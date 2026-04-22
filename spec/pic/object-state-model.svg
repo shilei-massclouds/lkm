@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img" aria-labelledby="title desc">
+  <title id="title">对象的通用状态模型</title>
+  <desc id="desc">三层对象状态链，每层从 base 经过 discover、setup、enable 到 online，下层 online 成为上层 base。</desc>
+  <defs>
+    <style>
+      .title { font: 700 22px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #1f2937; }
+      .level { font: 700 18px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; }
+      .node { fill: #ffffff; stroke: #111827; stroke-width: 2; }
+      .node-text { font: 600 18px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .edge { stroke: #111827; stroke-width: 2.5; fill: none; }
+      .edge-dashed { stroke: #2563eb; stroke-width: 2.5; fill: none; stroke-dasharray: 8 6; }
+      .edge-text { font: 600 15px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #374151; text-anchor: middle; }
+      .note-text { font: 500 14px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #1d4ed8; text-anchor: middle; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <text x="490" y="36" class="title">Object State Model</text>
+
+  <text x="70" y="82" class="level">Level N+1</text>
+  <text x="70" y="242" class="level">Level N</text>
+  <text x="70" y="402" class="level">Level N-1</text>
+
+  <rect x="110" y="100" width="130" height="48" rx="12" class="node"/>
+  <rect x="300" y="100" width="130" height="48" rx="12" class="node"/>
+  <rect x="490" y="100" width="130" height="48" rx="12" class="node"/>
+  <rect x="680" y="100" width="130" height="48" rx="12" class="node"/>
+  <text x="175" y="124" class="node-text">base</text>
+  <text x="365" y="124" class="node-text">prepared</text>
+  <text x="555" y="124" class="node-text">ready</text>
+  <text x="745" y="124" class="node-text">online</text>
+  <line x1="240" y1="124" x2="300" y2="124" class="edge" marker-end="url(#arrow)"/>
+  <line x1="430" y1="124" x2="490" y2="124" class="edge" marker-end="url(#arrow)"/>
+  <line x1="620" y1="124" x2="680" y2="124" class="edge" marker-end="url(#arrow)"/>
+  <text x="270" y="111" class="edge-text">discover</text>
+  <text x="460" y="111" class="edge-text">setup</text>
+  <text x="650" y="111" class="edge-text">enable</text>
+
+  <rect x="110" y="260" width="130" height="48" rx="12" class="node"/>
+  <rect x="300" y="260" width="130" height="48" rx="12" class="node"/>
+  <rect x="490" y="260" width="130" height="48" rx="12" class="node"/>
+  <rect x="680" y="260" width="130" height="48" rx="12" class="node"/>
+  <text x="175" y="284" class="node-text">base</text>
+  <text x="365" y="284" class="node-text">prepared</text>
+  <text x="555" y="284" class="node-text">ready</text>
+  <text x="745" y="284" class="node-text">online</text>
+  <line x1="240" y1="284" x2="300" y2="284" class="edge" marker-end="url(#arrow)"/>
+  <line x1="430" y1="284" x2="490" y2="284" class="edge" marker-end="url(#arrow)"/>
+  <line x1="620" y1="284" x2="680" y2="284" class="edge" marker-end="url(#arrow)"/>
+  <text x="270" y="271" class="edge-text">discover</text>
+  <text x="460" y="271" class="edge-text">setup</text>
+  <text x="650" y="271" class="edge-text">enable</text>
+
+  <rect x="110" y="420" width="130" height="48" rx="12" class="node"/>
+  <rect x="300" y="420" width="130" height="48" rx="12" class="node"/>
+  <rect x="490" y="420" width="130" height="48" rx="12" class="node"/>
+  <rect x="680" y="420" width="130" height="48" rx="12" class="node"/>
+  <text x="175" y="444" class="node-text">base</text>
+  <text x="365" y="444" class="node-text">prepared</text>
+  <text x="555" y="444" class="node-text">ready</text>
+  <text x="745" y="444" class="node-text">online</text>
+  <line x1="240" y1="444" x2="300" y2="444" class="edge" marker-end="url(#arrow)"/>
+  <line x1="430" y1="444" x2="490" y2="444" class="edge" marker-end="url(#arrow)"/>
+  <line x1="620" y1="444" x2="680" y2="444" class="edge" marker-end="url(#arrow)"/>
+  <text x="270" y="431" class="edge-text">discover</text>
+  <text x="460" y="431" class="edge-text">setup</text>
+  <text x="650" y="431" class="edge-text">enable</text>
+
+  <path d="M 810 444
+           C 870 444, 930 444, 930 404
+           C 930 380, 920 364, 885 364
+           L 225 364
+           C 190 364, 175 348, 175 320
+           L 175 308" class="edge-dashed" marker-end="url(#arrow-blue)"/>
+  <path d="M 810 284
+           C 865 284, 920 284, 920 244
+           C 920 220, 910 204, 880 204
+           L 225 204
+           C 190 204, 175 188, 175 160
+           L 175 148" class="edge-dashed" marker-end="url(#arrow-blue)"/>
+  <text x="918" y="382" class="note-text">online -&gt; base</text>
+  <text x="910" y="222" class="note-text">online -&gt; base</text>
+</svg>
