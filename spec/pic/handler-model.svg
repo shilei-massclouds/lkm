@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="420" viewBox="0 0 1080 420" role="img" aria-labelledby="title desc">
+  <title id="title">Handler 模型</title>
+  <desc id="desc">消息从 sender 发出，经过总开关进入 handler 侧，再由分路器根据消息类型派发到不同分路；每条分路先经过分路开关，再进入对应分路处理。</desc>
+  <defs>
+    <style>
+      .box { fill: #ffffff; stroke: #111827; stroke-width: 2; rx: 12; ry: 12; }
+      .gate { fill: #f8fafc; stroke: #111827; stroke-width: 2; }
+      .line { fill: none; stroke: #111827; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+      .dash { fill: none; stroke: #2563eb; stroke-width: 2.5; stroke-dasharray: 8 6; stroke-linecap: round; stroke-linejoin: round; }
+      .label { font: 700 22px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .small { font: 600 16px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .note { font: 600 15px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #2563eb; text-anchor: middle; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"/>
+    </marker>
+  </defs>
+
+  <rect x="60" y="170" width="140" height="60" class="box"/>
+  <text x="130" y="200" class="label">sender</text>
+
+  <line x1="200" y1="200" x2="300" y2="200" class="line" marker-end="url(#arrow)"/>
+  <text x="250" y="182" class="small">消息</text>
+
+  <rect x="320" y="130" width="50" height="140" class="gate"/>
+  <text x="345" y="200" class="label">总<tspan x="345" dy="24">开</tspan><tspan x="345" dy="24">关</tspan></text>
+
+  <line x1="370" y1="200" x2="450" y2="200" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="470" y="170" width="130" height="60" class="box"/>
+  <text x="535" y="200" class="label">分路器</text>
+  <text x="535" y="248" class="note">按消息类型分派</text>
+
+  <line x1="600" y1="200" x2="670" y2="120" class="line"/>
+  <line x1="600" y1="200" x2="670" y2="200" class="line"/>
+  <line x1="600" y1="200" x2="670" y2="280" class="line"/>
+
+  <rect x="670" y="92" width="120" height="56" class="box"/>
+  <rect x="670" y="172" width="120" height="56" class="box"/>
+  <rect x="670" y="252" width="120" height="56" class="box"/>
+  <text x="730" y="120" class="label">分路开关</text>
+  <text x="730" y="200" class="label">分路开关</text>
+  <text x="730" y="280" class="label">分路开关</text>
+
+  <line x1="790" y1="120" x2="860" y2="120" class="line" marker-end="url(#arrow)"/>
+  <line x1="790" y1="200" x2="860" y2="200" class="line" marker-end="url(#arrow)"/>
+  <line x1="790" y1="280" x2="860" y2="280" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="860" y="92" width="160" height="56" class="box"/>
+  <rect x="860" y="172" width="160" height="56" class="box"/>
+  <rect x="860" y="252" width="160" height="56" class="box"/>
+  <text x="940" y="120" class="label">分路处理</text>
+  <text x="940" y="200" class="label">分路处理</text>
+  <text x="940" y="280" class="label">分路处理</text>
+
+  <path d="M 310 90 C 400 50, 740 50, 860 70" class="dash"/>
+  <text x="600" y="46" class="note">handler 抽象侧</text>
+</svg>

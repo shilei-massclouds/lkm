@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="900" viewBox="0 0 980 900" role="img" aria-labelledby="title desc">
+  <title id="title">Linux signal 响应对应图</title>
+  <desc id="desc">按 Linux 原理细化的 signal 响应图。signal 先生成并解析目标，进入 shared pending 或 thread pending；随后按 blocked mask 决定可递送信号，再由 sigaction 根据 signum 分派到 ignore、default action 或 user handler。</desc>
+  <defs>
+    <style>
+      .box { fill: #ffffff; stroke: #111827; stroke-width: 2; }
+      .gate { fill: #f8fafc; stroke: #111827; stroke-width: 2; }
+      .line { fill: none; stroke: #111827; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+      .dash { fill: none; stroke: #2563eb; stroke-width: 2.5; stroke-dasharray: 8 6; stroke-linecap: round; stroke-linejoin: round; }
+      .label { font: 700 20px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .small { font: 600 14px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .note { font: 600 14px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #2563eb; text-anchor: middle; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"/>
+    </marker>
+  </defs>
+
+  <text x="490" y="30" class="label">Linux signal 响应对应图</text>
+
+  <rect x="320" y="60" width="340" height="68" rx="12" ry="12" class="box"/>
+  <text x="490" y="86" class="label">sender</text>
+  <text x="490" y="116" class="small">内核 / kill / tgkill / 其他任务</text>
+
+  <line x1="490" y1="128" x2="490" y2="188" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="320" y="188" width="340" height="76" rx="12" ry="12" class="box"/>
+  <text x="490" y="214" class="label">signal generation</text>
+  <text x="490" y="244" class="small">生成 signal 并解析目标 task / thread</text>
+
+  <line x1="490" y1="264" x2="490" y2="330" class="line"/>
+  <line x1="490" y1="330" x2="280" y2="330" class="line"/>
+  <line x1="490" y1="330" x2="700" y2="330" class="line"/>
+  <line x1="280" y1="330" x2="280" y2="380" class="line" marker-end="url(#arrow)"/>
+  <line x1="700" y1="330" x2="700" y2="380" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="150" y="380" width="260" height="72" rx="12" ry="12" class="box"/>
+  <text x="280" y="406" class="label">shared pending</text>
+  <text x="280" y="436" class="small">线程组共享待决 signal</text>
+
+  <rect x="570" y="380" width="260" height="72" rx="12" ry="12" class="box"/>
+  <text x="700" y="406" class="label">thread pending</text>
+  <text x="700" y="436" class="small">线程私有待决 signal</text>
+
+  <line x1="280" y1="452" x2="280" y2="520" class="line"/>
+  <line x1="700" y1="452" x2="700" y2="520" class="line"/>
+  <line x1="280" y1="520" x2="490" y2="520" class="line"/>
+  <line x1="700" y1="520" x2="490" y2="520" class="line"/>
+  <line x1="490" y1="520" x2="490" y2="580" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="340" y="580" width="300" height="84" rx="12" ry="12" class="gate"/>
+  <text x="490" y="606" class="label">delivery gate</text>
+  <text x="490" y="636" class="small">按 blocked mask 选择可递送 signal</text>
+  <text x="490" y="694" class="note">mask 阻止递送，不阻止 signal 生成与入队</text>
+
+  <line x1="490" y1="664" x2="490" y2="728" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="340" y="728" width="300" height="76" rx="12" ry="12" class="box"/>
+  <text x="490" y="754" class="label">sigaction dispatcher</text>
+  <text x="490" y="784" class="small">按 signum 查找 sigaction[signum]</text>
+
+  <line x1="490" y1="804" x2="220" y2="858" class="line"/>
+  <line x1="490" y1="804" x2="490" y2="858" class="line"/>
+  <line x1="490" y1="804" x2="760" y2="858" class="line"/>
+
+  <rect x="90" y="858" width="260" height="72" rx="12" ry="12" class="box"/>
+  <text x="220" y="884" class="label">ignore</text>
+  <text x="220" y="914" class="small">SIG_IGN 或默认忽略</text>
+
+  <rect x="360" y="858" width="260" height="72" rx="12" ry="12" class="box"/>
+  <text x="490" y="884" class="label">default action</text>
+  <text x="490" y="914" class="small">终止 / stop / continue / core</text>
+
+  <rect x="630" y="858" width="260" height="72" rx="12" ry="12" class="box"/>
+  <text x="760" y="878" class="label">user handler</text>
+  <text x="760" y="904" class="small">建立 signal frame</text>
+  <text x="760" y="926" class="small">返回用户态执行处理器</text>
+
+  <path d="M 650 842 C 620 700, 700 620, 820 620" class="dash" marker-end="url(#arrow)"/>
+  <text x="760" y="602" class="note">递送通常发生在适当时机</text>
+</svg>

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="420" viewBox="0 0 1160 420" role="img" aria-labelledby="title desc">
+  <title id="title">被动对象响应的 Handler 对应图</title>
+  <desc id="desc">命令或请求从发送方发出，经对象总开关进入，按消息类型分派到不同分路，经分路开关后进入对应处理。</desc>
+  <defs>
+    <style>
+      .box { fill: #ffffff; stroke: #111827; stroke-width: 2; }
+      .gate { fill: #f8fafc; stroke: #111827; stroke-width: 2; }
+      .line { fill: none; stroke: #111827; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+      .note { font: 600 15px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #2563eb; text-anchor: middle; }
+      .label { font: 700 22px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+      .small { font: 600 16px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #111827; text-anchor: middle; dominant-baseline: middle; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"/>
+    </marker>
+  </defs>
+
+  <text x="580" y="36" class="label">被动对象响应对应图</text>
+
+  <rect x="50" y="165" width="180" height="70" rx="12" ry="12" class="box"/>
+  <text x="140" y="188" class="label">其他对象 / Flow</text>
+  <text x="140" y="224" class="small">sender</text>
+
+  <line x1="230" y1="200" x2="320" y2="200" class="line" marker-end="url(#arrow)"/>
+  <text x="275" y="178" class="small">命令 / 请求</text>
+
+  <rect x="340" y="120" width="60" height="160" class="gate"/>
+  <text x="370" y="176" class="label">总</text>
+  <text x="370" y="204" class="label">开</text>
+  <text x="370" y="232" class="label">关</text>
+  <text x="370" y="308" class="note">对象是否 enable</text>
+
+  <line x1="400" y1="200" x2="500" y2="200" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="520" y="165" width="160" height="70" rx="12" ry="12" class="box"/>
+  <text x="600" y="194" class="label">操作分路器</text>
+  <text x="600" y="238" class="note">按消息类型分派</text>
+
+  <line x1="680" y1="200" x2="760" y2="110" class="line"/>
+  <line x1="680" y1="200" x2="760" y2="200" class="line"/>
+  <line x1="680" y1="200" x2="760" y2="290" class="line"/>
+
+  <rect x="760" y="82" width="150" height="56" rx="10" ry="10" class="box"/>
+  <rect x="760" y="172" width="150" height="56" rx="10" ry="10" class="box"/>
+  <rect x="760" y="262" width="150" height="56" rx="10" ry="10" class="box"/>
+  <text x="835" y="110" class="label">分路开关</text>
+  <text x="835" y="200" class="label">分路开关</text>
+  <text x="835" y="290" class="label">分路开关</text>
+
+  <line x1="910" y1="110" x2="980" y2="110" class="line" marker-end="url(#arrow)"/>
+  <line x1="910" y1="200" x2="980" y2="200" class="line" marker-end="url(#arrow)"/>
+  <line x1="910" y1="290" x2="980" y2="290" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="980" y="82" width="150" height="56" rx="10" ry="10" class="box"/>
+  <rect x="980" y="172" width="150" height="56" rx="10" ry="10" class="box"/>
+  <rect x="980" y="262" width="150" height="56" rx="10" ry="10" class="box"/>
+  <text x="1055" y="110" class="label">查询处理</text>
+  <text x="1055" y="200" class="label">读写处理</text>
+  <text x="1055" y="290" class="label">控制处理</text>
+</svg>
