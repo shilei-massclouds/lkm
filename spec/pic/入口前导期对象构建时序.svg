@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1140" viewBox="0 0 1280 1140" role="img" aria-labelledby="title desc">
+  <title id="title">入口前导期对象构建时序</title>
+  <desc id="desc">将 linux-6.12.37 arch/riscv/kernel/head.S 中 _start_kernel 到 start_kernel 前的流程对象化为入口前导期对象的 setup 编排顺序。</desc>
+  <defs>
+    <style>
+      text {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif;
+        fill: #0f172a;
+      }
+      .title { font-size: 30px; font-weight: 700; }
+      .subtitle { font-size: 15px; fill: #475569; }
+      .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .flow { fill: #eff6ff; stroke: #3b82f6; }
+      .addr { fill: #f0fdf4; stroke: #22c55e; }
+      .hw { fill: #fff7ed; stroke: #f97316; }
+      .obj { font-size: 17px; font-weight: 700; }
+      .line1 { font-size: 17px; font-weight: 600; }
+      .line2 { font-size: 14px; fill: #475569; }
+      .source { font-size: 13px; fill: #64748b; }
+      .num { font-size: 15px; font-weight: 700; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
+      .dot { fill: #334155; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="1140" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">入口前导期对象构建时序</text>
+  <text x="640" y="74" text-anchor="middle" class="subtitle">入口前导期对象的 setup 过程，对应 linux-6.12.37 arch/riscv/kernel/head.S:197-330 的主路径</text>
+  <text x="640" y="98" text-anchor="middle" class="subtitle">已排除：CONFIG_RISCV_M_MODE、CONFIG_RISCV_BOOT_SPINWAIT、CONFIG_XIP_KERNEL、CONFIG_BUILTIN_DTB、CONFIG_KASAN</text>
+
+  <rect x="48" y="128" width="178" height="995" rx="14" class="lane"/>
+  <text x="137" y="164" text-anchor="middle" class="obj">入口前导期对象</text>
+  <text x="137" y="188" text-anchor="middle" class="subtitle">setup()</text>
+  <line x1="137" y1="220" x2="137" y2="1100" class="timeline"/>
+
+  <g transform="translate(0 0)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">1</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
+    <text x="286" y="233" class="obj">中断流 / Interrupt Stream</text>
+    <text x="500" y="233" class="line1">屏蔽所有中断：sie = 0，sip = 0</text>
+    <text x="500" y="254" class="source">head.S:198-200</text>
+  </g>
+
+  <g transform="translate(0 66)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">2</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box addr"/>
+    <text x="286" y="233" class="obj">内核映像 / Kernel Image</text>
+    <text x="500" y="233" class="line1">初始化全局指针：gp = global_pointer$</text>
+    <text x="500" y="254" class="source">head.S:231-232</text>
+  </g>
+
+  <g transform="translate(0 132)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">3</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
+    <text x="286" y="233" class="obj">根流 / Root Stream</text>
+    <text x="500" y="233" class="line1">清除 sstatus 中的 FS/VS，禁止内核态 FPU 与 VECTOR</text>
+    <text x="500" y="254" class="source">head.S:234-239</text>
+  </g>
+
+  <g transform="translate(0 198)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">4</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box addr"/>
+    <text x="286" y="233" class="obj">内核映像 / Kernel Image</text>
+    <text x="500" y="233" class="line1">清零 BSS 段</text>
+    <text x="500" y="254" class="source">head.S:281-290</text>
+  </g>
+
+  <g transform="translate(0 264)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">5</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box hw"/>
+    <text x="286" y="233" class="obj">处理器管理 / CPUGroup</text>
+    <text x="500" y="233" class="line1">记录启动处理器：boot_hart_id = a0</text>
+    <text x="500" y="254" class="source">head.S:292-294</text>
+  </g>
+
+  <g transform="translate(0 330)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">6</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
+    <text x="286" y="233" class="obj">根任务 / InitTask</text>
+    <text x="500" y="233" class="line1">建立物理地址阶段的根任务指针：tp = init_task</text>
+    <text x="500" y="254" class="source">head.S:296-297</text>
+  </g>
+
+  <g transform="translate(0 396)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">7</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
+    <text x="286" y="233" class="obj">根栈 / InitStack</text>
+    <text x="500" y="233" class="line1">建立物理地址阶段的根栈指针：sp = init_thread_union + THREAD_SIZE - PT_SIZE_ON_STACK</text>
+    <text x="500" y="254" class="source">head.S:298-301</text>
+  </g>
+
+  <g transform="translate(0 462)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">8</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
+    <text x="286" y="233" class="obj">事件流 / Event Stream</text>
+    <text x="500" y="233" class="line1">设置临时事件入口：stvec = .Lsecondary_park</text>
+    <text x="500" y="254" class="source">head.S:308-310</text>
+  </g>
+
+  <g transform="translate(0 528)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">9</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box addr"/>
+    <text x="286" y="233" class="obj">虚拟内存空间 / VM</text>
+    <text x="500" y="233" class="line1">建立早期映射：a0 = dtb_pa，call setup_vm</text>
+    <text x="500" y="254" class="source">head.S:302-311；CONFIG_BUILTIN_DTB=n</text>
+  </g>
+
+  <g transform="translate(0 594)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">10</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box addr"/>
+    <text x="286" y="233" class="obj">虚拟内存空间 / VM</text>
+    <text x="500" y="233" class="line1">启用 MMU 并重定位到虚拟地址：early_pg_dir -> relocate_enable_mmu</text>
+    <text x="500" y="254" class="source">head.S:312-316；CONFIG_MMU=y 时执行</text>
+  </g>
+
+  <g transform="translate(0 660)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">11</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
+    <text x="286" y="233" class="obj">事件流 / Event Stream</text>
+    <text x="500" y="233" class="line1">设置正式事件入口：stvec = handle_exception，sscratch = 0</text>
+    <text x="500" y="254" class="source">head.S:318；.Lsetup_trap_vector:183-192</text>
+  </g>
+
+  <g transform="translate(0 726)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">12</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
+    <text x="286" y="233" class="obj">根任务 / InitTask</text>
+    <text x="500" y="233" class="line1">重置根任务指针：tp 切换为 init_task 的虚拟地址</text>
+    <text x="500" y="254" class="source">head.S:319-320</text>
+  </g>
+
+  <g transform="translate(0 792)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">13</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
+    <text x="286" y="233" class="obj">根栈 / InitStack</text>
+    <text x="500" y="233" class="line1">重置根栈指针：sp 切换为 init_thread_union 的虚拟地址，加载当前 shadow call stack</text>
+    <text x="500" y="254" class="source">head.S:321-323</text>
+  </g>
+
+  <g transform="translate(0 858)">
+    <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">14</text>
+    <rect x="258" y="210" width="876" height="56" rx="10" class="box phase"/>
+    <text x="286" y="233" class="obj">入口前导期对象</text>
+    <text x="500" y="233" class="line1">完成 setup：soc_early_init 后 tail start_kernel，阶段对象可释放退出</text>
+    <text x="500" y="254" class="source">head.S:328-330；CONFIG_KASAN=n</text>
+  </g>
+</svg>
