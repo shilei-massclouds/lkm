@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img" aria-labelledby="title desc">
   <title id="title">对象的通用状态模型</title>
-  <desc id="desc">三层对象状态链，每层从 base 经过 discover、setup、enable 到 online，下层 online 成为上层 base。</desc>
+  <desc id="desc">三层对象状态链，每层从 base 经过 discover/prepare、setup、enable 到 online，下层 online 成为上层 base。</desc>
   <defs>
     <style>
       .title { font: 700 22px "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #1f2937; }
@@ -37,7 +37,7 @@
   <line x1="240" y1="124" x2="300" y2="124" class="edge" marker-end="url(#arrow)"/>
   <line x1="430" y1="124" x2="490" y2="124" class="edge" marker-end="url(#arrow)"/>
   <line x1="620" y1="124" x2="680" y2="124" class="edge" marker-end="url(#arrow)"/>
-  <text x="270" y="111" class="edge-text">discover</text>
+  <text x="270" y="111" class="edge-text">discover / prepare</text>
   <text x="460" y="111" class="edge-text">setup</text>
   <text x="650" y="111" class="edge-text">enable</text>
 
@@ -52,7 +52,7 @@
   <line x1="240" y1="284" x2="300" y2="284" class="edge" marker-end="url(#arrow)"/>
   <line x1="430" y1="284" x2="490" y2="284" class="edge" marker-end="url(#arrow)"/>
   <line x1="620" y1="284" x2="680" y2="284" class="edge" marker-end="url(#arrow)"/>
-  <text x="270" y="271" class="edge-text">discover</text>
+  <text x="270" y="271" class="edge-text">discover / prepare</text>
   <text x="460" y="271" class="edge-text">setup</text>
   <text x="650" y="271" class="edge-text">enable</text>
 
@@ -67,7 +67,7 @@
   <line x1="240" y1="444" x2="300" y2="444" class="edge" marker-end="url(#arrow)"/>
   <line x1="430" y1="444" x2="490" y2="444" class="edge" marker-end="url(#arrow)"/>
   <line x1="620" y1="444" x2="680" y2="444" class="edge" marker-end="url(#arrow)"/>
-  <text x="270" y="431" class="edge-text">discover</text>
+  <text x="270" y="431" class="edge-text">discover / prepare</text>
   <text x="460" y="431" class="edge-text">setup</text>
   <text x="650" y="431" class="edge-text">enable</text>
 
