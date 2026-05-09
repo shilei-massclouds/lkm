@@ -7,19 +7,19 @@
         font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif;
         fill: #0f172a;
       }
-      .title { font-size: 30px; font-weight: 700; }
-      .subtitle { font-size: 15px; fill: #475569; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 20px; fill: #475569; }
       .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 8 6; }
       .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
       .phase { fill: #eef2ff; stroke: #6366f1; }
       .flow { fill: #eff6ff; stroke: #3b82f6; }
       .addr { fill: #f0fdf4; stroke: #22c55e; }
       .hw { fill: #fff7ed; stroke: #f97316; }
-      .obj { font-size: 17px; font-weight: 700; }
-      .line1 { font-size: 17px; font-weight: 600; }
-      .line2 { font-size: 14px; fill: #475569; }
-      .source { font-size: 13px; fill: #64748b; }
-      .num { font-size: 15px; font-weight: 700; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .obj { font-size: 24px; font-weight: 500; dominant-baseline: middle; }
+      .line1 { font-size: 24px; font-weight: 400; dominant-baseline: middle; }
+      .line2 { font-size: 20px; font-weight: 400; fill: #475569; dominant-baseline: middle; }
+      .source { font-size: 18px; font-weight: 400; fill: #64748b; dominant-baseline: middle; }
+      .num { font-size: 20px; font-weight: 500; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
       .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
       .dot { fill: #334155; }
     </style>
@@ -37,86 +37,84 @@
   <g transform="translate(0 0)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">1</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="233" class="line1">中断流.preset() - 禁用所有中断</text>
+    <text x="286" y="238" class="line1">中断流.preset() - 禁用所有中断</text>
   </g>
 
   <g transform="translate(0 66)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">2</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box addr"/>
-    <text x="286" y="233" class="line1">内核映像.preset() - 建立 gp-relative 快速寻址方式</text>
+    <text x="286" y="238" class="line1">内核映像.preset() - 建立 gp-relative 快速寻址方式</text>
   </g>
 
   <g transform="translate(0 132)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">3</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="233" class="line1">根流.preset() - 禁止在内核态执行 FPU 指令与 VECTOR 指令</text>
+    <text x="286" y="238" class="line1">根流.preset() - 禁止在内核态执行 FPU 指令与 VECTOR 指令</text>
   </g>
 
   <g transform="translate(0 198)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">4</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box addr"/>
-    <text x="286" y="233" class="line1">内核映像.setup() - 清零 BSS 段</text>
+    <text x="286" y="238" class="line1">内核映像.setup() - 清零 BSS 段</text>
   </g>
 
   <g transform="translate(0 264)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">5</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box hw"/>
-    <text x="286" y="233" class="line1">处理器管理.preset() - 记录启动处理器的 hartid</text>
+    <text x="286" y="238" class="line1">处理器管理.preset() - 记录启动处理器的 hartid</text>
   </g>
 
   <g transform="translate(0 330)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">6</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="233" class="line1">根任务.setup() - 建立物理地址阶段的根任务指针</text>
+    <text x="286" y="238" class="line1">根任务.setup() - 建立物理地址阶段的根任务指针</text>
   </g>
 
   <g transform="translate(0 396)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">7</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="233" class="line1">根栈.setup() - 建立物理地址阶段的根栈指针</text>
+    <text x="286" y="238" class="line1">根栈.setup() - 建立物理地址阶段的根栈指针</text>
   </g>
 
   <g transform="translate(0 462)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">8</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="233" class="line1">事件流.setup() - 设置事件的临时处理入口</text>
+    <text x="286" y="238" class="line1">事件流.setup() - 设置事件的临时处理入口</text>
   </g>
 
   <g transform="translate(0 528)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">9</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box addr"/>
-    <text x="286" y="233" class="obj">虚拟内存空间 / VM</text>
-    <text x="500" y="233" class="line1">建立早期映射：a0 = dtb_pa，call setup_vm</text>
+    <text x="286" y="238" class="line1">虚拟内存空间.preset() - 推进 TrampolineVM/EarlyVM.setup()</text>
   </g>
 
   <g transform="translate(0 594)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">10</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box addr"/>
-    <text x="286" y="233" class="obj">虚拟内存空间 / VM</text>
-    <text x="500" y="233" class="line1">启用 MMU 并重定位到虚拟地址：early_pg_dir -> relocate_enable_mmu</text>
+    <text x="286" y="238" class="line1">虚拟内存空间.setup() - 推进 TrampolineVM/EarlyVM.enable()</text>
   </g>
 
   <g transform="translate(0 660)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">11</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="233" class="line1">事件流.enable() - 设置事件的正式处理入口</text>
+    <text x="286" y="238" class="line1">事件流.enable() - 设置事件的正式处理入口</text>
   </g>
 
   <g transform="translate(0 726)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">12</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="233" class="line1">根任务.enable() - 重置根任务指针到虚拟地址</text>
+    <text x="286" y="238" class="line1">根任务.enable() - 重置根任务指针到虚拟地址</text>
   </g>
 
   <g transform="translate(0 792)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">13</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box flow"/>
-    <text x="286" y="233" class="line1">根栈.enable() - 重置根栈指针到虚拟地址</text>
+    <text x="286" y="238" class="line1">根栈.enable() - 重置根栈指针到虚拟地址</text>
   </g>
 
   <g transform="translate(0 858)">
     <circle cx="137" cy="238" r="15" class="dot"/><text x="137" y="238" class="num">14</text>
     <rect x="258" y="210" width="876" height="56" rx="10" class="box hw"/>
-    <text x="286" y="233" class="line1">片上系统.preset() - 执行片上系统早期预置</text>
+    <text x="286" y="238" class="line1">片上系统.preset() - 执行片上系统早期预置</text>
   </g>
 </svg>
