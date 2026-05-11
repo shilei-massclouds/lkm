@@ -1,6 +1,6 @@
-# verifier_py
+# pyveri
 
-`verifier_py` 是组件化内核规格的 Python 版推导验证器工具目录。
+`pyveri` 是组件化内核规格的 Python 版推导验证器工具目录。
 
 当前阶段的输入规格文件是：
 
@@ -30,5 +30,5 @@
 
 ## 目录
 
-- `src/verifier_py/`：后续 Python 源码实现目录。
+- `src/pyveri/`：后续 Python 源码实现目录。
 - `tests/`：后续验证器测试用例目录。
