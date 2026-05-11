@@ -33,3 +33,13 @@
 - `src/pyveri/`：后续 Python 源码实现目录。
 - `tests/`：后续验证器测试用例目录。
 - `DEVELOPMENT.md`：验证器第一版实现计划。
+
+## 当前运行方式
+
+在仓库根目录执行：
+
+```powershell
+$env:PYTHONPATH='tools\pyveri\src'
+python -m pyveri spec\entry-prelude-object-model.spec
+python -m unittest discover -s tools\pyveri\tests
+```
