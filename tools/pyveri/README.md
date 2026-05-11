@@ -43,3 +43,5 @@ $env:PYTHONPATH='tools\pyveri\src'
 python -m pyveri spec\entry-prelude-object-model.spec
 python -m unittest discover -s tools\pyveri\tests
 ```
+
+当前 CLI 会先输出解析摘要，再执行静态模型装配和引用检查。

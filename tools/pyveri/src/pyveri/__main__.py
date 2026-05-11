@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .model import build_model, summarize_model
 from .parser import ParseError, parse_file, summarize
 
 
@@ -24,7 +25,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(summarize(document))
-    return 0
+
+    result = build_model(document)
+    print(summarize_model(result))
+    for diagnostic in result.diagnostics:
+        print(diagnostic.format(), file=sys.stderr)
+
+    return 0 if result.ok else 1
 
 
 if __name__ == "__main__":
