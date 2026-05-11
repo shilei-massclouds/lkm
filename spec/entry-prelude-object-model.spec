@@ -4,6 +4,10 @@
  * This file is extracted from spec/组件化内核规格.md.
  * It is intended to be parsed by verifier/modeling tools.
  * Rust/C style comments are for human readers and should be ignored by tools.
+ *
+ * Global rule:
+ * - entries in a drives block form an ordered derivation queue and must be
+ *   processed in declaration order.
  */
 
 enum TransitionResult {
@@ -166,6 +170,9 @@ type FixMapConfig {
     invariant {
         valid_fixmap_config(self);
     }
+}
+
+type TimelineObject {
 }
 
 /*
@@ -358,6 +365,106 @@ object PhysicalMemory: PrepareObject {
             valid_phys_range_set(ram);
             valid_phys_range_set(iomap);
             disjoint(ram, iomap);
+        }
+    }
+}
+
+/*
+ * StartupTimeline 表示当前模型的内核启动时间轴对象。
+ * 它临时编排准备期和当前已经展开的引导期阶段，并在内核启动完成后退出。
+ */
+object StartupTimeline: TimelineObject {
+    initial_state: State::Base;
+
+    /*
+     * Base 表示顶层启动阶段对象已经进入模型空间，但尚未推进其子阶段。
+     */
+    state State::Base {
+        events {
+            /*
+             * Setup 先推进准备期边界，再推进当前已经展开的引导期阶段。
+             */
+            on Event::Setup -> State::Ready {
+                drives {
+                    PreparePhase.Event::Setup;
+                    PreparePhase.Event::Enable;
+                    BootPhase.Event::Setup;
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示准备期边界已经生效，且当前已经展开的引导期阶段已经完成。
+     */
+    state State::Ready {
+        invariant {
+            PreparePhase.state == State::Online;
+            BootPhase.state == State::Ready;
+        }
+    }
+}
+
+/*
+ * PreparePhase 表示准备期阶段对象。
+ * 当前模型不展开准备期内部过程，只验证入口前导期依赖的准备期输入对象均已在线且满足各自不变量。
+ */
+object PreparePhase: PhaseObject {
+    initial_state: State::Base;
+    parent: StartupTimeline;
+
+    /*
+     * Base 表示准备期阶段对象已经进入模型空间，但尚未形成当前规格所需的准备期完成边界。
+     */
+    state State::Base {
+        events {
+            /*
+             * Setup 汇总并验证入口前导期所需的准备期输入对象，形成准备期完成边界。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Riscv64.state == State::Online;
+                    Lds.state == State::Online;
+                    StaticObjects.state == State::Online;
+                    Config.state == State::Online;
+                    PhysicalMemory.state == State::Online;
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示入口前导期所需的准备期输入对象均已通过阶段边界验证。
+     */
+    state State::Ready {
+        invariant {
+            Riscv64.state == State::Online;
+            Lds.state == State::Online;
+            StaticObjects.state == State::Online;
+            Config.state == State::Online;
+            PhysicalMemory.state == State::Online;
+        }
+
+        events {
+            /*
+             * Enable 将准备期完成边界发布为后续引导期可依赖的输入边界。
+             * 当前不执行额外动作，只保留阶段生命周期中的显式边界。
+             */
+            on Event::Enable -> State::Online {
+            }
+        }
+    }
+
+    /*
+     * Online 表示准备期输入边界已经对后续引导期生效。
+     */
+    state State::Online {
+        invariant {
+            Riscv64.state == State::Online;
+            Lds.state == State::Online;
+            StaticObjects.state == State::Online;
+            Config.state == State::Online;
+            PhysicalMemory.state == State::Online;
         }
     }
 }
@@ -1291,15 +1398,36 @@ object Soc: HardwareObject {
 }
 
 /*
- * BootPhase 表示引导期阶段对象。当前小节只用它作为 EntryPreludePhase 的上级阶段占位。
+ * BootPhase 表示引导期阶段对象。它负责推进当前模型已经展开的引导期子阶段。
  */
 object BootPhase: PhaseObject {
     initial_state: State::Base;
+    parent: StartupTimeline;
 
     /*
-     * Base 表示引导期阶段对象作为上级阶段占位进入模型空间。
+     * Base 表示引导期阶段对象已经进入模型空间，但尚未推进其子阶段。
      */
     state State::Base {
+        events {
+            /*
+             * Setup 推进入口前导期子阶段。
+             * BootPhase 不直接依赖 PreparePhase；二者作为平级阶段由上级阶段对象编排衔接。
+             */
+            on Event::Setup -> State::Ready {
+                drives {
+                    EntryPreludePhase.Event::Setup;
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示当前模型已经展开的引导期子阶段均已完成。
+     */
+    state State::Ready {
+        invariant {
+            EntryPreludePhase.state == State::Ready;
+        }
     }
 }
 
