@@ -10,6 +10,8 @@ from .schemas import (
     DERIVE_VERSION,
     MODEL_SCHEMA,
     MODEL_VERSION,
+    VIEW_SCHEMA,
+    VIEW_VERSION,
 )
 
 __all__ = [
@@ -21,6 +23,8 @@ __all__ = [
     "DERIVE_VERSION",
     "MODEL_SCHEMA",
     "MODEL_VERSION",
+    "VIEW_SCHEMA",
+    "VIEW_VERSION",
     "read_json",
     "write_json",
 ]

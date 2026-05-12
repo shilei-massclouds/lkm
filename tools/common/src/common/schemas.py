@@ -11,3 +11,6 @@ DERIVE_VERSION = 1
 
 CHECK_SCHEMA = "lkm.spec.check"
 CHECK_VERSION = 1
+
+VIEW_SCHEMA = "lkm.spec.view"
+VIEW_VERSION = 1
