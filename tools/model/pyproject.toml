@@ -1,0 +1,13 @@
+[project]
+name = "lkm-model"
+version = "0.1.0"
+description = "Build LKM static object model JSON from AST intermediate JSON."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+lkm-model = "model_tool.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

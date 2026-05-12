@@ -416,9 +416,11 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 独立工具链第一步已开始落地：
 
-- 已建立 `tools/common` 公共库骨架，包含 AST schema 标识和 JSON 读写辅助。
+- 已建立 `tools/common` 公共库骨架，包含 AST/model schema 标识和 JSON 读写辅助。
 - 已建立 `tools/parse` 独立阶段工具，当前复用过渡期的 `pyveri.parser`，可把 `.spec` 输出为 `ast.json`。
 - `ast.json` 已包含 `schema`、`version`、`source`、语法树节点、block entry 和源码行号 span。
+- 已建立 `tools/model` 独立阶段工具，当前可读取 `ast.json` 并输出索引化的 `model.json`。
+- `model.json` 已包含 `schema`、`version`、`source`、summary、diagnostics、对象/状态/事件索引、children 和源码行号 span。
 
 后续需要继续推进到独立工具形态：
 
