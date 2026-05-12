@@ -60,6 +60,14 @@ PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 ```
 
 当前 CLI 已拆出阶段子命令：`parse`、`model`、`derive`、`check`、`view` 和 `render`。旧参数形式仍保留兼容。
+
+独立工具链第一步已经提供 `common` 公共库骨架和 `parse` 阶段工具。源码方式运行：
+
+```bash
+PYTHONPATH=tools/common/src:tools/parse/src:tools/pyveri/src python -m parse_tool spec/entry-prelude-object-model.spec -o tools/build/entry-prelude-object-model.ast.json
+PYTHONPATH=tools/common/src:tools/parse/src:tools/pyveri/src python -m unittest discover -s tools/parse/tests
+```
+
 未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查，并输出默认推导摘要；使用 `--derive` 时输出完整推导报告。默认情况下，推导结果为 `blocked` 仍返回 0，便于查看报告；需要把未达目标作为命令失败时使用 `--strict`。
 使用 `--graph object -o <file>` 时，图内容直接写入文件。
 `object` 视图只输出对象之间的静态 `parent` 父子关系。

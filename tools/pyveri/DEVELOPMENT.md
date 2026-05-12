@@ -414,6 +414,12 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - `view` 从模型生成文本视图。
 - `render` 从模型生成 DOT 或 SVG 输出。
 
+独立工具链第一步已开始落地：
+
+- 已建立 `tools/common` 公共库骨架，包含 AST schema 标识和 JSON 读写辅助。
+- 已建立 `tools/parse` 独立阶段工具，当前复用过渡期的 `pyveri.parser`，可把 `.spec` 输出为 `ast.json`。
+- `ast.json` 已包含 `schema`、`version`、`source`、语法树节点、block entry 和源码行号 span。
+
 后续需要继续推进到独立工具形态：
 
 - 明确 `common` 公共库的边界和中间文件 schema。
