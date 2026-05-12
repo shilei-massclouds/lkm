@@ -40,46 +40,38 @@
 
 在仓库根目录执行：
 
-```powershell
-$env:PYTHONPATH='tools\pyveri\src'
-python -m pyveri spec\entry-prelude-object-model.spec
-python -m pyveri spec\entry-prelude-object-model.spec --text object
-python -m pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
-python -m pyveri spec\entry-prelude-object-model.spec --text drives
-python -m pyveri spec\entry-prelude-object-model.spec --graph drives -o drives.gv
-python -m pyveri spec\entry-prelude-object-model.spec --text timeline
-python -m pyveri spec\entry-prelude-object-model.spec --graph timeline -o timeline.svg
-python -m unittest discover -s tools\pyveri\tests
+```bash
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive --strict
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --text object
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --text drives
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --graph drives -o drives.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --text timeline
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --graph timeline -o timeline.svg
+PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 ```
 
-未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查；使用 `--graph object -o <file>` 时，图内容直接写入文件。
+未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查，并输出默认推导摘要；使用 `--derive` 时输出完整推导报告。默认情况下，推导结果为 `blocked` 仍返回 0，便于查看报告；需要把未达目标作为命令失败时使用 `--strict`。
+使用 `--graph object -o <file>` 时，图内容直接写入文件。
 `object` 视图只输出对象之间的静态 `parent` 父子关系。
 `drives` 视图输出事件之间的驱动关系。
 `timeline` 文本视图按时间先后输出，图形视图直接输出自底向上的 SVG 时间轴。
+当前主开发环境为 WSL2/Linux，命令示例默认使用 `/` 路径分隔符和 `PYTHONPATH=... command` 形式。
 
 ### 安装命令
 
 如果当前 Python 环境具备 Python 打包构建工具，可以在仓库根目录执行：
 
-```powershell
-python -m pip install -e tools\pyveri
-```
-
-安装后可以直接运行：
-
-```powershell
-pyveri spec\entry-prelude-object-model.spec
-pyveri spec\entry-prelude-object-model.spec --text object
-pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
-pyveri spec\entry-prelude-object-model.spec --graph drives -o drives.gv
-pyveri spec\entry-prelude-object-model.spec --graph timeline -o timeline.svg
-```
-
-Linux 下路径分隔符改为 `/`：
-
 ```bash
 python -m pip install -e tools/pyveri
+pyveri spec/entry-prelude-object-model.spec
+pyveri spec/entry-prelude-object-model.spec --derive
+pyveri spec/entry-prelude-object-model.spec --text object
 pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+pyveri spec/entry-prelude-object-model.spec --graph drives -o drives.gv
+pyveri spec/entry-prelude-object-model.spec --graph timeline -o timeline.svg
 ```
 
 ### 本地命令脚本
@@ -110,6 +102,14 @@ sh tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --graph object -
 ```bash
 PATH="$PWD/tools/pyveri/bin:$PATH"
 pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+```
+
+Windows PowerShell 命令仍可用于旧开发环境：
+
+```powershell
+$env:PYTHONPATH='tools\pyveri\src'
+python -m pyveri spec\entry-prelude-object-model.spec --derive
+python -m unittest discover -s tools\pyveri\tests
 ```
 
 ### 查看 DOT 图

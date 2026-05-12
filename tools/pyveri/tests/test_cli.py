@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +21,16 @@ class CliTests(unittest.TestCase):
             data = output.read_bytes()
             self.assertTrue(data.startswith(b"digraph ObjectView"))
             data.decode("ascii")
+
+    def test_strict_derivation_fails_for_current_blocked_spec(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main([str(spec), "--derive", "--strict"])
+
+        self.assertEqual(exit_code, 1)
 
 
 if __name__ == "__main__":

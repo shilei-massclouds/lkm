@@ -126,9 +126,9 @@ def statement_entries(body: str) -> list[str]:
     depth = 0
 
     for index, char in enumerate(body):
-        if char in "([{<":
+        if char in "([{":
             depth += 1
-        elif char in ")]}>":
+        elif char in ")]}":
             depth = max(depth - 1, 0)
         elif char == ";" and depth == 0:
             entry = body[start:index].strip()

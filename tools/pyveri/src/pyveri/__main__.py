@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .derive import DEFAULT_TARGET, derive, render_derivation_text, summarize_derivation
 from .model import build_model, summarize_model
 from .parser import ParseError, parse_file, summarize
 from .view import (
@@ -39,6 +40,21 @@ def main(argv: list[str] | None = None) -> int:
         help="print a Graphviz DOT model view",
     )
     parser.add_argument(
+        "--derive",
+        action="store_true",
+        help="run the static derivation engine and print a derivation report",
+    )
+    parser.add_argument(
+        "--target",
+        default=DEFAULT_TARGET,
+        help=f"target event for --derive, default: {DEFAULT_TARGET}",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="return a non-zero exit code when derivation does not reach the target",
+    )
+    parser.add_argument(
         "-o",
         "--output",
         type=Path,
@@ -46,12 +62,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    output_modes = [bool(args.tree), bool(args.text), bool(args.graph)]
+    output_modes = [bool(args.tree), bool(args.text), bool(args.graph), bool(args.derive)]
     if args.output is not None:
         if not any(output_modes):
-            parser.error("-o/--output requires --text, --graph, or --tree")
+            parser.error("-o/--output requires --text, --graph, --tree, or --derive")
         if sum(output_modes) > 1:
-            parser.error("-o/--output can write only one selected view")
+            parser.error("-o/--output can write only one selected output")
 
     try:
         document = parse_file(args.spec)
@@ -67,12 +83,21 @@ def main(argv: list[str] | None = None) -> int:
         print(diagnostic.format(), file=sys.stderr)
 
     selected_outputs: list[str] = []
+    derivation = derive(result.model, args.target) if result.ok else None
 
-    graph_only = result.ok and args.graph and not args.text and not args.tree
+    graph_only = (
+        result.ok
+        and args.graph
+        and not args.text
+        and not args.tree
+        and not args.derive
+    )
     output_only = args.output is not None
     if not graph_only and not output_only:
         print(summarize(document))
         print(summarize_model(result))
+        if derivation is not None and not args.derive:
+            print(summarize_derivation(derivation))
 
     if result.ok:
         if args.tree:
@@ -81,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
             selected_outputs.append(render_text(_build_view(result.model, args.text)))
         if args.graph:
             selected_outputs.append(_render_graph(_build_view(result.model, args.graph)))
+        if args.derive and derivation is not None:
+            selected_outputs.append(render_derivation_text(derivation))
 
     if args.output is not None and selected_outputs:
         _write_output(args.output, "\n\n".join(selected_outputs), ascii_only=bool(args.graph))
@@ -88,7 +115,11 @@ def main(argv: list[str] | None = None) -> int:
         for output in selected_outputs:
             print(output)
 
-    return 0 if result.ok else 1
+    if not result.ok:
+        return 1
+    if args.strict and derivation is not None and not derivation.ok:
+        return 1
+    return 0
 
 
 def _build_view(model, name):

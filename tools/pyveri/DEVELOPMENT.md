@@ -89,6 +89,8 @@ StartupTimeline.state == State::Ready
 - 已检查重复声明、未知父对象、未知事件目标状态、未知事件引用和未知状态引用。
 - 已提供对象视图、驱动关系视图和时间轴视图。
 - 图形输出中，`object` 和 `drives` 仍使用 Graphviz DOT；`timeline` 直接生成 SVG。
+- 已加入最小推导器，可从 `StartupTimeline.Event::Setup` 按事件源状态、`depends_on`、`drives` 顺序和目标状态执行静态推导，并收集 `proved`、`assumed`、`obligation`、`deferred`、`blocked` 和 `contradiction` 结果。
+- 当前真实规格在严格推导下仍为 `blocked`：`Vm.Event::Setup` 在驱动 `KernelImage.Event::Enable` 时，后者要求 `Vm.state == State::Ready`，但此时 `Vm` 尚处于 `State::Prepared`。这说明当前 timeline 视图展示的是视图级状态推进，不等同于完整证明已通过。
 
 ### 2.1 Timeline View
 
@@ -184,8 +186,10 @@ StartupTimeline.state == State::Ready
 
 第一版命令形式：
 
-```text
-python -m pyveri ../../spec/entry-prelude-object-model.spec
+```bash
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive --strict
 ```
 
 默认目标：
@@ -201,6 +205,10 @@ StartupTimeline.Event::Setup
 --format text|json
 --strict
 ```
+
+当前 CLI 已支持 `--derive`、`--target` 和 `--strict`。默认推导摘要即使为 `blocked` 也返回 0，`--strict` 用于把未达目标的推导结果作为命令失败处理。
+
+当前主开发环境已经迁移到 WSL2/Linux；文档和日常命令优先使用 `/` 路径分隔符、`PYTHONPATH=... command` 环境变量形式和 `sh tools/pyveri/bin/pyveri ...` 本地脚本。Windows PowerShell 命令作为兼容旧环境保留。
 
 ### 6. Tests
 

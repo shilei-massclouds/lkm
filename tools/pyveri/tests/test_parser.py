@@ -58,6 +58,32 @@ class ParserTests(unittest.TestCase):
             ],
         )
 
+    def test_statement_entries_keeps_less_than_comparisons_separate(self) -> None:
+        document = parse_text(
+            """
+            object Config: PrepareObject {
+                initial_state: State::Online;
+
+                state State::Online {
+                    invariant {
+                        pt_size_on_stack < page_size;
+                        kernel_link_addr != 0;
+                    }
+                }
+            }
+            """
+        )
+
+        entries = document.objects[0].states[0].invariants[0].entries
+
+        self.assertEqual(
+            entries,
+            [
+                "pt_size_on_stack < page_size",
+                "kernel_link_addr != 0",
+            ],
+        )
+
     def test_parse_current_entry_prelude_spec(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
 
