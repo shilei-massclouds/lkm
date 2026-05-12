@@ -68,12 +68,21 @@ class ModelBuilderTests(unittest.TestCase):
         svg = render_svg(view)
 
         self.assertIn("timeline view:", text)
-        self.assertIn("StartupTimeline: TimelineObject", text)
-        self.assertIn("  StartupTimeline.Setup", text)
-        self.assertIn("    -> PreparePhase.Setup", text)
+        self.assertIn("PreparePhase: ready (State::Ready)", text)
+        self.assertIn("PreparePhase: online (State::Online)", text)
+        self.assertIn("  - Riscv64.State::Online", text)
+        self.assertIn("  - PhysicalMemory.State::Online", text)
+        self.assertIn("EntryPreludePhase: ready (State::Ready)", text)
+        self.assertIn("BootPhase: ready (State::Ready)", text)
+        self.assertIn("  - RootStream.State::Prepared", text)
+        self.assertIn("  - Soc.State::Prepared", text)
+        self.assertIn("  - Vm.State::Ready", text)
+        self.assertNotIn("StartupTimeline", text)
         self.assertIn("<svg", svg)
-        self.assertIn("EntryPreludePhase.Setup", svg)
-        self.assertIn("StartupTimeline.Setup", svg)
+        self.assertIn("PreparePhase", svg)
+        self.assertIn("BootPhase", svg)
+        self.assertIn("EntryPreludePhase", svg)
+        self.assertNotIn("StartupTimeline", svg)
 
     def test_reports_unknown_drive_event(self) -> None:
         document = parse_text(
