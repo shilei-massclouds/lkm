@@ -45,10 +45,17 @@ $env:PYTHONPATH='tools\pyveri\src'
 python -m pyveri spec\entry-prelude-object-model.spec
 python -m pyveri spec\entry-prelude-object-model.spec --text object
 python -m pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
+python -m pyveri spec\entry-prelude-object-model.spec --text drives
+python -m pyveri spec\entry-prelude-object-model.spec --graph drives -o drives.gv
+python -m pyveri spec\entry-prelude-object-model.spec --text timeline
+python -m pyveri spec\entry-prelude-object-model.spec --graph timeline -o timeline.svg
 python -m unittest discover -s tools\pyveri\tests
 ```
 
 未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查；使用 `--graph object -o <file>` 时，图内容直接写入文件。
+`object` 视图只输出对象之间的静态 `parent` 父子关系。
+`drives` 视图输出事件之间的驱动关系。
+`timeline` 文本视图按时间先后输出，图形视图直接输出自底向上的 SVG 时间轴。
 
 ### 安装命令
 
@@ -64,6 +71,8 @@ python -m pip install -e tools\pyveri
 pyveri spec\entry-prelude-object-model.spec
 pyveri spec\entry-prelude-object-model.spec --text object
 pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
+pyveri spec\entry-prelude-object-model.spec --graph drives -o drives.gv
+pyveri spec\entry-prelude-object-model.spec --graph timeline -o timeline.svg
 ```
 
 Linux 下路径分隔符改为 `/`：

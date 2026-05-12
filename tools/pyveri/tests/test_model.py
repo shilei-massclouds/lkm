@@ -5,7 +5,14 @@ from pathlib import Path
 
 from pyveri.model import Severity, build_model
 from pyveri.parser import parse_file, parse_text
-from pyveri.view import build_object_view, render_dot, render_text
+from pyveri.view import (
+    build_drives_view,
+    build_object_view,
+    build_timeline_view,
+    render_dot,
+    render_svg,
+    render_text,
+)
 
 
 class ModelBuilderTests(unittest.TestCase):
@@ -33,9 +40,40 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertIn("StartupTimeline: TimelineObject", text)
         self.assertIn("StartupTimeline -> PreparePhase [parent]", text)
-        self.assertIn("StartupTimeline -> BootPhase [drives Setup->Setup]", text)
+        self.assertNotIn("drives", text)
         self.assertIn('"StartupTimeline" -> "PreparePhase"', dot)
-        self.assertIn('label="drives Setup->Setup"', dot)
+        self.assertNotIn("drives", dot)
+
+    def test_builds_drives_view(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+
+        result = build_model(parse_file(spec))
+        view = build_drives_view(result.model)
+        text = render_text(view)
+        dot = render_dot(view)
+
+        self.assertIn("StartupTimeline.Setup", text)
+        self.assertIn("  -> PreparePhase.Setup", text)
+        self.assertIn("BootPhase.Setup", text)
+        self.assertIn("EntryPreludePhase.Setup", text)
+        self.assertIn("rankdir=LR", dot)
+        self.assertIn('"StartupTimeline.Setup" -> "PreparePhase.Setup"', dot)
+
+    def test_builds_timeline_view(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+
+        result = build_model(parse_file(spec))
+        view = build_timeline_view(result.model)
+        text = render_text(view)
+        svg = render_svg(view)
+
+        self.assertIn("timeline view:", text)
+        self.assertIn("StartupTimeline: TimelineObject", text)
+        self.assertIn("  StartupTimeline.Setup", text)
+        self.assertIn("    -> PreparePhase.Setup", text)
+        self.assertIn("<svg", svg)
+        self.assertIn("EntryPreludePhase.Setup", svg)
+        self.assertIn("StartupTimeline.Setup", svg)
 
     def test_reports_unknown_drive_event(self) -> None:
         document = parse_text(

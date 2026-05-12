@@ -2,7 +2,17 @@
 
 from .model import BuildResult, Diagnostic, ObjectModel, Severity, build_model
 from .parser import ParseError, parse_file, parse_text, strip_comments
-from .view import ViewEdge, ViewModel, ViewNode, build_object_view, render_dot, render_text
+from .view import (
+    ViewEdge,
+    ViewModel,
+    ViewNode,
+    build_drives_view,
+    build_object_view,
+    build_timeline_view,
+    render_dot,
+    render_svg,
+    render_text,
+)
 
 __all__ = [
     "BuildResult",
@@ -13,11 +23,14 @@ __all__ = [
     "ViewEdge",
     "ViewModel",
     "ViewNode",
+    "build_drives_view",
     "build_object_view",
+    "build_timeline_view",
     "build_model",
     "parse_file",
     "parse_text",
     "render_dot",
+    "render_svg",
     "render_text",
     "strip_comments",
 ]

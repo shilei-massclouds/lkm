@@ -8,7 +8,14 @@ from pathlib import Path
 
 from .model import build_model, summarize_model
 from .parser import ParseError, parse_file, summarize
-from .view import build_object_view, render_dot, render_text
+from .view import (
+    build_drives_view,
+    build_object_view,
+    build_timeline_view,
+    render_dot,
+    render_svg,
+    render_text,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,13 +28,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--text",
-        choices=["object"],
+        choices=["object", "drives", "timeline"],
         metavar="VIEW",
         help="print a plain text model view",
     )
     parser.add_argument(
         "--graph",
-        choices=["object"],
+        choices=["object", "drives", "timeline"],
         metavar="VIEW",
         help="print a Graphviz DOT model view",
     )
@@ -73,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.text:
             selected_outputs.append(render_text(_build_view(result.model, args.text)))
         if args.graph:
-            selected_outputs.append(render_dot(_build_view(result.model, args.graph)))
+            selected_outputs.append(_render_graph(_build_view(result.model, args.graph)))
 
     if args.output is not None and selected_outputs:
         _write_output(args.output, "\n\n".join(selected_outputs), ascii_only=bool(args.graph))
@@ -87,7 +94,17 @@ def main(argv: list[str] | None = None) -> int:
 def _build_view(model, name):
     if name == "object":
         return build_object_view(model)
+    if name == "drives":
+        return build_drives_view(model)
+    if name == "timeline":
+        return build_timeline_view(model)
     raise ValueError(f"unknown view: {name}")
+
+
+def _render_graph(view):
+    if view.graph_format == "svg":
+        return render_svg(view)
+    return render_dot(view)
 
 
 def _write_output(path: Path, text: str, ascii_only: bool) -> None:
