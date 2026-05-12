@@ -156,7 +156,9 @@ def _parse_enum(segment: _Segment) -> EnumDecl:
     match = _ENUM_RE.match(segment.text)
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid enum declaration")
-    body = _body_from_braced_decl(segment.text, match.end() - 1, segment.start_line)
+    body, _body_start_line = _body_segment_from_braced_decl(
+        segment.text, match.end() - 1, segment.start_line
+    )
     variants = [part.strip().rstrip(",") for part in body.splitlines()]
     variants = [variant for variant in variants if variant]
     return EnumDecl(match.group(1), variants, segment.span)
@@ -182,7 +184,9 @@ def _parse_predicate(segment: _Segment) -> PredicateDecl:
         body = None
     else:
         signature = rest[:brace].strip()
-        body = _body_from_braced_decl(rest, brace, segment.start_line)
+        body, _body_start_line = _body_segment_from_braced_decl(
+            rest, brace, segment.start_line
+        )
     return PredicateDecl(name, signature, segment.span, body)
 
 
@@ -190,8 +194,10 @@ def _parse_type(segment: _Segment) -> TypeDecl:
     match = _TYPE_RE.match(segment.text)
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid type declaration")
-    body = _body_from_braced_decl(segment.text, match.end() - 1, segment.start_line)
-    blocks = _parse_named_blocks(body, segment.start_line)
+    body, body_start_line = _body_segment_from_braced_decl(
+        segment.text, match.end() - 1, segment.start_line
+    )
+    blocks = _parse_named_blocks(body, body_start_line)
     return TypeDecl(
         name=match.group(1),
         header=match.group("header").strip(),
@@ -205,8 +211,9 @@ def _parse_object(segment: _Segment) -> ObjectDecl:
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid object declaration")
 
-    body = _body_from_braced_decl(segment.text, match.end() - 1, segment.start_line)
-    body_start_line = segment.start_line + _line_count(segment.text[: match.end()])
+    body, body_start_line = _body_segment_from_braced_decl(
+        segment.text, match.end() - 1, segment.start_line
+    )
     parts = _split_members(body, body_start_line)
 
     initial_state: str | None = None
@@ -264,12 +271,13 @@ def _parse_object(segment: _Segment) -> ObjectDecl:
 
 
 def _parse_state(segment: _Segment) -> StateDecl:
-    match = _STATE_RE.match(segment.text.strip())
+    match = _STATE_RE.match(segment.text)
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid state declaration")
 
-    body = _body_from_braced_decl(segment.text.strip(), match.end() - 1, segment.start_line)
-    body_start_line = segment.start_line + _line_count(segment.text[: match.end()])
+    body, body_start_line = _body_segment_from_braced_decl(
+        segment.text, match.end() - 1, segment.start_line
+    )
     parts = _split_members(body, body_start_line)
 
     invariants: list[Block] = []
@@ -305,7 +313,7 @@ def _parse_state(segment: _Segment) -> StateDecl:
 
 
 def _parse_events_block(block: Block) -> list[EventDecl]:
-    parts = _split_members(block.body, block.span.start_line)
+    parts = _split_members(block.body, block.body_start_line or block.span.start_line)
     events: list[EventDecl] = []
     for part in parts:
         if not _EVENT_RE.match(part.text.strip()):
@@ -317,12 +325,13 @@ def _parse_events_block(block: Block) -> list[EventDecl]:
 
 
 def _parse_event(segment: _Segment) -> EventDecl:
-    match = _EVENT_RE.match(segment.text.strip())
+    match = _EVENT_RE.match(segment.text)
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid event declaration")
 
-    body = _body_from_braced_decl(segment.text.strip(), match.end() - 1, segment.start_line)
-    body_start_line = segment.start_line + _line_count(segment.text[: match.end()])
+    body, body_start_line = _body_segment_from_braced_decl(
+        segment.text, match.end() - 1, segment.start_line
+    )
     parts = _split_members(body, body_start_line)
 
     depends_on: list[Block] = []
@@ -371,15 +380,19 @@ def _parse_named_blocks(body: str, start_line: int) -> list[Block]:
 
 
 def _to_block(segment: _Segment, kind: str) -> Block:
-    match = _BLOCK_RE.match(segment.text.strip())
+    text = segment.text
+    match = _BLOCK_RE.match(text)
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid block")
-    body = _body_from_braced_decl(segment.text.strip(), match.end() - 1, segment.start_line)
+    body, body_start_line = _body_segment_from_braced_decl(
+        text, match.end() - 1, segment.start_line
+    )
     return Block(
         kind=kind,
         body=body,
         span=segment.span,
         header=match.group("header").strip(),
+        body_start_line=body_start_line,
     )
 
 
@@ -411,7 +424,7 @@ def _split_members(text: str, start_line: int) -> list[_Segment]:
         else:
             raise ParseError(f"line {member_line}: unexpected delimiter {delimiter!r}")
 
-        raw = text[member_start:member_end].strip()
+        raw = text[member_start:member_end]
         if raw:
             end_line = start_line + text.count("\n", 0, member_end)
             segments.append(_Segment(raw, member_line, end_line))
@@ -497,8 +510,18 @@ def _matching_brace_end(text: str, open_index: int, line: int) -> int:
 
 
 def _body_from_braced_decl(text: str, open_index: int, line: int) -> str:
+    body, _body_start_line = _body_segment_from_braced_decl(text, open_index, line)
+    return body.strip()
+
+
+def _body_segment_from_braced_decl(
+    text: str, open_index: int, line: int
+) -> tuple[str, int]:
     end = _matching_brace_end(text, open_index, line)
-    return text[open_index + 1 : end - 1].strip()
+    body_start = open_index + 1
+    body = text[body_start : end - 1]
+    body_start_line = line + text.count("\n", 0, body_start)
+    return body, body_start_line
 
 
 def _find_top_level_char(text: str, target: str) -> int | None:

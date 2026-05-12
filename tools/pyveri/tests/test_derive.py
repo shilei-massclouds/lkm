@@ -121,6 +121,8 @@ class DerivationTests(unittest.TestCase):
             any(
                 record.status is DerivationStatus.BLOCKED
                 and "B.state == State::Ready" in record.message
+                and record.span is not None
+                and record.span.start_line == 9
                 for record in derivation.records
             )
         )

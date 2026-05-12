@@ -254,7 +254,7 @@ PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 
 #### Step B.0: 改进诊断行号精度
 
-当前诊断行号仍不够精确：推导报告显示的是 `depends_on` block 的起始行，而不是 block 内具体表达式所在行。例如此前报告显示 `line 824`，实际问题表达式 `Vm.state == State::Ready;` 在 `spec/entry-prelude-object-model.spec` 的第 833 行。后续应让 `Block.entries` 或等价结构携带 entry 级行号，使 `depends_on`、`invariant` 和 `drives` 的诊断能指向具体条目。
+已完成。`Block` 现在记录 block body 的真实起始行，并提供 entry 级 `SourceSpan`。推导报告中的 `depends_on`、`invariant`、`drives` 和 `deferred` 诊断可以指向具体条目行号。例如把当前规格临时回退为旧依赖后，报告会指向 `line 833: depends_on requires Vm.state == State::Ready`，而不是此前的 block 起始行。
 
 #### Step B.1: 统一 WSL2/Linux 换行策略
 

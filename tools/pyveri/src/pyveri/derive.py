@@ -278,13 +278,13 @@ class _Deriver:
                 return False
 
             for block in event.decl.drives:
-                for entry in block.entries:
+                for entry, entry_span in block.entry_spans:
                     match = _EVENT_EXPR_RE.match(entry)
                     if match is None:
                         self._record(
                             DerivationStatus.BLOCKED,
                             f"cannot parse drives entry: {entry}",
-                            block.span,
+                            entry_span,
                             object_name=object_name,
                             event_name=event_name,
                             expression=entry,
@@ -297,7 +297,7 @@ class _Deriver:
                             DerivationStatus.BLOCKED,
                             "driven event blocked: "
                             f"{_event_label(driven_object, driven_event)}",
-                            block.span,
+                            entry_span,
                             object_name=object_name,
                             event_name=event_name,
                             expression=entry,
@@ -428,14 +428,19 @@ class _Deriver:
     ) -> bool:
         ok = True
         for block in blocks:
-            for entry in block.entries:
+            for entry, entry_span in block.entry_spans:
                 if _STATE_EXPR_RE.match(entry):
-                    ok = self._verify_state_expression(entry, block, kind, event, state) and ok
+                    ok = (
+                        self._verify_state_expression(
+                            entry, entry_span, kind, event, state
+                        )
+                        and ok
+                    )
                 else:
                     self._record(
                         DerivationStatus.OBLIGATION,
                         f"unresolved {kind}: {entry}",
-                        block.span,
+                        entry_span,
                         object_name=_context_object(event, state),
                         event_name=event.name if event is not None else None,
                         state_name=state.name if state is not None else None,
@@ -446,7 +451,7 @@ class _Deriver:
     def _verify_state_expression(
         self,
         expression: str,
-        block: Block,
+        span: SourceSpan,
         kind: str,
         event: EventDef | None,
         state: StateDef | None,
@@ -461,7 +466,7 @@ class _Deriver:
             self._record(
                 DerivationStatus.PROVED,
                 f"{kind}: {expression}",
-                block.span,
+                span,
                 object_name=_context_object(event, state),
                 event_name=event.name if event is not None else None,
                 state_name=state.name if state is not None else None,
@@ -472,7 +477,7 @@ class _Deriver:
         self._record(
             DerivationStatus.BLOCKED,
             f"{kind} requires {expression}, got State::{actual_state}",
-            block.span,
+            span,
             object_name=_context_object(event, state),
             event_name=event.name if event is not None else None,
             state_name=state.name if state is not None else None,
@@ -487,14 +492,16 @@ class _Deriver:
         kind: str,
     ) -> None:
         for block in blocks:
-            entries = block.entries or [block.body.strip()]
-            for entry in entries:
+            entries = block.entry_spans or [
+                (block.body.strip(), SourceSpan(block.body_start_line or block.span.start_line, block.span.end_line))
+            ]
+            for entry, entry_span in entries:
                 if not entry:
                     continue
                 self._record(
                     DerivationStatus.DEFERRED,
                     f"{kind} deferred: {_strip_quotes(entry)}",
-                    block.span,
+                    entry_span,
                     object_name=owner.object_name,
                     event_name=owner.name if isinstance(owner, EventDef) else None,
                     state_name=owner.name if isinstance(owner, StateDef) else None,

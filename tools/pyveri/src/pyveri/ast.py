@@ -21,10 +21,16 @@ class Block:
     body: str
     span: SourceSpan
     header: str = ""
+    body_start_line: int | None = None
 
     @property
     def entries(self) -> list[str]:
         return statement_entries(self.body)
+
+    @property
+    def entry_spans(self) -> list[tuple[str, SourceSpan]]:
+        start_line = self.body_start_line or self.span.start_line
+        return statement_entry_spans(self.body, start_line)
 
 
 @dataclass(frozen=True)
@@ -121,6 +127,12 @@ class SpecDocument:
 def statement_entries(body: str) -> list[str]:
     """Split a raw block body into top-level semicolon-terminated entries."""
 
+    return [entry for entry, _span in statement_entry_spans(body, 1)]
+
+
+def statement_entry_spans(body: str, start_line: int) -> list[tuple[str, SourceSpan]]:
+    """Split a raw block body into entries with line spans."""
+
     entries: list[str] = []
     start = 0
     depth = 0
@@ -133,10 +145,20 @@ def statement_entries(body: str) -> list[str]:
         elif char == ";" and depth == 0:
             entry = body[start:index].strip()
             if entry:
-                entries.append(entry)
+                entries.append((entry, _entry_span(body, start, index, start_line)))
             start = index + 1
 
     tail = body[start:].strip()
     if tail:
-        entries.append(tail)
+        entries.append((tail, _entry_span(body, start, len(body), start_line)))
     return entries
+
+
+def _entry_span(body: str, start: int, end: int, start_line: int) -> SourceSpan:
+    while start < end and body[start].isspace():
+        start += 1
+    while end > start and body[end - 1].isspace():
+        end -= 1
+    entry_start_line = start_line + body.count("\n", 0, start)
+    entry_end_line = start_line + body.count("\n", 0, end)
+    return SourceSpan(entry_start_line, entry_end_line)

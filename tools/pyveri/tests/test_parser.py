@@ -84,6 +84,32 @@ class ParserTests(unittest.TestCase):
             ],
         )
 
+    def test_statement_entry_spans_report_entry_lines(self) -> None:
+        document = parse_text(
+            """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    invariant {
+                        first();
+                        second();
+                    }
+                }
+            }
+            """
+        )
+
+        block = document.objects[0].states[0].invariants[0]
+
+        self.assertEqual(
+            [(entry, span.start_line) for entry, span in block.entry_spans],
+            [
+                ("first()", 7),
+                ("second()", 8),
+            ],
+        )
+
     def test_parse_current_entry_prelude_spec(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
 
@@ -95,6 +121,18 @@ class ParserTests(unittest.TestCase):
         self.assertIn("BootPhase", object_names)
         self.assertIn("EntryPreludePhase", object_names)
         self.assertGreaterEqual(len(document.objects), 19)
+
+    def test_current_entry_prelude_entry_spans_use_source_lines(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+
+        document = parse_file(spec)
+        kernel_image = next(obj for obj in document.objects if obj.name == "KernelImage")
+        ready = next(state for state in kernel_image.states if state.name == "Ready")
+        enable = next(event for event in ready.events if event.name == "Enable")
+        entry, span = enable.depends_on[0].entry_spans[0]
+
+        self.assertEqual(entry, "EarlyVm.state == State::Online")
+        self.assertEqual(span.start_line, 833)
 
     def test_parse_error_for_unknown_top_level_declaration(self) -> None:
         with self.assertRaises(ParseError):
