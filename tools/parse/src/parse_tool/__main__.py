@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 from common import write_json
-from pyveri.parser import ParseError, parse_file
 
 from .ast_json import document_to_ast_json
+from .parser import ParseError, parse_file
 
 
 def main(argv: list[str] | None = None) -> int:
