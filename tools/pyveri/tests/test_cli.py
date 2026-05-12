@@ -94,6 +94,48 @@ class CliTests(unittest.TestCase):
             self.assertTrue(data.startswith(b"digraph ObjectView"))
             data.decode("ascii")
 
+    def test_work_dir_keeps_derivation_intermediates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "build"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main(
+                    [str(self.spec), "--derive", "--strict", "--work-dir", str(work)]
+                )
+
+            self.assertEqual(exit_code, 0)
+            stem = self.spec.stem
+            self.assertTrue((work / f"{stem}.ast.json").is_file())
+            self.assertTrue((work / f"{stem}.model.json").is_file())
+            self.assertTrue((work / f"{stem}.derive.json").is_file())
+
+    def test_work_dir_keeps_render_intermediates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "build"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        "render",
+                        str(self.spec),
+                        "object",
+                        "--format",
+                        "dot",
+                        "--work-dir",
+                        str(work),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            stem = self.spec.stem
+            self.assertTrue((work / f"{stem}.ast.json").is_file())
+            self.assertTrue((work / f"{stem}.model.json").is_file())
+            self.assertTrue((work / f"{stem}.object.view.json").is_file())
+            self.assertTrue((work / f"{stem}.object.gv").is_file())
+            self.assertTrue(stdout.getvalue().startswith("digraph ObjectView"))
+
     def test_render_command_honors_explicit_dot_format_for_timeline(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()

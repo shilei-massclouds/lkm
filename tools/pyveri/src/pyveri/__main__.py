@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
+from contextlib import contextmanager
 import os
 import signal
 import subprocess
@@ -10,6 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
 
 def _bootstrap_tool_paths() -> None:
     tools_root = Path(__file__).resolve().parents[3]
@@ -67,9 +70,11 @@ def _build_command_parser() -> argparse.ArgumentParser:
 
     parse_parser = subparsers.add_parser("parse", help="parse the spec and print an AST summary")
     parse_parser.add_argument("spec", type=Path, help="path to the .spec input file")
+    _add_work_dir_argument(parse_parser)
 
     model_parser = subparsers.add_parser("model", help="build the static object model")
     model_parser.add_argument("spec", type=Path, help="path to the .spec input file")
+    _add_work_dir_argument(model_parser)
 
     derive_parser = subparsers.add_parser("derive", help="run static derivation")
     derive_parser.add_argument("spec", type=Path, help="path to the .spec input file")
@@ -84,6 +89,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
         help="return a non-zero exit code when derivation does not reach the target",
     )
     derive_parser.add_argument("-o", "--output", type=Path, help="write the derivation report")
+    _add_work_dir_argument(derive_parser)
 
     check_parser = subparsers.add_parser("check", help="run verification check")
     check_parser.add_argument("spec", type=Path, help="path to the .spec input file")
@@ -92,11 +98,13 @@ def _build_command_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TARGET,
         help=f"target event, default: {DEFAULT_TARGET}",
     )
+    _add_work_dir_argument(check_parser)
 
     view_parser = subparsers.add_parser("view", help="print a plain text model view")
     view_parser.add_argument("spec", type=Path, help="path to the .spec input file")
     view_parser.add_argument("view", choices=VIEW_CHOICES, help="view name")
     view_parser.add_argument("-o", "--output", type=Path, help="write the view to a file")
+    _add_work_dir_argument(view_parser)
 
     render_parser = subparsers.add_parser("render", help="render a graph or SVG model view")
     render_parser.add_argument("spec", type=Path, help="path to the .spec input file")
@@ -108,8 +116,17 @@ def _build_command_parser() -> argparse.ArgumentParser:
         help="render format, default: dot",
     )
     render_parser.add_argument("-o", "--output", type=Path, help="write the rendering to a file")
+    _add_work_dir_argument(render_parser)
 
     return parser
+
+
+def _add_work_dir_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        help="retain intermediate files in this directory instead of a temporary directory",
+    )
 
 
 def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
@@ -137,6 +154,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         help="return a non-zero exit code when derivation does not reach the target",
     )
     parser.add_argument("-o", "--output", type=Path, help="write selected output to a file")
+    _add_work_dir_argument(parser)
 
 
 def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
@@ -150,8 +168,8 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
         if sum(output_modes) > 1:
             parser.error("-o/--output can write only one selected output")
 
-    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
-        paths = _pipeline_paths(Path(tmp), args.spec)
+    with _workspace(args.work_dir) as work:
+        paths = _pipeline_paths(work, args.spec)
         parse_code = _run_parse_stage(args.spec, paths["ast"])
         if parse_code != 0:
             return parse_code
@@ -177,12 +195,12 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 print(_derive_summary(derivation_data))
 
         if args.tree:
-            selected_outputs.append(_render_view_output(paths["model"], "object", "text", Path(tmp)))
+            selected_outputs.append(_render_view_output(paths["model"], "object", "text", work, args.spec))
         if args.text:
-            selected_outputs.append(_render_view_output(paths["model"], args.text, "text", Path(tmp)))
+            selected_outputs.append(_render_view_output(paths["model"], args.text, "text", work, args.spec))
         if args.graph:
             fmt = "svg" if args.graph == "timeline" else "dot"
-            selected_outputs.append(_render_view_output(paths["model"], args.graph, fmt, Path(tmp)))
+            selected_outputs.append(_render_view_output(paths["model"], args.graph, fmt, work, args.spec))
         if args.derive and derivation_data is not None:
             selected_outputs.append(_derive_report(derivation_data))
 
@@ -198,8 +216,8 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
 
 
 def _run_parse(args: argparse.Namespace) -> int:
-    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
-        ast = Path(tmp) / "spec.ast.json"
+    with _workspace(args.work_dir) as work:
+        ast = _pipeline_paths(work, args.spec)["ast"]
         code = _run_parse_stage(args.spec, ast)
         if code != 0:
             return code
@@ -208,8 +226,8 @@ def _run_parse(args: argparse.Namespace) -> int:
 
 
 def _run_model(args: argparse.Namespace) -> int:
-    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
-        paths = _pipeline_paths(Path(tmp), args.spec)
+    with _workspace(args.work_dir) as work:
+        paths = _pipeline_paths(work, args.spec)
         code = _run_parse_stage(args.spec, paths["ast"])
         if code != 0:
             return code
@@ -221,8 +239,8 @@ def _run_model(args: argparse.Namespace) -> int:
 
 
 def _run_derive(args: argparse.Namespace) -> int:
-    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
-        paths = _pipeline_paths(Path(tmp), args.spec)
+    with _workspace(args.work_dir) as work:
+        paths = _pipeline_paths(work, args.spec)
         code = _run_parse_stage(args.spec, paths["ast"])
         if code != 0:
             return code
@@ -244,8 +262,8 @@ def _run_derive(args: argparse.Namespace) -> int:
 
 
 def _run_check(args: argparse.Namespace) -> int:
-    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
-        paths = _pipeline_paths(Path(tmp), args.spec)
+    with _workspace(args.work_dir) as work:
+        paths = _pipeline_paths(work, args.spec)
         code = _run_parse_stage(args.spec, paths["ast"])
         if code != 0:
             return code
@@ -262,15 +280,15 @@ def _run_check(args: argparse.Namespace) -> int:
 
 
 def _run_view(args: argparse.Namespace) -> int:
-    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
-        paths = _pipeline_paths(Path(tmp), args.spec)
+    with _workspace(args.work_dir) as work:
+        paths = _pipeline_paths(work, args.spec)
         code = _run_parse_stage(args.spec, paths["ast"])
         if code != 0:
             return code
         code = _run_model_stage(paths["ast"], paths["model"])
         if code != 0:
             return code
-        output = _render_view_output(paths["model"], args.view, "text", Path(tmp))
+        output = _render_view_output(paths["model"], args.view, "text", work, args.spec)
         if args.output is not None:
             _write_output(args.output, output, ascii_only=False)
         else:
@@ -279,15 +297,15 @@ def _run_view(args: argparse.Namespace) -> int:
 
 
 def _run_render(args: argparse.Namespace) -> int:
-    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
-        paths = _pipeline_paths(Path(tmp), args.spec)
+    with _workspace(args.work_dir) as work:
+        paths = _pipeline_paths(work, args.spec)
         code = _run_parse_stage(args.spec, paths["ast"])
         if code != 0:
             return code
         code = _run_model_stage(paths["ast"], paths["model"])
         if code != 0:
             return code
-        output = _render_view_output(paths["model"], args.view, args.format, Path(tmp))
+        output = _render_view_output(paths["model"], args.view, args.format, work, args.spec)
         if args.output is not None:
             _write_output(args.output, output, ascii_only=args.format == "dot")
         else:
@@ -335,6 +353,17 @@ def _run_stage(args: list[str]) -> int:
     return completed.returncode
 
 
+@contextmanager
+def _workspace(work_dir: Path | None) -> Iterator[Path]:
+    if work_dir is None:
+        with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
+            yield Path(tmp)
+        return
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    yield work_dir
+
+
 def _stage_env() -> dict[str, str]:
     env = dict(os.environ)
     root = Path(__file__).resolve().parents[3]
@@ -354,9 +383,11 @@ def _stage_env() -> dict[str, str]:
     return env
 
 
-def _render_view_output(model: Path, view_name: str, fmt: str, tmp: Path) -> str:
-    view_path = tmp / f"{view_name}.view.json"
-    output = tmp / f"{view_name}.{fmt}"
+def _render_view_output(model: Path, view_name: str, fmt: str, work: Path, spec: Path) -> str:
+    stem = spec.stem
+    suffix = "gv" if fmt == "dot" else fmt
+    view_path = work / f"{stem}.{view_name}.view.json"
+    output = work / f"{stem}.{view_name}.{suffix}"
     view_code = _run_view_stage(model, view_name, view_path)
     if view_code != 0:
         raise SystemExit(view_code)

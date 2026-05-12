@@ -50,6 +50,8 @@ PYTHONPATH=tools/pyveri/src python -m pyveri derive spec/entry-prelude-object-mo
 PYTHONPATH=tools/pyveri/src python -m pyveri check spec/entry-prelude-object-model.spec
 PYTHONPATH=tools/pyveri/src python -m pyveri view spec/entry-prelude-object-model.spec object
 PYTHONPATH=tools/pyveri/src python -m pyveri render spec/entry-prelude-object-model.spec object --format dot -o object.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive --strict --work-dir tools/build
+PYTHONPATH=tools/pyveri/src python -m pyveri render spec/entry-prelude-object-model.spec object --format dot --work-dir tools/build
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --text object
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --text drives
@@ -59,7 +61,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 ```
 
-当前 `pyveri` 已作为 driver 调度独立阶段工具，CLI 保留 `parse`、`model`、`derive`、`check`、`view` 和 `render` 子命令以及旧参数形式兼容。driver 使用临时目录保存中间文件。
+当前 `pyveri` 已作为 driver 调度独立阶段工具，CLI 保留 `parse`、`model`、`derive`、`check`、`view` 和 `render` 子命令以及旧参数形式兼容。driver 默认使用临时目录保存中间文件；传入 `--work-dir tools/build` 时会保留本次流水线生成的 AST、model、derive、check、view 和 render 中间文件。
 
 独立工具链已经提供 `common` 公共库骨架、`parse`、`model`、`derive`、`check`、`view` 和 `render` 阶段工具。源码方式运行：
 
