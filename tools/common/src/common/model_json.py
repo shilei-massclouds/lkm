@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from common.schemas import MODEL_SCHEMA, MODEL_VERSION
-from pyveri.ast import (
+from common.model_types import EventDef, ObjectDef, ObjectModel, StateDef
+from common.spec_ast import (
     Block,
     EnumDecl,
     EventDecl,
@@ -16,11 +17,10 @@ from pyveri.ast import (
     StateDecl,
     TypeDecl,
 )
-from pyveri.model import EventDef, ObjectDef, ObjectModel, StateDef
 
 
 def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
-    """Deserialize model intermediate JSON into a pyveri ObjectModel."""
+    """Deserialize model intermediate JSON into an ObjectModel."""
 
     _require_schema(data, MODEL_SCHEMA, MODEL_VERSION)
     if not _object(data, "summary").get("ok", False):
