@@ -59,7 +59,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 ```
 
-当前 CLI 已拆出阶段子命令：`parse`、`model`、`derive`、`check`、`view` 和 `render`。旧参数形式仍保留兼容。
+当前 `pyveri` 已作为 driver 调度独立阶段工具，CLI 保留 `parse`、`model`、`derive`、`check`、`view` 和 `render` 子命令以及旧参数形式兼容。driver 使用临时目录保存中间文件。
 
 独立工具链已经提供 `common` 公共库骨架、`parse`、`model`、`derive`、`check`、`view` 和 `render` 阶段工具。源码方式运行：
 

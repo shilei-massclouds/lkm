@@ -1,47 +1,35 @@
-"""Command line entry point for pyveri."""
+"""Driver entry point for the pyveri toolchain."""
 
 from __future__ import annotations
 
 import argparse
+import os
+import signal
+import subprocess
 import sys
-from dataclasses import dataclass
+import tempfile
 from pathlib import Path
+from typing import Any
 
-from .derive import DEFAULT_TARGET, derive, render_derivation_text, summarize_derivation
-from .model import BuildResult, ObjectModel, build_model, summarize_model
-from .parser import ParseError, SpecDocument, parse_file, summarize
-from .view import (
-    ViewModel,
-    build_drives_view,
-    build_object_view,
-    build_timeline_view,
-    render_dot,
-    render_svg,
-    render_text,
-)
+def _bootstrap_tool_paths() -> None:
+    tools_root = Path(__file__).resolve().parents[3]
+    for name in ("common", "parse", "model", "derive", "check", "view", "render"):
+        source = str(tools_root / name / "src")
+        if source not in sys.path:
+            sys.path.insert(0, source)
+
+
+_bootstrap_tool_paths()
+
+from common import read_json
+from pyveri.derive import DEFAULT_TARGET
+
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
 VIEW_CHOICES = ("object", "drives", "timeline")
 COMMANDS = frozenset({"parse", "model", "derive", "check", "view", "render"})
-
-
-@dataclass(frozen=True)
-class Pipeline:
-    """Loaded command pipeline state."""
-
-    document: SpecDocument
-    build: BuildResult
-
-    @property
-    def model(self) -> ObjectModel:
-        return self.build.model
-
-
-@dataclass(frozen=True)
-class LoadFailure:
-    """Failed source loading result."""
-
-    exit_code: int
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,14 +56,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_legacy_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Parse and derive an LKM object model spec.")
+    parser = argparse.ArgumentParser(description="Run the pyveri verification driver.")
     _add_legacy_arguments(parser)
     return parser
 
 
 def _build_command_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run pyveri pipeline stages.")
-
     subparsers = parser.add_subparsers(dest="command")
 
     parse_parser = subparsers.add_parser("parse", help="parse the spec and print an AST summary")
@@ -96,16 +83,9 @@ def _build_command_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="return a non-zero exit code when derivation does not reach the target",
     )
-    derive_parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="write the derivation report to a file",
-    )
+    derive_parser.add_argument("-o", "--output", type=Path, help="write the derivation report")
 
-    check_parser = subparsers.add_parser(
-        "check", help="run static derivation and return failure for blocked targets"
-    )
+    check_parser = subparsers.add_parser("check", help="run verification check")
     check_parser.add_argument("spec", type=Path, help="path to the .spec input file")
     check_parser.add_argument(
         "--target",
@@ -139,18 +119,8 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="compatibility alias for --text object",
     )
-    parser.add_argument(
-        "--text",
-        choices=VIEW_CHOICES,
-        metavar="VIEW",
-        help="print a plain text model view",
-    )
-    parser.add_argument(
-        "--graph",
-        choices=VIEW_CHOICES,
-        metavar="VIEW",
-        help="print a Graphviz DOT model view",
-    )
+    parser.add_argument("--text", choices=VIEW_CHOICES, metavar="VIEW", help="print text view")
+    parser.add_argument("--graph", choices=VIEW_CHOICES, metavar="VIEW", help="print graph view")
     parser.add_argument(
         "--derive",
         action="store_true",
@@ -166,12 +136,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="return a non-zero exit code when derivation does not reach the target",
     )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        help="write the selected text or graph view to a file",
-    )
+    parser.add_argument("-o", "--output", type=Path, help="write selected output to a file")
 
 
 def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
@@ -185,202 +150,341 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
         if sum(output_modes) > 1:
             parser.error("-o/--output can write only one selected output")
 
-    loaded = _load_pipeline(args.spec)
-    if isinstance(loaded, LoadFailure):
-        return loaded.exit_code
-    pipeline = loaded
-    _print_diagnostics(pipeline.build)
+    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
+        paths = _pipeline_paths(Path(tmp), args.spec)
+        parse_code = _run_parse_stage(args.spec, paths["ast"])
+        if parse_code != 0:
+            return parse_code
+        model_code = _run_model_stage(paths["ast"], paths["model"])
+        if model_code != 0:
+            return model_code
 
-    selected_outputs: list[str] = []
-    derivation = derive(pipeline.model, args.target) if pipeline.build.ok else None
+        selected_outputs: list[str] = []
+        derivation_data: dict[str, Any] | None = None
+        needs_derivation = not args.graph or args.derive or args.strict
+        if needs_derivation:
+            derive_code = _run_derive_stage(paths["model"], paths["derive"], args.target)
+            if derive_code != 0:
+                return derive_code
+            derivation_data = read_json(paths["derive"])
 
-    graph_only = (
-        pipeline.build.ok
-        and args.graph
-        and not args.text
-        and not args.tree
-        and not args.derive
-    )
-    output_only = args.output is not None
-    if not graph_only and not output_only:
-        print(summarize(pipeline.document))
-        print(summarize_model(pipeline.build))
-        if derivation is not None and not args.derive:
-            print(summarize_derivation(derivation))
+        graph_only = args.graph and not args.text and not args.tree and not args.derive
+        output_only = args.output is not None
+        if not graph_only and not output_only:
+            print(_parse_summary(read_json(paths["ast"])))
+            print(_model_summary(read_json(paths["model"])))
+            if derivation_data is not None and not args.derive:
+                print(_derive_summary(derivation_data))
 
-    if pipeline.build.ok:
         if args.tree:
-            selected_outputs.append(render_text(build_object_view(pipeline.model)))
+            selected_outputs.append(_render_view_output(paths["model"], "object", "text", Path(tmp)))
         if args.text:
-            selected_outputs.append(render_text(_build_view(pipeline.model, args.text)))
+            selected_outputs.append(_render_view_output(paths["model"], args.text, "text", Path(tmp)))
         if args.graph:
-            selected_outputs.append(_render_dot(_build_view(pipeline.model, args.graph)))
-        if args.derive and derivation is not None:
-            selected_outputs.append(render_derivation_text(derivation))
+            fmt = "svg" if args.graph == "timeline" else "dot"
+            selected_outputs.append(_render_view_output(paths["model"], args.graph, fmt, Path(tmp)))
+        if args.derive and derivation_data is not None:
+            selected_outputs.append(_derive_report(derivation_data))
 
-    if args.output is not None and selected_outputs:
-        _write_output(args.output, "\n\n".join(selected_outputs), ascii_only=bool(args.graph))
-    else:
-        _print_outputs(selected_outputs)
+        if args.output is not None and selected_outputs:
+            _write_output(args.output, "\n\n".join(selected_outputs), ascii_only=bool(args.graph))
+        else:
+            for output in selected_outputs:
+                print(output)
 
-    if not pipeline.build.ok:
-        return 1
-    if args.strict and derivation is not None and not derivation.ok:
-        return 1
-    return 0
+        if args.strict and derivation_data is not None and not _derive_ok(derivation_data):
+            return 1
+        return 0
 
 
 def _run_parse(args: argparse.Namespace) -> int:
-    loaded = _load_document(args.spec)
-    if isinstance(loaded, LoadFailure):
-        return loaded.exit_code
-    document = loaded
-    print(summarize(document))
+    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
+        ast = Path(tmp) / "spec.ast.json"
+        code = _run_parse_stage(args.spec, ast)
+        if code != 0:
+            return code
+        print(_parse_summary(read_json(ast)))
     return 0
 
 
 def _run_model(args: argparse.Namespace) -> int:
-    loaded = _load_pipeline(args.spec)
-    if isinstance(loaded, LoadFailure):
-        return loaded.exit_code
-    pipeline = loaded
-    _print_diagnostics(pipeline.build)
-    print(summarize_model(pipeline.build))
-    return 0 if pipeline.build.ok else 1
+    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
+        paths = _pipeline_paths(Path(tmp), args.spec)
+        code = _run_parse_stage(args.spec, paths["ast"])
+        if code != 0:
+            return code
+        code = _run_model_stage(paths["ast"], paths["model"])
+        if code != 0:
+            return code
+        print(_model_summary(read_json(paths["model"])))
+    return 0
 
 
 def _run_derive(args: argparse.Namespace) -> int:
-    loaded = _load_pipeline(args.spec)
-    if isinstance(loaded, LoadFailure):
-        return loaded.exit_code
-    pipeline = loaded
-    _print_diagnostics(pipeline.build)
-    if not pipeline.build.ok:
-        return 1
-
-    derivation = derive(pipeline.model, args.target)
-    output = render_derivation_text(derivation)
-    if args.output is not None:
-        _write_output(args.output, output, ascii_only=False)
-    else:
-        print(output)
-    if args.strict and not derivation.ok:
-        return 1
+    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
+        paths = _pipeline_paths(Path(tmp), args.spec)
+        code = _run_parse_stage(args.spec, paths["ast"])
+        if code != 0:
+            return code
+        code = _run_model_stage(paths["ast"], paths["model"])
+        if code != 0:
+            return code
+        code = _run_derive_stage(paths["model"], paths["derive"], args.target)
+        if code != 0:
+            return code
+        data = read_json(paths["derive"])
+        output = _derive_report(data)
+        if args.output is not None:
+            _write_output(args.output, output, ascii_only=False)
+        else:
+            print(output)
+        if args.strict and not _derive_ok(data):
+            return 1
     return 0
 
 
 def _run_check(args: argparse.Namespace) -> int:
-    loaded = _load_pipeline(args.spec)
-    if isinstance(loaded, LoadFailure):
-        return loaded.exit_code
-    pipeline = loaded
-    _print_diagnostics(pipeline.build)
-    if not pipeline.build.ok:
-        return 1
-
-    derivation = derive(pipeline.model, args.target)
-    print(summarize_derivation(derivation))
-    return 0 if derivation.ok else 1
+    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
+        paths = _pipeline_paths(Path(tmp), args.spec)
+        code = _run_parse_stage(args.spec, paths["ast"])
+        if code != 0:
+            return code
+        code = _run_model_stage(paths["ast"], paths["model"])
+        if code != 0:
+            return code
+        code = _run_derive_stage(paths["model"], paths["derive"], args.target)
+        if code != 0:
+            return code
+        code = _run_check_stage(paths["derive"], paths["check"])
+        if code != 0:
+            return code
+    return 0
 
 
 def _run_view(args: argparse.Namespace) -> int:
-    loaded = _load_pipeline(args.spec)
-    if isinstance(loaded, LoadFailure):
-        return loaded.exit_code
-    pipeline = loaded
-    _print_diagnostics(pipeline.build)
-    if not pipeline.build.ok:
-        return 1
-
-    output = render_text(_build_view(pipeline.model, args.view))
-    if args.output is not None:
-        _write_output(args.output, output, ascii_only=False)
-    else:
-        print(output)
+    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
+        paths = _pipeline_paths(Path(tmp), args.spec)
+        code = _run_parse_stage(args.spec, paths["ast"])
+        if code != 0:
+            return code
+        code = _run_model_stage(paths["ast"], paths["model"])
+        if code != 0:
+            return code
+        output = _render_view_output(paths["model"], args.view, "text", Path(tmp))
+        if args.output is not None:
+            _write_output(args.output, output, ascii_only=False)
+        else:
+            print(output)
     return 0
 
 
 def _run_render(args: argparse.Namespace) -> int:
-    loaded = _load_pipeline(args.spec)
-    if isinstance(loaded, LoadFailure):
-        return loaded.exit_code
-    pipeline = loaded
-    _print_diagnostics(pipeline.build)
-    if not pipeline.build.ok:
-        return 1
-
-    view = _build_view(pipeline.model, args.view)
-    try:
-        output = _render_view(view, args.format)
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    if args.output is not None:
-        _write_output(args.output, output, ascii_only=args.format == "dot")
-    else:
-        print(output)
+    with tempfile.TemporaryDirectory(prefix="pyveri-") as tmp:
+        paths = _pipeline_paths(Path(tmp), args.spec)
+        code = _run_parse_stage(args.spec, paths["ast"])
+        if code != 0:
+            return code
+        code = _run_model_stage(paths["ast"], paths["model"])
+        if code != 0:
+            return code
+        output = _render_view_output(paths["model"], args.view, args.format, Path(tmp))
+        if args.output is not None:
+            _write_output(args.output, output, ascii_only=args.format == "dot")
+        else:
+            print(output)
     return 0
 
 
-def _load_document(path: Path) -> SpecDocument | LoadFailure:
-    try:
-        return parse_file(path)
-    except OSError as exc:
-        print(f"error: cannot read {path}: {exc}", file=sys.stderr)
-        return LoadFailure(2)
-    except ParseError as exc:
-        print(f"syntax_error: {exc}", file=sys.stderr)
-        return LoadFailure(1)
+def _run_parse_stage(spec: Path, output: Path) -> int:
+    return _run_stage(["-m", "parse_tool", str(spec), "-o", str(output)])
 
 
-def _load_pipeline(path: Path) -> Pipeline | LoadFailure:
-    loaded = _load_document(path)
-    if isinstance(loaded, LoadFailure):
-        return loaded
-    document = loaded
-    return Pipeline(document=document, build=build_model(document))
+def _run_model_stage(ast: Path, output: Path) -> int:
+    return _run_stage(["-m", "model_tool", str(ast), "-o", str(output)])
 
 
-def _print_diagnostics(result: BuildResult) -> None:
-    for diagnostic in result.diagnostics:
-        print(diagnostic.format(), file=sys.stderr)
+def _run_derive_stage(model: Path, output: Path, target: str) -> int:
+    return _run_stage(["-m", "derive_tool", str(model), "-o", str(output), "--target", target])
 
 
-def _print_outputs(outputs: list[str]) -> None:
-    for output in outputs:
-        print(output)
+def _run_check_stage(derive: Path, output: Path) -> int:
+    return _run_stage(["-m", "check_tool", str(derive), "-o", str(output)])
 
 
-def _build_view(model: ObjectModel, name: str) -> ViewModel:
-    if name == "object":
-        return build_object_view(model)
-    if name == "drives":
-        return build_drives_view(model)
-    if name == "timeline":
-        return build_timeline_view(model)
-    raise ValueError(f"unknown view: {name}")
+def _run_view_stage(model: Path, view: str, output: Path) -> int:
+    return _run_stage(["-m", "view_tool", str(model), view, "-o", str(output)])
 
 
-def _render_view(view: ViewModel, fmt: str) -> str:
-    if fmt == "svg":
-        return render_svg(view)
-    if fmt == "dot":
-        return render_dot(view)
-    raise ValueError(f"unknown render format: {fmt}")
+def _run_render_stage(view: Path, fmt: str, output: Path) -> int:
+    return _run_stage(["-m", "render_tool", str(view), "--format", fmt, "-o", str(output)])
 
 
-def _render_dot(view: ViewModel) -> str:
-    """Render legacy graph output, preserving timeline SVG behavior."""
+def _run_stage(args: list[str]) -> int:
+    completed = subprocess.run(
+        [sys.executable, *args],
+        env=_stage_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if completed.stdout:
+        print(completed.stdout, end="")
+    if completed.stderr:
+        print(completed.stderr, end="", file=sys.stderr)
+    return completed.returncode
 
-    if view.graph_format == "svg":
-        return render_svg(view)
-    return render_dot(view)
+
+def _stage_env() -> dict[str, str]:
+    env = dict(os.environ)
+    root = Path(__file__).resolve().parents[3]
+    paths = [
+        root / "common" / "src",
+        root / "parse" / "src",
+        root / "model" / "src",
+        root / "derive" / "src",
+        root / "check" / "src",
+        root / "view" / "src",
+        root / "render" / "src",
+        root / "pyveri" / "src",
+    ]
+    existing = env.get("PYTHONPATH")
+    path_text = os.pathsep.join(str(path) for path in paths)
+    env["PYTHONPATH"] = path_text if not existing else path_text + os.pathsep + existing
+    return env
+
+
+def _render_view_output(model: Path, view_name: str, fmt: str, tmp: Path) -> str:
+    view_path = tmp / f"{view_name}.view.json"
+    output = tmp / f"{view_name}.{fmt}"
+    view_code = _run_view_stage(model, view_name, view_path)
+    if view_code != 0:
+        raise SystemExit(view_code)
+    render_code = _run_render_stage(view_path, fmt, output)
+    if render_code != 0:
+        raise SystemExit(render_code)
+    encoding = "ascii" if fmt == "dot" else "utf-8"
+    return output.read_text(encoding=encoding)
+
+
+def _pipeline_paths(tmp: Path, spec: Path) -> dict[str, Path]:
+    stem = spec.stem
+    return {
+        "ast": tmp / f"{stem}.ast.json",
+        "model": tmp / f"{stem}.model.json",
+        "derive": tmp / f"{stem}.derive.json",
+        "check": tmp / f"{stem}.check.json",
+    }
+
+
+def _parse_summary(data: dict[str, Any]) -> str:
+    document = data["document"]
+    state_count = sum(len(obj["states"]) for obj in document["objects"])
+    event_count = sum(
+        len(state["events"])
+        for obj in document["objects"]
+        for state in obj["states"]
+    )
+    return "\n".join(
+        [
+            "parse: ok",
+            f"enums: {len(document['enums'])}",
+            f"functions: {len(document['functions'])}",
+            f"predicates: {len(document['predicates'])}",
+            f"types: {len(document['types'])}",
+            f"objects: {len(document['objects'])}",
+            f"states: {state_count}",
+            f"events: {event_count}",
+        ]
+    )
+
+
+def _model_summary(data: dict[str, Any]) -> str:
+    summary = data["summary"]
+    status = "ok" if summary["ok"] else "failed"
+    return "\n".join(
+        [
+            f"model: {status}",
+            f"objects: {summary['objects']}",
+            f"states: {summary['states']}",
+            f"events: {summary['events']}",
+            f"errors: {summary['errors']}",
+            f"warnings: {summary['warnings']}",
+        ]
+    )
+
+
+def _derive_summary(data: dict[str, Any]) -> str:
+    summary = data["summary"]
+    status = _derive_status(summary)
+    return "\n".join(
+        [
+            f"derive: {status}",
+            f"target: {data['target']['event']}",
+            f"target_reached: {'yes' if summary['target_reached'] else 'no'}",
+            f"transitions: {summary['transitions']}",
+            f"proved: {summary['proved']}",
+            f"assumed: {summary['assumed']}",
+            f"obligation: {summary['obligation']}",
+            f"deferred: {summary['deferred']}",
+            f"blocked: {summary['blocked']}",
+            f"contradiction: {summary['contradiction']}",
+        ]
+    )
+
+
+def _derive_report(data: dict[str, Any]) -> str:
+    lines = [_derive_summary(data)]
+    transitions = data.get("transitions", [])
+    if transitions:
+        lines.append("")
+        lines.append("transitions:")
+        for transition in transitions:
+            lines.append(f"- {transition['label']}")
+
+    for status in ("blocked", "contradiction", "deferred", "obligation"):
+        records = [record for record in data["records"] if record["status"] == status]
+        if not records:
+            continue
+        lines.append("")
+        lines.append(f"{status}:")
+        for record in records:
+            lines.append(f"- {_format_record(record)}")
+    return "\n".join(lines)
+
+
+def _derive_status(summary: dict[str, Any]) -> str:
+    if _derive_ok_summary(summary):
+        return "ok"
+    if summary["contradiction"]:
+        return "contradiction"
+    if summary["blocked"]:
+        return "blocked"
+    return "incomplete"
+
+
+def _derive_ok(data: dict[str, Any]) -> bool:
+    return _derive_ok_summary(data["summary"])
+
+
+def _derive_ok_summary(summary: dict[str, Any]) -> bool:
+    return bool(summary["target_reached"]) and not summary["blocked"] and not summary["contradiction"]
+
+
+def _format_record(record: dict[str, Any]) -> str:
+    span = record.get("span")
+    location = f"line {span['start_line']}: " if span is not None else ""
+    return f"{location}{record['message']}"
 
 
 def _write_output(path: Path, text: str, ascii_only: bool) -> None:
     encoding = "ascii" if ascii_only else "utf-8"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text + "\n", encoding=encoding)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:
+        raise SystemExit(0)

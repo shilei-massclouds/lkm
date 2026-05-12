@@ -429,14 +429,14 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - `view.json` 已包含 `schema`、`version`、source、view、rankdir、graph_format、nodes、edges 和 metadata。
 - 已建立 `tools/render` 独立阶段工具，当前可读取 `view.json` 并输出 text、DOT 或 SVG。
 - `render` 当前复用 `pyveri.view` 中的文本、DOT 和 SVG 渲染逻辑，后续可继续拆分为 renderer host 和格式插件。
+- `pyveri` 已收敛为 driver，当前通过临时目录和子进程调度 `parse`、`model`、`derive`、`check`、`view`、`render` 独立工具，并保留旧 CLI 输出兼容。
 
 后续需要继续推进到独立工具形态：
 
 - 明确 `common` 公共库的边界和中间文件 schema。
 - 按上述阶段工具职责细化中间文件 schema 和退出码。
-- 建立中间文件目录，保存 AST、模型、推导结果和视图结果。
 - 将当前 `tools/pyveri/src/pyveri/` 中的阶段逻辑逐步迁移到并列工具目录。
-- 最后把 `pyveri` 收敛为 driver：负责计算中间路径、调用阶段工具、处理缓存和组合默认流程。
+- 让 driver 支持可配置的持久中间文件目录和缓存策略，而不仅是临时目录。
 
 第一版中间产物可以先落在：
 
