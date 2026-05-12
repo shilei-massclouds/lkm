@@ -208,6 +208,11 @@ StartupTimeline.Event::Setup
 
 当前 CLI 已支持 `--derive`、`--target` 和 `--strict`。默认推导摘要即使为 `blocked` 也返回 0，`--strict` 用于把未达目标的推导结果作为命令失败处理。
 
+后续 CLI 改进：
+
+- 将 `--derive` 行为改为默认行为。当前默认命令已经输出推导摘要，但完整推导报告仍需要显式 `--derive`；后续应让 `python -m pyveri <spec>` 默认执行完整推导，并用参数选择只解析、只建模或只输出视图。
+- 保留显式子命令或参数用于工具链阶段，例如 `parse`、`model`、`derive`、`view`、`render`，避免默认行为变复杂后难以单独调试。
+
 当前主开发环境已经迁移到 WSL2/Linux；文档和日常命令优先使用 `/` 路径分隔符、`PYTHONPATH=... command` 环境变量形式和 `sh tools/pyveri/bin/pyveri ...` 本地脚本。Windows PowerShell 命令作为兼容旧环境保留。
 
 ### 5.1 Next Execution Plan
@@ -258,16 +263,17 @@ PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 
 #### Step B.1: 统一 WSL2/Linux 换行策略
 
-当前主开发环境已迁移到 WSL2/Linux，后续应清理文本文件中的 CRLF `^M`。这对 `pyveri` 解析和推导语义通常没有影响：Python 文本读取会处理通用换行，当前 parser 的行号统计也主要依赖 `\n`。但换行清理会造成大面积 diff，因此必须作为独立维护提交处理，不应混入规格语义或工具逻辑修改。
+已完成。当前主开发环境已迁移到 WSL2/Linux，仓库已添加 `.gitattributes` 换行策略，并确认 tracked 文本文件当前没有 CRLF `^M` 残留。这对 `pyveri` 解析和推导语义通常没有影响：Python 文本读取会处理通用换行，当前 parser 的行号统计也主要依赖 `\n`。
 
-建议先添加或更新 `.gitattributes`：
+当前策略：
 
 ```gitattributes
 * text=auto eol=lf
 *.cmd text eol=crlf
+*.png binary
 ```
 
-随后再统一规范化源码、文档和 `.spec` 文件的换行。Windows 批处理脚本 `*.cmd` 保持 CRLF。
+源码、文档和 `.spec` 文件统一按 LF 管理。Windows 批处理脚本 `*.cmd` 保留 CRLF 策略，避免影响旧 Windows 环境。
 
 完成标准：
 
@@ -284,6 +290,8 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 候选改进：
 
+- 当前完整推导报告过于平铺，信息噪音较大。后续应重新设计输出层次，默认只显示摘要、目标状态、根因 blocked、deferred 和 obligation 统计；详细 transitions 和全部 obligation 应通过 verbose/detail 参数打开。
+- 将默认推导过程显示为进入/退出式 trace，而不是平铺的 `transitions` 列表。每个事件输出成对记录：进入行使用 `>`，退出行使用 `<`；被 `drives` 的子事件缩进两格嵌套在中间。成功退出行不额外标注 `ok`，失败退出行标注 `blocked:` 或 `contradiction:` 并附带原因。
 - 按 `blocked`、`deferred`、`obligation` 分组时进一步按对象/事件/状态分组。
 - 对 `blocked` 输出根因链，而不是只输出逐层传播的 blocked。
 - 在摘要中区分“目标已达但存在 obligation”和“目标未达”。
