@@ -830,7 +830,7 @@ object KernelImage: ImageObject {
              */
             on Event::Enable -> State::Online {
                 depends_on {
-                    Vm.state == State::Ready;
+                    EarlyVm.state == State::Online;
                 }
 
                 may_change {

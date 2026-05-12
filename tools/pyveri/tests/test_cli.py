@@ -22,7 +22,7 @@ class CliTests(unittest.TestCase):
             self.assertTrue(data.startswith(b"digraph ObjectView"))
             data.decode("ascii")
 
-    def test_strict_derivation_fails_for_current_blocked_spec(self) -> None:
+    def test_strict_derivation_succeeds_for_current_spec(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
 
         stdout = io.StringIO()
@@ -30,7 +30,7 @@ class CliTests(unittest.TestCase):
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             exit_code = main([str(spec), "--derive", "--strict"])
 
-        self.assertEqual(exit_code, 1)
+        self.assertEqual(exit_code, 0)
 
 
 if __name__ == "__main__":

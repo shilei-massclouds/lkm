@@ -125,24 +125,20 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
-    def test_current_entry_prelude_derivation_reports_blocked_cycle(self) -> None:
+    def test_current_entry_prelude_derivation_reaches_target(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
         result = build_model(parse_file(spec))
 
         derivation = derive(result.model)
         text = render_derivation_text(derivation)
 
-        self.assertFalse(derivation.ok)
-        self.assertIn("derive: blocked", text)
+        self.assertTrue(derivation.ok)
+        self.assertIn("derive: ok", text)
+        self.assertIn("target_reached: yes", text)
         self.assertIn("transitions:", text)
         self.assertIn("PreparePhase.Event::Setup", text)
-        self.assertTrue(
-            any(
-                record.status is DerivationStatus.BLOCKED
-                and "Vm.state == State::Ready" in record.message
-                for record in derivation.records
-            )
-        )
+        self.assertEqual(derivation.states["StartupTimeline"], "Ready")
+        self.assertFalse(derivation.blocked)
 
 
 if __name__ == "__main__":

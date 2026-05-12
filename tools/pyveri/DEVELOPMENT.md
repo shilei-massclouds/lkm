@@ -90,7 +90,7 @@ StartupTimeline.state == State::Ready
 - 已提供对象视图、驱动关系视图和时间轴视图。
 - 图形输出中，`object` 和 `drives` 仍使用 Graphviz DOT；`timeline` 直接生成 SVG。
 - 已加入最小推导器，可从 `StartupTimeline.Event::Setup` 按事件源状态、`depends_on`、`drives` 顺序和目标状态执行静态推导，并收集 `proved`、`assumed`、`obligation`、`deferred`、`blocked` 和 `contradiction` 结果。
-- 当前真实规格在严格推导下仍为 `blocked`：`Vm.Event::Setup` 在驱动 `KernelImage.Event::Enable` 时，后者要求 `Vm.state == State::Ready`，但此时 `Vm` 尚处于 `State::Prepared`。这说明当前 timeline 视图展示的是视图级状态推进，不等同于完整证明已通过。
+- 已修正当前真实规格中的严格推导阻塞点：`KernelImage.Event::Enable` 不再依赖聚合完成态 `Vm.state == State::Ready`，而是依赖更局部的 `EarlyVm.state == State::Online`。当前 `StartupTimeline.Event::Setup` 可严格推出 `StartupTimeline.state == State::Ready`，复杂谓词仍作为 `obligation` 保留。
 
 ### 2.1 Timeline View
 
@@ -209,6 +209,105 @@ StartupTimeline.Event::Setup
 当前 CLI 已支持 `--derive`、`--target` 和 `--strict`。默认推导摘要即使为 `blocked` 也返回 0，`--strict` 用于把未达目标的推导结果作为命令失败处理。
 
 当前主开发环境已经迁移到 WSL2/Linux；文档和日常命令优先使用 `/` 路径分隔符、`PYTHONPATH=... command` 环境变量形式和 `sh tools/pyveri/bin/pyveri ...` 本地脚本。Windows PowerShell 命令作为兼容旧环境保留。
+
+### 5.1 Next Execution Plan
+
+后续工作按“小步可验证”的方式推进。当前优先级是先把已经发现的规格阻塞点、测试和开发环境问题逐步收口，再继续扩展工具链。
+
+#### Step A: 修正当前规格阻塞点
+
+已完成。此前严格推导阻塞在：
+
+```text
+Vm.Event::Setup
+  drives KernelImage.Event::Enable
+
+KernelImage.Event::Enable
+  depends_on Vm.state == State::Ready
+```
+
+但 `Vm.Event::Setup` 自身完成前，`Vm.state` 仍是 `State::Prepared`。因此这是规格模型中的阶段依赖自锁，不是工具运行错误。当前修正为让 `KernelImage.Event::Enable` 依赖 `EarlyVm.state == State::Online`，表达其真实局部需求：EarlyVm 对应的早期虚拟地址空间已经可用。
+
+完成标准：
+
+```bash
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive --strict
+```
+
+当前结果不再因为该状态依赖产生 `blocked`。
+
+#### Step B: 将当前真实规格纳入严格推导测试
+
+已完成。`tools/pyveri/tests/test_derive.py` 已从“报告 blocked”改为“目标可达”：
+
+- 目标为 `StartupTimeline.Event::Setup`。
+- 期望最终 `StartupTimeline.state == State::Ready`。
+- 复杂谓词仍允许作为 `obligation` 保留。
+
+完成标准：
+
+```bash
+PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
+```
+
+全部通过，且严格推导命令返回 0。
+
+#### Step B.0: 改进诊断行号精度
+
+当前诊断行号仍不够精确：推导报告显示的是 `depends_on` block 的起始行，而不是 block 内具体表达式所在行。例如此前报告显示 `line 824`，实际问题表达式 `Vm.state == State::Ready;` 在 `spec/entry-prelude-object-model.spec` 的第 833 行。后续应让 `Block.entries` 或等价结构携带 entry 级行号，使 `depends_on`、`invariant` 和 `drives` 的诊断能指向具体条目。
+
+#### Step B.1: 统一 WSL2/Linux 换行策略
+
+当前主开发环境已迁移到 WSL2/Linux，后续应清理文本文件中的 CRLF `^M`。这对 `pyveri` 解析和推导语义通常没有影响：Python 文本读取会处理通用换行，当前 parser 的行号统计也主要依赖 `\n`。但换行清理会造成大面积 diff，因此必须作为独立维护提交处理，不应混入规格语义或工具逻辑修改。
+
+建议先添加或更新 `.gitattributes`：
+
+```gitattributes
+* text=auto eol=lf
+*.cmd text eol=crlf
+```
+
+随后再统一规范化源码、文档和 `.spec` 文件的换行。Windows 批处理脚本 `*.cmd` 保持 CRLF。
+
+完成标准：
+
+```bash
+PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive
+```
+
+两条命令行为与换行清理前一致。
+
+#### Step C: 改进推导报告可读性
+
+在严格推导通过后，再优化报告输出，避免过早打磨未稳定的结果格式。
+
+候选改进：
+
+- 按 `blocked`、`deferred`、`obligation` 分组时进一步按对象/事件/状态分组。
+- 对 `blocked` 输出根因链，而不是只输出逐层传播的 blocked。
+- 在摘要中区分“目标已达但存在 obligation”和“目标未达”。
+- 增加 `--format json`，为后续工具链中间产物做准备。
+
+#### Step D: 工具链拆分
+
+当严格推导和报告格式稳定后，再进入工具链拆分：
+
+- `parse` 输出 AST。
+- `model` 输出静态对象模型。
+- `derive` 输出推导轨迹和证明义务。
+- `check` 将结果解释为通过、阻塞或矛盾。
+- `view` 从模型或推导结果生成视图模型。
+- `render` 输出 text、DOT、SVG 或 JSON。
+
+第一版中间产物可以先落在：
+
+```text
+tools/pyveri/build/
+tools/pyveri/out/
+```
+
+缓存策略先采用内容摘要和参数摘要，不急于引入完整构建数据库。
 
 ### 6. Tests
 
