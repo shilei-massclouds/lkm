@@ -1,0 +1,13 @@
+[project]
+name = "lkm-check"
+version = "0.1.0"
+description = "Evaluate LKM derivation JSON with verification policies."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+lkm-check = "check_tool.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

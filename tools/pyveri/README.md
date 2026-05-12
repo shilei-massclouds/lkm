@@ -61,15 +61,17 @@ PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 
 当前 CLI 已拆出阶段子命令：`parse`、`model`、`derive`、`check`、`view` 和 `render`。旧参数形式仍保留兼容。
 
-独立工具链已经提供 `common` 公共库骨架、`parse`、`model` 和 `derive` 阶段工具。源码方式运行：
+独立工具链已经提供 `common` 公共库骨架、`parse`、`model`、`derive` 和 `check` 阶段工具。源码方式运行：
 
 ```bash
 PYTHONPATH=tools/common/src:tools/parse/src:tools/pyveri/src python -m parse_tool spec/entry-prelude-object-model.spec -o tools/build/entry-prelude-object-model.ast.json
 PYTHONPATH=tools/common/src:tools/model/src:tools/pyveri/src python -m model_tool tools/build/entry-prelude-object-model.ast.json -o tools/build/entry-prelude-object-model.model.json
 PYTHONPATH=tools/common/src:tools/derive/src:tools/pyveri/src python -m derive_tool tools/build/entry-prelude-object-model.model.json -o tools/build/entry-prelude-object-model.derive.json
+PYTHONPATH=tools/common/src:tools/check/src python -m check_tool tools/build/entry-prelude-object-model.derive.json -o tools/build/entry-prelude-object-model.check.json
 PYTHONPATH=tools/common/src:tools/parse/src:tools/pyveri/src python -m unittest discover -s tools/parse/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/pyveri/src python -m unittest discover -s tools/model/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/derive/src:tools/pyveri/src python -m unittest discover -s tools/derive/tests
+PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/derive/src:tools/check/src:tools/pyveri/src python -m unittest discover -s tools/check/tests
 ```
 
 未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查，并输出默认推导摘要；使用 `--derive` 时输出完整推导报告。默认情况下，推导结果为 `blocked` 仍返回 0，便于查看报告；需要把未达目标作为命令失败时使用 `--strict`。
