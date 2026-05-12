@@ -36,12 +36,92 @@
 
 ## 当前运行方式
 
+### 源码方式
+
 在仓库根目录执行：
 
 ```powershell
 $env:PYTHONPATH='tools\pyveri\src'
 python -m pyveri spec\entry-prelude-object-model.spec
+python -m pyveri spec\entry-prelude-object-model.spec --text object
+python -m pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
 python -m unittest discover -s tools\pyveri\tests
 ```
 
-当前 CLI 会先输出解析摘要，再执行静态模型装配和引用检查。
+未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查；使用 `--graph object -o <file>` 时，图内容直接写入文件。
+
+### 安装命令
+
+如果当前 Python 环境具备 Python 打包构建工具，可以在仓库根目录执行：
+
+```powershell
+python -m pip install -e tools\pyveri
+```
+
+安装后可以直接运行：
+
+```powershell
+pyveri spec\entry-prelude-object-model.spec
+pyveri spec\entry-prelude-object-model.spec --text object
+pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
+```
+
+Linux 下路径分隔符改为 `/`：
+
+```bash
+python -m pip install -e tools/pyveri
+pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+```
+
+### 本地命令脚本
+
+如果不安装 Python 包，可以直接使用仓库内的本地脚本。
+
+Windows PowerShell：
+
+```powershell
+.\tools\pyveri\bin\pyveri.cmd spec\entry-prelude-object-model.spec --graph object -o object.gv
+```
+
+也可以临时加入 PATH，使命令形式变成 `pyveri ...`：
+
+```powershell
+$env:PATH = "$(Resolve-Path tools\pyveri\bin);$env:PATH"
+pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
+```
+
+Linux：
+
+```bash
+sh tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+```
+
+也可以临时加入 PATH：
+
+```bash
+PATH="$PWD/tools/pyveri/bin:$PATH"
+pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+```
+
+### 查看 DOT 图
+
+安装 Graphviz 后，可以把 `--graph object` 输出渲染为 SVG。
+
+Windows PowerShell：
+
+```powershell
+pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
+dot -Tsvg object.gv -o object.svg
+start object.svg
+```
+
+Linux：
+
+```bash
+pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+dot -Tsvg object.gv -o object.svg
+xdg-open object.svg
+```
+
+`-o` 会由 `pyveri` 直接写出 ASCII 编码的 Graphviz 文件，避免 Windows PowerShell 重定向生成 UTF-16 文件。
+如果没有安装 Graphviz，也可以把 `object.gv` 的内容粘贴到在线 Graphviz/DOT viewer 中查看。

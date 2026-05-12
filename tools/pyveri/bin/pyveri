@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PYVERI_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+
+if [ -n "${PYTHONPATH:-}" ]; then
+    PYTHONPATH="$PYVERI_ROOT/src:$PYTHONPATH"
+else
+    PYTHONPATH="$PYVERI_ROOT/src"
+fi
+export PYTHONPATH
+
+PYTHON_BIN=${PYTHON:-python}
+exec "$PYTHON_BIN" -m pyveri "$@"

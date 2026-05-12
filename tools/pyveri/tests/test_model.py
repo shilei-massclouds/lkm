@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pyveri.model import Severity, build_model
 from pyveri.parser import parse_file, parse_text
+from pyveri.view import build_object_view, render_dot, render_text
 
 
 class ModelBuilderTests(unittest.TestCase):
@@ -21,6 +22,20 @@ class ModelBuilderTests(unittest.TestCase):
             ["PreparePhase", "BootPhase"],
         )
         self.assertEqual(result.model.objects["BootPhase"].children, ["EntryPreludePhase"])
+
+    def test_builds_object_view(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+
+        result = build_model(parse_file(spec))
+        view = build_object_view(result.model)
+        text = render_text(view)
+        dot = render_dot(view)
+
+        self.assertIn("StartupTimeline: TimelineObject", text)
+        self.assertIn("StartupTimeline -> PreparePhase [parent]", text)
+        self.assertIn("StartupTimeline -> BootPhase [drives Setup->Setup]", text)
+        self.assertIn('"StartupTimeline" -> "PreparePhase"', dot)
+        self.assertIn('label="drives Setup->Setup"', dot)
 
     def test_reports_unknown_drive_event(self) -> None:
         document = parse_text(
