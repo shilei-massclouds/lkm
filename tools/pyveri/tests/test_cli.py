@@ -10,12 +10,17 @@ from pyveri.__main__ import main
 
 
 class CliTests(unittest.TestCase):
-    def test_graph_output_file_is_ascii_dot(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+    def setUp(self) -> None:
+        self.spec = (
+            Path(__file__).resolve().parents[3]
+            / "spec"
+            / "entry-prelude-object-model.spec"
+        )
 
+    def test_graph_output_file_is_ascii_dot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "object.gv"
-            exit_code = main([str(spec), "--graph", "object", "-o", str(output)])
+            exit_code = main([str(self.spec), "--graph", "object", "-o", str(output)])
 
             self.assertEqual(exit_code, 0)
             data = output.read_bytes()
@@ -23,14 +28,98 @@ class CliTests(unittest.TestCase):
             data.decode("ascii")
 
     def test_strict_derivation_succeeds_for_current_spec(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
-
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            exit_code = main([str(spec), "--derive", "--strict"])
+            exit_code = main([str(self.spec), "--derive", "--strict"])
 
         self.assertEqual(exit_code, 0)
+
+    def test_parse_command_prints_parse_summary(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["parse", str(self.spec)])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("parse: ok", stdout.getvalue())
+
+    def test_model_command_prints_model_summary(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["model", str(self.spec)])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("model: ok", stdout.getvalue())
+
+    def test_derive_command_prints_derivation_report(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["derive", str(self.spec), "--strict"])
+
+        self.assertEqual(exit_code, 0)
+        text = stdout.getvalue()
+        self.assertIn("derive: ok", text)
+        self.assertIn("transitions:", text)
+
+    def test_check_command_uses_strict_derivation_exit_code(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["check", str(self.spec)])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("target_reached: yes", stdout.getvalue())
+
+    def test_view_command_prints_text_view(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["view", str(self.spec), "object"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("object view:", stdout.getvalue())
+
+    def test_render_command_writes_ascii_dot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "object.gv"
+            exit_code = main(
+                ["render", str(self.spec), "object", "--format", "dot", "-o", str(output)]
+            )
+
+            self.assertEqual(exit_code, 0)
+            data = output.read_bytes()
+            self.assertTrue(data.startswith(b"digraph ObjectView"))
+            data.decode("ascii")
+
+    def test_render_command_honors_explicit_dot_format_for_timeline(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["render", str(self.spec), "timeline", "--format", "dot"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(stdout.getvalue().startswith("digraph TimelineView"))
+
+    def test_legacy_graph_timeline_keeps_svg_behavior(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main([str(self.spec), "--graph", "timeline"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(stdout.getvalue().startswith("<?xml"))
+
+    def test_missing_input_returns_usage_error_code(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["parse", str(self.spec.with_name("missing.spec"))])
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("error: cannot read", stderr.getvalue())
 
 
 if __name__ == "__main__":

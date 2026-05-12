@@ -299,14 +299,20 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 #### Step D: 工具链拆分
 
-当严格推导和报告格式稳定后，再进入工具链拆分：
+已开始。当前已先拆出 CLI 阶段边界，并保留旧参数形式兼容：
 
-- `parse` 输出 AST。
-- `model` 输出静态对象模型。
-- `derive` 输出推导轨迹和证明义务。
-- `check` 将结果解释为通过、阻塞或矛盾。
-- `view` 从模型或推导结果生成视图模型。
-- `render` 输出 text、DOT、SVG 或 JSON。
+- `parse` 输出解析摘要。
+- `model` 输出静态对象模型摘要。
+- `derive` 输出推导报告和证明义务。
+- `check` 将推导结果解释为通过、阻塞或矛盾，并用退出码表达。
+- `view` 从模型生成文本视图。
+- `render` 从模型生成 DOT 或 SVG 输出。
+
+后续继续推进：
+
+- 增加结构化 `--format json`。
+- 让 `parse`、`model`、`derive` 输出可复用的中间产物，而不仅是人类可读摘要。
+- 视需要把 `__main__.py` 中的阶段执行逻辑拆到独立 pipeline 模块。
 
 第一版中间产物可以先落在：
 
