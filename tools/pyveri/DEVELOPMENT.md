@@ -24,6 +24,110 @@ StartupTimeline.Event::Setup
 StartupTimeline.state == State::Ready
 ```
 
+## 工具链架构目标
+
+长期目标是把验证工具链做成类似 `gcc` 的 driver/tool 结构，而不是只做成单一程序的子命令集合。`pyveri` 应作为当前验证器 driver，负责调度一组独立工具；每个阶段工具都是可以单独执行的程序，阶段之间通过明确的中间文件衔接。
+
+仓库内部目录使用短名称，便于开发和组合：
+
+```text
+tools/
+  common/   # 公共库，不直接作为工具执行
+  parse/    # .spec -> AST 中间文件
+  model/    # AST -> 静态对象模型中间文件
+  derive/   # 模型 -> 推导结果中间文件或报告
+  check/    # 推导结果 -> 通过/阻塞/矛盾判断
+  view/     # 模型或推导结果 -> 视图中间文件
+  render/   # 视图中间文件 -> text/DOT/SVG/JSON
+  pyveri/   # 当前 driver，负责调度上述工具
+```
+
+发布或安装时可以把这些短名称映射为带项目前缀的长命令名，避免和系统命令或其它项目冲突；仓库内部不需要过早承担外部命名约束。
+
+`common` 是公共库，不是用户直接执行的工具。它应承载工具链共享的数据契约和基础设施，例如 AST/model/derivation/view 的中间文件 schema、JSON 读写、诊断格式、退出码约定和公共测试 fixture。具体阶段逻辑仍归属各自工具：解析在 `parse`，建模在 `model`，推导在 `derive`，检查在 `check`，视图构建在 `view`，渲染在 `render`。
+
+当前 `tools/pyveri` 内部已经先做了 CLI 子命令拆分，这只是过渡步骤，用于明确阶段边界和测试现有行为；它还没有达到最终的独立工具链结构。后续拆分应以独立目录、独立入口和中间文件协议为目标。
+
+## 阶段工具职责
+
+第一版独立工具链包含 6 个阶段工具：`parse`、`model`、`derive`、`check`、`view` 和 `render`。`common` 是公共库，`pyveri` 是 driver，不计入阶段工具。
+
+中间文件第一版优先采用 JSON。JSON 便于人工检查、测试断言和早期 schema 演进；每类中间文件都应包含 `schema`、`version` 和必要的来源信息。
+
+### parse
+
+`parse` 只负责把 `.spec` 源文件转换成语法级 AST 中间文件：
+
+```text
+*.spec -> ast.json
+```
+
+它应读取 `.spec`、去除注释并保留源码行号，解析顶层声明、对象结构、状态结构、事件结构和 block 条目。复杂表达式第一版保留为原始字符串。AST 节点、block 和 block entry 都应保留 `span`，用于后续诊断指回 `.spec` 行号。
+
+`parse` 不检查对象引用、状态引用或事件引用是否存在，不执行推导，不生成视图，不渲染输出。它只回答：源文件能否被解析成结构化语法树。
+
+### model
+
+`model` 负责把语法级 AST 转换成静态对象模型中间文件：
+
+```text
+ast.json -> model.json
+```
+
+它应建立对象表、类型/枚举/函数/谓词索引、父子关系、状态表、事件表，以及事件的源状态、目标状态、依赖、驱动队列和延期义务。它负责检查重复声明、未知父对象、未知事件目标状态、未知事件引用和未知状态引用，并保留源码 span。
+
+`model` 不执行事件，不判断 `depends_on` 当前是否满足，不递归执行 `drives`，不判断目标是否可达，不生成视图或图形。它只回答：AST 能否形成引用一致、结构可索引的对象模型。
+
+### derive
+
+`derive` 负责从静态对象模型执行规格内的状态推导，生成推导结果中间文件：
+
+```text
+model.json -> derive.json
+```
+
+它应根据 `initial_state` 初始化状态表，从目标事件开始按事件源状态、`depends_on`、`drives` 声明顺序和目标状态推进推导。进入某个对象状态后，`derive` 负责处理该状态的 `invariant`：能直接确认的记录为 `proved`，无法求解的复杂谓词记录为 `obligation`，不满足的状态条件记录为 `blocked` 或 `contradiction`。它还负责收集 `deferred`、最终状态表、记录、统计，以及后续 trace 输出所需的结构化数据。
+
+`derive` 只做推导执行和事实收集，不做最终验证裁决。它不决定整体是否通过、不定义退出码策略、不判断 `obligation` 或 `deferred` 在某种策略下是否允许。当前实现中的 `ok` 字段可作为过渡摘要，但未来最终通过/失败应由 `check` 解释。
+
+### check
+
+`check` 负责读取推导结果，根据验证策略给出最终判定和退出码：
+
+```text
+derive.json -> check.json
+```
+
+它只针对 `derive` 已经产出的最终结果做策略解释和后续处理，不重新执行推导，也不重新验证每个对象状态。第一版默认策略可以是：`target_reached == true`，且没有 `blocked` 和 `contradiction` 即通过；`obligation` 和 `deferred` 允许存在。
+
+后续可扩展不同策略，例如不允许 `obligation`、不允许 `deferred`、CI 严格策略等。同一个 `derive.json` 可以被不同 `check` 策略解释。
+
+### view
+
+`view` 负责把模型或推导结果转换成视图模型中间文件：
+
+```text
+model.json/derive.json -> view.json
+```
+
+它决定“要展示什么”，而不是“怎么输出”。第一版视图类型包括 `object`、`drives`、`timeline` 和 `trace`。`object` 和 `drives` 可来自 `model.json`；`timeline` 可以来自模型或推导结果；`trace` 应来自 `derive.json`。视图模型应组织节点、边、层级、顺序、状态、分组和 trace 行等渲染前数据。
+
+`view` 不解析 `.spec`，不构建模型，不执行推导，不判断验证是否通过，不直接生成 DOT/SVG/text。
+
+### render
+
+`render` 负责把 `view.json` 渲染成最终输出：
+
+```text
+view.json -> text/DOT/SVG/animated SVG
+```
+
+它决定“怎么输出”。第一版至少支持 `text`、`dot` 和 `svg`，后续可增加 `animated-svg`、HTML、Markdown、PNG 或视频导出。`render` 不直接读取 `model.json` 或 `derive.json`，除非后续明确增加快捷路径；它的稳定输入应是 `view.json`。
+
+长期看，`render` 可以演进为 renderer host：自身负责读取 `view.json`、根据 `--format` 选择 renderer、传递数据、处理输出路径和错误码；不同格式由独立 renderer 模块或插件处理，例如 text renderer、DOT renderer、SVG renderer、animated SVG renderer。
+
+动画输出遵循简单直观、开源免费、面向工程人员理解使用的原则。优先采用基于开放标准和浏览器原生能力的 `animated SVG`，第一阶段不引入外部动画框架。动画只用于表达推导顺序、状态推进、事件进入/退出、对象出现和 blocked 位置，不做装饰性特效。
+
 ## 规格语义
 
 - `object` 是推导中的实体单位。
@@ -299,7 +403,9 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 #### Step D: 工具链拆分
 
-已开始。当前已先拆出 CLI 阶段边界，并保留旧参数形式兼容：
+目标是拆成 `gcc` 风格的 driver/tool 工具链。`pyveri` 作为 driver，独立阶段工具并列放在 `tools/` 下，通过中间文件衔接。
+
+当前已完成过渡步骤：先在 `tools/pyveri` 内部拆出 CLI 阶段边界，并保留旧参数形式兼容：
 
 - `parse` 输出解析摘要。
 - `model` 输出静态对象模型摘要。
@@ -308,17 +414,19 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - `view` 从模型生成文本视图。
 - `render` 从模型生成 DOT 或 SVG 输出。
 
-后续继续推进：
+后续需要继续推进到独立工具形态：
 
-- 增加结构化 `--format json`。
-- 让 `parse`、`model`、`derive` 输出可复用的中间产物，而不仅是人类可读摘要。
-- 视需要把 `__main__.py` 中的阶段执行逻辑拆到独立 pipeline 模块。
+- 明确 `common` 公共库的边界和中间文件 schema。
+- 按上述阶段工具职责细化中间文件 schema 和退出码。
+- 建立中间文件目录，保存 AST、模型、推导结果和视图结果。
+- 将当前 `tools/pyveri/src/pyveri/` 中的阶段逻辑逐步迁移到并列工具目录。
+- 最后把 `pyveri` 收敛为 driver：负责计算中间路径、调用阶段工具、处理缓存和组合默认流程。
 
 第一版中间产物可以先落在：
 
 ```text
-tools/pyveri/build/
-tools/pyveri/out/
+tools/build/
+tools/out/
 ```
 
 缓存策略先采用内容摘要和参数摘要，不急于引入完整构建数据库。
