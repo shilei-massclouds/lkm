@@ -1,0 +1,13 @@
+[project]
+name = "lkm-derive"
+version = "0.1.0"
+description = "Derive LKM model state transitions from model intermediate JSON."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+lkm-derive = "derive_tool.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
