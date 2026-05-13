@@ -364,29 +364,35 @@ class _TraceLayoutBuilder:
         enter_id = f"{event_id}-source"
         exit_id = f"{event_id}-target"
         span_id = f"{event_id}-span"
-        event_row = len(self.rows)
         column = content_column * 2
         gap_column = column + 1
         self._max_content_column = max(self._max_content_column, content_column)
 
-        self._add_row("state", event_row, f"{label}.source")
-        self.cells.append(
-            TraceCell(
-                id=enter_id,
-                kind="state",
-                row=event_row,
-                column=column,
-                label=f"{data['object']}.State::{data['source_state']}",
+        source_label = f"{data['object']}.State::{data['source_state']}"
+        event_row = len(self.rows)
+        adjacent_source_id = self._adjacent_state_cell_id(column, source_label)
+        if adjacent_source_id is not None:
+            enter_id = adjacent_source_id
+            event_row = self.rows[-1]["index"]
+        else:
+            self._add_row("state", event_row, f"{label}.source")
+            self.cells.append(
+                TraceCell(
+                    id=enter_id,
+                    kind="state",
+                    row=event_row,
+                    column=column,
+                    label=source_label,
+                )
             )
-        )
-        self.cells.append(
-            TraceCell(
-                id=f"{event_id}-vertical-gap-before",
-                kind="gap",
-                row=event_row,
-                column=gap_column,
+            self.cells.append(
+                TraceCell(
+                    id=f"{event_id}-vertical-gap-before",
+                    kind="gap",
+                    row=event_row,
+                    column=gap_column,
+                )
             )
-        )
 
         event_body_start = len(self.rows)
         self._add_row("gap", event_body_start, f"{label}.body.start")
@@ -480,6 +486,20 @@ class _TraceLayoutBuilder:
 
     def _add_row(self, kind: str, index: int, label: str) -> None:
         self.rows.append({"index": index, "kind": kind, "label": label})
+
+    def _adjacent_state_cell_id(self, column: int, label: str) -> str | None:
+        if not self.rows or self.rows[-1]["kind"] != "state":
+            return None
+        row = self.rows[-1]["index"]
+        for cell in reversed(self.cells):
+            if (
+                cell.kind == "state"
+                and cell.row == row
+                and cell.column == column
+                and cell.label == label
+            ):
+                return cell.id
+        return None
 
     def _build_columns(self) -> None:
         for content_column in range(self._max_content_column + 1):

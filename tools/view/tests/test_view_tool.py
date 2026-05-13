@@ -113,6 +113,13 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(arrow["kind"] == "drives" for arrow in metadata["trace_arrows"])
             )
+            prepare_ready_cells = [
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "state"
+                and cell["label"] == "PreparePhase.State::Ready"
+            ]
+            self.assertEqual(len(prepare_ready_cells), 1)
 
     def test_invalid_model_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
