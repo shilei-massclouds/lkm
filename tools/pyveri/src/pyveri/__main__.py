@@ -127,6 +127,11 @@ def _build_command_parser() -> argparse.ArgumentParser:
         default="dot",
         help="render format, default: dot",
     )
+    render_parser.add_argument(
+        "--annotations",
+        type=Path,
+        help="optional trace SVG annotation JSON",
+    )
     render_parser.add_argument("-o", "--output", type=Path, help="write the rendering to a file")
     _add_work_dir_argument(render_parser)
 
@@ -337,7 +342,14 @@ def _run_render(args: argparse.Namespace) -> int:
             code = _ensure_derivation(paths, args.target)
             if code != 0:
                 return code
-        output = _render_view_output(paths, args.view, args.format, work, args.spec)
+        output = _render_view_output(
+            paths,
+            args.view,
+            args.format,
+            work,
+            args.spec,
+            annotations=args.annotations,
+        )
         if args.output is not None:
             _write_output(args.output, output, ascii_only=args.format == "dot")
         else:
@@ -365,8 +377,13 @@ def _run_view_stage(model: Path, view: str, output: Path) -> int:
     return _run_stage(["-m", "view_tool", str(model), view, "-o", str(output)])
 
 
-def _run_render_stage(view: Path, fmt: str, output: Path) -> int:
-    return _run_stage(["-m", "render_tool", str(view), "--format", fmt, "-o", str(output)])
+def _run_render_stage(
+    view: Path, fmt: str, output: Path, annotations: Path | None = None
+) -> int:
+    args = ["-m", "render_tool", str(view), "--format", fmt, "-o", str(output)]
+    if annotations is not None:
+        args.extend(["--annotations", str(annotations.resolve())])
+    return _run_stage(args)
 
 
 def _run_stage(args: list[str]) -> int:
@@ -416,7 +433,12 @@ def _stage_env() -> dict[str, str]:
 
 
 def _render_view_output(
-    paths: dict[str, Path], view_name: str, fmt: str, work: Path, spec: Path
+    paths: dict[str, Path],
+    view_name: str,
+    fmt: str,
+    work: Path,
+    spec: Path,
+    annotations: Path | None = None,
 ) -> str:
     stem = spec.stem
     suffix = "gv" if fmt == "dot" else fmt
@@ -426,7 +448,7 @@ def _render_view_output(
     view_code = _run_view_stage(view_input, view_name, view_path)
     if view_code != 0:
         raise SystemExit(view_code)
-    render_code = _run_render_stage(view_path, fmt, output)
+    render_code = _run_render_stage(view_path, fmt, output, annotations)
     if render_code != 0:
         raise SystemExit(render_code)
     encoding = "ascii" if fmt == "dot" else "utf-8"

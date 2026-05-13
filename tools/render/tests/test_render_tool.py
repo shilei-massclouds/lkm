@@ -110,6 +110,45 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("depends-arrow", text)
             self.assertNotIn("StartupTimeline.Base", text)
 
+    def test_render_svg_from_trace_view_with_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._build_view_json(tmp, "trace")
+            annotations = Path(tmp) / "notes.json"
+            annotations.write_text(
+                """
+{
+  "states": {
+    "Vm.State::Ready": "early virtual address space available"
+  },
+  "events": {
+    "Vm.Event::Setup": "build early mappings"
+  }
+}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            output = Path(tmp) / "trace.svg"
+
+            exit_code = render_main(
+                [
+                    str(view),
+                    "--format",
+                    "svg",
+                    "--annotations",
+                    str(annotations),
+                    "-o",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("annotation-box", text)
+            self.assertIn("annotation-leader", text)
+            self.assertIn("early virtual address", text)
+            self.assertIn("build early mappings", text)
+
     def test_svg_requires_timeline_or_trace_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             view = self._build_view_json(tmp, "object")
@@ -122,6 +161,30 @@ class RenderToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 2)
             self.assertIn("error: cannot render view JSON", stderr.getvalue())
+
+    def test_missing_annotations_returns_usage_error_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._build_view_json(tmp, "trace")
+            output = Path(tmp) / "trace.svg"
+            missing = Path(tmp) / "missing-notes.json"
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = render_main(
+                    [
+                        str(view),
+                        "--format",
+                        "svg",
+                        "--annotations",
+                        str(missing),
+                        "-o",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn(f"error: cannot read {missing}", stderr.getvalue())
 
     def test_invalid_view_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

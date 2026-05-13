@@ -171,6 +171,31 @@ class CliTests(unittest.TestCase):
             self.assertTrue(text.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
             self.assertIn("StartupTimeline.Setup", text)
 
+    def test_render_trace_command_accepts_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            annotations = Path(tmp) / "notes.json"
+            annotations.write_text(
+                '{"events": {"Vm.Event::Setup": "build early mappings"}}\n',
+                encoding="utf-8",
+            )
+            output = Path(tmp) / "trace.svg"
+            exit_code = main(
+                [
+                    "render",
+                    str(self.spec),
+                    "trace",
+                    "--format",
+                    "svg",
+                    "--annotations",
+                    str(annotations),
+                    "-o",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("build early mappings", output.read_text(encoding="utf-8"))
+
     def test_legacy_graph_timeline_keeps_svg_behavior(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()

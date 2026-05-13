@@ -21,16 +21,29 @@ def main(argv: list[str] | None = None) -> int:
         default="text",
         help="output format, default: text",
     )
+    parser.add_argument(
+        "--annotations",
+        type=Path,
+        help="optional trace SVG annotation JSON",
+    )
     parser.add_argument("-o", "--output", type=Path, help="write output to a file")
     args = parser.parse_args(argv)
 
     try:
         view_data = read_json(args.view)
-        view = view_json_to_view_model(view_data)
-        output = render_view(view, args.format)
     except OSError as exc:
         print(f"error: cannot read {args.view}: {exc}", file=sys.stderr)
         return 2
+
+    try:
+        annotations = read_json(args.annotations) if args.annotations is not None else None
+    except OSError as exc:
+        print(f"error: cannot read {args.annotations}: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        view = view_json_to_view_model(view_data)
+        output = render_view(view, args.format, annotations)
     except ValueError as exc:
         print(f"error: cannot render view JSON: {exc}", file=sys.stderr)
         return 2

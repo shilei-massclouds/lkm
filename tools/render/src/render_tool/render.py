@@ -16,9 +16,17 @@ from common.view_types import (
 _TRACE_DRIVE_ARROW_MAX_LENGTH = 81
 _TRACE_EVENT_LABEL_PAD_X = 8
 _TRACE_EVENT_LABEL_HEIGHT = 22
+_TRACE_ANNOTATION_WIDTH = 160
+_TRACE_ANNOTATION_LINE_HEIGHT = 13
+_TRACE_ANNOTATION_PADDING_X = 8
+_TRACE_ANNOTATION_PADDING_Y = 6
+_TRACE_ANNOTATION_GAP = 10
+_TRACE_ANNOTATION_MARGIN = 18
 
 
-def render_view(view: ViewModel, fmt: str) -> str:
+def render_view(
+    view: ViewModel, fmt: str, annotations: dict[str, object] | None = None
+) -> str:
     """Render a view model with the requested output format."""
 
     if fmt == "text":
@@ -26,7 +34,7 @@ def render_view(view: ViewModel, fmt: str) -> str:
     if fmt == "dot":
         return render_dot(view)
     if fmt == "svg":
-        return render_svg(view)
+        return render_svg(view, annotations)
     raise ValueError(f"unknown render format: {fmt}")
 
 
@@ -77,11 +85,11 @@ def render_dot(view: ViewModel) -> str:
     return "\n".join(lines)
 
 
-def render_svg(view: ViewModel) -> str:
+def render_svg(view: ViewModel, annotations: dict[str, object] | None = None) -> str:
     """Render a startup timeline SVG."""
 
     if view.name == "trace":
-        return _render_trace_svg(view)
+        return _render_trace_svg(view, annotations)
     if view.name != "timeline":
         raise ValueError("SVG rendering is currently only supported for timeline and trace views")
 
@@ -194,7 +202,7 @@ def render_svg(view: ViewModel) -> str:
     return "\n".join(lines)
 
 
-def _render_trace_svg(view: ViewModel) -> str:
+def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) -> str:
     columns = _trace_columns(view)
     rows = _trace_rows(view)
     cells = _trace_cells(view)
@@ -208,7 +216,18 @@ def _render_trace_svg(view: ViewModel) -> str:
     right_margin = 28
     top_margin = 28
     bottom_margin = 28
-    width = int(left_margin + right_margin + sum(metric[1] for metric in column_metrics.values()))
+    annotation_items = _trace_annotation_items(annotations)
+    annotation_margin = (
+        _TRACE_ANNOTATION_WIDTH + _TRACE_ANNOTATION_MARGIN
+        if annotation_items
+        else 0
+    )
+    width = int(
+        left_margin
+        + right_margin
+        + annotation_margin
+        + sum(metric[1] for metric in column_metrics.values())
+    )
     height = int(top_margin + bottom_margin + sum(metric[1] for metric in row_metrics.values()))
     cell_by_id = {cell.id: cell for cell in cells}
     phase_span_ids = {
@@ -269,6 +288,9 @@ def _render_trace_svg(view: ViewModel) -> str:
         ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
+        ".annotation-box { fill: #ffffff; stroke: #0f766e; stroke-width: 1; }",
+        ".annotation-leader { stroke: #0f766e; stroke-width: 1; fill: none; }",
+        ".annotation-text { fill: #0f172a; }",
         ".muted { fill: #64748b; }",
         "</style>",
     ]
@@ -308,6 +330,17 @@ def _render_trace_svg(view: ViewModel) -> str:
             _append_trace_horizontal_arrow(
                 lines, cell_box(source), cell_box(target), css_class="depends-arrow"
             )
+
+    if annotation_items:
+        _append_trace_annotations(
+            lines,
+            cells,
+            cell_box,
+            phase_span_ids,
+            phase_state_ids,
+            annotation_items,
+            width - right_margin - _TRACE_ANNOTATION_WIDTH,
+        )
 
     lines.append("</svg>")
     return "\n".join(lines)
@@ -601,6 +634,198 @@ def _trace_event_anchor_box(
     return label_x, label_y, label_width, _TRACE_EVENT_LABEL_HEIGHT
 
 
+def _trace_annotation_items(
+    annotations: dict[str, object] | None,
+) -> list[tuple[str, str, str]]:
+    if annotations is None:
+        return []
+    items: list[tuple[str, str, str]] = []
+    for section, kind in (("states", "state"), ("events", "event")):
+        values = annotations.get(section)
+        if not isinstance(values, dict):
+            continue
+        for label, note in values.items():
+            if not isinstance(label, str):
+                continue
+            note_text = _annotation_text(note)
+            if note_text:
+                normalized_label = (
+                    _shorten_trace_label(label)
+                    if kind == "state"
+                    else _shorten_trace_event(label)
+                )
+                items.append((kind, normalized_label, note_text))
+    return items
+
+
+def _annotation_text(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        title = value.get("title")
+        text = value.get("text")
+        parts = [part.strip() for part in (title, text) if isinstance(part, str)]
+        return " ".join(part for part in parts if part)
+    return ""
+
+
+def _append_trace_annotations(
+    lines: list[str],
+    cells: tuple[TraceCell, ...],
+    cell_box,
+    phase_span_ids: set[str],
+    phase_state_ids: set[str],
+    annotations: list[tuple[str, str, str]],
+    fallback_x: float,
+) -> None:
+    targets = _trace_annotation_targets(cells, cell_box, phase_span_ids, phase_state_ids)
+    occupied = [
+        rect
+        for cell_id, rect in targets.items()
+        if cell_id not in phase_state_ids
+    ]
+    placed: list[tuple[float, float, float, float]] = []
+    fallback_y = _TRACE_ANNOTATION_MARGIN
+
+    lines.append('<g class="annotations">')
+    for kind, label, note in annotations:
+        target = targets.get((kind, label))
+        if target is None:
+            continue
+        note_lines = _wrap_annotation(note, 24, 3)
+        box_height = (
+            _TRACE_ANNOTATION_PADDING_Y * 2
+            + len(note_lines) * _TRACE_ANNOTATION_LINE_HEIGHT
+        )
+        box = _choose_annotation_box(
+            target,
+            _TRACE_ANNOTATION_WIDTH,
+            box_height,
+            occupied + placed,
+            fallback_x,
+            fallback_y,
+        )
+        if box[0] == fallback_x:
+            fallback_y = box[1] + box[3] + _TRACE_ANNOTATION_GAP
+        placed.append(box)
+        _append_annotation_box(lines, box, target, note_lines)
+    lines.append("</g>")
+
+
+def _trace_annotation_targets(
+    cells: tuple[TraceCell, ...],
+    cell_box,
+    phase_span_ids: set[str],
+    phase_state_ids: set[str],
+) -> dict[tuple[str, str], tuple[float, float, float, float]]:
+    targets: dict[tuple[str, str], tuple[float, float, float, float]] = {}
+    for cell in cells:
+        if cell.id in phase_state_ids:
+            continue
+        if cell.kind in {"state", "verified_state"} and not _is_trace_phase_label(cell.label):
+            targets[("state", _shorten_trace_label(cell.label))] = _trace_state_anchor_box(
+                cell_box(cell)
+            )
+        elif cell.kind == "event_span" and cell.id not in phase_span_ids:
+            targets[("event", _shorten_trace_event(cell.label))] = _trace_event_anchor_box(
+                cell, cell_box(cell)
+            )
+    return targets
+
+
+def _trace_state_anchor_box(
+    box: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    x, y, width, height = box
+    pad_x = 8
+    box_width = max(10, width - pad_x * 2)
+    box_height = 30
+    box_x = x + pad_x
+    box_y = y + (height - box_height) / 2
+    return box_x, box_y, box_width, box_height
+
+
+def _choose_annotation_box(
+    target: tuple[float, float, float, float],
+    width: float,
+    height: float,
+    occupied: list[tuple[float, float, float, float]],
+    fallback_x: float,
+    fallback_y: float,
+) -> tuple[float, float, float, float]:
+    x, y, w, h = target
+    candidates = [
+        (x + w + _TRACE_ANNOTATION_GAP, y + h / 2 - height / 2, width, height),
+        (x + w / 2 - width / 2, y + h + _TRACE_ANNOTATION_GAP, width, height),
+        (x - width - _TRACE_ANNOTATION_GAP, y + h / 2 - height / 2, width, height),
+        (x + w / 2 - width / 2, y - height - _TRACE_ANNOTATION_GAP, width, height),
+    ]
+    for candidate in candidates:
+        if candidate[0] < _TRACE_ANNOTATION_MARGIN or candidate[1] < _TRACE_ANNOTATION_MARGIN:
+            continue
+        if not any(_rects_overlap(candidate, rect) for rect in occupied):
+            return candidate
+    return fallback_x, fallback_y, width, height
+
+
+def _append_annotation_box(
+    lines: list[str],
+    box: tuple[float, float, float, float],
+    target: tuple[float, float, float, float],
+    note_lines: list[str],
+) -> None:
+    x, y, width, height = box
+    target_x, target_y, target_w, target_h = target
+    box_center_y = y + height / 2
+    target_center_x = target_x + target_w / 2
+    target_center_y = target_y + target_h / 2
+    leader_x = x if x >= target_center_x else x + width
+    lines.extend(
+        [
+            f'<line class="annotation-leader" x1="{leader_x:.1f}" y1="{box_center_y:.1f}" x2="{target_center_x:.1f}" y2="{target_center_y:.1f}" />',
+            f'<rect class="annotation-box" x="{x:.1f}" y="{y:.1f}" width="{width:.1f}" height="{height:.1f}" rx="4" />',
+        ]
+    )
+    for index, line in enumerate(note_lines):
+        text_y = y + _TRACE_ANNOTATION_PADDING_Y + (index + 1) * _TRACE_ANNOTATION_LINE_HEIGHT - 2
+        lines.append(
+            f'<text class="annotation-text" x="{x + _TRACE_ANNOTATION_PADDING_X:.1f}" y="{text_y:.1f}" font-size="10">{_xml_escape(line)}</text>'
+        )
+
+
+def _wrap_annotation(text: str, width: int, max_lines: int) -> list[str]:
+    words = text.split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = word if not current else f"{current} {word}"
+        if len(candidate) <= width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        current = word
+        if len(lines) == max_lines - 1:
+            break
+    if current and len(lines) < max_lines:
+        lines.append(current)
+    if len(lines) == max_lines and words:
+        consumed = " ".join(lines)
+        if len(consumed) < len(text):
+            lines[-1] = lines[-1].rstrip(".") + "..."
+    return lines or [text[:width]]
+
+
+def _rects_overlap(
+    a: tuple[float, float, float, float], b: tuple[float, float, float, float]
+) -> bool:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
+
+
 def _shorten_trace_label(label: str) -> str:
     return label.replace(".State::", ".")
 
@@ -611,6 +836,11 @@ def _shorten_trace_event(label: str) -> str:
 
 def _is_trace_phase_event(label: str) -> bool:
     object_name = label.split(".Event::", 1)[0]
+    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+
+
+def _is_trace_phase_label(label: str) -> bool:
+    object_name = label.split(".", 1)[0]
     return object_name == "StartupTimeline" or object_name.endswith("Phase")
 
 

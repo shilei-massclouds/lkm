@@ -137,6 +137,27 @@ view.json -> text/DOT/SVG/animated SVG
 - 标签显示仍偏工程化，后续可讨论对象名/事件名的简化、分行、对齐和可读性规则。
 - 阶段 lane 间距、`drives` 最大长度、单元宽度、行高等布局参数仍是代码常量，后续可暴露为 render 参数或配置。
 
+`trace` SVG 支持可选 overlay 注释层。base trace 默认不显示注释，启用注释时也不改变底图布局。注释只针对普通对象的 state 和 event，不针对阶段对象。第一版注释数据由外部 JSON 提供，例如：
+
+```json
+{
+  "states": {
+    "Vm.State::Ready": "early virtual address space available"
+  },
+  "events": {
+    "Vm.Event::Setup": "build early mappings"
+  }
+}
+```
+
+注释通过 `render --annotations notes.json` 启用，统一渲染为外部注释块，通过短 leader line 指向目标 state/event 框。放置策略采用半自动插空：程序根据目标框生成右侧、下侧、左侧、上侧等候选位置，检查是否与 state/event 框和已有注释块重叠，选择第一个可用位置；若都不可用，则放到右侧 annotation column。第一版不移动底图元素，不为注释重新排版基础 trace，不做复杂绕线或全局最优布局。后续可扩展注释 JSON 为标题/正文结构，并按需要增加更完整的 annotation layout。
+
+示例命令：
+
+```bash
+PYTHONPATH=tools/pyveri/src python -m pyveri render spec/entry-prelude-object-model.spec trace --format svg --annotations notes.json -o trace.svg
+```
+
 ## 规格语义
 
 - `object` 是推导中的实体单位。
