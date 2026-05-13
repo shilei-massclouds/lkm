@@ -32,6 +32,7 @@ if hasattr(signal, "SIGPIPE"):
 
 
 VIEW_CHOICES = ("object", "drives", "timeline")
+TEXT_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 COMMANDS = frozenset({"parse", "model", "derive", "check", "view", "render"})
 
 
@@ -102,7 +103,12 @@ def _build_command_parser() -> argparse.ArgumentParser:
 
     view_parser = subparsers.add_parser("view", help="print a plain text model view")
     view_parser.add_argument("spec", type=Path, help="path to the .spec input file")
-    view_parser.add_argument("view", choices=VIEW_CHOICES, help="view name")
+    view_parser.add_argument("view", choices=TEXT_VIEW_CHOICES, help="view name")
+    view_parser.add_argument(
+        "--target",
+        default=DEFAULT_TARGET,
+        help=f"target event for trace view, default: {DEFAULT_TARGET}",
+    )
     view_parser.add_argument("-o", "--output", type=Path, help="write the view to a file")
     _add_work_dir_argument(view_parser)
 
@@ -136,7 +142,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="compatibility alias for --text object",
     )
-    parser.add_argument("--text", choices=VIEW_CHOICES, metavar="VIEW", help="print text view")
+    parser.add_argument("--text", choices=TEXT_VIEW_CHOICES, metavar="VIEW", help="print text view")
     parser.add_argument("--graph", choices=VIEW_CHOICES, metavar="VIEW", help="print graph view")
     parser.add_argument(
         "--derive",
@@ -179,7 +185,12 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
 
         selected_outputs: list[str] = []
         derivation_data: dict[str, Any] | None = None
-        needs_derivation = not args.graph or args.derive or args.strict
+        needs_derivation = (
+            not args.graph
+            or args.derive
+            or args.strict
+            or args.text == "trace"
+        )
         if needs_derivation:
             derive_code = _run_derive_stage(paths["model"], paths["derive"], args.target)
             if derive_code != 0:
@@ -195,12 +206,18 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 print(_derive_summary(derivation_data))
 
         if args.tree:
-            selected_outputs.append(_render_view_output(paths["model"], "object", "text", work, args.spec))
+            selected_outputs.append(
+                _render_view_output(paths, "object", "text", work, args.spec)
+            )
         if args.text:
-            selected_outputs.append(_render_view_output(paths["model"], args.text, "text", work, args.spec))
+            selected_outputs.append(
+                _render_view_output(paths, args.text, "text", work, args.spec)
+            )
         if args.graph:
             fmt = "svg" if args.graph == "timeline" else "dot"
-            selected_outputs.append(_render_view_output(paths["model"], args.graph, fmt, work, args.spec))
+            selected_outputs.append(
+                _render_view_output(paths, args.graph, fmt, work, args.spec)
+            )
         if args.derive and derivation_data is not None:
             selected_outputs.append(_derive_report(derivation_data))
 
@@ -288,7 +305,11 @@ def _run_view(args: argparse.Namespace) -> int:
         code = _run_model_stage(paths["ast"], paths["model"])
         if code != 0:
             return code
-        output = _render_view_output(paths["model"], args.view, "text", work, args.spec)
+        if args.view == "trace":
+            code = _ensure_derivation(paths, args.target)
+            if code != 0:
+                return code
+        output = _render_view_output(paths, args.view, "text", work, args.spec)
         if args.output is not None:
             _write_output(args.output, output, ascii_only=False)
         else:
@@ -305,7 +326,7 @@ def _run_render(args: argparse.Namespace) -> int:
         code = _run_model_stage(paths["ast"], paths["model"])
         if code != 0:
             return code
-        output = _render_view_output(paths["model"], args.view, args.format, work, args.spec)
+        output = _render_view_output(paths, args.view, args.format, work, args.spec)
         if args.output is not None:
             _write_output(args.output, output, ascii_only=args.format == "dot")
         else:
@@ -383,12 +404,15 @@ def _stage_env() -> dict[str, str]:
     return env
 
 
-def _render_view_output(model: Path, view_name: str, fmt: str, work: Path, spec: Path) -> str:
+def _render_view_output(
+    paths: dict[str, Path], view_name: str, fmt: str, work: Path, spec: Path
+) -> str:
     stem = spec.stem
     suffix = "gv" if fmt == "dot" else fmt
     view_path = work / f"{stem}.{view_name}.view.json"
     output = work / f"{stem}.{view_name}.{suffix}"
-    view_code = _run_view_stage(model, view_name, view_path)
+    view_input = paths["derive"] if view_name == "trace" else paths["model"]
+    view_code = _run_view_stage(view_input, view_name, view_path)
     if view_code != 0:
         raise SystemExit(view_code)
     render_code = _run_render_stage(view_path, fmt, output)
@@ -396,6 +420,12 @@ def _render_view_output(model: Path, view_name: str, fmt: str, work: Path, spec:
         raise SystemExit(render_code)
     encoding = "ascii" if fmt == "dot" else "utf-8"
     return output.read_text(encoding=encoding)
+
+
+def _ensure_derivation(paths: dict[str, Path], target: str) -> int:
+    if paths["derive"].is_file():
+        return 0
+    return _run_derive_stage(paths["model"], paths["derive"], target)
 
 
 def _pipeline_paths(tmp: Path, spec: Path) -> dict[str, Path]:

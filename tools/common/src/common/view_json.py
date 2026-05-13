@@ -5,7 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from common.schemas import VIEW_SCHEMA, VIEW_VERSION
-from common.view_types import TimelineItem, TimelineRow, ViewEdge, ViewModel, ViewNode
+from common.view_types import (
+    TimelineItem,
+    TimelineRow,
+    TraceArrow,
+    TraceCell,
+    ViewEdge,
+    ViewModel,
+    ViewNode,
+)
 
 
 def view_json_to_view_model(data: dict[str, Any]) -> ViewModel:
@@ -28,6 +36,18 @@ def view_json_to_view_model(data: dict[str, Any]) -> ViewModel:
 
 
 def _metadata_from_json(data: dict[str, Any], view_name: str) -> dict[str, Any]:
+    if view_name == "trace":
+        metadata = dict(data)
+        metadata["trace_cells"] = tuple(
+            _trace_cell_from_json(cell)
+            for cell in _as_list(data.get("trace_cells", []), "trace_cells")
+        )
+        metadata["trace_arrows"] = tuple(
+            _trace_arrow_from_json(arrow)
+            for arrow in _as_list(data.get("trace_arrows", []), "trace_arrows")
+        )
+        return metadata
+
     if view_name != "timeline":
         return data
 
@@ -59,6 +79,28 @@ def _timeline_item_from_json(item: Any) -> TimelineItem:
     return TimelineItem(
         object_name=_string(data, "object_name"),
         detail=_string(data, "detail"),
+        kind=_string(data, "kind"),
+    )
+
+
+def _trace_cell_from_json(item: Any) -> TraceCell:
+    data = _as_object(item, "trace cell")
+    return TraceCell(
+        id=_string(data, "id"),
+        kind=_string(data, "kind"),
+        row=_integer(data, "row"),
+        column=_integer(data, "column"),
+        label=_string(data, "label"),
+        row_span=_integer(data, "row_span"),
+        column_span=_integer(data, "column_span"),
+    )
+
+
+def _trace_arrow_from_json(item: Any) -> TraceArrow:
+    data = _as_object(item, "trace arrow")
+    return TraceArrow(
+        source=_string(data, "source"),
+        target=_string(data, "target"),
         kind=_string(data, "kind"),
     )
 
@@ -99,6 +141,13 @@ def _list(data: dict[str, Any], key: str) -> list[Any]:
 
 def _string(data: dict[str, Any], key: str) -> str:
     return _as_string(data.get(key), key)
+
+
+def _integer(data: dict[str, Any], key: str) -> int:
+    value = data.get(key)
+    if not isinstance(value, int):
+        raise ValueError(f"{key} must be an integer")
+    return value
 
 
 def _as_object(value: Any, name: str) -> dict[str, Any]:

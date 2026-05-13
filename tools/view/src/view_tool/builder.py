@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from common.model_types import EventDef, ObjectModel, StateDef
-from common.view_types import TimelineItem, TimelineRow, ViewEdge, ViewModel, ViewNode
+from common.view_types import (
+    TimelineItem,
+    TimelineRow,
+    TraceArrow,
+    TraceCell,
+    ViewEdge,
+    ViewModel,
+    ViewNode,
+)
 
 
 _OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
@@ -115,6 +124,23 @@ def build_timeline_view(model: ObjectModel) -> ViewModel:
         metadata={
             "timeline_rows": _build_timeline_rows(model, phase_objects),
             "phase_parents": phase_parents,
+        },
+    )
+
+
+def build_trace_view(derive_data: dict[str, Any]) -> ViewModel:
+    """Build a trace layout view from derive JSON."""
+
+    builder = _TraceLayoutBuilder()
+    builder.build(derive_data.get("trace", []))
+    return ViewModel(
+        name="trace",
+        graph_format="text",
+        metadata={
+            "trace_columns": builder.columns,
+            "trace_rows": builder.rows,
+            "trace_cells": tuple(builder.cells),
+            "trace_arrows": tuple(builder.arrows),
         },
     )
 
@@ -307,3 +333,185 @@ def _driven_events(event: EventDef) -> list[tuple[str, str]]:
     for block in event.decl.drives:
         driven.extend(_OBJECT_EVENT_RE.findall(block.body))
     return driven
+
+
+class _TraceLayoutBuilder:
+    def __init__(self) -> None:
+        self.columns: list[dict[str, object]] = []
+        self.rows: list[dict[str, object]] = []
+        self.cells: list[TraceCell] = []
+        self.arrows: list[TraceArrow] = []
+        self._event_index = 0
+        self._max_content_column = 0
+
+    def build(self, roots: list[Any]) -> None:
+        for node in roots:
+            self._place_node(node, content_column=0, parent_event_id=None)
+        self._build_columns()
+
+    def _place_node(
+        self,
+        node: Any,
+        *,
+        content_column: int,
+        parent_event_id: str | None,
+    ) -> None:
+        data = _trace_node_object(node)
+        index = self._event_index
+        self._event_index += 1
+        label = _trace_label(data)
+        event_id = f"event-{index}"
+        enter_id = f"{event_id}-source"
+        exit_id = f"{event_id}-target"
+        span_id = f"{event_id}-span"
+        event_row = len(self.rows)
+        column = content_column * 2
+        gap_column = column + 1
+        self._max_content_column = max(self._max_content_column, content_column)
+
+        self._add_row("state", event_row, f"{label}.source")
+        self.cells.append(
+            TraceCell(
+                id=enter_id,
+                kind="state",
+                row=event_row,
+                column=column,
+                label=f"{data['object']}.State::{data['source_state']}",
+            )
+        )
+        self.cells.append(
+            TraceCell(
+                id=f"{event_id}-vertical-gap-before",
+                kind="gap",
+                row=event_row,
+                column=gap_column,
+            )
+        )
+
+        event_body_start = len(self.rows)
+        self._add_row("gap", event_body_start, f"{label}.body.start")
+        self.cells.append(
+            TraceCell(
+                id=f"{event_id}-body-gap",
+                kind="gap",
+                row=event_body_start,
+                column=column,
+            )
+        )
+        self.cells.append(
+            TraceCell(
+                id=f"{event_id}-drive-gap",
+                kind="gap",
+                row=event_body_start,
+                column=gap_column,
+            )
+        )
+
+        for child in _trace_children(data):
+            child_event_id = f"event-{self._event_index}"
+            self.arrows.append(
+                TraceArrow(source=span_id, target=f"{child_event_id}-span", kind="drives")
+            )
+            self._place_node(
+                child,
+                content_column=content_column + 1,
+                parent_event_id=event_id,
+            )
+
+        event_exit_gap_row = len(self.rows)
+        self._add_row("gap", event_exit_gap_row, f"{label}.body.end")
+        self.cells.append(
+            TraceCell(
+                id=f"{event_id}-body-end-gap",
+                kind="gap",
+                row=event_exit_gap_row,
+                column=column,
+            )
+        )
+        self.cells.append(
+            TraceCell(
+                id=f"{event_id}-drive-end-gap",
+                kind="gap",
+                row=event_exit_gap_row,
+                column=gap_column,
+            )
+        )
+
+        exit_row = len(self.rows)
+        self._add_row("state", exit_row, f"{label}.target")
+        self.cells.append(
+            TraceCell(
+                id=exit_id,
+                kind="state",
+                row=exit_row,
+                column=column,
+                label=f"{data['object']}.State::{data['target_state']}",
+            )
+        )
+        self.cells.append(
+            TraceCell(
+                id=f"{event_id}-vertical-gap-after",
+                kind="gap",
+                row=exit_row,
+                column=gap_column,
+            )
+        )
+
+        self.cells.append(
+            TraceCell(
+                id=span_id,
+                kind="event_span",
+                row=event_body_start,
+                column=column,
+                label=label,
+                row_span=event_exit_gap_row - event_body_start + 1,
+            )
+        )
+        self.arrows.append(TraceArrow(source=enter_id, target=exit_id, kind="state"))
+        if parent_event_id is not None:
+            self.cells.append(
+                TraceCell(
+                    id=f"{parent_event_id}-to-{event_id}-gap",
+                    kind="gap",
+                    row=event_row,
+                    column=gap_column,
+                )
+            )
+
+    def _add_row(self, kind: str, index: int, label: str) -> None:
+        self.rows.append({"index": index, "kind": kind, "label": label})
+
+    def _build_columns(self) -> None:
+        for content_column in range(self._max_content_column + 1):
+            self.columns.append(
+                {
+                    "index": content_column * 2,
+                    "kind": "content",
+                    "depth": content_column,
+                }
+            )
+            self.columns.append(
+                {
+                    "index": content_column * 2 + 1,
+                    "kind": "gap",
+                    "depth": content_column,
+                }
+            )
+
+
+def _trace_node_object(node: Any) -> dict[str, Any]:
+    if not isinstance(node, dict):
+        raise ValueError("trace node must be an object")
+    return node
+
+
+def _trace_children(node: dict[str, Any]) -> list[Any]:
+    children = node.get("children", [])
+    return children if isinstance(children, list) else []
+
+
+def _trace_label(node: dict[str, Any]) -> str:
+    label = node.get("label")
+    if isinstance(label, str):
+        return label
+    return f"{node.get('object')}.Event::{node.get('event')}"

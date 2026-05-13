@@ -8,6 +8,7 @@ from pathlib import Path
 
 from model_tool.__main__ import main as model_main
 from parse_tool.__main__ import main as parse_main
+from derive_tool.__main__ import main as derive_main
 from render_tool.__main__ import main as render_main
 from view_tool.__main__ import main as view_main
 
@@ -26,7 +27,12 @@ class RenderToolTests(unittest.TestCase):
         view = Path(tmp) / f"entry-prelude-object-model.{view_name}.view.json"
         self.assertEqual(parse_main([str(self.spec), "-o", str(ast)]), 0)
         self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
-        self.assertEqual(view_main([str(model), view_name, "-o", str(view)]), 0)
+        view_input = model
+        if view_name == "trace":
+            derive = Path(tmp) / "entry-prelude-object-model.derive.json"
+            self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
+            view_input = derive
+        self.assertEqual(view_main([str(view_input), view_name, "-o", str(view)]), 0)
         return view
 
     def test_render_text_to_stdout(self) -> None:
@@ -67,6 +73,22 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("<svg", text)
             self.assertIn("PreparePhase", text)
             self.assertIn("BootPhase", text)
+
+    def test_render_text_from_trace_view(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._build_view_json(tmp, "trace")
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = render_main([str(view), "--format", "text"])
+
+            self.assertEqual(exit_code, 0)
+            text = stdout.getvalue()
+            self.assertIn("trace view:", text)
+            self.assertIn("columns:", text)
+            self.assertIn("StartupTimeline.Event::Setup", text)
+            self.assertIn("[drives]", text)
 
     def test_svg_requires_timeline_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

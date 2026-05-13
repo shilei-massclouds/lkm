@@ -46,6 +46,28 @@ class TimelineRow:
 
 
 @dataclass(frozen=True)
+class TraceCell:
+    """One occupied or empty cell in a trace layout grid."""
+
+    id: str
+    kind: str
+    row: int
+    column: int
+    label: str = ""
+    row_span: int = 1
+    column_span: int = 1
+
+
+@dataclass(frozen=True)
+class TraceArrow:
+    """A semantic arrow between trace layout cells."""
+
+    source: str
+    target: str
+    kind: str
+
+
+@dataclass(frozen=True)
 class ViewModel:
     """A renderable model view."""
 

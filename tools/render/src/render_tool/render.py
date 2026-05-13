@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from common.view_types import TimelineItem, TimelineRow, ViewEdge, ViewModel, ViewNode
+from common.view_types import (
+    TimelineItem,
+    TimelineRow,
+    TraceArrow,
+    TraceCell,
+    ViewEdge,
+    ViewModel,
+    ViewNode,
+)
 
 
 def render_view(view: ViewModel, fmt: str) -> str:
@@ -24,6 +32,8 @@ def render_text(view: ViewModel) -> str:
         return _render_drives_text(view)
     if view.name == "timeline":
         return _render_timeline_text(view)
+    if view.name == "trace":
+        return _render_trace_text(view)
 
     lines = [f"{view.name} view:"]
     for node in view.nodes.values():
@@ -224,6 +234,42 @@ def _render_timeline_text(view: ViewModel) -> str:
     return "\n".join(lines)
 
 
+def _render_trace_text(view: ViewModel) -> str:
+    lines = [f"{view.name} view:"]
+    columns = _trace_columns(view)
+    rows = _trace_rows(view)
+    cells = sorted(_trace_cells(view), key=lambda cell: (cell.row, cell.column, cell.id))
+    arrows = _trace_arrows(view)
+
+    lines.append(f"columns: {len(columns)}")
+    for column in columns:
+        lines.append(
+            f"  col {column.get('index')}: {column.get('kind')} depth={column.get('depth')}"
+        )
+
+    lines.append(f"rows: {len(rows)}")
+    for row in rows:
+        lines.append(
+            f"  row {row.get('index')}: {row.get('kind')} {row.get('label')}"
+        )
+
+    lines.append("cells:")
+    for cell in cells:
+        span = ""
+        if cell.row_span != 1 or cell.column_span != 1:
+            span = f" span={cell.row_span}x{cell.column_span}"
+        label = f" {cell.label}" if cell.label else ""
+        lines.append(
+            f"  r{cell.row} c{cell.column} {cell.kind} {cell.id}{span}{label}"
+        )
+
+    if arrows:
+        lines.append("arrows:")
+        for arrow in arrows:
+            lines.append(f"  {arrow.source} -> {arrow.target} [{arrow.kind}]")
+    return "\n".join(lines)
+
+
 def _timeline_phase_order(view: ViewModel, phase_id: str) -> int:
     return _timeline_phase_order_from_id(phase_id)
 
@@ -255,6 +301,26 @@ def _timeline_rows(view: ViewModel) -> tuple[TimelineRow, ...]:
 def _phase_parents(view: ViewModel) -> dict[str, str | None]:
     parents = view.metadata.get("phase_parents", {})
     return parents if isinstance(parents, dict) else {}
+
+
+def _trace_columns(view: ViewModel) -> list[dict[str, object]]:
+    columns = view.metadata.get("trace_columns", [])
+    return columns if isinstance(columns, list) else []
+
+
+def _trace_rows(view: ViewModel) -> list[dict[str, object]]:
+    rows = view.metadata.get("trace_rows", [])
+    return rows if isinstance(rows, list) else []
+
+
+def _trace_cells(view: ViewModel) -> tuple[TraceCell, ...]:
+    cells = view.metadata.get("trace_cells", ())
+    return cells if isinstance(cells, tuple) else ()
+
+
+def _trace_arrows(view: ViewModel) -> tuple[TraceArrow, ...]:
+    arrows = view.metadata.get("trace_arrows", ())
+    return arrows if isinstance(arrows, tuple) else ()
 
 
 def _timeline_row_height(

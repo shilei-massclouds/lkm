@@ -84,6 +84,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("object view:", stdout.getvalue())
 
+    def test_view_trace_command_prints_debug_layout(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(["view", str(self.spec), "trace"])
+
+        self.assertEqual(exit_code, 0)
+        text = stdout.getvalue()
+        self.assertIn("trace view:", text)
+        self.assertIn("columns:", text)
+        self.assertIn("StartupTimeline.Event::Setup", text)
+
     def test_render_command_writes_ascii_dot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "object.gv"
