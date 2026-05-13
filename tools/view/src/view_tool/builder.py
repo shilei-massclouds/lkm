@@ -351,6 +351,8 @@ class _TraceLayoutBuilder:
         verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
     ) -> None:
         for node in roots:
+            if _should_skip_trace_node(node, verified_states_by_event):
+                continue
             self._place_node(
                 node,
                 content_column=0,
@@ -424,13 +426,13 @@ class _TraceLayoutBuilder:
             )
         )
 
-        verified_content_column = content_column + 1
-        child_content_column = content_column + 2
-        verified_column = verified_content_column * 2
-        verified_gap_column = verified_column + 1
         verified_states = verified_states_by_event.get(
             (str(data["object"]), str(data["event"])), []
         )
+        verified_content_column = content_column + 1
+        child_content_column = content_column + (2 if verified_states else 1)
+        verified_column = verified_content_column * 2
+        verified_gap_column = verified_column + 1
         if verified_states:
             self._max_content_column = max(
                 self._max_content_column, verified_content_column
@@ -461,6 +463,8 @@ class _TraceLayoutBuilder:
             )
 
         for child in _trace_children(data):
+            if _should_skip_trace_node(child, verified_states_by_event):
+                continue
             child_event_id = f"event-{self._event_index}"
             self.arrows.append(
                 TraceArrow(source=span_id, target=f"{child_event_id}-span", kind="drives")
@@ -583,6 +587,25 @@ def _trace_label(node: dict[str, Any]) -> str:
     if isinstance(label, str):
         return label
     return f"{node.get('object')}.Event::{node.get('event')}"
+
+
+def _should_skip_trace_node(
+    node: Any, verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]]
+) -> bool:
+    data = _trace_node_object(node)
+    object_name = data.get("object")
+    event_name = data.get("event")
+    if not isinstance(object_name, str) or not isinstance(event_name, str):
+        return False
+    if not _is_trace_phase_object(object_name):
+        return False
+    if _trace_children(data):
+        return False
+    return not verified_states_by_event.get((object_name, event_name))
+
+
+def _is_trace_phase_object(object_name: str) -> bool:
+    return object_name == "StartupTimeline" or object_name.endswith("Phase")
 
 
 def _verified_states_by_event(

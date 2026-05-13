@@ -13,6 +13,12 @@ from common.view_types import (
 )
 
 
+_TRACE_DRIVE_ARROW_MAX_LENGTH = 81
+_TRACE_EVENT_LABEL_PAD_X = 8
+_TRACE_EVENT_LABEL_HEIGHT = 22
+_TRACE_PHASE_LANE_STEP = 84
+
+
 def render_view(view: ViewModel, fmt: str) -> str:
     """Render a view model with the requested output format."""
 
@@ -220,7 +226,6 @@ def _render_trace_svg(view: ViewModel) -> str:
         for arrow in arrows
         if arrow.kind == "state" and _trace_event_id(arrow.source) in phase_span_ids
     }
-
     def cell_box(cell: TraceCell) -> tuple[float, float, float, float]:
         x = left_margin + sum(
             column_metrics[index][1]
@@ -243,6 +248,8 @@ def _render_trace_svg(view: ViewModel) -> str:
             if index in row_metrics
         )
         return x, y, w, h
+
+    phase_lane_x_by_column = _trace_phase_lane_x_by_column(cells, cell_box)
 
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -277,7 +284,12 @@ def _render_trace_svg(view: ViewModel) -> str:
 
     for cell in cells:
         if cell.kind == "event_span" and cell.id in phase_span_ids:
-            _append_trace_phase_event(lines, cell, cell_box(cell))
+            _append_trace_phase_event(
+                lines,
+                cell,
+                cell_box(cell),
+                arrow_x=phase_lane_x_by_column.get(cell.column),
+            )
         elif cell.kind == "event_span":
             _append_trace_event_label(lines, cell, cell_box(cell))
 
@@ -294,7 +306,11 @@ def _render_trace_svg(view: ViewModel) -> str:
             if _is_phase_to_phase_arrow(source, target):
                 continue
             _append_trace_horizontal_arrow(
-                lines, cell_box(source), cell_box(target), css_class="drive-arrow"
+                lines,
+                _trace_event_anchor_box(source, cell_box(source)),
+                _trace_event_anchor_box(target, cell_box(target)),
+                css_class="drive-arrow",
+                max_length=_TRACE_DRIVE_ARROW_MAX_LENGTH,
             )
         elif arrow.kind == "depends_on":
             _append_trace_horizontal_arrow(
@@ -494,23 +510,27 @@ def _append_trace_event_label(
     lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
 ) -> None:
     x, y, width, height = box
-    label_width = max(10, width - 16)
-    label_height = 22
-    label_x = x + 8
-    label_y = y + max(6, min(14, height / 2 - label_height / 2))
+    label_width = max(10, width - _TRACE_EVENT_LABEL_PAD_X * 2)
+    label_x = x + _TRACE_EVENT_LABEL_PAD_X
+    label_y = y + (height - _TRACE_EVENT_LABEL_HEIGHT) / 2
     lines.extend(
         [
-            f'<rect class="event-label" x="{label_x:.1f}" y="{label_y:.1f}" width="{label_width:.1f}" height="{label_height:.1f}" rx="4" />',
+            f'<rect class="event-label" x="{label_x:.1f}" y="{label_y:.1f}" width="{label_width:.1f}" height="{_TRACE_EVENT_LABEL_HEIGHT:.1f}" rx="4" />',
             f'<text class="muted" x="{label_x + label_width / 2:.1f}" y="{label_y + 15:.1f}" font-size="10" text-anchor="middle">{_xml_escape(_shorten_trace_event(cell.label))}</text>',
         ]
     )
 
 
 def _append_trace_phase_event(
-    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+    lines: list[str],
+    cell: TraceCell,
+    box: tuple[float, float, float, float],
+    *,
+    arrow_x: float | None = None,
 ) -> None:
     x, y, width, height = box
-    arrow_x = x + width / 2
+    if arrow_x is None:
+        arrow_x = x + width / 2
     y1 = y + height - 8
     y2 = y + 8
     if y1 <= y2:
@@ -550,6 +570,7 @@ def _append_trace_horizontal_arrow(
     target_box: tuple[float, float, float, float],
     *,
     css_class: str,
+    max_length: float | None = None,
 ) -> None:
     source_x, source_y, source_w, source_h = source_box
     target_x, target_y, _target_w, target_h = target_box
@@ -559,9 +580,24 @@ def _append_trace_horizontal_arrow(
     if x2 <= x1:
         y = source_y + source_h / 2
         x2 = target_x
+    elif max_length is not None and x2 - x1 > max_length:
+        x1 = x2 - max_length
     lines.append(
         f'<line class="{css_class}" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
     )
+
+
+def _trace_event_anchor_box(
+    cell: TraceCell, box: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    if cell.kind != "event_span" or _is_trace_phase_event(cell.label):
+        return box
+    x, y, width, height = box
+    label_width = max(10, width - 16)
+    label_height = 22
+    label_x = x + 8
+    label_y = y + (height - label_height) / 2
+    return label_x, label_y, label_width, label_height
 
 
 def _shorten_trace_label(label: str) -> str:
@@ -570,6 +606,30 @@ def _shorten_trace_label(label: str) -> str:
 
 def _shorten_trace_event(label: str) -> str:
     return label.replace(".Event::", ".")
+
+
+def _trace_phase_lane_x_by_column(
+    cells: tuple[TraceCell, ...],
+    cell_box,
+) -> dict[int, float]:
+    phase_cells = [
+        cell
+        for cell in cells
+        if cell.kind == "event_span" and _is_trace_phase_event(cell.label)
+    ]
+    columns = sorted({cell.column for cell in phase_cells})
+    if not columns:
+        return {}
+    base_column = columns[0]
+    base_x = min(
+        cell_box(cell)[0] + cell_box(cell)[2] / 2
+        for cell in phase_cells
+        if cell.column == base_column
+    )
+    return {
+        column: base_x + index * _TRACE_PHASE_LANE_STEP
+        for index, column in enumerate(columns)
+    }
 
 
 def _is_trace_phase_event(label: str) -> bool:

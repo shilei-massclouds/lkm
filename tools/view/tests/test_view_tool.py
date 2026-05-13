@@ -139,6 +139,29 @@ class ViewToolTests(unittest.TestCase):
                 and cell["label"] == "PreparePhase.Event::Setup"
             )
             self.assertGreater(riscv64_cell["column"], prepare_setup_cell["column"])
+            self.assertFalse(
+                any(
+                    cell["kind"] == "event_span"
+                    and cell["label"] == "PreparePhase.Event::Enable"
+                    for cell in metadata["trace_cells"]
+                )
+            )
+            boot_setup_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "event_span"
+                and cell["label"] == "BootPhase.Event::Setup"
+            )
+            entry_prelude_setup_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "event_span"
+                and cell["label"] == "EntryPreludePhase.Event::Setup"
+            )
+            self.assertEqual(boot_setup_cell["column"], prepare_setup_cell["column"])
+            self.assertEqual(
+                entry_prelude_setup_cell["column"], boot_setup_cell["column"] + 2
+            )
             prepare_ready_cells = [
                 cell
                 for cell in metadata["trace_cells"]

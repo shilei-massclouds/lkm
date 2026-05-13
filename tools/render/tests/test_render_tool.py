@@ -103,6 +103,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("<svg", text)
             self.assertIn("StartupTimeline.Setup", text)
             self.assertIn("PreparePhase.Setup", text)
+            self.assertNotIn("PreparePhase.Enable", text)
             self.assertIn("phase-arrow", text)
             self.assertIn('marker id="dot"', text)
             self.assertIn("Riscv64.Online", text)
