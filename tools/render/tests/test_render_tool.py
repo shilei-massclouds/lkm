@@ -94,6 +94,14 @@ class RenderToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertIn("error: cannot render view JSON", stderr.getvalue())
 
+    def test_render_tool_does_not_import_pyveri(self) -> None:
+        source_root = Path(__file__).resolve().parents[1] / "src" / "render_tool"
+
+        for path in source_root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("from pyveri", text, str(path))
+            self.assertNotIn("import pyveri", text, str(path))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -71,13 +71,13 @@ PYTHONPATH=tools/common/src:tools/model/src python -m model_tool tools/build/ent
 PYTHONPATH=tools/common/src:tools/derive/src python -m derive_tool tools/build/entry-prelude-object-model.model.json -o tools/build/entry-prelude-object-model.derive.json
 PYTHONPATH=tools/common/src:tools/check/src python -m check_tool tools/build/entry-prelude-object-model.derive.json -o tools/build/entry-prelude-object-model.check.json
 PYTHONPATH=tools/common/src:tools/view/src python -m view_tool tools/build/entry-prelude-object-model.model.json object -o tools/build/entry-prelude-object-model.object.view.json
-PYTHONPATH=tools/common/src:tools/render/src:tools/pyveri/src python -m render_tool tools/build/entry-prelude-object-model.object.view.json --format dot -o tools/build/entry-prelude-object-model.object.gv
+PYTHONPATH=tools/common/src:tools/render/src python -m render_tool tools/build/entry-prelude-object-model.object.view.json --format dot -o tools/build/entry-prelude-object-model.object.gv
 PYTHONPATH=tools/common/src:tools/parse/src python -m unittest discover -s tools/parse/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src python -m unittest discover -s tools/model/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/derive/src python -m unittest discover -s tools/derive/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/derive/src:tools/check/src:tools/pyveri/src python -m unittest discover -s tools/check/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src python -m unittest discover -s tools/view/tests
-PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src:tools/render/src:tools/pyveri/src python -m unittest discover -s tools/render/tests
+PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src:tools/render/src python -m unittest discover -s tools/render/tests
 ```
 
 未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查，并输出默认推导摘要；使用 `--derive` 时输出完整推导报告。默认情况下，推导结果为 `blocked` 仍返回 0，便于查看报告；需要把未达目标作为命令失败时使用 `--strict`。
