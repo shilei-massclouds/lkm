@@ -242,14 +242,16 @@ def _render_trace_svg(view: ViewModel) -> str:
         "text { font-family: Arial, sans-serif; fill: #1f2937; }",
         ".state { fill: #ffffff; stroke: #334155; stroke-width: 1.1; }",
         ".event-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
+        ".verified-state { fill: #f8fafc; stroke: #64748b; stroke-width: 1.1; }",
         ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-end: url(#arrow); }",
         ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-end: url(#arrow); }",
+        ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-end: url(#arrow); }",
         ".muted { fill: #64748b; }",
         "</style>",
     ]
 
     for cell in cells:
-        if cell.kind == "state":
+        if cell.kind in {"state", "verified_state"}:
             _append_trace_state_cell(lines, cell, cell_box(cell))
 
     for cell in cells:
@@ -264,7 +266,13 @@ def _render_trace_svg(view: ViewModel) -> str:
         if arrow.kind == "state":
             _append_trace_state_arrow(lines, cell_box(source), cell_box(target))
         elif arrow.kind == "drives":
-            _append_trace_drive_arrow(lines, cell_box(source), cell_box(target))
+            _append_trace_horizontal_arrow(
+                lines, cell_box(source), cell_box(target), css_class="drive-arrow"
+            )
+        elif arrow.kind == "depends_on":
+            _append_trace_horizontal_arrow(
+                lines, cell_box(source), cell_box(target), css_class="depends-arrow"
+            )
 
     lines.append("</svg>")
     return "\n".join(lines)
@@ -439,9 +447,10 @@ def _append_trace_state_cell(
     box_y = y + (height - box_height) / 2
     center_x = box_x + box_width / 2
     center_y = box_y + box_height / 2
+    css_class = "verified-state" if cell.kind == "verified_state" else "state"
     lines.extend(
         [
-            f'<rect class="state" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="4" />',
+            f'<rect class="{css_class}" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="4" />',
             f'<text x="{center_x:.1f}" y="{center_y + 4:.1f}" font-size="11" text-anchor="middle">{_xml_escape(_shorten_trace_label(cell.label))}</text>',
         ]
     )
@@ -481,10 +490,12 @@ def _append_trace_state_arrow(
     )
 
 
-def _append_trace_drive_arrow(
+def _append_trace_horizontal_arrow(
     lines: list[str],
     source_box: tuple[float, float, float, float],
     target_box: tuple[float, float, float, float],
+    *,
+    css_class: str,
 ) -> None:
     source_x, source_y, source_w, source_h = source_box
     target_x, target_y, _target_w, target_h = target_box
@@ -495,7 +506,7 @@ def _append_trace_drive_arrow(
         y = source_y + source_h / 2
         x2 = target_x
     lines.append(
-        f'<line class="drive-arrow" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
+        f'<line class="{css_class}" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
     )
 
 

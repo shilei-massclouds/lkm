@@ -103,6 +103,8 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("<svg", text)
             self.assertIn("StartupTimeline.Setup", text)
             self.assertIn("PreparePhase.Setup", text)
+            self.assertIn("Riscv64.Online", text)
+            self.assertIn("depends-arrow", text)
 
     def test_svg_requires_timeline_or_trace_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

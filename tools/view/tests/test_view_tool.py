@@ -113,6 +113,19 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(arrow["kind"] == "drives" for arrow in metadata["trace_arrows"])
             )
+            self.assertTrue(
+                any(
+                    arrow["kind"] == "depends_on"
+                    for arrow in metadata["trace_arrows"]
+                )
+            )
+            self.assertTrue(
+                any(
+                    cell["kind"] == "verified_state"
+                    and cell["label"] == "Riscv64.State::Online"
+                    for cell in metadata["trace_cells"]
+                )
+            )
             prepare_ready_cells = [
                 cell
                 for cell in metadata["trace_cells"]

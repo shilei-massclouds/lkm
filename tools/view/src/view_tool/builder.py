@@ -132,7 +132,8 @@ def build_trace_view(derive_data: dict[str, Any]) -> ViewModel:
     """Build a trace layout view from derive JSON."""
 
     builder = _TraceLayoutBuilder()
-    builder.build(derive_data.get("trace", []))
+    roots = derive_data.get("trace", [])
+    builder.build(roots, _verified_states_by_event(derive_data, roots))
     return ViewModel(
         name="trace",
         graph_format="text",
@@ -344,9 +345,18 @@ class _TraceLayoutBuilder:
         self._event_index = 0
         self._max_content_column = 0
 
-    def build(self, roots: list[Any]) -> None:
+    def build(
+        self,
+        roots: list[Any],
+        verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
+    ) -> None:
         for node in roots:
-            self._place_node(node, content_column=0, parent_event_id=None)
+            self._place_node(
+                node,
+                content_column=0,
+                parent_event_id=None,
+                verified_states_by_event=verified_states_by_event,
+            )
         self._build_columns()
 
     def _place_node(
@@ -355,6 +365,7 @@ class _TraceLayoutBuilder:
         *,
         content_column: int,
         parent_event_id: str | None,
+        verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
     ) -> None:
         data = _trace_node_object(node)
         index = self._event_index
@@ -413,6 +424,40 @@ class _TraceLayoutBuilder:
             )
         )
 
+        verified_column = (content_column + 1) * 2
+        verified_gap_column = verified_column + 1
+        verified_states = verified_states_by_event.get(
+            (str(data["object"]), str(data["event"])), []
+        )
+        if verified_states:
+            self._max_content_column = max(
+                self._max_content_column, content_column + 1
+            )
+        for verified_index, (object_name, state_name) in enumerate(verified_states):
+            verified_id = f"{event_id}-verified-{verified_index}"
+            verified_row = len(self.rows)
+            self._add_row("state", verified_row, f"{label}.verified.{object_name}")
+            self.cells.append(
+                TraceCell(
+                    id=verified_id,
+                    kind="verified_state",
+                    row=verified_row,
+                    column=verified_column,
+                    label=f"{object_name}.State::{state_name}",
+                )
+            )
+            self.cells.append(
+                TraceCell(
+                    id=f"{verified_id}-gap",
+                    kind="gap",
+                    row=verified_row,
+                    column=verified_gap_column,
+                )
+            )
+            self.arrows.append(
+                TraceArrow(source=span_id, target=verified_id, kind="depends_on")
+            )
+
         for child in _trace_children(data):
             child_event_id = f"event-{self._event_index}"
             self.arrows.append(
@@ -422,6 +467,7 @@ class _TraceLayoutBuilder:
                 child,
                 content_column=content_column + 1,
                 parent_event_id=event_id,
+                verified_states_by_event=verified_states_by_event,
             )
 
         event_exit_gap_row = len(self.rows)
@@ -535,3 +581,57 @@ def _trace_label(node: dict[str, Any]) -> str:
     if isinstance(label, str):
         return label
     return f"{node.get('object')}.Event::{node.get('event')}"
+
+
+def _verified_states_by_event(
+    derive_data: dict[str, Any], roots: list[Any]
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    transitioned_objects = _trace_transitioned_objects(roots)
+    seen_states: set[tuple[str, str]] = set()
+    verified: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for record in derive_data.get("records", []):
+        if not isinstance(record, dict):
+            continue
+        if record.get("status") != "proved":
+            continue
+        message = record.get("message")
+        if not isinstance(message, str) or not message.startswith("depends_on: "):
+            continue
+        expression = record.get("expression")
+        if not isinstance(expression, str):
+            continue
+        match = _OBJECT_STATE_RE.search(expression)
+        if match is None:
+            continue
+
+        object_name, state_name = match.group(1), match.group(2)
+        if object_name in transitioned_objects:
+            continue
+        state_key = (object_name, state_name)
+        if state_key in seen_states:
+            continue
+        event_object = record.get("object")
+        event_name = record.get("event")
+        if not isinstance(event_object, str) or not isinstance(event_name, str):
+            continue
+
+        seen_states.add(state_key)
+        verified.setdefault((event_object, event_name), []).append(state_key)
+    return verified
+
+
+def _trace_transitioned_objects(roots: list[Any]) -> set[str]:
+    objects: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        object_name = node.get("object")
+        if isinstance(object_name, str):
+            objects.add(object_name)
+        for child in _trace_children(node):
+            visit(child)
+
+    for root in roots:
+        visit(root)
+    return objects
