@@ -430,12 +430,13 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - 已建立 `tools/render` 独立阶段工具，当前已迁出 text、DOT 和 SVG 渲染逻辑并脱离 `pyveri` 包依赖，可读取 `view.json` 并输出 text、DOT 或 SVG。
 - `render` 后续可继续拆分为 renderer host 和格式插件。
 - `pyveri` 已收敛为 driver，当前通过子进程调度 `parse`、`model`、`derive`、`check`、`view`、`render` 独立工具，并保留旧 CLI 输出兼容。默认使用临时目录保存中间文件；传入 `--work-dir` 时会把本次流水线生成的中间文件保留在指定目录。
+- `tools/pyveri/src/pyveri/` 中的 `ast`、`parser`、`model`、`derive` 和 `view` 当前只作为兼容转发层存在；阶段逻辑已迁入并列工具目录。独立阶段源码目录应保持不依赖 `pyveri` 包。
 
 后续需要继续推进到独立工具形态：
 
 - 明确 `common` 公共库的边界和中间文件 schema。
 - 按上述阶段工具职责细化中间文件 schema 和退出码。
-- 将当前 `tools/pyveri/src/pyveri/` 中的阶段逻辑逐步迁移到并列工具目录。
+- 维护工具链边界测试，防止独立阶段重新依赖 `pyveri` 包。
 - 在已支持 `--work-dir` 持久中间文件目录的基础上，继续补缓存策略和增量重建判断。
 
 第一版中间产物可以先落在：
