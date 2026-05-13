@@ -312,9 +312,9 @@ tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --trace-svg trace.s
 第一版命令形式：
 
 ```bash
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive --strict
+tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec
+tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --trace-svg trace.svg
+tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --trace-svg trace.svg --trace-annotations state,event
 ```
 
 默认目标：
@@ -331,14 +331,26 @@ StartupTimeline.Event::Setup
 --strict
 ```
 
-当前 CLI 已支持 `--derive`、`--target` 和 `--strict`。默认推导摘要即使为 `blocked` 也返回 0，`--strict` 用于把未达目标的推导结果作为命令失败处理。
+当前主入口是 `tools/pyveri/bin/pyveri`。默认执行完整流水线：
+
+```text
+parse -> model -> derive -> check
+```
+
+默认输出解析、建模、推导和检查摘要；`check` 负责最终退出码。`--derive` 仍作为兼容参数保留，用于输出完整推导报告。`parse`、`model`、`derive`、`check`、`view` 和 `render` 子命令继续保留，用于单独调试阶段工具。
+
+trace SVG 输出通过 driver 参数启用：
+
+- `--trace-svg <path>`：在完整推导验证通过后输出基础 trace SVG。
+- `--trace-annotations state|event|state,event`：在基础 trace SVG 上叠加来自 `.spec` 注释的 state/event 注释层。该参数必须与 `--trace-svg` 一起使用。
 
 后续 CLI 改进：
 
-- 将 `--derive` 行为改为默认行为。当前默认命令已经输出推导摘要，但完整推导报告仍需要显式 `--derive`；后续应让 `python -m pyveri <spec>` 默认执行完整推导，并用参数选择只解析、只建模或只输出视图。
-- 保留显式子命令或参数用于工具链阶段，例如 `parse`、`model`、`derive`、`view`、`render`，避免默认行为变复杂后难以单独调试。
+- 进一步梳理默认摘要、完整报告和调试视图的参数边界，避免默认输出过吵。
+- 增加结构化输出参数，例如 `--format json`，用于导出机器可读摘要。
+- 继续保留显式子命令或参数用于工具链阶段，避免默认行为变复杂后难以单独调试。
 
-当前主开发环境已经迁移到 WSL2/Linux；文档和日常命令优先使用 `/` 路径分隔符、`PYTHONPATH=... command` 环境变量形式和 `sh tools/pyveri/bin/pyveri ...` 本地脚本。Windows PowerShell 命令作为兼容旧环境保留。
+当前主开发环境已经迁移到 WSL2/Linux；文档和日常命令优先使用 `/` 路径分隔符和 `tools/pyveri/bin/pyveri ...` 本地脚本。`PYTHONPATH=... python -m pyveri ...` 形式主要作为开发调试或测试命令保留。Windows PowerShell 命令作为兼容旧环境保留。
 
 ### 5.1 Next Execution Plan
 
@@ -423,6 +435,15 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - 对 `blocked` 输出根因链，而不是只输出逐层传播的 blocked。
 - 在摘要中区分“目标已达但存在 obligation”和“目标未达”。
 - 增加 `--format json`，为后续工具链中间产物做准备。
+
+#### Step C.1: 收口 trace 输出和注释数据流
+
+当前 trace SVG 已能作为基础推导过程图输出，并支持来自 `.spec` 注释的 overlay 注释层。下一步需要把已经暴露的问题收口：
+
+- 预览输出文件不要散落在仓库根目录。`pyveri-cli-trace.svg`、`trace.svg` 这类临时输出应删除，或统一输出到明确目录；后续默认建议使用 `tools/out/` 或命令显式指定路径。
+- 当前 `.spec` 注释由 `pyveri` driver 临时读取并转换成 render 可用的 annotation JSON。长期更合理的数据流是：`parse` 保留注释 span/内容，`model` 或 `view` 按对象状态和事件关联注释，`render` 只消费 `view.json` 或明确的 annotation 输入。
+- trace 注释第一版保持 overlay，不改变底图布局；后续如果注释过密，再讨论更完整的注释布局、标题/正文结构和过滤策略。
+- 基础 trace 图仍需继续改进：`depends_on` 虚线是否改成靠近目标端的短线，完整图是否分段/折叠/分页，标签是否简化和自动分行，以及布局常量是否暴露为 render 参数。
 
 #### Step D: 工具链拆分
 
