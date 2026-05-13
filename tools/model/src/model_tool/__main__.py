@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 from common import read_json, write_json
-from pyveri.model import build_model
 
 from .ast_json import ast_json_to_document
+from .builder import build_model
 from .model_json import build_result_to_model_json
 
 

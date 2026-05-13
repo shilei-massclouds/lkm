@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from common import MODEL_SCHEMA, MODEL_VERSION
-from pyveri.ast import Block, EnumDecl, FunctionDecl, PredicateDecl, SourceSpan, TypeDecl
-from pyveri.model import BuildResult, Diagnostic, EventDef, ObjectDef, StateDef
+from common.model_types import BuildResult, Diagnostic, EventDef, ObjectDef, StateDef
+from common.spec_ast import Block, EnumDecl, FunctionDecl, PredicateDecl, SourceSpan, TypeDecl
 
 
 def build_result_to_model_json(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from common import AST_SCHEMA, AST_VERSION
-from pyveri.ast import (
+from common.spec_ast import (
     Block,
     EnumDecl,
     EventDecl,
