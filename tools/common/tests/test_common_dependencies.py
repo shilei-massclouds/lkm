@@ -11,6 +11,8 @@ class CommonDependencyTests(unittest.TestCase):
             source_root / "spec_ast.py",
             source_root / "model_types.py",
             source_root / "model_json.py",
+            source_root / "derive_types.py",
+            source_root / "defaults.py",
         ]
 
         for path in paths:

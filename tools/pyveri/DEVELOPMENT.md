@@ -416,12 +416,12 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 独立工具链第一步已开始落地：
 
-- 已建立 `tools/common` 公共库骨架，包含 AST/model/derive/check/view schema 标识、JSON 读写辅助、共享 AST 类型、共享模型类型和共享的 `model.json` 反序列化逻辑。`common.model_json` 已脱离 `pyveri` 包依赖。
+- 已建立 `tools/common` 公共库骨架，包含 AST/model/derive/check/view schema 标识、JSON 读写辅助、共享 AST 类型、共享模型类型、共享推导结果类型、默认 target 和共享的 `model.json` 反序列化逻辑。`common.model_json` 已脱离 `pyveri` 包依赖。
 - 已建立 `tools/parse` 独立阶段工具，当前已迁出 parser 逻辑并脱离 `pyveri` 包依赖，可把 `.spec` 输出为 `ast.json`。
 - `ast.json` 已包含 `schema`、`version`、`source`、语法树节点、block entry 和源码行号 span。
 - 已建立 `tools/model` 独立阶段工具，当前已迁出 model builder 逻辑并脱离 `pyveri` 包依赖，可读取 `ast.json` 并输出索引化的 `model.json`。
 - `model.json` 已包含 `schema`、`version`、`source`、summary、diagnostics、对象/状态/事件索引、children 和源码行号 span。
-- 已建立 `tools/derive` 独立阶段工具，当前可读取 `model.json` 并输出结构化 `derive.json`。
+- 已建立 `tools/derive` 独立阶段工具，当前可读取 `model.json` 并输出结构化 `derive.json`；推导结果类型已迁入 `common`，推导引擎逻辑仍待迁出。
 - `derive.json` 已包含 `schema`、`version`、`source`、target、summary、最终状态表、records 和 transitions。
 - 已建立 `tools/check` 独立阶段工具，当前可读取 `derive.json`，按默认策略输出 `check.json` 并返回通过/失败退出码。
 - `check.json` 已包含 `schema`、`version`、policy、target、verdict、exit_code、summary、allowed 和 reasons。

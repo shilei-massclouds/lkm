@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from common import DERIVE_SCHEMA, DERIVE_VERSION
-from pyveri.ast import SourceSpan
-from pyveri.derive import (
+from common.derive_types import (
     DerivationRecord,
     DerivationResult,
     DerivationStatus,
     EventTransition,
 )
+from common.spec_ast import SourceSpan
 
 
 def derivation_to_json(
