@@ -343,19 +343,24 @@ class _TraceLayoutBuilder:
         self.cells: list[TraceCell] = []
         self.arrows: list[TraceArrow] = []
         self._event_index = 0
-        self._max_content_column = 0
+        self._max_phase_lane = 0
+        self._max_object_lane = -1
+        self._object_column_base = 0
 
     def build(
         self,
         roots: list[Any],
         verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
     ) -> None:
+        self._max_phase_lane = _max_trace_phase_lane(roots, verified_states_by_event)
+        self._object_column_base = self._max_phase_lane + 2
         for node in roots:
             if _should_skip_trace_node(node, verified_states_by_event):
                 continue
             self._place_node(
                 node,
-                content_column=0,
+                phase_lane=0,
+                object_lane=0,
                 parent_event_id=None,
                 verified_states_by_event=verified_states_by_event,
             )
@@ -365,11 +370,13 @@ class _TraceLayoutBuilder:
         self,
         node: Any,
         *,
-        content_column: int,
+        phase_lane: int,
+        object_lane: int,
         parent_event_id: str | None,
         verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
     ) -> None:
         data = _trace_node_object(node)
+        is_phase = _is_trace_phase_object(str(data["object"]))
         index = self._event_index
         self._event_index += 1
         label = _trace_label(data)
@@ -377,9 +384,11 @@ class _TraceLayoutBuilder:
         enter_id = f"{event_id}-source"
         exit_id = f"{event_id}-target"
         span_id = f"{event_id}-span"
-        column = content_column * 2
-        gap_column = column + 1
-        self._max_content_column = max(self._max_content_column, content_column)
+        column = phase_lane if is_phase else self._object_column(object_lane)
+        gap_column = None if is_phase else self._object_gap_column(object_lane)
+        self._max_phase_lane = max(self._max_phase_lane, phase_lane)
+        if not is_phase:
+            self._max_object_lane = max(self._max_object_lane, object_lane)
 
         source_label = f"{data['object']}.State::{data['source_state']}"
         event_row = len(self.rows)
@@ -388,7 +397,13 @@ class _TraceLayoutBuilder:
             enter_id = adjacent_source_id
             event_row = self.rows[-1]["index"]
         else:
-            self._add_row("state", event_row, f"{label}.source")
+            self._add_row(
+                "state",
+                event_row,
+                f"{label}.source",
+                group_id=event_id if not is_phase else None,
+                group_role="source" if not is_phase else None,
+            )
             self.cells.append(
                 TraceCell(
                     id=enter_id,
@@ -398,17 +413,23 @@ class _TraceLayoutBuilder:
                     label=source_label,
                 )
             )
-            self.cells.append(
+            self._add_gap_cell(
                 TraceCell(
                     id=f"{event_id}-vertical-gap-before",
                     kind="gap",
                     row=event_row,
-                    column=gap_column,
+                    column=gap_column if gap_column is not None else column,
                 )
             )
 
         event_body_start = len(self.rows)
-        self._add_row("gap", event_body_start, f"{label}.body.start")
+        self._add_row(
+            "gap",
+            event_body_start,
+            f"{label}.body.start",
+            group_id=event_id if not is_phase else None,
+            group_role="body_start" if not is_phase else None,
+        )
         self.cells.append(
             TraceCell(
                 id=f"{event_id}-body-gap",
@@ -417,26 +438,26 @@ class _TraceLayoutBuilder:
                 column=column,
             )
         )
-        self.cells.append(
+        self._add_gap_cell(
             TraceCell(
                 id=f"{event_id}-drive-gap",
                 kind="gap",
                 row=event_body_start,
-                column=gap_column,
+                column=gap_column if gap_column is not None else column,
             )
         )
 
         verified_states = verified_states_by_event.get(
             (str(data["object"]), str(data["event"])), []
         )
-        verified_content_column = content_column + 1
-        child_content_column = content_column + (2 if verified_states else 1)
-        verified_column = verified_content_column * 2
-        verified_gap_column = verified_column + 1
+        verified_lane = object_lane if is_phase else object_lane + 1
+        child_object_lane = object_lane if is_phase else object_lane + (
+            2 if verified_states else 1
+        )
+        verified_column = self._object_column(verified_lane)
+        verified_gap_column = self._object_gap_column(verified_lane)
         if verified_states:
-            self._max_content_column = max(
-                self._max_content_column, verified_content_column
-            )
+            self._max_object_lane = max(self._max_object_lane, verified_lane)
         for verified_index, (object_name, state_name) in enumerate(verified_states):
             verified_id = f"{event_id}-verified-{verified_index}"
             verified_row = len(self.rows)
@@ -469,15 +490,24 @@ class _TraceLayoutBuilder:
             self.arrows.append(
                 TraceArrow(source=span_id, target=f"{child_event_id}-span", kind="drives")
             )
+            child_data = _trace_node_object(child)
+            child_is_phase = _is_trace_phase_object(str(child_data.get("object")))
             self._place_node(
                 child,
-                content_column=child_content_column,
+                phase_lane=phase_lane + 1 if child_is_phase else phase_lane,
+                object_lane=object_lane if child_is_phase else child_object_lane,
                 parent_event_id=event_id,
                 verified_states_by_event=verified_states_by_event,
             )
 
         event_exit_gap_row = len(self.rows)
-        self._add_row("gap", event_exit_gap_row, f"{label}.body.end")
+        self._add_row(
+            "gap",
+            event_exit_gap_row,
+            f"{label}.body.end",
+            group_id=event_id if not is_phase else None,
+            group_role="body_end" if not is_phase else None,
+        )
         self.cells.append(
             TraceCell(
                 id=f"{event_id}-body-end-gap",
@@ -486,17 +516,23 @@ class _TraceLayoutBuilder:
                 column=column,
             )
         )
-        self.cells.append(
+        self._add_gap_cell(
             TraceCell(
                 id=f"{event_id}-drive-end-gap",
                 kind="gap",
                 row=event_exit_gap_row,
-                column=gap_column,
+                column=gap_column if gap_column is not None else column,
             )
         )
 
         exit_row = len(self.rows)
-        self._add_row("state", exit_row, f"{label}.target")
+        self._add_row(
+            "state",
+            exit_row,
+            f"{label}.target",
+            group_id=event_id if not is_phase else None,
+            group_role="target" if not is_phase else None,
+        )
         self.cells.append(
             TraceCell(
                 id=exit_id,
@@ -506,12 +542,12 @@ class _TraceLayoutBuilder:
                 label=f"{data['object']}.State::{data['target_state']}",
             )
         )
-        self.cells.append(
+        self._add_gap_cell(
             TraceCell(
                 id=f"{event_id}-vertical-gap-after",
                 kind="gap",
                 row=exit_row,
-                column=gap_column,
+                column=gap_column if gap_column is not None else column,
             )
         )
 
@@ -527,17 +563,35 @@ class _TraceLayoutBuilder:
         )
         self.arrows.append(TraceArrow(source=enter_id, target=exit_id, kind="state"))
         if parent_event_id is not None:
-            self.cells.append(
+            self._add_gap_cell(
                 TraceCell(
                     id=f"{parent_event_id}-to-{event_id}-gap",
                     kind="gap",
                     row=event_row,
-                    column=gap_column,
+                    column=gap_column if gap_column is not None else column,
                 )
             )
 
-    def _add_row(self, kind: str, index: int, label: str) -> None:
-        self.rows.append({"index": index, "kind": kind, "label": label})
+    def _add_row(
+        self,
+        kind: str,
+        index: int,
+        label: str,
+        *,
+        group_id: str | None = None,
+        group_role: str | None = None,
+    ) -> None:
+        row: dict[str, object] = {"index": index, "kind": kind, "label": label}
+        if group_id is not None:
+            row["group_id"] = group_id
+        if group_role is not None:
+            row["group_role"] = group_role
+        self.rows.append(row)
+
+    def _add_gap_cell(self, cell: TraceCell) -> None:
+        if cell.column < self._object_column_base:
+            return
+        self.cells.append(cell)
 
     def _adjacent_state_cell_id(self, column: int, label: str) -> str | None:
         if not self.rows or self.rows[-1]["kind"] != "state":
@@ -554,21 +608,42 @@ class _TraceLayoutBuilder:
         return None
 
     def _build_columns(self) -> None:
-        for content_column in range(self._max_content_column + 1):
+        for phase_lane in range(self._max_phase_lane + 1):
             self.columns.append(
                 {
-                    "index": content_column * 2,
-                    "kind": "content",
-                    "depth": content_column,
+                    "index": phase_lane,
+                    "kind": "phase",
+                    "depth": phase_lane,
+                }
+            )
+        self.columns.append(
+            {
+                "index": self._object_column_base - 1,
+                "kind": "phase_object_gap",
+                "depth": 0,
+            }
+        )
+        for object_lane in range(self._max_object_lane + 1):
+            self.columns.append(
+                {
+                    "index": self._object_column(object_lane),
+                    "kind": "object",
+                    "depth": object_lane,
                 }
             )
             self.columns.append(
                 {
-                    "index": content_column * 2 + 1,
+                    "index": self._object_gap_column(object_lane),
                     "kind": "gap",
-                    "depth": content_column,
+                    "depth": object_lane,
                 }
             )
+
+    def _object_column(self, object_lane: int) -> int:
+        return self._object_column_base + object_lane * 2
+
+    def _object_gap_column(self, object_lane: int) -> int:
+        return self._object_column(object_lane) + 1
 
 
 def _trace_node_object(node: Any) -> dict[str, Any]:
@@ -606,6 +681,35 @@ def _should_skip_trace_node(
 
 def _is_trace_phase_object(object_name: str) -> bool:
     return object_name == "StartupTimeline" or object_name.endswith("Phase")
+
+
+def _max_trace_phase_lane(
+    roots: list[Any],
+    verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
+) -> int:
+    max_lane = 0
+
+    def visit(node: Any, phase_lane: int) -> None:
+        nonlocal max_lane
+        if _should_skip_trace_node(node, verified_states_by_event):
+            return
+        data = _trace_node_object(node)
+        is_phase = _is_trace_phase_object(str(data.get("object")))
+        current_phase_lane = phase_lane
+        if is_phase:
+            max_lane = max(max_lane, current_phase_lane)
+        for child in _trace_children(data):
+            child_data = _trace_node_object(child)
+            child_phase_lane = (
+                current_phase_lane + 1
+                if _is_trace_phase_object(str(child_data.get("object")))
+                else current_phase_lane
+            )
+            visit(child, child_phase_lane)
+
+    for root in roots:
+        visit(root, 0)
+    return max_lane
 
 
 def _verified_states_by_event(

@@ -102,6 +102,12 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(column["kind"] == "gap" for column in metadata["trace_columns"])
             )
+            self.assertTrue(
+                any(column["kind"] == "phase" for column in metadata["trace_columns"])
+            )
+            self.assertTrue(
+                any(column["kind"] == "object" for column in metadata["trace_columns"])
+            )
             self.assertTrue(any(row["kind"] == "gap" for row in metadata["trace_rows"]))
             self.assertTrue(
                 any(
@@ -139,6 +145,13 @@ class ViewToolTests(unittest.TestCase):
                 and cell["label"] == "PreparePhase.Event::Setup"
             )
             self.assertGreater(riscv64_cell["column"], prepare_setup_cell["column"])
+            root_stream_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "state"
+                and cell["label"] == "RootStream.State::Base"
+            )
+            self.assertEqual(riscv64_cell["column"], root_stream_cell["column"])
             self.assertFalse(
                 any(
                     cell["kind"] == "event_span"
@@ -160,7 +173,14 @@ class ViewToolTests(unittest.TestCase):
             )
             self.assertEqual(boot_setup_cell["column"], prepare_setup_cell["column"])
             self.assertEqual(
-                entry_prelude_setup_cell["column"], boot_setup_cell["column"] + 2
+                entry_prelude_setup_cell["column"], boot_setup_cell["column"] + 1
+            )
+            self.assertTrue(
+                any(
+                    row.get("group_role") == "body_start"
+                    and row.get("label") == "RootStream.Event::Preset.body.start"
+                    for row in metadata["trace_rows"]
+                )
             )
             prepare_ready_cells = [
                 cell

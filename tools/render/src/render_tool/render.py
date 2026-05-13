@@ -16,7 +16,6 @@ from common.view_types import (
 _TRACE_DRIVE_ARROW_MAX_LENGTH = 81
 _TRACE_EVENT_LABEL_PAD_X = 8
 _TRACE_EVENT_LABEL_HEIGHT = 22
-_TRACE_PHASE_LANE_STEP = 84
 
 
 def render_view(view: ViewModel, fmt: str) -> str:
@@ -249,8 +248,6 @@ def _render_trace_svg(view: ViewModel) -> str:
         )
         return x, y, w, h
 
-    phase_lane_x_by_column = _trace_phase_lane_x_by_column(cells, cell_box)
-
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
@@ -284,12 +281,7 @@ def _render_trace_svg(view: ViewModel) -> str:
 
     for cell in cells:
         if cell.kind == "event_span" and cell.id in phase_span_ids:
-            _append_trace_phase_event(
-                lines,
-                cell,
-                cell_box(cell),
-                arrow_x=phase_lane_x_by_column.get(cell.column),
-            )
+            _append_trace_phase_event(lines, cell, cell_box(cell))
         elif cell.kind == "event_span":
             _append_trace_event_label(lines, cell, cell_box(cell))
 
@@ -464,7 +456,15 @@ def _trace_column_metrics(columns: list[dict[str, object]]) -> dict[int, tuple[s
         kind = column.get("kind")
         if not isinstance(index, int) or not isinstance(kind, str):
             continue
-        metrics[index] = (kind, 178 if kind == "content" else 46)
+        if kind == "phase":
+            width = 84
+        elif kind == "phase_object_gap":
+            width = 56
+        elif kind == "object":
+            width = 178
+        else:
+            width = _TRACE_DRIVE_ARROW_MAX_LENGTH
+        metrics[index] = (kind, width)
     return metrics
 
 
@@ -476,12 +476,17 @@ def _trace_row_metrics(rows: list[dict[str, object]]) -> dict[int, tuple[str, in
         label = row.get("label")
         if not isinstance(index, int) or not isinstance(kind, str):
             continue
+        group_role = row.get("group_role")
         if isinstance(label, str) and _is_trace_phase_row(label):
             height = 20
+        elif group_role in {"source", "target"}:
+            height = 48
+        elif group_role in {"body_start", "body_end"}:
+            height = 12
         elif kind == "state":
             height = 48
         else:
-            height = 34
+            height = 46
         metrics[index] = (kind, height)
     return metrics
 
@@ -525,12 +530,9 @@ def _append_trace_phase_event(
     lines: list[str],
     cell: TraceCell,
     box: tuple[float, float, float, float],
-    *,
-    arrow_x: float | None = None,
 ) -> None:
     x, y, width, height = box
-    if arrow_x is None:
-        arrow_x = x + width / 2
+    arrow_x = x + width / 2
     y1 = y + height - 8
     y2 = y + 8
     if y1 <= y2:
@@ -593,11 +595,10 @@ def _trace_event_anchor_box(
     if cell.kind != "event_span" or _is_trace_phase_event(cell.label):
         return box
     x, y, width, height = box
-    label_width = max(10, width - 16)
-    label_height = 22
-    label_x = x + 8
-    label_y = y + (height - label_height) / 2
-    return label_x, label_y, label_width, label_height
+    label_width = max(10, width - _TRACE_EVENT_LABEL_PAD_X * 2)
+    label_x = x + _TRACE_EVENT_LABEL_PAD_X
+    label_y = y + (height - _TRACE_EVENT_LABEL_HEIGHT) / 2
+    return label_x, label_y, label_width, _TRACE_EVENT_LABEL_HEIGHT
 
 
 def _shorten_trace_label(label: str) -> str:
@@ -606,30 +607,6 @@ def _shorten_trace_label(label: str) -> str:
 
 def _shorten_trace_event(label: str) -> str:
     return label.replace(".Event::", ".")
-
-
-def _trace_phase_lane_x_by_column(
-    cells: tuple[TraceCell, ...],
-    cell_box,
-) -> dict[int, float]:
-    phase_cells = [
-        cell
-        for cell in cells
-        if cell.kind == "event_span" and _is_trace_phase_event(cell.label)
-    ]
-    columns = sorted({cell.column for cell in phase_cells})
-    if not columns:
-        return {}
-    base_column = columns[0]
-    base_x = min(
-        cell_box(cell)[0] + cell_box(cell)[2] / 2
-        for cell in phase_cells
-        if cell.column == base_column
-    )
-    return {
-        column: base_x + index * _TRACE_PHASE_LANE_STEP
-        for index, column in enumerate(columns)
-    }
 
 
 def _is_trace_phase_event(label: str) -> bool:
