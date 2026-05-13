@@ -8,8 +8,8 @@ from pathlib import Path
 
 from common import read_json, write_json
 from common.model_json import model_json_to_object_model
-from pyveri.view import build_drives_view, build_object_view, build_timeline_view
 
+from .builder import build_drives_view, build_object_view, build_timeline_view
 from .view_json import view_to_json
 
 

@@ -425,7 +425,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - `derive.json` 已包含 `schema`、`version`、`source`、target、summary、最终状态表、records 和 transitions。
 - 已建立 `tools/check` 独立阶段工具，当前可读取 `derive.json`，按默认策略输出 `check.json` 并返回通过/失败退出码。
 - `check.json` 已包含 `schema`、`version`、policy、target、verdict、exit_code、summary、allowed 和 reasons。
-- 已建立 `tools/view` 独立阶段工具，当前可读取 `model.json` 并输出 `object`、`drives` 或 `timeline` 的 `view.json`。
+- 已建立 `tools/view` 独立阶段工具，当前已迁出 view builder 逻辑并脱离 `pyveri` 包依赖，可读取 `model.json` 并输出 `object`、`drives` 或 `timeline` 的 `view.json`。
 - `view.json` 已包含 `schema`、`version`、source、view、rankdir、graph_format、nodes、edges 和 metadata。
 - 已建立 `tools/render` 独立阶段工具，当前可读取 `view.json` 并输出 text、DOT 或 SVG。
 - `render` 当前复用 `pyveri.view` 中的文本、DOT 和 SVG 渲染逻辑，后续可继续拆分为 renderer host 和格式插件。

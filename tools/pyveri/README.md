@@ -70,13 +70,13 @@ PYTHONPATH=tools/common/src:tools/parse/src python -m parse_tool spec/entry-prel
 PYTHONPATH=tools/common/src:tools/model/src python -m model_tool tools/build/entry-prelude-object-model.ast.json -o tools/build/entry-prelude-object-model.model.json
 PYTHONPATH=tools/common/src:tools/derive/src python -m derive_tool tools/build/entry-prelude-object-model.model.json -o tools/build/entry-prelude-object-model.derive.json
 PYTHONPATH=tools/common/src:tools/check/src python -m check_tool tools/build/entry-prelude-object-model.derive.json -o tools/build/entry-prelude-object-model.check.json
-PYTHONPATH=tools/common/src:tools/view/src:tools/pyveri/src python -m view_tool tools/build/entry-prelude-object-model.model.json object -o tools/build/entry-prelude-object-model.object.view.json
+PYTHONPATH=tools/common/src:tools/view/src python -m view_tool tools/build/entry-prelude-object-model.model.json object -o tools/build/entry-prelude-object-model.object.view.json
 PYTHONPATH=tools/common/src:tools/render/src:tools/pyveri/src python -m render_tool tools/build/entry-prelude-object-model.object.view.json --format dot -o tools/build/entry-prelude-object-model.object.gv
 PYTHONPATH=tools/common/src:tools/parse/src python -m unittest discover -s tools/parse/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src python -m unittest discover -s tools/model/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/derive/src python -m unittest discover -s tools/derive/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/derive/src:tools/check/src:tools/pyveri/src python -m unittest discover -s tools/check/tests
-PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src:tools/pyveri/src python -m unittest discover -s tools/view/tests
+PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src python -m unittest discover -s tools/view/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src:tools/render/src:tools/pyveri/src python -m unittest discover -s tools/render/tests
 ```
 
