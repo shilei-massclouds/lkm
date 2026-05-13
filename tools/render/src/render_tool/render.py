@@ -206,6 +206,20 @@ def _render_trace_svg(view: ViewModel) -> str:
     width = int(left_margin + right_margin + sum(metric[1] for metric in column_metrics.values()))
     height = int(top_margin + bottom_margin + sum(metric[1] for metric in row_metrics.values()))
     cell_by_id = {cell.id: cell for cell in cells}
+    phase_span_ids = {
+        cell.id
+        for cell in cells
+        if cell.kind == "event_span" and _is_trace_phase_event(cell.label)
+    }
+    phase_state_ids = {
+        arrow.source
+        for arrow in arrows
+        if arrow.kind == "state" and _trace_event_id(arrow.source) in phase_span_ids
+    } | {
+        arrow.target
+        for arrow in arrows
+        if arrow.kind == "state" and _trace_event_id(arrow.source) in phase_span_ids
+    }
 
     def cell_box(cell: TraceCell) -> tuple[float, float, float, float]:
         x = left_margin + sum(
@@ -243,6 +257,8 @@ def _render_trace_svg(view: ViewModel) -> str:
         ".state { fill: #ffffff; stroke: #334155; stroke-width: 1.1; }",
         ".event-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
         ".verified-state { fill: #f8fafc; stroke: #64748b; stroke-width: 1.1; }",
+        ".phase-arrow { stroke: #0f172a; stroke-width: 4; fill: none; marker-end: url(#arrow); }",
+        ".phase-label { fill: #0f172a; font-weight: 600; }",
         ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-end: url(#arrow); }",
         ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-end: url(#arrow); }",
         ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-end: url(#arrow); }",
@@ -251,11 +267,15 @@ def _render_trace_svg(view: ViewModel) -> str:
     ]
 
     for cell in cells:
+        if cell.id in phase_state_ids:
+            continue
         if cell.kind in {"state", "verified_state"}:
             _append_trace_state_cell(lines, cell, cell_box(cell))
 
     for cell in cells:
-        if cell.kind == "event_span":
+        if cell.kind == "event_span" and cell.id in phase_span_ids:
+            _append_trace_phase_event(lines, cell, cell_box(cell))
+        elif cell.kind == "event_span":
             _append_trace_event_label(lines, cell, cell_box(cell))
 
     for arrow in arrows:
@@ -264,6 +284,8 @@ def _render_trace_svg(view: ViewModel) -> str:
         if source is None or target is None:
             continue
         if arrow.kind == "state":
+            if _trace_event_id(arrow.source) in phase_span_ids:
+                continue
             _append_trace_state_arrow(lines, cell_box(source), cell_box(target))
         elif arrow.kind == "drives":
             _append_trace_horizontal_arrow(
@@ -430,9 +452,16 @@ def _trace_row_metrics(rows: list[dict[str, object]]) -> dict[int, tuple[str, in
     for row in rows:
         index = row.get("index")
         kind = row.get("kind")
+        label = row.get("label")
         if not isinstance(index, int) or not isinstance(kind, str):
             continue
-        metrics[index] = (kind, 48 if kind == "state" else 34)
+        if isinstance(label, str) and _is_trace_phase_row(label):
+            height = 20
+        elif kind == "state":
+            height = 48
+        else:
+            height = 34
+        metrics[index] = (kind, height)
     return metrics
 
 
@@ -469,6 +498,26 @@ def _append_trace_event_label(
             f'<rect class="event-label" x="{label_x:.1f}" y="{label_y:.1f}" width="{label_width:.1f}" height="{label_height:.1f}" rx="4" />',
             f'<text class="muted" x="{label_x + label_width / 2:.1f}" y="{label_y + 15:.1f}" font-size="10" text-anchor="middle">{_xml_escape(_shorten_trace_event(cell.label))}</text>',
         ]
+    )
+
+
+def _append_trace_phase_event(
+    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+) -> None:
+    x, y, width, height = box
+    arrow_x = x + width / 2
+    y1 = y + height - 8
+    y2 = y + 8
+    if y1 <= y2:
+        y1 = y + height
+        y2 = y
+    lines.append(
+        f'<line class="phase-arrow" x1="{arrow_x:.1f}" y1="{y1:.1f}" x2="{arrow_x:.1f}" y2="{y2:.1f}" />'
+    )
+    label_x = arrow_x - 16
+    label_y = y + height / 2
+    lines.append(
+        f'<text class="phase-label" x="{label_x:.1f}" y="{label_y:.1f}" font-size="11" text-anchor="middle" transform="rotate(-90 {label_x:.1f} {label_y:.1f})">{_xml_escape(_shorten_trace_event(cell.label))}</text>'
     )
 
 
@@ -516,6 +565,25 @@ def _shorten_trace_label(label: str) -> str:
 
 def _shorten_trace_event(label: str) -> str:
     return label.replace(".Event::", ".")
+
+
+def _is_trace_phase_event(label: str) -> bool:
+    object_name = label.split(".Event::", 1)[0]
+    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+
+
+def _is_trace_phase_row(label: str) -> bool:
+    object_name = label.split(".", 1)[0]
+    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+
+
+def _trace_event_id(cell_id: str) -> str:
+    if "-" not in cell_id:
+        return cell_id
+    parts = cell_id.split("-")
+    if len(parts) >= 2 and parts[0] == "event":
+        return f"{parts[0]}-{parts[1]}-span"
+    return cell_id
 
 
 def _timeline_row_height(
