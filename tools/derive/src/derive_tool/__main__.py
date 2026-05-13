@@ -8,9 +8,9 @@ from pathlib import Path
 
 from common import read_json, write_json
 from common.defaults import DEFAULT_TARGET
-from pyveri.derive import derive
 
 from .derive_json import derivation_to_json
+from .engine import derive
 from .model_json import model_json_to_object_model
 
 
