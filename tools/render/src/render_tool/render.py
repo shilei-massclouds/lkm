@@ -288,12 +288,17 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
-        ".annotation-box { fill: #ffffff; stroke: #0f766e; stroke-width: 1; }",
-        ".annotation-leader { stroke: #0f766e; stroke-width: 1; fill: none; }",
-        ".annotation-text { fill: #0f172a; }",
         ".muted { fill: #64748b; }",
-        "</style>",
     ]
+    if annotation_items:
+        lines.extend(
+            [
+                ".annotation-box { fill: #ffffff; stroke: #0f766e; stroke-width: 1; }",
+                ".annotation-leader { stroke: #0f766e; stroke-width: 1; fill: none; }",
+                ".annotation-text { fill: #0f172a; }",
+            ]
+        )
+    lines.extend(["</style>"])
 
     for cell in cells:
         if cell.id in phase_state_ids:

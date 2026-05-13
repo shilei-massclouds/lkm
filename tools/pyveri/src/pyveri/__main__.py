@@ -24,7 +24,7 @@ def _bootstrap_tool_paths() -> None:
 
 _bootstrap_tool_paths()
 
-from common import read_json
+from common import read_json, write_json
 from pyveri.derive import DEFAULT_TARGET
 
 if hasattr(signal, "SIGPIPE"):
@@ -170,6 +170,15 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="return a non-zero exit code when derivation does not reach the target",
     )
+    parser.add_argument(
+        "--trace-svg",
+        type=Path,
+        help="write the derivation trace SVG after verification",
+    )
+    parser.add_argument(
+        "--trace-annotations",
+        help="trace annotation categories: state, event, or state,event",
+    )
     parser.add_argument("-o", "--output", type=Path, help="write selected output to a file")
     _add_work_dir_argument(parser)
 
@@ -178,10 +187,25 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
     if args.spec is None:
         parser.error("the following arguments are required: spec")
 
-    output_modes = [bool(args.tree), bool(args.text), bool(args.graph), bool(args.derive)]
+    annotation_categories = _parse_trace_annotation_categories(
+        args.trace_annotations, parser
+    )
+    if annotation_categories and args.trace_svg is None:
+        parser.error("--trace-annotations requires --trace-svg")
+    if args.trace_svg is not None and args.output is not None:
+        parser.error("--trace-svg writes to its own path and cannot be combined with -o/--output")
+
+    output_modes = [
+        bool(args.tree),
+        bool(args.text),
+        bool(args.graph),
+        bool(args.derive),
+    ]
     if args.output is not None:
         if not any(output_modes):
-            parser.error("-o/--output requires --text, --graph, --tree, or --derive")
+            parser.error(
+                "-o/--output requires --text, --graph, --tree, or --derive"
+            )
         if sum(output_modes) > 1:
             parser.error("-o/--output can write only one selected output")
 
@@ -196,26 +220,29 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
 
         selected_outputs: list[str] = []
         derivation_data: dict[str, Any] | None = None
-        needs_derivation = (
-            not args.graph
-            or args.derive
-            or args.strict
-            or args.text == "trace"
-            or args.graph == "trace"
-        )
-        if needs_derivation:
-            derive_code = _run_derive_stage(paths["model"], paths["derive"], args.target)
-            if derive_code != 0:
-                return derive_code
-            derivation_data = read_json(paths["derive"])
+        derive_code = _run_derive_stage(paths["model"], paths["derive"], args.target)
+        if derive_code != 0:
+            return derive_code
+        derivation_data = read_json(paths["derive"])
+        check_code = _run_check_stage(paths["derive"], paths["check"], echo=False)
+        if check_code not in (0, 1):
+            return check_code
+        check_data = read_json(paths["check"])
 
-        graph_only = args.graph and not args.text and not args.tree and not args.derive
+        graph_only = (
+            args.graph
+            and not args.text
+            and not args.tree
+            and not args.derive
+            and not args.trace_svg
+        )
         output_only = args.output is not None
         if not graph_only and not output_only:
             print(_parse_summary(read_json(paths["ast"])))
             print(_model_summary(read_json(paths["model"])))
-            if derivation_data is not None and not args.derive:
+            if not args.derive:
                 print(_derive_summary(derivation_data))
+            print(_check_summary(check_data))
 
         if args.tree:
             selected_outputs.append(
@@ -230,6 +257,27 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
             selected_outputs.append(
                 _render_view_output(paths, args.graph, fmt, work, args.spec)
             )
+        if args.trace_svg:
+            annotations = None
+            if annotation_categories:
+                annotations = work / f"{args.spec.stem}.trace.annotations.json"
+                write_json(
+                    annotations,
+                    _spec_trace_annotations(
+                        read_json(paths["ast"]),
+                        args.spec,
+                        annotation_categories,
+                    ),
+                )
+            trace_svg = _render_view_output(
+                paths,
+                "trace",
+                "svg",
+                work,
+                args.spec,
+                annotations=annotations,
+            )
+            _write_output(args.trace_svg, trace_svg, ascii_only=False)
         if args.derive and derivation_data is not None:
             selected_outputs.append(_derive_report(derivation_data))
 
@@ -239,6 +287,8 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
             for output in selected_outputs:
                 print(output)
 
+        if int(check_data.get("exit_code", 1)) != 0:
+            return int(check_data.get("exit_code", 1))
         if args.strict and derivation_data is not None and not _derive_ok(derivation_data):
             return 1
         return 0
@@ -369,8 +419,8 @@ def _run_derive_stage(model: Path, output: Path, target: str) -> int:
     return _run_stage(["-m", "derive_tool", str(model), "-o", str(output), "--target", target])
 
 
-def _run_check_stage(derive: Path, output: Path) -> int:
-    return _run_stage(["-m", "check_tool", str(derive), "-o", str(output)])
+def _run_check_stage(derive: Path, output: Path, *, echo: bool = True) -> int:
+    return _run_stage(["-m", "check_tool", str(derive), "-o", str(output)], echo=echo)
 
 
 def _run_view_stage(model: Path, view: str, output: Path) -> int:
@@ -386,7 +436,7 @@ def _run_render_stage(
     return _run_stage(args)
 
 
-def _run_stage(args: list[str]) -> int:
+def _run_stage(args: list[str], *, echo: bool = True) -> int:
     completed = subprocess.run(
         [sys.executable, *args],
         env=_stage_env(),
@@ -395,9 +445,9 @@ def _run_stage(args: list[str]) -> int:
         text=True,
         check=False,
     )
-    if completed.stdout:
+    if echo and completed.stdout:
         print(completed.stdout, end="")
-    if completed.stderr:
+    if echo and completed.stderr:
         print(completed.stderr, end="", file=sys.stderr)
     return completed.returncode
 
@@ -527,6 +577,22 @@ def _derive_summary(data: dict[str, Any]) -> str:
     )
 
 
+def _check_summary(data: dict[str, Any]) -> str:
+    summary = data["summary"]
+    return "\n".join(
+        [
+            f"check: {data['verdict']}",
+            f"policy: {data['policy']}",
+            f"target: {data['target']}",
+            f"target_reached: {'yes' if summary['target_reached'] else 'no'}",
+            f"blocked: {summary['blocked']}",
+            f"contradiction: {summary['contradiction']}",
+            f"obligation: {summary['obligation']}",
+            f"deferred: {summary['deferred']}",
+        ]
+    )
+
+
 def _derive_report(data: dict[str, Any]) -> str:
     lines = [_derive_summary(data)]
     trace = data.get("trace", [])
@@ -597,6 +663,84 @@ def _write_output(path: Path, text: str, ascii_only: bool) -> None:
     encoding = "ascii" if ascii_only else "utf-8"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text + "\n", encoding=encoding)
+
+
+def _parse_trace_annotation_categories(
+    value: str | None, parser: argparse.ArgumentParser
+) -> set[str]:
+    if value is None:
+        return set()
+    categories = {part.strip() for part in value.split(",") if part.strip()}
+    allowed = {"state", "event"}
+    invalid = sorted(categories - allowed)
+    if invalid or not categories:
+        parser.error(
+            "--trace-annotations must be one of: state, event, or state,event"
+        )
+    return categories
+
+
+def _spec_trace_annotations(
+    ast_data: dict[str, Any], spec: Path, categories: set[str]
+) -> dict[str, dict[str, str]]:
+    lines = spec.read_text(encoding="utf-8").splitlines()
+    annotations: dict[str, dict[str, str]] = {}
+    if "state" in categories:
+        annotations["states"] = {}
+    if "event" in categories:
+        annotations["events"] = {}
+
+    for obj in ast_data["document"]["objects"]:
+        object_name = obj["name"]
+        if _is_phase_object_name(object_name):
+            continue
+        if "state" in categories:
+            for state in obj["states"]:
+                note = _doc_comment_before(lines, int(state["span"]["start_line"]))
+                if note:
+                    annotations["states"][f"{object_name}.State::{state['name']}"] = note
+        if "event" in categories:
+            for state in obj["states"]:
+                for event in state["events"]:
+                    note = _doc_comment_before(lines, int(event["span"]["start_line"]))
+                    if note:
+                        annotations["events"][f"{object_name}.Event::{event['name']}"] = note
+    return annotations
+
+
+def _is_phase_object_name(object_name: str) -> bool:
+    return object_name == "StartupTimeline" or object_name.endswith("Phase")
+
+
+def _doc_comment_before(lines: list[str], start_line: int) -> str:
+    index = start_line - 2
+    while index >= 0 and not lines[index].strip():
+        index -= 1
+    if index < 0 or not lines[index].strip().endswith("*/"):
+        return ""
+    end = index
+    while index >= 0 and "/*" not in lines[index]:
+        index -= 1
+    if index < 0:
+        return ""
+    raw = "\n".join(lines[index : end + 1])
+    return _clean_doc_comment(raw)
+
+
+def _clean_doc_comment(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("/*"):
+        text = text[2:]
+    if text.endswith("*/"):
+        text = text[:-2]
+    cleaned: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("*"):
+            line = line[1:].strip()
+        if line:
+            cleaned.append(line)
+    return " ".join(cleaned)
 
 
 if __name__ == "__main__":

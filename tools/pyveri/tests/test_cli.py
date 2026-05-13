@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,6 +35,17 @@ class CliTests(unittest.TestCase):
             exit_code = main([str(self.spec), "--derive", "--strict"])
 
         self.assertEqual(exit_code, 0)
+
+    def test_default_command_runs_full_verification(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main([str(self.spec)])
+
+        self.assertEqual(exit_code, 0)
+        text = stdout.getvalue()
+        self.assertIn("derive: ok", text)
+        self.assertIn("check: passed", text)
 
     def test_parse_command_prints_parse_summary(self) -> None:
         stdout = io.StringIO()
@@ -195,6 +207,95 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertIn("build early mappings", output.read_text(encoding="utf-8"))
+
+    def test_legacy_trace_svg_writes_spec_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "trace.svg"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        str(self.spec),
+                        "--trace-svg",
+                        str(output),
+                        "--trace-annotations",
+                        "state,event",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("annotation-box", text)
+            self.assertIn("控制流已经切换到", text)
+            self.assertIn("EarlyVm", text)
+            self.assertIn("启用跳板页表和早期页表", text)
+
+    def test_legacy_trace_svg_accepts_state_annotations_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "trace.svg"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        str(self.spec),
+                        "--trace-svg",
+                        str(output),
+                        "--trace-annotations",
+                        "state",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("控制流已经切换到", text)
+            self.assertNotIn("启用跳板页表和早期页表", text)
+
+    def test_legacy_trace_svg_accepts_event_annotations_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "trace.svg"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main(
+                    [
+                        str(self.spec),
+                        "--trace-svg",
+                        str(output),
+                        "--trace-annotations",
+                        "event",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("启用跳板页表和早期页表", text)
+            self.assertNotIn("控制流已经切换到", text)
+
+    def test_legacy_trace_svg_rejects_output_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "trace.svg"
+            alias = Path(tmp) / "alias.svg"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as caught:
+                main([str(self.spec), "--trace-svg", str(output), "-o", str(alias)])
+
+            self.assertEqual(caught.exception.code, 2)
+            self.assertIn("cannot be combined", stderr.getvalue())
+
+    def test_bin_script_runs_default_verification(self) -> None:
+        script = Path(__file__).resolve().parents[1] / "bin" / "pyveri"
+        completed = subprocess.run(
+            [str(script), str(self.spec)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("check: passed", completed.stdout)
 
     def test_legacy_graph_timeline_keeps_svg_behavior(self) -> None:
         stdout = io.StringIO()
