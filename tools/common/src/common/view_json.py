@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from common.schemas import VIEW_SCHEMA, VIEW_VERSION
-from pyveri.view import TimelineItem, TimelineRow, ViewEdge, ViewModel, ViewNode
+from common.view_types import TimelineItem, TimelineRow, ViewEdge, ViewModel, ViewNode
 
 
 def view_json_to_view_model(data: dict[str, Any]) -> ViewModel:
-    """Deserialize view intermediate JSON into a pyveri ViewModel."""
+    """Deserialize view intermediate JSON into a ViewModel."""
 
     _require_schema(data, VIEW_SCHEMA, VIEW_VERSION)
     view_name = _string(data, "view")

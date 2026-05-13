@@ -13,6 +13,8 @@ class CommonDependencyTests(unittest.TestCase):
             source_root / "model_json.py",
             source_root / "derive_types.py",
             source_root / "defaults.py",
+            source_root / "view_types.py",
+            source_root / "view_json.py",
         ]
 
         for path in paths:

@@ -3,61 +3,17 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+import sys
+from pathlib import Path
 
-from .model import EventDef, ObjectModel, StateDef
+_COMMON_SRC = Path(__file__).resolve().parents[3] / "common" / "src"
+if _COMMON_SRC.is_dir():
+    common_src = str(_COMMON_SRC)
+    if common_src not in sys.path:
+        sys.path.insert(0, common_src)
 
-
-@dataclass(frozen=True)
-class ViewNode:
-    """A node in a rendered model view."""
-
-    id: str
-    label: str
-    kind: str
-
-
-@dataclass(frozen=True)
-class ViewEdge:
-    """A directed edge in a rendered model view."""
-
-    source: str
-    target: str
-    kind: str
-    label: str = ""
-
-
-@dataclass(frozen=True)
-class TimelineItem:
-    """An object-level item placed on a timeline row."""
-
-    object_name: str
-    detail: str
-    kind: str
-
-
-@dataclass(frozen=True)
-class TimelineRow:
-    """One chronological row in the startup timeline view."""
-
-    id: str
-    phase: str
-    subphase: str | None
-    label: str
-    detail: str
-    items: tuple[TimelineItem, ...] = ()
-
-
-@dataclass(frozen=True)
-class ViewModel:
-    """A renderable model view."""
-
-    name: str
-    nodes: dict[str, ViewNode] = field(default_factory=dict)
-    edges: list[ViewEdge] = field(default_factory=list)
-    rankdir: str = "TB"
-    graph_format: str = "dot"
-    metadata: dict[str, object] = field(default_factory=dict)
+from common.model_types import EventDef, ObjectModel, StateDef
+from common.view_types import TimelineItem, TimelineRow, ViewEdge, ViewModel, ViewNode
 
 
 _OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")

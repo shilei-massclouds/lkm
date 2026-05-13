@@ -6,11 +6,11 @@ from dataclasses import is_dataclass
 from typing import Any
 
 from common import VIEW_SCHEMA, VIEW_VERSION
-from pyveri.view import ViewEdge, ViewModel, ViewNode
+from common.view_types import ViewEdge, ViewModel, ViewNode
 
 
 def view_to_json(view: ViewModel, input_data: dict[str, Any]) -> dict[str, Any]:
-    """Serialize a pyveri view model to the view intermediate format."""
+    """Serialize a view model to the view intermediate format."""
 
     return {
         "schema": VIEW_SCHEMA,
