@@ -90,7 +90,21 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("StartupTimeline.Event::Setup", text)
             self.assertIn("[drives]", text)
 
-    def test_svg_requires_timeline_view(self) -> None:
+    def test_render_svg_from_trace_view(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._build_view_json(tmp, "trace")
+            output = Path(tmp) / "trace.svg"
+
+            exit_code = render_main([str(view), "--format", "svg", "-o", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            text = output.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
+            self.assertIn("<svg", text)
+            self.assertIn("StartupTimeline.Setup", text)
+            self.assertIn("PreparePhase.Setup", text)
+
+    def test_svg_requires_timeline_or_trace_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             view = self._build_view_json(tmp, "object")
             output = Path(tmp) / "object.svg"

@@ -75,8 +75,10 @@ def render_dot(view: ViewModel) -> str:
 def render_svg(view: ViewModel) -> str:
     """Render a startup timeline SVG."""
 
+    if view.name == "trace":
+        return _render_trace_svg(view)
     if view.name != "timeline":
-        raise ValueError("SVG rendering is currently only supported for timeline views")
+        raise ValueError("SVG rendering is currently only supported for timeline and trace views")
 
     rows = _timeline_rows(view)
     width = 1180
@@ -182,6 +184,87 @@ def render_svg(view: ViewModel) -> str:
                     f'<text class="muted" x="{x + item_width / 2}" y="{item_y + 34:.1f}" font-size="11" text-anchor="middle">{_xml_escape(item.detail)}</text>',
                 ]
             )
+
+    lines.append("</svg>")
+    return "\n".join(lines)
+
+
+def _render_trace_svg(view: ViewModel) -> str:
+    columns = _trace_columns(view)
+    rows = _trace_rows(view)
+    cells = _trace_cells(view)
+    arrows = _trace_arrows(view)
+    if not columns or not rows:
+        raise ValueError("trace view has no layout metadata")
+
+    column_metrics = _trace_column_metrics(columns)
+    row_metrics = _trace_row_metrics(rows)
+    left_margin = 28
+    right_margin = 28
+    top_margin = 28
+    bottom_margin = 28
+    width = int(left_margin + right_margin + sum(metric[1] for metric in column_metrics.values()))
+    height = int(top_margin + bottom_margin + sum(metric[1] for metric in row_metrics.values()))
+    cell_by_id = {cell.id: cell for cell in cells}
+
+    def cell_box(cell: TraceCell) -> tuple[float, float, float, float]:
+        x = left_margin + sum(
+            column_metrics[index][1]
+            for index in range(cell.column)
+            if index in column_metrics
+        )
+        w = sum(
+            column_metrics[index][1]
+            for index in range(cell.column, cell.column + cell.column_span)
+            if index in column_metrics
+        )
+        h = sum(
+            row_metrics[index][1]
+            for index in range(cell.row, cell.row + cell.row_span)
+            if index in row_metrics
+        )
+        y = height - bottom_margin - sum(
+            row_metrics[index][1]
+            for index in range(cell.row + cell.row_span)
+            if index in row_metrics
+        )
+        return x, y, w, h
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        "<defs>",
+        '<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">',
+        '<path d="M0,0 L8,4 L0,8 Z" fill="#334155" />',
+        "</marker>",
+        "</defs>",
+        "<style>",
+        "text { font-family: Arial, sans-serif; fill: #1f2937; }",
+        ".state { fill: #ffffff; stroke: #334155; stroke-width: 1.1; }",
+        ".event-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
+        ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-end: url(#arrow); }",
+        ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-end: url(#arrow); }",
+        ".muted { fill: #64748b; }",
+        "</style>",
+    ]
+
+    for cell in cells:
+        if cell.kind == "state":
+            _append_trace_state_cell(lines, cell, cell_box(cell))
+
+    for cell in cells:
+        if cell.kind == "event_span":
+            _append_trace_event_label(lines, cell, cell_box(cell))
+
+    for arrow in arrows:
+        source = cell_by_id.get(arrow.source)
+        target = cell_by_id.get(arrow.target)
+        if source is None or target is None:
+            continue
+        if arrow.kind == "state":
+            _append_trace_state_arrow(lines, cell_box(source), cell_box(target))
+        elif arrow.kind == "drives":
+            _append_trace_drive_arrow(lines, cell_box(source), cell_box(target))
 
     lines.append("</svg>")
     return "\n".join(lines)
@@ -321,6 +404,107 @@ def _trace_cells(view: ViewModel) -> tuple[TraceCell, ...]:
 def _trace_arrows(view: ViewModel) -> tuple[TraceArrow, ...]:
     arrows = view.metadata.get("trace_arrows", ())
     return arrows if isinstance(arrows, tuple) else ()
+
+
+def _trace_column_metrics(columns: list[dict[str, object]]) -> dict[int, tuple[str, int]]:
+    metrics: dict[int, tuple[str, int]] = {}
+    for column in columns:
+        index = column.get("index")
+        kind = column.get("kind")
+        if not isinstance(index, int) or not isinstance(kind, str):
+            continue
+        metrics[index] = (kind, 178 if kind == "content" else 46)
+    return metrics
+
+
+def _trace_row_metrics(rows: list[dict[str, object]]) -> dict[int, tuple[str, int]]:
+    metrics: dict[int, tuple[str, int]] = {}
+    for row in rows:
+        index = row.get("index")
+        kind = row.get("kind")
+        if not isinstance(index, int) or not isinstance(kind, str):
+            continue
+        metrics[index] = (kind, 48 if kind == "state" else 34)
+    return metrics
+
+
+def _append_trace_state_cell(
+    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+) -> None:
+    x, y, width, height = box
+    pad_x = 8
+    box_width = max(10, width - pad_x * 2)
+    box_height = 30
+    box_x = x + pad_x
+    box_y = y + (height - box_height) / 2
+    center_x = box_x + box_width / 2
+    center_y = box_y + box_height / 2
+    lines.extend(
+        [
+            f'<rect class="state" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="4" />',
+            f'<text x="{center_x:.1f}" y="{center_y + 4:.1f}" font-size="11" text-anchor="middle">{_xml_escape(_shorten_trace_label(cell.label))}</text>',
+        ]
+    )
+
+
+def _append_trace_event_label(
+    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+) -> None:
+    x, y, width, height = box
+    label_width = max(10, width - 16)
+    label_height = 22
+    label_x = x + 8
+    label_y = y + max(6, min(14, height / 2 - label_height / 2))
+    lines.extend(
+        [
+            f'<rect class="event-label" x="{label_x:.1f}" y="{label_y:.1f}" width="{label_width:.1f}" height="{label_height:.1f}" rx="4" />',
+            f'<text class="muted" x="{label_x + label_width / 2:.1f}" y="{label_y + 15:.1f}" font-size="10" text-anchor="middle">{_xml_escape(_shorten_trace_event(cell.label))}</text>',
+        ]
+    )
+
+
+def _append_trace_state_arrow(
+    lines: list[str],
+    source_box: tuple[float, float, float, float],
+    target_box: tuple[float, float, float, float],
+) -> None:
+    source_x, source_y, source_w, _source_h = source_box
+    target_x, target_y, target_w, target_h = target_box
+    x = source_x + source_w / 2
+    y1 = source_y + 8
+    y2 = target_y + target_h - 8
+    if y2 <= y1:
+        y1 = source_y
+        y2 = target_y + target_h
+    lines.append(
+        f'<line class="state-arrow" x1="{x:.1f}" y1="{y1:.1f}" x2="{target_x + target_w / 2:.1f}" y2="{y2:.1f}" />'
+    )
+
+
+def _append_trace_drive_arrow(
+    lines: list[str],
+    source_box: tuple[float, float, float, float],
+    target_box: tuple[float, float, float, float],
+) -> None:
+    source_x, source_y, source_w, source_h = source_box
+    target_x, target_y, _target_w, target_h = target_box
+    y = target_y + min(max(target_h / 2, 18), 34)
+    x1 = source_x + source_w
+    x2 = target_x + 6
+    if x2 <= x1:
+        y = source_y + source_h / 2
+        x2 = target_x
+    lines.append(
+        f'<line class="drive-arrow" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
+    )
+
+
+def _shorten_trace_label(label: str) -> str:
+    return label.replace(".State::", ".")
+
+
+def _shorten_trace_event(label: str) -> str:
+    return label.replace(".Event::", ".")
 
 
 def _timeline_row_height(

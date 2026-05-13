@@ -33,6 +33,7 @@ if hasattr(signal, "SIGPIPE"):
 
 VIEW_CHOICES = ("object", "drives", "timeline")
 TEXT_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
+RENDER_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 COMMANDS = frozenset({"parse", "model", "derive", "check", "view", "render"})
 
 
@@ -114,7 +115,12 @@ def _build_command_parser() -> argparse.ArgumentParser:
 
     render_parser = subparsers.add_parser("render", help="render a graph or SVG model view")
     render_parser.add_argument("spec", type=Path, help="path to the .spec input file")
-    render_parser.add_argument("view", choices=VIEW_CHOICES, help="view name")
+    render_parser.add_argument("view", choices=RENDER_VIEW_CHOICES, help="view name")
+    render_parser.add_argument(
+        "--target",
+        default=DEFAULT_TARGET,
+        help=f"target event for trace view, default: {DEFAULT_TARGET}",
+    )
     render_parser.add_argument(
         "--format",
         choices=("dot", "svg"),
@@ -143,7 +149,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         help="compatibility alias for --text object",
     )
     parser.add_argument("--text", choices=TEXT_VIEW_CHOICES, metavar="VIEW", help="print text view")
-    parser.add_argument("--graph", choices=VIEW_CHOICES, metavar="VIEW", help="print graph view")
+    parser.add_argument("--graph", choices=RENDER_VIEW_CHOICES, metavar="VIEW", help="print graph view")
     parser.add_argument(
         "--derive",
         action="store_true",
@@ -190,6 +196,7 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
             or args.derive
             or args.strict
             or args.text == "trace"
+            or args.graph == "trace"
         )
         if needs_derivation:
             derive_code = _run_derive_stage(paths["model"], paths["derive"], args.target)
@@ -214,7 +221,7 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 _render_view_output(paths, args.text, "text", work, args.spec)
             )
         if args.graph:
-            fmt = "svg" if args.graph == "timeline" else "dot"
+            fmt = "svg" if args.graph in {"timeline", "trace"} else "dot"
             selected_outputs.append(
                 _render_view_output(paths, args.graph, fmt, work, args.spec)
             )
@@ -326,6 +333,10 @@ def _run_render(args: argparse.Namespace) -> int:
         code = _run_model_stage(paths["ast"], paths["model"])
         if code != 0:
             return code
+        if args.view == "trace":
+            code = _ensure_derivation(paths, args.target)
+            if code != 0:
+                return code
         output = _render_view_output(paths, args.view, args.format, work, args.spec)
         if args.output is not None:
             _write_output(args.output, output, ascii_only=args.format == "dot")

@@ -159,6 +159,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(stdout.getvalue().startswith("digraph TimelineView"))
 
+    def test_render_trace_command_writes_svg(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "trace.svg"
+            exit_code = main(
+                ["render", str(self.spec), "trace", "--format", "svg", "-o", str(output)]
+            )
+
+            self.assertEqual(exit_code, 0)
+            text = output.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
+            self.assertIn("StartupTimeline.Setup", text)
+
     def test_legacy_graph_timeline_keeps_svg_behavior(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
