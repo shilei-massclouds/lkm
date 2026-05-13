@@ -9,6 +9,7 @@ from common.derive_types import (
     DerivationRecord,
     DerivationResult,
     DerivationStatus,
+    DerivationTraceNode,
     EventTransition,
 )
 from common.model_types import EventDef, ObjectDef, ObjectModel, StateDef
@@ -68,7 +69,12 @@ def render_derivation_text(result: DerivationResult) -> str:
 
     lines = [summarize_derivation(result)]
 
-    if result.transitions:
+    if result.trace:
+        lines.append("")
+        lines.append("trace:")
+        for node in result.trace:
+            _append_trace_node(lines, node, depth=0)
+    elif result.transitions:
         lines.append("")
         lines.append("transitions:")
         for transition in result.transitions:
@@ -98,6 +104,8 @@ class _Deriver:
         self.states: dict[str, str] = {}
         self.records: list[DerivationRecord] = []
         self.transitions: list[EventTransition] = []
+        self.trace: list[DerivationTraceNode] = []
+        self.trace_stack: list[_TraceFrame] = []
         self.stack: list[tuple[str, str]] = []
         self.validated_states: set[tuple[str, str]] = set()
 
@@ -117,6 +125,7 @@ class _Deriver:
             states=dict(self.states),
             records=tuple(self.records),
             transitions=tuple(self.transitions),
+            trace=tuple(self.trace),
         )
 
     def _parse_target(self) -> tuple[str | None, str | None]:
@@ -185,10 +194,21 @@ class _Deriver:
         if event is None:
             return False
 
+        trace_frame = _TraceFrame(
+            object_name=object_name,
+            event_name=event_name,
+            source_state=event.source_state,
+            target_state=event.target_state,
+            span=event.decl.span,
+        )
+        self.trace_stack.append(trace_frame)
         self.stack.append(key)
+        exit_status = DerivationStatus.BLOCKED
+        exit_message: str | None = None
         try:
             self._collect_deferred(event.decl.deferred, event, "event")
             if not self._verify_blocks(event.decl.depends_on, "depends_on", event=event):
+                exit_message = "depends_on blocked"
                 return False
 
             for block in event.decl.drives:
@@ -203,6 +223,7 @@ class _Deriver:
                             event_name=event_name,
                             expression=entry,
                         )
+                        exit_message = f"cannot parse drives entry: {entry}"
                         return False
 
                     driven_object, driven_event = match.group(1), match.group(2)
@@ -216,6 +237,10 @@ class _Deriver:
                             event_name=event_name,
                             expression=entry,
                         )
+                        exit_message = (
+                            "driven event blocked: "
+                            f"{_event_label(driven_object, driven_event)}"
+                        )
                         return False
 
             if self.states.get(object_name) != event.source_state:
@@ -227,6 +252,10 @@ class _Deriver:
                     event.decl.span,
                     object_name=object_name,
                     event_name=event_name,
+                )
+                exit_status = DerivationStatus.CONTRADICTION
+                exit_message = (
+                    f"source state changed to State::{self.states.get(object_name)}"
                 )
                 return False
 
@@ -248,9 +277,15 @@ class _Deriver:
                 event_name=event_name,
                 state_name=event.target_state,
             )
-            return self._validate_state(object_name, event.target_state)
+            if self._validate_state(object_name, event.target_state):
+                exit_status = DerivationStatus.PROVED
+                return True
+            exit_message = "target state invariant blocked"
+            return False
         finally:
             self.stack.pop()
+            self.trace_stack.pop()
+            self._finish_trace(trace_frame, exit_status, exit_message)
 
     def _event_from_current_state(
         self, obj: ObjectDef, event_name: str, current_state: str | None
@@ -445,6 +480,45 @@ class _Deriver:
             )
         )
 
+    def _finish_trace(
+        self,
+        frame: "_TraceFrame",
+        status: DerivationStatus,
+        message: str | None,
+    ) -> None:
+        node = DerivationTraceNode(
+            object_name=frame.object_name,
+            event_name=frame.event_name,
+            source_state=frame.source_state,
+            target_state=frame.target_state,
+            status=status,
+            message=message,
+            span=frame.span,
+            children=tuple(frame.children),
+        )
+        if self.trace_stack:
+            self.trace_stack[-1].children.append(node)
+        else:
+            self.trace.append(node)
+
+
+class _TraceFrame:
+    def __init__(
+        self,
+        *,
+        object_name: str,
+        event_name: str,
+        source_state: str,
+        target_state: str,
+        span: SourceSpan,
+    ) -> None:
+        self.object_name = object_name
+        self.event_name = event_name
+        self.source_state = source_state
+        self.target_state = target_state
+        self.span = span
+        self.children: list[DerivationTraceNode] = []
+
 
 def _find_event(obj: ObjectDef, event_name: str) -> EventDef | None:
     for state in obj.states.values():
@@ -480,6 +554,22 @@ def _record_counts(records: tuple[DerivationRecord, ...]) -> dict[DerivationStat
     return counts
 
 
+def _append_trace_node(
+    lines: list[str], node: DerivationTraceNode, depth: int
+) -> None:
+    indent = "  " * depth
+    lines.append(f"{indent}> {node.label} State::{node.source_state}")
+    for child in node.children:
+        _append_trace_node(lines, child, depth + 1)
+
+    suffix = ""
+    if node.status in (DerivationStatus.BLOCKED, DerivationStatus.CONTRADICTION):
+        suffix = f" {node.status.value}"
+        if node.message:
+            suffix += f": {node.message}"
+    lines.append(f"{indent}< {node.label} State::{node.target_state}{suffix}")
+
+
 def _format_record(record: DerivationRecord) -> str:
     location = ""
     if record.span is not None:
@@ -492,6 +582,7 @@ __all__ = [
     "DerivationRecord",
     "DerivationResult",
     "DerivationStatus",
+    "DerivationTraceNode",
     "EventTransition",
     "derive",
     "render_derivation_text",

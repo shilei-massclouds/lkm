@@ -466,12 +466,19 @@ def _derive_summary(data: dict[str, Any]) -> str:
 
 def _derive_report(data: dict[str, Any]) -> str:
     lines = [_derive_summary(data)]
-    transitions = data.get("transitions", [])
-    if transitions:
+    trace = data.get("trace", [])
+    if trace:
         lines.append("")
-        lines.append("transitions:")
-        for transition in transitions:
-            lines.append(f"- {transition['label']}")
+        lines.append("trace:")
+        for node in trace:
+            _append_trace_node(lines, node, depth=0)
+    else:
+        transitions = data.get("transitions", [])
+        if transitions:
+            lines.append("")
+            lines.append("transitions:")
+            for transition in transitions:
+                lines.append(f"- {transition['label']}")
 
     for status in ("blocked", "contradiction", "deferred", "obligation"):
         records = [record for record in data["records"] if record["status"] == status]
@@ -482,6 +489,21 @@ def _derive_report(data: dict[str, Any]) -> str:
         for record in records:
             lines.append(f"- {_format_record(record)}")
     return "\n".join(lines)
+
+
+def _append_trace_node(lines: list[str], node: dict[str, Any], depth: int) -> None:
+    indent = "  " * depth
+    label = node["label"]
+    lines.append(f"{indent}> {label} State::{node['source_state']}")
+    for child in node.get("children", []):
+        _append_trace_node(lines, child, depth + 1)
+
+    status = node.get("status")
+    suffix = ""
+    if status in ("blocked", "contradiction"):
+        message = node.get("message")
+        suffix = f" {status}: {message}" if message else f" {status}"
+    lines.append(f"{indent}< {label} State::{node['target_state']}{suffix}")
 
 
 def _derive_status(summary: dict[str, Any]) -> str:

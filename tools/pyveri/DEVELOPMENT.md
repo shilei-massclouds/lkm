@@ -396,6 +396,8 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 - 当前完整推导报告过于平铺，信息噪音较大。后续应重新设计输出层次，默认只显示摘要、目标状态、根因 blocked、deferred 和 obligation 统计；详细 transitions 和全部 obligation 应通过 verbose/detail 参数打开。
 - 将默认推导过程显示为进入/退出式 trace，而不是平铺的 `transitions` 列表。每个事件输出成对记录：进入行使用 `>`，退出行使用 `<`；被 `drives` 的子事件缩进两格嵌套在中间。成功退出行不额外标注 `ok`，失败退出行标注 `blocked:` 或 `contradiction:` 并附带原因。
+- trace 图形输出应先建立单元格布局，再填充内容：横向先划分对象/嵌套列，列与列之间的空隙也作为占位单元格；列内部再按时间顺序分段，状态框、事件区间和内部空隙都占据明确单元格。虚线只作为布局辅助线或 debug 层，最终 SVG 默认不必显示。
+- 当前先以 `StartupTimeline.Event::Setup` 从 `State::Base` 到 `State::Ready` 的推导作为模板实现结构化 trace；未来完整入口再扩展为 `StartupTimeline` 顺序执行 `Preset`、`Setup`、`Enable` 并推进到 `State::Online`。
 - 按 `blocked`、`deferred`、`obligation` 分组时进一步按对象/事件/状态分组。
 - 对 `blocked` 输出根因链，而不是只输出逐层传播的 blocked。
 - 在摘要中区分“目标已达但存在 obligation”和“目标未达”。

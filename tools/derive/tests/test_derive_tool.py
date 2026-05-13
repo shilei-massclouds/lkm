@@ -47,7 +47,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["summary"]["contradiction"], 0)
             self.assertEqual(data["states"]["StartupTimeline"], "Ready")
 
-    def test_derive_json_contains_records_and_transitions(self) -> None:
+    def test_derive_json_contains_records_transitions_and_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model = self._build_model_json(tmp)
             derive = Path(tmp) / "entry-prelude-object-model.derive.json"
@@ -63,6 +63,14 @@ class DeriveToolTests(unittest.TestCase):
                     for transition in data["transitions"]
                 )
             )
+            self.assertEqual(len(data["trace"]), 1)
+            root = data["trace"][0]
+            self.assertEqual(root["object"], "StartupTimeline")
+            self.assertEqual(root["event"], "Setup")
+            self.assertEqual(root["source_state"], "Base")
+            self.assertEqual(root["target_state"], "Ready")
+            self.assertEqual(root["status"], "proved")
+            self.assertGreater(len(root["children"]), 0)
             self.assertTrue(
                 any(record["span"] is not None for record in data["records"])
             )

@@ -20,6 +20,7 @@ from common.derive_types import (
     DerivationRecord,
     DerivationResult,
     DerivationStatus,
+    DerivationTraceNode,
     EventTransition,
 )
 from derive_tool.engine import derive, render_derivation_text, summarize_derivation
@@ -29,6 +30,7 @@ __all__ = [
     "DerivationRecord",
     "DerivationResult",
     "DerivationStatus",
+    "DerivationTraceNode",
     "EventTransition",
     "derive",
     "render_derivation_text",

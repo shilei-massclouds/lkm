@@ -50,6 +50,24 @@ class EventTransition:
 
 
 @dataclass(frozen=True)
+class DerivationTraceNode:
+    """One nested event node in the derivation trace."""
+
+    object_name: str
+    event_name: str
+    source_state: str
+    target_state: str
+    status: DerivationStatus
+    message: str | None = None
+    span: SourceSpan | None = None
+    children: tuple["DerivationTraceNode", ...] = ()
+
+    @property
+    def label(self) -> str:
+        return f"{self.object_name}.Event::{self.event_name}"
+
+
+@dataclass(frozen=True)
 class DerivationResult:
     """Result of deriving a target event from an object model."""
 
@@ -60,6 +78,7 @@ class DerivationResult:
     states: dict[str, str]
     records: tuple[DerivationRecord, ...] = ()
     transitions: tuple[EventTransition, ...] = ()
+    trace: tuple[DerivationTraceNode, ...] = ()
 
     @property
     def blocked(self) -> list[DerivationRecord]:

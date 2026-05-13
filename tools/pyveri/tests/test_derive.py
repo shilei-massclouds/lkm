@@ -71,6 +71,9 @@ class DerivationTests(unittest.TestCase):
             [transition.object_name for transition in derivation.transitions],
             ["B", "A"],
         )
+        self.assertEqual(len(derivation.trace), 1)
+        self.assertEqual(derivation.trace[0].object_name, "A")
+        self.assertEqual(derivation.trace[0].children[0].object_name, "B")
         self.assertTrue(
             any(
                 record.status is DerivationStatus.OBLIGATION
@@ -137,8 +140,10 @@ class DerivationTests(unittest.TestCase):
         self.assertTrue(derivation.ok)
         self.assertIn("derive: ok", text)
         self.assertIn("target_reached: yes", text)
-        self.assertIn("transitions:", text)
-        self.assertIn("PreparePhase.Event::Setup", text)
+        self.assertIn("trace:", text)
+        self.assertIn("> StartupTimeline.Event::Setup State::Base", text)
+        self.assertIn("  > PreparePhase.Event::Setup State::Base", text)
+        self.assertIn("< StartupTimeline.Event::Setup State::Ready", text)
         self.assertEqual(derivation.states["StartupTimeline"], "Ready")
         self.assertFalse(derivation.blocked)
 

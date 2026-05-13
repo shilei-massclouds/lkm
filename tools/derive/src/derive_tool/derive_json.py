@@ -9,6 +9,7 @@ from common.derive_types import (
     DerivationRecord,
     DerivationResult,
     DerivationStatus,
+    DerivationTraceNode,
     EventTransition,
 )
 from common.spec_ast import SourceSpan
@@ -51,6 +52,7 @@ def derivation_to_json(
         "transitions": [
             _transition_to_json(transition) for transition in result.transitions
         ],
+        "trace": [_trace_to_json(node) for node in result.trace],
     }
 
 
@@ -80,6 +82,20 @@ def _transition_to_json(transition: EventTransition) -> dict[str, str]:
         "source_state": transition.source_state,
         "target_state": transition.target_state,
         "label": transition.label,
+    }
+
+
+def _trace_to_json(node: DerivationTraceNode) -> dict[str, Any]:
+    return {
+        "object": node.object_name,
+        "event": node.event_name,
+        "source_state": node.source_state,
+        "target_state": node.target_state,
+        "status": node.status.value,
+        "message": node.message,
+        "span": _optional_span_to_json(node.span),
+        "label": node.label,
+        "children": [_trace_to_json(child) for child in node.children],
     }
 
 

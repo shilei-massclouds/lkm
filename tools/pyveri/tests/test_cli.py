@@ -62,7 +62,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         text = stdout.getvalue()
         self.assertIn("derive: ok", text)
-        self.assertIn("transitions:", text)
+        self.assertIn("trace:", text)
+        self.assertIn("> StartupTimeline.Event::Setup State::Base", text)
+        self.assertIn("< StartupTimeline.Event::Setup State::Ready", text)
 
     def test_check_command_uses_strict_derivation_exit_code(self) -> None:
         stdout = io.StringIO()
