@@ -251,17 +251,20 @@ def _render_trace_svg(view: ViewModel) -> str:
         '<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">',
         '<path d="M0,0 L8,4 L0,8 Z" fill="#334155" />',
         "</marker>",
+        '<marker id="dot" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto" markerUnits="strokeWidth">',
+        '<circle cx="3" cy="3" r="2.2" fill="#334155" />',
+        "</marker>",
         "</defs>",
         "<style>",
         "text { font-family: Arial, sans-serif; fill: #1f2937; }",
         ".state { fill: #ffffff; stroke: #334155; stroke-width: 1.1; }",
         ".event-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
         ".verified-state { fill: #f8fafc; stroke: #64748b; stroke-width: 1.1; }",
-        ".phase-arrow { stroke: #0f172a; stroke-width: 4; fill: none; marker-end: url(#arrow); }",
+        ".phase-arrow { stroke: #0f172a; stroke-width: 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".phase-label { fill: #0f172a; font-weight: 600; }",
-        ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-end: url(#arrow); }",
-        ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-end: url(#arrow); }",
-        ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-end: url(#arrow); }",
+        ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
+        ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
+        ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".muted { fill: #64748b; }",
         "</style>",
     ]
@@ -288,6 +291,8 @@ def _render_trace_svg(view: ViewModel) -> str:
                 continue
             _append_trace_state_arrow(lines, cell_box(source), cell_box(target))
         elif arrow.kind == "drives":
+            if _is_phase_to_phase_arrow(source, target):
+                continue
             _append_trace_horizontal_arrow(
                 lines, cell_box(source), cell_box(target), css_class="drive-arrow"
             )
@@ -573,8 +578,16 @@ def _is_trace_phase_event(label: str) -> bool:
 
 
 def _is_trace_phase_row(label: str) -> bool:
+    if ".verified." in label:
+        return False
     object_name = label.split(".", 1)[0]
     return object_name == "StartupTimeline" or object_name.endswith("Phase")
+
+
+def _is_phase_to_phase_arrow(source: TraceCell, target: TraceCell) -> bool:
+    if source.kind != "event_span" or target.kind != "event_span":
+        return False
+    return _is_trace_phase_event(source.label) and _is_trace_phase_event(target.label)
 
 
 def _trace_event_id(cell_id: str) -> str:

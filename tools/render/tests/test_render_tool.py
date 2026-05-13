@@ -104,6 +104,7 @@ class RenderToolTests(unittest.TestCase):
             self.assertIn("StartupTimeline.Setup", text)
             self.assertIn("PreparePhase.Setup", text)
             self.assertIn("phase-arrow", text)
+            self.assertIn('marker id="dot"', text)
             self.assertIn("Riscv64.Online", text)
             self.assertIn("depends-arrow", text)
             self.assertNotIn("StartupTimeline.Base", text)

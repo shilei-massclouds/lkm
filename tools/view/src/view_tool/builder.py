@@ -424,14 +424,16 @@ class _TraceLayoutBuilder:
             )
         )
 
-        verified_column = (content_column + 1) * 2
+        verified_content_column = content_column + 1
+        child_content_column = content_column + 2
+        verified_column = verified_content_column * 2
         verified_gap_column = verified_column + 1
         verified_states = verified_states_by_event.get(
             (str(data["object"]), str(data["event"])), []
         )
         if verified_states:
             self._max_content_column = max(
-                self._max_content_column, content_column + 1
+                self._max_content_column, verified_content_column
             )
         for verified_index, (object_name, state_name) in enumerate(verified_states):
             verified_id = f"{event_id}-verified-{verified_index}"
@@ -465,7 +467,7 @@ class _TraceLayoutBuilder:
             )
             self._place_node(
                 child,
-                content_column=content_column + 1,
+                content_column=child_content_column,
                 parent_event_id=event_id,
                 verified_states_by_event=verified_states_by_event,
             )

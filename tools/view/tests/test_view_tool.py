@@ -126,6 +126,19 @@ class ViewToolTests(unittest.TestCase):
                     for cell in metadata["trace_cells"]
                 )
             )
+            riscv64_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "verified_state"
+                and cell["label"] == "Riscv64.State::Online"
+            )
+            prepare_setup_cell = next(
+                cell
+                for cell in metadata["trace_cells"]
+                if cell["kind"] == "event_span"
+                and cell["label"] == "PreparePhase.Event::Setup"
+            )
+            self.assertGreater(riscv64_cell["column"], prepare_setup_cell["column"])
             prepare_ready_cells = [
                 cell
                 for cell in metadata["trace_cells"]
