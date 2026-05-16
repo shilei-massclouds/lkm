@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 84)
+            self.assertEqual(data["summary"]["obligation"], 82)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -490,11 +490,9 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
-            self.assertTrue(
+            self.assertFalse(
                 any(
                     record["predicate"] == "phys_to_virt_transition_completed"
-                    and record["proof_class"] == "architecture_state"
-                    and record["proof_provider"] == "prior_derivation_facts"
                     for record in obligations
                 )
             )
@@ -514,12 +512,26 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "gp_relative_access_ready"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "phys_to_virt_transition_completed"
+                    and record["proof_class"] == "architecture_state"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "gp_relative_access_ready"
                     and record["proof_class"] == "architecture_state"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             attrs_providers = {

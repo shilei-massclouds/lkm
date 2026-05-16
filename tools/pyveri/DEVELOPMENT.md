@@ -482,6 +482,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - 已引入事件后置断言块 `ensures { ... }`。`ensures` 表达事件完成后保证成立的关系，不表示在 invariant 中赋值，也不同于 `may_change` 的“允许改变”。推导器现在可用“进入目标状态的事件 `ensures`”证明该目标状态中完全相同的 invariant；第一批用于消化 `register_effect` 相关寄存器状态关系。
 - 推导器已开始记录已证明表达式，并用前序事实继续证明一小组派生 invariant：`valid_task_ref(Riscv64.tp)`、`valid_stack_pointer(Riscv64.sp)` 和 `inside(Riscv64.sp, ...)` 可由已证明的 `tp/sp` 后置关系推出。
 - `FixMap.Preset` 已用 `ensures { slot_contains(fdt_slot, RawDtb); }` 表达“RawDtb 已被安排到 FDT fixmap 槽位”的事件后置事实；`EarlyVm.Preset` 作为复合事件，用 `ensures { slot_contains(FixMap.fdt_slot, RawDtb); }` 表达驱动 `RawDtb` 与 `FixMap` 后形成的对外事实。`EarlyVm.Setup` 中重复依赖的同一 `slot_contains(...)` 可由前序已证明事实推出，因此 `fixmap_slot_content/prior_derivation_facts` 这一组当前已收口。
+- `TrampolineVm.Enable` 已用事件后置条件证明 `phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap)`；`KernelImage.Enable` 已用事件后置条件证明 `gp_relative_access_ready()`。这两项目前作为具体事件效果收口，而不是引入泛化自动规则。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 

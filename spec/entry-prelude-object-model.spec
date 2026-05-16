@@ -923,6 +923,7 @@ object KernelImage: ImageObject {
 
                 ensures {
                     Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
+                    gp_relative_access_ready();
                 }
             }
         }
@@ -1245,6 +1246,10 @@ object TrampolineVm: AddressSpaceObject {
 
                 may_change {
                     Riscv64.satp;
+                }
+
+                ensures {
+                    phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap);
                 }
             }
         }
