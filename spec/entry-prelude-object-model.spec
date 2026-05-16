@@ -167,6 +167,12 @@ type KernelImageMap: VirtualAddressArea {
     range: Derived<VirtAddrRange<KernelImage>, range(Config.kernel_link_addr, Config.kernel_link_addr + Config.kernel_image_va_window_size)>;
 }
 
+type TrampolineMap: VirtualAddressArea {
+    phys_start: Derived<SymbolAddr, Lds.kernel_start>;
+    virt_start: Derived<VirtAddr<KernelImage>, Config.kernel_link_addr>;
+    size: Derived<Size, Config.pmd_size>;
+}
+
 type DtbHeader {
     magic: u32;
     total_size: Size;
@@ -362,6 +368,7 @@ object Config: PrepareObject {
             pt_size_on_stack < page_size;
             kernel_link_addr != 0;
             page_aligned(kernel_link_addr);
+            valid_virt_addr(kernel_link_addr);
             kernel_image_va_window_size > 0;
             kernel_image_va_window_size >= pmd_size;
             valid_satp_mode(satp_mode);
@@ -1153,10 +1160,8 @@ object TrampolineVm: AddressSpaceObject {
                 depends_on {
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
-                    page_aligned(StaticObjects.trampoline_pg_dir);
                     Lds.state == State::Online;
                     aligned(Lds.kernel_start, Config.pmd_size);
-                    valid_virt_addr(Config.kernel_link_addr);
                     valid_satp_mode(Config.satp_mode);
                 }
 
@@ -1172,7 +1177,7 @@ object TrampolineVm: AddressSpaceObject {
      */
     state State::Ready {
         invariant {
-            trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, Lds.kernel_start, Config.kernel_link_addr);
+            trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap);
         }
 
         events {
@@ -1196,8 +1201,8 @@ object TrampolineVm: AddressSpaceObject {
      */
     state State::Online {
         invariant {
-            phys_to_virt_transition_completed();
-            trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, Lds.kernel_start, Config.kernel_link_addr);
+            phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap);
+            trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap);
         }
 
         events {
@@ -1277,7 +1282,6 @@ object EarlyVm: AddressSpaceObject {
                     KernelImage.state == State::Ready;
                     RawDtb.state == State::Ready;
                     FixMap.state == State::Ready;
-                    page_aligned(StaticObjects.early_pg_dir);
                     fits_in_kernel_image_map(KernelImage, KernelImageMap);
                     slot_contains(FixMap.fdt_slot, RawDtb);
                 }
@@ -1372,7 +1376,6 @@ object SwapperVm: AddressSpaceObject {
                 depends_on {
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
-                    page_aligned(StaticObjects.swapper_pg_dir);
                 }
 
                 may_change {

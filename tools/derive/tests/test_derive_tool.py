@@ -233,6 +233,54 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_virt_addr"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "config_source_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "trampoline_mapping_ready"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "phys_to_virt_transition_completed"
+                    and record["proof_class"] == "architecture_state"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_segment_set"
+                    and record["proof_class"] == "linker_layout"
+                    and record["proof_provider"] == "linker_script_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "memory_zeroed"
+                    and record["proof_class"] == "memory_content"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "gp_relative_access_ready"
+                    and record["proof_class"] == "architecture_state"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
             attrs_providers = {
                 record["object"]: (record["proof_class"], record["proof_provider"])
                 for record in obligations

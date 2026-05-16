@@ -467,6 +467,11 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - `EarlyVm` 的 FDT 映射谓词已改为通用 fixmap slot 语义：`fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。RawDtb 是否位于该槽位由 `FixMap` 的 `slot_contains(...)` 负责，页表映射阶段不再直接绑定 RawDtb 物理范围。
 - `KernelImageArea` 已更名为 `KernelImageMap`，表达内核映像在 EarlyVm 中的虚拟映射区域。`EarlyVm.Ready` 和 `EarlyVm.Online` 分别使用 `kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap)` 与 `kernel_image_accessible(KernelImage, KernelImageMap)`，避免把内核映像映射写成无参数黑盒。
 - `EarlyVm.Setup` 不再直接使用 `KernelImage.end - KernelImage.start < Config.kernel_image_va_window_size` 这种裸关系表达容量约束，而是使用 `fits_in_kernel_image_map(KernelImage, KernelImageMap)` 表达“内核映像可装入该映射区域”；具体窗口大小仍由 `KernelImageMap.range` 从 `Config.kernel_link_addr` 和 `Config.kernel_image_va_window_size` 派生。
+- `valid_virt_addr(kernel_link_addr)` 已上移到 `Config.Online`，表示内核链接地址有效性属于配置/地址布局事实，`TrampolineVm.Setup` 不再重复声明该检查。`trampoline_mapping_ready(...)` 归入 `boot_code_candidate`，`phys_to_virt_transition_completed()` 归入 `prior_derivation_facts`。
+- 已引入 `TrampolineMap` 表示第一次物理到虚拟地址过渡所需的最小跳板映射区域，其物理起点来自 `Lds.kernel_start`，虚拟起点来自 `Config.kernel_link_addr`，大小来自 `Config.pmd_size`。`TrampolineVm` 现在使用 `trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap)`，不再把物理起点和虚拟起点散落在谓词参数里。
+- `phys_to_virt_transition_completed(...)` 已参数化为 `phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap)`，表示第一次地址空间过渡完成应由跳板页表、跳板映射和 `TrampolineVm.Enable` 的 satp 切换共同推出。
+- `KernelImage` 自身的剩余义务按来源细化：`valid_segment_set(segments)` 来自链接脚本段布局，`memory_zeroed(segments.bss.range)` 来自启动代码清零 BSS，`gp_relative_access_ready()` 由 `KernelImage.Enable` 重置 gp、`KernelImageMap` 可访问等前序事实推出。
+- `StaticObjects` 中的 `valid_page_table_storage(...)` 已统一承担静态页表存储的存在性、稳定性、静态分配、页对齐和最小容量约束。`TrampolineVm.Setup`、`EarlyVm.Setup` 和 `SwapperVm.Setup` 不再重复声明 `page_aligned(StaticObjects.*_pg_dir)`；各 VM 阶段只依赖 `StaticObjects.state == State::Online` 和各自的映射语义。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 

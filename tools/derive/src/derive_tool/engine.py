@@ -100,10 +100,16 @@ _DERIVED_PROVIDERS = {
     "kernel_image_accessible": "prior_derivation_facts",
     "kernel_image_mapping_ready": "boot_code_candidate",
     "linear_map_area_reserved": "config_source_candidate",
+    "gp_relative_access_ready": "prior_derivation_facts",
+    "memory_zeroed": "boot_code_candidate",
+    "phys_to_virt_transition_completed": "prior_derivation_facts",
     "slot_contains": "prior_derivation_facts",
+    "trampoline_mapping_ready": "boot_code_candidate",
     "valid_dtb_header": "boot_code_candidate",
     "valid_dtb_magic": "boot_code_candidate",
     "valid_hart_id": "fdt_and_boot_protocol",
+    "valid_virt_addr": "config_source_candidate",
+    "valid_segment_set": "linker_script_candidate",
 }
 _CONTAINS_PROOFS = {
     "contains(PhysicalMemory.ram, header_range)": (
