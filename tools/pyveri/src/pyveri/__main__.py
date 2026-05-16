@@ -617,6 +617,7 @@ def _derive_report(data: dict[str, Any]) -> str:
         lines.append(f"{status}:")
         if status == "obligation":
             lines.extend(_format_obligation_category_summary(records))
+            lines.extend(_format_obligation_provider_summary(records))
         for record in records:
             lines.append(f"- {_format_record(record)}")
     return "\n".join(lines)
@@ -658,7 +659,12 @@ def _derive_ok_summary(summary: dict[str, Any]) -> bool:
 def _format_record(record: dict[str, Any]) -> str:
     span = record.get("span")
     location = f"line {span['start_line']}: " if span is not None else ""
-    return f"{location}{record['message']}"
+    proof = ""
+    if record.get("proof_provider") or record.get("proof_class"):
+        proof_provider = record.get("proof_provider") or "unknown"
+        proof_class = record.get("proof_class") or "unknown"
+        proof = f" [{proof_provider}/{proof_class}]"
+    return f"{location}{record['message']}{proof}"
 
 
 def _format_obligation_category_summary(records: list[dict[str, Any]]) -> list[str]:
@@ -670,6 +676,24 @@ def _format_obligation_category_summary(records: list[dict[str, Any]]) -> list[s
         return []
     summary = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
     return [f"  categories: {summary}"]
+
+
+def _format_obligation_provider_summary(records: list[dict[str, Any]]) -> list[str]:
+    counts: dict[tuple[str, str], int] = {}
+    for record in records:
+        proof_provider = record.get("proof_provider") or "unknown"
+        proof_class = record.get("proof_class") or "unknown"
+        key = (proof_provider, proof_class)
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return []
+
+    lines = ["  providers:"]
+    for (proof_provider, proof_class), count in sorted(
+        counts.items(), key=lambda item: (-item[1], item[0][0], item[0][1])
+    ):
+        lines.append(f"    {proof_provider}/{proof_class}: {count}")
+    return lines
 
 
 def _write_output(path: Path, text: str, ascii_only: bool) -> None:

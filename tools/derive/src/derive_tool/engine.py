@@ -379,6 +379,7 @@ def render_derivation_text(result: DerivationResult) -> str:
         lines.append(f"{status.value}:")
         if status is DerivationStatus.OBLIGATION:
             lines.extend(_format_obligation_category_summary(records))
+            lines.extend(_format_obligation_provider_summary(records))
         for record in records:
             lines.append(f"- {_format_record(record)}")
 
@@ -968,6 +969,24 @@ def _format_obligation_category_summary(records: list[DerivationRecord]) -> list
     return [f"  categories: {summary}"]
 
 
+def _format_obligation_provider_summary(records: list[DerivationRecord]) -> list[str]:
+    counts: dict[tuple[str, str], int] = {}
+    for record in records:
+        proof_provider = record.proof_provider or "unknown"
+        proof_class = record.proof_class or "unknown"
+        key = (proof_provider, proof_class)
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return []
+
+    lines = ["  providers:"]
+    for (proof_provider, proof_class), count in sorted(
+        counts.items(), key=lambda item: (-item[1], item[0][0], item[0][1])
+    ):
+        lines.append(f"    {proof_provider}/{proof_class}: {count}")
+    return lines
+
+
 def _classify_obligation(
     expression: str, source_kind: str, context_object: str | None
 ) -> dict[str, str | None]:
@@ -1085,7 +1104,12 @@ def _format_record(record: DerivationRecord) -> str:
     location = ""
     if record.span is not None:
         location = f"line {record.span.start_line}: "
-    return f"{location}{record.message}"
+    proof = ""
+    if record.proof_provider or record.proof_class:
+        proof_provider = record.proof_provider or "unknown"
+        proof_class = record.proof_class or "unknown"
+        proof = f" [{proof_provider}/{proof_class}]"
+    return f"{location}{record.message}{proof}"
 
 
 __all__ = [

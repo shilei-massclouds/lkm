@@ -142,6 +142,8 @@ class DerivationTests(unittest.TestCase):
         self.assertIn("target_reached: yes", text)
         self.assertIn("trace:", text)
         self.assertIn("categories:", text)
+        self.assertIn("providers:", text)
+        self.assertIn("prior_derivation_facts/register_effect", text)
         self.assertIn("> StartupTimeline.Event::Setup State::Base", text)
         self.assertIn("  > PreparePhase.Event::Setup State::Base", text)
         self.assertIn("< StartupTimeline.Event::Setup State::Ready", text)
