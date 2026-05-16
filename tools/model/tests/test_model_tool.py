@@ -55,6 +55,10 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(setup["source_state"], "Base")
             self.assertEqual(setup["target_state"], "Ready")
             self.assertEqual(
+                objects["PhysicalMemory"]["properties"]["access"],
+                "Access::ReadOnly",
+            )
+            self.assertEqual(
                 [entry["text"] for entry in setup["drives"][0]["entries"]],
                 [
                     "PreparePhase.Event::Setup",

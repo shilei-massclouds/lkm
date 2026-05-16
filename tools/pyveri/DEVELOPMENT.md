@@ -450,6 +450,13 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 这一步只增强 `derive.json` 和文本报告的可读性，不自动证明任何 obligation，不改变 `check` 策略，也不影响 `blocked`、`contradiction` 或 `target_reached`。
 
+已确认的分类调整：
+
+- `attrs_accessible(self)` 不能只按谓词名分类，应结合对象来源决定证明来源，例如配置源、链接脚本、静态对象布局、FDT/平台描述或启动 ABI。
+- `context_is(SystemExclusive)` 应由此前推导出的启动阶段、中断状态、事件流状态和 CPU 组状态等事实组合推出，归入 `derived_candidate / system_exclusive_context / prior_derivation_facts`。
+- `valid_hart_id(...)` 依赖启动 ABI 中的 boot hart id 和 FDT/平台 CPU 描述，归入 `derived_candidate / boot_hart_identity / fdt_and_boot_protocol`。
+- `CpuGroup.boot_cpu_hartid` 不是可选值，而是 `CpuGroup.Prepared` 后生效的属性；规格中使用 `HartId`，不使用 `Option<HartId>`、`Some(...)` 或 `unwrap()`。
+
 #### Step C.1: 收口 trace 输出和注释数据流
 
 当前 trace SVG 已能作为基础推导过程图输出，并支持来自 `.spec` 注释的 overlay 注释层。下一步需要把已经暴露的问题收口：

@@ -78,6 +78,7 @@ def _object_to_json(item: ObjectDef) -> dict[str, Any]:
         "parent": item.parent,
         "children": item.children,
         "attrs": item.attrs,
+        "properties": item.decl.properties,
         "states": {
             name: _state_to_json(state)
             for name, state in sorted(item.states.items())

@@ -83,6 +83,7 @@ class DeriveToolTests(unittest.TestCase):
             obligations = [
                 record for record in data["records"] if record["status"] == "obligation"
             ]
+            proved = [record for record in data["records"] if record["status"] == "proved"]
             self.assertTrue(
                 any(
                     record["obligation_category"] == "auto_candidate"
@@ -100,17 +101,17 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["predicate"] == "has_slot"
-                    and record["obligation_category"] == "auto_candidate"
                     and record["proof_class"] == "config_structure"
-                    for record in obligations
+                    and record["proof_provider"] == "builtin"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["predicate"] == "readonly"
-                    and record["obligation_category"] == "auto_candidate"
                     and record["proof_class"] == "object_attribute"
-                    for record in obligations
+                    and record["proof_provider"] == "builtin"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -142,10 +143,20 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "no_service"
-                    and record["obligation_category"] == "auto_candidate"
-                    and record["proof_class"] == "state_alias"
+                    record["predicate"] == "valid_hart_id"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "boot_hart_identity"
+                    and record["proof_provider"] == "fdt_and_boot_protocol"
+                    and record["expression"] == "valid_hart_id(boot_cpu_hartid)"
                     for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "no_service"
+                    and record["proof_class"] == "state_alias"
+                    and record["proof_provider"] == "builtin"
+                    for record in proved
                 )
             )
 

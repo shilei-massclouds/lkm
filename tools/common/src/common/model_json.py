@@ -77,6 +77,7 @@ def _object_def_from_json(item: Any) -> ObjectDef:
         references=[],
         states=[state.decl for state in states.values()],
         other_blocks=[],
+        properties={str(key): str(value) for key, value in _object(data, "properties").items()},
     )
     return ObjectDef(
         name=decl.name,

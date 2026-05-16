@@ -1317,7 +1317,7 @@ object CpuGroup: HardwareObject {
     parent: Soc;
 
     attrs {
-        boot_cpu_hartid: Option<HartId>;
+        boot_cpu_hartid: HartId;
     }
 
     /*
@@ -1346,8 +1346,8 @@ object CpuGroup: HardwareObject {
      */
     state State::Prepared {
         invariant {
-            boot_cpu_hartid == Some(Riscv64.a0);
-            valid_hart_id(boot_cpu_hartid.unwrap());
+            boot_cpu_hartid == Riscv64.a0;
+            valid_hart_id(boot_cpu_hartid);
         }
 
         deferred {
@@ -1524,4 +1524,3 @@ object EntryPreludePhase: PhaseObject {
         }
     }
 }
-

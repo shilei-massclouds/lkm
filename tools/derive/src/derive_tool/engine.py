@@ -27,6 +27,11 @@ _EVENT_EXPR_RE = re.compile(
 )
 _PREDICATE_CALL_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _RELATION_RE = re.compile(r"(==|!=|>=|<=|>|<)")
+_HAS_SLOT_RE = re.compile(
+    r"\Ahas_slot\(\s*Config\.fixmap\s*,\s*FixMapSlot::([A-Za-z_][A-Za-z0-9_]*)\s*\)\Z"
+)
+_NO_SERVICE_RE = re.compile(r"\Ano_service\(\s*([A-Z][A-Za-z0-9_]*)\s*\)\Z")
+_SLOT_ENTRY_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*:\s*FixMapSlot<")
 
 _AUTO_PREDICATES = {
     "aligned": "alignment",
@@ -42,7 +47,6 @@ _ASSUMPTION_PREDICATES = {
     "addr_in_ram": "boot_input",
     "attrs_accessible": "environment",
     "context_is": "environment",
-    "valid_hart_id": "boot_input",
 }
 _EXTERNAL_PREDICATES = {
     "disjoint": "platform_memory_layout",
@@ -62,6 +66,7 @@ _EXTERNAL_PREDICATES = {
     "valid_dtb_header": "boot_input",
     "valid_dtb_magic": "boot_input",
     "valid_function_symbol": "linker_symbol",
+    "valid_hart_id": "boot_hart_identity",
     "valid_object_storage": "object_storage",
     "valid_page_table_storage": "object_storage",
     "valid_phys_range_set": "platform",
@@ -76,6 +81,7 @@ _DERIVED_PROVIDERS = {
     "kernel_fpu_disabled": "isa_spec_and_boot_code",
     "kernel_vector_disabled": "isa_spec_and_boot_code",
     "range_in_ram": "boot_code_candidate",
+    "valid_hart_id": "fdt_and_boot_protocol",
 }
 
 
@@ -439,6 +445,10 @@ class _Deriver:
                         )
                         and ok
                     )
+                elif self._try_prove_builtin_predicate(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
                 else:
                     classification = _classify_obligation(entry, kind)
                     self._record(
@@ -492,6 +502,100 @@ class _Deriver:
             state_name=state.name if state is not None else None,
             expression=expression,
         )
+        return False
+
+    def _try_prove_builtin_predicate(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        stripped = expression.strip()
+        if stripped == "readonly(self)" and state is not None:
+            obj = self.model.objects.get(state.object_name)
+            if obj is not None and obj.decl.properties.get("access") == "Access::ReadOnly":
+                self._record_builtin_proof(
+                    expression,
+                    span,
+                    kind,
+                    event,
+                    state,
+                    proof_class="object_attribute",
+                    proof_provider="builtin",
+                )
+                return True
+
+        has_slot = _HAS_SLOT_RE.match(stripped)
+        if has_slot is not None:
+            slot_name = has_slot.group(1)
+            if self._fixmap_config_has_slot(slot_name):
+                self._record_builtin_proof(
+                    expression,
+                    span,
+                    kind,
+                    event,
+                    state,
+                    proof_class="config_structure",
+                    proof_provider="builtin",
+                )
+                return True
+
+        no_service = _NO_SERVICE_RE.match(stripped)
+        if no_service is not None:
+            object_name = no_service.group(1)
+            if self.states.get(object_name) == "Destroyed":
+                self._record_builtin_proof(
+                    expression,
+                    span,
+                    kind,
+                    event,
+                    state,
+                    proof_class="state_alias",
+                    proof_provider="builtin",
+                )
+                return True
+
+        return False
+
+    def _record_builtin_proof(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+        *,
+        proof_class: str,
+        proof_provider: str,
+    ) -> None:
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class=proof_class,
+            proof_provider=proof_provider,
+        )
+
+    def _fixmap_config_has_slot(self, slot_name: str) -> bool:
+        fixmap = self.model.types.get("FixMapConfig")
+        if fixmap is None:
+            return False
+        expected = _slot_field_name(slot_name)
+        for block in fixmap.blocks:
+            if block.kind != "slots":
+                continue
+            for entry in block.entries:
+                match = _SLOT_ENTRY_RE.match(entry)
+                if match is not None and match.group(1) == expected:
+                    return True
         return False
 
     def _collect_deferred(
@@ -688,6 +792,10 @@ def _predicate_name(expression: str) -> str | None:
 
 def _is_relation_expression(expression: str) -> bool:
     return bool(_RELATION_RE.search(expression))
+
+
+def _slot_field_name(slot_name: str) -> str:
+    return slot_name[:1].lower() + slot_name[1:]
 
 
 def _append_trace_node(
