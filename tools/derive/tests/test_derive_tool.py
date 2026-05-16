@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 93)
+            self.assertEqual(data["summary"]["obligation"], 87)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -87,6 +87,12 @@ class DeriveToolTests(unittest.TestCase):
             proved = [record for record in data["records"] if record["status"] == "proved"]
             self.assertFalse(
                 any(record["proof_class"] == "register_effect" for record in obligations)
+            )
+            self.assertFalse(
+                any(
+                    record["predicate"] in ("valid_task_ref", "valid_stack_pointer")
+                    for record in obligations
+                )
             )
             self.assertNotIn(
                 "auto_candidate", data["summary"]["obligation_categories"]
@@ -435,7 +441,7 @@ class DeriveToolTests(unittest.TestCase):
                     record["predicate"] == "valid_task_ref"
                     and record["proof_class"] == "object_storage"
                     and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -443,7 +449,16 @@ class DeriveToolTests(unittest.TestCase):
                     record["predicate"] == "valid_stack_pointer"
                     and record["proof_class"] == "architecture_state"
                     and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "inside(Riscv64.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)"
+                    and record["proof_class"] == "stack_layout"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in proved
                 )
             )
             self.assertTrue(

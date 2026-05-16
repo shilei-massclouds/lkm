@@ -398,6 +398,7 @@ class _Deriver:
         self.stack: list[tuple[str, str]] = []
         self.state_validation_events: dict[tuple[str, str], EventDef] = {}
         self.validated_states: set[tuple[str, str]] = set()
+        self.proved_expressions: set[str] = set()
 
     def run(self) -> DerivationResult:
         target_object, target_event = self._parse_target()
@@ -689,6 +690,10 @@ class _Deriver:
                     entry, entry_span, kind, state, entered_by
                 ):
                     continue
+                elif self._try_prove_prior_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
                 elif self._try_prove_builtin_predicate(
                     entry, entry_span, kind, event, state
                 ):
@@ -837,6 +842,32 @@ class _Deriver:
             return True
         return False
 
+    def _try_prove_prior_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        proof_class = _prior_fact_proof_class(expression, self.proved_expressions)
+        if proof_class is None:
+            return False
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class=proof_class,
+            proof_provider="prior_derivation_facts",
+        )
+        return True
+
     def _record_builtin_proof(
         self,
         expression: str,
@@ -915,6 +946,8 @@ class _Deriver:
         proof_class: str | None = None,
         proof_provider: str | None = None,
     ) -> None:
+        if status is DerivationStatus.PROVED and expression is not None:
+            self.proved_expressions.add(expression)
         self.records.append(
             DerivationRecord(
                 status=status,
@@ -1033,6 +1066,48 @@ def _format_obligation_provider_summary(records: list[DerivationRecord]) -> list
     ):
         lines.append(f"    {proof_provider}/{proof_class}: {count}")
     return lines
+
+
+_PRIOR_FACT_PROOFS = {
+    "valid_task_ref(Riscv64.tp)": (
+        "object_storage",
+        {
+            "Riscv64.tp == phys_addr(StaticObjects.init_task)",
+            "Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap)",
+        },
+    ),
+    "valid_stack_pointer(Riscv64.sp)": (
+        "architecture_state",
+        {
+            "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
+            "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+        },
+    ),
+    "inside(Riscv64.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
+        "stack_layout",
+        {
+            "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)",
+        },
+    ),
+    "inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
+        "stack_layout",
+        {
+            "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+        },
+    ),
+}
+
+
+def _prior_fact_proof_class(
+    expression: str, proved_expressions: set[str]
+) -> str | None:
+    proof = _PRIOR_FACT_PROOFS.get(expression)
+    if proof is None:
+        return None
+    proof_class, required = proof
+    if proved_expressions.intersection(required):
+        return proof_class
+    return None
 
 
 def _classify_obligation(
