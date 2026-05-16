@@ -21,6 +21,8 @@ enum TransitionResult {
 function addr_of<T>(value: T) -> AddrIdentity<T>;
 function phys_addr<T>(value: T) -> PhysAddr<T>;
 function virt_addr<T, S: VirtualAddressSpace, A: VirtualAddressArea>(value: T, space: S, area: A) -> VirtAddr<T>;
+function page_cover_count<T>(range: PhysAddrRange<T>, page_size: Size) -> PageCount;
+function slot_page_count<T>(slot: FixMapSlotRange<T>) -> PageCount;
 
 predicate exists<T>(value: T) -> bool;
 predicate readable<T>(value: T) -> bool;
@@ -111,8 +113,20 @@ predicate disjoint<T, U>(left: PhysRangeSet<T>, right: PhysRangeSet<U>) -> bool 
     }
 }
 
-predicate fits_in_fixmap_slot<T, U>(range: PhysAddrRange<T>, slot: FixMapSlot<U>) -> bool {
-    size_of(range) <= size_of(slot)
+predicate fits_in_fixmap_slot<T, U>(range: PhysAddrRange<T>, slot: FixMapSlotRange<U>, page_size: Size) -> bool {
+    page_cover_count(range, page_size) <= slot_page_count(slot)
+}
+
+predicate slot_contains<T, U>(slot: FixMapSlotRange<T>, obj: U) -> bool {
+    contains(slot, obj)
+}
+
+predicate linear_map_area_reserved<T: Object>(obj: T) -> bool {
+    obj.state == State::Reserved
+}
+
+predicate fixmap_adjacent_to_linear_map<T: Object, U: Object>(fixmap: T, linear_map: U) -> bool {
+    adjacent(fixmap, linear_map)
 }
 
 type ObjectStorage<T> {
@@ -156,7 +170,7 @@ type DtbHeader {
 
 type FixMapConfig {
     slots {
-        fdt: FixMapSlot<Fdt>;
+        fdt: FixMapSlotRange<Fdt>;
     }
 
     invariant {
@@ -937,6 +951,72 @@ object RawDtb: ResourceObject {
 }
 
 /*
+ * FixMap 表示入口前导期可用的固定虚拟地址槽位集合。
+ * 当前只建模 FDT 槽位，并记录 RawDtb 是否已被安排到该槽位。
+ */
+object FixMap: PrepareObject {
+    initial_state: State::Base;
+
+    attrs {
+        fdt_slot: FixMapSlotRange<Fdt>;
+    }
+
+    /*
+     * Base 表示 fixmap 槽位布局来自配置，但尚未把 RawDtb 安排到 FDT 槽位。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 检查 FDT 槽位存在且能容纳 RawDtb，并把 RawDtb 安排到该槽位。
+             */
+            on Event::Preset -> State::Ready {
+                depends_on {
+                    Config.state == State::Online;
+                    RawDtb.state == State::Ready;
+                    has_slot(Config.fixmap, FixMapSlot::Fdt);
+                    fdt_slot == Config.fixmap.fdt;
+                    fits_in_fixmap_slot(RawDtb.range, fdt_slot, Config.page_size);
+                }
+
+                may_change {
+                    FixMap.fdt_slot;
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 FDT 槽位已经承载 RawDtb，后续页表映射可直接引用该槽位。
+     */
+    state State::Ready {
+        invariant {
+            attrs_accessible(self);
+            fdt_slot == Config.fixmap.fdt;
+            slot_contains(fdt_slot, RawDtb);
+        }
+    }
+}
+
+/*
+ * LinearMap 表示 PAGE_OFFSET 起始的物理内存线性映射虚拟区域。
+ * 入口前导期只预留该区域，完整 RAM banks 映射由后续完整页表阶段建立。
+ */
+object LinearMap: AddressSpaceObject {
+    initial_state: State::Reserved;
+    parent: Vm;
+
+    /*
+     * Reserved 表示线性映射虚拟区域已按布局预留，但尚未建立完整物理内存映射。
+     */
+    state State::Reserved {
+        invariant {
+            linear_map_area_reserved(self);
+            fixmap_adjacent_to_linear_map(FixMap, LinearMap);
+        }
+    }
+}
+
+/*
  * Vm 表示入口前导期正在建立的内核虚拟内存空间抽象。它编排 TrampolineVm 和 EarlyVm，后续阶段再接入 SwapperVm。
  */
 object Vm: AddressSpaceObject {
@@ -1141,44 +1221,45 @@ object TrampolineVm: AddressSpaceObject {
 }
 
 /*
- * EarlyVm 表示入口前导期后半段使用的早期虚拟内存空间。它映射内核映像区域和原始 dtb 所在的 fixmap 区域。
+ * EarlyVm 表示入口前导期后半段使用的早期虚拟内存空间。它映射内核映像区域和 FixMap 中承载 RawDtb 的 FDT 槽位，并保留线性映射区域。
  */
 object EarlyVm: AddressSpaceObject {
     initial_state: State::Base;
     parent: Vm;
 
     /*
-     * Base 表示早期虚拟内存空间尚未发现并验证原始 dtb。
+     * Base 表示早期虚拟内存空间尚未发现 RawDtb，也尚未准备 FDT fixmap 槽位。
      */
     state State::Base {
         events {
             /*
-             * Preset 发现并验证原始 dtb，并检查 fixmap 的 FDT 槽位容量。
+             * Preset 发现并验证原始 dtb，并把 RawDtb 安排到 FDT fixmap 槽位。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
                     Config.state == State::Online;
                     PhysicalMemory.state == State::Online;
                     RawDtb.state == State::Base;
-                    has_slot(Config.fixmap, FixMapSlot::Fdt);
+                    FixMap.state == State::Base;
                 }
 
                 drives {
                     RawDtb.Event::Preset;
                     RawDtb.Event::Setup;
+                    FixMap.Event::Preset;
                 }
             }
         }
     }
 
     /*
-     * Prepared 表示原始 dtb 已验证，且 fixmap 的 FDT 槽位能够容纳它。
+     * Prepared 表示原始 dtb 已验证，且已被安排到 FDT fixmap 槽位。
      */
     state State::Prepared {
         invariant {
             RawDtb.state == State::Ready;
-            has_slot(Config.fixmap, FixMapSlot::Fdt);
-            fits_in_fixmap_slot(RawDtb.range, Config.fixmap.fdt);
+            FixMap.state == State::Ready;
+            slot_contains(FixMap.fdt_slot, RawDtb);
         }
 
         events {
@@ -1191,9 +1272,10 @@ object EarlyVm: AddressSpaceObject {
                     Config.state == State::Online;
                     KernelImage.state == State::Ready;
                     RawDtb.state == State::Ready;
+                    FixMap.state == State::Ready;
                     page_aligned(StaticObjects.early_pg_dir);
                     KernelImage.end - KernelImage.start < Config.kernel_image_va_window_size;
-                    fits_in_fixmap_slot(RawDtb.range, Config.fixmap.fdt);
+                    slot_contains(FixMap.fdt_slot, RawDtb);
                 }
 
                 may_change {
@@ -1204,12 +1286,13 @@ object EarlyVm: AddressSpaceObject {
     }
 
     /*
-     * Ready 表示 early_pg_dir 已建立内核映像映射和原始 dtb 的 fixmap 映射。
+     * Ready 表示 early_pg_dir 已建立内核映像映射和 FDT fixmap 槽位映射，并保留 PAGE_OFFSET 起始的线性映射区域。
      */
     state State::Ready {
         invariant {
             kernel_image_mapping_ready(StaticObjects.early_pg_dir);
-            raw_dtb_mapping_ready(StaticObjects.early_pg_dir, RawDtb.range, Config.fixmap.fdt);
+            fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot);
+            LinearMap.state == State::Reserved;
         }
 
         events {
@@ -1229,13 +1312,13 @@ object EarlyVm: AddressSpaceObject {
     }
 
     /*
-     * Online 表示 EarlyVm 已启用，内核映像和原始 dtb 可以通过早期虚拟地址访问。
+     * Online 表示 EarlyVm 已启用，内核映像和 FDT fixmap 槽位可以通过早期虚拟地址访问。
      */
     state State::Online {
         invariant {
             Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
             kernel_image_accessible();
-            raw_dtb_accessible(RawDtb.range);
+            fixmap_slot_accessible(FixMap.fdt_slot);
         }
 
         events {

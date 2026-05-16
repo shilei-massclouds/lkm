@@ -35,7 +35,7 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(data["schema"], MODEL_SCHEMA)
             self.assertEqual(data["version"], MODEL_VERSION)
             self.assertTrue(data["summary"]["ok"])
-            self.assertEqual(data["summary"]["objects"], 23)
+            self.assertEqual(data["summary"]["objects"], 25)
             self.assertEqual(data["summary"]["errors"], 0)
             self.assertIn("StartupTimeline", data["model"]["objects"])
 

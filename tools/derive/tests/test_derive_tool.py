@@ -54,7 +54,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
 
             data = read_json(derive)
-            self.assertEqual(data["summary"]["transitions"], 28)
+            self.assertEqual(data["summary"]["transitions"], 29)
             self.assertGreater(data["summary"]["obligation"], 0)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
@@ -192,6 +192,15 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "slot_contains"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "fixmap_slot_content"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
             attrs_providers = {
                 record["object"]: (record["proof_class"], record["proof_provider"])
                 for record in obligations
@@ -204,6 +213,10 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(
                 attrs_providers["Config"],
                 ("config_attributes", "config_source_candidate"),
+            )
+            self.assertEqual(
+                attrs_providers["FixMap"],
+                ("fixmap_layout", "config_source_candidate"),
             )
             self.assertEqual(
                 attrs_providers["Lds"],

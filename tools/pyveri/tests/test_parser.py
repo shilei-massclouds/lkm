@@ -132,7 +132,8 @@ class ParserTests(unittest.TestCase):
         entry, span = enable.depends_on[0].entry_spans[0]
 
         self.assertEqual(entry, "EarlyVm.state == State::Online")
-        self.assertEqual(span.start_line, 833)
+        line = spec.read_text(encoding="utf-8").splitlines()[span.start_line - 1]
+        self.assertIn("EarlyVm.state == State::Online", line)
 
     def test_parse_error_for_unknown_top_level_declaration(self) -> None:
         with self.assertRaises(ParseError):

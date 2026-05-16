@@ -31,7 +31,7 @@ _HAS_SLOT_RE = re.compile(
     r"\Ahas_slot\(\s*Config\.fixmap\s*,\s*FixMapSlot::([A-Za-z_][A-Za-z0-9_]*)\s*\)\Z"
 )
 _NO_SERVICE_RE = re.compile(r"\Ano_service\(\s*([A-Z][A-Za-z0-9_]*)\s*\)\Z")
-_SLOT_ENTRY_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*:\s*FixMapSlot<")
+_SLOT_ENTRY_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*:\s*FixMapSlot(?:Range)?<")
 
 _AUTO_PREDICATES = {
     "aligned": "alignment",
@@ -47,6 +47,8 @@ _ASSUMPTION_PREDICATES = {
 }
 _ATTRS_ACCESSIBLE_PROOFS = {
     "Config": ("config_attributes", "config_source_candidate"),
+    "FixMap": ("fixmap_layout", "config_source_candidate"),
+    "LinearMap": ("linear_map_layout", "config_source_candidate"),
     "Lds": ("linker_layout", "linker_script_candidate"),
     "BootArgs": ("boot_arguments", "boot_protocol_candidate"),
     "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
@@ -57,15 +59,18 @@ _EXTERNAL_PREDICATES = {
     "context_is": "system_exclusive_context",
     "disjoint": "platform_memory_layout",
     "fits_in_fixmap_slot": "address_mapping",
+    "fixmap_slot_accessible": "address_mapping",
+    "fixmap_slot_mapping_ready": "address_mapping",
+    "fixmap_adjacent_to_linear_map": "address_layout",
     "gp_relative_access_ready": "architecture_state",
     "kernel_fpu_disabled": "riscv_status_register",
     "kernel_image_accessible": "address_mapping",
     "kernel_image_mapping_ready": "address_mapping",
+    "linear_map_area_reserved": "address_layout",
     "kernel_vector_disabled": "riscv_status_register",
     "memory_zeroed": "memory_content",
     "phys_to_virt_transition_completed": "architecture_state",
-    "raw_dtb_accessible": "address_mapping",
-    "raw_dtb_mapping_ready": "address_mapping",
+    "slot_contains": "fixmap_slot_content",
     "soc_early_platform_ready": "platform",
     "trampoline_mapping_ready": "address_mapping",
     "valid_dtb_header": "boot_input",
@@ -86,6 +91,9 @@ _DERIVED_PROVIDERS = {
     "disjoint": "fdt_candidate",
     "kernel_fpu_disabled": "isa_spec_and_boot_code",
     "kernel_vector_disabled": "isa_spec_and_boot_code",
+    "fixmap_adjacent_to_linear_map": "config_source_candidate",
+    "linear_map_area_reserved": "config_source_candidate",
+    "slot_contains": "prior_derivation_facts",
     "valid_dtb_header": "boot_code_candidate",
     "valid_dtb_magic": "boot_code_candidate",
     "valid_hart_id": "fdt_and_boot_protocol",

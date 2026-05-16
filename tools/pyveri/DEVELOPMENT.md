@@ -461,6 +461,10 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 - 已引入 `BootArgs` 对象作为内核启动参数抽象。当前 RISC-V64 语境下，`BootArgs.boot_hartid == Riscv64.a0`，`BootArgs.dtb_pa == Riscv64.a1`。`Riscv64` 继续描述入口寄存器事实，`BootArgs` 描述启动 ABI/boot protocol 对寄存器的语义解释；`RawDtb` 已改为依赖 `BootArgs.dtb_pa`，`CpuGroup` 后续可改为依赖 `BootArgs.boot_hartid`，避免裸寄存器名散落在规格中。
 - `RawDtb` 的规格按三层表达：`BootArgs.dtb_pa` 是 dtb 起始物理地址，`header_range` 覆盖读取 `DtbHeader` 所需范围，`range` 覆盖根据 `header.total_size` 得到的完整 dtb 范围。规格统一使用 `contains(container, value)` 表达包含关系，不再引入 `addr_in_ram` 或 `range_in_ram` 这类薄包装谓词；`contains(PhysicalMemory.ram, header_range)` 表示头部读取范围有效，`contains(PhysicalMemory.ram, range)` 表示启动代码读取 total_size 后的完整范围检查。
+- `fits_in_fixmap_slot(range, slot, page_size)` 只表达 RawDtb 物理范围有资格放入 FDT fixmap 槽位范围的页覆盖数约束，不表示映射已经建立，也不要求 RawDtb 原始前后边界页对齐。fixmap 的基本单位是页，FDT slot 可覆盖连续多个页；因此 `FixMapSlotRange<T>` 表示连续页槽位范围，容量比较已改为 `page_cover_count(range, page_size) <= slot_page_count(slot)`。
+- 已引入最小 `FixMap` 对象，先只建模 FDT 槽位。`RawDtb` 负责物理 DTB 有效性，`FixMap.Preset` 负责检查 FDT slot 存在且能够容纳 RawDtb，并记录 `slot_contains(FixMap.fdt_slot, RawDtb)`；`EarlyVm` 后续只依赖 FixMap 已就绪和槽位内容，再建立页表映射。
+- 已引入最小 `LinearMap` 对象，表示 `PAGE_OFFSET` 起始的物理内存线性映射区域在入口前导期已按布局预留，但完整 RAM banks 映射尚未建立。`EarlyVm.Ready` 只要求 `LinearMap.state == State::Reserved`，完整线性映射应留给 `SwapperVm` 或后续完整 VM 阶段。
+- `EarlyVm` 的 FDT 映射谓词已改为通用 fixmap slot 语义：`fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。RawDtb 是否位于该槽位由 `FixMap` 的 `slot_contains(...)` 负责，页表映射阶段不再直接绑定 RawDtb 物理范围。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 
