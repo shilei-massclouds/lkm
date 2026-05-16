@@ -56,6 +56,12 @@ class DeriveToolTests(unittest.TestCase):
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 28)
             self.assertGreater(data["summary"]["obligation"], 0)
+            self.assertIn("obligation_categories", data["summary"])
+            self.assertGreater(
+                data["summary"]["obligation_categories"]["auto_candidate"], 0
+            )
+            self.assertNotIn("spec_gap", data["summary"]["obligation_categories"])
+            self.assertNotIn("unknown", data["summary"]["obligation_categories"])
             self.assertTrue(
                 any(
                     transition["object"] == "StartupTimeline"
@@ -73,6 +79,74 @@ class DeriveToolTests(unittest.TestCase):
             self.assertGreater(len(root["children"]), 0)
             self.assertTrue(
                 any(record["span"] is not None for record in data["records"])
+            )
+            obligations = [
+                record for record in data["records"] if record["status"] == "obligation"
+            ]
+            self.assertTrue(
+                any(
+                    record["obligation_category"] == "auto_candidate"
+                    and record["proof_provider"] == "builtin_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["obligation_category"] == "derived_candidate"
+                    and record["proof_provider"] == "derived_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "has_slot"
+                    and record["obligation_category"] == "auto_candidate"
+                    and record["proof_class"] == "config_structure"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "readonly"
+                    and record["obligation_category"] == "auto_candidate"
+                    and record["proof_class"] == "object_attribute"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "disjoint"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "platform_memory_layout"
+                    and record["proof_provider"] == "fdt_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "kernel_fpu_disabled"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "riscv_status_register"
+                    and record["proof_provider"] == "isa_spec_and_boot_code"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "range_in_ram"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "physical_memory_membership"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "no_service"
+                    and record["obligation_category"] == "auto_candidate"
+                    and record["proof_class"] == "state_alias"
+                    for record in obligations
+                )
             )
 
     def test_invalid_model_schema_returns_usage_error_code(self) -> None:

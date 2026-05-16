@@ -30,6 +30,11 @@ class DerivationRecord:
     event_name: str | None = None
     state_name: str | None = None
     expression: str | None = None
+    source_kind: str | None = None
+    predicate: str | None = None
+    obligation_category: str | None = None
+    proof_class: str | None = None
+    proof_provider: str | None = None
 
 
 @dataclass(frozen=True)

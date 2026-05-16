@@ -25,6 +25,58 @@ _STATE_EXPR_RE = re.compile(
 _EVENT_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\Z"
 )
+_PREDICATE_CALL_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_RELATION_RE = re.compile(r"(==|!=|>=|<=|>|<)")
+
+_AUTO_PREDICATES = {
+    "aligned": "alignment",
+    "has_slot": "config_structure",
+    "inside": "range",
+    "no_service": "state_alias",
+    "page_aligned": "alignment",
+    "readonly": "object_attribute",
+    "valid_fixmap_config": "configuration",
+    "valid_satp_mode": "configuration",
+}
+_ASSUMPTION_PREDICATES = {
+    "addr_in_ram": "boot_input",
+    "attrs_accessible": "environment",
+    "context_is": "environment",
+    "valid_hart_id": "boot_input",
+}
+_EXTERNAL_PREDICATES = {
+    "disjoint": "platform_memory_layout",
+    "fits_in_fixmap_slot": "address_mapping",
+    "gp_relative_access_ready": "architecture_state",
+    "kernel_fpu_disabled": "riscv_status_register",
+    "kernel_image_accessible": "address_mapping",
+    "kernel_image_mapping_ready": "address_mapping",
+    "kernel_vector_disabled": "riscv_status_register",
+    "memory_zeroed": "memory_content",
+    "phys_to_virt_transition_completed": "architecture_state",
+    "range_in_ram": "physical_memory_membership",
+    "raw_dtb_accessible": "address_mapping",
+    "raw_dtb_mapping_ready": "address_mapping",
+    "soc_early_platform_ready": "platform",
+    "trampoline_mapping_ready": "address_mapping",
+    "valid_dtb_header": "boot_input",
+    "valid_dtb_magic": "boot_input",
+    "valid_function_symbol": "linker_symbol",
+    "valid_object_storage": "object_storage",
+    "valid_page_table_storage": "object_storage",
+    "valid_phys_range_set": "platform",
+    "valid_segment_set": "linker_layout",
+    "valid_stack_pointer": "architecture_state",
+    "valid_task_ref": "object_storage",
+    "valid_task_storage": "object_storage",
+    "valid_virt_addr": "address_mapping",
+}
+_DERIVED_PROVIDERS = {
+    "disjoint": "fdt_candidate",
+    "kernel_fpu_disabled": "isa_spec_and_boot_code",
+    "kernel_vector_disabled": "isa_spec_and_boot_code",
+    "range_in_ram": "boot_code_candidate",
+}
 
 
 def derive(model: ObjectModel, target: str = DEFAULT_TARGET) -> DerivationResult:
@@ -91,6 +143,8 @@ def render_derivation_text(result: DerivationResult) -> str:
             continue
         lines.append("")
         lines.append(f"{status.value}:")
+        if status is DerivationStatus.OBLIGATION:
+            lines.extend(_format_obligation_category_summary(records))
         for record in records:
             lines.append(f"- {_format_record(record)}")
 
@@ -386,6 +440,7 @@ class _Deriver:
                         and ok
                     )
                 else:
+                    classification = _classify_obligation(entry, kind)
                     self._record(
                         DerivationStatus.OBLIGATION,
                         f"unresolved {kind}: {entry}",
@@ -394,6 +449,11 @@ class _Deriver:
                         event_name=event.name if event is not None else None,
                         state_name=state.name if state is not None else None,
                         expression=entry,
+                        source_kind=kind,
+                        predicate=classification["predicate"],
+                        obligation_category=classification["category"],
+                        proof_class=classification["proof_class"],
+                        proof_provider=classification["proof_provider"],
                     )
         return ok
 
@@ -467,6 +527,11 @@ class _Deriver:
         event_name: str | None = None,
         state_name: str | None = None,
         expression: str | None = None,
+        source_kind: str | None = None,
+        predicate: str | None = None,
+        obligation_category: str | None = None,
+        proof_class: str | None = None,
+        proof_provider: str | None = None,
     ) -> None:
         self.records.append(
             DerivationRecord(
@@ -477,6 +542,11 @@ class _Deriver:
                 event_name=event_name,
                 state_name=state_name,
                 expression=expression,
+                source_kind=source_kind,
+                predicate=predicate,
+                obligation_category=obligation_category,
+                proof_class=proof_class,
+                proof_provider=proof_provider,
             )
         )
 
@@ -552,6 +622,72 @@ def _record_counts(records: tuple[DerivationRecord, ...]) -> dict[DerivationStat
     for record in records:
         counts[record.status] = counts.get(record.status, 0) + 1
     return counts
+
+
+def _format_obligation_category_summary(records: list[DerivationRecord]) -> list[str]:
+    counts: dict[str, int] = {}
+    for record in records:
+        category = record.obligation_category or "unknown"
+        counts[category] = counts.get(category, 0) + 1
+    if not counts:
+        return []
+    summary = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
+    return [f"  categories: {summary}"]
+
+
+def _classify_obligation(expression: str, source_kind: str) -> dict[str, str | None]:
+    predicate = _predicate_name(expression)
+    if predicate in _AUTO_PREDICATES:
+        return {
+            "predicate": predicate,
+            "category": "auto_candidate",
+            "proof_class": _AUTO_PREDICATES[predicate],
+            "proof_provider": "builtin_candidate",
+        }
+    if predicate in _ASSUMPTION_PREDICATES:
+        return {
+            "predicate": predicate,
+            "category": "assumption_candidate",
+            "proof_class": _ASSUMPTION_PREDICATES[predicate],
+            "proof_provider": "assumption_candidate",
+        }
+    if predicate in _EXTERNAL_PREDICATES:
+        return {
+            "predicate": predicate,
+            "category": "derived_candidate",
+            "proof_class": _EXTERNAL_PREDICATES[predicate],
+            "proof_provider": _DERIVED_PROVIDERS.get(predicate, "derived_candidate"),
+        }
+
+    if _is_relation_expression(expression):
+        return {
+            "predicate": predicate,
+            "category": "auto_candidate",
+            "proof_class": "relation",
+            "proof_provider": "builtin_candidate",
+        }
+
+    if source_kind == "depends_on":
+        category = "spec_gap"
+    else:
+        category = "unknown"
+    return {
+        "predicate": predicate,
+        "category": category,
+        "proof_class": "unknown",
+        "proof_provider": "unknown",
+    }
+
+
+def _predicate_name(expression: str) -> str | None:
+    match = _PREDICATE_CALL_RE.match(expression.strip())
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _is_relation_expression(expression: str) -> bool:
+    return bool(_RELATION_RE.search(expression))
 
 
 def _append_trace_node(

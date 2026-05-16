@@ -21,6 +21,7 @@ def derivation_to_json(
     """Serialize a derivation result to the derive intermediate format."""
 
     counts = _record_counts(result.records)
+    obligation_categories = _obligation_category_counts(result.records)
     return {
         "schema": DERIVE_SCHEMA,
         "version": DERIVE_VERSION,
@@ -46,6 +47,7 @@ def derivation_to_json(
             "deferred": counts[DerivationStatus.DEFERRED.value],
             "blocked": counts[DerivationStatus.BLOCKED.value],
             "contradiction": counts[DerivationStatus.CONTRADICTION.value],
+            "obligation_categories": obligation_categories,
         },
         "states": dict(sorted(result.states.items())),
         "records": [_record_to_json(record) for record in result.records],
@@ -72,7 +74,24 @@ def _record_to_json(record: DerivationRecord) -> dict[str, Any]:
         "event": record.event_name,
         "state": record.state_name,
         "expression": record.expression,
+        "source_kind": record.source_kind,
+        "predicate": record.predicate,
+        "obligation_category": record.obligation_category,
+        "proof_class": record.proof_class,
+        "proof_provider": record.proof_provider,
     }
+
+
+def _obligation_category_counts(
+    records: tuple[DerivationRecord, ...]
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        if record.status is not DerivationStatus.OBLIGATION:
+            continue
+        category = record.obligation_category or "unknown"
+        counts[category] = counts.get(category, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _transition_to_json(transition: EventTransition) -> dict[str, str]:

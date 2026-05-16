@@ -436,6 +436,20 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - 在摘要中区分“目标已达但存在 obligation”和“目标未达”。
 - 增加 `--format json`，为后续工具链中间产物做准备。
 
+#### Step C.0: obligation 分类和证明调度元数据
+
+`obligation` 当前定义为当前目标推导路径上的剩余证明义务。它不是 `.spec` 中直接声明的延期项，也不等同于完整规格的等价命题集合。当前处理策略是先在推导产出物中记录分类，不改 `.spec` 语法，也不把分类写入 predicate metadata。
+
+第一步只在 `derive.json` 的 obligation record 中增加元数据：
+
+- `source_kind`：义务来自 `depends_on` 还是 `invariant`。
+- `predicate`：若表达式是谓词调用，则记录谓词名。
+- `obligation_category`：当前分诊分类，例如 `auto_candidate`、`assumption_candidate`、`derived_candidate`、`spec_gap` 或 `unknown`。其中 `derived_candidate` 表示该义务不是原始假设，也不是当前对象状态推导器能直接证明，而是预期由其它已知事实、前置结论、代码语义、平台描述、ISA 语义或链接器产物继续推导出来。
+- `proof_class`：后续证明调度线索，例如 `alignment`、`range`、`linker_symbol`、`address_mapping`、`environment`。
+- `proof_provider`：后续证明来源线索，例如 `builtin_candidate`、`assumption_candidate`、`derived_candidate`。
+
+这一步只增强 `derive.json` 和文本报告的可读性，不自动证明任何 obligation，不改变 `check` 策略，也不影响 `blocked`、`contradiction` 或 `target_reached`。
+
 #### Step C.1: 收口 trace 输出和注释数据流
 
 当前 trace SVG 已能作为基础推导过程图输出，并支持来自 `.spec` 注释的 overlay 注释层。下一步需要把已经暴露的问题收口：

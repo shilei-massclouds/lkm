@@ -615,6 +615,8 @@ def _derive_report(data: dict[str, Any]) -> str:
             continue
         lines.append("")
         lines.append(f"{status}:")
+        if status == "obligation":
+            lines.extend(_format_obligation_category_summary(records))
         for record in records:
             lines.append(f"- {_format_record(record)}")
     return "\n".join(lines)
@@ -657,6 +659,17 @@ def _format_record(record: dict[str, Any]) -> str:
     span = record.get("span")
     location = f"line {span['start_line']}: " if span is not None else ""
     return f"{location}{record['message']}"
+
+
+def _format_obligation_category_summary(records: list[dict[str, Any]]) -> list[str]:
+    counts: dict[str, int] = {}
+    for record in records:
+        category = record.get("obligation_category") or "unknown"
+        counts[category] = counts.get(category, 0) + 1
+    if not counts:
+        return []
+    summary = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
+    return [f"  categories: {summary}"]
 
 
 def _write_output(path: Path, text: str, ascii_only: bool) -> None:
