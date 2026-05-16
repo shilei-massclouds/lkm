@@ -48,6 +48,7 @@ _ASSUMPTION_PREDICATES = {
 _ATTRS_ACCESSIBLE_PROOFS = {
     "Config": ("config_attributes", "config_source_candidate"),
     "Lds": ("linker_layout", "linker_script_candidate"),
+    "BootArgs": ("boot_arguments", "boot_protocol_candidate"),
     "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
     "Riscv64": ("boot_register_state", "boot_protocol_candidate"),
     "StaticObjects": ("static_object_layout", "linker_symbol_candidate"),
@@ -63,7 +64,6 @@ _EXTERNAL_PREDICATES = {
     "kernel_vector_disabled": "riscv_status_register",
     "memory_zeroed": "memory_content",
     "phys_to_virt_transition_completed": "architecture_state",
-    "range_in_ram": "physical_memory_membership",
     "raw_dtb_accessible": "address_mapping",
     "raw_dtb_mapping_ready": "address_mapping",
     "soc_early_platform_ready": "platform",
@@ -86,13 +86,18 @@ _DERIVED_PROVIDERS = {
     "disjoint": "fdt_candidate",
     "kernel_fpu_disabled": "isa_spec_and_boot_code",
     "kernel_vector_disabled": "isa_spec_and_boot_code",
-    "range_in_ram": "boot_code_candidate",
+    "valid_dtb_header": "boot_code_candidate",
+    "valid_dtb_magic": "boot_code_candidate",
     "valid_hart_id": "fdt_and_boot_protocol",
 }
 _CONTAINS_PROOFS = {
-    "contains(PhysicalMemory.ram, Riscv64.a1)": (
-        "boot_dtb_address",
-        "boot_protocol_and_fdt",
+    "contains(PhysicalMemory.ram, header_range)": (
+        "dtb_header_range",
+        "boot_code_candidate",
+    ),
+    "contains(PhysicalMemory.ram, range)": (
+        "physical_memory_membership",
+        "boot_code_candidate",
     ),
 }
 

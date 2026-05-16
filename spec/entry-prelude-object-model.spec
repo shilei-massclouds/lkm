@@ -111,10 +111,6 @@ predicate disjoint<T, U>(left: PhysRangeSet<T>, right: PhysRangeSet<U>) -> bool 
     }
 }
 
-predicate range_in_ram<T>(range: PhysAddrRange<T>, ram: PhysRangeSet<Ram>) -> bool {
-    contains(ram, range)
-}
-
 predicate fits_in_fixmap_slot<T, U>(range: PhysAddrRange<T>, slot: FixMapSlot<U>) -> bool {
     size_of(range) <= size_of(slot)
 }
@@ -201,6 +197,30 @@ object Riscv64: IsaObject {
     state State::Online {
         invariant {
             attrs_accessible(self);
+        }
+    }
+}
+
+/*
+ * BootArgs 表示启动 ABI 对入口寄存器的语义解释。
+ * RISC-V64 下 a0 是启动 hartid，a1 是原始 dtb 物理地址。
+ */
+object BootArgs: PrepareObject {
+    initial_state: State::Online;
+
+    attrs {
+        boot_hartid: HartId;
+        dtb_pa: PhysAddr<Dtb>;
+    }
+
+    /*
+     * Online 表示启动参数在入口前导期开始前已经由启动 ABI 给出。
+     */
+    state State::Online {
+        invariant {
+            attrs_accessible(self);
+            boot_hartid == Riscv64.a0;
+            dtb_pa == Riscv64.a1;
         }
     }
 }
@@ -851,18 +871,20 @@ object KernelImage: ImageObject {
 }
 
 /*
- * RawDtb 表示引导入口参数 a1 指向的原始设备树二进制。它只验证原始 dtb 的物理位置、头部和完整物理范围。
+ * RawDtb 表示启动参数 dtb_pa 指向的原始设备树二进制。
+ * 它分层验证原始 dtb 的起始物理地址、头部和完整物理范围。
  */
 object RawDtb: ResourceObject {
     initial_state: State::Base;
 
     attrs {
         header: DtbHeader;
+        header_range: PhysAddrRange<DtbHeader>;
         range: PhysAddrRange<Dtb>;
     }
 
     /*
-     * Base 表示只知道入口参数中可能存在 dtb 物理地址，尚未验证头部。
+     * Base 表示只知道启动参数中给出了 dtb 物理地址，尚未验证头部。
      */
     state State::Base {
         events {
@@ -871,9 +893,11 @@ object RawDtb: ResourceObject {
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    Riscv64.state == State::Online;
+                    BootArgs.state == State::Online;
                     PhysicalMemory.state == State::Online;
-                    contains(PhysicalMemory.ram, Riscv64.a1);
+                    header_range.start == BootArgs.dtb_pa;
+                    header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>();
+                    contains(PhysicalMemory.ram, header_range);
                 }
             }
         }
@@ -905,9 +929,9 @@ object RawDtb: ResourceObject {
     state State::Ready {
         invariant {
             valid_dtb_header(header);
-            range.start == Riscv64.a1;
-            range.end == Riscv64.a1 + header.total_size;
-            range_in_ram(range, PhysicalMemory.ram);
+            range.start == BootArgs.dtb_pa;
+            range.end == BootArgs.dtb_pa + header.total_size;
+            contains(PhysicalMemory.ram, range);
         }
     }
 }

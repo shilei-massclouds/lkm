@@ -137,9 +137,28 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "range_in_ram"
+                    record["predicate"] == "contains"
                     and record["obligation_category"] == "derived_candidate"
-                    and record["proof_class"] == "physical_memory_membership"
+                    and record["proof_class"] == "dtb_header_range"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    and record["expression"] == "contains(PhysicalMemory.ram, header_range)"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_dtb_magic"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "boot_input"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_dtb_header"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "boot_input"
                     and record["proof_provider"] == "boot_code_candidate"
                     for record in obligations
                 )
@@ -167,9 +186,9 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "contains"
                     and record["obligation_category"] == "derived_candidate"
-                    and record["proof_class"] == "boot_dtb_address"
-                    and record["proof_provider"] == "boot_protocol_and_fdt"
-                    and record["expression"] == "contains(PhysicalMemory.ram, Riscv64.a1)"
+                    and record["proof_class"] == "physical_memory_membership"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    and record["expression"] == "contains(PhysicalMemory.ram, range)"
                     for record in obligations
                 )
             )
@@ -178,6 +197,10 @@ class DeriveToolTests(unittest.TestCase):
                 for record in obligations
                 if record["predicate"] == "attrs_accessible"
             }
+            self.assertEqual(
+                attrs_providers["BootArgs"],
+                ("boot_arguments", "boot_protocol_candidate"),
+            )
             self.assertEqual(
                 attrs_providers["Config"],
                 ("config_attributes", "config_source_candidate"),

@@ -459,7 +459,8 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 后续规格结构清理：
 
-- 可考虑引入 `BootArgs` 对象作为内核启动参数抽象。当前 RISC-V64 语境下，`BootArgs.boot_hartid == Riscv64.a0`，`BootArgs.dtb_pa == Riscv64.a1`。`Riscv64` 继续描述入口寄存器事实，`BootArgs` 描述启动 ABI/boot protocol 对寄存器的语义解释；`CpuGroup` 和 `RawDtb` 后续可分别依赖 `BootArgs.boot_hartid` 和 `BootArgs.dtb_pa`，避免裸寄存器名散落在规格中。
+- 已引入 `BootArgs` 对象作为内核启动参数抽象。当前 RISC-V64 语境下，`BootArgs.boot_hartid == Riscv64.a0`，`BootArgs.dtb_pa == Riscv64.a1`。`Riscv64` 继续描述入口寄存器事实，`BootArgs` 描述启动 ABI/boot protocol 对寄存器的语义解释；`RawDtb` 已改为依赖 `BootArgs.dtb_pa`，`CpuGroup` 后续可改为依赖 `BootArgs.boot_hartid`，避免裸寄存器名散落在规格中。
+- `RawDtb` 的规格按三层表达：`BootArgs.dtb_pa` 是 dtb 起始物理地址，`header_range` 覆盖读取 `DtbHeader` 所需范围，`range` 覆盖根据 `header.total_size` 得到的完整 dtb 范围。规格统一使用 `contains(container, value)` 表达包含关系，不再引入 `addr_in_ram` 或 `range_in_ram` 这类薄包装谓词；`contains(PhysicalMemory.ram, header_range)` 表示头部读取范围有效，`contains(PhysicalMemory.ram, range)` 表示启动代码读取 total_size 后的完整范围检查。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 

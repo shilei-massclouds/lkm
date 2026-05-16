@@ -35,7 +35,7 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(data["schema"], MODEL_SCHEMA)
             self.assertEqual(data["version"], MODEL_VERSION)
             self.assertTrue(data["summary"]["ok"])
-            self.assertEqual(data["summary"]["objects"], 22)
+            self.assertEqual(data["summary"]["objects"], 23)
             self.assertEqual(data["summary"]["errors"], 0)
             self.assertIn("StartupTimeline", data["model"]["objects"])
 
@@ -80,7 +80,10 @@ class ModelToolTests(unittest.TestCase):
             entry = enable["depends_on"][0]["entries"][0]
 
             self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
-            self.assertEqual(entry["span"]["start_line"], 833)
+            line = self.spec.read_text(encoding="utf-8").splitlines()[
+                entry["span"]["start_line"] - 1
+            ]
+            self.assertIn("EarlyVm.state == State::Online", line)
 
     def test_invalid_ast_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
