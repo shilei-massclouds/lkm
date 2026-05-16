@@ -143,7 +143,15 @@ class DerivationTests(unittest.TestCase):
         self.assertIn("trace:", text)
         self.assertIn("categories:", text)
         self.assertIn("providers:", text)
-        self.assertIn("prior_derivation_facts/register_effect", text)
+        self.assertIn("obligation: 93", text)
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_provider == "event_ensures"
+                and record.proof_class == "register_effect"
+                for record in derivation.records
+            )
+        )
         self.assertIn("> StartupTimeline.Event::Setup State::Base", text)
         self.assertIn("  > PreparePhase.Event::Setup State::Base", text)
         self.assertIn("< StartupTimeline.Event::Setup State::Ready", text)

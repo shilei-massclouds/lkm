@@ -53,7 +53,10 @@ class ParseToolTests(unittest.TestCase):
             entry = enable["depends_on"][0]["entries"][0]
 
             self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
-            self.assertEqual(entry["span"]["start_line"], 833)
+            line = self.spec.read_text(encoding="utf-8").splitlines()[
+                entry["span"]["start_line"] - 1
+            ]
+            self.assertIn("EarlyVm.state == State::Online", line)
 
     def test_output_parent_directory_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -337,6 +337,7 @@ def _parse_event(segment: _Segment) -> EventDecl:
     depends_on: list[Block] = []
     drives: list[Block] = []
     may_change: list[Block] = []
+    ensures: list[Block] = []
     deferred: list[Block] = []
     other_blocks: list[Block] = []
 
@@ -353,6 +354,8 @@ def _parse_event(segment: _Segment) -> EventDecl:
             drives.append(block)
         elif block.kind == "may_change":
             may_change.append(block)
+        elif block.kind == "ensures":
+            ensures.append(block)
         elif block.kind == "deferred":
             deferred.append(block)
         else:
@@ -365,6 +368,7 @@ def _parse_event(segment: _Segment) -> EventDecl:
         depends_on=depends_on,
         drives=drives,
         may_change=may_change,
+        ensures=ensures,
         deferred=deferred,
         other_blocks=other_blocks,
     )

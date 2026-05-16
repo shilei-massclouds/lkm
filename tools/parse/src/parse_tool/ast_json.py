@@ -105,6 +105,7 @@ def _event_to_json(item: EventDecl) -> dict[str, Any]:
         "depends_on": [_block_to_json(block) for block in item.depends_on],
         "drives": [_block_to_json(block) for block in item.drives],
         "may_change": [_block_to_json(block) for block in item.may_change],
+        "ensures": [_block_to_json(block) for block in item.ensures],
         "deferred": [_block_to_json(block) for block in item.deferred],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
     }

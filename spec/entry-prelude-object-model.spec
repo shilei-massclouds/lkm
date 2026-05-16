@@ -586,6 +586,10 @@ object InitTask: TaskObject {
                 may_change {
                     Riscv64.tp;
                 }
+
+                ensures {
+                    Riscv64.tp == phys_addr(StaticObjects.init_task);
+                }
             }
         }
     }
@@ -610,6 +614,10 @@ object InitTask: TaskObject {
 
                 may_change {
                     Riscv64.tp;
+                }
+
+                ensures {
+                    Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap);
                 }
             }
         }
@@ -655,6 +663,10 @@ object InitStack: StackObject {
                 may_change {
                     Riscv64.sp;
                 }
+
+                ensures {
+                    Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack);
+                }
             }
         }
     }
@@ -681,6 +693,10 @@ object InitStack: StackObject {
 
                 may_change {
                     Riscv64.sp;
+                }
+
+                ensures {
+                    Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
                 }
             }
         }
@@ -722,6 +738,11 @@ object InterruptStream: FlowObject {
                     Riscv64.sie;
                     Riscv64.sip;
                 }
+
+                ensures {
+                    Riscv64.sie == 0;
+                    Riscv64.sip == 0;
+                }
             }
         }
     }
@@ -761,6 +782,10 @@ object EventStream: FlowObject {
                 may_change {
                     Riscv64.stvec;
                 }
+
+                ensures {
+                    Riscv64.stvec == phys_addr(StaticObjects.early_event_entry);
+                }
             }
         }
     }
@@ -786,6 +811,11 @@ object EventStream: FlowObject {
                 may_change {
                     Riscv64.stvec;
                     Riscv64.sscratch;
+                }
+
+                ensures {
+                    Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
+                    Riscv64.sscratch == 0;
                 }
             }
         }
@@ -830,6 +860,10 @@ object KernelImage: ImageObject {
 
                 may_change {
                     Riscv64.gp;
+                }
+
+                ensures {
+                    Riscv64.gp == phys_addr(Lds.global_pointer);
                 }
             }
         }
@@ -885,6 +919,10 @@ object KernelImage: ImageObject {
 
                 may_change {
                     Riscv64.gp;
+                }
+
+                ensures {
+                    Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
                 }
             }
         }
@@ -1099,6 +1137,10 @@ object Vm: AddressSpaceObject {
                 may_change {
                     Riscv64.satp;
                     Riscv64.gp;
+                }
+
+                ensures {
+                    Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
                 }
             }
         }
@@ -1322,6 +1364,10 @@ object EarlyVm: AddressSpaceObject {
 
                 may_change {
                     Riscv64.satp;
+                }
+
+                ensures {
+                    Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
                 }
             }
         }

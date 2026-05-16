@@ -112,6 +112,7 @@ def _event_to_json(item: EventDef) -> dict[str, Any]:
         "depends_on": [_block_to_json(block) for block in decl.depends_on],
         "drives": [_block_to_json(block) for block in decl.drives],
         "may_change": [_block_to_json(block) for block in decl.may_change],
+        "ensures": [_block_to_json(block) for block in decl.ensures],
         "deferred": [_block_to_json(block) for block in decl.deferred],
         "other_blocks": [_block_to_json(block) for block in decl.other_blocks],
     }

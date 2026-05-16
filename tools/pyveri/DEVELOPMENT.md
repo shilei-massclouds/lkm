@@ -479,6 +479,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - 若裸关系表达式实际承载模型语义，也需要按表达式来源细化，而不是一律归入 `builtin_candidate`。当前已细化：`BootArgs` 的 `a0/a1` 绑定来自启动协议，`RawDtb` 的 header/range 边界来自启动代码读取与派生，`FixMap.fdt_slot == Config.fixmap.fdt` 来自配置源。
 - 事件写寄存器后的状态关系已归入 `register_effect/prior_derivation_facts`，包括 `sie/sip/stvec/tp/sp/gp/satp/sscratch` 的物理地址阶段、EarlyVm 阶段和地址空间切换结果。这类关系不再视为普通 builtin 关系，而是由对应事件的 `may_change` 与前序推导事实支持。
 - `Config` 的数值边界、对齐、satp 模式和 fixmap 配置约束已归入 `configuration/config_source_candidate`；`Lds` 与 `KernelImage.segments.bss.range` 的符号/范围约束已归入 `linker_layout/linker_script_candidate`；`InitStack` 的栈容量和 sp 落入栈范围约束分别归入 `stack_layout/config_and_linker_candidate` 与 `stack_layout/prior_derivation_facts`。
+- 已引入事件后置断言块 `ensures { ... }`。`ensures` 表达事件完成后保证成立的关系，不表示在 invariant 中赋值，也不同于 `may_change` 的“允许改变”。推导器现在可用“进入目标状态的事件 `ensures`”证明该目标状态中完全相同的 invariant；第一批用于消化 `register_effect` 相关寄存器状态关系。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 

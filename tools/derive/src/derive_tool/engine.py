@@ -396,6 +396,7 @@ class _Deriver:
         self.trace: list[DerivationTraceNode] = []
         self.trace_stack: list[_TraceFrame] = []
         self.stack: list[tuple[str, str]] = []
+        self.state_validation_events: dict[tuple[str, str], EventDef] = {}
         self.validated_states: set[tuple[str, str]] = set()
 
     def run(self) -> DerivationResult:
@@ -566,7 +567,7 @@ class _Deriver:
                 event_name=event_name,
                 state_name=event.target_state,
             )
-            if self._validate_state(object_name, event.target_state):
+            if self._validate_state(object_name, event.target_state, entered_by=event):
                 exit_status = DerivationStatus.PROVED
                 return True
             exit_message = "target state invariant blocked"
@@ -626,8 +627,12 @@ class _Deriver:
             )
         return None
 
-    def _validate_state(self, object_name: str, state_name: str) -> bool:
+    def _validate_state(
+        self, object_name: str, state_name: str, entered_by: EventDef | None = None
+    ) -> bool:
         key = (object_name, state_name)
+        if entered_by is not None:
+            self.state_validation_events[key] = entered_by
         if key in self.validated_states:
             return True
         self.validated_states.add(key)
@@ -654,7 +659,12 @@ class _Deriver:
             return False
 
         self._collect_deferred(state.decl.deferred, state, "state")
-        return self._verify_blocks(state.decl.invariants, "invariant", state=state)
+        return self._verify_blocks(
+            state.decl.invariants,
+            "invariant",
+            state=state,
+            entered_by=self.state_validation_events.get(key),
+        )
 
     def _verify_blocks(
         self,
@@ -663,6 +673,7 @@ class _Deriver:
         *,
         event: EventDef | None = None,
         state: StateDef | None = None,
+        entered_by: EventDef | None = None,
     ) -> bool:
         ok = True
         for block in blocks:
@@ -674,6 +685,10 @@ class _Deriver:
                         )
                         and ok
                     )
+                elif self._try_prove_event_ensures(
+                    entry, entry_span, kind, state, entered_by
+                ):
+                    continue
                 elif self._try_prove_builtin_predicate(
                     entry, entry_span, kind, event, state
                 ):
@@ -787,6 +802,39 @@ class _Deriver:
                 )
                 return True
 
+        return False
+
+    def _try_prove_event_ensures(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        state: StateDef | None,
+        entered_by: EventDef | None,
+    ) -> bool:
+        if kind != "invariant" or state is None or entered_by is None:
+            return False
+
+        for block in entered_by.decl.ensures:
+            if expression not in block.entries:
+                continue
+            classification = _classify_obligation(
+                expression, kind, state.object_name
+            )
+            self._record(
+                DerivationStatus.PROVED,
+                f"{kind}: {expression}",
+                span,
+                object_name=state.object_name,
+                event_name=entered_by.name,
+                state_name=state.name,
+                expression=expression,
+                source_kind=kind,
+                predicate=classification["predicate"],
+                proof_class=classification["proof_class"],
+                proof_provider="event_ensures",
+            )
+            return True
         return False
 
     def _record_builtin_proof(

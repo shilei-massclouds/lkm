@@ -43,6 +43,7 @@ class EventDecl:
     depends_on: list[Block] = field(default_factory=list)
     drives: list[Block] = field(default_factory=list)
     may_change: list[Block] = field(default_factory=list)
+    ensures: list[Block] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
 

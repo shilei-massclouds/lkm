@@ -29,6 +29,10 @@ class ParserTests(unittest.TestCase):
                                 PreparePhase.Event::Setup;
                                 BootPhase.Event::Setup;
                             }
+
+                            ensures {
+                                BootPhase.state == State::Ready;
+                            }
                         }
                     }
                 }
@@ -56,6 +60,10 @@ class ParserTests(unittest.TestCase):
                 "PreparePhase.Event::Setup",
                 "BootPhase.Event::Setup",
             ],
+        )
+        self.assertEqual(
+            event.ensures[0].entries,
+            ["BootPhase.state == State::Ready"],
         )
 
     def test_statement_entries_keeps_less_than_comparisons_separate(self) -> None:

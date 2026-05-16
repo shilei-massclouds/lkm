@@ -50,10 +50,16 @@ class ModelToolTests(unittest.TestCase):
             objects = data["model"]["objects"]
             startup = objects["StartupTimeline"]
             setup = startup["states"]["Base"]["events"]["Setup"]
+            event_stream = objects["EventStream"]
+            event_preset = event_stream["states"]["Base"]["events"]["Preset"]
 
             self.assertEqual(startup["children"], ["PreparePhase", "BootPhase"])
             self.assertEqual(setup["source_state"], "Base")
             self.assertEqual(setup["target_state"], "Ready")
+            self.assertEqual(
+                event_preset["ensures"][0]["entries"][0]["text"],
+                "Riscv64.stvec == phys_addr(StaticObjects.early_event_entry)",
+            )
             self.assertEqual(
                 objects["PhysicalMemory"]["properties"]["access"],
                 "Access::ReadOnly",

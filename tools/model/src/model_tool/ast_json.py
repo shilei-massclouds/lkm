@@ -120,6 +120,7 @@ def _event_from_json(item: Any) -> EventDecl:
         depends_on=[_block_from_json(block) for block in _list(data, "depends_on")],
         drives=[_block_from_json(block) for block in _list(data, "drives")],
         may_change=[_block_from_json(block) for block in _list(data, "may_change")],
+        ensures=[_block_from_json(block) for block in _list(data, "ensures")],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
     )

@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertGreater(data["summary"]["obligation"], 0)
+            self.assertEqual(data["summary"]["obligation"], 93)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -85,6 +85,9 @@ class DeriveToolTests(unittest.TestCase):
                 record for record in data["records"] if record["status"] == "obligation"
             ]
             proved = [record for record in data["records"] if record["status"] == "proved"]
+            self.assertFalse(
+                any(record["proof_class"] == "register_effect" for record in obligations)
+            )
             self.assertNotIn(
                 "auto_candidate", data["summary"]["obligation_categories"]
             )
@@ -192,37 +195,33 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"] == "Riscv64.stvec == phys_addr(StaticObjects.early_event_entry)"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"] == "Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap)"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"] == "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"] == "Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode)"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
