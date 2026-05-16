@@ -1039,6 +1039,10 @@ object FixMap: PrepareObject {
                 may_change {
                     FixMap.fdt_slot;
                 }
+
+                ensures {
+                    slot_contains(fdt_slot, RawDtb);
+                }
             }
         }
     }
@@ -1306,6 +1310,10 @@ object EarlyVm: AddressSpaceObject {
                     RawDtb.Event::Preset;
                     RawDtb.Event::Setup;
                     FixMap.Event::Preset;
+                }
+
+                ensures {
+                    slot_contains(FixMap.fdt_slot, RawDtb);
                 }
             }
         }

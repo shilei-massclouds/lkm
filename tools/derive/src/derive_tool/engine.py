@@ -1069,6 +1069,12 @@ def _format_obligation_provider_summary(records: list[DerivationRecord]) -> list
 
 
 _PRIOR_FACT_PROOFS = {
+    "slot_contains(FixMap.fdt_slot, RawDtb)": (
+        "fixmap_slot_content",
+        {
+            "slot_contains(FixMap.fdt_slot, RawDtb)",
+        },
+    ),
     "valid_task_ref(Riscv64.tp)": (
         "object_storage",
         {
