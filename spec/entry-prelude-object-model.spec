@@ -129,6 +129,10 @@ predicate fixmap_adjacent_to_linear_map<T: Object, U: Object>(fixmap: T, linear_
     adjacent(fixmap, linear_map)
 }
 
+predicate fits_in_kernel_image_map<T: Object, U: VirtualAddressArea>(image: T, map: U) -> bool {
+    contains(map, image)
+}
+
 type ObjectStorage<T> {
     invariant {
         valid_object_storage(self);
@@ -159,7 +163,7 @@ type KernelImageSegment {
     range: AddrRange;
 }
 
-type KernelImageArea: VirtualAddressArea {
+type KernelImageMap: VirtualAddressArea {
     range: Derived<VirtAddrRange<KernelImage>, range(Config.kernel_link_addr, Config.kernel_link_addr + Config.kernel_image_va_window_size)>;
 }
 
@@ -598,7 +602,7 @@ object InitTask: TaskObject {
      */
     state State::Online {
         invariant {
-            Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageArea);
+            Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap);
             valid_task_ref(Riscv64.tp);
         }
     }
@@ -670,9 +674,9 @@ object InitStack: StackObject {
     state State::Online {
         invariant {
             Lds.init_stack_end - Lds.init_stack_start >= Config.page_size;
-            Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageArea);
+            Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
             valid_stack_pointer(Riscv64.sp);
-            inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageArea), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageArea), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageArea));
+            inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap));
         }
     }
 }
@@ -776,7 +780,7 @@ object EventStream: FlowObject {
      */
     state State::Online {
         invariant {
-            Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageArea);
+            Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
             Riscv64.sscratch == 0;
         }
     }
@@ -878,7 +882,7 @@ object KernelImage: ImageObject {
             valid_segment_set(segments);
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
-            Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageArea);
+            Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
             gp_relative_access_ready();
         }
     }
@@ -1274,7 +1278,7 @@ object EarlyVm: AddressSpaceObject {
                     RawDtb.state == State::Ready;
                     FixMap.state == State::Ready;
                     page_aligned(StaticObjects.early_pg_dir);
-                    KernelImage.end - KernelImage.start < Config.kernel_image_va_window_size;
+                    fits_in_kernel_image_map(KernelImage, KernelImageMap);
                     slot_contains(FixMap.fdt_slot, RawDtb);
                 }
 
@@ -1290,7 +1294,7 @@ object EarlyVm: AddressSpaceObject {
      */
     state State::Ready {
         invariant {
-            kernel_image_mapping_ready(StaticObjects.early_pg_dir);
+            kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap);
             fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot);
             LinearMap.state == State::Reserved;
         }
@@ -1317,7 +1321,7 @@ object EarlyVm: AddressSpaceObject {
     state State::Online {
         invariant {
             Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
-            kernel_image_accessible();
+            kernel_image_accessible(KernelImage, KernelImageMap);
             fixmap_slot_accessible(FixMap.fdt_slot);
         }
 

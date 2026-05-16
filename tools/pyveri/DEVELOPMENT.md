@@ -465,6 +465,8 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - 已引入最小 `FixMap` 对象，先只建模 FDT 槽位。`RawDtb` 负责物理 DTB 有效性，`FixMap.Preset` 负责检查 FDT slot 存在且能够容纳 RawDtb，并记录 `slot_contains(FixMap.fdt_slot, RawDtb)`；`EarlyVm` 后续只依赖 FixMap 已就绪和槽位内容，再建立页表映射。
 - 已引入最小 `LinearMap` 对象，表示 `PAGE_OFFSET` 起始的物理内存线性映射区域在入口前导期已按布局预留，但完整 RAM banks 映射尚未建立。`EarlyVm.Ready` 只要求 `LinearMap.state == State::Reserved`，完整线性映射应留给 `SwapperVm` 或后续完整 VM 阶段。
 - `EarlyVm` 的 FDT 映射谓词已改为通用 fixmap slot 语义：`fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。RawDtb 是否位于该槽位由 `FixMap` 的 `slot_contains(...)` 负责，页表映射阶段不再直接绑定 RawDtb 物理范围。
+- `KernelImageArea` 已更名为 `KernelImageMap`，表达内核映像在 EarlyVm 中的虚拟映射区域。`EarlyVm.Ready` 和 `EarlyVm.Online` 分别使用 `kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap)` 与 `kernel_image_accessible(KernelImage, KernelImageMap)`，避免把内核映像映射写成无参数黑盒。
+- `EarlyVm.Setup` 不再直接使用 `KernelImage.end - KernelImage.start < Config.kernel_image_va_window_size` 这种裸关系表达容量约束，而是使用 `fits_in_kernel_image_map(KernelImage, KernelImageMap)` 表达“内核映像可装入该映射区域”；具体窗口大小仍由 `KernelImageMap.range` 从 `Config.kernel_link_addr` 和 `Config.kernel_image_va_window_size` 派生。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 

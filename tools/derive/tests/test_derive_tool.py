@@ -201,6 +201,38 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "fits_in_kernel_image_map"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "config_source_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "fits_in_fixmap_slot"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "config_source_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "kernel_image_mapping_ready"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "kernel_image_accessible"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
             attrs_providers = {
                 record["object"]: (record["proof_class"], record["proof_provider"])
                 for record in obligations
