@@ -472,6 +472,13 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - `phys_to_virt_transition_completed(...)` 已参数化为 `phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap)`，表示第一次地址空间过渡完成应由跳板页表、跳板映射和 `TrampolineVm.Enable` 的 satp 切换共同推出。
 - `KernelImage` 自身的剩余义务按来源细化：`valid_segment_set(segments)` 来自链接脚本段布局，`memory_zeroed(segments.bss.range)` 来自启动代码清零 BSS，`gp_relative_access_ready()` 由 `KernelImage.Enable` 重置 gp、`KernelImageMap` 可访问等前序事实推出。
 - `StaticObjects` 中的 `valid_page_table_storage(...)` 已统一承担静态页表存储的存在性、稳定性、静态分配、页对齐和最小容量约束。`TrampolineVm.Setup`、`EarlyVm.Setup` 和 `SwapperVm.Setup` 不再重复声明 `page_aligned(StaticObjects.*_pg_dir)`；各 VM 阶段只依赖 `StaticObjects.state == State::Online` 和各自的映射语义。
+- `StaticObjects` 中的 `valid_function_symbol(...)` 已统一承担事件入口符号的存在性与稳定性约束。`EventStream.Preset` 和 `EventStream.Enable` 不再重复声明 `valid_function_symbol(StaticObjects.*_event_entry)`；事件流只依赖 `StaticObjects.state == State::Online` 并设置对应入口。
+- `TrampolineMap` 增加 `valid_trampoline_map(...)` 约束，把跳板映射的物理起点、虚拟起点和映射大小约束集中到映射对象自身。`TrampolineVm.Setup` 不再直接声明 `aligned(Lds.kernel_start, Config.pmd_size)`，也不再重复声明 `valid_satp_mode(Config.satp_mode)`；前者归入 `config_and_linker_candidate`，后者由 `Config.Online` 提供。
+- `StaticObjects` 中的 `valid_object_storage(...)`、`valid_function_symbol(...)` 和 `valid_page_table_storage(...)` 的证明来源已统一细化为 `linker_symbol_candidate`，表示这些静态对象和符号的存在性、稳定性、对齐与容量约束应来自链接符号/静态分配事实。
+- 剩余泛化 provider 已继续细化：`valid_phys_range_set(...)` 来自 FDT/platform memory layout，`valid_task_storage(...)` 来自链接符号/静态对象布局，`valid_task_ref(...)` 与 `valid_stack_pointer(...)` 由前序寄存器设置事实推出，`soc_early_platform_ready()` 来自 FDT 与平台早期初始化事实。
+- 若裸关系表达式实际承载模型语义，也需要按表达式来源细化，而不是一律归入 `builtin_candidate`。当前已细化：`BootArgs` 的 `a0/a1` 绑定来自启动协议，`RawDtb` 的 header/range 边界来自启动代码读取与派生，`FixMap.fdt_slot == Config.fixmap.fdt` 来自配置源。
+- 事件写寄存器后的状态关系已归入 `register_effect/prior_derivation_facts`，包括 `sie/sip/stvec/tp/sp/gp/satp/sscratch` 的物理地址阶段、EarlyVm 阶段和地址空间切换结果。这类关系不再视为普通 builtin 关系，而是由对应事件的 `may_change` 与前序推导事实支持。
+- `Config` 的数值边界、对齐、satp 模式和 fixmap 配置约束已归入 `configuration/config_source_candidate`；`Lds` 与 `KernelImage.segments.bss.range` 的符号/范围约束已归入 `linker_layout/linker_script_candidate`；`InitStack` 的栈容量和 sp 落入栈范围约束分别归入 `stack_layout/config_and_linker_candidate` 与 `stack_layout/prior_derivation_facts`。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 

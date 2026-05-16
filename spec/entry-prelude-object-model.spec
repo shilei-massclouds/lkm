@@ -133,6 +133,13 @@ predicate fits_in_kernel_image_map<T: Object, U: VirtualAddressArea>(image: T, m
     contains(map, image)
 }
 
+predicate valid_trampoline_map<T: VirtualAddressArea>(map: T) -> bool {
+    exists(map);
+    aligned(map.phys_start, map.size);
+    page_aligned(map.virt_start);
+    map.size >= page_size_min();
+}
+
 type ObjectStorage<T> {
     invariant {
         valid_object_storage(self);
@@ -171,6 +178,10 @@ type TrampolineMap: VirtualAddressArea {
     phys_start: Derived<SymbolAddr, Lds.kernel_start>;
     virt_start: Derived<VirtAddr<KernelImage>, Config.kernel_link_addr>;
     size: Derived<Size, Config.pmd_size>;
+
+    invariant {
+        valid_trampoline_map(self);
+    }
 }
 
 type DtbHeader {
@@ -745,7 +756,6 @@ object EventStream: FlowObject {
                 depends_on {
                     InterruptStream.state == State::Prepared;
                     StaticObjects.state == State::Online;
-                    valid_function_symbol(StaticObjects.early_event_entry);
                 }
 
                 may_change {
@@ -771,7 +781,6 @@ object EventStream: FlowObject {
                 depends_on {
                     Vm.state == State::Ready;
                     StaticObjects.state == State::Online;
-                    valid_function_symbol(StaticObjects.formal_event_entry);
                 }
 
                 may_change {
@@ -1161,8 +1170,7 @@ object TrampolineVm: AddressSpaceObject {
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
                     Lds.state == State::Online;
-                    aligned(Lds.kernel_start, Config.pmd_size);
-                    valid_satp_mode(Config.satp_mode);
+                    valid_trampoline_map(TrampolineMap);
                 }
 
                 may_change {

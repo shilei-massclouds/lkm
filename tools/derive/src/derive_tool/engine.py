@@ -40,8 +40,6 @@ _AUTO_PREDICATES = {
     "no_service": "state_alias",
     "page_aligned": "alignment",
     "readonly": "object_attribute",
-    "valid_fixmap_config": "configuration",
-    "valid_satp_mode": "configuration",
 }
 _ASSUMPTION_PREDICATES = {
 }
@@ -81,10 +79,13 @@ _EXTERNAL_PREDICATES = {
     "valid_object_storage": "object_storage",
     "valid_page_table_storage": "object_storage",
     "valid_phys_range_set": "platform",
+    "valid_fixmap_config": "configuration",
+    "valid_satp_mode": "configuration",
     "valid_segment_set": "linker_layout",
     "valid_stack_pointer": "architecture_state",
     "valid_task_ref": "object_storage",
     "valid_task_storage": "object_storage",
+    "valid_trampoline_map": "address_mapping",
     "valid_virt_addr": "address_mapping",
 }
 _DERIVED_PROVIDERS = {
@@ -105,11 +106,22 @@ _DERIVED_PROVIDERS = {
     "phys_to_virt_transition_completed": "prior_derivation_facts",
     "slot_contains": "prior_derivation_facts",
     "trampoline_mapping_ready": "boot_code_candidate",
+    "valid_trampoline_map": "config_and_linker_candidate",
+    "valid_fixmap_config": "config_source_candidate",
     "valid_dtb_header": "boot_code_candidate",
     "valid_dtb_magic": "boot_code_candidate",
+    "valid_function_symbol": "linker_symbol_candidate",
     "valid_hart_id": "fdt_and_boot_protocol",
+    "valid_object_storage": "linker_symbol_candidate",
+    "valid_page_table_storage": "linker_symbol_candidate",
+    "valid_phys_range_set": "fdt_candidate",
+    "valid_satp_mode": "config_source_candidate",
     "valid_virt_addr": "config_source_candidate",
     "valid_segment_set": "linker_script_candidate",
+    "valid_stack_pointer": "prior_derivation_facts",
+    "valid_task_ref": "prior_derivation_facts",
+    "valid_task_storage": "linker_symbol_candidate",
+    "soc_early_platform_ready": "fdt_and_platform_candidate",
 }
 _CONTAINS_PROOFS = {
     "contains(PhysicalMemory.ram, header_range)": (
@@ -119,6 +131,184 @@ _CONTAINS_PROOFS = {
     "contains(PhysicalMemory.ram, range)": (
         "physical_memory_membership",
         "boot_code_candidate",
+    ),
+}
+_RELATION_PROOFS = {
+    "boot_hartid == Riscv64.a0": (
+        "boot_arguments",
+        "boot_protocol_candidate",
+    ),
+    "boot_cpu_hartid == Riscv64.a0": (
+        "boot_hart_identity",
+        "boot_protocol_candidate",
+    ),
+    "page_size > 0": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "pmd_size >= page_size": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "aligned(pmd_size, page_size)": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "pt_size_on_stack > 0": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "pt_size_on_stack < page_size": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "kernel_link_addr != 0": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "page_aligned(kernel_link_addr)": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "kernel_image_va_window_size > 0": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "kernel_image_va_window_size >= pmd_size": (
+        "configuration",
+        "config_source_candidate",
+    ),
+    "dtb_pa == Riscv64.a1": (
+        "boot_arguments",
+        "boot_protocol_candidate",
+    ),
+    "global_pointer != 0": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "kernel_start != 0": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "kernel_end > kernel_start": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "bss_start != 0": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "bss_end > bss_start": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "inside(bss_start, bss_end, kernel_start, kernel_end)": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "init_stack_start != 0": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "init_stack_end > init_stack_start": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "page_aligned(init_stack_start)": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "page_aligned(init_stack_end)": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "segments.bss.range == range(Lds.bss_start, Lds.bss_end)": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "inside(segments.bss.range.start, segments.bss.range.end, start, end)": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "Lds.init_stack_end - Lds.init_stack_start >= Config.page_size": (
+        "stack_layout",
+        "config_and_linker_candidate",
+    ),
+    "inside(Riscv64.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end)": (
+        "stack_layout",
+        "prior_derivation_facts",
+    ),
+    "inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap))": (
+        "stack_layout",
+        "prior_derivation_facts",
+    ),
+    "header_range.start == BootArgs.dtb_pa": (
+        "dtb_header_range",
+        "boot_code_candidate",
+    ),
+    "header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>()": (
+        "dtb_header_range",
+        "boot_code_candidate",
+    ),
+    "range.start == BootArgs.dtb_pa": (
+        "dtb_range",
+        "boot_code_candidate",
+    ),
+    "range.end == BootArgs.dtb_pa + header.total_size": (
+        "dtb_range",
+        "boot_code_candidate",
+    ),
+    "fdt_slot == Config.fixmap.fdt": (
+        "fixmap_layout",
+        "config_source_candidate",
+    ),
+    "Riscv64.sie == 0": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.sip == 0": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.stvec == phys_addr(StaticObjects.early_event_entry)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.sscratch == 0": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.tp == phys_addr(StaticObjects.init_task)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.gp == phys_addr(Lds.global_pointer)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode)": (
+        "register_effect",
+        "prior_derivation_facts",
     ),
 }
 
@@ -794,6 +984,14 @@ def _classify_obligation(
         }
     if expression in _CONTAINS_PROOFS:
         proof_class, proof_provider = _CONTAINS_PROOFS[expression]
+        return {
+            "predicate": predicate,
+            "category": "derived_candidate",
+            "proof_class": proof_class,
+            "proof_provider": proof_provider,
+        }
+    if expression in _RELATION_PROOFS:
+        proof_class, proof_provider = _RELATION_PROOFS[expression]
         return {
             "predicate": predicate,
             "category": "derived_candidate",

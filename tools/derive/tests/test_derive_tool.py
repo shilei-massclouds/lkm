@@ -60,9 +60,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
             )
-            self.assertGreater(
-                data["summary"]["obligation_categories"]["auto_candidate"], 0
-            )
+            self.assertNotIn("auto_candidate", data["summary"]["obligation_categories"])
             self.assertNotIn("spec_gap", data["summary"]["obligation_categories"])
             self.assertNotIn("unknown", data["summary"]["obligation_categories"])
             self.assertTrue(
@@ -87,19 +85,20 @@ class DeriveToolTests(unittest.TestCase):
                 record for record in data["records"] if record["status"] == "obligation"
             ]
             proved = [record for record in data["records"] if record["status"] == "proved"]
-            self.assertTrue(
-                any(
-                    record["obligation_category"] == "auto_candidate"
-                    and record["proof_provider"] == "builtin_candidate"
-                    for record in obligations
-                )
+            self.assertNotIn(
+                "auto_candidate", data["summary"]["obligation_categories"]
+            )
+            self.assertFalse(
+                any(record["proof_provider"] == "builtin_candidate" for record in obligations)
             )
             self.assertTrue(
                 any(
                     record["obligation_category"] == "derived_candidate"
-                    and record["proof_provider"] == "derived_candidate"
                     for record in obligations
                 )
+            )
+            self.assertFalse(
+                any(record["proof_provider"] == "derived_candidate" for record in obligations)
             )
             self.assertTrue(
                 any(
@@ -142,6 +141,141 @@ class DeriveToolTests(unittest.TestCase):
                     and record["proof_class"] == "dtb_header_range"
                     and record["proof_provider"] == "boot_code_candidate"
                     and record["expression"] == "contains(PhysicalMemory.ram, header_range)"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "boot_hartid == Riscv64.a0"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "boot_arguments"
+                    and record["proof_provider"] == "boot_protocol_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "dtb_pa == Riscv64.a1"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "boot_arguments"
+                    and record["proof_provider"] == "boot_protocol_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "header_range.start == BootArgs.dtb_pa"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "dtb_header_range"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "range.end == BootArgs.dtb_pa + header.total_size"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "dtb_range"
+                    and record["proof_provider"] == "boot_code_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "fdt_slot == Config.fixmap.fdt"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "fixmap_layout"
+                    and record["proof_provider"] == "config_source_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "Riscv64.stvec == phys_addr(StaticObjects.early_event_entry)"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "register_effect"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap)"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "register_effect"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "register_effect"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode)"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "register_effect"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "kernel_image_va_window_size >= pmd_size"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "configuration"
+                    and record["proof_provider"] == "config_source_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_satp_mode"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "configuration"
+                    and record["proof_provider"] == "config_source_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "kernel_end > kernel_start"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "linker_layout"
+                    and record["proof_provider"] == "linker_script_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "segments.bss.range == range(Lds.bss_start, Lds.bss_end)"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "linker_layout"
+                    and record["proof_provider"] == "linker_script_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "Lds.init_stack_end - Lds.init_stack_start >= Config.page_size"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "stack_layout"
+                    and record["proof_provider"] == "config_and_linker_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "boot_cpu_hartid == Riscv64.a0"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "boot_hart_identity"
+                    and record["proof_provider"] == "boot_protocol_candidate"
                     for record in obligations
                 )
             )
@@ -246,6 +380,78 @@ class DeriveToolTests(unittest.TestCase):
                     record["predicate"] == "trampoline_mapping_ready"
                     and record["proof_class"] == "address_mapping"
                     and record["proof_provider"] == "boot_code_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_trampoline_map"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "config_and_linker_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_object_storage"
+                    and record["proof_class"] == "object_storage"
+                    and record["proof_provider"] == "linker_symbol_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_function_symbol"
+                    and record["proof_class"] == "linker_symbol"
+                    and record["proof_provider"] == "linker_symbol_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_page_table_storage"
+                    and record["proof_class"] == "object_storage"
+                    and record["proof_provider"] == "linker_symbol_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_phys_range_set"
+                    and record["proof_class"] == "platform"
+                    and record["proof_provider"] == "fdt_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_task_storage"
+                    and record["proof_class"] == "object_storage"
+                    and record["proof_provider"] == "linker_symbol_candidate"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_task_ref"
+                    and record["proof_class"] == "object_storage"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "valid_stack_pointer"
+                    and record["proof_class"] == "architecture_state"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "soc_early_platform_ready"
+                    and record["proof_class"] == "platform"
+                    and record["proof_provider"] == "fdt_and_platform_candidate"
                     for record in obligations
                 )
             )
