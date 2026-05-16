@@ -1381,6 +1381,8 @@ object EarlyVm: AddressSpaceObject {
 
                 ensures {
                     Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
+                    kernel_image_accessible(KernelImage, KernelImageMap);
+                    fixmap_slot_accessible(FixMap.fdt_slot);
                 }
             }
         }

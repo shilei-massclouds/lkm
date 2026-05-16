@@ -483,6 +483,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - 推导器已开始记录已证明表达式，并用前序事实继续证明一小组派生 invariant：`valid_task_ref(Riscv64.tp)`、`valid_stack_pointer(Riscv64.sp)` 和 `inside(Riscv64.sp, ...)` 可由已证明的 `tp/sp` 后置关系推出。
 - `FixMap.Preset` 已用 `ensures { slot_contains(fdt_slot, RawDtb); }` 表达“RawDtb 已被安排到 FDT fixmap 槽位”的事件后置事实；`EarlyVm.Preset` 作为复合事件，用 `ensures { slot_contains(FixMap.fdt_slot, RawDtb); }` 表达驱动 `RawDtb` 与 `FixMap` 后形成的对外事实。`EarlyVm.Setup` 中重复依赖的同一 `slot_contains(...)` 可由前序已证明事实推出，因此 `fixmap_slot_content/prior_derivation_facts` 这一组当前已收口。
 - `TrampolineVm.Enable` 已用事件后置条件证明 `phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap)`；`KernelImage.Enable` 已用事件后置条件证明 `gp_relative_access_ready()`。这两项目前作为具体事件效果收口，而不是引入泛化自动规则。
+- `EarlyVm.Enable` 已用事件后置条件证明 `kernel_image_accessible(KernelImage, KernelImageMap)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。含义是 `EarlyVm.Ready` 已经具备映射，`Enable` 切换到 `early_pg_dir` 后这些映射进入可访问状态；当前不引入通用映射可访问自动证明规则。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 

@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 82)
+            self.assertEqual(data["summary"]["obligation"], 80)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -385,12 +385,32 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "kernel_image_accessible"
+                    for record in obligations
+                )
+            )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "fixmap_slot_accessible"
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "kernel_image_accessible"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "fixmap_slot_accessible"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
