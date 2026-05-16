@@ -694,6 +694,10 @@ class _Deriver:
                     entry, entry_span, kind, event, state
                 ):
                     continue
+                elif self._try_prove_phase_context(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
                 elif self._try_prove_builtin_predicate(
                     entry, entry_span, kind, event, state
                 ):
@@ -864,6 +868,39 @@ class _Deriver:
             source_kind=kind,
             predicate=_predicate_name(expression),
             proof_class=proof_class,
+            proof_provider="prior_derivation_facts",
+        )
+        return True
+
+    def _try_prove_phase_context(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if (
+            kind != "invariant"
+            or state is None
+            or state.object_name != "EntryPreludePhase"
+            or expression != "context_is(SystemExclusive)"
+        ):
+            return False
+
+        # EntryPreludePhase belongs to BootPhase, whose default context is
+        # system-exclusive until interrupt and multitask paths are introduced.
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class="phase_context",
             proof_provider="prior_derivation_facts",
         )
         return True

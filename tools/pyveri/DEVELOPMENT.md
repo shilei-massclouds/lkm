@@ -453,7 +453,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 已确认的分类调整：
 
 - `attrs_accessible(self)` 不能只按谓词名分类，应结合对象来源决定证明来源，例如配置源、链接脚本、静态对象布局、FDT/平台描述或启动 ABI。
-- `context_is(SystemExclusive)` 应由此前推导出的启动阶段、中断状态、事件流状态和 CPU 组状态等事实组合推出，归入 `derived_candidate / system_exclusive_context / prior_derivation_facts`。
+- `context_is(SystemExclusive)` 应由阶段上下文和前序事实组合推出。当前已确认主文档与 `.spec` 语义一致：引导期 `BootPhase` 的默认上下文是 `SystemExclusive`，`EntryPreludePhase` 作为引导期子阶段继承并维持该默认上下文；关键事实包括入口前导期没有打开中断处理并发路径，也没有启动其它任务，因此当前阶段只有根流/根任务独占推进系统。推导器已先用窄规则证明 `EntryPreludePhase` 的两个 `context_is(SystemExclusive)`，归入 `phase_context / prior_derivation_facts`。后续仍需讨论正式条件拆分采用“无中断并发 + 无任务并发”两条，还是增加显式的 `no_preemption_path` 第三条。
 - `valid_hart_id(...)` 依赖启动 ABI 中的 boot hart id 和 FDT/平台 CPU 描述，归入 `derived_candidate / boot_hart_identity / fdt_and_boot_protocol`。
 - `CpuGroup.boot_cpu_hartid` 不是可选值，而是 `CpuGroup.Prepared` 后生效的属性；规格中使用 `HartId`，不使用 `Option<HartId>`、`Some(...)` 或 `unwrap()`。
 

@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 80)
+            self.assertEqual(data["summary"]["obligation"], 78)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -312,13 +312,18 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "context_is"
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "context_is"
-                    and record["obligation_category"] == "derived_candidate"
-                    and record["proof_class"] == "system_exclusive_context"
+                    and record["proof_class"] == "phase_context"
                     and record["proof_provider"] == "prior_derivation_facts"
-                    for record in obligations
+                    for record in proved
                 )
             )
             self.assertTrue(
