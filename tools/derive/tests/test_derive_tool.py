@@ -57,6 +57,9 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["summary"]["transitions"], 28)
             self.assertGreater(data["summary"]["obligation"], 0)
             self.assertIn("obligation_categories", data["summary"])
+            self.assertNotIn(
+                "assumption_candidate", data["summary"]["obligation_categories"]
+            )
             self.assertGreater(
                 data["summary"]["obligation_categories"]["auto_candidate"], 0
             )
@@ -150,6 +153,50 @@ class DeriveToolTests(unittest.TestCase):
                     and record["expression"] == "valid_hart_id(boot_cpu_hartid)"
                     for record in obligations
                 )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "context_is"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "system_exclusive_context"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "contains"
+                    and record["obligation_category"] == "derived_candidate"
+                    and record["proof_class"] == "boot_dtb_address"
+                    and record["proof_provider"] == "boot_protocol_and_fdt"
+                    and record["expression"] == "contains(PhysicalMemory.ram, Riscv64.a1)"
+                    for record in obligations
+                )
+            )
+            attrs_providers = {
+                record["object"]: (record["proof_class"], record["proof_provider"])
+                for record in obligations
+                if record["predicate"] == "attrs_accessible"
+            }
+            self.assertEqual(
+                attrs_providers["Config"],
+                ("config_attributes", "config_source_candidate"),
+            )
+            self.assertEqual(
+                attrs_providers["Lds"],
+                ("linker_layout", "linker_script_candidate"),
+            )
+            self.assertEqual(
+                attrs_providers["PhysicalMemory"],
+                ("platform_memory_layout", "fdt_candidate"),
+            )
+            self.assertEqual(
+                attrs_providers["Riscv64"],
+                ("boot_register_state", "boot_protocol_candidate"),
+            )
+            self.assertEqual(
+                attrs_providers["StaticObjects"],
+                ("static_object_layout", "linker_symbol_candidate"),
             )
             self.assertTrue(
                 any(

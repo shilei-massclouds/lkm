@@ -44,11 +44,16 @@ _AUTO_PREDICATES = {
     "valid_satp_mode": "configuration",
 }
 _ASSUMPTION_PREDICATES = {
-    "addr_in_ram": "boot_input",
-    "attrs_accessible": "environment",
-    "context_is": "environment",
+}
+_ATTRS_ACCESSIBLE_PROOFS = {
+    "Config": ("config_attributes", "config_source_candidate"),
+    "Lds": ("linker_layout", "linker_script_candidate"),
+    "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
+    "Riscv64": ("boot_register_state", "boot_protocol_candidate"),
+    "StaticObjects": ("static_object_layout", "linker_symbol_candidate"),
 }
 _EXTERNAL_PREDICATES = {
+    "context_is": "system_exclusive_context",
     "disjoint": "platform_memory_layout",
     "fits_in_fixmap_slot": "address_mapping",
     "gp_relative_access_ready": "architecture_state",
@@ -77,11 +82,18 @@ _EXTERNAL_PREDICATES = {
     "valid_virt_addr": "address_mapping",
 }
 _DERIVED_PROVIDERS = {
+    "context_is": "prior_derivation_facts",
     "disjoint": "fdt_candidate",
     "kernel_fpu_disabled": "isa_spec_and_boot_code",
     "kernel_vector_disabled": "isa_spec_and_boot_code",
     "range_in_ram": "boot_code_candidate",
     "valid_hart_id": "fdt_and_boot_protocol",
+}
+_CONTAINS_PROOFS = {
+    "contains(PhysicalMemory.ram, Riscv64.a1)": (
+        "boot_dtb_address",
+        "boot_protocol_and_fdt",
+    ),
 }
 
 
@@ -450,12 +462,13 @@ class _Deriver:
                 ):
                     continue
                 else:
-                    classification = _classify_obligation(entry, kind)
+                    context_object = _context_object(event, state)
+                    classification = _classify_obligation(entry, kind, context_object)
                     self._record(
                         DerivationStatus.OBLIGATION,
                         f"unresolved {kind}: {entry}",
                         entry_span,
-                        object_name=_context_object(event, state),
+                        object_name=context_object,
                         event_name=event.name if event is not None else None,
                         state_name=state.name if state is not None else None,
                         expression=entry,
@@ -739,8 +752,28 @@ def _format_obligation_category_summary(records: list[DerivationRecord]) -> list
     return [f"  categories: {summary}"]
 
 
-def _classify_obligation(expression: str, source_kind: str) -> dict[str, str | None]:
+def _classify_obligation(
+    expression: str, source_kind: str, context_object: str | None
+) -> dict[str, str | None]:
     predicate = _predicate_name(expression)
+    if predicate == "attrs_accessible":
+        proof_class, proof_provider = _attrs_accessible_proof(
+            expression, context_object
+        )
+        return {
+            "predicate": predicate,
+            "category": "derived_candidate",
+            "proof_class": proof_class,
+            "proof_provider": proof_provider,
+        }
+    if expression in _CONTAINS_PROOFS:
+        proof_class, proof_provider = _CONTAINS_PROOFS[expression]
+        return {
+            "predicate": predicate,
+            "category": "derived_candidate",
+            "proof_class": proof_class,
+            "proof_provider": proof_provider,
+        }
     if predicate in _AUTO_PREDICATES:
         return {
             "predicate": predicate,
@@ -788,6 +821,16 @@ def _predicate_name(expression: str) -> str | None:
     if match is None:
         return None
     return match.group(1)
+
+
+def _attrs_accessible_proof(
+    expression: str, context_object: str | None
+) -> tuple[str, str]:
+    match = re.match(r"\Aattrs_accessible\(\s*([A-Z][A-Za-z0-9_]*)\s*\)\Z", expression)
+    object_name = match.group(1) if match is not None else context_object
+    if object_name in _ATTRS_ACCESSIBLE_PROOFS:
+        return _ATTRS_ACCESSIBLE_PROOFS[object_name]
+    return ("object_attributes", "derived_candidate")
 
 
 def _is_relation_expression(expression: str) -> bool:

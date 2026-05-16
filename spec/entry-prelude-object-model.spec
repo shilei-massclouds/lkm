@@ -111,10 +111,6 @@ predicate disjoint<T, U>(left: PhysRangeSet<T>, right: PhysRangeSet<U>) -> bool 
     }
 }
 
-predicate addr_in_ram<T>(addr: PhysAddr<T>, ram: PhysRangeSet<Ram>) -> bool {
-    contains(ram, addr)
-}
-
 predicate range_in_ram<T>(range: PhysAddrRange<T>, ram: PhysRangeSet<Ram>) -> bool {
     contains(ram, range)
 }
@@ -877,7 +873,7 @@ object RawDtb: ResourceObject {
                 depends_on {
                     Riscv64.state == State::Online;
                     PhysicalMemory.state == State::Online;
-                    addr_in_ram(Riscv64.a1, PhysicalMemory.ram);
+                    contains(PhysicalMemory.ram, Riscv64.a1);
                 }
             }
         }

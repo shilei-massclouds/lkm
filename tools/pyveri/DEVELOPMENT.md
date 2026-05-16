@@ -457,6 +457,10 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - `valid_hart_id(...)` 依赖启动 ABI 中的 boot hart id 和 FDT/平台 CPU 描述，归入 `derived_candidate / boot_hart_identity / fdt_and_boot_protocol`。
 - `CpuGroup.boot_cpu_hartid` 不是可选值，而是 `CpuGroup.Prepared` 后生效的属性；规格中使用 `HartId`，不使用 `Option<HartId>`、`Some(...)` 或 `unwrap()`。
 
+后续规格结构清理：
+
+- 可考虑引入 `BootArgs` 对象作为内核启动参数抽象。当前 RISC-V64 语境下，`BootArgs.boot_hartid == Riscv64.a0`，`BootArgs.dtb_pa == Riscv64.a1`。`Riscv64` 继续描述入口寄存器事实，`BootArgs` 描述启动 ABI/boot protocol 对寄存器的语义解释；`CpuGroup` 和 `RawDtb` 后续可分别依赖 `BootArgs.boot_hartid` 和 `BootArgs.dtb_pa`，避免裸寄存器名散落在规格中。
+
 #### Step C.1: 收口 trace 输出和注释数据流
 
 当前 trace SVG 已能作为基础推导过程图输出，并支持来自 `.spec` 注释的 overlay 注释层。下一步需要把已经暴露的问题收口：
