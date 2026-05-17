@@ -893,7 +893,7 @@ class _Deriver:
 
         if expression == "interrupt_concurrency_closed()":
             proof_class = "system_exclusive_context"
-            proof_provider = "prior_derivation_facts"
+            proof_provider = "riscv_entry_and_interrupt_stream"
         elif expression == "task_concurrency_closed()":
             proof_class = "system_exclusive_context"
             proof_provider = "boot_protocol_and_sbi_hsm"

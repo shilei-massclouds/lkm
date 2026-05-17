@@ -335,7 +335,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "interrupt_concurrency_closed"
                     and record["proof_class"] == "system_exclusive_context"
-                    and record["proof_provider"] == "prior_derivation_facts"
+                    and record["proof_provider"] == "riscv_entry_and_interrupt_stream"
                     for record in proved
                 )
             )
