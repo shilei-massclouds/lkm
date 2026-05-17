@@ -314,7 +314,12 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertFalse(
                 any(
-                    record["predicate"] == "context_is"
+                    record["predicate"]
+                    in (
+                        "context_is",
+                        "interrupt_concurrency_closed",
+                        "task_concurrency_closed",
+                    )
                     for record in obligations
                 )
             )
@@ -322,6 +327,22 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "context_is"
                     and record["proof_class"] == "phase_context"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "interrupt_concurrency_closed"
+                    and record["proof_class"] == "system_exclusive_context"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "task_concurrency_closed"
+                    and record["proof_class"] == "system_exclusive_context"
                     and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
                 )

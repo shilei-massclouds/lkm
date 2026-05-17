@@ -36,6 +36,8 @@ predicate inside<T>(inner_start: T, inner_end: T, outer_start: T, outer_end: T) 
 predicate non_empty<T>(value: T) -> bool;
 predicate well_formed<T>(value: T) -> bool;
 predicate contains<T, U>(container: T, value: U) -> bool;
+predicate interrupt_concurrency_closed() -> bool;
+predicate task_concurrency_closed() -> bool;
 
 predicate attrs_accessible<T: Object>(obj: T) -> bool {
     forall attr in obj.attrs {
@@ -1622,6 +1624,8 @@ object EntryPreludePhase: PhaseObject {
      */
     state State::Base {
         invariant {
+            interrupt_concurrency_closed();
+            task_concurrency_closed();
             context_is(SystemExclusive);
         }
 
@@ -1663,6 +1667,8 @@ object EntryPreludePhase: PhaseObject {
      */
     state State::Ready {
         invariant {
+            interrupt_concurrency_closed();
+            task_concurrency_closed();
             context_is(SystemExclusive);
             RootStream.state == State::Prepared;
             InterruptStream.state == State::Prepared;

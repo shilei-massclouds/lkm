@@ -65,12 +65,14 @@ _EXTERNAL_PREDICATES = {
     "kernel_fpu_disabled": "riscv_status_register",
     "kernel_image_accessible": "address_mapping",
     "kernel_image_mapping_ready": "address_mapping",
+    "interrupt_concurrency_closed": "system_exclusive_context",
     "linear_map_area_reserved": "address_layout",
     "kernel_vector_disabled": "riscv_status_register",
     "memory_zeroed": "memory_content",
     "phys_to_virt_transition_completed": "architecture_state",
     "slot_contains": "fixmap_slot_content",
     "soc_early_platform_ready": "platform",
+    "task_concurrency_closed": "system_exclusive_context",
     "trampoline_mapping_ready": "address_mapping",
     "valid_dtb_header": "boot_input",
     "valid_dtb_magic": "boot_input",
@@ -98,6 +100,7 @@ _DERIVED_PROVIDERS = {
     "fixmap_slot_mapping_ready": "boot_code_candidate",
     "fits_in_fixmap_slot": "config_source_candidate",
     "fits_in_kernel_image_map": "config_source_candidate",
+    "interrupt_concurrency_closed": "prior_derivation_facts",
     "kernel_image_accessible": "prior_derivation_facts",
     "kernel_image_mapping_ready": "boot_code_candidate",
     "linear_map_area_reserved": "config_source_candidate",
@@ -105,6 +108,7 @@ _DERIVED_PROVIDERS = {
     "memory_zeroed": "boot_code_candidate",
     "phys_to_virt_transition_completed": "prior_derivation_facts",
     "slot_contains": "prior_derivation_facts",
+    "task_concurrency_closed": "prior_derivation_facts",
     "trampoline_mapping_ready": "boot_code_candidate",
     "valid_trampoline_map": "config_and_linker_candidate",
     "valid_fixmap_config": "config_source_candidate",
@@ -884,12 +888,22 @@ class _Deriver:
             kind != "invariant"
             or state is None
             or state.object_name != "EntryPreludePhase"
-            or expression != "context_is(SystemExclusive)"
         ):
             return False
 
-        # EntryPreludePhase belongs to BootPhase, whose default context is
-        # system-exclusive until interrupt and multitask paths are introduced.
+        if expression in (
+            "interrupt_concurrency_closed()",
+            "task_concurrency_closed()",
+        ):
+            proof_class = "system_exclusive_context"
+        elif expression == "context_is(SystemExclusive)" and {
+            "interrupt_concurrency_closed()",
+            "task_concurrency_closed()",
+        }.issubset(self.proved_expressions):
+            proof_class = "phase_context"
+        else:
+            return False
+
         self._record(
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
@@ -900,7 +914,7 @@ class _Deriver:
             expression=expression,
             source_kind=kind,
             predicate=_predicate_name(expression),
-            proof_class="phase_context",
+            proof_class=proof_class,
             proof_provider="prior_derivation_facts",
         )
         return True
