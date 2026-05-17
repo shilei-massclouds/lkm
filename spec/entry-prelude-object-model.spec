@@ -765,7 +765,7 @@ object InitStack: StackObject {
             /*
              * Enable 在早期虚拟地址空间可用后，将根栈指针切换为虚拟地址。
              */
-            on Event::Enable -> State::Online {
+            on Event::Enable -> State::Ready {
                 depends_on {
                     Vm.state == State::Ready;
                 }
@@ -782,9 +782,10 @@ object InitStack: StackObject {
     }
 
     /*
-     * Online 表示 sp 已经使用 EarlyVm 中的内核映像虚拟区域地址。
+     * Ready 表示 sp 已经使用 EarlyVm 中的内核映像虚拟区域地址。
+     * Online 留给后续栈保护机制建立后的正式服务状态。
      */
-    state State::Online {
+    state State::Ready {
         invariant {
             Lds.init_stack_end - Lds.init_stack_start >= Config.page_size;
             Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap);
@@ -1800,7 +1801,7 @@ object EntryPreludePhase: PhaseObject {
             KernelImage.state == State::Online;
             RawDtb.state == State::Ready;
             InitTask.state == State::Online;
-            InitStack.state == State::Online;
+            InitStack.state == State::Ready;
             Vm.state == State::Ready;
             TrampolineVm.state == State::Destroyed;
             EarlyVm.state == State::Online;

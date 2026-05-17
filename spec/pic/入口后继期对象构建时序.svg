@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1040" viewBox="0 0 1280 1040" role="img" aria-labelledby="title desc">
   <title id="title">入口后继期对象构建时序</title>
   <desc id="desc">展示入口后继期从 start_kernel 到 paging_init 完成之间的核心对象构建顺序。</desc>
   <defs>
@@ -27,35 +27,49 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1280" height="860" fill="#ffffff"/>
+  <rect x="0" y="0" width="1280" height="1040" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">入口后继期对象构建时序</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">核心路径：EarlyDtb -> MemBlock -> VM.enable() -> SwapperVM.Online</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">核心路径：InitStack / CPUGroup 承接 -> EarlyDtb -> MemBlock -> VM.enable()</text>
 
-  <rect x="48" y="128" width="210" height="650" rx="14" class="lane"/>
+  <rect x="48" y="128" width="210" height="830" rx="14" class="lane"/>
   <text x="153" y="164" text-anchor="middle" class="obj">入口后继期对象</text>
   <text x="153" y="190" text-anchor="middle" class="subtitle">setup()</text>
-  <line x1="153" y1="224" x2="153" y2="744" class="timeline"/>
+  <line x1="153" y1="224" x2="153" y2="924" class="timeline"/>
 
   <rect x="290" y="118" width="870" height="50" rx="10" class="stage"/>
-  <text x="318" y="143" class="boundary">起点边界：start_kernel() 入口，VM.Ready，EarlyVM.Online，SwapperVM.Base</text>
+  <text x="318" y="143" class="boundary">起点边界：start_kernel() 入口，InitStack.Ready，CPUGroup.Prepared，VM.Ready</text>
 
   <g transform="translate(0 0)">
     <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">1</text>
+    <rect x="290" y="205" width="870" height="60" rx="10" class="box cleanup"/>
+    <text x="318" y="230" class="line1">InitStack.enable()</text>
+    <text x="535" y="230" class="line2">建立根栈保护状态，使 InitStack.Ready -> Online</text>
+  </g>
+
+  <g transform="translate(0 88)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">2</text>
+    <rect x="290" y="205" width="870" height="60" rx="10" class="box cleanup"/>
+    <text x="318" y="230" class="line1">CPUGroup.setup()</text>
+    <text x="550" y="230" class="line2">建立 logical CPU 0 -> boot_cpu_hartid 映射，使 CPUGroup.Prepared -> Ready</text>
+  </g>
+
+  <g transform="translate(0 176)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">3</text>
     <rect x="290" y="205" width="870" height="60" rx="10" class="box dtb"/>
     <text x="318" y="230" class="line1">EarlyDtb.setup()</text>
     <text x="520" y="230" class="line2">解析 RawDtb，提取 command line、memory ranges 和早期平台事实</text>
   </g>
 
-  <g transform="translate(0 88)">
-    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">2</text>
+  <g transform="translate(0 264)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">4</text>
     <rect x="290" y="205" width="870" height="60" rx="10" class="box mem"/>
     <text x="318" y="230" class="line1">MemBlock.setup()</text>
     <text x="535" y="230" class="line2">基于 EarlyDtb 建立早期物理内存分配与保留区信息</text>
   </g>
 
-  <g transform="translate(0 176)">
-    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">3</text>
-    <rect x="290" y="205" width="870" height="200" rx="12" class="box addr"/>
+  <g transform="translate(0 352)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">5</text>
+    <rect x="290" y="205" width="870" height="174" rx="12" class="box addr"/>
     <text x="318" y="232" class="line1">VM.enable()</text>
     <text x="470" y="232" class="line2">把当前地址空间从 EarlyVM 推进到 SwapperVM</text>
 
@@ -69,13 +83,13 @@
     <text x="366" y="392" class="line2">3.3  EarlyVM.cleanup()：EarlyVM 退出当前地址空间服务</text>
   </g>
 
-  <g transform="translate(0 408)">
-    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">4</text>
+  <g transform="translate(0 558)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">6</text>
     <rect x="290" y="205" width="870" height="60" rx="10" class="box cleanup"/>
     <text x="318" y="230" class="line1">EarlyDtb.cleanup()</text>
     <text x="530" y="230" class="line2">早期 DTB 解析对象退出服务，后续由正式 OF/DeviceTree 对象接续</text>
   </g>
 
-  <rect x="290" y="716" width="870" height="50" rx="10" class="stage"/>
-  <text x="318" y="741" class="boundary">终点边界：paging_init() 完成，VM.Online，SwapperVM.Online，EarlyVM.Destroyed</text>
+  <rect x="290" y="906" width="870" height="50" rx="10" class="stage"/>
+  <text x="318" y="931" class="boundary">终点边界：paging_init() 完成，InitStack.Online，CPUGroup.Ready，VM.Online</text>
 </svg>

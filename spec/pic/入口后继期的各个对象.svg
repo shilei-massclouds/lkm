@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1040" viewBox="0 0 1280 1040" role="img" aria-labelledby="title desc">
   <title id="title">入口后继期对象分类与相互关系</title>
-  <desc id="desc">展示入口后继期的阶段对象、EarlyDtb、MemBlock、VM、EarlyVM 和 SwapperVM 之间的关系。</desc>
+  <desc id="desc">展示入口后继期的阶段对象、承接对象、EarlyDtb、MemBlock、VM、EarlyVM 和 SwapperVM 之间的关系。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
@@ -19,6 +19,7 @@
       .dtb { fill: #fff7ed; stroke: #f97316; }
       .mem { fill: #f0fdf4; stroke: #22c55e; }
       .addr { fill: #eff6ff; stroke: #3b82f6; }
+      .carry { fill: #fefce8; stroke: #ca8a04; }
       .inactive { fill: #f1f5f9; stroke: #64748b; }
       .label { font-size: 23px; font-weight: 600; text-anchor: middle; dominant-baseline: middle; }
       .small { font-size: 16px; fill: #475569; text-anchor: middle; dominant-baseline: middle; }
@@ -29,7 +30,7 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1280" height="860" fill="#ffffff"/>
+  <rect x="0" y="0" width="1280" height="1040" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">入口后继期对象分类与相互关系</text>
   <text x="640" y="76" text-anchor="middle" class="subtitle">从 start_kernel() 到 paging_init() 完成，建立完整内核虚拟地址空间</text>
 
@@ -115,4 +116,20 @@
   <text x="706" y="708" class="edge-label">驱动 VM.enable()</text>
   <path d="M660 568 C775 568, 858 616, 970 596" class="edge"/>
   <text x="820" y="555" class="edge-label">早期分配支持</text>
+
+  <rect x="48" y="810" width="1184" height="158" rx="16" class="group"/>
+  <text x="640" y="846" class="group-label" text-anchor="middle">入口前导期承接对象</text>
+
+  <rect x="120" y="878" width="430" height="66" rx="10" class="box carry"/>
+  <text x="335" y="902" class="label">InitStack</text>
+  <text x="335" y="926" class="small">Ready -> Online：建立根栈保护状态</text>
+
+  <rect x="730" y="878" width="430" height="66" rx="10" class="box carry"/>
+  <text x="945" y="902" class="label">CPUGroup</text>
+  <text x="945" y="926" class="small">logical CPU 0 -> boot_cpu_hartid 映射</text>
+
+  <path d="M298 552 C405 728, 260 790, 310 878" class="edge-soft"/>
+  <text x="310" y="802" class="edge-label">承接 / 保护</text>
+  <path d="M298 552 C520 765, 880 770, 945 878" class="edge-soft"/>
+  <text x="715" y="802" class="edge-label">承接 / 建立 primary 映射</text>
 </svg>
