@@ -505,9 +505,13 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 
 当前 trace SVG 已能作为基础推导过程图输出，并支持来自 `.spec` 注释的 overlay 注释层。下一步需要把已经暴露的问题收口：
 
+- 下一阶段优先收口 trace/SVG 输出体验，而不是继续扩展证明规则。当前 `obligation: 0` 已经形成阶段性闭环，后续应先让推导验证过程图更适合日常审阅。
 - 预览输出文件不要散落在仓库根目录。`pyveri-cli-trace.svg`、`trace.svg` 这类临时输出应删除，或统一输出到明确目录；后续默认建议使用 `tools/out/` 或命令显式指定路径。
+- 系统检查四种 SVG 输出：基础图、带 state 注释、带 event 注释、同时带 state/event 注释，并把具体视觉问题记录成待办。
 - 当前 `.spec` 注释由 `pyveri` driver 临时读取并转换成 render 可用的 annotation JSON。长期更合理的数据流是：`parse` 保留注释 span/内容，`model` 或 `view` 按对象状态和事件关联注释，`render` 只消费 `view.json` 或明确的 annotation 输入。
-- trace 注释第一版保持 overlay，不改变底图布局；后续如果注释过密，再讨论更完整的注释布局、标题/正文结构和过滤策略。
+- trace 注释第一版保持 overlay，不改变底图布局；后续如果注释过密，再讨论更完整的注释布局、标题/正文结构、过滤策略，以及注释块自动避让和遮挡控制。
+- 在图输出稳定后，再考虑把 `--trace-svg` / `--trace-annotations` 的命令形式进一步简化。
+- 当前剩余 `deferred` 暂时放在 trace 输出体验之后处理。
 - 基础 trace 图仍需继续改进：`depends_on` 虚线是否改成靠近目标端的短线，完整图是否分段/折叠/分页，标签是否简化和自动分行，以及布局常量是否暴露为 render 参数。
 
 #### Step D: 工具链拆分
