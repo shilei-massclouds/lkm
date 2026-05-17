@@ -339,7 +339,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "interrupt_concurrency_closed"
                     and record["proof_class"] == "system_exclusive_context"
-                    and record["proof_provider"] == "opensbi_firmware_entry_state"
+                    and record["proof_provider"] == "prior_derivation_facts"
                     for record in proved
                 )
             )
@@ -347,7 +347,39 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "task_concurrency_closed"
                     and record["proof_class"] == "system_exclusive_context"
-                    and record["proof_provider"] == "boot_protocol_and_sbi_hsm"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "sbi_hsm_available"
+                    and record["proof_class"] == "sbi_hsm"
+                    and record["proof_provider"] == "riscv_sbi_spec"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "primary_hart_sie_clear_at_kernel_entry"
+                    and record["proof_class"] == "firmware_entry_state"
+                    and record["proof_provider"] == "opensbi_firmware"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "primary_hart_only_at_kernel_entry"
+                    and record["proof_class"] == "firmware_entry_state"
+                    and record["proof_provider"] == "opensbi_firmware"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "ordered_booting_enabled"
+                    and record["proof_class"] == "firmware_boot_policy"
+                    and record["proof_provider"] == "opensbi_firmware"
                     for record in proved
                 )
             )

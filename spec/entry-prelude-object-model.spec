@@ -36,6 +36,10 @@ predicate inside<T>(inner_start: T, inner_end: T, outer_start: T, outer_end: T) 
 predicate non_empty<T>(value: T) -> bool;
 predicate well_formed<T>(value: T) -> bool;
 predicate contains<T, U>(container: T, value: U) -> bool;
+predicate sbi_hsm_available() -> bool;
+predicate ordered_booting_enabled() -> bool;
+predicate primary_hart_only_at_kernel_entry() -> bool;
+predicate primary_hart_sie_clear_at_kernel_entry() -> bool;
 predicate interrupt_concurrency_closed() -> bool;
 predicate task_concurrency_closed() -> bool;
 
@@ -263,6 +267,39 @@ object BootArgs: PrepareObject {
 }
 
 /*
+ * SbiSpec 表示 RISC-V SBI 规范中当前模型依赖的 HSM 语义。
+ * 它描述规范能力，不描述具体固件版本的实现细节。
+ */
+object SbiSpec: PrepareObject {
+    initial_state: State::Online;
+    source: external_spec::riscv_sbi;
+
+    state State::Online {
+        invariant {
+            sbi_hsm_available();
+        }
+    }
+}
+
+/*
+ * OpenSbiFirmware 表示当前启动路径中由 OpenSBI 固件提供的 SBI 交接语义。
+ * 它把 SBI 规范能力落实到本次内核入口的固件状态。
+ */
+object OpenSbiFirmware: PrepareObject {
+    initial_state: State::Online;
+    source: firmware::opensbi;
+
+    state State::Online {
+        invariant {
+            SbiSpec.state == State::Online;
+            ordered_booting_enabled();
+            primary_hart_only_at_kernel_entry();
+            primary_hart_sie_clear_at_kernel_entry();
+        }
+    }
+}
+
+/*
  * Lds 表示链接脚本形成的内核映像布局对象。
  * 它提供符号地址、BSS 边界、根栈边界和内核映像边界。
  */
@@ -478,6 +515,8 @@ object PreparePhase: PhaseObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
+                    SbiSpec.state == State::Online;
+                    OpenSbiFirmware.state == State::Online;
                     Lds.state == State::Online;
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
@@ -493,6 +532,8 @@ object PreparePhase: PhaseObject {
     state State::Ready {
         invariant {
             Riscv64.state == State::Online;
+            SbiSpec.state == State::Online;
+            OpenSbiFirmware.state == State::Online;
             Lds.state == State::Online;
             StaticObjects.state == State::Online;
             Config.state == State::Online;
@@ -515,6 +556,8 @@ object PreparePhase: PhaseObject {
     state State::Online {
         invariant {
             Riscv64.state == State::Online;
+            SbiSpec.state == State::Online;
+            OpenSbiFirmware.state == State::Online;
             Lds.state == State::Online;
             StaticObjects.state == State::Online;
             Config.state == State::Online;
@@ -1640,6 +1683,8 @@ object EntryPreludePhase: PhaseObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
+                    SbiSpec.state == State::Online;
+                    OpenSbiFirmware.state == State::Online;
                     Lds.state == State::Online;
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;

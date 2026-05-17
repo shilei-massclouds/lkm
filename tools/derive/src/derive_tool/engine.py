@@ -63,6 +63,34 @@ _EXTERNAL_SOURCE_PROOFS = {
         "architecture_register_file",
         "riscv_isa_spec",
     ),
+    ("SbiSpec", "external_spec::riscv_sbi", "sbi_hsm_available()"): (
+        "sbi_hsm",
+        "riscv_sbi_spec",
+    ),
+    (
+        "OpenSbiFirmware",
+        "firmware::opensbi",
+        "ordered_booting_enabled()",
+    ): (
+        "firmware_boot_policy",
+        "opensbi_firmware",
+    ),
+    (
+        "OpenSbiFirmware",
+        "firmware::opensbi",
+        "primary_hart_only_at_kernel_entry()",
+    ): (
+        "firmware_entry_state",
+        "opensbi_firmware",
+    ),
+    (
+        "OpenSbiFirmware",
+        "firmware::opensbi",
+        "primary_hart_sie_clear_at_kernel_entry()",
+    ): (
+        "firmware_entry_state",
+        "opensbi_firmware",
+    ),
 }
 _EXTERNAL_PREDICATES = {
     "context_is": "system_exclusive_context",
@@ -80,9 +108,13 @@ _EXTERNAL_PREDICATES = {
     "linear_map_area_reserved": "address_layout",
     "kernel_vector_disabled": "riscv_status_register",
     "memory_zeroed": "memory_content",
+    "ordered_booting_enabled": "firmware_boot_policy",
     "phys_to_virt_transition_completed": "architecture_state",
+    "primary_hart_only_at_kernel_entry": "firmware_entry_state",
+    "primary_hart_sie_clear_at_kernel_entry": "firmware_entry_state",
     "slot_contains": "fixmap_slot_content",
     "soc_early_platform_ready": "platform",
+    "sbi_hsm_available": "sbi_hsm",
     "task_concurrency_closed": "system_exclusive_context",
     "trampoline_mapping_ready": "address_mapping",
     "valid_dtb_header": "boot_input",
@@ -118,8 +150,12 @@ _DERIVED_PROVIDERS = {
     "gp_relative_access_ready": "prior_derivation_facts",
     "memory_zeroed": "boot_code_candidate",
     "phys_to_virt_transition_completed": "prior_derivation_facts",
+    "primary_hart_only_at_kernel_entry": "opensbi_firmware",
+    "primary_hart_sie_clear_at_kernel_entry": "opensbi_firmware",
     "slot_contains": "prior_derivation_facts",
+    "sbi_hsm_available": "riscv_sbi_spec",
     "task_concurrency_closed": "prior_derivation_facts",
+    "ordered_booting_enabled": "opensbi_firmware",
     "trampoline_mapping_ready": "boot_code_candidate",
     "valid_trampoline_map": "config_and_linker_candidate",
     "valid_fixmap_config": "config_source_candidate",
@@ -981,11 +1017,22 @@ class _Deriver:
             return False
 
         if expression == "interrupt_concurrency_closed()":
+            self._validate_state("OpenSbiFirmware", "Online")
+            if "primary_hart_sie_clear_at_kernel_entry()" not in self.proved_expressions:
+                return False
             proof_class = "system_exclusive_context"
-            proof_provider = "opensbi_firmware_entry_state"
+            proof_provider = "prior_derivation_facts"
         elif expression == "task_concurrency_closed()":
+            self._validate_state("SbiSpec", "Online")
+            self._validate_state("OpenSbiFirmware", "Online")
+            if not {
+                "sbi_hsm_available()",
+                "ordered_booting_enabled()",
+                "primary_hart_only_at_kernel_entry()",
+            }.issubset(self.proved_expressions):
+                return False
             proof_class = "system_exclusive_context"
-            proof_provider = "boot_protocol_and_sbi_hsm"
+            proof_provider = "prior_derivation_facts"
         elif expression == "context_is(SystemExclusive)" and {
             "interrupt_concurrency_closed()",
             "task_concurrency_closed()",
