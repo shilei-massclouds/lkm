@@ -40,6 +40,7 @@ predicate sbi_hsm_available() -> bool;
 predicate ordered_booting_enabled() -> bool;
 predicate primary_hart_only_at_kernel_entry() -> bool;
 predicate primary_hart_sie_clear_at_kernel_entry() -> bool;
+predicate firmware_dtb_blob_in_ram_at_kernel_entry<T>(dtb_pa: PhysAddr<T>) -> bool;
 predicate platform_hart_id_valid(hartid: HartId) -> bool;
 predicate interrupt_concurrency_closed() -> bool;
 predicate task_concurrency_closed() -> bool;
@@ -293,9 +294,12 @@ object OpenSbiFirmware: PrepareObject {
     state State::Online {
         invariant {
             SbiSpec.state == State::Online;
+            BootArgs.state == State::Online;
+            PhysicalMemory.state == State::Online;
             ordered_booting_enabled();
             primary_hart_only_at_kernel_entry();
             primary_hart_sie_clear_at_kernel_entry();
+            firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
         }
     }
 }
@@ -1671,6 +1675,10 @@ object Soc: HardwareObject {
 
                 may_change {
                     // 待补充：平台相关早期状态点。
+                }
+
+                ensures {
+                    soc_early_platform_ready();
                 }
             }
         }

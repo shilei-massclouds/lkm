@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 5)
+            self.assertEqual(data["summary"]["obligation"], 0)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -100,12 +100,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertFalse(
                 any(record["proof_provider"] == "builtin_candidate" for record in obligations)
             )
-            self.assertTrue(
-                any(
-                    record["obligation_category"] == "derived_candidate"
-                    for record in obligations
-                )
-            )
+            self.assertFalse(obligations)
             self.assertFalse(
                 any(record["proof_provider"] == "derived_candidate" for record in obligations)
             )
@@ -185,11 +180,10 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["predicate"] == "contains"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "dtb_header_range"
-                    and record["proof_provider"] == "boot_code_candidate"
+                    and record["proof_provider"] == "opensbi_firmware"
                     and record["expression"] == "contains(PhysicalMemory.ram, header_range)"
-                    for record in obligations
+                    for record in proved
                 )
             )
             self.assertFalse(
@@ -436,12 +430,19 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
+                    record["predicate"] == "firmware_dtb_blob_in_ram_at_kernel_entry"
+                    and record["proof_class"] == "firmware_entry_state"
+                    and record["proof_provider"] == "opensbi_firmware"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
                     record["predicate"] == "contains"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "physical_memory_membership"
-                    and record["proof_provider"] == "boot_code_candidate"
+                    and record["proof_provider"] == "opensbi_firmware"
                     and record["expression"] == "contains(PhysicalMemory.ram, range)"
-                    for record in obligations
+                    for record in proved
                 )
             )
             self.assertFalse(
@@ -474,11 +475,23 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "fits_in_kernel_image_map"
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "fits_in_kernel_image_map"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "config_source_candidate"
+                    and record["proof_provider"] == "config_and_linker"
+                    for record in proved
+                )
+            )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "fits_in_fixmap_slot"
                     for record in obligations
                 )
             )
@@ -486,8 +499,8 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "fits_in_fixmap_slot"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "config_source_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "riscv_fixmap_layout"
+                    for record in proved
                 )
             )
             self.assertFalse(
@@ -659,12 +672,18 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "soc_early_platform_ready"
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "soc_early_platform_ready"
                     and record["proof_class"] == "platform"
-                    and record["proof_provider"] == "fdt_and_platform_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertFalse(

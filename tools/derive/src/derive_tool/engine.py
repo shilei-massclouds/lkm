@@ -193,6 +193,14 @@ _EXTERNAL_SOURCE_PROOFS = {
         "opensbi_firmware",
     ),
     (
+        "OpenSbiFirmware",
+        "firmware::opensbi",
+        "firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)",
+    ): (
+        "firmware_entry_state",
+        "opensbi_firmware",
+    ),
+    (
         "PlatformCpuInfo",
         "fdt::cpus",
         "platform_hart_id_valid(BootArgs.boot_hartid)",
@@ -208,6 +216,7 @@ _EXTERNAL_PREDICATES = {
     "fits_in_kernel_image_map": "address_mapping",
     "fixmap_slot_accessible": "address_mapping",
     "fixmap_slot_mapping_ready": "address_mapping",
+    "firmware_dtb_blob_in_ram_at_kernel_entry": "firmware_entry_state",
     "fixmap_adjacent_to_linear_map": "address_layout",
     "gp_relative_access_ready": "architecture_state",
     "kernel_fpu_disabled": "riscv_status_register",
@@ -253,6 +262,7 @@ _DERIVED_PROVIDERS = {
     "fixmap_slot_mapping_ready": "boot_code_candidate",
     "fits_in_fixmap_slot": "config_source_candidate",
     "fits_in_kernel_image_map": "config_source_candidate",
+    "firmware_dtb_blob_in_ram_at_kernel_entry": "opensbi_firmware",
     "interrupt_concurrency_closed": "prior_derivation_facts",
     "kernel_image_accessible": "prior_derivation_facts",
     "kernel_image_mapping_ready": "boot_code_candidate",
@@ -288,11 +298,11 @@ _DERIVED_PROVIDERS = {
 _CONTAINS_PROOFS = {
     "contains(PhysicalMemory.ram, header_range)": (
         "dtb_header_range",
-        "boot_code_candidate",
+        "opensbi_firmware",
     ),
     "contains(PhysicalMemory.ram, range)": (
         "physical_memory_membership",
-        "boot_code_candidate",
+        "opensbi_firmware",
     ),
 }
 _RELATION_PROOFS = {
@@ -876,6 +886,18 @@ class _Deriver:
                     entry, entry_span, kind, event, state
                 ):
                     continue
+                elif self._try_prove_kernel_image_map_layout_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
+                elif self._try_prove_fixmap_slot_layout_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
+                elif self._try_prove_raw_dtb_memory_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
                 elif self._try_prove_stack_layout_fact(
                     entry, entry_span, kind, event, state
                 ):
@@ -1271,6 +1293,131 @@ class _Deriver:
             predicate=_predicate_name(expression),
             proof_class="address_mapping",
             proof_provider="config_and_linker",
+        )
+        return True
+
+    def _try_prove_kernel_image_map_layout_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if expression.strip() != "fits_in_kernel_image_map(KernelImage, KernelImageMap)":
+            return False
+        if not (
+            self._validate_state("KernelImage", "Ready")
+            and self._validate_state("Lds", "Online")
+            and self._validate_state("Config", "Online")
+        ):
+            return False
+
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class="address_mapping",
+            proof_provider="config_and_linker",
+        )
+        return True
+
+    def _try_prove_fixmap_slot_layout_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if (
+            expression.strip()
+            != "fits_in_fixmap_slot(RawDtb.range, fdt_slot, Config.page_size)"
+        ):
+            return False
+        if not (
+            self._validate_state("RawDtb", "Ready")
+            and self._validate_state("Config", "Online")
+        ):
+            return False
+
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class="address_mapping",
+            proof_provider="riscv_fixmap_layout",
+        )
+        return True
+
+    def _try_prove_raw_dtb_memory_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        stripped = expression.strip()
+        proof = _CONTAINS_PROOFS.get(stripped)
+        if proof is None:
+            return False
+
+        if not (
+            self._validate_state("OpenSbiFirmware", "Online")
+            and self._validate_state("BootArgs", "Online")
+            and self._validate_state("PhysicalMemory", "Online")
+        ):
+            return False
+
+        if (
+            "firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)"
+            not in self.proved_expressions
+        ):
+            return False
+
+        if stripped == "contains(PhysicalMemory.ram, header_range)":
+            required = {
+                "header_range.start == BootArgs.dtb_pa",
+                "header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>()",
+            }
+        elif stripped == "contains(PhysicalMemory.ram, range)":
+            required = {
+                "valid_dtb_header(header)",
+                "range.start == BootArgs.dtb_pa",
+                "range.end == BootArgs.dtb_pa + header.total_size",
+            }
+        else:
+            return False
+
+        if not required.issubset(self.proved_expressions):
+            return False
+
+        proof_class, proof_provider = proof
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class=proof_class,
+            proof_provider=proof_provider,
         )
         return True
 
