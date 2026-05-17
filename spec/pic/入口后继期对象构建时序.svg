@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
+  <title id="title">入口后继期对象构建时序</title>
+  <desc id="desc">展示入口后继期从 start_kernel 到 paging_init 完成之间的核心对象构建顺序。</desc>
+  <defs>
+    <style>
+      text {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif;
+        fill: #0f172a;
+      }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 20px; fill: #475569; }
+      .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .dtb { fill: #fff7ed; stroke: #f97316; }
+      .mem { fill: #f0fdf4; stroke: #22c55e; }
+      .addr { fill: #eff6ff; stroke: #3b82f6; }
+      .cleanup { fill: #f1f5f9; stroke: #64748b; }
+      .obj { font-size: 24px; font-weight: 500; dominant-baseline: middle; }
+      .line1 { font-size: 23px; font-weight: 500; dominant-baseline: middle; }
+      .line2 { font-size: 18px; fill: #475569; dominant-baseline: middle; }
+      .boundary { font-size: 18px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
+      .num { font-size: 19px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
+      .dot { fill: #334155; }
+      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="860" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">入口后继期对象构建时序</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">核心路径：EarlyDtb -> MemBlock -> VM.enable() -> SwapperVM.Online</text>
+
+  <rect x="48" y="128" width="210" height="650" rx="14" class="lane"/>
+  <text x="153" y="164" text-anchor="middle" class="obj">入口后继期对象</text>
+  <text x="153" y="190" text-anchor="middle" class="subtitle">setup()</text>
+  <line x1="153" y1="224" x2="153" y2="744" class="timeline"/>
+
+  <rect x="290" y="118" width="870" height="50" rx="10" class="stage"/>
+  <text x="318" y="143" class="boundary">起点边界：start_kernel() 入口，VM.Ready，EarlyVM.Online，SwapperVM.Base</text>
+
+  <g transform="translate(0 0)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">1</text>
+    <rect x="290" y="205" width="870" height="60" rx="10" class="box dtb"/>
+    <text x="318" y="230" class="line1">EarlyDtb.setup()</text>
+    <text x="520" y="230" class="line2">解析 RawDtb，提取 command line、memory ranges 和早期平台事实</text>
+  </g>
+
+  <g transform="translate(0 88)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">2</text>
+    <rect x="290" y="205" width="870" height="60" rx="10" class="box mem"/>
+    <text x="318" y="230" class="line1">MemBlock.setup()</text>
+    <text x="535" y="230" class="line2">基于 EarlyDtb 建立早期物理内存分配与保留区信息</text>
+  </g>
+
+  <g transform="translate(0 176)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">3</text>
+    <rect x="290" y="205" width="870" height="200" rx="12" class="box addr"/>
+    <text x="318" y="232" class="line1">VM.enable()</text>
+    <text x="470" y="232" class="line2">把当前地址空间从 EarlyVM 推进到 SwapperVM</text>
+
+    <rect x="340" y="265" width="760" height="42" rx="8" class="box addr"/>
+    <text x="366" y="286" class="line2">3.1  SwapperVM.setup()：建立 swapper_pg_dir 的完整内核页表</text>
+
+    <rect x="340" y="318" width="760" height="42" rx="8" class="box addr"/>
+    <text x="366" y="339" class="line2">3.2  SwapperVM.enable()：切换 RISCV64.satp 并同步 TLB</text>
+
+    <rect x="340" y="371" width="760" height="42" rx="8" class="box cleanup"/>
+    <text x="366" y="392" class="line2">3.3  EarlyVM.cleanup()：EarlyVM 退出当前地址空间服务</text>
+  </g>
+
+  <g transform="translate(0 408)">
+    <circle cx="153" cy="235" r="15" class="dot"/><text x="153" y="235" class="num">4</text>
+    <rect x="290" y="205" width="870" height="60" rx="10" class="box cleanup"/>
+    <text x="318" y="230" class="line1">EarlyDtb.cleanup()</text>
+    <text x="530" y="230" class="line2">早期 DTB 解析对象退出服务，后续由正式 OF/DeviceTree 对象接续</text>
+  </g>
+
+  <rect x="290" y="716" width="870" height="50" rx="10" class="stage"/>
+  <text x="318" y="741" class="boundary">终点边界：paging_init() 完成，VM.Online，SwapperVM.Online，EarlyVM.Destroyed</text>
+</svg>

@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
+  <title id="title">入口后继期对象分类与相互关系</title>
+  <desc id="desc">展示入口后继期的阶段对象、EarlyDtb、MemBlock、VM、EarlyVM 和 SwapperVM 之间的关系。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <style>
+      text {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif;
+        fill: #0f172a;
+      }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 20px; fill: #475569; }
+      .group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 8 6; }
+      .group-label { font-size: 22px; font-weight: 600; fill: #334155; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.4; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .dtb { fill: #fff7ed; stroke: #f97316; }
+      .mem { fill: #f0fdf4; stroke: #22c55e; }
+      .addr { fill: #eff6ff; stroke: #3b82f6; }
+      .inactive { fill: #f1f5f9; stroke: #64748b; }
+      .label { font-size: 23px; font-weight: 600; text-anchor: middle; dominant-baseline: middle; }
+      .small { font-size: 16px; fill: #475569; text-anchor: middle; dominant-baseline: middle; }
+      .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .edge-soft { stroke: #64748b; stroke-width: 1.8; stroke-dasharray: 7 6; fill: none; marker-end: url(#arrow); }
+      .edge-label { font-size: 15px; fill: #475569; text-anchor: middle; }
+      .state { font-size: 14px; fill: #334155; text-anchor: middle; dominant-baseline: middle; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="860" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">入口后继期对象分类与相互关系</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">从 start_kernel() 到 paging_init() 完成，建立完整内核虚拟地址空间</text>
+
+  <rect x="48" y="122" width="290" height="650" rx="16" class="group"/>
+  <text x="193" y="158" class="group-label" text-anchor="middle">阶段对象</text>
+
+  <rect x="88" y="205" width="210" height="68" rx="10" class="box phase"/>
+  <text x="193" y="232" class="label">引导期</text>
+  <text x="193" y="256" class="small">Boot Phase</text>
+
+  <rect x="88" y="330" width="210" height="76" rx="10" class="box phase"/>
+  <text x="193" y="358" class="label">入口前导期对象</text>
+  <text x="193" y="383" class="small">EntryPreludePhase</text>
+
+  <rect x="88" y="486" width="210" height="86" rx="10" class="box phase"/>
+  <text x="193" y="515" class="label">入口后继期对象</text>
+  <text x="193" y="541" class="small">EntrySuccessorPhase</text>
+  <text x="193" y="562" class="state">setup: start_kernel -> paging_init done</text>
+
+  <path d="M193 273 L193 330" class="edge"/>
+  <text x="228" y="306" class="edge-label">包含</text>
+  <path d="M193 406 L193 486" class="edge"/>
+  <text x="238" y="454" class="edge-label">接续 / cleanup</text>
+
+  <rect x="380" y="122" width="330" height="650" rx="16" class="group"/>
+  <text x="545" y="158" class="group-label" text-anchor="middle">早期输入与内存准备</text>
+
+  <rect x="430" y="205" width="230" height="74" rx="10" class="box dtb"/>
+  <text x="545" y="235" class="label">RawDtb</text>
+  <text x="545" y="260" class="small">入口前导期已验证原始 blob</text>
+
+  <rect x="430" y="340" width="230" height="94" rx="10" class="box dtb"/>
+  <text x="545" y="369" class="label">EarlyDtb</text>
+  <text x="545" y="394" class="small">cmdline / memory ranges</text>
+  <text x="545" y="416" class="state">Base -> Ready -> Destroyed</text>
+
+  <rect x="430" y="520" width="230" height="94" rx="10" class="box mem"/>
+  <text x="545" y="550" class="label">MemBlock</text>
+  <text x="545" y="575" class="small">早期物理内存分配支持</text>
+  <text x="545" y="597" class="state">Base -> Online</text>
+
+  <path d="M545 279 L545 340" class="edge"/>
+  <text x="590" y="317" class="edge-label">早期解析</text>
+  <path d="M545 434 L545 520" class="edge"/>
+  <text x="610" y="483" class="edge-label">内存范围 / 保留区</text>
+
+  <rect x="752" y="122" width="480" height="650" rx="16" class="group"/>
+  <text x="992" y="158" class="group-label" text-anchor="middle">地址空间对象</text>
+
+  <rect x="860" y="205" width="264" height="84" rx="10" class="box addr"/>
+  <text x="992" y="234" class="label">VM</text>
+  <text x="992" y="259" class="small">聚合当前内核地址空间能力</text>
+  <text x="992" y="280" class="state">Ready -> Online</text>
+
+  <rect x="805" y="355" width="210" height="88" rx="10" class="box inactive"/>
+  <text x="910" y="383" class="label">EarlyVM</text>
+  <text x="910" y="408" class="small">早期当前地址空间</text>
+  <text x="910" y="429" class="state">Online -> Destroyed</text>
+
+  <rect x="970" y="535" width="230" height="98" rx="10" class="box addr"/>
+  <text x="1085" y="565" class="label">SwapperVM</text>
+  <text x="1085" y="591" class="small">完整内核页表</text>
+  <text x="1085" y="614" class="state">Base -> Ready -> Online</text>
+
+  <rect x="770" y="535" width="156" height="98" rx="10" class="box addr"/>
+  <text x="848" y="565" class="small">静态输入</text>
+  <text x="848" y="589" class="state">swapper_pg_dir</text>
+  <text x="848" y="611" class="state">Config / satp_mode</text>
+
+  <path d="M992 289 L932 355" class="edge"/>
+  <text x="930" y="329" class="edge-label">当前入口状态</text>
+  <path d="M992 289 L1074 535" class="edge"/>
+  <text x="1098" y="425" class="edge-label">本阶段建立</text>
+  <path d="M1015 403 C1068 422, 1101 470, 1088 535" class="edge"/>
+  <text x="1118" y="472" class="edge-label">替换当前地址空间</text>
+  <path d="M926 584 L970 584" class="edge"/>
+
+  <path d="M298 529 C340 529, 353 387, 430 387" class="edge-soft"/>
+  <text x="356" y="438" class="edge-label">驱动</text>
+  <path d="M298 529 C363 529, 365 568, 430 568" class="edge-soft"/>
+  <text x="354" y="562" class="edge-label">驱动</text>
+  <path d="M298 529 C498 700, 815 706, 1085 633" class="edge-soft"/>
+  <text x="706" y="708" class="edge-label">驱动 VM.enable()</text>
+  <path d="M660 568 C775 568, 858 616, 970 596" class="edge"/>
+  <text x="820" y="555" class="edge-label">早期分配支持</text>
+</svg>
