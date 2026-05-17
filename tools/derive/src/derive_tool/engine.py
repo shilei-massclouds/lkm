@@ -58,7 +58,57 @@ _BOOT_PROTOCOL_PROOFS = {
     "boot_hartid == Riscv64.a0": ("boot_arguments", "riscv_boot_protocol"),
     "dtb_pa == Riscv64.a1": ("boot_arguments", "riscv_boot_protocol"),
 }
+_CONFIG_SOURCE_PROOFS = {
+    "attrs_accessible(self)": ("config_attributes", "config_source"),
+    "page_size > 0": ("configuration", "config_source"),
+    "pmd_size >= page_size": ("configuration", "config_source"),
+    "aligned(pmd_size, page_size)": ("configuration", "config_source"),
+    "pt_size_on_stack > 0": ("configuration", "config_source"),
+    "pt_size_on_stack < page_size": ("configuration", "config_source"),
+    "kernel_link_addr != 0": ("configuration", "config_source"),
+    "page_aligned(kernel_link_addr)": ("configuration", "config_source"),
+    "valid_virt_addr(kernel_link_addr)": ("address_mapping", "config_source"),
+    "kernel_image_va_window_size > 0": ("configuration", "config_source"),
+    "kernel_image_va_window_size >= pmd_size": ("configuration", "config_source"),
+    "valid_satp_mode(satp_mode)": ("configuration", "config_source"),
+    "valid_fixmap_config(fixmap)": ("configuration", "config_source"),
+}
+_LDS_LINKER_PROOFS = {
+    "attrs_accessible(self)": ("linker_layout", "linux_linker_script"),
+    "global_pointer != 0": ("linker_layout", "linux_linker_script"),
+    "kernel_start != 0": ("linker_layout", "linux_linker_script"),
+    "kernel_end > kernel_start": ("linker_layout", "linux_linker_script"),
+    "bss_start != 0": ("linker_layout", "linux_linker_script"),
+    "bss_end > bss_start": ("linker_layout", "linux_linker_script"),
+    "inside(bss_start, bss_end, kernel_start, kernel_end)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
+    "init_stack_start != 0": ("linker_layout", "linux_linker_script"),
+    "init_stack_end > init_stack_start": ("linker_layout", "linux_linker_script"),
+    "page_aligned(init_stack_start)": ("linker_layout", "linux_linker_script"),
+    "page_aligned(init_stack_end)": ("linker_layout", "linux_linker_script"),
+}
+_KERNEL_IMAGE_LINKER_PROOFS = {
+    "valid_segment_set(segments)": ("linker_layout", "linux_linker_script"),
+    "segments.bss.range == range(Lds.bss_start, Lds.bss_end)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
+    "inside(segments.bss.range.start, segments.bss.range.end, start, end)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
+}
 _EXTERNAL_SOURCE_PROOFS = {
+    **{
+        ("Config", "config::entry_prelude", expression): proof
+        for expression, proof in _CONFIG_SOURCE_PROOFS.items()
+    },
+    **{
+        ("Lds", "linker::linux_6_12_37", expression): proof
+        for expression, proof in _LDS_LINKER_PROOFS.items()
+    },
     ("Riscv64", "external_spec::riscv_isa", "attrs_accessible(self)"): (
         "architecture_register_file",
         "riscv_isa_spec",
@@ -759,6 +809,10 @@ class _Deriver:
                     entry, entry_span, kind, event, state
                 ):
                     continue
+                elif self._try_prove_kernel_image_linker_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
                 elif self._try_prove_platform_cpu_fact(
                     entry, entry_span, kind, event, state
                 ):
@@ -973,6 +1027,40 @@ class _Deriver:
         )
         if proof is None:
             return False
+        proof_class, proof_provider = proof
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class=proof_class,
+            proof_provider=proof_provider,
+        )
+        return True
+
+    def _try_prove_kernel_image_linker_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if kind != "invariant" or state is None:
+            return False
+        if state.object_name != "KernelImage":
+            return False
+
+        proof = _KERNEL_IMAGE_LINKER_PROOFS.get(expression.strip())
+        if proof is None:
+            return False
+
+        self._validate_state("Lds", "Online")
         proof_class, proof_provider = proof
         self._record(
             DerivationStatus.PROVED,

@@ -143,8 +143,8 @@ class DerivationTests(unittest.TestCase):
         self.assertIn("trace:", text)
         self.assertIn("categories:", text)
         self.assertIn("providers:", text)
-        self.assertIn("proved: 176", text)
-        self.assertIn("obligation: 71", text)
+        self.assertIn("proved: 209", text)
+        self.assertIn("obligation: 38", text)
         self.assertTrue(
             any(
                 record.status is DerivationStatus.PROVED

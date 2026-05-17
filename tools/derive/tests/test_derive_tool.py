@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 71)
+            self.assertEqual(data["summary"]["obligation"], 38)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -238,37 +238,33 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"] == "kernel_image_va_window_size >= pmd_size"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "configuration"
-                    and record["proof_provider"] == "config_source_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "config_source"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["predicate"] == "valid_satp_mode"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "configuration"
-                    and record["proof_provider"] == "config_source_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "config_source"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"] == "kernel_end > kernel_start"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "linker_layout"
-                    and record["proof_provider"] == "linker_script_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "linux_linker_script"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"] == "segments.bss.range == range(Lds.bss_start, Lds.bss_end)"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "linker_layout"
-                    and record["proof_provider"] == "linker_script_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "linux_linker_script"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -489,8 +485,8 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_virt_addr"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "config_source_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "config_source"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -592,8 +588,8 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_segment_set"
                     and record["proof_class"] == "linker_layout"
-                    and record["proof_provider"] == "linker_script_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "linux_linker_script"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -641,17 +637,29 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
-            self.assertEqual(
-                attrs_providers["Config"],
-                ("config_attributes", "config_source_candidate"),
+            self.assertNotIn("Config", attrs_providers)
+            self.assertTrue(
+                any(
+                    record["object"] == "Config"
+                    and record["predicate"] == "attrs_accessible"
+                    and record["proof_class"] == "config_attributes"
+                    and record["proof_provider"] == "config_source"
+                    for record in proved
+                )
             )
             self.assertEqual(
                 attrs_providers["FixMap"],
                 ("fixmap_layout", "config_source_candidate"),
             )
-            self.assertEqual(
-                attrs_providers["Lds"],
-                ("linker_layout", "linker_script_candidate"),
+            self.assertNotIn("Lds", attrs_providers)
+            self.assertTrue(
+                any(
+                    record["object"] == "Lds"
+                    and record["predicate"] == "attrs_accessible"
+                    and record["proof_class"] == "linker_layout"
+                    and record["proof_provider"] == "linux_linker_script"
+                    for record in proved
+                )
             )
             self.assertEqual(
                 attrs_providers["PhysicalMemory"],

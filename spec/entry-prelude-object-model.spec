@@ -306,6 +306,7 @@ object OpenSbiFirmware: PrepareObject {
  */
 object Lds: PrepareObject {
     initial_state: State::Online;
+    source: linker::linux_6_12_37;
 
     attrs {
         global_pointer: SymbolAddr;
@@ -341,6 +342,8 @@ object Lds: PrepareObject {
         global_pointer = symbol("__global_pointer$");
         kernel_start = symbol("_start");
         kernel_end = symbol("_end");
+        bss_start = symbol("__bss_start");
+        bss_end = symbol("__bss_stop");
         init_stack_start = symbol("init_thread_union");
         init_stack_end = expr("init_thread_union + THREAD_SIZE");
     }
@@ -394,6 +397,7 @@ object StaticObjects: PrepareObject {
  */
 object Config: PrepareObject {
     initial_state: State::Online;
+    source: config::entry_prelude;
 
     attrs {
         page_size: Size;
