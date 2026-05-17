@@ -355,6 +355,7 @@ object Lds: PrepareObject {
  */
 object StaticObjects: PrepareObject {
     initial_state: State::Online;
+    source: static::linux_6_12_37;
 
     attrs {
         init_task: ObjectStorage<InitTask>;

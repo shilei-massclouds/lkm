@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 38)
+            self.assertEqual(data["summary"]["obligation"], 30)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -509,24 +509,24 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_object_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "linker_symbol_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "linux_static_objects"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["predicate"] == "valid_function_symbol"
                     and record["proof_class"] == "linker_symbol"
-                    and record["proof_provider"] == "linker_symbol_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "linux_static_objects"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["predicate"] == "valid_page_table_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "linker_symbol_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "linux_static_objects"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -541,8 +541,8 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_task_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "linker_symbol_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -675,9 +675,15 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
-            self.assertEqual(
-                attrs_providers["StaticObjects"],
-                ("static_object_layout", "linker_symbol_candidate"),
+            self.assertNotIn("StaticObjects", attrs_providers)
+            self.assertTrue(
+                any(
+                    record["object"] == "StaticObjects"
+                    and record["predicate"] == "attrs_accessible"
+                    and record["proof_class"] == "static_object_layout"
+                    and record["proof_provider"] == "linux_static_objects"
+                    for record in proved
+                )
             )
             self.assertTrue(
                 any(

@@ -100,6 +100,33 @@ _KERNEL_IMAGE_LINKER_PROOFS = {
         "linux_linker_script",
     ),
 }
+_STATIC_OBJECT_PROOFS = {
+    "attrs_accessible(self)": ("static_object_layout", "linux_static_objects"),
+    "valid_object_storage(init_task)": (
+        "object_storage",
+        "linux_static_objects",
+    ),
+    "valid_function_symbol(early_event_entry)": (
+        "linker_symbol",
+        "linux_static_objects",
+    ),
+    "valid_function_symbol(formal_event_entry)": (
+        "linker_symbol",
+        "linux_static_objects",
+    ),
+    "valid_page_table_storage(trampoline_pg_dir)": (
+        "object_storage",
+        "linux_static_objects",
+    ),
+    "valid_page_table_storage(early_pg_dir)": (
+        "object_storage",
+        "linux_static_objects",
+    ),
+    "valid_page_table_storage(swapper_pg_dir)": (
+        "object_storage",
+        "linux_static_objects",
+    ),
+}
 _EXTERNAL_SOURCE_PROOFS = {
     **{
         ("Config", "config::entry_prelude", expression): proof
@@ -108,6 +135,10 @@ _EXTERNAL_SOURCE_PROOFS = {
     **{
         ("Lds", "linker::linux_6_12_37", expression): proof
         for expression, proof in _LDS_LINKER_PROOFS.items()
+    },
+    **{
+        ("StaticObjects", "static::linux_6_12_37", expression): proof
+        for expression, proof in _STATIC_OBJECT_PROOFS.items()
     },
     ("Riscv64", "external_spec::riscv_isa", "attrs_accessible(self)"): (
         "architecture_register_file",
@@ -1400,6 +1431,12 @@ _PRIOR_FACT_PROOFS = {
         {
             "Riscv64.tp == phys_addr(StaticObjects.init_task)",
             "Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap)",
+        },
+    ),
+    "valid_task_storage(StaticObjects.init_task)": (
+        "object_storage",
+        {
+            "valid_object_storage(init_task)",
         },
     ),
     "valid_stack_pointer(Riscv64.sp)": (
