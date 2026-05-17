@@ -311,16 +311,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "boot_hartid == BootArgs.boot_hartid"
-                    and record["object"] == "PlatformCpuInfo"
-                    and record["proof_class"] == "platform_cpu_description"
-                    and record["proof_provider"] == "fdt_cpu_description"
-                    for record in proved
-                )
-            )
-            self.assertTrue(
-                any(
-                    record["expression"] == "platform_hart_id_valid(boot_hartid)"
+                    record["expression"] == "platform_hart_id_valid(BootArgs.boot_hartid)"
                     and record["object"] == "PlatformCpuInfo"
                     and record["proof_class"] == "platform_cpu_description"
                     and record["proof_provider"] == "fdt_cpu_description"

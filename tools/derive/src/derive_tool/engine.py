@@ -91,15 +91,11 @@ _EXTERNAL_SOURCE_PROOFS = {
         "firmware_entry_state",
         "opensbi_firmware",
     ),
-    ("PlatformCpuInfo", "fdt::cpus", "attrs_accessible(self)"): (
-        "platform_cpu_description",
-        "fdt_cpu_description",
-    ),
-    ("PlatformCpuInfo", "fdt::cpus", "boot_hartid == BootArgs.boot_hartid"): (
-        "platform_cpu_description",
-        "fdt_cpu_description",
-    ),
-    ("PlatformCpuInfo", "fdt::cpus", "platform_hart_id_valid(boot_hartid)"): (
+    (
+        "PlatformCpuInfo",
+        "fdt::cpus",
+        "platform_hart_id_valid(BootArgs.boot_hartid)",
+    ): (
         "platform_cpu_description",
         "fdt_cpu_description",
     ),
@@ -763,6 +759,10 @@ class _Deriver:
                     entry, entry_span, kind, event, state
                 ):
                     continue
+                elif self._try_prove_platform_cpu_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
                 elif self._try_prove_prior_fact(
                     entry, entry_span, kind, event, state
                 ):
@@ -986,6 +986,35 @@ class _Deriver:
             predicate=_predicate_name(expression),
             proof_class=proof_class,
             proof_provider=proof_provider,
+        )
+        return True
+
+    def _try_prove_platform_cpu_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if expression.strip() != "platform_hart_id_valid(BootArgs.boot_hartid)":
+            return False
+
+        self._validate_state("PlatformCpuInfo", "Online")
+        if expression not in self.proved_expressions:
+            return False
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class="platform_cpu_description",
+            proof_provider="prior_derivation_facts",
         )
         return True
 
@@ -1304,18 +1333,11 @@ _PRIOR_FACT_PROOFS = {
             "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
         },
     ),
-    "platform_hart_id_valid(BootArgs.boot_hartid)": (
-        "platform_cpu_description",
-        {
-            "boot_hartid == BootArgs.boot_hartid",
-            "platform_hart_id_valid(boot_hartid)",
-        },
-    ),
     "platform_hart_id_valid(boot_cpu_hartid)": (
         "platform_cpu_description",
         {
             "boot_cpu_hartid == BootArgs.boot_hartid",
-            "platform_hart_id_valid(boot_hartid)",
+            "platform_hart_id_valid(BootArgs.boot_hartid)",
         },
     ),
 }

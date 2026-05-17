@@ -462,22 +462,16 @@ object PhysicalMemory: PrepareObject {
 }
 
 /*
- * PlatformCpuInfo 表示从平台 CPU 描述中提取出的启动处理器信息。
- * 当前只建模启动 hart 的有效性，完整 CPU 拓扑留给后续阶段。
+ * PlatformCpuInfo 表示从平台 CPU 描述中提取出的有效 hart 集合。
+ * 当前只建模启动参数中的 hart id 是否属于该集合，完整 CPU 拓扑留给后续阶段。
  */
 object PlatformCpuInfo: PrepareObject {
     initial_state: State::Online;
     source: fdt::cpus;
 
-    attrs {
-        boot_hartid: HartId;
-    }
-
     state State::Online {
         invariant {
-            attrs_accessible(self);
-            boot_hartid == BootArgs.boot_hartid;
-            platform_hart_id_valid(boot_hartid);
+            platform_hart_id_valid(BootArgs.boot_hartid);
         }
     }
 }
