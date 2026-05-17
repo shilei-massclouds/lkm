@@ -91,6 +91,18 @@ _EXTERNAL_SOURCE_PROOFS = {
         "firmware_entry_state",
         "opensbi_firmware",
     ),
+    ("PlatformCpuInfo", "fdt::cpus", "attrs_accessible(self)"): (
+        "platform_cpu_description",
+        "fdt_cpu_description",
+    ),
+    ("PlatformCpuInfo", "fdt::cpus", "boot_hartid == BootArgs.boot_hartid"): (
+        "platform_cpu_description",
+        "fdt_cpu_description",
+    ),
+    ("PlatformCpuInfo", "fdt::cpus", "platform_hart_id_valid(boot_hartid)"): (
+        "platform_cpu_description",
+        "fdt_cpu_description",
+    ),
 }
 _EXTERNAL_PREDICATES = {
     "context_is": "system_exclusive_context",
@@ -109,6 +121,7 @@ _EXTERNAL_PREDICATES = {
     "kernel_vector_disabled": "riscv_status_register",
     "memory_zeroed": "memory_content",
     "ordered_booting_enabled": "firmware_boot_policy",
+    "platform_hart_id_valid": "platform_cpu_description",
     "phys_to_virt_transition_completed": "architecture_state",
     "primary_hart_only_at_kernel_entry": "firmware_entry_state",
     "primary_hart_sie_clear_at_kernel_entry": "firmware_entry_state",
@@ -156,6 +169,7 @@ _DERIVED_PROVIDERS = {
     "sbi_hsm_available": "riscv_sbi_spec",
     "task_concurrency_closed": "prior_derivation_facts",
     "ordered_booting_enabled": "opensbi_firmware",
+    "platform_hart_id_valid": "fdt_cpu_description",
     "trampoline_mapping_ready": "boot_code_candidate",
     "valid_trampoline_map": "config_and_linker_candidate",
     "valid_fixmap_config": "config_source_candidate",
@@ -1288,6 +1302,20 @@ _PRIOR_FACT_PROOFS = {
         "stack_layout",
         {
             "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
+        },
+    ),
+    "platform_hart_id_valid(BootArgs.boot_hartid)": (
+        "platform_cpu_description",
+        {
+            "boot_hartid == BootArgs.boot_hartid",
+            "platform_hart_id_valid(boot_hartid)",
+        },
+    ),
+    "platform_hart_id_valid(boot_cpu_hartid)": (
+        "platform_cpu_description",
+        {
+            "boot_cpu_hartid == BootArgs.boot_hartid",
+            "platform_hart_id_valid(boot_hartid)",
         },
     ),
 }

@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 73)
+            self.assertEqual(data["summary"]["obligation"], 71)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -306,14 +306,33 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
+            self.assertFalse(
+                any(record["predicate"] == "valid_hart_id" for record in obligations)
+            )
             self.assertTrue(
                 any(
-                    record["predicate"] == "valid_hart_id"
-                    and record["obligation_category"] == "derived_candidate"
-                    and record["proof_class"] == "boot_hart_identity"
-                    and record["proof_provider"] == "fdt_and_boot_protocol"
-                    and record["expression"] == "valid_hart_id(boot_cpu_hartid)"
-                    for record in obligations
+                    record["expression"] == "boot_hartid == BootArgs.boot_hartid"
+                    and record["object"] == "PlatformCpuInfo"
+                    and record["proof_class"] == "platform_cpu_description"
+                    and record["proof_provider"] == "fdt_cpu_description"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "platform_hart_id_valid(boot_hartid)"
+                    and record["object"] == "PlatformCpuInfo"
+                    and record["proof_class"] == "platform_cpu_description"
+                    and record["proof_provider"] == "fdt_cpu_description"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "platform_hart_id_valid(boot_cpu_hartid)"
+                    and record["proof_class"] == "platform_cpu_description"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in proved
                 )
             )
             self.assertFalse(

@@ -40,6 +40,7 @@ predicate sbi_hsm_available() -> bool;
 predicate ordered_booting_enabled() -> bool;
 predicate primary_hart_only_at_kernel_entry() -> bool;
 predicate primary_hart_sie_clear_at_kernel_entry() -> bool;
+predicate platform_hart_id_valid(hartid: HartId) -> bool;
 predicate interrupt_concurrency_closed() -> bool;
 predicate task_concurrency_closed() -> bool;
 
@@ -461,6 +462,27 @@ object PhysicalMemory: PrepareObject {
 }
 
 /*
+ * PlatformCpuInfo 表示从平台 CPU 描述中提取出的启动处理器信息。
+ * 当前只建模启动 hart 的有效性，完整 CPU 拓扑留给后续阶段。
+ */
+object PlatformCpuInfo: PrepareObject {
+    initial_state: State::Online;
+    source: fdt::cpus;
+
+    attrs {
+        boot_hartid: HartId;
+    }
+
+    state State::Online {
+        invariant {
+            attrs_accessible(self);
+            boot_hartid == BootArgs.boot_hartid;
+            platform_hart_id_valid(boot_hartid);
+        }
+    }
+}
+
+/*
  * StartupTimeline 表示当前模型的内核启动时间轴对象。
  * 它临时编排准备期和当前已经展开的引导期阶段，并在内核启动完成后退出。
  */
@@ -521,6 +543,7 @@ object PreparePhase: PhaseObject {
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
                     PhysicalMemory.state == State::Online;
+                    PlatformCpuInfo.state == State::Online;
                 }
             }
         }
@@ -538,6 +561,7 @@ object PreparePhase: PhaseObject {
             StaticObjects.state == State::Online;
             Config.state == State::Online;
             PhysicalMemory.state == State::Online;
+            PlatformCpuInfo.state == State::Online;
         }
 
         events {
@@ -562,6 +586,7 @@ object PreparePhase: PhaseObject {
             StaticObjects.state == State::Online;
             Config.state == State::Online;
             PhysicalMemory.state == State::Online;
+            PlatformCpuInfo.state == State::Online;
         }
     }
 }
@@ -1555,7 +1580,8 @@ object CpuGroup: HardwareObject {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     BootArgs.state == State::Online;
-                    valid_hart_id(BootArgs.boot_hartid);
+                    PlatformCpuInfo.state == State::Online;
+                    platform_hart_id_valid(BootArgs.boot_hartid);
                 }
 
                 may_change {
@@ -1575,7 +1601,7 @@ object CpuGroup: HardwareObject {
     state State::Prepared {
         invariant {
             boot_cpu_hartid == BootArgs.boot_hartid;
-            valid_hart_id(boot_cpu_hartid);
+            platform_hart_id_valid(boot_cpu_hartid);
         }
 
         deferred {
@@ -1689,6 +1715,7 @@ object EntryPreludePhase: PhaseObject {
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
                     PhysicalMemory.state == State::Online;
+                    PlatformCpuInfo.state == State::Online;
                 }
 
                 drives {
