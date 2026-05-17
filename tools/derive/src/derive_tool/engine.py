@@ -891,16 +891,18 @@ class _Deriver:
         ):
             return False
 
-        if expression in (
-            "interrupt_concurrency_closed()",
-            "task_concurrency_closed()",
-        ):
+        if expression == "interrupt_concurrency_closed()":
             proof_class = "system_exclusive_context"
+            proof_provider = "prior_derivation_facts"
+        elif expression == "task_concurrency_closed()":
+            proof_class = "system_exclusive_context"
+            proof_provider = "boot_protocol_and_sbi_hsm"
         elif expression == "context_is(SystemExclusive)" and {
             "interrupt_concurrency_closed()",
             "task_concurrency_closed()",
         }.issubset(self.proved_expressions):
             proof_class = "phase_context"
+            proof_provider = "prior_derivation_facts"
         else:
             return False
 
@@ -915,7 +917,7 @@ class _Deriver:
             source_kind=kind,
             predicate=_predicate_name(expression),
             proof_class=proof_class,
-            proof_provider="prior_derivation_facts",
+            proof_provider=proof_provider,
         )
         return True
 

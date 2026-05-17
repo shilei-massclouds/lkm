@@ -343,7 +343,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "task_concurrency_closed"
                     and record["proof_class"] == "system_exclusive_context"
-                    and record["proof_provider"] == "prior_derivation_facts"
+                    and record["proof_provider"] == "boot_protocol_and_sbi_hsm"
                     for record in proved
                 )
             )
