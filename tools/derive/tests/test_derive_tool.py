@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 30)
+            self.assertEqual(data["summary"]["obligation"], 13)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -125,13 +125,15 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(record["predicate"] == "disjoint" for record in obligations)
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "disjoint"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "platform_memory_layout"
-                    and record["proof_provider"] == "fdt_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "fdt_memory_layout"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -179,28 +181,31 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"] == "header_range.start == BootArgs.dtb_pa"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "dtb_header_range"
-                    and record["proof_provider"] == "boot_code_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"] == "range.end == BootArgs.dtb_pa + header.total_size"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "dtb_range"
-                    and record["proof_provider"] == "boot_code_candidate"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
+            self.assertFalse(
+                any(
+                    record["expression"] == "fdt_slot == Config.fixmap.fdt"
                     for record in obligations
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"] == "fdt_slot == Config.fixmap.fdt"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "fixmap_layout"
-                    and record["proof_provider"] == "config_source_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -287,19 +292,17 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["predicate"] == "valid_dtb_magic"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "boot_input"
-                    and record["proof_provider"] == "boot_code_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["predicate"] == "valid_dtb_header"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "boot_input"
-                    and record["proof_provider"] == "boot_code_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertFalse(
@@ -445,11 +448,13 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
-            self.assertTrue(
+            self.assertFalse(
                 any(
-                    record["predicate"] == "kernel_image_mapping_ready"
-                    and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "boot_code_candidate"
+                    record["predicate"]
+                    in (
+                        "kernel_image_mapping_ready",
+                        "fixmap_slot_mapping_ready",
+                    )
                     for record in obligations
                 )
             )
@@ -489,12 +494,42 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "trampoline_mapping_ready"
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "trampoline_mapping_ready"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "boot_code_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "trampoline_mapping_ready"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "kernel_image_mapping_ready"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "fixmap_slot_mapping_ready"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -529,12 +564,18 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "valid_phys_range_set"
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "valid_phys_range_set"
                     and record["proof_class"] == "platform"
-                    and record["proof_provider"] == "fdt_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "fdt_memory_layout"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -647,9 +688,15 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
-            self.assertEqual(
-                attrs_providers["FixMap"],
-                ("fixmap_layout", "config_source_candidate"),
+            self.assertNotIn("FixMap", attrs_providers)
+            self.assertTrue(
+                any(
+                    record["object"] == "FixMap"
+                    and record["predicate"] == "attrs_accessible"
+                    and record["proof_class"] == "fixmap_layout"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
             )
             self.assertNotIn("Lds", attrs_providers)
             self.assertTrue(
@@ -661,9 +708,15 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
-            self.assertEqual(
-                attrs_providers["PhysicalMemory"],
-                ("platform_memory_layout", "fdt_candidate"),
+            self.assertNotIn("PhysicalMemory", attrs_providers)
+            self.assertTrue(
+                any(
+                    record["object"] == "PhysicalMemory"
+                    and record["predicate"] == "attrs_accessible"
+                    and record["proof_class"] == "platform_memory_layout"
+                    and record["proof_provider"] == "fdt_memory_layout"
+                    for record in proved
+                )
             )
             self.assertNotIn("Riscv64", attrs_providers)
             self.assertTrue(

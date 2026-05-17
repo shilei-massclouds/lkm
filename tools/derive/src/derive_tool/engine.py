@@ -127,6 +127,15 @@ _STATIC_OBJECT_PROOFS = {
         "linux_static_objects",
     ),
 }
+_PHYSICAL_MEMORY_PROOFS = {
+    "attrs_accessible(self)": ("platform_memory_layout", "fdt_memory_layout"),
+    "valid_phys_range_set(ram)": ("platform", "fdt_memory_layout"),
+    "valid_phys_range_set(iomap)": ("platform", "fdt_memory_layout"),
+    "disjoint(ram, iomap)": (
+        "platform_memory_layout",
+        "fdt_memory_layout",
+    ),
+}
 _EXTERNAL_SOURCE_PROOFS = {
     **{
         ("Config", "config::entry_prelude", expression): proof
@@ -139,6 +148,10 @@ _EXTERNAL_SOURCE_PROOFS = {
     **{
         ("StaticObjects", "static::linux_6_12_37", expression): proof
         for expression, proof in _STATIC_OBJECT_PROOFS.items()
+    },
+    **{
+        ("PhysicalMemory", "fdt::memory", expression): proof
+        for expression, proof in _PHYSICAL_MEMORY_PROOFS.items()
     },
     ("Riscv64", "external_spec::riscv_isa", "attrs_accessible(self)"): (
         "architecture_register_file",
@@ -1424,6 +1437,12 @@ _PRIOR_FACT_PROOFS = {
         "fixmap_slot_content",
         {
             "slot_contains(FixMap.fdt_slot, RawDtb)",
+        },
+    ),
+    "trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap)": (
+        "address_mapping",
+        {
+            "trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap)",
         },
     ),
     "valid_task_ref(Riscv64.tp)": (

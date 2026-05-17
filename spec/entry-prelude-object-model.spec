@@ -445,6 +445,7 @@ object Config: PrepareObject {
 object PhysicalMemory: PrepareObject {
     initial_state: State::Online;
     access: Access::ReadOnly;
+    source: fdt::memory;
 
     attrs {
         ram: PhysRangeSet<Ram>;
@@ -1037,9 +1038,17 @@ object RawDtb: ResourceObject {
                 depends_on {
                     BootArgs.state == State::Online;
                     PhysicalMemory.state == State::Online;
+                }
+
+                may_change {
+                    RawDtb.header;
+                    RawDtb.header_range;
+                }
+
+                ensures {
                     header_range.start == BootArgs.dtb_pa;
                     header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>();
-                    contains(PhysicalMemory.ram, header_range);
+                    valid_dtb_magic(header);
                 }
             }
         }
@@ -1050,6 +1059,9 @@ object RawDtb: ResourceObject {
      */
     state State::Prepared {
         invariant {
+            header_range.start == BootArgs.dtb_pa;
+            header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>();
+            contains(PhysicalMemory.ram, header_range);
             valid_dtb_magic(header);
         }
 
@@ -1060,6 +1072,16 @@ object RawDtb: ResourceObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     PhysicalMemory.state == State::Online;
+                }
+
+                may_change {
+                    RawDtb.range;
+                }
+
+                ensures {
+                    valid_dtb_header(header);
+                    range.start == BootArgs.dtb_pa;
+                    range.end == BootArgs.dtb_pa + header.total_size;
                 }
             }
         }
@@ -1102,7 +1124,6 @@ object FixMap: PrepareObject {
                     Config.state == State::Online;
                     RawDtb.state == State::Ready;
                     has_slot(Config.fixmap, FixMapSlot::Fdt);
-                    fdt_slot == Config.fixmap.fdt;
                     fits_in_fixmap_slot(RawDtb.range, fdt_slot, Config.page_size);
                 }
 
@@ -1111,6 +1132,8 @@ object FixMap: PrepareObject {
                 }
 
                 ensures {
+                    attrs_accessible(self);
+                    fdt_slot == Config.fixmap.fdt;
                     slot_contains(fdt_slot, RawDtb);
                 }
             }
@@ -1292,6 +1315,10 @@ object TrampolineVm: AddressSpaceObject {
                 may_change {
                     StaticObjects.trampoline_pg_dir;
                 }
+
+                ensures {
+                    trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap);
+                }
             }
         }
     }
@@ -1420,6 +1447,11 @@ object EarlyVm: AddressSpaceObject {
 
                 may_change {
                     StaticObjects.early_pg_dir;
+                }
+
+                ensures {
+                    kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap);
+                    fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot);
                 }
             }
         }
