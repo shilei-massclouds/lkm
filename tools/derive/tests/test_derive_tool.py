@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 13)
+            self.assertEqual(data["summary"]["obligation"], 5)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -109,6 +109,29 @@ class DeriveToolTests(unittest.TestCase):
             self.assertFalse(
                 any(record["proof_provider"] == "derived_candidate" for record in obligations)
             )
+            self.assertFalse(
+                any(
+                    record["predicate"]
+                    in ("linear_map_area_reserved", "fixmap_adjacent_to_linear_map")
+                    for record in obligations
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "linear_map_area_reserved"
+                    and record["proof_class"] == "address_layout"
+                    and record["proof_provider"] == "config_address_layout"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "fixmap_adjacent_to_linear_map"
+                    and record["proof_class"] == "address_layout"
+                    and record["proof_provider"] == "config_address_layout"
+                    for record in proved
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "has_slot"
@@ -136,13 +159,27 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"]
+                    in ("kernel_fpu_disabled", "kernel_vector_disabled")
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "kernel_fpu_disabled"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "riscv_status_register"
-                    and record["proof_provider"] == "isa_spec_and_boot_code"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "kernel_vector_disabled"
+                    and record["proof_class"] == "riscv_status_register"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -272,13 +309,18 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(
+                    record["expression"] == "Lds.init_stack_end - Lds.init_stack_start >= Config.page_size"
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["expression"] == "Lds.init_stack_end - Lds.init_stack_start >= Config.page_size"
-                    and record["obligation_category"] == "derived_candidate"
                     and record["proof_class"] == "stack_layout"
-                    and record["proof_provider"] == "config_and_linker_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "config_and_linker"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -532,12 +574,18 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(
+                    record["predicate"] == "valid_trampoline_map"
+                    for record in obligations
+                )
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "valid_trampoline_map"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "config_and_linker_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "config_and_linker"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -633,12 +681,15 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertFalse(
+                any(record["predicate"] == "memory_zeroed" for record in obligations)
+            )
             self.assertTrue(
                 any(
                     record["predicate"] == "memory_zeroed"
                     and record["proof_class"] == "memory_content"
-                    and record["proof_provider"] == "boot_code_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertFalse(

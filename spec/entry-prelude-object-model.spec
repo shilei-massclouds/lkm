@@ -614,6 +614,11 @@ object RootStream: FlowObject {
                 may_change {
                     Riscv64.sstatus;
                 }
+
+                ensures {
+                    kernel_fpu_disabled(Riscv64.sstatus);
+                    kernel_vector_disabled(Riscv64.sstatus);
+                }
             }
         }
     }
@@ -961,6 +966,10 @@ object KernelImage: ImageObject {
 
                 may_change {
                     memory(segments.bss.range);
+                }
+
+                ensures {
+                    memory_zeroed(segments.bss.range);
                 }
             }
         }

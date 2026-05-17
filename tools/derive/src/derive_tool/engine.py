@@ -100,6 +100,13 @@ _KERNEL_IMAGE_LINKER_PROOFS = {
         "linux_linker_script",
     ),
 }
+_LINEAR_MAP_LAYOUT_PROOFS = {
+    "linear_map_area_reserved(self)": ("address_layout", "config_address_layout"),
+    "fixmap_adjacent_to_linear_map(FixMap, LinearMap)": (
+        "address_layout",
+        "config_address_layout",
+    ),
+}
 _STATIC_OBJECT_PROOFS = {
     "attrs_accessible(self)": ("static_object_layout", "linux_static_objects"),
     "valid_object_storage(init_task)": (
@@ -861,6 +868,18 @@ class _Deriver:
                     entry, entry_span, kind, event, state
                 ):
                     continue
+                elif self._try_prove_linear_map_layout_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
+                elif self._try_prove_trampoline_map_layout_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
+                elif self._try_prove_stack_layout_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
                 elif self._try_prove_prior_fact(
                     entry, entry_span, kind, event, state
                 ):
@@ -1147,6 +1166,111 @@ class _Deriver:
             predicate=_predicate_name(expression),
             proof_class="platform_cpu_description",
             proof_provider="prior_derivation_facts",
+        )
+        return True
+
+    def _try_prove_linear_map_layout_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if kind != "invariant" or state is None:
+            return False
+        if state.object_name != "LinearMap" or state.name != "Reserved":
+            return False
+
+        proof = _LINEAR_MAP_LAYOUT_PROOFS.get(expression.strip())
+        if proof is None:
+            return False
+        if not self._validate_state("Config", "Online"):
+            return False
+
+        proof_class, proof_provider = proof
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class=proof_class,
+            proof_provider=proof_provider,
+        )
+        return True
+
+    def _try_prove_stack_layout_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if kind != "invariant" or state is None:
+            return False
+        if state.object_name != "InitStack":
+            return False
+        if (
+            expression.strip()
+            != "Lds.init_stack_end - Lds.init_stack_start >= Config.page_size"
+        ):
+            return False
+
+        if not (
+            self._validate_state("Lds", "Online")
+            and self._validate_state("Config", "Online")
+        ):
+            return False
+
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class="stack_layout",
+            proof_provider="config_and_linker",
+        )
+        return True
+
+    def _try_prove_trampoline_map_layout_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if expression.strip() != "valid_trampoline_map(TrampolineMap)":
+            return False
+        if not (
+            self._validate_state("Lds", "Online")
+            and self._validate_state("Config", "Online")
+        ):
+            return False
+
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name if state is not None else None,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class="address_mapping",
+            proof_provider="config_and_linker",
         )
         return True
 
