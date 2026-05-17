@@ -55,7 +55,7 @@ class DeriveToolTests(unittest.TestCase):
 
             data = read_json(derive)
             self.assertEqual(data["summary"]["transitions"], 29)
-            self.assertEqual(data["summary"]["obligation"], 78)
+            self.assertEqual(data["summary"]["obligation"], 73)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
                 "assumption_candidate", data["summary"]["obligation_categories"]
@@ -153,22 +153,27 @@ class DeriveToolTests(unittest.TestCase):
                     for record in obligations
                 )
             )
-            self.assertTrue(
+            self.assertFalse(
                 any(
-                    record["expression"] == "boot_hartid == Riscv64.a0"
-                    and record["obligation_category"] == "derived_candidate"
-                    and record["proof_class"] == "boot_arguments"
-                    and record["proof_provider"] == "boot_protocol_candidate"
+                    record["expression"]
+                    in ("boot_hartid == Riscv64.a0", "dtb_pa == Riscv64.a1")
                     for record in obligations
                 )
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "dtb_pa == Riscv64.a1"
-                    and record["obligation_category"] == "derived_candidate"
+                    record["expression"] == "boot_hartid == Riscv64.a0"
                     and record["proof_class"] == "boot_arguments"
-                    and record["proof_provider"] == "boot_protocol_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "riscv_boot_protocol"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "dtb_pa == Riscv64.a1"
+                    and record["proof_class"] == "boot_arguments"
+                    and record["proof_provider"] == "riscv_boot_protocol"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -277,11 +282,10 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "boot_cpu_hartid == Riscv64.a0"
-                    and record["obligation_category"] == "derived_candidate"
+                    record["expression"] == "boot_cpu_hartid == BootArgs.boot_hartid"
                     and record["proof_class"] == "boot_hart_identity"
-                    and record["proof_provider"] == "boot_protocol_candidate"
-                    for record in obligations
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
                 )
             )
             self.assertTrue(
@@ -585,9 +589,15 @@ class DeriveToolTests(unittest.TestCase):
                 for record in obligations
                 if record["predicate"] == "attrs_accessible"
             }
-            self.assertEqual(
-                attrs_providers["BootArgs"],
-                ("boot_arguments", "boot_protocol_candidate"),
+            self.assertNotIn("BootArgs", attrs_providers)
+            self.assertTrue(
+                any(
+                    record["object"] == "BootArgs"
+                    and record["predicate"] == "attrs_accessible"
+                    and record["proof_class"] == "boot_arguments"
+                    and record["proof_provider"] == "riscv_boot_protocol"
+                    for record in proved
+                )
             )
             self.assertEqual(
                 attrs_providers["Config"],
@@ -605,9 +615,15 @@ class DeriveToolTests(unittest.TestCase):
                 attrs_providers["PhysicalMemory"],
                 ("platform_memory_layout", "fdt_candidate"),
             )
-            self.assertEqual(
-                attrs_providers["Riscv64"],
-                ("boot_register_state", "boot_protocol_candidate"),
+            self.assertNotIn("Riscv64", attrs_providers)
+            self.assertTrue(
+                any(
+                    record["object"] == "Riscv64"
+                    and record["predicate"] == "attrs_accessible"
+                    and record["proof_class"] == "architecture_register_file"
+                    and record["proof_provider"] == "riscv_isa_spec"
+                    for record in proved
+                )
             )
             self.assertEqual(
                 attrs_providers["StaticObjects"],

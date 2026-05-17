@@ -50,8 +50,19 @@ _ATTRS_ACCESSIBLE_PROOFS = {
     "Lds": ("linker_layout", "linker_script_candidate"),
     "BootArgs": ("boot_arguments", "boot_protocol_candidate"),
     "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
-    "Riscv64": ("boot_register_state", "boot_protocol_candidate"),
+    "Riscv64": ("architecture_register_file", "riscv_isa_spec_candidate"),
     "StaticObjects": ("static_object_layout", "linker_symbol_candidate"),
+}
+_BOOT_PROTOCOL_PROOFS = {
+    "attrs_accessible(self)": ("boot_arguments", "riscv_boot_protocol"),
+    "boot_hartid == Riscv64.a0": ("boot_arguments", "riscv_boot_protocol"),
+    "dtb_pa == Riscv64.a1": ("boot_arguments", "riscv_boot_protocol"),
+}
+_EXTERNAL_SOURCE_PROOFS = {
+    ("Riscv64", "external_spec::riscv_isa", "attrs_accessible(self)"): (
+        "architecture_register_file",
+        "riscv_isa_spec",
+    ),
 }
 _EXTERNAL_PREDICATES = {
     "context_is": "system_exclusive_context",
@@ -142,7 +153,7 @@ _RELATION_PROOFS = {
         "boot_arguments",
         "boot_protocol_candidate",
     ),
-    "boot_cpu_hartid == Riscv64.a0": (
+    "boot_cpu_hartid == BootArgs.boot_hartid": (
         "boot_hart_identity",
         "boot_protocol_candidate",
     ),
@@ -694,6 +705,14 @@ class _Deriver:
                     entry, entry_span, kind, state, entered_by
                 ):
                     continue
+                elif self._try_prove_boot_protocol_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
+                elif self._try_prove_external_source_fact(
+                    entry, entry_span, kind, event, state
+                ):
+                    continue
                 elif self._try_prove_prior_fact(
                     entry, entry_span, kind, event, state
                 ):
@@ -849,6 +868,76 @@ class _Deriver:
             )
             return True
         return False
+
+    def _try_prove_boot_protocol_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if (
+            kind != "invariant"
+            or state is None
+            or state.object_name != "BootArgs"
+            or state.name != "Online"
+        ):
+            return False
+
+        proof = _BOOT_PROTOCOL_PROOFS.get(expression.strip())
+        if proof is None:
+            return False
+        proof_class, proof_provider = proof
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class=proof_class,
+            proof_provider=proof_provider,
+        )
+        return True
+
+    def _try_prove_external_source_fact(
+        self,
+        expression: str,
+        span: SourceSpan,
+        kind: str,
+        event: EventDef | None,
+        state: StateDef | None,
+    ) -> bool:
+        if kind != "invariant" or state is None:
+            return False
+
+        obj = self.model.objects.get(state.object_name)
+        if obj is None:
+            return False
+        proof = _EXTERNAL_SOURCE_PROOFS.get(
+            (state.object_name, obj.decl.properties.get("source"), expression.strip())
+        )
+        if proof is None:
+            return False
+        proof_class, proof_provider = proof
+        self._record(
+            DerivationStatus.PROVED,
+            f"{kind}: {expression}",
+            span,
+            object_name=_context_object(event, state),
+            event_name=event.name if event is not None else None,
+            state_name=state.name,
+            expression=expression,
+            source_kind=kind,
+            predicate=_predicate_name(expression),
+            proof_class=proof_class,
+            proof_provider=proof_provider,
+        )
+        return True
 
     def _try_prove_prior_fact(
         self,

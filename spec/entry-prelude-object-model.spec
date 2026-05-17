@@ -1511,12 +1511,16 @@ object CpuGroup: HardwareObject {
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    Riscv64.state == State::Online;
-                    valid_hart_id(Riscv64.a0);
+                    BootArgs.state == State::Online;
+                    valid_hart_id(BootArgs.boot_hartid);
                 }
 
                 may_change {
                     CpuGroup.boot_cpu_hartid;
+                }
+
+                ensures {
+                    boot_cpu_hartid == BootArgs.boot_hartid;
                 }
             }
         }
@@ -1527,7 +1531,7 @@ object CpuGroup: HardwareObject {
      */
     state State::Prepared {
         invariant {
-            boot_cpu_hartid == Riscv64.a0;
+            boot_cpu_hartid == BootArgs.boot_hartid;
             valid_hart_id(boot_cpu_hartid);
         }
 
