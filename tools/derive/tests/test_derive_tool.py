@@ -339,7 +339,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "interrupt_concurrency_closed"
                     and record["proof_class"] == "system_exclusive_context"
-                    and record["proof_provider"] == "riscv_entry_and_interrupt_stream"
+                    and record["proof_provider"] == "opensbi_firmware_entry_state"
                     for record in proved
                 )
             )
