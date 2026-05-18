@@ -72,8 +72,8 @@
 
   <rect x="430" y="520" width="230" height="94" rx="10" class="box mem"/>
   <text x="545" y="550" class="label">MemBlock</text>
-  <text x="545" y="575" class="small">早期物理内存分配支持</text>
-  <text x="545" y="597" class="state">Base -> Online</text>
+  <text x="545" y="575" class="small">早期物理内存分配管理</text>
+  <text x="545" y="597" class="state">Base -> Ready</text>
 
   <path d="M545 279 L545 340" class="edge"/>
   <text x="590" y="317" class="edge-label">早期解析</text>
@@ -118,7 +118,7 @@
   <path d="M298 529 C498 700, 815 706, 1085 633" class="edge-soft"/>
   <text x="706" y="708" class="edge-label">驱动 VM.enable()</text>
   <path d="M660 568 C775 568, 858 616, 970 596" class="edge"/>
-  <text x="820" y="555" class="edge-label">早期分配支持</text>
+  <text x="820" y="555" class="edge-label">MemBlock.Ready</text>
 
   <rect x="380" y="790" width="330" height="540" rx="16" class="group"/>
   <text x="545" y="836" class="group-label" text-anchor="middle">早期服务对象</text>
