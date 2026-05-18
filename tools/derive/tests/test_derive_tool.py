@@ -330,7 +330,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "boot_cpu_hartid == BootArgs.boot_hartid"
+                    record["expression"] == "boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)"
                     and record["proof_class"] == "boot_hart_identity"
                     and record["proof_provider"] == "event_ensures"
                     for record in proved
@@ -366,9 +366,17 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "platform_hart_id_valid(boot_cpu_hartid)"
-                    and record["proof_class"] == "platform_cpu_description"
-                    and record["proof_provider"] == "prior_derivation_facts"
+                    record["expression"] == "cpu_id_map_ready(CpuIdMap, 0, BootCPU)"
+                    and record["proof_class"] == "cpu_topology"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "boot_cpu_online(BootCPU)"
+                    and record["proof_class"] == "cpu_state"
+                    and record["proof_provider"] == "event_ensures"
                     for record in proved
                 )
             )

@@ -262,6 +262,11 @@ _EXTERNAL_PREDICATES = {
     "valid_dtb_magic": "boot_input",
     "valid_function_symbol": "linker_symbol",
     "valid_hart_id": "boot_hart_identity",
+    "boot_cpu_active": "cpu_state",
+    "boot_cpu_hartid_ready": "boot_hart_identity",
+    "boot_cpu_online": "cpu_state",
+    "boot_cpu_present": "cpu_state",
+    "cpu_id_map_ready": "cpu_topology",
     "valid_object_storage": "object_storage",
     "valid_page_table_storage": "object_storage",
     "valid_phys_range_set": "platform",
@@ -352,10 +357,6 @@ _CONTAINS_PROOFS = {
 _RELATION_PROOFS = {
     "boot_hartid == Riscv64.a0": (
         "boot_arguments",
-        "boot_protocol_candidate",
-    ),
-    "boot_cpu_hartid == BootArgs.boot_hartid": (
-        "boot_hart_identity",
         "boot_protocol_candidate",
     ),
     "page_size > 0": (
@@ -1790,13 +1791,6 @@ _PRIOR_FACT_PROOFS = {
         "stack_layout",
         {
             "Riscv64.sp == virt_addr(Lds.init_stack_end - Config.pt_size_on_stack, EarlyVm, KernelImageMap)",
-        },
-    ),
-    "platform_hart_id_valid(boot_cpu_hartid)": (
-        "platform_cpu_description",
-        {
-            "boot_cpu_hartid == BootArgs.boot_hartid",
-            "platform_hart_id_valid(BootArgs.boot_hartid)",
         },
     ),
 }

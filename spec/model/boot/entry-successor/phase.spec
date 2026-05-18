@@ -498,94 +498,6 @@ object SBI: PlatformServiceObject {
 }
 
 /*
- * BootCPU 表示当前启动 CPU 本体。后续 secondary CPU 可复用同一类 CPU 对象。
- */
-object BootCPU: CPUObject {
-    initial_state: State::Base;
-    parent: CpuGroup;
-
-    attrs {
-        hartid: HartId;
-    }
-
-    /*
-     * Base 表示基于准备期 FDT，启动 CPU 已作为 possible CPU 被识别。
-     */
-    state State::Base {
-        invariant {
-            platform_hart_id_valid(BootArgs.boot_hartid);
-        }
-
-        events {
-            /*
-             * Preset 记录 BootCPU.hartid 来自启动 ABI。
-             */
-            on Event::Preset -> State::Prepared {
-                depends_on {
-                    BootArgs.state == State::Online;
-                    PlatformCpuInfo.state == State::Online;
-                }
-
-                ensures {
-                    boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-                }
-            }
-        }
-    }
-
-    /*
-     * Prepared 表示启动 CPU 已可作为 present CPU 继续初始化。
-     */
-    state State::Prepared {
-        invariant {
-            boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
-        }
-
-        events {
-            /*
-             * Setup 对应 boot_cpu_init() 中 present/active 边界。
-             */
-            on Event::Setup -> State::Ready {
-                ensures {
-                    boot_cpu_present(BootCPU);
-                    boot_cpu_active(BootCPU);
-                }
-            }
-        }
-    }
-
-    /*
-     * Ready 表示启动 CPU 已标记 present/active。
-     */
-    state State::Ready {
-        invariant {
-            boot_cpu_present(BootCPU);
-            boot_cpu_active(BootCPU);
-        }
-
-        events {
-            /*
-             * Enable 对应 boot_cpu_init() 最终 online 边界。
-             */
-            on Event::Enable -> State::Online {
-                ensures {
-                    boot_cpu_online(BootCPU);
-                }
-            }
-        }
-    }
-
-    /*
-     * Online 表示启动 CPU 已进入本阶段需要的 online 边界。
-     */
-    state State::Online {
-        invariant {
-            boot_cpu_online(BootCPU);
-        }
-    }
-}
-
-/*
  * CpuIdMap 表示逻辑 CPU ID 到 hartid 的基础映射。
  */
 object CpuIdMap: HardwareObject {
@@ -660,7 +572,6 @@ object EntrySuccessorPhase: PhaseObject {
                 drives {
                     EntryPreludePhase.Event::Cleanup;
                     InitStack.Event::Enable;
-                    BootCPU.Event::Preset;
                     CpuIdMap.Event::Preset;
                     BootCPU.Event::Setup;
                     BootCPU.Event::Enable;

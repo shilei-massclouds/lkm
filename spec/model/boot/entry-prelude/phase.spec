@@ -1075,53 +1075,126 @@ object SwapperVm: AddressSpaceObject {
 }
 
 /*
- * CpuGroup 表示 SoC 下的处理器管理对象。入口前导期只记录启动 hart 的物理标识。
+ * BootCPU 表示当前启动 CPU 本体。后续 secondary CPU 可复用同一类 CPU 对象。
  */
-object CpuGroup: HardwareObject {
+object BootCPU: CPUObject {
     initial_state: State::Base;
-    parent: Soc;
+    parent: CpuGroup;
 
     attrs {
-        boot_cpu_hartid: HartId;
+        hartid: HartId;
     }
 
     /*
-     * Base 表示处理器管理对象尚未记录启动 hart。
+     * Base 表示基于准备期 FDT，启动 CPU 已作为 possible CPU 被识别。
      */
     state State::Base {
+        invariant {
+            platform_hart_id_valid(BootArgs.boot_hartid);
+        }
+
         events {
             /*
-             * Preset 记录入口参数 a0 中的启动 hart 物理标识。
+             * Preset 记录 BootCPU.hartid 来自启动 ABI。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
                     BootArgs.state == State::Online;
                     PlatformCpuInfo.state == State::Online;
-                    platform_hart_id_valid(BootArgs.boot_hartid);
-                }
-
-                may_change {
-                    CpuGroup.boot_cpu_hartid;
                 }
 
                 ensures {
-                    boot_cpu_hartid == BootArgs.boot_hartid;
+                    boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
                 }
             }
         }
     }
 
     /*
-     * Prepared 表示启动 hart 的物理标识已经记录并通过有效性检查。
+     * Prepared 表示启动 CPU 已识别并记录物理 hartid，等待后继期 boot_cpu_init() 继续推进。
      */
     state State::Prepared {
         invariant {
-            boot_cpu_hartid == BootArgs.boot_hartid;
-            platform_hart_id_valid(boot_cpu_hartid);
+            boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
         }
 
-        deferred {
-            "CpuGroup.Online 以及 CPU 拓扑、物理 ID 与逻辑 ID 映射属于后续阶段；入口前导期只建立 boot_cpu_hartid。"
+        events {
+            /*
+             * Setup 对应 boot_cpu_init() 中 present/active 边界。
+             */
+            on Event::Setup -> State::Ready {
+                ensures {
+                    boot_cpu_present(BootCPU);
+                    boot_cpu_active(BootCPU);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示启动 CPU 已标记 present/active。
+     */
+    state State::Ready {
+        invariant {
+            boot_cpu_present(BootCPU);
+            boot_cpu_active(BootCPU);
+        }
+
+        events {
+            /*
+             * Enable 对应 boot_cpu_init() 最终 online 边界。
+             */
+            on Event::Enable -> State::Online {
+                ensures {
+                    boot_cpu_online(BootCPU);
+                }
+            }
+        }
+    }
+
+    /*
+     * Online 表示启动 CPU 已进入本阶段需要的 online 边界。
+     */
+    state State::Online {
+        invariant {
+            boot_cpu_online(BootCPU);
+        }
+    }
+}
+
+/*
+ * CpuGroup 表示 SoC 下的处理器管理对象。入口前导期只建立启动 CPU 子对象的组织边界。
+ */
+object CpuGroup: HardwareObject {
+    initial_state: State::Base;
+    parent: Soc;
+
+    /*
+     * Base 表示处理器管理对象尚未组织启动 CPU 子对象。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 驱动 BootCPU 记录入口参数 a0 中的启动 hart 物理标识。
+             */
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    BootCPU.state == State::Base;
+                }
+
+                drives {
+                    BootCPU.Event::Preset;
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示启动 CPU 已识别并挂入处理器管理对象。
+     */
+    state State::Prepared {
+        invariant {
+            BootCPU.state == State::Prepared;
         }
     }
 }
@@ -1166,7 +1239,7 @@ object Soc: HardwareObject {
         }
 
         deferred {
-            "具体 SoC 早期平台状态点后续补充；当前入口前导期只要求 CpuGroup 已记录启动处理器 hartid。"
+            "具体 SoC 早期平台状态点后续补充；当前入口前导期只要求 CpuGroup 已组织启动 CPU。"
         }
     }
 }
@@ -1242,6 +1315,7 @@ object EntryPreludePhase: PhaseObject {
             Vm.state == State::Ready;
             TrampolineVm.state == State::Destroyed;
             EarlyVm.state == State::Online;
+            BootCPU.state == State::Prepared;
             CpuGroup.state == State::Prepared;
             Soc.state == State::Prepared;
         }
