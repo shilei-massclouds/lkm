@@ -273,6 +273,42 @@ class CliTests(unittest.TestCase):
             self.assertIn("启用跳板页表和早期页表", text)
             self.assertNotIn("控制流已经切换到", text)
 
+    def test_trace_short_option_writes_default_out_path(self) -> None:
+        output = (
+            Path(__file__).resolve().parents[2]
+            / "out"
+            / "trace"
+            / f"{self.spec.stem}.trace.svg"
+        )
+        if output.exists():
+            output.unlink()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main([str(self.spec), "-T"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(output.is_file())
+            self.assertIn(f"trace_svg: {output}", stdout.getvalue())
+            self.assertIn("StartupTimeline.Setup", output.read_text(encoding="utf-8"))
+        finally:
+            if output.exists():
+                output.unlink()
+
+    def test_trace_short_options_accept_path_and_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "trace.svg"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main([str(self.spec), "-T", str(output), "-a", "event"])
+
+            self.assertEqual(exit_code, 0)
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("启用跳板页表和早期页表", text)
+            self.assertNotIn("控制流已经切换到", text)
+
     def test_legacy_trace_svg_rejects_output_alias(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "trace.svg"

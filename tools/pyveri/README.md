@@ -45,6 +45,8 @@
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --derive
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --derive --strict
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec -T
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec -T -a state,event
 PYTHONPATH=tools/pyveri/src python -m pyveri parse spec/model/startup-timeline.spec
 PYTHONPATH=tools/pyveri/src python -m pyveri model spec/model/startup-timeline.spec
 PYTHONPATH=tools/pyveri/src python -m pyveri derive spec/model/startup-timeline.spec --strict
@@ -84,6 +86,7 @@ PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src:tools
 ```
 
 未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查，并输出默认推导摘要；使用 `--derive` 时输出完整推导报告。默认情况下，推导结果为 `blocked` 仍返回 0，便于查看报告；需要把未达目标作为命令失败时使用 `--strict`。
+使用 `-T` 或 `--trace` 时，CLI 会在完整推导验证通过后输出 trace SVG；不带路径时默认写入 `tools/out/trace/<spec>.trace.svg`，带路径时写入指定文件。`-a state|event|state,event` 可叠加来自 `.spec` 注释的 state/event 注释层。
 使用 `--graph object -o <file>` 时，图内容直接写入文件。
 `object` 视图只输出对象之间的静态 `parent` 父子关系。
 `drives` 视图输出事件之间的驱动关系。

@@ -36,6 +36,7 @@ VIEW_CHOICES = ("object", "drives", "timeline")
 TEXT_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 RENDER_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 COMMANDS = frozenset({"parse", "model", "derive", "check", "view", "render"})
+DEFAULT_TRACE_SVG_MARKER = "__pyveri_default_trace_svg__"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,11 +173,20 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         help="return a non-zero exit code when derivation does not reach the target",
     )
     parser.add_argument(
+        "-T",
+        "--trace",
         "--trace-svg",
-        type=Path,
-        help="write the derivation trace SVG after verification",
+        dest="trace_svg",
+        nargs="?",
+        const=DEFAULT_TRACE_SVG_MARKER,
+        metavar="PATH",
+        help=(
+            "write the derivation trace SVG after verification; "
+            "without PATH, write to tools/out/trace/<spec>.trace.svg"
+        ),
     )
     parser.add_argument(
+        "-a",
         "--trace-annotations",
         help="trace annotation categories: state, event, or state,event",
     )
@@ -259,6 +269,7 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 _render_view_output(paths, args.graph, fmt, work, args.spec)
             )
         if args.trace_svg:
+            trace_svg_path = _trace_svg_output_path(args.trace_svg, args.spec)
             annotations = None
             if annotation_categories:
                 annotations = work / f"{args.spec.stem}.trace.annotations.json"
@@ -278,7 +289,9 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 args.spec,
                 annotations=annotations,
             )
-            _write_output(args.trace_svg, trace_svg, ascii_only=False)
+            _write_output(trace_svg_path, trace_svg, ascii_only=False)
+            if args.trace_svg == DEFAULT_TRACE_SVG_MARKER:
+                print(f"trace_svg: {trace_svg_path}")
         if args.derive and derivation_data is not None:
             selected_outputs.append(_derive_report(derivation_data))
 
@@ -701,6 +714,13 @@ def _write_output(path: Path, text: str, ascii_only: bool) -> None:
     encoding = "ascii" if ascii_only else "utf-8"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text + "\n", encoding=encoding)
+
+
+def _trace_svg_output_path(value: str, spec: Path) -> Path:
+    if value != DEFAULT_TRACE_SVG_MARKER:
+        return Path(value)
+    tools_root = Path(__file__).resolve().parents[3]
+    return tools_root / "out" / "trace" / f"{spec.stem}.trace.svg"
 
 
 def _parse_trace_annotation_categories(

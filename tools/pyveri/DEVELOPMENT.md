@@ -130,7 +130,7 @@ view.json -> text/DOT/SVG/animated SVG
 
 当前 `trace` SVG 已作为推导过程展示模板开始实现：空阶段事件会被隐藏，阶段事件显示为紧凑的粗竖箭头，普通对象事件显示在自身状态推进箭头中部，`drives` 短箭头对准目标事件框，准备期 `depends_on` 结果显示为 verified 状态。后续仍需继续改进：
 
-- 预览输出文件不要散落在仓库根目录。`trace.svg` 这类临时输出应删除，或统一输出到 `out/`、`spec/pic/` 或命令指定路径。
+- 预览输出文件不要散落在仓库根目录。`-T/--trace` 不带路径时默认写入 `tools/out/trace/<spec>.trace.svg`；显式给出路径时仍按命令指定路径输出。
 - 阶段箭头的紧凑 lane 当前主要在 SVG 渲染层实现；长期应在 `view` 的 trace 布局模型中正式区分 `phase_lane` 和 `object_lane`。
 - `depends_on` 虚线仍然较长，后续需要讨论是否也改为靠近目标端的短线，或采用更清楚的 verified 依赖表示。
 - 完整 trace 图仍然很高，后续可考虑按阶段分段、折叠同类短事件、分页输出或提供局部 trace。
@@ -145,8 +145,9 @@ view.json -> text/DOT/SVG/animated SVG
 
 ```bash
 tools/pyveri/bin/pyveri spec/model/startup-timeline.spec
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg --trace-annotations state,event
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T --trace-annotations state,event
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T custom-trace.svg -a state,event
 ```
 
 ## 规格语义
@@ -314,8 +315,9 @@ tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg -
 
 ```bash
 tools/pyveri/bin/pyveri spec/model/startup-timeline.spec
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg --trace-annotations state,event
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T --trace-annotations state,event
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T custom-trace.svg -a state,event
 ```
 
 旧入口 `spec/entry-prelude-object-model.spec` 在迁移期间继续可用；正式入口逐步切换为 `spec/model/startup-timeline.spec`。
@@ -344,8 +346,9 @@ parse -> model -> derive -> check
 
 trace SVG 输出通过 driver 参数启用：
 
-- `--trace-svg <path>`：在完整推导验证通过后输出基础 trace SVG。
-- `--trace-annotations state|event|state,event`：在基础 trace SVG 上叠加来自 `.spec` 注释的 state/event 注释层。该参数必须与 `--trace-svg` 一起使用。
+- `-T` / `--trace`：在完整推导验证通过后输出基础 trace SVG，默认写入 `tools/out/trace/<spec>.trace.svg`。
+- `-T <path>` / `--trace <path>` / `--trace-svg <path>`：把 trace SVG 写入指定路径；`--trace-svg` 作为兼容别名保留。
+- `-a state|event|state,event` / `--trace-annotations state|event|state,event`：在基础 trace SVG 上叠加来自 `.spec` 注释的 state/event 注释层。该参数必须与 `-T/--trace/--trace-svg` 一起使用。
 
 后续 CLI 改进：
 
@@ -509,11 +512,11 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 当前 trace SVG 已能作为基础推导过程图输出，并支持来自 `.spec` 注释的 overlay 注释层。下一步需要把已经暴露的问题收口：
 
 - 下一阶段优先收口 trace/SVG 输出体验，而不是继续扩展证明规则。当前 `obligation: 0` 已经形成阶段性闭环，后续应先让推导验证过程图更适合日常审阅。
-- 预览输出文件不要散落在仓库根目录。`pyveri-cli-trace.svg`、`trace.svg` 这类临时输出应删除，或统一输出到明确目录；后续默认建议使用 `tools/out/` 或命令显式指定路径。
+- 预览输出文件不要散落在仓库根目录。`-T/--trace` 不带路径时已默认输出到 `tools/out/trace/`；显式路径仍用于正式导出到 `spec/pic/` 或其它指定目录。
 - 系统检查四种 SVG 输出：基础图、带 state 注释、带 event 注释、同时带 state/event 注释，并把具体视觉问题记录成待办。
 - 当前 `.spec` 注释由 `pyveri` driver 临时读取并转换成 render 可用的 annotation JSON。长期更合理的数据流是：`parse` 保留注释 span/内容，`model` 或 `view` 按对象状态和事件关联注释，`render` 只消费 `view.json` 或明确的 annotation 输入。
 - trace 注释第一版保持 overlay，不改变底图布局；后续如果注释过密，再讨论更完整的注释布局、标题/正文结构、过滤策略，以及注释块自动避让和遮挡控制。
-- 在图输出稳定后，再考虑把 `--trace-svg` / `--trace-annotations` 的命令形式进一步简化。
+- `--trace-svg` / `--trace-annotations` 已增加短形式：`-T/--trace` 和 `-a`。
 - 当前剩余 `deferred` 暂时放在 trace 输出体验之后处理。
 - 基础 trace 图仍需继续改进：`depends_on` 虚线是否改成靠近目标端的短线，完整图是否分段/折叠/分页，标签是否简化和自动分行，以及布局常量是否暴露为 render 参数。
 
