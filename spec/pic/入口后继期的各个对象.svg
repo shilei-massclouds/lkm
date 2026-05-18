@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1040" viewBox="0 0 1280 1040" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1240" viewBox="0 0 1280 1240" role="img" aria-labelledby="title desc">
   <title id="title">入口后继期对象分类与相互关系</title>
-  <desc id="desc">展示入口后继期的阶段对象、承接对象、EarlyDtb、MemBlock、VM、EarlyVM 和 SwapperVM 之间的关系。</desc>
+  <desc id="desc">展示入口后继期的阶段对象、承接对象、EarlyDtb、PrintkBuffer、EarlyCon、MemBlock、VM、EarlyVM 和 SwapperVM 之间的关系。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
@@ -18,6 +18,7 @@
       .phase { fill: #eef2ff; stroke: #6366f1; }
       .dtb { fill: #fff7ed; stroke: #f97316; }
       .mem { fill: #f0fdf4; stroke: #22c55e; }
+      .log { fill: #fdf2f8; stroke: #db2777; }
       .addr { fill: #eff6ff; stroke: #3b82f6; }
       .carry { fill: #fefce8; stroke: #ca8a04; }
       .inactive { fill: #f1f5f9; stroke: #64748b; }
@@ -117,30 +118,48 @@
   <path d="M660 568 C775 568, 858 616, 970 596" class="edge"/>
   <text x="820" y="555" class="edge-label">早期分配支持</text>
 
-  <rect x="48" y="810" width="1184" height="182" rx="16" class="group"/>
-  <text x="640" y="846" class="group-label" text-anchor="middle">入口前导期承接对象</text>
+  <rect x="380" y="810" width="330" height="190" rx="16" class="group"/>
+  <text x="545" y="846" class="group-label" text-anchor="middle">早期输出对象</text>
 
-  <rect x="86" y="878" width="244" height="74" rx="10" class="box carry"/>
-  <text x="208" y="904" class="label">InitStack</text>
-  <text x="208" y="930" class="small">Ready -> Online</text>
+  <rect x="430" y="875" width="230" height="56" rx="10" class="box log"/>
+  <text x="545" y="895" class="label">PrintkBuffer</text>
+  <text x="545" y="916" class="small">Banner 先写入 ring buffer</text>
 
-  <rect x="366" y="878" width="244" height="74" rx="10" class="box carry"/>
-  <text x="488" y="904" class="label">InterruptStream</text>
-  <text x="488" y="930" class="small">Prepared -> Ready</text>
+  <rect x="430" y="950" width="230" height="56" rx="10" class="box log"/>
+  <text x="545" y="970" class="label">EarlyCon</text>
+  <text x="545" y="991" class="small">SBI backend / flush buffer</text>
 
-  <rect x="650" y="852" width="536" height="126" rx="10" class="box carry"/>
-  <text x="918" y="876" class="label">CPUGroup</text>
-  <rect x="690" y="900" width="210" height="54" rx="8" class="box carry"/>
-  <text x="795" y="919" class="small">BootCPU</text>
-  <text x="795" y="940" class="small">possible -> present -> active -> online</text>
-  <rect x="936" y="900" width="210" height="54" rx="8" class="box carry"/>
-  <text x="1041" y="919" class="small">CpuIdMap</text>
-  <text x="1041" y="940" class="small">logical CPU 0 -> BootCPU.hartid</text>
+  <path d="M545 931 L545 950" class="edge"/>
+  <text x="602" y="946" class="edge-label">replay / flush</text>
+  <path d="M545 434 C650 545, 696 740, 660 978" class="edge-soft"/>
+  <text x="688" y="712" class="edge-label">cmdline: earlycon=sbi</text>
+  <path d="M298 529 C392 650, 410 805, 430 903" class="edge-soft"/>
+  <text x="376" y="724" class="edge-label">驱动早期输出</text>
 
-  <path d="M298 552 C405 728, 260 790, 208 878" class="edge-soft"/>
-  <text x="310" y="802" class="edge-label">承接 / 保护</text>
-  <path d="M298 552 C438 726, 480 760, 488 878" class="edge-soft"/>
-  <text x="492" y="802" class="edge-label">防御式关闭总开关</text>
-  <path d="M298 552 C520 765, 880 770, 918 852" class="edge-soft"/>
-  <text x="715" y="802" class="edge-label">承接 / 建立 BootCPU 与映射</text>
+  <rect x="48" y="1030" width="1184" height="182" rx="16" class="group"/>
+  <text x="640" y="1066" class="group-label" text-anchor="middle">入口前导期承接对象</text>
+
+  <rect x="86" y="1098" width="244" height="74" rx="10" class="box carry"/>
+  <text x="208" y="1124" class="label">InitStack</text>
+  <text x="208" y="1150" class="small">Ready -> Online</text>
+
+  <rect x="366" y="1098" width="244" height="74" rx="10" class="box carry"/>
+  <text x="488" y="1124" class="label">InterruptStream</text>
+  <text x="488" y="1150" class="small">Prepared -> Ready</text>
+
+  <rect x="650" y="1072" width="536" height="126" rx="10" class="box carry"/>
+  <text x="918" y="1096" class="label">CPUGroup</text>
+  <rect x="690" y="1120" width="210" height="54" rx="8" class="box carry"/>
+  <text x="795" y="1139" class="small">BootCPU</text>
+  <text x="795" y="1160" class="small">possible -> present -> active -> online</text>
+  <rect x="936" y="1120" width="210" height="54" rx="8" class="box carry"/>
+  <text x="1041" y="1139" class="small">CpuIdMap</text>
+  <text x="1041" y="1160" class="small">logical CPU 0 -> BootCPU.hartid</text>
+
+  <path d="M298 552 C405 842, 260 1010, 208 1098" class="edge-soft"/>
+  <text x="310" y="1018" class="edge-label">承接 / 保护</text>
+  <path d="M298 552 C438 842, 480 980, 488 1098" class="edge-soft"/>
+  <text x="492" y="1018" class="edge-label">防御式关闭总开关</text>
+  <path d="M298 552 C520 978, 880 990, 918 1072" class="edge-soft"/>
+  <text x="715" y="1018" class="edge-label">承接 / 建立 BootCPU 与映射</text>
 </svg>
