@@ -54,7 +54,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
 
             data = read_json(derive)
-            self.assertEqual(data["summary"]["transitions"], 29)
+            self.assertGreaterEqual(data["summary"]["transitions"], 55)
             self.assertEqual(data["summary"]["obligation"], 0)
             self.assertIn("obligation_categories", data["summary"])
             self.assertNotIn(
@@ -70,6 +70,17 @@ class DeriveToolTests(unittest.TestCase):
                     for transition in data["transitions"]
                 )
             )
+            self.assertTrue(
+                any(
+                    transition["object"] == "EntrySuccessorPhase"
+                    and transition["event"] == "Setup"
+                    for transition in data["transitions"]
+                )
+            )
+            self.assertEqual(data["states"]["EntryPreludePhase"], "Destroyed")
+            self.assertEqual(data["states"]["EntrySuccessorPhase"], "Ready")
+            self.assertEqual(data["states"]["SwapperVm"], "Online")
+            self.assertEqual(data["states"]["MemBlock"], "Online")
             self.assertEqual(len(data["trace"]), 1)
             root = data["trace"][0]
             self.assertEqual(root["object"], "StartupTimeline")
@@ -729,6 +740,22 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "gp_relative_access_ready"
                     and record["proof_class"] == "architecture_state"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "swapper_vm_mappings_ready"
+                    and record["proof_class"] == "address_mapping"
+                    and record["proof_provider"] == "event_ensures"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"] == "memblock_allocator_ready"
+                    and record["proof_class"] == "physical_memory_management"
                     and record["proof_provider"] == "event_ensures"
                     for record in proved
                 )

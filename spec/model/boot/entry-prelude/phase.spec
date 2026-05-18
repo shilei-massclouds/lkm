@@ -202,6 +202,30 @@ object InitStack: StackObject {
             valid_stack_pointer(Riscv64.sp);
             inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap));
         }
+
+        events {
+            /*
+             * Enable 在 start_kernel() 早期建立根栈保护状态，例如设置 stack canary。
+             */
+            on Event::Enable -> State::Online {
+                depends_on {
+                    Vm.state == State::Ready;
+                }
+
+                ensures {
+                    init_stack_canary_ready(InitStack);
+                }
+            }
+        }
+    }
+
+    /*
+     * Online 表示根栈不仅地址可用，而且已经建立入口后继期要求的栈保护状态。
+     */
+    state State::Online {
+        invariant {
+            init_stack_canary_ready(InitStack);
+        }
     }
 }
 
@@ -244,6 +268,38 @@ object InterruptStream: FlowObject {
         invariant {
             Riscv64.sie == 0;
             Riscv64.sip == 0;
+        }
+
+        events {
+            /*
+             * Setup 在 start_kernel() 早期再次防御式关闭中断总开关。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Riscv64.state == State::Online;
+                }
+
+                may_change {
+                    Riscv64.sstatus;
+                }
+
+                ensures {
+                    Riscv64.sie == 0;
+                    Riscv64.sip == 0;
+                    supervisor_interrupts_disabled(Riscv64.sstatus);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示子开关和总开关都处于关闭状态。
+     */
+    state State::Ready {
+        invariant {
+            Riscv64.sie == 0;
+            Riscv64.sip == 0;
+            supervisor_interrupts_disabled(Riscv64.sstatus);
         }
     }
 }
@@ -680,13 +736,9 @@ object Vm: AddressSpaceObject {
 
         events {
             /*
-             * Enable 建立完整内核虚拟内存空间；入口前导期不触发该事件。
+             * Enable 建立完整内核虚拟内存空间；该事件由入口后继期触发。
              */
             on Event::Enable -> State::Online {
-                deferred {
-                    "当前入口前导期不会触发该事件；它属于后续阶段，用于建立完整虚拟内存空间。"
-                }
-
                 drives {
                     SwapperVm.Event::Setup;
                     SwapperVm.Event::Enable;
@@ -696,6 +748,10 @@ object Vm: AddressSpaceObject {
                 may_change {
                     Riscv64.satp;
                     StaticObjects.swapper_pg_dir;
+                }
+
+                ensures {
+                    Riscv64.satp == satp_of(StaticObjects.swapper_pg_dir, Config.satp_mode);
                 }
             }
         }
@@ -948,7 +1004,7 @@ object EarlyVm: AddressSpaceObject {
 }
 
 /*
- * SwapperVm 表示后续阶段使用的完整内核虚拟内存空间。入口前导期只保留其状态机占位。
+ * SwapperVm 表示后续阶段使用的完整内核虚拟内存空间。
  */
 object SwapperVm: AddressSpaceObject {
     initial_state: State::Base;
@@ -960,20 +1016,22 @@ object SwapperVm: AddressSpaceObject {
     state State::Base {
         events {
             /*
-             * Setup 建立完整内核页表；当前入口前导期只保留占位。
+             * Setup 建立完整内核页表。
              */
             on Event::Setup -> State::Ready {
-                deferred {
-                    "SwapperVm.Setup 属于后续阶段；当前只保留状态机占位。"
-                }
-
                 depends_on {
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
+                    MemBlock.state == State::Ready;
                 }
 
                 may_change {
                     StaticObjects.swapper_pg_dir;
+                }
+
+                ensures {
+                    swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap);
+                    temporary_fixmap_page_table_slots_clean(SwapperVm);
                 }
             }
         }
@@ -983,17 +1041,23 @@ object SwapperVm: AddressSpaceObject {
      * Ready 表示完整内核页表已准备好等待启用。
      */
     state State::Ready {
+        invariant {
+            swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap);
+            temporary_fixmap_page_table_slots_clean(SwapperVm);
+        }
+
         events {
             /*
-             * Enable 切换到完整内核页表；当前入口前导期只保留占位。
+             * Enable 切换到完整内核页表。
              */
             on Event::Enable -> State::Online {
-                deferred {
-                    "SwapperVm.Enable 属于后续阶段；当前只保留状态机占位。"
-                }
-
                 may_change {
                     Riscv64.satp;
+                }
+
+                ensures {
+                    Riscv64.satp == satp_of(StaticObjects.swapper_pg_dir, Config.satp_mode);
+                    swapper_vm_current(SwapperVm);
                 }
             }
         }
@@ -1005,10 +1069,7 @@ object SwapperVm: AddressSpaceObject {
     state State::Online {
         invariant {
             Riscv64.satp == satp_of(StaticObjects.swapper_pg_dir, Config.satp_mode);
-        }
-
-        deferred {
-            "完整虚拟内存空间的页表内容、权限和覆盖范围约束在后续阶段补充。"
+            swapper_vm_current(SwapperVm);
         }
     }
 }
@@ -1190,12 +1251,8 @@ object EntryPreludePhase: PhaseObject {
              * Cleanup 在后继阶段开始后退出入口前导期对象。
              */
             on Event::Cleanup -> State::Destroyed {
-                deferred {
-                    "next_phase_started() 是后继阶段边界谓词，后续建立入口后继期对象时展开。"
-                }
-
                 depends_on {
-                    next_phase_started();
+                    EntrySuccessorPhase.state == State::Base;
                 }
             }
         }

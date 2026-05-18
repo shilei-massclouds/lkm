@@ -192,7 +192,7 @@ def _build_timeline_rows(
             return
 
         event = _find_event(obj, event_name, states.get(object_name))
-        if event is None or event.decl.deferred:
+        if event is None:
             return
 
         key = (object_name, event_name)
@@ -311,7 +311,7 @@ def _make_timeline_row(
 
 
 def _parent_timeline_phase(phase: str) -> str:
-    if phase == "EntryPreludePhase":
+    if phase in {"EntryPreludePhase", "EntrySuccessorPhase"}:
         return "BootPhase"
     return phase
 

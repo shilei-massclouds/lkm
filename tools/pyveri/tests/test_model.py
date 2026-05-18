@@ -28,7 +28,10 @@ class ModelBuilderTests(unittest.TestCase):
             result.model.children["StartupTimeline"],
             ["PreparePhase", "BootPhase"],
         )
-        self.assertEqual(result.model.objects["BootPhase"].children, ["EntryPreludePhase"])
+        self.assertEqual(
+            result.model.objects["BootPhase"].children,
+            ["EntryPreludePhase", "EntrySuccessorPhase"],
+        )
 
     def test_builds_object_view(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
@@ -56,6 +59,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  -> PreparePhase.Setup", text)
         self.assertIn("BootPhase.Setup", text)
         self.assertIn("EntryPreludePhase.Setup", text)
+        self.assertIn("EntrySuccessorPhase.Setup", text)
         self.assertIn("rankdir=LR", dot)
         self.assertIn('"StartupTimeline.Setup" -> "PreparePhase.Setup"', dot)
 
@@ -73,15 +77,19 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  - Riscv64.State::Online", text)
         self.assertIn("  - PhysicalMemory.State::Online", text)
         self.assertIn("EntryPreludePhase: ready (State::Ready)", text)
+        self.assertIn("EntrySuccessorPhase: ready (State::Ready)", text)
         self.assertIn("BootPhase: ready (State::Ready)", text)
         self.assertIn("  - RootStream.State::Prepared", text)
         self.assertIn("  - Soc.State::Prepared", text)
-        self.assertIn("  - Vm.State::Ready", text)
+        self.assertIn("  - Vm.State::Online", text)
+        self.assertIn("  - SwapperVm.State::Online", text)
+        self.assertIn("  - MemBlock.State::Online", text)
         self.assertNotIn("StartupTimeline", text)
         self.assertIn("<svg", svg)
         self.assertIn("PreparePhase", svg)
         self.assertIn("BootPhase", svg)
         self.assertIn("EntryPreludePhase", svg)
+        self.assertIn("EntrySuccessorPhase", svg)
         self.assertNotIn("StartupTimeline", svg)
 
     def test_reports_unknown_drive_event(self) -> None:

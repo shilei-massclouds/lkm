@@ -143,7 +143,7 @@ class DerivationTests(unittest.TestCase):
         self.assertIn("trace:", text)
         self.assertNotIn("categories:", text)
         self.assertNotIn("providers:", text)
-        self.assertIn("proved: 249", text)
+        self.assertIn("proved: 393", text)
         self.assertIn("obligation: 0", text)
         self.assertTrue(
             any(
@@ -157,6 +157,8 @@ class DerivationTests(unittest.TestCase):
         self.assertIn("  > PreparePhase.Event::Setup State::Base", text)
         self.assertIn("< StartupTimeline.Event::Setup State::Ready", text)
         self.assertEqual(derivation.states["StartupTimeline"], "Ready")
+        self.assertEqual(derivation.states["EntrySuccessorPhase"], "Ready")
+        self.assertEqual(derivation.states["SwapperVm"], "Online")
         self.assertFalse(derivation.blocked)
 
 

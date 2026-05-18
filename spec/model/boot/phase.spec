@@ -1,8 +1,7 @@
 /*
  * Boot Phase Specification
  *
- * This phase currently drives the entry-prelude subphase. Later entry
- * successor modeling can be included beside it.
+ * This phase currently drives the entry-prelude and entry-successor subphases.
  */
 
 include "entry-prelude/phase.spec";
@@ -21,12 +20,13 @@ object BootPhase: PhaseObject {
     state State::Base {
         events {
             /*
-             * Setup 推进入口前导期子阶段。
+             * Setup 顺序推进入口前导期和入口后继期两个子阶段。
              * BootPhase 不直接依赖 PreparePhase；二者作为平级阶段由上级阶段对象编排衔接。
              */
             on Event::Setup -> State::Ready {
                 drives {
                     EntryPreludePhase.Event::Setup;
+                    EntrySuccessorPhase.Event::Setup;
                 }
             }
         }
@@ -37,7 +37,8 @@ object BootPhase: PhaseObject {
      */
     state State::Ready {
         invariant {
-            EntryPreludePhase.state == State::Ready;
+            EntryPreludePhase.state == State::Destroyed;
+            EntrySuccessorPhase.state == State::Ready;
         }
     }
 }
