@@ -14,6 +14,8 @@ for source in (_TOOLS_ROOT / "common" / "src", _TOOLS_ROOT / "parse" / "src"):
 
 from parse_tool.parser import (
     ParseError,
+    _read_with_includes,
+    _read_source_with_includes,
     parse_file,
     parse_text,
     strip_comments,
@@ -23,6 +25,8 @@ from common.spec_ast import statement_entries
 
 __all__ = [
     "ParseError",
+    "_read_source_with_includes",
+    "_read_with_includes",
     "parse_file",
     "parse_text",
     "statement_entries",

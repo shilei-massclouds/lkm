@@ -26,6 +26,7 @@ _bootstrap_tool_paths()
 
 from common import read_json, write_json
 from pyveri.derive import DEFAULT_TARGET
+from pyveri.parser import _read_source_with_includes
 
 if hasattr(signal, "SIGPIPE"):
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
@@ -720,7 +721,7 @@ def _parse_trace_annotation_categories(
 def _spec_trace_annotations(
     ast_data: dict[str, Any], spec: Path, categories: set[str]
 ) -> dict[str, dict[str, str]]:
-    lines = spec.read_text(encoding="utf-8").splitlines()
+    lines = _read_source_with_includes(spec, seen=set(), stack=[]).splitlines()
     annotations: dict[str, dict[str, str]] = {}
     if "state" in categories:
         annotations["states"] = {}

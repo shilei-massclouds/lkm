@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from pyveri.parser import ParseError, parse_file, parse_text, strip_comments
+from pyveri.parser import ParseError, _read_with_includes, parse_file, parse_text, strip_comments
 
 
 class ParserTests(unittest.TestCase):
@@ -130,7 +130,7 @@ class ParserTests(unittest.TestCase):
         self.assertIn("EntryPreludePhase", object_names)
         self.assertGreaterEqual(len(document.objects), 19)
 
-    def test_current_entry_prelude_entry_spans_use_source_lines(self) -> None:
+    def test_current_entry_prelude_entry_spans_use_expanded_lines(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
 
         document = parse_file(spec)
@@ -140,7 +140,9 @@ class ParserTests(unittest.TestCase):
         entry, span = enable.depends_on[0].entry_spans[0]
 
         self.assertEqual(entry, "EarlyVm.state == State::Online")
-        line = spec.read_text(encoding="utf-8").splitlines()[span.start_line - 1]
+        line = _read_with_includes(spec, seen=set(), stack=[]).splitlines()[
+            span.start_line - 1
+        ]
         self.assertIn("EarlyVm.state == State::Online", line)
 
     def test_parse_error_for_unknown_top_level_declaration(self) -> None:

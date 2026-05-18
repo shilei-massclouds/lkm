@@ -96,6 +96,16 @@ def parse_text(text: str) -> SpecDocument:
 
 
 def _read_with_includes(path: Path, seen: set[Path], stack: list[Path]) -> str:
+    return _read_with_include_mode(path, seen, stack, strip=True)
+
+
+def _read_source_with_includes(path: Path, seen: set[Path], stack: list[Path]) -> str:
+    return _read_with_include_mode(path, seen, stack, strip=False)
+
+
+def _read_with_include_mode(
+    path: Path, seen: set[Path], stack: list[Path], *, strip: bool
+) -> str:
     resolved = path.resolve()
     if resolved in stack:
         cycle = " -> ".join(str(item) for item in [*stack, resolved])
@@ -105,11 +115,13 @@ def _read_with_includes(path: Path, seen: set[Path], stack: list[Path]) -> str:
 
     seen.add(resolved)
     raw = resolved.read_text(encoding="utf-8")
-    stripped = strip_comments(raw)
-    return _expand_includes(stripped, resolved.parent, seen, [*stack, resolved])
+    text = strip_comments(raw) if strip else raw
+    return _expand_includes(text, resolved.parent, seen, [*stack, resolved], strip=strip)
 
 
-def _expand_includes(text: str, base_dir: Path, seen: set[Path], stack: list[Path]) -> str:
+def _expand_includes(
+    text: str, base_dir: Path, seen: set[Path], stack: list[Path], *, strip: bool
+) -> str:
     lines: list[str] = []
     for line in text.splitlines(keepends=True):
         match = _INCLUDE_LINE_RE.match(line.rstrip("\n"))
@@ -117,7 +129,7 @@ def _expand_includes(text: str, base_dir: Path, seen: set[Path], stack: list[Pat
             lines.append(line)
             continue
         include_path = (base_dir / match.group(1)).resolve()
-        lines.append(_read_with_includes(include_path, seen, stack))
+        lines.append(_read_with_include_mode(include_path, seen, stack, strip=strip))
         if lines[-1] and not lines[-1].endswith("\n"):
             lines.append("\n")
     return "".join(lines)

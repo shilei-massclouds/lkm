@@ -8,6 +8,7 @@ from pathlib import Path
 
 from common import AST_SCHEMA, AST_VERSION, read_json
 from parse_tool.__main__ import main
+from parse_tool.parser import _read_source_with_includes, _read_with_includes
 
 
 class ParseToolTests(unittest.TestCase):
@@ -53,9 +54,8 @@ class ParseToolTests(unittest.TestCase):
             entry = enable["depends_on"][0]["entries"][0]
 
             self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
-            line = self.spec.read_text(encoding="utf-8").splitlines()[
-                entry["span"]["start_line"] - 1
-            ]
+            expanded = _read_with_includes(self.spec, seen=set(), stack=[]).splitlines()
+            line = expanded[entry["span"]["start_line"] - 1]
             self.assertIn("EarlyVm.state == State::Online", line)
 
     def test_output_parent_directory_is_created(self) -> None:
@@ -137,6 +137,29 @@ class ParseToolTests(unittest.TestCase):
             data = read_json(output)
             object_names = [item["name"] for item in data["document"]["objects"]]
             self.assertEqual(object_names.count("IncludedOnce"), 1)
+
+    def test_source_include_expansion_preserves_comments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "child.spec"
+            child.write_text(
+                """
+                /*
+                 * Included note.
+                 */
+                object IncludedWithComment: TimelineObject {
+                    initial_state: State::Base;
+                }
+                """,
+                encoding="utf-8",
+            )
+            spec = root / "root.spec"
+            spec.write_text('include "child.spec";\n', encoding="utf-8")
+
+            expanded = _read_source_with_includes(spec, seen=set(), stack=[])
+
+            self.assertIn("Included note.", expanded)
+            self.assertIn("IncludedWithComment", expanded)
 
     def test_missing_input_returns_usage_error_code(self) -> None:
         stdout = io.StringIO()

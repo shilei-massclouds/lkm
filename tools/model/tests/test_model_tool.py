@@ -9,6 +9,7 @@ from pathlib import Path
 from common import MODEL_SCHEMA, MODEL_VERSION, read_json
 from model_tool.__main__ import main as model_main
 from parse_tool.__main__ import main as parse_main
+from parse_tool.parser import _read_with_includes
 
 
 class ModelToolTests(unittest.TestCase):
@@ -86,9 +87,8 @@ class ModelToolTests(unittest.TestCase):
             entry = enable["depends_on"][0]["entries"][0]
 
             self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
-            line = self.spec.read_text(encoding="utf-8").splitlines()[
-                entry["span"]["start_line"] - 1
-            ]
+            expanded = _read_with_includes(self.spec, seen=set(), stack=[]).splitlines()
+            line = expanded[entry["span"]["start_line"] - 1]
             self.assertIn("EarlyVm.state == State::Online", line)
 
     def test_invalid_ast_schema_returns_usage_error_code(self) -> None:

@@ -1,8 +1,43 @@
 /*
  * Boot Phase Specification
  *
- * This wrapper keeps the new directory-shaped phase tree usable while the
- * existing entry-prelude formal model is being split.
+ * This phase currently drives the entry-prelude subphase. Later entry
+ * successor modeling can be included beside it.
  */
 
 include "entry-prelude/phase.spec";
+include "entry-successor/phase.spec";
+
+/*
+ * BootPhase 表示引导期阶段对象。它负责推进当前模型已经展开的引导期子阶段。
+ */
+object BootPhase: PhaseObject {
+    initial_state: State::Base;
+    parent: StartupTimeline;
+
+    /*
+     * Base 表示引导期阶段对象已经进入模型空间，但尚未推进其子阶段。
+     */
+    state State::Base {
+        events {
+            /*
+             * Setup 推进入口前导期子阶段。
+             * BootPhase 不直接依赖 PreparePhase；二者作为平级阶段由上级阶段对象编排衔接。
+             */
+            on Event::Setup -> State::Ready {
+                drives {
+                    EntryPreludePhase.Event::Setup;
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示当前模型已经展开的引导期子阶段均已完成。
+     */
+    state State::Ready {
+        invariant {
+            EntryPreludePhase.state == State::Ready;
+        }
+    }
+}
