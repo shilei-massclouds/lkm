@@ -118,30 +118,41 @@
   <path d="M660 568 C775 568, 858 616, 970 596" class="edge"/>
   <text x="820" y="555" class="edge-label">早期分配支持</text>
 
-  <rect x="380" y="810" width="330" height="190" rx="16" class="group"/>
-  <text x="545" y="846" class="group-label" text-anchor="middle">早期输出对象</text>
+  <rect x="380" y="800" width="330" height="210" rx="16" class="group"/>
+  <text x="545" y="836" class="group-label" text-anchor="middle">早期服务对象</text>
 
-  <rect x="430" y="875" width="230" height="56" rx="10" class="box log"/>
-  <text x="545" y="895" class="label">PrintkBuffer</text>
-  <text x="545" y="916" class="small">Banner 先写入 ring buffer</text>
+  <rect x="430" y="862" width="230" height="46" rx="10" class="box addr"/>
+  <text x="545" y="881" class="label">EarlyIoremap</text>
+  <text x="545" y="900" class="small">uses FixMap.FIX_BTMAP</text>
 
-  <rect x="430" y="950" width="230" height="56" rx="10" class="box log"/>
-  <text x="545" y="970" class="label">EarlyCon</text>
-  <text x="545" y="991" class="small">SBI backend / flush buffer</text>
+  <rect x="430" y="926" width="230" height="46" rx="10" class="box log"/>
+  <text x="545" y="945" class="label">PrintkBuffer</text>
+  <text x="545" y="964" class="small">Banner 先写入 ring buffer</text>
 
-  <path d="M545 931 L545 950" class="edge"/>
-  <text x="602" y="946" class="edge-label">replay / flush</text>
-  <path d="M545 434 C650 545, 696 740, 660 978" class="edge-soft"/>
+  <rect x="430" y="990" width="230" height="46" rx="10" class="box log"/>
+  <text x="545" y="1009" class="label">EarlyCon</text>
+  <text x="545" y="1028" class="small">SBI backend / flush buffer</text>
+
+  <path d="M545 972 L545 990" class="edge"/>
+  <text x="602" y="988" class="edge-label">replay / flush</text>
+  <path d="M1015 403 C860 602, 704 750, 660 885" class="edge-soft"/>
+  <text x="818" y="704" class="edge-label">依赖 FixMap.FIX_BTMAP</text>
+  <path d="M545 434 C650 545, 696 740, 660 1013" class="edge-soft"/>
   <text x="688" y="712" class="edge-label">cmdline: earlycon=sbi</text>
-  <path d="M298 529 C392 650, 410 805, 430 903" class="edge-soft"/>
-  <text x="376" y="724" class="edge-label">驱动早期输出</text>
+  <path d="M298 529 C392 650, 410 805, 430 885" class="edge-soft"/>
+  <text x="376" y="724" class="edge-label">驱动早期服务</text>
 
   <rect x="48" y="1030" width="1184" height="182" rx="16" class="group"/>
   <text x="640" y="1066" class="group-label" text-anchor="middle">入口前导期承接对象</text>
 
-  <rect x="86" y="1098" width="244" height="74" rx="10" class="box carry"/>
-  <text x="208" y="1124" class="label">InitStack</text>
-  <text x="208" y="1150" class="small">Ready -> Online</text>
+  <rect x="66" y="1072" width="300" height="126" rx="10" class="box carry"/>
+  <text x="216" y="1096" class="label">InitTask</text>
+  <rect x="92" y="1120" width="116" height="54" rx="8" class="box carry"/>
+  <text x="150" y="1139" class="small">InitStack</text>
+  <text x="150" y="1160" class="small">Ready -> Online</text>
+  <rect x="224" y="1120" width="116" height="54" rx="8" class="box carry"/>
+  <text x="282" y="1139" class="small">InitMM</text>
+  <text x="282" y="1160" class="small">init_mm metadata</text>
 
   <rect x="366" y="1098" width="244" height="74" rx="10" class="box carry"/>
   <text x="488" y="1124" class="label">InterruptStream</text>
@@ -156,7 +167,7 @@
   <text x="1041" y="1139" class="small">CpuIdMap</text>
   <text x="1041" y="1160" class="small">logical CPU 0 -> BootCPU.hartid</text>
 
-  <path d="M298 552 C405 842, 260 1010, 208 1098" class="edge-soft"/>
+  <path d="M298 552 C405 842, 260 1000, 216 1072" class="edge-soft"/>
   <text x="310" y="1018" class="edge-label">承接 / 保护</text>
   <path d="M298 552 C438 842, 480 980, 488 1098" class="edge-soft"/>
   <text x="492" y="1018" class="edge-label">防御式关闭总开关</text>
