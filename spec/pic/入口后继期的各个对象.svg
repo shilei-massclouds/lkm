@@ -73,7 +73,7 @@
   <rect x="430" y="520" width="230" height="94" rx="10" class="box mem"/>
   <text x="545" y="550" class="label">MemBlock</text>
   <text x="545" y="575" class="small">早期物理内存分配管理</text>
-  <text x="545" y="597" class="state">Base -> Ready</text>
+  <text x="545" y="597" class="state">Base -> Ready -> Online</text>
 
   <path d="M545 279 L545 340" class="edge"/>
   <text x="590" y="317" class="edge-label">早期解析</text>
