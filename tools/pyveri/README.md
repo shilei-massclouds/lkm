@@ -5,17 +5,18 @@
 当前阶段的输入规格文件是：
 
 ```text
-../../spec/entry-prelude-object-model.spec
+../../spec/model/startup-timeline.spec
 ```
 
 ## 当前目标
 
-第一版验证器只面向入口前导期对象模型，做基于规格本身的纸上推导验证：
+第一版验证器正从入口前导期单文件模型迁移到阶段树模型，做基于规格本身的纸上推导验证：
 
 - 解析 `.spec` 文件，忽略 `/* ... */` 和 `// ...` 注释。
 - 建立对象、状态、事件、依赖、不变量和延期义务的模型。
 - 从 `StartupTimeline.Event::Setup` 开始，推导当前启动时间轴是否能达到目标状态。
 - 报告已证明、无法证明、矛盾和 `deferred` 条目。
+- 支持 `include "relative/path.spec";`，路径相对当前 `.spec` 文件所在目录解析。
 
 ## 非目标
 
@@ -41,25 +42,27 @@
 在仓库根目录执行：
 
 ```bash
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive --strict
-PYTHONPATH=tools/pyveri/src python -m pyveri parse spec/entry-prelude-object-model.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri model spec/entry-prelude-object-model.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri derive spec/entry-prelude-object-model.spec --strict
-PYTHONPATH=tools/pyveri/src python -m pyveri check spec/entry-prelude-object-model.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri view spec/entry-prelude-object-model.spec object
-PYTHONPATH=tools/pyveri/src python -m pyveri render spec/entry-prelude-object-model.spec object --format dot -o object.gv
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive --strict --work-dir tools/build
-PYTHONPATH=tools/pyveri/src python -m pyveri render spec/entry-prelude-object-model.spec object --format dot --work-dir tools/build
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --text object
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --text drives
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --graph drives -o drives.gv
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --text timeline
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --graph timeline -o timeline.svg
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --derive
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --derive --strict
+PYTHONPATH=tools/pyveri/src python -m pyveri parse spec/model/startup-timeline.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri model spec/model/startup-timeline.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri derive spec/model/startup-timeline.spec --strict
+PYTHONPATH=tools/pyveri/src python -m pyveri check spec/model/startup-timeline.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri view spec/model/startup-timeline.spec object
+PYTHONPATH=tools/pyveri/src python -m pyveri render spec/model/startup-timeline.spec object --format dot -o object.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --derive --strict --work-dir tools/build
+PYTHONPATH=tools/pyveri/src python -m pyveri render spec/model/startup-timeline.spec object --format dot --work-dir tools/build
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --text object
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --graph object -o object.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --text drives
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --graph drives -o drives.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --text timeline
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --graph timeline -o timeline.svg
 PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 ```
+
+迁移期间，旧入口 `spec/entry-prelude-object-model.spec` 仍可直接运行。
 
 当前 `pyveri` 已作为 driver 调度独立阶段工具，CLI 保留 `parse`、`model`、`derive`、`check`、`view` 和 `render` 子命令以及旧参数形式兼容。driver 默认使用临时目录保存中间文件；传入 `--work-dir tools/build` 时会保留本次流水线生成的 AST、model、derive、check、view 和 render 中间文件。
 

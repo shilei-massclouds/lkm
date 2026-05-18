@@ -46,12 +46,13 @@ _STATE_RE = re.compile(rf"\Astate\s+State::({_IDENT})\s*\{{", re.S)
 _EVENT_RE = re.compile(rf"\Aon\s+Event::({_IDENT})\s*->\s*State::({_IDENT})\s*\{{", re.S)
 _BLOCK_RE = re.compile(rf"\A({_IDENT})(?P<header>[^\{{]*)\{{", re.S)
 _PROP_RE = re.compile(rf"\A({_IDENT})\s*:\s*(.+?)\s*;\Z", re.S)
+_INCLUDE_LINE_RE = re.compile(r'\A\s*include\s+"([^"]+)"\s*;\s*\Z')
 
 
 def parse_file(path: str | Path) -> SpecDocument:
     """Parse a spec file."""
 
-    text = Path(path).read_text(encoding="utf-8")
+    text = _read_with_includes(Path(path), seen=set(), stack=[])
     return parse_text(text)
 
 
@@ -92,6 +93,34 @@ def parse_text(text: str) -> SpecDocument:
         types=types,
         objects=objects,
     )
+
+
+def _read_with_includes(path: Path, seen: set[Path], stack: list[Path]) -> str:
+    resolved = path.resolve()
+    if resolved in stack:
+        cycle = " -> ".join(str(item) for item in [*stack, resolved])
+        raise ParseError(f"include cycle: {cycle}")
+    if resolved in seen:
+        return "\n"
+
+    seen.add(resolved)
+    raw = resolved.read_text(encoding="utf-8")
+    stripped = strip_comments(raw)
+    return _expand_includes(stripped, resolved.parent, seen, [*stack, resolved])
+
+
+def _expand_includes(text: str, base_dir: Path, seen: set[Path], stack: list[Path]) -> str:
+    lines: list[str] = []
+    for line in text.splitlines(keepends=True):
+        match = _INCLUDE_LINE_RE.match(line.rstrip("\n"))
+        if not match:
+            lines.append(line)
+            continue
+        include_path = (base_dir / match.group(1)).resolve()
+        lines.append(_read_with_includes(include_path, seen, stack))
+        if lines[-1] and not lines[-1].endswith("\n"):
+            lines.append("\n")
+    return "".join(lines)
 
 
 def strip_comments(text: str) -> str:

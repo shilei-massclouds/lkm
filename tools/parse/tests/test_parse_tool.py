@@ -66,6 +66,78 @@ class ParseToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue(output.exists())
 
+    def test_include_expands_relative_to_current_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            nested = root / "nested"
+            nested.mkdir()
+            (nested / "child.spec").write_text(
+                """
+                object IncludedObject: TimelineObject {
+                    initial_state: State::Base;
+
+                    state State::Base {
+                    }
+                }
+                """,
+                encoding="utf-8",
+            )
+            spec = root / "root.spec"
+            spec.write_text(
+                """
+                include "nested/child.spec";
+
+                object RootObject: TimelineObject {
+                    initial_state: State::Base;
+
+                    state State::Base {
+                    }
+                }
+                """,
+                encoding="utf-8",
+            )
+            output = root / "root.ast.json"
+
+            exit_code = main([str(spec), "-o", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            data = read_json(output)
+            object_names = {item["name"] for item in data["document"]["objects"]}
+            self.assertIn("IncludedObject", object_names)
+            self.assertIn("RootObject", object_names)
+
+    def test_duplicate_include_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            child = root / "child.spec"
+            child.write_text(
+                """
+                object IncludedOnce: TimelineObject {
+                    initial_state: State::Base;
+
+                    state State::Base {
+                    }
+                }
+                """,
+                encoding="utf-8",
+            )
+            spec = root / "root.spec"
+            spec.write_text(
+                """
+                include "child.spec";
+                include "child.spec";
+                """,
+                encoding="utf-8",
+            )
+            output = root / "root.ast.json"
+
+            exit_code = main([str(spec), "-o", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            data = read_json(output)
+            object_names = [item["name"] for item in data["document"]["objects"]]
+            self.assertEqual(object_names.count("IncludedOnce"), 1)
+
     def test_missing_input_returns_usage_error_code(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()

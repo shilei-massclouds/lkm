@@ -144,13 +144,14 @@ view.json -> text/DOT/SVG/animated SVG
 示例命令：
 
 ```bash
-tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec
-tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --trace-svg trace.svg
-tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --trace-svg trace.svg --trace-annotations state,event
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg --trace-annotations state,event
 ```
 
 ## 规格语义
 
+- `include "relative/path.spec";` 在解析阶段展开其它规格文件；路径相对当前 `.spec` 文件所在目录解析，重复 include 同一文件只展开一次。
 - `object` 是推导中的实体单位。
 - `parent` 建立对象之间的静态父子层级。
 - `initial_state` 给出对象进入推导模型时的初始状态。
@@ -312,10 +313,12 @@ tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --trace-svg trace.s
 第一版命令形式：
 
 ```bash
-tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec
-tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --trace-svg trace.svg
-tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --trace-svg trace.svg --trace-annotations state,event
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg
+tools/pyveri/bin/pyveri spec/model/startup-timeline.spec --trace-svg trace.svg --trace-annotations state,event
 ```
+
+旧入口 `spec/entry-prelude-object-model.spec` 在迁移期间继续可用；正式入口逐步切换为 `spec/model/startup-timeline.spec`。
 
 默认目标：
 
