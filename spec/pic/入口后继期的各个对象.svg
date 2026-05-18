@@ -117,19 +117,30 @@
   <path d="M660 568 C775 568, 858 616, 970 596" class="edge"/>
   <text x="820" y="555" class="edge-label">早期分配支持</text>
 
-  <rect x="48" y="810" width="1184" height="158" rx="16" class="group"/>
+  <rect x="48" y="810" width="1184" height="182" rx="16" class="group"/>
   <text x="640" y="846" class="group-label" text-anchor="middle">入口前导期承接对象</text>
 
-  <rect x="120" y="878" width="430" height="66" rx="10" class="box carry"/>
-  <text x="335" y="902" class="label">InitStack</text>
-  <text x="335" y="926" class="small">Ready -> Online：建立根栈保护状态</text>
+  <rect x="86" y="878" width="244" height="74" rx="10" class="box carry"/>
+  <text x="208" y="904" class="label">InitStack</text>
+  <text x="208" y="930" class="small">Ready -> Online</text>
 
-  <rect x="730" y="878" width="430" height="66" rx="10" class="box carry"/>
-  <text x="945" y="902" class="label">CPUGroup</text>
-  <text x="945" y="926" class="small">logical CPU 0 -> boot_cpu_hartid 映射</text>
+  <rect x="366" y="878" width="244" height="74" rx="10" class="box carry"/>
+  <text x="488" y="904" class="label">InterruptStream</text>
+  <text x="488" y="930" class="small">Prepared -> Ready</text>
 
-  <path d="M298 552 C405 728, 260 790, 310 878" class="edge-soft"/>
+  <rect x="650" y="852" width="536" height="126" rx="10" class="box carry"/>
+  <text x="918" y="876" class="label">CPUGroup</text>
+  <rect x="690" y="900" width="210" height="54" rx="8" class="box carry"/>
+  <text x="795" y="919" class="small">BootCPU</text>
+  <text x="795" y="940" class="small">possible -> present -> active -> online</text>
+  <rect x="936" y="900" width="210" height="54" rx="8" class="box carry"/>
+  <text x="1041" y="919" class="small">CpuIdMap</text>
+  <text x="1041" y="940" class="small">logical CPU 0 -> BootCPU.hartid</text>
+
+  <path d="M298 552 C405 728, 260 790, 208 878" class="edge-soft"/>
   <text x="310" y="802" class="edge-label">承接 / 保护</text>
-  <path d="M298 552 C520 765, 880 770, 945 878" class="edge-soft"/>
-  <text x="715" y="802" class="edge-label">承接 / 建立 primary 映射</text>
+  <path d="M298 552 C438 726, 480 760, 488 878" class="edge-soft"/>
+  <text x="492" y="802" class="edge-label">防御式关闭总开关</text>
+  <path d="M298 552 C520 765, 880 770, 918 852" class="edge-soft"/>
+  <text x="715" y="802" class="edge-label">承接 / 建立 BootCPU 与映射</text>
 </svg>
