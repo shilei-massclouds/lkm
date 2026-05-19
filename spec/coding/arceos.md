@@ -8,12 +8,19 @@
 
 当前目标不是复制 ArceOS，而是在 `spec/model` 的对象和阶段边界下吸收 ArceOS 中已经验证过的实现经验。
 
+`arceos_ex` 的演化约束分为两个层面：
+
+- 代码实现层面：ArceOS 代码只是参考。能满足规格且改造成本合理的代码可以复用、复制或改写；不适合的代码应新写，不能无脑复用。
+- 框架与接口层面：应尽量保持 ArceOS 的组件化形态。组件仍以 crate 为边界，crate 内部仍以 Rust module 组织；组件构成、组件公开接口和 module 公开接口应尽量接近 ArceOS。只有规格要求不允许时，才改变接口，并记录原因。
+
 ## 参考原则
 
 - 模型对象边界优先于 ArceOS 现有模块边界。
 - 可复用思想、接口形状和成熟实现路径，但不得因为 ArceOS 现有代码结构而改变模型状态迁移。
 - 若 ArceOS 中某个实现步骤覆盖多个模型事件，目标内核应按模型事件拆分或显式记录合并理由。
 - 若模型中一个对象需要参考 ArceOS 多处代码，应在实现任务中列出映射关系。
+- `os/arceos` 和已有 `components` 实现视为只读参考；`arceos_ex` 通过新增目录或新增 `_ex` 组件实现。
+- 新增 crate 名称优先使用与 ArceOS 对应 crate 相同的语义名并加 `_ex` 后缀，避免 workspace 包名冲突。
 
 ## 初步参考方向
 
@@ -23,6 +30,20 @@
 - FDT：参考 ArceOS 的设备树解析入口，但保持 `RawDtb` 与 `EarlyDtb` 的阶段边界。
 - 输出：参考 ArceOS early console 或 logging 机制，落实 `PrintkBuffer` 与 `EarlyCon` 的区别。
 - 内存管理：参考 ArceOS 早期内存区段和 allocator 初始化经验，落实 `MemBlock` 的候选区段、保留区段和 enable 边界。
+
+## arceos_ex 第一轮形态
+
+第一轮以 `helloworld` Unikernel 为目标，但该最小应用仍必须支撑 `EntryPreludePhase` 和 `EntrySuccessorPhase` 两个子阶段。实现边界达到 `EntrySuccessorPhase.Ready` 后，才能认为第一轮启动模型闭环完成。
+
+建议的组织原则：
+
+- `os/arceos_ex` 镜像 ArceOS 的 OS 侧目录习惯，例如保留 `modules/`、`examples/` 等组织方式。
+- 内核核心组件可新增为 `ax-hal-ex`、`ax-runtime-ex` 等 crate，并在目录上尽量贴近 ArceOS 原有模块层次。
+- `helloworld` 应作为 `os/arceos_ex/examples/helloworld` 下的 Unikernel 应用出现。
+- ArceOS 现有 `examples/` 和 `test-suit/arceos/` 下的 Unikernel 应用应尽量复用。`arceos_ex` 第一轮可以先复用 `helloworld` 应用源码，后续逐步验证更多应用和测试集。
+- `ulib/axstd`、`api/ax-api`、`api/ax-feat` 这类应用接口和特性接口第一轮不主动复制；目标是尽量保持其公开接口不变。
+- 如果现有 `ax-std` / `ax-api` / `ax-feat` 的依赖链固定指向原 `ax-hal`、`ax-runtime`，导致 `arceos_ex` 无法接入 `_ex` runtime，则再引入同接口的 `_ex` facade，而不是修改现有接口语义。
+- 构建和运行应直接接入 tgoskits 现有 `cargo xtask` 工具体系。第一轮可增加专用 `arceos_ex` 路径，让它显式选择 `_ex` 核心组件；长期由 `xtask` 管理不同内核 profile 对顶层 Cargo 依赖映射或生成配置的切换。
 
 ## 与模型不一致时的处理
 
@@ -37,3 +58,4 @@
 - `tgoskits` 中 ArceOS 代码的实际路径。
 - 目标内核与 ArceOS 参考模块的映射表。
 - 可直接复用、需要改写、禁止复用的代码分类。
+- `ax-std` / `ax-api` / `ax-feat` 是否需要 `_ex` facade 的最终判断。
