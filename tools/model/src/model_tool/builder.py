@@ -31,6 +31,35 @@ _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 _ATTR_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)\Z", re.S)
+_ALLOWED_STATE_NAMES = frozenset(
+    {
+        "Base",
+        "Prepared",
+        "Ready",
+        "Online",
+        "Destroyed",
+    }
+)
+_ALLOWED_EVENT_NAMES = frozenset(
+    {
+        "Preset",
+        "Setup",
+        "Enable",
+        "Cleanup",
+    }
+)
+_ALLOWED_TRANSITIONS = frozenset(
+    {
+        ("Base", "Preset", "Prepared"),
+        ("Base", "Preset", "Ready"),
+        ("Base", "Setup", "Ready"),
+        ("Prepared", "Setup", "Ready"),
+        ("Prepared", "Enable", "Online"),
+        ("Ready", "Enable", "Online"),
+        ("Ready", "Cleanup", "Destroyed"),
+        ("Online", "Cleanup", "Destroyed"),
+    }
+)
 
 
 def build_model(document: SpecDocument) -> BuildResult:
@@ -123,6 +152,8 @@ def _build_objects(
             )
             continue
 
+        _check_object_lifecycle_names(decl, diagnostics)
+        _check_object_event_uniqueness(decl, diagnostics)
         states = _build_states(decl, diagnostics)
         attrs = _extract_attrs(decl, diagnostics)
         objects[decl.name] = ObjectDef(
@@ -135,6 +166,81 @@ def _build_objects(
             attrs=attrs,
         )
     return objects
+
+
+def _check_object_lifecycle_names(
+    decl: ObjectDecl, diagnostics: list[Diagnostic]
+) -> None:
+    """Enforce SEM-NAME-001: lifecycle names come from controlled vocabularies."""
+
+    if decl.initial_state is not None and decl.initial_state not in _ALLOWED_STATE_NAMES:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"unknown lifecycle state name: {decl.name}.initial_state State::{decl.initial_state}",
+                decl.span,
+            )
+        )
+
+    for state_decl in decl.states:
+        if state_decl.name not in _ALLOWED_STATE_NAMES:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown lifecycle state name: {decl.name}.State::{state_decl.name}",
+                    state_decl.span,
+                )
+            )
+        for event_decl in state_decl.events:
+            if event_decl.name not in _ALLOWED_EVENT_NAMES:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"unknown lifecycle event name: {decl.name}.Event::{event_decl.name}",
+                        event_decl.span,
+                    )
+                )
+            transition = (state_decl.name, event_decl.name, event_decl.target_state)
+            if transition not in _ALLOWED_TRANSITIONS:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "invalid lifecycle transition: "
+                        f"{decl.name}.State::{state_decl.name}.Event::{event_decl.name} -> State::{event_decl.target_state}",
+                        event_decl.span,
+                    )
+                )
+            if event_decl.target_state not in _ALLOWED_STATE_NAMES:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "unknown lifecycle state name: "
+                        f"{decl.name}.Event::{event_decl.name} -> State::{event_decl.target_state}",
+                        event_decl.span,
+                    )
+                )
+
+
+def _check_object_event_uniqueness(
+    decl: ObjectDecl, diagnostics: list[Diagnostic]
+) -> None:
+    """Enforce SEM-EVENT-001: event identity is object-local."""
+
+    seen: dict[str, EventDecl] = {}
+    for state_decl in decl.states:
+        for event_decl in state_decl.events:
+            existing = seen.get(event_decl.name)
+            if existing is None:
+                seen[event_decl.name] = event_decl
+                continue
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "duplicate object event declaration: "
+                    f"{decl.name}.Event::{event_decl.name}",
+                    event_decl.span,
+                )
+            )
 
 
 def _build_states(decl: ObjectDecl, diagnostics: list[Diagnostic]) -> dict[str, StateDef]:
@@ -150,7 +256,7 @@ def _build_states(decl: ObjectDecl, diagnostics: list[Diagnostic]) -> dict[str, 
             )
             continue
 
-        events = _build_events(decl.name, state_decl, diagnostics)
+        events = _build_events(decl.name, state_decl, diagnostics, object_wide=True)
         states[state_decl.name] = StateDef(
             name=state_decl.name,
             object_name=decl.name,
@@ -161,11 +267,15 @@ def _build_states(decl: ObjectDecl, diagnostics: list[Diagnostic]) -> dict[str, 
 
 
 def _build_events(
-    object_name: str, state_decl: StateDecl, diagnostics: list[Diagnostic]
+    object_name: str,
+    state_decl: StateDecl,
+    diagnostics: list[Diagnostic],
+    *,
+    object_wide: bool = False,
 ) -> dict[str, EventDef]:
     events: dict[str, EventDef] = {}
     for event_decl in state_decl.events:
-        if event_decl.name in events:
+        if not object_wide and event_decl.name in events:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,

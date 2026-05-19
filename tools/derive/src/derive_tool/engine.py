@@ -1246,7 +1246,7 @@ class _Deriver:
     ) -> bool:
         if kind != "invariant" or state is None:
             return False
-        if state.object_name != "LinearMap" or state.name != "Reserved":
+        if state.object_name != "LinearMap" or state.name != "Destroyed":
             return False
 
         proof = _LINEAR_MAP_LAYOUT_PROOFS.get(expression.strip())

@@ -6,6 +6,10 @@
 ../../spec/entry-prelude-object-model.spec
 ```
 
+## 修改前必读
+
+修改规格、模型构建、推导、检查、视图或渲染逻辑前，必须先阅读 `spec/model/SEMANTICS.md`。该文档记录模型语义硬规则；工具实现不得用后续阶段的消歧、补偿或展示逻辑绕过这些规则。
+
 ## 定位
 
 `pyveri` 是面向组件化内核规格的静态推导验证器。它不读取运行时轨迹，也不依赖模拟器、硬件采集或参考内核差分数据。
@@ -475,10 +479,11 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - 已引入 `BootArgs` 对象作为内核启动参数抽象。当前 RISC-V64 语境下，`BootArgs.boot_hartid == Riscv64.a0`，`BootArgs.dtb_pa == Riscv64.a1`。`Riscv64` 继续描述入口寄存器事实，`BootArgs` 描述启动 ABI/boot protocol 对寄存器的语义解释；`RawDtb` 已改为依赖 `BootArgs.dtb_pa`，`CpuGroup` 已改为依赖 `BootArgs.boot_hartid`，避免裸寄存器名散落在规格中。
 - `RawDtb` 的规格按三层表达：`BootArgs.dtb_pa` 是 dtb 起始物理地址，`header_range` 覆盖读取 `DtbHeader` 所需范围，`range` 覆盖根据 `header.total_size` 得到的完整 dtb 范围。规格统一使用 `contains(container, value)` 表达包含关系，不再引入 `addr_in_ram` 或 `range_in_ram` 这类薄包装谓词；`contains(PhysicalMemory.ram, header_range)` 表示头部读取范围有效，`contains(PhysicalMemory.ram, range)` 表示启动代码读取 total_size 后的完整范围检查。
 - `RawDtb.Preset` 已用事件后置条件证明 `header_range` 由 `BootArgs.dtb_pa` 和 `size_of::<DtbHeader>()` 派生，并证明头部 magic 有效；`RawDtb.Setup` 已用事件后置条件证明完整 `range` 由 `BootArgs.dtb_pa` 和 `header.total_size` 派生，并证明完整 header 有效。`contains(PhysicalMemory.ram, header_range)` 与 `contains(PhysicalMemory.ram, range)` 不用事件后置条件硬消，而是由 `firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)` 加上 RawDtb 自身的边界派生事实证明。
+- `RawDtb.Preset/Setup` 当前属于规格前置证明边界，不表示 Linux 6.12.37 的 RISC-V `setup_vm()` 在同一源码位置逐项验证 DTB。Linux 实现侧主要在 `setup_vm()` 中根据 `dtb_pa` 建立 FDT fixmap 映射并设置 `dtb_early_va/dtb_early_pa`，后续 `parse_dtb()` 调用 `early_init_dt_scan()`，再由 `early_init_dt_verify()` 执行 `fdt_check_header()` 并扫描 `/chosen`、`/memory` 等节点。本规格把这些后续隐含依赖提前收口，是为了让 `EarlyVm` 的 FDT 映射前提可推导、可检查。
 - `fits_in_fixmap_slot(range, slot, page_size)` 只表达 RawDtb 物理范围有资格放入 FDT fixmap 槽位范围的页覆盖数约束，不表示映射已经建立，也不要求 RawDtb 原始前后边界页对齐。fixmap 的基本单位是页，FDT slot 可覆盖连续多个页；因此 `FixMapSlotRange<T>` 表示连续页槽位范围，容量比较已改为 `page_cover_count(range, page_size) <= slot_page_count(slot)`。该约束已由 `riscv_fixmap_layout` 收口：Linux/RISC-V 定义 `FIX_FDT = FIX_FDT_END + FIX_FDT_SIZE / PAGE_SIZE - 1`，64 位下 `MAX_FDT_SIZE = PMD_SIZE` 且 `FIX_FDT_SIZE = MAX_FDT_SIZE + SZ_2M`，`create_fdt_early_page_table()` 用两个 PMD 映射覆盖未对齐 DTB 所在范围。
 - 已引入最小 `FixMap` 对象，先只建模 FDT 槽位。`RawDtb` 负责物理 DTB 有效性，`FixMap.Preset` 负责检查 FDT slot 存在且能够容纳 RawDtb，并记录 `slot_contains(FixMap.fdt_slot, RawDtb)`；`EarlyVm` 后续只依赖 FixMap 已就绪和槽位内容，再建立页表映射。
-- 已引入最小 `LinearMap` 对象，表示 `PAGE_OFFSET` 起始的物理内存线性映射区域在入口前导期已按布局预留，但完整 RAM banks 映射尚未建立。`EarlyVm.Ready` 只要求 `LinearMap.state == State::Reserved`，完整线性映射应留给 `SwapperVm` 或后续完整 VM 阶段。
-- `LinearMap.Reserved` 的 `linear_map_area_reserved(self)` 与 `fixmap_adjacent_to_linear_map(FixMap, LinearMap)` 已由 `config_address_layout` 收口。依据是 RISC-V/Linux 地址空间布局中 `PAGE_OFFSET` 作为 lowmem/direct map 起点，`FIXADDR_START/FIXADDR_TOP` 定义位于其前侧的 fixmap 区域；入口前导期只证明该虚拟区域布局已预留，不证明完整 RAM banks 已映射。
+- 已引入最小 `LinearMap` 对象，表示 `PAGE_OFFSET` 起始的物理内存线性映射区域在入口前导期已按布局预留，但完整 RAM banks 映射尚未建立。`EarlyVm.Ready` 只要求 `LinearMap.state == State::Destroyed`；这里的 `Destroyed` 使用其 `reserved/已预留` 别名，表示该区域尚不提供当前地址转换服务。完整线性映射应留给 `SwapperVm` 或后续完整 VM 阶段。
+- `LinearMap.Destroyed` 的 `linear_map_area_reserved(self)` 与 `fixmap_adjacent_to_linear_map(FixMap, LinearMap)` 已由 `config_address_layout` 收口。依据是 RISC-V/Linux 地址空间布局中 `PAGE_OFFSET` 作为 lowmem/direct map 起点，`FIXADDR_START/FIXADDR_TOP` 定义位于其前侧的 fixmap 区域；入口前导期只证明该虚拟区域布局已预留，不证明完整 RAM banks 已映射。
 - `EarlyVm` 的 FDT 映射谓词已改为通用 fixmap slot 语义：`fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。RawDtb 是否位于该槽位由 `FixMap` 的 `slot_contains(...)` 负责，页表映射阶段不再直接绑定 RawDtb 物理范围。
 - `KernelImageArea` 已更名为 `KernelImageMap`，表达内核映像在 EarlyVm 中的虚拟映射区域。`EarlyVm.Ready` 和 `EarlyVm.Online` 分别使用 `kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap)` 与 `kernel_image_accessible(KernelImage, KernelImageMap)`，避免把内核映像映射写成无参数黑盒。
 - `EarlyVm.Setup` 不再直接使用 `KernelImage.end - KernelImage.start < Config.kernel_image_va_window_size` 这种裸关系表达容量约束，而是使用 `fits_in_kernel_image_map(KernelImage, KernelImageMap)` 表达“内核映像可装入该映射区域”。该约束已由 `KernelImage` 的链接布局与 `Config` 地址窗口共同证明：`KernelImageMap.range` 从 `KERNEL_LINK_ADDR` 和 `SZ_2G` 派生，Linux `create_kernel_page_table()` 按 `kernel_map.virt_addr + kernel_map.size` 建立 early_pg_dir 的内核映像映射。
@@ -519,6 +524,23 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spe
 - `--trace-svg` / `--trace-annotations` 已增加短形式：`-T/--trace` 和 `-a`。
 - 当前剩余 `deferred` 暂时放在 trace 输出体验之后处理。
 - 基础 trace 图仍需继续改进：`depends_on` 虚线是否改成靠近目标端的短线，完整图是否分段/折叠/分页，标签是否简化和自动分行，以及布局常量是否暴露为 render 参数。
+- trace 当前只把 `Object.state == State::X` 这类 `depends_on` 展示为 verified state，非状态谓词事实没有显式展示。后续应为关键谓词增加 verified fact 节点或事件摘要，例如 `EarlyVm.Setup` 中的 `fits_in_kernel_image_map(KernelImage, KernelImageMap)`、`slot_contains(FixMap.fdt_slot, RawDtb)`、`kernel_image_mapping_ready(...)` 和 `fixmap_slot_mapping_ready(...)`，避免 SVG 只显示 RawDtb/FixMap 而弱化 KernelImage 映射范围依赖。
+
+#### Step C.2: 计划列表与优先级
+
+本文档维护一个粗粒度计划列表，用于在阶段性讨论后快速确认下一步工作顺序。优先级含义：
+
+- `P0`：当前最应优先推进，直接影响日常审阅或当前闭环质量。
+- `P1`：近期应推进，通常依赖 `P0` 的结果或与其紧密相邻。
+- `P2`：后续扩展项，应在当前闭环稳定后推进。
+
+| 优先级 | 状态 | 事项 | 目标与说明 |
+| --- | --- | --- | --- |
+| `P0` | 待办 | 收口 trace/SVG 输出体验 | 系统检查基础图、state 注释图、event 注释图、state+event 注释图四种输出；优先处理 `depends_on` 长线、完整图过高、标签简化/分行、关键非状态谓词事实展示，以及布局常量是否暴露为 render 参数等问题，使 trace 图适合日常审阅。 |
+| `P1` | 待办 | 注释数据流下沉 | 当前 `.spec` 注释由 `pyveri` driver 临时抽取并传给 render。后续应让 `parse` 保留注释 span/内容，由 `model` 或 `view` 建立 state/event 关联，`render` 只消费 `view.json` 或明确的 annotation 输入。 |
+| `P1` | 待办 | 同步开发文档与当前真实进展 | 清理文档中已经过期的描述，例如前文仍提到复杂谓词保留为 `obligation`，但当前严格推导实际为 `obligation: 0`；同时明确当前主入口、已覆盖阶段和剩余 `deferred`。 |
+| `P2` | 待办 | 继续语义扩展 | 在 trace/文档闭环稳定后，再决定是优先消化两个剩余 `deferred`，还是沿 Linux 启动流程继续推进到 `paging_init()` 之后的下一个阶段边界。 |
+| `P2` | 进行中 | 工具链拆分与中间文件协议完善 | 独立阶段工具已经落地，后续继续细化 schema、退出码、缓存/增量重建策略，并保持独立阶段不反向依赖 `pyveri` 包。详见 Step D。 |
 
 #### Step D: 工具链拆分
 

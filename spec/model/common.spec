@@ -130,7 +130,7 @@ predicate slot_contains<T, U>(slot: FixMapSlotRange<T>, obj: U) -> bool {
 }
 
 predicate linear_map_area_reserved<T: Object>(obj: T) -> bool {
-    obj.state == State::Reserved
+    obj.state == State::Destroyed
 }
 
 predicate fixmap_adjacent_to_linear_map<T: Object, U: Object>(fixmap: T, linear_map: U) -> bool {

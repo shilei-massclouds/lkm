@@ -173,9 +173,9 @@ object InitStack: StackObject {
 
         events {
             /*
-             * Enable 在早期虚拟地址空间可用后，将根栈指针切换为虚拟地址。
+             * Setup 在早期虚拟地址空间可用后，将根栈指针切换为虚拟地址。
              */
-            on Event::Enable -> State::Ready {
+            on Event::Setup -> State::Ready {
                 depends_on {
                     Vm.state == State::Ready;
                 }
@@ -496,6 +496,9 @@ object KernelImage: ImageObject {
 /*
  * RawDtb 表示启动参数 dtb_pa 指向的原始设备树二进制。
  * 它分层验证原始 dtb 的起始物理地址、头部和完整物理范围。
+ * 这是规格前置证明边界：Linux/RISC-V setup_vm() 主要先建立 FDT
+ * fixmap 映射，后续 parse_dtb()/early_init_dt_scan() 再验证 header
+ * 并扫描内容；本规格在 EarlyVm.Preset 前置收口这些安全前提。
  */
 object RawDtb: ResourceObject {
     initial_state: State::Base;
@@ -513,6 +516,7 @@ object RawDtb: ResourceObject {
         events {
             /*
              * Preset 读取并验证原始 dtb 头部 magic。
+             * 该验证表达规格要求，不表示 Linux setup_vm() 在此处逐项执行。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
@@ -548,6 +552,7 @@ object RawDtb: ResourceObject {
         events {
             /*
              * Setup 读取 total_size 并确定原始 dtb 的完整物理范围。
+             * 该范围证明用于后续 FDT fixmap 容量检查和映射安全性。
              */
             on Event::Setup -> State::Ready {
                 depends_on {
@@ -583,6 +588,9 @@ object RawDtb: ResourceObject {
 /*
  * FixMap 表示入口前导期可用的固定虚拟地址槽位集合。
  * 当前只建模 FDT 槽位，并记录 RawDtb 是否已被安排到该槽位。
+ * FDT 槽位容量检查是规格侧的显式前置条件；Linux 实现侧对应
+ * FIX_FDT/FIX_FDT_SIZE/MAX_FDT_SIZE 布局和 create_fdt_early_page_table()
+ * 的固定映射窗口。
  */
 object FixMap: PrepareObject {
     initial_state: State::Base;
@@ -598,6 +606,7 @@ object FixMap: PrepareObject {
         events {
             /*
              * Preset 检查 FDT 槽位存在且能容纳 RawDtb，并把 RawDtb 安排到该槽位。
+             * 该检查把 Linux 隐含在 fixmap 布局常量中的容量前提显式化。
              */
             on Event::Preset -> State::Ready {
                 depends_on {
@@ -637,13 +646,13 @@ object FixMap: PrepareObject {
  * 入口前导期只预留该区域，完整 RAM banks 映射由后续完整页表阶段建立。
  */
 object LinearMap: AddressSpaceObject {
-    initial_state: State::Reserved;
+    initial_state: State::Destroyed;
     parent: Vm;
 
     /*
-     * Reserved 表示线性映射虚拟区域已按布局预留，但尚未建立完整物理内存映射。
+     * Destroyed 表示线性映射虚拟区域已按布局预留，但尚未建立完整物理内存映射，也不提供当前地址转换服务。
      */
-    state State::Reserved {
+    state State::Destroyed {
         invariant {
             linear_map_area_reserved(self);
             fixmap_adjacent_to_linear_map(FixMap, LinearMap);
@@ -814,6 +823,9 @@ object TrampolineVm: AddressSpaceObject {
         events {
             /*
              * Enable 切换到跳板页表，完成从物理地址阶段进入虚拟地址阶段的第一次过渡。
+             * Linux/RISC-V 实现中，在写入 trampoline satp 前执行 sfence.vma，
+             * 确保 setup_vm() 刚建立的页表项对新的地址转换可见。
+             * 规格层只保留地址转换同步要求，不把 sfence.vma 展开为独立事件。
              */
             on Event::Enable -> State::Online {
                 depends_on {
@@ -878,6 +890,7 @@ object EarlyVm: AddressSpaceObject {
         events {
             /*
              * Preset 发现并验证原始 dtb，并把 RawDtb 安排到 FDT fixmap 槽位。
+             * 这是规格前置证明边界，强于 Linux setup_vm() 的直接实现顺序。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
@@ -944,12 +957,15 @@ object EarlyVm: AddressSpaceObject {
         invariant {
             kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap);
             fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot);
-            LinearMap.state == State::Reserved;
+            LinearMap.state == State::Destroyed;
         }
 
         events {
             /*
              * Enable 切换到 early_pg_dir，使早期虚拟地址空间进入服务状态。
+             * Linux/RISC-V 实现中，在写入 early/kernel satp 后执行 sfence.vma，
+             * 避免继续使用只覆盖首个 superpage 的 trampoline translations。
+             * 规格层只保留地址转换同步要求，不把 sfence.vma 展开为独立事件。
              */
             on Event::Enable -> State::Online {
                 depends_on {
@@ -1278,20 +1294,20 @@ object EntryPreludePhase: PhaseObject {
                 }
 
                 drives {
-                    RootStream.Event::Preset;
                     InterruptStream.Event::Preset;
-                    EventStream.Event::Preset;
                     KernelImage.Event::Preset;
+                    RootStream.Event::Preset;
                     KernelImage.Event::Setup;
+                    CpuGroup.Event::Preset;
                     InitTask.Event::Preset;
                     InitStack.Event::Preset;
-                    CpuGroup.Event::Preset;
-                    Soc.Event::Preset;
+                    EventStream.Event::Preset;
                     Vm.Event::Preset;
                     Vm.Event::Setup;
-                    InitTask.Event::Enable;
-                    InitStack.Event::Enable;
                     EventStream.Event::Enable;
+                    InitTask.Event::Enable;
+                    InitStack.Event::Setup;
+                    Soc.Event::Preset;
                 }
             }
         }

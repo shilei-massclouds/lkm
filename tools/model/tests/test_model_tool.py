@@ -105,6 +105,116 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertIn("error: invalid AST JSON", stderr.getvalue())
 
+    def test_duplicate_object_event_names_fail_model_stage(self) -> None:
+        source = """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Enable -> State::Ready {
+                        }
+                    }
+                }
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "duplicate-event.spec"
+            ast = Path(tmp) / "duplicate-event.ast.json"
+            model = Path(tmp) / "duplicate-event.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "duplicate object event declaration: A.Event::Enable",
+                stderr.getvalue(),
+            )
+
+    def test_lifecycle_names_outside_controlled_sets_fail_model_stage(self) -> None:
+        source = """
+            object A: T {
+                initial_state: State::Reserved;
+
+                state State::Reserved {
+                    events {
+                        on Event::Activate -> State::Done {
+                        }
+                    }
+                }
+
+                state State::Done {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "bad-lifecycle-name.spec"
+            ast = Path(tmp) / "bad-lifecycle-name.ast.json"
+            model = Path(tmp) / "bad-lifecycle-name.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            errors = stderr.getvalue()
+            self.assertIn("A.initial_state State::Reserved", errors)
+            self.assertIn("A.State::Reserved", errors)
+            self.assertIn("A.Event::Activate", errors)
+            self.assertIn("A.Event::Activate -> State::Done", errors)
+
+    def test_lifecycle_transitions_outside_controlled_table_fail_model_stage(self) -> None:
+        source = """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Enable -> State::Online {
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "bad-lifecycle-transition.spec"
+            ast = Path(tmp) / "bad-lifecycle-transition.ast.json"
+            model = Path(tmp) / "bad-lifecycle-transition.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "invalid lifecycle transition: A.State::Base.Event::Enable -> State::Online",
+                stderr.getvalue(),
+            )
+
     def test_model_tool_does_not_import_pyveri(self) -> None:
         source_root = Path(__file__).resolve().parents[1] / "src" / "model_tool"
 

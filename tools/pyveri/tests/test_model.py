@@ -161,6 +161,110 @@ class ModelBuilderTests(unittest.TestCase):
             )
         )
 
+    def test_rejects_duplicate_object_event_names_across_states(self) -> None:
+        document = parse_text(
+            """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Enable -> State::Ready {
+                        }
+                    }
+                }
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "duplicate object event declaration: A.Event::Enable" in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
+    def test_rejects_lifecycle_names_outside_controlled_sets(self) -> None:
+        document = parse_text(
+            """
+            object A: T {
+                initial_state: State::Reserved;
+
+                state State::Reserved {
+                    events {
+                        on Event::Activate -> State::Done {
+                        }
+                    }
+                }
+
+                state State::Done {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+        messages = [diag.message for diag in result.errors]
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any("A.initial_state State::Reserved" in message for message in messages)
+        )
+        self.assertTrue(
+            any("A.State::Reserved" in message for message in messages)
+        )
+        self.assertTrue(
+            any("A.Event::Activate" in message for message in messages)
+        )
+        self.assertTrue(
+            any("A.Event::Activate -> State::Done" in message for message in messages)
+        )
+
+    def test_rejects_lifecycle_transitions_outside_controlled_table(self) -> None:
+        document = parse_text(
+            """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Enable -> State::Online {
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "invalid lifecycle transition: A.State::Base.Event::Enable -> State::Online"
+                in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
