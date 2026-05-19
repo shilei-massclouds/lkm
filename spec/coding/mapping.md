@@ -62,6 +62,8 @@ Phase 过程的主要职责是按规格中的 `drives` 顺序调用普通对象�
 - 未来可能与 Linux 参考状态做差分的状态点。
 - 规格中 `Ready`、`Online`、`Destroyed` 对后续对象形成依赖的状态点。
 
+第一轮可以先预留 checkpoint 接口，不要求立即输出完整差分数据。最小运行目标仍是通过 SBI early console 打印 `Hello, world!` 并关机。
+
 ## 依赖与后置事实
 
 `depends_on` 应映射为函数前置检查、类型约束、构建期检查或启动断言。

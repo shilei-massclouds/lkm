@@ -39,11 +39,18 @@
 
 - `os/arceos_ex` 镜像 ArceOS 的 OS 侧目录习惯，例如保留 `modules/`、`examples/` 等组织方式。
 - 内核核心组件可新增为 `ax-hal-ex`、`ax-runtime-ex` 等 crate，并在目录上尽量贴近 ArceOS 原有模块层次。
-- `helloworld` 应作为 `os/arceos_ex/examples/helloworld` 下的 Unikernel 应用出现。
-- ArceOS 现有 `examples/` 和 `test-suit/arceos/` 下的 Unikernel 应用应尽量复用。`arceos_ex` 第一轮可以先复用 `helloworld` 应用源码，后续逐步验证更多应用和测试集。
-- `ulib/axstd`、`api/ax-api`、`api/ax-feat` 这类应用接口和特性接口第一轮不主动复制；目标是尽量保持其公开接口不变。
-- 如果现有 `ax-std` / `ax-api` / `ax-feat` 的依赖链固定指向原 `ax-hal`、`ax-runtime`，导致 `arceos_ex` 无法接入 `_ex` runtime，则再引入同接口的 `_ex` facade，而不是修改现有接口语义。
-- 构建和运行应直接接入 tgoskits 现有 `cargo xtask` 工具体系。第一轮可增加专用 `arceos_ex` 路径，让它显式选择 `_ex` 核心组件；长期由 `xtask` 管理不同内核 profile 对顶层 Cargo 依赖映射或生成配置的切换。
+- ArceOS 现有 `examples/` 和 `test-suit/arceos/` 下的 Unikernel 应用应尽量复用，不默认复制到 `os/arceos_ex/examples`。当前仓库中 `helloworld` 已存在于 `os/arceos/examples/helloworld` 和 `test-suit/arceos/std/qemu-smp1/helloworld`。
+- `arceos_ex` 第一轮通过 `ax-std` 正式接入现有 Unikernel 应用，而不是让应用直接依赖 `ax-runtime-ex`。
+- `ulib/axstd`、`api/ax-api`、`api/ax-feat` 这类应用接口和特性接口第一轮不主动复制；目标是让它们的公开接口保持不变，并由构建工具把底层内核实现切换到 `_ex` 组件。
+- 如果现有 `ax-std` / `ax-api` / `ax-feat` 的依赖链固定指向原 `ax-hal`、`ax-runtime`，导致 `arceos_ex` 无法接入 `_ex` runtime，则先由 `xtask` 管理顶层 Cargo 依赖映射或生成配置；只有在该方式不足时，才引入同接口的 `_ex` facade。
+- 构建和运行应直接接入 tgoskits 现有 `cargo xtask` 工具体系。第一轮新增 `cargo xtask arceos-ex ...` 子命令，复用 ArceOS 的测试选择机制运行 `helloworld`；长期由 `xtask` 管理不同内核 profile 对顶层 Cargo 依赖映射或生成配置的切换。
+
+第一轮建议新增的核心实现 crate 包括：
+
+- `ax-hal-ex`
+- `ax-runtime-ex`
+- `ax-plat-riscv64-generic-ex`
+- 必要时增加最小支撑 crate，但不得复制 `ax-std`、`ax-api`、`ax-feat` 的公开接口层，除非 `xtask` 依赖映射方案无法满足接入。
 
 ## 与模型不一致时的处理
 
