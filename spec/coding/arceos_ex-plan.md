@@ -49,9 +49,17 @@ cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
 
 ## Cargo/xtask 策略
 
-短期优先使用 `xtask` 驱动的 Cargo patch 或生成配置实验，让现有 `ax-std` / `ax-api` / `ax-feat` 依赖链在 `arceos-ex` 构建中指向 `_ex` 核心组件。
+短期采用 `xtask` 驱动的 overlay workspace 方案，让现有 `ax-std` / `ax-api` / `ax-feat` 依赖链在 `arceos-ex` 构建中指向 `_ex` 核心组件。
 
-若 patch 实验无法稳定表达依赖切换，长期可由 `xtask` 针对不同内核 profile 生成或替换顶层 `Cargo.toml` 依赖映射。该过程必须由工具管理，不要求开发者手工来回修改顶层 `Cargo.toml`。
+`cargo xtask arceos-ex ...` 先在 `tmp/axbuild/arceos-ex-workspace/` 下生成独立的 `Cargo.toml`，并通过符号链接映射原仓库的 `os/`、`components/`、`drivers/`、`platform/`、`scripts/`、`test-suit/` 等源码目录。后续内部 Cargo 调用显式使用该 overlay manifest。顶层 `Cargo.toml` 不应被手工修改或替换。
+
+已验证限制：
+
+- Cargo 的 `--manifest-path` 目标文件名必须是 `Cargo.toml`。
+- workspace member 必须位于 workspace root 之下，不能直接从临时 workspace 引用外部成员目录。
+- 通过 overlay workspace 内部符号链接映射源码目录后，Cargo 可以把这些成员视为位于 overlay workspace 内部。
+
+若未来 overlay workspace 无法稳定表达依赖切换，再讨论由 `xtask` 管理正式的多 workspace manifest 或受控顶层 manifest 切换。该过程必须由工具管理，不要求开发者手工来回修改顶层 `Cargo.toml`。
 
 ## 第一轮最小对象覆盖
 
@@ -134,4 +142,4 @@ checkpoint 命名应沿用模型对象和状态名称，例如：
 - `ax-hal-ex` 与现有 `ax-hal` 的第一轮 public API 对照表。
 - `ax-runtime-ex` 与现有 `ax-runtime` 的第一轮 public API 对照表。
 - `xtask arceos-ex` 的具体参数和快照格式。
-- Cargo patch 实验是否足以替换 `ax-std` 下游核心依赖。
+- overlay workspace 生成内容的最小成员集合和依赖替换表。

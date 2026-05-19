@@ -43,8 +43,8 @@
 - ArceOS 现有 `examples/` 和 `test-suit/arceos/` 下的 Unikernel 应用应尽量复用，不默认复制到 `os/arceos_ex/examples`。当前仓库中 `helloworld` 已存在于 `os/arceos/examples/helloworld` 和 `test-suit/arceos/std/qemu-smp1/helloworld`。
 - `arceos_ex` 第一轮通过 `ax-std` 正式接入现有 Unikernel 应用，而不是让应用直接依赖 `ax-runtime-ex`。
 - `ulib/axstd`、`api/ax-api`、`api/ax-feat` 这类应用接口和特性接口第一轮不主动复制；目标是让它们的公开接口保持不变，并由构建工具把底层内核实现切换到 `_ex` 组件。
-- 如果现有 `ax-std` / `ax-api` / `ax-feat` 的依赖链固定指向原 `ax-hal`、`ax-runtime`，导致 `arceos_ex` 无法接入 `_ex` runtime，则先由 `xtask` 管理顶层 Cargo 依赖映射或生成配置；只有在该方式不足时，才引入同接口的 `_ex` facade。
-- 构建和运行应直接接入 tgoskits 现有 `cargo xtask` 工具体系。第一轮新增 `cargo xtask arceos-ex ...` 子命令，复用 ArceOS 的测试选择机制运行 `helloworld`；长期由 `xtask` 管理不同内核 profile 对顶层 Cargo 依赖映射或生成配置的切换。
+- 如果现有 `ax-std` / `ax-api` / `ax-feat` 的依赖链固定指向原 `ax-hal`、`ax-runtime`，导致 `arceos_ex` 无法接入 `_ex` runtime，则先由 `xtask` 生成 overlay workspace 并在其中替换 Cargo 依赖映射；只有在该方式不足时，才引入同接口的 `_ex` facade。
+- 构建和运行应直接接入 tgoskits 现有 `cargo xtask` 工具体系。第一轮新增 `cargo xtask arceos-ex ...` 子命令，复用 ArceOS 的测试选择机制运行 `helloworld`；长期由 `xtask` 管理不同内核 profile 的 overlay workspace 或正式多 workspace manifest。
 
 第一轮建议新增的核心实现 crate 包括：
 

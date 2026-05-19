@@ -61,7 +61,7 @@
 - 需要新增可复用组件时，直接放入 `tgoskits/components` 的合适层级，并使用 `_ex` 后缀区分现有组件。
 - 新 RISC-V64 generic 平台实现不放在 `os/arceos_ex` 下；按 tgoskits 现有组件布局，优先放在 `components/axplat_crates/platforms/` 下，并使用 `_ex` 后缀避免与现有平台 crate 冲突。
 - 第一轮应直接接入 tgoskits 的构建/运行工具链，而不是长期依赖临时脚本。
-- `cargo xtask` 负责管理 `arceos_ex` 构建所需的顶层 Cargo 依赖映射或生成配置；不要求开发者手工来回修改顶层 `Cargo.toml`。
+- `cargo xtask` 负责管理 `arceos_ex` 构建所需的 overlay workspace 和 Cargo 依赖映射；不要求开发者手工来回修改顶层 `Cargo.toml`。
 - 第一轮应新增 `cargo xtask arceos-ex ...` 子命令，并复用 ArceOS 的测试发现、构建和运行机制来选择 Unikernel 应用；后续可逐步扩展到全量 ArceOS 应用测试。
 
 ## 当前文件
