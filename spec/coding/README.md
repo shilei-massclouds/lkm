@@ -70,3 +70,4 @@
 - `rust.md`：Rust 语言和安全边界相关编码约束。
 - `arceos.md`：参考 ArceOS 时的取舍原则和映射约束。
 - `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的映射规则。
+- `arceos_ex-plan.md`：`arceos_ex` 第一轮实现任务清单。
