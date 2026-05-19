@@ -64,6 +64,12 @@ Phase 过程的主要职责是按规格中的 `drives` 顺序调用普通对象�
 
 第一轮可以先预留 checkpoint 接口，不要求立即输出完整差分数据。最小运行目标仍是通过 SBI early console 打印 `Hello, world!` 并关机。
 
+checkpoint 在代码中应实现为 hook，而不是普通日志调用。默认 hook 为空实现；具体工程可以通过编译或链接选项插入不同处理机制，例如 SBI 单字符输出、内存 trace buffer、QEMU 调试出口或未来的状态差分采集器。hook 不改变对象状态，不参与事件推进，也不能成为规格依赖。
+
+checkpoint trace 是独立观测路径，不属于 `EarlyCon` 或正式 `Console`。在入口前导期最早阶段，允许使用极小的 SBI 字符输出后端，只输出稳定 checkpoint id 对应的单个字符。这样可以避免字符串地址、缓冲区地址、allocator、FixMap、线性映射或 console 初始化状态对 trace 的影响。完整名称和语义应由静态映射表维护，例如 `EarlyVm.Ready -> 'D'`；字符仅用于早期烟雾测试和定位。
+
+如果某个 checkpoint 位于页表切换前后，hook 实现必须保证自身代码地址在当前地址空间可执行，且不得读取尚未映射的数据。进入 `EarlyVm` 或更晚阶段后，可以切换到更丰富的 trace 后端，但仍应保持与 early console/console 路径隔离。
+
 ## 依赖与后置事实
 
 `depends_on` 应映射为函数前置检查、类型约束、构建期检查或启动断言。

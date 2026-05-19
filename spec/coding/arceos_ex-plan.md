@@ -128,7 +128,9 @@ cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
 
 ## checkpoint
 
-第一轮预留 checkpoint 接口，但不要求实现完整状态差分输出。
+第一轮预留 checkpoint hook 接口，但不要求实现完整状态差分输出。hook 默认为空实现，可通过编译/链接选项接入具体 trace 后端。
+
+checkpoint trace 独立于 `EarlyCon` 和正式 `Console`。当前最小后端可以使用 RISC-V64 SBI legacy putchar 输出单个字符，用于最早期启动定位；该路径不得依赖 allocator、锁、字符串地址、FixMap 或线性映射状态。
 
 checkpoint 命名应沿用模型对象和状态名称，例如：
 
