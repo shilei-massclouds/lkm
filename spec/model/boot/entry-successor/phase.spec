@@ -573,9 +573,9 @@ object EntrySuccessorPhase: PhaseObject {
                     EntryPreludePhase.Event::Cleanup;
                     InitStack.Event::Enable;
                     CpuIdMap.Event::Preset;
+                    InterruptStream.Event::Setup;
                     BootCPU.Event::Setup;
                     BootCPU.Event::Enable;
-                    InterruptStream.Event::Setup;
                     PrintkBuffer.Event::Preset;
                     EarlyDtb.Event::Setup;
                     InitMM.Event::Setup;
