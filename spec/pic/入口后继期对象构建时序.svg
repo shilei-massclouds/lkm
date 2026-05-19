@@ -41,7 +41,7 @@
   <line x1="153" y1="224" x2="153" y2="2518" class="timeline"/>
 
   <rect x="290" y="118" width="870" height="50" rx="10" class="stage"/>
-  <text x="318" y="143" class="boundary">起点边界：start_kernel() 入口，InitStack.Ready，InterruptStream.Prepared，BootCPU.Base(possible)</text>
+  <text x="318" y="143" class="boundary">起点边界：start_kernel() 入口，InitStack.Ready，InterruptStream.Prepared，BootCPU.Prepared(present)</text>
 
   <g transform="translate(0 0)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">1</text>
