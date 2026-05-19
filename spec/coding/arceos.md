@@ -50,7 +50,7 @@
 
 - `ax-hal-ex`
 - `ax-runtime-ex`
-- `ax-plat-riscv64-generic-ex`
+- `ax-plat-riscv64-generic`
 - 必要时增加最小支撑 crate，但不得复制 `ax-std`、`ax-api`、`ax-feat` 的公开接口层，除非 `xtask` 依赖映射方案无法满足接入。
 
 ## 与模型不一致时的处理

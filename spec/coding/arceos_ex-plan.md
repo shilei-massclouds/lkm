@@ -43,7 +43,7 @@ cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
 
 - `os/arceos_ex/modules/axhal`，包名 `ax-hal-ex`
 - `os/arceos_ex/modules/axruntime`，包名 `ax-runtime-ex`
-- `components/axplat_crates/platforms/axplat-riscv64-generic-ex`
+- `components/axplat_crates/platforms/axplat-riscv64-generic`，包名 `ax-plat-riscv64-generic`
 
 若需要额外支撑 crate，应优先放在合适的 `components` 层级，并使用 `_ex` 后缀。不得修改现有 `os/arceos` 和已有 `components` crate 的行为。
 
@@ -95,7 +95,7 @@ cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
 
 ## RISC-V64 generic 平台任务
 
-`axplat-riscv64-generic-ex` 应以 SBI/FDT 为主要事实来源。
+`ax-plat-riscv64-generic` 应以 SBI/FDT 为主要事实来源。
 
 第一轮必须解析或建立：
 
