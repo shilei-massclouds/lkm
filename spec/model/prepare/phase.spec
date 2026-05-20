@@ -90,11 +90,12 @@ object OpenSbiFirmware: PrepareObject {
         invariant {
             SbiSpec.state == State::Online;
             BootArgs.state == State::Online;
-            PhysicalMemory.state == State::Online;
             ordered_booting_enabled();
             primary_hart_only_at_kernel_entry();
             primary_hart_sie_clear_at_kernel_entry();
             firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa);
+            firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
+            firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
         }
     }
 }
@@ -109,6 +110,8 @@ object Lds: PrepareObject {
 
     attrs {
         global_pointer: SymbolAddr;
+        text_start: SymbolAddr;
+        elf_entry: SymbolAddr;
         bss_start: SymbolAddr;
         bss_end: SymbolAddr;
         init_stack_start: SymbolAddr;
@@ -126,6 +129,8 @@ object Lds: PrepareObject {
             attrs_accessible(self);
             global_pointer != 0;
             kernel_start != 0;
+            text_start == kernel_start;
+            elf_entry == kernel_start;
             kernel_end > kernel_start;
             bss_start != 0;
             bss_end > bss_start;
@@ -140,6 +145,8 @@ object Lds: PrepareObject {
     reference linux_6_12_37 {
         global_pointer = symbol("__global_pointer$");
         kernel_start = symbol("_start");
+        text_start = symbol("_start");
+        elf_entry = symbol("_start");
         kernel_end = symbol("_end");
         bss_start = symbol("__bss_start");
         bss_end = symbol("__bss_stop");
@@ -239,10 +246,10 @@ object Config: PrepareObject {
 
 /*
  * PhysicalMemory 表示平台提供的物理 RAM 和设备 I/O 地址布局。
- * 它是只读准备期输入，入口前导期只能读取和验证其范围约束。
+ * 它由入口后继期 EarlyDtb.Preset 从 RawDtb 的 /memory 描述中建立。
  */
 object PhysicalMemory: PrepareObject {
-    initial_state: State::Online;
+    initial_state: State::Base;
     access: Access::ReadOnly;
     source: fdt::memory;
 
@@ -252,7 +259,52 @@ object PhysicalMemory: PrepareObject {
     }
 
     /*
-     * Online 表示物理资源布局在推导起点已经可读取。
+     * Base 表示物理内存事实尚未从 RawDtb 的 /memory 描述中抽取。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 由 EarlyDtb.Preset 触发，解析 /memory 并形成平台物理内存布局事实。
+             */
+            on Event::Preset -> State::Ready {
+                depends_on {
+                    RawDtb.state == State::Ready;
+                }
+
+                ensures {
+                    physical_memory_ranges_ready(PhysicalMemory, RawDtb);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 FDT /memory 已解析为物理资源布局事实，等待发布为后续对象可依赖输入。
+     */
+    state State::Ready {
+        invariant {
+            attrs_accessible(self);
+            readonly(self);
+            valid_phys_range_set(ram);
+            valid_phys_range_set(iomap);
+            disjoint(ram, iomap);
+            physical_memory_ranges_ready(PhysicalMemory, RawDtb);
+        }
+
+        events {
+            /*
+             * Enable 将已解析的物理内存布局发布为后续 MemBlock 可依赖的事实。
+             */
+            on Event::Enable -> State::Online {
+                ensures {
+                    physical_memory_ranges_published(PhysicalMemory);
+                }
+            }
+        }
+    }
+
+    /*
+     * Online 表示物理资源布局已经从 RawDtb 的 FDT /memory 描述中抽取并可读取。
      * 本状态要求 RAM 和 I/O 范围结构良好、非空且互不重叠。
      */
     state State::Online {
@@ -262,6 +314,7 @@ object PhysicalMemory: PrepareObject {
             valid_phys_range_set(ram);
             valid_phys_range_set(iomap);
             disjoint(ram, iomap);
+            physical_memory_ranges_published(PhysicalMemory);
         }
     }
 }
@@ -271,11 +324,55 @@ object PhysicalMemory: PrepareObject {
  * 当前只建模启动参数中的 hart id 是否属于该集合，完整 CPU 拓扑留给后续阶段。
  */
 object PlatformCpuInfo: PrepareObject {
-    initial_state: State::Online;
+    initial_state: State::Base;
     source: fdt::cpus;
+
+    /*
+     * Base 表示平台 CPU 事实尚未从 RawDtb 的 /cpus 描述中抽取。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 由 EarlyDtb.Preset 触发，解析 /cpus 并确认启动 hart 属于平台有效集合。
+             */
+            on Event::Preset -> State::Ready {
+                depends_on {
+                    BootArgs.state == State::Online;
+                    RawDtb.state == State::Ready;
+                }
+
+                ensures {
+                    platform_cpu_info_ready(PlatformCpuInfo, RawDtb);
+                    platform_hart_id_valid(BootArgs.boot_hartid);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 FDT /cpus 已解析为平台 CPU 事实，且启动 hartid 已通过该集合验证。
+     */
+    state State::Ready {
+        invariant {
+            platform_cpu_info_ready(PlatformCpuInfo, RawDtb);
+            platform_hart_id_valid(BootArgs.boot_hartid);
+        }
+
+        events {
+            /*
+             * Enable 将平台 CPU 事实发布为 BootCPU 后续推进可依赖的输入。
+             */
+            on Event::Enable -> State::Online {
+                ensures {
+                    platform_cpu_info_published(PlatformCpuInfo);
+                }
+            }
+        }
+    }
 
     state State::Online {
         invariant {
+            platform_cpu_info_published(PlatformCpuInfo);
             platform_hart_id_valid(BootArgs.boot_hartid);
         }
     }
@@ -283,7 +380,8 @@ object PlatformCpuInfo: PrepareObject {
 
 /*
  * PreparePhase 表示准备期阶段对象。
- * 当前模型不展开准备期内部过程，只验证入口前导期依赖的准备期输入对象均已在线且满足各自不变量。
+ * 当前模型不展开准备期内部过程，只验证入口前导期依赖的启动 ABI、固件、链接布局、
+ * 静态对象和配置输入均已在线且满足各自不变量。
  */
 object PreparePhase: PhaseObject {
     initial_state: State::Base;
@@ -305,8 +403,6 @@ object PreparePhase: PhaseObject {
                     Lds.state == State::Online;
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
-                    PhysicalMemory.state == State::Online;
-                    PlatformCpuInfo.state == State::Online;
                 }
             }
         }
@@ -323,8 +419,6 @@ object PreparePhase: PhaseObject {
             Lds.state == State::Online;
             StaticObjects.state == State::Online;
             Config.state == State::Online;
-            PhysicalMemory.state == State::Online;
-            PlatformCpuInfo.state == State::Online;
         }
 
         events {
@@ -348,8 +442,6 @@ object PreparePhase: PhaseObject {
             Lds.state == State::Online;
             StaticObjects.state == State::Online;
             Config.state == State::Online;
-            PhysicalMemory.state == State::Online;
-            PlatformCpuInfo.state == State::Online;
         }
     }
 }

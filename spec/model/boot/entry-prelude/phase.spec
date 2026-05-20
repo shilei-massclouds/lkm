@@ -521,7 +521,8 @@ object RawDtb: ResourceObject {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     BootArgs.state == State::Online;
-                    PhysicalMemory.state == State::Online;
+                    OpenSbiFirmware.state == State::Online;
+                    firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa);
                 }
 
                 may_change {
@@ -532,6 +533,7 @@ object RawDtb: ResourceObject {
                 ensures {
                     header_range.start == BootArgs.dtb_pa;
                     header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>();
+                    firmware_dtb_header_accessible(header_range);
                     valid_dtb_magic(header);
                 }
             }
@@ -545,7 +547,7 @@ object RawDtb: ResourceObject {
         invariant {
             header_range.start == BootArgs.dtb_pa;
             header_range.end == BootArgs.dtb_pa + size_of::<DtbHeader>();
-            contains(PhysicalMemory.ram, header_range);
+            firmware_dtb_header_accessible(header_range);
             valid_dtb_magic(header);
         }
 
@@ -556,7 +558,8 @@ object RawDtb: ResourceObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    PhysicalMemory.state == State::Online;
+                    OpenSbiFirmware.state == State::Online;
+                    firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
                 }
 
                 may_change {
@@ -567,6 +570,7 @@ object RawDtb: ResourceObject {
                     valid_dtb_header(header);
                     range.start == BootArgs.dtb_pa;
                     range.end == BootArgs.dtb_pa + header.total_size;
+                    firmware_dtb_range_accessible(range);
                 }
             }
         }
@@ -580,7 +584,7 @@ object RawDtb: ResourceObject {
             valid_dtb_header(header);
             range.start == BootArgs.dtb_pa;
             range.end == BootArgs.dtb_pa + header.total_size;
-            contains(PhysicalMemory.ram, range);
+            firmware_dtb_range_accessible(range);
         }
     }
 }
@@ -895,7 +899,6 @@ object EarlyVm: AddressSpaceObject {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     Config.state == State::Online;
-                    PhysicalMemory.state == State::Online;
                     RawDtb.state == State::Base;
                     FixMap.state == State::Base;
                 }
@@ -1102,13 +1105,9 @@ object BootCPU: CPUObject {
     }
 
     /*
-     * Base 表示基于准备期 FDT，启动 CPU 已作为 possible CPU 被识别。
+     * Base 表示启动 CPU 对象尚未记录入口参数中的物理 hartid。
      */
     state State::Base {
-        invariant {
-            platform_hart_id_valid(BootArgs.boot_hartid);
-        }
-
         events {
             /*
              * Preset 记录 BootCPU.hartid 来自启动 ABI。
@@ -1116,7 +1115,6 @@ object BootCPU: CPUObject {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     BootArgs.state == State::Online;
-                    PlatformCpuInfo.state == State::Online;
                 }
 
                 ensures {
@@ -1139,7 +1137,12 @@ object BootCPU: CPUObject {
              * Setup 对应 boot_cpu_init() 中 present/active 边界。
              */
             on Event::Setup -> State::Ready {
+                depends_on {
+                    PlatformCpuInfo.state == State::Online;
+                }
+
                 ensures {
+                    platform_hart_id_valid(BootArgs.boot_hartid);
                     boot_cpu_present(BootCPU);
                     boot_cpu_active(BootCPU);
                 }
@@ -1152,6 +1155,8 @@ object BootCPU: CPUObject {
      */
     state State::Ready {
         invariant {
+            boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            platform_hart_id_valid(BootArgs.boot_hartid);
             boot_cpu_present(BootCPU);
             boot_cpu_active(BootCPU);
         }
@@ -1173,6 +1178,10 @@ object BootCPU: CPUObject {
      */
     state State::Online {
         invariant {
+            boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            platform_hart_id_valid(BootArgs.boot_hartid);
+            boot_cpu_present(BootCPU);
+            boot_cpu_active(BootCPU);
             boot_cpu_online(BootCPU);
         }
     }
@@ -1289,8 +1298,6 @@ object EntryPreludePhase: PhaseObject {
                     Lds.state == State::Online;
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
-                    PhysicalMemory.state == State::Online;
-                    PlatformCpuInfo.state == State::Online;
                 }
 
                 drives {

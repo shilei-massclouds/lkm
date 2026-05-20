@@ -65,11 +65,11 @@ object MemBlock: MemoryObject {
     state State::Base {
         events {
             /*
-             * Preset 由 EarlyDtb.setup() 触发，收集 FDT 给出的候选 RAM 区段和粗略边界。
+             * Preset 由 EarlyDtb.Setup 触发，基于已发布的 PhysicalMemory 收集候选 RAM 区段和粗略边界。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    EarlyDtb.state == State::Base;
+                    EarlyDtb.state == State::Prepared;
                     PhysicalMemory.state == State::Online;
                     RawDtb.state == State::Ready;
                 }
@@ -159,17 +159,51 @@ object EarlyDtb: ResourceObject {
     initial_state: State::Base;
 
     /*
-     * Base 表示尚未把 RawDtb 解析为本子阶段需要的早期事实。
+     * Base 表示尚未把 RawDtb 解析为本子阶段需要的基础平台事实。
      */
     state State::Base {
         events {
             /*
-             * Setup 对应 parse_dtb()，提取 kernel command line、物理内存范围和早期平台事实。
+             * Preset 提取最小平台事实：/cpus 发布 PlatformCpuInfo，/memory 发布 PhysicalMemory。
              */
-            on Event::Setup -> State::Ready {
+            on Event::Preset -> State::Prepared {
                 depends_on {
                     RawDtb.state == State::Ready;
                     EarlyVm.state == State::Online;
+                }
+
+                drives {
+                    PlatformCpuInfo.Event::Preset;
+                    PlatformCpuInfo.Event::Enable;
+                    PhysicalMemory.Event::Preset;
+                    PhysicalMemory.Event::Enable;
+                }
+
+                ensures {
+                    early_dtb_platform_facts_ready(EarlyDtb, RawDtb);
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示基础平台事实已发布，后续对象可依赖 PlatformCpuInfo 与 PhysicalMemory。
+     */
+    state State::Prepared {
+        invariant {
+            early_dtb_platform_facts_ready(EarlyDtb, RawDtb);
+            PlatformCpuInfo.state == State::Online;
+            PhysicalMemory.state == State::Online;
+        }
+
+        events {
+            /*
+             * Setup 对应 parse_dtb() 的后续用途，提取 kernel command line 并触发 MemBlock 候选区段建立。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    PhysicalMemory.state == State::Online;
+                    PlatformCpuInfo.state == State::Online;
                 }
 
                 drives {
@@ -190,6 +224,8 @@ object EarlyDtb: ResourceObject {
     state State::Ready {
         invariant {
             early_dtb_parse_ready(EarlyDtb, RawDtb);
+            PlatformCpuInfo.state == State::Online;
+            PhysicalMemory.state == State::Online;
             MemBlock.state == State::Prepared;
             KernelCmdline.state == State::Ready;
         }
@@ -572,6 +608,7 @@ object EntrySuccessorPhase: PhaseObject {
                 drives {
                     EntryPreludePhase.Event::Cleanup;
                     InitStack.Event::Enable;
+                    EarlyDtb.Event::Preset;
                     CpuIdMap.Event::Preset;
                     InterruptStream.Event::Setup;
                     BootCPU.Event::Setup;

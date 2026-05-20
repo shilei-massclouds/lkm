@@ -14,6 +14,7 @@
 - `a0` 对应 boot hart id，进入模型中的 `BootArgs.boot_hartid`。
 - `a1` 对应 DTB 物理地址，进入模型中的 `BootArgs.dtb_pa`。
 - 入口代码不得跳过 `BootArgs` 抽象直接让后续对象长期依赖裸寄存器值。
+- 链接脚本必须显式提供 `__global_pointer$`，并保证 `_start` 同时是内核 text 起点和 ELF entry。
 
 ## CSR 与屏障
 
@@ -32,8 +33,9 @@
 ## FDT 与物理内存
 
 - `RawDtb` 的物理地址、头部范围和完整范围应在进入后续解析前被记录并检查。
-- `PhysicalMemory` 和 `PlatformCpuInfo` 这类准备期事实可以来源于 FDT/platform 描述，但代码中应区分“描述来源”和“使用该事实的对象”。
-- `EarlyDtb` 只表示入口后继期短暂存在的早期解析服务，不能被实现为后续正式 DeviceTree 对象的无边界延续。
+- OpenSBI 固件提供 RawDtb 已完整加载到 S-mode 可访问内存中的交付保证；实现仍应在 `RawDtb` 推进过程中逐步确认 header、magic、totalsize 和完整范围。
+- `PhysicalMemory` 和 `PlatformCpuInfo` 不是准备期事实。它们来自 `RawDtb`，由入口后继期 `EarlyDtb.Preset` 解析 FDT `/memory` 与 `/cpus` 后建立并发布。
+- `EarlyDtb` 只表示入口后继期短暂存在的早期解析服务，不能被实现为后续正式 DeviceTree 对象的无边界延续。实现中应区分 `EarlyDtb.Preset` 的基础平台事实抽取和 `EarlyDtb.Setup` 的命令行、MemBlock 候选区段等后续解析用途。
 - `PhysicalMemory`、`PlatformCpuInfo`、`MemBlock` 第一轮应优先由实际 FDT 解析建立。若解析能力不足，应停止并报告缺口，不得静默回退到 QEMU virt 固定内存范围。
 
 ## SBI
