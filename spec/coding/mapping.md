@@ -21,6 +21,21 @@ Phase 对象在源码中不强制对应 Rust `struct`。默认实现方式是函
 
 Phase 过程的主要职责是按规格中的 `drives` 顺序调用普通对象的生命周期事件。Phase 过程本身应保留可观测的起止边界，但不应为了满足形式上的对象对应而引入无实际职责的 struct。
 
+### ArceOS/Unikernel 引导边界
+
+映射到 `arceos_ex` 时，`ax-hal-ex` 只应承载最低层入口前导路径。它负责从 `_start` 开始建立进入 Rust 代码所需的最小执行条件，并推进到
+`EntryPreludePhase.Ready`。
+
+`EntryPreludePhase.Ready` 之后应交由 `ax-runtime-ex` 接管。`EntrySuccessorPhase` 是
+`ax-runtime-ex` 引导过程的第一部分，而不是 `ax-hal-ex` 的长期编排职责。`ax-runtime-ex`
+可以调用 `ax-hal-ex`、平台 crate 和其它组件提供的对象事件函数，但阶段编排边界应保留在 runtime 侧。
+
+`ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 开始到 `app_main` 为止的大部分内核引导过程。后续新增的内核初始化阶段、服务初始化或运行形态切换，应默认插入在
+`EntrySuccessorPhase` 与 `app_main` 之间，并继续保留模型 checkpoint。
+
+在 ArceOS Unikernel 形态下，`app_main` 表示当前内核形态的引领入口，而不等同于传统操作系统的普通用户态进程入口。不同 Unikernel 应用、测试应用或未来的宏内核引导应用，都可以作为该入口的不同 payload。未来若增加宏内核形态，相关 app 可以在
+`app_main` 中完成切换到用户态并启动首个用户态应用的最后步骤。
+
 ## 普通对象
 
 除 Phase 对象外，模型对象原则上应对应 Rust `struct`、静态单例或启动上下文中的结构化字段。

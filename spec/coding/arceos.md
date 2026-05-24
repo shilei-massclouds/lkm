@@ -36,6 +36,14 @@
 
 第一轮以 `helloworld` Unikernel 为目标，但该最小应用仍必须支撑 `EntryPreludePhase` 和 `EntrySuccessorPhase` 两个子阶段。实现边界达到 `EntrySuccessorPhase.Ready` 后，才能认为第一轮启动模型闭环完成。
 
+在 `arceos_ex` 中，`ax-hal-ex` 与 `ax-runtime-ex` 的引导责任应按阶段边界划分。`ax-hal-ex` 负责 `_start` 到
+`EntryPreludePhase.Ready` 的最低层入口前导路径；`EntryPreludePhase.Ready` 之后由 `ax-runtime-ex` 接管。
+`EntrySuccessorPhase` 是 `ax-runtime-ex` 引导过程的第一部分，之后逐步增加的内核初始化过程也属于
+`ax-runtime-ex` 主引导链，直到调用当前 Unikernel payload 的 `app_main`。
+
+这里的 Unikernel app 是内核形态的引领入口。`helloworld` 是默认最小 payload，许多测试也可以作为 payload 运行。
+未来若增加宏内核形态，可以通过一个专门 payload 在 `app_main` 阶段完成用户态切换并启动首个用户态应用。
+
 建议的组织原则：
 
 - `os/arceos_ex` 镜像 ArceOS 的 OS 侧目录习惯，例如保留 `modules/`、`examples/` 等组织方式。

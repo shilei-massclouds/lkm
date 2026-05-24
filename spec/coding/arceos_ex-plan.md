@@ -11,6 +11,10 @@
 
 最小可见结果是通过 SBI early console 打印 `Hello, world!`，随后关机。
 
+实现分层上，`ax-hal-ex` 只负责入口前导期的最低层启动路径，并推进到 `EntryPreludePhase.Ready`。
+之后应进入 `ax-runtime-ex` 的 bootstrap 路径。`EntrySuccessorPhase` 是 `ax-runtime-ex` 引导过程的第一部分，
+后续逐步增加的 runtime/kernel 初始化过程应位于 `EntrySuccessorPhase` 与 `app_main` 之间。
+
 ## 入口命令
 
 新增 `cargo xtask arceos-ex ...` 子命令。
@@ -36,6 +40,10 @@ cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
 - `os/arceos/examples/helloworld`
 
 应用通过 `ax-std` 正式接入，而不是直接依赖 `ax-runtime-ex`。
+
+在 ArceOS Unikernel 形态下，应用是当前内核形态的引领入口。默认应用为 `helloworld`；测试用例也可以按同一机制作为
+Unikernel app 选择和运行。未来可以增加一个支持宏内核形态的 app，由它在 runtime 初始化完成后切换到用户态并启动首个用户态应用。
+`cargo xtask arceos-ex ...` 应长期承担选择这些 app/test payload 的职责。
 
 ## 新增核心 crate
 
