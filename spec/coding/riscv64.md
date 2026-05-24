@@ -44,6 +44,13 @@
 - `EarlyDtb` 只表示入口后继期短暂存在的早期解析服务，不能被实现为后续正式 DeviceTree 对象的无边界延续。实现中应区分 `EarlyDtb.Preset` 的基础平台事实抽取和 `EarlyDtb.Setup` 的命令行、MemBlock 候选区段等后续解析用途。
 - `PhysicalMemory`、`PlatformCpuInfo`、`MemBlock` 第一轮应优先由实际 FDT 解析建立。若解析能力不足，应停止并报告缺口，不得静默回退到 QEMU virt 固定内存范围。
 
+## 多核与内存模型
+
+- 当前 RISC-V64 generic 平台按 UMA 架构建模，所有 CPU/hart 共享同一物理内存地址空间。
+- 将来扩展多核时，应基于 SMP 架构推进 `CPUGroup`、secondary CPU、IPI、timer 和调度相关对象；不得引入 NUMA
+  节点、本地内存距离或 per-node allocator 语义，除非模型规格先显式扩展。
+- FDT 中解析出的多个 hart 只表示 SMP CPU 拓扑事实，不改变 `PhysicalMemory` 的 UMA 语义。
+
 ## SBI
 
 - SBI 能力探测应集中形成 `SBI` 能力视图。

@@ -116,12 +116,14 @@ cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
 - bootargs：来自 FDT `/chosen`
 - reserved-memory：仅处理当前启动闭环必要信息
 - SBI 能力视图：至少覆盖 early console、timer、HSM/shutdown 相关能力边界
+- 多 hart 平台按 UMA/SMP 处理：`/cpus` 描述 SMP CPU 拓扑，`/memory` 描述共享物理内存地址空间；第一轮不引入 NUMA 语义
 
 第一轮不要求支持：
 
 - initrd
 - memory limit
 - 多个 memory bank 的完整策略
+- NUMA 节点、内存距离和 per-node allocator
 - 非 QEMU 的板级差异处理
 
 若 FDT 解析能力不足，应停止并报告缺口，不得静默回退到 QEMU virt 固定内存范围。
