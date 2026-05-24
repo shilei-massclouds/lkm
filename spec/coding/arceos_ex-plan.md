@@ -33,13 +33,16 @@ cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
 
 优先目标：
 
-- `test-suit/arceos/std/qemu-smp1/helloworld`
+- `os/arceos/examples/helloworld`
 
 可作为参考的现有示例：
 
-- `os/arceos/examples/helloworld`
+- `test-suit/arceos/std/qemu-smp1/helloworld`
 
 应用通过 `ax-std` 正式接入，而不是直接依赖 `ax-runtime-ex`。
+第一轮只参考并接入 `ax-std` 路径，不参考、不适配也不调试 ArceOS C API 和 Rust std/Hermit API 路径。
+因此 `helloworld` 的 `println!` 应进入 `ax-std` 统一输出路径，并最终由内核输出机制处理；当前阶段不得把 POSIX fd、
+Hermit syscall 或 C API 层作为 `helloworld` 运行的前置条件。
 
 在 ArceOS Unikernel 形态下，应用是当前内核形态的引领入口。默认应用为 `helloworld`；测试用例也可以按同一机制作为
 Unikernel app 选择和运行。未来可以增加一个支持宏内核形态的 app，由它在 runtime 初始化完成后切换到用户态并启动首个用户态应用。
@@ -122,7 +125,8 @@ Unikernel app 选择和运行。未来可以增加一个支持宏内核形态的
 - CPU 描述：来自 FDT `/cpus`
 - 物理内存：来自 FDT `/memory`
 - bootargs：来自 FDT `/chosen`
-- reserved-memory：仅处理当前启动闭环必要信息
+- reserved-memory：必须至少处理 FDT header `/memreserve/` 与 `/reserved-memory` 中当前启动闭环必要的保留范围，
+  供 `MemBlock.setup()` 在 allocator 可用前排除；不得把 OpenSBI 或 QEMU virt 固定物理范围作为最终硬编码规则
 - SBI 能力视图：至少覆盖 early console、timer、HSM/shutdown 相关能力边界
 - 多 hart 平台按 UMA/SMP 处理：`/cpus` 描述 SMP CPU 拓扑，`/memory` 描述共享物理内存地址空间；第一轮不引入 NUMA 语义
 

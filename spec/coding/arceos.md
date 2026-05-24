@@ -50,6 +50,7 @@
 - 内核核心组件可新增为 `ax-hal-ex`、`ax-runtime-ex` 等 crate，并在目录上尽量贴近 ArceOS 原有模块层次。
 - ArceOS 现有 `examples/` 和 `test-suit/arceos/` 下的 Unikernel 应用应尽量复用，不默认复制到 `os/arceos_ex/examples`。当前仓库中 `helloworld` 已存在于 `os/arceos/examples/helloworld` 和 `test-suit/arceos/std/qemu-smp1/helloworld`。
 - `arceos_ex` 第一轮通过 `ax-std` 正式接入现有 Unikernel 应用，而不是让应用直接依赖 `ax-runtime-ex`。
+- 第一轮只参考并接入 ArceOS 的 `ax-std` Unikernel 路径；不参考、不适配也不调试 ArceOS C API 和 Rust std/Hermit API 路径。应用输出应通过 `ax-std` 的 `println!` 进入内核统一输出路径，而不是通过 POSIX fd 或 Hermit syscall 层。
 - `ulib/axstd`、`api/ax-api`、`api/ax-feat` 这类应用接口和特性接口第一轮不主动复制；目标是让它们的公开接口保持不变，并由构建工具把底层内核实现切换到 `_ex` 组件。
 - 如果现有 `ax-std` / `ax-api` / `ax-feat` 的依赖链固定指向原 `ax-hal`、`ax-runtime`，导致 `arceos_ex` 无法接入 `_ex` runtime，则先由 `xtask` 生成 overlay workspace 并在其中替换 Cargo 依赖映射；只有在该方式不足时，才引入同接口的 `_ex` facade。
 - 构建和运行应直接接入 tgoskits 现有 `cargo xtask` 工具体系。第一轮新增 `cargo xtask arceos-ex ...` 子命令，复用 ArceOS 的测试选择机制运行 `helloworld`；长期由 `xtask` 管理不同内核 profile 的 overlay workspace 或正式多 workspace manifest。

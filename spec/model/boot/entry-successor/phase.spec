@@ -50,6 +50,8 @@ object InitMM: AddressSpaceObject {
 
 /*
  * MemBlock 表示早期物理内存区段和保留区段管理对象。
+ * 固件占用内存不作为 OpenSBI 等具体固件的特例硬编码，而应通过 FDT header /memreserve/
+ * 和 /reserved-memory 节点形成 FDT reserved ranges 后统一排除。
  */
 object MemBlock: MemoryObject {
     initial_state: State::Base;
@@ -106,6 +108,7 @@ object MemBlock: MemoryObject {
                 ensures {
                     memblock_candidate_ranges_ready(MemBlock, PhysicalMemory, RawDtb);
                     memblock_reserved_ranges_ready(MemBlock, KernelImage, RawDtb);
+                    memblock_fdt_reserved_ranges_applied(MemBlock, EarlyDtb);
                     memblock_allocator_ready(MemBlock);
                 }
             }
@@ -119,6 +122,7 @@ object MemBlock: MemoryObject {
         invariant {
             memblock_candidate_ranges_ready(MemBlock, PhysicalMemory, RawDtb);
             memblock_reserved_ranges_ready(MemBlock, KernelImage, RawDtb);
+            memblock_fdt_reserved_ranges_applied(MemBlock, EarlyDtb);
             memblock_allocator_ready(MemBlock);
         }
 
@@ -198,7 +202,8 @@ object EarlyDtb: ResourceObject {
 
         events {
             /*
-             * Setup 对应 parse_dtb() 的后续用途，提取 kernel command line 并触发 MemBlock 候选区段建立。
+             * Setup 对应 parse_dtb() 的后续用途，提取 kernel command line、FDT reserved ranges
+             * 并触发 MemBlock 候选区段建立。
              */
             on Event::Setup -> State::Ready {
                 depends_on {
@@ -213,6 +218,7 @@ object EarlyDtb: ResourceObject {
 
                 ensures {
                     early_dtb_parse_ready(EarlyDtb, RawDtb);
+                    fdt_reserved_memory_ranges_ready(EarlyDtb, RawDtb);
                 }
             }
         }
@@ -224,6 +230,7 @@ object EarlyDtb: ResourceObject {
     state State::Ready {
         invariant {
             early_dtb_parse_ready(EarlyDtb, RawDtb);
+            fdt_reserved_memory_ranges_ready(EarlyDtb, RawDtb);
             PlatformCpuInfo.state == State::Online;
             PhysicalMemory.state == State::Online;
             MemBlock.state == State::Prepared;

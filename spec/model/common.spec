@@ -51,6 +51,8 @@ predicate physical_memory_ranges_published<T>(memory: T) -> bool;
 predicate platform_cpu_info_ready<T, U>(cpu_info: T, dtb: U) -> bool;
 predicate platform_cpu_info_published<T>(cpu_info: T) -> bool;
 predicate early_dtb_platform_facts_ready<T, U>(early_dtb: T, raw_dtb: U) -> bool;
+predicate fdt_reserved_memory_ranges_ready<T, U>(early_dtb: T, raw_dtb: U) -> bool;
+predicate memblock_fdt_reserved_ranges_applied<T, U>(memblock: T, early_dtb: U) -> bool;
 predicate interrupt_concurrency_closed() -> bool;
 predicate task_concurrency_closed() -> bool;
 
