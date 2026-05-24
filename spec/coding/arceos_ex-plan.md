@@ -61,6 +61,16 @@ cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
 
 若未来 overlay workspace 无法稳定表达依赖切换，再讨论由 `xtask` 管理正式的多 workspace manifest 或受控顶层 manifest 切换。该过程必须由工具管理，不要求开发者手工来回修改顶层 `Cargo.toml`。
 
+## 外部 crate 整改
+
+`arceos_ex` 必须遵守 Rust coding 规格中的 crate 信任边界。当前实现中已发现的直接外部 crate 使用需要整改：
+
+- `fdt-parser`：不得作为黑盒依赖保留。后续应改为本项目维护的最小 FDT 解析实现，或先把可参考源码引入
+  `components/` 后审查、裁剪和改造。
+- `sbi-rt`：不得作为 `SBI.setup()` 的实现依赖扩大使用范围。后续 SBI 能力视图优先由本项目维护的最小 SBI ecall
+  wrapper 建立；现有 checkpoint SBI 字符输出和平台关机路径也应逐步收口到本项目维护的 SBI 封装。
+- 对上述 crate 的传递依赖也必须按同一规则处理，不能留下未审查的黑盒依赖。
+
 ## 第一轮最小对象覆盖
 
 实现必须覆盖当前模型中 `EntryPreludePhase` 和 `EntrySuccessorPhase` 所需对象。Phase 对象可以是编排过程；非 Phase 对象原则上应有 Rust struct、静态单例或启动上下文字段承载。
