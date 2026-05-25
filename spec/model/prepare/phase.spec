@@ -102,7 +102,7 @@ object OpenSbiFirmware: PrepareObject {
 
 /*
  * Lds 表示链接脚本形成的内核映像布局对象。
- * 它提供符号地址、BSS 边界、根栈边界和内核映像边界。
+ * 它提供符号地址、BSS 边界、根栈边界、内核映像边界和入口前导期早期代码布局。
  */
 object Lds: PrepareObject {
     initial_state: State::Online;
@@ -112,6 +112,9 @@ object Lds: PrepareObject {
         global_pointer: SymbolAddr;
         text_start: SymbolAddr;
         elf_entry: SymbolAddr;
+        head_text_range: AddrRange;
+        pre_mmu_text_range: AddrRange;
+        trampoline_safe_text_range: AddrRange;
         bss_start: SymbolAddr;
         bss_end: SymbolAddr;
         init_stack_start: SymbolAddr;
@@ -132,6 +135,9 @@ object Lds: PrepareObject {
             text_start == kernel_start;
             elf_entry == kernel_start;
             kernel_end > kernel_start;
+            entry_head_text_layout_ready(Lds);
+            pre_mmu_access_discipline_ready(Lds);
+            trampoline_access_discipline_ready(Lds);
             bss_start != 0;
             bss_end > bss_start;
             inside(bss_start, bss_end, kernel_start, kernel_end);
@@ -147,6 +153,9 @@ object Lds: PrepareObject {
         kernel_start = symbol("_start");
         text_start = symbol("_start");
         elf_entry = symbol("_start");
+        head_text_range = section(".head.text");
+        pre_mmu_text_range = section(".head.text");
+        trampoline_safe_text_range = symbol_range("relocate_enable_mmu", ".Lsecondary_park");
         kernel_end = symbol("_end");
         bss_start = symbol("__bss_start");
         bss_end = symbol("__bss_stop");

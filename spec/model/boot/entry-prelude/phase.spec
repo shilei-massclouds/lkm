@@ -948,6 +948,7 @@ object EarlyVm: AddressSpaceObject {
                 ensures {
                     kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap);
                     fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot);
+                    kernel_image_mapped_for_plain_data(KernelImage, KernelImageMap);
                 }
             }
         }
@@ -960,6 +961,7 @@ object EarlyVm: AddressSpaceObject {
         invariant {
             kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap);
             fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot);
+            kernel_image_mapped_for_plain_data(KernelImage, KernelImageMap);
             LinearMap.state == State::Destroyed;
         }
 

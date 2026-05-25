@@ -16,6 +16,26 @@
 - 入口代码不得跳过 `BootArgs` 抽象直接让后续对象长期依赖裸寄存器值。
 - 链接脚本必须显式提供 `__global_pointer$`，并保证 `_start` 同时是内核 text 起点和 ELF entry。
 
+## 入口前导期地址访问纪律
+
+RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码位置和可访问数据范围。
+
+1. MMU 关闭阶段：
+   - 入口最前段代码应集中放在内核映像起始处的 boot/head text 区域。实现可采用 `.head.text`、`.text.boot` 或其它等价段名，但链接脚本必须保证该区域紧接 `_start`，且位于固件跳入后可直接取指的物理映像范围内。
+   - 该阶段访问内核符号必须使用 PC-relative 或等价 position-independent 方式。若使用 Rust/C 函数，必须确保对应编译选项和代码形态不会生成依赖最终虚拟地址的绝对寻址。
+   - 该阶段不得访问普通 `.data/.bss/.init.data`，除非该访问已经被证明使用当前物理地址语义且不依赖尚未启用的虚拟映射。
+   - 该阶段函数不得引入 ftrace、sanitizer、coverage、stack protector 或其它可能访问普通数据段或运行时设施的 instrumentation，除非逐项证明其访问路径满足本阶段约束。
+2. trampoline 临时映射阶段：
+   - 切换到 trampoline 页表后，只允许执行 trampoline 映射覆盖的代码，且代码应尽快切换到 `EarlyVm` 页表。
+   - 该阶段不得访问普通 `.data/.bss/.init.data`，不得调用可能访问普通数据段、锁、日志、allocator 或未映射静态对象的函数。
+   - checkpoint hook 若位于该阶段，必须是极小的 head/trampoline-safe 实现。
+3. EarlyVm 阶段：
+   - `EarlyVm` 必须至少映射整个 `KernelImage`，包括入口后续需要访问的 `.text/.rodata/.data/.bss/.init.data` 等内核映像范围。
+   - 进入 EarlyVm 后应重新设置 `gp = __global_pointer$` 的当前虚拟地址，使 `gp-relative` 访问重新有效。
+   - 只有在该阶段之后，入口前导期代码才可以按普通早期虚拟地址访问内核静态数据。
+
+该约束参考 Linux RISC-V64 的 `__HEAD`/`HEAD_TEXT_SECTION`、`setup_vm()` 的 `medany` 要求，以及 trampoline 到 early page table 的两次 `satp` 切换流程；`arceos_ex` 不要求复制 Linux 宏名，但必须提供等价的链接布局和访问纪律。
+
 ## 链接脚本参考建议
 
 - `__global_pointer$` 的存在和入口可达性属于强制约束；其在链接脚本中的精确位置当前作为实现建议处理。

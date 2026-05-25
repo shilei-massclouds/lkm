@@ -152,6 +152,26 @@ predicate fits_in_kernel_image_map<T: Object, U: VirtualAddressArea>(image: T, m
     contains(map, image)
 }
 
+predicate entry_head_text_layout_ready<T>(lds: T) -> bool {
+    exists(lds.head_text_range);
+    lds.head_text_range.start == lds.kernel_start;
+    inside(lds.head_text_range.start, lds.head_text_range.end, lds.kernel_start, lds.kernel_end);
+}
+
+predicate pre_mmu_access_discipline_ready<T>(lds: T) -> bool {
+    exists(lds.pre_mmu_text_range);
+    contains(lds.head_text_range, lds.pre_mmu_text_range);
+}
+
+predicate trampoline_access_discipline_ready<T>(lds: T) -> bool {
+    exists(lds.trampoline_safe_text_range);
+    contains(lds.head_text_range, lds.trampoline_safe_text_range);
+}
+
+predicate kernel_image_mapped_for_plain_data<T, U>(image: T, map: U) -> bool {
+    contains(map, image)
+}
+
 predicate valid_trampoline_map<T: VirtualAddressArea>(map: T) -> bool {
     exists(map);
     aligned(map.phys_start, map.size);
