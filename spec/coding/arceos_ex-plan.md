@@ -35,7 +35,7 @@
 | P0 | 待办 | 实现 `EntrySuccessorPhase` 最小闭环：EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap、SwapperVm。 |
 | P0 | 待办 | 建立 no-alloc 输出路径：启动期内部 `printk`/`println-like` 前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
 | P1 | 待办 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
-| P1 | 待办 | 用 Makefile 提供 `build`、`run`、`trace`、`check-spec`、`clean` 等入口，暂时脱离 `xtask`。 |
+| P1 | 完成 | 用顶层 Makefile 提供 `build`、`run`、`verify`、`clean` 等入口，暂时脱离 `xtask`。 |
 | P1 | 待办 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性。 |
 | P1 | 待办 | 建立 GitHub Actions 快速 CI，覆盖推导工具质量、核心规格推导和 `impl/arceos_ex` 最小构建。 |
 | P1 | 待办 | 建立 nightly/manual 测试流水线，生成 trace、系统测试日志、对象覆盖表和项目主页展示产物。 |
@@ -43,19 +43,22 @@
 
 ## 入口命令
 
-当前入口统一使用 `impl/arceos_ex/Makefile`。
+当前入口统一使用仓库顶层 `Makefile`，默认内核为 `arceos_ex`。
 
 第一轮优先支持：
 
 ```bash
-make -C impl/arceos_ex build
-make -C impl/arceos_ex run
-make -C impl/arceos_ex trace
-make -C impl/arceos_ex check-spec
+make build
+make run
+make run LOG=trace
+make verify
+make verify REPORT=graph
+make clean
 ```
 
-`build` 负责编译 RISC-V64 内核镜像；`run` 使用 QEMU/OpenSBI 运行；`trace` 启用 checkpoint 字符输出；`check-spec` 调用 `pyveri`
-检查当前启动时间轴规格。
+`KERNEL ?= arceos_ex` 选择默认内核。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
+启用 checkpoint 字符输出。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
+生成带注释的 trace SVG 报告。
 
 ## 应用复用
 
@@ -102,8 +105,8 @@ GitHub workflow 分为测试和展示两类，但展示内容应主要来自测�
 - 推导工具本身的格式检查、lint、单元测试和关键边界测试。
 - 核心规格推导验证，例如 `spec/model/startup-timeline.spec --derive --strict`。
 - trace 生成 smoke test：输出到临时目录，确认命令成功，不要求把生成图提交回仓库。
-- `impl/arceos_ex` 的 `make check-spec`。
-- 当对象级内核骨架具备可编译状态后，加入 `make -C impl/arceos_ex build`。
+- 顶层 `make verify`。
+- 当对象级内核骨架具备可编译状态后，加入顶层 `make build`。
 
 快速 CI 不发布 GitHub Pages，不运行耗时长或依赖模拟器稳定性的全量任务。
 
@@ -114,7 +117,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - 推导工具全量测试、系统测试和 fixture 回归。
 - 全规格批量推导验证。
 - trace SVG 全量生成，并作为 artifact 保存。
-- `impl/arceos_ex` 的完整 `build/run/trace`。
+- `impl/arceos_ex` 的完整 `make build`、`make run`、`make run LOG=trace`。
 - QEMU smoke test，检查 `Hello, world!` 或 checkpoint 序列。
 - 生成 unresolved obligations、deferred items、对象覆盖表、QEMU 日志等报告。
 

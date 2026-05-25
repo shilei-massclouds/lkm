@@ -9,16 +9,17 @@ Current goals:
 - build a standalone RISC-V64 no-alloc kernel image;
 - keep phases as process orchestration;
 - give non-phase model objects explicit Rust carriers;
-- expose Makefile targets for build, run, trace, and spec checks.
+- expose kernel-local Makefile targets used by the repository root Makefile.
 
 Useful commands:
 
 ```bash
-make -C impl/arceos_ex build
-make -C impl/arceos_ex run
-make -C impl/arceos_ex trace
-make -C impl/arceos_ex check-spec
-make -C impl/arceos_ex clean
+make build
+make run
+make run LOG=trace
+make verify
+make verify REPORT=graph
+make clean
 ```
 
 Prerequisites:

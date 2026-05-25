@@ -1,4 +1,5 @@
 TARGET := riscv64gc-unknown-none-elf
+LOG ?= info
 PROFILE ?= release
 BUILD_DIR := build/$(TARGET)/$(PROFILE)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
@@ -20,7 +21,7 @@ RUSTFLAGS := \
 	-C link-arg=-static \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run trace check-spec clean
+.PHONY: build run clean
 
 build: $(KERNEL_BIN)
 
@@ -37,15 +38,14 @@ $(KERNEL_ELF): src/main.rs $(LINKER)
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(RUST_OBJCOPY) --strip-all -O binary $< $@
 
-run: build
-	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -kernel $(KERNEL_ELF)
-
-trace:
+run:
+ifeq ($(LOG),trace)
 	$(MAKE) PROFILE=trace EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -kernel build/$(TARGET)/trace/arceos_ex.elf
-
-check-spec:
-	$(PYVERI) $(ROOT)/spec/model/startup-timeline.spec --derive --strict
+else
+	$(MAKE) build
+	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -kernel $(KERNEL_ELF)
+endif
 
 clean:
 	rm -rf build
