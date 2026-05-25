@@ -4,6 +4,7 @@ use crate::{arch::riscv64::csr, trace::Checkpoint};
 
 use super::{
     boot_args::BootArgs,
+    raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
 };
 
@@ -55,6 +56,7 @@ pub struct EntryPreludeObjects {
     init_task: InitTask,
     init_stack: InitStack,
     event_stream: EventStream,
+    raw_dtb: RawDtb,
 }
 
 impl EntryPreludeObjects {
@@ -68,6 +70,7 @@ impl EntryPreludeObjects {
             init_task: InitTask::new(),
             init_stack: InitStack::new(),
             event_stream: EventStream::new(),
+            raw_dtb: RawDtb::new(),
         }
     }
 
@@ -101,6 +104,14 @@ impl EntryPreludeObjects {
 
     pub fn event_stream_preset(&mut self) -> EventResult {
         self.event_stream.preset()
+    }
+
+    pub fn raw_dtb_preset(&mut self, boot_args: &BootArgs) -> EventResult {
+        self.raw_dtb.preset(boot_args)
+    }
+
+    pub fn raw_dtb_setup(&mut self) -> EventResult {
+        self.raw_dtb.setup()
     }
 }
 

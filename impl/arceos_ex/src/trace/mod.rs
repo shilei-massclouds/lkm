@@ -25,6 +25,8 @@ pub enum Checkpoint {
     InitTaskPrepared,
     InitStackPrepared,
     EventStreamPrepared,
+    RawDtbPrepared,
+    RawDtbReady,
     #[allow(dead_code)]
     PrintkBufferPrepared,
     #[allow(dead_code)]
@@ -53,6 +55,8 @@ impl Checkpoint {
             Self::InitTaskPrepared => b'T',
             Self::InitStackPrepared => b'S',
             Self::EventStreamPrepared => b'V',
+            Self::RawDtbPrepared => b'Y',
+            Self::RawDtbReady => b'W',
             Self::PrintkBufferPrepared => b'B',
             Self::EarlyConPrepared => b'C',
             Self::EarlyConReady => b'D',

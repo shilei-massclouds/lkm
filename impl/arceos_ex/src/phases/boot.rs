@@ -22,6 +22,8 @@ fn entry_prelude_phase_setup(boot_args: &BootArgs, objects: &mut EntryPreludeObj
     require(objects.init_task_preset());
     require(objects.init_stack_preset());
     require(objects.event_stream_preset());
+    require(objects.raw_dtb_preset(boot_args));
+    require(objects.raw_dtb_setup());
     trace::checkpoint(Checkpoint::EntryPreludeFoundationReady);
 }
 
