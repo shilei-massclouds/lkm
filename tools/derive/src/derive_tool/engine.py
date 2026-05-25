@@ -77,7 +77,21 @@ _LDS_LINKER_PROOFS = {
     "attrs_accessible(self)": ("linker_layout", "linux_linker_script"),
     "global_pointer != 0": ("linker_layout", "linux_linker_script"),
     "kernel_start != 0": ("linker_layout", "linux_linker_script"),
+    "text_start == kernel_start": ("linker_layout", "linux_linker_script"),
+    "elf_entry == kernel_start": ("linker_layout", "linux_linker_script"),
     "kernel_end > kernel_start": ("linker_layout", "linux_linker_script"),
+    "entry_head_text_layout_ready(Lds)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
+    "pre_mmu_access_discipline_ready(Lds)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
+    "trampoline_access_discipline_ready(Lds)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
     "bss_start != 0": ("linker_layout", "linux_linker_script"),
     "bss_end > bss_start": ("linker_layout", "linux_linker_script"),
     "inside(bss_start, bss_end, kernel_start, kernel_end)": (
@@ -201,6 +215,22 @@ _EXTERNAL_SOURCE_PROOFS = {
         "opensbi_firmware",
     ),
     (
+        "OpenSbiFirmware",
+        "firmware::opensbi",
+        "firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)",
+    ): (
+        "firmware_entry_state",
+        "opensbi_firmware",
+    ),
+    (
+        "OpenSbiFirmware",
+        "firmware::opensbi",
+        "firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)",
+    ): (
+        "firmware_entry_state",
+        "opensbi_firmware",
+    ),
+    (
         "PlatformCpuInfo",
         "fdt::cpus",
         "platform_hart_id_valid(BootArgs.boot_hartid)",
@@ -217,6 +247,8 @@ _EXTERNAL_PREDICATES = {
     "fixmap_slot_accessible": "address_mapping",
     "fixmap_slot_mapping_ready": "address_mapping",
     "firmware_dtb_blob_in_ram_at_kernel_entry": "firmware_entry_state",
+    "firmware_dtb_blob_complete_at_kernel_entry": "firmware_entry_state",
+    "firmware_dtb_blob_accessible_at_kernel_entry": "firmware_entry_state",
     "fixmap_adjacent_to_linear_map": "address_layout",
     "gp_relative_access_ready": "architecture_state",
     "kernel_fpu_disabled": "riscv_status_register",
@@ -290,6 +322,8 @@ _DERIVED_PROVIDERS = {
     "fits_in_fixmap_slot": "config_source_candidate",
     "fits_in_kernel_image_map": "config_source_candidate",
     "firmware_dtb_blob_in_ram_at_kernel_entry": "opensbi_firmware",
+    "firmware_dtb_blob_complete_at_kernel_entry": "opensbi_firmware",
+    "firmware_dtb_blob_accessible_at_kernel_entry": "opensbi_firmware",
     "interrupt_concurrency_closed": "prior_derivation_facts",
     "kernel_image_accessible": "prior_derivation_facts",
     "kernel_image_mapping_ready": "boot_code_candidate",
@@ -1749,6 +1783,36 @@ def _format_obligation_provider_summary(records: list[DerivationRecord]) -> list
 
 
 _PRIOR_FACT_PROOFS = {
+    "firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)": (
+        "firmware_entry_state",
+        {
+            "firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)",
+        },
+    ),
+    "firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)": (
+        "firmware_entry_state",
+        {
+            "firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)",
+        },
+    ),
+    "boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)": (
+        "boot_hart_identity",
+        {
+            "boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)",
+        },
+    ),
+    "boot_cpu_present(BootCPU)": (
+        "cpu_state",
+        {
+            "boot_cpu_present(BootCPU)",
+        },
+    ),
+    "boot_cpu_active(BootCPU)": (
+        "cpu_state",
+        {
+            "boot_cpu_active(BootCPU)",
+        },
+    ),
     "slot_contains(FixMap.fdt_slot, RawDtb)": (
         "fixmap_slot_content",
         {

@@ -64,21 +64,22 @@ make clean
 
 ## `make verify` obligation 分类
 
-截至当前实现点，`make verify` 通过推导检查，但仍报告 `13 obligation / 2 deferred`。这些条目不要求在开始编码前一次性清零；处理原则是：实现某个对象事件前，必须先处理它直接依赖的 obligation，处理方式可以是代码证明、运行期检查、明确的固件交付假设，或继续作为显式 deferred。
+`80966ec` 曾暴露 `13 obligation / 2 deferred`。这些条目不能作为实现可忽略的提示；处理原则是：实现某个对象事件前，必须先通过“推导义务门禁”。能由模型、推导工具、链接脚本、ISA、固件规范或已证明前序事实推出的，应优先补齐推导证明；只能由外部交付保证支撑的，应明确作为 source assumption，并在后续对象事件中尽快转化为运行期检查；无法归类的应作为规格缺口或显式 deferred。
+
+当前已补齐 Lds、OpenSBI DTB handoff 和 BootCPU 前序事实的推导规则，`make verify` 报告为 `0 obligation / 2 deferred`。后续若再次出现 obligation，应先回到本节分类处理，不得直接继续实现。
 
 | 分类 | 条目 | 影响范围 | 当前处理策略 |
 | --- | --- | --- | --- |
-| 固件交付假设，运行期逐步确认 | `firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)`；`firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)` | `OpenSbiFirmware.Online`、`RawDtb.Preset`、`RawDtb.Setup` | 作为 OpenSBI handoff 保证进入实现；`RawDtb` 仍必须逐步读取 header、检查 magic、读取 totalsize 并确定完整范围。若确认失败，事件返回 `Failed`，不得继续推进。 |
-| 链接/入口布局硬约束 | `text_start == kernel_start`；`elf_entry == kernel_start`；`entry_head_text_layout_ready(Lds)`；`pre_mmu_access_discipline_ready(Lds)`；`trampoline_access_discipline_ready(Lds)` | `Lds.Online`、`KernelImage.Preset/Setup`、`TrampolineVm`、`EarlyVm` | 进入真实页表实现前必须落实到 linker script、入口段布局和构建期检查。当前骨架已有 `_start`、`.head.text` 和 `ENTRY(_start)`，但还需要补齐可验证符号、head/trampoline 安全范围和访问纪律说明。 |
-| 对象事实待实现 | `boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)`；`boot_cpu_present(BootCPU)`；`boot_cpu_active(BootCPU)` | `BootCPU.Preset`、`BootCPU.Setup`、`BootCPU.Enable` | `boot_cpu_hartid_ready` 应由 `BootCPU` 记录 `BootArgs.boot_hartid` 解决；`present/active` 依赖 `PlatformCpuInfo`，属于入口后继期基于 FDT `/cpus` 验证后的推进。 |
+| 固件交付假设，运行期逐步确认 | `firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)`；`firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)` | `OpenSbiFirmware.Online`、`RawDtb.Preset`、`RawDtb.Setup` | 已作为 OpenSBI handoff source fact 进入推导；`RawDtb` 仍必须逐步读取 header、检查 magic、读取 totalsize 并确定完整范围。若确认失败，事件返回 `Failed`，不得继续推进。 |
+| 链接/入口布局硬约束 | `text_start == kernel_start`；`elf_entry == kernel_start`；`entry_head_text_layout_ready(Lds)`；`pre_mmu_access_discipline_ready(Lds)`；`trampoline_access_discipline_ready(Lds)` | `Lds.Online`、`KernelImage.Preset/Setup`、`TrampolineVm`、`EarlyVm` | 已作为 linker script source fact 进入推导；实现必须继续由 linker script、入口段布局和构建期/启动期检查维持这些事实。推进真实页表前，还要复查 head/trampoline 安全范围和访问纪律。 |
+| 对象前序事实 | `boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)`；`boot_cpu_present(BootCPU)`；`boot_cpu_active(BootCPU)` | `BootCPU.Preset`、`BootCPU.Setup`、`BootCPU.Enable` | 已由 `BootCPU` 事件 `ensures` 和前序事实推导消化；实现方面，`BootCPU.Preset` 已记录启动 hartid，`Setup/Enable` 仍需在入口后继期基于 `PlatformCpuInfo` 和 FDT `/cpus` 完成。 |
 | 显式 deferred | `Soc` 早期平台状态点；`jump_label_init()`；`efi_init()` | `Soc.Preset` 和后续非最小启动路径 | 保持 deferred，不在第一轮对象级最小闭环中隐式实现；后续扩展 SoC、StaticKey 或 EFI 对象时再展开。 |
 
-由此得到下一批 `EntryPreludePhase` 实现顺序：
+由此得到后续 `EntryPreludePhase` 实现顺序：
 
-1. 先补齐 `Lds`/`KernelImage` 相关符号和布局检查面，确保 `_start`、`kernel_start`、text 起点、ELF entry、head text 范围在实现中可对应。
-2. 实现入口前导期中不依赖页表构造的对象承载：`RootStream`、`InterruptStream`、`KernelImage`、`BootCPU`、`CpuGroup`、`InitTask`、`InitStack`、`EventStream`。
-3. 实现 `RawDtb.Preset/Setup` 的最小确认路径，把 OpenSBI handoff 假设转化为 header/magic/totalsize/range 的运行期检查。
-4. 在上述事实具备后，再推进 `FixMap`、`TrampolineVm`、`EarlyVm` 和 `Vm` 三段切换。
+1. 持续保持 `Lds`/`KernelImage` 相关符号和布局检查面，确保 `_start`、`kernel_start`、text 起点、ELF entry、head text 范围在实现中可对应。
+2. 继续实现 `RawDtb.Preset/Setup` 的最小确认路径，把 OpenSBI handoff 假设转化为 header/magic/totalsize/range 的运行期检查。
+3. 在上述事实具备后，推进 `FixMap`、`TrampolineVm`、`EarlyVm` 和 `Vm` 三段切换。
 
 ## 应用复用
 

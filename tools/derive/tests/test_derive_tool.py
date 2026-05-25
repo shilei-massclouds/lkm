@@ -190,10 +190,12 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "contains"
-                    and record["proof_class"] == "dtb_header_range"
-                    and record["proof_provider"] == "opensbi_firmware"
-                    and record["expression"] == "contains(PhysicalMemory.ram, header_range)"
+                    record["predicate"]
+                    == "firmware_dtb_blob_accessible_at_kernel_entry"
+                    and record["proof_class"] == "firmware_entry_state"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    and record["expression"]
+                    == "firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)"
                     for record in proved
                 )
             )
@@ -457,10 +459,34 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["predicate"] == "contains"
-                    and record["proof_class"] == "physical_memory_membership"
+                    record["predicate"]
+                    == "firmware_dtb_blob_complete_at_kernel_entry"
+                    and record["proof_class"] == "firmware_entry_state"
                     and record["proof_provider"] == "opensbi_firmware"
-                    and record["expression"] == "contains(PhysicalMemory.ram, range)"
+                    and record["expression"]
+                    == "firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"]
+                    == "firmware_dtb_blob_accessible_at_kernel_entry"
+                    and record["proof_class"] == "firmware_entry_state"
+                    and record["proof_provider"] == "opensbi_firmware"
+                    and record["expression"]
+                    == "firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["predicate"]
+                    == "firmware_dtb_blob_complete_at_kernel_entry"
+                    and record["proof_class"] == "firmware_entry_state"
+                    and record["proof_provider"] == "prior_derivation_facts"
+                    and record["expression"]
+                    == "firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)"
                     for record in proved
                 )
             )
