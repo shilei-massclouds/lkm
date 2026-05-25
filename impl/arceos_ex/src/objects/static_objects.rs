@@ -53,6 +53,7 @@ impl StaticObjects {
 
     pub fn storage_ready(&self, config: &Config) -> bool {
         page_table_storage_ready(trampoline_pg_dir_addr(), config.page_size())
+            && page_table_storage_ready(trampoline_kernel_pg_table_addr(), config.page_size())
             && page_table_storage_ready(early_pg_dir_addr(), config.page_size())
             && page_table_storage_ready(early_kernel_pg_table_addr(), config.page_size())
             && page_table_storage_ready(early_fixmap_l1_table_addr(), config.page_size())
@@ -107,6 +108,26 @@ impl StaticObjects {
             raw_dtb.range().start(),
             raw_dtb.range().size(),
             config.page_size(),
+        )
+    }
+
+    pub fn build_trampoline_pg_dir(&mut self, config: &Config, kernel_start: usize) -> bool {
+        if !aligned(kernel_start, config.pmd_size()) || config.kernel_link_addr() == 0 {
+            return false;
+        }
+
+        let root = trampoline_pg_dir_mut();
+        let kernel_table = trampoline_kernel_pg_table_mut();
+        root.clear();
+        kernel_table.clear();
+
+        map_pmd_range(
+            root,
+            kernel_table,
+            config.kernel_link_addr(),
+            kernel_start,
+            config.pmd_size(),
+            config.pmd_size(),
         )
     }
 }
@@ -225,6 +246,10 @@ fn trampoline_pg_dir_addr() -> usize {
     core::ptr::addr_of!(TRAMPOLINE_PG_DIR) as usize
 }
 
+fn trampoline_kernel_pg_table_addr() -> usize {
+    core::ptr::addr_of!(TRAMPOLINE_KERNEL_PG_TABLE) as usize
+}
+
 fn early_pg_dir_addr() -> usize {
     core::ptr::addr_of!(EARLY_PG_DIR) as usize
 }
@@ -251,6 +276,16 @@ fn early_pg_dir_mut() -> &'static mut PageTablePage {
     unsafe { &mut *core::ptr::addr_of_mut!(EARLY_PG_DIR) }
 }
 
+fn trampoline_pg_dir_mut() -> &'static mut PageTablePage {
+    // TrampolineVm.Setup owns initialization of StaticObjects.trampoline_pg_dir.
+    unsafe { &mut *core::ptr::addr_of_mut!(TRAMPOLINE_PG_DIR) }
+}
+
+fn trampoline_kernel_pg_table_mut() -> &'static mut PageTablePage {
+    // TrampolineVm.Setup owns this subordinate page table while constructing trampoline_pg_dir.
+    unsafe { &mut *core::ptr::addr_of_mut!(TRAMPOLINE_KERNEL_PG_TABLE) }
+}
+
 fn early_kernel_pg_table_mut() -> &'static mut PageTablePage {
     // EarlyVm.Setup owns this subordinate page table while constructing early_pg_dir.
     unsafe { &mut *core::ptr::addr_of_mut!(EARLY_KERNEL_PG_TABLE) }
@@ -267,6 +302,7 @@ fn early_fixmap_l0_table_mut() -> &'static mut PageTablePage {
 }
 
 static mut TRAMPOLINE_PG_DIR: PageTablePage = PageTablePage::zeroed();
+static mut TRAMPOLINE_KERNEL_PG_TABLE: PageTablePage = PageTablePage::zeroed();
 static mut EARLY_PG_DIR: PageTablePage = PageTablePage::zeroed();
 static mut EARLY_KERNEL_PG_TABLE: PageTablePage = PageTablePage::zeroed();
 static mut EARLY_FIXMAP_L1_TABLE: PageTablePage = PageTablePage::zeroed();

@@ -8,3 +8,4 @@ pub mod printk;
 pub mod raw_dtb;
 pub mod state;
 pub mod static_objects;
+pub mod trampoline_vm;

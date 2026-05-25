@@ -10,6 +10,7 @@ use super::{
     raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
+    trampoline_vm::TrampolineVm,
 };
 
 pub const PT_SIZE_ON_STACK: usize = 256;
@@ -62,6 +63,7 @@ pub struct EntryPreludeObjects {
     init_task: InitTask,
     init_stack: InitStack,
     event_stream: EventStream,
+    trampoline_vm: TrampolineVm,
     early_vm: EarlyVm,
     raw_dtb: RawDtb,
     fix_map: FixMap,
@@ -80,6 +82,7 @@ impl EntryPreludeObjects {
             init_task: InitTask::new(),
             init_stack: InitStack::new(),
             event_stream: EventStream::new(),
+            trampoline_vm: TrampolineVm::new(),
             early_vm: EarlyVm::new(),
             raw_dtb: RawDtb::new(),
             fix_map: FixMap::new(),
@@ -116,6 +119,11 @@ impl EntryPreludeObjects {
 
     pub fn event_stream_preset(&mut self) -> EventResult {
         self.event_stream.preset()
+    }
+
+    pub fn trampoline_vm_setup(&mut self) -> EventResult {
+        self.trampoline_vm
+            .setup(&self.config, &mut self.static_objects, &self.lds)
     }
 
     pub fn early_vm_preset(&mut self, boot_args: &BootArgs) -> EventResult {
