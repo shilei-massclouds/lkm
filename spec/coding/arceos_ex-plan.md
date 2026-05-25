@@ -1,6 +1,6 @@
 # arceos_ex 第一轮实现计划
 
-本文记录 `arceos_ex` 第一轮实现任务清单。该计划用于把 `spec/model`、主规格文档和 coding 规格转化为 `tgoskits` 中可执行的实现步骤。
+本文记录 `arceos_ex` 第一轮实现任务清单。该计划用于把 `spec/model`、主规格文档和 coding/compose 规格转化为 `tgoskits` 中可执行的实现步骤。
 
 ## 目标边界
 
@@ -10,6 +10,13 @@
 - `EntrySuccessorPhase.Ready`
 
 最小可见结果是通过 SBI early console 打印 `Hello, world!`，随后关机。
+
+实现推进分为两个逻辑阶段：
+
+- `Object Coding Phase`：优先完成对象级语义，包括对象状态、事件推进、依赖检查、checkpoint 和必要的最小运行路径。
+- `Composition Phase`：在对象级语义明确之后，再整理 crate/module 边界、公开接口、adapter、overlay workspace 和与 ArceOS 组件体系的兼容关系。
+
+第一轮代码为了尽快形成可运行闭环，允许对象级实现与 ArceOS 接入代码在物理 crate 中临时交织；但评审和后续整理时应按上述两个阶段区分问题来源。不得因为临时 crate/module 落点而反向改变模型对象语义。
 
 实现分层上，`ax-hal-ex` 只负责入口前导期的最低层启动路径，并推进到 `EntryPreludePhase.Ready`。
 之后应进入 `ax-runtime-ex` 的 bootstrap 路径。`EntrySuccessorPhase` 是 `ax-runtime-ex` 引导过程的第一部分，

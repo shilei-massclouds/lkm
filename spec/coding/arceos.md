@@ -4,14 +4,14 @@
 
 ## 适用范围
 
-本文件说明在实现目标内核时如何参考 ArceOS。参考范围包括工程组织、RISC-V64 启动路径、地址空间、SBI、FDT、early console、allocator 和模块拆分经验。
+本文件说明在对象级编码阶段如何参考 ArceOS。参考范围包括 RISC-V64 启动路径、地址空间、SBI、FDT、early console、allocator 和模块拆分经验中与模型对象实现直接相关的部分。
 
 当前目标不是复制 ArceOS，而是在 `spec/model` 的对象和阶段边界下吸收 ArceOS 中已经验证过的实现经验。
 
-`arceos_ex` 的演化约束分为两个层面：
+`arceos_ex` 的演化约束分为两个阶段：
 
-- 代码实现层面：ArceOS 代码只是参考。能满足规格且改造成本合理的代码可以复用、复制或改写；不适合的代码应新写，不能无脑复用。
-- 框架与接口层面：应尽量保持 ArceOS 的组件化形态。组件仍以 crate 为边界，crate 内部仍以 Rust module 组织；组件构成、组件公开接口和 module 公开接口应尽量接近 ArceOS。接口兼容是优先目标，但不是百分百硬约束；只有规格要求、实现边界或演化路径不允许时，才改变接口，并记录原因。
+- `Object Coding Phase`：先完成对象级编码实现。ArceOS 代码只是参考；能满足规格且改造成本合理的代码可以复用、复制或改写；不适合的代码应新写，不能无脑复用。
+- `Composition Phase`：再进行组合封装。组件构成、crate/module 公开接口、adapter、overlay workspace 和与 ArceOS 组件体系兼容相关的规则，记录在 `../compose/README.md`。
 
 ## 参考原则
 
@@ -21,7 +21,7 @@
 - 若模型中一个对象需要参考 ArceOS 多处代码，应在实现任务中列出映射关系。
 - Linux 参考主要用于理解机制和验证边界。若规格中已有 Linux 机制提示，优先使用规格；若规格缺少实现细节，可参考本地 Linux 源码 `~/gitStudy/linux-6.12.37/`，但必须转化为 ArceOS 组件和接口形式，不能直接照搬 Linux 结构。
 - `os/arceos` 和已有 `components` 实现视为只读参考；`arceos_ex` 通过新增目录或新增 `_ex` 组件实现。
-- 新增 crate 名称优先使用与 ArceOS 对应 crate 相同的语义名并加 `_ex` 后缀，避免 workspace 包名冲突。
+- 新增 crate 名称、公开接口兼容和 workspace 接入属于 `Composition Phase` 决策；对象级编码阶段只在需要承载代码时采用临时落点，不把临时落点视为最终组件边界。
 
 ## 初步参考方向
 
@@ -46,6 +46,7 @@
 
 建议的组织原则：
 
+- 当前第一轮实现可以为了运行闭环临时交织对象级代码和 ArceOS 接入代码，但文档解释和后续整理应按 `Object Coding Phase` 与 `Composition Phase` 分开处理。
 - `os/arceos_ex` 镜像 ArceOS 的 OS 侧目录习惯，例如保留 `modules/`、`examples/` 等组织方式。
 - 内核核心组件可新增为 `ax-hal-ex`、`ax-runtime-ex` 等 crate，并在目录上尽量贴近 ArceOS 原有模块层次。
 - ArceOS 现有 `examples/` 和 `test-suit/arceos/` 下的 Unikernel 应用应尽量复用，不默认复制到 `os/arceos_ex/examples`。当前仓库中 `helloworld` 已存在于 `os/arceos/examples/helloworld` 和 `test-suit/arceos/std/qemu-smp1/helloworld`。
