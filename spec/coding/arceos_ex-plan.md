@@ -31,6 +31,8 @@
 | --- | --- | --- |
 | P0 | 完成 | 建立 `impl/arceos_ex/` 独立实验目录，包含 `Makefile`、RISC-V64 linker script、入口汇编和 no-alloc Rust 源码骨架。 |
 | P0 | 完成 | 定义对象级公共基础：规范状态集合、事件集合、`EventResult`、生命周期事件唯一性检查和 checkpoint hook。 |
+| P0 | 完成 | 分类 `make verify` 当前 obligations/deferred，明确进入 `EntryPreludePhase` 对象实现前的处理策略。 |
+| P0 | 完成 | 实现 `EntryPreludePhase` 第一批不依赖页表切换的 foundation 对象：`InterruptStream.Preset`、`KernelImage.Preset/Setup`、`RootStream.Preset`、`BootCPU.Preset`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`、`EventStream.Preset`。 |
 | P0 | 待办 | 实现 `EntryPreludePhase` 最小闭环：`_start`、`__global_pointer$`、head text 布局约束、BootArgs、RootStream、KernelImage、BootCPU、InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm、VM 三段切换。 |
 | P0 | 待办 | 实现 `EntrySuccessorPhase` 最小闭环：EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap、SwapperVm。 |
 | P0 | 待办 | 建立 no-alloc 输出路径：启动期内部 `printk`/`println-like` 前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
@@ -59,6 +61,24 @@ make clean
 `KERNEL ?= arceos_ex` 选择默认内核。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
 启用 checkpoint 字符输出。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
 生成带注释的 trace SVG 报告。
+
+## `make verify` obligation 分类
+
+截至当前实现点，`make verify` 通过推导检查，但仍报告 `13 obligation / 2 deferred`。这些条目不要求在开始编码前一次性清零；处理原则是：实现某个对象事件前，必须先处理它直接依赖的 obligation，处理方式可以是代码证明、运行期检查、明确的固件交付假设，或继续作为显式 deferred。
+
+| 分类 | 条目 | 影响范围 | 当前处理策略 |
+| --- | --- | --- | --- |
+| 固件交付假设，运行期逐步确认 | `firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)`；`firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)` | `OpenSbiFirmware.Online`、`RawDtb.Preset`、`RawDtb.Setup` | 作为 OpenSBI handoff 保证进入实现；`RawDtb` 仍必须逐步读取 header、检查 magic、读取 totalsize 并确定完整范围。若确认失败，事件返回 `Failed`，不得继续推进。 |
+| 链接/入口布局硬约束 | `text_start == kernel_start`；`elf_entry == kernel_start`；`entry_head_text_layout_ready(Lds)`；`pre_mmu_access_discipline_ready(Lds)`；`trampoline_access_discipline_ready(Lds)` | `Lds.Online`、`KernelImage.Preset/Setup`、`TrampolineVm`、`EarlyVm` | 进入真实页表实现前必须落实到 linker script、入口段布局和构建期检查。当前骨架已有 `_start`、`.head.text` 和 `ENTRY(_start)`，但还需要补齐可验证符号、head/trampoline 安全范围和访问纪律说明。 |
+| 对象事实待实现 | `boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)`；`boot_cpu_present(BootCPU)`；`boot_cpu_active(BootCPU)` | `BootCPU.Preset`、`BootCPU.Setup`、`BootCPU.Enable` | `boot_cpu_hartid_ready` 应由 `BootCPU` 记录 `BootArgs.boot_hartid` 解决；`present/active` 依赖 `PlatformCpuInfo`，属于入口后继期基于 FDT `/cpus` 验证后的推进。 |
+| 显式 deferred | `Soc` 早期平台状态点；`jump_label_init()`；`efi_init()` | `Soc.Preset` 和后续非最小启动路径 | 保持 deferred，不在第一轮对象级最小闭环中隐式实现；后续扩展 SoC、StaticKey 或 EFI 对象时再展开。 |
+
+由此得到下一批 `EntryPreludePhase` 实现顺序：
+
+1. 先补齐 `Lds`/`KernelImage` 相关符号和布局检查面，确保 `_start`、`kernel_start`、text 起点、ELF entry、head text 范围在实现中可对应。
+2. 实现入口前导期中不依赖页表构造的对象承载：`RootStream`、`InterruptStream`、`KernelImage`、`BootCPU`、`CpuGroup`、`InitTask`、`InitStack`、`EventStream`。
+3. 实现 `RawDtb.Preset/Setup` 的最小确认路径，把 OpenSBI handoff 假设转化为 header/magic/totalsize/range 的运行期检查。
+4. 在上述事实具备后，再推进 `FixMap`、`TrampolineVm`、`EarlyVm` 和 `Vm` 三段切换。
 
 ## 应用复用
 

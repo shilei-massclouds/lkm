@@ -1,5 +1,5 @@
 use crate::{
-    objects::{boot_args::BootArgs, earlycon, printk, state::EventResult},
+    objects::{boot_args::BootArgs, entry_prelude::EntryPreludeObjects, state::EventResult},
     trace::{self, Checkpoint},
 };
 
@@ -7,30 +7,31 @@ pub fn run(boot_args: &BootArgs) {
     let _ = boot_args.state();
     let _ = boot_args.boot_hartid();
     let _ = boot_args.dtb_pa();
-    entry_prelude_phase_setup();
-    entry_successor_phase_setup();
+    let mut entry_prelude = EntryPreludeObjects::new();
+    entry_prelude_phase_setup(boot_args, &mut entry_prelude);
+    smoke_output_after_entry_prelude_foundation();
 }
 
-fn entry_prelude_phase_setup() {
-    trace::checkpoint(Checkpoint::EntryPreludePhaseReady);
+fn entry_prelude_phase_setup(boot_args: &BootArgs, objects: &mut EntryPreludeObjects) {
+    trace::checkpoint(Checkpoint::EntryPreludePhaseStarted);
+    require(objects.interrupt_stream_preset());
+    require(objects.kernel_image_preset());
+    require(objects.root_stream_preset());
+    require(objects.kernel_image_setup());
+    require(objects.cpu_group_preset(boot_args));
+    require(objects.init_task_preset());
+    require(objects.init_stack_preset());
+    require(objects.event_stream_preset());
+    trace::checkpoint(Checkpoint::EntryPreludeFoundationReady);
 }
 
-fn entry_successor_phase_setup() {
-    trace::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
-    require(printk::preset());
-    printk::write_str("arceos_ex object kernel\n");
-
-    require(earlycon::preset());
-    require(earlycon::setup());
-    require(earlycon::enable());
-    earlycon::drain_printk();
-    trace::checkpoint(Checkpoint::EntrySuccessorPhaseReady);
+fn smoke_output_after_entry_prelude_foundation() {
+    crate::arch::riscv64::sbi::putstr("arceos_ex object kernel\n");
 }
 
 fn require(result: EventResult) {
     if !result.is_success() {
-        printk::write_str("arceos_ex boot event failed\n");
-        earlycon::drain_printk();
+        crate::arch::riscv64::sbi::putstr("arceos_ex boot event failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
     }
 }

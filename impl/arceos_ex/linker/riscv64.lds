@@ -6,17 +6,19 @@ BASE_ADDRESS = 0x80200000;
 SECTIONS
 {
     . = BASE_ADDRESS;
-    PROVIDE(kernel_start = .);
-    PROVIDE(_stext = .);
+    kernel_start = .;
+    _stext = .;
 
     .head.text : ALIGN(4K) {
+        __head_text_start = .;
         KEEP(*(.head.text))
+        __head_text_end = .;
     }
 
     .text : ALIGN(4K) {
         *(.text .text.*)
     }
-    PROVIDE(_etext = .);
+    _etext = .;
 
     .rodata : ALIGN(4K) {
         *(.rodata .rodata.*)
@@ -27,18 +29,28 @@ SECTIONS
         *(.sdata .sdata.*)
         *(.data .data.*)
     }
-    PROVIDE(_edata = .);
+    _edata = .;
 
     .bss : ALIGN(4K) {
-        PROVIDE(_sbss = .);
+        _sbss = .;
+        __bss_start = .;
+        KEEP(*(.bss.objects))
         *(.sbss .sbss.*)
         *(.bss .bss.*)
         *(COMMON)
-        PROVIDE(_ebss = .);
+        _ebss = .;
+        __bss_stop = .;
     }
 
-    PROVIDE(_end = .);
-    PROVIDE(kernel_end = .);
+    .boot.stack : ALIGN(4K) {
+        init_stack_start = .;
+        KEEP(*(.boot.stack))
+        . = ALIGN(4K);
+        init_stack_end = .;
+    }
+
+    _end = .;
+    kernel_end = .;
 
     /DISCARD/ : {
         *(.eh_frame)

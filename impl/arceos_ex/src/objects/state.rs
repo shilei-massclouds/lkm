@@ -35,6 +35,7 @@ impl LifecycleEvent {
 pub enum EventErrorCode {
     DuplicateLifecycleEvent,
     InvalidTransition,
+    ConditionFailed,
     UnexpectedState,
 }
 
@@ -76,6 +77,21 @@ pub enum EventResult {
 impl EventResult {
     pub const fn is_success(self) -> bool {
         matches!(self, Self::Success)
+    }
+
+    pub const fn failed_condition(
+        event: LifecycleEvent,
+        actual: State,
+        expected: State,
+        target: State,
+    ) -> Self {
+        Self::Failed(EventError::new(
+            EventErrorCode::ConditionFailed,
+            event,
+            actual,
+            expected,
+            target,
+        ))
     }
 }
 

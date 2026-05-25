@@ -8,6 +8,12 @@ pub fn putchar(byte: u8) {
     let _ = sbi_call_1(EID_LEGACY_CONSOLE_PUTCHAR, 0, byte as usize);
 }
 
+pub fn putstr(message: &str) {
+    for byte in message.bytes() {
+        putchar(byte);
+    }
+}
+
 pub fn system_shutdown() -> ! {
     let _ = sbi_call_2(
         EID_SRST,

@@ -1,10 +1,13 @@
 use super::state::{EventResult, Lifecycle, LifecycleEvent, State};
 use crate::trace::Checkpoint;
 
+#[allow(dead_code)]
 const BUFFER_SIZE: usize = 4096;
 
+#[allow(dead_code)]
 static mut PRINTK_BUFFER: PrintkBuffer = PrintkBuffer::new();
 
+#[allow(dead_code)]
 pub struct PrintkBuffer {
     lifecycle: Lifecycle,
     buffer: [u8; BUFFER_SIZE],
@@ -12,6 +15,7 @@ pub struct PrintkBuffer {
     write: usize,
 }
 
+#[allow(dead_code)]
 impl PrintkBuffer {
     pub const fn new() -> Self {
         Self {
@@ -55,10 +59,12 @@ impl PrintkBuffer {
     }
 }
 
+#[allow(dead_code)]
 pub fn preset() -> EventResult {
     unsafe { (&raw mut PRINTK_BUFFER).as_mut().unwrap().preset() }
 }
 
+#[allow(dead_code)]
 pub fn write_str(message: &str) {
     unsafe {
         (&raw mut PRINTK_BUFFER)
@@ -68,6 +74,7 @@ pub fn write_str(message: &str) {
     }
 }
 
+#[allow(dead_code)]
 pub fn drain_to(sink: impl FnMut(u8)) {
     unsafe {
         (&raw mut PRINTK_BUFFER).as_mut().unwrap().drain_to(sink);
