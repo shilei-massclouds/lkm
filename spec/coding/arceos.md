@@ -29,7 +29,7 @@
 - 地址空间：参考 ArceOS 的页表抽象和地址类型，但按 `TrampolineVm`、`EarlyVm`、`SwapperVm` 区分阶段边界。
 - SBI：参考 ArceOS 的 SBI 调用封装，形成规格中的 `SBI` 能力视图。
 - FDT：参考 ArceOS 的设备树解析入口，但保持 `RawDtb` 与 `EarlyDtb` 的阶段边界。
-- 输出：参考 ArceOS early console 或 logging 机制，落实 `PrintkBuffer` 与 `EarlyCon` 的区别。
+- 输出：参考 ArceOS early console 或 logging 机制，落实 `PrintkBuffer` 与 `EarlyCon` 的对象级区别。对象级编码阶段先建立启动期内部 `printk`/`println-like` 前端到 `PrintkBuffer.write(...) -> ring buffer -> EarlyCon.drain(...)` 的路径；应用侧 `axstd::println!` 是另一个前端入口，也应汇聚到同一 `PrintkBuffer` 后端路径。两类 `println!` 入口不应混同；`axlog` 这类上层日志 facade 属于组合封装阶段，不作为当前模型要求的核心对象。
 - 内存管理：参考 ArceOS 早期内存区段和 allocator 初始化经验，落实 `MemBlock` 的候选区段、保留区段和 enable 边界。
 
 ## arceos_ex 第一轮形态

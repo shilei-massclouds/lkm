@@ -355,7 +355,9 @@ object PrintkBuffer: BufferObject {
     state State::Base {
         events {
             /*
-             * Preset 建立静态日志缓冲，并承接 Linux Banner 这类早期输出。
+             * Preset 建立静态日志缓冲。arceos_ex 启动 banner 这类早期输出通过
+             * 启动期内部输出前端或 PrintkBuffer.write(...) action 写入缓冲区，
+             * 不依赖应用侧 axstd::println!，也不作为生命周期事件的后置状态。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
@@ -364,7 +366,6 @@ object PrintkBuffer: BufferObject {
 
                 ensures {
                     printk_buffer_ready(PrintkBuffer);
-                    linux_banner_buffered(PrintkBuffer);
                 }
             }
         }
@@ -376,7 +377,6 @@ object PrintkBuffer: BufferObject {
     state State::Prepared {
         invariant {
             printk_buffer_ready(PrintkBuffer);
-            linux_banner_buffered(PrintkBuffer);
         }
     }
 }

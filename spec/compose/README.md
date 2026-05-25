@@ -48,3 +48,13 @@
 - 第一轮只参考并接入 ArceOS 的 `ax-std` Unikernel 路径；不参考、不适配也不调试 ArceOS C API 和 Rust std/Hermit API 路径。
 
 组合封装阶段可以复用 ArceOS 的接口形状、目录习惯和成熟构建路径，但不得因为 ArceOS 现有模块边界而改变模型对象的状态迁移。
+
+## 输出 Facade
+
+对象级输出路径应先由 `PrintkBuffer`、`EarlyCon` 和后续正式 `Console` 承担。`Object Coding Phase` 可以先引入启动期内部 `printk`/`println-like` 前端，用于输出 `arceos_ex` 启动 banner；应用侧 `axstd::println!` 是另一个前端入口，用于 `helloworld` 等 Unikernel payload。二者不是同一个入口，但应汇聚到同一条缓冲路径；`info!/debug!/warn!/error!` 和 panic 输出等更完整前端后续也应汇聚到该路径：
+
+```text
+frontend -> PrintkBuffer.write(...) -> ring buffer -> EarlyCon/Console drain
+```
+
+`axlog` 属于 ArceOS 风格的上层日志 facade。它可以在 `Composition Phase` 中提供日志级别过滤、格式化、时间戳、CPU/task 标识、颜色和 `LogIf` 适配，但不应反向改变对象级输出语义。对象级编码阶段可以先实现启动期内部输出前端和应用侧 `axstd::println!` 到 `PrintkBuffer -> EarlyCon(SBI)` 的最小闭环；后续再把 `axlog` 接到同一 `PrintkBuffer` 路径。
