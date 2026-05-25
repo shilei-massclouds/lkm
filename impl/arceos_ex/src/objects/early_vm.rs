@@ -3,9 +3,12 @@ use crate::trace::Checkpoint;
 use super::{
     boot_args::BootArgs,
     config::Config,
+    entry_prelude::KernelImage,
+    entry_prelude::Lds,
     fix_map::FixMap,
     raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
+    static_objects::StaticObjects,
 };
 
 pub struct EarlyVm {
@@ -31,7 +34,7 @@ impl EarlyVm {
         raw_dtb: &mut RawDtb,
         fix_map: &mut FixMap,
     ) -> EventResult {
-        if config.state() != State::Online
+        if !config.entry_prelude_ready()
             || raw_dtb.state() != State::Base
             || fix_map.state() != State::Base
         {
@@ -63,6 +66,55 @@ impl EarlyVm {
             State::Base,
             State::Prepared,
             Checkpoint::EarlyVmPrepared,
+        )
+    }
+
+    pub fn setup(
+        &mut self,
+        config: &Config,
+        static_objects: &mut StaticObjects,
+        lds: &Lds,
+        kernel_image: &KernelImage,
+        raw_dtb: &RawDtb,
+        fix_map: &FixMap,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || !config.entry_prelude_ready()
+            || static_objects.state() != State::Online
+            || !static_objects.storage_ready(config)
+            || kernel_image.state() != State::Ready
+            || raw_dtb.state() != State::Ready
+            || fix_map.state() != State::Ready
+            || !fix_map.contains_raw_dtb(raw_dtb)
+        {
+            return EventResult::failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        if !static_objects.build_early_pg_dir(
+            config,
+            lds.kernel_start(),
+            lds.kernel_end(),
+            raw_dtb,
+            fix_map,
+        ) {
+            return EventResult::failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::EarlyVmReady,
         )
     }
 }

@@ -9,6 +9,7 @@ use super::{
     fix_map::FixMap,
     raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
+    static_objects::StaticObjects,
 };
 
 pub const PT_SIZE_ON_STACK: usize = 256;
@@ -52,6 +53,7 @@ extern "C" fn early_event_entry_rust() -> ! {
 
 pub struct EntryPreludeObjects {
     config: Config,
+    static_objects: StaticObjects,
     pub lds: Lds,
     interrupt_stream: InterruptStream,
     kernel_image: KernelImage,
@@ -69,6 +71,7 @@ impl EntryPreludeObjects {
     pub const fn new() -> Self {
         Self {
             config: Config::new(),
+            static_objects: StaticObjects::new(),
             lds: Lds::new(),
             interrupt_stream: InterruptStream::new(),
             kernel_image: KernelImage::new(),
@@ -123,6 +126,17 @@ impl EntryPreludeObjects {
             &mut self.fix_map,
         )
     }
+
+    pub fn early_vm_setup(&mut self) -> EventResult {
+        self.early_vm.setup(
+            &self.config,
+            &mut self.static_objects,
+            &self.lds,
+            &self.kernel_image,
+            &self.raw_dtb,
+            &self.fix_map,
+        )
+    }
 }
 
 pub struct Lds {
@@ -140,11 +154,11 @@ impl Lds {
         self.lifecycle.state()
     }
 
-    fn kernel_start(&self) -> usize {
+    pub fn kernel_start(&self) -> usize {
         kernel_start as usize
     }
 
-    fn kernel_end(&self) -> usize {
+    pub fn kernel_end(&self) -> usize {
         kernel_end as usize
     }
 
@@ -241,6 +255,10 @@ impl KernelImage {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
     }
 
     fn preset(&mut self, lds: &Lds) -> EventResult {

@@ -10,14 +10,16 @@ use super::{
 pub struct FixMapSlot {
     page_size: usize,
     page_count: usize,
+    virt_start: usize,
     mapped_range: PhysRange,
 }
 
 impl FixMapSlot {
-    pub const fn new(page_size: usize, page_count: usize) -> Self {
+    pub const fn new(page_size: usize, page_count: usize, virt_start: usize) -> Self {
         Self {
             page_size,
             page_count,
+            virt_start,
             mapped_range: PhysRange::empty(),
         }
     }
@@ -26,12 +28,17 @@ impl FixMapSlot {
         Self {
             page_size: 0,
             page_count: 0,
+            virt_start: 0,
             mapped_range: PhysRange::empty(),
         }
     }
 
     pub const fn page_size(self) -> usize {
         self.page_size
+    }
+
+    pub const fn virt_start(self) -> usize {
+        self.virt_start
     }
 
     fn can_contain(self, range: PhysRange) -> bool {
@@ -72,6 +79,14 @@ impl FixMap {
     #[allow(dead_code)]
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn fdt_slot(&self) -> FixMapSlot {
+        self.fdt_slot
+    }
+
+    pub fn contains_raw_dtb(&self, raw_dtb: &RawDtb) -> bool {
+        self.fdt_slot.contains(raw_dtb.range())
     }
 
     pub fn preset(&mut self, config: &Config, raw_dtb: &RawDtb) -> EventResult {

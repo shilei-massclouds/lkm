@@ -33,6 +33,10 @@ impl PhysRange {
     pub const fn end(self) -> usize {
         self.end
     }
+
+    pub const fn size(self) -> usize {
+        self.end - self.start
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

@@ -7,3 +7,4 @@ pub mod fix_map;
 pub mod printk;
 pub mod raw_dtb;
 pub mod state;
+pub mod static_objects;
