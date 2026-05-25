@@ -5,6 +5,7 @@ use crate::{arch::riscv64::csr, trace::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
+    early_vm::EarlyVm,
     fix_map::FixMap,
     raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
@@ -59,6 +60,7 @@ pub struct EntryPreludeObjects {
     init_task: InitTask,
     init_stack: InitStack,
     event_stream: EventStream,
+    early_vm: EarlyVm,
     raw_dtb: RawDtb,
     fix_map: FixMap,
 }
@@ -75,6 +77,7 @@ impl EntryPreludeObjects {
             init_task: InitTask::new(),
             init_stack: InitStack::new(),
             event_stream: EventStream::new(),
+            early_vm: EarlyVm::new(),
             raw_dtb: RawDtb::new(),
             fix_map: FixMap::new(),
         }
@@ -112,16 +115,13 @@ impl EntryPreludeObjects {
         self.event_stream.preset()
     }
 
-    pub fn raw_dtb_preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        self.raw_dtb.preset(boot_args)
-    }
-
-    pub fn raw_dtb_setup(&mut self) -> EventResult {
-        self.raw_dtb.setup()
-    }
-
-    pub fn fix_map_preset(&mut self) -> EventResult {
-        self.fix_map.preset(&self.config, &self.raw_dtb)
+    pub fn early_vm_preset(&mut self, boot_args: &BootArgs) -> EventResult {
+        self.early_vm.preset(
+            &self.config,
+            boot_args,
+            &mut self.raw_dtb,
+            &mut self.fix_map,
+        )
     }
 }
 

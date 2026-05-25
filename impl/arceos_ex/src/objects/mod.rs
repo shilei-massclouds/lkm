@@ -1,5 +1,6 @@
 pub mod boot_args;
 pub mod config;
+pub mod early_vm;
 pub mod earlycon;
 pub mod entry_prelude;
 pub mod fix_map;
