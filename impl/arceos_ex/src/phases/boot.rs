@@ -22,9 +22,7 @@ fn entry_prelude_phase_setup(boot_args: &BootArgs, objects: &mut EntryPreludeObj
     require(objects.init_task_preset());
     require(objects.init_stack_preset());
     require(objects.event_stream_preset());
-    require(objects.trampoline_vm_setup());
-    require(objects.early_vm_preset(boot_args));
-    require(objects.early_vm_setup());
+    require(objects.vm_preset(boot_args));
     trace::checkpoint(Checkpoint::EntryPreludeFoundationReady);
 }
 

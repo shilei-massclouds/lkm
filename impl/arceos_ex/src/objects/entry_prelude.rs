@@ -5,12 +5,11 @@ use crate::{arch::riscv64::csr, trace::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
-    early_vm::EarlyVm,
     fix_map::FixMap,
     raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
-    trampoline_vm::TrampolineVm,
+    vm::Vm,
 };
 
 pub const PT_SIZE_ON_STACK: usize = 256;
@@ -63,8 +62,7 @@ pub struct EntryPreludeObjects {
     init_task: InitTask,
     init_stack: InitStack,
     event_stream: EventStream,
-    trampoline_vm: TrampolineVm,
-    early_vm: EarlyVm,
+    vm: Vm,
     raw_dtb: RawDtb,
     fix_map: FixMap,
 }
@@ -82,8 +80,7 @@ impl EntryPreludeObjects {
             init_task: InitTask::new(),
             init_stack: InitStack::new(),
             event_stream: EventStream::new(),
-            trampoline_vm: TrampolineVm::new(),
-            early_vm: EarlyVm::new(),
+            vm: Vm::new(),
             raw_dtb: RawDtb::new(),
             fix_map: FixMap::new(),
         }
@@ -121,28 +118,15 @@ impl EntryPreludeObjects {
         self.event_stream.preset()
     }
 
-    pub fn trampoline_vm_setup(&mut self) -> EventResult {
-        self.trampoline_vm
-            .setup(&self.config, &mut self.static_objects, &self.lds)
-    }
-
-    pub fn early_vm_preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        self.early_vm.preset(
-            &self.config,
-            boot_args,
-            &mut self.raw_dtb,
-            &mut self.fix_map,
-        )
-    }
-
-    pub fn early_vm_setup(&mut self) -> EventResult {
-        self.early_vm.setup(
+    pub fn vm_preset(&mut self, boot_args: &BootArgs) -> EventResult {
+        self.vm.preset(
             &self.config,
             &mut self.static_objects,
             &self.lds,
             &self.kernel_image,
-            &self.raw_dtb,
-            &self.fix_map,
+            boot_args,
+            &mut self.raw_dtb,
+            &mut self.fix_map,
         )
     }
 }
