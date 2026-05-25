@@ -1,7 +1,55 @@
+use core::arch::global_asm;
+
 #[allow(dead_code)]
 const SSTATUS_SIE: usize = 1 << 1;
 const SSTATUS_VS: usize = 0b11 << 9;
 const SSTATUS_FS: usize = 0b11 << 13;
+
+pub const SATP_MODE_SV39: usize = 8usize << 60;
+
+global_asm!(
+    r#"
+    .section .head.text.vm_switch, "ax"
+    .align 2
+    .globl arceos_ex_switch_to_early_vm
+arceos_ex_switch_to_early_vm:
+    /*
+     * a0 = trampoline satp
+     * a1 = early satp
+     * a2 = virtual stack pointer
+     * a3 = virtual gp
+     * a4 = virtual continuation
+     * a5 = kernel virtual offset
+     *
+     * This follows the Linux/RISC-V relocation idea: after writing the
+     * trampoline satp, the next physical PC is not mapped, so the CPU traps
+     * to the virtual stvec label that is covered by the trampoline mapping.
+     */
+    la      t0, 1f
+    add     t0, t0, a5
+    csrw    stvec, t0
+    sfence.vma
+    csrw    satp, a0
+    .balign 4
+1:
+    mv      sp, a2
+    mv      gp, a3
+    csrw    satp, a1
+    sfence.vma
+    jr      a4
+"#
+);
+
+unsafe extern "C" {
+    fn arceos_ex_switch_to_early_vm(
+        trampoline_satp: usize,
+        early_satp: usize,
+        stack_virt: usize,
+        gp_virt: usize,
+        continuation_virt: usize,
+        kernel_virt_offset: usize,
+    ) -> !;
+}
 
 pub fn disable_kernel_fpu_vector() {
     clear_sstatus_bits(SSTATUS_FS | SSTATUS_VS);
@@ -28,6 +76,16 @@ pub fn read_gp() -> usize {
     value
 }
 
+pub fn read_satp() -> usize {
+    let value: usize;
+
+    unsafe {
+        core::arch::asm!("csrr {value}, satp", value = out(reg) value, options(nostack, nomem));
+    }
+
+    value
+}
+
 pub fn write_tp(value: usize) {
     unsafe {
         core::arch::asm!("mv tp, {value}", value = in(reg) value, options(nostack, nomem));
@@ -40,10 +98,45 @@ pub fn write_stvec(value: usize) {
     }
 }
 
+pub fn write_satp(value: usize) {
+    unsafe {
+        core::arch::asm!("csrw satp, {value}", value = in(reg) value, options(nostack, nomem));
+    }
+}
+
+pub fn sfence_vma() {
+    unsafe {
+        core::arch::asm!("sfence.vma", options(nostack, nomem));
+    }
+}
+
 #[allow(dead_code)]
 pub fn clear_sscratch() {
     unsafe {
         core::arch::asm!("csrw sscratch, zero", options(nostack, nomem));
+    }
+}
+
+pub unsafe fn switch_to_early_vm(
+    trampoline_satp: usize,
+    early_satp: usize,
+    stack_virt: usize,
+    gp_virt: usize,
+    continuation_virt: usize,
+    kernel_virt_offset: usize,
+) -> ! {
+    // SAFETY: this is the architecture boundary for Vm.Setup. The caller must
+    // provide satp values for initialized TrampolineVm/EarlyVm page tables and
+    // virtual continuation state covered by EarlyVm.
+    unsafe {
+        arceos_ex_switch_to_early_vm(
+            trampoline_satp,
+            early_satp,
+            stack_virt,
+            gp_virt,
+            continuation_virt,
+            kernel_virt_offset,
+        )
     }
 }
 

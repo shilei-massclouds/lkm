@@ -33,12 +33,13 @@
 | P0 | 完成 | 定义对象级公共基础：规范状态集合、事件集合、`EventResult`、生命周期事件唯一性检查和 checkpoint hook。 |
 | P0 | 完成 | 分类 `make verify` 当前 obligations/deferred，明确进入 `EntryPreludePhase` 对象实现前的处理策略。 |
 | P0 | 完成 | 实现 `EntryPreludePhase` 第一批不依赖页表切换的 foundation 对象：`InterruptStream.Preset`、`KernelImage.Preset/Setup`、`RootStream.Preset`、`BootCPU.Preset`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`、`EventStream.Preset`。 |
-| P0 | 待办 | 实现 `EntryPreludePhase` 最小闭环：`_start`、`__global_pointer$`、head text 布局约束、BootArgs、RootStream、KernelImage、BootCPU、InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm、VM 三段切换。 |
-| P0 | 待办 | 实现 `EntrySuccessorPhase` 最小闭环：EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap、SwapperVm。 |
-| P0 | 待办 | 建立 no-alloc 输出路径：启动期内部 `printk`/`println-like` 前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
-| P1 | 待办 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
+| P0 | 完成 | 实现 `EntryPreludePhase` 最小闭环：`_start`、`__global_pointer$`、head text 布局约束、BootArgs、RootStream、KernelImage、BootCPU、InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm、VM 三段切换；`make run LOG=trace` 已到达 banner 与本地 `app_main()`。 |
+| P0 | 完成 | 实现 `EntrySuccessorPhase` 最小闭环：EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap、SwapperVm；`make run LOG=trace` 已到达 `EntrySuccessorPhase.Ready`。 |
+| P0 | 完成 | 建立 no-alloc 输出路径：启动期内部 `printk`/`println-like` 前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
+| P1 | 完成 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
 | P1 | 完成 | 用顶层 Makefile 提供 `build`、`run`、`verify`、`clean` 等入口，暂时脱离 `xtask`。 |
 | P1 | 待办 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性。 |
+| P1 | 待办 | 整理规格规则强度分层，为 `MUST`/硬约束、`SHOULD`/强建议、`MAY`/建议项和 `NOTE`/说明建立统一标注与解释规则。 |
 | P1 | 待办 | 建立 GitHub Actions 快速 CI，覆盖推导工具质量、核心规格推导和 `impl/arceos_ex` 最小构建。 |
 | P1 | 待办 | 建立 nightly/manual 测试流水线，生成 trace、系统测试日志、对象覆盖表和项目主页展示产物。 |
 | P2 | 延期 | 组件封装阶段：恢复 ArceOS 组件接口、crate 边界、`ax-std` 接入、overlay workspace、`xtask`、feature 传递、`axlog` 和 `ax-alloc` facade 等问题。 |
@@ -61,6 +62,9 @@ make clean
 `KERNEL ?= arceos_ex` 选择默认内核。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
 启用 checkpoint 字符输出。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
 生成带注释的 trace SVG 报告。
+
+当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready` 与
+`EntrySuccessorPhase.Ready`，输出启动 banner 和 `Hello, world!` 后通过 SBI 关机。
 
 ## `make verify` obligation 分类
 

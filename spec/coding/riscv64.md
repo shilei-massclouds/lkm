@@ -23,8 +23,10 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 1. MMU 关闭阶段：
    - 入口最前段代码应集中放在内核映像起始处的 boot/head text 区域。实现可采用 `.head.text`、`.text.boot` 或其它等价段名，但链接脚本必须保证该区域紧接 `_start`，且位于固件跳入后可直接取指的物理映像范围内。
    - 该阶段访问内核符号必须使用 PC-relative 或等价 position-independent 方式。若使用 Rust/C 函数，必须确保对应编译选项和代码形态不会生成依赖最终虚拟地址的绝对寻址。
+   - 该阶段不得生成或执行依赖最终虚拟地址的间接控制流。普通对象方法、公共状态机、match/switch 分发、trait/vtable 调用、函数指针表、跳转表、panic 路径和编译器自动生成的分发表都必须满足当前物理地址可执行性；无法证明时，必须改用显式分支、head-safe 汇编或其它可验证的物理地址安全实现。
    - 该阶段不得访问普通 `.data/.bss/.init.data`，除非该访问已经被证明使用当前物理地址语义且不依赖尚未启用的虚拟映射。
    - 该阶段函数不得引入 ftrace、sanitizer、coverage、stack protector 或其它可能访问普通数据段或运行时设施的 instrumentation，除非逐项证明其访问路径满足本阶段约束。
+   - 实现应把 pre-MMU 路径纳入反汇编或等价构建检查范围，重点检查是否出现跳转到高虚拟地址、从普通 `.rodata` 读取代码目标、或其它无法在 MMU 关闭阶段执行的间接分支。
 2. trampoline 临时映射阶段：
    - 切换到 trampoline 页表后，只允许执行 trampoline 映射覆盖的代码，且代码应尽快切换到 `EarlyVm` 页表。
    - 该阶段不得访问普通 `.data/.bss/.init.data`，不得调用可能访问普通数据段、锁、日志、allocator 或未映射静态对象的函数。
@@ -45,6 +47,7 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 ## CSR 与屏障
 
 - CSR 访问应集中封装，调用点表达具体语义，例如关闭中断、设置 `stvec`、切换 `satp`。
+- 写入 `stvec` 的入口地址必须满足 RISC-V64 `stvec` 对齐和模式编码要求。直接模式下入口 base 至少 4 字节对齐，低位不得被误用为 mode；trampoline 或 early trap 入口标签必须在汇编或链接布局中显式保证对齐，并按当前地址空间阶段写入物理地址或虚拟地址。
 - 页表切换相关代码必须显式处理 `sfence.vma` 要求。模型规格可以不逐条展开该细节，但实现规格要求保留该边界。
 - 早期入口对中断 pending/enable 状态的防御性清理应对应 `InterruptStream.Preset` 或 `InterruptStream.Setup` 的实现边界。
 

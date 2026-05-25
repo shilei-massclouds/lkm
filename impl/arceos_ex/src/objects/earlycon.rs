@@ -19,7 +19,16 @@ impl EarlyCon {
         }
     }
 
-    pub fn preset(&mut self) -> EventResult {
+    pub fn preset(&mut self, earlycon_sbi_config: bool) -> EventResult {
+        if !earlycon_sbi_config {
+            return EventResult::failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
@@ -28,7 +37,16 @@ impl EarlyCon {
         )
     }
 
-    pub fn setup(&mut self) -> EventResult {
+    pub fn setup(&mut self, sbi_ready: bool) -> EventResult {
+        if !sbi_ready {
+            return EventResult::failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -38,23 +56,33 @@ impl EarlyCon {
     }
 
     pub fn enable(&mut self) -> EventResult {
-        self.lifecycle.transition(
+        let result = self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,
             State::Online,
             Checkpoint::EarlyConOnline,
-        )
+        );
+        if result.is_success() {
+            printk::drain_to(sbi::putchar);
+        }
+        result
+    }
+
+}
+
+#[allow(dead_code)]
+pub fn preset(earlycon_sbi_config: bool) -> EventResult {
+    unsafe {
+        (&raw mut EARLY_CON)
+            .as_mut()
+            .unwrap()
+            .preset(earlycon_sbi_config)
     }
 }
 
 #[allow(dead_code)]
-pub fn preset() -> EventResult {
-    unsafe { (&raw mut EARLY_CON).as_mut().unwrap().preset() }
-}
-
-#[allow(dead_code)]
-pub fn setup() -> EventResult {
-    unsafe { (&raw mut EARLY_CON).as_mut().unwrap().setup() }
+pub fn setup(sbi_ready: bool) -> EventResult {
+    unsafe { (&raw mut EARLY_CON).as_mut().unwrap().setup(sbi_ready) }
 }
 
 #[allow(dead_code)]

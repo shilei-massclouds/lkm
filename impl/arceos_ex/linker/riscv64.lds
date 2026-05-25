@@ -1,37 +1,40 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 
-BASE_ADDRESS = 0x80200000;
+KERNEL_LINK_ADDR = 0xffffffff80000000;
+KERNEL_PHYS_ADDR = 0x80200000;
+LOAD_OFFSET = KERNEL_LINK_ADDR - KERNEL_PHYS_ADDR;
 
 SECTIONS
 {
-    . = BASE_ADDRESS;
+    . = KERNEL_LINK_ADDR;
     kernel_start = .;
     _stext = .;
 
-    .head.text : ALIGN(4K) {
+    .head.text : AT(ADDR(.head.text) - LOAD_OFFSET) ALIGN(4K) {
         __head_text_start = .;
-        KEEP(*(.head.text))
+        KEEP(*(.head.text.entry))
+        KEEP(*(.head.text .head.text.*))
         __head_text_end = .;
     }
 
-    .text : ALIGN(4K) {
+    .text : AT(ADDR(.text) - LOAD_OFFSET) ALIGN(4K) {
         *(.text .text.*)
     }
     _etext = .;
 
-    .rodata : ALIGN(4K) {
+    .rodata : AT(ADDR(.rodata) - LOAD_OFFSET) ALIGN(4K) {
         *(.rodata .rodata.*)
     }
 
-    .data : ALIGN(4K) {
+    .data : AT(ADDR(.data) - LOAD_OFFSET) ALIGN(4K) {
         PROVIDE(__global_pointer$ = . + 0x800);
         *(.sdata .sdata.*)
         *(.data .data.*)
     }
     _edata = .;
 
-    .bss : ALIGN(4K) {
+    .bss : AT(ADDR(.bss) - LOAD_OFFSET) ALIGN(4K) {
         _sbss = .;
         __bss_start = .;
         KEEP(*(.bss.objects))
@@ -42,7 +45,7 @@ SECTIONS
         __bss_stop = .;
     }
 
-    .boot.stack : ALIGN(4K) {
+    .boot.stack : AT(ADDR(.boot.stack) - LOAD_OFFSET) ALIGN(4K) {
         init_stack_start = .;
         KEEP(*(.boot.stack))
         . = ALIGN(4K);

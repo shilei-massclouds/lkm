@@ -41,6 +41,21 @@ impl FixMapSlot {
         self.virt_start
     }
 
+    pub fn virt_for_phys(self, phys: usize) -> Option<usize> {
+        if self.page_size == 0
+            || !self.page_size.is_power_of_two()
+            || phys < self.mapped_range.start()
+            || phys >= self.mapped_range.end()
+        {
+            return None;
+        }
+
+        let page_offset = self.mapped_range.start() & (self.page_size - 1);
+        let mapped_phys_base = self.mapped_range.start() - page_offset;
+        let delta = phys.checked_sub(mapped_phys_base)?;
+        self.virt_start.checked_add(delta)
+    }
+
     fn can_contain(self, range: PhysRange) -> bool {
         if self.page_size == 0 || !self.page_size.is_power_of_two() {
             return false;

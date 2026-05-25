@@ -11,7 +11,7 @@ use core::panic::PanicInfo;
 
 global_asm!(
     r#"
-    .section .head.text, "ax"
+    .section .head.text.entry, "ax"
     .globl _start
 _start:
     .option push
@@ -35,13 +35,12 @@ boot_stack_top:
 #[unsafe(no_mangle)]
 extern "C" fn rust_entry(hartid: usize, dtb_pa: usize) -> ! {
     let boot_args = objects::boot_args::BootArgs::new(hartid, dtb_pa);
-    phases::boot::run(&boot_args);
-    app_main();
-    arch::riscv64::sbi::system_shutdown()
+    phases::boot::run(&boot_args)
 }
 
-fn app_main() {
-    arch::riscv64::sbi::putstr("Hello, world!\n");
+pub fn app_main() {
+    objects::printk::write_str("Hello, world!\n");
+    objects::earlycon::drain_printk();
 }
 
 #[panic_handler]

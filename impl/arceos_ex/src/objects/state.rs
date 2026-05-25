@@ -161,15 +161,47 @@ const fn is_allowed_lifecycle_transition(
     event: LifecycleEvent,
     target: State,
 ) -> bool {
-    matches!(
-        (source, event, target),
-        (State::Base, LifecycleEvent::Preset, State::Prepared)
-            | (State::Base, LifecycleEvent::Preset, State::Ready)
-            | (State::Base, LifecycleEvent::Setup, State::Ready)
-            | (State::Prepared, LifecycleEvent::Setup, State::Ready)
-            | (State::Prepared, LifecycleEvent::Enable, State::Online)
-            | (State::Ready, LifecycleEvent::Enable, State::Online)
-            | (State::Ready, LifecycleEvent::Cleanup, State::Destroyed)
-            | (State::Online, LifecycleEvent::Cleanup, State::Destroyed)
-    )
+    if matches_state(source, State::Base) {
+        if matches_event(event, LifecycleEvent::Preset) {
+            return matches_state(target, State::Prepared) || matches_state(target, State::Ready);
+        }
+        if matches_event(event, LifecycleEvent::Setup) {
+            return matches_state(target, State::Ready);
+        }
+        return false;
+    }
+
+    if matches_state(source, State::Prepared) {
+        if matches_event(event, LifecycleEvent::Setup) {
+            return matches_state(target, State::Ready);
+        }
+        if matches_event(event, LifecycleEvent::Enable) {
+            return matches_state(target, State::Online);
+        }
+        return false;
+    }
+
+    if matches_state(source, State::Ready) {
+        if matches_event(event, LifecycleEvent::Enable) {
+            return matches_state(target, State::Online);
+        }
+        if matches_event(event, LifecycleEvent::Cleanup) {
+            return matches_state(target, State::Destroyed);
+        }
+        return false;
+    }
+
+    if matches_state(source, State::Online) && matches_event(event, LifecycleEvent::Cleanup) {
+        return matches_state(target, State::Destroyed);
+    }
+
+    false
+}
+
+const fn matches_state(left: State, right: State) -> bool {
+    left as u8 == right as u8
+}
+
+const fn matches_event(left: LifecycleEvent, right: LifecycleEvent) -> bool {
+    left as u8 == right as u8
 }

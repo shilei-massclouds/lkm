@@ -57,6 +57,10 @@ impl PrintkBuffer {
             sink(byte);
         }
     }
+
+    pub fn is_prepared(&self) -> bool {
+        self.lifecycle.state() == State::Prepared
+    }
 }
 
 #[allow(dead_code)]
@@ -72,6 +76,10 @@ pub fn write_str(message: &str) {
             .unwrap()
             .write_bytes(message.as_bytes());
     }
+}
+
+pub fn is_prepared() -> bool {
+    unsafe { (&raw const PRINTK_BUFFER).as_ref().unwrap().is_prepared() }
 }
 
 #[allow(dead_code)]

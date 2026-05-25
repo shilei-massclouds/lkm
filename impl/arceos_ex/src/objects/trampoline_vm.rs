@@ -23,6 +23,42 @@ impl TrampolineVm {
         self.lifecycle.state()
     }
 
+    pub fn enable(&mut self, kernel_image: &super::entry_prelude::KernelImage) -> EventResult {
+        if self.lifecycle.state() != State::Ready || kernel_image.state() != State::Ready {
+            return EventResult::failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+            Checkpoint::TrampolineVmOnline,
+        )
+    }
+
+    pub fn cleanup(&mut self, early_vm: &super::early_vm::EarlyVm) -> EventResult {
+        if self.lifecycle.state() != State::Online || early_vm.state() != State::Online {
+            return EventResult::failed_condition(
+                LifecycleEvent::Cleanup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Destroyed,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Cleanup,
+            State::Online,
+            State::Destroyed,
+            Checkpoint::TrampolineVmDestroyed,
+        )
+    }
+
     pub fn setup(
         &mut self,
         config: &Config,

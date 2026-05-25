@@ -7,13 +7,16 @@ const PAGE_SIZE: usize = 4096;
 const PMD_SIZE: usize = 2 * 1024 * 1024;
 const FDT_SLOT_SIZE: usize = 2 * 1024 * 1024;
 const KERNEL_LINK_ADDR: usize = 0xffff_ffff_8000_0000;
+const KERNEL_PHYS_ADDR: usize = 0x8020_0000;
 const FDT_FIXMAP_VIRT_START: usize = 0xffff_ffc0_0000_0000;
+const LINEAR_MAP_VIRT_START: usize = 0xffff_ffd0_0000_0000;
 
 pub struct Config {
     lifecycle: Lifecycle,
     page_size: usize,
     pmd_size: usize,
     kernel_link_addr: usize,
+    kernel_phys_addr: usize,
     fixmap: FixMapConfig,
 }
 
@@ -24,6 +27,7 @@ impl Config {
             page_size: PAGE_SIZE,
             pmd_size: PMD_SIZE,
             kernel_link_addr: KERNEL_LINK_ADDR,
+            kernel_phys_addr: KERNEL_PHYS_ADDR,
             fixmap: FixMapConfig::new(),
         }
     }
@@ -44,6 +48,46 @@ impl Config {
         self.kernel_link_addr
     }
 
+    pub const fn kernel_phys_addr(&self) -> usize {
+        self.kernel_phys_addr
+    }
+
+    pub const fn kernel_virt_offset(&self) -> usize {
+        self.kernel_link_addr - self.kernel_phys_addr
+    }
+
+    pub const fn linear_map_virt_start(&self) -> usize {
+        LINEAR_MAP_VIRT_START
+    }
+
+    pub fn phys_to_linear(&self, addr: usize) -> Option<usize> {
+        addr.checked_add(self.linear_map_virt_start())
+    }
+
+    pub fn link_to_phys(&self, addr: usize) -> Option<usize> {
+        addr.checked_sub(self.kernel_virt_offset())
+    }
+
+    pub fn phys_to_link(&self, addr: usize) -> Option<usize> {
+        addr.checked_add(self.kernel_virt_offset())
+    }
+
+    pub fn runtime_to_phys(&self, addr: usize) -> Option<usize> {
+        if addr >= self.kernel_link_addr {
+            self.link_to_phys(addr)
+        } else {
+            Some(addr)
+        }
+    }
+
+    pub fn runtime_to_link(&self, addr: usize) -> Option<usize> {
+        if addr >= self.kernel_link_addr {
+            Some(addr)
+        } else {
+            self.phys_to_link(addr)
+        }
+    }
+
     pub fn entry_prelude_ready(&self) -> bool {
         self.state() == State::Online
             && self.page_size != 0
@@ -51,7 +95,10 @@ impl Config {
             && self.pmd_size >= self.page_size
             && self.pmd_size.is_multiple_of(self.page_size)
             && self.kernel_link_addr != 0
+            && self.kernel_phys_addr != 0
             && self.kernel_link_addr.is_multiple_of(self.page_size)
+            && self.kernel_phys_addr.is_multiple_of(self.page_size)
+            && self.kernel_link_addr > self.kernel_phys_addr
             && self.fixmap.fdt().page_size() == self.page_size
     }
 

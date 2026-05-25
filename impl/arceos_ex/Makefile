@@ -10,6 +10,7 @@ ROOT := ../..
 RUSTC ?= rustc +nightly-2025-05-20
 RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
 QEMU ?= qemu-system-riscv64
+QEMU_APPEND ?= earlycon=sbi
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 EXTRA_RUSTFLAGS ?=
 
@@ -42,10 +43,10 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 run:
 ifeq ($(LOG),trace)
 	$(MAKE) PROFILE=trace EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
-	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -kernel build/$(TARGET)/trace/arceos_ex.elf
+	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel build/$(TARGET)/trace/arceos_ex.bin
 else
 	$(MAKE) build
-	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -kernel $(KERNEL_ELF)
+	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(KERNEL_BIN)
 endif
 
 clean:

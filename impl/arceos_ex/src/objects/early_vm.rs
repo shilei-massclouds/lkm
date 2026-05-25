@@ -27,6 +27,42 @@ impl EarlyVm {
         self.lifecycle.state()
     }
 
+    pub fn enable(&mut self, trampoline_vm: &super::trampoline_vm::TrampolineVm) -> EventResult {
+        if self.lifecycle.state() != State::Ready || trampoline_vm.state() != State::Online {
+            return EventResult::failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+            Checkpoint::EarlyVmOnline,
+        )
+    }
+
+    pub fn cleanup(&mut self, swapper_vm: &super::swapper_vm::SwapperVm) -> EventResult {
+        if self.lifecycle.state() != State::Online || swapper_vm.state() != State::Online {
+            return EventResult::failed_condition(
+                LifecycleEvent::Cleanup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Destroyed,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Cleanup,
+            State::Online,
+            State::Destroyed,
+            Checkpoint::EarlyVmDestroyed,
+        )
+    }
+
     pub fn preset(
         &mut self,
         config: &Config,
