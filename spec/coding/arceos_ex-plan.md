@@ -1,83 +1,91 @@
 # arceos_ex 第一轮实现计划
 
-本文记录 `arceos_ex` 第一轮实现任务清单。该计划用于把 `spec/model`、主规格文档和 coding/compose 规格转化为 `tgoskits` 中可执行的实现步骤。
+本文记录 `arceos_ex` 第一轮实现任务清单。当前执行路线已经调整为：先在本仓库内直接完成对象级实现实验，源码放在
+`impl/arceos_ex/`，使用 `Makefile` 编译和运行；暂时不进入 `tgoskits`、`xtask`、ArceOS crate 兼容和 feature 传递问题。
+
+`tgoskits`/ArceOS 组件兼容属于后续 `Composition Phase`，只有对象级实现闭环后再恢复讨论。
 
 ## 目标边界
 
-第一轮目标是让 `arceos_ex` 以 ArceOS Unikernel 形态运行 `helloworld`，并完成当前模型中的两个子阶段：
+第一轮目标是让 `arceos_ex` 作为规格驱动的对象级内核原型运行，并完成当前模型中的两个子阶段：
 
 - `EntryPreludePhase.Ready`
 - `EntrySuccessorPhase.Ready`
 
-最小可见结果是通过 SBI early console 打印 `Hello, world!`，随后关机。
+最小可见结果是通过独立早期输出路径打印启动 banner 和 `Hello, world!`，随后通过 SBI 关机。
 
 实现推进分为两个逻辑阶段：
 
 - `Object Coding Phase`：优先完成对象级语义，包括对象状态、事件推进、依赖检查、checkpoint 和必要的最小运行路径。
 - `Composition Phase`：在对象级语义明确之后，再整理 crate/module 边界、公开接口、adapter、overlay workspace 和与 ArceOS 组件体系的兼容关系。
 
-第一轮代码为了尽快形成可运行闭环，允许对象级实现与 ArceOS 接入代码在物理 crate 中临时交织；但评审和后续整理时应按上述两个阶段区分问题来源。不得因为临时 crate/module 落点而反向改变模型对象语义。
+当前只推进 `Object Coding Phase`。不得因为未来 ArceOS 组件封装需要而反向改变模型对象语义。
 
-实现分层上，`ax-hal-ex` 只负责入口前导期的最低层启动路径，并推进到 `EntryPreludePhase.Ready`。
-之后应进入 `ax-runtime-ex` 的 bootstrap 路径。`EntrySuccessorPhase` 是 `ax-runtime-ex` 引导过程的第一部分，
-后续逐步增加的 runtime/kernel 初始化过程应位于 `EntrySuccessorPhase` 与 `app_main` 之间。
+实现分层上，Phase 对象只作为过程编排存在；非 Phase 对象原则上应在 Rust 中有明确承载，例如 struct、静态单例或启动上下文字段。
+
+## 当前执行计划
+
+| 优先级 | 状态 | 任务 |
+| --- | --- | --- |
+| P0 | 进行中 | 建立 `impl/arceos_ex/` 独立实验目录，包含 `Makefile`、RISC-V64 linker script、入口汇编和 no-alloc Rust 源码骨架。 |
+| P0 | 待办 | 定义对象级公共基础：规范状态集合、事件集合、`EventResult`、生命周期事件唯一性检查和 checkpoint hook。 |
+| P0 | 待办 | 实现 `EntryPreludePhase` 最小闭环：`_start`、`__global_pointer$`、head text 布局约束、BootArgs、RootStream、KernelImage、BootCPU、InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm、VM 三段切换。 |
+| P0 | 待办 | 实现 `EntrySuccessorPhase` 最小闭环：EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap、SwapperVm。 |
+| P0 | 待办 | 建立 no-alloc 输出路径：启动期内部 `printk`/`println-like` 前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
+| P1 | 待办 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
+| P1 | 待办 | 用 Makefile 提供 `build`、`run`、`trace`、`check-spec`、`clean` 等入口，暂时脱离 `xtask`。 |
+| P1 | 待办 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性。 |
+| P2 | 延期 | 组件封装阶段：恢复 ArceOS 组件接口、crate 边界、`ax-std` 接入、overlay workspace、`xtask`、feature 传递、`axlog` 和 `ax-alloc` facade 等问题。 |
 
 ## 入口命令
 
-新增 `cargo xtask arceos-ex ...` 子命令。
+当前入口统一使用 `impl/arceos_ex/Makefile`。
 
 第一轮优先支持：
 
 ```bash
-cargo xtask arceos-ex test qemu --test-case helloworld --arch riscv64
+make -C impl/arceos_ex build
+make -C impl/arceos_ex run
+make -C impl/arceos_ex trace
+make -C impl/arceos_ex check-spec
 ```
 
-该命令应复用 ArceOS 现有测试发现、构建和 QEMU 运行机制，但内部选择 `arceos_ex` 的 `_ex` 核心组件和 RISC-V64 generic 平台。
+`build` 负责编译 RISC-V64 内核镜像；`run` 使用 QEMU/OpenSBI 运行；`trace` 启用 checkpoint 字符输出；`check-spec` 调用 `pyveri`
+检查当前启动时间轴规格。
 
 ## 应用复用
 
-第一轮复用现有 ArceOS Unikernel 应用，不默认复制应用源码。
+当前对象级实验不复用现有 ArceOS Unikernel 应用，不依赖 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust`。
 
-优先目标：
+第一轮只保留一个内建的最小 payload：在对象级初始化完成后调用本地 `app_main()`，由它通过最小 `println!` 前端输出
+`Hello, world!`。该 `println!` 不等同于 `axstd::println!`；后者属于后续组件封装阶段。
 
-- `os/arceos/examples/helloworld`
-
-可作为参考的现有示例：
-
-- `test-suit/arceos/std/qemu-smp1/helloworld`
-
-应用通过 `ax-std` 正式接入，而不是直接依赖 `ax-runtime-ex`。
-第一轮只参考并接入 `ax-std` 路径，不参考、不适配也不调试 ArceOS C API 和 Rust std/Hermit API 路径。
-因此 `helloworld` 的 `println!` 应进入 `ax-std` 统一输出路径，并最终由内核输出机制处理；当前阶段不得把 POSIX fd、
-Hermit syscall 或 C API 层作为 `helloworld` 运行的前置条件。
-
-在 ArceOS Unikernel 形态下，应用是当前内核形态的引领入口。默认应用为 `helloworld`；测试用例也可以按同一机制作为
-Unikernel app 选择和运行。未来可以增加一个支持宏内核形态的 app，由它在 runtime 初始化完成后切换到用户态并启动首个用户态应用。
-`cargo xtask arceos-ex ...` 应长期承担选择这些 app/test payload 的职责。
+在未来 Composition Phase 中，再恢复“Unikernel app 引领内核形态”的 ArceOS 设计，并讨论如何接入 `ax-std`、测试 payload 和宏内核 payload。
 
 ## 新增核心 crate
 
-第一轮建议新增：
+当前不新增 crate。源码先集中在 `impl/arceos_ex/src/`，可按对象和架构分目录组织：
 
-- `os/arceos_ex/modules/axhal`，包名 `ax-hal-ex`
-- `os/arceos_ex/modules/axruntime`，包名 `ax-runtime-ex`
-- `components/axplat_crates/platforms/axplat-riscv64-generic`，包名 `ax-plat-riscv64-generic`
+```text
+impl/arceos_ex/
+  Makefile
+  README.md
+  linker/riscv64.lds
+  src/
+    arch/riscv64/
+    objects/
+    phases/
+    trace/
+```
 
-若需要额外支撑 crate，应优先放在合适的 `components` 层级，并使用 `_ex` 后缀。不得修改现有 `os/arceos` 和已有 `components` crate 的行为。
+目录结构服务于对象级实现清晰性，不承担最终组件边界。
 
 ## Cargo/xtask 策略
 
-短期采用 `xtask` 驱动的 overlay workspace 方案，让现有 `ax-std` / `ax-api` / `ax-feat` 依赖链在 `arceos-ex` 构建中指向 `_ex` 核心组件。
+当前不使用 Cargo workspace、overlay workspace 或 `xtask`。如果需要 Rust 编译，Makefile 直接调用 `rustc` 或一个局部最小
+`Cargo.toml`，但不得引入 ArceOS feature 传递链。
 
-`cargo xtask arceos-ex ...` 先在 `tmp/axbuild/arceos-ex-workspace/` 下生成独立的 `Cargo.toml`，并通过符号链接映射原仓库的 `os/`、`components/`、`drivers/`、`platform/`、`scripts/`、`test-suit/` 等源码目录。后续内部 Cargo 调用显式使用该 overlay manifest。顶层 `Cargo.toml` 不应被手工修改或替换。
-
-已验证限制：
-
-- Cargo 的 `--manifest-path` 目标文件名必须是 `Cargo.toml`。
-- workspace member 必须位于 workspace root 之下，不能直接从临时 workspace 引用外部成员目录。
-- 通过 overlay workspace 内部符号链接映射源码目录后，Cargo 可以把这些成员视为位于 overlay workspace 内部。
-
-若未来 overlay workspace 无法稳定表达依赖切换，再讨论由 `xtask` 管理正式的多 workspace manifest 或受控顶层 manifest 切换。该过程必须由工具管理，不要求开发者手工来回修改顶层 `Cargo.toml`。
+Cargo/xtask 策略整体延期到 Composition Phase。
 
 ## 外部 crate 整改
 
