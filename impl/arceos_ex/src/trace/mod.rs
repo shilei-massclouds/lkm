@@ -27,6 +27,7 @@ pub enum Checkpoint {
     EventStreamPrepared,
     RawDtbPrepared,
     RawDtbReady,
+    FixMapReady,
     #[allow(dead_code)]
     PrintkBufferPrepared,
     #[allow(dead_code)]
@@ -57,6 +58,7 @@ impl Checkpoint {
             Self::EventStreamPrepared => b'V',
             Self::RawDtbPrepared => b'Y',
             Self::RawDtbReady => b'W',
+            Self::FixMapReady => b'M',
             Self::PrintkBufferPrepared => b'B',
             Self::EarlyConPrepared => b'C',
             Self::EarlyConReady => b'D',

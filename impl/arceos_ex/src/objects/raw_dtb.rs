@@ -16,11 +16,11 @@ pub struct PhysRange {
 }
 
 impl PhysRange {
-    const fn empty() -> Self {
+    pub(super) const fn empty() -> Self {
         Self { start: 0, end: 0 }
     }
 
-    const fn new(start: usize, end: usize) -> Self {
+    pub(super) const fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 

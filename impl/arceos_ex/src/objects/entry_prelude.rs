@@ -4,6 +4,8 @@ use crate::{arch::riscv64::csr, trace::Checkpoint};
 
 use super::{
     boot_args::BootArgs,
+    config::Config,
+    fix_map::FixMap,
     raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
 };
@@ -48,6 +50,7 @@ extern "C" fn early_event_entry_rust() -> ! {
 }
 
 pub struct EntryPreludeObjects {
+    config: Config,
     pub lds: Lds,
     interrupt_stream: InterruptStream,
     kernel_image: KernelImage,
@@ -57,11 +60,13 @@ pub struct EntryPreludeObjects {
     init_stack: InitStack,
     event_stream: EventStream,
     raw_dtb: RawDtb,
+    fix_map: FixMap,
 }
 
 impl EntryPreludeObjects {
     pub const fn new() -> Self {
         Self {
+            config: Config::new(),
             lds: Lds::new(),
             interrupt_stream: InterruptStream::new(),
             kernel_image: KernelImage::new(),
@@ -71,6 +76,7 @@ impl EntryPreludeObjects {
             init_stack: InitStack::new(),
             event_stream: EventStream::new(),
             raw_dtb: RawDtb::new(),
+            fix_map: FixMap::new(),
         }
     }
 
@@ -112,6 +118,10 @@ impl EntryPreludeObjects {
 
     pub fn raw_dtb_setup(&mut self) -> EventResult {
         self.raw_dtb.setup()
+    }
+
+    pub fn fix_map_preset(&mut self) -> EventResult {
+        self.fix_map.preset(&self.config, &self.raw_dtb)
     }
 }
 

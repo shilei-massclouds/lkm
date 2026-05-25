@@ -54,6 +54,7 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 - 第一轮应真实拆分入口前导期和入口后继期页表推进过程，而不是只把现有 boot page table 代码改名为多个模型事件。
 - `EarlyVm` 的实现必须覆盖规格要求的 `KernelImage` 和 `RawDtb` 映射前提。
 - `FixMap` 槽位布局应由配置或架构常量统一定义，不应在多个对象实现中分散硬编码。
+- 第一轮 `Config.fixmap.fdt` 的 FDT 槽位容量按 2MiB 配置，用于覆盖 Linux RISC-V64 `FIX_FDT`/`FIX_FDT_SIZE` 级别的早期 FDT 映射窗口；`FixMap` 只能消费该配置并执行容量检查，不应自行定义槽位大小。
 - 完整内核页表启用后，`EarlyVm` 退出服务应有明确的代码边界，对应 `EarlyVm.Cleanup`。
 
 ## FDT 与物理内存
