@@ -35,6 +35,8 @@
 | P1 | 待办 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
 | P1 | 待办 | 用 Makefile 提供 `build`、`run`、`trace`、`check-spec`、`clean` 等入口，暂时脱离 `xtask`。 |
 | P1 | 待办 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性。 |
+| P1 | 待办 | 建立 GitHub Actions 快速 CI，覆盖推导工具质量、核心规格推导和 `impl/arceos_ex` 最小构建。 |
+| P1 | 待办 | 建立 nightly/manual 测试流水线，生成 trace、系统测试日志、对象覆盖表和项目主页展示产物。 |
 | P2 | 延期 | 组件封装阶段：恢复 ArceOS 组件接口、crate 边界、`ax-std` 接入、overlay workspace、`xtask`、feature 传递、`axlog` 和 `ax-alloc` facade 等问题。 |
 
 ## 入口命令
@@ -86,6 +88,50 @@ impl/arceos_ex/
 `Cargo.toml`，但不得引入 ArceOS feature 传递链。
 
 Cargo/xtask 策略整体延期到 Composition Phase。
+
+## CI 与项目主页
+
+GitHub workflow 分为测试和展示两类，但展示内容应主要来自测试流水线产物，不建立另一套独立生成来源。主页展示不要求高即时性，优先展示最近一次 nightly 或手动 workflow 成功生成的结果。
+
+### 快速 CI
+
+快速 CI 用于 pull request 和 push，目标是在较短时间内发现关键问题。第一轮应覆盖：
+
+- 推导工具本身的格式检查、lint、单元测试和关键边界测试。
+- 核心规格推导验证，例如 `spec/model/startup-timeline.spec --derive --strict`。
+- trace 生成 smoke test：输出到临时目录，确认命令成功，不要求把生成图提交回仓库。
+- `impl/arceos_ex` 的 `make check-spec`。
+- 当对象级内核骨架具备可编译状态后，加入 `make -C impl/arceos_ex build`。
+
+快速 CI 不发布 GitHub Pages，不运行耗时长或依赖模拟器稳定性的全量任务。
+
+### Nightly 与手动触发
+
+Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触发。它可以执行耗时更长的任务：
+
+- 推导工具全量测试、系统测试和 fixture 回归。
+- 全规格批量推导验证。
+- trace SVG 全量生成，并作为 artifact 保存。
+- `impl/arceos_ex` 的完整 `build/run/trace`。
+- QEMU smoke test，检查 `Hello, world!` 或 checkpoint 序列。
+- 生成 unresolved obligations、deferred items、对象覆盖表、QEMU 日志等报告。
+
+手动触发可用于规格大改后立即刷新展示结果，也可后续增加参数，例如指定 spec、指定 kernel implementation、是否运行 QEMU、是否发布 Pages。
+
+### 项目主页展示
+
+项目主页应作为测试流水线结果的发布视图，而不是独立测试来源。第一阶段采用轻量 GitHub Pages 方案即可，例如从 `docs/` 或 workflow artifact 发布静态页面。
+
+主页展示内容优先包括：
+
+- 项目目标和当前阶段。
+- 主规格、`spec/model`、`spec/coding`、`spec/compose` 的入口。
+- 最新成功 nightly/manual 生成的 startup trace SVG。
+- 推导摘要、unresolved obligations 和 deferred items。
+- `impl/arceos_ex` 对象级实现进展、Makefile 命令和 smoke 测试结果。
+- 生成时间、commit id 和 workflow run id。
+
+自动生成内容应放在清晰的 generated 区域，例如 `docs/generated/` 或 Pages artifact。普通 PR/push 只检查生成脚本可运行，不直接发布主页；nightly 或手动触发成功后再发布 GitHub Pages。
 
 ## 外部 crate 整改
 
