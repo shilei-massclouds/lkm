@@ -4,7 +4,7 @@
 
 ## 适用范围
 
-本文件说明在对象级编码阶段如何参考 ArceOS。参考范围包括 RISC-V64 启动路径、地址空间、SBI、FDT、early console、allocator 和模块拆分经验中与模型对象实现直接相关的部分。
+本文件说明在对象级编码阶段如何参考 ArceOS。参考范围包括 RISC-V64 启动路径、地址空间、SBI、FDT、early console、早期内存区段和模块拆分经验中与模型对象实现直接相关的部分。
 
 当前目标不是复制 ArceOS，而是在 `spec/model` 的对象和阶段边界下吸收 ArceOS 中已经验证过的实现经验。
 
@@ -30,7 +30,7 @@
 - SBI：参考 ArceOS 的 SBI 调用封装，形成规格中的 `SBI` 能力视图。
 - FDT：参考 ArceOS 的设备树解析入口，但保持 `RawDtb` 与 `EarlyDtb` 的阶段边界。
 - 输出：参考 ArceOS early console 或 logging 机制，落实 `PrintkBuffer` 与 `EarlyCon` 的对象级区别。对象级编码阶段先建立启动期内部 `printk`/`println-like` 前端到 `PrintkBuffer.write(...) -> ring buffer -> EarlyCon.drain(...)` 的路径；应用侧 `axstd::println!` 是另一个前端入口，也应汇聚到同一 `PrintkBuffer` 后端路径。两类 `println!` 入口不应混同；`axlog` 这类上层日志 facade 属于组合封装阶段，不作为当前模型要求的核心对象。
-- 内存管理：参考 ArceOS 早期内存区段和 allocator 初始化经验，落实 `MemBlock` 的候选区段、保留区段和 enable 边界。
+- 内存管理：参考 ArceOS 早期内存区段经验，落实 `MemBlock` 的候选区段、保留区段和 enable 边界。第一轮对象级实现默认采用 no-alloc 路径；除非模型规格显式引入 `KernelHeap` / `Allocator` 一类对象并定义其生命周期，否则不得把全局分配器初始化作为当前入口后继期的核心步骤。
 
 ## arceos_ex 第一轮形态
 

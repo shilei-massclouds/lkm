@@ -58,3 +58,9 @@ frontend -> PrintkBuffer.write(...) -> ring buffer -> EarlyCon/Console drain
 ```
 
 `axlog` 属于 ArceOS 风格的上层日志 facade。它可以在 `Composition Phase` 中提供日志级别过滤、格式化、时间戳、CPU/task 标识、颜色和 `LogIf` 适配，但不应反向改变对象级输出语义。对象级编码阶段可以先实现启动期内部输出前端和应用侧 `axstd::println!` 到 `PrintkBuffer -> EarlyCon(SBI)` 的最小闭环；后续再把 `axlog` 接到同一 `PrintkBuffer` 路径。
+
+## 分配器 Facade
+
+第一轮对象级实现默认不依赖堆分配。`EntrySuccessorPhase` 当前只要求推进 `PhysicalMemory`、`MemBlock`、`SwapperVM` 等早期内存对象；它不等价于已经建立 Rust 全局堆分配器。需要 `Vec`、`String`、`Box` 或其它堆对象时，必须先确认规格中已经引入并推进了 `KernelHeap` / `Allocator` 一类对象。
+
+`ax-alloc` 属于 ArceOS 组件封装和兼容接入层需要评估的 facade。若现有 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust` 依赖链临时拉入 `ax-alloc`，应把它记录为 overlay workspace 的兼容成本，而不是对象级规格已经要求的核心对象。后续只有在模型显式定义 allocator 生命周期后，才把 `GlobalAlloc` 初始化纳入正式启动流程。
