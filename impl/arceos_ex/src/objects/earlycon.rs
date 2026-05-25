@@ -1,40 +1,46 @@
 use crate::{arch::riscv64::sbi, objects::printk};
 
-use super::state::{EventResult, State};
+use super::state::{EventResult, Lifecycle, LifecycleEvent, State};
+use crate::trace::Checkpoint;
 
 static mut EARLY_CON: EarlyCon = EarlyCon::new();
 
 pub struct EarlyCon {
-    state: State,
+    lifecycle: Lifecycle,
 }
 
 impl EarlyCon {
     pub const fn new() -> Self {
-        Self { state: State::Base }
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+        }
     }
 
     pub fn preset(&mut self) -> EventResult {
-        if self.state != State::Base {
-            return EventResult::Failed;
-        }
-        self.state = State::Prepared;
-        EventResult::Success
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::EarlyConPrepared,
+        )
     }
 
     pub fn setup(&mut self) -> EventResult {
-        if self.state != State::Prepared {
-            return EventResult::Blocked;
-        }
-        self.state = State::Ready;
-        EventResult::Success
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::EarlyConReady,
+        )
     }
 
     pub fn enable(&mut self) -> EventResult {
-        if self.state != State::Ready {
-            return EventResult::Blocked;
-        }
-        self.state = State::Online;
-        EventResult::Success
+        self.lifecycle.transition(
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+            Checkpoint::EarlyConOnline,
+        )
     }
 }
 

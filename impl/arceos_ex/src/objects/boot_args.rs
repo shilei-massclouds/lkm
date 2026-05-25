@@ -1,7 +1,7 @@
-use super::state::State;
+use super::state::{Lifecycle, State};
 
 pub struct BootArgs {
-    state: State,
+    lifecycle: Lifecycle,
     boot_hartid: usize,
     dtb_pa: usize,
 }
@@ -9,14 +9,14 @@ pub struct BootArgs {
 impl BootArgs {
     pub const fn new(boot_hartid: usize, dtb_pa: usize) -> Self {
         Self {
-            state: State::Ready,
+            lifecycle: Lifecycle::new(State::Online),
             boot_hartid,
             dtb_pa,
         }
     }
 
     pub const fn state(&self) -> State {
-        self.state
+        self.lifecycle.state()
     }
 
     pub const fn boot_hartid(&self) -> usize {

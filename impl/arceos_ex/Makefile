@@ -5,6 +5,7 @@ BUILD_DIR := build/$(TARGET)/$(PROFILE)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
 KERNEL_BIN := $(BUILD_DIR)/arceos_ex.bin
 LINKER := linker/riscv64.lds
+SOURCES := $(shell find src -name '*.rs')
 ROOT := ../..
 RUSTC ?= rustc +nightly-2025-05-20
 RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
@@ -25,7 +26,7 @@ RUSTFLAGS := \
 
 build: $(KERNEL_BIN)
 
-$(KERNEL_ELF): src/main.rs $(LINKER)
+$(KERNEL_ELF): $(SOURCES) $(LINKER)
 	mkdir -p $(BUILD_DIR)
 	$(RUSTC) src/main.rs \
 		--crate-name arceos_ex \

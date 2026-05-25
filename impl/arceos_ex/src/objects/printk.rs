@@ -1,11 +1,12 @@
-use super::state::{EventResult, State};
+use super::state::{EventResult, Lifecycle, LifecycleEvent, State};
+use crate::trace::Checkpoint;
 
 const BUFFER_SIZE: usize = 4096;
 
 static mut PRINTK_BUFFER: PrintkBuffer = PrintkBuffer::new();
 
 pub struct PrintkBuffer {
-    state: State,
+    lifecycle: Lifecycle,
     buffer: [u8; BUFFER_SIZE],
     read: usize,
     write: usize,
@@ -14,7 +15,7 @@ pub struct PrintkBuffer {
 impl PrintkBuffer {
     pub const fn new() -> Self {
         Self {
-            state: State::Base,
+            lifecycle: Lifecycle::new(State::Base),
             buffer: [0; BUFFER_SIZE],
             read: 0,
             write: 0,
@@ -22,16 +23,16 @@ impl PrintkBuffer {
     }
 
     pub fn preset(&mut self) -> EventResult {
-        if self.state != State::Base {
-            return EventResult::Failed;
-        }
-
-        self.state = State::Prepared;
-        EventResult::Success
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::PrintkBufferPrepared,
+        )
     }
 
     pub fn write_bytes(&mut self, bytes: &[u8]) {
-        if self.state != State::Prepared {
+        if self.lifecycle.state() != State::Prepared {
             return;
         }
 

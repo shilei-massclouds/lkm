@@ -1,6 +1,6 @@
 use crate::{
     objects::{boot_args::BootArgs, earlycon, printk, state::EventResult},
-    trace,
+    trace::{self, Checkpoint},
 };
 
 pub fn run(boot_args: &BootArgs) {
@@ -12,11 +12,11 @@ pub fn run(boot_args: &BootArgs) {
 }
 
 fn entry_prelude_phase_setup() {
-    trace::checkpoint(b'A');
+    trace::checkpoint(Checkpoint::EntryPreludePhaseReady);
 }
 
 fn entry_successor_phase_setup() {
-    trace::checkpoint(b'P');
+    trace::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
     require(printk::preset());
     printk::write_str("arceos_ex object kernel\n");
 
@@ -24,7 +24,7 @@ fn entry_successor_phase_setup() {
     require(earlycon::setup());
     require(earlycon::enable());
     earlycon::drain_printk();
-    trace::checkpoint(b'R');
+    trace::checkpoint(Checkpoint::EntrySuccessorPhaseReady);
 }
 
 fn require(result: EventResult) {
