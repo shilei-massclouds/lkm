@@ -6,145 +6,16 @@ mod objects;
 mod phases;
 mod trace;
 
-use core::arch::global_asm;
 use core::panic::PanicInfo;
 use core::sync::atomic::AtomicU8;
 
-use objects::{
-    boot_args::BootArgs,
-    state::{EventErrorCode, EventResult, LifecycleEvent, State},
-};
+use objects::state::{EventErrorCode, EventResult, LifecycleEvent, State};
 use trace::Checkpoint;
 
 #[unsafe(link_section = ".data.phase")]
 static STARTUP_TIMELINE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
-global_asm!(
-    r#"
-    .section .head.text.entry, "ax"
-    .globl _start
-_start:
-    mv s0, a0
-    mv s1, a1
-
-    /*
-     * EntryPreludePhase.setup() head segment.
-     *
-     * The RISC-V entry symbol must live in the crate root assembly block, but
-     * semantically this is the first part of EntryPreludePhase.setup().  It
-     * performs only the events that must happen before Rust can run: close the
-     * interrupt stream, establish gp, disable kernel FPU/vector use, zero BSS,
-     * record the boot CPU group input, install the init task pointer, and
-     * create the initial stack.  The Rust segment of the same phase setup is
-     * phases::boot::entry_prelude::setup().
-     */
-    li a0, '['
-    call arceos_ex_head_checkpoint
-    li a0, 123
-    call arceos_ex_head_checkpoint
-    li a0, 125
-    call arceos_ex_head_checkpoint
-    li a0, '('
-    call arceos_ex_head_checkpoint
-    li a0, 'A'
-    call arceos_ex_head_checkpoint
-
-    csrw sie, zero
-    csrw sip, zero
-    li a0, 'I'
-    call arceos_ex_head_checkpoint
-
-    .option push
-    .option norelax
-    la gp, __global_pointer$
-    .option pop
-    li a0, 'K'
-    call arceos_ex_head_checkpoint
-
-    li t0, (0b11 << 9) | (0b11 << 13)
-    csrrc zero, sstatus, t0
-    li a0, 'O'
-    call arceos_ex_head_checkpoint
-
-    la t0, _sbss
-    la t1, _ebss
-1:
-    bgeu t0, t1, 2f
-    sd zero, 0(t0)
-    addi t0, t0, 8
-    j 1b
-2:
-    li a0, 'Z'
-    call arceos_ex_head_checkpoint
-
-    la t0, head_boot_hartid
-    sd s0, 0(t0)
-    li a0, 'H'
-    call arceos_ex_head_checkpoint
-    li a0, 'G'
-    call arceos_ex_head_checkpoint
-
-    la tp, init_task_storage
-    li a0, 'T'
-    call arceos_ex_head_checkpoint
-
-    la sp, init_stack_end
-    addi sp, sp, -256
-    la t0, head_init_stack_sp
-    sd sp, 0(t0)
-    li a0, 'S'
-    call arceos_ex_head_checkpoint
-
-    mv a0, s0
-    mv a1, s1
-    tail rust_entry
-
-    .section .boot.stack, "aw", @nobits
-    .align 12
-    .space 4096 * 4
-
-    .section .head.handoff, "aw", @nobits
-    .align 3
-    .globl head_boot_hartid
-head_boot_hartid:
-    .space 8
-    .globl head_init_stack_sp
-head_init_stack_sp:
-    .space 8
-"#
-);
-
-#[cfg(checkpoint_sbi_char)]
-global_asm!(
-    r#"
-    .section .head.text.checkpoint, "ax"
-    .align 2
-    .globl arceos_ex_head_checkpoint
-arceos_ex_head_checkpoint:
-    li a7, 1
-    ecall
-    ret
-"#
-);
-
-#[cfg(not(checkpoint_sbi_char))]
-global_asm!(
-    r#"
-    .section .head.text.checkpoint, "ax"
-    .align 2
-    .globl arceos_ex_head_checkpoint
-arceos_ex_head_checkpoint:
-    ret
-"#
-);
-
-#[unsafe(no_mangle)]
-extern "C" fn rust_entry(hartid: usize, dtb_pa: usize) -> ! {
-    let boot_args = BootArgs::new(hartid, dtb_pa);
-    startup_timeline_continue_after_head_prefix(&boot_args)
-}
-
-fn startup_timeline_continue_after_head_prefix(boot_args: &BootArgs) -> ! {
+pub fn startup_timeline_continue_after_head_prefix(boot_args: &objects::boot_args::BootArgs) -> ! {
     require_startup_event(phases::prepare::adopt_head_prefix(boot_args));
     phases::boot::setup_after_head_prefix(boot_args)
 }

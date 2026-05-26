@@ -1,9 +1,8 @@
 /*
  * Entry Prelude Object Model Specification
  *
- * Compatibility entry for the previous single-file model path. The formal
- * declarations have moved into spec/model/startup-timeline.spec and its
- * phase-tree includes.
+ * Compatibility shim for the previous single-file model path. Do not add new
+ * declarations here. The formal model entry is spec/model/main.spec.
  */
 
-include "model/startup-timeline.spec";
+include "model/main.spec";

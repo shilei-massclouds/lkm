@@ -5,7 +5,7 @@
 当前阶段的输入规格文件是：
 
 ```text
-../../spec/model/startup-timeline.spec
+../../spec/model/main.spec
 ```
 
 ## 当前目标
@@ -42,41 +42,41 @@
 在仓库根目录执行：
 
 ```bash
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --derive
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --derive --strict
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec -T
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec -T -a state,event
-PYTHONPATH=tools/pyveri/src python -m pyveri parse spec/model/startup-timeline.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri model spec/model/startup-timeline.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri derive spec/model/startup-timeline.spec --strict
-PYTHONPATH=tools/pyveri/src python -m pyveri check spec/model/startup-timeline.spec
-PYTHONPATH=tools/pyveri/src python -m pyveri view spec/model/startup-timeline.spec object
-PYTHONPATH=tools/pyveri/src python -m pyveri render spec/model/startup-timeline.spec object --format dot -o object.gv
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --derive --strict --work-dir tools/build
-PYTHONPATH=tools/pyveri/src python -m pyveri render spec/model/startup-timeline.spec object --format dot --work-dir tools/build
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --text object
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --graph object -o object.gv
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --text drives
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --graph drives -o drives.gv
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --text timeline
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/startup-timeline.spec --graph timeline -o timeline.svg
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive --strict
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec -T
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec -T -a state,event
+PYTHONPATH=tools/pyveri/src python -m pyveri parse spec/model/main.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri model spec/model/main.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri derive spec/model/main.spec --strict
+PYTHONPATH=tools/pyveri/src python -m pyveri check spec/model/main.spec
+PYTHONPATH=tools/pyveri/src python -m pyveri view spec/model/main.spec object
+PYTHONPATH=tools/pyveri/src python -m pyveri render spec/model/main.spec object --format dot -o object.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive --strict --work-dir tools/build
+PYTHONPATH=tools/pyveri/src python -m pyveri render spec/model/main.spec object --format dot --work-dir tools/build
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --text object
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --graph object -o object.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --text drives
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --graph drives -o drives.gv
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --text timeline
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --graph timeline -o timeline.svg
 PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 ```
 
-迁移期间，旧入口 `spec/entry-prelude-object-model.spec` 仍可直接运行。
+旧入口 `spec/entry-prelude-object-model.spec` 仍可直接运行，但只作为兼容 shim；新命令应使用 `spec/model/main.spec`。
 
 当前 `pyveri` 已作为 driver 调度独立阶段工具，CLI 保留 `parse`、`model`、`derive`、`check`、`view` 和 `render` 子命令以及旧参数形式兼容。driver 默认使用临时目录保存中间文件；传入 `--work-dir tools/build` 时会保留本次流水线生成的 AST、model、derive、check、view 和 render 中间文件。
 
 独立工具链已经提供 `common` 公共库骨架、`parse`、`model`、`derive`、`check`、`view` 和 `render` 阶段工具。源码方式运行：
 
 ```bash
-PYTHONPATH=tools/common/src:tools/parse/src python -m parse_tool spec/entry-prelude-object-model.spec -o tools/build/entry-prelude-object-model.ast.json
-PYTHONPATH=tools/common/src:tools/model/src python -m model_tool tools/build/entry-prelude-object-model.ast.json -o tools/build/entry-prelude-object-model.model.json
-PYTHONPATH=tools/common/src:tools/derive/src python -m derive_tool tools/build/entry-prelude-object-model.model.json -o tools/build/entry-prelude-object-model.derive.json
-PYTHONPATH=tools/common/src:tools/check/src python -m check_tool tools/build/entry-prelude-object-model.derive.json -o tools/build/entry-prelude-object-model.check.json
-PYTHONPATH=tools/common/src:tools/view/src python -m view_tool tools/build/entry-prelude-object-model.model.json object -o tools/build/entry-prelude-object-model.object.view.json
-PYTHONPATH=tools/common/src:tools/render/src python -m render_tool tools/build/entry-prelude-object-model.object.view.json --format dot -o tools/build/entry-prelude-object-model.object.gv
+PYTHONPATH=tools/common/src:tools/parse/src python -m parse_tool spec/model/main.spec -o tools/build/model-main.ast.json
+PYTHONPATH=tools/common/src:tools/model/src python -m model_tool tools/build/model-main.ast.json -o tools/build/model-main.model.json
+PYTHONPATH=tools/common/src:tools/derive/src python -m derive_tool tools/build/model-main.model.json -o tools/build/model-main.derive.json
+PYTHONPATH=tools/common/src:tools/check/src python -m check_tool tools/build/model-main.derive.json -o tools/build/model-main.check.json
+PYTHONPATH=tools/common/src:tools/view/src python -m view_tool tools/build/model-main.model.json object -o tools/build/model-main.object.view.json
+PYTHONPATH=tools/common/src:tools/render/src python -m render_tool tools/build/model-main.object.view.json --format dot -o tools/build/model-main.object.gv
 PYTHONPATH=tools/common/src:tools/parse/src python -m unittest discover -s tools/parse/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src python -m unittest discover -s tools/model/tests
 PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/derive/src python -m unittest discover -s tools/derive/tests
@@ -99,12 +99,12 @@ PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src:tools
 
 ```bash
 python -m pip install -e tools/pyveri
-pyveri spec/entry-prelude-object-model.spec
-pyveri spec/entry-prelude-object-model.spec --derive
-pyveri spec/entry-prelude-object-model.spec --text object
-pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
-pyveri spec/entry-prelude-object-model.spec --graph drives -o drives.gv
-pyveri spec/entry-prelude-object-model.spec --graph timeline -o timeline.svg
+pyveri spec/model/main.spec
+pyveri spec/model/main.spec --derive
+pyveri spec/model/main.spec --text object
+pyveri spec/model/main.spec --graph object -o object.gv
+pyveri spec/model/main.spec --graph drives -o drives.gv
+pyveri spec/model/main.spec --graph timeline -o timeline.svg
 ```
 
 ### 本地命令脚本
@@ -114,34 +114,34 @@ pyveri spec/entry-prelude-object-model.spec --graph timeline -o timeline.svg
 Windows PowerShell：
 
 ```powershell
-.\tools\pyveri\bin\pyveri.cmd spec\entry-prelude-object-model.spec --graph object -o object.gv
+.\tools\pyveri\bin\pyveri.cmd spec\model\main.spec --graph object -o object.gv
 ```
 
 也可以临时加入 PATH，使命令形式变成 `pyveri ...`：
 
 ```powershell
 $env:PATH = "$(Resolve-Path tools\pyveri\bin);$env:PATH"
-pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
+pyveri spec\model\main.spec --graph object -o object.gv
 ```
 
 Linux：
 
 ```bash
-sh tools/pyveri/bin/pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+sh tools/pyveri/bin/pyveri spec/model/main.spec --graph object -o object.gv
 ```
 
 也可以临时加入 PATH：
 
 ```bash
 PATH="$PWD/tools/pyveri/bin:$PATH"
-pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+pyveri spec/model/main.spec --graph object -o object.gv
 ```
 
 Windows PowerShell 命令仍可用于旧开发环境：
 
 ```powershell
 $env:PYTHONPATH='tools\pyveri\src'
-python -m pyveri spec\entry-prelude-object-model.spec --derive
+python -m pyveri spec\model\main.spec --derive
 python -m unittest discover -s tools\pyveri\tests
 ```
 
@@ -152,7 +152,7 @@ python -m unittest discover -s tools\pyveri\tests
 Windows PowerShell：
 
 ```powershell
-pyveri spec\entry-prelude-object-model.spec --graph object -o object.gv
+pyveri spec\model\main.spec --graph object -o object.gv
 dot -Tsvg object.gv -o object.svg
 start object.svg
 ```
@@ -160,7 +160,7 @@ start object.svg
 Linux：
 
 ```bash
-pyveri spec/entry-prelude-object-model.spec --graph object -o object.gv
+pyveri spec/model/main.spec --graph object -o object.gv
 dot -Tsvg object.gv -o object.svg
 xdg-open object.svg
 ```

@@ -3,7 +3,7 @@
 本文档记录 `pyveri` 第一版推导验证器的实现计划。当前目标是验证：
 
 ```text
-../../spec/entry-prelude-object-model.spec
+../../spec/model/main.spec
 ```
 
 ## 修改前必读
@@ -148,10 +148,10 @@ view.json -> text/DOT/SVG/animated SVG
 示例命令：
 
 ```bash
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T --trace-annotations state,event
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T custom-trace.svg -a state,event
+tools/pyveri/bin/pyveri spec/model/main.spec
+tools/pyveri/bin/pyveri spec/model/main.spec -T
+tools/pyveri/bin/pyveri spec/model/main.spec -T --trace-annotations state,event
+tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 ```
 
 ## 规格语义
@@ -318,13 +318,13 @@ tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T custom-trace.svg -a 
 第一版命令形式：
 
 ```bash
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T --trace-annotations state,event
-tools/pyveri/bin/pyveri spec/model/startup-timeline.spec -T custom-trace.svg -a state,event
+tools/pyveri/bin/pyveri spec/model/main.spec
+tools/pyveri/bin/pyveri spec/model/main.spec -T
+tools/pyveri/bin/pyveri spec/model/main.spec -T --trace-annotations state,event
+tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 ```
 
-旧入口 `spec/entry-prelude-object-model.spec` 在迁移期间继续可用；正式入口逐步切换为 `spec/model/startup-timeline.spec`。
+旧入口 `spec/entry-prelude-object-model.spec` 继续可用；正式模型入口是 `spec/model/main.spec`。
 
 默认目标：
 
@@ -383,7 +383,7 @@ KernelImage.Event::Enable
 完成标准：
 
 ```bash
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive --strict
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive --strict
 ```
 
 当前结果不再因为该状态依赖产生 `blocked`。
@@ -426,7 +426,7 @@ PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 
 ```bash
 PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/entry-prelude-object-model.spec --derive
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 ```
 
 两条命令行为与换行清理前一致。

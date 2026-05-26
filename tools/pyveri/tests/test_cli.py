@@ -17,11 +17,8 @@ class CliTests(unittest.TestCase):
             / "spec"
             / "entry-prelude-object-model.spec"
         )
-        self.startup_timeline_spec = (
-            Path(__file__).resolve().parents[3]
-            / "spec"
-            / "model"
-            / "startup-timeline.spec"
+        self.model_main_spec = (
+            Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
         )
 
     def test_graph_output_file_is_ascii_dot(self) -> None:
@@ -42,13 +39,11 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
 
-    def test_startup_timeline_has_no_open_obligations(self) -> None:
+    def test_model_main_has_no_open_obligations(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            exit_code = main(
-                [str(self.startup_timeline_spec), "--derive", "--strict"]
-            )
+            exit_code = main([str(self.model_main_spec), "--derive", "--strict"])
 
         self.assertEqual(exit_code, 0)
         text = stdout.getvalue()

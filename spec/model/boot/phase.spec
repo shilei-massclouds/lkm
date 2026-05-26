@@ -4,8 +4,8 @@
  * This phase currently drives the entry-prelude and entry-successor subphases.
  */
 
-include "entry-prelude/phase.spec";
-include "entry-successor/phase.spec";
+include "entry-prelude/main.spec";
+include "entry-successor/main.spec";
 
 /*
  * BootPhase 表示引导期阶段对象。它负责推进当前模型已经展开的引导期子阶段。

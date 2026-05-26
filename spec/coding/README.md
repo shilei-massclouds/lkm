@@ -6,18 +6,20 @@
 
 ## 阅读入口
 
-`spec/coding/README.md` 是 coding 规格目录的入口文档，只负责说明范围、文档优先级和阅读顺序。对象级代码生成的主规格文档是 [`mapping.md`](mapping.md)；实现代码前必须先阅读 `mapping.md` 开头的 `MUST` 硬性要求。
+`spec/coding/README.md` 是 coding 规格目录的说明入口，只负责说明范围、文档优先级和阅读顺序。正式规格入口是 [`main.spec`](main.spec)；对象级代码生成的硬性约束从 `main.spec` include 的 [`mapping.spec`](mapping.spec) 进入。实现代码前必须先阅读正式 `.spec` 入口，再阅读对应 `.md` 说明。
 
 当前阅读顺序为：
 
 1. `README.md`：确认 coding 规格范围、外部规格优先级和本目录阅读顺序。
-2. `mapping.md`：对象、Phase、状态、事件、checkpoint 和源码落点的主映射规则；其中 `MUST` 小节是对象级实现硬约束。
-3. `riscv64.md`：RISC-V64 架构相关补充约束。
-4. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充约束。
-5. `arceos.md`：参考 ArceOS 时的取舍原则。
-6. `arceos_ex-plan.md`：当前实验内核的执行计划和任务状态；它不覆盖前述规格，只记录当前阶段如何落实规格。
+2. `main.spec`：coding 目录正式规格入口。
+3. `mapping.spec`：对象、Phase、状态、事件、checkpoint 和源码落点的正式硬约束。
+4. `mapping.md`：对 `mapping.spec` 的说明、例子和补充解释，不覆盖正式规格。
+5. `riscv64.md`：RISC-V64 架构相关补充约束。
+6. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充约束。
+7. `arceos.md`：参考 ArceOS 时的取舍原则。
+8. `arceos_ex-plan.md`：当前实验内核的执行计划和任务状态；它不覆盖前述规格，只记录当前阶段如何落实规格。
 
-若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.md` 的 `MUST` 优先于其它 coding 补充文档，计划文档不得覆盖规格文档。
+若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.spec` 的硬约束优先于其它 coding 补充文档，计划文档不得覆盖规格文档。
 
 ## 阶段边界
 
@@ -52,9 +54,11 @@
 1. `spec/model/SEMANTICS.md`：模型生命周期硬语义，不允许被编码便利性绕过。
 2. `spec/model/**/*.spec`：对象、状态、事件、依赖、驱动顺序和阶段完成条件。
 3. `spec/组件化内核规格.md`：模型意图、设计背景、对象解释和参考边界。
-4. `spec/coding/*.md`：面向对象级代码实现的补充约束。
-5. `spec/compose/*.md`：面向 crate/module 组合、公开接口和构建接入的补充约束。
-6. `tgoskits` 内目标内核的本地约定：目录、构建、测试和已有抽象。
+4. `spec/coding/main.spec` 与其 include 的正式规格：面向对象级代码实现的硬约束。
+5. `spec/coding/*.md`：面向对象级代码实现的补充说明。
+6. `spec/compose/main.spec` 与其 include 的正式规格：面向 crate/module 组合、公开接口和构建接入的硬约束。
+7. `spec/compose/*.md`：面向 crate/module 组合、公开接口和构建接入的补充说明。
+8. `tgoskits` 或当前实验内核目录内的本地约定：目录、构建、测试和已有抽象。
 
 ## 模型到代码的默认映射
 
@@ -98,5 +102,7 @@
 - `riscv64.md`：RISC-V64 架构相关编码约束。
 - `rust.md`：Rust 语言和安全边界相关编码约束。
 - `arceos.md`：参考 ArceOS 时的取舍原则和映射约束。
-- `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的主映射规格。
+- `main.spec`：coding 目录正式规格入口。
+- `mapping.spec`：模型对象、阶段、状态、事件和检查点到代码的正式硬约束。
+- `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的说明性映射文档。
 - `arceos_ex-plan.md`：`arceos_ex` 第一轮实现任务清单；不得作为覆盖规格的依据。

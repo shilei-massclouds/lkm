@@ -132,7 +132,7 @@ GitHub workflow 分为测试和展示两类，但展示内容应主要来自测�
 快速 CI 用于 pull request 和 push，目标是在较短时间内发现关键问题。第一轮应覆盖：
 
 - 推导工具本身的格式检查、lint、单元测试和关键边界测试。
-- 核心规格推导验证，例如 `spec/model/startup-timeline.spec --derive --strict`。
+- 核心规格推导验证，例如 `spec/model/main.spec --derive --strict`。
 - trace 生成 smoke test：输出到临时目录，确认命令成功，不要求把生成图提交回仓库。
 - 顶层 `make verify`。
 - 当对象级内核骨架具备可编译状态后，加入顶层 `make build`。

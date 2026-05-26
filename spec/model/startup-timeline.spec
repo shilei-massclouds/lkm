@@ -1,13 +1,13 @@
 /*
  * Startup Timeline Specification
  *
- * This is the top-level model entry. It composes the phase tree under
- * spec/model and is the preferred input for the pyveri driver.
+ * This file defines the current top-level timeline object and composes the
+ * model phase tree. The formal directory entry is spec/model/main.spec.
  */
 
 include "common.spec";
-include "prepare/phase.spec";
-include "boot/phase.spec";
+include "prepare/main.spec";
+include "boot/main.spec";
 
 /*
  * StartupTimeline 表示当前模型的内核启动时间轴对象。
