@@ -2,7 +2,7 @@ use crate::{
     context::Context,
     objects::{
         earlycon, printk,
-        state::{EventResult, LifecycleEvent, State},
+        state::{EventOutcome, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
 };
@@ -14,135 +14,87 @@ static ENTRY_SUCCESSOR_PHASE_STATE: AtomicU8 =
 
 pub fn setup(ctx: &mut Context) -> ! {
     crate::trace::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
-    require(setup_objects(ctx));
-    require(checkpoint_ready(ctx));
+    crate::phases::shutdown_on_error(
+        setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
+        "arceos_ex entry successor event failed\n",
+    );
     handoff()
 }
 
-fn setup_objects(ctx: &mut Context) -> EventResult {
-    let result = ctx.init_stack.enable();
-    if !result.is_success() {
-        return result;
-    }
+fn setup_objects(ctx: &mut Context) -> EventOutcome {
+    ctx.init_stack.enable().into_result()?;
 
     let boot_hartid = ctx.cpu_group.boot_hartid();
-    let result = ctx.early_dtb.preset(
-        &ctx.raw_dtb,
-        &ctx.fix_map,
-        boot_hartid,
-        &mut ctx.platform_cpu_info,
-        &mut ctx.physical_memory,
-    );
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.cpu_id_map.preset(boot_hartid);
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.interrupt_stream.setup();
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx
-        .cpu_group
-        .boot_cpu_setup(ctx.platform_cpu_info.contains(boot_hartid));
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.cpu_group.boot_cpu_enable();
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = printk::preset();
-    if !result.is_success() {
-        return result;
-    }
+    ctx.early_dtb
+        .preset(
+            &ctx.raw_dtb,
+            &ctx.fix_map,
+            boot_hartid,
+            &mut ctx.platform_cpu_info,
+            &mut ctx.physical_memory,
+        )
+        .into_result()?;
+    ctx.cpu_id_map.preset(boot_hartid).into_result()?;
+    ctx.interrupt_stream.setup().into_result()?;
+    ctx.cpu_group
+        .boot_cpu_setup(ctx.platform_cpu_info.contains(boot_hartid))
+        .into_result()?;
+    ctx.cpu_group.boot_cpu_enable().into_result()?;
+    printk::preset().into_result()?;
     printk::write_str("arceos_ex object kernel\n");
 
-    let result = ctx.early_dtb.setup(
-        &ctx.raw_dtb,
-        &mut ctx.memblock,
-        &mut ctx.kernel_cmdline,
-        &ctx.physical_memory,
-    );
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.init_mm.setup(&ctx.lds);
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.early_ioremap.setup(&ctx.fix_map);
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.sbi.setup();
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.kernel_param.setup(&ctx.kernel_cmdline, &ctx.sbi);
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.memblock.setup(
-        &ctx.early_dtb,
-        &ctx.kernel_image,
-        &ctx.raw_dtb,
-        &ctx.config,
-        &ctx.lds,
-        &ctx.physical_memory,
-    );
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.vm.enable(
-        &ctx.config,
-        &mut ctx.static_objects,
-        &ctx.lds,
-        &ctx.kernel_image,
-        &ctx.memblock,
-    );
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.memblock.enable(ctx.vm.state());
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.early_dtb.cleanup(&ctx.memblock, &ctx.kernel_param);
-    if !result.is_success() {
-        return result;
-    }
-
-    EventResult::Success
+    ctx.early_dtb
+        .setup(
+            &ctx.raw_dtb,
+            &mut ctx.memblock,
+            &mut ctx.kernel_cmdline,
+            &ctx.physical_memory,
+        )
+        .into_result()?;
+    ctx.init_mm.setup(&ctx.lds).into_result()?;
+    ctx.early_ioremap.setup(&ctx.fix_map).into_result()?;
+    ctx.sbi.setup().into_result()?;
+    ctx.kernel_param
+        .setup(&ctx.kernel_cmdline, &ctx.sbi)
+        .into_result()?;
+    ctx.memblock
+        .setup(
+            &ctx.early_dtb,
+            &ctx.kernel_image,
+            &ctx.raw_dtb,
+            &ctx.config,
+            &ctx.lds,
+            &ctx.physical_memory,
+        )
+        .into_result()?;
+    ctx.vm
+        .enable(
+            &ctx.config,
+            &mut ctx.static_objects,
+            &ctx.lds,
+            &ctx.kernel_image,
+            &ctx.memblock,
+        )
+        .into_result()?;
+    ctx.memblock.enable(ctx.vm.state()).into_result()?;
+    ctx.early_dtb
+        .cleanup(&ctx.memblock, &ctx.kernel_param)
+        .into_result()
 }
 
 fn handoff() -> ! {
     crate::phases::boot::setup_after_children()
 }
 
-fn checkpoint_ready(ctx: &Context) -> EventResult {
+fn checkpoint_ready(ctx: &Context) -> EventOutcome {
     if !entry_successor_phase_ready(ctx) {
         return EventResult::failed_condition(
             LifecycleEvent::Setup,
             crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE),
             State::Base,
             State::Ready,
-        );
+        )
+        .into_result();
     }
 
     crate::phases::state::mark(
@@ -152,6 +104,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         State::Ready,
         Checkpoint::EntrySuccessorPhaseReady,
     )
+    .into_result()
 }
 
 fn entry_successor_phase_ready(ctx: &Context) -> bool {
@@ -170,11 +123,4 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.kernel_param.state() == State::Ready
         && earlycon::is_online()
         && ctx.memblock.state() == State::Online
-}
-
-fn require(result: EventResult) {
-    if !result.is_success() {
-        crate::arch::riscv64::sbi::putstr("arceos_ex entry successor event failed\n");
-        crate::arch::riscv64::sbi::system_shutdown()
-    }
 }

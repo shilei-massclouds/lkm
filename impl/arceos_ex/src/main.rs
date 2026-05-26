@@ -10,7 +10,7 @@ mod trace;
 use core::panic::PanicInfo;
 use core::sync::atomic::AtomicU8;
 
-use objects::state::{EventErrorCode, EventResult, LifecycleEvent, State};
+use objects::state::{EventOutcome, LifecycleEvent, State};
 use trace::Checkpoint;
 
 #[unsafe(link_section = ".data.phase")]
@@ -22,32 +22,20 @@ pub fn startup_timeline_ready() -> ! {
         arch::riscv64::sbi::system_shutdown()
     }
 
-    require_startup_event(crate::phases::state::mark(
+    phases::shutdown_on_error(startup_timeline_event(), "arceos_ex startup event failed\n");
+    app_main();
+    arch::riscv64::sbi::system_shutdown()
+}
+
+fn startup_timeline_event() -> EventOutcome {
+    crate::phases::state::mark(
         &STARTUP_TIMELINE_STATE,
         LifecycleEvent::Setup,
         State::Base,
         State::Ready,
         Checkpoint::StartupTimelineReady,
-    ));
-    app_main();
-    arch::riscv64::sbi::system_shutdown()
-}
-
-fn require_startup_event(result: EventResult) {
-    match result {
-        EventResult::Success => {}
-        EventResult::Failed(error) | EventResult::Blocked(error) => {
-            arch::riscv64::sbi::putstr("arceos_ex startup event failed:");
-            arch::riscv64::sbi::putchar(match error.code {
-                EventErrorCode::DuplicateLifecycleEvent => b'D',
-                EventErrorCode::InvalidTransition => b'I',
-                EventErrorCode::ConditionFailed => b'C',
-                EventErrorCode::UnexpectedState => b'U',
-            });
-            arch::riscv64::sbi::putchar(b'\n');
-            arch::riscv64::sbi::system_shutdown()
-        }
-    }
+    )
+    .into_result()
 }
 
 pub fn app_main() {

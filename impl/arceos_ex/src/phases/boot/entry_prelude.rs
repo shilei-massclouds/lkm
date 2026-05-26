@@ -6,7 +6,7 @@ use crate::{
     objects::{
         boot_args::BootArgs,
         entry_prelude::Soc,
-        state::{EventResult, LifecycleEvent, State},
+        state::{EventOutcome, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
 };
@@ -189,7 +189,10 @@ unsafe extern "C" fn arceos_ex_head_checkpoint() {
 #[unsafe(no_mangle)]
 extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
     let boot_args = BootArgs::new(hartid, dtb_pa);
-    require(crate::phases::prepare::adopt_head_prefix(&boot_args));
+    crate::phases::shutdown_on_error(
+        crate::phases::prepare::adopt_head_prefix(&boot_args).into_result(),
+        "arceos_ex prepare event failed\n",
+    );
     setup(&boot_args)
 }
 
@@ -212,17 +215,10 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
 /// setup() after `Vm.Setup` switches to the early virtual address space.
 fn setup(boot_args: &BootArgs) -> ! {
     let ctx = crate::context::context();
-    require(adopt_head_prefix(ctx, boot_args));
-    require(ctx.event_stream.preset(&ctx.config));
-    require(ctx.vm.preset(
-        &ctx.config,
-        &mut ctx.static_objects,
-        &ctx.lds,
-        &ctx.kernel_image,
-        boot_args,
-        &mut ctx.raw_dtb,
-        &mut ctx.fix_map,
-    ));
+    crate::phases::shutdown_on_error(
+        setup_until_vm_switch(ctx, boot_args),
+        "arceos_ex entry prelude event failed\n",
+    );
     ctx.vm.setup(
         &ctx.config,
         &ctx.static_objects,
@@ -232,32 +228,36 @@ fn setup(boot_args: &BootArgs) -> ! {
     )
 }
 
-fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
-    let result = ctx.interrupt_stream.adopt_head_preset();
-    if !result.is_success() {
-        return result;
-    }
-    let result = ctx.kernel_image.adopt_head_preset(&ctx.config, &ctx.lds);
-    if !result.is_success() {
-        return result;
-    }
-    let result = ctx.root_stream.adopt_head_preset();
-    if !result.is_success() {
-        return result;
-    }
-    let result = ctx.kernel_image.adopt_head_setup(&ctx.config, &ctx.lds);
-    if !result.is_success() {
-        return result;
-    }
-    let result = ctx.cpu_group.adopt_head_preset(boot_args);
-    if !result.is_success() {
-        return result;
-    }
-    let result = ctx.init_task.adopt_head_preset(&ctx.config);
-    if !result.is_success() {
-        return result;
-    }
-    ctx.init_stack.adopt_head_preset(&ctx.config, &ctx.lds)
+fn setup_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventOutcome {
+    adopt_head_prefix(ctx, boot_args)?;
+    ctx.event_stream.preset(&ctx.config).into_result()?;
+    ctx.vm
+        .preset(
+            &ctx.config,
+            &mut ctx.static_objects,
+            &ctx.lds,
+            &ctx.kernel_image,
+            boot_args,
+            &mut ctx.raw_dtb,
+            &mut ctx.fix_map,
+        )
+        .into_result()
+}
+
+fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventOutcome {
+    ctx.interrupt_stream.adopt_head_preset().into_result()?;
+    ctx.kernel_image
+        .adopt_head_preset(&ctx.config, &ctx.lds)
+        .into_result()?;
+    ctx.root_stream.adopt_head_preset().into_result()?;
+    ctx.kernel_image
+        .adopt_head_setup(&ctx.config, &ctx.lds)
+        .into_result()?;
+    ctx.cpu_group.adopt_head_preset(boot_args).into_result()?;
+    ctx.init_task.adopt_head_preset(&ctx.config).into_result()?;
+    ctx.init_stack
+        .adopt_head_preset(&ctx.config, &ctx.lds)
+        .into_result()
 }
 
 /// Continues the same `EntryPreludePhase.setup()` after `Vm.Setup` has switched
@@ -265,64 +265,62 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
 /// continuation selected by this phase; it does not pass through `BootPhase`.
 extern "C" fn after_vm_setup_continuation() -> ! {
     let ctx = crate::context::context();
-    require(after_vm_setup(ctx));
+    crate::phases::shutdown_on_error(
+        after_vm_setup(ctx),
+        "arceos_ex entry prelude event failed\n",
+    );
     handoff(ctx)
 }
 
 /// Finishes `EntryPreludePhase.setup()` after `Vm.Setup` has switched address
 /// spaces and returned through the virtual continuation path.
-fn after_vm_setup(ctx: &mut Context) -> EventResult {
-    let result = ctx.event_stream.enable(&ctx.vm, &ctx.static_objects);
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.init_task.enable(&ctx.config, &ctx.vm);
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = ctx.init_stack.setup(&ctx.vm);
-    if !result.is_success() {
-        return result;
-    }
-
-    let result = Soc::preset();
-    if !result.is_success() {
-        return result;
-    }
-
+fn after_vm_setup(ctx: &mut Context) -> EventOutcome {
+    ctx.event_stream
+        .enable(&ctx.vm, &ctx.static_objects)
+        .into_result()?;
+    ctx.init_task.enable(&ctx.config, &ctx.vm).into_result()?;
+    ctx.init_stack.setup(&ctx.vm).into_result()?;
+    Soc::preset().into_result()?;
     checkpoint_ready(ctx)
 }
 
 /// Implements the Phase handoff edge from `EntryPreludePhase` to the next
 /// BootPhase child, `EntrySuccessorPhase`.
 fn handoff(ctx: &mut Context) -> ! {
-    require(cleanup_entry_prelude_phase(ctx));
-    require(crate::phases::state::mark(
+    crate::phases::shutdown_on_error(
+        handoff_event(ctx),
+        "arceos_ex entry prelude handoff failed\n",
+    );
+    crate::phases::boot::entry_successor::setup(ctx)
+}
+
+fn handoff_event(ctx: &mut Context) -> EventOutcome {
+    cleanup_entry_prelude_phase(ctx)?;
+    crate::phases::state::mark(
         &ENTRY_PRELUDE_PHASE_STATE,
         LifecycleEvent::Cleanup,
         State::Ready,
         State::Destroyed,
         Checkpoint::EntryPreludePhaseDestroyed,
-    ));
-    crate::phases::boot::entry_successor::setup(ctx)
+    )
+    .into_result()
 }
 
-fn cleanup_entry_prelude_phase(_ctx: &mut Context) -> EventResult {
-    EventResult::Success
+fn cleanup_entry_prelude_phase(_ctx: &mut Context) -> EventOutcome {
+    Ok(())
 }
 
 /// Checks the `EntryPreludePhase.Ready` model boundary before emitting its
 /// checkpoint.  This is the coding counterpart of the phase invariant.
-fn checkpoint_ready(ctx: &Context) -> EventResult {
+fn checkpoint_ready(ctx: &Context) -> EventOutcome {
     if !entry_prelude_phase_ready(ctx) {
         return EventResult::failed_condition(
             LifecycleEvent::Setup,
             crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE),
             State::Base,
             State::Ready,
-        );
+        )
+        .into_result();
     }
 
     crate::phases::state::mark(
@@ -332,6 +330,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         State::Ready,
         Checkpoint::EntryPreludePhaseReady,
     )
+    .into_result()
 }
 
 fn entry_prelude_phase_ready(ctx: &Context) -> bool {
@@ -346,11 +345,4 @@ fn entry_prelude_phase_ready(ctx: &Context) -> bool {
         && ctx.vm.entry_prelude_ready()
         && ctx.cpu_group.state() == State::Prepared
         && ctx.cpu_group.boot_cpu_state() == State::Prepared
-}
-
-fn require(result: EventResult) {
-    if !result.is_success() {
-        crate::arch::riscv64::sbi::putstr("arceos_ex entry prelude event failed\n");
-        crate::arch::riscv64::sbi::system_shutdown()
-    }
 }

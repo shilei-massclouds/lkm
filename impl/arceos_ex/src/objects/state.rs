@@ -74,9 +74,18 @@ pub enum EventResult {
     Blocked(EventError),
 }
 
+pub type EventOutcome = Result<(), EventError>;
+
 impl EventResult {
     pub const fn is_success(self) -> bool {
         matches!(self, Self::Success)
+    }
+
+    pub const fn into_result(self) -> EventOutcome {
+        match self {
+            Self::Success => Ok(()),
+            Self::Failed(error) | Self::Blocked(error) => Err(error),
+        }
     }
 
     pub const fn failed_condition(

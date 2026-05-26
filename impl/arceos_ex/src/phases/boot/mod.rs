@@ -2,7 +2,7 @@ pub mod entry_prelude;
 pub mod entry_successor;
 
 use crate::{
-    objects::state::{EventResult, LifecycleEvent, State},
+    objects::state::{EventOutcome, LifecycleEvent, State},
     trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
@@ -11,13 +11,7 @@ use core::sync::atomic::AtomicU8;
 static BOOT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn setup_after_children() -> ! {
-    require(crate::phases::state::mark(
-        &BOOT_PHASE_STATE,
-        LifecycleEvent::Setup,
-        State::Base,
-        State::Ready,
-        Checkpoint::BootPhaseReady,
-    ));
+    crate::phases::shutdown_on_error(boot_phase_ready(), "arceos_ex boot event failed\n");
     handoff()
 }
 
@@ -25,11 +19,15 @@ fn handoff() -> ! {
     crate::startup_timeline_ready()
 }
 
-fn require(result: EventResult) {
-    if !result.is_success() {
-        crate::arch::riscv64::sbi::putstr("arceos_ex boot event failed\n");
-        crate::arch::riscv64::sbi::system_shutdown()
-    }
+fn boot_phase_ready() -> EventOutcome {
+    crate::phases::state::mark(
+        &BOOT_PHASE_STATE,
+        LifecycleEvent::Setup,
+        State::Base,
+        State::Ready,
+        Checkpoint::BootPhaseReady,
+    )
+    .into_result()
 }
 
 pub fn is_ready() -> bool {
