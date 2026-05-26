@@ -33,6 +33,14 @@ Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中�
 
 Phase 对象表示阶段或子阶段的编排边界，例如 `PreparePhase`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`。
 
+Phase 代码生成以模型中的阶段树为输入，默认采用深度优先遍历。生成器从顶层启动对象进入第一个阶段；若该阶段不属于当前内核代码生成范围，则只生成必要的事实采纳、检查或发布边界，然后回到父层级继续处理下一个阶段。若该阶段属于当前内核代码生成范围且包含子 Phase，则递归处理其子 Phase；若该阶段没有子 Phase，则生成该叶子 Phase 的主体 `setup()` 过程。
+
+父 Phase 在模型中声明和组织直接子 Phase 的顺序，这一顺序是 coding 生成 `handoff()` 链的依据。父 Phase 本身不应被机械生成成“直接逐个调用子 Phase `setup()`”的串行过程；运行时控制流应由当前 Phase 的 `handoff()` 显式连接到同层下一个 Phase 的 `setup()`。当某个 Phase 是本层级最后一个子 Phase 时，它的 `handoff()` 回到父 Phase 的完成确认过程。
+
+非叶子 Phase 的代码职责主要是边界确认：在所有子 Phase 通过 `handoff()` 链完成后，执行自身 `depends_on`、`ensures`、`invariant` 对应的检查和 checkpoint，并将父 Phase 推进到对应完成边界。叶子 Phase 的代码职责主要是按本 Phase 规格中的 `drives` 顺序推进普通对象事件，并在完成后调用自身 `handoff()`。
+
+特殊 Phase 可以由 coding 规格或对象规格显式覆盖默认生成方式。覆盖必须说明生效范围、原因和仍需保留的模型边界。例如入口前导期的 `setup()` 可以从架构入口符号开始，并由必要汇编和 Rust 续段共同组成；这种覆盖不改变 Phase 仍需提供 `setup()`、`handoff()`、边界检查和 checkpoint 的要求。
+
 Phase 对象在源码中不得对应资源对象式 Rust `struct`。默认实现方式是函数和 module，例如：
 
 - `entry_prelude_phase_setup(...)`

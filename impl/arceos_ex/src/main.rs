@@ -8,15 +8,16 @@ mod trace;
 
 use core::arch::global_asm;
 use core::panic::PanicInfo;
+use core::sync::atomic::AtomicU8;
 
 use objects::{
     boot_args::BootArgs,
-    state::{EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{EventErrorCode, EventResult, LifecycleEvent, State},
 };
 use trace::Checkpoint;
 
 #[unsafe(link_section = ".data.phase")]
-static mut STARTUP_TIMELINE: Lifecycle = Lifecycle::new(State::Base);
+static STARTUP_TIMELINE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 global_asm!(
     r#"
@@ -151,7 +152,8 @@ pub fn startup_timeline_ready() -> ! {
         arch::riscv64::sbi::system_shutdown()
     }
 
-    require_startup_event(startup_timeline().transition(
+    require_startup_event(crate::phases::state::mark(
+        &STARTUP_TIMELINE_STATE,
         LifecycleEvent::Setup,
         State::Base,
         State::Ready,
@@ -176,12 +178,6 @@ fn require_startup_event(result: EventResult) {
             arch::riscv64::sbi::system_shutdown()
         }
     }
-}
-
-fn startup_timeline() -> &'static mut Lifecycle {
-    // SAFETY: early boot is single-hart and the startup timeline state is only
-    // mutated by the top-level startup process in specification order.
-    unsafe { &mut *core::ptr::addr_of_mut!(STARTUP_TIMELINE) }
 }
 
 pub fn app_main() {

@@ -9,6 +9,7 @@ use crate::{
 };
 use core::sync::atomic::AtomicU8;
 
+#[unsafe(link_section = ".data.phase")]
 static BOOT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 static mut ENTRY_PRELUDE: EntryPreludeObjects = EntryPreludeObjects::new();
 static mut ENTRY_SUCCESSOR: EntrySuccessorObjects = EntrySuccessorObjects::new();

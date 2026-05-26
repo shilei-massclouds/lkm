@@ -48,3 +48,18 @@ pub fn mark(
     trace::checkpoint(checkpoint);
     EventResult::Success
 }
+
+pub fn adopt(
+    state: &AtomicU8,
+    event: LifecycleEvent,
+    expected: State,
+    target: State,
+) -> EventResult {
+    let actual = load(state);
+    if actual != expected {
+        return EventResult::failed_condition(event, actual, expected, target);
+    }
+
+    state.store(encode(target), Ordering::Relaxed);
+    EventResult::Success
+}
