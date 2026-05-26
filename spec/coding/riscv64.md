@@ -6,6 +6,8 @@
 
 本文件补充 `spec/model` 中与 RISC-V64 启动、CSR、页表、SBI、FDT 和中断异常入口相关的编码约束。它不重新定义对象生命周期，也不改变 `Preset`、`Setup`、`Enable`、`Cleanup` 的状态迁移语义。
 
+正式硬约束位于 [`riscv64.spec`](riscv64.spec)，并由 [`main.spec`](main.spec) 统一 include。本文只提供说明、背景和参考建议。
+
 第一轮实现只支持 RISC-V64，不要求提供其它架构的兼容层或空实现。
 
 ## 启动入口
@@ -40,6 +42,8 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 
 ## 链接脚本参考建议
 
+- 生成或维护的 RISC-V64 `.lds` 文件不得依赖固定的内核物理加载地址，也不得定义 `KERNEL_PHYS_ADDR` 这类 Config 常量。内核链接虚拟地址来自 `Config.kernel_link_addr`；实际物理装载起点由入口前导期 `KernelImage.Preset` 根据运行时映像位置确认，并作为 `KernelImage.phys_start` 一类对象事实供后续地址转换使用。
+- `.lds` 仍可依赖 `Lds` 规格和其它 `Config` 值，例如页大小、PMD 大小、段对齐、head text 布局、boot stack size 和相关符号位置。
 - `__global_pointer$` 的存在和入口可达性属于强制约束；其在链接脚本中的精确位置当前作为实现建议处理。
 - 可参考 Linux RISC-V64 的链接布局，把 `__global_pointer$` 放在 `.sbss` 与 `.sdata` 之间。这有助于让 `gp` 相对寻址覆盖小 BSS 与小数据段，并进一步使 `.sbss`、`.sdata` 的相对顺序和距离约束在链接脚本中显式化。
 - 若具体内核沿用不同布局，只要能证明 `gp` 初始化后的可寻址范围覆盖所有依赖 `gp` 相对寻址的符号，即可视为满足当前强制规格；后续若模型需要表达小数据段布局，可再把该建议提升为更精细的约束。
