@@ -6,3 +6,4 @@
  */
 
 include "mapping.spec";
+include "rust.spec";
