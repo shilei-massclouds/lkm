@@ -41,5 +41,5 @@ pub fn is_online() -> bool {
 }
 
 fn entry_prelude_objects() -> &'static EntryPreludeObjects {
-    crate::phases::boot::entry_prelude_objects_ref()
+    crate::phases::boot::entry_prelude::objects_ref()
 }

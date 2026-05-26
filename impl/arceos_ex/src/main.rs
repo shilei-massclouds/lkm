@@ -15,11 +15,6 @@ use trace::Checkpoint;
 #[unsafe(link_section = ".data.phase")]
 static STARTUP_TIMELINE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
-pub fn startup_timeline_continue_after_head_prefix(boot_args: &objects::boot_args::BootArgs) -> ! {
-    require_startup_event(phases::prepare::adopt_head_prefix(boot_args));
-    phases::boot::setup_after_head_prefix(boot_args)
-}
-
 pub fn startup_timeline_ready() -> ! {
     if !phases::prepare::is_online() || !phases::boot::is_ready() {
         arch::riscv64::sbi::putstr("arceos_ex startup invariant failed\n");

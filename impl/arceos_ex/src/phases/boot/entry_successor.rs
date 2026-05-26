@@ -11,8 +11,10 @@ use core::sync::atomic::AtomicU8;
 #[unsafe(link_section = ".data.phase")]
 static ENTRY_SUCCESSOR_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
+static mut ENTRY_SUCCESSOR: EntrySuccessorObjects = EntrySuccessorObjects::new();
 
-pub fn setup(objects: &mut EntrySuccessorObjects, entry_prelude: &mut EntryPreludeObjects) -> ! {
+pub fn setup(entry_prelude: &mut EntryPreludeObjects) -> ! {
+    let objects = objects();
     crate::trace::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
     require(objects.setup(entry_prelude));
     require(checkpoint_ready(objects, entry_prelude));
@@ -50,4 +52,10 @@ fn require(result: EventResult) {
         crate::arch::riscv64::sbi::putstr("arceos_ex entry successor event failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
     }
+}
+
+fn objects() -> &'static mut EntrySuccessorObjects {
+    // SAFETY: the boot path is single-hart and system-exclusive here. The
+    // successor phase owns this object carrier for the duration of its setup().
+    unsafe { &mut *core::ptr::addr_of_mut!(ENTRY_SUCCESSOR) }
 }

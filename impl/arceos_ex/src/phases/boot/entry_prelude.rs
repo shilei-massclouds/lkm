@@ -13,6 +13,7 @@ use crate::{
 #[unsafe(link_section = ".data.phase")]
 static ENTRY_PRELUDE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
+static mut ENTRY_PRELUDE: EntryPreludeObjects = EntryPreludeObjects::new();
 
 global_asm!(
     r#"
@@ -135,7 +136,8 @@ arceos_ex_head_checkpoint:
 #[unsafe(no_mangle)]
 extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
     let boot_args = BootArgs::new(hartid, dtb_pa);
-    crate::startup_timeline_continue_after_head_prefix(&boot_args)
+    require(crate::phases::prepare::adopt_head_prefix(&boot_args));
+    setup(&boot_args)
 }
 
 /// Continues `EntryPreludePhase.setup()` after the `_start` head segment.
@@ -153,17 +155,28 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
 ///
 /// This Rust segment adopts those completed events into the resource objects,
 /// then continues the remaining `EntryPreludePhase.setup()` drives in model
-/// order until `Vm.Setup` switches to the early virtual address space.
-pub fn setup(boot_args: &BootArgs, objects: &mut EntryPreludeObjects) -> ! {
+/// order. It also supplies the phase-owned continuation that resumes this same
+/// setup() after `Vm.Setup` switches to the early virtual address space.
+fn setup(boot_args: &BootArgs) -> ! {
+    let objects = objects();
     require(objects.adopt_head_prefix(boot_args));
     require(objects.event_stream_preset());
     require(objects.vm_preset(boot_args));
-    objects.vm_setup()
+    objects.vm_setup(after_vm_setup_continuation)
+}
+
+/// Continues the same `EntryPreludePhase.setup()` after `Vm.Setup` has switched
+/// to the early virtual address space.  Control returns here directly from the
+/// continuation selected by this phase; it does not pass through `BootPhase`.
+extern "C" fn after_vm_setup_continuation() -> ! {
+    let objects = objects();
+    require(after_vm_setup(objects));
+    handoff(objects)
 }
 
 /// Finishes `EntryPreludePhase.setup()` after `Vm.Setup` has switched address
 /// spaces and returned through the virtual continuation path.
-pub fn after_vm_setup(objects: &mut EntryPreludeObjects) -> EventResult {
+fn after_vm_setup(objects: &mut EntryPreludeObjects) -> EventResult {
     let result = objects.after_vm_setup();
     if !result.is_success() {
         return result;
@@ -174,7 +187,7 @@ pub fn after_vm_setup(objects: &mut EntryPreludeObjects) -> EventResult {
 
 /// Implements the Phase handoff edge from `EntryPreludePhase` to the next
 /// BootPhase child, `EntrySuccessorPhase`.
-pub fn handoff(objects: &mut EntryPreludeObjects) -> ! {
+fn handoff(objects: &mut EntryPreludeObjects) -> ! {
     require(objects.cleanup_entry_prelude_phase());
     require(crate::phases::state::mark(
         &ENTRY_PRELUDE_PHASE_STATE,
@@ -183,8 +196,7 @@ pub fn handoff(objects: &mut EntryPreludeObjects) -> ! {
         State::Destroyed,
         Checkpoint::EntryPreludePhaseDestroyed,
     ));
-    let entry_successor = crate::phases::boot::entry_successor_objects();
-    crate::phases::entry_successor::setup(entry_successor, objects)
+    crate::phases::boot::entry_successor::setup(objects)
 }
 
 /// Checks the `EntryPreludePhase.Ready` model boundary before emitting its
@@ -213,4 +225,17 @@ fn require(result: EventResult) {
         crate::arch::riscv64::sbi::putstr("arceos_ex entry prelude event failed\n");
         crate::arch::riscv64::sbi::system_shutdown()
     }
+}
+
+fn objects() -> &'static mut EntryPreludeObjects {
+    // SAFETY: the boot path is single-hart and system-exclusive here. This
+    // static carrier keeps object state alive across Vm.Setup, which does not
+    // return to its physical-address caller.
+    unsafe { &mut *core::ptr::addr_of_mut!(ENTRY_PRELUDE) }
+}
+
+pub fn objects_ref() -> &'static EntryPreludeObjects {
+    // SAFETY: read-only access is used by PreparePhase before EntryPreludePhase
+    // mutates the carrier. Later callers must keep using the mutable phase path.
+    unsafe { &*core::ptr::addr_of!(ENTRY_PRELUDE) }
 }

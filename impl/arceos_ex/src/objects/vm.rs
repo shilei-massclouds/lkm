@@ -13,6 +13,8 @@ use super::{
     trampoline_vm::TrampolineVm,
 };
 
+pub type VmSetupContinuation = extern "C" fn() -> !;
+
 pub struct Vm {
     lifecycle: Lifecycle,
     trampoline_vm: TrampolineVm,
@@ -88,6 +90,7 @@ impl Vm {
         static_objects: &StaticObjects,
         lds: &Lds,
         kernel_image: &mut KernelImage,
+        after_switch: VmSetupContinuation,
     ) -> ! {
         if self.lifecycle.state() != State::Prepared
             || self.trampoline_vm.state() != State::Ready
@@ -127,11 +130,15 @@ impl Vm {
         let Some(lds_virt) = config.runtime_to_link(lds as *const Lds as usize) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
+        let Some(after_switch_virt) = config.runtime_to_link(after_switch as usize) else {
+            crate::arch::riscv64::sbi::system_shutdown();
+        };
 
         let context = VmSetupContext {
             vm: vm_virt as *mut Vm,
             kernel_image: kernel_image_virt as *mut KernelImage,
             lds: lds_virt as *const Lds,
+            after_switch: after_switch_virt,
         };
         set_vm_setup_context(config, context);
 
@@ -237,12 +244,14 @@ struct VmSetupContext {
     vm: *mut Vm,
     kernel_image: *mut KernelImage,
     lds: *const Lds,
+    after_switch: usize,
 }
 
 static mut VM_SETUP_CONTEXT: VmSetupContext = VmSetupContext {
     vm: core::ptr::null_mut(),
     kernel_image: core::ptr::null_mut(),
     lds: core::ptr::null(),
+    after_switch: 0,
 };
 
 fn set_vm_setup_context(config: &Config, context: VmSetupContext) {
@@ -258,7 +267,11 @@ fn set_vm_setup_context(config: &Config, context: VmSetupContext) {
 #[unsafe(no_mangle)]
 extern "C" fn vm_setup_continuation() -> ! {
     let context = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(VM_SETUP_CONTEXT)) };
-    if context.vm.is_null() || context.kernel_image.is_null() || context.lds.is_null() {
+    if context.vm.is_null()
+        || context.kernel_image.is_null()
+        || context.lds.is_null()
+        || context.after_switch == 0
+    {
         crate::arch::riscv64::sbi::system_shutdown();
     }
 
@@ -266,5 +279,6 @@ extern "C" fn vm_setup_continuation() -> ! {
     let kernel_image = unsafe { &mut *context.kernel_image };
     let lds = unsafe { &*context.lds };
     vm.finish_setup_after_switch(kernel_image, lds);
-    crate::phases::boot::after_vm_setup_continuation()
+    let after_switch: VmSetupContinuation = unsafe { core::mem::transmute(context.after_switch) };
+    after_switch()
 }

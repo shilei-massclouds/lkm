@@ -10,7 +10,7 @@ use super::{
     raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
-    vm::Vm,
+    vm::{Vm, VmSetupContinuation},
 };
 
 pub const PT_SIZE_ON_STACK: usize = 256;
@@ -133,12 +133,13 @@ impl EntryPreludeObjects {
         self.init_stack.adopt_head_preset(&self.config, &self.lds)
     }
 
-    pub fn vm_setup(&mut self) -> ! {
+    pub fn vm_setup(&mut self, after_switch: VmSetupContinuation) -> ! {
         self.vm.setup(
             &self.config,
             &self.static_objects,
             &self.lds,
             &mut self.kernel_image,
+            after_switch,
         )
     }
 
