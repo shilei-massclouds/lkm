@@ -82,9 +82,9 @@ impl Lds {
         global_pointer as usize
     }
 
-    pub fn current_global_pointer(&self, config: &Config) -> Option<usize> {
+    pub fn current_global_pointer(&self, kernel_image: &KernelImage) -> Option<usize> {
         if csr::read_satp() == 0 {
-            config.runtime_to_phys(self.global_pointer())
+            kernel_image.runtime_to_phys(self.global_pointer())
         } else {
             Some(self.global_pointer())
         }
@@ -114,8 +114,8 @@ impl Lds {
         init_stack_end as usize
     }
 
-    pub fn init_stack_end_phys(&self, config: &Config) -> Option<usize> {
-        config.runtime_to_phys(self.init_stack_end())
+    pub fn init_stack_end_phys(&self, kernel_image: &KernelImage) -> Option<usize> {
+        kernel_image.runtime_to_phys(self.init_stack_end())
     }
 
     pub fn entry_layout_ready(&self) -> bool {
@@ -139,8 +139,8 @@ impl Lds {
             && self.init_stack_end() & 0xfff == 0
     }
 
-    fn bss_zeroed(&self, config: &Config) -> bool {
-        let Some(start) = config.runtime_to_phys(self.bss_start()) else {
+    fn bss_zeroed(&self, kernel_image: &KernelImage) -> bool {
+        let Some(start) = kernel_image.runtime_to_phys(self.bss_start()) else {
             return false;
         };
         let len = self.bss_end() - self.bss_start();
@@ -199,12 +199,18 @@ impl InterruptStream {
 
 pub struct KernelImage {
     lifecycle: Lifecycle,
+    phys_start: usize,
+    virt_start: usize,
+    virt_offset: usize,
 }
 
 impl KernelImage {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            phys_start: 0,
+            virt_start: 0,
+            virt_offset: 0,
         }
     }
 
@@ -212,10 +218,64 @@ impl KernelImage {
         self.lifecycle.state()
     }
 
+    pub const fn phys_start(&self) -> usize {
+        self.phys_start
+    }
+
+    pub const fn virt_start(&self) -> usize {
+        self.virt_start
+    }
+
+    pub const fn virt_offset(&self) -> usize {
+        self.virt_offset
+    }
+
+    pub fn link_to_phys(&self, addr: usize) -> Option<usize> {
+        addr.checked_sub(self.virt_offset)
+    }
+
+    pub fn phys_to_link(&self, addr: usize) -> Option<usize> {
+        addr.checked_add(self.virt_offset)
+    }
+
+    pub fn runtime_to_phys(&self, addr: usize) -> Option<usize> {
+        if addr >= self.virt_start {
+            self.link_to_phys(addr)
+        } else {
+            Some(addr)
+        }
+    }
+
+    pub fn runtime_to_link(&self, addr: usize) -> Option<usize> {
+        if addr >= self.virt_start {
+            Some(addr)
+        } else {
+            self.phys_to_link(addr)
+        }
+    }
+
     pub fn adopt_head_preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
+        let runtime_start = lds.kernel_start();
+        let virt_start = config.kernel_link_addr();
+        let Some(virt_offset) = virt_start.checked_sub(runtime_start) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        };
+
+        self.phys_start = runtime_start;
+        self.virt_start = virt_start;
+        self.virt_offset = virt_offset;
+
         if lds.state() != State::Online
             || !lds.entry_layout_ready()
-            || lds.current_global_pointer(config) != Some(csr::read_gp())
+            || runtime_start == 0
+            || runtime_start >= virt_start
+            || !runtime_start.is_multiple_of(config.pmd_size())
+            || lds.current_global_pointer(self) != Some(csr::read_gp())
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -229,8 +289,8 @@ impl KernelImage {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    pub fn adopt_head_setup(&mut self, config: &Config, lds: &Lds) -> EventResult {
-        if self.lifecycle.state() != State::Prepared || !lds.bss_zeroed(config) {
+    pub fn adopt_head_setup(&mut self, lds: &Lds) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || !lds.bss_zeroed(self) {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -408,9 +468,9 @@ impl InitTask {
         }
     }
 
-    pub fn adopt_head_preset(&mut self, config: &Config) -> EventResult {
+    pub fn adopt_head_preset(&mut self, kernel_image: &KernelImage) -> EventResult {
         let Some(init_task_phys) =
-            config.runtime_to_phys(core::ptr::addr_of!(init_task_storage) as usize)
+            kernel_image.runtime_to_phys(core::ptr::addr_of!(init_task_storage) as usize)
         else {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -433,9 +493,9 @@ impl InitTask {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    pub fn enable(&mut self, config: &Config, vm: &Vm) -> EventResult {
+    pub fn enable(&mut self, kernel_image: &KernelImage, vm: &Vm) -> EventResult {
         let Some(init_task_virt) =
-            config.runtime_to_link(core::ptr::addr_of!(init_task_storage) as usize)
+            kernel_image.runtime_to_link(core::ptr::addr_of!(init_task_storage) as usize)
         else {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -479,9 +539,9 @@ impl InitStack {
         }
     }
 
-    pub fn adopt_head_preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
+    pub fn adopt_head_preset(&mut self, kernel_image: &KernelImage, lds: &Lds) -> EventResult {
         let head_sp = unsafe { core::ptr::addr_of!(head_init_stack_sp).read_volatile() };
-        let Some(stack_phys) = lds.init_stack_end_phys(config).and_then(|stack_end| {
+        let Some(stack_phys) = lds.init_stack_end_phys(kernel_image).and_then(|stack_end| {
             stack_end
                 .checked_sub(PT_SIZE_ON_STACK)
                 .filter(|stack| *stack == head_sp)
@@ -550,8 +610,8 @@ impl EventStream {
         }
     }
 
-    pub fn preset(&mut self, config: &Config) -> EventResult {
-        let Some(early_event_entry_phys) = config.runtime_to_phys(early_event_entry as usize)
+    pub fn preset(&mut self, kernel_image: &KernelImage) -> EventResult {
+        let Some(early_event_entry_phys) = kernel_image.runtime_to_phys(early_event_entry as usize)
         else {
             return failed_condition(
                 LifecycleEvent::Preset,

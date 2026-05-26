@@ -21,7 +21,6 @@ class LinkerCodegenTests(unittest.TestCase):
             result.model,
             LinkerProfile(
                 kernel_link_addr="0xffffffff80000000",
-                kernel_phys_addr="0x80200000",
                 page_size="4K",
                 boot_stack_size="16K",
             ),
@@ -40,7 +39,6 @@ class LinkerCodegenTests(unittest.TestCase):
                 model,
                 LinkerProfile(
                     kernel_link_addr="0xffffffff80000000",
-                    kernel_phys_addr="0x80200000",
                     page_size="4K",
                     boot_stack_size="16K",
                 ),
@@ -64,7 +62,6 @@ def _minimal_model_without_config_driven_lds_invariant() -> ObjectModel:
         attrs={
             "boot_stack_size": "Size",
             "kernel_link_addr": "VirtAddr<KernelImage>",
-            "kernel_phys_addr": "PhysAddr<KernelImage>",
             "page_size": "Size",
         },
     )

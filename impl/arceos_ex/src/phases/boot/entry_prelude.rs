@@ -207,7 +207,7 @@ fn setup(boot_args: &BootArgs) -> ! {
 
 fn setup_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     adopt_head_prefix(ctx, boot_args)?;
-    ctx.event_stream.preset(&ctx.config)?;
+    ctx.event_stream.preset(&ctx.kernel_image)?;
     ctx.vm.preset(
         &ctx.config,
         &mut ctx.static_objects,
@@ -223,10 +223,11 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     ctx.interrupt_stream.adopt_head_preset()?;
     ctx.kernel_image.adopt_head_preset(&ctx.config, &ctx.lds)?;
     ctx.root_stream.adopt_head_preset()?;
-    ctx.kernel_image.adopt_head_setup(&ctx.config, &ctx.lds)?;
+    ctx.kernel_image.adopt_head_setup(&ctx.lds)?;
     ctx.cpu_group.adopt_head_preset(boot_args)?;
-    ctx.init_task.adopt_head_preset(&ctx.config)?;
-    ctx.init_stack.adopt_head_preset(&ctx.config, &ctx.lds)
+    ctx.init_task.adopt_head_preset(&ctx.kernel_image)?;
+    ctx.init_stack
+        .adopt_head_preset(&ctx.kernel_image, &ctx.lds)
 }
 
 /// Continues the same `EntryPreludePhase.setup()` after `Vm.Setup` has switched
@@ -245,7 +246,7 @@ extern "C" fn after_vm_setup_continuation() -> ! {
 /// spaces and returned through the virtual continuation path.
 fn after_vm_setup(ctx: &mut Context) -> EventResult {
     ctx.event_stream.enable(&ctx.vm, &ctx.static_objects)?;
-    ctx.init_task.enable(&ctx.config, &ctx.vm)?;
+    ctx.init_task.enable(&ctx.kernel_image, &ctx.vm)?;
     ctx.init_stack.setup(&ctx.vm)?;
     Soc::preset()?;
     checkpoint_ready(ctx)

@@ -2,7 +2,7 @@ use crate::trace::Checkpoint;
 
 use super::{
     config::Config,
-    entry_prelude::Lds,
+    entry_prelude::{KernelImage, Lds},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
 };
@@ -64,12 +64,14 @@ impl TrampolineVm {
         config: &Config,
         static_objects: &mut StaticObjects,
         lds: &Lds,
+        kernel_image: &KernelImage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || !config.entry_prelude_ready()
             || static_objects.state() != State::Online
             || !static_objects.storage_ready(config)
             || lds.state() != State::Online
+            || kernel_image.state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -79,7 +81,7 @@ impl TrampolineVm {
             );
         }
 
-        if !static_objects.build_trampoline_pg_dir(config, lds.kernel_start()) {
+        if !static_objects.build_trampoline_pg_dir(config, kernel_image) {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

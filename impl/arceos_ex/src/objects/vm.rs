@@ -59,7 +59,9 @@ impl Vm {
             );
         }
 
-        let result = self.trampoline_vm.setup(config, static_objects, lds);
+        let result = self
+            .trampoline_vm
+            .setup(config, static_objects, lds, kernel_image);
         if result.is_err() {
             return result;
         }
@@ -86,7 +88,7 @@ impl Vm {
 
     pub fn setup(
         &mut self,
-        config: &Config,
+        _config: &Config,
         static_objects: &StaticObjects,
         lds: &Lds,
         kernel_image: &mut KernelImage,
@@ -99,38 +101,38 @@ impl Vm {
             crate::arch::riscv64::sbi::system_shutdown();
         }
 
-        let Some(trampoline_satp) = static_objects.trampoline_satp(config) else {
+        let Some(trampoline_satp) = static_objects.trampoline_satp(kernel_image) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(early_satp) = static_objects.early_satp(config) else {
+        let Some(early_satp) = static_objects.early_satp(kernel_image) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(stack_virt) = lds.init_stack_end_phys(config).and_then(|stack_end| {
+        let Some(stack_virt) = lds.init_stack_end_phys(kernel_image).and_then(|stack_end| {
             stack_end
                 .checked_sub(super::entry_prelude::PT_SIZE_ON_STACK)
-                .and_then(|stack| config.phys_to_link(stack))
+                .and_then(|stack| kernel_image.phys_to_link(stack))
         }) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(gp_virt) = config.runtime_to_link(lds.global_pointer()) else {
+        let Some(gp_virt) = kernel_image.runtime_to_link(lds.global_pointer()) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(continuation_virt) = config.runtime_to_link(vm_setup_continuation as usize) else {
-            crate::arch::riscv64::sbi::system_shutdown();
-        };
-
-        let Some(vm_virt) = config.runtime_to_link(self as *mut Vm as usize) else {
-            crate::arch::riscv64::sbi::system_shutdown();
-        };
-        let Some(kernel_image_virt) =
-            config.runtime_to_link(kernel_image as *mut KernelImage as usize)
+        let Some(continuation_virt) = kernel_image.runtime_to_link(vm_setup_continuation as usize)
         else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(lds_virt) = config.runtime_to_link(lds as *const Lds as usize) else {
+
+        let Some(vm_virt) = kernel_image.runtime_to_link(self as *mut Vm as usize) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(after_switch_virt) = config.runtime_to_link(after_switch as usize) else {
+        let kernel_image_addr = kernel_image as *mut KernelImage as usize;
+        let Some(kernel_image_virt) = kernel_image.runtime_to_link(kernel_image_addr) else {
+            crate::arch::riscv64::sbi::system_shutdown();
+        };
+        let Some(lds_virt) = kernel_image.runtime_to_link(lds as *const Lds as usize) else {
+            crate::arch::riscv64::sbi::system_shutdown();
+        };
+        let Some(after_switch_virt) = kernel_image.runtime_to_link(after_switch as usize) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
 
@@ -140,7 +142,7 @@ impl Vm {
             lds: lds_virt as *const Lds,
             after_switch: after_switch_virt,
         };
-        set_vm_setup_context(config, context);
+        set_vm_setup_context(kernel_image, context);
 
         unsafe {
             csr::switch_to_early_vm(
@@ -149,7 +151,7 @@ impl Vm {
                 stack_virt,
                 gp_virt,
                 continuation_virt,
-                config.kernel_virt_offset(),
+                kernel_image.virt_offset(),
             )
         }
     }
@@ -210,7 +212,7 @@ impl Vm {
             return result;
         }
 
-        let result = self.swapper_vm.enable(config, static_objects);
+        let result = self.swapper_vm.enable(static_objects, kernel_image);
         if result.is_err() {
             return result;
         }
@@ -254,8 +256,9 @@ static mut VM_SETUP_CONTEXT: VmSetupContext = VmSetupContext {
     after_switch: 0,
 };
 
-fn set_vm_setup_context(config: &Config, context: VmSetupContext) {
-    let Some(context_addr) = config.runtime_to_phys(core::ptr::addr_of!(VM_SETUP_CONTEXT) as usize)
+fn set_vm_setup_context(kernel_image: &KernelImage, context: VmSetupContext) {
+    let Some(context_addr) =
+        kernel_image.runtime_to_phys(core::ptr::addr_of!(VM_SETUP_CONTEXT) as usize)
     else {
         crate::arch::riscv64::sbi::system_shutdown();
     };

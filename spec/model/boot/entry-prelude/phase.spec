@@ -386,6 +386,7 @@ object KernelImage: ImageObject {
 
     attrs {
         start: Derived<SymbolAddr, Lds.kernel_start>;
+        phys_start: PhysAddr<KernelImage>;
         end: Derived<SymbolAddr, Lds.kernel_end>;
         segments: SegmentSet<KernelImageSegment>;
     }
@@ -409,6 +410,7 @@ object KernelImage: ImageObject {
                 }
 
                 ensures {
+                    phys_start == phys_addr(Lds.kernel_start);
                     Riscv64.gp == phys_addr(Lds.global_pointer);
                 }
             }
@@ -423,6 +425,7 @@ object KernelImage: ImageObject {
             valid_segment_set(segments);
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
+            phys_start == phys_addr(Lds.kernel_start);
             Riscv64.gp == phys_addr(Lds.global_pointer);
         }
 
@@ -440,6 +443,7 @@ object KernelImage: ImageObject {
                 }
 
                 ensures {
+                    phys_start == phys_addr(Lds.kernel_start);
                     memory_zeroed(segments.bss.range);
                 }
             }
@@ -454,6 +458,7 @@ object KernelImage: ImageObject {
             valid_segment_set(segments);
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
+            phys_start == phys_addr(Lds.kernel_start);
             memory_zeroed(segments.bss.range);
         }
 
@@ -472,6 +477,7 @@ object KernelImage: ImageObject {
                 }
 
                 ensures {
+                    phys_start == phys_addr(Lds.kernel_start);
                     Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
                     gp_relative_access_ready();
                 }
@@ -487,6 +493,7 @@ object KernelImage: ImageObject {
             valid_segment_set(segments);
             segments.bss.range == range(Lds.bss_start, Lds.bss_end);
             inside(segments.bss.range.start, segments.bss.range.end, start, end);
+            phys_start == phys_addr(Lds.kernel_start);
             Riscv64.gp == virt_addr(Lds.global_pointer, EarlyVm, KernelImageMap);
             gp_relative_access_ready();
         }
@@ -802,6 +809,7 @@ object TrampolineVm: AddressSpaceObject {
                     StaticObjects.state == State::Online;
                     Config.state == State::Online;
                     Lds.state == State::Online;
+                    KernelImage.state == State::Ready;
                     valid_trampoline_map(TrampolineMap);
                 }
 

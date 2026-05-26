@@ -68,9 +68,7 @@ _CONFIG_SOURCE_PROOFS = {
     "boot_stack_size >= page_size": ("configuration", "config_source"),
     "aligned(boot_stack_size, page_size)": ("configuration", "config_source"),
     "kernel_link_addr != 0": ("configuration", "config_source"),
-    "kernel_phys_addr != 0": ("configuration", "config_source"),
     "page_aligned(kernel_link_addr)": ("configuration", "config_source"),
-    "page_aligned(kernel_phys_addr)": ("configuration", "config_source"),
     "valid_virt_addr(kernel_link_addr)": ("address_mapping", "config_source"),
     "kernel_image_va_window_size > 0": ("configuration", "config_source"),
     "kernel_image_va_window_size >= pmd_size": ("configuration", "config_source"),
@@ -429,15 +427,7 @@ _RELATION_PROOFS = {
         "configuration",
         "config_source_candidate",
     ),
-    "kernel_phys_addr != 0": (
-        "configuration",
-        "config_source_candidate",
-    ),
     "page_aligned(kernel_link_addr)": (
-        "configuration",
-        "config_source_candidate",
-    ),
-    "page_aligned(kernel_phys_addr)": (
         "configuration",
         "config_source_candidate",
     ),
@@ -1346,6 +1336,7 @@ class _Deriver:
         if not (
             self._validate_state("Lds", "Online")
             and self._validate_state("Config", "Online")
+            and self._validate_state("KernelImage", "Ready")
         ):
             return False
         required = {

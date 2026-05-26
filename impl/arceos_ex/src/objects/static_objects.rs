@@ -1,5 +1,6 @@
 use super::{
     config::Config,
+    entry_prelude::KernelImage,
     entry_successor::MemBlock,
     fix_map::FixMap,
     raw_dtb::RawDtb,
@@ -54,47 +55,64 @@ impl StaticObjects {
     }
 
     pub fn storage_ready(&self, config: &Config) -> bool {
-        page_table_storage_ready(trampoline_pg_dir_addr(config), config.page_size())
-            && page_table_storage_ready(trampoline_kernel_pg_table_addr(config), config.page_size())
-            && page_table_storage_ready(early_pg_dir_addr(config), config.page_size())
-            && page_table_storage_ready(early_kernel_pg_table_addr(config), config.page_size())
-            && page_table_storage_ready(early_fixmap_l1_table_addr(config), config.page_size())
-            && page_table_storage_ready(early_fixmap_l0_table_addr(config), config.page_size())
-            && page_table_storage_ready(swapper_pg_dir_addr(config), config.page_size())
-            && page_table_storage_ready(swapper_kernel_pg_table_addr(config), config.page_size())
-            && swapper_linear_pg_tables_ready(config)
+        page_table_storage_ready(
+            core::ptr::addr_of!(TRAMPOLINE_PG_DIR) as usize,
+            config.page_size(),
+        ) && page_table_storage_ready(
+            core::ptr::addr_of!(TRAMPOLINE_KERNEL_PG_TABLE) as usize,
+            config.page_size(),
+        ) && page_table_storage_ready(
+            core::ptr::addr_of!(EARLY_PG_DIR) as usize,
+            config.page_size(),
+        ) && page_table_storage_ready(
+            core::ptr::addr_of!(EARLY_KERNEL_PG_TABLE) as usize,
+            config.page_size(),
+        ) && page_table_storage_ready(
+            core::ptr::addr_of!(EARLY_FIXMAP_L1_TABLE) as usize,
+            config.page_size(),
+        ) && page_table_storage_ready(
+            core::ptr::addr_of!(EARLY_FIXMAP_L0_TABLE) as usize,
+            config.page_size(),
+        ) && page_table_storage_ready(
+            core::ptr::addr_of!(SWAPPER_PG_DIR) as usize,
+            config.page_size(),
+        ) && page_table_storage_ready(
+            core::ptr::addr_of!(SWAPPER_KERNEL_PG_TABLE) as usize,
+            config.page_size(),
+        ) && swapper_linear_pg_tables_ready(config)
     }
 
-    pub fn trampoline_satp(&self, config: &Config) -> Option<usize> {
-        satp_from_root(config, trampoline_pg_dir_addr(config))
+    pub fn trampoline_satp(&self, kernel_image: &KernelImage) -> Option<usize> {
+        satp_from_root(kernel_image, trampoline_pg_dir_addr(kernel_image))
     }
 
-    pub fn early_satp(&self, config: &Config) -> Option<usize> {
-        satp_from_root(config, early_pg_dir_addr(config))
+    pub fn early_satp(&self, kernel_image: &KernelImage) -> Option<usize> {
+        satp_from_root(kernel_image, early_pg_dir_addr(kernel_image))
     }
 
-    pub fn swapper_satp(&self, config: &Config) -> Option<usize> {
-        satp_from_root(config, swapper_pg_dir_addr(config))
+    pub fn swapper_satp(&self, kernel_image: &KernelImage) -> Option<usize> {
+        satp_from_root(kernel_image, swapper_pg_dir_addr(kernel_image))
     }
 
     pub fn build_early_pg_dir(
         &mut self,
         config: &Config,
+        kernel_image: &KernelImage,
         kernel_start: usize,
         kernel_end: usize,
         raw_dtb: &RawDtb,
         fix_map: &FixMap,
     ) -> bool {
         let Some((kernel_link_start, kernel_phys_start, kernel_size)) =
-            kernel_runtime_range(config, kernel_start, kernel_end)
+            kernel_runtime_range(config, kernel_image, kernel_start, kernel_end)
         else {
             return false;
         };
 
-        let root = early_pg_dir_mut(config);
-        let kernel_table = early_kernel_pg_table_mut(config);
-        let fixmap_l1_table = early_fixmap_l1_table_mut(config);
-        let fixmap_l0_table = early_fixmap_l0_table_mut(config);
+        let root = early_pg_dir_mut(kernel_image);
+        let kernel_table = early_kernel_pg_table_mut(kernel_image);
+        let fixmap_l1_table = early_fixmap_l1_table_mut(kernel_image);
+        let fixmap_l0_table = early_fixmap_l0_table_mut(kernel_image);
         root.clear();
         kernel_table.clear();
         fixmap_l1_table.clear();
@@ -102,6 +120,7 @@ impl StaticObjects {
 
         if !map_pmd_range(
             config,
+            kernel_image,
             root,
             kernel_table,
             kernel_link_start,
@@ -115,6 +134,7 @@ impl StaticObjects {
         let fdt_slot = fix_map.fdt_slot();
         map_page_range(
             config,
+            kernel_image,
             root,
             fixmap_l1_table,
             fixmap_l0_table,
@@ -125,28 +145,24 @@ impl StaticObjects {
         )
     }
 
-    pub fn build_trampoline_pg_dir(&mut self, config: &Config, kernel_start: usize) -> bool {
-        let Some(kernel_link_start) = config.runtime_to_link(kernel_start) else {
-            return false;
-        };
-        let Some(kernel_phys_start) = config.runtime_to_phys(kernel_start) else {
-            return false;
-        };
+    pub fn build_trampoline_pg_dir(&mut self, config: &Config, kernel_image: &KernelImage) -> bool {
+        let kernel_link_start = kernel_image.virt_start();
+        let kernel_phys_start = kernel_image.phys_start();
         if kernel_link_start != config.kernel_link_addr()
-            || kernel_phys_start != config.kernel_phys_addr()
             || !aligned(kernel_link_start, config.pmd_size())
             || !aligned(kernel_phys_start, config.pmd_size())
         {
             return false;
         }
 
-        let root = trampoline_pg_dir_mut(config);
-        let kernel_table = trampoline_kernel_pg_table_mut(config);
+        let root = trampoline_pg_dir_mut(kernel_image);
+        let kernel_table = trampoline_kernel_pg_table_mut(kernel_image);
         root.clear();
         kernel_table.clear();
 
         map_pmd_range(
             config,
+            kernel_image,
             root,
             kernel_table,
             kernel_link_start,
@@ -159,19 +175,20 @@ impl StaticObjects {
     pub fn build_swapper_pg_dir(
         &mut self,
         config: &Config,
+        kernel_image: &KernelImage,
         kernel_start: usize,
         kernel_end: usize,
         memblock: &MemBlock,
     ) -> bool {
         let Some((kernel_link_start, kernel_phys_start, kernel_size)) =
-            kernel_runtime_range(config, kernel_start, kernel_end)
+            kernel_runtime_range(config, kernel_image, kernel_start, kernel_end)
         else {
             return false;
         };
 
-        let root = swapper_pg_dir_mut(config);
-        let kernel_table = swapper_kernel_pg_table_mut(config);
-        let linear_tables = swapper_linear_pg_tables_mut(config);
+        let root = swapper_pg_dir_mut(kernel_image);
+        let kernel_table = swapper_kernel_pg_table_mut(kernel_image);
+        let linear_tables = swapper_linear_pg_tables_mut(kernel_image);
         root.clear();
         kernel_table.clear();
         for table in linear_tables.iter_mut() {
@@ -180,6 +197,7 @@ impl StaticObjects {
 
         if !map_pmd_range(
             config,
+            kernel_image,
             root,
             kernel_table,
             kernel_link_start,
@@ -201,6 +219,7 @@ impl StaticObjects {
             };
             if !map_linear_pmd_range(
                 config,
+                kernel_image,
                 root,
                 linear_tables,
                 linear_start,
@@ -227,8 +246,8 @@ fn page_table_storage_ready(addr: usize, page_size: usize) -> bool {
 fn swapper_linear_pg_tables_ready(config: &Config) -> bool {
     let mut index = 0;
     while index < SWAPPER_L1_TABLES {
-        let addr =
-            swapper_linear_pg_tables_addr(config) + index * core::mem::size_of::<PageTablePage>();
+        let addr = core::ptr::addr_of!(SWAPPER_LINEAR_PG_TABLES) as usize
+            + index * core::mem::size_of::<PageTablePage>();
         if !page_table_storage_ready(addr, config.page_size()) {
             return false;
         }
@@ -238,7 +257,8 @@ fn swapper_linear_pg_tables_ready(config: &Config) -> bool {
 }
 
 fn map_pmd_range(
-    config: &Config,
+    _config: &Config,
+    kernel_image: &KernelImage,
     root: &mut PageTablePage,
     leaf_table: &mut PageTablePage,
     virt_start: usize,
@@ -260,7 +280,7 @@ fn map_pmd_range(
     let vpn2 = sv39_index(virt_start, 30);
     let mut vpn1 = sv39_index(virt_start, 21);
     let mut phys = phys_start;
-    let Some(leaf_table_phys) = page_table_phys_addr(config, leaf_table) else {
+    let Some(leaf_table_phys) = page_table_phys_addr(kernel_image, leaf_table) else {
         return false;
     };
     for _ in 0..covered / pmd_size {
@@ -279,7 +299,8 @@ fn map_pmd_range(
 }
 
 fn map_page_range(
-    config: &Config,
+    _config: &Config,
+    kernel_image: &KernelImage,
     root: &mut PageTablePage,
     l1_table: &mut PageTablePage,
     l0_table: &mut PageTablePage,
@@ -304,10 +325,10 @@ fn map_page_range(
     let vpn1 = sv39_index(virt_start, 21);
     let mut vpn0 = sv39_index(virt_start, 12);
     let mut phys = phys_base;
-    let Some(l1_table_phys) = page_table_phys_addr(config, l1_table) else {
+    let Some(l1_table_phys) = page_table_phys_addr(kernel_image, l1_table) else {
         return false;
     };
-    let Some(l0_table_phys) = page_table_phys_addr(config, l0_table) else {
+    let Some(l0_table_phys) = page_table_phys_addr(kernel_image, l0_table) else {
         return false;
     };
     for _ in 0..covered / page_size {
@@ -328,6 +349,7 @@ fn map_page_range(
 
 fn map_linear_pmd_range(
     config: &Config,
+    kernel_image: &KernelImage,
     root: &mut PageTablePage,
     leaf_tables: &mut [PageTablePage; SWAPPER_L1_TABLES],
     virt_start: usize,
@@ -359,7 +381,7 @@ fn map_linear_pmd_range(
             return false;
         }
         let table = &mut leaf_tables[table_index];
-        let Some(table_phys) = page_table_phys_addr(config, table) else {
+        let Some(table_phys) = page_table_phys_addr(kernel_image, table) else {
             return false;
         };
         table.set(vpn1, leaf_pte(phys, PTE_LEAF_RWX));
@@ -397,64 +419,76 @@ fn leaf_pte(phys: usize, flags: usize) -> usize {
     ((phys >> 12) << 10) | flags
 }
 
-fn page_table_phys_addr(config: &Config, table: &PageTablePage) -> Option<usize> {
-    config.runtime_to_phys(table as *const PageTablePage as usize)
+fn page_table_phys_addr(kernel_image: &KernelImage, table: &PageTablePage) -> Option<usize> {
+    kernel_image.runtime_to_phys(table as *const PageTablePage as usize)
 }
 
-fn satp_from_root(config: &Config, root_addr: usize) -> Option<usize> {
-    config
+fn satp_from_root(kernel_image: &KernelImage, root_addr: usize) -> Option<usize> {
+    kernel_image
         .runtime_to_phys(root_addr)
         .map(|root_phys| crate::arch::riscv64::csr::SATP_MODE_SV39 | (root_phys >> 12))
 }
 
-fn trampoline_pg_dir_addr(config: &Config) -> usize {
-    runtime_addr(config, core::ptr::addr_of!(TRAMPOLINE_PG_DIR) as usize)
+fn trampoline_pg_dir_addr(kernel_image: &KernelImage) -> usize {
+    runtime_addr(
+        kernel_image,
+        core::ptr::addr_of!(TRAMPOLINE_PG_DIR) as usize,
+    )
 }
 
-fn trampoline_kernel_pg_table_addr(config: &Config) -> usize {
+fn trampoline_kernel_pg_table_addr(kernel_image: &KernelImage) -> usize {
     runtime_addr(
-        config,
+        kernel_image,
         core::ptr::addr_of!(TRAMPOLINE_KERNEL_PG_TABLE) as usize,
     )
 }
 
-fn early_pg_dir_addr(config: &Config) -> usize {
-    runtime_addr(config, core::ptr::addr_of!(EARLY_PG_DIR) as usize)
+fn early_pg_dir_addr(kernel_image: &KernelImage) -> usize {
+    runtime_addr(kernel_image, core::ptr::addr_of!(EARLY_PG_DIR) as usize)
 }
 
-fn early_kernel_pg_table_addr(config: &Config) -> usize {
-    runtime_addr(config, core::ptr::addr_of!(EARLY_KERNEL_PG_TABLE) as usize)
-}
-
-fn early_fixmap_l1_table_addr(config: &Config) -> usize {
-    runtime_addr(config, core::ptr::addr_of!(EARLY_FIXMAP_L1_TABLE) as usize)
-}
-
-fn early_fixmap_l0_table_addr(config: &Config) -> usize {
-    runtime_addr(config, core::ptr::addr_of!(EARLY_FIXMAP_L0_TABLE) as usize)
-}
-
-fn swapper_pg_dir_addr(config: &Config) -> usize {
-    runtime_addr(config, core::ptr::addr_of!(SWAPPER_PG_DIR) as usize)
-}
-
-fn swapper_kernel_pg_table_addr(config: &Config) -> usize {
+fn early_kernel_pg_table_addr(kernel_image: &KernelImage) -> usize {
     runtime_addr(
-        config,
+        kernel_image,
+        core::ptr::addr_of!(EARLY_KERNEL_PG_TABLE) as usize,
+    )
+}
+
+fn early_fixmap_l1_table_addr(kernel_image: &KernelImage) -> usize {
+    runtime_addr(
+        kernel_image,
+        core::ptr::addr_of!(EARLY_FIXMAP_L1_TABLE) as usize,
+    )
+}
+
+fn early_fixmap_l0_table_addr(kernel_image: &KernelImage) -> usize {
+    runtime_addr(
+        kernel_image,
+        core::ptr::addr_of!(EARLY_FIXMAP_L0_TABLE) as usize,
+    )
+}
+
+fn swapper_pg_dir_addr(kernel_image: &KernelImage) -> usize {
+    runtime_addr(kernel_image, core::ptr::addr_of!(SWAPPER_PG_DIR) as usize)
+}
+
+fn swapper_kernel_pg_table_addr(kernel_image: &KernelImage) -> usize {
+    runtime_addr(
+        kernel_image,
         core::ptr::addr_of!(SWAPPER_KERNEL_PG_TABLE) as usize,
     )
 }
 
-fn swapper_linear_pg_tables_addr(config: &Config) -> usize {
+fn swapper_linear_pg_tables_addr(kernel_image: &KernelImage) -> usize {
     runtime_addr(
-        config,
+        kernel_image,
         core::ptr::addr_of!(SWAPPER_LINEAR_PG_TABLES) as usize,
     )
 }
 
-fn runtime_addr(config: &Config, link_addr: usize) -> usize {
+fn runtime_addr(kernel_image: &KernelImage, link_addr: usize) -> usize {
     if crate::arch::riscv64::csr::read_satp() == 0 {
-        config.link_to_phys(link_addr).unwrap_or(link_addr)
+        kernel_image.link_to_phys(link_addr).unwrap_or(link_addr)
     } else {
         link_addr
     }
@@ -462,17 +496,18 @@ fn runtime_addr(config: &Config, link_addr: usize) -> usize {
 
 fn kernel_runtime_range(
     config: &Config,
+    kernel_image: &KernelImage,
     kernel_start: usize,
     kernel_end: usize,
 ) -> Option<(usize, usize, usize)> {
-    let kernel_link_start = config.runtime_to_link(kernel_start)?;
-    let kernel_link_end = config.runtime_to_link(kernel_end)?;
-    let kernel_phys_start = config.runtime_to_phys(kernel_start)?;
-    let kernel_phys_end = config.runtime_to_phys(kernel_end)?;
+    let kernel_link_start = kernel_image.runtime_to_link(kernel_start)?;
+    let kernel_link_end = kernel_image.runtime_to_link(kernel_end)?;
+    let kernel_phys_start = kernel_image.runtime_to_phys(kernel_start)?;
+    let kernel_phys_end = kernel_image.runtime_to_phys(kernel_end)?;
     let kernel_link_size = kernel_link_end.checked_sub(kernel_link_start)?;
     let kernel_phys_size = kernel_phys_end.checked_sub(kernel_phys_start)?;
     if kernel_link_start != config.kernel_link_addr()
-        || kernel_phys_start != config.kernel_phys_addr()
+        || kernel_phys_start != kernel_image.phys_start()
         || kernel_link_size == 0
         || kernel_link_size != kernel_phys_size
         || !aligned(kernel_link_start, config.pmd_size())
@@ -484,50 +519,51 @@ fn kernel_runtime_range(
     Some((kernel_link_start, kernel_phys_start, kernel_link_size))
 }
 
-fn early_pg_dir_mut(config: &Config) -> &'static mut PageTablePage {
+fn early_pg_dir_mut(kernel_image: &KernelImage) -> &'static mut PageTablePage {
     // Early boot is still single-threaded here; this function is the object
     // boundary that owns initialization of StaticObjects.early_pg_dir.
-    unsafe { &mut *(early_pg_dir_addr(config) as *mut PageTablePage) }
+    unsafe { &mut *(early_pg_dir_addr(kernel_image) as *mut PageTablePage) }
 }
 
-fn trampoline_pg_dir_mut(config: &Config) -> &'static mut PageTablePage {
+fn trampoline_pg_dir_mut(kernel_image: &KernelImage) -> &'static mut PageTablePage {
     // TrampolineVm.Setup owns initialization of StaticObjects.trampoline_pg_dir.
-    unsafe { &mut *(trampoline_pg_dir_addr(config) as *mut PageTablePage) }
+    unsafe { &mut *(trampoline_pg_dir_addr(kernel_image) as *mut PageTablePage) }
 }
 
-fn trampoline_kernel_pg_table_mut(config: &Config) -> &'static mut PageTablePage {
+fn trampoline_kernel_pg_table_mut(kernel_image: &KernelImage) -> &'static mut PageTablePage {
     // TrampolineVm.Setup owns this subordinate page table while constructing trampoline_pg_dir.
-    unsafe { &mut *(trampoline_kernel_pg_table_addr(config) as *mut PageTablePage) }
+    unsafe { &mut *(trampoline_kernel_pg_table_addr(kernel_image) as *mut PageTablePage) }
 }
 
-fn early_kernel_pg_table_mut(config: &Config) -> &'static mut PageTablePage {
+fn early_kernel_pg_table_mut(kernel_image: &KernelImage) -> &'static mut PageTablePage {
     // EarlyVm.Setup owns this subordinate page table while constructing early_pg_dir.
-    unsafe { &mut *(early_kernel_pg_table_addr(config) as *mut PageTablePage) }
+    unsafe { &mut *(early_kernel_pg_table_addr(kernel_image) as *mut PageTablePage) }
 }
 
-fn early_fixmap_l1_table_mut(config: &Config) -> &'static mut PageTablePage {
+fn early_fixmap_l1_table_mut(kernel_image: &KernelImage) -> &'static mut PageTablePage {
     // EarlyVm.Setup owns this subordinate page table while constructing early_pg_dir.
-    unsafe { &mut *(early_fixmap_l1_table_addr(config) as *mut PageTablePage) }
+    unsafe { &mut *(early_fixmap_l1_table_addr(kernel_image) as *mut PageTablePage) }
 }
 
-fn early_fixmap_l0_table_mut(config: &Config) -> &'static mut PageTablePage {
+fn early_fixmap_l0_table_mut(kernel_image: &KernelImage) -> &'static mut PageTablePage {
     // EarlyVm.Setup owns this subordinate page table while constructing early_pg_dir.
-    unsafe { &mut *(early_fixmap_l0_table_addr(config) as *mut PageTablePage) }
+    unsafe { &mut *(early_fixmap_l0_table_addr(kernel_image) as *mut PageTablePage) }
 }
 
-fn swapper_pg_dir_mut(config: &Config) -> &'static mut PageTablePage {
-    unsafe { &mut *(swapper_pg_dir_addr(config) as *mut PageTablePage) }
+fn swapper_pg_dir_mut(kernel_image: &KernelImage) -> &'static mut PageTablePage {
+    unsafe { &mut *(swapper_pg_dir_addr(kernel_image) as *mut PageTablePage) }
 }
 
-fn swapper_kernel_pg_table_mut(config: &Config) -> &'static mut PageTablePage {
-    unsafe { &mut *(swapper_kernel_pg_table_addr(config) as *mut PageTablePage) }
+fn swapper_kernel_pg_table_mut(kernel_image: &KernelImage) -> &'static mut PageTablePage {
+    unsafe { &mut *(swapper_kernel_pg_table_addr(kernel_image) as *mut PageTablePage) }
 }
 
 fn swapper_linear_pg_tables_mut(
-    config: &Config,
+    kernel_image: &KernelImage,
 ) -> &'static mut [PageTablePage; SWAPPER_L1_TABLES] {
     unsafe {
-        &mut *(swapper_linear_pg_tables_addr(config) as *mut [PageTablePage; SWAPPER_L1_TABLES])
+        &mut *(swapper_linear_pg_tables_addr(kernel_image)
+            as *mut [PageTablePage; SWAPPER_L1_TABLES])
     }
 }
 

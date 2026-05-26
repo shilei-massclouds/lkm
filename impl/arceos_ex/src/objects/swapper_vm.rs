@@ -49,6 +49,7 @@ impl SwapperVm {
 
         if !static_objects.build_swapper_pg_dir(
             config,
+            kernel_image,
             lds.kernel_start(),
             lds.kernel_end(),
             memblock,
@@ -69,7 +70,11 @@ impl SwapperVm {
         )
     }
 
-    pub fn enable(&mut self, config: &Config, static_objects: &StaticObjects) -> EventResult {
+    pub fn enable(
+        &mut self,
+        static_objects: &StaticObjects,
+        kernel_image: &KernelImage,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -79,7 +84,7 @@ impl SwapperVm {
             );
         }
 
-        let Some(satp) = static_objects.swapper_satp(config) else {
+        let Some(satp) = static_objects.swapper_satp(kernel_image) else {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),

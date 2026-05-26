@@ -133,6 +133,7 @@ impl EarlyVm {
 
         if !static_objects.build_early_pg_dir(
             config,
+            kernel_image,
             lds.kernel_start(),
             lds.kernel_end(),
             raw_dtb,

@@ -12,7 +12,6 @@ class LinkerProfile:
     """Concrete values for the current implementation profile."""
 
     kernel_link_addr: str
-    kernel_phys_addr: str
     page_size: str
     boot_stack_size: str
 
@@ -20,7 +19,6 @@ class LinkerProfile:
 _REQUIRED_CONFIG_ATTRS = {
     "boot_stack_size",
     "kernel_link_addr",
-    "kernel_phys_addr",
     "page_size",
 }
 
@@ -87,12 +85,11 @@ def _render(profile: LinkerProfile) -> str:
 ENTRY(_start)
 
 KERNEL_LINK_ADDR = {profile.kernel_link_addr};
-KERNEL_PHYS_ADDR = {profile.kernel_phys_addr};
-LOAD_OFFSET = KERNEL_LINK_ADDR - KERNEL_PHYS_ADDR;
+LOAD_OFFSET = KERNEL_LINK_ADDR;
 
 SECTIONS
 {{
-    . = KERNEL_LINK_ADDR;
+    . = LOAD_OFFSET;
     kernel_start = .;
     _stext = .;
 

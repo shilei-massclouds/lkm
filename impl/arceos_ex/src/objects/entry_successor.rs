@@ -526,10 +526,10 @@ impl MemBlock {
         lds: &Lds,
         physical_memory: &PhysicalMemory,
     ) -> EventResult {
-        let Some(kernel_start) = config.runtime_to_phys(lds.kernel_start()) else {
+        let Some(kernel_start) = kernel_image.runtime_to_phys(lds.kernel_start()) else {
             return self.failed_setup();
         };
-        let Some(kernel_end) = config.runtime_to_phys(lds.kernel_end()) else {
+        let Some(kernel_end) = kernel_image.runtime_to_phys(lds.kernel_end()) else {
             return self.failed_setup();
         };
         if early_dtb.state() != State::Ready

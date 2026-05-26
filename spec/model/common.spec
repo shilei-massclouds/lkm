@@ -214,7 +214,7 @@ type KernelImageMap: VirtualAddressArea {
 }
 
 type TrampolineMap: VirtualAddressArea {
-    phys_start: Derived<SymbolAddr, Lds.kernel_start>;
+    phys_start: Derived<PhysAddr<KernelImage>, KernelImage.phys_start>;
     virt_start: Derived<VirtAddr<KernelImage>, Config.kernel_link_addr>;
     size: Derived<Size, Config.pmd_size>;
 
