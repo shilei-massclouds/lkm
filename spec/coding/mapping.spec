@@ -21,6 +21,7 @@ predicate coding_must_phase_not_resource_lifecycle() -> bool;
 predicate coding_must_keep_event_boundaries() -> bool;
 predicate coding_must_check_before_checkpoint() -> bool;
 predicate coding_must_checkpoint_owner_matches_event() -> bool;
+predicate coding_must_linker_script_driven_by_model_lds() -> bool;
 predicate coding_must_record_exceptions() -> bool;
 predicate coding_must_run_verification_gates() -> bool;
 
@@ -154,6 +155,19 @@ type CodingMappingMust {
          * visually match the derived trace.
          */
         coding_must_checkpoint_owner_matches_event();
+
+        /*
+         * Linker script mapping:
+         *
+         * A generated or maintained linker script is the coding artifact that
+         * realizes the model Lds object. It must be driven by the PreparePhase
+         * Lds attributes and by the Config attributes that Lds depends on, such
+         * as kernel addresses, page size, section alignment, head-text layout
+         * and boot-stack size. Hard-coded linker constants are only permitted
+         * as recorded transitional exceptions with the corresponding model
+         * Lds/Config source named.
+         */
+        coding_must_linker_script_driven_by_model_lds();
 
         /*
          * Explicit exceptions:
