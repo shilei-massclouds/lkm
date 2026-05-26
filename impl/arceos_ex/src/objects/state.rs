@@ -28,6 +28,15 @@ impl LifecycleEvent {
             Self::Cleanup => 1 << 3,
         }
     }
+
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Preset => b'P',
+            Self::Setup => b'S',
+            Self::Enable => b'E',
+            Self::Cleanup => b'C',
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -37,6 +46,17 @@ pub enum EventErrorCode {
     InvalidTransition,
     ConditionFailed,
     UnexpectedState,
+}
+
+impl EventErrorCode {
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::DuplicateLifecycleEvent => b'D',
+            Self::InvalidTransition => b'I',
+            Self::ConditionFailed => b'C',
+            Self::UnexpectedState => b'U',
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -63,6 +83,38 @@ impl EventError {
             actual,
             expected,
             target,
+        }
+    }
+
+    pub const fn error_code(self) -> u8 {
+        self.code.code()
+    }
+
+    pub const fn event_code(self) -> u8 {
+        self.event.code()
+    }
+
+    pub const fn actual_state_code(self) -> u8 {
+        self.actual.code()
+    }
+
+    pub const fn expected_state_code(self) -> u8 {
+        self.expected.code()
+    }
+
+    pub const fn target_state_code(self) -> u8 {
+        self.target.code()
+    }
+}
+
+impl State {
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Base => b'B',
+            Self::Prepared => b'P',
+            Self::Ready => b'R',
+            Self::Online => b'O',
+            Self::Destroyed => b'D',
         }
     }
 }
