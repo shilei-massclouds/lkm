@@ -2,9 +2,9 @@ pub mod boot;
 pub mod prepare;
 pub mod state;
 
-use crate::objects::state::{EventError, EventOutcome};
+use crate::objects::state::{EventError, EventResult};
 
-pub fn shutdown_on_error(result: EventOutcome, message: &str) {
+pub fn shutdown_on_error(result: EventResult, message: &str) {
     if let Err(error) = result {
         crate::arch::riscv64::sbi::putstr(message);
         print_event_error(error);

@@ -4,7 +4,7 @@ use super::{
     config::Config,
     entry_prelude::{KernelImage, Lds},
     entry_successor::MemBlock,
-    state::{EventResult, Lifecycle, LifecycleEvent, State},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
 };
 
@@ -39,7 +39,7 @@ impl SwapperVm {
             || kernel_image.state() != State::Online
             || memblock.state() != State::Ready
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
@@ -53,7 +53,7 @@ impl SwapperVm {
             lds.kernel_end(),
             memblock,
         ) {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
@@ -71,7 +71,7 @@ impl SwapperVm {
 
     pub fn enable(&mut self, config: &Config, static_objects: &StaticObjects) -> EventResult {
         if self.lifecycle.state() != State::Ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,
@@ -80,7 +80,7 @@ impl SwapperVm {
         }
 
         let Some(satp) = static_objects.swapper_satp(config) else {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,

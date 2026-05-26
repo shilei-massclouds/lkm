@@ -3,7 +3,7 @@ use crate::trace::Checkpoint;
 use super::{
     config::Config,
     raw_dtb::{PhysRange, RawDtb},
-    state::{EventResult, Lifecycle, LifecycleEvent, State},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -112,7 +112,7 @@ impl FixMap {
             || fdt_slot.page_size() != config.page_size()
             || !fdt_slot.can_contain(raw_dtb.range())
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -123,7 +123,7 @@ impl FixMap {
         self.fdt_slot = fdt_slot;
         self.fdt_slot.map(raw_dtb.range());
         if !self.fdt_slot.contains(raw_dtb.range()) {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,

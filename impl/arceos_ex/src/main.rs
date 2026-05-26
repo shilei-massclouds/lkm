@@ -10,7 +10,7 @@ mod trace;
 use core::panic::PanicInfo;
 use core::sync::atomic::AtomicU8;
 
-use objects::state::{EventOutcome, LifecycleEvent, State};
+use objects::state::{EventResult, LifecycleEvent, State};
 use trace::Checkpoint;
 
 #[unsafe(link_section = ".data.phase")]
@@ -27,7 +27,7 @@ pub fn startup_timeline_ready() -> ! {
     arch::riscv64::sbi::system_shutdown()
 }
 
-fn startup_timeline_event() -> EventOutcome {
+fn startup_timeline_event() -> EventResult {
     crate::phases::state::mark(
         &STARTUP_TIMELINE_STATE,
         LifecycleEvent::Setup,
@@ -35,7 +35,6 @@ fn startup_timeline_event() -> EventOutcome {
         State::Ready,
         Checkpoint::StartupTimelineReady,
     )
-    .into_result()
 }
 
 pub fn app_main() {

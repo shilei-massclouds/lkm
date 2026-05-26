@@ -5,7 +5,7 @@ use crate::{arch::riscv64::csr, trace::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
-    state::{EventResult, Lifecycle, LifecycleEvent, State},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
     vm::Vm,
 };
@@ -162,7 +162,7 @@ impl InterruptStream {
 
     pub fn adopt_head_preset(&mut self) -> EventResult {
         if csr::read_sie() != 0 || csr::read_sip() != 0 {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -180,7 +180,7 @@ impl InterruptStream {
 
     pub fn setup(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Prepared {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -217,7 +217,7 @@ impl KernelImage {
             || !lds.entry_layout_ready()
             || lds.current_global_pointer(config) != Some(csr::read_gp())
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -231,7 +231,7 @@ impl KernelImage {
 
     pub fn adopt_head_setup(&mut self, config: &Config, lds: &Lds) -> EventResult {
         if self.lifecycle.state() != State::Prepared || !lds.bss_zeroed(config) {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -245,7 +245,7 @@ impl KernelImage {
 
     pub fn enable(&mut self, lds: &Lds) -> EventResult {
         if self.lifecycle.state() != State::Ready || csr::read_gp() != lds.global_pointer() {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,
@@ -275,7 +275,7 @@ impl RootStream {
 
     pub fn adopt_head_preset(&mut self) -> EventResult {
         if !csr::kernel_fpu_vector_disabled() {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -308,7 +308,7 @@ impl BootCpu {
     fn adopt_head_preset(&mut self, boot_args: &BootArgs) -> EventResult {
         let head_hartid = unsafe { core::ptr::addr_of!(head_boot_hartid).read_volatile() };
         if head_hartid != boot_args.boot_hartid() {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -323,7 +323,7 @@ impl BootCpu {
 
     fn setup(&mut self, boot_hartid_valid: bool) -> EventResult {
         if self.lifecycle.state() != State::Prepared || !boot_hartid_valid {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -368,7 +368,7 @@ impl CpuGroup {
 
     pub fn adopt_head_preset(&mut self, boot_args: &BootArgs) -> EventResult {
         let result = self.boot_cpu.adopt_head_preset(boot_args);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
@@ -412,7 +412,7 @@ impl InitTask {
         let Some(init_task_phys) =
             config.runtime_to_phys(core::ptr::addr_of!(init_task_storage) as usize)
         else {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -421,7 +421,7 @@ impl InitTask {
         };
 
         if csr::read_tp() != init_task_phys {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -437,7 +437,7 @@ impl InitTask {
         let Some(init_task_virt) =
             config.runtime_to_link(core::ptr::addr_of!(init_task_storage) as usize)
         else {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -446,7 +446,7 @@ impl InitTask {
         };
 
         if self.lifecycle.state() != State::Prepared || vm.state() != State::Ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -486,7 +486,7 @@ impl InitStack {
                 .checked_sub(PT_SIZE_ON_STACK)
                 .filter(|stack| *stack == head_sp)
         }) else {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -495,7 +495,7 @@ impl InitStack {
         };
 
         if stack_phys < lds.init_stack_start() || stack_phys >= lds.init_stack_end() {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -509,7 +509,7 @@ impl InitStack {
 
     pub fn setup(&mut self, vm: &Vm) -> EventResult {
         if self.lifecycle.state() != State::Prepared || vm.state() != State::Ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -553,7 +553,7 @@ impl EventStream {
     pub fn preset(&mut self, config: &Config) -> EventResult {
         let Some(early_event_entry_phys) = config.runtime_to_phys(early_event_entry as usize)
         else {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -576,7 +576,7 @@ impl EventStream {
     pub fn enable(&mut self, vm: &Vm, static_objects: &StaticObjects) -> EventResult {
         let _ = static_objects.state();
         if self.lifecycle.state() != State::Prepared || vm.state() != State::Ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -600,7 +600,7 @@ pub struct Soc;
 impl Soc {
     pub fn preset() -> EventResult {
         crate::trace::checkpoint(Checkpoint::SocPrepared);
-        EventResult::Success
+        Ok(())
     }
 }
 

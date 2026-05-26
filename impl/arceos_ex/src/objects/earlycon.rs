@@ -1,6 +1,6 @@
 use crate::{arch::riscv64::sbi, objects::printk};
 
-use super::state::{EventResult, Lifecycle, LifecycleEvent, State};
+use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
 use crate::trace::Checkpoint;
 
 #[allow(dead_code)]
@@ -21,7 +21,7 @@ impl EarlyCon {
 
     pub fn preset(&mut self, earlycon_sbi_config: bool) -> EventResult {
         if !earlycon_sbi_config {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -39,7 +39,7 @@ impl EarlyCon {
 
     pub fn setup(&mut self, sbi_ready: bool) -> EventResult {
         if !sbi_ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -62,7 +62,7 @@ impl EarlyCon {
             State::Online,
             Checkpoint::EarlyConOnline,
         );
-        if result.is_success() {
+        if result.is_ok() {
             printk::drain_to(sbi::putchar);
         }
         result

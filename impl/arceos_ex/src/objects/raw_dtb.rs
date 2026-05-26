@@ -2,7 +2,7 @@ use crate::trace::Checkpoint;
 
 use super::{
     boot_args::BootArgs,
-    state::{EventResult, Lifecycle, LifecycleEvent, State},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 
 const FDT_MAGIC: u32 = 0xd00d_feed;
@@ -163,7 +163,7 @@ impl RawDtb {
         expected: State,
         target: State,
     ) -> EventResult {
-        EventResult::failed_condition(event, self.lifecycle.state(), expected, target)
+        failed_condition(event, self.lifecycle.state(), expected, target)
     }
 }
 

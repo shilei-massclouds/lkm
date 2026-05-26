@@ -7,7 +7,7 @@ use super::{
     entry_prelude::{KernelImage, Lds},
     fix_map::FixMap,
     raw_dtb::RawDtb,
-    state::{EventResult, Lifecycle, LifecycleEvent, State},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
     swapper_vm::SwapperVm,
     trampoline_vm::TrampolineVm,
@@ -51,7 +51,7 @@ impl Vm {
             || self.trampoline_vm.state() != State::Base
             || self.early_vm.state() != State::Base
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -60,19 +60,19 @@ impl Vm {
         }
 
         let result = self.trampoline_vm.setup(config, static_objects, lds);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
         let result = self.early_vm.preset(config, boot_args, raw_dtb, fix_map);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
         let result =
             self.early_vm
                 .setup(config, static_objects, lds, kernel_image, raw_dtb, fix_map);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
@@ -156,22 +156,22 @@ impl Vm {
 
     fn finish_setup_after_switch(&mut self, kernel_image: &mut KernelImage, lds: &Lds) {
         let result = self.trampoline_vm.enable(kernel_image);
-        if !result.is_success() {
+        if result.is_err() {
             crate::arch::riscv64::sbi::system_shutdown();
         }
 
         let result = self.early_vm.enable(&self.trampoline_vm);
-        if !result.is_success() {
+        if result.is_err() {
             crate::arch::riscv64::sbi::system_shutdown();
         }
 
         let result = self.trampoline_vm.cleanup(&self.early_vm);
-        if !result.is_success() {
+        if result.is_err() {
             crate::arch::riscv64::sbi::system_shutdown();
         }
 
         let result = kernel_image.enable(lds);
-        if !result.is_success() {
+        if result.is_err() {
             crate::arch::riscv64::sbi::system_shutdown();
         }
 
@@ -181,7 +181,7 @@ impl Vm {
             State::Ready,
             Checkpoint::VmReady,
         );
-        if !result.is_success() {
+        if result.is_err() {
             crate::arch::riscv64::sbi::system_shutdown();
         }
     }
@@ -195,7 +195,7 @@ impl Vm {
         memblock: &super::entry_successor::MemBlock,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready || self.early_vm.state() != State::Online {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,
@@ -206,17 +206,17 @@ impl Vm {
         let result = self
             .swapper_vm
             .setup(config, static_objects, lds, kernel_image, memblock);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
         let result = self.swapper_vm.enable(config, static_objects);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
         let result = self.early_vm.cleanup(&self.swapper_vm);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 

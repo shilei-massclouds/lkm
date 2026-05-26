@@ -7,7 +7,7 @@ use super::{
     entry_prelude::Lds,
     fix_map::FixMap,
     raw_dtb::RawDtb,
-    state::{EventResult, Lifecycle, LifecycleEvent, State},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
 };
 
@@ -29,7 +29,7 @@ impl EarlyVm {
 
     pub fn enable(&mut self, trampoline_vm: &super::trampoline_vm::TrampolineVm) -> EventResult {
         if self.lifecycle.state() != State::Ready || trampoline_vm.state() != State::Online {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,
@@ -47,7 +47,7 @@ impl EarlyVm {
 
     pub fn cleanup(&mut self, swapper_vm: &super::swapper_vm::SwapperVm) -> EventResult {
         if self.lifecycle.state() != State::Online || swapper_vm.state() != State::Online {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Cleanup,
                 self.lifecycle.state(),
                 State::Online,
@@ -74,7 +74,7 @@ impl EarlyVm {
             || raw_dtb.state() != State::Base
             || fix_map.state() != State::Base
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -83,17 +83,17 @@ impl EarlyVm {
         }
 
         let result = raw_dtb.preset(boot_args);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
         let result = raw_dtb.setup();
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
         let result = fix_map.preset(config, raw_dtb);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
@@ -123,7 +123,7 @@ impl EarlyVm {
             || fix_map.state() != State::Ready
             || !fix_map.contains_raw_dtb(raw_dtb)
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -138,7 +138,7 @@ impl EarlyVm {
             raw_dtb,
             fix_map,
         ) {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,

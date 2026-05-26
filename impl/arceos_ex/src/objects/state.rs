@@ -61,7 +61,15 @@ impl EventErrorCode {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
+pub enum EventErrorKind {
+    Failed,
+    Blocked,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct EventError {
+    pub kind: EventErrorKind,
     pub code: EventErrorCode,
     pub event: LifecycleEvent,
     pub actual: State,
@@ -71,6 +79,7 @@ pub struct EventError {
 
 impl EventError {
     const fn new(
+        kind: EventErrorKind,
         code: EventErrorCode,
         event: LifecycleEvent,
         actual: State,
@@ -78,12 +87,47 @@ impl EventError {
         target: State,
     ) -> Self {
         Self {
+            kind,
             code,
             event,
             actual,
             expected,
             target,
         }
+    }
+
+    pub const fn failed(
+        code: EventErrorCode,
+        event: LifecycleEvent,
+        actual: State,
+        expected: State,
+        target: State,
+    ) -> Self {
+        Self::new(
+            EventErrorKind::Failed,
+            code,
+            event,
+            actual,
+            expected,
+            target,
+        )
+    }
+
+    pub const fn blocked(
+        code: EventErrorCode,
+        event: LifecycleEvent,
+        actual: State,
+        expected: State,
+        target: State,
+    ) -> Self {
+        Self::new(
+            EventErrorKind::Blocked,
+            code,
+            event,
+            actual,
+            expected,
+            target,
+        )
     }
 
     pub const fn error_code(self) -> u8 {
@@ -119,41 +163,21 @@ impl State {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum EventResult {
-    Success,
-    Failed(EventError),
-    Blocked(EventError),
-}
+pub type EventResult = Result<(), EventError>;
 
-pub type EventOutcome = Result<(), EventError>;
-
-impl EventResult {
-    pub const fn is_success(self) -> bool {
-        matches!(self, Self::Success)
-    }
-
-    pub const fn into_result(self) -> EventOutcome {
-        match self {
-            Self::Success => Ok(()),
-            Self::Failed(error) | Self::Blocked(error) => Err(error),
-        }
-    }
-
-    pub const fn failed_condition(
-        event: LifecycleEvent,
-        actual: State,
-        expected: State,
-        target: State,
-    ) -> Self {
-        Self::Failed(EventError::new(
-            EventErrorCode::ConditionFailed,
-            event,
-            actual,
-            expected,
-            target,
-        ))
-    }
+pub const fn failed_condition(
+    event: LifecycleEvent,
+    actual: State,
+    expected: State,
+    target: State,
+) -> EventResult {
+    Err(EventError::failed(
+        EventErrorCode::ConditionFailed,
+        event,
+        actual,
+        expected,
+        target,
+    ))
 }
 
 pub struct Lifecycle {
@@ -181,7 +205,7 @@ impl Lifecycle {
         checkpoint: Checkpoint,
     ) -> EventResult {
         if self.seen_events & event.bit() != 0 {
-            return EventResult::Failed(EventError::new(
+            return Err(EventError::failed(
                 EventErrorCode::DuplicateLifecycleEvent,
                 event,
                 self.state,
@@ -191,7 +215,7 @@ impl Lifecycle {
         }
 
         if self.state != expected {
-            return EventResult::Blocked(EventError::new(
+            return Err(EventError::blocked(
                 EventErrorCode::UnexpectedState,
                 event,
                 self.state,
@@ -201,7 +225,7 @@ impl Lifecycle {
         }
 
         if !is_allowed_lifecycle_transition(expected, event, target) {
-            return EventResult::Failed(EventError::new(
+            return Err(EventError::failed(
                 EventErrorCode::InvalidTransition,
                 event,
                 self.state,
@@ -213,7 +237,7 @@ impl Lifecycle {
         self.state = target;
         self.seen_events |= event.bit();
         trace::checkpoint(checkpoint);
-        EventResult::Success
+        Ok(())
     }
 
     pub fn adopt_transition(
@@ -223,7 +247,7 @@ impl Lifecycle {
         target: State,
     ) -> EventResult {
         if self.seen_events & event.bit() != 0 {
-            return EventResult::Failed(EventError::new(
+            return Err(EventError::failed(
                 EventErrorCode::DuplicateLifecycleEvent,
                 event,
                 self.state,
@@ -233,7 +257,7 @@ impl Lifecycle {
         }
 
         if self.state != expected {
-            return EventResult::Blocked(EventError::new(
+            return Err(EventError::blocked(
                 EventErrorCode::UnexpectedState,
                 event,
                 self.state,
@@ -243,7 +267,7 @@ impl Lifecycle {
         }
 
         if !is_allowed_lifecycle_transition(expected, event, target) {
-            return EventResult::Failed(EventError::new(
+            return Err(EventError::failed(
                 EventErrorCode::InvalidTransition,
                 event,
                 self.state,
@@ -254,7 +278,7 @@ impl Lifecycle {
 
         self.state = target;
         self.seen_events |= event.bit();
-        EventResult::Success
+        Ok(())
     }
 }
 

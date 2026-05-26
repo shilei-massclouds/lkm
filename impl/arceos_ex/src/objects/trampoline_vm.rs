@@ -3,7 +3,7 @@ use crate::trace::Checkpoint;
 use super::{
     config::Config,
     entry_prelude::Lds,
-    state::{EventResult, Lifecycle, LifecycleEvent, State},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
 };
 
@@ -25,7 +25,7 @@ impl TrampolineVm {
 
     pub fn enable(&mut self, kernel_image: &super::entry_prelude::KernelImage) -> EventResult {
         if self.lifecycle.state() != State::Ready || kernel_image.state() != State::Ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,
@@ -43,7 +43,7 @@ impl TrampolineVm {
 
     pub fn cleanup(&mut self, early_vm: &super::early_vm::EarlyVm) -> EventResult {
         if self.lifecycle.state() != State::Online || early_vm.state() != State::Online {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Cleanup,
                 self.lifecycle.state(),
                 State::Online,
@@ -71,7 +71,7 @@ impl TrampolineVm {
             || !static_objects.storage_ready(config)
             || lds.state() != State::Online
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
@@ -80,7 +80,7 @@ impl TrampolineVm {
         }
 
         if !static_objects.build_trampoline_pg_dir(config, lds.kernel_start()) {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,

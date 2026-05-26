@@ -6,7 +6,7 @@ use super::{
     fix_map::FixMap,
     printk,
     raw_dtb::{PhysRange, RawDtb},
-    state::{EventResult, Lifecycle, LifecycleEvent, State},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
 
@@ -37,7 +37,7 @@ impl PlatformCpuInfo {
             || facts.harts.count() == 0
             || !facts.harts.contains(boot_hartid)
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -87,7 +87,7 @@ impl PhysicalMemory {
 
     pub fn preset(&mut self, raw_dtb: &RawDtb, facts: &FdtFacts) -> EventResult {
         if raw_dtb.state() != State::Ready || facts.memory.count() == 0 {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -145,7 +145,7 @@ impl EarlyDtb {
         physical_memory: &mut PhysicalMemory,
     ) -> EventResult {
         if raw_dtb.state() != State::Ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -154,7 +154,7 @@ impl EarlyDtb {
         }
 
         let Some(facts) = fdt::parse(raw_dtb, fix_map) else {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -164,20 +164,20 @@ impl EarlyDtb {
         self.facts = facts;
 
         let result = platform_cpu_info.preset(raw_dtb, &self.facts, boot_hartid);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
         let result = platform_cpu_info.enable();
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
         let result = physical_memory.preset(raw_dtb, &self.facts);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
         let result = physical_memory.enable();
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
@@ -200,7 +200,7 @@ impl EarlyDtb {
             || raw_dtb.state() != State::Ready
             || physical_memory.state() != State::Online
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,
@@ -209,12 +209,12 @@ impl EarlyDtb {
         }
 
         let result = memblock.preset(self, physical_memory, raw_dtb);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
         let result = kernel_cmdline.preset(raw_dtb, &self.facts);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
@@ -231,7 +231,7 @@ impl EarlyDtb {
             || memblock.state() != State::Online
             || kernel_param.state() != State::Ready
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Cleanup,
                 self.lifecycle.state(),
                 State::Ready,
@@ -299,7 +299,7 @@ impl KernelCmdline {
 
     pub fn preset(&mut self, raw_dtb: &RawDtb, facts: &FdtFacts) -> EventResult {
         if raw_dtb.state() != State::Ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -334,7 +334,7 @@ impl InitMm {
 
     pub fn setup(&mut self, lds: &Lds) -> EventResult {
         if lds.state() != State::Online || lds.kernel_start() >= lds.kernel_end() {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
@@ -370,7 +370,7 @@ impl EarlyIoremap {
 
     pub fn setup(&mut self, fix_map: &FixMap) -> EventResult {
         if fix_map.state() != State::Ready {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
@@ -437,7 +437,7 @@ impl KernelParam {
             || !printk::is_prepared()
             || !kernel_cmdline.has_earlycon_sbi()
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
@@ -446,15 +446,15 @@ impl KernelParam {
         }
 
         let result = earlycon::preset(kernel_cmdline.has_earlycon_sbi());
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
         let result = earlycon::setup(sbi.state() == State::Ready);
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
         let result = earlycon::enable();
-        if !result.is_success() {
+        if result.is_err() {
             return result;
         }
 
@@ -500,7 +500,7 @@ impl MemBlock {
             || physical_memory.state() != State::Online
             || raw_dtb.state() != State::Ready
         {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
@@ -563,7 +563,7 @@ impl MemBlock {
 
     pub fn enable(&mut self, vm_state: State) -> EventResult {
         if vm_state != State::Online {
-            return EventResult::failed_condition(
+            return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
                 State::Ready,
@@ -580,7 +580,7 @@ impl MemBlock {
     }
 
     fn failed_setup(&self) -> EventResult {
-        EventResult::failed_condition(
+        failed_condition(
             LifecycleEvent::Setup,
             self.lifecycle.state(),
             State::Prepared,

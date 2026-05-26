@@ -1,6 +1,6 @@
 use crate::objects::{
     boot_args::BootArgs,
-    state::{EventResult, LifecycleEvent, State},
+    state::{failed_condition, EventResult, LifecycleEvent, State},
 };
 use core::sync::atomic::AtomicU8;
 
@@ -10,7 +10,7 @@ static PREPARE_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encod
 pub fn adopt_head_prefix(boot_args: &BootArgs) -> EventResult {
     let ctx = crate::context::context_ref();
     if boot_args.state() != State::Online || !prepare_inputs_ready(ctx) {
-        return EventResult::failed_condition(
+        return failed_condition(
             LifecycleEvent::Setup,
             crate::phases::state::load(&PREPARE_PHASE_STATE),
             State::Base,
@@ -24,7 +24,7 @@ pub fn adopt_head_prefix(boot_args: &BootArgs) -> EventResult {
         State::Base,
         State::Ready,
     );
-    if !result.is_success() {
+    if result.is_err() {
         return result;
     }
 

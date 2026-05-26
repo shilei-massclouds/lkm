@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{
-    objects::state::{EventResult, LifecycleEvent, State},
+    objects::state::{failed_condition, EventResult, LifecycleEvent, State},
     trace::{self, Checkpoint},
 };
 
@@ -41,12 +41,12 @@ pub fn mark(
 ) -> EventResult {
     let actual = load(state);
     if actual != expected {
-        return EventResult::failed_condition(event, actual, expected, target);
+        return failed_condition(event, actual, expected, target);
     }
 
     state.store(encode(target), Ordering::Relaxed);
     trace::checkpoint(checkpoint);
-    EventResult::Success
+    Ok(())
 }
 
 pub fn adopt(
@@ -57,9 +57,9 @@ pub fn adopt(
 ) -> EventResult {
     let actual = load(state);
     if actual != expected {
-        return EventResult::failed_condition(event, actual, expected, target);
+        return failed_condition(event, actual, expected, target);
     }
 
     state.store(encode(target), Ordering::Relaxed);
-    EventResult::Success
+    Ok(())
 }

@@ -2,7 +2,7 @@ pub mod entry_prelude;
 pub mod entry_successor;
 
 use crate::{
-    objects::state::{EventOutcome, LifecycleEvent, State},
+    objects::state::{EventResult, LifecycleEvent, State},
     trace::Checkpoint,
 };
 use core::sync::atomic::AtomicU8;
@@ -19,7 +19,7 @@ fn handoff() -> ! {
     crate::startup_timeline_ready()
 }
 
-fn boot_phase_ready() -> EventOutcome {
+fn boot_phase_ready() -> EventResult {
     crate::phases::state::mark(
         &BOOT_PHASE_STATE,
         LifecycleEvent::Setup,
@@ -27,7 +27,6 @@ fn boot_phase_ready() -> EventOutcome {
         State::Ready,
         Checkpoint::BootPhaseReady,
     )
-    .into_result()
 }
 
 pub fn is_ready() -> bool {
