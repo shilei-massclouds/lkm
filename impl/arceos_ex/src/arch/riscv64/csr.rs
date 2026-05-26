@@ -51,14 +51,28 @@ unsafe extern "C" {
     ) -> !;
 }
 
-pub fn disable_kernel_fpu_vector() {
-    clear_sstatus_bits(SSTATUS_FS | SSTATUS_VS);
+pub fn kernel_fpu_vector_disabled() -> bool {
+    read_sstatus() & (SSTATUS_FS | SSTATUS_VS) == 0
 }
 
-pub fn close_interrupt_stream() {
+pub fn read_sie() -> usize {
+    let value: usize;
+
     unsafe {
-        core::arch::asm!("csrw sie, zero", "csrw sip, zero", options(nostack, nomem));
+        core::arch::asm!("csrr {value}, sie", value = out(reg) value, options(nostack, nomem));
     }
+
+    value
+}
+
+pub fn read_sip() -> usize {
+    let value: usize;
+
+    unsafe {
+        core::arch::asm!("csrr {value}, sip", value = out(reg) value, options(nostack, nomem));
+    }
+
+    value
 }
 
 #[allow(dead_code)]
@@ -71,6 +85,26 @@ pub fn read_gp() -> usize {
 
     unsafe {
         core::arch::asm!("mv {value}, gp", value = out(reg) value, options(nostack, nomem));
+    }
+
+    value
+}
+
+pub fn read_tp() -> usize {
+    let value: usize;
+
+    unsafe {
+        core::arch::asm!("mv {value}, tp", value = out(reg) value, options(nostack, nomem));
+    }
+
+    value
+}
+
+pub fn read_sstatus() -> usize {
+    let value: usize;
+
+    unsafe {
+        core::arch::asm!("csrr {value}, sstatus", value = out(reg) value, options(nostack, nomem));
     }
 
     value

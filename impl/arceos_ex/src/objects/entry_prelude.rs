@@ -44,6 +44,8 @@ unsafe extern "C" {
     fn init_stack_start();
     fn init_stack_end();
     fn early_event_entry();
+    static head_boot_hartid: usize;
+    static head_init_stack_sp: usize;
 }
 
 #[unsafe(no_mangle)]
@@ -87,34 +89,6 @@ impl EntryPreludeObjects {
         }
     }
 
-    pub fn interrupt_stream_preset(&mut self) -> EventResult {
-        self.interrupt_stream.preset()
-    }
-
-    pub fn kernel_image_preset(&mut self) -> EventResult {
-        self.kernel_image.preset(&self.config, &self.lds)
-    }
-
-    pub fn root_stream_preset(&mut self) -> EventResult {
-        self.root_stream.preset()
-    }
-
-    pub fn kernel_image_setup(&mut self) -> EventResult {
-        self.kernel_image.setup(&self.config, &self.lds)
-    }
-
-    pub fn cpu_group_preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        self.cpu_group.preset(boot_args)
-    }
-
-    pub fn init_task_preset(&mut self) -> EventResult {
-        self.init_task.preset(&self.config)
-    }
-
-    pub fn init_stack_preset(&mut self) -> EventResult {
-        self.init_stack.preset(&self.config, &self.lds)
-    }
-
     pub fn event_stream_preset(&mut self) -> EventResult {
         self.event_stream.preset(&self.config)
     }
@@ -129,6 +103,34 @@ impl EntryPreludeObjects {
             &mut self.raw_dtb,
             &mut self.fix_map,
         )
+    }
+
+    pub fn adopt_head_prefix(&mut self, boot_args: &BootArgs) -> EventResult {
+        let result = self.interrupt_stream.adopt_head_preset();
+        if !result.is_success() {
+            return result;
+        }
+        let result = self.kernel_image.adopt_head_preset(&self.config, &self.lds);
+        if !result.is_success() {
+            return result;
+        }
+        let result = self.root_stream.adopt_head_preset();
+        if !result.is_success() {
+            return result;
+        }
+        let result = self.kernel_image.adopt_head_setup(&self.config, &self.lds);
+        if !result.is_success() {
+            return result;
+        }
+        let result = self.cpu_group.adopt_head_preset(boot_args);
+        if !result.is_success() {
+            return result;
+        }
+        let result = self.init_task.adopt_head_preset(&self.config);
+        if !result.is_success() {
+            return result;
+        }
+        self.init_stack.adopt_head_preset(&self.config, &self.lds)
     }
 
     pub fn vm_setup(&mut self) -> ! {
@@ -212,6 +214,14 @@ impl EntryPreludeObjects {
 
     pub fn vm_state(&self) -> State {
         self.vm.state()
+    }
+
+    pub fn prepare_inputs_ready(&self) -> bool {
+        self.config.entry_prelude_ready()
+            && self.lds.state() == State::Online
+            && self.lds.entry_layout_ready()
+            && self.static_objects.state() == State::Online
+            && self.static_objects.storage_ready(&self.config)
     }
 }
 
@@ -303,16 +313,13 @@ impl Lds {
             && self.init_stack_end() & 0xfff == 0
     }
 
-    unsafe fn zero_bss(&self, config: &Config) -> bool {
+    fn bss_zeroed(&self, config: &Config) -> bool {
         let Some(start) = config.runtime_to_phys(self.bss_start()) else {
             return false;
         };
         let len = self.bss_end() - self.bss_start();
-        let start = start as *mut u8;
-        unsafe {
-            core::ptr::write_bytes(start, 0, len);
-        }
-        true
+        let bytes = unsafe { core::slice::from_raw_parts(start as *const u8, len) };
+        bytes.iter().all(|byte| *byte == 0)
     }
 }
 
@@ -327,14 +334,17 @@ impl InterruptStream {
         }
     }
 
-    fn preset(&mut self) -> EventResult {
-        csr::close_interrupt_stream();
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            Checkpoint::InterruptStreamPrepared,
-        )
+    fn adopt_head_preset(&mut self) -> EventResult {
+        if csr::read_sie() != 0 || csr::read_sip() != 0 {
+            return EventResult::failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn setup(&mut self) -> EventResult {
@@ -371,7 +381,7 @@ impl KernelImage {
         self.lifecycle.state()
     }
 
-    fn preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
+    fn adopt_head_preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
         if lds.state() != State::Online
             || !lds.entry_layout_ready()
             || lds.current_global_pointer(config) != Some(csr::read_gp())
@@ -384,34 +394,20 @@ impl KernelImage {
             );
         }
 
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            Checkpoint::KernelImagePrepared,
-        )
+        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    fn setup(&mut self, config: &Config, lds: &Lds) -> EventResult {
-        if self.lifecycle.state() == State::Prepared {
-            unsafe {
-                if !lds.zero_bss(config) {
-                    return EventResult::failed_condition(
-                        LifecycleEvent::Setup,
-                        self.lifecycle.state(),
-                        State::Prepared,
-                        State::Ready,
-                    );
-                }
-            }
+    fn adopt_head_setup(&mut self, config: &Config, lds: &Lds) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || !lds.bss_zeroed(config) {
+            return EventResult::failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
         }
 
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Prepared,
-            State::Ready,
-            Checkpoint::KernelImageReady,
-        )
+        self.lifecycle.adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
     pub fn enable(&mut self, lds: &Lds) -> EventResult {
@@ -444,14 +440,17 @@ impl RootStream {
         }
     }
 
-    fn preset(&mut self) -> EventResult {
-        csr::disable_kernel_fpu_vector();
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            Checkpoint::RootStreamPrepared,
-        )
+    fn adopt_head_preset(&mut self) -> EventResult {
+        if !csr::kernel_fpu_vector_disabled() {
+            return EventResult::failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 }
 
@@ -468,14 +467,19 @@ impl BootCpu {
         }
     }
 
-    fn preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        self.hartid = boot_args.boot_hartid();
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            Checkpoint::BootCpuPrepared,
-        )
+    fn adopt_head_preset(&mut self, boot_args: &BootArgs) -> EventResult {
+        let head_hartid = unsafe { core::ptr::addr_of!(head_boot_hartid).read_volatile() };
+        if head_hartid != boot_args.boot_hartid() {
+            return EventResult::failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.hartid = head_hartid;
+        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn setup(&mut self, boot_hartid_valid: bool) -> EventResult {
@@ -519,18 +523,13 @@ impl CpuGroup {
         }
     }
 
-    fn preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        let result = self.boot_cpu.preset(boot_args);
+    fn adopt_head_preset(&mut self, boot_args: &BootArgs) -> EventResult {
+        let result = self.boot_cpu.adopt_head_preset(boot_args);
         if !result.is_success() {
             return result;
         }
 
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            Checkpoint::CpuGroupPrepared,
-        )
+        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn boot_cpu_setup(&mut self, boot_hartid_valid: bool) -> EventResult {
@@ -557,9 +556,9 @@ impl InitTask {
         }
     }
 
-    fn preset(&mut self, config: &Config) -> EventResult {
+    fn adopt_head_preset(&mut self, config: &Config) -> EventResult {
         let Some(init_task_phys) =
-            config.runtime_to_phys(core::ptr::addr_of!(INIT_TASK_STORAGE) as usize)
+            config.runtime_to_phys(core::ptr::addr_of!(init_task_storage) as usize)
         else {
             return EventResult::failed_condition(
                 LifecycleEvent::Preset,
@@ -568,18 +567,22 @@ impl InitTask {
                 State::Prepared,
             );
         };
-        csr::write_tp(init_task_phys);
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            Checkpoint::InitTaskPrepared,
-        )
+
+        if csr::read_tp() != init_task_phys {
+            return EventResult::failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn enable(&mut self, config: &Config, vm: &Vm) -> EventResult {
         let Some(init_task_virt) =
-            config.runtime_to_link(core::ptr::addr_of!(INIT_TASK_STORAGE) as usize)
+            config.runtime_to_link(core::ptr::addr_of!(init_task_storage) as usize)
         else {
             return EventResult::failed_condition(
                 LifecycleEvent::Enable,
@@ -619,11 +622,22 @@ impl InitStack {
         }
     }
 
-    fn preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
-        if lds.init_stack_end() - lds.init_stack_start() < 4096
-            || PT_SIZE_ON_STACK >= lds.init_stack_end() - lds.init_stack_start()
-            || lds.init_stack_end_phys(config).is_none()
-        {
+    fn adopt_head_preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
+        let head_sp = unsafe { core::ptr::addr_of!(head_init_stack_sp).read_volatile() };
+        let Some(stack_phys) = lds.init_stack_end_phys(config).and_then(|stack_end| {
+            stack_end
+                .checked_sub(PT_SIZE_ON_STACK)
+                .filter(|stack| *stack == head_sp)
+        }) else {
+            return EventResult::failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        };
+
+        if stack_phys < lds.init_stack_start() || stack_phys >= lds.init_stack_end() {
             return EventResult::failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
@@ -632,12 +646,7 @@ impl InitStack {
             );
         }
 
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Prepared,
-            Checkpoint::InitStackPrepared,
-        )
+        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn setup(&mut self, vm: &Vm) -> EventResult {
@@ -680,7 +689,8 @@ impl EventStream {
     }
 
     fn preset(&mut self, config: &Config) -> EventResult {
-        let Some(early_event_entry_phys) = config.runtime_to_phys(early_event_entry as usize) else {
+        let Some(early_event_entry_phys) = config.runtime_to_phys(early_event_entry as usize)
+        else {
             return EventResult::failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
@@ -729,8 +739,9 @@ impl Soc {
 }
 
 #[repr(C)]
-struct InitTaskStorage {
+pub struct InitTaskStorage {
     reserved: usize,
 }
 
-static INIT_TASK_STORAGE: InitTaskStorage = InitTaskStorage { reserved: 0 };
+#[unsafe(no_mangle)]
+pub static init_task_storage: InitTaskStorage = InitTaskStorage { reserved: 0 };

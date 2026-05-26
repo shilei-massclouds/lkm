@@ -6,8 +6,17 @@ pub fn checkpoint(checkpoint: Checkpoint) {
 #[cfg(not(checkpoint_sbi_char))]
 pub fn checkpoint(_checkpoint: Checkpoint) {}
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Checkpoint {
+    StartupTimelineStarted,
+    #[allow(dead_code)]
+    StartupTimelineReady,
+    PreparePhaseReady,
+    PreparePhaseOnline,
+    BootPhaseStarted,
+    #[allow(dead_code)]
+    BootPhaseReady,
     EntryPreludePhaseStarted,
     #[allow(dead_code)]
     EntryPreludePhaseReady,
@@ -79,6 +88,12 @@ impl Checkpoint {
     #[allow(dead_code)]
     const fn byte(self) -> u8 {
         match self {
+            Self::StartupTimelineStarted => b'[',
+            Self::StartupTimelineReady => b']',
+            Self::PreparePhaseReady => b'{',
+            Self::PreparePhaseOnline => b'}',
+            Self::BootPhaseStarted => b'(',
+            Self::BootPhaseReady => b')',
             Self::EntryPreludePhaseStarted => b'A',
             Self::EntryPreludePhaseReady => b'a',
             Self::EntrySuccessorPhaseStarted => b'P',

@@ -154,6 +154,47 @@ impl Lifecycle {
         trace::checkpoint(checkpoint);
         EventResult::Success
     }
+
+    pub fn adopt_transition(
+        &mut self,
+        event: LifecycleEvent,
+        expected: State,
+        target: State,
+    ) -> EventResult {
+        if self.seen_events & event.bit() != 0 {
+            return EventResult::Failed(EventError::new(
+                EventErrorCode::DuplicateLifecycleEvent,
+                event,
+                self.state,
+                expected,
+                target,
+            ));
+        }
+
+        if self.state != expected {
+            return EventResult::Blocked(EventError::new(
+                EventErrorCode::UnexpectedState,
+                event,
+                self.state,
+                expected,
+                target,
+            ));
+        }
+
+        if !is_allowed_lifecycle_transition(expected, event, target) {
+            return EventResult::Failed(EventError::new(
+                EventErrorCode::InvalidTransition,
+                event,
+                self.state,
+                expected,
+                target,
+            ));
+        }
+
+        self.state = target;
+        self.seen_events |= event.bit();
+        EventResult::Success
+    }
 }
 
 const fn is_allowed_lifecycle_transition(

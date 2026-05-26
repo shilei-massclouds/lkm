@@ -32,6 +32,7 @@
 | P0 | 完成 | 建立 `impl/arceos_ex/` 独立实验目录，包含 `Makefile`、RISC-V64 linker script、入口汇编和 no-alloc Rust 源码骨架。 |
 | P0 | 完成 | 定义对象级公共基础：规范状态集合、事件集合、`EventResult`、生命周期事件唯一性检查和 checkpoint hook。 |
 | P0 | 完成 | 分类 `make verify` 当前 obligations/deferred，明确进入 `EntryPreludePhase` 对象实现前的处理策略。 |
+| P0 | 完成 | 纠正入口实现与规格顺序不一致的问题：`_start` 现在作为严格 head prefix，按规格顺序完成进入 Rust 前必须用汇编实现的 `StartupTimeline/PreparePhase/BootPhase/EntryPreludePhase` 起始边界以及 `InterruptStream.Preset`、`KernelImage.Preset`、`RootStream.Preset`、`KernelImage.Setup`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`；Rust 续段只认领这些状态并从 `EventStream.Preset` 继续。 |
 | P0 | 完成 | 实现 `EntryPreludePhase` 第一批不依赖页表切换的 foundation 对象：`InterruptStream.Preset`、`KernelImage.Preset/Setup`、`RootStream.Preset`、`BootCPU.Preset`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`、`EventStream.Preset`。 |
 | P0 | 完成 | 实现 `EntryPreludePhase` 最小闭环：`_start`、`__global_pointer$`、head text 布局约束、BootArgs、RootStream、KernelImage、BootCPU、InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm、VM 三段切换；`make run LOG=trace` 已到达 banner 与本地 `app_main()`。 |
 | P0 | 完成 | 实现 `EntrySuccessorPhase` 最小闭环：EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap、SwapperVm；`make run LOG=trace` 已到达 `EntrySuccessorPhase.Ready`。 |
@@ -39,6 +40,7 @@
 | P1 | 完成 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
 | P1 | 完成 | 用顶层 Makefile 提供 `build`、`run`、`verify`、`clean` 等入口，暂时脱离 `xtask`。 |
 | P1 | 待办 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性。 |
+| P1 | 待办 | 按 Object Coding Phase 映射规则整理源码结构：`main.rs` 承载 `startup-timeline`，`phases/` 按 Phase 包含层次拆分过程文件，`objects/` 按对象类别逐步拆成一对象一文件，并把 `EntryPreludeObjects`、`EntrySuccessorObjects` 等聚合体明确为上下文载体而非资源对象。 |
 | P1 | 待办 | 整理规格规则强度分层，为 `MUST`/硬约束、`SHOULD`/强建议、`MAY`/建议项和 `NOTE`/说明建立统一标注与解释规则。 |
 | P1 | 待办 | 建立 GitHub Actions 快速 CI，覆盖推导工具质量、核心规格推导和 `impl/arceos_ex` 最小构建。 |
 | P1 | 待办 | 建立 nightly/manual 测试流水线，生成 trace、系统测试日志、对象覆盖表和项目主页展示产物。 |

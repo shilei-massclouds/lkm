@@ -29,6 +29,7 @@ SECTIONS
 
     .data : AT(ADDR(.data) - LOAD_OFFSET) ALIGN(4K) {
         PROVIDE(__global_pointer$ = . + 0x800);
+        KEEP(*(.head.handoff))
         *(.sdata .sdata.*)
         *(.data .data.*)
     }
