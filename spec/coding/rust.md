@@ -51,6 +51,10 @@
   不应强行参数化。
 - 对很小且边界清晰的汇编入口，例如单指令 trace hook 或 ABI trampoline，可以在工具链支持时使用 naked function
   承载，但这属于可选手段，不应成为普通实现路径的前提。
+- 跨汇编、固件 ABI、naked function、手工函数指针保存、函数指针与整数往返转换、地址空间切换 continuation
+  等低级边界的函数，应显式使用稳定 ABI，例如 `extern "C"`。即使函数最终由 Rust 代码调用，只要它的地址经过
+  保存、重定位或 `transmute` 后再调用，也应视为低级边界。
+- 纯 Rust 内部函数不应只是为了风格统一而使用 `extern "C"`；显式 ABI 标记应表示真实的低级边界或已记录的例外。
 
 ## unsafe 边界
 
