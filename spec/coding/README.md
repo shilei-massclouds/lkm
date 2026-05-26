@@ -12,14 +12,14 @@
 
 1. `README.md`：确认 coding 规格范围、外部规格优先级和本目录阅读顺序。
 2. `main.spec`：coding 目录正式规格入口。
-3. `mapping.spec`：对象、Phase、状态、事件、checkpoint 和源码落点的正式硬约束。
+3. `mapping.spec`：对象、Phase、状态、事件、checkpoint、源码落点和规则强度分层的正式规格。
 4. `mapping.md`：对 `mapping.spec` 的说明、例子和补充解释，不覆盖正式规格。
 5. `riscv64.md`：RISC-V64 架构相关补充约束。
 6. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充约束。
 7. `arceos.md`：参考 ArceOS 时的取舍原则。
 8. `arceos_ex-plan.md`：当前实验内核的执行计划和任务状态；它不覆盖前述规格，只记录当前阶段如何落实规格。
 
-若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.spec` 的硬约束优先于其它 coding 补充文档，计划文档不得覆盖规格文档。
+若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.spec` 的 `MUST` 优先于其它 coding 补充文档，`mapping.spec` 的 `SHOULD` 需要默认遵循或显式记录偏离原因，计划文档不得覆盖规格文档。
 
 ## 阶段边界
 
@@ -103,6 +103,6 @@
 - `rust.md`：Rust 语言和安全边界相关编码约束。
 - `arceos.md`：参考 ArceOS 时的取舍原则和映射约束。
 - `main.spec`：coding 目录正式规格入口。
-- `mapping.spec`：模型对象、阶段、状态、事件和检查点到代码的正式硬约束。
+- `mapping.spec`：模型对象、阶段、状态、事件和检查点到代码的正式规则，包括 `MUST`、`SHOULD`、`MAY` 和 `NOTE` 分层。
 - `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的说明性映射文档。
 - `arceos_ex-plan.md`：`arceos_ex` 第一轮实现任务清单；不得作为覆盖规格的依据。

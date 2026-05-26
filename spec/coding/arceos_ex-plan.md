@@ -40,8 +40,8 @@
 | P1 | 完成 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
 | P1 | 完成 | 用顶层 Makefile 提供 `build`、`run`、`verify`、`clean` 等入口，暂时脱离 `xtask`。 |
 | P1 | 待办 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性。 |
-| P1 | 待办 | 按 Object Coding Phase 映射规则整理源码结构：`main.rs` 承载 `startup-timeline`，`phases/` 按 Phase 包含层次拆分过程文件，`objects/` 按对象类别逐步拆成一对象一文件，并把 `EntryPreludeObjects`、`EntrySuccessorObjects` 等聚合体明确为上下文载体而非资源对象。 |
-| P1 | 待办 | 整理规格规则强度分层，为 `MUST`/硬约束、`SHOULD`/强建议、`MAY`/建议项和 `NOTE`/说明建立统一标注与解释规则。 |
+| P1 | 待办 | 按 Object Coding Phase 映射规则整理源码结构：`main.rs` 承载 `startup-timeline`，`phases/` 按 Phase 包含层次拆分过程文件，`objects/` 按对象类别逐步拆成一对象一文件，并把资源对象统一收敛到全局 `Context`。 |
+| P1 | 完成 | 整理规格规则强度分层，为 `MUST`/硬约束、`SHOULD`/强建议、`MAY`/允许项和 `NOTE`/说明建立统一标注与解释规则，并把全局 `Context` 映射记录为 `SHOULD`。 |
 | P1 | 待办 | 建立 GitHub Actions 快速 CI，覆盖推导工具质量、核心规格推导和 `impl/arceos_ex` 最小构建。 |
 | P1 | 待办 | 建立 nightly/manual 测试流水线，生成 trace、系统测试日志、对象覆盖表和项目主页展示产物。 |
 | P2 | 延期 | 组件封装阶段：恢复 ArceOS 组件接口、crate 边界、`ax-std` 接入、overlay workspace、`xtask`、feature 传递、`axlog` 和 `ax-alloc` facade 等问题。 |

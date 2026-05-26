@@ -1,10 +1,16 @@
 /*
- * Object Coding Mapping MUST Specification
+ * Object Coding Mapping Specification
  *
  * These predicates name mandatory constraints for generating object-level code
  * from spec/model. They are intentionally separate from mapping.md so tools and
- * AI agents can consume the hard rules through the formal *.spec entry.
+ * AI agents can consume the hard rules and strong recommendations through the
+ * formal *.spec entry.
  */
+
+predicate coding_rule_level_must_defined() -> bool;
+predicate coding_rule_level_should_defined() -> bool;
+predicate coding_rule_level_may_defined() -> bool;
+predicate coding_rule_level_note_defined() -> bool;
 
 predicate coding_must_model_priority() -> bool;
 predicate coding_must_map_before_coding() -> bool;
@@ -16,6 +22,48 @@ predicate coding_must_keep_event_boundaries() -> bool;
 predicate coding_must_check_before_checkpoint() -> bool;
 predicate coding_must_record_exceptions() -> bool;
 predicate coding_must_run_verification_gates() -> bool;
+
+predicate coding_should_use_global_context() -> bool;
+predicate coding_should_name_context_parameters_ctx() -> bool;
+predicate coding_should_group_context_resources_by_category() -> bool;
+predicate coding_should_avoid_phase_local_context_accessors() -> bool;
+
+type CodingRuleLevels {
+    invariant {
+        /*
+         * MUST:
+         *
+         * A mandatory rule. Violating a MUST rule blocks implementation until
+         * the model, coding spec, tool or implementation is corrected.
+         */
+        coding_rule_level_must_defined();
+
+        /*
+         * SHOULD:
+         *
+         * A strong recommendation. Generated or handwritten code is expected to
+         * follow it by default. A deviation is allowed only with an explicit
+         * recorded reason, scope and future convergence path.
+         */
+        coding_rule_level_should_defined();
+
+        /*
+         * MAY:
+         *
+         * An optional technique. It is permitted when useful but must not be
+         * required by later code unless promoted to SHOULD or MUST.
+         */
+        coding_rule_level_may_defined();
+
+        /*
+         * NOTE:
+         *
+         * Explanatory guidance. It carries no direct implementation obligation
+         * and cannot override MUST or SHOULD rules.
+         */
+        coding_rule_level_note_defined();
+    }
+}
 
 type CodingMappingMust {
     invariant {
@@ -111,5 +159,46 @@ type CodingMappingMust {
          * they are treated as complete.
          */
         coding_must_run_verification_gates();
+    }
+}
+
+type CodingMappingShould {
+    invariant {
+        /*
+         * Global context:
+         *
+         * Object Coding Phase should maintain long-lived resource objects in a
+         * single implementation Context rather than in phase-local object
+         * carriers. Phase modules should borrow this Context and use it to
+         * drive resource-object events.
+         */
+        coding_should_use_global_context();
+
+        /*
+         * Context parameter names:
+         *
+         * Function parameters and local variables that carry the implementation
+         * Context should be named ctx or context. They should not be named
+         * objects, because objects has a formal model meaning.
+         */
+        coding_should_name_context_parameters_ctx();
+
+        /*
+         * Context resource layout:
+         *
+         * Context fields should be grouped by resource-object category, matching
+         * the source directory hierarchy as it evolves. They should not be
+         * grouped by Phase except as an explicitly recorded transitional step.
+         */
+        coding_should_group_context_resources_by_category();
+
+        /*
+         * Context accessor placement:
+         *
+         * Context accessors should be centralized, for example as
+         * crate::context::context() and crate::context::context_ref(). Phase
+         * files should not define their own local objects()/context() accessors.
+         */
+        coding_should_avoid_phase_local_context_accessors();
     }
 }
