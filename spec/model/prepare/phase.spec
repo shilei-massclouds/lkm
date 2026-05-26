@@ -119,6 +119,7 @@ object Lds: PrepareObject {
         bss_end: SymbolAddr;
         init_stack_start: SymbolAddr;
         init_stack_end: SymbolAddr;
+        boot_stack_size: Size;
         kernel_start: SymbolAddr;
         kernel_end: SymbolAddr;
     }
@@ -145,6 +146,8 @@ object Lds: PrepareObject {
             init_stack_end > init_stack_start;
             page_aligned(init_stack_start);
             page_aligned(init_stack_end);
+            boot_stack_size == Config.boot_stack_size;
+            init_stack_end - init_stack_start == boot_stack_size;
         }
     }
 
@@ -161,6 +164,7 @@ object Lds: PrepareObject {
         bss_end = symbol("__bss_stop");
         init_stack_start = symbol("init_thread_union");
         init_stack_end = expr("init_thread_union + THREAD_SIZE");
+        boot_stack_size = symbol("THREAD_SIZE");
     }
 }
 
@@ -218,6 +222,7 @@ object Config: PrepareObject {
     attrs {
         page_size: Size;
         pt_size_on_stack: Size;
+        boot_stack_size: Size;
         pmd_size: Size;
         kernel_link_addr: VirtAddr<KernelImage>;
         kernel_image_va_window_size: Size;
@@ -237,6 +242,8 @@ object Config: PrepareObject {
             aligned(pmd_size, page_size);
             pt_size_on_stack > 0;
             pt_size_on_stack < page_size;
+            boot_stack_size >= page_size;
+            aligned(boot_stack_size, page_size);
             kernel_link_addr != 0;
             page_aligned(kernel_link_addr);
             valid_virt_addr(kernel_link_addr);

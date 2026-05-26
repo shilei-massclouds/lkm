@@ -65,6 +65,8 @@ _CONFIG_SOURCE_PROOFS = {
     "aligned(pmd_size, page_size)": ("configuration", "config_source"),
     "pt_size_on_stack > 0": ("configuration", "config_source"),
     "pt_size_on_stack < page_size": ("configuration", "config_source"),
+    "boot_stack_size >= page_size": ("configuration", "config_source"),
+    "aligned(boot_stack_size, page_size)": ("configuration", "config_source"),
     "kernel_link_addr != 0": ("configuration", "config_source"),
     "page_aligned(kernel_link_addr)": ("configuration", "config_source"),
     "valid_virt_addr(kernel_link_addr)": ("address_mapping", "config_source"),
@@ -102,6 +104,14 @@ _LDS_LINKER_PROOFS = {
     "init_stack_end > init_stack_start": ("linker_layout", "linux_linker_script"),
     "page_aligned(init_stack_start)": ("linker_layout", "linux_linker_script"),
     "page_aligned(init_stack_end)": ("linker_layout", "linux_linker_script"),
+    "boot_stack_size == Config.boot_stack_size": (
+        "stack_layout",
+        "config_driven_linker_script",
+    ),
+    "init_stack_end - init_stack_start == boot_stack_size": (
+        "stack_layout",
+        "linux_linker_script",
+    ),
 }
 _KERNEL_IMAGE_LINKER_PROOFS = {
     "valid_segment_set(segments)": ("linker_layout", "linux_linker_script"),
@@ -1327,6 +1337,13 @@ class _Deriver:
             self._validate_state("Lds", "Online")
             and self._validate_state("Config", "Online")
         ):
+            return False
+        required = {
+            "boot_stack_size >= page_size",
+            "boot_stack_size == Config.boot_stack_size",
+            "init_stack_end - init_stack_start == boot_stack_size",
+        }
+        if not required.issubset(self.proved_expressions):
             return False
 
         self._record(
