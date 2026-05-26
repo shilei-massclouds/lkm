@@ -537,6 +537,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 | 优先级 | 状态 | 事项 | 目标与说明 |
 | --- | --- | --- | --- |
 | `P0` | 待办 | 收口 trace/SVG 输出体验 | 系统检查基础图、state 注释图、event 注释图、state+event 注释图四种输出；优先处理 `depends_on` 长线、完整图过高、标签简化/分行、关键非状态谓词事实展示，以及布局常量是否暴露为 render 参数等问题，使 trace 图适合日常审阅。 |
+| `P1` | 待办 | 规格内默认 target 与 rule-only 检查模式 | 当前工具链把 `StartupTimeline.Event::Setup` 作为全局默认 target，这只适合 `spec/model/main.spec`。后续应支持在 `model/main.spec` 中声明默认推导目标；target 选择顺序为命令行 `--target` 优先，其次规格元信息，缺失时 derive/check/trace 要求显式 target。同时为 `spec/coding/main.spec`、`spec/compose/main.spec` 等 rule-only 规格提供只执行 parse/model/rule 检查的模式，避免误套启动时间线推导。`make verify` 仍可保持默认 `SPEC=spec/model/main.spec`。 |
 | `P1` | 待办 | 注释数据流下沉 | 当前 `.spec` 注释由 `pyveri` driver 临时抽取并传给 render。后续应让 `parse` 保留注释 span/内容，由 `model` 或 `view` 建立 state/event 关联，`render` 只消费 `view.json` 或明确的 annotation 输入。 |
 | `P1` | 待办 | 同步开发文档与当前真实进展 | 清理文档中已经过期的描述，例如前文仍提到复杂谓词保留为 `obligation`，但当前严格推导实际为 `obligation: 0`；同时明确当前主入口、已覆盖阶段和剩余 `deferred`。 |
 | `P2` | 待办 | 继续语义扩展 | 在 trace/文档闭环稳定后，再决定是优先消化两个剩余 `deferred`，还是沿 Linux 启动流程继续推进到 `paging_init()` 之后的下一个阶段边界。 |
