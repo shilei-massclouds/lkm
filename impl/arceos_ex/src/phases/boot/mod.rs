@@ -1,3 +1,5 @@
+pub mod entry_prelude;
+
 use crate::{
     objects::{
         boot_args::BootArgs,
@@ -16,13 +18,13 @@ static mut ENTRY_SUCCESSOR: EntrySuccessorObjects = EntrySuccessorObjects::new()
 
 pub fn setup_after_head_prefix(boot_args: &BootArgs) -> ! {
     let entry_prelude = entry_prelude_objects();
-    crate::phases::entry_prelude::setup_after_head_prefix(boot_args, entry_prelude);
+    entry_prelude::setup(boot_args, entry_prelude);
 }
 
 pub fn after_vm_setup_continuation() -> ! {
     let entry_prelude = entry_prelude_objects();
-    require(crate::phases::entry_prelude::after_vm_setup(entry_prelude));
-    crate::phases::entry_prelude::handoff(entry_prelude)
+    require(entry_prelude::after_vm_setup(entry_prelude));
+    entry_prelude::handoff(entry_prelude)
 }
 
 pub fn setup_after_children() -> ! {

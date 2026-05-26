@@ -28,12 +28,15 @@ _start:
     mv s1, a1
 
     /*
-     * EntryPreludePhase early prefix.
+     * EntryPreludePhase.setup() head segment.
      *
-     * These operations must happen before Rust can run because Rust needs a
-     * valid gp, zeroed static state, a task pointer, and a stack. They are
-     * kept in specification order and use the same checkpoint characters as
-     * the Rust object events that follow.
+     * The RISC-V entry symbol must live in the crate root assembly block, but
+     * semantically this is the first part of EntryPreludePhase.setup().  It
+     * performs only the events that must happen before Rust can run: close the
+     * interrupt stream, establish gp, disable kernel FPU/vector use, zero BSS,
+     * record the boot CPU group input, install the init task pointer, and
+     * create the initial stack.  The Rust segment of the same phase setup is
+     * phases::boot::entry_prelude::setup().
      */
     li a0, '['
     call arceos_ex_head_checkpoint
