@@ -32,14 +32,14 @@
 | P0 | 完成 | 建立 `impl/arceos_ex/` 独立实验目录，包含 `Makefile`、RISC-V64 linker script、入口汇编和 no-alloc Rust 源码骨架。 |
 | P0 | 完成 | 定义对象级公共基础：规范状态集合、事件集合、`EventResult`、生命周期事件唯一性检查和 checkpoint hook。 |
 | P0 | 完成 | 分类 `make verify` 当前 obligations/deferred，明确进入 `EntryPreludePhase` 对象实现前的处理策略。 |
-| P0 | 完成 | 纠正入口实现与规格顺序不一致的问题：`_start` 现在作为严格 head prefix，按规格顺序完成进入 Rust 前必须用汇编实现的 `StartupTimeline/PreparePhase/BootPhase/EntryPreludePhase` 起始边界以及 `InterruptStream.Preset`、`KernelImage.Preset`、`RootStream.Preset`、`KernelImage.Setup`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`；Rust 续段只认领这些状态并从 `EventStream.Preset` 继续。 |
+| P0 | 完成 | 纠正入口实现与规格顺序不一致的问题：`_start` 现在作为严格 head prefix，按规格顺序完成进入 Rust 前必须用汇编实现并由入口前导期拥有的 `EntryPreludePhase.Setup` 起始边界以及 `InterruptStream.Preset`、`KernelImage.Preset`、`RootStream.Preset`、`KernelImage.Setup`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`；Rust 续段只认领这些状态并从 `EventStream.Preset` 继续。`StartupTimeline/PreparePhase/BootPhase` 等父阶段或准备期边界不由入口汇编代发 checkpoint，而是在各自映射实现中提交或采用 head-prefix adoption。 |
 | P0 | 完成 | 实现 `EntryPreludePhase` 第一批不依赖页表切换的 foundation 对象：`InterruptStream.Preset`、`KernelImage.Preset/Setup`、`RootStream.Preset`、`BootCPU.Preset`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`、`EventStream.Preset`。 |
 | P0 | 完成 | 实现 `EntryPreludePhase` 最小闭环：`_start`、`__global_pointer$`、head text 布局约束、BootArgs、RootStream、KernelImage、BootCPU、InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm、VM 三段切换；`make run LOG=trace` 已到达 banner 与本地 `app_main()`。 |
 | P0 | 完成 | 实现 `EntrySuccessorPhase` 最小闭环：EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap、SwapperVm；`make run LOG=trace` 已到达 `EntrySuccessorPhase.Ready`。 |
 | P0 | 完成 | 建立 no-alloc 输出路径：启动期内部 `printk`/`println-like` 前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
 | P1 | 完成 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
 | P1 | 完成 | 用顶层 Makefile 提供 `build`、`run`、`verify`、`clean` 等入口，暂时脱离 `xtask`。 |
-| P1 | 待办 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性。 |
+| P1 | 完成 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性；当前 `make verify REPORT=graph`、`make run LOG=trace` 和实现阶段顺序一致，运行期 checkpoint 单字符映射已修正为无重复。 |
 | P1 | 待办 | 按 Object Coding Phase 映射规则整理源码结构：`main.rs` 承载 `startup-timeline`，`phases/` 按 Phase 包含层次拆分过程文件，`objects/` 按对象类别逐步拆成一对象一文件，并把资源对象统一收敛到全局 `Context`。 |
 | P1 | 待办 | 将当前直接生成完整 `riscv64.lds` 的实验收敛为 Linux 风格的 `riscv64.lds.S` 方案：`codegen` 基于 `Config` 生成 `generated/config.lds.h` 等配置头，`.lds.S` 保留链接布局结构并通过预处理生成最终 `.lds`；同时规划生成 Rust 侧配置，避免 `.lds`、Rust 常量和 codegen profile 各自维护同一配置值。 |
 | P1 | 完成 | 整理规格规则强度分层，为 `MUST`/硬约束、`SHOULD`/强建议、`MAY`/允许项和 `NOTE`/说明建立统一标注与解释规则，并把全局 `Context` 映射记录为 `SHOULD`。 |
@@ -251,6 +251,8 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 第一轮预留 checkpoint hook 接口，但不要求实现完整状态差分输出。hook 默认为空实现，可通过编译/链接选项接入具体 trace 后端。
 
 checkpoint trace 独立于 `EarlyCon` 和正式 `Console`。当前最小后端可以使用 RISC-V64 SBI legacy putchar 输出单个字符，用于最早期启动定位；该路径不得依赖 allocator、锁、字符串地址、FixMap 或线性映射状态。
+
+单字符 checkpoint id 必须在当前后端中保持一一对应，避免运行期 trace 解码歧义。
 
 checkpoint 命名应沿用模型对象和状态名称，例如：
 

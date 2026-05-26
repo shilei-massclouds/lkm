@@ -135,7 +135,7 @@ impl Checkpoint {
             Self::PlatformCpuInfoReady => b'c',
             Self::PlatformCpuInfoOnline => b'5',
             Self::PhysicalMemoryReady => b'm',
-            Self::PhysicalMemoryOnline => b'M',
+            Self::PhysicalMemoryOnline => b'6',
             Self::CpuIdMapReady => b'l',
             Self::KernelCmdlineReady => b'w',
             Self::InitMmReady => b'h',
