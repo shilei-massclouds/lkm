@@ -2,8 +2,10 @@ use core::arch::global_asm;
 use core::sync::atomic::AtomicU8;
 
 use crate::{
+    context::Context,
     objects::{
         boot_args::BootArgs,
+        entry_prelude::Soc,
         state::{EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
@@ -157,10 +159,52 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
 /// setup() after `Vm.Setup` switches to the early virtual address space.
 fn setup(boot_args: &BootArgs) -> ! {
     let ctx = crate::context::context();
-    require(ctx.entry_prelude.adopt_head_prefix(boot_args));
-    require(ctx.entry_prelude.event_stream_preset());
-    require(ctx.entry_prelude.vm_preset(boot_args));
-    ctx.entry_prelude.vm_setup(after_vm_setup_continuation)
+    require(adopt_head_prefix(ctx, boot_args));
+    require(ctx.event_stream.preset(&ctx.config));
+    require(ctx.vm.preset(
+        &ctx.config,
+        &mut ctx.static_objects,
+        &ctx.lds,
+        &ctx.kernel_image,
+        boot_args,
+        &mut ctx.raw_dtb,
+        &mut ctx.fix_map,
+    ));
+    ctx.vm.setup(
+        &ctx.config,
+        &ctx.static_objects,
+        &ctx.lds,
+        &mut ctx.kernel_image,
+        after_vm_setup_continuation,
+    )
+}
+
+fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
+    let result = ctx.interrupt_stream.adopt_head_preset();
+    if !result.is_success() {
+        return result;
+    }
+    let result = ctx.kernel_image.adopt_head_preset(&ctx.config, &ctx.lds);
+    if !result.is_success() {
+        return result;
+    }
+    let result = ctx.root_stream.adopt_head_preset();
+    if !result.is_success() {
+        return result;
+    }
+    let result = ctx.kernel_image.adopt_head_setup(&ctx.config, &ctx.lds);
+    if !result.is_success() {
+        return result;
+    }
+    let result = ctx.cpu_group.adopt_head_preset(boot_args);
+    if !result.is_success() {
+        return result;
+    }
+    let result = ctx.init_task.adopt_head_preset(&ctx.config);
+    if !result.is_success() {
+        return result;
+    }
+    ctx.init_stack.adopt_head_preset(&ctx.config, &ctx.lds)
 }
 
 /// Continues the same `EntryPreludePhase.setup()` after `Vm.Setup` has switched
@@ -174,8 +218,23 @@ extern "C" fn after_vm_setup_continuation() -> ! {
 
 /// Finishes `EntryPreludePhase.setup()` after `Vm.Setup` has switched address
 /// spaces and returned through the virtual continuation path.
-fn after_vm_setup(ctx: &mut crate::context::Context) -> EventResult {
-    let result = ctx.entry_prelude.after_vm_setup();
+fn after_vm_setup(ctx: &mut Context) -> EventResult {
+    let result = ctx.event_stream.enable(&ctx.vm, &ctx.static_objects);
+    if !result.is_success() {
+        return result;
+    }
+
+    let result = ctx.init_task.enable(&ctx.config, &ctx.vm);
+    if !result.is_success() {
+        return result;
+    }
+
+    let result = ctx.init_stack.setup(&ctx.vm);
+    if !result.is_success() {
+        return result;
+    }
+
+    let result = Soc::preset();
     if !result.is_success() {
         return result;
     }
@@ -185,8 +244,8 @@ fn after_vm_setup(ctx: &mut crate::context::Context) -> EventResult {
 
 /// Implements the Phase handoff edge from `EntryPreludePhase` to the next
 /// BootPhase child, `EntrySuccessorPhase`.
-fn handoff(ctx: &mut crate::context::Context) -> ! {
-    require(ctx.entry_prelude.cleanup_entry_prelude_phase());
+fn handoff(ctx: &mut Context) -> ! {
+    require(cleanup_entry_prelude_phase(ctx));
     require(crate::phases::state::mark(
         &ENTRY_PRELUDE_PHASE_STATE,
         LifecycleEvent::Cleanup,
@@ -197,10 +256,14 @@ fn handoff(ctx: &mut crate::context::Context) -> ! {
     crate::phases::boot::entry_successor::setup(ctx)
 }
 
+fn cleanup_entry_prelude_phase(_ctx: &mut Context) -> EventResult {
+    EventResult::Success
+}
+
 /// Checks the `EntryPreludePhase.Ready` model boundary before emitting its
 /// checkpoint.  This is the coding counterpart of the phase invariant.
-fn checkpoint_ready(ctx: &crate::context::Context) -> EventResult {
-    if !ctx.entry_prelude.entry_prelude_phase_ready() {
+fn checkpoint_ready(ctx: &Context) -> EventResult {
+    if !entry_prelude_phase_ready(ctx) {
         return EventResult::failed_condition(
             LifecycleEvent::Setup,
             crate::phases::state::load(&ENTRY_PRELUDE_PHASE_STATE),
@@ -216,6 +279,20 @@ fn checkpoint_ready(ctx: &crate::context::Context) -> EventResult {
         State::Ready,
         Checkpoint::EntryPreludePhaseReady,
     )
+}
+
+fn entry_prelude_phase_ready(ctx: &Context) -> bool {
+    ctx.root_stream.state() == State::Prepared
+        && ctx.interrupt_stream.state() == State::Prepared
+        && ctx.event_stream.state() == State::Online
+        && ctx.kernel_image.state() == State::Online
+        && ctx.raw_dtb.state() == State::Ready
+        && ctx.init_task.state() == State::Online
+        && ctx.init_stack.state() == State::Ready
+        && ctx.vm.state() == State::Ready
+        && ctx.vm.entry_prelude_ready()
+        && ctx.cpu_group.state() == State::Prepared
+        && ctx.cpu_group.boot_cpu_state() == State::Prepared
 }
 
 fn require(result: EventResult) {

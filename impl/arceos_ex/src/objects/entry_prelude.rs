@@ -5,12 +5,9 @@ use crate::{arch::riscv64::csr, trace::Checkpoint};
 use super::{
     boot_args::BootArgs,
     config::Config,
-    entry_successor::MemBlock,
-    fix_map::FixMap,
-    raw_dtb::RawDtb,
     state::{EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
-    vm::{Vm, VmSetupContinuation},
+    vm::Vm,
 };
 
 pub const PT_SIZE_ON_STACK: usize = 256;
@@ -54,213 +51,12 @@ extern "C" fn early_event_entry_rust() -> ! {
     crate::arch::riscv64::sbi::system_shutdown()
 }
 
-pub struct EntryPreludeObjects {
-    config: Config,
-    static_objects: StaticObjects,
-    pub lds: Lds,
-    interrupt_stream: InterruptStream,
-    kernel_image: KernelImage,
-    root_stream: RootStream,
-    cpu_group: CpuGroup,
-    init_task: InitTask,
-    init_stack: InitStack,
-    event_stream: EventStream,
-    vm: Vm,
-    raw_dtb: RawDtb,
-    fix_map: FixMap,
-}
-
-impl EntryPreludeObjects {
-    pub const fn new() -> Self {
-        Self {
-            config: Config::new(),
-            static_objects: StaticObjects::new(),
-            lds: Lds::new(),
-            interrupt_stream: InterruptStream::new(),
-            kernel_image: KernelImage::new(),
-            root_stream: RootStream::new(),
-            cpu_group: CpuGroup::new(),
-            init_task: InitTask::new(),
-            init_stack: InitStack::new(),
-            event_stream: EventStream::new(),
-            vm: Vm::new(),
-            raw_dtb: RawDtb::new(),
-            fix_map: FixMap::new(),
-        }
-    }
-
-    pub fn event_stream_preset(&mut self) -> EventResult {
-        self.event_stream.preset(&self.config)
-    }
-
-    pub fn vm_preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        self.vm.preset(
-            &self.config,
-            &mut self.static_objects,
-            &self.lds,
-            &self.kernel_image,
-            boot_args,
-            &mut self.raw_dtb,
-            &mut self.fix_map,
-        )
-    }
-
-    pub fn adopt_head_prefix(&mut self, boot_args: &BootArgs) -> EventResult {
-        let result = self.interrupt_stream.adopt_head_preset();
-        if !result.is_success() {
-            return result;
-        }
-        let result = self.kernel_image.adopt_head_preset(&self.config, &self.lds);
-        if !result.is_success() {
-            return result;
-        }
-        let result = self.root_stream.adopt_head_preset();
-        if !result.is_success() {
-            return result;
-        }
-        let result = self.kernel_image.adopt_head_setup(&self.config, &self.lds);
-        if !result.is_success() {
-            return result;
-        }
-        let result = self.cpu_group.adopt_head_preset(boot_args);
-        if !result.is_success() {
-            return result;
-        }
-        let result = self.init_task.adopt_head_preset(&self.config);
-        if !result.is_success() {
-            return result;
-        }
-        self.init_stack.adopt_head_preset(&self.config, &self.lds)
-    }
-
-    pub fn vm_setup(&mut self, after_switch: VmSetupContinuation) -> ! {
-        self.vm.setup(
-            &self.config,
-            &self.static_objects,
-            &self.lds,
-            &mut self.kernel_image,
-            after_switch,
-        )
-    }
-
-    pub fn after_vm_setup(&mut self) -> EventResult {
-        let result = self.event_stream.enable(&self.vm, &self.static_objects);
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.init_task.enable(&self.config, &self.vm);
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.init_stack.setup(&self.vm);
-        if !result.is_success() {
-            return result;
-        }
-
-        Soc::preset()
-    }
-
-    pub fn entry_prelude_phase_ready(&self) -> bool {
-        self.root_stream.state() == State::Prepared
-            && self.interrupt_stream.state() == State::Prepared
-            && self.event_stream.state() == State::Online
-            && self.kernel_image.state() == State::Online
-            && self.raw_dtb.state() == State::Ready
-            && self.init_task.state() == State::Online
-            && self.init_stack.state() == State::Ready
-            && self.vm.state() == State::Ready
-            && self.vm.entry_prelude_ready()
-            && self.cpu_group.state() == State::Prepared
-            && self.cpu_group.boot_cpu_state() == State::Prepared
-    }
-
-    pub fn cleanup_entry_prelude_phase(&mut self) -> EventResult {
-        EventResult::Success
-    }
-
-    pub fn init_stack_enable(&mut self) -> EventResult {
-        self.init_stack.enable()
-    }
-
-    pub fn interrupt_stream_setup(&mut self) -> EventResult {
-        self.interrupt_stream.setup()
-    }
-
-    pub fn boot_cpu_setup(&mut self, boot_hartid_valid: bool) -> EventResult {
-        self.cpu_group.boot_cpu_setup(boot_hartid_valid)
-    }
-
-    pub fn boot_cpu_enable(&mut self) -> EventResult {
-        self.cpu_group.boot_cpu_enable()
-    }
-
-    pub fn boot_hartid(&self) -> usize {
-        self.cpu_group.boot_hartid()
-    }
-
-    pub fn raw_dtb(&self) -> &RawDtb {
-        &self.raw_dtb
-    }
-
-    pub fn fix_map(&self) -> &FixMap {
-        &self.fix_map
-    }
-
-    pub fn kernel_image(&self) -> &KernelImage {
-        &self.kernel_image
-    }
-
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-
-    pub fn vm_enable(&mut self, memblock: &MemBlock) -> EventResult {
-        self.vm.enable(
-            &self.config,
-            &mut self.static_objects,
-            &self.lds,
-            &self.kernel_image,
-            memblock,
-        )
-    }
-
-    pub fn vm_state(&self) -> State {
-        self.vm.state()
-    }
-
-    pub fn vm_entry_successor_ready(&self) -> bool {
-        self.vm.entry_successor_ready()
-    }
-
-    pub fn init_stack_state(&self) -> State {
-        self.init_stack.state()
-    }
-
-    pub fn boot_cpu_state(&self) -> State {
-        self.cpu_group.boot_cpu_state()
-    }
-
-    pub fn interrupt_stream_state(&self) -> State {
-        self.interrupt_stream.state()
-    }
-
-    pub fn prepare_inputs_ready(&self) -> bool {
-        self.config.entry_prelude_ready()
-            && self.lds.state() == State::Online
-            && self.lds.entry_layout_ready()
-            && self.static_objects.state() == State::Online
-            && self.static_objects.storage_ready(&self.config)
-    }
-}
-
 pub struct Lds {
     lifecycle: Lifecycle,
 }
 
 impl Lds {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Online),
         }
@@ -322,7 +118,7 @@ impl Lds {
         config.runtime_to_phys(self.init_stack_end())
     }
 
-    fn entry_layout_ready(&self) -> bool {
+    pub fn entry_layout_ready(&self) -> bool {
         let kernel_start_addr = self.kernel_start();
         let kernel_end_addr = self.kernel_end();
         let head_start = self.head_text_start();
@@ -358,13 +154,13 @@ pub struct InterruptStream {
 }
 
 impl InterruptStream {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
     }
 
-    fn adopt_head_preset(&mut self) -> EventResult {
+    pub fn adopt_head_preset(&mut self) -> EventResult {
         if csr::read_sie() != 0 || csr::read_sip() != 0 {
             return EventResult::failed_condition(
                 LifecycleEvent::Preset,
@@ -378,11 +174,11 @@ impl InterruptStream {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 
-    fn setup(&mut self) -> EventResult {
+    pub fn setup(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Prepared {
             return EventResult::failed_condition(
                 LifecycleEvent::Setup,
@@ -406,7 +202,7 @@ pub struct KernelImage {
 }
 
 impl KernelImage {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
@@ -416,7 +212,7 @@ impl KernelImage {
         self.lifecycle.state()
     }
 
-    fn adopt_head_preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
+    pub fn adopt_head_preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
         if lds.state() != State::Online
             || !lds.entry_layout_ready()
             || lds.current_global_pointer(config) != Some(csr::read_gp())
@@ -433,7 +229,7 @@ impl KernelImage {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    fn adopt_head_setup(&mut self, config: &Config, lds: &Lds) -> EventResult {
+    pub fn adopt_head_setup(&mut self, config: &Config, lds: &Lds) -> EventResult {
         if self.lifecycle.state() != State::Prepared || !lds.bss_zeroed(config) {
             return EventResult::failed_condition(
                 LifecycleEvent::Setup,
@@ -471,13 +267,13 @@ pub struct RootStream {
 }
 
 impl RootStream {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
     }
 
-    fn adopt_head_preset(&mut self) -> EventResult {
+    pub fn adopt_head_preset(&mut self) -> EventResult {
         if !csr::kernel_fpu_vector_disabled() {
             return EventResult::failed_condition(
                 LifecycleEvent::Preset,
@@ -491,7 +287,7 @@ impl RootStream {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 }
@@ -563,14 +359,14 @@ pub struct CpuGroup {
 }
 
 impl CpuGroup {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             boot_cpu: BootCpu::new(),
         }
     }
 
-    fn adopt_head_preset(&mut self, boot_args: &BootArgs) -> EventResult {
+    pub fn adopt_head_preset(&mut self, boot_args: &BootArgs) -> EventResult {
         let result = self.boot_cpu.adopt_head_preset(boot_args);
         if !result.is_success() {
             return result;
@@ -580,23 +376,23 @@ impl CpuGroup {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    fn boot_cpu_setup(&mut self, boot_hartid_valid: bool) -> EventResult {
+    pub fn boot_cpu_setup(&mut self, boot_hartid_valid: bool) -> EventResult {
         self.boot_cpu.setup(boot_hartid_valid)
     }
 
-    fn boot_cpu_enable(&mut self) -> EventResult {
+    pub fn boot_cpu_enable(&mut self) -> EventResult {
         self.boot_cpu.enable()
     }
 
-    fn boot_hartid(&self) -> usize {
+    pub fn boot_hartid(&self) -> usize {
         self.boot_cpu.hartid
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 
-    fn boot_cpu_state(&self) -> State {
+    pub fn boot_cpu_state(&self) -> State {
         self.boot_cpu.state()
     }
 }
@@ -606,13 +402,13 @@ pub struct InitTask {
 }
 
 impl InitTask {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
     }
 
-    fn adopt_head_preset(&mut self, config: &Config) -> EventResult {
+    pub fn adopt_head_preset(&mut self, config: &Config) -> EventResult {
         let Some(init_task_phys) =
             config.runtime_to_phys(core::ptr::addr_of!(init_task_storage) as usize)
         else {
@@ -637,7 +433,7 @@ impl InitTask {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    fn enable(&mut self, config: &Config, vm: &Vm) -> EventResult {
+    pub fn enable(&mut self, config: &Config, vm: &Vm) -> EventResult {
         let Some(init_task_virt) =
             config.runtime_to_link(core::ptr::addr_of!(init_task_storage) as usize)
         else {
@@ -667,7 +463,7 @@ impl InitTask {
         )
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 }
@@ -677,13 +473,13 @@ pub struct InitStack {
 }
 
 impl InitStack {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
     }
 
-    fn adopt_head_preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
+    pub fn adopt_head_preset(&mut self, config: &Config, lds: &Lds) -> EventResult {
         let head_sp = unsafe { core::ptr::addr_of!(head_init_stack_sp).read_volatile() };
         let Some(stack_phys) = lds.init_stack_end_phys(config).and_then(|stack_end| {
             stack_end
@@ -711,7 +507,7 @@ impl InitStack {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    fn setup(&mut self, vm: &Vm) -> EventResult {
+    pub fn setup(&mut self, vm: &Vm) -> EventResult {
         if self.lifecycle.state() != State::Prepared || vm.state() != State::Ready {
             return EventResult::failed_condition(
                 LifecycleEvent::Setup,
@@ -729,7 +525,7 @@ impl InitStack {
         )
     }
 
-    fn enable(&mut self) -> EventResult {
+    pub fn enable(&mut self) -> EventResult {
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,
@@ -748,13 +544,13 @@ pub struct EventStream {
 }
 
 impl EventStream {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
     }
 
-    fn preset(&mut self, config: &Config) -> EventResult {
+    pub fn preset(&mut self, config: &Config) -> EventResult {
         let Some(early_event_entry_phys) = config.runtime_to_phys(early_event_entry as usize)
         else {
             return EventResult::failed_condition(
@@ -773,11 +569,11 @@ impl EventStream {
         )
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 
-    fn enable(&mut self, vm: &Vm, static_objects: &StaticObjects) -> EventResult {
+    pub fn enable(&mut self, vm: &Vm, static_objects: &StaticObjects) -> EventResult {
         let _ = static_objects.state();
         if self.lifecycle.state() != State::Prepared || vm.state() != State::Ready {
             return EventResult::failed_condition(
@@ -802,7 +598,7 @@ impl EventStream {
 pub struct Soc;
 
 impl Soc {
-    fn preset() -> EventResult {
+    pub fn preset() -> EventResult {
         crate::trace::checkpoint(Checkpoint::SocPrepared);
         EventResult::Success
     }

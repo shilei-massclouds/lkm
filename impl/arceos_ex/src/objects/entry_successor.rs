@@ -1,7 +1,7 @@
 use super::{
     config::Config,
     earlycon,
-    entry_prelude::{EntryPreludeObjects, KernelImage, Lds},
+    entry_prelude::{KernelImage, Lds},
     fdt::{self, BootCommandLine, FdtFacts, HartSet, PhysRangeSet},
     fix_map::FixMap,
     printk,
@@ -10,165 +10,13 @@ use super::{
 };
 use crate::trace::Checkpoint;
 
-pub struct EntrySuccessorObjects {
-    early_dtb: EarlyDtb,
-    platform_cpu_info: PlatformCpuInfo,
-    physical_memory: PhysicalMemory,
-    cpu_id_map: CpuIdMap,
-    kernel_cmdline: KernelCmdline,
-    init_mm: InitMm,
-    early_ioremap: EarlyIoremap,
-    sbi: Sbi,
-    kernel_param: KernelParam,
-    memblock: MemBlock,
-}
-
-impl EntrySuccessorObjects {
-    pub const fn new() -> Self {
-        Self {
-            early_dtb: EarlyDtb::new(),
-            platform_cpu_info: PlatformCpuInfo::new(),
-            physical_memory: PhysicalMemory::new(),
-            cpu_id_map: CpuIdMap::new(),
-            kernel_cmdline: KernelCmdline::new(),
-            init_mm: InitMm::new(),
-            early_ioremap: EarlyIoremap::new(),
-            sbi: Sbi::new(),
-            kernel_param: KernelParam::new(),
-            memblock: MemBlock::new(),
-        }
-    }
-
-    pub fn setup(&mut self, entry_prelude: &mut EntryPreludeObjects) -> EventResult {
-        let result = entry_prelude.init_stack_enable();
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.early_dtb.preset(
-            entry_prelude.raw_dtb(),
-            entry_prelude.fix_map(),
-            entry_prelude.boot_hartid(),
-            &mut self.platform_cpu_info,
-            &mut self.physical_memory,
-        );
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.cpu_id_map.preset(entry_prelude.boot_hartid());
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = entry_prelude.interrupt_stream_setup();
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = entry_prelude
-            .boot_cpu_setup(self.platform_cpu_info.contains(entry_prelude.boot_hartid()));
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = entry_prelude.boot_cpu_enable();
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = printk::preset();
-        if !result.is_success() {
-            return result;
-        }
-        printk::write_str("arceos_ex object kernel\n");
-
-        let result = self.early_dtb.setup(
-            entry_prelude.raw_dtb(),
-            &mut self.memblock,
-            &mut self.kernel_cmdline,
-            &self.physical_memory,
-        );
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.init_mm.setup(&entry_prelude.lds);
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.early_ioremap.setup(entry_prelude.fix_map());
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.sbi.setup();
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.kernel_param.setup(&self.kernel_cmdline, &self.sbi);
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.memblock.setup(
-            &self.early_dtb,
-            entry_prelude.kernel_image(),
-            entry_prelude.raw_dtb(),
-            entry_prelude.config(),
-            &entry_prelude.lds,
-            &self.physical_memory,
-        );
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = entry_prelude.vm_enable(&self.memblock);
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.memblock.enable(entry_prelude.vm_state());
-        if !result.is_success() {
-            return result;
-        }
-
-        let result = self.early_dtb.cleanup(&self.memblock, &self.kernel_param);
-        if !result.is_success() {
-            return result;
-        }
-
-        EventResult::Success
-    }
-
-    pub fn entry_successor_phase_ready(&self, entry_prelude: &EntryPreludeObjects) -> bool {
-        entry_prelude.init_stack_state() == State::Online
-            && entry_prelude.boot_cpu_state() == State::Online
-            && entry_prelude.interrupt_stream_state() == State::Ready
-            && entry_prelude.vm_state() == State::Online
-            && entry_prelude.vm_entry_successor_ready()
-            && self.cpu_id_map.state() == State::Ready
-            && printk::is_prepared()
-            && self.early_dtb.state() == State::Destroyed
-            && self.kernel_cmdline.state() == State::Ready
-            && self.init_mm.state() == State::Ready
-            && self.early_ioremap.state() == State::Ready
-            && self.sbi.state() == State::Ready
-            && self.kernel_param.state() == State::Ready
-            && earlycon::is_online()
-            && self.memblock.state() == State::Online
-    }
-}
-
 pub struct PlatformCpuInfo {
     lifecycle: Lifecycle,
     harts: HartSet,
 }
 
 impl PlatformCpuInfo {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             harts: HartSet::empty(),
@@ -179,7 +27,12 @@ impl PlatformCpuInfo {
         self.lifecycle.state() == State::Online && self.harts.contains(hartid)
     }
 
-    fn preset(&mut self, raw_dtb: &RawDtb, facts: &FdtFacts, boot_hartid: usize) -> EventResult {
+    pub fn preset(
+        &mut self,
+        raw_dtb: &RawDtb,
+        facts: &FdtFacts,
+        boot_hartid: usize,
+    ) -> EventResult {
         if raw_dtb.state() != State::Ready
             || facts.harts.count() == 0
             || !facts.harts.contains(boot_hartid)
@@ -201,7 +54,7 @@ impl PlatformCpuInfo {
         )
     }
 
-    fn enable(&mut self) -> EventResult {
+    pub fn enable(&mut self) -> EventResult {
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,
@@ -217,7 +70,7 @@ pub struct PhysicalMemory {
 }
 
 impl PhysicalMemory {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             ram: PhysRangeSet::empty(),
@@ -232,7 +85,7 @@ impl PhysicalMemory {
         &self.ram
     }
 
-    fn preset(&mut self, raw_dtb: &RawDtb, facts: &FdtFacts) -> EventResult {
+    pub fn preset(&mut self, raw_dtb: &RawDtb, facts: &FdtFacts) -> EventResult {
         if raw_dtb.state() != State::Ready || facts.memory.count() == 0 {
             return EventResult::failed_condition(
                 LifecycleEvent::Preset,
@@ -251,7 +104,7 @@ impl PhysicalMemory {
         )
     }
 
-    fn enable(&mut self) -> EventResult {
+    pub fn enable(&mut self) -> EventResult {
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,
@@ -261,13 +114,13 @@ impl PhysicalMemory {
     }
 }
 
-struct EarlyDtb {
+pub struct EarlyDtb {
     lifecycle: Lifecycle,
     facts: FdtFacts,
 }
 
 impl EarlyDtb {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             facts: FdtFacts {
@@ -279,11 +132,11 @@ impl EarlyDtb {
         }
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 
-    fn preset(
+    pub fn preset(
         &mut self,
         raw_dtb: &RawDtb,
         fix_map: &FixMap,
@@ -336,7 +189,7 @@ impl EarlyDtb {
         )
     }
 
-    fn setup(
+    pub fn setup(
         &mut self,
         raw_dtb: &RawDtb,
         memblock: &mut MemBlock,
@@ -373,7 +226,7 @@ impl EarlyDtb {
         )
     }
 
-    fn cleanup(&mut self, memblock: &MemBlock, kernel_param: &KernelParam) -> EventResult {
+    pub fn cleanup(&mut self, memblock: &MemBlock, kernel_param: &KernelParam) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || memblock.state() != State::Online
             || kernel_param.state() != State::Ready
@@ -395,20 +248,20 @@ impl EarlyDtb {
     }
 }
 
-struct CpuIdMap {
+pub struct CpuIdMap {
     lifecycle: Lifecycle,
     boot_hartid: usize,
 }
 
 impl CpuIdMap {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             boot_hartid: usize::MAX,
         }
     }
 
-    fn preset(&mut self, boot_hartid: usize) -> EventResult {
+    pub fn preset(&mut self, boot_hartid: usize) -> EventResult {
         self.boot_hartid = boot_hartid;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
@@ -418,33 +271,33 @@ impl CpuIdMap {
         )
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 }
 
-struct KernelCmdline {
+pub struct KernelCmdline {
     lifecycle: Lifecycle,
     cmdline: BootCommandLine,
 }
 
 impl KernelCmdline {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             cmdline: BootCommandLine::empty(),
         }
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 
-    fn has_earlycon_sbi(&self) -> bool {
+    pub fn has_earlycon_sbi(&self) -> bool {
         self.cmdline.contains(b"earlycon=sbi")
     }
 
-    fn preset(&mut self, raw_dtb: &RawDtb, facts: &FdtFacts) -> EventResult {
+    pub fn preset(&mut self, raw_dtb: &RawDtb, facts: &FdtFacts) -> EventResult {
         if raw_dtb.state() != State::Ready {
             return EventResult::failed_condition(
                 LifecycleEvent::Preset,
@@ -464,14 +317,14 @@ impl KernelCmdline {
     }
 }
 
-struct InitMm {
+pub struct InitMm {
     lifecycle: Lifecycle,
     kernel_start: usize,
     kernel_end: usize,
 }
 
 impl InitMm {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             kernel_start: 0,
@@ -479,7 +332,7 @@ impl InitMm {
         }
     }
 
-    fn setup(&mut self, lds: &Lds) -> EventResult {
+    pub fn setup(&mut self, lds: &Lds) -> EventResult {
         if lds.state() != State::Online || lds.kernel_start() >= lds.kernel_end() {
             return EventResult::failed_condition(
                 LifecycleEvent::Setup,
@@ -499,23 +352,23 @@ impl InitMm {
         )
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 }
 
-struct EarlyIoremap {
+pub struct EarlyIoremap {
     lifecycle: Lifecycle,
 }
 
 impl EarlyIoremap {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
     }
 
-    fn setup(&mut self, fix_map: &FixMap) -> EventResult {
+    pub fn setup(&mut self, fix_map: &FixMap) -> EventResult {
         if fix_map.state() != State::Ready {
             return EventResult::failed_condition(
                 LifecycleEvent::Setup,
@@ -533,7 +386,7 @@ impl EarlyIoremap {
         )
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 }
@@ -543,7 +396,7 @@ pub struct Sbi {
 }
 
 impl Sbi {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
@@ -553,7 +406,7 @@ impl Sbi {
         self.lifecycle.state()
     }
 
-    fn setup(&mut self) -> EventResult {
+    pub fn setup(&mut self) -> EventResult {
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -563,22 +416,22 @@ impl Sbi {
     }
 }
 
-struct KernelParam {
+pub struct KernelParam {
     lifecycle: Lifecycle,
 }
 
 impl KernelParam {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
         }
     }
 
-    fn state(&self) -> State {
+    pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 
-    fn setup(&mut self, kernel_cmdline: &KernelCmdline, sbi: &Sbi) -> EventResult {
+    pub fn setup(&mut self, kernel_cmdline: &KernelCmdline, sbi: &Sbi) -> EventResult {
         if kernel_cmdline.state() != State::Ready
             || sbi.state() != State::Ready
             || !printk::is_prepared()
@@ -621,7 +474,7 @@ pub struct MemBlock {
 }
 
 impl MemBlock {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             usable: PhysRangeSet::empty(),
@@ -637,7 +490,7 @@ impl MemBlock {
         &self.usable
     }
 
-    fn preset(
+    pub fn preset(
         &mut self,
         early_dtb: &EarlyDtb,
         physical_memory: &PhysicalMemory,
@@ -664,7 +517,7 @@ impl MemBlock {
         )
     }
 
-    fn setup(
+    pub fn setup(
         &mut self,
         early_dtb: &EarlyDtb,
         kernel_image: &KernelImage,
@@ -708,7 +561,7 @@ impl MemBlock {
         )
     }
 
-    fn enable(&mut self, vm_state: State) -> EventResult {
+    pub fn enable(&mut self, vm_state: State) -> EventResult {
         if vm_state != State::Online {
             return EventResult::failed_condition(
                 LifecycleEvent::Enable,

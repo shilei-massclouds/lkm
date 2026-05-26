@@ -8,11 +8,8 @@ use core::sync::atomic::AtomicU8;
 static PREPARE_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn adopt_head_prefix(boot_args: &BootArgs) -> EventResult {
-    if boot_args.state() != State::Online
-        || !crate::context::context_ref()
-            .entry_prelude
-            .prepare_inputs_ready()
-    {
+    let ctx = crate::context::context_ref();
+    if boot_args.state() != State::Online || !prepare_inputs_ready(ctx) {
         return EventResult::failed_condition(
             LifecycleEvent::Setup,
             crate::phases::state::load(&PREPARE_PHASE_STATE),
@@ -41,4 +38,12 @@ pub fn adopt_head_prefix(boot_args: &BootArgs) -> EventResult {
 
 pub fn is_online() -> bool {
     crate::phases::state::load(&PREPARE_PHASE_STATE) == State::Online
+}
+
+fn prepare_inputs_ready(ctx: &crate::context::Context) -> bool {
+    ctx.config.entry_prelude_ready()
+        && ctx.lds.state() == State::Online
+        && ctx.lds.entry_layout_ready()
+        && ctx.static_objects.state() == State::Online
+        && ctx.static_objects.storage_ready(&ctx.config)
 }

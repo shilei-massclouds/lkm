@@ -1,15 +1,72 @@
-use crate::objects::{entry_prelude::EntryPreludeObjects, entry_successor::EntrySuccessorObjects};
+use crate::objects::{
+    config::Config,
+    entry_prelude::{
+        CpuGroup, EventStream, InitStack, InitTask, InterruptStream, KernelImage, Lds, RootStream,
+    },
+    entry_successor::{
+        CpuIdMap, EarlyDtb, EarlyIoremap, InitMm, KernelCmdline, KernelParam, MemBlock,
+        PhysicalMemory, PlatformCpuInfo, Sbi,
+    },
+    fix_map::FixMap,
+    raw_dtb::RawDtb,
+    static_objects::StaticObjects,
+    vm::Vm,
+};
 
 pub struct Context {
-    pub entry_prelude: EntryPreludeObjects,
-    pub entry_successor: EntrySuccessorObjects,
+    pub config: Config,
+    pub static_objects: StaticObjects,
+    pub lds: Lds,
+
+    pub interrupt_stream: InterruptStream,
+    pub kernel_image: KernelImage,
+    pub root_stream: RootStream,
+    pub cpu_group: CpuGroup,
+    pub init_task: InitTask,
+    pub init_stack: InitStack,
+    pub event_stream: EventStream,
+    pub vm: Vm,
+    pub raw_dtb: RawDtb,
+    pub fix_map: FixMap,
+
+    pub early_dtb: EarlyDtb,
+    pub platform_cpu_info: PlatformCpuInfo,
+    pub physical_memory: PhysicalMemory,
+    pub cpu_id_map: CpuIdMap,
+    pub kernel_cmdline: KernelCmdline,
+    pub init_mm: InitMm,
+    pub early_ioremap: EarlyIoremap,
+    pub sbi: Sbi,
+    pub kernel_param: KernelParam,
+    pub memblock: MemBlock,
 }
 
 impl Context {
     pub const fn new() -> Self {
         Self {
-            entry_prelude: EntryPreludeObjects::new(),
-            entry_successor: EntrySuccessorObjects::new(),
+            config: Config::new(),
+            static_objects: StaticObjects::new(),
+            lds: Lds::new(),
+            interrupt_stream: InterruptStream::new(),
+            kernel_image: KernelImage::new(),
+            root_stream: RootStream::new(),
+            cpu_group: CpuGroup::new(),
+            init_task: InitTask::new(),
+            init_stack: InitStack::new(),
+            event_stream: EventStream::new(),
+            vm: Vm::new(),
+            raw_dtb: RawDtb::new(),
+            fix_map: FixMap::new(),
+            early_dtb: EarlyDtb::new(),
+            platform_cpu_info: PlatformCpuInfo::new(),
+            physical_memory: PhysicalMemory::new(),
+            cpu_id_map: CpuIdMap::new(),
+            kernel_cmdline: KernelCmdline::new(),
+            init_mm: InitMm::new(),
+            early_ioremap: EarlyIoremap::new(),
+            sbi: Sbi::new(),
+            kernel_param: KernelParam::new(),
+            memblock: MemBlock::new(),
         }
     }
 }
