@@ -2,6 +2,7 @@
 #![no_main]
 
 mod arch;
+mod context;
 mod objects;
 mod phases;
 mod trace;

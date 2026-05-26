@@ -1,6 +1,5 @@
 use crate::objects::{
     boot_args::BootArgs,
-    entry_prelude::EntryPreludeObjects,
     state::{EventResult, LifecycleEvent, State},
 };
 use core::sync::atomic::AtomicU8;
@@ -9,7 +8,11 @@ use core::sync::atomic::AtomicU8;
 static PREPARE_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn adopt_head_prefix(boot_args: &BootArgs) -> EventResult {
-    if boot_args.state() != State::Online || !entry_prelude_objects().prepare_inputs_ready() {
+    if boot_args.state() != State::Online
+        || !crate::context::context_ref()
+            .entry_prelude
+            .prepare_inputs_ready()
+    {
         return EventResult::failed_condition(
             LifecycleEvent::Setup,
             crate::phases::state::load(&PREPARE_PHASE_STATE),
@@ -38,8 +41,4 @@ pub fn adopt_head_prefix(boot_args: &BootArgs) -> EventResult {
 
 pub fn is_online() -> bool {
     crate::phases::state::load(&PREPARE_PHASE_STATE) == State::Online
-}
-
-fn entry_prelude_objects() -> &'static EntryPreludeObjects {
-    crate::phases::boot::entry_prelude::objects_ref()
 }
