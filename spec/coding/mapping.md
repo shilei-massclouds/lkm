@@ -25,7 +25,7 @@
 
 `startup-timeline` 对应 `main.rs`。`main.rs` 是最顶层启动时间线的承载点，负责建立最小入口边界，并组织一级 Phase 对象的过程调用。它不应吸收普通资源对象的状态和事件实现；这些实现应下沉到 `objects/` 或相应 Phase 过程调用的对象方法中。
 
-Phase 对象对应过程式代码。各级 Phase 对象应按规格中的包含关系放入 `phases/` 下的相应层次，例如 `BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase` 分别形成清晰的过程边界。Phase 源码可以是函数和 module，不需要为了形式对应而创建无实际状态职责的 Rust `struct`。
+Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中的包含关系放入 `phases/` 下的相应层次，例如 `BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase` 分别形成清晰的过程边界。Phase 源码只生成函数和 module，不生成资源对象式 `struct + impl`，也不生成普通对象式 `Lifecycle` 状态机。
 
 资源对象和其它非 Phase 对象对应面向对象风格的 Rust 代码，默认形态是 `struct + impl methods`。原则上每个规格对象应有一个独立 `.rs` 文件；文件数量增加后，应优先按对象类别建立目录层级，例如 CPU、内存、启动参数、平台、输出、地址空间等，而不是按 Phase 分类。Phase 过程可以持有上下文或对象集合，但这种 context carrier 不等同于规格中的资源对象，不能替代资源对象自身的状态和事件边界。
 
@@ -33,13 +33,23 @@ Phase 对象对应过程式代码。各级 Phase 对象应按规格中的包含�
 
 Phase 对象表示阶段或子阶段的编排边界，例如 `PreparePhase`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`。
 
-Phase 对象在源码中不强制对应 Rust `struct`。默认实现方式是函数、module 或 runtime 编排过程，例如：
+Phase 对象在源码中不得对应资源对象式 Rust `struct`。默认实现方式是函数和 module，例如：
 
 - `entry_prelude_phase_setup(...)`
+- `entry_prelude_phase_handoff(...)`
 - `entry_successor_phase_setup(...)`
+- `entry_successor_phase_handoff(...)`
 - `boot_phase_setup(...)`
 
-Phase 过程的主要职责是按规格中的 `drives` 顺序调用普通对象的生命周期事件。Phase 过程本身应保留可观测的起止边界，但不应为了满足形式上的对象对应而引入无实际职责的 struct。
+每个 Phase 对象在 coding 阶段默认生成 `setup()` 和 `handoff()` 两个过程函数。`handoff()` 是 Phase coding 中对模型 `cleanup` 的本地别名，表达“本阶段退出服务并移交控制权”。若模型中显式定义了该 Phase 的 `cleanup`，则 `handoff()` 的前半段必须实现对应动作、检查和 checkpoint；若模型没有显式 `cleanup`，则 `handoff()` 只负责移交执行权。
+
+Phase 的 `setup()` 负责本阶段主体推进。除准备期等明确例外外，`setup()` 成功完成本阶段目标后，最后一步必须调用本 Phase 的 `handoff()`。同一层级内，前一个 Phase 的 `handoff()` 调用下一个兄弟 Phase 的 `setup()`；若当前 Phase 是本层级最后一个阶段，则调用父 Phase 的 `setup()` 或父 Phase 的完成确认过程。父 Phase 是子 Phase 顺序的组织者和规格来源，但 coding 中不应简单生成“父 Phase 直接逐个调用子 Phase”的控制流。
+
+Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象的生命周期事件，并在阶段边界调用模型边界检查函数。Phase 自身的 `depends_on`、`ensures` 和 `invariant` 应转化为显式 checkpoint/check 函数；这些函数先检查对应事实，成功后才发出 trace checkpoint。Phase checkpoint 是模型状态边界函数，不只是日志 hook。
+
+为了支持阶段 invariant、父阶段完成确认和未来状态差分，可以为每个 Phase 设置轻量的全局状态记录变量。该变量只记录 `Base`、`Ready`、`Destroyed` 等模型边界状态，不负责事件合法性推进，也不替代资源对象的 `Lifecycle`。Phase 的事件唯一性和顺序约束由生成出的 `setup()/handoff()` 调用结构、检查器和测试共同保证。
+
+`PreparePhase` 表示入口前已经形成的准备边界，当前 coding 中作为明确例外处理。它可以生成准备事实的检查或发布函数，但不强制生成普通 Phase 的 `setup()/handoff()` 链。`PreparePhase.Enable` 的代码映射另行讨论，不应影响普通 Phase 的生成规则。
 
 ### ArceOS/Unikernel 引导边界
 

@@ -1,9 +1,7 @@
-use crate::{
-    objects::{
-        boot_args::BootArgs,
-        entry_prelude::EntryPreludeObjects,
-        state::{EventResult, Lifecycle, LifecycleEvent, State},
-    },
+use crate::objects::{
+    boot_args::BootArgs,
+    entry_prelude::EntryPreludeObjects,
+    state::{EventResult, Lifecycle, LifecycleEvent, State},
 };
 
 #[unsafe(link_section = ".data.phase")]

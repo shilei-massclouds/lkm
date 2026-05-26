@@ -67,7 +67,6 @@ impl EarlyCon {
         }
         result
     }
-
 }
 
 #[allow(dead_code)]
@@ -93,4 +92,8 @@ pub fn enable() -> EventResult {
 #[allow(dead_code)]
 pub fn drain_printk() {
     printk::drain_to(sbi::putchar);
+}
+
+pub fn is_online() -> bool {
+    unsafe { (&raw const EARLY_CON).as_ref().unwrap().lifecycle.state() == State::Online }
 }

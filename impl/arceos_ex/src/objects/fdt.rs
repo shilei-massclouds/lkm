@@ -319,7 +319,8 @@ impl Parser {
                 }
                 FDT_PROP => {
                     let len = read_be_u32(cursor, self.header.struct_end)? as usize;
-                    let nameoff = read_be_u32(cursor.checked_add(4)?, self.header.struct_end)? as usize;
+                    let nameoff =
+                        read_be_u32(cursor.checked_add(4)?, self.header.struct_end)? as usize;
                     let value = cursor.checked_add(8)?;
                     let value_end = value.checked_add(len)?;
                     if value_end > self.header.struct_end {
@@ -391,7 +392,9 @@ impl Parser {
             }
         } else if kind == NodeKind::Chosen {
             if self.prop_name_eq(nameoff, b"bootargs")? {
-                self.facts.cmdline.copy_from(value, len, self.header.struct_end)?;
+                self.facts
+                    .cmdline
+                    .copy_from(value, len, self.header.struct_end)?;
             }
         } else if kind == NodeKind::ReservedMemory {
             if self.prop_name_eq(nameoff, b"#address-cells")? && len >= 4 {
@@ -443,7 +446,11 @@ impl Parser {
         let mut offset = 0;
         while offset < len {
             let (start, next) = read_cells(value.checked_add(offset)?, len - offset, addr_cells)?;
-            let (size, _) = read_cells(value.checked_add(offset)?.checked_add(next)?, len - offset - next, size_cells)?;
+            let (size, _) = read_cells(
+                value.checked_add(offset)?.checked_add(next)?,
+                len - offset - next,
+                size_cells,
+            )?;
             if size != 0 {
                 let start = start as usize;
                 let end = start.checked_add(size as usize)?;

@@ -8,7 +8,7 @@ use super::{
     raw_dtb::{PhysRange, RawDtb},
     state::{EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::{self, Checkpoint};
+use crate::trace::Checkpoint;
 
 pub struct EntrySuccessorObjects {
     early_dtb: EarlyDtb,
@@ -40,13 +40,6 @@ impl EntrySuccessorObjects {
     }
 
     pub fn setup(&mut self, entry_prelude: &mut EntryPreludeObjects) -> EventResult {
-        trace::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
-
-        let result = entry_prelude.cleanup_entry_prelude_phase();
-        if !result.is_success() {
-            return result;
-        }
-
         let result = entry_prelude.init_stack_enable();
         if !result.is_success() {
             return result;
@@ -73,8 +66,8 @@ impl EntrySuccessorObjects {
             return result;
         }
 
-        let result =
-            entry_prelude.boot_cpu_setup(self.platform_cpu_info.contains(entry_prelude.boot_hartid()));
+        let result = entry_prelude
+            .boot_cpu_setup(self.platform_cpu_info.contains(entry_prelude.boot_hartid()));
         if !result.is_success() {
             return result;
         }
@@ -147,8 +140,25 @@ impl EntrySuccessorObjects {
             return result;
         }
 
-        trace::checkpoint(Checkpoint::EntrySuccessorPhaseReady);
         EventResult::Success
+    }
+
+    pub fn entry_successor_phase_ready(&self, entry_prelude: &EntryPreludeObjects) -> bool {
+        entry_prelude.init_stack_state() == State::Online
+            && entry_prelude.boot_cpu_state() == State::Online
+            && entry_prelude.interrupt_stream_state() == State::Ready
+            && entry_prelude.vm_state() == State::Online
+            && entry_prelude.vm_entry_successor_ready()
+            && self.cpu_id_map.state() == State::Ready
+            && printk::is_prepared()
+            && self.early_dtb.state() == State::Destroyed
+            && self.kernel_cmdline.state() == State::Ready
+            && self.init_mm.state() == State::Ready
+            && self.early_ioremap.state() == State::Ready
+            && self.sbi.state() == State::Ready
+            && self.kernel_param.state() == State::Ready
+            && earlycon::is_online()
+            && self.memblock.state() == State::Online
     }
 }
 
@@ -407,6 +417,10 @@ impl CpuIdMap {
             Checkpoint::CpuIdMapReady,
         )
     }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
+    }
 }
 
 struct KernelCmdline {
@@ -484,6 +498,10 @@ impl InitMm {
             Checkpoint::InitMmReady,
         )
     }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
+    }
 }
 
 struct EarlyIoremap {
@@ -513,6 +531,10 @@ impl EarlyIoremap {
             State::Ready,
             Checkpoint::EarlyIoremapReady,
         )
+    }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
     }
 }
 
@@ -663,7 +685,9 @@ impl MemBlock {
             || raw_dtb.state() != State::Ready
             || config.state() != State::Online
             || physical_memory.state() != State::Online
-            || !self.usable.contains_range(PhysRange::new(kernel_start, kernel_end))
+            || !self
+                .usable
+                .contains_range(PhysRange::new(kernel_start, kernel_end))
             || !self.usable.contains_range(raw_dtb.range())
         {
             return self.failed_setup();

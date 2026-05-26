@@ -1,11 +1,52 @@
-use crate::objects::{
-    entry_prelude::EntryPreludeObjects, entry_successor::EntrySuccessorObjects,
-    state::EventResult,
+use crate::{
+    objects::{
+        entry_prelude::EntryPreludeObjects,
+        entry_successor::EntrySuccessorObjects,
+        state::{EventResult, LifecycleEvent, State},
+    },
+    trace::Checkpoint,
 };
+use core::sync::atomic::AtomicU8;
 
-pub fn setup(
-    objects: &mut EntrySuccessorObjects,
-    entry_prelude: &mut EntryPreludeObjects,
+static ENTRY_SUCCESSOR_PHASE_STATE: AtomicU8 =
+    AtomicU8::new(crate::phases::state::encode(State::Base));
+
+pub fn setup(objects: &mut EntrySuccessorObjects, entry_prelude: &mut EntryPreludeObjects) -> ! {
+    crate::trace::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
+    require(objects.setup(entry_prelude));
+    require(checkpoint_ready(objects, entry_prelude));
+    handoff()
+}
+
+fn handoff() -> ! {
+    crate::phases::boot::setup_after_children()
+}
+
+fn checkpoint_ready(
+    objects: &EntrySuccessorObjects,
+    entry_prelude: &EntryPreludeObjects,
 ) -> EventResult {
-    objects.setup(entry_prelude)
+    if !objects.entry_successor_phase_ready(entry_prelude) {
+        return EventResult::failed_condition(
+            LifecycleEvent::Setup,
+            crate::phases::state::load(&ENTRY_SUCCESSOR_PHASE_STATE),
+            State::Base,
+            State::Ready,
+        );
+    }
+
+    crate::phases::state::mark(
+        &ENTRY_SUCCESSOR_PHASE_STATE,
+        LifecycleEvent::Setup,
+        State::Base,
+        State::Ready,
+        Checkpoint::EntrySuccessorPhaseReady,
+    )
+}
+
+fn require(result: EventResult) {
+    if !result.is_success() {
+        crate::arch::riscv64::sbi::putstr("arceos_ex entry successor event failed\n");
+        crate::arch::riscv64::sbi::system_shutdown()
+    }
 }

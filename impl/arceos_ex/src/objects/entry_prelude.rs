@@ -161,8 +161,21 @@ impl EntryPreludeObjects {
         Soc::preset()
     }
 
+    pub fn entry_prelude_phase_ready(&self) -> bool {
+        self.root_stream.state() == State::Prepared
+            && self.interrupt_stream.state() == State::Prepared
+            && self.event_stream.state() == State::Online
+            && self.kernel_image.state() == State::Online
+            && self.raw_dtb.state() == State::Ready
+            && self.init_task.state() == State::Online
+            && self.init_stack.state() == State::Ready
+            && self.vm.state() == State::Ready
+            && self.vm.entry_prelude_ready()
+            && self.cpu_group.state() == State::Prepared
+            && self.cpu_group.boot_cpu_state() == State::Prepared
+    }
+
     pub fn cleanup_entry_prelude_phase(&mut self) -> EventResult {
-        crate::trace::checkpoint(Checkpoint::EntryPreludePhaseDestroyed);
         EventResult::Success
     }
 
@@ -214,6 +227,22 @@ impl EntryPreludeObjects {
 
     pub fn vm_state(&self) -> State {
         self.vm.state()
+    }
+
+    pub fn vm_entry_successor_ready(&self) -> bool {
+        self.vm.entry_successor_ready()
+    }
+
+    pub fn init_stack_state(&self) -> State {
+        self.init_stack.state()
+    }
+
+    pub fn boot_cpu_state(&self) -> State {
+        self.cpu_group.boot_cpu_state()
+    }
+
+    pub fn interrupt_stream_state(&self) -> State {
+        self.interrupt_stream.state()
     }
 
     pub fn prepare_inputs_ready(&self) -> bool {
@@ -344,7 +373,12 @@ impl InterruptStream {
             );
         }
 
-        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+    }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
     }
 
     fn setup(&mut self) -> EventResult {
@@ -394,7 +428,8 @@ impl KernelImage {
             );
         }
 
-        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn adopt_head_setup(&mut self, config: &Config, lds: &Lds) -> EventResult {
@@ -407,7 +442,8 @@ impl KernelImage {
             );
         }
 
-        self.lifecycle.adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
     pub fn enable(&mut self, lds: &Lds) -> EventResult {
@@ -450,7 +486,12 @@ impl RootStream {
             );
         }
 
-        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+    }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
     }
 }
 
@@ -479,7 +520,8 @@ impl BootCpu {
         }
 
         self.hartid = head_hartid;
-        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn setup(&mut self, boot_hartid_valid: bool) -> EventResult {
@@ -508,6 +550,10 @@ impl BootCpu {
             Checkpoint::BootCpuOnline,
         )
     }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
+    }
 }
 
 pub struct CpuGroup {
@@ -529,7 +575,8 @@ impl CpuGroup {
             return result;
         }
 
-        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn boot_cpu_setup(&mut self, boot_hartid_valid: bool) -> EventResult {
@@ -542,6 +589,14 @@ impl CpuGroup {
 
     fn boot_hartid(&self) -> usize {
         self.boot_cpu.hartid
+    }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    fn boot_cpu_state(&self) -> State {
+        self.boot_cpu.state()
     }
 }
 
@@ -577,7 +632,8 @@ impl InitTask {
             );
         }
 
-        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn enable(&mut self, config: &Config, vm: &Vm) -> EventResult {
@@ -608,6 +664,10 @@ impl InitTask {
             State::Online,
             Checkpoint::InitTaskOnline,
         )
+    }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
     }
 }
 
@@ -646,7 +706,8 @@ impl InitStack {
             );
         }
 
-        self.lifecycle.adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
     fn setup(&mut self, vm: &Vm) -> EventResult {
@@ -674,6 +735,10 @@ impl InitStack {
             State::Online,
             Checkpoint::InitStackOnline,
         )
+    }
+
+    pub fn state(&self) -> State {
+        self.lifecycle.state()
     }
 }
 
@@ -705,6 +770,10 @@ impl EventStream {
             State::Prepared,
             Checkpoint::EventStreamPrepared,
         )
+    }
+
+    fn state(&self) -> State {
+        self.lifecycle.state()
     }
 
     fn enable(&mut self, vm: &Vm, static_objects: &StaticObjects) -> EventResult {

@@ -112,9 +112,7 @@ impl Vm {
         let Some(gp_virt) = config.runtime_to_link(lds.global_pointer()) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(continuation_virt) =
-            config.runtime_to_link(vm_setup_continuation as usize)
-        else {
+        let Some(continuation_virt) = config.runtime_to_link(vm_setup_continuation as usize) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
 
@@ -221,6 +219,16 @@ impl Vm {
             State::Online,
             Checkpoint::VmOnline,
         )
+    }
+
+    pub fn entry_prelude_ready(&self) -> bool {
+        self.trampoline_vm.state() == State::Destroyed && self.early_vm.state() == State::Online
+    }
+
+    pub fn entry_successor_ready(&self) -> bool {
+        self.lifecycle.state() == State::Online
+            && self.swapper_vm.state() == State::Online
+            && self.early_vm.state() == State::Destroyed
     }
 }
 

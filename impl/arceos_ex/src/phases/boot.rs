@@ -3,13 +3,13 @@ use crate::{
         boot_args::BootArgs,
         entry_prelude::EntryPreludeObjects,
         entry_successor::EntrySuccessorObjects,
-        state::{EventResult, Lifecycle, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
 };
+use core::sync::atomic::AtomicU8;
 
-#[unsafe(link_section = ".data.phase")]
-static mut BOOT_PHASE: Lifecycle = Lifecycle::new(State::Base);
+static BOOT_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 static mut ENTRY_PRELUDE: EntryPreludeObjects = EntryPreludeObjects::new();
 static mut ENTRY_SUCCESSOR: EntrySuccessorObjects = EntrySuccessorObjects::new();
 
@@ -21,17 +21,21 @@ pub fn setup_after_head_prefix(boot_args: &BootArgs) -> ! {
 pub fn after_vm_setup_continuation() -> ! {
     let entry_prelude = entry_prelude_objects();
     require(crate::phases::entry_prelude::after_vm_setup(entry_prelude));
-    let entry_successor = entry_successor_objects();
-    require(crate::phases::entry_successor::setup(
-        entry_successor,
-        entry_prelude,
-    ));
-    require(boot_phase().transition(
+    crate::phases::entry_prelude::handoff(entry_prelude)
+}
+
+pub fn setup_after_children() -> ! {
+    require(crate::phases::state::mark(
+        &BOOT_PHASE_STATE,
         LifecycleEvent::Setup,
         State::Base,
         State::Ready,
         Checkpoint::BootPhaseReady,
     ));
+    handoff()
+}
+
+fn handoff() -> ! {
     crate::startup_timeline_ready()
 }
 
@@ -55,17 +59,11 @@ pub fn entry_prelude_objects_ref() -> &'static EntryPreludeObjects {
     unsafe { &*core::ptr::addr_of!(ENTRY_PRELUDE) }
 }
 
-fn entry_successor_objects() -> &'static mut EntrySuccessorObjects {
+pub fn entry_successor_objects() -> &'static mut EntrySuccessorObjects {
     // SAFETY: same boot-exclusive context as ENTRY_PRELUDE.
     unsafe { &mut *core::ptr::addr_of_mut!(ENTRY_SUCCESSOR) }
 }
 
-fn boot_phase() -> &'static mut Lifecycle {
-    // SAFETY: early boot is single-hart and phase state is only mutated by the
-    // startup timeline in specification order.
-    unsafe { &mut *core::ptr::addr_of_mut!(BOOT_PHASE) }
-}
-
 pub fn is_ready() -> bool {
-    boot_phase().state() == State::Ready
+    crate::phases::state::load(&BOOT_PHASE_STATE) == State::Ready
 }

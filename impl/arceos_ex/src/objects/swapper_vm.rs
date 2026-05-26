@@ -47,8 +47,12 @@ impl SwapperVm {
             );
         }
 
-        if !static_objects.build_swapper_pg_dir(config, lds.kernel_start(), lds.kernel_end(), memblock)
-        {
+        if !static_objects.build_swapper_pg_dir(
+            config,
+            lds.kernel_start(),
+            lds.kernel_end(),
+            memblock,
+        ) {
             return EventResult::failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

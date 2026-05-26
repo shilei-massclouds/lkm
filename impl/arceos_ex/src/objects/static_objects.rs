@@ -1,7 +1,7 @@
 use super::{
     config::Config,
-    fix_map::FixMap,
     entry_successor::MemBlock,
+    fix_map::FixMap,
     raw_dtb::RawDtb,
     state::{Lifecycle, State},
 };
@@ -439,11 +439,17 @@ fn swapper_pg_dir_addr(config: &Config) -> usize {
 }
 
 fn swapper_kernel_pg_table_addr(config: &Config) -> usize {
-    runtime_addr(config, core::ptr::addr_of!(SWAPPER_KERNEL_PG_TABLE) as usize)
+    runtime_addr(
+        config,
+        core::ptr::addr_of!(SWAPPER_KERNEL_PG_TABLE) as usize,
+    )
 }
 
 fn swapper_linear_pg_tables_addr(config: &Config) -> usize {
-    runtime_addr(config, core::ptr::addr_of!(SWAPPER_LINEAR_PG_TABLES) as usize)
+    runtime_addr(
+        config,
+        core::ptr::addr_of!(SWAPPER_LINEAR_PG_TABLES) as usize,
+    )
 }
 
 fn runtime_addr(config: &Config, link_addr: usize) -> usize {
@@ -517,8 +523,12 @@ fn swapper_kernel_pg_table_mut(config: &Config) -> &'static mut PageTablePage {
     unsafe { &mut *(swapper_kernel_pg_table_addr(config) as *mut PageTablePage) }
 }
 
-fn swapper_linear_pg_tables_mut(config: &Config) -> &'static mut [PageTablePage; SWAPPER_L1_TABLES] {
-    unsafe { &mut *(swapper_linear_pg_tables_addr(config) as *mut [PageTablePage; SWAPPER_L1_TABLES]) }
+fn swapper_linear_pg_tables_mut(
+    config: &Config,
+) -> &'static mut [PageTablePage; SWAPPER_L1_TABLES] {
+    unsafe {
+        &mut *(swapper_linear_pg_tables_addr(config) as *mut [PageTablePage; SWAPPER_L1_TABLES])
+    }
 }
 
 static mut TRAMPOLINE_PG_DIR: PageTablePage = PageTablePage::zeroed();
