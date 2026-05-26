@@ -20,6 +20,7 @@ predicate coding_must_phase_dfs_generation() -> bool;
 predicate coding_must_phase_not_resource_lifecycle() -> bool;
 predicate coding_must_keep_event_boundaries() -> bool;
 predicate coding_must_check_before_checkpoint() -> bool;
+predicate coding_must_checkpoint_owner_matches_event() -> bool;
 predicate coding_must_record_exceptions() -> bool;
 predicate coding_must_run_verification_gates() -> bool;
 
@@ -141,6 +142,18 @@ type CodingMappingMust {
          * the fact as an established dependency.
          */
         coding_must_check_before_checkpoint();
+
+        /*
+         * Checkpoint ownership:
+         *
+         * A checkpoint may only be emitted by the mapped implementation of the
+         * object event or phase boundary whose fact it reports. A lower-level
+         * phase, resource object, assembly entry point or continuation must not
+         * emit synthetic checkpoints for parent phases, sibling phases,
+         * preparation phases or other objects merely to make the runtime trace
+         * visually match the derived trace.
+         */
+        coding_must_checkpoint_owner_matches_event();
 
         /*
          * Explicit exceptions:

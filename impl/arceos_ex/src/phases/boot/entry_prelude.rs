@@ -20,10 +20,6 @@ const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
 #[cfg(checkpoint_sbi_char)]
 const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 
-const TRACE_ENTRY_OPEN: usize = b'[' as usize;
-const TRACE_EVENT_OPEN: usize = b'{' as usize;
-const TRACE_EVENT_CLOSE: usize = b'}' as usize;
-const TRACE_PHASE_OPEN: usize = b'(' as usize;
 const TRACE_ADOPT_BEGIN: usize = b'A' as usize;
 const TRACE_INTERRUPT_PRESET: usize = b'I' as usize;
 const TRACE_KERNEL_IMAGE_PRESET: usize = b'K' as usize;
@@ -67,14 +63,6 @@ _start:
      * CPU group input, install the init task pointer, and create the initial
      * stack.  The Rust segment below continues the same setup() event.
      */
-    li a0, {trace_entry_open}
-    call {head_checkpoint}
-    li a0, {trace_event_open}
-    call {head_checkpoint}
-    li a0, {trace_event_close}
-    call {head_checkpoint}
-    li a0, {trace_phase_open}
-    call {head_checkpoint}
     li a0, {trace_adopt_begin}
     call {head_checkpoint}
 
@@ -149,14 +137,10 @@ _start:
     trace_boot_cpu_preset = const TRACE_BOOT_CPU_PRESET,
     trace_bss_zeroed = const TRACE_BSS_ZEROED,
     trace_cpu_group_preset = const TRACE_CPU_GROUP_PRESET,
-    trace_entry_open = const TRACE_ENTRY_OPEN,
-    trace_event_close = const TRACE_EVENT_CLOSE,
-    trace_event_open = const TRACE_EVENT_OPEN,
     trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
     trace_init_task_preset = const TRACE_INIT_TASK_PRESET,
     trace_interrupt_preset = const TRACE_INTERRUPT_PRESET,
     trace_kernel_image_preset = const TRACE_KERNEL_IMAGE_PRESET,
-    trace_phase_open = const TRACE_PHASE_OPEN,
     trace_root_stream_preset = const TRACE_ROOT_STREAM_PRESET,
 );
 
