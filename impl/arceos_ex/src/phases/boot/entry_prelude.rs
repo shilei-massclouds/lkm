@@ -15,11 +15,47 @@ use crate::{
 static ENTRY_PRELUDE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
+const HEAD_TEXT_ALIGN: usize = 2;
+const BOOT_STACK_ALIGN: usize = 12;
+const BOOT_STACK_SIZE: usize = 4096 * 4;
+const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
+#[cfg(checkpoint_sbi_char)]
+const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
+
+const TRACE_ENTRY_OPEN: usize = b'[' as usize;
+const TRACE_EVENT_OPEN: usize = b'{' as usize;
+const TRACE_EVENT_CLOSE: usize = b'}' as usize;
+const TRACE_PHASE_OPEN: usize = b'(' as usize;
+const TRACE_ADOPT_BEGIN: usize = b'A' as usize;
+const TRACE_INTERRUPT_PRESET: usize = b'I' as usize;
+const TRACE_KERNEL_IMAGE_PRESET: usize = b'K' as usize;
+const TRACE_ROOT_STREAM_PRESET: usize = b'O' as usize;
+const TRACE_BSS_ZEROED: usize = b'Z' as usize;
+const TRACE_BOOT_CPU_PRESET: usize = b'H' as usize;
+const TRACE_CPU_GROUP_PRESET: usize = b'G' as usize;
+const TRACE_INIT_TASK_PRESET: usize = b'T' as usize;
+const TRACE_INIT_STACK_PRESET: usize = b'S' as usize;
+
+#[repr(C, align(8))]
+struct HeadHandoffWord(usize);
+
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut head_boot_hartid: HeadHandoffWord = HeadHandoffWord(0);
+
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".head.handoff")]
+static mut head_init_stack_sp: HeadHandoffWord = HeadHandoffWord(0);
+
 global_asm!(
     r#"
     .section .head.text.entry, "ax"
+    .align {head_text_align}
     .globl _start
 _start:
+    # Preserve OpenSBI boot arguments while the head segment rewrites a0.
     mv s0, a0
     mv s1, a1
 
@@ -33,34 +69,38 @@ _start:
      * CPU group input, install the init task pointer, and create the initial
      * stack.  The Rust segment below continues the same setup() event.
      */
-    li a0, '['
-    call arceos_ex_head_checkpoint
-    li a0, 123
-    call arceos_ex_head_checkpoint
-    li a0, 125
-    call arceos_ex_head_checkpoint
-    li a0, '('
-    call arceos_ex_head_checkpoint
-    li a0, 'A'
-    call arceos_ex_head_checkpoint
+    li a0, {trace_entry_open}
+    call {head_checkpoint}
+    li a0, {trace_event_open}
+    call {head_checkpoint}
+    li a0, {trace_event_close}
+    call {head_checkpoint}
+    li a0, {trace_phase_open}
+    call {head_checkpoint}
+    li a0, {trace_adopt_begin}
+    call {head_checkpoint}
 
+    # InterruptStream.Preset: S-mode interrupt pending/enabled state is closed.
     csrw sie, zero
     csrw sip, zero
-    li a0, 'I'
-    call arceos_ex_head_checkpoint
+    li a0, {trace_interrupt_preset}
+    call {head_checkpoint}
 
+    # KernelImage.Preset: establish gp before accessing small data.
     .option push
     .option norelax
     la gp, __global_pointer$
     .option pop
-    li a0, 'K'
-    call arceos_ex_head_checkpoint
+    li a0, {trace_kernel_image_preset}
+    call {head_checkpoint}
 
-    li t0, (0b11 << 9) | (0b11 << 13)
+    # RootStream.Preset: disable kernel FPU/vector use in sstatus.
+    li t0, {sstatus_fpu_vector_mask}
     csrrc zero, sstatus, t0
-    li a0, 'O'
-    call arceos_ex_head_checkpoint
+    li a0, {trace_root_stream_preset}
+    call {head_checkpoint}
 
+    # KernelImage.Setup: clear BSS before Rust observes static storage.
     la t0, _sbss
     la t1, _ebss
 1:
@@ -69,69 +109,82 @@ _start:
     addi t0, t0, 8
     j 1b
 2:
-    li a0, 'Z'
-    call arceos_ex_head_checkpoint
+    li a0, {trace_bss_zeroed}
+    call {head_checkpoint}
 
-    la t0, head_boot_hartid
+    # CpuGroup.Preset: publish the boot hart id for Rust-side adoption.
+    la t0, {head_boot_hartid}
     sd s0, 0(t0)
-    li a0, 'H'
-    call arceos_ex_head_checkpoint
-    li a0, 'G'
-    call arceos_ex_head_checkpoint
+    li a0, {trace_boot_cpu_preset}
+    call {head_checkpoint}
+    li a0, {trace_cpu_group_preset}
+    call {head_checkpoint}
 
-    la tp, init_task_storage
-    li a0, 'T'
-    call arceos_ex_head_checkpoint
+    # InitTask.Preset: install the init task pointer in tp.
+    la tp, {init_task_storage}
+    li a0, {trace_init_task_preset}
+    call {head_checkpoint}
 
+    # InitStack.Preset: reserve temporary page-table space on the boot stack.
     la sp, init_stack_end
-    addi sp, sp, -256
-    la t0, head_init_stack_sp
+    addi sp, sp, -{pt_size_on_stack}
+    la t0, {head_init_stack_sp}
     sd sp, 0(t0)
-    li a0, 'S'
-    call arceos_ex_head_checkpoint
+    li a0, {trace_init_stack_preset}
+    call {head_checkpoint}
 
+    # Continue EntryPreludePhase.setup() in Rust with the original boot args.
     mv a0, s0
     mv a1, s1
-    tail entry_prelude_rust_entry
+    tail {rust_entry}
 
     .section .boot.stack, "aw", @nobits
-    .align 12
-    .space 4096 * 4
-
-    .section .head.handoff, "aw", @nobits
-    .align 3
-    .globl head_boot_hartid
-head_boot_hartid:
-    .space 8
-    .globl head_init_stack_sp
-head_init_stack_sp:
-    .space 8
-"#
+    .align {boot_stack_align}
+    .space {boot_stack_size}
+"#,
+    boot_stack_align = const BOOT_STACK_ALIGN,
+    boot_stack_size = const BOOT_STACK_SIZE,
+    head_boot_hartid = sym head_boot_hartid,
+    head_checkpoint = sym arceos_ex_head_checkpoint,
+    head_init_stack_sp = sym head_init_stack_sp,
+    head_text_align = const HEAD_TEXT_ALIGN,
+    init_task_storage = sym crate::objects::entry_prelude::init_task_storage,
+    pt_size_on_stack = const crate::objects::entry_prelude::PT_SIZE_ON_STACK,
+    rust_entry = sym entry_prelude_rust_entry,
+    sstatus_fpu_vector_mask = const SSTATUS_FPU_VECTOR_MASK,
+    trace_adopt_begin = const TRACE_ADOPT_BEGIN,
+    trace_boot_cpu_preset = const TRACE_BOOT_CPU_PRESET,
+    trace_bss_zeroed = const TRACE_BSS_ZEROED,
+    trace_cpu_group_preset = const TRACE_CPU_GROUP_PRESET,
+    trace_entry_open = const TRACE_ENTRY_OPEN,
+    trace_event_close = const TRACE_EVENT_CLOSE,
+    trace_event_open = const TRACE_EVENT_OPEN,
+    trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
+    trace_init_task_preset = const TRACE_INIT_TASK_PRESET,
+    trace_interrupt_preset = const TRACE_INTERRUPT_PRESET,
+    trace_kernel_image_preset = const TRACE_KERNEL_IMAGE_PRESET,
+    trace_phase_open = const TRACE_PHASE_OPEN,
+    trace_root_stream_preset = const TRACE_ROOT_STREAM_PRESET,
 );
 
 #[cfg(checkpoint_sbi_char)]
-global_asm!(
-    r#"
-    .section .head.text.checkpoint, "ax"
-    .align 2
-    .globl arceos_ex_head_checkpoint
-arceos_ex_head_checkpoint:
-    li a7, 1
-    ecall
-    ret
-"#
-);
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn arceos_ex_head_checkpoint() {
+    core::arch::naked_asm!(
+        "li a7, {sbi_legacy_console_putchar}",
+        "ecall",
+        "ret",
+        sbi_legacy_console_putchar = const SBI_LEGACY_CONSOLE_PUTCHAR,
+    )
+}
 
 #[cfg(not(checkpoint_sbi_char))]
-global_asm!(
-    r#"
-    .section .head.text.checkpoint, "ax"
-    .align 2
-    .globl arceos_ex_head_checkpoint
-arceos_ex_head_checkpoint:
-    ret
-"#
-);
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn arceos_ex_head_checkpoint() {
+    core::arch::naked_asm!("ret")
+}
 
 #[unsafe(no_mangle)]
 extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
