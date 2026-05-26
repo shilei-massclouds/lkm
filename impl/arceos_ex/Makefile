@@ -12,6 +12,10 @@ RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
 QEMU ?= qemu-system-riscv64
 QEMU_APPEND ?= earlycon=sbi
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
+CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
+MODEL_JSON := $(ROOT)/tools/out/codegen/main.model.json
+MODEL_SPECS := $(shell find $(ROOT)/spec/model -name '*.spec')
+CODEGEN_SOURCES := $(shell find $(ROOT)/tools/codegen/src $(ROOT)/tools/common/src -name '*.py')
 EXTRA_RUSTFLAGS ?=
 
 RUSTFLAGS := \
@@ -23,9 +27,16 @@ RUSTFLAGS := \
 	-C link-arg=-static \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run clean
+.PHONY: build run generate clean
 
-build: $(KERNEL_BIN)
+build: generate $(KERNEL_BIN)
+
+generate: $(LINKER)
+
+$(LINKER): $(MODEL_SPECS) $(CODEGEN_SOURCES) Makefile
+	mkdir -p $(ROOT)/tools/out/codegen
+	$(PYVERI) $(ROOT)/spec/model/main.spec --derive --work-dir $(ROOT)/tools/out/codegen -o /dev/null
+	PYTHONPATH=$(CODEGEN_PYTHONPATH) python -m codegen_tool linker-script $(MODEL_JSON) -o $(LINKER)
 
 $(KERNEL_ELF): $(SOURCES) $(LINKER)
 	mkdir -p $(BUILD_DIR)

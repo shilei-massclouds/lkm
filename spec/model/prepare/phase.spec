@@ -225,6 +225,7 @@ object Config: PrepareObject {
         boot_stack_size: Size;
         pmd_size: Size;
         kernel_link_addr: VirtAddr<KernelImage>;
+        kernel_phys_addr: PhysAddr<KernelImage>;
         kernel_image_va_window_size: Size;
         satp_mode: SatpMode;
         fixmap: FixMapConfig;
@@ -245,7 +246,9 @@ object Config: PrepareObject {
             boot_stack_size >= page_size;
             aligned(boot_stack_size, page_size);
             kernel_link_addr != 0;
+            kernel_phys_addr != 0;
             page_aligned(kernel_link_addr);
+            page_aligned(kernel_phys_addr);
             valid_virt_addr(kernel_link_addr);
             kernel_image_va_window_size > 0;
             kernel_image_va_window_size >= pmd_size;
@@ -256,6 +259,7 @@ object Config: PrepareObject {
 
     reference linux_6_12_37 {
         kernel_link_addr = symbol("KERNEL_LINK_ADDR");
+        kernel_phys_addr = symbol("KERNEL_PHYS_ADDR");
         kernel_image_va_window_size = symbol("SZ_2G");
     }
 }
