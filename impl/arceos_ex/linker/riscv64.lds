@@ -46,9 +46,10 @@ SECTIONS
         __bss_stop = .;
     }
 
-    .boot.stack : AT(ADDR(.boot.stack) - LOAD_OFFSET) ALIGN(4K) {
+    .boot.stack (NOLOAD) : AT(ADDR(.boot.stack) - LOAD_OFFSET) ALIGN(4K) {
         init_stack_start = .;
         KEEP(*(.boot.stack))
+        . += 16K;
         . = ALIGN(4K);
         init_stack_end = .;
     }

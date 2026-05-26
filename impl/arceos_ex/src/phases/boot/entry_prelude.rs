@@ -16,8 +16,6 @@ static ENTRY_PRELUDE_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
 
 const HEAD_TEXT_ALIGN: usize = 2;
-const BOOT_STACK_ALIGN: usize = 12;
-const BOOT_STACK_SIZE: usize = 4096 * 4;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
 #[cfg(checkpoint_sbi_char)]
 const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
@@ -138,12 +136,7 @@ _start:
     mv a1, s1
     tail {rust_entry}
 
-    .section .boot.stack, "aw", @nobits
-    .align {boot_stack_align}
-    .space {boot_stack_size}
 "#,
-    boot_stack_align = const BOOT_STACK_ALIGN,
-    boot_stack_size = const BOOT_STACK_SIZE,
     head_boot_hartid = sym head_boot_hartid,
     head_checkpoint = sym arceos_ex_head_checkpoint,
     head_init_stack_sp = sym head_init_stack_sp,
