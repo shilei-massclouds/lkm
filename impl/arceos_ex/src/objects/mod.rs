@@ -9,6 +9,7 @@ pub mod earlycon;
 pub mod event_stream;
 pub mod fdt;
 pub mod fdt_facts;
+pub mod fdt_parser;
 pub mod fdt_reader;
 pub mod fix_map;
 pub mod init_mm;
