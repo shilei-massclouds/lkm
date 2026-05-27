@@ -10,6 +10,8 @@ pub mod event_stream;
 pub mod fdt;
 pub mod fix_map;
 pub mod init_mm;
+pub mod init_stack;
+pub mod init_task;
 pub mod interrupt_stream;
 pub mod kernel_cmdline;
 pub mod kernel_param;

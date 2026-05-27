@@ -109,7 +109,7 @@ impl Vm {
         };
         let Some(stack_virt) = lds.init_stack_end_phys(kernel_image).and_then(|stack_end| {
             stack_end
-                .checked_sub(super::entry_prelude::PT_SIZE_ON_STACK)
+                .checked_sub(super::init_stack::PT_SIZE_ON_STACK)
                 .and_then(|stack| kernel_image.phys_to_link(stack))
         }) else {
             crate::arch::riscv64::sbi::system_shutdown();
