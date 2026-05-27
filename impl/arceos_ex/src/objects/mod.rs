@@ -6,6 +6,7 @@ pub mod early_ioremap;
 pub mod early_vm;
 pub mod earlycon;
 pub mod entry_prelude;
+pub mod event_stream;
 pub mod fdt;
 pub mod fix_map;
 pub mod init_mm;
