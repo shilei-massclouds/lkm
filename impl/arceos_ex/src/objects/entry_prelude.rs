@@ -149,54 +149,6 @@ impl Lds {
     }
 }
 
-pub struct InterruptStream {
-    lifecycle: Lifecycle,
-}
-
-impl InterruptStream {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-        }
-    }
-
-    pub fn adopt_head_preset(&mut self) -> EventResult {
-        if csr::read_sie() != 0 || csr::read_sip() != 0 {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.lifecycle.state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
-    }
-
-    pub fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub fn setup(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Prepared {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Prepared,
-                State::Ready,
-            );
-        }
-
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Prepared,
-            State::Ready,
-            Checkpoint::InterruptStreamReady,
-        )
-    }
-}
-
 pub struct KernelImage {
     lifecycle: Lifecycle,
     phys_start: usize,
@@ -319,36 +271,6 @@ impl KernelImage {
             State::Online,
             Checkpoint::KernelImageOnline,
         )
-    }
-}
-
-pub struct RootStream {
-    lifecycle: Lifecycle,
-}
-
-impl RootStream {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-        }
-    }
-
-    pub fn adopt_head_preset(&mut self) -> EventResult {
-        if !csr::kernel_fpu_vector_disabled() {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.lifecycle.state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
-    }
-
-    pub fn state(&self) -> State {
-        self.lifecycle.state()
     }
 }
 
@@ -652,15 +574,6 @@ impl EventStream {
             State::Online,
             Checkpoint::EventStreamOnline,
         )
-    }
-}
-
-pub struct Soc;
-
-impl Soc {
-    pub fn preset() -> EventResult {
-        crate::trace::checkpoint(Checkpoint::SocPrepared);
-        Ok(())
     }
 }
 

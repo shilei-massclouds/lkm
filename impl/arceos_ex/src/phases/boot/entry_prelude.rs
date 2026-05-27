@@ -5,7 +5,7 @@ use crate::{
     context::Context,
     objects::{
         boot_args::BootArgs,
-        entry_prelude::Soc,
+        soc::Soc,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
