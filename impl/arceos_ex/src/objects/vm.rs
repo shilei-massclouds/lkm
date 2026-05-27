@@ -194,7 +194,7 @@ impl Vm {
         static_objects: &mut StaticObjects,
         lds: &Lds,
         kernel_image: &KernelImage,
-        memblock: &super::entry_successor::MemBlock,
+        memblock: &super::memblock::MemBlock,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready || self.early_vm.state() != State::Online {
             return failed_condition(

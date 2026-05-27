@@ -1,15 +1,20 @@
 use crate::objects::{
     config::Config,
+    cpu_id_map::CpuIdMap,
+    early_dtb::EarlyDtb,
+    early_ioremap::EarlyIoremap,
     entry_prelude::{
         CpuGroup, EventStream, InitStack, InitTask, InterruptStream, KernelImage, Lds, RootStream,
     },
-    entry_successor::{
-        CpuIdMap, EarlyDtb, EarlyIoremap, InitMm, KernelParam, MemBlock, PhysicalMemory,
-        PlatformCpuInfo, Sbi,
-    },
     fix_map::FixMap,
+    init_mm::InitMm,
     kernel_cmdline::KernelCmdline,
+    kernel_param::KernelParam,
+    memblock::MemBlock,
+    physical_memory::PhysicalMemory,
+    platform_cpu_info::PlatformCpuInfo,
     raw_dtb::RawDtb,
+    sbi::Sbi,
     static_objects::StaticObjects,
     vm::Vm,
 };

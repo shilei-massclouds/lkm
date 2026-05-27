@@ -1,8 +1,8 @@
 use super::{
     config::Config,
     entry_prelude::KernelImage,
-    entry_successor::MemBlock,
     fix_map::FixMap,
+    memblock::MemBlock,
     raw_dtb::RawDtb,
     state::{Lifecycle, State},
 };
