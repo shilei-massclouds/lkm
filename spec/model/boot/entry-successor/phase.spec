@@ -633,7 +633,6 @@ object EntrySuccessorPhase: PhaseObject {
                 }
 
                 deferred {
-                    "jump_label_init() 后续抽象为 StaticKey/静态分支对象。"
                     "efi_init() 后续在支持 EFI 启动路径时抽象为 FirmwareInterface/EFI 对象。"
                 }
             }

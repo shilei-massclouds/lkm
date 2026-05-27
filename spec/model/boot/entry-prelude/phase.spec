@@ -440,6 +440,8 @@ object ExceptionStream: FlowObject {
                 }
 
                 ensures {
+                    exception_stream_fallback_panic_ready(ExceptionStream);
+                    all_exceptions_covered_by_fallback(ExceptionStream);
                     exception_dispatch_ready(ExceptionStream);
                 }
             }
@@ -452,6 +454,7 @@ object ExceptionStream: FlowObject {
     state State::Ready {
         invariant {
             exception_stream_fallback_panic_ready(ExceptionStream);
+            all_exceptions_covered_by_fallback(ExceptionStream);
             exception_dispatch_ready(ExceptionStream);
         }
 
@@ -512,7 +515,7 @@ object PageFaultException: FlowObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    ExceptionStream.state == State::Prepared;
+                    ExceptionStream.state == State::Ready;
                 }
 
                 ensures {
@@ -578,7 +581,7 @@ object SyscallException: FlowObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    ExceptionStream.state == State::Prepared;
+                    ExceptionStream.state == State::Ready;
                 }
 
                 ensures {
@@ -644,7 +647,7 @@ object BreakpointException: FlowObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    ExceptionStream.state == State::Prepared;
+                    ExceptionStream.state == State::Ready;
                 }
 
                 ensures {
@@ -710,7 +713,7 @@ object UnexpectedException: FlowObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    ExceptionStream.state == State::Prepared;
+                    ExceptionStream.state == State::Ready;
                 }
 
                 ensures {
