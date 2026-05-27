@@ -82,6 +82,8 @@ pub enum Checkpoint {
     EarlyConReady,
     #[allow(dead_code)]
     EarlyConOnline,
+    PayloadPhaseReady,
+    PayloadPhaseOnline,
 }
 
 impl Checkpoint {
@@ -152,6 +154,8 @@ impl Checkpoint {
             Self::EarlyConPrepared => b'C',
             Self::EarlyConReady => b'D',
             Self::EarlyConOnline => b'E',
+            Self::PayloadPhaseReady => b'7',
+            Self::PayloadPhaseOnline => b'8',
         }
     }
 }

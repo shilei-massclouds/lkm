@@ -89,6 +89,7 @@ class ViewToolTests(unittest.TestCase):
             rows = data["metadata"]["timeline_rows"]
             self.assertTrue(any(row["phase"] == "PreparePhase" for row in rows))
             self.assertTrue(any(row["phase"] == "BootPhase" for row in rows))
+            self.assertTrue(any(row["phase"] == "PayloadPhase" for row in rows))
 
     def test_trace_view_contains_cell_layout_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

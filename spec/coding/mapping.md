@@ -56,7 +56,7 @@ Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中�
 
 ## Phase 对象
 
-Phase 对象表示阶段或子阶段的编排边界，例如 `PreparePhase`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`。
+Phase 对象表示阶段或子阶段的编排边界，例如 `PreparePhase`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`PayloadPhase`。
 
 Phase 代码生成以模型中的阶段树为输入，默认采用深度优先遍历。生成器从顶层启动对象进入第一个阶段；若该阶段不属于当前内核代码生成范围，则只生成必要的事实采纳、检查或发布边界，然后回到父层级继续处理下一个阶段。若该阶段属于当前内核代码生成范围且包含子 Phase，则递归处理其子 Phase；若该阶段没有子 Phase，则生成该叶子 Phase 的主体 `setup()` 过程。
 
@@ -80,7 +80,7 @@ Phase 的 `setup()` 负责本阶段主体推进。除准备期等明确例外外
 
 Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象的生命周期事件，并在阶段边界调用模型边界检查函数。Phase 自身的 `depends_on`、`ensures` 和 `invariant` 应转化为显式 checkpoint/check 函数；这些函数先检查对应事实，成功后才发出 trace checkpoint。Phase checkpoint 是模型状态边界函数，不只是日志 hook。
 
-为了支持阶段 invariant、父阶段完成确认和未来状态差分，可以为每个 Phase 设置轻量的全局状态记录变量。该变量只记录 `Base`、`Ready`、`Destroyed` 等模型边界状态，不负责事件合法性推进，也不替代资源对象的 `Lifecycle`。Phase 的事件唯一性和顺序约束由生成出的 `setup()/handoff()` 调用结构、检查器和测试共同保证。
+为了支持阶段 invariant、父阶段完成确认和未来状态差分，可以为每个 Phase 设置轻量的全局状态记录变量。该变量只记录 `Base`、`Ready`、`Online`、`Destroyed` 等模型边界状态，不负责事件合法性推进，也不替代资源对象的 `Lifecycle`。Phase 的事件唯一性和顺序约束由生成出的 `setup()/handoff()` 调用结构、检查器和测试共同保证。
 
 `PreparePhase` 表示入口前已经形成的准备边界，当前 coding 中作为明确例外处理。它可以生成准备事实的检查或发布函数，但不强制生成普通 Phase 的 `setup()/handoff()` 链。`PreparePhase.Enable` 的代码映射另行讨论，不应影响普通 Phase 的生成规则。
 
@@ -93,11 +93,10 @@ Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象�
 `ax-runtime-ex` 引导过程的第一部分，而不是 `ax-hal-ex` 的长期编排职责。`ax-runtime-ex`
 可以调用 `ax-hal-ex`、平台 crate 和其它组件提供的对象事件函数，但阶段编排边界应保留在 runtime 侧。
 
-`ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 开始到 `app_main` 为止的大部分内核引导过程。后续新增的内核初始化阶段、服务初始化或运行形态切换，应默认插入在
-`EntrySuccessorPhase` 与 `app_main` 之间，并继续保留模型 checkpoint。
+`ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 开始到 `PayloadPhase` 为止的大部分内核引导过程。后续新增的内核初始化阶段、服务初始化或运行形态切换，应默认插入在
+`EntrySuccessorPhase` 与 `PayloadPhase` 之间，并继续保留模型 checkpoint。
 
-在 ArceOS Unikernel 形态下，`app_main` 表示当前内核形态的引领入口，而不等同于传统操作系统的普通用户态进程入口。不同 Unikernel 应用、测试应用或未来的宏内核引导应用，都可以作为该入口的不同 payload。未来若增加宏内核形态，相关 app 可以在
-`app_main` 中完成切换到用户态并启动首个用户态应用的最后步骤。
+在 ArceOS Unikernel 形态下，`PayloadPhase` 负责把启动编排链移交给 selected payload，而不把该入口固定为传统操作系统的普通用户态进程入口。不同 Unikernel 应用、测试应用或未来的宏内核引导应用，都可以作为 selected payload。未来若增加宏内核形态，相关 payload 可以在 `PayloadPhase.Enable` 后完成切换到用户态并启动首个用户态应用的最后步骤。`PayloadPhase.Enable` 的运行期约定是不返回：payload 要么进入服务循环，要么最终停机。
 
 ## 普通对象
 

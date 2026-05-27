@@ -1,7 +1,8 @@
 TARGET := riscv64gc-unknown-none-elf
 LOG ?= info
 PROFILE ?= release
-BUILD_DIR := build/$(TARGET)/$(PROFILE)
+APP ?= hello
+BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
 KERNEL_BIN := $(BUILD_DIR)/arceos_ex.bin
 LINKER := linker/riscv64.lds
@@ -17,6 +18,7 @@ MODEL_JSON := $(ROOT)/tools/out/codegen/main.model.json
 MODEL_SPECS := $(shell find $(ROOT)/spec/model -name '*.spec')
 CODEGEN_SOURCES := $(shell find $(ROOT)/tools/codegen/src $(ROOT)/tools/common/src -name '*.py')
 EXTRA_RUSTFLAGS ?=
+APP_CFG := app_$(subst -,_,$(APP))
 
 RUSTFLAGS := \
 	-C opt-level=2 \
@@ -25,6 +27,7 @@ RUSTFLAGS := \
 	-C code-model=medium \
 	-C link-arg=-T$(LINKER) \
 	-C link-arg=-static \
+	--cfg $(APP_CFG) \
 	$(EXTRA_RUSTFLAGS)
 
 .PHONY: build run generate clean
@@ -53,10 +56,10 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 
 run:
 ifeq ($(LOG),trace)
-	$(MAKE) PROFILE=trace EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
-	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel build/$(TARGET)/trace/arceos_ex.bin
+	$(MAKE) PROFILE=trace APP=$(APP) EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
+	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel build/$(TARGET)/trace/$(APP)/arceos_ex.bin
 else
-	$(MAKE) build
+	$(MAKE) build APP=$(APP)
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(KERNEL_BIN)
 endif
 

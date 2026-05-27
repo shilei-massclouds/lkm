@@ -55,6 +55,8 @@ predicate fdt_reserved_memory_ranges_ready<T, U>(early_dtb: T, raw_dtb: U) -> bo
 predicate memblock_fdt_reserved_ranges_applied<T, U>(memblock: T, early_dtb: U) -> bool;
 predicate interrupt_concurrency_closed() -> bool;
 predicate task_concurrency_closed() -> bool;
+predicate selected_payload_ready() -> bool;
+predicate selected_payload_no_return_handoff() -> bool;
 
 predicate attrs_accessible<T: Object>(obj: T) -> bool {
     forall attr in obj.attrs {

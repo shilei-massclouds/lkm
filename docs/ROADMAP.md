@@ -41,9 +41,10 @@
 | model/derive | 推导义务阶段性收口 | 当前 `make verify` 为 `0 obligation / 2 deferred`。 |
 | arceos_ex | `EntryPreludePhase` 最小闭环 | 已覆盖 head prefix、BootArgs、RootStream、KernelImage、BootCPU/CpuGroup、InitTask/InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm 和 VM 切换。 |
 | arceos_ex | `EntrySuccessorPhase` 最小闭环 | 已覆盖 EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap 和 SwapperVm。 |
+| arceos_ex | `PayloadPhase` 最小闭环 | 已把启动链末尾的 selected payload 交接建模为不返回阶段，默认 `APP=hello` 输出 `Hello, world!` 后通过 SBI 关机。 |
 | arceos_ex | no-alloc 输出路径 | 启动期内部输出前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
 | arceos_ex | 最小 FDT 解析 | 不引入外部 crate，不使用 `Vec`、`String`、`Box`，只解析当前闭环必要节点。 |
-| arceos_ex | 顶层 Makefile 入口 | 顶层 `make build`、`make run`、`make run LOG=trace`、`make verify`、`make clean` 已可用。 |
+| arceos_ex | 顶层 Makefile 入口 | 顶层 `make build`、`make run`、`make run LOG=trace`、`make verify`、`make clean` 已可用，并支持 `APP=hello` payload 选择。 |
 | arceos_ex | trace/checkpoint 一致性复查 | `make verify REPORT=graph`、`make run LOG=trace` 和实现阶段顺序一致，checkpoint 单字符映射无重复。 |
 | spec/coding | 规则强度分层 | 已为 `MUST`、`SHOULD`、`MAY`、`NOTE` 建立统一标注与解释规则，并把全局 `Context` 映射记录为 `SHOULD`。 |
 | arceos_ex | 第一轮源码结构清理 | 已拆分 `entry_successor`、`entry_prelude`、FDT、静态页表、VM setup bridge 等聚合文件，保留后续目录分层为 P2。 |

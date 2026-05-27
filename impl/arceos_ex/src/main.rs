@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod apps;
 mod arch;
 mod context;
 mod objects;
@@ -22,9 +23,7 @@ pub fn startup_timeline_ready() -> ! {
         arch::riscv64::sbi::system_shutdown()
     }
 
-    phases::shutdown_on_error(startup_timeline_event(), "arceos_ex startup event failed\n");
-    app_main();
-    arch::riscv64::sbi::system_shutdown()
+    phases::payload::setup_then_enable()
 }
 
 fn startup_timeline_event() -> EventResult {
@@ -35,11 +34,6 @@ fn startup_timeline_event() -> EventResult {
         State::Ready,
         Checkpoint::StartupTimelineReady,
     )
-}
-
-pub fn app_main() {
-    objects::printk::write_str("Hello, world!\n");
-    objects::earlycon::drain_printk();
 }
 
 #[panic_handler]

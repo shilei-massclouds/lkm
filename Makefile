@@ -2,6 +2,7 @@ KERNEL ?= arceos_ex
 LOG ?= info
 REPORT ?= text
 SPEC ?= spec/model/main.spec
+APP ?= hello
 
 KERNEL_DIR := impl/$(KERNEL)
 PYVERI ?= tools/pyveri/bin/pyveri
@@ -9,13 +10,13 @@ PYVERI ?= tools/pyveri/bin/pyveri
 .PHONY: build run verify clean
 
 build:
-	$(MAKE) -C $(KERNEL_DIR) build
+	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP)
 
 run:
 ifeq ($(LOG),trace)
-	$(MAKE) -C $(KERNEL_DIR) run LOG=trace
+	$(MAKE) -C $(KERNEL_DIR) run LOG=trace APP=$(APP)
 else
-	$(MAKE) -C $(KERNEL_DIR) run
+	$(MAKE) -C $(KERNEL_DIR) run APP=$(APP)
 endif
 
 verify:

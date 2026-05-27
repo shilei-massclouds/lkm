@@ -12,10 +12,11 @@
 
 ## 目标边界
 
-第一轮目标是让 `arceos_ex` 作为规格驱动的对象级内核原型运行，并完成当前模型中的两个子阶段：
+第一轮目标是让 `arceos_ex` 作为规格驱动的对象级内核原型运行，并完成当前模型中的两个引导子阶段和最终 payload 交接阶段：
 
 - `EntryPreludePhase.Ready`
 - `EntrySuccessorPhase.Ready`
+- `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner 和 `Hello, world!`，随后通过 SBI 关机。
 
@@ -36,19 +37,21 @@
 
 ```bash
 make build
+make build APP=hello
 make run
+make run APP=hello
 make run LOG=trace
 make verify
 make verify REPORT=graph
 make clean
 ```
 
-`KERNEL ?= arceos_ex` 选择默认内核。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
+`KERNEL ?= arceos_ex` 选择默认内核，`APP ?= hello` 选择默认 selected payload。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
 启用 checkpoint 字符输出。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
 生成带注释的 trace SVG 报告。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready` 与
-`EntrySuccessorPhase.Ready`，输出启动 banner 和 `Hello, world!` 后通过 SBI 关机。
+`EntrySuccessorPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `hello` payload，输出启动 banner 和 `Hello, world!` 后通过 SBI 关机。
 
 ## `make verify` obligation 分类
 
@@ -102,8 +105,11 @@ make clean
 
 当前对象级实验不复用现有 ArceOS Unikernel 应用，不依赖 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust`。
 
-第一轮只保留一个内建的最小 payload：在对象级初始化完成后调用本地 `app_main()`，由它通过最小 `println!` 前端输出
-`Hello, world!`。该 `println!` 不等同于 `axstd::println!`；后者属于后续组件封装阶段。
+第一轮只保留一个内建的最小 payload：`APP=hello`。对象级初始化完成后，启动链进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `hello` payload 通过最小输出前端写入 `PrintkBuffer`，再由 `EarlyCon` drain，输出 `Hello, world!` 后通过 SBI 关机。
+
+所有 payload 的入口约定为 `run() -> !`。这表示控制流不返回启动编排链：Unikernel payload 可以进入服务循环或停机，未来宏内核 payload 可以加载首个用户态程序并完成用户态切换。若某个 payload 意外返回，应视为违反 `PayloadPhase.Enable` 的 no-return handoff 契约。
+
+当前 payload 选择由 Makefile 变量控制，`APP` 会转换为 Rust `--cfg app_<name>`，例如 `APP=hello` 对应 `app_hello`。后续新增 payload 时，应在 `impl/arceos_ex/src/apps/` 下新增模块，并在 `apps/mod.rs` 中加入对应静态选择分支。
 
 在未来 Composition Phase 中，再恢复“Unikernel app 引领内核形态”的 ArceOS 设计，并讨论如何接入 `ax-std`、测试 payload 和宏内核 payload。
 
@@ -190,7 +196,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 
 ## 第一轮最小对象覆盖
 
-实现必须覆盖当前模型中 `EntryPreludePhase` 和 `EntrySuccessorPhase` 所需对象。Phase 对象可以是编排过程；非 Phase 对象原则上应有 Rust struct、静态单例或启动上下文字段承载。
+实现必须覆盖当前模型中 `EntryPreludePhase`、`EntrySuccessorPhase` 和 `PayloadPhase` 所需对象。Phase 对象可以是编排过程；非 Phase 对象原则上应有 Rust struct、静态单例或启动上下文字段承载。
 
 重点对象包括：
 

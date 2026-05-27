@@ -26,7 +26,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("StartupTimeline", result.model.objects)
         self.assertEqual(
             result.model.children["StartupTimeline"],
-            ["PreparePhase", "BootPhase"],
+            ["PreparePhase", "BootPhase", "PayloadPhase"],
         )
         self.assertEqual(
             result.model.objects["BootPhase"].children,
@@ -60,6 +60,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("BootPhase.Setup", text)
         self.assertIn("EntryPreludePhase.Setup", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
+        self.assertIn("PayloadPhase.Setup", text)
         self.assertIn("rankdir=LR", dot)
         self.assertIn('"StartupTimeline.Setup" -> "PreparePhase.Setup"', dot)
 
@@ -79,6 +80,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("EntryPreludePhase: ready (State::Ready)", text)
         self.assertIn("EntrySuccessorPhase: ready (State::Ready)", text)
         self.assertIn("BootPhase: ready (State::Ready)", text)
+        self.assertIn("PayloadPhase: ready (State::Ready)", text)
+        self.assertIn("PayloadPhase: online (State::Online)", text)
         self.assertIn("  - RootStream.State::Prepared", text)
         self.assertIn("  - Soc.State::Prepared", text)
         self.assertIn("  - Vm.State::Online", text)
@@ -90,6 +93,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("BootPhase", svg)
         self.assertIn("EntryPreludePhase", svg)
         self.assertIn("EntrySuccessorPhase", svg)
+        self.assertIn("PayloadPhase", svg)
         self.assertNotIn("StartupTimeline", svg)
 
     def test_reports_unknown_drive_event(self) -> None:
