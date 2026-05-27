@@ -8,6 +8,7 @@ pub mod early_vm;
 pub mod earlycon;
 pub mod event_stream;
 pub mod fdt;
+pub mod fdt_facts;
 pub mod fix_map;
 pub mod init_mm;
 pub mod init_stack;
