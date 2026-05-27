@@ -4,10 +4,11 @@ use crate::objects::{
         CpuGroup, EventStream, InitStack, InitTask, InterruptStream, KernelImage, Lds, RootStream,
     },
     entry_successor::{
-        CpuIdMap, EarlyDtb, EarlyIoremap, InitMm, KernelCmdline, KernelParam, MemBlock,
-        PhysicalMemory, PlatformCpuInfo, Sbi,
+        CpuIdMap, EarlyDtb, EarlyIoremap, InitMm, KernelParam, MemBlock, PhysicalMemory,
+        PlatformCpuInfo, Sbi,
     },
     fix_map::FixMap,
+    kernel_cmdline::KernelCmdline,
     raw_dtb::RawDtb,
     static_objects::StaticObjects,
     vm::Vm,

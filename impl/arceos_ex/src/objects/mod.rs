@@ -6,6 +6,7 @@ pub mod entry_prelude;
 pub mod entry_successor;
 pub mod fdt;
 pub mod fix_map;
+pub mod kernel_cmdline;
 pub mod printk;
 pub mod raw_dtb;
 pub mod state;

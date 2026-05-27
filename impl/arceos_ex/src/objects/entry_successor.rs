@@ -4,6 +4,7 @@ use super::{
     entry_prelude::{KernelImage, Lds},
     fdt::{self, BootCommandLine, FdtFacts, HartSet, PhysRangeSet},
     fix_map::FixMap,
+    kernel_cmdline::KernelCmdline,
     printk,
     raw_dtb::{PhysRange, RawDtb},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -273,47 +274,6 @@ impl CpuIdMap {
 
     pub fn state(&self) -> State {
         self.lifecycle.state()
-    }
-}
-
-pub struct KernelCmdline {
-    lifecycle: Lifecycle,
-    cmdline: BootCommandLine,
-}
-
-impl KernelCmdline {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            cmdline: BootCommandLine::empty(),
-        }
-    }
-
-    pub fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub fn has_earlycon_sbi(&self) -> bool {
-        self.cmdline.contains(b"earlycon=sbi")
-    }
-
-    pub fn preset(&mut self, raw_dtb: &RawDtb, facts: &FdtFacts) -> EventResult {
-        if raw_dtb.state() != State::Ready {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.lifecycle.state(),
-                State::Base,
-                State::Ready,
-            );
-        }
-
-        self.cmdline = facts.cmdline;
-        self.lifecycle.transition(
-            LifecycleEvent::Preset,
-            State::Base,
-            State::Ready,
-            Checkpoint::KernelCmdlineReady,
-        )
     }
 }
 
