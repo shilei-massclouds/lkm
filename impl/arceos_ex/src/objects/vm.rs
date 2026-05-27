@@ -12,9 +12,8 @@ use super::{
     static_objects::StaticObjects,
     swapper_vm::SwapperVm,
     trampoline_vm::TrampolineVm,
+    vm_setup::{self, VmSetupContinuation},
 };
-
-pub type VmSetupContinuation = extern "C" fn() -> !;
 
 pub struct Vm {
     lifecycle: Lifecycle,
@@ -118,32 +117,14 @@ impl Vm {
         let Some(gp_virt) = kernel_image.runtime_to_link(lds.global_pointer()) else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-        let Some(continuation_virt) = kernel_image.runtime_to_link(vm_setup_continuation as usize)
+        let Some(continuation_virt) = vm_setup::continuation_addr(kernel_image) else {
+            crate::arch::riscv64::sbi::system_shutdown();
+        };
+        let Some(context) = vm_setup::VmSetupContext::new(self, kernel_image, lds, after_switch)
         else {
             crate::arch::riscv64::sbi::system_shutdown();
         };
-
-        let Some(vm_virt) = kernel_image.runtime_to_link(self as *mut Vm as usize) else {
-            crate::arch::riscv64::sbi::system_shutdown();
-        };
-        let kernel_image_addr = kernel_image as *mut KernelImage as usize;
-        let Some(kernel_image_virt) = kernel_image.runtime_to_link(kernel_image_addr) else {
-            crate::arch::riscv64::sbi::system_shutdown();
-        };
-        let Some(lds_virt) = kernel_image.runtime_to_link(lds as *const Lds as usize) else {
-            crate::arch::riscv64::sbi::system_shutdown();
-        };
-        let Some(after_switch_virt) = kernel_image.runtime_to_link(after_switch as usize) else {
-            crate::arch::riscv64::sbi::system_shutdown();
-        };
-
-        let context = VmSetupContext {
-            vm: vm_virt as *mut Vm,
-            kernel_image: kernel_image_virt as *mut KernelImage,
-            lds: lds_virt as *const Lds,
-            after_switch: after_switch_virt,
-        };
-        set_vm_setup_context(kernel_image, context);
+        vm_setup::set_context(kernel_image, context);
 
         unsafe {
             csr::switch_to_early_vm(
@@ -157,7 +138,7 @@ impl Vm {
         }
     }
 
-    fn finish_setup_after_switch(&mut self, kernel_image: &mut KernelImage, lds: &Lds) {
+    pub(super) fn finish_setup_after_switch(&mut self, kernel_image: &mut KernelImage, lds: &Lds) {
         let result = self.trampoline_vm.enable(kernel_image);
         if result.is_err() {
             crate::arch::riscv64::sbi::system_shutdown();
@@ -240,49 +221,4 @@ impl Vm {
             && self.swapper_vm.state() == State::Online
             && self.early_vm.state() == State::Destroyed
     }
-}
-
-#[derive(Clone, Copy)]
-struct VmSetupContext {
-    vm: *mut Vm,
-    kernel_image: *mut KernelImage,
-    lds: *const Lds,
-    after_switch: usize,
-}
-
-static mut VM_SETUP_CONTEXT: VmSetupContext = VmSetupContext {
-    vm: core::ptr::null_mut(),
-    kernel_image: core::ptr::null_mut(),
-    lds: core::ptr::null(),
-    after_switch: 0,
-};
-
-fn set_vm_setup_context(kernel_image: &KernelImage, context: VmSetupContext) {
-    let Some(context_addr) =
-        kernel_image.runtime_to_phys(core::ptr::addr_of!(VM_SETUP_CONTEXT) as usize)
-    else {
-        crate::arch::riscv64::sbi::system_shutdown();
-    };
-    unsafe {
-        core::ptr::write_volatile(context_addr as *mut VmSetupContext, context);
-    }
-}
-
-#[unsafe(no_mangle)]
-extern "C" fn vm_setup_continuation() -> ! {
-    let context = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(VM_SETUP_CONTEXT)) };
-    if context.vm.is_null()
-        || context.kernel_image.is_null()
-        || context.lds.is_null()
-        || context.after_switch == 0
-    {
-        crate::arch::riscv64::sbi::system_shutdown();
-    }
-
-    let vm = unsafe { &mut *context.vm };
-    let kernel_image = unsafe { &mut *context.kernel_image };
-    let lds = unsafe { &*context.lds };
-    vm.finish_setup_after_switch(kernel_image, lds);
-    let after_switch: VmSetupContinuation = unsafe { core::mem::transmute(context.after_switch) };
-    after_switch()
 }

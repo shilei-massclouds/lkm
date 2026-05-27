@@ -35,3 +35,4 @@ pub mod static_page_tables;
 pub mod swapper_vm;
 pub mod trampoline_vm;
 pub mod vm;
+pub mod vm_setup;
