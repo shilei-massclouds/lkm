@@ -1,8 +1,8 @@
 use crate::objects::{
     config::Config, cpu_group::CpuGroup, cpu_id_map::CpuIdMap, early_dtb::EarlyDtb,
-    early_ioremap::EarlyIoremap, entry_prelude::Lds, event_stream::EventStream, fix_map::FixMap,
-    init_mm::InitMm, init_stack::InitStack, init_task::InitTask, interrupt_stream::InterruptStream,
-    kernel_cmdline::KernelCmdline, kernel_image::KernelImage, kernel_param::KernelParam,
+    early_ioremap::EarlyIoremap, event_stream::EventStream, fix_map::FixMap, init_mm::InitMm,
+    init_stack::InitStack, init_task::InitTask, interrupt_stream::InterruptStream,
+    kernel_cmdline::KernelCmdline, kernel_image::KernelImage, kernel_param::KernelParam, lds::Lds,
     memblock::MemBlock, physical_memory::PhysicalMemory, platform_cpu_info::PlatformCpuInfo,
     raw_dtb::RawDtb, root_stream::RootStream, sbi::Sbi, static_objects::StaticObjects, vm::Vm,
 };

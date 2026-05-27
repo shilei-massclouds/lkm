@@ -2,7 +2,7 @@ use crate::{arch::riscv64::csr, trace::Checkpoint};
 
 use super::{
     config::Config,
-    entry_prelude::Lds,
+    lds::Lds,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 

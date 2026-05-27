@@ -2,8 +2,8 @@ use crate::trace::Checkpoint;
 
 use super::{
     config::Config,
-    entry_prelude::Lds,
     kernel_image::KernelImage,
+    lds::Lds,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
 };

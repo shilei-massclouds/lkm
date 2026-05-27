@@ -1,8 +1,8 @@
 use crate::trace::Checkpoint;
 
 use super::{
-    entry_prelude::Lds,
     kernel_image::KernelImage,
+    lds::Lds,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
 };
