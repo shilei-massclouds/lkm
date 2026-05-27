@@ -1,7 +1,7 @@
 use super::{
     config::Config,
-    entry_prelude::KernelImage,
     fix_map::FixMap,
+    kernel_image::KernelImage,
     memblock::MemBlock,
     raw_dtb::RawDtb,
     state::{Lifecycle, State},

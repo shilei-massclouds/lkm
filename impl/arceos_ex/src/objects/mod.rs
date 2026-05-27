@@ -15,6 +15,7 @@ pub mod init_stack;
 pub mod init_task;
 pub mod interrupt_stream;
 pub mod kernel_cmdline;
+pub mod kernel_image;
 pub mod kernel_param;
 pub mod memblock;
 pub mod physical_memory;

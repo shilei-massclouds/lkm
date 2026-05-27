@@ -2,7 +2,8 @@ use crate::trace::Checkpoint;
 
 use super::{
     config::Config,
-    entry_prelude::{KernelImage, Lds},
+    entry_prelude::Lds,
+    kernel_image::KernelImage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
 };
@@ -23,7 +24,7 @@ impl TrampolineVm {
         self.lifecycle.state()
     }
 
-    pub fn enable(&mut self, kernel_image: &super::entry_prelude::KernelImage) -> EventResult {
+    pub fn enable(&mut self, kernel_image: &KernelImage) -> EventResult {
         if self.lifecycle.state() != State::Ready || kernel_image.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Enable,

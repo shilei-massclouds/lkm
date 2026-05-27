@@ -3,7 +3,7 @@ use core::arch::global_asm;
 use crate::{arch::riscv64::csr, trace::Checkpoint};
 
 use super::{
-    entry_prelude::KernelImage,
+    kernel_image::KernelImage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
     vm::Vm,

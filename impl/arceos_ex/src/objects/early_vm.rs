@@ -3,9 +3,9 @@ use crate::trace::Checkpoint;
 use super::{
     boot_args::BootArgs,
     config::Config,
-    entry_prelude::KernelImage,
     entry_prelude::Lds,
     fix_map::FixMap,
+    kernel_image::KernelImage,
     raw_dtb::RawDtb,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,

@@ -1,8 +1,9 @@
 use super::{
     config::Config,
     early_dtb::EarlyDtb,
-    entry_prelude::{KernelImage, Lds},
+    entry_prelude::Lds,
     fdt::PhysRangeSet,
+    kernel_image::KernelImage,
     physical_memory::PhysicalMemory,
     raw_dtb::{PhysRange, RawDtb},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
