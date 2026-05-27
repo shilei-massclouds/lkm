@@ -1,5 +1,6 @@
 pub mod boot_args;
 pub mod config;
+pub mod cpu_group;
 pub mod cpu_id_map;
 pub mod early_dtb;
 pub mod early_ioremap;

@@ -1,9 +1,10 @@
 use crate::objects::{
     config::Config,
+    cpu_group::CpuGroup,
     cpu_id_map::CpuIdMap,
     early_dtb::EarlyDtb,
     early_ioremap::EarlyIoremap,
-    entry_prelude::{CpuGroup, KernelImage, Lds},
+    entry_prelude::{KernelImage, Lds},
     event_stream::EventStream,
     fix_map::FixMap,
     init_mm::InitMm,
