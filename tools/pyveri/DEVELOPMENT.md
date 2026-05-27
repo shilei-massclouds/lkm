@@ -541,6 +541,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 | `P1` | 待办 | 注释数据流下沉 | 当前 `.spec` 注释由 `pyveri` driver 临时抽取并传给 render。后续应让 `parse` 保留注释 span/内容，由 `model` 或 `view` 建立 state/event 关联，`render` 只消费 `view.json` 或明确的 annotation 输入。 |
 | `P1` | 待办 | 同步开发文档与当前真实进展 | 清理文档中已经过期的描述，例如前文仍提到复杂谓词保留为 `obligation`，但当前严格推导实际为 `obligation: 0`；同时明确当前主入口、已覆盖阶段和剩余 `deferred`。 |
 | `P2` | 待办 | 继续语义扩展 | 在 trace/文档闭环稳定后，再决定是优先消化两个剩余 `deferred`，还是沿 Linux 启动流程继续推进到 `paging_init()` 之后的下一个阶段边界。 |
+| `P2` | 待办 | `impl/arceos_ex/src/objects/` 目录分层 | 当前先在平铺 `objects/` 目录内拆清对象语义、静态存储、通用原语和 facade/API 边界；等主要大文件和命名稳定后，再考虑按 `model/`、`storage/`、`primitives/` 或主题子目录整理。这是结构收敛后的目录化工作，不紧急，避免当前阶段产生过多路径 churn。 |
 | `P2` | 进行中 | 工具链拆分与中间文件协议完善 | 独立阶段工具已经落地，后续继续细化 schema、退出码、缓存/增量重建策略，并保持独立阶段不反向依赖 `pyveri` 包。详见 Step D。 |
 
 #### Step D: 工具链拆分
