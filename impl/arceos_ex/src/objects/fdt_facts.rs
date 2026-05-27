@@ -84,6 +84,19 @@ impl PhysRangeSet {
         false
     }
 
+    #[allow(dead_code)]
+    pub fn overlaps_range(&self, range: PhysRange) -> bool {
+        let mut index = 0;
+        while index < self.count {
+            let item = self.ranges[index];
+            if item.start() < range.end() && range.start() < item.end() {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
     pub fn push(&mut self, range: PhysRange) -> bool {
         if range.start() >= range.end() {
             return false;

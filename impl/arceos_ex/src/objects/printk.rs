@@ -1,5 +1,6 @@
 use super::state::{EventResult, Lifecycle, LifecycleEvent, State};
 use crate::trace::Checkpoint;
+use core::fmt::{self, Write};
 
 #[allow(dead_code)]
 const BUFFER_SIZE: usize = 4096;
@@ -88,6 +89,11 @@ pub fn write_byte(byte: u8) {
     }
 }
 
+#[allow(dead_code)]
+pub fn write_fmt(args: fmt::Arguments<'_>) {
+    let _ = PrintkWriter.write_fmt(args);
+}
+
 pub fn is_prepared() -> bool {
     unsafe { (&raw const PRINTK_BUFFER).as_ref().unwrap().is_prepared() }
 }
@@ -96,5 +102,15 @@ pub fn is_prepared() -> bool {
 pub fn drain_to(sink: impl FnMut(u8)) {
     unsafe {
         (&raw mut PRINTK_BUFFER).as_mut().unwrap().drain_to(sink);
+    }
+}
+
+#[allow(dead_code)]
+struct PrintkWriter;
+
+impl Write for PrintkWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        write_str(s);
+        Ok(())
     }
 }

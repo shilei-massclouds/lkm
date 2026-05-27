@@ -14,6 +14,8 @@ pub struct MemBlock {
     lifecycle: Lifecycle,
     usable: PhysRangeSet,
     reserved: PhysRangeSet,
+    #[allow(dead_code)]
+    alloc_cursor: usize,
 }
 
 impl MemBlock {
@@ -22,6 +24,7 @@ impl MemBlock {
             lifecycle: Lifecycle::new(State::Base),
             usable: PhysRangeSet::empty(),
             reserved: PhysRangeSet::empty(),
+            alloc_cursor: 0,
         }
     }
 
@@ -31,6 +34,40 @@ impl MemBlock {
 
     pub const fn usable_ranges(&self) -> &PhysRangeSet {
         &self.usable
+    }
+
+    #[allow(dead_code)]
+    pub fn alloc_phys(&mut self, size: usize, align: usize) -> Option<PhysRange> {
+        if self.lifecycle.state() != State::Online
+            || size == 0
+            || align == 0
+            || !align.is_power_of_two()
+        {
+            return None;
+        }
+
+        let mut range_index = 0;
+        while range_index < self.usable.count() {
+            let range = self.usable.get(range_index)?;
+            let mut start = align_up(range.start().max(self.alloc_cursor), align)?;
+            loop {
+                let end = start.checked_add(size)?;
+                if end > range.end() {
+                    break;
+                }
+
+                let candidate = PhysRange::new(start, end);
+                if !self.reserved.overlaps_range(candidate) {
+                    self.alloc_cursor = end;
+                    let _ = self.reserved.push(candidate);
+                    return Some(candidate);
+                }
+                start = align_up(end, align)?;
+            }
+            range_index += 1;
+        }
+
+        None
     }
 
     pub fn preset(
@@ -130,4 +167,9 @@ impl MemBlock {
             State::Ready,
         )
     }
+}
+
+#[allow(dead_code)]
+fn align_up(value: usize, align: usize) -> Option<usize> {
+    Some(value.checked_add(align - 1)? & !(align - 1))
 }

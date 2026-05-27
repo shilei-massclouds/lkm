@@ -16,10 +16,24 @@ pub struct SmokeCase {
     pub run: fn() -> SmokeResult,
 }
 
-const CASES: &[SmokeCase] = &[SmokeCase {
-    name: "hello",
-    run: cases::hello::run,
-}];
+const CASES: &[SmokeCase] = &[
+    SmokeCase {
+        name: "hello",
+        run: cases::hello::run,
+    },
+    SmokeCase {
+        name: "print",
+        run: cases::print::run,
+    },
+    SmokeCase {
+        name: "memblock",
+        run: cases::memblock::run,
+    },
+    SmokeCase {
+        name: "fdt",
+        run: cases::fdt::run,
+    },
+];
 
 pub fn run() -> ! {
     printk::write_str("arceos_ex smoke start\n");

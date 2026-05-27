@@ -37,6 +37,21 @@ impl EarlyDtb {
         self.facts.reserved
     }
 
+    #[allow(dead_code)]
+    pub fn has_boot_hart(&self, hartid: usize) -> bool {
+        self.facts.harts.contains(hartid)
+    }
+
+    #[allow(dead_code)]
+    pub fn memory_range_count(&self) -> usize {
+        self.facts.memory.count()
+    }
+
+    #[allow(dead_code)]
+    pub fn has_earlycon_sbi_cmdline(&self) -> bool {
+        self.facts.cmdline.contains(b"earlycon=sbi")
+    }
+
     pub fn preset(
         &mut self,
         raw_dtb: &RawDtb,
