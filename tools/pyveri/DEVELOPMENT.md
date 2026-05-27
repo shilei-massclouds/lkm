@@ -1,6 +1,7 @@
-# pyveri Development Plan
+# pyveri Development Notes
 
-本文档记录 `pyveri` 第一版推导验证器的实现计划。当前目标是验证：
+本文档记录 `pyveri` 推导验证器的工具链设计、阶段职责和实现细节。统一任务优先级和状态以
+[`docs/ROADMAP.md`](../../docs/ROADMAP.md) 为准；本文不维护独立计划表。当前目标是验证：
 
 ```text
 ../../spec/model/main.spec
@@ -526,23 +527,9 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - 基础 trace 图仍需继续改进：`depends_on` 虚线是否改成靠近目标端的短线，完整图是否分段/折叠/分页，标签是否简化和自动分行，以及布局常量是否暴露为 render 参数。
 - trace 当前只把 `Object.state == State::X` 这类 `depends_on` 展示为 verified state，非状态谓词事实没有显式展示。后续应为关键谓词增加 verified fact 节点或事件摘要，例如 `EarlyVm.Setup` 中的 `fits_in_kernel_image_map(KernelImage, KernelImageMap)`、`slot_contains(FixMap.fdt_slot, RawDtb)`、`kernel_image_mapping_ready(...)` 和 `fixmap_slot_mapping_ready(...)`，避免 SVG 只显示 RawDtb/FixMap 而弱化 KernelImage 映射范围依赖。
 
-#### Step C.2: 计划列表与优先级
+#### Step C.2: 统一 Roadmap
 
-本文档维护一个粗粒度计划列表，用于在阶段性讨论后快速确认下一步工作顺序。优先级含义：
-
-- `P0`：当前最应优先推进，直接影响日常审阅或当前闭环质量。
-- `P1`：近期应推进，通常依赖 `P0` 的结果或与其紧密相邻。
-- `P2`：后续扩展项，应在当前闭环稳定后推进。
-
-| 优先级 | 状态 | 事项 | 目标与说明 |
-| --- | --- | --- | --- |
-| `P0` | 待办 | 收口 trace/SVG 输出体验 | 系统检查基础图、state 注释图、event 注释图、state+event 注释图四种输出；优先处理 `depends_on` 长线、完整图过高、标签简化/分行、关键非状态谓词事实展示，以及布局常量是否暴露为 render 参数等问题，使 trace 图适合日常审阅。 |
-| `P1` | 待办 | 规格内默认 target 与 rule-only 检查模式 | 当前工具链把 `StartupTimeline.Event::Setup` 作为全局默认 target，这只适合 `spec/model/main.spec`。后续应支持在 `model/main.spec` 中声明默认推导目标；target 选择顺序为命令行 `--target` 优先，其次规格元信息，缺失时 derive/check/trace 要求显式 target。同时为 `spec/coding/main.spec`、`spec/compose/main.spec` 等 rule-only 规格提供只执行 parse/model/rule 检查的模式，避免误套启动时间线推导。`make verify` 仍可保持默认 `SPEC=spec/model/main.spec`。 |
-| `P1` | 待办 | 注释数据流下沉 | 当前 `.spec` 注释由 `pyveri` driver 临时抽取并传给 render。后续应让 `parse` 保留注释 span/内容，由 `model` 或 `view` 建立 state/event 关联，`render` 只消费 `view.json` 或明确的 annotation 输入。 |
-| `P1` | 待办 | 同步开发文档与当前真实进展 | 清理文档中已经过期的描述，例如前文仍提到复杂谓词保留为 `obligation`，但当前严格推导实际为 `obligation: 0`；同时明确当前主入口、已覆盖阶段和剩余 `deferred`。 |
-| `P2` | 待办 | 继续语义扩展 | 在 trace/文档闭环稳定后，再决定是优先消化两个剩余 `deferred`，还是沿 Linux 启动流程继续推进到 `paging_init()` 之后的下一个阶段边界。 |
-| `P2` | 待办 | `impl/arceos_ex/src/objects/` 目录分层 | 当前先在平铺 `objects/` 目录内拆清对象语义、静态存储、通用原语和 facade/API 边界；等主要大文件和命名稳定后，再考虑按 `model/`、`storage/`、`primitives/` 或主题子目录整理。这是结构收敛后的目录化工作，不紧急，避免当前阶段产生过多路径 churn。 |
-| `P2` | 进行中 | 工具链拆分与中间文件协议完善 | 独立阶段工具已经落地，后续继续细化 schema、退出码、缓存/增量重建策略，并保持独立阶段不反向依赖 `pyveri` 包。详见 Step D。 |
+项目优先级和任务状态统一维护在 [`docs/ROADMAP.md`](../../docs/ROADMAP.md)。本文只保留 pyveri 工具链、trace 输出和注释数据流的专题设计细节，不再维护独立 P0/P1/P2 计划表。
 
 #### Step D: 工具链拆分
 

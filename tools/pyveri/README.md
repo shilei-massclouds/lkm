@@ -33,7 +33,7 @@
 
 - `src/pyveri/`：后续 Python 源码实现目录。
 - `tests/`：后续验证器测试用例目录。
-- `DEVELOPMENT.md`：验证器第一版实现计划。
+- `DEVELOPMENT.md`：验证器工具链设计和开发说明；统一任务优先级见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
 
 ## 当前运行方式
 

@@ -19,7 +19,7 @@
 7. `riscv64.md`：RISC-V64 架构相关补充说明。
 8. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充说明。
 9. `arceos.md`：参考 ArceOS 时的取舍原则。
-10. `arceos_ex-plan.md`：当前实验内核的执行计划和任务状态；它不覆盖前述规格，只记录当前阶段如何落实规格。
+10. `arceos_ex.md`：当前实验内核的对象级实现说明；它不覆盖前述规格，只记录当前阶段如何落实规格。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
 
 若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.spec` 的 `MUST` 优先于其它 coding 补充文档，`mapping.spec` 的 `SHOULD` 需要默认遵循或显式记录偏离原因，计划文档不得覆盖规格文档。
 
@@ -111,4 +111,4 @@
 - `riscv64.spec`：RISC-V64 链接脚本、入口地址事实和地址转换来源的正式规则。
 - `rust.spec`：Rust 语言、安全边界和 ABI 使用的正式规则。
 - `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的说明性映射文档。
-- `arceos_ex-plan.md`：`arceos_ex` 第一轮实现任务清单；不得作为覆盖规格的依据。
+- `arceos_ex.md`：`arceos_ex` 第一轮对象级实现说明；不得作为覆盖规格的依据。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。

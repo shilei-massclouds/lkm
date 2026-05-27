@@ -1,6 +1,9 @@
-# arceos_ex 第一轮实现计划
+# arceos_ex 对象级实现说明
 
-本文记录 `arceos_ex` 第一轮实现任务清单。当前执行路线已经调整为：先在本仓库内直接完成对象级实现实验，源码放在
+本文记录 `arceos_ex` 第一轮对象级实现的设计背景、命令、工程边界和专题方案。统一任务优先级和状态以
+[`docs/ROADMAP.md`](../../docs/ROADMAP.md) 为准；本文不维护独立计划表。
+
+当前执行路线已经调整为：先在本仓库内直接完成对象级实现实验，源码放在
 `impl/arceos_ex/`，使用 `Makefile` 编译和运行；暂时不进入 `tgoskits`、`xtask`、ArceOS crate 兼容和 feature 传递问题。
 
 `tgoskits`/ArceOS 组件兼容属于后续 `Composition Phase`，只有对象级实现闭环后再恢复讨论。此前在
@@ -24,28 +27,6 @@
 当前只推进 `Object Coding Phase`。不得因为未来 ArceOS 组件封装需要而反向改变模型对象语义。
 
 实现分层上，Phase 对象只作为过程编排存在；非 Phase 对象原则上应在 Rust 中有明确承载，例如 struct、静态单例或启动上下文字段。
-
-## 当前执行计划
-
-| 优先级 | 状态 | 任务 |
-| --- | --- | --- |
-| P0 | 完成 | 建立 `impl/arceos_ex/` 独立实验目录，包含 `Makefile`、RISC-V64 linker script、入口汇编和 no-alloc Rust 源码骨架。 |
-| P0 | 完成 | 定义对象级公共基础：规范状态集合、事件集合、`EventResult`、生命周期事件唯一性检查和 checkpoint hook。 |
-| P0 | 完成 | 分类 `make verify` 当前 obligations/deferred，明确进入 `EntryPreludePhase` 对象实现前的处理策略。 |
-| P0 | 完成 | 纠正入口实现与规格顺序不一致的问题：`_start` 现在作为严格 head prefix，按规格顺序完成进入 Rust 前必须用汇编实现并由入口前导期拥有的 `EntryPreludePhase.Setup` 起始边界以及 `InterruptStream.Preset`、`KernelImage.Preset`、`RootStream.Preset`、`KernelImage.Setup`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`；Rust 续段只认领这些状态并从 `EventStream.Preset` 继续。`StartupTimeline/PreparePhase/BootPhase` 等父阶段或准备期边界不由入口汇编代发 checkpoint，而是在各自映射实现中提交或采用 head-prefix adoption。 |
-| P0 | 完成 | 实现 `EntryPreludePhase` 第一批不依赖页表切换的 foundation 对象：`InterruptStream.Preset`、`KernelImage.Preset/Setup`、`RootStream.Preset`、`BootCPU.Preset`、`CpuGroup.Preset`、`InitTask.Preset`、`InitStack.Preset`、`EventStream.Preset`。 |
-| P0 | 完成 | 实现 `EntryPreludePhase` 最小闭环：`_start`、`__global_pointer$`、head text 布局约束、BootArgs、RootStream、KernelImage、BootCPU、InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm、VM 三段切换；`make run LOG=trace` 已到达 banner 与本地 `app_main()`。 |
-| P0 | 完成 | 实现 `EntrySuccessorPhase` 最小闭环：EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、KernelCmdline、KernelParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap、SwapperVm；`make run LOG=trace` 已到达 `EntrySuccessorPhase.Ready`。 |
-| P0 | 完成 | 建立 no-alloc 输出路径：启动期内部 `printk`/`println-like` 前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
-| P1 | 完成 | 实现最小 FDT 解析，不引入外部 crate，不使用 `Vec`、`String`、`Box`；只解析当前闭环必要的 `/cpus`、`/memory`、`/chosen`、`/memreserve/` 和必要 `/reserved-memory`。 |
-| P1 | 完成 | 用顶层 Makefile 提供 `build`、`run`、`verify`、`clean` 等入口，暂时脱离 `xtask`。 |
-| P1 | 完成 | 对照 `startup-timeline.trace.svg` 和 checkpoint 输出逐段复查规格、推导和实现一致性；当前 `make verify REPORT=graph`、`make run LOG=trace` 和实现阶段顺序一致，运行期 checkpoint 单字符映射已修正为无重复。 |
-| P1 | 待办 | 按 Object Coding Phase 映射规则整理源码结构：`main.rs` 承载 `startup-timeline`，`phases/` 按 Phase 包含层次拆分过程文件，`objects/` 按对象类别逐步拆成一对象一文件，并把资源对象统一收敛到全局 `Context`。 |
-| P1 | 待办 | 将当前直接生成完整 `riscv64.lds` 的实验收敛为 Linux 风格的 `riscv64.lds.S` 方案：`codegen` 基于 `Config` 生成 `generated/config.lds.h` 等配置头，`.lds.S` 保留链接布局结构并通过预处理生成最终 `.lds`；同时规划生成 Rust 侧配置，避免 `.lds`、Rust 常量和 codegen profile 各自维护同一配置值。 |
-| P1 | 完成 | 整理规格规则强度分层，为 `MUST`/硬约束、`SHOULD`/强建议、`MAY`/允许项和 `NOTE`/说明建立统一标注与解释规则，并把全局 `Context` 映射记录为 `SHOULD`。 |
-| P1 | 待办 | 建立 GitHub Actions 快速 CI，覆盖推导工具质量、核心规格推导和 `impl/arceos_ex` 最小构建。 |
-| P1 | 待办 | 建立 nightly/manual 测试流水线，生成 trace、系统测试日志、对象覆盖表和项目主页展示产物。 |
-| P2 | 延期 | 组件封装阶段：恢复 ArceOS 组件接口、crate 边界、`ax-std` 接入、overlay workspace、`xtask`、feature 传递、`axlog` 和 `ax-alloc` facade 等问题。 |
 
 ## 入口命令
 
