@@ -1,7 +1,7 @@
 TARGET := riscv64gc-unknown-none-elf
 LOG ?= info
 PROFILE ?= release
-APP ?= hello
+APP ?= smoke
 BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
 KERNEL_BIN := $(BUILD_DIR)/arceos_ex.bin

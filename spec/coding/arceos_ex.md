@@ -18,7 +18,7 @@
 - `EntrySuccessorPhase.Ready`
 - `PayloadPhase.Online`
 
-最小可见结果是通过独立早期输出路径打印启动 banner 和 `Hello, world!`，随后通过 SBI 关机。
+最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
 
 实现推进分为两个逻辑阶段：
 
@@ -37,8 +37,10 @@
 
 ```bash
 make build
+make build APP=smoke
 make build APP=hello
 make run
+make run APP=smoke
 make run APP=hello
 make run LOG=trace
 make verify
@@ -46,12 +48,12 @@ make verify REPORT=graph
 make clean
 ```
 
-`KERNEL ?= arceos_ex` 选择默认内核，`APP ?= hello` 选择默认 selected payload。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
+`KERNEL ?= arceos_ex` 选择默认内核，`APP ?= smoke` 选择默认 selected payload。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
 启用 checkpoint 字符输出。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
 生成带注释的 trace SVG 报告。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready` 与
-`EntrySuccessorPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `hello` payload，输出启动 banner 和 `Hello, world!` 后通过 SBI 关机。
+`EntrySuccessorPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 
 ## `make verify` obligation 分类
 
@@ -105,11 +107,11 @@ make clean
 
 当前对象级实验不复用现有 ArceOS Unikernel 应用，不依赖 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust`。
 
-第一轮只保留一个内建的最小 payload：`APP=hello`。对象级初始化完成后，启动链进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `hello` payload 通过最小输出前端写入 `PrintkBuffer`，再由 `EarlyCon` drain，输出 `Hello, world!` 后通过 SBI 关机。
+第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。对象级初始化完成后，启动链进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例；第一个用例独立测试输出路径，打印 `Hello, smoke!` 并返回通过。`APP=hello` 仍作为最小独立 payload，输出 `Hello, world!` 后通过 SBI 关机。
 
 所有 payload 的入口约定为 `run() -> !`。这表示控制流不返回启动编排链：Unikernel payload 可以进入服务循环或停机，未来宏内核 payload 可以加载首个用户态程序并完成用户态切换。若某个 payload 意外返回，应视为违反 `PayloadPhase.Enable` 的 no-return handoff 契约。
 
-当前 payload 选择由 Makefile 变量控制，`APP` 会转换为 Rust `--cfg app_<name>`，例如 `APP=hello` 对应 `app_hello`。后续新增 payload 时，应在 `impl/arceos_ex/src/apps/` 下新增模块，并在 `apps/mod.rs` 中加入对应静态选择分支。
+当前 payload 选择由 Makefile 变量控制，`APP` 会转换为 Rust `--cfg app_<name>`，例如 `APP=smoke` 对应 `app_smoke`。后续新增 payload 时，应在 `impl/arceos_ex/src/apps/` 下新增模块，并在 `apps/mod.rs` 中加入对应静态选择分支。后续新增 smoke 用例时，应放在 `impl/arceos_ex/src/apps/smoke/cases/` 下，并返回 `SmokeResult`，不得使用 payload 级 `run() -> !` 契约。
 
 在未来 Composition Phase 中，再恢复“Unikernel app 引领内核形态”的 ArceOS 设计，并讨论如何接入 `ax-std`、测试 payload 和宏内核 payload。
 
@@ -164,7 +166,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - 全规格批量推导验证。
 - trace SVG 全量生成，并作为 artifact 保存。
 - `impl/arceos_ex` 的完整 `make build`、`make run`、`make run LOG=trace`。
-- QEMU smoke test，检查 `Hello, world!` 或 checkpoint 序列。
+- QEMU smoke test，检查 smoke 汇总输出、独立 `APP=hello` 输出或 checkpoint 序列。
 - 生成 unresolved obligations、deferred items、对象覆盖表、QEMU 日志等报告。
 
 手动触发可用于规格大改后立即刷新展示结果，也可后续增加参数，例如指定 spec、指定 kernel implementation、是否运行 QEMU、是否发布 Pages。

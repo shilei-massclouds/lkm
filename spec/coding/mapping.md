@@ -163,7 +163,7 @@ Phase 对象的事件默认映射为过程函数，例如 `entry_prelude_phase_s
 - 未来可能与 Linux 参考状态做差分的状态点。
 - 规格中 `Ready`、`Online`、`Destroyed` 对后续对象形成依赖的状态点。
 
-第一轮可以先预留 checkpoint 接口，不要求立即输出完整差分数据。最小运行目标仍是通过 SBI early console 打印 `Hello, world!` 并关机。
+第一轮可以先预留 checkpoint 接口，不要求立即输出完整差分数据。最小运行目标仍是通过 SBI early console 运行默认 smoke payload 并关机；独立 `APP=hello` 仍保留为最小输出路径示例。
 
 checkpoint 在代码中应实现为 hook，而不是普通日志调用。默认 hook 为空实现；具体工程可以通过编译或链接选项插入不同处理机制，例如 SBI 单字符输出、内存 trace buffer、QEMU 调试出口或未来的状态差分采集器。hook 不改变对象状态，不参与事件推进，也不能成为规格依赖。
 

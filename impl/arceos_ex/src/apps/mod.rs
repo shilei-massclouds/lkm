@@ -1,7 +1,13 @@
+#[cfg(app_hello)]
 pub mod hello;
+#[cfg(app_smoke)]
+pub mod smoke;
+
+#[cfg(app_smoke)]
+pub use smoke::run;
 
 #[cfg(app_hello)]
 pub use hello::run;
 
-#[cfg(not(app_hello))]
-compile_error!("unsupported APP selection; build with APP=hello");
+#[cfg(not(any(app_smoke, app_hello)))]
+compile_error!("unsupported APP selection; build with APP=smoke or APP=hello");

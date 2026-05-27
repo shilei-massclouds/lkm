@@ -78,6 +78,16 @@ pub fn write_str(message: &str) {
     }
 }
 
+#[allow(dead_code)]
+pub fn write_byte(byte: u8) {
+    unsafe {
+        (&raw mut PRINTK_BUFFER)
+            .as_mut()
+            .unwrap()
+            .write_bytes(&[byte]);
+    }
+}
+
 pub fn is_prepared() -> bool {
     unsafe { (&raw const PRINTK_BUFFER).as_ref().unwrap().is_prepared() }
 }

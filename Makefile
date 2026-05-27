@@ -2,7 +2,7 @@ KERNEL ?= arceos_ex
 LOG ?= info
 REPORT ?= text
 SPEC ?= spec/model/main.spec
-APP ?= hello
+APP ?= smoke
 
 KERNEL_DIR := impl/$(KERNEL)
 PYVERI ?= tools/pyveri/bin/pyveri
