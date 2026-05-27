@@ -83,43 +83,6 @@ object ExceptionTable: ResourceObject {
 }
 
 /*
- * StaticKey 表示 jump label / static branch 机制的启动期准备对象。
- */
-object StaticKey: KernelObject {
-    initial_state: State::Base;
-
-    /*
-     * Base 表示静态分支机制尚未初始化。
-     */
-    state State::Base {
-        events {
-            /*
-             * Setup 对应 jump_label_init()，建立静态分支的早期元数据状态。
-             */
-            on Event::Setup -> State::Ready {
-                depends_on {
-                    KernelImage.state == State::Online;
-                    Vm.state == State::Online;
-                }
-
-                ensures {
-                    static_key_ready(StaticKey, KernelImage);
-                }
-            }
-        }
-    }
-
-    /*
-     * Ready 表示静态分支元数据已经可供后续内核机制使用。
-     */
-    state State::Ready {
-        invariant {
-            static_key_ready(StaticKey, KernelImage);
-        }
-    }
-}
-
-/*
  * CorePreparePhase 表示从 paging_init() 完成后到 trap_init() 完成的核心准备子阶段。
  * 它补齐正式异常分发之前的核心机制准备，并以 ExceptionStream.Setup 作为阶段末尾边界。
  */
@@ -147,7 +110,6 @@ object CorePreparePhase: PhaseObject {
                 drives {
                     PageAllocatorPrepare.Event::Setup;
                     ExceptionTable.Event::Setup;
-                    StaticKey.Event::Setup;
                     ExceptionStream.Event::Setup;
                     PageFaultException.Event::Setup;
                     BreakpointException.Event::Setup;
@@ -158,6 +120,10 @@ object CorePreparePhase: PhaseObject {
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     context_is(SystemExclusive);
+                }
+
+                deferred {
+                    "jump_label_init() 在该位置再次出现；当前暂不区分它与入口后继期中同名调用的关系。"
                 }
             }
         }
@@ -174,7 +140,6 @@ object CorePreparePhase: PhaseObject {
             EntrySuccessorPhase.state == State::Ready;
             PageAllocatorPrepare.state == State::Ready;
             ExceptionTable.state == State::Ready;
-            StaticKey.state == State::Ready;
             ExceptionStream.state == State::Ready;
             PageFaultException.state == State::Ready;
             SyscallException.state == State::Prepared;
