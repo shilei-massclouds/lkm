@@ -10,6 +10,7 @@ from model_tool.__main__ import main as model_main
 from parse_tool.__main__ import main as parse_main
 from derive_tool.__main__ import main as derive_main
 from render_tool.__main__ import main as render_main
+from render_tool.render import _choose_annotation_box, _expand_rect, _rects_overlap
 from view_tool.__main__ import main as view_main
 
 
@@ -106,7 +107,9 @@ class RenderToolTests(unittest.TestCase):
             self.assertNotIn("PreparePhase.Enable", text)
             self.assertIn("phase-arrow", text)
             self.assertIn('marker id="dot"', text)
-            self.assertIn("Riscv64.Online", text)
+            self.assertIn('<tspan x="425.0">Riscv64</tspan>', text)
+            self.assertIn('<tspan x="425.0" dy="12">Online</tspan>', text)
+            self.assertIn("<tspan", text)
             self.assertIn("depends-arrow", text)
             self.assertNotIn("StartupTimeline.Base", text)
 
@@ -146,8 +149,77 @@ class RenderToolTests(unittest.TestCase):
             text = output.read_text(encoding="utf-8")
             self.assertIn("annotation-box", text)
             self.assertIn("annotation-leader", text)
+            self.assertIn("early virtual", text)
             self.assertIn("early virtual address", text)
+            self.assertIn("space available", text)
             self.assertIn("build early mappings", text)
+
+    def test_render_svg_from_trace_view_wraps_unspaced_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._build_view_json(tmp, "trace")
+            annotations = Path(tmp) / "notes.json"
+            annotations.write_text(
+                """
+{
+  "events": {
+    "Vm.Event::Setup": "建立早期虚拟地址空间并完成跳板页表切换后的连续中文说明"
+  }
+}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            output = Path(tmp) / "trace.svg"
+
+            exit_code = render_main(
+                [
+                    str(view),
+                    "--format",
+                    "svg",
+                    "--annotations",
+                    str(annotations),
+                    "-o",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("建立早期虚拟地址空间并完成", text)
+            self.assertIn("跳板页表切换后的连续中文说", text)
+            self.assertIn("明", text)
+
+    def test_trace_annotation_fallback_stays_near_target_y(self) -> None:
+        target = (100.0, 1000.0, 50.0, 30.0)
+        occupied = [(0.0, 900.0, 400.0, 250.0)]
+
+        box = _choose_annotation_box(
+            target,
+            width=160.0,
+            height=38.0,
+            occupied=occupied,
+            fallback_x=500.0,
+            fallback_y=18.0,
+            min_y=18.0,
+        )
+
+        self.assertEqual(box[0], 500.0)
+        self.assertGreater(box[1], 900.0)
+
+    def test_trace_annotation_collision_uses_clearance_rects(self) -> None:
+        occupied = _expand_rect((100.0, 100.0, 80.0, 30.0), 6.0)
+
+        box = _choose_annotation_box(
+            target=(10.0, 100.0, 30.0, 30.0),
+            width=80.0,
+            height=30.0,
+            occupied=[occupied],
+            fallback_x=300.0,
+            fallback_y=18.0,
+            min_y=18.0,
+        )
+
+        self.assertFalse(_rects_overlap(box, occupied))
 
     def test_svg_requires_timeline_or_trace_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

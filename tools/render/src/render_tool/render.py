@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import unicodedata
+
 from common.view_types import (
     TimelineItem,
     TimelineRow,
@@ -14,14 +16,19 @@ from common.view_types import (
 
 
 _TRACE_DRIVE_ARROW_MAX_LENGTH = 81
+_TRACE_STATE_BOX_HEIGHT = 34
+_TRACE_LABEL_LINE_HEIGHT = 12
 _TRACE_EVENT_LABEL_PAD_X = 8
-_TRACE_EVENT_LABEL_HEIGHT = 22
+_TRACE_EVENT_LABEL_HEIGHT = 34
 _TRACE_ANNOTATION_WIDTH = 160
+_TRACE_ANNOTATION_WRAP_UNITS = 26
 _TRACE_ANNOTATION_LINE_HEIGHT = 13
 _TRACE_ANNOTATION_PADDING_X = 8
 _TRACE_ANNOTATION_PADDING_Y = 6
 _TRACE_ANNOTATION_GAP = 10
 _TRACE_ANNOTATION_MARGIN = 18
+_TRACE_ANNOTATION_CLEARANCE = 6
+_TRACE_ANNOTATION_FALLBACK_SCAN_STEPS = 80
 
 
 def render_view(
@@ -536,7 +543,7 @@ def _append_trace_state_cell(
     x, y, width, height = box
     pad_x = 8
     box_width = max(10, width - pad_x * 2)
-    box_height = 30
+    box_height = _TRACE_STATE_BOX_HEIGHT
     box_x = x + pad_x
     box_y = y + (height - box_height) / 2
     center_x = box_x + box_width / 2
@@ -545,8 +552,15 @@ def _append_trace_state_cell(
     lines.extend(
         [
             f'<rect class="{css_class}" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="4" />',
-            f'<text x="{center_x:.1f}" y="{center_y + 4:.1f}" font-size="11" text-anchor="middle">{_xml_escape(_shorten_trace_label(cell.label))}</text>',
         ]
+    )
+    _append_trace_centered_text(
+        lines,
+        _trace_label_lines(_shorten_trace_label(cell.label)),
+        center_x,
+        center_y,
+        font_size=11,
+        baseline_offset=4,
     )
 
 
@@ -560,8 +574,16 @@ def _append_trace_event_label(
     lines.extend(
         [
             f'<rect class="event-label" x="{label_x:.1f}" y="{label_y:.1f}" width="{label_width:.1f}" height="{_TRACE_EVENT_LABEL_HEIGHT:.1f}" rx="4" />',
-            f'<text class="muted" x="{label_x + label_width / 2:.1f}" y="{label_y + 15:.1f}" font-size="10" text-anchor="middle">{_xml_escape(_shorten_trace_event(cell.label))}</text>',
         ]
+    )
+    _append_trace_centered_text(
+        lines,
+        _trace_label_lines(_shorten_trace_event(cell.label)),
+        label_x + label_width / 2,
+        label_y + _TRACE_EVENT_LABEL_HEIGHT / 2,
+        css_class="muted",
+        font_size=10,
+        baseline_offset=3.5,
     )
 
 
@@ -686,11 +708,19 @@ def _append_trace_annotations(
 ) -> None:
     targets = _trace_annotation_targets(cells, cell_box, phase_span_ids, phase_state_ids)
     occupied = [
-        rect
-        for cell_id, rect in targets.items()
-        if cell_id not in phase_state_ids
+        _expand_rect(rect, _TRACE_ANNOTATION_CLEARANCE)
+        for rect in _trace_annotation_occupied_boxes(
+            cells, cell_box, phase_span_ids, phase_state_ids
+        )
     ]
     placed: list[tuple[float, float, float, float]] = []
+    placed_annotations: list[
+        tuple[
+            tuple[float, float, float, float],
+            tuple[float, float, float, float],
+            list[str],
+        ]
+    ] = []
     fallback_y = _TRACE_ANNOTATION_MARGIN
 
     lines.append('<g class="annotations">')
@@ -698,7 +728,7 @@ def _append_trace_annotations(
         target = targets.get((kind, label))
         if target is None:
             continue
-        note_lines = _wrap_annotation(note, 24, 3)
+        note_lines = _wrap_annotation(note, _TRACE_ANNOTATION_WRAP_UNITS, 4)
         box_height = (
             _TRACE_ANNOTATION_PADDING_Y * 2
             + len(note_lines) * _TRACE_ANNOTATION_LINE_HEIGHT
@@ -707,14 +737,19 @@ def _append_trace_annotations(
             target,
             _TRACE_ANNOTATION_WIDTH,
             box_height,
-            occupied + placed,
+            occupied + [_expand_rect(rect, _TRACE_ANNOTATION_CLEARANCE) for rect in placed],
             fallback_x,
             fallback_y,
+            _TRACE_ANNOTATION_MARGIN,
         )
         if box[0] == fallback_x:
             fallback_y = box[1] + box[3] + _TRACE_ANNOTATION_GAP
         placed.append(box)
-        _append_annotation_box(lines, box, target, note_lines)
+        placed_annotations.append((box, target, note_lines))
+    for box, target, _note_lines in placed_annotations:
+        _append_annotation_leader(lines, box, target)
+    for box, _target, note_lines in placed_annotations:
+        _append_annotation_body(lines, box, note_lines)
     lines.append("</g>")
 
 
@@ -739,13 +774,30 @@ def _trace_annotation_targets(
     return targets
 
 
+def _trace_annotation_occupied_boxes(
+    cells: tuple[TraceCell, ...],
+    cell_box,
+    phase_span_ids: set[str],
+    phase_state_ids: set[str],
+) -> list[tuple[float, float, float, float]]:
+    boxes: list[tuple[float, float, float, float]] = []
+    for cell in cells:
+        if cell.id in phase_state_ids:
+            continue
+        if cell.kind in {"state", "verified_state"} and not _is_trace_phase_label(cell.label):
+            boxes.append(_trace_state_anchor_box(cell_box(cell)))
+        elif cell.kind == "event_span" and cell.id not in phase_span_ids:
+            boxes.append(_trace_event_anchor_box(cell, cell_box(cell)))
+    return boxes
+
+
 def _trace_state_anchor_box(
     box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
     x, y, width, height = box
     pad_x = 8
     box_width = max(10, width - pad_x * 2)
-    box_height = 30
+    box_height = _TRACE_STATE_BOX_HEIGHT
     box_x = x + pad_x
     box_y = y + (height - box_height) / 2
     return box_x, box_y, box_width, box_height
@@ -758,6 +810,7 @@ def _choose_annotation_box(
     occupied: list[tuple[float, float, float, float]],
     fallback_x: float,
     fallback_y: float,
+    min_y: float,
 ) -> tuple[float, float, float, float]:
     x, y, w, h = target
     candidates = [
@@ -771,26 +824,40 @@ def _choose_annotation_box(
             continue
         if not any(_rects_overlap(candidate, rect) for rect in occupied):
             return candidate
+    target_center_y = y + h / 2
+    preferred_y = max(min_y, target_center_y - height / 2)
+    fallback_candidates = [(fallback_x, preferred_y, width, height)]
+    for step in range(1, _TRACE_ANNOTATION_FALLBACK_SCAN_STEPS + 1):
+        offset = step * _TRACE_ANNOTATION_GAP
+        fallback_candidates.append((fallback_x, preferred_y - offset, width, height))
+        fallback_candidates.append((fallback_x, preferred_y + offset, width, height))
+    for candidate in fallback_candidates:
+        if candidate[1] < min_y:
+            continue
+        if not any(_rects_overlap(candidate, rect) for rect in occupied):
+            return candidate
     return fallback_x, fallback_y, width, height
 
 
-def _append_annotation_box(
+def _append_annotation_leader(
     lines: list[str],
     box: tuple[float, float, float, float],
     target: tuple[float, float, float, float],
+) -> None:
+    leader_x, leader_y, target_x, target_y = _annotation_leader_points(box, target)
+    lines.append(
+        f'<line class="annotation-leader" x1="{leader_x:.1f}" y1="{leader_y:.1f}" x2="{target_x:.1f}" y2="{target_y:.1f}" />'
+    )
+
+
+def _append_annotation_body(
+    lines: list[str],
+    box: tuple[float, float, float, float],
     note_lines: list[str],
 ) -> None:
     x, y, width, height = box
-    target_x, target_y, target_w, target_h = target
-    box_center_y = y + height / 2
-    target_center_x = target_x + target_w / 2
-    target_center_y = target_y + target_h / 2
-    leader_x = x if x >= target_center_x else x + width
-    lines.extend(
-        [
-            f'<line class="annotation-leader" x1="{leader_x:.1f}" y1="{box_center_y:.1f}" x2="{target_center_x:.1f}" y2="{target_center_y:.1f}" />',
-            f'<rect class="annotation-box" x="{x:.1f}" y="{y:.1f}" width="{width:.1f}" height="{height:.1f}" rx="4" />',
-        ]
+    lines.append(
+        f'<rect class="annotation-box" x="{x:.1f}" y="{y:.1f}" width="{width:.1f}" height="{height:.1f}" rx="4" />'
     )
     for index, line in enumerate(note_lines):
         text_y = y + _TRACE_ANNOTATION_PADDING_Y + (index + 1) * _TRACE_ANNOTATION_LINE_HEIGHT - 2
@@ -799,29 +866,145 @@ def _append_annotation_box(
         )
 
 
-def _wrap_annotation(text: str, width: int, max_lines: int) -> list[str]:
-    words = text.split()
+def _annotation_leader_points(
+    source: tuple[float, float, float, float],
+    target: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    source_center = _rect_center(source)
+    target_center = _rect_center(target)
+    source_x, source_y = _rect_edge_point_towards(source, target_center)
+    target_x, target_y = _rect_edge_point_towards(target, source_center)
+    return source_x, source_y, target_x, target_y
+
+
+def _rect_center(rect: tuple[float, float, float, float]) -> tuple[float, float]:
+    x, y, width, height = rect
+    return x + width / 2, y + height / 2
+
+
+def _rect_edge_point_towards(
+    rect: tuple[float, float, float, float],
+    point: tuple[float, float],
+) -> tuple[float, float]:
+    x, y, width, height = rect
+    center_x, center_y = _rect_center(rect)
+    dx = point[0] - center_x
+    dy = point[1] - center_y
+    if dx == 0 and dy == 0:
+        return center_x, center_y
+    x_scale = (width / 2) / abs(dx) if dx else float("inf")
+    y_scale = (height / 2) / abs(dy) if dy else float("inf")
+    scale = min(x_scale, y_scale)
+    return center_x + dx * scale, center_y + dy * scale
+
+
+def _append_trace_centered_text(
+    lines: list[str],
+    label_lines: tuple[str, ...],
+    x: float,
+    center_y: float,
+    *,
+    css_class: str | None = None,
+    font_size: int,
+    baseline_offset: float,
+) -> None:
+    class_attr = f' class="{css_class}"' if css_class else ""
+    y = center_y - (len(label_lines) - 1) * _TRACE_LABEL_LINE_HEIGHT / 2 + baseline_offset
+    if len(label_lines) == 1:
+        lines.append(
+            f'<text{class_attr} x="{x:.1f}" y="{y:.1f}" font-size="{font_size}" text-anchor="middle">{_xml_escape(label_lines[0])}</text>'
+        )
+        return
+
+    parts = [
+        f'<text{class_attr} x="{x:.1f}" y="{y:.1f}" font-size="{font_size}" text-anchor="middle">',
+        f'<tspan x="{x:.1f}">{_xml_escape(label_lines[0])}</tspan>',
+    ]
+    for line in label_lines[1:]:
+        parts.append(
+            f'<tspan x="{x:.1f}" dy="{_TRACE_LABEL_LINE_HEIGHT}">{_xml_escape(line)}</tspan>'
+        )
+    parts.append("</text>")
+    lines.append("".join(parts))
+
+
+def _wrap_annotation(text: str, max_units: int, max_lines: int) -> list[str]:
+    words = _annotation_words(text, max_units)
     if not words:
         return [""]
     lines: list[str] = []
     current = ""
-    for word in words:
+    truncated = False
+    for index, word in enumerate(words):
         candidate = word if not current else f"{current} {word}"
-        if len(candidate) <= width:
+        if _annotation_text_units(candidate) <= max_units:
             current = candidate
             continue
+        if len(lines) == max_lines - 1:
+            truncated = True
+            break
         if current:
             lines.append(current)
         current = word
-        if len(lines) == max_lines - 1:
-            break
     if current and len(lines) < max_lines:
         lines.append(current)
-    if len(lines) == max_lines and words:
-        consumed = " ".join(lines)
-        if len(consumed) < len(text):
-            lines[-1] = lines[-1].rstrip(".") + "..."
-    return lines or [text[:width]]
+    elif current:
+        truncated = True
+    if not truncated and len(lines) == max_lines and index < len(words) - 1:
+        truncated = True
+    if truncated and lines:
+        lines[-1] = _ellipsis_line(lines[-1], max_units)
+    return lines or [_trim_annotation_line(text, max_units)]
+
+
+def _annotation_words(text: str, max_units: int) -> list[str]:
+    words: list[str] = []
+    for word in text.split():
+        current = ""
+        current_units = 0
+        for char in word:
+            char_units = _annotation_char_units(char)
+            if current and current_units + char_units > max_units:
+                words.append(current)
+                current = char
+                current_units = char_units
+            else:
+                current += char
+                current_units += char_units
+        if current:
+            words.append(current)
+    return words
+
+
+def _annotation_text_units(text: str) -> int:
+    return sum(_annotation_char_units(char) for char in text)
+
+
+def _annotation_char_units(char: str) -> int:
+    return 2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+
+
+def _trim_annotation_line(line: str, max_units: int) -> str:
+    result = ""
+    used_units = 0
+    for char in line:
+        char_units = _annotation_char_units(char)
+        if result and used_units + char_units > max_units:
+            break
+        if not result and char_units > max_units:
+            break
+        result += char
+        used_units += char_units
+    return result
+
+
+def _ellipsis_line(line: str, max_units: int) -> str:
+    ellipsis = "..."
+    ellipsis_units = _annotation_text_units(ellipsis)
+    if max_units <= ellipsis_units:
+        return "." * max_units
+    trimmed = _trim_annotation_line(line.rstrip("."), max_units - ellipsis_units).rstrip()
+    return f"{trimmed}{ellipsis}" if trimmed else ellipsis
 
 
 def _rects_overlap(
@@ -832,12 +1015,26 @@ def _rects_overlap(
     return ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
 
 
+def _expand_rect(
+    rect: tuple[float, float, float, float], amount: float
+) -> tuple[float, float, float, float]:
+    x, y, width, height = rect
+    return x - amount, y - amount, width + amount * 2, height + amount * 2
+
+
 def _shorten_trace_label(label: str) -> str:
     return label.replace(".State::", ".")
 
 
 def _shorten_trace_event(label: str) -> str:
     return label.replace(".Event::", ".")
+
+
+def _trace_label_lines(label: str) -> tuple[str, ...]:
+    if "." not in label:
+        return (label,)
+    object_name, state_or_event = label.split(".", 1)
+    return (object_name, state_or_event)
 
 
 def _is_trace_phase_event(label: str) -> bool:
