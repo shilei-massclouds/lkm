@@ -1,0 +1,223 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="3600" viewBox="0 0 1280 3600" role="img" aria-labelledby="title desc">
+  <title id="title">核心准备期对象构建时序</title>
+  <desc id="desc">展示核心准备期从 paging_init 完成到 trap_init 完成之间的候选对象和 deferred 过程顺序。</desc>
+  <defs>
+    <style>
+      text {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif;
+        fill: #0f172a;
+      }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 20px; fill: #475569; }
+      .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+      .platform { fill: #fff7ed; stroke: #f97316; }
+      .memory { fill: #f0fdf4; stroke: #22c55e; }
+      .arch { fill: #eff6ff; stroke: #3b82f6; }
+      .cpu { fill: #fefce8; stroke: #ca8a04; }
+      .param { fill: #f5f3ff; stroke: #7c3aed; }
+      .trap { fill: #fdf2f8; stroke: #db2777; }
+      .defer { fill: #f1f5f9; stroke: #64748b; stroke-dasharray: 6 4; }
+      .obj { font-size: 24px; font-weight: 500; dominant-baseline: middle; }
+      .line1 { font-size: 23px; font-weight: 500; dominant-baseline: middle; }
+      .line2 { font-size: 18px; fill: #475569; dominant-baseline: middle; }
+      .boundary { font-size: 18px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
+      .num { font-size: 18px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
+      .dot { fill: #334155; }
+      .split { fill: #e2e8f0; stroke: #64748b; stroke-width: 1.2; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="3600" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">核心准备期对象构建时序</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">CorePreparePhase.setup(): setup_arch 后半段 + start_kernel 到 trap_init</text>
+
+  <rect x="48" y="128" width="210" height="3350" rx="14" class="lane"/>
+  <text x="153" y="164" text-anchor="middle" class="obj">核心准备期对象</text>
+  <text x="153" y="190" text-anchor="middle" class="subtitle">setup()</text>
+  <line x1="153" y1="224" x2="153" y2="3458" class="timeline"/>
+
+  <rect x="290" y="118" width="870" height="50" rx="10" class="stage"/>
+  <text x="318" y="143" class="boundary">起点边界：paging_init() 完成，VM.Online，SwapperVM.Online，MemBlock.Online</text>
+
+  <rect x="290" y="205" width="870" height="52" rx="10" class="split"/>
+  <text x="318" y="231" class="boundary">A. setup_arch() 中 paging_init() 之后的体系结构收尾</text>
+
+  <g transform="translate(0 90)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">1</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">acpi_boot_table_init()</text>
+    <text x="318" y="265" class="line2">defer：ACPI 引导路径，当前 FDT/SBI 最小路径暂不展开</text>
+  </g>
+
+  <g transform="translate(0 202)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">2</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box platform"/>
+    <text x="318" y="234" class="line1">DeviceTree.setup() / unflatten_device_tree()</text>
+    <text x="318" y="265" class="line2">建立正式 OF/DeviceTree 运行期结构，接续 EarlyDtb 的早期事实</text>
+  </g>
+
+  <g transform="translate(0 314)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">3</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box memory"/>
+    <text x="318" y="234" class="line1">MiscMemoryInit.setup() / misc_mem_init()</text>
+    <text x="318" y="265" class="line2">完整页表可用后的体系结构杂项内存初始化</text>
+  </g>
+
+  <g transform="translate(0 426)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">4</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box memory"/>
+    <text x="318" y="234" class="line1">ResourceTree.setup() / init_resources()</text>
+    <text x="318" y="265" class="line2">基于 MemBlock memory/reserved 区段建立系统资源树</text>
+  </g>
+
+  <g transform="translate(0 538)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">5</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">kasan_init()</text>
+    <text x="318" y="265" class="line2">defer：CONFIG_KASAN 条件路径</text>
+  </g>
+
+  <g transform="translate(0 650)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">6</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">setup_smp() 与 ACPI CPU/NUMA 映射</text>
+    <text x="318" y="265" class="line2">defer：SMP/ACPI/NUMA 条件路径，后续多核阶段展开</text>
+  </g>
+
+  <g transform="translate(0 762)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">7</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
+    <text x="318" y="234" class="line1">RiscvCacheBlock.setup() / riscv_init_cbo_blocksizes()</text>
+    <text x="318" y="265" class="line2">记录 RISC-V cache block operation 的块大小事实</text>
+  </g>
+
+  <g transform="translate(0 874)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">8</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
+    <text x="318" y="234" class="line1">RiscvHwCap.setup() / riscv_fill_hwcap()</text>
+    <text x="318" y="265" class="line2">汇总 ISA/hwcap 能力，供 alternatives 和用户态能力暴露使用</text>
+  </g>
+
+  <g transform="translate(0 986)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">9</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
+    <text x="318" y="234" class="line1">BootAlternative.setup() / apply_boot_alternatives()</text>
+    <text x="318" y="265" class="line2">根据 CPU/ISA 能力应用启动期 alternatives patch</text>
+  </g>
+
+  <g transform="translate(0 1098)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">10</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
+    <text x="318" y="234" class="line1">SignalEnv.setup() / init_rt_signal_env()</text>
+    <text x="318" y="265" class="line2">初始化实时信号环境；纯 kernel-mode payload 可先延后实现</text>
+  </g>
+
+  <g transform="translate(0 1210)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">11</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
+    <text x="318" y="234" class="line1">DmaCachePolicy.setup()</text>
+    <text x="318" y="265" class="line2">覆盖 riscv_noncoherent_supported() 条件路径和 DMA cache alignment</text>
+  </g>
+
+  <g transform="translate(0 1322)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">12</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
+    <text x="318" y="234" class="line1">UserIsa.setup() / riscv_user_isa_enable()</text>
+    <text x="318" y="265" class="line2">为后续用户态执行路径准备可暴露 ISA 能力</text>
+  </g>
+
+  <rect x="290" y="1714" width="870" height="52" rx="10" class="split"/>
+  <text x="318" y="1740" class="boundary">B. setup_arch() 返回后到 trap_init() 的通用核心准备</text>
+
+  <g transform="translate(0 1584)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">13</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">jump_label_init() / static_call_init() / early_security_init()</text>
+    <text x="318" y="265" class="line2">defer：静态分支、静态调用与安全框架早期初始化</text>
+  </g>
+
+  <g transform="translate(0 1696)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">14</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box param"/>
+    <text x="318" y="234" class="line1">CommandLine/BootConfig.setup()</text>
+    <text x="318" y="265" class="line2">覆盖 setup_boot_config() 与 setup_command_line()</text>
+  </g>
+
+  <g transform="translate(0 1808)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">15</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box cpu"/>
+    <text x="318" y="234" class="line1">CpuTopology/PerCpuArea.setup()</text>
+    <text x="318" y="265" class="line2">覆盖 setup_nr_cpu_ids(), setup_per_cpu_areas(), smp_prepare_boot_cpu()</text>
+  </g>
+
+  <g transform="translate(0 1920)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">16</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">early_numa_node_init() / boot_cpu_hotplug_init()</text>
+    <text x="318" y="265" class="line2">defer：NUMA 与 CPU hotplug 早期状态，后续拓扑阶段展开</text>
+  </g>
+
+  <g transform="translate(0 2032)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">17</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box param"/>
+    <text x="318" y="234" class="line1">KernelParam 后续事件 / parse_early_param() + parse_args()</text>
+    <text x="318" y="265" class="line2">第二次 early param 与普通内核参数、init 参数解析，不自动合并</text>
+  </g>
+
+  <g transform="translate(0 2144)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">18</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
+    <text x="318" y="234" class="line1">RandomEarly.setup() / random_init_early()</text>
+    <text x="318" y="265" class="line2">allocator 初始化前完成架构与非 timekeeping RNG 早期初始化</text>
+  </g>
+
+  <g transform="translate(0 2256)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">19</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box param"/>
+    <text x="318" y="234" class="line1">LogBuffer.setup() / setup_log_buf()</text>
+    <text x="318" y="265" class="line2">使用大块 bootmem 扩展日志缓冲，区别于静态 PrintkBuffer.preset()</text>
+  </g>
+
+  <g transform="translate(0 2368)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">20</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">vfs_caches_init_early()</text>
+    <text x="318" y="265" class="line2">defer：VFS 早期缓存初始化，当前核心启动建模暂缓</text>
+  </g>
+
+  <g transform="translate(0 2480)">
+    <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">21</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box trap"/>
+    <text x="318" y="234" class="line1">ExceptionTable.setup() / sort_main_extable()</text>
+    <text x="318" y="265" class="line2">整理主异常表，为异常恢复和故障定位准备</text>
+  </g>
+
+  <g transform="translate(0 2592)">
+    <circle cx="153" cy="320" r="15" class="dot"/><text x="153" y="320" class="num">22</text>
+    <rect x="290" y="205" width="870" height="318" rx="12" class="box trap"/>
+    <text x="318" y="234" class="line1">ExceptionStream.setup() / trap_init()</text>
+    <text x="318" y="265" class="line2">建立正式异常分类、分发和 handler 注册框架；作为阶段终点</text>
+
+    <rect x="340" y="312" width="760" height="48" rx="8" class="box trap"/>
+    <text x="366" y="330" class="line2">22.1  PageFaultException.setup()</text>
+    <text x="366" y="350" class="line2">page fault 被正式识别；恢复机制不在本阶段承诺</text>
+
+    <rect x="340" y="374" width="760" height="48" rx="8" class="box trap"/>
+    <text x="366" y="392" class="line2">22.2  BreakpointException.setup()</text>
+    <text x="366" y="412" class="line2">breakpoint 进入调试异常分类；正式调试机制可后续启用</text>
+
+    <rect x="340" y="436" width="760" height="48" rx="8" class="box trap"/>
+    <text x="366" y="454" class="line2">22.3  UnexpectedException.setup()</text>
+    <text x="366" y="474" class="line2">非法指令、访存错误等意外异常保持 panic 策略</text>
+
+    <rect x="340" y="498" width="760" height="58" rx="8" class="box defer"/>
+    <text x="366" y="520" class="line2">22.4  SyscallException 保持 Prepared</text>
+    <text x="366" y="542" class="line2">syscall/ecall 等用户态执行路径建立后再推进</text>
+  </g>
+
+  <rect x="290" y="3410" width="870" height="50" rx="10" class="stage"/>
+  <text x="318" y="3435" class="boundary">终点边界：trap_init() 完成，ExceptionStream.Ready，异常分发框架就绪</text>
+</svg>

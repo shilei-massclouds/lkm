@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">核心准备期对象分类与相互关系</title>
+  <desc id="desc">展示核心准备期从 paging_init 完成到 trap_init 完成之间的候选对象分类与依赖关系。</desc>
+  <defs>
+    <style>
+      text {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif;
+        fill: #0f172a;
+      }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 19px; fill: #475569; }
+      .group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .memory { fill: #f0fdf4; stroke: #22c55e; }
+      .platform { fill: #fff7ed; stroke: #f97316; }
+      .arch { fill: #eff6ff; stroke: #3b82f6; }
+      .cpu { fill: #fefce8; stroke: #ca8a04; }
+      .param { fill: #f5f3ff; stroke: #7c3aed; }
+      .trap { fill: #fdf2f8; stroke: #db2777; }
+      .defer { fill: #f1f5f9; stroke: #64748b; stroke-dasharray: 6 4; }
+      .label { font-size: 22px; font-weight: 600; dominant-baseline: middle; }
+      .small { font-size: 17px; fill: #475569; dominant-baseline: middle; }
+      .group-title { font-size: 21px; font-weight: 600; fill: #334155; }
+      .edge { stroke: #64748b; stroke-width: 1.4; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="760" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">核心准备期对象分类与相互关系</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">从 paging_init() 完成到 trap_init() 完成：setup_arch 后半段 + start_kernel 后续核心准备</text>
+
+  <rect x="54" y="112" width="240" height="596" rx="16" class="group"/>
+  <text x="174" y="146" text-anchor="middle" class="group-title">阶段对象</text>
+  <rect x="86" y="190" width="176" height="74" rx="10" class="box phase"/>
+  <text x="174" y="218" text-anchor="middle" class="label">CorePreparePhase</text>
+  <text x="174" y="246" text-anchor="middle" class="small">setup()</text>
+  <rect x="86" y="314" width="176" height="74" rx="10" class="box phase"/>
+  <text x="174" y="342" text-anchor="middle" class="label">BootPhase</text>
+  <text x="174" y="370" text-anchor="middle" class="small">父阶段</text>
+  <path d="M174 314 L174 270" class="edge"/>
+
+  <rect x="330" y="112" width="382" height="278" rx="16" class="group"/>
+  <text x="521" y="146" text-anchor="middle" class="group-title">平台与内存资源</text>
+  <rect x="362" y="180" width="150" height="68" rx="9" class="box platform"/>
+  <text x="437" y="208" text-anchor="middle" class="label">DeviceTree</text>
+  <text x="437" y="232" text-anchor="middle" class="small">正式 OF 结构</text>
+  <rect x="530" y="180" width="150" height="68" rx="9" class="box memory"/>
+  <text x="605" y="208" text-anchor="middle" class="label">ResourceTree</text>
+  <text x="605" y="232" text-anchor="middle" class="small">/proc/iomem</text>
+  <rect x="362" y="282" width="150" height="68" rx="9" class="box memory"/>
+  <text x="437" y="310" text-anchor="middle" class="label">MiscMemory</text>
+  <text x="437" y="334" text-anchor="middle" class="small">misc_mem_init</text>
+  <rect x="530" y="282" width="150" height="68" rx="9" class="box memory"/>
+  <text x="605" y="310" text-anchor="middle" class="label">MemBlock</text>
+  <text x="605" y="334" text-anchor="middle" class="small">已 Online</text>
+
+  <rect x="330" y="430" width="382" height="278" rx="16" class="group"/>
+  <text x="521" y="464" text-anchor="middle" class="group-title">体系结构能力</text>
+  <rect x="362" y="496" width="150" height="68" rx="9" class="box arch"/>
+  <text x="437" y="524" text-anchor="middle" class="label">RiscvHwCap</text>
+  <text x="437" y="548" text-anchor="middle" class="small">ISA/hwcap</text>
+  <rect x="530" y="496" width="150" height="68" rx="9" class="box arch"/>
+  <text x="605" y="524" text-anchor="middle" class="label">BootAlternative</text>
+  <text x="605" y="548" text-anchor="middle" class="small">alternatives</text>
+  <rect x="362" y="598" width="150" height="68" rx="9" class="box arch"/>
+  <text x="437" y="626" text-anchor="middle" class="label">CacheBlock</text>
+  <text x="437" y="650" text-anchor="middle" class="small">CBO size</text>
+  <rect x="530" y="598" width="150" height="68" rx="9" class="box arch"/>
+  <text x="605" y="626" text-anchor="middle" class="label">UserIsa</text>
+  <text x="605" y="650" text-anchor="middle" class="small">用户态能力</text>
+
+  <rect x="748" y="112" width="478" height="278" rx="16" class="group"/>
+  <text x="987" y="146" text-anchor="middle" class="group-title">启动参数、CPU 与日志</text>
+  <rect x="782" y="180" width="132" height="68" rx="9" class="box param"/>
+  <text x="848" y="208" text-anchor="middle" class="label">CommandLine</text>
+  <text x="848" y="232" text-anchor="middle" class="small">运行期命令行</text>
+  <rect x="930" y="180" width="132" height="68" rx="9" class="box param"/>
+  <text x="996" y="208" text-anchor="middle" class="label">BootConfig</text>
+  <text x="996" y="232" text-anchor="middle" class="small">bootconfig</text>
+  <rect x="1078" y="180" width="112" height="68" rx="9" class="box cpu"/>
+  <text x="1134" y="208" text-anchor="middle" class="label">PerCpuArea</text>
+  <text x="1134" y="232" text-anchor="middle" class="small">per-cpu</text>
+  <rect x="782" y="282" width="132" height="68" rx="9" class="box cpu"/>
+  <text x="848" y="310" text-anchor="middle" class="label">CpuTopology</text>
+  <text x="848" y="334" text-anchor="middle" class="small">CPU ids</text>
+  <rect x="930" y="282" width="132" height="68" rx="9" class="box arch"/>
+  <text x="996" y="310" text-anchor="middle" class="label">RandomEarly</text>
+  <text x="996" y="334" text-anchor="middle" class="small">早期 RNG</text>
+  <rect x="1078" y="282" width="112" height="68" rx="9" class="box param"/>
+  <text x="1134" y="310" text-anchor="middle" class="label">LogBuffer</text>
+  <text x="1134" y="334" text-anchor="middle" class="small">日志扩展</text>
+
+  <rect x="748" y="430" width="478" height="278" rx="16" class="group"/>
+  <text x="987" y="464" text-anchor="middle" class="group-title">异常与 deferred 路径</text>
+  <rect x="782" y="496" width="132" height="68" rx="9" class="box trap"/>
+  <text x="848" y="524" text-anchor="middle" class="label">ExceptionTable</text>
+  <text x="848" y="548" text-anchor="middle" class="small">sort extable</text>
+  <rect x="930" y="496" width="132" height="68" rx="9" class="box trap"/>
+  <text x="996" y="524" text-anchor="middle" class="label">ExceptionStream</text>
+  <text x="996" y="548" text-anchor="middle" class="small">trap_init</text>
+  <rect x="1078" y="496" width="112" height="68" rx="9" class="box trap"/>
+  <text x="1134" y="524" text-anchor="middle" class="label">子异常</text>
+  <text x="1134" y="548" text-anchor="middle" class="small">PF/BR/Fault</text>
+  <rect x="782" y="598" width="408" height="68" rx="9" class="box defer"/>
+  <text x="986" y="626" text-anchor="middle" class="label">Deferred / 条件路径</text>
+  <text x="986" y="650" text-anchor="middle" class="small">ACPI, KASAN, SMP, NUMA, Security, VFS, StaticCall, jump_label</text>
+
+  <path d="M262 227 C292 227, 302 214, 360 214" class="edge"/>
+  <path d="M262 227 C302 227, 300 530, 360 530" class="edge"/>
+  <path d="M262 227 C520 96, 720 210, 780 214" class="edge"/>
+  <path d="M262 227 C520 720, 720 532, 780 530" class="edge"/>
+</svg>
