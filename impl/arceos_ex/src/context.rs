@@ -1,10 +1,11 @@
 use crate::objects::{
     config::Config, cpu_group::CpuGroup, cpu_id_map::CpuIdMap, early_dtb::EarlyDtb,
-    early_ioremap::EarlyIoremap, event_stream::EventStream, fix_map::FixMap, init_mm::InitMm,
-    init_stack::InitStack, init_task::InitTask, interrupt_stream::InterruptStream,
-    kernel_cmdline::KernelCmdline, kernel_image::KernelImage, kernel_param::KernelParam, lds::Lds,
-    memblock::MemBlock, physical_memory::PhysicalMemory, platform_cpu_info::PlatformCpuInfo,
-    raw_dtb::RawDtb, root_stream::RootStream, sbi::Sbi, static_objects::StaticObjects, vm::Vm,
+    early_ioremap::EarlyIoremap, event_stream::EventStream, exception_stream::ExceptionStream,
+    fix_map::FixMap, init_mm::InitMm, init_stack::InitStack, init_task::InitTask,
+    interrupt_stream::InterruptStream, kernel_cmdline::KernelCmdline, kernel_image::KernelImage,
+    kernel_param::KernelParam, lds::Lds, memblock::MemBlock, physical_memory::PhysicalMemory,
+    platform_cpu_info::PlatformCpuInfo, raw_dtb::RawDtb, root_stream::RootStream, sbi::Sbi,
+    static_objects::StaticObjects, vm::Vm,
 };
 
 pub struct Context {
@@ -19,6 +20,7 @@ pub struct Context {
     pub init_task: InitTask,
     pub init_stack: InitStack,
     pub event_stream: EventStream,
+    pub exception_stream: ExceptionStream,
     pub vm: Vm,
     pub raw_dtb: RawDtb,
     pub fix_map: FixMap,
@@ -48,6 +50,7 @@ impl Context {
             init_task: InitTask::new(),
             init_stack: InitStack::new(),
             event_stream: EventStream::new(),
+            exception_stream: ExceptionStream::new(),
             vm: Vm::new(),
             raw_dtb: RawDtb::new(),
             fix_map: FixMap::new(),

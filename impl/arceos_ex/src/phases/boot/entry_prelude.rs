@@ -208,6 +208,8 @@ fn setup(boot_args: &BootArgs) -> ! {
 fn setup_until_vm_switch(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     adopt_head_prefix(ctx, boot_args)?;
     ctx.event_stream.preset(&ctx.kernel_image)?;
+    ctx.exception_stream
+        .preset(&ctx.event_stream, &ctx.init_stack)?;
     ctx.vm.preset(
         &ctx.config,
         &mut ctx.static_objects,
@@ -302,6 +304,11 @@ fn entry_prelude_phase_ready(ctx: &Context) -> bool {
     ctx.root_stream.state() == State::Prepared
         && ctx.interrupt_stream.state() == State::Prepared
         && ctx.event_stream.state() == State::Online
+        && ctx.exception_stream.state() == State::Prepared
+        && ctx.exception_stream.page_fault_state() == State::Prepared
+        && ctx.exception_stream.syscall_state() == State::Prepared
+        && ctx.exception_stream.breakpoint_state() == State::Prepared
+        && ctx.exception_stream.unexpected_state() == State::Prepared
         && ctx.kernel_image.state() == State::Online
         && ctx.raw_dtb.state() == State::Ready
         && ctx.init_task.state() == State::Online

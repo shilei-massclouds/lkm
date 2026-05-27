@@ -379,6 +379,369 @@ object EventStream: FlowObject {
 }
 
 /*
+ * ExceptionStream 表示事件入口下的异常流总控对象。入口前导期只建立所有异常的受控兜底，
+ * 正式异常分类和分发留给后续对齐 trap_init() 的阶段。
+ */
+object ExceptionStream: FlowObject {
+    initial_state: State::Base;
+    parent: EventStream;
+
+    /*
+     * Base 表示异常流尚未纳入早期受控处理路径。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 在物理地址阶段事件入口就绪后建立全异常兜底策略。
+             * 当前兜底策略是 panic/halt，保证后续建页表和切换地址空间时误入异常仍受控。
+             */
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    EventStream.state == State::Prepared;
+                    InitStack.state == State::Prepared;
+                }
+
+                drives {
+                    PageFaultException.Event::Preset;
+                    SyscallException.Event::Preset;
+                    BreakpointException.Event::Preset;
+                    UnexpectedException.Event::Preset;
+                }
+
+                ensures {
+                    exception_stream_fallback_panic_ready(ExceptionStream);
+                    all_exceptions_covered_by_fallback(ExceptionStream);
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示所有异常都已经有受控兜底；未被子对象机制接管的异常进入 panic/halt。
+     */
+    state State::Prepared {
+        invariant {
+            exception_stream_fallback_panic_ready(ExceptionStream);
+            all_exceptions_covered_by_fallback(ExceptionStream);
+            PageFaultException.state == State::Prepared;
+            SyscallException.state == State::Prepared;
+            BreakpointException.state == State::Prepared;
+            UnexpectedException.state == State::Prepared;
+        }
+
+        events {
+            /*
+             * Setup 对齐后续 trap_init()：建立正式异常分类、分发和 handler 注册框架。
+             * 该事件不属于当前入口前导期。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    EventStream.state == State::Online;
+                }
+
+                ensures {
+                    exception_dispatch_ready(ExceptionStream);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示正式异常分类和分发框架已建立；具体异常机制是否可用由子对象 Enable 表达。
+     */
+    state State::Ready {
+        invariant {
+            exception_stream_fallback_panic_ready(ExceptionStream);
+            exception_dispatch_ready(ExceptionStream);
+        }
+
+        events {
+            /*
+             * Enable 表示当前配置要求的异常机制均已可用；例如 syscall 需要等用户态执行路径准备好。
+             */
+            on Event::Enable -> State::Online {
+                depends_on {
+                    exception_mechanisms_ready(ExceptionStream);
+                }
+
+                ensures {
+                    exception_stream_online(ExceptionStream);
+                }
+            }
+        }
+    }
+
+    /*
+     * Online 表示异常流已经进入当前配置要求的正式服务状态。
+     */
+    state State::Online {
+        invariant {
+            exception_stream_online(ExceptionStream);
+        }
+    }
+}
+
+/*
+ * PageFaultException 表示 page fault 异常对象。入口前导期只要求它被兜底 panic 覆盖；
+ * 后续 VM fault 机制可用后再进入 Enable。
+ */
+object PageFaultException: FlowObject {
+    initial_state: State::Base;
+    parent: ExceptionStream;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    ExceptionStream.state == State::Base;
+                    EventStream.state == State::Prepared;
+                }
+
+                ensures {
+                    exception_fallback_panic_ready(PageFaultException);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            exception_fallback_panic_ready(PageFaultException);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    ExceptionStream.state == State::Prepared;
+                }
+
+                ensures {
+                    page_fault_exception_handler_ready(PageFaultException);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            page_fault_exception_handler_ready(PageFaultException);
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                depends_on {
+                    vm_fault_recovery_ready();
+                }
+
+                ensures {
+                    page_fault_exception_mechanism_ready(PageFaultException);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            page_fault_exception_mechanism_ready(PageFaultException);
+        }
+    }
+}
+
+/*
+ * SyscallException 表示 ecall/syscall 异常对象。入口前导期只纳入兜底；
+ * 真正 Enable 依赖用户态上下文、syscall table 和 trap return 路径。
+ */
+object SyscallException: FlowObject {
+    initial_state: State::Base;
+    parent: ExceptionStream;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    ExceptionStream.state == State::Base;
+                    EventStream.state == State::Prepared;
+                }
+
+                ensures {
+                    exception_fallback_panic_ready(SyscallException);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            exception_fallback_panic_ready(SyscallException);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    ExceptionStream.state == State::Prepared;
+                }
+
+                ensures {
+                    syscall_exception_handler_ready(SyscallException);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            syscall_exception_handler_ready(SyscallException);
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                depends_on {
+                    user_trap_return_ready();
+                    syscall_table_ready();
+                }
+
+                ensures {
+                    syscall_exception_mechanism_ready(SyscallException);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            syscall_exception_mechanism_ready(SyscallException);
+        }
+    }
+}
+
+/*
+ * BreakpointException 表示 breakpoint 调试异常对象。调试机制接入前，其兜底策略仍是 panic/halt。
+ */
+object BreakpointException: FlowObject {
+    initial_state: State::Base;
+    parent: ExceptionStream;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    ExceptionStream.state == State::Base;
+                    EventStream.state == State::Prepared;
+                }
+
+                ensures {
+                    exception_fallback_panic_ready(BreakpointException);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            exception_fallback_panic_ready(BreakpointException);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    ExceptionStream.state == State::Prepared;
+                }
+
+                ensures {
+                    breakpoint_exception_handler_ready(BreakpointException);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            breakpoint_exception_handler_ready(BreakpointException);
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                depends_on {
+                    debug_exception_mechanism_ready();
+                }
+
+                ensures {
+                    breakpoint_exception_mechanism_ready(BreakpointException);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            breakpoint_exception_mechanism_ready(BreakpointException);
+        }
+    }
+}
+
+/*
+ * UnexpectedException 表示除机制型和调试型异常之外的意外异常集合，例如非法指令和访存错误。
+ * 它的正式策略就是 panic/halt，因此 Setup/Enable 可以在后续阶段保持简单。
+ */
+object UnexpectedException: FlowObject {
+    initial_state: State::Base;
+    parent: ExceptionStream;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    ExceptionStream.state == State::Base;
+                    EventStream.state == State::Prepared;
+                }
+
+                ensures {
+                    exception_fallback_panic_ready(UnexpectedException);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            exception_fallback_panic_ready(UnexpectedException);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    ExceptionStream.state == State::Prepared;
+                }
+
+                ensures {
+                    unexpected_exception_handler_ready(UnexpectedException);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            unexpected_exception_handler_ready(UnexpectedException);
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                ensures {
+                    unexpected_exception_panic_policy_online(UnexpectedException);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            unexpected_exception_panic_policy_online(UnexpectedException);
+        }
+    }
+}
+
+/*
  * KernelImage 表示入口前导期可见的内核映像对象。它跟踪映像边界、BSS 段状态和 gp-relative 寻址状态。
  */
 object KernelImage: ImageObject {
@@ -1319,6 +1682,7 @@ object EntryPreludePhase: PhaseObject {
                     InitTask.Event::Preset;
                     InitStack.Event::Preset;
                     EventStream.Event::Preset;
+                    ExceptionStream.Event::Preset;
                     Vm.Event::Preset;
                     Vm.Event::Setup;
                     EventStream.Event::Enable;
@@ -1341,6 +1705,11 @@ object EntryPreludePhase: PhaseObject {
             RootStream.state == State::Prepared;
             InterruptStream.state == State::Prepared;
             EventStream.state == State::Online;
+            ExceptionStream.state == State::Prepared;
+            PageFaultException.state == State::Prepared;
+            SyscallException.state == State::Prepared;
+            BreakpointException.state == State::Prepared;
+            UnexpectedException.state == State::Prepared;
             KernelImage.state == State::Online;
             RawDtb.state == State::Ready;
             InitTask.state == State::Online;

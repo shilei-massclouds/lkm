@@ -7,6 +7,7 @@ pub mod early_ioremap;
 pub mod early_vm;
 pub mod earlycon;
 pub mod event_stream;
+pub mod exception_stream;
 pub mod fdt;
 pub mod fdt_facts;
 pub mod fdt_parser;
