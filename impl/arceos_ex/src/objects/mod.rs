@@ -18,6 +18,7 @@ pub mod kernel_image;
 pub mod kernel_param;
 pub mod lds;
 pub mod memblock;
+pub mod page_table;
 pub mod physical_memory;
 pub mod platform_cpu_info;
 pub mod printk;
