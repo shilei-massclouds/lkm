@@ -89,23 +89,45 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    let system_ram_kib = system_ram_bytes / 1024;
+
     printk::write_fmt(format_args!(
-        "total_resources={}\n  {}=1\n  {}={} bytes={}\n  {}={}\n  {}=1 segments={}\n  kernel_range={:#x}..{:#x}\n",
+        "Resource tree:\n  Entries      : {}\n  {:<12} : {}\n  {:<12} : {} {}, {} KiB\n  {:<12} : {} {}\n  {:<12} : [mem {:#x}-{:#x}], {} {}\n",
         resource_tree.resource_count(),
+        "Root",
         ResourceKind::Root.name(),
         ResourceKind::SystemRam.name(),
         system_ram_count,
-        system_ram_bytes,
+        region_word(system_ram_count),
+        system_ram_kib,
         ResourceKind::Reserved.name(),
         reserved_count,
+        region_word(reserved_count),
         ResourceKind::KernelImage.name(),
-        kernel_segment_count,
         kernel.range().start(),
-        kernel.range().end()
+        kernel.range().end() - 1,
+        kernel_segment_count,
+        segment_word(kernel_segment_count)
     ));
     SmokeResult::Passed
 }
 
 fn contains(parent: ResourceRef<'_>, child: ResourceRef<'_>) -> bool {
     parent.range().start() <= child.range().start() && parent.range().end() >= child.range().end()
+}
+
+fn region_word(count: usize) -> &'static str {
+    if count == 1 {
+        "region"
+    } else {
+        "regions"
+    }
+}
+
+fn segment_word(count: usize) -> &'static str {
+    if count == 1 {
+        "segment"
+    } else {
+        "segments"
+    }
 }
