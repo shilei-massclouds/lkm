@@ -30,7 +30,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.cpu_group
         .setup_smp(&ctx.device_tree, &ctx.cpu_id_map, &ctx.sbi)?;
     ctx.cpu_id_map.setup(&ctx.cpu_group)?;
-    ctx.cache_block_info.setup(&ctx.device_tree)?;
+    ctx.cache_block_info
+        .setup(&ctx.device_tree, &ctx.cpu_group)?;
     ctx.riscv_hwcap
         .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
     ctx.saved_command_line

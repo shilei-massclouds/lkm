@@ -203,13 +203,16 @@ object ResourceTree: ResourceObject {
 }
 
 /*
- * CacheBlockInfo 表示 RISC-V cache block operation 的块大小事实。
+ * CacheBlockInfo 表示 RISC-V cache block operation 的平台级块大小事实。
+ * 它是独立事实对象；CorePreparePhase 只编排其 Setup，不拥有该对象。
+ * 当前最小模型按 Linux 6.12.37 的 riscv_init_cbo_blocksizes() 建模：
+ * 从 DeviceTree CPU nodes 收集 CBOM/CBOZ block size，并发布为系统级事实。
  */
 object CacheBlockInfo: HardwareObject {
     initial_state: State::Base;
 
     /*
-     * Base 表示 cache block size 尚未从平台描述和架构能力中确认。
+     * Base 表示 CBOM/CBOZ block size 尚未从平台描述中确认。
      */
     state State::Base {
         events {
@@ -220,21 +223,34 @@ object CacheBlockInfo: HardwareObject {
                 depends_on {
                     Riscv64.state == State::Online;
                     DeviceTree.state == State::Ready;
+                    CpuGroup.state == State::Ready;
                 }
 
                 ensures {
-                    riscv_cache_block_info_ready(CacheBlockInfo, DeviceTree);
+                    cache_block_info_ready(CacheBlockInfo, DeviceTree, CpuGroup);
+                    cache_block_info_source_is_cpu_nodes(CacheBlockInfo, DeviceTree);
+                    cbom_block_size_fact_ready(CacheBlockInfo);
+                    cboz_block_size_fact_ready(CacheBlockInfo);
+                    cache_block_info_values_platform_wide(CacheBlockInfo);
+                    cache_block_info_missing_property_allowed(CacheBlockInfo);
+                    cache_block_info_mismatch_diagnostic_nonfatal(CacheBlockInfo);
                 }
             }
         }
     }
 
     /*
-     * Ready 表示 cache block operation 所需块大小事实已经可供后续机制依赖。
+     * Ready 表示 CBOM/CBOZ block size 已收敛为可供后续机制依赖的系统级事实。
      */
     state State::Ready {
         invariant {
-            riscv_cache_block_info_ready(CacheBlockInfo, DeviceTree);
+            cache_block_info_ready(CacheBlockInfo, DeviceTree, CpuGroup);
+            cache_block_info_source_is_cpu_nodes(CacheBlockInfo, DeviceTree);
+            cbom_block_size_fact_ready(CacheBlockInfo);
+            cboz_block_size_fact_ready(CacheBlockInfo);
+            cache_block_info_values_platform_wide(CacheBlockInfo);
+            cache_block_info_missing_property_allowed(CacheBlockInfo);
+            cache_block_info_mismatch_diagnostic_nonfatal(CacheBlockInfo);
         }
     }
 }
@@ -657,6 +673,7 @@ object CorePreparePhase: PhaseObject {
                     "arch_reserve_crashkernel() 暂缓：crashkernel 资源保留路径后续展开。"
                     "kasan_init() 暂缓：CONFIG_KASAN 条件路径。"
                     "acpi_init_rintc_map() / acpi_map_cpus_to_nodes() 暂缓：依赖 ACPI CPU 拓扑和 NUMA 模型。"
+                    "CBOP block size 暂缓：DeviceTree binding 定义 riscv,cbop-block-size，但 Linux 6.12.37 的 riscv_init_cbo_blocksizes() 当前只发布 CBOM/CBOZ。"
                     "apply_boot_alternatives() 暂缓：启动期 alternatives patch 后续抽象为代码补丁设施。"
                     "init_rt_signal_env() 暂缓：用户态信号环境不属于当前最小核心准备路径。"
                     "riscv_noncoherent_supported() / riscv_set_dma_cache_alignment() 暂缓：DMA/cache policy 后续建模。"

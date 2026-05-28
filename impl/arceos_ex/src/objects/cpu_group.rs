@@ -204,6 +204,21 @@ impl CpuGroup {
         }
     }
 
+    pub fn has_hartid(&self, hartid: usize) -> bool {
+        if self.boot_cpu.hartid == hartid {
+            return true;
+        }
+
+        let mut index = 0usize;
+        while index < self.secondary_count {
+            if self.secondary_cpus[index].hartid == hartid {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
     pub const fn possible_cpu_count(&self) -> usize {
         1 + self.secondary_count
     }

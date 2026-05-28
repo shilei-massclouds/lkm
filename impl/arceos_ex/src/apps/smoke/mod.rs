@@ -34,6 +34,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::cpu_id_map::run,
     },
     SmokeCase {
+        name: "cache_block_info",
+        run: cases::cache_block_info::run,
+    },
+    SmokeCase {
         name: "memblock",
         run: cases::memblock::run,
     },

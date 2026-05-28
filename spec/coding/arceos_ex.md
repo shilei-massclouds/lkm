@@ -252,7 +252,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `MemBlock`
 - `InitMM`
 - `EarlyIoremap`
-- `CorePreparePhase` 的最小对象骨架：`DeviceTree`、`Zones`、`ResourceTree`、`CacheBlockInfo`、`RiscvHwCap`、`SavedCommandLine`、`StaticCommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`
+- `CorePreparePhase` 编排的最小对象骨架：`DeviceTree`、`Zones`、`ResourceTree`、`CacheBlockInfo`、`RiscvHwCap`、`SavedCommandLine`、`StaticCommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`。这些对象不是 `CorePreparePhase` 的下级对象；phase 只驱动其生命周期事件。
 
 ## DeviceTree unflatten 编码约束
 
@@ -270,6 +270,12 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 3. 第二遍填充 `DeviceNode`、property、root、parent/children 和查询索引或等价关系。
 
 `DeviceTree.Ready` checkpoint 只能在第二遍完成，并且 root 唯一、非 root 节点 parent 唯一、parent/children 一致、路径查询和 property 查询均可用之后发出。涉及裸指针写入 `MemBlock` 分配存储的代码应封装在小的内部 unsafe 边界内，对外优先暴露安全的状态推进和查询接口。
+
+## CacheBlockInfo 编码约束
+
+`CacheBlockInfo.setup()` 对应 Linux 6.12.37 的 `riscv_init_cbo_blocksizes()`。当前实现只发布平台级 `CBOM` 和 `CBOZ` block size 事实；`CBOP` 虽然存在 DeviceTree binding，但不在该 Linux 初始化点发布，暂不进入当前对象状态。
+
+实现必须从正式 `DeviceTree` 的 `/cpus` CPU nodes 读取 `riscv,cbom-block-size` 和 `riscv,cboz-block-size`，并结合 `CpuGroup` 只收集当前拓扑中的 hart。缺失属性表示 unavailable，不应导致启动失败。多个 hart 值不一致时只记录诊断事实，保持 first value wins 的收敛策略，不 panic，也不阻止 `CacheBlockInfo` 进入 `Ready`。
 
 ## RISC-V64 generic 平台任务
 
