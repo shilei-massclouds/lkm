@@ -30,6 +30,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::memblock::run,
     },
     SmokeCase {
+        name: "device_tree",
+        run: cases::device_tree::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },
