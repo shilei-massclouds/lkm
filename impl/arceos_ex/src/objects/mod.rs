@@ -1,11 +1,11 @@
 pub mod boot_args;
-pub mod boot_cpu_hotplug;
 pub mod boot_param;
 pub mod cache_block_info;
 pub mod command_line;
 pub mod config;
 pub mod cpu_capabilities;
 pub mod cpu_group;
+pub mod cpu_hotplug;
 pub mod cpu_id_map;
 pub mod device_tree;
 pub mod early_dtb;

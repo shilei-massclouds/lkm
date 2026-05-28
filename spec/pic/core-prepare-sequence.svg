@@ -156,7 +156,7 @@
   <g transform="translate(0 1920)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">16</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
-    <text x="318" y="234" class="line1">BootCpuHotplugState.setup() / boot_cpu_hotplug_init()</text>
+    <text x="318" y="234" class="line1">CpuHotplugState.setup() / boot_cpu_hotplug_init()</text>
     <text x="318" y="265" class="line2">early_numa_node_init() 不纳入当前 SMP over UMA 规格</text>
   </g>
 

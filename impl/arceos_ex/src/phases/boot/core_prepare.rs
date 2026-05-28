@@ -50,7 +50,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.cpu_group,
         &ctx.cpu_id_map,
     )?;
-    ctx.boot_cpu_hotplug_state
+    ctx.cpu_hotplug_state
         .setup(&ctx.cpu_group, &ctx.per_cpu_storage)?;
     checkpoint_second_parse_early_param(&ctx.early_param)?;
     ctx.boot_param
@@ -163,7 +163,7 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.per_cpu_storage.static_image().state() == State::Ready
         && ctx.per_cpu_storage.first_chunk().state() == State::Ready
         && ctx.per_cpu_storage.offset_table().state() == State::Ready
-        && ctx.boot_cpu_hotplug_state.state() == State::Ready
+        && ctx.cpu_hotplug_state.state() == State::Ready
         && ctx.boot_param.state() == State::Ready
         && ctx.payload_param.state() == State::Ready
         && ctx.randomness.state() == State::Prepared

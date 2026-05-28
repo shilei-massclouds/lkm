@@ -571,9 +571,11 @@ object PerCpuStorage: MemoryObject {
 }
 
 /*
- * BootCpuHotplugState 表示 BootCPU 下的 hotplug 状态对象。后续 SecondaryCPU 也应具备同类子对象。
+ * CpuHotplugState 表示 CPUObject 下的通用 hotplug 状态对象类型。
+ * 当前 DSL 尚未表达“每个 CPUObject 一份”的实例集合，因此此处先声明
+ * BootCPU 实例；后续 SecondaryCPU bringup/teardown 复用同类子状态。
  */
-object BootCpuHotplugState: HardwareObject {
+object CpuHotplugState: HardwareObject {
     initial_state: State::Base;
     parent: BootCPU;
 
@@ -592,10 +594,10 @@ object BootCpuHotplugState: HardwareObject {
                 }
 
                 ensures {
-                    cpu_hotplug_state_ready(BootCpuHotplugState, BootCPU);
-                    cpu_hotplug_state_current(BootCpuHotplugState, BootCPU, Online);
-                    cpu_hotplug_state_target(BootCpuHotplugState, BootCPU, Online);
-                    boot_cpu_recorded_booted_once(BootCpuHotplugState, BootCPU);
+                    cpu_hotplug_state_ready(CpuHotplugState, BootCPU);
+                    cpu_hotplug_state_current(CpuHotplugState, BootCPU, Online);
+                    cpu_hotplug_state_target(CpuHotplugState, BootCPU, Online);
+                    boot_cpu_recorded_booted_once(CpuHotplugState, BootCPU);
                 }
             }
         }
@@ -606,10 +608,10 @@ object BootCpuHotplugState: HardwareObject {
      */
     state State::Ready {
         invariant {
-            cpu_hotplug_state_ready(BootCpuHotplugState, BootCPU);
-            cpu_hotplug_state_current(BootCpuHotplugState, BootCPU, Online);
-            cpu_hotplug_state_target(BootCpuHotplugState, BootCPU, Online);
-            boot_cpu_recorded_booted_once(BootCpuHotplugState, BootCPU);
+            cpu_hotplug_state_ready(CpuHotplugState, BootCPU);
+            cpu_hotplug_state_current(CpuHotplugState, BootCPU, Online);
+            cpu_hotplug_state_target(CpuHotplugState, BootCPU, Online);
+            boot_cpu_recorded_booted_once(CpuHotplugState, BootCPU);
         }
     }
 }
@@ -815,7 +817,7 @@ object CorePreparePhase: PhaseObject {
                     CpuCapabilities.Event::Setup;
                     CommandLine.Event::Setup;
                     PerCpuStorage.Event::Setup;
-                    BootCpuHotplugState.Event::Setup;
+                    CpuHotplugState.Event::Setup;
                     BootParam.Event::Setup;
                     PayloadParam.Event::Setup;
                     Randomness.Event::Preset;
@@ -884,7 +886,7 @@ object CorePreparePhase: PhaseObject {
             PerCpuStaticImage.state == State::Ready;
             PerCpuFirstChunk.state == State::Ready;
             PerCpuOffsetTable.state == State::Ready;
-            BootCpuHotplugState.state == State::Ready;
+            CpuHotplugState.state == State::Ready;
             BootParam.state == State::Ready;
             PayloadParam.state == State::Ready;
             Randomness.state == State::Prepared;
