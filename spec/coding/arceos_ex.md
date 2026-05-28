@@ -227,7 +227,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `MemBlock`
 - `InitMM`
 - `EarlyIoremap`
-- `CorePreparePhase` 的最小对象骨架：`DeviceTree`、`Zones`、`PageAllocatorPrepare`、`ResourceTree`、`CacheBlockInfo`、`RiscvHwCap`、`SavedCommandLine`、`StaticCommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`
+- `CorePreparePhase` 的最小对象骨架：`DeviceTree`、`Zones`、`ResourceTree`、`CacheBlockInfo`、`RiscvHwCap`、`SavedCommandLine`、`StaticCommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`
 
 ## DeviceTree unflatten 编码约束
 

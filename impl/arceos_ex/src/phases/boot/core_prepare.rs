@@ -25,8 +25,6 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.device_tree
         .setup(&ctx.raw_dtb, &ctx.vm, &mut ctx.memblock, &ctx.config)?;
     ctx.zones.setup(&ctx.memblock, &ctx.vm)?;
-    ctx.page_allocator_prepare
-        .setup(&ctx.memblock, &ctx.vm, &ctx.zones)?;
     ctx.resource_tree
         .setup(&ctx.memblock, &ctx.kernel_image, &ctx.lds)?;
     ctx.cpu_group
@@ -133,7 +131,6 @@ pub fn is_ready() -> bool {
 fn core_prepare_phase_ready(ctx: &Context) -> bool {
     ctx.device_tree.state() == State::Ready
         && ctx.zones.state() == State::Ready
-        && ctx.page_allocator_prepare.state() == State::Ready
         && ctx.resource_tree.state() == State::Ready
         && ctx.cpu_group.state() == State::Ready
         && ctx.cache_block_info.state() == State::Ready

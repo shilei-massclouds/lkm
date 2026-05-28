@@ -1,5 +1,6 @@
 use crate::objects::{
-    boot_cpu_hotplug::BootCpuHotplugState, boot_param::BootParam,
+    boot_cpu_hotplug::BootCpuHotplugState,
+    boot_param::BootParam,
     cache_block_info::CacheBlockInfo,
     command_line::{SavedCommandLine, StaticCommandLine},
     config::Config,
@@ -21,7 +22,6 @@ use crate::objects::{
     kernel_image::KernelImage,
     lds::Lds,
     memblock::MemBlock,
-    page_allocator_prepare::PageAllocatorPrepare,
     payload_param::PayloadParam,
     per_cpu_storage::PerCpuStorage,
     physical_memory::PhysicalMemory,
@@ -67,7 +67,6 @@ pub struct Context {
 
     pub device_tree: DeviceTree,
     pub zones: Zones,
-    pub page_allocator_prepare: PageAllocatorPrepare,
     pub resource_tree: ResourceTree,
     pub cache_block_info: CacheBlockInfo,
     pub riscv_hwcap: RiscvHwCap,
@@ -110,7 +109,6 @@ impl Context {
             memblock: MemBlock::new(),
             device_tree: DeviceTree::new(),
             zones: Zones::new(),
-            page_allocator_prepare: PageAllocatorPrepare::new(),
             resource_tree: ResourceTree::new(),
             cache_block_info: CacheBlockInfo::new(),
             riscv_hwcap: RiscvHwCap::new(),

@@ -154,48 +154,6 @@ object Zones: MemoryObject {
 }
 
 /*
- * PageAllocatorPrepare 表示正式页分配器进入 mm_core_init() 之前的准备状态。
- * 本阶段只建立页分配核心的早期准备条件，不宣称完整内存分配机制已经完成。
- */
-object PageAllocatorPrepare: MemoryObject {
-    initial_state: State::Base;
-
-    /*
-     * Base 表示页分配器准备对象尚未承接 paging_init() 后的内存状态。
-     */
-    state State::Base {
-        events {
-            /*
-             * Setup 对应 paging_init() 之后、mm_core_init() 之前的页分配准备工作。
-             */
-            on Event::Setup -> State::Ready {
-                depends_on {
-                    MemBlock.state == State::Online;
-                    Vm.state == State::Online;
-                    SwapperVm.state == State::Online;
-                    Zones.state == State::Ready;
-                }
-
-                ensures {
-                    page_allocator_prepare_ready(PageAllocatorPrepare, MemBlock, SwapperVm);
-                    page_allocator_zone_model_ready(PageAllocatorPrepare, Zones);
-                }
-            }
-        }
-    }
-
-    /*
-     * Ready 表示正式页分配器的前置准备已完成，但 mm_core_init() 尚未完成。
-     */
-    state State::Ready {
-        invariant {
-            page_allocator_prepare_ready(PageAllocatorPrepare, MemBlock, SwapperVm);
-            page_allocator_zone_model_ready(PageAllocatorPrepare, Zones);
-        }
-    }
-}
-
-/*
  * ResourceTree 表示系统资源树。它把 MemBlock 中的 memory/reserved 区段和内核镜像段
  * 登记为可查询、可嵌套的 Resource 关系。
  */
@@ -665,7 +623,6 @@ object CorePreparePhase: PhaseObject {
                 drives {
                     DeviceTree.Event::Setup;
                     Zones.Event::Setup;
-                    PageAllocatorPrepare.Event::Setup;
                     ResourceTree.Event::Setup;
                     CpuGroup.Event::Setup;
                     CacheBlockInfo.Event::Setup;
@@ -729,7 +686,6 @@ object CorePreparePhase: PhaseObject {
             EntrySuccessorPhase.state == State::Ready;
             DeviceTree.state == State::Ready;
             Zones.state == State::Ready;
-            PageAllocatorPrepare.state == State::Ready;
             ResourceTree.state == State::Ready;
             CpuGroup.state == State::Ready;
             CacheBlockInfo.state == State::Ready;
