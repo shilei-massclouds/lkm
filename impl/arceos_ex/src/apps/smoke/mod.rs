@@ -34,6 +34,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::device_tree::run,
     },
     SmokeCase {
+        name: "zones",
+        run: cases::zones::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },
