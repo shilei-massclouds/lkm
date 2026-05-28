@@ -35,6 +35,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    let mut kernel_segment_count = 0usize;
     for kind in [
         ResourceKind::KernelCode,
         ResourceKind::KernelRodata,
@@ -51,6 +52,7 @@ pub fn run() -> SmokeResult {
             printk::write_str("kernel segment relationship invalid\n");
             return SmokeResult::Failed;
         }
+        kernel_segment_count += 1;
     }
 
     let mut system_ram_count = 0usize;
@@ -88,10 +90,12 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "resources={} system_ram={} reserved={} kernel={:#x}..{:#x}\n",
+        "resources={} root=1 system_ram={} reserved={} kernel=1 segments={} kernel_name={} kernel={:#x}..{:#x}\n",
         resource_tree.resource_count(),
         system_ram_count,
         reserved_count,
+        kernel_segment_count,
+        kernel.kind().name(),
         kernel.range().start(),
         kernel.range().end()
     ));

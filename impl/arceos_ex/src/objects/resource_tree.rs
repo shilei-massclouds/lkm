@@ -22,6 +22,21 @@ pub enum ResourceKind {
     KernelBss,
 }
 
+impl ResourceKind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Root => "I/O memory",
+            Self::SystemRam => "System RAM",
+            Self::Reserved => "Reserved",
+            Self::KernelImage => "Kernel image",
+            Self::KernelCode => "Kernel code",
+            Self::KernelRodata => "Kernel rodata",
+            Self::KernelData => "Kernel data",
+            Self::KernelBss => "Kernel bss",
+        }
+    }
+}
+
 pub struct ResourceTree {
     lifecycle: Lifecycle,
     records: [ResourceRecord; MAX_RESOURCES],
