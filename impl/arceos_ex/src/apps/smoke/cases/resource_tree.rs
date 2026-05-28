@@ -90,12 +90,16 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "resources={} root=1 system_ram={} reserved={} kernel=1 segments={} kernel_name={} kernel={:#x}..{:#x}\n",
+        "total_resources={}\n  {}=1\n  {}={} bytes={}\n  {}={}\n  {}=1 segments={}\n  kernel_range={:#x}..{:#x}\n",
         resource_tree.resource_count(),
+        ResourceKind::Root.name(),
+        ResourceKind::SystemRam.name(),
         system_ram_count,
+        system_ram_bytes,
+        ResourceKind::Reserved.name(),
         reserved_count,
+        ResourceKind::KernelImage.name(),
         kernel_segment_count,
-        kernel.kind().name(),
         kernel.range().start(),
         kernel.range().end()
     ));
