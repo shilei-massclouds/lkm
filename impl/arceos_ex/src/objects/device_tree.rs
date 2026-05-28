@@ -269,6 +269,30 @@ impl DeviceTree {
         self.find_path_in_records(path)
     }
 
+    pub fn root(&self) -> Option<DeviceNodeRef<'_>> {
+        if self.lifecycle.state() != State::Ready || self.record_node(0).is_none() {
+            return None;
+        }
+        Some(DeviceNodeRef {
+            tree: self,
+            index: 0,
+        })
+    }
+
+    pub fn find_node(&self, path: &[u8]) -> Option<DeviceNodeRef<'_>> {
+        let index = self.find_path(path)?;
+        self.record_node(index)?;
+        Some(DeviceNodeRef { tree: self, index })
+    }
+
+    fn record_node(&self, index: usize) -> Option<DeviceNodeRecord> {
+        self.records()?.node(index)
+    }
+
+    fn record_property(&self, index: usize) -> Option<DevicePropertyRecord> {
+        self.records()?.property(index)
+    }
+
     fn find_path_in_records(&self, path: &[u8]) -> Option<usize> {
         if path == b"/" {
             return Some(0);
@@ -294,6 +318,144 @@ impl DeviceTree {
             }
         }
         Some(current)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DeviceNodeRef<'dt> {
+    tree: &'dt DeviceTree,
+    index: usize,
+}
+
+impl<'dt> DeviceNodeRef<'dt> {
+    pub fn name(&self) -> &'dt [u8] {
+        self.record()
+            .and_then(|record| raw_string_slice(record.name))
+            .unwrap_or(&[])
+    }
+
+    pub fn parent(&self) -> Option<DeviceNodeRef<'dt>> {
+        let parent = self.record()?.parent;
+        if parent == NO_INDEX {
+            return None;
+        }
+        self.tree.record_node(parent)?;
+        Some(DeviceNodeRef {
+            tree: self.tree,
+            index: parent,
+        })
+    }
+
+    pub fn children(&self) -> ChildIter<'dt> {
+        let next = self
+            .record()
+            .map(|record| record.first_child)
+            .unwrap_or(NO_INDEX);
+        ChildIter {
+            tree: self.tree,
+            next,
+            remaining: self.tree.node_count,
+        }
+    }
+
+    pub fn properties(&self) -> PropertyIter<'dt> {
+        let next = self
+            .record()
+            .map(|record| record.first_property)
+            .unwrap_or(NO_INDEX);
+        PropertyIter {
+            tree: self.tree,
+            next,
+            remaining: self.tree.property_count,
+        }
+    }
+
+    pub fn property(&self, name: &[u8]) -> Option<DevicePropertyRef<'dt>> {
+        self.properties().find(|property| property.name() == name)
+    }
+
+    fn record(&self) -> Option<DeviceNodeRecord> {
+        self.tree.record_node(self.index)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DevicePropertyRef<'dt> {
+    tree: &'dt DeviceTree,
+    index: usize,
+}
+
+impl<'dt> DevicePropertyRef<'dt> {
+    pub fn name(&self) -> &'dt [u8] {
+        self.record()
+            .and_then(|record| raw_string_slice(record.name))
+            .unwrap_or(&[])
+    }
+
+    pub fn raw_value(&self) -> &'dt [u8] {
+        self.record()
+            .and_then(|record| raw_bytes_slice(record.value_addr, record.value_len))
+            .unwrap_or(&[])
+    }
+
+    fn record(&self) -> Option<DevicePropertyRecord> {
+        self.tree.record_property(self.index)
+    }
+}
+
+pub struct ChildIter<'dt> {
+    tree: &'dt DeviceTree,
+    next: usize,
+    remaining: usize,
+}
+
+impl<'dt> Iterator for ChildIter<'dt> {
+    type Item = DeviceNodeRef<'dt>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == NO_INDEX || self.remaining == 0 {
+            return None;
+        }
+
+        let index = self.next;
+        let Some(record) = self.tree.record_node(index) else {
+            self.next = NO_INDEX;
+            return None;
+        };
+        self.next = record.next_sibling;
+        self.remaining -= 1;
+        Some(DeviceNodeRef {
+            tree: self.tree,
+            index,
+        })
+    }
+}
+
+pub struct PropertyIter<'dt> {
+    tree: &'dt DeviceTree,
+    next: usize,
+    remaining: usize,
+}
+
+impl<'dt> Iterator for PropertyIter<'dt> {
+    type Item = DevicePropertyRef<'dt>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next == NO_INDEX || self.remaining == 0 {
+            return None;
+        }
+
+        let index = self.next;
+        let Some(record) = self.tree.record_property(index) else {
+            self.next = NO_INDEX;
+            return None;
+        };
+        self.next = record.next;
+        self.remaining -= 1;
+        Some(DevicePropertyRef {
+            tree: self.tree,
+            index,
+        })
     }
 }
 
@@ -774,6 +936,18 @@ fn raw_string_matches_slice(string: RawString, expected: &[u8]) -> Option<bool> 
         index += 1;
     }
     Some(true)
+}
+
+fn raw_string_slice<'a>(string: RawString) -> Option<&'a [u8]> {
+    raw_bytes_slice(string.addr, string.len)
+}
+
+fn raw_bytes_slice<'a>(addr: usize, len: usize) -> Option<&'a [u8]> {
+    if len == 0 {
+        return Some(&[]);
+    }
+    addr.checked_add(len)?;
+    Some(unsafe { core::slice::from_raw_parts(addr as *const u8, len) })
 }
 
 fn round_up(value: usize, align: usize) -> Option<usize> {
