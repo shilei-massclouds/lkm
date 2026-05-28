@@ -59,7 +59,7 @@ make clean
 
 `80966ec` 曾暴露 `13 obligation / 2 deferred`。这些条目不能作为实现可忽略的提示；处理原则是：实现某个对象事件前，必须先通过“推导义务门禁”。能由模型、推导工具、链接脚本、ISA、固件规范或已证明前序事实推出的，应优先补齐推导证明；只能由外部交付保证支撑的，应明确作为 source assumption，并在后续对象事件中尽快转化为运行期检查；无法归类的应作为规格缺口或显式 deferred。
 
-当前已补齐 Lds、OpenSBI DTB handoff 和 BootCPU 前序事实的推导规则，`make verify` 报告为 `0 obligation / 2 deferred`。后续若再次出现 obligation，应先回到本节分类处理，不得直接继续实现。
+当前已补齐 Lds、OpenSBI DTB handoff 和 BootCPU 前序事实的推导规则，`make verify` 报告为 `0 obligation / 3 deferred`。后续若再次出现 obligation，应先回到本节分类处理，不得直接继续实现。
 
 | 分类 | 条目 | 影响范围 | 当前处理策略 |
 | --- | --- | --- | --- |

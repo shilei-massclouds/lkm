@@ -34,10 +34,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.device_tree, &ctx.cpu_group)?;
     ctx.cpu_capabilities
         .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
-    ctx.saved_command_line
-        .setup(&ctx.kernel_cmdline, &ctx.memblock)?;
-    ctx.static_command_line
-        .setup(&ctx.kernel_cmdline, &ctx.saved_command_line, &ctx.memblock)?;
+    ctx.command_line.setup(
+        &ctx.kernel_cmdline,
+        &mut ctx.saved_command_line,
+        &mut ctx.static_command_line,
+        &ctx.memblock,
+    )?;
     checkpoint_setup_nr_cpu_ids(&ctx.cpu_id_map, &ctx.cpu_group)?;
     ctx.per_cpu_storage
         .setup(&ctx.memblock, &ctx.vm, &ctx.cpu_group, &ctx.cpu_id_map)?;
@@ -147,6 +149,7 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.cpu_id_map.state() == State::Ready
         && ctx.cache_block_info.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
+        && ctx.command_line.state() == State::Ready
         && ctx.saved_command_line.state() == State::Ready
         && ctx.static_command_line.state() == State::Ready
         && ctx.per_cpu_storage.state() == State::Ready

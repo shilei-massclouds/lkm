@@ -43,13 +43,15 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.early_dtb.setup(
         &ctx.raw_dtb,
         &mut ctx.memblock,
+        &mut ctx.command_line,
         &mut ctx.kernel_cmdline,
         &ctx.physical_memory,
     )?;
     ctx.init_mm.setup(&ctx.lds)?;
     ctx.early_ioremap.setup(&ctx.fix_map)?;
     ctx.sbi.setup()?;
-    ctx.early_param.setup(&ctx.kernel_cmdline, &ctx.sbi)?;
+    ctx.early_param
+        .setup(&ctx.command_line, &ctx.kernel_cmdline, &ctx.sbi)?;
     ctx.memblock.setup(
         &ctx.early_dtb,
         &ctx.kernel_image,
@@ -101,6 +103,7 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.cpu_id_map.state() == State::Prepared
         && printk::is_prepared()
         && ctx.early_dtb.state() == State::Destroyed
+        && ctx.command_line.state() == State::Prepared
         && ctx.kernel_cmdline.state() == State::Ready
         && ctx.init_mm.state() == State::Ready
         && ctx.early_ioremap.state() == State::Ready

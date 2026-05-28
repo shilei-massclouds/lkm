@@ -1,8 +1,9 @@
 use super::{
+    command_line::CommandLine,
+    early_param::EarlyParam,
     fdt::{self, BootCommandLine, FdtFacts, HartSet, PhysRangeSet},
     fix_map::FixMap,
     kernel_cmdline::KernelCmdline,
-    early_param::EarlyParam,
     memblock::MemBlock,
     physical_memory::PhysicalMemory,
     platform_cpu_info::PlatformCpuInfo,
@@ -109,6 +110,7 @@ impl EarlyDtb {
         &mut self,
         raw_dtb: &RawDtb,
         memblock: &mut MemBlock,
+        command_line: &mut CommandLine,
         kernel_cmdline: &mut KernelCmdline,
         physical_memory: &PhysicalMemory,
     ) -> EventResult {
@@ -129,7 +131,7 @@ impl EarlyDtb {
             return result;
         }
 
-        let result = kernel_cmdline.preset(raw_dtb, &self.facts);
+        let result = command_line.preset(raw_dtb, &self.facts, kernel_cmdline);
         if result.is_err() {
             return result;
         }

@@ -1,4 +1,5 @@
 use super::{
+    command_line::CommandLine,
     earlycon,
     kernel_cmdline::KernelCmdline,
     printk,
@@ -22,8 +23,14 @@ impl EarlyParam {
         self.lifecycle.state()
     }
 
-    pub fn setup(&mut self, kernel_cmdline: &KernelCmdline, sbi: &Sbi) -> EventResult {
-        if kernel_cmdline.state() != State::Ready
+    pub fn setup(
+        &mut self,
+        command_line: &CommandLine,
+        kernel_cmdline: &KernelCmdline,
+        sbi: &Sbi,
+    ) -> EventResult {
+        if command_line.state() != State::Prepared
+            || kernel_cmdline.state() != State::Ready
             || sbi.state() != State::Ready
             || !printk::is_prepared()
             || !kernel_cmdline.has_earlycon_sbi()
