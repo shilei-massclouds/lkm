@@ -8,7 +8,9 @@
 
 /*
  * DeviceTree 表示正式运行期设备树对象。它不同于 EarlyDtb：EarlyDtb 只服务早期事实提取，
- * DeviceTree 则建立运行期可遍历和可查询的 OF/DeviceTree 结构。
+ * DeviceTree 则建立运行期可遍历和可查询的 OF/DeviceTree 结构。展开后的
+ * DeviceTree 存储由 MemBlock 早期分配提供；这里描述的是结果语义，具体的两次遍历
+ * 和内存写入策略由 coding 规格约束。
  *
  * DeviceNode 是 DeviceTree 中的抽象节点。规格层描述的是逻辑关系：每个节点有 name、
  * properties、可选 parent 引用和 children 集合；这些关系不要求实现必须使用指针、数组下标、
@@ -34,6 +36,9 @@ object DeviceTree: ResourceObject {
                 }
 
                 ensures {
+                    device_tree_unflattened_from_raw_dtb(DeviceTree, RawDtb);
+                    device_tree_storage_allocated_from_memblock(DeviceTree, MemBlock);
+                    device_tree_storage_accessible_in_swapper_vm(DeviceTree, SwapperVm);
                     device_tree_root_exists(DeviceTree);
                     device_tree_root_unique(DeviceTree);
                     device_tree_root_has_no_parent(DeviceTree);
@@ -58,6 +63,9 @@ object DeviceTree: ResourceObject {
      */
     state State::Ready {
         invariant {
+            device_tree_unflattened_from_raw_dtb(DeviceTree, RawDtb);
+            device_tree_storage_allocated_from_memblock(DeviceTree, MemBlock);
+            device_tree_storage_accessible_in_swapper_vm(DeviceTree, SwapperVm);
             device_tree_root_exists(DeviceTree);
             device_tree_root_unique(DeviceTree);
             device_tree_root_has_no_parent(DeviceTree);

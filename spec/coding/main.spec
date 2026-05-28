@@ -8,3 +8,4 @@
 include "mapping.spec";
 include "riscv64.spec";
 include "rust.spec";
+include "arceos_ex.spec";

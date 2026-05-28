@@ -15,11 +15,12 @@
 3. `mapping.spec`：对象、Phase、状态、事件、checkpoint、源码落点和规则强度分层的正式规格。
 4. `riscv64.spec`：RISC-V64 架构、链接脚本和入口地址语义相关的正式规格。
 5. `rust.spec`：Rust 语言、安全边界和 ABI 相关的正式规格。
-6. `mapping.md`：对 `mapping.spec` 的说明、例子和补充解释，不覆盖正式规格。
-7. `riscv64.md`：RISC-V64 架构相关补充说明。
-8. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充说明。
-9. `arceos.md`：参考 ArceOS 时的取舍原则。
-10. `arceos_ex.md`：当前实验内核的对象级实现说明；它不覆盖前述规格，只记录当前阶段如何落实规格。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
+6. `arceos_ex.spec`：当前 `arceos_ex` 目标内核的对象级编码约束。
+7. `mapping.md`：对 `mapping.spec` 的说明、例子和补充解释，不覆盖正式规格。
+8. `riscv64.md`：RISC-V64 架构相关补充说明。
+9. `rust.md`：Rust 语言、安全边界和 crate 信任边界相关补充说明。
+10. `arceos.md`：参考 ArceOS 时的取舍原则。
+11. `arceos_ex.md`：当前实验内核的对象级实现说明；它不覆盖前述规格，只记录当前阶段如何落实规格。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。
 
 若后读文档与先读文档发生冲突，不能自行选择更方便的解释。必须回到上级规格确认：模型语义优先于 coding 规格，`mapping.spec` 的 `MUST` 优先于其它 coding 补充文档，`mapping.spec` 的 `SHOULD` 需要默认遵循或显式记录偏离原因，计划文档不得覆盖规格文档。
 
@@ -110,5 +111,6 @@
 - `mapping.spec`：模型对象、阶段、状态、事件和检查点到代码的正式规则，包括 `MUST`、`SHOULD`、`MAY` 和 `NOTE` 分层。
 - `riscv64.spec`：RISC-V64 链接脚本、入口地址事实和地址转换来源的正式规则。
 - `rust.spec`：Rust 语言、安全边界和 ABI 使用的正式规则。
+- `arceos_ex.spec`：当前 `arceos_ex` 目标内核的对象级编码约束。
 - `mapping.md`：模型对象、阶段、状态、事件和检查点到代码的说明性映射文档。
 - `arceos_ex.md`：`arceos_ex` 第一轮对象级实现说明；不得作为覆盖规格的依据。统一任务优先级和状态见 [`../../docs/ROADMAP.md`](../../docs/ROADMAP.md)。

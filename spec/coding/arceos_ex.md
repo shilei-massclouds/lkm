@@ -227,7 +227,24 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `MemBlock`
 - `InitMM`
 - `EarlyIoremap`
-- `CorePreparePhase` 的 no-alloc 最小对象骨架：`DeviceTree`、`Zones`、`PageAllocatorPrepare`、`ResourceTree`、`CacheBlockInfo`、`RiscvHwCap`、`SavedCommandLine`、`StaticCommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`
+- `CorePreparePhase` 的最小对象骨架：`DeviceTree`、`Zones`、`PageAllocatorPrepare`、`ResourceTree`、`CacheBlockInfo`、`RiscvHwCap`、`SavedCommandLine`、`StaticCommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`
+
+## DeviceTree unflatten 编码约束
+
+正式 `DeviceTree` 对应模型中的 `DeviceTree.setup()`，参考 Linux 的 `unflatten_device_tree()` /
+`unflatten_and_copy_device_tree()` 路径。它不同于早期 `EarlyDtb` 扫描：`EarlyDtb` 只提取启动早期事实，
+`DeviceTree` 要建立后续运行期可遍历、可查询的树结构。
+
+`DeviceTree.setup()` 必须把 `MemBlock.Online` 作为可分配早期物理内存的能力来使用，而不是只检查状态。
+展开树的节点和属性元数据必须来自 `MemBlock` 早期分配；不得使用普通 heap、`Vec`/`Box`，也不得用固定静态数组作为正式展开存储。属性原始值可以引用生命周期受保护的 `RawDtb` 或内建 DTB 拷贝，但这种引用关系必须在对象状态中可解释，不能依赖已经销毁的 `EarlyDtb` 临时结构。
+
+实现应采用两次遍历 `RawDtb` 的流程：
+
+1. 第一遍校验 FDT 结构，并计算展开后节点、属性和必要元数据所需空间；若遇到格式错误、深度越界、大小溢出或无法映射的地址范围，事件必须失败，不能提交 `Ready`。
+2. 通过 `MemBlock.alloc_phys(size, align)` 或等价的 `MemBlock` 事件接口申请物理存储，并通过 `SwapperVm`/`Config` 已建立的线性映射取得可写地址。
+3. 第二遍填充 `DeviceNode`、property、root、parent/children 和查询索引或等价关系。
+
+`DeviceTree.Ready` checkpoint 只能在第二遍完成，并且 root 唯一、非 root 节点 parent 唯一、parent/children 一致、路径查询和 property 查询均可用之后发出。涉及裸指针写入 `MemBlock` 分配存储的代码应封装在小的内部 unsafe 边界内，对外优先暴露安全的状态推进和查询接口。
 
 ## RISC-V64 generic 平台任务
 
