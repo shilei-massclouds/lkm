@@ -256,13 +256,17 @@ object CacheBlockInfo: HardwareObject {
 }
 
 /*
- * RiscvHwCap 表示 RISC-V ISA/hwcap 能力汇总。
+ * CpuCapabilities 表示 CPU 集合的能力事实视图。它是独立事实对象；
+ * CorePreparePhase 只编排其 Setup，不拥有该对象。
+ * 当前最小模型对应 Linux 6.12.37 的 riscv_fill_hwcap()：
+ * 从 DeviceTree CPU nodes 收集 per-hart ISA facts，结合 CpuGroup 形成
+ * all-harts common capability facts，并用 CacheBlockInfo 校验 Zicbom/Zicboz。
  */
-object RiscvHwCap: HardwareObject {
+object CpuCapabilities: HardwareObject {
     initial_state: State::Base;
 
     /*
-     * Base 表示硬件能力尚未汇总。
+     * Base 表示 CPU 能力事实尚未汇总。
      */
     state State::Base {
         events {
@@ -278,20 +282,36 @@ object RiscvHwCap: HardwareObject {
                 }
 
                 ensures {
-                    riscv_hwcap_ready(RiscvHwCap, DeviceTree, CpuGroup);
-                    riscv_isa_facts_ready(RiscvHwCap);
+                    cpu_capabilities_ready(CpuCapabilities, DeviceTree, CpuGroup);
+                    cpu_capabilities_source_is_cpu_nodes(CpuCapabilities, DeviceTree);
+                    per_hart_isa_facts_ready(CpuCapabilities, CpuGroup);
+                    common_cpu_isa_facts_ready(CpuCapabilities, CpuGroup);
+                    elf_hwcap_facts_ready(CpuCapabilities);
+                    fpu_capability_facts_ready(CpuCapabilities);
+                    vector_capability_facts_ready(CpuCapabilities);
+                    zicbom_capability_validated(CpuCapabilities, CacheBlockInfo);
+                    zicboz_capability_validated(CpuCapabilities, CacheBlockInfo);
                 }
             }
         }
     }
 
     /*
-     * Ready 表示 ISA/hwcap 能力事实已经可供 alternatives、DMA/cache 和用户态能力路径依赖。
+     * Ready 表示 CPU 能力事实已经可供 alternatives、DMA/cache、上下文管理
+     * 和用户态能力路径依赖。FPU/VECTOR 的支持事实属于本对象；入口期禁用
+     * FPU/VECTOR 的执行状态属于 CPU execution context，不由本对象推进。
      */
     state State::Ready {
         invariant {
-            riscv_hwcap_ready(RiscvHwCap, DeviceTree, CpuGroup);
-            riscv_isa_facts_ready(RiscvHwCap);
+            cpu_capabilities_ready(CpuCapabilities, DeviceTree, CpuGroup);
+            cpu_capabilities_source_is_cpu_nodes(CpuCapabilities, DeviceTree);
+            per_hart_isa_facts_ready(CpuCapabilities, CpuGroup);
+            common_cpu_isa_facts_ready(CpuCapabilities, CpuGroup);
+            elf_hwcap_facts_ready(CpuCapabilities);
+            fpu_capability_facts_ready(CpuCapabilities);
+            vector_capability_facts_ready(CpuCapabilities);
+            zicbom_capability_validated(CpuCapabilities, CacheBlockInfo);
+            zicboz_capability_validated(CpuCapabilities, CacheBlockInfo);
         }
     }
 }
@@ -643,7 +663,7 @@ object CorePreparePhase: PhaseObject {
                     CpuGroup.Event::Setup;
                     CpuIdMap.Event::Setup;
                     CacheBlockInfo.Event::Setup;
-                    RiscvHwCap.Event::Setup;
+                    CpuCapabilities.Event::Setup;
                     SavedCommandLine.Event::Setup;
                     StaticCommandLine.Event::Setup;
                     PerCpuStorage.Event::Setup;
@@ -708,7 +728,7 @@ object CorePreparePhase: PhaseObject {
             CpuGroup.state == State::Ready;
             CpuIdMap.state == State::Ready;
             CacheBlockInfo.state == State::Ready;
-            RiscvHwCap.state == State::Ready;
+            CpuCapabilities.state == State::Ready;
             SavedCommandLine.state == State::Ready;
             StaticCommandLine.state == State::Ready;
             PerCpuStorage.state == State::Ready;

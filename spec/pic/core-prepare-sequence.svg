@@ -97,7 +97,7 @@
   <g transform="translate(0 874)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">8</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
-    <text x="318" y="234" class="line1">RiscvHwCap.setup() / riscv_fill_hwcap()</text>
+    <text x="318" y="234" class="line1">CpuCapabilities.setup() / riscv_fill_hwcap()</text>
     <text x="318" y="265" class="line2">汇总 ISA/hwcap 能力，供 alternatives 和用户态能力暴露使用</text>
   </g>
 

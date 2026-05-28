@@ -32,7 +32,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.cpu_id_map.setup(&ctx.cpu_group)?;
     ctx.cache_block_info
         .setup(&ctx.device_tree, &ctx.cpu_group)?;
-    ctx.riscv_hwcap
+    ctx.cpu_capabilities
         .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
     ctx.saved_command_line
         .setup(&ctx.kernel_cmdline, &ctx.memblock)?;
@@ -146,7 +146,7 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.cpu_group.state() == State::Ready
         && ctx.cpu_id_map.state() == State::Ready
         && ctx.cache_block_info.state() == State::Ready
-        && ctx.riscv_hwcap.state() == State::Ready
+        && ctx.cpu_capabilities.state() == State::Ready
         && ctx.saved_command_line.state() == State::Ready
         && ctx.static_command_line.state() == State::Ready
         && ctx.per_cpu_storage.state() == State::Ready

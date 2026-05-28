@@ -61,7 +61,7 @@
   <rect x="330" y="430" width="382" height="278" rx="16" class="group"/>
   <text x="521" y="464" text-anchor="middle" class="group-title">体系结构能力</text>
   <rect x="362" y="496" width="150" height="68" rx="9" class="box arch"/>
-  <text x="437" y="524" text-anchor="middle" class="label">RiscvHwCap</text>
+  <text x="437" y="524" text-anchor="middle" class="label">CpuCapabilities</text>
   <text x="437" y="548" text-anchor="middle" class="small">ISA/hwcap</text>
   <rect x="530" y="496" width="150" height="68" rx="9" class="box arch"/>
   <text x="605" y="524" text-anchor="middle" class="label">Deferred</text>
