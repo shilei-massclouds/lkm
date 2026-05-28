@@ -142,8 +142,8 @@
   <g transform="translate(0 1696)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">14</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box param"/>
-    <text x="318" y="234" class="line1">SavedCommandLine/StaticCommandLine.setup()</text>
-    <text x="318" y="265" class="line2">覆盖 setup_command_line(); setup_boot_config() 保持 deferred</text>
+    <text x="318" y="234" class="line1">CommandLine.setup() / setup_command_line()</text>
+    <text x="318" y="265" class="line2">建立 saved/static 文本视图；setup_boot_config() 保持 deferred</text>
   </g>
 
   <g transform="translate(0 1808)">

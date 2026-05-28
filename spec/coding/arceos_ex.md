@@ -87,7 +87,7 @@ make clean
 | `set_task_stack_end_magic()` | `CONFIG_SCHED_STACK_END_CHECK=y` | `InitStack` | 可折叠进栈保护语义，但应说明当前不展开 Linux 的具体检查标记。 |
 | `init_vmlinux_build_id()` | `start_kernel()` early generic path | `EntrySuccessorPhase` | 当前未建模 build id 初始化，也未标记 deferred。 |
 | `page_address_init()` | `start_kernel()` before `setup_arch()` | `EntrySuccessorPhase` | 当前没有 page address 元数据对象。 |
-| `setup_command_line()` / saved cmdline | `start_kernel()` after `setup_arch()` | `KernelCmdline` | 当前只建模 raw cmdline 与 early param，未建模 saved/static command line 分裂。 |
+| `setup_command_line()` / saved cmdline | `start_kernel()` after `setup_arch()` | `CommandLine` | `CommandLine` 管理 raw/saved/static 三个文本视图；Param 解析对象保持独立和原时序。 |
 | DT unflatten | `CONFIG_OF_FLATTREE=y` | `EarlyDtb` 或后续 DT 对象 | 当前只覆盖 early scan 所需事实，未标记 unflatten 阶段。 |
 | `phys_ram_base` / `kernel_map.va_pa_offset` 建立 | `CONFIG_64BIT=y`、`CONFIG_MMU=y` | `MemBlock.Setup` 或 `SwapperVm.Setup` | 当前折叠进映射正确性谓词，未单独说明。 |
 | `ZONE_DMA32` / zone 边界初始化前置事实 | `CONFIG_ZONE_DMA32=y` | `MemBlock.Setup` | 当前未抽象 zone 边界与 DMA32 限制。 |
@@ -244,7 +244,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `SwapperVm`
 - `FixMap`
 - `EarlyDtb`
-- `KernelCmdline`
+- `CommandLine` / `KernelCmdline`
 - `EarlyParam`
 - `SBI`
 - `PrintkBuffer`
@@ -252,7 +252,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `MemBlock`
 - `InitMM`
 - `EarlyIoremap`
-- `CorePreparePhase` 编排的最小对象骨架：`DeviceTree`、`Zones`、`ResourceTree`、`CacheBlockInfo`、`CpuCapabilities`、`SavedCommandLine`、`StaticCommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`。这些对象不是 `CorePreparePhase` 的下级对象；phase 只驱动其生命周期事件。
+- `CorePreparePhase` 编排的最小对象骨架：`DeviceTree`、`Zones`、`ResourceTree`、`CacheBlockInfo`、`CpuCapabilities`、`CommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`。这些对象不是 `CorePreparePhase` 的下级对象；phase 只驱动其生命周期事件。`SavedCommandLine` / `StaticCommandLine` 是 `CommandLine` 的子视图对象，不是独立顶级对象。
 
 ## DeviceTree unflatten 编码约束
 

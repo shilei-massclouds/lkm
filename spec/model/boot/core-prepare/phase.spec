@@ -317,15 +317,18 @@ object CpuCapabilities: HardwareObject {
 }
 
 /*
- * SavedCommandLine 表示 setup_command_line() 保存下来的稳定命令行副本。
+ * SavedCommandLine 表示 CommandLine 的 saved view，即 setup_command_line()
+ * 保存下来的稳定命令行副本。
  */
 object SavedCommandLine: ResourceObject {
     initial_state: State::Base;
+    parent: CommandLine;
 
     state State::Base {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
+                    CommandLine.state == State::Prepared;
                     KernelCmdline.state == State::Ready;
                     MemBlock.state == State::Online;
                 }
@@ -345,15 +348,18 @@ object SavedCommandLine: ResourceObject {
 }
 
 /*
- * StaticCommandLine 表示 parse_args() 使用的可修改命令行工作副本。
+ * StaticCommandLine 表示 CommandLine 的 static view，即 parse_args() 使用的
+ * 可修改命令行工作副本。
  */
 object StaticCommandLine: ResourceObject {
     initial_state: State::Base;
+    parent: CommandLine;
 
     state State::Base {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
+                    CommandLine.state == State::Prepared;
                     KernelCmdline.state == State::Ready;
                     SavedCommandLine.state == State::Ready;
                     MemBlock.state == State::Online;
@@ -649,7 +655,7 @@ object CorePreparePhase: PhaseObject {
                     SwapperVm.state == State::Online;
                     MemBlock.state == State::Online;
                     EarlyParam.state == State::Ready;
-                    KernelCmdline.state == State::Ready;
+                    CommandLine.state == State::Prepared;
                     BootCPU.state == State::Online;
                     CpuIdMap.state == State::Prepared;
                     PrintkBuffer.state == State::Prepared;
@@ -664,8 +670,7 @@ object CorePreparePhase: PhaseObject {
                     CpuIdMap.Event::Setup;
                     CacheBlockInfo.Event::Setup;
                     CpuCapabilities.Event::Setup;
-                    SavedCommandLine.Event::Setup;
-                    StaticCommandLine.Event::Setup;
+                    CommandLine.Event::Setup;
                     PerCpuStorage.Event::Setup;
                     BootCpuHotplugState.Event::Setup;
                     BootParam.Event::Setup;
@@ -729,6 +734,7 @@ object CorePreparePhase: PhaseObject {
             CpuIdMap.state == State::Ready;
             CacheBlockInfo.state == State::Ready;
             CpuCapabilities.state == State::Ready;
+            CommandLine.state == State::Ready;
             SavedCommandLine.state == State::Ready;
             StaticCommandLine.state == State::Ready;
             PerCpuStorage.state == State::Ready;

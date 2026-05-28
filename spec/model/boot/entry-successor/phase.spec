@@ -213,7 +213,7 @@ object EarlyDtb: ResourceObject {
 
                 drives {
                     MemBlock.Event::Preset;
-                    KernelCmdline.Event::Preset;
+                    CommandLine.Event::Preset;
                 }
 
                 ensures {
@@ -234,7 +234,7 @@ object EarlyDtb: ResourceObject {
             PlatformCpuInfo.state == State::Online;
             PhysicalMemory.state == State::Online;
             MemBlock.state == State::Prepared;
-            KernelCmdline.state == State::Ready;
+            CommandLine.state == State::Prepared;
         }
 
         events {
@@ -262,13 +262,99 @@ object EarlyDtb: ResourceObject {
 }
 
 /*
- * KernelCmdline 表示从早期 DTB 中提取出来的原始 kernel command line 文本。
+ * CommandLine 表示启动命令行管理对象。它是顶层对象，管理 raw/saved/static
+ * 三个命令行视图；参数解析对象 EarlyParam/BootParam/PayloadParam 不归入本对象。
+ * 入口后继期只通过 Preset 建立 raw view，核心准备期再通过 Setup 建立 saved/static
+ * 副本。
  */
-object KernelCmdline: ResourceObject {
+object CommandLine: ResourceObject {
     initial_state: State::Base;
 
     /*
-     * Base 表示命令行文本尚未从 EarlyDtb 中抽取。
+     * Base 表示尚未建立任何命令行视图。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 建立可供 EarlyParam 解析的 raw command line。
+             */
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    RawDtb.state == State::Ready;
+                }
+
+                drives {
+                    KernelCmdline.Event::Preset;
+                }
+
+                ensures {
+                    command_line_raw_ready(CommandLine, KernelCmdline);
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示 raw command line 已经可供早期参数解析。
+     * Ready 状态在核心准备期由 CommandLine.Setup 推进。
+     */
+    state State::Prepared {
+        invariant {
+            command_line_raw_ready(CommandLine, KernelCmdline);
+            KernelCmdline.state == State::Ready;
+        }
+
+        events {
+            /*
+             * Setup 对应 setup_command_line() 中建立 saved/static 两个命令行副本的部分。
+             * 参数解析仍由 EarlyParam/BootParam/PayloadParam 各自按原时序完成。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    MemBlock.state == State::Online;
+                    KernelCmdline.state == State::Ready;
+                }
+
+                drives {
+                    SavedCommandLine.Event::Setup;
+                    StaticCommandLine.Event::Setup;
+                }
+
+                ensures {
+                    command_line_raw_ready(CommandLine, KernelCmdline);
+                    command_line_copies_ready(CommandLine, SavedCommandLine, StaticCommandLine);
+                    command_line_raw_preserved(CommandLine, KernelCmdline);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 raw/saved/static 三个命令行视图已经建立；后续 Param 对象可以
+     * 按既有时序解析 static view 或 payload 边界。
+     */
+    state State::Ready {
+        invariant {
+            command_line_raw_ready(CommandLine, KernelCmdline);
+            command_line_copies_ready(CommandLine, SavedCommandLine, StaticCommandLine);
+            command_line_raw_preserved(CommandLine, KernelCmdline);
+            KernelCmdline.state == State::Ready;
+            SavedCommandLine.state == State::Ready;
+            StaticCommandLine.state == State::Ready;
+        }
+    }
+}
+
+/*
+ * KernelCmdline 表示 CommandLine 的 raw view，即从早期 DTB 中提取出来的原始
+ * kernel command line 文本。它是 CommandLine 的子视图对象。
+ */
+object KernelCmdline: ResourceObject {
+    initial_state: State::Base;
+    parent: CommandLine;
+
+    /*
+     * Base 表示 raw command line 尚未从 EarlyDtb 中抽取。
      */
     state State::Base {
         events {
@@ -288,7 +374,7 @@ object KernelCmdline: ResourceObject {
     }
 
     /*
-     * Ready 表示命令行文本已经可供早期参数解析。
+     * Ready 表示 raw command line 文本已经可供早期参数解析。
      */
     state State::Ready {
         invariant {
@@ -313,7 +399,7 @@ object EarlyParam: KernelObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    KernelCmdline.state == State::Ready;
+                    CommandLine.state == State::Prepared;
                     StaticObjects.state == State::Online;
                     SBI.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
@@ -327,6 +413,7 @@ object EarlyParam: KernelObject {
 
                 ensures {
                     early_params_dispatched(EarlyParam, KernelCmdline);
+                    early_params_use_raw_command_line(EarlyParam, CommandLine);
                 }
             }
         }
@@ -338,6 +425,7 @@ object EarlyParam: KernelObject {
     state State::Ready {
         invariant {
             early_params_dispatched(EarlyParam, KernelCmdline);
+            early_params_use_raw_command_line(EarlyParam, CommandLine);
             EarlyCon.state == State::Online;
         }
     }
@@ -427,11 +515,12 @@ object EarlyCon: ConsoleObject {
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    KernelCmdline.state == State::Ready;
+                    CommandLine.state == State::Prepared;
                 }
 
                 ensures {
                     earlycon_sbi_config_ready(EarlyCon, KernelCmdline);
+                    earlycon_config_uses_raw_command_line(EarlyCon, CommandLine);
                 }
             }
         }
@@ -443,6 +532,7 @@ object EarlyCon: ConsoleObject {
     state State::Prepared {
         invariant {
             earlycon_sbi_config_ready(EarlyCon, KernelCmdline);
+            earlycon_config_uses_raw_command_line(EarlyCon, CommandLine);
         }
 
         events {
