@@ -1,3 +1,4 @@
+pub mod cpu_id_map;
 pub mod device_tree;
 pub mod fdt;
 pub mod hello;

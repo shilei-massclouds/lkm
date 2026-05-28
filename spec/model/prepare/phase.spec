@@ -111,6 +111,11 @@ object Lds: PrepareObject {
     attrs {
         global_pointer: SymbolAddr;
         text_start: SymbolAddr;
+        text_end: SymbolAddr;
+        rodata_start: SymbolAddr;
+        rodata_end: SymbolAddr;
+        data_start: SymbolAddr;
+        data_end: SymbolAddr;
         elf_entry: SymbolAddr;
         head_text_range: AddrRange;
         pre_mmu_text_range: AddrRange;
@@ -134,11 +139,17 @@ object Lds: PrepareObject {
             global_pointer != 0;
             kernel_start != 0;
             text_start == kernel_start;
+            text_end > text_start;
+            rodata_end >= rodata_start;
+            data_end >= data_start;
             elf_entry == kernel_start;
             kernel_end > kernel_start;
             entry_head_text_layout_ready(Lds);
             pre_mmu_access_discipline_ready(Lds);
             trampoline_access_discipline_ready(Lds);
+            inside(text_start, text_end, kernel_start, kernel_end);
+            inside(rodata_start, rodata_end, kernel_start, kernel_end);
+            inside(data_start, data_end, kernel_start, kernel_end);
             bss_start != 0;
             bss_end > bss_start;
             inside(bss_start, bss_end, kernel_start, kernel_end);
@@ -155,6 +166,11 @@ object Lds: PrepareObject {
         global_pointer = symbol("__global_pointer$");
         kernel_start = symbol("_start");
         text_start = symbol("_start");
+        text_end = symbol("_etext");
+        rodata_start = symbol("_srodata");
+        rodata_end = symbol("_erodata");
+        data_start = symbol("_sdata");
+        data_end = symbol("_edata");
         elf_entry = symbol("_start");
         head_text_range = section(".head.text");
         pre_mmu_text_range = section(".head.text");

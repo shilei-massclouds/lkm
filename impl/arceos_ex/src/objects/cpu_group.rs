@@ -112,7 +112,7 @@ impl CpuGroup {
         if self.lifecycle.state() != State::Prepared
             || self.boot_cpu.state() != State::Online
             || device_tree.state() != State::Ready
-            || cpu_id_map.state() != State::Ready
+            || cpu_id_map.state() != State::Prepared
             || sbi.state() != State::Ready
         {
             return failed_condition(

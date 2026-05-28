@@ -98,7 +98,7 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.interrupt_stream.state() == State::Ready
         && ctx.vm.state() == State::Online
         && ctx.vm.entry_successor_ready()
-        && ctx.cpu_id_map.state() == State::Ready
+        && ctx.cpu_id_map.state() == State::Prepared
         && printk::is_prepared()
         && ctx.early_dtb.state() == State::Destroyed
         && ctx.kernel_cmdline.state() == State::Ready

@@ -29,6 +29,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.memblock, &ctx.kernel_image, &ctx.lds)?;
     ctx.cpu_group
         .setup_smp(&ctx.device_tree, &ctx.cpu_id_map, &ctx.sbi)?;
+    ctx.cpu_id_map.setup(&ctx.cpu_group)?;
     ctx.cache_block_info.setup(&ctx.device_tree)?;
     ctx.riscv_hwcap
         .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
@@ -59,7 +60,16 @@ fn checkpoint_setup_nr_cpu_ids(
     cpu_id_map: &crate::objects::cpu_id_map::CpuIdMap,
     cpu_group: &crate::objects::cpu_group::CpuGroup,
 ) -> EventResult {
-    if cpu_id_map.state() != State::Ready || cpu_group.boot_cpu_state() != State::Online {
+    let boot_entry = cpu_id_map.entry(0);
+    if cpu_id_map.state() != State::Ready
+        || cpu_group.state() != State::Ready
+        || cpu_group.boot_cpu_state() != State::Online
+        || cpu_id_map.count() == 0
+        || boot_entry.map(|entry| entry.hartid()) != Some(cpu_group.boot_hartid())
+        || boot_entry.map(|entry| entry.logical_id()) != Some(0)
+        || boot_entry.map(|entry| entry.kind())
+            != Some(crate::objects::cpu_id_map::CpuIdMapEntryKind::BootCpu)
+    {
         return failed_condition(
             LifecycleEvent::Setup,
             State::Base,
@@ -133,6 +143,7 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.zones.state() == State::Ready
         && ctx.resource_tree.state() == State::Ready
         && ctx.cpu_group.state() == State::Ready
+        && ctx.cpu_id_map.state() == State::Ready
         && ctx.cache_block_info.state() == State::Ready
         && ctx.riscv_hwcap.state() == State::Ready
         && ctx.saved_command_line.state() == State::Ready

@@ -80,6 +80,9 @@ _LDS_LINKER_PROOFS = {
     "global_pointer != 0": ("linker_layout", "linux_linker_script"),
     "kernel_start != 0": ("linker_layout", "linux_linker_script"),
     "text_start == kernel_start": ("linker_layout", "linux_linker_script"),
+    "text_end > text_start": ("linker_layout", "linux_linker_script"),
+    "rodata_end >= rodata_start": ("linker_layout", "linux_linker_script"),
+    "data_end >= data_start": ("linker_layout", "linux_linker_script"),
     "elf_entry == kernel_start": ("linker_layout", "linux_linker_script"),
     "kernel_end > kernel_start": ("linker_layout", "linux_linker_script"),
     "entry_head_text_layout_ready(Lds)": (
@@ -91,6 +94,18 @@ _LDS_LINKER_PROOFS = {
         "linux_linker_script",
     ),
     "trampoline_access_discipline_ready(Lds)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
+    "inside(text_start, text_end, kernel_start, kernel_end)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
+    "inside(rodata_start, rodata_end, kernel_start, kernel_end)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
+    "inside(data_start, data_end, kernel_start, kernel_end)": (
         "linker_layout",
         "linux_linker_script",
     ),
@@ -451,6 +466,18 @@ _RELATION_PROOFS = {
         "linker_layout",
         "linker_script_candidate",
     ),
+    "text_end > text_start": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "rodata_end >= rodata_start": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "data_end >= data_start": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
     "kernel_end > kernel_start": (
         "linker_layout",
         "linker_script_candidate",
@@ -460,6 +487,18 @@ _RELATION_PROOFS = {
         "linker_script_candidate",
     ),
     "bss_end > bss_start": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "inside(text_start, text_end, kernel_start, kernel_end)": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "inside(rodata_start, rodata_end, kernel_start, kernel_end)": (
+        "linker_layout",
+        "linker_script_candidate",
+    ),
+    "inside(data_start, data_end, kernel_start, kernel_end)": (
         "linker_layout",
         "linker_script_candidate",
     ),

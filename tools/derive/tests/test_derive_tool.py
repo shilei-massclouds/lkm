@@ -368,7 +368,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "cpu_id_map_ready(CpuIdMap, 0, BootCPU)"
+                    record["expression"] == "cpu_id_map_ready(CpuIdMap, CpuGroup)"
                     and record["proof_class"] == "cpu_topology"
                     and record["proof_provider"] == "event_ensures"
                     for record in proved

@@ -75,6 +75,9 @@ def _minimal_model_without_config_driven_lds_invariant() -> ObjectModel:
                 body="""
                     init_stack_end - init_stack_start == boot_stack_size;
                     text_start == kernel_start;
+                    inside(text_start, text_end, kernel_start, kernel_end);
+                    inside(rodata_start, rodata_end, kernel_start, kernel_end);
+                    inside(data_start, data_end, kernel_start, kernel_end);
                     entry_head_text_layout_ready(Lds);
                 """,
                 span=span,
@@ -109,6 +112,11 @@ def _minimal_model_without_config_driven_lds_invariant() -> ObjectModel:
             "init_stack_start": "SymbolAddr",
             "kernel_end": "SymbolAddr",
             "kernel_start": "SymbolAddr",
+            "data_end": "SymbolAddr",
+            "data_start": "SymbolAddr",
+            "rodata_end": "SymbolAddr",
+            "rodata_start": "SymbolAddr",
+            "text_end": "SymbolAddr",
             "text_start": "SymbolAddr",
         },
     )

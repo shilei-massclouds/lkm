@@ -571,7 +571,10 @@ object SBI: PlatformServiceObject {
 }
 
 /*
- * CpuIdMap 表示逻辑 CPU ID 到 CPUObject 的基础映射。
+ * CpuIdMap 表示逻辑 CPU ID 到 CPUObject 的映射表。入口后继期只建立
+ * logical CPU 0 -> BootCPU 的基础映射；核心准备期在 CpuGroup.setup_smp()
+ * 之后再完成当前阶段的 CPU 映射边界整理。Enable 保留给未来多 CPU 运行期
+ * 或动态拓扑正式启用时使用。
  */
 object CpuIdMap: HardwareObject {
     initial_state: State::Base;
@@ -583,15 +586,14 @@ object CpuIdMap: HardwareObject {
     state State::Base {
         events {
             /*
-             * Preset 建立 logic id 0 -> BootCPU 的基础映射。
+             * Preset 建立 logical CPU 0 -> BootCPU 的基础映射。
              */
-            on Event::Preset -> State::Ready {
+            on Event::Preset -> State::Prepared {
                 depends_on {
                     BootCPU.state == State::Prepared;
                 }
 
                 ensures {
-                    cpu_id_map_ready(CpuIdMap, 0, BootCPU);
                     cpu_id_map_entry(CpuIdMap, 0, BootCPU);
                     cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
                 }
@@ -600,13 +602,43 @@ object CpuIdMap: HardwareObject {
     }
 
     /*
-     * Ready 表示基础逻辑 ID 映射已建立。
+     * Prepared 表示 boot CPU 基础映射已建立，但尚未完成核心准备期 CPU 映射整理。
+     */
+    state State::Prepared {
+        invariant {
+            cpu_id_map_entry(CpuIdMap, 0, BootCPU);
+            cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
+        }
+
+        events {
+            /*
+             * Setup 在 CpuGroup.setup_smp() 建立拓扑事实后，确认当前阶段可用的
+             * CPU logical id 映射边界。它不启动 secondary CPU，也不占用 Enable。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    CpuGroup.state == State::Ready;
+                }
+
+                ensures {
+                    cpu_id_map_ready(CpuIdMap, CpuGroup);
+                    cpu_id_map_entry(CpuIdMap, 0, BootCPU);
+                    cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
+                    cpu_id_map_possible_cpu_boundary_ready(CpuIdMap, CpuGroup);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示核心准备期需要的逻辑 ID 映射边界已建立。
      */
     state State::Ready {
         invariant {
-            cpu_id_map_ready(CpuIdMap, 0, BootCPU);
+            cpu_id_map_ready(CpuIdMap, CpuGroup);
             cpu_id_map_entry(CpuIdMap, 0, BootCPU);
             cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
+            cpu_id_map_possible_cpu_boundary_ready(CpuIdMap, CpuGroup);
         }
     }
 }
@@ -685,7 +717,7 @@ object EntrySuccessorPhase: PhaseObject {
             EntryPreludePhase.state == State::Destroyed;
             InitStack.state == State::Online;
             BootCPU.state == State::Online;
-            CpuIdMap.state == State::Ready;
+            CpuIdMap.state == State::Prepared;
             InterruptStream.state == State::Ready;
             PrintkBuffer.state == State::Prepared;
             EarlyDtb.state == State::Destroyed;

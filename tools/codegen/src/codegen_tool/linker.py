@@ -32,6 +32,11 @@ _REQUIRED_LDS_ATTRS = {
     "init_stack_start",
     "kernel_end",
     "kernel_start",
+    "data_end",
+    "data_start",
+    "rodata_end",
+    "rodata_start",
+    "text_end",
     "text_start",
 }
 
@@ -39,6 +44,9 @@ _REQUIRED_LDS_INVARIANTS = {
     "boot_stack_size == Config.boot_stack_size",
     "init_stack_end - init_stack_start == boot_stack_size",
     "text_start == kernel_start",
+    "inside(text_start, text_end, kernel_start, kernel_end)",
+    "inside(rodata_start, rodata_end, kernel_start, kernel_end)",
+    "inside(data_start, data_end, kernel_start, kernel_end)",
     "entry_head_text_layout_ready(Lds)",
 }
 
@@ -106,10 +114,13 @@ SECTIONS
     _etext = .;
 
     .rodata : AT(ADDR(.rodata) - LOAD_OFFSET) ALIGN({profile.page_size}) {{
+        _srodata = .;
         *(.rodata .rodata.*)
+        _erodata = .;
     }}
 
     .data : AT(ADDR(.data) - LOAD_OFFSET) ALIGN({profile.page_size}) {{
+        _sdata = .;
         PROVIDE(__global_pointer$ = . + 0x800);
         KEEP(*(.head.handoff))
         *(.sdata .sdata.*)

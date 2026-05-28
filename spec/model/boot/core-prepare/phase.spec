@@ -615,7 +615,7 @@ object CorePreparePhase: PhaseObject {
                     EarlyParam.state == State::Ready;
                     KernelCmdline.state == State::Ready;
                     BootCPU.state == State::Online;
-                    CpuIdMap.state == State::Ready;
+                    CpuIdMap.state == State::Prepared;
                     PrintkBuffer.state == State::Prepared;
                     ExceptionStream.state == State::Prepared;
                 }
@@ -625,6 +625,7 @@ object CorePreparePhase: PhaseObject {
                     Zones.Event::Setup;
                     ResourceTree.Event::Setup;
                     CpuGroup.Event::Setup;
+                    CpuIdMap.Event::Setup;
                     CacheBlockInfo.Event::Setup;
                     RiscvHwCap.Event::Setup;
                     SavedCommandLine.Event::Setup;
@@ -688,6 +689,7 @@ object CorePreparePhase: PhaseObject {
             Zones.state == State::Ready;
             ResourceTree.state == State::Ready;
             CpuGroup.state == State::Ready;
+            CpuIdMap.state == State::Ready;
             CacheBlockInfo.state == State::Ready;
             RiscvHwCap.state == State::Ready;
             SavedCommandLine.state == State::Ready;
