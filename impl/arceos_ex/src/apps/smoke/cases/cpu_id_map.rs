@@ -63,5 +63,20 @@ pub fn run() -> SmokeResult {
         boot_entry.logical_id(),
         boot_entry.hartid()
     ));
+
+    let mut index = 0usize;
+    while index < ctx.cpu_group.secondary_count() {
+        let logical_id = index + 1;
+        let Some(entry) = cpu_id_map.entry(logical_id) else {
+            return SmokeResult::Failed;
+        };
+        printk::write_fmt(format_args!(
+            "  Secondary    : logical {} -> hart {}\n",
+            entry.logical_id(),
+            entry.hartid()
+        ));
+        index += 1;
+    }
+
     SmokeResult::Passed
 }

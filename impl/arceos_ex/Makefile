@@ -11,6 +11,7 @@ ROOT := ../..
 RUSTC ?= rustc +nightly-2025-05-20
 RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
 QEMU ?= qemu-system-riscv64
+QEMU_SMP ?= 8
 QEMU_APPEND ?= earlycon=sbi
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
@@ -57,10 +58,10 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 run:
 ifeq ($(LOG),trace)
 	$(MAKE) PROFILE=trace APP=$(APP) EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
-	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel build/$(TARGET)/trace/$(APP)/arceos_ex.bin
+	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel build/$(TARGET)/trace/$(APP)/arceos_ex.bin
 else
 	$(MAKE) build APP=$(APP)
-	$(QEMU) -machine virt -cpu rv64 -m 128M -smp 1 -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(KERNEL_BIN)
+	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(KERNEL_BIN)
 endif
 
 clean:
