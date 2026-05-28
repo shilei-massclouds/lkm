@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
   <title id="title">核心准备期对象分类与相互关系</title>
-  <desc id="desc">展示核心准备期从 paging_init 完成到 trap_init 完成之间的候选对象分类与依赖关系。</desc>
+  <desc id="desc">展示核心准备期从 paging_init 完成到 trap_init 完成之间的 formal 对象、deferred 路径和实现 checkpoint。</desc>
   <defs>
     <style>
       text {
@@ -52,8 +52,8 @@
   <text x="605" y="208" text-anchor="middle" class="label">ResourceTree</text>
   <text x="605" y="232" text-anchor="middle" class="small">/proc/iomem</text>
   <rect x="362" y="282" width="150" height="68" rx="9" class="box memory"/>
-  <text x="437" y="310" text-anchor="middle" class="label">MiscMemory</text>
-  <text x="437" y="334" text-anchor="middle" class="small">misc_mem_init</text>
+  <text x="437" y="310" text-anchor="middle" class="label">Zones</text>
+  <text x="437" y="334" text-anchor="middle" class="small">zone sizes</text>
   <rect x="530" y="282" width="150" height="68" rx="9" class="box memory"/>
   <text x="605" y="310" text-anchor="middle" class="label">MemBlock</text>
   <text x="605" y="334" text-anchor="middle" class="small">已 Online</text>
@@ -64,35 +64,35 @@
   <text x="437" y="524" text-anchor="middle" class="label">RiscvHwCap</text>
   <text x="437" y="548" text-anchor="middle" class="small">ISA/hwcap</text>
   <rect x="530" y="496" width="150" height="68" rx="9" class="box arch"/>
-  <text x="605" y="524" text-anchor="middle" class="label">BootAlternative</text>
+  <text x="605" y="524" text-anchor="middle" class="label">Deferred</text>
   <text x="605" y="548" text-anchor="middle" class="small">alternatives</text>
   <rect x="362" y="598" width="150" height="68" rx="9" class="box arch"/>
-  <text x="437" y="626" text-anchor="middle" class="label">CacheBlock</text>
+  <text x="437" y="626" text-anchor="middle" class="label">CacheBlockInfo</text>
   <text x="437" y="650" text-anchor="middle" class="small">CBO size</text>
   <rect x="530" y="598" width="150" height="68" rx="9" class="box arch"/>
-  <text x="605" y="626" text-anchor="middle" class="label">UserIsa</text>
-  <text x="605" y="650" text-anchor="middle" class="small">用户态能力</text>
+  <text x="605" y="626" text-anchor="middle" class="label">Deferred</text>
+  <text x="605" y="650" text-anchor="middle" class="small">User ISA</text>
 
   <rect x="748" y="112" width="478" height="278" rx="16" class="group"/>
   <text x="987" y="146" text-anchor="middle" class="group-title">启动参数、CPU 与日志</text>
   <rect x="782" y="180" width="132" height="68" rx="9" class="box param"/>
-  <text x="848" y="208" text-anchor="middle" class="label">CommandLine</text>
-  <text x="848" y="232" text-anchor="middle" class="small">运行期命令行</text>
+  <text x="848" y="208" text-anchor="middle" class="label">SavedCmdline</text>
+  <text x="848" y="232" text-anchor="middle" class="small">+ Static</text>
   <rect x="930" y="180" width="132" height="68" rx="9" class="box param"/>
-  <text x="996" y="208" text-anchor="middle" class="label">BootConfig</text>
-  <text x="996" y="232" text-anchor="middle" class="small">bootconfig</text>
+  <text x="996" y="208" text-anchor="middle" class="label">BootParam</text>
+  <text x="996" y="232" text-anchor="middle" class="small">parse_args</text>
   <rect x="1078" y="180" width="112" height="68" rx="9" class="box cpu"/>
-  <text x="1134" y="208" text-anchor="middle" class="label">PerCpuArea</text>
+  <text x="1134" y="208" text-anchor="middle" class="label">PerCpuStorage</text>
   <text x="1134" y="232" text-anchor="middle" class="small">per-cpu</text>
   <rect x="782" y="282" width="132" height="68" rx="9" class="box cpu"/>
-  <text x="848" y="310" text-anchor="middle" class="label">CpuTopology</text>
-  <text x="848" y="334" text-anchor="middle" class="small">CPU ids</text>
+  <text x="848" y="310" text-anchor="middle" class="label">CpuGroup</text>
+  <text x="848" y="334" text-anchor="middle" class="small">setup_smp</text>
   <rect x="930" y="282" width="132" height="68" rx="9" class="box arch"/>
-  <text x="996" y="310" text-anchor="middle" class="label">RandomEarly</text>
-  <text x="996" y="334" text-anchor="middle" class="small">早期 RNG</text>
+  <text x="996" y="310" text-anchor="middle" class="label">Randomness</text>
+  <text x="996" y="334" text-anchor="middle" class="small">preset</text>
   <rect x="1078" y="282" width="112" height="68" rx="9" class="box param"/>
-  <text x="1134" y="310" text-anchor="middle" class="label">LogBuffer</text>
-  <text x="1134" y="334" text-anchor="middle" class="small">日志扩展</text>
+  <text x="1134" y="310" text-anchor="middle" class="label">PrintkBuffer</text>
+  <text x="1134" y="334" text-anchor="middle" class="small">setup</text>
 
   <rect x="748" y="430" width="478" height="278" rx="16" class="group"/>
   <text x="987" y="464" text-anchor="middle" class="group-title">异常与 deferred 路径</text>
@@ -106,8 +106,8 @@
   <text x="1134" y="524" text-anchor="middle" class="label">子异常</text>
   <text x="1134" y="548" text-anchor="middle" class="small">PF/BR/Fault</text>
   <rect x="782" y="598" width="408" height="68" rx="9" class="box defer"/>
-  <text x="986" y="626" text-anchor="middle" class="label">Deferred / 条件路径</text>
-  <text x="986" y="650" text-anchor="middle" class="small">ACPI, KASAN, SMP, NUMA, Security, VFS, StaticCall, jump_label</text>
+  <text x="986" y="626" text-anchor="middle" class="label">Deferred / Checkpoints</text>
+  <text x="986" y="650" text-anchor="middle" class="small">ACPI, KASAN, Security, VFS, StaticCall, jump_label, nr_cpu_ids</text>
 
   <path d="M262 227 C292 227, 302 214, 360 214" class="edge"/>
   <path d="M262 227 C302 227, 300 530, 360 530" class="edge"/>

@@ -41,6 +41,6 @@ selects the built-in smoke payload.  The Makefile maps app names to
 `run() -> !`.
 
 The current code covers the minimal `EntryPreludePhase`, `EntrySuccessorPhase`,
-and final `PayloadPhase` handoff.  The default `smoke` payload runs smoke cases
-under `src/apps/smoke/cases/` and then shuts down.  `APP=hello` remains available
-as the minimal standalone payload.
+`CorePreparePhase`, and final `PayloadPhase` handoff.  The default `smoke`
+payload runs smoke cases under `src/apps/smoke/cases/` and then shuts down.
+`APP=hello` remains available as the minimal standalone payload.

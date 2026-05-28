@@ -33,7 +33,7 @@
 
   <rect x="0" y="0" width="1280" height="2640" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">入口后继期对象构建时序</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">核心路径：InitStack -> CpuIdMap -> BootCPU -> PrintkBuffer -> EarlyDtb -> InitMM -> EarlyIoremap -> SBI -> KernelParam(+EarlyCon) -> VM.enable()</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">核心路径：InitStack -> CpuIdMap -> BootCPU -> PrintkBuffer -> EarlyDtb -> InitMM -> EarlyIoremap -> SBI -> EarlyParam(+EarlyCon) -> VM.enable()</text>
 
   <rect x="48" y="128" width="210" height="2410" rx="14" class="lane"/>
   <text x="153" y="164" text-anchor="middle" class="obj">入口后继期对象</text>
@@ -116,7 +116,7 @@
   <g transform="translate(0 1120)">
     <circle cx="153" cy="320" r="15" class="dot"/><text x="153" y="320" class="num">11</text>
     <rect x="290" y="205" width="870" height="318" rx="12" class="box param"/>
-    <text x="318" y="234" class="line1">KernelParam.setup() / parse_early_param()</text>
+    <text x="318" y="234" class="line1">EarlyParam.setup() / parse_early_param()</text>
     <text x="318" y="265" class="line2">解析 KernelCmdline；earlycon handler 在同一调用链内驱动 EarlyCon</text>
 
     <rect x="340" y="312" width="760" height="48" rx="8" class="box param"/>

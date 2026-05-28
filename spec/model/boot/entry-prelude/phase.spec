@@ -1564,7 +1564,8 @@ object BootCPU: CPUObject {
 }
 
 /*
- * CpuGroup 表示 SoC 下的处理器管理对象。入口前导期只建立启动 CPU 子对象的组织边界。
+ * CpuGroup 表示 SoC 下的处理器管理对象。入口前导期只建立启动 CPU 子对象的组织边界；
+ * 核心准备期再基于正式 DeviceTree 和 CpuIdMap 完成 setup_smp() 对应的拓扑准备。
  */
 object CpuGroup: HardwareObject {
     initial_state: State::Base;
@@ -1586,6 +1587,10 @@ object CpuGroup: HardwareObject {
                 drives {
                     BootCPU.Event::Preset;
                 }
+
+                ensures {
+                    boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+                }
             }
         }
     }
@@ -1595,7 +1600,43 @@ object CpuGroup: HardwareObject {
      */
     state State::Prepared {
         invariant {
-            BootCPU.state == State::Prepared;
+            boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+        }
+
+        events {
+            /*
+             * Setup 对应 setup_smp()，建立逻辑 CPU 映射和 secondary CPU 候选集合。
+             * 它不启动 secondary CPU，也不开放多 hart 并发。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    BootCPU.state == State::Online;
+                    DeviceTree.state == State::Ready;
+                    CpuIdMap.state == State::Ready;
+                    SBI.state == State::Ready;
+                }
+
+                ensures {
+                    boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+                    cpu_group_topology_ready(CpuGroup, DeviceTree);
+                    secondary_cpus_discovered(CpuGroup, DeviceTree);
+                    cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
+                    cpu_group_concurrency_closed(CpuGroup);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 CPU 拓扑事实和 secondary CPU 候选集合已经建立，但 secondary CPU 尚未 online。
+     */
+    state State::Ready {
+        invariant {
+            boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+            cpu_group_topology_ready(CpuGroup, DeviceTree);
+            secondary_cpus_discovered(CpuGroup, DeviceTree);
+            cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
+            cpu_group_concurrency_closed(CpuGroup);
         }
     }
 }

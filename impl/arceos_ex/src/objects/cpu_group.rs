@@ -1,5 +1,8 @@
 use super::{
     boot_args::BootArgs,
+    cpu_id_map::CpuIdMap,
+    device_tree::DeviceTree,
+    sbi::Sbi,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -98,6 +101,34 @@ impl CpuGroup {
 
     pub fn boot_cpu_enable(&mut self) -> EventResult {
         self.boot_cpu.enable()
+    }
+
+    pub fn setup_smp(
+        &mut self,
+        device_tree: &DeviceTree,
+        cpu_id_map: &CpuIdMap,
+        sbi: &Sbi,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || self.boot_cpu.state() != State::Online
+            || device_tree.state() != State::Ready
+            || cpu_id_map.state() != State::Ready
+            || sbi.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::CpuGroupReady,
+        )
     }
 
     pub fn boot_hartid(&self) -> usize {

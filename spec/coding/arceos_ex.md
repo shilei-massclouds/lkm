@@ -52,8 +52,8 @@ make clean
 启用 checkpoint 字符输出。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
 生成带注释的 trace SVG 报告。
 
-当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready` 与
-`EntrySuccessorPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
+当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
+`EntrySuccessorPhase.Ready` 与 `CorePreparePhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 
 ## `make verify` obligation 分类
 
@@ -220,13 +220,14 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `FixMap`
 - `EarlyDtb`
 - `KernelCmdline`
-- `KernelParam`
+- `EarlyParam`
 - `SBI`
 - `PrintkBuffer`
 - `EarlyCon`
 - `MemBlock`
 - `InitMM`
 - `EarlyIoremap`
+- `CorePreparePhase` 的 no-alloc 最小对象骨架：`DeviceTree`、`Zones`、`PageAllocatorPrepare`、`ResourceTree`、`CacheBlockInfo`、`RiscvHwCap`、`SavedCommandLine`、`StaticCommandLine`、`PerCpuStorage`、`BootCpuHotplugState`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`
 
 ## RISC-V64 generic 平台任务
 

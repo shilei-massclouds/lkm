@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="3600" viewBox="0 0 1280 3600" role="img" aria-labelledby="title desc">
   <title id="title">核心准备期对象构建时序</title>
-  <desc id="desc">展示核心准备期从 paging_init 完成到 trap_init 完成之间的候选对象和 deferred 过程顺序。</desc>
+  <desc id="desc">展示核心准备期从 paging_init 完成到 trap_init 完成之间的 formal 对象、deferred 路径和实现 checkpoint 顺序。</desc>
   <defs>
     <style>
       text {
@@ -62,8 +62,8 @@
   <g transform="translate(0 314)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">3</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box memory"/>
-    <text x="318" y="234" class="line1">MiscMemoryInit.setup() / misc_mem_init()</text>
-    <text x="318" y="265" class="line2">完整页表可用后的体系结构杂项内存初始化</text>
+    <text x="318" y="234" class="line1">Zones.setup() / misc_mem_init(): zone_sizes_init()</text>
+    <text x="318" y="265" class="line2">建立 Zones -> Zone -> MigrationType -> FreePageSet 四层抽象</text>
   </g>
 
   <g transform="translate(0 426)">
@@ -83,14 +83,14 @@
   <g transform="translate(0 650)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">6</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
-    <text x="318" y="234" class="line1">setup_smp() 与 ACPI CPU/NUMA 映射</text>
-    <text x="318" y="265" class="line2">defer：SMP/ACPI/NUMA 条件路径，后续多核阶段展开</text>
+    <text x="318" y="234" class="line1">CpuGroup.setup() / setup_smp()</text>
+    <text x="318" y="265" class="line2">建立 CPU 拓扑事实和 secondary CPU 候选集合，不启动 secondary CPU</text>
   </g>
 
   <g transform="translate(0 762)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">7</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
-    <text x="318" y="234" class="line1">RiscvCacheBlock.setup() / riscv_init_cbo_blocksizes()</text>
+    <text x="318" y="234" class="line1">CacheBlockInfo.setup() / riscv_init_cbo_blocksizes()</text>
     <text x="318" y="265" class="line2">记录 RISC-V cache block operation 的块大小事实</text>
   </g>
 
@@ -104,29 +104,29 @@
   <g transform="translate(0 986)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">9</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
-    <text x="318" y="234" class="line1">BootAlternative.setup() / apply_boot_alternatives()</text>
-    <text x="318" y="265" class="line2">根据 CPU/ISA 能力应用启动期 alternatives patch</text>
+    <text x="318" y="234" class="line1">apply_boot_alternatives()</text>
+    <text x="318" y="265" class="line2">defer：启动期 alternatives patch 后续抽象为代码补丁设施</text>
   </g>
 
   <g transform="translate(0 1098)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">10</text>
-    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
-    <text x="318" y="234" class="line1">SignalEnv.setup() / init_rt_signal_env()</text>
-    <text x="318" y="265" class="line2">初始化实时信号环境；纯 kernel-mode payload 可先延后实现</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">init_rt_signal_env()</text>
+    <text x="318" y="265" class="line2">defer：用户态信号环境不属于当前最小核心准备路径</text>
   </g>
 
   <g transform="translate(0 1210)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">11</text>
-    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
-    <text x="318" y="234" class="line1">DmaCachePolicy.setup()</text>
-    <text x="318" y="265" class="line2">覆盖 riscv_noncoherent_supported() 条件路径和 DMA cache alignment</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">riscv_noncoherent_supported() / riscv_set_dma_cache_alignment()</text>
+    <text x="318" y="265" class="line2">defer：DMA/cache policy 后续建模</text>
   </g>
 
   <g transform="translate(0 1322)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">12</text>
-    <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
-    <text x="318" y="234" class="line1">UserIsa.setup() / riscv_user_isa_enable()</text>
-    <text x="318" y="265" class="line2">为后续用户态执行路径准备可暴露 ISA 能力</text>
+    <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
+    <text x="318" y="234" class="line1">riscv_user_isa_enable()</text>
+    <text x="318" y="265" class="line2">defer：用户态 ISA 暴露路径后续建模</text>
   </g>
 
   <rect x="290" y="1714" width="870" height="52" rx="10" class="split"/>
@@ -142,43 +142,43 @@
   <g transform="translate(0 1696)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">14</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box param"/>
-    <text x="318" y="234" class="line1">CommandLine/BootConfig.setup()</text>
-    <text x="318" y="265" class="line2">覆盖 setup_boot_config() 与 setup_command_line()</text>
+    <text x="318" y="234" class="line1">SavedCommandLine/StaticCommandLine.setup()</text>
+    <text x="318" y="265" class="line2">覆盖 setup_command_line(); setup_boot_config() 保持 deferred</text>
   </g>
 
   <g transform="translate(0 1808)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">15</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box cpu"/>
-    <text x="318" y="234" class="line1">CpuTopology/PerCpuArea.setup()</text>
-    <text x="318" y="265" class="line2">覆盖 setup_nr_cpu_ids(), setup_per_cpu_areas(), smp_prepare_boot_cpu()</text>
+    <text x="318" y="234" class="line1">PerCpuStorage.setup() / setup_per_cpu_areas()</text>
+    <text x="318" y="265" class="line2">setup_nr_cpu_ids() 是 checkpoint; smp_prepare_boot_cpu() deferred</text>
   </g>
 
   <g transform="translate(0 1920)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">16</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box defer"/>
-    <text x="318" y="234" class="line1">early_numa_node_init() / boot_cpu_hotplug_init()</text>
-    <text x="318" y="265" class="line2">defer：NUMA 与 CPU hotplug 早期状态，后续拓扑阶段展开</text>
+    <text x="318" y="234" class="line1">BootCpuHotplugState.setup() / boot_cpu_hotplug_init()</text>
+    <text x="318" y="265" class="line2">early_numa_node_init() 不纳入当前 SMP over UMA 规格</text>
   </g>
 
   <g transform="translate(0 2032)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">17</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box param"/>
-    <text x="318" y="234" class="line1">KernelParam 后续事件 / parse_early_param() + parse_args()</text>
-    <text x="318" y="265" class="line2">第二次 early param 与普通内核参数、init 参数解析，不自动合并</text>
+    <text x="318" y="234" class="line1">BootParam/PayloadParam.setup() / parse_args()</text>
+    <text x="318" y="265" class="line2">第二次 parse_early_param() 只作为 checkpoint，不重推 EarlyParam</text>
   </g>
 
   <g transform="translate(0 2144)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">18</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box arch"/>
-    <text x="318" y="234" class="line1">RandomEarly.setup() / random_init_early()</text>
-    <text x="318" y="265" class="line2">allocator 初始化前完成架构与非 timekeeping RNG 早期初始化</text>
+    <text x="318" y="234" class="line1">Randomness.preset() / random_init_early()</text>
+    <text x="318" y="265" class="line2">混入早期熵源，不表示完整 RNG 已 ready</text>
   </g>
 
   <g transform="translate(0 2256)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">19</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box param"/>
-    <text x="318" y="234" class="line1">LogBuffer.setup() / setup_log_buf()</text>
-    <text x="318" y="265" class="line2">使用大块 bootmem 扩展日志缓冲，区别于静态 PrintkBuffer.preset()</text>
+    <text x="318" y="234" class="line1">PrintkBuffer.setup() / setup_log_buf()</text>
+    <text x="318" y="265" class="line2">完成正式日志缓冲准备，并保留已有记录</text>
   </g>
 
   <g transform="translate(0 2368)">
@@ -192,7 +192,7 @@
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">21</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box trap"/>
     <text x="318" y="234" class="line1">ExceptionTable.setup() / sort_main_extable()</text>
-    <text x="318" y="265" class="line2">整理主异常表，为异常恢复和故障定位准备</text>
+    <text x="318" y="265" class="line2">排序主异常表并建立查询语义，为异常恢复和故障定位准备</text>
   </g>
 
   <g transform="translate(0 2592)">

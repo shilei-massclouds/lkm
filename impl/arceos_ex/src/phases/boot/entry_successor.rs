@@ -18,7 +18,7 @@ pub fn setup(ctx: &mut Context) -> ! {
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex entry successor event failed\n",
     );
-    handoff()
+    handoff(ctx)
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
@@ -49,7 +49,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.init_mm.setup(&ctx.lds)?;
     ctx.early_ioremap.setup(&ctx.fix_map)?;
     ctx.sbi.setup()?;
-    ctx.kernel_param.setup(&ctx.kernel_cmdline, &ctx.sbi)?;
+    ctx.early_param.setup(&ctx.kernel_cmdline, &ctx.sbi)?;
     ctx.memblock.setup(
         &ctx.early_dtb,
         &ctx.kernel_image,
@@ -66,11 +66,11 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.memblock,
     )?;
     ctx.memblock.enable(ctx.vm.state())?;
-    ctx.early_dtb.cleanup(&ctx.memblock, &ctx.kernel_param)
+    ctx.early_dtb.cleanup(&ctx.memblock, &ctx.early_param)
 }
 
-fn handoff() -> ! {
-    crate::phases::boot::setup_after_children()
+fn handoff(ctx: &mut Context) -> ! {
+    crate::phases::boot::core_prepare::setup(ctx)
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {
@@ -105,7 +105,7 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.init_mm.state() == State::Ready
         && ctx.early_ioremap.state() == State::Ready
         && ctx.sbi.state() == State::Ready
-        && ctx.kernel_param.state() == State::Ready
+        && ctx.early_param.state() == State::Ready
         && earlycon::is_online()
         && ctx.memblock.state() == State::Online
 }

@@ -36,8 +36,17 @@ impl PrintkBuffer {
         )
     }
 
+    pub fn setup(&mut self) -> EventResult {
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::PrintkBufferReady,
+        )
+    }
+
     pub fn write_bytes(&mut self, bytes: &[u8]) {
-        if self.lifecycle.state() != State::Prepared {
+        if self.lifecycle.state() != State::Prepared && self.lifecycle.state() != State::Ready {
             return;
         }
 
@@ -62,6 +71,10 @@ impl PrintkBuffer {
     pub fn is_prepared(&self) -> bool {
         self.lifecycle.state() == State::Prepared
     }
+
+    pub fn is_ready(&self) -> bool {
+        self.lifecycle.state() == State::Ready
+    }
 }
 
 #[allow(dead_code)]
@@ -77,6 +90,11 @@ pub fn write_str(message: &str) {
             .unwrap()
             .write_bytes(message.as_bytes());
     }
+}
+
+#[allow(dead_code)]
+pub fn setup() -> EventResult {
+    unsafe { (&raw mut PRINTK_BUFFER).as_mut().unwrap().setup() }
 }
 
 #[allow(dead_code)]
@@ -96,6 +114,10 @@ pub fn write_fmt(args: fmt::Arguments<'_>) {
 
 pub fn is_prepared() -> bool {
     unsafe { (&raw const PRINTK_BUFFER).as_ref().unwrap().is_prepared() }
+}
+
+pub fn is_ready() -> bool {
+    unsafe { (&raw const PRINTK_BUFFER).as_ref().unwrap().is_ready() }
 }
 
 #[allow(dead_code)]

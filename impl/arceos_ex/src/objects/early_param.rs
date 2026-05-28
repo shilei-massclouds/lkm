@@ -7,11 +7,11 @@ use super::{
 };
 use crate::trace::Checkpoint;
 
-pub struct KernelParam {
+pub struct EarlyParam {
     lifecycle: Lifecycle,
 }
 
-impl KernelParam {
+impl EarlyParam {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -53,7 +53,7 @@ impl KernelParam {
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
-            Checkpoint::KernelParamReady,
+            Checkpoint::EarlyParamReady,
         )
     }
 }

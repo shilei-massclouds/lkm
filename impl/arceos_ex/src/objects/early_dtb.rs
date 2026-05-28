@@ -2,7 +2,7 @@ use super::{
     fdt::{self, BootCommandLine, FdtFacts, HartSet, PhysRangeSet},
     fix_map::FixMap,
     kernel_cmdline::KernelCmdline,
-    kernel_param::KernelParam,
+    early_param::EarlyParam,
     memblock::MemBlock,
     physical_memory::PhysicalMemory,
     platform_cpu_info::PlatformCpuInfo,
@@ -142,10 +142,10 @@ impl EarlyDtb {
         )
     }
 
-    pub fn cleanup(&mut self, memblock: &MemBlock, kernel_param: &KernelParam) -> EventResult {
+    pub fn cleanup(&mut self, memblock: &MemBlock, early_param: &EarlyParam) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || memblock.state() != State::Online
-            || kernel_param.state() != State::Ready
+            || early_param.state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Cleanup,

@@ -225,7 +225,7 @@ object EarlyDtb: ResourceObject {
     }
 
     /*
-     * Ready 表示早期 DTB 解析事实已可供 MemBlock 和 KernelParam 使用。
+     * Ready 表示早期 DTB 解析事实已可供 MemBlock 和 EarlyParam 使用。
      */
     state State::Ready {
         invariant {
@@ -244,7 +244,7 @@ object EarlyDtb: ResourceObject {
             on Event::Cleanup -> State::Destroyed {
                 depends_on {
                     MemBlock.state == State::Online;
-                    KernelParam.state == State::Ready;
+                    EarlyParam.state == State::Ready;
                 }
             }
         }
@@ -273,7 +273,7 @@ object KernelCmdline: ResourceObject {
     state State::Base {
         events {
             /*
-             * Preset 建立可供 KernelParam 解析的原始命令行文本。
+             * Preset 建立可供 EarlyParam 解析的原始命令行文本。
              */
             on Event::Preset -> State::Ready {
                 depends_on {
@@ -298,9 +298,9 @@ object KernelCmdline: ResourceObject {
 }
 
 /*
- * KernelParam 表示早期内核参数解析和分发机制。
+ * EarlyParam 表示早期内核参数解析和分发机制。
  */
-object KernelParam: KernelObject {
+object EarlyParam: KernelObject {
     initial_state: State::Base;
 
     /*
@@ -326,7 +326,7 @@ object KernelParam: KernelObject {
                 }
 
                 ensures {
-                    early_params_dispatched(KernelParam, KernelCmdline);
+                    early_params_dispatched(EarlyParam, KernelCmdline);
                 }
             }
         }
@@ -337,7 +337,7 @@ object KernelParam: KernelObject {
      */
     state State::Ready {
         invariant {
-            early_params_dispatched(KernelParam, KernelCmdline);
+            early_params_dispatched(EarlyParam, KernelCmdline);
             EarlyCon.state == State::Online;
         }
     }
@@ -377,6 +377,36 @@ object PrintkBuffer: BufferObject {
     state State::Prepared {
         invariant {
             printk_buffer_ready(PrintkBuffer);
+        }
+
+        events {
+            /*
+             * Setup 对应 setup_log_buf()，在 per-cpu 和启动参数准备后完成正式日志缓冲准备。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    MemBlock.state == State::Online;
+                    PerCpuStorage.state == State::Ready;
+                    BootParam.state == State::Ready;
+                }
+
+                ensures {
+                    printk_buffer_ready(PrintkBuffer);
+                    printk_buffer_runtime_ready(PrintkBuffer);
+                    printk_buffer_records_preserved(PrintkBuffer);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 printk 缓冲区已经完成 setup_log_buf() 对应的运行期准备。
+     */
+    state State::Ready {
+        invariant {
+            printk_buffer_ready(PrintkBuffer);
+            printk_buffer_runtime_ready(PrintkBuffer);
+            printk_buffer_records_preserved(PrintkBuffer);
         }
     }
 }
@@ -541,7 +571,7 @@ object SBI: PlatformServiceObject {
 }
 
 /*
- * CpuIdMap 表示逻辑 CPU ID 到 hartid 的基础映射。
+ * CpuIdMap 表示逻辑 CPU ID 到 CPUObject 的基础映射。
  */
 object CpuIdMap: HardwareObject {
     initial_state: State::Base;
@@ -553,7 +583,7 @@ object CpuIdMap: HardwareObject {
     state State::Base {
         events {
             /*
-             * Preset 建立 logic id 0 -> BootCPU.hartid 的基础映射。
+             * Preset 建立 logic id 0 -> BootCPU 的基础映射。
              */
             on Event::Preset -> State::Ready {
                 depends_on {
@@ -562,6 +592,8 @@ object CpuIdMap: HardwareObject {
 
                 ensures {
                     cpu_id_map_ready(CpuIdMap, 0, BootCPU);
+                    cpu_id_map_entry(CpuIdMap, 0, BootCPU);
+                    cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
                 }
             }
         }
@@ -573,6 +605,8 @@ object CpuIdMap: HardwareObject {
     state State::Ready {
         invariant {
             cpu_id_map_ready(CpuIdMap, 0, BootCPU);
+            cpu_id_map_entry(CpuIdMap, 0, BootCPU);
+            cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
         }
     }
 }
@@ -625,7 +659,7 @@ object EntrySuccessorPhase: PhaseObject {
                     InitMM.Event::Setup;
                     EarlyIoremap.Event::Setup;
                     SBI.Event::Setup;
-                    KernelParam.Event::Setup;
+                    EarlyParam.Event::Setup;
                     MemBlock.Event::Setup;
                     Vm.Event::Enable;
                     MemBlock.Event::Enable;
@@ -659,7 +693,7 @@ object EntrySuccessorPhase: PhaseObject {
             InitMM.state == State::Ready;
             EarlyIoremap.state == State::Ready;
             SBI.state == State::Ready;
-            KernelParam.state == State::Ready;
+            EarlyParam.state == State::Ready;
             EarlyCon.state == State::Online;
             MemBlock.state == State::Online;
             Vm.state == State::Online;
