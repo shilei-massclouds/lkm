@@ -115,6 +115,12 @@ make clean
 
 在未来 Composition Phase 中，再恢复“Unikernel app 引领内核形态”的 ArceOS 设计，并讨论如何接入 `ax-std`、测试 payload 和宏内核 payload。
 
+### smoke 测试边界
+
+smoke payload 用于覆盖 QEMU 运行期可观察行为，以及规格推导不能单独替代的实现效果，例如控制台输出、格式化输出、内存分配动作、FDT/DeviceTree 公开查询接口、资源摘要和 payload 关机路径。若某个性质仅仅是在重复对象状态、生命周期顺序、内部副本一致性或谓词不变量，并且已经能由 `make verify` 的规格推导闭合，则不应为它新增 smoke 用例。
+
+实现也不应为了 smoke 暴露原本不需要公开的内部状态查询接口。若某个对象同时有可验证的不变量和用户可观察行为，smoke 应测试后者；前者保留在模型谓词、推导验证和对象事件推进检查中。例如 `CommandLine` 的 raw/saved/static 文本视图一致性属于规格和实现状态推进约束，不需要单独增加只读取内部状态的 smoke case。
+
 ### 启动与 smoke 输出风格
 
 启动日志和 smoke 用例输出主要服务人工审阅，SHOULD 优先采用接近 Linux 启动日志的清晰文本格式，而不是大量
