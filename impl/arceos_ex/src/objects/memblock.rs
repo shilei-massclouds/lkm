@@ -59,8 +59,10 @@ impl MemBlock {
                 let candidate = PhysRange::new(start, end);
                 if !self.reserved.overlaps_range(candidate) {
                     self.alloc_cursor = end;
-                    let _ = self.reserved.push(candidate);
-                    return Some(candidate);
+                    if self.reserved.push(candidate) {
+                        return Some(candidate);
+                    }
+                    return None;
                 }
                 start = align_up(end, align)?;
             }

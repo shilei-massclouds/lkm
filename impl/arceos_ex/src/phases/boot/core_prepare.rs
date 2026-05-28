@@ -23,7 +23,7 @@ pub fn setup(ctx: &mut Context) -> ! {
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.device_tree
-        .setup(&ctx.raw_dtb, &ctx.vm, &ctx.memblock)?;
+        .setup(&ctx.raw_dtb, &ctx.vm, &mut ctx.memblock, &ctx.config)?;
     ctx.zones.setup(&ctx.memblock, &ctx.vm)?;
     ctx.page_allocator_prepare
         .setup(&ctx.memblock, &ctx.vm, &ctx.zones)?;
@@ -36,11 +36,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
     ctx.saved_command_line
         .setup(&ctx.kernel_cmdline, &ctx.memblock)?;
-    ctx.static_command_line.setup(
-        &ctx.kernel_cmdline,
-        &ctx.saved_command_line,
-        &ctx.memblock,
-    )?;
+    ctx.static_command_line
+        .setup(&ctx.kernel_cmdline, &ctx.saved_command_line, &ctx.memblock)?;
     checkpoint_setup_nr_cpu_ids(&ctx.cpu_id_map, &ctx.cpu_group)?;
     ctx.per_cpu_storage
         .setup(&ctx.memblock, &ctx.vm, &ctx.cpu_group, &ctx.cpu_id_map)?;
@@ -65,7 +62,12 @@ fn checkpoint_setup_nr_cpu_ids(
     cpu_group: &crate::objects::cpu_group::CpuGroup,
 ) -> EventResult {
     if cpu_id_map.state() != State::Ready || cpu_group.boot_cpu_state() != State::Online {
-        return failed_condition(LifecycleEvent::Setup, State::Base, State::Base, State::Ready);
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Base,
+            State::Ready,
+        );
     }
     crate::trace::checkpoint(Checkpoint::SetupNrCpuIdsCheckpoint);
     Ok(())
@@ -75,7 +77,12 @@ fn checkpoint_second_parse_early_param(
     early_param: &crate::objects::early_param::EarlyParam,
 ) -> EventResult {
     if early_param.state() != State::Ready {
-        return failed_condition(LifecycleEvent::Setup, State::Base, State::Base, State::Ready);
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Base,
+            State::Ready,
+        );
     }
     crate::trace::checkpoint(Checkpoint::SecondParseEarlyParamCheckpoint);
     Ok(())
@@ -85,7 +92,12 @@ fn checkpoint_print_unknown_bootoptions(
     boot_param: &crate::objects::boot_param::BootParam,
 ) -> EventResult {
     if boot_param.state() != State::Ready {
-        return failed_condition(LifecycleEvent::Setup, State::Base, State::Base, State::Ready);
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Base,
+            State::Ready,
+        );
     }
     crate::trace::checkpoint(Checkpoint::PrintUnknownBootoptionsCheckpoint);
     Ok(())
