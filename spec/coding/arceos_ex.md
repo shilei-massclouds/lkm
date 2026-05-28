@@ -115,6 +115,31 @@ make clean
 
 在未来 Composition Phase 中，再恢复“Unikernel app 引领内核形态”的 ArceOS 设计，并讨论如何接入 `ax-std`、测试 payload 和宏内核 payload。
 
+### 启动与 smoke 输出风格
+
+启动日志和 smoke 用例输出主要服务人工审阅，SHOULD 优先采用接近 Linux 启动日志的清晰文本格式，而不是大量
+`key=value` 调试字段。机器可解析的状态序列应通过 checkpoint trace 或后续结构化报告承载，不应挤进普通启动日志。
+
+建议格式如下：
+
+- 用简短标题标明当前对象或测试主题，例如 `Resource tree:`。
+- 多项事实分行输出，左侧使用稳定的人类可读标签，冒号对齐，右侧放结果值。
+- 物理地址范围采用 `[mem start-end]` 风格，输出为闭区间；内部实现仍可继续使用半开区间。
+- 容量优先用 `KiB`、`MiB` 等可读单位，避免只输出裸字节数。
+- 汇总行应说明事实类别和数量，例如 `1 region`、`5 regions`、`4 segments`；单复数可读性优先于完全机器化。
+- 测试失败时可以直接输出一行具体失败原因，不要求套用对齐格式。
+
+示例：
+
+```text
+Resource tree:
+  Entries      : 12
+  Root         : I/O memory
+  System RAM   : 1 region, 131072 KiB
+  Reserved     : 5 regions
+  Kernel image : [mem 0x80200000-0x80221fff], 4 segments
+```
+
 ## 新增核心 crate
 
 当前不新增 crate。源码先集中在 `impl/arceos_ex/src/`，可按对象和架构分目录组织：
