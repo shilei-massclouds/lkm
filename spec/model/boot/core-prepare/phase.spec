@@ -86,6 +86,11 @@ object DeviceTree: ResourceObject {
 
 /*
  * Zones 表示页分配器建立前的 zone / migration type / free page set 层级。
+ * 当前规格固定三类 ZoneKind：DMA32、NORMAL 和 MOVABLE；它们代表不同物理内存
+ * 区段，允许某类 zone 在当前平台或策略下为空。ZoneKind::MOVABLE 不等同于
+ * MigrationType::MOVABLE：前者是物理内存 zone，后者是每个 Zone 下 buddy/pageblock
+ * 层级的迁移类型。
+ *
  * 当前 DSL 还没有专门集合类型，因此 Zone、MigrationType 和 FreePageSet 先作为
  * Zones 内部的抽象元素关系由谓词表达。
  */
@@ -110,7 +115,15 @@ object Zones: MemoryObject {
                 ensures {
                     zones_ready(Zones, MemBlock);
                     zones_zone_level_ready(Zones);
+                    zones_have_dma32_normal_movable_kinds(Zones);
+                    zones_dma32_normal_movable_ranges_ordered(Zones);
+                    zones_empty_zone_ranges_allowed(Zones);
+                    zones_zone_ranges_derived_from_memblock(Zones, MemBlock);
+                    zones_dma32_covers_32bit_dma_range(Zones, MemBlock);
+                    zones_normal_covers_regular_managed_range(Zones, MemBlock);
+                    zones_movable_reserved_for_movable_policy(Zones);
                     zones_migration_type_level_ready(Zones);
+                    zones_migration_type_layer_distinct_from_zone_kind(Zones);
                     zones_free_page_set_level_ready(Zones);
                     zones_free_page_sets_initially_empty(Zones);
                 }
@@ -125,7 +138,15 @@ object Zones: MemoryObject {
         invariant {
             zones_ready(Zones, MemBlock);
             zones_zone_level_ready(Zones);
+            zones_have_dma32_normal_movable_kinds(Zones);
+            zones_dma32_normal_movable_ranges_ordered(Zones);
+            zones_empty_zone_ranges_allowed(Zones);
+            zones_zone_ranges_derived_from_memblock(Zones, MemBlock);
+            zones_dma32_covers_32bit_dma_range(Zones, MemBlock);
+            zones_normal_covers_regular_managed_range(Zones, MemBlock);
+            zones_movable_reserved_for_movable_policy(Zones);
             zones_migration_type_level_ready(Zones);
+            zones_migration_type_layer_distinct_from_zone_kind(Zones);
             zones_free_page_set_level_ready(Zones);
             zones_free_page_sets_initially_empty(Zones);
         }
