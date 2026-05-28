@@ -263,7 +263,8 @@ object EarlyDtb: ResourceObject {
 
 /*
  * CommandLine 表示启动命令行管理对象。它是顶层对象，管理 raw/saved/static
- * 三个命令行视图；参数解析对象 EarlyParam/BootParam/PayloadParam 不归入本对象。
+ * 三个命令行视图；参数解析对象 EarlyParam/BootParam/PayloadParam 归入 Params，
+ * 不归入本对象。
  * 入口后继期只通过 Preset 建立 raw view，核心准备期再通过 Setup 建立 saved/static
  * 副本。
  */
@@ -384,10 +385,96 @@ object KernelCmdline: ResourceObject {
 }
 
 /*
+ * Params 表示启动参数解析管理对象。它不同于 CommandLine：CommandLine 管理启动
+ * 命令行的文本视图，Params 管理 EarlyParam/BootParam/PayloadParam 三类参数解析
+ * 对象及其阶段性推进。Preset 驱动早期参数解析；Setup 在核心准备期驱动 BootParam
+ * 和 PayloadParam，且实现必须在二者之间保留 print_unknown_bootoptions() checkpoint。
+ */
+object Params: KernelObject {
+    initial_state: State::Base;
+
+    /*
+     * Base 表示任何参数解析对象尚未进入完成状态。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 对应入口后继期第一次 parse_early_param() 路径。
+             */
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    CommandLine.state == State::Prepared;
+                    StaticObjects.state == State::Online;
+                    SBI.state == State::Ready;
+                    PrintkBuffer.state == State::Prepared;
+                }
+
+                drives {
+                    EarlyParam.Event::Setup;
+                }
+
+                ensures {
+                    params_early_ready(Params, EarlyParam);
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示早期参数已经解析；普通 boot 参数和 payload 参数仍按后续时序解析。
+     */
+    state State::Prepared {
+        invariant {
+            params_early_ready(Params, EarlyParam);
+            EarlyParam.state == State::Ready;
+        }
+
+        events {
+            /*
+             * Setup 在核心准备期继续推进普通 boot 参数和最终 payload 参数解析。
+             * 该事件不重新推进 EarlyParam；第二次 parse_early_param() 只作为实现 checkpoint 保留。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    EarlyParam.state == State::Ready;
+                    StaticCommandLine.state == State::Ready;
+                }
+
+                drives {
+                    BootParam.Event::Setup;
+                    PayloadParam.Event::Setup;
+                }
+
+                ensures {
+                    params_early_ready(Params, EarlyParam);
+                    params_boot_ready(Params, BootParam);
+                    params_payload_ready(Params, PayloadParam);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 状态在核心准备期由 Params.Setup 推进。
+     */
+    state State::Ready {
+        invariant {
+            params_early_ready(Params, EarlyParam);
+            params_boot_ready(Params, BootParam);
+            params_payload_ready(Params, PayloadParam);
+            EarlyParam.state == State::Ready;
+            BootParam.state == State::Ready;
+            PayloadParam.state == State::Ready;
+        }
+    }
+}
+
+/*
  * EarlyParam 表示早期内核参数解析和分发机制。
  */
 object EarlyParam: KernelObject {
     initial_state: State::Base;
+    parent: Params;
 
     /*
      * Base 表示早期参数尚未解析。
@@ -787,7 +874,7 @@ object EntrySuccessorPhase: PhaseObject {
                     InitMM.Event::Setup;
                     EarlyIoremap.Event::Setup;
                     SBI.Event::Setup;
-                    EarlyParam.Event::Setup;
+                    Params.Event::Preset;
                     MemBlock.Event::Setup;
                     Vm.Event::Enable;
                     MemBlock.Event::Enable;
@@ -821,6 +908,7 @@ object EntrySuccessorPhase: PhaseObject {
             InitMM.state == State::Ready;
             EarlyIoremap.state == State::Ready;
             SBI.state == State::Ready;
+            Params.state == State::Prepared;
             EarlyParam.state == State::Ready;
             EarlyCon.state == State::Online;
             MemBlock.state == State::Online;

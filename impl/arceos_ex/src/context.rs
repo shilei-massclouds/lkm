@@ -23,6 +23,7 @@ use crate::objects::{
     kernel_image::KernelImage,
     lds::Lds,
     memblock::MemBlock,
+    params::Params,
     payload_param::PayloadParam,
     per_cpu_storage::PerCpuStorage,
     physical_memory::PhysicalMemory,
@@ -64,6 +65,7 @@ pub struct Context {
     pub early_ioremap: EarlyIoremap,
     pub sbi: Sbi,
     pub early_param: EarlyParam,
+    pub params: Params,
     pub memblock: MemBlock,
 
     pub device_tree: DeviceTree,
@@ -108,6 +110,7 @@ impl Context {
             early_ioremap: EarlyIoremap::new(),
             sbi: Sbi::new(),
             early_param: EarlyParam::new(),
+            params: Params::new(),
             memblock: MemBlock::new(),
             device_tree: DeviceTree::new(),
             zones: Zones::new(),

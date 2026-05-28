@@ -50,8 +50,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.init_mm.setup(&ctx.lds)?;
     ctx.early_ioremap.setup(&ctx.fix_map)?;
     ctx.sbi.setup()?;
-    ctx.early_param
-        .setup(&ctx.command_line, &ctx.kernel_cmdline, &ctx.sbi)?;
+    ctx.params.preset(
+        &ctx.command_line,
+        &ctx.kernel_cmdline,
+        &ctx.sbi,
+        &mut ctx.early_param,
+    )?;
     ctx.memblock.setup(
         &ctx.early_dtb,
         &ctx.kernel_image,
@@ -108,6 +112,7 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.init_mm.state() == State::Ready
         && ctx.early_ioremap.state() == State::Ready
         && ctx.sbi.state() == State::Ready
+        && ctx.params.state() == State::Prepared
         && ctx.early_param.state() == State::Ready
         && earlycon::is_online()
         && ctx.memblock.state() == State::Online

@@ -124,6 +124,10 @@ impl BootCommandLine {
         }
     }
 
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
     pub fn contains(&self, needle: &[u8]) -> bool {
         if needle.is_empty() || needle.len() > self.len {
             return false;

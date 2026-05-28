@@ -50,6 +50,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::per_cpu::run,
     },
     SmokeCase {
+        name: "params",
+        run: cases::params::run,
+    },
+    SmokeCase {
         name: "device_tree",
         run: cases::device_tree::run,
     },

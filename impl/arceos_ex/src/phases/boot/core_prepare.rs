@@ -53,10 +53,13 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.cpu_hotplug_state
         .setup(&ctx.cpu_group, &ctx.per_cpu_storage)?;
     checkpoint_second_parse_early_param(&ctx.early_param)?;
-    ctx.boot_param
-        .setup(&ctx.early_param, &ctx.static_command_line)?;
-    checkpoint_print_unknown_bootoptions(&ctx.boot_param)?;
-    ctx.payload_param.setup(&ctx.boot_param)?;
+    ctx.params.setup(
+        &ctx.early_param,
+        &ctx.static_command_line,
+        &mut ctx.boot_param,
+        &mut ctx.payload_param,
+        checkpoint_print_unknown_bootoptions,
+    )?;
     ctx.randomness.preset(&ctx.static_command_line)?;
     printk::setup()?;
     ctx.exception_table.setup(&ctx.kernel_image, &ctx.vm)?;
@@ -164,6 +167,7 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.per_cpu_storage.first_chunk().state() == State::Ready
         && ctx.per_cpu_storage.offset_table().state() == State::Ready
         && ctx.cpu_hotplug_state.state() == State::Ready
+        && ctx.params.state() == State::Ready
         && ctx.boot_param.state() == State::Ready
         && ctx.payload_param.state() == State::Ready
         && ctx.randomness.state() == State::Prepared

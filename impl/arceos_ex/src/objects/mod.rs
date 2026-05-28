@@ -30,6 +30,7 @@ pub mod kernel_image;
 pub mod lds;
 pub mod memblock;
 pub mod page_table;
+pub mod params;
 pub mod payload_param;
 pub mod per_cpu_storage;
 pub mod physical_memory;

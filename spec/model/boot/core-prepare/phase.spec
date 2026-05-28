@@ -621,6 +621,7 @@ object CpuHotplugState: HardwareObject {
  */
 object BootParam: KernelObject {
     initial_state: State::Base;
+    parent: Params;
 
     /*
      * Base 表示普通启动参数尚未解析。
@@ -663,6 +664,7 @@ object BootParam: KernelObject {
  */
 object PayloadParam: KernelObject {
     initial_state: State::Base;
+    parent: Params;
 
     /*
      * Base 表示 payload 参数尚未从 BootParam 边界中建立。
@@ -799,6 +801,7 @@ object CorePreparePhase: PhaseObject {
                     Vm.state == State::Online;
                     SwapperVm.state == State::Online;
                     MemBlock.state == State::Online;
+                    Params.state == State::Prepared;
                     EarlyParam.state == State::Ready;
                     CommandLine.state == State::Prepared;
                     BootCPU.state == State::Online;
@@ -818,8 +821,7 @@ object CorePreparePhase: PhaseObject {
                     CommandLine.Event::Setup;
                     PerCpuStorage.Event::Setup;
                     CpuHotplugState.Event::Setup;
-                    BootParam.Event::Setup;
-                    PayloadParam.Event::Setup;
+                    Params.Event::Setup;
                     Randomness.Event::Preset;
                     PrintkBuffer.Event::Setup;
                     ExceptionTable.Event::Setup;
@@ -887,6 +889,7 @@ object CorePreparePhase: PhaseObject {
             PerCpuFirstChunk.state == State::Ready;
             PerCpuOffsetTable.state == State::Ready;
             CpuHotplugState.state == State::Ready;
+            Params.state == State::Ready;
             BootParam.state == State::Ready;
             PayloadParam.state == State::Ready;
             Randomness.state == State::Prepared;

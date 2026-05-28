@@ -41,7 +41,7 @@
 | model/derive | 推导义务阶段性收口 | 当前 `make verify` 为 `0 obligation / 3 deferred`。 |
 | arceos_ex | `EntryPreludePhase` 最小闭环 | 已覆盖 head prefix、BootArgs、RootStream、KernelImage、BootCPU/CpuGroup、InitTask/InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm 和 VM 切换。 |
 | arceos_ex | `EntrySuccessorPhase` 最小闭环 | 已覆盖 EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、CommandLine/KernelCmdline、EarlyParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap 和 SwapperVm。 |
-| arceos_ex | `CorePreparePhase` 最小骨架 | 已按规格插入 PayloadPhase 前，覆盖 DeviceTree、Zones、ResourceTree、CpuGroup.setup_smp、CacheBlockInfo、CpuCapabilities、CommandLine saved/static 视图、PerCpuStorage、CpuHotplugState、BootParam、PayloadParam、Randomness、PrintkBuffer.setup、ExceptionTable 和 ExceptionStream.setup。 |
+| arceos_ex | `CorePreparePhase` 最小骨架 | 已按规格插入 PayloadPhase 前，覆盖 DeviceTree、Zones、ResourceTree、CpuGroup.setup_smp、CacheBlockInfo、CpuCapabilities、CommandLine saved/static 视图、PerCpuStorage、CpuHotplugState、Params、BootParam、PayloadParam、Randomness、PrintkBuffer.setup、ExceptionTable 和 ExceptionStream.setup。 |
 | arceos_ex | `PayloadPhase` 最小闭环 | 已把启动链末尾的 selected payload 交接建模为不返回阶段，默认 `APP=smoke` 执行批量 smoke 用例后通过 SBI 关机。 |
 | arceos_ex | no-alloc 输出路径 | 启动期内部输出前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
 | arceos_ex | 最小 FDT 解析 | 不引入外部 crate，不使用 `Vec`、`String`、`Box`，只解析当前闭环必要节点。 |

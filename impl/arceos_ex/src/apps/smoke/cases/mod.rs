@@ -5,6 +5,7 @@ pub mod device_tree;
 pub mod fdt;
 pub mod hello;
 pub mod memblock;
+pub mod params;
 pub mod per_cpu;
 pub mod print;
 pub mod resource_tree;

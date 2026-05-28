@@ -22,6 +22,10 @@ impl KernelCmdline {
         self.lifecycle.state()
     }
 
+    pub const fn cmdline(&self) -> BootCommandLine {
+        self.cmdline
+    }
+
     pub fn has_earlycon_sbi(&self) -> bool {
         self.cmdline.contains(b"earlycon=sbi")
     }

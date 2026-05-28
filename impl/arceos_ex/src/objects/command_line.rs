@@ -1,4 +1,5 @@
 use super::{
+    fdt::BootCommandLine,
     fdt::FdtFacts,
     kernel_cmdline::KernelCmdline,
     memblock::MemBlock,
@@ -83,12 +84,14 @@ impl CommandLine {
 
 pub struct SavedCommandLine {
     lifecycle: Lifecycle,
+    cmdline: BootCommandLine,
 }
 
 impl SavedCommandLine {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            cmdline: BootCommandLine::empty(),
         }
     }
 
@@ -109,6 +112,7 @@ impl SavedCommandLine {
             );
         }
 
+        self.cmdline = kernel_cmdline.cmdline();
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -120,17 +124,23 @@ impl SavedCommandLine {
 
 pub struct StaticCommandLine {
     lifecycle: Lifecycle,
+    cmdline: BootCommandLine,
 }
 
 impl StaticCommandLine {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            cmdline: BootCommandLine::empty(),
         }
     }
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.cmdline.as_bytes()
     }
 
     pub fn setup(
@@ -152,6 +162,7 @@ impl StaticCommandLine {
             );
         }
 
+        self.cmdline = kernel_cmdline.cmdline();
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
