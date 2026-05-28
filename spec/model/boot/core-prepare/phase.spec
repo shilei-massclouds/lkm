@@ -10,9 +10,9 @@
  * DeviceTree 表示正式运行期设备树对象。它不同于 EarlyDtb：EarlyDtb 只服务早期事实提取，
  * DeviceTree 则建立运行期可遍历和可查询的 OF/DeviceTree 结构。
  *
- * 规格层只描述 DeviceNode 关系语义：存在唯一 root，非 root 节点有唯一 parent，
- * parent/children 关系一致，root 可达全部节点，并且节点属性可查询。它不绑定 C 结构体中的
- * sibling/child 指针实现方式。
+ * DeviceNode 是 DeviceTree 中的抽象节点。规格层描述的是逻辑关系：每个节点有 name、
+ * properties、可选 parent 引用和 children 集合；这些关系不要求实现必须使用指针、数组下标、
+ * sibling 链表或其它具体内存布局。
  */
 object DeviceTree: ResourceObject {
     initial_state: State::Base;
@@ -35,12 +35,19 @@ object DeviceTree: ResourceObject {
 
                 ensures {
                     device_tree_root_exists(DeviceTree);
+                    device_tree_root_unique(DeviceTree);
                     device_tree_root_has_no_parent(DeviceTree);
+                    device_tree_nodes_have_name(DeviceTree);
+                    device_tree_nodes_have_properties(DeviceTree);
                     device_tree_non_root_nodes_have_unique_parent(DeviceTree);
                     device_tree_parent_children_consistent(DeviceTree);
                     device_tree_root_reaches_all_nodes(DeviceTree);
                     device_tree_acyclic(DeviceTree);
+                    device_tree_node_property_names_unique(DeviceTree);
+                    device_tree_path_lookup_ready(DeviceTree);
+                    device_tree_parent_name_lookup_ready(DeviceTree);
                     device_tree_properties_queryable(DeviceTree);
+                    device_tree_property_raw_values_queryable(DeviceTree);
                 }
             }
         }
@@ -52,12 +59,19 @@ object DeviceTree: ResourceObject {
     state State::Ready {
         invariant {
             device_tree_root_exists(DeviceTree);
+            device_tree_root_unique(DeviceTree);
             device_tree_root_has_no_parent(DeviceTree);
+            device_tree_nodes_have_name(DeviceTree);
+            device_tree_nodes_have_properties(DeviceTree);
             device_tree_non_root_nodes_have_unique_parent(DeviceTree);
             device_tree_parent_children_consistent(DeviceTree);
             device_tree_root_reaches_all_nodes(DeviceTree);
             device_tree_acyclic(DeviceTree);
+            device_tree_node_property_names_unique(DeviceTree);
+            device_tree_path_lookup_ready(DeviceTree);
+            device_tree_parent_name_lookup_ready(DeviceTree);
             device_tree_properties_queryable(DeviceTree);
+            device_tree_property_raw_values_queryable(DeviceTree);
         }
     }
 }
