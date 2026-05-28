@@ -1619,7 +1619,13 @@ object CpuGroup: HardwareObject {
                 ensures {
                     boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
                     cpu_group_topology_ready(CpuGroup, DeviceTree);
+                    cpu_group_boot_cpu_present(CpuGroup, BootCPU);
                     secondary_cpus_discovered(CpuGroup, DeviceTree);
+                    secondary_cpus_have_unique_hartids(CpuGroup);
+                    secondary_cpus_exclude_boot_cpu(CpuGroup, BootCPU);
+                    secondary_cpus_possible(CpuGroup);
+                    secondary_cpus_present(CpuGroup);
+                    secondary_cpus_not_online(CpuGroup);
                     cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
                     cpu_id_map_entry(CpuIdMap, 0, BootCPU);
                     cpu_group_concurrency_closed(CpuGroup);
@@ -1635,7 +1641,13 @@ object CpuGroup: HardwareObject {
         invariant {
             boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
             cpu_group_topology_ready(CpuGroup, DeviceTree);
+            cpu_group_boot_cpu_present(CpuGroup, BootCPU);
             secondary_cpus_discovered(CpuGroup, DeviceTree);
+            secondary_cpus_have_unique_hartids(CpuGroup);
+            secondary_cpus_exclude_boot_cpu(CpuGroup, BootCPU);
+            secondary_cpus_possible(CpuGroup);
+            secondary_cpus_present(CpuGroup);
+            secondary_cpus_not_online(CpuGroup);
             cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
             cpu_id_map_entry(CpuIdMap, 0, BootCPU);
             cpu_group_concurrency_closed(CpuGroup);

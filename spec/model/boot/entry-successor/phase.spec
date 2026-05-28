@@ -624,6 +624,9 @@ object CpuIdMap: HardwareObject {
                     cpu_id_map_ready(CpuIdMap, CpuGroup);
                     cpu_id_map_entry(CpuIdMap, 0, BootCPU);
                     cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
+                    cpu_id_map_secondary_cpu_entries_ready(CpuIdMap, CpuGroup);
+                    cpu_id_map_entries_have_unique_logical_ids(CpuIdMap);
+                    cpu_id_map_entries_have_unique_hartids(CpuIdMap);
                     cpu_id_map_possible_cpu_boundary_ready(CpuIdMap, CpuGroup);
                 }
             }
@@ -638,6 +641,9 @@ object CpuIdMap: HardwareObject {
             cpu_id_map_ready(CpuIdMap, CpuGroup);
             cpu_id_map_entry(CpuIdMap, 0, BootCPU);
             cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
+            cpu_id_map_secondary_cpu_entries_ready(CpuIdMap, CpuGroup);
+            cpu_id_map_entries_have_unique_logical_ids(CpuIdMap);
+            cpu_id_map_entries_have_unique_hartids(CpuIdMap);
             cpu_id_map_possible_cpu_boundary_ready(CpuIdMap, CpuGroup);
         }
     }

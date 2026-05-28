@@ -9,6 +9,7 @@ const MAX_CPUS: usize = 16;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CpuIdMapEntryKind {
     BootCpu,
+    SecondaryCpu,
 }
 
 #[derive(Clone, Copy)]
@@ -95,6 +96,30 @@ impl CpuIdMap {
             );
         }
 
+        let mut entries = [CpuIdMapEntry::empty(); MAX_CPUS];
+        entries[0] = self.entries[0];
+        let mut count = 1usize;
+
+        let mut index = 0usize;
+        while index < cpu_group.secondary_count() {
+            let Some(cpu) = cpu_group.secondary_cpu(index) else {
+                return self.failed_setup();
+            };
+            if count >= MAX_CPUS || contains_hartid(&entries, count, cpu.hartid()) {
+                return self.failed_setup();
+            }
+            entries[count] = CpuIdMapEntry {
+                logical_id: count,
+                hartid: cpu.hartid(),
+                kind: CpuIdMapEntryKind::SecondaryCpu,
+            };
+            count += 1;
+            index += 1;
+        }
+
+        self.entries = entries;
+        self.count = count;
+
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -118,4 +143,24 @@ impl CpuIdMap {
             None
         }
     }
+
+    fn failed_setup(&self) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Prepared,
+            State::Ready,
+        )
+    }
+}
+
+fn contains_hartid(entries: &[CpuIdMapEntry; MAX_CPUS], count: usize, hartid: usize) -> bool {
+    let mut index = 0usize;
+    while index < count {
+        if entries[index].hartid == hartid {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }

@@ -2,10 +2,13 @@ use super::{
     boot_args::BootArgs,
     cpu_id_map::CpuIdMap,
     device_tree::DeviceTree,
+    fdt_reader::read_cells,
     sbi::Sbi,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
+
+const MAX_CPUS: usize = 16;
 
 unsafe extern "C" {
     static head_boot_hartid: usize;
@@ -72,9 +75,55 @@ impl BootCpu {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct SecondaryCpu {
+    hartid: usize,
+    possible: bool,
+    present: bool,
+    online: bool,
+}
+
+impl SecondaryCpu {
+    const fn empty() -> Self {
+        Self {
+            hartid: usize::MAX,
+            possible: false,
+            present: false,
+            online: false,
+        }
+    }
+
+    const fn new(hartid: usize) -> Self {
+        Self {
+            hartid,
+            possible: true,
+            present: true,
+            online: false,
+        }
+    }
+
+    pub const fn hartid(self) -> usize {
+        self.hartid
+    }
+
+    pub const fn is_possible(self) -> bool {
+        self.possible
+    }
+
+    pub const fn is_present(self) -> bool {
+        self.present
+    }
+
+    pub const fn is_online(self) -> bool {
+        self.online
+    }
+}
+
 pub struct CpuGroup {
     lifecycle: Lifecycle,
     boot_cpu: BootCpu,
+    secondary_cpus: [SecondaryCpu; MAX_CPUS - 1],
+    secondary_count: usize,
 }
 
 impl CpuGroup {
@@ -82,6 +131,8 @@ impl CpuGroup {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             boot_cpu: BootCpu::new(),
+            secondary_cpus: [SecondaryCpu::empty(); MAX_CPUS - 1],
+            secondary_count: 0,
         }
     }
 
@@ -123,6 +174,12 @@ impl CpuGroup {
             );
         }
 
+        let Some(secondary_cpus) = collect_secondary_cpus(device_tree, self.boot_cpu.hartid) else {
+            return self.failed_setup();
+        };
+        self.secondary_cpus = secondary_cpus.cpus;
+        self.secondary_count = secondary_cpus.count;
+
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -135,11 +192,112 @@ impl CpuGroup {
         self.boot_cpu.hartid
     }
 
+    pub const fn secondary_count(&self) -> usize {
+        self.secondary_count
+    }
+
+    pub fn secondary_cpu(&self, index: usize) -> Option<SecondaryCpu> {
+        if index < self.secondary_count {
+            Some(self.secondary_cpus[index])
+        } else {
+            None
+        }
+    }
+
+    pub const fn possible_cpu_count(&self) -> usize {
+        1 + self.secondary_count
+    }
+
     pub fn state(&self) -> State {
         self.lifecycle.state()
     }
 
     pub fn boot_cpu_state(&self) -> State {
         self.boot_cpu.state()
+    }
+
+    fn failed_setup(&self) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Prepared,
+            State::Ready,
+        )
+    }
+}
+
+struct SecondaryCpuSet {
+    cpus: [SecondaryCpu; MAX_CPUS - 1],
+    count: usize,
+}
+
+impl SecondaryCpuSet {
+    const fn empty() -> Self {
+        Self {
+            cpus: [SecondaryCpu::empty(); MAX_CPUS - 1],
+            count: 0,
+        }
+    }
+
+    fn push(&mut self, hartid: usize) -> bool {
+        if self.count >= self.cpus.len() || self.contains(hartid) {
+            return false;
+        }
+
+        self.cpus[self.count] = SecondaryCpu::new(hartid);
+        self.count += 1;
+        true
+    }
+
+    fn contains(&self, hartid: usize) -> bool {
+        let mut index = 0usize;
+        while index < self.count {
+            if self.cpus[index].hartid == hartid {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+}
+
+fn collect_secondary_cpus(device_tree: &DeviceTree, boot_hartid: usize) -> Option<SecondaryCpuSet> {
+    let cpus = device_tree.find_node(b"/cpus")?;
+    let address_cells = cpu_address_cells(cpus.property(b"#address-cells")?.raw_value())?;
+    let mut secondary_cpus = SecondaryCpuSet::empty();
+    let mut saw_boot_cpu = false;
+
+    for cpu in cpus.children() {
+        let Some(reg) = cpu.property(b"reg") else {
+            continue;
+        };
+        let value = reg.raw_value();
+        let base = value.as_ptr() as usize;
+        let (hartid, _) = read_cells(base, value.len(), address_cells)?;
+        let hartid = usize::try_from(hartid).ok()?;
+        if hartid == boot_hartid {
+            saw_boot_cpu = true;
+        } else if !secondary_cpus.push(hartid) {
+            return None;
+        }
+    }
+
+    if saw_boot_cpu {
+        Some(secondary_cpus)
+    } else {
+        None
+    }
+}
+
+fn cpu_address_cells(value: &[u8]) -> Option<usize> {
+    if value.len() < 4 {
+        return None;
+    }
+    let (cells, _) = read_cells(value.as_ptr() as usize, value.len(), 1)?;
+    let cells = usize::try_from(cells).ok()?;
+    if cells == 0 || cells > 2 {
+        None
+    } else {
+        Some(cells)
     }
 }
