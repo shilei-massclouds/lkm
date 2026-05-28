@@ -13,6 +13,12 @@ unsafe extern "C" {
     fn global_pointer();
     fn __head_text_start();
     fn __head_text_end();
+    fn _stext();
+    fn _etext();
+    fn _srodata();
+    fn _erodata();
+    fn _sdata();
+    fn _edata();
     fn _sbss();
     fn _ebss();
     fn init_stack_start();
@@ -44,6 +50,22 @@ impl Lds {
 
     fn text_start(&self) -> usize {
         _start as usize
+    }
+
+    pub fn text_range(&self) -> (usize, usize) {
+        (_stext as usize, _etext as usize)
+    }
+
+    pub fn rodata_range(&self) -> (usize, usize) {
+        (_srodata as usize, _erodata as usize)
+    }
+
+    pub fn data_range(&self) -> (usize, usize) {
+        (_sdata as usize, _edata as usize)
+    }
+
+    pub fn bss_range(&self) -> (usize, usize) {
+        (self.bss_start(), self.bss_end())
     }
 
     pub fn global_pointer(&self) -> usize {

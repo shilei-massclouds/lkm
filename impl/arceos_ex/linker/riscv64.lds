@@ -23,10 +23,13 @@ SECTIONS
     _etext = .;
 
     .rodata : AT(ADDR(.rodata) - LOAD_OFFSET) ALIGN(4K) {
+        _srodata = .;
         *(.rodata .rodata.*)
+        _erodata = .;
     }
 
     .data : AT(ADDR(.data) - LOAD_OFFSET) ALIGN(4K) {
+        _sdata = .;
         PROVIDE(__global_pointer$ = . + 0x800);
         KEEP(*(.head.handoff))
         *(.sdata .sdata.*)

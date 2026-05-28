@@ -36,6 +36,10 @@ impl MemBlock {
         &self.usable
     }
 
+    pub const fn reserved_ranges(&self) -> &PhysRangeSet {
+        &self.reserved
+    }
+
     #[allow(dead_code)]
     pub fn alloc_phys(&mut self, size: usize, align: usize) -> Option<PhysRange> {
         if self.lifecycle.state() != State::Online
