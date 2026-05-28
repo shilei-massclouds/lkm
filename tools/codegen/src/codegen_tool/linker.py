@@ -32,6 +32,9 @@ _REQUIRED_LDS_ATTRS = {
     "init_stack_start",
     "kernel_end",
     "kernel_start",
+    "per_cpu_end",
+    "per_cpu_load",
+    "per_cpu_start",
     "data_end",
     "data_start",
     "rodata_end",
@@ -48,6 +51,7 @@ _REQUIRED_LDS_INVARIANTS = {
     "inside(rodata_start, rodata_end, kernel_start, kernel_end)",
     "inside(data_start, data_end, kernel_start, kernel_end)",
     "entry_head_text_layout_ready(Lds)",
+    "per_cpu_static_image_layout_ready(Lds)",
 }
 
 
@@ -124,9 +128,29 @@ SECTIONS
         PROVIDE(__global_pointer$ = . + 0x800);
         KEEP(*(.head.handoff))
         *(.sdata .sdata.*)
-        *(.data .data.*)
+        *(.data)
     }}
     _edata = .;
+
+    . = ALIGN({profile.page_size});
+    .data..percpu : AT(ADDR(.data..percpu) - LOAD_OFFSET) {{
+        __per_cpu_load = .;
+        __per_cpu_start = .;
+        KEEP(*(.data..percpu..first))
+        . = ALIGN({profile.page_size});
+        *(.data..percpu..page_aligned)
+        . = ALIGN(64);
+        *(.data..percpu..read_mostly)
+        . = ALIGN(64);
+        *(.data..percpu)
+        *(.data..percpu.*)
+        . = ALIGN(64);
+        __per_cpu_end = .;
+    }}
+
+    .data.tail : AT(ADDR(.data.tail) - LOAD_OFFSET) ALIGN({profile.page_size}) {{
+        *(.data.*)
+    }}
 
     .bss : AT(ADDR(.bss) - LOAD_OFFSET) ALIGN({profile.page_size}) {{
         _sbss = .;

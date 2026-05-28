@@ -382,8 +382,133 @@ object StaticCommandLine: ResourceObject {
 }
 
 /*
- * PerCpuStorage 表示 per-cpu 存储的顶层抽象。后续可以继续细化为 first chunk、
- * static/dynamic per-cpu 区和 offset 表。
+ * PerCpuStaticImage 表示链接脚本中 .data..percpu 的静态模板。
+ * __per_cpu_start / __per_cpu_end 定义模板大小和运行地址范围；
+ * __per_cpu_load 定义 first chunk 初始化时复制静态内容的加载地址。
+ */
+object PerCpuStaticImage: MemoryObject {
+    initial_state: State::Base;
+    parent: PerCpuStorage;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Lds.state == State::Online;
+                    StaticObjects.state == State::Online;
+                }
+
+                ensures {
+                    per_cpu_static_image_ready(PerCpuStaticImage, Lds, StaticObjects);
+                    per_cpu_static_image_size_from_lds(PerCpuStaticImage, Lds);
+                    per_cpu_static_image_load_source_ready(PerCpuStaticImage, Lds);
+                    static_per_cpu_objects_in_static_image(StaticObjects, PerCpuStaticImage);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            per_cpu_static_image_ready(PerCpuStaticImage, Lds, StaticObjects);
+            per_cpu_static_image_size_from_lds(PerCpuStaticImage, Lds);
+            per_cpu_static_image_load_source_ready(PerCpuStaticImage, Lds);
+            static_per_cpu_objects_in_static_image(StaticObjects, PerCpuStaticImage);
+        }
+    }
+}
+
+/*
+ * PerCpuFirstChunk 表示 setup_per_cpu_areas() 为 possible CPU 集合建立的
+ * first percpu chunk。每个 possible CPU 对应一个 unit；unit 内部布局为
+ * static | [reserved] | dynamic | unused tail。reserved 段当前只作为布局事实，
+ * 其 allocator 能力后续在模块/保留 percpu 分配路径展开。
+ */
+object PerCpuFirstChunk: MemoryObject {
+    initial_state: State::Base;
+    parent: PerCpuStorage;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    PerCpuStaticImage.state == State::Ready;
+                    MemBlock.state == State::Online;
+                    SwapperVm.state == State::Online;
+                    CpuGroup.state == State::Ready;
+                    CpuIdMap.state == State::Ready;
+                }
+
+                ensures {
+                    per_cpu_first_chunk_ready(PerCpuFirstChunk, PerCpuStaticImage, CpuGroup);
+                    per_cpu_first_chunk_allocated_from_memblock(PerCpuFirstChunk, MemBlock);
+                    per_cpu_first_chunk_linearly_mapped(PerCpuFirstChunk, SwapperVm);
+                    per_cpu_first_chunk_unit_count_matches_possible_cpus(PerCpuFirstChunk, CpuGroup);
+                    per_cpu_first_chunk_units_follow_cpu_id_map(PerCpuFirstChunk, CpuIdMap);
+                    per_cpu_unit_static_area_initialized_from_load(PerCpuFirstChunk, PerCpuStaticImage);
+                    per_cpu_unit_layout_ready(PerCpuFirstChunk);
+                    per_cpu_reserved_area_layout_ready(PerCpuFirstChunk);
+                    per_cpu_dynamic_reserve_ready(PerCpuFirstChunk);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            per_cpu_first_chunk_ready(PerCpuFirstChunk, PerCpuStaticImage, CpuGroup);
+            per_cpu_first_chunk_allocated_from_memblock(PerCpuFirstChunk, MemBlock);
+            per_cpu_first_chunk_linearly_mapped(PerCpuFirstChunk, SwapperVm);
+            per_cpu_first_chunk_unit_count_matches_possible_cpus(PerCpuFirstChunk, CpuGroup);
+            per_cpu_first_chunk_units_follow_cpu_id_map(PerCpuFirstChunk, CpuIdMap);
+            per_cpu_unit_static_area_initialized_from_load(PerCpuFirstChunk, PerCpuStaticImage);
+            per_cpu_unit_layout_ready(PerCpuFirstChunk);
+            per_cpu_reserved_area_layout_ready(PerCpuFirstChunk);
+            per_cpu_dynamic_reserve_ready(PerCpuFirstChunk);
+        }
+    }
+}
+
+/*
+ * PerCpuOffsetTable 表示 logical CPU 到 percpu unit/base offset 的映射表。
+ * 其边界基于 CpuGroup 中 possible CPU 的个数，而不是 online CPU 的个数。
+ */
+object PerCpuOffsetTable: MemoryObject {
+    initial_state: State::Base;
+    parent: PerCpuStorage;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    PerCpuFirstChunk.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                    CpuIdMap.state == State::Ready;
+                }
+
+                ensures {
+                    per_cpu_offset_table_ready(PerCpuOffsetTable, PerCpuFirstChunk, CpuIdMap);
+                    per_cpu_offset_entries_match_possible_cpus(PerCpuOffsetTable, CpuGroup);
+                    per_cpu_offset_entries_follow_cpu_id_map(PerCpuOffsetTable, CpuIdMap);
+                    per_cpu_addressing_ready(PerCpuOffsetTable);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            per_cpu_offset_table_ready(PerCpuOffsetTable, PerCpuFirstChunk, CpuIdMap);
+            per_cpu_offset_entries_match_possible_cpus(PerCpuOffsetTable, CpuGroup);
+            per_cpu_offset_entries_follow_cpu_id_map(PerCpuOffsetTable, CpuIdMap);
+            per_cpu_addressing_ready(PerCpuOffsetTable);
+        }
+    }
+}
+
+/*
+ * PerCpuStorage 表示 per-cpu 存储的顶层抽象。它聚合静态 percpu 模板、
+ * first chunk 和 offset table；完整动态 percpu allocator 后续再展开。
  */
 object PerCpuStorage: MemoryObject {
     initial_state: State::Base;
@@ -400,15 +525,24 @@ object PerCpuStorage: MemoryObject {
                 depends_on {
                     MemBlock.state == State::Online;
                     SwapperVm.state == State::Online;
+                    Lds.state == State::Online;
+                    StaticObjects.state == State::Online;
                     CpuGroup.state == State::Ready;
                     CpuIdMap.state == State::Ready;
                 }
 
+                drives {
+                    PerCpuStaticImage.Event::Setup;
+                    PerCpuFirstChunk.Event::Setup;
+                    PerCpuOffsetTable.Event::Setup;
+                }
+
                 ensures {
-                    per_cpu_storage_ready(PerCpuStorage, CpuGroup);
-                    per_cpu_addressing_ready(PerCpuStorage);
-                    per_cpu_static_instances_ready(PerCpuStorage);
-                    per_cpu_dynamic_reserve_ready(PerCpuStorage);
+                    per_cpu_storage_ready(PerCpuStorage, CpuGroup, PerCpuFirstChunk, PerCpuOffsetTable);
+                    per_cpu_static_instances_ready(PerCpuStorage, PerCpuStaticImage, PerCpuFirstChunk);
+                    per_cpu_dynamic_reserve_ready(PerCpuStorage, PerCpuFirstChunk);
+                    per_cpu_addressing_ready(PerCpuStorage, PerCpuOffsetTable);
+                    per_cpu_storage_unit_count_uses_possible_cpus(PerCpuStorage, CpuGroup);
                 }
             }
         }
@@ -419,10 +553,14 @@ object PerCpuStorage: MemoryObject {
      */
     state State::Ready {
         invariant {
-            per_cpu_storage_ready(PerCpuStorage, CpuGroup);
-            per_cpu_addressing_ready(PerCpuStorage);
-            per_cpu_static_instances_ready(PerCpuStorage);
-            per_cpu_dynamic_reserve_ready(PerCpuStorage);
+            PerCpuStaticImage.state == State::Ready;
+            PerCpuFirstChunk.state == State::Ready;
+            PerCpuOffsetTable.state == State::Ready;
+            per_cpu_storage_ready(PerCpuStorage, CpuGroup, PerCpuFirstChunk, PerCpuOffsetTable);
+            per_cpu_static_instances_ready(PerCpuStorage, PerCpuStaticImage, PerCpuFirstChunk);
+            per_cpu_dynamic_reserve_ready(PerCpuStorage, PerCpuFirstChunk);
+            per_cpu_addressing_ready(PerCpuStorage, PerCpuOffsetTable);
+            per_cpu_storage_unit_count_uses_possible_cpus(PerCpuStorage, CpuGroup);
         }
     }
 }
@@ -738,6 +876,9 @@ object CorePreparePhase: PhaseObject {
             SavedCommandLine.state == State::Ready;
             StaticCommandLine.state == State::Ready;
             PerCpuStorage.state == State::Ready;
+            PerCpuStaticImage.state == State::Ready;
+            PerCpuFirstChunk.state == State::Ready;
+            PerCpuOffsetTable.state == State::Ready;
             BootCpuHotplugState.state == State::Ready;
             BootParam.state == State::Ready;
             PayloadParam.state == State::Ready;

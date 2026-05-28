@@ -115,6 +115,13 @@ _LDS_LINKER_PROOFS = {
         "linker_layout",
         "linux_linker_script",
     ),
+    "per_cpu_start != 0": ("linker_layout", "linux_linker_script"),
+    "per_cpu_end > per_cpu_start": ("linker_layout", "linux_linker_script"),
+    "per_cpu_load != 0": ("linker_layout", "linux_linker_script"),
+    "per_cpu_static_image_layout_ready(Lds)": (
+        "linker_layout",
+        "linux_linker_script",
+    ),
     "init_stack_start != 0": ("linker_layout", "linux_linker_script"),
     "init_stack_end > init_stack_start": ("linker_layout", "linux_linker_script"),
     "page_aligned(init_stack_start)": ("linker_layout", "linux_linker_script"),

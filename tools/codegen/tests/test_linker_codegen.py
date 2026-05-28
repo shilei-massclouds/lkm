@@ -79,6 +79,7 @@ def _minimal_model_without_config_driven_lds_invariant() -> ObjectModel:
                     inside(rodata_start, rodata_end, kernel_start, kernel_end);
                     inside(data_start, data_end, kernel_start, kernel_end);
                     entry_head_text_layout_ready(Lds);
+                    per_cpu_static_image_layout_ready(Lds);
                 """,
                 span=span,
             )
@@ -112,6 +113,9 @@ def _minimal_model_without_config_driven_lds_invariant() -> ObjectModel:
             "init_stack_start": "SymbolAddr",
             "kernel_end": "SymbolAddr",
             "kernel_start": "SymbolAddr",
+            "per_cpu_end": "SymbolAddr",
+            "per_cpu_load": "SymbolAddr",
+            "per_cpu_start": "SymbolAddr",
             "data_end": "SymbolAddr",
             "data_start": "SymbolAddr",
             "rodata_end": "SymbolAddr",

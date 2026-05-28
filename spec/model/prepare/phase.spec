@@ -122,6 +122,9 @@ object Lds: PrepareObject {
         trampoline_safe_text_range: AddrRange;
         bss_start: SymbolAddr;
         bss_end: SymbolAddr;
+        per_cpu_start: SymbolAddr;
+        per_cpu_end: SymbolAddr;
+        per_cpu_load: SymbolAddr;
         init_stack_start: SymbolAddr;
         init_stack_end: SymbolAddr;
         boot_stack_size: Size;
@@ -153,6 +156,10 @@ object Lds: PrepareObject {
             bss_start != 0;
             bss_end > bss_start;
             inside(bss_start, bss_end, kernel_start, kernel_end);
+            per_cpu_start != 0;
+            per_cpu_end > per_cpu_start;
+            per_cpu_load != 0;
+            per_cpu_static_image_layout_ready(Lds);
             init_stack_start != 0;
             init_stack_end > init_stack_start;
             page_aligned(init_stack_start);
@@ -178,6 +185,9 @@ object Lds: PrepareObject {
         kernel_end = symbol("_end");
         bss_start = symbol("__bss_start");
         bss_end = symbol("__bss_stop");
+        per_cpu_start = symbol("__per_cpu_start");
+        per_cpu_end = symbol("__per_cpu_end");
+        per_cpu_load = symbol("__per_cpu_load");
         init_stack_start = symbol("init_thread_union");
         init_stack_end = expr("init_thread_union + THREAD_SIZE");
         boot_stack_size = symbol("THREAD_SIZE");

@@ -170,6 +170,16 @@ predicate trampoline_access_discipline_ready<T>(lds: T) -> bool {
     contains(lds.head_text_range, lds.trampoline_safe_text_range);
 }
 
+predicate per_cpu_static_image_layout_ready<T>(lds: T) -> bool {
+    exists(lds.per_cpu_start);
+    exists(lds.per_cpu_end);
+    exists(lds.per_cpu_load);
+    lds.per_cpu_end > lds.per_cpu_start;
+    aligned(lds.per_cpu_start, page_size_min());
+    inside(lds.per_cpu_start, lds.per_cpu_end, lds.kernel_start, lds.kernel_end);
+    inside(lds.per_cpu_load, lds.per_cpu_load + (lds.per_cpu_end - lds.per_cpu_start), lds.kernel_start, lds.kernel_end);
+}
+
 predicate kernel_image_mapped_for_plain_data<T, U>(image: T, map: U) -> bool {
     contains(map, image)
 }

@@ -33,9 +33,29 @@ SECTIONS
         PROVIDE(__global_pointer$ = . + 0x800);
         KEEP(*(.head.handoff))
         *(.sdata .sdata.*)
-        *(.data .data.*)
+        *(.data)
     }
     _edata = .;
+
+    . = ALIGN(4K);
+    .data..percpu : AT(ADDR(.data..percpu) - LOAD_OFFSET) {
+        __per_cpu_load = .;
+        __per_cpu_start = .;
+        KEEP(*(.data..percpu..first))
+        . = ALIGN(4K);
+        *(.data..percpu..page_aligned)
+        . = ALIGN(64);
+        *(.data..percpu..read_mostly)
+        . = ALIGN(64);
+        *(.data..percpu)
+        *(.data..percpu.*)
+        . = ALIGN(64);
+        __per_cpu_end = .;
+    }
+
+    .data.tail : AT(ADDR(.data.tail) - LOAD_OFFSET) ALIGN(4K) {
+        *(.data.*)
+    }
 
     .bss : AT(ADDR(.bss) - LOAD_OFFSET) ALIGN(4K) {
         _sbss = .;
