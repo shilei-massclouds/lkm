@@ -152,6 +152,18 @@ Resource tree:
 `.data.*` 尾部段；不得让 `.data .data.*` 的普通 wildcard 提前吞掉 `.data..percpu`、`.data..percpu.*` 等输入段。运行期
 `Lds.entry_layout_ready()` 会检查 `__per_cpu_start < __per_cpu_end`、起点页对齐，以及 `__per_cpu_load` 到模板大小的加载范围仍处于内核镜像内。
 
+### 静态 per-cpu 访问接口
+
+当前实现 SHOULD 提供两类接近 Linux 静态 percpu 使用方式的接口：
+
+- 定义接口：通过宏封装 `#[link_section = ".data..percpu"]` 和 `#[used]`，只声明静态 percpu 模板变量。
+- 访问接口：通过 `PerCpuStorage` 的 offset table 按 logical CPU 计算实例地址，并提供 `per_cpu_ptr` 风格地址计算以及类型化读/写 action；调用者不得直接依赖 first chunk 的 dynamic/reserved 内部布局。
+
+从规格语义看，静态 percpu 访问是 action：它锚定在 `PerCpuStorage.Ready` / `PerCpuOffsetTable.Ready` 状态上执行。若对象尚未处于这些状态，action 应失败或返回空结果；若 action 成功，也仍停留在原 Ready 状态，不推进任何对象生命周期状态，也不得伪造成新的 `Setup/Enable` 事件。
+
+smoke 可以覆盖静态 percpu 访问的真实运行期行为，例如对每个 possible logical CPU 的实例分别写入并读回，确认实例互不影响。完整动态
+percpu allocator 暂缓，在规格中只有 `dynamic reserve ready` 布局事实时，不应新增动态分配或动态区裸写 smoke。
+
 ## 新增核心 crate
 
 当前不新增 crate。源码先集中在 `impl/arceos_ex/src/`，可按对象和架构分目录组织：

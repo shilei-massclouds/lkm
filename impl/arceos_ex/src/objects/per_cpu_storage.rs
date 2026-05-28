@@ -19,6 +19,30 @@ const RESERVED_SIZE: usize = 0;
 #[unsafe(link_section = ".data..percpu")]
 static PER_CPU_STATIC_ANCHOR: usize = 0;
 
+#[macro_export]
+macro_rules! define_per_cpu {
+    ($vis:vis static $name:ident: $ty:ty = $value:expr) => {
+        #[used]
+        #[unsafe(link_section = ".data..percpu")]
+        $vis static $name: $ty = $value;
+    };
+}
+
+#[derive(Clone, Copy)]
+pub struct PerCpuSymbol<T> {
+    template: *const T,
+}
+
+impl<T> PerCpuSymbol<T> {
+    pub const fn new(template: &'static T) -> Self {
+        Self { template }
+    }
+
+    fn template_addr(&self) -> usize {
+        self.template as usize
+    }
+}
+
 pub struct PerCpuStorage {
     lifecycle: Lifecycle,
     static_image: PerCpuStaticImage,
@@ -53,6 +77,39 @@ impl PerCpuStorage {
     #[allow(dead_code)]
     pub const fn offset_table(&self) -> &PerCpuOffsetTable {
         &self.offset_table
+    }
+
+    pub fn per_cpu_ptr<T>(&self, symbol: PerCpuSymbol<T>, logical_id: usize) -> Option<*mut T> {
+        let template_addr = symbol.template_addr();
+        if self.lifecycle.state() != State::Ready
+            || !self
+                .static_image
+                .contains(template_addr, core::mem::size_of::<T>())
+        {
+            return None;
+        }
+
+        let offset = self.offset_table.offset(logical_id)?;
+        let addr = template_addr.wrapping_add(offset);
+        Some(addr as *mut T)
+    }
+
+    pub fn read_per_cpu<T: Copy>(&self, symbol: PerCpuSymbol<T>, logical_id: usize) -> Option<T> {
+        let ptr = self.per_cpu_ptr(symbol, logical_id)?;
+        Some(unsafe { core::ptr::read_volatile(ptr) })
+    }
+
+    pub fn write_per_cpu<T: Copy>(
+        &self,
+        symbol: PerCpuSymbol<T>,
+        logical_id: usize,
+        value: T,
+    ) -> Option<()> {
+        let ptr = self.per_cpu_ptr(symbol, logical_id)?;
+        unsafe {
+            core::ptr::write_volatile(ptr, value);
+        }
+        Some(())
     }
 
     pub fn setup(
@@ -161,6 +218,16 @@ impl PerCpuStaticImage {
 
     pub const fn size(&self) -> usize {
         self.size
+    }
+
+    fn contains(&self, addr: usize, size: usize) -> bool {
+        if size == 0 {
+            return addr >= self.start && addr <= self.end;
+        }
+        let Some(end) = addr.checked_add(size) else {
+            return false;
+        };
+        addr >= self.start && end <= self.end
     }
 
     fn setup(&mut self, lds: &Lds, static_objects: &StaticObjects) -> EventResult {

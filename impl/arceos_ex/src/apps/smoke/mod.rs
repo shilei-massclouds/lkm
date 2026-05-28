@@ -46,6 +46,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::memblock::run,
     },
     SmokeCase {
+        name: "per_cpu",
+        run: cases::per_cpu::run,
+    },
+    SmokeCase {
         name: "device_tree",
         run: cases::device_tree::run,
     },

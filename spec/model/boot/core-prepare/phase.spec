@@ -472,6 +472,9 @@ object PerCpuFirstChunk: MemoryObject {
 /*
  * PerCpuOffsetTable 表示 logical CPU 到 percpu unit/base offset 的映射表。
  * 其边界基于 CpuGroup 中 possible CPU 的个数，而不是 online CPU 的个数。
+ * 运行期 per_cpu_ptr(symbol, logical_cpu) 属于 action：它锚定在 Ready 状态，
+ * 依赖 Ready 状态提供的 offset table 和 static image 事实；成功访问后仍停留在
+ * Ready 状态，不推进任何生命周期状态。
  */
 object PerCpuOffsetTable: MemoryObject {
     initial_state: State::Base;
@@ -508,7 +511,8 @@ object PerCpuOffsetTable: MemoryObject {
 
 /*
  * PerCpuStorage 表示 per-cpu 存储的顶层抽象。它聚合静态 percpu 模板、
- * first chunk 和 offset table；完整动态 percpu allocator 后续再展开。
+ * first chunk 和 offset table。静态 percpu 变量访问是状态内 action，
+ * 由 Ready 状态下的寻址事实支撑；完整动态 percpu allocator 后续再展开。
  */
 object PerCpuStorage: MemoryObject {
     initial_state: State::Base;
@@ -549,7 +553,8 @@ object PerCpuStorage: MemoryObject {
     }
 
     /*
-     * Ready 表示 per-cpu 存储和寻址事实已经可供后续 CPU/hotplug/logging 路径使用。
+     * Ready 表示 per-cpu 存储、静态 percpu 变量寻址事实和基础 offset table
+     * 已经可供后续 CPU/hotplug/logging 路径使用。
      */
     state State::Ready {
         invariant {
