@@ -720,7 +720,9 @@ object Randomness: KernelObject {
                 }
 
                 ensures {
-                    randomness_early_entropy_mixed(Randomness, StaticCommandLine);
+                    randomness_early_seed_material_ready(Randomness);
+                    static_command_line_mixed_into_randomness(Randomness, StaticCommandLine);
+                    arch_entropy_accounted(Randomness, Riscv64);
                     randomness_not_fully_ready(Randomness);
                 }
             }
@@ -732,7 +734,9 @@ object Randomness: KernelObject {
      */
     state State::Prepared {
         invariant {
-            randomness_early_entropy_mixed(Randomness, StaticCommandLine);
+            randomness_early_seed_material_ready(Randomness);
+            static_command_line_mixed_into_randomness(Randomness, StaticCommandLine);
+            arch_entropy_accounted(Randomness, Riscv64);
             randomness_not_fully_ready(Randomness);
         }
     }

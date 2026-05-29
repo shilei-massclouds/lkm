@@ -278,6 +278,8 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `EarlyIoremap`
 - `CorePreparePhase` 编排的最小对象骨架：`DeviceTree`、`Zones`、`ResourceTree`、`CacheBlockInfo`、`CpuCapabilities`、`CommandLine`、`PerCpuStorage`、`CpuHotplugState`、`Params`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`。这些对象不是 `CorePreparePhase` 的下级对象；phase 只驱动其生命周期事件。`SavedCommandLine` / `StaticCommandLine` 是 `CommandLine` 的子视图对象，不是独立顶级对象；`EarlyParam` / `BootParam` / `PayloadParam` 是 `Params` 的子对象。`PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable` 是 `PerCpuStorage` 的子对象；first chunk 的 unit 个数和 offset table 边界必须基于 `CpuGroup` 的 possible CPU 集合，而不是 online CPU 集合。
 
+`Randomness.preset()` 对应 `random_init_early(command_line)` 的早期语义。实现应建立 early seed material，并至少混入 `StaticCommandLine`；具体 mix/hash 算法不由 coding 规格限定。当前 RISC-V64 最小实现允许记录 arch entropy 为 0，且 `Randomness.Prepared` 不得暴露正式随机数接口或表示完整 RNG ready。
+
 ## DeviceTree unflatten 编码约束
 
 正式 `DeviceTree` 对应模型中的 `DeviceTree.setup()`，参考 Linux 的 `unflatten_device_tree()` /
