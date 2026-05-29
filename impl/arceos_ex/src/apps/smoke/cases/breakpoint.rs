@@ -93,6 +93,11 @@ fn smoke_breakpoint_hook(frame: &mut TrapFrame) -> BreakpointHookResult {
         return BreakpointHookResult::NotHandled;
     }
 
+    if BREAKPOINT_PROGRESS.load(Ordering::Relaxed) == 0 {
+        printk::write_str("  hook handled ebreak\n");
+    } else {
+        printk::write_str("  hook handled c.ebreak\n");
+    }
     exception_stream::resume_after_breakpoint(frame);
     BreakpointHookResult::Resume
 }
