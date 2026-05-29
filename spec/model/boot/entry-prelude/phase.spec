@@ -233,6 +233,7 @@ object InitStack: StackObject {
  * EventStream 表示异常和中断共享的陷入总入口对象。它先建立物理地址阶段的 early 兜底入口；
  * VM 切换过程允许临时借用 stvec 作为重定位落点；EarlyVm 生效后再切换到 formal 总入口，
  * 由 formal 入口根据 scause 分流到 ExceptionStream 或 InterruptStream。
+ * formal 入口只执行第一层分流；具体 cause 到处理策略的绑定由两个子流维护。
  */
 object EventStream: FlowObject {
     initial_state: State::Base;
@@ -315,7 +316,8 @@ object EventStream: FlowObject {
 
 /*
  * InterruptStream 表示 EventStream 分流后的异步中断流控制对象。它在本阶段先封闭中断进入路径，
- * 不开放真实中断处理。
+ * 不开放真实中断处理。中断流维护 interrupt cause 到 handler policy 的绑定；默认绑定为 panic/halt，
+ * 后续具体中断类型启用时再替换对应 cause 的处理策略。
  */
 object InterruptStream: FlowObject {
     initial_state: State::Base;
@@ -342,6 +344,8 @@ object InterruptStream: FlowObject {
                 ensures {
                     Riscv64.sie == 0;
                     Riscv64.sip == 0;
+                    interrupt_fallback_panic_ready(InterruptStream);
+                    interrupt_handler_bindings_default_panic(InterruptStream);
                 }
             }
         }
@@ -354,6 +358,8 @@ object InterruptStream: FlowObject {
         invariant {
             Riscv64.sie == 0;
             Riscv64.sip == 0;
+            interrupt_fallback_panic_ready(InterruptStream);
+            interrupt_handler_bindings_default_panic(InterruptStream);
         }
 
         events {
@@ -373,6 +379,7 @@ object InterruptStream: FlowObject {
                     Riscv64.sie == 0;
                     Riscv64.sip == 0;
                     supervisor_interrupts_disabled(Riscv64.sstatus);
+                    interrupt_dispatch_ready(InterruptStream);
                 }
             }
         }
@@ -386,13 +393,15 @@ object InterruptStream: FlowObject {
             Riscv64.sie == 0;
             Riscv64.sip == 0;
             supervisor_interrupts_disabled(Riscv64.sstatus);
+            interrupt_dispatch_ready(InterruptStream);
         }
     }
 }
 
 /*
  * ExceptionStream 表示事件入口下的异常流总控对象。入口前导期只建立所有异常的受控兜底，
- * 正式异常分类和分发留给后续对齐 trap_init() 的阶段。
+ * 正式异常分类和分发留给后续对齐 trap_init() 的阶段。异常流维护 exception cause 到 handler policy
+ * 的绑定；默认绑定为 panic/halt，子异常对象 Setup 时替换它所覆盖的 cause 集合。
  */
 object ExceptionStream: FlowObject {
     initial_state: State::Base;
@@ -423,6 +432,7 @@ object ExceptionStream: FlowObject {
                 ensures {
                     exception_stream_fallback_panic_ready(ExceptionStream);
                     all_exceptions_covered_by_fallback(ExceptionStream);
+                    exception_handler_bindings_default_panic(ExceptionStream);
                 }
             }
         }
@@ -435,6 +445,7 @@ object ExceptionStream: FlowObject {
         invariant {
             exception_stream_fallback_panic_ready(ExceptionStream);
             all_exceptions_covered_by_fallback(ExceptionStream);
+            exception_handler_bindings_default_panic(ExceptionStream);
             PageFaultException.state == State::Prepared;
             SyscallException.state == State::Prepared;
             BreakpointException.state == State::Prepared;
@@ -455,6 +466,7 @@ object ExceptionStream: FlowObject {
                     exception_stream_fallback_panic_ready(ExceptionStream);
                     all_exceptions_covered_by_fallback(ExceptionStream);
                     exception_dispatch_ready(ExceptionStream);
+                    exception_handler_bindings_ready(ExceptionStream);
                 }
             }
         }
@@ -468,6 +480,7 @@ object ExceptionStream: FlowObject {
             exception_stream_fallback_panic_ready(ExceptionStream);
             all_exceptions_covered_by_fallback(ExceptionStream);
             exception_dispatch_ready(ExceptionStream);
+            exception_handler_bindings_ready(ExceptionStream);
         }
 
         events {
@@ -532,6 +545,11 @@ object PageFaultException: FlowObject {
 
                 ensures {
                     page_fault_exception_handler_ready(PageFaultException);
+                    exception_causes_bound_to_handler(
+                        ExceptionStream,
+                        PageFaultException,
+                        {instruction_page_fault, load_page_fault, store_page_fault}
+                    );
                 }
             }
         }
@@ -598,6 +616,11 @@ object SyscallException: FlowObject {
 
                 ensures {
                     syscall_exception_handler_ready(SyscallException);
+                    exception_causes_bound_to_handler(
+                        ExceptionStream,
+                        SyscallException,
+                        {user_ecall, supervisor_ecall}
+                    );
                 }
             }
         }
@@ -664,6 +687,11 @@ object BreakpointException: FlowObject {
 
                 ensures {
                     breakpoint_exception_handler_ready(BreakpointException);
+                    exception_causes_bound_to_handler(
+                        ExceptionStream,
+                        BreakpointException,
+                        {breakpoint}
+                    );
                 }
             }
         }
@@ -730,6 +758,7 @@ object UnexpectedException: FlowObject {
 
                 ensures {
                     unexpected_exception_handler_ready(UnexpectedException);
+                    remaining_exception_causes_bound_to_handler(ExceptionStream, UnexpectedException);
                 }
             }
         }

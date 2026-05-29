@@ -15,18 +15,34 @@ const EXC_STORE_PAGE_FAULT: usize = 15;
 const EXC_BREAKPOINT: usize = 3;
 const EXC_USER_ECALL: usize = 8;
 const EXC_SUPERVISOR_ECALL: usize = 9;
+const EXCEPTION_HANDLER_COUNT: usize = 16;
 
-const HANDLER_NONE: u8 = 0;
+const HANDLER_FALLBACK: u8 = 0;
 const HANDLER_PAGE_FAULT: u8 = 1;
-const HANDLER_SYSCALL: u8 = 2;
+const HANDLER_SYSCALL_DISABLED: u8 = 2;
 const HANDLER_BREAKPOINT: u8 = 3;
 const HANDLER_UNEXPECTED: u8 = 4;
 
+const PAGE_FAULT_CAUSES: [usize; 3] = [
+    EXC_INSTRUCTION_PAGE_FAULT,
+    EXC_LOAD_PAGE_FAULT,
+    EXC_STORE_PAGE_FAULT,
+];
+const SYSCALL_CAUSES: [usize; 2] = [EXC_USER_ECALL, EXC_SUPERVISOR_ECALL];
+const BREAKPOINT_CAUSES: [usize; 1] = [EXC_BREAKPOINT];
+
 static DISPATCH_READY: AtomicU8 = AtomicU8::new(0);
-static PAGE_FAULT_HANDLER: AtomicU8 = AtomicU8::new(HANDLER_NONE);
-static SYSCALL_HANDLER: AtomicU8 = AtomicU8::new(HANDLER_NONE);
-static BREAKPOINT_HANDLER: AtomicU8 = AtomicU8::new(HANDLER_NONE);
-static UNEXPECTED_HANDLER: AtomicU8 = AtomicU8::new(HANDLER_NONE);
+static EXCEPTION_HANDLER_POLICY: [AtomicU8; EXCEPTION_HANDLER_COUNT] =
+    [const { AtomicU8::new(HANDLER_FALLBACK) }; EXCEPTION_HANDLER_COUNT];
+
+#[derive(Clone, Copy)]
+struct ExceptionPolicy(u8);
+
+const FALLBACK_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_FALLBACK);
+const PAGE_FAULT_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_PAGE_FAULT);
+const SYSCALL_DISABLED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
+const BREAKPOINT_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_BREAKPOINT);
+const UNEXPECTED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_UNEXPECTED);
 
 pub struct ExceptionStream {
     lifecycle: Lifecycle,
@@ -66,6 +82,11 @@ impl ExceptionStream {
         self.syscall.preset()?;
         self.breakpoint.preset()?;
         self.unexpected.preset()?;
+        reset_exception_handlers();
+        bind_exception_policy(
+            ExceptionHandlerBinding::Causes(&SYSCALL_CAUSES),
+            SYSCALL_DISABLED_POLICY,
+        );
 
         self.lifecycle.transition(
             LifecycleEvent::Preset,
@@ -102,24 +123,24 @@ impl ExceptionStream {
     pub fn page_fault_setup(&mut self) -> EventResult {
         self.page_fault.setup(
             self.lifecycle.state(),
-            &PAGE_FAULT_HANDLER,
-            HANDLER_PAGE_FAULT,
+            ExceptionHandlerBinding::Causes(&PAGE_FAULT_CAUSES),
+            PAGE_FAULT_POLICY,
         )
     }
 
     pub fn breakpoint_setup(&mut self) -> EventResult {
         self.breakpoint.setup(
             self.lifecycle.state(),
-            &BREAKPOINT_HANDLER,
-            HANDLER_BREAKPOINT,
+            ExceptionHandlerBinding::Causes(&BREAKPOINT_CAUSES),
+            BREAKPOINT_POLICY,
         )
     }
 
     pub fn unexpected_setup(&mut self) -> EventResult {
         self.unexpected.setup(
             self.lifecycle.state(),
-            &UNEXPECTED_HANDLER,
-            HANDLER_UNEXPECTED,
+            ExceptionHandlerBinding::RemainingKnown,
+            UNEXPECTED_POLICY,
         )
     }
 
@@ -143,18 +164,15 @@ impl ExceptionStream {
     pub const fn dispatch_ready(&self) -> bool {
         self.dispatch_ready
     }
-
-    #[allow(dead_code)]
-    pub fn dispatch_kind_for_scause(&self, scause: usize) -> Option<ExceptionDispatchKind> {
-        if !self.dispatch_ready {
-            return None;
-        }
-        ExceptionDispatchKind::from_scause(scause)
-    }
 }
 
 struct ExceptionKind {
     lifecycle: Lifecycle,
+}
+
+enum ExceptionHandlerBinding {
+    Causes(&'static [usize]),
+    RemainingKnown,
 }
 
 impl ExceptionKind {
@@ -172,10 +190,10 @@ impl ExceptionKind {
     fn setup(
         &mut self,
         exception_stream_state: State,
-        handler_slot: &AtomicU8,
-        handler: u8,
+        binding: ExceptionHandlerBinding,
+        policy: ExceptionPolicy,
     ) -> EventResult {
-        if exception_stream_state != State::Ready {
+        if exception_stream_state != State::Ready || self.lifecycle.state() != State::Prepared {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -184,7 +202,7 @@ impl ExceptionKind {
             );
         }
 
-        handler_slot.store(handler, Ordering::Relaxed);
+        bind_exception_policy(binding, policy);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
@@ -194,70 +212,92 @@ impl ExceptionKind {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum ExceptionDispatchKind {
-    PageFault,
-    Syscall,
-    Breakpoint,
-    Unexpected,
-}
-
-impl ExceptionDispatchKind {
-    pub const fn from_scause(scause: usize) -> Option<Self> {
-        if scause & SCAUSE_INTERRUPT_BIT != 0 {
-            return None;
-        }
-
-        match scause {
-            EXC_INSTRUCTION_PAGE_FAULT | EXC_LOAD_PAGE_FAULT | EXC_STORE_PAGE_FAULT => {
-                Some(Self::PageFault)
-            }
-            EXC_BREAKPOINT => Some(Self::Breakpoint),
-            EXC_USER_ECALL | EXC_SUPERVISOR_ECALL => Some(Self::Syscall),
-            _ => Some(Self::Unexpected),
-        }
-    }
-}
-
 pub fn dispatch_scause(scause: usize) -> ! {
-    let Some(kind) = ExceptionDispatchKind::from_scause(scause) else {
+    if scause & SCAUSE_INTERRUPT_BIT != 0 {
         panic_dispatch("interrupt reached exception stream\n");
-    };
+    }
 
     if DISPATCH_READY.load(Ordering::Relaxed) == 0 {
         panic_dispatch("exception dispatch not ready\n");
     }
 
-    match kind {
-        ExceptionDispatchKind::PageFault => dispatch_registered(
-            PAGE_FAULT_HANDLER.load(Ordering::Relaxed),
-            HANDLER_PAGE_FAULT,
-            "page fault exception\n",
-        ),
-        ExceptionDispatchKind::Breakpoint => dispatch_registered(
-            BREAKPOINT_HANDLER.load(Ordering::Relaxed),
-            HANDLER_BREAKPOINT,
-            "breakpoint exception\n",
-        ),
-        ExceptionDispatchKind::Unexpected => dispatch_registered(
-            UNEXPECTED_HANDLER.load(Ordering::Relaxed),
-            HANDLER_UNEXPECTED,
-            "unexpected exception\n",
-        ),
-        ExceptionDispatchKind::Syscall => dispatch_registered(
-            SYSCALL_HANDLER.load(Ordering::Relaxed),
-            HANDLER_SYSCALL,
-            "syscall exception not enabled\n",
-        ),
+    dispatch_handler_policy(read_exception_handler_policy(scause), scause)
+}
+
+fn reset_exception_handlers() {
+    for cause in 0..EXCEPTION_HANDLER_COUNT {
+        set_exception_policy(cause, FALLBACK_POLICY);
     }
 }
 
-fn dispatch_registered(actual: u8, expected: u8, message: &str) -> ! {
-    if actual != expected {
-        panic_dispatch("exception handler not registered\n");
+fn bind_exception_policy(binding: ExceptionHandlerBinding, policy: ExceptionPolicy) {
+    match binding {
+        ExceptionHandlerBinding::Causes(causes) => {
+            for &cause in causes {
+                set_exception_policy(cause, policy);
+            }
+        }
+        ExceptionHandlerBinding::RemainingKnown => {
+            for cause in 0..EXCEPTION_HANDLER_COUNT {
+                if !known_mechanism_cause(cause) {
+                    set_exception_policy(cause, policy);
+                }
+            }
+        }
+    }
+}
+
+fn read_exception_handler_policy(scause: usize) -> u8 {
+    let cause = scause & !SCAUSE_INTERRUPT_BIT;
+    if cause >= EXCEPTION_HANDLER_COUNT {
+        return HANDLER_UNEXPECTED;
     }
 
-    panic_dispatch(message)
+    EXCEPTION_HANDLER_POLICY[cause].load(Ordering::Relaxed)
+}
+
+fn known_mechanism_cause(cause: usize) -> bool {
+    PAGE_FAULT_CAUSES.contains(&cause)
+        || SYSCALL_CAUSES.contains(&cause)
+        || BREAKPOINT_CAUSES.contains(&cause)
+}
+
+fn set_exception_policy(cause: usize, policy: ExceptionPolicy) {
+    if cause >= EXCEPTION_HANDLER_COUNT {
+        return;
+    }
+
+    EXCEPTION_HANDLER_POLICY[cause].store(policy.0, Ordering::Relaxed);
+}
+
+fn dispatch_handler_policy(handler: u8, scause: usize) -> ! {
+    match handler {
+        HANDLER_PAGE_FAULT => page_fault_exception_handler(scause),
+        HANDLER_SYSCALL_DISABLED => syscall_disabled_exception_handler(scause),
+        HANDLER_BREAKPOINT => breakpoint_exception_handler(scause),
+        HANDLER_UNEXPECTED => unexpected_exception_handler(scause),
+        _ => default_exception_handler(scause),
+    }
+}
+
+fn default_exception_handler(_scause: usize) -> ! {
+    panic_dispatch("exception fallback panic\n")
+}
+
+fn page_fault_exception_handler(_scause: usize) -> ! {
+    panic_dispatch("page fault exception\n")
+}
+
+fn syscall_disabled_exception_handler(_scause: usize) -> ! {
+    panic_dispatch("syscall exception not enabled\n")
+}
+
+fn breakpoint_exception_handler(_scause: usize) -> ! {
+    panic_dispatch("breakpoint exception\n")
+}
+
+fn unexpected_exception_handler(_scause: usize) -> ! {
+    panic_dispatch("unexpected exception\n")
 }
 
 fn panic_dispatch(message: &str) -> ! {

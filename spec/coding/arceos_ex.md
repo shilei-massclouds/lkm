@@ -284,6 +284,20 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 
 `ExceptionTable.setup()` 对应 `sort_main_extable()`。链接脚本必须提供 `__start___ex_table` / `__stop___ex_table` 边界，运行时必须基于该范围完成主异常表排序并提供按 faulting instruction address 查询的路径。当前表为空时也必须显式确认空表范围有效、排序事实成立且 lookup 返回 miss，不得仅以 checkpoint 代替该语义。
 
+`EventStream.setup()` 安装的 formal trap entry 只负责读取 cause 并做第一层分流：interrupt cause 必须进入
+`InterruptStream`，exception cause 必须进入 `ExceptionStream`。不得让 `ExceptionStream` 直接承担中断过滤职责。
+
+`ExceptionStream` 和 `InterruptStream` 应维护 cause 到 handler policy 的静态分发表。当前最小实现可以使用固定大小数组或等价的静态表；每个表项初始必须绑定到 fallback panic/halt handler，不能留下空项、未初始化项或落到未定义行为。具体异常或中断对象完成 `Setup` / `Enable` 时，只能替换它所覆盖 cause 的表项。
+
+异常 cause 映射至少应满足：
+
+1. instruction/load/store page fault 绑定到 `PageFaultException`。
+2. breakpoint 绑定到 `BreakpointException`。
+3. user/supervisor ecall 绑定到 `SyscallException`，在 syscall 机制未启用前仍必须落到受控 panic/halt 或 disabled policy。
+4. 其它同步异常绑定到 `UnexpectedException`。
+
+当前所有 handler 可以返回 `!` 并执行 panic/halt；后续支持 syscall、timer interrupt 或 page fault recovery 时，formal entry 必须先保存 trap context，handler 签名也应升级为可返回的 `TrapOutcome` 或等价结果，最后由统一出口恢复上下文并返回。
+
 ## DeviceTree unflatten 编码约束
 
 正式 `DeviceTree` 对应模型中的 `DeviceTree.setup()`，参考 Linux 的 `unflatten_device_tree()` /
