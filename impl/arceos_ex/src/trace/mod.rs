@@ -135,6 +135,7 @@ pub enum Checkpoint {
     PrintkBufferReady,
     ExceptionTableReady,
     ExceptionStreamReady,
+    BreakpointExceptionHandled,
     PayloadPhaseReady,
     PayloadPhaseOnline,
 }
@@ -260,6 +261,7 @@ impl Checkpoint {
             Self::PrintkBufferReady => "PrintkBuffer.Ready",
             Self::ExceptionTableReady => "ExceptionTable.Ready",
             Self::ExceptionStreamReady => "ExceptionStream.Ready",
+            Self::BreakpointExceptionHandled => "BreakpointException.Handled",
             Self::PayloadPhaseReady => "PayloadPhase.Ready",
             Self::PayloadPhaseOnline => "PayloadPhase.Online",
         }

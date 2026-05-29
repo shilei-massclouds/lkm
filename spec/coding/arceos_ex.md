@@ -296,7 +296,22 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 3. user/supervisor ecall 绑定到 `SyscallException`，在 syscall 机制未启用前仍必须落到受控 panic/halt 或 disabled policy。
 4. 其它同步异常绑定到 `UnexpectedException`。
 
-当前所有 handler 可以返回 `!` 并执行 panic/halt；后续支持 syscall、timer interrupt 或 page fault recovery 时，formal entry 必须先保存 trap context，handler 签名也应升级为可返回的 `TrapOutcome` 或等价结果，最后由统一出口恢复上下文并返回。
+`formal_event_entry` 必须先建立共享 trap context，再进入 `EventStream` 的第一层分流。该 context 至少应保存
+`scause`、`sepc`、`sstatus`、`stval`，以及可透明返回所需的通用寄存器；当前最小实现 SHOULD 保存全部整数寄存器。
+具体异常 handler 不应直接执行 `sret`，而应通过统一的 trap outcome 或等价约定表达 `Resume` / `Panic`：
+`Resume` 由统一出口写回 `sepc`、恢复寄存器并 `sret`，`Panic` 仍走受控 panic/halt。
+
+`BreakpointException` 的默认 handler 是第一个可返回异常 handler。它必须走上述共享 trap context 和统一出口路径，
+不得使用 smoke 专用旁路。默认动作是输出一次 trace/checkpoint，按当前 `sepc` 处指令长度跳过触发指令，然后返回。
+指令长度判断参考 Linux/RISC-V 的 `GET_INSN_LENGTH` 规则：读取 `sepc` 处半字，若低两位为 `0b11` 则跳过 4 字节，
+否则跳过 2 字节，从而同时覆盖 `ebreak` 和 `c.ebreak`。
+
+该默认 #BR 处理属于 `BreakpointException.Setup` 的语义：`Preset` 阶段仍只安装受控 fallback panic/halt；
+`Setup` 阶段才把 breakpoint cause 切换到可返回的默认 handler；`Enable` 保留给后续完整调试机制，例如断点管理、
+kprobe/kgdb 或等价设施。
+
+其它 handler 当前仍可以返回 `!` 并执行 panic/halt；后续支持 syscall、timer interrupt 或 page fault recovery 时，
+应复用同一套 trap context、handler outcome 和统一出口路径。
 
 ## DeviceTree unflatten 编码约束
 

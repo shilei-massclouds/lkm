@@ -1,9 +1,9 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::trace::Checkpoint;
+use crate::trace::{self, Checkpoint};
 
 use super::{
-    event_stream::EventStream,
+    event_stream::{EventStream, TrapFrame},
     init_stack::InitStack,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
@@ -215,8 +215,8 @@ impl ExceptionKind {
     }
 }
 
-pub fn dispatch_scause(scause: usize) -> ! {
-    if scause & SCAUSE_INTERRUPT_BIT != 0 {
+pub fn dispatch_trap(frame: &mut TrapFrame) {
+    if frame.scause & SCAUSE_INTERRUPT_BIT != 0 {
         panic_dispatch("interrupt reached exception stream\n");
     }
 
@@ -224,7 +224,7 @@ pub fn dispatch_scause(scause: usize) -> ! {
         panic_dispatch("exception dispatch not ready\n");
     }
 
-    dispatch_handler_policy(read_exception_handler_policy(scause), scause)
+    dispatch_handler_frame(read_exception_handler_policy(frame.scause), frame);
 }
 
 fn reset_exception_handlers() {
@@ -273,13 +273,13 @@ fn set_exception_policy(cause: usize, policy: ExceptionPolicy) {
     EXCEPTION_HANDLER_POLICY[cause].store(policy.0, Ordering::Relaxed);
 }
 
-fn dispatch_handler_policy(handler: u8, scause: usize) -> ! {
+fn dispatch_handler_frame(handler: u8, frame: &mut TrapFrame) {
     match handler {
-        HANDLER_PAGE_FAULT => page_fault_exception_handler(scause),
-        HANDLER_SYSCALL_DISABLED => syscall_disabled_exception_handler(scause),
-        HANDLER_BREAKPOINT => breakpoint_exception_handler(scause),
-        HANDLER_UNEXPECTED => unexpected_exception_handler(scause),
-        _ => default_exception_handler(scause),
+        HANDLER_BREAKPOINT => breakpoint_exception_handler(frame),
+        HANDLER_PAGE_FAULT => page_fault_exception_handler(frame.scause),
+        HANDLER_SYSCALL_DISABLED => syscall_disabled_exception_handler(frame.scause),
+        HANDLER_UNEXPECTED => unexpected_exception_handler(frame.scause),
+        _ => default_exception_handler(frame.scause),
     }
 }
 
@@ -295,12 +295,24 @@ fn syscall_disabled_exception_handler(_scause: usize) -> ! {
     panic_dispatch("syscall exception not enabled\n")
 }
 
-fn breakpoint_exception_handler(_scause: usize) -> ! {
-    panic_dispatch("breakpoint exception\n")
+fn breakpoint_exception_handler(frame: &mut TrapFrame) {
+    trace::checkpoint(Checkpoint::BreakpointExceptionHandled);
+    frame.sepc = frame
+        .sepc
+        .wrapping_add(breakpoint_instruction_length(frame.sepc));
 }
 
 fn unexpected_exception_handler(_scause: usize) -> ! {
     panic_dispatch("unexpected exception\n")
+}
+
+fn breakpoint_instruction_length(sepc: usize) -> usize {
+    let insn = unsafe { core::ptr::read_unaligned(sepc as *const u16) };
+    if insn & 0b11 == 0b11 {
+        4
+    } else {
+        2
+    }
 }
 
 fn panic_dispatch(message: &str) -> ! {

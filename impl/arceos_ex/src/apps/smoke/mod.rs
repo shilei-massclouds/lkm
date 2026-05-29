@@ -18,6 +18,10 @@ pub struct SmokeCase {
 
 const CASES: &[SmokeCase] = &[
     SmokeCase {
+        name: "breakpoint",
+        run: cases::breakpoint::run,
+    },
+    SmokeCase {
         name: "hello",
         run: cases::hello::run,
     },
