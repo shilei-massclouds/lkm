@@ -301,14 +301,17 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 具体异常 handler 不应直接执行 `sret`，而应通过统一的 trap outcome 或等价约定表达 `Resume` / `Panic`：
 `Resume` 由统一出口写回 `sepc`、恢复寄存器并 `sret`，`Panic` 仍走受控 panic/halt。
 
-`BreakpointException` 的默认 handler 是第一个可返回异常 handler。它必须走上述共享 trap context 和统一出口路径，
-不得使用 smoke 专用旁路。默认动作是输出一次 trace/checkpoint，按当前 `sepc` 处指令长度跳过触发指令，然后返回。
-指令长度判断参考 Linux/RISC-V 的 `GET_INSN_LENGTH` 规则：读取 `sepc` 处半字，若低两位为 `0b11` 则跳过 4 字节，
-否则跳过 2 字节，从而同时覆盖 `ebreak` 和 `c.ebreak`。
+`BreakpointException.Setup` 安装的是 breakpoint trap 的 hook 分发入口，而不是“任意 #BR 均跳过返回”的终点
+handler。其处理顺序 SHOULD 参考 Linux/RISC-V 的 `handle_break()`：先给 single-step/probe 类 hook 机会，再给
+breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook 输入为共享 trap context，输出应能表达：
+已接管并 resume、已接管并 panic/halt、未接管。只有明确接管并要求 resume 的 hook 可以修改 `sepc` 并返回；
+未知 #BR 或无人接管的 #BR 必须落入受控 panic/halt，不得默认跳过。
 
-该默认 #BR 处理属于 `BreakpointException.Setup` 的语义：`Preset` 阶段仍只安装受控 fallback panic/halt；
-`Setup` 阶段才把 breakpoint cause 切换到可返回的默认 handler；`Enable` 保留给后续完整调试机制，例如断点管理、
-kprobe/kgdb 或等价设施。
+`Preset` 阶段仍只安装受控 fallback panic/halt；`Setup` 阶段才把 breakpoint cause 切换到 hook 分发入口；
+`Enable` 保留给后续完整调试机制，例如断点管理、kprobe/kgdb 或等价设施。当前 smoke 若需要验证可返回路径，
+应通过一个明确的 smoke/probe hook 接管测试断点，而不是依赖未知 #BR 的默认跳过行为。该 hook 若需要跳过
+`ebreak` 或 `c.ebreak`，指令长度判断参考 Linux/RISC-V 的 `GET_INSN_LENGTH` 规则：读取 `sepc` 处半字，
+若低两位为 `0b11` 则跳过 4 字节，否则跳过 2 字节。
 
 其它 handler 当前仍可以返回 `!` 并执行 panic/halt；后续支持 syscall、timer interrupt 或 page fault recovery 时，
 应复用同一套 trap context、handler outcome 和统一出口路径。

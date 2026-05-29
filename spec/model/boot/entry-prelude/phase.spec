@@ -659,7 +659,8 @@ object SyscallException: FlowObject {
 }
 
 /*
- * BreakpointException 表示 breakpoint 调试异常对象。调试机制接入前，其兜底策略仍是 panic/halt。
+ * BreakpointException 表示 breakpoint 调试异常对象。Setup 只建立 breakpoint trap 的 hook
+ * 分发入口；具体机制通过 hook 接管后才能 resume，未知 #BR 仍进入 fallback panic/halt。
  */
 object BreakpointException: FlowObject {
     initial_state: State::Base;
@@ -692,7 +693,7 @@ object BreakpointException: FlowObject {
                 }
 
                 ensures {
-                    breakpoint_exception_handler_ready(BreakpointException);
+                    breakpoint_hook_dispatch_ready(BreakpointException);
                     exception_causes_bound_to_handler(
                         ExceptionStream,
                         BreakpointException,
@@ -705,7 +706,7 @@ object BreakpointException: FlowObject {
 
     state State::Ready {
         invariant {
-            breakpoint_exception_handler_ready(BreakpointException);
+            breakpoint_hook_dispatch_ready(BreakpointException);
         }
 
         events {

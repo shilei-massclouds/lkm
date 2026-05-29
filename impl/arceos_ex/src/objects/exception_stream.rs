@@ -296,6 +296,55 @@ fn syscall_disabled_exception_handler(_scause: usize) -> ! {
 }
 
 fn breakpoint_exception_handler(frame: &mut TrapFrame) {
+    if run_breakpoint_hooks(frame) == BreakpointHookResult::Resume {
+        return;
+    }
+
+    panic_dispatch("unhandled breakpoint exception\n")
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum BreakpointHookResult {
+    NotHandled,
+    Resume,
+}
+
+pub type BreakpointHook = fn(&mut TrapFrame) -> BreakpointHookResult;
+
+static mut BREAKPOINT_HOOKS: [Option<BreakpointHook>; 4] = [None; 4];
+
+pub fn register_breakpoint_hook(hook: BreakpointHook) -> bool {
+    unsafe {
+        for slot in (&raw mut BREAKPOINT_HOOKS).as_mut().unwrap().iter_mut() {
+            if slot.is_none() {
+                *slot = Some(hook);
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn run_breakpoint_hooks(frame: &mut TrapFrame) -> BreakpointHookResult {
+    unsafe {
+        for hook in (&raw const BREAKPOINT_HOOKS)
+            .as_ref()
+            .unwrap()
+            .iter()
+            .flatten()
+        {
+            match hook(frame) {
+                BreakpointHookResult::NotHandled => {}
+                BreakpointHookResult::Resume => return BreakpointHookResult::Resume,
+            }
+        }
+    }
+
+    BreakpointHookResult::NotHandled
+}
+
+pub fn resume_after_breakpoint(frame: &mut TrapFrame) {
     trace::checkpoint(Checkpoint::BreakpointExceptionHandled);
     frame.sepc = frame
         .sepc
