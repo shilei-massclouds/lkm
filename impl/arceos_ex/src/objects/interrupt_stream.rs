@@ -49,3 +49,8 @@ impl InterruptStream {
         )
     }
 }
+
+pub fn dispatch_scause(_scause: usize) -> ! {
+    crate::arch::riscv64::sbi::putstr("interrupt stream not enabled\n");
+    crate::arch::riscv64::sbi::system_shutdown()
+}

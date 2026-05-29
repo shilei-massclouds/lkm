@@ -120,6 +120,16 @@ pub fn read_satp() -> usize {
     value
 }
 
+pub fn read_scause() -> usize {
+    let value: usize;
+
+    unsafe {
+        core::arch::asm!("csrr {value}, scause", value = out(reg) value, options(nostack, nomem));
+    }
+
+    value
+}
+
 pub fn write_tp(value: usize) {
     unsafe {
         core::arch::asm!("mv tp, {value}", value = in(reg) value, options(nostack, nomem));

@@ -230,10 +230,96 @@ object InitStack: StackObject {
 }
 
 /*
- * InterruptStream 表示入口前导期的中断控制对象。它在本阶段先封闭中断进入路径，不开放真实中断处理。
+ * EventStream 表示异常和中断共享的陷入总入口对象。它先建立物理地址阶段的 early 兜底入口；
+ * VM 切换过程允许临时借用 stvec 作为重定位落点；EarlyVm 生效后再切换到 formal 总入口，
+ * 由 formal 入口根据 scause 分流到 ExceptionStream 或 InterruptStream。
+ */
+object EventStream: FlowObject {
+    initial_state: State::Base;
+
+    /*
+     * Base 表示事件入口尚未被设置。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 设置物理地址阶段的 early 总入口。
+             * early_event_entry 必须只依赖物理地址阶段可访问的代码和静态只读数据；
+             * 不得依赖分页、动态内存、percpu、正式 printk 或已展开设备树。
+             */
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    StaticObjects.state == State::Online;
+                }
+
+                may_change {
+                    Riscv64.stvec;
+                }
+
+                ensures {
+                    Riscv64.stvec == phys_addr(StaticObjects.early_event_entry);
+                    early_event_entry_phys_safe(StaticObjects.early_event_entry);
+                    event_stream_early_entry_available(EventStream, StaticObjects.early_event_entry);
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示 early 总入口能力已经建立。非 VM 切换临界区中，stvec 指向 early_event_entry；
+     * Vm.Setup / TrampolineVm.Enable 可以临时接管 stvec 作为物理到虚拟地址过渡的重定位落点。
+     */
+    state State::Prepared {
+        invariant {
+            early_event_entry_phys_safe(StaticObjects.early_event_entry);
+            event_stream_early_entry_available(EventStream, StaticObjects.early_event_entry);
+        }
+
+        events {
+            /*
+             * Setup 设置 EarlyVm 中的 formal 总入口，并清零 sscratch。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Vm.state == State::Ready;
+                    StaticObjects.state == State::Online;
+                    ExceptionStream.state == State::Prepared;
+                    InterruptStream.state == State::Prepared;
+                }
+
+                may_change {
+                    Riscv64.stvec;
+                    Riscv64.sscratch;
+                }
+
+                ensures {
+                    Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
+                    Riscv64.sscratch == 0;
+                    event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示事件入口已经切换到 EarlyVm 中的 formal 总入口，并具备异常/中断第一层分流能力。
+     */
+    state State::Ready {
+        invariant {
+            Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
+            Riscv64.sscratch == 0;
+            event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
+        }
+    }
+}
+
+/*
+ * InterruptStream 表示 EventStream 分流后的异步中断流控制对象。它在本阶段先封闭中断进入路径，
+ * 不开放真实中断处理。
  */
 object InterruptStream: FlowObject {
     initial_state: State::Base;
+    parent: EventStream;
 
     /*
      * Base 表示中断控制对象尚未完成入口前导期的屏蔽动作。
@@ -305,80 +391,6 @@ object InterruptStream: FlowObject {
 }
 
 /*
- * EventStream 表示中断流下的事件入口组织对象。它先建立临时陷入入口，再在早期虚拟地址空间可用后切换到正式入口。
- */
-object EventStream: FlowObject {
-    initial_state: State::Base;
-    parent: InterruptStream;
-
-    /*
-     * Base 表示事件入口尚未被设置。
-     */
-    state State::Base {
-        events {
-            /*
-             * Preset 设置物理地址阶段的临时事件入口。
-             */
-            on Event::Preset -> State::Prepared {
-                depends_on {
-                    InterruptStream.state == State::Prepared;
-                    StaticObjects.state == State::Online;
-                }
-
-                may_change {
-                    Riscv64.stvec;
-                }
-
-                ensures {
-                    Riscv64.stvec == phys_addr(StaticObjects.early_event_entry);
-                }
-            }
-        }
-    }
-
-    /*
-     * Prepared 表示 stvec 指向物理地址阶段的临时事件入口。
-     */
-    state State::Prepared {
-        invariant {
-            Riscv64.stvec == phys_addr(StaticObjects.early_event_entry);
-        }
-
-        events {
-            /*
-             * Enable 设置早期虚拟地址阶段的正式事件入口，并清零 sscratch。
-             */
-            on Event::Enable -> State::Online {
-                depends_on {
-                    Vm.state == State::Ready;
-                    StaticObjects.state == State::Online;
-                }
-
-                may_change {
-                    Riscv64.stvec;
-                    Riscv64.sscratch;
-                }
-
-                ensures {
-                    Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
-                    Riscv64.sscratch == 0;
-                }
-            }
-        }
-    }
-
-    /*
-     * Online 表示事件入口已经切换到 EarlyVm 中的正式处理入口。
-     */
-    state State::Online {
-        invariant {
-            Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
-            Riscv64.sscratch == 0;
-        }
-    }
-}
-
-/*
  * ExceptionStream 表示事件入口下的异常流总控对象。入口前导期只建立所有异常的受控兜底，
  * 正式异常分类和分发留给后续对齐 trap_init() 的阶段。
  */
@@ -436,7 +448,7 @@ object ExceptionStream: FlowObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    EventStream.state == State::Online;
+                    EventStream.state == State::Ready;
                 }
 
                 ensures {
@@ -1100,10 +1112,12 @@ object Vm: AddressSpaceObject {
                 may_change {
                     Riscv64.satp;
                     Riscv64.gp;
+                    Riscv64.stvec;
                 }
 
                 ensures {
                     Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
+                    vm_transition_stvec_released_to_event_stream(Riscv64.stvec, EventStream);
                 }
             }
         }
@@ -1203,6 +1217,8 @@ object TrampolineVm: AddressSpaceObject {
              * Enable 切换到跳板页表，完成从物理地址阶段进入虚拟地址阶段的第一次过渡。
              * Linux/RISC-V 实现中，在写入 trampoline satp 前执行 sfence.vma，
              * 确保 setup_vm() 刚建立的页表项对新的地址转换可见。
+             * 同一临界区会临时把 stvec 设置为虚拟 continuation，借用 trap 入口完成
+             * 物理 PC 到虚拟 PC 的重定位；这不是正式异常/中断分发。
              * 规格层只保留地址转换同步要求，不把 sfence.vma 展开为独立事件。
              */
             on Event::Enable -> State::Online {
@@ -1212,10 +1228,13 @@ object TrampolineVm: AddressSpaceObject {
 
                 may_change {
                     Riscv64.satp;
+                    Riscv64.stvec;
                 }
 
                 ensures {
                     phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap);
+                    Riscv64.stvec == virt_addr(VmSwitchContinuation, TrampolineVm, TrampolineMap);
+                    event_stream_stvec_temporarily_borrowed(EventStream, Vm);
                 }
             }
         }
@@ -1743,7 +1762,7 @@ object EntryPreludePhase: PhaseObject {
                     ExceptionStream.Event::Preset;
                     Vm.Event::Preset;
                     Vm.Event::Setup;
-                    EventStream.Event::Enable;
+                    EventStream.Event::Setup;
                     InitTask.Event::Enable;
                     InitStack.Event::Setup;
                     Soc.Event::Preset;
@@ -1762,7 +1781,7 @@ object EntryPreludePhase: PhaseObject {
             context_is(SystemExclusive);
             RootStream.state == State::Prepared;
             InterruptStream.state == State::Prepared;
-            EventStream.state == State::Online;
+            EventStream.state == State::Ready;
             ExceptionStream.state == State::Prepared;
             PageFaultException.state == State::Prepared;
             SyscallException.state == State::Prepared;

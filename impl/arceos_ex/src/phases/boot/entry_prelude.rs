@@ -247,7 +247,12 @@ extern "C" fn after_vm_setup_continuation() -> ! {
 /// Finishes `EntryPreludePhase.setup()` after `Vm.Setup` has switched address
 /// spaces and returned through the virtual continuation path.
 fn after_vm_setup(ctx: &mut Context) -> EventResult {
-    ctx.event_stream.enable(&ctx.vm, &ctx.static_objects)?;
+    ctx.event_stream.setup(
+        &ctx.vm,
+        &ctx.static_objects,
+        &ctx.exception_stream,
+        &ctx.interrupt_stream,
+    )?;
     ctx.init_task.enable(&ctx.kernel_image, &ctx.vm)?;
     ctx.init_stack.setup(&ctx.vm)?;
     Soc::preset()?;
@@ -303,7 +308,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
 fn entry_prelude_phase_ready(ctx: &Context) -> bool {
     ctx.root_stream.state() == State::Prepared
         && ctx.interrupt_stream.state() == State::Prepared
-        && ctx.event_stream.state() == State::Online
+        && ctx.event_stream.state() == State::Ready
         && ctx.exception_stream.state() == State::Prepared
         && ctx.exception_stream.page_fault_state() == State::Prepared
         && ctx.exception_stream.syscall_state() == State::Prepared

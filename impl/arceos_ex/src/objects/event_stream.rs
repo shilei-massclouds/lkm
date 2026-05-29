@@ -3,11 +3,15 @@ use core::arch::global_asm;
 use crate::{arch::riscv64::csr, trace::Checkpoint};
 
 use super::{
+    exception_stream::ExceptionStream,
+    interrupt_stream::InterruptStream,
     kernel_image::KernelImage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
     vm::Vm,
 };
+
+const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
 
 global_asm!(
     r#"
@@ -16,6 +20,10 @@ global_asm!(
     .globl early_event_entry
 early_event_entry:
     j early_event_entry_rust
+
+    .globl formal_event_entry
+formal_event_entry:
+    j formal_event_entry_rust
 
     .section .bss.objects, "aw", @nobits
     .align 3
@@ -27,12 +35,19 @@ bss_anchor:
 
 unsafe extern "C" {
     fn early_event_entry();
+    fn formal_event_entry();
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn early_event_entry_rust() -> ! {
     crate::arch::riscv64::sbi::putstr("arceos_ex early trap\n");
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn formal_event_entry_rust() -> ! {
+    let scause = csr::read_scause();
+    dispatch_scause(scause)
 }
 
 pub struct EventStream {
@@ -69,24 +84,42 @@ impl EventStream {
         self.lifecycle.state()
     }
 
-    pub fn enable(&mut self, vm: &Vm, static_objects: &StaticObjects) -> EventResult {
-        let _ = static_objects.state();
-        if self.lifecycle.state() != State::Prepared || vm.state() != State::Ready {
+    pub fn setup(
+        &mut self,
+        vm: &Vm,
+        static_objects: &StaticObjects,
+        exception_stream: &ExceptionStream,
+        interrupt_stream: &InterruptStream,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || vm.state() != State::Ready
+            || static_objects.state() != State::Online
+            || exception_stream.state() != State::Prepared
+            || interrupt_stream.state() != State::Prepared
+        {
             return failed_condition(
-                LifecycleEvent::Enable,
+                LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Prepared,
-                State::Online,
+                State::Ready,
             );
         }
 
-        csr::write_stvec(early_event_entry as usize);
+        csr::write_stvec(formal_event_entry as usize);
         csr::clear_sscratch();
         self.lifecycle.transition(
-            LifecycleEvent::Enable,
+            LifecycleEvent::Setup,
             State::Prepared,
-            State::Online,
-            Checkpoint::EventStreamOnline,
+            State::Ready,
+            Checkpoint::EventStreamReady,
         )
+    }
+}
+
+pub fn dispatch_scause(scause: usize) -> ! {
+    if scause & SCAUSE_INTERRUPT_BIT != 0 {
+        crate::objects::interrupt_stream::dispatch_scause(scause)
+    } else {
+        crate::objects::exception_stream::dispatch_scause(scause)
     }
 }
