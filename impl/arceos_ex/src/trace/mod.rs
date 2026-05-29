@@ -1,6 +1,31 @@
 #[cfg(checkpoint_sbi_char)]
+use core::sync::atomic::{AtomicU8, Ordering};
+
+#[cfg(checkpoint_sbi_char)]
+const TRACE_MODE_EARLY_BYTE: u8 = 0;
+#[cfg(checkpoint_sbi_char)]
+const TRACE_MODE_NAMED_STRING: u8 = 1;
+
+#[cfg(checkpoint_sbi_char)]
+static TRACE_MODE: AtomicU8 = AtomicU8::new(TRACE_MODE_EARLY_BYTE);
+
+#[cfg(checkpoint_sbi_char)]
+pub fn enable_named_checkpoints() {
+    if TRACE_MODE.swap(TRACE_MODE_NAMED_STRING, Ordering::Relaxed) == TRACE_MODE_EARLY_BYTE {
+        crate::arch::riscv64::sbi::putchar(b'\n');
+    }
+}
+
+#[cfg(checkpoint_sbi_char)]
 pub fn checkpoint(checkpoint: Checkpoint) {
-    crate::arch::riscv64::sbi::putchar(checkpoint.byte());
+    if TRACE_MODE.load(Ordering::Relaxed) == TRACE_MODE_EARLY_BYTE {
+        crate::arch::riscv64::sbi::putchar(checkpoint.early_byte());
+        return;
+    }
+
+    crate::arch::riscv64::sbi::putstr("trace: ");
+    crate::arch::riscv64::sbi::putstr(checkpoint.name());
+    crate::arch::riscv64::sbi::putchar(b'\n');
 }
 
 #[cfg(not(checkpoint_sbi_char))]
@@ -116,102 +141,127 @@ pub enum Checkpoint {
 
 impl Checkpoint {
     #[allow(dead_code)]
-    const fn byte(self) -> u8 {
+    const fn early_byte(self) -> u8 {
         match self {
-            Self::StartupTimelineStarted => b'[',
-            Self::StartupTimelineReady => b']',
-            Self::PreparePhaseReady => b'{',
-            Self::PreparePhaseOnline => b'}',
-            Self::BootPhaseStarted => b'(',
-            Self::BootPhaseReady => b')',
             Self::EntryPreludePhaseStarted => b'A',
-            Self::EntryPreludePhaseReady => b'a',
-            Self::EntrySuccessorPhaseStarted => b'P',
-            Self::EntrySuccessorPhaseReady => b'3',
-            Self::EntryPreludePhaseDestroyed => b'd',
             Self::InterruptStreamPrepared => b'I',
-            Self::InterruptStreamReady => b'i',
             Self::KernelImagePrepared => b'K',
             Self::RootStreamPrepared => b'O',
             Self::KernelImageReady => b'Z',
             Self::BootCpuPrepared => b'H',
-            Self::BootCpuReady => b'0',
-            Self::BootCpuOnline => b'1',
             Self::CpuGroupPrepared => b'G',
             Self::InitTaskPrepared => b'T',
             Self::InitStackPrepared => b'S',
             Self::EventStreamPrepared => b'V',
             Self::ExceptionStreamPrepared => b'9',
             Self::TrampolineVmReady => b'Q',
-            Self::TrampolineVmOnline => b'R',
-            Self::TrampolineVmDestroyed => b'X',
             Self::RawDtbPrepared => b'Y',
             Self::RawDtbReady => b'W',
             Self::FixMapReady => b'M',
             Self::EarlyVmPrepared => b'N',
             Self::EarlyVmReady => b'J',
-            Self::EarlyVmOnline => b'L',
             Self::VmPrepared => b'U',
-            Self::VmReady => b'v',
-            Self::VmOnline => b'2',
-            Self::KernelImageOnline => b'k',
-            Self::EventStreamOnline => b'e',
-            Self::InitTaskOnline => b't',
-            Self::InitStackReady => b's',
-            Self::InitStackOnline => b'n',
-            Self::SocPrepared => b'o',
-            Self::EarlyDtbPrepared => b'p',
-            Self::EarlyDtbReady => b'r',
-            Self::EarlyDtbDestroyed => b'g',
-            Self::PlatformCpuInfoReady => b'c',
-            Self::PlatformCpuInfoOnline => b'5',
-            Self::PhysicalMemoryReady => b'm',
-            Self::PhysicalMemoryOnline => b'6',
-            Self::CpuIdMapPrepared => b'-',
-            Self::CpuIdMapReady => b'l',
-            Self::CommandLinePrepared => b'u',
-            Self::KernelCmdlineReady => b'w',
-            Self::InitMmReady => b'h',
-            Self::EarlyIoremapReady => b'y',
-            Self::SbiReady => b'b',
-            Self::EarlyParamReady => b'z',
-            Self::MemBlockPrepared => b'4',
-            Self::MemBlockReady => b'f',
-            Self::MemBlockOnline => b'F',
-            Self::SwapperVmReady => b'j',
-            Self::SwapperVmOnline => b'q',
-            Self::EarlyVmDestroyed => b'x',
-            Self::PrintkBufferPrepared => b'B',
-            Self::EarlyConPrepared => b'C',
-            Self::EarlyConReady => b'D',
-            Self::EarlyConOnline => b'E',
-            Self::CorePreparePhaseStarted => b'!',
-            Self::CorePreparePhaseReady => b'@',
-            Self::DeviceTreeReady => b'?',
-            Self::ZonesReady => b'+',
-            Self::ResourceTreeReady => b'%',
-            Self::CpuGroupReady => b'~',
-            Self::CacheBlockInfoReady => b'&',
-            Self::CpuCapabilitiesReady => b'=',
-            Self::CommandLineReady => b'#',
-            Self::SavedCommandLineReady => b':',
-            Self::StaticCommandLineReady => b';',
-            Self::SetupNrCpuIdsCheckpoint => b'<',
-            Self::PerCpuStaticImageReady => b'"',
-            Self::PerCpuFirstChunkReady => b'\'',
-            Self::PerCpuOffsetTableReady => b'\\',
-            Self::PerCpuStorageReady => b'>',
-            Self::CpuHotplugStateReady => b'^',
-            Self::SecondParseEarlyParamCheckpoint => b'_',
-            Self::BootParamReady => b'`',
-            Self::PrintUnknownBootoptionsCheckpoint => b'|',
-            Self::PayloadParamReady => b'$',
-            Self::RandomnessPrepared => b'*',
-            Self::PrintkBufferReady => b'/',
-            Self::ExceptionTableReady => b'.',
-            Self::ExceptionStreamReady => b',',
-            Self::PayloadPhaseReady => b'7',
-            Self::PayloadPhaseOnline => b'8',
+            _ => b'?',
+        }
+    }
+
+    #[allow(dead_code)]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::StartupTimelineStarted => "StartupTimeline.Started",
+            Self::StartupTimelineReady => "StartupTimeline.Ready",
+            Self::PreparePhaseReady => "PreparePhase.Ready",
+            Self::PreparePhaseOnline => "PreparePhase.Online",
+            Self::BootPhaseStarted => "BootPhase.Started",
+            Self::BootPhaseReady => "BootPhase.Ready",
+            Self::EntryPreludePhaseStarted => "EntryPreludePhase.Started",
+            Self::EntryPreludePhaseReady => "EntryPreludePhase.Ready",
+            Self::EntrySuccessorPhaseStarted => "EntrySuccessorPhase.Started",
+            Self::EntrySuccessorPhaseReady => "EntrySuccessorPhase.Ready",
+            Self::EntryPreludePhaseDestroyed => "EntryPreludePhase.Destroyed",
+            Self::InterruptStreamPrepared => "InterruptStream.Prepared",
+            Self::InterruptStreamReady => "InterruptStream.Ready",
+            Self::KernelImagePrepared => "KernelImage.Prepared",
+            Self::RootStreamPrepared => "RootStream.Prepared",
+            Self::KernelImageReady => "KernelImage.Ready",
+            Self::BootCpuPrepared => "BootCPU.Prepared",
+            Self::BootCpuReady => "BootCPU.Ready",
+            Self::BootCpuOnline => "BootCPU.Online",
+            Self::CpuGroupPrepared => "CpuGroup.Prepared",
+            Self::InitTaskPrepared => "InitTask.Prepared",
+            Self::InitStackPrepared => "InitStack.Prepared",
+            Self::EventStreamPrepared => "EventStream.Prepared",
+            Self::ExceptionStreamPrepared => "ExceptionStream.Prepared",
+            Self::TrampolineVmReady => "TrampolineVm.Ready",
+            Self::TrampolineVmOnline => "TrampolineVm.Online",
+            Self::TrampolineVmDestroyed => "TrampolineVm.Destroyed",
+            Self::RawDtbPrepared => "RawDtb.Prepared",
+            Self::RawDtbReady => "RawDtb.Ready",
+            Self::FixMapReady => "FixMap.Ready",
+            Self::EarlyVmPrepared => "EarlyVm.Prepared",
+            Self::EarlyVmReady => "EarlyVm.Ready",
+            Self::EarlyVmOnline => "EarlyVm.Online",
+            Self::VmPrepared => "Vm.Prepared",
+            Self::VmReady => "Vm.Ready",
+            Self::VmOnline => "Vm.Online",
+            Self::KernelImageOnline => "KernelImage.Online",
+            Self::EventStreamOnline => "EventStream.Online",
+            Self::InitTaskOnline => "InitTask.Online",
+            Self::InitStackReady => "InitStack.Ready",
+            Self::InitStackOnline => "InitStack.Online",
+            Self::SocPrepared => "Soc.Prepared",
+            Self::EarlyDtbPrepared => "EarlyDtb.Prepared",
+            Self::EarlyDtbReady => "EarlyDtb.Ready",
+            Self::EarlyDtbDestroyed => "EarlyDtb.Destroyed",
+            Self::PlatformCpuInfoReady => "PlatformCpuInfo.Ready",
+            Self::PlatformCpuInfoOnline => "PlatformCpuInfo.Online",
+            Self::PhysicalMemoryReady => "PhysicalMemory.Ready",
+            Self::PhysicalMemoryOnline => "PhysicalMemory.Online",
+            Self::CpuIdMapPrepared => "CpuIdMap.Prepared",
+            Self::CpuIdMapReady => "CpuIdMap.Ready",
+            Self::CommandLinePrepared => "CommandLine.Prepared",
+            Self::KernelCmdlineReady => "KernelCmdline.Ready",
+            Self::InitMmReady => "InitMM.Ready",
+            Self::EarlyIoremapReady => "EarlyIoremap.Ready",
+            Self::SbiReady => "SBI.Ready",
+            Self::EarlyParamReady => "EarlyParam.Ready",
+            Self::MemBlockPrepared => "MemBlock.Prepared",
+            Self::MemBlockReady => "MemBlock.Ready",
+            Self::MemBlockOnline => "MemBlock.Online",
+            Self::SwapperVmReady => "SwapperVm.Ready",
+            Self::SwapperVmOnline => "SwapperVm.Online",
+            Self::EarlyVmDestroyed => "EarlyVm.Destroyed",
+            Self::PrintkBufferPrepared => "PrintkBuffer.Prepared",
+            Self::EarlyConPrepared => "EarlyCon.Prepared",
+            Self::EarlyConReady => "EarlyCon.Ready",
+            Self::EarlyConOnline => "EarlyCon.Online",
+            Self::CorePreparePhaseStarted => "CorePreparePhase.Started",
+            Self::CorePreparePhaseReady => "CorePreparePhase.Ready",
+            Self::DeviceTreeReady => "DeviceTree.Ready",
+            Self::ZonesReady => "Zones.Ready",
+            Self::ResourceTreeReady => "ResourceTree.Ready",
+            Self::CpuGroupReady => "CpuGroup.Ready",
+            Self::CacheBlockInfoReady => "CacheBlockInfo.Ready",
+            Self::CpuCapabilitiesReady => "CpuCapabilities.Ready",
+            Self::CommandLineReady => "CommandLine.Ready",
+            Self::SavedCommandLineReady => "SavedCommandLine.Ready",
+            Self::StaticCommandLineReady => "StaticCommandLine.Ready",
+            Self::SetupNrCpuIdsCheckpoint => "SetupNrCpuIds.Checkpoint",
+            Self::PerCpuStaticImageReady => "PerCpuStaticImage.Ready",
+            Self::PerCpuFirstChunkReady => "PerCpuFirstChunk.Ready",
+            Self::PerCpuOffsetTableReady => "PerCpuOffsetTable.Ready",
+            Self::PerCpuStorageReady => "PerCpuStorage.Ready",
+            Self::CpuHotplugStateReady => "CpuHotplugState.Ready",
+            Self::SecondParseEarlyParamCheckpoint => "SecondParseEarlyParam.Checkpoint",
+            Self::BootParamReady => "BootParam.Ready",
+            Self::PrintUnknownBootoptionsCheckpoint => "PrintUnknownBootoptions.Checkpoint",
+            Self::PayloadParamReady => "PayloadParam.Ready",
+            Self::RandomnessPrepared => "Randomness.Prepared",
+            Self::PrintkBufferReady => "PrintkBuffer.Ready",
+            Self::ExceptionTableReady => "ExceptionTable.Ready",
+            Self::ExceptionStreamReady => "ExceptionStream.Ready",
+            Self::PayloadPhaseReady => "PayloadPhase.Ready",
+            Self::PayloadPhaseOnline => "PayloadPhase.Online",
         }
     }
 }

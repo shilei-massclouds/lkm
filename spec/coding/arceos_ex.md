@@ -341,9 +341,9 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 
 第一轮预留 checkpoint hook 接口，但不要求实现完整状态差分输出。hook 默认为空实现，可通过编译/链接选项接入具体 trace 后端。
 
-checkpoint trace 独立于 `EarlyCon` 和正式 `Console`。当前最小后端可以使用 RISC-V64 SBI legacy putchar 输出单个字符，用于最早期启动定位；该路径不得依赖 allocator、锁、字符串地址、FixMap 或线性映射状态。
+checkpoint trace 独立于 `EarlyCon` 和正式 `Console`。极早期地址空间阶段可以使用 RISC-V64 SBI legacy putchar 输出单个字符，用于定位 `EarlyVm` 切换生效前的最小事件；该路径不得依赖 allocator、锁、字符串地址、FixMap 或线性映射状态。`EarlyVm` 切换生效、完整 `KernelImage` 映射可访问后，trace 后端应输出稳定 checkpoint 名称字符串，而不是继续消耗单字符 id。
 
-单字符 checkpoint id 必须在当前后端中保持一一对应，避免运行期 trace 解码歧义。
+单字符 checkpoint id 只服务 `EarlyVm` 切换前的最低层观测，必须在该极早期后端中保持一一对应，避免运行期 trace 解码歧义。`EarlyVm` 切换后的 checkpoint 新增时只需提供稳定名称，不应再分配单字符 id。
 
 checkpoint 命名应沿用模型对象和状态名称，例如：
 
