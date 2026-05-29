@@ -1,0 +1,193 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="2660" viewBox="0 0 1280 2660" role="img" aria-labelledby="title desc">
+  <title id="title">内存核心初始化期对象构建时序</title>
+  <desc id="desc">展示 Linux 6.12.37 default_config 下 mm_core_init() 内部调用顺序、主线 formal 候选、checkpoint 和裁剪项。</desc>
+  <defs>
+    <style>
+      text {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif;
+        fill: #0f172a;
+      }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 19px; fill: #475569; }
+      .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+      .formal { fill: #ecfdf5; stroke: #10b981; }
+      .debug { fill: #fff7ed; stroke: #f97316; }
+      .alloc { fill: #eff6ff; stroke: #3b82f6; }
+      .checkpoint { fill: #f5f3ff; stroke: #7c3aed; }
+      .trimmed { fill: #f1f5f9; stroke: #64748b; stroke-dasharray: 6 4; }
+      .obj { font-size: 23px; font-weight: 600; dominant-baseline: middle; }
+      .line1 { font-size: 21px; font-weight: 600; dominant-baseline: middle; }
+      .line2 { font-size: 17px; fill: #475569; dominant-baseline: middle; }
+      .boundary { font-size: 18px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
+      .num { font-size: 17px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
+      .dot { fill: #334155; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="2660" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">内存核心初始化期对象构建时序</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">MmCoreInitPhase.setup(): Linux 6.12.37 default_config 下的 mm_core_init() 调用顺序</text>
+
+  <rect x="48" y="126" width="214" height="2500" rx="14" class="lane"/>
+  <text x="155" y="162" text-anchor="middle" class="obj">MmCoreInitPhase</text>
+  <text x="155" y="188" text-anchor="middle" class="subtitle">setup()</text>
+  <line x1="155" y1="224" x2="155" y2="2578" class="timeline"/>
+
+  <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="142" class="boundary">起点：trap_init() 完成，ExceptionStream.Ready，仍处于 SystemExclusive</text>
+
+  <g transform="translate(0 -60)">
+  <g transform="translate(0 68)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box checkpoint"/>
+    <text x="320" y="234" class="line1">BUILD_BUG_ON(MAX_ZONELISTS &gt; 2)</text>
+    <text x="320" y="264" class="line2">checkpoint：编译期结构约束，不推进运行期对象状态</text>
+  </g>
+
+  <g transform="translate(0 176)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">PageAllocatorCore.setup(): build_all_zonelists(NULL)</text>
+    <text x="320" y="264" class="line2">基于 Zones 建立 zonelist，并记录 mobility grouping 事实</text>
+  </g>
+
+  <g transform="translate(0 284)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">PageAllocatorCore.setup(): page_alloc_init_cpuhp()</text>
+    <text x="320" y="264" class="line2">登记 page allocator CPU hotplug/pcp 回调；不启动 secondary CPU</text>
+  </g>
+
+  <g transform="translate(0 392)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">page_ext_init_flatmem()</text>
+    <text x="320" y="264" class="line2">trimmed：CONFIG_PAGE_EXTENSION=n，当前 default_config 下不建立 PageExt</text>
+  </g>
+
+  <g transform="translate(0 500)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box debug"/>
+    <text x="320" y="234" class="line1">MemoryDebug.setup(): mem_debugging_and_hardening_init()</text>
+    <text x="320" y="264" class="line2">DEBUG_PAGEALLOC/DEBUG_VM 相关 static key 和内存初始化策略收敛</text>
+  </g>
+
+  <g transform="translate(0 608)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">kfence_alloc_pool_and_metadata()</text>
+    <text x="320" y="264" class="line2">trimmed：CONFIG_KFENCE=n</text>
+  </g>
+
+  <g transform="translate(0 716)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box checkpoint"/>
+    <text x="320" y="234" class="line1">report_meminit()</text>
+    <text x="320" y="264" class="line2">checkpoint：输出内存自动初始化状态，不推进对象生命周期</text>
+  </g>
+
+  <g transform="translate(0 824)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">kmsan_init_shadow()</text>
+    <text x="320" y="264" class="line2">trimmed：CONFIG_KMSAN=n</text>
+  </g>
+
+  <g transform="translate(0 932)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box debug"/>
+    <text x="320" y="234" class="line1">StackDepot.setup(): stack_depot_early_init()</text>
+    <text x="320" y="264" class="line2">CONFIG_STACKDEPOT=y；为 page owner、kmemleak 等调试路径提供栈存储基础</text>
+  </g>
+
+  <g transform="translate(0 1040)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">PageAllocatorCore.enable(): mem_init()</text>
+    <text x="320" y="264" class="line2">RISC-V: swiotlb_init(); memblock_free_all(); print_vm_layout()</text>
+  </g>
+
+  <g transform="translate(0 1148)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">SlabAllocator.setup(): kmem_cache_init()</text>
+    <text x="320" y="264" class="line2">CONFIG_SLUB=y；建立 boot caches、kmalloc caches 和 SLUB CPU hotplug 状态</text>
+  </g>
+
+  <g transform="translate(0 1256)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">page_ext_init_flatmem_late()</text>
+    <text x="320" y="264" class="line2">trimmed：CONFIG_PAGE_EXTENSION=n</text>
+  </g>
+
+  <g transform="translate(0 1364)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">kmemleak_init()</text>
+    <text x="320" y="264" class="line2">trimmed：CONFIG_DEBUG_KMEMLEAK=n</text>
+  </g>
+
+  <g transform="translate(0 1472)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box alloc"/>
+    <text x="320" y="234" class="line1">PageTableCaches.setup(): ptlock_cache_init()</text>
+    <text x="320" y="264" class="line2">CONFIG_SPLIT_PTE_PTLOCKS=y；建立 split page-table lock cache</text>
+  </g>
+
+  <g transform="translate(0 1580)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">15</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box alloc"/>
+    <text x="320" y="234" class="line1">PageTableCaches.setup(): pgtable_cache_init()</text>
+    <text x="320" y="264" class="line2">RISC-V64: 预分配 vmalloc/direct-map 等区域页表同步层级；modules/KASAN 分支被裁剪</text>
+  </g>
+
+  <g transform="translate(0 1688)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">16</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">debug_objects_mem_init()</text>
+    <text x="320" y="264" class="line2">trimmed：CONFIG_DEBUG_OBJECTS=n</text>
+  </g>
+
+  <g transform="translate(0 1796)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">17</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box alloc"/>
+    <text x="320" y="234" class="line1">VmallocCore.setup(): vmalloc_init()</text>
+    <text x="320" y="264" class="line2">建立 vmap_area cache、per-CPU vmap 队列、vmap nodes 和空闲 vmap 空间</text>
+  </g>
+
+  <g transform="translate(0 1904)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">18</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">if (!deferred_struct_pages) page_ext_init()</text>
+    <text x="320" y="264" class="line2">trimmed：CONFIG_PAGE_EXTENSION=n；不建立 PageExt final init</text>
+  </g>
+
+  <g transform="translate(0 2012)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">19</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">init_espfix_bsp(); pti_init(); kmsan_init_runtime()</text>
+    <text x="320" y="264" class="line2">trimmed：x86 专有路径或 CONFIG_KMSAN=n；RISC-V64 当前不纳入</text>
+  </g>
+
+  <g transform="translate(0 2120)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">20</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">MmStructCache.setup(): mm_cache_init()</text>
+    <text x="320" y="264" class="line2">建立 mm_struct 等内存描述符相关 cache</text>
+  </g>
+
+  <g transform="translate(0 2228)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">21</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box trimmed"/>
+    <text x="320" y="234" class="line1">execmem_init()</text>
+    <text x="320" y="264" class="line2">trimmed/no-op：MODULES=n、BPF_JIT=n、KPROBES=n，当前未选择 CONFIG_EXECMEM</text>
+  </g>
+  </g>
+
+  <rect x="292" y="2520" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="2546" class="boundary">终点：mm_core_init() 返回；核心页分配、SLUB、页表缓存、vmalloc 和 mm cache 基础就绪</text>
+</svg>
