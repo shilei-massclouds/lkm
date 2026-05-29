@@ -50,8 +50,8 @@
   <g transform="translate(0 176)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
-    <text x="320" y="234" class="line1">PageAllocatorCore.setup(): build_all_zonelists(NULL)</text>
-    <text x="320" y="264" class="line2">基于 Zones 建立 zonelist，并记录 mobility grouping 事实</text>
+    <text x="320" y="234" class="line1">MemoryNode[*].ZonelistSet.setup(): build_all_zonelists(NULL)</text>
+    <text x="320" y="264" class="line2">基于 ZoneSet 建立 fallback zoneref 顺序，并记录 boot pageset/mobility 事实</text>
   </g>
 
   <g transform="translate(0 284)">
