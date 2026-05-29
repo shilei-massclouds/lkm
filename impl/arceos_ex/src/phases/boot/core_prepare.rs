@@ -61,7 +61,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         checkpoint_print_unknown_bootoptions,
     )?;
     ctx.randomness.preset(&ctx.static_command_line)?;
-    printk::setup()?;
+    printk::setup(&ctx.memblock, &ctx.per_cpu_storage, &ctx.boot_param)?;
     ctx.exception_table.setup(&ctx.kernel_image, &ctx.vm)?;
     ctx.exception_stream.setup(&ctx.event_stream)?;
     ctx.exception_stream.page_fault_setup()?;
