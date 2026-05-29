@@ -110,6 +110,9 @@ impl ExceptionStream {
             );
         }
 
+        self.page_fault_setup()?;
+        self.breakpoint_setup()?;
+        self.unexpected_setup()?;
         self.dispatch_ready = true;
         DISPATCH_READY.store(1, Ordering::Relaxed);
         self.lifecycle.transition(
@@ -193,7 +196,7 @@ impl ExceptionKind {
         binding: ExceptionHandlerBinding,
         policy: ExceptionPolicy,
     ) -> EventResult {
-        if exception_stream_state != State::Ready || self.lifecycle.state() != State::Prepared {
+        if exception_stream_state != State::Prepared || self.lifecycle.state() != State::Prepared {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

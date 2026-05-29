@@ -830,9 +830,6 @@ object CorePreparePhase: PhaseObject {
                     PrintkBuffer.Event::Setup;
                     ExceptionTable.Event::Setup;
                     ExceptionStream.Event::Setup;
-                    PageFaultException.Event::Setup;
-                    BreakpointException.Event::Setup;
-                    UnexpectedException.Event::Setup;
                 }
 
                 ensures {
