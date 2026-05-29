@@ -28,6 +28,13 @@ SECTIONS
         _erodata = .;
     }
 
+    . = ALIGN(4);
+    __ex_table : AT(ADDR(__ex_table) - LOAD_OFFSET) {
+        __start___ex_table = .;
+        KEEP(*(__ex_table))
+        __stop___ex_table = .;
+    }
+
     .data : AT(ADDR(.data) - LOAD_OFFSET) ALIGN(4K) {
         _sdata = .;
         PROVIDE(__global_pointer$ = . + 0x800);

@@ -282,6 +282,8 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 
 `PrintkBuffer.setup()` 对应 `setup_log_buf()` 的运行期准备语义。它不重新建立早期输出能力，而是在 `MemBlock`、`PerCpuStorage` 和 `BootParam` 已就绪后完成运行期日志缓冲准备；当前最小实现可以不扩容、不切换动态缓冲，继续使用静态 ring buffer，但必须标记运行期 printk 数据可用，且不得清空或丢弃 setup 时仍未 drain 的记录。
 
+`ExceptionTable.setup()` 对应 `sort_main_extable()`。链接脚本必须提供 `__start___ex_table` / `__stop___ex_table` 边界，运行时必须基于该范围完成主异常表排序并提供按 faulting instruction address 查询的路径。当前表为空时也必须显式确认空表范围有效、排序事实成立且 lookup 返回 miss，不得仅以 checkpoint 代替该语义。
+
 ## DeviceTree unflatten 编码约束
 
 正式 `DeviceTree` 对应模型中的 `DeviceTree.setup()`，参考 Linux 的 `unflatten_device_tree()` /
