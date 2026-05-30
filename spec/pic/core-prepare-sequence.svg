@@ -63,7 +63,7 @@
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">3</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box memory"/>
     <text x="318" y="234" class="line1">Zones.setup() / misc_mem_init(): zone_sizes_init()</text>
-    <text x="318" y="265" class="line2">建立 Zones -> Zone -> MigrationType -> FreePageSet 四层抽象</text>
+    <text x="318" y="265" class="line2">建立 Zones -> Zone -> OrderClass -> MigrationType -> FreePageSet 五层抽象</text>
   </g>
 
   <g transform="translate(0 426)">

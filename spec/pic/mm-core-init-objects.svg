@@ -62,10 +62,10 @@
   <text x="530" y="366" text-anchor="middle" class="tiny">Zoneref[] references Zone; does not own Zone</text>
 
   <rect x="364" y="420" width="160" height="72" rx="8" class="box memory"/>
-  <text x="444" y="448" text-anchor="middle" class="label">PageAllocCore</text>
-  <text x="444" y="472" text-anchor="middle" class="small">cpuhp + mem_init</text>
+  <text x="444" y="448" text-anchor="middle" class="label">PageAllocator</text>
+  <text x="444" y="472" text-anchor="middle" class="small">zonelist + memblock</text>
   <rect x="540" y="420" width="156" height="72" rx="8" class="box memory"/>
-  <text x="618" y="448" text-anchor="middle" class="label">SlabAllocator</text>
+  <text x="618" y="448" text-anchor="middle" class="label">SlubAllocator</text>
   <text x="618" y="472" text-anchor="middle" class="small">SLUB + kmalloc</text>
 
   <rect x="364" y="526" width="160" height="72" rx="8" class="box alloc"/>

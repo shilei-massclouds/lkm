@@ -50,14 +50,14 @@
   <g transform="translate(0 176)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
-    <text x="320" y="234" class="line1">MemoryNode[*].ZonelistSet.setup(): build_all_zonelists(NULL)</text>
+    <text x="320" y="234" class="line1">PageAllocator.preset(): build_all_zonelists(NULL)</text>
     <text x="320" y="264" class="line2">基于 ZoneSet 建立 fallback zoneref 顺序，并记录 boot pageset/mobility 事实</text>
   </g>
 
   <g transform="translate(0 284)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
-    <text x="320" y="234" class="line1">PageAllocatorCore.setup(): page_alloc_init_cpuhp()</text>
+    <text x="320" y="234" class="line1">PageAllocator.preset(): page_alloc_init_cpuhp()</text>
     <text x="320" y="264" class="line2">登记 page allocator CPU hotplug/pcp 回调；不启动 secondary CPU</text>
   </g>
 
@@ -106,15 +106,15 @@
   <g transform="translate(0 1040)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
-    <text x="320" y="234" class="line1">PageAllocatorCore.enable(): mem_init()</text>
-    <text x="320" y="264" class="line2">RISC-V: swiotlb_init(); memblock_free_all(); print_vm_layout()</text>
+    <text x="320" y="234" class="line1">PageAllocator.setup(): mem_init()</text>
+    <text x="320" y="264" class="line2">Swiotlb.setup(); MemBlock.offline(); print_vm_layout() checkpoint</text>
   </g>
 
   <g transform="translate(0 1148)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
-    <text x="320" y="234" class="line1">SlabAllocator.setup(): kmem_cache_init()</text>
-    <text x="320" y="264" class="line2">CONFIG_SLUB=y；建立 boot caches、kmalloc caches 和 SLUB CPU hotplug 状态</text>
+    <text x="320" y="234" class="line1">SlubAllocator.setup(): kmem_cache_init()</text>
+    <text x="320" y="264" class="line2">建立 SlubCacheRegistry、KmallocCaches 和 SLUB CPU hotplug step</text>
   </g>
 
   <g transform="translate(0 1256)">
