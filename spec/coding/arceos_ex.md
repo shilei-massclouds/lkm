@@ -55,6 +55,32 @@ make clean
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready` 与 `MmCoreInitPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。当前 `MmCoreInitPhase` 仍是最小对象级语义：`PageAllocator`、`SlubAllocator` 和 `VmallocAllocator` 只发布状态与事实，不提供完整分配 API。
 
+## Pre-VM lifecycle 代码生成约束
+
+`Lifecycle` 是对象模型贯穿内核生命周期的核心保障机制：它既覆盖入口前导期，也覆盖后续核心初始化和 payload handoff。其实现应按内核基础设施对待，优先保证确定性、可审计性和 pre-VM 安全性；必要时可以用手写汇编实现关键路径，而不是完全依赖编译器对普通 Rust 控制流的 lowering。
+
+`Lifecycle::{transition, adopt_transition}` 在 `EarlyVm` 启用前可由入口前导路径调用。该路径运行时 `satp == 0`，只能执行 PC-relative
+直线代码，不得依赖 high-half jump table、`.rodata` 分发表、间接跳转目标、格式化或 panic 路径。`is_allowed_lifecycle_transition`
+是这两个方法共享的转移合法性检查，必须保持为 pre-VM safe 实现。
+
+RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)]` 编码；`is_allowed_lifecycle_transition`
+必须通过手写汇编 `arceos_ex_is_allowed_lifecycle_transition` 执行整数 key 比较。该汇编函数只允许：
+
+- 使用 `a0/a1/a2` 中的 `source/event/target` 编码构造 key。
+- 使用 `li/beq/ret` 等直线比较和直接条件分支。
+- 返回 `a0 = 0/1`。
+
+该函数不得访问内存，不得调用其它函数，不得使用跳转表，不得依赖 `.rodata`，不得改回普通 Rust `match`、嵌套 enum 分支或其它可能由编译器 lowering
+成 jump table 的写法。若新增 lifecycle 状态或事件，必须同步更新：
+
+- `State` / `LifecycleEvent` 的 `#[repr(u8)]` 枚举顺序或显式编码。
+- 汇编中的 allowed transition key 列表。
+- 非 RISC-V fallback 的整数 key 列表。
+
+修改后应通过反汇编审计确认 `arceos_ex_is_allowed_lifecycle_transition` 不含 `jr/jalr`、不含 load 指令、也不引用 `.rodata`。
+将来若出于性能、确定性或 pre-VM 约束考虑，把 `Lifecycle::transition`、`Lifecycle::adopt_transition` 或其它 lifecycle
+核心函数也改为汇编实现，应延续同样约束：固定 ABI 编码、无表驱动控制流、无隐式内存依赖，并在规格中同步记录审计要求。
+
 ## `make verify` obligation 分类
 
 `80966ec` 曾暴露 `13 obligation / 2 deferred`。这些条目不能作为实现可忽略的提示；处理原则是：实现某个对象事件前，必须先通过“推导义务门禁”。能由模型、推导工具、链接脚本、ISA、固件规范或已证明前序事实推出的，应优先补齐推导证明；只能由外部交付保证支撑的，应明确作为 source assumption，并在后续对象事件中尽快转化为运行期检查；无法归类的应作为规格缺口或显式 deferred。

@@ -1,6 +1,10 @@
+#[cfg(target_arch = "riscv64")]
+use core::arch::global_asm;
+
 use crate::trace::{self, Checkpoint};
 
 #[allow(dead_code)]
+#[repr(u8)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum State {
     Base,
@@ -12,6 +16,7 @@ pub enum State {
 }
 
 #[allow(dead_code)]
+#[repr(u8)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum LifecycleEvent {
     Preset,
@@ -287,7 +292,79 @@ impl Lifecycle {
     }
 }
 
-const fn is_allowed_lifecycle_transition(
+// Lifecycle is the object model's always-on guardrail: it is used from the
+// pre-VM entry path through the later kernel payload handoff. Keep the
+// transition legality check in hand-written assembly on RISC-V so this core
+// mechanism has deterministic code generation even before EarlyVm is enabled.
+// Future hot or pre-VM lifecycle operations may use the same treatment if they
+// need stronger performance or control-flow guarantees.
+#[cfg(target_arch = "riscv64")]
+global_asm!(
+    r#"
+    .section .text.arceos_ex_is_allowed_lifecycle_transition, "ax"
+    .align 2
+    .globl arceos_ex_is_allowed_lifecycle_transition
+    .type arceos_ex_is_allowed_lifecycle_transition, @function
+arceos_ex_is_allowed_lifecycle_transition:
+    andi a0, a0, 0xff
+    andi a1, a1, 0xff
+    andi a2, a2, 0xff
+    slli t0, a0, 8
+    slli t1, a1, 4
+    or   t0, t0, t1
+    or   t0, t0, a2
+
+    li   t1, 0x001
+    beq  t0, t1, 1f
+    li   t1, 0x002
+    beq  t0, t1, 1f
+    li   t1, 0x012
+    beq  t0, t1, 1f
+    li   t1, 0x112
+    beq  t0, t1, 1f
+    li   t1, 0x123
+    beq  t0, t1, 1f
+    li   t1, 0x223
+    beq  t0, t1, 1f
+    li   t1, 0x245
+    beq  t0, t1, 1f
+    li   t1, 0x334
+    beq  t0, t1, 1f
+    li   t1, 0x345
+    beq  t0, t1, 1f
+    li   t1, 0x445
+    beq  t0, t1, 1f
+
+    li   a0, 0
+    ret
+1:
+    li   a0, 1
+    ret
+    .size arceos_ex_is_allowed_lifecycle_transition, . - arceos_ex_is_allowed_lifecycle_transition
+"#,
+);
+
+#[cfg(target_arch = "riscv64")]
+unsafe extern "C" {
+    fn arceos_ex_is_allowed_lifecycle_transition(source: u8, event: u8, target: u8) -> u8;
+}
+
+fn is_allowed_lifecycle_transition(source: State, event: LifecycleEvent, target: State) -> bool {
+    #[cfg(target_arch = "riscv64")]
+    {
+        return unsafe {
+            arceos_ex_is_allowed_lifecycle_transition(source as u8, event as u8, target as u8) != 0
+        };
+    }
+
+    #[cfg(not(target_arch = "riscv64"))]
+    {
+        is_allowed_lifecycle_transition_rust(source, event, target)
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+const fn is_allowed_lifecycle_transition_rust(
     source: State,
     event: LifecycleEvent,
     target: State,
@@ -306,6 +383,7 @@ const fn is_allowed_lifecycle_transition(
         || key == transition_key(State::Offline, LifecycleEvent::Cleanup, State::Destroyed)
 }
 
+#[cfg(not(target_arch = "riscv64"))]
 const fn transition_key(source: State, event: LifecycleEvent, target: State) -> u16 {
     ((source as u16) << 8) | ((event as u16) << 4) | target as u16
 }
