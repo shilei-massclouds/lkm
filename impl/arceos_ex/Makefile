@@ -2,12 +2,12 @@ TARGET := riscv64gc-unknown-none-elf
 LOG ?= info
 PROFILE ?= release
 APP ?= smoke
-STOP_AT ?=
-STOP_AT_BUILD_SUFFIX := $(if $(STOP_AT),/stop-at-$(subst /,_,$(subst .,_,$(STOP_AT))))
-BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)$(STOP_AT_BUILD_SUFFIX)
+PROBE ?=
+PROBE_BUILD_SUFFIX := $(if $(PROBE),/probe-$(subst /,_,$(subst .,_,$(PROBE))))
+BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)$(PROBE_BUILD_SUFFIX)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
 KERNEL_BIN := $(BUILD_DIR)/arceos_ex.bin
-TRACE_KERNEL_BIN := build/$(TARGET)/trace/$(APP)$(STOP_AT_BUILD_SUFFIX)/arceos_ex.bin
+TRACE_KERNEL_BIN := build/$(TARGET)/trace/$(APP)$(PROBE_BUILD_SUFFIX)/arceos_ex.bin
 LINKER := linker/riscv64.lds
 SOURCES := $(shell find src -name '*.rs')
 ROOT := ../..
@@ -47,7 +47,7 @@ $(LINKER): $(MODEL_SPECS) $(CODEGEN_SOURCES) Makefile
 
 $(KERNEL_ELF): $(SOURCES) $(LINKER)
 	mkdir -p $(BUILD_DIR)
-	CHECKPOINT_STOP_AT="$(STOP_AT)" $(RUSTC) src/main.rs \
+	CHECKPOINT_PROBE="$(PROBE)" $(RUSTC) src/main.rs \
 		--crate-name arceos_ex \
 		--crate-type bin \
 		--edition 2024 \
@@ -60,10 +60,10 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 
 run:
 ifeq ($(LOG),trace)
-	$(MAKE) PROFILE=trace APP=$(APP) STOP_AT="$(STOP_AT)" EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
+	$(MAKE) PROFILE=trace APP=$(APP) PROBE="$(PROBE)" EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(TRACE_KERNEL_BIN)
 else
-	$(MAKE) build APP=$(APP) STOP_AT="$(STOP_AT)"
+	$(MAKE) build APP=$(APP) PROBE="$(PROBE)"
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(KERNEL_BIN)
 endif
 

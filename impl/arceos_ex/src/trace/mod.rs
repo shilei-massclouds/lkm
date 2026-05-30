@@ -2,10 +2,11 @@
 use core::sync::atomic::AtomicU8;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-const CHECKPOINT_STOP_AT: &str = match option_env!("CHECKPOINT_STOP_AT") {
+const CHECKPOINT_PROBE: &str = match option_env!("CHECKPOINT_PROBE") {
     Some(value) => value,
     None => "",
 };
+const PROBE_MEMBLOCK_ONLINE_STOP: &str = "memblock-online-stop";
 
 #[cfg(checkpoint_sbi_char)]
 const TRACE_MODE_EARLY_BYTE: u8 = 0;
@@ -99,19 +100,29 @@ fn dispatch_post_vm_handlers(checkpoint: Checkpoint) -> CheckpointOutcome {
 }
 
 fn configured_control_handlers(checkpoint: Checkpoint) -> CheckpointOutcome {
-    stop_at_handler(checkpoint)
+    match CHECKPOINT_PROBE {
+        PROBE_MEMBLOCK_ONLINE_STOP => memblock_online_stop_handler(checkpoint),
+        _ => unknown_probe_shutdown(),
+    }
 }
 
 fn control_handlers_configured() -> bool {
-    !CHECKPOINT_STOP_AT.is_empty()
+    !CHECKPOINT_PROBE.is_empty()
 }
 
-fn stop_at_handler(checkpoint: Checkpoint) -> CheckpointOutcome {
-    if CHECKPOINT_STOP_AT == checkpoint.name() {
+fn memblock_online_stop_handler(checkpoint: Checkpoint) -> CheckpointOutcome {
+    if checkpoint == Checkpoint::MemBlockOnline {
         CheckpointOutcome::StopAndShutdown
     } else {
         CheckpointOutcome::Continue
     }
+}
+
+fn unknown_probe_shutdown() -> ! {
+    crate::arch::riscv64::sbi::putstr("checkpoint probe unknown: ");
+    crate::arch::riscv64::sbi::putstr(CHECKPOINT_PROBE);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+    crate::arch::riscv64::sbi::system_shutdown()
 }
 
 fn checkpoint_reentry_shutdown() -> ! {
