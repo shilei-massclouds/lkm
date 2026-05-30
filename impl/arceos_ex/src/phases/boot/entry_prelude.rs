@@ -6,7 +6,7 @@ use crate::{
     objects::{
         boot_args::BootArgs,
         soc::Soc,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{EventResult, LifecycleEvent, State, failed_condition},
     },
     trace::Checkpoint,
 };
@@ -116,6 +116,8 @@ _start:
     addi sp, sp, -{pt_size_on_stack}
     la t0, {head_init_stack_sp}
     sd sp, 0(t0)
+    la t0, {head_trap_entry}
+    csrw stvec, t0
     li a0, {trace_init_stack_preset}
     call {head_checkpoint}
 
@@ -128,6 +130,7 @@ _start:
     head_boot_hartid = sym head_boot_hartid,
     head_checkpoint = sym arceos_ex_head_checkpoint,
     head_init_stack_sp = sym head_init_stack_sp,
+    head_trap_entry = sym arceos_ex_head_trap_entry,
     head_text_align = const HEAD_TEXT_ALIGN,
     init_task_storage = sym crate::objects::init_task::init_task_storage,
     pt_size_on_stack = const crate::objects::init_stack::PT_SIZE_ON_STACK,
@@ -143,6 +146,24 @@ _start:
     trace_kernel_image_preset = const TRACE_KERNEL_IMAGE_PRESET,
     trace_root_stream_preset = const TRACE_ROOT_STREAM_PRESET,
 );
+
+global_asm!(
+    r#"
+    .section .head.text.trap, "ax"
+    .align 2
+    .globl arceos_ex_head_trap_entry
+arceos_ex_head_trap_entry:
+    csrr    a0, scause
+    csrr    a1, sepc
+    csrr    a2, stval
+    tail    {head_trap_rust}
+"#,
+    head_trap_rust = sym arceos_ex_head_trap_rust,
+);
+
+unsafe extern "C" {
+    fn arceos_ex_head_trap_entry();
+}
 
 #[cfg(checkpoint_sbi_char)]
 #[unsafe(naked)]
@@ -161,6 +182,28 @@ unsafe extern "C" fn arceos_ex_head_checkpoint() {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn arceos_ex_head_checkpoint() {
     core::arch::naked_asm!("ret")
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn arceos_ex_head_trap_rust(scause: usize, sepc: usize, stval: usize) -> ! {
+    crate::arch::riscv64::sbi::putstr("arceos_ex head trap\n");
+    crate::arch::riscv64::sbi::putstr("scause=0x");
+    print_hex(scause);
+    crate::arch::riscv64::sbi::putstr(" sepc=0x");
+    print_hex(sepc);
+    crate::arch::riscv64::sbi::putstr(" stval=0x");
+    print_hex(stval);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+    crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn print_hex(value: usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        crate::arch::riscv64::sbi::putchar(HEX[(value >> shift) & 0xf]);
+    }
 }
 
 #[unsafe(no_mangle)]

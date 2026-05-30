@@ -8,6 +8,7 @@ use crate::objects::{
     cpu_hotplug::CpuHotplugState,
     cpu_id_map::CpuIdMap,
     device_tree::DeviceTree,
+    dma_cache_policy::DmaCachePolicy,
     early_dtb::EarlyDtb,
     early_ioremap::EarlyIoremap,
     early_param::EarlyParam,
@@ -23,6 +24,10 @@ use crate::objects::{
     kernel_image::KernelImage,
     lds::Lds,
     memblock::MemBlock,
+    mm_core::{
+        MemoryDebugHardening, MemoryTopology, MmStructCache, PageAllocator, PageTableCaches,
+        SlubAllocator, StackDepot, Swiotlb, VmallocAllocator,
+    },
     params::Params,
     payload_param::PayloadParam,
     per_cpu_storage::PerCpuStorage,
@@ -33,6 +38,7 @@ use crate::objects::{
     resource_tree::ResourceTree,
     root_stream::RootStream,
     sbi::Sbi,
+    static_branch::StaticBranch,
     static_objects::StaticObjects,
     vm::Vm,
     zones::Zones,
@@ -73,6 +79,8 @@ pub struct Context {
     pub resource_tree: ResourceTree,
     pub cache_block_info: CacheBlockInfo,
     pub cpu_capabilities: CpuCapabilities,
+    pub dma_cache_policy: DmaCachePolicy,
+    pub static_branch: StaticBranch,
     pub saved_command_line: SavedCommandLine,
     pub static_command_line: StaticCommandLine,
     pub per_cpu_storage: PerCpuStorage,
@@ -81,6 +89,16 @@ pub struct Context {
     pub payload_param: PayloadParam,
     pub randomness: Randomness,
     pub exception_table: ExceptionTable,
+
+    pub memory_topology: MemoryTopology,
+    pub page_allocator: PageAllocator,
+    pub memory_debug_hardening: MemoryDebugHardening,
+    pub stack_depot: StackDepot,
+    pub swiotlb: Swiotlb,
+    pub slub_allocator: SlubAllocator,
+    pub page_table_caches: PageTableCaches,
+    pub vmalloc_allocator: VmallocAllocator,
+    pub mm_struct_cache: MmStructCache,
 }
 
 impl Context {
@@ -117,6 +135,8 @@ impl Context {
             resource_tree: ResourceTree::new(),
             cache_block_info: CacheBlockInfo::new(),
             cpu_capabilities: CpuCapabilities::new(),
+            dma_cache_policy: DmaCachePolicy::new(),
+            static_branch: StaticBranch::new(),
             saved_command_line: SavedCommandLine::new(),
             static_command_line: StaticCommandLine::new(),
             per_cpu_storage: PerCpuStorage::new(),
@@ -125,6 +145,15 @@ impl Context {
             payload_param: PayloadParam::new(),
             randomness: Randomness::new(),
             exception_table: ExceptionTable::new(),
+            memory_topology: MemoryTopology::new(),
+            page_allocator: PageAllocator::new(),
+            memory_debug_hardening: MemoryDebugHardening::new(),
+            stack_depot: StackDepot::new(),
+            swiotlb: Swiotlb::new(),
+            slub_allocator: SlubAllocator::new(),
+            page_table_caches: PageTableCaches::new(),
+            vmalloc_allocator: VmallocAllocator::new(),
+            mm_struct_cache: MmStructCache::new(),
         }
     }
 }

@@ -53,7 +53,7 @@ make clean
 生成带注释的 trace SVG 报告。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
-`EntrySuccessorPhase.Ready` 与 `CorePreparePhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。`MmCoreInitPhase` 已进入正式规格；实现侧仍按后续对象级任务推进。
+`EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready` 与 `MmCoreInitPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。当前 `MmCoreInitPhase` 仍是最小对象级语义：`PageAllocator`、`SlubAllocator` 和 `VmallocAllocator` 只发布状态与事实，不提供完整分配 API。
 
 ## `make verify` obligation 分类
 

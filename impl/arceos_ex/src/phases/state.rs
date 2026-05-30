@@ -9,7 +9,8 @@ const BASE: u8 = 0;
 const PREPARED: u8 = 1;
 const READY: u8 = 2;
 const ONLINE: u8 = 3;
-const DESTROYED: u8 = 4;
+const OFFLINE: u8 = 4;
+const DESTROYED: u8 = 5;
 
 pub const fn encode(state: State) -> u8 {
     match state {
@@ -17,6 +18,7 @@ pub const fn encode(state: State) -> u8 {
         State::Prepared => PREPARED,
         State::Ready => READY,
         State::Online => ONLINE,
+        State::Offline => OFFLINE,
         State::Destroyed => DESTROYED,
     }
 }
@@ -27,6 +29,7 @@ pub fn load(state: &AtomicU8) -> State {
         PREPARED => State::Prepared,
         READY => State::Ready,
         ONLINE => State::Online,
+        OFFLINE => State::Offline,
         DESTROYED => State::Destroyed,
         _ => State::Destroyed,
     }

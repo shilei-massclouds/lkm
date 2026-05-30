@@ -66,6 +66,18 @@ const CASES: &[SmokeCase] = &[
         run: cases::zones::run,
     },
     SmokeCase {
+        name: "page_allocator",
+        run: cases::page_allocator::run,
+    },
+    SmokeCase {
+        name: "slub",
+        run: cases::slub::run,
+    },
+    SmokeCase {
+        name: "vmalloc",
+        run: cases::vmalloc::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

@@ -18,7 +18,7 @@ pub fn setup(ctx: &mut Context) -> ! {
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex core prepare event failed\n",
     );
-    handoff()
+    handoff(ctx)
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
@@ -34,6 +34,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.device_tree, &ctx.cpu_group)?;
     ctx.cpu_capabilities
         .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
+    ctx.dma_cache_policy
+        .setup(&ctx.cpu_capabilities, &ctx.cache_block_info)?;
+    ctx.static_branch.setup(&ctx.kernel_image, &ctx.vm)?;
     ctx.command_line.setup(
         &ctx.kernel_cmdline,
         &mut ctx.saved_command_line,
@@ -121,8 +124,8 @@ fn checkpoint_print_unknown_bootoptions(
     Ok(())
 }
 
-fn handoff() -> ! {
-    crate::phases::boot::setup_after_children()
+fn handoff(ctx: &mut Context) -> ! {
+    crate::phases::boot::mm_core_init::setup(ctx)
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {
@@ -156,6 +159,8 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.cpu_id_map.state() == State::Ready
         && ctx.cache_block_info.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
+        && ctx.dma_cache_policy.state() == State::Ready
+        && ctx.static_branch.state() == State::Ready
         && ctx.command_line.state() == State::Ready
         && ctx.saved_command_line.state() == State::Ready
         && ctx.static_command_line.state() == State::Ready

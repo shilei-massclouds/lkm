@@ -165,6 +165,15 @@ impl MemBlock {
         )
     }
 
+    pub fn disable(&mut self) -> EventResult {
+        self.lifecycle.transition(
+            LifecycleEvent::Disable,
+            State::Online,
+            State::Offline,
+            Checkpoint::MemBlockOffline,
+        )
+    }
+
     fn failed_setup(&self) -> EventResult {
         failed_condition(
             LifecycleEvent::Setup,

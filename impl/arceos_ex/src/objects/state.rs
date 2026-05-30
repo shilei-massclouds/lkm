@@ -7,6 +7,7 @@ pub enum State {
     Prepared,
     Ready,
     Online,
+    Offline,
     Destroyed,
 }
 
@@ -16,6 +17,7 @@ pub enum LifecycleEvent {
     Preset,
     Setup,
     Enable,
+    Disable,
     Cleanup,
 }
 
@@ -25,7 +27,8 @@ impl LifecycleEvent {
             Self::Preset => 1 << 0,
             Self::Setup => 1 << 1,
             Self::Enable => 1 << 2,
-            Self::Cleanup => 1 << 3,
+            Self::Disable => 1 << 3,
+            Self::Cleanup => 1 << 4,
         }
     }
 
@@ -34,6 +37,7 @@ impl LifecycleEvent {
             Self::Preset => b'P',
             Self::Setup => b'S',
             Self::Enable => b'E',
+            Self::Disable => b'D',
             Self::Cleanup => b'C',
         }
     }
@@ -158,6 +162,7 @@ impl State {
             Self::Prepared => b'P',
             Self::Ready => b'R',
             Self::Online => b'O',
+            Self::Offline => b'F',
             Self::Destroyed => b'D',
         }
     }
@@ -287,47 +292,20 @@ const fn is_allowed_lifecycle_transition(
     event: LifecycleEvent,
     target: State,
 ) -> bool {
-    if matches_state(source, State::Base) {
-        if matches_event(event, LifecycleEvent::Preset) {
-            return matches_state(target, State::Prepared) || matches_state(target, State::Ready);
-        }
-        if matches_event(event, LifecycleEvent::Setup) {
-            return matches_state(target, State::Ready);
-        }
-        return false;
-    }
+    let key = transition_key(source, event, target);
 
-    if matches_state(source, State::Prepared) {
-        if matches_event(event, LifecycleEvent::Setup) {
-            return matches_state(target, State::Ready);
-        }
-        if matches_event(event, LifecycleEvent::Enable) {
-            return matches_state(target, State::Online);
-        }
-        return false;
-    }
-
-    if matches_state(source, State::Ready) {
-        if matches_event(event, LifecycleEvent::Enable) {
-            return matches_state(target, State::Online);
-        }
-        if matches_event(event, LifecycleEvent::Cleanup) {
-            return matches_state(target, State::Destroyed);
-        }
-        return false;
-    }
-
-    if matches_state(source, State::Online) && matches_event(event, LifecycleEvent::Cleanup) {
-        return matches_state(target, State::Destroyed);
-    }
-
-    false
+    key == transition_key(State::Base, LifecycleEvent::Preset, State::Prepared)
+        || key == transition_key(State::Base, LifecycleEvent::Preset, State::Ready)
+        || key == transition_key(State::Base, LifecycleEvent::Setup, State::Ready)
+        || key == transition_key(State::Prepared, LifecycleEvent::Setup, State::Ready)
+        || key == transition_key(State::Prepared, LifecycleEvent::Enable, State::Online)
+        || key == transition_key(State::Ready, LifecycleEvent::Enable, State::Online)
+        || key == transition_key(State::Ready, LifecycleEvent::Cleanup, State::Destroyed)
+        || key == transition_key(State::Online, LifecycleEvent::Disable, State::Offline)
+        || key == transition_key(State::Online, LifecycleEvent::Cleanup, State::Destroyed)
+        || key == transition_key(State::Offline, LifecycleEvent::Cleanup, State::Destroyed)
 }
 
-const fn matches_state(left: State, right: State) -> bool {
-    left as u8 == right as u8
-}
-
-const fn matches_event(left: LifecycleEvent, right: LifecycleEvent) -> bool {
-    left as u8 == right as u8
+const fn transition_key(source: State, event: LifecycleEvent, target: State) -> u16 {
+    ((source as u16) << 8) | ((event as u16) << 4) | target as u16
 }

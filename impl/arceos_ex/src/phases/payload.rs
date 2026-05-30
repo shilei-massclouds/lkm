@@ -51,6 +51,7 @@ fn payload_phase_dependencies_ready() -> bool {
     crate::phases::prepare::is_online()
         && crate::phases::boot::is_ready()
         && crate::phases::boot::core_prepare::is_ready()
+        && crate::phases::boot::mm_core_init::is_ready()
         && printk::is_ready()
         && earlycon::is_online()
 }
