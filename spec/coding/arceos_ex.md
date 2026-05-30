@@ -53,7 +53,7 @@ make clean
 生成带注释的 trace SVG 报告。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
-`EntrySuccessorPhase.Ready` 与 `CorePreparePhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
+`EntrySuccessorPhase.Ready` 与 `CorePreparePhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。`MmCoreInitPhase` 已进入正式规格；实现侧仍按后续对象级任务推进。
 
 ## `make verify` obligation 分类
 
@@ -66,7 +66,7 @@ make clean
 | 固件交付假设，运行期逐步确认 | `firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa)`；`firmware_dtb_blob_accessible_at_kernel_entry(BootArgs.dtb_pa)` | `OpenSbiFirmware.Online`、`RawDtb.Preset`、`RawDtb.Setup` | 已作为 OpenSBI handoff source fact 进入推导；`RawDtb` 仍必须逐步读取 header、检查 magic、读取 totalsize 并确定完整范围。若确认失败，事件返回 `Failed`，不得继续推进。 |
 | 链接/入口布局硬约束 | `text_start == kernel_start`；`elf_entry == kernel_start`；`entry_head_text_layout_ready(Lds)`；`pre_mmu_access_discipline_ready(Lds)`；`trampoline_access_discipline_ready(Lds)` | `Lds.Online`、`KernelImage.Preset/Setup`、`TrampolineVm`、`EarlyVm` | 已作为 linker script source fact 进入推导；实现必须继续由 linker script、入口段布局和构建期/启动期检查维持这些事实。推进真实页表前，还要复查 head/trampoline 安全范围和访问纪律。 |
 | 对象前序事实 | `boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)`；`boot_cpu_present(BootCPU)`；`boot_cpu_active(BootCPU)` | `BootCPU.Preset`、`BootCPU.Setup`、`BootCPU.Enable` | 已由 `BootCPU` 事件 `ensures` 和前序事实推导消化；实现方面，`BootCPU.Preset` 已记录启动 hartid，`Setup/Enable` 仍需在入口后继期基于 `PlatformCpuInfo` 和 FDT `/cpus` 完成。 |
-| 显式 deferred | `Soc` 早期平台状态点；`jump_label_init()`；`efi_init()` | `Soc.Preset` 和后续非最小启动路径 | 保持 deferred，不在第一轮对象级最小闭环中隐式实现；后续扩展 SoC、StaticKey 或 EFI 对象时再展开。 |
+| 显式 deferred | `Soc` 早期平台状态点；`efi_init()` | `Soc.Preset` 和后续非最小启动路径 | 保持 deferred，不在第一轮对象级最小闭环中隐式实现；`StaticBranch` 已进入 formal model，后续 EFI 对象扩展时再展开 EFI 路径。 |
 
 ### 待迁移到 model 的 deferred 标记
 
@@ -332,6 +332,20 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 3. 第二遍填充 `DeviceNode`、property、root、parent/children 和查询索引或等价关系。
 
 `DeviceTree.Ready` checkpoint 只能在第二遍完成，并且 root 唯一、非 root 节点 parent 唯一、parent/children 一致、路径查询和 property 查询均可用之后发出。涉及裸指针写入 `MemBlock` 分配存储的代码应封装在小的内部 unsafe 边界内，对外优先暴露安全的状态推进和查询接口。
+
+## `mm_core_init()` 编码约束
+
+`MmCoreInitPhase` 已正式落到 `spec/model/boot/mm-core-init/`。实现侧必须保持与模型一致的阶段边界：入口是 `CorePreparePhase.Ready`、`ExceptionStream.Ready`、`MemBlock.Online`、`DmaCachePolicy.Ready`、`StaticBranch.Ready` 和 `SystemExclusive`；出口是 `PageAllocator.Ready`、`MemBlock.Offline`、`SlubAllocator.Ready`、`PageTableCaches.Ready`、`VmallocAllocator.Ready`、`MmStructCache.Ready`。
+
+`PageAllocator.preset()` 只做 `build_all_zonelists(NULL)` 和 `page_alloc_init_cpuhp()` 对应的拓扑与 hook 建立：`BootZonelistSet.Ready`、fallback zoneref 顺序、NULL sentinel、`CPUHP_PAGE_ALLOC` step 注册。它不得释放 MemBlock 页，也不得把自身推进到 `Ready`。
+
+`PageAllocator.setup()` 才对应 `memblock_free_all()`。该事件必须先要求 `Swiotlb.Ready` 和 `MemoryDebugHardening.Ready`，再把 MemBlock free ranges 交给 buddy/free page sets，并通过 `MemBlock.Disable` 使 `MemBlock.state == Offline`。本阶段不得执行 `memblock_discard()`，不得把 `MemBlock` 推进到 `Destroyed`。
+
+`VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址资源管理，不是页表映射器。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END` 页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、`VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、建立 free vmap space。
+
+`MmStructCache.setup()` 只建立 `"mm_struct"` cache。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
+
+`PageExt`、`KFENCE`、`KMSAN`、`Kmemleak`、`DebugObjectsMemory` 和 `ExecMemory` 当前按 `linux-6.12.37/default_config` 记录为 model `deferred`/trimmed 路径。实现若遇到这些调用位置，应输出 checkpoint 或保留 no-op 分支说明，不得散落 TODO 来替代正式规格记录。
 
 ## CacheBlockInfo 编码约束
 

@@ -37,6 +37,7 @@ _ALLOWED_STATE_NAMES = frozenset(
         "Prepared",
         "Ready",
         "Online",
+        "Offline",
         "Destroyed",
     }
 )
@@ -45,6 +46,7 @@ _ALLOWED_EVENT_NAMES = frozenset(
         "Preset",
         "Setup",
         "Enable",
+        "Disable",
         "Cleanup",
     }
 )
@@ -57,7 +59,9 @@ _ALLOWED_TRANSITIONS = frozenset(
         ("Prepared", "Enable", "Online"),
         ("Ready", "Enable", "Online"),
         ("Ready", "Cleanup", "Destroyed"),
+        ("Online", "Disable", "Offline"),
         ("Online", "Cleanup", "Destroyed"),
+        ("Offline", "Cleanup", "Destroyed"),
     }
 )
 

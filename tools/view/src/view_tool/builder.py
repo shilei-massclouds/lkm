@@ -311,7 +311,12 @@ def _make_timeline_row(
 
 
 def _parent_timeline_phase(phase: str) -> str:
-    if phase in {"EntryPreludePhase", "EntrySuccessorPhase"}:
+    if phase in {
+        "EntryPreludePhase",
+        "EntrySuccessorPhase",
+        "CorePreparePhase",
+        "MmCoreInitPhase",
+    }:
         return "BootPhase"
     return phase
 

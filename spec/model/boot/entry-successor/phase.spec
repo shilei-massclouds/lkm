@@ -153,6 +153,39 @@ object MemBlock: MemoryObject {
             memblock_allocator_ready(MemBlock);
             memblock_resize_allowed(MemBlock);
         }
+
+        events {
+            /*
+             * Disable 对应 mm_core_init()/mem_init() 中 memblock_free_all() 完成后
+             * 早期页分配服务退出普通运行路径。MemBlock 元数据仍保留，后续
+             * page_alloc_init_late()/memblock_discard() 再推进 Cleanup。
+             */
+            on Event::Disable -> State::Offline {
+                depends_on {
+                    PageAllocator.state == State::Prepared;
+                    Swiotlb.state == State::Ready;
+                }
+
+                ensures {
+                    memblock_allocator_ready(MemBlock);
+                    memblock_resize_allowed(MemBlock);
+                    memblock_free_ranges_handed_to_page_allocator(MemBlock, PageAllocator);
+                    memblock_metadata_retained_for_late_discard(MemBlock);
+                }
+            }
+        }
+    }
+
+    /*
+     * Offline 表示可释放页已经交接给 PageAllocator，但 memblock 私有元数据尚未销毁。
+     */
+    state State::Offline {
+        invariant {
+            memblock_allocator_ready(MemBlock);
+            memblock_resize_allowed(MemBlock);
+            memblock_free_ranges_handed_to_page_allocator(MemBlock, PageAllocator);
+            memblock_metadata_retained_for_late_discard(MemBlock);
+        }
     }
 }
 
@@ -882,7 +915,6 @@ object EntrySuccessorPhase: PhaseObject {
                 }
 
                 deferred {
-                    "jump_label_init() 后续抽象为 StaticKey/静态分支对象。"
                     "efi_init() 后续在支持 EFI 启动路径时抽象为 FirmwareInterface/EFI 对象。"
                 }
             }

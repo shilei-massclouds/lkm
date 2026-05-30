@@ -551,6 +551,7 @@ def _append_trace_state_cell(
     css_class = "verified-state" if cell.kind == "verified_state" else "state"
     lines.extend(
         [
+            f'<title>{_xml_escape(cell.label)}</title>',
             f'<rect class="{css_class}" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="4" />',
         ]
     )

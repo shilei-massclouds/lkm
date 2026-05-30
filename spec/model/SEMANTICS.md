@@ -14,6 +14,7 @@
 - `Prepared`
 - `Ready`
 - `Online`
+- `Offline`
 - `Destroyed`
 
 允许的生命周期事件名：
@@ -21,6 +22,7 @@
 - `Preset`
 - `Setup`
 - `Enable`
+- `Disable`
 - `Cleanup`
 
 语义约定：
@@ -29,10 +31,12 @@
 - `Prepared` 的别名包括：预置态、前置条件已建立。
 - `Ready` 的别名包括：就绪态、主要构建已完成。
 - `Online` 的别名包括：在线态、已启用、可服务。
+- `Offline` 的别名包括：离线态、已退出主要服务、资源已交接、`handoff`。`Handoff` 不是正式状态名。
 - `Destroyed` 的别名包括：已销毁、已退出服务、已清理、已预留、`reserved`。`Reserved` 不是正式状态名。
 - `Preset` 表示建立进入主要构建流程前的早期前置条件，通常推进到 `Prepared` 或 `Ready`。
 - `Setup` 表示完成对象的主要构建，使对象进入 `Ready`。
 - `Enable` 表示让已经构建完成的对象进入服务状态，通常推进到 `Online`。别名包括：启用、上线、进入服务、保护、`guard`。当语义是建立栈 canary 这类保护性运行约束时，仍使用 `Enable` 作为正式事件名。
+- `Disable` 表示对象退出主要服务路径或完成资源所有权交接，但对象元数据仍保留给诊断、引用收尾或后续销毁。
 - `Cleanup` 表示对象退出服务或释放阶段性抽象，通常推进到 `Destroyed`。
 
 检查点：
@@ -54,7 +58,9 @@
 - `Prepared --Enable--> Online`
 - `Ready --Enable--> Online`
 - `Ready --Cleanup--> Destroyed`
+- `Online --Disable--> Offline`
 - `Online --Cleanup--> Destroyed`
+- `Offline --Cleanup--> Destroyed`
 
 检查点：
 

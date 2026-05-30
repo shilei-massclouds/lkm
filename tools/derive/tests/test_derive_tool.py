@@ -79,8 +79,12 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertEqual(data["states"]["EntryPreludePhase"], "Destroyed")
             self.assertEqual(data["states"]["EntrySuccessorPhase"], "Ready")
+            self.assertEqual(data["states"]["CorePreparePhase"], "Ready")
+            self.assertEqual(data["states"]["MmCoreInitPhase"], "Ready")
             self.assertEqual(data["states"]["SwapperVm"], "Online")
-            self.assertEqual(data["states"]["MemBlock"], "Online")
+            self.assertEqual(data["states"]["MemBlock"], "Offline")
+            self.assertEqual(data["states"]["PageAllocator"], "Ready")
+            self.assertEqual(data["states"]["VmallocAllocator"], "Ready")
             self.assertEqual(len(data["trace"]), 1)
             root = data["trace"][0]
             self.assertEqual(root["object"], "StartupTimeline")
@@ -254,7 +258,8 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "Riscv64.stvec == phys_addr(StaticObjects.early_event_entry)"
+                    record["expression"]
+                    == "Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "event_ensures"
                     for record in proved

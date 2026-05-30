@@ -30,7 +30,7 @@ class ModelBuilderTests(unittest.TestCase):
         )
         self.assertEqual(
             result.model.objects["BootPhase"].children,
-            ["EntryPreludePhase", "EntrySuccessorPhase"],
+            ["EntryPreludePhase", "EntrySuccessorPhase", "CorePreparePhase", "MmCoreInitPhase"],
         )
 
     def test_builds_object_view(self) -> None:
@@ -60,6 +60,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("BootPhase.Setup", text)
         self.assertIn("EntryPreludePhase.Setup", text)
         self.assertIn("EntrySuccessorPhase.Setup", text)
+        self.assertIn("CorePreparePhase.Setup", text)
+        self.assertIn("MmCoreInitPhase.Setup", text)
         self.assertIn("PayloadPhase.Setup", text)
         self.assertIn("rankdir=LR", dot)
         self.assertIn('"StartupTimeline.Setup" -> "PreparePhase.Setup"', dot)
@@ -79,6 +81,8 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  - PhysicalMemory.State::Online", text)
         self.assertIn("EntryPreludePhase: ready (State::Ready)", text)
         self.assertIn("EntrySuccessorPhase: ready (State::Ready)", text)
+        self.assertIn("CorePreparePhase: ready (State::Ready)", text)
+        self.assertIn("MmCoreInitPhase: ready (State::Ready)", text)
         self.assertIn("BootPhase: ready (State::Ready)", text)
         self.assertIn("PayloadPhase: ready (State::Ready)", text)
         self.assertIn("PayloadPhase: online (State::Online)", text)
@@ -86,13 +90,15 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("  - Soc.State::Prepared", text)
         self.assertIn("  - Vm.State::Online", text)
         self.assertIn("  - SwapperVm.State::Online", text)
-        self.assertIn("  - MemBlock.State::Online", text)
+        self.assertIn("  - MemBlock.State::Offline", text)
         self.assertNotIn("StartupTimeline", text)
         self.assertIn("<svg", svg)
         self.assertIn("PreparePhase", svg)
         self.assertIn("BootPhase", svg)
         self.assertIn("EntryPreludePhase", svg)
         self.assertIn("EntrySuccessorPhase", svg)
+        self.assertIn("CorePreparePhase", svg)
+        self.assertIn("MmCoreInitPhase", svg)
         self.assertIn("PayloadPhase", svg)
         self.assertNotIn("StartupTimeline", svg)
 
@@ -238,6 +244,50 @@ class ModelBuilderTests(unittest.TestCase):
             any("A.Event::Activate -> State::Done" in message for message in messages)
         )
 
+    def test_accepts_disable_and_offline_lifecycle_names_and_transitions(self) -> None:
+        document = parse_text(
+            """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                        }
+                    }
+                }
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                        }
+                    }
+                }
+
+                state State::Online {
+                    events {
+                        on Event::Disable -> State::Offline {
+                        }
+                    }
+                }
+
+                state State::Offline {
+                    events {
+                        on Event::Cleanup -> State::Destroyed {
+                        }
+                    }
+                }
+
+                state State::Destroyed {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertTrue(result.ok, [diag.message for diag in result.errors])
+
     def test_rejects_lifecycle_transitions_outside_controlled_table(self) -> None:
         document = parse_text(
             """
@@ -263,6 +313,37 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "invalid lifecycle transition: A.State::Base.Event::Enable -> State::Online"
+                in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
+    def test_rejects_disable_from_base_to_offline(self) -> None:
+        document = parse_text(
+            """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Disable -> State::Offline {
+                        }
+                    }
+                }
+
+                state State::Offline {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "invalid lifecycle transition: A.State::Base.Event::Disable -> State::Offline"
                 in diag.message
                 and diag.severity is Severity.ERROR
                 for diag in result.errors

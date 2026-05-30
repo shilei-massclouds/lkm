@@ -122,7 +122,9 @@ object Zones: MemoryObject {
                     zones_dma32_covers_32bit_dma_range(Zones, MemBlock);
                     zones_normal_covers_regular_managed_range(Zones, MemBlock);
                     zones_movable_reserved_for_movable_policy(Zones);
+                    zones_order_class_level_ready(Zones);
                     zones_migration_type_level_ready(Zones);
+                    zones_free_page_sets_partitioned_by_order_and_migration_type(Zones);
                     zones_migration_type_layer_distinct_from_zone_kind(Zones);
                     zones_free_page_set_level_ready(Zones);
                     zones_free_page_sets_initially_empty(Zones);
@@ -145,7 +147,9 @@ object Zones: MemoryObject {
             zones_dma32_covers_32bit_dma_range(Zones, MemBlock);
             zones_normal_covers_regular_managed_range(Zones, MemBlock);
             zones_movable_reserved_for_movable_policy(Zones);
+            zones_order_class_level_ready(Zones);
             zones_migration_type_level_ready(Zones);
+            zones_free_page_sets_partitioned_by_order_and_migration_type(Zones);
             zones_migration_type_layer_distinct_from_zone_kind(Zones);
             zones_free_page_set_level_ready(Zones);
             zones_free_page_sets_initially_empty(Zones);
@@ -312,6 +316,97 @@ object CpuCapabilities: HardwareObject {
             vector_capability_facts_ready(CpuCapabilities);
             zicbom_capability_validated(CpuCapabilities, CacheBlockInfo);
             zicboz_capability_validated(CpuCapabilities, CacheBlockInfo);
+        }
+    }
+}
+
+/*
+ * DmaCachePolicy 表示 RISC-V non-coherent DMA 与 cache maintenance 策略事实。
+ * 它消费 CPU 能力和 cache block size 事实，供后续 mm_core_init() 中的 SWIOTLB
+ * 与未对齐 kmalloc DMA bounce 决策使用；它不是 DMA API 本体。
+ */
+object DmaCachePolicy: HardwareObject {
+    initial_state: State::Base;
+
+    /*
+     * Base 表示 DMA/cache 策略事实尚未从 CPU 能力中收敛。
+     */
+    state State::Base {
+        events {
+            /*
+             * Setup 对应 riscv_noncoherent_supported() 与
+             * riscv_set_dma_cache_alignment() 的抽象结果。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    CpuCapabilities.state == State::Ready;
+                    CacheBlockInfo.state == State::Ready;
+                }
+
+                ensures {
+                    dma_cache_policy_ready(DmaCachePolicy, CpuCapabilities, CacheBlockInfo);
+                    noncoherent_dma_policy_resolved(DmaCachePolicy, CpuCapabilities);
+                    dma_cache_alignment_resolved(DmaCachePolicy, CacheBlockInfo);
+                    dma_cache_policy_available_for_swiotlb(DmaCachePolicy);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示后续 SWIOTLB 和 DMA bounce 选择可以消费稳定策略事实。
+     */
+    state State::Ready {
+        invariant {
+            dma_cache_policy_ready(DmaCachePolicy, CpuCapabilities, CacheBlockInfo);
+            noncoherent_dma_policy_resolved(DmaCachePolicy, CpuCapabilities);
+            dma_cache_alignment_resolved(DmaCachePolicy, CacheBlockInfo);
+            dma_cache_policy_available_for_swiotlb(DmaCachePolicy);
+        }
+    }
+}
+
+/*
+ * StaticBranch 表示 static key / static branch 的启动期基础设施。
+ * 本阶段只建立 registry 与分支项关系，后续 set(key, value) 是状态内 action，
+ * 不推进 StaticBranch 生命周期。
+ */
+object StaticBranch: KernelObject {
+    initial_state: State::Base;
+
+    /*
+     * Base 表示 static branch registry 尚未建立。
+     */
+    state State::Base {
+        events {
+            /*
+             * Setup 对应 RISC-V setup_arch() 中的 jump_label_init()。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    KernelImage.state == State::Online;
+                    SwapperVm.state == State::Online;
+                }
+
+                ensures {
+                    static_branch_registry_ready(StaticBranch, KernelImage);
+                    static_branch_entries_sorted(StaticBranch);
+                    static_key_to_branch_sites_ready(StaticBranch);
+                    static_branch_set_action_ready(StaticBranch);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示后续对象可以通过 StaticBranch.set(key, value) action 收敛 static key。
+     */
+    state State::Ready {
+        invariant {
+            static_branch_registry_ready(StaticBranch, KernelImage);
+            static_branch_entries_sorted(StaticBranch);
+            static_key_to_branch_sites_ready(StaticBranch);
+            static_branch_set_action_ready(StaticBranch);
         }
     }
 }
@@ -822,6 +917,8 @@ object CorePreparePhase: PhaseObject {
                     CpuIdMap.Event::Setup;
                     CacheBlockInfo.Event::Setup;
                     CpuCapabilities.Event::Setup;
+                    DmaCachePolicy.Event::Setup;
+                    StaticBranch.Event::Setup;
                     CommandLine.Event::Setup;
                     PerCpuStorage.Event::Setup;
                     CpuHotplugState.Event::Setup;
@@ -849,9 +946,7 @@ object CorePreparePhase: PhaseObject {
                     "CBOP block size 暂缓：DeviceTree binding 定义 riscv,cbop-block-size，但 Linux 6.12.37 的 riscv_init_cbo_blocksizes() 当前只发布 CBOM/CBOZ。"
                     "apply_boot_alternatives() 暂缓：启动期 alternatives patch 后续抽象为代码补丁设施。"
                     "init_rt_signal_env() 暂缓：用户态信号环境不属于当前最小核心准备路径。"
-                    "riscv_noncoherent_supported() / riscv_set_dma_cache_alignment() 暂缓：DMA/cache policy 后续建模。"
                     "riscv_user_isa_enable() 暂缓：用户态 ISA 暴露路径后续建模。"
-                    "jump_label_init() 在 setup_arch() 返回后再次出现；保留该调用点，后续抽象为 StaticKey/静态分支对象。"
                     "static_call_init() 暂缓：静态调用是调用目标代码补丁设施，当前不进入核心模型。"
                     "early_security_init() 暂缓：LSM/security 框架依赖后续任务、凭据和安全对象。"
                     "setup_boot_config() 暂缓：bootconfig/XBC/initrd 派生参数后续作为参数来源展开。"
@@ -882,6 +977,8 @@ object CorePreparePhase: PhaseObject {
             CpuIdMap.state == State::Ready;
             CacheBlockInfo.state == State::Ready;
             CpuCapabilities.state == State::Ready;
+            DmaCachePolicy.state == State::Ready;
+            StaticBranch.state == State::Ready;
             CommandLine.state == State::Ready;
             SavedCommandLine.state == State::Ready;
             StaticCommandLine.state == State::Ready;

@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import contextlib
 import io
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+TOOLS_ROOT = Path(__file__).resolve().parents[2]
+DERIVE_SRC = TOOLS_ROOT / "derive" / "src"
+if str(DERIVE_SRC) not in sys.path:
+    sys.path.insert(0, str(DERIVE_SRC))
 
 from common import VIEW_SCHEMA, VIEW_VERSION, read_json
 from derive_tool.__main__ import main as derive_main

@@ -183,6 +183,57 @@ class ModelToolTests(unittest.TestCase):
             self.assertIn("A.Event::Activate", errors)
             self.assertIn("A.Event::Activate -> State::Done", errors)
 
+    def test_disable_and_offline_lifecycle_names_and_transitions_are_allowed(self) -> None:
+        source = """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                        }
+                    }
+                }
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                        }
+                    }
+                }
+
+                state State::Online {
+                    events {
+                        on Event::Disable -> State::Offline {
+                        }
+                    }
+                }
+
+                state State::Offline {
+                    events {
+                        on Event::Cleanup -> State::Destroyed {
+                        }
+                    }
+                }
+
+                state State::Destroyed {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "offline-lifecycle.spec"
+            ast = Path(tmp) / "offline-lifecycle.ast.json"
+            model = Path(tmp) / "offline-lifecycle.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+
     def test_lifecycle_transitions_outside_controlled_table_fail_model_stage(self) -> None:
         source = """
             object A: T {
@@ -214,6 +265,40 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             self.assertIn(
                 "invalid lifecycle transition: A.State::Base.Event::Enable -> State::Online",
+                stderr.getvalue(),
+            )
+
+    def test_disable_from_base_to_offline_fails_model_stage(self) -> None:
+        source = """
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Disable -> State::Offline {
+                        }
+                    }
+                }
+
+                state State::Offline {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "bad-disable-transition.spec"
+            ast = Path(tmp) / "bad-disable-transition.ast.json"
+            model = Path(tmp) / "bad-disable-transition.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "invalid lifecycle transition: A.State::Base.Event::Disable -> State::Offline",
                 stderr.getvalue(),
             )
 
