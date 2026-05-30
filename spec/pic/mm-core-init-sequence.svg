@@ -134,15 +134,15 @@
   <g transform="translate(0 1472)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box alloc"/>
-    <text x="320" y="234" class="line1">PageTableCaches.setup(): ptlock_cache_init()</text>
-    <text x="320" y="264" class="line2">CONFIG_SPLIT_PTE_PTLOCKS=y；建立 split page-table lock cache</text>
+    <text x="320" y="234" class="line1">PageTableLockCache.setup(): ptlock_cache_init()</text>
+    <text x="320" y="264" class="line2">CONFIG_SPLIT_PTE_PTLOCKS=y；建立 page-&gt;ptl cache</text>
   </g>
 
   <g transform="translate(0 1580)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">15</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box alloc"/>
     <text x="320" y="234" class="line1">PageTableCaches.setup(): pgtable_cache_init()</text>
-    <text x="320" y="264" class="line2">RISC-V64: 预分配 vmalloc/direct-map 等区域页表同步层级；modules/KASAN 分支被裁剪</text>
+    <text x="320" y="264" class="line2">RISC-V64 当前主线预分配 VMALLOC range；其它配置分支裁剪</text>
   </g>
 
   <g transform="translate(0 1688)">
@@ -155,8 +155,8 @@
   <g transform="translate(0 1796)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">17</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box alloc"/>
-    <text x="320" y="234" class="line1">VmallocCore.setup(): vmalloc_init()</text>
-    <text x="320" y="264" class="line2">建立 vmap_area cache、per-CPU vmap 队列、vmap nodes 和空闲 vmap 空间</text>
+    <text x="320" y="234" class="line1">VmallocAllocator.setup(): vmalloc_init()</text>
+    <text x="320" y="264" class="line2">建立 VmapAddressSpace、VmapNodeSet 和 free/busy vmap areas</text>
   </g>
 
   <g transform="translate(0 1904)">
@@ -177,7 +177,7 @@
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">20</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
     <text x="320" y="234" class="line1">MmStructCache.setup(): mm_cache_init()</text>
-    <text x="320" y="264" class="line2">建立 mm_struct 等内存描述符相关 cache</text>
+    <text x="320" y="264" class="line2">只建立 mm_struct cache；VMA caches 属于后续 proc_caches_init()</text>
   </g>
 
   <g transform="translate(0 2228)">

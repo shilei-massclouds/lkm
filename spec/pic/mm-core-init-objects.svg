@@ -73,8 +73,9 @@
   <text x="444" y="572" text-anchor="middle" class="label">Caches</text>
   <text x="444" y="592" text-anchor="middle" class="small">ptlock + pgtable</text>
   <rect x="540" y="526" width="156" height="72" rx="8" class="box alloc"/>
-  <text x="618" y="554" text-anchor="middle" class="label">VmallocCore</text>
-  <text x="618" y="578" text-anchor="middle" class="small">vmap space</text>
+  <text x="618" y="548" text-anchor="middle" class="label">Vmalloc</text>
+  <text x="618" y="572" text-anchor="middle" class="label">Allocator</text>
+  <text x="618" y="592" text-anchor="middle" class="small">vmap space</text>
 
   <rect x="364" y="632" width="160" height="72" rx="8" class="box debug"/>
   <text x="444" y="660" text-anchor="middle" class="label">MemoryDebug</text>
