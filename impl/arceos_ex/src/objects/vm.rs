@@ -139,8 +139,7 @@ impl Vm {
     }
 
     pub(super) fn finish_setup_after_switch(&mut self, kernel_image: &mut KernelImage, lds: &Lds) {
-        #[cfg(checkpoint_sbi_char)]
-        crate::trace::enable_named_checkpoints();
+        crate::trace::enable_post_vm_checkpoints();
 
         let result = self.trampoline_vm.enable(kernel_image);
         if result.is_err() {
