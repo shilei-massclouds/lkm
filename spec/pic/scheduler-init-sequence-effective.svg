@@ -1,49 +1,148 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1100" viewBox="0 0 1280 1100" role="img" aria-labelledby="title desc">
-  <title id="title">Scheduler Init Effective Sequence</title>
-  <desc id="desc">Shows Linux 6.12.37 default_config scheduler-init subphase calls with Linux tracing deferred.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="1840" viewBox="0 0 1480 1840" role="img" aria-labelledby="title desc">
+  <title id="title">Scheduler Init Effective Sequence Expanded</title>
+  <desc id="desc">Shows Linux 6.12.37 default_config scheduler-init subphase with sched_init expanded into Scheduler preset, setup, and enable.</desc>
   <defs>
     <style>
       text { font-family: "DejaVu Sans", Arial, sans-serif; fill: #0f172a; }
       .title { font-size: 30px; font-weight: 600; }
-      .subtitle { font-size: 19px; fill: #475569; }
+      .subtitle { font-size: 18px; fill: #475569; }
       .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
-      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
       .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
       .formal { fill: #ecfdf5; stroke: #10b981; }
       .checkpoint { fill: #f5f3ff; stroke: #7c3aed; }
       .deferred { fill: #f1f5f9; stroke: #64748b; stroke-dasharray: 6 4; }
+      .omitted { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 5 4; }
+      .group { fill: #ffffff; stroke: #64748b; stroke-width: 1.4; }
       .obj { font-size: 23px; font-weight: 600; dominant-baseline: middle; }
       .line1 { font-size: 21px; font-weight: 600; dominant-baseline: middle; }
-      .line2 { font-size: 17px; fill: #475569; dominant-baseline: middle; }
-      .boundary { font-size: 18px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
-      .num { font-size: 17px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .line2 { font-size: 16px; fill: #475569; dominant-baseline: middle; }
+      .small { font-size: 15px; fill: #475569; dominant-baseline: middle; }
+      .boundary { font-size: 17px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
+      .num { font-size: 16px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
       .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
       .dot { fill: #334155; }
+      .arrow { stroke: #64748b; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .thin { stroke: #94a3b8; stroke-width: 1.4; fill: none; marker-end: url(#arrowhead); }
     </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+      <path d="M 0 0 L 10 4 L 0 8 z" fill="#64748b"/>
+    </marker>
   </defs>
 
-  <rect x="0" y="0" width="1280" height="1100" fill="#ffffff"/>
-  <text x="640" y="46" text-anchor="middle" class="title">Scheduler Init Effective Sequence</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">SchedulerInitPhase.setup(): early_trace_init() to initcall_debug_enable()</text>
-  <rect x="48" y="126" width="214" height="910" rx="14" class="lane"/>
+  <rect x="0" y="0" width="1480" height="1840" fill="#ffffff"/>
+  <text x="740" y="46" text-anchor="middle" class="title">Scheduler Init Effective Sequence</text>
+  <text x="740" y="76" text-anchor="middle" class="subtitle">SchedulerInitPhase.setup(): sched_init expanded; default_config effective path</text>
+
+  <rect x="48" y="126" width="214" height="1624" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">SchedulerInit</text>
   <text x="155" y="188" text-anchor="middle" class="obj">Phase</text>
-  <line x1="155" y1="224" x2="155" y2="998" class="timeline"/>
-  <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="142" class="boundary">Start: core memory management is ready; Linux tracing calls are marked deferred</text>
+  <line x1="155" y1="224" x2="155" y2="1712" class="timeline"/>
 
-  <g transform="translate(0 -48)">
-  <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box deferred"/><text x="320" y="232" class="line1">early_trace_init()</text><text x="320" y="260" class="line2">deferred: Linux tracing core relation to checkpoint trace is unresolved</text></g>
-  <g transform="translate(0 156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Scheduler.setup(): sched_init()</text><text x="320" y="260" class="line2">Prepares boot CPU runqueue, idle task binding, and scheduler base</text></g>
-  <g transform="translate(0 256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text><rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/><text x="320" y="232" class="line1">WARN(!irqs_disabled(), ...)</text><text x="320" y="260" class="line2">Checkpoint: interrupts must stay disabled before scheduler base is ready</text></g>
-  <g transform="translate(0 356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">KernelCollections.setup(): radix_tree_init(); maple_tree_init()</text><text x="320" y="260" class="line2">Common index infrastructure; may split by consumers later</text></g>
-  <g transform="translate(0 456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Housekeeping.setup(): housekeeping_init()</text><text x="320" y="260" class="line2">Builds housekeeping CPU masks for workqueue, tick/nohz, and isolation policy</text></g>
-  <g transform="translate(0 556)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">WorkqueueEarly.setup(): workqueue_init_early()</text><text x="320" y="260" class="line2">Allows workqueue creation, queueing, and cancel; worker kthreads are deferred</text></g>
-  <g transform="translate(0 656)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Rcu.setup(): rcu_init()</text><text x="320" y="260" class="line2">TREE_RCU: builds RCU tree, boot CPU online state, softirq, and workqueues</text></g>
-  <g transform="translate(0 756)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text><rect x="292" y="204" width="876" height="84" rx="10" class="box deferred"/><text x="320" y="232" class="line1">trace_init()</text><text x="320" y="260" class="line2">deferred: Linux event tracing relation to checkpoint trace is unresolved</text></g>
-  <g transform="translate(0 856)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text><rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/><text x="320" y="232" class="line1">initcall_debug_enable()</text><text x="320" y="260" class="line2">Checkpoint/deferred: only affects later initcall diagnostics when enabled</text></g>
+  <rect x="300" y="116" width="1088" height="52" rx="10" class="stage"/>
+  <text x="328" y="142" class="boundary">Start: core memory management is ready; interrupts are still disabled</text>
+
+  <g transform="translate(0 0)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">1</text>
+    <rect x="300" y="198" width="1088" height="84" rx="10" class="box deferred"/>
+    <text x="328" y="226" class="line1">early_trace_init()</text>
+    <text x="328" y="254" class="line2">deferred: LinuxTracing.preset relation to project checkpoint trace is unresolved</text>
   </g>
 
-  <rect x="292" y="940" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="966" class="boundary">End: scheduler, collections, housekeeping, workqueue early, and RCU are ready</text>
+  <g transform="translate(0 114)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">2</text>
+    <rect x="300" y="184" width="1088" height="112" rx="10" class="box formal"/>
+    <text x="328" y="218" class="line1">Scheduler.preset(): sched_init global prerequisites</text>
+    <text x="328" y="248" class="line2">Prepare global scheduler dependencies before per-CPU RunQueue setup</text>
+    <text x="328" y="274" class="line2">Drives deferred SchedClass checkpoints, BitWaitQueueTable, and DefaultSchedRootDomain</text>
+  </g>
+
+  <g transform="translate(0 266)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">2a</text>
+    <rect x="300" y="184" width="1088" height="112" rx="10" class="box deferred"/>
+    <text x="328" y="218" class="line1">SchedClasses order checkpoints</text>
+    <text x="328" y="248" class="line2">deferred objects: StopSchedClass, DeadlineSchedClass, RealtimeSchedClass, FairSchedClass, IdleSchedClass</text>
+    <text x="328" y="274" class="line2">deferred checks: Stop &gt; Deadline &gt; Realtime &gt; Fair &gt; Idle</text>
+  </g>
+
+  <g transform="translate(0 418)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">2b</text>
+    <rect x="300" y="198" width="1088" height="84" rx="10" class="box formal"/>
+    <text x="328" y="226" class="line1">BitWaitQueueTable.preset()</text>
+    <text x="328" y="254" class="line2">Preset global waitqueue bucket table used by wait_on_bit and wake_up_bit</text>
+  </g>
+
+  <g transform="translate(0 532)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">2c</text>
+    <rect x="300" y="184" width="1088" height="112" rx="10" class="box formal"/>
+    <text x="328" y="218" class="line1">DefaultSchedRootDomain.setup()</text>
+    <text x="328" y="248" class="line2">Build default shared scheduling state area for CPUs before full topology exists</text>
+    <text x="328" y="274" class="line2">Checkpoint: ready for Cpu[id].RunQueue.attach_root()</text>
+  </g>
+
+  <g transform="translate(0 684)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">3</text>
+    <rect x="300" y="170" width="1088" height="140" rx="10" class="box formal"/>
+    <text x="328" y="206" class="line1">Scheduler.setup(): per-CPU scheduling state</text>
+    <text x="328" y="236" class="line2">For each possible Cpu: drive Cpu[id].RunQueue.setup(DefaultSchedRootDomain)</text>
+    <text x="328" y="262" class="line2">RunQueue owns CfsRunQueue, RealtimeRunQueue, and DeadlineRunQueue subobjects</text>
+    <text x="328" y="288" class="line2">Other runqueue fields remain attributes; FairServer is deferred</text>
+  </g>
+
+  <g transform="translate(0 864)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">3a</text>
+    <rect x="300" y="170" width="1088" height="140" rx="10" class="box formal"/>
+    <text x="328" y="206" class="line1">BootCPU.RunQueue.BootIdleTask.setup(source = InitTask/current)</text>
+    <text x="328" y="236" class="line2">Advance existing InitTask/current into the boot CPU idle task role</text>
+    <text x="328" y="262" class="line2">Covers load weight, time slice, InitMM lazy TLB, kthread metadata, and sched entity reset</text>
+    <text x="328" y="288" class="line2">Checkpoints: RunQueue.idle == BootIdleTask and RunQueue.curr == BootIdleTask</text>
+  </g>
+
+  <g transform="translate(0 1044)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">3b</text>
+    <rect x="300" y="184" width="1088" height="112" rx="10" class="box formal"/>
+    <text x="328" y="218" class="line1">Scheduler.setup(): tail attributes</text>
+    <text x="328" y="248" class="line2">Set global load update deadline, BootCPU idle_thread_ref, and balance_push_enabled = false</text>
+    <text x="328" y="274" class="line2">These are Scheduler, BootCPU, and RunQueue attributes, not separate objects yet</text>
+  </g>
+
+  <g transform="translate(0 1196)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">3c</text>
+    <rect x="300" y="170" width="1088" height="140" rx="10" class="box deferred"/>
+    <text x="328" y="206" class="line1">FairSchedClass.setup(): init_sched_fair_class()</text>
+    <text x="328" y="236" class="line2">deferred because FairSchedClass itself is deferred</text>
+    <text x="328" y="262" class="line2">Future work: fair balance masks, SCHED_SOFTIRQ handler, and NOHZ balance state</text>
+    <text x="328" y="288" class="line2">Also deferred/omitted by config: ExtSchedClass, PSI, Uclamp, PreemptDynamic</text>
+  </g>
+
+  <g transform="translate(0 1376)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">4</text>
+    <rect x="300" y="198" width="1088" height="84" rx="10" class="box formal"/>
+    <text x="328" y="226" class="line1">Scheduler.enable()</text>
+    <text x="328" y="254" class="line2">Set scheduler_running = true; scheduler enters the boot-time online state</text>
+  </g>
+
+  <g transform="translate(0 1490)">
+    <circle cx="155" cy="240" r="15" class="dot"/>
+    <text x="155" y="240" class="num">5</text>
+    <rect x="300" y="198" width="1088" height="84" rx="10" class="box checkpoint"/>
+    <text x="328" y="226" class="line1">WARN(!irqs_disabled(), ...)</text>
+    <text x="328" y="254" class="line2">Checkpoint: interrupts must still be disabled after sched_init</text>
+  </g>
+
+  <rect x="300" y="1622" width="1088" height="52" rx="10" class="stage"/>
+  <text x="328" y="1648" class="boundary">Next in subphase 5: KernelCollections, Housekeeping, WorkqueueEarly, RCU, trace_init deferred, initcall debug checkpoint</text>
+
+  <rect x="300" y="1708" width="1088" height="52" rx="10" class="stage"/>
+  <text x="328" y="1734" class="boundary">End of expanded Fig. 17 focus: Scheduler is online for boot CPU; full SMP topology remains later</text>
 </svg>
