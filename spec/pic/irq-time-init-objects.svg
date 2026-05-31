@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820" role="img" aria-labelledby="title desc">
   <title id="title">IRQ and Time Init Objects</title>
-  <desc id="desc">Shows BootPhase subphase 6 object boundaries for Linux 6.12.37 default_config from after context_tracking_init() to before local_irq_enable().</desc>
+  <desc id="desc">Shows BootPhase subphase 6 object boundaries for Linux 6.12.37 default_config from early_irq_init() to before local_irq_enable().</desc>
   <defs>
     <style>
       text { font-family: "DejaVu Sans", Arial, sans-serif; fill: #0f172a; }
@@ -13,7 +13,6 @@
       .irq { fill: #f0fdfa; stroke: #14b8a6; }
       .time { fill: #fff7ed; stroke: #f97316; }
       .async { fill: #eff6ff; stroke: #3b82f6; }
-      .trimmed { fill: #f1f5f9; stroke: #64748b; stroke-dasharray: 6 4; }
       .label { font-size: 20px; font-weight: 600; dominant-baseline: middle; }
       .small { font-size: 15px; fill: #475569; dominant-baseline: middle; }
       .group-title { font-size: 20px; font-weight: 600; fill: #334155; }
@@ -26,7 +25,7 @@
 
   <rect x="0" y="0" width="1280" height="820" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">IRQ and Time Init Objects</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase subphase 6: after context_tracking_init() to before local_irq_enable()</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase subphase 6: early_irq_init() to before local_irq_enable()</text>
 
   <rect x="50" y="116" width="235" height="644" rx="14" class="group"/>
   <text x="168" y="150" text-anchor="middle" class="group-title">Phase Boundary</text>
@@ -83,9 +82,6 @@
   <rect x="805" y="436" width="176" height="72" rx="8" class="box irq"/>
   <text x="893" y="464" text-anchor="middle" class="label">SmpCallFunction</text>
   <text x="893" y="488" text-anchor="middle" class="small">IPI foundation</text>
-  <rect x="1018" y="436" width="176" height="72" rx="8" class="box trimmed"/>
-  <text x="1106" y="464" text-anchor="middle" class="label">KFence</text>
-  <text x="1106" y="488" text-anchor="middle" class="small">KFENCE=n</text>
   <rect x="805" y="592" width="389" height="72" rx="8" class="box phase"/>
   <text x="999" y="620" text-anchor="middle" class="label">early_boot_irqs_disabled = false</text>
   <text x="999" y="644" text-anchor="middle" class="small">local_irq_enable() starts the next phase</text>

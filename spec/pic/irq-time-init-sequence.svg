@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="2380" viewBox="0 0 1280 2380" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="2240" viewBox="0 0 1280 2240" role="img" aria-labelledby="title desc">
   <title id="title">IRQ and Time Init Sequence</title>
-  <desc id="desc">Shows Linux 6.12.37 default_config start_kernel() calls from after context_tracking_init() to before local_irq_enable().</desc>
+  <desc id="desc">Shows Linux 6.12.37 default_config effective start_kernel() calls from early_irq_init() to before local_irq_enable().</desc>
   <defs>
     <style>
       text { font-family: "DejaVu Sans", Arial, sans-serif; fill: #0f172a; }
@@ -13,7 +13,6 @@
       .irq { fill: #f0fdfa; stroke: #14b8a6; }
       .time { fill: #fff7ed; stroke: #f97316; }
       .checkpoint { fill: #f5f3ff; stroke: #7c3aed; }
-      .trimmed { fill: #f1f5f9; stroke: #64748b; stroke-dasharray: 6 4; }
       .obj { font-size: 23px; font-weight: 600; dominant-baseline: middle; }
       .line1 { font-size: 21px; font-weight: 600; dominant-baseline: middle; }
       .line2 { font-size: 17px; fill: #475569; dominant-baseline: middle; }
@@ -24,13 +23,13 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1280" height="2380" fill="#ffffff"/>
+  <rect x="0" y="0" width="1280" height="2240" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">IRQ and Time Init Sequence</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">IrqTimeInitPhase.setup(): after context_tracking_init() to before local_irq_enable()</text>
-  <rect x="48" y="126" width="214" height="2190" rx="14" class="lane"/>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">IrqTimeInitPhase.setup(): early_irq_init() to before local_irq_enable()</text>
+  <rect x="48" y="126" width="214" height="2050" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">IrqTimeInit</text>
   <text x="155" y="188" text-anchor="middle" class="obj">Phase</text>
-  <line x1="155" y1="224" x2="155" y2="2280" class="timeline"/>
+  <line x1="155" y1="224" x2="155" y2="2140" class="timeline"/>
   <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
   <text x="320" y="142" class="boundary">Start: SchedulerInitPhase is complete; interrupts are still disabled</text>
 
@@ -45,14 +44,13 @@
   <g transform="translate(0 756)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">Timekeeping.setup(): timekeeping_init()</text><text x="320" y="260" class="line2">Builds generic timekeeper, clocksource state, and initial time values</text></g>
   <g transform="translate(0 856)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">RiscvTimer.setup(): time_init()</text><text x="320" y="260" class="line2">Reads DeviceTree /cpus timebase-frequency and runs timer_probe()</text></g>
   <g transform="translate(0 956)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Randomness.setup(): random_init()</text><text x="320" y="260" class="line2">Runs after timekeeping and moves RNG to the full boot-time ready boundary</text></g>
-  <g transform="translate(0 1056)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text><rect x="292" y="204" width="876" height="84" rx="10" class="box trimmed"/><text x="320" y="232" class="line1">kfence_init()</text><text x="320" y="260" class="line2">trimmed: CONFIG_KFENCE=n</text></g>
-  <g transform="translate(0 1156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">StackCanary.setup(): boot_init_stack_canary()</text><text x="320" y="260" class="line2">Refreshes or records boot stack canary facts using the full RNG state</text></g>
-  <g transform="translate(0 1256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">PerfEvent.setup(): perf_event_init()</text><text x="320" y="260" class="line2">CONFIG_PERF_EVENTS=y; builds perf event core and per-CPU contexts</text></g>
-  <g transform="translate(0 1356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Profiler.setup(); SmpCallFunction.setup()</text><text x="320" y="260" class="line2">Builds profiling and SMP call-function/IPI base; secondary CPUs remain offline</text></g>
-  <g transform="translate(0 1456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">15</text><rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/><text x="320" y="232" class="line1">WARN(!irqs_disabled(), ...)</text><text x="320" y="260" class="line2">Checkpoint: interrupts must still be disabled at the exit boundary</text></g>
-  <g transform="translate(0 1556)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">16</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">IrqEnableGate.prepare(): early_boot_irqs_disabled = false</text><text x="320" y="260" class="line2">Clears the early boot guard; local_irq_enable() starts the next phase</text></g>
+  <g transform="translate(0 1056)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">StackCanary.setup(): boot_init_stack_canary()</text><text x="320" y="260" class="line2">Refreshes or records boot stack canary facts using the full RNG state</text></g>
+  <g transform="translate(0 1156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">PerfEvent.setup(): perf_event_init()</text><text x="320" y="260" class="line2">CONFIG_PERF_EVENTS=y; builds perf event core and per-CPU contexts</text></g>
+  <g transform="translate(0 1256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Profiler.setup(); SmpCallFunction.setup()</text><text x="320" y="260" class="line2">Builds profiling and SMP call-function/IPI base; secondary CPUs remain offline</text></g>
+  <g transform="translate(0 1356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text><rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/><text x="320" y="232" class="line1">WARN(!irqs_disabled(), ...)</text><text x="320" y="260" class="line2">Checkpoint: interrupts must still be disabled at the exit boundary</text></g>
+  <g transform="translate(0 1456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">15</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">IrqEnableGate.prepare(): early_boot_irqs_disabled = false</text><text x="320" y="260" class="line2">Clears the early boot guard; local_irq_enable() starts the next phase</text></g>
   </g>
 
-  <rect x="292" y="2220" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="2246" class="boundary">End: interrupts are still disabled, but IRQ, timer/timekeeping, softirq, RNG, and IPI are ready</text>
+  <rect x="292" y="2080" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="2106" class="boundary">End: interrupts are still disabled, but IRQ, timer/timekeeping, softirq, RNG, and IPI are ready</text>
 </svg>
