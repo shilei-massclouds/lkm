@@ -7,7 +7,7 @@ empty :=
 space := $(empty) $(empty)
 PROBE ?=
 PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)))
-KNOWN_PROBES := memblock-api memblock-online-stop
+KNOWN_PROBES := memblock-api
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))

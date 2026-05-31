@@ -2,8 +2,6 @@
 pub mod early_trace;
 #[cfg(checkpoint_handler_memblock_api)]
 mod memblock_api;
-#[cfg(checkpoint_handler_memblock_online_stop)]
-mod memblock_online_stop;
 #[cfg(checkpoint_sbi_char)]
 mod trace;
 
@@ -41,8 +39,6 @@ pub struct Handler {
 const POST_VM_HANDLERS: &[Handler] = &[
     #[cfg(checkpoint_sbi_char)]
     trace::HANDLER,
-    #[cfg(checkpoint_handler_memblock_online_stop)]
-    memblock_online_stop::HANDLER,
     #[cfg(checkpoint_handler_memblock_api)]
     memblock_api::HANDLER,
 ];
