@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820" role="img" aria-labelledby="title desc">
+  <title id="title">IRQ and Time Init Objects</title>
+  <desc id="desc">Shows BootPhase subphase 6 object boundaries for Linux 6.12.37 default_config from after context_tracking_init() to before local_irq_enable().</desc>
+  <defs>
+    <style>
+      text { font-family: "DejaVu Sans", Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 18px; fill: #475569; }
+      .group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .ready { fill: #ecfdf5; stroke: #10b981; }
+      .irq { fill: #f0fdfa; stroke: #14b8a6; }
+      .time { fill: #fff7ed; stroke: #f97316; }
+      .async { fill: #eff6ff; stroke: #3b82f6; }
+      .trimmed { fill: #f1f5f9; stroke: #64748b; stroke-dasharray: 6 4; }
+      .label { font-size: 20px; font-weight: 600; dominant-baseline: middle; }
+      .small { font-size: 15px; fill: #475569; dominant-baseline: middle; }
+      .group-title { font-size: 20px; font-weight: 600; fill: #334155; }
+      .edge { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="820" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">IRQ and Time Init Objects</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase subphase 6: after context_tracking_init() to before local_irq_enable()</text>
+
+  <rect x="50" y="116" width="235" height="644" rx="14" class="group"/>
+  <text x="168" y="150" text-anchor="middle" class="group-title">Phase Boundary</text>
+  <rect x="82" y="186" width="172" height="72" rx="8" class="box phase"/>
+  <text x="168" y="214" text-anchor="middle" class="label">IrqTimeInit</text>
+  <text x="168" y="238" text-anchor="middle" class="small">Subphase</text>
+  <rect x="82" y="304" width="172" height="72" rx="8" class="box ready"/>
+  <text x="168" y="332" text-anchor="middle" class="label">SchedulerInit</text>
+  <text x="168" y="356" text-anchor="middle" class="small">Ready input</text>
+  <rect x="82" y="422" width="172" height="72" rx="8" class="box phase"/>
+  <text x="168" y="450" text-anchor="middle" class="label">IRQ Enable Gate</text>
+  <text x="168" y="474" text-anchor="middle" class="small">before local_irq_enable</text>
+  <path d="M168 304 L168 264" class="edge"/>
+  <path d="M168 422 L168 382" class="edge"/>
+
+  <rect x="320" y="116" width="420" height="644" rx="14" class="group"/>
+  <text x="530" y="150" text-anchor="middle" class="group-title">IRQ + timer/timekeeping</text>
+  <rect x="350" y="184" width="160" height="72" rx="8" class="box irq"/>
+  <text x="430" y="212" text-anchor="middle" class="label">IrqSubsystem</text>
+  <text x="430" y="236" text-anchor="middle" class="small">irqchip + SBI IPI</text>
+  <rect x="550" y="184" width="160" height="72" rx="8" class="box time"/>
+  <text x="630" y="212" text-anchor="middle" class="label">TickSubsystem</text>
+  <text x="630" y="236" text-anchor="middle" class="small">NO_HZ idle</text>
+  <rect x="350" y="310" width="160" height="72" rx="8" class="box time"/>
+  <text x="430" y="338" text-anchor="middle" class="label">TimerWheel</text>
+  <text x="430" y="362" text-anchor="middle" class="small">TIMER_SOFTIRQ</text>
+  <rect x="550" y="310" width="160" height="72" rx="8" class="box time"/>
+  <text x="630" y="338" text-anchor="middle" class="label">Hrtimer</text>
+  <text x="630" y="362" text-anchor="middle" class="small">HRTIMER_SOFTIRQ</text>
+  <rect x="350" y="436" width="160" height="72" rx="8" class="box irq"/>
+  <text x="430" y="464" text-anchor="middle" class="label">Softirq</text>
+  <text x="430" y="488" text-anchor="middle" class="small">action table</text>
+  <rect x="550" y="436" width="160" height="72" rx="8" class="box time"/>
+  <text x="630" y="464" text-anchor="middle" class="label">Timekeeping</text>
+  <text x="630" y="488" text-anchor="middle" class="small">clocksource base</text>
+  <rect x="450" y="592" width="180" height="72" rx="8" class="box time"/>
+  <text x="540" y="620" text-anchor="middle" class="label">RiscvTimer</text>
+  <text x="540" y="644" text-anchor="middle" class="small">timebase + timer_probe</text>
+
+  <rect x="775" y="116" width="455" height="644" rx="14" class="group"/>
+  <text x="1002" y="150" text-anchor="middle" class="group-title">Exit Preparation</text>
+  <rect x="805" y="184" width="176" height="72" rx="8" class="box async"/>
+  <text x="893" y="212" text-anchor="middle" class="label">SRCU</text>
+  <text x="893" y="236" text-anchor="middle" class="small">sleepable RCU</text>
+  <rect x="1018" y="184" width="176" height="72" rx="8" class="box async"/>
+  <text x="1106" y="212" text-anchor="middle" class="label">Randomness</text>
+  <text x="1106" y="236" text-anchor="middle" class="small">after timekeeping</text>
+  <rect x="805" y="310" width="176" height="72" rx="8" class="box async"/>
+  <text x="893" y="338" text-anchor="middle" class="label">StackCanary</text>
+  <text x="893" y="362" text-anchor="middle" class="small">boot canary</text>
+  <rect x="1018" y="310" width="176" height="72" rx="8" class="box async"/>
+  <text x="1106" y="338" text-anchor="middle" class="label">Perf/Profile</text>
+  <text x="1106" y="362" text-anchor="middle" class="small">events + profiling</text>
+  <rect x="805" y="436" width="176" height="72" rx="8" class="box irq"/>
+  <text x="893" y="464" text-anchor="middle" class="label">SmpCallFunction</text>
+  <text x="893" y="488" text-anchor="middle" class="small">IPI foundation</text>
+  <rect x="1018" y="436" width="176" height="72" rx="8" class="box trimmed"/>
+  <text x="1106" y="464" text-anchor="middle" class="label">KFence</text>
+  <text x="1106" y="488" text-anchor="middle" class="small">KFENCE=n</text>
+  <rect x="805" y="592" width="389" height="72" rx="8" class="box phase"/>
+  <text x="999" y="620" text-anchor="middle" class="label">early_boot_irqs_disabled = false</text>
+  <text x="999" y="644" text-anchor="middle" class="small">local_irq_enable() starts the next phase</text>
+
+  <path d="M254 222 C286 222, 304 220, 348 220" class="edge"/>
+  <path d="M510 220 L548 220" class="edge"/>
+  <path d="M630 256 C620 286, 520 300, 430 308" class="edge"/>
+  <path d="M510 346 L548 346" class="edge"/>
+  <path d="M430 382 L430 434" class="edge"/>
+  <path d="M510 472 L548 472" class="edge"/>
+  <path d="M630 508 C630 544, 594 566, 540 590" class="edge"/>
+  <path d="M630 628 C700 628, 742 220, 803 220" class="edge"/>
+  <path d="M981 220 L1016 220" class="edge"/>
+  <path d="M1106 256 C1106 286, 1000 306, 981 346" class="edge"/>
+  <path d="M981 346 L1016 346" class="edge"/>
+  <path d="M893 508 C893 550, 934 570, 999 590" class="edge"/>
+</svg>
