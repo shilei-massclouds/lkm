@@ -1,133 +1,11 @@
-#[cfg(checkpoint_sbi_char)]
-use core::sync::atomic::AtomicU8;
-use core::sync::atomic::{AtomicBool, Ordering};
-
-const CHECKPOINT_PROBE: &str = match option_env!("CHECKPOINT_PROBE") {
-    Some(value) => value,
-    None => "",
-};
-const PROBE_MEMBLOCK_ONLINE_STOP: &str = "memblock-online-stop";
-
-#[cfg(checkpoint_sbi_char)]
-const TRACE_MODE_EARLY_BYTE: u8 = 0;
-#[cfg(checkpoint_sbi_char)]
-const TRACE_MODE_NAMED_STRING: u8 = 1;
-
-#[cfg(checkpoint_sbi_char)]
-static TRACE_MODE: AtomicU8 = AtomicU8::new(TRACE_MODE_EARLY_BYTE);
-
-static POST_VM_CHECKPOINTS_ENABLED: AtomicBool = AtomicBool::new(false);
-static CHECKPOINT_HANDLER_ACTIVE: AtomicBool = AtomicBool::new(false);
-
 pub fn enable_post_vm_checkpoints() {
-    POST_VM_CHECKPOINTS_ENABLED.store(true, Ordering::Release);
-
     #[cfg(checkpoint_sbi_char)]
-    enable_named_checkpoints();
-}
-
-#[cfg(checkpoint_sbi_char)]
-fn enable_named_checkpoints() {
-    if TRACE_MODE.swap(TRACE_MODE_NAMED_STRING, Ordering::Relaxed) == TRACE_MODE_EARLY_BYTE {
-        crate::arch::riscv64::sbi::putchar(b'\n');
-    }
+    crate::checkpoint::handlers::early_trace::enable_named_checkpoints();
+    crate::checkpoint::enable_post_vm_checkpoints();
 }
 
 pub fn checkpoint(checkpoint: Checkpoint) {
-    if !control_handlers_configured() {
-        trace_checkpoint(checkpoint);
-        return;
-    }
-
-    if CHECKPOINT_HANDLER_ACTIVE.load(Ordering::Acquire) {
-        checkpoint_reentry_shutdown();
-    }
-
-    trace_checkpoint(checkpoint);
-
-    match dispatch_post_vm_handlers(checkpoint) {
-        CheckpointOutcome::Continue => {}
-        CheckpointOutcome::FailAndShutdown => {
-            crate::arch::riscv64::sbi::putstr("checkpoint fail: ");
-            crate::arch::riscv64::sbi::putstr(checkpoint.name());
-            crate::arch::riscv64::sbi::putchar(b'\n');
-            crate::arch::riscv64::sbi::system_shutdown();
-        }
-        CheckpointOutcome::StopAndShutdown => {
-            crate::arch::riscv64::sbi::putstr("checkpoint stop: ");
-            crate::arch::riscv64::sbi::putstr(checkpoint.name());
-            crate::arch::riscv64::sbi::putchar(b'\n');
-            crate::arch::riscv64::sbi::system_shutdown();
-        }
-    }
-}
-
-#[cfg(checkpoint_sbi_char)]
-fn trace_checkpoint(checkpoint: Checkpoint) {
-    if TRACE_MODE.load(Ordering::Relaxed) == TRACE_MODE_EARLY_BYTE {
-        crate::arch::riscv64::sbi::putchar(checkpoint.early_byte());
-        return;
-    }
-
-    crate::arch::riscv64::sbi::putstr("trace: ");
-    crate::arch::riscv64::sbi::putstr(checkpoint.name());
-    crate::arch::riscv64::sbi::putchar(b'\n');
-}
-
-#[cfg(not(checkpoint_sbi_char))]
-fn trace_checkpoint(_checkpoint: Checkpoint) {}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum CheckpointOutcome {
-    Continue,
-    FailAndShutdown,
-    StopAndShutdown,
-}
-
-fn dispatch_post_vm_handlers(checkpoint: Checkpoint) -> CheckpointOutcome {
-    if !POST_VM_CHECKPOINTS_ENABLED.load(Ordering::Acquire) || !control_handlers_configured() {
-        return CheckpointOutcome::Continue;
-    }
-
-    if CHECKPOINT_HANDLER_ACTIVE.swap(true, Ordering::AcqRel) {
-        checkpoint_reentry_shutdown();
-    }
-
-    let outcome = configured_control_handlers(checkpoint);
-    CHECKPOINT_HANDLER_ACTIVE.store(false, Ordering::Release);
-    outcome
-}
-
-fn configured_control_handlers(checkpoint: Checkpoint) -> CheckpointOutcome {
-    match CHECKPOINT_PROBE {
-        PROBE_MEMBLOCK_ONLINE_STOP => memblock_online_stop_handler(checkpoint),
-        _ => unknown_probe_shutdown(),
-    }
-}
-
-fn control_handlers_configured() -> bool {
-    !CHECKPOINT_PROBE.is_empty()
-}
-
-fn memblock_online_stop_handler(checkpoint: Checkpoint) -> CheckpointOutcome {
-    if checkpoint == Checkpoint::MemBlockOnline {
-        CheckpointOutcome::StopAndShutdown
-    } else {
-        CheckpointOutcome::Continue
-    }
-}
-
-fn unknown_probe_shutdown() -> ! {
-    crate::arch::riscv64::sbi::putstr("checkpoint probe unknown: ");
-    crate::arch::riscv64::sbi::putstr(CHECKPOINT_PROBE);
-    crate::arch::riscv64::sbi::putchar(b'\n');
-    crate::arch::riscv64::sbi::system_shutdown()
-}
-
-fn checkpoint_reentry_shutdown() -> ! {
-    crate::arch::riscv64::sbi::putstr("checkpoint reentry\n");
-    crate::arch::riscv64::sbi::system_shutdown()
+    crate::checkpoint::dispatch_pre_context(checkpoint);
 }
 
 #[allow(dead_code)]
@@ -268,7 +146,7 @@ pub enum Checkpoint {
 
 impl Checkpoint {
     #[allow(dead_code)]
-    const fn early_byte(self) -> u8 {
+    pub(crate) const fn early_byte(self) -> u8 {
         match self {
             Self::EntryPreludePhaseStarted => b'A',
             Self::InterruptStreamPrepared => b'I',

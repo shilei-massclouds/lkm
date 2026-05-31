@@ -1,0 +1,107 @@
+#[cfg(checkpoint_sbi_char)]
+pub mod early_trace;
+#[cfg(checkpoint_handler_memblock_api)]
+mod memblock_api;
+#[cfg(checkpoint_handler_memblock_online_stop)]
+mod memblock_online_stop;
+#[cfg(checkpoint_sbi_char)]
+mod trace;
+
+use crate::{context::Context, trace::Checkpoint};
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[allow(dead_code)]
+pub enum CheckpointOutcome {
+    Continue,
+    FailAndShutdown,
+    StopAndShutdown,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[allow(dead_code)]
+pub enum HandlerScope {
+    All,
+    Only(&'static [Checkpoint]),
+}
+
+#[allow(dead_code)]
+pub enum HandlerRun {
+    Read(fn(Checkpoint, &Context) -> CheckpointOutcome),
+    Write(fn(Checkpoint, &mut Context) -> CheckpointOutcome),
+}
+
+#[allow(dead_code)]
+pub struct Handler {
+    pub name: &'static str,
+    pub priority: i16,
+    pub scope: HandlerScope,
+    pub run: HandlerRun,
+}
+
+const POST_VM_HANDLERS: &[Handler] = &[
+    #[cfg(checkpoint_sbi_char)]
+    trace::HANDLER,
+    #[cfg(checkpoint_handler_memblock_online_stop)]
+    memblock_online_stop::HANDLER,
+    #[cfg(checkpoint_handler_memblock_api)]
+    memblock_api::HANDLER,
+];
+
+pub const fn has_post_vm_handlers() -> bool {
+    !POST_VM_HANDLERS.is_empty()
+}
+
+pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
+    let mut current_priority = next_priority(checkpoint, None);
+    while let Some(priority) = current_priority {
+        let mut index = 0usize;
+        while index < POST_VM_HANDLERS.len() {
+            let handler = &POST_VM_HANDLERS[index];
+            if handler.priority == priority && handler_matches(handler, checkpoint) {
+                let outcome = match handler.run {
+                    HandlerRun::Read(run) => run(checkpoint, ctx),
+                    HandlerRun::Write(run) => run(checkpoint, ctx),
+                };
+                if outcome != CheckpointOutcome::Continue {
+                    return outcome;
+                }
+            }
+            index += 1;
+        }
+        current_priority = next_priority(checkpoint, Some(priority));
+    }
+
+    CheckpointOutcome::Continue
+}
+
+fn next_priority(checkpoint: Checkpoint, after: Option<i16>) -> Option<i16> {
+    let mut next = None;
+    let mut index = 0usize;
+    while index < POST_VM_HANDLERS.len() {
+        let handler = &POST_VM_HANDLERS[index];
+        if handler_matches(handler, checkpoint)
+            && after.map_or(true, |priority| handler.priority > priority)
+            && next.map_or(true, |priority| handler.priority < priority)
+        {
+            next = Some(handler.priority);
+        }
+        index += 1;
+    }
+    next
+}
+
+fn handler_matches(handler: &Handler, checkpoint: Checkpoint) -> bool {
+    match handler.scope {
+        HandlerScope::All => true,
+        HandlerScope::Only(checkpoints) => {
+            let mut index = 0usize;
+            while index < checkpoints.len() {
+                if checkpoints[index] == checkpoint {
+                    return true;
+                }
+                index += 1;
+            }
+            false
+        }
+    }
+}

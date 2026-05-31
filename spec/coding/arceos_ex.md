@@ -417,7 +417,16 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 ## checkpoint
 
-第一轮预留 checkpoint hook 接口，但不要求实现完整状态差分输出。hook 默认为空实现，可通过编译/链接选项接入具体 trace 后端。
+checkpoint 是对象事件和 Phase 边界的可配置观测/探针分发点，不是普通日志函数，也不是状态机推进的一部分。第一轮预留 checkpoint hook 接口，但不要求实现完整状态差分输出。默认 hook 必须为空实现；trace、test、probe、verify、stop-at-checkpoint 或状态差分采集等具体 handler，都必须通过编译期配置启用，不得依赖运行期动态注册来改变 checkpoint 语义。
+
+checkpoint handler 必须遵守以下约束：
+
+- 不得推进对象或 Phase 状态，不得调用 `Lifecycle::transition`、`Lifecycle::adopt_transition`、`phases::state::mark` 或 `phases::state::adopt`。
+- 不得把自身行为作为模型事件成功的前置条件；对象事件的 `ensures` 只能来自对象事件实现本身，不能来自可选 handler 的副作用。
+- 默认只能观察只读上下文。handler 输入应优先是 `Checkpoint` 加 `&Context` 或更窄的只读 `CheckpointContext<'_>`；不得默认暴露 `&mut Context`。
+- 若某个 checkpoint probe 必须调用会改变对象内部数据的功能 API，例如在 `MemBlock.Online` 后、`MemBlock.Disable` 前测试 `alloc_phys()`，必须通过该 checkpoint 专属的显式 probe capability 授权。该 capability 只能覆盖被测试 API 的最小能力，仍不得推进 lifecycle 或 Phase 状态。
+- handler 可以失败并停机，也可以主动停机。建议 outcome 至少区分 `Continue`、`FailAndShutdown` 和 `StopAndShutdown`：前者继续启动，第二类表示 probe/verify 失败，第三类表示达到逐级构建或逐级验证目标后主动结束。
+- handler 内部不得再次调用 checkpoint；实现应通过 guard 或模块边界防止 checkpoint 重入。若发生重入，应视为实现错误并停机或直接忽略内层 checkpoint，但不得递归执行 handler。
 
 checkpoint trace 独立于 `EarlyCon` 和正式 `Console`。极早期地址空间阶段可以使用 RISC-V64 SBI legacy putchar 输出单个字符，用于定位 `EarlyVm` 切换生效前的最小事件；该路径不得依赖 allocator、锁、字符串地址、FixMap 或线性映射状态。`EarlyVm` 切换生效、完整 `KernelImage` 映射可访问后，trace 后端应输出稳定 checkpoint 名称字符串，而不是继续消耗单字符 id。
 

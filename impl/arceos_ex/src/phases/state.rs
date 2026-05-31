@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{
     objects::state::{failed_condition, EventResult, LifecycleEvent, State},
-    trace::{self, Checkpoint},
+    trace::Checkpoint,
 };
 
 const BASE: u8 = 0;
@@ -40,7 +40,7 @@ pub fn mark(
     event: LifecycleEvent,
     expected: State,
     target: State,
-    checkpoint: Checkpoint,
+    _checkpoint: Checkpoint,
 ) -> EventResult {
     let actual = load(state);
     if actual != expected {
@@ -48,7 +48,6 @@ pub fn mark(
     }
 
     state.store(encode(target), Ordering::Relaxed);
-    trace::checkpoint(checkpoint);
     Ok(())
 }
 

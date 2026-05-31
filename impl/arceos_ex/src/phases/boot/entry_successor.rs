@@ -72,6 +72,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.memblock,
     )?;
     ctx.memblock.enable(ctx.vm.state())?;
+    crate::checkpoint::dispatch_mut(Checkpoint::MemBlockOnline, ctx);
     ctx.early_dtb.cleanup(&ctx.memblock, &ctx.early_param)
 }
 

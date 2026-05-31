@@ -2,8 +2,18 @@ TARGET := riscv64gc-unknown-none-elf
 LOG ?= info
 PROFILE ?= release
 APP ?= smoke
+comma := ,
+empty :=
+space := $(empty) $(empty)
 PROBE ?=
-PROBE_BUILD_SUFFIX := $(if $(PROBE),/probe-$(subst /,_,$(subst .,_,$(PROBE))))
+PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)))
+KNOWN_PROBES := memblock-api memblock-online-stop
+UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
+ifneq ($(UNKNOWN_PROBES),)
+$(error unknown PROBE handler(s): $(UNKNOWN_PROBES))
+endif
+PROBE_CFGS := $(foreach probe,$(PROBE_LIST),--cfg checkpoint_handler_$(subst -,_,$(probe)))
+PROBE_BUILD_SUFFIX := $(if $(PROBE),/probe-$(subst $(comma),+,$(subst /,_,$(subst .,_,$(PROBE)))))
 BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)$(PROBE_BUILD_SUFFIX)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
 KERNEL_BIN := $(BUILD_DIR)/arceos_ex.bin
@@ -32,6 +42,7 @@ RUSTFLAGS := \
 	-C link-arg=-T$(LINKER) \
 	-C link-arg=-static \
 	--cfg $(APP_CFG) \
+	$(PROBE_CFGS) \
 	$(EXTRA_RUSTFLAGS)
 
 .PHONY: build run generate clean
@@ -47,7 +58,7 @@ $(LINKER): $(MODEL_SPECS) $(CODEGEN_SOURCES) Makefile
 
 $(KERNEL_ELF): $(SOURCES) $(LINKER)
 	mkdir -p $(BUILD_DIR)
-	CHECKPOINT_PROBE="$(PROBE)" $(RUSTC) src/main.rs \
+	$(RUSTC) src/main.rs \
 		--crate-name arceos_ex \
 		--crate-type bin \
 		--edition 2024 \
