@@ -49,21 +49,24 @@
   <rect x="550" y="184" width="160" height="72" rx="8" class="box time"/>
   <text x="630" y="212" text-anchor="middle" class="label">TickSubsystem</text>
   <text x="630" y="236" text-anchor="middle" class="small">NO_HZ idle</text>
-  <rect x="350" y="310" width="160" height="72" rx="8" class="box time"/>
-  <text x="430" y="338" text-anchor="middle" class="label">TimerWheel</text>
-  <text x="430" y="362" text-anchor="middle" class="small">TIMER_SOFTIRQ</text>
-  <rect x="550" y="310" width="160" height="72" rx="8" class="box time"/>
-  <text x="630" y="338" text-anchor="middle" class="label">Hrtimer</text>
-  <text x="630" y="362" text-anchor="middle" class="small">HRTIMER_SOFTIRQ</text>
-  <rect x="350" y="436" width="160" height="72" rx="8" class="box irq"/>
-  <text x="430" y="464" text-anchor="middle" class="label">Softirq</text>
-  <text x="430" y="488" text-anchor="middle" class="small">action table</text>
-  <rect x="550" y="436" width="160" height="72" rx="8" class="box time"/>
-  <text x="630" y="464" text-anchor="middle" class="label">Timekeeping</text>
-  <text x="630" y="488" text-anchor="middle" class="small">clocksource base</text>
-  <rect x="450" y="592" width="180" height="72" rx="8" class="box time"/>
-  <text x="540" y="620" text-anchor="middle" class="label">RiscvTimer</text>
-  <text x="540" y="644" text-anchor="middle" class="small">timebase + timer_probe</text>
+  <rect x="350" y="304" width="160" height="72" rx="8" class="box irq"/>
+  <text x="430" y="332" text-anchor="middle" class="label">SbiIpi</text>
+  <text x="430" y="356" text-anchor="middle" class="small">Ready，启用后置</text>
+  <rect x="550" y="304" width="160" height="72" rx="8" class="box time"/>
+  <text x="630" y="332" text-anchor="middle" class="label">TimerWheel</text>
+  <text x="630" y="356" text-anchor="middle" class="small">TIMER_SOFTIRQ</text>
+  <rect x="350" y="424" width="160" height="72" rx="8" class="box irq"/>
+  <text x="430" y="452" text-anchor="middle" class="label">Softirq</text>
+  <text x="430" y="476" text-anchor="middle" class="small">action table</text>
+  <rect x="550" y="424" width="160" height="72" rx="8" class="box time"/>
+  <text x="630" y="452" text-anchor="middle" class="label">Hrtimer</text>
+  <text x="630" y="476" text-anchor="middle" class="small">HRTIMER_SOFTIRQ</text>
+  <rect x="350" y="584" width="160" height="72" rx="8" class="box time"/>
+  <text x="430" y="612" text-anchor="middle" class="label">RiscvTimer</text>
+  <text x="430" y="636" text-anchor="middle" class="small">timebase</text>
+  <rect x="550" y="584" width="160" height="72" rx="8" class="box time"/>
+  <text x="630" y="612" text-anchor="middle" class="label">Timekeeping</text>
+  <text x="630" y="636" text-anchor="middle" class="small">clocksource base</text>
 
   <rect x="775" y="116" width="455" height="644" rx="14" class="group"/>
   <text x="1002" y="150" text-anchor="middle" class="group-title">出口准备</text>
@@ -88,12 +91,13 @@
 
   <path d="M254 222 C286 222, 304 220, 348 220" class="edge"/>
   <path d="M510 220 L548 220" class="edge"/>
-  <path d="M630 256 C620 286, 520 300, 430 308" class="edge"/>
-  <path d="M510 346 L548 346" class="edge"/>
-  <path d="M430 382 L430 434" class="edge"/>
-  <path d="M510 472 L548 472" class="edge"/>
-  <path d="M630 508 C630 544, 594 566, 540 590" class="edge"/>
-  <path d="M630 628 C700 628, 742 220, 803 220" class="edge"/>
+  <path d="M430 256 L430 302" class="edge"/>
+  <path d="M630 256 L630 302" class="edge"/>
+  <path d="M630 376 L630 422" class="edge"/>
+  <path d="M430 376 L430 422" class="edge"/>
+  <path d="M630 496 L630 582" class="edge"/>
+  <path d="M630 656 C700 656, 742 220, 803 220" class="edge"/>
+  <path d="M510 340 C635 340, 702 460, 803 472" class="edge"/>
   <path d="M981 220 L1016 220" class="edge"/>
   <path d="M1106 256 C1106 286, 1000 306, 981 346" class="edge"/>
   <path d="M981 346 L1016 346" class="edge"/>

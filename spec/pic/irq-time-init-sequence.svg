@@ -35,7 +35,7 @@
 
   <g transform="translate(0 -48)">
   <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">IrqDispatchTree.preset(): early_irq_init()</text><text x="320" y="260" class="line2">建立 IRQ 编号空间、默认 affinity 和 early IRQ 基础，进入 Prepared</text></g>
-  <g transform="translate(0 156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">IrqDispatchTree.setup(): init_IRQ()</text><text x="320" y="260" class="line2">建立 IrqDomain 分发树、关联 IrqChip、架构 IRQ 入口和 SBI IPI</text></g>
+  <g transform="translate(0 156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">IrqDispatchTree.setup(): init_IRQ()</text><text x="320" y="260" class="line2">建立 IrqDomain/IrqChip/架构入口，并驱动 SbiIpi.preset/setup</text></g>
   <g transform="translate(0 256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">TickSubsystem.setup(): tick_init()</text><text x="320" y="260" class="line2">建立 tick broadcast 与 NO_HZ idle 基础</text></g>
   <g transform="translate(0 356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">RcuCore nohz action: rcu_init_nohz()</text><text x="320" y="260" class="line2">初始化 RCU nohz 状态；不引入新的生命周期事件</text></g>
   <g transform="translate(0 456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">TimerWheel.setup(): init_timers()</text><text x="320" y="260" class="line2">建立 timer base、POSIX CPU timer work，并注册 TIMER_SOFTIRQ</text></g>
@@ -53,5 +53,5 @@
   </g>
 
   <rect x="292" y="2180" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="2206" class="boundary">终点：中断仍关闭，但 IRQ、timer/timekeeping、softirq、RNG 和 IPI 已就绪</text>
+  <text x="320" y="2206" class="boundary">终点：中断仍关闭；IRQ、timer/timekeeping、softirq、RNG 和 SbiIpi 均 Ready</text>
 </svg>
