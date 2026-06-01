@@ -85,7 +85,7 @@
   <text x="1106" y="362" text-anchor="middle" class="small">perf deferred</text>
   <rect x="805" y="436" width="176" height="72" rx="8" class="box irq"/>
   <text x="893" y="464" text-anchor="middle" class="label">SmpCallFunction</text>
-  <text x="893" y="488" text-anchor="middle" class="small">IPI foundation</text>
+  <text x="893" y="488" text-anchor="middle" class="small">queues + IPI route</text>
   <rect x="805" y="592" width="389" height="72" rx="8" class="box phase"/>
   <text x="999" y="620" text-anchor="middle" class="label">early_boot_irqs_disabled = false</text>
   <text x="999" y="644" text-anchor="middle" class="small">local_irq_enable() 进入下一阶段</text>
