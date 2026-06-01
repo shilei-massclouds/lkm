@@ -58,8 +58,8 @@
   <rect x="325" y="116" width="520" height="744" rx="14" class="group"/>
   <text x="585" y="150" text-anchor="middle" class="group-title">当前主线对象</text>
   <rect x="355" y="184" width="150" height="72" rx="8" class="box proc"/>
-  <text x="430" y="212" text-anchor="middle" class="label">PidAllocator</text>
-  <text x="430" y="236" text-anchor="middle" class="small">init_pid_ns.idr</text>
+  <text x="430" y="212" text-anchor="middle" class="label">RootPidNs</text>
+  <text x="430" y="236" text-anchor="middle" class="small">idr + pid cache</text>
   <rect x="525" y="184" width="150" height="72" rx="8" class="box mm"/>
   <text x="600" y="212" text-anchor="middle" class="label">AnonVmaCore</text>
   <text x="600" y="236" text-anchor="middle" class="small">rmap caches</text>
