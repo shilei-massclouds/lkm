@@ -15,6 +15,7 @@
       .console { fill: #eff6ff; stroke: #3b82f6; }
       .time { fill: #fff7ed; stroke: #f97316; }
       .trimmed { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .deferred { fill: #fefce8; stroke: #ca8a04; stroke-dasharray: 7 5; }
       .checkpoint { fill: #f5f3ff; stroke: #7c3aed; }
       .label { font-size: 20px; font-weight: 600; dominant-baseline: middle; }
       .small { font-size: 15px; fill: #475569; dominant-baseline: middle; }
@@ -66,15 +67,15 @@
   <rect x="570" y="304" width="176" height="72" rx="8" class="box checkpoint"/>
   <text x="658" y="332" text-anchor="middle" class="label">panic_later</text>
   <text x="658" y="356" text-anchor="middle" class="small">fail boundary</text>
-  <rect x="365" y="424" width="176" height="72" rx="8" class="box mm"/>
-  <text x="453" y="452" text-anchor="middle" class="label">PerCpuPagesetSet</text>
-  <text x="453" y="476" text-anchor="middle" class="small">page allocator fast path</text>
+  <rect x="365" y="424" width="176" height="72" rx="8" class="box deferred"/>
+  <text x="453" y="452" text-anchor="middle" class="label">PageAllocator</text>
+  <text x="453" y="476" text-anchor="middle" class="small">PCP 缓存 deferred</text>
   <rect x="570" y="424" width="176" height="72" rx="8" class="box time"/>
   <text x="658" y="452" text-anchor="middle" class="label">SchedClock</text>
   <text x="658" y="476" text-anchor="middle" class="small">sched_clock_running</text>
   <rect x="365" y="544" width="176" height="72" rx="8" class="box time"/>
   <text x="453" y="572" text-anchor="middle" class="label">DelayLoop</text>
-  <text x="453" y="596" text-anchor="middle" class="small">lpj_fine -> lpj</text>
+  <text x="453" y="596" text-anchor="middle" class="small">busy delay API</text>
   <rect x="570" y="544" width="176" height="72" rx="8" class="box ready"/>
   <text x="658" y="572" text-anchor="middle" class="label">BootCPU</text>
   <text x="658" y="596" text-anchor="middle" class="small">IRQ 总入口开放</text>
