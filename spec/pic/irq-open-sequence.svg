@@ -37,9 +37,9 @@
   <text x="320" y="142" class="boundary">起点：early_boot_irqs_disabled 已清除；boot CPU 本地中断仍关闭</text>
 
   <g transform="translate(0 -48)">
-  <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">InterruptStream.enable(): local_irq_enable()</text><text x="320" y="260" class="line2">打开 boot CPU 本地中断接收路径；不自动推进 Tick/Softirq/IPI 到 Online</text></g>
-  <g transform="translate(0 156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box mm"/><text x="320" y="232" class="line1">SlubFlushWq.setup(): kmem_cache_init_late()</text><text x="320" y="260" class="line2">创建 slub_flushwq；SLUB FULL/Online 仍留给后续 slab_sysfs_init()</text></g>
-  <g transform="translate(0 256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text><rect x="292" y="204" width="876" height="84" rx="10" class="box console"/><text x="320" y="232" class="line1">Console.setup(): console_init()</text><text x="320" y="260" class="line2">初始化默认 TTY line discipline，并遍历 console initcall 注册早期可用 console</text></g>
+  <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">InterruptStream.enable(): local_irq_enable()</text><text x="320" y="260" class="line2">设置 sstatus.SIE 中断总开关；sie/sip 仍保留为具体中断类型子开关/挂起位</text></g>
+  <g transform="translate(0 156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box mm"/><text x="320" y="232" class="line1">SlubAllocator.setup_flush_workqueue(): kmem_cache_init_late()</text><text x="320" y="260" class="line2">创建 slub_flushwq 内部资源；不建立独立对象，SLUB FULL/Online 后置</text></g>
+  <g transform="translate(0 256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text><rect x="292" y="204" width="876" height="84" rx="10" class="box console"/><text x="320" y="232" class="line1">Console.preset(): console_init()</text><text x="320" y="260" class="line2">注册 N_TTY line discipline，遍历静态 console initcall 表驱动 drivers early register</text></g>
   <g transform="translate(0 356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text><rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/><text x="320" y="232" class="line1">panic_later checkpoint</text><text x="320" y="260" class="line2">若早期参数异常被延迟记录，则在 console 可用后进入 fail boundary</text></g>
   <g transform="translate(0 456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text><rect x="292" y="204" width="876" height="84" rx="10" class="box trimmed"/><text x="320" y="232" class="line1">lockdep_init(): trimmed/no-op</text><text x="320" y="260" class="line2">当前 CONFIG_LOCKDEP=n；未来启用后恢复为 Lockdep.setup()</text></g>
   <g transform="translate(0 556)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text><rect x="292" y="204" width="876" height="84" rx="10" class="box trimmed"/><text x="320" y="232" class="line1">locking_selftest(): trimmed/no-op</text><text x="320" y="260" class="line2">当前 DEBUG_LOCKING_API_SELFTESTS=n；启用后要求中断已经打开</text></g>
@@ -54,5 +54,5 @@
   </g>
 
   <rect x="292" y="1880" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="1906" class="boundary">终点：boot CPU 本地中断已开放；console、per-CPU pageset、sched_clock 和 delay loop 已 Ready</text>
+  <text x="320" y="1906" class="boundary">终点：boot CPU 已通过 sstatus.SIE 开放中断总入口；console、per-CPU pageset、sched_clock 和 delay loop 已 Ready</text>
 </svg>

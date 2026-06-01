@@ -44,7 +44,7 @@
   <text x="172" y="362" text-anchor="middle" class="small">IrqOpenPhase</text>
   <rect x="82" y="444" width="180" height="82" rx="8" class="box irq"/>
   <text x="172" y="472" text-anchor="middle" class="label">InterruptStream</text>
-  <text x="172" y="496" text-anchor="middle" class="small">enable: 本地 IRQ 开放</text>
+  <text x="172" y="496" text-anchor="middle" class="small">enable: 打开 sstatus.SIE</text>
   <rect x="82" y="578" width="180" height="82" rx="8" class="box checkpoint"/>
   <text x="172" y="606" text-anchor="middle" class="label">ProcessPrepare</text>
   <text x="172" y="630" text-anchor="middle" class="small">下一阶段入口</text>
@@ -58,11 +58,11 @@
   <text x="453" y="212" text-anchor="middle" class="label">IRQ/Timer 基础</text>
   <text x="453" y="236" text-anchor="middle" class="small">保持 Ready，不自动 Online</text>
   <rect x="570" y="184" width="176" height="72" rx="8" class="box mm"/>
-  <text x="658" y="212" text-anchor="middle" class="label">SlubFlushWq</text>
-  <text x="658" y="236" text-anchor="middle" class="small">kmem_cache_init_late</text>
+  <text x="658" y="212" text-anchor="middle" class="label">SlubAllocator</text>
+  <text x="658" y="236" text-anchor="middle" class="small">flush_workqueue_ready</text>
   <rect x="365" y="304" width="176" height="72" rx="8" class="box console"/>
   <text x="453" y="332" text-anchor="middle" class="label">Console</text>
-  <text x="453" y="356" text-anchor="middle" class="small">TTY + console initcalls</text>
+  <text x="453" y="356" text-anchor="middle" class="small">preset: ldisc + drivers</text>
   <rect x="570" y="304" width="176" height="72" rx="8" class="box checkpoint"/>
   <text x="658" y="332" text-anchor="middle" class="label">panic_later</text>
   <text x="658" y="356" text-anchor="middle" class="small">fail boundary</text>
@@ -77,7 +77,7 @@
   <text x="453" y="596" text-anchor="middle" class="small">lpj_fine -> lpj</text>
   <rect x="570" y="544" width="176" height="72" rx="8" class="box ready"/>
   <text x="658" y="572" text-anchor="middle" class="label">BootCPU</text>
-  <text x="658" y="596" text-anchor="middle" class="small">local_irq_enabled</text>
+  <text x="658" y="596" text-anchor="middle" class="small">IRQ 总入口开放</text>
 
   <rect x="815" y="116" width="415" height="684" rx="14" class="group"/>
   <text x="1022" y="150" text-anchor="middle" class="group-title">当前裁剪路径</text>
