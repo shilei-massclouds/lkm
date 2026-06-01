@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1520" viewBox="0 0 1280 1520" role="img" aria-labelledby="title desc">
+  <title id="title">rest_init 期对象构建时序</title>
+  <desc id="desc">展示 Linux 6.12.37 default_config 下 rest_init() 的有效调用顺序。</desc>
+  <defs>
+    <style>
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 19px; fill: #475569; }
+      .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+      .flow { fill: #ecfdf5; stroke: #10b981; }
+      .sched { fill: #f0fdfa; stroke: #14b8a6; }
+      .sync { fill: #f5f3ff; stroke: #7c3aed; }
+      .trimmed { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .obj { font-size: 23px; font-weight: 600; dominant-baseline: middle; }
+      .line1 { font-size: 21px; font-weight: 600; dominant-baseline: middle; }
+      .line2 { font-size: 17px; fill: #475569; dominant-baseline: middle; }
+      .boundary { font-size: 18px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
+      .num { font-size: 17px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
+      .dot { fill: #334155; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="1520" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">rest_init 期对象构建时序</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">RestInitPhase.setup(): rcu_scheduler_starting() 到 cpu_startup_entry(CPUHP_ONLINE)</text>
+  <rect x="48" y="126" width="214" height="1320" rx="14" class="lane"/>
+  <text x="155" y="162" text-anchor="middle" class="obj">rest_init 期</text>
+  <text x="155" y="188" text-anchor="middle" class="obj">RestInitPhase</text>
+  <line x1="155" y1="224" x2="155" y2="1410" class="timeline"/>
+  <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="142" class="boundary">起点：ProcessPreparePhase 已 Ready；尚未创建 PID 1 与 kthreadd；system_state 尚未调度化</text>
+
+  <g transform="translate(0 -48)">
+  <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sched"/><text x="320" y="232" class="line1">RcuCore.start_scheduler(): rcu_scheduler_starting()</text><text x="320" y="260" class="line2">退出 RCU early boot 模式；记录 scheduler 开始参与 RCU 语义</text></g>
+  <g transform="translate(0 166)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">KernelInitFlow.spawn(): user_mode_thread(kernel_init)</text><text x="320" y="260" class="line2">创建 PID 1 常规流；kernel_init 会等待 kthreadd_done</text></g>
+  <g transform="translate(0 276)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">KernelInitFlow.pin_to_boot_cpu()</text><text x="320" y="260" class="line2">查找 PID 1 task，设置 PF_NO_SETAFFINITY，并限制到 boot CPU</text></g>
+  <g transform="translate(0 386)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text><rect x="292" y="204" width="876" height="84" rx="10" class="box trimmed"/><text x="320" y="232" class="line1">numa_default_policy(): trimmed/no-op</text><text x="320" y="260" class="line2">当前 CONFIG_NUMA=n；未来启用后恢复为 NUMA 默认策略动作</text></g>
+  <g transform="translate(0 496)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">KthreaddFlow.spawn(): kernel_thread(kthreadd)</text><text x="320" y="260" class="line2">创建 kthreadd 常规流，后续服务内核线程创建请求</text></g>
+  <g transform="translate(0 606)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">KthreaddFlow.bind_global_ref(): kthreadd_task</text><text x="320" y="260" class="line2">通过根 PID namespace 找到 kthreadd task，并写入全局引用</text></g>
+  <g transform="translate(0 716)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sync"/><text x="320" y="232" class="line1">SystemState.enter_scheduling(): system_state = SYSTEM_SCHEDULING</text><text x="320" y="260" class="line2">全局进入调度运行语义；不代表 SMP 或 workqueue 已经启用</text></g>
+  <g transform="translate(0 826)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sync"/><text x="320" y="232" class="line1">KthreaddReadyGate.open(): complete(&amp;kthreadd_done)</text><text x="320" y="260" class="line2">释放 PID 1，使 KernelInitFlow 可以进入 kernel_init_freeable()</text></g>
+  <g transform="translate(0 936)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sched"/><text x="320" y="232" class="line1">IdleFlow.schedule_once(): schedule_preempt_disabled()</text><text x="320" y="260" class="line2">启动根流执行第一次调度交接，新建常规流获得运行机会</text></g>
+  <g transform="translate(0 1046)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">IdleFlow.enter_cpu_idle(): cpu_startup_entry(CPUHP_ONLINE)</text><text x="320" y="260" class="line2">原启动根流转入 boot CPU idle 循环；secondary CPU 仍未启动</text></g>
+  </g>
+
+  <rect x="292" y="1360" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="1386" class="boundary">终点：PID 1、kthreadd 和 boot idle 三条常规流存在；KernelInitFlow 进入 PreSmpInitPhase</text>
+</svg>
