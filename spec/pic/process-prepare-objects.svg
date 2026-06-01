@@ -68,8 +68,8 @@
   <text x="755" y="236" text-anchor="middle" class="small">task cache + limits</text>
 
   <rect x="355" y="304" width="150" height="72" rx="8" class="box proc"/>
-  <text x="430" y="332" text-anchor="middle" class="label">ProcCaches</text>
-  <text x="430" y="356" text-anchor="middle" class="small">signal/fs/vma</text>
+  <text x="430" y="332" text-anchor="middle" class="label">TaskFileCtx</text>
+  <text x="430" y="356" text-anchor="middle" class="small">files + fs cache</text>
   <rect x="525" y="304" width="150" height="72" rx="8" class="box sec"/>
   <text x="600" y="332" text-anchor="middle" class="label">CredentialCore</text>
   <text x="600" y="356" text-anchor="middle" class="small">cred cache</text>
@@ -78,8 +78,8 @@
   <text x="755" y="356" text-anchor="middle" class="small">riscv v cache</text>
 
   <rect x="355" y="424" width="150" height="72" rx="8" class="box proc"/>
-  <text x="430" y="452" text-anchor="middle" class="label">Namespaces</text>
-  <text x="430" y="476" text-anchor="middle" class="small">UTS / NET</text>
+  <text x="430" y="452" text-anchor="middle" class="label">VmaCore</text>
+  <text x="430" y="476" text-anchor="middle" class="small">vma + committed_as</text>
   <rect x="525" y="424" width="150" height="72" rx="8" class="box sec"/>
   <text x="600" y="452" text-anchor="middle" class="label">KeyringCore</text>
   <text x="600" y="476" text-anchor="middle" class="small">keys + root user</text>
@@ -101,11 +101,11 @@
   <text x="430" y="692" text-anchor="middle" class="label">SignalCore</text>
   <text x="430" y="716" text-anchor="middle" class="small">signal path</text>
   <rect x="525" y="664" width="150" height="72" rx="8" class="box fs"/>
-  <text x="600" y="692" text-anchor="middle" class="label">SeqFile/Procfs</text>
-  <text x="600" y="716" text-anchor="middle" class="small">process views</text>
+  <text x="600" y="692" text-anchor="middle" class="label">NsProxy/NS</text>
+  <text x="600" y="716" text-anchor="middle" class="small">task namespace refs</text>
   <rect x="695" y="664" width="120" height="72" rx="8" class="box fs"/>
-  <text x="755" y="692" text-anchor="middle" class="label">Nsfs/Pidfs</text>
-  <text x="755" y="716" text-anchor="middle" class="small">pseudo fs</text>
+  <text x="755" y="692" text-anchor="middle" class="label">Fs Views</text>
+  <text x="755" y="716" text-anchor="middle" class="small">proc/ns/pidfs</text>
 
   <rect x="875" y="116" width="355" height="744" rx="14" class="group"/>
   <text x="1052" y="150" text-anchor="middle" class="group-title">当前裁剪路径</text>
