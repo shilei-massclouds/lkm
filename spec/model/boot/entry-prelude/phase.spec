@@ -205,7 +205,7 @@ object InitStack: StackObject {
 
         events {
             /*
-             * Enable 在 start_kernel() 早期建立根栈保护状态，例如设置 stack canary。
+             * Enable 在 start_kernel() 早期建立根栈边界和溢出保护状态。
              */
             on Event::Enable -> State::Online {
                 depends_on {
@@ -213,7 +213,7 @@ object InitStack: StackObject {
                 }
 
                 ensures {
-                    init_stack_canary_ready(InitStack);
+                    init_stack_guard_ready(InitStack);
                 }
             }
         }
@@ -224,7 +224,7 @@ object InitStack: StackObject {
      */
     state State::Online {
         invariant {
-            init_stack_canary_ready(InitStack);
+            init_stack_guard_ready(InitStack);
         }
     }
 }
