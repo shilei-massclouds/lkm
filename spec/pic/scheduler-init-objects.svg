@@ -27,7 +27,7 @@
 
   <rect x="0" y="0" width="1280" height="700" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">调度准备期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase 子阶段 5：scheduler、radix/maple、workqueue 与 RCU 支撑设施</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase 子阶段 5：scheduler、radix/maple、workqueue、softirq 与 RCU 支撑设施</text>
 
   <rect x="50" y="116" width="235" height="524" rx="14" class="group"/>
   <text x="168" y="150" text-anchor="middle" class="group-title">阶段边界</text>
@@ -67,9 +67,12 @@
   <rect x="1018" y="184" width="176" height="72" rx="8" class="box async"/>
   <text x="1106" y="212" text-anchor="middle" class="label">Workqueue</text>
   <text x="1106" y="236" text-anchor="middle" class="small">early preset</text>
-  <rect x="912" y="330" width="176" height="72" rx="8" class="box async"/>
-  <text x="1000" y="358" text-anchor="middle" class="label">RcuCore</text>
-  <text x="1000" y="382" text-anchor="middle" class="small">TREE_RCU support</text>
+  <rect x="805" y="330" width="176" height="72" rx="8" class="box async"/>
+  <text x="893" y="358" text-anchor="middle" class="label">Softirq</text>
+  <text x="893" y="382" text-anchor="middle" class="small">Prepared table</text>
+  <rect x="1018" y="330" width="176" height="72" rx="8" class="box async"/>
+  <text x="1106" y="358" text-anchor="middle" class="label">RcuCore</text>
+  <text x="1106" y="382" text-anchor="middle" class="small">TREE_RCU support</text>
   <rect x="450" y="462" width="236" height="72" rx="8" class="box deferred"/>
   <text x="568" y="490" text-anchor="middle" class="label">LinuxTracing</text>
   <text x="568" y="514" text-anchor="middle" class="small">preset/setup deferred</text>
@@ -79,6 +82,7 @@
   <path d="M630 278 L630 318" class="edge"/>
   <path d="M710 356 C748 356, 768 220, 803 220" class="edge"/>
   <path d="M981 220 L1016 220" class="edge"/>
-  <path d="M1106 256 C1106 292, 1050 316, 1000 328" class="edge"/>
-  <path d="M1000 402 C1000 444, 558 474, 254 458" class="edge"/>
+  <path d="M1106 256 C1106 292, 970 316, 893 328" class="edge"/>
+  <path d="M981 366 L1016 366" class="edge"/>
+  <path d="M1106 402 C1106 444, 558 474, 254 458" class="edge"/>
 </svg>

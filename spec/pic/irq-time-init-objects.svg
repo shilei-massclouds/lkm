@@ -58,7 +58,7 @@
   <text x="630" y="356" text-anchor="middle" class="small">CpuTimerBases[*]</text>
   <rect x="350" y="424" width="160" height="72" rx="8" class="box irq"/>
   <text x="430" y="452" text-anchor="middle" class="label">Softirq</text>
-  <text x="430" y="476" text-anchor="middle" class="small">preset -> setup</text>
+  <text x="430" y="476" text-anchor="middle" class="small">Prepared -> Ready</text>
   <rect x="550" y="424" width="160" height="72" rx="8" class="box time"/>
   <text x="630" y="452" text-anchor="middle" class="label">HrtimerCore</text>
   <text x="630" y="476" text-anchor="middle" class="small">cpu bases + softirq</text>

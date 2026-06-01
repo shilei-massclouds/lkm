@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="3060" viewBox="0 0 1280 3060" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="3208" viewBox="0 0 1280 3208" role="img" aria-labelledby="title desc">
   <title id="title">调度准备期对象构建时序</title>
   <desc id="desc">展示 Linux 6.12.37 default_config 下 start_kernel() 从 mm_core_init() 之后到 context_tracking_init() 调用点的子阶段 5 有效调用顺序，并展开 sched_init()。</desc>
   <defs>
@@ -26,14 +26,14 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1280" height="3060" fill="#ffffff"/>
+  <rect x="0" y="0" width="1280" height="3208" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">调度准备期对象构建时序</text>
   <text x="640" y="76" text-anchor="middle" class="subtitle">SchedInitPhase.setup(): Linux 6.12.37 default_config 下 mm_core_init() 后到 context_tracking_init()</text>
 
-  <rect x="48" y="126" width="214" height="2900" rx="14" class="lane"/>
+  <rect x="48" y="126" width="214" height="3048" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">调度准备期</text>
   <text x="155" y="188" text-anchor="middle" class="subtitle">setup()</text>
-  <line x1="155" y1="224" x2="155" y2="2978" class="timeline"/>
+  <line x1="155" y1="224" x2="155" y2="3126" class="timeline"/>
 
   <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
   <text x="320" y="142" class="boundary">起点：MmCoreInitPhase.Ready，核心内存管理就绪，中断仍保持关闭</text>
@@ -166,33 +166,41 @@
   <g transform="translate(0 2296)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text>
     <rect x="292" y="190" width="876" height="116" rx="10" class="box formal"/>
-    <text x="320" y="226" class="line1">RcuCore.setup(): rcu_init()</text>
-    <text x="320" y="256" class="line2">建立 RCU 树、boot CPU online、RCU softirq、workqueues 和 Tasks RCU facts</text>
-    <text x="320" y="282" class="line2">依赖 scheduler/workqueue early 基础，但仍处于中断关闭启动上下文</text>
+    <text x="320" y="226" class="line1">SchedInitPhase drives Softirq.preset()</text>
+    <text x="320" y="256" class="line2">建立 SoftirqActionTable、slots 和 per-CPU pending bit 承载壳</text>
+    <text x="320" y="282" class="line2">进入 Prepared，使 rcu_init() 可注册 RCU_SOFTIRQ</text>
   </g>
 
   <g transform="translate(0 2444)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text>
+    <rect x="292" y="190" width="876" height="116" rx="10" class="box formal"/>
+    <text x="320" y="226" class="line1">RcuCore.setup(): rcu_init()</text>
+    <text x="320" y="256" class="line2">建立 RCU 树、boot CPU online、RCU softirq、workqueues 和 Tasks RCU facts</text>
+    <text x="320" y="282" class="line2">依赖 scheduler/workqueue early 基础和 SoftirqActionTable.Prepared</text>
+  </g>
+
+  <g transform="translate(0 2592)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box deferred"/>
     <text x="320" y="234" class="line1">trace_init()</text>
     <text x="320" y="264" class="line2">deferred：Linux event tracing 与项目 checkpoint trace 的边界未定</text>
   </g>
 
-  <g transform="translate(0 2564)">
-    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text>
+  <g transform="translate(0 2712)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box checkpoint"/>
     <text x="320" y="234" class="line1">initcall_debug_enable()</text>
     <text x="320" y="264" class="line2">checkpoint/deferred：仅在 initcall_debug 参数开启时影响后续 initcall 诊断</text>
   </g>
 
-  <g transform="translate(0 2684)">
-    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text>
+  <g transform="translate(0 2832)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">15</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box omitted"/>
     <text x="320" y="234" class="line1">context_tracking_init()</text>
     <text x="320" y="264" class="line2">trimmed/no-op：当前 CONFIG_CONTEXT_TRACKING_USER_FORCE=n，调用折叠为空实现</text>
   </g>
   </g>
 
-  <rect x="292" y="2960" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="2986" class="boundary">终点：context_tracking_init() 调用点完成；调度、radix/maple、workqueue 与 RCU 支撑设施就绪</text>
+  <rect x="292" y="3108" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="3134" class="boundary">终点：context_tracking_init() 调用点完成；调度、radix/maple、workqueue、softirq 与 RCU 支撑设施就绪</text>
 </svg>
