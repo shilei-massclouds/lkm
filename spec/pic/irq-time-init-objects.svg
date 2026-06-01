@@ -64,10 +64,10 @@
   <text x="630" y="476" text-anchor="middle" class="small">cpu bases + softirq</text>
   <rect x="350" y="584" width="160" height="72" rx="8" class="box time"/>
   <text x="430" y="612" text-anchor="middle" class="label">RiscvTimer</text>
-  <text x="430" y="636" text-anchor="middle" class="small">timebase</text>
+  <text x="430" y="636" text-anchor="middle" class="small">riscv clocksource</text>
   <rect x="550" y="584" width="160" height="72" rx="8" class="box time"/>
-  <text x="630" y="612" text-anchor="middle" class="label">Timekeeping</text>
-  <text x="630" y="636" text-anchor="middle" class="small">clocksource base</text>
+  <text x="630" y="612" text-anchor="middle" class="label">Timekeeper</text>
+  <text x="630" y="636" text-anchor="middle" class="small">jiffies clocksource</text>
 
   <rect x="775" y="116" width="455" height="644" rx="14" class="group"/>
   <text x="1002" y="150" text-anchor="middle" class="group-title">出口准备</text>
