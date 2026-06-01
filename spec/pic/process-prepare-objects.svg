@@ -85,7 +85,7 @@
   <text x="600" y="476" text-anchor="middle" class="small">keys + root user</text>
   <rect x="695" y="424" width="120" height="72" rx="8" class="box sec"/>
   <text x="755" y="452" text-anchor="middle" class="label">SecurityCore</text>
-  <text x="755" y="476" text-anchor="middle" class="small">LSM setup</text>
+  <text x="755" y="476" text-anchor="middle" class="small">hooks + blob layout</text>
 
   <rect x="355" y="544" width="150" height="72" rx="8" class="box fs"/>
   <text x="430" y="572" text-anchor="middle" class="label">VfsCore</text>
