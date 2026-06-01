@@ -80,9 +80,9 @@
   <rect x="805" y="310" width="176" height="72" rx="8" class="box async"/>
   <text x="893" y="338" text-anchor="middle" class="label">InitTask action</text>
   <text x="893" y="362" text-anchor="middle" class="small">refresh stack canary</text>
-  <rect x="1018" y="310" width="176" height="72" rx="8" class="box async"/>
+  <rect x="1018" y="310" width="176" height="72" rx="8" class="box deferred"/>
   <text x="1106" y="338" text-anchor="middle" class="label">Perf/Profile</text>
-  <text x="1106" y="362" text-anchor="middle" class="small">events + profiling</text>
+  <text x="1106" y="362" text-anchor="middle" class="small">perf deferred</text>
   <rect x="805" y="436" width="176" height="72" rx="8" class="box irq"/>
   <text x="893" y="464" text-anchor="middle" class="label">SmpCallFunction</text>
   <text x="893" y="488" text-anchor="middle" class="small">IPI foundation</text>
