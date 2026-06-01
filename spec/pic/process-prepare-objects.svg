@@ -14,6 +14,7 @@
       .mm { fill: #fefce8; stroke: #ca8a04; }
       .fs { fill: #eff6ff; stroke: #3b82f6; }
       .sec { fill: #f5f3ff; stroke: #7c3aed; }
+      .deferred { fill: #fefce8; stroke: #ca8a04; stroke-dasharray: 7 5; }
       .trimmed { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
       .label { font-size: 19px; font-weight: 600; dominant-baseline: middle; }
       .small { font-size: 14px; fill: #475569; dominant-baseline: middle; }
@@ -56,7 +57,7 @@
   <path d="M166 650 L166 698" class="edge"/>
 
   <rect x="325" y="116" width="520" height="744" rx="14" class="group"/>
-  <text x="585" y="150" text-anchor="middle" class="group-title">当前主线对象</text>
+  <text x="585" y="150" text-anchor="middle" class="group-title">主线对象与尾段 deferred</text>
   <rect x="355" y="184" width="150" height="72" rx="8" class="box proc"/>
   <text x="430" y="212" text-anchor="middle" class="label">RootPidNs</text>
   <text x="430" y="236" text-anchor="middle" class="small">idr + pid cache</text>
@@ -87,25 +88,25 @@
   <text x="755" y="452" text-anchor="middle" class="label">SecurityCore</text>
   <text x="755" y="476" text-anchor="middle" class="small">hooks + blob layout</text>
 
-  <rect x="355" y="544" width="150" height="72" rx="8" class="box fs"/>
+  <rect x="355" y="544" width="150" height="72" rx="8" class="box deferred"/>
   <text x="430" y="572" text-anchor="middle" class="label">VfsCore</text>
-  <text x="430" y="596" text-anchor="middle" class="small">runtime caches</text>
-  <rect x="525" y="544" width="150" height="72" rx="8" class="box mm"/>
+  <text x="430" y="596" text-anchor="middle" class="small">setup deferred</text>
+  <rect x="525" y="544" width="150" height="72" rx="8" class="box deferred"/>
   <text x="600" y="572" text-anchor="middle" class="label">PageCache</text>
-  <text x="600" y="596" text-anchor="middle" class="small">page cache core</text>
+  <text x="600" y="596" text-anchor="middle" class="small">setup deferred</text>
   <rect x="695" y="544" width="120" height="72" rx="8" class="box proc"/>
   <text x="755" y="572" text-anchor="middle" class="label">UprobeCore</text>
   <text x="755" y="596" text-anchor="middle" class="small">die notifier</text>
 
   <rect x="355" y="664" width="150" height="72" rx="8" class="box proc"/>
   <text x="430" y="692" text-anchor="middle" class="label">SignalCore</text>
-  <text x="430" y="716" text-anchor="middle" class="small">signal path</text>
+  <text x="430" y="716" text-anchor="middle" class="small">Prepared; setup 后续</text>
   <rect x="525" y="664" width="150" height="72" rx="8" class="box fs"/>
   <text x="600" y="692" text-anchor="middle" class="label">NsProxy/NS</text>
-  <text x="600" y="716" text-anchor="middle" class="small">task namespace refs</text>
-  <rect x="695" y="664" width="120" height="72" rx="8" class="box fs"/>
+  <text x="600" y="716" text-anchor="middle" class="small">UTS 准备; net 后续</text>
+  <rect x="695" y="664" width="120" height="72" rx="8" class="box deferred"/>
   <text x="755" y="692" text-anchor="middle" class="label">Fs Views</text>
-  <text x="755" y="716" text-anchor="middle" class="small">proc/ns/pidfs</text>
+  <text x="755" y="716" text-anchor="middle" class="small">proc/ns/pidfs 后续</text>
 
   <rect x="875" y="116" width="355" height="744" rx="14" class="group"/>
   <text x="1052" y="150" text-anchor="middle" class="group-title">当前裁剪路径</text>
