@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
+  <title id="title">中断开放期对象分类与相互关系</title>
+  <desc id="desc">展示 BootPhase 子阶段 7 在 Linux 6.12.37 default_config 下从 local_irq_enable() 到 arch_cpu_finalize_init() 的对象边界。</desc>
+  <defs>
+    <style>
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 18px; fill: #475569; }
+      .group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .ready { fill: #ecfdf5; stroke: #10b981; }
+      .irq { fill: #f0fdfa; stroke: #14b8a6; }
+      .mm { fill: #fefce8; stroke: #ca8a04; }
+      .console { fill: #eff6ff; stroke: #3b82f6; }
+      .time { fill: #fff7ed; stroke: #f97316; }
+      .trimmed { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .checkpoint { fill: #f5f3ff; stroke: #7c3aed; }
+      .label { font-size: 20px; font-weight: 600; dominant-baseline: middle; }
+      .small { font-size: 15px; fill: #475569; dominant-baseline: middle; }
+      .group-title { font-size: 20px; font-weight: 600; fill: #334155; }
+      .edge { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+      .edge-dash { stroke: #94a3b8; stroke-width: 1.4; fill: none; stroke-dasharray: 7 5; marker-end: url(#arrow2); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="860" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">中断开放期对象分类与相互关系</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase 子阶段 7：local_irq_enable() 到 arch_cpu_finalize_init()</text>
+
+  <rect x="50" y="116" width="245" height="684" rx="14" class="group"/>
+  <text x="172" y="150" text-anchor="middle" class="group-title">阶段边界</text>
+  <rect x="82" y="186" width="180" height="72" rx="8" class="box ready"/>
+  <text x="172" y="214" text-anchor="middle" class="label">IrqTimeInit</text>
+  <text x="172" y="238" text-anchor="middle" class="small">Ready 输入</text>
+  <rect x="82" y="310" width="180" height="82" rx="8" class="box phase"/>
+  <text x="172" y="338" text-anchor="middle" class="label">中断开放期</text>
+  <text x="172" y="362" text-anchor="middle" class="small">IrqOpenPhase</text>
+  <rect x="82" y="444" width="180" height="82" rx="8" class="box irq"/>
+  <text x="172" y="472" text-anchor="middle" class="label">InterruptStream</text>
+  <text x="172" y="496" text-anchor="middle" class="small">enable: 本地 IRQ 开放</text>
+  <rect x="82" y="578" width="180" height="82" rx="8" class="box checkpoint"/>
+  <text x="172" y="606" text-anchor="middle" class="label">ProcessPrepare</text>
+  <text x="172" y="630" text-anchor="middle" class="small">下一阶段入口</text>
+  <path d="M172 258 L172 308" class="edge"/>
+  <path d="M172 392 L172 442" class="edge"/>
+  <path d="M172 526 L172 576" class="edge"/>
+
+  <rect x="335" y="116" width="440" height="684" rx="14" class="group"/>
+  <text x="555" y="150" text-anchor="middle" class="group-title">当前主线对象</text>
+  <rect x="365" y="184" width="176" height="72" rx="8" class="box irq"/>
+  <text x="453" y="212" text-anchor="middle" class="label">IRQ/Timer 基础</text>
+  <text x="453" y="236" text-anchor="middle" class="small">保持 Ready，不自动 Online</text>
+  <rect x="570" y="184" width="176" height="72" rx="8" class="box mm"/>
+  <text x="658" y="212" text-anchor="middle" class="label">SlubFlushWq</text>
+  <text x="658" y="236" text-anchor="middle" class="small">kmem_cache_init_late</text>
+  <rect x="365" y="304" width="176" height="72" rx="8" class="box console"/>
+  <text x="453" y="332" text-anchor="middle" class="label">Console</text>
+  <text x="453" y="356" text-anchor="middle" class="small">TTY + console initcalls</text>
+  <rect x="570" y="304" width="176" height="72" rx="8" class="box checkpoint"/>
+  <text x="658" y="332" text-anchor="middle" class="label">panic_later</text>
+  <text x="658" y="356" text-anchor="middle" class="small">fail boundary</text>
+  <rect x="365" y="424" width="176" height="72" rx="8" class="box mm"/>
+  <text x="453" y="452" text-anchor="middle" class="label">PerCpuPagesetSet</text>
+  <text x="453" y="476" text-anchor="middle" class="small">page allocator fast path</text>
+  <rect x="570" y="424" width="176" height="72" rx="8" class="box time"/>
+  <text x="658" y="452" text-anchor="middle" class="label">SchedClock</text>
+  <text x="658" y="476" text-anchor="middle" class="small">sched_clock_running</text>
+  <rect x="365" y="544" width="176" height="72" rx="8" class="box time"/>
+  <text x="453" y="572" text-anchor="middle" class="label">DelayLoop</text>
+  <text x="453" y="596" text-anchor="middle" class="small">lpj_fine -> lpj</text>
+  <rect x="570" y="544" width="176" height="72" rx="8" class="box ready"/>
+  <text x="658" y="572" text-anchor="middle" class="label">BootCPU</text>
+  <text x="658" y="596" text-anchor="middle" class="small">local_irq_enabled</text>
+
+  <rect x="815" y="116" width="415" height="684" rx="14" class="group"/>
+  <text x="1022" y="150" text-anchor="middle" class="group-title">当前裁剪路径</text>
+  <rect x="845" y="184" width="160" height="72" rx="8" class="box trimmed"/>
+  <text x="925" y="212" text-anchor="middle" class="label">Lockdep</text>
+  <text x="925" y="236" text-anchor="middle" class="small">CONFIG_LOCKDEP=n</text>
+  <rect x="1038" y="184" width="160" height="72" rx="8" class="box trimmed"/>
+  <text x="1118" y="212" text-anchor="middle" class="label">LockingSelftest</text>
+  <text x="1118" y="236" text-anchor="middle" class="small">DEBUG_SELFTESTS=n</text>
+  <rect x="845" y="304" width="160" height="72" rx="8" class="box trimmed"/>
+  <text x="925" y="332" text-anchor="middle" class="label">InitrdBounds</text>
+  <text x="925" y="356" text-anchor="middle" class="small">INITRD=n</text>
+  <rect x="1038" y="304" width="160" height="72" rx="8" class="box trimmed"/>
+  <text x="1118" y="332" text-anchor="middle" class="label">NumaPolicy</text>
+  <text x="1118" y="356" text-anchor="middle" class="small">NUMA=n</text>
+  <rect x="845" y="424" width="160" height="72" rx="8" class="box trimmed"/>
+  <text x="925" y="452" text-anchor="middle" class="label">AcpiEarly</text>
+  <text x="925" y="476" text-anchor="middle" class="small">ACPI=n</text>
+  <rect x="1038" y="424" width="160" height="72" rx="8" class="box trimmed"/>
+  <text x="1118" y="452" text-anchor="middle" class="label">late_time_init</text>
+  <text x="1118" y="476" text-anchor="middle" class="small">hook 未设置</text>
+  <rect x="845" y="544" width="353" height="72" rx="8" class="box trimmed"/>
+  <text x="1022" y="572" text-anchor="middle" class="label">ArchCpuFinalize</text>
+  <text x="1022" y="596" text-anchor="middle" class="small">RISC-V 当前为空 inline</text>
+
+  <path d="M262 485 C298 485, 320 220, 363 220" class="edge"/>
+  <path d="M453 220 L568 220" class="edge-dash"/>
+  <path d="M746 220 C790 220, 814 220, 843 220" class="edge-dash"/>
+  <path d="M658 256 L658 302" class="edge"/>
+  <path d="M453 376 L453 422" class="edge"/>
+  <path d="M453 496 L453 542" class="edge"/>
+  <path d="M541 580 L568 580" class="edge"/>
+  <path d="M746 460 C800 460, 810 460, 843 460" class="edge-dash"/>
+  <path d="M1022 616 C1022 706, 260 618, 264 618" class="edge-dash"/>
+</svg>
