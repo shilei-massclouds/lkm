@@ -37,7 +37,7 @@
   <text x="168" y="332" text-anchor="middle" class="label">SchedInit</text>
   <text x="168" y="356" text-anchor="middle" class="small">Ready 输入</text>
   <rect x="82" y="422" width="172" height="72" rx="8" class="box phase"/>
-  <text x="168" y="450" text-anchor="middle" class="label">IRQ Enable Gate</text>
+  <text x="168" y="450" text-anchor="middle" class="label">出口边界</text>
   <text x="168" y="474" text-anchor="middle" class="small">local_irq_enable 前</text>
   <path d="M168 304 L168 264" class="edge"/>
   <path d="M168 422 L168 382" class="edge"/>
@@ -87,8 +87,8 @@
   <text x="893" y="464" text-anchor="middle" class="label">SmpCallFunction</text>
   <text x="893" y="488" text-anchor="middle" class="small">queues + IPI route</text>
   <rect x="805" y="592" width="389" height="72" rx="8" class="box phase"/>
-  <text x="999" y="620" text-anchor="middle" class="label">early_boot_irqs_disabled = false</text>
-  <text x="999" y="644" text-anchor="middle" class="small">local_irq_enable() 进入下一阶段</text>
+  <text x="999" y="620" text-anchor="middle" class="label">出口 checkpoint</text>
+  <text x="999" y="644" text-anchor="middle" class="small">IRQ 仍关闭，early guard 已清除</text>
 
   <path d="M254 222 C286 222, 304 220, 348 220" class="edge"/>
   <path d="M510 220 L548 220" class="edge"/>
