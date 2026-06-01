@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="920" viewBox="0 0 1280 920" role="img" aria-labelledby="title desc">
+  <title id="title">进程准备期对象分类与相互关系</title>
+  <desc id="desc">展示 BootPhase 子阶段 8 在 Linux 6.12.37 default_config 下从 pid_idr_init() 到 kcsan_init() 的对象边界。</desc>
+  <defs>
+    <style>
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 18px; fill: #475569; }
+      .group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .ready { fill: #ecfdf5; stroke: #10b981; }
+      .proc { fill: #ecfdf5; stroke: #10b981; }
+      .mm { fill: #fefce8; stroke: #ca8a04; }
+      .fs { fill: #eff6ff; stroke: #3b82f6; }
+      .sec { fill: #f5f3ff; stroke: #7c3aed; }
+      .trimmed { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .label { font-size: 19px; font-weight: 600; dominant-baseline: middle; }
+      .small { font-size: 14px; fill: #475569; dominant-baseline: middle; }
+      .group-title { font-size: 20px; font-weight: 600; fill: #334155; }
+      .edge { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+      .edge-dash { stroke: #94a3b8; stroke-width: 1.4; fill: none; stroke-dasharray: 7 5; marker-end: url(#arrow2); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="920" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">进程准备期对象分类与相互关系</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase 子阶段 8：pid_idr_init() 到 kcsan_init()，rest_init() 前</text>
+
+  <rect x="44" y="116" width="245" height="744" rx="14" class="group"/>
+  <text x="166" y="150" text-anchor="middle" class="group-title">阶段边界</text>
+  <rect x="76" y="184" width="180" height="72" rx="8" class="box ready"/>
+  <text x="166" y="212" text-anchor="middle" class="label">IrqOpenPhase</text>
+  <text x="166" y="236" text-anchor="middle" class="small">Ready 输入</text>
+  <rect x="76" y="304" width="180" height="82" rx="8" class="box phase"/>
+  <text x="166" y="332" text-anchor="middle" class="label">进程准备期</text>
+  <text x="166" y="356" text-anchor="middle" class="small">ProcessPreparePhase</text>
+  <rect x="76" y="436" width="180" height="82" rx="8" class="box proc"/>
+  <text x="166" y="464" text-anchor="middle" class="label">任务基础设施</text>
+  <text x="166" y="488" text-anchor="middle" class="small">PID/fork/cred</text>
+  <rect x="76" y="568" width="180" height="82" rx="8" class="box fs"/>
+  <text x="166" y="596" text-anchor="middle" class="label">可见资源</text>
+  <text x="166" y="620" text-anchor="middle" class="small">namespace/fs</text>
+  <rect x="76" y="700" width="180" height="82" rx="8" class="box phase"/>
+  <text x="166" y="728" text-anchor="middle" class="label">rest_init</text>
+  <text x="166" y="752" text-anchor="middle" class="small">创建 init/kthreadd</text>
+  <path d="M166 256 L166 302" class="edge"/>
+  <path d="M166 386 L166 434" class="edge"/>
+  <path d="M166 518 L166 566" class="edge"/>
+  <path d="M166 650 L166 698" class="edge"/>
+
+  <rect x="325" y="116" width="520" height="744" rx="14" class="group"/>
+  <text x="585" y="150" text-anchor="middle" class="group-title">当前主线对象</text>
+  <rect x="355" y="184" width="150" height="72" rx="8" class="box proc"/>
+  <text x="430" y="212" text-anchor="middle" class="label">PidAllocator</text>
+  <text x="430" y="236" text-anchor="middle" class="small">init_pid_ns.idr</text>
+  <rect x="525" y="184" width="150" height="72" rx="8" class="box mm"/>
+  <text x="600" y="212" text-anchor="middle" class="label">AnonVmaCore</text>
+  <text x="600" y="236" text-anchor="middle" class="small">rmap caches</text>
+  <rect x="695" y="184" width="120" height="72" rx="8" class="box proc"/>
+  <text x="755" y="212" text-anchor="middle" class="label">ForkCore</text>
+  <text x="755" y="236" text-anchor="middle" class="small">task cache</text>
+
+  <rect x="355" y="304" width="150" height="72" rx="8" class="box proc"/>
+  <text x="430" y="332" text-anchor="middle" class="label">ThreadStack</text>
+  <text x="430" y="356" text-anchor="middle" class="small">VMAP stack cache</text>
+  <rect x="525" y="304" width="150" height="72" rx="8" class="box sec"/>
+  <text x="600" y="332" text-anchor="middle" class="label">CredentialCore</text>
+  <text x="600" y="356" text-anchor="middle" class="small">cred cache</text>
+  <rect x="695" y="304" width="120" height="72" rx="8" class="box proc"/>
+  <text x="755" y="332" text-anchor="middle" class="label">ProcCaches</text>
+  <text x="755" y="356" text-anchor="middle" class="small">signal/fs/vma</text>
+
+  <rect x="355" y="424" width="150" height="72" rx="8" class="box proc"/>
+  <text x="430" y="452" text-anchor="middle" class="label">Namespaces</text>
+  <text x="430" y="476" text-anchor="middle" class="small">UTS / NET</text>
+  <rect x="525" y="424" width="150" height="72" rx="8" class="box sec"/>
+  <text x="600" y="452" text-anchor="middle" class="label">KeyringCore</text>
+  <text x="600" y="476" text-anchor="middle" class="small">keys + root user</text>
+  <rect x="695" y="424" width="120" height="72" rx="8" class="box sec"/>
+  <text x="755" y="452" text-anchor="middle" class="label">SecurityCore</text>
+  <text x="755" y="476" text-anchor="middle" class="small">LSM setup</text>
+
+  <rect x="355" y="544" width="150" height="72" rx="8" class="box fs"/>
+  <text x="430" y="572" text-anchor="middle" class="label">VfsCore</text>
+  <text x="430" y="596" text-anchor="middle" class="small">runtime caches</text>
+  <rect x="525" y="544" width="150" height="72" rx="8" class="box mm"/>
+  <text x="600" y="572" text-anchor="middle" class="label">PageCache</text>
+  <text x="600" y="596" text-anchor="middle" class="small">page cache core</text>
+  <rect x="695" y="544" width="120" height="72" rx="8" class="box proc"/>
+  <text x="755" y="572" text-anchor="middle" class="label">SignalCore</text>
+  <text x="755" y="596" text-anchor="middle" class="small">signal path</text>
+
+  <rect x="355" y="664" width="150" height="72" rx="8" class="box fs"/>
+  <text x="430" y="692" text-anchor="middle" class="label">SeqFileCore</text>
+  <text x="430" y="716" text-anchor="middle" class="small">iterator export</text>
+  <rect x="525" y="664" width="150" height="72" rx="8" class="box fs"/>
+  <text x="600" y="692" text-anchor="middle" class="label">Procfs/Nsfs</text>
+  <text x="600" y="716" text-anchor="middle" class="small">process views</text>
+  <rect x="695" y="664" width="120" height="72" rx="8" class="box fs"/>
+  <text x="755" y="692" text-anchor="middle" class="label">Pidfs</text>
+  <text x="755" y="716" text-anchor="middle" class="small">pidfd fs</text>
+
+  <rect x="875" y="116" width="355" height="744" rx="14" class="group"/>
+  <text x="1052" y="150" text-anchor="middle" class="group-title">当前裁剪路径</text>
+  <rect x="905" y="184" width="140" height="72" rx="8" class="box trimmed"/>
+  <text x="975" y="212" text-anchor="middle" class="label">X86 EFI</text>
+  <text x="975" y="236" text-anchor="middle" class="small">CONFIG_X86=n</text>
+  <rect x="1062" y="184" width="140" height="72" rx="8" class="box trimmed"/>
+  <text x="1132" y="212" text-anchor="middle" class="label">KGDB late</text>
+  <text x="1132" y="236" text-anchor="middle" class="small">KGDB=n</text>
+  <rect x="905" y="304" width="140" height="72" rx="8" class="box trimmed"/>
+  <text x="975" y="332" text-anchor="middle" class="label">Cpuset</text>
+  <text x="975" y="356" text-anchor="middle" class="small">CGROUPS=n</text>
+  <rect x="1062" y="304" width="140" height="72" rx="8" class="box trimmed"/>
+  <text x="1132" y="332" text-anchor="middle" class="label">CgroupCore</text>
+  <text x="1132" y="356" text-anchor="middle" class="small">CGROUPS=n</text>
+  <rect x="905" y="424" width="140" height="72" rx="8" class="box trimmed"/>
+  <text x="975" y="452" text-anchor="middle" class="label">Taskstats</text>
+  <text x="975" y="476" text-anchor="middle" class="small">TASKSTATS=n</text>
+  <rect x="1062" y="424" width="140" height="72" rx="8" class="box trimmed"/>
+  <text x="1132" y="452" text-anchor="middle" class="label">DelayAcct</text>
+  <text x="1132" y="476" text-anchor="middle" class="small">DELAY_ACCT=n</text>
+  <rect x="905" y="544" width="140" height="72" rx="8" class="box trimmed"/>
+  <text x="975" y="572" text-anchor="middle" class="label">ACPI tail</text>
+  <text x="975" y="596" text-anchor="middle" class="small">ACPI=n</text>
+  <rect x="1062" y="544" width="140" height="72" rx="8" class="box trimmed"/>
+  <text x="1132" y="572" text-anchor="middle" class="label">KCSAN</text>
+  <text x="1132" y="596" text-anchor="middle" class="small">KCSAN=n</text>
+
+  <path d="M256 476 C300 476, 312 220, 353 220" class="edge"/>
+  <path d="M505 220 L523 220" class="edge"/>
+  <path d="M675 220 L693 220" class="edge"/>
+  <path d="M505 340 L523 340" class="edge"/>
+  <path d="M675 340 L693 340" class="edge"/>
+  <path d="M505 460 L523 460" class="edge"/>
+  <path d="M675 460 L693 460" class="edge"/>
+  <path d="M505 580 L523 580" class="edge"/>
+  <path d="M675 580 L693 580" class="edge"/>
+  <path d="M505 700 L523 700" class="edge"/>
+  <path d="M675 700 L693 700" class="edge"/>
+  <path d="M815 700 C855 700, 856 700, 874 700" class="edge-dash"/>
+  <path d="M905 620 C820 806, 262 742, 258 742" class="edge-dash"/>
+</svg>
