@@ -1,148 +1,198 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="1840" viewBox="0 0 1480 1840" role="img" aria-labelledby="title desc">
-  <title id="title">Scheduler Init Effective Sequence Expanded</title>
-  <desc id="desc">Shows Linux 6.12.37 default_config scheduler-init subphase with sched_init expanded into Scheduler preset, setup, and enable.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="3060" viewBox="0 0 1280 3060" role="img" aria-labelledby="title desc">
+  <title id="title">调度准备期对象构建时序</title>
+  <desc id="desc">展示 Linux 6.12.37 default_config 下 start_kernel() 从 mm_core_init() 之后到 context_tracking_init() 调用点的子阶段 5 有效调用顺序，并展开 sched_init()。</desc>
   <defs>
     <style>
-      text { font-family: "DejaVu Sans", Arial, sans-serif; fill: #0f172a; }
+      text {
+        font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif;
+        fill: #0f172a;
+      }
       .title { font-size: 30px; font-weight: 600; }
-      .subtitle { font-size: 18px; fill: #475569; }
+      .subtitle { font-size: 19px; fill: #475569; }
       .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
-      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
       .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
       .formal { fill: #ecfdf5; stroke: #10b981; }
       .checkpoint { fill: #f5f3ff; stroke: #7c3aed; }
       .deferred { fill: #f1f5f9; stroke: #64748b; stroke-dasharray: 6 4; }
       .omitted { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 5 4; }
-      .group { fill: #ffffff; stroke: #64748b; stroke-width: 1.4; }
       .obj { font-size: 23px; font-weight: 600; dominant-baseline: middle; }
       .line1 { font-size: 21px; font-weight: 600; dominant-baseline: middle; }
-      .line2 { font-size: 16px; fill: #475569; dominant-baseline: middle; }
-      .small { font-size: 15px; fill: #475569; dominant-baseline: middle; }
-      .boundary { font-size: 17px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
-      .num { font-size: 16px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .line2 { font-size: 17px; fill: #475569; dominant-baseline: middle; }
+      .boundary { font-size: 18px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
+      .num { font-size: 17px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
       .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
       .dot { fill: #334155; }
-      .arrow { stroke: #64748b; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
-      .thin { stroke: #94a3b8; stroke-width: 1.4; fill: none; marker-end: url(#arrowhead); }
     </style>
-    <marker id="arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-      <path d="M 0 0 L 10 4 L 0 8 z" fill="#64748b"/>
-    </marker>
   </defs>
 
-  <rect x="0" y="0" width="1480" height="1840" fill="#ffffff"/>
-  <text x="740" y="46" text-anchor="middle" class="title">Scheduler Init Effective Sequence</text>
-  <text x="740" y="76" text-anchor="middle" class="subtitle">SchedulerInitPhase.setup(): sched_init expanded; default_config effective path</text>
+  <rect x="0" y="0" width="1280" height="3060" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">调度准备期对象构建时序</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">SchedInitPhase.setup(): Linux 6.12.37 default_config 下 mm_core_init() 后到 context_tracking_init()</text>
 
-  <rect x="48" y="126" width="214" height="1624" rx="14" class="lane"/>
-  <text x="155" y="162" text-anchor="middle" class="obj">SchedulerInit</text>
-  <text x="155" y="188" text-anchor="middle" class="obj">Phase</text>
-  <line x1="155" y1="224" x2="155" y2="1712" class="timeline"/>
+  <rect x="48" y="126" width="214" height="2900" rx="14" class="lane"/>
+  <text x="155" y="162" text-anchor="middle" class="obj">调度准备期</text>
+  <text x="155" y="188" text-anchor="middle" class="subtitle">setup()</text>
+  <line x1="155" y1="224" x2="155" y2="2978" class="timeline"/>
 
-  <rect x="300" y="116" width="1088" height="52" rx="10" class="stage"/>
-  <text x="328" y="142" class="boundary">Start: core memory management is ready; interrupts are still disabled</text>
+  <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="142" class="boundary">起点：MmCoreInitPhase.Ready，核心内存管理就绪，中断仍保持关闭</text>
 
-  <g transform="translate(0 0)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">1</text>
-    <rect x="300" y="198" width="1088" height="84" rx="10" class="box deferred"/>
-    <text x="328" y="226" class="line1">early_trace_init()</text>
-    <text x="328" y="254" class="line2">deferred: LinuxTracing.preset relation to project checkpoint trace is unresolved</text>
+  <g transform="translate(0 -56)">
+  <g transform="translate(0 68)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box omitted"/>
+    <text x="320" y="234" class="line1">poking_init(); ftrace_init()</text>
+    <text x="320" y="264" class="line2">trimmed/no-op：RISC-V poking weak hook；当前 CONFIG_FTRACE_MCOUNT_RECORD=n</text>
   </g>
 
-  <g transform="translate(0 114)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">2</text>
-    <rect x="300" y="184" width="1088" height="112" rx="10" class="box formal"/>
-    <text x="328" y="218" class="line1">Scheduler.preset(): sched_init global prerequisites</text>
-    <text x="328" y="248" class="line2">Prepare global scheduler dependencies before per-CPU RunQueue setup</text>
-    <text x="328" y="274" class="line2">Drives deferred SchedClass checkpoints, BitWaitQueueTable, and DefaultSchedRootDomain</text>
+  <g transform="translate(0 188)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box deferred"/>
+    <text x="320" y="234" class="line1">early_trace_init()</text>
+    <text x="320" y="264" class="line2">deferred：LinuxTracing.preset 与项目 checkpoint trace 的关系尚未确定</text>
   </g>
 
-  <g transform="translate(0 266)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">2a</text>
-    <rect x="300" y="184" width="1088" height="112" rx="10" class="box deferred"/>
-    <text x="328" y="218" class="line1">SchedClasses order checkpoints</text>
-    <text x="328" y="248" class="line2">deferred objects: StopSchedClass, DeadlineSchedClass, RealtimeSchedClass, FairSchedClass, IdleSchedClass</text>
-    <text x="328" y="274" class="line2">deferred checks: Stop &gt; Deadline &gt; Realtime &gt; Fair &gt; Idle</text>
+  <g transform="translate(0 308)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text>
+    <rect x="292" y="190" width="876" height="116" rx="10" class="box formal"/>
+    <text x="320" y="226" class="line1">Scheduler.preset(): sched_init 全局前置准备</text>
+    <text x="320" y="256" class="line2">在逐 CPU RunQueue 建立前准备调度器全局依赖</text>
+    <text x="320" y="282" class="line2">预留驱动 SchedClass.preset()，并建立 BitWaitQueueTable 和 DefaultSchedRootDomain</text>
   </g>
 
-  <g transform="translate(0 418)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">2b</text>
-    <rect x="300" y="198" width="1088" height="84" rx="10" class="box formal"/>
-    <text x="328" y="226" class="line1">BitWaitQueueTable.preset()</text>
-    <text x="328" y="254" class="line2">Preset global waitqueue bucket table used by wait_on_bit and wake_up_bit</text>
+  <g transform="translate(0 456)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3a</text>
+    <rect x="292" y="190" width="876" height="116" rx="10" class="box deferred"/>
+    <text x="320" y="226" class="line1">SchedClass.preset(): 调度类对象壳</text>
+    <text x="320" y="256" class="line2">deferred：Stop、Deadline、Realtime、Fair、Idle sched class 先形成可引用对象壳</text>
+    <text x="320" y="282" class="line2">顺序关系暂不单独建 checkpoint，除非后续确认为模型边界</text>
   </g>
 
-  <g transform="translate(0 532)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">2c</text>
-    <rect x="300" y="184" width="1088" height="112" rx="10" class="box formal"/>
-    <text x="328" y="218" class="line1">DefaultSchedRootDomain.setup()</text>
-    <text x="328" y="248" class="line2">Build default shared scheduling state area for CPUs before full topology exists</text>
-    <text x="328" y="274" class="line2">Checkpoint: ready for Cpu[id].RunQueue.attach_root()</text>
+  <g transform="translate(0 604)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3b</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">BitWaitQueueTable.preset()</text>
+    <text x="320" y="264" class="line2">预置 wait_on_bit 和 wake_up_bit 使用的全局 waitqueue bucket 表</text>
   </g>
 
-  <g transform="translate(0 684)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">3</text>
-    <rect x="300" y="170" width="1088" height="140" rx="10" class="box formal"/>
-    <text x="328" y="206" class="line1">Scheduler.setup(): per-CPU scheduling state</text>
-    <text x="328" y="236" class="line2">For each possible Cpu: drive Cpu[id].RunQueue.setup(DefaultSchedRootDomain)</text>
-    <text x="328" y="262" class="line2">RunQueue owns CfsRunQueue, RealtimeRunQueue, and DeadlineRunQueue subobjects</text>
-    <text x="328" y="288" class="line2">Other runqueue fields remain attributes; FairServer is deferred</text>
+  <g transform="translate(0 724)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3c</text>
+    <rect x="292" y="190" width="876" height="116" rx="10" class="box formal"/>
+    <text x="320" y="226" class="line1">DefaultSchedRootDomain.setup()</text>
+    <text x="320" y="256" class="line2">在完整拓扑建立前，为 CPU 构建默认共享调度状态区域</text>
+    <text x="320" y="282" class="line2">checkpoint：已可供 Cpu[id].RunQueue.attach_root() 使用</text>
   </g>
 
-  <g transform="translate(0 864)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">3a</text>
-    <rect x="300" y="170" width="1088" height="140" rx="10" class="box formal"/>
-    <text x="328" y="206" class="line1">BootCPU.RunQueue.BootIdleTask.setup(source = InitTask/current)</text>
-    <text x="328" y="236" class="line2">Advance existing InitTask/current into the boot CPU idle task role</text>
-    <text x="328" y="262" class="line2">Covers load weight, time slice, InitMM lazy TLB, kthread metadata, and sched entity reset</text>
-    <text x="328" y="288" class="line2">Checkpoints: RunQueue.idle == BootIdleTask and RunQueue.curr == BootIdleTask</text>
+  <g transform="translate(0 872)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text>
+    <rect x="292" y="176" width="876" height="144" rx="10" class="box formal"/>
+    <text x="320" y="214" class="line1">Scheduler.setup(): 逐 CPU 调度状态</text>
+    <text x="320" y="244" class="line2">对每个 possible Cpu：驱动 Cpu[id].RunQueue.setup(DefaultSchedRootDomain)</text>
+    <text x="320" y="270" class="line2">RunQueue 持有 CfsRunQueue、RealtimeRunQueue 和 DeadlineRunQueue 子对象</text>
+    <text x="320" y="296" class="line2">其它 runqueue 字段先作为属性处理；FairServer 暂为 deferred</text>
   </g>
 
-  <g transform="translate(0 1044)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">3b</text>
-    <rect x="300" y="184" width="1088" height="112" rx="10" class="box formal"/>
-    <text x="328" y="218" class="line1">Scheduler.setup(): tail attributes</text>
-    <text x="328" y="248" class="line2">Set global load update deadline, BootCPU idle_thread_ref, and balance_push_enabled = false</text>
-    <text x="328" y="274" class="line2">These are Scheduler, BootCPU, and RunQueue attributes, not separate objects yet</text>
+  <g transform="translate(0 1048)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4a</text>
+    <rect x="292" y="176" width="876" height="144" rx="10" class="box formal"/>
+    <text x="320" y="214" class="line1">BootCPU.RunQueue.BootIdleTask.setup(source = InitTask/current)</text>
+    <text x="320" y="244" class="line2">将已有 InitTask/current 推进为 boot CPU idle task 角色</text>
+    <text x="320" y="270" class="line2">覆盖 load weight、time slice、InitMM lazy TLB 和 kthread 元数据</text>
+    <text x="320" y="296" class="line2">checkpoint：RunQueue.idle == BootIdleTask 且 RunQueue.curr == BootIdleTask</text>
   </g>
 
-  <g transform="translate(0 1196)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">3c</text>
-    <rect x="300" y="170" width="1088" height="140" rx="10" class="box deferred"/>
-    <text x="328" y="206" class="line1">FairSchedClass.setup(): init_sched_fair_class()</text>
-    <text x="328" y="236" class="line2">deferred because FairSchedClass itself is deferred</text>
-    <text x="328" y="262" class="line2">Future work: fair balance masks, SCHED_SOFTIRQ handler, and NOHZ balance state</text>
-    <text x="328" y="288" class="line2">Also deferred/omitted by config: ExtSchedClass, PSI, Uclamp, PreemptDynamic</text>
+  <g transform="translate(0 1224)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4b</text>
+    <rect x="292" y="190" width="876" height="116" rx="10" class="box formal"/>
+    <text x="320" y="226" class="line1">Scheduler.setup(): 收尾属性</text>
+    <text x="320" y="256" class="line2">设置全局 load 更新期限、BootCPU idle_thread_ref 和 balance_push_enabled</text>
+    <text x="320" y="282" class="line2">这些仍是 Scheduler、BootCPU 和 RunQueue 属性，暂不拆成独立对象</text>
   </g>
 
-  <g transform="translate(0 1376)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">4</text>
-    <rect x="300" y="198" width="1088" height="84" rx="10" class="box formal"/>
-    <text x="328" y="226" class="line1">Scheduler.enable()</text>
-    <text x="328" y="254" class="line2">Set scheduler_running = true; scheduler enters the boot-time online state</text>
+  <g transform="translate(0 1372)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4c</text>
+    <rect x="292" y="176" width="876" height="144" rx="10" class="box deferred"/>
+    <text x="320" y="214" class="line1">SchedClass.setup(): init_sched_fair_class() 等</text>
+    <text x="320" y="244" class="line2">deferred：由 Scheduler.setup() 驱动各 sched class 对象从壳进入正式对象</text>
+    <text x="320" y="270" class="line2">后续工作：fair balance masks、SCHED_SOFTIRQ handler 和 NOHZ balance state</text>
+    <text x="320" y="296" class="line2">同时 deferred 或被配置省略：ExtSchedClass、PSI、Uclamp、PreemptDynamic</text>
   </g>
 
-  <g transform="translate(0 1490)">
-    <circle cx="155" cy="240" r="15" class="dot"/>
-    <text x="155" y="240" class="num">5</text>
-    <rect x="300" y="198" width="1088" height="84" rx="10" class="box checkpoint"/>
-    <text x="328" y="226" class="line1">WARN(!irqs_disabled(), ...)</text>
-    <text x="328" y="254" class="line2">Checkpoint: interrupts must still be disabled after sched_init</text>
+  <g transform="translate(0 1548)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">Scheduler.enable()</text>
+    <text x="320" y="264" class="line2">设置 scheduler_running = true；调度器进入启动期 online 状态</text>
   </g>
 
-  <rect x="300" y="1622" width="1088" height="52" rx="10" class="stage"/>
-  <text x="328" y="1648" class="boundary">Next in subphase 5: KernelCollections, Housekeeping, WorkqueueEarly, RCU, trace_init deferred, initcall debug checkpoint</text>
+  <g transform="translate(0 1668)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box checkpoint"/>
+    <text x="320" y="234" class="line1">WARN(!irqs_disabled(), ...)</text>
+    <text x="320" y="264" class="line2">checkpoint：sched_init 之后中断必须仍保持关闭</text>
+  </g>
 
-  <rect x="300" y="1708" width="1088" height="52" rx="10" class="stage"/>
-  <text x="328" y="1734" class="boundary">End of expanded Fig. 17 focus: Scheduler is online for boot CPU; full SMP topology remains later</text>
+  <g transform="translate(0 1788)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">RadixTree.setup(): radix_tree_init()</text>
+    <text x="320" y="264" class="line2">创建 radix_tree_node SLUB cache，并登记 radix tree CPU hotplug dead 回调</text>
+  </g>
+
+  <g transform="translate(0 1908)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
+    <text x="320" y="234" class="line1">MapleTree.setup(): maple_tree_init()</text>
+    <text x="320" y="264" class="line2">创建 maple_node SLUB cache；后续 VMA tree 等使用者另行建模</text>
+  </g>
+
+  <g transform="translate(0 2028)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text>
+    <rect x="292" y="190" width="876" height="116" rx="10" class="box deferred"/>
+    <text x="320" y="226" class="line1">Housekeeping: housekeeping_init()</text>
+    <text x="320" y="256" class="line2">deferred/no-op：管理 routine work 可运行 CPU 集合，服务 WQ/timer/kthread/RCU/tick</text>
+    <text x="320" y="282" class="line2">当前未建模 nohz_full/isolcpus 参数，housekeeping.flags == 0 时直接返回</text>
+  </g>
+
+  <g transform="translate(0 2148)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text>
+    <rect x="292" y="190" width="876" height="116" rx="10" class="box formal"/>
+    <text x="320" y="226" class="line1">Workqueue.preset(): workqueue_init_early()</text>
+    <text x="320" y="256" class="line2">建立 system workqueue、worker pool、unbound cpumask 和 BH worker pool</text>
+    <text x="320" y="282" class="line2">早期代码可创建 workqueue 并排队/取消 work item；worker 尚不执行</text>
+  </g>
+
+  <g transform="translate(0 2296)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text>
+    <rect x="292" y="190" width="876" height="116" rx="10" class="box formal"/>
+    <text x="320" y="226" class="line1">RcuCore.setup(): rcu_init()</text>
+    <text x="320" y="256" class="line2">建立 RCU 树、boot CPU online、RCU softirq、workqueues 和 Tasks RCU facts</text>
+    <text x="320" y="282" class="line2">依赖 scheduler/workqueue early 基础，但仍处于中断关闭启动上下文</text>
+  </g>
+
+  <g transform="translate(0 2444)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box deferred"/>
+    <text x="320" y="234" class="line1">trace_init()</text>
+    <text x="320" y="264" class="line2">deferred：Linux event tracing 与项目 checkpoint trace 的边界未定</text>
+  </g>
+
+  <g transform="translate(0 2564)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box checkpoint"/>
+    <text x="320" y="234" class="line1">initcall_debug_enable()</text>
+    <text x="320" y="264" class="line2">checkpoint/deferred：仅在 initcall_debug 参数开启时影响后续 initcall 诊断</text>
+  </g>
+
+  <g transform="translate(0 2684)">
+    <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text>
+    <rect x="292" y="204" width="876" height="88" rx="10" class="box omitted"/>
+    <text x="320" y="234" class="line1">context_tracking_init()</text>
+    <text x="320" y="264" class="line2">trimmed/no-op：当前 CONFIG_CONTEXT_TRACKING_USER_FORCE=n，调用折叠为空实现</text>
+  </g>
+  </g>
+
+  <rect x="292" y="2960" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="2986" class="boundary">终点：context_tracking_init() 调用点完成；调度、radix/maple、workqueue 与 RCU 支撑设施就绪</text>
 </svg>

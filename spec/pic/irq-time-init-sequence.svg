@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="2240" viewBox="0 0 1280 2240" role="img" aria-labelledby="title desc">
-  <title id="title">IRQ and Time Init Sequence</title>
-  <desc id="desc">Shows Linux 6.12.37 default_config effective start_kernel() calls from early_irq_init() to before local_irq_enable().</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="2340" viewBox="0 0 1280 2340" role="img" aria-labelledby="title desc">
+  <title id="title">中断时间准备期对象构建时序</title>
+  <desc id="desc">展示 Linux 6.12.37 default_config 下 start_kernel() 从 early_irq_init() 到 local_irq_enable() 前的有效调用顺序。</desc>
   <defs>
     <style>
-      text { font-family: "DejaVu Sans", Arial, sans-serif; fill: #0f172a; }
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
       .title { font-size: 30px; font-weight: 600; }
       .subtitle { font-size: 19px; fill: #475569; }
       .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
@@ -23,34 +23,35 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1280" height="2240" fill="#ffffff"/>
-  <text x="640" y="46" text-anchor="middle" class="title">IRQ and Time Init Sequence</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">IrqTimeInitPhase.setup(): early_irq_init() to before local_irq_enable()</text>
-  <rect x="48" y="126" width="214" height="2050" rx="14" class="lane"/>
-  <text x="155" y="162" text-anchor="middle" class="obj">IrqTimeInit</text>
-  <text x="155" y="188" text-anchor="middle" class="obj">Phase</text>
-  <line x1="155" y1="224" x2="155" y2="2140" class="timeline"/>
+  <rect x="0" y="0" width="1280" height="2340" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">中断时间准备期对象构建时序</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">IrqTimeInitPhase.setup(): early_irq_init() 到 local_irq_enable() 前</text>
+  <rect x="48" y="126" width="214" height="2150" rx="14" class="lane"/>
+  <text x="155" y="162" text-anchor="middle" class="obj">中断时间</text>
+  <text x="155" y="188" text-anchor="middle" class="obj">准备期</text>
+  <line x1="155" y1="224" x2="155" y2="2240" class="timeline"/>
   <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="142" class="boundary">Start: SchedulerInitPhase is complete; interrupts are still disabled</text>
+  <text x="320" y="142" class="boundary">起点：SchedInitPhase 完成；中断仍保持关闭</text>
 
   <g transform="translate(0 -48)">
-  <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">IrqSubsystem.preset/setup(): early_irq_init(); init_IRQ()</text><text x="320" y="260" class="line2">Builds IRQ descriptors, irqdomain, RISC-V irq stack, irqchip, and SBI IPI</text></g>
-  <g transform="translate(0 156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">TickSubsystem.setup(): tick_init()</text><text x="320" y="260" class="line2">Builds tick broadcast and NO_HZ idle foundations</text></g>
-  <g transform="translate(0 256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Rcu.setup_nohz(): rcu_init_nohz()</text><text x="320" y="260" class="line2">Initializes RCU nohz state; depends on RCU and tick/nohz configuration</text></g>
-  <g transform="translate(0 356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">TimerWheel.setup(): init_timers()</text><text x="320" y="260" class="line2">Builds timer bases, POSIX CPU timer work, and registers TIMER_SOFTIRQ</text></g>
-  <g transform="translate(0 456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Srcu.setup(): srcu_init()</text><text x="320" y="260" class="line2">Builds sleepable RCU foundations</text></g>
-  <g transform="translate(0 556)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">HrtimerSubsystem.setup(): hrtimers_init()</text><text x="320" y="260" class="line2">HIGH_RES_TIMERS=y; prepares boot CPU hrtimer base and HRTIMER_SOFTIRQ</text></g>
-  <g transform="translate(0 656)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">Softirq.setup(): softirq_init()</text><text x="320" y="260" class="line2">Builds softirq action table and per-CPU pending state; execution is deferred</text></g>
-  <g transform="translate(0 756)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">Timekeeping.setup(): timekeeping_init()</text><text x="320" y="260" class="line2">Builds generic timekeeper, clocksource state, and initial time values</text></g>
-  <g transform="translate(0 856)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">RiscvTimer.setup(): time_init()</text><text x="320" y="260" class="line2">Reads DeviceTree /cpus timebase-frequency and runs timer_probe()</text></g>
-  <g transform="translate(0 956)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Randomness.setup(): random_init()</text><text x="320" y="260" class="line2">Runs after timekeeping and moves RNG to the full boot-time ready boundary</text></g>
-  <g transform="translate(0 1056)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">StackCanary.setup(): boot_init_stack_canary()</text><text x="320" y="260" class="line2">Refreshes or records boot stack canary facts using the full RNG state</text></g>
-  <g transform="translate(0 1156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">PerfEvent.setup(): perf_event_init()</text><text x="320" y="260" class="line2">CONFIG_PERF_EVENTS=y; builds perf event core and per-CPU contexts</text></g>
-  <g transform="translate(0 1256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Profiler.setup(); SmpCallFunction.setup()</text><text x="320" y="260" class="line2">Builds profiling and SMP call-function/IPI base; secondary CPUs remain offline</text></g>
-  <g transform="translate(0 1356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text><rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/><text x="320" y="232" class="line1">WARN(!irqs_disabled(), ...)</text><text x="320" y="260" class="line2">Checkpoint: interrupts must still be disabled at the exit boundary</text></g>
-  <g transform="translate(0 1456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">15</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">IrqEnableGate.prepare(): early_boot_irqs_disabled = false</text><text x="320" y="260" class="line2">Clears the early boot guard; local_irq_enable() starts the next phase</text></g>
+  <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">IrqDispatchTree.preset(): early_irq_init()</text><text x="320" y="260" class="line2">建立 IRQ 编号空间、默认 affinity 和 early IRQ 基础，进入 Prepared</text></g>
+  <g transform="translate(0 156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">IrqDispatchTree.setup(): init_IRQ()</text><text x="320" y="260" class="line2">建立 IrqDomain 分发树、关联 IrqChip、架构 IRQ 入口和 SBI IPI</text></g>
+  <g transform="translate(0 256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">TickSubsystem.setup(): tick_init()</text><text x="320" y="260" class="line2">建立 tick broadcast 与 NO_HZ idle 基础</text></g>
+  <g transform="translate(0 356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">RcuCore nohz action: rcu_init_nohz()</text><text x="320" y="260" class="line2">初始化 RCU nohz 状态；不引入新的生命周期事件</text></g>
+  <g transform="translate(0 456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">TimerWheel.setup(): init_timers()</text><text x="320" y="260" class="line2">建立 timer base、POSIX CPU timer work，并注册 TIMER_SOFTIRQ</text></g>
+  <g transform="translate(0 556)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Srcu.setup(): srcu_init()</text><text x="320" y="260" class="line2">建立 sleepable RCU 基础</text></g>
+  <g transform="translate(0 656)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">HrtimerSubsystem.setup(): hrtimers_init()</text><text x="320" y="260" class="line2">CONFIG_HIGH_RES_TIMERS=y；准备 boot CPU hrtimer base 并注册 HRTIMER_SOFTIRQ</text></g>
+  <g transform="translate(0 756)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">Softirq.setup(): softirq_init()</text><text x="320" y="260" class="line2">建立 softirq action 表和 per-CPU pending 状态；异步执行仍 deferred</text></g>
+  <g transform="translate(0 856)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">Timekeeping.setup(): timekeeping_init()</text><text x="320" y="260" class="line2">建立通用 timekeeper、clocksource 状态和初始时间值</text></g>
+  <g transform="translate(0 956)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text><rect x="292" y="204" width="876" height="84" rx="10" class="box time"/><text x="320" y="232" class="line1">RiscvTimer.setup(): time_init()</text><text x="320" y="260" class="line2">读取 DeviceTree /cpus timebase-frequency，并执行 timer_probe()</text></g>
+  <g transform="translate(0 1056)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Randomness.setup(): random_init()</text><text x="320" y="260" class="line2">在 timekeeping 之后执行，使 RNG 到达完整启动期可用边界</text></g>
+  <g transform="translate(0 1156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">StackCanary.setup(): boot_init_stack_canary()</text><text x="320" y="260" class="line2">基于完整 RNG 刷新或记录 boot stack canary 事实</text></g>
+  <g transform="translate(0 1256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">PerfEvent.setup(): perf_event_init()</text><text x="320" y="260" class="line2">CONFIG_PERF_EVENTS=y；建立 perf event core 和 per-CPU contexts</text></g>
+  <g transform="translate(0 1356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">Profiler.setup(); SmpCallFunction.setup()</text><text x="320" y="260" class="line2">建立 profiling 与 SMP call-function/IPI 基础；secondary CPU 仍未启动</text></g>
+  <g transform="translate(0 1456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">15</text><rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/><text x="320" y="232" class="line1">WARN(!irqs_disabled(), ...)</text><text x="320" y="260" class="line2">checkpoint：出口边界前中断必须仍保持关闭</text></g>
+  <g transform="translate(0 1556)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">16</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">IrqEnableGate.prepare(): early_boot_irqs_disabled = false</text><text x="320" y="260" class="line2">清除 early boot guard；local_irq_enable() 进入下一阶段</text></g>
   </g>
 
-  <rect x="292" y="2080" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="2106" class="boundary">End: interrupts are still disabled, but IRQ, timer/timekeeping, softirq, RNG, and IPI are ready</text>
+  <rect x="292" y="2180" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="2206" class="boundary">终点：中断仍关闭，但 IRQ、timer/timekeeping、softirq、RNG 和 IPI 已就绪</text>
 </svg>
