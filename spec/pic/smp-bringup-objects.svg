@@ -68,8 +68,8 @@
   <text x="460" y="346" text-anchor="middle" class="label">Cpu[].IdleTask</text>
   <text x="460" y="370" text-anchor="middle" class="small">preset non-boot</text>
   <rect x="580" y="318" width="210" height="82" rx="8" class="box sync"/>
-  <text x="685" y="346" text-anchor="middle" class="label">CpuHotplugThreads</text>
-  <text x="685" y="370" text-anchor="middle" class="small">per-CPU hp thread</text>
+  <text x="685" y="346" text-anchor="middle" class="label">BootCpuHpThread</text>
+  <text x="685" y="370" text-anchor="middle" class="small">template + unpark</text>
 
   <rect x="360" y="452" width="200" height="82" rx="8" class="box cpu"/>
   <text x="460" y="480" text-anchor="middle" class="label">CpuGroup</text>
@@ -79,7 +79,7 @@
   <text x="685" y="504" text-anchor="middle" class="small">present -> online</text>
 
   <rect x="360" y="586" width="200" height="82" rx="8" class="box support"/>
-  <text x="460" y="614" text-anchor="middle" class="label">CpuHotplugState</text>
+  <text x="460" y="614" text-anchor="middle" class="label">Cpu[].HotplugState</text>
   <text x="460" y="638" text-anchor="middle" class="small">CPUHP_ONLINE</text>
   <rect x="580" y="586" width="210" height="82" rx="8" class="box flow"/>
   <text x="685" y="614" text-anchor="middle" class="label">SecondaryEntry</text>
