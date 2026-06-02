@@ -88,8 +88,8 @@
   <rect x="880" y="116" width="350" height="884" rx="14" class="group"/>
   <text x="1055" y="150" text-anchor="middle" class="group-title">依赖事实与关联对象</text>
   <rect x="912" y="184" width="286" height="72" rx="8" class="box ready"/>
-  <text x="1055" y="212" text-anchor="middle" class="label">KernelInitFlow</text>
-  <text x="1055" y="236" text-anchor="middle" class="small">PID 1 current flow</text>
+  <text x="1055" y="212" text-anchor="middle" class="label">KernelInitTask</text>
+  <text x="1055" y="236" text-anchor="middle" class="small">PID 1 current task</text>
   <rect x="912" y="304" width="286" height="72" rx="8" class="box exec"/>
   <text x="1055" y="332" text-anchor="middle" class="label">Rootfs + Console</text>
   <text x="1055" y="356" text-anchor="middle" class="small">root namespace + fd 0/1/2</text>

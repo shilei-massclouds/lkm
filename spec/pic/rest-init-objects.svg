@@ -31,7 +31,7 @@
 
   <rect x="0" y="0" width="1280" height="940" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">rest_init 期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">UP Multitask Phase 子阶段 1：rest_init() 创建 PID 1、kthreadd，并把启动根流转入 boot idle</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">UP Multitask Phase 子阶段 1：rest_init() 创建 PID 1、kthreadd，并把 BootInitTask 转入 boot idle</text>
 
   <rect x="44" y="116" width="250" height="760" rx="14" class="group"/>
   <text x="169" y="150" text-anchor="middle" class="group-title">阶段边界</text>
@@ -46,30 +46,30 @@
   <text x="169" y="488" text-anchor="middle" class="small">SCHEDULING</text>
   <rect x="75" y="568" width="188" height="82" rx="8" class="box flow"/>
   <text x="169" y="596" text-anchor="middle" class="label">单核多任务</text>
-  <text x="169" y="620" text-anchor="middle" class="small">三条常规流存在</text>
+  <text x="169" y="620" text-anchor="middle" class="small">三类任务运行语义成立</text>
   <rect x="75" y="700" width="188" height="82" rx="8" class="box phase"/>
   <text x="169" y="728" text-anchor="middle" class="label">PreSmpInit</text>
-  <text x="169" y="752" text-anchor="middle" class="small">KernelInitFlow 继续</text>
+  <text x="169" y="752" text-anchor="middle" class="small">KernelInitTask 继续</text>
   <path d="M169 256 L169 302" class="edge"/>
   <path d="M169 386 L169 434" class="edge"/>
   <path d="M169 518 L169 566" class="edge"/>
   <path d="M169 650 L169 698" class="edge"/>
 
   <rect x="330" y="116" width="515" height="760" rx="14" class="group"/>
-  <text x="587" y="150" text-anchor="middle" class="group-title">新建与转换的常规流</text>
+  <text x="587" y="150" text-anchor="middle" class="group-title">新建与转换的任务</text>
   <rect x="365" y="184" width="190" height="86" rx="8" class="box flow"/>
-  <text x="460" y="214" text-anchor="middle" class="label">KernelInitFlow</text>
+  <text x="460" y="214" text-anchor="middle" class="label">KernelInitTask</text>
   <text x="460" y="238" text-anchor="middle" class="small">PID 1 / kernel_init</text>
   <rect x="590" y="184" width="190" height="86" rx="8" class="box support"/>
-  <text x="685" y="214" text-anchor="middle" class="label">KernelInitTask</text>
+  <text x="685" y="214" text-anchor="middle" class="label">PID 1 属性</text>
   <text x="685" y="238" text-anchor="middle" class="small">boot CPU affinity</text>
 
   <rect x="365" y="328" width="190" height="86" rx="8" class="box flow"/>
-  <text x="460" y="358" text-anchor="middle" class="label">KthreaddFlow</text>
+  <text x="460" y="358" text-anchor="middle" class="label">KthreaddTask</text>
   <text x="460" y="382" text-anchor="middle" class="small">kernel_thread(kthreadd)</text>
   <rect x="590" y="328" width="190" height="86" rx="8" class="box support"/>
-  <text x="685" y="358" text-anchor="middle" class="label">KthreaddTask</text>
-  <text x="685" y="382" text-anchor="middle" class="small">kthreadd_task 引用</text>
+  <text x="685" y="358" text-anchor="middle" class="label">全局引用</text>
+  <text x="685" y="382" text-anchor="middle" class="small">kthreadd_task</text>
 
   <rect x="365" y="472" width="190" height="86" rx="8" class="box flow"/>
   <text x="460" y="502" text-anchor="middle" class="label">BootInitTask</text>
