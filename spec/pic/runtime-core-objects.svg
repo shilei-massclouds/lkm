@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="980" viewBox="0 0 1280 980" role="img" aria-labelledby="title desc">
+  <title id="title">运行核心补全期对象分类与相互关系</title>
+  <desc id="desc">展示 SMP Runtime Phase 子阶段 2 从 sched_init_smp() 到 page_alloc_init_late() 的对象边界。</desc>
+  <defs><style>
+    text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
+    .title { font-size: 30px; font-weight: 600; } .subtitle { font-size: 18px; fill: #475569; }
+    .group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+    .box { fill: #fff; stroke: #334155; stroke-width: 1.2; } .phase { fill:#eef2ff; stroke:#6366f1; }
+    .ready,.flow { fill:#ecfdf5; stroke:#10b981; } .core { fill:#f0fdfa; stroke:#14b8a6; }
+    .mm { fill:#fefce8; stroke:#ca8a04; } .support { fill:#eff6ff; stroke:#3b82f6; }
+    .trimmed { fill:#fff7ed; stroke:#f97316; stroke-dasharray:7 5; }
+    .label { font-size:19px; font-weight:600; dominant-baseline:middle; } .small { font-size:14px; fill:#475569; dominant-baseline:middle; }
+    .group-title { font-size:20px; font-weight:600; fill:#334155; } .edge { stroke:#64748b; stroke-width:1.5; fill:none; marker-end:url(#arrow); }
+    .edge-dash { stroke:#94a3b8; stroke-width:1.4; fill:none; stroke-dasharray:7 5; marker-end:url(#arrow2); }
+  </style><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker><marker id="arrow2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/></marker></defs>
+  <rect width="1280" height="980" fill="#fff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">运行核心补全期对象分类与相互关系</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">RuntimeCorePhase：sched_init_smp() 到 page_alloc_init_late()</text>
+  <rect x="44" y="116" width="250" height="804" rx="14" class="group"/><text x="169" y="150" text-anchor="middle" class="group-title">阶段边界</text>
+  <rect x="75" y="184" width="188" height="72" rx="8" class="box ready"/><text x="169" y="212" text-anchor="middle" class="label">SmpBringup</text><text x="169" y="236" text-anchor="middle" class="small">Ready 输入</text>
+  <rect x="75" y="304" width="188" height="82" rx="8" class="box phase"/><text x="169" y="332" text-anchor="middle" class="label">运行核心补全</text><text x="169" y="356" text-anchor="middle" class="small">RuntimeCorePhase</text>
+  <rect x="75" y="436" width="188" height="82" rx="8" class="box core"/><text x="169" y="464" text-anchor="middle" class="label">多核核心设施</text><text x="169" y="488" text-anchor="middle" class="small">scheduler/wq/mm</text>
+  <rect x="75" y="568" width="188" height="82" rx="8" class="box phase"/><text x="169" y="596" text-anchor="middle" class="label">InitcallPhase</text><text x="169" y="620" text-anchor="middle" class="small">do_basic_setup()</text>
+  <path d="M169 256 L169 302" class="edge"/><path d="M169 386 L169 434" class="edge"/><path d="M169 518 L169 566" class="edge"/>
+  <rect x="330" y="116" width="515" height="804" rx="14" class="group"/><text x="587" y="150" text-anchor="middle" class="group-title">主线补全对象</text>
+  <rect x="360" y="184" width="205" height="82" rx="8" class="box core"/><text x="462" y="212" text-anchor="middle" class="label">Scheduler</text><text x="462" y="236" text-anchor="middle" class="small">enable_smp()</text>
+  <rect x="590" y="184" width="210" height="82" rx="8" class="box flow"/><text x="695" y="212" text-anchor="middle" class="label">InitTask</text><text x="695" y="236" text-anchor="middle" class="small">affinity released</text>
+  <rect x="360" y="318" width="205" height="82" rx="8" class="box core"/><text x="462" y="346" text-anchor="middle" class="label">Workqueue</text><text x="462" y="370" text-anchor="middle" class="small">topology ready</text>
+  <rect x="590" y="318" width="210" height="82" rx="8" class="box support"/><text x="695" y="346" text-anchor="middle" class="label">AsyncCore</text><text x="695" y="370" text-anchor="middle" class="small">async wq</text>
+  <rect x="360" y="452" width="205" height="82" rx="8" class="box support"/><text x="462" y="480" text-anchor="middle" class="label">PadataCore</text><text x="462" y="504" text-anchor="middle" class="small">work list + cpuhp</text>
+  <rect x="590" y="452" width="210" height="82" rx="8" class="box mm"/><text x="695" y="480" text-anchor="middle" class="label">PageAllocator</text><text x="695" y="504" text-anchor="middle" class="small">enable late</text>
+  <rect x="360" y="586" width="205" height="82" rx="8" class="box core"/><text x="462" y="614" text-anchor="middle" class="label">SchedDomain</text><text x="462" y="638" text-anchor="middle" class="small">cpu_active_mask</text>
+  <rect x="590" y="586" width="210" height="82" rx="8" class="box support"/><text x="695" y="614" text-anchor="middle" class="label">WqPodTypes</text><text x="695" y="638" text-anchor="middle" class="small">CPU/SMT/cache/NUMA</text>
+  <path d="M263 345 C304 345,315 225,358 225" class="edge"/><path d="M565 225 L588 225" class="edge"/><path d="M462 266 L462 316" class="edge"/><path d="M565 359 L588 359" class="edge"/><path d="M695 400 L695 450" class="edge"/><path d="M565 493 L588 493" class="edge"/><path d="M462 586 L462 535" class="edge-dash"/><path d="M695 586 L695 401" class="edge-dash"/>
+  <rect x="880" y="116" width="350" height="804" rx="14" class="group"/><text x="1055" y="150" text-anchor="middle" class="group-title">关联与裁剪</text>
+  <rect x="912" y="184" width="286" height="72" rx="8" class="box support"/><text x="1055" y="212" text-anchor="middle" class="label">Housekeeping</text><text x="1055" y="236" text-anchor="middle" class="small">domain mask</text>
+  <rect x="912" y="304" width="286" height="72" rx="8" class="box support"/><text x="1055" y="332" text-anchor="middle" class="label">CpuHotplugState</text><text x="1055" y="356" text-anchor="middle" class="small">padata steps</text>
+  <rect x="912" y="424" width="286" height="72" rx="8" class="box trimmed"/><text x="1055" y="452" text-anchor="middle" class="label">DeferredPageInit</text><text x="1055" y="476" text-anchor="middle" class="small">disabled</text>
+  <rect x="912" y="544" width="286" height="72" rx="8" class="box trimmed"/><text x="1055" y="572" text-anchor="middle" class="label">PageExtension</text><text x="1055" y="596" text-anchor="middle" class="small">disabled</text>
+  <rect x="912" y="664" width="286" height="72" rx="8" class="box trimmed"/><text x="1055" y="692" text-anchor="middle" class="label">ShuffleAllocator</text><text x="1055" y="716" text-anchor="middle" class="small">disabled</text>
+  <path d="M800 225 C850 225,858 220,910 220" class="edge-dash"/><path d="M462 452 C462 416,585 400,650 400 C770 400,810 340,910 340" class="edge"/><path d="M800 493 C848 493,858 460,910 460" class="edge-dash"/><path d="M800 493 C848 493,858 580,910 580" class="edge-dash"/><path d="M800 493 C848 493,858 700,910 700" class="edge-dash"/>
+</svg>
