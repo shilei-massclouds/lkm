@@ -75,10 +75,10 @@
 
   <rect x="365" y="452" width="190" height="82" rx="8" class="box mm"/>
   <text x="460" y="480" text-anchor="middle" class="label">VmstatCore</text>
-  <text x="460" y="504" text-anchor="middle" class="small">mm_percpu_wq + hotplug</text>
+  <text x="460" y="504" text-anchor="middle" class="small">preset -> Prepared</text>
   <rect x="590" y="452" width="190" height="82" rx="8" class="box sync"/>
   <text x="685" y="480" text-anchor="middle" class="label">TasksRcu</text>
-  <text x="685" y="504" text-anchor="middle" class="small">tasks/trace kthreads</text>
+  <text x="685" y="504" text-anchor="middle" class="small">enabled flavor kthreads</text>
 
   <rect x="365" y="586" width="190" height="82" rx="8" class="box support"/>
   <text x="460" y="614" text-anchor="middle" class="label">InitcallTable</text>
