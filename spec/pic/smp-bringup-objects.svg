@@ -65,8 +65,8 @@
   <text x="685" y="236" text-anchor="middle" class="small">Prepared</text>
 
   <rect x="360" y="318" width="200" height="82" rx="8" class="box flow"/>
-  <text x="460" y="346" text-anchor="middle" class="label">SecondaryIdle</text>
-  <text x="460" y="370" text-anchor="middle" class="small">idle task/flow set</text>
+  <text x="460" y="346" text-anchor="middle" class="label">Cpu[].IdleTask</text>
+  <text x="460" y="370" text-anchor="middle" class="small">preset non-boot</text>
   <rect x="580" y="318" width="210" height="82" rx="8" class="box sync"/>
   <text x="685" y="346" text-anchor="middle" class="label">CpuHotplugThreads</text>
   <text x="685" y="370" text-anchor="middle" class="small">per-CPU hp thread</text>
@@ -87,10 +87,10 @@
 
   <rect x="360" y="720" width="200" height="82" rx="8" class="box cpu"/>
   <text x="460" y="748" text-anchor="middle" class="label">BootCPU</text>
-  <text x="460" y="772" text-anchor="middle" class="small">stays online</text>
+  <text x="460" y="772" text-anchor="middle" class="small">IdleTask = BootIdleTask</text>
   <rect x="580" y="720" width="210" height="82" rx="8" class="box flow"/>
-  <text x="685" y="748" text-anchor="middle" class="label">AP IdleFlows</text>
-  <text x="685" y="772" text-anchor="middle" class="small">local irq enabled</text>
+  <text x="685" y="748" text-anchor="middle" class="label">IdleTask.enable</text>
+  <text x="685" y="772" text-anchor="middle" class="small">AP idle path</text>
 
   <path d="M263 345 C302 345, 315 225, 363 225" class="edge"/>
   <path d="M555 225 L588 225" class="edge"/>
