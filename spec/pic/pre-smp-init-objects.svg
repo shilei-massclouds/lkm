@@ -83,9 +83,9 @@
   <rect x="365" y="586" width="190" height="82" rx="8" class="box support"/>
   <text x="460" y="614" text-anchor="middle" class="label">InitcallTable</text>
   <text x="460" y="638" text-anchor="middle" class="small">run early initcalls</text>
-  <rect x="590" y="586" width="190" height="82" rx="8" class="box sync"/>
+  <rect x="590" y="586" width="190" height="82" rx="8" class="box deferred"/>
   <text x="685" y="614" text-anchor="middle" class="label">LockupDetector</text>
-  <text x="685" y="638" text-anchor="middle" class="small">softlockup/watchdog</text>
+  <text x="685" y="638" text-anchor="middle" class="small">deferred diagnostics</text>
 
   <rect x="365" y="720" width="190" height="82" rx="8" class="box flow"/>
   <text x="460" y="748" text-anchor="middle" class="label">KthreaddTask</text>
