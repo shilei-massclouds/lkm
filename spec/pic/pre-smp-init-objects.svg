@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="980" viewBox="0 0 1280 980" role="img" aria-labelledby="title desc">
+  <title id="title">SMP 前初始化期对象分类与相互关系</title>
+  <desc id="desc">展示 UP Multitask Phase 子阶段 2 在 Linux 6.12.37 default_config 下 kernel_init_freeable() 到 smp_init() 前的对象边界。</desc>
+  <defs>
+    <style>
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 18px; fill: #475569; }
+      .group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .ready { fill: #ecfdf5; stroke: #10b981; }
+      .flow { fill: #ecfdf5; stroke: #10b981; }
+      .mm { fill: #fefce8; stroke: #ca8a04; }
+      .sched { fill: #f0fdfa; stroke: #14b8a6; }
+      .sync { fill: #f5f3ff; stroke: #7c3aed; }
+      .support { fill: #eff6ff; stroke: #3b82f6; }
+      .deferred { fill: #fefce8; stroke: #ca8a04; stroke-dasharray: 7 5; }
+      .trimmed { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .label { font-size: 19px; font-weight: 600; dominant-baseline: middle; }
+      .small { font-size: 14px; fill: #475569; dominant-baseline: middle; }
+      .group-title { font-size: 20px; font-weight: 600; fill: #334155; }
+      .edge { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+      .edge-dash { stroke: #94a3b8; stroke-width: 1.4; fill: none; stroke-dasharray: 7 5; marker-end: url(#arrow2); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="980" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">SMP 前初始化期对象分类与相互关系</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">UP Multitask Phase 子阶段 2：KernelInitFlow 执行 kernel_init_freeable()，到 smp_init() 前结束</text>
+
+  <rect x="44" y="116" width="250" height="804" rx="14" class="group"/>
+  <text x="169" y="150" text-anchor="middle" class="group-title">阶段边界</text>
+  <rect x="75" y="184" width="188" height="72" rx="8" class="box ready"/>
+  <text x="169" y="212" text-anchor="middle" class="label">RestInitPhase</text>
+  <text x="169" y="236" text-anchor="middle" class="small">Ready 输入</text>
+  <rect x="75" y="304" width="188" height="82" rx="8" class="box flow"/>
+  <text x="169" y="332" text-anchor="middle" class="label">KernelInitFlow</text>
+  <text x="169" y="356" text-anchor="middle" class="small">主执行流 / PID 1</text>
+  <rect x="75" y="436" width="188" height="82" rx="8" class="box phase"/>
+  <text x="169" y="464" text-anchor="middle" class="label">SMP 前初始化</text>
+  <text x="169" y="488" text-anchor="middle" class="small">PreSmpInitPhase</text>
+  <rect x="75" y="568" width="188" height="82" rx="8" class="box sched"/>
+  <text x="169" y="596" text-anchor="middle" class="label">单核多任务</text>
+  <text x="169" y="620" text-anchor="middle" class="small">boot CPU only</text>
+  <rect x="75" y="700" width="188" height="82" rx="8" class="box phase"/>
+  <text x="169" y="728" text-anchor="middle" class="label">smp_init</text>
+  <text x="169" y="752" text-anchor="middle" class="small">下一阶段入口</text>
+  <path d="M169 256 L169 302" class="edge"/>
+  <path d="M169 386 L169 434" class="edge"/>
+  <path d="M169 518 L169 566" class="edge"/>
+  <path d="M169 650 L169 698" class="edge"/>
+
+  <rect x="330" y="116" width="515" height="804" rx="14" class="group"/>
+  <text x="587" y="150" text-anchor="middle" class="group-title">主线推进对象</text>
+  <rect x="365" y="184" width="190" height="82" rx="8" class="box mm"/>
+  <text x="460" y="212" text-anchor="middle" class="label">GfpPolicy</text>
+  <text x="460" y="236" text-anchor="middle" class="small">完整 GFP mask</text>
+  <rect x="590" y="184" width="190" height="82" rx="8" class="box support"/>
+  <text x="685" y="212" text-anchor="middle" class="label">CtrlAltDel</text>
+  <text x="685" y="236" text-anchor="middle" class="small">cad_pid = PID 1</text>
+
+  <rect x="365" y="318" width="190" height="82" rx="8" class="box sched"/>
+  <text x="460" y="346" text-anchor="middle" class="label">SmpBootPlan</text>
+  <text x="460" y="370" text-anchor="middle" class="small">topology + present</text>
+  <rect x="590" y="318" width="190" height="82" rx="8" class="box sched"/>
+  <text x="685" y="346" text-anchor="middle" class="label">Workqueue</text>
+  <text x="685" y="370" text-anchor="middle" class="small">setup -> Ready</text>
+
+  <rect x="365" y="452" width="190" height="82" rx="8" class="box mm"/>
+  <text x="460" y="480" text-anchor="middle" class="label">VmstatCore</text>
+  <text x="460" y="504" text-anchor="middle" class="small">mm_percpu_wq + hotplug</text>
+  <rect x="590" y="452" width="190" height="82" rx="8" class="box sync"/>
+  <text x="685" y="480" text-anchor="middle" class="label">TasksRcu</text>
+  <text x="685" y="504" text-anchor="middle" class="small">tasks/trace kthreads</text>
+
+  <rect x="365" y="586" width="190" height="82" rx="8" class="box support"/>
+  <text x="460" y="614" text-anchor="middle" class="label">InitcallTable</text>
+  <text x="460" y="638" text-anchor="middle" class="small">early level run</text>
+  <rect x="590" y="586" width="190" height="82" rx="8" class="box sync"/>
+  <text x="685" y="614" text-anchor="middle" class="label">LockupDetector</text>
+  <text x="685" y="638" text-anchor="middle" class="small">softlockup/watchdog</text>
+
+  <rect x="365" y="720" width="190" height="82" rx="8" class="box flow"/>
+  <text x="460" y="748" text-anchor="middle" class="label">KthreaddFlow</text>
+  <text x="460" y="772" text-anchor="middle" class="small">kthread provider</text>
+  <rect x="590" y="720" width="190" height="82" rx="8" class="box sched"/>
+  <text x="685" y="748" text-anchor="middle" class="label">BootCPU</text>
+  <text x="685" y="772" text-anchor="middle" class="small">only online CPU</text>
+
+  <path d="M263 345 C302 345, 315 225, 363 225" class="edge"/>
+  <path d="M263 345 C302 345, 315 359, 363 359" class="edge"/>
+  <path d="M555 359 L588 359" class="edge"/>
+  <path d="M685 400 L685 450" class="edge"/>
+  <path d="M555 493 L588 493" class="edge-dash"/>
+  <path d="M555 627 L588 627" class="edge"/>
+  <path d="M460 720 L460 670" class="edge-dash"/>
+  <path d="M685 720 L685 670" class="edge-dash"/>
+
+  <rect x="880" y="116" width="350" height="804" rx="14" class="group"/>
+  <text x="1055" y="150" text-anchor="middle" class="group-title">引用路径与出口</text>
+  <rect x="912" y="184" width="286" height="72" rx="8" class="box trimmed"/>
+  <text x="1055" y="212" text-anchor="middle" class="label">MemsAllowed</text>
+  <text x="1055" y="236" text-anchor="middle" class="small">CPUSETS/NUMA no-op</text>
+  <rect x="912" y="304" width="286" height="72" rx="8" class="box support"/>
+  <text x="1055" y="332" text-anchor="middle" class="label">CpuTopology</text>
+  <text x="1055" y="356" text-anchor="middle" class="small">possible/present CPUs</text>
+  <rect x="912" y="424" width="286" height="72" rx="8" class="box deferred"/>
+  <text x="1055" y="452" text-anchor="middle" class="label">VmstatProcExports</text>
+  <text x="1055" y="476" text-anchor="middle" class="small">procfs deferred</text>
+  <rect x="912" y="544" width="286" height="72" rx="8" class="box deferred"/>
+  <text x="1055" y="572" text-anchor="middle" class="label">Housekeeping</text>
+  <text x="1055" y="596" text-anchor="middle" class="small">timer mask default</text>
+  <rect x="912" y="664" width="286" height="72" rx="8" class="box trimmed"/>
+  <text x="1055" y="692" text-anchor="middle" class="label">Hardlockup</text>
+  <text x="1055" y="716" text-anchor="middle" class="small">detector disabled</text>
+  <rect x="912" y="784" width="286" height="72" rx="8" class="box phase"/>
+  <text x="1055" y="812" text-anchor="middle" class="label">SMP Runtime</text>
+  <text x="1055" y="836" text-anchor="middle" class="small">smp_init() starts</text>
+
+  <path d="M555 225 C820 225, 832 220, 910 220" class="edge-dash"/>
+  <path d="M555 359 C820 359, 835 340, 910 340" class="edge"/>
+  <path d="M555 493 C820 493, 835 460, 910 460" class="edge-dash"/>
+  <path d="M780 627 C840 627, 846 580, 910 580" class="edge-dash"/>
+  <path d="M780 627 C840 627, 846 700, 910 700" class="edge-dash"/>
+  <path d="M555 359 C815 359, 830 820, 910 820" class="edge"/>
+</svg>
