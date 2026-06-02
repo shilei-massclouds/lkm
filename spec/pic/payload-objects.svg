@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1040" viewBox="0 0 1280 1040" role="img" aria-labelledby="title desc">
+  <title id="title">Payload 交接期对象分类与相互关系</title>
+  <desc id="desc">展示 PayloadPhase 的变种、UserBootPayload 主线对象以及 exec/binfmt/rootfs 等依赖关系。</desc>
+  <defs>
+    <style>
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 18px; fill: #475569; }
+      .group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #fff; stroke: #334155; stroke-width: 1.2; }
+      .phase { fill: #eef2ff; stroke: #6366f1; }
+      .ready { fill: #ecfdf5; stroke: #10b981; }
+      .variant { fill: #f0fdfa; stroke: #14b8a6; }
+      .exec { fill: #eff6ff; stroke: #3b82f6; }
+      .arg { fill: #fefce8; stroke: #ca8a04; }
+      .terminal { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .coarse { fill: #f5f3ff; stroke: #7c3aed; }
+      .label { font-size: 20px; font-weight: 600; dominant-baseline: middle; }
+      .small { font-size: 14px; fill: #475569; dominant-baseline: middle; }
+      .group-title { font-size: 20px; font-weight: 600; fill: #334155; }
+      .edge { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+      .edge-dash { stroke: #94a3b8; stroke-width: 1.4; fill: none; stroke-dasharray: 7 5; marker-end: url(#arrow2); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="1040" fill="#fff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">Payload 交接期对象分类与相互关系</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">PayloadPhase：do_sysctl_args() 之后到 selected payload 不可逆交接</text>
+
+  <rect x="44" y="116" width="250" height="884" rx="14" class="group"/>
+  <text x="169" y="150" text-anchor="middle" class="group-title">阶段边界</text>
+  <rect x="75" y="184" width="188" height="72" rx="8" class="box ready"/>
+  <text x="169" y="212" text-anchor="middle" class="label">FinalizePhase</text>
+  <text x="169" y="236" text-anchor="middle" class="small">Ready 输入</text>
+  <rect x="75" y="304" width="188" height="82" rx="8" class="box phase"/>
+  <text x="169" y="332" text-anchor="middle" class="label">PayloadPhase</text>
+  <text x="169" y="356" text-anchor="middle" class="small">variant selected</text>
+  <rect x="75" y="436" width="188" height="82" rx="8" class="box variant"/>
+  <text x="169" y="464" text-anchor="middle" class="label">selected payload</text>
+  <text x="169" y="488" text-anchor="middle" class="small">handoff target</text>
+  <rect x="75" y="568" width="188" height="82" rx="8" class="box phase"/>
+  <text x="169" y="596" text-anchor="middle" class="label">StartupTimeline</text>
+  <text x="169" y="620" text-anchor="middle" class="small">no-return boundary</text>
+  <path d="M169 256 L169 302" class="edge"/>
+  <path d="M169 386 L169 434" class="edge"/>
+  <path d="M169 518 L169 566" class="edge"/>
+
+  <rect x="330" y="116" width="515" height="884" rx="14" class="group"/>
+  <text x="587" y="150" text-anchor="middle" class="group-title">payload 变种与主线对象</text>
+  <rect x="360" y="184" width="220" height="82" rx="8" class="box variant"/>
+  <text x="470" y="212" text-anchor="middle" class="label">UserBootPayload</text>
+  <text x="470" y="236" text-anchor="middle" class="small">Linux-like variant</text>
+  <rect x="610" y="184" width="205" height="82" rx="8" class="box coarse"/>
+  <text x="712" y="212" text-anchor="middle" class="label">UnikernelApp</text>
+  <text x="712" y="236" text-anchor="middle" class="small">coarse variant</text>
+  <rect x="360" y="318" width="220" height="82" rx="8" class="box arg"/>
+  <text x="470" y="346" text-anchor="middle" class="label">InitCandidateList</text>
+  <text x="470" y="370" text-anchor="middle" class="small">rdinit/init/default/fallback</text>
+  <rect x="610" y="318" width="205" height="82" rx="8" class="box arg"/>
+  <text x="712" y="346" text-anchor="middle" class="label">InitArgEnv</text>
+  <text x="712" y="370" text-anchor="middle" class="small">argv_init + envp_init</text>
+  <rect x="360" y="452" width="220" height="82" rx="8" class="box exec"/>
+  <text x="470" y="480" text-anchor="middle" class="label">ExecCore</text>
+  <text x="470" y="504" text-anchor="middle" class="small">kernel_execve()</text>
+  <rect x="610" y="452" width="205" height="82" rx="8" class="box exec"/>
+  <text x="712" y="480" text-anchor="middle" class="label">UserInitProcess</text>
+  <text x="712" y="504" text-anchor="middle" class="small">PID 1 after exec</text>
+  <rect x="360" y="586" width="220" height="82" rx="8" class="box terminal"/>
+  <text x="470" y="614" text-anchor="middle" class="label">PayloadPanic</text>
+  <text x="470" y="638" text-anchor="middle" class="small">no working init</text>
+  <rect x="610" y="586" width="205" height="82" rx="8" class="box phase"/>
+  <text x="712" y="614" text-anchor="middle" class="label">PayloadPhase</text>
+  <text x="712" y="638" text-anchor="middle" class="small">Online on success</text>
+  <path d="M263 345 C304 345,316 225,358 225" class="edge"/>
+  <path d="M580 225 L608 225" class="edge-dash"/>
+  <path d="M470 266 L470 316" class="edge"/>
+  <path d="M580 359 L608 359" class="edge"/>
+  <path d="M470 400 L470 450" class="edge"/>
+  <path d="M580 493 L608 493" class="edge"/>
+  <path d="M470 534 L470 584" class="edge-dash"/>
+  <path d="M712 534 L712 584" class="edge"/>
+
+  <rect x="880" y="116" width="350" height="884" rx="14" class="group"/>
+  <text x="1055" y="150" text-anchor="middle" class="group-title">依赖事实与关联对象</text>
+  <rect x="912" y="184" width="286" height="72" rx="8" class="box ready"/>
+  <text x="1055" y="212" text-anchor="middle" class="label">KernelInitFlow</text>
+  <text x="1055" y="236" text-anchor="middle" class="small">PID 1 current flow</text>
+  <rect x="912" y="304" width="286" height="72" rx="8" class="box exec"/>
+  <text x="1055" y="332" text-anchor="middle" class="label">Rootfs + Console</text>
+  <text x="1055" y="356" text-anchor="middle" class="small">root namespace + fd 0/1/2</text>
+  <rect x="912" y="424" width="286" height="72" rx="8" class="box exec"/>
+  <text x="1055" y="452" text-anchor="middle" class="label">BinaryFormatRegistry</text>
+  <text x="1055" y="476" text-anchor="middle" class="small">ELF / script handlers</text>
+  <rect x="912" y="544" width="286" height="72" rx="8" class="box exec"/>
+  <text x="1055" y="572" text-anchor="middle" class="label">VFS + Cred + MM</text>
+  <text x="1055" y="596" text-anchor="middle" class="small">exec dependencies</text>
+  <rect x="912" y="664" width="286" height="72" rx="8" class="box arg"/>
+  <text x="1055" y="692" text-anchor="middle" class="label">PayloadParam</text>
+  <text x="1055" y="716" text-anchor="middle" class="small">init args input</text>
+  <path d="M815 493 C850 493,858 452,910 452" class="edge"/>
+  <path d="M815 493 C850 493,858 572,910 572" class="edge"/>
+  <path d="M815 359 C846 382,868 648,910 692" class="edge-dash"/>
+  <path d="M815 474 C856 392,860 238,910 220" class="edge-dash"/>
+  <path d="M815 493 C856 468,860 356,910 340" class="edge-dash"/>
+</svg>

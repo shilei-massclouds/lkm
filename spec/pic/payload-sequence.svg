@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1640" viewBox="0 0 1280 1640" role="img" aria-labelledby="title desc">
+  <title id="title">Payload 交接期 Linux-like 对象构建时序</title>
+  <desc id="desc">展示 UserBootPayload 从 do_sysctl_args() 返回后到第一个用户态 init exec 成功或 panic 的 Linux-like 时序。</desc>
+  <defs>
+    <style>
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 19px; fill: #475569; }
+      .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #fff; stroke: #334155; stroke-width: 1.2; }
+      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+      .formal { fill: #ecfdf5; stroke: #10b981; }
+      .exec { fill: #eff6ff; stroke: #3b82f6; }
+      .arg { fill: #fefce8; stroke: #ca8a04; }
+      .handoff { fill: #f5f3ff; stroke: #7c3aed; }
+      .terminal { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .obj { font-size: 23px; font-weight: 600; dominant-baseline: middle; }
+      .line1 { font-size: 21px; font-weight: 600; dominant-baseline: middle; }
+      .line2 { font-size: 17px; fill: #475569; dominant-baseline: middle; }
+      .boundary { font-size: 18px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
+      .num { font-size: 17px; font-weight: 600; fill: #fff; text-anchor: middle; dominant-baseline: middle; }
+      .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
+      .dot { fill: #334155; }
+    </style>
+  </defs>
+  <rect width="1280" height="1640" fill="#fff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">Payload 交接期 Linux-like 对象构建时序</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">UserBootPayload.enable(): run_init_process() 候选链到 kernel_execve()</text>
+
+  <rect x="48" y="126" width="214" height="1460" rx="14" class="lane"/>
+  <text x="155" y="162" text-anchor="middle" class="obj">PayloadPhase</text>
+  <text x="155" y="188" text-anchor="middle" class="obj">UserBootPayload</text>
+  <line x1="155" y1="224" x2="155" y2="1548" class="timeline"/>
+  <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="142" class="boundary">起点：FinalizePhase 已 Ready；do_sysctl_args() 已返回；即将第一次 run_init_process(...)</text>
+
+  <g transform="translate(0 -48)">
+    <g transform="translate(0 56)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/>
+      <text x="320" y="232" class="line1">PayloadPhase.setup(): 选择 UserBootPayload 变种</text>
+      <text x="320" y="260" class="line2">确认 rootfs、console、PID 1 当前流、参数/环境和 exec 前置条件</text>
+    </g>
+    <g transform="translate(0 166)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
+      <text x="320" y="232" class="line1">UserBootPayload.setup(): InitCandidateList + InitArgEnv</text>
+      <text x="320" y="260" class="line2">候选顺序为 rdinit、init、CONFIG_DEFAULT_INIT、固定 fallback 列表</text>
+    </g>
+    <g transform="translate(0 276)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/>
+      <text x="320" y="232" class="line1">PayloadPhase.enable() drives UserBootPayload.enable()</text>
+      <text x="320" y="260" class="line2">从这里开始进入不可逆 payload 交接尝试链</text>
+    </g>
+    <g transform="translate(0 386)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
+      <text x="320" y="232" class="line1">InitCandidateList.try_ramdisk(): ramdisk_execute_command</text>
+      <text x="320" y="260" class="line2">默认 /init，或由 rdinit= 改写；存在时先尝试 run_init_process(path)</text>
+    </g>
+    <g transform="translate(0 496)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/>
+      <text x="320" y="232" class="line1">UserBootPayload.try_candidate(path): run_init_process(path)</text>
+      <text x="320" y="260" class="line2">设置 argv_init[0]，打印候选、参数和环境，调用 kernel_execve()</text>
+    </g>
+    <g transform="translate(0 606)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box exec"/>
+      <text x="320" y="232" class="line1">ExecCore.execve(): kernel_execve(path, argv_init, envp_init)</text>
+      <text x="320" y="260" class="line2">分配 linux_binprm，复制 argv/envp，进入 bprm_execve() 和 binfmt handler</text>
+    </g>
+    <g transform="translate(0 716)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box handoff"/>
+      <text x="320" y="232" class="line1">成功分支：UserInitProcess.Online</text>
+      <text x="320" y="260" class="line2">PID 1 当前流 exec 成用户态 init；kernel_init() 返回 0，启动编排链不再继续</text>
+    </g>
+    <g transform="translate(0 826)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box terminal"/>
+      <text x="320" y="232" class="line1">ramdisk 候选失败：记录错误并继续</text>
+      <text x="320" y="260" class="line2">Failed to execute ramdisk_execute_command 后进入 init= / default / fallback 链</text>
+    </g>
+    <g transform="translate(0 936)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
+      <text x="320" y="232" class="line1">InitCandidateList.try_init_arg(): execute_command</text>
+      <text x="320" y="260" class="line2">来自 init=；成功则进入 UserInitProcess，失败则 Requested init panic</text>
+    </g>
+    <g transform="translate(0 1046)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
+      <text x="320" y="232" class="line1">InitCandidateList.try_default_init(): CONFIG_DEFAULT_INIT</text>
+      <text x="320" y="260" class="line2">配置非空时尝试；失败打印 Default init failed 并继续 fallback</text>
+    </g>
+    <g transform="translate(0 1156)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
+      <text x="320" y="232" class="line1">InitCandidateList.try_fallbacks(): /sbin/init, /etc/init, /bin/init, /bin/sh</text>
+      <text x="320" y="260" class="line2">逐个 try_to_run_init_process()；-ENOENT 静默，其它错误打印后继续</text>
+    </g>
+    <g transform="translate(0 1266)">
+      <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box terminal"/>
+      <text x="320" y="232" class="line1">PayloadPanic.no_working_init()</text>
+      <text x="320" y="260" class="line2">所有候选失败时 panic；该失败终端不形成 PayloadPhase.Online</text>
+    </g>
+  </g>
+  <rect x="292" y="1518" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="1544" class="boundary">终点：成功时 selected user init 已接管 PID 1；失败时进入 panic terminal</text>
+</svg>
