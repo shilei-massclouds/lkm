@@ -110,7 +110,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 | EFI stub / PE header 入口细节 | `CONFIG_EFI=y`、`CONFIG_EFI_STUB=y` | `PreparePhase` 或 `Lds` | 现有 deferred 只覆盖 `efi_init()`，未覆盖 EFI stub/header 入口。 |
 | SATP mode 探测与页表层级降级 | `CONFIG_PGTABLE_LEVELS=5` | `Config` 或 `Vm.Preset` | 当前 `Config.satp_mode` 是既定事实，未描述 Linux 的运行时探测/降级过程。 |
 | `apply_early_boot_alternatives()` | `CONFIG_RISCV_ALTERNATIVE_EARLY=y` | `Vm.Preset` 或 `EarlyVm.Setup` | 早期 alternatives/errata patch 尚未作为对象或 deferred 标记。 |
-| `set_task_stack_end_magic()` | `CONFIG_SCHED_STACK_END_CHECK=y` | `InitStack` | 可折叠进栈保护语义，但应说明当前不展开 Linux 的具体检查标记。 |
+| `set_task_stack_end_magic()` | `CONFIG_SCHED_STACK_END_CHECK=y` | `BootInitStack` | 可折叠进栈保护语义，但应说明当前不展开 Linux 的具体检查标记。 |
 | `init_vmlinux_build_id()` | `start_kernel()` early generic path | `EntrySuccessorPhase` | 当前未建模 build id 初始化，也未标记 deferred。 |
 | `page_address_init()` | `start_kernel()` before `setup_arch()` | `EntrySuccessorPhase` | 当前没有 page address 元数据对象。 |
 | `setup_command_line()` / saved cmdline | `start_kernel()` after `setup_arch()` | `CommandLine` | `CommandLine` 管理 raw/saved/static 三个文本视图；Param 解析对象由 `Params` 管理并保持原时序。 |
@@ -286,8 +286,8 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `RawDtb`
 - `PhysicalMemory`
 - `PlatformCpuInfo`
-- `InitTask`
-- `InitStack`
+- `BootInitTask`
+- `BootInitStack`
 - `Vm`
 - `TrampolineVm`
 - `EarlyVm`

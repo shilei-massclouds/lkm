@@ -168,9 +168,9 @@
   <text x="640" y="1396" class="group-label" text-anchor="middle">入口前导期承接对象</text>
 
   <rect x="66" y="1402" width="300" height="126" rx="10" class="box carry"/>
-  <text x="216" y="1426" class="label">InitTask</text>
+  <text x="216" y="1426" class="label">BootInitTask</text>
   <rect x="92" y="1450" width="116" height="54" rx="8" class="box carry"/>
-  <text x="150" y="1469" class="small">InitStack</text>
+  <text x="150" y="1469" class="small">BootInitStack</text>
   <text x="150" y="1490" class="small">Ready -> Online</text>
   <rect x="224" y="1450" width="116" height="54" rx="8" class="box carry"/>
   <text x="282" y="1469" class="small">InitMM</text>

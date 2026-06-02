@@ -1371,7 +1371,7 @@ class _Deriver:
     ) -> bool:
         if kind != "invariant" or state is None:
             return False
-        if state.object_name != "InitStack":
+        if state.object_name != "BootInitStack":
             return False
         if (
             expression.strip()

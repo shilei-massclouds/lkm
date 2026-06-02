@@ -7,12 +7,12 @@
  */
 
 /*
- * InitMM 表示根任务关联的 init_mm 元数据。它连接 InitTask 与后续完整内核地址空间元数据，
+ * InitMM 表示根任务关联的 init_mm 元数据。它连接 BootInitTask 与后续完整内核地址空间元数据，
  * 但不作为另一个页表对象与 Vm/SwapperVm 竞争。
  */
 object InitMM: AddressSpaceObject {
     initial_state: State::Base;
-    parent: InitTask;
+    parent: BootInitTask;
 
     /*
      * Base 表示 init_mm 元数据尚未填入内核映像边界。
@@ -24,14 +24,14 @@ object InitMM: AddressSpaceObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    InitTask.state == State::Online;
+                    BootInitTask.state == State::Online;
                     StaticObjects.state == State::Online;
                     Lds.state == State::Online;
                 }
 
                 ensures {
                     init_mm_bounds_ready(InitMM, Lds);
-                    init_task_active_mm_ready(InitTask, InitMM);
+                    init_task_active_mm_ready(BootInitTask, InitMM);
                 }
             }
         }
@@ -43,7 +43,7 @@ object InitMM: AddressSpaceObject {
     state State::Ready {
         invariant {
             init_mm_bounds_ready(InitMM, Lds);
-            init_task_active_mm_ready(InitTask, InitMM);
+            init_task_active_mm_ready(BootInitTask, InitMM);
         }
     }
 }
@@ -886,8 +886,8 @@ object EntrySuccessorPhase: PhaseObject {
                     EntryPreludePhase.state == State::Ready;
                     Vm.state == State::Ready;
                     EarlyVm.state == State::Online;
-                    InitTask.state == State::Online;
-                    InitStack.state == State::Ready;
+                    BootInitTask.state == State::Online;
+                    BootInitStack.state == State::Ready;
                     InterruptStream.state == State::Prepared;
                     RawDtb.state == State::Ready;
                     FixMap.state == State::Ready;
@@ -896,7 +896,7 @@ object EntrySuccessorPhase: PhaseObject {
 
                 drives {
                     EntryPreludePhase.Event::Cleanup;
-                    InitStack.Event::Enable;
+                    BootInitStack.Event::Enable;
                     EarlyDtb.Event::Preset;
                     CpuIdMap.Event::Preset;
                     InterruptStream.Event::Setup;
@@ -930,7 +930,7 @@ object EntrySuccessorPhase: PhaseObject {
             task_concurrency_closed();
             context_is(SystemExclusive);
             EntryPreludePhase.state == State::Destroyed;
-            InitStack.state == State::Online;
+            BootInitStack.state == State::Online;
             BootCPU.state == State::Online;
             CpuIdMap.state == State::Prepared;
             InterruptStream.state == State::Ready;

@@ -33,7 +33,7 @@
 
   <rect x="0" y="0" width="1280" height="2640" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">入口后继期对象构建时序</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">核心路径：InitStack -> CpuIdMap -> BootCPU -> PrintkBuffer -> EarlyDtb -> InitMM -> EarlyIoremap -> SBI -> EarlyParam(+EarlyCon) -> VM.enable()</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">核心路径：BootInitStack -> CpuIdMap -> BootCPU -> PrintkBuffer -> EarlyDtb -> InitMM -> EarlyIoremap -> SBI -> EarlyParam(+EarlyCon) -> VM.enable()</text>
 
   <rect x="48" y="128" width="210" height="2410" rx="14" class="lane"/>
   <text x="153" y="164" text-anchor="middle" class="obj">入口后继期对象</text>
@@ -41,13 +41,13 @@
   <line x1="153" y1="224" x2="153" y2="2518" class="timeline"/>
 
   <rect x="290" y="118" width="870" height="50" rx="10" class="stage"/>
-  <text x="318" y="143" class="boundary">起点边界：start_kernel() 入口，InitStack.Ready，InterruptStream.Prepared，BootCPU.Prepared(present)</text>
+  <text x="318" y="143" class="boundary">起点边界：start_kernel() 入口，BootInitStack.Ready，InterruptStream.Prepared，BootCPU.Prepared(present)</text>
 
   <g transform="translate(0 0)">
     <circle cx="153" cy="248" r="15" class="dot"/><text x="153" y="248" class="num">1</text>
     <rect x="290" y="205" width="870" height="86" rx="10" class="box cleanup"/>
-    <text x="318" y="234" class="line1">InitStack.enable()</text>
-    <text x="318" y="265" class="line2">建立根栈保护状态，使 InitStack.Ready -> Online</text>
+    <text x="318" y="234" class="line1">BootInitStack.enable()</text>
+    <text x="318" y="265" class="line2">建立根栈保护状态，使 BootInitStack.Ready -> Online</text>
   </g>
 
   <g transform="translate(0 112)">

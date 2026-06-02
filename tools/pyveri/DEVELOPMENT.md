@@ -244,7 +244,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 当前对象填充规则：
 
 - 准备期对象来自 `PreparePhase.Online` 的状态不变量，例如 `Riscv64`、`Lds`、`StaticObjects`、`Config`、`PhysicalMemory`。
-- 入口前导期对象来自 `EntryPreludePhase.Setup` 递归驱动出的对象状态推进结果，例如 `RootStream`、`InterruptStream`、`Vm`、`InitTask`、`InitStack`、`EventStream` 等。
+- 入口前导期对象来自 `EntryPreludePhase.Setup` 递归驱动出的对象状态推进结果，例如 `RootStream`、`InterruptStream`、`Vm`、`BootInitTask`、`BootInitStack`、`EventStream` 等。
 - `StartupTimeline` 是顶层时间轴对象，不在图中显示。
 - 阶段对象和子阶段对象只通过左侧单元体现，不在对象列重复显示。
 
@@ -495,14 +495,14 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `StaticObjects` 中的 `valid_page_table_storage(...)` 已统一承担静态页表存储的存在性、稳定性、静态分配、页对齐和最小容量约束。`TrampolineVm.Setup`、`EarlyVm.Setup` 和 `SwapperVm.Setup` 不再重复声明 `page_aligned(StaticObjects.*_pg_dir)`；各 VM 阶段只依赖 `StaticObjects.state == State::Online` 和各自的映射语义。
 - `StaticObjects` 中的 `valid_function_symbol(...)` 已统一承担事件入口符号的存在性与稳定性约束。`EventStream.Preset` 和 `EventStream.Enable` 不再重复声明 `valid_function_symbol(StaticObjects.*_event_entry)`；事件流只依赖 `StaticObjects.state == State::Online` 并设置对应入口。
 - `TrampolineMap` 增加 `valid_trampoline_map(...)` 约束，把跳板映射的物理起点、虚拟起点和映射大小约束集中到映射对象自身。`TrampolineVm.Setup` 不再直接声明 `aligned(Lds.kernel_start, Config.pmd_size)`，也不再重复声明 `valid_satp_mode(Config.satp_mode)`；`valid_trampoline_map(...)` 已由 `Lds` 链接布局和 `Config` 地址配置共同证明，对应 Linux `setup_vm()` 中从 `_start`、`KERNEL_LINK_ADDR/kernel_map.virt_addr` 和 `PMD_SIZE` 建立 trampoline 映射。
-- `StaticObjects` 已标注 `source: static::linux_6_12_37`。`valid_object_storage(init_task)` 来自 `init/init_task.c` 中的静态 `init_task` 定义，`valid_function_symbol(...)` 来自 RISC-V 汇编入口符号，`valid_page_table_storage(...)` 来自 `arch/riscv/mm/init.c` 中的静态页表数组定义；这些事实已由窄规则归入 `linux_static_objects` 直接证明。`InitTask.Preset` 的 `valid_task_storage(StaticObjects.init_task)` 由 `StaticObjects.Online` 中已证明的 `valid_object_storage(init_task)` 推出。
+- `StaticObjects` 已标注 `source: static::linux_6_12_37`。`valid_object_storage(init_task)` 来自 `init/init_task.c` 中的静态 `init_task` 定义，`valid_function_symbol(...)` 来自 RISC-V 汇编入口符号，`valid_page_table_storage(...)` 来自 `arch/riscv/mm/init.c` 中的静态页表数组定义；这些事实已由窄规则归入 `linux_static_objects` 直接证明。`BootInitTask.Preset` 的 `valid_task_storage(StaticObjects.init_task)` 由 `StaticObjects.Online` 中已证明的 `valid_object_storage(init_task)` 推出。
 - `PhysicalMemory` 已标注 `source: fdt::memory`。`attrs_accessible(self)`、`valid_phys_range_set(ram)`、`valid_phys_range_set(iomap)` 和 `disjoint(ram, iomap)` 归入 `fdt_memory_layout` 直接证明，表示平台内存布局来自 FDT/platform memory description。具体 DTB 地址/范围落入 RAM 不由该来源自动证明，避免用 DTB 自身的 `/memory` 描述证明 DTB 自身位置；当前由 OpenSBI 固件交接事实与 RawDtb 边界派生共同收口。
 - 剩余泛化 provider 已继续细化：`valid_task_ref(...)` 与 `valid_stack_pointer(...)` 由前序寄存器设置事实推出，`Soc.Preset` 用事件后置条件证明 `soc_early_platform_ready()`；对应 Linux `head.S` 在进入 `start_kernel` 前调用 `soc_early_init()`，而 `soc.c` 根据 `dtb_early_va` 的 compatible 匹配执行 SoC 早期函数。
 - 若裸关系表达式实际承载模型语义，也需要按表达式来源细化，而不是一律归入 `builtin_candidate`。当前已细化：`BootArgs` 的 `a0/a1` 绑定来自启动协议，`RawDtb` 的 header/range 边界来自启动代码读取与派生，`FixMap.fdt_slot == Config.fixmap.fdt` 来自配置源。
 - 事件写寄存器后的状态关系已归入 `register_effect/prior_derivation_facts`，包括 `sie/sip/stvec/tp/sp/gp/satp/sscratch` 的物理地址阶段、EarlyVm 阶段和地址空间切换结果。这类关系不再视为普通 builtin 关系，而是由对应事件的 `may_change` 与前序推导事实支持。
 - `source` 表示可替换的证明来源标识，不应把模型永久固定到某一个 Linux 版本或某一个链接脚本实现；当前用具体来源先收口 RISCV64/Linux 6.12.37 这条验证路径，后续可增加其它来源并保留相同对象语义。
 - `Lds` 已标注 `source: linker::linux_6_12_37`。`Lds.Online` 中的 `_start`、`_end`、`__global_pointer$`、`__bss_start`、`__bss_stop`、`init_thread_union + THREAD_SIZE` 等链接脚本布局事实已由窄规则归入 `linux_linker_script` 直接证明；`KernelImage` 的段集合、BSS 段范围和 BSS 落入内核映像范围也由该链接布局来源收口。
-- `Config` 的数值边界、对齐、satp 模式和 fixmap 配置约束已由 `config_source` 收口。`InitStack` 的栈容量约束已由 `Lds` 链接布局和 `Config` 页大小共同证明：Linux 链接脚本用 `init_thread_union + THREAD_SIZE` 定义 init stack 边界，RISC-V `THREAD_SIZE = PAGE_SIZE << THREAD_SIZE_ORDER`，因此可推出 `Lds.init_stack_end - Lds.init_stack_start >= Config.page_size`；sp 落入栈范围约束仍由前序 sp 设置事实推出。
+- `Config` 的数值边界、对齐、satp 模式和 fixmap 配置约束已由 `config_source` 收口。`BootInitStack` 的栈容量约束已由 `Lds` 链接布局和 `Config` 页大小共同证明：Linux 链接脚本用 `init_thread_union + THREAD_SIZE` 定义 init stack 边界，RISC-V `THREAD_SIZE = PAGE_SIZE << THREAD_SIZE_ORDER`，因此可推出 `Lds.init_stack_end - Lds.init_stack_start >= Config.page_size`；sp 落入栈范围约束仍由前序 sp 设置事实推出。
 - `Config` 已标注 `source: config::entry_prelude`。`Config.Online` 中的配置项可访问性、页大小/PMD/栈页表空间/内核链接地址/内核映像窗口/satp 模式/fixmap 配置等配置源事实，已由窄规则归入 `config_source` 直接证明；`FixMap`、`LinearMap` 和各 VM 阶段对配置的使用仍保留为后续推导义务。
 - 已引入事件后置断言块 `ensures { ... }`。`ensures` 表达事件完成后保证成立的关系，不表示在 invariant 中赋值，也不同于 `may_change` 的“允许改变”。推导器现在可用“进入目标状态的事件 `ensures`”证明该目标状态中完全相同的 invariant；第一批用于消化 `register_effect` 相关寄存器状态关系。
 - 推导器已开始记录已证明表达式，并用前序事实继续证明一小组派生 invariant：`valid_task_ref(Riscv64.tp)`、`valid_stack_pointer(Riscv64.sp)` 和 `inside(Riscv64.sp, ...)` 可由已证明的 `tp/sp` 后置关系推出。

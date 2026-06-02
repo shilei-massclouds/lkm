@@ -10,7 +10,7 @@
  */
 object RootStream: FlowObject {
     initial_state: State::Base;
-    parent: InitTask;
+    parent: BootInitTask;
 
     /*
      * Base 表示根流只进入模型空间，尚未完成入口前导期的执行约束预置。
@@ -49,9 +49,9 @@ object RootStream: FlowObject {
 }
 
 /*
- * InitTask 表示入口前导期的根任务对象。它使用 StaticObjects.init_task 作为底层静态存储，并承载根流的任务身份。
+ * BootInitTask 表示入口前导期的根任务对象。它使用 StaticObjects.init_task 作为底层静态存储，并承载根流的任务身份。
  */
-object InitTask: TaskObject {
+object BootInitTask: TaskObject {
     initial_state: State::Base;
 
     attrs {
@@ -124,11 +124,11 @@ object InitTask: TaskObject {
 }
 
 /*
- * InitStack 表示入口前导期根任务使用的静态根栈。它约束 sp 在物理地址阶段和早期虚拟地址阶段的取值。
+ * BootInitStack 表示入口前导期根任务使用的静态根栈。它约束 sp 在物理地址阶段和早期虚拟地址阶段的取值。
  */
-object InitStack: StackObject {
+object BootInitStack: StackObject {
     initial_state: State::Base;
-    parent: InitTask;
+    parent: BootInitTask;
 
     attrs {
         range: Derived<AddrRange, range(Lds.init_stack_start, Lds.init_stack_end)>;
@@ -213,7 +213,7 @@ object InitStack: StackObject {
                 }
 
                 ensures {
-                    init_stack_guard_ready(InitStack);
+                    init_stack_guard_ready(BootInitStack);
                 }
             }
         }
@@ -224,7 +224,7 @@ object InitStack: StackObject {
      */
     state State::Online {
         invariant {
-            init_stack_guard_ready(InitStack);
+            init_stack_guard_ready(BootInitStack);
         }
     }
 }
@@ -419,7 +419,7 @@ object ExceptionStream: FlowObject {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     EventStream.state == State::Prepared;
-                    InitStack.state == State::Prepared;
+                    BootInitStack.state == State::Prepared;
                 }
 
                 drives {
@@ -1792,15 +1792,15 @@ object EntryPreludePhase: PhaseObject {
                     RootStream.Event::Preset;
                     KernelImage.Event::Setup;
                     CpuGroup.Event::Preset;
-                    InitTask.Event::Preset;
-                    InitStack.Event::Preset;
+                    BootInitTask.Event::Preset;
+                    BootInitStack.Event::Preset;
                     EventStream.Event::Preset;
                     ExceptionStream.Event::Preset;
                     Vm.Event::Preset;
                     Vm.Event::Setup;
                     EventStream.Event::Setup;
-                    InitTask.Event::Enable;
-                    InitStack.Event::Setup;
+                    BootInitTask.Event::Enable;
+                    BootInitStack.Event::Setup;
                     Soc.Event::Preset;
                 }
             }
@@ -1825,8 +1825,8 @@ object EntryPreludePhase: PhaseObject {
             UnexpectedException.state == State::Prepared;
             KernelImage.state == State::Online;
             RawDtb.state == State::Ready;
-            InitTask.state == State::Online;
-            InitStack.state == State::Ready;
+            BootInitTask.state == State::Online;
+            BootInitStack.state == State::Ready;
             Vm.state == State::Ready;
             TrampolineVm.state == State::Destroyed;
             EarlyVm.state == State::Online;

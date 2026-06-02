@@ -203,7 +203,7 @@ object StaticObjects: PrepareObject {
     source: static::linux_6_12_37;
 
     attrs {
-        init_task: ObjectStorage<InitTask>;
+        init_task: ObjectStorage<BootInitTask>;
         early_event_entry: FunctionSymbol<EventEntryPrototype>;
         formal_event_entry: FunctionSymbol<EventEntryPrototype>;
         trampoline_pg_dir: PageTableStorage;
