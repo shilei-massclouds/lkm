@@ -67,8 +67,8 @@
   <text x="685" y="236" text-anchor="middle" class="small">deferred binding</text>
 
   <rect x="365" y="318" width="190" height="82" rx="8" class="box sched"/>
-  <text x="460" y="346" text-anchor="middle" class="label">SmpBootPlan</text>
-  <text x="460" y="370" text-anchor="middle" class="small">topology + present</text>
+  <text x="460" y="346" text-anchor="middle" class="label">CpuGroup</text>
+  <text x="460" y="370" text-anchor="middle" class="small">topology + present attrs</text>
   <rect x="590" y="318" width="190" height="82" rx="8" class="box sched"/>
   <text x="685" y="346" text-anchor="middle" class="label">Workqueue</text>
   <text x="685" y="370" text-anchor="middle" class="small">setup -> Ready</text>
@@ -110,8 +110,8 @@
   <text x="1055" y="212" text-anchor="middle" class="label">MemsAllowed</text>
   <text x="1055" y="236" text-anchor="middle" class="small">CPUSETS/NUMA no-op</text>
   <rect x="912" y="304" width="286" height="72" rx="8" class="box support"/>
-  <text x="1055" y="332" text-anchor="middle" class="label">CpuTopology</text>
-  <text x="1055" y="356" text-anchor="middle" class="small">possible/present CPUs</text>
+  <text x="1055" y="332" text-anchor="middle" class="label">CpuGroup.CpuTopology</text>
+  <text x="1055" y="356" text-anchor="middle" class="small">setup + record BootCPU</text>
   <rect x="912" y="424" width="286" height="72" rx="8" class="box deferred"/>
   <text x="1055" y="452" text-anchor="middle" class="label">VmstatProcExports</text>
   <text x="1055" y="476" text-anchor="middle" class="small">procfs deferred</text>
