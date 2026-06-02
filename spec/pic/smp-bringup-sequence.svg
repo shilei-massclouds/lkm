@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1920" viewBox="0 0 1280 1920" role="img" aria-labelledby="title desc">
+  <title id="title">SMP 启动期对象构建时序</title>
+  <desc id="desc">展示 Linux 6.12.37 default_config 下 smp_init() 的有效调用顺序。</desc>
+  <defs>
+    <style>
+      text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
+      .title { font-size: 30px; font-weight: 600; }
+      .subtitle { font-size: 19px; fill: #475569; }
+      .lane { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 8 6; }
+      .box { fill: #ffffff; stroke: #334155; stroke-width: 1.2; }
+      .stage { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+      .formal { fill: #ecfdf5; stroke: #10b981; }
+      .cpu { fill: #f0fdfa; stroke: #14b8a6; }
+      .flow { fill: #ecfdf5; stroke: #10b981; }
+      .sync { fill: #f5f3ff; stroke: #7c3aed; }
+      .support { fill: #eff6ff; stroke: #3b82f6; }
+      .trimmed { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .obj { font-size: 23px; font-weight: 600; dominant-baseline: middle; }
+      .line1 { font-size: 21px; font-weight: 600; dominant-baseline: middle; }
+      .line2 { font-size: 17px; fill: #475569; dominant-baseline: middle; }
+      .boundary { font-size: 18px; font-weight: 600; fill: #334155; dominant-baseline: middle; }
+      .num { font-size: 17px; font-weight: 600; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .timeline { stroke: #64748b; stroke-width: 2; stroke-linecap: round; }
+      .dot { fill: #334155; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="1920" fill="#ffffff"/>
+  <text x="640" y="46" text-anchor="middle" class="title">SMP 启动期对象构建时序</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">SmpBringupPhase.setup(): smp_init() 启动 secondary CPU</text>
+  <rect x="48" y="126" width="214" height="1720" rx="14" class="lane"/>
+  <text x="155" y="162" text-anchor="middle" class="obj">SMP 启动期</text>
+  <text x="155" y="188" text-anchor="middle" class="obj">SmpBringupPhase</text>
+  <line x1="155" y1="224" x2="155" y2="1810" class="timeline"/>
+  <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="142" class="boundary">起点：PreSmpInitPhase 已 Ready；secondary CPU present 但未 online</text>
+
+  <g transform="translate(0 -48)">
+  <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">SecondaryIdleFlowSet.preset(): idle_threads_init()</text><text x="320" y="260" class="line2">为 possible non-boot CPU 准备 idle task/flow，等待 CPU online 后进入 AP idle</text></g>
+  <g transform="translate(0 176)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sync"/><text x="320" y="232" class="line1">CpuHotplugThreads.setup(): cpuhp_threads_init()</text><text x="320" y="260" class="line2">初始化 cpuhp_state，注册 per-CPU hotplug thread，并 unpark boot CPU 线程</text></g>
+  <g transform="translate(0 296)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text><rect x="292" y="204" width="876" height="84" rx="10" class="box trimmed"/><text x="320" y="232" class="line1">ParallelBringup: cpuhp_bringup_cpus_parallel() trimmed/no-op</text><text x="320" y="260" class="line2">当前 HOTPLUG_PARALLEL 未启用，直接进入串行 bringup 路径</text></g>
+  <g transform="translate(0 416)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text><rect x="292" y="204" width="876" height="84" rx="10" class="box cpu"/><text x="320" y="232" class="line1">CpuGroup.enable(): cpuhp_bringup_mask(..., CPUHP_ONLINE)</text><text x="320" y="260" class="line2">串行遍历 present CPUs，逐个调用 cpu_up(cpu, CPUHP_ONLINE)</text></g>
+  <g transform="translate(0 536)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text><rect x="292" y="204" width="876" height="84" rx="10" class="box cpu"/><text x="320" y="232" class="line1">CpuHotplugState.advance(cpu): cpu_up()</text><text x="320" y="260" class="line2">为目标 CPU 执行 hotplug step，目标状态是 CPUHP_ONLINE</text></g>
+  <g transform="translate(0 656)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">SecondaryCpuEntry.start(cpu): RISC-V __cpu_up()</text><text x="320" y="260" class="line2">设置 tidle CPU，调用 cpu_ops->cpu_start() 启动目标 hart，并等待 cpu_running</text></g>
+  <g transform="translate(0 776)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sync"/><text x="320" y="232" class="line1">CpuRunningGate.wait(): wait_for_completion_timeout()</text><text x="320" y="260" class="line2">boot CPU 等待目标 secondary CPU 完成 smp_callin() 的 online 握手</text></g>
+  <g transform="translate(0 896)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">SecondaryCpuEntry.callin(cpu): smp_callin()</text><text x="320" y="260" class="line2">secondary CPU 绑定 init_mm，记录 topology，并执行 notify_cpu_starting()</text></g>
+  <g transform="translate(0 1016)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text><rect x="292" y="204" width="876" height="84" rx="10" class="box support"/><text x="320" y="232" class="line1">SbiIpi.enable(cpu) + set_cpu_online(cpu, true)</text><text x="320" y="260" class="line2">启用当前 CPU 的 IPI 接收路径，并把 secondary CPU 标记为 online</text></g>
+  <g transform="translate(0 1136)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text><rect x="292" y="204" width="876" height="84" rx="10" class="box support"/><text x="320" y="232" class="line1">SecondaryCpuEntry.finish_callin()</text><text x="320" y="260" class="line2">启用用户态 ISA 暴露，flush icache/TLB，并 complete(&amp;cpu_running)</text></g>
+  <g transform="translate(0 1256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">SecondaryIdleFlowSet.enter_ap_idle(cpu)</text><text x="320" y="260" class="line2">secondary CPU local_irq_enable() 后进入 cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)</text></g>
+  <g transform="translate(0 1376)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text><rect x="292" y="204" width="876" height="84" rx="10" class="box stage"/><text x="320" y="232" class="line1">Online count checkpoint</text><text x="320" y="260" class="line2">读取 num_online_nodes()/num_online_cpus() 并记录 bringup 结果</text></g>
+  <g transform="translate(0 1496)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text><rect x="292" y="204" width="876" height="84" rx="10" class="box trimmed"/><text x="320" y="232" class="line1">smp_cpus_done(setup_max_cpus): trimmed/no-op</text><text x="320" y="260" class="line2">当前 RISC-V 为空实现；下一步进入 sched_init_smp()</text></g>
+  </g>
+
+  <rect x="292" y="1760" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="1786" class="boundary">终点：secondary CPU 已 online 并进入 AP idle；真正多核并行成立；下一步 sched_init_smp()</text>
+</svg>
