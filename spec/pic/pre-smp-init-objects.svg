@@ -82,7 +82,7 @@
 
   <rect x="365" y="586" width="190" height="82" rx="8" class="box support"/>
   <text x="460" y="614" text-anchor="middle" class="label">InitcallTable</text>
-  <text x="460" y="638" text-anchor="middle" class="small">early level run</text>
+  <text x="460" y="638" text-anchor="middle" class="small">run early initcalls</text>
   <rect x="590" y="586" width="190" height="82" rx="8" class="box sync"/>
   <text x="685" y="614" text-anchor="middle" class="label">LockupDetector</text>
   <text x="685" y="638" text-anchor="middle" class="small">softlockup/watchdog</text>
@@ -119,8 +119,8 @@
   <text x="1055" y="572" text-anchor="middle" class="label">Housekeeping</text>
   <text x="1055" y="596" text-anchor="middle" class="small">timer mask default</text>
   <rect x="912" y="664" width="286" height="72" rx="8" class="box trimmed"/>
-  <text x="1055" y="692" text-anchor="middle" class="label">Hardlockup</text>
-  <text x="1055" y="716" text-anchor="middle" class="small">detector disabled</text>
+  <text x="1055" y="692" text-anchor="middle" class="label">EarlyInitcallEffects</text>
+  <text x="1055" y="716" text-anchor="middle" class="small">ASID / zero_pfn / stopper</text>
   <rect x="912" y="784" width="286" height="72" rx="8" class="box phase"/>
   <text x="1055" y="812" text-anchor="middle" class="label">SMP Runtime</text>
   <text x="1055" y="836" text-anchor="middle" class="small">smp_init() starts</text>
