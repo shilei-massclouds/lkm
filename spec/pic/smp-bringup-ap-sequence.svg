@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1780" viewBox="0 0 1280 1780" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1900" viewBox="0 0 1280 1900" role="img" aria-labelledby="title desc">
   <title id="title">SMP 启动期 AP 侧时序</title>
   <desc id="desc">展示 RISC-V secondary CPU 从 AP entry prelude 到 smp_callin() 和 AP idle 的执行路径。</desc>
   <defs>
@@ -25,14 +25,14 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1280" height="1780" fill="#ffffff"/>
+  <rect x="0" y="0" width="1280" height="1900" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">SMP 启动期 AP 侧时序</text>
   <text x="640" y="76" text-anchor="middle" class="subtitle">目标 secondary CPU 自己执行入口先导、smp_callin() 和 AP idle 入口</text>
 
-  <rect x="48" y="126" width="214" height="1580" rx="14" class="lane"/>
+  <rect x="48" y="126" width="214" height="1700" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">AP side</text>
   <text x="155" y="188" text-anchor="middle" class="obj">Secondary CPU</text>
-  <line x1="155" y1="224" x2="155" y2="1670" class="timeline"/>
+  <line x1="155" y1="224" x2="155" y2="1790" class="timeline"/>
 
   <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
   <text x="320" y="142" class="boundary">起点：BP side 已执行 CpuStartProvider.start(cpu, idle)，目标 hart 被释放</text>
@@ -50,9 +50,10 @@
   <g transform="translate(0 1136)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sync"/><text x="320" y="232" class="line1">CpuHotplugState.cpu_running.complete()</text><text x="320" y="260" class="line2">AP complete(&amp;cpu_running)，释放 BP side 在 __cpu_up() 中的等待</text></g>
   <g transform="translate(0 1256)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">InterruptStream.enable(cpu) + IdleTask.enable()</text><text x="320" y="260" class="line2">AP 打开 sstatus.SIE，并进入 cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)</text></g>
   <g transform="translate(0 1376)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">12</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sync"/><text x="320" y="232" class="line1">cpuhp_online_idle(): done_up.complete()</text><text x="320" y="260" class="line2">AP 到达 CPUHP_AP_ONLINE_IDLE，complete_ap_thread(st, true)</text></g>
-  <g transform="translate(0 1496)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">do_idle()</text><text x="320" y="260" class="line2">AP idle task 进入 idle loop，等待调度和中断事件</text></g>
+  <g transform="translate(0 1496)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">13</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">do_idle()</text><text x="320" y="260" class="line2">AP idle task 进入 idle loop；目标 CPU 已可调度其它内核线程</text></g>
+  <g transform="translate(0 1616)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">CpuHotplugThread.run_to_target(CPUHP_ONLINE)</text><text x="320" y="260" class="line2">被 BP 唤醒后，AP hotplug thread 继续执行后续 AP-side callbacks</text></g>
   </g>
 
-  <rect x="292" y="1640" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="1666" class="boundary">终点：目标 secondary CPU 已 online，进入 AP idle；后续 AP hotplug callbacks 由 cpuhp thread 继续</text>
+  <rect x="292" y="1760" width="876" height="52" rx="10" class="stage"/>
+  <text x="320" y="1786" class="boundary">终点：目标 secondary CPU 已 online；AP idle 与 AP hotplug thread 都可被调度执行</text>
 </svg>
