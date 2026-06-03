@@ -14,6 +14,7 @@
       .arg { fill: #fefce8; stroke: #ca8a04; }
       .handoff { fill: #f5f3ff; stroke: #7c3aed; }
       .terminal { fill: #fff7ed; stroke: #f97316; stroke-dasharray: 7 5; }
+      .checkpoint { fill: #f8fafc; stroke: #cbd5e1; }
       .obj { font-size: 23px; font-weight: 600; dominant-baseline: middle; }
       .line1 { font-size: 21px; font-weight: 600; dominant-baseline: middle; }
       .line2 { font-size: 17px; fill: #475569; dominant-baseline: middle; }
@@ -45,7 +46,7 @@
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
       <text x="320" y="232" class="line1">UserBootPayload.setup(): InitCandidateList + InitArgEnv</text>
-      <text x="320" y="260" class="line2">候选顺序为 rdinit、init、CONFIG_DEFAULT_INIT、固定 fallback 列表</text>
+      <text x="320" y="260" class="line2">rdinit 分支仅作 checkpoint；有效候选为 init、CONFIG_DEFAULT_INIT、fallback 列表</text>
     </g>
     <g transform="translate(0 276)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">3</text>
@@ -55,9 +56,9 @@
     </g>
     <g transform="translate(0 386)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">4</text>
-      <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
-      <text x="320" y="232" class="line1">InitCandidateList.try_ramdisk(): ramdisk_execute_command</text>
-      <text x="320" y="260" class="line2">默认 /init，或由 rdinit= 改写；存在时先尝试 run_init_process(path)</text>
+      <rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/>
+      <text x="320" y="232" class="line1">ramdisk_execute_command checkpoint: no run_init_process()</text>
+      <text x="320" y="260" class="line2">前序已要求进入 prepare_namespace() 分支，此处不会执行 ramdisk init</text>
     </g>
     <g transform="translate(0 496)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">5</text>
@@ -81,7 +82,7 @@
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box terminal"/>
       <text x="320" y="232" class="line1">ramdisk 候选失败：记录错误并继续</text>
-      <text x="320" y="260" class="line2">Failed to execute ramdisk_execute_command 后进入 init= / default / fallback 链</text>
+      <text x="320" y="260" class="line2">该失败继续分支当前不进入主线；有效候选从 init= 开始</text>
     </g>
     <g transform="translate(0 936)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text>
