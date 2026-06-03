@@ -1,7 +1,6 @@
 pub mod core_prepare;
 pub mod entry_prelude;
 pub mod entry_successor;
-pub mod irq_time_init;
 pub mod mm_core_init;
 pub mod sched_init;
 
@@ -20,7 +19,7 @@ pub fn setup_after_children() -> ! {
 }
 
 fn handoff() -> ! {
-    crate::startup_timeline_ready()
+    crate::phases::interrupt::setup()
 }
 
 fn boot_phase_ready() -> EventResult {
@@ -38,5 +37,4 @@ pub fn is_ready() -> bool {
         && core_prepare::is_ready()
         && mm_core_init::is_ready()
         && sched_init::is_ready()
-        && irq_time_init::is_ready()
 }

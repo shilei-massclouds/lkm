@@ -19,6 +19,8 @@ pub enum Checkpoint {
     BootPhaseStarted,
     #[allow(dead_code)]
     BootPhaseReady,
+    InterruptPhaseStarted,
+    InterruptPhaseReady,
     EntryPreludePhaseStarted,
     #[allow(dead_code)]
     EntryPreludePhaseReady,
@@ -222,6 +224,8 @@ impl Checkpoint {
             Self::PreparePhaseOnline => "PreparePhase.Online",
             Self::BootPhaseStarted => "BootPhase.Started",
             Self::BootPhaseReady => "BootPhase.Ready",
+            Self::InterruptPhaseStarted => "InterruptPhase.Started",
+            Self::InterruptPhaseReady => "InterruptPhase.Ready",
             Self::EntryPreludePhaseStarted => "EntryPreludePhase.Started",
             Self::EntryPreludePhaseReady => "EntryPreludePhase.Ready",
             Self::EntrySuccessorPhaseStarted => "EntrySuccessorPhase.Started",

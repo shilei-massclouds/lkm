@@ -50,8 +50,7 @@ class CheckToolTests(unittest.TestCase):
             self.assertTrue(data["summary"]["target_reached"])
             self.assertEqual(data["summary"]["blocked"], 0)
             self.assertEqual(data["summary"]["contradiction"], 0)
-            self.assertGreater(data["summary"]["obligation"], 0)
-            self.assertTrue(data["allowed"]["obligation"])
+            self.assertEqual(data["summary"]["obligation"], 0)
             self.assertIn("check: passed", stdout.getvalue())
 
     def test_check_fails_when_target_not_reached(self) -> None:

@@ -26,11 +26,17 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("StartupTimeline", result.model.objects)
         self.assertEqual(
             result.model.children["StartupTimeline"],
-            ["PreparePhase", "BootPhase", "PayloadPhase"],
+            ["PreparePhase", "BootPhase", "InterruptPhase", "PayloadPhase"],
         )
         self.assertEqual(
             result.model.objects["BootPhase"].children,
-            ["EntryPreludePhase", "EntrySuccessorPhase", "CorePreparePhase", "MmCoreInitPhase"],
+            [
+                "EntryPreludePhase",
+                "EntrySuccessorPhase",
+                "CorePreparePhase",
+                "MmCoreInitPhase",
+                "SchedInitPhase",
+            ],
         )
 
     def test_builds_object_view(self) -> None:

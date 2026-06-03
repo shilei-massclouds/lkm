@@ -45,7 +45,7 @@
 | arceos_ex | `CorePreparePhase` 最小骨架 | 已按规格插入 PayloadPhase 前，覆盖 DeviceTree、Zones、ResourceTree、CpuGroup.setup_smp、CacheBlockInfo、CpuCapabilities、CommandLine saved/static 视图、PerCpuStorage、CpuHotplugState、Params、BootParam、PayloadParam、Randomness、PrintkBuffer.setup、ExceptionTable 和 ExceptionStream.setup。 |
 | arceos_ex | `MmCoreInitPhase` 最小闭环 | 已覆盖 MemoryTopology、BootMemoryNode/BootZoneSet/BootZonelistSet、PageAllocator、MemoryDebugHardening、StackDepot、Swiotlb、SlubAllocator、PageTableCaches、VmallocAllocator 和 MmStructCache。 |
 | arceos_ex | `SchedInitPhase` 最小闭环 | 已正式落到 `spec/model/boot/sched-init/` 和 `impl/arceos_ex/src/phases/boot/sched_init.rs`，覆盖 Scheduler、BootRunQueue、BootIdleTask、RadixTree、MapleTree、Workqueue.Prepared、Softirq.Prepared、RcuCore 和 `Scheduler.schedule_preempt_disabled()` smoke。 |
-| arceos_ex | `IrqTimeInitPhase` 最小闭环 | 已正式落到 `spec/model/boot/irq-time-init/` 和 `impl/arceos_ex/src/phases/boot/irq_time_init.rs`，覆盖 IrqController、IrqDispatchTree、Tick/TimerWheel/HrtimerCore、Timekeeper、RiscvTimerProvider、Softirq.Ready、Randomness.Ready、SbiIpi、SmpCallFunction，并在阶段末尾打开 boot CPU 本地中断，新增 timer interrupt smoke。 |
+| arceos_ex | `IrqTimeInitPhase` 最小闭环 | 已正式落到 `spec/model/interrupt/irq-time-init/` 和 `impl/arceos_ex/src/phases/interrupt/irq_time_init.rs`，覆盖 IrqController、IrqDispatchTree、Tick/TimerWheel/HrtimerCore、Timekeeper、RiscvTimerProvider、Softirq.Ready、Randomness.Ready、SbiIpi、SmpCallFunction，并在阶段末尾打开 boot CPU 本地中断，新增 timer interrupt smoke。 |
 | arceos_ex | `PayloadPhase` 最小闭环 | 已把启动链末尾的 selected payload 交接建模为不返回阶段，默认 `APP=smoke` 执行批量 smoke 用例后通过 SBI 关机。 |
 | arceos_ex | no-alloc 输出路径 | 启动期内部输出前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
 | arceos_ex | 最小 FDT 解析 | 不引入外部 crate，不使用 `Vec`、`String`、`Box`，只解析当前闭环必要节点。 |

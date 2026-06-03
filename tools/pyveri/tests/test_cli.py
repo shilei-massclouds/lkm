@@ -49,8 +49,9 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("derive: ok", text)
         self.assertIn("obligation: 0", text)
-        self.assertIn("deferred: 11", text)
+        self.assertIn("deferred: 24", text)
         self.assertIn("MmCoreInitPhase.Event::Setup", text)
+        self.assertIn("InterruptPhase.Event::Setup", text)
 
     def test_default_command_runs_full_verification(self) -> None:
         stdout = io.StringIO()

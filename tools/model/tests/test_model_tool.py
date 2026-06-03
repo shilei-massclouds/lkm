@@ -54,7 +54,10 @@ class ModelToolTests(unittest.TestCase):
             event_stream = objects["EventStream"]
             event_preset = event_stream["states"]["Base"]["events"]["Preset"]
 
-            self.assertEqual(startup["children"], ["PreparePhase", "BootPhase", "PayloadPhase"])
+            self.assertEqual(
+                startup["children"],
+                ["PreparePhase", "BootPhase", "InterruptPhase", "PayloadPhase"],
+            )
             self.assertEqual(setup["source_state"], "Base")
             self.assertEqual(setup["target_state"], "Ready")
             self.assertEqual(
@@ -71,6 +74,7 @@ class ModelToolTests(unittest.TestCase):
                     "PreparePhase.Event::Setup",
                     "PreparePhase.Event::Enable",
                     "BootPhase.Event::Setup",
+                    "InterruptPhase.Event::Setup",
                     "PayloadPhase.Event::Setup",
                     "PayloadPhase.Event::Enable",
                 ],
