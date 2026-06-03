@@ -19,7 +19,10 @@ use trace::Checkpoint;
 static STARTUP_TIMELINE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
 
 pub fn startup_timeline_ready() -> ! {
-    if !phases::prepare::is_online() || !phases::boot::is_ready() || !phases::interrupt::is_ready()
+    if !phases::prepare::is_online()
+        || !phases::boot::is_ready()
+        || !phases::interrupt::is_ready()
+        || !phases::up_multitask::is_ready()
     {
         arch::riscv64::sbi::putstr("arceos_ex startup invariant failed\n");
         arch::riscv64::sbi::system_shutdown()

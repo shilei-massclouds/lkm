@@ -45,6 +45,14 @@ predicate arceos_ex_must_process_prepare_not_create_rest_init_tasks() -> bool;
 predicate arceos_ex_must_process_prepare_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_process_prepare_cover_pid_task_cred_memory_namespace_key_security_objects() -> bool;
 predicate arceos_ex_must_process_prepare_keep_deferred_paths_explicit() -> bool;
+predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
+predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
+predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
+predicate arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts() -> bool;
+predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
+predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
+predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
+predicate arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -431,5 +439,79 @@ type ArceosExProcessPrepareCodingMust {
          * silently disappearing from the implementation boundary.
          */
         arceos_ex_must_process_prepare_keep_deferred_paths_explicit();
+    }
+}
+
+type ArceosExRestInitCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * RestInitPhase is UpMultitaskPhase subphase 1. Its formal model path
+         * is spec/model/up-multitask/rest-init/.
+         */
+        arceos_ex_must_rest_init_model_path_under_up_multitask_phase();
+
+        /*
+         * Code path:
+         *
+         * Phase source layout must follow the model phase tree. The target
+         * implementation path for this phase is the up-multitask phase
+         * subtree, for example impl/arceos_ex/src/phases/up_multitask/rest_init.rs.
+         */
+        arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree();
+
+        /*
+         * Ordering:
+         *
+         * RestInitPhase must run after ProcessPreparePhase.Ready and before
+         * PayloadPhase. It consumes the prepared PID/task/cred/scheduler facts
+         * and opens the single-CPU multitask boundary.
+         */
+        arceos_ex_must_rest_init_run_after_process_prepare();
+
+        /*
+         * Task creation facts:
+         *
+         * The implementation must publish explicit object facts for PID 1
+         * KernelInitTask and KthreaddTask creation, scheduling eligibility and
+         * kthreadd provider binding.
+         */
+        arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts();
+
+        /*
+         * System state:
+         *
+         * rest_init() must publish SystemState.value == SYSTEM_SCHEDULING and
+         * the opening of task-concurrency semantics, without implying SMP.
+         */
+        arceos_ex_must_rest_init_publish_system_scheduling();
+
+        /*
+         * Completion:
+         *
+         * complete(&kthreadd_done) must be represented as a visible
+         * KthreaddReadyGate fact that releases KernelInitTask for the next
+         * PreSmpInitPhase.
+         */
+        arceos_ex_must_rest_init_complete_kthreadd_ready_gate();
+
+        /*
+         * No real task switch:
+         *
+         * The current object-level implementation must not pretend to perform
+         * a real task-stack switch, preemptive scheduler context switch or
+         * idle loop. It may only publish the rest_init boundary facts.
+         */
+        arceos_ex_must_rest_init_keep_true_task_switching_deferred();
+
+        /*
+         * Deferred runtime:
+         *
+         * Secondary CPU bringup, workqueue workers, Tasks RCU GP kthreads,
+         * KernelInitTask.kernel_init_freeable() and kthreadd request
+         * consumption remain later-phase work.
+         */
+        arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred();
     }
 }

@@ -98,6 +98,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::process_prepare::run,
     },
     SmokeCase {
+        name: "rest_init",
+        run: cases::rest_init::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

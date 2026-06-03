@@ -46,6 +46,8 @@
 | arceos_ex | `MmCoreInitPhase` 最小闭环 | 已覆盖 MemoryTopology、BootMemoryNode/BootZoneSet/BootZonelistSet、PageAllocator、MemoryDebugHardening、StackDepot、Swiotlb、SlubAllocator、PageTableCaches、VmallocAllocator 和 MmStructCache。 |
 | arceos_ex | `SchedInitPhase` 最小闭环 | 已正式落到 `spec/model/boot/sched-init/` 和 `impl/arceos_ex/src/phases/boot/sched_init.rs`，覆盖 Scheduler、BootRunQueue、BootIdleTask、RadixTree、MapleTree、Workqueue.Prepared、Softirq.Prepared、RcuCore 和 `Scheduler.schedule_preempt_disabled()` smoke。 |
 | arceos_ex | `IrqTimeInitPhase` 最小闭环 | 已正式落到 `spec/model/interrupt/irq-time-init/` 和 `impl/arceos_ex/src/phases/interrupt/irq_time_init.rs`，覆盖 IrqController、IrqDispatchTree、Tick/TimerWheel/HrtimerCore、Timekeeper、RiscvTimerProvider、Softirq.Ready、Randomness.Ready、SbiIpi、SmpCallFunction，并在阶段末尾打开 boot CPU 本地中断，新增 timer interrupt smoke。 |
+| arceos_ex | `IrqOpenPreparePhase` 最小闭环 | 已正式落到 `spec/model/interrupt/irq-open-prepare/` 和 `impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs`，覆盖 SLUB late flush workqueue、Console.Prepared、SchedClock.Ready、DelayLoop.Ready 和中断打开后的 trimmed/deferred 路径。 |
+| arceos_ex | `ProcessPreparePhase` 最小闭环 | 已正式落到 `spec/model/interrupt/process-prepare/` 和 `impl/arceos_ex/src/phases/interrupt/process_prepare.rs`，覆盖 RootPidNamespace、TaskCreationCore、CredentialCore、VMA/task context、namespace、keyring/security 等 rest_init 输入事实，并新增 process_prepare smoke。 |
 | arceos_ex | `PayloadPhase` 最小闭环 | 已把启动链末尾的 selected payload 交接建模为不返回阶段，默认 `APP=smoke` 执行批量 smoke 用例后通过 SBI 关机。 |
 | arceos_ex | no-alloc 输出路径 | 启动期内部输出前端和应用侧最小 `println!` 前端都写入 `PrintkBuffer`，再由 `EarlyCon(SBI)` drain。 |
 | arceos_ex | 最小 FDT 解析 | 不引入外部 crate，不使用 `Vec`、`String`、`Box`，只解析当前闭环必要节点。 |
@@ -56,10 +58,10 @@
 
 ## 当前交接标记
 
-- 截止提交 537c208 (impl: move irq time init into interrupt phase)，InterruptPhase 子阶段 1 IrqTimeInitPhase 已收尾：正式规格位于 spec/model/interrupt/irq-time-init/，实现位于 impl/arceos_ex/src/phases/interrupt/irq_time_init.rs，阶段末尾打开 boot CPU 本地中断。
-- 已完成验收：make verify；make test；make run LOG=trace APP=smoke；make build APP=hello；make run APP=hello；tools/common、parse、model、derive、check、codegen、view、render、pyveri unittest。
-- 下一轮入口：InterruptPhase 子阶段 2 IrqOpenPreparePhase（中断开放后准备期）。规格讨论起点在 spec/组件化内核规格.md 的 kmem_cache_init_late() 到 arch_cpu_finalize_init() 段；正式化时先落 spec/model/interrupt/irq-open-prepare/，再调整 spec/coding/ 和 impl/arceos_ex/src/phases/interrupt/。
-- 上下文清理后恢复：先执行 git status --short --branch；预期除本地未跟踪 AGENTS.md 外，dev 与 origin/dev 同步。
+- 截止提交 8e89676 (impl: add process prepare phase)，InterruptPhase 子阶段 3 ProcessPreparePhase 已收尾：正式规格位于 spec/model/interrupt/process-prepare/，实现位于 impl/arceos_ex/src/phases/interrupt/process_prepare.rs，阶段出口停在 rest_init() 前。
+- 已完成验收：make verify；make build APP=smoke；make run APP=smoke；make test；make run LOG=trace APP=smoke；make verify REPORT=graph。
+- 下一轮入口：UP Multitask Phase 子阶段 1 RestInitPhase（rest_init 期）。规格讨论起点在 spec/组件化内核规格.md 的 rest_init 期段；正式化时先落 spec/model/up-multitask/rest-init/，再调整 spec/coding/ 和 impl/arceos_ex/src/phases/up_multitask/。
+- 上下文清理后恢复：先执行 git status --short --branch；预期工作树干净。
 
 ## 细节文档索引
 

@@ -23,6 +23,8 @@
 - `IrqTimeInitPhase.Ready`
 - `IrqOpenPreparePhase.Ready`
 - `ProcessPreparePhase.Ready`
+- `UpMultitaskPhase.Ready`
+- `RestInitPhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -62,7 +64,8 @@ make clean
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
-`ProcessPreparePhase.Ready`），随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
+`ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready`），随后通过
+`PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
 `SmpCallFunction` 只发布状态与必要事实，不提供完整运行期服务。
@@ -86,6 +89,22 @@ workqueue worker、RCU GP kthread、完整 softirq 执行或 SMP 并发。
 `VectorContext.Preset` 与 `UprobeCore.Setup`。`SignalCore`、`TaskFileContext`、`VmaCore`、namespace、
 keyring 和 security 对象按 formal trace 后续推进。VFS/proc/page-cache/net namespace、`signals_init()` 以及
 实际任务创建仍保持 deferred 或 trimmed checkpoint，不应伪装成完整运行期服务。
+
+## RestInitPhase 编码约束
+
+`RestInitPhase` 是 `UpMultitaskPhase` 的第一个子阶段，formal model 路径为
+`spec/model/up-multitask/rest-init/`，目标实现路径为
+`impl/arceos_ex/src/phases/up_multitask/rest_init.rs`。该阶段必须在 `ProcessPreparePhase.Ready` 之后运行，并在
+`PayloadPhase` 之前完成；它覆盖 Linux `rest_init()` 的最小对象级边界。
+
+本阶段的主线对象是 `KernelInitTask`、`KthreaddTask`、`SystemState`、`KthreaddReadyGate` 和
+`BootIdleRuntime`。实现必须发布 PID 1 已创建并入队、`kthreadd` provider 已创建并绑定全局引用、
+`system_state == SYSTEM_SCHEDULING`、`kthreadd_done` 已 complete、boot idle runtime 入口已确认等事实。
+这些事实当前仍是对象级模拟边界，不得实现真实任务栈切换、真实调度上下文切换或 idle loop。
+
+本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把 workqueue worker、Tasks RCU GP kthread、
+`kernel_init_freeable()` 或后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是
+`PreSmpInitPhase`，`KthreaddTask` 的运行期服务能力也留给后续模型。
 
 ## Pre-VM lifecycle 代码生成约束
 

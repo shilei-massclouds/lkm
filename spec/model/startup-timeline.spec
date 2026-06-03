@@ -9,6 +9,7 @@ include "common.spec";
 include "prepare/main.spec";
 include "boot/main.spec";
 include "interrupt/main.spec";
+include "up-multitask/main.spec";
 include "payload/main.spec";
 
 /*
@@ -24,7 +25,7 @@ object StartupTimeline: TimelineObject {
     state State::Base {
         events {
             /*
-             * Setup 先推进准备期边界，再推进当前已经展开的引导期和中断期阶段，最后
+             * Setup 先推进准备期边界，再推进当前已经展开的引导期、中断期和单核多任务期阶段，最后
              * 进入 selected payload 的不返回交接边界。
              */
             on Event::Setup -> State::Ready {
@@ -33,6 +34,7 @@ object StartupTimeline: TimelineObject {
                     PreparePhase.Event::Enable;
                     BootPhase.Event::Setup;
                     InterruptPhase.Event::Setup;
+                    UpMultitaskPhase.Event::Setup;
                     PayloadPhase.Event::Setup;
                     PayloadPhase.Event::Enable;
                 }
@@ -41,7 +43,7 @@ object StartupTimeline: TimelineObject {
     }
 
     /*
-     * Ready 表示准备期边界已经生效，当前已经展开的引导期/中断期阶段已经完成，
+     * Ready 表示准备期边界已经生效，当前已经展开的引导期/中断期/单核多任务期阶段已经完成，
      * 且启动链已经移交给 selected payload。
      */
     state State::Ready {
@@ -49,6 +51,7 @@ object StartupTimeline: TimelineObject {
             PreparePhase.state == State::Online;
             BootPhase.state == State::Ready;
             InterruptPhase.state == State::Ready;
+            UpMultitaskPhase.state == State::Ready;
             PayloadPhase.state == State::Online;
         }
     }

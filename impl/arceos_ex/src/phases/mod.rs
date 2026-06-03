@@ -3,6 +3,7 @@ pub mod interrupt;
 pub mod payload;
 pub mod prepare;
 pub mod state;
+pub mod up_multitask;
 
 use crate::objects::state::{EventError, EventResult};
 

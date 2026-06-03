@@ -47,6 +47,7 @@ pub mod randomness;
 pub mod raw_dtb;
 pub mod rcu;
 pub mod resource_tree;
+pub mod rest_init;
 pub mod root_stream;
 pub mod sbi;
 pub mod scheduler;
