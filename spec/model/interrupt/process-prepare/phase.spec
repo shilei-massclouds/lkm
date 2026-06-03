@@ -1,0 +1,610 @@
+/*
+ * Process Prepare Phase Specification
+ *
+ * This is InterruptPhase subphase 3. It starts after IrqOpenPreparePhase has
+ * prepared the interrupt-open late core/platform boundary and covers the Linux
+ * start_kernel() segment from pid_idr_init() through kcsan_init(), stopping
+ * before rest_init() creates PID 1 and kthreadd.
+ */
+
+/*
+ * RootPidNamespace 表示 pid_idr_init() 后 init_pid_ns 的 PID 分配基础。
+ */
+object RootPidNamespace: TaskObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    CpuGroup.state == State::Ready;
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                }
+
+                ensures {
+                    root_pid_namespace_ready(RootPidNamespace);
+                    init_pid_ns_idr_ready(RootPidNamespace);
+                    pid_cache_level0_ready(RootPidNamespace, SlubAllocator);
+                    pid_allocator_limits_configured(RootPidNamespace, CpuGroup);
+                    pid_max_limit_compiletime_checked();
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            root_pid_namespace_ready(RootPidNamespace);
+            init_pid_ns_idr_ready(RootPidNamespace);
+            pid_cache_level0_ready(RootPidNamespace, SlubAllocator);
+            pid_allocator_limits_configured(RootPidNamespace, CpuGroup);
+        }
+    }
+}
+
+/*
+ * AnonVmaCore 表示 anon_vma_init() 建立的匿名内存 rmap graph 分配基础。
+ */
+object AnonVmaCore: MemoryObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                }
+
+                ensures {
+                    anon_vma_core_ready(AnonVmaCore);
+                    anon_vma_cache_ready(AnonVmaCore, SlubAllocator);
+                    anon_vma_chain_cache_ready(AnonVmaCore, SlubAllocator);
+                    anon_vma_runtime_graph_deferred(AnonVmaCore);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            anon_vma_core_ready(AnonVmaCore);
+            anon_vma_cache_ready(AnonVmaCore, SlubAllocator);
+            anon_vma_chain_cache_ready(AnonVmaCore, SlubAllocator);
+            anon_vma_runtime_graph_deferred(AnonVmaCore);
+        }
+    }
+}
+
+/*
+ * CredentialCore 表示 cred_init() 后 cred cache 的准备边界。
+ */
+object CredentialCore: TaskObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                }
+
+                ensures {
+                    credential_core_prepared(CredentialCore);
+                    cred_cache_ready(CredentialCore, SlubAllocator);
+                    init_cred_static_root_not_created_here(CredentialCore);
+                    credential_runtime_relations_deferred(CredentialCore);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            credential_core_prepared(CredentialCore);
+            cred_cache_ready(CredentialCore, SlubAllocator);
+            credential_runtime_relations_deferred(CredentialCore);
+        }
+    }
+}
+
+/*
+ * VectorContext 表示 RISC-V arch_task_cache_init()/riscv_v_setup_ctx_cache()
+ * 后的 vector context cache 准备边界。
+ */
+object VectorContext: HardwareObject {
+    initial_state: State::Base;
+    parent: TaskCreationCore;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    CpuCapabilities.state == State::Ready;
+                    SlubAllocator.state == State::Ready;
+                }
+
+                ensures {
+                    vector_context_prepared(VectorContext, CpuCapabilities);
+                    user_vector_context_cache_ready_if_supported(VectorContext, CpuCapabilities);
+                    kernel_vector_context_cache_ready_if_preemptive(VectorContext, CpuCapabilities);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            vector_context_prepared(VectorContext, CpuCapabilities);
+            user_vector_context_cache_ready_if_supported(VectorContext, CpuCapabilities);
+            kernel_vector_context_cache_ready_if_preemptive(VectorContext, CpuCapabilities);
+        }
+    }
+}
+
+/*
+ * UprobeCore 表示 uprobes_init() 后 uprobes 调试/插桩基础进入 Ready。
+ */
+object UprobeCore: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    ExceptionStream.state == State::Ready;
+                    SlubAllocator.state == State::Ready;
+                }
+
+                ensures {
+                    uprobe_core_ready(UprobeCore);
+                    uprobes_hash_mutex_ready(UprobeCore);
+                    uprobes_die_notifier_registered(UprobeCore, ExceptionStream);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            uprobe_core_ready(UprobeCore);
+            uprobes_hash_mutex_ready(UprobeCore);
+            uprobes_die_notifier_registered(UprobeCore, ExceptionStream);
+        }
+    }
+}
+
+/*
+ * TaskCreationCore 表示 thread_stack_cache_init() 与 fork_init() 后的 task
+ * 创建基础。它不创建 PID 1/kthreadd；这些属于 rest_init()。
+ */
+object TaskCreationCore: TaskObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                    PerCpuStorage.state == State::Ready;
+                }
+
+                ensures {
+                    task_creation_core_prepared(TaskCreationCore);
+                    thread_stack_cache_ready(TaskCreationCore, SlubAllocator);
+                    vmap_stack_path_selected(TaskCreationCore);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            task_creation_core_prepared(TaskCreationCore);
+            thread_stack_cache_ready(TaskCreationCore, SlubAllocator);
+            vmap_stack_path_selected(TaskCreationCore);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    RootPidNamespace.state == State::Ready;
+                    CredentialCore.state == State::Prepared;
+                    CpuGroup.state == State::Ready;
+                    CpuCapabilities.state == State::Ready;
+                    SlubAllocator.state == State::Ready;
+                    BootInitTask.state == State::Online;
+                }
+
+                drives {
+                    VectorContext.Event::Preset;
+                    UprobeCore.Event::Setup;
+                }
+
+                ensures {
+                    task_creation_core_ready(TaskCreationCore);
+                    task_struct_cache_ready(TaskCreationCore, SlubAllocator);
+                    max_threads_configured(TaskCreationCore, CpuGroup);
+                    init_task_rlimits_ready(TaskCreationCore, BootInitTask);
+                    init_user_namespace_ucounts_ready(TaskCreationCore);
+                    fork_vm_stack_cpuhp_registered(TaskCreationCore);
+                    rest_init_task_creation_inputs_ready(TaskCreationCore, RootPidNamespace, CredentialCore);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            VectorContext.state == State::Prepared;
+            UprobeCore.state == State::Ready;
+            task_creation_core_ready(TaskCreationCore);
+            task_struct_cache_ready(TaskCreationCore, SlubAllocator);
+            max_threads_configured(TaskCreationCore, CpuGroup);
+            init_task_rlimits_ready(TaskCreationCore, BootInitTask);
+            init_user_namespace_ucounts_ready(TaskCreationCore);
+            fork_vm_stack_cpuhp_registered(TaskCreationCore);
+            rest_init_task_creation_inputs_ready(TaskCreationCore, RootPidNamespace, CredentialCore);
+        }
+    }
+}
+
+/*
+ * SignalCore 表示 proc_caches_init() 中 signal/sighand cache 的准备边界。
+ * signals_init() 暂缓，因此本阶段只推进到 Prepared。
+ */
+object SignalCore: TaskObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                }
+
+                ensures {
+                    signal_core_prepared(SignalCore);
+                    sighand_cache_ready(SignalCore, SlubAllocator);
+                    signal_struct_cache_ready(SignalCore, SlubAllocator);
+                    sigqueue_cache_deferred(SignalCore);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            signal_core_prepared(SignalCore);
+            sighand_cache_ready(SignalCore, SlubAllocator);
+            signal_struct_cache_ready(SignalCore, SlubAllocator);
+            sigqueue_cache_deferred(SignalCore);
+        }
+    }
+}
+
+/*
+ * TaskFileContext 表示 proc_caches_init() 中 files_struct/fs_struct cache。
+ */
+object TaskFileContext: TaskObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                }
+
+                ensures {
+                    task_file_context_prepared(TaskFileContext);
+                    files_struct_cache_ready(TaskFileContext, SlubAllocator);
+                    fs_struct_cache_ready(TaskFileContext, SlubAllocator);
+                    vfs_runtime_dependency_deferred(TaskFileContext);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            task_file_context_prepared(TaskFileContext);
+            files_struct_cache_ready(TaskFileContext, SlubAllocator);
+            fs_struct_cache_ready(TaskFileContext, SlubAllocator);
+            vfs_runtime_dependency_deferred(TaskFileContext);
+        }
+    }
+}
+
+/*
+ * VmaCore 表示 proc_caches_init()/mmap_init() 中 VMA 分配基础准备。
+ */
+object VmaCore: MemoryObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    MmStructCache.state == State::Ready;
+                    AnonVmaCore.state == State::Ready;
+                    SlubAllocator.state == State::Ready;
+                    PerCpuStorage.state == State::Ready;
+                }
+
+                ensures {
+                    vma_core_prepared(VmaCore);
+                    vm_area_struct_cache_ready(VmaCore, SlubAllocator);
+                    per_vma_lock_cache_ready(VmaCore, SlubAllocator);
+                    vm_committed_as_counter_ready(VmaCore, PerCpuStorage);
+                    vma_runtime_mapping_deferred(VmaCore);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            vma_core_prepared(VmaCore);
+            vm_area_struct_cache_ready(VmaCore, SlubAllocator);
+            per_vma_lock_cache_ready(VmaCore, SlubAllocator);
+            vm_committed_as_counter_ready(VmaCore, PerCpuStorage);
+            vma_runtime_mapping_deferred(VmaCore);
+        }
+    }
+}
+
+/*
+ * NsProxy 表示 task 指向 namespace 实例集合的聚合引用 cache。
+ */
+object NsProxy: TaskObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                }
+
+                ensures {
+                    ns_proxy_prepared(NsProxy);
+                    nsproxy_cache_ready(NsProxy, SlubAllocator);
+                    namespace_runtime_refs_deferred(NsProxy);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            ns_proxy_prepared(NsProxy);
+            nsproxy_cache_ready(NsProxy, SlubAllocator);
+            namespace_runtime_refs_deferred(NsProxy);
+        }
+    }
+}
+
+/*
+ * UtsNamespace 表示 uts_ns_init() 后 UTS namespace clone/unshare cache。
+ */
+object UtsNamespace: TaskObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    NsProxy.state == State::Prepared;
+                    SlubAllocator.state == State::Ready;
+                }
+
+                ensures {
+                    uts_namespace_prepared(UtsNamespace);
+                    uts_namespace_cache_ready(UtsNamespace, SlubAllocator);
+                    init_uts_namespace_static_root_not_created_here(UtsNamespace);
+                    uts_namespace_runtime_ops_deferred(UtsNamespace);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            uts_namespace_prepared(UtsNamespace);
+            uts_namespace_cache_ready(UtsNamespace, SlubAllocator);
+            uts_namespace_runtime_ops_deferred(UtsNamespace);
+        }
+    }
+}
+
+/*
+ * KeyringCore 表示 key_init() 后 key 分配和内建 key type registry 基础。
+ */
+object KeyringCore: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    CredentialCore.state == State::Prepared;
+                    SlubAllocator.state == State::Ready;
+                }
+
+                ensures {
+                    keyring_core_ready(KeyringCore);
+                    key_cache_ready(KeyringCore, SlubAllocator);
+                    builtin_key_types_registered(KeyringCore);
+                    root_key_user_tracking_ready(KeyringCore);
+                    persistent_keyrings_trimmed(KeyringCore);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            keyring_core_ready(KeyringCore);
+            key_cache_ready(KeyringCore, SlubAllocator);
+            builtin_key_types_registered(KeyringCore);
+            root_key_user_tracking_ready(KeyringCore);
+            persistent_keyrings_trimmed(KeyringCore);
+        }
+    }
+}
+
+/*
+ * SecurityCore 表示 security_init() 后 LSM 顺序、blob layout 和 hook
+ * dispatcher 的基础装配。
+ */
+object SecurityCore: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    CredentialCore.state == State::Prepared;
+                    KeyringCore.state == State::Ready;
+                    SlubAllocator.state == State::Ready;
+                    StaticBranch.state == State::Ready;
+                }
+
+                ensures {
+                    security_core_ready(SecurityCore);
+                    ordered_lsms_ready(SecurityCore);
+                    lsm_blob_layout_ready(SecurityCore);
+                    lsm_hook_dispatcher_ready(SecurityCore);
+                    capability_lsm_hooks_registered(SecurityCore);
+                    optional_lsms_conditionally_deferred(SecurityCore);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            security_core_ready(SecurityCore);
+            ordered_lsms_ready(SecurityCore);
+            lsm_blob_layout_ready(SecurityCore);
+            lsm_hook_dispatcher_ready(SecurityCore);
+            capability_lsm_hooks_registered(SecurityCore);
+            optional_lsms_conditionally_deferred(SecurityCore);
+        }
+    }
+}
+
+/*
+ * ProcessPreparePhase 表示 InterruptPhase 的第三个子阶段。它为
+ * rest_init() 创建 kernel_init 和 kthreadd 准备 PID、task、cred、VMA、
+ * namespace、key/security 等基础结构，但不创建任务，也不进入调度运行。
+ */
+object ProcessPreparePhase: PhaseObject {
+    initial_state: State::Base;
+    parent: InterruptPhase;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    IrqOpenPreparePhase.state == State::Ready;
+                    InterruptStream.state == State::Online;
+                    Console.state == State::Prepared;
+                    SchedClock.state == State::Ready;
+                    DelayLoop.state == State::Ready;
+                    Scheduler.state == State::Online;
+                    Workqueue.state == State::Prepared;
+                    Softirq.state == State::Ready;
+                    RcuCore.state == State::Ready;
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                    MmStructCache.state == State::Ready;
+                    PerCpuStorage.state == State::Ready;
+                    CpuCapabilities.state == State::Ready;
+                    BootInitTask.state == State::Online;
+                    ExceptionStream.state == State::Ready;
+                }
+
+                drives {
+                    RootPidNamespace.Event::Setup;
+                    AnonVmaCore.Event::Setup;
+                    TaskCreationCore.Event::Preset;
+                    CredentialCore.Event::Preset;
+                    TaskCreationCore.Event::Setup;
+                    SignalCore.Event::Preset;
+                    TaskFileContext.Event::Preset;
+                    VmaCore.Event::Preset;
+                    NsProxy.Event::Preset;
+                    UtsNamespace.Event::Preset;
+                    KeyringCore.Event::Setup;
+                    SecurityCore.Event::Setup;
+                }
+
+                ensures {
+                    process_prepare_ready(ProcessPreparePhase);
+                    rest_init_inputs_ready(ProcessPreparePhase, RootPidNamespace, TaskCreationCore, CredentialCore);
+                    boot_cpu_local_irq_enabled();
+                    interrupt_concurrency_open_for_boot_cpu();
+                    task_concurrency_closed();
+                    smp_concurrency_closed();
+                    kernel_init_task_not_created_yet();
+                    kthreadd_task_not_created_yet();
+                    system_state_not_scheduling_yet();
+                    x86_efi_runtime_switch_trimmed();
+                    shadow_call_stack_init_trimmed();
+                    lockdep_init_task_trimmed();
+                    dbg_late_init_trimmed();
+                    cpuset_init_trimmed();
+                    cgroup_init_trimmed();
+                    taskstats_init_trimmed();
+                    delayacct_init_trimmed();
+                    acpi_subsystem_init_trimmed();
+                    arch_post_acpi_subsys_init_trimmed();
+                    kcsan_init_trimmed();
+                }
+
+                deferred {
+                    "NetNamespace.setup() 保留 Linux net_ns_init() 时序位置，当前不推进网络 namespace 运行期对象。";
+                    "VfsCore.setup()、PageCache.setup()、SeqFileCore.setup()、Procfs.setup()、Nsfs.setup() 和 Pidfs.setup() 服务用户态/VFS/proc 可见路径，当前保留为 deferred。";
+                    "SignalCore.setup()/signals_init() 暂缓；本阶段只要求 sighand/signal cache 进入 Prepared。";
+                    "RootPidNamespace 的 alloc_pid/free_pid/find_pid_ns 等运行期 action 留给 rest_init() 和后续任务创建路径。";
+                    "TaskCreationCore 不创建 kernel_init 或 kthreadd；rest_init() 才推进这些任务对象和 SYSTEM_SCHEDULING。";
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            IrqOpenPreparePhase.state == State::Ready;
+            RootPidNamespace.state == State::Ready;
+            AnonVmaCore.state == State::Ready;
+            TaskCreationCore.state == State::Ready;
+            CredentialCore.state == State::Prepared;
+            VectorContext.state == State::Prepared;
+            UprobeCore.state == State::Ready;
+            SignalCore.state == State::Prepared;
+            TaskFileContext.state == State::Prepared;
+            VmaCore.state == State::Prepared;
+            NsProxy.state == State::Prepared;
+            UtsNamespace.state == State::Prepared;
+            KeyringCore.state == State::Ready;
+            SecurityCore.state == State::Ready;
+            process_prepare_ready(ProcessPreparePhase);
+            rest_init_inputs_ready(ProcessPreparePhase, RootPidNamespace, TaskCreationCore, CredentialCore);
+            boot_cpu_local_irq_enabled();
+            task_concurrency_closed();
+            smp_concurrency_closed();
+            kernel_init_task_not_created_yet();
+            kthreadd_task_not_created_yet();
+            system_state_not_scheduling_yet();
+        }
+    }
+}

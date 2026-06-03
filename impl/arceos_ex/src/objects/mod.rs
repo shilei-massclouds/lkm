@@ -41,6 +41,7 @@ pub mod per_cpu_storage;
 pub mod physical_memory;
 pub mod platform_cpu_info;
 pub mod printk;
+pub mod process_prepare;
 pub mod radix_tree;
 pub mod randomness;
 pub mod raw_dtb;

@@ -22,6 +22,7 @@
 - `InterruptPhase.Ready`
 - `IrqTimeInitPhase.Ready`
 - `IrqOpenPreparePhase.Ready`
+- `ProcessPreparePhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -60,10 +61,31 @@ make clean
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
-`InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready` 和 `IrqOpenPreparePhase.Ready`），随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
+`InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
+`ProcessPreparePhase.Ready`），随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
 `SmpCallFunction` 只发布状态与必要事实，不提供完整运行期服务。
+
+## ProcessPreparePhase 编码约束
+
+`ProcessPreparePhase` 是 `InterruptPhase` 的第三个子阶段，formal model 路径为
+`spec/model/interrupt/process-prepare/`，目标实现路径为
+`impl/arceos_ex/src/phases/interrupt/process_prepare.rs`。该阶段必须在 `IrqOpenPreparePhase.Ready`
+之后运行，复用已打开的 boot CPU local IRQ、`Console.Prepared`、`SchedClock.Ready` 和 `DelayLoop.Ready`
+事实，为后续 `rest_init()` 创建 `kernel_init`/`kthreadd` 准备对象基础。
+
+本阶段的 Rust 对象承载应覆盖规格中的核心对象：`RootPidNamespace`、`AnonVmaCore`、`TaskCreationCore`、
+`CredentialCore`、`VectorContext`、`UprobeCore`、`SignalCore`、`TaskFileContext`、`VmaCore`、`NsProxy`、
+`UtsNamespace`、`KeyringCore` 和 `SecurityCore`。这些对象只发布 PID/task/cred/VMA/namespace/key/security
+的启动期 ready/prepared 事实，不得创建 PID 1、不得创建 `kthreadd`、不得把系统推进到调度运行状态，也不得启动
+workqueue worker、RCU GP kthread、完整 softirq 执行或 SMP 并发。
+
+`TaskCreationCore.Setup` 是本阶段的主要收敛点：它必须依赖 `RootPidNamespace.Ready`、
+`CredentialCore.Prepared`、`BootInitTask.Online`、CPU/SLUB 事实和异常分发事实，并在同一事件中驱动
+`VectorContext.Preset` 与 `UprobeCore.Setup`。`SignalCore`、`TaskFileContext`、`VmaCore`、namespace、
+keyring 和 security 对象按 formal trace 后续推进。VFS/proc/page-cache/net namespace、`signals_init()` 以及
+实际任务创建仍保持 deferred 或 trimmed checkpoint，不应伪装成完整运行期服务。
 
 ## Pre-VM lifecycle 代码生成约束
 

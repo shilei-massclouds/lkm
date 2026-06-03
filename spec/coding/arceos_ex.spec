@@ -38,6 +38,13 @@ predicate arceos_ex_must_irq_open_prepare_keep_runtime_services_deferred() -> bo
 predicate arceos_ex_must_irq_open_prepare_keep_slub_ready_not_online() -> bool;
 predicate arceos_ex_must_irq_open_prepare_console_prepared_only() -> bool;
 predicate arceos_ex_must_irq_open_prepare_expose_sched_clock_and_delay_smoke_actions() -> bool;
+predicate arceos_ex_must_process_prepare_model_path_under_interrupt_phase() -> bool;
+predicate arceos_ex_must_process_prepare_code_path_follow_interrupt_phase_tree() -> bool;
+predicate arceos_ex_must_process_prepare_run_after_irq_open_prepare() -> bool;
+predicate arceos_ex_must_process_prepare_not_create_rest_init_tasks() -> bool;
+predicate arceos_ex_must_process_prepare_keep_runtime_services_deferred() -> bool;
+predicate arceos_ex_must_process_prepare_cover_pid_task_cred_memory_namespace_key_security_objects() -> bool;
+predicate arceos_ex_must_process_prepare_keep_deferred_paths_explicit() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -356,5 +363,73 @@ type ArceosExIrqOpenPrepareCodingMust {
          * clock read that advances and a bounded busy-wait delay action.
          */
         arceos_ex_must_irq_open_prepare_expose_sched_clock_and_delay_smoke_actions();
+    }
+}
+
+type ArceosExProcessPrepareCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * ProcessPreparePhase is InterruptPhase subphase 3. Its formal model
+         * path is spec/model/interrupt/process-prepare/.
+         */
+        arceos_ex_must_process_prepare_model_path_under_interrupt_phase();
+
+        /*
+         * Code path:
+         *
+         * Phase source layout must follow the model phase tree. The target
+         * implementation path for this phase is the interrupt phase subtree,
+         * for example impl/arceos_ex/src/phases/interrupt/process_prepare.rs.
+         */
+        arceos_ex_must_process_prepare_code_path_follow_interrupt_phase_tree();
+
+        /*
+         * Ordering:
+         *
+         * ProcessPreparePhase must run after IrqOpenPreparePhase.Ready, with
+         * Console.Prepared, SchedClock.Ready, DelayLoop.Ready and the boot CPU
+         * local interrupt gate already established.
+         */
+        arceos_ex_must_process_prepare_run_after_irq_open_prepare();
+
+        /*
+         * rest_init boundary:
+         *
+         * This phase prepares the inputs to rest_init(). It must not create
+         * kernel_init, kthreadd or any PID 1 task, and must not advance the
+         * system into the scheduling-running state.
+         */
+        arceos_ex_must_process_prepare_not_create_rest_init_tasks();
+
+        /*
+         * Runtime services:
+         *
+         * This phase must keep task concurrency and SMP concurrency closed and
+         * must not implicitly start workqueue workers, RCU GP kthreads, full
+         * softirq execution, network namespace runtime or VFS/proc visible
+         * services.
+         */
+        arceos_ex_must_process_prepare_keep_runtime_services_deferred();
+
+        /*
+         * Object coverage:
+         *
+         * The implementation must provide explicit object carriers for the
+         * formal PID namespace, anonymous VMA, task creation, credential,
+         * vector context, uprobe, signal, task file context, VMA, namespace,
+         * keyring and security readiness/preparedness facts.
+         */
+        arceos_ex_must_process_prepare_cover_pid_task_cred_memory_namespace_key_security_objects();
+
+        /*
+         * Deferred paths:
+         *
+         * Trimmed and deferred Linux start_kernel() calls in this interval
+         * must remain visible as checkpoints or deferred facts rather than
+         * silently disappearing from the implementation boundary.
+         */
+        arceos_ex_must_process_prepare_keep_deferred_paths_explicit();
     }
 }

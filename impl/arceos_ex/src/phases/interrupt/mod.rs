@@ -1,5 +1,6 @@
 pub mod irq_open_prepare;
 pub mod irq_time_init;
+pub mod process_prepare;
 
 use crate::{
     objects::state::{EventResult, LifecycleEvent, State},
@@ -41,4 +42,5 @@ pub fn is_ready() -> bool {
     crate::phases::state::load(&INTERRUPT_PHASE_STATE) == State::Ready
         && irq_time_init::is_ready()
         && irq_open_prepare::is_ready()
+        && process_prepare::is_ready()
 }

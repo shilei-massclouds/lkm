@@ -39,6 +39,10 @@ use crate::objects::{
     per_cpu_storage::PerCpuStorage,
     physical_memory::PhysicalMemory,
     platform_cpu_info::PlatformCpuInfo,
+    process_prepare::{
+        AnonVmaCore, CredentialCore, KeyringCore, NsProxy, RootPidNamespace, SecurityCore,
+        SignalCore, TaskCreationCore, TaskFileContext, UtsNamespace, VmaCore,
+    },
     radix_tree::RadixTree,
     randomness::Randomness,
     raw_dtb::RawDtb,
@@ -134,6 +138,18 @@ pub struct Context {
     pub console: Console,
     pub sched_clock: SchedClock,
     pub delay_loop: DelayLoop,
+
+    pub root_pid_namespace: RootPidNamespace,
+    pub anon_vma_core: AnonVmaCore,
+    pub task_creation_core: TaskCreationCore,
+    pub credential_core: CredentialCore,
+    pub signal_core: SignalCore,
+    pub task_file_context: TaskFileContext,
+    pub vma_core: VmaCore,
+    pub ns_proxy: NsProxy,
+    pub uts_namespace: UtsNamespace,
+    pub keyring_core: KeyringCore,
+    pub security_core: SecurityCore,
 }
 
 impl Context {
@@ -210,6 +226,17 @@ impl Context {
             console: Console::new(),
             sched_clock: SchedClock::new(),
             delay_loop: DelayLoop::new(),
+            root_pid_namespace: RootPidNamespace::new(),
+            anon_vma_core: AnonVmaCore::new(),
+            task_creation_core: TaskCreationCore::new(),
+            credential_core: CredentialCore::new(),
+            signal_core: SignalCore::new(),
+            task_file_context: TaskFileContext::new(),
+            vma_core: VmaCore::new(),
+            ns_proxy: NsProxy::new(),
+            uts_namespace: UtsNamespace::new(),
+            keyring_core: KeyringCore::new(),
+            security_core: SecurityCore::new(),
         }
     }
 }

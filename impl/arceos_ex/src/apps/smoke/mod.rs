@@ -94,6 +94,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::delay_loop::run,
     },
     SmokeCase {
+        name: "process_prepare",
+        run: cases::process_prepare::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },
