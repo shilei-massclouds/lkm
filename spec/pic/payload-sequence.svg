@@ -39,8 +39,8 @@
     <g transform="translate(0 56)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/>
-      <text x="320" y="232" class="line1">PayloadPhase.setup(): 选择 UserBootPayload 变种</text>
-      <text x="320" y="260" class="line2">确认 rootfs、console、PID 1 当前流、参数/环境和 exec 前置条件</text>
+      <text x="320" y="232" class="line1">PayloadPhase.setup(): 确认编译期 selected payload</text>
+      <text x="320" y="260" class="line2">APP -> --cfg app_&lt;name&gt; -> apps::run()；运行期不再动态分派</text>
     </g>
     <g transform="translate(0 166)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text>
