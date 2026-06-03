@@ -6,14 +6,22 @@ comma := ,
 empty :=
 space := $(empty) $(empty)
 PROBE ?=
-PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)))
-KNOWN_PROBES := memblock-api
+PROBE_FILE ?=
+ifneq ($(PROBE_FILE),)
+ifeq ($(wildcard $(PROBE_FILE)),)
+$(error PROBE_FILE not found: $(PROBE_FILE))
+endif
+endif
+PROBE_FILE_LIST := $(if $(PROBE_FILE),$(strip $(shell sed -e 's/#.*//' "$(PROBE_FILE)")),)
+PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST))
+KNOWN_PROBES := memblock earlycon
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))
 endif
 PROBE_CFGS := $(foreach probe,$(PROBE_LIST),--cfg checkpoint_handler_$(subst -,_,$(probe)))
-PROBE_BUILD_SUFFIX := $(if $(PROBE),/probe-$(subst $(comma),+,$(subst /,_,$(subst .,_,$(PROBE)))))
+PROBE_BUILD_LABEL := $(subst $(space),+,$(PROBE_LIST))
+PROBE_BUILD_SUFFIX := $(if $(PROBE_LIST),/probe-$(subst /,_,$(subst .,_,$(PROBE_BUILD_LABEL))))
 BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)$(PROBE_BUILD_SUFFIX)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
 KERNEL_BIN := $(BUILD_DIR)/arceos_ex.bin
@@ -71,10 +79,10 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 
 run:
 ifeq ($(LOG),trace)
-	$(MAKE) PROFILE=trace APP=$(APP) PROBE="$(PROBE)" EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
+	$(MAKE) PROFILE=trace APP=$(APP) PROBE="$(PROBE)" PROBE_FILE="$(PROBE_FILE)" EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(TRACE_KERNEL_BIN)
 else
-	$(MAKE) build APP=$(APP) PROBE="$(PROBE)"
+	$(MAKE) build APP=$(APP) PROBE="$(PROBE)" PROBE_FILE="$(PROBE_FILE)"
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(KERNEL_BIN)
 endif
 

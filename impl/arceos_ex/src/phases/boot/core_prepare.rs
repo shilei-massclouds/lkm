@@ -65,6 +65,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.randomness.preset(&ctx.static_command_line)?;
     printk::setup(&ctx.memblock, &ctx.per_cpu_storage, &ctx.boot_param)?;
+    crate::checkpoint::dispatch_mut(Checkpoint::PrintkBufferReady, ctx);
     ctx.exception_table.setup(&ctx.kernel_image, &ctx.vm)?;
     ctx.exception_stream.setup(&ctx.event_stream)
 }

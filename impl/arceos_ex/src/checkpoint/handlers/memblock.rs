@@ -8,7 +8,7 @@ const SCOPE: &[Checkpoint] = &[Checkpoint::MemBlockOnline];
 const MEMBLOCK_TEST_WORD: usize = 0x4d45_4d42;
 
 pub const HANDLER: Handler = Handler {
-    name: "memblock-api",
+    name: "memblock",
     priority: 100,
     scope: HandlerScope::Only(SCOPE),
     run: HandlerRun::Write(run),
@@ -18,21 +18,21 @@ fn run(_checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
     let page_size = ctx.config.page_size();
 
     let Some(first) = ctx.memblock.alloc_phys(page_size, page_size) else {
-        putstr("checkpoint memblock-api: first alloc failed\n");
+        putstr("kunit memblock: first alloc failed\n");
         return CheckpointOutcome::FailAndShutdown;
     };
     let Some(second) = ctx.memblock.alloc_phys(page_size, page_size) else {
-        putstr("checkpoint memblock-api: second alloc failed\n");
+        putstr("kunit memblock: second alloc failed\n");
         return CheckpointOutcome::FailAndShutdown;
     };
 
     if first.end() > second.start() || first.size() != page_size || second.size() != page_size {
-        putstr("checkpoint memblock-api: allocated ranges invalid\n");
+        putstr("kunit memblock: allocated ranges invalid\n");
         return CheckpointOutcome::FailAndShutdown;
     }
 
     let Some(first_va) = ctx.config.phys_to_linear(first.start()) else {
-        putstr("checkpoint memblock-api: linear address conversion failed\n");
+        putstr("kunit memblock: linear address conversion failed\n");
         return CheckpointOutcome::FailAndShutdown;
     };
 
@@ -40,17 +40,18 @@ fn run(_checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
     unsafe {
         core::ptr::write_volatile(word, MEMBLOCK_TEST_WORD);
         if core::ptr::read_volatile(word) != MEMBLOCK_TEST_WORD {
-            putstr("checkpoint memblock-api: readback failed\n");
+            putstr("kunit memblock: readback failed\n");
             return CheckpointOutcome::FailAndShutdown;
         }
     }
 
-    putstr("checkpoint memblock-api: allocated pages phys=0x");
+    putstr("kunit memblock: allocated pages phys=0x");
     put_hex(first.start());
     putstr(",0x");
     put_hex(second.start());
     putstr("\n");
-    CheckpointOutcome::StopAndShutdown
+    putstr("kunit memblock: passed\n");
+    CheckpointOutcome::Passed
 }
 
 fn putstr(message: &str) {

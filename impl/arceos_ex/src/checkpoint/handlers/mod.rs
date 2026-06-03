@@ -1,7 +1,11 @@
 #[cfg(checkpoint_sbi_char)]
 pub mod early_trace;
+#[cfg(checkpoint_handler_earlycon)]
+mod earlycon;
 #[cfg(checkpoint_handler_memblock_api)]
-mod memblock_api;
+compile_error!("checkpoint handler memblock-api was renamed to memblock");
+#[cfg(checkpoint_handler_memblock)]
+mod memblock;
 #[cfg(checkpoint_sbi_char)]
 mod trace;
 
@@ -11,6 +15,7 @@ use crate::{context::Context, trace::Checkpoint};
 #[allow(dead_code)]
 pub enum CheckpointOutcome {
     Continue,
+    Passed,
     FailAndShutdown,
     StopAndShutdown,
 }
@@ -39,8 +44,10 @@ pub struct Handler {
 const POST_VM_HANDLERS: &[Handler] = &[
     #[cfg(checkpoint_sbi_char)]
     trace::HANDLER,
-    #[cfg(checkpoint_handler_memblock_api)]
-    memblock_api::HANDLER,
+    #[cfg(checkpoint_handler_memblock)]
+    memblock::HANDLER,
+    #[cfg(checkpoint_handler_earlycon)]
+    earlycon::HANDLER,
 ];
 
 pub const fn has_post_vm_handlers() -> bool {
