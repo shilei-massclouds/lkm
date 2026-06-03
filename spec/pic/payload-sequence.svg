@@ -87,8 +87,8 @@
     <g transform="translate(0 936)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
-      <text x="320" y="232" class="line1">InitCandidateList.try_init_arg(): execute_command</text>
-      <text x="320" y="260" class="line2">来自 init=；成功则进入 UserInitProcess，失败则 Requested init panic</text>
+      <text x="320" y="232" class="line1">UserBootPayload.try_candidate(path, requested=true)</text>
+      <text x="320" y="260" class="line2">execute_command 来自 init=；失败则 PayloadPanic.requested_init_failed()</text>
     </g>
     <g transform="translate(0 1046)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text>
