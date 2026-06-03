@@ -23,7 +23,9 @@ pub fn run() -> SmokeResult {
     }
 
     if ctx.irq_controller.state() != State::Ready
+        || ctx.riscv_intc.state() != State::Ready
         || ctx.irq_dispatch_tree.state() != State::Ready
+        || ctx.plic.state() != State::Prepared
         || ctx.tick.state() != State::Ready
         || ctx.timer_wheel.state() != State::Ready
         || ctx.hrtimer_core.state() != State::Ready
@@ -31,6 +33,7 @@ pub fn run() -> SmokeResult {
         || ctx.riscv_timer_provider.state() != State::Ready
         || ctx.softirq.state() != State::Ready
         || ctx.randomness.state() != State::Ready
+        || ctx.ipi_mux.state() != State::Ready
         || ctx.sbi_ipi.state() != State::Ready
         || ctx.smp_call_function.state() != State::Ready
     {

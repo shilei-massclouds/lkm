@@ -429,9 +429,15 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 
 `IrqTimeInitPhase` 已正式落到 `spec/model/boot/irq-time-init/`。实现侧边界和早期设计草案不同：`local_irq_enable()`
 不再属于后续中断开放期的开头，而是本阶段的结尾。阶段出口必须满足 `InterruptStream.Online`、boot CPU
-`sstatus.SIE` 已打开、`IrqController.Ready`、`IrqDispatchTree.Ready`、`Tick.Ready`、`TimerWheel.Ready`、`HrtimerCore.Ready`、
-`Timekeeper.Ready`、`RiscvTimerProvider.Ready`、`Softirq.Ready`、`Randomness.Ready`、`SbiIpi.Ready` 和
-`SmpCallFunction.Ready`。
+`sstatus.SIE` 已打开、`IrqController.Ready`、`RiscvIntc.Ready`、`IrqDispatchTree.Ready`、`Plic.Prepared`、`Tick.Ready`、
+`TimerWheel.Ready`、`HrtimerCore.Ready`、`Timekeeper.Ready`、`RiscvTimerProvider.Ready`、`Softirq.Ready`、`Randomness.Ready`、
+`SbiIpi.Ready`、`IpiMux.Ready` 和 `SmpCallFunction.Ready`。
+
+当前按 OpenSBI 下的 RISC-V S-mode 路径建模：`RiscvIntc` 表示每 hart 直连 CPU 的 local interrupt controller，
+`RiscvTimerProvider` 表示 Linux `timer-riscv` 风格的 time/clockevent provider，timer programming 走 SBI TIME 或后续 SSTC
+能力，而不是直接把 CLINT 作为本阶段对象。IPI 路径按 `SbiIpi` 提供 software IRQ mapping 和 send action，`IpiMux` 在其上建立虚拟
+IPI range；这对应 Linux `sbi-ipi` + generic `ipi-mux`。`Plic` 在本阶段只推进到 `Prepared` 占位，保留 external interrupt
+provider discovery 和 parent 关系，不开放 external IRQ route，也不注册外部中断 handler。
 
 本阶段打开的只是 boot CPU 本地中断总入口。普通任务并发、secondary CPU 并发、周期 tick 服务、workqueue worker
 kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提前解释为 Online。

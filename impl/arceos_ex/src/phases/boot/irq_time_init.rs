@@ -30,11 +30,15 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.per_cpu_storage,
         &ctx.cpu_group,
     )?;
+    ctx.riscv_intc
+        .setup(&ctx.device_tree, &ctx.irq_controller, &ctx.cpu_group)?;
     ctx.irq_dispatch_tree.setup(
         &ctx.irq_controller,
+        &ctx.riscv_intc,
         &mut ctx.interrupt_stream,
         &ctx.cpu_group,
     )?;
+    ctx.plic.preset(&ctx.device_tree, &ctx.riscv_intc)?;
     ctx.tick.preset(&ctx.cpu_group, &ctx.per_cpu_storage)?;
     ctx.timer_wheel
         .setup(&ctx.per_cpu_storage, &ctx.cpu_group, &mut ctx.softirq)?;
@@ -43,7 +47,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.timekeeper.setup(&ctx.tick, &ctx.static_branch)?;
     ctx.riscv_timer_provider.setup(
         &ctx.device_tree,
-        &ctx.irq_controller,
+        &ctx.riscv_intc,
         &ctx.irq_dispatch_tree,
         &mut ctx.timekeeper,
         &ctx.hrtimer_core,
@@ -56,9 +60,11 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     let time_seed = crate::arch::riscv64::sbi::read_time();
     ctx.randomness.setup(&ctx.cpu_group, time_seed)?;
     ctx.sbi_ipi
-        .setup(&ctx.sbi, &ctx.irq_controller, &ctx.cpu_group)?;
+        .setup(&ctx.sbi, &ctx.riscv_intc, &ctx.cpu_group)?;
+    ctx.ipi_mux
+        .setup(&ctx.sbi_ipi, &ctx.per_cpu_storage, &ctx.cpu_group)?;
     ctx.smp_call_function
-        .setup(&ctx.sbi_ipi, &ctx.cpu_group, &ctx.per_cpu_storage)?;
+        .setup(&ctx.ipi_mux, &ctx.cpu_group, &ctx.per_cpu_storage)?;
     ctx.interrupt_stream.enable()
 }
 
@@ -94,12 +100,26 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.irq_controller.state() == State::Ready
         && ctx.irq_controller.descriptors_ready()
         && ctx.irq_controller.domain_ready()
-        && ctx.irq_controller.riscv_intc_ready()
-        && ctx.irq_controller.boot_cpu_timer_irq_ready()
+        && ctx.irq_controller.allocator_minimal_ready()
+        && ctx.riscv_intc.state() == State::Ready
+        && ctx.riscv_intc.domain_ready()
+        && ctx.riscv_intc.boot_cpu_local_causes_ready()
+        && ctx.riscv_intc.timer_pin_ready()
+        && ctx.riscv_intc.software_pin_ready()
+        && ctx.riscv_intc.external_pin_ready()
+        && ctx.riscv_intc.boot_cpu_timer_irq_ready()
+        && ctx.riscv_intc.boot_cpu_software_irq_ready()
+        && ctx.riscv_intc.boot_cpu_external_irq_reserved()
         && ctx.irq_dispatch_tree.state() == State::Ready
         && ctx.irq_dispatch_tree.fallback_route_ready()
         && ctx.irq_dispatch_tree.timer_route_ready()
+        && ctx.irq_dispatch_tree.software_route_reserved()
+        && ctx.irq_dispatch_tree.external_route_deferred()
         && ctx.irq_dispatch_tree.boot_cpu_route_ready()
+        && ctx.plic.state() == State::Prepared
+        && ctx.plic.provider_discovery_reserved()
+        && ctx.plic.external_parent_reserved()
+        && ctx.plic.external_irq_route_deferred()
         && ctx.tick.state() == State::Ready
         && ctx.tick.control_ready()
         && ctx.tick.nohz_trimmed()
@@ -143,12 +163,20 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && !ctx.softirq.execution_open()
         && ctx.randomness.state() == State::Ready
         && ctx.randomness.is_fully_ready()
+        && ctx.ipi_mux.state() == State::Ready
+        && ctx.ipi_mux.domain_ready()
+        && ctx.ipi_mux.per_cpu_bits_ready()
+        && ctx.ipi_mux.virtual_ipi_range_ready()
+        && ctx.ipi_mux.parent_software_irq_ready()
+        && ctx.ipi_mux.secondary_enable_deferred()
         && ctx.sbi_ipi.state() == State::Ready
         && ctx.sbi_ipi.irq_mapping_ready()
+        && ctx.sbi_ipi.send_action_ready()
         && ctx.sbi_ipi.enable_deferred()
         && ctx.smp_call_function.state() == State::Ready
         && ctx.smp_call_function.call_single_queue_ready()
         && ctx.smp_call_function.ipi_route_ready()
+        && ctx.smp_call_function.ipi_mux_ready()
         && ctx.smp_call_function.possible_cpu_count() == ctx.cpu_group.possible_cpu_count()
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()

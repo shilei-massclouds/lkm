@@ -9,7 +9,7 @@
 
 /*
  * IrqController 表示 early_irq_init()/init_IRQ() 建立的 IRQ descriptor、
- * IRQ domain 和 RISC-V INTC 基础。当前只要求 boot CPU timer interrupt 可映射。
+ * generic IRQ domain 壳。RISC-V 本地中断控制器、IPI mux 和 PLIC 另行建模。
  */
 object IrqController: InterruptObject {
     initial_state: State::Base;
@@ -28,8 +28,7 @@ object IrqController: InterruptObject {
                 ensures {
                     irq_descriptors_ready(IrqController);
                     irq_domain_ready(IrqController, DeviceTree);
-                    riscv_intc_domain_ready(IrqController, DeviceTree);
-                    boot_cpu_timer_irq_mapping_ready(IrqController);
+                    irq_allocator_minimal_ready(IrqController, PageAllocator, SlubAllocator);
                 }
             }
         }
@@ -39,8 +38,53 @@ object IrqController: InterruptObject {
         invariant {
             irq_descriptors_ready(IrqController);
             irq_domain_ready(IrqController, DeviceTree);
-            riscv_intc_domain_ready(IrqController, DeviceTree);
-            boot_cpu_timer_irq_mapping_ready(IrqController);
+            irq_allocator_minimal_ready(IrqController, PageAllocator, SlubAllocator);
+        }
+    }
+}
+
+/*
+ * RiscvIntc 表示每 hart 直连 CPU 的 RISC-V local interrupt controller。
+ * 当前要求 boot CPU 的 INTC domain 建立，并能映射 timer/software/external
+ * 三条本地 cause；external provider 仍由 PLIC 占位而不开放运行期路由。
+ */
+object RiscvIntc: InterruptObject {
+    initial_state: State::Base;
+    parent: IrqController;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    IrqController.state == State::Ready;
+                    DeviceTree.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                }
+
+                ensures {
+                    riscv_intc_domain_ready(RiscvIntc, IrqController, DeviceTree);
+                    riscv_intc_boot_cpu_local_causes_ready(RiscvIntc, BootCPU);
+                    riscv_intc_timer_pin_ready(RiscvIntc);
+                    riscv_intc_software_pin_ready(RiscvIntc);
+                    riscv_intc_external_pin_ready(RiscvIntc);
+                    boot_cpu_timer_irq_mapping_ready(RiscvIntc);
+                    boot_cpu_software_irq_mapping_ready(RiscvIntc);
+                    boot_cpu_external_irq_mapping_reserved(RiscvIntc);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            riscv_intc_domain_ready(RiscvIntc, IrqController, DeviceTree);
+            riscv_intc_boot_cpu_local_causes_ready(RiscvIntc, BootCPU);
+            riscv_intc_timer_pin_ready(RiscvIntc);
+            riscv_intc_software_pin_ready(RiscvIntc);
+            riscv_intc_external_pin_ready(RiscvIntc);
+            boot_cpu_timer_irq_mapping_ready(RiscvIntc);
+            boot_cpu_software_irq_mapping_ready(RiscvIntc);
+            boot_cpu_external_irq_mapping_reserved(RiscvIntc);
         }
     }
 }
@@ -59,14 +103,17 @@ object IrqDispatchTree: InterruptObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     IrqController.state == State::Ready;
+                    RiscvIntc.state == State::Ready;
                     InterruptStream.state == State::Ready;
                     CpuGroup.state == State::Ready;
                 }
 
                 ensures {
-                    irq_dispatch_tree_ready(IrqDispatchTree, IrqController);
+                    irq_dispatch_tree_ready(IrqDispatchTree, IrqController, RiscvIntc);
                     irq_dispatch_fallback_route_ready(IrqDispatchTree);
-                    irq_dispatch_timer_route_ready(IrqDispatchTree, IrqController);
+                    irq_dispatch_timer_route_ready(IrqDispatchTree, RiscvIntc);
+                    irq_dispatch_software_route_reserved(IrqDispatchTree, RiscvIntc);
+                    irq_dispatch_external_route_deferred(IrqDispatchTree, RiscvIntc);
                     irq_dispatch_boot_cpu_route_ready(IrqDispatchTree, BootCPU);
                 }
             }
@@ -75,9 +122,11 @@ object IrqDispatchTree: InterruptObject {
 
     state State::Ready {
         invariant {
-            irq_dispatch_tree_ready(IrqDispatchTree, IrqController);
+            irq_dispatch_tree_ready(IrqDispatchTree, IrqController, RiscvIntc);
             irq_dispatch_fallback_route_ready(IrqDispatchTree);
-            irq_dispatch_timer_route_ready(IrqDispatchTree, IrqController);
+            irq_dispatch_timer_route_ready(IrqDispatchTree, RiscvIntc);
+            irq_dispatch_software_route_reserved(IrqDispatchTree, RiscvIntc);
+            irq_dispatch_external_route_deferred(IrqDispatchTree, RiscvIntc);
             irq_dispatch_boot_cpu_route_ready(IrqDispatchTree, BootCPU);
         }
     }
@@ -355,6 +404,7 @@ object RiscvTimerProvider: HardwareObject {
                 depends_on {
                     DeviceTree.state == State::Ready;
                     IrqController.state == State::Ready;
+                    RiscvIntc.state == State::Ready;
                     IrqDispatchTree.state == State::Ready;
                     Timekeeper.state == State::Ready;
                     HrtimerCore.state == State::Ready;
@@ -366,7 +416,7 @@ object RiscvTimerProvider: HardwareObject {
                     riscv_timebase_ready(RiscvTimerProvider, DeviceTree);
                     riscv_clocksource_registered(RiscvTimerProvider, ClocksourceCore);
                     riscv_clockevent_registered(RiscvTimerProvider);
-                    riscv_timer_irq_mapping_ready(RiscvTimerProvider, IrqController);
+                    riscv_timer_irq_mapping_ready(RiscvTimerProvider, RiscvIntc);
                     riscv_timer_interrupt_action_ready(IrqDispatchTree, RiscvTimerProvider);
                     riscv_timer_sbi_programming_ready(RiscvTimerProvider, SBI);
                     riscv_time_read_action_available(RiscvTimerProvider);
@@ -381,7 +431,7 @@ object RiscvTimerProvider: HardwareObject {
             riscv_timebase_ready(RiscvTimerProvider, DeviceTree);
             riscv_clocksource_registered(RiscvTimerProvider, ClocksourceCore);
             riscv_clockevent_registered(RiscvTimerProvider);
-            riscv_timer_irq_mapping_ready(RiscvTimerProvider, IrqController);
+            riscv_timer_irq_mapping_ready(RiscvTimerProvider, RiscvIntc);
             riscv_timer_interrupt_action_ready(IrqDispatchTree, RiscvTimerProvider);
             riscv_timer_sbi_programming_ready(RiscvTimerProvider, SBI);
             riscv_time_read_action_available(RiscvTimerProvider);
@@ -401,13 +451,14 @@ object SbiIpi: HardwareObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     SBI.state == State::Ready;
-                    IrqController.state == State::Ready;
+                    RiscvIntc.state == State::Ready;
                     CpuGroup.state == State::Ready;
                 }
 
                 ensures {
                     sbi_ipi_ready(SbiIpi, SBI, CpuGroup);
-                    sbi_ipi_irq_mapping_ready(SbiIpi, IrqController);
+                    sbi_ipi_irq_mapping_ready(SbiIpi, RiscvIntc);
+                    sbi_ipi_send_action_ready(SbiIpi, SBI);
                     sbi_ipi_enable_deferred(SbiIpi);
                 }
             }
@@ -417,8 +468,82 @@ object SbiIpi: HardwareObject {
     state State::Ready {
         invariant {
             sbi_ipi_ready(SbiIpi, SBI, CpuGroup);
-            sbi_ipi_irq_mapping_ready(SbiIpi, IrqController);
+            sbi_ipi_irq_mapping_ready(SbiIpi, RiscvIntc);
+            sbi_ipi_send_action_ready(SbiIpi, SBI);
             sbi_ipi_enable_deferred(SbiIpi);
+        }
+    }
+}
+
+/*
+ * IpiMux 表示 generic IPI-Mux：多个虚拟 IPI 复用到 SBI software IRQ。
+ * 当前只要求 boot CPU 上的 mux domain 和基础虚拟 IPI range 可见，secondary
+ * CPU enable 仍随 SMP 并发路径后续展开。
+ */
+object IpiMux: InterruptObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    SbiIpi.state == State::Ready;
+                    PerCpuStorage.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                }
+
+                ensures {
+                    ipi_mux_domain_ready(IpiMux, SbiIpi);
+                    ipi_mux_per_cpu_bits_ready(IpiMux, PerCpuStorage);
+                    ipi_mux_virtual_ipi_range_ready(IpiMux);
+                    ipi_mux_parent_software_irq_ready(IpiMux, SbiIpi);
+                    ipi_mux_secondary_enable_deferred(IpiMux);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            ipi_mux_domain_ready(IpiMux, SbiIpi);
+            ipi_mux_per_cpu_bits_ready(IpiMux, PerCpuStorage);
+            ipi_mux_virtual_ipi_range_ready(IpiMux);
+            ipi_mux_parent_software_irq_ready(IpiMux, SbiIpi);
+            ipi_mux_secondary_enable_deferred(IpiMux);
+        }
+    }
+}
+
+/*
+ * Plic 表示 RISC-V 外部中断 provider 的占位。当前阶段只确认 PLIC/PLIC-like
+ * provider 发现路径被保留，不创建 external IRQ 运行期路由。
+ */
+object Plic: InterruptObject {
+    initial_state: State::Base;
+    parent: RiscvIntc;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    RiscvIntc.state == State::Ready;
+                    DeviceTree.state == State::Ready;
+                }
+
+                ensures {
+                    plic_provider_discovery_reserved(Plic, DeviceTree);
+                    plic_external_parent_reserved(Plic, RiscvIntc);
+                    plic_external_irq_route_deferred(Plic);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            plic_provider_discovery_reserved(Plic, DeviceTree);
+            plic_external_parent_reserved(Plic, RiscvIntc);
+            plic_external_irq_route_deferred(Plic);
         }
     }
 }
@@ -433,7 +558,7 @@ object SmpCallFunction: TaskObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SbiIpi.state == State::Ready;
+                    IpiMux.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                 }
@@ -441,7 +566,8 @@ object SmpCallFunction: TaskObject {
                 ensures {
                     smp_call_function_ready(SmpCallFunction, CpuGroup);
                     call_single_queue_ready(SmpCallFunction, PerCpuStorage);
-                    smp_call_function_ipi_route_ready(SmpCallFunction, SbiIpi);
+                    smp_call_function_ipi_route_ready(SmpCallFunction, IpiMux);
+                    smp_call_function_ipi_mux_ready(SmpCallFunction, IpiMux);
                 }
             }
         }
@@ -451,7 +577,8 @@ object SmpCallFunction: TaskObject {
         invariant {
             smp_call_function_ready(SmpCallFunction, CpuGroup);
             call_single_queue_ready(SmpCallFunction, PerCpuStorage);
-            smp_call_function_ipi_route_ready(SmpCallFunction, SbiIpi);
+            smp_call_function_ipi_route_ready(SmpCallFunction, IpiMux);
+            smp_call_function_ipi_mux_ready(SmpCallFunction, IpiMux);
         }
     }
 }
@@ -479,7 +606,9 @@ object IrqTimeInitPhase: PhaseObject {
 
                 drives {
                     IrqController.Event::Setup;
+                    RiscvIntc.Event::Setup;
                     IrqDispatchTree.Event::Setup;
+                    Plic.Event::Preset;
                     Tick.Event::Preset;
                     TimerWheel.Event::Setup;
                     HrtimerCore.Event::Setup;
@@ -489,6 +618,7 @@ object IrqTimeInitPhase: PhaseObject {
                     Softirq.Event::Setup;
                     Randomness.Event::Setup;
                     SbiIpi.Event::Setup;
+                    IpiMux.Event::Setup;
                     SmpCallFunction.Event::Setup;
                     InterruptStream.Event::Enable;
                 }
@@ -508,6 +638,7 @@ object IrqTimeInitPhase: PhaseObject {
                     "profile_init() 暂缓：profile buffer 和 proc export 后续再建模。";
                     "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
+                    "PLIC external IRQ route 暂缓：当前只保留 provider discovery/parent reserved，不开放外部中断 handler。";
                 }
             }
         }
@@ -517,7 +648,9 @@ object IrqTimeInitPhase: PhaseObject {
         invariant {
             irq_time_init_ready(IrqTimeInitPhase);
             IrqController.state == State::Ready;
+            RiscvIntc.state == State::Ready;
             IrqDispatchTree.state == State::Ready;
+            Plic.state == State::Prepared;
             Tick.state == State::Ready;
             TickBroadcast.state == State::Ready;
             TimerWheel.state == State::Ready;
@@ -528,6 +661,7 @@ object IrqTimeInitPhase: PhaseObject {
             RiscvTimerProvider.state == State::Ready;
             Softirq.state == State::Ready;
             Randomness.state == State::Ready;
+            IpiMux.state == State::Ready;
             SbiIpi.state == State::Ready;
             SmpCallFunction.state == State::Ready;
             InterruptStream.state == State::Online;

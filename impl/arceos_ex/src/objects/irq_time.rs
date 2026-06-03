@@ -26,8 +26,7 @@ pub struct IrqController {
     lifecycle: Lifecycle,
     descriptors_ready: bool,
     domain_ready: bool,
-    riscv_intc_ready: bool,
-    boot_cpu_timer_irq_ready: bool,
+    allocator_minimal_ready: bool,
 }
 
 impl IrqController {
@@ -36,8 +35,7 @@ impl IrqController {
             lifecycle: Lifecycle::new(State::Base),
             descriptors_ready: false,
             domain_ready: false,
-            riscv_intc_ready: false,
-            boot_cpu_timer_irq_ready: false,
+            allocator_minimal_ready: false,
         }
     }
 
@@ -53,12 +51,8 @@ impl IrqController {
         self.domain_ready
     }
 
-    pub const fn riscv_intc_ready(&self) -> bool {
-        self.riscv_intc_ready
-    }
-
-    pub const fn boot_cpu_timer_irq_ready(&self) -> bool {
-        self.boot_cpu_timer_irq_ready
+    pub const fn allocator_minimal_ready(&self) -> bool {
+        self.allocator_minimal_ready
     }
 
     pub fn setup(
@@ -75,7 +69,6 @@ impl IrqController {
             || slub_allocator.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
             || cpu_group.state() != State::Ready
-            || device_tree.find_node(b"/cpus").is_none()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -87,8 +80,7 @@ impl IrqController {
 
         self.descriptors_ready = true;
         self.domain_ready = true;
-        self.riscv_intc_ready = true;
-        self.boot_cpu_timer_irq_ready = true;
+        self.allocator_minimal_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -98,10 +90,112 @@ impl IrqController {
     }
 }
 
+pub struct RiscvIntc {
+    lifecycle: Lifecycle,
+    domain_ready: bool,
+    boot_cpu_local_causes_ready: bool,
+    timer_pin_ready: bool,
+    software_pin_ready: bool,
+    external_pin_ready: bool,
+    boot_cpu_timer_irq_ready: bool,
+    boot_cpu_software_irq_ready: bool,
+    boot_cpu_external_irq_reserved: bool,
+}
+
+impl RiscvIntc {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            domain_ready: false,
+            boot_cpu_local_causes_ready: false,
+            timer_pin_ready: false,
+            software_pin_ready: false,
+            external_pin_ready: false,
+            boot_cpu_timer_irq_ready: false,
+            boot_cpu_software_irq_ready: false,
+            boot_cpu_external_irq_reserved: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn domain_ready(&self) -> bool {
+        self.domain_ready
+    }
+
+    pub const fn boot_cpu_local_causes_ready(&self) -> bool {
+        self.boot_cpu_local_causes_ready
+    }
+
+    pub const fn timer_pin_ready(&self) -> bool {
+        self.timer_pin_ready
+    }
+
+    pub const fn software_pin_ready(&self) -> bool {
+        self.software_pin_ready
+    }
+
+    pub const fn external_pin_ready(&self) -> bool {
+        self.external_pin_ready
+    }
+
+    pub const fn boot_cpu_timer_irq_ready(&self) -> bool {
+        self.boot_cpu_timer_irq_ready
+    }
+
+    pub const fn boot_cpu_software_irq_ready(&self) -> bool {
+        self.boot_cpu_software_irq_ready
+    }
+
+    pub const fn boot_cpu_external_irq_reserved(&self) -> bool {
+        self.boot_cpu_external_irq_reserved
+    }
+
+    pub fn setup(
+        &mut self,
+        device_tree: &DeviceTree,
+        irq_controller: &IrqController,
+        cpu_group: &CpuGroup,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || device_tree.state() != State::Ready
+            || irq_controller.state() != State::Ready
+            || cpu_group.state() != State::Ready
+            || device_tree.find_node(b"/cpus").is_none()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.domain_ready = true;
+        self.boot_cpu_local_causes_ready = true;
+        self.timer_pin_ready = true;
+        self.software_pin_ready = true;
+        self.external_pin_ready = true;
+        self.boot_cpu_timer_irq_ready = true;
+        self.boot_cpu_software_irq_ready = true;
+        self.boot_cpu_external_irq_reserved = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::RiscvIntcReady,
+        )
+    }
+}
+
 pub struct IrqDispatchTree {
     lifecycle: Lifecycle,
     fallback_route_ready: bool,
     timer_route_ready: bool,
+    software_route_reserved: bool,
+    external_route_deferred: bool,
     boot_cpu_route_ready: bool,
 }
 
@@ -111,6 +205,8 @@ impl IrqDispatchTree {
             lifecycle: Lifecycle::new(State::Base),
             fallback_route_ready: false,
             timer_route_ready: false,
+            software_route_reserved: false,
+            external_route_deferred: false,
             boot_cpu_route_ready: false,
         }
     }
@@ -127,6 +223,14 @@ impl IrqDispatchTree {
         self.timer_route_ready
     }
 
+    pub const fn software_route_reserved(&self) -> bool {
+        self.software_route_reserved
+    }
+
+    pub const fn external_route_deferred(&self) -> bool {
+        self.external_route_deferred
+    }
+
     pub const fn boot_cpu_route_ready(&self) -> bool {
         self.boot_cpu_route_ready
     }
@@ -134,14 +238,16 @@ impl IrqDispatchTree {
     pub fn setup(
         &mut self,
         irq_controller: &IrqController,
+        riscv_intc: &RiscvIntc,
         interrupt_stream: &mut InterruptStream,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || irq_controller.state() != State::Ready
+            || riscv_intc.state() != State::Ready
             || interrupt_stream.state() != State::Ready
             || cpu_group.state() != State::Ready
-            || !irq_controller.boot_cpu_timer_irq_ready()
+            || !riscv_intc.boot_cpu_timer_irq_ready()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -154,6 +260,8 @@ impl IrqDispatchTree {
         interrupt_stream.bind_timer_handler()?;
         self.fallback_route_ready = true;
         self.timer_route_ready = true;
+        self.software_route_reserved = true;
+        self.external_route_deferred = true;
         self.boot_cpu_route_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -628,7 +736,7 @@ impl RiscvTimerProvider {
     pub fn setup(
         &mut self,
         device_tree: &DeviceTree,
-        irq_controller: &IrqController,
+        riscv_intc: &RiscvIntc,
         irq_dispatch_tree: &IrqDispatchTree,
         timekeeper: &mut Timekeeper,
         hrtimer_core: &HrtimerCore,
@@ -637,7 +745,7 @@ impl RiscvTimerProvider {
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || device_tree.state() != State::Ready
-            || irq_controller.state() != State::Ready
+            || riscv_intc.state() != State::Ready
             || irq_dispatch_tree.state() != State::Ready
             || timekeeper.state() != State::Ready
             || hrtimer_core.state() != State::Ready
@@ -657,7 +765,7 @@ impl RiscvTimerProvider {
         self.clocksource_registered = true;
         self.clockevent_registered = true;
         self.irq_mapping_ready =
-            irq_controller.boot_cpu_timer_irq_ready() && irq_dispatch_tree.timer_route_ready();
+            riscv_intc.boot_cpu_timer_irq_ready() && irq_dispatch_tree.timer_route_ready();
         self.sbi_programming_ready = true;
         if self.timebase_hz == 0 || !self.irq_mapping_ready {
             return failed_condition(
@@ -705,6 +813,7 @@ impl RiscvTimerProvider {
 pub struct SbiIpi {
     lifecycle: Lifecycle,
     irq_mapping_ready: bool,
+    send_action_ready: bool,
     enable_deferred: bool,
 }
 
@@ -713,6 +822,7 @@ impl SbiIpi {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             irq_mapping_ready: false,
+            send_action_ready: false,
             enable_deferred: false,
         }
     }
@@ -725,6 +835,10 @@ impl SbiIpi {
         self.irq_mapping_ready
     }
 
+    pub const fn send_action_ready(&self) -> bool {
+        self.send_action_ready
+    }
+
     pub const fn enable_deferred(&self) -> bool {
         self.enable_deferred
     }
@@ -732,13 +846,14 @@ impl SbiIpi {
     pub fn setup(
         &mut self,
         sbi: &Sbi,
-        irq_controller: &IrqController,
+        riscv_intc: &RiscvIntc,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || sbi.state() != State::Ready
-            || irq_controller.state() != State::Ready
+            || riscv_intc.state() != State::Ready
             || cpu_group.state() != State::Ready
+            || !riscv_intc.boot_cpu_software_irq_ready()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -749,6 +864,7 @@ impl SbiIpi {
         }
 
         self.irq_mapping_ready = true;
+        self.send_action_ready = true;
         self.enable_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -759,10 +875,149 @@ impl SbiIpi {
     }
 }
 
+pub struct IpiMux {
+    lifecycle: Lifecycle,
+    domain_ready: bool,
+    per_cpu_bits_ready: bool,
+    virtual_ipi_range_ready: bool,
+    parent_software_irq_ready: bool,
+    secondary_enable_deferred: bool,
+}
+
+impl IpiMux {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            domain_ready: false,
+            per_cpu_bits_ready: false,
+            virtual_ipi_range_ready: false,
+            parent_software_irq_ready: false,
+            secondary_enable_deferred: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn domain_ready(&self) -> bool {
+        self.domain_ready
+    }
+
+    pub const fn per_cpu_bits_ready(&self) -> bool {
+        self.per_cpu_bits_ready
+    }
+
+    pub const fn virtual_ipi_range_ready(&self) -> bool {
+        self.virtual_ipi_range_ready
+    }
+
+    pub const fn parent_software_irq_ready(&self) -> bool {
+        self.parent_software_irq_ready
+    }
+
+    pub const fn secondary_enable_deferred(&self) -> bool {
+        self.secondary_enable_deferred
+    }
+
+    pub fn setup(
+        &mut self,
+        sbi_ipi: &SbiIpi,
+        per_cpu_storage: &PerCpuStorage,
+        cpu_group: &CpuGroup,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || sbi_ipi.state() != State::Ready
+            || per_cpu_storage.state() != State::Ready
+            || cpu_group.state() != State::Ready
+            || !sbi_ipi.send_action_ready()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.domain_ready = true;
+        self.per_cpu_bits_ready = true;
+        self.virtual_ipi_range_ready = true;
+        self.parent_software_irq_ready = true;
+        self.secondary_enable_deferred = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::IpiMuxReady,
+        )
+    }
+}
+
+pub struct Plic {
+    lifecycle: Lifecycle,
+    provider_discovery_reserved: bool,
+    external_parent_reserved: bool,
+    external_irq_route_deferred: bool,
+}
+
+impl Plic {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            provider_discovery_reserved: false,
+            external_parent_reserved: false,
+            external_irq_route_deferred: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn provider_discovery_reserved(&self) -> bool {
+        self.provider_discovery_reserved
+    }
+
+    pub const fn external_parent_reserved(&self) -> bool {
+        self.external_parent_reserved
+    }
+
+    pub const fn external_irq_route_deferred(&self) -> bool {
+        self.external_irq_route_deferred
+    }
+
+    pub fn preset(&mut self, device_tree: &DeviceTree, riscv_intc: &RiscvIntc) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || device_tree.state() != State::Ready
+            || riscv_intc.state() != State::Ready
+            || !riscv_intc.boot_cpu_external_irq_reserved()
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.provider_discovery_reserved = true;
+        self.external_parent_reserved = true;
+        self.external_irq_route_deferred = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::PlicPrepared,
+        )
+    }
+}
+
 pub struct SmpCallFunction {
     lifecycle: Lifecycle,
     call_single_queue_ready: bool,
     ipi_route_ready: bool,
+    ipi_mux_ready: bool,
     possible_cpu_count: usize,
 }
 
@@ -772,6 +1027,7 @@ impl SmpCallFunction {
             lifecycle: Lifecycle::new(State::Base),
             call_single_queue_ready: false,
             ipi_route_ready: false,
+            ipi_mux_ready: false,
             possible_cpu_count: 0,
         }
     }
@@ -788,20 +1044,25 @@ impl SmpCallFunction {
         self.ipi_route_ready
     }
 
+    pub const fn ipi_mux_ready(&self) -> bool {
+        self.ipi_mux_ready
+    }
+
     pub const fn possible_cpu_count(&self) -> usize {
         self.possible_cpu_count
     }
 
     pub fn setup(
         &mut self,
-        sbi_ipi: &SbiIpi,
+        ipi_mux: &IpiMux,
         cpu_group: &CpuGroup,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || sbi_ipi.state() != State::Ready
+            || ipi_mux.state() != State::Ready
             || cpu_group.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
+            || !ipi_mux.virtual_ipi_range_ready()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -813,6 +1074,7 @@ impl SmpCallFunction {
 
         self.call_single_queue_ready = true;
         self.ipi_route_ready = true;
+        self.ipi_mux_ready = true;
         self.possible_cpu_count = cpu_group.possible_cpu_count();
         self.lifecycle.transition(
             LifecycleEvent::Setup,
