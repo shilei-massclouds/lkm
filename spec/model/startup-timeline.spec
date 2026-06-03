@@ -8,11 +8,12 @@
 include "common.spec";
 include "prepare/main.spec";
 include "boot/main.spec";
+include "interrupt/main.spec";
 include "payload/main.spec";
 
 /*
  * StartupTimeline 表示当前模型的内核启动时间轴对象。
- * 它临时编排准备期、当前已经展开的引导期阶段，以及启动末尾的 payload 交接阶段。
+ * 它临时编排准备期、当前已经展开的引导期/中断期阶段，以及启动末尾的 payload 交接阶段。
  */
 object StartupTimeline: TimelineObject {
     initial_state: State::Base;
@@ -23,7 +24,7 @@ object StartupTimeline: TimelineObject {
     state State::Base {
         events {
             /*
-             * Setup 先推进准备期边界，再推进当前已经展开的引导期阶段，最后
+             * Setup 先推进准备期边界，再推进当前已经展开的引导期和中断期阶段，最后
              * 进入 selected payload 的不返回交接边界。
              */
             on Event::Setup -> State::Ready {
@@ -31,6 +32,7 @@ object StartupTimeline: TimelineObject {
                     PreparePhase.Event::Setup;
                     PreparePhase.Event::Enable;
                     BootPhase.Event::Setup;
+                    InterruptPhase.Event::Setup;
                     PayloadPhase.Event::Setup;
                     PayloadPhase.Event::Enable;
                 }
@@ -39,13 +41,14 @@ object StartupTimeline: TimelineObject {
     }
 
     /*
-     * Ready 表示准备期边界已经生效，当前已经展开的引导期阶段已经完成，
+     * Ready 表示准备期边界已经生效，当前已经展开的引导期/中断期阶段已经完成，
      * 且启动链已经移交给 selected payload。
      */
     state State::Ready {
         invariant {
             PreparePhase.state == State::Online;
             BootPhase.state == State::Ready;
+            InterruptPhase.state == State::Ready;
             PayloadPhase.state == State::Online;
         }
     }

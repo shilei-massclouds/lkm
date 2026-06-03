@@ -23,6 +23,14 @@ predicate arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_not_page_tables
 predicate arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects() -> bool;
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
+predicate arceos_ex_must_startup_drive_boot_then_interrupt_then_payload() -> bool;
+predicate arceos_ex_must_payload_require_interrupt_phase_ready() -> bool;
+predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
+predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
+predicate arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action() -> bool;
+predicate arceos_ex_must_irq_time_init_keep_task_and_smp_concurrency_closed() -> bool;
+predicate arceos_ex_must_irq_time_init_keep_runtime_services_deferred() -> bool;
+predicate arceos_ex_must_irq_time_init_expose_time_and_clockevent_smoke_actions() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -189,5 +197,89 @@ type ArceosExMmCoreInitCodingShould {
          * them into lifecycle states.
          */
         arceos_ex_should_keep_mm_core_init_checkpoints_observable();
+    }
+}
+
+type ArceosExStartupPhaseCodingMust {
+    invariant {
+        /*
+         * Startup phase order:
+         *
+         * The arceos_ex startup chain must follow the formal top-level model
+         * order PreparePhase -> BootPhase -> InterruptPhase -> PayloadPhase.
+         * PayloadPhase setup/enable must not run directly after BootPhase
+         * without first completing InterruptPhase.
+         */
+        arceos_ex_must_startup_drive_boot_then_interrupt_then_payload();
+
+        /*
+         * Payload dependency:
+         *
+         * PayloadPhase setup and enable must require InterruptPhase.Ready in
+         * addition to BootPhase.Ready. A selected payload may rely on the
+         * boot CPU interrupt gate and IRQ/time acceptance facts established by
+         * InterruptPhase.
+         */
+        arceos_ex_must_payload_require_interrupt_phase_ready();
+    }
+}
+
+type ArceosExIrqTimeInitCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * IrqTimeInitPhase is InterruptPhase subphase 1. Its formal model
+         * path is spec/model/interrupt/irq-time-init/, not
+         * spec/model/boot/irq-time-init/.
+         */
+        arceos_ex_must_irq_time_init_model_path_under_interrupt_phase();
+
+        /*
+         * Code path:
+         *
+         * Phase source layout must follow the model phase tree. The target
+         * implementation path for this phase is the interrupt phase subtree,
+         * for example impl/arceos_ex/src/phases/interrupt/irq_time_init.rs,
+         * rather than the boot phase subtree.
+         */
+        arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree();
+
+        /*
+         * Interrupt-open boundary:
+         *
+         * local_irq_enable() is the terminal action of IrqTimeInitPhase. It
+         * must be represented as InterruptStream.enable() on the boot CPU and
+         * must not be moved back to the beginning of a later IRQ-open phase.
+         */
+        arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action();
+
+        /*
+         * Concurrency scope:
+         *
+         * IrqTimeInitPhase opens only the boot CPU local interrupt gate.
+         * Task concurrency and SMP concurrency remain closed when this phase
+         * reaches Ready.
+         */
+        arceos_ex_must_irq_time_init_keep_task_and_smp_concurrency_closed();
+
+        /*
+         * Runtime services:
+         *
+         * Opening the boot CPU interrupt gate must not implicitly advance
+         * periodic tick service, full softirq execution, IPI enable, workqueue
+         * workers, RCU GP kthreads or secondary CPU execution to Online.
+         */
+        arceos_ex_must_irq_time_init_keep_runtime_services_deferred();
+
+        /*
+         * Smoke actions:
+         *
+         * RiscvTimerProvider.setup() must expose enough action surface for two
+         * smoke checks after InterruptStream.enable(): a monotonic time read
+         * check and a one-shot clockevent callback check through the timer IRQ
+         * route. These checks do not imply full periodic tick service.
+         */
+        arceos_ex_must_irq_time_init_expose_time_and_clockevent_smoke_actions();
     }
 }

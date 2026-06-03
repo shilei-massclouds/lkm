@@ -35,12 +35,12 @@
 
 ## arceos_ex 第一轮形态
 
-第一轮以 `helloworld` Unikernel 为目标，但该最小应用仍必须支撑 `EntryPreludePhase`、`EntrySuccessorPhase` 和最终 `PayloadPhase`。实现边界达到 `PayloadPhase.Online` 并进入 selected payload 后，才能认为第一轮启动模型闭环完成。
+第一轮以 `helloworld` Unikernel 为目标，但该最小应用仍必须支撑当前已经展开的 `BootPhase`、`InterruptPhase` 和最终 `PayloadPhase`。实现边界达到 `InterruptPhase.Ready`、`PayloadPhase.Online` 并进入 selected payload 后，才能认为当前启动模型闭环完成。
 
 在 `arceos_ex` 中，`ax-hal-ex` 与 `ax-runtime-ex` 的引导责任应按阶段边界划分。`ax-hal-ex` 负责 `_start` 到
 `EntryPreludePhase.Ready` 的最低层入口前导路径；`EntryPreludePhase.Ready` 之后由 `ax-runtime-ex` 接管。
 `EntrySuccessorPhase` 是 `ax-runtime-ex` 引导过程的第一部分，之后逐步增加的内核初始化过程也属于
-`ax-runtime-ex` 主引导链，直到进入 `PayloadPhase` 并移交给当前 selected payload。
+`ax-runtime-ex` 主引导链，当前正式顺序为 `BootPhase` 后接 `InterruptPhase`，再进入 `PayloadPhase` 并移交给当前 selected payload。
 
 这里的 Unikernel app 是内核形态的引领入口。`helloworld` 是默认最小 payload，许多测试也可以作为 payload 运行。
 未来若增加宏内核形态，可以通过一个专门 payload 在 `PayloadPhase.Enable` 后完成用户态切换并启动首个用户态应用。无论 payload 是内核态服务循环、测试后停机，还是用户态切换入口，其运行期契约都是不返回启动编排链。

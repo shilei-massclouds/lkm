@@ -30,6 +30,7 @@ object PayloadPhase: PhaseObject {
                 depends_on {
                     PreparePhase.state == State::Online;
                     BootPhase.state == State::Ready;
+                    InterruptPhase.state == State::Ready;
                 }
 
                 ensures {
@@ -46,6 +47,7 @@ object PayloadPhase: PhaseObject {
         invariant {
             PreparePhase.state == State::Online;
             BootPhase.state == State::Ready;
+            InterruptPhase.state == State::Ready;
             selected_payload_ready();
         }
 
@@ -71,6 +73,7 @@ object PayloadPhase: PhaseObject {
         invariant {
             PreparePhase.state == State::Online;
             BootPhase.state == State::Ready;
+            InterruptPhase.state == State::Ready;
             selected_payload_ready();
             selected_payload_no_return_handoff();
         }

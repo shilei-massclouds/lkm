@@ -48,7 +48,7 @@
 - 目标平台：新增 RISC-V64 generic SBI/FDT 平台实现，当前以 QEMU 为测试环境，但不以 QEMU virt 硬编码作为平台语义来源。
 - 规格来源：优先使用 `spec/model` 下已经规格化的启动阶段模型，必要时由本目录补充编码约束。
 
-第一轮内核形态以 ArceOS 的 Unikernel 方式起步，由 `helloworld` 应用引领构成最小系统。即使应用只是 `helloworld`，也必须完整支撑当前模型中的入口前导期和入口后继期两个子阶段。
+第一轮内核形态以 ArceOS 的 Unikernel 方式起步，由 `helloworld` 应用引领构成最小系统。即使应用只是 `helloworld`，也必须完整支撑当前模型中已经展开的入口、引导、中断时间准备和 payload 交接阶段。
 
 ## 规格优先级
 

@@ -40,7 +40,7 @@
 
 `startup-timeline` 对应 `main.rs`。`main.rs` 是最顶层启动时间线的承载点，负责建立最小入口边界，并组织一级 Phase 对象的过程调用。它不应吸收普通资源对象的状态和事件实现；这些实现应下沉到 `objects/` 或相应 Phase 过程调用的对象方法中。
 
-Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中的包含关系放入 `phases/` 下的相应层次，例如 `BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase` 分别形成清晰的过程边界。Phase 源码只生成函数和 module，不生成资源对象式 `struct + impl`，也不生成普通对象式 `Lifecycle` 状态机。
+Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中的包含关系放入 `phases/` 下的相应层次，例如 `BootPhase`、`InterruptPhase`、`EntryPreludePhase`、`EntrySuccessorPhase` 分别形成清晰的过程边界。Phase 源码只生成函数和 module，不生成资源对象式 `struct + impl`，也不生成普通对象式 `Lifecycle` 状态机。
 
 资源对象和其它非 Phase 对象对应面向对象风格的 Rust 代码，默认形态是 `struct + impl methods`。原则上每个规格对象应有一个独立 `.rs` 文件；文件数量增加后，应优先按对象类别建立目录层级，例如 CPU、内存、启动参数、平台、输出、地址空间等，而不是按 Phase 分类。Phase 过程可以持有上下文或对象集合，但这种 context carrier 不等同于规格中的资源对象，不能替代资源对象自身的状态和事件边界。
 
@@ -56,7 +56,7 @@ Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中�
 
 ## Phase 对象
 
-Phase 对象表示阶段或子阶段的编排边界，例如 `PreparePhase`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`PayloadPhase`。
+Phase 对象表示阶段或子阶段的编排边界，例如 `PreparePhase`、`BootPhase`、`InterruptPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`PayloadPhase`。
 
 Phase 代码生成以模型中的阶段树为输入，默认采用深度优先遍历。生成器从顶层启动对象进入第一个阶段；若该阶段不属于当前内核代码生成范围，则只生成必要的事实采纳、检查或发布边界，然后回到父层级继续处理下一个阶段。若该阶段属于当前内核代码生成范围且包含子 Phase，则递归处理其子 Phase；若该阶段没有子 Phase，则生成该叶子 Phase 的主体 `setup()` 过程。
 
@@ -93,8 +93,9 @@ Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象�
 `ax-runtime-ex` 引导过程的第一部分，而不是 `ax-hal-ex` 的长期编排职责。`ax-runtime-ex`
 可以调用 `ax-hal-ex`、平台 crate 和其它组件提供的对象事件函数，但阶段编排边界应保留在 runtime 侧。
 
-`ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 开始到 `PayloadPhase` 为止的大部分内核引导过程。后续新增的内核初始化阶段、服务初始化或运行形态切换，应默认插入在
-`EntrySuccessorPhase` 与 `PayloadPhase` 之间，并继续保留模型 checkpoint。
+`ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 开始到 `PayloadPhase` 为止的大部分内核引导过程。当前正式模型中，`InterruptPhase` 位于
+`BootPhase` 之后、`PayloadPhase` 之前；后续新增的内核初始化阶段、服务初始化或运行形态切换，应默认插入在
+`EntrySuccessorPhase` 与 `PayloadPhase` 之间的正式阶段树位置，并继续保留模型 checkpoint。
 
 在 ArceOS Unikernel 形态下，`PayloadPhase` 负责把启动编排链移交给 selected payload，而不把该入口固定为传统操作系统的普通用户态进程入口。不同 Unikernel 应用、测试应用或未来的宏内核引导应用，都可以作为 selected payload。未来若增加宏内核形态，相关 payload 可以在 `PayloadPhase.Enable` 后完成切换到用户态并启动首个用户态应用的最后步骤。`PayloadPhase.Enable` 的运行期约定是不返回：payload 要么进入服务循环，要么最终停机。
 

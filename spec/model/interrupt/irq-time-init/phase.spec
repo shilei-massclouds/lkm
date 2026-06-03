@@ -1,10 +1,11 @@
 /*
  * IRQ and Time Init Phase Specification
  *
- * This subphase starts after sched_init/context_tracking_init and now ends
- * after the boot CPU local_irq_enable() boundary. Moving the interrupt-open
- * action here lets this phase expose a real IRQ/timer acceptance test while
- * task and SMP concurrency remain closed.
+ * This is InterruptPhase subphase 1. It starts after
+ * sched_init/context_tracking_init and ends after the boot CPU
+ * local_irq_enable() boundary. Moving the interrupt-open action here lets this
+ * phase expose a real IRQ/timer acceptance test while task and SMP concurrency
+ * remain closed.
  */
 
 /*
@@ -584,12 +585,12 @@ object SmpCallFunction: TaskObject {
 }
 
 /*
- * IrqTimeInitPhase 表示 BootPhase 的第六个子阶段。它在阶段末尾打开
+ * IrqTimeInitPhase 表示 InterruptPhase 的第一个子阶段。它在阶段末尾打开
  * boot CPU 本地中断总入口，使后续 smoke 可以真实验收 timer interrupt。
  */
 object IrqTimeInitPhase: PhaseObject {
     initial_state: State::Base;
-    parent: BootPhase;
+    parent: InterruptPhase;
 
     state State::Base {
         events {

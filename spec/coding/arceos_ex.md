@@ -12,13 +12,15 @@
 
 ## 目标边界
 
-第一轮目标是让 `arceos_ex` 作为规格驱动的对象级内核原型运行，并完成当前模型中的引导子阶段和最终 payload 交接阶段：
+第一轮目标是让 `arceos_ex` 作为规格驱动的对象级内核原型运行，并完成当前模型中的引导子阶段、中断时间准备期和最终 payload 交接阶段：
 
 - `EntryPreludePhase.Ready`
 - `EntrySuccessorPhase.Ready`
 - `CorePreparePhase.Ready`
 - `MmCoreInitPhase.Ready`
 - `SchedInitPhase.Ready`
+- `InterruptPhase.Ready`
+- `IrqTimeInitPhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -57,7 +59,7 @@ make clean
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
-`IrqTimeInitPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
+`InterruptPhase.Ready`（其当前展开子阶段为 `IrqTimeInitPhase.Ready`），随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
 `SmpCallFunction` 只发布状态与必要事实，不提供完整运行期服务。
@@ -285,7 +287,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 
 ## 第一轮最小对象覆盖
 
-实现必须覆盖当前模型中 `EntryPreludePhase`、`EntrySuccessorPhase` 和 `PayloadPhase` 所需对象。Phase 对象可以是编排过程；非 Phase 对象原则上应有 Rust struct、静态单例或启动上下文字段承载。
+实现必须覆盖当前模型中已展开的 `EntryPreludePhase`、`EntrySuccessorPhase`、`CorePreparePhase`、`MmCoreInitPhase`、`SchedInitPhase`、`IrqTimeInitPhase` 和 `PayloadPhase` 所需对象。Phase 对象可以是编排过程；非 Phase 对象原则上应有 Rust struct、静态单例或启动上下文字段承载。
 
 重点对象包括：
 
@@ -427,11 +429,15 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 
 ## `IrqTimeInitPhase` 编码约束
 
-`IrqTimeInitPhase` 已正式落到 `spec/model/boot/irq-time-init/`。实现侧边界和早期设计草案不同：`local_irq_enable()`
+`IrqTimeInitPhase` 已正式落到 `spec/model/interrupt/irq-time-init/`，属于 `InterruptPhase` 的第一个子阶段。实现侧边界和早期设计草案不同：`local_irq_enable()`
 不再属于后续中断开放期的开头，而是本阶段的结尾。阶段出口必须满足 `InterruptStream.Online`、boot CPU
 `sstatus.SIE` 已打开、`IrqController.Ready`、`RiscvIntc.Ready`、`IrqDispatchTree.Ready`、`Plic.Prepared`、`Tick.Ready`、
 `TimerWheel.Ready`、`HrtimerCore.Ready`、`Timekeeper.Ready`、`RiscvTimerProvider.Ready`、`Softirq.Ready`、`Randomness.Ready`、
 `SbiIpi.Ready`、`IpiMux.Ready` 和 `SmpCallFunction.Ready`。
+
+目录、文件和对象命名必须跟阶段树一致：模型目录为 `spec/model/interrupt/irq-time-init/`，实现文件应迁移或保持在
+`impl/arceos_ex/src/phases/interrupt/irq_time_init.rs` 等 `interrupt` 阶段子树下。若短期内实现仍保留在旧
+`phases/boot/irq_time_init.rs`，只能作为迁移中的技术债记录，不能改变正式阶段归属。
 
 当前按 OpenSBI 下的 RISC-V S-mode 路径建模：`RiscvIntc` 表示每 hart 直连 CPU 的 local interrupt controller，
 `RiscvTimerProvider` 表示 Linux `timer-riscv` 风格的 time/clockevent provider，timer programming 走 SBI TIME 或后续 SSTC
