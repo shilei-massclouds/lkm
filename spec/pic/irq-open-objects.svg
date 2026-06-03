@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860" role="img" aria-labelledby="title desc">
-  <title id="title">中断开放期对象分类与相互关系</title>
-  <desc id="desc">展示 InterruptPhase 子阶段 1 在 Linux 6.12.37 default_config 下从 local_irq_enable() 到 arch_cpu_finalize_init() 的对象边界。</desc>
+  <title id="title">中断开放后准备期对象分类与相互关系</title>
+  <desc id="desc">展示 InterruptPhase 子阶段 2 在 Linux 6.12.37 default_config 下从 kmem_cache_init_late() 到 arch_cpu_finalize_init() 的对象边界。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
@@ -32,8 +32,8 @@
   </defs>
 
   <rect x="0" y="0" width="1280" height="860" fill="#ffffff"/>
-  <text x="640" y="46" text-anchor="middle" class="title">中断开放期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">InterruptPhase 子阶段 1：local_irq_enable() 到 arch_cpu_finalize_init()</text>
+  <text x="640" y="46" text-anchor="middle" class="title">中断开放后准备期对象分类与相互关系</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">InterruptPhase 子阶段 2：kmem_cache_init_late() 到 arch_cpu_finalize_init()</text>
 
   <rect x="50" y="116" width="245" height="684" rx="14" class="group"/>
   <text x="172" y="150" text-anchor="middle" class="group-title">阶段边界</text>
@@ -41,11 +41,11 @@
   <text x="172" y="214" text-anchor="middle" class="label">IrqTimeInit</text>
   <text x="172" y="238" text-anchor="middle" class="small">Ready 输入</text>
   <rect x="82" y="310" width="180" height="82" rx="8" class="box phase"/>
-  <text x="172" y="338" text-anchor="middle" class="label">中断开放期</text>
-  <text x="172" y="362" text-anchor="middle" class="small">IrqOpenPhase</text>
-  <rect x="82" y="444" width="180" height="82" rx="8" class="box irq"/>
-  <text x="172" y="472" text-anchor="middle" class="label">InterruptStream</text>
-  <text x="172" y="496" text-anchor="middle" class="small">enable: 打开 sstatus.SIE</text>
+  <text x="172" y="338" text-anchor="middle" class="label">开放后准备期</text>
+  <text x="172" y="362" text-anchor="middle" class="small">IrqOpenPreparePhase</text>
+  <rect x="82" y="444" width="180" height="82" rx="8" class="box ready"/>
+  <text x="172" y="472" text-anchor="middle" class="label">BootCPU IRQ</text>
+  <text x="172" y="496" text-anchor="middle" class="small">本地总入口已开放</text>
   <rect x="82" y="578" width="180" height="82" rx="8" class="box checkpoint"/>
   <text x="172" y="606" text-anchor="middle" class="label">ProcessPrepare</text>
   <text x="172" y="630" text-anchor="middle" class="small">下一子阶段入口</text>

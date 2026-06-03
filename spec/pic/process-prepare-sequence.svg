@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="3740" viewBox="0 0 1280 3740" role="img" aria-labelledby="title desc">
   <title id="title">进程准备期对象构建时序</title>
-  <desc id="desc">展示 Linux 6.12.37 default_config 下 start_kernel() 从 pid_idr_init() 到 kcsan_init() 的有效调用顺序。</desc>
+  <desc id="desc">展示 InterruptPhase 子阶段 3 在 Linux 6.12.37 default_config 下 start_kernel() 从 pid_idr_init() 到 kcsan_init() 的有效调用顺序。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
@@ -28,7 +28,7 @@
 
   <rect x="0" y="0" width="1280" height="3740" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">进程准备期对象构建时序</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">ProcessPreparePhase.setup(): pid_idr_init() 到 kcsan_init()，下一步进入 rest_init()</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">InterruptPhase 子阶段 3：ProcessPreparePhase.setup() 到 rest_init() 前</text>
   <rect x="48" y="126" width="214" height="3550" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">进程准备期</text>
   <text x="155" y="188" text-anchor="middle" class="obj">ProcessPreparePhase</text>

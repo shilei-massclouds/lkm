@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="920" viewBox="0 0 1280 920" role="img" aria-labelledby="title desc">
   <title id="title">进程准备期对象分类与相互关系</title>
-  <desc id="desc">展示 InterruptPhase 子阶段 2 在 Linux 6.12.37 default_config 下从 pid_idr_init() 到 kcsan_init() 的对象边界。</desc>
+  <desc id="desc">展示 InterruptPhase 子阶段 3 在 Linux 6.12.37 default_config 下从 pid_idr_init() 到 kcsan_init() 的对象边界。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
@@ -32,12 +32,12 @@
 
   <rect x="0" y="0" width="1280" height="920" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">进程准备期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">InterruptPhase 子阶段 2：pid_idr_init() 到 kcsan_init()，rest_init() 前</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">InterruptPhase 子阶段 3：pid_idr_init() 到 kcsan_init()，rest_init() 前</text>
 
   <rect x="44" y="116" width="245" height="744" rx="14" class="group"/>
   <text x="166" y="150" text-anchor="middle" class="group-title">阶段边界</text>
   <rect x="76" y="184" width="180" height="72" rx="8" class="box ready"/>
-  <text x="166" y="212" text-anchor="middle" class="label">IrqOpenPhase</text>
+  <text x="166" y="212" text-anchor="middle" class="label">IrqOpenPrepare</text>
   <text x="166" y="236" text-anchor="middle" class="small">Ready 输入</text>
   <rect x="76" y="304" width="180" height="82" rx="8" class="box phase"/>
   <text x="166" y="332" text-anchor="middle" class="label">进程准备期</text>

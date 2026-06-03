@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="2440" viewBox="0 0 1280 2440" role="img" aria-labelledby="title desc">
   <title id="title">中断时间准备期对象构建时序</title>
-  <desc id="desc">展示 Linux 6.12.37 default_config 下 start_kernel() 从 early_irq_init() 到 local_irq_enable() 前的有效调用顺序及规格补充动作。</desc>
+  <desc id="desc">展示 Linux 6.12.37 default_config 下 start_kernel() 从 early_irq_init() 到 local_irq_enable() 完成的有效调用顺序及规格补充动作。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
@@ -26,7 +26,7 @@
 
   <rect x="0" y="0" width="1280" height="2440" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">中断时间准备期对象构建时序</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">IrqTimeInitPhase.setup(): early_irq_init() 到 local_irq_enable() 前，Softirq 已 Prepared</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">IrqTimeInitPhase.setup(): early_irq_init() 到 local_irq_enable() 完成，Softirq 已 Prepared</text>
   <rect x="48" y="126" width="214" height="2250" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">中断时间</text>
   <text x="155" y="188" text-anchor="middle" class="obj">准备期</text>
@@ -51,8 +51,9 @@
   <g transform="translate(0 1356)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">14</text><rect x="292" y="204" width="876" height="84" rx="10" class="box deferred"/><text x="320" y="232" class="line1">profile_init(): deferred</text><text x="320" y="260" class="line2">默认未启用 profile=；后续恢复为 KernelProfiler.setup()</text></g>
   <g transform="translate(0 1456)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">15</text><rect x="292" y="204" width="876" height="84" rx="10" class="box formal"/><text x="320" y="232" class="line1">SmpCallFunction.setup(): call_function_init()</text><text x="320" y="260" class="line2">初始化 call_single_queue[*] 和 boot CPU call data，关联 IPI_CALL_FUNC</text></g>
   <g transform="translate(0 1556)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">16</text><rect x="292" y="204" width="876" height="84" rx="10" class="box checkpoint"/><text x="320" y="232" class="line1">IRQ enable boundary checkpoint</text><text x="320" y="260" class="line2">WARN 确认 IRQ 仍关闭；early_boot_irqs_disabled 已清除</text></g>
+  <g transform="translate(0 1656)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">17</text><rect x="292" y="204" width="876" height="84" rx="10" class="box irq"/><text x="320" y="232" class="line1">InterruptStream.enable(): local_irq_enable()</text><text x="320" y="260" class="line2">设置 sstatus.SIE，打开 boot CPU 本地中断总入口</text></g>
   </g>
 
   <rect x="292" y="2280" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="2306" class="boundary">终点：中断仍关闭；IRQ、timer/timekeeping、softirq、RNG、SbiIpi 与 SmpCallFunction 均 Ready</text>
+  <text x="320" y="2306" class="boundary">终点：boot CPU 本地中断总入口已开放；IRQ/time、softirq、RNG、SbiIpi 与 SmpCallFunction 均 Ready</text>
 </svg>

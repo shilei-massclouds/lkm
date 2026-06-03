@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820" role="img" aria-labelledby="title desc">
   <title id="title">中断时间准备期对象分类与相互关系</title>
-  <desc id="desc">展示 BootPhase 子阶段 6 在 Linux 6.12.37 default_config 下从 early_irq_init() 到 local_irq_enable() 前的对象边界。</desc>
+  <desc id="desc">展示 InterruptPhase 子阶段 1 在 Linux 6.12.37 default_config 下从 early_irq_init() 到 local_irq_enable() 完成的对象边界。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
@@ -26,7 +26,7 @@
 
   <rect x="0" y="0" width="1280" height="820" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">中断时间准备期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase 子阶段 6：early_irq_init() 到 local_irq_enable() 前</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">InterruptPhase 子阶段 1：early_irq_init() 到 local_irq_enable() 完成</text>
 
   <rect x="50" y="116" width="235" height="644" rx="14" class="group"/>
   <text x="168" y="150" text-anchor="middle" class="group-title">阶段边界</text>
@@ -38,7 +38,7 @@
   <text x="168" y="356" text-anchor="middle" class="small">Ready 输入</text>
   <rect x="82" y="422" width="172" height="72" rx="8" class="box phase"/>
   <text x="168" y="450" text-anchor="middle" class="label">出口边界</text>
-  <text x="168" y="474" text-anchor="middle" class="small">local_irq_enable 前</text>
+  <text x="168" y="474" text-anchor="middle" class="small">IRQ 总入口已开放</text>
   <path d="M168 304 L168 264" class="edge"/>
   <path d="M168 422 L168 382" class="edge"/>
 
@@ -86,9 +86,9 @@
   <rect x="805" y="436" width="176" height="72" rx="8" class="box irq"/>
   <text x="893" y="464" text-anchor="middle" class="label">SmpCallFunction</text>
   <text x="893" y="488" text-anchor="middle" class="small">queues + IPI route</text>
-  <rect x="805" y="592" width="389" height="72" rx="8" class="box phase"/>
-  <text x="999" y="620" text-anchor="middle" class="label">出口 checkpoint</text>
-  <text x="999" y="644" text-anchor="middle" class="small">IRQ 仍关闭，early guard 已清除</text>
+  <rect x="805" y="592" width="389" height="72" rx="8" class="box irq"/>
+  <text x="999" y="620" text-anchor="middle" class="label">中断开放动作</text>
+  <text x="999" y="644" text-anchor="middle" class="small">InterruptStream.enable()</text>
 
   <path d="M254 222 C286 222, 304 220, 348 220" class="edge"/>
   <path d="M510 220 L548 220" class="edge"/>
