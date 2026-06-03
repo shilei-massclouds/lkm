@@ -2,13 +2,15 @@
  * Interrupt Phase Specification
  *
  * InterruptPhase starts when IRQ/time facilities begin setup. Its first
- * currently expanded subphase is IrqTimeInitPhase: it starts with the boot CPU
- * interrupt gate still closed and ends after local_irq_enable() opens that
- * gate. Later interrupt-open preparation and process-preparation subphases are
- * not yet formalized in spec/model.
+ * currently expanded subphases are IrqTimeInitPhase and IrqOpenPreparePhase.
+ * IrqTimeInitPhase starts with the boot CPU interrupt gate still closed and
+ * ends after local_irq_enable() opens that gate. IrqOpenPreparePhase then
+ * covers the interrupt-open late core/platform preparation boundary before
+ * process preparation starts.
  */
 
 include "irq-time-init/main.spec";
+include "irq-open-prepare/main.spec";
 
 /*
  * InterruptPhase 表示中断期阶段对象。它负责推进当前模型已经展开的中断期子阶段。
@@ -23,7 +25,7 @@ object InterruptPhase: PhaseObject {
     state State::Base {
         events {
             /*
-             * Setup 顺序推进当前已经正式规格化的中断时间准备期。
+             * Setup 顺序推进当前已经正式规格化的中断期子阶段。
              * InterruptPhase 不直接依赖 PreparePhase；它从 BootPhase.Ready 接续。
              */
             on Event::Setup -> State::Ready {
@@ -34,6 +36,7 @@ object InterruptPhase: PhaseObject {
 
                 drives {
                     IrqTimeInitPhase.Event::Setup;
+                    IrqOpenPreparePhase.Event::Setup;
                 }
             }
         }
@@ -47,6 +50,7 @@ object InterruptPhase: PhaseObject {
             BootPhase.state == State::Ready;
             SchedInitPhase.state == State::Ready;
             IrqTimeInitPhase.state == State::Ready;
+            IrqOpenPreparePhase.state == State::Ready;
         }
     }
 }

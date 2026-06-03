@@ -20,6 +20,7 @@ use crate::objects::{
     init_stack::InitStack,
     init_task::InitTask,
     interrupt_stream::InterruptStream,
+    irq_open::{Console, DelayLoop, SchedClock},
     irq_time::{
         HrtimerCore, IpiMux, IrqController, IrqDispatchTree, Plic, RiscvIntc, RiscvTimerProvider,
         SbiIpi, SmpCallFunction, Tick, Timekeeper, TimerWheel,
@@ -129,6 +130,10 @@ pub struct Context {
     pub ipi_mux: IpiMux,
     pub sbi_ipi: SbiIpi,
     pub smp_call_function: SmpCallFunction,
+
+    pub console: Console,
+    pub sched_clock: SchedClock,
+    pub delay_loop: DelayLoop,
 }
 
 impl Context {
@@ -202,6 +207,9 @@ impl Context {
             ipi_mux: IpiMux::new(),
             sbi_ipi: SbiIpi::new(),
             smp_call_function: SmpCallFunction::new(),
+            console: Console::new(),
+            sched_clock: SchedClock::new(),
+            delay_loop: DelayLoop::new(),
         }
     }
 }

@@ -1,3 +1,4 @@
+pub mod irq_open_prepare;
 pub mod irq_time_init;
 
 use crate::{
@@ -37,5 +38,7 @@ fn interrupt_phase_ready() -> EventResult {
 }
 
 pub fn is_ready() -> bool {
-    crate::phases::state::load(&INTERRUPT_PHASE_STATE) == State::Ready && irq_time_init::is_ready()
+    crate::phases::state::load(&INTERRUPT_PHASE_STATE) == State::Ready
+        && irq_time_init::is_ready()
+        && irq_open_prepare::is_ready()
 }

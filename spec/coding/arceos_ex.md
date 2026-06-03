@@ -21,6 +21,7 @@
 - `SchedInitPhase.Ready`
 - `InterruptPhase.Ready`
 - `IrqTimeInitPhase.Ready`
+- `IrqOpenPreparePhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -59,7 +60,7 @@ make clean
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
-`InterruptPhase.Ready`（其当前展开子阶段为 `IrqTimeInitPhase.Ready`），随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
+`InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready` 和 `IrqOpenPreparePhase.Ready`），随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
 `SmpCallFunction` 只发布状态与必要事实，不提供完整运行期服务。
@@ -455,6 +456,35 @@ kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提
 `poking_init()`、`ftrace_init()` 和 `context_tracking_init()` 当前按 RISC-V64/default_config 记录为 trimmed/no-op。
 `early_trace_init()`、`trace_init()` 和 `housekeeping_init()` 当前保留为 model `deferred`。实现若遇到这些调用位置，应按模型记录
 checkpoint 或 no-op 条件，不得以零散 TODO 代替正式 deferred。
+
+## `IrqOpenPreparePhase` 编码约束
+
+`IrqOpenPreparePhase` 已正式落到 `spec/model/interrupt/irq-open-prepare/`，属于 `InterruptPhase` 的第二个子阶段。它必须接在
+`IrqTimeInitPhase.Ready` 之后运行，此时 boot CPU 本地中断总入口已经开放；不得把 `local_irq_enable()` 从
+`IrqTimeInitPhase` 末尾移到本阶段开头。
+
+目录、文件和对象命名必须跟阶段树一致：实现文件位于
+`impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs` 等 `interrupt` 阶段子树下，不得落回 `boot` 阶段子树。
+
+`kmem_cache_init_late()` 当前只实现为 `SlubAllocator.setup_flush_workqueue()` 内部资源事实：依赖
+`SlubAllocator.Ready`、`KmallocCaches.Ready` 和 `Workqueue.Prepared`，记录 `flush_workqueue_ready == true`。
+它不得把 `SlubAllocator` 推进到 `Online`，Linux `slab_state = FULL` / `SlubAllocator.enable()` 仍留给后续
+`slab_sysfs_init()` 类 late initcall。
+
+`console_init()` 当前只要求 `Console.Prepared`、`TtyLineDisciplineRegistry.Prepared` 和 `ConsoleDriverSet.Prepared`。
+正式 console 进入准备边界后，真实 console device probe、boot console unregister 和完整 early/boot console handoff
+仍是条件事实或后续设备初始化结果，不作为本阶段固定结束条件。
+
+`sched_clock_init()` 对应 `SchedClock.setup()`，只发布 generic sched clock core 的启动期读数可用事实，不改变
+`RiscvTimerProvider` 或 `Timekeeper` 的生命周期状态。`calibrate_delay()` 对应 `DelayLoop.setup()`，消费
+`RiscvTimerProvider` 的 timebase/lpj fact，建立 `udelay`/`ndelay`/`mdelay` 等 Ready 后 action 的参数基础。
+
+本阶段仍不得打开普通任务并发或 secondary CPU 并发；周期 tick 服务、完整 softirq 执行、IPI enable、workqueue worker
+kthread 和 RCU GP kthread 仍保持 deferred。`setup_per_cpu_pageset()` 当前只作为 `PageAllocator.setup()` 的 per-CPU
+pageset 快速路径 deferred 细项记录，不引入新的 lifecycle slot。
+
+smoke 可覆盖两个用户可观察 action：`SchedClock.read()` 至少能返回随 time source 推进的读数，`DelayLoop.udelay(usec)`
+能完成一个有界 busy-wait 并保持中断开放状态。smoke 不应为了重复内部状态不变量而暴露更多私有对象字段。
 
 ## CacheBlockInfo 编码约束
 

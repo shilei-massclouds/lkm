@@ -7,9 +7,10 @@ use super::{
     memblock::MemBlock,
     per_cpu_storage::PerCpuStorage,
     raw_dtb::PhysRange,
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::{StaticBranch, StaticKey},
     vm::Vm,
+    workqueue::Workqueue,
     zones::{ZoneKind, Zones},
 };
 use crate::trace::Checkpoint;
@@ -742,6 +743,7 @@ pub struct SlubAllocator {
     bootstrap_completed: bool,
     cpu_cache_ready: bool,
     cpuhp_step_registered: bool,
+    flush_workqueue_ready: bool,
     cache_registry: SlubCacheRegistry,
     kmalloc_caches: KmallocCaches,
 }
@@ -755,6 +757,7 @@ impl SlubAllocator {
             bootstrap_completed: false,
             cpu_cache_ready: false,
             cpuhp_step_registered: false,
+            flush_workqueue_ready: false,
             cache_registry: SlubCacheRegistry::new(),
             kmalloc_caches: KmallocCaches::new(),
         }
@@ -782,6 +785,10 @@ impl SlubAllocator {
 
     pub const fn cpuhp_step_registered(&self) -> bool {
         self.cpuhp_step_registered
+    }
+
+    pub const fn flush_workqueue_ready(&self) -> bool {
+        self.flush_workqueue_ready
     }
 
     pub const fn cache_registry(&self) -> &SlubCacheRegistry {
@@ -854,6 +861,24 @@ impl SlubAllocator {
             State::Ready,
             Checkpoint::SlubAllocatorReady,
         )
+    }
+
+    pub fn setup_flush_workqueue(&mut self, workqueue: &Workqueue) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || self.kmalloc_caches.state() != State::Ready
+            || workqueue.state() != State::Prepared
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.flush_workqueue_ready = true;
+        crate::trace::checkpoint(Checkpoint::SlubFlushWorkqueueReady);
+        Ok(())
     }
 }
 

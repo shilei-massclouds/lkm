@@ -26,6 +26,7 @@ pub mod init_mm;
 pub mod init_stack;
 pub mod init_task;
 pub mod interrupt_stream;
+pub mod irq_open;
 pub mod irq_time;
 pub mod kernel_cmdline;
 pub mod kernel_image;

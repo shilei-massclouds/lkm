@@ -86,6 +86,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::irq_time::run,
     },
     SmokeCase {
+        name: "irq_open_prepare",
+        run: cases::irq_open_prepare::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

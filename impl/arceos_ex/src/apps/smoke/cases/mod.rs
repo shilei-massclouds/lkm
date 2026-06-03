@@ -5,6 +5,7 @@ pub mod cpu_id_map;
 pub mod device_tree;
 pub mod fdt;
 pub mod hello;
+pub mod irq_open_prepare;
 pub mod irq_time;
 pub mod memblock;
 pub mod page_allocator;

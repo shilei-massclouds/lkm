@@ -31,6 +31,13 @@ predicate arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action() -> 
 predicate arceos_ex_must_irq_time_init_keep_task_and_smp_concurrency_closed() -> bool;
 predicate arceos_ex_must_irq_time_init_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_irq_time_init_expose_time_and_clockevent_smoke_actions() -> bool;
+predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
+predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
+predicate arceos_ex_must_irq_open_prepare_run_after_irq_time_init() -> bool;
+predicate arceos_ex_must_irq_open_prepare_keep_runtime_services_deferred() -> bool;
+predicate arceos_ex_must_irq_open_prepare_keep_slub_ready_not_online() -> bool;
+predicate arceos_ex_must_irq_open_prepare_console_prepared_only() -> bool;
+predicate arceos_ex_must_irq_open_prepare_expose_sched_clock_and_delay_smoke_actions() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -281,5 +288,73 @@ type ArceosExIrqTimeInitCodingMust {
          * route. These checks do not imply full periodic tick service.
          */
         arceos_ex_must_irq_time_init_expose_time_and_clockevent_smoke_actions();
+    }
+}
+
+type ArceosExIrqOpenPrepareCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * IrqOpenPreparePhase is InterruptPhase subphase 2. Its formal model
+         * path is spec/model/interrupt/irq-open-prepare/.
+         */
+        arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase();
+
+        /*
+         * Code path:
+         *
+         * Phase source layout must follow the model phase tree. The target
+         * implementation path for this phase is the interrupt phase subtree,
+         * for example impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs.
+         */
+        arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree();
+
+        /*
+         * Ordering:
+         *
+         * IrqOpenPreparePhase must run after IrqTimeInitPhase.Ready, with the
+         * boot CPU local interrupt gate already open. It must not move
+         * local_irq_enable() out of IrqTimeInitPhase.
+         */
+        arceos_ex_must_irq_open_prepare_run_after_irq_time_init();
+
+        /*
+         * Runtime services:
+         *
+         * This phase must keep task concurrency and SMP concurrency closed and
+         * must not implicitly start periodic tick service, IPI enable,
+         * workqueue workers, RCU GP kthreads or full softirq execution.
+         */
+        arceos_ex_must_irq_open_prepare_keep_runtime_services_deferred();
+
+        /*
+         * SLUB late boundary:
+         *
+         * kmem_cache_init_late() must be represented as the internal
+         * SlubAllocator flush workqueue fact. It must not advance
+         * SlubAllocator to Online/FULL; that belongs to later slab_sysfs_init()
+         * style work.
+         */
+        arceos_ex_must_irq_open_prepare_keep_slub_ready_not_online();
+
+        /*
+         * Console boundary:
+         *
+         * console_init() must prepare the formal Console object, line
+         * discipline registry and early console driver set only. Real device
+         * probe, boot console unregister and full handoff remain conditional
+         * or deferred facts.
+         */
+        arceos_ex_must_irq_open_prepare_console_prepared_only();
+
+        /*
+         * Smoke actions:
+         *
+         * SchedClock.setup() and DelayLoop.setup() must expose enough action
+         * surface for smoke checks after IrqOpenPreparePhase.Ready: a sched
+         * clock read that advances and a bounded busy-wait delay action.
+         */
+        arceos_ex_must_irq_open_prepare_expose_sched_clock_and_delay_smoke_actions();
     }
 }
