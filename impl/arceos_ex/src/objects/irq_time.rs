@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use super::{
     cpu_group::CpuGroup,
@@ -17,6 +17,10 @@ use crate::{arch::riscv64, trace::Checkpoint};
 const DEFAULT_TIMEBASE_HZ: u64 = 10_000_000;
 
 static TIMER_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
+static ONESHOT_DEADLINE: AtomicU64 = AtomicU64::new(0);
+static ONESHOT_CALLBACK: AtomicUsize = AtomicUsize::new(0);
+
+pub type ClockEventCallback = fn(u64);
 
 pub struct IrqController {
     lifecycle: Lifecycle,
@@ -672,15 +676,29 @@ impl RiscvTimerProvider {
         )
     }
 
-    pub fn program_delta(&self, delta_ticks: u64) -> bool {
-        if self.lifecycle.state() != State::Ready || delta_ticks == 0 {
-            return false;
+    pub fn read_time(&self) -> Option<u64> {
+        if self.lifecycle.state() != State::Ready {
+            return None;
+        }
+
+        Some(riscv64::sbi::read_time())
+    }
+
+    pub fn schedule_oneshot(&self, delta_ticks: u64, callback: ClockEventCallback) -> Option<u64> {
+        if self.lifecycle.state() != State::Ready
+            || delta_ticks == 0
+            || ONESHOT_CALLBACK.load(Ordering::Acquire) != 0
+        {
+            return None;
         }
 
         let now = riscv64::sbi::read_time();
+        let deadline = now.wrapping_add(delta_ticks);
+        ONESHOT_DEADLINE.store(deadline, Ordering::Relaxed);
+        ONESHOT_CALLBACK.store(callback as usize, Ordering::Release);
         riscv64::csr::enable_supervisor_timer_interrupt();
-        riscv64::sbi::set_timer(now.wrapping_add(delta_ticks));
-        true
+        riscv64::sbi::set_timer(deadline);
+        Some(deadline)
     }
 }
 
@@ -812,6 +830,12 @@ pub fn timer_interrupt_count() -> usize {
 pub fn handle_timer_interrupt() {
     riscv64::csr::disable_supervisor_timer_interrupt();
     TIMER_INTERRUPT_COUNT.fetch_add(1, Ordering::Relaxed);
+    let callback = ONESHOT_CALLBACK.swap(0, Ordering::AcqRel);
+    let deadline = ONESHOT_DEADLINE.swap(0, Ordering::AcqRel);
+    if callback != 0 {
+        let callback: ClockEventCallback = unsafe { core::mem::transmute(callback) };
+        callback(deadline);
+    }
 }
 
 fn read_timebase_frequency(device_tree: &DeviceTree) -> Option<u64> {

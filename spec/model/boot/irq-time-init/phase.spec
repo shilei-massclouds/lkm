@@ -369,6 +369,8 @@ object RiscvTimerProvider: HardwareObject {
                     riscv_timer_irq_mapping_ready(RiscvTimerProvider, IrqController);
                     riscv_timer_interrupt_action_ready(IrqDispatchTree, RiscvTimerProvider);
                     riscv_timer_sbi_programming_ready(RiscvTimerProvider, SBI);
+                    riscv_time_read_action_available(RiscvTimerProvider);
+                    riscv_clockevent_oneshot_action_available(RiscvTimerProvider, IrqDispatchTree);
                 }
             }
         }
@@ -382,6 +384,8 @@ object RiscvTimerProvider: HardwareObject {
             riscv_timer_irq_mapping_ready(RiscvTimerProvider, IrqController);
             riscv_timer_interrupt_action_ready(IrqDispatchTree, RiscvTimerProvider);
             riscv_timer_sbi_programming_ready(RiscvTimerProvider, SBI);
+            riscv_time_read_action_available(RiscvTimerProvider);
+            riscv_clockevent_oneshot_action_available(RiscvTimerProvider, IrqDispatchTree);
         }
     }
 }
@@ -494,7 +498,8 @@ object IrqTimeInitPhase: PhaseObject {
                     interrupt_concurrency_open_for_boot_cpu();
                     task_concurrency_closed();
                     smp_concurrency_closed();
-                    boot_cpu_timer_interrupt_smoke_available(RiscvTimerProvider, IrqDispatchTree);
+                    time_read_smoke_available(RiscvTimerProvider);
+                    clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
                 }
 
                 deferred {
@@ -511,9 +516,9 @@ object IrqTimeInitPhase: PhaseObject {
     state State::Ready {
         invariant {
             irq_time_init_ready(IrqTimeInitPhase);
-                    IrqController.state == State::Ready;
-                    IrqDispatchTree.state == State::Ready;
-                    Tick.state == State::Ready;
+            IrqController.state == State::Ready;
+            IrqDispatchTree.state == State::Ready;
+            Tick.state == State::Ready;
             TickBroadcast.state == State::Ready;
             TimerWheel.state == State::Ready;
             HrtimerCore.state == State::Ready;
@@ -529,7 +534,8 @@ object IrqTimeInitPhase: PhaseObject {
             interrupt_concurrency_open_for_boot_cpu();
             task_concurrency_closed();
             smp_concurrency_closed();
-            boot_cpu_timer_interrupt_smoke_available(RiscvTimerProvider, IrqDispatchTree);
+            time_read_smoke_available(RiscvTimerProvider);
+            clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
         }
     }
 }
