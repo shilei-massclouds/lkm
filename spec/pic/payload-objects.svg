@@ -59,8 +59,8 @@
   <text x="712" y="212" text-anchor="middle" class="label">UnikernelApp</text>
   <text x="712" y="236" text-anchor="middle" class="small">coarse variant</text>
   <rect x="360" y="318" width="220" height="82" rx="8" class="box arg"/>
-  <text x="470" y="346" text-anchor="middle" class="label">InitCandidateList</text>
-  <text x="470" y="370" text-anchor="middle" class="small">rdinit checkpoint; init/default/fallback</text>
+  <text x="470" y="346" text-anchor="middle" class="label">candidates</text>
+  <text x="470" y="370" text-anchor="middle" class="small">UserBootPayload attribute</text>
   <rect x="610" y="318" width="205" height="82" rx="8" class="box arg"/>
   <text x="712" y="346" text-anchor="middle" class="label">InitArgEnv</text>
   <text x="712" y="370" text-anchor="middle" class="small">argv_init + envp_init</text>

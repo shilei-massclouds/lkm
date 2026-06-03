@@ -45,7 +45,7 @@
     <g transform="translate(0 166)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">2</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
-      <text x="320" y="232" class="line1">UserBootPayload.setup(): InitCandidateList + InitArgEnv</text>
+      <text x="320" y="232" class="line1">UserBootPayload.setup(): candidates + InitArgEnv</text>
       <text x="320" y="260" class="line2">rdinit 分支仅作 checkpoint；有效候选为 init、CONFIG_DEFAULT_INIT、fallback 列表</text>
     </g>
     <g transform="translate(0 276)">
@@ -70,7 +70,7 @@
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box exec"/>
       <text x="320" y="232" class="line1">ExecCore.execve(): kernel_execve(path, argv_init, envp_init)</text>
-      <text x="320" y="260" class="line2">分配 linux_binprm，复制 argv/envp，进入 bprm_execve() 和 binfmt handler</text>
+      <text x="320" y="260" class="line2">当前建模为 exec 依赖动作；bprm、argv/envp、binfmt 细节 deferred</text>
     </g>
     <g transform="translate(0 716)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text>
@@ -93,13 +93,13 @@
     <g transform="translate(0 1046)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
-      <text x="320" y="232" class="line1">InitCandidateList.try_default_init(): CONFIG_DEFAULT_INIT</text>
+      <text x="320" y="232" class="line1">UserBootPayload.try_candidate(path, default=true)</text>
       <text x="320" y="260" class="line2">配置非空时尝试；失败打印 Default init failed 并继续 fallback</text>
     </g>
     <g transform="translate(0 1156)">
       <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text>
       <rect x="292" y="204" width="876" height="84" rx="10" class="box arg"/>
-      <text x="320" y="232" class="line1">InitCandidateList.try_fallbacks(): /sbin/init, /etc/init, /bin/init, /bin/sh</text>
+      <text x="320" y="232" class="line1">UserBootPayload.try_fallbacks(): /sbin/init, /etc/init, /bin/init, /bin/sh</text>
       <text x="320" y="260" class="line2">逐个 try_to_run_init_process()；-ENOENT 静默，其它错误打印后继续</text>
     </g>
     <g transform="translate(0 1266)">
