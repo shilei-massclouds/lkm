@@ -395,6 +395,43 @@ object InterruptStream: FlowObject {
             supervisor_interrupts_disabled(Riscv64.sstatus);
             interrupt_dispatch_ready(InterruptStream);
         }
+
+        events {
+            /*
+             * Enable 对应 boot CPU 的 local_irq_enable() 边界。当前模型把这一步
+             * 收入中断时间准备期末尾，使 IRQ/timer smoke 可以在该阶段之后运行。
+             */
+            on Event::Enable -> State::Online {
+                depends_on {
+                    IrqController.state == State::Ready;
+                    RiscvTimerProvider.state == State::Ready;
+                    Softirq.state == State::Ready;
+                    EventStream.state == State::Ready;
+                }
+
+                may_change {
+                    Riscv64.sstatus;
+                }
+
+                ensures {
+                    supervisor_interrupts_enabled(Riscv64.sstatus);
+                    boot_cpu_local_interrupts_enabled(BootCPU);
+                    interrupt_dispatch_ready(InterruptStream);
+                }
+            }
+        }
+    }
+
+    /*
+     * Online 表示 boot CPU 本地中断总入口已经开放。各类中断源仍由 sie
+     * 子开关、IRQ domain 和设备级 enable 独立控制。
+     */
+    state State::Online {
+        invariant {
+            supervisor_interrupts_enabled(Riscv64.sstatus);
+            boot_cpu_local_interrupts_enabled(BootCPU);
+            interrupt_dispatch_ready(InterruptStream);
+        }
     }
 }
 

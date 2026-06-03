@@ -82,6 +82,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::scheduler::run,
     },
     SmokeCase {
+        name: "irq_time",
+        run: cases::irq_time::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

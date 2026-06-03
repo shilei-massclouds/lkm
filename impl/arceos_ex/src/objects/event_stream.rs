@@ -208,7 +208,7 @@ impl EventStream {
 
 pub fn dispatch_trap(frame: &mut TrapFrame) {
     if frame.scause & SCAUSE_INTERRUPT_BIT != 0 {
-        crate::objects::interrupt_stream::dispatch_scause(frame.scause)
+        crate::objects::interrupt_stream::dispatch_scause(frame.scause);
     } else {
         crate::objects::exception_stream::dispatch_trap(frame)
     }

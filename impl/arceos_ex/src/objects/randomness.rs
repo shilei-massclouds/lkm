@@ -1,5 +1,6 @@
 use super::{
     command_line::StaticCommandLine,
+    cpu_group::CpuGroup,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -59,6 +60,27 @@ impl Randomness {
             State::Base,
             State::Prepared,
             Checkpoint::RandomnessPrepared,
+        )
+    }
+
+    pub fn setup(&mut self, cpu_group: &CpuGroup, time_seed: u64) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || cpu_group.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.early_mix = mix_bytes(self.early_mix, &time_seed.to_le_bytes());
+        self.early_mix = mix_bytes(self.early_mix, &cpu_group.boot_hartid().to_le_bytes());
+        self.fully_ready = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::RandomnessReady,
         )
     }
 }

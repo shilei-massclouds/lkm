@@ -1,6 +1,7 @@
 pub mod core_prepare;
 pub mod entry_prelude;
 pub mod entry_successor;
+pub mod irq_time_init;
 pub mod mm_core_init;
 pub mod sched_init;
 
@@ -37,4 +38,5 @@ pub fn is_ready() -> bool {
         && core_prepare::is_ready()
         && mm_core_init::is_ready()
         && sched_init::is_ready()
+        && irq_time_init::is_ready()
 }

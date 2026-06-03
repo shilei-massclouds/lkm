@@ -20,6 +20,10 @@ use crate::objects::{
     init_stack::InitStack,
     init_task::InitTask,
     interrupt_stream::InterruptStream,
+    irq_time::{
+        HrtimerCore, IrqController, IrqDispatchTree, RiscvTimerProvider, SbiIpi, SmpCallFunction,
+        Tick, Timekeeper, TimerWheel,
+    },
     kernel_cmdline::KernelCmdline,
     kernel_image::KernelImage,
     lds::Lds,
@@ -112,6 +116,16 @@ pub struct Context {
     pub workqueue: Workqueue,
     pub softirq: Softirq,
     pub rcu_core: RcuCore,
+
+    pub irq_controller: IrqController,
+    pub irq_dispatch_tree: IrqDispatchTree,
+    pub tick: Tick,
+    pub timer_wheel: TimerWheel,
+    pub hrtimer_core: HrtimerCore,
+    pub timekeeper: Timekeeper,
+    pub riscv_timer_provider: RiscvTimerProvider,
+    pub sbi_ipi: SbiIpi,
+    pub smp_call_function: SmpCallFunction,
 }
 
 impl Context {
@@ -173,6 +187,15 @@ impl Context {
             workqueue: Workqueue::new(),
             softirq: Softirq::new(),
             rcu_core: RcuCore::new(),
+            irq_controller: IrqController::new(),
+            irq_dispatch_tree: IrqDispatchTree::new(),
+            tick: Tick::new(),
+            timer_wheel: TimerWheel::new(),
+            hrtimer_core: HrtimerCore::new(),
+            timekeeper: Timekeeper::new(),
+            riscv_timer_provider: RiscvTimerProvider::new(),
+            sbi_ipi: SbiIpi::new(),
+            smp_call_function: SmpCallFunction::new(),
         }
     }
 }

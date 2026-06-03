@@ -834,6 +834,38 @@ object Randomness: KernelObject {
             arch_entropy_accounted(Randomness, Riscv64);
             randomness_not_fully_ready(Randomness);
         }
+
+        events {
+            /*
+             * Setup 对应 random_init()。它在中断打开前补齐完整 RNG 基础，
+             * 但不要求熵池已经达到运行期强随机可用状态。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Timekeeper.state == State::Ready;
+                    StaticCommandLine.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                }
+
+                ensures {
+                    randomness_ready(Randomness);
+                    randomness_time_seed_material_ready(Randomness, Timekeeper);
+                    randomness_boot_cpu_mix_ready(Randomness, CpuGroup);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 random_init() 已完成，后续代码可依赖完整 RNG 对象壳；
+     * 熵质量和阻塞随机语义留给后续运行期模型。
+     */
+    state State::Ready {
+        invariant {
+            randomness_ready(Randomness);
+            randomness_time_seed_material_ready(Randomness, Timekeeper);
+            randomness_boot_cpu_mix_ready(Randomness, CpuGroup);
+        }
     }
 }
 

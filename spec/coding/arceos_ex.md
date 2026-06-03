@@ -56,10 +56,11 @@ make clean
 生成带注释的 trace SVG 报告。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
-`EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`，并正在接入 `SchedInitPhase.Ready`，随后通过
-`PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。当前 `MmCoreInitPhase` 和 `SchedInitPhase`
-都保持最小对象级语义：`PageAllocator`、`SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq` 和
-`RcuCore` 只发布状态与必要事实，不提供完整运行期服务。
+`EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
+`IrqTimeInitPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
+当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
+`SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
+`SmpCallFunction` 只发布状态与必要事实，不提供完整运行期服务。
 
 ## Pre-VM lifecycle 代码生成约束
 
@@ -423,6 +424,20 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 `RcuCore.setup()` 覆盖 `rcu_init()` 的共同核心设施：boot CPU online 事实、RCU softirq 注册、RCU workqueue 基础和
 Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepared`；GP kthread 创建和 `TasksRcu.Ready` 属于后续
 `rcu_init_tasks_generic()` 路径。
+
+## `IrqTimeInitPhase` 编码约束
+
+`IrqTimeInitPhase` 已正式落到 `spec/model/boot/irq-time-init/`。实现侧边界和早期设计草案不同：`local_irq_enable()`
+不再属于后续中断开放期的开头，而是本阶段的结尾。阶段出口必须满足 `InterruptStream.Online`、boot CPU
+`sstatus.SIE` 已打开、`IrqController.Ready`、`IrqDispatchTree.Ready`、`Tick.Ready`、`TimerWheel.Ready`、`HrtimerCore.Ready`、
+`Timekeeper.Ready`、`RiscvTimerProvider.Ready`、`Softirq.Ready`、`Randomness.Ready`、`SbiIpi.Ready` 和
+`SmpCallFunction.Ready`。
+
+本阶段打开的只是 boot CPU 本地中断总入口。普通任务并发、secondary CPU 并发、周期 tick 服务、workqueue worker
+kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提前解释为 Online。
+
+`RiscvTimerProvider.setup()` 可以提供最小 `program_delta()` action，供 smoke 使用 SBI timer 触发一次 supervisor timer
+interrupt。该 smoke 验收中断入口、timer programming 和 handler 返回能力；它不表示完整 clockevent/tick 运行期已经启动。
 
 `poking_init()`、`ftrace_init()` 和 `context_tracking_init()` 当前按 RISC-V64/default_config 记录为 trimmed/no-op。
 `early_trace_init()`、`trace_init()` 和 `housekeeping_init()` 当前保留为 model `deferred`。实现若遇到这些调用位置，应按模型记录

@@ -8,6 +8,8 @@ const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
 const INTERRUPT_HANDLER_COUNT: usize = 16;
 
 const HANDLER_FALLBACK: u8 = 0;
+const HANDLER_TIMER: u8 = 1;
+const INTERRUPT_SUPERVISOR_TIMER: usize = 5;
 
 static INTERRUPT_HANDLER_POLICY: [AtomicU8; INTERRUPT_HANDLER_COUNT] =
     [const { AtomicU8::new(HANDLER_FALLBACK) }; INTERRUPT_HANDLER_COUNT];
@@ -19,12 +21,16 @@ const FALLBACK_POLICY: InterruptPolicy = InterruptPolicy(HANDLER_FALLBACK);
 
 pub struct InterruptStream {
     lifecycle: Lifecycle,
+    timer_handler_ready: bool,
+    boot_cpu_local_interrupts_enabled: bool,
 }
 
 impl InterruptStream {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            timer_handler_ready: false,
+            boot_cpu_local_interrupts_enabled: false,
         }
     }
 
@@ -47,6 +53,14 @@ impl InterruptStream {
         self.lifecycle.state()
     }
 
+    pub const fn timer_handler_ready(&self) -> bool {
+        self.timer_handler_ready
+    }
+
+    pub const fn boot_cpu_local_interrupts_enabled(&self) -> bool {
+        self.boot_cpu_local_interrupts_enabled
+    }
+
     pub fn setup(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Prepared {
             return failed_condition(
@@ -64,9 +78,53 @@ impl InterruptStream {
             Checkpoint::InterruptStreamReady,
         )
     }
+
+    pub fn bind_timer_handler(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        bind_interrupt_policy(INTERRUPT_SUPERVISOR_TIMER, InterruptPolicy(HANDLER_TIMER));
+        self.timer_handler_ready = true;
+        Ok(())
+    }
+
+    pub fn enable(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.timer_handler_ready {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        csr::enable_supervisor_interrupts();
+        if !csr::supervisor_interrupts_enabled() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.boot_cpu_local_interrupts_enabled = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+            Checkpoint::InterruptStreamOnline,
+        )
+    }
 }
 
-pub fn dispatch_scause(scause: usize) -> ! {
+pub fn dispatch_scause(scause: usize) {
     dispatch_handler_policy(read_interrupt_handler_policy(scause), scause)
 }
 
@@ -93,10 +151,15 @@ fn bind_interrupt_policy(cause: usize, policy: InterruptPolicy) {
     INTERRUPT_HANDLER_POLICY[cause].store(policy.0, Ordering::Relaxed);
 }
 
-fn dispatch_handler_policy(handler: u8, scause: usize) -> ! {
+fn dispatch_handler_policy(handler: u8, scause: usize) {
     match handler {
+        HANDLER_TIMER => timer_interrupt_handler(),
         _ => default_interrupt_handler(scause),
     }
+}
+
+fn timer_interrupt_handler() {
+    crate::objects::irq_time::handle_timer_interrupt();
 }
 
 fn default_interrupt_handler(_scause: usize) -> ! {

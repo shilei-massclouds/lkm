@@ -12,19 +12,25 @@ pub fn run() -> SmokeResult {
         printk::write_str("scheduler is not online\n");
         return SmokeResult::Failed;
     }
-    if csr::supervisor_interrupts_enabled() {
-        printk::write_str("interrupts unexpectedly enabled before scheduler smoke\n");
+    let interrupts_enabled = csr::supervisor_interrupts_enabled();
+    if !interrupts_enabled {
+        printk::write_str("interrupts not enabled before scheduler smoke\n");
         return SmokeResult::Failed;
     }
 
     let before = ctx.scheduler.preempt_disabled_passes();
+    csr::disable_supervisor_interrupts();
     if ctx.scheduler.schedule_preempt_disabled().is_err() {
         printk::write_str("schedule_preempt_disabled failed\n");
+        csr::enable_supervisor_interrupts();
         return SmokeResult::Failed;
     }
 
-    if csr::supervisor_interrupts_enabled() {
-        printk::write_str("scheduler smoke enabled interrupts\n");
+    if !csr::supervisor_interrupts_enabled() {
+        csr::enable_supervisor_interrupts();
+    }
+    if !csr::supervisor_interrupts_enabled() {
+        printk::write_str("scheduler smoke failed to restore interrupts\n");
         return SmokeResult::Failed;
     }
     if ctx.scheduler.state() != State::Online

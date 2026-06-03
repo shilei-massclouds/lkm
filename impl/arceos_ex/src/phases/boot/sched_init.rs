@@ -60,7 +60,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn handoff() -> ! {
-    crate::phases::boot::setup_after_children()
+    crate::phases::boot::irq_time_init::setup(crate::context::context())
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {

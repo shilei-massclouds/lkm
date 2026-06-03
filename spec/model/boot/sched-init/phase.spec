@@ -357,6 +357,41 @@ object Softirq: InterruptObject {
             softirq_pending_set_ready(Softirq, PerCpuStorage);
             softirq_execution_closed(Softirq);
         }
+
+        events {
+            /*
+             * Setup 对应 softirq_init()。TimerWheel/HrtimerCore 已经在本阶段
+             * 前半段注册 TIMER_SOFTIRQ/HRTIMER_SOFTIRQ；这里补齐 tasklet 队列
+             * 与 TASKLET/HI softirq action。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    PerCpuStorage.state == State::Ready;
+                    TimerWheel.state == State::Ready;
+                    HrtimerCore.state == State::Ready;
+                }
+
+                ensures {
+                    softirq_action_table_ready(Softirq);
+                    softirq_pending_set_ready(Softirq, PerCpuStorage);
+                    softirq_tasklet_queues_ready(Softirq, PerCpuStorage);
+                    softirq_tasklet_actions_registered(Softirq);
+                    softirq_timer_actions_registered(Softirq, TimerWheel, HrtimerCore);
+                    softirq_execution_closed(Softirq);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            softirq_action_table_ready(Softirq);
+            softirq_pending_set_ready(Softirq, PerCpuStorage);
+            softirq_tasklet_queues_ready(Softirq, PerCpuStorage);
+            softirq_tasklet_actions_registered(Softirq);
+            softirq_timer_actions_registered(Softirq, TimerWheel, HrtimerCore);
+            softirq_execution_closed(Softirq);
+        }
     }
 }
 

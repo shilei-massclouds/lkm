@@ -2,6 +2,7 @@ use core::arch::global_asm;
 
 #[allow(dead_code)]
 const SSTATUS_SIE: usize = 1 << 1;
+const SIE_STIE: usize = 1 << 5;
 const SSTATUS_VS: usize = 0b11 << 9;
 const SSTATUS_FS: usize = 0b11 << 13;
 
@@ -78,6 +79,18 @@ pub fn read_sip() -> usize {
 #[allow(dead_code)]
 pub fn disable_supervisor_interrupts() {
     clear_sstatus_bits(SSTATUS_SIE);
+}
+
+pub fn enable_supervisor_interrupts() {
+    set_sstatus_bits(SSTATUS_SIE);
+}
+
+pub fn disable_supervisor_timer_interrupt() {
+    clear_sie_bits(SIE_STIE);
+}
+
+pub fn enable_supervisor_timer_interrupt() {
+    set_sie_bits(SIE_STIE);
 }
 
 pub fn read_gp() -> usize {
@@ -181,5 +194,23 @@ pub unsafe fn switch_to_early_vm(
 fn clear_sstatus_bits(mask: usize) {
     unsafe {
         core::arch::asm!("csrrc zero, sstatus, {mask}", mask = in(reg) mask, options(nostack, nomem));
+    }
+}
+
+fn set_sstatus_bits(mask: usize) {
+    unsafe {
+        core::arch::asm!("csrrs zero, sstatus, {mask}", mask = in(reg) mask, options(nostack, nomem));
+    }
+}
+
+fn set_sie_bits(mask: usize) {
+    unsafe {
+        core::arch::asm!("csrrs zero, sie, {mask}", mask = in(reg) mask, options(nostack, nomem));
+    }
+}
+
+fn clear_sie_bits(mask: usize) {
+    unsafe {
+        core::arch::asm!("csrrc zero, sie, {mask}", mask = in(reg) mask, options(nostack, nomem));
     }
 }
