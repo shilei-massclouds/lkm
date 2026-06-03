@@ -54,6 +54,13 @@
 | spec/coding | 规则强度分层 | 已为 `MUST`、`SHOULD`、`MAY`、`NOTE` 建立统一标注与解释规则，并把全局 `Context` 映射记录为 `SHOULD`。 |
 | arceos_ex | 第一轮源码结构清理 | 已拆分 `entry_successor`、`entry_prelude`、FDT、静态页表、VM setup bridge 等聚合文件，保留后续目录分层为 P2。 |
 
+## 当前交接标记
+
+- 截止提交 537c208 (impl: move irq time init into interrupt phase)，InterruptPhase 子阶段 1 IrqTimeInitPhase 已收尾：正式规格位于 spec/model/interrupt/irq-time-init/，实现位于 impl/arceos_ex/src/phases/interrupt/irq_time_init.rs，阶段末尾打开 boot CPU 本地中断。
+- 已完成验收：make verify；make test；make run LOG=trace APP=smoke；make build APP=hello；make run APP=hello；tools/common、parse、model、derive、check、codegen、view、render、pyveri unittest。
+- 下一轮入口：InterruptPhase 子阶段 2 IrqOpenPreparePhase（中断开放后准备期）。规格讨论起点在 spec/组件化内核规格.md 的 kmem_cache_init_late() 到 arch_cpu_finalize_init() 段；正式化时先落 spec/model/interrupt/irq-open-prepare/，再调整 spec/coding/ 和 impl/arceos_ex/src/phases/interrupt/。
+- 上下文清理后恢复：先执行 git status --short --branch；预期除本地未跟踪 AGENTS.md 外，dev 与 origin/dev 同步。
+
 ## 细节文档索引
 
 - [tools/pyveri/DEVELOPMENT.md](../tools/pyveri/DEVELOPMENT.md)：pyveri 工具链架构、阶段工具职责、trace 输出和注释数据流设计。
