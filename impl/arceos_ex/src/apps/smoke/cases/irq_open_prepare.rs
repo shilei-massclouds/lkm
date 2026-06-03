@@ -60,19 +60,9 @@ pub fn run() -> SmokeResult {
         second_sched_clock = now;
     }
 
-    let Some(delay_ticks) = ctx.delay_loop.udelay(&ctx.riscv_timer_provider, 1) else {
-        printk::write_str("delay loop action unavailable\n");
-        return SmokeResult::Failed;
-    };
-    if delay_ticks == 0 || !csr::supervisor_interrupts_enabled() {
-        printk::write_str("delay loop action returned invalid state\n");
-        return SmokeResult::Failed;
-    }
-
     printk::write_fmt(format_args!(
-        "sched_clock_delta={} delay_ticks={} lpj_fine={}\n",
+        "sched_clock_delta={} lpj_fine={}\n",
         second_sched_clock.wrapping_sub(first_sched_clock),
-        delay_ticks,
         ctx.delay_loop.lpj_fine()
     ));
     SmokeResult::Passed

@@ -88,6 +88,10 @@ const CASES: &[SmokeKunitCase] = &[
         run: cases::irq_open_prepare::run,
     },
     SmokeKunitCase {
+        name: "delay_loop",
+        run: cases::delay_loop::run,
+    },
+    SmokeKunitCase {
         name: "fdt",
         run: cases::fdt::run,
     },
