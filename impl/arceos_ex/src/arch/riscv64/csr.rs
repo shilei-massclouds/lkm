@@ -110,6 +110,10 @@ pub fn read_sstatus() -> usize {
     value
 }
 
+pub fn supervisor_interrupts_enabled() -> bool {
+    read_sstatus() & SSTATUS_SIE != 0
+}
+
 pub fn read_satp() -> usize {
     let value: usize;
 

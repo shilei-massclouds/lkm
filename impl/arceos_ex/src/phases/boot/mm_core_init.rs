@@ -2,7 +2,7 @@ use crate::{
     context::Context,
     objects::{
         earlycon, printk,
-        state::{EventResult, LifecycleEvent, State, failed_condition},
+        state::{failed_condition, EventResult, LifecycleEvent, State},
         static_branch::StaticKey,
     },
     trace::Checkpoint,
@@ -62,7 +62,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn handoff() -> ! {
-    crate::phases::boot::setup_after_children()
+    crate::phases::boot::sched_init::setup(crate::context::context())
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {

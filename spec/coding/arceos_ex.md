@@ -12,10 +12,13 @@
 
 ## 目标边界
 
-第一轮目标是让 `arceos_ex` 作为规格驱动的对象级内核原型运行，并完成当前模型中的两个引导子阶段和最终 payload 交接阶段：
+第一轮目标是让 `arceos_ex` 作为规格驱动的对象级内核原型运行，并完成当前模型中的引导子阶段和最终 payload 交接阶段：
 
 - `EntryPreludePhase.Ready`
 - `EntrySuccessorPhase.Ready`
+- `CorePreparePhase.Ready`
+- `MmCoreInitPhase.Ready`
+- `SchedInitPhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -53,7 +56,10 @@ make clean
 生成带注释的 trace SVG 报告。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
-`EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready` 与 `MmCoreInitPhase.Ready`，随后通过 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。当前 `MmCoreInitPhase` 仍是最小对象级语义：`PageAllocator`、`SlubAllocator` 和 `VmallocAllocator` 只发布状态与事实，不提供完整分配 API。
+`EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`，并正在接入 `SchedInitPhase.Ready`，随后通过
+`PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。当前 `MmCoreInitPhase` 和 `SchedInitPhase`
+都保持最小对象级语义：`PageAllocator`、`SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq` 和
+`RcuCore` 只发布状态与必要事实，不提供完整运行期服务。
 
 ## Pre-VM lifecycle 代码生成约束
 
@@ -146,6 +152,11 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 smoke payload 用于覆盖 QEMU 运行期可观察行为，以及规格推导不能单独替代的实现效果，例如控制台输出、格式化输出、内存分配动作、FDT/DeviceTree 公开查询接口、资源摘要和 payload 关机路径。若某个性质仅仅是在重复对象状态、生命周期顺序、内部副本一致性或谓词不变量，并且已经能由 `make verify` 的规格推导闭合，则不应为它新增 smoke 用例。
 
 实现也不应为了 smoke 暴露原本不需要公开的内部状态查询接口。若某个对象同时有可验证的不变量和用户可观察行为，smoke 应测试后者；前者保留在模型谓词、推导验证和对象事件推进检查中。例如 `CommandLine` 的 raw/saved/static 文本视图一致性属于规格和实现状态推进约束，不需要单独增加只读取内部状态的 smoke case。
+
+`SchedInitPhase` 的 smoke 验收例外地允许验证一个主动 action：`Scheduler.schedule_preempt_disabled()`。该 action 是
+`Scheduler.Online` 后的最小可返回调度入口，不是 lifecycle event。当前阶段仍未启用中断，且只有一个可运行的 boot idle/current task，
+因此 smoke 只要求主动发起一次禁抢占调度选择并安全返回：调度器仍为 `Online`，中断仍关闭，当前任务仍是同一个 boot idle task，
+没有切换到其它任务，也不推进 `Workqueue`、`Softirq` 或 `RcuCore` 到运行期 `Online`。
 
 ### 启动与 smoke 输出风格
 
@@ -372,6 +383,50 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 `MmStructCache.setup()` 只建立 `"mm_struct"` cache。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
 
 `PageExt`、`KFENCE`、`KMSAN`、`Kmemleak`、`DebugObjectsMemory` 和 `ExecMemory` 当前按 `linux-6.12.37/default_config` 记录为 model `deferred`/trimmed 路径。实现若遇到这些调用位置，应输出 checkpoint 或保留 no-op 分支说明，不得散落 TODO 来替代正式规格记录。
+
+## `SchedInitPhase` 编码约束
+
+`SchedInitPhase` 已正式落到 `spec/model/boot/sched-init/`。实现侧必须保持与模型一致的阶段边界：入口是
+`MmCoreInitPhase.Ready`、`PageAllocator.Ready`、`SlubAllocator.Ready`、`KmallocCaches.Ready`、`CpuGroup.Ready`、
+`CpuIdMap.Ready`、`PerCpuStorage.Ready`、`CpuHotplugState.Ready`、`StaticBranch.Ready`、`PrintkBuffer.Ready` 和
+`SystemExclusive`；出口是 `Scheduler.Online`、`RadixTree.Ready`、`MapleTree.Ready`、`Workqueue.Prepared`、
+`Softirq.Prepared`、`RcuCore.Ready` 和 `TasksRcu.Prepared`。
+
+目录、文件和对象命名必须跟阶段名一致：模型目录为 `spec/model/boot/sched-init/`，实现文件为
+`impl/arceos_ex/src/phases/boot/sched_init.rs`，阶段对象名为 `SchedInitPhase`。不得混用 `scheduler-init` /
+`SchedulerInitPhase`，除非先正式改名并同步所有规格、图示和实现。
+
+`Scheduler.preset()` 对应 `sched_init()` 的全局前置准备：默认 root domain、bit wait queue table 和调度类壳。当前
+`SchedClass` 细分仍 deferred，调度类顺序检查只作为实现一致性检查或 checkpoint，不作为独立生命周期对象。
+
+`Scheduler.setup()` 建立 possible CPU 的 runqueue 元数据，并把 boot CPU 的当前 `InitTask/current` 建模为
+`BootIdleTask`。它不得分配新的 boot idle task，不得创建第二个 runnable task，也不得把完整 SMP 调度拓扑提前塞进本阶段。
+`BootRunQueue.curr`、`BootRunQueue.idle`、`BootCPU.idle_thread_ref` 和 per-cpu idle task 引用必须收敛到同一个
+`BootIdleTask` 事实。
+
+`Scheduler.enable()` 只表示 boot CPU 调度基础和主动调度入口可用，并设置 `scheduler_running` 等价事实。它不表示 timer tick、
+中断调度、kthread 调度、secondary CPU 调度或 SMP domain 已经可用。
+
+`Scheduler.schedule_preempt_disabled()` 是 `Scheduler.Online` 后的 action。当前阶段只能由实现或 smoke 主动调用；
+不得依赖中断、tick、softirq 或 workqueue 触发。由于当前只有一个任务，该 action 可以空走调度选择路径并返回，但必须保持：
+当前任务仍是 boot idle/current task，中断仍关闭，`Scheduler.state == Online`，且没有普通任务切换副作用。
+
+`RadixTree.setup()` 和 `MapleTree.setup()` 只建立 node cache 与全局分配基础。具体 radix tree、IDR、XArray、maple tree
+实例由后续使用者对象拥有，不在本阶段创建。
+
+`Workqueue.preset()` 只覆盖 `workqueue_init_early()`：system workqueue、worker pool 壳、unbound cpumask、BH pool 和属性缓存。
+它使 `Workqueue.state == Prepared`，表示可以创建 workqueue 和排队/取消 work item；不得解释为 worker kthread 已创建或可执行。
+
+`Softirq.preset()` 是模型显式补充动作，用于在 `RcuCore.setup()` 前建立 `SoftirqActionTable`、slot 和 per-CPU pending bit
+承载壳。它不得执行 softirq，不得建立 tasklet 队列；`softirq_init()` 对应的 `Softirq.setup()` 留给下一子阶段。
+
+`RcuCore.setup()` 覆盖 `rcu_init()` 的共同核心设施：boot CPU online 事实、RCU softirq 注册、RCU workqueue 基础和
+Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepared`；GP kthread 创建和 `TasksRcu.Ready` 属于后续
+`rcu_init_tasks_generic()` 路径。
+
+`poking_init()`、`ftrace_init()` 和 `context_tracking_init()` 当前按 RISC-V64/default_config 记录为 trimmed/no-op。
+`early_trace_init()`、`trace_init()` 和 `housekeeping_init()` 当前保留为 model `deferred`。实现若遇到这些调用位置，应按模型记录
+checkpoint 或 no-op 条件，不得以零散 TODO 代替正式 deferred。
 
 ## CacheBlockInfo 编码约束
 

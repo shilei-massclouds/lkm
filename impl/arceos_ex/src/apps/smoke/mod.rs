@@ -78,6 +78,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::vmalloc::run,
     },
     SmokeCase {
+        name: "scheduler",
+        run: cases::scheduler::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

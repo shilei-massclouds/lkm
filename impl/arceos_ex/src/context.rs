@@ -23,6 +23,7 @@ use crate::objects::{
     kernel_cmdline::KernelCmdline,
     kernel_image::KernelImage,
     lds::Lds,
+    maple_tree::MapleTree,
     memblock::MemBlock,
     mm_core::{
         MemoryDebugHardening, MemoryTopology, MmStructCache, PageAllocator, PageTableCaches,
@@ -33,14 +34,19 @@ use crate::objects::{
     per_cpu_storage::PerCpuStorage,
     physical_memory::PhysicalMemory,
     platform_cpu_info::PlatformCpuInfo,
+    radix_tree::RadixTree,
     randomness::Randomness,
     raw_dtb::RawDtb,
+    rcu::RcuCore,
     resource_tree::ResourceTree,
     root_stream::RootStream,
     sbi::Sbi,
+    scheduler::Scheduler,
+    softirq::Softirq,
     static_branch::StaticBranch,
     static_objects::StaticObjects,
     vm::Vm,
+    workqueue::Workqueue,
     zones::Zones,
 };
 
@@ -99,6 +105,13 @@ pub struct Context {
     pub page_table_caches: PageTableCaches,
     pub vmalloc_allocator: VmallocAllocator,
     pub mm_struct_cache: MmStructCache,
+
+    pub scheduler: Scheduler,
+    pub radix_tree: RadixTree,
+    pub maple_tree: MapleTree,
+    pub workqueue: Workqueue,
+    pub softirq: Softirq,
+    pub rcu_core: RcuCore,
 }
 
 impl Context {
@@ -154,6 +167,12 @@ impl Context {
             page_table_caches: PageTableCaches::new(),
             vmalloc_allocator: VmallocAllocator::new(),
             mm_struct_cache: MmStructCache::new(),
+            scheduler: Scheduler::new(),
+            radix_tree: RadixTree::new(),
+            maple_tree: MapleTree::new(),
+            workqueue: Workqueue::new(),
+            softirq: Softirq::new(),
+            rcu_core: RcuCore::new(),
         }
     }
 }

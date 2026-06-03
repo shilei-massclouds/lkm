@@ -11,6 +11,7 @@ pub mod params;
 pub mod per_cpu;
 pub mod print;
 pub mod resource_tree;
+pub mod scheduler;
 pub mod slub;
 pub mod vmalloc;
 pub mod zones;

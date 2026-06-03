@@ -2,6 +2,7 @@ pub mod core_prepare;
 pub mod entry_prelude;
 pub mod entry_successor;
 pub mod mm_core_init;
+pub mod sched_init;
 
 use crate::{
     objects::state::{EventResult, LifecycleEvent, State},
@@ -35,4 +36,5 @@ pub fn is_ready() -> bool {
     crate::phases::state::load(&BOOT_PHASE_STATE) == State::Ready
         && core_prepare::is_ready()
         && mm_core_init::is_ready()
+        && sched_init::is_ready()
 }
