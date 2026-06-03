@@ -23,7 +23,7 @@
   <rect x="75" y="568" width="188" height="82" rx="8" class="box phase"/><text x="169" y="596" text-anchor="middle" class="label">InitcallPhase</text><text x="169" y="620" text-anchor="middle" class="small">do_basic_setup()</text>
   <path d="M169 256 L169 302" class="edge"/><path d="M169 386 L169 434" class="edge"/><path d="M169 518 L169 566" class="edge"/>
   <rect x="330" y="116" width="515" height="804" rx="14" class="group"/><text x="587" y="150" text-anchor="middle" class="group-title">主线补全对象</text>
-  <rect x="360" y="184" width="205" height="82" rx="8" class="box core"/><text x="462" y="212" text-anchor="middle" class="label">Scheduler</text><text x="462" y="236" text-anchor="middle" class="small">enable_smp()</text>
+  <rect x="360" y="184" width="205" height="82" rx="8" class="box core"/><text x="462" y="212" text-anchor="middle" class="label">Scheduler</text><text x="462" y="236" text-anchor="middle" class="small">SMP action</text>
   <rect x="590" y="184" width="210" height="82" rx="8" class="box flow"/><text x="695" y="212" text-anchor="middle" class="label">KernelInitTask</text><text x="695" y="236" text-anchor="middle" class="small">affinity released</text>
   <rect x="360" y="318" width="205" height="82" rx="8" class="box core"/><text x="462" y="346" text-anchor="middle" class="label">Workqueue</text><text x="462" y="370" text-anchor="middle" class="small">topology ready</text>
   <rect x="590" y="318" width="210" height="82" rx="8" class="box support"/><text x="695" y="346" text-anchor="middle" class="label">AsyncCore</text><text x="695" y="370" text-anchor="middle" class="small">async wq</text>
