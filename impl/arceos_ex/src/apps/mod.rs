@@ -1,6 +1,6 @@
 #[cfg(app_hello)]
 pub mod hello;
-#[cfg(app_smoke)]
+#[cfg(any(app_smoke, checkpoint_handler_smoke))]
 pub mod smoke;
 
 #[cfg(app_smoke)]

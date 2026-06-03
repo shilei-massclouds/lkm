@@ -14,7 +14,7 @@ endif
 endif
 PROBE_FILE_LIST := $(if $(PROBE_FILE),$(strip $(shell sed -e 's/#.*//' "$(PROBE_FILE)")),)
 PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST))
-KNOWN_PROBES := memblock earlycon
+KNOWN_PROBES := memblock earlycon smoke
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))
@@ -43,6 +43,7 @@ EXTRA_RUSTFLAGS ?=
 APP_CFG := app_$(subst -,_,$(APP))
 
 RUSTFLAGS := \
+	$(if $(filter hello,$(APP)),-A dead_code,) \
 	-C opt-level=2 \
 	-C panic=abort \
 	-C relocation-model=static \

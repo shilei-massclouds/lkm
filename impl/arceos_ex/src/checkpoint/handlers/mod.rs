@@ -6,6 +6,8 @@ mod earlycon;
 compile_error!("checkpoint handler memblock-api was renamed to memblock");
 #[cfg(checkpoint_handler_memblock)]
 mod memblock;
+#[cfg(checkpoint_handler_smoke)]
+mod smoke;
 #[cfg(checkpoint_sbi_char)]
 mod trace;
 
@@ -48,10 +50,34 @@ const POST_VM_HANDLERS: &[Handler] = &[
     memblock::HANDLER,
     #[cfg(checkpoint_handler_earlycon)]
     earlycon::HANDLER,
+    #[cfg(checkpoint_handler_smoke)]
+    smoke::HANDLER,
 ];
 
 pub const fn has_post_vm_handlers() -> bool {
     !POST_VM_HANDLERS.is_empty()
+}
+
+#[cfg(any(
+    checkpoint_handler_memblock,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_smoke
+))]
+pub const fn kunit_case_count() -> usize {
+    let mut count = 0usize;
+    #[cfg(checkpoint_handler_memblock)]
+    {
+        count += memblock::KUNIT_CASE_COUNT;
+    }
+    #[cfg(checkpoint_handler_earlycon)]
+    {
+        count += earlycon::KUNIT_CASE_COUNT;
+    }
+    #[cfg(checkpoint_handler_smoke)]
+    {
+        count += smoke::KUNIT_CASE_COUNT;
+    }
+    count
 }
 
 pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {

@@ -1,4 +1,10 @@
 pub mod handlers;
+#[cfg(any(
+    checkpoint_handler_memblock,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_smoke
+))]
+mod kunit;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -34,19 +40,15 @@ pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) {
 fn apply_outcome(checkpoint: Checkpoint, outcome: CheckpointOutcome) {
     match outcome {
         CheckpointOutcome::Continue => {}
-        CheckpointOutcome::Passed => {
-            crate::arch::riscv64::sbi::putstr("checkpoint passed: ");
-            crate::arch::riscv64::sbi::putstr(checkpoint.name());
-            crate::arch::riscv64::sbi::putchar(b'\n');
-        }
+        CheckpointOutcome::Passed => {}
         CheckpointOutcome::FailAndShutdown => {
-            crate::arch::riscv64::sbi::putstr("checkpoint fail: ");
+            crate::arch::riscv64::sbi::putstr("# checkpoint fail: ");
             crate::arch::riscv64::sbi::putstr(checkpoint.name());
             crate::arch::riscv64::sbi::putchar(b'\n');
             crate::arch::riscv64::sbi::system_shutdown();
         }
         CheckpointOutcome::StopAndShutdown => {
-            crate::arch::riscv64::sbi::putstr("checkpoint stop: ");
+            crate::arch::riscv64::sbi::putstr("# checkpoint stop: ");
             crate::arch::riscv64::sbi::putstr(checkpoint.name());
             crate::arch::riscv64::sbi::putchar(b'\n');
             crate::arch::riscv64::sbi::system_shutdown();
