@@ -59,7 +59,7 @@ use crate::objects::{
     resource_tree::ResourceTree,
     rest_init::{
         BootIdleRuntime, KernelInitAffinity, KernelInitDispatchGate, KernelInitTask,
-        KthreaddReadyGate, KthreaddTask, RcuSchedulerStart, SystemState,
+        KthreaddReadyGate, KthreaddTask, SystemState,
     },
     root_stream::RootStream,
     rootfs::{
@@ -173,7 +173,6 @@ pub struct Context {
     pub keyring_core: KeyringCore,
     pub security_core: SecurityCore,
 
-    pub rcu_scheduler_start: RcuSchedulerStart,
     pub kernel_init_task: KernelInitTask,
     pub kernel_init_affinity: KernelInitAffinity,
     pub kthreadd_task: KthreaddTask,
@@ -299,7 +298,6 @@ impl Context {
             uts_namespace: UtsNamespace::new(),
             keyring_core: KeyringCore::new(),
             security_core: SecurityCore::new(),
-            rcu_scheduler_start: RcuSchedulerStart::new(),
             kernel_init_task: KernelInitTask::new(),
             kernel_init_affinity: KernelInitAffinity::new(),
             kthreadd_task: KthreaddTask::new(),

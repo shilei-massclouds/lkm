@@ -15,6 +15,10 @@ pub struct RcuCore {
     softirq_registered: bool,
     workqueues_ready: bool,
     gp_threads_deferred: bool,
+    scheduler_starting_ready: bool,
+    scheduler_active_init: bool,
+    scheduler_start_single_online_cpu: bool,
+    gp_seq_baseline_synced: bool,
     inkernel_boot_ended: bool,
 }
 
@@ -27,6 +31,10 @@ impl RcuCore {
             softirq_registered: false,
             workqueues_ready: false,
             gp_threads_deferred: true,
+            scheduler_starting_ready: false,
+            scheduler_active_init: false,
+            scheduler_start_single_online_cpu: false,
+            gp_seq_baseline_synced: false,
             inkernel_boot_ended: false,
         }
     }
@@ -59,6 +67,22 @@ impl RcuCore {
         self.gp_threads_deferred
     }
 
+    pub const fn scheduler_starting_ready(&self) -> bool {
+        self.scheduler_starting_ready
+    }
+
+    pub const fn scheduler_active_init(&self) -> bool {
+        self.scheduler_active_init
+    }
+
+    pub const fn scheduler_start_single_online_cpu(&self) -> bool {
+        self.scheduler_start_single_online_cpu
+    }
+
+    pub const fn gp_seq_baseline_synced(&self) -> bool {
+        self.gp_seq_baseline_synced
+    }
+
     pub const fn inkernel_boot_ended(&self) -> bool {
         self.inkernel_boot_ended
     }
@@ -86,6 +110,10 @@ impl RcuCore {
         self.softirq_registered = softirq.action_table_ready();
         self.workqueues_ready = workqueue.system_queues_ready();
         self.gp_threads_deferred = true;
+        self.scheduler_starting_ready = false;
+        self.scheduler_active_init = false;
+        self.scheduler_start_single_online_cpu = false;
+        self.gp_seq_baseline_synced = false;
         self.inkernel_boot_ended = false;
         if !self.boot_cpu_online_ready || !self.softirq_registered || !self.workqueues_ready {
             return self.failed_setup();
@@ -97,6 +125,36 @@ impl RcuCore {
             State::Ready,
             Checkpoint::RcuCoreReady,
         )
+    }
+
+    pub fn scheduler_start(&mut self, scheduler: &Scheduler, cpu_group: &CpuGroup) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || scheduler.state() != State::Online
+            || cpu_group.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.scheduler_start_single_online_cpu = cpu_group.boot_cpu_state() == State::Online;
+        if !self.scheduler_start_single_online_cpu || !self.gp_threads_deferred {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.scheduler_starting_ready = true;
+        self.scheduler_active_init = true;
+        self.gp_seq_baseline_synced = true;
+        crate::trace::checkpoint(Checkpoint::RcuSchedulerStartingReady);
+        Ok(())
     }
 
     pub fn end_inkernel_boot(&mut self) -> bool {

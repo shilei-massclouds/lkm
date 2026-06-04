@@ -10,40 +10,10 @@
  */
 
 /*
- * RcuSchedulerStart 表示 rcu_scheduler_starting() 后 RCU 已经离开 early boot
- * 调度盲区。它不重新推进 RcuCore 生命周期，也不创建 GP kthread。
+ * rcu_scheduler_starting() 是 RcuCore.Ready 状态内 action。它不推进
+ * RcuCore 生命周期，只把 RCU 从 early boot/no-op 模式切到
+ * RCU_SCHEDULER_INIT，同步 GP 序号基线，并保持 GP kthread deferred。
  */
-object RcuSchedulerStart: TaskObject {
-    initial_state: State::Base;
-    parent: RcuCore;
-
-    state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
-                depends_on {
-                    RcuCore.state == State::Ready;
-                    Scheduler.state == State::Online;
-                    CpuGroup.state == State::Ready;
-                }
-
-                ensures {
-                    rcu_scheduler_starting_ready(RcuSchedulerStart, RcuCore);
-                    rcu_scheduler_active_level_init(RcuSchedulerStart);
-                    rcu_single_online_cpu_at_scheduler_start(RcuSchedulerStart, CpuGroup);
-                    rcu_gp_threads_still_deferred(RcuCore);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            rcu_scheduler_starting_ready(RcuSchedulerStart, RcuCore);
-            rcu_scheduler_active_level_init(RcuSchedulerStart);
-            rcu_gp_threads_still_deferred(RcuCore);
-        }
-    }
-}
 
 /*
  * KernelInitTask 表示 user_mode_thread(kernel_init, NULL, CLONE_FS) 创建的
@@ -52,8 +22,14 @@ object RcuSchedulerStart: TaskObject {
 object KernelInitTask: TaskObject {
     initial_state: State::Base;
 
+    /*
+     * Base 表示 PID 1 的创建规格尚未建立。
+     */
     state State::Base {
         events {
+            /*
+             * Preset 选择 kernel_init 入口并记录 CLONE_FS 创建约束。
+             */
             on Event::Preset -> State::Prepared {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
@@ -75,6 +51,9 @@ object KernelInitTask: TaskObject {
         }
     }
 
+    /*
+     * Prepared 表示 kernel_init 的创建规格已准备好，但任务实体尚未进入调度体系。
+     */
     state State::Prepared {
         invariant {
             kernel_init_spawn_spec_ready(KernelInitTask);
@@ -83,6 +62,9 @@ object KernelInitTask: TaskObject {
         }
 
         events {
+            /*
+             * Setup 对应 user_mode_thread(kernel_init, NULL, CLONE_FS) 创建 PID 1。
+             */
             on Event::Setup -> State::Ready {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
@@ -102,6 +84,9 @@ object KernelInitTask: TaskObject {
         }
     }
 
+    /*
+     * Ready 表示 PID 1 任务实体已建立，并等待 kthreadd_done completion。
+     */
     state State::Ready {
         invariant {
             kernel_init_task_ready(KernelInitTask);
@@ -111,6 +96,9 @@ object KernelInitTask: TaskObject {
         }
 
         events {
+            /*
+             * Enable 把 kernel_init 放入可调度集合，但仍等待 kthreadd_done 释放。
+             */
             on Event::Enable -> State::Online {
                 depends_on {
                     Scheduler.state == State::Online;
@@ -127,6 +115,9 @@ object KernelInitTask: TaskObject {
         }
     }
 
+    /*
+     * Online 表示 PID 1 已成为可调度任务，后续由 completion 释放进入 PreSmpInitPhase。
+     */
     state State::Online {
         invariant {
             kernel_init_task_online(KernelInitTask);
@@ -144,8 +135,14 @@ object KernelInitAffinity: TaskObject {
     initial_state: State::Base;
     parent: KernelInitTask;
 
+    /*
+     * Base 表示 PID 1 尚未被 rest_init() 固定到 boot CPU。
+     */
     state State::Base {
         events {
+            /*
+             * Setup 设置 PF_NO_SETAFFINITY，并把 PID 1 临时固定到 boot CPU。
+             */
             on Event::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
@@ -163,6 +160,9 @@ object KernelInitAffinity: TaskObject {
         }
     }
 
+    /*
+     * Ready 表示 PID 1 的临时亲和性约束已经发布。
+     */
     state State::Ready {
         invariant {
             kernel_init_affinity_ready(KernelInitAffinity, KernelInitTask);
@@ -179,8 +179,14 @@ object KernelInitAffinity: TaskObject {
 object KthreaddTask: TaskObject {
     initial_state: State::Base;
 
+    /*
+     * Base 表示 kthreadd 的创建规格尚未建立。
+     */
     state State::Base {
         events {
+            /*
+             * Preset 选择 kthreadd 入口并记录 CLONE_FS | CLONE_FILES 创建约束。
+             */
             on Event::Preset -> State::Prepared {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
@@ -200,6 +206,9 @@ object KthreaddTask: TaskObject {
         }
     }
 
+    /*
+     * Prepared 表示 kthreadd 创建规格已准备好，但全局管理线程尚未建立。
+     */
     state State::Prepared {
         invariant {
             kthreadd_spawn_spec_ready(KthreaddTask);
@@ -208,6 +217,9 @@ object KthreaddTask: TaskObject {
         }
 
         events {
+            /*
+             * Setup 对应 kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES)。
+             */
             on Event::Setup -> State::Ready {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
@@ -227,6 +239,9 @@ object KthreaddTask: TaskObject {
         }
     }
 
+    /*
+     * Ready 表示 kthreadd 任务实体已建立，并绑定为全局内核线程管理者。
+     */
     state State::Ready {
         invariant {
             kthreadd_task_ready(KthreaddTask);
@@ -235,6 +250,9 @@ object KthreaddTask: TaskObject {
         }
 
         events {
+            /*
+             * Enable 把 kthreadd 放入可调度集合。
+             */
             on Event::Enable -> State::Online {
                 depends_on {
                     Scheduler.state == State::Online;
@@ -250,6 +268,9 @@ object KthreaddTask: TaskObject {
         }
     }
 
+    /*
+     * Online 表示 kthreadd 已可调度，并可作为后续 kthread 服务提供者。
+     */
     state State::Online {
         invariant {
             kthreadd_task_online(KthreaddTask);
@@ -267,8 +288,14 @@ object KthreaddTask: TaskObject {
 object SystemState: KernelObject {
     initial_state: State::Base;
 
+    /*
+     * Base 表示 system_state 尚未在本阶段重新确认启动中状态。
+     */
     state State::Base {
         events {
+            /*
+             * Preset 记录 SYSTEM_BOOTING 仍是当前全局系统状态。
+             */
             on Event::Preset -> State::Prepared {
                 ensures {
                     system_state_booting(SystemState);
@@ -277,12 +304,18 @@ object SystemState: KernelObject {
         }
     }
 
+    /*
+     * Prepared 表示 SYSTEM_BOOTING 已确认，等待 PID 1 和 kthreadd 都创建完成。
+     */
     state State::Prepared {
         invariant {
             system_state_booting(SystemState);
         }
 
         events {
+            /*
+             * Setup 对应 rest_init() 中 system_state = SYSTEM_SCHEDULING。
+             */
             on Event::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
@@ -298,6 +331,9 @@ object SystemState: KernelObject {
         }
     }
 
+    /*
+     * Ready 表示系统已进入 SYSTEM_SCHEDULING，UP 多任务调度边界打开。
+     */
     state State::Ready {
         invariant {
             system_state_scheduling(SystemState);
@@ -306,6 +342,9 @@ object SystemState: KernelObject {
         }
 
         events {
+            /*
+             * Enable 预留给 FinalizePhase 将 system_state 推进到 SYSTEM_RUNNING。
+             */
             on Event::Enable -> State::Online {
                 depends_on {
                     InitMemoryCleanupDeferred.state == State::Ready;
@@ -322,6 +361,9 @@ object SystemState: KernelObject {
         }
     }
 
+    /*
+     * Online 表示系统已进入 SYSTEM_RUNNING，多核运行期并发边界打开。
+     */
     state State::Online {
         invariant {
             system_state_running(SystemState);
@@ -338,8 +380,14 @@ object SystemState: KernelObject {
 object KthreaddReadyGate: TaskObject {
     initial_state: State::Base;
 
+    /*
+     * Base 表示 kthreadd_done completion 尚未建模为 pending 门。
+     */
     state State::Base {
         events {
+            /*
+             * Setup 建立 kthreadd_done pending 门，PID 1 仍被阻塞在等待点。
+             */
             on Event::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
@@ -355,12 +403,18 @@ object KthreaddReadyGate: TaskObject {
         }
     }
 
+    /*
+     * Ready 表示 kthreadd_done 已存在但尚未 complete。
+     */
     state State::Ready {
         invariant {
             kthreadd_ready_gate_ready(KthreaddReadyGate);
         }
 
         events {
+            /*
+             * Enable 对应 complete(&kthreadd_done)，释放 PID 1 进入下一子阶段。
+             */
             on Event::Enable -> State::Online {
                 depends_on {
                     SystemState.state == State::Ready;
@@ -376,6 +430,9 @@ object KthreaddReadyGate: TaskObject {
         }
     }
 
+    /*
+     * Online 表示 kthreadd_done 已完成，PID 1 可以推进 PreSmpInitPhase。
+     */
     state State::Online {
         invariant {
             kthreadd_ready_gate_completed(KthreaddReadyGate);
@@ -393,8 +450,14 @@ object KthreaddReadyGate: TaskObject {
 object KernelInitDispatchGate: TaskObject {
     initial_state: State::Base;
 
+    /*
+     * Base 表示 schedule_preempt_disabled() 的分叉边界尚未提交。
+     */
     state State::Base {
         events {
+            /*
+             * Setup 对应 schedule_preempt_disabled()，把 PID 1 分派到 PreSmpInitPhase。
+             */
             on Event::Setup -> State::Ready {
                 depends_on {
                     Scheduler.state == State::Online;
@@ -415,6 +478,9 @@ object KernelInitDispatchGate: TaskObject {
         }
     }
 
+    /*
+     * Ready 表示 PID 1 已分派，BootInitTask 继续执行 rest_init() 尾部。
+     */
     state State::Ready {
         invariant {
             kernel_init_dispatch_gate_ready(KernelInitDispatchGate);
@@ -433,8 +499,14 @@ object BootIdleRuntime: TaskObject {
     initial_state: State::Base;
     parent: BootIdleTask;
 
+    /*
+     * Base 表示 boot idle 任务已存在，但尚未进入 cpu_startup_entry() 运行期入口。
+     */
     state State::Base {
         events {
+            /*
+             * Setup 对应 rest_init() 尾部的 cpu_startup_entry(CPUHP_ONLINE) 边界。
+             */
             on Event::Setup -> State::Ready {
                 depends_on {
                     Scheduler.state == State::Online;
@@ -458,6 +530,9 @@ object BootIdleRuntime: TaskObject {
         }
     }
 
+    /*
+     * Ready 表示 BootInitTask 已完成运行期交接，boot CPU idle runtime 已进入。
+     */
     state State::Ready {
         invariant {
             scheduler_first_schedule_committed(Scheduler);
@@ -497,7 +572,6 @@ object RestInitPhase: PhaseObject {
                 }
 
                 drives {
-                    RcuSchedulerStart.Event::Setup;
                     KernelInitTask.Event::Preset;
                     KernelInitTask.Event::Setup;
                     KernelInitTask.Event::Enable;
@@ -513,6 +587,10 @@ object RestInitPhase: PhaseObject {
                 }
 
                 ensures {
+                    rcu_scheduler_starting_ready(RcuCore);
+                    rcu_scheduler_active_level_init(RcuCore);
+                    rcu_single_online_cpu_at_scheduler_start(RcuCore, CpuGroup);
+                    rcu_gp_seq_baseline_synced(RcuCore);
                     rest_init_dispatch_ready(RestInitPhase, KernelInitDispatchGate);
                     kernel_init_task_created(KernelInitTask);
                     kthreadd_task_created(KthreaddTask);
@@ -540,6 +618,9 @@ object RestInitPhase: PhaseObject {
         invariant {
             ProcessPreparePhase.state == State::Ready;
             KernelInitDispatchGate.state == State::Ready;
+            rcu_scheduler_starting_ready(RcuCore);
+            rcu_scheduler_active_level_init(RcuCore);
+            rcu_gp_seq_baseline_synced(RcuCore);
             KernelInitTask.state == State::Online;
             KthreaddTask.state == State::Online;
             SystemState.state == State::Ready;
@@ -566,6 +647,9 @@ object RestInitPhase: PhaseObject {
                     up_multitask_runtime_ready(RestInitPhase, KernelInitTask, KthreaddTask, BootIdleRuntime);
                     boot_cpu_idle_runtime_entered(BootIdleRuntime);
                     boot_init_task_runtime_handoff_complete(BootInitTask, BootIdleTask);
+                    rcu_scheduler_starting_ready(RcuCore);
+                    rcu_scheduler_active_level_init(RcuCore);
+                    rcu_gp_seq_baseline_synced(RcuCore);
                     system_state_scheduling(SystemState);
                     kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -584,7 +668,9 @@ object RestInitPhase: PhaseObject {
     state State::Ready {
         invariant {
             ProcessPreparePhase.state == State::Ready;
-            RcuSchedulerStart.state == State::Ready;
+            rcu_scheduler_starting_ready(RcuCore);
+            rcu_scheduler_active_level_init(RcuCore);
+            rcu_gp_seq_baseline_synced(RcuCore);
             KernelInitTask.state == State::Online;
             KernelInitAffinity.state == State::Ready;
             KthreaddTask.state == State::Online;

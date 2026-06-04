@@ -31,8 +31,8 @@ pub fn setup(ctx: &mut Context) -> ! {
 }
 
 fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
-    ctx.rcu_scheduler_start
-        .setup(&ctx.rcu_core, &ctx.scheduler, &ctx.cpu_group)?;
+    ctx.rcu_core
+        .scheduler_start(&ctx.scheduler, &ctx.cpu_group)?;
     ctx.kernel_init_task.preset(TaskSpawnInputs {
         task_creation_core: &ctx.task_creation_core,
         root_pid_namespace: &ctx.root_pid_namespace,
@@ -164,10 +164,11 @@ fn rest_init_phase_ready(ctx: &Context) -> bool {
 
 fn rest_init_dispatch_ready(ctx: &Context) -> bool {
     crate::phases::interrupt::process_prepare::is_ready()
-        && ctx.rcu_scheduler_start.state() == State::Ready
-        && ctx.rcu_scheduler_start.scheduler_active()
-        && ctx.rcu_scheduler_start.single_online_cpu()
-        && ctx.rcu_scheduler_start.gp_threads_still_deferred()
+        && ctx.rcu_core.scheduler_starting_ready()
+        && ctx.rcu_core.scheduler_active_init()
+        && ctx.rcu_core.scheduler_start_single_online_cpu()
+        && ctx.rcu_core.gp_seq_baseline_synced()
+        && ctx.rcu_core.gp_threads_deferred()
         && ctx.kernel_init_task.state() == State::Online
         && ctx.kernel_init_task.pid() == 1
         && ctx.kernel_init_task.entry() == TaskEntry::KernelInit

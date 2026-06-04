@@ -20,6 +20,16 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    if !ctx.rcu_core.scheduler_starting_ready()
+        || !ctx.rcu_core.scheduler_active_init()
+        || !ctx.rcu_core.scheduler_start_single_online_cpu()
+        || !ctx.rcu_core.gp_seq_baseline_synced()
+        || !ctx.rcu_core.gp_threads_deferred()
+    {
+        printk::write_str("rcu scheduler start action facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     if ctx.kernel_init_task.state() != State::Online
         || ctx.kernel_init_task.pid() != 1
         || ctx.kernel_init_task.entry() != TaskEntry::KernelInit
