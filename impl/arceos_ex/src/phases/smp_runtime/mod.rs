@@ -1,3 +1,4 @@
+pub mod initcall;
 pub mod runtime_core;
 pub mod smp_bringup;
 
@@ -41,4 +42,5 @@ pub fn is_ready() -> bool {
     crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE) == State::Ready
         && smp_bringup::is_ready()
         && runtime_core::is_ready()
+        && initcall::is_ready()
 }

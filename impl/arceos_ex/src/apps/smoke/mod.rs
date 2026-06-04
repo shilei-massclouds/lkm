@@ -114,6 +114,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::runtime_core::run,
     },
     SmokeCase {
+        name: "initcall",
+        run: cases::initcall::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

@@ -19,6 +19,10 @@ use crate::objects::{
     init_mm::InitMm,
     init_stack::InitStack,
     init_task::InitTask,
+    initcall::{
+        CpusetSmpTrimmed, CtorTable, DriverCoreDeferred, InitcallBoundary, InitcallTable,
+        IrqProcViewDeferred,
+    },
     interrupt_stream::InterruptStream,
     irq_open::{Console, DelayLoop, SchedClock},
     irq_time::{
@@ -181,6 +185,12 @@ pub struct Context {
     pub async_core_deferred: AsyncCoreDeferred,
     pub padata_core_deferred: PadataCoreDeferred,
     pub runtime_core_boundary: RuntimeCoreBoundary,
+    pub cpuset_smp_trimmed: CpusetSmpTrimmed,
+    pub driver_core_deferred: DriverCoreDeferred,
+    pub irq_proc_view_deferred: IrqProcViewDeferred,
+    pub ctor_table: CtorTable,
+    pub initcall_table: InitcallTable,
+    pub initcall_boundary: InitcallBoundary,
 }
 
 impl Context {
@@ -288,6 +298,12 @@ impl Context {
             async_core_deferred: AsyncCoreDeferred::new(),
             padata_core_deferred: PadataCoreDeferred::new(),
             runtime_core_boundary: RuntimeCoreBoundary::new(),
+            cpuset_smp_trimmed: CpusetSmpTrimmed::new(),
+            driver_core_deferred: DriverCoreDeferred::new(),
+            irq_proc_view_deferred: IrqProcViewDeferred::new(),
+            ctor_table: CtorTable::new(),
+            initcall_table: InitcallTable::new(),
+            initcall_boundary: InitcallBoundary::new(),
         }
     }
 }

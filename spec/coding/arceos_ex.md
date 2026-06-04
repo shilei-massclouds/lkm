@@ -29,6 +29,7 @@
 - `SmpRuntimePhase.Ready`
 - `SmpBringupPhase.Ready`
 - `RuntimeCorePhase.Ready`
+- `InitcallPhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -69,8 +70,8 @@ make clean
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready` 和
-`PreSmpInitPhase.Ready`），随后完成 `SmpRuntimePhase.Ready`（当前展开 `SmpBringupPhase.Ready` 与
-`RuntimeCorePhase.Ready`，后续 Initcall/Rootfs/Finalize 子阶段保持 deferred），再通过
+`PreSmpInitPhase.Ready`），随后完成 `SmpRuntimePhase.Ready`（当前展开 `SmpBringupPhase.Ready`、
+`RuntimeCorePhase.Ready` 与 `InitcallPhase.Ready`，后续 Rootfs/Finalize 子阶段保持 deferred），再通过
 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
@@ -176,6 +177,27 @@ Linux 时序位置，但必须显式记录为 deferred boundary，不能静默�
 
 测试应覆盖 `RuntimeCorePhase.Ready`、`Scheduler.smp_initialized`、PID 1 affinity 释放、Workqueue topology
 facts、Async/Padata deferred facts、PageAllocator late facts，以及下一入口仍是 `do_basic_setup()`。
+
+## InitcallPhase 编码约束
+
+`InitcallPhase` 是 `SMP Runtime Phase` 的第三个子阶段，formal model 路径为
+`spec/model/smp-runtime/initcall/`，目标实现路径为
+`impl/arceos_ex/src/phases/smp_runtime/initcall.rs`。该阶段必须在 `RuntimeCorePhase.Ready` 之后运行，由
+`KernelInitTask` 在 boot CPU 上继续推进 `do_basic_setup()` 的对象级边界。
+
+本阶段必须覆盖 `cpuset_init_smp()` 的 trimmed/no-op、`DriverCore` deferred boundary、
+`IrqProcView` deferred boundary、`CtorTable.setup()`、`InitcallTable.run_all_levels()` 和
+`InitcallBoundary.setup()`。当前不得展开完整驱动模型、procfs IRQ 导出或每个 initcall entry 的目标对象；
+这些路径必须保留为显式 deferred 或表内属性，而不是静默假设已经可用。
+
+`InitcallTable` 是本阶段的核心可测对象。实现应记录静态表范围存在、level 数、所有 level 已执行、entries
+作为表内属性记录、每 level 命令行 scratch 复用、参数解析、blacklist/filter 处理和 `do_one_initcall()`
+运行上下文检查。当前对象级 prototype 可以使用固定的最小表摘要，但 API 必须表达表驱动语义，后续才能把具体
+entry 绑定到目标对象 event/action。
+
+测试应覆盖 `InitcallPhase.Ready`、Cpuset trimmed、DriverCore/IrqProcView deferred、CtorTable 表位置、
+`InitcallTable.all_levels_ran`、level/entry 摘要、命令行 scratch 和运行上下文事实，以及下一入口仍是
+`kunit_run_all_tests()` / `RootfsPhase`。
 
 ## Pre-VM lifecycle 代码生成约束
 

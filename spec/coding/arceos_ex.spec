@@ -725,3 +725,57 @@ type ArceosExRuntimeCoreCodingMust {
         arceos_ex_must_runtime_core_setup_page_allocator_late_action();
     }
 }
+
+type ArceosExInitcallCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * InitcallPhase is SMP Runtime Phase subphase 3. Its formal model
+         * path is spec/model/smp-runtime/initcall/.
+         */
+        arceos_ex_must_initcall_model_path_under_smp_runtime_phase();
+
+        /*
+         * Code path:
+         *
+         * Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+         */
+        arceos_ex_must_initcall_code_path_follow_smp_runtime_phase_tree();
+
+        /*
+         * Entry gate:
+         *
+         * InitcallPhase must run after RuntimeCorePhase.Ready and preserve
+         * the do_basic_setup() entry boundary.
+         */
+        arceos_ex_must_initcall_run_after_runtime_core();
+
+        /*
+         * Deferred heavy subsystems:
+         *
+         * DriverCore and IrqProcView must remain explicit deferred
+         * boundaries in this step.
+         */
+        arceos_ex_must_initcall_keep_driver_core_and_irq_proc_deferred();
+
+        /*
+         * Constructors:
+         *
+         * CtorTable must preserve the do_ctors() table position and record
+         * the current trimmed/empty constructor table status.
+         */
+        arceos_ex_must_initcall_record_ctor_table_boundary();
+
+        /*
+         * Initcall table:
+         *
+         * InitcallTable.run_all_levels() must represent do_initcalls() as a
+         * static linker table action. It must record level count, all-level
+         * execution, command-line scratch reuse, parameter parsing, filtering
+         * and run-context checks without promoting every entry to a top-level
+         * object.
+         */
+        arceos_ex_must_initcall_run_static_initcall_table_summary();
+    }
+}
