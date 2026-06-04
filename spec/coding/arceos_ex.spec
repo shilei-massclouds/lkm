@@ -779,3 +779,80 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_initcall_run_static_initcall_table_summary();
     }
 }
+
+type ArceosExRootfsCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * RootfsPhase is SMP Runtime Phase subphase 4. Its formal model path
+         * is spec/model/smp-runtime/rootfs/.
+         */
+        arceos_ex_must_rootfs_model_path_under_smp_runtime_phase();
+
+        /*
+         * Code path:
+         *
+         * Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+         */
+        arceos_ex_must_rootfs_code_path_follow_smp_runtime_phase_tree();
+
+        /*
+         * Entry gate:
+         *
+         * RootfsPhase must run after InitcallPhase.Ready and preserve the
+         * kunit_run_all_tests() entry position inside RootfsPhase.
+         */
+        arceos_ex_must_rootfs_run_after_initcall();
+
+        /*
+         * KUnit runtime:
+         *
+         * CONFIG_KUNIT=n in the current Linux-like configuration, so
+         * kunit_run_all_tests() must be encoded as a trimmed/no-op object
+         * inside RootfsPhase, not as a standalone KUnitPhase.
+         */
+        arceos_ex_must_rootfs_keep_kunit_trimmed_inside_rootfs_phase();
+
+        /*
+         * Deferred initramfs and console details:
+         *
+         * wait_for_initramfs() and console_on_rootfs() must preserve their
+         * Linux order but remain deferred in this round.
+         */
+        arceos_ex_must_rootfs_keep_initramfs_and_console_deferred();
+
+        /*
+         * Required branch checkpoint:
+         *
+         * init_eaccess(ramdisk_execute_command) must force the supported
+         * Linux-like path toward prepare_namespace().
+         */
+        arceos_ex_must_rootfs_require_prepare_namespace_branch();
+
+        /*
+         * RootFS enable:
+         *
+         * prepare_namespace() must be represented by RootFsEnableDeferred in
+         * this round. Root device probing, filesystem selection, devtmpfs
+         * mount, MS_MOVE and chroot(".") must remain unimplemented details.
+         */
+        arceos_ex_must_rootfs_keep_rootfs_enable_deferred_only();
+
+        /*
+         * Integrity keys:
+         *
+         * integrity_load_keys() must preserve CONFIG_INTEGRITY=y timing but
+         * keep IMA/EVM keyring and certificate loading details deferred.
+         */
+        arceos_ex_must_rootfs_keep_integrity_keys_deferred_only();
+
+        /*
+         * Boundary:
+         *
+         * RootfsBoundary must mark the next boundary as FinalizePhase while
+         * FinalizePhase internals remain deferred.
+         */
+        arceos_ex_must_rootfs_boundary_handoff_to_finalize();
+    }
+}

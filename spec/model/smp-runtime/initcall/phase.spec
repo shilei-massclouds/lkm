@@ -178,7 +178,7 @@ object InitcallTable: KernelObject {
 
 /*
  * InitcallBoundary 聚合 do_basic_setup() 的完成边界，并把下一入口固定
- * 为 kunit_run_all_tests()/RootfsPhase。
+ * 为 RootfsPhase 的 kunit_run_all_tests() 位置。
  */
 object InitcallBoundary: KernelObject {
     initial_state: State::Base;

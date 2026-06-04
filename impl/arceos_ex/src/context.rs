@@ -58,6 +58,10 @@ use crate::objects::{
         KthreaddReadyGate, KthreaddTask, RcuSchedulerStart, SystemState,
     },
     root_stream::RootStream,
+    rootfs::{
+        InitramfsSyncDeferred, IntegrityKeysDeferred, KUnitRuntimeTrimmed, RootFsEnableDeferred,
+        RootfsBoundary, RootfsConsoleDeferred,
+    },
     runtime_core::{AsyncCoreDeferred, PadataCoreDeferred, RuntimeCoreBoundary},
     sbi::Sbi,
     scheduler::Scheduler,
@@ -191,6 +195,12 @@ pub struct Context {
     pub ctor_table: CtorTable,
     pub initcall_table: InitcallTable,
     pub initcall_boundary: InitcallBoundary,
+    pub kunit_runtime_trimmed: KUnitRuntimeTrimmed,
+    pub initramfs_sync_deferred: InitramfsSyncDeferred,
+    pub rootfs_console_deferred: RootfsConsoleDeferred,
+    pub rootfs_enable_deferred: RootFsEnableDeferred,
+    pub integrity_keys_deferred: IntegrityKeysDeferred,
+    pub rootfs_boundary: RootfsBoundary,
 }
 
 impl Context {
@@ -304,6 +314,12 @@ impl Context {
             ctor_table: CtorTable::new(),
             initcall_table: InitcallTable::new(),
             initcall_boundary: InitcallBoundary::new(),
+            kunit_runtime_trimmed: KUnitRuntimeTrimmed::new(),
+            initramfs_sync_deferred: InitramfsSyncDeferred::new(),
+            rootfs_console_deferred: RootfsConsoleDeferred::new(),
+            rootfs_enable_deferred: RootFsEnableDeferred::new(),
+            integrity_keys_deferred: IntegrityKeysDeferred::new(),
+            rootfs_boundary: RootfsBoundary::new(),
         }
     }
 }

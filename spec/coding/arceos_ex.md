@@ -30,6 +30,7 @@
 - `SmpBringupPhase.Ready`
 - `RuntimeCorePhase.Ready`
 - `InitcallPhase.Ready`
+- `RootfsPhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -71,7 +72,7 @@ make clean
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready` 和
 `PreSmpInitPhase.Ready`），随后完成 `SmpRuntimePhase.Ready`（当前展开 `SmpBringupPhase.Ready`、
-`RuntimeCorePhase.Ready` 与 `InitcallPhase.Ready`，后续 Rootfs/Finalize 子阶段保持 deferred），再通过
+`RuntimeCorePhase.Ready`、`InitcallPhase.Ready` 与 `RootfsPhase.Ready`，后续 Finalize 子阶段保持 deferred），再通过
 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
@@ -150,7 +151,7 @@ AP hotplug callbacks 的内部细节当前保持 deferred；但 AP 对 BP 可见
 `smp_concurrency_open` 事实。
 
 `SmpRuntimePhase` 在本轮之后继续进入 `RuntimeCorePhase`。后续 `InitcallPhase`、`RootfsPhase` 和
-`FinalizePhase` 暂以 deferred 边界支撑对象级原型继续进入 `PayloadPhase`，不得把这些后续阶段的完整运行期服务
+`FinalizePhase` 由各自子阶段逐步展开；未展开部分保持显式 deferred 边界，不得把这些后续阶段的完整运行期服务
 伪装为已经实现。
 
 测试应覆盖 BP 侧 bringup 主线已经闭合、secondary idle task 已准备、CPU hotplug 同步量已建立并被 AP summary ack
@@ -198,6 +199,27 @@ entry 绑定到目标对象 event/action。
 测试应覆盖 `InitcallPhase.Ready`、Cpuset trimmed、DriverCore/IrqProcView deferred、CtorTable 表位置、
 `InitcallTable.all_levels_ran`、level/entry 摘要、命令行 scratch 和运行上下文事实，以及下一入口仍是
 `kunit_run_all_tests()` / `RootfsPhase`。
+
+## RootfsPhase 编码约束
+
+`RootfsPhase` 是 `SMP Runtime Phase` 的第四个子阶段，formal model 路径为
+`spec/model/smp-runtime/rootfs/`，目标实现路径为
+`impl/arceos_ex/src/phases/smp_runtime/rootfs.rs`。该阶段必须在 `InitcallPhase.Ready` 之后运行，由
+`KernelInitTask` 在 boot CPU 上继续推进 `kernel_init_freeable()` 的 rootfs 准备边界。
+
+本阶段覆盖 `kunit_run_all_tests()`、`wait_for_initramfs()`、`console_on_rootfs()`、
+`init_eaccess(ramdisk_execute_command)` 对应 checkpoint、`prepare_namespace()` 和
+`integrity_load_keys()` 的时序位置。当前 `CONFIG_KUNIT=n`，`kunit_run_all_tests()` 必须建模为
+trimmed/no-op，不得单独升格为 `KUnitPhase`。
+
+`InitramfsSyncDeferred`、`RootfsConsoleDeferred`、`RootFsEnableDeferred` 和 `IntegrityKeysDeferred`
+在本轮只保留 deferred/position-preserved 语义。其中 `init_eaccess(ramdisk_execute_command)` 是 required
+checkpoint，必须记录当前 Linux-like 路径要求进入 `prepare_namespace()` 分支。`RootFsEnableDeferred`
+不得伪造真实 root device 探测、devtmpfs mount、`MS_MOVE` 或 `chroot(".")` 已完成。
+
+测试应覆盖 `RootfsPhase.Ready`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
+ramdisk eaccess 强制进入 prepare_namespace、RootFS enable deferred、integrity keys deferred，以及下一入口仍是
+`FinalizePhase`。
 
 ## Pre-VM lifecycle 代码生成约束
 

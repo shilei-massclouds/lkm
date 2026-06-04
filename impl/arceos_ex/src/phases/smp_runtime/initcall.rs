@@ -17,7 +17,7 @@ pub fn setup(ctx: &mut Context) -> ! {
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex initcall event failed\n",
     );
-    crate::phases::smp_runtime::setup_after_children()
+    crate::phases::smp_runtime::rootfs::setup(ctx)
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {

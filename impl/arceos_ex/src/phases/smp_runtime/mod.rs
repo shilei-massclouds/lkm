@@ -1,4 +1,5 @@
 pub mod initcall;
+pub mod rootfs;
 pub mod runtime_core;
 pub mod smp_bringup;
 
@@ -43,4 +44,5 @@ pub fn is_ready() -> bool {
         && smp_bringup::is_ready()
         && runtime_core::is_ready()
         && initcall::is_ready()
+        && rootfs::is_ready()
 }

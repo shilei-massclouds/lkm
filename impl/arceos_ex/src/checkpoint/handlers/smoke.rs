@@ -116,6 +116,10 @@ const CASES: &[SmokeKunitCase] = &[
         run: cases::initcall::run,
     },
     SmokeKunitCase {
+        name: "rootfs",
+        run: cases::rootfs::run,
+    },
+    SmokeKunitCase {
         name: "fdt",
         run: cases::fdt::run,
     },
