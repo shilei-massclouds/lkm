@@ -37,6 +37,10 @@ impl RcuCore {
         &self.tasks_rcu
     }
 
+    pub fn tasks_rcu_mut(&mut self) -> &mut TasksRcu {
+        &mut self.tasks_rcu
+    }
+
     pub const fn boot_cpu_online_ready(&self) -> bool {
         self.boot_cpu_online_ready
     }
@@ -103,6 +107,7 @@ pub struct TasksRcu {
     callback_lists_ready: bool,
     enabled_flavor_count: usize,
     gp_threads_deferred: bool,
+    gp_threads_ready: bool,
 }
 
 impl TasksRcu {
@@ -112,6 +117,7 @@ impl TasksRcu {
             callback_lists_ready: false,
             enabled_flavor_count: 0,
             gp_threads_deferred: true,
+            gp_threads_ready: false,
         }
     }
 
@@ -131,6 +137,10 @@ impl TasksRcu {
         self.gp_threads_deferred
     }
 
+    pub const fn gp_threads_ready(&self) -> bool {
+        self.gp_threads_ready
+    }
+
     fn preset(&mut self, per_cpu_storage: &PerCpuStorage) -> EventResult {
         if self.lifecycle.state() != State::Base || per_cpu_storage.state() != State::Ready {
             return failed_condition(
@@ -144,11 +154,35 @@ impl TasksRcu {
         self.callback_lists_ready = true;
         self.enabled_flavor_count = 2;
         self.gp_threads_deferred = true;
+        self.gp_threads_ready = false;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
             State::Prepared,
             Checkpoint::TasksRcuPrepared,
+        )
+    }
+
+    pub fn setup(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || !self.callback_lists_ready
+            || self.enabled_flavor_count == 0
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.gp_threads_deferred = false;
+        self.gp_threads_ready = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::TasksRcuReady,
         )
     }
 }

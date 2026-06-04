@@ -697,6 +697,93 @@ impl KthreaddReadyGate {
     }
 }
 
+pub struct KernelInitDispatchGate {
+    lifecycle: Lifecycle,
+    schedule_committed: bool,
+    kernel_init_dispatched: bool,
+    boot_idle_tail_pending: bool,
+}
+
+impl KernelInitDispatchGate {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            schedule_committed: false,
+            kernel_init_dispatched: false,
+            boot_idle_tail_pending: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn schedule_committed(&self) -> bool {
+        self.schedule_committed
+    }
+
+    pub const fn kernel_init_dispatched(&self) -> bool {
+        self.kernel_init_dispatched
+    }
+
+    pub const fn boot_idle_tail_pending(&self) -> bool {
+        self.boot_idle_tail_pending
+    }
+
+    pub fn setup(
+        &mut self,
+        scheduler: &mut Scheduler,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
+        system_state: &SystemState,
+        kthreadd_ready_gate: &KthreaddReadyGate,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || scheduler.state() != State::Online
+            || kernel_init_task.state() != State::Online
+            || !kernel_init_task.released_for_pre_smp_init()
+            || kthreadd_task.state() != State::Online
+            || system_state.state() != State::Ready
+            || system_state.value() != SystemStateValue::Scheduling
+            || kthreadd_ready_gate.state() != State::Online
+            || !kthreadd_ready_gate.release_committed()
+        {
+            return self.failed_setup();
+        }
+
+        let interrupts_enabled = crate::arch::riscv64::csr::supervisor_interrupts_enabled();
+        if interrupts_enabled {
+            crate::arch::riscv64::csr::disable_supervisor_interrupts();
+        }
+        let schedule_result = scheduler.schedule_preempt_disabled();
+        if interrupts_enabled {
+            crate::arch::riscv64::csr::enable_supervisor_interrupts();
+        }
+        if schedule_result.is_err() {
+            return self.failed_setup();
+        }
+
+        self.schedule_committed = true;
+        self.kernel_init_dispatched = true;
+        self.boot_idle_tail_pending = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::KernelInitDispatchGateReady,
+        )
+    }
+
+    fn failed_setup(&self) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Base,
+            State::Ready,
+        )
+    }
+}
+
 pub struct BootIdleRuntime {
     lifecycle: Lifecycle,
     first_schedule_committed: bool,
@@ -750,10 +837,11 @@ impl BootIdleRuntime {
 
     pub fn setup(
         &mut self,
-        scheduler: &mut Scheduler,
+        scheduler: &Scheduler,
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
         kthreadd_ready_gate: &KthreaddReadyGate,
+        dispatch_gate: &KernelInitDispatchGate,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
@@ -762,21 +850,12 @@ impl BootIdleRuntime {
             || kernel_init_task.state() != State::Online
             || kthreadd_task.state() != State::Online
             || kthreadd_ready_gate.state() != State::Online
+            || dispatch_gate.state() != State::Ready
+            || !dispatch_gate.schedule_committed()
+            || !dispatch_gate.kernel_init_dispatched()
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
         {
-            return self.failed_setup();
-        }
-
-        let interrupts_enabled = crate::arch::riscv64::csr::supervisor_interrupts_enabled();
-        if interrupts_enabled {
-            crate::arch::riscv64::csr::disable_supervisor_interrupts();
-        }
-        let schedule_result = scheduler.schedule_preempt_disabled();
-        if interrupts_enabled {
-            crate::arch::riscv64::csr::enable_supervisor_interrupts();
-        }
-        if schedule_result.is_err() {
             return self.failed_setup();
         }
 
@@ -839,8 +918,7 @@ pub fn runtime_services_still_deferred(
     rcu_core: &RcuCore,
     cpu_group: &CpuGroup,
 ) -> bool {
-    workqueue.state() == State::Prepared
-        && !workqueue.workers_running()
-        && rcu_core.gp_threads_deferred()
+    !workqueue.workers_running()
+        && (rcu_core.gp_threads_deferred() || rcu_core.tasks_rcu().gp_threads_ready())
         && cpu_group.boot_cpu_state() == State::Online
 }

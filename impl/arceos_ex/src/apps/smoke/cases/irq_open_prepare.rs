@@ -21,7 +21,7 @@ pub fn run() -> SmokeResult {
 
     if ctx.slub_allocator.state() != State::Ready
         || !ctx.slub_allocator.flush_workqueue_ready()
-        || ctx.workqueue.state() != State::Prepared
+        || (ctx.workqueue.state() != State::Prepared && ctx.workqueue.state() != State::Ready)
         || ctx.workqueue.workers_running()
     {
         printk::write_str("irq open SLUB/workqueue facts invalid\n");

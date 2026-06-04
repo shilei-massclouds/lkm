@@ -324,6 +324,39 @@ object Workqueue: TaskObject {
             workqueue_early_framework_ready(Workqueue, CpuGroup);
             workqueue_workers_not_running(Workqueue);
         }
+
+        events {
+            /*
+             * Setup 对应 PreSmpInitPhase 中 workqueue_init()。它创建
+             * rescuer 和初始 worker 壳，打开 worker 创建属性，但仍不表示
+             * SMP topology 感知和完整 worker 运行期服务已经 online。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    KernelInitDispatchGate.state == State::Ready;
+                    KthreaddTask.state == State::Online;
+                    PageAllocator.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                }
+
+                ensures {
+                    workqueue_ready_before_smp(Workqueue);
+                    workqueue_rescuers_ready(Workqueue, KthreaddTask);
+                    workqueue_initial_workers_created(Workqueue, CpuGroup);
+                    workqueue_worker_creation_open(Workqueue);
+                    workqueue_watchdog_ready(Workqueue);
+                    workqueue_smp_topology_deferred(Workqueue);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            workqueue_ready_before_smp(Workqueue);
+            workqueue_worker_creation_open(Workqueue);
+            workqueue_smp_topology_deferred(Workqueue);
+        }
     }
 }
 
@@ -467,6 +500,31 @@ object TasksRcu: TaskObject {
         invariant {
             tasks_rcu_callback_lists_ready(TasksRcu, PerCpuStorage);
             tasks_rcu_enabled_flavors_recorded(TasksRcu);
+        }
+
+        events {
+            /*
+             * Setup 对应 PreSmpInitPhase 中 rcu_init_tasks_generic()。
+             */
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    KernelInitDispatchGate.state == State::Ready;
+                    KthreaddTask.state == State::Online;
+                }
+
+                ensures {
+                    tasks_rcu_ready(TasksRcu);
+                    tasks_rcu_gp_threads_created(TasksRcu, KthreaddTask);
+                    tasks_rcu_enabled_flavors_recorded(TasksRcu);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            tasks_rcu_ready(TasksRcu);
+            tasks_rcu_gp_threads_created(TasksRcu, KthreaddTask);
         }
     }
 }

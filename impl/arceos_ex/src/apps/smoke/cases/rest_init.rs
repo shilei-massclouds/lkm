@@ -12,7 +12,10 @@ use crate::{
 pub fn run() -> SmokeResult {
     let ctx = context();
 
-    if !phases::up_multitask::rest_init::is_ready() || !phases::up_multitask::is_ready() {
+    if !phases::up_multitask::rest_init::is_ready()
+        || !phases::up_multitask::rest_init::dispatch_ready()
+        || !phases::up_multitask::is_ready()
+    {
         printk::write_str("rest init phase is not ready\n");
         return SmokeResult::Failed;
     }
@@ -54,6 +57,16 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    if ctx.kernel_init_dispatch_gate.state() != State::Ready
+        || !ctx.kernel_init_dispatch_gate.schedule_committed()
+        || !ctx.kernel_init_dispatch_gate.kernel_init_dispatched()
+        || !ctx.kernel_init_dispatch_gate.boot_idle_tail_pending()
+        || ctx.scheduler.preempt_disabled_passes() == 0
+    {
+        printk::write_str("kernel init dispatch gate facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     if ctx.boot_idle_runtime.state() != State::Ready
         || !ctx.boot_idle_runtime.first_schedule_committed()
         || !ctx.boot_idle_runtime.cpu_startup_entry_ready()
@@ -61,7 +74,6 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_idle_runtime.secondary_cpus_not_started()
         || !ctx.boot_idle_runtime.real_task_switch_deferred()
         || ctx.workqueue.workers_running()
-        || !ctx.rcu_core.gp_threads_deferred()
     {
         printk::write_str("boot idle runtime facts invalid\n");
         return SmokeResult::Failed;

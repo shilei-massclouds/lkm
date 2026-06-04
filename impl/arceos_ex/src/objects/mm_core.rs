@@ -360,6 +360,7 @@ pub struct PageAllocator {
     cpuhp_step_registered: bool,
     boot_pageset_checkpoint_ready: bool,
     handoff_complete: bool,
+    full_gfp_mask_open: bool,
     totalram_pages: usize,
     zone_facts: [ZoneRef; MAX_BOOT_ZONES],
     zone_fact_count: usize,
@@ -373,6 +374,7 @@ impl PageAllocator {
             cpuhp_step_registered: false,
             boot_pageset_checkpoint_ready: false,
             handoff_complete: false,
+            full_gfp_mask_open: false,
             totalram_pages: 0,
             zone_facts: [ZoneRef::empty(); MAX_BOOT_ZONES],
             zone_fact_count: 0,
@@ -397,6 +399,10 @@ impl PageAllocator {
 
     pub const fn handoff_complete(&self) -> bool {
         self.handoff_complete
+    }
+
+    pub const fn full_gfp_mask_open(&self) -> bool {
+        self.full_gfp_mask_open
     }
 
     pub const fn totalram_pages(&self) -> usize {
@@ -507,6 +513,21 @@ impl PageAllocator {
             State::Ready,
             Checkpoint::PageAllocatorReady,
         )
+    }
+
+    pub fn open_full_gfp_mask(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.handoff_complete {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.full_gfp_mask_open = true;
+        crate::trace::checkpoint(Checkpoint::PageAllocatorFullGfpMaskOpen);
+        Ok(())
     }
 
     fn zone_fact_by_kind(&self, kind: ZoneKind) -> Option<ZoneRef> {

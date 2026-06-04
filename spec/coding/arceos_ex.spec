@@ -51,8 +51,16 @@ predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
 predicate arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts() -> bool;
 predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
+predicate arceos_ex_must_rest_init_publish_kernel_init_dispatch_gate() -> bool;
+predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
 predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
 predicate arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred() -> bool;
+predicate arceos_ex_must_pre_smp_init_model_path_under_up_multitask_phase() -> bool;
+predicate arceos_ex_must_pre_smp_init_code_path_follow_up_multitask_phase_tree() -> bool;
+predicate arceos_ex_must_pre_smp_init_run_from_kernel_init_dispatch_gate() -> bool;
+predicate arceos_ex_must_pre_smp_init_open_full_gfp_and_prepare_topology() -> bool;
+predicate arceos_ex_must_pre_smp_init_setup_workqueue_vmstat_tasks_rcu_and_initcalls() -> bool;
+predicate arceos_ex_must_pre_smp_init_stop_before_smp_init() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -497,6 +505,25 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_rest_init_complete_kthreadd_ready_gate();
 
         /*
+         * Dispatch gate:
+         *
+         * schedule_preempt_disabled() must publish a visible
+         * KernelInitDispatchGate fact. This gate is the branch point where
+         * KernelInitTask may enter PreSmpInitPhase while BootInitTask
+         * continues the cpu_startup_entry() tail.
+         */
+        arceos_ex_must_rest_init_publish_kernel_init_dispatch_gate();
+
+        /*
+         * Fork dependency:
+         *
+         * PreSmpInitPhase must depend on KernelInitDispatchGate.Ready, not on
+         * RestInitPhase.Ready. RestInitPhase.Ready still records the boot idle
+         * tail completion.
+         */
+        arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready();
+
+        /*
          * No real task switch:
          *
          * The current object-level implementation must not pretend to perform
@@ -513,5 +540,56 @@ type ArceosExRestInitCodingMust {
          * consumption remain later-phase work.
          */
         arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred();
+    }
+}
+
+type ArceosExPreSmpInitCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * PreSmpInitPhase is UpMultitaskPhase subphase 2. Its formal model
+         * path is spec/model/up-multitask/pre-smp-init/.
+         */
+        arceos_ex_must_pre_smp_init_model_path_under_up_multitask_phase();
+
+        /*
+         * Code path:
+         *
+         * Implementation must live under impl/arceos_ex/src/phases/up_multitask/.
+         */
+        arceos_ex_must_pre_smp_init_code_path_follow_up_multitask_phase_tree();
+
+        /*
+         * Entry gate:
+         *
+         * This phase must run from KernelInitDispatchGate.Ready, not from
+         * RestInitPhase.Ready.
+         */
+        arceos_ex_must_pre_smp_init_run_from_kernel_init_dispatch_gate();
+
+        /*
+         * Allocation and CPU topology:
+         *
+         * This phase must open PageAllocator full GFP mask and record pre-SMP
+         * CPU topology/present facts without making secondary CPUs online.
+         */
+        arceos_ex_must_pre_smp_init_open_full_gfp_and_prepare_topology();
+
+        /*
+         * Runtime support setup:
+         *
+         * This phase must setup Workqueue, VmstatCore, TasksRcu and early
+         * pre-SMP initcall boundary facts.
+         */
+        arceos_ex_must_pre_smp_init_setup_workqueue_vmstat_tasks_rcu_and_initcalls();
+
+        /*
+         * Stop before SMP:
+         *
+         * smp_init() is the next top-level phase boundary and must not be
+         * executed or modeled as complete here.
+         */
+        arceos_ex_must_pre_smp_init_stop_before_smp_init();
     }
 }

@@ -25,6 +25,7 @@
 - `ProcessPreparePhase.Ready`
 - `UpMultitaskPhase.Ready`
 - `RestInitPhase.Ready`
+- `PreSmpInitPhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -97,14 +98,36 @@ keyring 和 security 对象按 formal trace 后续推进。VFS/proc/page-cache/n
 `impl/arceos_ex/src/phases/up_multitask/rest_init.rs`。该阶段必须在 `ProcessPreparePhase.Ready` 之后运行，并在
 `PayloadPhase` 之前完成；它覆盖 Linux `rest_init()` 的最小对象级边界。
 
-本阶段的主线对象是 `KernelInitTask`、`KthreaddTask`、`SystemState`、`KthreaddReadyGate` 和
-`BootIdleRuntime`。实现必须发布 PID 1 已创建并入队、`kthreadd` provider 已创建并绑定全局引用、
-`system_state == SYSTEM_SCHEDULING`、`kthreadd_done` 已 complete、boot idle runtime 入口已确认等事实。
+本阶段的主线对象是 `KernelInitTask`、`KthreaddTask`、`SystemState`、`KthreaddReadyGate`、
+`KernelInitDispatchGate` 和 `BootIdleRuntime`。实现必须发布 PID 1 已创建并入队、`kthreadd`
+provider 已创建并绑定全局引用、`system_state == SYSTEM_SCHEDULING`、`kthreadd_done` 已 complete、
+`Scheduler.schedule_preempt_disabled()` 已形成 dispatch gate、boot idle runtime 入口已确认等事实。
 这些事实当前仍是对象级模拟边界，不得实现真实任务栈切换、真实调度上下文切换或 idle loop。
 
-本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把 workqueue worker、Tasks RCU GP kthread、
-`kernel_init_freeable()` 或后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是
+`Scheduler.schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部和
+`KernelInitTask -> PreSmpInitPhase` 的分叉点。`PreSmpInitPhase` 依赖
+`KernelInitDispatchGate.Ready`，不得硬依赖 `RestInitPhase.Ready`。`RestInitPhase.Ready` 仍必须覆盖
+`cpu_startup_entry(CPUHP_ONLINE)` 对应的 boot idle 尾部完成事实。
+
+本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
+真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是
 `PreSmpInitPhase`，`KthreaddTask` 的运行期服务能力也留给后续模型。
+
+## PreSmpInitPhase 编码约束
+
+`PreSmpInitPhase` 是 `UpMultitaskPhase` 的第二个子阶段，formal model 路径为
+`spec/model/up-multitask/pre-smp-init/`，目标实现路径为
+`impl/arceos_ex/src/phases/up_multitask/pre_smp_init.rs`。该阶段由 `KernelInitTask` 在
+`kernel_init_freeable()` 中推进，入口是 `KernelInitDispatchGate.Ready`，出口停在 `smp_init()` 调用前。
+
+本阶段必须覆盖 `PageAllocator.open_full_gfp_mask()`、`CpuGroup`/CPU topology 的 pre-SMP present 边界、
+`Workqueue.setup()`、`VmstatCore.preset()`、`TasksRcu.setup()`、`PreSmpInitcallTable.run_early()` 和
+`PreSmpInitBoundary`。它可以发布阻塞 GFP 分配可用、workqueue worker 创建边界、Tasks RCU GP thread
+创建边界和 early initcall 已运行事实，但不得把 secondary CPU 标记为 online，也不得执行 `smp_init()`。
+
+测试应覆盖 full GFP mask 已打开、secondary CPU 只处于 present/not-online、Workqueue Ready 但 SMP topology
+仍 deferred、VmstatCore Prepared、TasksRcu Ready、pre-SMP initcall 已运行、`smp_init()` 未执行，以及
+`PreSmpInitPhase` 的入口来自 `KernelInitDispatchGate` 而非 `RestInitPhase.Ready`。
 
 ## Pre-VM lifecycle 代码生成约束
 

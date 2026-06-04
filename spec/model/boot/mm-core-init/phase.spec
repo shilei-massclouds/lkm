@@ -215,6 +215,7 @@ object PageAllocator: MemoryObject {
             buddy_free_page_sets_populated(PageAllocator, Zones);
             totalram_pages_accounted(PageAllocator);
         }
+
     }
 }
 

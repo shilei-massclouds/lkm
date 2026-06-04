@@ -12,6 +12,7 @@ pub mod memblock;
 pub mod page_allocator;
 pub mod params;
 pub mod per_cpu;
+pub mod pre_smp_init;
 pub mod print;
 pub mod process_prepare;
 pub mod resource_tree;

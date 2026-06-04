@@ -39,6 +39,7 @@ use crate::objects::{
     per_cpu_storage::PerCpuStorage,
     physical_memory::PhysicalMemory,
     platform_cpu_info::PlatformCpuInfo,
+    pre_smp_init::{PreSmpInitBoundary, PreSmpInitcallTable, VmstatCore},
     process_prepare::{
         AnonVmaCore, CredentialCore, KeyringCore, NsProxy, RootPidNamespace, SecurityCore,
         SignalCore, TaskCreationCore, TaskFileContext, UtsNamespace, VmaCore,
@@ -49,8 +50,8 @@ use crate::objects::{
     rcu::RcuCore,
     resource_tree::ResourceTree,
     rest_init::{
-        BootIdleRuntime, KernelInitAffinity, KernelInitTask, KthreaddReadyGate, KthreaddTask,
-        RcuSchedulerStart, SystemState,
+        BootIdleRuntime, KernelInitAffinity, KernelInitDispatchGate, KernelInitTask,
+        KthreaddReadyGate, KthreaddTask, RcuSchedulerStart, SystemState,
     },
     root_stream::RootStream,
     sbi::Sbi,
@@ -161,7 +162,11 @@ pub struct Context {
     pub kthreadd_task: KthreaddTask,
     pub system_state: SystemState,
     pub kthreadd_ready_gate: KthreaddReadyGate,
+    pub kernel_init_dispatch_gate: KernelInitDispatchGate,
     pub boot_idle_runtime: BootIdleRuntime,
+    pub vmstat_core: VmstatCore,
+    pub pre_smp_initcalls: PreSmpInitcallTable,
+    pub pre_smp_boundary: PreSmpInitBoundary,
 }
 
 impl Context {
@@ -255,7 +260,11 @@ impl Context {
             kthreadd_task: KthreaddTask::new(),
             system_state: SystemState::new(),
             kthreadd_ready_gate: KthreaddReadyGate::new(),
+            kernel_init_dispatch_gate: KernelInitDispatchGate::new(),
             boot_idle_runtime: BootIdleRuntime::new(),
+            vmstat_core: VmstatCore::new(),
+            pre_smp_initcalls: PreSmpInitcallTable::new(),
+            pre_smp_boundary: PreSmpInitBoundary::new(),
         }
     }
 }

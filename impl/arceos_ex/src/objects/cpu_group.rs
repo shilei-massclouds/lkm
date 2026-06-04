@@ -124,6 +124,8 @@ pub struct CpuGroup {
     boot_cpu: BootCpu,
     secondary_cpus: [SecondaryCpu; MAX_CPUS - 1],
     secondary_count: usize,
+    pre_smp_topology_ready: bool,
+    boot_cpu_topology_recorded: bool,
 }
 
 impl CpuGroup {
@@ -133,6 +135,8 @@ impl CpuGroup {
             boot_cpu: BootCpu::new(),
             secondary_cpus: [SecondaryCpu::empty(); MAX_CPUS - 1],
             secondary_count: 0,
+            pre_smp_topology_ready: false,
+            boot_cpu_topology_recorded: false,
         }
     }
 
@@ -221,6 +225,50 @@ impl CpuGroup {
 
     pub const fn possible_cpu_count(&self) -> usize {
         1 + self.secondary_count
+    }
+
+    pub const fn pre_smp_topology_ready(&self) -> bool {
+        self.pre_smp_topology_ready
+    }
+
+    pub const fn boot_cpu_topology_recorded(&self) -> bool {
+        self.boot_cpu_topology_recorded
+    }
+
+    pub fn secondary_cpus_present_not_online(&self) -> bool {
+        let mut index = 0usize;
+        while index < self.secondary_count {
+            let cpu = self.secondary_cpus[index];
+            if !cpu.is_present() || cpu.is_online() {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    pub fn prepare_pre_smp(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || self.boot_cpu.state() != State::Online {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+        if !self.secondary_cpus_present_not_online() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.pre_smp_topology_ready = true;
+        self.boot_cpu_topology_recorded = true;
+        crate::trace::checkpoint(Checkpoint::CpuGroupPreSmpReady);
+        Ok(())
     }
 
     pub fn state(&self) -> State {

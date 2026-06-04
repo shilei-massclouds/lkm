@@ -1,3 +1,4 @@
+pub mod pre_smp_init;
 pub mod rest_init;
 
 use crate::{
@@ -12,7 +13,7 @@ static UP_MULTITASK_PHASE_STATE: AtomicU8 =
 
 pub fn setup() -> ! {
     crate::trace::checkpoint(Checkpoint::UpMultitaskPhaseStarted);
-    rest_init::setup(crate::context::context())
+    rest_init::preset(crate::context::context())
 }
 
 pub fn setup_after_children() -> ! {
@@ -38,5 +39,7 @@ fn up_multitask_phase_ready() -> EventResult {
 }
 
 pub fn is_ready() -> bool {
-    crate::phases::state::load(&UP_MULTITASK_PHASE_STATE) == State::Ready && rest_init::is_ready()
+    crate::phases::state::load(&UP_MULTITASK_PHASE_STATE) == State::Ready
+        && rest_init::is_ready()
+        && pre_smp_init::is_ready()
 }

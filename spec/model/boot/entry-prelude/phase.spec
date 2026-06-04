@@ -1744,6 +1744,7 @@ object CpuGroup: HardwareObject {
             cpu_id_map_entry(CpuIdMap, 0, BootCPU);
             cpu_group_concurrency_closed(CpuGroup);
         }
+
     }
 }
 

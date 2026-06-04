@@ -58,9 +58,10 @@
 
 ## 当前交接标记
 
-- 截止提交 8e89676 (impl: add process prepare phase)，InterruptPhase 子阶段 3 ProcessPreparePhase 已收尾：正式规格位于 spec/model/interrupt/process-prepare/，实现位于 impl/arceos_ex/src/phases/interrupt/process_prepare.rs，阶段出口停在 rest_init() 前。
+- 截止提交 3a122d9 (impl: add rest init phase)，UP Multitask Phase 子阶段 1 RestInitPhase 已形成最小闭环：正式规格位于 spec/model/up-multitask/rest-init/，实现位于 impl/arceos_ex/src/phases/up_multitask/rest_init.rs，已新增 rest_init smoke。
 - 已完成验收：make verify；make build APP=smoke；make run APP=smoke；make test；make run LOG=trace APP=smoke；make verify REPORT=graph。
-- 下一轮入口：UP Multitask Phase 子阶段 1 RestInitPhase（rest_init 期）。规格讨论起点在 spec/组件化内核规格.md 的 rest_init 期段；正式化时先落 spec/model/up-multitask/rest-init/，再调整 spec/coding/ 和 impl/arceos_ex/src/phases/up_multitask/。
+- 下一步先修正 UP Multitask Phase 的分叉语义：`Scheduler.schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部与 `KernelInitTask -> PreSmpInitPhase` 分支的分叉点，`PreSmpInitPhase.Started` 不应硬依赖 `RestInitPhase.Ready`。计划先落 spec/组件化内核规格.md，再调整 formal model、coding 约束、impl/arceos_ex/src/phases/up_multitask/ 和 smoke/trace 测试。
+- 分叉语义修正完成后，进入 UP Multitask Phase 子阶段 2 PreSmpInitPhase（SMP 前初始化期）：正式化起点为 spec/组件化内核规格.md 的 Pre-SMP Init Subphase 段，随后落 spec/model/up-multitask/pre-smp-init/、spec/coding/ 和 impl/arceos_ex/src/phases/up_multitask/pre_smp_init.rs。
 - 上下文清理后恢复：先执行 git status --short --branch；预期工作树干净。
 
 ## 细节文档索引
