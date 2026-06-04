@@ -50,6 +50,7 @@ pub mod rcu;
 pub mod resource_tree;
 pub mod rest_init;
 pub mod root_stream;
+pub mod runtime_core;
 pub mod sbi;
 pub mod scheduler;
 pub mod smp_bringup;

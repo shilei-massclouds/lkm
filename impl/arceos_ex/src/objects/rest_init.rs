@@ -292,6 +292,23 @@ impl KernelInitTask {
         true
     }
 
+    pub fn release_boot_cpu_affinity(&mut self, cpu_group: &CpuGroup) -> bool {
+        if self.lifecycle.state() != State::Online
+            || self.pid != KERNEL_INIT_PID
+            || !self.pinned_to_boot_cpu
+            || !self.pf_no_setaffinity
+            || !cpu_group.secondary_cpus_online()
+            || !cpu_group.smp_concurrency_open()
+        {
+            return false;
+        }
+
+        self.pinned_to_boot_cpu = false;
+        self.pf_no_setaffinity = false;
+        self.cpu_id = usize::MAX;
+        true
+    }
+
     fn failed_preset(&self) -> EventResult {
         failed_condition(
             LifecycleEvent::Preset,

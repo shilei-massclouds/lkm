@@ -17,6 +17,7 @@ pub mod print;
 pub mod process_prepare;
 pub mod resource_tree;
 pub mod rest_init;
+pub mod runtime_core;
 pub mod scheduler;
 pub mod slub;
 pub mod smp_bringup;

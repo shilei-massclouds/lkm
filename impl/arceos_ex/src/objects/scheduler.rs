@@ -4,6 +4,7 @@ use super::{
     init_mm::InitMm,
     init_task::InitTask,
     per_cpu_storage::PerCpuStorage,
+    rest_init::KernelInitTask,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::StaticBranch,
 };
@@ -17,6 +18,11 @@ pub struct Scheduler {
     boot_idle_task: BootIdleTask,
     scheduler_running: bool,
     preempt_disabled_passes: usize,
+    smp_initialized: bool,
+    sched_domains_ready: bool,
+    kernel_init_affinity_released: bool,
+    rt_dl_smp_ready: bool,
+    granularity_refreshed: bool,
 }
 
 impl Scheduler {
@@ -29,6 +35,11 @@ impl Scheduler {
             boot_idle_task: BootIdleTask::new(),
             scheduler_running: false,
             preempt_disabled_passes: 0,
+            smp_initialized: false,
+            sched_domains_ready: false,
+            kernel_init_affinity_released: false,
+            rt_dl_smp_ready: false,
+            granularity_refreshed: false,
         }
     }
 
@@ -58,6 +69,26 @@ impl Scheduler {
 
     pub const fn preempt_disabled_passes(&self) -> usize {
         self.preempt_disabled_passes
+    }
+
+    pub const fn smp_initialized(&self) -> bool {
+        self.smp_initialized
+    }
+
+    pub const fn sched_domains_ready(&self) -> bool {
+        self.sched_domains_ready
+    }
+
+    pub const fn kernel_init_affinity_released(&self) -> bool {
+        self.kernel_init_affinity_released
+    }
+
+    pub const fn rt_dl_smp_ready(&self) -> bool {
+        self.rt_dl_smp_ready
+    }
+
+    pub const fn granularity_refreshed(&self) -> bool {
+        self.granularity_refreshed
     }
 
     pub fn preset(
@@ -162,6 +193,44 @@ impl Scheduler {
 
         self.preempt_disabled_passes = self.preempt_disabled_passes.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerPreemptDisabledPass);
+        Ok(())
+    }
+
+    pub fn enable_smp(
+        &mut self,
+        kernel_init_task: &mut KernelInitTask,
+        cpu_group: &CpuGroup,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.scheduler_running
+            || kernel_init_task.state() != State::Online
+            || cpu_group.state() != State::Ready
+            || !cpu_group.secondary_cpus_online()
+            || !cpu_group.smp_concurrency_open()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        if !kernel_init_task.release_boot_cpu_affinity(cpu_group) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.smp_initialized = true;
+        self.sched_domains_ready = true;
+        self.kernel_init_affinity_released = true;
+        self.rt_dl_smp_ready = true;
+        self.granularity_refreshed = true;
+        crate::trace::checkpoint(Checkpoint::SchedulerSmpReady);
         Ok(())
     }
 

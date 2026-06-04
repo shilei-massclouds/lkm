@@ -110,6 +110,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::smp_bringup::run,
     },
     SmokeCase {
+        name: "runtime_core",
+        run: cases::runtime_core::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

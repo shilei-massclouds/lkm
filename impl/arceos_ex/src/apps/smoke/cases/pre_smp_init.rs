@@ -43,7 +43,6 @@ pub fn run() -> SmokeResult {
         || !ctx.workqueue.rescuers_ready()
         || !ctx.workqueue.initial_workers_created()
         || !ctx.workqueue.watchdog_ready()
-        || !ctx.workqueue.smp_topology_deferred()
         || ctx.workqueue.workers_running()
     {
         printk::write_str("workqueue pre-smp facts invalid\n");

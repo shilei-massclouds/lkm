@@ -361,6 +361,15 @@ pub struct PageAllocator {
     boot_pageset_checkpoint_ready: bool,
     handoff_complete: bool,
     full_gfp_mask_open: bool,
+    late_ready: bool,
+    memory_stats_ready: bool,
+    buffer_init_ready: bool,
+    memblock_private_discarded: bool,
+    zone_contiguous_ready: bool,
+    sysctl_ready: bool,
+    deferred_struct_page_init_trimmed: bool,
+    page_extension_late_trimmed: bool,
+    shuffle_late_trimmed: bool,
     totalram_pages: usize,
     zone_facts: [ZoneRef; MAX_BOOT_ZONES],
     zone_fact_count: usize,
@@ -375,6 +384,15 @@ impl PageAllocator {
             boot_pageset_checkpoint_ready: false,
             handoff_complete: false,
             full_gfp_mask_open: false,
+            late_ready: false,
+            memory_stats_ready: false,
+            buffer_init_ready: false,
+            memblock_private_discarded: false,
+            zone_contiguous_ready: false,
+            sysctl_ready: false,
+            deferred_struct_page_init_trimmed: false,
+            page_extension_late_trimmed: false,
+            shuffle_late_trimmed: false,
             totalram_pages: 0,
             zone_facts: [ZoneRef::empty(); MAX_BOOT_ZONES],
             zone_fact_count: 0,
@@ -403,6 +421,42 @@ impl PageAllocator {
 
     pub const fn full_gfp_mask_open(&self) -> bool {
         self.full_gfp_mask_open
+    }
+
+    pub const fn late_ready(&self) -> bool {
+        self.late_ready
+    }
+
+    pub const fn memory_stats_ready(&self) -> bool {
+        self.memory_stats_ready
+    }
+
+    pub const fn buffer_init_ready(&self) -> bool {
+        self.buffer_init_ready
+    }
+
+    pub const fn memblock_private_discarded(&self) -> bool {
+        self.memblock_private_discarded
+    }
+
+    pub const fn zone_contiguous_ready(&self) -> bool {
+        self.zone_contiguous_ready
+    }
+
+    pub const fn sysctl_ready(&self) -> bool {
+        self.sysctl_ready
+    }
+
+    pub const fn deferred_struct_page_init_trimmed(&self) -> bool {
+        self.deferred_struct_page_init_trimmed
+    }
+
+    pub const fn page_extension_late_trimmed(&self) -> bool {
+        self.page_extension_late_trimmed
+    }
+
+    pub const fn shuffle_late_trimmed(&self) -> bool {
+        self.shuffle_late_trimmed
     }
 
     pub const fn totalram_pages(&self) -> usize {
@@ -527,6 +581,36 @@ impl PageAllocator {
 
         self.full_gfp_mask_open = true;
         crate::trace::checkpoint(Checkpoint::PageAllocatorFullGfpMaskOpen);
+        Ok(())
+    }
+
+    pub fn setup_late(&mut self, workqueue: &Workqueue, cpu_group: &CpuGroup) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.handoff_complete
+            || !self.full_gfp_mask_open
+            || workqueue.state() != State::Ready
+            || !workqueue.topology_ready()
+            || cpu_group.state() != State::Ready
+            || !cpu_group.smp_concurrency_open()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.late_ready = true;
+        self.memory_stats_ready = true;
+        self.buffer_init_ready = true;
+        self.memblock_private_discarded = true;
+        self.zone_contiguous_ready = true;
+        self.sysctl_ready = true;
+        self.deferred_struct_page_init_trimmed = true;
+        self.page_extension_late_trimmed = true;
+        self.shuffle_late_trimmed = true;
+        crate::trace::checkpoint(Checkpoint::PageAllocatorLateReady);
         Ok(())
     }
 

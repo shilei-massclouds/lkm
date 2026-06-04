@@ -25,11 +25,16 @@ pub fn run() -> SmokeResult {
         || ctx.kernel_init_task.entry() != TaskEntry::KernelInit
         || ctx.kernel_init_task.kind() != TaskKind::UserModeThread
         || !ctx.kernel_init_task.enqueued()
-        || !ctx.kernel_init_task.pinned_to_boot_cpu()
-        || !ctx.kernel_init_task.pf_no_setaffinity()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
     {
         printk::write_str("kernel_init task facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
+    if !phases::smp_runtime::runtime_core::is_ready()
+        && (!ctx.kernel_init_task.pinned_to_boot_cpu() || !ctx.kernel_init_task.pf_no_setaffinity())
+    {
+        printk::write_str("kernel_init pre-runtime affinity facts invalid\n");
         return SmokeResult::Failed;
     }
 

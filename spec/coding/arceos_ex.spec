@@ -654,10 +654,74 @@ type ArceosExSmpBringupCodingMust {
         /*
          * Later runtime:
          *
-         * RuntimeCorePhase, InitcallPhase, RootfsPhase and FinalizePhase are
-         * not implemented in this step; they must remain explicit deferred
-         * boundaries rather than being silently assumed complete.
+         * SmpBringupPhase must hand off to RuntimeCorePhase. InitcallPhase,
+         * RootfsPhase and FinalizePhase remain explicit deferred boundaries
+         * rather than being silently assumed complete.
          */
+        arceos_ex_must_smp_bringup_handoff_to_runtime_core();
         arceos_ex_must_smp_runtime_keep_later_subphases_deferred();
+    }
+}
+
+type ArceosExRuntimeCoreCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * RuntimeCorePhase is SMP Runtime Phase subphase 2. Its formal model
+         * path is spec/model/smp-runtime/runtime-core/.
+         */
+        arceos_ex_must_runtime_core_model_path_under_smp_runtime_phase();
+
+        /*
+         * Code path:
+         *
+         * Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+         */
+        arceos_ex_must_runtime_core_code_path_follow_smp_runtime_phase_tree();
+
+        /*
+         * Entry gate:
+         *
+         * RuntimeCorePhase must run after SmpBringupPhase.Ready, with
+         * secondary CPUs online and SMP concurrency open.
+         */
+        arceos_ex_must_runtime_core_run_after_smp_bringup();
+
+        /*
+         * Scheduler SMP action:
+         *
+         * Scheduler.enable_smp() must publish SMP scheduler domains, release
+         * PID 1 boot CPU affinity, clear PF_NO_SETAFFINITY, refresh
+         * granularity and initialize RT/DL SMP post state without re-running
+         * Scheduler lifecycle enable.
+         */
+        arceos_ex_must_runtime_core_enable_scheduler_smp_action();
+
+        /*
+         * Workqueue topology:
+         *
+         * RuntimeCorePhase must publish workqueue topology facts for CPU/SMT,
+         * cache and NUMA pod types and rebind unbound pools while keeping the
+         * current object-level Workqueue.Ready historical state stable.
+         */
+        arceos_ex_must_runtime_core_setup_workqueue_topology_action();
+
+        /*
+         * Deferred runtime cores:
+         *
+         * async_init() and padata_init() must remain explicit deferred
+         * boundaries in this step.
+         */
+        arceos_ex_must_runtime_core_keep_async_and_padata_deferred();
+
+        /*
+         * Page allocator late:
+         *
+         * RuntimeCorePhase must publish page_alloc_init_late() facts,
+         * including memory stats, buffer init, memblock private discard, zone
+         * contiguous, sysctl and current-config trimmed late paths.
+         */
+        arceos_ex_must_runtime_core_setup_page_allocator_late_action();
     }
 }

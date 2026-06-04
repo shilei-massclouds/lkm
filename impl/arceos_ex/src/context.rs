@@ -54,6 +54,7 @@ use crate::objects::{
         KthreaddReadyGate, KthreaddTask, RcuSchedulerStart, SystemState,
     },
     root_stream::RootStream,
+    runtime_core::{AsyncCoreDeferred, PadataCoreDeferred, RuntimeCoreBoundary},
     sbi::Sbi,
     scheduler::Scheduler,
     smp_bringup::{
@@ -177,6 +178,9 @@ pub struct Context {
     pub secondary_cpu_startup_ack: SecondaryCpuStartupAck,
     pub secondary_cpu_online_ack: SecondaryCpuOnlineAck,
     pub smp_bringup_boundary: SmpBringupBoundary,
+    pub async_core_deferred: AsyncCoreDeferred,
+    pub padata_core_deferred: PadataCoreDeferred,
+    pub runtime_core_boundary: RuntimeCoreBoundary,
 }
 
 impl Context {
@@ -281,6 +285,9 @@ impl Context {
             secondary_cpu_startup_ack: SecondaryCpuStartupAck::new(),
             secondary_cpu_online_ack: SecondaryCpuOnlineAck::new(),
             smp_bringup_boundary: SmpBringupBoundary::new(),
+            async_core_deferred: AsyncCoreDeferred::new(),
+            padata_core_deferred: PadataCoreDeferred::new(),
+            runtime_core_boundary: RuntimeCoreBoundary::new(),
         }
     }
 }

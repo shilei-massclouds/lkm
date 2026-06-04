@@ -2,6 +2,7 @@ use super::{
     cpu_group::CpuGroup,
     mm_core::{PageAllocator, SlubAllocator},
     per_cpu_storage::PerCpuStorage,
+    scheduler::Scheduler,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -18,6 +19,10 @@ pub struct Workqueue {
     initial_workers_created: bool,
     watchdog_ready: bool,
     smp_topology_deferred: bool,
+    topology_ready: bool,
+    pod_types_ready: bool,
+    unbound_pools_rebound: bool,
+    max_active_topology_ready: bool,
     possible_cpu_count: usize,
 }
 
@@ -35,6 +40,10 @@ impl Workqueue {
             initial_workers_created: false,
             watchdog_ready: false,
             smp_topology_deferred: true,
+            topology_ready: false,
+            pod_types_ready: false,
+            unbound_pools_rebound: false,
+            max_active_topology_ready: false,
             possible_cpu_count: 0,
         }
     }
@@ -83,6 +92,22 @@ impl Workqueue {
         self.smp_topology_deferred
     }
 
+    pub const fn topology_ready(&self) -> bool {
+        self.topology_ready
+    }
+
+    pub const fn pod_types_ready(&self) -> bool {
+        self.pod_types_ready
+    }
+
+    pub const fn unbound_pools_rebound(&self) -> bool {
+        self.unbound_pools_rebound
+    }
+
+    pub const fn max_active_topology_ready(&self) -> bool {
+        self.max_active_topology_ready
+    }
+
     pub const fn possible_cpu_count(&self) -> usize {
         self.possible_cpu_count
     }
@@ -119,6 +144,10 @@ impl Workqueue {
         self.initial_workers_created = false;
         self.watchdog_ready = false;
         self.smp_topology_deferred = true;
+        self.topology_ready = false;
+        self.pod_types_ready = false;
+        self.unbound_pools_rebound = false;
+        self.max_active_topology_ready = false;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
@@ -154,5 +183,32 @@ impl Workqueue {
             State::Ready,
             Checkpoint::WorkqueueReady,
         )
+    }
+
+    pub fn setup_topology(&mut self, scheduler: &Scheduler, cpu_group: &CpuGroup) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.worker_creation_open
+            || scheduler.state() != State::Online
+            || !scheduler.smp_initialized()
+            || cpu_group.state() != State::Ready
+            || !cpu_group.secondary_cpus_online()
+            || !cpu_group.smp_concurrency_open()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.topology_ready = true;
+        self.pod_types_ready = true;
+        self.unbound_pools_rebound = true;
+        self.max_active_topology_ready = true;
+        self.smp_topology_deferred = false;
+        self.workers_running = false;
+        crate::trace::checkpoint(Checkpoint::WorkqueueTopologyReady);
+        Ok(())
     }
 }

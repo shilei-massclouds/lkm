@@ -28,6 +28,7 @@
 - `PreSmpInitPhase.Ready`
 - `SmpRuntimePhase.Ready`
 - `SmpBringupPhase.Ready`
+- `RuntimeCorePhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -68,8 +69,8 @@ make clean
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready` 和
-`PreSmpInitPhase.Ready`），随后完成 `SmpRuntimePhase.Ready`（当前只展开 `SmpBringupPhase.Ready`，后续运行期子阶段保持
-deferred），再通过
+`PreSmpInitPhase.Ready`），随后完成 `SmpRuntimePhase.Ready`（当前展开 `SmpBringupPhase.Ready` 与
+`RuntimeCorePhase.Ready`，后续 Initcall/Rootfs/Finalize 子阶段保持 deferred），再通过
 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
@@ -147,13 +148,34 @@ AP hotplug callbacks 的内部细节当前保持 deferred；但 AP 对 BP 可见
 `cpu_running` observed、`done_up` observed、`done_down` reserved/deferred、secondary CPU online 和
 `smp_concurrency_open` 事实。
 
-当前 `SmpRuntimePhase` 只正式展开 `SmpBringupPhase`。后续 `RuntimeCorePhase`、`InitcallPhase`、
-`RootfsPhase` 和 `FinalizePhase` 暂以 deferred 边界支撑对象级原型继续进入 `PayloadPhase`，不得把这些后续
-阶段的完整运行期服务伪装为已经实现。
+`SmpRuntimePhase` 在本轮之后继续进入 `RuntimeCorePhase`。后续 `InitcallPhase`、`RootfsPhase` 和
+`FinalizePhase` 暂以 deferred 边界支撑对象级原型继续进入 `PayloadPhase`，不得把这些后续阶段的完整运行期服务
+伪装为已经实现。
 
 测试应覆盖 BP 侧 bringup 主线已经闭合、secondary idle task 已准备、CPU hotplug 同步量已建立并被 AP summary ack
 观察、secondary CPU 从 present/not-online 推进到 online、`smp_concurrency_open` 成立，以及 AP 内部路径仍为
 deferred summary。
+
+## RuntimeCorePhase 编码约束
+
+`RuntimeCorePhase` 是 `SMP Runtime Phase` 的第二个子阶段，formal model 路径为
+`spec/model/smp-runtime/runtime-core/`，目标实现路径为
+`impl/arceos_ex/src/phases/smp_runtime/runtime_core.rs`。该阶段必须在 `SmpBringupPhase.Ready` 之后运行，由
+`KernelInitTask` 在 boot CPU 上继续推进 `sched_init_smp()` 到 `page_alloc_init_late()` 的 BP 主线。
+
+本阶段必须覆盖 `Scheduler.enable_smp()`、`Workqueue` topology action、`AsyncCore` deferred boundary、
+`PadataCore` deferred boundary、`PageAllocator` late action 和 `RuntimeCoreBoundary.setup()`。
+`Scheduler.enable_smp()` 必须发布 SMP sched domain ready、PID 1 boot CPU affinity 已解除、
+`PF_NO_SETAFFINITY` 已清除、RT/DL SMP 后置状态 ready 和调度 granularity 已刷新事实。由于 `Scheduler`
+主对象此前已经 `Online`，该动作不得重新推进 `Scheduler` 主生命周期。
+
+`Workqueue` 和 `PageAllocator` 在当前对象级 prototype 中保持其前序 `Ready` 主状态；RuntimeCore 通过
+topology/late action facts 表达 `workqueue_init_topology()` 和 `page_alloc_init_late()` 的完成边界，避免破坏前序
+phase 对 `Workqueue.Ready`、`PageAllocator.Ready` 的历史不变式。`async_init()` 和 `padata_init()` 在本轮保留
+Linux 时序位置，但必须显式记录为 deferred boundary，不能静默假设可用。
+
+测试应覆盖 `RuntimeCorePhase.Ready`、`Scheduler.smp_initialized`、PID 1 affinity 释放、Workqueue topology
+facts、Async/Padata deferred facts、PageAllocator late facts，以及下一入口仍是 `do_basic_setup()`。
 
 ## Pre-VM lifecycle 代码生成约束
 
