@@ -15,6 +15,7 @@ pub struct RcuCore {
     softirq_registered: bool,
     workqueues_ready: bool,
     gp_threads_deferred: bool,
+    inkernel_boot_ended: bool,
 }
 
 impl RcuCore {
@@ -26,6 +27,7 @@ impl RcuCore {
             softirq_registered: false,
             workqueues_ready: false,
             gp_threads_deferred: true,
+            inkernel_boot_ended: false,
         }
     }
 
@@ -57,6 +59,10 @@ impl RcuCore {
         self.gp_threads_deferred
     }
 
+    pub const fn inkernel_boot_ended(&self) -> bool {
+        self.inkernel_boot_ended
+    }
+
     pub fn setup(
         &mut self,
         scheduler: &Scheduler,
@@ -80,6 +86,7 @@ impl RcuCore {
         self.softirq_registered = softirq.action_table_ready();
         self.workqueues_ready = workqueue.system_queues_ready();
         self.gp_threads_deferred = true;
+        self.inkernel_boot_ended = false;
         if !self.boot_cpu_online_ready || !self.softirq_registered || !self.workqueues_ready {
             return self.failed_setup();
         }
@@ -90,6 +97,16 @@ impl RcuCore {
             State::Ready,
             Checkpoint::RcuCoreReady,
         )
+    }
+
+    pub fn end_inkernel_boot(&mut self) -> bool {
+        if self.lifecycle.state() != State::Ready || self.inkernel_boot_ended {
+            return false;
+        }
+
+        self.inkernel_boot_ended = true;
+        crate::trace::checkpoint(Checkpoint::RcuInkernelBootEnded);
+        true
     }
 
     fn failed_setup(&self) -> EventResult {

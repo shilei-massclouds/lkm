@@ -122,6 +122,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::rootfs::run,
     },
     SmokeCase {
+        name: "finalize",
+        run: cases::finalize::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

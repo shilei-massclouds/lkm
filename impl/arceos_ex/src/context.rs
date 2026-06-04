@@ -15,6 +15,10 @@ use crate::objects::{
     event_stream::EventStream,
     exception_stream::ExceptionStream,
     exception_table::ExceptionTable,
+    finalize::{
+        AsyncFullSyncDeferred, FinalizeBoundary, InitMemoryCleanupDeferred,
+        KernelMappingProtectionDeferred, PtiFinalizeTrimmed, RcuBootEnd, SysctlArgsDeferred,
+    },
     fix_map::FixMap,
     init_mm::InitMm,
     init_stack::InitStack,
@@ -201,6 +205,13 @@ pub struct Context {
     pub rootfs_enable_deferred: RootFsEnableDeferred,
     pub integrity_keys_deferred: IntegrityKeysDeferred,
     pub rootfs_boundary: RootfsBoundary,
+    pub async_full_sync_deferred: AsyncFullSyncDeferred,
+    pub init_memory_cleanup_deferred: InitMemoryCleanupDeferred,
+    pub kernel_mapping_protection_deferred: KernelMappingProtectionDeferred,
+    pub pti_finalize_trimmed: PtiFinalizeTrimmed,
+    pub rcu_boot_end: RcuBootEnd,
+    pub sysctl_args_deferred: SysctlArgsDeferred,
+    pub finalize_boundary: FinalizeBoundary,
 }
 
 impl Context {
@@ -320,6 +331,13 @@ impl Context {
             rootfs_enable_deferred: RootFsEnableDeferred::new(),
             integrity_keys_deferred: IntegrityKeysDeferred::new(),
             rootfs_boundary: RootfsBoundary::new(),
+            async_full_sync_deferred: AsyncFullSyncDeferred::new(),
+            init_memory_cleanup_deferred: InitMemoryCleanupDeferred::new(),
+            kernel_mapping_protection_deferred: KernelMappingProtectionDeferred::new(),
+            pti_finalize_trimmed: PtiFinalizeTrimmed::new(),
+            rcu_boot_end: RcuBootEnd::new(),
+            sysctl_args_deferred: SysctlArgsDeferred::new(),
+            finalize_boundary: FinalizeBoundary::new(),
         }
     }
 }

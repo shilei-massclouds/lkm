@@ -2,21 +2,20 @@
  * SMP Runtime Phase Specification
  *
  * This top-level phase starts at smp_init(). The currently expanded
- * subphases are SmpBringupPhase, RuntimeCorePhase, InitcallPhase and
- * RootfsPhase. Later finalization subphase details are intentionally summarized
- * as deferred boundaries so the object-level prototype can continue to
- * PayloadPhase while AP-side details remain future work.
+ * subphases are SmpBringupPhase, RuntimeCorePhase, InitcallPhase,
+ * RootfsPhase and FinalizePhase. AP-side details remain future work.
  */
 
 include "smp-bringup/main.spec";
 include "runtime-core/main.spec";
 include "initcall/main.spec";
 include "rootfs/main.spec";
+include "finalize/main.spec";
 
 /*
  * SmpRuntimePhase 表示多核运行期阶段对象。本轮正式展开
- * SmpBringupPhase、RuntimeCorePhase、InitcallPhase 与 RootfsPhase；
- * 后续 finalize 子阶段保留 deferred 边界。
+ * SmpBringupPhase、RuntimeCorePhase、InitcallPhase、RootfsPhase 与
+ * FinalizePhase。
  */
 object SmpRuntimePhase: PhaseObject {
     initial_state: State::Base;
@@ -35,6 +34,7 @@ object SmpRuntimePhase: PhaseObject {
                     RuntimeCorePhase.Event::Setup;
                     InitcallPhase.Event::Setup;
                     RootfsPhase.Event::Setup;
+                    FinalizePhase.Event::Setup;
                 }
 
                 ensures {
@@ -43,7 +43,7 @@ object SmpRuntimePhase: PhaseObject {
                     runtime_core_phase_ready(RuntimeCorePhase);
                     initcall_phase_ready(InitcallPhase);
                     rootfs_phase_ready(RootfsPhase);
-                    finalize_phase_deferred();
+                    finalize_phase_ready(FinalizePhase);
                 }
             }
         }
@@ -57,11 +57,12 @@ object SmpRuntimePhase: PhaseObject {
             RuntimeCorePhase.state == State::Ready;
             InitcallPhase.state == State::Ready;
             RootfsPhase.state == State::Ready;
+            FinalizePhase.state == State::Ready;
             smp_runtime_phase_ready(SmpRuntimePhase);
             runtime_core_phase_ready(RuntimeCorePhase);
             initcall_phase_ready(InitcallPhase);
             rootfs_phase_ready(RootfsPhase);
-            finalize_phase_deferred();
+            finalize_phase_ready(FinalizePhase);
         }
     }
 }

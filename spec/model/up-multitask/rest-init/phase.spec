@@ -261,7 +261,8 @@ object KthreaddTask: TaskObject {
 
 /*
  * SystemState 表示 Linux 全局 system_state 枚举。生命周期 Ready 对应本阶段
- * 把内部值推进到 SYSTEM_SCHEDULING。
+ * 把内部值推进到 SYSTEM_SCHEDULING；后续 FinalizePhase 通过 Enable
+ * 推进到 SYSTEM_RUNNING / Online。
  */
 object SystemState: KernelObject {
     initial_state: State::Base;
@@ -302,6 +303,30 @@ object SystemState: KernelObject {
             system_state_scheduling(SystemState);
             up_multitask_scheduling_open();
             smp_concurrency_closed();
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                depends_on {
+                    InitMemoryCleanupDeferred.state == State::Ready;
+                    KernelMappingProtectionDeferred.state == State::Ready;
+                    PtiFinalizeTrimmed.state == State::Ready;
+                }
+
+                ensures {
+                    system_state_running(SystemState);
+                    up_multitask_scheduling_open();
+                    smp_concurrency_open(CpuGroup);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            system_state_running(SystemState);
+            up_multitask_scheduling_open();
+            smp_concurrency_open(CpuGroup);
         }
     }
 }

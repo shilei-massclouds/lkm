@@ -272,7 +272,7 @@ object SmpBringupPhase: PhaseObject {
                 deferred {
                     "AP secondary_start_sbi / smp_callin() 内部细节留给后续 AP 侧展开。";
                     "AP hotplug thread callback 细节留给后续 CPU hotplug 模型。";
-                    "FinalizePhase 及后续收尾细节暂保持 deferred 边界。";
+                    "FinalizePhase 内部的 async/initmem/mapping/sysctl 细节逐步展开，AP 侧仍留给后续模型。";
                 }
             }
         }

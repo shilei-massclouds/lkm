@@ -51,8 +51,12 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.system_state.state() != State::Ready
-        || ctx.system_state.value() != SystemStateValue::Scheduling
+    let system_state_valid = (ctx.system_state.state() == State::Ready
+        && ctx.system_state.value() == SystemStateValue::Scheduling)
+        || (ctx.system_state.state() == State::Online
+            && ctx.system_state.value() == SystemStateValue::Running);
+
+    if !system_state_valid
         || ctx.kthreadd_ready_gate.state() != State::Online
         || !ctx.kthreadd_ready_gate.completed()
         || !ctx.kthreadd_ready_gate.release_committed()

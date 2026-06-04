@@ -1,5 +1,6 @@
 use super::{
     cpu_group::CpuGroup,
+    finalize::{InitMemoryCleanupDeferred, KernelMappingProtectionDeferred, PtiFinalizeTrimmed},
     init_task::InitTask,
     process_prepare::{
         CredentialCore, RootPidNamespace, SecurityCore, SignalCore, TaskCreationCore,
@@ -19,6 +20,8 @@ pub const KTHREADD_PID: usize = 2;
 pub enum SystemStateValue {
     Booting,
     Scheduling,
+    FreeingInitmem,
+    Running,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -605,6 +608,40 @@ impl SystemState {
             State::Prepared,
             State::Ready,
             Checkpoint::SystemStateReady,
+        )
+    }
+
+    pub fn enable(
+        &mut self,
+        init_memory: &InitMemoryCleanupDeferred,
+        mapping: &KernelMappingProtectionDeferred,
+        pti_finalize: &PtiFinalizeTrimmed,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || self.value != SystemStateValue::Scheduling
+            || init_memory.state() != State::Ready
+            || !init_memory.system_state_freeing_window_entered()
+            || mapping.state() != State::Ready
+            || !mapping.enable_deferred()
+            || pti_finalize.state() != State::Ready
+            || !pti_finalize.trimmed_noop()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.value = SystemStateValue::FreeingInitmem;
+        crate::trace::checkpoint(Checkpoint::SystemStateFreeingInitmemCheckpoint);
+        self.value = SystemStateValue::Running;
+        self.lifecycle.transition(
+            LifecycleEvent::Enable,
+            State::Ready,
+            State::Online,
+            Checkpoint::SystemStateOnline,
         )
     }
 }

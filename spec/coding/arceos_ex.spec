@@ -654,12 +654,12 @@ type ArceosExSmpBringupCodingMust {
         /*
          * Later runtime:
          *
-         * SmpBringupPhase must hand off to RuntimeCorePhase. InitcallPhase,
-         * RootfsPhase and FinalizePhase remain explicit deferred boundaries
-         * rather than being silently assumed complete.
+         * SmpBringupPhase must hand off to RuntimeCorePhase. Later
+         * subphases are expanded through their own formal model and code
+         * steps rather than being silently assumed complete.
          */
         arceos_ex_must_smp_bringup_handoff_to_runtime_core();
-        arceos_ex_must_smp_runtime_keep_later_subphases_deferred();
+        arceos_ex_must_smp_runtime_expand_later_subphases_explicitly();
     }
 }
 
@@ -850,9 +850,76 @@ type ArceosExRootfsCodingMust {
         /*
          * Boundary:
          *
-         * RootfsBoundary must mark the next boundary as FinalizePhase while
-         * FinalizePhase internals remain deferred.
+         * RootfsBoundary must mark the next boundary as FinalizePhase.
          */
         arceos_ex_must_rootfs_boundary_handoff_to_finalize();
+    }
+}
+
+type ArceosExFinalizeCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * FinalizePhase is SMP Runtime Phase subphase 5. Its formal model
+         * path is spec/model/smp-runtime/finalize/.
+         */
+        arceos_ex_must_finalize_model_path_under_smp_runtime_phase();
+
+        /*
+         * Code path:
+         *
+         * Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+         */
+        arceos_ex_must_finalize_code_path_follow_smp_runtime_phase_tree();
+
+        /*
+         * Entry gate:
+         *
+         * FinalizePhase must run after RootfsPhase.Ready and preserve the
+         * kernel_init_freeable() return boundary before PayloadPhase.
+         */
+        arceos_ex_must_finalize_run_after_rootfs_phase();
+
+        /*
+         * Deferred cleanup details:
+         *
+         * async_synchronize_full(), ftrace/free_initmem, mark_readonly() and
+         * do_sysctl_args() must preserve Linux order but remain deferred in
+         * this round.
+         */
+        arceos_ex_must_finalize_keep_cleanup_details_deferred();
+
+        /*
+         * Trimmed current-config paths:
+         *
+         * kprobe_free_init_mem(), kgdb_free_init_mem(), exit_boot_config(),
+         * pti_finalize() and numa_default_policy() must be recorded as
+         * trimmed/no-op under the current RISC-V/default configuration.
+         */
+        arceos_ex_must_finalize_record_trimmed_config_paths();
+
+        /*
+         * System state:
+         *
+         * SystemState.enable() must publish the SYSTEM_FREEING_INITMEM window
+         * and end with SystemState.state == Online and value == SYSTEM_RUNNING.
+         */
+        arceos_ex_must_finalize_publish_system_running();
+
+        /*
+         * RCU boot end:
+         *
+         * RcuCore.end_inkernel_boot() must record rcu_boot_ended == true
+         * without claiming full runtime RCU GP service implementation.
+         */
+        arceos_ex_must_finalize_end_rcu_inkernel_boot();
+
+        /*
+         * Boundary:
+         *
+         * FinalizeBoundary must mark the next boundary as PayloadPhase.
+         */
+        arceos_ex_must_finalize_boundary_handoff_to_payload();
     }
 }

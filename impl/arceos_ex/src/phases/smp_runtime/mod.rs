@@ -1,3 +1,4 @@
+pub mod finalize;
 pub mod initcall;
 pub mod rootfs;
 pub mod runtime_core;
@@ -45,4 +46,5 @@ pub fn is_ready() -> bool {
         && runtime_core::is_ready()
         && initcall::is_ready()
         && rootfs::is_ready()
+        && finalize::is_ready()
 }

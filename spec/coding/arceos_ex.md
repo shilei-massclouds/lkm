@@ -31,6 +31,7 @@
 - `RuntimeCorePhase.Ready`
 - `InitcallPhase.Ready`
 - `RootfsPhase.Ready`
+- `FinalizePhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -72,7 +73,7 @@ make clean
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready` 和
 `PreSmpInitPhase.Ready`），随后完成 `SmpRuntimePhase.Ready`（当前展开 `SmpBringupPhase.Ready`、
-`RuntimeCorePhase.Ready`、`InitcallPhase.Ready` 与 `RootfsPhase.Ready`，后续 Finalize 子阶段保持 deferred），再通过
+`RuntimeCorePhase.Ready`、`InitcallPhase.Ready`、`RootfsPhase.Ready` 与 `FinalizePhase.Ready`），再通过
 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
@@ -220,6 +221,27 @@ checkpoint，必须记录当前 Linux-like 路径要求进入 `prepare_namespace
 测试应覆盖 `RootfsPhase.Ready`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
 ramdisk eaccess 强制进入 prepare_namespace、RootFS enable deferred、integrity keys deferred，以及下一入口仍是
 `FinalizePhase`。
+
+## FinalizePhase 编码约束
+
+`FinalizePhase` 是 `SMP Runtime Phase` 的第五个子阶段，formal model 路径为
+`spec/model/smp-runtime/finalize/`，目标实现路径为
+`impl/arceos_ex/src/phases/smp_runtime/finalize.rs`。该阶段必须在 `RootfsPhase.Ready` 之后运行，由
+`KernelInitTask` 在 boot CPU 上继续推进 `kernel_init()` 中 `kernel_init_freeable()` 返回后的收尾边界。
+
+本阶段覆盖 `async_synchronize_full()`、`SYSTEM_FREEING_INITMEM`、init-only memory cleanup、
+`mark_readonly()`、`pti_finalize()`、`SYSTEM_RUNNING`、`numa_default_policy()`、`rcu_end_inkernel_boot()` 和
+`do_sysctl_args()` 的时序位置。当前 `AsyncCore`、ftrace/free_initmem、mapping protection 和 sysctl 参数路径
+仍保留 deferred/position-preserved 语义；Kprobes/KGDB/BootConfig/PTI/NUMA 按当前配置记录为 trimmed/no-op。
+
+`SystemState.enable()` 是本阶段的主要状态动作：它必须从 `SYSTEM_SCHEDULING` 进入
+`SYSTEM_FREEING_INITMEM` 窗口，并最终发布 `SYSTEM_RUNNING`，把 `SystemState.state` 推进到 `Online`。
+`RcuCore.end_inkernel_boot()` 是本阶段的另一个主线 action，必须记录 `rcu_boot_ended == true`，但不得把完整
+RCU GP 服务或 worker 运行伪装成已实现。
+
+测试应覆盖 `FinalizePhase.Ready`、async full sync deferred、init memory cleanup deferred/trimmed 事实、
+mapping protection deferred、PTI trimmed、`SystemState.Online`/`SYSTEM_RUNNING`、RCU in-kernel boot ended、
+sysctl args deferred，以及下一入口仍是 `PayloadPhase`。
 
 ## Pre-VM lifecycle 代码生成约束
 

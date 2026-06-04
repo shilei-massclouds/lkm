@@ -168,7 +168,7 @@ object IntegrityKeysDeferred: KernelObject {
 
 /*
  * RootfsBoundary aggregates the rootfs preparation segment and fixes the next
- * entry as the final kernel_init_freeable() cleanup subphase.
+ * entry as FinalizePhase.
  */
 object RootfsBoundary: KernelObject {
     initial_state: State::Base;
