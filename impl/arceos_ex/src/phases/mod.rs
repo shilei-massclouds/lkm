@@ -2,6 +2,7 @@ pub mod boot;
 pub mod interrupt;
 pub mod payload;
 pub mod prepare;
+pub mod smp_runtime;
 pub mod state;
 pub mod up_multitask;
 

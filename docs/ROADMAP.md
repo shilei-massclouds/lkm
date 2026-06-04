@@ -58,10 +58,9 @@
 
 ## 当前交接标记
 
-- 截止提交 3a122d9 (impl: add rest init phase)，UP Multitask Phase 子阶段 1 RestInitPhase 已形成最小闭环：正式规格位于 spec/model/up-multitask/rest-init/，实现位于 impl/arceos_ex/src/phases/up_multitask/rest_init.rs，已新增 rest_init smoke。
-- 已完成验收：make verify；make build APP=smoke；make run APP=smoke；make test；make run LOG=trace APP=smoke；make verify REPORT=graph。
-- 下一步先修正 UP Multitask Phase 的分叉语义：`Scheduler.schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部与 `KernelInitTask -> PreSmpInitPhase` 分支的分叉点，`PreSmpInitPhase.Started` 不应硬依赖 `RestInitPhase.Ready`。计划先落 spec/组件化内核规格.md，再调整 formal model、coding 约束、impl/arceos_ex/src/phases/up_multitask/ 和 smoke/trace 测试。
-- 分叉语义修正完成后，进入 UP Multitask Phase 子阶段 2 PreSmpInitPhase（SMP 前初始化期）：正式化起点为 spec/组件化内核规格.md 的 Pre-SMP Init Subphase 段，随后落 spec/model/up-multitask/pre-smp-init/、spec/coding/ 和 impl/arceos_ex/src/phases/up_multitask/pre_smp_init.rs。
+- 截止提交 41ce0b9 (impl: add pre smp init phase)，UP Multitask Phase 已形成两个子阶段最小闭环：`RestInitPhase` 和 `PreSmpInitPhase`。`PreSmpInitPhase` 从 `KernelInitDispatchGate.Ready` 分叉进入，不硬依赖 `RestInitPhase.Ready`。
+- 当前正在推进 `SMP Runtime Phase` 子阶段 1 `SmpBringupPhase`：正式规格位于 `spec/model/smp-runtime/smp-bringup/`，当前实现策略只展开 BP 侧主线和 BP/AP 同步量，AP 内部 entry/callback 细节保持 deferred。
+- 本阶段完成后需验收：`make verify`；`make build APP=smoke`；`make run APP=smoke`；`make test`；`make run LOG=trace APP=smoke`；`make verify REPORT=graph`。
 - 上下文清理后恢复：先执行 git status --short --branch；预期工作树干净。
 
 ## 细节文档索引

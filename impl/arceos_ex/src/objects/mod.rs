@@ -52,6 +52,7 @@ pub mod rest_init;
 pub mod root_stream;
 pub mod sbi;
 pub mod scheduler;
+pub mod smp_bringup;
 pub mod soc;
 pub mod softirq;
 pub mod state;

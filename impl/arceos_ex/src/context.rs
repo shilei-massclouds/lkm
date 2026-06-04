@@ -56,6 +56,10 @@ use crate::objects::{
     root_stream::RootStream,
     sbi::Sbi,
     scheduler::Scheduler,
+    smp_bringup::{
+        CpuHotplugSyncSet, CpuStartProvider, SecondaryCpuOnlineAck, SecondaryCpuStartupAck,
+        SecondaryIdleTaskSet, SmpBringupBoundary,
+    },
     softirq::Softirq,
     static_branch::StaticBranch,
     static_objects::StaticObjects,
@@ -167,6 +171,12 @@ pub struct Context {
     pub vmstat_core: VmstatCore,
     pub pre_smp_initcalls: PreSmpInitcallTable,
     pub pre_smp_boundary: PreSmpInitBoundary,
+    pub secondary_idle_tasks: SecondaryIdleTaskSet,
+    pub cpu_hotplug_sync: CpuHotplugSyncSet,
+    pub cpu_start_provider: CpuStartProvider,
+    pub secondary_cpu_startup_ack: SecondaryCpuStartupAck,
+    pub secondary_cpu_online_ack: SecondaryCpuOnlineAck,
+    pub smp_bringup_boundary: SmpBringupBoundary,
 }
 
 impl Context {
@@ -265,6 +275,12 @@ impl Context {
             vmstat_core: VmstatCore::new(),
             pre_smp_initcalls: PreSmpInitcallTable::new(),
             pre_smp_boundary: PreSmpInitBoundary::new(),
+            secondary_idle_tasks: SecondaryIdleTaskSet::new(),
+            cpu_hotplug_sync: CpuHotplugSyncSet::new(),
+            cpu_start_provider: CpuStartProvider::new(),
+            secondary_cpu_startup_ack: SecondaryCpuStartupAck::new(),
+            secondary_cpu_online_ack: SecondaryCpuOnlineAck::new(),
+            smp_bringup_boundary: SmpBringupBoundary::new(),
         }
     }
 }

@@ -19,5 +19,6 @@ pub mod resource_tree;
 pub mod rest_init;
 pub mod scheduler;
 pub mod slub;
+pub mod smp_bringup;
 pub mod vmalloc;
 pub mod zones;

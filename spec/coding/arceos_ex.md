@@ -26,6 +26,8 @@
 - `UpMultitaskPhase.Ready`
 - `RestInitPhase.Ready`
 - `PreSmpInitPhase.Ready`
+- `SmpRuntimePhase.Ready`
+- `SmpBringupPhase.Ready`
 - `PayloadPhase.Online`
 
 最小可见结果是通过独立早期输出路径打印启动 banner，进入默认 smoke payload，执行 smoke 用例并通过 SBI 关机。
@@ -65,7 +67,9 @@ make clean
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
-`ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready`），随后通过
+`ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready` 和
+`PreSmpInitPhase.Ready`），随后完成 `SmpRuntimePhase.Ready`（当前只展开 `SmpBringupPhase.Ready`，后续运行期子阶段保持
+deferred），再通过
 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
 `SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
@@ -128,6 +132,28 @@ provider 已创建并绑定全局引用、`system_state == SYSTEM_SCHEDULING`、
 测试应覆盖 full GFP mask 已打开、secondary CPU 只处于 present/not-online、Workqueue Ready 但 SMP topology
 仍 deferred、VmstatCore Prepared、TasksRcu Ready、pre-SMP initcall 已运行、`smp_init()` 未执行，以及
 `PreSmpInitPhase` 的入口来自 `KernelInitDispatchGate` 而非 `RestInitPhase.Ready`。
+
+## SmpBringupPhase 编码约束
+
+`SmpBringupPhase` 是 `SMP Runtime Phase` 的第一个子阶段，formal model 路径为
+`spec/model/smp-runtime/smp-bringup/`，目标实现路径为
+`impl/arceos_ex/src/phases/smp_runtime/smp_bringup.rs`。该阶段从 `smp_init()` 开始，由
+`KernelInitTask` 在 boot CPU 上驱动，当前对象级实现只展开 BP 侧主线和 BP/AP 同步边界。
+
+本阶段必须覆盖 `SecondaryIdleTaskSet.preset()`、`CpuHotplugSyncSet.preset()`、
+`CpuStartProvider.setup()`、`SecondaryCpuStartupAck.setup()`、`SecondaryCpuOnlineAck.setup()` 和
+`SmpBringupBoundary.setup()`。AP 侧 `secondary_start_sbi`、`smp_callin()`、本地中断打开、AP idle 入口和
+AP hotplug callbacks 的内部细节当前保持 deferred；但 AP 对 BP 可见的同步量不得省略，至少要发布
+`cpu_running` observed、`done_up` observed、`done_down` reserved/deferred、secondary CPU online 和
+`smp_concurrency_open` 事实。
+
+当前 `SmpRuntimePhase` 只正式展开 `SmpBringupPhase`。后续 `RuntimeCorePhase`、`InitcallPhase`、
+`RootfsPhase` 和 `FinalizePhase` 暂以 deferred 边界支撑对象级原型继续进入 `PayloadPhase`，不得把这些后续
+阶段的完整运行期服务伪装为已经实现。
+
+测试应覆盖 BP 侧 bringup 主线已经闭合、secondary idle task 已准备、CPU hotplug 同步量已建立并被 AP summary ack
+观察、secondary CPU 从 present/not-online 推进到 online、`smp_concurrency_open` 成立，以及 AP 内部路径仍为
+deferred summary。
 
 ## Pre-VM lifecycle 代码生成约束
 

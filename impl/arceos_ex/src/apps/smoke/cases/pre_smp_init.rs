@@ -32,7 +32,7 @@ pub fn run() -> SmokeResult {
     if ctx.cpu_group.state() != State::Ready
         || !ctx.cpu_group.pre_smp_topology_ready()
         || !ctx.cpu_group.boot_cpu_topology_recorded()
-        || !ctx.cpu_group.secondary_cpus_present_not_online()
+        || !ctx.pre_smp_boundary.secondary_cpus_present_not_online()
     {
         printk::write_str("pre-smp cpu topology facts invalid\n");
         return SmokeResult::Failed;

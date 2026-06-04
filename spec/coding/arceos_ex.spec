@@ -61,6 +61,13 @@ predicate arceos_ex_must_pre_smp_init_run_from_kernel_init_dispatch_gate() -> bo
 predicate arceos_ex_must_pre_smp_init_open_full_gfp_and_prepare_topology() -> bool;
 predicate arceos_ex_must_pre_smp_init_setup_workqueue_vmstat_tasks_rcu_and_initcalls() -> bool;
 predicate arceos_ex_must_pre_smp_init_stop_before_smp_init() -> bool;
+predicate arceos_ex_must_smp_bringup_model_path_under_smp_runtime_phase() -> bool;
+predicate arceos_ex_must_smp_bringup_code_path_follow_smp_runtime_phase_tree() -> bool;
+predicate arceos_ex_must_smp_bringup_focus_bp_side_flow() -> bool;
+predicate arceos_ex_must_smp_bringup_keep_bp_ap_sync_explicit() -> bool;
+predicate arceos_ex_must_smp_bringup_make_secondary_cpus_online() -> bool;
+predicate arceos_ex_must_smp_bringup_keep_ap_internals_deferred() -> bool;
+predicate arceos_ex_must_smp_runtime_keep_later_subphases_deferred() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -591,5 +598,66 @@ type ArceosExPreSmpInitCodingMust {
          * executed or modeled as complete here.
          */
         arceos_ex_must_pre_smp_init_stop_before_smp_init();
+    }
+}
+
+type ArceosExSmpBringupCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * SmpBringupPhase is SMP Runtime Phase subphase 1. Its formal model
+         * path is spec/model/smp-runtime/smp-bringup/.
+         */
+        arceos_ex_must_smp_bringup_model_path_under_smp_runtime_phase();
+
+        /*
+         * Code path:
+         *
+         * Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
+         */
+        arceos_ex_must_smp_bringup_code_path_follow_smp_runtime_phase_tree();
+
+        /*
+         * BP-side focus:
+         *
+         * The current implementation should follow the boot processor side of
+         * smp_init(), not expand AP entry internals.
+         */
+        arceos_ex_must_smp_bringup_focus_bp_side_flow();
+
+        /*
+         * Synchronization:
+         *
+         * BP/AP synchronization facts must stay explicit: cpu_running,
+         * done_up and done_down placement must be represented even when AP
+         * internals are summarized.
+         */
+        arceos_ex_must_smp_bringup_keep_bp_ap_sync_explicit();
+
+        /*
+         * Online boundary:
+         *
+         * This phase must move secondary CPUs from present/not-online to
+         * online and publish the opening of SMP concurrency.
+         */
+        arceos_ex_must_smp_bringup_make_secondary_cpus_online();
+
+        /*
+         * AP internals:
+         *
+         * secondary_start_sbi, smp_callin(), AP local IRQ enable, AP idle and
+         * AP hotplug callback details remain deferred summary paths.
+         */
+        arceos_ex_must_smp_bringup_keep_ap_internals_deferred();
+
+        /*
+         * Later runtime:
+         *
+         * RuntimeCorePhase, InitcallPhase, RootfsPhase and FinalizePhase are
+         * not implemented in this step; they must remain explicit deferred
+         * boundaries rather than being silently assumed complete.
+         */
+        arceos_ex_must_smp_runtime_keep_later_subphases_deferred();
     }
 }

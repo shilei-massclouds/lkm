@@ -126,6 +126,7 @@ pub struct CpuGroup {
     secondary_count: usize,
     pre_smp_topology_ready: bool,
     boot_cpu_topology_recorded: bool,
+    smp_concurrency_open: bool,
 }
 
 impl CpuGroup {
@@ -137,6 +138,7 @@ impl CpuGroup {
             secondary_count: 0,
             pre_smp_topology_ready: false,
             boot_cpu_topology_recorded: false,
+            smp_concurrency_open: false,
         }
     }
 
@@ -247,6 +249,22 @@ impl CpuGroup {
         true
     }
 
+    pub fn secondary_cpus_online(&self) -> bool {
+        let mut index = 0usize;
+        while index < self.secondary_count {
+            let cpu = self.secondary_cpus[index];
+            if !cpu.is_present() || !cpu.is_online() {
+                return false;
+            }
+            index += 1;
+        }
+        self.secondary_count != 0
+    }
+
+    pub const fn smp_concurrency_open(&self) -> bool {
+        self.smp_concurrency_open
+    }
+
     pub fn prepare_pre_smp(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Ready || self.boot_cpu.state() != State::Online {
             return failed_condition(
@@ -268,6 +286,30 @@ impl CpuGroup {
         self.pre_smp_topology_ready = true;
         self.boot_cpu_topology_recorded = true;
         crate::trace::checkpoint(Checkpoint::CpuGroupPreSmpReady);
+        Ok(())
+    }
+
+    pub fn mark_secondary_cpus_online(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.pre_smp_topology_ready
+            || !self.boot_cpu_topology_recorded
+            || !self.secondary_cpus_present_not_online()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        let mut index = 0usize;
+        while index < self.secondary_count {
+            self.secondary_cpus[index].online = true;
+            index += 1;
+        }
+        self.smp_concurrency_open = true;
+        crate::trace::checkpoint(Checkpoint::SecondaryCpusOnline);
         Ok(())
     }
 

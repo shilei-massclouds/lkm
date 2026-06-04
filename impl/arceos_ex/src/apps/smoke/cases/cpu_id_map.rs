@@ -35,7 +35,7 @@ pub fn run() -> SmokeResult {
             printk::write_str("secondary CPU entry missing\n");
             return SmokeResult::Failed;
         };
-        if !cpu.is_possible() || !cpu.is_present() || cpu.is_online() {
+        if !cpu.is_possible() || !cpu.is_present() {
             printk::write_str("secondary CPU state invalid\n");
             return SmokeResult::Failed;
         }

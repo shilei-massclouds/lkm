@@ -25,7 +25,7 @@ pub fn setup_after_children() -> ! {
 }
 
 fn handoff() -> ! {
-    crate::startup_timeline_ready()
+    crate::phases::smp_runtime::setup()
 }
 
 fn up_multitask_phase_ready() -> EventResult {

@@ -32,6 +32,7 @@ object PayloadPhase: PhaseObject {
                     BootPhase.state == State::Ready;
                     InterruptPhase.state == State::Ready;
                     UpMultitaskPhase.state == State::Ready;
+                    SmpRuntimePhase.state == State::Ready;
                 }
 
                 ensures {
@@ -50,6 +51,7 @@ object PayloadPhase: PhaseObject {
             BootPhase.state == State::Ready;
             InterruptPhase.state == State::Ready;
             UpMultitaskPhase.state == State::Ready;
+            SmpRuntimePhase.state == State::Ready;
             selected_payload_ready();
         }
 
@@ -77,6 +79,7 @@ object PayloadPhase: PhaseObject {
             BootPhase.state == State::Ready;
             InterruptPhase.state == State::Ready;
             UpMultitaskPhase.state == State::Ready;
+            SmpRuntimePhase.state == State::Ready;
             selected_payload_ready();
             selected_payload_no_return_handoff();
         }

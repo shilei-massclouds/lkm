@@ -23,6 +23,7 @@ pub fn startup_timeline_ready() -> ! {
         || !phases::boot::is_ready()
         || !phases::interrupt::is_ready()
         || !phases::up_multitask::is_ready()
+        || !phases::smp_runtime::is_ready()
     {
         arch::riscv64::sbi::putstr("arceos_ex startup invariant failed\n");
         arch::riscv64::sbi::system_shutdown()
