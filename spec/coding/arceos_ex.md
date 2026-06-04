@@ -151,9 +151,8 @@ AP hotplug callbacks 的内部细节当前保持 deferred；但 AP 对 BP 可见
 `cpu_running` observed、`done_up` observed、`done_down` reserved/deferred、secondary CPU online 和
 `smp_concurrency_open` 事实。
 
-`SmpRuntimePhase` 在本轮之后继续进入 `RuntimeCorePhase`。后续 `InitcallPhase`、`RootfsPhase` 和
-`FinalizePhase` 由各自子阶段逐步展开；未展开部分保持显式 deferred 边界，不得把这些后续阶段的完整运行期服务
-伪装为已经实现。
+`SmpRuntimePhase` 当前已经继续串联 `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和
+`FinalizePhase`。各子阶段未展开的完整运行期服务仍保持显式 deferred 边界，不得伪装为已经实现。
 
 测试应覆盖 BP 侧 bringup 主线已经闭合、secondary idle task 已准备、CPU hotplug 同步量已建立并被 AP summary ack
 观察、secondary CPU 从 present/not-online 推进到 online、`smp_concurrency_open` 成立，以及 AP 内部路径仍为
