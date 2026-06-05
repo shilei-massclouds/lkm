@@ -56,7 +56,14 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(
                 startup["children"],
-                ["PreparePhase", "BootPhase", "InterruptPhase", "PayloadPhase"],
+                [
+                    "PreparePhase",
+                    "BootPhase",
+                    "InterruptPhase",
+                    "UpMultitaskPhase",
+                    "SmpRuntimePhase",
+                    "PayloadPhase",
+                ],
             )
             self.assertEqual(setup["source_state"], "Base")
             self.assertEqual(setup["target_state"], "Ready")
@@ -75,6 +82,8 @@ class ModelToolTests(unittest.TestCase):
                     "PreparePhase.Event::Enable",
                     "BootPhase.Event::Setup",
                     "InterruptPhase.Event::Setup",
+                    "UpMultitaskPhase.Event::Setup",
+                    "SmpRuntimePhase.Event::Setup",
                     "PayloadPhase.Event::Setup",
                     "PayloadPhase.Event::Enable",
                 ],

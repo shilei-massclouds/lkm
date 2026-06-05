@@ -34,6 +34,20 @@ class Block:
 
 
 @dataclass(frozen=True)
+class WithinDecl:
+    """An event/action block executed within an exclusive context."""
+
+    context: str
+    span: SourceSpan
+    depends_on: list[Block] = field(default_factory=list)
+    drives: list[Block] = field(default_factory=list)
+    may_change: list[Block] = field(default_factory=list)
+    ensures: list[Block] = field(default_factory=list)
+    deferred: list[Block] = field(default_factory=list)
+    other_blocks: list[Block] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class EventDecl:
     """A state-local event transition declaration."""
 
@@ -42,6 +56,7 @@ class EventDecl:
     span: SourceSpan
     depends_on: list[Block] = field(default_factory=list)
     drives: list[Block] = field(default_factory=list)
+    within: list[WithinDecl] = field(default_factory=list)
     may_change: list[Block] = field(default_factory=list)
     ensures: list[Block] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
@@ -115,6 +130,26 @@ class EnumDecl:
 
 
 @dataclass(frozen=True)
+class LockDecl:
+    """A lock declaration used by exclusive contexts."""
+
+    name: str
+    span: SourceSpan
+
+
+@dataclass(frozen=True)
+class ExclusiveContextDecl:
+    """An exclusive context declaration."""
+
+    name: str
+    span: SourceSpan
+    lock_ref: str | None = None
+    obj_refs: list[str] = field(default_factory=list)
+    other_blocks: list[Block] = field(default_factory=list)
+    properties: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class SpecDocument:
     """Parsed syntax-level spec document."""
 
@@ -122,6 +157,8 @@ class SpecDocument:
     functions: list[FunctionDecl] = field(default_factory=list)
     predicates: list[PredicateDecl] = field(default_factory=list)
     types: list[TypeDecl] = field(default_factory=list)
+    locks: list[LockDecl] = field(default_factory=list)
+    exclusive_contexts: list[ExclusiveContextDecl] = field(default_factory=list)
     objects: list[ObjectDecl] = field(default_factory=list)
 
 

@@ -15,9 +15,45 @@
  * RCU_SCHEDULER_INIT，同步 GP 序号基线，并保持 GP kthread deferred。
  */
 
+lock KernelInitTaskPiLock;
+
+exclusive_context WakeUpNewTaskContext {
+    lock_ref: KernelInitTaskPiLock;
+
+    obj_refs {
+        KernelInitTask;
+        Scheduler;
+        BootRunQueue;
+    }
+}
+
 /*
  * KernelInitTask 表示 user_mode_thread(kernel_init, NULL, CLONE_FS) 创建的
  * PID 1。它在本阶段变为 Online，但其 kernel_init_freeable() 执行属于下一子阶段。
+ *
+ * KernelInitTask.Preset 对应 user_mode_thread() 内部构造临时
+ * kernel_clone_args 的过程。kernel_clone_args 是栈上传参结构，没有独立
+ * 生命周期，因此不建模为对象；Preset 把 fn、fn_arg、clone flags、
+ * exit_signal 等信息固化为 KernelInitTask.Prepared 上的 facts，并明确
+ * 尚未分配 task_struct、尚未 attach pid、尚未入队。
+ *
+ * KernelInitTask.Setup 对应 kernel_clone() 调用 copy_process() 的成功路径。
+ * copy_process() 是 TaskCreationCore.Ready 状态内的参数化 action：
+ * TaskCreationCore.Action::CopyProcess(src_task: BootInitTask,
+ * new_task: KernelInitTask, ...)。该 action 以 src_task/current 为模板创建
+ * new_task/task_struct，初始化 pid、凭据、fs/files、signal、安全上下文、
+ * thread context 与 sched entity，但保持 task_state_new 且 task_not_enqueued。
+ * KernelInitTask.Setup 只提交 KernelInitTask Prepared -> Ready 的生命周期结果。
+ *
+ * KernelInitTask.Enable 对应 wake_up_new_task()。该路径受 p->pi_lock 保护，
+ * 因此 Enable 不直接驱动任务、调度器和 runqueue 的 action，而是在
+ * WakeUpNewTaskContext 独占上下文内执行：上下文通过 KernelInitTaskPiLock
+ * 建立边界，引用 KernelInitTask、Scheduler、BootRunQueue 三个对象。
+ * Enable 的 within WakeUpNewTaskContext 块直接驱动
+ * Task.Action::SetTaskState(Running)、Scheduler.Action::SelectRunQueue
+ * (selected_rq: BootRunQueue) 和 BootRunQueue.Action::EnqueueTask
+ * (task: KernelInitTask)。三者都成功后，Enable 才提交
+ * KernelInitTask Ready -> Online。
  */
 object KernelInitTask: TaskObject {
     initial_state: State::Base;
@@ -78,6 +114,8 @@ object KernelInitTask: TaskObject {
                     kernel_init_task_pid_is_one(KernelInitTask);
                     kernel_init_thread_context_ready(KernelInitTask);
                     kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+                    task_state_new(KernelInitTask);
+                    task_not_enqueued(KernelInitTask);
                     kernel_init_waits_for_kthreadd_done(KernelInitTask);
                 }
             }
@@ -92,6 +130,8 @@ object KernelInitTask: TaskObject {
             kernel_init_task_ready(KernelInitTask);
             kernel_init_task_pid_is_one(KernelInitTask);
             kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+            task_state_new(KernelInitTask);
+            task_not_enqueued(KernelInitTask);
             kernel_init_waits_for_kthreadd_done(KernelInitTask);
         }
 
@@ -103,12 +143,33 @@ object KernelInitTask: TaskObject {
                 depends_on {
                     Scheduler.state == State::Online;
                     BootRunQueue.state == State::Ready;
+                    task_state_new(KernelInitTask);
+                    task_not_enqueued(KernelInitTask);
+                }
+
+                within WakeUpNewTaskContext {
+                    depends_on {
+                        task_state_new(KernelInitTask);
+                        task_not_enqueued(KernelInitTask);
+                    }
+
+                    drives {
+                        KernelInitTask.Action::SetTaskState(TaskRuntimeState::Running);
+                        Scheduler.Action::SelectRunQueue(selected_rq: BootRunQueue);
+                        BootRunQueue.Action::EnqueueTask(task: KernelInitTask);
+                    }
+
+                    ensures {
+                        task_state_running(KernelInitTask);
+                        task_runqueue_selected(Scheduler, KernelInitTask, BootRunQueue);
+                        task_enqueued_on_runqueue(KernelInitTask, BootRunQueue);
+                    }
                 }
 
                 ensures {
                     kernel_init_task_online(KernelInitTask);
                     kernel_init_task_pid_is_one(KernelInitTask);
-                    kernel_init_task_enqueued(KernelInitTask, Scheduler);
+                    kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
                     kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
                 }
             }
@@ -122,7 +183,9 @@ object KernelInitTask: TaskObject {
         invariant {
             kernel_init_task_online(KernelInitTask);
             kernel_init_task_pid_is_one(KernelInitTask);
-            kernel_init_task_enqueued(KernelInitTask, Scheduler);
+            kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
+            task_state_running(KernelInitTask);
+            task_enqueued_on_runqueue(KernelInitTask, BootRunQueue);
         }
     }
 }

@@ -26,7 +26,14 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("StartupTimeline", result.model.objects)
         self.assertEqual(
             result.model.children["StartupTimeline"],
-            ["PreparePhase", "BootPhase", "InterruptPhase", "PayloadPhase"],
+            [
+                "PreparePhase",
+                "BootPhase",
+                "InterruptPhase",
+                "UpMultitaskPhase",
+                "SmpRuntimePhase",
+                "PayloadPhase",
+            ],
         )
         self.assertEqual(
             result.model.objects["BootPhase"].children,
@@ -107,6 +114,107 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("MmCoreInitPhase", svg)
         self.assertIn("PayloadPhase", svg)
         self.assertNotIn("StartupTimeline", svg)
+
+
+    def test_accepts_exclusive_context_within_action_refs(self) -> None:
+        document = parse_text(
+            """
+            lock TaskPiLock;
+
+            exclusive_context WakeContext {
+                lock_ref: TaskPiLock;
+
+                obj_refs {
+                    A;
+                    B;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                            within WakeContext {
+                                drives {
+                                    A.Action::SetTaskState(TaskRuntimeState::Running);
+                                    B.Action::Touch(task: A);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+
+            object B: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertTrue(result.ok, [diag.message for diag in result.errors])
+        self.assertIn("WakeContext", result.model.exclusive_contexts)
+
+    def test_rejects_action_refs_outside_exclusive_context_objects(self) -> None:
+        document = parse_text(
+            """
+            lock TaskPiLock;
+
+            exclusive_context WakeContext {
+                lock_ref: TaskPiLock;
+
+                obj_refs {
+                    A;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                            within WakeContext {
+                                drives {
+                                    B.Action::Touch(task: A);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+
+            object B: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "action reference outside exclusive_context obj_refs" in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
 
     def test_reports_unknown_drive_event(self) -> None:
         document = parse_text(

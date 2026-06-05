@@ -8,7 +8,9 @@ from enum import Enum
 from common.spec_ast import (
     EnumDecl,
     EventDecl,
+    ExclusiveContextDecl,
     FunctionDecl,
+    LockDecl,
     ObjectDecl,
     PredicateDecl,
     SourceSpan,
@@ -75,6 +77,16 @@ class ObjectDef:
 
 
 @dataclass(frozen=True)
+class ExclusiveContextDef:
+    """Indexed exclusive context definition."""
+
+    name: str
+    decl: ExclusiveContextDecl
+    lock_ref: str | None
+    obj_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ObjectModel:
     """Static model built from the parsed spec."""
 
@@ -82,6 +94,8 @@ class ObjectModel:
     functions: dict[str, list[FunctionDecl]]
     predicates: dict[str, list[PredicateDecl]]
     types: dict[str, TypeDecl]
+    locks: dict[str, LockDecl]
+    exclusive_contexts: dict[str, ExclusiveContextDef]
     objects: dict[str, ObjectDef]
     children: dict[str, list[str]]
 

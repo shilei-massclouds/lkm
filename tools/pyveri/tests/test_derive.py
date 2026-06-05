@@ -130,6 +130,95 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
+
+    def test_within_ensures_can_satisfy_target_invariants(self) -> None:
+        result = build_model(
+            parse_text(
+                """
+                lock TaskPiLock;
+
+                exclusive_context WakeContext {
+                    lock_ref: TaskPiLock;
+
+                    obj_refs {
+                        A;
+                        B;
+                    }
+                }
+
+                object A: T {
+                    initial_state: State::Ready;
+
+                    state State::Ready {
+                        invariant {
+                            task_state_new(A);
+                        }
+
+                        events {
+                            on Event::Enable -> State::Online {
+                                within WakeContext {
+                                    depends_on {
+                                        task_state_new(A);
+                                    }
+
+                                    drives {
+                                        A.Action::SetTaskState(TaskRuntimeState::Running);
+                                        B.Action::EnqueueTask(task: A);
+                                    }
+
+                                    ensures {
+                                        task_state_running(A);
+                                        task_enqueued_on_runqueue(A, B);
+                                    }
+                                }
+
+                                ensures {
+                                    task_online(A);
+                                }
+                            }
+                        }
+                    }
+
+                    state State::Online {
+                        invariant {
+                            task_online(A);
+                            task_state_running(A);
+                            task_enqueued_on_runqueue(A, B);
+                        }
+                    }
+                }
+
+                object B: T {
+                    initial_state: State::Ready;
+
+                    state State::Ready {
+                    }
+                }
+                """
+            )
+        )
+
+        derivation = derive(result.model, "A.Event::Enable")
+
+        self.assertTrue(derivation.ok)
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_provider == "within_ensures"
+                and record.expression == "task_state_running(A)"
+                for record in derivation.records
+            )
+        )
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_class == "action_commit"
+                and record.proof_provider == "within_context"
+                and record.expression == "A.Action::SetTaskState(TaskRuntimeState::Running)"
+                for record in derivation.records
+            )
+        )
+
     def test_current_entry_prelude_derivation_reaches_target(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
         result = build_model(parse_file(spec))

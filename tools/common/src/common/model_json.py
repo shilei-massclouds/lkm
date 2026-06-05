@@ -5,17 +5,26 @@ from __future__ import annotations
 from typing import Any
 
 from common.schemas import MODEL_SCHEMA, MODEL_VERSION
-from common.model_types import EventDef, ObjectDef, ObjectModel, StateDef
+from common.model_types import (
+    EventDef,
+    ExclusiveContextDef,
+    ObjectDef,
+    ObjectModel,
+    StateDef,
+)
 from common.spec_ast import (
     Block,
     EnumDecl,
     EventDecl,
+    ExclusiveContextDecl,
     FunctionDecl,
+    LockDecl,
     ObjectDecl,
     PredicateDecl,
     SourceSpan,
     StateDecl,
     TypeDecl,
+    WithinDecl,
 )
 
 
@@ -43,6 +52,14 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
         name: _type_from_json(item)
         for name, item in _object(model_data, "types").items()
     }
+    locks = {
+        name: _lock_from_json(item)
+        for name, item in _object(model_data, "locks").items()
+    }
+    exclusive_contexts = {
+        name: _exclusive_context_from_json(item)
+        for name, item in _object(model_data, "exclusive_contexts").items()
+    }
     objects = {
         name: _object_def_from_json(item)
         for name, item in _object(model_data, "objects").items()
@@ -56,8 +73,42 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
         functions=functions,
         predicates=predicates,
         types=types,
+        locks=locks,
+        exclusive_contexts=exclusive_contexts,
         objects=objects,
         children=children,
+    )
+
+
+def _lock_from_json(item: Any) -> LockDecl:
+    data = _as_object(item, "lock")
+    return LockDecl(
+        name=_string(data, "name"),
+        span=_span_from_json(data["span"]),
+    )
+
+
+def _exclusive_context_from_json(item: Any) -> ExclusiveContextDef:
+    data = _as_object(item, "exclusive_context")
+    lock_ref = data.get("lock_ref")
+    if lock_ref is not None and not isinstance(lock_ref, str):
+        raise ValueError("exclusive_context.lock_ref must be a string or null")
+    properties = data.get("properties", {})
+    if not isinstance(properties, dict):
+        raise ValueError("exclusive_context.properties must be an object")
+    decl = ExclusiveContextDecl(
+        name=_string(data, "name"),
+        span=_span_from_json(data["span"]),
+        lock_ref=lock_ref,
+        obj_refs=[_as_string(value, "obj_ref") for value in _list(data, "obj_refs")],
+        other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
+        properties={str(key): str(value) for key, value in properties.items()},
+    )
+    return ExclusiveContextDef(
+        name=decl.name,
+        decl=decl,
+        lock_ref=decl.lock_ref,
+        obj_refs=tuple(decl.obj_refs),
     )
 
 
@@ -124,6 +175,7 @@ def _event_def_from_json(item: Any) -> EventDef:
         span=_span_from_json(data["span"]),
         depends_on=[_block_from_json(block) for block in _list(data, "depends_on")],
         drives=[_block_from_json(block) for block in _list(data, "drives")],
+        within=[_within_from_json(block) for block in _list(data, "within")],
         may_change=[_block_from_json(block) for block in _list(data, "may_change")],
         ensures=[_block_from_json(block) for block in _list(data, "ensures")],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],
@@ -173,6 +225,20 @@ def _type_from_json(item: Any) -> TypeDecl:
         header=_string(data, "header"),
         span=_span_from_json(data["span"]),
         blocks=[_block_from_json(block) for block in _list(data, "blocks")],
+    )
+
+
+def _within_from_json(item: Any) -> WithinDecl:
+    data = _as_object(item, "within")
+    return WithinDecl(
+        context=_string(data, "context"),
+        span=_span_from_json(data["span"]),
+        depends_on=[_block_from_json(block) for block in _list(data, "depends_on")],
+        drives=[_block_from_json(block) for block in _list(data, "drives")],
+        may_change=[_block_from_json(block) for block in _list(data, "may_change")],
+        ensures=[_block_from_json(block) for block in _list(data, "ensures")],
+        deferred=[_block_from_json(block) for block in _list(data, "deferred")],
+        other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
     )
 
 

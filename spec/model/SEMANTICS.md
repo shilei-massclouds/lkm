@@ -102,6 +102,152 @@
 
 当前 `.spec` 语法只支持生命周期事件；`action` 和 `Operational Event` 仍是后续扩展语义。新增相关语法前，`model`、`derive`、`view`、`render` 不得推测或隐式实现 action 语义。
 
+一等 `action` 的正式规格如下，后续实现语法、检查器、推导器、视图和渲染时必须保持这些规则：
+
+```text
+state State::Ready {
+    actions {
+        on Action::Name<T: Object>(arg: T, other: OtherObject) {
+            depends_on {
+                ...
+            }
+
+            drives {
+                ...
+            }
+
+            ensures {
+                ...
+            }
+
+            deferred {
+                ...
+            }
+        }
+    }
+}
+```
+
+- `actions` 块只能出现在 `state` 内；action 所在 state 是该 action 的 owner-state guard。
+- action 成功时不得推进 owner 对象生命周期状态；owner 仍停留在 action 所属 state。
+- action 名称在 owner 对象内唯一，引用身份是 `Object.Action::Name` 加实参绑定。
+- action 可以带类型参数和命名形参；形参必须是对象引用或受控值类型。
+- `drives` 可以引用 lifecycle event，也可以引用 action；引用参数化 action 时必须提供完整命名实参，并通过类型检查。
+- action 的 `depends_on` 是调用成功前提；被 event 驱动的 action 若 `depends_on` 不满足，该 event 不得提交生命周期迁移。
+- action 的 `ensures` 在 action 成功后成立，并可作为驱动它的 event 成功路径上的可用事实。
+- action 的 `ensures` 不得直接伪造生命周期提交，例如不得用 action 确保 `SomeObject.state == State::Ready` 来替代 `SomeObject.Event::Setup`。
+- 参数化 action 不得把具体目标对象编码进 action 名；具体对象差异应通过实参和对象自身 facts 表达。
+
+示例：`copy_process()` 应建模为 `TaskCreationCore` 在 `Ready` 状态内的参数化 action，而不是为每个目标任务建立 `CopyKernelInitProcess` 之类的专名 action：
+
+```text
+on Action::CopyProcess<Src: TaskObject, New: TaskObject>(
+    src_task: Src,
+    new_task: New,
+    pid_ns: RootPidNamespace,
+    creds: CredentialCore,
+    signal: SignalCore,
+    files: TaskFileContext,
+    security: SecurityCore,
+    scheduler: Scheduler
+) {
+    depends_on {
+        src_task.state == State::Online;
+        new_task.state == State::Prepared;
+        pid_ns.state == State::Ready;
+        creds.state == State::Prepared;
+        signal.state == State::Prepared;
+        files.state == State::Prepared;
+        security.state == State::Ready;
+        scheduler.state == State::Online;
+        task_clone_args_ready(new_task);
+    }
+
+    ensures {
+        task_creation_copy_process_committed(TaskCreationCore, src_task, new_task);
+        task_creation_used_clone_args(TaskCreationCore, new_task);
+        task_struct_allocated(new_task);
+        task_duplicated_from(new_task, src_task);
+        task_pid_allocated(new_task, pid_ns);
+        task_creds_copied(new_task, creds);
+        task_file_context_copied_or_shared(new_task, files);
+        task_signal_context_ready(new_task, signal);
+        task_security_context_allocated(new_task, security);
+        task_thread_context_ready(new_task);
+        task_sched_entity_initialized(new_task, scheduler);
+        task_state_new(new_task);
+        task_not_enqueued(new_task);
+    }
+}
+```
+
+## SEM-EXCLUSIVE-CONTEXT-001: Lock And Exclusive Context Are Distinct
+
+`Lock` 表示可建立独占边界的同步对象。`Lock` 不带泛型，不拥有被保护资源；锁与资源的关系由独占上下文表达。
+
+`exclusive_context` 表示通过某个锁引用建立的受保护执行作用域。它不是普通 lifecycle object，不拥有锁，也不拥有资源；它只保存引用关系和作用域语义。
+
+正式结构：
+
+```text
+exclusive_context WakeUpNewTaskContext {
+    lock_ref: KernelInitTaskPiLock;
+    obj_refs: {
+        KernelInitTask;
+        Scheduler;
+        BootRunQueue;
+    }
+}
+```
+
+规则：
+
+- `lock_ref` 必须引用一个 `Lock` 实例；该引用建立上下文的独占边界。
+- `obj_refs` 是对象引用集合，至少包含一个对象；上下文不拥有这些对象。
+- 同一把锁可以被多个 exclusive context 引用，用于建立不同受保护作用域。
+- exclusive context 不需要 lifecycle state；进入上下文是一次受锁保护的独占执行尝试。
+- 同一时刻至多一个执行流可以成功进入同一个 exclusive context。
+- `within` 块内只能直接驱动 `obj_refs` 中对象的 action/event，除非规格显式声明允许外部对象。
+- exclusive context 成功退出后释放独占执行权；失败或 `Blocked` 时，外层 event 不得提交生命周期迁移。
+
+事件或 action 使用 `within` 声明独占执行作用域。`within` 块内可以包含 `depends_on`、`drives`、`ensures` 和 `deferred`。
+
+`KernelInitTask.Enable` 对应 `wake_up_new_task()` 的正式规格形态如下：
+
+```text
+state State::Ready {
+    events {
+        on Event::Enable -> State::Online {
+            within WakeUpNewTaskContext {
+                depends_on {
+                    task_state_new(KernelInitTask);
+                    task_not_enqueued(KernelInitTask);
+                }
+
+                drives {
+                    KernelInitTask.Action::SetTaskState(TaskRuntimeState::Running);
+                    Scheduler.Action::SelectRunQueue(selected_rq: BootRunQueue);
+                    BootRunQueue.Action::EnqueueTask(task: KernelInitTask);
+                }
+
+                ensures {
+                    task_state_running(KernelInitTask);
+                    task_runqueue_selected(Scheduler, KernelInitTask, BootRunQueue);
+                    task_enqueued_on_runqueue(KernelInitTask, BootRunQueue);
+                }
+            }
+
+            ensures {
+                kernel_init_task_online(KernelInitTask);
+                kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
+            }
+        }
+    }
+}
+```
+
+`within` 的语义是：先尝试进入指定 exclusive context；进入成功后，在该独占作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，外层 event/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移。
+
 ## SEM-EVENT-RESULT-001: Event And Action Results Are Explicit
 
 `event` 和 `action` 都应具有显式返回结果。最小结果集合包括：

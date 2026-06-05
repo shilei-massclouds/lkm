@@ -7,6 +7,7 @@ from common.model_types import (
     BuildResult,
     Diagnostic,
     EventDef,
+    ExclusiveContextDef,
     ObjectDef,
     ObjectModel,
     Severity,
@@ -14,6 +15,7 @@ from common.model_types import (
 )
 from common.spec_ast import (
     Block,
+    ExclusiveContextDecl,
     EnumDecl,
     EventDecl,
     FunctionDecl,
@@ -27,6 +29,7 @@ from common.spec_ast import (
 
 
 _OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
+_OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
@@ -75,6 +78,10 @@ def build_model(document: SpecDocument) -> BuildResult:
     functions = _index_overloads(document.functions)
     predicates = _index_overloads(document.predicates)
     types = _index_by_name(document.types, "type", diagnostics)
+    locks = _index_by_name(document.locks, "lock", diagnostics)
+    exclusive_contexts = _build_exclusive_contexts(
+        document.exclusive_contexts, locks, diagnostics
+    )
     objects = _build_objects(document.objects, diagnostics)
     children = _build_children(objects, diagnostics)
 
@@ -89,12 +96,15 @@ def build_model(document: SpecDocument) -> BuildResult:
         functions=functions,
         predicates=predicates,
         types=types,
+        locks=locks,
+        exclusive_contexts=exclusive_contexts,
         objects=objects,
         children=children,
     )
 
     _check_initial_states(model, diagnostics)
     _check_event_targets(model, diagnostics)
+    _check_exclusive_context_references(model, diagnostics)
     _check_references(model, diagnostics)
 
     return BuildResult(model=model, diagnostics=diagnostics)
@@ -139,6 +149,57 @@ def _index_overloads(items) -> dict[str, list[object]]:
     for item in items:
         indexed.setdefault(item.name, []).append(item)
     return indexed
+
+
+
+
+def _build_exclusive_contexts(
+    declarations: list[ExclusiveContextDecl],
+    locks: dict[str, object],
+    diagnostics: list[Diagnostic],
+) -> dict[str, ExclusiveContextDef]:
+    contexts: dict[str, ExclusiveContextDef] = {}
+    for decl in declarations:
+        if decl.name in contexts:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"duplicate exclusive_context declaration: {decl.name}",
+                    decl.span,
+                )
+            )
+            continue
+        if decl.lock_ref is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"exclusive_context {decl.name} is missing lock_ref",
+                    decl.span,
+                )
+            )
+        elif decl.lock_ref not in locks:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown lock_ref on exclusive_context {decl.name}: {decl.lock_ref}",
+                    decl.span,
+                )
+            )
+        if not decl.obj_refs:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"exclusive_context {decl.name} must reference at least one object",
+                    decl.span,
+                )
+            )
+        contexts[decl.name] = ExclusiveContextDef(
+            name=decl.name,
+            decl=decl,
+            lock_ref=decl.lock_ref,
+            obj_refs=tuple(decl.obj_refs),
+        )
+    return contexts
 
 
 def _build_objects(
@@ -385,6 +446,21 @@ def _check_event_targets(model: ObjectModel, diagnostics: list[Diagnostic]) -> N
                     )
 
 
+def _check_exclusive_context_references(
+    model: ObjectModel, diagnostics: list[Diagnostic]
+) -> None:
+    for context in model.exclusive_contexts.values():
+        for object_name in context.obj_refs:
+            if object_name not in model.objects:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"unknown object reference in exclusive_context {context.name}: {object_name}",
+                        context.decl.span,
+                    )
+                )
+
+
 def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
     for obj in model.objects.values():
         for state in obj.states.values():
@@ -395,6 +471,59 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
                     _check_state_references(model, block, diagnostics)
                 for block in event.decl.drives:
                     _check_event_references(model, block, diagnostics)
+                    _check_action_references(model, block, diagnostics)
+                for within in event.decl.within:
+                    _check_within_references(model, within, diagnostics)
+
+
+
+
+def _check_within_references(model: ObjectModel, within, diagnostics: list[Diagnostic]) -> None:
+    context = model.exclusive_contexts.get(within.context)
+    if context is None:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"unknown exclusive_context reference: {within.context}",
+                within.span,
+            )
+        )
+        return
+
+    for block in within.depends_on:
+        _check_state_references(model, block, diagnostics)
+    for block in within.drives:
+        _check_event_references(model, block, diagnostics)
+        _check_action_references(model, block, diagnostics, context=context)
+
+
+def _check_action_references(
+    model: ObjectModel,
+    block: Block,
+    diagnostics: list[Diagnostic],
+    *,
+    context: ExclusiveContextDef | None = None,
+) -> None:
+    allowed = set(context.obj_refs) if context is not None else None
+    for object_name, action_name in _OBJECT_ACTION_RE.findall(block.body):
+        if object_name not in model.objects:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown object in action reference: {object_name}.Action::{action_name}",
+                    block.span,
+                )
+            )
+            continue
+        if allowed is not None and object_name not in allowed:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "action reference outside exclusive_context obj_refs: "
+                    f"{object_name}.Action::{action_name} not in {context.name}",
+                    block.span,
+                )
+            )
 
 
 def _check_event_references(

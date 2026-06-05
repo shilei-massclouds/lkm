@@ -118,6 +118,73 @@ class ParserTests(unittest.TestCase):
             ],
         )
 
+
+    def test_parse_exclusive_context_and_within_block(self) -> None:
+        document = parse_text(
+            """
+            lock TaskPiLock;
+
+            exclusive_context WakeContext {
+                lock_ref: TaskPiLock;
+
+                obj_refs {
+                    A;
+                    B;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                            within WakeContext {
+                                depends_on {
+                                    task_state_new(A);
+                                }
+
+                                drives {
+                                    A.Action::SetTaskState(TaskRuntimeState::Running);
+                                    B.Action::Touch(task: A);
+                                }
+
+                                ensures {
+                                    task_state_running(A);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+
+            object B: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        self.assertEqual([lock.name for lock in document.locks], ["TaskPiLock"])
+        context = document.exclusive_contexts[0]
+        self.assertEqual(context.name, "WakeContext")
+        self.assertEqual(context.lock_ref, "TaskPiLock")
+        self.assertEqual(context.obj_refs, ["A", "B"])
+        event = document.objects[0].states[0].events[0]
+        self.assertEqual(event.within[0].context, "WakeContext")
+        self.assertEqual(
+            event.within[0].drives[0].entries,
+            [
+                "A.Action::SetTaskState(TaskRuntimeState::Running)",
+                "B.Action::Touch(task: A)",
+            ],
+        )
+
     def test_parse_current_entry_prelude_spec(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
 

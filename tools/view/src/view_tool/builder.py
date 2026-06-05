@@ -18,6 +18,7 @@ from common.view_types import (
 
 
 _OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
+_OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
@@ -58,13 +59,19 @@ def build_drives_view(model: ObjectModel) -> ViewModel:
                 source = _event_node_id(obj.name, event.name)
                 _add_event_node(nodes, source, obj.name, event.name)
 
-                for block in event.decl.drives:
-                    for target_obj, target_event in _OBJECT_EVENT_RE.findall(block.body):
-                        if target_obj not in model.objects:
-                            continue
-                        target = _event_node_id(target_obj, target_event)
-                        _add_event_node(nodes, target, target_obj, target_event)
-                        edges.append(ViewEdge(source=source, target=target, kind="drives"))
+                for target_obj, target_event in _driven_events(event):
+                    if target_obj not in model.objects:
+                        continue
+                    target = _event_node_id(target_obj, target_event)
+                    _add_event_node(nodes, target, target_obj, target_event)
+                    edges.append(ViewEdge(source=source, target=target, kind="drives"))
+
+                for target_obj, target_action in _driven_actions(event):
+                    if target_obj not in model.objects:
+                        continue
+                    target = _action_node_id(target_obj, target_action)
+                    _add_action_node(nodes, target, target_obj, target_action)
+                    edges.append(ViewEdge(source=source, target=target, kind="drives_action"))
 
     return ViewModel(name="drives", nodes=nodes, edges=edges, rankdir="LR")
 
@@ -101,19 +108,18 @@ def build_timeline_view(model: ObjectModel) -> ViewModel:
                     )
                 )
 
-                for block in event.decl.drives:
-                    for target_obj, target_event in _OBJECT_EVENT_RE.findall(block.body):
-                        if target_obj not in phase_objects:
-                            continue
-                        target = _event_node_id(target_obj, target_event)
-                        _add_event_node(nodes, target, target_obj, target_event)
-                        edges.append(
-                            ViewEdge(
-                                source=event_id,
-                                target=target,
-                                kind="drives",
-                            )
+                for target_obj, target_event in _driven_events(event):
+                    if target_obj not in phase_objects:
+                        continue
+                    target = _event_node_id(target_obj, target_event)
+                    _add_event_node(nodes, target, target_obj, target_event)
+                    edges.append(
+                        ViewEdge(
+                            source=event_id,
+                            target=target,
+                            kind="drives",
                         )
+                    )
 
     return ViewModel(
         name="timeline",
@@ -150,6 +156,10 @@ def _event_node_id(object_name: str, event_name: str) -> str:
     return f"{object_name}.{event_name}"
 
 
+def _action_node_id(object_name: str, action_name: str) -> str:
+    return f"{object_name}.Action.{action_name}"
+
+
 def _add_event_node(
     nodes: dict[str, ViewNode], node_id: str, object_name: str, event_name: str
 ) -> None:
@@ -158,6 +168,17 @@ def _add_event_node(
             id=node_id,
             label=f"{object_name}.{event_name}",
             kind="Event",
+        )
+
+
+def _add_action_node(
+    nodes: dict[str, ViewNode], node_id: str, object_name: str, action_name: str
+) -> None:
+    if node_id not in nodes:
+        nodes[node_id] = ViewNode(
+            id=node_id,
+            label=f"{object_name}.{action_name}",
+            kind="Action",
         )
 
 
@@ -338,6 +359,19 @@ def _driven_events(event: EventDef) -> list[tuple[str, str]]:
     driven: list[tuple[str, str]] = []
     for block in event.decl.drives:
         driven.extend(_OBJECT_EVENT_RE.findall(block.body))
+    for within in event.decl.within:
+        for block in within.drives:
+            driven.extend(_OBJECT_EVENT_RE.findall(block.body))
+    return driven
+
+
+def _driven_actions(event: EventDef) -> list[tuple[str, str]]:
+    driven: list[tuple[str, str]] = []
+    for block in event.decl.drives:
+        driven.extend(_OBJECT_ACTION_RE.findall(block.body))
+    for within in event.decl.within:
+        for block in within.drives:
+            driven.extend(_OBJECT_ACTION_RE.findall(block.body))
     return driven
 
 

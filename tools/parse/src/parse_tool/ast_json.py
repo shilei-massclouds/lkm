@@ -10,13 +10,16 @@ from common.spec_ast import (
     Block,
     EnumDecl,
     EventDecl,
+    ExclusiveContextDecl,
     FunctionDecl,
+    LockDecl,
     ObjectDecl,
     PredicateDecl,
     SourceSpan,
     SpecDocument,
     StateDecl,
     TypeDecl,
+    WithinDecl,
 )
 
 
@@ -32,6 +35,11 @@ def document_to_ast_json(document: SpecDocument, source: str | Path) -> dict[str
             "functions": [_function_to_json(item) for item in document.functions],
             "predicates": [_predicate_to_json(item) for item in document.predicates],
             "types": [_type_to_json(item) for item in document.types],
+            "locks": [_lock_to_json(item) for item in document.locks],
+            "exclusive_contexts": [
+                _exclusive_context_to_json(item)
+                for item in document.exclusive_contexts
+            ],
             "objects": [_object_to_json(item) for item in document.objects],
         },
     }
@@ -71,6 +79,24 @@ def _type_to_json(item: TypeDecl) -> dict[str, Any]:
     }
 
 
+def _lock_to_json(item: LockDecl) -> dict[str, Any]:
+    return {
+        "name": item.name,
+        "span": _span_to_json(item.span),
+    }
+
+
+def _exclusive_context_to_json(item: ExclusiveContextDecl) -> dict[str, Any]:
+    return {
+        "name": item.name,
+        "span": _span_to_json(item.span),
+        "lock_ref": item.lock_ref,
+        "obj_refs": item.obj_refs,
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+        "properties": item.properties,
+    }
+
+
 def _object_to_json(item: ObjectDecl) -> dict[str, Any]:
     return {
         "name": item.name,
@@ -101,6 +127,20 @@ def _event_to_json(item: EventDecl) -> dict[str, Any]:
     return {
         "name": item.name,
         "target_state": item.target_state,
+        "span": _span_to_json(item.span),
+        "depends_on": [_block_to_json(block) for block in item.depends_on],
+        "drives": [_block_to_json(block) for block in item.drives],
+        "within": [_within_to_json(block) for block in item.within],
+        "may_change": [_block_to_json(block) for block in item.may_change],
+        "ensures": [_block_to_json(block) for block in item.ensures],
+        "deferred": [_block_to_json(block) for block in item.deferred],
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+    }
+
+
+def _within_to_json(item: WithinDecl) -> dict[str, Any]:
+    return {
+        "context": item.context,
         "span": _span_to_json(item.span),
         "depends_on": [_block_to_json(block) for block in item.depends_on],
         "drives": [_block_to_json(block) for block in item.drives],

@@ -25,6 +25,10 @@ _STATE_EXPR_RE = re.compile(
 _EVENT_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\Z"
 )
+_ACTION_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
 _PREDICATE_CALL_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _RELATION_RE = re.compile(r"(==|!=|>=|<=|>|<)")
 _HAS_SLOT_RE = re.compile(
@@ -809,37 +813,14 @@ class _Deriver:
                 exit_message = "depends_on blocked"
                 return False
 
-            for block in event.decl.drives:
-                for entry, entry_span in block.entry_spans:
-                    match = _EVENT_EXPR_RE.match(entry)
-                    if match is None:
-                        self._record(
-                            DerivationStatus.BLOCKED,
-                            f"cannot parse drives entry: {entry}",
-                            entry_span,
-                            object_name=object_name,
-                            event_name=event_name,
-                            expression=entry,
-                        )
-                        exit_message = f"cannot parse drives entry: {entry}"
-                        return False
+            if not self._drive_blocks(event.decl.drives, event):
+                exit_message = "drives blocked"
+                return False
 
-                    driven_object, driven_event = match.group(1), match.group(2)
-                    if not self._derive_event(driven_object, driven_event):
-                        self._record(
-                            DerivationStatus.BLOCKED,
-                            "driven event blocked: "
-                            f"{_event_label(driven_object, driven_event)}",
-                            entry_span,
-                            object_name=object_name,
-                            event_name=event_name,
-                            expression=entry,
-                        )
-                        exit_message = (
-                            "driven event blocked: "
-                            f"{_event_label(driven_object, driven_event)}"
-                        )
-                        return False
+            for within in event.decl.within:
+                if not self._execute_within(within, event):
+                    exit_message = f"within blocked: {within.context}"
+                    return False
 
             if self.states.get(object_name) != event.source_state:
                 self._record(
@@ -884,6 +865,158 @@ class _Deriver:
             self.stack.pop()
             self.trace_stack.pop()
             self._finish_trace(trace_frame, exit_status, exit_message)
+
+
+    def _drive_blocks(
+        self,
+        blocks: list[Block],
+        event: EventDef,
+        *,
+        action_provider: str = "action_drive",
+    ) -> bool:
+        for block in blocks:
+            for entry, entry_span in block.entry_spans:
+                if not self._drive_entry(
+                    entry,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                ):
+                    return False
+        return True
+
+    def _drive_entry(
+        self,
+        entry: str,
+        entry_span: SourceSpan,
+        event: EventDef,
+        *,
+        action_provider: str,
+    ) -> bool:
+        match = _EVENT_EXPR_RE.match(entry)
+        if match is not None:
+            driven_object, driven_event = match.group(1), match.group(2)
+            if self._derive_event(driven_object, driven_event):
+                return True
+            self._record(
+                DerivationStatus.BLOCKED,
+                "driven event blocked: "
+                f"{_event_label(driven_object, driven_event)}",
+                entry_span,
+                object_name=event.object_name,
+                event_name=event.name,
+                expression=entry,
+            )
+            return False
+
+        action = _ACTION_EXPR_RE.match(entry)
+        if action is not None:
+            object_name, action_name = action.group(1), action.group(2)
+            self._record(
+                DerivationStatus.PROVED,
+                f"action committed: {object_name}.Action::{action_name}",
+                entry_span,
+                object_name=event.object_name,
+                event_name=event.name,
+                expression=entry,
+                source_kind="drives",
+                predicate=None,
+                proof_class="action_commit",
+                proof_provider=action_provider,
+            )
+            return True
+
+        self._record(
+            DerivationStatus.BLOCKED,
+            f"cannot parse drives entry: {entry}",
+            entry_span,
+            object_name=event.object_name,
+            event_name=event.name,
+            expression=entry,
+        )
+        return False
+
+    def _execute_within(self, within, event: EventDef) -> bool:
+        context = self.model.exclusive_contexts.get(within.context)
+        if context is None:
+            self._record(
+                DerivationStatus.CONTRADICTION,
+                f"unknown exclusive_context: {within.context}",
+                within.span,
+                object_name=event.object_name,
+                event_name=event.name,
+            )
+            return False
+
+        self._record(
+            DerivationStatus.PROVED,
+            f"within entered: {within.context}",
+            within.span,
+            object_name=event.object_name,
+            event_name=event.name,
+            expression=f"within {within.context}",
+            source_kind="within",
+            proof_class="exclusive_context",
+            proof_provider="lock_ref",
+        )
+        self._collect_deferred(within.deferred, event, "within")
+        if not self._verify_blocks(within.depends_on, "within depends_on", event=event):
+            return False
+        if not self._drive_blocks(
+            within.drives,
+            event,
+            action_provider="within_context",
+        ):
+            return False
+        if not self._prove_blocks(
+            within.ensures,
+            "within ensures",
+            event=event,
+            proof_class="exclusive_context_fact",
+            proof_provider="within_ensures",
+        ):
+            return False
+        self._record(
+            DerivationStatus.PROVED,
+            f"within exited: {within.context}",
+            within.span,
+            object_name=event.object_name,
+            event_name=event.name,
+            expression=f"within {within.context} exited",
+            source_kind="within",
+            proof_class="exclusive_context",
+            proof_provider="lock_ref",
+        )
+        return True
+
+    def _prove_blocks(
+        self,
+        blocks: list[Block],
+        kind: str,
+        *,
+        event: EventDef,
+        proof_class: str,
+        proof_provider: str,
+    ) -> bool:
+        for block in blocks:
+            for entry, entry_span in block.entry_spans:
+                classification = _classify_obligation(
+                    entry, kind, event.object_name
+                )
+                self._record(
+                    DerivationStatus.PROVED,
+                    f"{kind}: {entry}",
+                    entry_span,
+                    object_name=event.object_name,
+                    event_name=event.name,
+                    expression=entry,
+                    source_kind=kind,
+                    predicate=classification["predicate"],
+                    proof_class=proof_class,
+                    proof_provider=proof_provider,
+                )
+        return True
+
 
     def _event_from_current_state(
         self, obj: ObjectDef, event_name: str, current_state: str | None
@@ -1171,7 +1304,10 @@ class _Deriver:
         if kind != "invariant" or state is None or entered_by is None:
             return False
 
-        for block in entered_by.decl.ensures:
+        ensure_blocks = list(entered_by.decl.ensures)
+        for within in entered_by.decl.within:
+            ensure_blocks.extend(within.ensures)
+        for block in ensure_blocks:
             if expression not in block.entries:
                 continue
             classification = _classify_obligation(
@@ -1928,11 +2064,12 @@ def _prior_fact_proof_class(
     expression: str, proved_expressions: set[str]
 ) -> str | None:
     proof = _PRIOR_FACT_PROOFS.get(expression)
-    if proof is None:
-        return None
-    proof_class, required = proof
-    if proved_expressions.intersection(required):
-        return proof_class
+    if proof is not None:
+        proof_class, required = proof
+        if proved_expressions.intersection(required):
+            return proof_class
+    if expression in proved_expressions:
+        return "derived_fact"
     return None
 
 

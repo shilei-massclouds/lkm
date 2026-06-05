@@ -10,13 +10,16 @@ from common.spec_ast import (
     Block,
     EnumDecl,
     EventDecl,
+    ExclusiveContextDecl,
     FunctionDecl,
+    LockDecl,
     ObjectDecl,
     PredicateDecl,
     SourceSpan,
     SpecDocument,
     StateDecl,
     TypeDecl,
+    WithinDecl,
     statement_entries,
 )
 
@@ -39,6 +42,8 @@ class _Segment:
 _IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
 _ENUM_RE = re.compile(rf"\Aenum\s+({_IDENT})\s*\{{", re.S)
 _TYPE_RE = re.compile(rf"\Atype\s+({_IDENT})(?P<header>[^\{{]*)\{{", re.S)
+_LOCK_RE = re.compile(rf"\Alock\s+({_IDENT})\s*;\Z", re.S)
+_EXCLUSIVE_CONTEXT_RE = re.compile(rf"\Aexclusive_context\s+({_IDENT})\s*\{{", re.S)
 _OBJECT_RE = re.compile(rf"\Aobject\s+({_IDENT})\s*:\s*({_IDENT})\s*\{{", re.S)
 _FUNCTION_RE = re.compile(rf"\Afunction\s+({_IDENT})(?P<sig>.*);?\Z", re.S)
 _PREDICATE_RE = re.compile(rf"\Apredicate\s+({_IDENT})(?P<rest>.*)\Z", re.S)
@@ -66,6 +71,8 @@ def parse_text(text: str) -> SpecDocument:
     functions: list[FunctionDecl] = []
     predicates: list[PredicateDecl] = []
     types: list[TypeDecl] = []
+    locks: list[LockDecl] = []
+    exclusive_contexts: list[ExclusiveContextDecl] = []
     objects: list[ObjectDecl] = []
 
     for segment in segments:
@@ -78,6 +85,10 @@ def parse_text(text: str) -> SpecDocument:
             predicates.append(_parse_predicate(segment))
         elif head.startswith("type "):
             types.append(_parse_type(segment))
+        elif head.startswith("lock "):
+            locks.append(_parse_lock(segment))
+        elif head.startswith("exclusive_context "):
+            exclusive_contexts.append(_parse_exclusive_context(segment))
         elif head.startswith("object "):
             objects.append(_parse_object(segment))
         else:
@@ -91,6 +102,8 @@ def parse_text(text: str) -> SpecDocument:
         functions=functions,
         predicates=predicates,
         types=types,
+        locks=locks,
+        exclusive_contexts=exclusive_contexts,
         objects=objects,
     )
 
@@ -247,6 +260,61 @@ def _parse_type(segment: _Segment) -> TypeDecl:
     )
 
 
+
+
+def _parse_lock(segment: _Segment) -> LockDecl:
+    match = _LOCK_RE.match(segment.text.strip())
+    if not match:
+        raise ParseError(f"line {segment.start_line}: invalid lock declaration")
+    return LockDecl(match.group(1), segment.span)
+
+
+def _parse_exclusive_context(segment: _Segment) -> ExclusiveContextDecl:
+    match = _EXCLUSIVE_CONTEXT_RE.match(segment.text)
+    if not match:
+        raise ParseError(f"line {segment.start_line}: invalid exclusive_context declaration")
+
+    body, body_start_line = _body_segment_from_braced_decl(
+        segment.text, match.end() - 1, segment.start_line
+    )
+    parts = _split_members(body, body_start_line)
+    lock_ref: str | None = None
+    obj_refs: list[str] = []
+    other_blocks: list[Block] = []
+    properties: dict[str, str] = {}
+
+    for part in parts:
+        stripped = part.text.strip()
+        block_match = _BLOCK_RE.match(stripped)
+        if block_match:
+            block = _to_block(part, block_match.group(1))
+            if block.kind == "obj_refs":
+                obj_refs.extend(block.entries)
+            else:
+                other_blocks.append(block)
+            continue
+
+        prop_match = _PROP_RE.match(stripped)
+        if not prop_match:
+            raise ParseError(
+                f"line {part.start_line}: invalid exclusive_context member: {_preview(part.text)}"
+            )
+        key = prop_match.group(1)
+        value = prop_match.group(2).strip()
+        properties[key] = value
+        if key == "lock_ref":
+            lock_ref = value
+
+    return ExclusiveContextDecl(
+        name=match.group(1),
+        span=segment.span,
+        lock_ref=lock_ref,
+        obj_refs=obj_refs,
+        other_blocks=other_blocks,
+        properties=properties,
+    )
+
+
 def _parse_object(segment: _Segment) -> ObjectDecl:
     match = _OBJECT_RE.match(segment.text)
     if not match:
@@ -377,6 +445,7 @@ def _parse_event(segment: _Segment) -> EventDecl:
 
     depends_on: list[Block] = []
     drives: list[Block] = []
+    within: list[WithinDecl] = []
     may_change: list[Block] = []
     ensures: list[Block] = []
     deferred: list[Block] = []
@@ -393,6 +462,8 @@ def _parse_event(segment: _Segment) -> EventDecl:
             depends_on.append(block)
         elif block.kind == "drives":
             drives.append(block)
+        elif block.kind == "within":
+            within.append(_parse_within(block))
         elif block.kind == "may_change":
             may_change.append(block)
         elif block.kind == "ensures":
@@ -406,6 +477,53 @@ def _parse_event(segment: _Segment) -> EventDecl:
         name=match.group(1),
         target_state=match.group(2),
         span=segment.span,
+        depends_on=depends_on,
+        drives=drives,
+        within=within,
+        may_change=may_change,
+        ensures=ensures,
+        deferred=deferred,
+        other_blocks=other_blocks,
+    )
+
+
+
+
+def _parse_within(block: Block) -> WithinDecl:
+    context = block.header.strip()
+    if not context:
+        raise ParseError(f"line {block.span.start_line}: within block is missing context")
+
+    depends_on: list[Block] = []
+    drives: list[Block] = []
+    may_change: list[Block] = []
+    ensures: list[Block] = []
+    deferred: list[Block] = []
+    other_blocks: list[Block] = []
+
+    for part in _split_members(block.body, block.body_start_line or block.span.start_line):
+        block_match = _BLOCK_RE.match(part.text.strip())
+        if not block_match:
+            raise ParseError(
+                f"line {part.start_line}: invalid within member: {_preview(part.text)}"
+            )
+        child = _to_block(part, block_match.group(1))
+        if child.kind == "depends_on":
+            depends_on.append(child)
+        elif child.kind == "drives":
+            drives.append(child)
+        elif child.kind == "may_change":
+            may_change.append(child)
+        elif child.kind == "ensures":
+            ensures.append(child)
+        elif child.kind == "deferred":
+            deferred.append(child)
+        else:
+            other_blocks.append(child)
+
+    return WithinDecl(
+        context=context,
+        span=block.span,
         depends_on=depends_on,
         drives=drives,
         may_change=may_change,
@@ -608,6 +726,8 @@ def summarize(document: SpecDocument) -> str:
         f"functions: {len(document.functions)}",
         f"predicates: {len(document.predicates)}",
         f"types: {len(document.types)}",
+        f"locks: {len(document.locks)}",
+        f"exclusive_contexts: {len(document.exclusive_contexts)}",
         f"objects: {len(document.objects)}",
         f"states: {state_count}",
         f"events: {event_count}",
