@@ -15,6 +15,7 @@ from common.model_types import (
 )
 from common.spec_ast import (
     Block,
+    ContextGuardDecl,
     EnumDecl,
     FunctionDecl,
     LockDecl,
@@ -155,10 +156,27 @@ def _exclusive_context_to_json(item: ExclusiveContextDef) -> dict[str, Any]:
     return {
         "name": item.name,
         "span": _span_to_json(item.decl.span),
+        "kind": item.kind,
+        "guard": _context_guard_to_json(item.guard),
         "lock_ref": item.lock_ref,
         "obj_refs": list(item.obj_refs),
+        "effects": [_block_to_json(block) for block in item.decl.effects],
         "other_blocks": [_block_to_json(block) for block in item.decl.other_blocks],
         "properties": item.decl.properties,
+    }
+
+
+def _context_guard_to_json(item: ContextGuardDecl | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "kind": item.kind,
+        "span": _span_to_json(item.span),
+        "lock_ref": item.lock_ref,
+        "entered_by": [_block_to_json(block) for block in item.entered_by],
+        "exited_by": [_block_to_json(block) for block in item.exited_by],
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+        "properties": item.properties,
     }
 
 

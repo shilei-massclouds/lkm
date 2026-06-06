@@ -183,6 +183,143 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn("WakeContext", result.model.exclusive_contexts)
         self.assertEqual(result.model.locks["TaskPiLock"].kind, "RawSpinLock")
 
+    def test_accepts_resource_context_guard_action_refs(self) -> None:
+        document = parse_text(
+            """
+            type RawSpinLock {
+                processes {
+                    Event::LockIrqSave {
+                    }
+
+                    Event::UnlockIrqRestore {
+                    }
+                }
+            }
+
+            lock TaskPiLock: RawSpinLock;
+
+            context WakeContext: ResourceExclusiveContext {
+                guard: RawSpinLockIrqSaveGuard {
+                    lock_ref: TaskPiLock;
+
+                    entered_by {
+                        TaskPiLock.Event::LockIrqSave;
+                    }
+
+                    exited_by {
+                        TaskPiLock.Event::UnlockIrqRestore;
+                    }
+                }
+
+                obj_refs {
+                    A;
+                    B;
+                }
+
+                effects {
+                    interruptible: false;
+                    preemptible: false;
+                    sleepable: false;
+                    exclusive_refs: obj_refs;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                            within WakeContext {
+                                drives {
+                                    A.Action::SetTaskState(TaskRuntimeState::Running);
+                                    B.Action::Touch(task: A);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+
+            object B: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertTrue(result.ok, [diag.message for diag in result.errors])
+        context = result.model.exclusive_contexts["WakeContext"]
+        self.assertEqual(context.kind, "ResourceExclusiveContext")
+        self.assertIsNotNone(context.guard)
+        self.assertEqual(context.lock_ref, "TaskPiLock")
+        self.assertEqual(result.model.locks["TaskPiLock"].kind, "RawSpinLock")
+
+    def test_rejects_within_boundary_override_for_context_guard(self) -> None:
+        document = parse_text(
+            """
+            type RawSpinLock {
+                processes {
+                    Event::LockIrqSave {
+                    }
+                }
+            }
+
+            lock TaskPiLock: RawSpinLock;
+
+            context WakeContext: ResourceExclusiveContext {
+                guard: RawSpinLockIrqSaveGuard {
+                    lock_ref: TaskPiLock;
+
+                    entered_by {
+                        TaskPiLock.Event::LockIrqSave;
+                    }
+                }
+
+                obj_refs {
+                    A;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                            within WakeContext {
+                                entered_by {
+                                    TaskPiLock.Event::LockIrqSave;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "must not override context guard entered_by" in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
     def test_rejects_within_boundary_for_non_context_lock(self) -> None:
         document = parse_text(
             """

@@ -466,7 +466,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - 是否仍有 `InterruptStream` 或其它对象直接改写 `sstatus.SIE` 总开关；接管后只有 `LocalInterruptControl` 可以直接操作本 CPU 中断总开关状态。`InterruptStream` 可以直接管理 `sie/sip` source enable / pending 分开关。
 - `BootRunQueue.curr`、`BootCPU` 当前任务事实和 scheduler setup 是否需要收敛到 `CurrentTaskSlot`。
 - `preempt_disable()` / `preempt_enable()` 语义是否通过 `CurrentCPU -> cpu -> CurrentTaskSlot.current_task -> PreemptionControl` 表达。
-- `KernelInitTask.Enable` 是否通过 `RawSpinLock.LockIrqSave/UnlockIrqRestore` 进入和退出 `WakeUpNewTaskContext`，并只在 `within` 内驱动受保护资源对象的 action/event。
+- `KernelInitTask.Enable` 是否通过 `WakeUpNewTaskContext.guard: RawSpinLockIrqSaveGuard` 绑定的 `RawSpinLock.LockIrqSave/UnlockIrqRestore` 进入和退出资源独占上下文，并只在该 guard 保护区内驱动受保护资源对象的 action/event。
 - checkpoint、trace 注释、smoke case 和 KUnit case 是否仍引用旧的 `BootCPU` 或裸 `boot_cpu_current_is_idle_task(...)` 事实。
 
 若上述检查表明正式对象、event/action、trace checkpoint 或上下文边界发生变化，应只重新生成受影响部分，不得全局重排无关实现。预计受影响的实现范围包括 CPU/current 相关对象、CPU-local interrupt 控制对象、task preemption 控制对象、raw spinlock wrapper、`rest_init` 中 `KernelInitTask.Enable` 路径、trace 输出以及 smoke/KUnit 测试注册。

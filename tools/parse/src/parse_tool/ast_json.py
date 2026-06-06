@@ -8,6 +8,7 @@ from typing import Any
 from common import AST_SCHEMA, AST_VERSION
 from common.spec_ast import (
     Block,
+    ContextGuardDecl,
     EnumDecl,
     EventDecl,
     ExclusiveContextDecl,
@@ -92,8 +93,25 @@ def _exclusive_context_to_json(item: ExclusiveContextDecl) -> dict[str, Any]:
     return {
         "name": item.name,
         "span": _span_to_json(item.span),
+        "kind": item.kind,
+        "guard": _context_guard_to_json(item.guard),
         "lock_ref": item.lock_ref,
         "obj_refs": item.obj_refs,
+        "effects": [_block_to_json(block) for block in item.effects],
+        "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+        "properties": item.properties,
+    }
+
+
+def _context_guard_to_json(item: ContextGuardDecl | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    return {
+        "kind": item.kind,
+        "span": _span_to_json(item.span),
+        "lock_ref": item.lock_ref,
+        "entered_by": [_block_to_json(block) for block in item.entered_by],
+        "exited_by": [_block_to_json(block) for block in item.exited_by],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
         "properties": item.properties,
     }

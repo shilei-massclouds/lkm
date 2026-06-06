@@ -142,13 +142,29 @@ class LockDecl:
 
 
 @dataclass(frozen=True)
+class ContextGuardDecl:
+    """A guard that establishes context entry and exit boundaries."""
+
+    kind: str
+    span: SourceSpan
+    lock_ref: str | None = None
+    entered_by: list[Block] = field(default_factory=list)
+    exited_by: list[Block] = field(default_factory=list)
+    other_blocks: list[Block] = field(default_factory=list)
+    properties: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ExclusiveContextDecl:
     """An exclusive context declaration."""
 
     name: str
     span: SourceSpan
+    kind: str | None = None
+    guard: ContextGuardDecl | None = None
     lock_ref: str | None = None
     obj_refs: list[str] = field(default_factory=list)
+    effects: list[Block] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
     properties: dict[str, str] = field(default_factory=dict)
 

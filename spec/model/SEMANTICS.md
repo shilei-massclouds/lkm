@@ -216,36 +216,57 @@ process 的结果使用 `ProcessResult` 语义集合：`Success`、`Blocked(reas
 
 Completion 也说明了 event/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。
 
-## SEM-EXCLUSIVE-CONTEXT-001: Lock And Exclusive Context Are Distinct
+## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct
 
-`Lock` 表示可建立独占边界的同步对象。`Lock` 不带泛型，不拥有被保护资源；锁与资源的关系由独占上下文表达。
+`Lock` 表示可建立独占边界的同步对象。`Lock` 不带泛型，不拥有被保护资源；锁与资源的关系由资源独占上下文表达。
 
-`exclusive_context` 表示通过某个锁引用建立的受保护执行作用域。它不是普通 lifecycle object，不拥有锁，也不拥有资源；它只保存引用关系和作用域语义。
+`context ... : ResourceExclusiveContext` 表示通过某个 guard 建立的受保护执行作用域。它不是普通 lifecycle object，不拥有 guard、锁或资源；它只保存引用关系、guard 边界和作用域语义。
+
+`guard` 表示建立和退出上下文边界的机制。对于当前试验对象，guard 是 `RawSpinLockIrqSaveGuard`：它引用一个 `RawSpinLock` 实例，并通过该锁实例的 `LockIrqSave`/`UnlockIrqRestore` 事件建立进入和退出边界。guard 本身不是锁实例；锁实例仍由 `lock Name: RawSpinLock` 定义。
 
 正式结构：
 
 ```text
-exclusive_context WakeUpNewTaskContext {
-    lock_ref: KernelInitTaskPiLock;
+context WakeUpNewTaskContext: ResourceExclusiveContext {
+    guard: RawSpinLockIrqSaveGuard {
+        lock_ref: KernelInitTaskPiLock;
+
+        entered_by {
+            KernelInitTaskPiLock.Event::LockIrqSave;
+        }
+
+        exited_by {
+            KernelInitTaskPiLock.Event::UnlockIrqRestore;
+        }
+    }
+
     obj_refs: {
         KernelInitTask;
         Scheduler;
         BootRunQueue;
+    }
+
+    effects {
+        interruptible: false;
+        preemptible: false;
+        sleepable: false;
+        exclusive_refs: obj_refs;
     }
 }
 ```
 
 规则：
 
-- `lock_ref` 必须引用一个 `Lock` 实例；该引用建立上下文的独占边界。
+- `guard.lock_ref` 必须引用一个 `Lock` 实例；对于 `RawSpinLockIrqSaveGuard`，该锁实例必须由 `RawSpinLock` 类型定义。
+- `guard.entered_by` 和 `guard.exited_by` 声明进入和退出上下文边界的锁事件。
 - `obj_refs` 是对象引用集合，至少包含一个对象；上下文不拥有这些对象。
-- 同一把锁可以被多个 exclusive context 引用，用于建立不同受保护作用域。
-- exclusive context 不需要 lifecycle state；进入上下文是一次受锁保护的独占执行尝试。
-- 同一时刻至多一个执行流可以成功进入同一个 exclusive context。
+- 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
+- resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
+- 同一时刻至多一个执行流可以成功进入同一个 resource exclusive context。
 - `within` 块内只能直接驱动 `obj_refs` 中对象的 action/event，除非规格显式声明允许外部对象。
-- exclusive context 成功退出后释放独占执行权；失败或 `Blocked` 时，外层 event 不得提交生命周期迁移。
+- context 成功退出后释放独占执行权；失败或 `Blocked` 时，外层 event 不得提交生命周期迁移。
 
-事件或 action 使用 `within` 声明独占执行作用域。`within` 块内可以包含 `depends_on`、`drives`、`ensures` 和 `deferred`。
+事件或 action 使用 `within` 声明独占执行作用域。`within` 块内可以包含 `depends_on`、`drives`、`ensures` 和 `deferred`。进入/退出边界由 context 的 guard 声明，`within` 不再重复声明 `entered_by`/`exited_by`。
 
 `KernelInitTask.Enable` 对应 `wake_up_new_task()` 的正式规格形态如下：
 
@@ -281,7 +302,7 @@ state State::Ready {
 }
 ```
 
-`within` 的语义是：先尝试进入指定 exclusive context；进入成功后，在该独占作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，外层 event/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移。
+`within` 的语义是：先通过指定 context 的 guard 尝试进入该 resource exclusive context；进入成功后，在该独占作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，随后通过 guard 退出上下文，外层 event/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移。
 
 ## SEM-CONTEXT-NESTING-001: Context Effects Compose Monotonically
 
@@ -303,7 +324,7 @@ state State::Ready {
 
 多种上下文和上下文嵌套的正式规格化，是主规格中“组件化内核在不同上下文可以访问对象不同层级句柄”的具体化：上下文 effect 栈给出当前流的访问能力，句柄层级由累计上下文推导，而不是由对象所有权或普通参数传递隐式决定。
 
-当前工具只检查单层 `exclusive_context` 的 `lock_ref`、`obj_refs` 和 `within` 内 action/event 引用边界；多种 context kind、effect 偏序、嵌套合法性和句柄层级推导尚未实现。
+当前工具只检查单层 `ResourceExclusiveContext` 的 `guard.lock_ref`、`guard.entered_by/exited_by`、`obj_refs` 和 `within` 内 action/event 引用边界；多种 context kind、effect 偏序、嵌套合法性和句柄层级推导尚未实现。
 
 ## SEM-CURRENT-CPU-MODEL-001: CurrentCPU Is The Per-CPU Self Identity Entry
 

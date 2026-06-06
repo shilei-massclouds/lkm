@@ -17,13 +17,30 @@
 
 lock KernelInitTaskPiLock: RawSpinLock;
 
-exclusive_context WakeUpNewTaskContext {
-    lock_ref: KernelInitTaskPiLock;
+context WakeUpNewTaskContext: ResourceExclusiveContext {
+    guard: RawSpinLockIrqSaveGuard {
+        lock_ref: KernelInitTaskPiLock;
+
+        entered_by {
+            KernelInitTaskPiLock.Event::LockIrqSave;
+        }
+
+        exited_by {
+            KernelInitTaskPiLock.Event::UnlockIrqRestore;
+        }
+    }
 
     obj_refs {
         KernelInitTask;
         Scheduler;
         BootRunQueue;
+    }
+
+    effects {
+        interruptible: false;
+        preemptible: false;
+        sleepable: false;
+        exclusive_refs: obj_refs;
     }
 }
 
@@ -168,10 +185,6 @@ object KernelInitTask: TaskObject {
                 }
 
                 within WakeUpNewTaskContext {
-                    entered_by {
-                        KernelInitTaskPiLock.Event::LockIrqSave;
-                    }
-
                     depends_on {
                         task_state_new(KernelInitTask);
                         task_not_enqueued(KernelInitTask);
@@ -182,10 +195,6 @@ object KernelInitTask: TaskObject {
                         KernelInitTask.Action::SetTaskState(TaskRuntimeState::Running);
                         Scheduler.Action::SelectRunQueue(selected_rq: BootRunQueue);
                         BootRunQueue.Action::EnqueueTask(task: KernelInitTask);
-                    }
-
-                    exited_by {
-                        KernelInitTaskPiLock.Event::UnlockIrqRestore;
                     }
 
                     ensures {

@@ -199,6 +199,8 @@ def _build_exclusive_contexts(
         contexts[decl.name] = ExclusiveContextDef(
             name=decl.name,
             decl=decl,
+            kind=decl.kind,
+            guard=decl.guard,
             lock_ref=decl.lock_ref,
             obj_refs=tuple(decl.obj_refs),
         )
@@ -453,6 +455,34 @@ def _check_exclusive_context_references(
     model: ObjectModel, diagnostics: list[Diagnostic]
 ) -> None:
     for context in model.exclusive_contexts.values():
+        if context.kind is not None and context.kind != "ResourceExclusiveContext":
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unsupported context kind on {context.name}: {context.kind}",
+                    context.decl.span,
+                )
+            )
+        if context.kind == "ResourceExclusiveContext" and context.guard is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"ResourceExclusiveContext {context.name} is missing guard",
+                    context.decl.span,
+                )
+            )
+        if context.kind == "ResourceExclusiveContext" and not context.decl.effects:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"ResourceExclusiveContext {context.name} is missing effects",
+                    context.decl.span,
+                )
+            )
+        if context.kind == "ResourceExclusiveContext":
+            _check_context_effects(context, diagnostics)
+        if context.guard is not None:
+            _check_context_guard_references(model, context, diagnostics)
         for object_name in context.obj_refs:
             if object_name not in model.objects:
                 diagnostics.append(
@@ -460,6 +490,80 @@ def _check_exclusive_context_references(
                         Severity.ERROR,
                         f"unknown object reference in exclusive_context {context.name}: {object_name}",
                         context.decl.span,
+                )
+            )
+
+
+def _check_context_guard_references(
+    model: ObjectModel,
+    context: ExclusiveContextDef,
+    diagnostics: list[Diagnostic],
+) -> None:
+    guard = context.guard
+    if guard is None:
+        return
+    if guard.kind != "RawSpinLockIrqSaveGuard":
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"unsupported guard kind on context {context.name}: {guard.kind}",
+                guard.span,
+            )
+        )
+    if guard.lock_ref is None:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"context guard on {context.name} is missing lock_ref",
+                guard.span,
+            )
+        )
+    elif guard.lock_ref != context.lock_ref:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"context {context.name} guard lock_ref does not match context lock_ref",
+                guard.span,
+            )
+        )
+    if guard.kind == "RawSpinLockIrqSaveGuard" and guard.lock_ref is not None:
+        lock = model.locks.get(guard.lock_ref)
+        if lock is not None and lock.kind != "RawSpinLock":
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "RawSpinLockIrqSaveGuard requires RawSpinLock lock_ref: "
+                    f"{guard.lock_ref}",
+                    guard.span,
+                )
+            )
+    _check_lock_event_blocks(model, guard.entered_by, diagnostics, context=context)
+    _check_lock_event_blocks(model, guard.exited_by, diagnostics, context=context)
+
+
+def _check_context_effects(
+    context: ExclusiveContextDef, diagnostics: list[Diagnostic]
+) -> None:
+    entries: dict[str, str] = {}
+    for block in context.decl.effects:
+        for entry, _span in block.entry_spans:
+            match = _ATTR_RE.match(entry)
+            if match is not None:
+                entries[match.group(1)] = match.group(2).strip()
+    required = {
+        "interruptible": "false",
+        "preemptible": "false",
+        "sleepable": "false",
+        "exclusive_refs": "obj_refs",
+    }
+    for key, value in required.items():
+        if entries.get(key) != value:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "ResourceExclusiveContext effect must declare "
+                    f"{key}: {value}",
+                    context.decl.span,
                 )
             )
 
@@ -507,14 +611,40 @@ def _check_within_references(model: ObjectModel, within, diagnostics: list[Diagn
         )
         return
 
-    for block in within.entered_by:
-        _check_lock_event_references(model, block, diagnostics, context=context)
+    if context.guard is not None and within.entered_by:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"within {within.context} must not override context guard entered_by",
+                within.entered_by[0].span,
+            )
+        )
+    if context.guard is not None and within.exited_by:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"within {within.context} must not override context guard exited_by",
+                within.exited_by[0].span,
+            )
+        )
+
+    _check_lock_event_blocks(model, within.entered_by, diagnostics, context=context)
     for block in within.depends_on:
         _check_state_references(model, block, diagnostics)
     for block in within.drives:
         _check_event_references(model, block, diagnostics)
         _check_action_references(model, block, diagnostics, context=context)
-    for block in within.exited_by:
+    _check_lock_event_blocks(model, within.exited_by, diagnostics, context=context)
+
+
+def _check_lock_event_blocks(
+    model: ObjectModel,
+    blocks: list[Block],
+    diagnostics: list[Diagnostic],
+    *,
+    context: ExclusiveContextDef,
+) -> None:
+    for block in blocks:
         _check_lock_event_references(model, block, diagnostics, context=context)
 
 

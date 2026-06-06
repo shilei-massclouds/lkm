@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from common.spec_ast import (
+    ContextGuardDecl,
     EnumDecl,
     EventDecl,
     ExclusiveContextDecl,
@@ -82,6 +83,8 @@ class ExclusiveContextDef:
 
     name: str
     decl: ExclusiveContextDecl
+    kind: str | None
+    guard: ContextGuardDecl | None
     lock_ref: str | None
     obj_refs: tuple[str, ...] = ()
 

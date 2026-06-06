@@ -7,6 +7,7 @@ from typing import Any
 from common import AST_SCHEMA, AST_VERSION
 from common.spec_ast import (
     Block,
+    ContextGuardDecl,
     EnumDecl,
     EventDecl,
     ExclusiveContextDecl,
@@ -100,6 +101,12 @@ def _lock_from_json(item: Any) -> LockDecl:
 
 def _exclusive_context_from_json(item: Any) -> ExclusiveContextDecl:
     data = _as_object(item, "exclusive_context")
+    kind = data.get("kind")
+    if kind is not None and not isinstance(kind, str):
+        raise ValueError("exclusive_context.kind must be a string or null")
+    guard = data.get("guard")
+    if guard is not None:
+        guard = _context_guard_from_json(guard)
     lock_ref = data.get("lock_ref")
     if lock_ref is not None and not isinstance(lock_ref, str):
         raise ValueError("exclusive_context.lock_ref must be a string or null")
@@ -109,8 +116,30 @@ def _exclusive_context_from_json(item: Any) -> ExclusiveContextDecl:
     return ExclusiveContextDecl(
         name=_string(data, "name"),
         span=_span_from_json(data["span"]),
+        kind=kind,
+        guard=guard,
         lock_ref=lock_ref,
         obj_refs=[_as_string(value, "obj_ref") for value in _list(data, "obj_refs")],
+        effects=[_block_from_json(block) for block in _list(data, "effects")],
+        other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
+        properties={str(key): str(value) for key, value in properties.items()},
+    )
+
+
+def _context_guard_from_json(item: Any) -> ContextGuardDecl:
+    data = _as_object(item, "context_guard")
+    lock_ref = data.get("lock_ref")
+    if lock_ref is not None and not isinstance(lock_ref, str):
+        raise ValueError("context_guard.lock_ref must be a string or null")
+    properties = data.get("properties", {})
+    if not isinstance(properties, dict):
+        raise ValueError("context_guard.properties must be an object")
+    return ContextGuardDecl(
+        kind=_string(data, "kind"),
+        span=_span_from_json(data["span"]),
+        lock_ref=lock_ref,
+        entered_by=[_block_from_json(block) for block in _list(data, "entered_by")],
+        exited_by=[_block_from_json(block) for block in _list(data, "exited_by")],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
         properties={str(key): str(value) for key, value in properties.items()},
     )

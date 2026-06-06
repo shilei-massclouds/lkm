@@ -977,8 +977,19 @@ class _Deriver:
             proof_class="exclusive_context",
             proof_provider="lock_ref",
         )
+        entered_by = (
+            context.guard.entered_by
+            if context.guard is not None
+            else within.entered_by
+        )
+        exited_by = (
+            context.guard.exited_by
+            if context.guard is not None
+            else within.exited_by
+        )
+
         if not self._commit_within_boundary(
-            within.entered_by,
+            entered_by,
             event,
             source_kind="within_entered_by",
         ):
@@ -1001,7 +1012,7 @@ class _Deriver:
         ):
             return False
         if not self._commit_within_boundary(
-            within.exited_by,
+            exited_by,
             event,
             source_kind="within_exited_by",
         ):

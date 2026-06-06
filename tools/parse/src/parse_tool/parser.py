@@ -8,6 +8,7 @@ from pathlib import Path
 
 from common.spec_ast import (
     Block,
+    ContextGuardDecl,
     EnumDecl,
     EventDecl,
     ExclusiveContextDecl,
@@ -44,6 +45,7 @@ _ENUM_RE = re.compile(rf"\Aenum\s+({_IDENT})\s*\{{", re.S)
 _TYPE_RE = re.compile(rf"\Atype\s+({_IDENT})(?P<header>[^\{{]*)\{{", re.S)
 _LOCK_RE = re.compile(rf"\Alock\s+({_IDENT})(?:\s*:\s*({_IDENT}))?\s*;\Z", re.S)
 _EXCLUSIVE_CONTEXT_RE = re.compile(rf"\Aexclusive_context\s+({_IDENT})\s*\{{", re.S)
+_CONTEXT_RE = re.compile(rf"\Acontext\s+({_IDENT})\s*:\s*({_IDENT})\s*\{{", re.S)
 _OBJECT_RE = re.compile(rf"\Aobject\s+({_IDENT})\s*:\s*({_IDENT})\s*\{{", re.S)
 _FUNCTION_RE = re.compile(rf"\Afunction\s+({_IDENT})(?P<sig>.*);?\Z", re.S)
 _PREDICATE_RE = re.compile(rf"\Apredicate\s+({_IDENT})(?P<rest>.*)\Z", re.S)
@@ -89,6 +91,8 @@ def parse_text(text: str) -> SpecDocument:
             locks.append(_parse_lock(segment))
         elif head.startswith("exclusive_context "):
             exclusive_contexts.append(_parse_exclusive_context(segment))
+        elif head.startswith("context "):
+            exclusive_contexts.append(_parse_context(segment))
         elif head.startswith("object "):
             objects.append(_parse_object(segment))
         else:
@@ -288,12 +292,28 @@ def _parse_exclusive_context(segment: _Segment) -> ExclusiveContextDecl:
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid exclusive_context declaration")
 
+    return _parse_context_body(segment, match, kind=None)
+
+
+def _parse_context(segment: _Segment) -> ExclusiveContextDecl:
+    match = _CONTEXT_RE.match(segment.text)
+    if not match:
+        raise ParseError(f"line {segment.start_line}: invalid context declaration")
+
+    return _parse_context_body(segment, match, kind=match.group(2))
+
+
+def _parse_context_body(
+    segment: _Segment, match: re.Match[str], *, kind: str | None
+) -> ExclusiveContextDecl:
     body, body_start_line = _body_segment_from_braced_decl(
         segment.text, match.end() - 1, segment.start_line
     )
     parts = _split_members(body, body_start_line)
     lock_ref: str | None = None
+    guard: ContextGuardDecl | None = None
     obj_refs: list[str] = []
+    effects: list[Block] = []
     other_blocks: list[Block] = []
     properties: dict[str, str] = {}
 
@@ -302,8 +322,18 @@ def _parse_exclusive_context(segment: _Segment) -> ExclusiveContextDecl:
         block_match = _BLOCK_RE.match(stripped)
         if block_match:
             block = _to_block(part, block_match.group(1))
-            if block.kind == "obj_refs":
+            if block.kind == "guard":
+                if guard is not None:
+                    raise ParseError(
+                        f"line {part.start_line}: duplicate context guard block"
+                    )
+                guard = _parse_context_guard(block)
+                if guard.lock_ref is not None:
+                    lock_ref = guard.lock_ref
+            elif block.kind == "obj_refs":
                 obj_refs.extend(block.entries)
+            elif block.kind == "effects":
+                effects.append(block)
             else:
                 other_blocks.append(block)
             continue
@@ -322,8 +352,59 @@ def _parse_exclusive_context(segment: _Segment) -> ExclusiveContextDecl:
     return ExclusiveContextDecl(
         name=match.group(1),
         span=segment.span,
+        kind=kind,
+        guard=guard,
         lock_ref=lock_ref,
         obj_refs=obj_refs,
+        effects=effects,
+        other_blocks=other_blocks,
+        properties=properties,
+    )
+
+
+def _parse_context_guard(block: Block) -> ContextGuardDecl:
+    kind = block.header.strip()
+    if kind.startswith(":"):
+        kind = kind[1:].strip()
+    if not kind:
+        raise ParseError(f"line {block.span.start_line}: guard block is missing kind")
+
+    lock_ref: str | None = None
+    entered_by: list[Block] = []
+    exited_by: list[Block] = []
+    other_blocks: list[Block] = []
+    properties: dict[str, str] = {}
+
+    for part in _split_members(block.body, block.body_start_line or block.span.start_line):
+        stripped = part.text.strip()
+        block_match = _BLOCK_RE.match(stripped)
+        if block_match:
+            child = _to_block(part, block_match.group(1))
+            if child.kind == "entered_by":
+                entered_by.append(child)
+            elif child.kind == "exited_by":
+                exited_by.append(child)
+            else:
+                other_blocks.append(child)
+            continue
+
+        prop_match = _PROP_RE.match(stripped)
+        if not prop_match:
+            raise ParseError(
+                f"line {part.start_line}: invalid guard member: {_preview(part.text)}"
+            )
+        key = prop_match.group(1)
+        value = prop_match.group(2).strip()
+        properties[key] = value
+        if key == "lock_ref":
+            lock_ref = value
+
+    return ContextGuardDecl(
+        kind=kind,
+        span=block.span,
+        lock_ref=lock_ref,
+        entered_by=entered_by,
+        exited_by=exited_by,
         other_blocks=other_blocks,
         properties=properties,
     )

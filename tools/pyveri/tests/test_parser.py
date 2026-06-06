@@ -230,6 +230,88 @@ class ParserTests(unittest.TestCase):
             ["TaskPiLock.Event::UnlockIrqRestore"],
         )
 
+    def test_parse_resource_context_guard_and_effects(self) -> None:
+        document = parse_text(
+            """
+            lock TaskPiLock: RawSpinLock;
+
+            context WakeContext: ResourceExclusiveContext {
+                guard: RawSpinLockIrqSaveGuard {
+                    lock_ref: TaskPiLock;
+
+                    entered_by {
+                        TaskPiLock.Event::LockIrqSave;
+                    }
+
+                    exited_by {
+                        TaskPiLock.Event::UnlockIrqRestore;
+                    }
+                }
+
+                obj_refs {
+                    A;
+                    B;
+                }
+
+                effects {
+                    interruptible: false;
+                    preemptible: false;
+                    sleepable: false;
+                    exclusive_refs: obj_refs;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                            within WakeContext {
+                                drives {
+                                    A.Action::SetTaskState(TaskRuntimeState::Running);
+                                    B.Action::Touch(task: A);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+
+            object B: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        context = document.exclusive_contexts[0]
+        self.assertEqual(context.name, "WakeContext")
+        self.assertEqual(context.kind, "ResourceExclusiveContext")
+        self.assertIsNotNone(context.guard)
+        assert context.guard is not None
+        self.assertEqual(context.guard.kind, "RawSpinLockIrqSaveGuard")
+        self.assertEqual(context.guard.lock_ref, "TaskPiLock")
+        self.assertEqual(context.lock_ref, "TaskPiLock")
+        self.assertEqual(context.guard.entered_by[0].entries, ["TaskPiLock.Event::LockIrqSave"])
+        self.assertEqual(context.guard.exited_by[0].entries, ["TaskPiLock.Event::UnlockIrqRestore"])
+        self.assertEqual(context.obj_refs, ["A", "B"])
+        self.assertEqual(context.effects[0].entries, [
+            "interruptible: false",
+            "preemptible: false",
+            "sleepable: false",
+            "exclusive_refs: obj_refs",
+        ])
+        event = document.objects[0].states[0].events[0]
+        self.assertEqual(event.within[0].context, "WakeContext")
+        self.assertEqual(event.within[0].entered_by, [])
+        self.assertEqual(event.within[0].exited_by, [])
+
     def test_parse_current_entry_prelude_spec(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
 

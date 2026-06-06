@@ -135,14 +135,41 @@ class DerivationTests(unittest.TestCase):
         result = build_model(
             parse_text(
                 """
-                lock TaskPiLock;
+                type RawSpinLock {
+                    processes {
+                        Event::LockIrqSave {
+                        }
 
-                exclusive_context WakeContext {
-                    lock_ref: TaskPiLock;
+                        Event::UnlockIrqRestore {
+                        }
+                    }
+                }
+
+                lock TaskPiLock: RawSpinLock;
+
+                context WakeContext: ResourceExclusiveContext {
+                    guard: RawSpinLockIrqSaveGuard {
+                        lock_ref: TaskPiLock;
+
+                        entered_by {
+                            TaskPiLock.Event::LockIrqSave;
+                        }
+
+                        exited_by {
+                            TaskPiLock.Event::UnlockIrqRestore;
+                        }
+                    }
 
                     obj_refs {
                         A;
                         B;
+                    }
+
+                    effects {
+                        interruptible: false;
+                        preemptible: false;
+                        sleepable: false;
+                        exclusive_refs: obj_refs;
                     }
                 }
 
@@ -215,6 +242,24 @@ class DerivationTests(unittest.TestCase):
                 and record.proof_class == "action_commit"
                 and record.proof_provider == "within_context"
                 and record.expression == "A.Action::SetTaskState(TaskRuntimeState::Running)"
+                for record in derivation.records
+            )
+        )
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_class == "exclusive_context_lock_event"
+                and record.source_kind == "within_entered_by"
+                and record.expression == "TaskPiLock.Event::LockIrqSave"
+                for record in derivation.records
+            )
+        )
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_class == "exclusive_context_lock_event"
+                and record.source_kind == "within_exited_by"
+                and record.expression == "TaskPiLock.Event::UnlockIrqRestore"
                 for record in derivation.records
             )
         )
