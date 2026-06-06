@@ -40,6 +40,10 @@ _REF_EVENT_EXPR_RE = re.compile(
     re.S,
 )
 _TYPE_EVENT_RE_TEMPLATE = r"\bEvent::{}\b"
+_REF_TARGET_PROCESS_TYPES = {
+    "RunQueueRef": "RunQueue",
+    "TaskRef": "Task",
+}
 _PREDICATE_CALL_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _RELATION_RE = re.compile(r"(==|!=|>=|<=|>|<)")
 _HAS_SLOT_RE = re.compile(
@@ -911,7 +915,20 @@ class _Deriver:
     ) -> bool:
         bind = _ACTION_BIND_RE.match(entry)
         if bind is not None:
-            name, type_name, object_name, action_name = bind.group(1, 2, 3, 4)
+            name, type_name, object_name, action_name, args = bind.group(1, 2, 3, 4, 5)
+            display_call = _process_call_expression(
+                f"{object_name}.Action::{action_name}", args
+            )
+            display_expression = f"let {name}: {type_name} <- {display_call}"
+            call = _normalize_process_expression(
+                self.model,
+                object_name,
+                "Action",
+                action_name,
+                args,
+                display_call,
+            )
+            expression = f"let {name}: {type_name} <- {call}"
             bindings[name] = {"type": type_name}
             result_value = _action_result_value(
                 self.model, object_name, action_name, type_name
@@ -924,7 +941,8 @@ class _Deriver:
                 entry_span,
                 object_name=event.object_name,
                 event_name=event.name,
-                expression=entry,
+                expression=expression,
+                display_expression=display_expression if expression != display_expression else None,
                 source_kind="drives",
                 predicate=None,
                 proof_class="action_result_binding",
@@ -934,55 +952,89 @@ class _Deriver:
 
         ref_event = _REF_EVENT_EXPR_RE.match(entry)
         if ref_event is not None:
-            receiver_name, driven_event = ref_event.group(1), ref_event.group(2)
+            receiver_name, driven_event, args = ref_event.group(1, 2, 3)
             receiver = bindings.get(receiver_name)
             receiver_type = receiver.get("type") if receiver is not None else None
             if receiver_type is not None and _is_supported_ref_type_event(
                 receiver_type, driven_event
             ):
+                expression = _normalize_ref_process_expression(
+                    self.model,
+                    receiver_name,
+                    receiver_type,
+                    driven_event,
+                    args,
+                    entry,
+                )
+                display_expression = _process_call_expression(
+                    f"{receiver_name}.Event::{driven_event}", args
+                )
                 self._record(
                     DerivationStatus.PROVED,
                     f"ref type process committed: {receiver_name}.Event::{driven_event}",
                     entry_span,
                     object_name=event.object_name,
                     event_name=event.name,
-                expression=entry,
-                display_expression=_display_ref_aliases(entry, bindings),
-                source_kind="drives",
-                predicate=None,
-                proof_class="type_process_commit",
-                proof_provider=action_provider,
+                    expression=expression,
+                    display_expression=display_expression if expression != display_expression else None,
+                    source_kind="drives",
+                    predicate=None,
+                    proof_class="type_process_commit",
+                    proof_provider=action_provider,
                 )
                 return True
 
         match = _EVENT_EXPR_RE.match(entry)
         if match is not None:
-            driven_object, driven_event = match.group(1), match.group(2)
+            driven_object, driven_event, args = match.group(1, 2, 3)
             obj = self.model.objects.get(driven_object)
             if obj is None and _is_supported_ref_event(driven_object, driven_event):
+                expression = _normalize_ref_process_expression(
+                    self.model,
+                    driven_object,
+                    "RunQueueRef",
+                    driven_event,
+                    args,
+                    entry,
+                )
+                display_expression = _process_call_expression(
+                    f"{driven_object}.Event::{driven_event}", args
+                )
                 self._record(
                     DerivationStatus.PROVED,
                     f"ref type process committed: {driven_object}.Event::{driven_event}",
                     entry_span,
                     object_name=event.object_name,
                     event_name=event.name,
-                expression=entry,
-                display_expression=_display_ref_aliases(entry, bindings),
-                source_kind="drives",
-                predicate=None,
-                proof_class="type_process_commit",
-                proof_provider=action_provider,
+                    expression=expression,
+                    display_expression=display_expression if expression != display_expression else None,
+                    source_kind="drives",
+                    predicate=None,
+                    proof_class="type_process_commit",
+                    proof_provider=action_provider,
                 )
                 return True
             if obj is not None and _find_event(obj, driven_event) is None:
                 if _type_declares_event(self.model, obj, driven_event):
+                    expression = _normalize_process_expression(
+                        self.model,
+                        driven_object,
+                        "Event",
+                        driven_event,
+                        args,
+                        entry,
+                    )
+                    display_expression = _process_call_expression(
+                        f"{driven_object}.Event::{driven_event}", args
+                    )
                     self._record(
                         DerivationStatus.PROVED,
                         f"type process committed: {driven_object}.Event::{driven_event}",
                         entry_span,
                         object_name=event.object_name,
                         event_name=event.name,
-                        expression=entry,
+                        expression=expression,
+                        display_expression=display_expression if expression != display_expression else None,
                         source_kind="drives",
                         predicate=None,
                         proof_class="type_process_commit",
@@ -1005,14 +1057,26 @@ class _Deriver:
 
         action = _ACTION_EXPR_RE.match(entry)
         if action is not None:
-            object_name, action_name = action.group(1), action.group(2)
+            object_name, action_name, args = action.group(1, 2, 3)
+            expression = _normalize_process_expression(
+                self.model,
+                object_name,
+                "Action",
+                action_name,
+                args,
+                entry,
+            )
+            display_expression = _process_call_expression(
+                f"{object_name}.Action::{action_name}", args
+            )
             self._record(
                 DerivationStatus.PROVED,
                 f"action committed: {object_name}.Action::{action_name}",
                 entry_span,
                 object_name=event.object_name,
                 event_name=event.name,
-                expression=entry,
+                expression=expression,
+                display_expression=display_expression if expression != display_expression else None,
                 source_kind="drives",
                 predicate=None,
                 proof_class="action_commit",
@@ -2169,6 +2233,115 @@ def _display_ref_aliases(
             changed = True
             display = replaced
     return display if changed else None
+
+
+def _normalize_ref_process_expression(
+    model: ObjectModel,
+    receiver_name: str,
+    receiver_type: str,
+    event_name: str,
+    args: str | None,
+    fallback: str,
+) -> str:
+    process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
+    if process_type is None:
+        return fallback
+    return _normalize_process_call(
+        model,
+        process_type,
+        f"{receiver_name}.Event::{event_name}",
+        "Event",
+        event_name,
+        args,
+        fallback,
+    )
+
+
+def _normalize_process_expression(
+    model: ObjectModel,
+    object_name: str,
+    process_kind: str,
+    process_name: str,
+    args: str | None,
+    fallback: str,
+) -> str:
+    obj = model.objects.get(object_name)
+    if obj is None:
+        return fallback
+    return _normalize_process_call(
+        model,
+        obj.kind,
+        f"{object_name}.{process_kind}::{process_name}",
+        process_kind,
+        process_name,
+        args,
+        fallback,
+    )
+
+
+def _normalize_process_call(
+    model: ObjectModel,
+    type_name: str,
+    callee: str,
+    process_kind: str,
+    process_name: str,
+    args: str | None,
+    fallback: str,
+) -> str:
+    signature = _process_signature(model, type_name, process_kind, process_name)
+    if signature is None or args is None:
+        return fallback
+    args = args.strip()
+    if not args or _uses_named_args(args) or len(signature) != 1 or "," in args:
+        return fallback
+    param_name, _param_type = signature[0]
+    return f"{callee}({param_name}: {args})"
+
+
+def _process_signature(
+    model: ObjectModel, type_name: str, process_kind: str, process_name: str
+) -> tuple[tuple[str, str], ...] | None:
+    type_decl = model.types.get(type_name)
+    if type_decl is None:
+        return None
+    pattern = re.compile(
+        r"\b"
+        + re.escape(process_kind)
+        + r"::"
+        + re.escape(process_name)
+        + r"\s*(?:\(([^{};]*)\))?",
+        re.S,
+    )
+    for block in type_decl.blocks:
+        match = pattern.search(block.body)
+        if match is not None:
+            return _parse_process_parameters(match.group(1) or "")
+    return None
+
+
+def _parse_process_parameters(params: str) -> tuple[tuple[str, str], ...]:
+    params = params.strip()
+    if not params:
+        return ()
+    parsed: list[tuple[str, str]] = []
+    for item in params.split(","):
+        name, sep, type_name = item.strip().partition(":")
+        if sep:
+            parsed.append((name.strip(), type_name.strip()))
+    return tuple(parsed)
+
+
+def _uses_named_args(args: str) -> bool:
+    return any(
+        re.match(r"\s*[a-z][A-Za-z0-9_]*\s*:(?!:)", item) is not None
+        for item in args.split(",")
+    )
+
+
+def _process_call_expression(callee: str, args: str | None) -> str:
+    if args is None:
+        return callee
+    return f"{callee}({args.strip()})"
 
 
 def _action_result_value(

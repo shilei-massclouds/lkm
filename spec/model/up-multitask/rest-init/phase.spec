@@ -96,10 +96,10 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
  * Scheduler、BootRunQueue 三个受保护对象。
  * Enable 的 within WakeUpNewTaskContext 块直接驱动
  * Task.Event::SetRuntimeState(Running)，再通过 action result binding 把
- * Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef) 返回的
+ * Scheduler.Action::SelectRunQueue(KernelInitTaskRef) 返回的
  * runqueue ref 绑定为 selected_rq。随后以 selected_rq 进入
  * EnqueueSelectedRunQueueContext，并驱动
- * RunQueue.Event::EnqueueTask(task_ref: KernelInitTaskRef)。SelectRunQueue
+ * RunQueue.Event::EnqueueTask(KernelInitTaskRef)。SelectRunQueue
  * 当前固定返回 BootRunQueueRef；完整选择策略后续 deferred。三者都成功后，
  * Enable 才提交 KernelInitTask Ready -> Online。
  */
@@ -229,18 +229,18 @@ object KernelInitTask: Task {
                     }
 
                     drives {
-                        KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running);
+                        KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running);
                         let selected_rq: RunQueueRef <-
-                            Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef);
+                            Scheduler.Action::SelectRunQueue(KernelInitTaskRef);
                     }
 
-                    within EnqueueSelectedRunQueueContext(runq_ref: selected_rq) {
+                    within EnqueueSelectedRunQueueContext {
                         depends_on {
-                            runqueue_ref_targets(runq_ref, BootRunQueue);
+                            runqueue_ref_targets(selected_rq, BootRunQueue);
                         }
 
                         drives {
-                            runq_ref.Event::EnqueueTask(task_ref: KernelInitTaskRef);
+                            selected_rq.Event::EnqueueTask(KernelInitTaskRef);
                         }
 
                         ensures {

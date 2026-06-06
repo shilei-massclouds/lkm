@@ -327,6 +327,90 @@ class ModelToolTests(unittest.TestCase):
                 stderr.getvalue(),
             )
 
+    def test_single_argument_type_process_accepts_positional_drive(self) -> None:
+        source = """
+            type T {
+                processes {
+                    Event::Touch(value: TouchValue) {
+                    }
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                A.Event::Touch(TouchValue::Ready);
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "single-arg-position.spec"
+            ast = Path(tmp) / "single-arg-position.ast.json"
+            model = Path(tmp) / "single-arg-position.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+
+    def test_multi_argument_type_process_requires_named_drive_args(self) -> None:
+        source = """
+            type T {
+                processes {
+                    Action::Copy(src: TaskRef, dst: TaskRef) {
+                    }
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                A.Action::Copy(SourceTaskRef, TargetTaskRef);
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "multi-arg-position.spec"
+            ast = Path(tmp) / "multi-arg-position.ast.json"
+            model = Path(tmp) / "multi-arg-position.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "positional process arguments require a single-parameter signature",
+                stderr.getvalue(),
+            )
+
     def test_model_tool_does_not_import_pyveri(self) -> None:
         source_root = Path(__file__).resolve().parents[1] / "src" / "model_tool"
 

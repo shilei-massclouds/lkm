@@ -255,7 +255,8 @@ class ViewToolTests(unittest.TestCase):
                         "event": "Enable",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "KernelInitTask.Event::SetRuntimeState(Runnable)",
+                        "expression": "KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running)",
+                        "display_expression": "KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running)",
                     },
                     {
                         "object": "KernelInitTask",
@@ -263,6 +264,7 @@ class ViewToolTests(unittest.TestCase):
                         "proof_class": "action_result_binding",
                         "proof_provider": "within_context",
                         "expression": "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
+                        "display_expression": "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(KernelInitTaskRef)",
                     },
                     {
                         "object": "KernelInitTask",
@@ -276,8 +278,8 @@ class ViewToolTests(unittest.TestCase):
                         "event": "Enable",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "runq_ref.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
-                        "display_expression": "selected_rq.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
+                        "expression": "selected_rq.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
+                        "display_expression": "selected_rq.Event::EnqueueTask(KernelInitTaskRef)",
                     },
                     {
                         "object": "KernelInitTask",
@@ -355,13 +357,13 @@ class ViewToolTests(unittest.TestCase):
         self.assertEqual(
             [cell.label for cell in sorted(action_cells, key=lambda cell: cell.row)],
             [
-                "KernelInitTask.Event::SetRuntimeState(Runnable)",
-                "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
+                "KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running)",
+                "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(KernelInitTaskRef)",
             ],
         )
         self.assertEqual(
             [cell.label for cell in enqueue_action_cells],
-            ["selected_rq.Event::EnqueueTask(task_ref: KernelInitTaskRef)"],
+            ["selected_rq.Event::EnqueueTask(KernelInitTaskRef)"],
         )
         self.assertTrue(
             all(

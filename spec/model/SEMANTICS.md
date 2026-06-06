@@ -132,7 +132,7 @@ state State::Ready {
 - action 成功时不得推进 owner 对象生命周期状态；owner 仍停留在 action 所属 state。
 - action 名称在 owner 对象内唯一，引用身份是 `Object.Action::Name` 加实参绑定。
 - action 可以带类型参数和命名形参；形参必须是对象引用或受控值类型。
-- `drives` 可以引用 lifecycle event，也可以引用 action；引用参数化 action 时必须提供完整命名实参，并通过类型检查。
+- `drives` 可以引用 lifecycle event，也可以引用 action；正式 process 定义必须声明命名形参并通过类型检查。调用点允许单参数 process 使用位置实参简写，例如 `SetRuntimeState(TaskRuntimeState::Running)`，工具按签名规范化为 `SetRuntimeState(state: TaskRuntimeState::Running)`；多参数 process 仍必须使用完整命名实参，避免同类型参数互换后仍通过类型检查。
 - action 的 `depends_on` 是调用成功前提；被 event 驱动的 action 若 `depends_on` 不满足，该 event 不得提交生命周期迁移。
 - action 的 `ensures` 在 action 成功后成立，并可作为驱动它的 event 成功路径上的可用事实。
 - action 的 `ensures` 不得直接伪造生命周期提交，例如不得用 action 确保 `SomeObject.state == State::Ready` 来替代 `SomeObject.Event::Setup`。
@@ -218,11 +218,11 @@ Completion 也说明了 event/action factoring 的边界：`Completion.Setup` �
 
 `Task` 是可复用运行期任务类型。`object KernelInitTask: Task` 表示 PID 1 任务实例继承 `Task` 的运行期 process；`TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Event::SetRuntimeState(state: TaskRuntimeState)` 这样的 Operational Event，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
 
-正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。action 返回对象引用时，调用方必须用 action result binding 显式承接返回值，例如 `let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(...)`。该绑定是局部 SSA 风格值，作用域覆盖后续 drives 语句和嵌套 `within`；嵌套上下文可以通过 `within Context(runq_ref: selected_rq)` 把该引用传入子作用域。后续对目标对象的操作应使用引用 receiver，例如 `runq_ref.Event::EnqueueTask(...)`，而不是把当前策略结果硬编码为 `BootRunQueue.Event` 或 `BootRunQueueRef.Event`。
+正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。action 返回对象引用时，调用方必须用 action result binding 显式承接返回值，例如 `let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(...)`。该绑定是局部 SSA 风格值，作用域覆盖后续 drives 语句和嵌套 `within`；嵌套上下文可以直接使用该绑定，只有需要把外层名字重命名为上下文局部名字时才使用 `within Context(local_ref: selected_rq)`。后续对目标对象的操作应使用引用 receiver，例如 `selected_rq.Event::EnqueueTask(...)`，而不是把当前策略结果硬编码为 `BootRunQueue.Event` 或 `BootRunQueueRef.Event`。
 
 `SchedulerObject.Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef` 是状态内 action。它只根据任务引用和当前调度条件选择目标 runqueue 引用，不推进 `Scheduler` lifecycle state，也不提交 runqueue 成员关系。当前 `rest_init()` 最小路径固定返回 `BootRunQueueRef`，即 boot CPU runqueue；完整 `select_task_rq()` 策略，包括 affinity、wake flags、scheduler class、load balance、SMP、migration disabled 和 cpuset 等，后续作为 deferred 策略展开。
 
-`RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Event::EnqueueTask(task_ref: TaskRef)` 是 Operational Event，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，再在该 runqueue 的锁建立的资源独占上下文内通过 `runq_ref.Event::EnqueueTask(...)` 提交入队。
+`RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Event::EnqueueTask(task_ref: TaskRef)` 是 Operational Event，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，再在该 runqueue 的锁建立的资源独占上下文内通过 `selected_rq.Event::EnqueueTask(...)` 提交入队。
 
 ## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct
 
@@ -289,18 +289,18 @@ state State::Ready {
                 }
 
                 drives {
-                    KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running);
+                    KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running);
                     let selected_rq: RunQueueRef <-
-                        Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef);
+                        Scheduler.Action::SelectRunQueue(KernelInitTaskRef);
                 }
 
-                within EnqueueSelectedRunQueueContext(runq_ref: selected_rq) {
+                within EnqueueSelectedRunQueueContext {
                     depends_on {
-                        runqueue_ref_targets(runq_ref, BootRunQueue);
+                        runqueue_ref_targets(selected_rq, BootRunQueue);
                     }
 
                     drives {
-                        runq_ref.Event::EnqueueTask(task_ref: KernelInitTaskRef);
+                        selected_rq.Event::EnqueueTask(KernelInitTaskRef);
                     }
                 }
 

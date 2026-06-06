@@ -173,9 +173,11 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"]
                     == (
-                        "let selected_rq: RunQueueRef <-\n"
-                        "                            Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)"
+                        "let selected_rq: RunQueueRef <- "
+                        "Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)"
                     )
+                    and record["display_expression"]
+                    == "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(KernelInitTaskRef)"
                     and record["proof_class"] == "action_result_binding"
                     and record["proof_provider"] == "within_context"
                     for record in proved
@@ -184,9 +186,9 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "runq_ref.Event::EnqueueTask(task_ref: KernelInitTaskRef)"
-                    and record["display_expression"]
                     == "selected_rq.Event::EnqueueTask(task_ref: KernelInitTaskRef)"
+                    and record["display_expression"]
+                    == "selected_rq.Event::EnqueueTask(KernelInitTaskRef)"
                     and record["proof_class"] == "type_process_commit"
                     and record["proof_provider"] == "within_context"
                     for record in proved

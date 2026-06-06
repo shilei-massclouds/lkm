@@ -30,17 +30,33 @@ from common.spec_ast import (
 
 _OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
+_OBJECT_EVENT_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
+_OBJECT_ACTION_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
 _ACTION_BIND_RE = re.compile(
     r"\Alet\s+([a-z][A-Za-z0-9_]*)\s*:\s*([A-Z][A-Za-z0-9_]*)\s*<-\s*"
     r"([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _REF_EVENT_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
+_REF_EVENT_EXPR_RE = re.compile(
+    r"\A([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
 _LOCK_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
 _TYPE_EVENT_RE_TEMPLATE = r"\bEvent::{}\b"
+_REF_TARGET_PROCESS_TYPES = {
+    "RunQueueRef": "RunQueue",
+    "TaskRef": "Task",
+}
 _ATTR_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)\Z", re.S)
 _ALLOWED_STATE_NAMES = frozenset(
     {
@@ -596,9 +612,11 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
             for event in state.events.values():
                 for block in event.decl.depends_on:
                     _check_state_references(model, block, diagnostics)
+                bindings: dict[str, str] = {}
                 for block in event.decl.drives:
-                    _check_event_references(model, block, diagnostics)
-                    _check_action_references(model, block, diagnostics)
+                    _check_drive_references(
+                        model, block, diagnostics, bindings=bindings
+                    )
                 for within in event.decl.within:
                     _check_within_references(model, within, diagnostics)
 
@@ -767,7 +785,7 @@ def _check_drive_references(
     for entry, entry_span in block.entry_spans:
         bind = _ACTION_BIND_RE.match(entry)
         if bind is not None:
-            name, type_name, object_name, action_name = bind.group(1, 2, 3, 4)
+            name, type_name, object_name, action_name, args = bind.group(1, 2, 3, 4, 5)
             _check_action_reference(
                 model,
                 object_name,
@@ -786,9 +804,145 @@ def _check_drive_references(
                     )
                 )
             bindings[name] = type_name
+            obj = model.objects.get(object_name)
+            if obj is not None:
+                _check_process_arguments(
+                    model,
+                    obj.kind,
+                    "Action",
+                    action_name,
+                    args,
+                    diagnostics,
+                    entry_span,
+                )
+            continue
+        if _check_drive_event_entry(
+            model, entry, entry_span, diagnostics, bindings=bindings
+        ):
+            continue
+        if _check_drive_action_entry(
+            model, entry, entry_span, diagnostics, context=context
+        ):
             continue
         _check_event_references(model, block, diagnostics, bindings=bindings)
         _check_action_references(model, block, diagnostics, context=context)
+
+
+def _check_drive_event_entry(
+    model: ObjectModel,
+    entry: str,
+    span: SourceSpan,
+    diagnostics: list[Diagnostic],
+    *,
+    bindings: dict[str, str],
+) -> bool:
+    ref_event = _REF_EVENT_EXPR_RE.match(entry)
+    if ref_event is not None:
+        receiver_name, event_name, args = ref_event.group(1, 2, 3)
+        receiver_type = bindings.get(receiver_name)
+        if receiver_type is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown ref binding in event reference: {receiver_name}.Event::{event_name}",
+                    span,
+                )
+            )
+            return True
+        if not _is_supported_ref_type_event(receiver_type, event_name):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "unsupported ref event reference: "
+                    f"{receiver_name}: {receiver_type}.Event::{event_name}",
+                    span,
+                )
+            )
+            return True
+        process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
+        if process_type is not None:
+            _check_process_arguments(
+                model,
+                process_type,
+                "Event",
+                event_name,
+                args,
+                diagnostics,
+                span,
+            )
+        return True
+
+    match = _OBJECT_EVENT_EXPR_RE.match(entry)
+    if match is None:
+        return False
+    object_name, event_name, args = match.group(1, 2, 3)
+    obj = model.objects.get(object_name)
+    if obj is None:
+        if _is_supported_ref_event(object_name, event_name):
+            return True
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"unknown object in event reference: {object_name}.Event::{event_name}",
+                span,
+            )
+        )
+        return True
+    if not any(event_name in state.events for state in obj.states.values()) and not (
+        obj.kind in model.types and _type_declares_event(model.types[obj.kind], event_name)
+    ):
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"unknown event reference: {object_name}.Event::{event_name}",
+                span,
+            )
+        )
+        return True
+    _check_process_arguments(
+        model,
+        obj.kind,
+        "Event",
+        event_name,
+        args,
+        diagnostics,
+        span,
+    )
+    return True
+
+
+def _check_drive_action_entry(
+    model: ObjectModel,
+    entry: str,
+    span: SourceSpan,
+    diagnostics: list[Diagnostic],
+    *,
+    context: ExclusiveContextDef | None = None,
+) -> bool:
+    action = _OBJECT_ACTION_EXPR_RE.match(entry)
+    if action is None:
+        return False
+    object_name, action_name, args = action.group(1, 2, 3)
+    _check_action_reference(
+        model,
+        object_name,
+        action_name,
+        diagnostics,
+        span,
+        context=context,
+    )
+    obj = model.objects.get(object_name)
+    if obj is not None:
+        _check_process_arguments(
+            model,
+            obj.kind,
+            "Action",
+            action_name,
+            args,
+            diagnostics,
+            span,
+        )
+    return True
 
 
 def _check_action_reference(
@@ -889,6 +1043,64 @@ def _is_supported_ref_type_event(type_name: str, event_name: str) -> bool:
     return type_name == "RunQueueRef" and event_name == "EnqueueTask"
 
 
+def _check_process_arguments(
+    model: ObjectModel,
+    type_name: str,
+    process_kind: str,
+    process_name: str,
+    args: str | None,
+    diagnostics: list[Diagnostic],
+    span: SourceSpan,
+) -> None:
+    signature = _process_signature(model, type_name, process_kind, process_name)
+    if signature is None:
+        return
+    if args is None:
+        if signature:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "missing process argument: "
+                    f"{type_name}.{process_kind}::{process_name}",
+                    span,
+                )
+            )
+        return
+    args = args.strip()
+    if not args:
+        if signature:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "missing process argument: "
+                    f"{type_name}.{process_kind}::{process_name}",
+                    span,
+                )
+            )
+        return
+    if _uses_named_args(args):
+        return
+    if len(signature) != 1:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "positional process arguments require a single-parameter signature: "
+                f"{type_name}.{process_kind}::{process_name}",
+                span,
+            )
+        )
+        return
+    if "," in args:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "positional process arguments are only supported for one argument: "
+                f"{type_name}.{process_kind}::{process_name}",
+                span,
+            )
+        )
+
+
 def _is_known_ref_value(value: str) -> bool:
     return value.endswith("Ref")
 
@@ -905,6 +1117,46 @@ def _within_parameter_bindings(
         elif value.endswith("TaskRef"):
             bindings[name] = "TaskRef"
     return bindings
+
+
+def _process_signature(
+    model: ObjectModel, type_name: str, process_kind: str, process_name: str
+) -> tuple[tuple[str, str], ...] | None:
+    type_decl = model.types.get(type_name)
+    if type_decl is None:
+        return None
+    pattern = re.compile(
+        r"\b"
+        + re.escape(process_kind)
+        + r"::"
+        + re.escape(process_name)
+        + r"\s*(?:\(([^{};]*)\))?",
+        re.S,
+    )
+    for block in type_decl.blocks:
+        match = pattern.search(block.body)
+        if match is not None:
+            return _parse_process_parameters(match.group(1) or "")
+    return None
+
+
+def _parse_process_parameters(params: str) -> tuple[tuple[str, str], ...]:
+    params = params.strip()
+    if not params:
+        return ()
+    parsed: list[tuple[str, str]] = []
+    for item in params.split(","):
+        name, sep, type_name = item.strip().partition(":")
+        if sep:
+            parsed.append((name.strip(), type_name.strip()))
+    return tuple(parsed)
+
+
+def _uses_named_args(args: str) -> bool:
+    return any(
+        re.match(r"\s*[a-z][A-Za-z0-9_]*\s*:(?!:)", item) is not None
+        for item in args.split(",")
+    )
 
 
 def _action_return_type(

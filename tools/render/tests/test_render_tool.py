@@ -217,7 +217,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_action",
                         row=2,
                         column=1,
-                        label="KernelInitTask.Event::SetRuntimeState(Runnable)",
+                        label="KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running)",
                         column_span=2,
                     ),
                     TraceCell(
@@ -225,7 +225,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_action",
                         row=3,
                         column=1,
-                        label="let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
+                        label="let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(KernelInitTaskRef)",
                         column_span=2,
                     ),
                     TraceCell(
@@ -233,7 +233,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_action",
                         row=4,
                         column=1,
-                        label="runq_ref.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
+                        label="selected_rq.Event::EnqueueTask(KernelInitTaskRef)",
                         column_span=2,
                     ),
                 ),
