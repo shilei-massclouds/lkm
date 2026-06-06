@@ -218,11 +218,11 @@ Completion 也说明了 event/action factoring 的边界：`Completion.Setup` �
 
 `Task` 是可复用运行期任务类型。`object KernelInitTask: Task` 表示 PID 1 任务实例继承 `Task` 的运行期 process；`TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Event::SetRuntimeState(state: TaskRuntimeState)` 这样的 Operational Event，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
 
-正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。当前语法暂未提供独立 `ref` 顶层声明、返回值绑定或引用 receiver，因此阶段主线先用 typed value 名称和普通 facts 承载引用关系；后续 context/handle 语义扩展时应把这些引用纳入句柄层级检查。
+正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。action 返回对象引用时，调用方必须用 action result binding 显式承接返回值，例如 `let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(...)`。该绑定是局部 SSA 风格值，作用域覆盖后续 drives 语句和嵌套 `within`；嵌套上下文可以通过 `within Context(runq_ref: selected_rq)` 把该引用传入子作用域。后续对目标对象的操作应使用引用 receiver，例如 `runq_ref.Event::EnqueueTask(...)`，而不是把当前策略结果硬编码为 `BootRunQueue.Event` 或 `BootRunQueueRef.Event`。
 
 `SchedulerObject.Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef` 是状态内 action。它只根据任务引用和当前调度条件选择目标 runqueue 引用，不推进 `Scheduler` lifecycle state，也不提交 runqueue 成员关系。当前 `rest_init()` 最小路径固定返回 `BootRunQueueRef`，即 boot CPU runqueue；完整 `select_task_rq()` 策略，包括 affinity、wake flags、scheduler class、load balance、SMP、migration disabled 和 cpuset 等，后续作为 deferred 策略展开。
 
-`RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Event::EnqueueTask(task_ref: TaskRef)` 是 Operational Event，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，再在该 runqueue 的锁建立的资源独占上下文内提交入队。当前语法暂不支持完整引用 receiver，因此 `BootRunQueueRef.Event::EnqueueTask(...)` 只作为 `BootRunQueueRef -> BootRunQueue` 绑定后的过渡承载。
+`RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Event::EnqueueTask(task_ref: TaskRef)` 是 Operational Event，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，再在该 runqueue 的锁建立的资源独占上下文内通过 `runq_ref.Event::EnqueueTask(...)` 提交入队。
 
 ## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct
 
@@ -290,16 +290,17 @@ state State::Ready {
 
                 drives {
                     KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running);
-                    Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef);
+                    let selected_rq: RunQueueRef <-
+                        Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef);
                 }
 
-                within EnqueueSelectedRunQueueContext {
+                within EnqueueSelectedRunQueueContext(runq_ref: selected_rq) {
                     depends_on {
-                        runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
+                        runqueue_ref_targets(runq_ref, BootRunQueue);
                     }
 
                     drives {
-                        BootRunQueueRef.Event::EnqueueTask(task_ref: KernelInitTaskRef);
+                        runq_ref.Event::EnqueueTask(task_ref: KernelInitTaskRef);
                     }
                 }
 

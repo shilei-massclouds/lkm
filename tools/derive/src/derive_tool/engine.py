@@ -30,6 +30,15 @@ _ACTION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
+_ACTION_BIND_RE = re.compile(
+    r"\Alet\s+([a-z][A-Za-z0-9_]*)\s*:\s*([A-Z][A-Za-z0-9_]*)\s*<-\s*"
+    r"([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
+_REF_EVENT_EXPR_RE = re.compile(
+    r"\A([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
 _TYPE_EVENT_RE_TEMPLATE = r"\bEvent::{}\b"
 _PREDICATE_CALL_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _RELATION_RE = re.compile(r"(==|!=|>=|<=|>|<)")
@@ -815,12 +824,13 @@ class _Deriver:
                 exit_message = "depends_on blocked"
                 return False
 
-            if not self._drive_blocks(event.decl.drives, event):
+            bindings: dict[str, dict[str, str]] = {}
+            if not self._drive_blocks(event.decl.drives, event, bindings=bindings):
                 exit_message = "drives blocked"
                 return False
 
             for within in event.decl.within:
-                if not self._execute_within(within, event):
+                if not self._execute_within(within, event, bindings=bindings):
                     exit_message = f"within blocked: {within.context}"
                     return False
 
@@ -875,7 +885,9 @@ class _Deriver:
         event: EventDef,
         *,
         action_provider: str = "action_drive",
+        bindings: dict[str, dict[str, str]] | None = None,
     ) -> bool:
+        bindings = bindings if bindings is not None else {}
         for block in blocks:
             for entry, entry_span in block.entry_spans:
                 if not self._drive_entry(
@@ -883,6 +895,7 @@ class _Deriver:
                     entry_span,
                     event,
                     action_provider=action_provider,
+                    bindings=bindings,
                 ):
                     return False
         return True
@@ -894,7 +907,54 @@ class _Deriver:
         event: EventDef,
         *,
         action_provider: str,
+        bindings: dict[str, dict[str, str]],
     ) -> bool:
+        bind = _ACTION_BIND_RE.match(entry)
+        if bind is not None:
+            name, type_name, object_name, action_name = bind.group(1, 2, 3, 4)
+            bindings[name] = {"type": type_name}
+            result_value = _action_result_value(
+                self.model, object_name, action_name, type_name
+            )
+            if result_value is not None:
+                bindings[name]["value"] = result_value
+            self._record(
+                DerivationStatus.PROVED,
+                f"action result bound: {name}: {type_name} <- {object_name}.Action::{action_name}",
+                entry_span,
+                object_name=event.object_name,
+                event_name=event.name,
+                expression=entry,
+                source_kind="drives",
+                predicate=None,
+                proof_class="action_result_binding",
+                proof_provider=action_provider,
+            )
+            return True
+
+        ref_event = _REF_EVENT_EXPR_RE.match(entry)
+        if ref_event is not None:
+            receiver_name, driven_event = ref_event.group(1), ref_event.group(2)
+            receiver = bindings.get(receiver_name)
+            receiver_type = receiver.get("type") if receiver is not None else None
+            if receiver_type is not None and _is_supported_ref_type_event(
+                receiver_type, driven_event
+            ):
+                self._record(
+                    DerivationStatus.PROVED,
+                    f"ref type process committed: {receiver_name}.Event::{driven_event}",
+                    entry_span,
+                    object_name=event.object_name,
+                    event_name=event.name,
+                expression=entry,
+                display_expression=_display_ref_aliases(entry, bindings),
+                source_kind="drives",
+                predicate=None,
+                proof_class="type_process_commit",
+                proof_provider=action_provider,
+                )
+                return True
+
         match = _EVENT_EXPR_RE.match(entry)
         if match is not None:
             driven_object, driven_event = match.group(1), match.group(2)
@@ -906,11 +966,12 @@ class _Deriver:
                     entry_span,
                     object_name=event.object_name,
                     event_name=event.name,
-                    expression=entry,
-                    source_kind="drives",
-                    predicate=None,
-                    proof_class="type_process_commit",
-                    proof_provider=action_provider,
+                expression=entry,
+                display_expression=_display_ref_aliases(entry, bindings),
+                source_kind="drives",
+                predicate=None,
+                proof_class="type_process_commit",
+                proof_provider=action_provider,
                 )
                 return True
             if obj is not None and _find_event(obj, driven_event) is None:
@@ -969,7 +1030,15 @@ class _Deriver:
         )
         return False
 
-    def _execute_within(self, within, event: EventDef) -> bool:
+    def _execute_within(
+        self,
+        within,
+        event: EventDef,
+        *,
+        bindings: dict[str, dict[str, str]] | None = None,
+    ) -> bool:
+        bindings = dict(bindings or {})
+        bindings.update(_within_parameter_bindings(within.parameters, bindings))
         context = self.model.exclusive_contexts.get(within.context)
         if context is None:
             self._record(
@@ -1010,16 +1079,22 @@ class _Deriver:
         ):
             return False
         self._collect_deferred(within.deferred, event, "within")
-        if not self._verify_blocks(within.depends_on, "within depends_on", event=event):
+        if not self._verify_blocks(
+            within.depends_on,
+            "within depends_on",
+            event=event,
+            bindings=bindings,
+        ):
             return False
         if not self._drive_blocks(
             within.drives,
             event,
             action_provider="within_context",
+            bindings=bindings,
         ):
             return False
         for child_within in within.within:
-            if not self._execute_within(child_within, event):
+            if not self._execute_within(child_within, event, bindings=bindings):
                 return False
         if not self._prove_blocks(
             within.ensures,
@@ -1027,6 +1102,7 @@ class _Deriver:
             event=event,
             proof_class="exclusive_context_fact",
             proof_provider="within_ensures",
+            bindings=bindings,
         ):
             return False
         if not self._commit_within_boundary(
@@ -1087,11 +1163,14 @@ class _Deriver:
         event: EventDef,
         proof_class: str,
         proof_provider: str,
+        bindings: dict[str, dict[str, str]] | None = None,
     ) -> bool:
+        bindings = bindings or {}
         for block in blocks:
             for entry, entry_span in block.entry_spans:
+                canonical_entry = _canonicalize_ref_aliases(entry, bindings)
                 classification = _classify_obligation(
-                    entry, kind, event.object_name
+                    canonical_entry, kind, event.object_name
                 )
                 self._record(
                     DerivationStatus.PROVED,
@@ -1205,10 +1284,13 @@ class _Deriver:
         event: EventDef | None = None,
         state: StateDef | None = None,
         entered_by: EventDef | None = None,
+        bindings: dict[str, dict[str, str]] | None = None,
     ) -> bool:
+        bindings = bindings or {}
         ok = True
         for block in blocks:
             for entry, entry_span in block.entry_spans:
+                canonical_entry = _canonicalize_ref_aliases(entry, bindings)
                 if _STATE_EXPR_RE.match(entry):
                     ok = (
                         self._verify_state_expression(
@@ -1262,6 +1344,15 @@ class _Deriver:
                     continue
                 elif self._try_prove_prior_fact(
                     entry, entry_span, kind, event, state
+                ):
+                    continue
+                elif canonical_entry != entry and self._try_prove_prior_fact(
+                    canonical_entry,
+                    entry_span,
+                    kind,
+                    event,
+                    state,
+                    recorded_expression=entry,
                 ):
                     continue
                 elif self._try_prove_phase_context(
@@ -1797,20 +1888,23 @@ class _Deriver:
         kind: str,
         event: EventDef | None,
         state: StateDef | None,
+        *,
+        recorded_expression: str | None = None,
     ) -> bool:
         proof_class = _prior_fact_proof_class(expression, self.proved_expressions)
         if proof_class is None:
             return False
+        recorded_expression = recorded_expression or expression
         self._record(
             DerivationStatus.PROVED,
-            f"{kind}: {expression}",
+            f"{kind}: {recorded_expression}",
             span,
             object_name=_context_object(event, state),
             event_name=event.name if event is not None else None,
             state_name=state.name if state is not None else None,
-            expression=expression,
+            expression=recorded_expression,
             source_kind=kind,
-            predicate=_predicate_name(expression),
+            predicate=_predicate_name(recorded_expression),
             proof_class=proof_class,
             proof_provider="prior_derivation_facts",
         )
@@ -1949,6 +2043,7 @@ class _Deriver:
         obligation_category: str | None = None,
         proof_class: str | None = None,
         proof_provider: str | None = None,
+        display_expression: str | None = None,
     ) -> None:
         if status is DerivationStatus.PROVED and expression is not None:
             self.proved_expressions.add(expression)
@@ -1961,6 +2056,7 @@ class _Deriver:
                 event_name=event_name,
                 state_name=state_name,
                 expression=expression,
+                display_expression=display_expression,
                 source_kind=source_kind,
                 predicate=predicate,
                 obligation_category=obligation_category,
@@ -2027,6 +2123,73 @@ def _type_declares_event(model: ObjectModel, obj: ObjectDef, event_name: str) ->
 
 def _is_supported_ref_event(receiver_name: str, event_name: str) -> bool:
     return receiver_name.endswith("RunQueueRef") and event_name == "EnqueueTask"
+
+
+def _is_supported_ref_type_event(type_name: str, event_name: str) -> bool:
+    return type_name == "RunQueueRef" and event_name == "EnqueueTask"
+
+
+def _within_parameter_bindings(
+    parameters: dict[str, str], inherited_bindings: dict[str, dict[str, str]]
+) -> dict[str, dict[str, str]]:
+    bindings: dict[str, dict[str, str]] = {}
+    for name, value in parameters.items():
+        if value in inherited_bindings:
+            bindings[name] = dict(inherited_bindings[value])
+            bindings[name]["display"] = value
+        elif value.endswith("RunQueueRef"):
+            bindings[name] = {"type": "RunQueueRef", "value": value}
+        elif value.endswith("TaskRef"):
+            bindings[name] = {"type": "TaskRef", "value": value}
+    return bindings
+
+
+def _canonicalize_ref_aliases(
+    expression: str, bindings: dict[str, dict[str, str]]
+) -> str:
+    canonical = expression
+    for name, binding in bindings.items():
+        value = binding.get("value")
+        if value:
+            canonical = re.sub(rf"\b{re.escape(name)}\b", value, canonical)
+    return canonical
+
+
+def _display_ref_aliases(
+    expression: str, bindings: dict[str, dict[str, str]]
+) -> str | None:
+    display = expression
+    changed = False
+    for name, binding in bindings.items():
+        display_name = binding.get("display")
+        if not display_name:
+            continue
+        replaced = re.sub(rf"\b{re.escape(name)}\b", display_name, display)
+        if replaced != display:
+            changed = True
+            display = replaced
+    return display if changed else None
+
+
+def _action_result_value(
+    model: ObjectModel, object_name: str, action_name: str, type_name: str
+) -> str | None:
+    if type_name == "RunQueueRef" and action_name == "SelectRunQueue":
+        obj = model.objects.get(object_name)
+        if obj is None or obj.kind not in model.types:
+            return None
+        type_decl = model.types[obj.kind]
+        pattern = re.compile(
+            r"\bAction::"
+            + re.escape(action_name)
+            + r"\b.*?scheduler_select_runqueue_returns\([^,]+,\s*[^,]+,\s*([A-Z][A-Za-z0-9_]*)\)",
+            re.S,
+        )
+        for block in type_decl.blocks:
+            match = pattern.search(block.body)
+            if match is not None:
+                return match.group(1)
+    return None
 
 
 def _context_object(event: EventDef | None, state: StateDef | None) -> str | None:

@@ -80,6 +80,7 @@ def _record_to_json(record: DerivationRecord) -> dict[str, Any]:
         "event": record.event_name,
         "state": record.state_name,
         "expression": record.expression,
+        "display_expression": record.display_expression,
         "source_kind": record.source_kind,
         "predicate": record.predicate,
         "obligation_category": record.obligation_category,

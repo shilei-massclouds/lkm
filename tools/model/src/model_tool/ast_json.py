@@ -203,6 +203,7 @@ def _within_from_json(item: Any) -> WithinDecl:
     return WithinDecl(
         context=_string(data, "context"),
         span=_span_from_json(data["span"]),
+        parameters=_string_map(data.get("parameters", {}), "within.parameters"),
         entered_by=[_block_from_json(block) for block in _list(data, "entered_by")],
         depends_on=[_block_from_json(block) for block in _list(data, "depends_on")],
         drives=[_block_from_json(block) for block in _list(data, "drives")],
@@ -253,6 +254,12 @@ def _list(data: dict[str, Any], key: str) -> list[Any]:
     if not isinstance(value, list):
         raise ValueError(f"{key} must be a list")
     return value
+
+
+def _string_map(value: Any, name: str) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must be an object")
+    return {str(key): str(item) for key, item in value.items()}
 
 
 def _string(data: dict[str, Any], key: str) -> str:

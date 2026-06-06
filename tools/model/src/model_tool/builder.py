@@ -30,6 +30,12 @@ from common.spec_ast import (
 
 _OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
+_ACTION_BIND_RE = re.compile(
+    r"\Alet\s+([a-z][A-Za-z0-9_]*)\s*:\s*([A-Z][A-Za-z0-9_]*)\s*<-\s*"
+    r"([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
+_REF_EVENT_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
 _LOCK_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
@@ -599,7 +605,13 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
 
 
 
-def _check_within_references(model: ObjectModel, within, diagnostics: list[Diagnostic]) -> None:
+def _check_within_references(
+    model: ObjectModel,
+    within,
+    diagnostics: list[Diagnostic],
+    *,
+    inherited_bindings: dict[str, str] | None = None,
+) -> None:
     context = model.exclusive_contexts.get(within.context)
     if context is None:
         diagnostics.append(
@@ -631,11 +643,26 @@ def _check_within_references(model: ObjectModel, within, diagnostics: list[Diagn
     _check_lock_event_blocks(model, within.entered_by, diagnostics, context=context)
     for block in within.depends_on:
         _check_state_references(model, block, diagnostics)
+    bindings: dict[str, str] = dict(inherited_bindings or {})
+    bindings.update(_within_parameter_bindings(within.parameters, bindings))
     for block in within.drives:
-        _check_event_references(model, block, diagnostics)
-        _check_action_references(model, block, diagnostics, context=context)
+        _check_drive_references(model, block, diagnostics, context=context, bindings=bindings)
     for child_within in within.within:
-        _check_within_references(model, child_within, diagnostics)
+        for name, value in child_within.parameters.items():
+            if value not in bindings and not _is_known_ref_value(value):
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"unknown within parameter value: {name}: {value}",
+                        child_within.span,
+                    )
+                )
+        _check_within_references(
+            model,
+            child_within,
+            diagnostics,
+            inherited_bindings=bindings,
+        )
     _check_lock_event_blocks(model, within.exited_by, diagnostics, context=context)
 
 
@@ -729,9 +756,100 @@ def _check_action_references(
             )
 
 
-def _check_event_references(
-    model: ObjectModel, block: Block, diagnostics: list[Diagnostic]
+def _check_drive_references(
+    model: ObjectModel,
+    block: Block,
+    diagnostics: list[Diagnostic],
+    *,
+    context: ExclusiveContextDef | None = None,
+    bindings: dict[str, str],
 ) -> None:
+    for entry, entry_span in block.entry_spans:
+        bind = _ACTION_BIND_RE.match(entry)
+        if bind is not None:
+            name, type_name, object_name, action_name = bind.group(1, 2, 3, 4)
+            _check_action_reference(
+                model,
+                object_name,
+                action_name,
+                diagnostics,
+                entry_span,
+                context=context,
+            )
+            if type_name != _action_return_type(model, object_name, action_name):
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        "action result binding type mismatch: "
+                        f"{name}: {type_name} <- {object_name}.Action::{action_name}",
+                        entry_span,
+                    )
+                )
+            bindings[name] = type_name
+            continue
+        _check_event_references(model, block, diagnostics, bindings=bindings)
+        _check_action_references(model, block, diagnostics, context=context)
+
+
+def _check_action_reference(
+    model: ObjectModel,
+    object_name: str,
+    action_name: str,
+    diagnostics: list[Diagnostic],
+    span: SourceSpan,
+    *,
+    context: ExclusiveContextDef | None = None,
+) -> None:
+    allowed = set(context.obj_refs) if context is not None else None
+    if object_name not in model.objects:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"unknown object in action reference: {object_name}.Action::{action_name}",
+                span,
+            )
+        )
+        return
+    if allowed is not None and object_name not in allowed:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "action reference outside exclusive_context obj_refs: "
+                f"{object_name}.Action::{action_name} not in {context.name}",
+                span,
+            )
+        )
+
+
+def _check_event_references(
+    model: ObjectModel,
+    block: Block,
+    diagnostics: list[Diagnostic],
+    *,
+    bindings: dict[str, str] | None = None,
+) -> None:
+    bindings = bindings or {}
+    for receiver_name, event_name in _REF_EVENT_RE.findall(block.body):
+        receiver_type = bindings.get(receiver_name)
+        if receiver_type is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown ref binding in event reference: {receiver_name}.Event::{event_name}",
+                    block.span,
+                )
+            )
+            continue
+        if not _is_supported_ref_type_event(receiver_type, event_name):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "unsupported ref event reference: "
+                    f"{receiver_name}: {receiver_type}.Event::{event_name}",
+                    block.span,
+                )
+            )
+        return
     for object_name, event_name in _OBJECT_EVENT_RE.findall(block.body):
         obj = model.objects.get(object_name)
         if obj is None:
@@ -765,6 +883,51 @@ def _type_declares_event(type_decl: TypeDecl, event_name: str) -> bool:
 
 def _is_supported_ref_event(receiver_name: str, event_name: str) -> bool:
     return receiver_name.endswith("RunQueueRef") and event_name == "EnqueueTask"
+
+
+def _is_supported_ref_type_event(type_name: str, event_name: str) -> bool:
+    return type_name == "RunQueueRef" and event_name == "EnqueueTask"
+
+
+def _is_known_ref_value(value: str) -> bool:
+    return value.endswith("Ref")
+
+
+def _within_parameter_bindings(
+    parameters: dict[str, str], inherited_bindings: dict[str, str]
+) -> dict[str, str]:
+    bindings: dict[str, str] = {}
+    for name, value in parameters.items():
+        if value in inherited_bindings:
+            bindings[name] = inherited_bindings[value]
+        elif value.endswith("RunQueueRef"):
+            bindings[name] = "RunQueueRef"
+        elif value.endswith("TaskRef"):
+            bindings[name] = "TaskRef"
+    return bindings
+
+
+def _action_return_type(
+    model: ObjectModel, object_name: str, action_name: str
+) -> str | None:
+    obj = model.objects.get(object_name)
+    if obj is None:
+        return None
+    candidates: list[str] = []
+    if obj.kind in model.types:
+        candidates.extend(block.body for block in model.types[obj.kind].blocks)
+    candidates.extend(block.body for block in obj.decl.other_blocks)
+    pattern = re.compile(
+        r"\bAction::"
+        + re.escape(action_name)
+        + r"\s*(?:\([^{};]*\))?\s*->\s*([A-Z][A-Za-z0-9_]*)\b",
+        re.S,
+    )
+    for body in candidates:
+        match = pattern.search(body)
+        if match is not None:
+            return match.group(1)
+    return None
 
 
 def _check_state_references(

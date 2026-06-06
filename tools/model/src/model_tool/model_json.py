@@ -218,6 +218,7 @@ def _type_to_json(item: TypeDecl) -> dict[str, Any]:
 def _within_to_json(item: WithinDecl) -> dict[str, Any]:
     return {
         "context": item.context,
+        "parameters": item.parameters,
         "span": _span_to_json(item.span),
         "entered_by": [_block_to_json(block) for block in item.entered_by],
         "depends_on": [_block_to_json(block) for block in item.depends_on],

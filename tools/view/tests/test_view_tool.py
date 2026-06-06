@@ -260,9 +260,9 @@ class ViewToolTests(unittest.TestCase):
                     {
                         "object": "KernelInitTask",
                         "event": "Enable",
-                        "proof_class": "action_commit",
+                        "proof_class": "action_result_binding",
                         "proof_provider": "within_context",
-                        "expression": "Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
+                        "expression": "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
                     },
                     {
                         "object": "KernelInitTask",
@@ -276,7 +276,8 @@ class ViewToolTests(unittest.TestCase):
                         "event": "Enable",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "BootRunQueueRef.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
+                        "expression": "runq_ref.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
+                        "display_expression": "selected_rq.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
                     },
                     {
                         "object": "KernelInitTask",
@@ -355,12 +356,12 @@ class ViewToolTests(unittest.TestCase):
             [cell.label for cell in sorted(action_cells, key=lambda cell: cell.row)],
             [
                 "KernelInitTask.Event::SetRuntimeState(Runnable)",
-                "Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
+                "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
             ],
         )
         self.assertEqual(
             [cell.label for cell in enqueue_action_cells],
-            ["BootRunQueueRef.Event::EnqueueTask(task_ref: KernelInitTaskRef)"],
+            ["selected_rq.Event::EnqueueTask(task_ref: KernelInitTaskRef)"],
         )
         self.assertTrue(
             all(

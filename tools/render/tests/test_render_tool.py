@@ -152,12 +152,18 @@ class RenderToolTests(unittest.TestCase):
                     },
                     {
                         "index": 4,
+                        "kind": "context_action",
+                        "label": "within.2",
+                        "group_role": "context_action",
+                    },
+                    {
+                        "index": 5,
                         "kind": "context_guard",
                         "label": "within.guard",
                         "group_role": "context_guard",
                     },
-                    {"index": 5, "kind": "gap", "label": "body.end"},
-                    {"index": 6, "kind": "state", "label": "target"},
+                    {"index": 6, "kind": "gap", "label": "body.end"},
+                    {"index": 7, "kind": "state", "label": "target"},
                 ],
                 "trace_cells": (
                     TraceCell(
@@ -170,7 +176,7 @@ class RenderToolTests(unittest.TestCase):
                     TraceCell(
                         id="target",
                         kind="state",
-                        row=6,
+                        row=7,
                         column=0,
                         label="KernelInitTask.State::Runnable",
                     ),
@@ -180,7 +186,7 @@ class RenderToolTests(unittest.TestCase):
                         row=1,
                         column=0,
                         label="KernelInitTask.Event::Enable",
-                        row_span=4,
+                        row_span=5,
                     ),
                     TraceCell(
                         id="context",
@@ -194,13 +200,13 @@ class RenderToolTests(unittest.TestCase):
                             "|enter=KernelInitTaskPiLock.Event::LockIrqSave"
                             "|exit=KernelInitTaskPiLock.Event::UnlockIrqRestore"
                         ),
-                        row_span=3,
+                        row_span=4,
                         column_span=2,
                     ),
                     TraceCell(
                         id="nested-context",
                         kind="context_span",
-                        row=3,
+                        row=4,
                         column=1,
                         label="EnqueueSelectedRunQueueContext|lock=BootRunQueueLock",
                         row_span=1,
@@ -219,7 +225,15 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_action",
                         row=3,
                         column=1,
-                        label="Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
+                        label="let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
+                        column_span=2,
+                    ),
+                    TraceCell(
+                        id="action-2",
+                        kind="context_action",
+                        row=4,
+                        column=1,
+                        label="runq_ref.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
                         column_span=2,
                     ),
                 ),
@@ -228,6 +242,9 @@ class RenderToolTests(unittest.TestCase):
                     TraceArrow(source="event", target="context", kind="within"),
                     TraceArrow(
                         source="action-0", target="action-1", kind="context_order"
+                    ),
+                    TraceArrow(
+                        source="action-1", target="action-2", kind="context_order"
                     ),
                 ),
             },
@@ -246,7 +263,9 @@ class RenderToolTests(unittest.TestCase):
         self.assertNotIn("enter: KernelInitTaskPiLock.LockIrqSave", text)
         self.assertNotIn("exit: KernelInitTaskPiLock.UnlockIrqRestore", text)
         self.assertIn("SetRuntimeState", text)
-        self.assertIn("SelectRunQueue", text)
+        self.assertIn("selected_rq: RunQueueRef &lt;-", text)
+        self.assertIn("Scheduler.SelectRunQueue", text)
+        self.assertIn("EnqueueTask", text)
 
     def test_render_svg_from_trace_view_with_annotations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

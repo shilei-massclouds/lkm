@@ -202,7 +202,8 @@ def _context_records_by_event(
                 active_context.pop(key, None)
             continue
         if (
-            proof_class not in {"action_commit", "type_process_commit"}
+            proof_class
+            not in {"action_commit", "action_result_binding", "type_process_commit"}
             or proof_provider != "within_context"
         ):
             continue
@@ -210,10 +211,13 @@ def _context_records_by_event(
         context_name = stack[-1] if stack else None
         if context_name is None or not isinstance(expression, str):
             continue
+        display_expression = record.get("display_expression")
+        if not isinstance(display_expression, str) or not display_expression:
+            display_expression = expression
         item: dict[str, object] = {
             "context": context_name,
             "context_stack": tuple(stack),
-            "action": expression,
+            "action": display_expression,
         }
         context_labels: dict[str, str] = {}
         for active_name in stack:

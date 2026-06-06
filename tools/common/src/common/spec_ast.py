@@ -39,6 +39,7 @@ class WithinDecl:
 
     context: str
     span: SourceSpan
+    parameters: dict[str, str] = field(default_factory=dict)
     entered_by: list[Block] = field(default_factory=list)
     depends_on: list[Block] = field(default_factory=list)
     drives: list[Block] = field(default_factory=list)

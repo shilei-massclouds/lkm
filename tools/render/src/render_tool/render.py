@@ -1210,7 +1210,15 @@ def _trace_label_lines(label: str) -> tuple[str, ...]:
 
 
 def _trace_action_label_lines(label: str) -> tuple[str, ...]:
+    if "<-" in label:
+        binding, action = label.split("<-", 1)
+        binding = binding.strip()
+        if binding.startswith("let "):
+            binding = binding[4:]
+        action_lines = _trace_action_label_lines(action.strip())
+        return (f"{binding} <-", ".".join(action_lines))
     compact = label.replace(".Action::", ".")
+    compact = compact.replace(".Event::", ".")
     compact = compact.split("(", 1)[0]
     if "." not in compact:
         return (compact,)
