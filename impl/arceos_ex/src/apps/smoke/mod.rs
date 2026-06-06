@@ -1,14 +1,22 @@
 pub mod cases;
+pub mod harness;
 
 use crate::{
     arch::riscv64::sbi,
     objects::{earlycon, printk},
 };
 
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum SmokeResult {
     Passed,
     #[allow(dead_code)]
     Failed,
+}
+
+impl SmokeResult {
+    pub const fn is_failed(self) -> bool {
+        matches!(self, Self::Failed)
+    }
 }
 
 pub struct SmokeCase {
