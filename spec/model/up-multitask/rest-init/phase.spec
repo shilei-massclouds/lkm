@@ -252,7 +252,6 @@ object KernelInitTask: Task {
                     ensures {
                         raw_spinlock_irqsave_entered(KernelInitTaskPiLock, BootCurrentCPU);
                         raw_spinlock_irqrestore_exited(KernelInitTaskPiLock, BootCurrentCPU);
-                        task_state_running(KernelInitTask);
                         scheduler_select_runqueue_returns(Scheduler, KernelInitTaskRef, BootRunQueueRef);
                         task_runqueue_selected(Scheduler, KernelInitTaskRef, BootRunQueueRef);
                         task_enqueued_on_runqueue(KernelInitTaskRef, BootRunQueueRef);

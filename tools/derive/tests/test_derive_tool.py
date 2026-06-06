@@ -214,6 +214,14 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
+                    record["expression"] == "task_state_running(KernelInitTask)"
+                    and record["proof_class"] == "derived_alias"
+                    and record["proof_provider"] == "type_process_ensures"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
                     record["expression"]
                     == "scheduler_select_runqueue_returns(Scheduler, KernelInitTaskRef, BootRunQueueRef)"
                     and record["proof_class"] == "type_process_ensures"

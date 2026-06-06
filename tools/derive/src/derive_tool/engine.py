@@ -2233,6 +2233,25 @@ class _Deriver:
                 proof_provider=proof_provider,
             )
         )
+        if status is DerivationStatus.PROVED and expression is not None:
+            alias = _derived_alias(expression)
+            if alias is not None and alias not in self.proved_expressions:
+                self.proved_expressions.add(alias)
+                self.records.append(
+                    DerivationRecord(
+                        status=DerivationStatus.PROVED,
+                        message=f"derived alias: {alias}",
+                        span=span,
+                        object_name=object_name,
+                        event_name=event_name,
+                        state_name=state_name,
+                        expression=alias,
+                        source_kind="derived_alias",
+                        predicate=_predicate_name(alias),
+                        proof_class="derived_alias",
+                        proof_provider="type_process_ensures",
+                    )
+                )
 
     def _finish_trace(
         self,
@@ -2607,6 +2626,16 @@ def _context_object(event: EventDef | None, state: StateDef | None) -> str | Non
 
 def _event_label(object_name: str, event_name: str) -> str:
     return f"{object_name}.Event::{event_name}"
+
+
+def _derived_alias(expression: str) -> str | None:
+    match = re.match(
+        r"\Atask_runtime_state_is\(\s*([A-Z][A-Za-z0-9_]*)\s*,\s*TaskRuntimeState::Running\s*\)\Z",
+        expression,
+    )
+    if match is None:
+        return None
+    return f"task_state_running({match.group(1)})"
 
 
 def _strip_quotes(value: str) -> str:
