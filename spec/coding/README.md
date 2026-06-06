@@ -56,7 +56,7 @@
 
 1. `spec/model/SEMANTICS.md`：模型生命周期硬语义，不允许被编码便利性绕过。
 2. `spec/model/**/*.spec`：对象、状态、事件、依赖、驱动顺序和阶段完成条件。
-3. `spec/组件化内核规格.md`：模型意图、设计背景、对象解释和参考边界。
+3. `spec/charter.md`：项目章程、模型意图、设计背景、对象解释和参考边界。
 4. `spec/coding/main.spec` 与其 include 的正式规格：面向对象级代码实现的硬约束。
 5. `spec/coding/*.md`：面向对象级代码实现的补充说明。
 6. `spec/compose/main.spec` 与其 include 的正式规格：面向 crate/module 组合、公开接口和构建接入的硬约束。

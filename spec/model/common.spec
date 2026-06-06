@@ -1,7 +1,7 @@
 /*
  * Entry Prelude Object Model Specification
  *
- * This file is extracted from spec/组件化内核规格.md.
+ * This file is extracted from spec/charter.md.
  * It is intended to be parsed by verifier/modeling tools.
  * Rust/C style comments are for human readers and should be ignored by tools.
  *
