@@ -1,5 +1,6 @@
 use super::{
     boot_args::BootArgs,
+    cpu_control::BootCurrentCpu,
     cpu_id_map::CpuIdMap,
     device_tree::DeviceTree,
     fdt_reader::read_cells,
@@ -142,10 +143,23 @@ impl CpuGroup {
         }
     }
 
-    pub fn adopt_head_preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        let result = self.boot_cpu.adopt_head_preset(boot_args);
-        if result.is_err() {
-            return result;
+    pub fn adopt_boot_cpu_preset(&mut self, boot_args: &BootArgs) -> EventResult {
+        self.boot_cpu.adopt_head_preset(boot_args)
+    }
+
+    pub fn preset(&mut self, current_cpu: &BootCurrentCpu) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || self.boot_cpu.state() != State::Prepared
+            || current_cpu.state() != State::Ready
+            || current_cpu.hartid() != self.boot_cpu.hartid
+            || !current_cpu.owns_boot_cpu()
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
         }
 
         self.lifecycle

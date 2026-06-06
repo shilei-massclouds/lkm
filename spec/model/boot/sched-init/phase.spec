@@ -66,6 +66,7 @@ object Scheduler: TaskObject {
                     scheduler_runqueues_ready(Scheduler, CpuGroup);
                     boot_runqueue_ready(BootRunQueue, BootCPU);
                     boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
+                    current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
                     scheduler_preempt_disabled_action_available(Scheduler);
                 }
@@ -78,6 +79,7 @@ object Scheduler: TaskObject {
             BootRunQueue.state == State::Ready;
             BootIdleTask.state == State::Ready;
             scheduler_runqueues_ready(Scheduler, CpuGroup);
+            current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
             scheduler_preempt_disabled_action_available(Scheduler);
         }
@@ -204,14 +206,22 @@ object BootIdleTask: TaskObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     BootRunQueue.state == State::Ready;
+                    BootCpuCurrentTask.state == State::Ready;
                     BootInitTask.state == State::Online;
                     InitMM.state == State::Ready;
+                }
+
+                drives {
+                    BootIdlePreemption.Event::Setup;
+                    BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
                 }
 
                 ensures {
                     boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                     boot_idle_task_reuses_current_init_task(BootIdleTask, BootInitTask);
                     boot_idle_task_uses_init_mm_lazy_tlb(BootIdleTask, InitMM);
+                    task_preemption_control_ready(BootIdleTask);
+                    current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
                 }
             }
@@ -222,7 +232,36 @@ object BootIdleTask: TaskObject {
         invariant {
             boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
             boot_idle_task_reuses_current_init_task(BootIdleTask, BootInitTask);
+            task_preemption_control_ready(BootIdleTask);
+            current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
+        }
+    }
+}
+
+/*
+ * BootIdlePreemption 表示 boot idle/current task 的 preempt_count 控制视图。
+ * raw spinlock 等运行期路径通过 current task slot 找到当前任务，再作用于该
+ * 任务的抢占控制。
+ */
+object BootIdlePreemption: PreemptionControl {
+    initial_state: State::Base;
+    parent: BootIdleTask;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                ensures {
+                    task_preemption_control_ready(BootIdleTask);
+                    task_preemption_enabled(BootIdleTask);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            task_preemption_control_ready(BootIdleTask);
         }
     }
 }

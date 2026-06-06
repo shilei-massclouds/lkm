@@ -119,7 +119,17 @@ class ModelBuilderTests(unittest.TestCase):
     def test_accepts_exclusive_context_within_action_refs(self) -> None:
         document = parse_text(
             """
-            lock TaskPiLock;
+            type RawSpinLock {
+                processes {
+                    Event::LockIrqSave {
+                    }
+
+                    Event::UnlockIrqRestore {
+                    }
+                }
+            }
+
+            lock TaskPiLock: RawSpinLock;
 
             exclusive_context WakeContext {
                 lock_ref: TaskPiLock;
@@ -137,9 +147,17 @@ class ModelBuilderTests(unittest.TestCase):
                     events {
                         on Event::Enable -> State::Online {
                             within WakeContext {
+                                entered_by {
+                                    TaskPiLock.Event::LockIrqSave;
+                                }
+
                                 drives {
                                     A.Action::SetTaskState(TaskRuntimeState::Running);
                                     B.Action::Touch(task: A);
+                                }
+
+                                exited_by {
+                                    TaskPiLock.Event::UnlockIrqRestore;
                                 }
                             }
                         }
@@ -163,6 +181,60 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertTrue(result.ok, [diag.message for diag in result.errors])
         self.assertIn("WakeContext", result.model.exclusive_contexts)
+        self.assertEqual(result.model.locks["TaskPiLock"].kind, "RawSpinLock")
+
+    def test_rejects_within_boundary_for_non_context_lock(self) -> None:
+        document = parse_text(
+            """
+            type RawSpinLock {
+                processes {
+                    Event::LockIrqSave {
+                    }
+                }
+            }
+
+            lock TaskPiLock: RawSpinLock;
+            lock OtherLock: RawSpinLock;
+
+            exclusive_context WakeContext {
+                lock_ref: TaskPiLock;
+
+                obj_refs {
+                    A;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    events {
+                        on Event::Enable -> State::Online {
+                            within WakeContext {
+                                entered_by {
+                                    OtherLock.Event::LockIrqSave;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "lock event reference outside exclusive_context lock_ref" in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
 
     def test_rejects_action_refs_outside_exclusive_context_objects(self) -> None:
         document = parse_text(

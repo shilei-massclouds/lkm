@@ -6,7 +6,7 @@ use crate::{
     objects::{
         boot_args::BootArgs,
         soc::Soc,
-        state::{EventResult, LifecycleEvent, State, failed_condition},
+        state::{failed_condition, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
 };
@@ -26,7 +26,6 @@ const TRACE_KERNEL_IMAGE_PRESET: usize = b'K' as usize;
 const TRACE_ROOT_STREAM_PRESET: usize = b'O' as usize;
 const TRACE_BSS_ZEROED: usize = b'Z' as usize;
 const TRACE_BOOT_CPU_PRESET: usize = b'H' as usize;
-const TRACE_CPU_GROUP_PRESET: usize = b'G' as usize;
 const TRACE_INIT_TASK_PRESET: usize = b'T' as usize;
 const TRACE_INIT_STACK_PRESET: usize = b'S' as usize;
 
@@ -98,12 +97,10 @@ _start:
     li a0, {trace_bss_zeroed}
     call {head_checkpoint}
 
-    # CpuGroup.Preset: publish the boot hart id for Rust-side adoption.
+    # BootCurrentCPU.Preset / BootCPU.Preset: publish the boot hart id for Rust-side adoption.
     la t0, {head_boot_hartid}
     sd s0, 0(t0)
     li a0, {trace_boot_cpu_preset}
-    call {head_checkpoint}
-    li a0, {trace_cpu_group_preset}
     call {head_checkpoint}
 
     # InitTask.Preset: install the init task pointer in tp.
@@ -139,7 +136,6 @@ _start:
     trace_adopt_begin = const TRACE_ADOPT_BEGIN,
     trace_boot_cpu_preset = const TRACE_BOOT_CPU_PRESET,
     trace_bss_zeroed = const TRACE_BSS_ZEROED,
-    trace_cpu_group_preset = const TRACE_CPU_GROUP_PRESET,
     trace_init_stack_preset = const TRACE_INIT_STACK_PRESET,
     trace_init_task_preset = const TRACE_INIT_TASK_PRESET,
     trace_interrupt_preset = const TRACE_INTERRUPT_PRESET,
@@ -225,7 +221,7 @@ extern "C" fn entry_prelude_rust_entry(hartid: usize, dtb_pa: usize) -> ! {
 /// - `KernelImage.Preset`
 /// - `RootStream.Preset`
 /// - `KernelImage.Setup`
-/// - `CpuGroup.Preset`
+/// - `BootCurrentCPU.Preset`
 /// - `InitTask.Preset`
 /// - `InitStack.Preset`
 ///
@@ -269,7 +265,14 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     ctx.kernel_image.adopt_head_preset(&ctx.config, &ctx.lds)?;
     ctx.root_stream.adopt_head_preset()?;
     ctx.kernel_image.adopt_head_setup(&ctx.lds)?;
-    ctx.cpu_group.adopt_head_preset(boot_args)?;
+    ctx.boot_current_cpu.adopt_head_preset(boot_args)?;
+    ctx.cpu_group.adopt_boot_cpu_preset(boot_args)?;
+    ctx.boot_cpu_local_interrupt.setup()?;
+    ctx.boot_cpu_current_task.setup()?;
+    ctx.boot_current_cpu.setup()?;
+    ctx.cpu_group.preset(&ctx.boot_current_cpu)?;
+    crate::trace::checkpoint(Checkpoint::CpuGroupPrepared);
+    ctx.boot_current_cpu.enable(&ctx.cpu_group)?;
     ctx.init_task.adopt_head_preset(&ctx.kernel_image)?;
     ctx.init_stack
         .adopt_head_preset(&ctx.kernel_image, &ctx.lds)
@@ -363,6 +366,14 @@ fn entry_prelude_phase_ready(ctx: &Context) -> bool {
         && ctx.init_stack.state() == State::Ready
         && ctx.vm.state() == State::Ready
         && ctx.vm.entry_prelude_ready()
+        && ctx.boot_current_cpu.state() == State::Online
+        && ctx.boot_current_cpu.owns_boot_cpu()
+        && ctx.boot_current_cpu.registered_in_cpu_group()
+        && ctx.boot_current_cpu.logical_id() == 0
+        && ctx.boot_current_cpu.bootstrap_role_ready()
+        && ctx.boot_cpu_local_interrupt.state() == State::Ready
+        && ctx.boot_cpu_local_interrupt.disabled()
+        && ctx.boot_cpu_current_task.state() == State::Ready
         && ctx.cpu_group.state() == State::Prepared
         && ctx.cpu_group.boot_cpu_state() == State::Prepared
 }

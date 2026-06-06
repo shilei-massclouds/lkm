@@ -42,7 +42,7 @@ class _Segment:
 _IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
 _ENUM_RE = re.compile(rf"\Aenum\s+({_IDENT})\s*\{{", re.S)
 _TYPE_RE = re.compile(rf"\Atype\s+({_IDENT})(?P<header>[^\{{]*)\{{", re.S)
-_LOCK_RE = re.compile(rf"\Alock\s+({_IDENT})\s*;\Z", re.S)
+_LOCK_RE = re.compile(rf"\Alock\s+({_IDENT})(?:\s*:\s*({_IDENT}))?\s*;\Z", re.S)
 _EXCLUSIVE_CONTEXT_RE = re.compile(rf"\Aexclusive_context\s+({_IDENT})\s*\{{", re.S)
 _OBJECT_RE = re.compile(rf"\Aobject\s+({_IDENT})\s*:\s*({_IDENT})\s*\{{", re.S)
 _FUNCTION_RE = re.compile(rf"\Afunction\s+({_IDENT})(?P<sig>.*);?\Z", re.S)
@@ -280,7 +280,7 @@ def _parse_lock(segment: _Segment) -> LockDecl:
     match = _LOCK_RE.match(segment.text.strip())
     if not match:
         raise ParseError(f"line {segment.start_line}: invalid lock declaration")
-    return LockDecl(match.group(1), segment.span)
+    return LockDecl(match.group(1), segment.span, match.group(2))
 
 
 def _parse_exclusive_context(segment: _Segment) -> ExclusiveContextDecl:
@@ -508,8 +508,10 @@ def _parse_within(block: Block) -> WithinDecl:
     if not context:
         raise ParseError(f"line {block.span.start_line}: within block is missing context")
 
+    entered_by: list[Block] = []
     depends_on: list[Block] = []
     drives: list[Block] = []
+    exited_by: list[Block] = []
     may_change: list[Block] = []
     ensures: list[Block] = []
     deferred: list[Block] = []
@@ -522,10 +524,14 @@ def _parse_within(block: Block) -> WithinDecl:
                 f"line {part.start_line}: invalid within member: {_preview(part.text)}"
             )
         child = _to_block(part, block_match.group(1))
-        if child.kind == "depends_on":
+        if child.kind == "entered_by":
+            entered_by.append(child)
+        elif child.kind == "depends_on":
             depends_on.append(child)
         elif child.kind == "drives":
             drives.append(child)
+        elif child.kind == "exited_by":
+            exited_by.append(child)
         elif child.kind == "may_change":
             may_change.append(child)
         elif child.kind == "ensures":
@@ -538,8 +544,10 @@ def _parse_within(block: Block) -> WithinDecl:
     return WithinDecl(
         context=context,
         span=block.span,
+        entered_by=entered_by,
         depends_on=depends_on,
         drives=drives,
+        exited_by=exited_by,
         may_change=may_change,
         ensures=ensures,
         deferred=deferred,

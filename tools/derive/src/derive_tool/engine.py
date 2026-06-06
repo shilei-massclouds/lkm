@@ -29,6 +29,7 @@ _ACTION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
+_TYPE_EVENT_RE_TEMPLATE = r"\bEvent::{}\b"
 _PREDICATE_CALL_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _RELATION_RE = re.compile(r"(==|!=|>=|<=|>|<)")
 _HAS_SLOT_RE = re.compile(
@@ -896,8 +897,25 @@ class _Deriver:
         match = _EVENT_EXPR_RE.match(entry)
         if match is not None:
             driven_object, driven_event = match.group(1), match.group(2)
-            if self._derive_event(driven_object, driven_event):
-                return True
+            obj = self.model.objects.get(driven_object)
+            if obj is not None and _find_event(obj, driven_event) is None:
+                if _type_declares_event(self.model, obj, driven_event):
+                    self._record(
+                        DerivationStatus.PROVED,
+                        f"type process committed: {driven_object}.Event::{driven_event}",
+                        entry_span,
+                        object_name=event.object_name,
+                        event_name=event.name,
+                        expression=entry,
+                        source_kind="drives",
+                        predicate=None,
+                        proof_class="type_process_commit",
+                        proof_provider=action_provider,
+                    )
+                    return True
+            else:
+                if self._derive_event(driven_object, driven_event):
+                    return True
             self._record(
                 DerivationStatus.BLOCKED,
                 "driven event blocked: "
@@ -959,6 +977,12 @@ class _Deriver:
             proof_class="exclusive_context",
             proof_provider="lock_ref",
         )
+        if not self._commit_within_boundary(
+            within.entered_by,
+            event,
+            source_kind="within_entered_by",
+        ):
+            return False
         self._collect_deferred(within.deferred, event, "within")
         if not self._verify_blocks(within.depends_on, "within depends_on", event=event):
             return False
@@ -976,6 +1000,12 @@ class _Deriver:
             proof_provider="within_ensures",
         ):
             return False
+        if not self._commit_within_boundary(
+            within.exited_by,
+            event,
+            source_kind="within_exited_by",
+        ):
+            return False
         self._record(
             DerivationStatus.PROVED,
             f"within exited: {within.context}",
@@ -987,6 +1017,37 @@ class _Deriver:
             proof_class="exclusive_context",
             proof_provider="lock_ref",
         )
+        return True
+
+    def _commit_within_boundary(
+        self, blocks: list[Block], event: EventDef, *, source_kind: str
+    ) -> bool:
+        for block in blocks:
+            for entry, entry_span in block.entry_spans:
+                match = _EVENT_EXPR_RE.match(entry)
+                if match is None:
+                    self._record(
+                        DerivationStatus.BLOCKED,
+                        f"cannot parse within boundary entry: {entry}",
+                        entry_span,
+                        object_name=event.object_name,
+                        event_name=event.name,
+                        expression=entry,
+                    )
+                    return False
+                object_name, event_name = match.group(1), match.group(2)
+                self._record(
+                    DerivationStatus.PROVED,
+                    f"within boundary committed: {object_name}.Event::{event_name}",
+                    entry_span,
+                    object_name=event.object_name,
+                    event_name=event.name,
+                    expression=entry,
+                    source_kind=source_kind,
+                    predicate=None,
+                    proof_class="exclusive_context_lock_event",
+                    proof_provider="lock_ref",
+                )
         return True
 
     def _prove_blocks(
@@ -1925,6 +1986,14 @@ def _find_event(obj: ObjectDef, event_name: str) -> EventDef | None:
         if event is not None:
             return event
     return None
+
+
+def _type_declares_event(model: ObjectModel, obj: ObjectDef, event_name: str) -> bool:
+    type_decl = model.types.get(obj.kind)
+    if type_decl is None:
+        return False
+    pattern = re.compile(_TYPE_EVENT_RE_TEMPLATE.format(re.escape(event_name)))
+    return any(pattern.search(block.body) for block in type_decl.blocks)
 
 
 def _context_object(event: EventDef | None, state: StateDef | None) -> str | None:

@@ -1,5 +1,6 @@
 use super::{
     completion::Completion,
+    cpu_control::{BootCurrentCpu, CurrentTaskSlot, LocalInterruptControl, RawSpinLock},
     cpu_group::CpuGroup,
     finalize::{InitMemoryCleanupDeferred, KernelMappingProtectionDeferred, PtiFinalizeTrimmed},
     init_task::InitTask,
@@ -54,6 +55,7 @@ pub struct KernelInitTask {
     pinned_to_boot_cpu: bool,
     pf_no_setaffinity: bool,
     cpu_id: usize,
+    running: bool,
 }
 
 impl KernelInitTask {
@@ -73,6 +75,7 @@ impl KernelInitTask {
             pinned_to_boot_cpu: false,
             pf_no_setaffinity: false,
             cpu_id: usize::MAX,
+            running: false,
         }
     }
 
@@ -132,6 +135,10 @@ impl KernelInitTask {
         self.cpu_id
     }
 
+    pub const fn running(&self) -> bool {
+        self.running
+    }
+
     pub fn preset(&mut self, inputs: TaskSpawnInputs<'_>) -> EventResult {
         if self.lifecycle.state() != State::Base || !inputs.ready_for_kernel_init() {
             return self.failed_preset();
@@ -176,10 +183,23 @@ impl KernelInitTask {
         )
     }
 
-    pub fn enable(&mut self, scheduler: &Scheduler) -> EventResult {
+    pub fn enable(
+        &mut self,
+        scheduler: &mut Scheduler,
+        current_cpu: &BootCurrentCpu,
+        local_interrupt: &mut LocalInterruptControl,
+        current_task_slot: &CurrentTaskSlot,
+        pi_lock: &mut RawSpinLock,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
             || scheduler.boot_runqueue().state() != State::Ready
+            || current_cpu.state() != State::Online
+            || local_interrupt.state() != State::Ready
+            || current_task_slot.state() != State::Ready
+            || !current_task_slot.current_is_boot_idle()
+            || pi_lock.state() != State::Ready
+            || scheduler.boot_idle_preemption().state() != State::Ready
             || self.pid != KERNEL_INIT_PID
             || !self.sched_entity_ready
         {
@@ -191,13 +211,22 @@ impl KernelInitTask {
             );
         }
 
-        self.enqueued = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            Checkpoint::KernelInitTaskOnline,
-        )
+        pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
+        let guarded_result = (|| {
+            self.running = true;
+            scheduler.select_boot_runqueue_for_task(self.pid)?;
+            scheduler.enqueue_task_on_boot_runqueue(self.pid)?;
+            self.enqueued = true;
+            self.lifecycle.transition(
+                LifecycleEvent::Enable,
+                State::Ready,
+                State::Online,
+                Checkpoint::KernelInitTaskOnline,
+            )
+        })();
+        let unlock_result =
+            pi_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
+        guarded_result.and(unlock_result)
     }
 
     fn pin_to_boot_cpu(&mut self, root_pid_namespace: &RootPidNamespace, cpu_id: usize) -> bool {
@@ -741,11 +770,19 @@ impl KernelInitDispatchGate {
         if interrupts_enabled {
             crate::arch::riscv64::csr::disable_supervisor_interrupts();
         }
+        let preempt_disable_result = scheduler.boot_idle_preemption_mut().disable();
+        if preempt_disable_result.is_err() {
+            if interrupts_enabled {
+                crate::arch::riscv64::csr::enable_supervisor_interrupts();
+            }
+            return self.failed_setup();
+        }
         let schedule_result = scheduler.schedule_preempt_disabled();
+        let preempt_enable_result = scheduler.boot_idle_preemption_mut().enable();
         if interrupts_enabled {
             crate::arch::riscv64::csr::enable_supervisor_interrupts();
         }
-        if schedule_result.is_err() {
+        if schedule_result.is_err() || preempt_enable_result.is_err() {
             return self.failed_setup();
         }
 

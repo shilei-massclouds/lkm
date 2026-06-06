@@ -24,7 +24,7 @@ pub fn setup(ctx: &mut Context) -> ! {
 fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.init_stack.enable()?;
 
-    let boot_hartid = ctx.cpu_group.boot_hartid();
+    let boot_hartid = ctx.boot_current_cpu.hartid();
     ctx.early_dtb.preset(
         &ctx.raw_dtb,
         &ctx.fix_map,
@@ -33,7 +33,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.physical_memory,
     )?;
     ctx.cpu_id_map.preset(boot_hartid)?;
-    ctx.interrupt_stream.setup()?;
+    ctx.interrupt_stream
+        .setup(&mut ctx.boot_cpu_local_interrupt)?;
     ctx.cpu_group
         .boot_cpu_setup(ctx.platform_cpu_info.contains(boot_hartid))?;
     ctx.cpu_group.boot_cpu_enable()?;
@@ -102,6 +103,9 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
 fn entry_successor_phase_ready(ctx: &Context) -> bool {
     ctx.init_stack.state() == State::Online
         && ctx.cpu_group.boot_cpu_state() == State::Online
+        && ctx.boot_current_cpu.state() == State::Online
+        && ctx.boot_cpu_local_interrupt.state() == State::Ready
+        && ctx.boot_cpu_local_interrupt.disabled()
         && ctx.interrupt_stream.state() == State::Ready
         && ctx.vm.state() == State::Online
         && ctx.vm.entry_successor_ready()

@@ -369,16 +369,17 @@ object InterruptStream: FlowObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
+                    BootCpuLocalInterrupt.state == State::Ready;
                 }
 
-                may_change {
-                    Riscv64.sstatus;
+                drives {
+                    BootCpuLocalInterrupt.Event::Disable;
                 }
 
                 ensures {
                     Riscv64.sie == 0;
                     Riscv64.sip == 0;
-                    supervisor_interrupts_disabled(Riscv64.sstatus);
+                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
                     interrupt_dispatch_ready(InterruptStream);
                 }
             }
@@ -392,7 +393,7 @@ object InterruptStream: FlowObject {
         invariant {
             Riscv64.sie == 0;
             Riscv64.sip == 0;
-            supervisor_interrupts_disabled(Riscv64.sstatus);
+            cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
             interrupt_dispatch_ready(InterruptStream);
         }
 
@@ -409,12 +410,12 @@ object InterruptStream: FlowObject {
                     EventStream.state == State::Ready;
                 }
 
-                may_change {
-                    Riscv64.sstatus;
+                drives {
+                    BootCpuLocalInterrupt.Event::Enable;
                 }
 
                 ensures {
-                    supervisor_interrupts_enabled(Riscv64.sstatus);
+                    cpu_local_interrupts_enabled(BootCpuLocalInterrupt);
                     boot_cpu_local_interrupts_enabled(BootCPU);
                     interrupt_dispatch_ready(InterruptStream);
                 }
@@ -428,7 +429,7 @@ object InterruptStream: FlowObject {
      */
     state State::Online {
         invariant {
-            supervisor_interrupts_enabled(Riscv64.sstatus);
+            cpu_local_interrupts_enabled(BootCpuLocalInterrupt);
             boot_cpu_local_interrupts_enabled(BootCPU);
             interrupt_dispatch_ready(InterruptStream);
         }
@@ -1562,11 +1563,107 @@ object SwapperVm: AddressSpaceObject {
 }
 
 /*
- * BootCPU 表示当前启动 CPU 本体。后续 secondary CPU 可复用同一类 CPU 对象。
+ * BootCurrentCPU 表示 BP 启动时天然存在的当前 CPU 自我身份入口。它独立于
+ * CpuGroup，拥有当前启动 CPU 对象；过渡期内该 CPU 对象仍由 BootCPU 承载，
+ * BootCPU 作为 CurrentCPU.cpu 的 bootstrap role/alias 保留。
+ */
+object BootCurrentCPU: CurrentCPU {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            /*
+             * Preset 记录 BP 的自我身份入口和入口 hartid 来源。
+             */
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    BootArgs.state == State::Online;
+                    BootCPU.state == State::Base;
+                }
+
+                drives {
+                    BootCPU.Event::Preset;
+                    BootCpuLocalInterrupt.Event::Setup;
+                    BootCpuCurrentTask.Event::Setup;
+                }
+
+                ensures {
+                    current_cpu_self_identity_ready(BootCurrentCPU);
+                    current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
+                    current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
+                    current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
+                    cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
+                    current_task_slot_ready(BootCpuCurrentTask, BootCPU);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            current_cpu_self_identity_ready(BootCurrentCPU);
+            current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
+            current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
+            current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
+        }
+
+        events {
+            /*
+             * Setup 确认 BP 的 logical CPU id。当前启动闭环固定为 0。
+             */
+            on Event::Setup -> State::Ready {
+                ensures {
+                    current_cpu_logical_id_ready(BootCurrentCPU, 0);
+                    current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
+            current_cpu_logical_id_ready(BootCurrentCPU, 0);
+            current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
+            current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
+        }
+
+        events {
+            /*
+             * Enable 在 CpuGroup 建立后，把 CurrentCPU 拥有的 CPU 对象注册到
+             * CpuGroup 的引用集合。CpuGroup 不拥有 CPU 本体。
+             */
+            on Event::Enable -> State::Online {
+                depends_on {
+                    CpuGroup.state == State::Prepared;
+                }
+
+                ensures {
+                    current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
+                    boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
+            current_cpu_logical_id_ready(BootCurrentCPU, 0);
+            current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
+            current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
+            current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
+        }
+    }
+}
+
+/*
+ * BootCPU 表示 BootCurrentCPU 拥有的启动 CPU 对象。后续它会退化为
+ * BootCurrentCPU.cpu 的 bootstrap role/alias；当前迁移期保留具名对象。
  */
 object BootCPU: CPUObject {
     initial_state: State::Base;
-    parent: CpuGroup;
+    parent: BootCurrentCPU;
 
     attrs {
         hartid: HartId;
@@ -1656,31 +1753,83 @@ object BootCPU: CPUObject {
 }
 
 /*
- * CpuGroup 表示 SoC 下的处理器管理对象。入口前导期只建立启动 CPU 子对象的组织边界；
- * 核心准备期再基于正式 DeviceTree 和 CpuIdMap.Prepared 完成 setup_smp() 对应的拓扑准备。
+ * BootCpuLocalInterrupt 是 BootCPU 的本地中断总开关控制对象。接管后只有它
+ * 可以直接表示 local interrupt 开关状态；InterruptStream 只能驱动它。
+ */
+object BootCpuLocalInterrupt: LocalInterruptControl {
+    initial_state: State::Base;
+    parent: BootCPU;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                ensures {
+                    cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
+                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
+        }
+    }
+}
+
+/*
+ * BootCpuCurrentTask 是 BootCPU 的 current task 引用槽。它不拥有任务，只保存
+ * 当前 CPU 正在执行的 task 引用。
+ */
+object BootCpuCurrentTask: CurrentTaskSlot {
+    initial_state: State::Base;
+    parent: BootCPU;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                ensures {
+                    current_task_slot_ready(BootCpuCurrentTask, BootCPU);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            current_task_slot_ready(BootCpuCurrentTask, BootCPU);
+        }
+    }
+}
+
+/*
+ * CpuGroup 表示 SoC 下的处理器管理对象。它维护 CPU 对象引用、索引和拓扑
+ * 组织关系，不拥有 CPU 本体；启动 CPU 本体由 BootCurrentCPU 拥有。
+ * 核心准备期再基于正式 DeviceTree 和 CpuIdMap.Prepared 完成 setup_smp()
+ * 对应的拓扑准备。
  */
 object CpuGroup: HardwareObject {
     initial_state: State::Base;
     parent: Soc;
 
     /*
-     * Base 表示处理器管理对象尚未组织启动 CPU 子对象。
+     * Base 表示处理器管理对象尚未记录启动 CPU 引用。
      */
     state State::Base {
         events {
             /*
-             * Preset 驱动 BootCPU 记录入口参数 a0 中的启动 hart 物理标识。
+             * Preset 注册 BootCurrentCPU 拥有的 BootCPU 引用。CpuGroup 不拥有
+             * BootCPU，只维护该引用和后续 topology/index 关系。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    BootCPU.state == State::Base;
-                }
-
-                drives {
-                    BootCPU.Event::Preset;
+                    BootCurrentCPU.state == State::Ready;
+                    BootCPU.state == State::Prepared;
                 }
 
                 ensures {
+                    current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
                     boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
                 }
             }
@@ -1692,6 +1841,7 @@ object CpuGroup: HardwareObject {
      */
     state State::Prepared {
         invariant {
+            current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
             boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
         }
 
@@ -1710,6 +1860,7 @@ object CpuGroup: HardwareObject {
 
                 ensures {
                     boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+                    current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
                     cpu_group_topology_ready(CpuGroup, DeviceTree);
                     cpu_group_boot_cpu_present(CpuGroup, BootCPU);
                     secondary_cpus_discovered(CpuGroup, DeviceTree);
@@ -1732,6 +1883,7 @@ object CpuGroup: HardwareObject {
     state State::Ready {
         invariant {
             boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+            current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
             cpu_group_topology_ready(CpuGroup, DeviceTree);
             cpu_group_boot_cpu_present(CpuGroup, BootCPU);
             secondary_cpus_discovered(CpuGroup, DeviceTree);
@@ -1829,7 +1981,10 @@ object EntryPreludePhase: PhaseObject {
                     KernelImage.Event::Preset;
                     RootStream.Event::Preset;
                     KernelImage.Event::Setup;
+                    BootCurrentCPU.Event::Preset;
+                    BootCurrentCPU.Event::Setup;
                     CpuGroup.Event::Preset;
+                    BootCurrentCPU.Event::Enable;
                     BootInitTask.Event::Preset;
                     BootInitStack.Event::Preset;
                     EventStream.Event::Preset;
@@ -1868,6 +2023,7 @@ object EntryPreludePhase: PhaseObject {
             Vm.state == State::Ready;
             TrampolineVm.state == State::Destroyed;
             EarlyVm.state == State::Online;
+            BootCurrentCPU.state == State::Online;
             BootCPU.state == State::Prepared;
             CpuGroup.state == State::Prepared;
             Soc.state == State::Prepared;

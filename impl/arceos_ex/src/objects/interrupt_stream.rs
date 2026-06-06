@@ -2,7 +2,10 @@ use core::sync::atomic::{AtomicU8, Ordering};
 
 use crate::{arch::riscv64::csr, trace::Checkpoint};
 
-use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
+use super::{
+    cpu_control::LocalInterruptControl,
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+};
 
 const SCAUSE_INTERRUPT_BIT: usize = 1usize << (usize::BITS as usize - 1);
 const INTERRUPT_HANDLER_COUNT: usize = 16;
@@ -61,8 +64,8 @@ impl InterruptStream {
         self.boot_cpu_local_interrupts_enabled
     }
 
-    pub fn setup(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Prepared {
+    pub fn setup(&mut self, local_interrupt: &mut LocalInterruptControl) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || local_interrupt.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -71,6 +74,8 @@ impl InterruptStream {
             );
         }
 
+        local_interrupt.disable()?;
+        self.boot_cpu_local_interrupts_enabled = false;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -94,7 +99,7 @@ impl InterruptStream {
         Ok(())
     }
 
-    pub fn enable(&mut self) -> EventResult {
+    pub fn enable(&mut self, local_interrupt: &mut LocalInterruptControl) -> EventResult {
         if self.lifecycle.state() != State::Ready || !self.timer_handler_ready {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -104,8 +109,8 @@ impl InterruptStream {
             );
         }
 
-        csr::enable_supervisor_interrupts();
-        if !csr::supervisor_interrupts_enabled() {
+        local_interrupt.enable()?;
+        if !local_interrupt.enabled() || !csr::supervisor_interrupts_enabled() {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -114,7 +119,7 @@ impl InterruptStream {
             );
         }
 
-        self.boot_cpu_local_interrupts_enabled = true;
+        self.boot_cpu_local_interrupts_enabled = local_interrupt.enabled();
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,

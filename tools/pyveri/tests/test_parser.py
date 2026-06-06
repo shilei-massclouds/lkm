@@ -150,7 +150,7 @@ class ParserTests(unittest.TestCase):
     def test_parse_exclusive_context_and_within_block(self) -> None:
         document = parse_text(
             """
-            lock TaskPiLock;
+            lock TaskPiLock: RawSpinLock;
 
             exclusive_context WakeContext {
                 lock_ref: TaskPiLock;
@@ -168,6 +168,10 @@ class ParserTests(unittest.TestCase):
                     events {
                         on Event::Enable -> State::Online {
                             within WakeContext {
+                                entered_by {
+                                    TaskPiLock.Event::LockIrqSave;
+                                }
+
                                 depends_on {
                                     task_state_new(A);
                                 }
@@ -175,6 +179,10 @@ class ParserTests(unittest.TestCase):
                                 drives {
                                     A.Action::SetTaskState(TaskRuntimeState::Running);
                                     B.Action::Touch(task: A);
+                                }
+
+                                exited_by {
+                                    TaskPiLock.Event::UnlockIrqRestore;
                                 }
 
                                 ensures {
@@ -199,6 +207,7 @@ class ParserTests(unittest.TestCase):
         )
 
         self.assertEqual([lock.name for lock in document.locks], ["TaskPiLock"])
+        self.assertEqual(document.locks[0].kind, "RawSpinLock")
         context = document.exclusive_contexts[0]
         self.assertEqual(context.name, "WakeContext")
         self.assertEqual(context.lock_ref, "TaskPiLock")
@@ -206,11 +215,19 @@ class ParserTests(unittest.TestCase):
         event = document.objects[0].states[0].events[0]
         self.assertEqual(event.within[0].context, "WakeContext")
         self.assertEqual(
+            event.within[0].entered_by[0].entries,
+            ["TaskPiLock.Event::LockIrqSave"],
+        )
+        self.assertEqual(
             event.within[0].drives[0].entries,
             [
                 "A.Action::SetTaskState(TaskRuntimeState::Running)",
                 "B.Action::Touch(task: A)",
             ],
+        )
+        self.assertEqual(
+            event.within[0].exited_by[0].entries,
+            ["TaskPiLock.Event::UnlockIrqRestore"],
         )
 
     def test_parse_current_entry_prelude_spec(self) -> None:

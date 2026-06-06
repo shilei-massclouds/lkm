@@ -146,6 +146,7 @@ def _event_to_json(item: EventDef) -> dict[str, Any]:
 def _lock_to_json(item: LockDecl) -> dict[str, Any]:
     return {
         "name": item.name,
+        "kind": item.kind,
         "span": _span_to_json(item.span),
     }
 
@@ -200,8 +201,10 @@ def _within_to_json(item: WithinDecl) -> dict[str, Any]:
     return {
         "context": item.context,
         "span": _span_to_json(item.span),
+        "entered_by": [_block_to_json(block) for block in item.entered_by],
         "depends_on": [_block_to_json(block) for block in item.depends_on],
         "drives": [_block_to_json(block) for block in item.drives],
+        "exited_by": [_block_to_json(block) for block in item.exited_by],
         "may_change": [_block_to_json(block) for block in item.may_change],
         "ensures": [_block_to_json(block) for block in item.ensures],
         "deferred": [_block_to_json(block) for block in item.deferred],

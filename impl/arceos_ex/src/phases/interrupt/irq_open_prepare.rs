@@ -75,6 +75,8 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
     crate::phases::interrupt::irq_time_init::is_ready()
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
+        && ctx.boot_cpu_local_interrupt.state() == State::Ready
+        && ctx.boot_cpu_local_interrupt.enabled()
         && csr::supervisor_interrupts_enabled()
         && ctx.irq_dispatch_tree.state() == State::Ready
         && ctx.sbi_ipi.state() == State::Ready

@@ -120,6 +120,8 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
     crate::phases::interrupt::irq_open_prepare::is_ready()
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
+        && ctx.boot_cpu_local_interrupt.state() == State::Ready
+        && ctx.boot_cpu_local_interrupt.enabled()
         && csr::supervisor_interrupts_enabled()
         && ctx.console.state() == State::Prepared
         && ctx.sched_clock.state() == State::Ready

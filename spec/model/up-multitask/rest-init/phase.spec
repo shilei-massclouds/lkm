@@ -15,7 +15,7 @@
  * RCU_SCHEDULER_INIT，同步 GP 序号基线，并保持 GP kthread deferred。
  */
 
-lock KernelInitTaskPiLock;
+lock KernelInitTaskPiLock: RawSpinLock;
 
 exclusive_context WakeUpNewTaskContext {
     lock_ref: KernelInitTaskPiLock;
@@ -46,9 +46,11 @@ exclusive_context WakeUpNewTaskContext {
  * KernelInitTask.Setup 只提交 KernelInitTask Prepared -> Ready 的生命周期结果。
  *
  * KernelInitTask.Enable 对应 wake_up_new_task()。该路径受 p->pi_lock 保护，
- * 因此 Enable 不直接驱动任务、调度器和 runqueue 的 action，而是在
- * WakeUpNewTaskContext 独占上下文内执行：上下文通过 KernelInitTaskPiLock
- * 建立边界，引用 KernelInitTask、Scheduler、BootRunQueue 三个对象。
+ * 因此 Enable 先通过 KernelInitTaskPiLock.LockIrqSave 进入
+ * WakeUpNewTaskContext，再在该独占上下文内执行受保护资源动作；退出时
+ * 通过 KernelInitTaskPiLock.UnlockIrqRestore 恢复本地中断和当前任务抢占。
+ * 上下文通过 KernelInitTaskPiLock 建立边界，引用 KernelInitTask、
+ * Scheduler、BootRunQueue 三个受保护对象。
  * Enable 的 within WakeUpNewTaskContext 块直接驱动
  * Task.Action::SetTaskState(Running)、Scheduler.Action::SelectRunQueue
  * (selected_rq: BootRunQueue) 和 BootRunQueue.Action::EnqueueTask
@@ -156,14 +158,24 @@ object KernelInitTask: TaskObject {
                 depends_on {
                     Scheduler.state == State::Online;
                     BootRunQueue.state == State::Ready;
+                    BootCurrentCPU.state == State::Online;
+                    BootCpuLocalInterrupt.state == State::Ready;
+                    BootCpuCurrentTask.state == State::Ready;
+                    current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                    task_preemption_control_ready(BootIdleTask);
                     task_state_new(KernelInitTask);
                     task_not_enqueued(KernelInitTask);
                 }
 
                 within WakeUpNewTaskContext {
+                    entered_by {
+                        KernelInitTaskPiLock.Event::LockIrqSave;
+                    }
+
                     depends_on {
                         task_state_new(KernelInitTask);
                         task_not_enqueued(KernelInitTask);
+                        current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     }
 
                     drives {
@@ -172,7 +184,13 @@ object KernelInitTask: TaskObject {
                         BootRunQueue.Action::EnqueueTask(task: KernelInitTask);
                     }
 
+                    exited_by {
+                        KernelInitTaskPiLock.Event::UnlockIrqRestore;
+                    }
+
                     ensures {
+                        raw_spinlock_irqsave_entered(KernelInitTaskPiLock, BootCurrentCPU);
+                        raw_spinlock_irqrestore_exited(KernelInitTaskPiLock, BootCurrentCPU);
                         task_state_running(KernelInitTask);
                         task_runqueue_selected(Scheduler, KernelInitTask, BootRunQueue);
                         task_enqueued_on_runqueue(KernelInitTask, BootRunQueue);

@@ -47,7 +47,14 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.root_pid_namespace,
         &ctx.scheduler,
     )?;
-    ctx.kernel_init_task.enable(&ctx.scheduler)?;
+    ctx.kernel_init_task_pi_lock.setup()?;
+    ctx.kernel_init_task.enable(
+        &mut ctx.scheduler,
+        &ctx.boot_current_cpu,
+        &mut ctx.boot_cpu_local_interrupt,
+        &ctx.boot_cpu_current_task,
+        &mut ctx.kernel_init_task_pi_lock,
+    )?;
     ctx.kernel_init_affinity.setup(
         &mut ctx.kernel_init_task,
         &ctx.root_pid_namespace,
@@ -177,7 +184,14 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && !ctx.kernel_init_task.user_mm_created()
         && ctx.kernel_init_task.thread_context_ready()
         && ctx.kernel_init_task.sched_entity_ready()
+        && ctx.kernel_init_task.running()
         && ctx.kernel_init_task.enqueued()
+        && ctx.scheduler.selected_runqueue_task_id() == ctx.kernel_init_task.pid()
+        && ctx.scheduler.boot_runqueue().enqueued_task_id() == ctx.kernel_init_task.pid()
+        && ctx.kernel_init_task_pi_lock.state() == State::Ready
+        && !ctx.kernel_init_task_pi_lock.locked()
+        && ctx.kernel_init_task_pi_lock.irqsave_entered_count() != 0
+        && ctx.kernel_init_task_pi_lock.irqrestore_exited_count() != 0
         && !ctx.kernel_init_task.waiting_for_kthreadd_done()
         && ctx.kernel_init_task.released_for_pre_smp_init()
         && ctx.kernel_init_task.pinned_to_boot_cpu()

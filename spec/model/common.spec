@@ -36,6 +36,26 @@ enum CompletionExtState {
     CompletedAll,
 }
 
+enum LocalInterruptExtState {
+    Disabled,
+    Enabled,
+}
+
+enum SavedInterruptState {
+    Disabled,
+    Enabled,
+}
+
+enum PreemptionExtState {
+    Enabled,
+    Disabled,
+}
+
+enum RawSpinLockExtState {
+    Unlocked,
+    Locked,
+}
+
 function addr_of<T>(value: T) -> AddrIdentity<T>;
 function phys_addr<T>(value: T) -> PhysAddr<T>;
 function virt_addr<T, S: VirtualAddressSpace, A: VirtualAddressArea>(value: T, space: S, area: A) -> VirtAddr<T>;
@@ -98,6 +118,31 @@ predicate wait_queue_wake_one_committed<T>(queue: T) -> bool;
 predicate wait_queue_wake_all_committed<T>(queue: T) -> bool;
 predicate wait_queue_waiter_enqueued<T>(queue: T) -> bool;
 predicate wait_queue_waiter_finished<T>(queue: T) -> bool;
+predicate current_cpu_self_identity_ready<T>(current_cpu: T) -> bool;
+predicate current_cpu_hartid_ready<T>(current_cpu: T, hartid: HartId) -> bool;
+predicate current_cpu_logical_id_ready<T, U>(current_cpu: T, logical_id: U) -> bool;
+predicate current_cpu_owns_cpu<T, U>(current_cpu: T, cpu: U) -> bool;
+predicate current_cpu_registered_in_cpu_group<T, U>(current_cpu: T, cpu_group: U) -> bool;
+predicate current_cpu_bootstrap_role_ready<T, U>(current_cpu: T, cpu: U) -> bool;
+predicate cpu_local_interrupt_control_ready<T, U>(control: T, cpu: U) -> bool;
+predicate cpu_local_interrupts_disabled<T>(control: T) -> bool;
+predicate cpu_local_interrupts_enabled<T>(control: T) -> bool;
+predicate cpu_local_interrupts_saved_and_disabled<T>(control: T) -> bool;
+predicate cpu_local_interrupts_restored<T>(control: T) -> bool;
+predicate current_task_slot_ready<T, U>(slot: T, cpu: U) -> bool;
+predicate current_task_slot_current<T, U>(slot: T, task: U) -> bool;
+predicate task_preemption_control_ready<T>(task: T) -> bool;
+predicate task_preemption_disabled<T>(task: T) -> bool;
+predicate task_preemption_enabled<T>(task: T) -> bool;
+predicate raw_spinlock_storage_bound<T>(lock: T) -> bool;
+predicate raw_spinlock_initialized<T>(lock: T) -> bool;
+predicate raw_spinlock_unlocked<T>(lock: T) -> bool;
+predicate raw_spinlock_ready<T>(lock: T) -> bool;
+predicate raw_spinlock_acquired<T>(lock: T) -> bool;
+predicate raw_spinlock_released<T>(lock: T) -> bool;
+predicate raw_spinlock_held<T>(lock: T) -> bool;
+predicate raw_spinlock_irqsave_entered<T, U>(lock: T, current_cpu: U) -> bool;
+predicate raw_spinlock_irqrestore_exited<T, U>(lock: T, current_cpu: U) -> bool;
 
 predicate attrs_accessible<T: Object>(obj: T) -> bool {
     forall attr in obj.attrs {
@@ -292,6 +337,220 @@ type FixMapConfig {
 }
 
 type TimelineObject {
+}
+
+type CurrentCPU {
+    owned {
+        cpu: CPUObject;
+    }
+
+    lifecycle {
+        Event::Preset {
+            state_effect: StateEffect::Always;
+            ensures {
+                current_cpu_self_identity_ready(self);
+            }
+        }
+
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            ensures {
+                current_cpu_self_identity_ready(self);
+            }
+        }
+
+        Event::Enable {
+            state_effect: StateEffect::Always;
+            ensures {
+                current_cpu_registered_in_cpu_group(self, CpuGroup);
+            }
+        }
+    }
+}
+
+type LocalInterruptControl {
+    ext_state: LocalInterruptExtState;
+
+    processes {
+        Event::Disable {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                LocalInterruptExtState::Enabled -> LocalInterruptExtState::Disabled;
+                LocalInterruptExtState::Disabled -> LocalInterruptExtState::Disabled;
+            }
+            ensures {
+                cpu_local_interrupts_disabled(self);
+            }
+            result {
+                Enabled: Success(disabled);
+                Disabled: Success(no_change);
+            }
+        }
+
+        Event::Enable {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                LocalInterruptExtState::Disabled -> LocalInterruptExtState::Enabled;
+                LocalInterruptExtState::Enabled -> LocalInterruptExtState::Enabled;
+            }
+            ensures {
+                cpu_local_interrupts_enabled(self);
+            }
+            result {
+                Disabled: Success(enabled);
+                Enabled: Success(no_change);
+            }
+        }
+
+        Event::SaveAndDisable {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                LocalInterruptExtState::Enabled -> LocalInterruptExtState::Disabled;
+                LocalInterruptExtState::Disabled -> LocalInterruptExtState::Disabled;
+            }
+            ensures {
+                cpu_local_interrupts_saved_and_disabled(self);
+                cpu_local_interrupts_disabled(self);
+            }
+            result {
+                Enabled: Success(saved_enabled_then_disabled);
+                Disabled: Success(saved_disabled);
+            }
+        }
+
+        Event::Restore {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                SavedInterruptState::Enabled -> LocalInterruptExtState::Enabled;
+                SavedInterruptState::Disabled -> LocalInterruptExtState::Disabled;
+            }
+            ensures {
+                cpu_local_interrupts_restored(self);
+            }
+            result {
+                SavedEnabled: Success(restored_enabled);
+                SavedDisabled: Success(restored_disabled);
+            }
+        }
+    }
+}
+
+type CurrentTaskSlot {
+    processes {
+        Action::SetCurrent {
+            state_effect: StateEffect::None;
+            ensures {
+                current_task_slot_current(self, task);
+            }
+        }
+    }
+}
+
+type PreemptionControl {
+    ext_state: PreemptionExtState;
+
+    processes {
+        Event::Disable {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                PreemptionExtState::Enabled -> PreemptionExtState::Disabled;
+                PreemptionExtState::Disabled -> PreemptionExtState::Disabled;
+            }
+            ensures {
+                task_preemption_disabled(self);
+            }
+            result {
+                Enabled: Success(disabled);
+                Disabled: Success(nested_disable);
+            }
+        }
+
+        Event::Enable {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                PreemptionExtState::Disabled -> PreemptionExtState::Enabled;
+                PreemptionExtState::Enabled -> PreemptionExtState::Enabled;
+            }
+            ensures {
+                task_preemption_enabled(self);
+            }
+            result {
+                Disabled: Success(enabled_or_nested_count_decremented);
+                Enabled: Success(no_change);
+            }
+        }
+    }
+}
+
+type RawSpinLock {
+    ext_state: RawSpinLockExtState;
+
+    lifecycle {
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            ensures {
+                raw_spinlock_storage_bound(self);
+                raw_spinlock_initialized(self);
+                raw_spinlock_unlocked(self);
+                raw_spinlock_ready(self);
+            }
+        }
+    }
+
+    processes {
+        Action::Acquire {
+            state_effect: StateEffect::None;
+            ensures {
+                raw_spinlock_acquired(self);
+                raw_spinlock_held(self);
+            }
+        }
+
+        Action::Release {
+            state_effect: StateEffect::None;
+            ensures {
+                raw_spinlock_released(self);
+                raw_spinlock_unlocked(self);
+            }
+        }
+
+        Event::LockIrqSave {
+            state_effect: StateEffect::Conditional;
+            drives {
+                current_cpu.cpu.LocalInterruptControl.Event::SaveAndDisable(out flags);
+                current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Event::Disable;
+                self.Action::Acquire;
+            }
+            transitions {
+                RawSpinLockExtState::Unlocked -> RawSpinLockExtState::Locked;
+                RawSpinLockExtState::Locked -> RawSpinLockExtState::Locked;
+            }
+            ensures {
+                raw_spinlock_irqsave_entered(self, current_cpu);
+                raw_spinlock_acquired(self);
+            }
+            result {
+                Unlocked: Success(acquired);
+                Locked: Blocked(contended);
+            }
+        }
+
+        Event::UnlockIrqRestore {
+            state_effect: StateEffect::Conditional;
+            drives {
+                self.Action::Release;
+                current_cpu.cpu.LocalInterruptControl.Event::Restore(flags);
+                current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Event::Enable;
+            }
+            transitions {
+                RawSpinLockExtState::Locked -> RawSpinLockExtState::Unlocked;
+            }
+            ensures {
+                raw_spinlock_irqrestore_exited(self, current_cpu);
+                raw_spinlock_released(self);
+            }
+        }
+    }
 }
 
 type CompletionTokenCount {

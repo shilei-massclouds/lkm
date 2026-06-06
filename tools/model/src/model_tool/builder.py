@@ -30,9 +30,11 @@ from common.spec_ast import (
 
 _OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
+_LOCK_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
+_TYPE_EVENT_RE_TEMPLATE = r"\bEvent::{}\b"
 _ATTR_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)\Z", re.S)
 _ALLOWED_STATE_NAMES = frozenset(
     {
@@ -104,6 +106,7 @@ def build_model(document: SpecDocument) -> BuildResult:
 
     _check_initial_states(model, diagnostics)
     _check_event_targets(model, diagnostics)
+    _check_lock_references(model, diagnostics)
     _check_exclusive_context_references(model, diagnostics)
     _check_references(model, diagnostics)
 
@@ -457,8 +460,22 @@ def _check_exclusive_context_references(
                         Severity.ERROR,
                         f"unknown object reference in exclusive_context {context.name}: {object_name}",
                         context.decl.span,
-                    )
                 )
+            )
+
+
+def _check_lock_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
+    for lock in model.locks.values():
+        if lock.kind is None:
+            continue
+        if lock.kind not in model.types:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown lock type on lock {lock.name}: {lock.kind}",
+                    lock.span,
+                )
+            )
 
 
 def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
@@ -490,11 +507,65 @@ def _check_within_references(model: ObjectModel, within, diagnostics: list[Diagn
         )
         return
 
+    for block in within.entered_by:
+        _check_lock_event_references(model, block, diagnostics, context=context)
     for block in within.depends_on:
         _check_state_references(model, block, diagnostics)
     for block in within.drives:
         _check_event_references(model, block, diagnostics)
         _check_action_references(model, block, diagnostics, context=context)
+    for block in within.exited_by:
+        _check_lock_event_references(model, block, diagnostics, context=context)
+
+
+def _check_lock_event_references(
+    model: ObjectModel,
+    block: Block,
+    diagnostics: list[Diagnostic],
+    *,
+    context: ExclusiveContextDef,
+) -> None:
+    for lock_name, event_name in _LOCK_EVENT_RE.findall(block.body):
+        if lock_name != context.lock_ref:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "lock event reference outside exclusive_context lock_ref: "
+                    f"{lock_name}.Event::{event_name} not bound to {context.name}",
+                    block.span,
+                )
+            )
+            continue
+        lock = model.locks.get(lock_name)
+        if lock is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown lock in event reference: {lock_name}.Event::{event_name}",
+                    block.span,
+                )
+            )
+            continue
+        if lock.kind is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"lock event reference requires typed lock: {lock_name}.Event::{event_name}",
+                    block.span,
+                )
+            )
+            continue
+        lock_type = model.types.get(lock.kind)
+        if lock_type is None:
+            continue
+        if not _type_declares_event(lock_type, event_name):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown lock type event reference: {lock_name}.Event::{event_name}",
+                    block.span,
+                )
+            )
 
 
 def _check_action_references(
@@ -540,7 +611,10 @@ def _check_event_references(
                 )
             )
             continue
-        if not any(event_name in state.events for state in obj.states.values()):
+        if not any(event_name in state.events for state in obj.states.values()) and not (
+            obj.kind in model.types
+            and _type_declares_event(model.types[obj.kind], event_name)
+        ):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -548,6 +622,11 @@ def _check_event_references(
                     block.span,
                 )
             )
+
+
+def _type_declares_event(type_decl: TypeDecl, event_name: str) -> bool:
+    pattern = re.compile(_TYPE_EVENT_RE_TEMPLATE.format(re.escape(event_name)))
+    return any(pattern.search(block.body) for block in type_decl.blocks)
 
 
 def _check_state_references(

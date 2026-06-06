@@ -16,6 +16,8 @@ pub fn run() -> SmokeResult {
 
     if !phases::interrupt::irq_time_init::is_ready()
         || ctx.interrupt_stream.state() != State::Online
+        || ctx.boot_cpu_local_interrupt.state() != State::Ready
+        || !ctx.boot_cpu_local_interrupt.enabled()
         || !csr::supervisor_interrupts_enabled()
     {
         printk::write_str("irq time phase did not open boot CPU interrupts\n");

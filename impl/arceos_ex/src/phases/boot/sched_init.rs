@@ -35,6 +35,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.per_cpu_storage,
         &ctx.init_task,
         &ctx.init_mm,
+        &mut ctx.boot_cpu_current_task,
     )?;
     ctx.scheduler.enable()?;
     checkpoint_irqs_disabled()?;
@@ -108,6 +109,10 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.boot_idle_task().uses_current_init_task()
         && ctx.scheduler.boot_idle_task().lazy_tlb_mm_ready()
         && ctx.scheduler.boot_idle_task().no_set_affinity()
+        && ctx.scheduler.boot_idle_preemption().state() == State::Ready
+        && ctx.scheduler.boot_idle_preemption().enabled()
+        && ctx.boot_cpu_current_task.state() == State::Ready
+        && ctx.boot_cpu_current_task.current_is_boot_idle()
         && ctx.radix_tree.state() == State::Ready
         && ctx.radix_tree.node_cache_ready()
         && ctx.radix_tree.cpuhp_step() != 0

@@ -82,9 +82,13 @@ def model_json_to_object_model(data: dict[str, Any]) -> ObjectModel:
 
 def _lock_from_json(item: Any) -> LockDecl:
     data = _as_object(item, "lock")
+    kind = data.get("kind")
+    if kind is not None and not isinstance(kind, str):
+        raise ValueError("lock.kind must be a string or null")
     return LockDecl(
         name=_string(data, "name"),
         span=_span_from_json(data["span"]),
+        kind=kind,
     )
 
 
@@ -237,8 +241,10 @@ def _within_from_json(item: Any) -> WithinDecl:
     return WithinDecl(
         context=_string(data, "context"),
         span=_span_from_json(data["span"]),
+        entered_by=[_block_from_json(block) for block in _list(data, "entered_by")],
         depends_on=[_block_from_json(block) for block in _list(data, "depends_on")],
         drives=[_block_from_json(block) for block in _list(data, "drives")],
+        exited_by=[_block_from_json(block) for block in _list(data, "exited_by")],
         may_change=[_block_from_json(block) for block in _list(data, "may_change")],
         ensures=[_block_from_json(block) for block in _list(data, "ensures")],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],

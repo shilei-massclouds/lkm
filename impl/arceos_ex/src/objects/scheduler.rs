@@ -1,4 +1,5 @@
 use super::{
+    cpu_control::{CurrentTaskSlot, PreemptionControl},
     cpu_group::CpuGroup,
     cpu_id_map::CpuIdMap,
     init_mm::InitMm,
@@ -16,7 +17,9 @@ pub struct Scheduler {
     bit_wait_queue_table: BitWaitQueueTable,
     boot_runqueue: BootRunQueue,
     boot_idle_task: BootIdleTask,
+    boot_idle_preemption: PreemptionControl,
     scheduler_running: bool,
+    selected_runqueue_task_id: usize,
     preempt_disabled_passes: usize,
     smp_initialized: bool,
     sched_domains_ready: bool,
@@ -33,7 +36,9 @@ impl Scheduler {
             bit_wait_queue_table: BitWaitQueueTable::new(),
             boot_runqueue: BootRunQueue::new(),
             boot_idle_task: BootIdleTask::new(),
+            boot_idle_preemption: PreemptionControl::new(),
             scheduler_running: false,
+            selected_runqueue_task_id: usize::MAX,
             preempt_disabled_passes: 0,
             smp_initialized: false,
             sched_domains_ready: false,
@@ -63,8 +68,20 @@ impl Scheduler {
         &self.boot_idle_task
     }
 
+    pub const fn boot_idle_preemption(&self) -> &PreemptionControl {
+        &self.boot_idle_preemption
+    }
+
+    pub fn boot_idle_preemption_mut(&mut self) -> &mut PreemptionControl {
+        &mut self.boot_idle_preemption
+    }
+
     pub const fn scheduler_running(&self) -> bool {
         self.scheduler_running
+    }
+
+    pub const fn selected_runqueue_task_id(&self) -> usize {
+        self.selected_runqueue_task_id
     }
 
     pub const fn preempt_disabled_passes(&self) -> usize {
@@ -124,6 +141,7 @@ impl Scheduler {
         per_cpu_storage: &PerCpuStorage,
         init_task: &InitTask,
         init_mm: &InitMm,
+        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
             || self.default_root_domain.state() != State::Ready
@@ -145,6 +163,8 @@ impl Scheduler {
         )?;
         self.boot_idle_task
             .setup(init_task, init_mm, &self.boot_runqueue, cpu_group)?;
+        self.boot_idle_preemption.setup(init_task)?;
+        current_task_slot.set_current_boot_idle()?;
         if !self.setup_facts_hold(cpu_group) {
             return self.failed_setup();
         }
@@ -181,6 +201,7 @@ impl Scheduler {
             || !self.scheduler_running
             || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
+            || !self.boot_idle_preemption.disabled()
             || crate::arch::riscv64::csr::supervisor_interrupts_enabled()
         {
             return failed_condition(
@@ -194,6 +215,37 @@ impl Scheduler {
         self.preempt_disabled_passes = self.preempt_disabled_passes.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerPreemptDisabledPass);
         Ok(())
+    }
+
+    pub fn select_boot_runqueue_for_task(&mut self, task_id: usize) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.scheduler_running
+            || self.boot_runqueue.state() != State::Ready
+            || task_id == usize::MAX
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.selected_runqueue_task_id = task_id;
+        Ok(())
+    }
+
+    pub fn enqueue_task_on_boot_runqueue(&mut self, task_id: usize) -> EventResult {
+        if self.selected_runqueue_task_id != task_id {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.boot_runqueue.enqueue_task(task_id)
     }
 
     pub fn enable_smp(
@@ -255,6 +307,8 @@ impl Scheduler {
     fn setup_facts_hold(&self, cpu_group: &CpuGroup) -> bool {
         self.boot_runqueue.state() == State::Ready
             && self.boot_idle_task.state() == State::Ready
+            && self.boot_idle_preemption.state() == State::Ready
+            && self.boot_idle_preemption.enabled()
             && self.boot_runqueue.cpu_id() == 0
             && self.boot_runqueue.boot_hartid() == cpu_group.boot_hartid()
             && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()
@@ -362,6 +416,7 @@ pub struct BootRunQueue {
     dl_ready: bool,
     attached_to_root_domain: bool,
     balance_push_enabled: bool,
+    enqueued_task_id: usize,
 }
 
 impl BootRunQueue {
@@ -377,6 +432,7 @@ impl BootRunQueue {
             dl_ready: false,
             attached_to_root_domain: false,
             balance_push_enabled: true,
+            enqueued_task_id: usize::MAX,
         }
     }
 
@@ -410,6 +466,10 @@ impl BootRunQueue {
 
     pub const fn balance_push_enabled(&self) -> bool {
         self.balance_push_enabled
+    }
+
+    pub const fn enqueued_task_id(&self) -> usize {
+        self.enqueued_task_id
     }
 
     fn setup(
@@ -449,6 +509,15 @@ impl BootRunQueue {
             State::Ready,
             Checkpoint::BootRunQueueReady,
         )
+    }
+
+    fn enqueue_task(&mut self, task_id: usize) -> EventResult {
+        if self.lifecycle.state() != State::Ready || task_id == usize::MAX {
+            return self.failed_setup();
+        }
+
+        self.enqueued_task_id = task_id;
+        Ok(())
     }
 
     fn failed_setup(&self) -> EventResult {

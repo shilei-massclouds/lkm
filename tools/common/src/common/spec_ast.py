@@ -39,8 +39,10 @@ class WithinDecl:
 
     context: str
     span: SourceSpan
+    entered_by: list[Block] = field(default_factory=list)
     depends_on: list[Block] = field(default_factory=list)
     drives: list[Block] = field(default_factory=list)
+    exited_by: list[Block] = field(default_factory=list)
     may_change: list[Block] = field(default_factory=list)
     ensures: list[Block] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
@@ -136,6 +138,7 @@ class LockDecl:
 
     name: str
     span: SourceSpan
+    kind: str | None = None
 
 
 @dataclass(frozen=True)

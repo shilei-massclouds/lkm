@@ -34,8 +34,15 @@ pub fn run() -> SmokeResult {
         || ctx.kernel_init_task.pid() != 1
         || ctx.kernel_init_task.entry() != TaskEntry::KernelInit
         || ctx.kernel_init_task.kind() != TaskKind::UserModeThread
+        || !ctx.kernel_init_task.running()
         || !ctx.kernel_init_task.enqueued()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
+        || ctx.scheduler.selected_runqueue_task_id() != ctx.kernel_init_task.pid()
+        || ctx.scheduler.boot_runqueue().enqueued_task_id() != ctx.kernel_init_task.pid()
+        || ctx.kernel_init_task_pi_lock.state() != State::Ready
+        || ctx.kernel_init_task_pi_lock.locked()
+        || ctx.kernel_init_task_pi_lock.irqsave_entered_count() == 0
+        || ctx.kernel_init_task_pi_lock.irqrestore_exited_count() == 0
     {
         printk::write_str("kernel_init task facts invalid\n");
         return SmokeResult::Failed;

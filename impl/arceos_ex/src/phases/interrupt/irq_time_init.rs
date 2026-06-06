@@ -65,7 +65,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.sbi_ipi, &ctx.per_cpu_storage, &ctx.cpu_group)?;
     ctx.smp_call_function
         .setup(&ctx.ipi_mux, &ctx.cpu_group, &ctx.per_cpu_storage)?;
-    ctx.interrupt_stream.enable()
+    ctx.interrupt_stream
+        .enable(&mut ctx.boot_cpu_local_interrupt)
 }
 
 fn handoff() -> ! {
@@ -180,6 +181,8 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.smp_call_function.possible_cpu_count() == ctx.cpu_group.possible_cpu_count()
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
+        && ctx.boot_cpu_local_interrupt.state() == State::Ready
+        && ctx.boot_cpu_local_interrupt.enabled()
         && csr::supervisor_interrupts_enabled()
         && printk::is_ready()
         && earlycon::is_online()
