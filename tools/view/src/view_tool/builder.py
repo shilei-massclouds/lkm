@@ -160,7 +160,7 @@ def _context_records_by_event(
     derive_data: dict[str, Any]
 ) -> dict[tuple[str, str], list[dict[str, object]]]:
     contexts: dict[tuple[str, str], list[dict[str, object]]] = {}
-    active_context: dict[tuple[str, str], str] = {}
+    active_context: dict[tuple[str, str], list[str]] = {}
     context_specs = _context_specs(derive_data)
     records = derive_data.get("records", [])
     if not isinstance(records, list):
@@ -185,7 +185,9 @@ def _context_records_by_event(
             and expression.startswith("within ")
             and not expression.endswith(" exited")
         ):
-            active_context[key] = expression.removeprefix("within ").strip()
+            active_context.setdefault(key, []).append(
+                expression.removeprefix("within ").strip()
+            )
             continue
         if (
             source_kind == "within"
@@ -193,17 +195,35 @@ def _context_records_by_event(
             and isinstance(expression, str)
             and expression.endswith(" exited")
         ):
-            active_context.pop(key, None)
+            stack = active_context.get(key)
+            if stack:
+                stack.pop()
+            if stack == []:
+                active_context.pop(key, None)
             continue
         if (
             proof_class not in {"action_commit", "type_process_commit"}
             or proof_provider != "within_context"
         ):
             continue
-        context_name = active_context.get(key)
+        stack = active_context.get(key)
+        context_name = stack[-1] if stack else None
         if context_name is None or not isinstance(expression, str):
             continue
-        item = {"context": context_name, "action": expression}
+        item: dict[str, object] = {
+            "context": context_name,
+            "context_stack": tuple(stack),
+            "action": expression,
+        }
+        context_labels: dict[str, str] = {}
+        for active_name in stack:
+            active_spec = context_specs.get(active_name)
+            if active_spec is not None:
+                context_labels[active_name] = _context_trace_label(
+                    active_name, active_spec
+                )
+        if context_labels:
+            item["context_labels"] = context_labels
         context_spec = context_specs.get(context_name)
         if context_spec is not None:
             item["context_label"] = _context_trace_label(context_name, context_spec)
@@ -257,6 +277,108 @@ def _first_block_body(value: object) -> str:
         if isinstance(body, str) and body.strip():
             return body.strip().rstrip(";")
     return ""
+
+
+def _context_item_stack(item: dict[str, object]) -> list[str]:
+    stack = item.get("context_stack")
+    if isinstance(stack, (list, tuple)):
+        names = [name for name in stack if isinstance(name, str) and name]
+        if names:
+            return names
+    context_name = item.get("context")
+    return [context_name] if isinstance(context_name, str) and context_name else []
+
+
+def _context_item_label(item: dict[str, object], context_name: str) -> str:
+    labels = item.get("context_labels")
+    if isinstance(labels, dict):
+        label = labels.get(context_name)
+        if isinstance(label, str) and label:
+            return label
+    if item.get("context") == context_name:
+        label = item.get("context_label")
+        if isinstance(label, str) and label:
+            return label
+    return context_name
+
+
+def _build_context_forest(
+    items: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    forest: list[dict[str, object]] = []
+    open_nodes: list[dict[str, object]] = []
+
+    for item in items:
+        stack = _context_item_stack(item)
+        if not stack:
+            continue
+
+        common = 0
+        max_common = min(len(stack), len(open_nodes))
+        while (
+            common < max_common
+            and open_nodes[common].get("name") == stack[common]
+        ):
+            common += 1
+        open_nodes = open_nodes[:common]
+
+        for context_name in stack[common:]:
+            node: dict[str, object] = {
+                "kind": "context",
+                "name": context_name,
+                "label": _context_item_label(item, context_name),
+                "children": [],
+            }
+            if open_nodes:
+                children = open_nodes[-1].setdefault("children", [])
+                if isinstance(children, list):
+                    children.append(node)
+            else:
+                forest.append(node)
+            open_nodes.append(node)
+
+        children = open_nodes[-1].setdefault("children", [])
+        if isinstance(children, list):
+            children.append(
+                {
+                    "kind": "action",
+                    "action": str(item.get("action", "")),
+                }
+            )
+
+    return forest
+
+
+def _context_forest_max_depth(nodes: list[dict[str, object]]) -> int:
+    max_depth = -1
+
+    def visit(node: dict[str, object], depth: int) -> None:
+        nonlocal max_depth
+        if node.get("kind") != "context":
+            return
+        max_depth = max(max_depth, depth)
+        children = node.get("children")
+        if not isinstance(children, list):
+            return
+        for child in children:
+            if isinstance(child, dict):
+                visit(child, depth + 1)
+
+    for node in nodes:
+        visit(node, 0)
+    return max_depth
+
+
+def _context_subtree_depth(node: dict[str, object]) -> int:
+    children = node.get("children")
+    if not isinstance(children, list):
+        return 0
+    child_depths = [
+        1 + _context_subtree_depth(child)
+        for child in children
+        if isinstance(child, dict) and child.get("kind") == "context"
+    ]
+    return max(child_depths, default=0)
 
 
 def _event_node_id(object_name: str, event_name: str) -> str:
@@ -635,68 +757,96 @@ class _TraceLayoutBuilder:
         context_items = context_records.get((str(data["object"]), str(data["event"])), [])
         context_column = None if is_phase else gap_column
         if context_items and context_column is not None:
-            self._max_object_lane = max(self._max_object_lane, object_lane + 1)
-            context_start_row = len(self.rows)
+            context_forest = _build_context_forest(context_items)
+            max_context_depth = _context_forest_max_depth(context_forest)
+            if max_context_depth >= 0:
+                self._max_object_lane = max(
+                    self._max_object_lane, object_lane + max_context_depth + 1
+                )
+            context_index = 0
             previous_action_id: str | None = None
-            context_label = str(
-                context_items[0].get(
-                    "context_label", context_items[0].get("context", "")
-                )
-            )
-            for item_index, item in enumerate(context_items):
-                action_row = len(self.rows)
-                self._add_row(
-                    "context_action",
-                    action_row,
-                    f"{label}.within.{item_index}",
-                    group_id=event_id if not is_phase else None,
-                    group_role="context_action" if not is_phase else None,
-                )
-                action_id = f"{event_id}-context-action-{item_index}"
-                self.cells.append(
+
+            def place_context_node(node: dict[str, object], depth: int) -> None:
+                nonlocal context_index, previous_action_id
+                current_context_index = context_index
+                context_index += 1
+                context_id = f"{event_id}-context-{current_context_index}"
+                context_start_row = len(self.rows)
+                cell_insert_index = len(self.cells)
+                action_index = 0
+                context_label = str(node.get("label", node.get("name", "")))
+                children = node.get("children")
+                if not isinstance(children, list):
+                    children = []
+
+                for child in children:
+                    if not isinstance(child, dict):
+                        continue
+                    if child.get("kind") == "context":
+                        place_context_node(child, depth + 1)
+                        continue
+                    if child.get("kind") != "action":
+                        continue
+                    action_row = len(self.rows)
+                    self._add_row(
+                        "context_action",
+                        action_row,
+                        f"{label}.within.{current_context_index}.{action_index}",
+                        group_id=event_id if not is_phase else None,
+                        group_role="context_action" if not is_phase else None,
+                    )
+                    action_id = f"{context_id}-action-{action_index}"
+                    self.cells.append(
+                        TraceCell(
+                            id=action_id,
+                            kind="context_action",
+                            row=action_row,
+                            column=context_column + depth * 2,
+                            column_span=2,
+                            label=str(child.get("action", "")),
+                        )
+                    )
+                    if previous_action_id is not None:
+                        self.arrows.append(
+                            TraceArrow(
+                                source=previous_action_id,
+                                target=action_id,
+                                kind="context_order",
+                            )
+                        )
+                    previous_action_id = action_id
+                    action_index += 1
+
+                context_extra_rows = 0
+                if "|" in context_label:
+                    guard_row = len(self.rows)
+                    context_extra_rows = 1
+                    self._add_row(
+                        "context_guard",
+                        guard_row,
+                        f"{label}.within.{current_context_index}.guard",
+                        group_id=event_id if not is_phase else None,
+                        group_role="context_guard" if not is_phase else None,
+                    )
+                self.cells.insert(
+                    cell_insert_index,
                     TraceCell(
-                        id=action_id,
-                        kind="context_action",
-                        row=action_row,
-                        column=context_column,
-                        column_span=2,
-                        label=str(item.get("action", "")),
+                        id=context_id,
+                        kind="context_span",
+                        row=context_start_row,
+                        column=context_column + depth * 2,
+                        label=context_label,
+                        row_span=max(1, len(self.rows) - context_start_row),
+                        column_span=(_context_subtree_depth(node) + 1) * 2,
                     )
                 )
-                if previous_action_id is not None:
-                    self.arrows.append(
-                        TraceArrow(
-                            source=previous_action_id,
-                            target=action_id,
-                            kind="context_order",
-                    )
+                self.arrows.append(
+                    TraceArrow(source=span_id, target=context_id, kind="within")
                 )
-                previous_action_id = action_id
-            context_extra_rows = 0
-            if "|" in context_label:
-                guard_row = len(self.rows)
-                context_extra_rows = 1
-                self._add_row(
-                    "context_guard",
-                    guard_row,
-                    f"{label}.within.guard",
-                    group_id=event_id if not is_phase else None,
-                    group_role="context_guard" if not is_phase else None,
-                )
-            self.cells.append(
-                TraceCell(
-                    id=f"{event_id}-context",
-                    kind="context_span",
-                    row=context_start_row,
-                    column=context_column,
-                    label=context_label,
-                    row_span=len(context_items) + context_extra_rows,
-                    column_span=2,
-                )
-            )
-            self.arrows.append(
-                TraceArrow(source=span_id, target=f"{event_id}-context", kind="within")
-            )
+
+            for context_node in context_forest:
+                if context_node.get("kind") == "context":
+                    place_context_node(context_node, 0)
 
         for child in _trace_children(data):
             if _should_skip_trace_node(child, verified_states_by_event):

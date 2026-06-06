@@ -592,6 +592,7 @@ def _parse_within(block: Block) -> WithinDecl:
     entered_by: list[Block] = []
     depends_on: list[Block] = []
     drives: list[Block] = []
+    within: list[WithinDecl] = []
     exited_by: list[Block] = []
     may_change: list[Block] = []
     ensures: list[Block] = []
@@ -611,6 +612,8 @@ def _parse_within(block: Block) -> WithinDecl:
             depends_on.append(child)
         elif child.kind == "drives":
             drives.append(child)
+        elif child.kind == "within":
+            within.append(_parse_within(child))
         elif child.kind == "exited_by":
             exited_by.append(child)
         elif child.kind == "may_change":
@@ -628,6 +631,7 @@ def _parse_within(block: Block) -> WithinDecl:
         entered_by=entered_by,
         depends_on=depends_on,
         drives=drives,
+        within=within,
         exited_by=exited_by,
         may_change=may_change,
         ensures=ensures,

@@ -165,6 +165,7 @@ def _within_to_json(item: WithinDecl) -> dict[str, Any]:
         "entered_by": [_block_to_json(block) for block in item.entered_by],
         "depends_on": [_block_to_json(block) for block in item.depends_on],
         "drives": [_block_to_json(block) for block in item.drives],
+        "within": [_within_to_json(block) for block in item.within],
         "exited_by": [_block_to_json(block) for block in item.exited_by],
         "may_change": [_block_to_json(block) for block in item.may_change],
         "ensures": [_block_to_json(block) for block in item.ensures],

@@ -169,6 +169,40 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)"
+                    and record["proof_class"] == "action_commit"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "BootRunQueueRef.Event::EnqueueTask(task_ref: KernelInitTaskRef)"
+                    and record["proof_class"] == "type_process_commit"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "within EnqueueSelectedRunQueueContext"
+                    and record["proof_class"] == "exclusive_context"
+                    and record["proof_provider"] == "lock_ref"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "BootRunQueueLock.Event::LockIrqSave"
+                    and record["proof_class"] == "exclusive_context_lock_event"
+                    and record["proof_provider"] == "lock_ref"
+                    for record in proved
+                )
+            )
             self.assertFalse(
                 any(record["predicate"] == "disjoint" for record in obligations)
             )

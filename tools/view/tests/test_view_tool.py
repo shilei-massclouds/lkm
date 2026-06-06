@@ -226,7 +226,20 @@ class ViewToolTests(unittest.TestCase):
                                     }
                                 ],
                             },
-                        }
+                        },
+                        "EnqueueSelectedRunQueueContext": {
+                            "lock_ref": "BootRunQueueLock",
+                            "guard": {
+                                "kind": "RawSpinLockIrqSaveGuard",
+                                "lock_ref": "BootRunQueueLock",
+                                "entered_by": [
+                                    {"body": "BootRunQueueLock.Event::LockIrqSave;"}
+                                ],
+                                "exited_by": [
+                                    {"body": "BootRunQueueLock.Event::UnlockIrqRestore;"}
+                                ],
+                            },
+                        },
                     }
                 },
                 "records": [
@@ -249,14 +262,28 @@ class ViewToolTests(unittest.TestCase):
                         "event": "Enable",
                         "proof_class": "action_commit",
                         "proof_provider": "within_context",
-                        "expression": "Scheduler.Action::SelectRunQueue(KernelInitTask)",
+                        "expression": "Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
                     },
                     {
                         "object": "KernelInitTask",
                         "event": "Enable",
-                        "proof_class": "action_commit",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within EnqueueSelectedRunQueueContext",
+                    },
+                    {
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "BootRunQueue.Action::EnqueueTask(KernelInitTask)",
+                        "expression": "BootRunQueueRef.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
+                    },
+                    {
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within EnqueueSelectedRunQueueContext exited",
                     },
                     {
                         "object": "KernelInitTask",
@@ -274,10 +301,31 @@ class ViewToolTests(unittest.TestCase):
         rows = metadata["trace_rows"]
         arrows = metadata["trace_arrows"]
         event_cell = next(cell for cell in cells if cell.kind == "event_span")
-        context_cell = next(cell for cell in cells if cell.kind == "context_span")
+        context_cell = next(
+            cell
+            for cell in cells
+            if cell.kind == "context_span"
+            and "WakeUpNewTaskContext" in cell.label
+        )
+        enqueue_context_cell = next(
+            cell
+            for cell in cells
+            if cell.kind == "context_span"
+            and "EnqueueSelectedRunQueueContext" in cell.label
+        )
         self.assertEqual(context_cell.column, event_cell.column + 1)
-        self.assertEqual(context_cell.column_span, 2)
-        self.assertEqual(context_cell.row_span, 4)
+        self.assertEqual(context_cell.column_span, 4)
+        self.assertGreater(context_cell.row_span, enqueue_context_cell.row_span)
+        self.assertGreater(enqueue_context_cell.column, context_cell.column)
+        self.assertLessEqual(
+            enqueue_context_cell.column + enqueue_context_cell.column_span,
+            context_cell.column + context_cell.column_span,
+        )
+        self.assertGreaterEqual(enqueue_context_cell.row, context_cell.row)
+        self.assertLessEqual(
+            enqueue_context_cell.row + enqueue_context_cell.row_span,
+            context_cell.row + context_cell.row_span,
+        )
         self.assertIn("WakeUpNewTaskContext", context_cell.label)
         self.assertIn("lock=KernelInitTaskPiLock", context_cell.label)
         self.assertIn("guard=RawSpinLockIrqSaveGuard", context_cell.label)
@@ -287,7 +335,19 @@ class ViewToolTests(unittest.TestCase):
         self.assertIn(
             "exit=KernelInitTaskPiLock.Event::UnlockIrqRestore", context_cell.label
         )
-        action_cells = [cell for cell in cells if cell.kind == "context_action"]
+        self.assertIn("lock=BootRunQueueLock", enqueue_context_cell.label)
+        action_cells = [
+            cell
+            for cell in cells
+            if cell.kind == "context_action"
+            and cell.id.startswith(context_cell.id)
+        ]
+        enqueue_action_cells = [
+            cell
+            for cell in cells
+            if cell.kind == "context_action"
+            and cell.id.startswith(enqueue_context_cell.id)
+        ]
         self.assertTrue(
             all(
                 cell.column == context_cell.column and cell.column_span == 2
@@ -298,9 +358,12 @@ class ViewToolTests(unittest.TestCase):
             [cell.label for cell in sorted(action_cells, key=lambda cell: cell.row)],
             [
                 "KernelInitTask.Event::SetRuntimeState(Runnable)",
-                "Scheduler.Action::SelectRunQueue(KernelInitTask)",
-                "BootRunQueue.Action::EnqueueTask(KernelInitTask)",
+                "Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
             ],
+        )
+        self.assertEqual(
+            [cell.label for cell in enqueue_action_cells],
+            ["BootRunQueueRef.Event::EnqueueTask(task_ref: KernelInitTaskRef)"],
         )
         self.assertTrue(
             all(

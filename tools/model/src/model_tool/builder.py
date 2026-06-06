@@ -634,6 +634,8 @@ def _check_within_references(model: ObjectModel, within, diagnostics: list[Diagn
     for block in within.drives:
         _check_event_references(model, block, diagnostics)
         _check_action_references(model, block, diagnostics, context=context)
+    for child_within in within.within:
+        _check_within_references(model, child_within, diagnostics)
     _check_lock_event_blocks(model, within.exited_by, diagnostics, context=context)
 
 
@@ -733,6 +735,8 @@ def _check_event_references(
     for object_name, event_name in _OBJECT_EVENT_RE.findall(block.body):
         obj = model.objects.get(object_name)
         if obj is None:
+            if _is_supported_ref_event(object_name, event_name):
+                continue
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -757,6 +761,10 @@ def _check_event_references(
 def _type_declares_event(type_decl: TypeDecl, event_name: str) -> bool:
     pattern = re.compile(_TYPE_EVENT_RE_TEMPLATE.format(re.escape(event_name)))
     return any(pattern.search(block.body) for block in type_decl.blocks)
+
+
+def _is_supported_ref_event(receiver_name: str, event_name: str) -> bool:
+    return receiver_name.endswith("RunQueueRef") and event_name == "EnqueueTask"
 
 
 def _check_state_references(

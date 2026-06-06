@@ -899,6 +899,20 @@ class _Deriver:
         if match is not None:
             driven_object, driven_event = match.group(1), match.group(2)
             obj = self.model.objects.get(driven_object)
+            if obj is None and _is_supported_ref_event(driven_object, driven_event):
+                self._record(
+                    DerivationStatus.PROVED,
+                    f"ref type process committed: {driven_object}.Event::{driven_event}",
+                    entry_span,
+                    object_name=event.object_name,
+                    event_name=event.name,
+                    expression=entry,
+                    source_kind="drives",
+                    predicate=None,
+                    proof_class="type_process_commit",
+                    proof_provider=action_provider,
+                )
+                return True
             if obj is not None and _find_event(obj, driven_event) is None:
                 if _type_declares_event(self.model, obj, driven_event):
                     self._record(
@@ -1004,6 +1018,9 @@ class _Deriver:
             action_provider="within_context",
         ):
             return False
+        for child_within in within.within:
+            if not self._execute_within(child_within, event):
+                return False
         if not self._prove_blocks(
             within.ensures,
             "within ensures",
@@ -2006,6 +2023,10 @@ def _type_declares_event(model: ObjectModel, obj: ObjectDef, event_name: str) ->
         return False
     pattern = re.compile(_TYPE_EVENT_RE_TEMPLATE.format(re.escape(event_name)))
     return any(pattern.search(block.body) for block in type_decl.blocks)
+
+
+def _is_supported_ref_event(receiver_name: str, event_name: str) -> bool:
+    return receiver_name.endswith("RunQueueRef") and event_name == "EnqueueTask"
 
 
 def _context_object(event: EventDef | None, state: StateDef | None) -> str | None:

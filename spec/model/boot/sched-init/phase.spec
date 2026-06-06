@@ -10,7 +10,7 @@
  * Scheduler 表示启动期调度器基础对象。本阶段只要求 boot CPU 的 runqueue、
  * idle task 关联和主动调度入口可用；完整 SMP 调度拓扑留给后续阶段。
  */
-object Scheduler: TaskObject {
+object Scheduler: SchedulerObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -65,6 +65,8 @@ object Scheduler: TaskObject {
                 ensures {
                     scheduler_runqueues_ready(Scheduler, CpuGroup);
                     boot_runqueue_ready(BootRunQueue, BootCPU);
+                    runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
+                    runqueue_ref_ready(BootRunQueueRef);
                     boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
@@ -79,6 +81,7 @@ object Scheduler: TaskObject {
             BootRunQueue.state == State::Ready;
             BootIdleTask.state == State::Ready;
             scheduler_runqueues_ready(Scheduler, CpuGroup);
+            runqueue_ref_ready(BootRunQueueRef);
             current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
             scheduler_preempt_disabled_action_available(Scheduler);
@@ -99,6 +102,7 @@ object Scheduler: TaskObject {
             scheduler_running_flag_set(Scheduler);
             BootRunQueue.state == State::Ready;
             BootIdleTask.state == State::Ready;
+            runqueue_ref_ready(BootRunQueueRef);
             scheduler_preempt_disabled_action_available(Scheduler);
         }
     }
@@ -160,7 +164,7 @@ object BitWaitQueueTable: TaskObject {
 /*
  * BootRunQueue 表示 boot CPU 的 runqueue 元数据。
  */
-object BootRunQueue: TaskObject {
+object BootRunQueue: RunQueue {
     initial_state: State::Base;
     parent: Scheduler;
 
@@ -176,6 +180,10 @@ object BootRunQueue: TaskObject {
 
                 ensures {
                     boot_runqueue_ready(BootRunQueue, BootCPU);
+                    runqueue_runtime_state_is(BootRunQueue, RunQueueRuntimeState::None);
+                    runqueue_task_refs_empty(BootRunQueue);
+                    runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
+                    runqueue_ref_ready(BootRunQueueRef);
                     boot_runqueue_attached_to_root_domain(BootRunQueue, DefaultSchedRootDomain);
                     boot_runqueue_class_queues_ready(BootRunQueue);
                     boot_runqueue_balance_push_disabled(BootRunQueue);
@@ -187,6 +195,8 @@ object BootRunQueue: TaskObject {
     state State::Ready {
         invariant {
             boot_runqueue_ready(BootRunQueue, BootCPU);
+            runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
+            runqueue_ref_ready(BootRunQueueRef);
             boot_runqueue_attached_to_root_domain(BootRunQueue, DefaultSchedRootDomain);
             boot_runqueue_class_queues_ready(BootRunQueue);
         }

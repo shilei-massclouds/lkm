@@ -61,6 +61,11 @@ enum TaskRuntimeState {
     Running,
 }
 
+enum RunQueueRuntimeState {
+    None,
+    Some,
+}
+
 function addr_of<T>(value: T) -> AddrIdentity<T>;
 function phys_addr<T>(value: T) -> PhysAddr<T>;
 function virt_addr<T, S: VirtualAddressSpace, A: VirtualAddressArea>(value: T, space: S, area: A) -> VirtAddr<T>;
@@ -142,8 +147,22 @@ predicate current_task_slot_current<T, U>(slot: T, task: U) -> bool;
 predicate task_preemption_control_ready<T>(task: T) -> bool;
 predicate task_preemption_disabled<T>(task: T) -> bool;
 predicate task_preemption_enabled<T>(task: T) -> bool;
+predicate task_ref_targets<T, U>(task_ref: T, task: U) -> bool;
+predicate task_ref_ready<T>(task_ref: T) -> bool;
+predicate task_state_new<T>(task: T) -> bool;
+predicate task_state_running<T>(task: T) -> bool;
+predicate task_not_enqueued<T>(task: T) -> bool;
+predicate task_enqueued_on_runqueue<T, U>(task: T, runqueue: U) -> bool;
 predicate task_runtime_state_transition_allowed<T>(task: T, state: TaskRuntimeState) -> bool;
 predicate task_runtime_state_is<T>(task: T, state: TaskRuntimeState) -> bool;
+predicate runqueue_ref_targets<T, U>(runqueue_ref: T, runqueue: U) -> bool;
+predicate runqueue_ref_ready<T>(runqueue_ref: T) -> bool;
+predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, runqueue_ref: V) -> bool;
+predicate task_runqueue_selected<T, U, V>(scheduler: T, task: U, runqueue: V) -> bool;
+predicate runqueue_runtime_state_is<T>(runqueue: T, state: RunQueueRuntimeState) -> bool;
+predicate runqueue_task_refs_empty<T>(runqueue: T) -> bool;
+predicate runqueue_task_refs_some<T>(runqueue: T) -> bool;
+predicate runqueue_contains_task<T, U>(runqueue: T, task_ref: U) -> bool;
 predicate raw_spinlock_storage_bound<T>(lock: T) -> bool;
 predicate raw_spinlock_initialized<T>(lock: T) -> bool;
 predicate raw_spinlock_unlocked<T>(lock: T) -> bool;
@@ -352,6 +371,15 @@ type TimelineObject {
 type TaskObject {
 }
 
+type TaskRef {
+}
+
+type RunQueueRef {
+}
+
+type TaskRefSet {
+}
+
 /*
  * Task is a reusable runtime task type. TaskRuntimeState is an extended
  * runtime state rather than an object lifecycle state. The current formal
@@ -363,7 +391,7 @@ type Task: TaskObject {
     ext_state: TaskRuntimeState;
 
     processes {
-        Event::SetRuntimeState {
+        Event::SetRuntimeState(state: TaskRuntimeState) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 task_runtime_state_transition_allowed(self, state);
@@ -378,6 +406,68 @@ type Task: TaskObject {
             result {
                 Allowed: Success(runtime_state_set);
                 Disallowed: Failed(invalid_runtime_state_transition);
+            }
+        }
+    }
+}
+
+/*
+ * SchedulerObject is the reusable scheduler service type. SelectRunQueue is
+ * a pure selection action: it consumes a TaskRef and returns a RunQueueRef.
+ * The current UP rest_init path fixes that result to the boot CPU runqueue;
+ * full select_task_rq policy is deferred.
+ */
+type SchedulerObject: TaskObject {
+    processes {
+        Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_ref_ready(task_ref);
+            }
+            ensures {
+                scheduler_select_runqueue_returns(self, task_ref, BootRunQueueRef);
+                runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
+            }
+            deferred {
+                "当前 SelectRunQueue 固定返回 Boot CPU runqueue；完整 select_task_rq 策略后续展开。";
+            }
+        }
+    }
+}
+
+/*
+ * RunQueue is a top-level scheduler runqueue abstraction. The current model
+ * stores task_refs as a temporary aggregate view; future CFS/RT/DL scheduler
+ * class queues should own concrete membership, with RunQueue.task_refs derived
+ * from those queues.
+ */
+type RunQueue: TaskObject {
+    ext_state: RunQueueRuntimeState;
+    task_refs: TaskRefSet;
+
+    processes {
+        Event::EnqueueTask(task_ref: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                task_ref_ready(task_ref);
+                task_not_enqueued(task_ref);
+            }
+            transitions {
+                RunQueueRuntimeState::None -> RunQueueRuntimeState::Some;
+                RunQueueRuntimeState::Some -> RunQueueRuntimeState::Some;
+            }
+            ensures {
+                runqueue_runtime_state_is(self, RunQueueRuntimeState::Some);
+                runqueue_task_refs_some(self);
+                runqueue_contains_task(self, task_ref);
+            }
+            result {
+                None: Success(first_task_enqueued);
+                Some: Success(additional_task_enqueued);
+                AlreadyQueued: Failed(duplicate_enqueue);
+            }
+            deferred {
+                "当前 RunQueue.task_refs 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，task_refs 应改为由具体队列派生。";
             }
         }
     }

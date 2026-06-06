@@ -275,6 +275,7 @@ def _within_from_json(item: Any) -> WithinDecl:
         entered_by=[_block_from_json(block) for block in _list(data, "entered_by")],
         depends_on=[_block_from_json(block) for block in _list(data, "depends_on")],
         drives=[_block_from_json(block) for block in _list(data, "drives")],
+        within=[_within_from_json(block) for block in _list(data, "within")],
         exited_by=[_block_from_json(block) for block in _list(data, "exited_by")],
         may_change=[_block_from_json(block) for block in _list(data, "may_change")],
         ensures=[_block_from_json(block) for block in _list(data, "ensures")],

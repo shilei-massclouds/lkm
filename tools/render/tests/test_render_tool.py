@@ -210,7 +210,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_action",
                         row=3,
                         column=1,
-                        label="Scheduler.Action::SelectRunQueue(KernelInitTask)",
+                        label="Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
                         column_span=2,
                     ),
                 ),

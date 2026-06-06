@@ -16,6 +16,7 @@
  */
 
 lock KernelInitTaskPiLock: RawSpinLock;
+lock BootRunQueueLock: RawSpinLock;
 
 context WakeUpNewTaskContext: ResourceExclusiveContext {
     guard: RawSpinLockIrqSaveGuard {
@@ -33,6 +34,31 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
     obj_refs {
         KernelInitTask;
         Scheduler;
+        BootRunQueue;
+    }
+
+    effects {
+        interruptible: false;
+        preemptible: false;
+        sleepable: false;
+        exclusive_refs: obj_refs;
+    }
+}
+
+context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
+    guard: RawSpinLockIrqSaveGuard {
+        lock_ref: BootRunQueueLock;
+
+        entered_by {
+            BootRunQueueLock.Event::LockIrqSave;
+        }
+
+        exited_by {
+            BootRunQueueLock.Event::UnlockIrqRestore;
+        }
+    }
+
+    obj_refs {
         BootRunQueue;
     }
 
@@ -70,9 +96,11 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
  * Scheduler、BootRunQueue 三个受保护对象。
  * Enable 的 within WakeUpNewTaskContext 块直接驱动
  * Task.Event::SetRuntimeState(Running)、Scheduler.Action::SelectRunQueue
- * (selected_rq: BootRunQueue) 和 BootRunQueue.Action::EnqueueTask
- * (task: KernelInitTask)。三者都成功后，Enable 才提交
- * KernelInitTask Ready -> Online。
+ * (task_ref: KernelInitTaskRef)，再对 SelectRunQueue 返回的 runqueue ref
+ * 进入 EnqueueSelectedRunQueueContext，并驱动
+ * RunQueue.Event::EnqueueTask(task_ref: KernelInitTaskRef)。SelectRunQueue
+ * 当前固定返回 BootRunQueueRef；完整选择策略后续 deferred。三者都成功后，
+ * Enable 才提交 KernelInitTask Ready -> Online。
  */
 object KernelInitTask: Task {
     initial_state: State::Base;
@@ -146,6 +174,8 @@ object KernelInitTask: Task {
                     kernel_init_task_pid_is_one(KernelInitTask);
                     kernel_init_thread_context_ready(KernelInitTask);
                     kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+                    task_ref_targets(KernelInitTaskRef, KernelInitTask);
+                    task_ref_ready(KernelInitTaskRef);
                     task_state_new(KernelInitTask);
                     task_not_enqueued(KernelInitTask);
                     kernel_init_waits_for_kthreadd_done(KernelInitTask);
@@ -162,6 +192,8 @@ object KernelInitTask: Task {
             kernel_init_task_ready(KernelInitTask);
             kernel_init_task_pid_is_one(KernelInitTask);
             kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
+            task_ref_targets(KernelInitTaskRef, KernelInitTask);
+            task_ref_ready(KernelInitTaskRef);
             task_state_new(KernelInitTask);
             task_not_enqueued(KernelInitTask);
             kernel_init_waits_for_kthreadd_done(KernelInitTask);
@@ -180,12 +212,16 @@ object KernelInitTask: Task {
                     BootCpuCurrentTask.state == State::Ready;
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     task_preemption_control_ready(BootIdleTask);
+                    task_ref_ready(KernelInitTaskRef);
+                    runqueue_ref_ready(BootRunQueueRef);
                     task_state_new(KernelInitTask);
                     task_not_enqueued(KernelInitTask);
                 }
 
                 within WakeUpNewTaskContext {
                     depends_on {
+                        task_ref_ready(KernelInitTaskRef);
+                        runqueue_ref_ready(BootRunQueueRef);
                         task_state_new(KernelInitTask);
                         task_not_enqueued(KernelInitTask);
                         current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
@@ -193,16 +229,33 @@ object KernelInitTask: Task {
 
                     drives {
                         KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running);
-                        Scheduler.Action::SelectRunQueue(selected_rq: BootRunQueue);
-                        BootRunQueue.Action::EnqueueTask(task: KernelInitTask);
+                        Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef);
+                    }
+
+                    within EnqueueSelectedRunQueueContext {
+                        depends_on {
+                            runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
+                        }
+
+                        drives {
+                            BootRunQueueRef.Event::EnqueueTask(task_ref: KernelInitTaskRef);
+                        }
+
+                        ensures {
+                            raw_spinlock_irqsave_entered(BootRunQueueLock, BootCurrentCPU);
+                            raw_spinlock_irqrestore_exited(BootRunQueueLock, BootCurrentCPU);
+                            scheduler_select_runqueue_returns(Scheduler, KernelInitTaskRef, BootRunQueueRef);
+                            runqueue_contains_task(BootRunQueue, KernelInitTaskRef);
+                        }
                     }
 
                     ensures {
                         raw_spinlock_irqsave_entered(KernelInitTaskPiLock, BootCurrentCPU);
                         raw_spinlock_irqrestore_exited(KernelInitTaskPiLock, BootCurrentCPU);
                         task_state_running(KernelInitTask);
-                        task_runqueue_selected(Scheduler, KernelInitTask, BootRunQueue);
-                        task_enqueued_on_runqueue(KernelInitTask, BootRunQueue);
+                        scheduler_select_runqueue_returns(Scheduler, KernelInitTaskRef, BootRunQueueRef);
+                        task_runqueue_selected(Scheduler, KernelInitTaskRef, BootRunQueueRef);
+                        task_enqueued_on_runqueue(KernelInitTaskRef, BootRunQueueRef);
                     }
                 }
 
@@ -225,7 +278,7 @@ object KernelInitTask: Task {
             kernel_init_task_pid_is_one(KernelInitTask);
             kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
             task_state_running(KernelInitTask);
-            task_enqueued_on_runqueue(KernelInitTask, BootRunQueue);
+            task_enqueued_on_runqueue(KernelInitTaskRef, BootRunQueueRef);
         }
     }
 }
