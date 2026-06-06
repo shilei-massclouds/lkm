@@ -102,6 +102,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::completion::run,
     },
     SmokeCase {
+        name: "raw_spinlock",
+        run: cases::raw_spinlock::run,
+    },
+    SmokeCase {
         name: "rest_init",
         run: cases::rest_init::run,
     },

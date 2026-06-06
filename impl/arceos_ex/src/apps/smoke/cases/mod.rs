@@ -18,6 +18,7 @@ pub mod per_cpu;
 pub mod pre_smp_init;
 pub mod print;
 pub mod process_prepare;
+pub mod raw_spinlock;
 pub mod resource_tree;
 pub mod rest_init;
 pub mod rootfs;

@@ -402,6 +402,7 @@ pub struct RawSpinLock {
     locked: bool,
     irqsave_entered_count: usize,
     irqrestore_exited_count: usize,
+    irqrestore_restored_before_preemption_enabled: bool,
 }
 
 impl RawSpinLock {
@@ -411,6 +412,7 @@ impl RawSpinLock {
             locked: false,
             irqsave_entered_count: 0,
             irqrestore_exited_count: 0,
+            irqrestore_restored_before_preemption_enabled: false,
         }
     }
 
@@ -428,6 +430,10 @@ impl RawSpinLock {
 
     pub const fn irqrestore_exited_count(&self) -> usize {
         self.irqrestore_exited_count
+    }
+
+    pub const fn irqrestore_restored_before_preemption_enabled(&self) -> bool {
+        self.irqrestore_restored_before_preemption_enabled
     }
 
     pub fn setup(&mut self) -> EventResult {
@@ -485,8 +491,12 @@ impl RawSpinLock {
         }
 
         self.locked = false;
-        preemption.enable()?;
+        let restored_before = local_interrupt.restored_count();
         local_interrupt.restore()?;
+        self.irqrestore_restored_before_preemption_enabled = local_interrupt.restored_count()
+            == restored_before.wrapping_add(1)
+            && preemption.disabled();
+        preemption.enable()?;
         self.irqrestore_exited_count = self.irqrestore_exited_count.wrapping_add(1);
         Ok(())
     }

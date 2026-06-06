@@ -12,6 +12,7 @@
 - `model/main.spec`：对象、状态、事件、依赖和阶段顺序的正式模型入口。
 - `coding/main.spec`：从模型映射到对象级代码实现的正式编码约束入口。
 - `compose/main.spec`：对象级实现进入组件封装阶段时的正式约束入口。
+- `testing/main.spec`：从模型和编码规格生成、指导或审查测试用例的正式约束入口。
 
 `entry-prelude-object-model.spec` 是旧单文件模型路径的兼容入口，只转发到
 `model/main.spec`。新规格不应继续写入该文件。

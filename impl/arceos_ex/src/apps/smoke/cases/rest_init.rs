@@ -43,6 +43,9 @@ pub fn run() -> SmokeResult {
         || ctx.kernel_init_task_pi_lock.locked()
         || ctx.kernel_init_task_pi_lock.irqsave_entered_count() == 0
         || ctx.kernel_init_task_pi_lock.irqrestore_exited_count() == 0
+        || !ctx
+            .kernel_init_task_pi_lock
+            .irqrestore_restored_before_preemption_enabled()
     {
         printk::write_str("kernel_init task facts invalid\n");
         return SmokeResult::Failed;
