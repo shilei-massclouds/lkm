@@ -55,11 +55,17 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.boot_cpu_current_task,
         &mut ctx.kernel_init_task_pi_lock,
     )?;
-    ctx.kernel_init_affinity.setup(
-        &mut ctx.kernel_init_task,
-        &ctx.root_pid_namespace,
-        &ctx.scheduler,
-    )?;
+    if !ctx
+        .kernel_init_task
+        .pin_to_boot_cpu(ctx.scheduler.boot_runqueue().cpu_id())
+    {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            crate::phases::state::load(&REST_INIT_PHASE_STATE),
+            State::Base,
+            State::Prepared,
+        );
+    }
     checkpoint_numa_default_policy_noop()?;
     ctx.kthreadd_task.preset(TaskSpawnInputs {
         task_creation_core: &ctx.task_creation_core,
@@ -197,8 +203,6 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.kernel_init_task.pinned_to_boot_cpu()
         && ctx.kernel_init_task.pf_no_setaffinity()
         && ctx.kernel_init_task.cpu_id() == ctx.scheduler.boot_runqueue().cpu_id()
-        && ctx.kernel_init_affinity.state() == State::Ready
-        && ctx.kernel_init_affinity.pid_lookup_used_root_namespace()
         && ctx.kthreadd_task.state() == State::Online
         && ctx.kthreadd_task.pid() == 2
         && ctx.kthreadd_task.entry() == TaskEntry::Kthreadd

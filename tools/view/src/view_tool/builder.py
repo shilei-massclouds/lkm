@@ -143,6 +143,8 @@ def build_trace_view(derive_data: dict[str, Any]) -> ViewModel:
         roots,
         _verified_states_by_event(derive_data, roots),
         _context_records_by_event(derive_data),
+        _ordinary_action_records_by_event(derive_data),
+        _transition_record_order_by_event(derive_data),
     )
     return ViewModel(
         name="trace",
@@ -154,6 +156,71 @@ def build_trace_view(derive_data: dict[str, Any]) -> ViewModel:
             "trace_arrows": tuple(builder.arrows),
         },
     )
+
+
+def _ordinary_action_records_by_event(
+    derive_data: dict[str, Any]
+) -> dict[tuple[str, str], list[dict[str, object]]]:
+    actions: dict[tuple[str, str], list[dict[str, object]]] = {}
+    records = derive_data.get("records", [])
+    if not isinstance(records, list):
+        return actions
+
+    for order, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        if record.get("status") != "proved":
+            continue
+        object_name = record.get("object")
+        event_name = record.get("event")
+        if not isinstance(object_name, str) or not isinstance(event_name, str):
+            continue
+        proof_class = record.get("proof_class")
+        if proof_class not in {
+            "action_commit",
+            "action_result_binding",
+            "type_process_commit",
+        }:
+            continue
+        if record.get("source_kind") != "drives":
+            continue
+        if record.get("proof_provider") == "within_context":
+            continue
+        expression = record.get("expression")
+        if not isinstance(expression, str) or not expression:
+            continue
+        display_expression = record.get("display_expression")
+        if not isinstance(display_expression, str) or not display_expression:
+            display_expression = expression
+        actions.setdefault((object_name, event_name), []).append(
+            {
+                "action": display_expression,
+                "order": order,
+            }
+        )
+    return actions
+
+
+def _transition_record_order_by_event(derive_data: dict[str, Any]) -> dict[tuple[str, str], int]:
+    orders: dict[tuple[str, str], int] = {}
+    records = derive_data.get("records", [])
+    if not isinstance(records, list):
+        return orders
+
+    for order, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        if record.get("status") != "proved":
+            continue
+        message = record.get("message")
+        if not isinstance(message, str) or not message.startswith("transition: "):
+            continue
+        object_name = record.get("object")
+        event_name = record.get("event")
+        if not isinstance(object_name, str) or not isinstance(event_name, str):
+            continue
+        orders.setdefault((object_name, event_name), order)
+    return orders
 
 
 def _context_records_by_event(
@@ -592,6 +659,8 @@ class _TraceLayoutBuilder:
         roots: list[Any],
         verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
         context_records: dict[tuple[str, str], list[dict[str, object]]],
+        ordinary_actions: dict[tuple[str, str], list[dict[str, object]]],
+        event_orders: dict[tuple[str, str], int],
     ) -> None:
         self._max_phase_lane = _max_trace_phase_lane(roots, verified_states_by_event)
         self._object_column_base = self._max_phase_lane + 2
@@ -604,6 +673,8 @@ class _TraceLayoutBuilder:
                 object_lane=0,
                 parent_event_id=None,
                 context_records=context_records,
+                ordinary_actions=ordinary_actions,
+                event_orders=event_orders,
                 verified_states_by_event=verified_states_by_event,
             )
         self._build_columns()
@@ -616,6 +687,8 @@ class _TraceLayoutBuilder:
         object_lane: int,
         parent_event_id: str | None,
         context_records: dict[tuple[str, str], list[dict[str, object]]],
+        ordinary_actions: dict[tuple[str, str], list[dict[str, object]]],
+        event_orders: dict[tuple[str, str], int],
         verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
     ) -> None:
         data = _trace_node_object(node)
@@ -817,8 +890,69 @@ class _TraceLayoutBuilder:
                 if context_node.get("kind") == "context":
                     place_context_node(context_node, 0)
 
-        for child in _trace_children(data):
+        body_items: list[dict[str, object]] = []
+        for child_index, child in enumerate(_trace_children(data)):
             if _should_skip_trace_node(child, verified_states_by_event):
+                continue
+            child_data = _trace_node_object(child)
+            child_key = (
+                str(child_data.get("object")),
+                str(child_data.get("event")),
+            )
+            body_items.append(
+                {
+                    "kind": "child",
+                    "order": event_orders.get(child_key, 1_000_000 + child_index),
+                    "child": child,
+                }
+            )
+        event_key = (str(data["object"]), str(data["event"]))
+        for action_index, action in enumerate(ordinary_actions.get(event_key, [])):
+            order = action.get("order")
+            body_items.append(
+                {
+                    "kind": "action",
+                    "order": order if isinstance(order, int) else 1_500_000 + action_index,
+                    "action": action,
+                }
+            )
+        body_items.sort(key=lambda item: int(item.get("order", 0)))
+
+        action_column = self._object_gap_column(object_lane)
+        if any(item.get("kind") == "action" for item in body_items):
+            self._max_object_lane = max(self._max_object_lane, object_lane + 1)
+
+        for item in body_items:
+            if item.get("kind") == "action":
+                action = item.get("action")
+                if not isinstance(action, dict):
+                    continue
+                action_row = len(self.rows)
+                self._add_row(
+                    "action",
+                    action_row,
+                    f"{label}.action.{action_row}",
+                    group_id=event_id if not is_phase else None,
+                    group_role="action" if not is_phase else None,
+                )
+                action_id = f"{event_id}-action-{action_row}"
+                self.cells.append(
+                    TraceCell(
+                        id=action_id,
+                        kind="action",
+                        row=action_row,
+                        column=action_column,
+                        column_span=2,
+                        label=str(action.get("action", "")),
+                    )
+                )
+                self.arrows.append(
+                    TraceArrow(source=span_id, target=action_id, kind="action")
+                )
+                continue
+
+            child = item.get("child")
+            if child is None:
                 continue
             child_event_id = f"event-{self._event_index}"
             self.arrows.append(
@@ -832,6 +966,8 @@ class _TraceLayoutBuilder:
                 object_lane=object_lane if child_is_phase else child_object_lane,
                 parent_event_id=event_id,
                 context_records=context_records,
+                ordinary_actions=ordinary_actions,
+                event_orders=event_orders,
                 verified_states_by_event=verified_states_by_event,
             )
 

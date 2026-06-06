@@ -57,6 +57,7 @@ predicate arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts() -> bo
 predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_kernel_init_dispatch_gate() -> bool;
+predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
 predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
 predicate arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred() -> bool;
@@ -576,6 +577,18 @@ type ArceosExRestInitCodingMust {
          * continues the cpu_startup_entry() tail.
          */
         arceos_ex_must_rest_init_publish_kernel_init_dispatch_gate();
+
+        /*
+         * KernelInitTask affinity action:
+         *
+         * PID 1 boot CPU pinning must be implemented as a KernelInitTask
+         * action that sets the PF_NO_SETAFFINITY-equivalent flag and cpumask
+         * facts. It must not be represented by an independent
+         * KernelInitAffinity lifecycle object. The RCU read-side boundary
+         * around the Linux pid lookup remains a deferred context-modeling
+         * question, not a completed resource-exclusive context.
+         */
+        arceos_ex_must_rest_init_pin_kernel_init_as_task_action();
 
         /*
          * Fork dependency:

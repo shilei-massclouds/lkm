@@ -127,6 +127,13 @@ provider 已创建并绑定全局引用、`system_state == SYSTEM_SCHEDULING`、
 `Scheduler.schedule_preempt_disabled()` 已形成 dispatch gate、boot idle runtime 入口已确认等事实。
 这些事实当前仍是对象级模拟边界，不得实现真实任务栈切换、真实调度上下文切换或 idle loop。
 
+PID 1 的临时 boot CPU 亲和约束不得实现为独立 `KernelInitAffinity` 对象；它必须作为
+`KernelInitTask` 的 `pin_to_boot_cpu()` action 承载。该 action 只提交两类 task 属性：设置
+`PF_NO_SETAFFINITY` 等价 flag，以及把 task cpumask/cpu id 限制到 boot CPU。Linux 源码中的
+`find_task_by_pid_ns(pid, &init_pid_ns)` 只作为实现路径说明，不能在对象级实现中变成单独生命周期对象。
+包围该查找的 `rcu_read_lock()/unlock()` 读侧上下文当前保留为 deferred 建模问题；代码可以记录注释，
+但不得伪造成已经完成的资源独占上下文模型。
+
 `Scheduler.schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部和
 `KernelInitTask -> PreSmpInitPhase` 的分叉点。`PreSmpInitPhase` 依赖
 `KernelInitDispatchGate.Ready`，不得硬依赖 `RestInitPhase.Ready`。`RestInitPhase.Ready` 仍必须覆盖

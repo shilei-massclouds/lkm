@@ -296,6 +296,8 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         "text { font-family: Arial, sans-serif; fill: #1f2937; }",
         ".state { fill: #ffffff; stroke: #334155; stroke-width: 1.1; }",
         ".event-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
+        ".action { fill: #fffbeb; stroke: #d97706; stroke-width: 1; }",
+        ".action-arrow { stroke: #d97706; stroke-width: 1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".verified-state { fill: #f8fafc; stroke: #64748b; stroke-width: 1.1; }",
         ".phase-arrow { stroke: #0f172a; stroke-width: 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".phase-label { fill: #0f172a; font-weight: 600; }",
@@ -340,6 +342,8 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
             _append_trace_phase_event(lines, cell, cell_box(cell))
         elif cell.kind == "event_span":
             _append_trace_event_label(lines, cell, cell_box(cell))
+        elif cell.kind == "action":
+            _append_trace_action(lines, cell, cell_box(cell))
         elif cell.kind == "context_action":
             _append_trace_context_action(lines, cell, cell_box(cell))
 
@@ -375,6 +379,13 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
             )
         elif arrow.kind == "context_order":
             _append_trace_context_order_arrow(lines, cell_box(source), cell_box(target))
+        elif arrow.kind == "action":
+            _append_trace_directed_horizontal_arrow(
+                lines,
+                _trace_event_anchor_box(source, cell_box(source)),
+                cell_box(target),
+                css_class="action-arrow",
+            )
 
     if annotation_items:
         _append_trace_annotations(
@@ -700,6 +711,28 @@ def _append_trace_context_action(
     )
 
 
+def _append_trace_action(
+    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+) -> None:
+    box_x, box_y, box_width, box_height = _trace_action_rect(box)
+    center_x = box_x + box_width / 2
+    center_y = box_y + box_height / 2
+    lines.extend(
+        [
+            f'<title>{_xml_escape(cell.label)}</title>',
+            f'<rect class="action" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="4" />',
+        ]
+    )
+    _append_trace_centered_text(
+        lines,
+        _trace_action_label_lines(cell.label),
+        center_x,
+        center_y,
+        font_size=9,
+        baseline_offset=3,
+    )
+
+
 def _append_trace_context_order_arrow(
     lines: list[str],
     source_box: tuple[float, float, float, float],
@@ -730,6 +763,18 @@ def _trace_context_action_rect(
     box_height = 34
     box_x = x + pad_x
     box_y = y + (height - box_height) / 2 + 4
+    return box_x, box_y, box_width, box_height
+
+
+def _trace_action_rect(
+    box: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    x, y, width, height = box
+    pad_x = 14
+    box_width = max(20, width - pad_x * 2)
+    box_height = 34
+    box_x = x + pad_x
+    box_y = y + (height - box_height) / 2
     return box_x, box_y, box_width, box_height
 
 

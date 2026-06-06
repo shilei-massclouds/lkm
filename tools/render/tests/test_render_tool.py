@@ -267,6 +267,55 @@ class RenderToolTests(unittest.TestCase):
         self.assertIn("Scheduler.SelectRunQueue", text)
         self.assertIn("EnqueueTask", text)
 
+    def test_render_svg_from_trace_view_draws_ordinary_action(self) -> None:
+        view = ViewModel(
+            name="trace",
+            graph_format="svg",
+            metadata={
+                "trace_columns": [
+                    {"index": 0, "kind": "phase", "depth": 0},
+                    {"index": 1, "kind": "phase_object_gap", "depth": 0},
+                    {"index": 2, "kind": "object", "depth": 0},
+                    {"index": 3, "kind": "gap", "depth": 0},
+                ],
+                "trace_rows": [
+                    {"index": 0, "kind": "gap", "label": "body.start"},
+                    {"index": 1, "kind": "action", "label": "action"},
+                    {"index": 2, "kind": "gap", "label": "body.end"},
+                ],
+                "trace_cells": (
+                    TraceCell(
+                        id="event",
+                        kind="event_span",
+                        row=0,
+                        column=0,
+                        label="RestInitPhase.Event::Preset",
+                        row_span=3,
+                    ),
+                    TraceCell(
+                        id="action",
+                        kind="action",
+                        row=1,
+                        column=3,
+                        label="KernelInitTask.Action::PinToBootCpu(BootCPURef)",
+                        column_span=2,
+                    ),
+                ),
+                "trace_arrows": (
+                    TraceArrow(source="event", target="action", kind="action"),
+                ),
+            },
+        )
+
+        text = render_svg(view)
+
+        self.assertIn("action", text)
+        self.assertIn("action-arrow", text)
+        self.assertIn("PinToBootCpu", text)
+        self.assertIn("KernelInitTask.Action::PinToBootCpu(BootCPURef)", text)
+        self.assertIn(">KernelInitTask</tspan>", text)
+        self.assertIn('dy="12">PinToBootCpu</tspan>', text)
+
     def test_render_svg_from_trace_view_with_annotations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             view = self._build_view_json(tmp, "trace")

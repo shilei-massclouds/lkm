@@ -102,6 +102,15 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
  * RunQueue.Event::EnqueueTask(KernelInitTaskRef)。SelectRunQueue
  * 当前固定返回 BootRunQueueRef；完整选择策略后续 deferred。三者都成功后，
  * Enable 才提交 KernelInitTask Ready -> Online。
+ *
+ * KernelInitTask.PinToBootCpu 对应 rest_init() 随后的 PF_NO_SETAFFINITY
+ * 与 set_cpus_allowed_ptr(tsk, cpumask_of(smp_processor_id()))。它不是独立
+ * lifecycle object，而是 KernelInitTask 的属性 action；源码中的
+ * find_task_by_pid_ns(pid, &init_pid_ns) 只是用 pid 重新取回 task 指针，
+ * 规格层已经通过 KernelInitTask receiver 持有目标 task。该 action 当前
+ * 直接提交 flags 和 cpumask 属性。Linux 路径处在 rcu_read_lock()/unlock()
+ * 定界的读侧上下文中；该上下文是否归入资源独占上下文，还是应建模为
+ * 单独的 RCU/读侧上下文，后续讨论。
  */
 object KernelInitTask: Task {
     initial_state: State::Base;
@@ -280,49 +289,27 @@ object KernelInitTask: Task {
             task_enqueued_on_runqueue(KernelInitTaskRef, BootRunQueueRef);
         }
     }
-}
 
-/*
- * KernelInitAffinity 表示 rest_init() 中对 PID 1 设置 PF_NO_SETAFFINITY 并
- * 临时固定到 boot CPU。
- */
-object KernelInitAffinity: TaskObject {
-    initial_state: State::Base;
-    parent: KernelInitTask;
-
-    /*
-     * Base 表示 PID 1 尚未被 rest_init() 固定到 boot CPU。
-     */
-    state State::Base {
-        events {
-            /*
-             * Setup 设置 PF_NO_SETAFFINITY，并把 PID 1 临时固定到 boot CPU。
-             */
-            on Event::Setup -> State::Ready {
-                depends_on {
-                    KernelInitTask.state == State::Online;
-                    RootPidNamespace.state == State::Ready;
-                    CpuGroup.state == State::Ready;
-                }
-
-                ensures {
-                    kernel_init_affinity_ready(KernelInitAffinity, KernelInitTask);
-                    kernel_init_pf_no_setaffinity(KernelInitTask);
-                    kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
-                    kernel_init_pid_lookup_used_root_namespace(KernelInitTask, RootPidNamespace);
-                }
+    actions {
+        /*
+         * PinToBootCpu 设置 PF_NO_SETAFFINITY 并把 PID 1 临时固定到 boot CPU。
+         * 源码通过 RCU 读侧保护下的 pid lookup 取回 task 指针；规格层不把
+         * pid lookup 提升为正式 drives，因为 receiver 已经是 KernelInitTask。
+         */
+        Action::PinToBootCpu(cpu_ref: CpuRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                cpu_ref_ready(cpu_ref);
             }
-        }
-    }
-
-    /*
-     * Ready 表示 PID 1 的临时亲和性约束已经发布。
-     */
-    state State::Ready {
-        invariant {
-            kernel_init_affinity_ready(KernelInitAffinity, KernelInitTask);
-            kernel_init_pf_no_setaffinity(KernelInitTask);
-            kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
+            ensures {
+                task_flag_no_setaffinity(KernelInitTask);
+                task_cpumask_is(KernelInitTask, cpu_ref);
+                kernel_init_pf_no_setaffinity(KernelInitTask);
+                kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
+            }
+            deferred {
+                "PinToBootCpu 当前未建模 rcu_read_lock()/unlock() 定界的读侧上下文；它是否属于资源独占上下文，还是应作为 RCU/读侧上下文单独建模，后续讨论。";
+            }
         }
     }
 }
@@ -751,7 +738,7 @@ object RestInitPhase: PhaseObject {
                     KernelInitTask.Event::Preset;
                     KernelInitTask.Event::Setup;
                     KernelInitTask.Event::Enable;
-                    KernelInitAffinity.Event::Setup;
+                    KernelInitTask.Action::PinToBootCpu(BootCPURef);
                     KthreaddTask.Event::Preset;
                     KthreaddTask.Event::Setup;
                     KthreaddTask.Event::Enable;
@@ -769,6 +756,8 @@ object RestInitPhase: PhaseObject {
                     rcu_gp_seq_baseline_synced(RcuCore);
                     rest_init_dispatch_ready(RestInitPhase, KernelInitDispatchGate);
                     kernel_init_task_created(KernelInitTask);
+                    kernel_init_pf_no_setaffinity(KernelInitTask);
+                    kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     kthreadd_task_created(KthreaddTask);
                     system_state_scheduling(SystemState);
                     kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
@@ -785,6 +774,7 @@ object RestInitPhase: PhaseObject {
                 deferred {
                     "KthreaddTask 消费 kthread_create_list 和后续 kthread 创建服务留给运行期模型。";
                     "真实抢占、上下文切换和任务栈切换不在当前对象级实现中执行，只发布调度分叉事实。";
+                    "KernelInitTask.PinToBootCpu 当前保留 rcu_read_lock()/unlock() 读侧上下文建模问题：它是否属于资源独占上下文，还是应作为 RCU/读侧上下文单独建模，后续讨论。";
                 }
             }
         }
@@ -798,6 +788,8 @@ object RestInitPhase: PhaseObject {
             rcu_scheduler_active_level_init(RcuCore);
             rcu_gp_seq_baseline_synced(RcuCore);
             KernelInitTask.state == State::Online;
+            kernel_init_pf_no_setaffinity(KernelInitTask);
+            kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             KthreaddTask.state == State::Online;
             SystemState.state == State::Ready;
             KthreaddReadyGate.state == State::Online;
@@ -848,7 +840,6 @@ object RestInitPhase: PhaseObject {
             rcu_scheduler_active_level_init(RcuCore);
             rcu_gp_seq_baseline_synced(RcuCore);
             KernelInitTask.state == State::Online;
-            KernelInitAffinity.state == State::Ready;
             KthreaddTask.state == State::Online;
             SystemState.state == State::Ready;
             KthreaddReadyGate.state == State::Online;
@@ -856,6 +847,8 @@ object RestInitPhase: PhaseObject {
             BootIdleRuntime.state == State::Ready;
             rest_init_ready(RestInitPhase);
             system_state_scheduling(SystemState);
+            kernel_init_pf_no_setaffinity(KernelInitTask);
+            kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
             scheduler_first_schedule_committed(Scheduler);
             task_concurrency_open();

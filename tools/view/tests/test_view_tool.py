@@ -378,6 +378,113 @@ class ViewToolTests(unittest.TestCase):
             2,
         )
 
+    def test_trace_view_places_ordinary_drives_actions(self) -> None:
+        view = build_trace_view(
+            {
+                "trace": [
+                    {
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "source_state": "Ready",
+                        "target_state": "Prepared",
+                        "children": [
+                            {
+                                "object": "KernelInitTask",
+                                "event": "Enable",
+                                "source_state": "Ready",
+                                "target_state": "Online",
+                                "children": [],
+                            },
+                            {
+                                "object": "KthreaddTask",
+                                "event": "Preset",
+                                "source_state": "Base",
+                                "target_state": "Prepared",
+                                "children": [],
+                            },
+                        ],
+                    }
+                ],
+                "model": {},
+                "records": [
+                    {
+                        "status": "proved",
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "message": "transition: KernelInitTask.Event::Enable State::Ready -> State::Online",
+                    },
+                    {
+                        "status": "proved",
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "source_kind": "drives",
+                        "proof_class": "action_commit",
+                        "proof_provider": "action_drive",
+                        "expression": "KernelInitTask.Action::PinToBootCpu(cpu_ref: BootCPURef)",
+                        "display_expression": "KernelInitTask.Action::PinToBootCpu(BootCPURef)",
+                    },
+                    {
+                        "status": "proved",
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "source_kind": "drives",
+                        "proof_class": "action_commit",
+                        "proof_provider": "within_context",
+                        "expression": "KernelInitTask.Action::InsideContext()",
+                    },
+                    {
+                        "status": "proved",
+                        "object": "KthreaddTask",
+                        "event": "Preset",
+                        "message": "transition: KthreaddTask.Event::Preset State::Base -> State::Prepared",
+                    },
+                ],
+            }
+        )
+
+        cells = view.metadata["trace_cells"]
+        arrows = view.metadata["trace_arrows"]
+        action_cells = [cell for cell in cells if cell.kind == "action"]
+        self.assertEqual(len(action_cells), 1)
+        action_cell = action_cells[0]
+        self.assertEqual(
+            action_cell.label,
+            "KernelInitTask.Action::PinToBootCpu(BootCPURef)",
+        )
+        self.assertFalse(any("InsideContext" in cell.label for cell in action_cells))
+        rest_init_cell = next(
+            cell
+            for cell in cells
+            if cell.kind == "event_span"
+            and cell.label == "RestInitPhase.Event::Preset"
+        )
+        kernel_enable_cell = next(
+            cell
+            for cell in cells
+            if cell.kind == "event_span"
+            and cell.label == "KernelInitTask.Event::Enable"
+        )
+        kthreadd_preset_cell = next(
+            cell
+            for cell in cells
+            if cell.kind == "event_span"
+            and cell.label == "KthreaddTask.Event::Preset"
+        )
+        self.assertGreater(
+            action_cell.row,
+            kernel_enable_cell.row + kernel_enable_cell.row_span,
+        )
+        self.assertLess(action_cell.row, kthreadd_preset_cell.row)
+        self.assertGreater(action_cell.column, rest_init_cell.column)
+        self.assertTrue(
+            any(
+                arrow.kind == "action"
+                and arrow.source == rest_init_cell.id
+                and arrow.target == action_cell.id
+                for arrow in arrows
+            )
+        )
+
     def test_invalid_model_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model = Path(tmp) / "bad.model.json"

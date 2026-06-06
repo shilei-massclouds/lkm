@@ -229,14 +229,13 @@ impl KernelInitTask {
         guarded_result.and(unlock_result)
     }
 
-    fn pin_to_boot_cpu(&mut self, root_pid_namespace: &RootPidNamespace, cpu_id: usize) -> bool {
-        if self.lifecycle.state() != State::Online
-            || root_pid_namespace.state() != State::Ready
-            || self.pid != KERNEL_INIT_PID
-        {
+    pub fn pin_to_boot_cpu(&mut self, cpu_id: usize) -> bool {
+        if self.lifecycle.state() != State::Online || self.pid != KERNEL_INIT_PID {
             return false;
         }
 
+        // Linux reaches this through an RCU read-side pid lookup. The formal
+        // model keeps that RCU context as a deferred context-kind question.
         self.pinned_to_boot_cpu = true;
         self.pf_no_setaffinity = true;
         self.cpu_id = cpu_id;
@@ -284,64 +283,6 @@ impl KernelInitTask {
             LifecycleEvent::Setup,
             self.lifecycle.state(),
             State::Prepared,
-            State::Ready,
-        )
-    }
-}
-
-pub struct KernelInitAffinity {
-    lifecycle: Lifecycle,
-    pid_lookup_used_root_namespace: bool,
-}
-
-impl KernelInitAffinity {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            pid_lookup_used_root_namespace: false,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn pid_lookup_used_root_namespace(&self) -> bool {
-        self.pid_lookup_used_root_namespace
-    }
-
-    pub fn setup(
-        &mut self,
-        kernel_init_task: &mut KernelInitTask,
-        root_pid_namespace: &RootPidNamespace,
-        scheduler: &Scheduler,
-    ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || kernel_init_task.state() != State::Online
-            || root_pid_namespace.state() != State::Ready
-            || scheduler.boot_runqueue().state() != State::Ready
-        {
-            return self.failed_setup();
-        }
-
-        if !kernel_init_task.pin_to_boot_cpu(root_pid_namespace, scheduler.boot_runqueue().cpu_id())
-        {
-            return self.failed_setup();
-        }
-        self.pid_lookup_used_root_namespace = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            Checkpoint::KernelInitAffinityReady,
-        )
-    }
-
-    fn failed_setup(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Setup,
-            self.lifecycle.state(),
-            State::Base,
             State::Ready,
         )
     }

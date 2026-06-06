@@ -1753,6 +1753,8 @@ object BootCPU: CPUObject {
             on Event::Enable -> State::Online {
                 ensures {
                     boot_cpu_online(BootCPU);
+                    cpu_ref_targets(BootCPURef, BootCPU);
+                    cpu_ref_ready(BootCPURef);
                 }
             }
         }
@@ -1768,6 +1770,8 @@ object BootCPU: CPUObject {
             boot_cpu_present(BootCPU);
             boot_cpu_active(BootCPU);
             boot_cpu_online(BootCPU);
+            cpu_ref_targets(BootCPURef, BootCPU);
+            cpu_ref_ready(BootCPURef);
         }
     }
 }

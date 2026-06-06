@@ -134,6 +134,8 @@ predicate current_cpu_logical_id_ready<T, U>(current_cpu: T, logical_id: U) -> b
 predicate current_cpu_owns_cpu<T, U>(current_cpu: T, cpu: U) -> bool;
 predicate current_cpu_registered_in_cpu_group<T, U>(current_cpu: T, cpu_group: U) -> bool;
 predicate current_cpu_bootstrap_role_ready<T, U>(current_cpu: T, cpu: U) -> bool;
+predicate cpu_ref_targets<T, U>(cpu_ref: T, cpu: U) -> bool;
+predicate cpu_ref_ready<T>(cpu_ref: T) -> bool;
 predicate cpu_event_stream_ready<T, U>(cpu: T, event_stream: U) -> bool;
 predicate cpu_exception_stream_ready<T, U>(cpu: T, exception_stream: U) -> bool;
 predicate cpu_interrupt_stream_ready<T, U>(cpu: T, interrupt_stream: U) -> bool;
@@ -155,6 +157,8 @@ predicate task_not_enqueued<T>(task: T) -> bool;
 predicate task_enqueued_on_runqueue<T, U>(task: T, runqueue: U) -> bool;
 predicate task_runtime_state_transition_allowed<T>(task: T, state: TaskRuntimeState) -> bool;
 predicate task_runtime_state_is<T>(task: T, state: TaskRuntimeState) -> bool;
+predicate task_flag_no_setaffinity<T>(task: T) -> bool;
+predicate task_cpumask_is<T, U>(task: T, cpu_ref: U) -> bool;
 predicate runqueue_ref_targets<T, U>(runqueue_ref: T, runqueue: U) -> bool;
 predicate runqueue_ref_ready<T>(runqueue_ref: T) -> bool;
 predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, runqueue_ref: V) -> bool;
@@ -377,6 +381,9 @@ type TaskRef {
 type RunQueueRef {
 }
 
+type CpuRef {
+}
+
 type TaskRefSet {
 }
 
@@ -406,6 +413,17 @@ type Task: TaskObject {
             result {
                 Allowed: Success(runtime_state_set);
                 Disallowed: Failed(invalid_runtime_state_transition);
+            }
+        }
+
+        Action::PinToBootCpu(cpu_ref: CpuRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                cpu_ref_ready(cpu_ref);
+            }
+            ensures {
+                task_flag_no_setaffinity(self);
+                task_cpumask_is(self, cpu_ref);
             }
         }
     }
