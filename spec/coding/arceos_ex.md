@@ -453,6 +453,34 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 
 手动触发可用于规格大改后立即刷新展示结果，也可后续增加参数，例如指定 spec、指定 kernel implementation、是否运行 QEMU、是否发布 Pages。
 
+### CurrentCPU 与锁上下文变更后的生成要求
+
+后续若模型正式引入 `CurrentCPU`、`LocalInterruptControl`、`CurrentTaskSlot`、`PreemptionControl` 或 `RawSpinLock`，不能只完成规格验证就停止。规格验证通过后，必须检查对象级实现和代码生成指导是否受影响。
+
+重点检查范围：
+
+- `CurrentCPU` 是否拥有对应 CPU 对象，`CpuGroup` 是否只维护这些 CPU 对象的引用、索引和拓扑组织关系。
+- possible secondary CPU 是否仍只是 `CpuGroup`/topology 中的候选或描述；AP 真实进入 secondary entry 前，不得生成 live AP `CurrentCPU`，也不得把 AP 的 local interrupt、current task slot 或 task preemption 控制链视为可操作。
+- `BootCPU` 是否仍作为独立实现对象存在，或已经退化为 `CurrentCPU.cpu` 指向 CPU 的 bootstrap role/alias。
+- `InterruptStream.Enable/Setup` 是否仍直接维护 boot CPU 本地中断事实，或已经改为只在 lifecycle event 中驱动 CPU-local `LocalInterruptControl`。
+- 是否仍有 `InterruptStream` 或其它对象直接改写 local interrupt 开关；接管后只有 `LocalInterruptControl` 可以直接操作本 CPU 中断开关状态。
+- `BootRunQueue.curr`、`BootCPU` 当前任务事实和 scheduler setup 是否需要收敛到 `CurrentTaskSlot`。
+- `preempt_disable()` / `preempt_enable()` 语义是否通过 `CurrentCPU -> cpu -> CurrentTaskSlot.current_task -> PreemptionControl` 表达。
+- `KernelInitTask.Enable` 是否通过 `RawSpinLock.LockIrqSave/UnlockIrqRestore` 进入和退出 `WakeUpNewTaskContext`，并只在 `within` 内驱动受保护资源对象的 action/event。
+- checkpoint、trace 注释、smoke case 和 KUnit case 是否仍引用旧的 `BootCPU` 或裸 `boot_cpu_current_is_idle_task(...)` 事实。
+
+若上述检查表明正式对象、event/action、trace checkpoint 或上下文边界发生变化，应只重新生成受影响部分，不得全局重排无关实现。预计受影响的实现范围包括 CPU/current 相关对象、CPU-local interrupt 控制对象、task preemption 控制对象、raw spinlock wrapper、`rest_init` 中 `KernelInitTask.Enable` 路径、trace 输出以及 smoke/KUnit 测试注册。
+
+有实现变化时，验证至少覆盖：
+
+```text
+make build APP=smoke
+make test
+make verify
+```
+
+同时应运行受影响的 KUnit 入口和 smoke case。smoke/KUnit 应覆盖 `CurrentCPU` 绑定、CPU-local interrupt save/restore、current task slot、task preemption disable/enable，以及 `RawSpinLock.LockIrqSave/UnlockIrqRestore` 驱动 `KernelInitTask.Enable` 的最小路径。若某项暂时无法实现，应在规格或 coding 文档中记录明确 deferred 边界，不得用普通 TODO 代替。
+
 ### 项目主页展示
 
 项目主页应作为测试流水线结果的发布视图，而不是独立测试来源。第一阶段采用轻量 GitHub Pages 方案即可，例如从 `docs/` 或 workflow artifact 发布静态页面。

@@ -305,6 +305,72 @@ state State::Ready {
 
 当前工具只检查单层 `exclusive_context` 的 `lock_ref`、`obj_refs` 和 `within` 内 action/event 引用边界；多种 context kind、effect 偏序、嵌套合法性和句柄层级推导尚未实现。
 
+## SEM-CURRENT-CPU-PLAN-001: CurrentCPU Is The Per-CPU Self Identity Entry
+
+后续正式规格化 `RawSpinLock`、本地中断开关和抢占开关前，必须先补齐 `CurrentCPU` 建模。`CurrentCPU` 表示每个 CPU 启动时天然拥有的“当前 CPU 自我身份入口”；它不是 `Context` 语义中的资源访问上下文，也不是 `within` 使用的资源独占上下文。
+
+`CurrentCPU` 的计划语义如下：
+
+- 每个 CPU 启动时自动产生一个与自身唯一对应的 `CurrentCPU` 实例。
+- `CurrentCPU` 独立于 `CpuGroup`，不挂在 `CpuGroup` 对象树下；BP 侧的 `CurrentCPU` 早于几乎所有内核对象存在。
+- `CurrentCPU` 拥有与自身对应的 CPU 对象；`CpuGroup` 后续维护对这些 CPU 对象的引用、索引和拓扑组织关系，而不是天然拥有 CPU 本体。
+- 内核启动最早期，当前执行 CPU 只通过自己的 `CurrentCPU` 认识自身和访问自己拥有的 CPU 对象；此时规格层尚不应假定已经存在 `BootCPU`。
+- `CurrentCPU.Preset` 记录入口或固件交付的 hartid。
+- `CurrentCPU.Setup` 记录或确认 logical CPU id。
+- `CurrentCPU.Enable` 在 `CpuGroup` 建立后，把自身拥有的 CPU 对象注册/绑定到 `CpuGroup.Cpu[id]` 引用集合。
+- `BootCPU` 后续应从早期身份对象逐步退化为 `CurrentCPU.cpu` 所指 CPU 的 bootstrap role、alias 或描述性 fact；现有 `BootCPU` 对象可在迁移期保留，以避免一次性大范围重写。
+
+secondary CPU 的边界必须单独区分。`CpuGroup` 可以先从 `PlatformCpuInfo`、DeviceTree 或 topology 事实中知道 possible secondary CPU，并可维护 `CpuCandidate`、`PossibleCpuDescriptor` 或等价描述；但在某个 AP 真实进入 secondary entry 之前，不应假定该 AP 的 live `CurrentCPU` 已经存在，也不应认为该 AP 已经拥有可操作的 CPU-local interrupt、current task slot 或 task preemption 控制链。BP 侧如果提前为 AP 准备 idle task、hotplug state、runqueue 元数据或同步 completion，这些对象应标记为 BP 侧为 future CPU 准备的描述/资源，不等同于 AP 自己的 `CurrentCPU` 已建立。AP 进入后，才由该 AP 自动产生自己的 `CurrentCPU`，拥有对应 CPU 对象，并把该 CPU 对象注册/绑定回 `CpuGroup.Cpu[id]` 引用集合。
+
+完成上述绑定后，与当前锁建模相关的访问链应为：
+
+```text
+CurrentCPU
+    -> cpu
+    -> LocalInterruptControl
+    -> CurrentTaskSlot
+    -> current Task
+    -> PreemptionControl
+
+CpuGroup
+    -> CpuRef[id] -> CurrentCPU.cpu
+```
+
+其中 `LocalInterruptControl` 属于具体 CPU，`CurrentTaskSlot` 也属于具体 CPU 并保存当前任务引用；`PreemptionControl` 属于当前 task/thread_info。`preempt_disable()` 和 `preempt_enable()` 不应直接作用于被唤醒或被创建的任务，而应通过 `CurrentCPU -> cpu -> CurrentTaskSlot.current_task` 找到当前正在执行的任务后再驱动该任务的抢占控制事件。
+
+`LocalInterruptControl` 应接管本 CPU local interrupt 开关状态的直接控制能力。`InterruptStream` 不应再直接修改架构中断开关寄存器事实，也不应对外提供普通的 `local_irq_enable/disable` operational event；它只能在自身 lifecycle event 中驱动 `CurrentCPU.cpu.LocalInterruptControl` 完成阶段边界所需的 enable/disable。`LocalInterruptControl` 则只提供可反复调用的 operational events，例如 `Disable`、`Enable`、`SaveAndDisable(out flags)` 和 `Restore(flags)`；本地中断打开/关闭是运行期状态变化，不是 `LocalInterruptControl` 自身 lifecycle event。
+
+后续 `RawSpinLock` 类型建模应在该访问链成立后展开。`raw_spin_lock_irqsave()` 对应的事件应同时驱动三类效果：保存并关闭当前 CPU 本地中断、关闭当前任务抢占、获取锁本体。释放路径应先释放锁本体，再恢复本地中断状态并打开当前任务抢占。示例形态如下：
+
+```text
+RawSpinLock.Event::LockIrqSave(current_cpu: CurrentCPU) {
+    drives {
+        current_cpu.cpu.LocalInterruptControl.Event::SaveAndDisable(out flags);
+        current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Event::Disable;
+        self.Action::Acquire;
+    }
+}
+
+RawSpinLock.Event::UnlockIrqRestore(current_cpu: CurrentCPU, flags: IrqFlags) {
+    drives {
+        self.Action::Release;
+        current_cpu.cpu.LocalInterruptControl.Event::Restore(flags);
+        current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Event::Enable;
+    }
+}
+```
+
+这一路径落地后，`KernelInitTask.Enable` 的 `within WakeUpNewTaskContext` 应由 `KernelInitTaskPiLock.Event::LockIrqSave(current_cpu: CurrentCPU)` 建立进入边界，并由对应的 `UnlockIrqRestore` 建立退出边界。`within` 块内部只保留受保护资源对象的 action/event，例如设置 task runtime state、选择 runqueue 和入队任务。
+
+计划落地顺序：
+
+1. 在模型规格中新增 `CurrentCPU`、CPU 对象所有权、`LocalInterruptControl`、`CurrentTaskSlot`、`PreemptionControl` 和 `RawSpinLock` 的正式类型语义。
+2. 调整入口前导期规格，使 BP 先由 `CurrentCPU` 记录 hartid，并通过自身拥有的 CPU 对象访问 local interrupt/current task 等 CPU-local 子对象；`CpuGroup` 建立后只维护对该 CPU 对象的引用；`BootCPU` 暂作为迁移期 alias/fact 保留。
+3. 调整调度初始化规格，把现有 `boot_cpu_current_is_idle_task(...)` 事实升级为 CPU current slot 的正式设置动作。
+4. 调整 `rest_init` 规格，使 `KernelInitTask.Enable` 的资源独占上下文进入/退出由 `RawSpinLock.LockIrqSave/UnlockIrqRestore` 表达。
+5. 补充工具语法和检查支持，包括 typed lock 或 `RawSpinLock` 实例、`within` enter/exit 边界、路径式 action/event 引用，以及上下文 effect 检查的后续扩展点。
+6. 规格变更后运行 `tools/pyveri/bin/pyveri spec/main.spec --derive --strict`、`make verify` 和 `git diff --check`；若工具实现发生变化，还应运行相关 parser/model/derive 单元测试。
+
 ## SEM-EVENT-RESULT-001: Event And Action Results Are Explicit
 
 `event` 和 `action` 都应具有显式返回结果。正式结果集合由 `ProcessResult` 语义定义，最小包括：
