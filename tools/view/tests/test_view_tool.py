@@ -16,6 +16,7 @@ from common import VIEW_SCHEMA, VIEW_VERSION, read_json
 from derive_tool.__main__ import main as derive_main
 from model_tool.__main__ import main as model_main
 from parse_tool.__main__ import main as parse_main
+from view_tool.builder import build_trace_view
 from view_tool.__main__ import main as view_main
 
 
@@ -196,6 +197,123 @@ class ViewToolTests(unittest.TestCase):
                 and cell["label"] == "PreparePhase.State::Ready"
             ]
             self.assertEqual(len(prepare_ready_cells), 1)
+
+    def test_trace_view_places_within_context_actions(self) -> None:
+        view = build_trace_view(
+            {
+                "trace": [
+                    {
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "source_state": "Created",
+                        "target_state": "Runnable",
+                        "children": [],
+                    }
+                ],
+                "model": {
+                    "exclusive_contexts": {
+                        "WakeUpNewTaskContext": {
+                            "lock_ref": "KernelInitTaskPiLock",
+                            "guard": {
+                                "kind": "RawSpinLockIrqSaveGuard",
+                                "lock_ref": "KernelInitTaskPiLock",
+                                "entered_by": [
+                                    {"body": "KernelInitTaskPiLock.Event::LockIrqSave;"}
+                                ],
+                                "exited_by": [
+                                    {
+                                        "body": "KernelInitTaskPiLock.Event::UnlockIrqRestore;"
+                                    }
+                                ],
+                            },
+                        }
+                    }
+                },
+                "records": [
+                    {
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within WakeUpNewTaskContext",
+                    },
+                    {
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "proof_class": "action_commit",
+                        "proof_provider": "within_context",
+                        "expression": "KernelInitTask.Action::SetTaskState(Runnable)",
+                    },
+                    {
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "proof_class": "action_commit",
+                        "proof_provider": "within_context",
+                        "expression": "Scheduler.Action::SelectRunQueue(KernelInitTask)",
+                    },
+                    {
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "proof_class": "action_commit",
+                        "proof_provider": "within_context",
+                        "expression": "BootRunQueue.Action::EnqueueTask(KernelInitTask)",
+                    },
+                    {
+                        "object": "KernelInitTask",
+                        "event": "Enable",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within WakeUpNewTaskContext exited",
+                    },
+                ],
+            }
+        )
+
+        metadata = view.metadata
+        cells = metadata["trace_cells"]
+        rows = metadata["trace_rows"]
+        arrows = metadata["trace_arrows"]
+        event_cell = next(cell for cell in cells if cell.kind == "event_span")
+        context_cell = next(cell for cell in cells if cell.kind == "context_span")
+        self.assertEqual(context_cell.column, event_cell.column + 1)
+        self.assertEqual(context_cell.column_span, 2)
+        self.assertEqual(context_cell.row_span, 4)
+        self.assertIn("WakeUpNewTaskContext", context_cell.label)
+        self.assertIn("lock=KernelInitTaskPiLock", context_cell.label)
+        self.assertIn("guard=RawSpinLockIrqSaveGuard", context_cell.label)
+        self.assertIn(
+            "enter=KernelInitTaskPiLock.Event::LockIrqSave", context_cell.label
+        )
+        self.assertIn(
+            "exit=KernelInitTaskPiLock.Event::UnlockIrqRestore", context_cell.label
+        )
+        action_cells = [cell for cell in cells if cell.kind == "context_action"]
+        self.assertTrue(
+            all(
+                cell.column == context_cell.column and cell.column_span == 2
+                for cell in action_cells
+            )
+        )
+        self.assertEqual(
+            [cell.label for cell in sorted(action_cells, key=lambda cell: cell.row)],
+            [
+                "KernelInitTask.Action::SetTaskState(Runnable)",
+                "Scheduler.Action::SelectRunQueue(KernelInitTask)",
+                "BootRunQueue.Action::EnqueueTask(KernelInitTask)",
+            ],
+        )
+        self.assertTrue(
+            all(
+                row.get("group_role") == "context_action"
+                for row in rows
+                if row["kind"] == "context_action"
+            )
+        )
+        self.assertTrue(any(arrow.kind == "within" for arrow in arrows))
+        self.assertEqual(
+            sum(1 for arrow in arrows if arrow.kind == "context_order"),
+            2,
+        )
 
     def test_invalid_model_schema_returns_usage_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

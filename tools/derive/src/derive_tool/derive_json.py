@@ -50,6 +50,12 @@ def derivation_to_json(
             "obligation_categories": obligation_categories,
         },
         "states": dict(sorted(result.states.items())),
+        "model": {
+            "locks": model_data.get("model", {}).get("locks", {}),
+            "exclusive_contexts": model_data.get("model", {}).get(
+                "exclusive_contexts", {}
+            ),
+        },
         "records": [_record_to_json(record) for record in result.records],
         "transitions": [
             _transition_to_json(transition) for transition in result.transitions

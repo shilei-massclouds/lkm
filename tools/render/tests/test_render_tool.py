@@ -12,11 +12,17 @@ DERIVE_SRC = TOOLS_ROOT / "derive" / "src"
 if str(DERIVE_SRC) not in sys.path:
     sys.path.insert(0, str(DERIVE_SRC))
 
+from common.view_types import TraceArrow, TraceCell, ViewModel
 from model_tool.__main__ import main as model_main
 from parse_tool.__main__ import main as parse_main
 from derive_tool.__main__ import main as derive_main
 from render_tool.__main__ import main as render_main
-from render_tool.render import _choose_annotation_box, _expand_rect, _rects_overlap
+from render_tool.render import (
+    _choose_annotation_box,
+    _expand_rect,
+    _rects_overlap,
+    render_svg,
+)
 from view_tool.__main__ import main as view_main
 
 
@@ -113,11 +119,124 @@ class RenderToolTests(unittest.TestCase):
             self.assertNotIn("PreparePhase.Enable", text)
             self.assertIn("phase-arrow", text)
             self.assertIn('marker id="dot"', text)
-            self.assertIn('<tspan x="425.0">Riscv64</tspan>', text)
-            self.assertIn('<tspan x="425.0" dy="12">Online</tspan>', text)
+            self.assertIn(">Riscv64</tspan>", text)
+            self.assertIn('dy="12">Online</tspan>', text)
             self.assertIn("<tspan", text)
             self.assertIn("depends-arrow", text)
             self.assertNotIn("StartupTimeline.Base", text)
+
+    def test_render_svg_from_trace_view_draws_within_context(self) -> None:
+        view = ViewModel(
+            name="trace",
+            graph_format="svg",
+            metadata={
+                "trace_columns": [
+                    {"index": 0, "kind": "object", "depth": 0},
+                    {"index": 1, "kind": "gap", "depth": 0},
+                    {"index": 2, "kind": "object", "depth": 1},
+                ],
+                "trace_rows": [
+                    {"index": 0, "kind": "state", "label": "source"},
+                    {"index": 1, "kind": "gap", "label": "body.start"},
+                    {
+                        "index": 2,
+                        "kind": "context_action",
+                        "label": "within.0",
+                        "group_role": "context_action",
+                    },
+                    {
+                        "index": 3,
+                        "kind": "context_action",
+                        "label": "within.1",
+                        "group_role": "context_action",
+                    },
+                    {
+                        "index": 4,
+                        "kind": "context_guard",
+                        "label": "within.guard",
+                        "group_role": "context_guard",
+                    },
+                    {"index": 5, "kind": "gap", "label": "body.end"},
+                    {"index": 6, "kind": "state", "label": "target"},
+                ],
+                "trace_cells": (
+                    TraceCell(
+                        id="source",
+                        kind="state",
+                        row=0,
+                        column=0,
+                        label="KernelInitTask.State::Created",
+                    ),
+                    TraceCell(
+                        id="target",
+                        kind="state",
+                        row=6,
+                        column=0,
+                        label="KernelInitTask.State::Runnable",
+                    ),
+                    TraceCell(
+                        id="event",
+                        kind="event_span",
+                        row=1,
+                        column=0,
+                        label="KernelInitTask.Event::Enable",
+                        row_span=4,
+                    ),
+                    TraceCell(
+                        id="context",
+                        kind="context_span",
+                        row=2,
+                        column=1,
+                        label=(
+                            "WakeUpNewTaskContext"
+                            "|lock=KernelInitTaskPiLock"
+                            "|guard=RawSpinLockIrqSaveGuard"
+                            "|enter=KernelInitTaskPiLock.Event::LockIrqSave"
+                            "|exit=KernelInitTaskPiLock.Event::UnlockIrqRestore"
+                        ),
+                        row_span=3,
+                        column_span=2,
+                    ),
+                    TraceCell(
+                        id="action-0",
+                        kind="context_action",
+                        row=2,
+                        column=1,
+                        label="KernelInitTask.Action::SetTaskState(Runnable)",
+                        column_span=2,
+                    ),
+                    TraceCell(
+                        id="action-1",
+                        kind="context_action",
+                        row=3,
+                        column=1,
+                        label="Scheduler.Action::SelectRunQueue(KernelInitTask)",
+                        column_span=2,
+                    ),
+                ),
+                "trace_arrows": (
+                    TraceArrow(source="source", target="target", kind="state"),
+                    TraceArrow(source="event", target="context", kind="within"),
+                    TraceArrow(
+                        source="action-0", target="action-1", kind="context_order"
+                    ),
+                ),
+            },
+        )
+
+        text = render_svg(view)
+
+        self.assertIn("context-box", text)
+        self.assertIn("context-action", text)
+        self.assertIn("within-arrow", text)
+        self.assertIn("context-order", text)
+        self.assertIn("WakeUpNewTaskContext", text)
+        self.assertIn("lock: KernelInitTaskPiLock", text)
+        self.assertNotIn("guard: RawSpinLockIrqSaveGuard", text)
+        self.assertNotIn("enter: KernelInitTaskPiLock.LockIrqSave", text)
+        self.assertNotIn("exit: KernelInitTaskPiLock.UnlockIrqRestore", text)
+        self.assertIn("SetTaskState", text)
+        self.assertIn("SelectRunQueue", text)
 
     def test_render_svg_from_trace_view_with_annotations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

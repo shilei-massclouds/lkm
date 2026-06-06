@@ -295,6 +295,12 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         ".state-arrow { stroke: #334155; stroke-width: 1.2; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".drive-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
+        ".within-arrow { stroke: #0f766e; stroke-width: 1.1; stroke-dasharray: 5 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
+        ".context-box { fill: #f0fdfa; stroke: #0f766e; stroke-width: 1.2; stroke-dasharray: 6 4; }",
+        ".context-action { fill: #ffffff; stroke: #0f766e; stroke-width: 1; }",
+        ".context-order { stroke: #0f766e; stroke-width: 1; fill: none; marker-end: url(#arrow); }",
+        ".context-title { fill: #0f766e; font-weight: 600; }",
+        ".context-guard { fill: #115e59; }",
         ".muted { fill: #64748b; }",
     ]
     if annotation_items:
@@ -314,10 +320,16 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
             _append_trace_state_cell(lines, cell, cell_box(cell))
 
     for cell in cells:
+        if cell.kind == "context_span":
+            _append_trace_context_box(lines, cell, cell_box(cell))
+
+    for cell in cells:
         if cell.kind == "event_span" and cell.id in phase_span_ids:
             _append_trace_phase_event(lines, cell, cell_box(cell))
         elif cell.kind == "event_span":
             _append_trace_event_label(lines, cell, cell_box(cell))
+        elif cell.kind == "context_action":
+            _append_trace_context_action(lines, cell, cell_box(cell))
 
     for arrow in arrows:
         source = cell_by_id.get(arrow.source)
@@ -342,6 +354,15 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
             _append_trace_horizontal_arrow(
                 lines, cell_box(source), cell_box(target), css_class="depends-arrow"
             )
+        elif arrow.kind == "within":
+            _append_trace_directed_horizontal_arrow(
+                lines,
+                _trace_event_anchor_box(source, cell_box(source)),
+                cell_box(target),
+                css_class="within-arrow",
+            )
+        elif arrow.kind == "context_order":
+            _append_trace_context_order_arrow(lines, cell_box(source), cell_box(target))
 
     if annotation_items:
         _append_trace_annotations(
@@ -506,6 +527,8 @@ def _trace_column_metrics(columns: list[dict[str, object]]) -> dict[int, tuple[s
             width = 84
         elif kind == "phase_object_gap":
             width = 56
+        elif kind == "context":
+            width = 260
         elif kind == "object":
             width = 178
         else:
@@ -527,6 +550,10 @@ def _trace_row_metrics(rows: list[dict[str, object]]) -> dict[int, tuple[str, in
             height = 20
         elif group_role in {"source", "target"}:
             height = 48
+        elif group_role == "context_action":
+            height = 56
+        elif group_role == "context_guard":
+            height = 28
         elif group_role in {"body_start", "body_end"}:
             height = 12
         elif kind == "state":
@@ -610,6 +637,86 @@ def _append_trace_phase_event(
     )
 
 
+def _append_trace_context_box(
+    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+) -> None:
+    x, y, width, height = box
+    pad_x = 10
+    pad_y = 6
+    box_x = x + pad_x
+    box_y = y + pad_y
+    box_width = max(20, width - pad_x * 2)
+    box_height = max(20, height - pad_y * 2)
+    title, details = _trace_context_label_lines(cell.label)
+    lines.extend(
+        [
+            f'<title>{_xml_escape(cell.label)}</title>',
+            f'<rect class="context-box" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="6" />',
+            f'<text class="context-title" x="{box_x + box_width / 2:.1f}" y="{box_y - 4:.1f}" font-size="10" text-anchor="middle">{_xml_escape(title)}</text>',
+        ]
+    )
+    detail_y = box_y + 14
+    for index, detail in enumerate(details[:1]):
+        lines.append(
+            f'<text class="context-guard" x="{box_x + 8:.1f}" y="{detail_y + index * 12:.1f}" font-size="8">{_xml_escape(detail)}</text>'
+        )
+
+
+def _append_trace_context_action(
+    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+) -> None:
+    box_x, box_y, box_width, box_height = _trace_context_action_rect(box)
+    center_x = box_x + box_width / 2
+    center_y = box_y + box_height / 2
+    lines.extend(
+        [
+            f'<title>{_xml_escape(cell.label)}</title>',
+            f'<rect class="context-action" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="4" />',
+        ]
+    )
+    _append_trace_centered_text(
+        lines,
+        _trace_action_label_lines(cell.label),
+        center_x,
+        center_y,
+        font_size=9,
+        baseline_offset=3,
+    )
+
+
+def _append_trace_context_order_arrow(
+    lines: list[str],
+    source_box: tuple[float, float, float, float],
+    target_box: tuple[float, float, float, float],
+) -> None:
+    source_x, source_y, source_w, source_h = _trace_context_action_rect(source_box)
+    target_x, target_y, target_w, target_h = _trace_context_action_rect(target_box)
+    source_center_y = source_y + source_h / 2
+    target_center_y = target_y + target_h / 2
+    x = (source_x + source_w / 2 + target_x + target_w / 2) / 2
+    if target_center_y < source_center_y:
+        y1 = source_y
+        y2 = target_y + target_h
+    else:
+        y1 = source_y + source_h
+        y2 = target_y
+    lines.append(
+        f'<line class="context-order" x1="{x:.1f}" y1="{y1:.1f}" x2="{x:.1f}" y2="{y2:.1f}" />'
+    )
+
+
+def _trace_context_action_rect(
+    box: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    x, y, width, height = box
+    pad_x = 22
+    box_width = max(20, width - pad_x * 2)
+    box_height = 34
+    box_x = x + pad_x
+    box_y = y + (height - box_height) / 2 + 4
+    return box_x, box_y, box_width, box_height
+
+
 def _append_trace_state_arrow(
     lines: list[str],
     source_box: tuple[float, float, float, float],
@@ -646,6 +753,32 @@ def _append_trace_horizontal_arrow(
         x2 = target_x
     elif max_length is not None and x2 - x1 > max_length:
         x1 = x2 - max_length
+    lines.append(
+        f'<line class="{css_class}" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
+    )
+
+
+def _append_trace_directed_horizontal_arrow(
+    lines: list[str],
+    source_box: tuple[float, float, float, float],
+    target_box: tuple[float, float, float, float],
+    *,
+    css_class: str,
+) -> None:
+    source_x, source_y, source_w, source_h = source_box
+    target_x, target_y, target_w, target_h = target_box
+    source_center_x = source_x + source_w / 2
+    target_center_x = target_x + target_w / 2
+    y = source_y + source_h / 2
+    if target_center_x < source_center_x:
+        x1 = source_x
+        x2 = target_x + target_w
+    else:
+        x1 = source_x + source_w
+        x2 = target_x
+    target_center_y = target_y + target_h / 2
+    if abs(target_center_y - y) <= 12:
+        y = target_center_y
     lines.append(
         f'<line class="{css_class}" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
     )
@@ -789,7 +922,20 @@ def _trace_annotation_occupied_boxes(
             boxes.append(_trace_state_anchor_box(cell_box(cell)))
         elif cell.kind == "event_span" and cell.id not in phase_span_ids:
             boxes.append(_trace_event_anchor_box(cell, cell_box(cell)))
+        elif cell.kind == "context_span":
+            boxes.append(_trace_context_box_rect(cell_box(cell)))
+        elif cell.kind == "context_action":
+            boxes.append(_trace_context_action_rect(cell_box(cell)))
     return boxes
+
+
+def _trace_context_box_rect(
+    box: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    x, y, width, height = box
+    pad_x = 10
+    pad_y = 6
+    return x + pad_x, y + pad_y, max(20, width - pad_x * 2), max(20, height - pad_y * 2)
 
 
 def _trace_state_anchor_box(
@@ -1036,6 +1182,34 @@ def _trace_label_lines(label: str) -> tuple[str, ...]:
         return (label,)
     object_name, state_or_event = label.split(".", 1)
     return (object_name, state_or_event)
+
+
+def _trace_action_label_lines(label: str) -> tuple[str, ...]:
+    compact = label.replace(".Action::", ".")
+    compact = compact.split("(", 1)[0]
+    if "." not in compact:
+        return (compact,)
+    object_name, action_name = compact.split(".", 1)
+    return (object_name, action_name)
+
+
+def _trace_context_label_lines(label: str) -> tuple[str, tuple[str, ...]]:
+    parts = tuple(part.strip() for part in label.split("|") if part.strip())
+    if not parts:
+        return "", ()
+    title = parts[0]
+    details = tuple(
+        _shorten_context_detail(part) for part in parts[1:] if part.startswith("lock=")
+    )
+    return title, details
+
+
+def _shorten_context_detail(label: str) -> str:
+    if "=" not in label:
+        return label
+    key, value = label.split("=", 1)
+    compact = value.replace(".Event::", ".")
+    return f"{key}: {compact}"
 
 
 def _is_trace_phase_event(label: str) -> bool:

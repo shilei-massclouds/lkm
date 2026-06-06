@@ -46,6 +46,8 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(data["summary"]["blocked"], 0)
             self.assertEqual(data["summary"]["contradiction"], 0)
             self.assertEqual(data["states"]["StartupTimeline"], "Ready")
+            self.assertIn("locks", data["model"])
+            self.assertIn("exclusive_contexts", data["model"])
 
     def test_derive_json_contains_records_transitions_and_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

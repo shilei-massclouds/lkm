@@ -139,7 +139,11 @@ def build_trace_view(derive_data: dict[str, Any]) -> ViewModel:
 
     builder = _TraceLayoutBuilder()
     roots = derive_data.get("trace", [])
-    builder.build(roots, _verified_states_by_event(derive_data, roots))
+    builder.build(
+        roots,
+        _verified_states_by_event(derive_data, roots),
+        _context_records_by_event(derive_data),
+    )
     return ViewModel(
         name="trace",
         graph_format="text",
@@ -150,6 +154,106 @@ def build_trace_view(derive_data: dict[str, Any]) -> ViewModel:
             "trace_arrows": tuple(builder.arrows),
         },
     )
+
+
+def _context_records_by_event(
+    derive_data: dict[str, Any]
+) -> dict[tuple[str, str], list[dict[str, object]]]:
+    contexts: dict[tuple[str, str], list[dict[str, object]]] = {}
+    active_context: dict[tuple[str, str], str] = {}
+    context_specs = _context_specs(derive_data)
+    records = derive_data.get("records", [])
+    if not isinstance(records, list):
+        return contexts
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        object_name = record.get("object")
+        event_name = record.get("event")
+        if not isinstance(object_name, str) or not isinstance(event_name, str):
+            continue
+        key = (object_name, event_name)
+        source_kind = record.get("source_kind")
+        proof_class = record.get("proof_class")
+        proof_provider = record.get("proof_provider")
+        expression = record.get("expression")
+        if (
+            source_kind == "within"
+            and proof_class == "exclusive_context"
+            and isinstance(expression, str)
+            and expression.startswith("within ")
+            and not expression.endswith(" exited")
+        ):
+            active_context[key] = expression.removeprefix("within ").strip()
+            continue
+        if (
+            source_kind == "within"
+            and proof_class == "exclusive_context"
+            and isinstance(expression, str)
+            and expression.endswith(" exited")
+        ):
+            active_context.pop(key, None)
+            continue
+        if proof_class != "action_commit" or proof_provider != "within_context":
+            continue
+        context_name = active_context.get(key)
+        if context_name is None or not isinstance(expression, str):
+            continue
+        item = {"context": context_name, "action": expression}
+        context_spec = context_specs.get(context_name)
+        if context_spec is not None:
+            item["context_label"] = _context_trace_label(context_name, context_spec)
+        contexts.setdefault(key, []).append(item)
+    return contexts
+
+
+def _context_specs(derive_data: dict[str, Any]) -> dict[str, dict[str, object]]:
+    model = derive_data.get("model")
+    if not isinstance(model, dict):
+        return {}
+    contexts = model.get("exclusive_contexts")
+    if not isinstance(contexts, dict):
+        return {}
+    return {
+        name: spec
+        for name, spec in contexts.items()
+        if isinstance(name, str) and isinstance(spec, dict)
+    }
+
+
+def _context_trace_label(context_name: str, context_spec: dict[str, object]) -> str:
+    labels = [context_name]
+    guard = context_spec.get("guard")
+    lock_ref = context_spec.get("lock_ref")
+    if isinstance(guard, dict):
+        guard_kind = guard.get("kind")
+        if isinstance(guard_kind, str) and guard_kind:
+            labels.append(f"guard={guard_kind}")
+        guard_lock_ref = guard.get("lock_ref")
+        if isinstance(guard_lock_ref, str) and guard_lock_ref:
+            lock_ref = guard_lock_ref
+        enter = _first_block_body(guard.get("entered_by"))
+        exit_ = _first_block_body(guard.get("exited_by"))
+        if enter:
+            labels.append(f"enter={enter}")
+        if exit_:
+            labels.append(f"exit={exit_}")
+    if isinstance(lock_ref, str) and lock_ref:
+        labels.insert(1, f"lock={lock_ref}")
+    return "|".join(labels)
+
+
+def _first_block_body(value: object) -> str:
+    if not isinstance(value, list):
+        return ""
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        body = item.get("body")
+        if isinstance(body, str) and body.strip():
+            return body.strip().rstrip(";")
+    return ""
 
 
 def _event_node_id(object_name: str, event_name: str) -> str:
@@ -390,6 +494,7 @@ class _TraceLayoutBuilder:
         self,
         roots: list[Any],
         verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
+        context_records: dict[tuple[str, str], list[dict[str, object]]],
     ) -> None:
         self._max_phase_lane = _max_trace_phase_lane(roots, verified_states_by_event)
         self._object_column_base = self._max_phase_lane + 2
@@ -401,6 +506,7 @@ class _TraceLayoutBuilder:
                 phase_lane=0,
                 object_lane=0,
                 parent_event_id=None,
+                context_records=context_records,
                 verified_states_by_event=verified_states_by_event,
             )
         self._build_columns()
@@ -412,6 +518,7 @@ class _TraceLayoutBuilder:
         phase_lane: int,
         object_lane: int,
         parent_event_id: str | None,
+        context_records: dict[tuple[str, str], list[dict[str, object]]],
         verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
     ) -> None:
         data = _trace_node_object(node)
@@ -522,6 +629,72 @@ class _TraceLayoutBuilder:
                 TraceArrow(source=span_id, target=verified_id, kind="depends_on")
             )
 
+        context_items = context_records.get((str(data["object"]), str(data["event"])), [])
+        context_column = None if is_phase else gap_column
+        if context_items and context_column is not None:
+            self._max_object_lane = max(self._max_object_lane, object_lane + 1)
+            context_start_row = len(self.rows)
+            previous_action_id: str | None = None
+            context_label = str(
+                context_items[0].get(
+                    "context_label", context_items[0].get("context", "")
+                )
+            )
+            for item_index, item in enumerate(context_items):
+                action_row = len(self.rows)
+                self._add_row(
+                    "context_action",
+                    action_row,
+                    f"{label}.within.{item_index}",
+                    group_id=event_id if not is_phase else None,
+                    group_role="context_action" if not is_phase else None,
+                )
+                action_id = f"{event_id}-context-action-{item_index}"
+                self.cells.append(
+                    TraceCell(
+                        id=action_id,
+                        kind="context_action",
+                        row=action_row,
+                        column=context_column,
+                        column_span=2,
+                        label=str(item.get("action", "")),
+                    )
+                )
+                if previous_action_id is not None:
+                    self.arrows.append(
+                        TraceArrow(
+                            source=previous_action_id,
+                            target=action_id,
+                            kind="context_order",
+                    )
+                )
+                previous_action_id = action_id
+            context_extra_rows = 0
+            if "|" in context_label:
+                guard_row = len(self.rows)
+                context_extra_rows = 1
+                self._add_row(
+                    "context_guard",
+                    guard_row,
+                    f"{label}.within.guard",
+                    group_id=event_id if not is_phase else None,
+                    group_role="context_guard" if not is_phase else None,
+                )
+            self.cells.append(
+                TraceCell(
+                    id=f"{event_id}-context",
+                    kind="context_span",
+                    row=context_start_row,
+                    column=context_column,
+                    label=context_label,
+                    row_span=len(context_items) + context_extra_rows,
+                    column_span=2,
+                )
+            )
+            self.arrows.append(
+                TraceArrow(source=span_id, target=f"{event_id}-context", kind="within")
+            )
+
         for child in _trace_children(data):
             if _should_skip_trace_node(child, verified_states_by_event):
                 continue
@@ -536,6 +709,7 @@ class _TraceLayoutBuilder:
                 phase_lane=phase_lane + 1 if child_is_phase else phase_lane,
                 object_lane=object_lane if child_is_phase else child_object_lane,
                 parent_event_id=event_id,
+                context_records=context_records,
                 verified_states_by_event=verified_states_by_event,
             )
 
