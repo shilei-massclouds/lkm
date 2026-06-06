@@ -99,6 +99,21 @@ workqueue worker、RCU GP kthread、完整 softirq 执行或 SMP 并发。
 keyring 和 security 对象按 formal trace 后续推进。VFS/proc/page-cache/net namespace、`signals_init()` 以及
 实际任务创建仍保持 deferred 或 trimmed checkpoint，不应伪装成完整运行期服务。
 
+## Completion 编码约束
+
+`Completion` 是 `spec/model/common.spec` 中定义的可复用 Type process。当前对象级实现必须把它落到
+`impl/arceos_ex/src/objects/completion.rs`，由 `Completion` 结构体承载普通生命周期状态、`CompletionExtState`
+扩展状态、token 计数和 owned `SimpleWaitQueue`。`SimpleWaitQueue` 对应 Linux simple waitqueue/swait 的核心等待队列语义，
+不是 completion 用户传入的外部引用。
+
+`Completion.setup()` 建立 pending 状态、`done == 0` 和 owned wait queue ready；`Completion.enable()` 发布可运行期访问的
+completion handle；`complete()`、`complete_all()`、`wait()`、`try_wait()` 和 `reinit()` 只能改变扩展状态和 token/waiter
+事实，不能重新推进普通生命周期；`done()` 是只读观察 action。`KthreaddReadyGate` 这类 `object X: Completion`
+实例必须包装并驱动该通用对象，而不是把 pending/completed/wake bookkeeping 复制成私有布尔字段。
+
+smoke 测试必须覆盖两类路径：一是独立 `Completion` 实例的 setup/enable/complete/token consume/reinit 流程，二是
+`rest_init()` 中的 live `kthreadd_done` 实例，验证 `KthreaddReadyGate` 已驱动 `Completion.complete()` 并唤醒 PID 1。
+
 ## RestInitPhase 编码约束
 
 `RestInitPhase` 是 `UpMultitaskPhase` 的第一个子阶段，formal model 路径为

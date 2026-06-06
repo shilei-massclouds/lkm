@@ -6,7 +6,7 @@
 
 生命周期状态名和生命周期事件名必须来自受控集合。规格不得临时发明新的生命周期名称来表达局部语义；如果确实需要新增名称，必须先修改本文档、`model` 阶段检查器和对应测试。
 
-当前 `.spec` 启动模型只形式化生命周期状态和生命周期事件，即 `Lifecycle Event`。运行期对象未来可以引入 `Operational Event` 和 `Action`，但必须先在本文档补充对应语法、检查器规则和测试，不能混用当前生命周期事件规则。
+当前 `object` 状态机语法只用受控生命周期状态和生命周期事件表达启动期对象推进。运行期 Type process、扩展状态、action 引用和独占上下文由本文档后续规则单独约束；它们不得借用或发明新的生命周期状态名来规避本节规则。
 
 允许的状态名：
 
@@ -100,7 +100,7 @@
 - 不得为了表达可重复调用而把应为 `action` 的操作伪造成生命周期事件。
 - 不得为了绕过生命周期事件唯一性而把应为 `Operational Event` 的状态迁移伪造成 `action`。
 
-当前 `.spec` 语法只支持生命周期事件；`action` 和 `Operational Event` 仍是后续扩展语义。新增相关语法前，`model`、`derive`、`view`、`render` 不得推测或隐式实现 action 语义。
+当前工具已经支持在 `drives` 和 `within` 内引用 `Object.Action::Name(...)`，并把该引用作为成功路径上的 action commit fact；对象内 `state.actions` 的完整定义语法仍处于语义契约阶段，暂未由 parser/model 展开检查。
 
 一等 `action` 的正式规格如下，后续实现语法、检查器、推导器、视图和渲染时必须保持这些规则：
 
@@ -137,13 +137,16 @@ state State::Ready {
 - action 的 `ensures` 在 action 成功后成立，并可作为驱动它的 event 成功路径上的可用事实。
 - action 的 `ensures` 不得直接伪造生命周期提交，例如不得用 action 确保 `SomeObject.state == State::Ready` 来替代 `SomeObject.Event::Setup`。
 - 参数化 action 不得把具体目标对象编码进 action 名；具体对象差异应通过实参和对象自身 facts 表达。
+- event 可以通过 `drives` 调用 action，以复用不推进被建模状态的内部动作；这适合表达 `Setup`/`Enable` 这类 lifecycle event 内部的初始化、发布、入队、唤醒、查询或其它属性动作。
+- event 调用 action 后，外层 event 仍负责提交自己的状态迁移；action 只贡献自己的 `ensures`，不得替代外层 event 的目标状态提交。
+- 如果某个过程会改变已建模生命周期状态或扩展状态，它必须保持为 event，不能为了减少定义而降级成 action。也就是说，复用 action 只能消除无状态迁移的重复动作，不能隐藏真实状态迁移。
 
 示例：`copy_process()` 应建模为 `TaskCreationCore` 在 `Ready` 状态内的参数化 action，而不是为每个目标任务建立 `CopyKernelInitProcess` 之类的专名 action：
 
 ```text
 on Action::CopyProcess<Src: TaskObject, New: TaskObject>(
     src_task: Src,
-    new_task: New,
+    dst_task: New,
     pid_ns: RootPidNamespace,
     creds: CredentialCore,
     signal: SignalCore,
@@ -153,33 +156,65 @@ on Action::CopyProcess<Src: TaskObject, New: TaskObject>(
 ) {
     depends_on {
         src_task.state == State::Online;
-        new_task.state == State::Prepared;
+        dst_task.state == State::Prepared;
         pid_ns.state == State::Ready;
         creds.state == State::Prepared;
         signal.state == State::Prepared;
         files.state == State::Prepared;
         security.state == State::Ready;
         scheduler.state == State::Online;
-        task_clone_args_ready(new_task);
+        task_clone_args_ready(dst_task);
     }
 
     ensures {
-        task_creation_copy_process_committed(TaskCreationCore, src_task, new_task);
-        task_creation_used_clone_args(TaskCreationCore, new_task);
-        task_struct_allocated(new_task);
-        task_duplicated_from(new_task, src_task);
-        task_pid_allocated(new_task, pid_ns);
-        task_creds_copied(new_task, creds);
-        task_file_context_copied_or_shared(new_task, files);
-        task_signal_context_ready(new_task, signal);
-        task_security_context_allocated(new_task, security);
-        task_thread_context_ready(new_task);
-        task_sched_entity_initialized(new_task, scheduler);
-        task_state_new(new_task);
-        task_not_enqueued(new_task);
+        task_creation_copy_process_committed(TaskCreationCore, src_task, dst_task);
+        task_creation_used_clone_args(TaskCreationCore, dst_task);
+        task_struct_allocated(dst_task);
+        task_duplicated_from(dst_task, src_task);
+        task_pid_allocated(dst_task, pid_ns);
+        task_creds_copied(dst_task, creds);
+        task_file_context_copied_or_shared(dst_task, files);
+        task_signal_context_ready(dst_task, signal);
+        task_security_context_allocated(dst_task, security);
+        task_thread_context_ready(dst_task);
+        task_sched_entity_initialized(dst_task, scheduler);
+        task_state_new(dst_task);
+        task_not_enqueued(dst_task);
     }
 }
 ```
+
+## SEM-TYPE-PROCESS-001: Type Processes Define Reusable Runtime Semantics
+
+`type` 定义可复用对象类型的共同属性、owned 子对象、标准生命周期 process、运行期 process、扩展状态和约束。`object X: SomeType` 表示 `X` 是 `SomeType` 的一个具名实例；实例绑定并继承 `SomeType` 上定义的 Type process。也就是说，`X.Event::Setup`、`X.Event::Enable` 或 `X.Action::Done` 若来自 Type 定义，语义上是“对实例 X 执行 Type process”，不是实例重新定义了一套同名过程。
+
+Type body 中的 `key: ValueType;` 是 Type 属性声明，必须被 parse/model 工具保留。`owned { field: ChildType; }` 声明 Type 实例拥有的子对象或内嵌资源；owned 子对象随宿主实例建立实例身份，不是外部引用，也不表示普通参数传递。Type body 中的命名块按语义分类：
+
+- `lifecycle { ... }` 定义 Type 实例的标准生命周期 process，名称应使用受控生命周期事件名。
+- `processes { ... }` 定义实例进入可服务状态后的运行期 process；其中 `Event::Name` 是 Operational Event，`Action::Name` 是 action。
+- `owned { ... }` 定义实例拥有的内嵌资源或子对象；Type process 可以通过 `self.field.Event::Name` 或 `self.field.Action::Name` 驱动它们。
+- 其它命名块可用于 invariant、context、handle 或后续扩展，但不得隐式改变生命周期迁移表。
+
+每个 Type process 必须声明 `state_effect`，其值来自 `StateEffect`：
+
+- `StateEffect::Always`：`Success` 提交时必然推进该 process 声明的被建模状态。
+- `StateEffect::Conditional`：`Success` 提交时依据扩展状态、计数、等待队列或目标对象状态选择迁移；迁移表必须写在该 Type process 内。
+- `StateEffect::None`：`Success` 不推进被建模状态；这类 process 应归为 `Action::Name`。
+
+`StateEffect` 已在正式规格中以 enum 建模；当前工具保留该声明和 Type process 块，但尚未解析、类型检查或推导 process 内部的 `state_effect`。因此它已经是正式规格术语，不再只是说明性文字；工具执行语义仍在后续扩展范围内。
+
+扩展状态不是 lifecycle state。扩展状态用于表达运行期对象在 `Online` 等生命周期状态内可反复变化的内部语义，例如 completion 的 pending/completed/all-completed。扩展状态集合必须由 enum 或受控值类型声明，不能混入 `State::Ready`、`State::Online` 等生命周期状态名。
+
+process 的结果使用 `ProcessResult` 语义集合：`Success`、`Blocked(reason)`、`Failed(code)`。只有 `Success` 可以提交 `state_effect` 与 `ensures`；`Blocked` 和 `Failed` 都不得推进生命周期状态或扩展状态，也不得假定 `ensures` 成立。
+
+当前工具边界：
+
+- parser/model 保留 Type 属性和 Type 块，包括 `lifecycle`、`processes`、`transitions` 和 `result` 这类嵌套文本。
+- derive/view/render 尚不推导 Type process 内部迁移；阶段主线若需要使用某个 Type process 的效果，必须暂时通过对象 lifecycle wrapper、显式 action commit 或普通 predicate fact 承载，并在规格中说明该承载不改变 Type process 的正式语义。
+
+`Completion` 是当前第一个正式 Type process 示例。Linux `struct completion` 内嵌 `swait_queue_head wait`，因此规格中 `Completion` 拥有 `SimpleWaitQueue`，不是引用外部 wait queue。`Completion.Setup` 驱动 owned wait queue 的 setup；`Complete`/`CompleteAll` 驱动 wait queue 的 wake action；`Wait` 驱动 wait queue 的 prepare/finish wait action；`Reinit` 只重置 completion token 状态并保留 wait queue。`Complete`、`CompleteAll`、`Wait`、`TryWait`、`Reinit` 是 `StateEffect::Conditional` 的运行期事件；`Done` 是 `StateEffect::None` 的只读 action。
+
+Completion 也说明了 event/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。
 
 ## SEM-EXCLUSIVE-CONTEXT-001: Lock And Exclusive Context Are Distinct
 
@@ -272,7 +307,7 @@ state State::Ready {
 
 ## SEM-EVENT-RESULT-001: Event And Action Results Are Explicit
 
-`event` 和 `action` 都应具有显式返回结果。最小结果集合包括：
+`event` 和 `action` 都应具有显式返回结果。正式结果集合由 `ProcessResult` 语义定义，最小包括：
 
 - `Success`：操作成功完成。
 - `Failed(code)`：操作失败，可携带具体错误码或原因。
@@ -283,15 +318,16 @@ state State::Ready {
 
 对 `event` 的结果约束：
 
-- 只有 `Success` 才提交状态迁移，并使目标状态及该事件的 `ensures` 成立。
-- `Blocked` 和 `Failed` 都不得使对象进入目标状态，也不得假定该事件的 `ensures` 成立。
+- 只有 `Success` 才提交 `state_effect`，并使目标状态、目标扩展状态及该事件的 `ensures` 成立。
+- `Blocked` 和 `Failed` 都不得使对象进入目标状态或目标扩展状态，也不得假定该事件的 `ensures` 成立。
+- 对 `StateEffect::Conditional` 的 event，`Success` 后是否发生状态变化、变化到哪里，以 Type process 的条件迁移表为准。
 
 对 `action` 的结果约束：
 
 - `Success` 表示动作完成，但对象仍停留在 action 所属的被建模状态内。
 - `Blocked` 和 `Failed` 表示动作未完成或失败，同样不推进被建模状态。
 
-当前推导器把生命周期事件视为成功路径上的静态推导；失败、阻塞和错误码尚未进入 `.spec` 推导语法。后续扩展错误路径推导时，必须保持上述提交语义。
+当前推导器把对象 lifecycle event 视为成功路径上的静态推导；失败、阻塞、错误码和 Type process 结果尚未进入推导语法。后续扩展错误路径或运行期 process 推导时，必须保持上述提交语义。
 
 ## SEM-LIFECYCLE-OPERATIONAL-001: Lifecycle And Operational Events Have Different Trigger Rules
 

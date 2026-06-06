@@ -2,6 +2,7 @@ pub mod boot_args;
 pub mod boot_param;
 pub mod cache_block_info;
 pub mod command_line;
+pub mod completion;
 pub mod config;
 pub mod cpu_capabilities;
 pub mod cpu_group;

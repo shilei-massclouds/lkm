@@ -40,8 +40,8 @@ exclusive_context WakeUpNewTaskContext {
  * KernelInitTask.Setup 对应 kernel_clone() 调用 copy_process() 的成功路径。
  * copy_process() 是 TaskCreationCore.Ready 状态内的参数化 action：
  * TaskCreationCore.Action::CopyProcess(src_task: BootInitTask,
- * new_task: KernelInitTask, ...)。该 action 以 src_task/current 为模板创建
- * new_task/task_struct，初始化 pid、凭据、fs/files、signal、安全上下文、
+ * dst_task: KernelInitTask, ...)。该 action 以 src_task/current 为模板创建
+ * dst_task/task_struct，初始化 pid、凭据、fs/files、signal、安全上下文、
  * thread context 与 sched entity，但保持 task_state_new 且 task_not_enqueued。
  * KernelInitTask.Setup 只提交 KernelInitTask Prepared -> Ready 的生命周期结果。
  *
@@ -107,6 +107,19 @@ object KernelInitTask: TaskObject {
                     RootPidNamespace.state == State::Ready;
                     Scheduler.state == State::Online;
                     BootRunQueue.state == State::Ready;
+                }
+
+                drives {
+                    TaskCreationCore.Action::CopyProcess(
+                        src_task: BootInitTask,
+                        dst_task: KernelInitTask,
+                        pid_ns: RootPidNamespace,
+                        creds: CredentialCore,
+                        signal: SignalCore,
+                        files: TaskFileContext,
+                        security: SecurityCore,
+                        scheduler: Scheduler
+                    );
                 }
 
                 ensures {
@@ -437,10 +450,15 @@ object SystemState: KernelObject {
 }
 
 /*
- * KthreaddReadyGate 表示静态 completion kthreadd_done。Setup 建立 pending 门；
- * Enable 表示 complete(&kthreadd_done) 已发布，PID 1 可继续执行下一子阶段。
+ * KthreaddReadyGate 表示静态 completion kthreadd_done，是 Completion Type
+ * 的具名实例。它本身不重新定义 Setup/Enable；下面对象事件是当前工具对
+ * inherited Type process 的阶段推导展开。Setup 来自 Completion.Setup，
+ * 建立 done=0 和 owned wait_queue；Enable 在对象主状态迁移中先应用
+ * Completion.Enable，使该 completion 可被运行期 process 操作，再应用
+ * Completion.Complete 的成功效果，即 complete(&kthreadd_done) 已发布，
+ * PID 1 可继续执行下一子阶段。
  */
-object KthreaddReadyGate: TaskObject {
+object KthreaddReadyGate: Completion {
     initial_state: State::Base;
 
     /*
@@ -460,6 +478,11 @@ object KthreaddReadyGate: TaskObject {
                 ensures {
                     kthreadd_ready_gate_ready(KthreaddReadyGate);
                     kthreadd_ready_gate_pending(KthreaddReadyGate);
+                    completion_owns_wait_queue(KthreaddReadyGate);
+                    completion_ready(KthreaddReadyGate);
+                    completion_pending(KthreaddReadyGate);
+                    completion_done_count_is_zero(KthreaddReadyGate);
+                    completion_wait_queue_ready(KthreaddReadyGate);
                     kernel_init_waits_for_kthreadd_done(KernelInitTask);
                 }
             }
@@ -472,6 +495,8 @@ object KthreaddReadyGate: TaskObject {
     state State::Ready {
         invariant {
             kthreadd_ready_gate_ready(KthreaddReadyGate);
+            completion_ready(KthreaddReadyGate);
+            completion_pending(KthreaddReadyGate);
         }
 
         events {
@@ -486,6 +511,11 @@ object KthreaddReadyGate: TaskObject {
 
                 ensures {
                     kthreadd_ready_gate_completed(KthreaddReadyGate);
+                    completion_online(KthreaddReadyGate);
+                    completion_handle_published(KthreaddReadyGate);
+                    completion_complete_committed(KthreaddReadyGate);
+                    completion_token_available(KthreaddReadyGate);
+                    completion_wakes_one_waiter(KthreaddReadyGate);
                     kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
                     kernel_init_released_for_pre_smp_init(KernelInitTask);
                 }
@@ -499,6 +529,10 @@ object KthreaddReadyGate: TaskObject {
     state State::Online {
         invariant {
             kthreadd_ready_gate_completed(KthreaddReadyGate);
+            completion_online(KthreaddReadyGate);
+            completion_complete_committed(KthreaddReadyGate);
+            completion_token_available(KthreaddReadyGate);
+            completion_wakes_one_waiter(KthreaddReadyGate);
             kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
             kernel_init_released_for_pre_smp_init(KernelInitTask);
         }

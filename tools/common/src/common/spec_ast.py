@@ -99,6 +99,7 @@ class TypeDecl:
     header: str
     span: SourceSpan
     blocks: list[Block] = field(default_factory=list)
+    properties: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

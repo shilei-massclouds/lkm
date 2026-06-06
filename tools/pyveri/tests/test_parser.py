@@ -66,6 +66,34 @@ class ParserTests(unittest.TestCase):
             ["BootPhase.state == State::Ready"],
         )
 
+    def test_parse_type_preserves_properties_and_blocks(self) -> None:
+        document = parse_text(
+            """
+            type Completion {
+                ext_state: CompletionExtState;
+                done: CompletionTokenCount;
+
+                processes {
+                    Event::Complete {
+                        state_effect: StateEffect::Conditional;
+                    }
+                }
+            }
+            """
+        )
+
+        typ = document.types[0]
+
+        self.assertEqual(typ.name, "Completion")
+        self.assertEqual(
+            typ.properties,
+            {
+                "ext_state": "CompletionExtState",
+                "done": "CompletionTokenCount",
+            },
+        )
+        self.assertEqual([block.kind for block in typ.blocks], ["processes"])
+
     def test_statement_entries_keeps_less_than_comparisons_separate(self) -> None:
         document = parse_text(
             """

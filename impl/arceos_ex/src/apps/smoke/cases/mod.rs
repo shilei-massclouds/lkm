@@ -1,5 +1,6 @@
 pub mod breakpoint;
 pub mod cache_block_info;
+pub mod completion;
 pub mod cpu_capabilities;
 pub mod cpu_id_map;
 pub mod delay_loop;

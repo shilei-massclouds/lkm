@@ -75,6 +75,20 @@ pub fn run() -> SmokeResult {
         printk::write_str("system state or kthreadd gate facts invalid\n");
         return SmokeResult::Failed;
     }
+    let kthreadd_completion = ctx.kthreadd_ready_gate.completion();
+    if kthreadd_completion.state() != State::Online
+        || kthreadd_completion.done_count() != 1
+        || !kthreadd_completion.storage_bound()
+        || !kthreadd_completion.owns_wait_queue()
+        || !kthreadd_completion.handle_published()
+        || !kthreadd_completion.complete_committed()
+        || !kthreadd_completion.token_available()
+        || !kthreadd_completion.wakes_one_waiter()
+        || kthreadd_completion.wait_queue().state() != State::Ready
+    {
+        printk::write_str("kthreadd completion facts invalid\n");
+        return SmokeResult::Failed;
+    }
 
     if ctx.kernel_init_dispatch_gate.state() != State::Ready
         || !ctx.kernel_init_dispatch_gate.schedule_committed()

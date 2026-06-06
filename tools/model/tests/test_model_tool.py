@@ -53,6 +53,7 @@ class ModelToolTests(unittest.TestCase):
             setup = startup["states"]["Base"]["events"]["Setup"]
             event_stream = objects["EventStream"]
             event_preset = event_stream["states"]["Base"]["events"]["Preset"]
+            completion_type = data["model"]["types"]["Completion"]
 
             self.assertEqual(
                 startup["children"],
@@ -74,6 +75,17 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 objects["PhysicalMemory"]["properties"]["access"],
                 "Access::ReadOnly",
+            )
+            self.assertEqual(
+                completion_type["properties"],
+                {
+                    "ext_state": "CompletionExtState",
+                    "done": "CompletionTokenCount",
+                },
+            )
+            self.assertEqual(
+                [block["kind"] for block in completion_type["blocks"]],
+                ["owned", "lifecycle", "processes"],
             )
             self.assertEqual(
                 [entry["text"] for entry in setup["drives"][0]["entries"]],

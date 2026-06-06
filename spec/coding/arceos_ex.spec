@@ -45,6 +45,11 @@ predicate arceos_ex_must_process_prepare_not_create_rest_init_tasks() -> bool;
 predicate arceos_ex_must_process_prepare_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_process_prepare_cover_pid_task_cred_memory_namespace_key_security_objects() -> bool;
 predicate arceos_ex_must_process_prepare_keep_deferred_paths_explicit() -> bool;
+predicate arceos_ex_must_completion_map_to_reusable_object() -> bool;
+predicate arceos_ex_must_completion_own_simple_wait_queue() -> bool;
+predicate arceos_ex_must_completion_processes_keep_state_effects() -> bool;
+predicate arceos_ex_must_completion_instances_drive_type_processes() -> bool;
+predicate arceos_ex_must_completion_smoke_cover_setup_complete_and_token_flow() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
 predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
@@ -457,6 +462,57 @@ type ArceosExProcessPrepareCodingMust {
     }
 }
 
+type ArceosExCompletionCodingMust {
+    invariant {
+        /*
+         * Reusable object:
+         *
+         * The formal Completion Type must map to a reusable Rust resource
+         * object, not to ad-hoc boolean fields on each user. Its implementation
+         * target is impl/arceos_ex/src/objects/completion.rs.
+         */
+        arceos_ex_must_completion_map_to_reusable_object();
+
+        /*
+         * Owned wait queue:
+         *
+         * Completion must own a SimpleWaitQueue field. The field is an owned
+         * child resource corresponding to Linux swait_queue_head, not an
+         * external wait-queue reference supplied by the caller.
+         */
+        arceos_ex_must_completion_own_simple_wait_queue();
+
+        /*
+         * Event/action boundary:
+         *
+         * Completion.setup()/enable() advance the ordinary lifecycle state.
+         * complete(), complete_all(), wait(), try_wait(), reinit() operate on
+         * CompletionExtState and token count while preserving the main
+         * lifecycle state, and done() is a read-only action.
+         */
+        arceos_ex_must_completion_processes_keep_state_effects();
+
+        /*
+         * Instance inheritance:
+         *
+         * A model object declared as an instance of Completion, such as
+         * KthreaddReadyGate, must drive the reusable Completion implementation
+         * instead of copying completion-specific pending/completed bookkeeping
+         * into a private object-local state machine.
+         */
+        arceos_ex_must_completion_instances_drive_type_processes();
+
+        /*
+         * Smoke coverage:
+         *
+         * Smoke tests must cover Completion.setup(), Completion.enable(),
+         * complete(), token observation and token consumption, and must also
+         * verify the live kthreadd_done/KthreaddReadyGate instance.
+         */
+        arceos_ex_must_completion_smoke_cover_setup_complete_and_token_flow();
+    }
+}
+
 type ArceosExRestInitCodingMust {
     invariant {
         /*
@@ -505,9 +561,9 @@ type ArceosExRestInitCodingMust {
         /*
          * Completion:
          *
-         * complete(&kthreadd_done) must be represented as a visible
-         * KthreaddReadyGate fact that releases KernelInitTask for the next
-         * PreSmpInitPhase.
+         * complete(&kthreadd_done) must drive the reusable Completion object
+         * carried by KthreaddReadyGate, publish the visible gate fact, and
+         * release KernelInitTask for the next PreSmpInitPhase.
          */
         arceos_ex_must_rest_init_complete_kthreadd_ready_gate();
 

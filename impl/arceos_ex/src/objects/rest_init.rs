@@ -1,4 +1,5 @@
 use super::{
+    completion::Completion,
     cpu_group::CpuGroup,
     finalize::{InitMemoryCleanupDeferred, KernelMappingProtectionDeferred, PtiFinalizeTrimmed},
     init_task::InitTask,
@@ -576,8 +577,7 @@ impl SystemState {
 
 pub struct KthreaddReadyGate {
     lifecycle: Lifecycle,
-    pending: bool,
-    completed: bool,
+    completion: Completion,
     release_committed: bool,
 }
 
@@ -585,8 +585,7 @@ impl KthreaddReadyGate {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            pending: false,
-            completed: false,
+            completion: Completion::new(),
             release_committed: false,
         }
     }
@@ -595,12 +594,16 @@ impl KthreaddReadyGate {
         self.lifecycle.state()
     }
 
-    pub const fn pending(&self) -> bool {
-        self.pending
+    pub const fn completion(&self) -> &Completion {
+        &self.completion
     }
 
-    pub const fn completed(&self) -> bool {
-        self.completed
+    pub fn pending(&self) -> bool {
+        self.completion.pending()
+    }
+
+    pub fn completed(&self) -> bool {
+        self.completion.completed()
     }
 
     pub const fn release_committed(&self) -> bool {
@@ -620,8 +623,7 @@ impl KthreaddReadyGate {
             return self.failed_setup();
         }
 
-        self.pending = true;
-        self.completed = false;
+        self.completion.setup()?;
         self.release_committed = false;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -641,6 +643,8 @@ impl KthreaddReadyGate {
             || system_state.state() != State::Ready
             || system_state.value() != SystemStateValue::Scheduling
             || kthreadd_task.state() != State::Online
+            || kernel_init_task.state() != State::Online
+            || !kernel_init_task.waiting_for_kthreadd_done()
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -650,6 +654,8 @@ impl KthreaddReadyGate {
             );
         }
 
+        self.completion.enable()?;
+        self.completion.complete()?;
         if !kernel_init_task.release_for_pre_smp_init() {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -658,8 +664,6 @@ impl KthreaddReadyGate {
                 State::Online,
             );
         }
-        self.pending = false;
-        self.completed = true;
         self.release_committed = true;
         self.lifecycle.transition(
             LifecycleEvent::Enable,

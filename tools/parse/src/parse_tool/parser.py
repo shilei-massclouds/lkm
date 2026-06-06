@@ -251,12 +251,26 @@ def _parse_type(segment: _Segment) -> TypeDecl:
     body, body_start_line = _body_segment_from_braced_decl(
         segment.text, match.end() - 1, segment.start_line
     )
-    blocks = _parse_named_blocks(body, body_start_line)
+    blocks: list[Block] = []
+    properties: dict[str, str] = {}
+    for part in _split_members(body, body_start_line):
+        stripped = part.text.strip()
+        block_match = _BLOCK_RE.match(stripped)
+        if block_match:
+            blocks.append(_to_block(part, block_match.group(1)))
+            continue
+        prop_match = _PROP_RE.match(stripped)
+        if not prop_match:
+            raise ParseError(
+                f"line {part.start_line}: invalid type member: {_preview(part.text)}"
+            )
+        properties[prop_match.group(1)] = prop_match.group(2).strip()
     return TypeDecl(
         name=match.group(1),
         header=match.group("header").strip(),
         span=segment.span,
         blocks=blocks,
+        properties=properties,
     )
 
 

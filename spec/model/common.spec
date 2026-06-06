@@ -18,6 +18,24 @@ enum TransitionResult {
     NoChange,
 }
 
+enum ProcessResult {
+    Success,
+    Blocked,
+    Failed,
+}
+
+enum StateEffect {
+    Always,
+    Conditional,
+    None,
+}
+
+enum CompletionExtState {
+    Pending,
+    Completed,
+    CompletedAll,
+}
+
 function addr_of<T>(value: T) -> AddrIdentity<T>;
 function phys_addr<T>(value: T) -> PhysAddr<T>;
 function virt_addr<T, S: VirtualAddressSpace, A: VirtualAddressArea>(value: T, space: S, area: A) -> VirtAddr<T>;
@@ -57,6 +75,29 @@ predicate interrupt_concurrency_closed() -> bool;
 predicate task_concurrency_closed() -> bool;
 predicate selected_payload_ready() -> bool;
 predicate selected_payload_no_return_handoff() -> bool;
+predicate completion_storage_bound<T>(completion: T) -> bool;
+predicate completion_ready<T>(completion: T) -> bool;
+predicate completion_pending<T>(completion: T) -> bool;
+predicate completion_done_count_is_zero<T>(completion: T) -> bool;
+predicate completion_wait_queue_ready<T>(completion: T) -> bool;
+predicate completion_owns_wait_queue<T>(completion: T) -> bool;
+predicate completion_online<T>(completion: T) -> bool;
+predicate completion_handle_published<T>(completion: T) -> bool;
+predicate completion_handle_revoked<T>(completion: T) -> bool;
+predicate completion_complete_committed<T>(completion: T) -> bool;
+predicate completion_token_available<T>(completion: T) -> bool;
+predicate completion_wakes_one_waiter<T>(completion: T) -> bool;
+predicate completion_complete_all_committed<T>(completion: T) -> bool;
+predicate completion_all_waiters_released<T>(completion: T) -> bool;
+predicate completion_waiter_enqueued<T>(completion: T) -> bool;
+predicate completion_waiter_finished<T>(completion: T) -> bool;
+predicate completion_wait_queue_preserved<T>(completion: T) -> bool;
+predicate completion_done_observed<T>(completion: T) -> bool;
+predicate wait_queue_ready<T>(queue: T) -> bool;
+predicate wait_queue_wake_one_committed<T>(queue: T) -> bool;
+predicate wait_queue_wake_all_committed<T>(queue: T) -> bool;
+predicate wait_queue_waiter_enqueued<T>(queue: T) -> bool;
+predicate wait_queue_waiter_finished<T>(queue: T) -> bool;
 
 predicate attrs_accessible<T: Object>(obj: T) -> bool {
     forall attr in obj.attrs {
@@ -251,4 +292,238 @@ type FixMapConfig {
 }
 
 type TimelineObject {
+}
+
+type CompletionTokenCount {
+}
+
+type SimpleWaitQueue {
+    lifecycle {
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            ensures {
+                wait_queue_ready(self);
+            }
+        }
+    }
+
+    processes {
+        Action::WakeOne {
+            state_effect: StateEffect::None;
+            depends_on {
+                wait_queue_ready(self);
+            }
+            ensures {
+                wait_queue_wake_one_committed(self);
+            }
+        }
+
+        Action::WakeAll {
+            state_effect: StateEffect::None;
+            depends_on {
+                wait_queue_ready(self);
+            }
+            ensures {
+                wait_queue_wake_all_committed(self);
+            }
+        }
+
+        Action::PrepareWait {
+            state_effect: StateEffect::None;
+            depends_on {
+                wait_queue_ready(self);
+            }
+            ensures {
+                wait_queue_waiter_enqueued(self);
+            }
+        }
+
+        Action::FinishWait {
+            state_effect: StateEffect::None;
+            depends_on {
+                wait_queue_ready(self);
+            }
+            ensures {
+                wait_queue_waiter_finished(self);
+            }
+        }
+    }
+}
+
+/*
+ * Completion corresponds to Linux struct completion. It is a reusable Type
+ * with ordinary lifecycle state plus an extended completion state. The
+ * extended state is not a lifecycle state: complete/wait/reinit style
+ * processes operate while the instance remains Online.
+ */
+type Completion {
+    ext_state: CompletionExtState;
+    done: CompletionTokenCount;
+
+    owned {
+        wait_queue: SimpleWaitQueue;
+    }
+
+    lifecycle {
+        Event::Preset {
+            state_effect: StateEffect::Always;
+            ensures {
+                completion_storage_bound(self);
+                completion_owns_wait_queue(self);
+            }
+        }
+
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            drives {
+                self.wait_queue.Event::Setup;
+            }
+            ensures {
+                completion_ready(self);
+                completion_pending(self);
+                completion_done_count_is_zero(self);
+                completion_wait_queue_ready(self);
+            }
+        }
+
+        Event::Enable {
+            state_effect: StateEffect::Always;
+            ensures {
+                completion_online(self);
+                completion_handle_published(self);
+            }
+        }
+
+        Event::Disable {
+            state_effect: StateEffect::Conditional;
+            ensures {
+                completion_handle_revoked(self);
+            }
+        }
+    }
+
+    processes {
+        Event::Complete {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Online;
+            }
+            drives {
+                self.wait_queue.Action::WakeOne;
+            }
+            transitions {
+                CompletionExtState::Pending -> CompletionExtState::Completed;
+                CompletionExtState::Completed -> CompletionExtState::Completed;
+                CompletionExtState::CompletedAll -> CompletionExtState::CompletedAll;
+            }
+            ensures {
+                completion_complete_committed(self);
+                completion_token_available(self);
+                completion_wakes_one_waiter(self);
+            }
+            result {
+                Pending: Success(token_produced);
+                Completed: Success(token_produced);
+                CompletedAll: Success(no_change);
+            }
+        }
+
+        Event::CompleteAll {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Online;
+            }
+            drives {
+                self.wait_queue.Action::WakeAll;
+            }
+            transitions {
+                CompletionExtState::Pending -> CompletionExtState::CompletedAll;
+                CompletionExtState::Completed -> CompletionExtState::CompletedAll;
+                CompletionExtState::CompletedAll -> CompletionExtState::CompletedAll;
+            }
+            ensures {
+                completion_complete_all_committed(self);
+                completion_all_waiters_released(self);
+            }
+            result {
+                Pending: Success(all_tokens_published);
+                Completed: Success(all_tokens_published);
+                CompletedAll: Success(no_change);
+            }
+        }
+
+        Event::Wait {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Online;
+            }
+            drives {
+                self.wait_queue.Action::PrepareWait;
+                self.wait_queue.Action::FinishWait;
+            }
+            transitions {
+                CompletionExtState::Pending -> CompletionExtState::Pending;
+                CompletionExtState::Completed -> CompletionExtState::Pending;
+                CompletionExtState::CompletedAll -> CompletionExtState::CompletedAll;
+            }
+            ensures {
+                completion_waiter_enqueued(self);
+                completion_waiter_finished(self);
+            }
+            result {
+                Pending: Blocked(waiting_or_timeout_or_signal);
+                Completed: Success(token_consumed);
+                CompletedAll: Success(no_token_consumed);
+            }
+        }
+
+        Event::TryWait {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Online;
+            }
+            transitions {
+                CompletionExtState::Pending -> CompletionExtState::Pending;
+                CompletionExtState::Completed -> CompletionExtState::Pending;
+                CompletionExtState::CompletedAll -> CompletionExtState::CompletedAll;
+            }
+            result {
+                Pending: Failed(no_token);
+                Completed: Success(token_consumed);
+                CompletedAll: Success(no_token_consumed);
+            }
+        }
+
+        Event::Reinit {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Online;
+            }
+            transitions {
+                CompletionExtState::Pending -> CompletionExtState::Pending;
+                CompletionExtState::Completed -> CompletionExtState::Pending;
+                CompletionExtState::CompletedAll -> CompletionExtState::Pending;
+            }
+            ensures {
+                completion_pending(self);
+                completion_done_count_is_zero(self);
+                completion_wait_queue_preserved(self);
+            }
+            result {
+                Pending: Success(no_change);
+                Completed: Success(reset_to_pending);
+                CompletedAll: Success(reset_to_pending);
+            }
+        }
+
+        Action::Done {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+            }
+            ensures {
+                completion_done_observed(self);
+            }
+        }
+    }
 }

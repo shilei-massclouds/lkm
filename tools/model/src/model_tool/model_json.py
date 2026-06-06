@@ -192,6 +192,7 @@ def _type_to_json(item: TypeDecl) -> dict[str, Any]:
         "header": item.header,
         "span": _span_to_json(item.span),
         "blocks": [_block_to_json(block) for block in item.blocks],
+        "properties": item.properties,
     }
 
 

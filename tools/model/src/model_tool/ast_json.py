@@ -74,11 +74,15 @@ def _predicate_from_json(item: Any) -> PredicateDecl:
 
 def _type_from_json(item: Any) -> TypeDecl:
     data = _as_object(item, "type")
+    properties = data.get("properties", {})
+    if not isinstance(properties, dict):
+        raise ValueError("type.properties must be an object")
     return TypeDecl(
         name=_string(data, "name"),
         header=_string(data, "header"),
         span=_span_from_json(data["span"]),
         blocks=[_block_from_json(block) for block in _list(data, "blocks")],
+        properties={str(key): str(value) for key, value in properties.items()},
     )
 
 
