@@ -302,6 +302,11 @@ state State::Ready {
                     drives {
                         selected_rq.Event::EnqueueTask(KernelInitTaskRef);
                     }
+
+                    ensures {
+                        raw_spinlock_irqsave_entered(BootRunQueueLock, BootCurrentCPU);
+                        raw_spinlock_irqrestore_exited(BootRunQueueLock, BootCurrentCPU);
+                    }
                 }
 
                 ensures {

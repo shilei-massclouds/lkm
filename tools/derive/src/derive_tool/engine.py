@@ -948,6 +948,18 @@ class _Deriver:
                 proof_class="action_result_binding",
                 proof_provider=action_provider,
             )
+            obj = self.model.objects.get(object_name)
+            if obj is not None:
+                self._record_type_process_ensures(
+                    obj.kind,
+                    object_name,
+                    "Action",
+                    action_name,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                )
             return True
 
         ref_event = _REF_EVENT_EXPR_RE.match(entry)
@@ -958,6 +970,10 @@ class _Deriver:
             if receiver_type is not None and _is_supported_ref_type_event(
                 receiver_type, driven_event
             ):
+                process_type = _REF_TARGET_PROCESS_TYPES.get(
+                    receiver_type, receiver_type
+                )
+                target_object = _ref_target_object(self.model, receiver)
                 expression = _normalize_ref_process_expression(
                     self.model,
                     receiver_name,
@@ -982,6 +998,16 @@ class _Deriver:
                     proof_class="type_process_commit",
                     proof_provider=action_provider,
                 )
+                self._record_type_process_ensures(
+                    process_type,
+                    target_object or receiver_name,
+                    "Event",
+                    driven_event,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                )
                 return True
 
         match = _EVENT_EXPR_RE.match(entry)
@@ -989,6 +1015,10 @@ class _Deriver:
             driven_object, driven_event, args = match.group(1, 2, 3)
             obj = self.model.objects.get(driven_object)
             if obj is None and _is_supported_ref_event(driven_object, driven_event):
+                process_type = _REF_TARGET_PROCESS_TYPES.get(
+                    "RunQueueRef", "RunQueueRef"
+                )
+                target_object = _ref_value_target_object(self.model, driven_object)
                 expression = _normalize_ref_process_expression(
                     self.model,
                     driven_object,
@@ -1012,6 +1042,16 @@ class _Deriver:
                     predicate=None,
                     proof_class="type_process_commit",
                     proof_provider=action_provider,
+                )
+                self._record_type_process_ensures(
+                    process_type,
+                    target_object or driven_object,
+                    "Event",
+                    driven_event,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
                 )
                 return True
             if obj is not None and _find_event(obj, driven_event) is None:
@@ -1039,6 +1079,16 @@ class _Deriver:
                         predicate=None,
                         proof_class="type_process_commit",
                         proof_provider=action_provider,
+                    )
+                    self._record_type_process_ensures(
+                        obj.kind,
+                        driven_object,
+                        "Event",
+                        driven_event,
+                        args,
+                        entry_span,
+                        event,
+                        action_provider=action_provider,
                     )
                     return True
             else:
@@ -1082,6 +1132,18 @@ class _Deriver:
                 proof_class="action_commit",
                 proof_provider=action_provider,
             )
+            obj = self.model.objects.get(object_name)
+            if obj is not None:
+                self._record_type_process_ensures(
+                    obj.kind,
+                    object_name,
+                    "Action",
+                    action_name,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                )
             return True
 
         self._record(
@@ -1249,6 +1311,49 @@ class _Deriver:
                     proof_provider=proof_provider,
                 )
         return True
+
+    def _record_type_process_ensures(
+        self,
+        type_name: str,
+        self_name: str,
+        process_kind: str,
+        process_name: str,
+        args: str | None,
+        span: SourceSpan,
+        event: EventDef,
+        *,
+        action_provider: str,
+    ) -> None:
+        bindings = _process_argument_bindings(
+            self.model,
+            type_name,
+            process_kind,
+            process_name,
+            args,
+        )
+        bindings["self"] = self_name
+        for ensure in _process_ensures(
+            self.model,
+            type_name,
+            process_kind,
+            process_name,
+        ):
+            expression = _substitute_process_bindings(ensure, bindings)
+            classification = _classify_obligation(
+                expression, "type process ensures", event.object_name
+            )
+            self._record(
+                DerivationStatus.PROVED,
+                f"type process ensures: {expression}",
+                span,
+                object_name=event.object_name,
+                event_name=event.name,
+                expression=expression,
+                source_kind="type_process_ensures",
+                predicate=classification["predicate"],
+                proof_class="type_process_ensures",
+                proof_provider=action_provider,
+            )
 
 
     def _event_from_current_state(
@@ -2235,6 +2340,38 @@ def _display_ref_aliases(
     return display if changed else None
 
 
+def _ref_target_object(
+    model: ObjectModel, binding: dict[str, str] | None
+) -> str | None:
+    if binding is None:
+        return None
+    value = binding.get("value")
+    return _ref_value_target_object(model, value) if value else None
+
+
+def _ref_value_target_object(model: ObjectModel, ref_value: str | None) -> str | None:
+    if not ref_value:
+        return None
+    if ref_value == "BootRunQueueRef":
+        return "BootRunQueue"
+    if ref_value == "KernelInitTaskRef":
+        return "KernelInitTask"
+    for type_name in ("SchedulerObject", "RunQueue", "Task"):
+        type_decl = model.types.get(type_name)
+        if type_decl is None:
+            continue
+        pattern = re.compile(
+            r"\b(?:runqueue_ref_targets|task_ref_targets)\(\s*"
+            + re.escape(ref_value)
+            + r"\s*,\s*([A-Z][A-Za-z0-9_]*)\s*\)"
+        )
+        for block in type_decl.blocks:
+            match = pattern.search(block.body)
+            if match is not None:
+                return match.group(1)
+    return None
+
+
 def _normalize_ref_process_expression(
     model: ObjectModel,
     receiver_name: str,
@@ -2316,6 +2453,101 @@ def _process_signature(
         match = pattern.search(block.body)
         if match is not None:
             return _parse_process_parameters(match.group(1) or "")
+    return None
+
+
+def _process_body(
+    model: ObjectModel, type_name: str, process_kind: str, process_name: str
+) -> str | None:
+    type_decl = model.types.get(type_name)
+    if type_decl is None:
+        return None
+    pattern = re.compile(
+        r"\b"
+        + re.escape(process_kind)
+        + r"::"
+        + re.escape(process_name)
+        + r"\s*(?:\([^{};]*\))?(?:\s*->\s*[A-Z][A-Za-z0-9_]*)?\s*\{",
+        re.S,
+    )
+    for block in type_decl.blocks:
+        match = pattern.search(block.body)
+        if match is None:
+            continue
+        body_start = match.end()
+        body_end = _matching_brace_index(block.body, body_start - 1)
+        if body_end is not None:
+            return block.body[body_start:body_end]
+    return None
+
+
+def _process_ensures(
+    model: ObjectModel, type_name: str, process_kind: str, process_name: str
+) -> tuple[str, ...]:
+    body = _process_body(model, type_name, process_kind, process_name)
+    if body is None:
+        return ()
+    ensures = _named_block_body(body, "ensures")
+    if ensures is None:
+        return ()
+    return tuple(entry for entry, _span in Block("ensures", ensures, SourceSpan(1, 1)).entry_spans)
+
+
+def _process_argument_bindings(
+    model: ObjectModel,
+    type_name: str,
+    process_kind: str,
+    process_name: str,
+    args: str | None,
+) -> dict[str, str]:
+    signature = _process_signature(model, type_name, process_kind, process_name)
+    if signature is None or args is None:
+        return {}
+    raw_args = [item.strip() for item in args.split(",") if item.strip()]
+    if _uses_named_args(args):
+        bindings: dict[str, str] = {}
+        for item in raw_args:
+            name, sep, value = item.partition(":")
+            if sep:
+                bindings[name.strip()] = value.strip()
+        return bindings
+    if len(signature) != len(raw_args):
+        return {}
+    return {
+        param_name: value
+        for (param_name, _param_type), value in zip(signature, raw_args, strict=True)
+    }
+
+
+def _substitute_process_bindings(expression: str, bindings: dict[str, str]) -> str:
+    substituted = expression
+    for name, value in bindings.items():
+        substituted = re.sub(rf"\b{re.escape(name)}\b", value, substituted)
+    return substituted
+
+
+def _named_block_body(body: str, block_name: str) -> str | None:
+    pattern = re.compile(r"\b" + re.escape(block_name) + r"\s*\{", re.S)
+    match = pattern.search(body)
+    if match is None:
+        return None
+    block_start = match.end()
+    block_end = _matching_brace_index(body, block_start - 1)
+    if block_end is None:
+        return None
+    return body[block_start:block_end]
+
+
+def _matching_brace_index(text: str, open_index: int) -> int | None:
+    depth = 0
+    for index in range(open_index, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index
     return None
 
 

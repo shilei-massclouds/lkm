@@ -196,6 +196,33 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
+                    record["expression"]
+                    == "runqueue_contains_task(BootRunQueue, KernelInitTaskRef)"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "task_runtime_state_is(KernelInitTask, TaskRuntimeState::Running)"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "scheduler_select_runqueue_returns(Scheduler, KernelInitTaskRef, BootRunQueueRef)"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
                     record["expression"] == "within EnqueueSelectedRunQueueContext"
                     and record["proof_class"] == "exclusive_context"
                     and record["proof_provider"] == "lock_ref"
