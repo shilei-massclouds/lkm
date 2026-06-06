@@ -230,10 +230,13 @@ object BootInitStack: StackObject {
 }
 
 /*
- * EventStream 表示异常和中断共享的陷入总入口对象。它先建立物理地址阶段的 early 兜底入口；
+ * EventStream 表示 boot CPU 上异常和中断共享的陷入总入口对象。它先建立物理地址阶段的 early 兜底入口；
  * VM 切换过程允许临时借用 stvec 作为重定位落点；EarlyVm 生效后再切换到 formal 总入口，
- * 由 formal 入口根据 scause 分流到 ExceptionStream 或 InterruptStream。
+ * 由 formal 入口根据 scause 分流到本 EventStream 下的 ExceptionStream 或 InterruptStream。
  * formal 入口只执行第一层分流；具体 cause 到处理策略的绑定由两个子流维护。
+ *
+ * 当前具名 EventStream 是 boot CPU 的迁移期实例；后续 AP 进入 secondary entry 后，
+ * 每个 live CPU 都应建立自己的 EventStream，并通过它关联自己的 InterruptStream/ExceptionStream。
  */
 object EventStream: FlowObject {
     initial_state: State::Base;
@@ -261,6 +264,7 @@ object EventStream: FlowObject {
                     Riscv64.stvec == phys_addr(StaticObjects.early_event_entry);
                     early_event_entry_phys_safe(StaticObjects.early_event_entry);
                     event_stream_early_entry_available(EventStream, StaticObjects.early_event_entry);
+                    cpu_event_stream_ready(BootCPU, EventStream);
                 }
             }
         }
@@ -274,6 +278,7 @@ object EventStream: FlowObject {
         invariant {
             early_event_entry_phys_safe(StaticObjects.early_event_entry);
             event_stream_early_entry_available(EventStream, StaticObjects.early_event_entry);
+            cpu_event_stream_ready(BootCPU, EventStream);
         }
 
         events {
@@ -297,6 +302,9 @@ object EventStream: FlowObject {
                     Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
                     Riscv64.sscratch == 0;
                     event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
+                    cpu_event_stream_ready(BootCPU, EventStream);
+                    cpu_exception_stream_ready(BootCPU, ExceptionStream);
+                    cpu_interrupt_stream_ready(BootCPU, InterruptStream);
                 }
             }
         }
@@ -310,6 +318,9 @@ object EventStream: FlowObject {
             Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
             Riscv64.sscratch == 0;
             event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
+            cpu_event_stream_ready(BootCPU, EventStream);
+            cpu_exception_stream_ready(BootCPU, ExceptionStream);
+            cpu_interrupt_stream_ready(BootCPU, InterruptStream);
         }
     }
 }
@@ -318,6 +329,13 @@ object EventStream: FlowObject {
  * InterruptStream 表示 EventStream 分流后的异步中断流控制对象。它在本阶段先封闭中断进入路径，
  * 不开放真实中断处理。中断流维护 interrupt cause 到 handler policy 的绑定；默认绑定为 panic/halt，
  * 后续具体中断类型启用时再替换对应 cause 的处理策略。
+ *
+ * 职责分层：InterruptStream 直接管理 RISC-V sie/sip 这类 source enable / pending 分开关；
+ * boot CPU 本地中断总开关 sstatus.SIE 由 BootCpuLocalInterrupt 直接管理。InterruptStream
+ * 可以在生命周期事件中驱动 BootCpuLocalInterrupt，但不得绕过它直接改变总开关。
+ *
+ * 当前具名 InterruptStream 是 boot CPU 的中断流实例，并通过 parent EventStream
+ * 间接关联到 BootCPU。
  */
 object InterruptStream: FlowObject {
     initial_state: State::Base;
@@ -329,7 +347,8 @@ object InterruptStream: FlowObject {
     state State::Base {
         events {
             /*
-             * Preset 清零中断使能和挂起状态，避免入口前导期被异步中断打断。
+             * Preset 清零 sie/sip source enable / pending 分开关，避免入口前导期被异步中断打断。
+             * 这不表示直接操作 sstatus.SIE 总开关；总开关由 BootCpuLocalInterrupt 管理。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
@@ -364,7 +383,8 @@ object InterruptStream: FlowObject {
 
         events {
             /*
-             * Setup 在 start_kernel() 早期再次防御式关闭中断总开关。
+             * Setup 在 start_kernel() 早期再次防御式关闭中断总开关，但只通过
+             * BootCpuLocalInterrupt 完成，不直接改变 sstatus.SIE。
              */
             on Event::Setup -> State::Ready {
                 depends_on {
@@ -1753,8 +1773,9 @@ object BootCPU: CPUObject {
 }
 
 /*
- * BootCpuLocalInterrupt 是 BootCPU 的本地中断总开关控制对象。接管后只有它
- * 可以直接表示 local interrupt 开关状态；InterruptStream 只能驱动它。
+ * BootCpuLocalInterrupt 是 BootCPU 的本地中断总开关控制对象，对应 RISC-V
+ * sstatus.SIE。接管后只有它可以直接表示和改变 local interrupt 总开关状态；
+ * InterruptStream 可以驱动它，但不能绕过它直接改变总开关。
  */
 object BootCpuLocalInterrupt: LocalInterruptControl {
     initial_state: State::Base;

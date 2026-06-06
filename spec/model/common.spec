@@ -124,6 +124,9 @@ predicate current_cpu_logical_id_ready<T, U>(current_cpu: T, logical_id: U) -> b
 predicate current_cpu_owns_cpu<T, U>(current_cpu: T, cpu: U) -> bool;
 predicate current_cpu_registered_in_cpu_group<T, U>(current_cpu: T, cpu_group: U) -> bool;
 predicate current_cpu_bootstrap_role_ready<T, U>(current_cpu: T, cpu: U) -> bool;
+predicate cpu_event_stream_ready<T, U>(cpu: T, event_stream: U) -> bool;
+predicate cpu_exception_stream_ready<T, U>(cpu: T, exception_stream: U) -> bool;
+predicate cpu_interrupt_stream_ready<T, U>(cpu: T, interrupt_stream: U) -> bool;
 predicate cpu_local_interrupt_control_ready<T, U>(control: T, cpu: U) -> bool;
 predicate cpu_local_interrupts_disabled<T>(control: T) -> bool;
 predicate cpu_local_interrupts_enabled<T>(control: T) -> bool;

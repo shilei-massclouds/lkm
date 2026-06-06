@@ -462,8 +462,8 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `CurrentCPU` 是否拥有对应 CPU 对象，`CpuGroup` 是否只维护这些 CPU 对象的引用、索引和拓扑组织关系。
 - possible secondary CPU 是否仍只是 `CpuGroup`/topology 中的候选或描述；AP 真实进入 secondary entry 前，不得生成 live AP `CurrentCPU`，也不得把 AP 的 local interrupt、current task slot 或 task preemption 控制链视为可操作。
 - `BootCPU` 是否仍作为独立实现对象存在，或已经退化为 `CurrentCPU.cpu` 指向 CPU 的 bootstrap role/alias。
-- `InterruptStream.Enable/Setup` 是否仍直接维护 boot CPU 本地中断事实，或已经改为只在 lifecycle event 中驱动 CPU-local `LocalInterruptControl`。
-- 是否仍有 `InterruptStream` 或其它对象直接改写 local interrupt 开关；接管后只有 `LocalInterruptControl` 可以直接操作本 CPU 中断开关状态。
+- `InterruptStream.Enable/Setup` 是否仍直接维护 boot CPU 本地中断总开关事实，或已经改为只在 lifecycle event 中驱动 CPU-local `LocalInterruptControl`。
+- 是否仍有 `InterruptStream` 或其它对象直接改写 `sstatus.SIE` 总开关；接管后只有 `LocalInterruptControl` 可以直接操作本 CPU 中断总开关状态。`InterruptStream` 可以直接管理 `sie/sip` source enable / pending 分开关。
 - `BootRunQueue.curr`、`BootCPU` 当前任务事实和 scheduler setup 是否需要收敛到 `CurrentTaskSlot`。
 - `preempt_disable()` / `preempt_enable()` 语义是否通过 `CurrentCPU -> cpu -> CurrentTaskSlot.current_task -> PreemptionControl` 表达。
 - `KernelInitTask.Enable` 是否通过 `RawSpinLock.LockIrqSave/UnlockIrqRestore` 进入和退出 `WakeUpNewTaskContext`，并只在 `within` 内驱动受保护资源对象的 action/event。

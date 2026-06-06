@@ -327,6 +327,8 @@ secondary CPU 的边界必须单独区分。`CpuGroup` 可以先从 `PlatformCpu
 ```text
 CurrentCPU
     -> cpu
+    -> EventStream
+    -> InterruptStream / ExceptionStream
     -> LocalInterruptControl
     -> CurrentTaskSlot
     -> current Task
@@ -336,9 +338,13 @@ CpuGroup
     -> CpuRef[id] -> CurrentCPU.cpu
 ```
 
-其中 `LocalInterruptControl` 属于具体 CPU，`CurrentTaskSlot` 也属于具体 CPU 并保存当前任务引用；`PreemptionControl` 属于当前 task/thread_info。`preempt_disable()` 和 `preempt_enable()` 不应直接作用于被唤醒或被创建的任务，而应通过 `CurrentCPU -> cpu -> CurrentTaskSlot.current_task` 找到当前正在执行的任务后再驱动该任务的抢占控制事件。
+其中 `EventStream` 属于具体 CPU，并在该 CPU 的 trap entry 中把异常和中断分流到自己的 `ExceptionStream` 与 `InterruptStream`；`LocalInterruptControl` 属于具体 CPU，`CurrentTaskSlot` 也属于具体 CPU 并保存当前任务引用；`PreemptionControl` 属于当前 task/thread_info。`preempt_disable()` 和 `preempt_enable()` 不应直接作用于被唤醒或被创建的任务，而应通过 `CurrentCPU -> cpu -> CurrentTaskSlot.current_task` 找到当前正在执行的任务后再驱动该任务的抢占控制事件。
 
-`LocalInterruptControl` 应接管本 CPU local interrupt 开关状态的直接控制能力。`InterruptStream` 不应再直接修改架构中断开关寄存器事实，也不应对外提供普通的 `local_irq_enable/disable` operational event；它只能在自身 lifecycle event 中驱动 `CurrentCPU.cpu.LocalInterruptControl` 完成阶段边界所需的 enable/disable。`LocalInterruptControl` 则只提供可反复调用的 operational events，例如 `Disable`、`Enable`、`SaveAndDisable(out flags)` 和 `Restore(flags)`；本地中断打开/关闭是运行期状态变化，不是 `LocalInterruptControl` 自身 lifecycle event。
+当前 boot CPU 规格中，具名 `EventStream`、`InterruptStream` 和 `ExceptionStream` 是 boot CPU 的事件入口流迁移期实例。后续 AP 进入 secondary entry 时，每个 AP 必须建立自己的 live `CurrentCPU -> cpu -> EventStream` 链，再由该 `EventStream` 关联自己的 `InterruptStream`/`ExceptionStream`；BP 侧提前为 future CPU 准备的描述对象或 handler 模板不等同于 AP 自己的 live event stream。
+
+`LocalInterruptControl` 应接管本 CPU local interrupt 总开关状态的直接控制能力，即 RISC-V 上的 `sstatus.SIE`。`InterruptStream` 不应直接修改这个总开关，也不应对外提供普通的 `local_irq_enable/disable` operational event；它只能在自身 lifecycle event 中驱动 `CurrentCPU.cpu.LocalInterruptControl` 完成阶段边界所需的 enable/disable。`LocalInterruptControl` 则只提供可反复调用的 operational events，例如 `Disable`、`Enable`、`SaveAndDisable(out flags)` 和 `Restore(flags)`；本地中断总开关打开/关闭是运行期状态变化，不是 `LocalInterruptControl` 自身 lifecycle event。
+
+`InterruptStream` 仍负责中断流的 source/pending 层，例如 RISC-V 的 `sie` source enable bits 和 `sip` pending bits，以及 cause 到 handler policy 的分发表。它可以直接在自身事件中清理或维护 `sie/sip` 这类分开关/挂起状态；这不等同于直接操作 `sstatus.SIE` 总开关。正式边界是：`sstatus.SIE` 只能由 `LocalInterruptControl` 直接改变，`InterruptStream` 可以驱动 `LocalInterruptControl`，也可以直接管理 `sie/sip`。
 
 `RawSpinLock` 类型建模在该访问链成立后展开。`raw_spin_lock_irqsave()` 对应的事件应同时驱动三类效果：保存并关闭当前 CPU 本地中断、关闭当前任务抢占、获取锁本体。释放路径应先释放锁本体，再恢复本地中断状态并打开当前任务抢占。示例形态如下：
 
