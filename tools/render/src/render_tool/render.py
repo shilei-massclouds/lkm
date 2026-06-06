@@ -237,6 +237,13 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
     )
     height = int(top_margin + bottom_margin + sum(metric[1] for metric in row_metrics.values()))
     cell_by_id = {cell.id: cell for cell in cells}
+    context_cells = [cell for cell in cells if cell.kind == "context_span"]
+    nested_context_ids = {
+        inner.id
+        for inner in context_cells
+        for outer in context_cells
+        if inner.id != outer.id and _trace_cell_contains(outer, inner)
+    }
     phase_span_ids = {
         cell.id
         for cell in cells
@@ -321,7 +328,12 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
 
     for cell in cells:
         if cell.kind == "context_span":
-            _append_trace_context_box(lines, cell, cell_box(cell))
+            _append_trace_context_box(
+                lines,
+                cell,
+                cell_box(cell),
+                nested=cell.id in nested_context_ids,
+            )
 
     for cell in cells:
         if cell.kind == "event_span" and cell.id in phase_span_ids:
@@ -638,10 +650,14 @@ def _append_trace_phase_event(
 
 
 def _append_trace_context_box(
-    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+    lines: list[str],
+    cell: TraceCell,
+    box: tuple[float, float, float, float],
+    *,
+    nested: bool = False,
 ) -> None:
     x, y, width, height = box
-    pad_x = 10
+    pad_x = 22 if nested else 10
     pad_y = 6
     box_x = x + pad_x
     box_y = y + pad_y
@@ -715,6 +731,15 @@ def _trace_context_action_rect(
     box_x = x + pad_x
     box_y = y + (height - box_height) / 2 + 4
     return box_x, box_y, box_width, box_height
+
+
+def _trace_cell_contains(outer: TraceCell, inner: TraceCell) -> bool:
+    return (
+        outer.row <= inner.row
+        and inner.row + inner.row_span <= outer.row + outer.row_span
+        and outer.column <= inner.column
+        and inner.column + inner.column_span <= outer.column + outer.column_span
+    )
 
 
 def _append_trace_state_arrow(

@@ -314,13 +314,10 @@ class ViewToolTests(unittest.TestCase):
             and "EnqueueSelectedRunQueueContext" in cell.label
         )
         self.assertEqual(context_cell.column, event_cell.column + 1)
-        self.assertEqual(context_cell.column_span, 4)
+        self.assertEqual(context_cell.column_span, 2)
         self.assertGreater(context_cell.row_span, enqueue_context_cell.row_span)
-        self.assertGreater(enqueue_context_cell.column, context_cell.column)
-        self.assertLessEqual(
-            enqueue_context_cell.column + enqueue_context_cell.column_span,
-            context_cell.column + context_cell.column_span,
-        )
+        self.assertEqual(enqueue_context_cell.column, context_cell.column)
+        self.assertEqual(enqueue_context_cell.column_span, context_cell.column_span)
         self.assertGreaterEqual(enqueue_context_cell.row, context_cell.row)
         self.assertLessEqual(
             enqueue_context_cell.row + enqueue_context_cell.row_span,

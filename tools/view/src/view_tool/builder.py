@@ -349,38 +349,6 @@ def _build_context_forest(
     return forest
 
 
-def _context_forest_max_depth(nodes: list[dict[str, object]]) -> int:
-    max_depth = -1
-
-    def visit(node: dict[str, object], depth: int) -> None:
-        nonlocal max_depth
-        if node.get("kind") != "context":
-            return
-        max_depth = max(max_depth, depth)
-        children = node.get("children")
-        if not isinstance(children, list):
-            return
-        for child in children:
-            if isinstance(child, dict):
-                visit(child, depth + 1)
-
-    for node in nodes:
-        visit(node, 0)
-    return max_depth
-
-
-def _context_subtree_depth(node: dict[str, object]) -> int:
-    children = node.get("children")
-    if not isinstance(children, list):
-        return 0
-    child_depths = [
-        1 + _context_subtree_depth(child)
-        for child in children
-        if isinstance(child, dict) and child.get("kind") == "context"
-    ]
-    return max(child_depths, default=0)
-
-
 def _event_node_id(object_name: str, event_name: str) -> str:
     return f"{object_name}.{event_name}"
 
@@ -758,11 +726,8 @@ class _TraceLayoutBuilder:
         context_column = None if is_phase else gap_column
         if context_items and context_column is not None:
             context_forest = _build_context_forest(context_items)
-            max_context_depth = _context_forest_max_depth(context_forest)
-            if max_context_depth >= 0:
-                self._max_object_lane = max(
-                    self._max_object_lane, object_lane + max_context_depth + 1
-                )
+            if context_forest:
+                self._max_object_lane = max(self._max_object_lane, object_lane + 1)
             context_index = 0
             previous_action_id: str | None = None
 
@@ -801,7 +766,7 @@ class _TraceLayoutBuilder:
                             id=action_id,
                             kind="context_action",
                             row=action_row,
-                            column=context_column + depth * 2,
+                            column=context_column,
                             column_span=2,
                             label=str(child.get("action", "")),
                         )
@@ -834,10 +799,10 @@ class _TraceLayoutBuilder:
                         id=context_id,
                         kind="context_span",
                         row=context_start_row,
-                        column=context_column + depth * 2,
+                        column=context_column,
                         label=context_label,
                         row_span=max(1, len(self.rows) - context_start_row),
-                        column_span=(_context_subtree_depth(node) + 1) * 2,
+                        column_span=2,
                     )
                 )
                 self.arrows.append(

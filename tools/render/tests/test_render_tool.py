@@ -198,6 +198,15 @@ class RenderToolTests(unittest.TestCase):
                         column_span=2,
                     ),
                     TraceCell(
+                        id="nested-context",
+                        kind="context_span",
+                        row=3,
+                        column=1,
+                        label="EnqueueSelectedRunQueueContext|lock=BootRunQueueLock",
+                        row_span=1,
+                        column_span=2,
+                    ),
+                    TraceCell(
                         id="action-0",
                         kind="context_action",
                         row=2,
@@ -228,6 +237,7 @@ class RenderToolTests(unittest.TestCase):
 
         self.assertIn("context-box", text)
         self.assertIn("context-action", text)
+        self.assertIn('x="228.0" y="156.0" width="215.0"', text)
         self.assertIn("within-arrow", text)
         self.assertIn("context-order", text)
         self.assertIn("WakeUpNewTaskContext", text)
