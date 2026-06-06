@@ -56,6 +56,11 @@ enum RawSpinLockExtState {
     Locked,
 }
 
+enum TaskRuntimeState {
+    New,
+    Running,
+}
+
 function addr_of<T>(value: T) -> AddrIdentity<T>;
 function phys_addr<T>(value: T) -> PhysAddr<T>;
 function virt_addr<T, S: VirtualAddressSpace, A: VirtualAddressArea>(value: T, space: S, area: A) -> VirtAddr<T>;
@@ -137,6 +142,8 @@ predicate current_task_slot_current<T, U>(slot: T, task: U) -> bool;
 predicate task_preemption_control_ready<T>(task: T) -> bool;
 predicate task_preemption_disabled<T>(task: T) -> bool;
 predicate task_preemption_enabled<T>(task: T) -> bool;
+predicate task_runtime_state_transition_allowed<T>(task: T, state: TaskRuntimeState) -> bool;
+predicate task_runtime_state_is<T>(task: T, state: TaskRuntimeState) -> bool;
 predicate raw_spinlock_storage_bound<T>(lock: T) -> bool;
 predicate raw_spinlock_initialized<T>(lock: T) -> bool;
 predicate raw_spinlock_unlocked<T>(lock: T) -> bool;
@@ -340,6 +347,40 @@ type FixMapConfig {
 }
 
 type TimelineObject {
+}
+
+type TaskObject {
+}
+
+/*
+ * Task is a reusable runtime task type. TaskRuntimeState is an extended
+ * runtime state rather than an object lifecycle state. The current formal
+ * model keeps SetRuntimeState as a simple operational event; later state
+ * machine support will add transition guards and enter-state consistency
+ * checks for concrete runtime states.
+ */
+type Task: TaskObject {
+    ext_state: TaskRuntimeState;
+
+    processes {
+        Event::SetRuntimeState {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                task_runtime_state_transition_allowed(self, state);
+            }
+            transitions {
+                TaskRuntimeState::New -> TaskRuntimeState::Running;
+                TaskRuntimeState::Running -> TaskRuntimeState::Running;
+            }
+            ensures {
+                task_runtime_state_is(self, state);
+            }
+            result {
+                Allowed: Success(runtime_state_set);
+                Disallowed: Failed(invalid_runtime_state_transition);
+            }
+        }
+    }
 }
 
 type CurrentCPU {

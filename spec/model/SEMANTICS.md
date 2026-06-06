@@ -216,6 +216,8 @@ process 的结果使用 `ProcessResult` 语义集合：`Success`、`Blocked(reas
 
 Completion 也说明了 event/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。
 
+`Task` 是可复用运行期任务类型。`object KernelInitTask: Task` 表示 PID 1 任务实例继承 `Task` 的运行期 process；`TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Event::SetRuntimeState(state: TaskRuntimeState)` 这样的 Operational Event，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
+
 ## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct
 
 `Lock` 表示可建立独占边界的同步对象。`Lock` 不带泛型，不拥有被保护资源；锁与资源的关系由资源独占上下文表达。
@@ -281,7 +283,7 @@ state State::Ready {
                 }
 
                 drives {
-                    KernelInitTask.Action::SetTaskState(TaskRuntimeState::Running);
+                    KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running);
                     Scheduler.Action::SelectRunQueue(selected_rq: BootRunQueue);
                     BootRunQueue.Action::EnqueueTask(task: KernelInitTask);
                 }

@@ -195,7 +195,10 @@ def _context_records_by_event(
         ):
             active_context.pop(key, None)
             continue
-        if proof_class != "action_commit" or proof_provider != "within_context":
+        if (
+            proof_class not in {"action_commit", "type_process_commit"}
+            or proof_provider != "within_context"
+        ):
             continue
         context_name = active_context.get(key)
         if context_name is None or not isinstance(expression, str):

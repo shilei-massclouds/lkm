@@ -240,9 +240,9 @@ class ViewToolTests(unittest.TestCase):
                     {
                         "object": "KernelInitTask",
                         "event": "Enable",
-                        "proof_class": "action_commit",
+                        "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "KernelInitTask.Action::SetTaskState(Runnable)",
+                        "expression": "KernelInitTask.Event::SetRuntimeState(Runnable)",
                     },
                     {
                         "object": "KernelInitTask",
@@ -297,7 +297,7 @@ class ViewToolTests(unittest.TestCase):
         self.assertEqual(
             [cell.label for cell in sorted(action_cells, key=lambda cell: cell.row)],
             [
-                "KernelInitTask.Action::SetTaskState(Runnable)",
+                "KernelInitTask.Event::SetRuntimeState(Runnable)",
                 "Scheduler.Action::SelectRunQueue(KernelInitTask)",
                 "BootRunQueue.Action::EnqueueTask(KernelInitTask)",
             ],

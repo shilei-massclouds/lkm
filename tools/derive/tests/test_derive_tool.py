@@ -160,6 +160,15 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running)"
+                    and record["proof_class"] == "type_process_commit"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
             self.assertFalse(
                 any(record["predicate"] == "disjoint" for record in obligations)
             )

@@ -202,7 +202,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_action",
                         row=2,
                         column=1,
-                        label="KernelInitTask.Action::SetTaskState(Runnable)",
+                        label="KernelInitTask.Event::SetRuntimeState(Runnable)",
                         column_span=2,
                     ),
                     TraceCell(
@@ -235,7 +235,7 @@ class RenderToolTests(unittest.TestCase):
         self.assertNotIn("guard: RawSpinLockIrqSaveGuard", text)
         self.assertNotIn("enter: KernelInitTaskPiLock.LockIrqSave", text)
         self.assertNotIn("exit: KernelInitTaskPiLock.UnlockIrqRestore", text)
-        self.assertIn("SetTaskState", text)
+        self.assertIn("SetRuntimeState", text)
         self.assertIn("SelectRunQueue", text)
 
     def test_render_svg_from_trace_view_with_annotations(self) -> None:

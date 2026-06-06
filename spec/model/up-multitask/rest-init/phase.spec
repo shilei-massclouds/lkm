@@ -69,12 +69,12 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
  * 上下文通过 KernelInitTaskPiLock 建立边界，引用 KernelInitTask、
  * Scheduler、BootRunQueue 三个受保护对象。
  * Enable 的 within WakeUpNewTaskContext 块直接驱动
- * Task.Action::SetTaskState(Running)、Scheduler.Action::SelectRunQueue
+ * Task.Event::SetRuntimeState(Running)、Scheduler.Action::SelectRunQueue
  * (selected_rq: BootRunQueue) 和 BootRunQueue.Action::EnqueueTask
  * (task: KernelInitTask)。三者都成功后，Enable 才提交
  * KernelInitTask Ready -> Online。
  */
-object KernelInitTask: TaskObject {
+object KernelInitTask: Task {
     initial_state: State::Base;
 
     /*
@@ -192,7 +192,7 @@ object KernelInitTask: TaskObject {
                     }
 
                     drives {
-                        KernelInitTask.Action::SetTaskState(TaskRuntimeState::Running);
+                        KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running);
                         Scheduler.Action::SelectRunQueue(selected_rq: BootRunQueue);
                         BootRunQueue.Action::EnqueueTask(task: KernelInitTask);
                     }
