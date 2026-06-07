@@ -198,7 +198,7 @@ object PreSmpInitBoundary: KernelObject {
 /*
  * PreSmpInitPhase 表示 KernelInitTask 在 kernel_init_freeable() 中推进的
  * SMP 启动前初始化段。它依赖 KernelInitTask 已被 kthreadd_done 释放且
- * Scheduler.Action::SchedulePreemptDisabled 已提交，而不是依赖
+ * Scheduler.Event::Schedule 已提交，而不是依赖
  * RestInitPhase.Ready。
  */
 object PreSmpInitPhase: PhaseObject {

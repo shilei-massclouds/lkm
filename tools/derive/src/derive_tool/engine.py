@@ -1185,7 +1185,7 @@ class _Deriver:
             expression=f"within {within.context}",
             source_kind="within",
             proof_class="exclusive_context",
-            proof_provider="lock_ref",
+            proof_provider="guard",
         )
         entered_by = (
             context.guard.entered_by
@@ -1246,7 +1246,7 @@ class _Deriver:
             expression=f"within {within.context} exited",
             source_kind="within",
             proof_class="exclusive_context",
-            proof_provider="lock_ref",
+            proof_provider="guard",
         )
         return True
 
@@ -1276,8 +1276,8 @@ class _Deriver:
                     expression=entry,
                     source_kind=source_kind,
                     predicate=None,
-                    proof_class="exclusive_context_lock_event",
-                    proof_provider="lock_ref",
+                    proof_class="context_guard_event",
+                    proof_provider="guard",
                 )
         return True
 

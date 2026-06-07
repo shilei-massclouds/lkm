@@ -149,6 +149,7 @@ predicate current_task_slot_current<T, U>(slot: T, task: U) -> bool;
 predicate task_preemption_control_ready<T>(task: T) -> bool;
 predicate task_preemption_disabled<T>(task: T) -> bool;
 predicate task_preemption_enabled<T>(task: T) -> bool;
+predicate task_preemption_enabled_no_resched<T>(task: T) -> bool;
 predicate task_ref_targets<T, U>(task_ref: T, task: U) -> bool;
 predicate task_ref_ready<T>(task_ref: T) -> bool;
 predicate task_state_new<T>(task: T) -> bool;
@@ -164,6 +165,8 @@ predicate kthreadd_provider_ready<T>(task: T) -> bool;
 predicate runqueue_ref_targets<T, U>(runqueue_ref: T, runqueue: U) -> bool;
 predicate runqueue_ref_ready<T>(runqueue_ref: T) -> bool;
 predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, runqueue_ref: V) -> bool;
+predicate scheduler_schedule_event_available<T>(scheduler: T) -> bool;
+predicate scheduler_schedule_smoke_ready<T>(scheduler: T) -> bool;
 predicate task_runqueue_selected<T, U, V>(scheduler: T, task: U, runqueue: V) -> bool;
 predicate runqueue_runtime_state_is<T>(runqueue: T, state: RunQueueRuntimeState) -> bool;
 predicate runqueue_task_refs_empty<T>(runqueue: T) -> bool;
@@ -439,6 +442,16 @@ type Task: TaskObject {
  */
 type SchedulerObject: TaskObject {
     processes {
+        Event::Schedule {
+            state_effect: StateEffect::None;
+            depends_on {
+                scheduler_schedule_event_available(self);
+            }
+            ensures {
+                scheduler_first_schedule_committed(self);
+            }
+        }
+
         Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef {
             state_effect: StateEffect::None;
             depends_on {
@@ -633,6 +646,22 @@ type PreemptionControl {
             }
             result {
                 Disabled: Success(enabled_or_nested_count_decremented);
+                Enabled: Success(no_change);
+            }
+        }
+
+        Event::EnableNoResched {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                PreemptionExtState::Disabled -> PreemptionExtState::Enabled;
+                PreemptionExtState::Enabled -> PreemptionExtState::Enabled;
+            }
+            ensures {
+                task_preemption_enabled_no_resched(self);
+                task_preemption_enabled(self);
+            }
+            result {
+                Disabled: Success(enabled_no_resched);
                 Enabled: Success(no_change);
             }
         }

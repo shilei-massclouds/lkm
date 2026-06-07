@@ -2179,7 +2179,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 当前先把 `UP Multitask Phase` 拆为两个子阶段；需要注意，二者不是严格的
 `RestInitPhase.Ready -> PreSmpInitPhase.Started` 串行关系，而是在
-`Scheduler.schedule_preempt_disabled()` 处分叉：
+`schedule_preempt_disabled()` 展开的调度分界处分叉：
 
 - `BootInitTask` 继续执行 `rest_init()`，在调度交接后完成
   `cpu_startup_entry(CPUHP_ONLINE)`，并以 `BootIdleTask` 身份进入 idle 路径。
@@ -2190,27 +2190,28 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `UpMultitaskPhase.Ready` 才是两个分支均完成后的汇合边界：
   `RestInitPhase.Ready && PreSmpInitPhase.Ready`。
 
-1. `RestInitPhase`：覆盖 Linux `rest_init()`。它由上一阶段遗留的 `BootInitTask` 执行，依次调用 `rcu_scheduler_starting()`，通过通用 `TaskCreationCore` 创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，完成 `kthreadd_done`，最后通过 `Scheduler.schedule_preempt_disabled()` 执行第一次实际调度交接，再由 `cpu_startup_entry(CPUHP_ONLINE)` 将当前执行实体确认为 boot CPU 的显式 `BootIdleTask`。完成后，单核多任务调度语义成立。
+1. `RestInitPhase`：覆盖 Linux `rest_init()`。它由上一阶段遗留的 `BootInitTask` 执行，依次调用 `rcu_scheduler_starting()`，通过通用 `TaskCreationCore` 创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，完成 `kthreadd_done`，最后把 `schedule_preempt_disabled()` 展开为 preemption guard 退出、`Scheduler.schedule()` 调度分界和 post-schedule boot idle context 进入，再由 `cpu_startup_entry(CPUHP_ONLINE)` 将当前执行实体确认为 boot CPU 的显式 `BootIdleTask`。完成后，单核多任务调度语义成立。
 2. `PreSmpInitPhase`：覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是下一顶层阶段 `SMP Runtime Phase` 的入口边界。
 
 ##### UP Multitask Phase 分叉修正规则
 
-`RestInitPhase` 和 `PreSmpInitPhase` 的分叉点是
-`Scheduler.schedule_preempt_disabled()` 对应的 Scheduler action，而不是独立
-生命周期对象。该 action 提交 `Scheduler.first_schedule_committed` 等调度事实；
+`RestInitPhase` 和 `PreSmpInitPhase` 的分叉点是 `schedule_preempt_disabled()`
+展开后的 `Scheduler.schedule()` 调度分界，而不是独立生命周期对象或单个
+Scheduler action。该分界提交 `Scheduler.first_schedule_committed` 等调度事实；
 `RestInitPhase` 再提交 `KernelInitTask` 已被 `kthreadd_done` 释放并进入
 `PreSmpInitPhase` 的场景事实。规格不建立 `KernelInitDispatchGate`，因为 Linux
-没有对应的长期对象或明确生命周期，且 `schedule_preempt_disabled()` 是调度器的
-通用 helper。
+没有对应的长期对象或明确生命周期，且 `schedule_preempt_disabled()` 是由
+preemption guard 边界和调度分界组成的通用 helper。
 
 `PreSmpInitPhase` 依赖 `KernelInitTask` release/dispatch facts 和 Scheduler
 first-schedule fact，不直接依赖 `RestInitPhase.Ready`。`RestInitPhase.Ready`
 仍保持依赖 `BootIdleRuntime.Ready`，表示 boot idle 尾部已经完成。`UpMultitaskPhase.Ready`
 是汇合边界，同时要求 `RestInitPhase.Ready` 与 `PreSmpInitPhase.Ready`。
 
-实现层应拆分 `rest_init`：前半段创建 PID 1/kthreadd、完成 `kthreadd_done` 并直接
-调用 `Scheduler.schedule_preempt_disabled()`；随后 `PreSmpInitPhase` 可从上述 facts
-启动；最后 `RestInitPhase` 尾部完成 `BootIdleRuntime`。测试应验证 PID 1 的下一阶段
+实现层应拆分 `rest_init`：前半段创建 PID 1/kthreadd、完成 `kthreadd_done`，随后退出
+boot 初始 preempt-disabled 上下文、调用 `Scheduler.schedule()` 并进入 post-schedule
+boot idle context；随后 `PreSmpInitPhase` 可从上述 facts 启动；最后 `RestInitPhase`
+尾部完成 `BootIdleRuntime`。测试应验证 PID 1 的下一阶段
 启动条件来自 release/dispatch 与 scheduler facts，而不是来自 `RestInitPhase.Ready`。
 
 #### UP Multitask Phase 子阶段 1：rest_init 期（Rest Init Subphase）
@@ -2241,7 +2242,7 @@ first-schedule fact，不直接依赖 `RestInitPhase.Ready`。`RestInitPhase.Rea
    | `KthreaddTask.enable()` | `wake_up_new_task(p)` | 依赖 `KthreaddTask.Ready`，并由 `Scheduler.wake_new_task()` / `Scheduler.enqueue_task()` action 驱动；该 action 依赖 `Scheduler.Ready` 与 boot CPU runqueue 可接收新 task | 将 `KthreaddTask` 放入调度器可运行集合并推进到 `Online`。它使 kthreadd provider 具备被调度执行并消费 `kthread_create_list` 的机会；后续外部 kthread 创建请求可通过全局 provider 引用唤醒它。 |
 7. `kthreadd 准备同步门`（暂名 `KthreaddReadyGate`）：覆盖静态 completion `kthreadd_done` 和 `complete(&kthreadd_done)`。它是 `Completion` 类型的静态实例；`DECLARE_COMPLETION(kthreadd_done)` 可看作已由 `StaticObjects` 驱动其 `preset()` 与 `setup()`，初始扩展状态为 `Pending`。它把 `KernelInitTask` 和 `KthreaddTask` 解耦：PID 1 可以先创建并阻塞等待，待 `kthreadd_task` 全局引用建立且 `SystemState.value == SYSTEM_SCHEDULING` 后，`complete(&kthreadd_done)` 建模为 `KthreaddReadyGate.complete()` 扩展事件，释放 PID 1 继续执行 `kernel_init_freeable()`。
 8. `系统状态对象`（暂名 `SystemState`）的 setup：覆盖 `system_state = SYSTEM_SCHEDULING`。`SystemState` 是独立全局对象，早期由静态全局数据形成，`SystemState.preset()` 已把对象生命周期推进到 `Prepared`，并在内部属性 `value` 中记录 `SYSTEM_BOOTING`。本处执行 `SystemState.setup()`，把对象生命周期推进到 `Ready`，同时把内部属性 `SystemState.value` 更新为 `SYSTEM_SCHEDULING`。这里的 `value` 是 Linux 的全局阶段枚举，不是对象生命周期状态；该对象不替代 `Scheduler`，也不把 SMP 或 workqueue 直接推进到后续状态。
-9. `boot idle 任务对象`（暂名 `BootIdleTask`）：覆盖 `cpu_startup_entry(CPUHP_ONLINE)`，并承接前一调用 `schedule_preempt_disabled()` 造成的第一次实际调度交接。底层仍是 Linux 静态 `init_task/current`，因此 `BootInitTask` 与 `BootIdleTask` 可理解为同一底层 task 在不同时期的两个规格身份，而不是两个新旧 task 实体。`schedule_preempt_disabled()` 建模为 `Scheduler.schedule_preempt_disabled()` action，只表达在禁抢占条件下进入一次调度选择、使已入队的新任务获得运行机会；规格身份转换放在 `cpu_startup_entry(CPUHP_ONLINE)` 中，建模为 `BootInitTask.disable()` 与 `BootIdleTask.enable()` 的复合提交。这里 `handoff` 只作为 `disable()` 场景下的自然语言资源交接别名，不作为正式 slot 名。
+9. `boot idle 任务对象`（暂名 `BootIdleTask`）：覆盖 `cpu_startup_entry(CPUHP_ONLINE)`，并承接前一调用 `schedule_preempt_disabled()` 造成的第一次实际调度交接。底层仍是 Linux 静态 `init_task/current`，因此 `BootInitTask` 与 `BootIdleTask` 可理解为同一底层 task 在不同时期的两个规格身份，而不是两个新旧 task 实体。`schedule_preempt_disabled()` 不建模为单个 action，而是展开为 `BootIdlePreemption.enable_no_resched()`、`Scheduler.schedule()` 和 post-schedule boot idle context；规格身份转换放在 `cpu_startup_entry(CPUHP_ONLINE)` 中，建模为 `BootInitTask.disable()` 与 `BootIdleTask.enable()` 的复合提交。这里 `handoff` 只作为 `disable()` 场景下的自然语言资源交接别名，不作为正式 slot 名。
 
 <p align="center">
   <img src="pic/rest-init-objects.svg" alt="rest_init 期对象分类与相互关系" width="900">
@@ -2265,7 +2266,7 @@ first-schedule fact，不直接依赖 `RestInitPhase.Ready`。`RestInitPhase.Rea
 | `kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns)` | property fact in `KthreaddTask.setup()` | 建立 `KthreaddTask.global_ref == kthreadd_task`；未来可归入 `KthreadCreationService.provider == KthreaddTask`。该引用本身不是独立生命周期对象，也不单独建 action。 |
 | `system_state = SYSTEM_SCHEDULING` | formal candidate: `SystemState.setup()` | 把 `SystemState.state` 推进到 `Ready`，并把内部属性 `SystemState.value` 从 `SYSTEM_BOOTING` 更新为 `SYSTEM_SCHEDULING`；表示系统进入调度运行状态，但不等价于 SMP 已启动，也不自动推进 workqueue 到 enabled。 |
 | `complete(&kthreadd_done)` | extension event: `KthreaddReadyGate.complete()` | 对静态 `Completion` 实例执行 `complete()`：通常把扩展状态从 `Pending` 推进到 `Completed`，并唤醒等待中的 `KernelInitTask`。若随后 PID 1 的 `wait()` 消费该令牌，实例扩展状态可回到 `Pending`；因此本阶段不把 `Open` 作为长期结束状态。 |
-| `schedule_preempt_disabled()` | action: `Scheduler.schedule_preempt_disabled()` | 当前执行实体在禁抢占条件下进入一次调度选择，形成第一次实际调度交接，使已入队的新任务具备运行机会；它不承担 `BootInitTask -> BootIdleTask` 的命名语义。 |
+| `schedule_preempt_disabled()` | formal pattern: `BootIdlePreemption.enable_no_resched()` + `Scheduler.schedule()` + `BootIdleStartupContext` | 退出继承的禁抢占原子上下文，执行一次调度分界，再进入 post-schedule boot idle 原子上下文；形成第一次实际调度交接，使已入队的新任务具备运行机会。 |
 | `cpu_startup_entry(CPUHP_ONLINE)` | formal candidate: `BootInitTask.disable()` + `BootIdleTask.enable()` | 同一底层 `init_task/current` 的启动编排身份退出运行路径，并以 boot CPU idle 身份进入 idle 循环；`handoff` 只作为该 `disable()` 资源交接语义的自然语言别名，不作为正式 slot 名。该过程同时以 `CPUHP_ONLINE` 标记 boot CPU hotplug 状态；secondary CPU 仍未启动。 |
 
 <p align="center">
@@ -2290,7 +2291,7 @@ first-schedule fact，不直接依赖 `RestInitPhase.Ready`。`RestInitPhase.Rea
 - `KthreaddReadyGate.release_committed == true`，表示 `complete(&kthreadd_done)` 已执行并解除 PID 1 的等待；原始 completion 扩展状态可能保持 `Completed`，也可能在 `KernelInitTask.wait()` 消费后回到 `Pending`
 - `SystemState.state == Ready`
 - `SystemState.value == SYSTEM_SCHEDULING`
-- `Scheduler.first_schedule_committed == true`，表示 `schedule_preempt_disabled()` 已完成第一次实际调度交接
+- `Scheduler.first_schedule_committed == true`，表示 `schedule_preempt_disabled()` 展开的 `Scheduler.schedule()` 已完成第一次实际调度交接
 - `BootInitTask.state == Offline`，表示启动编排身份已经在 `cpu_startup_entry(CPUHP_ONLINE)` 中退出运行路径
 - `BootIdleTask.state == Online`，表示同一底层 task 已经在 `cpu_startup_entry(CPUHP_ONLINE)` 中启用 boot CPU idle 身份并转入 idle 路径
 - `BootCPU.hotplug_state == CPUHP_ONLINE`
@@ -2600,7 +2601,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 当前先将 `RuntimeCorePhase` 的对象和边界记录如下：
 
 1. `运行核心补全期对象`（暂名 `RuntimeCorePhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第二个子阶段对象。它从 `SmpBringupPhase.Ready` 接续，由 `KernelInitTask` 驱动，按 `sched_init_smp()` 到 `page_alloc_init_late()` 的有效顺序推进对象。
-2. `调度器 SMP 补全动作`：覆盖 `sched_init_smp()`。当前 `CONFIG_SMP=y`，它建模为 `Scheduler.enable_smp()` action，而不是 `Scheduler` 主对象的标准生命周期 `enable` slot。原因是 `Scheduler` 在此前已经支撑 `KernelInitTask` / `KthreaddTask` 创建、`schedule_preempt_disabled()` 和 `BootIdleTask` 运行；这里的语义只是补齐 SMP 调度能力。该 action 建立 `SchedDomain`，把 PID 1 的 CPU affinity 改为 `Housekeeping` domain mask，清除 `PF_NO_SETAFFINITY`，刷新调度 granularity，并初始化 RT/DL 调度类的 SMP 后置状态；完成后 `sched_smp_initialized == true`。
+2. `调度器 SMP 补全动作`：覆盖 `sched_init_smp()`。当前 `CONFIG_SMP=y`，它建模为 `Scheduler.enable_smp()` action，而不是 `Scheduler` 主对象的标准生命周期 `enable` slot。原因是 `Scheduler` 在此前已经支撑 `KernelInitTask` / `KthreaddTask` 创建、`schedule_preempt_disabled()` 展开的首次调度分界和 `BootIdleTask` 运行；这里的语义只是补齐 SMP 调度能力。该 action 建立 `SchedDomain`，把 PID 1 的 CPU affinity 改为 `Housekeeping` domain mask，清除 `PF_NO_SETAFFINITY`，刷新调度 granularity，并初始化 RT/DL 调度类的 SMP 后置状态；完成后 `sched_smp_initialized == true`。
 3. `Workqueue 拓扑启用动作`：覆盖 `workqueue_init_topology()`。规格语义上它是 Linux workqueue 三阶段初始化的第三步：前序 `workqueue_init_early()` 已对应 `Workqueue.preset()`，`workqueue_init()` 已对应 `Workqueue.setup()` 并推进到 `Ready`；这里在 SMP 和 CPU topology 信息稳定后补齐 unbound workqueue 的拓扑感知能力。当前 formal / coding 轮次为了保留前序阶段对 `Workqueue.Ready` 的历史不变式，将它落为 `WorkqueueTopology.setup()` action object，而不改变 `Workqueue` 主对象生命周期；后续若引入“阶段快照不变式”或更细的 Workqueue 子对象，可再把主对象推进到 `Online`。该 action 建立 CPU/SMT/cache/NUMA 四类 pod type，设置 `wq_topo_initialized = true`，并遍历已有 workqueue 与 online CPU 更新 unbound pool workqueue 绑定关系。
 4. `异步执行核心对象`（暂名 `AsyncCore`）：覆盖 `async_init()`。它创建专用 `"async"` unbound workqueue，并提高 `min_active`，用于后续异步 init work 的调度和同步。当前轮次不展开 `async_domain`、cookie、pending list、wait queue 和 async worker 执行细节，标记为 `deferred: AsyncCore.setup()`。
 5. `并行数据处理对象`（暂名 `PadataCore`）：覆盖 `padata_init()`。当前 `CONFIG_PADATA=y` 且 `CONFIG_HOTPLUG_CPU=y`，它登记 padata CPU online/dead hotplug state，并按 possible CPU 数分配 `padata_work` 数组，建立 free work list。由于具体 padata 实例在 `padata_alloc()` 时才创建，且当前轮次不深入 crypto、网络、驱动或大规模并行任务路径，标记为 `deferred: PadataCore.setup()`。

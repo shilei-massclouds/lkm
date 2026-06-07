@@ -127,7 +127,8 @@ smoke 测试必须覆盖两类路径：一是独立 `Completion` 实例的 setup
 本阶段的主线对象是 `KernelInitTask`、`KthreaddTask`、`SystemState`、`KthreaddReadyGate`
 和 `BootIdleRuntime`。实现必须发布 PID 1 已创建并入队、`kthreadd`
 provider 已创建并绑定全局引用、`system_state == SYSTEM_SCHEDULING`、`kthreadd_done` 已 complete、
-`Scheduler.schedule_preempt_disabled()` 已作为 Scheduler action 提交首次调度交接、boot idle runtime 入口已确认等事实。
+`schedule_preempt_disabled()` 已按 preemption guard 退出、`Scheduler.schedule()` 调度分界、
+post-schedule boot idle context 进入三段体提交首次调度交接，boot idle runtime 入口已确认等事实。
 这些事实当前仍是对象级模拟边界，不得实现真实任务栈切换、真实调度上下文切换或 idle loop。
 
 PID 1 的临时 boot CPU 亲和约束不得实现为独立 `KernelInitAffinity` 对象；它必须作为
@@ -137,9 +138,11 @@ PID 1 的临时 boot CPU 亲和约束不得实现为独立 `KernelInitAffinity` 
 包围该查找的 `rcu_read_lock()/unlock()` 读侧上下文当前保留为 deferred 建模问题；代码可以记录注释，
 但不得伪造成已经完成的资源独占上下文模型。
 
-`Scheduler.schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部和
-`KernelInitTask -> PreSmpInitPhase` 的分叉点。它必须实现为 `Scheduler` 的 action，
-不得引入 `KernelInitDispatchGate` 生命周期对象。`PreSmpInitPhase` 依赖
+`schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部和
+`KernelInitTask -> PreSmpInitPhase` 的分叉点。它不得实现为独立对象或单个
+`Scheduler` action，而应展开为 `BootIdlePreemption.enable_no_resched()`、
+`Scheduler.schedule()` 和 post-schedule boot idle context。不得引入
+`KernelInitDispatchGate` 生命周期对象。`PreSmpInitPhase` 依赖
 `KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact，不能硬依赖 `RestInitPhase.Ready`。
 `RestInitPhase.Ready` 仍必须覆盖
 `cpu_startup_entry(CPUHP_ONLINE)` 对应的 boot idle 尾部完成事实。
@@ -363,10 +366,13 @@ smoke payload 用于覆盖 QEMU 运行期可观察行为，以及规格推导不
 
 实现也不应为了 smoke 暴露原本不需要公开的内部状态查询接口。若某个对象同时有可验证的不变量和用户可观察行为，smoke 应测试后者；前者保留在模型谓词、推导验证和对象事件推进检查中。例如 `CommandLine` 的 raw/saved/static 文本视图一致性属于规格和实现状态推进约束，不需要单独增加只读取内部状态的 smoke case。
 
-`SchedInitPhase` 的 smoke 验收例外地允许验证一个主动 action：`Scheduler.schedule_preempt_disabled()`。该 action 是
-`Scheduler.Online` 后的最小可返回调度入口，不是 lifecycle event。当前阶段仍未启用中断，且只有一个可运行的 boot idle/current task，
-因此 smoke 只要求主动发起一次禁抢占调度选择并安全返回：调度器仍为 `Online`，中断仍关闭，当前任务仍是同一个 boot idle task，
-没有切换到其它任务，也不推进 `Workqueue`、`Softirq` 或 `RcuCore` 到运行期 `Online`。
+`SchedInitPhase` 的 smoke 验收例外地允许验证一个主动调度分界：
+`Scheduler.schedule()`。它是 `Scheduler.Online` 后的最小可返回调度事件，不是
+lifecycle event。当前阶段仍未启用中断，且只有一个可运行的 boot idle/current task，
+因此 smoke 只要求按 preemption guard 退出、schedule、preemption guard 重新进入的
+三段体主动发起一次调度选择并安全返回：调度器仍为 `Online`，当前任务仍是同一个
+boot idle task，没有切换到其它任务，也不推进 `Workqueue`、`Softirq` 或 `RcuCore`
+到运行期 `Online`。
 
 ### 启动与 smoke 输出风格
 
@@ -645,9 +651,10 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 `Scheduler.enable()` 只表示 boot CPU 调度基础和主动调度入口可用，并设置 `scheduler_running` 等价事实。它不表示 timer tick、
 中断调度、kthread 调度、secondary CPU 调度或 SMP domain 已经可用。
 
-`Scheduler.schedule_preempt_disabled()` 是 `Scheduler.Online` 后的 action。当前阶段只能由实现或 smoke 主动调用；
-不得依赖中断、tick、softirq 或 workqueue 触发。由于当前只有一个任务，该 action 可以空走调度选择路径并返回，但必须保持：
-当前任务仍是 boot idle/current task，中断仍关闭，`Scheduler.state == Online`，且没有普通任务切换副作用。
+`Scheduler.schedule()` 是 `Scheduler.Online` 后的调度分界 event。当前阶段只能由实现或 smoke 主动调用；
+不得依赖中断、tick、softirq 或 workqueue 触发。由于当前只有一个任务，该 event 可以空走调度选择路径并返回，但必须保持：
+当前任务仍是 boot idle/current task，`Scheduler.state == Online`，且没有普通任务切换副作用。若调用路径来自
+`schedule_preempt_disabled()`，preemption guard 的退出和重新进入必须在调用方上下文中显式建模。
 
 `RadixTree.setup()` 和 `MapleTree.setup()` 只建立 node cache 与全局分配基础。具体 radix tree、IDR、XArray、maple tree
 实例由后续使用者对象拥有，不在本阶段创建。

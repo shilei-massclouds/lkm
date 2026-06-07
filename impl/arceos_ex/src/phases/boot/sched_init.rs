@@ -110,7 +110,7 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.boot_idle_task().lazy_tlb_mm_ready()
         && ctx.scheduler.boot_idle_task().no_set_affinity()
         && ctx.scheduler.boot_idle_preemption().state() == State::Ready
-        && ctx.scheduler.boot_idle_preemption().enabled()
+        && ctx.scheduler.boot_idle_preemption().disabled()
         && ctx.boot_cpu_current_task.state() == State::Ready
         && ctx.boot_cpu_current_task.current_is_boot_idle()
         && ctx.radix_tree.state() == State::Ready

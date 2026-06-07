@@ -194,7 +194,7 @@ def _build_exclusive_contexts(
                 )
             )
             continue
-        if decl.lock_ref is None:
+        if decl.kind == "ResourceExclusiveContext" and decl.lock_ref is None:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -202,7 +202,7 @@ def _build_exclusive_contexts(
                     decl.span,
                 )
             )
-        elif decl.lock_ref not in locks:
+        elif decl.lock_ref is not None and decl.lock_ref not in locks:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -477,7 +477,7 @@ def _check_exclusive_context_references(
     model: ObjectModel, diagnostics: list[Diagnostic]
 ) -> None:
     for context in model.exclusive_contexts.values():
-        if context.kind is not None and context.kind != "ResourceExclusiveContext":
+        if context.kind is not None and context.kind not in ("ResourceExclusiveContext", "Context"):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -524,7 +524,7 @@ def _check_context_guard_references(
     guard = context.guard
     if guard is None:
         return
-    if guard.kind != "RawSpinLockIrqSaveGuard":
+    if guard.kind not in ("RawSpinLockIrqSaveGuard", "PreemptionGuard"):
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
@@ -532,6 +532,19 @@ def _check_context_guard_references(
                 guard.span,
             )
         )
+    if guard.kind == "PreemptionGuard":
+        if guard.lock_ref is not None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"PreemptionGuard on context {context.name} must not declare lock_ref",
+                    guard.span,
+                )
+            )
+        _check_event_blocks(model, guard.entered_by, diagnostics)
+        _check_event_blocks(model, guard.exited_by, diagnostics)
+        return
+
     if guard.lock_ref is None:
         diagnostics.append(
             Diagnostic(
@@ -561,6 +574,13 @@ def _check_context_guard_references(
             )
     _check_lock_event_blocks(model, guard.entered_by, diagnostics, context=context)
     _check_lock_event_blocks(model, guard.exited_by, diagnostics, context=context)
+
+
+def _check_event_blocks(
+    model: ObjectModel, blocks: list[Block], diagnostics: list[Diagnostic]
+) -> None:
+    for block in blocks:
+        _check_event_references(model, block, diagnostics)
 
 
 def _check_context_effects(

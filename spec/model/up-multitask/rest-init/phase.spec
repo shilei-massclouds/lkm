@@ -4,9 +4,10 @@
  * This is UP Multitask Phase subphase 1. It covers Linux rest_init(): RCU
  * scheduler start, creation of PID 1 and kthreadd, publication of
  * SYSTEM_SCHEDULING, completion of kthreadd_done, and boot idle runtime entry.
- * Scheduler.Action::SchedulePreemptDisabled is the first scheduling action
- * that lets KernelInitTask enter PreSmpInitPhase while BootInitTask continues
- * the rest_init tail and becomes BootIdleTask.
+ * schedule_preempt_disabled() is expanded into three formal steps: the boot
+ * idle preemption guard exits with EnableNoResched, Scheduler.Event::Schedule
+ * commits the first scheduling boundary, and BootIdleStartupContext enters the
+ * new boot-idle atomic context for the cpu_startup_entry() tail.
  */
 
 /*
@@ -104,6 +105,38 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
         preemptible: false;
         sleepable: false;
         exclusive_refs: obj_refs;
+    }
+}
+
+context BootIdleStartupContext: Context {
+    /*
+     * This context corresponds to the post-schedule preempt-disabled atomic
+     * context established by schedule_preempt_disabled() before
+     * cpu_startup_entry(CPUHP_ONLINE). The pre-schedule context is inherited
+     * from boot/sched_init and is exited explicitly by
+     * BootIdlePreemption.Event::EnableNoResched in RestInitPhase.Preset.
+     */
+    guard: PreemptionGuard {
+        entered_by {
+            BootIdlePreemption.Event::Disable;
+        }
+
+        exited_by {
+            BootIdlePreemption.Event::Enable;
+        }
+    }
+
+    obj_refs {
+        BootIdleTask;
+        BootIdleRuntime;
+        Scheduler;
+    }
+
+    effects {
+        interruptible: true;
+        preemptible: false;
+        sleepable: false;
+        exclusive_refs: none;
     }
 }
 
@@ -828,7 +861,8 @@ object RestInitPhase: PhaseObject {
                     KthreaddReadyGate.Event::Setup;
                     KthreaddReadyGate.Event::Enable;
                     KthreaddReadyGate.Event::Complete;
-                    Scheduler.Action::SchedulePreemptDisabled;
+                    BootIdlePreemption.Event::EnableNoResched;
+                    Scheduler.Event::Schedule;
                 }
 
                 ensures {
@@ -898,8 +932,15 @@ object RestInitPhase: PhaseObject {
                     BootIdleTask.state == State::Ready;
                 }
 
-                drives {
-                    BootIdleRuntime.Event::Setup;
+                within BootIdleStartupContext {
+                    drives {
+                        BootIdleRuntime.Event::Setup;
+                    }
+
+                    ensures {
+                        task_preemption_disabled(BootIdleTask);
+                        boot_idle_runtime_ready(BootIdleRuntime, BootIdleTask);
+                    }
                 }
 
                 ensures {

@@ -31,15 +31,18 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    let before = ctx.scheduler.preempt_disabled_passes();
+    let before = ctx.scheduler.schedule_passes();
     if ctx.boot_cpu_local_interrupt.save_and_disable().is_err()
         || ctx.scheduler.boot_idle_preemption_mut().disable().is_err()
     {
         printk::write_str("failed to enter scheduler smoke critical state\n");
         return SmokeResult::Failed;
     }
-    if ctx.scheduler.schedule_preempt_disabled().is_err() {
-        printk::write_str("schedule_preempt_disabled failed\n");
+    let enable_no_resched = ctx.scheduler.boot_idle_preemption_mut().enable_no_resched();
+    let schedule = ctx.scheduler.schedule();
+    let disable = ctx.scheduler.boot_idle_preemption_mut().disable();
+    if enable_no_resched.is_err() || schedule.is_err() || disable.is_err() {
+        printk::write_str("schedule boundary failed\n");
         let _ = ctx.scheduler.boot_idle_preemption_mut().enable();
         let _ = ctx.boot_cpu_local_interrupt.restore();
         return SmokeResult::Failed;
@@ -59,7 +62,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
     if ctx.scheduler.state() != State::Online
-        || ctx.scheduler.preempt_disabled_passes() != before.wrapping_add(1)
+        || ctx.scheduler.schedule_passes() != before.wrapping_add(1)
         || ctx.scheduler.boot_runqueue().curr_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || ctx.scheduler.boot_runqueue().idle_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || ctx.boot_cpu_local_interrupt.saved_and_disabled_count() == 0
@@ -70,8 +73,8 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "preempt_disabled_passes={} boot_cpu={} current_task={}\n",
-        ctx.scheduler.preempt_disabled_passes(),
+        "schedule_passes={} boot_cpu={} current_task={}\n",
+        ctx.scheduler.schedule_passes(),
         ctx.scheduler.boot_runqueue().cpu_id(),
         ctx.scheduler.boot_idle_task().task_id()
     ));

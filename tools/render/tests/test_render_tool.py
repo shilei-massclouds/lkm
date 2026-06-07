@@ -408,7 +408,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="action",
                         row=2,
                         column=3,
-                        label="Scheduler.Action::SchedulePreemptDisabled",
+                        label="Scheduler.Event::Schedule",
                         column_span=2,
                     ),
                 ),

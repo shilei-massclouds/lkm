@@ -16,7 +16,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.scheduler.preempt_disabled_passes() == 0
+    if ctx.scheduler.schedule_passes() == 0
         || !ctx.kernel_init_task.released_for_pre_smp_init()
         || ctx.boot_idle_runtime.state() != State::Ready
     {

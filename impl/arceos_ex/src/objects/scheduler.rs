@@ -20,7 +20,7 @@ pub struct Scheduler {
     boot_idle_preemption: PreemptionControl,
     scheduler_running: bool,
     selected_runqueue_task_id: usize,
-    preempt_disabled_passes: usize,
+    schedule_passes: usize,
     smp_initialized: bool,
     sched_domains_ready: bool,
     kernel_init_affinity_released: bool,
@@ -39,7 +39,7 @@ impl Scheduler {
             boot_idle_preemption: PreemptionControl::new(),
             scheduler_running: false,
             selected_runqueue_task_id: usize::MAX,
-            preempt_disabled_passes: 0,
+            schedule_passes: 0,
             smp_initialized: false,
             sched_domains_ready: false,
             kernel_init_affinity_released: false,
@@ -84,8 +84,8 @@ impl Scheduler {
         self.selected_runqueue_task_id
     }
 
-    pub const fn preempt_disabled_passes(&self) -> usize {
-        self.preempt_disabled_passes
+    pub const fn schedule_passes(&self) -> usize {
+        self.schedule_passes
     }
 
     pub const fn smp_initialized(&self) -> bool {
@@ -163,7 +163,7 @@ impl Scheduler {
         )?;
         self.boot_idle_task
             .setup(init_task, init_mm, &self.boot_runqueue, cpu_group)?;
-        self.boot_idle_preemption.setup(init_task)?;
+        self.boot_idle_preemption.setup_disabled(init_task)?;
         current_task_slot.set_current_boot_idle()?;
         if !self.setup_facts_hold(cpu_group) {
             return self.failed_setup();
@@ -196,12 +196,11 @@ impl Scheduler {
         )
     }
 
-    pub fn schedule_preempt_disabled(&mut self) -> EventResult {
+    pub fn schedule(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
-            || !self.boot_idle_preemption.disabled()
             || crate::arch::riscv64::csr::supervisor_interrupts_enabled()
         {
             return failed_condition(
@@ -212,8 +211,8 @@ impl Scheduler {
             );
         }
 
-        self.preempt_disabled_passes = self.preempt_disabled_passes.wrapping_add(1);
-        crate::trace::checkpoint(Checkpoint::SchedulerPreemptDisabledPass);
+        self.schedule_passes = self.schedule_passes.wrapping_add(1);
+        crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
         Ok(())
     }
 
@@ -308,7 +307,7 @@ impl Scheduler {
         self.boot_runqueue.state() == State::Ready
             && self.boot_idle_task.state() == State::Ready
             && self.boot_idle_preemption.state() == State::Ready
-            && self.boot_idle_preemption.enabled()
+            && self.boot_idle_preemption.disabled()
             && self.boot_runqueue.cpu_id() == 0
             && self.boot_runqueue.boot_hartid() == cpu_group.boot_hartid()
             && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()

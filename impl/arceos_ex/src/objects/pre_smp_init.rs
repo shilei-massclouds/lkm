@@ -63,7 +63,7 @@ impl VmstatCore {
             || !page_allocator.full_gfp_mask_open()
             || kernel_init_task.state() != State::Online
             || !kernel_init_task.released_for_pre_smp_init()
-            || scheduler.preempt_disabled_passes() == 0
+            || scheduler.schedule_passes() == 0
         {
             return self.failed_preset();
         }
@@ -162,7 +162,7 @@ impl PreSmpInitcallTable {
             || !rcu_core.tasks_rcu().gp_threads_ready()
             || softirq.state() != State::Ready
             || scheduler.state() != State::Online
-            || scheduler.preempt_disabled_passes() == 0
+            || scheduler.schedule_passes() == 0
             || cpu_group.state() != State::Ready
             || !cpu_group.pre_smp_topology_ready()
         {
@@ -250,7 +250,7 @@ impl PreSmpInitBoundary {
             || kernel_init_task.state() != State::Online
             || !kernel_init_task.released_for_pre_smp_init()
             || initcalls.state() != State::Ready
-            || scheduler.preempt_disabled_passes() == 0
+            || scheduler.schedule_passes() == 0
             || cpu_group.state() != State::Ready
             || !cpu_group.secondary_cpus_present_not_online()
         {
@@ -295,7 +295,7 @@ pub fn pre_smp_runtime_ready(
     kernel_init_task.state() == State::Online
         && kernel_init_task.released_for_pre_smp_init()
         && kthreadd_task.state() == State::Online
-        && scheduler.preempt_disabled_passes() != 0
+        && scheduler.schedule_passes() != 0
         && page_allocator.state() == State::Ready
         && page_allocator.full_gfp_mask_open()
         && cpu_group.pre_smp_topology_ready()

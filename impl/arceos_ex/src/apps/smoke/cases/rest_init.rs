@@ -119,9 +119,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.scheduler.preempt_disabled_passes() == 0
-        || !ctx.kernel_init_task.released_for_pre_smp_init()
-    {
+    if ctx.scheduler.schedule_passes() == 0 || !ctx.kernel_init_task.released_for_pre_smp_init() {
         printk::write_str("scheduler dispatch facts invalid\n");
         return SmokeResult::Failed;
     }
@@ -142,7 +140,7 @@ pub fn run() -> SmokeResult {
         "rest_init init_pid={} kthreadd_pid={} schedule_passes={}\n",
         ctx.kernel_init_task.pid(),
         ctx.kthreadd_task.pid(),
-        ctx.scheduler.preempt_disabled_passes()
+        ctx.scheduler.schedule_passes()
     ));
     SmokeResult::Passed
 }

@@ -571,11 +571,13 @@ type ArceosExRestInitCodingMust {
         /*
          * Scheduler dispatch facts:
          *
-         * schedule_preempt_disabled() must be implemented as a Scheduler
-         * action and publish visible dispatch facts. It must not introduce a
-         * KernelInitDispatchGate lifecycle object; the branch point is the
-         * combination of Scheduler first-schedule and KernelInitTask dispatch
-         * facts while BootInitTask continues the cpu_startup_entry() tail.
+         * schedule_preempt_disabled() must be expanded into preemption guard
+         * exit, Scheduler.schedule(), and post-schedule boot idle context
+         * entry. It must not be implemented as a single Scheduler action and
+         * must not introduce a KernelInitDispatchGate lifecycle object; the
+         * branch point is the combination of Scheduler first-schedule and
+         * KernelInitTask dispatch facts while BootInitTask continues the
+         * cpu_startup_entry() tail.
          */
         arceos_ex_must_rest_init_publish_scheduler_dispatch_facts();
 

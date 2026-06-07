@@ -110,7 +110,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.kthreadd_task,
         &mut ctx.kernel_init_task,
     )?;
-    schedule_preempt_disabled_once(ctx)
+    schedule_once_from_preempt_disabled_context(ctx)
 }
 
 fn setup_boot_idle_tail(ctx: &mut Context) -> EventResult {
@@ -123,7 +123,7 @@ fn setup_boot_idle_tail(ctx: &mut Context) -> EventResult {
     )
 }
 
-fn schedule_preempt_disabled_once(ctx: &mut Context) -> EventResult {
+fn schedule_once_from_preempt_disabled_context(ctx: &mut Context) -> EventResult {
     if ctx.scheduler.state() != State::Online
         || ctx.kernel_init_task.state() != State::Online
         || !ctx.kernel_init_task.released_for_pre_smp_init()
@@ -140,25 +140,32 @@ fn schedule_preempt_disabled_once(ctx: &mut Context) -> EventResult {
     if interrupts_enabled {
         crate::arch::riscv64::csr::disable_supervisor_interrupts();
     }
-    if ctx.scheduler.boot_idle_preemption_mut().disable().is_err() {
+    if ctx
+        .scheduler
+        .boot_idle_preemption_mut()
+        .enable_no_resched()
+        .is_err()
+    {
         if interrupts_enabled {
             crate::arch::riscv64::csr::enable_supervisor_interrupts();
         }
         return failed_dispatch_preset();
     }
 
-    // Current arceos_ex schedule_preempt_disabled() requires local interrupts
-    // already closed. The formal action only models the scheduler/preemption
-    // semantics; interrupt context modeling remains a separate pending item.
-    let schedule_result = ctx.scheduler.schedule_preempt_disabled();
+    // Current arceos_ex schedule() boundary requires local interrupts already
+    // closed. Interrupt context modeling remains a separate pending item.
+    let schedule_result = ctx.scheduler.schedule();
+    let preempt_disable_result = ctx.scheduler.boot_idle_preemption_mut().disable();
     // arceos_ex runs these phases linearly in one execution context. Restore
-    // the simulated CPU controls after recording the scheduler action so
-    // later smoke tests and object phases observe the normal boot environment.
+    // the simulated CPU controls after recording the post-schedule boot-idle
+    // atomic context so later smoke tests and object phases observe the normal
+    // boot environment.
     let preempt_enable_result = ctx.scheduler.boot_idle_preemption_mut().enable();
     if interrupts_enabled {
         crate::arch::riscv64::csr::enable_supervisor_interrupts();
     }
-    if schedule_result.is_err() || preempt_enable_result.is_err() {
+    if schedule_result.is_err() || preempt_disable_result.is_err() || preempt_enable_result.is_err()
+    {
         return failed_dispatch_preset();
     }
     Ok(())
@@ -221,10 +228,7 @@ pub fn is_ready() -> bool {
 
 pub fn dispatch_ready() -> bool {
     crate::phases::state::load(&REST_INIT_PHASE_STATE) != State::Base
-        && crate::context::context()
-            .scheduler
-            .preempt_disabled_passes()
-            != 0
+        && crate::context::context().scheduler.schedule_passes() != 0
 }
 
 fn rest_init_phase_ready(ctx: &Context) -> bool {
@@ -302,7 +306,7 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && !ctx.kthreadd_ready_gate.pending()
         && ctx.kthreadd_ready_gate.completed()
         && ctx.kthreadd_ready_gate.release_committed()
-        && ctx.scheduler.preempt_disabled_passes() != 0
+        && ctx.scheduler.schedule_passes() != 0
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 

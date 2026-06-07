@@ -810,7 +810,7 @@ impl BootIdleRuntime {
             || !kernel_init_task.released_for_pre_smp_init()
             || kthreadd_task.state() != State::Online
             || kthreadd_ready_gate.state() != State::Online
-            || scheduler.preempt_disabled_passes() == 0
+            || scheduler.schedule_passes() == 0
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
         {

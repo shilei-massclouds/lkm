@@ -237,7 +237,19 @@ Completion 也说明了 event/action factoring 的边界：`Completion.Setup` �
 
 `context ... : ResourceExclusiveContext` 表示通过某个 guard 建立的受保护执行作用域。它不是普通 lifecycle object，不拥有 guard、锁或资源；它只保存引用关系、guard 边界和作用域语义。
 
-`guard` 表示建立和退出上下文边界的机制。对于当前试验对象，guard 是 `RawSpinLockIrqSaveGuard`：它引用一个 `RawSpinLock` 实例，并通过该锁实例的 `LockIrqSave`/`UnlockIrqRestore` 事件建立进入和退出边界。guard 本身不是锁实例；锁实例仍由 `lock Name: RawSpinLock` 定义。
+`guard` 表示建立和退出上下文边界的机制。Context 的正式建模机制是统一的：
+`within ContextName { ... }` 进入由 guard 定义的上下文，执行块内行为，再按
+guard 定义退出。临界区上下文、原子上下文、RCU 读侧上下文等分类主要是
+规格语义描述上的分类；在 formal 结构上不需要拆成不同的 context 语法类别。
+差异来自 guard 的类型和 effects：RawSpinLock guard 产生资源互斥效果，
+PreemptionControl guard 产生不可被普通抢占打断的原子上下文效果，
+LocalInterruptControl guard 产生本 CPU 本地中断关闭效果。嵌套检查和上下文强度
+叠加也应基于 guard effects，而不是基于 context 名称。
+
+对于当前 wake-up 试验对象，guard 是 `RawSpinLockIrqSaveGuard`：它引用一个
+`RawSpinLock` 实例，并通过该锁实例的 `LockIrqSave`/`UnlockIrqRestore` 事件
+建立进入和退出边界。guard 本身不是锁实例；锁实例仍由 `lock Name: RawSpinLock`
+定义。
 
 正式结构：
 
@@ -274,6 +286,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 
 - `guard.lock_ref` 必须引用一个 `Lock` 实例；对于 `RawSpinLockIrqSaveGuard`，该锁实例必须由 `RawSpinLock` 类型定义。
 - `guard.entered_by` 和 `guard.exited_by` 声明进入和退出上下文边界的锁事件。
+- 对非锁 guard，`entered_by`/`exited_by` 声明对应控制对象的边界事件；这些边界事件是 guard 行为，不写入 `within` 内部的 `drives`。
 - `obj_refs` 是对象引用集合，至少包含一个对象；上下文不拥有这些对象。
 - 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
@@ -283,7 +296,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 - `within` 块内只能直接驱动 `obj_refs` 中对象的 action/event，除非规格显式声明允许外部对象。
 - context 成功退出后释放独占执行权；失败或 `Blocked` 时，外层 event 不得提交生命周期迁移。
 
-事件或 action 使用无实参 `within` 声明独占执行作用域。`within` 块内可以包含 `depends_on`、`drives`、`ensures` 和 `deferred`。进入/退出边界由 context 的 guard 声明，`within` 不再重复声明 `entered_by`/`exited_by`。
+事件或 action 使用无实参 `within` 声明上下文作用域。`within` 块内可以包含 `depends_on`、`drives`、`ensures` 和 `deferred`。进入/退出边界由 context 的 guard 声明，`within` 不再重复声明 `entered_by`/`exited_by`，也不把 guard 的进入/退出事件写入内部 `drives`。
 
 `KernelInitTask.Enable` 对应 `wake_up_new_task()` 的正式规格形态如下：
 

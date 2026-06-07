@@ -70,7 +70,7 @@ object Scheduler: SchedulerObject {
                     boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
-                    scheduler_preempt_disabled_action_available(Scheduler);
+                    scheduler_schedule_event_available(Scheduler);
                 }
             }
         }
@@ -84,14 +84,14 @@ object Scheduler: SchedulerObject {
             runqueue_ref_ready(BootRunQueueRef);
             current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
-            scheduler_preempt_disabled_action_available(Scheduler);
+            scheduler_schedule_event_available(Scheduler);
         }
 
         events {
             on Event::Enable -> State::Online {
                 ensures {
                     scheduler_running_flag_set(Scheduler);
-                    scheduler_preempt_disabled_action_available(Scheduler);
+                    scheduler_schedule_event_available(Scheduler);
                 }
             }
         }
@@ -103,33 +103,7 @@ object Scheduler: SchedulerObject {
             BootRunQueue.state == State::Ready;
             BootIdleTask.state == State::Ready;
             runqueue_ref_ready(BootRunQueueRef);
-            scheduler_preempt_disabled_action_available(Scheduler);
-        }
-    }
-
-    actions {
-        /*
-         * SchedulePreemptDisabled 对应 Linux schedule_preempt_disabled()。
-         * 它是 Scheduler.Online 后的通用 action：调用方必须已经处在禁抢占
-         * 上下文中；Linux helper 临时允许一次 schedule()，随后返回禁抢占状态。
-         * 它不建立 rest_init 专属 gate，也不承载 BootIdleTask 的运行期入口
-         * 身份转换；这些场景事实由调用它的阶段承载。
-         */
-        Action::SchedulePreemptDisabled {
-            state_effect: StateEffect::None;
-            depends_on {
-                Scheduler.state == State::Online;
-                BootIdleTask.state == State::Ready;
-                task_preemption_disabled(BootIdleTask);
-                scheduler_preempt_disabled_action_available(Scheduler);
-            }
-            ensures {
-                scheduler_first_schedule_committed(Scheduler);
-                task_preemption_disabled(BootIdleTask);
-            }
-            deferred {
-                "当前实现要求调用前 supervisor interrupts disabled，并在 action 后恢复线性模拟环境；这些条件属于调用上下文/实现前置约束，不纳入 SchedulePreemptDisabled action 的本体语义。";
-            }
+            scheduler_schedule_event_available(Scheduler);
         }
     }
 }
@@ -289,7 +263,7 @@ object BootIdlePreemption: PreemptionControl {
             on Event::Setup -> State::Ready {
                 ensures {
                     task_preemption_control_ready(BootIdleTask);
-                    task_preemption_enabled(BootIdleTask);
+                    task_preemption_disabled(BootIdleTask);
                 }
             }
         }
@@ -642,7 +616,7 @@ object SchedInitPhase: PhaseObject {
 
                 ensures {
                     sched_init_ready(SchedInitPhase);
-                    scheduler_schedule_preempt_disabled_smoke_ready(Scheduler);
+                    scheduler_schedule_smoke_ready(Scheduler);
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     context_is(SystemExclusive);

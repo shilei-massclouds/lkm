@@ -4,9 +4,10 @@
  * This top-level phase starts after InterruptPhase has completed the
  * ProcessPreparePhase boundary and before the selected PayloadPhase handoff.
  * The currently expanded subphases are RestInitPhase and PreSmpInitPhase.
- * RestInitPhase drives Scheduler.Action::SchedulePreemptDisabled; PreSmpInitPhase
- * starts from the resulting KernelInitTask dispatch facts rather than from
- * RestInitPhase.Ready.
+ * RestInitPhase expands schedule_preempt_disabled() into a preemption guard
+ * exit, Scheduler.Event::Schedule, and a post-schedule BootIdleStartupContext;
+ * PreSmpInitPhase starts from the resulting KernelInitTask dispatch facts
+ * rather than from RestInitPhase.Ready.
  */
 
 include "rest-init/main.spec";

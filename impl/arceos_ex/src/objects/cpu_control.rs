@@ -351,6 +351,14 @@ impl PreemptionControl {
     }
 
     pub fn setup(&mut self, init_task: &InitTask) -> EventResult {
+        self.setup_with_depth(init_task, 0)
+    }
+
+    pub fn setup_disabled(&mut self, init_task: &InitTask) -> EventResult {
+        self.setup_with_depth(init_task, 1)
+    }
+
+    fn setup_with_depth(&mut self, init_task: &InitTask, disable_depth: usize) -> EventResult {
         if self.lifecycle.state() != State::Base || init_task.state() != State::Online {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -360,7 +368,7 @@ impl PreemptionControl {
             );
         }
 
-        self.disable_depth = 0;
+        self.disable_depth = disable_depth;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -395,6 +403,10 @@ impl PreemptionControl {
 
         self.disable_depth -= 1;
         Ok(())
+    }
+
+    pub fn enable_no_resched(&mut self) -> EventResult {
+        self.enable()
     }
 }
 

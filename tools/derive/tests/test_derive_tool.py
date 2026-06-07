@@ -233,15 +233,15 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "within EnqueueSelectedRunQueueContext"
                     and record["proof_class"] == "exclusive_context"
-                    and record["proof_provider"] == "lock_ref"
+                    and record["proof_provider"] == "guard"
                     for record in proved
                 )
             )
             self.assertTrue(
                 any(
                     record["expression"] == "BootRunQueueLock.Event::LockIrqSave"
-                    and record["proof_class"] == "exclusive_context_lock_event"
-                    and record["proof_provider"] == "lock_ref"
+                    and record["proof_class"] == "context_guard_event"
+                    and record["proof_provider"] == "guard"
                     for record in proved
                 )
             )
