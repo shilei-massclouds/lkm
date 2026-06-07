@@ -16,6 +16,7 @@
  */
 
 lock KernelInitTaskPiLock: RawSpinLock;
+lock KthreaddTaskPiLock: RawSpinLock;
 lock BootRunQueueLock: RawSpinLock;
 
 context WakeUpNewTaskContext: ResourceExclusiveContext {
@@ -33,6 +34,33 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 
     obj_refs {
         KernelInitTask;
+        Scheduler;
+        BootRunQueue;
+    }
+
+    effects {
+        interruptible: false;
+        preemptible: false;
+        sleepable: false;
+        exclusive_refs: obj_refs;
+    }
+}
+
+context WakeUpKthreaddTaskContext: ResourceExclusiveContext {
+    guard: RawSpinLockIrqSaveGuard {
+        lock_ref: KthreaddTaskPiLock;
+
+        entered_by {
+            KthreaddTaskPiLock.Event::LockIrqSave;
+        }
+
+        exited_by {
+            KthreaddTaskPiLock.Event::UnlockIrqRestore;
+        }
+    }
+
+    obj_refs {
+        KthreaddTask;
         Scheduler;
         BootRunQueue;
     }
@@ -328,9 +356,14 @@ object KernelInitTask: Task {
 
 /*
  * KthreaddTask 表示 kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES)
- * 创建的全局内核线程管理者。
+ * 创建的全局内核线程管理者。它复用 KernelInitTask 的创建/唤醒形态：
+ * Preset 固化临时 kernel_clone_args，Setup 驱动 copy_process，Enable
+ * 对应 wake_up_new_task。区别在于入口为 kthreadd、flags 包含
+ * kernel_thread 固有的 CLONE_VM | CLONE_UNTRACED 以及传入的
+ * CLONE_FS | CLONE_FILES，并且创建和唤醒后还要发布 kthreadd_task
+ * 全局 provider 引用。
  */
-object KthreaddTask: TaskObject {
+object KthreaddTask: Task {
     initial_state: State::Base;
 
     /*
@@ -339,14 +372,16 @@ object KthreaddTask: TaskObject {
     state State::Base {
         events {
             /*
-             * Preset 选择 kthreadd 入口并记录 CLONE_FS | CLONE_FILES 创建约束。
+             * Preset 选择 kthreadd 入口并记录 kernel_thread 创建约束。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
                     RootPidNamespace.state == State::Ready;
                     CredentialCore.state == State::Prepared;
+                    SignalCore.state == State::Prepared;
                     TaskFileContext.state == State::Prepared;
+                    SecurityCore.state == State::Ready;
                     BootInitTask.state == State::Online;
                 }
 
@@ -354,6 +389,9 @@ object KthreaddTask: TaskObject {
                     kthreadd_spawn_spec_ready(KthreaddTask);
                     kthreadd_entry_selected(KthreaddTask);
                     kthreadd_clone_fs_files_flags_set(KthreaddTask);
+                    kthreadd_clone_vm_flag_set(KthreaddTask);
+                    kthreadd_clone_untraced_flag_set(KthreaddTask);
+                    kthreadd_kernel_thread_flag_set(KthreaddTask);
                     kthreadd_is_kernel_thread_provider(KthreaddTask);
                 }
             }
@@ -367,6 +405,10 @@ object KthreaddTask: TaskObject {
         invariant {
             kthreadd_spawn_spec_ready(KthreaddTask);
             kthreadd_entry_selected(KthreaddTask);
+            kthreadd_clone_fs_files_flags_set(KthreaddTask);
+            kthreadd_clone_vm_flag_set(KthreaddTask);
+            kthreadd_clone_untraced_flag_set(KthreaddTask);
+            kthreadd_kernel_thread_flag_set(KthreaddTask);
             kthreadd_is_kernel_thread_provider(KthreaddTask);
         }
 
@@ -382,12 +424,28 @@ object KthreaddTask: TaskObject {
                     BootRunQueue.state == State::Ready;
                 }
 
+                drives {
+                    TaskCreationCore.Action::CopyProcess(
+                        src_task: BootInitTask,
+                        dst_task: KthreaddTask,
+                        pid_ns: RootPidNamespace,
+                        creds: CredentialCore,
+                        signal: SignalCore,
+                        files: TaskFileContext,
+                        security: SecurityCore,
+                        scheduler: Scheduler
+                    );
+                }
+
                 ensures {
                     kthreadd_task_ready(KthreaddTask);
                     kthreadd_task_pid_allocated(KthreaddTask, RootPidNamespace);
                     kthreadd_thread_context_ready(KthreaddTask);
                     kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
-                    kthreadd_global_ref_bound(KthreaddTask);
+                    task_ref_targets(KthreaddTaskRef, KthreaddTask);
+                    task_ref_ready(KthreaddTaskRef);
+                    task_state_new(KthreaddTask);
+                    task_not_enqueued(KthreaddTask);
                 }
             }
         }
@@ -400,7 +458,10 @@ object KthreaddTask: TaskObject {
         invariant {
             kthreadd_task_ready(KthreaddTask);
             kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
-            kthreadd_global_ref_bound(KthreaddTask);
+            task_ref_targets(KthreaddTaskRef, KthreaddTask);
+            task_ref_ready(KthreaddTaskRef);
+            task_state_new(KthreaddTask);
+            task_not_enqueued(KthreaddTask);
         }
 
         events {
@@ -411,12 +472,60 @@ object KthreaddTask: TaskObject {
                 depends_on {
                     Scheduler.state == State::Online;
                     BootRunQueue.state == State::Ready;
+                    BootCurrentCPU.state == State::Online;
+                    BootCpuLocalInterrupt.state == State::Ready;
+                    BootCpuCurrentTask.state == State::Ready;
+                    current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                    task_preemption_control_ready(BootIdleTask);
+                    task_ref_ready(KthreaddTaskRef);
+                    runqueue_ref_ready(BootRunQueueRef);
+                    task_state_new(KthreaddTask);
+                    task_not_enqueued(KthreaddTask);
+                }
+
+                within WakeUpKthreaddTaskContext {
+                    depends_on {
+                        task_ref_ready(KthreaddTaskRef);
+                        runqueue_ref_ready(BootRunQueueRef);
+                        task_state_new(KthreaddTask);
+                        task_not_enqueued(KthreaddTask);
+                        current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                    }
+
+                    drives {
+                        KthreaddTask.Event::SetRuntimeState(TaskRuntimeState::Running);
+                        let selected_rq: RunQueueRef <-
+                            Scheduler.Action::SelectRunQueue(KthreaddTaskRef);
+                    }
+
+                    within EnqueueSelectedRunQueueContext {
+                        depends_on {
+                            runqueue_ref_targets(selected_rq, BootRunQueue);
+                        }
+
+                        drives {
+                            selected_rq.Event::EnqueueTask(KthreaddTaskRef);
+                        }
+
+                        ensures {
+                            raw_spinlock_irqsave_entered(BootRunQueueLock, BootCurrentCPU);
+                            raw_spinlock_irqrestore_exited(BootRunQueueLock, BootCurrentCPU);
+                            runqueue_contains_task(BootRunQueue, KthreaddTaskRef);
+                        }
+                    }
+
+                    ensures {
+                        raw_spinlock_irqsave_entered(KthreaddTaskPiLock, BootCurrentCPU);
+                        raw_spinlock_irqrestore_exited(KthreaddTaskPiLock, BootCurrentCPU);
+                        scheduler_select_runqueue_returns(Scheduler, KthreaddTaskRef, BootRunQueueRef);
+                        task_runqueue_selected(Scheduler, KthreaddTaskRef, BootRunQueueRef);
+                        task_enqueued_on_runqueue(KthreaddTaskRef, BootRunQueueRef);
+                    }
                 }
 
                 ensures {
                     kthreadd_task_online(KthreaddTask);
-                    kthreadd_task_enqueued(KthreaddTask, Scheduler);
-                    kthreadd_global_ref_bound(KthreaddTask);
+                    kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
                 }
             }
         }
@@ -428,8 +537,32 @@ object KthreaddTask: TaskObject {
     state State::Online {
         invariant {
             kthreadd_task_online(KthreaddTask);
-            kthreadd_task_enqueued(KthreaddTask, Scheduler);
-            kthreadd_global_ref_bound(KthreaddTask);
+            kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
+            task_state_running(KthreaddTask);
+            task_enqueued_on_runqueue(KthreaddTaskRef, BootRunQueueRef);
+        }
+    }
+
+    actions {
+        /*
+         * BindGlobalRef 对应 rest_init() 中 kernel_thread() 返回后的
+         * kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns)。规格层已经
+         * 持有 KthreaddTask receiver 和 KthreaddTaskRef；源码 pid lookup 只
+         * 是实现路径，不作为获取规格 task 引用的必要步骤。
+         */
+        Action::BindGlobalRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_ref_ready(KthreaddTaskRef);
+                task_state_running(KthreaddTask);
+                task_enqueued_on_runqueue(KthreaddTaskRef, BootRunQueueRef);
+                RootPidNamespace.state == State::Ready;
+            }
+            ensures {
+                kthreadd_global_ref_bound(KthreaddTask);
+                kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
+                kthreadd_provider_ready(KthreaddTask);
+            }
         }
     }
 }
@@ -754,6 +887,7 @@ object RestInitPhase: PhaseObject {
                     KthreaddTask.Event::Preset;
                     KthreaddTask.Event::Setup;
                     KthreaddTask.Event::Enable;
+                    KthreaddTask.Action::BindGlobalRef;
                     SystemState.Event::Preset;
                     SystemState.Event::Setup;
                     KthreaddReadyGate.Event::Setup;
@@ -771,6 +905,8 @@ object RestInitPhase: PhaseObject {
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     kthreadd_task_created(KthreaddTask);
+                    kthreadd_global_ref_bound(KthreaddTask);
+                    kthreadd_provider_ready(KthreaddTask);
                     system_state_scheduling(SystemState);
                     kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -803,6 +939,8 @@ object RestInitPhase: PhaseObject {
             kernel_init_pf_no_setaffinity(KernelInitTask);
             kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             KthreaddTask.state == State::Online;
+            kthreadd_global_ref_bound(KthreaddTask);
+            kthreadd_provider_ready(KthreaddTask);
             SystemState.state == State::Ready;
             KthreaddReadyGate.state == State::Online;
             rest_init_dispatch_ready(RestInitPhase, KernelInitDispatchGate);

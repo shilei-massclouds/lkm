@@ -159,6 +159,8 @@ predicate task_runtime_state_transition_allowed<T>(task: T, state: TaskRuntimeSt
 predicate task_runtime_state_is<T>(task: T, state: TaskRuntimeState) -> bool;
 predicate task_flag_no_setaffinity<T>(task: T) -> bool;
 predicate task_cpumask_is<T, U>(task: T, cpu_ref: U) -> bool;
+predicate kthreadd_provider_ref_targets<T, U>(task_ref: T, task: U) -> bool;
+predicate kthreadd_provider_ready<T>(task: T) -> bool;
 predicate runqueue_ref_targets<T, U>(runqueue_ref: T, runqueue: U) -> bool;
 predicate runqueue_ref_ready<T>(runqueue_ref: T) -> bool;
 predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, runqueue_ref: V) -> bool;

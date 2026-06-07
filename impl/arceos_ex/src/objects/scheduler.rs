@@ -417,6 +417,8 @@ pub struct BootRunQueue {
     attached_to_root_domain: bool,
     balance_push_enabled: bool,
     enqueued_task_id: usize,
+    kernel_init_task_enqueued: bool,
+    kthreadd_task_enqueued: bool,
 }
 
 impl BootRunQueue {
@@ -433,6 +435,8 @@ impl BootRunQueue {
             attached_to_root_domain: false,
             balance_push_enabled: true,
             enqueued_task_id: usize::MAX,
+            kernel_init_task_enqueued: false,
+            kthreadd_task_enqueued: false,
         }
     }
 
@@ -468,8 +472,9 @@ impl BootRunQueue {
         self.balance_push_enabled
     }
 
-    pub const fn enqueued_task_id(&self) -> usize {
-        self.enqueued_task_id
+    pub const fn contains_task(&self, task_id: usize) -> bool {
+        (self.kernel_init_task_enqueued && task_id == crate::objects::rest_init::KERNEL_INIT_PID)
+            || (self.kthreadd_task_enqueued && task_id == crate::objects::rest_init::KTHREADD_PID)
     }
 
     fn setup(
@@ -517,6 +522,12 @@ impl BootRunQueue {
         }
 
         self.enqueued_task_id = task_id;
+        if task_id == crate::objects::rest_init::KERNEL_INIT_PID {
+            self.kernel_init_task_enqueued = true;
+        }
+        if task_id == crate::objects::rest_init::KTHREADD_PID {
+            self.kthreadd_task_enqueued = true;
+        }
         Ok(())
     }
 

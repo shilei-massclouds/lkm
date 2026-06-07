@@ -37,8 +37,10 @@ pub fn run() -> SmokeResult {
         || !ctx.kernel_init_task.running()
         || !ctx.kernel_init_task.enqueued()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
-        || ctx.scheduler.selected_runqueue_task_id() != ctx.kernel_init_task.pid()
-        || ctx.scheduler.boot_runqueue().enqueued_task_id() != ctx.kernel_init_task.pid()
+        || !ctx
+            .scheduler
+            .boot_runqueue()
+            .contains_task(ctx.kernel_init_task.pid())
         || ctx.kernel_init_task_pi_lock.state() != State::Ready
         || ctx.kernel_init_task_pi_lock.locked()
         || ctx.kernel_init_task_pi_lock.irqsave_entered_count() == 0
@@ -64,8 +66,25 @@ pub fn run() -> SmokeResult {
         || ctx.kthreadd_task.kind() != TaskKind::KernelThread
         || !ctx.kthreadd_task.clone_fs()
         || !ctx.kthreadd_task.clone_files()
-        || !ctx.kthreadd_task.global_ref_bound()
+        || !ctx.kthreadd_task.clone_vm()
+        || !ctx.kthreadd_task.clone_untraced()
+        || !ctx.kthreadd_task.kernel_thread_flag()
+        || !ctx.kthreadd_task.running()
         || !ctx.kthreadd_task.enqueued()
+        || ctx.scheduler.selected_runqueue_task_id() != ctx.kthreadd_task.pid()
+        || !ctx
+            .scheduler
+            .boot_runqueue()
+            .contains_task(ctx.kthreadd_task.pid())
+        || !ctx.kthreadd_task.global_ref_bound()
+        || !ctx.kthreadd_task.provider_ready()
+        || ctx.kthreadd_task_pi_lock.state() != State::Ready
+        || ctx.kthreadd_task_pi_lock.locked()
+        || ctx.kthreadd_task_pi_lock.irqsave_entered_count() == 0
+        || ctx.kthreadd_task_pi_lock.irqrestore_exited_count() == 0
+        || !ctx
+            .kthreadd_task_pi_lock
+            .irqrestore_restored_before_preemption_enabled()
     {
         printk::write_str("kthreadd task facts invalid\n");
         return SmokeResult::Failed;

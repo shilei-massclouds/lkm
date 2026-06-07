@@ -295,10 +295,15 @@ pub struct KthreaddTask {
     kind: TaskKind,
     clone_fs: bool,
     clone_files: bool,
+    clone_vm: bool,
+    clone_untraced: bool,
+    kernel_thread_flag: bool,
     thread_context_ready: bool,
     sched_entity_ready: bool,
     global_ref_bound: bool,
+    provider_ready: bool,
     enqueued: bool,
+    running: bool,
 }
 
 impl KthreaddTask {
@@ -310,10 +315,15 @@ impl KthreaddTask {
             kind: TaskKind::None,
             clone_fs: false,
             clone_files: false,
+            clone_vm: false,
+            clone_untraced: false,
+            kernel_thread_flag: false,
             thread_context_ready: false,
             sched_entity_ready: false,
             global_ref_bound: false,
+            provider_ready: false,
             enqueued: false,
+            running: false,
         }
     }
 
@@ -341,6 +351,18 @@ impl KthreaddTask {
         self.clone_files
     }
 
+    pub const fn clone_vm(&self) -> bool {
+        self.clone_vm
+    }
+
+    pub const fn clone_untraced(&self) -> bool {
+        self.clone_untraced
+    }
+
+    pub const fn kernel_thread_flag(&self) -> bool {
+        self.kernel_thread_flag
+    }
+
     pub const fn thread_context_ready(&self) -> bool {
         self.thread_context_ready
     }
@@ -353,8 +375,16 @@ impl KthreaddTask {
         self.global_ref_bound
     }
 
+    pub const fn provider_ready(&self) -> bool {
+        self.provider_ready
+    }
+
     pub const fn enqueued(&self) -> bool {
         self.enqueued
+    }
+
+    pub const fn running(&self) -> bool {
+        self.running
     }
 
     pub fn preset(&mut self, inputs: TaskSpawnInputs<'_>) -> EventResult {
@@ -366,6 +396,9 @@ impl KthreaddTask {
         self.kind = TaskKind::KernelThread;
         self.clone_fs = true;
         self.clone_files = true;
+        self.clone_vm = true;
+        self.clone_untraced = true;
+        self.kernel_thread_flag = true;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
@@ -392,7 +425,6 @@ impl KthreaddTask {
         self.pid = KTHREADD_PID;
         self.thread_context_ready = true;
         self.sched_entity_ready = true;
-        self.global_ref_bound = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -401,11 +433,24 @@ impl KthreaddTask {
         )
     }
 
-    pub fn enable(&mut self, scheduler: &Scheduler) -> EventResult {
+    pub fn enable(
+        &mut self,
+        scheduler: &mut Scheduler,
+        current_cpu: &BootCurrentCpu,
+        local_interrupt: &mut LocalInterruptControl,
+        current_task_slot: &CurrentTaskSlot,
+        pi_lock: &mut RawSpinLock,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
             || scheduler.boot_runqueue().state() != State::Ready
-            || !self.global_ref_bound
+            || current_cpu.state() != State::Online
+            || local_interrupt.state() != State::Ready
+            || current_task_slot.state() != State::Ready
+            || !current_task_slot.current_is_boot_idle()
+            || pi_lock.state() != State::Ready
+            || scheduler.boot_idle_preemption().state() != State::Ready
+            || self.pid != KTHREADD_PID
             || !self.sched_entity_ready
         {
             return failed_condition(
@@ -416,13 +461,38 @@ impl KthreaddTask {
             );
         }
 
-        self.enqueued = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            Checkpoint::KthreaddTaskOnline,
-        )
+        pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
+        let guarded_result = (|| {
+            self.running = true;
+            scheduler.select_boot_runqueue_for_task(self.pid)?;
+            scheduler.enqueue_task_on_boot_runqueue(self.pid)?;
+            self.enqueued = true;
+            self.lifecycle.transition(
+                LifecycleEvent::Enable,
+                State::Ready,
+                State::Online,
+                Checkpoint::KthreaddTaskOnline,
+            )
+        })();
+        let unlock_result =
+            pi_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
+        guarded_result.and(unlock_result)
+    }
+
+    pub fn bind_global_ref(&mut self, root_pid_namespace: &RootPidNamespace) -> bool {
+        if self.lifecycle.state() != State::Online
+            || self.pid != KTHREADD_PID
+            || !self.running
+            || !self.enqueued
+            || root_pid_namespace.state() != State::Ready
+        {
+            return false;
+        }
+
+        self.global_ref_bound = true;
+        self.provider_ready = true;
+        crate::trace::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
+        true
     }
 
     fn failed_preset(&self) -> EventResult {

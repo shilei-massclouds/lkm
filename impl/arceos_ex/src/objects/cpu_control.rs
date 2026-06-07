@@ -5,6 +5,7 @@ use super::{
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::arch::riscv64::csr;
+use crate::trace::Checkpoint;
 
 const LOCAL_INTERRUPT_SAVE_STACK: usize = 8;
 
@@ -437,6 +438,10 @@ impl RawSpinLock {
     }
 
     pub fn setup(&mut self) -> EventResult {
+        self.setup_with_checkpoint(Checkpoint::KernelInitTaskPiLockReady)
+    }
+
+    pub fn setup_with_checkpoint(&mut self, checkpoint: Checkpoint) -> EventResult {
         if self.lifecycle.state() != State::Base {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -447,12 +452,8 @@ impl RawSpinLock {
         }
 
         self.locked = false;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            crate::trace::Checkpoint::KernelInitTaskPiLockReady,
-        )
+        self.lifecycle
+            .transition(LifecycleEvent::Setup, State::Base, State::Ready, checkpoint)
     }
 
     pub fn lock_irqsave(
