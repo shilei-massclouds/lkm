@@ -106,6 +106,32 @@ object Scheduler: SchedulerObject {
             scheduler_preempt_disabled_action_available(Scheduler);
         }
     }
+
+    actions {
+        /*
+         * SchedulePreemptDisabled 对应 Linux schedule_preempt_disabled()。
+         * 它是 Scheduler.Online 后的通用 action：调用方必须已经处在禁抢占
+         * 上下文中；Linux helper 临时允许一次 schedule()，随后返回禁抢占状态。
+         * 它不建立 rest_init 专属 gate，也不承载 BootIdleTask 的运行期入口
+         * 身份转换；这些场景事实由调用它的阶段承载。
+         */
+        Action::SchedulePreemptDisabled {
+            state_effect: StateEffect::None;
+            depends_on {
+                Scheduler.state == State::Online;
+                BootIdleTask.state == State::Ready;
+                task_preemption_disabled(BootIdleTask);
+                scheduler_preempt_disabled_action_available(Scheduler);
+            }
+            ensures {
+                scheduler_first_schedule_committed(Scheduler);
+                task_preemption_disabled(BootIdleTask);
+            }
+            deferred {
+                "当前实现要求调用前 supervisor interrupts disabled，并在 action 后恢复线性模拟环境；这些条件属于调用上下文/实现前置约束，不纳入 SchedulePreemptDisabled action 的本体语义。";
+            }
+        }
+    }
 }
 
 /*
@@ -382,7 +408,8 @@ object Workqueue: TaskObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    KernelInitDispatchGate.state == State::Ready;
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
                     KthreaddTask.state == State::Online;
                     PageAllocator.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -557,7 +584,8 @@ object TasksRcu: TaskObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    KernelInitDispatchGate.state == State::Ready;
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
                     KthreaddTask.state == State::Online;
                 }
 

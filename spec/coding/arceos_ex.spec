@@ -56,14 +56,14 @@ predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
 predicate arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts() -> bool;
 predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
-predicate arceos_ex_must_rest_init_publish_kernel_init_dispatch_gate() -> bool;
+predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
 predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
 predicate arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred() -> bool;
 predicate arceos_ex_must_pre_smp_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_pre_smp_init_code_path_follow_up_multitask_phase_tree() -> bool;
-predicate arceos_ex_must_pre_smp_init_run_from_kernel_init_dispatch_gate() -> bool;
+predicate arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_pre_smp_init_open_full_gfp_and_prepare_topology() -> bool;
 predicate arceos_ex_must_pre_smp_init_setup_workqueue_vmstat_tasks_rcu_and_initcalls() -> bool;
 predicate arceos_ex_must_pre_smp_init_stop_before_smp_init() -> bool;
@@ -569,14 +569,15 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_rest_init_complete_kthreadd_ready_gate();
 
         /*
-         * Dispatch gate:
+         * Scheduler dispatch facts:
          *
-         * schedule_preempt_disabled() must publish a visible
-         * KernelInitDispatchGate fact. This gate is the branch point where
-         * KernelInitTask may enter PreSmpInitPhase while BootInitTask
-         * continues the cpu_startup_entry() tail.
+         * schedule_preempt_disabled() must be implemented as a Scheduler
+         * action and publish visible dispatch facts. It must not introduce a
+         * KernelInitDispatchGate lifecycle object; the branch point is the
+         * combination of Scheduler first-schedule and KernelInitTask dispatch
+         * facts while BootInitTask continues the cpu_startup_entry() tail.
          */
-        arceos_ex_must_rest_init_publish_kernel_init_dispatch_gate();
+        arceos_ex_must_rest_init_publish_scheduler_dispatch_facts();
 
         /*
          * KernelInitTask affinity action:
@@ -593,9 +594,9 @@ type ArceosExRestInitCodingMust {
         /*
          * Fork dependency:
          *
-         * PreSmpInitPhase must depend on KernelInitDispatchGate.Ready, not on
-         * RestInitPhase.Ready. RestInitPhase.Ready still records the boot idle
-         * tail completion.
+         * PreSmpInitPhase must depend on the KernelInitTask release/dispatch
+         * facts and Scheduler first-schedule fact, not on RestInitPhase.Ready.
+         * RestInitPhase.Ready still records the boot idle tail completion.
          */
         arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready();
 
@@ -637,12 +638,12 @@ type ArceosExPreSmpInitCodingMust {
         arceos_ex_must_pre_smp_init_code_path_follow_up_multitask_phase_tree();
 
         /*
-         * Entry gate:
+         * Entry facts:
          *
-         * This phase must run from KernelInitDispatchGate.Ready, not from
-         * RestInitPhase.Ready.
+         * This phase must run from the KernelInitTask release/dispatch facts
+         * and Scheduler first-schedule fact, not from RestInitPhase.Ready.
          */
-        arceos_ex_must_pre_smp_init_run_from_kernel_init_dispatch_gate();
+        arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts();
 
         /*
          * Allocation and CPU topology:

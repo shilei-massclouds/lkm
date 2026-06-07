@@ -16,8 +16,8 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.kernel_init_dispatch_gate.state() != State::Ready
-        || !ctx.kernel_init_dispatch_gate.boot_idle_tail_pending()
+    if ctx.scheduler.preempt_disabled_passes() == 0
+        || !ctx.kernel_init_task.released_for_pre_smp_init()
         || ctx.boot_idle_runtime.state() != State::Ready
     {
         printk::write_str("pre-smp fork boundary invalid\n");

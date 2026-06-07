@@ -58,10 +58,7 @@ use crate::objects::{
     raw_dtb::RawDtb,
     rcu::RcuCore,
     resource_tree::ResourceTree,
-    rest_init::{
-        BootIdleRuntime, KernelInitDispatchGate, KernelInitTask, KthreaddReadyGate, KthreaddTask,
-        SystemState,
-    },
+    rest_init::{BootIdleRuntime, KernelInitTask, KthreaddReadyGate, KthreaddTask, SystemState},
     root_stream::RootStream,
     rootfs::{
         InitramfsSyncDeferred, IntegrityKeysDeferred, KUnitRuntimeTrimmed, RootFsEnableDeferred,
@@ -183,7 +180,6 @@ pub struct Context {
     pub kthreadd_task_pi_lock: RawSpinLock,
     pub system_state: SystemState,
     pub kthreadd_ready_gate: KthreaddReadyGate,
-    pub kernel_init_dispatch_gate: KernelInitDispatchGate,
     pub boot_idle_runtime: BootIdleRuntime,
     pub vmstat_core: VmstatCore,
     pub pre_smp_initcalls: PreSmpInitcallTable,
@@ -312,7 +308,6 @@ impl Context {
             kthreadd_task_pi_lock: RawSpinLock::new(),
             system_state: SystemState::new(),
             kthreadd_ready_gate: KthreaddReadyGate::new(),
-            kernel_init_dispatch_gate: KernelInitDispatchGate::new(),
             boot_idle_runtime: BootIdleRuntime::new(),
             vmstat_core: VmstatCore::new(),
             pre_smp_initcalls: PreSmpInitcallTable::new(),

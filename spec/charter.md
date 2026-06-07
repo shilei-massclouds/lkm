@@ -2193,35 +2193,25 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 1. `RestInitPhase`：覆盖 Linux `rest_init()`。它由上一阶段遗留的 `BootInitTask` 执行，依次调用 `rcu_scheduler_starting()`，通过通用 `TaskCreationCore` 创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，完成 `kthreadd_done`，最后通过 `Scheduler.schedule_preempt_disabled()` 执行第一次实际调度交接，再由 `cpu_startup_entry(CPUHP_ONLINE)` 将当前执行实体确认为 boot CPU 的显式 `BootIdleTask`。完成后，单核多任务调度语义成立。
 2. `PreSmpInitPhase`：覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是下一顶层阶段 `SMP Runtime Phase` 的入口边界。
 
-##### UP Multitask Phase 分叉修正规划
+##### UP Multitask Phase 分叉修正规则
 
-当前 `RestInitPhase` 的概念说明、正式规格和最小实现已经覆盖 rest_init 的对象事实，
-但仍需要在进入 `PreSmpInitPhase` 前完成一次分叉语义修正。修正目标是避免把
-`RestInitPhase.Ready` 误建模为 `PreSmpInitPhase.Started` 的硬前置条件。
+`RestInitPhase` 和 `PreSmpInitPhase` 的分叉点是
+`Scheduler.schedule_preempt_disabled()` 对应的 Scheduler action，而不是独立
+生命周期对象。该 action 提交 `Scheduler.first_schedule_committed` 等调度事实；
+`RestInitPhase` 再提交 `KernelInitTask` 已被 `kthreadd_done` 释放并进入
+`PreSmpInitPhase` 的场景事实。规格不建立 `KernelInitDispatchGate`，因为 Linux
+没有对应的长期对象或明确生命周期，且 `schedule_preempt_disabled()` 是调度器的
+通用 helper。
 
-计划按以下顺序执行：
+`PreSmpInitPhase` 依赖 `KernelInitTask` release/dispatch facts 和 Scheduler
+first-schedule fact，不直接依赖 `RestInitPhase.Ready`。`RestInitPhase.Ready`
+仍保持依赖 `BootIdleRuntime.Ready`，表示 boot idle 尾部已经完成。`UpMultitaskPhase.Ready`
+是汇合边界，同时要求 `RestInitPhase.Ready` 与 `PreSmpInitPhase.Ready`。
 
-1. 组件化规格先明确 `Scheduler.schedule_preempt_disabled()` 是分叉点，而不是普通阶段 handoff。
-   分叉后 `KernelInitTask` 可开始推进 `PreSmpInitPhase`，同时 `BootInitTask` 继续完成
-   `cpu_startup_entry(CPUHP_ONLINE)` 并转换为 `BootIdleTask`。
-2. 正式规格新增一个 fork boundary 对象或等价中间状态，暂名
-   `KernelInitDispatchGate`。它由 `KernelInitTask.Online`、`KthreaddTask.Online`、
-   `SystemState == SYSTEM_SCHEDULING`、`KthreaddReadyGate.release_committed` 和
-   `Scheduler.first_schedule_committed` 共同构成。
-3. `PreSmpInitPhase` 依赖 `KernelInitDispatchGate.Ready`，不直接依赖
-   `RestInitPhase.Ready`。`RestInitPhase.Ready` 保持依赖 `BootIdleRuntime.Ready`，
-   表示 boot idle 尾部已经完成。
-4. `UpMultitaskPhase.Ready` 改为汇合边界，同时要求 `RestInitPhase.Ready` 与
-   `PreSmpInitPhase.Ready`。trace 上允许 `PreSmpInitPhase.Started` 早于
-   `RestInitPhase.Ready`。
-5. 代码实现先拆分 `rest_init::setup()`：前半段创建 PID 1/kthreadd 并完成
-   `kthreadd_done`，中段发布 `KernelInitDispatchGate`，后半段完成
-   `BootIdleRuntime`。随后再接入 `pre_smp_init::setup()`，避免把子阶段串成
-   `RestInitPhase.Ready -> PreSmpInitPhase`。
-6. 测试先补 rest_init 分叉断言：PID 1 的下一阶段启动条件来自 fork boundary，
-   不是来自 `RestInitPhase.Ready`。再新增 `smoke.pre_smp_init` 覆盖 full GFP mask、
-   CPU present/topology、Workqueue Ready、VmstatCore、TasksRcu、pre-SMP initcall 和
-   `smp_init()` 未执行等边界。
+实现层应拆分 `rest_init`：前半段创建 PID 1/kthreadd、完成 `kthreadd_done` 并直接
+调用 `Scheduler.schedule_preempt_disabled()`；随后 `PreSmpInitPhase` 可从上述 facts
+启动；最后 `RestInitPhase` 尾部完成 `BootIdleRuntime`。测试应验证 PID 1 的下一阶段
+启动条件来自 release/dispatch 与 scheduler facts，而不是来自 `RestInitPhase.Ready`。
 
 #### UP Multitask Phase 子阶段 1：rest_init 期（Rest Init Subphase）
 
@@ -2315,7 +2305,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 当前先将 `PreSmpInitPhase` 的对象和边界记录如下：
 
-1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `UP Multitask Phase` 的第二个子阶段对象。它不从 `RestInitPhase.Ready` 串行接续，而是在 `KernelInitDispatchGate.Ready` 发布后由 `KernelInitTask` 分叉进入；此时 `BootInitTask` 仍可继续完成 `RestInitPhase` 的 boot idle 尾部。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界；`UpMultitaskPhase.Ready` 再以 `RestInitPhase.Ready && PreSmpInitPhase.Ready` 汇合。
+1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `UP Multitask Phase` 的第二个子阶段对象。它不从 `RestInitPhase.Ready` 串行接续，而是在 `KernelInitTask` 已被 `kthreadd_done` 释放、Scheduler 首次调度交接已提交后由 `KernelInitTask` 分叉进入；此时 `BootInitTask` 仍可继续完成 `RestInitPhase` 的 boot idle 尾部。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界；`UpMultitaskPhase.Ready` 再以 `RestInitPhase.Ready && PreSmpInitPhase.Ready` 汇合。
 2. `页分配器完整 GFP mask 属性`：覆盖 `gfp_allowed_mask = __GFP_BITS_MASK`。它不是独立对象，也不属于 `KernelInitTask`，而是 `PageAllocator` 的全局分配策略属性。当前建模为 `PageAllocator.open_full_gfp_mask()` action，不推进 `PageAllocator` 标准生命周期，只记录 `PageAllocator.gfp_allowed_mask == __GFP_BITS_MASK`，表示后续初始化可以执行可能阻塞的 `GFP_KERNEL` 分配。
 3. `init 内存节点访问路径`：覆盖 `set_mems_allowed(node_states[N_MEMORY])`。当前 `CONFIG_CPUSETS=n` 且 `CONFIG_NUMA=n`，该调用在头文件中折叠为空实现，按 trimmed/no-op 记录，不在本阶段展开对象建模。
 4. `cad_pid 绑定路径`：覆盖 `cad_pid = get_pid(task_pid(current))`。它属于 reboot/ctrl-alt-del 控制路径的全局引用绑定；当前启动主线不依赖它，先按 deferred 记录，后续讨论系统控制或 reboot/poweroff 路径时再决定归属。

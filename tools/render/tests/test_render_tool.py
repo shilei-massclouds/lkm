@@ -408,7 +408,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="action",
                         row=2,
                         column=3,
-                        label="KernelInitDispatchGate.Event::Setup",
+                        label="Scheduler.Action::SchedulePreemptDisabled",
                         column_span=2,
                     ),
                 ),

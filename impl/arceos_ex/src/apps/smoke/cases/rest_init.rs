@@ -119,13 +119,10 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.kernel_init_dispatch_gate.state() != State::Ready
-        || !ctx.kernel_init_dispatch_gate.schedule_committed()
-        || !ctx.kernel_init_dispatch_gate.kernel_init_dispatched()
-        || !ctx.kernel_init_dispatch_gate.boot_idle_tail_pending()
-        || ctx.scheduler.preempt_disabled_passes() == 0
+    if ctx.scheduler.preempt_disabled_passes() == 0
+        || !ctx.kernel_init_task.released_for_pre_smp_init()
     {
-        printk::write_str("kernel init dispatch gate facts invalid\n");
+        printk::write_str("scheduler dispatch facts invalid\n");
         return SmokeResult::Failed;
     }
 

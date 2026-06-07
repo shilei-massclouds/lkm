@@ -2,7 +2,7 @@ use super::{
     cpu_group::CpuGroup,
     mm_core::PageAllocator,
     rcu::RcuCore,
-    rest_init::{KernelInitDispatchGate, KernelInitTask, KthreaddTask},
+    rest_init::{KernelInitTask, KthreaddTask},
     scheduler::Scheduler,
     softirq::Softirq,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -53,14 +53,17 @@ impl VmstatCore {
         &mut self,
         workqueue: &Workqueue,
         page_allocator: &PageAllocator,
-        dispatch_gate: &KernelInitDispatchGate,
+        kernel_init_task: &KernelInitTask,
+        scheduler: &Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || workqueue.state() != State::Ready
             || !workqueue.worker_creation_open()
             || page_allocator.state() != State::Ready
             || !page_allocator.full_gfp_mask_open()
-            || dispatch_gate.state() != State::Ready
+            || kernel_init_task.state() != State::Online
+            || !kernel_init_task.released_for_pre_smp_init()
+            || scheduler.preempt_disabled_passes() == 0
         {
             return self.failed_preset();
         }
@@ -146,18 +149,20 @@ impl PreSmpInitcallTable {
 
     pub fn setup(
         &mut self,
-        dispatch_gate: &KernelInitDispatchGate,
+        kernel_init_task: &KernelInitTask,
         rcu_core: &RcuCore,
         softirq: &Softirq,
         scheduler: &Scheduler,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || dispatch_gate.state() != State::Ready
+            || kernel_init_task.state() != State::Online
+            || !kernel_init_task.released_for_pre_smp_init()
             || rcu_core.state() != State::Ready
             || !rcu_core.tasks_rcu().gp_threads_ready()
             || softirq.state() != State::Ready
             || scheduler.state() != State::Online
+            || scheduler.preempt_disabled_passes() == 0
             || cpu_group.state() != State::Ready
             || !cpu_group.pre_smp_topology_ready()
         {
@@ -236,13 +241,16 @@ impl PreSmpInitBoundary {
 
     pub fn setup(
         &mut self,
-        dispatch_gate: &KernelInitDispatchGate,
+        kernel_init_task: &KernelInitTask,
         initcalls: &PreSmpInitcallTable,
+        scheduler: &Scheduler,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || dispatch_gate.state() != State::Ready
+            || kernel_init_task.state() != State::Online
+            || !kernel_init_task.released_for_pre_smp_init()
             || initcalls.state() != State::Ready
+            || scheduler.preempt_disabled_passes() == 0
             || cpu_group.state() != State::Ready
             || !cpu_group.secondary_cpus_present_not_online()
         {
@@ -275,7 +283,7 @@ impl PreSmpInitBoundary {
 pub fn pre_smp_runtime_ready(
     kernel_init_task: &KernelInitTask,
     kthreadd_task: &KthreaddTask,
-    dispatch_gate: &KernelInitDispatchGate,
+    scheduler: &Scheduler,
     page_allocator: &PageAllocator,
     cpu_group: &CpuGroup,
     workqueue: &Workqueue,
@@ -287,7 +295,7 @@ pub fn pre_smp_runtime_ready(
     kernel_init_task.state() == State::Online
         && kernel_init_task.released_for_pre_smp_init()
         && kthreadd_task.state() == State::Online
-        && dispatch_gate.state() == State::Ready
+        && scheduler.preempt_disabled_passes() != 0
         && page_allocator.state() == State::Ready
         && page_allocator.full_gfp_mask_open()
         && cpu_group.pre_smp_topology_ready()

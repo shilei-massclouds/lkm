@@ -37,19 +37,21 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.vmstat_core.preset(
         &ctx.workqueue,
         &ctx.page_allocator,
-        &ctx.kernel_init_dispatch_gate,
+        &ctx.kernel_init_task,
+        &ctx.scheduler,
     )?;
     ctx.rcu_core.tasks_rcu_mut().setup()?;
     ctx.pre_smp_initcalls.setup(
-        &ctx.kernel_init_dispatch_gate,
+        &ctx.kernel_init_task,
         &ctx.rcu_core,
         &ctx.softirq,
         &ctx.scheduler,
         &ctx.cpu_group,
     )?;
     ctx.pre_smp_boundary.setup(
-        &ctx.kernel_init_dispatch_gate,
+        &ctx.kernel_init_task,
         &ctx.pre_smp_initcalls,
+        &ctx.scheduler,
         &ctx.cpu_group,
     )
 }
@@ -81,7 +83,7 @@ fn pre_smp_phase_ready(ctx: &Context) -> bool {
     pre_smp_runtime_ready(
         &ctx.kernel_init_task,
         &ctx.kthreadd_task,
-        &ctx.kernel_init_dispatch_gate,
+        &ctx.scheduler,
         &ctx.page_allocator,
         &ctx.cpu_group,
         &ctx.workqueue,

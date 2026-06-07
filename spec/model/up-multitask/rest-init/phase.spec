@@ -4,8 +4,8 @@
  * This is UP Multitask Phase subphase 1. It covers Linux rest_init(): RCU
  * scheduler start, creation of PID 1 and kthreadd, publication of
  * SYSTEM_SCHEDULING, completion of kthreadd_done, and boot idle runtime entry.
- * Scheduler.schedule_preempt_disabled() publishes KernelInitDispatchGate,
- * which lets KernelInitTask enter PreSmpInitPhase while BootInitTask continues
+ * Scheduler.Action::SchedulePreemptDisabled is the first scheduling action
+ * that lets KernelInitTask enter PreSmpInitPhase while BootInitTask continues
  * the rest_init tail and becomes BootIdleTask.
  */
 
@@ -734,55 +734,6 @@ object KthreaddReadyGate: Completion {
 }
 
 /*
- * KernelInitDispatchGate 表示 schedule_preempt_disabled() 形成的分叉边界。
- * 它释放 KernelInitTask 进入 PreSmpInitPhase，但不表示 BootInitTask 的
- * boot idle 尾部已经完成。
- */
-object KernelInitDispatchGate: TaskObject {
-    initial_state: State::Base;
-
-    /*
-     * Base 表示 schedule_preempt_disabled() 的分叉边界尚未提交。
-     */
-    state State::Base {
-        events {
-            /*
-             * Setup 对应 schedule_preempt_disabled()，把 PID 1 分派到 PreSmpInitPhase。
-             */
-            on Event::Setup -> State::Ready {
-                depends_on {
-                    Scheduler.state == State::Online;
-                    KernelInitTask.state == State::Online;
-                    KthreaddTask.state == State::Online;
-                    SystemState.state == State::Ready;
-                    KthreaddReadyGate.state == State::Online;
-                }
-
-                ensures {
-                    kernel_init_dispatch_gate_ready(KernelInitDispatchGate);
-                    scheduler_first_schedule_committed(Scheduler);
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    boot_init_task_continues_rest_init_tail(BootInitTask);
-                    rest_init_boot_idle_tail_pending(BootIdleRuntime);
-                }
-            }
-        }
-    }
-
-    /*
-     * Ready 表示 PID 1 已分派，BootInitTask 继续执行 rest_init() 尾部。
-     */
-    state State::Ready {
-        invariant {
-            kernel_init_dispatch_gate_ready(KernelInitDispatchGate);
-            scheduler_first_schedule_committed(Scheduler);
-            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-            boot_init_task_continues_rest_init_tail(BootInitTask);
-        }
-    }
-}
-
-/*
  * BootIdleRuntime 表示分叉点之后 cpu_startup_entry() 确认 boot CPU idle
  * runtime 入口。它复用 SchedInitPhase 已建立的 BootIdleTask。
  */
@@ -805,7 +756,8 @@ object BootIdleRuntime: TaskObject {
                     KernelInitTask.state == State::Online;
                     KthreaddTask.state == State::Online;
                     KthreaddReadyGate.state == State::Online;
-                    KernelInitDispatchGate.state == State::Ready;
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
                     CpuGroup.state == State::Ready;
                 }
 
@@ -876,7 +828,7 @@ object RestInitPhase: PhaseObject {
                     KthreaddReadyGate.Event::Setup;
                     KthreaddReadyGate.Event::Enable;
                     KthreaddReadyGate.Event::Complete;
-                    KernelInitDispatchGate.Event::Setup;
+                    Scheduler.Action::SchedulePreemptDisabled;
                 }
 
                 ensures {
@@ -884,7 +836,7 @@ object RestInitPhase: PhaseObject {
                     rcu_scheduler_active_level_init(RcuCore);
                     rcu_single_online_cpu_at_scheduler_start(RcuCore, CpuGroup);
                     rcu_gp_seq_baseline_synced(RcuCore);
-                    rest_init_dispatch_ready(RestInitPhase, KernelInitDispatchGate);
+                    rest_init_dispatch_ready(RestInitPhase);
                     kernel_init_task_created(KernelInitTask);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
@@ -917,7 +869,6 @@ object RestInitPhase: PhaseObject {
     state State::Prepared {
         invariant {
             ProcessPreparePhase.state == State::Ready;
-            KernelInitDispatchGate.state == State::Ready;
             rcu_scheduler_starting_ready(RcuCore);
             rcu_scheduler_active_level_init(RcuCore);
             rcu_gp_seq_baseline_synced(RcuCore);
@@ -932,7 +883,8 @@ object RestInitPhase: PhaseObject {
             kthreadd_ready_gate_completed(KthreaddReadyGate);
             kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
             kernel_init_released_for_pre_smp_init(KernelInitTask);
-            rest_init_dispatch_ready(RestInitPhase, KernelInitDispatchGate);
+            scheduler_first_schedule_committed(Scheduler);
+            rest_init_dispatch_ready(RestInitPhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             rest_init_boot_idle_tail_pending(BootIdleRuntime);
         }
@@ -940,7 +892,8 @@ object RestInitPhase: PhaseObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    KernelInitDispatchGate.state == State::Ready;
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
                     CpuGroup.state == State::Ready;
                     BootIdleTask.state == State::Ready;
                 }
@@ -984,7 +937,6 @@ object RestInitPhase: PhaseObject {
             KthreaddTask.state == State::Online;
             SystemState.state == State::Ready;
             KthreaddReadyGate.state == State::Online;
-            KernelInitDispatchGate.state == State::Ready;
             BootIdleRuntime.state == State::Ready;
             rest_init_ready(RestInitPhase);
             system_state_scheduling(SystemState);
@@ -994,6 +946,7 @@ object RestInitPhase: PhaseObject {
             kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
             kernel_init_released_for_pre_smp_init(KernelInitTask);
             scheduler_first_schedule_committed(Scheduler);
+            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             task_concurrency_open();
             smp_concurrency_closed();
         }

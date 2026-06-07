@@ -744,101 +744,6 @@ impl KthreaddReadyGate {
     }
 }
 
-pub struct KernelInitDispatchGate {
-    lifecycle: Lifecycle,
-    schedule_committed: bool,
-    kernel_init_dispatched: bool,
-    boot_idle_tail_pending: bool,
-}
-
-impl KernelInitDispatchGate {
-    pub const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            schedule_committed: false,
-            kernel_init_dispatched: false,
-            boot_idle_tail_pending: false,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn schedule_committed(&self) -> bool {
-        self.schedule_committed
-    }
-
-    pub const fn kernel_init_dispatched(&self) -> bool {
-        self.kernel_init_dispatched
-    }
-
-    pub const fn boot_idle_tail_pending(&self) -> bool {
-        self.boot_idle_tail_pending
-    }
-
-    pub fn setup(
-        &mut self,
-        scheduler: &mut Scheduler,
-        kernel_init_task: &KernelInitTask,
-        kthreadd_task: &KthreaddTask,
-        system_state: &SystemState,
-        kthreadd_ready_gate: &KthreaddReadyGate,
-    ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || scheduler.state() != State::Online
-            || kernel_init_task.state() != State::Online
-            || !kernel_init_task.released_for_pre_smp_init()
-            || kthreadd_task.state() != State::Online
-            || system_state.state() != State::Ready
-            || system_state.value() != SystemStateValue::Scheduling
-            || kthreadd_ready_gate.state() != State::Online
-            || !kthreadd_ready_gate.release_committed()
-        {
-            return self.failed_setup();
-        }
-
-        let interrupts_enabled = crate::arch::riscv64::csr::supervisor_interrupts_enabled();
-        if interrupts_enabled {
-            crate::arch::riscv64::csr::disable_supervisor_interrupts();
-        }
-        let preempt_disable_result = scheduler.boot_idle_preemption_mut().disable();
-        if preempt_disable_result.is_err() {
-            if interrupts_enabled {
-                crate::arch::riscv64::csr::enable_supervisor_interrupts();
-            }
-            return self.failed_setup();
-        }
-        let schedule_result = scheduler.schedule_preempt_disabled();
-        let preempt_enable_result = scheduler.boot_idle_preemption_mut().enable();
-        if interrupts_enabled {
-            crate::arch::riscv64::csr::enable_supervisor_interrupts();
-        }
-        if schedule_result.is_err() || preempt_enable_result.is_err() {
-            return self.failed_setup();
-        }
-
-        self.schedule_committed = true;
-        self.kernel_init_dispatched = true;
-        self.boot_idle_tail_pending = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            Checkpoint::KernelInitDispatchGateReady,
-        )
-    }
-
-    fn failed_setup(&self) -> EventResult {
-        failed_condition(
-            LifecycleEvent::Setup,
-            self.lifecycle.state(),
-            State::Base,
-            State::Ready,
-        )
-    }
-}
-
 pub struct BootIdleRuntime {
     lifecycle: Lifecycle,
     first_schedule_committed: bool,
@@ -896,18 +801,16 @@ impl BootIdleRuntime {
         kernel_init_task: &KernelInitTask,
         kthreadd_task: &KthreaddTask,
         kthreadd_ready_gate: &KthreaddReadyGate,
-        dispatch_gate: &KernelInitDispatchGate,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || scheduler.state() != State::Online
             || scheduler.boot_idle_task().state() != State::Ready
             || kernel_init_task.state() != State::Online
+            || !kernel_init_task.released_for_pre_smp_init()
             || kthreadd_task.state() != State::Online
             || kthreadd_ready_gate.state() != State::Online
-            || dispatch_gate.state() != State::Ready
-            || !dispatch_gate.schedule_committed()
-            || !dispatch_gate.kernel_init_dispatched()
+            || scheduler.preempt_disabled_passes() == 0
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
         {
