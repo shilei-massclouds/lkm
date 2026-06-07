@@ -380,11 +380,10 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         elif arrow.kind == "context_order":
             _append_trace_context_order_arrow(lines, cell_box(source), cell_box(target))
         elif arrow.kind == "action":
-            _append_trace_directed_horizontal_arrow(
+            _append_trace_action_arrow(
                 lines,
                 _trace_event_anchor_box(source, cell_box(source)),
                 cell_box(target),
-                css_class="action-arrow",
             )
 
     if annotation_items:
@@ -754,6 +753,27 @@ def _append_trace_context_order_arrow(
     )
 
 
+def _append_trace_action_arrow(
+    lines: list[str],
+    source_box: tuple[float, float, float, float],
+    target_box: tuple[float, float, float, float],
+) -> None:
+    source_x, _source_y, source_w, _source_h = source_box
+    target_x, target_y, target_w, target_h = _trace_action_rect(target_box)
+    target_center_x = target_x + target_w / 2
+    source_center_x = source_x + source_w / 2
+    y = target_y + target_h / 2
+    if target_center_x < source_center_x:
+        x1 = source_x
+        x2 = target_x + target_w
+    else:
+        x1 = source_x + source_w
+        x2 = target_x
+    lines.append(
+        f'<line class="action-arrow" x1="{x1:.1f}" y1="{y:.1f}" x2="{x2:.1f}" y2="{y:.1f}" />'
+    )
+
+
 def _trace_context_action_rect(
     box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
@@ -994,6 +1014,8 @@ def _trace_annotation_occupied_boxes(
             boxes.append(_trace_event_anchor_box(cell, cell_box(cell)))
         elif cell.kind == "context_span":
             boxes.append(_trace_context_box_rect(cell_box(cell)))
+        elif cell.kind == "action":
+            boxes.append(_trace_action_rect(cell_box(cell)))
         elif cell.kind == "context_action":
             boxes.append(_trace_context_action_rect(cell_box(cell)))
     return boxes

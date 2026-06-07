@@ -21,6 +21,8 @@ from render_tool.render import (
     _choose_annotation_box,
     _expand_rect,
     _rects_overlap,
+    _trace_action_rect,
+    _trace_annotation_occupied_boxes,
     render_svg,
 )
 from view_tool.__main__ import main as view_main
@@ -316,6 +318,54 @@ class RenderToolTests(unittest.TestCase):
         self.assertIn(">KernelInitTask</tspan>", text)
         self.assertIn('dy="12">PinToBootCpu</tspan>', text)
 
+    def test_render_svg_from_trace_view_aligns_action_arrow_to_action_box(self) -> None:
+        view = ViewModel(
+            name="trace",
+            graph_format="svg",
+            metadata={
+                "trace_columns": [
+                    {"index": 0, "kind": "phase", "depth": 0},
+                    {"index": 1, "kind": "phase_object_gap", "depth": 0},
+                    {"index": 2, "kind": "object", "depth": 0},
+                    {"index": 3, "kind": "gap", "depth": 0},
+                ],
+                "trace_rows": [
+                    {"index": 0, "kind": "gap", "label": "body.start"},
+                    {"index": 1, "kind": "gap", "label": "spacer"},
+                    {"index": 2, "kind": "action", "label": "action"},
+                    {"index": 3, "kind": "gap", "label": "body.end"},
+                ],
+                "trace_cells": (
+                    TraceCell(
+                        id="event",
+                        kind="event_span",
+                        row=0,
+                        column=0,
+                        label="RestInitPhase.Event::Preset",
+                        row_span=4,
+                    ),
+                    TraceCell(
+                        id="action",
+                        kind="action",
+                        row=2,
+                        column=3,
+                        label="KernelInitTask.Action::PinToBootCpu(BootCPURef)",
+                        column_span=2,
+                    ),
+                ),
+                "trace_arrows": (
+                    TraceArrow(source="event", target="action", kind="action"),
+                ),
+            },
+        )
+
+        text = render_svg(view)
+
+        self.assertIn(
+            '<line class="action-arrow" x1="112.0" y1="97.0" x2="360.0" y2="97.0" />',
+            text,
+        )
+
     def test_render_svg_from_trace_view_with_annotations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             view = self._build_view_json(tmp, "trace")
@@ -423,6 +473,25 @@ class RenderToolTests(unittest.TestCase):
         )
 
         self.assertFalse(_rects_overlap(box, occupied))
+
+    def test_trace_annotation_occupied_boxes_include_actions(self) -> None:
+        action = TraceCell(
+            id="action",
+            kind="action",
+            row=0,
+            column=0,
+            label="KernelInitTask.Action::PinToBootCpu(BootCPURef)",
+            column_span=2,
+        )
+
+        boxes = _trace_annotation_occupied_boxes(
+            (action,),
+            lambda _cell: (100.0, 200.0, 260.0, 46.0),
+            set(),
+            set(),
+        )
+
+        self.assertEqual(boxes, [_trace_action_rect((100.0, 200.0, 260.0, 46.0))])
 
     def test_svg_requires_timeline_or_trace_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
