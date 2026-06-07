@@ -105,7 +105,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.kernel_init_task, &ctx.kthreadd_task)?;
     ctx.kthreadd_ready_gate
         .enable(&ctx.system_state, &ctx.kthreadd_task)?;
-    ctx.kthreadd_ready_gate.release_kernel_init(
+    ctx.kthreadd_ready_gate.complete(
         &ctx.system_state,
         &ctx.kthreadd_task,
         &mut ctx.kernel_init_task,

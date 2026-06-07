@@ -408,7 +408,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="action",
                         row=2,
                         column=3,
-                        label="KthreaddReadyGate.Action::ReleaseKernelInit",
+                        label="KernelInitDispatchGate.Event::Setup",
                         column_span=2,
                     ),
                 ),

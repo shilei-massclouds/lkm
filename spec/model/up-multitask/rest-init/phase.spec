@@ -666,9 +666,9 @@ object SystemState: KernelObject {
  * Completion Type process 承载，实例不复制这些通用 facts。下面的对象
  * lifecycle event 只是当前工具的实例 wrapper：Setup/Enable 提交
  * kthreadd_done 在 rest_init 场景中的 gate 生命周期状态；真正的
- * complete(&kthreadd_done) 表达为 KthreaddReadyGate.Event::Complete，
- * Completion 通用结果来自 Type process；ReleaseKernelInit action 只补充
- * “释放 PID 1 进入下一子阶段”的场景事实。
+ * complete(&kthreadd_done) 表达为 KthreaddReadyGate.Event::Complete。
+ * Completion 通用结果来自 Type process；释放 PID 1 进入下一子阶段的
+ * 场景事实由 RestInitPhase 承载，不额外引入 Linux 中不存在的 action。
  */
 object KthreaddReadyGate: Completion {
     initial_state: State::Base;
@@ -723,38 +723,12 @@ object KthreaddReadyGate: Completion {
     }
 
     /*
-     * Online 表示 kthreadd_done 已完成，PID 1 可以推进 PreSmpInitPhase。
+     * Online 表示 kthreadd_done handle 已发布，可被 Completion Complete
+     * process 操作；是否完成由 Completion 扩展状态和外层阶段事实表达。
      */
     state State::Online {
         invariant {
             kthreadd_ready_gate_ready(KthreaddReadyGate);
-        }
-    }
-
-    actions {
-        /*
-         * ReleaseKernelInit 对应 complete(&kthreadd_done) 在 rest_init 场景
-         * 下释放 PID 1 的语义。Completion 的 token/wait_queue/wake-one
-         * 通用结果必须先由 KthreaddReadyGate.Event::Complete 提交；本 action
-         * 不复制 Completion 内部 bookkeeping，只提交场景事实。
-         */
-        Action::ReleaseKernelInit {
-            state_effect: StateEffect::None;
-            depends_on {
-                KthreaddReadyGate.state == State::Online;
-                SystemState.state == State::Ready;
-                KthreaddTask.state == State::Online;
-                KernelInitTask.state == State::Online;
-                kernel_init_waits_for_kthreadd_done(KernelInitTask);
-                completion_complete_committed(KthreaddReadyGate);
-                completion_token_available(KthreaddReadyGate);
-                completion_wakes_one_waiter(KthreaddReadyGate);
-            }
-            ensures {
-                kthreadd_ready_gate_completed(KthreaddReadyGate);
-                kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
-                kernel_init_released_for_pre_smp_init(KernelInitTask);
-            }
         }
     }
 }
@@ -902,7 +876,6 @@ object RestInitPhase: PhaseObject {
                     KthreaddReadyGate.Event::Setup;
                     KthreaddReadyGate.Event::Enable;
                     KthreaddReadyGate.Event::Complete;
-                    KthreaddReadyGate.Action::ReleaseKernelInit;
                     KernelInitDispatchGate.Event::Setup;
                 }
 
@@ -919,7 +892,9 @@ object RestInitPhase: PhaseObject {
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
                     system_state_scheduling(SystemState);
+                    kthreadd_ready_gate_completed(KthreaddReadyGate);
                     kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+                    kernel_init_released_for_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     rest_init_boot_idle_tail_pending(BootIdleRuntime);
@@ -954,6 +929,9 @@ object RestInitPhase: PhaseObject {
             kthreadd_provider_ready(KthreaddTask);
             SystemState.state == State::Ready;
             KthreaddReadyGate.state == State::Online;
+            kthreadd_ready_gate_completed(KthreaddReadyGate);
+            kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+            kernel_init_released_for_pre_smp_init(KernelInitTask);
             rest_init_dispatch_ready(RestInitPhase, KernelInitDispatchGate);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             rest_init_boot_idle_tail_pending(BootIdleRuntime);
@@ -980,7 +958,9 @@ object RestInitPhase: PhaseObject {
                     rcu_scheduler_active_level_init(RcuCore);
                     rcu_gp_seq_baseline_synced(RcuCore);
                     system_state_scheduling(SystemState);
+                    kthreadd_ready_gate_completed(KthreaddReadyGate);
                     kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+                    kernel_init_released_for_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
                     task_concurrency_open();
                     smp_concurrency_closed();
@@ -1010,7 +990,9 @@ object RestInitPhase: PhaseObject {
             system_state_scheduling(SystemState);
             kernel_init_pf_no_setaffinity(KernelInitTask);
             kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
+            kthreadd_ready_gate_completed(KthreaddReadyGate);
             kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+            kernel_init_released_for_pre_smp_init(KernelInitTask);
             scheduler_first_schedule_committed(Scheduler);
             task_concurrency_open();
             smp_concurrency_closed();

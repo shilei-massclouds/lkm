@@ -111,7 +111,8 @@ completion handle；`complete()`、`complete_all()`、`wait()`、`try_wait()` �
 事实，不能重新推进普通生命周期；`done()` 是只读观察 action。`KthreaddReadyGate` 这类 `object X: Completion`
 实例必须包装并驱动该通用对象，而不是把 pending/completed/wake bookkeeping 复制成私有布尔字段。
 实例 wrapper 只能承载场景事实：例如 `KthreaddReadyGate.enable()` 发布 completion handle 后，
-`release_kernel_init()` 必须驱动通用 `Completion.complete()`，再提交释放 PID 1 的场景结果。
+`KthreaddReadyGate.complete()` 必须驱动通用 `Completion.complete()`；释放 PID 1 的场景结果由
+`RestInitPhase` 事实承载，不引入 Linux 中不存在的额外 action。
 
 smoke 测试必须覆盖两类路径：一是独立 `Completion` 实例的 setup/enable/complete/token consume/reinit 流程，二是
 `rest_init()` 中的 live `kthreadd_done` 实例，验证 `KthreaddReadyGate` 已驱动 `Completion.complete()` 并唤醒 PID 1。

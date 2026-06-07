@@ -700,7 +700,7 @@ impl KthreaddReadyGate {
         )
     }
 
-    pub fn release_kernel_init(
+    pub fn complete(
         &mut self,
         system_state: &SystemState,
         kthreadd_task: &KthreaddTask,
