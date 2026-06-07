@@ -213,6 +213,8 @@ process 的结果使用 `ProcessResult` 语义集合：`Success`、`Blocked(reas
 - derive/view/render 尚不推导 Type process 内部迁移；阶段主线若需要使用某个 Type process 的效果，必须暂时通过对象 lifecycle wrapper、显式 action commit 或普通 predicate fact 承载，并在规格中说明该承载不改变 Type process 的正式语义。
 - 当前 derive 已能从 Type process 的 `ensures` 推导被驱动 action/event 的成功事实；对象实例自己声明的 `actions { ... }` 暂时只作为可驱动 action commit 展示，不自动把该 action 内部 `ensures` 推导为后续 `depends_on` 的可用事实。阶段主线若需要消费对象 action 的结果，必须暂时在外层 event/phase `ensures` 中显式承载，后续再扩展对象 action ensures 推导。
 
+Type/Instance 的基本原则是：可复用 Type 已定义的行为、状态效果和通用 facts，必须落在 Type 上；实例只负责把该 Type 行为绑定到具体场景，并补充场景级语义。实例不得复制 Type 内部 bookkeeping，例如 `Completion` 实例不应重新手写 token、wait queue 或 wake-one 的通用结果；这些结果应来自被驱动的 `Completion` Type process。若当前工具尚不能自动把 inherited lifecycle event 展开为实例生命周期迁移，可以暂时使用实例 wrapper event 提交实例状态，但 wrapper 的职责只能是驱动或承接 Type process，并提交场景级 facts。
+
 `Completion` 是当前第一个正式 Type process 示例。Linux `struct completion` 内嵌 `swait_queue_head wait`，因此规格中 `Completion` 拥有 `SimpleWaitQueue`，不是引用外部 wait queue。`Completion.Setup` 驱动 owned wait queue 的 setup；`Complete`/`CompleteAll` 驱动 wait queue 的 wake action；`Wait` 驱动 wait queue 的 prepare/finish wait action；`Reinit` 只重置 completion token 状态并保留 wait queue。`Complete`、`CompleteAll`、`Wait`、`TryWait`、`Reinit` 是 `StateEffect::Conditional` 的运行期事件；`Done` 是 `StateEffect::None` 的只读 action。
 
 Completion 也说明了 event/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。

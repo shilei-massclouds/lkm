@@ -677,14 +677,11 @@ impl KthreaddReadyGate {
         &mut self,
         system_state: &SystemState,
         kthreadd_task: &KthreaddTask,
-        kernel_init_task: &mut KernelInitTask,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || system_state.state() != State::Ready
             || system_state.value() != SystemStateValue::Scheduling
             || kthreadd_task.state() != State::Online
-            || kernel_init_task.state() != State::Online
-            || !kernel_init_task.waiting_for_kthreadd_done()
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -695,22 +692,46 @@ impl KthreaddReadyGate {
         }
 
         self.completion.enable()?;
-        self.completion.complete()?;
-        if !kernel_init_task.release_for_pre_smp_init() {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-        self.release_committed = true;
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,
             State::Online,
             Checkpoint::KthreaddReadyGateOnline,
         )
+    }
+
+    pub fn release_kernel_init(
+        &mut self,
+        system_state: &SystemState,
+        kthreadd_task: &KthreaddTask,
+        kernel_init_task: &mut KernelInitTask,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || system_state.state() != State::Ready
+            || system_state.value() != SystemStateValue::Scheduling
+            || kthreadd_task.state() != State::Online
+            || kernel_init_task.state() != State::Online
+            || !kernel_init_task.waiting_for_kthreadd_done()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.completion.complete()?;
+        if !kernel_init_task.release_for_pre_smp_init() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.release_committed = true;
+        Ok(())
     }
 
     fn failed_setup(&self) -> EventResult {

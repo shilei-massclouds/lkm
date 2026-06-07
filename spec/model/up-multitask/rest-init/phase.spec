@@ -662,12 +662,13 @@ object SystemState: KernelObject {
 
 /*
  * KthreaddReadyGate 表示静态 completion kthreadd_done，是 Completion Type
- * 的具名实例。它本身不重新定义 Setup/Enable；下面对象事件是当前工具对
- * inherited Type process 的阶段推导展开。Setup 来自 Completion.Setup，
- * 建立 done=0 和 owned wait_queue；Enable 在对象主状态迁移中先应用
- * Completion.Enable，使该 completion 可被运行期 process 操作，再应用
- * Completion.Complete 的成功效果，即 complete(&kthreadd_done) 已发布，
- * PID 1 可继续执行下一子阶段。
+ * 的具名实例。Completion 的 token、wait_queue 和 wake-one 行为必须由
+ * Completion Type process 承载，实例不复制这些通用 facts。下面的对象
+ * lifecycle event 只是当前工具的实例 wrapper：Setup/Enable 提交
+ * kthreadd_done 在 rest_init 场景中的 gate 生命周期状态；真正的
+ * complete(&kthreadd_done) 表达为 KthreaddReadyGate.Event::Complete，
+ * Completion 通用结果来自 Type process；ReleaseKernelInit action 只补充
+ * “释放 PID 1 进入下一子阶段”的场景事实。
  */
 object KthreaddReadyGate: Completion {
     initial_state: State::Base;
@@ -689,11 +690,6 @@ object KthreaddReadyGate: Completion {
                 ensures {
                     kthreadd_ready_gate_ready(KthreaddReadyGate);
                     kthreadd_ready_gate_pending(KthreaddReadyGate);
-                    completion_owns_wait_queue(KthreaddReadyGate);
-                    completion_ready(KthreaddReadyGate);
-                    completion_pending(KthreaddReadyGate);
-                    completion_done_count_is_zero(KthreaddReadyGate);
-                    completion_wait_queue_ready(KthreaddReadyGate);
                     kernel_init_waits_for_kthreadd_done(KernelInitTask);
                 }
             }
@@ -706,13 +702,12 @@ object KthreaddReadyGate: Completion {
     state State::Ready {
         invariant {
             kthreadd_ready_gate_ready(KthreaddReadyGate);
-            completion_ready(KthreaddReadyGate);
-            completion_pending(KthreaddReadyGate);
+            kthreadd_ready_gate_pending(KthreaddReadyGate);
         }
 
         events {
             /*
-             * Enable 对应 complete(&kthreadd_done)，释放 PID 1 进入下一子阶段。
+             * Enable 发布 completion handle，使其可被运行期 Complete process 操作。
              */
             on Event::Enable -> State::Online {
                 depends_on {
@@ -721,14 +716,7 @@ object KthreaddReadyGate: Completion {
                 }
 
                 ensures {
-                    kthreadd_ready_gate_completed(KthreaddReadyGate);
-                    completion_online(KthreaddReadyGate);
-                    completion_handle_published(KthreaddReadyGate);
-                    completion_complete_committed(KthreaddReadyGate);
-                    completion_token_available(KthreaddReadyGate);
-                    completion_wakes_one_waiter(KthreaddReadyGate);
-                    kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
-                    kernel_init_released_for_pre_smp_init(KernelInitTask);
+                    kthreadd_ready_gate_ready(KthreaddReadyGate);
                 }
             }
         }
@@ -739,13 +727,34 @@ object KthreaddReadyGate: Completion {
      */
     state State::Online {
         invariant {
-            kthreadd_ready_gate_completed(KthreaddReadyGate);
-            completion_online(KthreaddReadyGate);
-            completion_complete_committed(KthreaddReadyGate);
-            completion_token_available(KthreaddReadyGate);
-            completion_wakes_one_waiter(KthreaddReadyGate);
-            kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
-            kernel_init_released_for_pre_smp_init(KernelInitTask);
+            kthreadd_ready_gate_ready(KthreaddReadyGate);
+        }
+    }
+
+    actions {
+        /*
+         * ReleaseKernelInit 对应 complete(&kthreadd_done) 在 rest_init 场景
+         * 下释放 PID 1 的语义。Completion 的 token/wait_queue/wake-one
+         * 通用结果必须先由 KthreaddReadyGate.Event::Complete 提交；本 action
+         * 不复制 Completion 内部 bookkeeping，只提交场景事实。
+         */
+        Action::ReleaseKernelInit {
+            state_effect: StateEffect::None;
+            depends_on {
+                KthreaddReadyGate.state == State::Online;
+                SystemState.state == State::Ready;
+                KthreaddTask.state == State::Online;
+                KernelInitTask.state == State::Online;
+                kernel_init_waits_for_kthreadd_done(KernelInitTask);
+                completion_complete_committed(KthreaddReadyGate);
+                completion_token_available(KthreaddReadyGate);
+                completion_wakes_one_waiter(KthreaddReadyGate);
+            }
+            ensures {
+                kthreadd_ready_gate_completed(KthreaddReadyGate);
+                kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+                kernel_init_released_for_pre_smp_init(KernelInitTask);
+            }
         }
     }
 }
@@ -892,6 +901,8 @@ object RestInitPhase: PhaseObject {
                     SystemState.Event::Setup;
                     KthreaddReadyGate.Event::Setup;
                     KthreaddReadyGate.Event::Enable;
+                    KthreaddReadyGate.Event::Complete;
+                    KthreaddReadyGate.Action::ReleaseKernelInit;
                     KernelInitDispatchGate.Event::Setup;
                 }
 

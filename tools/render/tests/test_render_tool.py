@@ -23,6 +23,7 @@ from render_tool.render import (
     _rects_overlap,
     _trace_action_rect,
     _trace_annotation_occupied_boxes,
+    _trace_row_metrics,
     render_svg,
 )
 from view_tool.__main__ import main as view_main
@@ -365,6 +366,74 @@ class RenderToolTests(unittest.TestCase):
             '<line class="action-arrow" x1="112.0" y1="97.0" x2="360.0" y2="97.0" />',
             text,
         )
+
+    def test_render_svg_from_trace_view_does_not_overlap_phase_actions(self) -> None:
+        rows = [
+            {"index": 0, "kind": "gap", "label": "RestInitPhase.Event::Preset.body.start"},
+            {"index": 1, "kind": "action", "label": "RestInitPhase.Event::Preset.action.1"},
+            {"index": 2, "kind": "action", "label": "RestInitPhase.Event::Preset.action.2"},
+            {"index": 3, "kind": "gap", "label": "RestInitPhase.Event::Preset.body.end"},
+        ]
+        view = ViewModel(
+            name="trace",
+            graph_format="svg",
+            metadata={
+                "trace_columns": [
+                    {"index": 0, "kind": "phase", "depth": 0},
+                    {"index": 1, "kind": "phase_object_gap", "depth": 0},
+                    {"index": 2, "kind": "object", "depth": 0},
+                    {"index": 3, "kind": "gap", "depth": 0},
+                    {"index": 4, "kind": "object", "depth": 1},
+                ],
+                "trace_rows": rows,
+                "trace_cells": (
+                    TraceCell(
+                        id="event",
+                        kind="event_span",
+                        row=0,
+                        column=0,
+                        label="RestInitPhase.Event::Preset",
+                        row_span=4,
+                    ),
+                    TraceCell(
+                        id="action-1",
+                        kind="action",
+                        row=1,
+                        column=3,
+                        label="KthreaddReadyGate.Event::Complete",
+                        column_span=2,
+                    ),
+                    TraceCell(
+                        id="action-2",
+                        kind="action",
+                        row=2,
+                        column=3,
+                        label="KthreaddReadyGate.Action::ReleaseKernelInit",
+                        column_span=2,
+                    ),
+                ),
+                "trace_arrows": (
+                    TraceArrow(source="event", target="action-1", kind="action"),
+                    TraceArrow(source="event", target="action-2", kind="action"),
+                ),
+            },
+        )
+
+        render_svg(view)
+        row_metrics = _trace_row_metrics(rows)
+        total_height = 72 + 80 + sum(metric[1] for metric in row_metrics.values())
+
+        def row_box(row: int) -> tuple[float, float, float, float]:
+            y = total_height - 80 - sum(
+                row_metrics[index][1]
+                for index in range(row + 1)
+                if index in row_metrics
+            )
+            return (344.0, y, 260.0, row_metrics[row][1])
+
+        first = _trace_action_rect(row_box(1))
+        second = _trace_action_rect(row_box(2))
+        self.assertFalse(_rects_overlap(first, second))
 
     def test_render_svg_from_trace_view_with_annotations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

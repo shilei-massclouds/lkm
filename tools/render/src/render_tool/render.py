@@ -568,16 +568,18 @@ def _trace_row_metrics(rows: list[dict[str, object]]) -> dict[int, tuple[str, in
         if not isinstance(index, int) or not isinstance(kind, str):
             continue
         group_role = row.get("group_role")
-        if isinstance(label, str) and _is_trace_phase_row(label):
-            height = 20
-        elif group_role in {"source", "target"}:
+        if group_role in {"source", "target"}:
             height = 48
-        elif group_role == "context_action":
+        elif group_role == "context_action" or kind == "context_action":
             height = 56
         elif group_role == "context_guard":
             height = 28
         elif group_role in {"body_start", "body_end"}:
             height = 12
+        elif kind == "action":
+            height = 46
+        elif isinstance(label, str) and _is_trace_phase_row(label):
+            height = 20
         elif kind == "state":
             height = 48
         else:
