@@ -457,7 +457,10 @@ type SchedulerObject: TaskObject {
  * RunQueue is a top-level scheduler runqueue abstraction. The current model
  * stores task_refs as a temporary aggregate view; future CFS/RT/DL scheduler
  * class queues should own concrete membership, with RunQueue.task_refs derived
- * from those queues.
+ * from those queues. EnqueueTask commits the local membership fact
+ * runqueue_contains_task(self, task_ref); phase-level sequencing may derive
+ * task_enqueued_on_runqueue(task_ref, runqueue_ref) after selection and enqueue
+ * both succeed.
  */
 type RunQueue: TaskObject {
     ext_state: RunQueueRuntimeState;

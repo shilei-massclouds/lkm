@@ -46,6 +46,15 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 }
 
 context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
+    /*
+     * Per SEM-EXCLUSIVE-CONTEXT-001, nested within uses the standard
+     * no-argument form and consumes lexically visible bindings. The selected_rq
+     * binding produced by Scheduler.Action::SelectRunQueue is visible inside
+     * this context. In the current UP path, selected_rq is proven to target
+     * BootRunQueue, so this context is guarded by BootRunQueueLock. Future
+     * generic runqueue enqueue modeling should resolve the lock and obj_refs
+     * from the selected RunQueueRef instead of this BootRunQueue specialization.
+     */
     guard: RawSpinLockIrqSaveGuard {
         lock_ref: BootRunQueueLock;
 
@@ -97,8 +106,10 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
  * Enable 的 within WakeUpNewTaskContext 块直接驱动
  * Task.Event::SetRuntimeState(Running)，再通过 action result binding 把
  * Scheduler.Action::SelectRunQueue(KernelInitTaskRef) 返回的
- * runqueue ref 绑定为 selected_rq。随后以 selected_rq 进入
- * EnqueueSelectedRunQueueContext，并驱动
+ * runqueue ref 绑定为 selected_rq。随后用标准无实参 within 进入
+ * EnqueueSelectedRunQueueContext；selected_rq 作为外层 action result
+ * binding 在嵌套 within 中直接可见。当前 UP 路径证明 selected_rq
+ * 指向 BootRunQueue，因此该 context 仍由 BootRunQueueLock 建立边界，并驱动
  * RunQueue.Event::EnqueueTask(KernelInitTaskRef)。SelectRunQueue
  * 当前固定返回 BootRunQueueRef；完整选择策略后续 deferred。三者都成功后，
  * Enable 才提交 KernelInitTask Ready -> Online。
@@ -255,6 +266,7 @@ object KernelInitTask: Task {
                         ensures {
                             raw_spinlock_irqsave_entered(BootRunQueueLock, BootCurrentCPU);
                             raw_spinlock_irqrestore_exited(BootRunQueueLock, BootCurrentCPU);
+                            runqueue_contains_task(BootRunQueue, KernelInitTaskRef);
                         }
                     }
 
