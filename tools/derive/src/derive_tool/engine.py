@@ -40,11 +40,15 @@ _CHILD_ACTION_EXPR_RE = re.compile(
 )
 _ACTION_BIND_RE = re.compile(
     r"\Alet\s+([a-z][A-Za-z0-9_]*)\s*:\s*([A-Z][A-Za-z0-9_]*)\s*<-\s*"
-    r"([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    r"([A-Za-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _REF_EVENT_EXPR_RE = re.compile(
     r"\A([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
+_REF_ACTION_EXPR_RE = re.compile(
+    r"\A([a-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _TYPE_EVENT_RE_TEMPLATE = r"\bEvent::{}\b"
@@ -932,14 +936,33 @@ class _Deriver:
                 f"{object_name}.Action::{action_name}", args
             )
             display_expression = f"let {name}: {type_name} <- {display_call}"
-            call = _normalize_process_expression(
-                self.model,
-                object_name,
-                "Action",
-                action_name,
-                args,
-                display_call,
+            receiver = _binding_or_ref_value(object_name, bindings)
+            receiver_type = receiver.get("type") if receiver is not None else None
+            ref_process_type = (
+                _REF_TARGET_PROCESS_TYPES.get(receiver_type, receiver_type)
+                if receiver_type is not None
+                and _is_supported_ref_type_action(receiver_type, action_name)
+                else None
             )
+            if ref_process_type is not None:
+                call = _normalize_ref_process_expression(
+                    self.model,
+                    object_name,
+                    receiver_type or "",
+                    "Action",
+                    action_name,
+                    args,
+                    display_call,
+                )
+            else:
+                call = _normalize_process_expression(
+                    self.model,
+                    object_name,
+                    "Action",
+                    action_name,
+                    args,
+                    display_call,
+                )
             expression = f"let {name}: {type_name} <- {call}"
             bindings[name] = {"type": type_name}
             result_value = _action_result_value(
@@ -963,7 +986,34 @@ class _Deriver:
             )
             parent_expression = display_expression if expression != display_expression else expression
             obj = self.model.objects.get(object_name)
-            if obj is not None:
+            if ref_process_type is not None:
+                target_object = _ref_target_object(self.model, receiver)
+                canonical_args = _canonicalize_ref_aliases(args or "", bindings)
+                if not self._execute_type_process_drives(
+                    ref_process_type,
+                    target_object or object_name,
+                    "Action",
+                    action_name,
+                    canonical_args if args is not None else args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    process_parent=parent_expression,
+                    bindings=bindings,
+                ):
+                    return False
+                self._record_type_process_ensures(
+                    ref_process_type,
+                    target_object or object_name,
+                    "Action",
+                    action_name,
+                    canonical_args if args is not None else args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    bindings=bindings,
+                )
+            elif obj is not None:
                 if not self._execute_type_process_drives(
                     obj.kind,
                     object_name,
@@ -974,6 +1024,7 @@ class _Deriver:
                     event,
                     action_provider=action_provider,
                     process_parent=parent_expression,
+                    bindings=bindings,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -985,6 +1036,7 @@ class _Deriver:
                     entry_span,
                     event,
                     action_provider=action_provider,
+                    bindings=bindings,
                 )
             return True
 
@@ -1004,6 +1056,7 @@ class _Deriver:
                     self.model,
                     receiver_name,
                     receiver_type,
+                    "Event",
                     driven_event,
                     args,
                     entry,
@@ -1038,6 +1091,7 @@ class _Deriver:
                     event,
                     action_provider=action_provider,
                     process_parent=parent_expression,
+                    bindings=bindings,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1049,6 +1103,7 @@ class _Deriver:
                     entry_span,
                     event,
                     action_provider=action_provider,
+                    bindings=bindings,
                 )
                 return True
 
@@ -1106,6 +1161,7 @@ class _Deriver:
                 event,
                 action_provider=action_provider,
                 process_parent=parent_expression,
+                bindings=bindings,
             ):
                 return False
             self._record_type_process_ensures(
@@ -1117,6 +1173,7 @@ class _Deriver:
                 entry_span,
                 event,
                 action_provider=action_provider,
+                bindings=bindings,
             )
             return True
 
@@ -1133,6 +1190,7 @@ class _Deriver:
                     self.model,
                     driven_object,
                     "RunQueueRef",
+                    "Event",
                     driven_event,
                     args,
                     entry,
@@ -1167,6 +1225,7 @@ class _Deriver:
                     event,
                     action_provider=action_provider,
                     process_parent=parent_expression,
+                    bindings=bindings,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1178,6 +1237,7 @@ class _Deriver:
                     entry_span,
                     event,
                     action_provider=action_provider,
+                    bindings=bindings,
                 )
                 return True
             if obj is not None and _find_event(obj, driven_event) is None:
@@ -1220,6 +1280,7 @@ class _Deriver:
                         event,
                         action_provider=action_provider,
                         process_parent=parent_expression,
+                        bindings=bindings,
                     ):
                         return False
                     self._record_type_process_ensures(
@@ -1231,6 +1292,7 @@ class _Deriver:
                         entry_span,
                         event,
                         action_provider=action_provider,
+                        bindings=bindings,
                     )
                     return True
             else:
@@ -1246,6 +1308,73 @@ class _Deriver:
                 expression=entry,
             )
             return False
+
+        ref_action = _REF_ACTION_EXPR_RE.match(entry)
+        if ref_action is not None:
+            receiver_name, action_name, args = ref_action.group(1, 2, 3)
+            receiver = _binding_or_ref_value(receiver_name, bindings)
+            receiver_type = receiver.get("type") if receiver is not None else None
+            if receiver_type is not None and _is_supported_ref_type_action(
+                receiver_type, action_name
+            ):
+                process_type = _REF_TARGET_PROCESS_TYPES.get(
+                    receiver_type, receiver_type
+                )
+                target_object = _ref_target_object(self.model, receiver)
+                expression = _normalize_ref_process_expression(
+                    self.model,
+                    receiver_name,
+                    receiver_type,
+                    "Action",
+                    action_name,
+                    args,
+                    entry,
+                )
+                display_expression = _process_call_expression(
+                    f"{receiver_name}.Action::{action_name}", args
+                )
+                self._record(
+                    DerivationStatus.PROVED,
+                    f"ref action committed: {receiver_name}.Action::{action_name}",
+                    entry_span,
+                    object_name=event.object_name,
+                    event_name=event.name,
+                    expression=expression,
+                    display_expression=display_expression if expression != display_expression else None,
+                    source_kind="drives",
+                    predicate=None,
+                    proof_class="type_process_commit",
+                    proof_provider=action_provider,
+                    process_parent=process_parent,
+                )
+                parent_expression = (
+                    display_expression if expression != display_expression else expression
+                )
+                if not self._execute_type_process_drives(
+                    process_type,
+                    target_object or receiver_name,
+                    "Action",
+                    action_name,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    process_parent=parent_expression,
+                    bindings=bindings,
+                ):
+                    return False
+                self._record_type_process_ensures(
+                    process_type,
+                    target_object or receiver_name,
+                    "Action",
+                    action_name,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    bindings=bindings,
+                )
+                return True
 
         child_action = _CHILD_ACTION_EXPR_RE.match(entry)
         if child_action is not None:
@@ -1301,6 +1430,7 @@ class _Deriver:
                 event,
                 action_provider=action_provider,
                 process_parent=parent_expression,
+                bindings=bindings,
             ):
                 return False
             self._record_type_process_ensures(
@@ -1312,12 +1442,76 @@ class _Deriver:
                 entry_span,
                 event,
                 action_provider=action_provider,
+                bindings=bindings,
             )
             return True
 
         action = _ACTION_EXPR_RE.match(entry)
         if action is not None:
             object_name, action_name, args = action.group(1, 2, 3)
+            if object_name not in self.model.objects and _is_supported_ref_action(
+                object_name, action_name
+            ):
+                receiver = _binding_or_ref_value(object_name, bindings)
+                receiver_type = receiver.get("type") if receiver is not None else None
+                process_type = _REF_TARGET_PROCESS_TYPES.get(
+                    receiver_type or "", receiver_type or ""
+                )
+                target_object = _ref_target_object(self.model, receiver)
+                expression = _normalize_ref_process_expression(
+                    self.model,
+                    object_name,
+                    receiver_type or "",
+                    "Action",
+                    action_name,
+                    args,
+                    entry,
+                )
+                display_expression = _process_call_expression(
+                    f"{object_name}.Action::{action_name}", args
+                )
+                self._record(
+                    DerivationStatus.PROVED,
+                    f"ref action committed: {object_name}.Action::{action_name}",
+                    entry_span,
+                    object_name=event.object_name,
+                    event_name=event.name,
+                    expression=expression,
+                    display_expression=display_expression if expression != display_expression else None,
+                    source_kind="drives",
+                    predicate=None,
+                    proof_class="type_process_commit",
+                    proof_provider=action_provider,
+                    process_parent=process_parent,
+                )
+                parent_expression = (
+                    display_expression if expression != display_expression else expression
+                )
+                if not self._execute_type_process_drives(
+                    process_type,
+                    target_object or object_name,
+                    "Action",
+                    action_name,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    process_parent=parent_expression,
+                    bindings=bindings,
+                ):
+                    return False
+                self._record_type_process_ensures(
+                    process_type,
+                    target_object or object_name,
+                    "Action",
+                    action_name,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    bindings=bindings,
+                )
+                return True
             expression = _normalize_process_expression(
                 self.model,
                 object_name,
@@ -1356,6 +1550,7 @@ class _Deriver:
                     event,
                     action_provider=action_provider,
                     process_parent=parent_expression,
+                    bindings=bindings,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1367,6 +1562,7 @@ class _Deriver:
                     entry_span,
                     event,
                     action_provider=action_provider,
+                    bindings=bindings,
                 )
             return True
 
@@ -1392,6 +1588,7 @@ class _Deriver:
         *,
         action_provider: str,
         process_parent: str | None = None,
+        bindings: dict[str, dict[str, str]] | None = None,
     ) -> bool:
         key = (type_name, self_name, process_kind, process_name)
         if key in self.process_stack:
@@ -1418,10 +1615,27 @@ class _Deriver:
             args,
         )
         replacements = {**argument_bindings, "self": self_name}
-        drive_bindings = {
-            name: {"type": "ProcessArgument", "value": value}
-            for name, value in argument_bindings.items()
-        }
+        inherited_bindings = dict(bindings or {})
+        signature = dict(
+            _process_signature(self.model, type_name, process_kind, process_name) or ()
+        )
+        drive_bindings = dict(inherited_bindings)
+        for name, value in argument_bindings.items():
+            inherited = inherited_bindings.get(value)
+            if inherited is not None:
+                drive_bindings[name] = dict(inherited)
+                drive_bindings[name]["display"] = value
+                continue
+            param_type = signature.get(name)
+            ref_type = (
+                param_type
+                if param_type in _REF_TARGET_PROCESS_TYPES
+                else _known_ref_value_type(value)
+            )
+            if ref_type is not None:
+                drive_bindings[name] = {"type": ref_type, "value": value}
+            else:
+                drive_bindings[name] = {"type": "ProcessArgument", "value": value}
         drive_bindings["self"] = {"type": "Self", "value": self_name}
 
         self.process_stack.append(key)
@@ -1639,22 +1853,27 @@ class _Deriver:
         event: EventDef,
         *,
         action_provider: str,
+        bindings: dict[str, dict[str, str]] | None = None,
     ) -> None:
-        bindings = _process_argument_bindings(
+        argument_bindings = _process_argument_bindings(
             self.model,
             type_name,
             process_kind,
             process_name,
             args,
         )
-        bindings["self"] = self_name
+        inherited_bindings = dict(bindings or {})
+        replacements: dict[str, str] = {"self": self_name}
+        for name, value in argument_bindings.items():
+            inherited = inherited_bindings.get(value)
+            replacements[name] = inherited.get("value", value) if inherited else value
         for ensure in _process_ensures(
             self.model,
             type_name,
             process_kind,
             process_name,
         ):
-            expression = _substitute_process_bindings(ensure, bindings)
+            expression = _substitute_process_bindings(ensure, replacements)
             classification = _classify_obligation(
                 expression, "type process ensures", event.object_name
             )
@@ -2628,11 +2847,29 @@ def _type_declares_event(model: ObjectModel, obj: ObjectDef, event_name: str) ->
 
 
 def _is_supported_ref_event(receiver_name: str, event_name: str) -> bool:
-    return receiver_name.endswith("RunQueueRef") and event_name == "EnqueueTask"
+    receiver_type = _known_ref_value_type(receiver_name)
+    return receiver_type is not None and _is_supported_ref_type_event(
+        receiver_type, event_name
+    )
 
 
 def _is_supported_ref_type_event(type_name: str, event_name: str) -> bool:
     return type_name == "RunQueueRef" and event_name == "EnqueueTask"
+
+
+def _is_supported_ref_action(receiver_name: str, action_name: str) -> bool:
+    receiver_type = _known_ref_value_type(receiver_name)
+    return receiver_type is not None and _is_supported_ref_type_action(
+        receiver_type, action_name
+    )
+
+
+def _is_supported_ref_type_action(type_name: str, action_name: str) -> bool:
+    if type_name == "RunQueueRef":
+        return action_name == "PickNextTask"
+    if type_name == "TaskRef":
+        return action_name in {"SaveCoreContext", "RestoreCoreContext"}
+    return False
 
 
 def _within_parameter_bindings(
@@ -2643,10 +2880,10 @@ def _within_parameter_bindings(
         if value in inherited_bindings:
             bindings[name] = dict(inherited_bindings[value])
             bindings[name]["display"] = value
-        elif value.endswith("RunQueueRef"):
-            bindings[name] = {"type": "RunQueueRef", "value": value}
-        elif value.endswith("TaskRef"):
-            bindings[name] = {"type": "TaskRef", "value": value}
+        else:
+            value_type = _known_ref_value_type(value)
+            if value_type is not None:
+                bindings[name] = {"type": value_type, "value": value}
     return bindings
 
 
@@ -2689,6 +2926,10 @@ def _ref_target_object(
 def _ref_value_target_object(model: ObjectModel, ref_value: str | None) -> str | None:
     if not ref_value:
         return None
+    if ref_value == "CurrentRunQ":
+        return "BootRunQueue"
+    if ref_value == "CurrentTaskRef":
+        return "BootIdleTask"
     if ref_value == "BootRunQueueRef":
         return "BootRunQueue"
     if ref_value == "BootIdleTaskRef":
@@ -2717,7 +2958,8 @@ def _normalize_ref_process_expression(
     model: ObjectModel,
     receiver_name: str,
     receiver_type: str,
-    event_name: str,
+    process_kind: str,
+    process_name: str,
     args: str | None,
     fallback: str,
 ) -> str:
@@ -2727,12 +2969,32 @@ def _normalize_ref_process_expression(
     return _normalize_process_call(
         model,
         process_type,
-        f"{receiver_name}.Event::{event_name}",
-        "Event",
-        event_name,
+        f"{receiver_name}.{process_kind}::{process_name}",
+        process_kind,
+        process_name,
         args,
         fallback,
     )
+
+
+def _binding_or_ref_value(
+    receiver_name: str, bindings: dict[str, dict[str, str]]
+) -> dict[str, str] | None:
+    receiver = bindings.get(receiver_name)
+    if receiver is not None:
+        return receiver
+    receiver_type = _known_ref_value_type(receiver_name)
+    if receiver_type is None:
+        return None
+    return {"type": receiver_type, "value": receiver_name}
+
+
+def _known_ref_value_type(value: str) -> str | None:
+    if value.endswith("RunQueueRef") or value == "CurrentRunQ":
+        return "RunQueueRef"
+    if value.endswith("TaskRef"):
+        return "TaskRef"
+    return None
 
 
 def _normalize_process_expression(
@@ -2787,7 +3049,7 @@ def _process_signature(
         + re.escape(process_kind)
         + r"::"
         + re.escape(process_name)
-        + r"\s*(?:\(([^{};]*)\))?",
+        + r"\s*(?:\(([^{};]*)\))?(?:\s*->\s*[A-Z][A-Za-z0-9_]*)?\s*\{",
         re.S,
     )
     for block in type_decl.blocks:
@@ -3191,6 +3453,20 @@ def _action_result_value(
             r"\bAction::"
             + re.escape(action_name)
             + r"\b.*?scheduler_select_runqueue_returns\([^,]+,\s*[^,]+,\s*([A-Z][A-Za-z0-9_]*)\)",
+            re.S,
+        )
+        for block in type_decl.blocks:
+            match = pattern.search(block.body)
+            if match is not None:
+                return match.group(1)
+    if type_name == "TaskRef" and action_name == "PickNextTask":
+        type_decl = model.types.get("RunQueue")
+        if type_decl is None:
+            return None
+        pattern = re.compile(
+            r"\bAction::"
+            + re.escape(action_name)
+            + r"\b.*?runqueue_pick_next_task_returns\([^,]+,\s*[^,]+,\s*([A-Z][A-Za-z0-9_]*)\)",
             re.S,
         )
         for block in type_decl.blocks:

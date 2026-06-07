@@ -577,7 +577,10 @@ type ArceosExRestInitCodingMust {
          * must not introduce a KernelInitDispatchGate lifecycle object; the
          * branch point is the combination of Scheduler first-schedule and
          * KernelInitTask dispatch facts while BootInitTask continues the
-         * cpu_startup_entry() tail.
+         * cpu_startup_entry() tail. Scheduler.schedule() must derive the
+         * current task reference from the current CPU tp/current-task view,
+         * pick next from CurrentRunQ, then switch through TaskRef-based core
+         * context save/restore and publish the updated tp/current task fact.
          */
         arceos_ex_must_rest_init_publish_scheduler_dispatch_facts();
 

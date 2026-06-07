@@ -247,9 +247,19 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "Scheduler.Action::SwitchTo" in (record["expression"] or "")
-                    and "prev_ref: BootIdleTaskRef" in (record["expression"] or "")
-                    and "next_ref: BootIdleTaskRef" in (record["expression"] or "")
+                    record["expression"]
+                    == "let next: TaskRef <- CurrentRunQ.Action::PickNextTask(prev_ref: CurrentTaskRef)"
+                    and record["display_expression"]
+                    == "let next: TaskRef <- CurrentRunQ.Action::PickNextTask(CurrentTaskRef)"
+                    and record["proof_class"] == "action_result_binding"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "Scheduler.Action::SwitchTo(CurrentTaskRef, next)"
                     and record["proof_class"] == "action_commit"
                     and record["proof_provider"] == "within_context"
                     for record in proved
@@ -258,8 +268,8 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "BootIdleTask.Action::SaveCoreContext"
-                    and record["proof_class"] == "action_commit"
+                    == "CurrentTaskRef.Action::SaveCoreContext"
+                    and record["proof_class"] == "type_process_commit"
                     and record["proof_provider"] == "within_context"
                     and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
                     for record in proved
@@ -268,8 +278,8 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "BootIdleTask.Action::RestoreCoreContext"
-                    and record["proof_class"] == "action_commit"
+                    == "next.Action::RestoreCoreContext"
+                    and record["proof_class"] == "type_process_commit"
                     and record["proof_provider"] == "within_context"
                     and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
                     for record in proved

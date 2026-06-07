@@ -525,27 +525,13 @@ def _context_action_max_depth(node: dict[str, object]) -> int:
     if not isinstance(children, list):
         return 0
 
-    max_depth = 0
-
-    def visit_action(action: dict[str, object], depth: int) -> None:
-        nonlocal max_depth
-        max_depth = max(max_depth, depth)
-        nested_children = action.get("children")
-        if not isinstance(nested_children, list):
-            return
-        for nested in nested_children:
-            if isinstance(nested, dict) and nested.get("kind") == "action":
-                visit_action(nested, depth + 1)
+    max_depth = _context_span_start_depth(node)
 
     for child in children:
         if not isinstance(child, dict):
             continue
         if child.get("kind") == "context":
             max_depth = max(max_depth, _context_action_max_depth(child))
-        elif child.get("kind") == "action":
-            parent_keys = child.get("parent_keys")
-            external_depth = 1 if isinstance(parent_keys, set) and parent_keys else 0
-            visit_action(child, external_depth)
     return max_depth
 
 
@@ -1134,14 +1120,14 @@ class _TraceLayoutBuilder:
                     else None
                 )
                 effective_action_depth = (
-                    action_depth + 1 if external_parent_id is not None else action_depth
+                    1 if external_parent_id is not None else action_depth
                 )
                 external_parent_row = (
                     external_process_row(action_node.get("parent_keys"))
                     if external_parent_id is not None
                     else None
                 )
-                if external_parent_row is not None:
+                if external_parent_row is not None and action_index == 0:
                     action_row = external_parent_row
                 else:
                     action_row = len(self.rows)
@@ -1158,7 +1144,7 @@ class _TraceLayoutBuilder:
                         id=action_id,
                         kind="context_action",
                         row=action_row,
-                        column=context_column + effective_action_depth * 2,
+                        column=context_column + effective_action_depth,
                         label=str(action_node.get("action", "")),
                     )
                 )
@@ -1202,7 +1188,7 @@ class _TraceLayoutBuilder:
                         if isinstance(nested, dict) and nested.get("kind") == "action":
                             place_context_action(
                                 nested,
-                                action_depth=effective_action_depth + 1,
+                                action_depth=effective_action_depth,
                                 parent_action_id=action_id,
                             )
                 return action_id
@@ -1246,7 +1232,7 @@ class _TraceLayoutBuilder:
                     id=context_id,
                     kind="context_span",
                     row=span_row,
-                    column=max(0, context_column + context_start_depth * 2 - 1),
+                    column=max(0, context_column + context_start_depth),
                     label=context_label,
                     row_span=max(1, len(self.rows) - span_row),
                     column_span=context_span_columns,

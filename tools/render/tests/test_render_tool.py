@@ -376,8 +376,6 @@ class RenderToolTests(unittest.TestCase):
                     {"index": 0, "kind": "object", "depth": 0},
                     {"index": 1, "kind": "gap", "depth": 0},
                     {"index": 2, "kind": "object", "depth": 1},
-                    {"index": 3, "kind": "gap", "depth": 1},
-                    {"index": 4, "kind": "object", "depth": 2},
                 ],
                 "trace_rows": [
                     {
@@ -389,17 +387,23 @@ class RenderToolTests(unittest.TestCase):
                     {
                         "index": 1,
                         "kind": "context_action",
-                        "label": "switch",
+                        "label": "pick",
                         "group_role": "context_action",
                     },
                     {
                         "index": 2,
                         "kind": "context_action",
-                        "label": "save",
+                        "label": "switch",
                         "group_role": "context_action",
                     },
                     {
                         "index": 3,
+                        "kind": "context_action",
+                        "label": "save",
+                        "group_role": "context_action",
+                    },
+                    {
+                        "index": 4,
                         "kind": "context_action",
                         "label": "restore",
                         "group_role": "context_action",
@@ -414,28 +418,36 @@ class RenderToolTests(unittest.TestCase):
                         label="Scheduler.Action::Schedule",
                     ),
                     TraceCell(
-                        id="switch",
+                        id="pick",
                         kind="context_action",
                         row=1,
                         column=2,
-                        label="Scheduler.Action::SwitchTo(BootIdleTaskRef, BootIdleTaskRef)",
+                        label="let next: TaskRef <- CurrentRunQ.Action::PickNextTask(CurrentTaskRef)",
+                    ),
+                    TraceCell(
+                        id="switch",
+                        kind="context_action",
+                        row=2,
+                        column=2,
+                        label="Scheduler.Action::SwitchTo(CurrentTaskRef, next)",
                     ),
                     TraceCell(
                         id="save",
                         kind="context_action",
-                        row=2,
-                        column=4,
-                        label="BootIdleTask.Action::SaveCoreContext",
+                        row=3,
+                        column=2,
+                        label="CurrentTaskRef.Action::SaveCoreContext",
                     ),
                     TraceCell(
                         id="restore",
                         kind="context_action",
-                        row=3,
-                        column=4,
-                        label="BootIdleTask.Action::RestoreCoreContext",
+                        row=4,
+                        column=2,
+                        label="next.Action::RestoreCoreContext",
                     ),
                 ),
                 "trace_arrows": (
+                    TraceArrow(source="schedule", target="pick", kind="drives"),
                     TraceArrow(source="schedule", target="switch", kind="drives"),
                     TraceArrow(source="switch", target="save", kind="drives"),
                     TraceArrow(source="switch", target="restore", kind="drives"),
@@ -446,15 +458,11 @@ class RenderToolTests(unittest.TestCase):
         text = render_svg(view)
 
         self.assertIn(
-            '<line class="drive-arrow" x1="195.6" y1="207.0" x2="297.4" y2="185.0" />',
+            '<line class="drive-arrow" x1="376.0" y1="151.0" x2="376.0" y2="129.0" />',
             text,
         )
         self.assertIn(
-            '<line class="drive-arrow" x1="454.6" y1="151.0" x2="556.4" y2="129.0" />',
-            text,
-        )
-        self.assertIn(
-            '<line class="drive-arrow" x1="415.3" y1="151.0" x2="595.7" y2="73.0" />',
+            '<line class="drive-arrow" x1="376.0" y1="151.0" x2="376.0" y2="73.0" />',
             text,
         )
 

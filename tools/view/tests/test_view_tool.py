@@ -322,8 +322,7 @@ class ViewToolTests(unittest.TestCase):
             and "EnqueueSelectedRunQueueContext" in cell.label
         )
         self.assertGreater(context_cell.column, event_cell.column)
-        self.assertEqual(columns[context_cell.column]["kind"], "gap")
-        self.assertEqual(columns[context_cell.column + 1]["kind"], "object")
+        self.assertEqual(columns[context_cell.column]["kind"], "object")
         self.assertGreaterEqual(context_cell.column_span, 3)
         self.assertGreater(context_cell.row_span, enqueue_context_cell.row_span)
         self.assertEqual(enqueue_context_cell.column, context_cell.column)
@@ -357,7 +356,7 @@ class ViewToolTests(unittest.TestCase):
         ]
         self.assertTrue(
             all(
-                cell.column == context_cell.column + 1 and cell.column_span == 1
+                cell.column == context_cell.column and cell.column_span == 1
                 for cell in action_cells
             )
         )
@@ -443,10 +442,19 @@ class ViewToolTests(unittest.TestCase):
                     {
                         "object": "RestInitPhase",
                         "event": "Preset",
+                        "source_kind": "drives",
+                        "proof_class": "action_result_binding",
+                        "proof_provider": "within_context",
+                        "expression": "let next: TaskRef <- CurrentRunQ.Action::PickNextTask(prev_ref: CurrentTaskRef)",
+                        "display_expression": "let next: TaskRef <- CurrentRunQ.Action::PickNextTask(CurrentTaskRef)",
+                        "process_parent": "Scheduler.Action::Schedule",
+                    },
+                    {
+                        "object": "RestInitPhase",
+                        "event": "Preset",
                         "proof_class": "action_commit",
                         "proof_provider": "within_context",
-                        "expression": "Scheduler.Action::SwitchTo(prev_ref: BootIdleTaskRef, next_ref: BootIdleTaskRef)",
-                        "display_expression": "Scheduler.Action::SwitchTo(BootIdleTaskRef, BootIdleTaskRef)",
+                        "expression": "Scheduler.Action::SwitchTo(CurrentTaskRef, next)",
                         "process_parent": "Scheduler.Action::Schedule",
                     },
                     {
@@ -454,16 +462,16 @@ class ViewToolTests(unittest.TestCase):
                         "event": "Preset",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "BootIdleTask.Action::SaveCoreContext",
-                        "process_parent": "Scheduler.Action::SwitchTo(prev_ref: BootIdleTaskRef, next_ref: BootIdleTaskRef)",
+                        "expression": "CurrentTaskRef.Action::SaveCoreContext",
+                        "process_parent": "Scheduler.Action::SwitchTo(CurrentTaskRef, next)",
                     },
                     {
                         "object": "RestInitPhase",
                         "event": "Preset",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "BootIdleTask.Action::RestoreCoreContext",
-                        "process_parent": "Scheduler.Action::SwitchTo(prev_ref: BootIdleTaskRef, next_ref: BootIdleTaskRef)",
+                        "expression": "next.Action::RestoreCoreContext",
+                        "process_parent": "Scheduler.Action::SwitchTo(CurrentTaskRef, next)",
                     },
                     {
                         "object": "RestInitPhase",
@@ -504,7 +512,7 @@ class ViewToolTests(unittest.TestCase):
             cell for cell in ordinary_action_cells if cell.label == "Scheduler.Action::Schedule"
         )
         self.assertEqual(context_cell.column, schedule_cell.column + 1)
-        self.assertEqual(context_cell.column_span, 5)
+        self.assertEqual(context_cell.column_span, 3)
         self.assertLessEqual(context_cell.row, schedule_cell.row)
         self.assertLess(
             schedule_cell.row,
@@ -513,31 +521,42 @@ class ViewToolTests(unittest.TestCase):
         self.assertEqual(
             [cell.label for cell in sorted(action_cells, key=lambda cell: cell.row)],
             [
-                "Scheduler.Action::SwitchTo(BootIdleTaskRef, BootIdleTaskRef)",
-                "BootIdleTask.Action::SaveCoreContext",
-                "BootIdleTask.Action::RestoreCoreContext",
+                "let next: TaskRef <- CurrentRunQ.Action::PickNextTask(CurrentTaskRef)",
+                "Scheduler.Action::SwitchTo(CurrentTaskRef, next)",
+                "CurrentTaskRef.Action::SaveCoreContext",
+                "next.Action::RestoreCoreContext",
             ],
+        )
+        pick_cell = next(
+            cell
+            for cell in action_cells
+            if cell.label
+            == "let next: TaskRef <- CurrentRunQ.Action::PickNextTask(CurrentTaskRef)"
         )
         switch_cell = next(
             cell
             for cell in action_cells
             if cell.label
-            == "Scheduler.Action::SwitchTo(BootIdleTaskRef, BootIdleTaskRef)"
+            == "Scheduler.Action::SwitchTo(CurrentTaskRef, next)"
         )
         save_cell = next(
             cell
             for cell in action_cells
-            if cell.label == "BootIdleTask.Action::SaveCoreContext"
+            if cell.label == "CurrentTaskRef.Action::SaveCoreContext"
         )
         restore_cell = next(
             cell
             for cell in action_cells
-            if cell.label == "BootIdleTask.Action::RestoreCoreContext"
+            if cell.label == "next.Action::RestoreCoreContext"
         )
-        self.assertEqual(switch_cell.column, schedule_cell.column + 2)
-        self.assertEqual(switch_cell.row, schedule_cell.row)
-        self.assertEqual(save_cell.column, switch_cell.column + 2)
-        self.assertEqual(restore_cell.column, switch_cell.column + 2)
+        self.assertEqual(pick_cell.column, schedule_cell.column + 1)
+        self.assertEqual(switch_cell.column, pick_cell.column)
+        self.assertEqual(save_cell.column, pick_cell.column)
+        self.assertEqual(restore_cell.column, pick_cell.column)
+        self.assertEqual(pick_cell.row, schedule_cell.row)
+        self.assertGreater(switch_cell.row, pick_cell.row)
+        self.assertGreater(save_cell.row, switch_cell.row)
+        self.assertGreater(restore_cell.row, save_cell.row)
         self.assertTrue(
             any(
                 arrow.kind == "within"
@@ -549,6 +568,14 @@ class ViewToolTests(unittest.TestCase):
         self.assertEqual(
             sum(1 for arrow in arrows if arrow.kind == "context_order"),
             0,
+        )
+        self.assertTrue(
+            any(
+                arrow.kind == "drives"
+                and arrow.source == schedule_cell.id
+                and arrow.target == pick_cell.id
+                for arrow in arrows
+            )
         )
         self.assertTrue(
             any(

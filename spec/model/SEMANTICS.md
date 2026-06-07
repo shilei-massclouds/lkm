@@ -225,7 +225,7 @@ Completion 也说明了 event/action factoring 的边界：`Completion.Setup` �
 
 `Task.Action::PinToBootCpu(cpu_ref: CpuRef)` 是状态内 action，用于提交 task 的亲和性约束属性，不推进 task lifecycle，也不改变 `TaskRuntimeState`。在 `rest_init()` 中，调用点写为 `KernelInitTask.Action::PinToBootCpu(BootCPURef)`：receiver 已经确定目标 task，`BootCPURef` 是 `BootCPU` 发布的 CPU 引用。该 action 只提交两类属性事实：设置 `PF_NO_SETAFFINITY` 等价的 task flag，以及把 task cpumask 限制到 boot CPU。Linux 源码中的 `find_task_by_pid_ns(pid, &init_pid_ns)` 是用局部 pid 重新取回 task 指针的实现路径，不作为正式参数或 drives；规格层已经持有 `KernelInitTask` receiver。该源码路径由 `rcu_read_lock()/unlock()` 定界，当前保留为 deferred 上下文建模问题：它是否属于资源独占上下文，还是应建模为独立的 RCU/读侧上下文，后续讨论。
 
-正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。action 返回对象引用时，调用方必须用 action result binding 显式承接返回值，例如 `let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(...)`。该绑定是局部 SSA 风格值，作用域覆盖后续 drives 语句和嵌套 `within`；嵌套上下文直接使用该词法可见绑定，不通过 `within` 传参或重命名。后续对目标对象的操作应使用引用 receiver，例如 `selected_rq.Event::EnqueueTask(...)`，而不是把当前策略结果硬编码为 `BootRunQueue.Event` 或 `BootRunQueueRef.Event`。
+正式规格必须区分对象和对象引用。对象是被规格化的实体本身，拥有 lifecycle state、runtime state、facts 和 invariants；引用是某个上下文中可持有、传递和访问对象的能力或句柄。`TaskRef`、`RunQueueRef` 这类引用值通过 `task_ref_targets(ref, object)`、`runqueue_ref_targets(ref, object)` 绑定目标对象。`CurrentTaskRef` 是当前 CPU `tp` 寄存器指向当前 task 后形成的当前任务引用视图；`CurrentRunQ` 是当前调度上下文中的当前 runqueue 引用视图。action 返回对象引用时，调用方必须用 action result binding 显式承接返回值，例如 `let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(...)` 或 `let next: TaskRef <- CurrentRunQ.Action::PickNextTask(...)`。该绑定是局部 SSA 风格值，作用域覆盖后续 drives 语句和嵌套 `within`；嵌套上下文直接使用该词法可见绑定，不通过 `within` 传参或重命名。后续对目标对象的操作应使用引用 receiver，例如 `selected_rq.Event::EnqueueTask(...)`、`prev_ref.Action::SaveCoreContext`，而不是把当前策略结果硬编码为 `BootRunQueue.Event` 或 `BootIdleTask.Action`。
 
 `SchedulerObject.Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef` 是状态内 action。它只根据任务引用和当前调度条件选择目标 runqueue 引用，不推进 `Scheduler` lifecycle state，也不提交 runqueue 成员关系。当前 `rest_init()` 最小路径固定返回 `BootRunQueueRef`，即 boot CPU runqueue；完整 `select_task_rq()` 策略，包括 affinity、wake flags、scheduler class、load balance、SMP、migration disabled 和 cpuset 等，后续作为 deferred 策略展开。
 
@@ -237,7 +237,9 @@ Completion 也说明了 event/action factoring 的边界：`Completion.Setup` �
 上下文。`Schedule` 自身内部则建模 `schedule()`/`__schedule()` 的最小边界：
 先由 `PreemptionGuard` 建立 schedule-owned 不可抢占上下文，再由
 `LocalInterruptGuard` 关闭本 CPU 本地中断，然后在 runqueue lock context 中
-选择 next task 并进入 `SchedulerObject.Action::SwitchTo(prev_ref, next_ref)`。
+先从 `tp`/current task 视图得到 `CurrentTaskRef`，再执行
+`let next: TaskRef <- CurrentRunQ.Action::PickNextTask(CurrentTaskRef)`，
+最后进入 `SchedulerObject.Action::SwitchTo(CurrentTaskRef, next)`。
 
 `SwitchTo` 对应 Linux `context_switch()` 中 `prepare_task_switch()` 和
 `finish_task_switch()` 之间的 `switch_to(prev, next, last)` 核心位置。RISC-V
@@ -245,11 +247,12 @@ Completion 也说明了 event/action factoring 的边界：`Completion.Setup` �
 再由 `__switch_to` 保存 `prev->thread` 并恢复 `next->thread` 的核心寄存器。
 正式规格当前只覆盖 `__switch_to` 的核心寄存器组：`ra`、`sp` 和
 callee-saved `s0..s11`。这些寄存器不属于 `Scheduler`，而属于每个 `Task`
-拥有的 `TaskThreadContext` 内嵌结构。`Task.Action::SaveCoreContext` 和
-`Task.Action::RestoreCoreContext` 分别提交该内嵌结构的保存和恢复事实。
-当前 UP 最小路径允许 `prev == next == BootIdleTaskRef`，因此 `SwitchTo` 只提交
-identity switch 框架事实和核心上下文保存/恢复事实，不执行真实 task stack
-switch。完整 `prev != next` 切换、`last` 返回值、MM 切换、FPU/vector、
+拥有的 `TaskThreadContext` 内嵌结构。`SwitchTo(prev_ref, next_ref)` 内部通过
+`prev_ref.Action::SaveCoreContext` 和 `next_ref.Action::RestoreCoreContext`
+提交保存/恢复事实；完成后 `tp` 必须指向 next 对应的当前 task。当前 UP
+最小路径允许 `prev == next == CurrentTaskRef`，该引用目标是 `BootIdleTask`，
+因此 `SwitchTo` 只提交 identity switch 框架事实和核心上下文保存/恢复事实，
+不执行真实 task stack switch。完整 `prev != next` 切换、`last` 返回值、MM 切换、FPU/vector、
 `prepare_task_switch()`/`finish_task_switch()` 钩子、`sched_submit_work()`、
 worker sleep/running hook、RCU context switch 和 scheduler class pick 细节后续按对象展开。
 

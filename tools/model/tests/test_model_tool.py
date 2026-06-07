@@ -367,7 +367,7 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
 
-    def test_multi_argument_type_process_requires_named_drive_args(self) -> None:
+    def test_multi_argument_type_process_allows_positional_drive_args(self) -> None:
         source = """
             type T {
                 processes {
@@ -405,9 +405,49 @@ class ModelToolTests(unittest.TestCase):
             with contextlib.redirect_stderr(stderr):
                 exit_code = model_main([str(ast), "-o", str(model)])
 
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+
+    def test_multi_argument_type_process_rejects_wrong_positional_count(self) -> None:
+        source = """
+            type T {
+                processes {
+                    Action::Copy(src: TaskRef, dst: TaskRef) {
+                    }
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                A.Action::Copy(SourceTaskRef);
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "multi-arg-position-bad.spec"
+            ast = Path(tmp) / "multi-arg-position-bad.ast.json"
+            model = Path(tmp) / "multi-arg-position-bad.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
             self.assertEqual(exit_code, 1)
             self.assertIn(
-                "positional process arguments require a single-parameter signature",
+                "positional process argument count mismatch",
                 stderr.getvalue(),
             )
 

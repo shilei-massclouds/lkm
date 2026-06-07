@@ -653,12 +653,14 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 `Scheduler.schedule()` 是 `Scheduler.Online` 后的调度分界 event。当前阶段只能由实现或 smoke 主动调用；
 不得依赖中断、tick、softirq 或 workqueue 触发。该 event 自己负责 `schedule()`/`__schedule()` 内部边界：
-进入 schedule-owned preemption guard，关闭 boot CPU 本地中断，进入 runqueue lock context，选择 next task，
-并经过 `Scheduler.switch_to(prev_ref, next_ref)` 框架后再退出这些边界。调用方不得为了满足 `Scheduler.schedule()` 前置条件而直接裸写
+进入 schedule-owned preemption guard，关闭 boot CPU 本地中断，进入 runqueue lock context，先从当前 CPU 的
+`tp`/current task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQ` 执行 `pick_next_task` 得到 `next`，
+并经过 `Scheduler.switch_to(CurrentTaskRef, next)` 框架后再退出这些边界。调用方不得为了满足 `Scheduler.schedule()` 前置条件而直接裸写
 `sstatus.SIE`；本地中断总开关必须通过 `LocalInterruptControl` 操作。当前 RISC-V `switch_to` 框架只模拟 Linux
 `__switch_to` 的核心保存/恢复边界：每个 `Task` 拥有一个 `TaskThreadContext`，其寄存器组严格对应
-`thread.ra`、`thread.sp` 和 `thread.s[0..11]`。当前只有一个任务，因此 `prev == next == BootIdleTask`，
-实现只提交核心上下文已保存/已恢复和 identity switch fact，不执行真实 task stack switch。若调用路径来自
+`thread.ra`、`thread.sp` 和 `thread.s[0..11]`。保存/恢复必须通过 `TaskRef` receiver 对目标 task 的
+`TaskThreadContext` 生效，`switch_to` 完成后必须提交 `tp` 已指向 next/current task 的事实。当前只有一个任务，
+因此 `prev == next == CurrentTaskRef` 且目标为 `BootIdleTask`，实现只提交核心上下文已保存/已恢复和 identity switch fact，不执行真实 task stack switch。若调用路径来自
 `schedule_preempt_disabled()`，调用方继承的 preemption guard 退出和 post-schedule guard 重新进入必须在调用方上下文中显式建模。
 
 `RadixTree.setup()` 和 `MapleTree.setup()` 只建立 node cache 与全局分配基础。具体 radix tree、IDR、XArray、maple tree

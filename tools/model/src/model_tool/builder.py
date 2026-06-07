@@ -41,12 +41,16 @@ _OBJECT_ACTION_EXPR_RE = re.compile(
 )
 _ACTION_BIND_RE = re.compile(
     r"\Alet\s+([a-z][A-Za-z0-9_]*)\s*:\s*([A-Z][A-Za-z0-9_]*)\s*<-\s*"
-    r"([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    r"([A-Za-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _REF_EVENT_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
 _REF_EVENT_EXPR_RE = re.compile(
     r"\A([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
+_REF_ACTION_EXPR_RE = re.compile(
+    r"\A([a-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _LOCK_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
@@ -929,15 +933,42 @@ def _check_drive_references(
         bind = _ACTION_BIND_RE.match(entry)
         if bind is not None:
             name, type_name, object_name, action_name, args = bind.group(1, 2, 3, 4, 5)
-            _check_action_reference(
-                model,
-                object_name,
-                action_name,
-                diagnostics,
-                entry_span,
-                context=context,
-            )
-            if type_name != _action_return_type(model, object_name, action_name):
+            receiver_type = _binding_or_ref_value_type(object_name, bindings)
+            if object_name in model.objects:
+                _check_action_reference(
+                    model,
+                    object_name,
+                    action_name,
+                    diagnostics,
+                    entry_span,
+                    context=context,
+                )
+                return_type = _action_return_type(model, object_name, action_name)
+            elif receiver_type is not None and _is_supported_ref_type_action(
+                receiver_type, action_name
+            ):
+                return_type = _ref_action_return_type(model, receiver_type, action_name)
+                process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
+                if process_type is not None:
+                    _check_process_arguments(
+                        model,
+                        process_type,
+                        "Action",
+                        action_name,
+                        args,
+                        diagnostics,
+                        entry_span,
+                    )
+            else:
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"unknown action receiver: {object_name}.Action::{action_name}",
+                        entry_span,
+                    )
+                )
+                return_type = None
+            if type_name != return_type:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
@@ -964,7 +995,12 @@ def _check_drive_references(
         ):
             continue
         if _check_drive_action_entry(
-            model, entry, entry_span, diagnostics, context=context
+            model,
+            entry,
+            entry_span,
+            diagnostics,
+            context=context,
+            bindings=bindings,
         ):
             continue
         _check_event_references(model, block, diagnostics, bindings=bindings)
@@ -1061,11 +1097,65 @@ def _check_drive_action_entry(
     diagnostics: list[Diagnostic],
     *,
     context: ExclusiveContextDef | None = None,
+    bindings: dict[str, str],
 ) -> bool:
+    ref_action = _REF_ACTION_EXPR_RE.match(entry)
+    if ref_action is not None:
+        receiver_name, action_name, args = ref_action.group(1, 2, 3)
+        receiver_type = _binding_or_ref_value_type(receiver_name, bindings)
+        if receiver_type is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown ref binding in action reference: {receiver_name}.Action::{action_name}",
+                    span,
+                )
+            )
+            return True
+        if not _is_supported_ref_type_action(receiver_type, action_name):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "unsupported ref action reference: "
+                    f"{receiver_name}: {receiver_type}.Action::{action_name}",
+                    span,
+                )
+            )
+            return True
+        process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
+        if process_type is not None:
+            _check_process_arguments(
+                model,
+                process_type,
+                "Action",
+                action_name,
+                args,
+                diagnostics,
+                span,
+            )
+        return True
+
     action = _OBJECT_ACTION_EXPR_RE.match(entry)
     if action is None:
         return False
     object_name, action_name, args = action.group(1, 2, 3)
+    if object_name not in model.objects:
+        receiver_type = _binding_or_ref_value_type(object_name, bindings)
+        if receiver_type is not None and _is_supported_ref_type_action(
+            receiver_type, action_name
+        ):
+            process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
+            if process_type is not None:
+                _check_process_arguments(
+                    model,
+                    process_type,
+                    "Action",
+                    action_name,
+                    args,
+                    diagnostics,
+                    span,
+                )
+            return True
     _check_action_reference(
         model,
         object_name,
@@ -1179,11 +1269,22 @@ def _type_declares_event(type_decl: TypeDecl, event_name: str) -> bool:
 
 
 def _is_supported_ref_event(receiver_name: str, event_name: str) -> bool:
-    return receiver_name.endswith("RunQueueRef") and event_name == "EnqueueTask"
+    receiver_type = _known_ref_value_type(receiver_name)
+    return receiver_type is not None and _is_supported_ref_type_event(
+        receiver_type, event_name
+    )
 
 
 def _is_supported_ref_type_event(type_name: str, event_name: str) -> bool:
     return type_name == "RunQueueRef" and event_name == "EnqueueTask"
+
+
+def _is_supported_ref_type_action(type_name: str, action_name: str) -> bool:
+    if type_name == "RunQueueRef":
+        return action_name == "PickNextTask"
+    if type_name == "TaskRef":
+        return action_name in {"SaveCoreContext", "RestoreCoreContext"}
+    return False
 
 
 def _check_process_arguments(
@@ -1223,21 +1324,12 @@ def _check_process_arguments(
         return
     if _uses_named_args(args):
         return
-    if len(signature) != 1:
+    raw_args = [item.strip() for item in args.split(",") if item.strip()]
+    if len(signature) != len(raw_args):
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
-                "positional process arguments require a single-parameter signature: "
-                f"{type_name}.{process_kind}::{process_name}",
-                span,
-            )
-        )
-        return
-    if "," in args:
-        diagnostics.append(
-            Diagnostic(
-                Severity.ERROR,
-                "positional process arguments are only supported for one argument: "
+                "positional process argument count mismatch: "
                 f"{type_name}.{process_kind}::{process_name}",
                 span,
             )
@@ -1245,7 +1337,23 @@ def _check_process_arguments(
 
 
 def _is_known_ref_value(value: str) -> bool:
-    return value.endswith("Ref")
+    return _known_ref_value_type(value) is not None
+
+
+def _binding_or_ref_value_type(
+    value: str, bindings: dict[str, str]
+) -> str | None:
+    if value in bindings:
+        return bindings[value]
+    return _known_ref_value_type(value)
+
+
+def _known_ref_value_type(value: str) -> str | None:
+    if value.endswith("RunQueueRef") or value == "CurrentRunQ":
+        return "RunQueueRef"
+    if value.endswith("TaskRef"):
+        return "TaskRef"
+    return None
 
 
 def _within_parameter_bindings(
@@ -1273,7 +1381,7 @@ def _process_signature(
         + re.escape(process_kind)
         + r"::"
         + re.escape(process_name)
-        + r"\s*(?:\(([^{};]*)\))?",
+        + r"\s*(?:\(([^{};]*)\))?(?:\s*->\s*[A-Z][A-Za-z0-9_]*)?\s*\{",
         re.S,
     )
     for block in type_decl.blocks:
@@ -1312,9 +1420,29 @@ def _action_return_type(
     if obj.kind in model.types:
         candidates.extend(block.body for block in model.types[obj.kind].blocks)
     candidates.extend(block.body for block in obj.decl.other_blocks)
+    return _process_return_type(candidates, "Action", action_name)
+
+
+def _ref_action_return_type(
+    model: ObjectModel, receiver_type: str, action_name: str
+) -> str | None:
+    process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
+    type_decl = model.types.get(process_type or receiver_type)
+    if type_decl is None:
+        return None
+    return _process_return_type(
+        [block.body for block in type_decl.blocks], "Action", action_name
+    )
+
+
+def _process_return_type(
+    candidates: list[str], process_kind: str, process_name: str
+) -> str | None:
     pattern = re.compile(
-        r"\bAction::"
-        + re.escape(action_name)
+        r"\b"
+        + re.escape(process_kind)
+        + r"::"
+        + re.escape(process_name)
         + r"\s*(?:\([^{};]*\))?\s*->\s*([A-Z][A-Za-z0-9_]*)\b",
         re.S,
     )
