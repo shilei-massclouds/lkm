@@ -86,6 +86,7 @@ def _record_to_json(record: DerivationRecord) -> dict[str, Any]:
         "obligation_category": record.obligation_category,
         "proof_class": record.proof_class,
         "proof_provider": record.proof_provider,
+        "process_parent": record.process_parent,
     }
 
 

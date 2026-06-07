@@ -136,34 +136,22 @@ fn schedule_once_from_preempt_disabled_context(ctx: &mut Context) -> EventResult
         return failed_dispatch_preset();
     }
 
-    let interrupts_enabled = crate::arch::riscv64::csr::supervisor_interrupts_enabled();
-    if interrupts_enabled {
-        crate::arch::riscv64::csr::disable_supervisor_interrupts();
-    }
     if ctx
         .scheduler
         .boot_idle_preemption_mut()
         .enable_no_resched()
         .is_err()
     {
-        if interrupts_enabled {
-            crate::arch::riscv64::csr::enable_supervisor_interrupts();
-        }
         return failed_dispatch_preset();
     }
 
-    // Current arceos_ex schedule() boundary requires local interrupts already
-    // closed. Interrupt context modeling remains a separate pending item.
-    let schedule_result = ctx.scheduler.schedule();
+    let schedule_result = ctx.scheduler.schedule(&mut ctx.boot_cpu_local_interrupt);
     let preempt_disable_result = ctx.scheduler.boot_idle_preemption_mut().disable();
     // arceos_ex runs these phases linearly in one execution context. Restore
     // the simulated CPU controls after recording the post-schedule boot-idle
     // atomic context so later smoke tests and object phases observe the normal
     // boot environment.
     let preempt_enable_result = ctx.scheduler.boot_idle_preemption_mut().enable();
-    if interrupts_enabled {
-        crate::arch::riscv64::csr::enable_supervisor_interrupts();
-    }
     if schedule_result.is_err() || preempt_disable_result.is_err() || preempt_enable_result.is_err()
     {
         return failed_dispatch_preset();

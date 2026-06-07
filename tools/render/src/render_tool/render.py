@@ -296,8 +296,8 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         "text { font-family: Arial, sans-serif; fill: #1f2937; }",
         ".state { fill: #ffffff; stroke: #334155; stroke-width: 1.1; }",
         ".event-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
-        ".action { fill: #fffbeb; stroke: #d97706; stroke-width: 1; }",
-        ".action-arrow { stroke: #d97706; stroke-width: 1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
+        ".action { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
+        ".action-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".verified-state { fill: #f8fafc; stroke: #64748b; stroke-width: 1.1; }",
         ".phase-arrow { stroke: #0f172a; stroke-width: 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".phase-label { fill: #0f172a; font-weight: 600; }",
@@ -306,7 +306,7 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         ".depends-arrow { stroke: #64748b; stroke-width: 1; stroke-dasharray: 4 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".within-arrow { stroke: #0f766e; stroke-width: 1.1; stroke-dasharray: 5 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".context-box { fill: #f0fdfa; stroke: #0f766e; stroke-width: 1.2; stroke-dasharray: 6 4; }",
-        ".context-action { fill: #ffffff; stroke: #0f766e; stroke-width: 1; }",
+        ".context-action { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
         ".context-order { stroke: #0f766e; stroke-width: 1; fill: none; marker-end: url(#arrow); }",
         ".context-title { fill: #0f766e; font-weight: 600; }",
         ".context-guard { fill: #115e59; }",
@@ -359,13 +359,21 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         elif arrow.kind == "drives":
             if _is_phase_to_phase_arrow(source, target):
                 continue
-            _append_trace_horizontal_arrow(
-                lines,
-                _trace_event_anchor_box(source, cell_box(source)),
-                _trace_event_anchor_box(target, cell_box(target)),
-                css_class="drive-arrow",
-                max_length=_TRACE_DRIVE_ARROW_MAX_LENGTH,
-            )
+            if source.kind == "context_action" or target.kind == "context_action":
+                _append_trace_directed_arrow(
+                    lines,
+                    _trace_semantic_anchor_box(source, cell_box(source)),
+                    _trace_semantic_anchor_box(target, cell_box(target)),
+                    css_class="drive-arrow",
+                )
+            else:
+                _append_trace_horizontal_arrow(
+                    lines,
+                    _trace_event_anchor_box(source, cell_box(source)),
+                    _trace_event_anchor_box(target, cell_box(target)),
+                    css_class="drive-arrow",
+                    max_length=_TRACE_DRIVE_ARROW_MAX_LENGTH,
+                )
         elif arrow.kind == "depends_on":
             _append_trace_horizontal_arrow(
                 lines, cell_box(source), cell_box(target), css_class="depends-arrow"
@@ -570,6 +578,8 @@ def _trace_row_metrics(rows: list[dict[str, object]]) -> dict[int, tuple[str, in
         group_role = row.get("group_role")
         if group_role in {"source", "target"}:
             height = 48
+        elif group_role == "context_padding":
+            height = 22
         elif group_role == "context_action" or kind == "context_action":
             height = 56
         elif group_role == "context_guard":
@@ -668,13 +678,7 @@ def _append_trace_context_box(
     *,
     nested: bool = False,
 ) -> None:
-    x, y, width, height = box
-    pad_x = 22 if nested else 10
-    pad_y = 6
-    box_x = x + pad_x
-    box_y = y + pad_y
-    box_width = max(20, width - pad_x * 2)
-    box_height = max(20, height - pad_y * 2)
+    box_x, box_y, box_width, box_height = _trace_context_box_rect(box, nested=nested)
     title, details = _trace_context_label_lines(cell.label)
     lines.extend(
         [
@@ -693,7 +697,7 @@ def _append_trace_context_box(
 def _append_trace_context_action(
     lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
 ) -> None:
-    box_x, box_y, box_width, box_height = _trace_context_action_rect(box)
+    box_x, box_y, box_width, box_height = _trace_step_rect(box)
     center_x = box_x + box_width / 2
     center_y = box_y + box_height / 2
     lines.extend(
@@ -715,7 +719,7 @@ def _append_trace_context_action(
 def _append_trace_action(
     lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
 ) -> None:
-    box_x, box_y, box_width, box_height = _trace_action_rect(box)
+    box_x, box_y, box_width, box_height = _trace_step_rect(box)
     center_x = box_x + box_width / 2
     center_y = box_y + box_height / 2
     lines.extend(
@@ -739,8 +743,8 @@ def _append_trace_context_order_arrow(
     source_box: tuple[float, float, float, float],
     target_box: tuple[float, float, float, float],
 ) -> None:
-    source_x, source_y, source_w, source_h = _trace_context_action_rect(source_box)
-    target_x, target_y, target_w, target_h = _trace_context_action_rect(target_box)
+    source_x, source_y, source_w, source_h = _trace_step_rect(source_box)
+    target_x, target_y, target_w, target_h = _trace_step_rect(target_box)
     source_center_y = source_y + source_h / 2
     target_center_y = target_y + target_h / 2
     x = (source_x + source_w / 2 + target_x + target_w / 2) / 2
@@ -761,7 +765,7 @@ def _append_trace_action_arrow(
     target_box: tuple[float, float, float, float],
 ) -> None:
     source_x, _source_y, source_w, _source_h = source_box
-    target_x, target_y, target_w, target_h = _trace_action_rect(target_box)
+    target_x, target_y, target_w, target_h = _trace_step_rect(target_box)
     target_center_x = target_x + target_w / 2
     source_center_x = source_x + source_w / 2
     y = target_y + target_h / 2
@@ -779,22 +783,22 @@ def _append_trace_action_arrow(
 def _trace_context_action_rect(
     box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
-    x, y, width, height = box
-    pad_x = 22
-    box_width = max(20, width - pad_x * 2)
-    box_height = 34
-    box_x = x + pad_x
-    box_y = y + (height - box_height) / 2 + 4
-    return box_x, box_y, box_width, box_height
+    return _trace_step_rect(box)
 
 
 def _trace_action_rect(
     box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
+    return _trace_step_rect(box)
+
+
+def _trace_step_rect(
+    box: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
     x, y, width, height = box
-    pad_x = 14
+    pad_x = _TRACE_EVENT_LABEL_PAD_X
     box_width = max(20, width - pad_x * 2)
-    box_height = 34
+    box_height = _TRACE_EVENT_LABEL_HEIGHT
     box_x = x + pad_x
     box_y = y + (height - box_height) / 2
     return box_x, box_y, box_width, box_height
@@ -876,6 +880,22 @@ def _append_trace_directed_horizontal_arrow(
     )
 
 
+def _append_trace_directed_arrow(
+    lines: list[str],
+    source_box: tuple[float, float, float, float],
+    target_box: tuple[float, float, float, float],
+    *,
+    css_class: str,
+) -> None:
+    source_center = _rect_center(source_box)
+    target_center = _rect_center(target_box)
+    x1, y1 = _rect_edge_point_towards(source_box, target_center)
+    x2, y2 = _rect_edge_point_towards(target_box, source_center)
+    lines.append(
+        f'<line class="{css_class}" x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" />'
+    )
+
+
 def _trace_event_anchor_box(
     cell: TraceCell, box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
@@ -886,6 +906,14 @@ def _trace_event_anchor_box(
     label_x = x + _TRACE_EVENT_LABEL_PAD_X
     label_y = y + (height - _TRACE_EVENT_LABEL_HEIGHT) / 2
     return label_x, label_y, label_width, _TRACE_EVENT_LABEL_HEIGHT
+
+
+def _trace_semantic_anchor_box(
+    cell: TraceCell, box: tuple[float, float, float, float]
+) -> tuple[float, float, float, float]:
+    if cell.kind in {"action", "context_action"}:
+        return _trace_step_rect(box)
+    return _trace_event_anchor_box(cell, box)
 
 
 def _trace_annotation_items(
@@ -1024,10 +1052,10 @@ def _trace_annotation_occupied_boxes(
 
 
 def _trace_context_box_rect(
-    box: tuple[float, float, float, float]
+    box: tuple[float, float, float, float], *, nested: bool = False
 ) -> tuple[float, float, float, float]:
     x, y, width, height = box
-    pad_x = 10
+    pad_x = 16 if nested else 10
     pad_y = 6
     return x + pad_x, y + pad_y, max(20, width - pad_x * 2), max(20, height - pad_y * 2)
 

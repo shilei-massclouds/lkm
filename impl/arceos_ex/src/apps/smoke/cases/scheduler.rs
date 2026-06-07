@@ -1,6 +1,5 @@
 use crate::{
     apps::smoke::SmokeResult,
-    arch::riscv64::csr,
     context::context,
     objects::{printk, state::State},
 };
@@ -25,56 +24,81 @@ pub fn run() -> SmokeResult {
         printk::write_str("current CPU or idle task control facts invalid\n");
         return SmokeResult::Failed;
     }
-    let interrupts_enabled = csr::supervisor_interrupts_enabled();
-    if !interrupts_enabled {
+    if !ctx.boot_cpu_local_interrupt.enabled() {
         printk::write_str("interrupts not enabled before scheduler smoke\n");
         return SmokeResult::Failed;
     }
 
     let before = ctx.scheduler.schedule_passes();
-    if ctx.boot_cpu_local_interrupt.save_and_disable().is_err()
-        || ctx.scheduler.boot_idle_preemption_mut().disable().is_err()
-    {
+    let switch_before = ctx.scheduler.switch_to_passes();
+    let identity_switch_before = ctx.scheduler.identity_switch_passes();
+    let core_saved_before = ctx
+        .scheduler
+        .boot_idle_task()
+        .thread_context()
+        .core_saved_count();
+    let core_restored_before = ctx
+        .scheduler
+        .boot_idle_task()
+        .thread_context()
+        .core_restored_count();
+    let saved_before = ctx.boot_cpu_local_interrupt.saved_and_disabled_count();
+    let restored_before = ctx.boot_cpu_local_interrupt.restored_count();
+    if ctx.scheduler.boot_idle_preemption_mut().disable().is_err() {
         printk::write_str("failed to enter scheduler smoke critical state\n");
         return SmokeResult::Failed;
     }
     let enable_no_resched = ctx.scheduler.boot_idle_preemption_mut().enable_no_resched();
-    let schedule = ctx.scheduler.schedule();
+    let schedule = ctx.scheduler.schedule(&mut ctx.boot_cpu_local_interrupt);
     let disable = ctx.scheduler.boot_idle_preemption_mut().disable();
     if enable_no_resched.is_err() || schedule.is_err() || disable.is_err() {
         printk::write_str("schedule boundary failed\n");
         let _ = ctx.scheduler.boot_idle_preemption_mut().enable();
-        let _ = ctx.boot_cpu_local_interrupt.restore();
         return SmokeResult::Failed;
     }
-    if ctx.scheduler.boot_idle_preemption_mut().enable().is_err()
-        || ctx.boot_cpu_local_interrupt.restore().is_err()
-    {
+    if ctx.scheduler.boot_idle_preemption_mut().enable().is_err() {
         printk::write_str("failed to leave scheduler smoke critical state\n");
         return SmokeResult::Failed;
     }
 
-    if !csr::supervisor_interrupts_enabled() {
-        csr::enable_supervisor_interrupts();
-    }
-    if !csr::supervisor_interrupts_enabled() {
+    if !ctx.boot_cpu_local_interrupt.enabled() {
         printk::write_str("scheduler smoke failed to restore interrupts\n");
         return SmokeResult::Failed;
     }
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.schedule_passes() != before.wrapping_add(1)
+        || ctx.scheduler.switch_to_passes() != switch_before.wrapping_add(1)
+        || ctx.scheduler.identity_switch_passes() != identity_switch_before.wrapping_add(1)
         || ctx.scheduler.boot_runqueue().curr_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || ctx.scheduler.boot_runqueue().idle_task_id() != ctx.scheduler.boot_idle_task().task_id()
-        || ctx.boot_cpu_local_interrupt.saved_and_disabled_count() == 0
-        || ctx.boot_cpu_local_interrupt.restored_count() == 0
+        || !ctx
+            .scheduler
+            .boot_idle_task()
+            .thread_context()
+            .core_register_set()
+        || ctx
+            .scheduler
+            .boot_idle_task()
+            .thread_context()
+            .core_saved_count()
+            != core_saved_before.wrapping_add(1)
+        || ctx
+            .scheduler
+            .boot_idle_task()
+            .thread_context()
+            .core_restored_count()
+            != core_restored_before.wrapping_add(1)
+        || ctx.boot_cpu_local_interrupt.saved_and_disabled_count() != saved_before.wrapping_add(1)
+        || ctx.boot_cpu_local_interrupt.restored_count() != restored_before.wrapping_add(1)
     {
         printk::write_str("scheduler single-task pass facts invalid\n");
         return SmokeResult::Failed;
     }
 
     printk::write_fmt(format_args!(
-        "schedule_passes={} boot_cpu={} current_task={}\n",
+        "schedule_passes={} switch_to_passes={} boot_cpu={} current_task={}\n",
         ctx.scheduler.schedule_passes(),
+        ctx.scheduler.switch_to_passes(),
         ctx.scheduler.boot_runqueue().cpu_id(),
         ctx.scheduler.boot_idle_task().task_id()
     ));

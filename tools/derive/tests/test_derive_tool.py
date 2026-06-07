@@ -245,6 +245,45 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
+            self.assertTrue(
+                any(
+                    "Scheduler.Action::SwitchTo" in (record["expression"] or "")
+                    and "prev_ref: BootIdleTaskRef" in (record["expression"] or "")
+                    and "next_ref: BootIdleTaskRef" in (record["expression"] or "")
+                    and record["proof_class"] == "action_commit"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "BootIdleTask.Action::SaveCoreContext"
+                    and record["proof_class"] == "action_commit"
+                    and record["proof_provider"] == "within_context"
+                    and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "BootIdleTask.Action::RestoreCoreContext"
+                    and record["proof_class"] == "action_commit"
+                    and record["proof_provider"] == "within_context"
+                    and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "task_thread_context_core_restored(BootIdleTask.thread_context)"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "within_context"
+                    for record in proved
+                )
+            )
             self.assertFalse(
                 any(record["predicate"] == "disjoint" for record in obligations)
             )

@@ -5,7 +5,7 @@
  * ProcessPreparePhase boundary and before the selected PayloadPhase handoff.
  * The currently expanded subphases are RestInitPhase and PreSmpInitPhase.
  * RestInitPhase expands schedule_preempt_disabled() into a preemption guard
- * exit, Scheduler.Event::Schedule, and a post-schedule BootIdleStartupContext;
+ * exit, Scheduler.Action::Schedule, and a post-schedule BootIdleStartupContext;
  * PreSmpInitPhase starts from the resulting KernelInitTask dispatch facts
  * rather than from RestInitPhase.Ready.
  */

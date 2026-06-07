@@ -13,7 +13,7 @@ from common.derive_types import (
     EventTransition,
 )
 from common.model_types import EventDef, ObjectDef, ObjectModel, StateDef
-from common.spec_ast import Block, SourceSpan
+from common.spec_ast import Block, SourceSpan, WithinDecl
 
 
 _TARGET_RE = re.compile(
@@ -28,6 +28,14 @@ _EVENT_EXPR_RE = re.compile(
 )
 _ACTION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
+_CHILD_EVENT_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+    re.S,
+)
+_CHILD_ACTION_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.([a-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _ACTION_BIND_RE = re.compile(
@@ -722,6 +730,7 @@ class _Deriver:
         self.trace: list[DerivationTraceNode] = []
         self.trace_stack: list[_TraceFrame] = []
         self.stack: list[tuple[str, str]] = []
+        self.process_stack: list[tuple[str, str, str, str]] = []
         self.state_validation_events: dict[tuple[str, str], EventDef] = {}
         self.validated_states: set[tuple[str, str]] = set()
         self.proved_expressions: set[str] = set()
@@ -890,6 +899,7 @@ class _Deriver:
         *,
         action_provider: str = "action_drive",
         bindings: dict[str, dict[str, str]] | None = None,
+        process_parent: str | None = None,
     ) -> bool:
         bindings = bindings if bindings is not None else {}
         for block in blocks:
@@ -900,6 +910,7 @@ class _Deriver:
                     event,
                     action_provider=action_provider,
                     bindings=bindings,
+                    process_parent=process_parent,
                 ):
                     return False
         return True
@@ -912,6 +923,7 @@ class _Deriver:
         *,
         action_provider: str,
         bindings: dict[str, dict[str, str]],
+        process_parent: str | None,
     ) -> bool:
         bind = _ACTION_BIND_RE.match(entry)
         if bind is not None:
@@ -947,9 +959,23 @@ class _Deriver:
                 predicate=None,
                 proof_class="action_result_binding",
                 proof_provider=action_provider,
+                process_parent=process_parent,
             )
+            parent_expression = display_expression if expression != display_expression else expression
             obj = self.model.objects.get(object_name)
             if obj is not None:
+                if not self._execute_type_process_drives(
+                    obj.kind,
+                    object_name,
+                    "Action",
+                    action_name,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    process_parent=parent_expression,
+                ):
+                    return False
                 self._record_type_process_ensures(
                     obj.kind,
                     object_name,
@@ -997,7 +1023,23 @@ class _Deriver:
                     predicate=None,
                     proof_class="type_process_commit",
                     proof_provider=action_provider,
+                    process_parent=process_parent,
                 )
+                parent_expression = (
+                    display_expression if expression != display_expression else expression
+                )
+                if not self._execute_type_process_drives(
+                    process_type,
+                    target_object or receiver_name,
+                    "Event",
+                    driven_event,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    process_parent=parent_expression,
+                ):
+                    return False
                 self._record_type_process_ensures(
                     process_type,
                     target_object or receiver_name,
@@ -1009,6 +1051,74 @@ class _Deriver:
                     action_provider=action_provider,
                 )
                 return True
+
+        child_event = _CHILD_EVENT_EXPR_RE.match(entry)
+        if child_event is not None:
+            parent_name, child_name, driven_event, args = child_event.group(1, 2, 3, 4)
+            child_type = _owned_child_type(self.model, parent_name, child_name)
+            if child_type is None:
+                self._record(
+                    DerivationStatus.BLOCKED,
+                    "unknown child event receiver: "
+                    f"{parent_name}.{child_name}.Event::{driven_event}",
+                    entry_span,
+                    object_name=event.object_name,
+                    event_name=event.name,
+                    expression=entry,
+                )
+                return False
+
+            receiver = f"{parent_name}.{child_name}"
+            expression = _normalize_process_call(
+                self.model,
+                child_type,
+                f"{receiver}.Event::{driven_event}",
+                "Event",
+                driven_event,
+                args,
+                entry,
+            )
+            display_expression = _process_call_expression(
+                f"{receiver}.Event::{driven_event}", args
+            )
+            self._record(
+                DerivationStatus.PROVED,
+                f"child type process committed: {receiver}.Event::{driven_event}",
+                entry_span,
+                object_name=event.object_name,
+                event_name=event.name,
+                expression=expression,
+                display_expression=display_expression if expression != display_expression else None,
+                source_kind="drives",
+                predicate=None,
+                proof_class="type_process_commit",
+                proof_provider=action_provider,
+                process_parent=process_parent,
+            )
+            parent_expression = display_expression if expression != display_expression else expression
+            if not self._execute_type_process_drives(
+                child_type,
+                receiver,
+                "Event",
+                driven_event,
+                args,
+                entry_span,
+                event,
+                action_provider=action_provider,
+                process_parent=parent_expression,
+            ):
+                return False
+            self._record_type_process_ensures(
+                child_type,
+                receiver,
+                "Event",
+                driven_event,
+                args,
+                entry_span,
+                event,
+                action_provider=action_provider,
+            )
+            return True
 
         match = _EVENT_EXPR_RE.match(entry)
         if match is not None:
@@ -1042,7 +1152,23 @@ class _Deriver:
                     predicate=None,
                     proof_class="type_process_commit",
                     proof_provider=action_provider,
+                    process_parent=process_parent,
                 )
+                parent_expression = (
+                    display_expression if expression != display_expression else expression
+                )
+                if not self._execute_type_process_drives(
+                    process_type,
+                    target_object or driven_object,
+                    "Event",
+                    driven_event,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    process_parent=parent_expression,
+                ):
+                    return False
                 self._record_type_process_ensures(
                     process_type,
                     target_object or driven_object,
@@ -1079,7 +1205,23 @@ class _Deriver:
                         predicate=None,
                         proof_class="type_process_commit",
                         proof_provider=action_provider,
+                        process_parent=process_parent,
                     )
+                    parent_expression = (
+                        display_expression if expression != display_expression else expression
+                    )
+                    if not self._execute_type_process_drives(
+                        obj.kind,
+                        driven_object,
+                        "Event",
+                        driven_event,
+                        args,
+                        entry_span,
+                        event,
+                        action_provider=action_provider,
+                        process_parent=parent_expression,
+                    ):
+                        return False
                     self._record_type_process_ensures(
                         obj.kind,
                         driven_object,
@@ -1104,6 +1246,74 @@ class _Deriver:
                 expression=entry,
             )
             return False
+
+        child_action = _CHILD_ACTION_EXPR_RE.match(entry)
+        if child_action is not None:
+            parent_name, child_name, action_name, args = child_action.group(1, 2, 3, 4)
+            child_type = _owned_child_type(self.model, parent_name, child_name)
+            if child_type is None:
+                self._record(
+                    DerivationStatus.BLOCKED,
+                    "unknown child action receiver: "
+                    f"{parent_name}.{child_name}.Action::{action_name}",
+                    entry_span,
+                    object_name=event.object_name,
+                    event_name=event.name,
+                    expression=entry,
+                )
+                return False
+
+            receiver = f"{parent_name}.{child_name}"
+            expression = _normalize_process_call(
+                self.model,
+                child_type,
+                f"{receiver}.Action::{action_name}",
+                "Action",
+                action_name,
+                args,
+                entry,
+            )
+            display_expression = _process_call_expression(
+                f"{receiver}.Action::{action_name}", args
+            )
+            self._record(
+                DerivationStatus.PROVED,
+                f"child action committed: {receiver}.Action::{action_name}",
+                entry_span,
+                object_name=event.object_name,
+                event_name=event.name,
+                expression=expression,
+                display_expression=display_expression if expression != display_expression else None,
+                source_kind="drives",
+                predicate=None,
+                proof_class="action_commit",
+                proof_provider=action_provider,
+                process_parent=process_parent,
+            )
+            parent_expression = display_expression if expression != display_expression else expression
+            if not self._execute_type_process_drives(
+                child_type,
+                receiver,
+                "Action",
+                action_name,
+                args,
+                entry_span,
+                event,
+                action_provider=action_provider,
+                process_parent=parent_expression,
+            ):
+                return False
+            self._record_type_process_ensures(
+                child_type,
+                receiver,
+                "Action",
+                action_name,
+                args,
+                entry_span,
+                event,
+                action_provider=action_provider,
+            )
+            return True
 
         action = _ACTION_EXPR_RE.match(entry)
         if action is not None:
@@ -1131,9 +1341,23 @@ class _Deriver:
                 predicate=None,
                 proof_class="action_commit",
                 proof_provider=action_provider,
+                process_parent=process_parent,
             )
+            parent_expression = display_expression if expression != display_expression else expression
             obj = self.model.objects.get(object_name)
             if obj is not None:
+                if not self._execute_type_process_drives(
+                    obj.kind,
+                    object_name,
+                    "Action",
+                    action_name,
+                    args,
+                    entry_span,
+                    event,
+                    action_provider=action_provider,
+                    process_parent=parent_expression,
+                ):
+                    return False
                 self._record_type_process_ensures(
                     obj.kind,
                     object_name,
@@ -1156,12 +1380,96 @@ class _Deriver:
         )
         return False
 
+    def _execute_type_process_drives(
+        self,
+        type_name: str,
+        self_name: str,
+        process_kind: str,
+        process_name: str,
+        args: str | None,
+        span: SourceSpan,
+        event: EventDef,
+        *,
+        action_provider: str,
+        process_parent: str | None = None,
+    ) -> bool:
+        key = (type_name, self_name, process_kind, process_name)
+        if key in self.process_stack:
+            self._record(
+                DerivationStatus.BLOCKED,
+                "recursive type process drives: "
+                f"{type_name}.{process_kind}::{process_name}",
+                span,
+                object_name=event.object_name,
+                event_name=event.name,
+            )
+            return False
+
+        drives = _process_drives(self.model, type_name, process_kind, process_name)
+        withins = _process_withins(self.model, type_name, process_kind, process_name)
+        if not drives and not withins:
+            return True
+
+        argument_bindings = _process_argument_bindings(
+            self.model,
+            type_name,
+            process_kind,
+            process_name,
+            args,
+        )
+        replacements = {**argument_bindings, "self": self_name}
+        drive_bindings = {
+            name: {"type": "ProcessArgument", "value": value}
+            for name, value in argument_bindings.items()
+        }
+        drive_bindings["self"] = {"type": "Self", "value": self_name}
+
+        self.process_stack.append(key)
+        try:
+            for block in drives:
+                entries = [
+                    _substitute_process_bindings(entry, replacements)
+                    for entry in block.entries
+                ]
+                body = ";\n".join(entries)
+                if body:
+                    body += ";"
+                if not self._drive_blocks(
+                    (
+                        Block(
+                            block.kind,
+                            body,
+                            block.span,
+                            header=block.header,
+                            body_start_line=block.body_start_line,
+                        ),
+                    ),
+                    event,
+                    action_provider=action_provider,
+                    bindings=drive_bindings,
+                    process_parent=process_parent,
+                ):
+                    return False
+            for within in withins:
+                substituted_within = _substitute_within_bindings(within, replacements)
+                if not self._execute_within(
+                    substituted_within,
+                    event,
+                    bindings=drive_bindings,
+                    process_parent=process_parent,
+                ):
+                    return False
+        finally:
+            self.process_stack.pop()
+        return True
+
     def _execute_within(
         self,
         within,
         event: EventDef,
         *,
         bindings: dict[str, dict[str, str]] | None = None,
+        process_parent: str | None = None,
     ) -> bool:
         bindings = dict(bindings or {})
         bindings.update(_within_parameter_bindings(within.parameters, bindings))
@@ -1186,6 +1494,7 @@ class _Deriver:
             source_kind="within",
             proof_class="exclusive_context",
             proof_provider="guard",
+            process_parent=process_parent,
         )
         entered_by = (
             context.guard.entered_by
@@ -1217,10 +1526,16 @@ class _Deriver:
             event,
             action_provider="within_context",
             bindings=bindings,
+            process_parent=process_parent,
         ):
             return False
         for child_within in within.within:
-            if not self._execute_within(child_within, event, bindings=bindings):
+            if not self._execute_within(
+                child_within,
+                event,
+                bindings=bindings,
+                process_parent=process_parent,
+            ):
                 return False
         if not self._prove_blocks(
             within.ensures,
@@ -1247,6 +1562,7 @@ class _Deriver:
             source_kind="within",
             proof_class="exclusive_context",
             proof_provider="guard",
+            process_parent=process_parent,
         )
         return True
 
@@ -2213,6 +2529,7 @@ class _Deriver:
         proof_class: str | None = None,
         proof_provider: str | None = None,
         display_expression: str | None = None,
+        process_parent: str | None = None,
     ) -> None:
         if status is DerivationStatus.PROVED and expression is not None:
             self.proved_expressions.add(expression)
@@ -2231,6 +2548,7 @@ class _Deriver:
                 obligation_category=obligation_category,
                 proof_class=proof_class,
                 proof_provider=proof_provider,
+                process_parent=process_parent,
             )
         )
         if status is DerivationStatus.PROVED and expression is not None:
@@ -2373,8 +2691,12 @@ def _ref_value_target_object(model: ObjectModel, ref_value: str | None) -> str |
         return None
     if ref_value == "BootRunQueueRef":
         return "BootRunQueue"
+    if ref_value == "BootIdleTaskRef":
+        return "BootIdleTask"
     if ref_value == "KernelInitTaskRef":
         return "KernelInitTask"
+    if ref_value == "KthreaddTaskRef":
+        return "KthreaddTask"
     for type_name in ("SchedulerObject", "RunQueue", "Task"):
         type_decl = model.types.get(type_name)
         if type_decl is None:
@@ -2506,10 +2828,254 @@ def _process_ensures(
     body = _process_body(model, type_name, process_kind, process_name)
     if body is None:
         return ()
-    ensures = _named_block_body(body, "ensures")
+    ensures = _top_level_named_block_body(body, "ensures")
     if ensures is None:
         return ()
     return tuple(entry for entry, _span in Block("ensures", ensures, SourceSpan(1, 1)).entry_spans)
+
+
+def _process_drives(
+    model: ObjectModel, type_name: str, process_kind: str, process_name: str
+) -> tuple[Block, ...]:
+    body = _process_body(model, type_name, process_kind, process_name)
+    if body is None:
+        return ()
+    drives = _top_level_named_block_body(body, "drives")
+    if drives is None:
+        return ()
+    return (Block("drives", drives, SourceSpan(1, 1)),)
+
+
+def _process_withins(
+    model: ObjectModel, type_name: str, process_kind: str, process_name: str
+) -> tuple[WithinDecl, ...]:
+    body = _process_body(model, type_name, process_kind, process_name)
+    if body is None:
+        return ()
+    return tuple(_top_level_withins(body))
+
+
+def _top_level_withins(body: str) -> list[WithinDecl]:
+    withins: list[WithinDecl] = []
+    index = 0
+    pattern = re.compile(r"\bwithin\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*\([^{}]*\))?)\s*\{", re.S)
+    while index < len(body):
+        match = pattern.search(body, index)
+        if match is None:
+            break
+        if not _is_top_level_at(body, match.start()):
+            index = match.end()
+            continue
+        block_start = match.end()
+        block_end = _matching_brace_index(body, block_start - 1)
+        if block_end is None:
+            break
+        header = match.group(1).strip()
+        context, parameters = _parse_within_header(header)
+        body_start_line = 1 + body.count("\n", 0, block_start)
+        span = SourceSpan(
+            1 + body.count("\n", 0, match.start()),
+            1 + body.count("\n", 0, block_end),
+        )
+        withins.append(
+            _within_from_body(
+                context,
+                body[block_start:block_end],
+                span,
+                parameters=parameters,
+                body_start_line=body_start_line,
+            )
+        )
+        index = block_end + 1
+    return withins
+
+
+def _within_from_body(
+    context: str,
+    body: str,
+    span: SourceSpan,
+    *,
+    parameters: dict[str, str],
+    body_start_line: int,
+) -> WithinDecl:
+    entered_by: list[Block] = []
+    depends_on: list[Block] = []
+    drives: list[Block] = []
+    nested_withins: list[WithinDecl] = []
+    exited_by: list[Block] = []
+    may_change: list[Block] = []
+    ensures: list[Block] = []
+    deferred: list[Block] = []
+    other_blocks: list[Block] = []
+
+    for kind, header, child_body, child_span, child_body_start_line in _top_level_blocks(
+        body, body_start_line
+    ):
+        block = Block(
+            kind,
+            child_body,
+            child_span,
+            header=header,
+            body_start_line=child_body_start_line,
+        )
+        if kind == "entered_by":
+            entered_by.append(block)
+        elif kind == "depends_on":
+            depends_on.append(block)
+        elif kind == "drives":
+            drives.append(block)
+        elif kind == "within":
+            child_context, child_parameters = _parse_within_header(header)
+            nested_withins.append(
+                _within_from_body(
+                    child_context,
+                    child_body,
+                    child_span,
+                    parameters=child_parameters,
+                    body_start_line=child_body_start_line,
+                )
+            )
+        elif kind == "exited_by":
+            exited_by.append(block)
+        elif kind == "may_change":
+            may_change.append(block)
+        elif kind == "ensures":
+            ensures.append(block)
+        elif kind == "deferred":
+            deferred.append(block)
+        else:
+            other_blocks.append(block)
+
+    return WithinDecl(
+        context=context,
+        span=span,
+        parameters=parameters,
+        entered_by=entered_by,
+        depends_on=depends_on,
+        drives=drives,
+        within=nested_withins,
+        exited_by=exited_by,
+        may_change=may_change,
+        ensures=ensures,
+        deferred=deferred,
+        other_blocks=other_blocks,
+    )
+
+
+def _top_level_blocks(
+    body: str, body_start_line: int
+) -> list[tuple[str, str, str, SourceSpan, int]]:
+    blocks: list[tuple[str, str, str, SourceSpan, int]] = []
+    pattern = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*([^{};]*)\{", re.S)
+    index = 0
+    while index < len(body):
+        match = pattern.search(body, index)
+        if match is None:
+            break
+        if not _is_top_level_at(body, match.start()):
+            index = match.end()
+            continue
+        block_start = match.end()
+        block_end = _matching_brace_index(body, block_start - 1)
+        if block_end is None:
+            break
+        kind = match.group(1)
+        header = match.group(2).strip()
+        span = SourceSpan(
+            body_start_line + body.count("\n", 0, match.start()),
+            body_start_line + body.count("\n", 0, block_end),
+        )
+        child_body_start_line = body_start_line + body.count("\n", 0, block_start)
+        blocks.append((kind, header, body[block_start:block_end], span, child_body_start_line))
+        index = block_end + 1
+    return blocks
+
+
+def _is_top_level_at(text: str, offset: int) -> bool:
+    depth = 0
+    for char in text[:offset]:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth = max(0, depth - 1)
+    return depth == 0
+
+
+def _parse_within_header(header: str) -> tuple[str, dict[str, str]]:
+    if "(" not in header:
+        return header.strip(), {}
+    context, args = header.split("(", 1)
+    args = args.rsplit(")", 1)[0].strip()
+    parameters: dict[str, str] = {}
+    for raw_arg in args.split(","):
+        arg = raw_arg.strip()
+        if not arg or ":" not in arg:
+            continue
+        name, value = arg.split(":", 1)
+        parameters[name.strip()] = value.strip()
+    return context.strip(), parameters
+
+
+def _substitute_within_bindings(
+    within: WithinDecl, replacements: dict[str, str]
+) -> WithinDecl:
+    return WithinDecl(
+        context=within.context,
+        span=within.span,
+        parameters={
+            name: _substitute_process_bindings(value, replacements)
+            for name, value in within.parameters.items()
+        },
+        entered_by=_substitute_blocks(within.entered_by, replacements),
+        depends_on=_substitute_blocks(within.depends_on, replacements),
+        drives=_substitute_blocks(within.drives, replacements),
+        within=[
+            _substitute_within_bindings(child, replacements)
+            for child in within.within
+        ],
+        exited_by=_substitute_blocks(within.exited_by, replacements),
+        may_change=_substitute_blocks(within.may_change, replacements),
+        ensures=_substitute_blocks(within.ensures, replacements),
+        deferred=_substitute_blocks(within.deferred, replacements),
+        other_blocks=_substitute_blocks(within.other_blocks, replacements),
+    )
+
+
+def _substitute_blocks(blocks: list[Block], replacements: dict[str, str]) -> list[Block]:
+    return [
+        Block(
+            block.kind,
+            _substitute_process_bindings(block.body, replacements),
+            block.span,
+            header=_substitute_process_bindings(block.header, replacements),
+            body_start_line=block.body_start_line,
+        )
+        for block in blocks
+    ]
+
+
+def _owned_child_type(model: ObjectModel, parent_name: str, child_name: str) -> str | None:
+    parent = model.objects.get(parent_name)
+    if parent is None:
+        return None
+
+    candidates: list[Block] = []
+    candidates.extend(
+        block for block in parent.decl.other_blocks if block.kind == "owned"
+    )
+    type_decl = model.types.get(parent.kind)
+    if type_decl is not None:
+        candidates.extend(block for block in type_decl.blocks if block.kind == "owned")
+
+    pattern = re.compile(
+        r"\A" + re.escape(child_name) + r"\s*:\s*([A-Z][A-Za-z0-9_]*)\Z"
+    )
+    for block in candidates:
+        for entry in block.entries:
+            match = pattern.match(entry)
+            if match is not None:
+                return match.group(1)
+    return None
 
 
 def _process_argument_bindings(
@@ -2555,6 +3121,24 @@ def _named_block_body(body: str, block_name: str) -> str | None:
     if block_end is None:
         return None
     return body[block_start:block_end]
+
+
+def _top_level_named_block_body(body: str, block_name: str) -> str | None:
+    pattern = re.compile(r"\b" + re.escape(block_name) + r"\s*\{", re.S)
+    index = 0
+    while index < len(body):
+        match = pattern.search(body, index)
+        if match is None:
+            return None
+        if not _is_top_level_at(body, match.start()):
+            index = match.end()
+            continue
+        block_start = match.end()
+        block_end = _matching_brace_index(body, block_start - 1)
+        if block_end is None:
+            return None
+        return body[block_start:block_end]
+    return None
 
 
 def _matching_brace_index(text: str, open_index: int) -> int | None:

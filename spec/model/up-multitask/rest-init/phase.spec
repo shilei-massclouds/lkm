@@ -5,7 +5,7 @@
  * scheduler start, creation of PID 1 and kthreadd, publication of
  * SYSTEM_SCHEDULING, completion of kthreadd_done, and boot idle runtime entry.
  * schedule_preempt_disabled() is expanded into three formal steps: the boot
- * idle preemption guard exits with EnableNoResched, Scheduler.Event::Schedule
+ * idle preemption guard exits with EnableNoResched, Scheduler.Action::Schedule
  * commits the first scheduling boundary, and BootIdleStartupContext enters the
  * new boot-idle atomic context for the cpu_startup_entry() tail.
  */
@@ -97,6 +97,104 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
     }
 
     obj_refs {
+        BootRunQueue;
+    }
+
+    effects {
+        interruptible: false;
+        preemptible: false;
+        sleepable: false;
+        exclusive_refs: obj_refs;
+    }
+}
+
+context SchedulePreemptionContext: Context {
+    /*
+     * This context models schedule() entering __schedule_loop(): schedule()
+     * disables preemption before entering __schedule(). In rest_init(), the
+     * caller has just executed EnableNoResched from the inherited
+     * preempt-disabled context, so this context is the schedule-owned
+     * preemption boundary rather than the caller's inherited guard.
+     */
+    guard: PreemptionGuard {
+        entered_by {
+            BootIdlePreemption.Event::Disable;
+        }
+
+        exited_by {
+            BootIdlePreemption.Event::EnableNoResched;
+        }
+    }
+
+    obj_refs {
+        BootIdleTask;
+        Scheduler;
+        BootRunQueue;
+        BootCpuLocalInterrupt;
+    }
+
+    effects {
+        interruptible: true;
+        preemptible: false;
+        sleepable: false;
+        exclusive_refs: none;
+    }
+}
+
+context ScheduleLocalInterruptContext: Context {
+    /*
+     * This context models __schedule() disabling local interrupts before
+     * taking rq->lock. The guard is backed by BootCpuLocalInterrupt, not by a
+     * lock; it establishes a CPU-local interrupt-disabled boundary.
+     */
+    guard: LocalInterruptGuard {
+        entered_by {
+            BootCpuLocalInterrupt.Event::SaveAndDisable;
+        }
+
+        exited_by {
+            BootCpuLocalInterrupt.Event::Restore;
+        }
+    }
+
+    obj_refs {
+        BootIdleTask;
+        Scheduler;
+        BootRunQueue;
+        BootCpuLocalInterrupt;
+    }
+
+    effects {
+        interruptible: false;
+        preemptible: false;
+        sleepable: false;
+        exclusive_refs: none;
+    }
+}
+
+context ScheduleRunQueueContext: ResourceExclusiveContext {
+    /*
+     * This context models the rq_lock() region inside __schedule(). Current
+     * tooling reuses RawSpinLockIrqSaveGuard for the BootRunQueueLock boundary;
+     * the Linux path has local interrupts already disabled before rq_lock().
+     * A narrower runqueue-lock guard can replace this once rq_lock/raw rq lock
+     * is modeled separately from irq-save spinlock.
+     */
+    guard: RawSpinLockIrqSaveGuard {
+        lock_ref: BootRunQueueLock;
+
+        entered_by {
+            BootRunQueueLock.Event::LockIrqSave;
+        }
+
+        exited_by {
+            BootRunQueueLock.Event::UnlockIrqRestore;
+        }
+    }
+
+    obj_refs {
+        BootIdleTask;
+        Scheduler;
         BootRunQueue;
     }
 
@@ -862,7 +960,7 @@ object RestInitPhase: PhaseObject {
                     KthreaddReadyGate.Event::Enable;
                     KthreaddReadyGate.Event::Complete;
                     BootIdlePreemption.Event::EnableNoResched;
-                    Scheduler.Event::Schedule;
+                    Scheduler.Action::Schedule;
                 }
 
                 ensures {

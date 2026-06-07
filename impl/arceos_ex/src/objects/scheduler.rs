@@ -1,5 +1,5 @@
 use super::{
-    cpu_control::{CurrentTaskSlot, PreemptionControl},
+    cpu_control::{CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
     cpu_group::CpuGroup,
     cpu_id_map::CpuIdMap,
     init_mm::InitMm,
@@ -26,6 +26,8 @@ pub struct Scheduler {
     kernel_init_affinity_released: bool,
     rt_dl_smp_ready: bool,
     granularity_refreshed: bool,
+    switch_to_passes: usize,
+    identity_switch_passes: usize,
 }
 
 impl Scheduler {
@@ -45,6 +47,8 @@ impl Scheduler {
             kernel_init_affinity_released: false,
             rt_dl_smp_ready: false,
             granularity_refreshed: false,
+            switch_to_passes: 0,
+            identity_switch_passes: 0,
         }
     }
 
@@ -106,6 +110,14 @@ impl Scheduler {
 
     pub const fn granularity_refreshed(&self) -> bool {
         self.granularity_refreshed
+    }
+
+    pub const fn switch_to_passes(&self) -> usize {
+        self.switch_to_passes
+    }
+
+    pub const fn identity_switch_passes(&self) -> usize {
+        self.identity_switch_passes
     }
 
     pub fn preset(
@@ -196,12 +208,12 @@ impl Scheduler {
         )
     }
 
-    pub fn schedule(&mut self) -> EventResult {
+    pub fn schedule(&mut self, local_interrupt: &mut LocalInterruptControl) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
-            || crate::arch::riscv64::csr::supervisor_interrupts_enabled()
+            || local_interrupt.state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -211,9 +223,35 @@ impl Scheduler {
             );
         }
 
+        local_interrupt.save_and_disable()?;
+        self.switch_to_boot_idle_identity()?;
         self.schedule_passes = self.schedule_passes.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
+        local_interrupt.restore()?;
         Ok(())
+    }
+
+    fn switch_to_boot_idle_identity(&mut self) -> EventResult {
+        if self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
+            || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
+        {
+            return self.failed_switch_to();
+        }
+
+        self.boot_idle_task.save_core_context()?;
+        self.boot_idle_task.restore_core_context()?;
+        self.switch_to_passes = self.switch_to_passes.wrapping_add(1);
+        self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
+        Ok(())
+    }
+
+    fn failed_switch_to(&self) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Online,
+            State::Online,
+        )
     }
 
     pub fn select_boot_runqueue_for_task(&mut self, task_id: usize) -> EventResult {
@@ -544,6 +582,7 @@ pub struct BootIdleTask {
     lifecycle: Lifecycle,
     task_id: usize,
     cpu_id: usize,
+    thread_context: TaskThreadContext,
     uses_current_init_task: bool,
     lazy_tlb_mm_ready: bool,
     no_set_affinity: bool,
@@ -555,6 +594,7 @@ impl BootIdleTask {
             lifecycle: Lifecycle::new(State::Base),
             task_id: usize::MAX,
             cpu_id: usize::MAX,
+            thread_context: TaskThreadContext::new(),
             uses_current_init_task: false,
             lazy_tlb_mm_ready: false,
             no_set_affinity: false,
@@ -585,6 +625,10 @@ impl BootIdleTask {
         self.no_set_affinity
     }
 
+    pub const fn thread_context(&self) -> &TaskThreadContext {
+        &self.thread_context
+    }
+
     fn setup(
         &mut self,
         init_task: &InitTask,
@@ -608,6 +652,7 @@ impl BootIdleTask {
 
         self.task_id = boot_runqueue.idle_task_id();
         self.cpu_id = boot_runqueue.cpu_id();
+        self.thread_context.setup_boot_idle();
         self.uses_current_init_task = true;
         self.lazy_tlb_mm_ready = true;
         self.no_set_affinity = true;
@@ -617,5 +662,82 @@ impl BootIdleTask {
             State::Ready,
             Checkpoint::BootIdleTaskReady,
         )
+    }
+
+    fn save_core_context(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.thread_context.core_register_set() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.thread_context.save_core();
+        Ok(())
+    }
+
+    fn restore_core_context(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.thread_context.core_register_set() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.thread_context.restore_core();
+        Ok(())
+    }
+}
+
+pub struct TaskThreadContext {
+    ra: usize,
+    sp: usize,
+    s: [usize; 12],
+    core_register_set: bool,
+    core_saved_count: usize,
+    core_restored_count: usize,
+}
+
+impl TaskThreadContext {
+    const fn new() -> Self {
+        Self {
+            ra: 0,
+            sp: 0,
+            s: [0; 12],
+            core_register_set: false,
+            core_saved_count: 0,
+            core_restored_count: 0,
+        }
+    }
+
+    pub const fn core_register_set(&self) -> bool {
+        self.core_register_set
+    }
+
+    pub const fn core_saved_count(&self) -> usize {
+        self.core_saved_count
+    }
+
+    pub const fn core_restored_count(&self) -> usize {
+        self.core_restored_count
+    }
+
+    fn setup_boot_idle(&mut self) {
+        self.ra = 0;
+        self.sp = 0;
+        self.s = [0; 12];
+        self.core_register_set = true;
+    }
+
+    fn save_core(&mut self) {
+        self.core_saved_count = self.core_saved_count.wrapping_add(1);
+    }
+
+    fn restore_core(&mut self) {
+        self.core_restored_count = self.core_restored_count.wrapping_add(1);
     }
 }

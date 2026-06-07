@@ -257,7 +257,7 @@ class RenderToolTests(unittest.TestCase):
 
         self.assertIn("context-box", text)
         self.assertIn("context-action", text)
-        self.assertIn('x="228.0" y="156.0" width="215.0"', text)
+        self.assertIn('x="216.0" y="128.0" width="239.0"', text)
         self.assertIn("within-arrow", text)
         self.assertIn("context-order", text)
         self.assertIn("WakeUpNewTaskContext", text)
@@ -363,7 +363,98 @@ class RenderToolTests(unittest.TestCase):
         text = render_svg(view)
 
         self.assertIn(
-            '<line class="action-arrow" x1="112.0" y1="97.0" x2="360.0" y2="97.0" />',
+            '<line class="action-arrow" x1="112.0" y1="97.0" x2="354.0" y2="97.0" />',
+            text,
+        )
+
+    def test_render_svg_from_trace_view_points_context_drives_to_child_boxes(self) -> None:
+        view = ViewModel(
+            name="trace",
+            graph_format="svg",
+            metadata={
+                "trace_columns": [
+                    {"index": 0, "kind": "object", "depth": 0},
+                    {"index": 1, "kind": "gap", "depth": 0},
+                    {"index": 2, "kind": "object", "depth": 1},
+                    {"index": 3, "kind": "gap", "depth": 1},
+                    {"index": 4, "kind": "object", "depth": 2},
+                ],
+                "trace_rows": [
+                    {
+                        "index": 0,
+                        "kind": "context_action",
+                        "label": "schedule",
+                        "group_role": "context_action",
+                    },
+                    {
+                        "index": 1,
+                        "kind": "context_action",
+                        "label": "switch",
+                        "group_role": "context_action",
+                    },
+                    {
+                        "index": 2,
+                        "kind": "context_action",
+                        "label": "save",
+                        "group_role": "context_action",
+                    },
+                    {
+                        "index": 3,
+                        "kind": "context_action",
+                        "label": "restore",
+                        "group_role": "context_action",
+                    },
+                ],
+                "trace_cells": (
+                    TraceCell(
+                        id="schedule",
+                        kind="context_action",
+                        row=0,
+                        column=0,
+                        label="Scheduler.Action::Schedule",
+                    ),
+                    TraceCell(
+                        id="switch",
+                        kind="context_action",
+                        row=1,
+                        column=2,
+                        label="Scheduler.Action::SwitchTo(BootIdleTaskRef, BootIdleTaskRef)",
+                    ),
+                    TraceCell(
+                        id="save",
+                        kind="context_action",
+                        row=2,
+                        column=4,
+                        label="BootIdleTask.Action::SaveCoreContext",
+                    ),
+                    TraceCell(
+                        id="restore",
+                        kind="context_action",
+                        row=3,
+                        column=4,
+                        label="BootIdleTask.Action::RestoreCoreContext",
+                    ),
+                ),
+                "trace_arrows": (
+                    TraceArrow(source="schedule", target="switch", kind="drives"),
+                    TraceArrow(source="switch", target="save", kind="drives"),
+                    TraceArrow(source="switch", target="restore", kind="drives"),
+                ),
+            },
+        )
+
+        text = render_svg(view)
+
+        self.assertIn(
+            '<line class="drive-arrow" x1="195.6" y1="207.0" x2="297.4" y2="185.0" />',
+            text,
+        )
+        self.assertIn(
+            '<line class="drive-arrow" x1="454.6" y1="151.0" x2="556.4" y2="129.0" />',
+            text,
+        )
+        self.assertIn(
+            '<line class="drive-arrow" x1="415.3" y1="151.0" x2="595.7" y2="73.0" />',
             text,
         )
 
@@ -408,7 +499,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="action",
                         row=2,
                         column=3,
-                        label="Scheduler.Event::Schedule",
+                        label="Scheduler.Action::Schedule",
                         column_span=2,
                     ),
                 ),

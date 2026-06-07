@@ -301,6 +301,11 @@ class ViewToolTests(unittest.TestCase):
 
         metadata = view.metadata
         cells = metadata["trace_cells"]
+        columns = {
+            column["index"]: column
+            for column in metadata["trace_columns"]
+            if isinstance(column.get("index"), int)
+        }
         rows = metadata["trace_rows"]
         arrows = metadata["trace_arrows"]
         event_cell = next(cell for cell in cells if cell.kind == "event_span")
@@ -316,8 +321,10 @@ class ViewToolTests(unittest.TestCase):
             if cell.kind == "context_span"
             and "EnqueueSelectedRunQueueContext" in cell.label
         )
-        self.assertEqual(context_cell.column, event_cell.column + 1)
-        self.assertEqual(context_cell.column_span, 2)
+        self.assertGreater(context_cell.column, event_cell.column)
+        self.assertEqual(columns[context_cell.column]["kind"], "gap")
+        self.assertEqual(columns[context_cell.column + 1]["kind"], "object")
+        self.assertGreaterEqual(context_cell.column_span, 3)
         self.assertGreater(context_cell.row_span, enqueue_context_cell.row_span)
         self.assertEqual(enqueue_context_cell.column, context_cell.column)
         self.assertEqual(enqueue_context_cell.column_span, context_cell.column_span)
@@ -350,7 +357,7 @@ class ViewToolTests(unittest.TestCase):
         ]
         self.assertTrue(
             all(
-                cell.column == context_cell.column and cell.column_span == 2
+                cell.column == context_cell.column + 1 and cell.column_span == 1
                 for cell in action_cells
             )
         )
@@ -376,6 +383,196 @@ class ViewToolTests(unittest.TestCase):
         self.assertEqual(
             sum(1 for arrow in arrows if arrow.kind == "context_order"),
             2,
+        )
+
+    def test_trace_view_places_phase_within_context_actions(self) -> None:
+        view = build_trace_view(
+            {
+                "trace": [
+                    {
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "source_state": "Ready",
+                        "target_state": "Prepared",
+                        "children": [
+                            {
+                                "object": "BootIdleTask",
+                                "event": "Enable",
+                                "source_state": "Prepared",
+                                "target_state": "Online",
+                                "children": [],
+                            }
+                        ],
+                    }
+                ],
+                "model": {
+                    "exclusive_contexts": {
+                        "ScheduleRunQueueContext": {
+                            "lock_ref": "BootRunQueueLock",
+                            "guard": {
+                                "kind": "RawSpinLockIrqSaveGuard",
+                                "lock_ref": "BootRunQueueLock",
+                                "entered_by": [
+                                    {"body": "BootRunQueueLock.Event::LockIrqSave;"}
+                                ],
+                                "exited_by": [
+                                    {"body": "BootRunQueueLock.Event::UnlockIrqRestore;"}
+                                ],
+                            },
+                        },
+                    }
+                },
+                "records": [
+                    {
+                        "status": "proved",
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "source_kind": "drives",
+                        "proof_class": "action_commit",
+                        "proof_provider": "action_drive",
+                        "expression": "Scheduler.Action::Schedule",
+                    },
+                    {
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within ScheduleRunQueueContext",
+                        "process_parent": "Scheduler.Action::Schedule",
+                    },
+                    {
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "proof_class": "action_commit",
+                        "proof_provider": "within_context",
+                        "expression": "Scheduler.Action::SwitchTo(prev_ref: BootIdleTaskRef, next_ref: BootIdleTaskRef)",
+                        "display_expression": "Scheduler.Action::SwitchTo(BootIdleTaskRef, BootIdleTaskRef)",
+                        "process_parent": "Scheduler.Action::Schedule",
+                    },
+                    {
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "proof_class": "type_process_commit",
+                        "proof_provider": "within_context",
+                        "expression": "BootIdleTask.Action::SaveCoreContext",
+                        "process_parent": "Scheduler.Action::SwitchTo(prev_ref: BootIdleTaskRef, next_ref: BootIdleTaskRef)",
+                    },
+                    {
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "proof_class": "type_process_commit",
+                        "proof_provider": "within_context",
+                        "expression": "BootIdleTask.Action::RestoreCoreContext",
+                        "process_parent": "Scheduler.Action::SwitchTo(prev_ref: BootIdleTaskRef, next_ref: BootIdleTaskRef)",
+                    },
+                    {
+                        "object": "RestInitPhase",
+                        "event": "Preset",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within ScheduleRunQueueContext exited",
+                        "process_parent": "Scheduler.Action::Schedule",
+                    },
+                ],
+            }
+        )
+
+        cells = view.metadata["trace_cells"]
+        arrows = view.metadata["trace_arrows"]
+        rest_init_cell = next(
+            cell
+            for cell in cells
+            if cell.kind == "event_span"
+            and cell.label == "RestInitPhase.Event::Preset"
+        )
+        context_cell = next(
+            cell
+            for cell in cells
+            if cell.kind == "context_span"
+            and "ScheduleRunQueueContext" in cell.label
+        )
+        action_cells = [
+            cell
+            for cell in cells
+            if cell.kind == "context_action"
+            and cell.id.startswith(context_cell.id)
+        ]
+        ordinary_action_cells = [cell for cell in cells if cell.kind == "action"]
+
+        self.assertGreater(context_cell.column, rest_init_cell.column)
+        schedule_cell = next(
+            cell for cell in ordinary_action_cells if cell.label == "Scheduler.Action::Schedule"
+        )
+        self.assertEqual(context_cell.column, schedule_cell.column + 1)
+        self.assertEqual(context_cell.column_span, 5)
+        self.assertLessEqual(context_cell.row, schedule_cell.row)
+        self.assertLess(
+            schedule_cell.row,
+            context_cell.row + context_cell.row_span,
+        )
+        self.assertEqual(
+            [cell.label for cell in sorted(action_cells, key=lambda cell: cell.row)],
+            [
+                "Scheduler.Action::SwitchTo(BootIdleTaskRef, BootIdleTaskRef)",
+                "BootIdleTask.Action::SaveCoreContext",
+                "BootIdleTask.Action::RestoreCoreContext",
+            ],
+        )
+        switch_cell = next(
+            cell
+            for cell in action_cells
+            if cell.label
+            == "Scheduler.Action::SwitchTo(BootIdleTaskRef, BootIdleTaskRef)"
+        )
+        save_cell = next(
+            cell
+            for cell in action_cells
+            if cell.label == "BootIdleTask.Action::SaveCoreContext"
+        )
+        restore_cell = next(
+            cell
+            for cell in action_cells
+            if cell.label == "BootIdleTask.Action::RestoreCoreContext"
+        )
+        self.assertEqual(switch_cell.column, schedule_cell.column + 2)
+        self.assertEqual(switch_cell.row, schedule_cell.row)
+        self.assertEqual(save_cell.column, switch_cell.column + 2)
+        self.assertEqual(restore_cell.column, switch_cell.column + 2)
+        self.assertTrue(
+            any(
+                arrow.kind == "within"
+                and arrow.source == schedule_cell.id
+                and arrow.target == context_cell.id
+                for arrow in arrows
+            )
+        )
+        self.assertEqual(
+            sum(1 for arrow in arrows if arrow.kind == "context_order"),
+            0,
+        )
+        self.assertTrue(
+            any(
+                arrow.kind == "drives"
+                and arrow.source == schedule_cell.id
+                and arrow.target == switch_cell.id
+                for arrow in arrows
+            )
+        )
+        self.assertTrue(
+            any(
+                arrow.kind == "drives"
+                and arrow.source == switch_cell.id
+                and arrow.target == save_cell.id
+                for arrow in arrows
+            )
+        )
+        self.assertTrue(
+            any(
+                arrow.kind == "drives"
+                and arrow.source == switch_cell.id
+                and arrow.target == restore_cell.id
+                for arrow in arrows
+            )
         )
 
     def test_trace_view_places_ordinary_drives_actions(self) -> None:

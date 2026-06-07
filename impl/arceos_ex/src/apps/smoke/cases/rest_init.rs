@@ -119,7 +119,28 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.scheduler.schedule_passes() == 0 || !ctx.kernel_init_task.released_for_pre_smp_init() {
+    if ctx.scheduler.schedule_passes() == 0
+        || ctx.scheduler.switch_to_passes() == 0
+        || ctx.scheduler.identity_switch_passes() == 0
+        || !ctx
+            .scheduler
+            .boot_idle_task()
+            .thread_context()
+            .core_register_set()
+        || ctx
+            .scheduler
+            .boot_idle_task()
+            .thread_context()
+            .core_saved_count()
+            == 0
+        || ctx
+            .scheduler
+            .boot_idle_task()
+            .thread_context()
+            .core_restored_count()
+            == 0
+        || !ctx.kernel_init_task.released_for_pre_smp_init()
+    {
         printk::write_str("scheduler dispatch facts invalid\n");
         return SmokeResult::Failed;
     }
@@ -137,10 +158,11 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "rest_init init_pid={} kthreadd_pid={} schedule_passes={}\n",
+        "rest_init init_pid={} kthreadd_pid={} schedule_passes={} switch_to_passes={}\n",
         ctx.kernel_init_task.pid(),
         ctx.kthreadd_task.pid(),
-        ctx.scheduler.schedule_passes()
+        ctx.scheduler.schedule_passes(),
+        ctx.scheduler.switch_to_passes()
     ));
     SmokeResult::Passed
 }

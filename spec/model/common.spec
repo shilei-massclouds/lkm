@@ -158,6 +158,10 @@ predicate task_not_enqueued<T>(task: T) -> bool;
 predicate task_enqueued_on_runqueue<T, U>(task: T, runqueue: U) -> bool;
 predicate task_runtime_state_transition_allowed<T>(task: T, state: TaskRuntimeState) -> bool;
 predicate task_runtime_state_is<T>(task: T, state: TaskRuntimeState) -> bool;
+predicate task_thread_context_owned<T, U>(task: T, context: U) -> bool;
+predicate task_thread_context_core_register_set<T>(context: T) -> bool;
+predicate task_thread_context_core_saved<T>(context: T) -> bool;
+predicate task_thread_context_core_restored<T>(context: T) -> bool;
 predicate task_flag_no_setaffinity<T>(task: T) -> bool;
 predicate task_cpumask_is<T, U>(task: T, cpu_ref: U) -> bool;
 predicate kthreadd_provider_ref_targets<T, U>(task_ref: T, task: U) -> bool;
@@ -167,6 +171,15 @@ predicate runqueue_ref_ready<T>(runqueue_ref: T) -> bool;
 predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, runqueue_ref: V) -> bool;
 predicate scheduler_schedule_event_available<T>(scheduler: T) -> bool;
 predicate scheduler_schedule_smoke_ready<T>(scheduler: T) -> bool;
+predicate scheduler_schedule_local_interrupts_closed<T, U>(scheduler: T, local_interrupt: U) -> bool;
+predicate scheduler_runqueue_lock_held_for_schedule<T, U>(scheduler: T, runqueue: U) -> bool;
+predicate scheduler_pick_next_task_identity<T, U, V>(scheduler: T, runqueue: U, task: V) -> bool;
+predicate scheduler_no_task_switch_on_single_task_path<T, U>(scheduler: T, task: U) -> bool;
+predicate scheduler_switch_to_prepared<T, U, V, W>(scheduler: T, runqueue: U, prev_ref: V, next_ref: W) -> bool;
+predicate scheduler_switch_to_committed<T, U, V>(scheduler: T, prev_ref: U, next_ref: V) -> bool;
+predicate scheduler_switch_to_identity_path<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_switch_to_core_context_saved<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_switch_to_core_context_restored<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate task_runqueue_selected<T, U, V>(scheduler: T, task: U, runqueue: V) -> bool;
 predicate runqueue_runtime_state_is<T>(runqueue: T, state: RunQueueRuntimeState) -> bool;
 predicate runqueue_task_refs_empty<T>(runqueue: T) -> bool;
@@ -392,6 +405,35 @@ type CpuRef {
 type TaskRefSet {
 }
 
+type RegisterValue {
+}
+
+/*
+ * TaskThreadContext is the architecture-specific core switch context owned by
+ * every Task. On RISC-V this corresponds to Linux task_struct.thread fields
+ * saved/restored by arch/riscv/kernel/entry.S::__switch_to:
+ * ra, sp and callee-saved s0..s11. Floating-point/vector state, prev_cpu,
+ * icache flush policy and memory-context switching are intentionally outside
+ * this minimum core context and are modeled later as separate task subobjects
+ * or scheduler hooks.
+ */
+type TaskThreadContext {
+    ra: RegisterValue;
+    sp: RegisterValue;
+    s0: RegisterValue;
+    s1: RegisterValue;
+    s2: RegisterValue;
+    s3: RegisterValue;
+    s4: RegisterValue;
+    s5: RegisterValue;
+    s6: RegisterValue;
+    s7: RegisterValue;
+    s8: RegisterValue;
+    s9: RegisterValue;
+    s10: RegisterValue;
+    s11: RegisterValue;
+}
+
 /*
  * Task is a reusable runtime task type. TaskRuntimeState is an extended
  * runtime state rather than an object lifecycle state. The current formal
@@ -401,6 +443,10 @@ type TaskRefSet {
  */
 type Task: TaskObject {
     ext_state: TaskRuntimeState;
+
+    owned {
+        thread_context: TaskThreadContext;
+    }
 
     processes {
         Event::SetRuntimeState(state: TaskRuntimeState) {
@@ -431,6 +477,28 @@ type Task: TaskObject {
                 task_cpumask_is(self, cpu_ref);
             }
         }
+
+        Action::SaveCoreContext {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_thread_context_owned(self, self.thread_context);
+                task_thread_context_core_register_set(self.thread_context);
+            }
+            ensures {
+                task_thread_context_core_saved(self.thread_context);
+            }
+        }
+
+        Action::RestoreCoreContext {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_thread_context_owned(self, self.thread_context);
+                task_thread_context_core_register_set(self.thread_context);
+            }
+            ensures {
+                task_thread_context_core_restored(self.thread_context);
+            }
+        }
     }
 }
 
@@ -442,13 +510,73 @@ type Task: TaskObject {
  */
 type SchedulerObject: TaskObject {
     processes {
-        Event::Schedule {
+        Action::Schedule {
             state_effect: StateEffect::None;
             depends_on {
                 scheduler_schedule_event_available(self);
             }
+            within SchedulePreemptionContext {
+                within ScheduleLocalInterruptContext {
+                    within ScheduleRunQueueContext {
+                        depends_on {
+                            current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                            boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
+                            task_ref_targets(BootIdleTaskRef, BootIdleTask);
+                            task_ref_ready(BootIdleTaskRef);
+                        }
+
+                        drives {
+                            self.Action::SwitchTo(
+                                prev_ref: BootIdleTaskRef,
+                                next_ref: BootIdleTaskRef
+                            );
+                        }
+
+                        ensures {
+                            scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
+                            scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
+                            scheduler_pick_next_task_identity(self, BootRunQueue, BootIdleTask);
+                            scheduler_no_task_switch_on_single_task_path(self, BootIdleTask);
+                            scheduler_switch_to_committed(self, BootIdleTaskRef, BootIdleTaskRef);
+                            scheduler_switch_to_identity_path(self, BootIdleTaskRef);
+                            scheduler_switch_to_core_context_saved(self, BootIdleTaskRef);
+                            scheduler_switch_to_core_context_restored(self, BootIdleTaskRef);
+                            scheduler_first_schedule_committed(self);
+                        }
+                    }
+                }
+            }
             ensures {
+                scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
+                scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
+                scheduler_pick_next_task_identity(self, BootRunQueue, BootIdleTask);
+                scheduler_no_task_switch_on_single_task_path(self, BootIdleTask);
+                scheduler_switch_to_committed(self, BootIdleTaskRef, BootIdleTaskRef);
+                scheduler_switch_to_identity_path(self, BootIdleTaskRef);
+                scheduler_switch_to_core_context_saved(self, BootIdleTaskRef);
+                scheduler_switch_to_core_context_restored(self, BootIdleTaskRef);
                 scheduler_first_schedule_committed(self);
+            }
+        }
+
+        Action::SwitchTo(prev_ref: TaskRef, next_ref: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_ref_ready(prev_ref);
+                task_ref_ready(next_ref);
+                scheduler_switch_to_prepared(self, BootRunQueue, prev_ref, next_ref);
+            }
+            drives {
+                BootIdleTask.Action::SaveCoreContext;
+                BootIdleTask.Action::RestoreCoreContext;
+            }
+            ensures {
+                scheduler_switch_to_committed(self, prev_ref, next_ref);
+                scheduler_switch_to_core_context_saved(self, prev_ref);
+                scheduler_switch_to_core_context_restored(self, next_ref);
+            }
+            deferred {
+                "当前 SwitchTo 只建立 RISC-V __switch_to 核心寄存器保存/恢复框架；真实栈切换、last 返回值、FPU/vector、MM 切换、finish_task_switch 钩子和 prev != next 路径后续展开。";
             }
         }
 

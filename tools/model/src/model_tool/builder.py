@@ -541,7 +541,11 @@ def _check_context_guard_references(
     guard = context.guard
     if guard is None:
         return
-    if guard.kind not in ("RawSpinLockIrqSaveGuard", "PreemptionGuard"):
+    if guard.kind not in (
+        "RawSpinLockIrqSaveGuard",
+        "PreemptionGuard",
+        "LocalInterruptGuard",
+    ):
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
@@ -549,12 +553,12 @@ def _check_context_guard_references(
                 guard.span,
             )
         )
-    if guard.kind == "PreemptionGuard":
+    if guard.kind in ("PreemptionGuard", "LocalInterruptGuard"):
         if guard.lock_ref is not None:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"PreemptionGuard on context {context.name} must not declare lock_ref",
+                    f"{guard.kind} on context {context.name} must not declare lock_ref",
                     guard.span,
                 )
             )

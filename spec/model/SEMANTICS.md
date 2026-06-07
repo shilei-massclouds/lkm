@@ -229,6 +229,30 @@ Completion 也说明了 event/action factoring 的边界：`Completion.Setup` �
 
 `SchedulerObject.Action::SelectRunQueue(task_ref: TaskRef) -> RunQueueRef` 是状态内 action。它只根据任务引用和当前调度条件选择目标 runqueue 引用，不推进 `Scheduler` lifecycle state，也不提交 runqueue 成员关系。当前 `rest_init()` 最小路径固定返回 `BootRunQueueRef`，即 boot CPU runqueue；完整 `select_task_rq()` 策略，包括 affinity、wake flags、scheduler class、load balance、SMP、migration disabled 和 cpuset 等，后续作为 deferred 策略展开。
 
+`SchedulerObject.Action::Schedule` 是 `Scheduler.Online` 后的调度分界 action。
+它不推进 `Scheduler` lifecycle state，但会提交一次调度边界的运行期事实。
+`schedule_preempt_disabled()` 仍由调用方展开为三段式：
+先退出调用方继承的 preempt-disabled guard，再调用
+`Scheduler.Action::Schedule`，最后进入新的 boot-idle preempt-disabled
+上下文。`Schedule` 自身内部则建模 `schedule()`/`__schedule()` 的最小边界：
+先由 `PreemptionGuard` 建立 schedule-owned 不可抢占上下文，再由
+`LocalInterruptGuard` 关闭本 CPU 本地中断，然后在 runqueue lock context 中
+选择 next task 并进入 `SchedulerObject.Action::SwitchTo(prev_ref, next_ref)`。
+
+`SwitchTo` 对应 Linux `context_switch()` 中 `prepare_task_switch()` 和
+`finish_task_switch()` 之间的 `switch_to(prev, next, last)` 核心位置。RISC-V
+实现中 `switch_to` 先处理 `thread.prev_cpu`、FPU/vector/icache 等架构钩子，
+再由 `__switch_to` 保存 `prev->thread` 并恢复 `next->thread` 的核心寄存器。
+正式规格当前只覆盖 `__switch_to` 的核心寄存器组：`ra`、`sp` 和
+callee-saved `s0..s11`。这些寄存器不属于 `Scheduler`，而属于每个 `Task`
+拥有的 `TaskThreadContext` 内嵌结构。`Task.Action::SaveCoreContext` 和
+`Task.Action::RestoreCoreContext` 分别提交该内嵌结构的保存和恢复事实。
+当前 UP 最小路径允许 `prev == next == BootIdleTaskRef`，因此 `SwitchTo` 只提交
+identity switch 框架事实和核心上下文保存/恢复事实，不执行真实 task stack
+switch。完整 `prev != next` 切换、`last` 返回值、MM 切换、FPU/vector、
+`prepare_task_switch()`/`finish_task_switch()` 钩子、`sched_submit_work()`、
+worker sleep/running hook、RCU context switch 和 scheduler class pick 细节后续按对象展开。
+
 `RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Event::EnqueueTask(task_ref: TaskRef)` 是 Operational Event，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。该 event 的基础成员事实统一表达为 `runqueue_contains_task(self, task_ref)`；阶段级或跨对象派生事实可以继续使用 `task_enqueued_on_runqueue(task_ref, runqueue_ref)` 表示已经经过 `SelectRunQueue` 选择并完成入队的整体结果。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，再在该 runqueue 的锁建立的资源独占上下文内通过 `selected_rq.Event::EnqueueTask(...)` 提交入队。
 
 ## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct

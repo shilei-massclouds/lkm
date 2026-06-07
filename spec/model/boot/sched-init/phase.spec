@@ -207,7 +207,7 @@ object BootRunQueue: RunQueue {
  * BootIdleTask 表示启动线程在 sched_init() 中转换出的 boot CPU idle task
  * 规格身份。它不创建新 task，而是复用当前 BootInitTask/current。
  */
-object BootIdleTask: TaskObject {
+object BootIdleTask: Task {
     initial_state: State::Base;
     parent: BootRunQueue;
 
@@ -230,6 +230,10 @@ object BootIdleTask: TaskObject {
                     boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                     boot_idle_task_reuses_current_init_task(BootIdleTask, BootInitTask);
                     boot_idle_task_uses_init_mm_lazy_tlb(BootIdleTask, InitMM);
+                    task_ref_targets(BootIdleTaskRef, BootIdleTask);
+                    task_ref_ready(BootIdleTaskRef);
+                    task_thread_context_owned(BootIdleTask, BootIdleTask.thread_context);
+                    task_thread_context_core_register_set(BootIdleTask.thread_context);
                     task_preemption_control_ready(BootIdleTask);
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
@@ -242,6 +246,10 @@ object BootIdleTask: TaskObject {
         invariant {
             boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
             boot_idle_task_reuses_current_init_task(BootIdleTask, BootInitTask);
+            task_ref_targets(BootIdleTaskRef, BootIdleTask);
+            task_ref_ready(BootIdleTaskRef);
+            task_thread_context_owned(BootIdleTask, BootIdleTask.thread_context);
+            task_thread_context_core_register_set(BootIdleTask.thread_context);
             task_preemption_control_ready(BootIdleTask);
             current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);

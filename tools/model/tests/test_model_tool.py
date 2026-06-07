@@ -624,6 +624,79 @@ class ModelToolTests(unittest.TestCase):
                 stderr.getvalue(),
             )
 
+    def test_local_interrupt_guard_context_is_valid(self) -> None:
+        source = """
+            type LocalInterruptControl {
+                processes {
+                    Event::SaveAndDisable {
+                    }
+
+                    Event::Restore {
+                    }
+                }
+            }
+
+            context LocalIrqContext: Context {
+                guard: LocalInterruptGuard {
+                    entered_by {
+                        BootCpuLocalInterrupt.Event::SaveAndDisable;
+                    }
+
+                    exited_by {
+                        BootCpuLocalInterrupt.Event::Restore;
+                    }
+                }
+
+                obj_refs {
+                    BootCpuLocalInterrupt;
+                    A;
+                }
+
+                effects {
+                    interruptible: false;
+                    preemptible: false;
+                    sleepable: false;
+                    exclusive_refs: none;
+                }
+            }
+
+            object BootCpuLocalInterrupt: LocalInterruptControl {
+                initial_state: State::Base;
+
+                state State::Base {
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within LocalIrqContext {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "local-irq-context.spec"
+            ast = Path(tmp) / "local-irq-context.ast.json"
+            model = Path(tmp) / "local-irq-context.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+
     def test_model_tool_does_not_import_pyveri(self) -> None:
         source_root = Path(__file__).resolve().parents[1] / "src" / "model_tool"
 

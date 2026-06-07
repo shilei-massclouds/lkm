@@ -195,6 +195,7 @@ def _ordinary_action_records_by_event(
         actions.setdefault((object_name, event_name), []).append(
             {
                 "action": display_expression,
+                "expression": expression,
                 "order": order,
             }
         )
@@ -227,13 +228,13 @@ def _context_records_by_event(
     derive_data: dict[str, Any]
 ) -> dict[tuple[str, str], list[dict[str, object]]]:
     contexts: dict[tuple[str, str], list[dict[str, object]]] = {}
-    active_context: dict[tuple[str, str], list[str]] = {}
+    active_context: dict[tuple[str, str], list[dict[str, object]]] = {}
     context_specs = _context_specs(derive_data)
     records = derive_data.get("records", [])
     if not isinstance(records, list):
         return contexts
 
-    for record in records:
+    for order, record in enumerate(records):
         if not isinstance(record, dict):
             continue
         object_name = record.get("object")
@@ -253,7 +254,10 @@ def _context_records_by_event(
             and not expression.endswith(" exited")
         ):
             active_context.setdefault(key, []).append(
-                expression.removeprefix("within ").strip()
+                {
+                    "name": expression.removeprefix("within ").strip(),
+                    "process_parent": record.get("process_parent"),
+                }
             )
             continue
         if (
@@ -275,19 +279,33 @@ def _context_records_by_event(
         ):
             continue
         stack = active_context.get(key)
-        context_name = stack[-1] if stack else None
+        context_entry = stack[-1] if stack else None
+        context_name = _active_context_name(context_entry)
         if context_name is None or not isinstance(expression, str):
             continue
         display_expression = record.get("display_expression")
         if not isinstance(display_expression, str) or not display_expression:
             display_expression = expression
+        context_stack = tuple(
+            name
+            for name in (_active_context_name(entry) for entry in stack)
+            if name is not None
+        )
         item: dict[str, object] = {
             "context": context_name,
-            "context_stack": tuple(stack),
+            "context_stack": context_stack,
+            "expression": expression,
             "action": display_expression,
+            "order": order,
         }
+        process_parent = record.get("process_parent")
+        if isinstance(process_parent, str) and process_parent:
+            item["process_parent"] = process_parent
+        context_parent = _active_context_process_parent(context_entry)
+        if isinstance(context_parent, str) and context_parent:
+            item["context_process_parent"] = context_parent
         context_labels: dict[str, str] = {}
-        for active_name in stack:
+        for active_name in context_stack:
             active_spec = context_specs.get(active_name)
             if active_spec is not None:
                 context_labels[active_name] = _context_trace_label(
@@ -300,6 +318,23 @@ def _context_records_by_event(
             item["context_label"] = _context_trace_label(context_name, context_spec)
         contexts.setdefault(key, []).append(item)
     return contexts
+
+
+def _active_context_name(entry: object) -> str | None:
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        name = entry.get("name")
+        if isinstance(name, str) and name:
+            return name
+    return None
+
+
+def _active_context_process_parent(entry: object) -> str | None:
+    if not isinstance(entry, dict):
+        return None
+    process_parent = entry.get("process_parent")
+    return process_parent if isinstance(process_parent, str) and process_parent else None
 
 
 def _context_specs(derive_data: dict[str, Any]) -> dict[str, dict[str, object]]:
@@ -400,6 +435,10 @@ def _build_context_forest(
                 "label": _context_item_label(item, context_name),
                 "children": [],
             }
+            context_parent = item.get("context_process_parent")
+            if isinstance(context_parent, str) and context_parent:
+                node["process_parent"] = context_parent
+                node["parent_keys"] = _process_identity_keys(context_parent)
             if open_nodes:
                 children = open_nodes[-1].setdefault("children", [])
                 if isinstance(children, list):
@@ -410,14 +449,178 @@ def _build_context_forest(
 
         children = open_nodes[-1].setdefault("children", [])
         if isinstance(children, list):
+            action_text = str(item.get("action", ""))
             children.append(
                 {
                     "kind": "action",
-                    "action": str(item.get("action", "")),
+                    "action": action_text,
+                    "keys": _process_identity_keys(action_text, item.get("expression")),
+                    "parent": item.get("process_parent"),
+                    "parent_keys": _process_identity_keys(item.get("process_parent")),
+                    "children": [],
                 }
             )
 
+    for context in forest:
+        _nest_context_action_children(context)
+
     return forest
+
+
+def _nest_context_action_children(node: dict[str, object]) -> None:
+    children = node.get("children")
+    if not isinstance(children, list):
+        return
+
+    for child in children:
+        if isinstance(child, dict) and child.get("kind") == "context":
+            _nest_context_action_children(child)
+
+    actions = [
+        child
+        for child in children
+        if isinstance(child, dict) and child.get("kind") == "action"
+    ]
+    action_by_key: dict[str, dict[str, object]] = {}
+    for action in actions:
+        keys = action.get("keys")
+        if isinstance(keys, set):
+            for key in keys:
+                action_by_key.setdefault(key, action)
+        label = str(action.get("action", ""))
+        if label:
+            for key in _process_identity_keys(label):
+                action_by_key.setdefault(key, action)
+    nested_ids: set[int] = set()
+    for action in actions:
+        parent_keys = action.get("parent_keys")
+        if not isinstance(parent_keys, set) or not parent_keys:
+            continue
+        parent_action = None
+        for parent_key in parent_keys:
+            parent_action = action_by_key.get(parent_key)
+            if parent_action is not None:
+                break
+        if parent_action is None or parent_action is action:
+            continue
+        parent_children = parent_action.setdefault("children", [])
+        if isinstance(parent_children, list):
+            parent_children.append(action)
+            nested_ids.add(id(action))
+
+    if nested_ids:
+        node["children"] = [
+            child
+            for child in children
+            if not (
+                isinstance(child, dict)
+                and child.get("kind") == "action"
+                and id(child) in nested_ids
+            )
+        ]
+
+
+def _context_action_max_depth(node: dict[str, object]) -> int:
+    children = node.get("children")
+    if not isinstance(children, list):
+        return 0
+
+    max_depth = 0
+
+    def visit_action(action: dict[str, object], depth: int) -> None:
+        nonlocal max_depth
+        max_depth = max(max_depth, depth)
+        nested_children = action.get("children")
+        if not isinstance(nested_children, list):
+            return
+        for nested in nested_children:
+            if isinstance(nested, dict) and nested.get("kind") == "action":
+                visit_action(nested, depth + 1)
+
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        if child.get("kind") == "context":
+            max_depth = max(max_depth, _context_action_max_depth(child))
+        elif child.get("kind") == "action":
+            parent_keys = child.get("parent_keys")
+            external_depth = 1 if isinstance(parent_keys, set) and parent_keys else 0
+            visit_action(child, external_depth)
+    return max_depth
+
+
+def _context_span_start_depth(node: dict[str, object]) -> int:
+    parent_keys = node.get("parent_keys")
+    return 1 if isinstance(parent_keys, set) and parent_keys else 0
+
+
+def _context_span_column_count(node: dict[str, object]) -> int:
+    start_depth = _context_span_start_depth(node)
+    max_depth = _context_action_max_depth(node)
+    return 3 + max(0, max_depth - start_depth) * 2
+
+
+def _context_span_row(
+    start_row: int,
+    end_row: int,
+    event_body_start: int,
+    *,
+    context_parent_row: int | None,
+) -> int:
+    if context_parent_row is None:
+        return start_row
+    height = max(1, end_row - start_row)
+    lower_padding = height // 2
+    return max(event_body_start, context_parent_row - lower_padding)
+
+
+def _process_identity_keys(*values: object) -> set[str]:
+    keys: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        text = " ".join(value.split()).strip()
+        if not text:
+            continue
+        keys.add(text)
+        compact_call = _process_call_identity(text)
+        if compact_call:
+            keys.add(compact_call)
+    return keys
+
+
+def _process_call_identity(value: str) -> str:
+    match = re.match(
+        r"\A([A-Za-z_][A-Za-z0-9_.]*\.(?:Event|Action)::[A-Za-z_][A-Za-z0-9_]*)\((.*)\)\Z",
+        value,
+    )
+    if match is None:
+        return ""
+    prefix, args = match.group(1, 2)
+    normalized_args: list[str] = []
+    for arg in _split_process_args(args):
+        if ":" in arg:
+            _name, arg = arg.split(":", 1)
+        normalized_args.append(arg.strip())
+    return f"{prefix}({', '.join(normalized_args)})"
+
+
+def _split_process_args(args: str) -> list[str]:
+    parts: list[str] = []
+    start = 0
+    depth = 0
+    for index, char in enumerate(args):
+        if char in "([{":
+            depth += 1
+        elif char in ")]}" and depth > 0:
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(args[start:index].strip())
+            start = index + 1
+    tail = args[start:].strip()
+    if tail:
+        parts.append(tail)
+    return parts
 
 
 def _event_node_id(object_name: str, event_name: str) -> str:
@@ -799,97 +1002,6 @@ class _TraceLayoutBuilder:
                 TraceArrow(source=span_id, target=verified_id, kind="depends_on")
             )
 
-        context_items = context_records.get((str(data["object"]), str(data["event"])), [])
-        context_column = None if is_phase else gap_column
-        if context_items and context_column is not None:
-            context_forest = _build_context_forest(context_items)
-            if context_forest:
-                self._max_object_lane = max(self._max_object_lane, object_lane + 1)
-            context_index = 0
-            previous_action_id: str | None = None
-
-            def place_context_node(node: dict[str, object], depth: int) -> None:
-                nonlocal context_index, previous_action_id
-                current_context_index = context_index
-                context_index += 1
-                context_id = f"{event_id}-context-{current_context_index}"
-                context_start_row = len(self.rows)
-                cell_insert_index = len(self.cells)
-                action_index = 0
-                context_label = str(node.get("label", node.get("name", "")))
-                children = node.get("children")
-                if not isinstance(children, list):
-                    children = []
-
-                for child in children:
-                    if not isinstance(child, dict):
-                        continue
-                    if child.get("kind") == "context":
-                        place_context_node(child, depth + 1)
-                        continue
-                    if child.get("kind") != "action":
-                        continue
-                    action_row = len(self.rows)
-                    self._add_row(
-                        "context_action",
-                        action_row,
-                        f"{label}.within.{current_context_index}.{action_index}",
-                        group_id=event_id if not is_phase else None,
-                        group_role="context_action" if not is_phase else None,
-                    )
-                    action_id = f"{context_id}-action-{action_index}"
-                    self.cells.append(
-                        TraceCell(
-                            id=action_id,
-                            kind="context_action",
-                            row=action_row,
-                            column=context_column,
-                            column_span=2,
-                            label=str(child.get("action", "")),
-                        )
-                    )
-                    if previous_action_id is not None:
-                        self.arrows.append(
-                            TraceArrow(
-                                source=previous_action_id,
-                                target=action_id,
-                                kind="context_order",
-                            )
-                        )
-                    previous_action_id = action_id
-                    action_index += 1
-
-                context_extra_rows = 0
-                if "|" in context_label:
-                    guard_row = len(self.rows)
-                    context_extra_rows = 1
-                    self._add_row(
-                        "context_guard",
-                        guard_row,
-                        f"{label}.within.{current_context_index}.guard",
-                        group_id=event_id if not is_phase else None,
-                        group_role="context_guard" if not is_phase else None,
-                    )
-                self.cells.insert(
-                    cell_insert_index,
-                    TraceCell(
-                        id=context_id,
-                        kind="context_span",
-                        row=context_start_row,
-                        column=context_column,
-                        label=context_label,
-                        row_span=max(1, len(self.rows) - context_start_row),
-                        column_span=2,
-                    )
-                )
-                self.arrows.append(
-                    TraceArrow(source=span_id, target=context_id, kind="within")
-                )
-
-            for context_node in context_forest:
-                if context_node.get("kind") == "context":
-                    place_context_node(context_node, 0)
-
         body_items: list[dict[str, object]] = []
         for child_index, child in enumerate(_trace_children(data)):
             if _should_skip_trace_node(child, verified_states_by_event):
@@ -907,6 +1019,21 @@ class _TraceLayoutBuilder:
                 }
             )
         event_key = (str(data["object"]), str(data["event"]))
+        context_items = context_records.get(event_key, [])
+        context_forest = _build_context_forest(context_items)
+        if context_forest:
+            orders = [
+                item.get("order")
+                for item in context_items
+                if isinstance(item.get("order"), int)
+            ]
+            body_items.append(
+                {
+                    "kind": "context",
+                    "order": min(orders) if orders else 1_400_000,
+                    "forest": context_forest,
+                }
+            )
         for action_index, action in enumerate(ordinary_actions.get(event_key, [])):
             order = action.get("order")
             body_items.append(
@@ -918,11 +1045,232 @@ class _TraceLayoutBuilder:
             )
         body_items.sort(key=lambda item: int(item.get("order", 0)))
 
-        action_column = self._object_gap_column(object_lane)
-        if any(item.get("kind") == "action" for item in body_items):
-            self._max_object_lane = max(self._max_object_lane, object_lane + 1)
+        action_lane = child_object_lane
+        action_column = self._object_column(action_lane)
+        context_column = action_column
+        max_context_action_depth = 0
+        for item in body_items:
+            if item.get("kind") != "context":
+                continue
+            forest = item.get("forest")
+            if isinstance(forest, list):
+                for context_node in forest:
+                    if isinstance(context_node, dict):
+                        max_context_action_depth = max(
+                            max_context_action_depth,
+                            _context_action_max_depth(context_node),
+                        )
+        if any(item.get("kind") in {"action", "context"} for item in body_items):
+            self._max_object_lane = max(
+                self._max_object_lane,
+                action_lane + max_context_action_depth + 1,
+            )
+
+        context_index = 0
+        previous_context_action_id: str | None = None
+        process_cell_by_key: dict[str, str] = {}
+        process_row_by_key: dict[str, int] = {}
+
+        def register_process_cell(cell_id: str, row: int, *values: object) -> None:
+            for key in _process_identity_keys(*values):
+                process_cell_by_key.setdefault(key, cell_id)
+                process_row_by_key.setdefault(key, row)
+
+        def external_process_cell(keys: object) -> str | None:
+            if not isinstance(keys, set):
+                return None
+            for key in keys:
+                cell_id = process_cell_by_key.get(key)
+                if cell_id is not None:
+                    return cell_id
+            return None
+
+        def external_process_row(keys: object) -> int | None:
+            if not isinstance(keys, set):
+                return None
+            for key in keys:
+                row = process_row_by_key.get(key)
+                if row is not None:
+                    return row
+            return None
+
+        def place_context_node(node: dict[str, object], depth: int) -> None:
+            nonlocal context_index, previous_context_action_id
+            current_context_index = context_index
+            context_index += 1
+            context_id = f"{event_id}-context-{current_context_index}"
+            context_parent_row = external_process_row(node.get("parent_keys"))
+            context_start_row = (
+                context_parent_row if context_parent_row is not None else len(self.rows)
+            )
+            cell_insert_index = len(self.cells)
+            action_index = 0
+            context_label = str(node.get("label", node.get("name", "")))
+            context_start_depth = _context_span_start_depth(node)
+            context_span_columns = _context_span_column_count(node)
+            children = node.get("children")
+            if not isinstance(children, list):
+                children = []
+
+            padding_row = len(self.rows)
+            self._add_row(
+                "context_padding",
+                padding_row,
+                f"{label}.within.{current_context_index}.padding.bottom",
+                group_id=event_id,
+                group_role="context_padding",
+            )
+
+            def place_context_action(
+                action_node: dict[str, object],
+                *,
+                action_depth: int,
+                parent_action_id: str | None,
+            ) -> str:
+                nonlocal action_index, previous_context_action_id
+                external_parent_id = (
+                    external_process_cell(action_node.get("parent_keys"))
+                    if parent_action_id is None
+                    else None
+                )
+                effective_action_depth = (
+                    action_depth + 1 if external_parent_id is not None else action_depth
+                )
+                external_parent_row = (
+                    external_process_row(action_node.get("parent_keys"))
+                    if external_parent_id is not None
+                    else None
+                )
+                if external_parent_row is not None:
+                    action_row = external_parent_row
+                else:
+                    action_row = len(self.rows)
+                    self._add_row(
+                        "context_action",
+                        action_row,
+                        f"{label}.within.{current_context_index}.{action_index}",
+                        group_id=event_id,
+                        group_role="context_action",
+                    )
+                action_id = f"{context_id}-action-{action_index}"
+                self.cells.append(
+                    TraceCell(
+                        id=action_id,
+                        kind="context_action",
+                        row=action_row,
+                        column=context_column + effective_action_depth * 2,
+                        label=str(action_node.get("action", "")),
+                    )
+                )
+                register_process_cell(
+                    action_id,
+                    action_row,
+                    action_node.get("action"),
+                    *tuple(action_node.get("keys") or ()),
+                )
+                if parent_action_id is not None:
+                    self.arrows.append(
+                        TraceArrow(
+                            source=parent_action_id,
+                            target=action_id,
+                            kind="drives",
+                        )
+                    )
+                elif external_parent_id is not None:
+                    self.arrows.append(
+                        TraceArrow(
+                            source=external_parent_id,
+                            target=action_id,
+                            kind="drives",
+                        )
+                    )
+                elif previous_context_action_id is not None:
+                    self.arrows.append(
+                        TraceArrow(
+                            source=previous_context_action_id,
+                            target=action_id,
+                            kind="context_order",
+                        )
+                    )
+                if parent_action_id is None:
+                    previous_context_action_id = action_id
+                action_index += 1
+
+                nested_children = action_node.get("children")
+                if isinstance(nested_children, list):
+                    for nested in nested_children:
+                        if isinstance(nested, dict) and nested.get("kind") == "action":
+                            place_context_action(
+                                nested,
+                                action_depth=effective_action_depth + 1,
+                                parent_action_id=action_id,
+                            )
+                return action_id
+
+            for child in children:
+                if not isinstance(child, dict):
+                    continue
+                if child.get("kind") == "context":
+                    place_context_node(child, depth + 1)
+                    continue
+                if child.get("kind") != "action":
+                    continue
+                place_context_action(child, action_depth=0, parent_action_id=None)
+
+            if "|" in context_label:
+                guard_row = len(self.rows)
+                self._add_row(
+                    "context_guard",
+                    guard_row,
+                    f"{label}.within.{current_context_index}.guard",
+                    group_id=event_id,
+                    group_role="context_guard",
+                )
+            padding_row = len(self.rows)
+            self._add_row(
+                "context_padding",
+                padding_row,
+                f"{label}.within.{current_context_index}.padding.top",
+                group_id=event_id,
+                group_role="context_padding",
+            )
+            span_row = _context_span_row(
+                context_start_row,
+                len(self.rows),
+                event_body_start,
+                context_parent_row=context_parent_row,
+            )
+            self.cells.insert(
+                cell_insert_index,
+                TraceCell(
+                    id=context_id,
+                    kind="context_span",
+                    row=span_row,
+                    column=max(0, context_column + context_start_depth * 2 - 1),
+                    label=context_label,
+                    row_span=max(1, len(self.rows) - span_row),
+                    column_span=context_span_columns,
+                )
+            )
+            context_parent_id = external_process_cell(node.get("parent_keys"))
+            self.arrows.append(
+                TraceArrow(
+                    source=context_parent_id or span_id,
+                    target=context_id,
+                    kind="within",
+                )
+            )
 
         for item in body_items:
+            if item.get("kind") == "context":
+                forest = item.get("forest")
+                if not isinstance(forest, list):
+                    continue
+                for context_node in forest:
+                    if isinstance(context_node, dict) and context_node.get("kind") == "context":
+                        place_context_node(context_node, 0)
+                continue
+
             if item.get("kind") == "action":
                 action = item.get("action")
                 if not isinstance(action, dict):
@@ -942,9 +1290,14 @@ class _TraceLayoutBuilder:
                         kind="action",
                         row=action_row,
                         column=action_column,
-                        column_span=2,
                         label=str(action.get("action", "")),
                     )
+                )
+                register_process_cell(
+                    action_id,
+                    action_row,
+                    action.get("action"),
+                    action.get("expression"),
                 )
                 self.arrows.append(
                     TraceArrow(source=span_id, target=action_id, kind="action")

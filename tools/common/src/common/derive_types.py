@@ -36,6 +36,7 @@ class DerivationRecord:
     obligation_category: str | None = None
     proof_class: str | None = None
     proof_provider: str | None = None
+    process_parent: str | None = None
 
 
 @dataclass(frozen=True)
