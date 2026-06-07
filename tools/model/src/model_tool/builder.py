@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 from common.model_types import (
     BuildResult,
@@ -91,6 +92,15 @@ _ALLOWED_TRANSITIONS = frozenset(
         ("Offline", "Cleanup", "Destroyed"),
     }
 )
+_CONTEXT_BOOLEAN_EFFECTS = ("interruptible", "preemptible", "sleepable")
+
+
+@dataclass(frozen=True)
+class _ContextEffects:
+    interruptible: bool
+    preemptible: bool
+    sleepable: bool
+    exclusive_refs: frozenset[str]
 
 
 def build_model(document: SpecDocument) -> BuildResult:
@@ -477,7 +487,10 @@ def _check_exclusive_context_references(
     model: ObjectModel, diagnostics: list[Diagnostic]
 ) -> None:
     for context in model.exclusive_contexts.values():
-        if context.kind is not None and context.kind not in ("ResourceExclusiveContext", "Context"):
+        if context.kind is not None and context.kind not in (
+            "ResourceExclusiveContext",
+            "Context",
+        ):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -493,16 +506,20 @@ def _check_exclusive_context_references(
                     context.decl.span,
                 )
             )
-        if context.kind == "ResourceExclusiveContext" and not context.decl.effects:
+        if (
+            context.kind in ("ResourceExclusiveContext", "Context")
+            and not context.decl.effects
+        ):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"ResourceExclusiveContext {context.name} is missing effects",
+                    f"context {context.name} is missing effects",
                     context.decl.span,
                 )
             )
-        if context.kind == "ResourceExclusiveContext":
-            _check_context_effects(context, diagnostics)
+        effects = _parse_context_effects(context, diagnostics)
+        if context.kind == "ResourceExclusiveContext" and effects is not None:
+            _check_resource_exclusive_context_effects(context, effects, diagnostics)
         if context.guard is not None:
             _check_context_guard_references(model, context, diagnostics)
         for object_name in context.obj_refs:
@@ -583,31 +600,84 @@ def _check_event_blocks(
         _check_event_references(model, block, diagnostics)
 
 
-def _check_context_effects(
+def _parse_context_effects(
     context: ExclusiveContextDef, diagnostics: list[Diagnostic]
-) -> None:
+) -> _ContextEffects | None:
     entries: dict[str, str] = {}
     for block in context.decl.effects:
         for entry, _span in block.entry_spans:
             match = _ATTR_RE.match(entry)
             if match is not None:
                 entries[match.group(1)] = match.group(2).strip()
+    if not entries:
+        return None
+
+    bools: dict[str, bool] = {}
+    for key in _CONTEXT_BOOLEAN_EFFECTS:
+        raw = entries.get(key)
+        if raw not in ("true", "false"):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"context effect must declare {key}: true|false on {context.name}",
+                    context.decl.span,
+                )
+            )
+            return None
+        bools[key] = raw == "true"
+
+    raw_exclusive_refs = entries.get("exclusive_refs")
+    if raw_exclusive_refs == "obj_refs":
+        exclusive_refs = frozenset(context.obj_refs)
+    elif raw_exclusive_refs == "none":
+        exclusive_refs = frozenset()
+    else:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "context effect must declare exclusive_refs: obj_refs|none "
+                f"on {context.name}",
+                context.decl.span,
+            )
+        )
+        return None
+
+    return _ContextEffects(
+        interruptible=bools["interruptible"],
+        preemptible=bools["preemptible"],
+        sleepable=bools["sleepable"],
+        exclusive_refs=exclusive_refs,
+    )
+
+
+def _check_resource_exclusive_context_effects(
+    context: ExclusiveContextDef,
+    effects: _ContextEffects,
+    diagnostics: list[Diagnostic],
+) -> None:
     required = {
-        "interruptible": "false",
-        "preemptible": "false",
-        "sleepable": "false",
-        "exclusive_refs": "obj_refs",
+        "interruptible": False,
+        "preemptible": False,
+        "sleepable": False,
     }
     for key, value in required.items():
-        if entries.get(key) != value:
+        if getattr(effects, key) != value:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
                     "ResourceExclusiveContext effect must declare "
-                    f"{key}: {value}",
+                    f"{key}: {str(value).lower()}",
                     context.decl.span,
                 )
             )
+    if effects.exclusive_refs != frozenset(context.obj_refs):
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "ResourceExclusiveContext effect must declare exclusive_refs: obj_refs",
+                context.decl.span,
+            )
+        )
 
 
 def _check_lock_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
@@ -649,6 +719,7 @@ def _check_within_references(
     diagnostics: list[Diagnostic],
     *,
     inherited_bindings: dict[str, str] | None = None,
+    inherited_effects: _ContextEffects | None = None,
 ) -> None:
     context = model.exclusive_contexts.get(within.context)
     if context is None:
@@ -660,6 +731,20 @@ def _check_within_references(
             )
         )
         return
+    context_effects = _parse_context_effects(context, diagnostics)
+    cumulative_effects = inherited_effects
+    if context_effects is not None:
+        if inherited_effects is not None:
+            _check_context_nesting_effects(
+                parent_effects=inherited_effects,
+                child_effects=context_effects,
+                child_context=context,
+                span=within.span,
+                diagnostics=diagnostics,
+            )
+        cumulative_effects = _compose_context_effects(
+            inherited_effects, context_effects
+        )
 
     if context.guard is not None and within.entered_by:
         diagnostics.append(
@@ -700,8 +785,42 @@ def _check_within_references(
             child_within,
             diagnostics,
             inherited_bindings=bindings,
+            inherited_effects=cumulative_effects,
         )
     _check_lock_event_blocks(model, within.exited_by, diagnostics, context=context)
+
+
+def _check_context_nesting_effects(
+    *,
+    parent_effects: _ContextEffects,
+    child_effects: _ContextEffects,
+    child_context: ExclusiveContextDef,
+    span: SourceSpan,
+    diagnostics: list[Diagnostic],
+) -> None:
+    for key in _CONTEXT_BOOLEAN_EFFECTS:
+        if getattr(parent_effects, key) is False and getattr(child_effects, key) is True:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "invalid context nesting: inner context "
+                    f"{child_context.name} weakens {key} from false to true",
+                    span,
+                )
+            )
+
+
+def _compose_context_effects(
+    parent: _ContextEffects | None, child: _ContextEffects
+) -> _ContextEffects:
+    if parent is None:
+        return child
+    return _ContextEffects(
+        interruptible=parent.interruptible and child.interruptible,
+        preemptible=parent.preemptible and child.preemptible,
+        sleepable=parent.sleepable and child.sleepable,
+        exclusive_refs=parent.exclusive_refs | child.exclusive_refs,
+    )
 
 
 def _check_lock_event_blocks(

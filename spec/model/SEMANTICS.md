@@ -356,13 +356,16 @@ state State::Ready {
 
 上下文之间允许嵌套。嵌套的语义不是替换外层上下文，而是把外层和内层的效果叠加为一个累计上下文。累计上下文决定当前流能访问哪些对象、能获得哪些层级的对象句柄，以及能否睡眠、能否被抢占、能否被中断等运行约束。
 
-后续正式规格化时，每类 context 必须声明自己的 effect 向量。最小 effect 维度包括：
+每类 context 必须声明自己的 effect 向量。当前工具已经检查的最小 effect
+维度包括：
 
 - `interruptible`：当前作用域是否允许被中断。
 - `preemptible`：当前作用域是否允许被抢占。
 - `sleepable`：当前作用域是否允许睡眠或阻塞等待。
 - `exclusive_refs`：当前作用域独占或受保护访问的对象引用集合。
-- `handle_level`：当前作用域对对象可见的句柄层级或 capability。
+
+`handle_level` 是后续要加入的 effect 维度，用于表达当前作用域对对象可见的
+句柄层级或 capability；首轮工具实现先不推导句柄层级。
 
 嵌套检查必须满足单调加强规则：从外到内可以越来越强，但不能反向削弱外层已经建立的约束。也就是说，内层上下文可以进一步关闭中断、关闭抢占、扩大受保护对象集合或提升对象句柄层级；但不能在外层已经要求不可中断、不可抢占或不可睡眠时，引入语义上允许中断、允许抢占或允许睡眠的上下文。
 
@@ -370,7 +373,16 @@ state State::Ready {
 
 多种上下文和上下文嵌套的正式规格化，是主规格中“组件化内核在不同上下文可以访问对象不同层级句柄”的具体化：上下文 effect 栈给出当前流的访问能力，句柄层级由累计上下文推导，而不是由对象所有权或普通参数传递隐式决定。
 
-当前工具只检查单层 `ResourceExclusiveContext` 的 `guard.lock_ref`、`guard.entered_by/exited_by`、`obj_refs` 和 `within` 内 action/event 引用边界；多种 context kind、effect 偏序、嵌套合法性和句柄层级推导尚未实现。
+当前工具检查以下首轮规则：
+
+- `ResourceExclusiveContext` 与通用 `Context` 都必须声明 `effects`。
+- `interruptible`、`preemptible` 和 `sleepable` 必须为 `true` 或 `false`。
+- `exclusive_refs` 当前支持 `obj_refs` 或 `none`。
+- `ResourceExclusiveContext` 必须声明为 `interruptible: false`、`preemptible: false`、`sleepable: false`、`exclusive_refs: obj_refs`。
+- 嵌套 `within` 会把外层累计 effect 与内层 effect 叠加；布尔约束按单调加强检查，外层累计为 `false` 时，内层不得声明同一维度为 `true`。
+- `exclusive_refs` 通过集合并集叠加，内层声明 `none` 不释放外层已经建立的独占引用。
+
+句柄层级推导、系统天然独占上下文的来源证明、RCU 读侧上下文等更丰富的 guard/effect 语义仍在后续扩展范围内。
 
 ## SEM-CURRENT-CPU-MODEL-001: CurrentCPU Is The Per-CPU Self Identity Entry
 
