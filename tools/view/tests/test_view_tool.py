@@ -198,6 +198,27 @@ class ViewToolTests(unittest.TestCase):
             ]
             self.assertEqual(len(prepare_ready_cells), 1)
 
+    def test_trace_view_rejects_negative_action_depth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            derive = self._build_derive_json(tmp)
+            output = Path(tmp) / "trace.view.json"
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as caught:
+                view_main(
+                    [
+                        str(derive),
+                        "trace",
+                        "--trace-action-depth",
+                        "-1",
+                        "-o",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(caught.exception.code, 2)
+            self.assertIn("non-negative integer", stderr.getvalue())
+
     def test_trace_view_places_within_context_actions(self) -> None:
         view = build_trace_view(
             {
@@ -623,6 +644,162 @@ class ViewToolTests(unittest.TestCase):
                 for arrow in arrows
             )
         )
+
+    def test_trace_view_limits_nested_context_action_depth(self) -> None:
+        derive_data = {
+            "trace": [
+                {
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_state": "Ready",
+                    "target_state": "Online",
+                    "children": [],
+                }
+            ],
+            "model": {},
+            "records": [
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "within",
+                    "proof_class": "exclusive_context",
+                    "expression": "within BootIdleStartupContext",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "drives",
+                    "proof_class": "action_commit",
+                    "proof_provider": "within_context",
+                    "expression": "BootIdleRuntime.Action::RunIdleLoop",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "drives",
+                    "proof_class": "action_commit",
+                    "proof_provider": "within_context",
+                    "expression": "BootIdleRuntime.Action::DoIdleCycle",
+                    "process_parent": "BootIdleRuntime.Action::RunIdleLoop",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "drives",
+                    "proof_class": "action_commit",
+                    "proof_provider": "within_context",
+                    "expression": "BootIdleRuntime.Action::ScheduleIfNeedResched",
+                    "process_parent": "BootIdleRuntime.Action::DoIdleCycle",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "drives",
+                    "proof_class": "action_commit",
+                    "proof_provider": "within_context",
+                    "expression": "Scheduler.Action::ScheduleIdle",
+                    "process_parent": "BootIdleRuntime.Action::ScheduleIfNeedResched",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "drives",
+                    "proof_class": "action_commit",
+                    "proof_provider": "within_context",
+                    "expression": "Scheduler.Action::Schedule",
+                    "process_parent": "Scheduler.Action::ScheduleIdle",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "within",
+                    "proof_class": "exclusive_context",
+                    "expression": "within ScheduleRunQueueContext",
+                    "process_parent": "Scheduler.Action::Schedule",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "drives",
+                    "proof_class": "action_result_binding",
+                    "proof_provider": "within_context",
+                    "expression": "let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(prev_ref: CurrentTaskRef)",
+                    "display_expression": "let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef)",
+                    "process_parent": "Scheduler.Action::Schedule",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "within",
+                    "proof_class": "exclusive_context",
+                    "expression": "within ScheduleRunQueueContext exited",
+                    "process_parent": "Scheduler.Action::Schedule",
+                },
+                {
+                    "status": "proved",
+                    "object": "BootIdleRuntime",
+                    "event": "Enable",
+                    "source_kind": "within",
+                    "proof_class": "exclusive_context",
+                    "expression": "within BootIdleStartupContext exited",
+                },
+            ],
+        }
+
+        limited = build_trace_view(derive_data, max_action_depth=3)
+        limited_cells = limited.metadata["trace_cells"]
+        limited_labels = [
+            cell.label for cell in limited_cells if cell.kind == "context_action"
+        ]
+        limited_context = next(
+            cell for cell in limited_cells if cell.kind == "context_span"
+        )
+
+        self.assertIn("BootIdleRuntime.Action::RunIdleLoop", limited_labels)
+        self.assertIn("BootIdleRuntime.Action::DoIdleCycle", limited_labels)
+        self.assertIn("BootIdleRuntime.Action::ScheduleIfNeedResched", limited_labels)
+        self.assertIn("Scheduler.Action::ScheduleIdle", limited_labels)
+        self.assertNotIn("Scheduler.Action::Schedule", limited_labels)
+        self.assertNotIn(
+            "let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef)",
+            limited_labels,
+        )
+        self.assertFalse(
+            any(
+                cell.kind == "context_span"
+                and "ScheduleRunQueueContext" in cell.label
+                for cell in limited_cells
+            )
+        )
+        self.assertEqual(limited_context.column_span, 8)
+
+        full = build_trace_view(derive_data, max_action_depth=None)
+        full_cells = full.metadata["trace_cells"]
+        full_labels = [cell.label for cell in full_cells if cell.kind == "context_action"]
+        full_context = next(cell for cell in full_cells if cell.kind == "context_span")
+
+        self.assertIn("Scheduler.Action::Schedule", full_labels)
+        self.assertIn(
+            "let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef)",
+            full_labels,
+        )
+        self.assertTrue(
+            any(
+                cell.kind == "context_span"
+                and "ScheduleRunQueueContext" in cell.label
+                for cell in full_cells
+            )
+        )
+        self.assertEqual(full_context.column_span, 10)
 
     def test_trace_view_places_ordinary_drives_actions(self) -> None:
         view = build_trace_view(

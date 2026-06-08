@@ -37,6 +37,7 @@ TEXT_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 RENDER_VIEW_CHOICES = (*VIEW_CHOICES, "trace")
 COMMANDS = frozenset({"parse", "model", "derive", "check", "view", "render"})
 DEFAULT_TRACE_SVG_MARKER = "__pyveri_default_trace_svg__"
+DEFAULT_TRACE_ACTION_DEPTH = 3
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -112,6 +113,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TARGET,
         help=f"target event for trace view, default: {DEFAULT_TARGET}",
     )
+    _add_trace_action_depth_argument(view_parser)
     view_parser.add_argument("-o", "--output", type=Path, help="write the view to a file")
     _add_work_dir_argument(view_parser)
 
@@ -134,6 +136,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
         type=Path,
         help="optional trace SVG annotation JSON",
     )
+    _add_trace_action_depth_argument(render_parser)
     render_parser.add_argument("-o", "--output", type=Path, help="write the rendering to a file")
     _add_work_dir_argument(render_parser)
 
@@ -146,6 +149,31 @@ def _add_work_dir_argument(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="retain intermediate files in this directory instead of a temporary directory",
     )
+
+
+def _add_trace_action_depth_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--trace-action-depth",
+        type=_trace_action_depth,
+        default=DEFAULT_TRACE_ACTION_DEPTH,
+        metavar="N",
+        help=(
+            "maximum nested action depth for trace view; "
+            "use 'all' to disable the limit, default: 3"
+        ),
+    )
+
+
+def _trace_action_depth(value: str) -> int | None:
+    if value == "all":
+        return None
+    try:
+        depth = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected a non-negative integer or 'all'") from exc
+    if depth < 0:
+        raise argparse.ArgumentTypeError("expected a non-negative integer or 'all'")
+    return depth
 
 
 def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
@@ -190,6 +218,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         "--trace-annotations",
         help="trace annotation categories: state, event, or state,event",
     )
+    _add_trace_action_depth_argument(parser)
     parser.add_argument("-o", "--output", type=Path, help="write selected output to a file")
     _add_work_dir_argument(parser)
 
@@ -261,12 +290,26 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
             )
         if args.text:
             selected_outputs.append(
-                _render_view_output(paths, args.text, "text", work, args.spec)
+                _render_view_output(
+                    paths,
+                    args.text,
+                    "text",
+                    work,
+                    args.spec,
+                    trace_action_depth=args.trace_action_depth,
+                )
             )
         if args.graph:
             fmt = "svg" if args.graph in {"timeline", "trace"} else "dot"
             selected_outputs.append(
-                _render_view_output(paths, args.graph, fmt, work, args.spec)
+                _render_view_output(
+                    paths,
+                    args.graph,
+                    fmt,
+                    work,
+                    args.spec,
+                    trace_action_depth=args.trace_action_depth,
+                )
             )
         if args.trace_svg:
             trace_svg_path = _trace_svg_output_path(args.trace_svg, args.spec)
@@ -288,6 +331,7 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 work,
                 args.spec,
                 annotations=annotations,
+                trace_action_depth=args.trace_action_depth,
             )
             _write_output(trace_svg_path, trace_svg, ascii_only=False)
             if args.trace_svg == DEFAULT_TRACE_SVG_MARKER:
@@ -385,7 +429,14 @@ def _run_view(args: argparse.Namespace) -> int:
             code = _ensure_derivation(paths, args.target)
             if code != 0:
                 return code
-        output = _render_view_output(paths, args.view, "text", work, args.spec)
+        output = _render_view_output(
+            paths,
+            args.view,
+            "text",
+            work,
+            args.spec,
+            trace_action_depth=args.trace_action_depth,
+        )
         if args.output is not None:
             _write_output(args.output, output, ascii_only=False)
         else:
@@ -413,6 +464,7 @@ def _run_render(args: argparse.Namespace) -> int:
             work,
             args.spec,
             annotations=args.annotations,
+            trace_action_depth=args.trace_action_depth,
         )
         if args.output is not None:
             _write_output(args.output, output, ascii_only=args.format == "dot")
@@ -437,8 +489,18 @@ def _run_check_stage(derive: Path, output: Path, *, echo: bool = True) -> int:
     return _run_stage(["-m", "check_tool", str(derive), "-o", str(output)], echo=echo)
 
 
-def _run_view_stage(model: Path, view: str, output: Path) -> int:
-    return _run_stage(["-m", "view_tool", str(model), view, "-o", str(output)])
+def _run_view_stage(
+    model: Path,
+    view: str,
+    output: Path,
+    *,
+    trace_action_depth: int | None,
+) -> int:
+    args = ["-m", "view_tool", str(model), view, "-o", str(output)]
+    if view == "trace":
+        depth = "all" if trace_action_depth is None else str(trace_action_depth)
+        args.extend(["--trace-action-depth", depth])
+    return _run_stage(args)
 
 
 def _run_render_stage(
@@ -503,13 +565,19 @@ def _render_view_output(
     work: Path,
     spec: Path,
     annotations: Path | None = None,
+    trace_action_depth: int | None = DEFAULT_TRACE_ACTION_DEPTH,
 ) -> str:
     stem = spec.stem
     suffix = "gv" if fmt == "dot" else fmt
     view_path = work / f"{stem}.{view_name}.view.json"
     output = work / f"{stem}.{view_name}.{suffix}"
     view_input = paths["derive"] if view_name == "trace" else paths["model"]
-    view_code = _run_view_stage(view_input, view_name, view_path)
+    view_code = _run_view_stage(
+        view_input,
+        view_name,
+        view_path,
+        trace_action_depth=trace_action_depth,
+    )
     if view_code != 0:
         raise SystemExit(view_code)
     render_code = _run_render_stage(view_path, fmt, output, annotations)

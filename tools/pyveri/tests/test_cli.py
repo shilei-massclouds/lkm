@@ -125,6 +125,17 @@ class CliTests(unittest.TestCase):
         self.assertIn("columns:", text)
         self.assertIn("StartupTimeline.Event::Setup", text)
 
+    def test_view_trace_command_accepts_action_depth_option(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                ["view", str(self.spec), "trace", "--trace-action-depth", "all"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("trace view:", stdout.getvalue())
+
     def test_render_command_writes_ascii_dot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "object.gv"

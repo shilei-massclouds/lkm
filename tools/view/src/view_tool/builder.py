@@ -23,6 +23,7 @@ _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
+DEFAULT_TRACE_ACTION_DEPTH = 3
 
 
 def build_object_view(model: ObjectModel) -> ViewModel:
@@ -135,7 +136,11 @@ def build_timeline_view(model: ObjectModel) -> ViewModel:
     )
 
 
-def build_trace_view(derive_data: dict[str, Any]) -> ViewModel:
+def build_trace_view(
+    derive_data: dict[str, Any],
+    *,
+    max_action_depth: int | None = DEFAULT_TRACE_ACTION_DEPTH,
+) -> ViewModel:
     """Build a trace layout view from derive JSON."""
 
     builder = _TraceLayoutBuilder()
@@ -146,6 +151,7 @@ def build_trace_view(derive_data: dict[str, Any]) -> ViewModel:
         _context_records_by_event(derive_data),
         _ordinary_action_records_by_event(derive_data),
         _transition_record_order_by_event(derive_data),
+        max_action_depth=max_action_depth,
     )
     return ViewModel(
         name="trace",
@@ -410,8 +416,10 @@ def _context_item_label(item: dict[str, object], context_name: str) -> str:
 
 
 def _build_context_forest(
-    items: list[dict[str, object]]
+    items: list[dict[str, object]],
+    max_action_depth: int | None,
 ) -> list[dict[str, object]]:
+    action_depths = _context_action_depths(items)
     forest: list[dict[str, object]] = []
     open_nodes: list[dict[str, object]] = []
 
@@ -465,7 +473,124 @@ def _build_context_forest(
     for context in forest:
         _nest_context_action_children(context)
 
+    if max_action_depth is not None:
+        pruned_forest: list[dict[str, object]] = []
+        for context in forest:
+            pruned = _prune_context_tree_by_action_depth(
+                context,
+                action_depths,
+                max_action_depth,
+            )
+            if pruned is not None:
+                pruned_forest.append(pruned)
+        forest = pruned_forest
+
     return forest
+
+
+def _context_action_depths(
+    items: list[dict[str, object]]
+) -> dict[str, int]:
+    actions: list[dict[str, object]] = []
+    action_index_by_key: dict[str, int] = {}
+
+    for item in items:
+        action = item.get("action")
+        if not isinstance(action, str) or not action:
+            continue
+        keys = _process_identity_keys(action, item.get("expression"))
+        if not keys:
+            continue
+        action_index = len(actions)
+        actions.append(
+            {
+                "keys": keys,
+                "parent_keys": _process_identity_keys(item.get("process_parent")),
+            }
+        )
+        for key in keys:
+            action_index_by_key.setdefault(key, action_index)
+
+    depth_by_index: dict[int, int] = {}
+    resolving: set[int] = set()
+
+    def resolve_depth(action_index: int) -> int:
+        if action_index in depth_by_index:
+            return depth_by_index[action_index]
+        if action_index in resolving:
+            return 0
+        resolving.add(action_index)
+        parent_depths: list[int] = []
+        parent_keys = actions[action_index].get("parent_keys")
+        if isinstance(parent_keys, set):
+            for parent_key in parent_keys:
+                parent_index = action_index_by_key.get(parent_key)
+                if parent_index is not None and parent_index != action_index:
+                    parent_depths.append(resolve_depth(parent_index) + 1)
+        resolving.remove(action_index)
+        depth = min(parent_depths) if parent_depths else 0
+        depth_by_index[action_index] = depth
+        return depth
+
+    depth_by_key: dict[str, int] = {}
+    for action_index, action in enumerate(actions):
+        depth = resolve_depth(action_index)
+        keys = action.get("keys")
+        if isinstance(keys, set):
+            for key in keys:
+                depth_by_key.setdefault(key, depth)
+    return depth_by_key
+
+
+def _prune_context_tree_by_action_depth(
+    node: dict[str, object],
+    action_depths: dict[str, int],
+    max_action_depth: int,
+) -> dict[str, object] | None:
+    parent_depth = _context_action_depth_for_keys(
+        node.get("parent_keys"),
+        action_depths,
+    )
+    if parent_depth is not None and parent_depth >= max_action_depth:
+        return None
+
+    children = node.get("children")
+    if not isinstance(children, list):
+        return node
+
+    pruned_children: list[dict[str, object]] = []
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        if child.get("kind") == "context":
+            pruned_child = _prune_context_tree_by_action_depth(
+                child,
+                action_depths,
+                max_action_depth,
+            )
+            if pruned_child is not None:
+                pruned_children.append(pruned_child)
+            continue
+        if child.get("kind") == "action":
+            action_depth = _context_action_depth_for_keys(
+                child.get("keys"),
+                action_depths,
+            )
+            if action_depth is not None and action_depth > max_action_depth:
+                continue
+        pruned_children.append(child)
+    node["children"] = pruned_children
+    return node
+
+
+def _context_action_depth_for_keys(
+    keys: object,
+    action_depths: dict[str, int],
+) -> int | None:
+    if not isinstance(keys, set):
+        return None
+    depths = [action_depths[key] for key in keys if key in action_depths]
+    return min(depths) if depths else None
 
 
 def _nest_context_action_children(node: dict[str, object]) -> None:
@@ -521,7 +646,9 @@ def _nest_context_action_children(node: dict[str, object]) -> None:
         ]
 
 
-def _context_action_max_depth(node: dict[str, object]) -> int:
+def _context_action_max_depth(
+    node: dict[str, object], max_action_depth: int | None
+) -> int:
     children = node.get("children")
     if not isinstance(children, list):
         return 0
@@ -532,19 +659,27 @@ def _context_action_max_depth(node: dict[str, object]) -> int:
         if not isinstance(child, dict):
             continue
         if child.get("kind") == "context":
-            max_depth = max(max_depth, _context_action_max_depth(child))
+            max_depth = max(max_depth, _context_action_max_depth(child, max_action_depth))
         elif child.get("kind") == "action":
             max_depth = max(
                 max_depth,
-                _context_action_tree_max_depth(child, _context_span_start_depth(node)),
+                _context_action_tree_max_depth(
+                    child,
+                    _context_span_start_depth(node),
+                    max_action_depth,
+                ),
             )
     return max_depth
 
 
 def _context_action_tree_max_depth(
-    action_node: dict[str, object], action_depth: int
+    action_node: dict[str, object],
+    action_depth: int,
+    max_action_depth: int | None,
 ) -> int:
     max_depth = action_depth
+    if max_action_depth is not None and action_depth >= max_action_depth:
+        return max_depth
     children = action_node.get("children")
     if not isinstance(children, list):
         return max_depth
@@ -553,7 +688,11 @@ def _context_action_tree_max_depth(
         if isinstance(child, dict) and child.get("kind") == "action":
             max_depth = max(
                 max_depth,
-                _context_action_tree_max_depth(child, action_depth + 1),
+                _context_action_tree_max_depth(
+                    child,
+                    action_depth + 1,
+                    max_action_depth,
+                ),
             )
     return max_depth
 
@@ -563,9 +702,11 @@ def _context_span_start_depth(node: dict[str, object]) -> int:
     return 1 if isinstance(parent_keys, set) and parent_keys else 0
 
 
-def _context_span_column_count(node: dict[str, object]) -> int:
+def _context_span_column_count(
+    node: dict[str, object], max_action_depth: int | None
+) -> int:
     start_depth = _context_span_start_depth(node)
-    max_depth = _context_action_max_depth(node)
+    max_depth = _context_action_max_depth(node, max_action_depth)
     return 2 + max(0, max_depth - start_depth) * 2
 
 
@@ -873,6 +1014,8 @@ class _TraceLayoutBuilder:
         context_records: dict[tuple[str, str], list[dict[str, object]]],
         ordinary_actions: dict[tuple[str, str], list[dict[str, object]]],
         event_orders: dict[tuple[str, str], int],
+        *,
+        max_action_depth: int | None,
     ) -> None:
         self._max_phase_lane = _max_trace_phase_lane(roots, verified_states_by_event)
         self._object_column_base = self._max_phase_lane + 2
@@ -888,6 +1031,7 @@ class _TraceLayoutBuilder:
                 ordinary_actions=ordinary_actions,
                 event_orders=event_orders,
                 verified_states_by_event=verified_states_by_event,
+                max_action_depth=max_action_depth,
             )
         self._center_multi_target_process_sources()
         self._build_columns()
@@ -903,6 +1047,7 @@ class _TraceLayoutBuilder:
         ordinary_actions: dict[tuple[str, str], list[dict[str, object]]],
         event_orders: dict[tuple[str, str], int],
         verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
+        max_action_depth: int | None,
     ) -> None:
         data = _trace_node_object(node)
         is_phase = _is_trace_phase_object(str(data["object"]))
@@ -1030,7 +1175,7 @@ class _TraceLayoutBuilder:
             )
         event_key = (str(data["object"]), str(data["event"]))
         context_items = context_records.get(event_key, [])
-        context_forest = _build_context_forest(context_items)
+        context_forest = _build_context_forest(context_items, max_action_depth)
         if context_forest:
             orders = [
                 item.get("order")
@@ -1068,7 +1213,7 @@ class _TraceLayoutBuilder:
                     if isinstance(context_node, dict):
                         max_context_action_depth = max(
                             max_context_action_depth,
-                            _context_action_max_depth(context_node),
+                            _context_action_max_depth(context_node, max_action_depth),
                         )
         if any(item.get("kind") in {"action", "context"} for item in body_items):
             self._max_object_lane = max(
@@ -1117,7 +1262,7 @@ class _TraceLayoutBuilder:
             action_index = 0
             context_label = str(node.get("label", node.get("name", "")))
             context_start_depth = _context_span_start_depth(node)
-            context_span_columns = _context_span_column_count(node)
+            context_span_columns = _context_span_column_count(node, max_action_depth)
             children = node.get("children")
             if not isinstance(children, list):
                 children = []
@@ -1208,7 +1353,13 @@ class _TraceLayoutBuilder:
                 action_index += 1
 
                 nested_children = action_node.get("children")
-                if isinstance(nested_children, list):
+                if (
+                    isinstance(nested_children, list)
+                    and (
+                        max_action_depth is None
+                        or effective_action_depth < max_action_depth
+                    )
+                ):
                     for nested in nested_children:
                         if isinstance(nested, dict) and nested.get("kind") == "action":
                             place_context_action(
@@ -1333,6 +1484,7 @@ class _TraceLayoutBuilder:
                 ordinary_actions=ordinary_actions,
                 event_orders=event_orders,
                 verified_states_by_event=verified_states_by_event,
+                max_action_depth=max_action_depth,
             )
 
         event_exit_gap_row = len(self.rows)
