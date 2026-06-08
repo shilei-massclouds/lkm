@@ -565,9 +565,19 @@ class ViewToolTests(unittest.TestCase):
                 for cell in (pick_cell, switch_cell, save_cell, restore_cell)
             )
         )
-        self.assertEqual(pick_cell.row, schedule_cell.row)
+        self.assertEqual(schedule_cell.row, pick_cell.row)
+        self.assertEqual(
+            schedule_cell.row + schedule_cell.row_span,
+            switch_cell.row + switch_cell.row_span,
+        )
+        self.assertGreater(schedule_cell.row_span, 1)
         self.assertGreater(switch_cell.row, pick_cell.row)
-        self.assertGreater(save_cell.row, switch_cell.row)
+        self.assertEqual(switch_cell.row, save_cell.row)
+        self.assertEqual(
+            switch_cell.row + switch_cell.row_span,
+            restore_cell.row + restore_cell.row_span,
+        )
+        self.assertGreater(switch_cell.row_span, 1)
         self.assertGreater(restore_cell.row, save_cell.row)
         self.assertTrue(
             any(

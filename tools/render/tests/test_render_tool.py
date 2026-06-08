@@ -422,10 +422,11 @@ class RenderToolTests(unittest.TestCase):
                 "trace_cells": (
                     TraceCell(
                         id="schedule",
-                        kind="context_action",
-                        row=0,
+                        kind="action",
+                        row=1,
                         column=0,
                         label="Scheduler.Action::Schedule",
+                        row_span=2,
                     ),
                     TraceCell(
                         id="pick",
@@ -467,6 +468,14 @@ class RenderToolTests(unittest.TestCase):
 
         text = render_svg(view)
 
+        self.assertIn(
+            '<line class="drive-arrow" x1="198.0" y1="225.0" x2="301.0" y2="225.0" />',
+            text,
+        )
+        self.assertIn(
+            '<line class="drive-arrow" x1="198.0" y1="169.0" x2="301.0" y2="169.0" />',
+            text,
+        )
         self.assertIn(
             '<line class="drive-arrow" x1="376.0" y1="151.0" x2="376.0" y2="129.0" />',
             text,

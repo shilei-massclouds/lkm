@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import re
 from typing import Any
 
@@ -888,6 +889,7 @@ class _TraceLayoutBuilder:
                 event_orders=event_orders,
                 verified_states_by_event=verified_states_by_event,
             )
+        self._center_multi_target_process_sources()
         self._build_columns()
 
     def _place_node(
@@ -1477,6 +1479,45 @@ class _TraceLayoutBuilder:
 
     def _object_gap_column(self, object_lane: int) -> int:
         return self._object_column(object_lane) + 1
+
+    def _center_multi_target_process_sources(self) -> None:
+        while True:
+            cell_by_id = {cell.id: cell for cell in self.cells}
+            target_ranges_by_source: dict[str, list[tuple[int, int]]] = {}
+            for arrow in self.arrows:
+                if arrow.kind != "drives":
+                    continue
+                source = cell_by_id.get(arrow.source)
+                target = cell_by_id.get(arrow.target)
+                if source is None or target is None:
+                    continue
+                if source.kind not in {"action", "context_action"}:
+                    continue
+                if target.kind != "context_action" or target.column <= source.column:
+                    continue
+                target_ranges_by_source.setdefault(source.id, []).append(
+                    (target.row, target.row + target.row_span)
+                )
+
+            replacements: dict[str, TraceCell] = {}
+            for source_id, target_ranges in target_ranges_by_source.items():
+                if len(target_ranges) < 2:
+                    continue
+                source = cell_by_id[source_id]
+                start_row = min(start for start, _end in target_ranges)
+                end_row = max(end for _start, end in target_ranges)
+                row_span = max(1, end_row - start_row)
+                if source.row == start_row and source.row_span == row_span:
+                    continue
+                replacements[source_id] = replace(
+                    source,
+                    row=start_row,
+                    row_span=row_span,
+                )
+
+            if not replacements:
+                return
+            self.cells = [replacements.get(cell.id, cell) for cell in self.cells]
 
 
 def _trace_node_object(node: Any) -> dict[str, Any]:

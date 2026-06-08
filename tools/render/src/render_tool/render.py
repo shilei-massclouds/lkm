@@ -360,12 +360,22 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
             if _is_phase_to_phase_arrow(source, target):
                 continue
             if source.kind == "context_action" or target.kind == "context_action":
-                _append_trace_directed_arrow(
-                    lines,
-                    _trace_semantic_anchor_box(source, cell_box(source)),
-                    _trace_semantic_anchor_box(target, cell_box(target)),
-                    css_class="drive-arrow",
-                )
+                source_anchor = _trace_semantic_anchor_box(source, cell_box(source))
+                target_anchor = _trace_semantic_anchor_box(target, cell_box(target))
+                if target_anchor[0] > source_anchor[0] + source_anchor[2]:
+                    _append_trace_horizontal_arrow(
+                        lines,
+                        source_anchor,
+                        target_anchor,
+                        css_class="drive-arrow",
+                    )
+                else:
+                    _append_trace_directed_arrow(
+                        lines,
+                        source_anchor,
+                        target_anchor,
+                        css_class="drive-arrow",
+                    )
             else:
                 _append_trace_horizontal_arrow(
                     lines,
