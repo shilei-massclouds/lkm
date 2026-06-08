@@ -120,7 +120,10 @@ fn setup_boot_idle_tail(ctx: &mut Context) -> EventResult {
         &ctx.kthreadd_task,
         &ctx.kthreadd_ready_gate,
         &ctx.cpu_group,
-    )
+    )?;
+    ctx.boot_idle_runtime
+        .prepare_idle_entry(&ctx.scheduler, &ctx.cpu_group)?;
+    ctx.boot_idle_runtime.run_idle_loop(&ctx.scheduler)
 }
 
 fn schedule_once_from_preempt_disabled_context(ctx: &mut Context) -> EventResult {
@@ -229,7 +232,10 @@ fn rest_init_phase_ready(ctx: &Context) -> bool {
     rest_init_dispatch_ready(ctx)
         && ctx.boot_idle_runtime.state() == State::Ready
         && ctx.boot_idle_runtime.first_schedule_committed()
+        && ctx.boot_idle_runtime.idle_entry_prepared()
         && ctx.boot_idle_runtime.cpu_startup_entry_ready()
+        && ctx.boot_idle_runtime.idle_loop_entered()
+        && ctx.boot_idle_runtime.idle_cycle_committed()
         && ctx.boot_idle_runtime.boot_init_handoff_complete()
         && ctx.boot_idle_runtime.boot_cpu_hotplug_online()
         && ctx.boot_idle_runtime.secondary_cpus_not_started()

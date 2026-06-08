@@ -808,7 +808,10 @@ impl KthreaddReadyGate {
 pub struct BootIdleRuntime {
     lifecycle: Lifecycle,
     first_schedule_committed: bool,
+    idle_entry_prepared: bool,
     cpu_startup_entry_ready: bool,
+    idle_loop_entered: bool,
+    idle_cycle_committed: bool,
     boot_init_handoff_complete: bool,
     boot_cpu_hotplug_online: bool,
     secondary_cpus_not_started: bool,
@@ -820,7 +823,10 @@ impl BootIdleRuntime {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             first_schedule_committed: false,
+            idle_entry_prepared: false,
             cpu_startup_entry_ready: false,
+            idle_loop_entered: false,
+            idle_cycle_committed: false,
             boot_init_handoff_complete: false,
             boot_cpu_hotplug_online: false,
             secondary_cpus_not_started: true,
@@ -836,8 +842,20 @@ impl BootIdleRuntime {
         self.first_schedule_committed
     }
 
+    pub const fn idle_entry_prepared(&self) -> bool {
+        self.idle_entry_prepared
+    }
+
     pub const fn cpu_startup_entry_ready(&self) -> bool {
         self.cpu_startup_entry_ready
+    }
+
+    pub const fn idle_loop_entered(&self) -> bool {
+        self.idle_loop_entered
+    }
+
+    pub const fn idle_cycle_committed(&self) -> bool {
+        self.idle_cycle_committed
     }
 
     pub const fn boot_init_handoff_complete(&self) -> bool {
@@ -879,9 +897,12 @@ impl BootIdleRuntime {
         }
 
         self.first_schedule_committed = true;
-        self.cpu_startup_entry_ready = true;
-        self.boot_init_handoff_complete = true;
-        self.boot_cpu_hotplug_online = true;
+        self.idle_entry_prepared = false;
+        self.cpu_startup_entry_ready = false;
+        self.idle_loop_entered = false;
+        self.idle_cycle_committed = false;
+        self.boot_init_handoff_complete = false;
+        self.boot_cpu_hotplug_online = false;
         self.secondary_cpus_not_started = true;
         self.real_task_switch_deferred = true;
         self.lifecycle.transition(
@@ -892,11 +913,69 @@ impl BootIdleRuntime {
         )
     }
 
+    pub fn prepare_idle_entry(
+        &mut self,
+        scheduler: &Scheduler,
+        cpu_group: &CpuGroup,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.first_schedule_committed
+            || scheduler.state() != State::Online
+            || scheduler.boot_idle_task().state() != State::Ready
+            || cpu_group.state() != State::Ready
+            || cpu_group.boot_cpu_state() != State::Online
+        {
+            return self.failed_ready_action();
+        }
+
+        self.idle_entry_prepared = true;
+        self.cpu_startup_entry_ready = true;
+        self.boot_init_handoff_complete = true;
+        self.boot_cpu_hotplug_online = true;
+        Ok(())
+    }
+
+    pub fn run_idle_loop(&mut self, scheduler: &Scheduler) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.idle_entry_prepared
+            || scheduler.state() != State::Online
+        {
+            return self.failed_ready_action();
+        }
+
+        self.do_idle_cycle(scheduler)?;
+        self.idle_loop_entered = true;
+        Ok(())
+    }
+
+    fn do_idle_cycle(&mut self, scheduler: &Scheduler) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.idle_entry_prepared
+            || scheduler.state() != State::Online
+        {
+            return self.failed_ready_action();
+        }
+
+        self.idle_cycle_committed = true;
+        self.secondary_cpus_not_started = true;
+        self.real_task_switch_deferred = true;
+        Ok(())
+    }
+
     fn failed_setup(&self) -> EventResult {
         failed_condition(
             LifecycleEvent::Setup,
             self.lifecycle.state(),
             State::Base,
+            State::Ready,
+        )
+    }
+
+    fn failed_ready_action(&self) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Ready,
             State::Ready,
         )
     }

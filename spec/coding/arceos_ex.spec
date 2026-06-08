@@ -57,6 +57,7 @@ predicate arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts() -> bo
 predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
+predicate arceos_ex_must_boot_idle_runtime_split_entry_and_loop_actions() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
@@ -589,6 +590,22 @@ type ArceosExRestInitCodingMust {
          * only from Scheduler counters or BootRunQueue.curr.
          */
         arceos_ex_must_rest_init_publish_scheduler_dispatch_facts();
+
+        /*
+         * Boot idle runtime actions:
+         *
+         * BootIdleRuntime.setup() must only establish the Ready object shell
+         * after scheduler dispatch facts exist. It must not collapse
+         * PrepareIdleEntry, RunIdleLoop and DoIdleCycle into one setup-time
+         * fact update. The phase code must explicitly drive
+         * BootIdleRuntime.prepare_idle_entry(), then
+         * BootIdleRuntime.run_idle_loop(), with run_idle_loop() committing one
+         * representative do_idle_cycle() boundary. This step still keeps the
+         * real idle loop and need_resched loop deferred; it only aligns the
+         * code shape with the model action boundary so later AI-generated code
+         * has named hooks to extend.
+         */
+        arceos_ex_must_boot_idle_runtime_split_entry_and_loop_actions();
 
         /*
          * CurrentTaskRef scope:

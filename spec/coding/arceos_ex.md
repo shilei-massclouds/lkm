@@ -153,6 +153,13 @@ boot CPU。
 `RestInitPhase.Ready` 仍必须覆盖
 `cpu_startup_entry(CPUHP_ONLINE)` 对应的 boot idle 尾部完成事实。
 
+`BootIdleRuntime` 的代码结构必须和 model action 边界对齐：`setup()` 只建立
+`BootIdleRuntime.Ready` 壳并确认首次调度交接已存在，不得一次性写入全部 idle 尾部事实；
+phase 代码必须随后显式调用 `prepare_idle_entry()` 和 `run_idle_loop()`。`prepare_idle_entry()` 承载
+`current->flags |= PF_IDLE`、`arch_cpu_idle_prepare()` 和 `cpuhp_online_idle(CPUHP_ONLINE)` 的当前抽象事实；
+`run_idle_loop()` 只提交进入 idle loop，并驱动一轮代表性的 `do_idle_cycle()`。本步仍不得实现真实无限 idle loop、
+真实 `need_resched` 循环或真实 `schedule_idle()`；这些必须留给后续 action 细化。
+
 本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
 真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是
 `PreSmpInitPhase`，`KthreaddTask` 的运行期服务能力也留给后续模型。
