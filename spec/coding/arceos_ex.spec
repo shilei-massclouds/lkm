@@ -582,7 +582,9 @@ type ArceosExRestInitCodingMust {
          * current task reference from the current CPU current-task view,
          * pick next from CurrentRunQ, then switch through TaskRef-based core
          * context save/restore and publish the updated CPU-local current task
-         * fact.
+         * fact. The implementation boundary must pass through the current
+         * CPU's CurrentTaskSlot; it must not infer or publish the current task
+         * only from Scheduler counters or BootRunQueue.curr.
          */
         arceos_ex_must_rest_init_publish_scheduler_dispatch_facts();
 
@@ -594,7 +596,8 @@ type ArceosExRestInitCodingMust {
          * not introduce a descriptive CurrentTask object or a global current
          * task singleton. On task switch, next must become the target of this
          * CPU-local CurrentTaskRef. RISC-V64 code should follow the Linux-style
-         * tp register implementation reference, but per-cpu storage remains an
+         * tp register implementation reference through the object-level
+         * CurrentTaskSlot boundary, but per-cpu storage remains an
          * implementation term, not the model definition.
          */
         arceos_ex_must_current_task_ref_be_cpu_view_private();

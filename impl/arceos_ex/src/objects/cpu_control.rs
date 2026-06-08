@@ -270,6 +270,7 @@ impl LocalInterruptControl {
 pub struct CurrentTaskSlot {
     lifecycle: Lifecycle,
     current: CurrentTaskRef,
+    switch_committed_count: usize,
 }
 
 impl CurrentTaskSlot {
@@ -277,6 +278,7 @@ impl CurrentTaskSlot {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             current: CurrentTaskRef::None,
+            switch_committed_count: 0,
         }
     }
 
@@ -286,6 +288,10 @@ impl CurrentTaskSlot {
 
     pub const fn current(&self) -> CurrentTaskRef {
         self.current
+    }
+
+    pub const fn switch_committed_count(&self) -> usize {
+        self.switch_committed_count
     }
 
     pub fn setup(&mut self) -> EventResult {
@@ -317,6 +323,21 @@ impl CurrentTaskSlot {
         }
 
         self.current = CurrentTaskRef::BootIdle;
+        Ok(())
+    }
+
+    pub fn commit_boot_idle_switch(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.current_is_boot_idle() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.current = CurrentTaskRef::BootIdle;
+        self.switch_committed_count = self.switch_committed_count.wrapping_add(1);
         Ok(())
     }
 

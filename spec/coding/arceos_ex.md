@@ -659,14 +659,16 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQ` 执行 `pick_n
 `sstatus.SIE`；本地中断总开关必须通过 `LocalInterruptControl` 操作。当前 RISC-V `switch_to` 框架只模拟 Linux
 `__switch_to` 的核心保存/恢复边界：每个 `Task` 拥有一个 `TaskThreadContext`，其寄存器组严格对应
 `thread.ra`、`thread.sp` 和 `thread.s[0..11]`。保存/恢复必须通过 `TaskRef` receiver 对目标 task 的
-`TaskThreadContext` 生效，`switch_to` 完成后必须提交 next 已成为本 CPU `CurrentTaskRef` 目标的事实。当前只有一个任务，
+`TaskThreadContext` 生效，`switch_to` 完成后必须通过本 CPU 的 `CurrentTaskSlot` 提交 next 已成为本 CPU
+`CurrentTaskRef` 目标的事实，不能只依赖 `Scheduler` 计数或 `BootRunQueue.curr` 间接表示。当前只有一个任务，
 因此 `prev == next == CurrentTaskRef` 且目标为 `BootIdleTask`，实现只提交核心上下文已保存/已恢复和 identity switch fact，不执行真实 task stack switch。若调用路径来自
 `schedule_preempt_disabled()`，调用方继承的 preemption guard 退出和 post-schedule guard 重新进入必须在调用方上下文中显式建模。
 
 `CurrentTaskRef` 在 `arceos_ex` 中必须按模型定义实现为 CPU 视角私有引用。当前 BP 路径只存在 `BootCurrentCPU` 的
 `CurrentTaskRef`，目标是 `BootIdleTask`；实现不得新增 `CurrentTask` 描述性对象，也不得把 BP 的 `CurrentTaskRef`
 当作所有 CPU 共享的全局 current task。RISC-V64 代码可以并且 SHOULD 参考 Linux 用 `tp` 寄存器实现 current-task
-视图；per-cpu 存储只作为其它 CPU-local 数据的实现方式，不应替代规格中的 CPU 视角定义。
+视图；`CurrentTaskSlot` 是对象级实现边界，在 RISC-V64 后端可以收敛到以 `tp` 承载或快速访问 current-task 引用，但通用规格和通用代码不把
+`CurrentTaskSlot` 定义成 `tp` 本身。per-cpu 存储只作为其它 CPU-local 数据的实现方式，不应替代规格中的 CPU 视角定义。
 
 `RadixTree.setup()` 和 `MapleTree.setup()` 只建立 node cache 与全局分配基础。具体 radix tree、IDR、XArray、maple tree
 实例由后续使用者对象拥有，不在本阶段创建。

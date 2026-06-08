@@ -57,7 +57,9 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 
 ## 当前任务引用
 
-模型层的 `CurrentTaskRef` 是 CPU 视角下只属于本 CPU 的 current-task 引用，不是全局 current task，也不要求用 per-cpu 术语描述其本体。RISC-V64 实现 SHOULD 参考 Linux 的方式，用本 CPU `tp` 寄存器承载 current-task 视图；`switch_to` 完成后必须更新或保持 `tp` 指向 next/current task，并向对象层提交对应的 `task_ref_loaded_into_tp(next_ref, current_cpu)` 或等价事实。
+模型层的 `CurrentTaskRef` 是 CPU 视角下只属于本 CPU 的 current-task 引用，不是全局 current task，也不要求用 per-cpu 术语描述其本体。RISC-V64 实现 SHOULD 参考 Linux 的方式，用本 CPU `tp` 寄存器承载 current-task 视图；`CurrentTaskSlot` 是实现层的 current-task 槽位边界，在 RISC-V64 后端 SHOULD 以 `tp` 作为底层承载或快速入口。`switch_to` 完成后必须更新或保持 `tp` 指向 next/current task，并向对象层提交对应的 `task_ref_loaded_into_current_cpu(next_ref, current_cpu)` 事实。`tp` 是该事实在 RISC-V64 上的推荐实现承载，不是模型层谓词名。
+
+Linux 6.12.37 的参考路径是：`kernel/sched/core.c::__schedule()` 调用 `switch_to(prev, next, prev)`，RISC-V 宏 `arch/riscv/include/asm/switch_to.h::switch_to` 最终调用 `arch/riscv/kernel/entry.S::__switch_to`；`__switch_to` 保存 `prev->thread`、恢复 `next->thread` 后执行 `move tp, a1`，其中 `a1` 是 next `task_struct`。`arch/riscv/include/asm/current.h` 将 `current` 绑定为 `tp` 上的 `struct task_struct *`。
 
 per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把“通过 per-cpu 访问”误写成 `CurrentTaskRef` 的模型定义。当前 BP 路径只有 `BootCurrentCPU` 的 `CurrentTaskRef`；未来 AP 路径进入后，应由 AP 自己的 CPU 视角建立私有 current-task 引用。
 

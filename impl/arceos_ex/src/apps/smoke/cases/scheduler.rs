@@ -32,6 +32,7 @@ pub fn run() -> SmokeResult {
     let before = ctx.scheduler.schedule_passes();
     let switch_before = ctx.scheduler.switch_to_passes();
     let identity_switch_before = ctx.scheduler.identity_switch_passes();
+    let current_switch_before = ctx.boot_cpu_current_task.switch_committed_count();
     let core_saved_before = ctx
         .scheduler
         .boot_idle_task()
@@ -49,7 +50,10 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
     let enable_no_resched = ctx.scheduler.boot_idle_preemption_mut().enable_no_resched();
-    let schedule = ctx.scheduler.schedule(&mut ctx.boot_cpu_local_interrupt);
+    let schedule = ctx.scheduler.schedule(
+        &mut ctx.boot_cpu_local_interrupt,
+        &mut ctx.boot_cpu_current_task,
+    );
     let disable = ctx.scheduler.boot_idle_preemption_mut().disable();
     if enable_no_resched.is_err() || schedule.is_err() || disable.is_err() {
         printk::write_str("schedule boundary failed\n");
@@ -69,6 +73,11 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.schedule_passes() != before.wrapping_add(1)
         || ctx.scheduler.switch_to_passes() != switch_before.wrapping_add(1)
         || ctx.scheduler.identity_switch_passes() != identity_switch_before.wrapping_add(1)
+        || ctx.boot_cpu_current_task.switch_committed_count()
+            != current_switch_before.wrapping_add(1)
+        || !ctx.boot_cpu_current_task.current_is_boot_idle()
+        || ctx.boot_cpu_current_task.current()
+            != crate::objects::cpu_control::CurrentTaskRef::BootIdle
         || ctx.scheduler.boot_runqueue().curr_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || ctx.scheduler.boot_runqueue().idle_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || !ctx

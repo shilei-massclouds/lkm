@@ -208,12 +208,18 @@ impl Scheduler {
         )
     }
 
-    pub fn schedule(&mut self, local_interrupt: &mut LocalInterruptControl) -> EventResult {
+    pub fn schedule(
+        &mut self,
+        local_interrupt: &mut LocalInterruptControl,
+        current_task_slot: &mut CurrentTaskSlot,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || !self.scheduler_running
             || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
             || local_interrupt.state() != State::Ready
+            || current_task_slot.state() != State::Ready
+            || !current_task_slot.current_is_boot_idle()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -224,22 +230,28 @@ impl Scheduler {
         }
 
         local_interrupt.save_and_disable()?;
-        self.switch_to_boot_idle_identity()?;
+        self.switch_to_boot_idle_identity(current_task_slot)?;
         self.schedule_passes = self.schedule_passes.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
         local_interrupt.restore()?;
         Ok(())
     }
 
-    fn switch_to_boot_idle_identity(&mut self) -> EventResult {
+    fn switch_to_boot_idle_identity(
+        &mut self,
+        current_task_slot: &mut CurrentTaskSlot,
+    ) -> EventResult {
         if self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
+            || current_task_slot.state() != State::Ready
+            || !current_task_slot.current_is_boot_idle()
         {
             return self.failed_switch_to();
         }
 
         self.boot_idle_task.save_core_context()?;
         self.boot_idle_task.restore_core_context()?;
+        current_task_slot.commit_boot_idle_switch()?;
         self.switch_to_passes = self.switch_to_passes.wrapping_add(1);
         self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
         Ok(())

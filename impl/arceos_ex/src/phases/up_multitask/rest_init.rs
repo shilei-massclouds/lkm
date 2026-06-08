@@ -145,7 +145,10 @@ fn schedule_once_from_preempt_disabled_context(ctx: &mut Context) -> EventResult
         return failed_dispatch_preset();
     }
 
-    let schedule_result = ctx.scheduler.schedule(&mut ctx.boot_cpu_local_interrupt);
+    let schedule_result = ctx.scheduler.schedule(
+        &mut ctx.boot_cpu_local_interrupt,
+        &mut ctx.boot_cpu_current_task,
+    );
     let preempt_disable_result = ctx.scheduler.boot_idle_preemption_mut().disable();
     // arceos_ex runs these phases linearly in one execution context. Restore
     // the simulated CPU controls after recording the post-schedule boot-idle
@@ -215,8 +218,11 @@ pub fn is_ready() -> bool {
 }
 
 pub fn dispatch_ready() -> bool {
+    let ctx = crate::context::context_ref();
+
     crate::phases::state::load(&REST_INIT_PHASE_STATE) != State::Base
-        && crate::context::context().scheduler.schedule_passes() != 0
+        && ctx.scheduler.schedule_passes() != 0
+        && ctx.boot_cpu_current_task.switch_committed_count() != 0
 }
 
 fn rest_init_phase_ready(ctx: &Context) -> bool {
@@ -238,6 +244,9 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.rcu_core.scheduler_start_single_online_cpu()
         && ctx.rcu_core.gp_seq_baseline_synced()
         && ctx.rcu_core.gp_threads_deferred()
+        && ctx.boot_cpu_current_task.state() == State::Ready
+        && ctx.boot_cpu_current_task.current_is_boot_idle()
+        && ctx.boot_cpu_current_task.switch_committed_count() != 0
         && ctx.kernel_init_task.state() == State::Online
         && ctx.kernel_init_task.pid() == 1
         && ctx.kernel_init_task.entry() == TaskEntry::KernelInit
