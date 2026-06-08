@@ -188,6 +188,8 @@ fn schedule_once_from_preempt_disabled_context(ctx: &mut Context) -> EventResult
     {
         return failed_dispatch_preset();
     }
+    crate::checkpoint::dispatch_mut(Checkpoint::SchedulerPickNextTaskExit, ctx);
+    crate::checkpoint::dispatch_mut(Checkpoint::SchedulerSwitchToEntry, ctx);
     Ok(())
 }
 

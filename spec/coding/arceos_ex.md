@@ -725,6 +725,11 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 
 只能保存临时值，不能保存长期对象事实；每个 action 可读写的 packet 字段必须由模型 lowering 或 coding 规格明确约束。采用统一 action 入口后，每个 action
 的入口和出口都是潜在 checkpoint，action 内部的关键边界也可以通过 packet schema 暴露给 checkpoint/KUnit；对象方法不得为此反向抓取全局 `Context`。
 
+`Scheduler.schedule()` 的 checkpoint/KUnit 应先从 action chain 前段向后覆盖：第一步检查 `PickNextTask` 退出点已经得到
+`next_ref`，且当前 BP 最小路径中 `prev_ref == next_ref == BootIdleTask`；第二步检查 `SwitchTo` 进入点的
+`prev_ref` 和 `next_ref` 符合预期，并且该进入点发生在本次 `CurrentTaskRef` switch commit 之前。更粗的
+`Scheduler.Schedule` 后置 checkpoint 留到这些 action 内部边界通过后再补。
+
 `CurrentTaskRef` 在 `arceos_ex` 中必须按模型定义实现为 CPU 视角私有引用。当前 BP 路径只存在 `BootCurrentCPU` 的
 `CurrentTaskRef`，目标是 `BootIdleTask`；实现不得新增 `CurrentTask` 描述性对象，也不得把 BP 的 `CurrentTaskRef`
 当作所有 CPU 共享的全局 current task。RISC-V64 代码可以并且 SHOULD 参考 Linux 用 `tp` 寄存器实现 current-task

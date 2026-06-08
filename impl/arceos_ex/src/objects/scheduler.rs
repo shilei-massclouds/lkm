@@ -36,6 +36,14 @@ pub struct Scheduler {
     idle_schedule_passes: usize,
     idle_schedule_returned_passes: usize,
     idle_schedule_identity_passes: usize,
+    pick_next_task_exit_prev_ref: CurrentTaskRef,
+    pick_next_task_exit_next_ref: CurrentTaskRef,
+    pick_next_task_exit_count: usize,
+    switch_to_entry_prev_ref: CurrentTaskRef,
+    switch_to_entry_next_ref: CurrentTaskRef,
+    switch_to_entry_current_ref: CurrentTaskRef,
+    switch_to_entry_committed_count: usize,
+    switch_to_entry_count: usize,
 }
 
 impl Scheduler {
@@ -62,6 +70,14 @@ impl Scheduler {
             idle_schedule_passes: 0,
             idle_schedule_returned_passes: 0,
             idle_schedule_identity_passes: 0,
+            pick_next_task_exit_prev_ref: CurrentTaskRef::None,
+            pick_next_task_exit_next_ref: CurrentTaskRef::None,
+            pick_next_task_exit_count: 0,
+            switch_to_entry_prev_ref: CurrentTaskRef::None,
+            switch_to_entry_next_ref: CurrentTaskRef::None,
+            switch_to_entry_current_ref: CurrentTaskRef::None,
+            switch_to_entry_committed_count: 0,
+            switch_to_entry_count: 0,
         }
     }
 
@@ -151,6 +167,38 @@ impl Scheduler {
 
     pub const fn idle_schedule_identity_passes(&self) -> usize {
         self.idle_schedule_identity_passes
+    }
+
+    pub const fn pick_next_task_exit_prev_ref(&self) -> CurrentTaskRef {
+        self.pick_next_task_exit_prev_ref
+    }
+
+    pub const fn pick_next_task_exit_next_ref(&self) -> CurrentTaskRef {
+        self.pick_next_task_exit_next_ref
+    }
+
+    pub const fn pick_next_task_exit_count(&self) -> usize {
+        self.pick_next_task_exit_count
+    }
+
+    pub const fn switch_to_entry_prev_ref(&self) -> CurrentTaskRef {
+        self.switch_to_entry_prev_ref
+    }
+
+    pub const fn switch_to_entry_next_ref(&self) -> CurrentTaskRef {
+        self.switch_to_entry_next_ref
+    }
+
+    pub const fn switch_to_entry_current_ref(&self) -> CurrentTaskRef {
+        self.switch_to_entry_current_ref
+    }
+
+    pub const fn switch_to_entry_committed_count(&self) -> usize {
+        self.switch_to_entry_committed_count
+    }
+
+    pub const fn switch_to_entry_count(&self) -> usize {
+        self.switch_to_entry_count
     }
 
     pub fn preset(
@@ -324,8 +372,13 @@ impl Scheduler {
             return Err(self.failed_schedule_condition());
         }
 
+        let next_ref = CurrentTaskRef::BootIdle;
         self.pick_next_task_passes = self.pick_next_task_passes.wrapping_add(1);
-        Ok(CurrentTaskRef::BootIdle)
+        self.pick_next_task_exit_prev_ref = prev_ref;
+        self.pick_next_task_exit_next_ref = next_ref;
+        self.pick_next_task_exit_count = self.pick_next_task_exit_count.wrapping_add(1);
+        crate::trace::checkpoint(Checkpoint::SchedulerPickNextTaskExit);
+        Ok(next_ref)
     }
 
     fn failed_schedule_condition(&self) -> EventError {
@@ -354,6 +407,12 @@ impl Scheduler {
             return self.failed_switch_to();
         }
 
+        self.switch_to_entry_prev_ref = prev_ref;
+        self.switch_to_entry_next_ref = next_ref;
+        self.switch_to_entry_current_ref = current_task_slot.current();
+        self.switch_to_entry_committed_count = current_task_slot.switch_committed_count();
+        self.switch_to_entry_count = self.switch_to_entry_count.wrapping_add(1);
+        crate::trace::checkpoint(Checkpoint::SchedulerSwitchToEntry);
         self.boot_idle_task.save_core_context()?;
         self.boot_idle_task.restore_core_context()?;
         current_task_slot.commit_switch_to(next_ref)?;

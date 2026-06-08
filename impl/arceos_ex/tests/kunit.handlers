@@ -2,4 +2,5 @@
 memblock
 earlycon
 kernel-init-task
+scheduler-action
 smoke
