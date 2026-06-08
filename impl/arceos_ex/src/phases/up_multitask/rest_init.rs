@@ -55,6 +55,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.init_task,
         &ctx.scheduler,
     )?;
+    crate::checkpoint::dispatch_mut(Checkpoint::KernelInitTaskReady, ctx);
     ctx.kernel_init_task_pi_lock.setup()?;
     ctx.kernel_init_task.enable(
         &mut ctx.scheduler,
@@ -63,6 +64,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.boot_cpu_current_task,
         &mut ctx.kernel_init_task_pi_lock,
     )?;
+    crate::checkpoint::dispatch_mut(Checkpoint::KernelInitTaskOnline, ctx);
     if !ctx
         .kernel_init_task
         .pin_to_boot_cpu(ctx.scheduler.boot_runqueue().cpu_id())

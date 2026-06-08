@@ -2,6 +2,7 @@ pub mod handlers;
 #[cfg(any(
     checkpoint_handler_memblock,
     checkpoint_handler_earlycon,
+    checkpoint_handler_kernel_init_task,
     checkpoint_handler_smoke
 ))]
 mod kunit;

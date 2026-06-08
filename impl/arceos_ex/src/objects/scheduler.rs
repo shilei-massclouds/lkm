@@ -661,6 +661,10 @@ impl BootRunQueue {
             || (self.kthreadd_task_enqueued && task_id == crate::objects::rest_init::KTHREADD_PID)
     }
 
+    pub const fn task_count(&self) -> usize {
+        self.kernel_init_task_enqueued as usize + self.kthreadd_task_enqueued as usize
+    }
+
     fn setup(
         &mut self,
         cpu_group: &CpuGroup,

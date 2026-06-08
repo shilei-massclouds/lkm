@@ -1,4 +1,5 @@
 # One handler name per line. Lines may contain comments after '#'.
 memblock
 earlycon
+kernel-init-task
 smoke
