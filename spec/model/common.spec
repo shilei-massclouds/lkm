@@ -61,6 +61,12 @@ enum TaskRuntimeState {
     Running,
 }
 
+enum TaskEntry {
+    None,
+    KernelInit,
+    Kthreadd,
+}
+
 enum RunQueueRuntimeState {
     None,
     Some,
@@ -151,6 +157,26 @@ predicate current_task_ref_targets_cpu_task<T, U, V>(task_ref: T, current_cpu: U
 predicate current_task_ref_from_cpu_view<T, U, V>(task_ref: T, current_cpu: U, task: V) -> bool;
 predicate task_ref_loaded_into_current_cpu<T, U>(task_ref: T, current_cpu: U) -> bool;
 predicate current_task_ref_updated_by_switch<T, U, V>(current_cpu: T, prev_ref: U, next_ref: V) -> bool;
+predicate task_creation_entry_contract_ready<T>(core: T) -> bool;
+predicate task_clone_args_ready<T>(task: T) -> bool;
+predicate task_creation_copy_process_committed<T, U, V>(core: T, src_task: U, dst_task: V) -> bool;
+predicate task_creation_used_clone_args<T, U>(core: T, task: U) -> bool;
+predicate task_creation_bound_entry<T, U>(core: T, task: U, entry: TaskEntry) -> bool;
+predicate task_struct_allocated<T>(task: T) -> bool;
+predicate task_duplicated_from<T, U>(dst_task: T, src_task: U) -> bool;
+predicate task_pid_allocated<T, U>(task: T, pid_ns: U) -> bool;
+predicate task_creds_copied<T, U>(task: T, creds: U) -> bool;
+predicate task_file_context_copied_or_shared<T, U>(task: T, files: U) -> bool;
+predicate task_signal_context_ready<T, U>(task: T, signal: U) -> bool;
+predicate task_security_context_allocated<T, U>(task: T, security: U) -> bool;
+predicate task_thread_context_ready<T>(task: T) -> bool;
+predicate task_sched_entity_initialized<T, U>(task: T, scheduler: U) -> bool;
+predicate task_entry_bound<T>(task: T, entry: TaskEntry) -> bool;
+predicate task_entry_first_phase<T, U>(task: T, phase: U) -> bool;
+predicate kernel_init_entry_reaches_pre_smp_init<T, U>(task: T, phase: U) -> bool;
+predicate kthreadd_entry_reaches_schedule_loop<T, U>(task: T, scheduler: U) -> bool;
+predicate kthreadd_schedule_loop_ready<T, U>(task: T, scheduler: U) -> bool;
+predicate kthreadd_schedule_loop_schedule_boundary_deferred<T, U>(task: T, scheduler: U) -> bool;
 predicate task_preemption_control_ready<T>(task: T) -> bool;
 predicate task_preemption_disabled<T>(task: T) -> bool;
 predicate task_preemption_enabled<T>(task: T) -> bool;

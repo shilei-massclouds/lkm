@@ -256,15 +256,16 @@ context BootIdleStartupContext: Context {
  * KernelInitTask.Preset 对应 user_mode_thread() 内部构造临时
  * kernel_clone_args 的过程。kernel_clone_args 是栈上传参结构，没有独立
  * 生命周期，因此不建模为对象；Preset 把 fn、fn_arg、clone flags、
- * exit_signal 等信息固化为 KernelInitTask.Prepared 上的 facts，并明确
- * 尚未分配 task_struct、尚未 attach pid、尚未入队。
+ * exit_signal 与 TaskEntry::KernelInit 固化为 KernelInitTask.Prepared
+ * 上的 facts，并明确尚未分配 task_struct、尚未 attach pid、尚未入队。
  *
  * KernelInitTask.Setup 对应 kernel_clone() 调用 copy_process() 的成功路径。
  * copy_process() 是 TaskCreationCore.Ready 状态内的参数化 action：
  * TaskCreationCore.Action::CopyProcess(src_task: BootInitTask,
- * dst_task: KernelInitTask, ...)。该 action 以 src_task/current 为模板创建
- * dst_task/task_struct，初始化 pid、凭据、fs/files、signal、安全上下文、
- * thread context 与 sched entity，但保持 task_state_new 且 task_not_enqueued。
+ * dst_task: KernelInitTask, entry: TaskEntry::KernelInit, ...)。该 action
+ * 以 src_task/current 为模板创建 dst_task/task_struct，初始化 pid、凭据、
+ * fs/files、signal、安全上下文、thread context、sched entity 与启动入口，
+ * 但保持 task_state_new 且 task_not_enqueued。
  * KernelInitTask.Setup 只提交 KernelInitTask Prepared -> Ready 的生命周期结果。
  *
  * KernelInitTask.Enable 对应 wake_up_new_task()。该路径受 p->pi_lock 保护，
@@ -318,6 +319,8 @@ object KernelInitTask: Task {
                 ensures {
                     kernel_init_spawn_spec_ready(KernelInitTask);
                     kernel_init_entry_selected(KernelInitTask);
+                    task_clone_args_ready(KernelInitTask);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
                     kernel_init_clone_fs_flag_set(KernelInitTask);
                     kernel_init_not_user_mm_yet(KernelInitTask);
                 }
@@ -332,6 +335,8 @@ object KernelInitTask: Task {
         invariant {
             kernel_init_spawn_spec_ready(KernelInitTask);
             kernel_init_entry_selected(KernelInitTask);
+            task_clone_args_ready(KernelInitTask);
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             kernel_init_clone_fs_flag_set(KernelInitTask);
         }
 
@@ -356,11 +361,14 @@ object KernelInitTask: Task {
                         signal: SignalCore,
                         files: TaskFileContext,
                         security: SecurityCore,
-                        scheduler: Scheduler
+                        scheduler: Scheduler,
+                        entry: TaskEntry::KernelInit
                     );
                 }
 
                 ensures {
+                    task_creation_bound_entry(TaskCreationCore, KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
                     kernel_init_task_ready(KernelInitTask);
                     kernel_init_task_pid_is_one(KernelInitTask);
                     kernel_init_thread_context_ready(KernelInitTask);
@@ -382,6 +390,7 @@ object KernelInitTask: Task {
         invariant {
             kernel_init_task_ready(KernelInitTask);
             kernel_init_task_pid_is_one(KernelInitTask);
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             kernel_init_sched_entity_ready(KernelInitTask, Scheduler);
             task_ref_targets(KernelInitTaskRef, KernelInitTask);
             task_ref_ready(KernelInitTaskRef);
@@ -470,6 +479,7 @@ object KernelInitTask: Task {
         invariant {
             kernel_init_task_online(KernelInitTask);
             kernel_init_task_pid_is_one(KernelInitTask);
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
             task_state_running(KernelInitTask);
             task_cpu_ref_is(KernelInitTask, BootCPURef);
@@ -508,7 +518,9 @@ object KernelInitTask: Task {
  * 对应 wake_up_new_task。区别在于入口为 kthreadd、flags 包含
  * kernel_thread 固有的 CLONE_VM | CLONE_UNTRACED 以及传入的
  * CLONE_FS | CLONE_FILES，并且创建和唤醒后还要发布 kthreadd_task
- * 全局 provider 引用。
+ * 全局 provider 引用。KthreaddTask 的第一执行入口不是 kernel_init 线；
+ * 当前模型只把 kthreadd 入口抽象为一个服务循环边界：进入后反复等待
+ * kthread 请求，并在无可运行工作时调用 schedule() 尝试切出。
  */
 object KthreaddTask: Task {
     initial_state: State::Base;
@@ -535,6 +547,8 @@ object KthreaddTask: Task {
                 ensures {
                     kthreadd_spawn_spec_ready(KthreaddTask);
                     kthreadd_entry_selected(KthreaddTask);
+                    task_clone_args_ready(KthreaddTask);
+                    task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
                     kthreadd_clone_fs_files_flags_set(KthreaddTask);
                     kthreadd_clone_vm_flag_set(KthreaddTask);
                     kthreadd_clone_untraced_flag_set(KthreaddTask);
@@ -552,6 +566,8 @@ object KthreaddTask: Task {
         invariant {
             kthreadd_spawn_spec_ready(KthreaddTask);
             kthreadd_entry_selected(KthreaddTask);
+            task_clone_args_ready(KthreaddTask);
+            task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
             kthreadd_clone_fs_files_flags_set(KthreaddTask);
             kthreadd_clone_vm_flag_set(KthreaddTask);
             kthreadd_clone_untraced_flag_set(KthreaddTask);
@@ -580,11 +596,14 @@ object KthreaddTask: Task {
                         signal: SignalCore,
                         files: TaskFileContext,
                         security: SecurityCore,
-                        scheduler: Scheduler
+                        scheduler: Scheduler,
+                        entry: TaskEntry::Kthreadd
                     );
                 }
 
                 ensures {
+                    task_creation_bound_entry(TaskCreationCore, KthreaddTask, TaskEntry::Kthreadd);
+                    task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
                     kthreadd_task_ready(KthreaddTask);
                     kthreadd_task_pid_allocated(KthreaddTask, RootPidNamespace);
                     kthreadd_thread_context_ready(KthreaddTask);
@@ -604,6 +623,7 @@ object KthreaddTask: Task {
     state State::Ready {
         invariant {
             kthreadd_task_ready(KthreaddTask);
+            task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
             kthreadd_sched_entity_ready(KthreaddTask, Scheduler);
             task_ref_targets(KthreaddTaskRef, KthreaddTask);
             task_ref_ready(KthreaddTaskRef);
@@ -688,6 +708,7 @@ object KthreaddTask: Task {
     state State::Online {
         invariant {
             kthreadd_task_online(KthreaddTask);
+            task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
             kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
             task_state_running(KthreaddTask);
             task_cpu_ref_is(KthreaddTask, BootCPURef);
@@ -714,6 +735,30 @@ object KthreaddTask: Task {
                 kthreadd_global_ref_bound(KthreaddTask);
                 kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
                 kthreadd_provider_ready(KthreaddTask);
+            }
+        }
+
+        /*
+         * RunScheduleLoop 对应 kthreadd() 的最小入口循环边界。当前规格只
+         * 提交“入口循环已建立且会在无工作时寻求 schedule”的事实；真实
+         * kthread_create_list 消费、wait/park/stop 语义，以及 Scheduler
+         * 支持非 idle current 后的实际 schedule() 展开留给后续模型。
+         */
+        Action::RunScheduleLoop {
+            state_effect: StateEffect::None;
+            depends_on {
+                task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
+                task_state_running(KthreaddTask);
+                kthreadd_provider_ready(KthreaddTask);
+                Scheduler.state == State::Online;
+            }
+            ensures {
+                kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
+                kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
+                kthreadd_schedule_loop_schedule_boundary_deferred(KthreaddTask, Scheduler);
+            }
+            deferred {
+                "KthreaddTask 的真实 kthreadd() 循环、kthread_create_list 消费和非 idle current 下的 Scheduler.schedule() 展开后续建模；当前只保留入口循环与 schedule 请求边界。";
             }
         }
     }
@@ -980,6 +1025,7 @@ object RestInitPhase: PhaseObject {
                     KthreaddTask.Event::Setup;
                     KthreaddTask.Event::Enable;
                     KthreaddTask.Action::BindGlobalRef;
+                    KthreaddTask.Action::RunScheduleLoop;
                     SystemState.Event::Preset;
                     SystemState.Event::Setup;
                     KthreaddReadyGate.Event::Setup;
@@ -996,9 +1042,15 @@ object RestInitPhase: PhaseObject {
                     rcu_gp_seq_baseline_synced(RcuCore);
                     rest_init_dispatch_ready(RestInitPhase);
                     kernel_init_task_created(KernelInitTask);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
+                    kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     kthreadd_task_created(KthreaddTask);
+                    task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
+                    kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
+                    kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
                     system_state_scheduling(SystemState);
@@ -1016,7 +1068,7 @@ object RestInitPhase: PhaseObject {
                 }
 
                 deferred {
-                    "KthreaddTask 消费 kthread_create_list 和后续 kthread 创建服务留给运行期模型。";
+                    "KthreaddTask 入口循环当前只建立 schedule 请求边界；消费 kthread_create_list 和后续 kthread 创建服务留给运行期模型。";
                     "真实抢占、上下文切换和任务栈切换不在当前对象级实现中执行，只发布调度分叉事实。";
                     "KernelInitTask.PinToBootCpu 当前保留 rcu_read_lock()/unlock() 读侧上下文建模问题：它是否属于资源独占上下文，还是应作为 RCU/读侧上下文单独建模，后续讨论。";
                 }
@@ -1031,9 +1083,15 @@ object RestInitPhase: PhaseObject {
             rcu_scheduler_active_level_init(RcuCore);
             rcu_gp_seq_baseline_synced(RcuCore);
             KernelInitTask.state == State::Online;
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+            task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
+            kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
             kernel_init_pf_no_setaffinity(KernelInitTask);
             kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             KthreaddTask.state == State::Online;
+            task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
+            kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
+            kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
             kthreadd_global_ref_bound(KthreaddTask);
             kthreadd_provider_ready(KthreaddTask);
             SystemState.state == State::Ready;

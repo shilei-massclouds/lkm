@@ -178,7 +178,10 @@ object UprobeCore: KernelObject {
 
 /*
  * TaskCreationCore 表示 thread_stack_cache_init() 与 fork_init() 后的 task
- * 创建基础。它不创建 PID 1/kthreadd；这些属于 rest_init()。
+ * 创建基础。它不创建 PID 1/kthreadd；这些属于 rest_init()。它提供
+ * copy_process() 的通用创建契约：rest_init() 传入的 entry 是新任务的
+ * 第一执行入口，并由该入口决定任务之后进入 kernel_init 线还是 kthreadd
+ * 入口循环。
  */
 object TaskCreationCore: TaskObject {
     initial_state: State::Base;
@@ -231,6 +234,7 @@ object TaskCreationCore: TaskObject {
                     init_task_rlimits_ready(TaskCreationCore, BootInitTask);
                     init_user_namespace_ucounts_ready(TaskCreationCore);
                     fork_vm_stack_cpuhp_registered(TaskCreationCore);
+                    task_creation_entry_contract_ready(TaskCreationCore);
                     rest_init_task_creation_inputs_ready(TaskCreationCore, RootPidNamespace, CredentialCore);
                 }
             }
@@ -247,7 +251,60 @@ object TaskCreationCore: TaskObject {
             init_task_rlimits_ready(TaskCreationCore, BootInitTask);
             init_user_namespace_ucounts_ready(TaskCreationCore);
             fork_vm_stack_cpuhp_registered(TaskCreationCore);
+            task_creation_entry_contract_ready(TaskCreationCore);
             rest_init_task_creation_inputs_ready(TaskCreationCore, RootPidNamespace, CredentialCore);
+        }
+
+        actions {
+            /*
+             * CopyProcess 对应 kernel_clone()/copy_process() 的成功路径。
+             * entry 是调用者传入的启动入口，不是创建后的普通属性补丁：
+             * TaskCreationCore 必须把它绑定到新 task 的初始 thread context，
+             * 后续任务第一次被调度时就从该 entry 对应的执行线开始。
+             */
+            Action::CopyProcess<Src: TaskObject, New: TaskObject>(
+                src_task: Src,
+                dst_task: New,
+                pid_ns: RootPidNamespace,
+                creds: CredentialCore,
+                signal: SignalCore,
+                files: TaskFileContext,
+                security: SecurityCore,
+                scheduler: Scheduler,
+                entry: TaskEntry
+            ) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    src_task.state == State::Online;
+                    dst_task.state == State::Prepared;
+                    pid_ns.state == State::Ready;
+                    creds.state == State::Prepared;
+                    signal.state == State::Prepared;
+                    files.state == State::Prepared;
+                    security.state == State::Ready;
+                    scheduler.state == State::Online;
+                    task_creation_entry_contract_ready(TaskCreationCore);
+                    task_clone_args_ready(dst_task);
+                    task_entry_bound(dst_task, entry);
+                }
+
+                ensures {
+                    task_creation_copy_process_committed(TaskCreationCore, src_task, dst_task);
+                    task_creation_used_clone_args(TaskCreationCore, dst_task);
+                    task_creation_bound_entry(TaskCreationCore, dst_task, entry);
+                    task_struct_allocated(dst_task);
+                    task_duplicated_from(dst_task, src_task);
+                    task_pid_allocated(dst_task, pid_ns);
+                    task_creds_copied(dst_task, creds);
+                    task_file_context_copied_or_shared(dst_task, files);
+                    task_signal_context_ready(dst_task, signal);
+                    task_security_context_allocated(dst_task, security);
+                    task_thread_context_ready(dst_task);
+                    task_sched_entity_initialized(dst_task, scheduler);
+                    task_state_new(dst_task);
+                    task_not_enqueued(dst_task);
+                }
+            }
         }
     }
 }

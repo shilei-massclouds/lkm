@@ -101,6 +101,9 @@ workqueue worker、RCU GP kthread、完整 softirq 执行或 SMP 并发。
 keyring 和 security 对象按 formal trace 后续推进。VFS/proc/page-cache/net namespace、`signals_init()` 以及
 实际任务创建仍保持 deferred 或 trimmed checkpoint，不应伪装成完整运行期服务。
 
+`TaskCreationCore` 还必须提供 `copy_process()`/`kernel_clone()` 的通用创建契约。后续 `rest_init()` 创建
+`KernelInitTask` 或 `KthreaddTask` 时传入的 `TaskEntry` 要绑定到新任务的启动 context，并决定该任务第一次被调度后的执行入口；它不是创建完成后补写的描述性字段。当前正式规格要求 `KernelInitTask` 绑定 `TaskEntry::KernelInit`，`KthreaddTask` 绑定 `TaskEntry::Kthreadd`。
+
 ## Completion 编码约束
 
 `Completion` 是 `spec/model/common.spec` 中定义的可复用 Type process。当前对象级实现必须把它落到
@@ -132,6 +135,10 @@ provider 已创建并绑定全局引用、`system_state == SYSTEM_SCHEDULING`、
 `schedule_preempt_disabled()` 已按 preemption guard 退出、`Scheduler.schedule()` 调度分界、
 post-schedule boot idle context 进入三段体提交首次调度交接，boot idle runtime 入口已确认等事实。
 这些事实当前仍是对象级模拟边界，不得实现真实任务栈切换、真实调度上下文切换或 idle loop。
+
+PID 1 和 kthreadd 的创建必须通过 `TaskCreationCore` 的 entry contract 表达：`KernelInitTask` 使用
+`TaskEntry::KernelInit`，其第一执行线指向 `PreSmpInitPhase`；`KthreaddTask` 使用
+`TaskEntry::Kthreadd`，其第一执行线指向 kthreadd 服务循环边界。当前 BP 最小实现只需要把 kthreadd 入口循环建模为“等待工作、无工作时请求 `schedule()` 切出”的 named boundary；真实 kthread 请求消费、park/stop/wait 细节，以及非 idle current 下的完整 scheduler 切换留给后续模型。
 
 PID 1 的临时 boot CPU 亲和约束不得实现为独立 `KernelInitAffinity` 对象；它必须作为
 `KernelInitTask` 的 `pin_to_boot_cpu()` action 承载。该 action 只提交两类 task 属性：设置
@@ -186,7 +193,7 @@ schedule/switch/current-task switch counters 包含这一次 idle pass；schedul
 
 本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
 真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是
-`PreSmpInitPhase`，`KthreaddTask` 的运行期服务能力也留给后续模型。
+`PreSmpInitPhase`，该事实来自 `TaskEntry::KernelInit` 的创建入口绑定；`KthreaddTask` 当前只实现入口循环和 schedule 请求边界，完整运行期服务能力留给后续模型。
 
 ## PreSmpInitPhase 编码约束
 
@@ -200,10 +207,12 @@ schedule/switch/current-task switch counters 包含这一次 idle pass；schedul
 `Workqueue.setup()`、`VmstatCore.preset()`、`TasksRcu.setup()`、`PreSmpInitcallTable.run_early()` 和
 `PreSmpInitBoundary`。它可以发布阻塞 GFP 分配可用、workqueue worker 创建边界、Tasks RCU GP thread
 创建边界和 early initcall 已运行事实，但不得把 secondary CPU 标记为 online，也不得执行 `smp_init()`。
+本阶段入口除依赖 `KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact 外，还必须消费
+`TaskCreationCore` 建立的 entry contract：`KernelInitTask` 的 `TaskEntry::KernelInit` 指向 `PreSmpInitPhase`。
 
 测试应覆盖 full GFP mask 已打开、secondary CPU 只处于 present/not-online、Workqueue Ready 但 SMP topology
 仍 deferred、VmstatCore Prepared、TasksRcu Ready、pre-SMP initcall 已运行、`smp_init()` 未执行，以及
-`PreSmpInitPhase` 的入口来自 `KernelInitTask` release/dispatch 和 Scheduler 首次调度 facts，而非
+`PreSmpInitPhase` 的入口来自 `KernelInitTask` entry/release/dispatch 和 Scheduler 首次调度 facts，而非
 `RestInitPhase.Ready`。
 
 ## SmpBringupPhase 编码约束
@@ -317,12 +326,8 @@ sysctl args deferred，以及下一入口仍是 `PayloadPhase`。
 `SmpRuntimePhase.Ready` 之后的后续阶段实现，而不是嵌套为 `SmpRuntimePhase` 的子阶段。入口必须要求
 `FinalizePhase.Ready` 和 `FinalizeBoundary.Ready`，并消费 `payload_phase_next_boundary()` 事实。
 
-KernelInitTask 的执行线从 `PreSmpInitPhase` 入口开始：`rest_init()` 提交 `KernelInitTask`
-release/dispatch facts 后，`PreSmpInitPhase` 依赖 `kernel_init_dispatched_to_pre_smp_init(KernelInitTask)`
-进入；后续阶段按 phase 顺序衔接到 `FinalizePhase`，再自然进入 `PayloadPhase`。因此 selected payload
-的执行归属应从这条连续执行线推出，而不是由 `PayloadPhase` 单独声明一个调用者事实。`BootIdleTask` 只负责
-idle loop、need_resched observation 和 schedule boundary；`KthreaddTask` 当前只提供内核线程管理者的
-ready/provider 事实。
+KernelInitTask 的执行线从 `PreSmpInitPhase` 入口开始：`rest_init()` 通过 `TaskCreationCore` 把
+`TaskEntry::KernelInit` 绑定到 `KernelInitTask`，并提交 release/dispatch facts；`PreSmpInitPhase` 消费这些 entry/release/dispatch facts 后进入。后续阶段按 phase 顺序衔接到 `FinalizePhase`，再自然进入 `PayloadPhase`。因此 selected payload 的执行归属应从这条连续执行线推出，而不是由 `PayloadPhase` 单独声明一个调用者事实。`BootIdleTask` 只负责 idle loop、need_resched observation 和 schedule boundary；`KthreaddTask` 当前提供内核线程管理者 ready/provider 事实和最小 schedule-loop 入口边界。
 
 ## Pre-VM lifecycle 代码生成约束
 
@@ -402,7 +407,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 
 当前对象级实验不复用现有 ArceOS Unikernel 应用，不依赖 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust`。
 
-第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。对象级初始化完成后，启动链沿 `KernelInitTask` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，输出 `Hello, world!` 后通过 SBI 关机。
+第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，输出 `Hello, world!` 后通过 SBI 关机。
 
 所有 payload 的入口约定为 `run() -> !`。这表示控制流不返回启动编排链：Unikernel payload 可以进入服务循环或停机，未来宏内核 payload 可以加载首个用户态程序并完成用户态切换。若某个 payload 意外返回，应视为违反 `PayloadPhase.Enable` 的 no-return handoff 契约。
 

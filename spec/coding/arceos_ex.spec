@@ -47,6 +47,7 @@ predicate arceos_ex_must_process_prepare_run_after_irq_open_prepare() -> bool;
 predicate arceos_ex_must_process_prepare_not_create_rest_init_tasks() -> bool;
 predicate arceos_ex_must_process_prepare_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_process_prepare_cover_pid_task_cred_memory_namespace_key_security_objects() -> bool;
+predicate arceos_ex_must_task_creation_core_bind_task_entry_in_copy_process() -> bool;
 predicate arceos_ex_must_process_prepare_keep_deferred_paths_explicit() -> bool;
 predicate arceos_ex_must_completion_map_to_reusable_object() -> bool;
 predicate arceos_ex_must_completion_own_simple_wait_queue() -> bool;
@@ -57,6 +58,8 @@ predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
 predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
 predicate arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts() -> bool;
+predicate arceos_ex_must_rest_init_create_tasks_with_explicit_entries() -> bool;
+predicate arceos_ex_must_kthreadd_entry_model_minimal_schedule_loop() -> bool;
 predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
@@ -75,6 +78,7 @@ predicate arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred() -> bool
 predicate arceos_ex_must_pre_smp_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_pre_smp_init_code_path_follow_up_multitask_phase_tree() -> bool;
 predicate arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts() -> bool;
+predicate arceos_ex_must_pre_smp_init_consume_kernel_init_entry_contract() -> bool;
 predicate arceos_ex_must_pre_smp_init_open_full_gfp_and_prepare_topology() -> bool;
 predicate arceos_ex_must_pre_smp_init_setup_workqueue_vmstat_tasks_rcu_and_initcalls() -> bool;
 predicate arceos_ex_must_pre_smp_init_stop_before_smp_init() -> bool;
@@ -494,6 +498,16 @@ type ArceosExProcessPrepareCodingMust {
         arceos_ex_must_process_prepare_cover_pid_task_cred_memory_namespace_key_security_objects();
 
         /*
+         * Task entry creation contract:
+         *
+         * TaskCreationCore must expose copy_process()/kernel_clone() as the
+         * shared creation boundary for later rest_init tasks. That boundary
+         * must bind the caller-provided TaskEntry into the new task's startup
+         * context; entry is not an after-the-fact descriptive flag.
+         */
+        arceos_ex_must_task_creation_core_bind_task_entry_in_copy_process();
+
+        /*
          * Deferred paths:
          *
          * Trimmed and deferred Linux start_kernel() calls in this interval
@@ -591,6 +605,28 @@ type ArceosExRestInitCodingMust {
          * kthreadd provider binding.
          */
         arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts();
+
+        /*
+         * Explicit task entries:
+         *
+         * KernelInitTask must be created through TaskCreationCore with
+         * TaskEntry::KernelInit, and KthreaddTask through TaskEntry::Kthreadd.
+         * The selected entry determines the task's first execution line:
+         * KernelInitTask enters the PreSmpInitPhase chain, while KthreaddTask
+         * enters the kthreadd service loop boundary.
+         */
+        arceos_ex_must_rest_init_create_tasks_with_explicit_entries();
+
+        /*
+         * Kthreadd entry loop:
+         *
+         * The current BP implementation must at least expose a named
+         * KthreaddTask entry-loop boundary that represents kthreadd() waiting
+         * for work and calling schedule() when no work is runnable. Full
+         * kthread request consumption and non-idle-current scheduler switching
+         * remain deferred.
+         */
+        arceos_ex_must_kthreadd_entry_model_minimal_schedule_loop();
 
         /*
          * System state:
@@ -811,6 +847,15 @@ type ArceosExPreSmpInitCodingMust {
          * and Scheduler first-schedule fact, not from RestInitPhase.Ready.
          */
         arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts();
+
+        /*
+         * KernelInitTask entry:
+         *
+         * This phase must also consume the TaskCreationCore entry contract:
+         * KernelInitTask was created with TaskEntry::KernelInit and that entry
+         * points at the PreSmpInitPhase execution line.
+         */
+        arceos_ex_must_pre_smp_init_consume_kernel_init_entry_contract();
 
         /*
          * Allocation and CPU topology:

@@ -12,7 +12,8 @@
  * 它是 SmpRuntimePhase 的后续阶段，不是 SmpRuntimePhase 的子阶段；
  * 直接衔接 FinalizePhase.Ready / FinalizeBoundary.Ready。
  * KernelInitTask 的执行线从 PreSmpInitPhase 入口开始，并经由后续
- * phase 顺序自然到达本阶段。
+ * phase 顺序自然到达本阶段；该入口由 TaskCreationCore 在创建
+ * KernelInitTask 时绑定的 TaskEntry::KernelInit 决定。
  * 它不固定 payload 运行形态：当前可以是内核态 Unikernel app，后续也可以是
  * 加载首个用户态程序并切换到用户态的宏内核入口。
  */
@@ -40,6 +41,9 @@ object PayloadPhase: PhaseObject {
                     FinalizePhase.state == State::Ready;
                     FinalizeBoundary.state == State::Ready;
                     KernelInitTask.state == State::Online;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
+                    kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     payload_phase_next_boundary();
                 }
@@ -64,6 +68,9 @@ object PayloadPhase: PhaseObject {
             FinalizePhase.state == State::Ready;
             FinalizeBoundary.state == State::Ready;
             KernelInitTask.state == State::Online;
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+            task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
+            kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             payload_phase_next_boundary();
             selected_payload_ready();
@@ -97,6 +104,9 @@ object PayloadPhase: PhaseObject {
             FinalizePhase.state == State::Ready;
             FinalizeBoundary.state == State::Ready;
             KernelInitTask.state == State::Online;
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+            task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
+            kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             payload_phase_next_boundary();
             selected_payload_ready();

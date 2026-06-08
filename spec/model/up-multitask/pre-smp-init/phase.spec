@@ -198,8 +198,9 @@ object PreSmpInitBoundary: KernelObject {
 /*
  * PreSmpInitPhase 表示 KernelInitTask 在 kernel_init_freeable() 中推进的
  * SMP 启动前初始化段。它依赖 KernelInitTask 已被 kthreadd_done 释放且
- * Scheduler.Action::Schedule 已提交，而不是依赖
- * RestInitPhase.Ready。
+ * Scheduler.Action::Schedule 已提交，同时要求 KernelInitTask 的创建入口
+ * 已由 TaskCreationCore 绑定为 TaskEntry::KernelInit 并指向本阶段入口；
+ * 它不依赖 RestInitPhase.Ready。
  */
 object PreSmpInitPhase: PhaseObject {
     initial_state: State::Base;
@@ -210,6 +211,9 @@ object PreSmpInitPhase: PhaseObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
+                    kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
                     kernel_init_released_for_pre_smp_init(KernelInitTask);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -234,6 +238,9 @@ object PreSmpInitPhase: PhaseObject {
 
                 ensures {
                     pre_smp_init_ready(PreSmpInitPhase);
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
+                    kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
                     page_allocator_full_gfp_mask_open(PageAllocator);
                     cpu_topology_prepared_for_smp(CpuGroup);
                     workqueue_ready_before_smp(Workqueue);
@@ -257,6 +264,9 @@ object PreSmpInitPhase: PhaseObject {
     state State::Ready {
         invariant {
             kernel_init_released_for_pre_smp_init(KernelInitTask);
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+            task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
+            kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             scheduler_first_schedule_committed(Scheduler);
             PageAllocator.state == State::Ready;
