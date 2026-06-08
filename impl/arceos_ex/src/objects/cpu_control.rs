@@ -9,10 +9,25 @@ use crate::trace::Checkpoint;
 
 const LOCAL_INTERRUPT_SAVE_STACK: usize = 8;
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CurrentTaskRef {
     None,
     BootIdle,
+    KernelInit,
+    Kthreadd,
+}
+
+#[allow(dead_code)]
+impl CurrentTaskRef {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::BootIdle => "BootIdleTask",
+            Self::KernelInit => "KernelInitTask",
+            Self::Kthreadd => "KthreaddTask",
+        }
+    }
 }
 
 pub struct BootCurrentCpu {

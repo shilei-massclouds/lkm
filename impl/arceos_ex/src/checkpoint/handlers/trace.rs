@@ -11,7 +11,7 @@ pub const HANDLER: Handler = Handler {
     run: HandlerRun::Read(run),
 };
 
-fn run(checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
-    super::early_trace::trace_name(checkpoint);
+fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+    super::early_trace::trace_name_with_context(checkpoint, ctx);
     CheckpointOutcome::Continue
 }

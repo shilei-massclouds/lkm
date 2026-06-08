@@ -357,6 +357,7 @@ impl Scheduler {
         self.boot_idle_task.save_core_context()?;
         self.boot_idle_task.restore_core_context()?;
         current_task_slot.commit_switch_to(next_ref)?;
+        trace_switch_to(prev_ref, next_ref, current_task_slot.current());
         self.switch_to_passes = self.switch_to_passes.wrapping_add(1);
         if prev_ref == next_ref {
             self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
@@ -469,6 +470,28 @@ impl Scheduler {
             && self.boot_runqueue.boot_hartid() == cpu_group.boot_hartid()
             && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()
             && self.boot_runqueue.idle_task_id() == self.boot_idle_task.task_id()
+    }
+}
+
+fn trace_switch_to(
+    prev_ref: CurrentTaskRef,
+    next_ref: CurrentTaskRef,
+    current_after: CurrentTaskRef,
+) {
+    #[cfg(checkpoint_sbi_char)]
+    {
+        crate::arch::riscv64::sbi::putstr("trace: Scheduler.SwitchTo prev=");
+        crate::arch::riscv64::sbi::putstr(prev_ref.name());
+        crate::arch::riscv64::sbi::putstr(" next=");
+        crate::arch::riscv64::sbi::putstr(next_ref.name());
+        crate::arch::riscv64::sbi::putstr(" current_after=");
+        crate::arch::riscv64::sbi::putstr(current_after.name());
+        crate::arch::riscv64::sbi::putchar(b'\n');
+    }
+
+    #[cfg(not(checkpoint_sbi_char))]
+    {
+        let _ = (prev_ref, next_ref, current_after);
     }
 }
 

@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::trace::Checkpoint;
+use crate::{context::Context, trace::Checkpoint};
 
 const TRACE_MODE_EARLY_BYTE: u8 = 0;
 const TRACE_MODE_NAMED_STRING: u8 = 1;
@@ -22,8 +22,25 @@ pub fn emit(checkpoint: Checkpoint) {
     trace_name(checkpoint);
 }
 
+pub fn emit_with_context(checkpoint: Checkpoint, ctx: &Context) {
+    if TRACE_MODE.load(Ordering::Relaxed) == TRACE_MODE_EARLY_BYTE {
+        crate::arch::riscv64::sbi::putchar(checkpoint.early_byte());
+        return;
+    }
+
+    trace_name_with_context(checkpoint, ctx);
+}
+
 pub fn trace_name(checkpoint: Checkpoint) {
     crate::arch::riscv64::sbi::putstr("trace: ");
     crate::arch::riscv64::sbi::putstr(checkpoint.name());
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+pub fn trace_name_with_context(checkpoint: Checkpoint, ctx: &Context) {
+    crate::arch::riscv64::sbi::putstr("trace: ");
+    crate::arch::riscv64::sbi::putstr(checkpoint.name());
+    crate::arch::riscv64::sbi::putstr(" task=");
+    crate::arch::riscv64::sbi::putstr(ctx.boot_cpu_current_task.current().name());
     crate::arch::riscv64::sbi::putchar(b'\n');
 }

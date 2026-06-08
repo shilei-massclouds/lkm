@@ -212,7 +212,7 @@ impl Lifecycle {
         event: LifecycleEvent,
         expected: State,
         target: State,
-        _checkpoint: Checkpoint,
+        checkpoint: Checkpoint,
     ) -> EventResult {
         if self.seen_events & event.bit() != 0 {
             return Err(EventError::failed(
@@ -246,6 +246,7 @@ impl Lifecycle {
 
         self.state = target;
         self.seen_events |= event.bit();
+        crate::trace::checkpoint(checkpoint);
         Ok(())
     }
 

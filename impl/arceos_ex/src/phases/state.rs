@@ -40,7 +40,7 @@ pub fn mark(
     event: LifecycleEvent,
     expected: State,
     target: State,
-    _checkpoint: Checkpoint,
+    checkpoint: Checkpoint,
 ) -> EventResult {
     let actual = load(state);
     if actual != expected {
@@ -48,6 +48,7 @@ pub fn mark(
     }
 
     state.store(encode(target), Ordering::Relaxed);
+    crate::trace::checkpoint(checkpoint);
     Ok(())
 }
 
