@@ -24,7 +24,10 @@ pub fn preset(ctx: &mut Context) -> ! {
 
 pub fn setup(ctx: &mut Context) -> ! {
     crate::phases::shutdown_on_error(
-        setup_boot_idle_tail(ctx).and_then(|()| checkpoint_ready(ctx)),
+        setup_boot_idle_runtime(ctx)
+            .and_then(|()| prepare_boot_idle_entry(ctx))
+            .and_then(|()| run_boot_idle_loop(ctx))
+            .and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex rest init tail event failed\n",
     );
     handoff()
@@ -113,16 +116,22 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
     schedule_once_from_preempt_disabled_context(ctx)
 }
 
-fn setup_boot_idle_tail(ctx: &mut Context) -> EventResult {
+fn setup_boot_idle_runtime(ctx: &mut Context) -> EventResult {
     ctx.boot_idle_runtime.setup(
         &ctx.scheduler,
         &ctx.kernel_init_task,
         &ctx.kthreadd_task,
         &ctx.kthreadd_ready_gate,
         &ctx.cpu_group,
-    )?;
+    )
+}
+
+fn prepare_boot_idle_entry(ctx: &mut Context) -> EventResult {
     ctx.boot_idle_runtime
-        .prepare_idle_entry(&ctx.scheduler, &ctx.cpu_group)?;
+        .prepare_idle_entry(&ctx.scheduler, &ctx.cpu_group)
+}
+
+fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
     ctx.boot_idle_runtime.run_idle_loop(
         &mut ctx.scheduler,
         &mut ctx.boot_cpu_local_interrupt,

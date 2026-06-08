@@ -60,6 +60,7 @@ predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_boot_idle_runtime_split_entry_and_loop_actions() -> bool;
 predicate arceos_ex_must_boot_idle_runtime_model_representative_need_resched_cycle() -> bool;
 predicate arceos_ex_must_bind_boot_idle_schedule_if_need_resched_to_schedule_idle() -> bool;
+predicate arceos_ex_must_rest_init_setup_show_boot_idle_tail_chain() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
@@ -641,6 +642,19 @@ type ArceosExRestInitCodingMust {
          * prev != next task switch yet.
          */
         arceos_ex_must_bind_boot_idle_schedule_if_need_resched_to_schedule_idle();
+
+        /*
+         * RestInitPhase.Setup boot-idle chain:
+         *
+         * RestInitPhase.setup() must present the boot-idle tail chain directly
+         * in phase order: BootIdleRuntime.setup(), then
+         * BootIdleRuntime.prepare_idle_entry(), then
+         * BootIdleRuntime.run_idle_loop(), then the RestInitPhase.Ready
+         * checkpoint. It may use one small helper for each named action, but it
+         * must not hide the whole chain behind a single setup_boot_idle_tail()
+         * helper or collapse the model action order into one opaque phase call.
+         */
+        arceos_ex_must_rest_init_setup_show_boot_idle_tail_chain();
 
         /*
          * CurrentTaskRef scope:

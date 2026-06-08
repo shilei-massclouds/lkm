@@ -158,6 +158,10 @@ boot CPU。
 phase 代码必须随后显式调用 `prepare_idle_entry()` 和 `run_idle_loop()`。`prepare_idle_entry()` 承载
 `current->flags |= PF_IDLE`、`arch_cpu_idle_prepare()` 和 `cpuhp_online_idle(CPUHP_ONLINE)` 的当前抽象事实；
 `run_idle_loop()` 只提交进入 idle loop，并驱动一轮代表性的 `do_idle_cycle()`。
+`RestInitPhase.setup()` 主线必须直接呈现
+`BootIdleRuntime.setup()` -> `BootIdleRuntime.prepare_idle_entry()` -> `BootIdleRuntime.run_idle_loop()` ->
+`RestInitPhase.Ready` checkpoint 的顺序。代码可以为每个 named action 保留小 helper，但不得再用单个
+`setup_boot_idle_tail()` 把整条链隐藏起来。
 
 `do_idle_cycle()` 必须进一步暴露 `wait_while_no_need_resched()`、`observe_need_resched()` 和
 `schedule_if_need_resched()` 三个命名实现边界，对齐 model 中的
