@@ -660,7 +660,7 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 `Scheduler.schedule()` 是 `Scheduler.Online` 后的调度分界 event。当前阶段只能由实现或 smoke 主动调用；
 不得依赖中断、tick、softirq 或 workqueue 触发。该 event 自己负责 `schedule()`/`__schedule()` 内部边界：
 进入 schedule-owned preemption guard，关闭 boot CPU 本地中断，进入 runqueue lock context，先从当前 CPU 的
-current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQ` 执行 `pick_next_task` 得到 `next`，
+current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 `pick_next_task` 得到 `next`，
 并经过 `Scheduler.switch_to(CurrentTaskRef, next)` 框架后再退出这些边界。调用方不得为了满足 `Scheduler.schedule()` 前置条件而直接裸写
 `sstatus.SIE`；本地中断总开关必须通过 `LocalInterruptControl` 操作。当前 RISC-V `switch_to` 框架只模拟 Linux
 `__switch_to` 的核心保存/恢复边界：每个 `Task` 拥有一个 `TaskThreadContext`，其寄存器组严格对应
@@ -675,6 +675,12 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQ` 执行 `pick_n
 当作所有 CPU 共享的全局 current task。RISC-V64 代码可以并且 SHOULD 参考 Linux 用 `tp` 寄存器实现 current-task
 视图；`CurrentTaskSlot` 是对象级实现边界，在 RISC-V64 后端可以收敛到以 `tp` 承载或快速访问 current-task 引用，但通用规格和通用代码不把
 `CurrentTaskSlot` 定义成 `tp` 本身。per-cpu 存储只作为其它 CPU-local 数据的实现方式，不应替代规格中的 CPU 视角定义。
+
+`CurrentRunQueueRef` 同样必须按模型定义实现为 CPU 视角私有引用。它不是 `BootRunQueue` 的别名，也不得实现为
+描述性 current-runqueue 对象或全局 singleton。实现应参考 Linux 的间接路径：先通过 `CurrentTaskRef` 得到当前 task，
+读取 task 记录的 CPU id，再通过 CPUGroup/runqueue topology 解析该 CPU 的 runqueue。当前 BP 最小实现可以把这个解析固定到
+boot runqueue，但代码和注释必须把该绑定标成 UP 临时特化；未来 SMP 泛化时应替换为基于 selected/current runqueue ref 的
+`cpu_of(...)` 解析。
 
 `RadixTree.setup()` 和 `MapleTree.setup()` 只建立 node cache 与全局分配基础。具体 radix tree、IDR、XArray、maple tree
 实例由后续使用者对象拥有，不在本阶段创建。

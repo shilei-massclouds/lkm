@@ -80,6 +80,7 @@ pub fn run() -> SmokeResult {
             != crate::objects::cpu_control::CurrentTaskRef::BootIdle
         || ctx.scheduler.boot_runqueue().curr_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || ctx.scheduler.boot_runqueue().idle_task_id() != ctx.scheduler.boot_idle_task().task_id()
+        || ctx.scheduler.boot_idle_task().cpu_id() != ctx.scheduler.boot_runqueue().cpu_id()
         || !ctx
             .scheduler
             .boot_idle_task()

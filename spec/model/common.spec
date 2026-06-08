@@ -175,6 +175,8 @@ predicate kthreadd_provider_ready<T>(task: T) -> bool;
 predicate runqueue_ref_targets<T, U>(runqueue_ref: T, runqueue: U) -> bool;
 predicate runqueue_ref_ready<T>(runqueue_ref: T) -> bool;
 predicate runqueue_ref_cpu_is<T, U>(runqueue_ref: T, cpu_ref: U) -> bool;
+predicate current_runqueue_ref_private_to_cpu<T, U>(runqueue_ref: T, current_cpu: U) -> bool;
+predicate current_runqueue_ref_from_current_task<T, U, V, W, X>(runqueue_ref: T, current_cpu: U, current_task_ref: V, task: W, cpu_ref: X) -> bool;
 predicate runqueue_pick_next_task_returns<T, U, V>(runqueue_ref: T, prev_ref: U, next_ref: V) -> bool;
 predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, runqueue_ref: V) -> bool;
 predicate scheduler_schedule_event_available<T>(scheduler: T) -> bool;
@@ -532,16 +534,17 @@ type Task: TaskObject {
 /*
  * SchedulerObject is the reusable scheduler service type. Schedule models the
  * minimal schedule()/__schedule() path: derive the prev task ref from the
- * current CPU current-task view, ask the current runqueue to pick next, then
- * switch from prev to next. CurrentTaskRef is private to the current CPU view;
- * the model does not introduce a descriptive CurrentTask object or a global
- * current-task singleton. SelectRunQueue is a pure wake-up selection action: it
- * consumes a TaskRef and returns a RunQueueRef. Linux updates the task's
- * recorded CPU after select_task_rq() and before enqueue; callers therefore
- * drive the target Task.Action::SetTaskCpu(...) between SelectRunQueue and
- * EnqueueTask. The current UP rest_init path fixes selected runqueue CPU
- * resolution to BootCPURef; generic cpu_of(selected_rq) resolution from a
- * RunQueueRef is deferred.
+ * current CPU current-task view, resolve that CPU view's CurrentRunQueueRef,
+ * ask the current runqueue to pick next, then switch from prev to next.
+ * CurrentTaskRef and CurrentRunQueueRef are private to the current CPU view;
+ * the model does not introduce descriptive current-task/current-runqueue
+ * objects or global current-task/current-runqueue singletons. SelectRunQueue is a pure
+ * wake-up selection action: it consumes a TaskRef and returns a RunQueueRef.
+ * Linux updates the task's recorded CPU after select_task_rq() and before
+ * enqueue; callers therefore drive the target Task.Action::SetTaskCpu(...)
+ * between SelectRunQueue and EnqueueTask. The current UP rest_init path fixes
+ * selected runqueue CPU resolution to BootCPURef; generic cpu_of(selected_rq)
+ * resolution from a RunQueueRef is deferred.
  */
 type SchedulerObject: TaskObject {
     processes {
@@ -561,12 +564,15 @@ type SchedulerObject: TaskObject {
                             current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
                             current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
                             current_task_ref_from_cpu_view(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
-                            runqueue_ref_targets(CurrentRunQ, BootRunQueue);
-                            runqueue_ref_ready(CurrentRunQ);
+                            runqueue_ref_ready(CurrentRunQueueRef);
+                            runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
+                            runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
+                            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
+                            current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootIdleTask, BootCPURef);
                         }
 
                         drives {
-                            let next: TaskRef <- CurrentRunQ.Action::PickNextTask(CurrentTaskRef);
+                            let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef);
                             self.Action::SwitchTo(CurrentTaskRef, next);
                         }
 
@@ -575,7 +581,7 @@ type SchedulerObject: TaskObject {
                             scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
                             scheduler_pick_next_task_identity(self, BootRunQueue, BootIdleTask);
                             scheduler_no_task_switch_on_single_task_path(self, BootIdleTask);
-                            runqueue_pick_next_task_returns(CurrentRunQ, CurrentTaskRef, CurrentTaskRef);
+                            runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, CurrentTaskRef);
                             scheduler_switch_to_committed(self, CurrentTaskRef, CurrentTaskRef);
                             scheduler_switch_to_identity_path(self, CurrentTaskRef);
                             scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
@@ -593,7 +599,7 @@ type SchedulerObject: TaskObject {
                 scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
                 scheduler_pick_next_task_identity(self, BootRunQueue, BootIdleTask);
                 scheduler_no_task_switch_on_single_task_path(self, BootIdleTask);
-                runqueue_pick_next_task_returns(CurrentRunQ, CurrentTaskRef, CurrentTaskRef);
+                runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, CurrentTaskRef);
                 scheduler_switch_to_committed(self, CurrentTaskRef, CurrentTaskRef);
                 scheduler_switch_to_identity_path(self, CurrentTaskRef);
                 scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
@@ -690,12 +696,14 @@ type RunQueue: TaskObject {
         Action::PickNextTask(prev_ref: TaskRef) -> TaskRef {
             state_effect: StateEffect::None;
             depends_on {
-                runqueue_ref_targets(CurrentRunQ, self);
-                runqueue_ref_ready(CurrentRunQ);
+                runqueue_ref_targets(CurrentRunQueueRef, self);
+                runqueue_ref_ready(CurrentRunQueueRef);
+                runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
+                current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
                 task_ref_ready(prev_ref);
             }
             ensures {
-                runqueue_pick_next_task_returns(CurrentRunQ, prev_ref, CurrentTaskRef);
+                runqueue_pick_next_task_returns(CurrentRunQueueRef, prev_ref, CurrentTaskRef);
                 task_ref_targets(CurrentTaskRef, BootIdleTask);
                 task_ref_ready(CurrentTaskRef);
                 scheduler_pick_next_task_identity(Scheduler, self, BootIdleTask);

@@ -231,10 +231,31 @@ impl Scheduler {
         }
 
         local_interrupt.save_and_disable()?;
+        self.resolve_current_runqueue_for_boot_current_task(current_task_slot)?;
         self.switch_to_boot_idle_identity(current_task_slot)?;
         self.schedule_passes = self.schedule_passes.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
         local_interrupt.restore()?;
+        Ok(())
+    }
+
+    fn resolve_current_runqueue_for_boot_current_task(
+        &self,
+        current_task_slot: &CurrentTaskSlot,
+    ) -> EventResult {
+        if current_task_slot.state() != State::Ready
+            || !current_task_slot.current_is_boot_idle()
+            || self.boot_idle_task.cpu_id() != self.boot_runqueue.cpu_id()
+            || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
         Ok(())
     }
 

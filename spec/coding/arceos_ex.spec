@@ -58,6 +58,7 @@ predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
+predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
 predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
@@ -581,7 +582,7 @@ type ArceosExRestInitCodingMust {
          * KernelInitTask dispatch facts while BootInitTask continues the
          * cpu_startup_entry() tail. Scheduler.schedule() must derive the
          * current task reference from the current CPU current-task view,
-         * pick next from CurrentRunQ, then switch through TaskRef-based core
+         * pick next from CurrentRunQueueRef, then switch through TaskRef-based core
          * context save/restore and publish the updated CPU-local current task
          * fact. The implementation boundary must pass through the current
          * CPU's CurrentTaskSlot; it must not infer or publish the current task
@@ -602,6 +603,20 @@ type ArceosExRestInitCodingMust {
          * implementation term, not the model definition.
          */
         arceos_ex_must_current_task_ref_be_cpu_view_private();
+
+        /*
+         * CurrentRunQueueRef scope:
+         *
+         * CurrentRunQueueRef must be realized as a private reference in the
+         * current CPU view. It must not be implemented as a descriptive
+         * current-runqueue object or as a global current-runqueue singleton. Code
+         * should follow the Linux-style path: derive the current task through
+         * CurrentTaskRef, read the task's recorded CPU id, then resolve that
+         * CPU's runqueue through CPUGroup/runqueue topology. The current BP
+         * implementation may collapse this to the boot runqueue while marking
+         * that binding as a temporary UP specialization.
+         */
+        arceos_ex_must_current_runqueue_ref_be_cpu_view_private();
 
         /*
          * Wake-up task CPU action:

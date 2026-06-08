@@ -67,8 +67,11 @@ object Scheduler: SchedulerObject {
                     boot_runqueue_ready(BootRunQueue, BootCPU);
                     runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(BootRunQueueRef);
-                    runqueue_ref_targets(CurrentRunQ, BootRunQueue);
-                    runqueue_ref_ready(CurrentRunQ);
+                    runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
+                    runqueue_ref_ready(CurrentRunQueueRef);
+                    runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
+                    current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
+                    current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootIdleTask, BootCPURef);
                     boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
@@ -85,8 +88,11 @@ object Scheduler: SchedulerObject {
             BootIdleTask.state == State::Ready;
             scheduler_runqueues_ready(Scheduler, CpuGroup);
             runqueue_ref_ready(BootRunQueueRef);
-            runqueue_ref_targets(CurrentRunQ, BootRunQueue);
-            runqueue_ref_ready(CurrentRunQ);
+            runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
+            runqueue_ref_ready(CurrentRunQueueRef);
+            runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
+            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
+            current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootIdleTask, BootCPURef);
             current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
             task_cpu_ref_is(BootIdleTask, BootCPURef);
@@ -109,8 +115,11 @@ object Scheduler: SchedulerObject {
             BootRunQueue.state == State::Ready;
             BootIdleTask.state == State::Ready;
             runqueue_ref_ready(BootRunQueueRef);
-            runqueue_ref_targets(CurrentRunQ, BootRunQueue);
-            runqueue_ref_ready(CurrentRunQ);
+            runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
+            runqueue_ref_ready(CurrentRunQueueRef);
+            runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
+            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
+            current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootIdleTask, BootCPURef);
             task_cpu_ref_is(BootIdleTask, BootCPURef);
             scheduler_schedule_event_available(Scheduler);
         }
@@ -193,8 +202,9 @@ object BootRunQueue: RunQueue {
                     runqueue_task_refs_empty(BootRunQueue);
                     runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(BootRunQueueRef);
-                    runqueue_ref_targets(CurrentRunQ, BootRunQueue);
-                    runqueue_ref_ready(CurrentRunQ);
+                    runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
+                    runqueue_ref_ready(CurrentRunQueueRef);
+                    runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
                     boot_runqueue_attached_to_root_domain(BootRunQueue, DefaultSchedRootDomain);
                     boot_runqueue_class_queues_ready(BootRunQueue);
                     boot_runqueue_balance_push_disabled(BootRunQueue);
@@ -208,8 +218,9 @@ object BootRunQueue: RunQueue {
             boot_runqueue_ready(BootRunQueue, BootCPU);
             runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
             runqueue_ref_ready(BootRunQueueRef);
-            runqueue_ref_targets(CurrentRunQ, BootRunQueue);
-            runqueue_ref_ready(CurrentRunQ);
+            runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
+            runqueue_ref_ready(CurrentRunQueueRef);
+            runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
             boot_runqueue_attached_to_root_domain(BootRunQueue, DefaultSchedRootDomain);
             boot_runqueue_class_queues_ready(BootRunQueue);
         }
@@ -251,6 +262,8 @@ object BootIdleTask: Task {
                     current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
                     current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
                     current_task_ref_from_cpu_view(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
+                    current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
+                    current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootIdleTask, BootCPURef);
                     task_thread_context_owned(BootIdleTask, BootIdleTask.thread_context);
                     task_thread_context_core_register_set(BootIdleTask.thread_context);
                     task_preemption_control_ready(BootIdleTask);
@@ -273,6 +286,8 @@ object BootIdleTask: Task {
             current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
             current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
             current_task_ref_from_cpu_view(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
+            current_runqueue_ref_private_to_cpu(CurrentRunQueueRef, BootCurrentCPU);
+            current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootIdleTask, BootCPURef);
             task_thread_context_owned(BootIdleTask, BootIdleTask.thread_context);
             task_thread_context_core_register_set(BootIdleTask.thread_context);
             task_preemption_control_ready(BootIdleTask);
