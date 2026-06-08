@@ -719,6 +719,12 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 
 因此 `prev == next == CurrentTaskRef` 且目标为 `BootIdleTask`，实现只提交核心上下文已保存/已恢复和 identity switch fact，不执行真实 task stack switch。若调用路径来自
 `schedule_preempt_disabled()`，调用方继承的 preemption guard 退出和 post-schedule guard 重新进入必须在调用方上下文中显式建模。
 
+在 coding/codegen 层，模型中带显式参数和返回值的 action 可以 lowering 为统一入口形态：`Action(ContextRef, MutPacketRef)`。`ContextRef`
+提供生产对象图入口，`MutPacketRef` 是该 action chain 的强类型、局部、schema 明确的临时 packet，用于承载同级 actions 之间传递的临时值，例如
+`prev_ref`、`current_rq_ref` 和 `next_ref`。正式 model 层仍必须保留显式 action 参数、返回值和 `let` 绑定，不得把规格写成万能 packet 黑板。packet
+只能保存临时值，不能保存长期对象事实；每个 action 可读写的 packet 字段必须由模型 lowering 或 coding 规格明确约束。采用统一 action 入口后，每个 action
+的入口和出口都是潜在 checkpoint，action 内部的关键边界也可以通过 packet schema 暴露给 checkpoint/KUnit；对象方法不得为此反向抓取全局 `Context`。
+
 `CurrentTaskRef` 在 `arceos_ex` 中必须按模型定义实现为 CPU 视角私有引用。当前 BP 路径只存在 `BootCurrentCPU` 的
 `CurrentTaskRef`，目标是 `BootIdleTask`；实现不得新增 `CurrentTask` 描述性对象，也不得把 BP 的 `CurrentTaskRef`
 当作所有 CPU 共享的全局 current task。RISC-V64 代码可以并且 SHOULD 参考 Linux 用 `tp` 寄存器实现 current-task

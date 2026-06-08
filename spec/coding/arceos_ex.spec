@@ -28,6 +28,7 @@ predicate arceos_ex_must_payload_require_interrupt_phase_ready() -> bool;
 predicate arceos_ex_must_payload_follow_smp_runtime_not_nested_under_it() -> bool;
 predicate arceos_ex_must_payload_require_finalize_ready() -> bool;
 predicate arceos_ex_must_kernel_init_execution_line_reach_payload() -> bool;
+predicate arceos_ex_must_action_lowering_use_context_ref_and_typed_packet() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action() -> bool;
@@ -712,6 +713,22 @@ type ArceosExRestInitCodingMust {
          * prev != next task switch yet.
          */
         arceos_ex_must_bind_boot_idle_schedule_if_need_resched_to_schedule_idle();
+
+        /*
+         * Action lowering ABI:
+         *
+         * Coding/codegen may lower model actions with explicit parameters and
+         * return bindings to a uniform Action(ContextRef, MutPacketRef)
+         * implementation ABI. ContextRef is the object graph entry; MutPacketRef
+         * is a strongly typed, local, schema-explicit packet for temporary
+         * values passed between peer actions. The formal model must still keep
+         * explicit action parameters, return values and let bindings. Packets
+         * must not store persistent object facts. With this ABI, every action
+         * entry and exit is a potential checkpoint, and internal action
+         * boundaries may expose packet fields to checkpoint/KUnit. Object
+         * methods must not fetch the global Context themselves.
+         */
+        arceos_ex_must_action_lowering_use_context_ref_and_typed_packet();
 
         /*
          * RestInitPhase.Setup boot-idle chain:
