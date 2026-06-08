@@ -161,6 +161,7 @@ predicate task_state_new<T>(task: T) -> bool;
 predicate task_state_running<T>(task: T) -> bool;
 predicate task_not_enqueued<T>(task: T) -> bool;
 predicate task_enqueued_on_runqueue<T, U>(task: T, runqueue: U) -> bool;
+predicate task_cpu_ref_is<T, U>(task: T, cpu_ref: U) -> bool;
 predicate task_runtime_state_transition_allowed<T>(task: T, state: TaskRuntimeState) -> bool;
 predicate task_runtime_state_is<T>(task: T, state: TaskRuntimeState) -> bool;
 predicate task_thread_context_owned<T, U>(task: T, context: U) -> bool;
@@ -173,6 +174,7 @@ predicate kthreadd_provider_ref_targets<T, U>(task_ref: T, task: U) -> bool;
 predicate kthreadd_provider_ready<T>(task: T) -> bool;
 predicate runqueue_ref_targets<T, U>(runqueue_ref: T, runqueue: U) -> bool;
 predicate runqueue_ref_ready<T>(runqueue_ref: T) -> bool;
+predicate runqueue_ref_cpu_is<T, U>(runqueue_ref: T, cpu_ref: U) -> bool;
 predicate runqueue_pick_next_task_returns<T, U, V>(runqueue_ref: T, prev_ref: U, next_ref: V) -> bool;
 predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, runqueue_ref: V) -> bool;
 predicate scheduler_schedule_event_available<T>(scheduler: T) -> bool;
@@ -400,6 +402,14 @@ type TaskObject {
 }
 
 type TaskRef {
+    processes {
+        Action::SetCurrent(task: Task) {
+            state_effect: StateEffect::None;
+            ensures {
+                task_ref_targets(self, task);
+            }
+        }
+    }
 }
 
 type RunQueueRef {
@@ -449,6 +459,7 @@ type TaskThreadContext {
  */
 type Task: TaskObject {
     ext_state: TaskRuntimeState;
+    cpu_ref: CpuRef;
 
     owned {
         thread_context: TaskThreadContext;
@@ -484,6 +495,16 @@ type Task: TaskObject {
             }
         }
 
+        Action::SetTaskCpu(cpu_ref: CpuRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                cpu_ref_ready(cpu_ref);
+            }
+            ensures {
+                task_cpu_ref_is(self, cpu_ref);
+            }
+        }
+
         Action::SaveCoreContext {
             state_effect: StateEffect::None;
             depends_on {
@@ -515,9 +536,12 @@ type Task: TaskObject {
  * switch from prev to next. CurrentTaskRef is private to the current CPU view;
  * the model does not introduce a descriptive CurrentTask object or a global
  * current-task singleton. SelectRunQueue is a pure wake-up selection action: it
- * consumes a TaskRef and returns a RunQueueRef. The current UP rest_init path
- * fixes that result to the boot CPU runqueue; full select_task_rq policy is
- * deferred.
+ * consumes a TaskRef and returns a RunQueueRef. Linux updates the task's
+ * recorded CPU after select_task_rq() and before enqueue; callers therefore
+ * drive the target Task.Action::SetTaskCpu(...) between SelectRunQueue and
+ * EnqueueTask. The current UP rest_init path fixes selected runqueue CPU
+ * resolution to BootCPURef; generic cpu_of(selected_rq) resolution from a
+ * RunQueueRef is deferred.
  */
 type SchedulerObject: TaskObject {
     processes {
@@ -591,7 +615,7 @@ type SchedulerObject: TaskObject {
             drives {
                 prev_ref.Action::SaveCoreContext;
                 next_ref.Action::RestoreCoreContext;
-                BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
+                CurrentTaskRef.Action::SetCurrent(task: BootIdleTask);
             }
             ensures {
                 scheduler_switch_to_committed(self, prev_ref, next_ref);
@@ -614,9 +638,10 @@ type SchedulerObject: TaskObject {
             ensures {
                 scheduler_select_runqueue_returns(self, task_ref, BootRunQueueRef);
                 runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
+                runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
             }
             deferred {
-                "当前 SelectRunQueue 固定返回 Boot CPU runqueue；完整 select_task_rq 策略后续展开。";
+                "当前 SelectRunQueue 固定返回 Boot CPU runqueue，selected_rq 的 CPU 暂时固定为 BootCPURef；未来应由 RunQueueRef 解析 cpu_of(selected_rq)，再驱动 Task.SetTaskCpu。完整 select_task_rq 策略后续展开。";
             }
         }
     }

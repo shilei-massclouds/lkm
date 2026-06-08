@@ -80,9 +80,11 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
      * no-argument form and consumes lexically visible bindings. The selected_rq
      * binding produced by Scheduler.Action::SelectRunQueue is visible inside
      * this context. In the current UP path, selected_rq is proven to target
-     * BootRunQueue, so this context is guarded by BootRunQueueLock. Future
-     * generic runqueue enqueue modeling should resolve the lock and obj_refs
-     * from the selected RunQueueRef instead of this BootRunQueue specialization.
+     * BootRunQueue and BootCPURef, so this context is guarded by
+     * BootRunQueueLock and the task CPU update is temporarily driven with
+     * BootCPURef. Future generic runqueue enqueue modeling should resolve the
+     * lock, obj_refs and cpu_of(selected_rq) from the selected RunQueueRef
+     * instead of this BootRunQueue specialization.
      */
     guard: RawSpinLockIrqSaveGuard {
         lock_ref: BootRunQueueLock;
@@ -411,11 +413,14 @@ object KernelInitTask: Task {
                         KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running);
                         let selected_rq: RunQueueRef <-
                             Scheduler.Action::SelectRunQueue(KernelInitTaskRef);
+                        KernelInitTask.Action::SetTaskCpu(BootCPURef);
                     }
 
                     within EnqueueSelectedRunQueueContext {
                         depends_on {
                             runqueue_ref_targets(selected_rq, BootRunQueue);
+                            runqueue_ref_cpu_is(selected_rq, BootCPURef);
+                            task_cpu_ref_is(KernelInitTask, BootCPURef);
                         }
 
                         drives {
@@ -434,6 +439,7 @@ object KernelInitTask: Task {
                         raw_spinlock_irqrestore_exited(KernelInitTaskPiLock, BootCurrentCPU);
                         scheduler_select_runqueue_returns(Scheduler, KernelInitTaskRef, BootRunQueueRef);
                         task_runqueue_selected(Scheduler, KernelInitTaskRef, BootRunQueueRef);
+                        task_cpu_ref_is(KernelInitTask, BootCPURef);
                         task_enqueued_on_runqueue(KernelInitTaskRef, BootRunQueueRef);
                     }
                 }
@@ -457,6 +463,7 @@ object KernelInitTask: Task {
             kernel_init_task_pid_is_one(KernelInitTask);
             kernel_init_task_enqueued(KernelInitTask, BootRunQueue);
             task_state_running(KernelInitTask);
+            task_cpu_ref_is(KernelInitTask, BootCPURef);
             task_enqueued_on_runqueue(KernelInitTaskRef, BootRunQueueRef);
         }
     }
@@ -627,11 +634,14 @@ object KthreaddTask: Task {
                         KthreaddTask.Event::SetRuntimeState(TaskRuntimeState::Running);
                         let selected_rq: RunQueueRef <-
                             Scheduler.Action::SelectRunQueue(KthreaddTaskRef);
+                        KthreaddTask.Action::SetTaskCpu(BootCPURef);
                     }
 
                     within EnqueueSelectedRunQueueContext {
                         depends_on {
                             runqueue_ref_targets(selected_rq, BootRunQueue);
+                            runqueue_ref_cpu_is(selected_rq, BootCPURef);
+                            task_cpu_ref_is(KthreaddTask, BootCPURef);
                         }
 
                         drives {
@@ -650,6 +660,7 @@ object KthreaddTask: Task {
                         raw_spinlock_irqrestore_exited(KthreaddTaskPiLock, BootCurrentCPU);
                         scheduler_select_runqueue_returns(Scheduler, KthreaddTaskRef, BootRunQueueRef);
                         task_runqueue_selected(Scheduler, KthreaddTaskRef, BootRunQueueRef);
+                        task_cpu_ref_is(KthreaddTask, BootCPURef);
                         task_enqueued_on_runqueue(KthreaddTaskRef, BootRunQueueRef);
                     }
                 }
@@ -670,6 +681,7 @@ object KthreaddTask: Task {
             kthreadd_task_online(KthreaddTask);
             kthreadd_task_enqueued(KthreaddTask, BootRunQueue);
             task_state_running(KthreaddTask);
+            task_cpu_ref_is(KthreaddTask, BootCPURef);
             task_enqueued_on_runqueue(KthreaddTaskRef, BootRunQueueRef);
         }
     }

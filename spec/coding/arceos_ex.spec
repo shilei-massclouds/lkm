@@ -58,6 +58,7 @@ predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
+predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
 predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
 predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
@@ -603,11 +604,25 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_current_task_ref_be_cpu_view_private();
 
         /*
+         * Wake-up task CPU action:
+         *
+         * KernelInitTask and KthreaddTask wake-up paths must follow the
+         * Linux ordering: select the target runqueue, update the task's
+         * recorded CPU through a Task-level set_task_cpu boundary, then
+         * enqueue the task on that runqueue. The current BP implementation may
+         * bind the selected runqueue CPU to BootCPU/BootCPURef, but this is a
+         * temporary specialization; future SMP code must resolve cpu_of from
+         * the selected RunQueueRef.
+         */
+        arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue();
+
+        /*
          * KernelInitTask affinity action:
          *
          * PID 1 boot CPU pinning must be implemented as a KernelInitTask
          * action that sets the PF_NO_SETAFFINITY-equivalent flag and cpumask
-         * facts. It must not be represented by an independent
+         * facts. It must not be used as the wake-up set_task_cpu action and
+         * must not be represented by an independent
          * KernelInitAffinity lifecycle object. The RCU read-side boundary
          * around the Linux pid lookup remains a deferred context-modeling
          * question, not a completed resource-exclusive context.

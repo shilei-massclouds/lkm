@@ -11,6 +11,7 @@ use super::{
     rcu::RcuCore,
     scheduler::Scheduler,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    task::TaskCpuState,
     workqueue::Workqueue,
 };
 use crate::trace::Checkpoint;
@@ -54,7 +55,7 @@ pub struct KernelInitTask {
     released_for_pre_smp_init: bool,
     pinned_to_boot_cpu: bool,
     pf_no_setaffinity: bool,
-    cpu_id: usize,
+    cpu: TaskCpuState,
     running: bool,
 }
 
@@ -74,7 +75,7 @@ impl KernelInitTask {
             released_for_pre_smp_init: false,
             pinned_to_boot_cpu: false,
             pf_no_setaffinity: false,
-            cpu_id: usize::MAX,
+            cpu: TaskCpuState::new(),
             running: false,
         }
     }
@@ -132,7 +133,7 @@ impl KernelInitTask {
     }
 
     pub const fn cpu_id(&self) -> usize {
-        self.cpu_id
+        self.cpu.cpu_id()
     }
 
     pub const fn running(&self) -> bool {
@@ -215,6 +216,7 @@ impl KernelInitTask {
         let guarded_result = (|| {
             self.running = true;
             scheduler.select_boot_runqueue_for_task(self.pid)?;
+            self.set_task_cpu(scheduler.boot_runqueue().cpu_id())?;
             scheduler.enqueue_task_on_boot_runqueue(self.pid)?;
             self.enqueued = true;
             self.lifecycle.transition(
@@ -230,7 +232,10 @@ impl KernelInitTask {
     }
 
     pub fn pin_to_boot_cpu(&mut self, cpu_id: usize) -> bool {
-        if self.lifecycle.state() != State::Online || self.pid != KERNEL_INIT_PID {
+        if self.lifecycle.state() != State::Online
+            || self.pid != KERNEL_INIT_PID
+            || self.cpu_id() != cpu_id
+        {
             return false;
         }
 
@@ -238,8 +243,32 @@ impl KernelInitTask {
         // model keeps that RCU context as a deferred context-kind question.
         self.pinned_to_boot_cpu = true;
         self.pf_no_setaffinity = true;
-        self.cpu_id = cpu_id;
         true
+    }
+
+    fn set_task_cpu(&mut self, cpu_id: usize) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || self.pid != KERNEL_INIT_PID
+            || cpu_id == usize::MAX
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        if self.cpu.set_task_cpu(cpu_id) {
+            Ok(())
+        } else {
+            failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            )
+        }
     }
 
     fn release_for_pre_smp_init(&mut self) -> bool {
@@ -257,6 +286,7 @@ impl KernelInitTask {
             || self.pid != KERNEL_INIT_PID
             || !self.pinned_to_boot_cpu
             || !self.pf_no_setaffinity
+            || self.cpu_id() == usize::MAX
             || !cpu_group.secondary_cpus_online()
             || !cpu_group.smp_concurrency_open()
         {
@@ -265,7 +295,6 @@ impl KernelInitTask {
 
         self.pinned_to_boot_cpu = false;
         self.pf_no_setaffinity = false;
-        self.cpu_id = usize::MAX;
         true
     }
 
@@ -303,6 +332,7 @@ pub struct KthreaddTask {
     global_ref_bound: bool,
     provider_ready: bool,
     enqueued: bool,
+    cpu: TaskCpuState,
     running: bool,
 }
 
@@ -323,6 +353,7 @@ impl KthreaddTask {
             global_ref_bound: false,
             provider_ready: false,
             enqueued: false,
+            cpu: TaskCpuState::new(),
             running: false,
         }
     }
@@ -381,6 +412,10 @@ impl KthreaddTask {
 
     pub const fn enqueued(&self) -> bool {
         self.enqueued
+    }
+
+    pub const fn cpu_id(&self) -> usize {
+        self.cpu.cpu_id()
     }
 
     pub const fn running(&self) -> bool {
@@ -465,6 +500,7 @@ impl KthreaddTask {
         let guarded_result = (|| {
             self.running = true;
             scheduler.select_boot_runqueue_for_task(self.pid)?;
+            self.set_task_cpu(scheduler.boot_runqueue().cpu_id())?;
             scheduler.enqueue_task_on_boot_runqueue(self.pid)?;
             self.enqueued = true;
             self.lifecycle.transition(
@@ -477,6 +513,31 @@ impl KthreaddTask {
         let unlock_result =
             pi_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
         guarded_result.and(unlock_result)
+    }
+
+    fn set_task_cpu(&mut self, cpu_id: usize) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || self.pid != KTHREADD_PID
+            || cpu_id == usize::MAX
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        if self.cpu.set_task_cpu(cpu_id) {
+            Ok(())
+        } else {
+            failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            )
+        }
     }
 
     pub fn bind_global_ref(&mut self, root_pid_namespace: &RootPidNamespace) -> bool {

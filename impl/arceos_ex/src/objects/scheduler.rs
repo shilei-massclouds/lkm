@@ -8,6 +8,7 @@ use super::{
     rest_init::KernelInitTask,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::StaticBranch,
+    task::TaskCpuState,
 };
 use crate::trace::Checkpoint;
 
@@ -593,7 +594,7 @@ impl BootRunQueue {
 pub struct BootIdleTask {
     lifecycle: Lifecycle,
     task_id: usize,
-    cpu_id: usize,
+    cpu: TaskCpuState,
     thread_context: TaskThreadContext,
     uses_current_init_task: bool,
     lazy_tlb_mm_ready: bool,
@@ -605,7 +606,7 @@ impl BootIdleTask {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             task_id: usize::MAX,
-            cpu_id: usize::MAX,
+            cpu: TaskCpuState::new(),
             thread_context: TaskThreadContext::new(),
             uses_current_init_task: false,
             lazy_tlb_mm_ready: false,
@@ -622,7 +623,7 @@ impl BootIdleTask {
     }
 
     pub const fn cpu_id(&self) -> usize {
-        self.cpu_id
+        self.cpu.cpu_id()
     }
 
     pub const fn uses_current_init_task(&self) -> bool {
@@ -663,7 +664,14 @@ impl BootIdleTask {
         }
 
         self.task_id = boot_runqueue.idle_task_id();
-        self.cpu_id = boot_runqueue.cpu_id();
+        if !self.cpu.set_task_cpu(boot_runqueue.cpu_id()) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
         self.thread_context.setup_boot_idle();
         self.uses_current_init_task = true;
         self.lazy_tlb_mm_ready = true;

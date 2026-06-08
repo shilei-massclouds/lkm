@@ -26,7 +26,7 @@ pub fn run() -> SmokeResult {
 
     if ctx.kernel_init_task.pinned_to_boot_cpu()
         || ctx.kernel_init_task.pf_no_setaffinity()
-        || ctx.kernel_init_task.cpu_id() != usize::MAX
+        || ctx.kernel_init_task.cpu_id() != ctx.scheduler.boot_runqueue().cpu_id()
     {
         printk::write_str("kernel_init affinity release facts invalid\n");
         return SmokeResult::Failed;

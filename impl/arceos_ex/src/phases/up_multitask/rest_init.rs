@@ -282,6 +282,7 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.kthreadd_task.thread_context_ready()
         && ctx.kthreadd_task.sched_entity_ready()
         && ctx.kthreadd_task.running()
+        && ctx.kthreadd_task.cpu_id() == ctx.scheduler.boot_runqueue().cpu_id()
         && ctx.scheduler.selected_runqueue_task_id() == ctx.kthreadd_task.pid()
         && ctx
             .scheduler

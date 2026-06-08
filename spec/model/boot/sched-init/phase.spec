@@ -72,6 +72,7 @@ object Scheduler: SchedulerObject {
                     boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
+                    task_cpu_ref_is(BootIdleTask, BootCPURef);
                     scheduler_schedule_event_available(Scheduler);
                 }
             }
@@ -88,6 +89,7 @@ object Scheduler: SchedulerObject {
             runqueue_ref_ready(CurrentRunQ);
             current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
+            task_cpu_ref_is(BootIdleTask, BootCPURef);
             scheduler_schedule_event_available(Scheduler);
         }
 
@@ -109,6 +111,7 @@ object Scheduler: SchedulerObject {
             runqueue_ref_ready(BootRunQueueRef);
             runqueue_ref_targets(CurrentRunQ, BootRunQueue);
             runqueue_ref_ready(CurrentRunQ);
+            task_cpu_ref_is(BootIdleTask, BootCPURef);
             scheduler_schedule_event_available(Scheduler);
         }
     }
@@ -234,6 +237,7 @@ object BootIdleTask: Task {
                 drives {
                     BootIdlePreemption.Event::Setup;
                     BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
+                    BootIdleTask.Action::SetTaskCpu(BootCPURef);
                 }
 
                 ensures {
@@ -252,6 +256,7 @@ object BootIdleTask: Task {
                     task_preemption_control_ready(BootIdleTask);
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
+                    task_cpu_ref_is(BootIdleTask, BootCPURef);
                 }
             }
         }
@@ -273,6 +278,7 @@ object BootIdleTask: Task {
             task_preemption_control_ready(BootIdleTask);
             current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
+            task_cpu_ref_is(BootIdleTask, BootCPURef);
         }
     }
 }

@@ -36,6 +36,7 @@ pub fn run() -> SmokeResult {
         || ctx.kernel_init_task.kind() != TaskKind::UserModeThread
         || !ctx.kernel_init_task.running()
         || !ctx.kernel_init_task.enqueued()
+        || ctx.kernel_init_task.cpu_id() != ctx.scheduler.boot_runqueue().cpu_id()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
         || !ctx
             .scheduler
@@ -71,6 +72,7 @@ pub fn run() -> SmokeResult {
         || !ctx.kthreadd_task.kernel_thread_flag()
         || !ctx.kthreadd_task.running()
         || !ctx.kthreadd_task.enqueued()
+        || ctx.kthreadd_task.cpu_id() != ctx.scheduler.boot_runqueue().cpu_id()
         || ctx.scheduler.selected_runqueue_task_id() != ctx.kthreadd_task.pid()
         || !ctx
             .scheduler

@@ -133,10 +133,16 @@ post-schedule boot idle context 进入三段体提交首次调度交接，boot i
 
 PID 1 的临时 boot CPU 亲和约束不得实现为独立 `KernelInitAffinity` 对象；它必须作为
 `KernelInitTask` 的 `pin_to_boot_cpu()` action 承载。该 action 只提交两类 task 属性：设置
-`PF_NO_SETAFFINITY` 等价 flag，以及把 task cpumask/cpu id 限制到 boot CPU。Linux 源码中的
+`PF_NO_SETAFFINITY` 等价 flag，以及把 task cpumask 限制到 boot CPU。Linux 源码中的
 `find_task_by_pid_ns(pid, &init_pid_ns)` 只作为实现路径说明，不能在对象级实现中变成单独生命周期对象。
 包围该查找的 `rcu_read_lock()/unlock()` 读侧上下文当前保留为 deferred 建模问题；代码可以记录注释，
 但不得伪造成已经完成的资源独占上下文模型。
+
+`KernelInitTask` 和 `KthreaddTask` 的 wake-up 路径必须参考 Linux `wake_up_new_task()`：
+先选择目标 runqueue，再通过 `Task` 级 `set_task_cpu` 边界更新 task 记录的 CPU id，最后进入目标
+runqueue 的 enqueue/activate 边界。当前 BP 最小实现可以把 `cpu_of(selected_rq)` 固定为 boot CPU，
+但代码和注释必须把这个固定值标为临时特化；未来 SMP 泛化时应从 `RunQueueRef` 解析目标 CPU，而不是继续硬编码
+boot CPU。
 
 `schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部和
 `KernelInitTask -> PreSmpInitPhase` 的分叉点。它不得实现为独立对象或单个
