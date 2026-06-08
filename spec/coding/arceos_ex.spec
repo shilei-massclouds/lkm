@@ -29,7 +29,7 @@ predicate arceos_ex_must_payload_follow_smp_runtime_not_nested_under_it() -> boo
 predicate arceos_ex_must_payload_require_finalize_ready() -> bool;
 predicate arceos_ex_must_kernel_init_execution_line_reach_payload() -> bool;
 predicate arceos_ex_must_action_lowering_use_context_ref_and_typed_packet() -> bool;
-predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_next_exit_and_switch_to_entry() -> bool;
+predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_next_exit_and_switch_to_boundaries() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action() -> bool;
@@ -743,10 +743,13 @@ type ArceosExRestInitCodingMust {
          * KernelInitTask. Then check SwitchTo entry: the recorded
          * prev_ref/next_ref match the pick result and the checkpoint observes
          * the boundary before the current-task switch commit for this
-         * invocation. The coarser Scheduler.Schedule postcondition checkpoint
-         * should be added only after these action-internal boundaries pass.
+         * invocation. Then check SwitchTo exit: for the first rest_init
+         * schedule return, CurrentTaskRef must target the same runnable task
+         * selected by PickNextTask, namely KernelInitTask or KthreaddTask. The
+         * coarser Scheduler.Schedule postcondition checkpoint should be added
+         * only after these action-internal boundaries pass.
          */
-        arceos_ex_must_scheduler_action_checkpoints_cover_pick_next_exit_and_switch_to_entry();
+        arceos_ex_must_scheduler_action_checkpoints_cover_pick_next_exit_and_switch_to_boundaries();
 
         /*
          * RestInitPhase.Setup boot-idle chain:

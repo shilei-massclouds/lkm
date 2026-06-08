@@ -733,7 +733,9 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 
 `Scheduler.schedule()` 的 checkpoint/KUnit 应先从 action chain 前段向后覆盖：第一步检查 `PickNextTask` 退出点已经得到
 `next_ref`，且 `rest_init` 首次 schedule 的 `prev_ref == BootIdleTask`、`next_ref` 是 `KernelInitTask` 或
 `KthreaddTask`；当前实现固定优先 `KernelInitTask`。第二步检查 `SwitchTo` 进入点的
-`prev_ref` 和 `next_ref` 与 pick result 一致，并且该进入点发生在本次 `CurrentTaskRef` switch commit 之前。更粗的
+`prev_ref` 和 `next_ref` 与 pick result 一致，并且该进入点发生在本次 `CurrentTaskRef` switch commit 之前。
+第三步检查 `SwitchTo` 退出点：第一次 `rest_init` schedule 返回时，`CurrentTaskRef` 必须指向
+`PickNextTask` 选出的同一个 runnable task，即 `KernelInitTask` 或 `KthreaddTask`。更粗的
 `Scheduler.Schedule` 后置 checkpoint 留到这些 action 内部边界通过后再补。
 
 `CurrentTaskRef` 在 `arceos_ex` 中必须按模型定义实现为 CPU 视角私有引用。当前 BP 路径只存在 `BootCurrentCPU` 的

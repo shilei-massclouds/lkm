@@ -44,6 +44,11 @@ pub struct Scheduler {
     switch_to_entry_current_ref: CurrentTaskRef,
     switch_to_entry_committed_count: usize,
     switch_to_entry_count: usize,
+    switch_to_exit_prev_ref: CurrentTaskRef,
+    switch_to_exit_next_ref: CurrentTaskRef,
+    switch_to_exit_current_ref: CurrentTaskRef,
+    switch_to_exit_committed_count: usize,
+    switch_to_exit_count: usize,
 }
 
 impl Scheduler {
@@ -78,6 +83,11 @@ impl Scheduler {
             switch_to_entry_current_ref: CurrentTaskRef::None,
             switch_to_entry_committed_count: 0,
             switch_to_entry_count: 0,
+            switch_to_exit_prev_ref: CurrentTaskRef::None,
+            switch_to_exit_next_ref: CurrentTaskRef::None,
+            switch_to_exit_current_ref: CurrentTaskRef::None,
+            switch_to_exit_committed_count: 0,
+            switch_to_exit_count: 0,
         }
     }
 
@@ -203,6 +213,31 @@ impl Scheduler {
 
     pub const fn switch_to_entry_count(&self) -> usize {
         self.switch_to_entry_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn switch_to_exit_prev_ref(&self) -> CurrentTaskRef {
+        self.switch_to_exit_prev_ref
+    }
+
+    #[allow(dead_code)]
+    pub const fn switch_to_exit_next_ref(&self) -> CurrentTaskRef {
+        self.switch_to_exit_next_ref
+    }
+
+    #[allow(dead_code)]
+    pub const fn switch_to_exit_current_ref(&self) -> CurrentTaskRef {
+        self.switch_to_exit_current_ref
+    }
+
+    #[allow(dead_code)]
+    pub const fn switch_to_exit_committed_count(&self) -> usize {
+        self.switch_to_exit_committed_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn switch_to_exit_count(&self) -> usize {
+        self.switch_to_exit_count
     }
 
     pub fn preset(
@@ -433,6 +468,12 @@ impl Scheduler {
         if prev_ref == next_ref {
             self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
         }
+        self.switch_to_exit_prev_ref = prev_ref;
+        self.switch_to_exit_next_ref = next_ref;
+        self.switch_to_exit_current_ref = current_task_slot.current();
+        self.switch_to_exit_committed_count = current_task_slot.switch_committed_count();
+        self.switch_to_exit_count = self.switch_to_exit_count.wrapping_add(1);
+        crate::trace::checkpoint(Checkpoint::SchedulerSwitchToExit);
         Ok(())
     }
 
