@@ -372,6 +372,10 @@ impl CurrentTaskSlot {
     pub const fn current_is_boot_idle(&self) -> bool {
         matches!(self.current, CurrentTaskRef::BootIdle)
     }
+
+    pub const fn current_is_kernel_init(&self) -> bool {
+        matches!(self.current, CurrentTaskRef::KernelInit)
+    }
 }
 
 pub struct PreemptionControl {

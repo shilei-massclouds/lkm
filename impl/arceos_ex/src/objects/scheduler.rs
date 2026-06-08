@@ -181,18 +181,22 @@ impl Scheduler {
         self.pick_next_task_exit_count
     }
 
+    #[allow(dead_code)]
     pub const fn switch_to_entry_prev_ref(&self) -> CurrentTaskRef {
         self.switch_to_entry_prev_ref
     }
 
+    #[allow(dead_code)]
     pub const fn switch_to_entry_next_ref(&self) -> CurrentTaskRef {
         self.switch_to_entry_next_ref
     }
 
+    #[allow(dead_code)]
     pub const fn switch_to_entry_current_ref(&self) -> CurrentTaskRef {
         self.switch_to_entry_current_ref
     }
 
+    #[allow(dead_code)]
     pub const fn switch_to_entry_committed_count(&self) -> usize {
         self.switch_to_entry_committed_count
     }
@@ -368,11 +372,16 @@ impl Scheduler {
             || !matches!(prev_ref, CurrentTaskRef::BootIdle)
             || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
+            || self.boot_runqueue.task_count() == 0
         {
             return Err(self.failed_schedule_condition());
         }
 
-        let next_ref = CurrentTaskRef::BootIdle;
+        let next_ref = self.boot_runqueue.first_runnable_task_ref();
+        if matches!(next_ref, CurrentTaskRef::None) {
+            return Err(self.failed_schedule_condition());
+        }
+
         self.pick_next_task_passes = self.pick_next_task_passes.wrapping_add(1);
         self.pick_next_task_exit_prev_ref = prev_ref;
         self.pick_next_task_exit_next_ref = next_ref;
@@ -398,7 +407,10 @@ impl Scheduler {
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if !matches!(prev_ref, CurrentTaskRef::BootIdle)
-            || !matches!(next_ref, CurrentTaskRef::BootIdle)
+            || !matches!(
+                next_ref,
+                CurrentTaskRef::BootIdle | CurrentTaskRef::KernelInit | CurrentTaskRef::Kthreadd
+            )
             || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
             || current_task_slot.state() != State::Ready
@@ -722,6 +734,16 @@ impl BootRunQueue {
 
     pub const fn task_count(&self) -> usize {
         self.kernel_init_task_enqueued as usize + self.kthreadd_task_enqueued as usize
+    }
+
+    pub const fn first_runnable_task_ref(&self) -> CurrentTaskRef {
+        if self.kernel_init_task_enqueued {
+            CurrentTaskRef::KernelInit
+        } else if self.kthreadd_task_enqueued {
+            CurrentTaskRef::Kthreadd
+        } else {
+            CurrentTaskRef::None
+        }
     }
 
     fn setup(

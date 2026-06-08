@@ -181,15 +181,17 @@ phase 代码必须随后显式调用 `prepare_idle_entry()` 和 `run_idle_loop()
 
 `schedule_if_need_resched()` 必须驱动具体的 `Scheduler.schedule_idle()` 实现边界。该 wrapper 要求当前
 CPU 的 `CurrentTaskSlot` 仍指向 `BootIdleTask`，并且 `BootIdleRuntime` 已记录 need_resched observation。
-当前可以复用已有 `Scheduler.schedule()` 的单任务切换骨架，但必须用独立 idle-specific counter/fact 标记
-idle path，不能只依赖普通 `schedule_passes()` 推断。当前仍只实现对象级代表性一轮，不得引入真实无限
+它必须复用 `Scheduler.schedule()` 的 pick-next/switch-to 骨架，不能手工提交 `BootIdleTask -> BootIdleTask`
+identity switch；当 runqueue 中已有 `KernelInitTask`/`KthreaddTask` 时，`schedule_idle()` 也应通过
+`PickNextTask` 选择 runnable task。当前仍只实现对象级代表性一轮，不得引入真实无限
 idle loop、真实 timer/IRQ wakeup 源、真实 cpuidle/WFI 路径、Linux
-`do { __schedule(SM_IDLE); } while (need_resched())` 循环、`sched_submit_work()` skip 细节或真实
-`prev != next` 任务切换。
+`do { __schedule(SM_IDLE); } while (need_resched())` 循环、`sched_submit_work()` skip 细节、真实任务栈切换
+或长期 continuation 控制流。
 rest_init smoke 以及 checkpoint KUnit 复用的 smoke case 必须验证 idle schedule 的关系约束：当前 BP
-代表性 idle cycle 只记录一次 `schedule_idle()`，idle request/return/identity counters 相互一致，普通
-schedule/switch/current-task switch counters 包含这一次 idle pass；scheduler smoke 还必须证明普通
-`Scheduler.schedule()` 不会递增 idle-specific counters。
+代表性 idle cycle 只记录一次 `schedule_idle()`，idle request/return counters 相互一致，普通
+schedule/switch/current-task switch counters 包含这一次 idle pass。当前有 runnable task 时不应要求
+idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没有更合适 runnable task 的未来
+策略分支中才可能成立。
 
 本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
 真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是
@@ -715,9 +717,12 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 
 `__switch_to` 的核心保存/恢复边界：每个 `Task` 拥有一个 `TaskThreadContext`，其寄存器组严格对应
 `thread.ra`、`thread.sp` 和 `thread.s[0..11]`。保存/恢复必须通过 `TaskRef` receiver 对目标 task 的
 `TaskThreadContext` 生效，`switch_to` 完成后必须通过本 CPU 的 `CurrentTaskSlot` 提交 next 已成为本 CPU
-`CurrentTaskRef` 目标的事实，不能只依赖 `Scheduler` 计数或 `BootRunQueue.curr` 间接表示。当前只有一个任务，
-因此 `prev == next == CurrentTaskRef` 且目标为 `BootIdleTask`，实现只提交核心上下文已保存/已恢复和 identity switch fact，不执行真实 task stack switch。若调用路径来自
-`schedule_preempt_disabled()`，调用方继承的 preemption guard 退出和 post-schedule guard 重新进入必须在调用方上下文中显式建模。
+`CurrentTaskRef` 目标的事实，不能只依赖 `Scheduler` 计数或 `BootRunQueue.curr` 间接表示。当前 `rest_init`
+首次调度从 `BootIdleTask` 选择已入队的 `KernelInitTask` 或 `KthreaddTask`，实现暂时固定优先
+`KernelInitTask`，以支撑后续 `PreSmpInitPhase -> ... -> PayloadPhase` 的 KernelInit 执行线。当前
+`switch_to` 仍只实现 RISC-V 核心保存/恢复边界和 `CurrentTaskRef` commit；真实 task stack switch、next task
+上下文恢复、`finish_task_switch()` 等细节后续展开。若调用路径来自 `schedule_preempt_disabled()`，
+调用方继承的 preemption guard 退出和 post-schedule guard 重新进入必须在调用方上下文中显式建模。
 
 在 coding/codegen 层，模型中带显式参数和返回值的 action 可以 lowering 为统一入口形态：`Action(ContextRef, MutPacketRef)`。`ContextRef`
 提供生产对象图入口，`MutPacketRef` 是该 action chain 的强类型、局部、schema 明确的临时 packet，用于承载同级 actions 之间传递的临时值，例如
@@ -726,12 +731,14 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 
 的入口和出口都是潜在 checkpoint，action 内部的关键边界也可以通过 packet schema 暴露给 checkpoint/KUnit；对象方法不得为此反向抓取全局 `Context`。
 
 `Scheduler.schedule()` 的 checkpoint/KUnit 应先从 action chain 前段向后覆盖：第一步检查 `PickNextTask` 退出点已经得到
-`next_ref`，且当前 BP 最小路径中 `prev_ref == next_ref == BootIdleTask`；第二步检查 `SwitchTo` 进入点的
-`prev_ref` 和 `next_ref` 符合预期，并且该进入点发生在本次 `CurrentTaskRef` switch commit 之前。更粗的
+`next_ref`，且 `rest_init` 首次 schedule 的 `prev_ref == BootIdleTask`、`next_ref` 是 `KernelInitTask` 或
+`KthreaddTask`；当前实现固定优先 `KernelInitTask`。第二步检查 `SwitchTo` 进入点的
+`prev_ref` 和 `next_ref` 与 pick result 一致，并且该进入点发生在本次 `CurrentTaskRef` switch commit 之前。更粗的
 `Scheduler.Schedule` 后置 checkpoint 留到这些 action 内部边界通过后再补。
 
 `CurrentTaskRef` 在 `arceos_ex` 中必须按模型定义实现为 CPU 视角私有引用。当前 BP 路径只存在 `BootCurrentCPU` 的
-`CurrentTaskRef`，目标是 `BootIdleTask`；实现不得新增 `CurrentTask` 描述性对象，也不得把 BP 的 `CurrentTaskRef`
+`CurrentTaskRef`；它在 sched-init 后指向 `BootIdleTask`，在 `rest_init` 首次调度后更新为所选 runnable task。
+实现不得新增 `CurrentTask` 描述性对象，也不得把 BP 的 `CurrentTaskRef`
 当作所有 CPU 共享的全局 current task。RISC-V64 代码可以并且 SHOULD 参考 Linux 用 `tp` 寄存器实现 current-task
 视图；`CurrentTaskSlot` 是对象级实现边界，在 RISC-V64 后端可以收敛到以 `tp` 承载或快速访问 current-task 引用，但通用规格和通用代码不把
 `CurrentTaskSlot` 定义成 `tp` 本身。per-cpu 存储只作为其它 CPU-local 数据的实现方式，不应替代规格中的 CPU 视角定义。

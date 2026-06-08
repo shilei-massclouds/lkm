@@ -131,9 +131,9 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.current_runqueue_resolve_passes() == 0
         || ctx.scheduler.pick_next_task_passes() == 0
         || ctx.scheduler.switch_to_passes() == 0
-        || ctx.scheduler.identity_switch_passes() == 0
+        || ctx.scheduler.identity_switch_passes() != 0
         || ctx.boot_cpu_current_task.switch_committed_count() == 0
-        || !ctx.boot_cpu_current_task.current_is_boot_idle()
+        || !ctx.boot_cpu_current_task.current_is_kernel_init()
         || !ctx
             .scheduler
             .boot_idle_task()
@@ -160,11 +160,11 @@ pub fn run() -> SmokeResult {
     let idle_schedule_passes = ctx.scheduler.idle_schedule_passes();
     if idle_schedule_passes != 1
         || ctx.scheduler.idle_schedule_returned_passes() != idle_schedule_passes
-        || ctx.scheduler.idle_schedule_identity_passes() != idle_schedule_passes
+        || ctx.scheduler.idle_schedule_identity_passes() != 0
         || ctx.scheduler.schedule_passes() < idle_schedule_passes
         || ctx.scheduler.switch_to_passes() < idle_schedule_passes
         || ctx.boot_cpu_current_task.switch_committed_count() < idle_schedule_passes
-        || ctx.scheduler.identity_switch_passes() < idle_schedule_passes
+        || ctx.scheduler.identity_switch_passes() != 0
     {
         printk::write_str("idle schedule relation facts invalid\n");
         return SmokeResult::Failed;

@@ -705,13 +705,14 @@ type ArceosExRestInitCodingMust {
          * Scheduler.schedule_idle() implementation boundary. The wrapper must
          * require the current CPU's CurrentTaskSlot to still target BootIdleTask
          * and the need_resched observation to have been recorded by
-         * BootIdleRuntime. It may reuse the existing Scheduler.schedule() switch
-         * skeleton for the current single-task path, but it must publish
-         * idle-specific counters/facts separately from ordinary schedule()
-         * calls so smoke/KUnit coverage can distinguish the idle path. It must
-         * not model the full Linux do { __schedule(SM_IDLE); } while
-         * (need_resched()) loop, sched_submit_work() skip details, or a real
-         * prev != next task switch yet.
+         * BootIdleRuntime. It must reuse the existing Scheduler.schedule()
+         * pick-next/switch-to skeleton and must not hand-commit a
+         * BootIdleTask -> BootIdleTask identity switch when runnable tasks are
+         * present. It must publish idle-specific counters/facts separately
+         * from ordinary schedule() calls so smoke/KUnit coverage can
+         * distinguish the idle path. It must not model the full Linux do {
+         * __schedule(SM_IDLE); } while (need_resched()) loop,
+         * sched_submit_work() skip details, or the long-running idle loop yet.
          */
         arceos_ex_must_bind_boot_idle_schedule_if_need_resched_to_schedule_idle();
 
@@ -736,10 +737,12 @@ type ArceosExRestInitCodingMust {
          *
          * Scheduler.schedule() checkpoint/KUnit coverage must proceed from
          * the front of the action chain. First check PickNextTask exit: next_ref
-         * has been produced and, in the current BP identity path, prev_ref and
-         * next_ref both target BootIdleTask. Then check SwitchTo entry: the
-         * recorded prev_ref/next_ref match the pick result and the checkpoint
-         * observes the boundary before the current-task switch commit for this
+         * has been produced and, for the first rest_init schedule, prev_ref
+         * targets BootIdleTask while next_ref targets KernelInitTask or
+         * KthreaddTask; the current implementation deterministically prefers
+         * KernelInitTask. Then check SwitchTo entry: the recorded
+         * prev_ref/next_ref match the pick result and the checkpoint observes
+         * the boundary before the current-task switch commit for this
          * invocation. The coarser Scheduler.Schedule postcondition checkpoint
          * should be added only after these action-internal boundaries pass.
          */
@@ -765,10 +768,10 @@ type ArceosExRestInitCodingMust {
          * validate the boot idle schedule relation, not only non-zero facts:
          * the representative idle cycle records exactly one
          * Scheduler.schedule_idle() pass in the current BP implementation;
-         * idle schedule request, return and identity counters match each
-         * other; ordinary schedule/switch/current-task switch counters include
-         * that idle pass; and the scheduler smoke case proves that an ordinary
-         * Scheduler.schedule() call does not increment idle-specific counters.
+         * idle schedule request/return counters match each other; ordinary
+         * schedule/switch/current-task switch counters include that idle pass;
+         * and idle identity counters remain zero while runnable boot tasks are
+         * present.
          */
         arceos_ex_must_rest_init_smoke_cover_idle_schedule_relations();
 

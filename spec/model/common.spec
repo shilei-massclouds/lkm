@@ -210,6 +210,7 @@ predicate scheduler_schedule_smoke_ready<T>(scheduler: T) -> bool;
 predicate scheduler_schedule_local_interrupts_closed<T, U>(scheduler: T, local_interrupt: U) -> bool;
 predicate scheduler_runqueue_lock_held_for_schedule<T, U>(scheduler: T, runqueue: U) -> bool;
 predicate scheduler_pick_next_task_identity<T, U, V>(scheduler: T, runqueue: U, task: V) -> bool;
+predicate scheduler_pick_next_task_selects_runnable<T, U, V>(scheduler: T, runqueue: U, task_ref: V) -> bool;
 predicate scheduler_no_task_switch_on_single_task_path<T, U>(scheduler: T, task: U) -> bool;
 predicate scheduler_switch_to_prepared<T, U, V, W>(scheduler: T, runqueue: U, prev_ref: V, next_ref: W) -> bool;
 predicate scheduler_switch_to_committed<T, U, V>(scheduler: T, prev_ref: U, next_ref: V) -> bool;
@@ -219,6 +220,7 @@ predicate scheduler_switch_to_core_context_restored<T, U>(scheduler: T, task_ref
 predicate scheduler_idle_mode_used<T>(scheduler: T) -> bool;
 predicate scheduler_idle_schedule_committed<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_idle_schedule_returned_to_idle<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_idle_schedule_committed_to_runnable<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate boot_idle_schedule_idle_loop_until_resched_clear<T>(scheduler: T) -> bool;
 predicate task_runqueue_selected<T, U, V>(scheduler: T, task: U, runqueue: V) -> bool;
 predicate runqueue_runtime_state_is<T>(runqueue: T, state: RunQueueRuntimeState) -> bool;
@@ -636,16 +638,14 @@ type SchedulerObject: TaskObject {
                         ensures {
                             scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
                             scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
-                            scheduler_pick_next_task_identity(self, BootRunQueue, BootIdleTask);
-                            scheduler_no_task_switch_on_single_task_path(self, BootIdleTask);
-                            runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, CurrentTaskRef);
-                            scheduler_switch_to_committed(self, CurrentTaskRef, CurrentTaskRef);
-                            scheduler_switch_to_identity_path(self, CurrentTaskRef);
+                            scheduler_pick_next_task_selects_runnable(self, BootRunQueue, KernelInitTaskRef);
+                            runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, KernelInitTaskRef);
+                            scheduler_switch_to_committed(self, CurrentTaskRef, KernelInitTaskRef);
                             scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
-                            scheduler_switch_to_core_context_restored(self, CurrentTaskRef);
-                            task_ref_targets(CurrentTaskRef, BootIdleTask);
-                            task_ref_loaded_into_current_cpu(CurrentTaskRef, BootCurrentCPU);
-                            current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, CurrentTaskRef);
+                            scheduler_switch_to_core_context_restored(self, KernelInitTaskRef);
+                            task_ref_targets(KernelInitTaskRef, KernelInitTask);
+                            task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
+                            current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                             scheduler_first_schedule_committed(self);
                         }
                     }
@@ -654,16 +654,14 @@ type SchedulerObject: TaskObject {
             ensures {
                 scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
                 scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
-                scheduler_pick_next_task_identity(self, BootRunQueue, BootIdleTask);
-                scheduler_no_task_switch_on_single_task_path(self, BootIdleTask);
-                runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, CurrentTaskRef);
-                scheduler_switch_to_committed(self, CurrentTaskRef, CurrentTaskRef);
-                scheduler_switch_to_identity_path(self, CurrentTaskRef);
+                scheduler_pick_next_task_selects_runnable(self, BootRunQueue, KernelInitTaskRef);
+                runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, KernelInitTaskRef);
+                scheduler_switch_to_committed(self, CurrentTaskRef, KernelInitTaskRef);
                 scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
-                scheduler_switch_to_core_context_restored(self, CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
-                task_ref_loaded_into_current_cpu(CurrentTaskRef, BootCurrentCPU);
-                current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, CurrentTaskRef);
+                scheduler_switch_to_core_context_restored(self, KernelInitTaskRef);
+                task_ref_targets(KernelInitTaskRef, KernelInitTask);
+                task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
+                current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                 scheduler_first_schedule_committed(self);
             }
         }
@@ -682,13 +680,13 @@ type SchedulerObject: TaskObject {
             ensures {
                 scheduler_idle_mode_used(self);
                 scheduler_idle_schedule_committed(self, CurrentTaskRef);
-                scheduler_idle_schedule_returned_to_idle(self, CurrentTaskRef);
+                scheduler_idle_schedule_committed_to_runnable(self, KernelInitTaskRef);
                 boot_idle_schedule_idle_loop_until_resched_clear(self);
                 boot_idle_need_resched_drained_after_schedule(BootIdleTask);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
+                task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
             }
             deferred {
-                "ScheduleIdle 当前复用 Scheduler.Schedule 的对象级切换框架；Linux schedule_idle() 的 SM_IDLE 模式、跳过 sched_submit_work()、do { __schedule(SM_IDLE); } while (need_resched()) 循环和完整 prev != next 路径后续展开。";
+                "ScheduleIdle 当前复用 Scheduler.Schedule 的对象级 pick-next/switch-to 框架，不能手工提交 BootIdleTask -> BootIdleTask identity switch；Linux schedule_idle() 的 SM_IDLE 模式、跳过 sched_submit_work()、do { __schedule(SM_IDLE); } while (need_resched()) 循环，以及未来某刻返回 idle-loop continuation 的完整控制流后续展开。";
             }
         }
 
@@ -702,18 +700,17 @@ type SchedulerObject: TaskObject {
             drives {
                 prev_ref.Action::SaveCoreContext;
                 next_ref.Action::RestoreCoreContext;
-                CurrentTaskRef.Action::SetCurrent(task: BootIdleTask);
+                CurrentTaskRef.Action::SetCurrent(task: next_ref);
             }
             ensures {
                 scheduler_switch_to_committed(self, prev_ref, next_ref);
                 scheduler_switch_to_core_context_saved(self, prev_ref);
                 scheduler_switch_to_core_context_restored(self, next_ref);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
                 task_ref_loaded_into_current_cpu(next_ref, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, prev_ref, next_ref);
             }
             deferred {
-                "当前 SwitchTo 只建立 RISC-V __switch_to 核心寄存器保存/恢复框架；真实栈切换、last 返回值、FPU/vector、MM 切换、finish_task_switch 钩子和 prev != next 路径后续展开。";
+                "当前 SwitchTo 只建立 RISC-V __switch_to 核心寄存器保存/恢复框架和 CurrentTaskRef commit；真实栈切换、next task 上下文恢复、last 返回值、FPU/vector、MM 切换、finish_task_switch 钩子和长期任务 continuation 后续展开。";
             }
         }
 
@@ -906,12 +903,12 @@ type RunQueue: TaskObject {
             }
             ensures {
                 runqueue_pick_next_task_returns(CurrentRunQueueRef, prev_ref, CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
+                task_ref_targets(CurrentTaskRef, KernelInitTask);
                 task_ref_ready(CurrentTaskRef);
-                scheduler_pick_next_task_identity(Scheduler, self, BootIdleTask);
+                scheduler_pick_next_task_selects_runnable(Scheduler, self, CurrentTaskRef);
             }
             deferred {
-                "当前 UP/rest_init schedule 路径只有 boot idle/current task，PickNextTask 固定返回 CurrentTaskRef；完整 scheduler class pick_next_task 策略后续展开。";
+                "当前 UP/rest_init schedule 路径在 BootRunQueue 中优先选择已入队的 KernelInitTask；未来可扩展为 KernelInitTask/KthreaddTask 以及完整 scheduler class pick_next_task 策略。";
             }
         }
     }

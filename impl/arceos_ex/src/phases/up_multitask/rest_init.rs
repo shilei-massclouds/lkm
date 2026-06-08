@@ -145,11 +145,18 @@ fn prepare_boot_idle_entry(ctx: &mut Context) -> EventResult {
 }
 
 fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
-    ctx.boot_idle_runtime.run_idle_loop(
+    // The object model executes both task branches linearly. Re-enter the
+    // boot-idle continuation before modeling cpu_startup_entry()/do_idle();
+    // schedule_idle() then commits the selected runnable task as this CPU's
+    // CurrentTaskRef. The real future return to the idle-loop continuation is
+    // left to the later continuation/task-stack model.
+    ctx.boot_cpu_current_task.set_current_boot_idle()?;
+    let result = ctx.boot_idle_runtime.run_idle_loop(
         &mut ctx.scheduler,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
-    )
+    );
+    result
 }
 
 fn schedule_once_from_preempt_disabled_context(ctx: &mut Context) -> EventResult {
@@ -269,7 +276,6 @@ fn rest_init_phase_ready(ctx: &Context) -> bool {
             .representative_need_resched_cycle_committed()
         && ctx.scheduler.idle_schedule_passes() != 0
         && ctx.scheduler.idle_schedule_returned_passes() != 0
-        && ctx.scheduler.idle_schedule_identity_passes() != 0
         && ctx.boot_idle_runtime.boot_init_handoff_complete()
         && ctx.boot_idle_runtime.boot_cpu_hotplug_online()
         && ctx.boot_idle_runtime.secondary_cpus_not_started()
@@ -285,7 +291,7 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.rcu_core.gp_seq_baseline_synced()
         && ctx.rcu_core.gp_threads_deferred()
         && ctx.boot_cpu_current_task.state() == State::Ready
-        && ctx.boot_cpu_current_task.current_is_boot_idle()
+        && ctx.boot_cpu_current_task.current_is_kernel_init()
         && ctx.boot_cpu_current_task.switch_committed_count() != 0
         && ctx.task_creation_core.entry_contract_ready()
         && ctx.task_creation_core.kernel_init_created()

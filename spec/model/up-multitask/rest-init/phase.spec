@@ -936,8 +936,8 @@ object KthreaddReadyGate: Completion {
  * cpu_startup_entry() -> do_idle() -> schedule_idle() 的循环主线：boot CPU
  * 先执行 current->flags |= PF_IDLE、arch_cpu_idle_prepare() 和
  * cpuhp_online_idle(CPUHP_ONLINE)，然后进入 while (1) do_idle()；当本 CPU
- * 在 do_idle() 中观察到 need_resched 时，驱动 idle 专用调度，调度返回后
- * 继续回到原 idle loop 点。
+ * 在 do_idle() 中观察到 need_resched 时，驱动 idle 专用调度；真实系统
+ * 未来再次回到 idle loop continuation 的控制流后续展开。
  */
 object BootIdleRuntime: BootIdleRuntimeObject {
     initial_state: State::Base;
@@ -1156,7 +1156,7 @@ object RestInitPhase: PhaseObject {
                 }
 
                 deferred {
-                    "当前只建模 boot idle loop 的抽象主线和一轮代表性 no-need-resched -> need-resched -> schedule_idle -> return-to-idle-cycle；完整 tick/RCU/cpuidle/irq idle 细节后续展开。";
+                    "当前只建模 boot idle loop 的抽象主线和一轮代表性 no-need-resched -> need-resched -> schedule_idle；真实系统未来再次回到 idle loop continuation 的控制流，以及完整 tick/RCU/cpuidle/irq idle 细节后续展开。";
                     "secondary CPU 启动仍保持 deferred，后续 SMP Runtime Phase 再推进。";
                 }
             }
