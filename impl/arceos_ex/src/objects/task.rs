@@ -1,3 +1,10 @@
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum TaskEntry {
+    None,
+    KernelInit,
+    Kthreadd,
+}
+
 pub struct TaskCpuState {
     cpu_id: usize,
 }

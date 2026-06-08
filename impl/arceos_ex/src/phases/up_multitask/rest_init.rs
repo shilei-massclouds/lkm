@@ -46,8 +46,13 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         init_task: &ctx.init_task,
     })?;
     ctx.kernel_init_task.setup(
-        &ctx.task_creation_core,
+        &mut ctx.task_creation_core,
         &ctx.root_pid_namespace,
+        &ctx.credential_core,
+        &ctx.signal_core,
+        &ctx.task_file_context,
+        &ctx.security_core,
+        &ctx.init_task,
         &ctx.scheduler,
     )?;
     ctx.kernel_init_task_pi_lock.setup()?;
@@ -80,8 +85,13 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         init_task: &ctx.init_task,
     })?;
     ctx.kthreadd_task.setup(
-        &ctx.task_creation_core,
+        &mut ctx.task_creation_core,
         &ctx.root_pid_namespace,
+        &ctx.credential_core,
+        &ctx.signal_core,
+        &ctx.task_file_context,
+        &ctx.security_core,
+        &ctx.init_task,
         &ctx.scheduler,
     )?;
     ctx.kthreadd_task_pi_lock
@@ -101,6 +111,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
             State::Prepared,
         );
     }
+    ctx.kthreadd_task.run_schedule_loop(&ctx.scheduler)?;
     ctx.system_state.preset()?;
     ctx.system_state
         .setup(&ctx.kernel_init_task, &ctx.kthreadd_task)?;
@@ -272,6 +283,9 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.boot_cpu_current_task.state() == State::Ready
         && ctx.boot_cpu_current_task.current_is_boot_idle()
         && ctx.boot_cpu_current_task.switch_committed_count() != 0
+        && ctx.task_creation_core.entry_contract_ready()
+        && ctx.task_creation_core.kernel_init_created()
+        && ctx.task_creation_core.kthreadd_created()
         && ctx.kernel_init_task.state() == State::Online
         && ctx.kernel_init_task.pid() == 1
         && ctx.kernel_init_task.entry() == TaskEntry::KernelInit
@@ -322,6 +336,9 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
             .irqrestore_restored_before_preemption_enabled()
         && ctx.kthreadd_task.global_ref_bound()
         && ctx.kthreadd_task.provider_ready()
+        && ctx.kthreadd_task.schedule_loop_ready()
+        && ctx.kthreadd_task.schedule_loop_requests_schedule()
+        && ctx.kthreadd_task.schedule_loop_deferred()
         && ctx.kthreadd_task.enqueued()
         && ctx.system_state.state() == State::Ready
         && ctx.system_state.value() == SystemStateValue::Scheduling

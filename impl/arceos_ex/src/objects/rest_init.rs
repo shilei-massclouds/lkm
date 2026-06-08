@@ -5,8 +5,8 @@ use super::{
     finalize::{InitMemoryCleanupDeferred, KernelMappingProtectionDeferred, PtiFinalizeTrimmed},
     init_task::InitTask,
     process_prepare::{
-        CredentialCore, RootPidNamespace, SecurityCore, SignalCore, TaskCreationCore,
-        TaskFileContext,
+        CredentialCore, RootPidNamespace, SecurityCore, SignalCore, TaskCopyProcessInputs,
+        TaskCreationCore, TaskFileContext,
     },
     rcu::RcuCore,
     scheduler::Scheduler,
@@ -15,6 +15,8 @@ use super::{
     workqueue::Workqueue,
 };
 use crate::trace::Checkpoint;
+
+pub use super::task::TaskEntry;
 
 pub const KERNEL_INIT_PID: usize = 1;
 pub const KTHREADD_PID: usize = 2;
@@ -25,13 +27,6 @@ pub enum SystemStateValue {
     Scheduling,
     FreeingInitmem,
     Running,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum TaskEntry {
-    None,
-    KernelInit,
-    Kthreadd,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -159,8 +154,13 @@ impl KernelInitTask {
 
     pub fn setup(
         &mut self,
-        task_creation_core: &TaskCreationCore,
+        task_creation_core: &mut TaskCreationCore,
         root_pid_namespace: &RootPidNamespace,
+        credential_core: &CredentialCore,
+        signal_core: &SignalCore,
+        task_file_context: &TaskFileContext,
+        security_core: &SecurityCore,
+        init_task: &InitTask,
         scheduler: &Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
@@ -172,9 +172,33 @@ impl KernelInitTask {
             return self.failed_setup();
         }
 
+        let copy_result = task_creation_core.copy_process(
+            TaskCopyProcessInputs {
+                src_task: init_task,
+                root_pid_namespace,
+                credential_core,
+                signal_core,
+                task_file_context,
+                security_core,
+                scheduler,
+                entry: TaskEntry::KernelInit,
+            },
+            self.lifecycle.state(),
+            self.entry,
+        )?;
+        if copy_result.entry() != TaskEntry::KernelInit
+            || !copy_result.task_struct_allocated()
+            || !copy_result.thread_context_ready()
+            || !copy_result.sched_entity_ready()
+            || !copy_result.task_state_new()
+            || !copy_result.task_not_enqueued()
+        {
+            return self.failed_setup();
+        }
+
         self.pid = KERNEL_INIT_PID;
-        self.thread_context_ready = true;
-        self.sched_entity_ready = true;
+        self.thread_context_ready = copy_result.thread_context_ready();
+        self.sched_entity_ready = copy_result.sched_entity_ready();
         self.waiting_for_kthreadd_done = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -331,6 +355,9 @@ pub struct KthreaddTask {
     sched_entity_ready: bool,
     global_ref_bound: bool,
     provider_ready: bool,
+    schedule_loop_ready: bool,
+    schedule_loop_requests_schedule: bool,
+    schedule_loop_deferred: bool,
     enqueued: bool,
     cpu: TaskCpuState,
     running: bool,
@@ -352,6 +379,9 @@ impl KthreaddTask {
             sched_entity_ready: false,
             global_ref_bound: false,
             provider_ready: false,
+            schedule_loop_ready: false,
+            schedule_loop_requests_schedule: false,
+            schedule_loop_deferred: true,
             enqueued: false,
             cpu: TaskCpuState::new(),
             running: false,
@@ -410,6 +440,18 @@ impl KthreaddTask {
         self.provider_ready
     }
 
+    pub const fn schedule_loop_ready(&self) -> bool {
+        self.schedule_loop_ready
+    }
+
+    pub const fn schedule_loop_requests_schedule(&self) -> bool {
+        self.schedule_loop_requests_schedule
+    }
+
+    pub const fn schedule_loop_deferred(&self) -> bool {
+        self.schedule_loop_deferred
+    }
+
     pub const fn enqueued(&self) -> bool {
         self.enqueued
     }
@@ -444,8 +486,13 @@ impl KthreaddTask {
 
     pub fn setup(
         &mut self,
-        task_creation_core: &TaskCreationCore,
+        task_creation_core: &mut TaskCreationCore,
         root_pid_namespace: &RootPidNamespace,
+        credential_core: &CredentialCore,
+        signal_core: &SignalCore,
+        task_file_context: &TaskFileContext,
+        security_core: &SecurityCore,
+        init_task: &InitTask,
         scheduler: &Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
@@ -457,9 +504,33 @@ impl KthreaddTask {
             return self.failed_setup();
         }
 
+        let copy_result = task_creation_core.copy_process(
+            TaskCopyProcessInputs {
+                src_task: init_task,
+                root_pid_namespace,
+                credential_core,
+                signal_core,
+                task_file_context,
+                security_core,
+                scheduler,
+                entry: TaskEntry::Kthreadd,
+            },
+            self.lifecycle.state(),
+            self.entry,
+        )?;
+        if copy_result.entry() != TaskEntry::Kthreadd
+            || !copy_result.task_struct_allocated()
+            || !copy_result.thread_context_ready()
+            || !copy_result.sched_entity_ready()
+            || !copy_result.task_state_new()
+            || !copy_result.task_not_enqueued()
+        {
+            return self.failed_setup();
+        }
+
         self.pid = KTHREADD_PID;
-        self.thread_context_ready = true;
-        self.sched_entity_ready = true;
+        self.thread_context_ready = copy_result.thread_context_ready();
+        self.sched_entity_ready = copy_result.sched_entity_ready();
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -554,6 +625,28 @@ impl KthreaddTask {
         self.provider_ready = true;
         crate::trace::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
         true
+    }
+
+    pub fn run_schedule_loop(&mut self, scheduler: &Scheduler) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || self.entry != TaskEntry::Kthreadd
+            || !self.running
+            || !self.provider_ready
+            || scheduler.state() != State::Online
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.schedule_loop_ready = true;
+        self.schedule_loop_requests_schedule = true;
+        self.schedule_loop_deferred = true;
+        crate::trace::checkpoint(Checkpoint::KthreaddTaskScheduleLoopReady);
+        Ok(())
     }
 
     fn failed_preset(&self) -> EventResult {

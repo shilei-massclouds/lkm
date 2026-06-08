@@ -5,8 +5,10 @@ use super::{
     init_task::InitTask,
     mm_core::{KmallocCaches, MmStructCache, SlubAllocator},
     per_cpu_storage::PerCpuStorage,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    scheduler::Scheduler,
+    state::{failed_condition, EventError, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::StaticBranch,
+    task::TaskEntry,
 };
 use crate::trace::Checkpoint;
 
@@ -369,6 +371,7 @@ pub struct TaskCreationCore {
     init_user_namespace_ucounts_ready: bool,
     fork_vm_stack_cpuhp_registered: bool,
     rest_init_inputs_ready: bool,
+    entry_contract_ready: bool,
     kernel_init_created: bool,
     kthreadd_created: bool,
     system_scheduling: bool,
@@ -390,6 +393,7 @@ impl TaskCreationCore {
             init_user_namespace_ucounts_ready: false,
             fork_vm_stack_cpuhp_registered: false,
             rest_init_inputs_ready: false,
+            entry_contract_ready: false,
             kernel_init_created: false,
             kthreadd_created: false,
             system_scheduling: false,
@@ -446,6 +450,10 @@ impl TaskCreationCore {
 
     pub const fn rest_init_inputs_ready(&self) -> bool {
         self.rest_init_inputs_ready
+    }
+
+    pub const fn entry_contract_ready(&self) -> bool {
+        self.entry_contract_ready
     }
 
     pub const fn kernel_init_created(&self) -> bool {
@@ -514,6 +522,7 @@ impl TaskCreationCore {
         self.init_user_namespace_ucounts_ready = true;
         self.fork_vm_stack_cpuhp_registered = self.vmap_stack_selected;
         self.rest_init_inputs_ready = true;
+        self.entry_contract_ready = true;
         self.kernel_init_created = false;
         self.kthreadd_created = false;
         self.system_scheduling = false;
@@ -521,6 +530,7 @@ impl TaskCreationCore {
         if self.vector_context.state() != State::Prepared
             || self.uprobe_core.state() != State::Ready
             || self.max_threads == 0
+            || !self.entry_contract_ready
             || !self.rest_init_inputs_ready
         {
             return self.failed_setup();
@@ -532,6 +542,52 @@ impl TaskCreationCore {
             State::Ready,
             Checkpoint::TaskCreationCoreReady,
         )
+    }
+
+    pub fn copy_process(
+        &mut self,
+        inputs: TaskCopyProcessInputs<'_>,
+        dst_state: State,
+        dst_entry: TaskEntry,
+    ) -> Result<TaskCopyProcessResult, EventError> {
+        if self.lifecycle.state() != State::Ready
+            || !self.entry_contract_ready
+            || !self.rest_init_inputs_ready
+            || dst_state != State::Prepared
+            || dst_entry != inputs.entry
+            || inputs.entry == TaskEntry::None
+            || inputs.src_task.state() != State::Online
+            || inputs.root_pid_namespace.state() != State::Ready
+            || inputs.credential_core.state() != State::Prepared
+            || inputs.signal_core.state() != State::Prepared
+            || inputs.task_file_context.state() != State::Prepared
+            || inputs.security_core.state() != State::Ready
+            || inputs.scheduler.state() != State::Online
+            || inputs.scheduler.boot_runqueue().state() != State::Ready
+        {
+            return Err(EventError::failed(
+                super::state::EventErrorCode::ConditionFailed,
+                LifecycleEvent::Setup,
+                dst_state,
+                State::Prepared,
+                State::Ready,
+            ));
+        }
+
+        match inputs.entry {
+            TaskEntry::KernelInit => self.kernel_init_created = true,
+            TaskEntry::Kthreadd => self.kthreadd_created = true,
+            TaskEntry::None => {}
+        }
+
+        Ok(TaskCopyProcessResult {
+            entry: inputs.entry,
+            task_struct_allocated: self.task_struct_cache_ready,
+            thread_context_ready: self.thread_stack_cache_ready,
+            sched_entity_ready: true,
+            task_state_new: true,
+            task_not_enqueued: true,
+        })
     }
 
     fn failed_preset(&self) -> EventResult {
@@ -550,6 +606,52 @@ impl TaskCreationCore {
             State::Prepared,
             State::Ready,
         )
+    }
+}
+
+pub struct TaskCopyProcessInputs<'a> {
+    pub src_task: &'a InitTask,
+    pub root_pid_namespace: &'a RootPidNamespace,
+    pub credential_core: &'a CredentialCore,
+    pub signal_core: &'a SignalCore,
+    pub task_file_context: &'a TaskFileContext,
+    pub security_core: &'a SecurityCore,
+    pub scheduler: &'a Scheduler,
+    pub entry: TaskEntry,
+}
+
+pub struct TaskCopyProcessResult {
+    entry: TaskEntry,
+    task_struct_allocated: bool,
+    thread_context_ready: bool,
+    sched_entity_ready: bool,
+    task_state_new: bool,
+    task_not_enqueued: bool,
+}
+
+impl TaskCopyProcessResult {
+    pub const fn entry(&self) -> TaskEntry {
+        self.entry
+    }
+
+    pub const fn task_struct_allocated(&self) -> bool {
+        self.task_struct_allocated
+    }
+
+    pub const fn thread_context_ready(&self) -> bool {
+        self.thread_context_ready
+    }
+
+    pub const fn sched_entity_ready(&self) -> bool {
+        self.sched_entity_ready
+    }
+
+    pub const fn task_state_new(&self) -> bool {
+        self.task_state_new
+    }
+
+    pub const fn task_not_enqueued(&self) -> bool {
+        self.task_not_enqueued
     }
 }
 

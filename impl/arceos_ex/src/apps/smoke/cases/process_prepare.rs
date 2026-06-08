@@ -38,8 +38,7 @@ pub fn run() -> SmokeResult {
         || !ctx.task_creation_core.task_struct_cache_ready()
         || ctx.task_creation_core.max_threads() == 0
         || !ctx.task_creation_core.rest_init_inputs_ready()
-        || ctx.task_creation_core.kernel_init_created()
-        || ctx.task_creation_core.kthreadd_created()
+        || !ctx.task_creation_core.entry_contract_ready()
         || ctx.task_creation_core.system_scheduling()
     {
         printk::write_str("task creation facts invalid\n");

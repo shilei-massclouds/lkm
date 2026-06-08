@@ -32,6 +32,8 @@ pub fn run() -> SmokeResult {
 
     if ctx.kernel_init_task.state() != State::Online
         || ctx.kernel_init_task.pid() != 1
+        || !ctx.task_creation_core.entry_contract_ready()
+        || !ctx.task_creation_core.kernel_init_created()
         || ctx.kernel_init_task.entry() != TaskEntry::KernelInit
         || ctx.kernel_init_task.kind() != TaskKind::UserModeThread
         || !ctx.kernel_init_task.running()
@@ -63,6 +65,7 @@ pub fn run() -> SmokeResult {
 
     if ctx.kthreadd_task.state() != State::Online
         || ctx.kthreadd_task.pid() != 2
+        || !ctx.task_creation_core.kthreadd_created()
         || ctx.kthreadd_task.entry() != TaskEntry::Kthreadd
         || ctx.kthreadd_task.kind() != TaskKind::KernelThread
         || !ctx.kthreadd_task.clone_fs()
@@ -80,6 +83,9 @@ pub fn run() -> SmokeResult {
             .contains_task(ctx.kthreadd_task.pid())
         || !ctx.kthreadd_task.global_ref_bound()
         || !ctx.kthreadd_task.provider_ready()
+        || !ctx.kthreadd_task.schedule_loop_ready()
+        || !ctx.kthreadd_task.schedule_loop_requests_schedule()
+        || !ctx.kthreadd_task.schedule_loop_deferred()
         || ctx.kthreadd_task_pi_lock.state() != State::Ready
         || ctx.kthreadd_task_pi_lock.locked()
         || ctx.kthreadd_task_pi_lock.irqsave_entered_count() == 0
