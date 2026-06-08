@@ -709,6 +709,127 @@ type SchedulerObject: TaskObject {
 }
 
 /*
+ * BootIdleRuntimeObject is the boot CPU idle runtime process type. It models
+ * the Linux cpu_startup_entry(CPUHP_ONLINE) tail without treating the wrapper
+ * function itself as a standalone object: PrepareIdleEntry covers
+ * current->flags |= PF_IDLE, arch_cpu_idle_prepare(), and
+ * cpuhp_online_idle(CPUHP_ONLINE); RunIdleLoop covers while (1) do_idle();
+ * DoIdleCycle covers one representative do_idle() pass and its conditional
+ * schedule_idle() boundary.
+ */
+type BootIdleRuntimeObject: TaskObject {
+    processes {
+        Action::PrepareIdleEntry {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                scheduler_first_schedule_committed(Scheduler);
+                task_ref_ready(CurrentTaskRef);
+                task_ref_targets(CurrentTaskRef, BootIdleTask);
+            }
+            ensures {
+                boot_idle_entry_prepared(self, BootIdleTask);
+                boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
+                boot_idle_task_pf_idle(BootIdleTask);
+                boot_idle_arch_cpu_idle_prepare_done(self, BootCPU);
+                boot_idle_cpuhp_online_state_confirmed(self, BootCPU);
+                boot_cpu_hotplug_state_online(BootCPU);
+                boot_idle_need_resched_clear_before_wait(BootIdleTask);
+            }
+        }
+
+        Action::RunIdleLoop {
+            state_effect: StateEffect::None;
+            depends_on {
+                boot_idle_entry_prepared(self, BootIdleTask);
+            }
+            drives {
+                self.Action::DoIdleCycle;
+            }
+            ensures {
+                boot_idle_runtime_loop_entered(self, BootIdleTask);
+                boot_idle_loop_continues(self);
+            }
+        }
+
+        Action::DoIdleCycle {
+            state_effect: StateEffect::None;
+            depends_on {
+                boot_idle_entry_prepared(self, BootIdleTask);
+            }
+            drives {
+                self.Action::WaitWhileNoNeedResched;
+                self.Action::ObserveNeedResched;
+                self.Action::ScheduleIfNeedResched;
+            }
+            ensures {
+                boot_idle_runtime_cycle_started(self, BootIdleTask);
+                boot_idle_loop_cycle_committed(self);
+                boot_idle_loop_continues(self);
+            }
+            deferred {
+                "DoIdleCycle 当前只展开一轮代表性 do_idle() 主线；真实 while (1) do_idle() 会重复执行，后续可用循环/运行期 trace 语义表达多轮。";
+            }
+        }
+
+        Action::WaitWhileNoNeedResched {
+            state_effect: StateEffect::None;
+            depends_on {
+                boot_idle_entry_prepared(self, BootIdleTask);
+            }
+            ensures {
+                boot_idle_runtime_cycle_started(self, BootIdleTask);
+                boot_idle_need_resched_clear_before_wait(BootIdleTask);
+                boot_idle_runtime_observed_no_need_resched(self, BootIdleTask);
+                boot_idle_polling_set(BootIdleTask);
+                boot_idle_nohz_entered(self);
+                boot_idle_runtime_waiting(self, BootIdleTask);
+                boot_idle_wait_path_deferred(self);
+            }
+            deferred {
+                "WaitWhileNoNeedResched 抽象 Linux do_idle() 中 while (!need_resched()) 的 idle wait 段；tick_nohz_idle_enter、cpu_idle_poll、cpuidle_idle_call、arch_cpu_idle_enter/exit、WFI 和 RCU nocb 细节后续展开。";
+            }
+        }
+
+        Action::ObserveNeedResched {
+            state_effect: StateEffect::None;
+            depends_on {
+                boot_idle_runtime_waiting(self, BootIdleTask);
+            }
+            ensures {
+                boot_idle_need_resched_set_for_schedule(BootIdleTask);
+                boot_idle_runtime_observed_need_resched(self, BootIdleTask);
+                boot_idle_polling_cleared(BootIdleTask);
+                boot_idle_nohz_exited(self);
+            }
+            deferred {
+                "need_resched 由本 CPU 可观察环境设置，通常来自唤醒、定时器或跨 CPU 调度请求；当前模型只把该环境结果作为 idle loop 的条件分界事实。";
+            }
+        }
+
+        Action::ScheduleIfNeedResched {
+            state_effect: StateEffect::None;
+            depends_on {
+                boot_idle_need_resched_set_for_schedule(BootIdleTask);
+                task_ref_ready(CurrentTaskRef);
+                task_ref_targets(CurrentTaskRef, BootIdleTask);
+            }
+            drives {
+                Scheduler.Action::ScheduleIdle;
+            }
+            ensures {
+                boot_idle_schedule_requested(self, Scheduler);
+                boot_idle_schedule_returned(self, Scheduler);
+                scheduler_idle_schedule_returned_to_idle(Scheduler, CurrentTaskRef);
+                boot_idle_need_resched_drained_after_schedule(BootIdleTask);
+                boot_idle_loop_continues(self);
+                task_ref_targets(CurrentTaskRef, BootIdleTask);
+            }
+        }
+    }
+}
+
+/*
  * RunQueue is a top-level scheduler runqueue abstraction. The current model
  * stores task_refs as a temporary aggregate view; future CFS/RT/DL scheduler
  * class queues should own concrete membership, with RunQueue.task_refs derived

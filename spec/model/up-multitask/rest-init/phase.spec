@@ -894,7 +894,7 @@ object KthreaddReadyGate: Completion {
  * 在 do_idle() 中观察到 need_resched 时，驱动 idle 专用调度，调度返回后
  * 继续回到原 idle loop 点。
  */
-object BootIdleRuntime: TaskObject {
+object BootIdleRuntime: BootIdleRuntimeObject {
     initial_state: State::Base;
     parent: BootIdleTask;
 
@@ -942,130 +942,6 @@ object BootIdleRuntime: TaskObject {
         }
     }
 
-    actions {
-        /*
-         * PrepareIdleEntry 对应 kernel/sched/idle.c:420-422:
-         * current->flags |= PF_IDLE; arch_cpu_idle_prepare();
-         * cpuhp_online_idle(CPUHP_ONLINE)。cpu_startup_entry() 函数包装本身
-         * 不建模，CPUHP_ONLINE 作为 hotplug online idle 参数事实保留。
-         */
-        Action::PrepareIdleEntry {
-            state_effect: StateEffect::None;
-            depends_on {
-                BootIdleRuntime.state == State::Ready;
-                scheduler_first_schedule_committed(Scheduler);
-                task_ref_ready(CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
-            }
-            ensures {
-                boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
-                boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
-                boot_idle_task_pf_idle(BootIdleTask);
-                boot_idle_arch_cpu_idle_prepare_done(BootIdleRuntime, BootCPU);
-                boot_idle_cpuhp_online_state_confirmed(BootIdleRuntime, BootCPU);
-                boot_cpu_hotplug_state_online(BootCPU);
-                boot_idle_need_resched_clear_before_wait(BootIdleTask);
-            }
-        }
-
-        /*
-         * RunIdleLoop 对应 kernel/sched/idle.c:423-424:
-         * while (1) do_idle()。它表示长期循环结构，当前只驱动一轮
-         * DoIdleCycle 作为代表性循环体。
-         */
-        Action::RunIdleLoop {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
-            }
-            drives {
-                BootIdleRuntime.Action::DoIdleCycle;
-            }
-            ensures {
-                boot_idle_runtime_loop_entered(BootIdleRuntime, BootIdleTask);
-                boot_idle_loop_continues(BootIdleRuntime);
-            }
-        }
-
-        /*
-         * DoIdleCycle 对应 kernel/sched/idle.c:252-354 的一轮 do_idle()
-         * 主线：先覆盖 while (!need_resched()) 内的一段等待，再覆盖观察到
-         * need_resched 后进入 schedule_idle() 的路径。真实系统会重复执行该
-         * 循环体；模型用 boot_idle_loop_continues 表示 schedule 返回到同一
-         * idle loop 点。
-         */
-        Action::DoIdleCycle {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
-            }
-            drives {
-                BootIdleRuntime.Action::WaitWhileNoNeedResched;
-                BootIdleRuntime.Action::ObserveNeedResched;
-                BootIdleRuntime.Action::ScheduleIfNeedResched;
-            }
-            ensures {
-                boot_idle_runtime_cycle_started(BootIdleRuntime, BootIdleTask);
-                boot_idle_loop_cycle_committed(BootIdleRuntime);
-                boot_idle_loop_continues(BootIdleRuntime);
-            }
-        }
-
-        Action::WaitWhileNoNeedResched {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
-            }
-            ensures {
-                boot_idle_runtime_cycle_started(BootIdleRuntime, BootIdleTask);
-                boot_idle_need_resched_clear_before_wait(BootIdleTask);
-                boot_idle_runtime_observed_no_need_resched(BootIdleRuntime, BootIdleTask);
-                boot_idle_polling_set(BootIdleTask);
-                boot_idle_nohz_entered(BootIdleRuntime);
-                boot_idle_runtime_waiting(BootIdleRuntime, BootIdleTask);
-                boot_idle_wait_path_deferred(BootIdleRuntime);
-            }
-            deferred {
-                "WaitWhileNoNeedResched 抽象 Linux do_idle() 中 while (!need_resched()) 的 idle wait 段；tick_nohz_idle_enter、cpu_idle_poll、cpuidle_idle_call、arch_cpu_idle_enter/exit、WFI 和 RCU nocb 细节后续展开。";
-            }
-        }
-
-        Action::ObserveNeedResched {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_runtime_waiting(BootIdleRuntime, BootIdleTask);
-            }
-            ensures {
-                boot_idle_need_resched_set_for_schedule(BootIdleTask);
-                boot_idle_runtime_observed_need_resched(BootIdleRuntime, BootIdleTask);
-                boot_idle_polling_cleared(BootIdleTask);
-                boot_idle_nohz_exited(BootIdleRuntime);
-            }
-            deferred {
-                "need_resched 由本 CPU 可观察环境设置，通常来自唤醒、定时器或跨 CPU 调度请求；当前模型只把该环境结果作为 idle loop 的条件分界事实。";
-            }
-        }
-
-        Action::ScheduleIfNeedResched {
-            state_effect: StateEffect::None;
-            depends_on {
-                boot_idle_need_resched_set_for_schedule(BootIdleTask);
-                task_ref_ready(CurrentTaskRef);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
-            }
-            drives {
-                Scheduler.Action::ScheduleIdle;
-            }
-            ensures {
-                boot_idle_schedule_requested(BootIdleRuntime, Scheduler);
-                boot_idle_schedule_returned(BootIdleRuntime, Scheduler);
-                scheduler_idle_schedule_returned_to_idle(Scheduler, CurrentTaskRef);
-                boot_idle_need_resched_drained_after_schedule(BootIdleTask);
-                boot_idle_loop_continues(BootIdleRuntime);
-                task_ref_targets(CurrentTaskRef, BootIdleTask);
-            }
-        }
-    }
 }
 
 /*
