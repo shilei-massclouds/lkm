@@ -1055,7 +1055,7 @@ def _trace_context_box_rect(
     box: tuple[float, float, float, float], *, nested: bool = False
 ) -> tuple[float, float, float, float]:
     x, y, width, height = box
-    pad_x = 16 if nested else 10
+    pad_x = 6 if nested else 2
     pad_y = 6
     return x + pad_x, y + pad_y, max(20, width - pad_x * 2), max(20, height - pad_y * 2)
 

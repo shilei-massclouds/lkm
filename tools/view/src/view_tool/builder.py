@@ -532,6 +532,28 @@ def _context_action_max_depth(node: dict[str, object]) -> int:
             continue
         if child.get("kind") == "context":
             max_depth = max(max_depth, _context_action_max_depth(child))
+        elif child.get("kind") == "action":
+            max_depth = max(
+                max_depth,
+                _context_action_tree_max_depth(child, _context_span_start_depth(node)),
+            )
+    return max_depth
+
+
+def _context_action_tree_max_depth(
+    action_node: dict[str, object], action_depth: int
+) -> int:
+    max_depth = action_depth
+    children = action_node.get("children")
+    if not isinstance(children, list):
+        return max_depth
+
+    for child in children:
+        if isinstance(child, dict) and child.get("kind") == "action":
+            max_depth = max(
+                max_depth,
+                _context_action_tree_max_depth(child, action_depth + 1),
+            )
     return max_depth
 
 
@@ -543,7 +565,7 @@ def _context_span_start_depth(node: dict[str, object]) -> int:
 def _context_span_column_count(node: dict[str, object]) -> int:
     start_depth = _context_span_start_depth(node)
     max_depth = _context_action_max_depth(node)
-    return 3 + max(0, max_depth - start_depth) * 2
+    return 2 + max(0, max_depth - start_depth) * 2
 
 
 def _context_span_row(
@@ -1049,7 +1071,7 @@ class _TraceLayoutBuilder:
         if any(item.get("kind") in {"action", "context"} for item in body_items):
             self._max_object_lane = max(
                 self._max_object_lane,
-                action_lane + max_context_action_depth + 1,
+                action_lane + max_context_action_depth,
             )
 
         context_index = 0
@@ -1144,8 +1166,9 @@ class _TraceLayoutBuilder:
                         id=action_id,
                         kind="context_action",
                         row=action_row,
-                        column=context_column + effective_action_depth,
+                        column=context_column + effective_action_depth * 2,
                         label=str(action_node.get("action", "")),
+                        column_span=2,
                     )
                 )
                 register_process_cell(
@@ -1188,7 +1211,7 @@ class _TraceLayoutBuilder:
                         if isinstance(nested, dict) and nested.get("kind") == "action":
                             place_context_action(
                                 nested,
-                                action_depth=effective_action_depth,
+                                action_depth=effective_action_depth + 1,
                                 parent_action_id=action_id,
                             )
                 return action_id
@@ -1232,7 +1255,7 @@ class _TraceLayoutBuilder:
                     id=context_id,
                     kind="context_span",
                     row=span_row,
-                    column=max(0, context_column + context_start_depth),
+                    column=max(0, context_column + context_start_depth * 2),
                     label=context_label,
                     row_span=max(1, len(self.rows) - span_row),
                     column_span=context_span_columns,

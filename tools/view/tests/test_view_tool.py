@@ -323,7 +323,7 @@ class ViewToolTests(unittest.TestCase):
         )
         self.assertGreater(context_cell.column, event_cell.column)
         self.assertEqual(columns[context_cell.column]["kind"], "object")
-        self.assertGreaterEqual(context_cell.column_span, 3)
+        self.assertEqual(context_cell.column_span, 2)
         self.assertGreater(context_cell.row_span, enqueue_context_cell.row_span)
         self.assertEqual(enqueue_context_cell.column, context_cell.column)
         self.assertEqual(enqueue_context_cell.column_span, context_cell.column_span)
@@ -356,8 +356,14 @@ class ViewToolTests(unittest.TestCase):
         ]
         self.assertTrue(
             all(
-                cell.column == context_cell.column and cell.column_span == 1
+                cell.column == context_cell.column and cell.column_span == 2
                 for cell in action_cells
+            )
+        )
+        self.assertTrue(
+            all(
+                cell.column == enqueue_context_cell.column and cell.column_span == 2
+                for cell in enqueue_action_cells
             )
         )
         self.assertEqual(
@@ -511,8 +517,8 @@ class ViewToolTests(unittest.TestCase):
         schedule_cell = next(
             cell for cell in ordinary_action_cells if cell.label == "Scheduler.Action::Schedule"
         )
-        self.assertEqual(context_cell.column, schedule_cell.column + 1)
-        self.assertEqual(context_cell.column_span, 3)
+        self.assertEqual(context_cell.column, schedule_cell.column + 2)
+        self.assertEqual(context_cell.column_span, 4)
         self.assertLessEqual(context_cell.row, schedule_cell.row)
         self.assertLess(
             schedule_cell.row,
@@ -549,10 +555,16 @@ class ViewToolTests(unittest.TestCase):
             for cell in action_cells
             if cell.label == "next.Action::RestoreCoreContext"
         )
-        self.assertEqual(pick_cell.column, schedule_cell.column + 1)
+        self.assertEqual(pick_cell.column, schedule_cell.column + 2)
         self.assertEqual(switch_cell.column, pick_cell.column)
-        self.assertEqual(save_cell.column, pick_cell.column)
-        self.assertEqual(restore_cell.column, pick_cell.column)
+        self.assertEqual(save_cell.column, pick_cell.column + 2)
+        self.assertEqual(restore_cell.column, pick_cell.column + 2)
+        self.assertTrue(
+            all(
+                cell.column_span == 2
+                for cell in (pick_cell, switch_cell, save_cell, restore_cell)
+            )
+        )
         self.assertEqual(pick_cell.row, schedule_cell.row)
         self.assertGreater(switch_cell.row, pick_cell.row)
         self.assertGreater(save_cell.row, switch_cell.row)

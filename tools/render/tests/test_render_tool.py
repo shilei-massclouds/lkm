@@ -23,6 +23,8 @@ from render_tool.render import (
     _rects_overlap,
     _trace_action_rect,
     _trace_annotation_occupied_boxes,
+    _trace_context_action_rect,
+    _trace_context_box_rect,
     _trace_row_metrics,
     render_svg,
 )
@@ -254,10 +256,18 @@ class RenderToolTests(unittest.TestCase):
         )
 
         text = render_svg(view)
+        context_rect = _trace_context_box_rect((206.0, 122.0, 259.0, 196.0))
+        action_rect = _trace_context_action_rect((206.0, 262.0, 259.0, 56.0))
 
         self.assertIn("context-box", text)
         self.assertIn("context-action", text)
-        self.assertIn('x="216.0" y="128.0" width="239.0"', text)
+        self.assertIn('x="208.0" y="128.0" width="255.0"', text)
+        self.assertIn('x="214.0" y="273.0" width="243.0"', text)
+        self.assertEqual(action_rect[2], 243.0)
+        self.assertEqual(
+            action_rect[0] + action_rect[2] / 2,
+            context_rect[0] + context_rect[2] / 2,
+        )
         self.assertIn("within-arrow", text)
         self.assertIn("context-order", text)
         self.assertIn("WakeUpNewTaskContext", text)
