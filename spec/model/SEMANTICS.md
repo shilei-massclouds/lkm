@@ -427,7 +427,9 @@ state State::Ready {
 
 正式规格以 `CPU视角` 为基础，不支持脱离具体执行 CPU 的“上帝式”全局全知视角。每个 `CPU视角` 描述的是：本 CPU 自身拥有或可直接访问的本地状态、本 CPU 可以驱动的事件/action，以及本 CPU 能观察到的环境事实。其它 CPU 的内部执行进展，对当前 CPU 来说只能通过同步对象、ack、共享对象状态、拓扑事实、IPI 可见结果等环境事实进入当前视角，而不是由当前 CPU 直接展开或控制。
 
-`BP视角` 和 `AP视角` 是 `CPU视角` 的两个具体分类。BP 是唯一且必须存在的启动 CPU，承担主要内核初始化职责；AP 是后续进入的 secondary CPU，复用共享类型语义和 BP 已建立的共享环境，但必须拥有自己的 `CurrentCPU`、本地中断控制、current-task 引用、寄存器组和 AP entry/ack 路径。
+CPU 的 live 寄存器组也是 `CPU视角` 的私有对象，包括通用寄存器组 GPRs 和控制状态寄存器 CSRs。每个 CPU 都拥有自己的 GPR/CSR 实例集合；一个 CPU 不能在自己的规格步骤中直接读写另一个 CPU 的 live registers，只能通过 trap frame、saved task context、IPI/同步结果或共享内存中已经发布的保存副本观察间接结果。RISC-V64 中 `tp` 属于本 CPU 的 GPR 视图，`sstatus`、`stvec`、`sie`、`sip`、`satp` 等属于本 CPU 的 CSR 视图；现有规格中 `Riscv64.tp`、`Riscv64.satp` 这类具名写法是 BP 迁移期的当前 CPU register alias，后续规范化时应收敛为 `CurrentCPU.cpu.Registers` 或等价 CPU-local register group 下的成员。
+
+`BP视角` 和 `AP视角` 是 `CPU视角` 的两个具体分类。BP 是唯一且必须存在的启动 CPU，承担主要内核初始化职责；AP 是后续进入的 secondary CPU，复用共享类型语义和 BP 已建立的共享环境，但必须拥有自己的 `CurrentCPU`、本地中断控制、current-task 引用、GPR/CSR 寄存器组和 AP entry/ack 路径。
 
 多个 CPU 视角共同可见、共同依赖或共同维护的公共事实集合，命名为 `共享全局视角`。它包括共享内存对象、全局 phase 边界、`CpuGroup`/topology、全局调度设施、同步对象和跨 CPU 可见状态等。`共享全局视角` 不是新的执行主体，也不是可以同时支配所有 CPU 私有步骤的全局控制视角；它只是各个 `CPU视角` 中公共可见环境的规格化名称。CPU 私有对象或引用，例如 `CurrentTaskRef`、本地中断状态、当前寄存器组和当前任务切换结果，必须留在对应 CPU 视角内表达。
 
