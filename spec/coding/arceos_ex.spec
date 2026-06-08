@@ -57,6 +57,7 @@ predicate arceos_ex_must_rest_init_create_kernel_init_and_kthreadd_facts() -> bo
 predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
+predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
 predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
@@ -578,11 +579,25 @@ type ArceosExRestInitCodingMust {
          * branch point is the combination of Scheduler first-schedule and
          * KernelInitTask dispatch facts while BootInitTask continues the
          * cpu_startup_entry() tail. Scheduler.schedule() must derive the
-         * current task reference from the current CPU tp/current-task view,
+         * current task reference from the current CPU current-task view,
          * pick next from CurrentRunQ, then switch through TaskRef-based core
-         * context save/restore and publish the updated tp/current task fact.
+         * context save/restore and publish the updated CPU-local current task
+         * fact.
          */
         arceos_ex_must_rest_init_publish_scheduler_dispatch_facts();
+
+        /*
+         * CurrentTaskRef scope:
+         *
+         * CurrentTaskRef must be realized as a private object in the current
+         * CPU view. The BP path owns the BootCurrentCPU CurrentTaskRef and must
+         * not introduce a descriptive CurrentTask object or a global current
+         * task singleton. On task switch, next must become the target of this
+         * CPU-local CurrentTaskRef. RISC-V64 code should follow the Linux-style
+         * tp register implementation reference, but per-cpu storage remains an
+         * implementation term, not the model definition.
+         */
+        arceos_ex_must_current_task_ref_be_cpu_view_private();
 
         /*
          * KernelInitTask affinity action:

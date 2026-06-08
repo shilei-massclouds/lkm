@@ -146,8 +146,12 @@ predicate cpu_local_interrupts_saved_and_disabled<T>(control: T) -> bool;
 predicate cpu_local_interrupts_restored<T>(control: T) -> bool;
 predicate current_task_slot_ready<T, U>(slot: T, cpu: U) -> bool;
 predicate current_task_slot_current<T, U>(slot: T, task: U) -> bool;
+predicate current_task_ref_private_to_cpu<T, U>(task_ref: T, current_cpu: U) -> bool;
+predicate current_task_ref_targets_cpu_task<T, U, V>(task_ref: T, current_cpu: U, task: V) -> bool;
 predicate current_task_ref_from_tp<T, U, V>(task_ref: T, current_cpu: U, task: V) -> bool;
+predicate task_ref_loaded_into_current_cpu<T, U>(task_ref: T, current_cpu: U) -> bool;
 predicate task_ref_loaded_into_tp<T, U>(task_ref: T, current_cpu: U) -> bool;
+predicate current_task_ref_updated_by_switch<T, U, V>(current_cpu: T, prev_ref: U, next_ref: V) -> bool;
 predicate task_preemption_control_ready<T>(task: T) -> bool;
 predicate task_preemption_disabled<T>(task: T) -> bool;
 predicate task_preemption_enabled<T>(task: T) -> bool;
@@ -508,11 +512,13 @@ type Task: TaskObject {
 /*
  * SchedulerObject is the reusable scheduler service type. Schedule models the
  * minimal schedule()/__schedule() path: derive the prev task ref from the
- * current CPU tp/current task view, ask the current runqueue to pick next, then
- * switch from prev to next. SelectRunQueue is a pure wake-up selection action:
- * it consumes a TaskRef and returns a RunQueueRef. The current UP rest_init
- * path fixes that result to the boot CPU runqueue; full select_task_rq policy
- * is deferred.
+ * current CPU current-task view, ask the current runqueue to pick next, then
+ * switch from prev to next. CurrentTaskRef is private to the current CPU view;
+ * the model does not introduce a descriptive CurrentTask object or a global
+ * current-task singleton. SelectRunQueue is a pure wake-up selection action: it
+ * consumes a TaskRef and returns a RunQueueRef. The current UP rest_init path
+ * fixes that result to the boot CPU runqueue; full select_task_rq policy is
+ * deferred.
  */
 type SchedulerObject: TaskObject {
     processes {
@@ -529,6 +535,8 @@ type SchedulerObject: TaskObject {
                             boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                             task_ref_targets(CurrentTaskRef, BootIdleTask);
                             task_ref_ready(CurrentTaskRef);
+                            current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
+                            current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
                             current_task_ref_from_tp(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
                             runqueue_ref_targets(CurrentRunQ, BootRunQueue);
                             runqueue_ref_ready(CurrentRunQ);
@@ -549,7 +557,9 @@ type SchedulerObject: TaskObject {
                             scheduler_switch_to_identity_path(self, CurrentTaskRef);
                             scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
                             scheduler_switch_to_core_context_restored(self, CurrentTaskRef);
+                            task_ref_loaded_into_current_cpu(CurrentTaskRef, BootCurrentCPU);
                             task_ref_loaded_into_tp(CurrentTaskRef, BootCurrentCPU);
+                            current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, CurrentTaskRef);
                             scheduler_first_schedule_committed(self);
                         }
                     }
@@ -565,7 +575,9 @@ type SchedulerObject: TaskObject {
                 scheduler_switch_to_identity_path(self, CurrentTaskRef);
                 scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
                 scheduler_switch_to_core_context_restored(self, CurrentTaskRef);
+                task_ref_loaded_into_current_cpu(CurrentTaskRef, BootCurrentCPU);
                 task_ref_loaded_into_tp(CurrentTaskRef, BootCurrentCPU);
+                current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, CurrentTaskRef);
                 scheduler_first_schedule_committed(self);
             }
         }
@@ -585,7 +597,9 @@ type SchedulerObject: TaskObject {
                 scheduler_switch_to_committed(self, prev_ref, next_ref);
                 scheduler_switch_to_core_context_saved(self, prev_ref);
                 scheduler_switch_to_core_context_restored(self, next_ref);
+                task_ref_loaded_into_current_cpu(next_ref, BootCurrentCPU);
                 task_ref_loaded_into_tp(next_ref, BootCurrentCPU);
+                current_task_ref_updated_by_switch(BootCurrentCPU, prev_ref, next_ref);
             }
             deferred {
                 "当前 SwitchTo 只建立 RISC-V __switch_to 核心寄存器保存/恢复框架；真实栈切换、last 返回值、FPU/vector、MM 切换、finish_task_switch 钩子和 prev != next 路径后续展开。";

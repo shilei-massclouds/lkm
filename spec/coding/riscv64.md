@@ -55,6 +55,12 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 - 页表切换相关代码必须显式处理 `sfence.vma` 要求。模型规格可以不逐条展开该细节，但实现规格要求保留该边界。
 - 早期入口对中断 pending/enable 状态的防御性清理应对应 `InterruptStream.Preset` 或 `InterruptStream.Setup` 的实现边界。
 
+## 当前任务引用
+
+模型层的 `CurrentTaskRef` 是 CPU 视角下只属于本 CPU 的 current-task 引用，不是全局 current task，也不要求用 per-cpu 术语描述其本体。RISC-V64 实现 SHOULD 参考 Linux 的方式，用本 CPU `tp` 寄存器承载 current-task 视图；`switch_to` 完成后必须更新或保持 `tp` 指向 next/current task，并向对象层提交对应的 `task_ref_loaded_into_tp(next_ref, current_cpu)` 或等价事实。
+
+per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不得把“通过 per-cpu 访问”误写成 `CurrentTaskRef` 的模型定义。当前 BP 路径只有 `BootCurrentCPU` 的 `CurrentTaskRef`；未来 AP 路径进入后，应由 AP 自己的 CPU 视角建立私有 current-task 引用。
+
 ## 地址空间与页表
 
 - `TrampolineVm`、`EarlyVm`、`SwapperVm` 应在代码中保持可区分的实现边界。

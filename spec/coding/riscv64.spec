@@ -10,6 +10,7 @@ predicate riscv64_must_linker_script_ignore_fixed_kernel_phys_addr() -> bool;
 predicate riscv64_must_linker_script_use_config_kernel_link_addr() -> bool;
 predicate riscv64_must_kernel_phys_start_from_kernel_image() -> bool;
 predicate riscv64_must_address_translation_use_kernel_image_offset() -> bool;
+predicate riscv64_should_current_task_ref_follow_linux_tp() -> bool;
 
 type Riscv64LinkerScriptMust {
     invariant {
@@ -50,5 +51,20 @@ type Riscv64LinkerScriptMust {
          * must not use a fixed Config.kernel_phys_addr-style constant.
          */
         riscv64_must_address_translation_use_kernel_image_offset();
+    }
+}
+
+type Riscv64SchedulerCodingShould {
+    invariant {
+        /*
+         * Current task reference:
+         *
+         * RISC-V64 code should realize the model's CPU-local CurrentTaskRef by
+         * following the Linux-style use of the tp register as the current-task
+         * view. This is an implementation reference for this target; the model
+         * semantics remain CPU-view based and do not require per-cpu storage as
+         * the CurrentTaskRef abstraction.
+         */
+        riscv64_should_current_task_ref_follow_linux_tp();
     }
 }

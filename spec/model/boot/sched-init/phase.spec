@@ -244,6 +244,8 @@ object BootIdleTask: Task {
                     task_ref_ready(BootIdleTaskRef);
                     task_ref_targets(CurrentTaskRef, BootIdleTask);
                     task_ref_ready(CurrentTaskRef);
+                    current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
+                    current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
                     current_task_ref_from_tp(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
                     task_thread_context_owned(BootIdleTask, BootIdleTask.thread_context);
                     task_thread_context_core_register_set(BootIdleTask.thread_context);
@@ -263,6 +265,8 @@ object BootIdleTask: Task {
             task_ref_ready(BootIdleTaskRef);
             task_ref_targets(CurrentTaskRef, BootIdleTask);
             task_ref_ready(CurrentTaskRef);
+            current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
+            current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
             current_task_ref_from_tp(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
             task_thread_context_owned(BootIdleTask, BootIdleTask.thread_context);
             task_thread_context_core_register_set(BootIdleTask.thread_context);
