@@ -116,9 +116,10 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "schedule_passes={} switch_to_passes={} boot_cpu={} current_task={}\n",
+        "schedule_passes={} switch_to_passes={} idle_schedule_passes={} boot_cpu={} current_task={}\n",
         ctx.scheduler.schedule_passes(),
         ctx.scheduler.switch_to_passes(),
+        ctx.scheduler.idle_schedule_passes(),
         ctx.scheduler.boot_runqueue().cpu_id(),
         ctx.scheduler.boot_idle_task().task_id()
     ));

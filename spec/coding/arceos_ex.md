@@ -177,6 +177,10 @@ idle path，不能只依赖普通 `schedule_passes()` 推断。当前仍只实�
 idle loop、真实 timer/IRQ wakeup 源、真实 cpuidle/WFI 路径、Linux
 `do { __schedule(SM_IDLE); } while (need_resched())` 循环、`sched_submit_work()` skip 细节或真实
 `prev != next` 任务切换。
+rest_init smoke 以及 checkpoint KUnit 复用的 smoke case 必须验证 idle schedule 的关系约束：当前 BP
+代表性 idle cycle 只记录一次 `schedule_idle()`，idle request/return/identity counters 相互一致，普通
+schedule/switch/current-task switch counters 包含这一次 idle pass；scheduler smoke 还必须证明普通
+`Scheduler.schedule()` 不会递增 idle-specific counters。
 
 本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
 真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是

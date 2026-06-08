@@ -151,6 +151,19 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    let idle_schedule_passes = ctx.scheduler.idle_schedule_passes();
+    if idle_schedule_passes != 1
+        || ctx.scheduler.idle_schedule_returned_passes() != idle_schedule_passes
+        || ctx.scheduler.idle_schedule_identity_passes() != idle_schedule_passes
+        || ctx.scheduler.schedule_passes() < idle_schedule_passes
+        || ctx.scheduler.switch_to_passes() < idle_schedule_passes
+        || ctx.boot_cpu_current_task.switch_committed_count() < idle_schedule_passes
+        || ctx.scheduler.identity_switch_passes() < idle_schedule_passes
+    {
+        printk::write_str("idle schedule relation facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     if ctx.boot_idle_runtime.state() != State::Ready
         || !ctx.boot_idle_runtime.first_schedule_committed()
         || !ctx.boot_idle_runtime.idle_entry_prepared()
@@ -172,9 +185,6 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_idle_runtime.idle_schedule_returned()
         || !ctx.boot_idle_runtime.need_resched_drained()
         || !ctx.boot_idle_runtime.idle_loop_continues()
-        || ctx.scheduler.idle_schedule_passes() == 0
-        || ctx.scheduler.idle_schedule_returned_passes() == 0
-        || ctx.scheduler.idle_schedule_identity_passes() == 0
         || !ctx
             .boot_idle_runtime
             .representative_need_resched_cycle_committed()
@@ -188,11 +198,12 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "rest_init init_pid={} kthreadd_pid={} schedule_passes={} switch_to_passes={}\n",
+        "rest_init init_pid={} kthreadd_pid={} schedule_passes={} switch_to_passes={} idle_schedule_passes={}\n",
         ctx.kernel_init_task.pid(),
         ctx.kthreadd_task.pid(),
         ctx.scheduler.schedule_passes(),
-        ctx.scheduler.switch_to_passes()
+        ctx.scheduler.switch_to_passes(),
+        idle_schedule_passes
     ));
     SmokeResult::Passed
 }

@@ -61,6 +61,7 @@ predicate arceos_ex_must_boot_idle_runtime_split_entry_and_loop_actions() -> boo
 predicate arceos_ex_must_boot_idle_runtime_model_representative_need_resched_cycle() -> bool;
 predicate arceos_ex_must_bind_boot_idle_schedule_if_need_resched_to_schedule_idle() -> bool;
 predicate arceos_ex_must_rest_init_setup_show_boot_idle_tail_chain() -> bool;
+predicate arceos_ex_must_rest_init_smoke_cover_idle_schedule_relations() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
@@ -655,6 +656,20 @@ type ArceosExRestInitCodingMust {
          * helper or collapse the model action order into one opaque phase call.
          */
         arceos_ex_must_rest_init_setup_show_boot_idle_tail_chain();
+
+        /*
+         * Smoke/KUnit coverage:
+         *
+         * The rest_init smoke case and the checkpoint KUnit smoke reuse must
+         * validate the boot idle schedule relation, not only non-zero facts:
+         * the representative idle cycle records exactly one
+         * Scheduler.schedule_idle() pass in the current BP implementation;
+         * idle schedule request, return and identity counters match each
+         * other; ordinary schedule/switch/current-task switch counters include
+         * that idle pass; and the scheduler smoke case proves that an ordinary
+         * Scheduler.schedule() call does not increment idle-specific counters.
+         */
+        arceos_ex_must_rest_init_smoke_cover_idle_schedule_relations();
 
         /*
          * CurrentTaskRef scope:
