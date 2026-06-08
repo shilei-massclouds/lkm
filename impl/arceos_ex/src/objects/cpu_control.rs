@@ -313,6 +313,10 @@ impl CurrentTaskSlot {
     }
 
     pub fn set_current_boot_idle(&mut self) -> EventResult {
+        self.set_current(CurrentTaskRef::BootIdle)
+    }
+
+    pub fn set_current(&mut self, task_ref: CurrentTaskRef) -> EventResult {
         if self.lifecycle.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -322,12 +326,7 @@ impl CurrentTaskSlot {
             );
         }
 
-        self.current = CurrentTaskRef::BootIdle;
-        Ok(())
-    }
-
-    pub fn commit_boot_idle_switch(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.current_is_boot_idle() {
+        if matches!(task_ref, CurrentTaskRef::None) {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -336,7 +335,21 @@ impl CurrentTaskSlot {
             );
         }
 
-        self.current = CurrentTaskRef::BootIdle;
+        self.current = task_ref;
+        Ok(())
+    }
+
+    pub fn commit_switch_to(&mut self, next_ref: CurrentTaskRef) -> EventResult {
+        if self.lifecycle.state() != State::Ready || matches!(next_ref, CurrentTaskRef::None) {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.current = next_ref;
         self.switch_committed_count = self.switch_committed_count.wrapping_add(1);
         Ok(())
     }

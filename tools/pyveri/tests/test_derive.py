@@ -248,7 +248,7 @@ class DerivationTests(unittest.TestCase):
         self.assertTrue(
             any(
                 record.status is DerivationStatus.PROVED
-                and record.proof_class == "exclusive_context_lock_event"
+                and record.proof_class == "context_guard_event"
                 and record.source_kind == "within_entered_by"
                 and record.expression == "TaskPiLock.Event::LockIrqSave"
                 for record in derivation.records
@@ -257,7 +257,7 @@ class DerivationTests(unittest.TestCase):
         self.assertTrue(
             any(
                 record.status is DerivationStatus.PROVED
-                and record.proof_class == "exclusive_context_lock_event"
+                and record.proof_class == "context_guard_event"
                 and record.source_kind == "within_exited_by"
                 and record.expression == "TaskPiLock.Event::UnlockIrqRestore"
                 for record in derivation.records

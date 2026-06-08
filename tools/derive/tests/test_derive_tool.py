@@ -248,9 +248,9 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "let next: TaskRef <- CurrentRunQ.Action::PickNextTask(prev_ref: CurrentTaskRef)"
+                    == "let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(prev_ref: CurrentTaskRef)"
                     and record["display_expression"]
-                    == "let next: TaskRef <- CurrentRunQ.Action::PickNextTask(CurrentTaskRef)"
+                    == "let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef)"
                     and record["proof_class"] == "action_result_binding"
                     and record["proof_provider"] == "within_context"
                     for record in proved
@@ -272,6 +272,24 @@ class DeriveToolTests(unittest.TestCase):
                     and record["proof_class"] == "type_process_commit"
                     and record["proof_provider"] == "within_context"
                     and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"]
+                    == "CurrentTaskRef.Action::SetCurrent(task: BootIdleTask)"
+                    and record["proof_class"] == "type_process_commit"
+                    and record["proof_provider"] == "within_context"
+                    and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
+                    for record in proved
+                )
+            )
+            self.assertTrue(
+                any(
+                    record["expression"] == "task_ref_targets(CurrentTaskRef, BootIdleTask)"
+                    and record["proof_class"] == "type_process_ensures"
+                    and record["proof_provider"] == "within_context"
                     for record in proved
                 )
             )

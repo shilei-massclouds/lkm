@@ -30,6 +30,8 @@ pub fn run() -> SmokeResult {
     }
 
     let before = ctx.scheduler.schedule_passes();
+    let current_rq_before = ctx.scheduler.current_runqueue_resolve_passes();
+    let pick_next_before = ctx.scheduler.pick_next_task_passes();
     let switch_before = ctx.scheduler.switch_to_passes();
     let identity_switch_before = ctx.scheduler.identity_switch_passes();
     let current_switch_before = ctx.boot_cpu_current_task.switch_committed_count();
@@ -71,6 +73,8 @@ pub fn run() -> SmokeResult {
     }
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.schedule_passes() != before.wrapping_add(1)
+        || ctx.scheduler.current_runqueue_resolve_passes() != current_rq_before.wrapping_add(1)
+        || ctx.scheduler.pick_next_task_passes() != pick_next_before.wrapping_add(1)
         || ctx.scheduler.switch_to_passes() != switch_before.wrapping_add(1)
         || ctx.scheduler.identity_switch_passes() != identity_switch_before.wrapping_add(1)
         || ctx.boot_cpu_current_task.switch_committed_count()

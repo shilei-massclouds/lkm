@@ -56,6 +56,9 @@ _REF_TARGET_PROCESS_TYPES = {
     "RunQueueRef": "RunQueue",
     "TaskRef": "Task",
 }
+_REF_SELF_ACTION_TYPES = {
+    "TaskRef",
+}
 _PREDICATE_CALL_RE = re.compile(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 _RELATION_RE = re.compile(r"(==|!=|>=|<=|>|<)")
 _HAS_SLOT_RE = re.compile(
@@ -938,11 +941,8 @@ class _Deriver:
             display_expression = f"let {name}: {type_name} <- {display_call}"
             receiver = _binding_or_ref_value(object_name, bindings)
             receiver_type = receiver.get("type") if receiver is not None else None
-            ref_process_type = (
-                _REF_TARGET_PROCESS_TYPES.get(receiver_type, receiver_type)
-                if receiver_type is not None
-                and _is_supported_ref_type_action(receiver_type, action_name)
-                else None
+            ref_process_type = _ref_process_type(
+                self.model, receiver_type, "Action", action_name
             )
             if ref_process_type is not None:
                 call = _normalize_ref_process_expression(
@@ -987,7 +987,9 @@ class _Deriver:
             parent_expression = display_expression if expression != display_expression else expression
             obj = self.model.objects.get(object_name)
             if ref_process_type is not None:
-                target_object = _ref_target_object(self.model, receiver)
+                target_object = _ref_process_self_name(
+                    self.model, receiver, ref_process_type, object_name
+                )
                 canonical_args = _canonicalize_ref_aliases(args or "", bindings)
                 if not self._execute_type_process_drives(
                     ref_process_type,
@@ -1045,13 +1047,13 @@ class _Deriver:
             receiver_name, driven_event, args = ref_event.group(1, 2, 3)
             receiver = bindings.get(receiver_name)
             receiver_type = receiver.get("type") if receiver is not None else None
-            if receiver_type is not None and _is_supported_ref_type_event(
-                receiver_type, driven_event
-            ):
-                process_type = _REF_TARGET_PROCESS_TYPES.get(
-                    receiver_type, receiver_type
+            process_type = _ref_process_type(
+                self.model, receiver_type, "Event", driven_event
+            )
+            if process_type is not None:
+                target_object = _ref_process_self_name(
+                    self.model, receiver, process_type, receiver_name
                 )
-                target_object = _ref_target_object(self.model, receiver)
                 expression = _normalize_ref_process_expression(
                     self.model,
                     receiver_name,
@@ -1181,15 +1183,19 @@ class _Deriver:
         if match is not None:
             driven_object, driven_event, args = match.group(1, 2, 3)
             obj = self.model.objects.get(driven_object)
-            if obj is None and _is_supported_ref_event(driven_object, driven_event):
-                process_type = _REF_TARGET_PROCESS_TYPES.get(
-                    "RunQueueRef", "RunQueueRef"
+            receiver = _binding_or_ref_value(driven_object, bindings)
+            receiver_type = receiver.get("type") if receiver is not None else None
+            process_type = _ref_process_type(
+                self.model, receiver_type, "Event", driven_event
+            )
+            if obj is None and process_type is not None:
+                target_object = _ref_process_self_name(
+                    self.model, receiver, process_type, driven_object
                 )
-                target_object = _ref_value_target_object(self.model, driven_object)
                 expression = _normalize_ref_process_expression(
                     self.model,
                     driven_object,
-                    "RunQueueRef",
+                    receiver_type or "",
                     "Event",
                     driven_event,
                     args,
@@ -1314,13 +1320,13 @@ class _Deriver:
             receiver_name, action_name, args = ref_action.group(1, 2, 3)
             receiver = _binding_or_ref_value(receiver_name, bindings)
             receiver_type = receiver.get("type") if receiver is not None else None
-            if receiver_type is not None and _is_supported_ref_type_action(
-                receiver_type, action_name
-            ):
-                process_type = _REF_TARGET_PROCESS_TYPES.get(
-                    receiver_type, receiver_type
+            process_type = _ref_process_type(
+                self.model, receiver_type, "Action", action_name
+            )
+            if process_type is not None:
+                target_object = _ref_process_self_name(
+                    self.model, receiver, process_type, receiver_name
                 )
-                target_object = _ref_target_object(self.model, receiver)
                 expression = _normalize_ref_process_expression(
                     self.model,
                     receiver_name,
@@ -1449,15 +1455,15 @@ class _Deriver:
         action = _ACTION_EXPR_RE.match(entry)
         if action is not None:
             object_name, action_name, args = action.group(1, 2, 3)
-            if object_name not in self.model.objects and _is_supported_ref_action(
-                object_name, action_name
-            ):
-                receiver = _binding_or_ref_value(object_name, bindings)
-                receiver_type = receiver.get("type") if receiver is not None else None
-                process_type = _REF_TARGET_PROCESS_TYPES.get(
-                    receiver_type or "", receiver_type or ""
+            receiver = _binding_or_ref_value(object_name, bindings)
+            receiver_type = receiver.get("type") if receiver is not None else None
+            process_type = _ref_process_type(
+                self.model, receiver_type, "Action", action_name
+            )
+            if object_name not in self.model.objects and process_type is not None:
+                target_object = _ref_process_self_name(
+                    self.model, receiver, process_type, object_name
                 )
-                target_object = _ref_target_object(self.model, receiver)
                 expression = _normalize_ref_process_expression(
                     self.model,
                     object_name,
@@ -2846,30 +2852,38 @@ def _type_declares_event(model: ObjectModel, obj: ObjectDef, event_name: str) ->
     return any(pattern.search(block.body) for block in type_decl.blocks)
 
 
-def _is_supported_ref_event(receiver_name: str, event_name: str) -> bool:
-    receiver_type = _known_ref_value_type(receiver_name)
-    return receiver_type is not None and _is_supported_ref_type_event(
-        receiver_type, event_name
-    )
+def _ref_process_type(
+    model: ObjectModel,
+    receiver_type: str | None,
+    process_kind: str,
+    process_name: str,
+) -> str | None:
+    if receiver_type is None:
+        return None
+
+    self_type = _ref_self_process_type(model, receiver_type, process_kind, process_name)
+    if self_type is not None:
+        return self_type
+
+    target_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
+    if target_type is None:
+        return None
+    if _process_signature(model, target_type, process_kind, process_name) is None:
+        return None
+    return target_type
 
 
-def _is_supported_ref_type_event(type_name: str, event_name: str) -> bool:
-    return type_name == "RunQueueRef" and event_name == "EnqueueTask"
-
-
-def _is_supported_ref_action(receiver_name: str, action_name: str) -> bool:
-    receiver_type = _known_ref_value_type(receiver_name)
-    return receiver_type is not None and _is_supported_ref_type_action(
-        receiver_type, action_name
-    )
-
-
-def _is_supported_ref_type_action(type_name: str, action_name: str) -> bool:
-    if type_name == "RunQueueRef":
-        return action_name == "PickNextTask"
-    if type_name == "TaskRef":
-        return action_name in {"SaveCoreContext", "RestoreCoreContext"}
-    return False
+def _ref_self_process_type(
+    model: ObjectModel,
+    receiver_type: str,
+    process_kind: str,
+    process_name: str,
+) -> str | None:
+    if receiver_type not in _REF_SELF_ACTION_TYPES or process_kind != "Action":
+        return None
+    if _process_signature(model, receiver_type, process_kind, process_name) is None:
+        return None
+    return receiver_type
 
 
 def _within_parameter_bindings(
@@ -2923,13 +2937,25 @@ def _ref_target_object(
     return _ref_value_target_object(model, value) if value else None
 
 
+def _ref_process_self_name(
+    model: ObjectModel,
+    binding: dict[str, str] | None,
+    process_type: str,
+    fallback: str,
+) -> str:
+    binding_type = binding.get("type") if binding is not None else None
+    if binding_type == process_type:
+        return binding.get("value") or fallback
+    return _ref_target_object(model, binding) or fallback
+
+
 def _ref_value_target_object(model: ObjectModel, ref_value: str | None) -> str | None:
     if not ref_value:
         return None
-    if ref_value == "CurrentRunQ":
-        return "BootRunQueue"
     if ref_value == "CurrentTaskRef":
         return "BootIdleTask"
+    if ref_value == "CurrentRunQueueRef":
+        return "BootRunQueue"
     if ref_value == "BootRunQueueRef":
         return "BootRunQueue"
     if ref_value == "BootIdleTaskRef":
@@ -2963,7 +2989,7 @@ def _normalize_ref_process_expression(
     args: str | None,
     fallback: str,
 ) -> str:
-    process_type = _REF_TARGET_PROCESS_TYPES.get(receiver_type)
+    process_type = _ref_process_type(model, receiver_type, process_kind, process_name)
     if process_type is None:
         return fallback
     return _normalize_process_call(
@@ -2990,7 +3016,7 @@ def _binding_or_ref_value(
 
 
 def _known_ref_value_type(value: str) -> str | None:
-    if value.endswith("RunQueueRef") or value == "CurrentRunQ":
+    if value.endswith("RunQueueRef"):
         return "RunQueueRef"
     if value.endswith("TaskRef"):
         return "TaskRef"

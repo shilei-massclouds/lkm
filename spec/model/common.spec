@@ -557,7 +557,7 @@ type SchedulerObject: TaskObject {
                 within ScheduleLocalInterruptContext {
                     within ScheduleRunQueueContext {
                         depends_on {
-                            current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                            task_ref_targets(CurrentTaskRef, BootIdleTask);
                             boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                             task_ref_targets(CurrentTaskRef, BootIdleTask);
                             task_ref_ready(CurrentTaskRef);
@@ -586,7 +586,7 @@ type SchedulerObject: TaskObject {
                             scheduler_switch_to_identity_path(self, CurrentTaskRef);
                             scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
                             scheduler_switch_to_core_context_restored(self, CurrentTaskRef);
-                            current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                            task_ref_targets(CurrentTaskRef, BootIdleTask);
                             task_ref_loaded_into_current_cpu(CurrentTaskRef, BootCurrentCPU);
                             current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, CurrentTaskRef);
                             scheduler_first_schedule_committed(self);
@@ -604,7 +604,7 @@ type SchedulerObject: TaskObject {
                 scheduler_switch_to_identity_path(self, CurrentTaskRef);
                 scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
                 scheduler_switch_to_core_context_restored(self, CurrentTaskRef);
-                current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                task_ref_targets(CurrentTaskRef, BootIdleTask);
                 task_ref_loaded_into_current_cpu(CurrentTaskRef, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, CurrentTaskRef);
                 scheduler_first_schedule_committed(self);
@@ -627,7 +627,7 @@ type SchedulerObject: TaskObject {
                 scheduler_switch_to_committed(self, prev_ref, next_ref);
                 scheduler_switch_to_core_context_saved(self, prev_ref);
                 scheduler_switch_to_core_context_restored(self, next_ref);
-                current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                task_ref_targets(CurrentTaskRef, BootIdleTask);
                 task_ref_loaded_into_current_cpu(next_ref, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, prev_ref, next_ref);
             }

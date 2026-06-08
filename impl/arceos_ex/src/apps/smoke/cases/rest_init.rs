@@ -122,6 +122,8 @@ pub fn run() -> SmokeResult {
     }
 
     if ctx.scheduler.schedule_passes() == 0
+        || ctx.scheduler.current_runqueue_resolve_passes() == 0
+        || ctx.scheduler.pick_next_task_passes() == 0
         || ctx.scheduler.switch_to_passes() == 0
         || ctx.scheduler.identity_switch_passes() == 0
         || ctx.boot_cpu_current_task.switch_committed_count() == 0

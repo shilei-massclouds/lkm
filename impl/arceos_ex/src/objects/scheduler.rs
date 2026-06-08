@@ -1,12 +1,14 @@
 use super::{
-    cpu_control::{CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
+    cpu_control::{CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
     cpu_group::CpuGroup,
     cpu_id_map::CpuIdMap,
     init_mm::InitMm,
     init_task::InitTask,
     per_cpu_storage::PerCpuStorage,
     rest_init::KernelInitTask,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{
+        failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
+    },
     static_branch::StaticBranch,
     task::TaskCpuState,
 };
@@ -22,6 +24,8 @@ pub struct Scheduler {
     scheduler_running: bool,
     selected_runqueue_task_id: usize,
     schedule_passes: usize,
+    current_runqueue_resolve_passes: usize,
+    pick_next_task_passes: usize,
     smp_initialized: bool,
     sched_domains_ready: bool,
     kernel_init_affinity_released: bool,
@@ -43,6 +47,8 @@ impl Scheduler {
             scheduler_running: false,
             selected_runqueue_task_id: usize::MAX,
             schedule_passes: 0,
+            current_runqueue_resolve_passes: 0,
+            pick_next_task_passes: 0,
             smp_initialized: false,
             sched_domains_ready: false,
             kernel_init_affinity_released: false,
@@ -91,6 +97,14 @@ impl Scheduler {
 
     pub const fn schedule_passes(&self) -> usize {
         self.schedule_passes
+    }
+
+    pub const fn current_runqueue_resolve_passes(&self) -> usize {
+        self.current_runqueue_resolve_passes
+    }
+
+    pub const fn pick_next_task_passes(&self) -> usize {
+        self.pick_next_task_passes
     }
 
     pub const fn smp_initialized(&self) -> bool {
@@ -230,52 +244,83 @@ impl Scheduler {
             );
         }
 
+        let prev_ref = current_task_slot.current();
+
         local_interrupt.save_and_disable()?;
-        self.resolve_current_runqueue_for_boot_current_task(current_task_slot)?;
-        self.switch_to_boot_idle_identity(current_task_slot)?;
+        let current_rq = self.resolve_current_runqueue_ref(prev_ref)?;
+        let next_ref = self.pick_next_task(current_rq, prev_ref)?;
+        self.switch_to(prev_ref, next_ref, current_task_slot)?;
         self.schedule_passes = self.schedule_passes.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
         local_interrupt.restore()?;
         Ok(())
     }
 
-    fn resolve_current_runqueue_for_boot_current_task(
-        &self,
-        current_task_slot: &CurrentTaskSlot,
-    ) -> EventResult {
-        if current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_idle()
+    fn resolve_current_runqueue_ref(
+        &mut self,
+        current_task_ref: CurrentTaskRef,
+    ) -> Result<CurrentRunQueueRef, EventError> {
+        if !matches!(current_task_ref, CurrentTaskRef::BootIdle)
             || self.boot_idle_task.cpu_id() != self.boot_runqueue.cpu_id()
             || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
         {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Online,
-                State::Online,
-            );
+            return Err(self.failed_schedule_condition());
         }
 
-        Ok(())
+        self.current_runqueue_resolve_passes = self.current_runqueue_resolve_passes.wrapping_add(1);
+        Ok(CurrentRunQueueRef::BootRunQueue)
     }
 
-    fn switch_to_boot_idle_identity(
+    fn pick_next_task(
         &mut self,
+        current_rq: CurrentRunQueueRef,
+        prev_ref: CurrentTaskRef,
+    ) -> Result<CurrentTaskRef, EventError> {
+        if !matches!(current_rq, CurrentRunQueueRef::BootRunQueue)
+            || !matches!(prev_ref, CurrentTaskRef::BootIdle)
+            || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
+            || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
+        {
+            return Err(self.failed_schedule_condition());
+        }
+
+        self.pick_next_task_passes = self.pick_next_task_passes.wrapping_add(1);
+        Ok(CurrentTaskRef::BootIdle)
+    }
+
+    fn failed_schedule_condition(&self) -> EventError {
+        EventError::failed(
+            EventErrorCode::ConditionFailed,
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Online,
+            State::Online,
+        )
+    }
+
+    fn switch_to(
+        &mut self,
+        prev_ref: CurrentTaskRef,
+        next_ref: CurrentTaskRef,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
-        if self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
+        if !matches!(prev_ref, CurrentTaskRef::BootIdle)
+            || !matches!(next_ref, CurrentTaskRef::BootIdle)
+            || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
             || current_task_slot.state() != State::Ready
-            || !current_task_slot.current_is_boot_idle()
+            || current_task_slot.current() != prev_ref
         {
             return self.failed_switch_to();
         }
 
         self.boot_idle_task.save_core_context()?;
         self.boot_idle_task.restore_core_context()?;
-        current_task_slot.commit_boot_idle_switch()?;
+        current_task_slot.commit_switch_to(next_ref)?;
         self.switch_to_passes = self.switch_to_passes.wrapping_add(1);
-        self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
+        if prev_ref == next_ref {
+            self.identity_switch_passes = self.identity_switch_passes.wrapping_add(1);
+        }
         Ok(())
     }
 
@@ -385,6 +430,11 @@ impl Scheduler {
             && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()
             && self.boot_runqueue.idle_task_id() == self.boot_idle_task.task_id()
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CurrentRunQueueRef {
+    BootRunQueue,
 }
 
 pub struct DefaultSchedRootDomain {

@@ -49,7 +49,7 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("derive: ok", text)
         self.assertIn("obligation: 0", text)
-        self.assertIn("deferred: 44", text)
+        self.assertIn("deferred: 45", text)
         self.assertIn("MmCoreInitPhase.Event::Setup", text)
         self.assertIn("InterruptPhase.Event::Setup", text)
 
