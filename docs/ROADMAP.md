@@ -19,6 +19,7 @@
 | 优先级 | 状态 | 领域 | 任务 | 目标与说明 | 细节 |
 | --- | --- | --- | --- | --- | --- |
 | `P0` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 系统检查基础图、state 注释图、event 注释图、state+event 注释图四种输出；优先处理 `depends_on` 长线、完整图过高、标签简化/分行、关键非状态谓词事实展示、主 trace action 展开深度约束，以及布局常量是否暴露为 render 参数等问题，使 trace 图适合日常审阅。深层 action/process 内部细节后续应进入专门的 action 展开图。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
+| `P0` | 待办 | trace/view | 优化 trace context 框显示 | 当前 context 框在深层嵌套和长作用域下过高，文字位置也容易远离关键 action，影响阅读。后续应优化 context 高度控制、文本锚定/居中策略、跨行标签布局和框体视觉层级，使上下文边界可读但不压迫主 trace。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
 | `P1` | 待办 | CI | 建立 GitHub Actions 快速 CI | 覆盖推导工具质量、核心规格推导、trace 生成 smoke、顶层 `make verify` 和 `impl/arceos_ex` 最小构建；不发布 Pages，不跑耗时 QEMU 全量任务。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#ci-与项目主页) |
 | `P1` | 待办 | pyveri | 规格内默认 target 与 rule-only 检查模式 | 支持在规格元信息中声明默认推导目标；命令行 `--target` 优先，其次规格元信息，缺失时 derive/check/trace 要求显式 target。为 `spec/coding/main.spec`、`spec/compose/main.spec` 等 rule-only 规格提供只执行 parse/model/rule 检查的模式。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#工具链架构目标) |
 | `P1` | 待办 | pyveri | 注释数据流下沉 | 让 `parse` 保留注释 span/内容，由 `model` 或 `view` 建立 state/event 关联，`render` 只消费 `view.json` 或明确的 annotation 输入。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
