@@ -34,6 +34,9 @@ pub fn run() -> SmokeResult {
     let pick_next_before = ctx.scheduler.pick_next_task_passes();
     let switch_before = ctx.scheduler.switch_to_passes();
     let identity_switch_before = ctx.scheduler.identity_switch_passes();
+    let idle_schedule_before = ctx.scheduler.idle_schedule_passes();
+    let idle_schedule_returned_before = ctx.scheduler.idle_schedule_returned_passes();
+    let idle_schedule_identity_before = ctx.scheduler.idle_schedule_identity_passes();
     let current_switch_before = ctx.boot_cpu_current_task.switch_committed_count();
     let core_saved_before = ctx
         .scheduler
@@ -77,6 +80,9 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.pick_next_task_passes() != pick_next_before.wrapping_add(1)
         || ctx.scheduler.switch_to_passes() != switch_before.wrapping_add(1)
         || ctx.scheduler.identity_switch_passes() != identity_switch_before.wrapping_add(1)
+        || ctx.scheduler.idle_schedule_passes() != idle_schedule_before
+        || ctx.scheduler.idle_schedule_returned_passes() != idle_schedule_returned_before
+        || ctx.scheduler.idle_schedule_identity_passes() != idle_schedule_identity_before
         || ctx.boot_cpu_current_task.switch_committed_count()
             != current_switch_before.wrapping_add(1)
         || !ctx.boot_cpu_current_task.current_is_boot_idle()

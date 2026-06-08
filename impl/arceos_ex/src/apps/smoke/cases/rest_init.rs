@@ -172,6 +172,9 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_idle_runtime.idle_schedule_returned()
         || !ctx.boot_idle_runtime.need_resched_drained()
         || !ctx.boot_idle_runtime.idle_loop_continues()
+        || ctx.scheduler.idle_schedule_passes() == 0
+        || ctx.scheduler.idle_schedule_returned_passes() == 0
+        || ctx.scheduler.idle_schedule_identity_passes() == 0
         || !ctx
             .boot_idle_runtime
             .representative_need_resched_cycle_committed()

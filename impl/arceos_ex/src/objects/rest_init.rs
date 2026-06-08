@@ -1059,7 +1059,12 @@ impl BootIdleRuntime {
         Ok(())
     }
 
-    pub fn run_idle_loop(&mut self, scheduler: &Scheduler) -> EventResult {
+    pub fn run_idle_loop(
+        &mut self,
+        scheduler: &mut Scheduler,
+        local_interrupt: &mut LocalInterruptControl,
+        current_task_slot: &mut CurrentTaskSlot,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.idle_entry_prepared
             || scheduler.state() != State::Online
@@ -1067,13 +1072,18 @@ impl BootIdleRuntime {
             return self.failed_ready_action();
         }
 
-        self.do_idle_cycle(scheduler)?;
+        self.do_idle_cycle(scheduler, local_interrupt, current_task_slot)?;
         self.idle_loop_entered = true;
         self.idle_loop_continues = true;
         Ok(())
     }
 
-    fn do_idle_cycle(&mut self, scheduler: &Scheduler) -> EventResult {
+    fn do_idle_cycle(
+        &mut self,
+        scheduler: &mut Scheduler,
+        local_interrupt: &mut LocalInterruptControl,
+        current_task_slot: &mut CurrentTaskSlot,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.idle_entry_prepared
             || scheduler.state() != State::Online
@@ -1083,7 +1093,7 @@ impl BootIdleRuntime {
 
         self.wait_while_no_need_resched()?;
         self.observe_need_resched()?;
-        self.schedule_if_need_resched(scheduler)?;
+        self.schedule_if_need_resched(scheduler, local_interrupt, current_task_slot)?;
         self.idle_cycle_committed = true;
         self.secondary_cpus_not_started = true;
         self.real_task_switch_deferred = true;
@@ -1121,18 +1131,26 @@ impl BootIdleRuntime {
         Ok(())
     }
 
-    fn schedule_if_need_resched(&mut self, scheduler: &Scheduler) -> EventResult {
+    fn schedule_if_need_resched(
+        &mut self,
+        scheduler: &mut Scheduler,
+        local_interrupt: &mut LocalInterruptControl,
+        current_task_slot: &mut CurrentTaskSlot,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.idle_entry_prepared
             || !self.need_resched_set_for_schedule
             || !self.observed_need_resched
             || scheduler.state() != State::Online
             || scheduler.schedule_passes() == 0
+            || current_task_slot.state() != State::Ready
+            || !current_task_slot.current_is_boot_idle()
         {
             return self.failed_ready_action();
         }
 
         self.idle_schedule_requested = true;
+        scheduler.schedule_idle(local_interrupt, current_task_slot)?;
         self.idle_schedule_returned = true;
         self.need_resched_drained = true;
         self.idle_loop_continues = true;

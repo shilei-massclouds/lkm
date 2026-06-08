@@ -33,6 +33,9 @@ pub struct Scheduler {
     granularity_refreshed: bool,
     switch_to_passes: usize,
     identity_switch_passes: usize,
+    idle_schedule_passes: usize,
+    idle_schedule_returned_passes: usize,
+    idle_schedule_identity_passes: usize,
 }
 
 impl Scheduler {
@@ -56,6 +59,9 @@ impl Scheduler {
             granularity_refreshed: false,
             switch_to_passes: 0,
             identity_switch_passes: 0,
+            idle_schedule_passes: 0,
+            idle_schedule_returned_passes: 0,
+            idle_schedule_identity_passes: 0,
         }
     }
 
@@ -133,6 +139,18 @@ impl Scheduler {
 
     pub const fn identity_switch_passes(&self) -> usize {
         self.identity_switch_passes
+    }
+
+    pub const fn idle_schedule_passes(&self) -> usize {
+        self.idle_schedule_passes
+    }
+
+    pub const fn idle_schedule_returned_passes(&self) -> usize {
+        self.idle_schedule_returned_passes
+    }
+
+    pub const fn idle_schedule_identity_passes(&self) -> usize {
+        self.idle_schedule_identity_passes
     }
 
     pub fn preset(
@@ -253,6 +271,28 @@ impl Scheduler {
         self.schedule_passes = self.schedule_passes.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
         local_interrupt.restore()?;
+        Ok(())
+    }
+
+    pub fn schedule_idle(
+        &mut self,
+        local_interrupt: &mut LocalInterruptControl,
+        current_task_slot: &mut CurrentTaskSlot,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.scheduler_running
+            || current_task_slot.state() != State::Ready
+            || !current_task_slot.current_is_boot_idle()
+        {
+            return Err(self.failed_schedule_condition());
+        }
+
+        self.schedule(local_interrupt, current_task_slot)?;
+        self.idle_schedule_passes = self.idle_schedule_passes.wrapping_add(1);
+        self.idle_schedule_returned_passes = self.idle_schedule_returned_passes.wrapping_add(1);
+        if current_task_slot.current_is_boot_idle() {
+            self.idle_schedule_identity_passes = self.idle_schedule_identity_passes.wrapping_add(1);
+        }
         Ok(())
     }
 

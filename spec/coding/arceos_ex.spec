@@ -59,6 +59,7 @@ predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_boot_idle_runtime_split_entry_and_loop_actions() -> bool;
 predicate arceos_ex_must_boot_idle_runtime_model_representative_need_resched_cycle() -> bool;
+predicate arceos_ex_must_bind_boot_idle_schedule_if_need_resched_to_schedule_idle() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
@@ -619,13 +620,27 @@ type ArceosExRestInitCodingMust {
          * second records that the CPU-visible environment sets need_resched and
          * the idle task leaves the wait state; the third records a
          * schedule_idle request/return and drains the need_resched fact. This
-         * step is still an object-level representative cycle: it must not add a
-         * true infinite loop, real timer/IRQ wakeup source, cpuidle/WFI path, or
-         * a concrete Scheduler.schedule_idle() wrapper. That wrapper is the
-         * next coding refinement and will bind this named hook to scheduler
-         * code.
+         * remains an object-level representative cycle: it must not add a true
+         * infinite loop, real timer/IRQ wakeup source, or cpuidle/WFI path.
          */
         arceos_ex_must_boot_idle_runtime_model_representative_need_resched_cycle();
+
+        /*
+         * schedule_idle wrapper:
+         *
+         * BootIdleRuntime.schedule_if_need_resched() must now drive a concrete
+         * Scheduler.schedule_idle() implementation boundary. The wrapper must
+         * require the current CPU's CurrentTaskSlot to still target BootIdleTask
+         * and the need_resched observation to have been recorded by
+         * BootIdleRuntime. It may reuse the existing Scheduler.schedule() switch
+         * skeleton for the current single-task path, but it must publish
+         * idle-specific counters/facts separately from ordinary schedule()
+         * calls so smoke/KUnit coverage can distinguish the idle path. It must
+         * not model the full Linux do { __schedule(SM_IDLE); } while
+         * (need_resched()) loop, sched_submit_work() skip details, or a real
+         * prev != next task switch yet.
+         */
+        arceos_ex_must_bind_boot_idle_schedule_if_need_resched_to_schedule_idle();
 
         /*
          * CurrentTaskRef scope:
