@@ -26,6 +26,11 @@ make verify REPORT=graph
 make clean
 ```
 
+From the repository root, `make test` runs the full validation path: strict
+formal derive, checkpoint/KUnit handlers listed in `tests/kunit.handlers`, and
+the final `APP=smoke` payload smoke run. Use root `make test-kunit` or
+`make test-smoke` when only one runtime path is needed.
+
 Prerequisites:
 
 ```bash

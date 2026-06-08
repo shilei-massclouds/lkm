@@ -61,12 +61,20 @@ make run APP=hello
 make run LOG=trace
 make verify
 make verify REPORT=graph
+make test
+make test-verify
+make test-kunit
+make test-smoke
 make clean
 ```
 
 `KERNEL ?= arceos_ex` 选择默认内核，`APP ?= smoke` 选择默认 selected payload。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
 启用 checkpoint 字符输出。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
-生成带注释的 trace SVG 报告。
+生成带注释的 trace SVG 报告。`test` 是默认验证闭环，按顺序执行 `test-verify`、`test-kunit`
+和 `test-smoke`：第一步运行正式规格 strict derive，第二步用 `impl/arceos_ex/tests/kunit.handlers`
+聚合 checkpoint/KUnit handler 在 `APP=hello` 路径下验证局部对象和 action 边界，第三步运行 `APP=smoke`
+验证最终 payload 可观测行为。新增 checkpoint KUnit handler 时必须加入该 handler 文件，除非它需要单独的
+测试入口并在 coding 规格中记录原因。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和

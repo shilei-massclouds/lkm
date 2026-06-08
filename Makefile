@@ -6,12 +6,14 @@ APP ?= hello
 PROBE ?=
 PROBE_FILE ?=
 KUNIT_HANDLERS ?= impl/arceos_ex/tests/kunit.handlers
+KUNIT_APP ?= hello
+SMOKE_APP ?= smoke
 
 KERNEL_DIR := impl/$(KERNEL)
 PYVERI ?= tools/pyveri/bin/pyveri
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 
-.PHONY: build run verify test test-kunit test-smoke clean
+.PHONY: build run verify test test-verify test-kunit test-smoke clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" $(PROBE_FILE_ARG)
@@ -30,13 +32,16 @@ else
 	$(PYVERI) $(SPEC) --derive --strict
 endif
 
-test: test-kunit test-smoke
+test: test-verify test-kunit test-smoke
+
+test-verify:
+	$(MAKE) verify REPORT=text SPEC="$(SPEC)"
 
 test-kunit:
-	$(MAKE) -C $(KERNEL_DIR) run APP=hello PROBE_FILE="$(abspath $(KUNIT_HANDLERS))"
+	$(MAKE) -C $(KERNEL_DIR) run APP=$(KUNIT_APP) PROBE_FILE="$(abspath $(KUNIT_HANDLERS))"
 
 test-smoke:
-	$(MAKE) run APP=smoke
+	$(MAKE) run APP=$(SMOKE_APP)
 
 clean:
 	$(MAKE) -C $(KERNEL_DIR) clean
