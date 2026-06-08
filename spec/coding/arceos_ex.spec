@@ -25,6 +25,9 @@ predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
 predicate arceos_ex_must_startup_drive_boot_then_interrupt_then_payload() -> bool;
 predicate arceos_ex_must_payload_require_interrupt_phase_ready() -> bool;
+predicate arceos_ex_must_payload_follow_smp_runtime_not_nested_under_it() -> bool;
+predicate arceos_ex_must_payload_require_finalize_ready() -> bool;
+predicate arceos_ex_must_kernel_init_execution_line_reach_payload() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action() -> bool;
@@ -257,9 +260,10 @@ type ArceosExStartupPhaseCodingMust {
          * Startup phase order:
          *
          * The arceos_ex startup chain must follow the formal top-level model
-         * order PreparePhase -> BootPhase -> InterruptPhase -> PayloadPhase.
+         * order PreparePhase -> BootPhase -> InterruptPhase ->
+         * UpMultitaskPhase -> SmpRuntimePhase -> PayloadPhase.
          * PayloadPhase setup/enable must not run directly after BootPhase
-         * without first completing InterruptPhase.
+         * without first completing the intervening phase chain.
          */
         arceos_ex_must_startup_drive_boot_then_interrupt_then_payload();
 
@@ -272,6 +276,35 @@ type ArceosExStartupPhaseCodingMust {
          * InterruptPhase.
          */
         arceos_ex_must_payload_require_interrupt_phase_ready();
+
+        /*
+         * Payload placement:
+         *
+         * PayloadPhase is a StartupTimeline child that follows
+         * SmpRuntimePhase. It must not be implemented as the last subphase
+         * nested under SmpRuntimePhase.
+         */
+        arceos_ex_must_payload_follow_smp_runtime_not_nested_under_it();
+
+        /*
+         * Finalize handoff:
+         *
+         * PayloadPhase setup/enable must require FinalizePhase.Ready and the
+         * FinalizeBoundary next-boundary fact. This makes the direct handoff
+         * from kernel_init() finalization to payload explicit.
+         */
+        arceos_ex_must_payload_require_finalize_ready();
+
+        /*
+         * KernelInitTask execution line:
+         *
+         * KernelInitTask execution starts at the PreSmpInitPhase entry after
+         * rest_init() dispatch facts, then proceeds through the ordered
+         * phase chain to FinalizePhase and PayloadPhase. Payload ownership is
+         * derived from that continuous execution line instead of from an
+         * isolated payload-only fact.
+         */
+        arceos_ex_must_kernel_init_execution_line_reach_payload();
     }
 }
 
