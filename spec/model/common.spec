@@ -190,11 +190,37 @@ predicate scheduler_switch_to_committed<T, U, V>(scheduler: T, prev_ref: U, next
 predicate scheduler_switch_to_identity_path<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_switch_to_core_context_saved<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_switch_to_core_context_restored<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_idle_mode_used<T>(scheduler: T) -> bool;
+predicate scheduler_idle_schedule_committed<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_idle_schedule_returned_to_idle<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate boot_idle_schedule_idle_loop_until_resched_clear<T>(scheduler: T) -> bool;
 predicate task_runqueue_selected<T, U, V>(scheduler: T, task: U, runqueue: V) -> bool;
 predicate runqueue_runtime_state_is<T>(runqueue: T, state: RunQueueRuntimeState) -> bool;
 predicate runqueue_task_refs_empty<T>(runqueue: T) -> bool;
 predicate runqueue_task_refs_some<T>(runqueue: T) -> bool;
 predicate runqueue_contains_task<T, U>(runqueue: T, task_ref: U) -> bool;
+predicate boot_idle_entry_prepared<T, U>(runtime: T, task: U) -> bool;
+predicate boot_idle_arch_cpu_idle_prepare_done<T, U>(runtime: T, cpu: U) -> bool;
+predicate boot_idle_cpuhp_online_state_confirmed<T, U>(runtime: T, cpu: U) -> bool;
+predicate boot_idle_task_pf_idle<T>(task: T) -> bool;
+predicate boot_idle_task_identity_entered<T, U>(boot_init_task: T, boot_idle_task: U) -> bool;
+predicate boot_idle_runtime_loop_entered<T, U>(runtime: T, task: U) -> bool;
+predicate boot_idle_runtime_cycle_started<T, U>(runtime: T, task: U) -> bool;
+predicate boot_idle_runtime_waiting<T, U>(runtime: T, task: U) -> bool;
+predicate boot_idle_runtime_observed_no_need_resched<T, U>(runtime: T, task: U) -> bool;
+predicate boot_idle_runtime_observed_need_resched<T, U>(runtime: T, task: U) -> bool;
+predicate boot_idle_need_resched_clear_before_wait<T>(task: T) -> bool;
+predicate boot_idle_need_resched_set_for_schedule<T>(task: T) -> bool;
+predicate boot_idle_need_resched_drained_after_schedule<T>(task: T) -> bool;
+predicate boot_idle_polling_set<T>(task: T) -> bool;
+predicate boot_idle_polling_cleared<T>(task: T) -> bool;
+predicate boot_idle_nohz_entered<T>(runtime: T) -> bool;
+predicate boot_idle_nohz_exited<T>(runtime: T) -> bool;
+predicate boot_idle_wait_path_deferred<T>(runtime: T) -> bool;
+predicate boot_idle_schedule_requested<T, U>(runtime: T, scheduler: U) -> bool;
+predicate boot_idle_schedule_returned<T, U>(runtime: T, scheduler: U) -> bool;
+predicate boot_idle_loop_continues<T>(runtime: T) -> bool;
+predicate boot_idle_loop_cycle_committed<T>(runtime: T) -> bool;
 predicate raw_spinlock_storage_bound<T>(lock: T) -> bool;
 predicate raw_spinlock_initialized<T>(lock: T) -> bool;
 predicate raw_spinlock_unlocked<T>(lock: T) -> bool;
@@ -536,6 +562,11 @@ type Task: TaskObject {
  * minimal schedule()/__schedule() path: derive the prev task ref from the
  * current CPU current-task view, resolve that CPU view's CurrentRunQueueRef,
  * ask the current runqueue to pick next, then switch from prev to next.
+ * ScheduleIdle models Linux schedule_idle(): it is only reachable from the
+ * CPU-local idle loop after this CPU's idle task observes need_resched, and it
+ * returns to that same idle-loop point after the scheduler drains the resched
+ * request. The current model reuses Schedule for the shared switch skeleton and
+ * records the idle-specific facts separately.
  * CurrentTaskRef and CurrentRunQueueRef are private to the current CPU view;
  * the model does not introduce descriptive current-task/current-runqueue
  * objects or global current-task/current-runqueue singletons. SelectRunQueue is a pure
@@ -608,6 +639,30 @@ type SchedulerObject: TaskObject {
                 task_ref_loaded_into_current_cpu(CurrentTaskRef, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, CurrentTaskRef);
                 scheduler_first_schedule_committed(self);
+            }
+        }
+
+        Action::ScheduleIdle {
+            state_effect: StateEffect::None;
+            depends_on {
+                scheduler_schedule_event_available(self);
+                task_ref_ready(CurrentTaskRef);
+                task_ref_targets(CurrentTaskRef, BootIdleTask);
+                boot_idle_need_resched_set_for_schedule(BootIdleTask);
+            }
+            drives {
+                self.Action::Schedule;
+            }
+            ensures {
+                scheduler_idle_mode_used(self);
+                scheduler_idle_schedule_committed(self, CurrentTaskRef);
+                scheduler_idle_schedule_returned_to_idle(self, CurrentTaskRef);
+                boot_idle_schedule_idle_loop_until_resched_clear(self);
+                boot_idle_need_resched_drained_after_schedule(BootIdleTask);
+                task_ref_targets(CurrentTaskRef, BootIdleTask);
+            }
+            deferred {
+                "ScheduleIdle 当前复用 Scheduler.Schedule 的对象级切换框架；Linux schedule_idle() 的 SM_IDLE 模式、跳过 sched_submit_work()、do { __schedule(SM_IDLE); } while (need_resched()) 循环和完整 prev != next 路径后续展开。";
             }
         }
 
