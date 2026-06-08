@@ -812,6 +812,21 @@ pub struct BootIdleRuntime {
     cpu_startup_entry_ready: bool,
     idle_loop_entered: bool,
     idle_cycle_committed: bool,
+    idle_cycle_started: bool,
+    need_resched_clear_before_wait: bool,
+    observed_no_need_resched: bool,
+    idle_polling_set: bool,
+    nohz_idle_entered: bool,
+    idle_wait_committed: bool,
+    idle_wait_path_deferred: bool,
+    need_resched_set_for_schedule: bool,
+    observed_need_resched: bool,
+    idle_polling_cleared: bool,
+    nohz_idle_exited: bool,
+    idle_schedule_requested: bool,
+    idle_schedule_returned: bool,
+    need_resched_drained: bool,
+    idle_loop_continues: bool,
     boot_init_handoff_complete: bool,
     boot_cpu_hotplug_online: bool,
     secondary_cpus_not_started: bool,
@@ -827,6 +842,21 @@ impl BootIdleRuntime {
             cpu_startup_entry_ready: false,
             idle_loop_entered: false,
             idle_cycle_committed: false,
+            idle_cycle_started: false,
+            need_resched_clear_before_wait: false,
+            observed_no_need_resched: false,
+            idle_polling_set: false,
+            nohz_idle_entered: false,
+            idle_wait_committed: false,
+            idle_wait_path_deferred: false,
+            need_resched_set_for_schedule: false,
+            observed_need_resched: false,
+            idle_polling_cleared: false,
+            nohz_idle_exited: false,
+            idle_schedule_requested: false,
+            idle_schedule_returned: false,
+            need_resched_drained: false,
+            idle_loop_continues: false,
             boot_init_handoff_complete: false,
             boot_cpu_hotplug_online: false,
             secondary_cpus_not_started: true,
@@ -856,6 +886,84 @@ impl BootIdleRuntime {
 
     pub const fn idle_cycle_committed(&self) -> bool {
         self.idle_cycle_committed
+    }
+
+    pub const fn idle_cycle_started(&self) -> bool {
+        self.idle_cycle_started
+    }
+
+    pub const fn need_resched_clear_before_wait(&self) -> bool {
+        self.need_resched_clear_before_wait
+    }
+
+    pub const fn observed_no_need_resched(&self) -> bool {
+        self.observed_no_need_resched
+    }
+
+    pub const fn idle_polling_set(&self) -> bool {
+        self.idle_polling_set
+    }
+
+    pub const fn nohz_idle_entered(&self) -> bool {
+        self.nohz_idle_entered
+    }
+
+    pub const fn idle_wait_committed(&self) -> bool {
+        self.idle_wait_committed
+    }
+
+    pub const fn idle_wait_path_deferred(&self) -> bool {
+        self.idle_wait_path_deferred
+    }
+
+    pub const fn need_resched_set_for_schedule(&self) -> bool {
+        self.need_resched_set_for_schedule
+    }
+
+    pub const fn observed_need_resched(&self) -> bool {
+        self.observed_need_resched
+    }
+
+    pub const fn idle_polling_cleared(&self) -> bool {
+        self.idle_polling_cleared
+    }
+
+    pub const fn nohz_idle_exited(&self) -> bool {
+        self.nohz_idle_exited
+    }
+
+    pub const fn idle_schedule_requested(&self) -> bool {
+        self.idle_schedule_requested
+    }
+
+    pub const fn idle_schedule_returned(&self) -> bool {
+        self.idle_schedule_returned
+    }
+
+    pub const fn need_resched_drained(&self) -> bool {
+        self.need_resched_drained
+    }
+
+    pub const fn idle_loop_continues(&self) -> bool {
+        self.idle_loop_continues
+    }
+
+    pub const fn representative_need_resched_cycle_committed(&self) -> bool {
+        self.idle_cycle_started
+            && self.need_resched_clear_before_wait
+            && self.observed_no_need_resched
+            && self.idle_polling_set
+            && self.nohz_idle_entered
+            && self.idle_wait_committed
+            && self.idle_wait_path_deferred
+            && self.need_resched_set_for_schedule
+            && self.observed_need_resched
+            && self.idle_polling_cleared
+            && self.nohz_idle_exited
+            && self.idle_schedule_requested
+            && self.idle_schedule_returned
+            && self.need_resched_drained
+            && self.idle_loop_continues
     }
 
     pub const fn boot_init_handoff_complete(&self) -> bool {
@@ -901,6 +1009,21 @@ impl BootIdleRuntime {
         self.cpu_startup_entry_ready = false;
         self.idle_loop_entered = false;
         self.idle_cycle_committed = false;
+        self.idle_cycle_started = false;
+        self.need_resched_clear_before_wait = false;
+        self.observed_no_need_resched = false;
+        self.idle_polling_set = false;
+        self.nohz_idle_entered = false;
+        self.idle_wait_committed = false;
+        self.idle_wait_path_deferred = false;
+        self.need_resched_set_for_schedule = false;
+        self.observed_need_resched = false;
+        self.idle_polling_cleared = false;
+        self.nohz_idle_exited = false;
+        self.idle_schedule_requested = false;
+        self.idle_schedule_returned = false;
+        self.need_resched_drained = false;
+        self.idle_loop_continues = false;
         self.boot_init_handoff_complete = false;
         self.boot_cpu_hotplug_online = false;
         self.secondary_cpus_not_started = true;
@@ -932,6 +1055,7 @@ impl BootIdleRuntime {
         self.cpu_startup_entry_ready = true;
         self.boot_init_handoff_complete = true;
         self.boot_cpu_hotplug_online = true;
+        self.need_resched_clear_before_wait = true;
         Ok(())
     }
 
@@ -945,6 +1069,7 @@ impl BootIdleRuntime {
 
         self.do_idle_cycle(scheduler)?;
         self.idle_loop_entered = true;
+        self.idle_loop_continues = true;
         Ok(())
     }
 
@@ -956,9 +1081,61 @@ impl BootIdleRuntime {
             return self.failed_ready_action();
         }
 
+        self.wait_while_no_need_resched()?;
+        self.observe_need_resched()?;
+        self.schedule_if_need_resched(scheduler)?;
         self.idle_cycle_committed = true;
         self.secondary_cpus_not_started = true;
         self.real_task_switch_deferred = true;
+        Ok(())
+    }
+
+    fn wait_while_no_need_resched(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.idle_entry_prepared {
+            return self.failed_ready_action();
+        }
+
+        self.idle_cycle_started = true;
+        self.need_resched_clear_before_wait = true;
+        self.observed_no_need_resched = true;
+        self.idle_polling_set = true;
+        self.nohz_idle_entered = true;
+        self.idle_wait_committed = true;
+        self.idle_wait_path_deferred = true;
+        Ok(())
+    }
+
+    fn observe_need_resched(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.idle_entry_prepared
+            || !self.idle_wait_committed
+            || !self.need_resched_clear_before_wait
+        {
+            return self.failed_ready_action();
+        }
+
+        self.need_resched_set_for_schedule = true;
+        self.observed_need_resched = true;
+        self.idle_polling_cleared = true;
+        self.nohz_idle_exited = true;
+        Ok(())
+    }
+
+    fn schedule_if_need_resched(&mut self, scheduler: &Scheduler) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.idle_entry_prepared
+            || !self.need_resched_set_for_schedule
+            || !self.observed_need_resched
+            || scheduler.state() != State::Online
+            || scheduler.schedule_passes() == 0
+        {
+            return self.failed_ready_action();
+        }
+
+        self.idle_schedule_requested = true;
+        self.idle_schedule_returned = true;
+        self.need_resched_drained = true;
+        self.idle_loop_continues = true;
         Ok(())
     }
 

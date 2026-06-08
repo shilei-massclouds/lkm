@@ -157,8 +157,16 @@ boot CPU。
 `BootIdleRuntime.Ready` 壳并确认首次调度交接已存在，不得一次性写入全部 idle 尾部事实；
 phase 代码必须随后显式调用 `prepare_idle_entry()` 和 `run_idle_loop()`。`prepare_idle_entry()` 承载
 `current->flags |= PF_IDLE`、`arch_cpu_idle_prepare()` 和 `cpuhp_online_idle(CPUHP_ONLINE)` 的当前抽象事实；
-`run_idle_loop()` 只提交进入 idle loop，并驱动一轮代表性的 `do_idle_cycle()`。本步仍不得实现真实无限 idle loop、
-真实 `need_resched` 循环或真实 `schedule_idle()`；这些必须留给后续 action 细化。
+`run_idle_loop()` 只提交进入 idle loop，并驱动一轮代表性的 `do_idle_cycle()`。
+
+`do_idle_cycle()` 必须进一步暴露 `wait_while_no_need_resched()`、`observe_need_resched()` 和
+`schedule_if_need_resched()` 三个命名实现边界，对齐 model 中的
+`WaitWhileNoNeedResched`、`ObserveNeedResched` 和 `ScheduleIfNeedResched`。第一段记录 boot idle task
+进入抽象 idle wait 且 `need_resched` 尚未设置，polling/nohz/cpuidle/WFI 细节仍 deferred；第二段记录
+本 CPU 可观察环境设置 `need_resched`，idle task 离开 wait；第三段记录 idle 专用调度请求、调度返回以及
+`need_resched` 被 drain。当前仍只实现对象级代表性一轮，不得引入真实无限 idle loop、真实 timer/IRQ wakeup
+源、真实 cpuidle/WFI 路径或具体 `Scheduler.schedule_idle()` wrapper；后续细化时再把
+`schedule_if_need_resched()` 绑定到 scheduler 代码。
 
 本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
 真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是

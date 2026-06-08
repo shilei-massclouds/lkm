@@ -236,6 +236,9 @@ fn rest_init_phase_ready(ctx: &Context) -> bool {
         && ctx.boot_idle_runtime.cpu_startup_entry_ready()
         && ctx.boot_idle_runtime.idle_loop_entered()
         && ctx.boot_idle_runtime.idle_cycle_committed()
+        && ctx
+            .boot_idle_runtime
+            .representative_need_resched_cycle_committed()
         && ctx.boot_idle_runtime.boot_init_handoff_complete()
         && ctx.boot_idle_runtime.boot_cpu_hotplug_online()
         && ctx.boot_idle_runtime.secondary_cpus_not_started()

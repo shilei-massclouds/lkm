@@ -58,6 +58,7 @@ predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_boot_idle_runtime_split_entry_and_loop_actions() -> bool;
+predicate arceos_ex_must_boot_idle_runtime_model_representative_need_resched_cycle() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
@@ -606,6 +607,25 @@ type ArceosExRestInitCodingMust {
          * has named hooks to extend.
          */
         arceos_ex_must_boot_idle_runtime_split_entry_and_loop_actions();
+
+        /*
+         * Representative need_resched idle cycle:
+         *
+         * BootIdleRuntime.do_idle_cycle() must expose the three model action
+         * hooks WaitWhileNoNeedResched, ObserveNeedResched and
+         * ScheduleIfNeedResched as named implementation boundaries. The first
+         * boundary records that the boot idle task enters an abstract
+         * no-need-resched wait state with polling/nohz details deferred; the
+         * second records that the CPU-visible environment sets need_resched and
+         * the idle task leaves the wait state; the third records a
+         * schedule_idle request/return and drains the need_resched fact. This
+         * step is still an object-level representative cycle: it must not add a
+         * true infinite loop, real timer/IRQ wakeup source, cpuidle/WFI path, or
+         * a concrete Scheduler.schedule_idle() wrapper. That wrapper is the
+         * next coding refinement and will bind this named hook to scheduler
+         * code.
+         */
+        arceos_ex_must_boot_idle_runtime_model_representative_need_resched_cycle();
 
         /*
          * CurrentTaskRef scope:
