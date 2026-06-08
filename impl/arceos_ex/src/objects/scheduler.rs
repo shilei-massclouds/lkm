@@ -49,6 +49,12 @@ pub struct Scheduler {
     switch_to_exit_current_ref: CurrentTaskRef,
     switch_to_exit_committed_count: usize,
     switch_to_exit_count: usize,
+    schedule_exit_prev_ref: CurrentTaskRef,
+    schedule_exit_next_ref: CurrentTaskRef,
+    schedule_exit_current_ref: CurrentTaskRef,
+    schedule_exit_saved_interrupt_count: usize,
+    schedule_exit_restored_interrupt_count: usize,
+    schedule_exit_count: usize,
 }
 
 impl Scheduler {
@@ -88,6 +94,12 @@ impl Scheduler {
             switch_to_exit_current_ref: CurrentTaskRef::None,
             switch_to_exit_committed_count: 0,
             switch_to_exit_count: 0,
+            schedule_exit_prev_ref: CurrentTaskRef::None,
+            schedule_exit_next_ref: CurrentTaskRef::None,
+            schedule_exit_current_ref: CurrentTaskRef::None,
+            schedule_exit_saved_interrupt_count: 0,
+            schedule_exit_restored_interrupt_count: 0,
+            schedule_exit_count: 0,
         }
     }
 
@@ -240,6 +252,36 @@ impl Scheduler {
         self.switch_to_exit_count
     }
 
+    #[allow(dead_code)]
+    pub const fn schedule_exit_prev_ref(&self) -> CurrentTaskRef {
+        self.schedule_exit_prev_ref
+    }
+
+    #[allow(dead_code)]
+    pub const fn schedule_exit_next_ref(&self) -> CurrentTaskRef {
+        self.schedule_exit_next_ref
+    }
+
+    #[allow(dead_code)]
+    pub const fn schedule_exit_current_ref(&self) -> CurrentTaskRef {
+        self.schedule_exit_current_ref
+    }
+
+    #[allow(dead_code)]
+    pub const fn schedule_exit_saved_interrupt_count(&self) -> usize {
+        self.schedule_exit_saved_interrupt_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn schedule_exit_restored_interrupt_count(&self) -> usize {
+        self.schedule_exit_restored_interrupt_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn schedule_exit_count(&self) -> usize {
+        self.schedule_exit_count
+    }
+
     pub fn preset(
         &mut self,
         cpu_group: &CpuGroup,
@@ -358,6 +400,13 @@ impl Scheduler {
         self.schedule_passes = self.schedule_passes.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
         local_interrupt.restore()?;
+        self.schedule_exit_prev_ref = prev_ref;
+        self.schedule_exit_next_ref = next_ref;
+        self.schedule_exit_current_ref = current_task_slot.current();
+        self.schedule_exit_saved_interrupt_count = local_interrupt.saved_and_disabled_count();
+        self.schedule_exit_restored_interrupt_count = local_interrupt.restored_count();
+        self.schedule_exit_count = self.schedule_exit_count.wrapping_add(1);
+        crate::trace::checkpoint(Checkpoint::SchedulerScheduleExit);
         Ok(())
     }
 

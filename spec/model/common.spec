@@ -208,6 +208,7 @@ predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, 
 predicate scheduler_schedule_event_available<T>(scheduler: T) -> bool;
 predicate scheduler_schedule_smoke_ready<T>(scheduler: T) -> bool;
 predicate scheduler_schedule_local_interrupts_closed<T, U>(scheduler: T, local_interrupt: U) -> bool;
+predicate scheduler_schedule_exit_restores_local_interrupts<T, U>(scheduler: T, local_interrupt: U) -> bool;
 predicate scheduler_runqueue_lock_held_for_schedule<T, U>(scheduler: T, runqueue: U) -> bool;
 predicate scheduler_pick_next_task_identity<T, U, V>(scheduler: T, runqueue: U, task: V) -> bool;
 predicate scheduler_pick_next_task_selects_runnable<T, U, V>(scheduler: T, runqueue: U, task_ref: V) -> bool;
@@ -654,6 +655,7 @@ type SchedulerObject: TaskObject {
             ensures {
                 scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
                 scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
+                scheduler_schedule_exit_restores_local_interrupts(self, BootCpuLocalInterrupt);
                 scheduler_pick_next_task_selects_runnable(self, BootRunQueue, KernelInitTaskRef);
                 runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, KernelInitTaskRef);
                 scheduler_switch_to_committed(self, CurrentTaskRef, KernelInitTaskRef);

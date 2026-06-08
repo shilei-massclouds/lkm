@@ -10,8 +10,9 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::SchedulerPickNextTaskExit,
     Checkpoint::SchedulerSwitchToEntry,
     Checkpoint::SchedulerSwitchToExit,
+    Checkpoint::SchedulerScheduleExit,
 ];
-pub const KUNIT_CASE_COUNT: usize = 3;
+pub const KUNIT_CASE_COUNT: usize = 4;
 
 pub const HANDLER: Handler = Handler {
     name: "scheduler_action",
@@ -25,6 +26,7 @@ fn run(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
         Checkpoint::SchedulerPickNextTaskExit => check_pick_next_task_exit(checkpoint, ctx),
         Checkpoint::SchedulerSwitchToEntry => check_switch_to_entry(checkpoint, ctx),
         Checkpoint::SchedulerSwitchToExit => check_switch_to_exit(checkpoint, ctx),
+        Checkpoint::SchedulerScheduleExit => check_schedule_exit(checkpoint, ctx),
         _ => CheckpointOutcome::Continue,
     }
 }
@@ -75,6 +77,39 @@ fn check_switch_to_exit(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutc
             != ctx.scheduler.switch_to_exit_committed_count()
     {
         kunit::fail(total, "", name, "SwitchTo exit facts invalid");
+        return CheckpointOutcome::FailAndShutdown;
+    }
+
+    kunit::pass(total, "", name);
+    CheckpointOutcome::Continue
+}
+
+fn check_schedule_exit(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+    let total = super::kunit_case_count();
+    let name = "scheduler_action.schedule_exit";
+    kunit::start_case(total, "", name, checkpoint);
+    let next_ref = ctx.scheduler.schedule_exit_next_ref();
+    let current_ref = ctx.boot_cpu_current_task.current();
+    let current_is_first_boot_task =
+        current_ref == CurrentTaskRef::KernelInit || current_ref == CurrentTaskRef::Kthreadd;
+
+    if ctx.scheduler.state() != State::Online
+        || ctx.scheduler.schedule_exit_count() != 1
+        || ctx.scheduler.schedule_passes() != 1
+        || ctx.scheduler.schedule_exit_prev_ref() != CurrentTaskRef::BootIdle
+        || next_ref != ctx.scheduler.pick_next_task_exit_next_ref()
+        || next_ref != ctx.scheduler.switch_to_exit_next_ref()
+        || ctx.scheduler.schedule_exit_current_ref() != next_ref
+        || current_ref != next_ref
+        || !current_is_first_boot_task
+        || ctx.scheduler.schedule_exit_saved_interrupt_count()
+            != ctx.boot_cpu_local_interrupt.saved_and_disabled_count()
+        || ctx.scheduler.schedule_exit_restored_interrupt_count()
+            != ctx.boot_cpu_local_interrupt.restored_count()
+        || ctx.scheduler.schedule_exit_saved_interrupt_count()
+            != ctx.scheduler.schedule_exit_restored_interrupt_count()
+    {
+        kunit::fail(total, "", name, "Schedule exit facts invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
 

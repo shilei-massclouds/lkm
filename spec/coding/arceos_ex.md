@@ -736,7 +736,9 @@ current-task 视图取得 `CurrentTaskRef`，再从 `CurrentRunQueueRef` 执行 
 `prev_ref` 和 `next_ref` 与 pick result 一致，并且该进入点发生在本次 `CurrentTaskRef` switch commit 之前。
 第三步检查 `SwitchTo` 退出点：第一次 `rest_init` schedule 返回时，`CurrentTaskRef` 必须指向
 `PickNextTask` 选出的同一个 runnable task，即 `KernelInitTask` 或 `KthreaddTask`。更粗的
-`Scheduler.Schedule` 后置 checkpoint 留到这些 action 内部边界通过后再补。
+`Scheduler.Schedule.Exit` 后置 checkpoint 位于 `local_irq_restore()` 之后；第一次 `rest_init` schedule
+返回时，`CurrentTaskRef` 必须仍指向所选 runnable task，`schedule_passes` 必须已经提交，并且本次 local interrupt
+save/restore 计数配平。
 
 `CurrentTaskRef` 在 `arceos_ex` 中必须按模型定义实现为 CPU 视角私有引用。当前 BP 路径只存在 `BootCurrentCPU` 的
 `CurrentTaskRef`；它在 sched-init 后指向 `BootIdleTask`，在 `rest_init` 首次调度后更新为所选 runnable task。
