@@ -6,7 +6,10 @@ use super::{
     static_objects::StaticObjects,
     workqueue::Workqueue,
 };
-use crate::{context::Context, trace::Checkpoint};
+use crate::{
+    context::Context,
+    trace::{self, Checkpoint},
+};
 use core::mem::size_of;
 
 pub const INITCALL_LEVEL_COUNT: usize = 8;
@@ -192,12 +195,7 @@ fn postcore_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
 }
 
 fn of_platform_default_populate_init(ctx: ContextRef<'_>) -> InitcallReturn {
-    crate::objects::printk::write_str("initcall: of_platform_default_populate_init\n");
-    if ctx.platform_bus_type.state() == State::Ready && ctx.platform_bus_type.registered() {
-        InitcallReturn::Ok
-    } else {
-        InitcallReturn::Error(-1)
-    }
+    ctx.platform_bus_type.of_platform_default_populate_init()
 }
 
 fn subsys_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
@@ -730,6 +728,16 @@ impl PlatformBusType {
         self.register_return_zero = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    pub fn of_platform_default_populate_init(&self) -> InitcallReturn {
+        crate::objects::printk::write_str("initcall: of_platform_default_populate_init\n");
+        trace::checkpoint(Checkpoint::OfPlatformDefaultPopulateInitCalled);
+        if self.state() == State::Ready && self.registered() {
+            InitcallReturn::Ok
+        } else {
+            InitcallReturn::Error(-1)
+        }
     }
 
     pub fn add_device(&mut self, device: BusDeviceRef) -> EventResult {

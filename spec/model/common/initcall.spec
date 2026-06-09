@@ -45,12 +45,13 @@ enum InitcallRunLevel {
 type InitcallEntryPrototype {
 }
 
-type InitcallEntry {
+enum InitcallEntry {
+    OfPlatformDefaultPopulate,
 }
 
 predicate initcall_entry_prototype_no_payload_args<T>(prototype: T) -> bool;
 predicate initcall_entry_prototype_returns_result<T>(prototype: T) -> bool;
-predicate initcall_entry_ref_ready<T>(entry: T) -> bool;
+predicate initcall_entry_declared<T>(entry: T) -> bool;
 predicate initcall_entry_has_prototype<T, P>(entry: T, prototype: P) -> bool;
 predicate initcall_entry_owner_bound<T, O>(entry: T, owner: O) -> bool;
 predicate initcall_entry_operation_bound<T, O>(entry: T, owner: O) -> bool;
@@ -141,7 +142,7 @@ type InitcallTableType: KernelObject {
         Action::Register(level: InitcallLevel, entry: InitcallEntry) {
             state_effect: StateEffect::None;
             depends_on {
-                initcall_entry_ref_ready(entry);
+                initcall_entry_declared(entry);
             }
             ensures {
                 initcall_table_registration_committed(self, level, entry);
