@@ -788,7 +788,6 @@ pub struct BootRunQueue {
 }
 
 impl BootRunQueue {
-    #[cfg_attr(not(app_smoke), allow(dead_code))]
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
