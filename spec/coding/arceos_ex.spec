@@ -80,8 +80,8 @@ predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
 predicate arceos_ex_must_rest_init_keep_true_task_switching_deferred() -> bool;
 predicate arceos_ex_must_rest_init_keep_smp_and_later_runtime_deferred() -> bool;
-predicate arceos_ex_must_pre_smp_init_model_path_under_up_multitask_phase() -> bool;
-predicate arceos_ex_must_pre_smp_init_code_path_follow_up_multitask_phase_tree() -> bool;
+predicate arceos_ex_must_pre_smp_init_model_path_under_smp_runtime_phase() -> bool;
+predicate arceos_ex_must_pre_smp_init_code_path_follow_smp_runtime_phase_tree() -> bool;
 predicate arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_pre_smp_init_consume_kernel_init_entry_contract() -> bool;
 predicate arceos_ex_must_pre_smp_init_open_full_gfp_and_prepare_topology() -> bool;
@@ -914,17 +914,17 @@ type ArceosExPreSmpInitCodingMust {
         /*
          * Model path:
          *
-         * PreSmpInitPhase is UpMultitaskPhase subphase 2. Its formal model
-         * path is spec/model/up-multitask/pre-smp-init/.
+         * PreSmpInitPhase is SmpRuntimePhase subphase 1. Its formal model
+         * path is spec/model/smp-runtime/pre-smp-init/.
          */
-        arceos_ex_must_pre_smp_init_model_path_under_up_multitask_phase();
+        arceos_ex_must_pre_smp_init_model_path_under_smp_runtime_phase();
 
         /*
          * Code path:
          *
-         * Implementation must live under impl/arceos_ex/src/phases/up_multitask/.
+         * Implementation must live under impl/arceos_ex/src/phases/smp_runtime/.
          */
-        arceos_ex_must_pre_smp_init_code_path_follow_up_multitask_phase_tree();
+        arceos_ex_must_pre_smp_init_code_path_follow_smp_runtime_phase_tree();
 
         /*
          * Entry facts:
@@ -939,7 +939,8 @@ type ArceosExPreSmpInitCodingMust {
          *
          * This phase must also consume the TaskCreationCore entry contract:
          * KernelInitTask was created with TaskEntry::KernelInit and that entry
-         * points at the PreSmpInitPhase execution line.
+         * points at the SmpRuntimePhase execution line whose first child is
+         * PreSmpInitPhase.
          */
         arceos_ex_must_pre_smp_init_consume_kernel_init_entry_contract();
 

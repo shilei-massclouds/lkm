@@ -1,7 +1,7 @@
 /*
  * SMP Bringup Phase Specification
  *
- * This is SMP Runtime Phase subphase 1. It covers smp_init() on the boot
+ * This is SMP Runtime Phase subphase 2. It covers smp_init() on the boot
  * processor side, from idle_threads_init() through smp_cpus_done(). AP-side
  * internals are summarized as ack-producing actions, but the BP/AP
  * synchronization completions remain explicit model facts.

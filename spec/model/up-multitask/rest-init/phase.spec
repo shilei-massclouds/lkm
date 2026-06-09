@@ -1043,8 +1043,8 @@ object RestInitPhase: PhaseObject {
                     rest_init_dispatch_ready(RestInitPhase);
                     kernel_init_task_created(KernelInitTask);
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
-                    kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     kthreadd_task_created(KthreaddTask);
@@ -1084,8 +1084,8 @@ object RestInitPhase: PhaseObject {
             rcu_gp_seq_baseline_synced(RcuCore);
             KernelInitTask.state == State::Online;
             task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-            task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
-            kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
+            task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+            kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
             kernel_init_pf_no_setaffinity(KernelInitTask);
             kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             KthreaddTask.state == State::Online;

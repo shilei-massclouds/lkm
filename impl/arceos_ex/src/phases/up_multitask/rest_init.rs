@@ -19,7 +19,7 @@ pub fn preset(ctx: &mut Context) -> ! {
         setup_dispatch_objects(ctx).and_then(|()| checkpoint_dispatch_ready(ctx)),
         "arceos_ex rest init event failed\n",
     );
-    crate::phases::up_multitask::pre_smp_init::setup(ctx)
+    setup(ctx)
 }
 
 pub fn setup(ctx: &mut Context) -> ! {

@@ -1,11 +1,13 @@
 /*
  * SMP Runtime Phase Specification
  *
- * This top-level phase starts at smp_init(). The currently expanded
- * subphases are SmpBringupPhase, RuntimeCorePhase, InitcallPhase,
+ * This top-level phase starts from the KernelInitTask execution line forked
+ * by rest_init()'s first scheduler handoff. The currently expanded subphases
+ * are PreSmpInitPhase, SmpBringupPhase, RuntimeCorePhase, InitcallPhase,
  * RootfsPhase and FinalizePhase. AP-side details remain future work.
  */
 
+include "pre-smp-init/main.spec";
 include "smp-bringup/main.spec";
 include "runtime-core/main.spec";
 include "initcall/main.spec";
@@ -13,9 +15,9 @@ include "rootfs/main.spec";
 include "finalize/main.spec";
 
 /*
- * SmpRuntimePhase 表示多核运行期阶段对象。本轮正式展开
- * SmpBringupPhase、RuntimeCorePhase、InitcallPhase、RootfsPhase 与
- * FinalizePhase。
+ * SmpRuntimePhase 表示 KernelInitTask 驱动的 SMP/runtime 建立链。
+ * 它由 TaskEntry::KernelInit 启动，首个子阶段是 PreSmpInitPhase；
+ * 真正打开 SMP 并行的是后续 SmpBringupPhase/smp_init()。
  */
 object SmpRuntimePhase: PhaseObject {
     initial_state: State::Base;
@@ -26,10 +28,17 @@ object SmpRuntimePhase: PhaseObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     UpMultitaskPhase.state == State::Ready;
-                    PreSmpInitPhase.state == State::Ready;
+                    KernelInitTask.state == State::Online;
+                    task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_released_for_pre_smp_init(KernelInitTask);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
                 }
 
                 drives {
+                    PreSmpInitPhase.Event::Setup;
                     SmpBringupPhase.Event::Setup;
                     RuntimeCorePhase.Event::Setup;
                     InitcallPhase.Event::Setup;
@@ -39,6 +48,7 @@ object SmpRuntimePhase: PhaseObject {
 
                 ensures {
                     smp_runtime_phase_ready(SmpRuntimePhase);
+                    pre_smp_init_ready(PreSmpInitPhase);
                     smp_bringup_phase_ready(SmpBringupPhase);
                     runtime_core_phase_ready(RuntimeCorePhase);
                     initcall_phase_ready(InitcallPhase);
@@ -53,12 +63,19 @@ object SmpRuntimePhase: PhaseObject {
         invariant {
             UpMultitaskPhase.state == State::Ready;
             PreSmpInitPhase.state == State::Ready;
+            task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
+            task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+            kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+            kernel_init_released_for_pre_smp_init(KernelInitTask);
+            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+            scheduler_first_schedule_committed(Scheduler);
             SmpBringupPhase.state == State::Ready;
             RuntimeCorePhase.state == State::Ready;
             InitcallPhase.state == State::Ready;
             RootfsPhase.state == State::Ready;
             FinalizePhase.state == State::Ready;
             smp_runtime_phase_ready(SmpRuntimePhase);
+            pre_smp_init_ready(PreSmpInitPhase);
             runtime_core_phase_ready(RuntimeCorePhase);
             initcall_phase_ready(InitcallPhase);
             rootfs_phase_ready(RootfsPhase);

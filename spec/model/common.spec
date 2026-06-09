@@ -173,7 +173,7 @@ predicate task_thread_context_ready<T>(task: T) -> bool;
 predicate task_sched_entity_initialized<T, U>(task: T, scheduler: U) -> bool;
 predicate task_entry_bound<T>(task: T, entry: TaskEntry) -> bool;
 predicate task_entry_first_phase<T, U>(task: T, phase: U) -> bool;
-predicate kernel_init_entry_reaches_pre_smp_init<T, U>(task: T, phase: U) -> bool;
+predicate kernel_init_entry_reaches_smp_runtime<T, U>(task: T, phase: U) -> bool;
 predicate kthreadd_entry_reaches_schedule_loop<T, U>(task: T, scheduler: U) -> bool;
 predicate kthreadd_schedule_loop_ready<T, U>(task: T, scheduler: U) -> bool;
 predicate kthreadd_schedule_loop_schedule_boundary_deferred<T, U>(task: T, scheduler: U) -> bool;

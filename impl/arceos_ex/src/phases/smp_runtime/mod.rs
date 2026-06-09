@@ -1,5 +1,6 @@
 pub mod finalize;
 pub mod initcall;
+pub mod pre_smp_init;
 pub mod rootfs;
 pub mod runtime_core;
 pub mod smp_bringup;
@@ -15,7 +16,7 @@ static SMP_RUNTIME_PHASE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::e
 
 pub fn setup() -> ! {
     crate::trace::checkpoint(Checkpoint::SmpRuntimePhaseStarted);
-    smp_bringup::setup(crate::context::context())
+    pre_smp_init::setup(crate::context::context())
 }
 
 pub fn setup_after_children() -> ! {
@@ -42,6 +43,7 @@ fn smp_runtime_phase_ready() -> EventResult {
 
 pub fn is_ready() -> bool {
     crate::phases::state::load(&SMP_RUNTIME_PHASE_STATE) == State::Ready
+        && pre_smp_init::is_ready()
         && smp_bringup::is_ready()
         && runtime_core::is_ready()
         && initcall::is_ready()

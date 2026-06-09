@@ -79,8 +79,8 @@ make clean
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
-`ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready` 和
-`PreSmpInitPhase.Ready`），随后完成 `SmpRuntimePhase.Ready`（当前展开 `SmpBringupPhase.Ready`、
+`ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready`），
+随后完成 `SmpRuntimePhase.Ready`（当前展开 `PreSmpInitPhase.Ready`、`SmpBringupPhase.Ready`、
 `RuntimeCorePhase.Ready`、`InitcallPhase.Ready`、`RootfsPhase.Ready` 与 `FinalizePhase.Ready`），再通过
 后续的 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。`PayloadPhase` 是
 `SmpRuntimePhase` 的后续阶段，不是其最后一个子阶段；它直接衔接 `FinalizePhase.Ready` /
@@ -145,7 +145,7 @@ post-schedule boot idle context 进入三段体提交首次调度交接，boot i
 这些事实当前仍是对象级模拟边界，不得实现真实任务栈切换、真实调度上下文切换或 idle loop。
 
 PID 1 和 kthreadd 的创建必须通过 `TaskCreationCore` 的 entry contract 表达：`KernelInitTask` 使用
-`TaskEntry::KernelInit`，其第一执行线指向 `PreSmpInitPhase`；`KthreaddTask` 使用
+`TaskEntry::KernelInit`，其第一执行线指向 `SmpRuntimePhase`；`KthreaddTask` 使用
 `TaskEntry::Kthreadd`，其第一执行线指向 kthreadd 服务循环边界。当前 BP 最小实现只需要把 kthreadd 入口循环建模为“等待工作、无工作时请求 `schedule()` 切出”的 named boundary；真实 kthread 请求消费、park/stop/wait 细节，以及非 idle current 下的完整 scheduler 切换留给后续模型。
 
 PID 1 的临时 boot CPU 亲和约束不得实现为独立 `KernelInitAffinity` 对象；它必须作为
@@ -162,10 +162,10 @@ runqueue 的 enqueue/activate 边界。当前 BP 最小实现可以把 `cpu_of(s
 boot CPU。
 
 `schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部和
-`KernelInitTask -> PreSmpInitPhase` 的分叉点。它不得实现为独立对象或单个
+`KernelInitTask -> SmpRuntimePhase` 执行线的分叉点。它不得实现为独立对象或单个
 `Scheduler` action，而应展开为 `BootIdlePreemption.enable_no_resched()`、
 `Scheduler.schedule()` 和 post-schedule boot idle context。不得引入
-`KernelInitDispatchGate` 生命周期对象。`PreSmpInitPhase` 依赖
+`KernelInitDispatchGate` 生命周期对象。`SmpRuntimePhase` 首个子阶段 `PreSmpInitPhase` 依赖
 `KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact，不能硬依赖 `RestInitPhase.Ready`。
 `RestInitPhase.Ready` 仍必须覆盖
 `cpu_startup_entry(CPUHP_ONLINE)` 对应的 boot idle 尾部完成事实。
@@ -202,14 +202,14 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 策略分支中才可能成立。
 
 本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
-真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行点是
-`PreSmpInitPhase`，该事实来自 `TaskEntry::KernelInit` 的创建入口绑定；`KthreaddTask` 当前只实现入口循环和 schedule 请求边界，完整运行期服务能力留给后续模型。
+真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行线是
+`SmpRuntimePhase`，其首个子阶段是 `PreSmpInitPhase`；该事实来自 `TaskEntry::KernelInit` 的创建入口绑定。`KthreaddTask` 当前只实现入口循环和 schedule 请求边界，完整运行期服务能力留给后续模型。
 
 ## PreSmpInitPhase 编码约束
 
-`PreSmpInitPhase` 是 `UpMultitaskPhase` 的第二个子阶段，formal model 路径为
-`spec/model/up-multitask/pre-smp-init/`，目标实现路径为
-`impl/arceos_ex/src/phases/up_multitask/pre_smp_init.rs`。该阶段由 `KernelInitTask` 在
+`PreSmpInitPhase` 是 `SmpRuntimePhase` 的第一个子阶段，formal model 路径为
+`spec/model/smp-runtime/pre-smp-init/`，目标实现路径为
+`impl/arceos_ex/src/phases/smp_runtime/pre_smp_init.rs`。该阶段由 `KernelInitTask` 在
 `kernel_init_freeable()` 中推进，入口是 `KernelInitTask` 已被 `kthreadd_done` 释放、
 `KernelInitTask` dispatch facts 和 Scheduler 首次调度 fact，出口停在 `smp_init()` 调用前。
 
@@ -218,7 +218,7 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 `PreSmpInitBoundary`。它可以发布阻塞 GFP 分配可用、workqueue worker 创建边界、Tasks RCU GP thread
 创建边界和 early initcall 已运行事实，但不得把 secondary CPU 标记为 online，也不得执行 `smp_init()`。
 本阶段入口除依赖 `KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact 外，还必须消费
-`TaskCreationCore` 建立的 entry contract：`KernelInitTask` 的 `TaskEntry::KernelInit` 指向 `PreSmpInitPhase`。
+`TaskCreationCore` 建立的 entry contract：`KernelInitTask` 的 `TaskEntry::KernelInit` 指向 `SmpRuntimePhase`。
 
 测试应覆盖 full GFP mask 已打开、secondary CPU 只处于 present/not-online、Workqueue Ready 但 SMP topology
 仍 deferred、VmstatCore Prepared、TasksRcu Ready、pre-SMP initcall 已运行、`smp_init()` 未执行，以及
@@ -227,7 +227,7 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 
 ## SmpBringupPhase 编码约束
 
-`SmpBringupPhase` 是 `SMP Runtime Phase` 的第一个子阶段，formal model 路径为
+`SmpBringupPhase` 是 `SMP Runtime Phase` 的第二个子阶段，formal model 路径为
 `spec/model/smp-runtime/smp-bringup/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/smp_bringup.rs`。该阶段从 `smp_init()` 开始，由
 `KernelInitTask` 在 boot CPU 上驱动，当前对象级实现只展开 BP 侧主线和 BP/AP 同步边界。
@@ -311,7 +311,7 @@ ramdisk eaccess 强制进入 prepare_namespace、RootFS enable deferred、integr
 
 ## FinalizePhase 编码约束
 
-`FinalizePhase` 是 `SMP Runtime Phase` 的第五个子阶段，formal model 路径为
+`FinalizePhase` 是 `SMP Runtime Phase` 的第六个子阶段，formal model 路径为
 `spec/model/smp-runtime/finalize/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/finalize.rs`。该阶段必须在 `RootfsPhase.Ready` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `kernel_init()` 中 `kernel_init_freeable()` 返回后的收尾边界。
@@ -336,8 +336,8 @@ sysctl args deferred，以及下一入口仍是 `PayloadPhase`。
 `SmpRuntimePhase.Ready` 之后的后续阶段实现，而不是嵌套为 `SmpRuntimePhase` 的子阶段。入口必须要求
 `FinalizePhase.Ready` 和 `FinalizeBoundary.Ready`，并消费 `payload_phase_next_boundary()` 事实。
 
-KernelInitTask 的执行线从 `PreSmpInitPhase` 入口开始：`rest_init()` 通过 `TaskCreationCore` 把
-`TaskEntry::KernelInit` 绑定到 `KernelInitTask`，并提交 release/dispatch facts；`PreSmpInitPhase` 消费这些 entry/release/dispatch facts 后进入。后续阶段按 phase 顺序衔接到 `FinalizePhase`，再自然进入 `PayloadPhase`。因此 selected payload 的执行归属应从这条连续执行线推出，而不是由 `PayloadPhase` 单独声明一个调用者事实。`BootIdleTask` 只负责 idle loop、need_resched observation 和 schedule boundary；`KthreaddTask` 当前提供内核线程管理者 ready/provider 事实和最小 schedule-loop 入口边界。
+KernelInitTask 的执行线从 `SmpRuntimePhase` 入口开始：`rest_init()` 通过 `TaskCreationCore` 把
+`TaskEntry::KernelInit` 绑定到 `KernelInitTask`，并提交 release/dispatch facts；`SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 消费这些 entry/release/dispatch facts 后进入。后续阶段按 phase 顺序衔接到 `FinalizePhase`，再自然进入 `PayloadPhase`。因此 selected payload 的执行归属应从这条连续执行线推出，而不是由 `PayloadPhase` 单独声明一个调用者事实。`BootIdleTask` 只负责 idle loop、need_resched observation 和 schedule boundary；`KthreaddTask` 当前提供内核线程管理者 ready/provider 事实和最小 schedule-loop 入口边界。
 
 ## Pre-VM lifecycle 代码生成约束
 

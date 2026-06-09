@@ -2177,21 +2177,22 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `SystemState.state == Prepared`，且内部属性 `SystemState.value == SYSTEM_BOOTING`
 - secondary CPU 尚未启动
 
-当前先把 `UP Multitask Phase` 拆为两个子阶段；需要注意，二者不是严格的
-`RestInitPhase.Ready -> PreSmpInitPhase.Started` 串行关系，而是在
-`schedule_preempt_disabled()` 展开的调度分界处分叉：
+当前 `UP Multitask Phase` 只正式展开 `RestInitPhase`。需要注意，`rest_init()`
+中的 `schedule_preempt_disabled()` 展开后会 fork 出另一条由 `KernelInitTask`
+驱动的执行线：
 
 - `BootInitTask` 继续执行 `rest_init()`，在调度交接后完成
   `cpu_startup_entry(CPUHP_ONLINE)`，并以 `BootIdleTask` 身份进入 idle 路径。
 - `KernelInitTask` 在同一次调度交接后获得运行机会，消费 `kthreadd_done` 释放事实，
-  然后进入 `kernel_init_freeable()`，开始 `PreSmpInitPhase`。
-- 因此 `PreSmpInitPhase.Started` 可以早于 `RestInitPhase.Ready`；
-  `RestInitPhase.Ready` 仍必须包含 boot idle 身份转换和 idle 入口事实。
-- `UpMultitaskPhase.Ready` 才是两个分支均完成后的汇合边界：
-  `RestInitPhase.Ready && PreSmpInitPhase.Ready`。
+  然后进入 `kernel_init_freeable()`，启动 `SmpRuntimePhase`，其首个子阶段是
+  `PreSmpInitPhase`。
+- 因此 `PreSmpInitPhase.Started` 不是 `RestInitPhase.Ready` 后的普通 sibling；
+  `RestInitPhase.Ready` 只收束 boot idle 身份转换和 idle 入口事实。
+- `SmpRuntimePhase` 由 `TaskEntry::KernelInit` 启动，而不是由
+  `UpMultitaskPhase` 的最后子阶段顺序衔接启动。
 
 1. `RestInitPhase`：覆盖 Linux `rest_init()`。它由上一阶段遗留的 `BootInitTask` 执行，依次调用 `rcu_scheduler_starting()`，通过通用 `TaskCreationCore` 创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，完成 `kthreadd_done`，最后把 `schedule_preempt_disabled()` 展开为 preemption guard 退出、`Scheduler.schedule()` 调度分界和 post-schedule boot idle context 进入，再由 `cpu_startup_entry(CPUHP_ONLINE)` 将当前执行实体确认为 boot CPU 的显式 `BootIdleTask`。完成后，单核多任务调度语义成立。
-2. `PreSmpInitPhase`：覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是下一顶层阶段 `SMP Runtime Phase` 的入口边界。
+2. `SmpRuntimePhase` 的入口由 `TaskEntry::KernelInit` 启动；其首个子阶段 `PreSmpInitPhase` 覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口边界。
 
 ##### UP Multitask Phase 分叉修正规则
 
@@ -2203,10 +2204,10 @@ Scheduler action。该分界提交 `Scheduler.first_schedule_committed` 等调�
 没有对应的长期对象或明确生命周期，且 `schedule_preempt_disabled()` 是由
 preemption guard 边界和调度分界组成的通用 helper。
 
-`PreSmpInitPhase` 依赖 `KernelInitTask` release/dispatch facts 和 Scheduler
-first-schedule fact，不直接依赖 `RestInitPhase.Ready`。`RestInitPhase.Ready`
-仍保持依赖 `BootIdleRuntime.Ready`，表示 boot idle 尾部已经完成。`UpMultitaskPhase.Ready`
-是汇合边界，同时要求 `RestInitPhase.Ready` 与 `PreSmpInitPhase.Ready`。
+`SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 依赖 `KernelInitTask`
+release/dispatch facts 和 Scheduler first-schedule fact，不作为
+`UpMultitaskPhase` 的普通 sibling，也不直接依赖 `RestInitPhase.Ready`。
+`RestInitPhase.Ready` 仍保持依赖 `BootIdleRuntime.Ready`，表示 boot idle 尾部已经完成。
 
 实现层应拆分 `rest_init`：前半段创建 PID 1/kthreadd、完成 `kthreadd_done`，随后退出
 boot 初始 preempt-disabled 上下文、调用 `Scheduler.schedule()` 并进入 post-schedule
@@ -2277,7 +2278,7 @@ boot idle context；随后 `PreSmpInitPhase` 可从上述 facts 启动；最后 
   图 25 rest_init 期对象构建时序
 </p>
 
-图 25 按 Linux 6.12.37 `rest_init()` 的有效调用顺序展示 `UP Multitask Phase` 子阶段 1 的推进过程。绿色节点表示当前主线 formal/action 候选，紫色节点表示同步门或全局状态 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`kernel_init_freeable()` 不属于本子阶段，它在 `KthreaddReadyGate.complete()` 释放后由 `KernelInitTask` 进入下一子阶段 `PreSmpInitPhase`。
+图 25 按 Linux 6.12.37 `rest_init()` 的有效调用顺序展示 `UP Multitask Phase` 子阶段 1 的推进过程。绿色节点表示当前主线 formal/action 候选，紫色节点表示同步门或全局状态 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`kernel_init_freeable()` 不属于本子阶段，它在 `KthreaddReadyGate.complete()` 释放后由 `KernelInitTask` 启动 `SmpRuntimePhase`，并进入其首个子阶段 `PreSmpInitPhase`。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2298,15 +2299,15 @@ boot idle context；随后 `PreSmpInitPhase` 可从上述 facts 启动；最后 
 - `NumaDefaultPolicy` 按当前配置记录为 trimmed/no-op
 - 下一子阶段的主执行任务是 `KernelInitTask`，入口是 `kernel_init_freeable()` 中 `gfp_allowed_mask = __GFP_BITS_MASK`
 
-#### UP Multitask Phase 子阶段 2：SMP 前初始化期（Pre-SMP Init Subphase）
+#### SMP Runtime Phase 子阶段 1：SMP 前初始化期（Pre-SMP Init Subphase）
 
-`UP Multitask Phase` 的第二个子阶段暂名 `PreSmpInitPhase`，中文名为 SMP 前初始化期。它对应 Linux 6.12.37 `kernel_init_freeable()` 中从 `gfp_allowed_mask = __GFP_BITS_MASK` 开始，到 `smp_init()` 调用前结束的初始化段。`smp_init()` 本身不属于本子阶段，而是下一顶层阶段 `SMP Runtime Phase` 的入口。
+`SMP Runtime Phase` 的第一个子阶段暂名 `PreSmpInitPhase`，中文名为 SMP 前初始化期。它对应 Linux 6.12.37 `kernel_init_freeable()` 中从 `gfp_allowed_mask = __GFP_BITS_MASK` 开始，到 `smp_init()` 调用前结束的初始化段。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口。
 
 这个子阶段运行在上一子阶段创建并被 `KthreaddReadyGate` 释放的 `KernelInitTask` 上。此时 `BootIdleTask` 和 `KthreaddTask` 已经存在，`SystemState.state == Ready` 且内部属性 `SystemState.value == SYSTEM_SCHEDULING`，但只有 boot CPU online，secondary CPU 尚未启动。因此，本阶段可以使用调度、completion、kthread 和阻塞分配能力来完成更接近运行期的准备，但仍不能把任何对象解释为“多核并行已经开始”。
 
 当前先将 `PreSmpInitPhase` 的对象和边界记录如下：
 
-1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `UP Multitask Phase` 的第二个子阶段对象。它不从 `RestInitPhase.Ready` 串行接续，而是在 `KernelInitTask` 已被 `kthreadd_done` 释放、Scheduler 首次调度交接已提交后由 `KernelInitTask` 分叉进入；此时 `BootInitTask` 仍可继续完成 `RestInitPhase` 的 boot idle 尾部。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界；`UpMultitaskPhase.Ready` 再以 `RestInitPhase.Ready && PreSmpInitPhase.Ready` 汇合。
+1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第一个子阶段对象。它不从 `RestInitPhase.Ready` 串行接续，而是在 `KernelInitTask` 已被 `kthreadd_done` 释放、Scheduler 首次调度交接已提交后由 `TaskEntry::KernelInit` 启动的 `SmpRuntimePhase` 进入；此时 `BootInitTask` 仍可继续完成 `RestInitPhase` 的 boot idle 尾部。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界。
 2. `页分配器完整 GFP mask 属性`：覆盖 `gfp_allowed_mask = __GFP_BITS_MASK`。它不是独立对象，也不属于 `KernelInitTask`，而是 `PageAllocator` 的全局分配策略属性。当前建模为 `PageAllocator.open_full_gfp_mask()` action，不推进 `PageAllocator` 标准生命周期，只记录 `PageAllocator.gfp_allowed_mask == __GFP_BITS_MASK`，表示后续初始化可以执行可能阻塞的 `GFP_KERNEL` 分配。
 3. `init 内存节点访问路径`：覆盖 `set_mems_allowed(node_states[N_MEMORY])`。当前 `CONFIG_CPUSETS=n` 且 `CONFIG_NUMA=n`，该调用在头文件中折叠为空实现，按 trimmed/no-op 记录，不在本阶段展开对象建模。
 4. `cad_pid 绑定路径`：覆盖 `cad_pid = get_pid(task_pid(current))`。它属于 reboot/ctrl-alt-del 控制路径的全局引用绑定；当前启动主线不依赖它，先按 deferred 记录，后续讨论系统控制或 reboot/poweroff 路径时再决定归属。
@@ -2416,7 +2417,7 @@ boot idle context；随后 `PreSmpInitPhase` 可从上述 facts 启动；最后 
 - `cad_pid = get_pid(task_pid(current))` 按当前阶段记录为 deferred
 - 下一阶段入口是 `smp_init()`；`sched_init_smp()` 和 `workqueue_init_topology()` 均发生在 `smp_init()` 之后，属于后续 `SMP Runtime Phase` 早期补全过程
 
-至此，`UP Multitask Phase` 的两个子阶段可以收尾：`RestInitPhase` 建立并运行 `KernelInitTask` / `KthreaddTask`，`PreSmpInitPhase` 在 PID 1 上完成 `smp_init()` 前仍必须由 boot CPU 在单核多任务环境中推进的准备。阶段终点按控制流定义为“下一条主线调用是 `smp_init()`”；此时 secondary CPU 只处于 possible/present，不处于 online，也尚未形成多核并行。
+至此，`SmpRuntimePhase` 的首个子阶段可以收尾：`RestInitPhase` 已在上一阶段建立并运行 `KernelInitTask` / `KthreaddTask`，`PreSmpInitPhase` 在 PID 1 上完成 `smp_init()` 前仍必须由 boot CPU 在单核多任务环境中推进的准备。阶段终点按控制流定义为“下一条主线调用是 `smp_init()`”；此时 secondary CPU 只处于 possible/present，不处于 online，也尚未形成多核并行。
 
 本阶段的结束状态暂定至少包含：
 
@@ -2437,13 +2438,13 @@ boot idle context；随后 `PreSmpInitPhase` 可从上述 facts 启动；最后 
 - `Softirq.ksoftirqd_threads_registered == true`
 - `smp_init()` 尚未执行
 - secondary CPU 尚未进入内核并行执行路径
-- 下一阶段的起点是 `smp_init()`，它将启动 secondary CPU，并把系统推进到 `SMP Runtime Phase`
+- 下一子阶段的起点是 `smp_init()`，它将启动 secondary CPU，并推进到 `SmpBringupPhase`
 
-进入下一阶段时，驱动流仍是 `KernelInitTask`。第一条主线调用是 `smp_init()`，它将通过 CPU hotplug / arch bringup 路径启动 secondary CPU；因此从该调用开始，规格切换到 `SMP Runtime Phase`，其第一个子阶段为 `SmpBringupPhase`。
+进入下一子阶段时，驱动流仍是 `KernelInitTask`。第一条主线调用是 `smp_init()`，它将通过 CPU hotplug / arch bringup 路径启动 secondary CPU；因此从该调用开始进入 `SmpBringupPhase`。
 
 ### 多核运行期对象建立
 
-从这一小节开始，对应顶层 `SMP Runtime Phase`。本阶段从 `kernel_init_freeable()` 中 `smp_init()` 调用入口开始，到 `kernel_init()` 中 `do_sysctl_args()` 完成后、首次尝试 `run_init_process(...)` 前结束。`smp_init()` 是阶段入口，因为它会启动 secondary CPU，使系统从 boot CPU 单核运行进入真正多核并行；首次 `run_init_process(...)` 之后属于 selected payload / 第一个用户态 init 的交接，应进入后续 `PayloadPhase`。
+从这一小节开始，对应顶层 `SMP Runtime Phase`。本阶段从 `KernelInitTask` 的 `TaskEntry::KernelInit` 入口开始，到 `kernel_init()` 中 `do_sysctl_args()` 完成后、首次尝试 `run_init_process(...)` 前结束。首个子阶段 `PreSmpInitPhase` 仍保持单核运行；真正启动 secondary CPU 的入口是后续 `SmpBringupPhase` 中的 `smp_init()`。首次 `run_init_process(...)` 之后属于 selected payload / 第一个用户态 init 的交接，应进入后续 `PayloadPhase`。
 
 `system_state = SYSTEM_RUNNING` 是本阶段内的重要 checkpoint，但不作为本阶段终点。原因是 Linux 在该状态切换之后仍会执行 `numa_default_policy()`、`rcu_end_inkernel_boot()` 和 `do_sysctl_args()` 等内核侧启动收尾动作；这些动作完成后，才进入用户态 payload 选择和交接。
 
@@ -2463,23 +2464,24 @@ boot idle context；随后 `PreSmpInitPhase` 可从上述 facts 启动；最后 
 - `TasksRcu.state == Ready`
 - `LockupDetector` 当前 deferred，不作为 `SMP Runtime Phase` 输入状态要求
 
-当前先把 `SMP Runtime Phase` 拆为五个子阶段：
+当前先把 `SMP Runtime Phase` 拆为六个子阶段：
 
-1. `SmpBringupPhase`：覆盖 `smp_init()`。本轮实现重点是 boot CPU/BP 侧主线：创建 secondary CPU idle task，建立 CPU hotplug 同步量，发起 non-boot CPU bringup，并等待 AP summary path 通过 `cpu_running` 与 `done_up` 返回确认。RISC-V secondary entry、`smp_callin()`、AP 本地中断打开、AP idle 入口和 AP hotplug callback 内部细节当前保持 deferred，但 AP 对 BP 可见的同步量和 secondary CPU online 边界不能省略。完成后，多核并行语义成立。
-2. `RuntimeCorePhase`：覆盖 `sched_init_smp()` 到 `page_alloc_init_late()`。它完成 SMP 调度域、解除 PID 1 的 boot CPU 绑定、workqueue topology、async workqueue、padata 和 page allocator late。
-3. `InitcallPhase`：覆盖 `do_basic_setup()`。它包含 `cpuset_init_smp()`、`driver_init()`、`init_irq_proc()`、`do_ctors()` 和 `do_initcalls()`，属于 initcall 表驱动的大阶段。
-4. `RootfsPhase`：覆盖 `kunit_run_all_tests()`、`wait_for_initramfs()`、`console_on_rootfs()`、`prepare_namespace()` 和 `integrity_load_keys()`。它建立用户态入口前的 rootfs/namespace/key 相关条件。
-5. `FinalizePhase`：覆盖 `kernel_init_freeable()` 返回后的内核侧收尾：`async_synchronize_full()`、`SYSTEM_FREEING_INITMEM`、释放 initmem、`mark_readonly()`、`pti_finalize()`、`SYSTEM_RUNNING`、`rcu_end_inkernel_boot()` 和 `do_sysctl_args()`。完成后进入 `PayloadPhase`。
+1. `PreSmpInitPhase`：覆盖 `kernel_init_freeable()` 中 `smp_init()` 前的准备段。
+2. `SmpBringupPhase`：覆盖 `smp_init()`。本轮实现重点是 boot CPU/BP 侧主线：创建 secondary CPU idle task，建立 CPU hotplug 同步量，发起 non-boot CPU bringup，并等待 AP summary path 通过 `cpu_running` 与 `done_up` 返回确认。RISC-V secondary entry、`smp_callin()`、AP 本地中断打开、AP idle 入口和 AP hotplug callback 内部细节当前保持 deferred，但 AP 对 BP 可见的同步量和 secondary CPU online 边界不能省略。完成后，多核并行语义成立。
+3. `RuntimeCorePhase`：覆盖 `sched_init_smp()` 到 `page_alloc_init_late()`。它完成 SMP 调度域、解除 PID 1 的 boot CPU 绑定、workqueue topology、async workqueue、padata 和 page allocator late。
+4. `InitcallPhase`：覆盖 `do_basic_setup()`。它包含 `cpuset_init_smp()`、`driver_init()`、`init_irq_proc()`、`do_ctors()` 和 `do_initcalls()`，属于 initcall 表驱动的大阶段。
+5. `RootfsPhase`：覆盖 `kunit_run_all_tests()`、`wait_for_initramfs()`、`console_on_rootfs()`、`prepare_namespace()` 和 `integrity_load_keys()`。它建立用户态入口前的 rootfs/namespace/key 相关条件。
+6. `FinalizePhase`：覆盖 `kernel_init_freeable()` 返回后的内核侧收尾：`async_synchronize_full()`、`SYSTEM_FREEING_INITMEM`、释放 initmem、`mark_readonly()`、`pti_finalize()`、`SYSTEM_RUNNING`、`rcu_end_inkernel_boot()` 和 `do_sysctl_args()`。完成后进入 `PayloadPhase`。
 
-#### SMP Runtime Phase 子阶段 1：SMP 启动期（SMP Bringup Subphase）
+#### SMP Runtime Phase 子阶段 2：SMP 启动期（SMP Bringup Subphase）
 
-`SMP Runtime Phase` 的第一个子阶段暂名 `SmpBringupPhase`，中文名为 SMP 启动期。它对应 Linux 6.12.37 `smp_init()` 的完整执行段，从 `idle_threads_init()` 开始，到 RISC-V 当前为空实现的 `smp_cpus_done(setup_max_cpus)` 返回为止。
+`SMP Runtime Phase` 的第二个子阶段暂名 `SmpBringupPhase`，中文名为 SMP 启动期。它对应 Linux 6.12.37 `smp_init()` 的完整执行段，从 `idle_threads_init()` 开始，到 RISC-V 当前为空实现的 `smp_cpus_done(setup_max_cpus)` 返回为止。
 
 这个子阶段由 `KernelInitTask` 在 boot CPU 上发起，但执行结果会启动 secondary CPU 上的运行流。前序 `sched_init()` 已把 `BootIdleTask` 绑定为 `CpuGroup.Cpu[BootCPU.id].IdleTask`；`idle_threads_init()` 只为 possible non-boot CPU 准备 `CpuGroup.Cpu[cpu].IdleTask`，不重新处理 boot CPU。随后 `cpuhp_threads_init()` 初始化各 CPU 的 `CpuHotplugState` 同步门，注册 `CpuHotplugThread` 的 smpboot 模板，并只为当前 online 的 boot CPU 创建/唤醒 `CpuGroup.Cpu[BootCPU.id].CpuHotplugThread`；secondary CPU 的 `CpuHotplugThread` 内部创建/唤醒细节本轮保持 deferred。`bringup_nonboot_cpus(setup_max_cpus)` 再按 CPU hotplug 状态机启动 present CPUs。对 RISC-V 而言，`cpu_ops->cpu_start()` 是 BP/AP 分叉点：boot CPU 释放目标 hart 后继续等待同步 completion；AP 侧真实执行 `secondary_start_sbi`、`smp_callin()` 和 AP idle/hotplug callback，但本轮规格只把它压缩成两个 summary ack：`SecondaryCpuStartupAck` 完成 `cpu_running`，`SecondaryCpuOnlineAck` 完成 `done_up` 并发布 secondary CPU online。`done_down` 作为同一 hotplug 协议的 teardown/rollback 同步量保留位置。这样 BP 侧流程能够闭合，同时 AP 内部对象留给未来单独展开。
 
 当前先将 `SmpBringupPhase` 的对象和边界记录如下：
 
-1. `SMP 启动期对象`（暂名 `SmpBringupPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第一个子阶段对象。它从 `PreSmpInitPhase.Ready` 接续，由 `KernelInitTask` 驱动，按 `smp_init()` 的有效顺序推进 secondary CPU 从 present 到 online。
+1. `SMP 启动期对象`（暂名 `SmpBringupPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第二个子阶段对象。它从 `PreSmpInitPhase.Ready` 接续，由 `KernelInitTask` 驱动，按 `smp_init()` 的有效顺序推进 secondary CPU 从 present 到 online。
 2. `secondary idle 任务对象`（`CpuGroup.Cpu[cpu].IdleTask`）：覆盖 `idle_threads_init()`。它遍历 possible CPU，跳过 `BootCPU.id`，对每个 possible non-boot CPU 驱动 `CpuGroup.Cpu[cpu].IdleTask.preset()`：形成并初始化该 CPU 的 inactive idle task，内部对应 Linux `fork_idle(cpu)` / `init_idle(task, cpu)`，并写入 `per_cpu(idle_threads, cpu)`、`CpuGroup.Cpu[cpu].RunQueue.idle` 和 `CpuGroup.Cpu[cpu].RunQueue.curr` 等引用。该调用不启动 CPU，不设置 `cpu.online`，也不推进 `IdleTask.enable()`；secondary idle task 真正进入 AP idle 路径留给后续 `cpu_startup_entry(CPUHP_AP_ONLINE_IDLE)`。
 3. `CPU hotplug 状态与线程对象`：覆盖 `cpuhp_threads_init()`。`CpuHotplugState` 是 `CpuGroup.Cpu[cpu]` 的子对象，不再作为顶层集合对象；`CpuHotplugThread` 是 `SmpbootThread` Type 的特化实例，挂在对应 CPU 下，写作 `CpuGroup.Cpu[cpu].CpuHotplugThread`。本调用先驱动所有 possible CPU 的 `CpuHotplugState.preset_sync_gates()`，初始化 `done_up` / `done_down` completion；这两个 completion 按通用规则作为 `CpuHotplugState` 的同步子对象/属性，不单独建立 gate 对象。随后记录 `CpuHotplugThread.template.registered == true`；最后只为当前 online 的 `BootCPU` 创建并 unpark `CpuGroup.Cpu[BootCPU.id].CpuHotplugThread`。secondary CPU 的 `CpuHotplugThread` 不要求在本调用结束时存在。
 4. `CPU 组对象`（`CpuGroup`）的正式启用动作：覆盖 `bringup_nonboot_cpus(setup_max_cpus)` 的主线。`max_cpus == 0` 只作为 `nosmp` checkpoint，成立时跳过 secondary bringup。当前未启用 `CONFIG_HOTPLUG_PARALLEL`，并且 `cpuhp_bringup_cpus_parallel(max_cpus)` 折叠为 false，因此实际走串行 `cpuhp_bringup_mask(cpu_present_mask, setup_max_cpus, CPUHP_ONLINE)`。规格层把它建模为集合级 `CpuGroup.enable(mask = present_cpus, limit = setup_max_cpus, target = CPUHP_ONLINE)`，它不直接执行 arch 启动，而是逐个对目标 CPU 调用 `CpuGroup.Cpu[cpu].CpuHotplugState.advance(target = CPUHP_ONLINE)`。
@@ -2788,13 +2790,13 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 #### SMP Runtime Phase 子阶段 5：收尾期（Finalize Subphase）
 
-`SMP Runtime Phase` 的第五个子阶段暂名 `FinalizePhase`，中文名为收尾期。它对应 Linux 6.12.37 `kernel_init()` 中 `kernel_init_freeable()` 返回之后，从 `async_synchronize_full()` 开始，到 `do_sysctl_args()` 完成后、首次 `run_init_process(...)` 尝试前结束。
+`SMP Runtime Phase` 的第六个子阶段暂名 `FinalizePhase`，中文名为收尾期。它对应 Linux 6.12.37 `kernel_init()` 中 `kernel_init_freeable()` 返回之后，从 `async_synchronize_full()` 开始，到 `do_sysctl_args()` 完成后、首次 `run_init_process(...)` 尝试前结束。
 
 这个子阶段完成内核侧启动链的最终收尾：等待所有 async init work，进入 `SYSTEM_FREEING_INITMEM`，释放或裁剪 init-only text/data 相关资源，释放 initmem，设置内核 rodata/权限，进入 `SYSTEM_RUNNING`，结束 in-kernel boot RCU 模式，并处理 sysctl 参数。完成后，内核侧启动编排不再继续建立基础对象，而是进入 `PayloadPhase`，选择并执行第一个用户态 init 或等价 selected payload。
 
 当前先将 `FinalizePhase` 的对象和边界记录如下：
 
-1. `收尾期对象`（暂名 `FinalizePhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第五个子阶段对象。它从 `RootfsPhase.Ready` 接续，由 `KernelInitTask` 驱动，完成内核启动编排链向 `PayloadPhase` 的前置收尾。
+1. `收尾期对象`（暂名 `FinalizePhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第六个子阶段对象。它从 `RootfsPhase.Ready` 接续，由 `KernelInitTask` 驱动，完成内核启动编排链向 `PayloadPhase` 的前置收尾。
 2. `Async 同步对象`（暂名 `AsyncFullSyncDeferred`）：覆盖 `async_synchronize_full()`。它等待所有 async domain 中的异步函数完成，确保随后释放 init memory 时没有仍在运行的 async init code。由于前序 `AsyncCore` 已按当前轮次 deferred 处理，本项也标记为 `deferred: AsyncCore.synchronize_full()`。
 3. `系统状态对象`（`SystemState`）的 enable：覆盖 `SYSTEM_FREEING_INITMEM` 和 `SYSTEM_RUNNING`。这里执行 `SystemState.enable()`，先把内部属性 `SystemState.value` 更新为 `SYSTEM_FREEING_INITMEM`，表示进入释放 initmem 的窗口；释放和保护动作完成后，再把 `SystemState.value` 更新为 `SYSTEM_RUNNING`，并将对象生命周期推进到 `Online`。`SYSTEM_FREEING_INITMEM` 是 `SystemState.enable()` 内部的中间属性值，不单独占用标准 lifecycle slot；但 `SYSTEM_RUNNING` 之后仍有 RCU/sysctl 收尾动作，因此它不是本子阶段终点。
 4. `init memory 回收对象`（暂名 `InitMemoryCleanupDeferred`）：覆盖 `kprobe_free_init_mem()`、`ftrace_free_init_mem()`、`kgdb_free_init_mem()`、`exit_boot_config()` 和 `free_initmem()`。当前 `CONFIG_KPROBES=n` 和 `CONFIG_KGDB=n`，对应路径为空实现；当前 `CONFIG_BOOT_CONFIG=n`，`exit_boot_config()` 为空实现；当前 `CONFIG_FTRACE=y`，`ftrace_free_init_mem()` 保留时序位置但不展开；RISC-V `free_initmem()` 调用 `free_initmem_default(POISON_FREE_INITMEM)`，当前轮次标记为 `deferred: InitMemory.free()`。

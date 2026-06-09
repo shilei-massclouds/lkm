@@ -18,7 +18,7 @@ pub fn setup(ctx: &mut Context) -> ! {
         setup_objects(ctx).and_then(|()| checkpoint_ready(ctx)),
         "arceos_ex pre-smp init event failed\n",
     );
-    crate::phases::up_multitask::rest_init::setup(ctx)
+    crate::phases::smp_runtime::smp_bringup::setup(ctx)
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {

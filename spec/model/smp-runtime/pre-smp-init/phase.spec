@@ -1,7 +1,7 @@
 /*
  * Pre-SMP Init Phase Specification
  *
- * This is UP Multitask Phase subphase 2. It covers kernel_init_freeable()
+ * This is SMP Runtime Phase subphase 1. It covers kernel_init_freeable()
  * from opening the full GFP allocation mask through the point immediately
  * before smp_init(). It is driven by KernelInitTask after the rest_init
  * scheduler fork boundary, while BootInitTask may still complete its boot
@@ -197,14 +197,15 @@ object PreSmpInitBoundary: KernelObject {
 
 /*
  * PreSmpInitPhase 表示 KernelInitTask 在 kernel_init_freeable() 中推进的
- * SMP 启动前初始化段。它依赖 KernelInitTask 已被 kthreadd_done 释放且
- * Scheduler.Action::Schedule 已提交，同时要求 KernelInitTask 的创建入口
- * 已由 TaskCreationCore 绑定为 TaskEntry::KernelInit 并指向本阶段入口；
- * 它不依赖 RestInitPhase.Ready。
+ * SMP 启动前初始化段。它是 SmpRuntimePhase 的首个子阶段，依赖
+ * KernelInitTask 已被 kthreadd_done 释放且 Scheduler.Action::Schedule
+ * 已提交，同时要求 KernelInitTask 的创建入口已由 TaskCreationCore
+ * 绑定为 TaskEntry::KernelInit 并指向 SmpRuntimePhase 入口；它不由
+ * RestInitPhase.Ready 作为普通 sibling 顺序启动。
  */
 object PreSmpInitPhase: PhaseObject {
     initial_state: State::Base;
-    parent: UpMultitaskPhase;
+    parent: SmpRuntimePhase;
 
     state State::Base {
         events {
@@ -212,8 +213,8 @@ object PreSmpInitPhase: PhaseObject {
                 depends_on {
                     KernelInitTask.state == State::Online;
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
-                    kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     kernel_init_released_for_pre_smp_init(KernelInitTask);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -239,8 +240,8 @@ object PreSmpInitPhase: PhaseObject {
                 ensures {
                     pre_smp_init_ready(PreSmpInitPhase);
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-                    task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
-                    kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
+                    task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     page_allocator_full_gfp_mask_open(PageAllocator);
                     cpu_topology_prepared_for_smp(CpuGroup);
                     workqueue_ready_before_smp(Workqueue);
@@ -255,7 +256,7 @@ object PreSmpInitPhase: PhaseObject {
                     "cad_pid 绑定留给系统控制路径。";
                     "procfs vmstat 导出留给 VFS/procfs 路径。";
                     "lockup detector 留给运行期诊断模型。";
-                    "smp_init() 是下一顶层阶段 SMP Runtime Phase 的入口。";
+                    "smp_init() 是下一子阶段 SmpBringupPhase 的入口。";
                 }
             }
         }
@@ -265,8 +266,8 @@ object PreSmpInitPhase: PhaseObject {
         invariant {
             kernel_init_released_for_pre_smp_init(KernelInitTask);
             task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
-            task_entry_first_phase(KernelInitTask, PreSmpInitPhase);
-            kernel_init_entry_reaches_pre_smp_init(KernelInitTask, PreSmpInitPhase);
+            task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
+            kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             scheduler_first_schedule_committed(Scheduler);
             PageAllocator.state == State::Ready;
