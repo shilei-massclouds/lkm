@@ -130,6 +130,8 @@ def _minimal_model_without_config_driven_lds_invariant() -> ObjectModel:
         functions={},
         predicates={},
         types={},
+        locks={},
+        exclusive_contexts={},
         objects={"Config": config, "Lds": lds},
         children={},
     )

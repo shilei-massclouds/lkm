@@ -35,6 +35,34 @@ SECTIONS
         __stop___ex_table = .;
     }
 
+    . = ALIGN(8);
+    .initcall : AT(ADDR(.initcall) - LOAD_OFFSET) {
+        __initcall_pure_start = .;
+        KEEP(*(.initcall.pure))
+        __initcall_pure_end = .;
+        __initcall_core_start = .;
+        KEEP(*(.initcall.core))
+        __initcall_core_end = .;
+        __initcall_postcore_start = .;
+        KEEP(*(.initcall.postcore))
+        __initcall_postcore_end = .;
+        __initcall_arch_start = .;
+        KEEP(*(.initcall.arch))
+        __initcall_arch_end = .;
+        __initcall_subsys_start = .;
+        KEEP(*(.initcall.subsys))
+        __initcall_subsys_end = .;
+        __initcall_fs_start = .;
+        KEEP(*(.initcall.fs))
+        __initcall_fs_end = .;
+        __initcall_device_start = .;
+        KEEP(*(.initcall.device))
+        __initcall_device_end = .;
+        __initcall_late_start = .;
+        KEEP(*(.initcall.late))
+        __initcall_late_end = .;
+    }
+
     .data : AT(ADDR(.data) - LOAD_OFFSET) ALIGN(4K) {
         _sdata = .;
         PROVIDE(__global_pointer$ = . + 0x800);

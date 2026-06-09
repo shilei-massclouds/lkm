@@ -1,18 +1,226 @@
 use super::{
-    command_line::SavedCommandLine,
     irq_time::IrqDispatchTree,
     mm_core::PageAllocator,
-    rest_init::KernelInitTask,
     runtime_core::RuntimeCoreBoundary,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
     workqueue::Workqueue,
 };
-use crate::trace::Checkpoint;
+use crate::{context::Context, trace::Checkpoint};
+use core::mem::size_of;
 
 pub const INITCALL_LEVEL_COUNT: usize = 8;
 pub const INITCALL_ENTRY_COUNT: usize = 8;
 pub const PLATFORM_BUS_ACTION_SLOT_COUNT: usize = 4;
+
+unsafe extern "C" {
+    static __initcall_pure_start: u8;
+    static __initcall_pure_end: u8;
+    static __initcall_core_start: u8;
+    static __initcall_core_end: u8;
+    static __initcall_postcore_start: u8;
+    static __initcall_postcore_end: u8;
+    static __initcall_arch_start: u8;
+    static __initcall_arch_end: u8;
+    static __initcall_subsys_start: u8;
+    static __initcall_subsys_end: u8;
+    static __initcall_fs_start: u8;
+    static __initcall_fs_end: u8;
+    static __initcall_device_start: u8;
+    static __initcall_device_end: u8;
+    static __initcall_late_start: u8;
+    static __initcall_late_end: u8;
+}
+
+pub type ContextRef<'a> = &'a mut Context;
+pub type InitcallEntryFn = for<'a> fn(ContextRef<'a>) -> InitcallReturn;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum InitcallReturn {
+    Ok,
+    Error(isize),
+}
+
+impl InitcallReturn {
+    pub const fn code(self) -> isize {
+        match self {
+            Self::Ok => 0,
+            Self::Error(code) => code,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct InitcallEntryDescriptor {
+    level: InitcallLevelName,
+    name: &'static str,
+    entry: InitcallEntryFn,
+}
+
+impl InitcallEntryDescriptor {
+    pub const fn new(
+        level: InitcallLevelName,
+        name: &'static str,
+        entry: InitcallEntryFn,
+    ) -> Self {
+        Self { level, name, entry }
+    }
+
+    pub const fn level(&self) -> InitcallLevelName {
+        self.level
+    }
+
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    pub fn run(&self, ctx: ContextRef<'_>) -> InitcallReturn {
+        (self.entry)(ctx)
+    }
+}
+
+#[used]
+#[unsafe(link_section = ".initcall.pure")]
+static INITCALL_PURE_SMOKE: InitcallEntryDescriptor = InitcallEntryDescriptor::new(
+    InitcallLevelName::Pure,
+    "pure_smoke_initcall",
+    pure_smoke_initcall,
+);
+
+#[used]
+#[unsafe(link_section = ".initcall.core")]
+static INITCALL_CORE_SMOKE: InitcallEntryDescriptor = InitcallEntryDescriptor::new(
+    InitcallLevelName::Core,
+    "core_smoke_initcall",
+    core_smoke_initcall,
+);
+
+#[used]
+#[unsafe(link_section = ".initcall.postcore")]
+static INITCALL_POSTCORE_SMOKE: InitcallEntryDescriptor = InitcallEntryDescriptor::new(
+    InitcallLevelName::Postcore,
+    "postcore_smoke_initcall",
+    postcore_smoke_initcall,
+);
+
+#[used]
+#[unsafe(link_section = ".initcall.arch")]
+static INITCALL_ARCH_PLATFORM: InitcallEntryDescriptor = InitcallEntryDescriptor::new(
+    InitcallLevelName::Arch,
+    "of_platform_default_populate_init",
+    of_platform_default_populate_initcall,
+);
+
+#[used]
+#[unsafe(link_section = ".initcall.subsys")]
+static INITCALL_SUBSYS_SMOKE: InitcallEntryDescriptor = InitcallEntryDescriptor::new(
+    InitcallLevelName::Subsys,
+    "subsys_smoke_initcall",
+    subsys_smoke_initcall,
+);
+
+#[used]
+#[unsafe(link_section = ".initcall.fs")]
+static INITCALL_FS_SMOKE: InitcallEntryDescriptor =
+    InitcallEntryDescriptor::new(InitcallLevelName::Fs, "fs_smoke_initcall", fs_smoke_initcall);
+
+#[used]
+#[unsafe(link_section = ".initcall.device")]
+static INITCALL_DEVICE_SMOKE: InitcallEntryDescriptor = InitcallEntryDescriptor::new(
+    InitcallLevelName::Device,
+    "device_smoke_initcall",
+    device_smoke_initcall,
+);
+
+#[used]
+#[unsafe(link_section = ".initcall.late")]
+static INITCALL_LATE_SMOKE: InitcallEntryDescriptor = InitcallEntryDescriptor::new(
+    InitcallLevelName::Late,
+    "late_smoke_initcall",
+    late_smoke_initcall,
+);
+
+fn pure_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
+    crate::objects::printk::write_str("initcall: pure_smoke_initcall\n");
+    InitcallReturn::Ok
+}
+
+fn core_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
+    crate::objects::printk::write_str("initcall: core_smoke_initcall\n");
+    InitcallReturn::Ok
+}
+
+fn postcore_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
+    crate::objects::printk::write_str("initcall: postcore_smoke_initcall\n");
+    InitcallReturn::Ok
+}
+
+fn of_platform_default_populate_initcall(ctx: ContextRef<'_>) -> InitcallReturn {
+    crate::objects::printk::write_str("initcall: of_platform_default_populate_init\n");
+    if ctx.platform_bus_type.state() == State::Ready && ctx.platform_bus_type.registered() {
+        InitcallReturn::Ok
+    } else {
+        InitcallReturn::Error(-1)
+    }
+}
+
+fn subsys_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
+    crate::objects::printk::write_str("initcall: subsys_smoke_initcall\n");
+    InitcallReturn::Ok
+}
+
+fn fs_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
+    crate::objects::printk::write_str("initcall: fs_smoke_initcall\n");
+    InitcallReturn::Ok
+}
+
+fn device_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
+    crate::objects::printk::write_str("initcall: device_smoke_initcall\n");
+    InitcallReturn::Ok
+}
+
+fn late_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
+    crate::objects::printk::write_str("initcall: late_smoke_initcall\n");
+    InitcallReturn::Ok
+}
+
+fn static_initcall_descriptors() -> impl Iterator<Item = &'static InitcallEntryDescriptor> {
+    [
+        initcall_range(&raw const __initcall_pure_start, &raw const __initcall_pure_end),
+        initcall_range(&raw const __initcall_core_start, &raw const __initcall_core_end),
+        initcall_range(
+            &raw const __initcall_postcore_start,
+            &raw const __initcall_postcore_end,
+        ),
+        initcall_range(&raw const __initcall_arch_start, &raw const __initcall_arch_end),
+        initcall_range(&raw const __initcall_subsys_start, &raw const __initcall_subsys_end),
+        initcall_range(&raw const __initcall_fs_start, &raw const __initcall_fs_end),
+        initcall_range(
+            &raw const __initcall_device_start,
+            &raw const __initcall_device_end,
+        ),
+        initcall_range(&raw const __initcall_late_start, &raw const __initcall_late_end),
+    ]
+    .into_iter()
+    .flatten()
+}
+
+fn initcall_range(start: *const u8, end: *const u8) -> &'static [InitcallEntryDescriptor] {
+    let start_addr = start as usize;
+    let end_addr = end as usize;
+    let entry_size = size_of::<InitcallEntryDescriptor>();
+    if start_addr == 0
+        || end_addr < start_addr
+        || entry_size == 0
+        || (end_addr - start_addr) % entry_size != 0
+    {
+        return &[];
+    }
+
+    let count = (end_addr - start_addr) / entry_size;
+    unsafe { core::slice::from_raw_parts(start as *const InitcallEntryDescriptor, count) }
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum BusDeviceRef {
@@ -30,6 +238,7 @@ pub enum InitcallLevelState {
     Done,
 }
 
+#[repr(u8)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum InitcallLevelName {
     Pure,
@@ -74,6 +283,7 @@ impl InitcallLevel {
 #[derive(Clone, Copy)]
 pub struct InitcallEntry {
     level: InitcallLevelName,
+    name: &'static str,
     skipped: bool,
     return_code: isize,
     run_context_checked: bool,
@@ -83,6 +293,7 @@ impl InitcallEntry {
     const fn empty() -> Self {
         Self {
             level: InitcallLevelName::Pure,
+            name: "",
             skipped: false,
             return_code: 0,
             run_context_checked: false,
@@ -91,6 +302,10 @@ impl InitcallEntry {
 
     pub const fn level(&self) -> InitcallLevelName {
         self.level
+    }
+
+    pub const fn name(&self) -> &'static str {
+        self.name
     }
 
     pub const fn skipped(&self) -> bool {
@@ -695,12 +910,20 @@ pub struct InitcallTable {
     level_count_ready: bool,
     all_levels_ran: bool,
     entries_recorded_as_properties: bool,
+    registered_entries_collected: bool,
+    level_mapping_ready: bool,
+    run_levels_ready: bool,
+    entry_operation_bindings_ready: bool,
     command_line_scratch_reused_per_level: bool,
     param_parser_applied: bool,
     filter_applied: bool,
     run_context_checked: bool,
     levels: [InitcallLevel; INITCALL_LEVEL_COUNT],
     entries: [InitcallEntry; INITCALL_ENTRY_COUNT],
+    descriptors: [Option<InitcallEntryDescriptor>; INITCALL_ENTRY_COUNT],
+    entry_count: usize,
+    run_order: [InitcallLevelName; INITCALL_ENTRY_COUNT],
+    run_count: usize,
 }
 
 impl InitcallTable {
@@ -711,6 +934,10 @@ impl InitcallTable {
             level_count_ready: false,
             all_levels_ran: false,
             entries_recorded_as_properties: false,
+            registered_entries_collected: false,
+            level_mapping_ready: false,
+            run_levels_ready: false,
+            entry_operation_bindings_ready: false,
             command_line_scratch_reused_per_level: false,
             param_parser_applied: false,
             filter_applied: false,
@@ -726,6 +953,10 @@ impl InitcallTable {
                 InitcallLevel::new(InitcallLevelName::Late),
             ],
             entries: [InitcallEntry::empty(); INITCALL_ENTRY_COUNT],
+            descriptors: [None; INITCALL_ENTRY_COUNT],
+            entry_count: 0,
+            run_order: [InitcallLevelName::Pure; INITCALL_ENTRY_COUNT],
+            run_count: 0,
         }
     }
 
@@ -753,6 +984,22 @@ impl InitcallTable {
         self.entries_recorded_as_properties
     }
 
+    pub const fn registered_entries_collected(&self) -> bool {
+        self.registered_entries_collected
+    }
+
+    pub const fn level_mapping_ready(&self) -> bool {
+        self.level_mapping_ready
+    }
+
+    pub const fn run_levels_ready(&self) -> bool {
+        self.run_levels_ready
+    }
+
+    pub const fn entry_operation_bindings_ready(&self) -> bool {
+        self.entry_operation_bindings_ready
+    }
+
     pub const fn command_line_scratch_reused_per_level(&self) -> bool {
         self.command_line_scratch_reused_per_level
     }
@@ -770,7 +1017,19 @@ impl InitcallTable {
     }
 
     pub const fn entry_count(&self) -> usize {
-        INITCALL_ENTRY_COUNT
+        self.entry_count
+    }
+
+    pub const fn run_count(&self) -> usize {
+        self.run_count
+    }
+
+    pub fn run_order_level(&self, index: usize) -> Option<InitcallLevelName> {
+        if index < self.run_count {
+            Some(self.run_order[index])
+        } else {
+            None
+        }
     }
 
     pub fn level(&self, index: usize) -> Option<InitcallLevel> {
@@ -782,65 +1041,108 @@ impl InitcallTable {
     }
 
     pub fn entry(&self, index: usize) -> Option<InitcallEntry> {
-        if index < INITCALL_ENTRY_COUNT {
+        if index < self.entry_count {
             Some(self.entries[index])
         } else {
             None
         }
     }
 
-    pub fn setup(
+    pub fn register(
         &mut self,
-        ctor_table: &CtorTable,
-        static_objects: &StaticObjects,
-        saved_command_line: &SavedCommandLine,
-        kernel_init_task: &KernelInitTask,
-        page_allocator: &PageAllocator,
+        level: InitcallLevelName,
+        name: &'static str,
+        entry: InitcallEntryFn,
     ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || self.entry_count >= INITCALL_ENTRY_COUNT
+            || self.contains_entry(name)
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.descriptors[self.entry_count] = Some(InitcallEntryDescriptor::new(level, name, entry));
+        self.entry_count += 1;
+        Ok(())
+    }
+
+    pub fn register_static_entries(&mut self) -> EventResult {
+        for descriptor in static_initcall_descriptors() {
+            self.register(descriptor.level(), descriptor.name(), descriptor.entry)?;
+        }
+        Ok(())
+    }
+
+    pub fn preset(&mut self, ctor_table: &CtorTable, static_objects: &StaticObjects) -> EventResult {
         if self.lifecycle.state() != State::Base
             || ctor_table.state() != State::Ready
             || !ctor_table.constructors_empty_or_trimmed()
             || static_objects.state() != State::Online
-            || saved_command_line.state() != State::Ready
-            || kernel_init_task.state() != State::Online
-            || page_allocator.state() != State::Ready
-            || !page_allocator.late_ready()
+            || self.entry_count == 0
         {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
-                State::Ready,
+                State::Prepared,
             );
         }
 
         self.static_ranges_ready = true;
         self.level_count_ready = true;
         self.entries_recorded_as_properties = true;
+        self.registered_entries_collected = true;
+        self.level_mapping_ready = true;
+        self.run_levels_ready = true;
+        self.entry_operation_bindings_ready = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+    }
+
+    pub fn run_registered_entries_in_context(&mut self, ctx: ContextRef<'_>) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || ctx.saved_command_line.state() != State::Ready
+            || ctx.page_allocator.state() != State::Ready
+            || !ctx.page_allocator.late_ready()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
         self.command_line_scratch_reused_per_level = true;
         self.param_parser_applied = true;
         self.filter_applied = true;
         self.run_context_checked = true;
-        self.populate_entry_summary();
+
+        self.run_entries_in_level_order(ctx);
         self.all_levels_ran = all_levels_done(&self.levels);
-        if !self.all_levels_ran || !all_entries_checked(&self.entries) {
+        if !self.all_levels_ran || !all_entries_checked(&self.entries, self.run_count) {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
-                State::Base,
+                State::Prepared,
                 State::Ready,
             );
         }
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,
-            State::Base,
+            State::Prepared,
             State::Ready,
             Checkpoint::InitcallTableReady,
         )
     }
 
-    fn populate_entry_summary(&mut self) {
+    fn run_entries_in_level_order(&mut self, ctx: ContextRef<'_>) {
         let names = [
             InitcallLevelName::Pure,
             InitcallLevelName::Core,
@@ -852,18 +1154,57 @@ impl InitcallTable {
             InitcallLevelName::Late,
         ];
 
+        let mut level_index = 0usize;
+        let mut out_index = 0usize;
+        self.run_count = 0;
+        while level_index < INITCALL_LEVEL_COUNT {
+            self.levels[level_index].entry_count = 0;
+            level_index += 1;
+        }
+        level_index = 0;
+
+        while level_index < INITCALL_LEVEL_COUNT {
+            let level = names[level_index];
+            let mut descriptor_index = 0usize;
+            while descriptor_index < self.entry_count {
+                if let Some(descriptor) = self.descriptors[descriptor_index] {
+                    if descriptor.level() == level {
+                        let result = descriptor.run(&mut *ctx);
+                        self.entries[out_index] = InitcallEntry {
+                            level,
+                            name: descriptor.name(),
+                            skipped: false,
+                            return_code: result.code(),
+                            run_context_checked: true,
+                        };
+                        self.run_order[out_index] = level;
+                        out_index += 1;
+                        self.run_count = out_index;
+                        self.levels[level_index].entry_count += 1;
+                    }
+                }
+                descriptor_index += 1;
+            }
+            self.levels[level_index].state = InitcallLevelState::Done;
+            level_index += 1;
+        }
+    }
+
+    fn contains_entry(&self, name: &'static str) -> bool {
         let mut index = 0usize;
-        while index < INITCALL_LEVEL_COUNT {
-            self.levels[index].state = InitcallLevelState::Done;
-            self.levels[index].entry_count = 1;
-            self.entries[index] = InitcallEntry {
-                level: names[index],
-                skipped: false,
-                return_code: 0,
-                run_context_checked: true,
-            };
+        while index < self.entry_count {
+            if let Some(descriptor) = self.descriptors[index] {
+                if descriptor.name() == name {
+                    return true;
+                }
+            }
             index += 1;
         }
+        false
+    }
+
+    pub const fn all_registered_entries_ran(&self) -> bool {
+        self.entry_count == self.run_count
     }
 }
 
@@ -983,6 +1324,7 @@ pub fn initcall_phase_ready(
         && initcall_table.filter_applied()
         && initcall_table.run_context_checked()
         && initcall_table.entry_count() == INITCALL_ENTRY_COUNT
+        && initcall_table.all_registered_entries_ran()
         && all_levels_done_public(initcall_table)
         && all_entries_checked_public(initcall_table)
         && boundary.state() == State::Ready
@@ -992,7 +1334,7 @@ pub fn initcall_phase_ready(
 fn all_levels_done(levels: &[InitcallLevel; INITCALL_LEVEL_COUNT]) -> bool {
     let mut index = 0usize;
     while index < INITCALL_LEVEL_COUNT {
-        if levels[index].state() != InitcallLevelState::Done || levels[index].entry_count() == 0 {
+        if levels[index].state() != InitcallLevelState::Done {
             return false;
         }
         index += 1;
@@ -1000,9 +1342,9 @@ fn all_levels_done(levels: &[InitcallLevel; INITCALL_LEVEL_COUNT]) -> bool {
     true
 }
 
-fn all_entries_checked(entries: &[InitcallEntry; INITCALL_ENTRY_COUNT]) -> bool {
+fn all_entries_checked(entries: &[InitcallEntry; INITCALL_ENTRY_COUNT], count: usize) -> bool {
     let mut index = 0usize;
-    while index < INITCALL_ENTRY_COUNT {
+    while index < count {
         if entries[index].skipped()
             || entries[index].return_code() != 0
             || !entries[index].run_context_checked()
@@ -1020,7 +1362,7 @@ fn all_levels_done_public(initcall_table: &InitcallTable) -> bool {
         let Some(level) = initcall_table.level(index) else {
             return false;
         };
-        if level.state() != InitcallLevelState::Done || level.entry_count() == 0 {
+        if level.state() != InitcallLevelState::Done {
             return false;
         }
         index += 1;
@@ -1030,7 +1372,7 @@ fn all_levels_done_public(initcall_table: &InitcallTable) -> bool {
 
 fn all_entries_checked_public(initcall_table: &InitcallTable) -> bool {
     let mut index = 0usize;
-    while index < INITCALL_ENTRY_COUNT {
+    while index < initcall_table.run_count() {
         let Some(entry) = initcall_table.entry(index) else {
             return false;
         };

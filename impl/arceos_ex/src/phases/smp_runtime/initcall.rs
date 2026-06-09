@@ -47,13 +47,10 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.ctor_table
         .setup(&ctx.irq_proc_view_deferred, &ctx.static_objects)?;
-    ctx.initcall_table.setup(
-        &ctx.ctor_table,
-        &ctx.static_objects,
-        &ctx.saved_command_line,
-        &ctx.kernel_init_task,
-        &ctx.page_allocator,
-    )?;
+    ctx.initcall_table.register_static_entries()?;
+    ctx.initcall_table
+        .preset(&ctx.ctor_table, &ctx.static_objects)?;
+    run_initcall_table(ctx)?;
     ctx.initcall_boundary.setup(
         &ctx.cpuset_smp_trimmed,
         &ctx.driver_core_base,
@@ -64,6 +61,14 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.ctor_table,
         &ctx.initcall_table,
     )
+}
+
+fn run_initcall_table(ctx: &mut Context) -> EventResult {
+    let mut table =
+        core::mem::replace(&mut ctx.initcall_table, crate::objects::initcall::InitcallTable::new());
+    let result = table.run_registered_entries_in_context(ctx);
+    ctx.initcall_table = table;
+    result
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {
