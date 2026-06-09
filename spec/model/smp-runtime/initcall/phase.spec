@@ -110,6 +110,101 @@ object PlatformBusDevice: DeviceObject {
 }
 
 /*
+ * PlatformBusSubsysPrivate 是 bus_register(&platform_bus_type) 分配并挂到
+ * platform_bus_type.p 的 struct subsys_private。它承载后续 platform
+ * devices/drivers 两条 klist 以及 probe 控制入口。
+ */
+object PlatformBusSubsysPrivate: BusSubsysPrivate {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    PlatformBusType.state == State::Prepared;
+                }
+
+                ensures {
+                    bus_subsys_private_allocated(PlatformBusSubsysPrivate);
+                    bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBusType);
+                    bus_subsys_notifier_ready(PlatformBusSubsysPrivate);
+                    bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            bus_subsys_private_allocated(PlatformBusSubsysPrivate);
+            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBusType);
+            bus_subsys_notifier_ready(PlatformBusSubsysPrivate);
+            bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                ensures {
+                    bus_subsys_kobject_named(PlatformBusSubsysPrivate);
+                    bus_subsys_kobject_attached_to_bus_kset(PlatformBusSubsysPrivate);
+                    bus_subsys_registered(PlatformBusSubsysPrivate);
+                    bus_subsys_uevent_file_ready(PlatformBusSubsysPrivate);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            bus_subsys_private_allocated(PlatformBusSubsysPrivate);
+            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBusType);
+            bus_subsys_notifier_ready(PlatformBusSubsysPrivate);
+            bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
+            bus_subsys_kobject_named(PlatformBusSubsysPrivate);
+            bus_subsys_kobject_attached_to_bus_kset(PlatformBusSubsysPrivate);
+            bus_subsys_registered(PlatformBusSubsysPrivate);
+            bus_subsys_uevent_file_ready(PlatformBusSubsysPrivate);
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                ensures {
+                    bus_subsys_devices_kset_ready(PlatformBusSubsysPrivate);
+                    bus_subsys_drivers_kset_ready(PlatformBusSubsysPrivate);
+                    bus_subsys_interfaces_ready(PlatformBusSubsysPrivate);
+                    bus_subsys_mutex_ready(PlatformBusSubsysPrivate);
+                    bus_subsys_klist_devices_ready(PlatformBusSubsysPrivate);
+                    bus_subsys_klist_drivers_ready(PlatformBusSubsysPrivate);
+                    bus_subsys_probe_files_ready(PlatformBusSubsysPrivate);
+                    bus_subsys_groups_ready(PlatformBusSubsysPrivate);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            bus_subsys_private_allocated(PlatformBusSubsysPrivate);
+            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBusType);
+            bus_subsys_notifier_ready(PlatformBusSubsysPrivate);
+            bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
+            bus_subsys_kobject_named(PlatformBusSubsysPrivate);
+            bus_subsys_kobject_attached_to_bus_kset(PlatformBusSubsysPrivate);
+            bus_subsys_registered(PlatformBusSubsysPrivate);
+            bus_subsys_uevent_file_ready(PlatformBusSubsysPrivate);
+            bus_subsys_devices_kset_ready(PlatformBusSubsysPrivate);
+            bus_subsys_drivers_kset_ready(PlatformBusSubsysPrivate);
+            bus_subsys_interfaces_ready(PlatformBusSubsysPrivate);
+            bus_subsys_mutex_ready(PlatformBusSubsysPrivate);
+            bus_subsys_klist_devices_ready(PlatformBusSubsysPrivate);
+            bus_subsys_klist_drivers_ready(PlatformBusSubsysPrivate);
+            bus_subsys_probe_files_ready(PlatformBusSubsysPrivate);
+            bus_subsys_groups_ready(PlatformBusSubsysPrivate);
+        }
+    }
+}
+
+/*
  * PlatformBusType 是通用 BusType 的 platform 实例。Preset 对应静态
  * const struct bus_type platform_bus_type 的 name/ops/dev_groups 绑定；
  * Setup 对应 platform_bus_init() 中的 bus_register(&platform_bus_type)。
@@ -150,7 +245,15 @@ object PlatformBusType: BusType {
                     PlatformBusDevice.state == State::Ready;
                 }
 
+                drives {
+                    PlatformBusSubsysPrivate.Event::Preset;
+                    PlatformBusSubsysPrivate.Event::Setup;
+                    PlatformBusSubsysPrivate.Event::Enable;
+                }
+
                 ensures {
+                    bus_type_subsys_private_ready(PlatformBusType, PlatformBusSubsysPrivate);
+                    bus_type_subsys_private_online(PlatformBusType, PlatformBusSubsysPrivate);
                     bus_type_registered(PlatformBusType);
                     bus_type_devices_kset_ready(PlatformBusType);
                     bus_type_drivers_kset_ready(PlatformBusType);
@@ -171,6 +274,8 @@ object PlatformBusType: BusType {
             bus_type_descriptor_bound(PlatformBusType);
             bus_type_name_bound(PlatformBusType);
             bus_type_ops_bound(PlatformBusType);
+            bus_type_subsys_private_ready(PlatformBusType, PlatformBusSubsysPrivate);
+            bus_type_subsys_private_online(PlatformBusType, PlatformBusSubsysPrivate);
             bus_type_registered(PlatformBusType);
             bus_type_devices_kset_ready(PlatformBusType);
             bus_type_drivers_kset_ready(PlatformBusType);
