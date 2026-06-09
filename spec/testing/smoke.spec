@@ -10,6 +10,11 @@ predicate testing_smoke_category_type_behavior_defined() -> bool;
 predicate testing_smoke_category_object_api_behavior_defined() -> bool;
 predicate testing_smoke_category_kernel_environment_bound_defined() -> bool;
 
+predicate testing_tests_must_not_add_test_only_subject_api() -> bool;
+predicate testing_tests_must_not_modify_functional_api_for_tests() -> bool;
+predicate testing_new_smoke_tests_must_not_join_kunit_by_default() -> bool;
+predicate testing_new_kunit_tests_must_not_join_smoke_by_default() -> bool;
+predicate testing_cross_registration_must_record_reason() -> bool;
 predicate testing_smoke_must_classify_target_before_generation() -> bool;
 predicate testing_smoke_must_generate_scenarios() -> bool;
 predicate testing_smoke_must_cover_normal_paths() -> bool;
@@ -35,6 +40,55 @@ predicate testing_smoke_must_keep_kernel_environment_bound_explicit() -> bool;
 predicate testing_smoke_must_not_register_type_behavior_as_kunit_by_default() -> bool;
 predicate testing_smoke_must_not_register_object_api_behavior_as_kunit_by_default() -> bool;
 predicate testing_smoke_must_record_kunit_exceptions() -> bool;
+
+type TestImplementationPrinciples {
+    invariant {
+        /*
+         * No test-only subject API:
+         *
+         * Tests must not add test_* or otherwise test-only APIs to the subject
+         * under test. If an action needs a callable implementation boundary,
+         * that boundary must be modeled and implemented as a formal object API.
+         */
+        testing_tests_must_not_add_test_only_subject_api();
+
+        /*
+         * Do not bend functional APIs for tests:
+         *
+         * Tests must not change existing functional API signatures,
+         * visibility, semantics or error behavior merely to make a test easier
+         * to write. API changes must be justified by model/coding semantics.
+         */
+        testing_tests_must_not_modify_functional_api_for_tests();
+
+        /*
+         * Smoke registration default:
+         *
+         * A newly added smoke test must remain registered only in smoke by
+         * default. It must not be added to checkpoint KUnit unless a recorded
+         * reason names the checkpoint fact that requires KUnit coverage.
+         */
+        testing_new_smoke_tests_must_not_join_kunit_by_default();
+
+        /*
+         * KUnit registration default:
+         *
+         * A newly added KUnit/checkpoint test must remain registered only in
+         * KUnit by default. It must not be added to smoke unless a recorded
+         * reason names the payload or end-to-end observable behavior that
+         * requires smoke coverage.
+         */
+        testing_new_kunit_tests_must_not_join_smoke_by_default();
+
+        /*
+         * Explicit cross-registration:
+         *
+         * Any test shared between smoke and KUnit must record why both
+         * execution carriers are required. Silence means no cross-registration.
+         */
+        testing_cross_registration_must_record_reason();
+    }
+}
 
 type SmokeTestCategories {
     invariant {

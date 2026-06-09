@@ -858,10 +858,9 @@ impl BootRunQueue {
         }
     }
 
-    pub const fn enqueued_task_id(&self) -> usize {
-        self.enqueued_task_id
-    }
-
+    // Formal RunQueue.Event::Setup implementation boundary. Scheduler.setup()
+    // drives it for the production boot path; local subject tests may call the
+    // same lifecycle API without creating a test-only entry point.
     pub fn setup(
         &mut self,
         cpu_group: &CpuGroup,

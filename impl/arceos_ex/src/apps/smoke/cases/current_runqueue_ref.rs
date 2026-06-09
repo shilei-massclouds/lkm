@@ -129,10 +129,6 @@ impl SmokeScenario for KernelInitQueueScenario {
         );
         assertions.assert("task count", self.fixture.runqueue.task_count() == 1);
         assertions.assert(
-            "last enqueued",
-            self.fixture.runqueue.enqueued_task_id() == KERNEL_INIT_PID,
-        );
-        assertions.assert(
             "first runnable",
             self.fixture.runqueue.first_runnable_task_ref() == CurrentTaskRef::KernelInit,
         );
@@ -177,10 +173,6 @@ impl SmokeScenario for KthreaddQueueScenario {
             self.fixture.runqueue.contains_task(KTHREADD_PID),
         );
         assertions.assert("task count", self.fixture.runqueue.task_count() == 1);
-        assertions.assert(
-            "last enqueued",
-            self.fixture.runqueue.enqueued_task_id() == KTHREADD_PID,
-        );
         assertions.assert(
             "first runnable",
             self.fixture.runqueue.first_runnable_task_ref() == CurrentTaskRef::Kthreadd,
@@ -232,10 +224,6 @@ impl SmokeScenario for MixedQueueScenario {
         assertions.assert(
             "contains kthreadd",
             self.fixture.runqueue.contains_task(KTHREADD_PID),
-        );
-        assertions.assert(
-            "last enqueued",
-            self.fixture.runqueue.enqueued_task_id() == KERNEL_INIT_PID,
         );
         assertions.assert(
             "pick kernel init",

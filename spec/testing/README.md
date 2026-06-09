@@ -7,6 +7,16 @@
 
 正式规格入口是 [`main.spec`](main.spec)。当前首先规格化 smoke 测试生成规则，见 [`smoke.spec`](smoke.spec)。
 
+## 测试实现前提原则
+
+测试用例不得为了测试便利新增 `test_*` 或其它测试专用被测 API。若规格动作缺少可调用实现边界，应回到 model/coding 规格补正式对象 API，再由生产路径和测试路径共同使用。
+
+测试用例不得为了测试便利改变既有功能 API 的签名、语义、可见性或错误语义。若现有功能 API 与正式规格不一致，应作为规格/实现修正处理，而不是作为测试适配处理。
+
+新增 smoke 测试默认只注册到 smoke 执行入口，不自动加入 checkpoint KUnit。若确需复用到 KUnit，必须记录它验证的 checkpoint 事实和不能仅由 smoke 覆盖的理由。
+
+新增 KUnit 测试默认只注册到 KUnit/checkpoint 执行入口，不自动加入 smoke。若确需复用到 smoke，必须记录它验证的 payload/端到端可观测行为和不能仅由 KUnit 覆盖的理由。
+
 ## 测试目标分类
 
 smoke 测试生成时必须先判定测试目标类别，再决定是否依赖真实内核环境。
