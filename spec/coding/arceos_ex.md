@@ -275,18 +275,38 @@ facts、Async/Padata deferred facts、PageAllocator late facts，以及下一入
 `KernelInitTask` 在 boot CPU 上继续推进 `do_basic_setup()` 的对象级边界。
 
 本阶段必须覆盖 `cpuset_init_smp()` 的 trimmed/no-op、`DriverCore` deferred boundary、
-`IrqProcView` deferred boundary、`CtorTable.setup()`、`InitcallTable.run_all_levels()` 和
-`InitcallBoundary.setup()`。当前不得展开完整驱动模型、procfs IRQ 导出或每个 initcall entry 的目标对象；
+`IrqProcView` deferred boundary、`CtorTable.setup()`、`InitcallTable.preset()`、
+`InitcallTable.setup()` 和 `InitcallBoundary.setup()`。当前不得展开完整驱动模型、procfs IRQ
+导出或每个 initcall entry 的目标对象；
 这些路径必须保留为显式 deferred 或表内属性，而不是静默假设已经可用。
 
-`InitcallTable` 是本阶段的核心可测对象。实现应记录静态表范围存在、level 数、所有 level 已执行、entries
-作为表内属性记录、每 level 命令行 scratch 复用、参数解析、blacklist/filter 处理和 `do_one_initcall()`
-运行上下文检查。当前对象级 prototype 可以使用固定的最小表摘要，但 API 必须表达表驱动语义，后续才能把具体
-entry 绑定到目标对象 event/action。
+`InitcallTable` 的机制规格和具体 entry 的目标效果必须分开。model 层的
+`InitcallTable.Action::Register(level, entry)` 是抽象注册接口，不规定必须依赖 LDS；本 target 的 coding
+规格采用 Linux-like LDS/static section 方式实现它。也就是说，owner 对象在自己的 `preset` 中声明某个
+`Action` 作为 entry，并把该 entry 注册到指定 level；coding 层将这个注册降为编译/链接期的静态 entry
+descriptor，而不是运行期向 growable registry 做 push。
+
+`InitcallEntryPrototype` 必须降为 retained static function pointer，规格 ABI 为
+`fn(ContextRef) -> InitcallReturn`。`ContextRef` 是对象图入口；在当前 arceos_ex Rust target 中，它映射为
+`&mut crate::context::Context`。`InitcallReturn` 表示单个 entry 的 Linux-like outcome，可由对象 action 的
+`EventResult` 在 entry wrapper 内转换得到，并由 `InitcallTable.setup()` 记录。entry 不得依赖 captured
+closure、heap object 或带隐藏 payload 参数的动态 callback。静态 entry descriptor 应通过 retained static
+declaration 进入对应 level section，例如 Rust 侧可用 `#[used]` 加 `#[link_section]`，或使用 build-generated
+table 达到等价效果。链接脚本必须用 LDS/KEEP-style 规则保留这些 section，并导出 start/end ranges 或等价的
+range metadata。
+
+`InitcallTable.preset()` 负责消费这些预链接的静态 ranges，建立或校验 level mapping、entry 列表摘要和
+entry-to-operation binding；它可以构建表内 metadata，但不得调用 entry。`InitcallTable.setup()` 对应
+`do_initcalls()`，只迭代 preset 已收集的 entries，并按 Linux level order 记录 level 数、所有 level
+已执行、每 level 命令行 scratch 复用、参数解析、blacklist/filter 处理和 `do_one_initcall()` 运行上下文检查。
+sync slot 和 rootfs slot 可以作为静态收集 slot 保留其 Linux 排序语义；是否升格为独立模型 phase 由 model
+规格另行决定，coding 机制本身不强制。
 
 测试应覆盖 `InitcallPhase.Ready`、Cpuset trimmed、DriverCore/IrqProcView deferred、CtorTable 表位置、
-`InitcallTable.all_levels_ran`、level/entry 摘要、命令行 scratch 和运行上下文事实，以及下一入口仍是
-`kunit_run_all_tests()` / `RootfsPhase`。
+`InitcallTable.preset()` 的静态 range 收集事实、level/entry 摘要、entry operation binding、
+`InitcallTable.all_levels_ran`、命令行 scratch 和运行上下文事实，以及下一入口仍是 `kunit_run_all_tests()` /
+`RootfsPhase`。具体 entry 的目标副作用，例如 `of_platform_default_populate_init()` 填充 platform bus，应由
+对应对象规格和后续 smoke 测试覆盖，不混入 initcall 机制本身。
 
 ## RootfsPhase 编码约束
 

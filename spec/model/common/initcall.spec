@@ -2,7 +2,8 @@
  * Generic initcall table model.
  *
  * The model layer describes initcall registration as an abstract relation:
- * an object registers one of its no-argument entry actions into a table level.
+ * an object registers one of its no-payload-argument entry actions into a
+ * table level.
  * It does not require Linux's linker-section implementation. The coding layer
  * may satisfy the same model by LDS sections, generated static arrays, or a
  * dynamic registry.
@@ -45,7 +46,7 @@ type InitcallEntryPrototype {
 type InitcallEntry {
 }
 
-predicate initcall_entry_prototype_no_args<T>(prototype: T) -> bool;
+predicate initcall_entry_prototype_no_payload_args<T>(prototype: T) -> bool;
 predicate initcall_entry_prototype_returns_result<T>(prototype: T) -> bool;
 predicate initcall_entry_ref_ready<T>(entry: T) -> bool;
 predicate initcall_entry_has_prototype<T, P>(entry: T, prototype: P) -> bool;

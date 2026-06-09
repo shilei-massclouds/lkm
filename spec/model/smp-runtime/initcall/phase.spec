@@ -359,8 +359,8 @@ object IrqProcViewDeferred: KernelObject {
 
 /*
  * OfPlatformDefaultPopulateInitcallEntry 表示
- * arch_initcall_sync(of_platform_default_populate_init) 对应的无参
- * initcall entry。它归属于后续的 OfPlatformDefaultPopulate 对象；
+ * arch_initcall_sync(of_platform_default_populate_init) 对应的无 payload
+ * 参数 initcall entry。它归属于后续的 OfPlatformDefaultPopulate 对象；
  * 当前先建立 entry 注册关系，具体 DT node -> platform device 枚举
  * 留给下一轮规格。
  */
@@ -373,7 +373,7 @@ object OfPlatformDefaultPopulateInitcallEntry: KernelObject {
                 ensures {
                     initcall_entry_ref_ready(OfPlatformDefaultPopulateInitcallEntry);
                     initcall_entry_has_prototype(OfPlatformDefaultPopulateInitcallEntry, InitcallEntryPrototype);
-                    initcall_entry_prototype_no_args(InitcallEntryPrototype);
+                    initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
                     initcall_entry_prototype_returns_result(InitcallEntryPrototype);
                     initcall_entry_owner_bound(OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate);
                     initcall_entry_operation_bound(OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate.Action::InitcallEntry);
@@ -386,7 +386,7 @@ object OfPlatformDefaultPopulateInitcallEntry: KernelObject {
         invariant {
             initcall_entry_ref_ready(OfPlatformDefaultPopulateInitcallEntry);
             initcall_entry_has_prototype(OfPlatformDefaultPopulateInitcallEntry, InitcallEntryPrototype);
-            initcall_entry_prototype_no_args(InitcallEntryPrototype);
+            initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
             initcall_entry_prototype_returns_result(InitcallEntryPrototype);
             initcall_entry_owner_bound(OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate);
             initcall_entry_operation_bound(OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate.Action::InitcallEntry);

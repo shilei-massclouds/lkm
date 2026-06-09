@@ -1137,15 +1137,68 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_initcall_record_ctor_table_boundary();
 
         /*
-         * Initcall table:
+         * Entry ABI:
          *
-         * InitcallTable.run_all_levels() must represent do_initcalls() as a
-         * static linker table action. It must record level count, all-level
-         * execution, command-line scratch reuse, parameter parsing, filtering
-         * and run-context checks without promoting every entry to a top-level
-         * object.
+         * InitcallEntryPrototype must lower to a retained static function
+         * pointer with the ABI fn(ContextRef) -> InitcallReturn. ContextRef is
+         * the object graph entry; in the current Rust target it maps to
+         * &mut crate::context::Context. InitcallReturn records the per-entry
+         * Linux-like outcome and must be captured by InitcallTable.setup().
+         * The entry must not lower to a captured closure, heap object or
+         * runtime-dispatched callback that carries hidden payload arguments.
+         */
+        arceos_ex_must_initcall_entry_lower_to_context_ref_result_function();
+
+        /*
+         * Static registration:
+         *
+         * InitcallTable.Register(level, entry) is abstract in the model, but
+         * this target must realize it as a Linux-like static section
+         * declaration: the owning object's preset emits a retained entry
+         * descriptor into the section selected by level. It must not require
+         * a runtime push into a growable registry.
+         */
+        arceos_ex_must_initcall_register_lower_to_static_section_entry();
+
+        /*
+         * Linker collection:
+         *
+         * The static sections must be retained by the linker and collected
+         * through LDS/KEEP-style start/end ranges or a build-generated
+         * equivalent with the same observable table boundaries.
+         */
+        arceos_ex_must_initcall_sections_collected_by_lds_ranges();
+
+        /*
+         * Preset collection:
+         *
+         * InitcallTable.preset() must collect and validate the pre-linked
+         * static ranges, level mapping and entry operation bindings. It may
+         * allocate or build table metadata, but it must not invoke entries.
+         */
+        arceos_ex_must_initcall_table_preset_collect_static_ranges();
+
+        /*
+         * Setup execution:
+         *
+         * InitcallTable.setup() must represent do_initcalls() by iterating the
+         * entries collected by preset in Linux level order. It must record
+         * level count, all-level execution, command-line scratch reuse,
+         * parameter parsing, filtering and run-context checks without
+         * promoting every entry to a top-level object.
          */
         arceos_ex_must_initcall_run_static_initcall_table_summary();
+
+        /*
+         * Mechanism/effect split:
+         *
+         * The initcall mechanism specification must stay separate from the
+         * concrete side effects of individual entries such as
+         * of_platform_default_populate_init(). Concrete targets are bound by
+         * entry operation facts and may remain deferred until their owning
+         * object model exists.
+         */
+        arceos_ex_must_initcall_keep_static_mechanism_separate_from_entry_effects();
     }
 }
 
