@@ -31,10 +31,20 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     }
 
     ctx.cpuset_smp_trimmed.setup(&ctx.runtime_core_boundary)?;
-    ctx.driver_core_deferred
+    ctx.driver_core_base
         .setup(&ctx.cpuset_smp_trimmed, &ctx.page_allocator, &ctx.workqueue)?;
-    ctx.irq_proc_view_deferred
-        .setup(&ctx.driver_core_deferred, &ctx.irq_dispatch_tree)?;
+    ctx.platform_bus_device
+        .setup(&ctx.driver_core_base, &ctx.static_objects)?;
+    ctx.platform_bus_type
+        .setup(&ctx.driver_core_base, &ctx.platform_bus_device)?;
+    ctx.driver_core_deferred.setup(&ctx.platform_bus_type)?;
+    ctx.irq_proc_view_deferred.setup(
+        &ctx.driver_core_base,
+        &ctx.platform_bus_device,
+        &ctx.platform_bus_type,
+        &ctx.driver_core_deferred,
+        &ctx.irq_dispatch_tree,
+    )?;
     ctx.ctor_table
         .setup(&ctx.irq_proc_view_deferred, &ctx.static_objects)?;
     ctx.initcall_table.setup(
@@ -46,6 +56,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.initcall_boundary.setup(
         &ctx.cpuset_smp_trimmed,
+        &ctx.driver_core_base,
+        &ctx.platform_bus_device,
+        &ctx.platform_bus_type,
         &ctx.driver_core_deferred,
         &ctx.irq_proc_view_deferred,
         &ctx.ctor_table,
@@ -56,6 +69,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 fn checkpoint_ready(ctx: &Context) -> EventResult {
     if !initcall_phase_ready(
         &ctx.cpuset_smp_trimmed,
+        &ctx.driver_core_base,
+        &ctx.platform_bus_device,
+        &ctx.platform_bus_type,
         &ctx.driver_core_deferred,
         &ctx.irq_proc_view_deferred,
         &ctx.ctor_table,

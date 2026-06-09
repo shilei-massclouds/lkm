@@ -24,14 +24,31 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.driver_core_deferred.state() != State::Ready
-        || !ctx.driver_core_deferred.setup_deferred()
+    if ctx.driver_core_base.state() != State::Ready
+        || !ctx.driver_core_base.device_registry_ready()
+        || !ctx.driver_core_base.bus_registry_ready()
+        || !ctx.driver_core_base.pre_platform_deferred()
+        || !ctx.driver_core_base.pre_platform_order_preserved()
+        || ctx.platform_bus_device.state() != State::Ready
+        || !ctx.platform_bus_device.early_platform_cleanup_deferred()
+        || !ctx.platform_bus_device.static_device_registered()
+        || !ctx.platform_bus_device.device_name_bound()
+        || !ctx.platform_bus_device.register_return_zero()
+        || ctx.platform_bus_type.state() != State::Ready
+        || !ctx.platform_bus_type.registered()
+        || !ctx.platform_bus_type.devices_kset_ready()
+        || !ctx.platform_bus_type.drivers_kset_ready()
+        || !ctx.platform_bus_type.autoprobe_enabled()
+        || !ctx.platform_bus_type.ops_bound()
+        || !ctx.platform_bus_type.register_return_zero()
+        || ctx.driver_core_deferred.state() != State::Ready
+        || !ctx.driver_core_deferred.post_platform_deferred()
         || !ctx.driver_core_deferred.entry_position_preserved()
         || ctx.irq_proc_view_deferred.state() != State::Ready
         || !ctx.irq_proc_view_deferred.setup_deferred()
         || !ctx.irq_proc_view_deferred.proc_irq_export_deferred()
     {
-        printk::write_str("initcall deferred facts invalid\n");
+        printk::write_str("initcall driver core facts invalid\n");
         return SmokeResult::Failed;
     }
 
@@ -99,7 +116,7 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "initcall levels={} entries={} next=kunit\n",
+        "initcall platform_bus=ready levels={} entries={} next=kunit\n",
         ctx.initcall_table.level_count(),
         ctx.initcall_table.entry_count()
     ));

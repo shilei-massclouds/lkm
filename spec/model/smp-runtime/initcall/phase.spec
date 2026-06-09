@@ -34,11 +34,13 @@ object CpusetSmpTrimmed: KernelObject {
 }
 
 /*
- * DriverCoreDeferred 保留 driver_init() 的 Linux 时序位置。驱动模型
- * 内部对象层次较大，当前轮次不展开 device/bus/class/firmware/platform
- * 等对象。
+ * DriverCoreBase 表示 driver_init() 中 platform_bus_init() 的必要前置
+ * registry 基础。当前只把 devices_init() 与 buses_init() 升级为 formal
+ * 事实：device_register(&platform_bus) 依赖 devices_kset，bus_register()
+ * 依赖 bus_kset。bdi/devtmpfs/classes/firmware/hypervisor/of_core 等
+ * platform_bus_init() 不直接依赖的前置调用只保留 deferred 位置。
  */
-object DriverCoreDeferred: DeviceObject {
+object DriverCoreBase: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -51,7 +53,121 @@ object DriverCoreDeferred: DeviceObject {
                 }
 
                 ensures {
-                    driver_core_setup_deferred();
+                    driver_core_device_registry_ready(DriverCoreBase);
+                    driver_core_bus_registry_ready(DriverCoreBase);
+                    driver_core_pre_platform_deferred();
+                    driver_core_pre_platform_order_preserved();
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            driver_core_device_registry_ready(DriverCoreBase);
+            driver_core_bus_registry_ready(DriverCoreBase);
+            driver_core_pre_platform_deferred();
+            driver_core_pre_platform_order_preserved();
+        }
+    }
+}
+
+/*
+ * PlatformBusDevice 表示 platform_bus_init() 的第一段：
+ * early_platform_cleanup(); device_register(&platform_bus)。
+ * 当前 RISC-V 路径下 early platform cleanup 不展开；platform_bus 是
+ * 静态 struct device，注册成功后成为 /sys/devices 下的 root device。
+ */
+object PlatformBusDevice: DeviceObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    DriverCoreBase.state == State::Ready;
+                    StaticObjects.state == State::Online;
+                }
+
+                ensures {
+                    early_platform_cleanup_deferred();
+                    platform_bus_static_device_registered(PlatformBusDevice);
+                    platform_bus_device_name_bound(PlatformBusDevice);
+                    platform_bus_device_register_return_zero(PlatformBusDevice);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            early_platform_cleanup_deferred();
+            platform_bus_static_device_registered(PlatformBusDevice);
+            platform_bus_device_name_bound(PlatformBusDevice);
+            platform_bus_device_register_return_zero(PlatformBusDevice);
+        }
+    }
+}
+
+/*
+ * PlatformBusType 表示 platform_bus_init() 的第二段：
+ * bus_register(&platform_bus_type)。该对象只抽象 platform bus 的核心
+ * bus_type 注册事实，match/probe/remove/dma/pm 等运行期回调作为已绑定
+ * 属性记录；真正的 platform device/driver 枚举与 probe 留给后续 initcall。
+ */
+object PlatformBusType: DeviceObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    DriverCoreBase.state == State::Ready;
+                    PlatformBusDevice.state == State::Ready;
+                }
+
+                ensures {
+                    platform_bus_type_registered(PlatformBusType);
+                    platform_bus_type_devices_kset_ready(PlatformBusType);
+                    platform_bus_type_drivers_kset_ready(PlatformBusType);
+                    platform_bus_type_autoprobe_enabled(PlatformBusType);
+                    platform_bus_type_ops_bound(PlatformBusType);
+                    platform_bus_register_return_zero(PlatformBusType);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            platform_bus_type_registered(PlatformBusType);
+            platform_bus_type_devices_kset_ready(PlatformBusType);
+            platform_bus_type_drivers_kset_ready(PlatformBusType);
+            platform_bus_type_autoprobe_enabled(PlatformBusType);
+            platform_bus_type_ops_bound(PlatformBusType);
+            platform_bus_register_return_zero(PlatformBusType);
+        }
+    }
+}
+
+/*
+ * DriverCoreDeferred 现在只表示 platform_bus_init() 之后仍未展开的
+ * driver_init() 尾部：auxiliary_bus_init(), memory_dev_init(),
+ * node_dev_init(), cpu_dev_init(), container_dev_init()。这些不是当前
+ * platform_bus_init() 完成条件。
+ */
+object DriverCoreDeferred: DeviceObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    PlatformBusType.state == State::Ready;
+                }
+
+                ensures {
+                    driver_core_post_platform_deferred();
                     driver_model_entry_position_preserved();
                 }
             }
@@ -60,7 +176,7 @@ object DriverCoreDeferred: DeviceObject {
 
     state State::Ready {
         invariant {
-            driver_core_setup_deferred();
+            driver_core_post_platform_deferred();
             driver_model_entry_position_preserved();
         }
     }
@@ -77,6 +193,9 @@ object IrqProcViewDeferred: KernelObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
+                    DriverCoreBase.state == State::Ready;
+                    PlatformBusDevice.state == State::Ready;
+                    PlatformBusType.state == State::Ready;
                     DriverCoreDeferred.state == State::Ready;
                     IrqDispatchTree.state == State::Ready;
                 }
@@ -188,6 +307,9 @@ object InitcallBoundary: KernelObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     CpusetSmpTrimmed.state == State::Ready;
+                    DriverCoreBase.state == State::Ready;
+                    PlatformBusDevice.state == State::Ready;
+                    PlatformBusType.state == State::Ready;
                     DriverCoreDeferred.state == State::Ready;
                     IrqProcViewDeferred.state == State::Ready;
                     CtorTable.state == State::Ready;
@@ -231,6 +353,9 @@ object InitcallPhase: PhaseObject {
 
                 drives {
                     CpusetSmpTrimmed.Event::Setup;
+                    DriverCoreBase.Event::Setup;
+                    PlatformBusDevice.Event::Setup;
+                    PlatformBusType.Event::Setup;
                     DriverCoreDeferred.Event::Setup;
                     IrqProcViewDeferred.Event::Setup;
                     CtorTable.Event::Setup;
@@ -241,7 +366,11 @@ object InitcallPhase: PhaseObject {
                 ensures {
                     initcall_phase_ready(InitcallPhase);
                     cpuset_smp_trimmed_noop();
-                    driver_core_setup_deferred();
+                    driver_core_device_registry_ready(DriverCoreBase);
+                    driver_core_bus_registry_ready(DriverCoreBase);
+                    platform_bus_static_device_registered(PlatformBusDevice);
+                    platform_bus_type_registered(PlatformBusType);
+                    driver_core_post_platform_deferred();
                     irq_proc_view_setup_deferred();
                     constructors_trimmed_or_empty(CtorTable);
                     initcall_table_all_levels_ran(InitcallTable);
@@ -255,6 +384,9 @@ object InitcallPhase: PhaseObject {
         invariant {
             RuntimeCorePhase.state == State::Ready;
             CpusetSmpTrimmed.state == State::Ready;
+            DriverCoreBase.state == State::Ready;
+            PlatformBusDevice.state == State::Ready;
+            PlatformBusType.state == State::Ready;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;
