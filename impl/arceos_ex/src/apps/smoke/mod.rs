@@ -90,6 +90,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::scheduler::run,
     },
     SmokeCase {
+        name: "current_runqueue_ref",
+        run: cases::current_runqueue_ref::run,
+    },
+    SmokeCase {
         name: "irq_time",
         run: cases::irq_time::run,
     },
@@ -104,6 +108,10 @@ const CASES: &[SmokeCase] = &[
     SmokeCase {
         name: "process_prepare",
         run: cases::process_prepare::run,
+    },
+    SmokeCase {
+        name: "task_creation_core",
+        run: cases::task_creation_core::run,
     },
     SmokeCase {
         name: "completion",

@@ -7,6 +7,7 @@
  */
 
 predicate testing_smoke_category_type_behavior_defined() -> bool;
+predicate testing_smoke_category_object_api_behavior_defined() -> bool;
 predicate testing_smoke_category_kernel_environment_bound_defined() -> bool;
 
 predicate testing_smoke_must_classify_target_before_generation() -> bool;
@@ -28,8 +29,11 @@ predicate testing_smoke_must_not_halt_on_assertion_failure_by_default() -> bool;
 predicate testing_smoke_must_run_teardown_after_assertion_failure() -> bool;
 predicate testing_smoke_must_keep_type_behavior_local() -> bool;
 predicate testing_smoke_must_not_bind_type_behavior_to_production_singleton() -> bool;
+predicate testing_smoke_must_exercise_formal_object_api() -> bool;
+predicate testing_smoke_must_not_add_test_only_subject_api() -> bool;
 predicate testing_smoke_must_keep_kernel_environment_bound_explicit() -> bool;
 predicate testing_smoke_must_not_register_type_behavior_as_kunit_by_default() -> bool;
+predicate testing_smoke_must_not_register_object_api_behavior_as_kunit_by_default() -> bool;
 predicate testing_smoke_must_record_kunit_exceptions() -> bool;
 
 type SmokeTestCategories {
@@ -42,6 +46,16 @@ type SmokeTestCategories {
          * Completion are current examples.
          */
         testing_smoke_category_type_behavior_defined();
+
+        /*
+         * ObjectApiBehavior:
+         *
+         * A formal object API or action boundary whose contract can be tested
+         * with a local subject object and read-only live prerequisites.
+         * TaskCreationCore.copy_process() and CurrentRunQueueRef/RunQueue
+         * enqueue/pick actions are current examples.
+         */
+        testing_smoke_category_object_api_behavior_defined();
 
         /*
          * KernelEnvironmentBound:
@@ -219,6 +233,25 @@ type SmokeTestGenerationMust {
         testing_smoke_must_not_bind_type_behavior_to_production_singleton();
 
         /*
+         * Formal object API:
+         *
+         * ObjectApiBehavior cases must call the same formal object API or
+         * action boundary that production code uses. The smoke case may
+         * construct a local subject, but the exercised method must remain a
+         * real implementation boundary.
+         */
+        testing_smoke_must_exercise_formal_object_api();
+
+        /*
+         * No test-only subject API:
+         *
+         * Smoke generation must not add test_* or otherwise test-only methods
+         * to the subject object. If an action is not externally callable enough
+         * to test, the implementation must expose a formal object API instead.
+         */
+        testing_smoke_must_not_add_test_only_subject_api();
+
+        /*
          * Explicit environment-bound target:
          *
          * KernelEnvironmentBound cases must make clear that they test a live
@@ -234,6 +267,15 @@ type SmokeTestGenerationMust {
          * facts rather than ordinary reusable type behavior.
          */
         testing_smoke_must_not_register_type_behavior_as_kunit_by_default();
+
+        /*
+         * Object API KUnit default:
+         *
+         * ObjectApiBehavior smoke cases must not be registered as checkpoint
+         * KUnit cases by default. They validate API contracts, not necessarily
+         * checkpoint-specific production facts.
+         */
+        testing_smoke_must_not_register_object_api_behavior_as_kunit_by_default();
 
         /*
          * KUnit exceptions:

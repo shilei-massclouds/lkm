@@ -50,6 +50,7 @@ predicate arceos_ex_must_process_prepare_not_create_rest_init_tasks() -> bool;
 predicate arceos_ex_must_process_prepare_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_process_prepare_cover_pid_task_cred_memory_namespace_key_security_objects() -> bool;
 predicate arceos_ex_must_task_creation_core_bind_task_entry_in_copy_process() -> bool;
+predicate arceos_ex_must_task_creation_core_api_smoke_use_copy_process_contract() -> bool;
 predicate arceos_ex_must_process_prepare_keep_deferred_paths_explicit() -> bool;
 predicate arceos_ex_must_completion_map_to_reusable_object() -> bool;
 predicate arceos_ex_must_completion_own_simple_wait_queue() -> bool;
@@ -72,6 +73,7 @@ predicate arceos_ex_must_rest_init_setup_show_boot_idle_tail_chain() -> bool;
 predicate arceos_ex_must_rest_init_smoke_cover_idle_schedule_relations() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
+predicate arceos_ex_must_current_runqueue_ref_api_smoke_use_formal_runqueue_actions() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
 predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
@@ -510,6 +512,17 @@ type ArceosExProcessPrepareCodingMust {
         arceos_ex_must_task_creation_core_bind_task_entry_in_copy_process();
 
         /*
+         * TaskCreationCore API smoke:
+         *
+         * TaskCreationCore ObjectApiBehavior smoke must exercise the formal
+         * copy_process() contract directly. It may build a local
+         * TaskCreationCore subject and read live prerequisite objects, but it
+         * must not add a test-only copy helper or register this API case as a
+         * checkpoint KUnit smoke case by default.
+         */
+        arceos_ex_must_task_creation_core_api_smoke_use_copy_process_contract();
+
+        /*
          * Deferred paths:
          *
          * Trimmed and deferred Linux start_kernel() calls in this interval
@@ -808,6 +821,18 @@ type ArceosExRestInitCodingMust {
          * that binding as a temporary UP specialization.
          */
         arceos_ex_must_current_runqueue_ref_be_cpu_view_private();
+
+        /*
+         * CurrentRunQueueRef API smoke:
+         *
+         * CurrentRunQueueRef/RunQueue ObjectApiBehavior smoke must exercise
+         * formal runqueue enqueue and pick-next boundaries. The implementation
+         * must not expose test_* scheduler wrappers for these checks; if the
+         * boundary is needed by tests, expose it as a formal RunQueue API and
+         * route production enqueue/pick behavior through the same API. This
+         * smoke case remains app-smoke-only by default, not checkpoint KUnit.
+         */
+        arceos_ex_must_current_runqueue_ref_api_smoke_use_formal_runqueue_actions();
 
         /*
          * Wake-up task CPU action:

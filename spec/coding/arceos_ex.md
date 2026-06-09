@@ -431,6 +431,8 @@ smoke payload 用于覆盖 QEMU 运行期可观察行为，以及规格推导不
 
 实现也不应为了 smoke 暴露原本不需要公开的内部状态查询接口。若某个对象同时有可验证的不变量和用户可观察行为，smoke 应测试后者；前者保留在模型谓词、推导验证和对象事件推进检查中。例如 `CommandLine` 的 raw/saved/static 文本视图一致性属于规格和实现状态推进约束，不需要单独增加只读取内部状态的 smoke case。
 
+`TaskCreationCore.copy_process()` 与 `CurrentRunQueueRef`/`RunQueue.EnqueueTask`/`RunQueue.PickNextTask` 属于 `ObjectApiBehavior` smoke：它们验证正式对象 API/action 契约，可以构造局部 subject 对象，并只读 live context 满足依赖前置条件。这类用例默认只注册到 app smoke，不加入 checkpoint KUnit smoke 列表。实现不得为它们增加 `test_*` 被测入口；若缺少可测边界，应补正式对象 API，并让生产路径与 smoke 路径共享同一入口。
+
 `SchedInitPhase` 的 smoke 验收例外地允许验证一个主动调度分界：
 `Scheduler.schedule()`。它是 `Scheduler.Online` 后的最小可返回调度事件，不是
 lifecycle event。当前阶段仍未启用中断，且只有一个可运行的 boot idle/current task，

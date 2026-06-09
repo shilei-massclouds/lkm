@@ -13,6 +13,8 @@ smoke 测试生成时必须先判定测试目标类别，再决定是否依赖�
 
 `TypeBehavior` 用于 `RawSpinLock`、`Completion` 这类可复用抽象类型。测试目标是类型语义，而不是某个生产实例。生成的 smoke case 默认应本地构造 subject 实例，只引入最小依赖对象，不绑定 `Context` 中的某个具体生产单例。若必须读取 live context 以满足前置条件，读取行为应保持为支撑条件，不得把该生产对象变成测试主体。
 
+`ObjectApiBehavior` 用于 `TaskCreationCore.copy_process()`、`CurrentRunQueueRef`/`RunQueue.EnqueueTask`/`RunQueue.PickNextTask` 这类正式对象 API 或 action 边界。测试目标是对象 API 契约本身，可以本地构造 subject 对象，并只读 live context 作为依赖前置条件。测试不得为了方便增加 `test_*` 被测入口；若实现缺少可调用边界，应补正式对象 API，使生产路径和测试路径共享同一语义入口。
+
 `KernelEnvironmentBound` 用于 `MemBlock`、`CpuGroup`、`Scheduler` 这类启动路径中的真实对象或事实集合。它们通常只出现一次，或脱离内核环境后测试意义不足。生成的 smoke case 可以直接读取 `Context` 中的生产对象，并验证阶段事实、对象事实和关键派生行为。
 
 ## 场景三段体
@@ -55,5 +57,7 @@ smoke 测试生成时必须先判定测试目标类别，再决定是否依赖�
 ## KUnit 与 Smoke 的边界
 
 `TypeBehavior` smoke case 默认不注册为 checkpoint KUnit case。KUnit checkpoint 更适合验证启动路径中的真实对象、checkpoint 时刻和内核环境绑定事实。若某个类型测试必须进入 KUnit，必须记录原因，说明它验证的不是普通类型行为，而是某个 checkpoint 下不可脱离环境的事实。
+
+`ObjectApiBehavior` smoke case 默认也不注册为 checkpoint KUnit case。它可以覆盖正式对象 API 的成功/失败边界，但不代表某个 checkpoint 时刻必须出现的全局事实。若要纳入 KUnit，必须说明该 API 行为为什么只能在 checkpoint 环境下验证。
 
 `KernelEnvironmentBound` smoke case 可以在 app smoke 和 checkpoint KUnit 中复用，但应明确它测试的是生产对象或阶段事实，不应伪装成通用类型测试。

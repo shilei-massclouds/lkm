@@ -461,10 +461,10 @@ impl Scheduler {
             return Err(self.failed_schedule_condition());
         }
 
-        let next_ref = self.boot_runqueue.first_runnable_task_ref();
-        if matches!(next_ref, CurrentTaskRef::None) {
-            return Err(self.failed_schedule_condition());
-        }
+        let next_ref = self
+            .boot_runqueue
+            .pick_next_task(current_rq, prev_ref)
+            .map_err(|_| self.failed_schedule_condition())?;
 
         self.pick_next_task_passes = self.pick_next_task_passes.wrapping_add(1);
         self.pick_next_task_exit_prev_ref = prev_ref;
@@ -563,7 +563,20 @@ impl Scheduler {
             );
         }
 
-        self.boot_runqueue.enqueue_task(task_id)
+        let task_ref = if task_id == crate::objects::rest_init::KERNEL_INIT_PID {
+            CurrentTaskRef::KernelInit
+        } else if task_id == crate::objects::rest_init::KTHREADD_PID {
+            CurrentTaskRef::Kthreadd
+        } else {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        };
+        self.boot_runqueue
+            .enqueue_task_ref(CurrentRunQueueRef::BootRunQueue, task_ref)
     }
 
     pub fn enable_smp(
@@ -657,8 +670,16 @@ fn trace_switch_to(
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-enum CurrentRunQueueRef {
+pub enum CurrentRunQueueRef {
     BootRunQueue,
+}
+
+fn task_id_for_current_task_ref(task_ref: CurrentTaskRef) -> Option<usize> {
+    match task_ref {
+        CurrentTaskRef::KernelInit => Some(crate::objects::rest_init::KERNEL_INIT_PID),
+        CurrentTaskRef::Kthreadd => Some(crate::objects::rest_init::KTHREADD_PID),
+        CurrentTaskRef::None | CurrentTaskRef::BootIdle => None,
+    }
 }
 
 pub struct DefaultSchedRootDomain {
@@ -767,7 +788,8 @@ pub struct BootRunQueue {
 }
 
 impl BootRunQueue {
-    const fn new() -> Self {
+    #[cfg_attr(not(app_smoke), allow(dead_code))]
+    pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             cpu_id: usize::MAX,
@@ -836,7 +858,11 @@ impl BootRunQueue {
         }
     }
 
-    fn setup(
+    pub const fn enqueued_task_id(&self) -> usize {
+        self.enqueued_task_id
+    }
+
+    pub fn setup(
         &mut self,
         cpu_group: &CpuGroup,
         cpu_id_map: &CpuIdMap,
@@ -875,8 +901,49 @@ impl BootRunQueue {
         )
     }
 
+    pub fn enqueue_task_ref(
+        &mut self,
+        runqueue_ref: CurrentRunQueueRef,
+        task_ref: CurrentTaskRef,
+    ) -> EventResult {
+        if !matches!(runqueue_ref, CurrentRunQueueRef::BootRunQueue) {
+            return self.failed_setup();
+        }
+
+        let Some(task_id) = task_id_for_current_task_ref(task_ref) else {
+            return self.failed_setup();
+        };
+        self.enqueue_task(task_id)
+    }
+
+    pub fn pick_next_task(
+        &self,
+        runqueue_ref: CurrentRunQueueRef,
+        prev_ref: CurrentTaskRef,
+    ) -> Result<CurrentTaskRef, EventError> {
+        if !matches!(runqueue_ref, CurrentRunQueueRef::BootRunQueue)
+            || self.lifecycle.state() != State::Ready
+            || !matches!(prev_ref, CurrentTaskRef::BootIdle)
+            || self.curr_task_id != self.idle_task_id
+            || self.task_count() == 0
+        {
+            return Err(self.failed_setup_error());
+        }
+
+        let next_ref = self.first_runnable_task_ref();
+        if matches!(next_ref, CurrentTaskRef::None) {
+            return Err(self.failed_setup_error());
+        }
+        Ok(next_ref)
+    }
+
     fn enqueue_task(&mut self, task_id: usize) -> EventResult {
-        if self.lifecycle.state() != State::Ready || task_id == usize::MAX {
+        if self.lifecycle.state() != State::Ready
+            || task_id == usize::MAX
+            || self.contains_task(task_id)
+            || (task_id != crate::objects::rest_init::KERNEL_INIT_PID
+                && task_id != crate::objects::rest_init::KTHREADD_PID)
+        {
             return self.failed_setup();
         }
 
@@ -892,6 +959,16 @@ impl BootRunQueue {
 
     fn failed_setup(&self) -> EventResult {
         failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Base,
+            State::Ready,
+        )
+    }
+
+    fn failed_setup_error(&self) -> EventError {
+        EventError::failed(
+            EventErrorCode::ConditionFailed,
             LifecycleEvent::Setup,
             self.lifecycle.state(),
             State::Base,
