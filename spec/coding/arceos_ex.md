@@ -114,7 +114,7 @@ keyring 和 security 对象按 formal trace 后续推进。VFS/proc/page-cache/n
 
 ## Completion 编码约束
 
-`Completion` 是 `spec/model/common.spec` 中定义的可复用 Type process。当前对象级实现必须把它落到
+`Completion` 是 `spec/model/common/main.spec` 中定义的可复用 Type process。当前对象级实现必须把它落到
 `impl/arceos_ex/src/objects/completion.rs`，由 `Completion` 结构体承载普通生命周期状态、`CompletionExtState`
 扩展状态、token 计数和 owned `SimpleWaitQueue`。`SimpleWaitQueue` 对应 Linux simple waitqueue/swait 的核心等待队列语义，
 不是 completion 用户传入的外部引用。

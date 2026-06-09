@@ -110,15 +110,39 @@ object PlatformBusDevice: DeviceObject {
 }
 
 /*
- * PlatformBusType 表示 platform_bus_init() 的第二段：
- * bus_register(&platform_bus_type)。该对象只抽象 platform bus 的核心
- * bus_type 注册事实，match/probe/remove/dma/pm 等运行期回调作为已绑定
- * 属性记录；真正的 platform device/driver 枚举与 probe 留给后续 initcall。
+ * PlatformBusType 是通用 BusType 的 platform 实例。Preset 对应静态
+ * const struct bus_type platform_bus_type 的 name/ops/dev_groups 绑定；
+ * Setup 对应 platform_bus_init() 中的 bus_register(&platform_bus_type)。
+ * 真正的 platform device/driver 枚举与 probe 留给后续 initcall。
  */
-object PlatformBusType: DeviceObject {
+object PlatformBusType: BusType {
     initial_state: State::Base;
 
     state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    StaticObjects.state == State::Online;
+                }
+
+                ensures {
+                    bus_type_descriptor_bound(PlatformBusType);
+                    bus_type_name_bound(PlatformBusType);
+                    bus_type_ops_bound(PlatformBusType);
+                    platform_bus_type_ops_bound(PlatformBusType);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            bus_type_descriptor_bound(PlatformBusType);
+            bus_type_name_bound(PlatformBusType);
+            bus_type_ops_bound(PlatformBusType);
+            platform_bus_type_ops_bound(PlatformBusType);
+        }
+
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
@@ -127,11 +151,15 @@ object PlatformBusType: DeviceObject {
                 }
 
                 ensures {
+                    bus_type_registered(PlatformBusType);
+                    bus_type_devices_kset_ready(PlatformBusType);
+                    bus_type_drivers_kset_ready(PlatformBusType);
+                    bus_type_autoprobe_enabled(PlatformBusType);
+                    bus_type_register_return_zero(PlatformBusType);
                     platform_bus_type_registered(PlatformBusType);
                     platform_bus_type_devices_kset_ready(PlatformBusType);
                     platform_bus_type_drivers_kset_ready(PlatformBusType);
                     platform_bus_type_autoprobe_enabled(PlatformBusType);
-                    platform_bus_type_ops_bound(PlatformBusType);
                     platform_bus_register_return_zero(PlatformBusType);
                 }
             }
@@ -140,11 +168,19 @@ object PlatformBusType: DeviceObject {
 
     state State::Ready {
         invariant {
+            bus_type_descriptor_bound(PlatformBusType);
+            bus_type_name_bound(PlatformBusType);
+            bus_type_ops_bound(PlatformBusType);
+            bus_type_registered(PlatformBusType);
+            bus_type_devices_kset_ready(PlatformBusType);
+            bus_type_drivers_kset_ready(PlatformBusType);
+            bus_type_autoprobe_enabled(PlatformBusType);
+            bus_type_register_return_zero(PlatformBusType);
+            platform_bus_type_ops_bound(PlatformBusType);
             platform_bus_type_registered(PlatformBusType);
             platform_bus_type_devices_kset_ready(PlatformBusType);
             platform_bus_type_drivers_kset_ready(PlatformBusType);
             platform_bus_type_autoprobe_enabled(PlatformBusType);
-            platform_bus_type_ops_bound(PlatformBusType);
             platform_bus_register_return_zero(PlatformBusType);
         }
     }
@@ -355,6 +391,7 @@ object InitcallPhase: PhaseObject {
                     CpusetSmpTrimmed.Event::Setup;
                     DriverCoreBase.Event::Setup;
                     PlatformBusDevice.Event::Setup;
+                    PlatformBusType.Event::Preset;
                     PlatformBusType.Event::Setup;
                     DriverCoreDeferred.Event::Setup;
                     IrqProcViewDeferred.Event::Setup;

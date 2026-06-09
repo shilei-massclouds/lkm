@@ -5,7 +5,7 @@
  * model phase tree. The formal directory entry is spec/model/main.spec.
  */
 
-include "common.spec";
+include "common/main.spec";
 include "prepare/main.spec";
 include "boot/main.spec";
 include "interrupt/main.spec";

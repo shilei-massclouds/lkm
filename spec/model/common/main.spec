@@ -10,6 +10,8 @@
  *   processed in declaration order.
  */
 
+include "object_kinds.spec";
+
 enum TransitionResult {
     Moved,
     Rejected,
@@ -71,6 +73,8 @@ enum RunQueueRuntimeState {
     None,
     Some,
 }
+
+include "bus_type.spec";
 
 function addr_of<T>(value: T) -> AddrIdentity<T>;
 function phys_addr<T>(value: T) -> PhysAddr<T>;
@@ -455,9 +459,6 @@ type FixMapConfig {
     invariant {
         valid_fixmap_config(self);
     }
-}
-
-type TimelineObject {
 }
 
 type TaskObject {
