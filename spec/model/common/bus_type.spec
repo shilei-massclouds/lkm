@@ -17,6 +17,16 @@ predicate bus_type_devices_kset_ready<T>(bus: T) -> bool;
 predicate bus_type_drivers_kset_ready<T>(bus: T) -> bool;
 predicate bus_type_autoprobe_enabled<T>(bus: T) -> bool;
 predicate bus_type_register_return_zero<T>(bus: T) -> bool;
+predicate bus_device_ref_ready<T>(device: T) -> bool;
+predicate bus_driver_ref_ready<T>(driver: T) -> bool;
+predicate bus_type_device_added<T, U>(bus: T, device: U) -> bool;
+predicate bus_type_driver_added<T, U>(bus: T, driver: U) -> bool;
+predicate bus_type_devices_klist_nonempty<T>(bus: T) -> bool;
+predicate bus_type_drivers_klist_nonempty<T>(bus: T) -> bool;
+predicate bus_type_probe_driver_deferred<T, U>(bus: T, driver: U) -> bool;
+predicate bus_type_probe_device_deferred<T, U>(bus: T, device: U) -> bool;
+predicate bus_type_probe_driver_scans_devices<T, U>(bus: T, driver: U) -> bool;
+predicate bus_type_probe_device_scans_drivers<T, U>(bus: T, device: U) -> bool;
 
 predicate bus_subsys_private_allocated<T>(subsys: T) -> bool;
 predicate bus_subsys_private_bound_to_bus<T, U>(subsys: T, bus: U) -> bool;
@@ -32,8 +42,16 @@ predicate bus_subsys_interfaces_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_mutex_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_klist_devices_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_klist_drivers_ready<T>(subsys: T) -> bool;
+predicate bus_subsys_klist_devices_contains<T, U>(subsys: T, device: U) -> bool;
+predicate bus_subsys_klist_drivers_contains<T, U>(subsys: T, driver: U) -> bool;
 predicate bus_subsys_probe_files_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_groups_ready<T>(subsys: T) -> bool;
+
+type BusDeviceRef {
+}
+
+type BusDriverRef {
+}
 
 /*
  * BusSubsysPrivate models Linux struct subsys_private as created by
@@ -109,6 +127,94 @@ type BusType: DeviceObject {
                 bus_type_drivers_kset_ready(self);
                 bus_type_autoprobe_enabled(self);
                 bus_type_register_return_zero(self);
+            }
+        }
+    }
+
+    processes {
+        /*
+         * AddDevice records the bus-side device membership in
+         * subsys_private.klist_devices. It is the reusable BusType boundary
+         * that later Device modeling can call from device_add()/bus_add_device().
+         */
+        Action::AddDevice(device: BusDeviceRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                bus_type_subsys_private_online(self, self.subsys);
+                bus_subsys_klist_devices_ready(self.subsys);
+                bus_device_ref_ready(device);
+            }
+            ensures {
+                bus_type_device_added(self, device);
+                bus_type_devices_klist_nonempty(self);
+                bus_subsys_klist_devices_contains(self.subsys, device);
+            }
+        }
+
+        /*
+         * AddDriver records the bus-side driver membership in
+         * subsys_private.klist_drivers. It is the reusable BusType boundary
+         * that later Driver modeling can call from driver_register()/bus_add_driver().
+         */
+        Action::AddDriver(driver: BusDriverRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                bus_type_subsys_private_online(self, self.subsys);
+                bus_subsys_klist_drivers_ready(self.subsys);
+                bus_driver_ref_ready(driver);
+            }
+            ensures {
+                bus_type_driver_added(self, driver);
+                bus_type_drivers_klist_nonempty(self);
+                bus_subsys_klist_drivers_contains(self.subsys, driver);
+            }
+        }
+
+        /*
+         * ProbeDriver is only the driver-side probe boundary for now: it proves
+         * a registered driver can scan klist_devices, but Device/Driver
+         * matching and binding are deferred until those types exist.
+         */
+        Action::ProbeDriver(driver: BusDriverRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                bus_type_subsys_private_online(self, self.subsys);
+                bus_subsys_klist_devices_ready(self.subsys);
+                bus_type_devices_klist_nonempty(self);
+                bus_driver_ref_ready(driver);
+            }
+            ensures {
+                bus_type_probe_driver_deferred(self, driver);
+                bus_type_probe_driver_scans_devices(self, driver);
+            }
+            deferred {
+                "ProbeDriver 当前只建立 driver_attach()/bus_for_each_dev() 边界；真实 match/probe/bind 依赖 Device 和 Driver 类型建模后展开。";
+            }
+        }
+
+        /*
+         * ProbeDevice is the symmetric device-side probe boundary: it proves a
+         * registered device can scan klist_drivers, while real binding remains
+         * deferred.
+         */
+        Action::ProbeDevice(device: BusDeviceRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                bus_type_subsys_private_online(self, self.subsys);
+                bus_subsys_klist_drivers_ready(self.subsys);
+                bus_type_drivers_klist_nonempty(self);
+                bus_device_ref_ready(device);
+            }
+            ensures {
+                bus_type_probe_device_deferred(self, device);
+                bus_type_probe_device_scans_drivers(self, device);
+            }
+            deferred {
+                "ProbeDevice 当前只建立 bus_probe_device()/device_initial_probe() 边界；真实 match/probe/bind 依赖 Device 和 Driver 类型建模后展开。";
             }
         }
     }

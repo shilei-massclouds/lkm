@@ -146,6 +146,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::initcall::run,
     },
     SmokeCase {
+        name: "platform_bus_actions",
+        run: cases::platform_bus_actions::run,
+    },
+    SmokeCase {
         name: "rootfs",
         run: cases::rootfs::run,
     },

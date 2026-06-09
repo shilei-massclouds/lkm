@@ -12,6 +12,17 @@ use crate::trace::Checkpoint;
 
 pub const INITCALL_LEVEL_COUNT: usize = 8;
 pub const INITCALL_ENTRY_COUNT: usize = 8;
+pub const PLATFORM_BUS_ACTION_SLOT_COUNT: usize = 4;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum BusDeviceRef {
+    MockPlatformDevice,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum BusDriverRef {
+    MockPlatformDriver,
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum InitcallLevelState {
@@ -283,6 +294,14 @@ pub struct PlatformBusType {
     autoprobe_enabled: bool,
     ops_bound: bool,
     register_return_zero: bool,
+    device_refs: [Option<BusDeviceRef>; PLATFORM_BUS_ACTION_SLOT_COUNT],
+    device_count: usize,
+    driver_refs: [Option<BusDriverRef>; PLATFORM_BUS_ACTION_SLOT_COUNT],
+    driver_count: usize,
+    probe_driver_deferred_count: usize,
+    probe_device_deferred_count: usize,
+    probe_driver_scanned_devices: bool,
+    probe_device_scanned_drivers: bool,
 }
 
 impl PlatformBusType {
@@ -295,6 +314,14 @@ impl PlatformBusType {
             autoprobe_enabled: false,
             ops_bound: false,
             register_return_zero: false,
+            device_refs: [None; PLATFORM_BUS_ACTION_SLOT_COUNT],
+            device_count: 0,
+            driver_refs: [None; PLATFORM_BUS_ACTION_SLOT_COUNT],
+            driver_count: 0,
+            probe_driver_deferred_count: 0,
+            probe_device_deferred_count: 0,
+            probe_driver_scanned_devices: false,
+            probe_device_scanned_drivers: false,
         }
     }
 
@@ -326,6 +353,52 @@ impl PlatformBusType {
         self.register_return_zero
     }
 
+    pub const fn device_count(&self) -> usize {
+        self.device_count
+    }
+
+    pub const fn driver_count(&self) -> usize {
+        self.driver_count
+    }
+
+    pub const fn probe_driver_deferred_count(&self) -> usize {
+        self.probe_driver_deferred_count
+    }
+
+    pub const fn probe_device_deferred_count(&self) -> usize {
+        self.probe_device_deferred_count
+    }
+
+    pub const fn probe_driver_scanned_devices(&self) -> bool {
+        self.probe_driver_scanned_devices
+    }
+
+    pub const fn probe_device_scanned_drivers(&self) -> bool {
+        self.probe_device_scanned_drivers
+    }
+
+    pub fn contains_device(&self, device: BusDeviceRef) -> bool {
+        let mut index = 0usize;
+        while index < self.device_count {
+            if self.device_refs[index] == Some(device) {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    pub fn contains_driver(&self, driver: BusDriverRef) -> bool {
+        let mut index = 0usize;
+        while index < self.driver_count {
+            if self.driver_refs[index] == Some(driver) {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
     pub fn setup(
         &mut self,
         driver_core_base: &DriverCoreBase,
@@ -354,6 +427,94 @@ impl PlatformBusType {
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
+
+    pub fn add_device(&mut self, device: BusDeviceRef) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.registered
+            || !self.devices_kset_ready
+            || self.contains_device(device)
+            || self.device_count >= PLATFORM_BUS_ACTION_SLOT_COUNT
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.device_refs[self.device_count] = Some(device);
+        self.device_count += 1;
+        Ok(())
+    }
+
+    pub fn add_driver(&mut self, driver: BusDriverRef) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.registered
+            || !self.drivers_kset_ready
+            || self.contains_driver(driver)
+            || self.driver_count >= PLATFORM_BUS_ACTION_SLOT_COUNT
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.driver_refs[self.driver_count] = Some(driver);
+        self.driver_count += 1;
+        Ok(())
+    }
+
+    pub fn probe_driver(&mut self, driver: BusDriverRef) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.registered
+            || !self.devices_kset_ready
+            || self.device_count == 0
+            || !is_bus_driver_ref_ready(driver)
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.probe_driver_scanned_devices = true;
+        self.probe_driver_deferred_count += 1;
+        Ok(())
+    }
+
+    pub fn probe_device(&mut self, device: BusDeviceRef) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.registered
+            || !self.drivers_kset_ready
+            || self.driver_count == 0
+            || !is_bus_device_ref_ready(device)
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.probe_device_scanned_drivers = true;
+        self.probe_device_deferred_count += 1;
+        Ok(())
+    }
+}
+
+const fn is_bus_device_ref_ready(device: BusDeviceRef) -> bool {
+    matches!(device, BusDeviceRef::MockPlatformDevice)
+}
+
+const fn is_bus_driver_ref_ready(driver: BusDriverRef) -> bool {
+    matches!(driver, BusDriverRef::MockPlatformDriver)
 }
 
 pub struct DriverCoreDeferred {
