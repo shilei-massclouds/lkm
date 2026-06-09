@@ -358,6 +358,105 @@ object IrqProcViewDeferred: KernelObject {
 }
 
 /*
+ * OfPlatformDefaultPopulateInitcallEntry 表示
+ * arch_initcall_sync(of_platform_default_populate_init) 对应的无参
+ * initcall entry。它归属于后续的 OfPlatformDefaultPopulate 对象；
+ * 当前先建立 entry 注册关系，具体 DT node -> platform device 枚举
+ * 留给下一轮规格。
+ */
+object OfPlatformDefaultPopulateInitcallEntry: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                ensures {
+                    initcall_entry_ref_ready(OfPlatformDefaultPopulateInitcallEntry);
+                    initcall_entry_has_prototype(OfPlatformDefaultPopulateInitcallEntry, InitcallEntryPrototype);
+                    initcall_entry_prototype_no_args(InitcallEntryPrototype);
+                    initcall_entry_prototype_returns_result(InitcallEntryPrototype);
+                    initcall_entry_owner_bound(OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate);
+                    initcall_entry_operation_bound(OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate.Action::InitcallEntry);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            initcall_entry_ref_ready(OfPlatformDefaultPopulateInitcallEntry);
+            initcall_entry_has_prototype(OfPlatformDefaultPopulateInitcallEntry, InitcallEntryPrototype);
+            initcall_entry_prototype_no_args(InitcallEntryPrototype);
+            initcall_entry_prototype_returns_result(InitcallEntryPrototype);
+            initcall_entry_owner_bound(OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate);
+            initcall_entry_operation_bound(OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate.Action::InitcallEntry);
+        }
+    }
+}
+
+/*
+ * OfPlatformDefaultPopulate 是 drivers/of/platform.c 中
+ * arch_initcall_sync(of_platform_default_populate_init) 的 owner 对象。
+ * Preset 只注册其 initcall entry，不执行 device tree population。
+ */
+object OfPlatformDefaultPopulate: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    StaticObjects.state == State::Online;
+                }
+
+                drives {
+                    OfPlatformDefaultPopulateInitcallEntry.Event::Preset;
+                    InitcallTable.Action::Register(
+                        level: InitcallLevel::ArchSync,
+                        entry: OfPlatformDefaultPopulateInitcallEntry
+                    );
+                }
+
+                ensures {
+                    initcall_table_registration_committed(InitcallTable, InitcallLevel::ArchSync, OfPlatformDefaultPopulateInitcallEntry);
+                    initcall_table_registration_owner_bound(InitcallTable, OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate);
+                    initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, OfPlatformDefaultPopulateInitcallEntry);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            OfPlatformDefaultPopulateInitcallEntry.state == State::Prepared;
+            initcall_table_registration_committed(InitcallTable, InitcallLevel::ArchSync, OfPlatformDefaultPopulateInitcallEntry);
+            initcall_table_registration_owner_bound(InitcallTable, OfPlatformDefaultPopulateInitcallEntry, OfPlatformDefaultPopulate);
+            initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, OfPlatformDefaultPopulateInitcallEntry);
+        }
+
+        actions {
+            /*
+             * InitcallEntry 是 arch_initcall_sync 注册到 InitcallTable 的
+             * 无参 wrapper。当前只建立 entry 调用边界；真正的
+             * of_platform_default_populate_init() 设备枚举在下一轮展开。
+             */
+            Action::InitcallEntry {
+                state_effect: StateEffect::None;
+                depends_on {
+                    InitcallTable.state == State::Prepared;
+                    PlatformBusType.state == State::Ready;
+                }
+                ensures {
+                    initcall_entry_invoked(OfPlatformDefaultPopulateInitcallEntry);
+                    initcall_entry_return_recorded(OfPlatformDefaultPopulateInitcallEntry);
+                    initcall_entry_run_context_checked(OfPlatformDefaultPopulateInitcallEntry);
+                }
+            }
+        }
+    }
+}
+
+/*
  * CtorTable 表示 do_ctors() 的构造函数表位置。当前对象级实现只保留
  * 表边界；无构造函数条目时记录为 trimmed/empty。
  */
@@ -390,19 +489,53 @@ object CtorTable: KernelObject {
 }
 
 /*
- * InitcallTable 表示 do_initcalls() 对 linker initcall table 的执行动作。
- * 当前不把每个 entry 升级为顶层对象，只记录表属性和运行摘要。
+ * InitcallTable 是全量 initcall 表实例。Preset 汇集各 owner 对象在
+ * 自己 Preset 中注册的 entries；Setup 才对应 do_initcalls() 的表执行。
+ * model 层不限制注册关系必须来自 LDS，coding 层可选择 Linux-like
+ * linker section 方式实现。
  */
-object InitcallTable: KernelObject {
+object InitcallTable: InitcallTableType {
     initial_state: State::Base;
     parent: StaticObjects;
 
     state State::Base {
         events {
-            on Event::Setup -> State::Ready {
+            on Event::Preset -> State::Prepared {
                 depends_on {
                     CtorTable.state == State::Ready;
                     StaticObjects.state == State::Online;
+                    OfPlatformDefaultPopulate.state == State::Prepared;
+                }
+
+                ensures {
+                    initcall_table_static_ranges_ready(InitcallTable, StaticObjects);
+                    initcall_table_level_count_ready(InitcallTable);
+                    initcall_table_entries_recorded_as_properties(InitcallTable);
+                    initcall_table_registered_entries_collected(InitcallTable);
+                    initcall_table_level_mapping_ready(InitcallTable);
+                    initcall_table_run_levels_ready(InitcallTable);
+                    initcall_table_entry_operation_bindings_ready(InitcallTable);
+                    initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, OfPlatformDefaultPopulateInitcallEntry);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            initcall_table_static_ranges_ready(InitcallTable, StaticObjects);
+            initcall_table_level_count_ready(InitcallTable);
+            initcall_table_entries_recorded_as_properties(InitcallTable);
+            initcall_table_registered_entries_collected(InitcallTable);
+            initcall_table_level_mapping_ready(InitcallTable);
+            initcall_table_run_levels_ready(InitcallTable);
+            initcall_table_entry_operation_bindings_ready(InitcallTable);
+            initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, OfPlatformDefaultPopulateInitcallEntry);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
                     SavedCommandLine.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     PageAllocator.state == State::Ready;
@@ -411,12 +544,21 @@ object InitcallTable: KernelObject {
                 ensures {
                     initcall_table_static_ranges_ready(InitcallTable, StaticObjects);
                     initcall_table_level_count_ready(InitcallTable);
-                    initcall_table_all_levels_ran(InitcallTable);
                     initcall_table_entries_recorded_as_properties(InitcallTable);
+                    initcall_table_registered_entries_collected(InitcallTable);
+                    initcall_table_level_mapping_ready(InitcallTable);
+                    initcall_table_run_levels_ready(InitcallTable);
+                    initcall_table_entry_operation_bindings_ready(InitcallTable);
+                    initcall_table_all_levels_ran(InitcallTable);
+                    OfPlatformDefaultPopulate.Action::InitcallEntry;
                     initcall_command_line_scratch_reused_per_level(InitcallTable, SavedCommandLine);
                     initcall_param_parser_applied(InitcallTable);
                     initcall_filter_applied(InitcallTable);
                     initcall_run_context_checked(InitcallTable);
+                    initcall_entry_invoked(OfPlatformDefaultPopulateInitcallEntry);
+                    initcall_entry_return_recorded(OfPlatformDefaultPopulateInitcallEntry);
+                    initcall_entry_skipped_recorded(OfPlatformDefaultPopulateInitcallEntry);
+                    initcall_entry_run_context_checked(OfPlatformDefaultPopulateInitcallEntry);
                 }
             }
         }
@@ -426,12 +568,21 @@ object InitcallTable: KernelObject {
         invariant {
             initcall_table_static_ranges_ready(InitcallTable, StaticObjects);
             initcall_table_level_count_ready(InitcallTable);
-            initcall_table_all_levels_ran(InitcallTable);
             initcall_table_entries_recorded_as_properties(InitcallTable);
+            initcall_table_registered_entries_collected(InitcallTable);
+            initcall_table_level_mapping_ready(InitcallTable);
+            initcall_table_run_levels_ready(InitcallTable);
+            initcall_table_entry_operation_bindings_ready(InitcallTable);
+            initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, OfPlatformDefaultPopulateInitcallEntry);
+            initcall_table_all_levels_ran(InitcallTable);
+            initcall_entry_invoked(OfPlatformDefaultPopulateInitcallEntry);
             initcall_command_line_scratch_reused_per_level(InitcallTable, SavedCommandLine);
             initcall_param_parser_applied(InitcallTable);
             initcall_filter_applied(InitcallTable);
             initcall_run_context_checked(InitcallTable);
+            initcall_entry_return_recorded(OfPlatformDefaultPopulateInitcallEntry);
+            initcall_entry_skipped_recorded(OfPlatformDefaultPopulateInitcallEntry);
+            initcall_entry_run_context_checked(OfPlatformDefaultPopulateInitcallEntry);
         }
     }
 }
@@ -455,6 +606,7 @@ object InitcallBoundary: KernelObject {
                     IrqProcViewDeferred.state == State::Ready;
                     CtorTable.state == State::Ready;
                     InitcallTable.state == State::Ready;
+                    OfPlatformDefaultPopulate.state == State::Prepared;
                 }
 
                 ensures {
@@ -500,7 +652,9 @@ object InitcallPhase: PhaseObject {
                     PlatformBusType.Event::Setup;
                     DriverCoreDeferred.Event::Setup;
                     IrqProcViewDeferred.Event::Setup;
+                    OfPlatformDefaultPopulate.Event::Preset;
                     CtorTable.Event::Setup;
+                    InitcallTable.Event::Preset;
                     InitcallTable.Event::Setup;
                     InitcallBoundary.Event::Setup;
                 }
@@ -515,6 +669,7 @@ object InitcallPhase: PhaseObject {
                     driver_core_post_platform_deferred();
                     irq_proc_view_setup_deferred();
                     constructors_trimmed_or_empty(CtorTable);
+                    initcall_table_registered_entries_collected(InitcallTable);
                     initcall_table_all_levels_ran(InitcallTable);
                     initcall_boundary_ready(InitcallBoundary);
                 }
@@ -531,6 +686,7 @@ object InitcallPhase: PhaseObject {
             PlatformBusType.state == State::Ready;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
+            OfPlatformDefaultPopulate.state == State::Prepared;
             CtorTable.state == State::Ready;
             InitcallTable.state == State::Ready;
             InitcallBoundary.state == State::Ready;

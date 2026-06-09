@@ -74,6 +74,7 @@ enum RunQueueRuntimeState {
     Some,
 }
 
+include "initcall.spec";
 include "bus_type.spec";
 
 function addr_of<T>(value: T) -> AddrIdentity<T>;
