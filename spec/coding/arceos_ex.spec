@@ -1153,37 +1153,41 @@ type ArceosExInitcallCodingMust {
          * Static registration:
          *
          * InitcallTable.Register(level, entry) is abstract in the model, but
-         * this target must realize it as a Linux-like static section
-         * declaration: the owning object's preset emits a retained entry
-         * descriptor into the section selected by level. It must not require
-         * a runtime push into a growable registry.
+         * this target must realize it as a Linux-like initcall declaration
+         * macro, e.g. arch_initcall_sync!() or device_initcall!(). The macro
+         * emits a retained InitcallEntry element into the section selected by
+         * level. It must not lower to a runtime function call that pushes the
+         * entry into a second registry.
          */
         arceos_ex_must_initcall_register_lower_to_static_section_entry();
 
         /*
          * Linker collection:
          *
-         * The static sections must be retained by the linker and collected
-         * through LDS/KEEP-style start/end ranges or a build-generated
-         * equivalent with the same observable table boundaries.
+         * The static sections must be retained by the linker and represented
+         * in memory as contiguous arrays of InitcallEntry elements. LDS/KEEP
+         * start/end symbols, or a build-generated equivalent with the same
+         * observable table boundaries, define each level's array.
          */
         arceos_ex_must_initcall_sections_collected_by_lds_ranges();
 
         /*
          * Preset collection:
          *
-         * InitcallTable.preset() must collect and validate the pre-linked
-         * static ranges, level mapping and entry operation bindings. It may
-         * allocate or build table metadata, but it must not invoke entries.
+         * InitcallTable.preset() must validate the pre-linked static ranges,
+         * level mapping and entry operation bindings. For the Linux-like
+         * backend the range itself is the table view; preset must not copy
+         * entries into a secondary registration table and must not invoke
+         * entries.
          */
         arceos_ex_must_initcall_table_preset_collect_static_ranges();
 
         /*
          * Setup execution:
          *
-         * InitcallTable.setup() must represent do_initcalls() by iterating the
-         * entries collected by preset in Linux level order. It must record
-         * level count, all-level execution, command-line scratch reuse,
+         * InitcallTable.setup() must represent do_initcalls() by directly
+         * iterating the InitcallEntry arrays in Linux level order. It must
+         * record level count, all-level execution, command-line scratch reuse,
          * parameter parsing, filtering and run-context checks without
          * promoting every entry to a top-level object.
          */

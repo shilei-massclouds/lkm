@@ -47,7 +47,6 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.ctor_table
         .setup(&ctx.irq_proc_view_deferred, &ctx.static_objects)?;
-    ctx.initcall_table.register_static_entries()?;
     ctx.initcall_table
         .preset(&ctx.ctor_table, &ctx.static_objects)?;
     run_initcall_table(ctx)?;
@@ -64,9 +63,11 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 }
 
 fn run_initcall_table(ctx: &mut Context) -> EventResult {
-    let mut table =
-        core::mem::replace(&mut ctx.initcall_table, crate::objects::initcall::InitcallTable::new());
-    let result = table.run_registered_entries_in_context(ctx);
+    let mut table = core::mem::replace(
+        &mut ctx.initcall_table,
+        crate::objects::initcall::InitcallTable::new(),
+    );
+    let result = table.setup(ctx);
     ctx.initcall_table = table;
     result
 }

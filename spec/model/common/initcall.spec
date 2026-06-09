@@ -2,11 +2,13 @@
  * Generic initcall table model.
  *
  * The model layer describes initcall registration as an abstract relation:
- * an object registers one of its no-payload-argument entry actions into a
- * table level.
- * It does not require Linux's linker-section implementation. The coding layer
+ * an object declares one of its no-payload-argument entry actions in a table
+ * level during its Preset event. It is not a requirement for a runtime
+ * function call.
+ * It does not require Linux's linker-section implementation. A coding layer
  * may satisfy the same model by LDS sections, generated static arrays, or a
- * dynamic registry.
+ * dynamic registry. The current Linux-like backend maps Register to initcall
+ * declaration macros whose emitted section arrays are consumed by preset/setup.
  */
 
 enum InitcallLevel {
@@ -96,8 +98,8 @@ predicate initcall_run_context_checked<T>(table: T) -> bool;
 type InitcallTableType: KernelObject {
     lifecycle {
         /*
-         * Preset collects entries registered by owner objects into a table.
-         * The source may be LDS sections, generated static data, or a dynamic
+         * Preset materializes the registered entries as a table view. The
+         * source may be LDS sections, generated static data, or a dynamic
          * registry; model semantics only require the registration relation.
          */
         Event::Preset {
@@ -133,7 +135,8 @@ type InitcallTableType: KernelObject {
         /*
          * Register is an abstract model action. It is intentionally not tied
          * to a runtime call site; object Preset events use it to declare the
-         * entry they contribute to this table.
+         * entry they contribute to this table. Linux-like coding maps it to
+         * macros such as arch_initcall_sync!() or device_initcall!().
          */
         Action::Register(level: InitcallLevel, entry: InitcallEntry) {
             state_effect: StateEffect::None;

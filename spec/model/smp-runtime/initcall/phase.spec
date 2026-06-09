@@ -489,10 +489,11 @@ object CtorTable: KernelObject {
 }
 
 /*
- * InitcallTable 是全量 initcall 表实例。Preset 汇集各 owner 对象在
- * 自己 Preset 中注册的 entries；Setup 才对应 do_initcalls() 的表执行。
- * model 层不限制注册关系必须来自 LDS，coding 层可选择 Linux-like
- * linker section 方式实现。
+ * InitcallTable 是全量 initcall 表实例。Preset 基于各 owner 对象在
+ * 自己 Preset 中声明的 entries 建立表视图；Setup 才对应 do_initcalls()
+ * 的表执行。model 层不限制注册关系必须来自 LDS，当前 coding 层采用
+ * Linux-like linker section 方式：section range 本身就是 InitcallEntry
+ * 数组。
  */
 object InitcallTable: InitcallTableType {
     initial_state: State::Base;

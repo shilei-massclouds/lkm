@@ -2,10 +2,7 @@ use crate::{
     apps::smoke::SmokeResult,
     context::context,
     objects::{
-        initcall::{
-            ContextRef, InitcallLevelName, InitcallLevelState, InitcallReturn, InitcallTable,
-            INITCALL_ENTRY_COUNT, INITCALL_LEVEL_COUNT,
-        },
+        initcall::{InitcallLevelName, InitcallLevelState, InitcallTable, INITCALL_LEVEL_COUNT},
         printk,
         state::State,
     },
@@ -61,10 +58,6 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if !check_registration_api(ctx) {
-        return SmokeResult::Failed;
-    }
-
     if ctx.initcall_table.state() != State::Ready
         || !ctx.initcall_table.static_ranges_ready()
         || !ctx.initcall_table.level_count_ready()
@@ -79,8 +72,8 @@ pub fn run() -> SmokeResult {
         || !ctx.initcall_table.param_parser_applied()
         || !ctx.initcall_table.filter_applied()
         || !ctx.initcall_table.run_context_checked()
-        || ctx.initcall_table.entry_count() != INITCALL_ENTRY_COUNT
-        || ctx.initcall_table.run_count() != INITCALL_ENTRY_COUNT
+        || ctx.initcall_table.entry_count() == 0
+        || ctx.initcall_table.run_count() != ctx.initcall_table.entry_count()
         || !ctx.initcall_table.all_registered_entries_ran()
     {
         printk::write_str("initcall table summary facts invalid\n");
@@ -88,36 +81,29 @@ pub fn run() -> SmokeResult {
     }
 
     let mut index = 0usize;
+    let mut level_entry_count = 0usize;
     while index < ctx.initcall_table.level_count() {
         let Some(level) = ctx.initcall_table.level(index) else {
             printk::write_str("initcall level missing\n");
             return SmokeResult::Failed;
         };
-        if level.name() != expected_level_name(index)
-            || level.state() != InitcallLevelState::Done
-            || level.entry_count() != 1
-        {
+        if level.name() != expected_level_name(index) || level.state() != InitcallLevelState::Done {
             printk::write_str("initcall level facts invalid\n");
             return SmokeResult::Failed;
         }
+        level_entry_count += level.entry_count();
         index += 1;
     }
+    if level_entry_count != ctx.initcall_table.entry_count() {
+        printk::write_str("initcall level entry count invalid\n");
+        return SmokeResult::Failed;
+    }
 
-    let mut entry_index = 0usize;
-    while entry_index < ctx.initcall_table.entry_count() {
-        let Some(entry) = ctx.initcall_table.entry(entry_index) else {
-            printk::write_str("initcall entry missing\n");
-            return SmokeResult::Failed;
-        };
-        if entry.level() != expected_level_name(entry_index)
-            || entry.skipped()
-            || entry.return_code() != 0
-            || !entry.run_context_checked()
-        {
-            printk::write_str("initcall entry facts invalid\n");
-            return SmokeResult::Failed;
-        }
-        entry_index += 1;
+    if !check_entry_records(&ctx.initcall_table)
+        || !check_static_section_entries(&ctx.initcall_table)
+    {
+        printk::write_str("initcall static section subset invalid\n");
+        return SmokeResult::Failed;
     }
 
     if ctx.initcall_boundary.state() != State::Ready || !ctx.initcall_boundary.kunit_next_boundary()
@@ -134,125 +120,58 @@ pub fn run() -> SmokeResult {
     SmokeResult::Passed
 }
 
-fn check_registration_api(ctx: ContextRef<'_>) -> bool {
-    let mut table = InitcallTable::new();
-
-    if table
-        .register(
-            InitcallLevelName::Late,
-            "smoke_late_entry",
-            smoke_late_entry,
-        )
-        .is_err()
-        || table
-            .register(
-                InitcallLevelName::Core,
-                "smoke_core_entry",
-                smoke_core_entry,
-            )
-            .is_err()
-        || table
-            .register(
-                InitcallLevelName::Arch,
-                "smoke_arch_entry",
-                smoke_arch_entry,
-            )
-            .is_err()
-        || table
-            .register(
-                InitcallLevelName::Pure,
-                "smoke_pure_entry",
-                smoke_pure_entry,
-            )
-            .is_err()
-    {
-        printk::write_str("initcall smoke registration failed\n");
-        return false;
-    }
-
-    if table
-        .register(
-            InitcallLevelName::Pure,
-            "smoke_pure_entry",
-            smoke_pure_entry,
-        )
-        .is_ok()
-    {
-        printk::write_str("initcall duplicate registration accepted\n");
-        return false;
-    }
-
-    if table.preset(&ctx.ctor_table, &ctx.static_objects).is_err()
-        || table.run_registered_entries_in_context(ctx).is_err()
-    {
-        printk::write_str("initcall smoke execution failed\n");
-        return false;
-    }
-
-    let expected = [
-        InitcallLevelName::Pure,
-        InitcallLevelName::Core,
-        InitcallLevelName::Arch,
-        InitcallLevelName::Late,
-    ];
-    let names = [
-        "smoke_pure_entry",
-        "smoke_core_entry",
-        "smoke_arch_entry",
-        "smoke_late_entry",
-    ];
-
-    let mut index = 0usize;
-    while index < expected.len() {
-        let Some(level) = table.run_order_level(index) else {
-            printk::write_str("initcall smoke run order missing\n");
+fn check_entry_records(table: &InitcallTable) -> bool {
+    let mut entry_index = 0usize;
+    while entry_index < table.entry_count() {
+        let Some(entry) = table.entry(entry_index) else {
             return false;
         };
-        let Some(entry) = table.entry(index) else {
-            printk::write_str("initcall smoke entry missing\n");
+        let Some(level) = table.run_order_level(entry_index) else {
             return false;
         };
-        if level != expected[index]
-            || entry.level() != expected[index]
-            || entry.name() != names[index]
+        if entry.level() != level
+            || entry.skipped()
             || entry.return_code() != 0
             || !entry.run_context_checked()
         {
-            printk::write_str("initcall smoke order invalid\n");
             return false;
         }
-        index += 1;
+        entry_index += 1;
     }
-
-    if table.entry_count() != expected.len()
-        || table.run_count() != expected.len()
-        || !table.all_registered_entries_ran()
-    {
-        printk::write_str("initcall smoke entry counts invalid\n");
-        return false;
-    }
-
     true
 }
 
-fn smoke_pure_entry(_ctx: ContextRef<'_>) -> InitcallReturn {
-    printk::write_str("initcall smoke: pure\n");
-    InitcallReturn::Ok
-}
+fn check_static_section_entries(table: &InitcallTable) -> bool {
+    let expected = [
+        (InitcallLevelName::Pure, "pure_smoke_initcall"),
+        (InitcallLevelName::Core, "core_smoke_initcall"),
+        (InitcallLevelName::Postcore, "postcore_smoke_initcall"),
+        (InitcallLevelName::Arch, "of_platform_default_populate_init"),
+        (InitcallLevelName::Subsys, "subsys_smoke_initcall"),
+        (InitcallLevelName::Fs, "fs_smoke_initcall"),
+        (InitcallLevelName::Device, "device_smoke_initcall"),
+        (InitcallLevelName::Late, "late_smoke_initcall"),
+    ];
+    let mut expected_index = 0usize;
+    let mut entry_index = 0usize;
 
-fn smoke_core_entry(_ctx: ContextRef<'_>) -> InitcallReturn {
-    printk::write_str("initcall smoke: core\n");
-    InitcallReturn::Ok
-}
+    while entry_index < table.entry_count() {
+        let Some(entry) = table.entry(entry_index) else {
+            return false;
+        };
+        if expected_index < expected.len()
+            && entry.level() == expected[expected_index].0
+            && entry.name() == expected[expected_index].1
+            && !entry.skipped()
+            && entry.return_code() == 0
+            && entry.run_context_checked()
+        {
+            expected_index += 1;
+        }
+        entry_index += 1;
+    }
 
-fn smoke_arch_entry(_ctx: ContextRef<'_>) -> InitcallReturn {
-    printk::write_str("initcall smoke: arch\n");
-    InitcallReturn::Ok
-}
-
-fn smoke_late_entry(_ctx: ContextRef<'_>) -> InitcallReturn {
-    printk::write_str("initcall smoke: late\n");
-    InitcallReturn::Ok
+    expected_index == expected.len()
 }
 
 const fn expected_level_name(index: usize) -> InitcallLevelName {
