@@ -224,6 +224,11 @@ predicate scheduler_idle_schedule_returned_to_idle<T, U>(scheduler: T, task_ref:
 predicate scheduler_idle_schedule_committed_to_runnable<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate boot_idle_schedule_idle_loop_until_resched_clear<T>(scheduler: T) -> bool;
 predicate task_runqueue_selected<T, U, V>(scheduler: T, task: U, runqueue: V) -> bool;
+predicate scheduler_payload_cooperative_switch_ready<T>(scheduler: T) -> bool;
+predicate scheduler_payload_schedule_from_kernel_init<T, U>(scheduler: T, current_ref: U) -> bool;
+predicate scheduler_payload_smoke_task_enqueued<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_payload_smoke_task_entry_executed<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_payload_smoke_task_yielded_back<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate runqueue_runtime_state_is<T>(runqueue: T, state: RunQueueRuntimeState) -> bool;
 predicate runqueue_task_refs_empty<T>(runqueue: T) -> bool;
 predicate runqueue_task_refs_some<T>(runqueue: T) -> bool;
@@ -596,6 +601,13 @@ type Task: TaskObject {
  * returns to that same idle-loop point after the scheduler drains the resched
  * request. The current model reuses Schedule for the shared switch skeleton and
  * records the idle-specific facts separately.
+ * Payload smoke may use the same Schedule boundary after startup from a
+ * non-idle current task. That path is modeled as a minimal cooperative switch
+ * loop: KernelInitTask calls Schedule after enqueueing a smoke scheduler task,
+ * switch_to enters that task's entry on a real task stack, the smoke task
+ * records execution and calls Schedule/Yield, and the CPU returns to the
+ * KernelInitTask continuation. This does not weaken the rest_init first
+ * schedule facts below; it is an additional payload-phase schedule use.
  * CurrentTaskRef and CurrentRunQueueRef are private to the current CPU view;
  * the model does not introduce descriptive current-task/current-runqueue
  * objects or global current-task/current-runqueue singletons. SelectRunQueue is a pure
@@ -665,6 +677,9 @@ type SchedulerObject: TaskObject {
                 task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                 scheduler_first_schedule_committed(self);
+            }
+            deferred {
+                "Payload-phase Scheduler.schedule() cooperative switch branch: from KernelInitTask current, pick a smoke scheduler task, enter its stack/entry, let that task schedule/yield back, and return to KernelInitTask continuation. This branch is required for the app-smoke API test and is distinct from rest_init first-schedule checkpoints; full preemptive scheduling remains deferred.";
             }
         }
 

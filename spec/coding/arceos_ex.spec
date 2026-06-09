@@ -74,6 +74,7 @@ predicate arceos_ex_must_rest_init_smoke_cover_idle_schedule_relations() -> bool
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_api_smoke_use_formal_runqueue_actions() -> bool;
+predicate arceos_ex_must_scheduler_schedule_smoke_use_payload_cooperative_switch() -> bool;
 predicate arceos_ex_must_wakeup_set_task_cpu_between_select_and_enqueue() -> bool;
 predicate arceos_ex_must_rest_init_pin_kernel_init_as_task_action() -> bool;
 predicate arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready() -> bool;
@@ -833,6 +834,25 @@ type ArceosExRestInitCodingMust {
          * smoke case remains app-smoke-only by default, not checkpoint KUnit.
          */
         arceos_ex_must_current_runqueue_ref_api_smoke_use_formal_runqueue_actions();
+
+        /*
+         * Scheduler.schedule() payload smoke:
+         *
+         * A Scheduler.schedule() smoke case that targets the API itself must be
+         * app-smoke-only by default and run from the payload phase, where the
+         * caller is KernelInitTask, not the rest_init boot-idle checkpoint. The
+         * normal scenario must use a minimal cooperative switch loop:
+         * KernelInitTask enqueues a smoke scheduler task, calls schedule() a
+         * bounded number of times until that task's entry runs, the smoke task
+         * records that it executed and calls schedule()/yield, and control
+         * returns to KernelInitTask. This requires schedule() to support
+         * non-idle CurrentTaskRef in the payload path and requires switch_to to
+         * perform a real cooperative stack/context transfer for the smoke task.
+         * It must not reuse or weaken the checkpoint/KUnit expectations for
+         * the first rest_init schedule, and it must not add test_* subject APIs;
+         * any needed boundary must be a formal scheduler/task API.
+         */
+        arceos_ex_must_scheduler_schedule_smoke_use_payload_cooperative_switch();
 
         /*
          * Wake-up task CPU action:

@@ -3,6 +3,7 @@ pub enum TaskEntry {
     None,
     KernelInit,
     Kthreadd,
+    SmokeScheduler,
 }
 
 pub struct TaskCpuState {

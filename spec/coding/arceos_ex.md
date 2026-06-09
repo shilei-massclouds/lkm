@@ -433,13 +433,21 @@ smoke payload 用于覆盖 QEMU 运行期可观察行为，以及规格推导不
 
 `TaskCreationCore.copy_process()` 与 `CurrentRunQueueRef`/`RunQueue.EnqueueTask`/`RunQueue.PickNextTask` 属于 `ObjectApiBehavior` smoke：它们验证正式对象 API/action 契约，可以构造局部 subject 对象，并只读 live context 满足依赖前置条件。这类用例默认只注册到 app smoke，不加入 checkpoint KUnit smoke 列表。实现不得为它们增加 `test_*` 被测入口；若缺少可测边界，应补正式对象 API，并让生产路径与 smoke 路径共享同一入口。
 
-`SchedInitPhase` 的 smoke 验收例外地允许验证一个主动调度分界：
-`Scheduler.schedule()`。它是 `Scheduler.Online` 后的最小可返回调度事件，不是
-lifecycle event。当前阶段仍未启用中断，且只有一个可运行的 boot idle/current task，
-因此 smoke 只要求按 preemption guard 退出、schedule、preemption guard 重新进入的
-三段体主动发起一次调度选择并安全返回：调度器仍为 `Online`，当前任务仍是同一个
-boot idle task，没有切换到其它任务，也不推进 `Workqueue`、`Softirq` 或 `RcuCore`
-到运行期 `Online`。
+`Scheduler.schedule()` 的专门 smoke 验收是 payload 阶段的 app-smoke-only 用例，
+不是 checkpoint KUnit。它测试的是启动完成后 `Scheduler.schedule()` 作为正式 API
+在真实运行环境中的协作式切换闭环，而不是 `rest_init` 首次 schedule checkpoint。
+正常场景从 `KernelInitTask` 执行线开始：创建并入队一个 smoke scheduler task，
+随后 `KernelInitTask` 在有限次数内主动调用 `schedule()`，必须真实进入该 smoke
+task 的入口；smoke task 记录已经运行，再主动调用 `schedule()`/yield，最终返回
+`KernelInitTask` 的调用点并由 smoke 断言成功。
+
+这一路径要求 `Scheduler.schedule()` 在 payload 阶段支持非 idle current，
+`CurrentTaskRef` 至少能表示 `KernelInitTask` 和该 smoke scheduler task，runqueue
+能接收并选择该 smoke task，`switch_to` 至少对该 smoke task 执行真实的协作式
+栈/上下文转移。完整抢占、时间片、睡眠唤醒、SMP 调度和 Linux
+`finish_task_switch()` 仍 deferred。实现不得把这个 smoke 用例注册到 checkpoint
+KUnit，也不得放宽 `scheduler_action` KUnit 对 `rest_init` 首次 schedule 的断言。
+若为该闭环新增边界，必须是正式 scheduler/task API，不得新增 `test_*` 被测入口。
 
 ### 启动与 smoke 输出风格
 

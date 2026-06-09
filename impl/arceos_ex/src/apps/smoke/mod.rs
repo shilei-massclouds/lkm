@@ -90,6 +90,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::scheduler::run,
     },
     SmokeCase {
+        name: "scheduler_schedule",
+        run: cases::scheduler_schedule::run,
+    },
+    SmokeCase {
         name: "current_runqueue_ref",
         run: cases::current_runqueue_ref::run,
     },

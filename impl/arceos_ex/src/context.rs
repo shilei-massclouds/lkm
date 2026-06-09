@@ -1,3 +1,4 @@
+use crate::objects::state::EventResult;
 use crate::objects::{
     boot_param::BootParam,
     cache_block_info::CacheBlockInfo,
@@ -341,6 +342,31 @@ impl Context {
             sysctl_args_deferred: SysctlArgsDeferred::new(),
             finalize_boundary: FinalizeBoundary::new(),
         }
+    }
+
+    pub fn setup_smoke_scheduler_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
+        self.scheduler.setup_smoke_scheduler_task(entry)
+    }
+
+    pub fn enqueue_smoke_scheduler_task(&mut self) -> EventResult {
+        self.scheduler.enqueue_smoke_scheduler_task()
+    }
+
+    pub fn schedule_current(&mut self) -> EventResult {
+        self.scheduler.schedule(
+            &mut self.boot_cpu_local_interrupt,
+            &mut self.boot_cpu_current_task,
+        )
+    }
+
+    pub fn mark_smoke_scheduler_entry_ran(&mut self) -> EventResult {
+        self.scheduler.smoke_scheduler_task_mut().mark_entry_ran()
+    }
+
+    pub fn mark_smoke_scheduler_yielded_back(&mut self) -> EventResult {
+        self.scheduler
+            .smoke_scheduler_task_mut()
+            .mark_yielded_back()
     }
 }
 

@@ -16,6 +16,7 @@ pub enum CurrentTaskRef {
     BootIdle,
     KernelInit,
     Kthreadd,
+    SmokeScheduler,
 }
 
 #[allow(dead_code)]
@@ -26,6 +27,7 @@ impl CurrentTaskRef {
             Self::BootIdle => "BootIdleTask",
             Self::KernelInit => "KernelInitTask",
             Self::Kthreadd => "KthreaddTask",
+            Self::SmokeScheduler => "SmokeSchedulerTask",
         }
     }
 }

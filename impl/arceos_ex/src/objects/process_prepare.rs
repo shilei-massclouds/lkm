@@ -556,6 +556,7 @@ impl TaskCreationCore {
             || dst_state != State::Prepared
             || dst_entry != inputs.entry
             || inputs.entry == TaskEntry::None
+            || inputs.entry == TaskEntry::SmokeScheduler
             || inputs.src_task.state() != State::Online
             || inputs.root_pid_namespace.state() != State::Ready
             || inputs.credential_core.state() != State::Prepared
@@ -577,7 +578,7 @@ impl TaskCreationCore {
         match inputs.entry {
             TaskEntry::KernelInit => self.kernel_init_created = true,
             TaskEntry::Kthreadd => self.kthreadd_created = true,
-            TaskEntry::None => {}
+            TaskEntry::None | TaskEntry::SmokeScheduler => {}
         }
 
         Ok(TaskCopyProcessResult {

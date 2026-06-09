@@ -25,6 +25,7 @@ pub mod rest_init;
 pub mod rootfs;
 pub mod runtime_core;
 pub mod scheduler;
+pub mod scheduler_schedule;
 pub mod slub;
 pub mod smp_bringup;
 pub mod task_creation_core;
