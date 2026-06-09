@@ -10,9 +10,10 @@
 
 ## 当前焦点
 
-1. 收口 trace/SVG 输出体验，使推导过程图适合日常审阅。
-2. 建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
-3. 在暂不展开 `PayloadPhase` 的前提下，审计已完成启动阶段的 deferred 清单、核心对象和测试边界。
+1. 开始分析并实现 `SmpRuntimePhase`，以 `PreSmpInitPhase -> SmpBringupPhase` 的连续 KernelInitTask 执行线为当前入口。
+2. 收口 trace/SVG 输出体验，使推导过程图适合日常审阅。
+3. 建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
+4. 审计已完成启动阶段的 deferred 清单、核心对象和测试边界。
 
 ## 统一计划
 
@@ -45,7 +46,7 @@
 | --- | --- | --- |
 | arceos_ex | 独立对象级实验目录落地 | `impl/arceos_ex/` 已包含 Makefile、RISC-V64 linker script、入口汇编和 no-alloc Rust 源码骨架。 |
 | arceos_ex | 对象级公共基础落地 | 已定义状态集合、事件集合、`EventResult`、生命周期事件检查和 checkpoint hook。 |
-| model/derive | 推导义务阶段性收口 | 当前 `make verify` 为 `0 obligation / 44 deferred`。 |
+| model/derive | 推导义务阶段性收口 | 当前 `make verify` 为 `0 obligation / 45 deferred`。 |
 | arceos_ex | `EntryPreludePhase` 最小闭环 | 已覆盖 head prefix、BootArgs、RootStream、KernelImage、BootCPU/CpuGroup、InitTask/InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm 和 VM 切换。 |
 | arceos_ex | `EntrySuccessorPhase` 最小闭环 | 已覆盖 EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、CommandLine/KernelCmdline、EarlyParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap 和 SwapperVm。 |
 | arceos_ex | `CorePreparePhase` 最小骨架 | 已按规格插入 PayloadPhase 前，覆盖 DeviceTree、Zones、ResourceTree、CpuGroup.setup_smp、CacheBlockInfo、CpuCapabilities、CommandLine saved/static 视图、PerCpuStorage、CpuHotplugState、Params、BootParam、PayloadParam、Randomness、PrintkBuffer.setup、ExceptionTable 和 ExceptionStream.setup。 |
@@ -55,7 +56,7 @@
 | arceos_ex | `IrqOpenPreparePhase` 最小闭环 | 已正式落到 `spec/model/interrupt/irq-open-prepare/` 和 `impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs`，覆盖 SLUB late flush workqueue、Console.Prepared、SchedClock.Ready、DelayLoop.Ready 和中断打开后的 trimmed/deferred 路径。 |
 | arceos_ex | `ProcessPreparePhase` 最小闭环 | 已正式落到 `spec/model/interrupt/process-prepare/` 和 `impl/arceos_ex/src/phases/interrupt/process_prepare.rs`，覆盖 RootPidNamespace、TaskCreationCore、CredentialCore、VMA/task context、namespace、keyring/security 等 rest_init 输入事实，并新增 process_prepare smoke。 |
 | arceos_ex | `RestInitPhase` 最小闭环 | 已正式落到 `spec/model/up-multitask/rest-init/` 和 `impl/arceos_ex/src/phases/up_multitask/rest_init.rs`，覆盖 PID 1、kthreadd、SystemState.Scheduling、kthreadd_done、Scheduler 首次调度交接和 BootIdleRuntime。 |
-| arceos_ex | `PreSmpInitPhase` 最小闭环 | 已正式落到 `spec/model/up-multitask/pre-smp-init/` 和 `impl/arceos_ex/src/phases/up_multitask/pre_smp_init.rs`，覆盖 full GFP、pre-SMP CPU topology、Workqueue、VmstatCore、TasksRcu、early initcall 表和 smp_init 前边界。 |
+| arceos_ex | `PreSmpInitPhase` 最小闭环 | 已正式迁入 `SmpRuntimePhase` 首个子阶段，落到 `spec/model/smp-runtime/pre-smp-init/` 和 `impl/arceos_ex/src/phases/smp_runtime/pre_smp_init.rs`，覆盖 full GFP、pre-SMP CPU topology、Workqueue、VmstatCore、TasksRcu、early initcall 表和 smp_init 前边界。 |
 | arceos_ex | `SmpBringupPhase` 最小闭环 | 已正式落到 `spec/model/smp-runtime/smp-bringup/` 和 `impl/arceos_ex/src/phases/smp_runtime/smp_bringup.rs`，覆盖 BP 侧 `smp_init()` 主线、BP/AP 同步量、secondary CPU online summary 和 SMP concurrency open。 |
 | arceos_ex | `RuntimeCorePhase` 最小闭环 | 已正式落到 `spec/model/smp-runtime/runtime-core/` 和 `impl/arceos_ex/src/phases/smp_runtime/runtime_core.rs`，覆盖 `sched_init_smp()`、Workqueue topology、Async/Padata deferred、PageAllocator late 和 `do_basic_setup()` 前边界。 |
 | arceos_ex | `InitcallPhase` 最小闭环 | 已正式落到 `spec/model/smp-runtime/initcall/` 和 `impl/arceos_ex/src/phases/smp_runtime/initcall.rs`，覆盖 `do_basic_setup()`、CtorTable、InitcallTable 摘要、KUnit/Rootfs 入口边界和 initcall smoke。 |
@@ -71,9 +72,9 @@
 
 ## 当前交接标记
 
-- 截止提交 c2004b0 (`impl: add finalize phase`)，除暂不继续展开的 `PayloadPhase` 外，当前启动时间轴中的阶段级对象化闭环已经推进到 `FinalizePhase.Ready`。
-- `SmpRuntimePhase` 已形成五个子阶段最小闭环：`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
-- 最近完整验收已通过：`make verify`；`make build APP=smoke`；`make run APP=smoke`；`make test`；`make run LOG=trace APP=smoke`；`make verify REPORT=graph`。当前 `make verify` 摘要为 `0 obligation / 44 deferred`。
+- 截止提交 7f4e520 (`Move pre-SMP init under SMP runtime`)，`PreSmpInitPhase` 已从 `UpMultitaskPhase` 移入 `SmpRuntimePhase`，作为 KernelInitTask entry 启动的首个子阶段；`UpMultitaskPhase` 当前只收束 `RestInitPhase`。
+- `SmpRuntimePhase` 已形成六个子阶段最小闭环：`PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
+- 最近完整验收已通过：`tools/pyveri/bin/pyveri spec/main.spec --derive --strict`；`make build APP=smoke`；`make test`；`make verify REPORT=graph`。当前 `make test` summary 为 `total=70 pass=70 fail=0`。
 - 当前 trace SVG 产物：`tools/out/trace/main.trace.svg`。
 - 上下文清理后恢复：先执行 `git status --short --branch`；预期工作树干净。
 
