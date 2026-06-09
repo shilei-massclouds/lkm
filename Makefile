@@ -32,7 +32,8 @@ else
 	$(PYVERI) $(SPEC) --derive --strict
 endif
 
-test: test-verify test-kunit test-smoke
+test:
+	@bash tools/test_summary.sh "$(MAKE)" "$(SPEC)" "$(KERNEL_DIR)" "$(KUNIT_APP)" "$(abspath $(KUNIT_HANDLERS))" "$(SMOKE_APP)"
 
 test-verify:
 	$(MAKE) verify REPORT=text SPEC="$(SPEC)"
