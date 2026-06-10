@@ -71,6 +71,11 @@ predicate of_platform_default_populate_node_refs_bound<T>(bus: T) -> bool;
 predicate of_platform_default_populate_platform_devices_created<T>(bus: T) -> bool;
 predicate of_platform_default_populate_device_refs_bound<T>(bus: T) -> bool;
 predicate of_platform_default_populate_devices_added_to_bus<T>(bus: T) -> bool;
+predicate platform_bus_platform_device_set_bound<T, S>(bus: T, platform_devices: S) -> bool;
+predicate platform_bus_platform_device_owner_ready<T, S>(bus: T, platform_devices: S) -> bool;
+predicate platform_bus_devices_added_from_platform_device_set<T, S>(bus: T, platform_devices: S) -> bool;
+predicate of_platform_default_populate_device_node_ids_bound<T>(bus: T) -> bool;
+predicate of_platform_default_populate_platform_devices_owned<T, S>(bus: T, platform_devices: S) -> bool;
 
 type BusDriverRef {
 }
@@ -258,6 +263,10 @@ type BusType {
  * object wrapper events while this type defines reusable platform actions.
  */
 type PlatformBusType: BusType {
+    owned {
+        platform_devices: PlatformDeviceSet;
+    }
+
     processes {
         Action::OfPlatformDefaultPopulateInit {
             state_effect: StateEffect::None;
@@ -280,10 +289,17 @@ type PlatformBusType: BusType {
                 of_platform_default_populate_candidate_names_printed(self);
                 of_platform_default_populate_candidate_compatibles_printed(self);
                 of_platform_default_populate_scan_complete_checkpoint(self);
+                of_platform_default_populate_device_node_ids_bound(self);
                 of_platform_default_populate_node_refs_bound(self);
                 of_platform_default_populate_platform_devices_created(self);
+                of_platform_default_populate_platform_devices_owned(self, self.platform_devices);
                 of_platform_default_populate_device_refs_bound(self);
                 of_platform_default_populate_devices_added_to_bus(self);
+                platform_bus_platform_device_set_bound(self, self.platform_devices);
+                platform_bus_platform_device_owner_ready(self, self.platform_devices);
+                platform_bus_devices_added_from_platform_device_set(self, self.platform_devices);
+                platform_device_set_ready(self.platform_devices);
+                platform_device_set_nonempty(self.platform_devices);
                 bus_type_devices_klist_nonempty(self);
                 device_ref_set_nonempty(self.subsys.klist_devices);
             }

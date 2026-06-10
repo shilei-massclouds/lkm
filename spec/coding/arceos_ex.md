@@ -314,6 +314,19 @@ sync slot 和 rootfs slot 可以作为静态收集 slot 保留其 Linux 排序�
 实例，绑定其内嵌 `DeviceType` 的 node 引用，注册 core device，并把对应 `DeviceRef` 加入
 `PlatformBusSubsysPrivate.klist_devices` 的 model 视图。
 
+当前 arceos_ex 实现应由 `PlatformBus` 拥有 OF population 生成的 `PlatformDevice` 生命周期：使用
+`Vec<PlatformDevice>` 保存对象本体，使用 `Vec<DeviceRef>` 作为 `PlatformBusSubsysPrivate.klist_devices`
+的第一轮 backing。`DeviceRef` 必须引用内嵌 `Device` 的稳定位置，且能通过 container_of-like helper
+回到外层 `PlatformDevice`；不得把 `DeviceRef` 指向临时栈对象、扫描局部对象或固定容量 action-smoke slot。
+该实现依赖 `DynamicContainerRuntime.Ready`，不再因为 allocator/Vec 能力缺失而使用固定数组替代正式存储。
+
+`DeviceNodeId` 是 OF node 的长期稳定身份。Platform device creation 应从 candidate node 获得
+`DeviceNodeId`，在 `PlatformDevice`/内嵌 `Device` 中保存该 id，并在需要读取 name/compatible/status 等属性时通过仍然
+存在的 `DeviceTree` 解析临时 `DeviceNodeRef<'_>`。`DeviceNodeRef<'_>` 本身不得长期存入 `Context`。
+OF platform population smoke 应覆盖 candidate count、`PlatformBus.platform_devices.len()`、
+`klist_devices.len()`，并至少验证一个 `DeviceRef -> PlatformDevice -> DeviceNodeId -> DeviceTree node -> compatible`
+链路。
+
 model 层的 `DeviceType` 对应 Linux `struct device`，不是 Linux `struct device_type` 描述符；后者如需建模
 应另建 `DeviceTypeDescriptor` 或 `DeviceKind`。`PlatformDeviceType` 对应 Linux `struct platform_device`，
 它在 `DeviceType` 语义基础上嵌入 core device，并维护 name/id/resource 等 platform-specific 信息。coding 层

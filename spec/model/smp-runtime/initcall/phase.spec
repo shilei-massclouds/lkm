@@ -511,10 +511,17 @@ object InitcallTable: InitcallTableType {
                     of_platform_default_populate_candidate_names_printed(PlatformBus);
                     of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
                     of_platform_default_populate_scan_complete_checkpoint(PlatformBus);
+                    of_platform_default_populate_device_node_ids_bound(PlatformBus);
                     of_platform_default_populate_node_refs_bound(PlatformBus);
                     of_platform_default_populate_platform_devices_created(PlatformBus);
+                    of_platform_default_populate_platform_devices_owned(PlatformBus, PlatformBus.platform_devices);
                     of_platform_default_populate_device_refs_bound(PlatformBus);
                     of_platform_default_populate_devices_added_to_bus(PlatformBus);
+                    platform_bus_platform_device_set_bound(PlatformBus, PlatformBus.platform_devices);
+                    platform_bus_platform_device_owner_ready(PlatformBus, PlatformBus.platform_devices);
+                    platform_bus_devices_added_from_platform_device_set(PlatformBus, PlatformBus.platform_devices);
+                    platform_device_set_ready(PlatformBus.platform_devices);
+                    platform_device_set_nonempty(PlatformBus.platform_devices);
                     bus_type_devices_klist_nonempty(PlatformBus);
                     device_ref_set_nonempty(PlatformBusSubsysPrivate.klist_devices);
                 }
@@ -551,10 +558,17 @@ object InitcallTable: InitcallTableType {
             of_platform_default_populate_candidate_names_printed(PlatformBus);
             of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
             of_platform_default_populate_scan_complete_checkpoint(PlatformBus);
+            of_platform_default_populate_device_node_ids_bound(PlatformBus);
             of_platform_default_populate_node_refs_bound(PlatformBus);
             of_platform_default_populate_platform_devices_created(PlatformBus);
+            of_platform_default_populate_platform_devices_owned(PlatformBus, PlatformBus.platform_devices);
             of_platform_default_populate_device_refs_bound(PlatformBus);
             of_platform_default_populate_devices_added_to_bus(PlatformBus);
+            platform_bus_platform_device_set_bound(PlatformBus, PlatformBus.platform_devices);
+            platform_bus_platform_device_owner_ready(PlatformBus, PlatformBus.platform_devices);
+            platform_bus_devices_added_from_platform_device_set(PlatformBus, PlatformBus.platform_devices);
+            platform_device_set_ready(PlatformBus.platform_devices);
+            platform_device_set_nonempty(PlatformBus.platform_devices);
             bus_type_devices_klist_nonempty(PlatformBus);
             device_ref_set_nonempty(PlatformBusSubsysPrivate.klist_devices);
         }
@@ -647,10 +661,17 @@ object InitcallPhase: PhaseObject {
                     of_platform_default_populate_candidate_names_printed(PlatformBus);
                     of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
                     of_platform_default_populate_scan_complete_checkpoint(PlatformBus);
+                    of_platform_default_populate_device_node_ids_bound(PlatformBus);
                     of_platform_default_populate_node_refs_bound(PlatformBus);
                     of_platform_default_populate_platform_devices_created(PlatformBus);
+                    of_platform_default_populate_platform_devices_owned(PlatformBus, PlatformBus.platform_devices);
                     of_platform_default_populate_device_refs_bound(PlatformBus);
                     of_platform_default_populate_devices_added_to_bus(PlatformBus);
+                    platform_bus_platform_device_set_bound(PlatformBus, PlatformBus.platform_devices);
+                    platform_bus_platform_device_owner_ready(PlatformBus, PlatformBus.platform_devices);
+                    platform_bus_devices_added_from_platform_device_set(PlatformBus, PlatformBus.platform_devices);
+                    platform_device_set_ready(PlatformBus.platform_devices);
+                    platform_device_set_nonempty(PlatformBus.platform_devices);
                     bus_type_devices_klist_nonempty(PlatformBus);
                     device_ref_set_nonempty(PlatformBusSubsysPrivate.klist_devices);
                     initcall_boundary_ready(InitcallBoundary);

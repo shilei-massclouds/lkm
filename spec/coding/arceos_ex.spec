@@ -132,6 +132,10 @@ predicate arceos_ex_must_of_platform_default_populate_print_candidate_identity()
 predicate arceos_ex_must_action_checkpoints_use_entry_exit_and_semantic_points() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_scan_complete_after_candidate_print() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_create_and_register_platform_devices() -> bool;
+predicate arceos_ex_must_platform_bus_own_platform_devices_with_vec() -> bool;
+predicate arceos_ex_must_platform_bus_klist_devices_use_vec_device_refs() -> bool;
+predicate arceos_ex_must_platform_device_creation_use_stable_device_node_id() -> bool;
+predicate arceos_ex_must_of_platform_population_smoke_cover_refs_to_nodes() -> bool;
 predicate arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage() -> bool;
 predicate arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor() -> bool;
 predicate arceos_ex_must_platform_device_embed_device_and_support_container_lookup() -> bool;
@@ -1482,6 +1486,17 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_device_node_ref_store_stable_handle_not_borrowed_view();
 
         /*
+         * Platform device ownership:
+         *
+         * PlatformBus must own the PlatformDevice objects it creates during OF
+         * population. The current arceos_ex backing is a Vec<PlatformDevice>,
+         * enabled by DynamicContainerRuntime, so DeviceRef entries in
+         * klist_devices never outlive their containing PlatformDevice storage.
+         */
+        arceos_ex_must_platform_bus_own_platform_devices_with_vec();
+        arceos_ex_must_platform_device_creation_use_stable_device_node_id();
+
+        /*
          * Bus device set storage:
          *
          * The model-level BusSubsysPrivate.klist_devices is a DeviceRefSet.
@@ -1489,6 +1504,7 @@ type ArceosExInitcallCodingMust {
          * storage, not a small action-smoke slot array.
          */
         arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage();
+        arceos_ex_must_platform_bus_klist_devices_use_vec_device_refs();
 
         /*
          * OF platform scan completion:
@@ -1512,6 +1528,7 @@ type ArceosExInitcallCodingMust {
          * remains outside this boundary.
          */
         arceos_ex_must_of_platform_default_populate_create_and_register_platform_devices();
+        arceos_ex_must_of_platform_population_smoke_cover_refs_to_nodes();
     }
 }
 

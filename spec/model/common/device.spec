@@ -11,6 +11,10 @@ predicate device_ref_ready<T>(device_ref: T) -> bool;
 predicate device_ref_set_ready<T>(device_refs: T) -> bool;
 predicate device_ref_set_contains<T, R>(device_refs: T, device_ref: R) -> bool;
 predicate device_ref_set_nonempty<T>(device_refs: T) -> bool;
+predicate device_node_id_ready<T>(node_id: T) -> bool;
+predicate device_node_id_stable<T>(node_id: T) -> bool;
+predicate device_node_id_in_tree<T, D>(node_id: T, device_tree: D) -> bool;
+predicate device_node_ref_id_bound<T, I>(node_ref: T, node_id: I) -> bool;
 predicate device_node_ref_in_tree<T, D>(node_ref: T, device_tree: D) -> bool;
 predicate device_node_ref_identity_stable<T>(node_ref: T) -> bool;
 predicate device_node_ref_properties_queryable<T>(node_ref: T) -> bool;
@@ -39,6 +43,18 @@ predicate platform_device_ref_ready<R>(platform_device_ref: R) -> bool;
 predicate platform_device_core_ref_ready<T, R>(platform_device: T, device_ref: R) -> bool;
 predicate platform_device_from_device_ref_ready<R, T>(device_ref: R, platform_device: T) -> bool;
 predicate platform_device_ref_from_device_ref_ready<D, P>(device_ref: D, platform_device_ref: P) -> bool;
+predicate platform_device_set_ready<T>(platform_devices: T) -> bool;
+predicate platform_device_set_contains<T, P>(platform_devices: T, platform_device: P) -> bool;
+predicate platform_device_set_contains_ref<T, R>(platform_devices: T, platform_device_ref: R) -> bool;
+predicate platform_device_set_nonempty<T>(platform_devices: T) -> bool;
+
+/*
+ * DeviceNodeId is the stable identity of a DeviceTree node in the expanded
+ * tree. Coding may use a node index/path handle; long-lived Context objects
+ * should store this id and resolve temporary DeviceNodeRef views when needed.
+ */
+type DeviceNodeId {
+}
 
 /*
  * DeviceNodeRef is an abstract reference to a DeviceTree node. The compatible
@@ -46,14 +62,19 @@ predicate platform_device_ref_from_device_ref_ready<D, P>(device_ref: D, platfor
  * reference to it through SetNode.
  */
 type DeviceNodeRef {
+    id: DeviceNodeId;
+
     processes {
-        Action::BindNode(device_tree: ResourceObject) {
+        Action::BindNode(node_id: DeviceNodeId, device_tree: ResourceObject) {
             state_effect: StateEffect::None;
             depends_on {
                 device_tree.state == State::Ready;
+                device_node_id_ready(node_id);
+                device_node_id_in_tree(node_id, device_tree);
                 device_tree_properties_queryable(device_tree);
             }
             ensures {
+                device_node_ref_id_bound(self, node_id);
                 device_node_ref_in_tree(self, device_tree);
                 device_node_ref_identity_stable(self);
                 device_node_ref_properties_queryable(self);
@@ -105,6 +126,9 @@ type DeviceType {
 }
 
 type DeviceRefSet {
+}
+
+type PlatformDeviceSet {
 }
 
 type DeviceRef {
