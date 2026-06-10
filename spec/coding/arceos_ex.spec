@@ -14,6 +14,10 @@ predicate arceos_ex_must_device_tree_checkpoint_after_validation() -> bool;
 predicate arceos_ex_should_encapsulate_device_tree_unflatten_unsafe() -> bool;
 predicate arceos_ex_must_page_allocator_preset_only_builds_topology_and_hooks() -> bool;
 predicate arceos_ex_must_page_allocator_setup_hands_memblock_pages_to_buddy() -> bool;
+predicate arceos_ex_must_page_allocator_expose_linux_like_alloc_pages_api() -> bool;
+predicate arceos_ex_must_page_allocator_alloc_pages_return_owned_linear_mapped_pageref() -> bool;
+predicate arceos_ex_must_page_allocator_free_pages_match_alloc_order() -> bool;
+predicate arceos_ex_must_page_allocator_smoke_cover_page_alloc_free_read_write() -> bool;
 predicate arceos_ex_must_memblock_disable_reaches_offline_not_destroyed() -> bool;
 predicate arceos_ex_must_swiotlb_setup_before_memblock_disable() -> bool;
 predicate arceos_ex_must_memory_debug_hardening_use_static_branch_registry() -> bool;
@@ -192,6 +196,45 @@ type ArceosExMmCoreInitCodingMust {
          * MemBlock through Disable to Offline.
          */
         arceos_ex_must_page_allocator_setup_hands_memblock_pages_to_buddy();
+
+        /*
+         * Linux-like buddy API:
+         *
+         * Once PageAllocator reaches Ready it must expose the formal
+         * PageAllocatorType runtime actions as production APIs named after
+         * Linux's buddy boundary: alloc_pages(order, gfp), alloc_page(gfp) as
+         * an order-0 convenience, and free_pages(page_ref, order). These APIs
+         * must be used by later SLUB/kmalloc and smoke paths instead of
+         * private test-only hooks.
+         */
+        arceos_ex_must_page_allocator_expose_linux_like_alloc_pages_api();
+
+        /*
+         * PageRef contract:
+         *
+         * alloc_pages(order, gfp) must return a caller-owned PageRef covering
+         * 2^order buddy pages that are reachable through the established
+         * linear mapping. The PageRef is the object-model handle used by later
+         * SLUB and smoke code; it must not expose allocator internals.
+         */
+        arceos_ex_must_page_allocator_alloc_pages_return_owned_linear_mapped_pageref();
+
+        /*
+         * Free order contract:
+         *
+         * free_pages(page_ref, order) must release only PageRefs allocated from
+         * PageAllocator, and the order must match the allocation order.
+         */
+        arceos_ex_must_page_allocator_free_pages_match_alloc_order();
+
+        /*
+         * Page allocator smoke:
+         *
+         * The first allocator smoke coverage must allocate pages through the
+         * formal alloc_pages API, perform bounded read/write through the
+         * mapped page reference, and release them through free_pages().
+         */
+        arceos_ex_must_page_allocator_smoke_cover_page_alloc_free_read_write();
 
         /*
          * MemBlock remains Offline:

@@ -512,6 +512,11 @@ task 的入口；smoke task 记录已经运行，再主动调用 `schedule()`/yi
 KUnit，也不得放宽 `scheduler_action` KUnit 对 `rest_init` 首次 schedule 的断言。
 若为该闭环新增边界，必须是正式 scheduler/task API，不得新增 `test_*` 被测入口。
 
+PageAllocator API smoke 是动态容器前置链路的第一个运行期用例：它应通过正式 `alloc_pages(order, gfp)` 分配至少一个
+order-0 页引用，通过该 `PageRef` 的受限映射视图做有界读写校验，再用 `free_pages(page_ref, order)` 释放。该用例不得绕过
+正式对象 API，也不得读取 buddy free list、zone 统计等私有内部状态作为断言条件。SLUB/kmalloc 和 `GlobalAlloc`/`Vec` smoke
+必须在这个 PageAllocator smoke 之后推进。
+
 ### 启动与 smoke 输出风格
 
 启动日志和 smoke 用例输出主要服务人工审阅，SHOULD 优先采用接近 Linux 启动日志的清晰文本格式，而不是大量
@@ -759,6 +764,12 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 `PageAllocator.preset()` 只做 `build_all_zonelists(NULL)` 和 `page_alloc_init_cpuhp()` 对应的拓扑与 hook 建立：`BootZonelistSet.Ready`、fallback zoneref 顺序、NULL sentinel、`CPUHP_PAGE_ALLOC` step 注册。它不得释放 MemBlock 页，也不得把自身推进到 `Ready`。
 
 `PageAllocator.setup()` 才对应 `memblock_free_all()`。该事件必须先要求 `Swiotlb.Ready` 和 `MemoryDebugHardening.Ready`，再把 MemBlock free ranges 交给 buddy/free page sets，并通过 `MemBlock.Disable` 使 `MemBlock.state == Offline`。本阶段不得执行 `memblock_discard()`，不得把 `MemBlock` 推进到 `Destroyed`。
+
+`PageAllocator.Ready` 之后必须暴露正式的 Linux-like buddy API：`alloc_pages(order, gfp)`、order-0 convenience
+`alloc_page(gfp)` 和 `free_pages(page_ref, order)`。model 层对应 `PageAllocatorType.Action::AllocPages(order, gfp) -> PageRef`
+与 `PageAllocatorType.Action::FreePages(page_ref, order)`；coding 层可按 Rust 需要调整参数顺序或封装形式，但必须保留
+order、GFP 约束、返回 `PageRef`、caller-owned 语义和释放时 order 必须匹配的契约。返回的 `PageRef` 表示 2^order 个连续
+buddy pages，并且必须可通过已经建立的线性映射进行受限读写；它不得暴露 buddy free list 或 zone 内部结构。
 
 `VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址资源管理，不是页表映射器。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END` 页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、`VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、建立 free vmap space。
 

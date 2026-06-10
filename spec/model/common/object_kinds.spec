@@ -25,5 +25,8 @@ type KernelObject {
 type DeviceObject {
 }
 
+type MemoryObject {
+}
+
 type ResourceObject {
 }

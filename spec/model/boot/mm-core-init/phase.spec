@@ -147,7 +147,7 @@ object BootZonelistSet: MemoryObject {
  * PageAllocator 覆盖 build_all_zonelists(NULL)、page_alloc_init_cpuhp()
  * 和 memblock_free_all()。Enable 保留给后续 page_alloc_init_late()。
  */
-object PageAllocator: MemoryObject {
+object PageAllocator: PageAllocatorType {
     initial_state: State::Base;
 
     state State::Base {
@@ -201,6 +201,8 @@ object PageAllocator: MemoryObject {
                     zone_managed_pages_accounted(Zones, PageAllocator);
                     buddy_free_page_sets_populated(PageAllocator, Zones);
                     totalram_pages_accounted(PageAllocator);
+                    page_allocator_alloc_pages_api_ready(PageAllocator);
+                    page_allocator_free_pages_api_ready(PageAllocator);
                 }
             }
         }
@@ -214,6 +216,8 @@ object PageAllocator: MemoryObject {
             zone_managed_pages_accounted(Zones, PageAllocator);
             buddy_free_page_sets_populated(PageAllocator, Zones);
             totalram_pages_accounted(PageAllocator);
+            page_allocator_alloc_pages_api_ready(PageAllocator);
+            page_allocator_free_pages_api_ready(PageAllocator);
         }
 
     }
