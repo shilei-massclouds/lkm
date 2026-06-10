@@ -77,7 +77,7 @@ type BusDriverRef {
  * Setup registers the bus kobject/kset shape; Enable publishes the runtime
  * device/driver containers and probe-control files.
  */
-type BusSubsysPrivate: DeviceObject {
+type BusSubsysPrivate {
     lifecycle {
         Event::Preset {
             state_effect: StateEffect::Always;
@@ -115,7 +115,7 @@ type BusSubsysPrivate: DeviceObject {
     }
 }
 
-type BusType: DeviceObject {
+type BusType {
     owned {
         subsys: BusSubsysPrivate;
     }

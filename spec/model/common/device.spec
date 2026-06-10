@@ -8,11 +8,18 @@
 
 predicate device_ref_targets<T, D>(device_ref: T, device: D) -> bool;
 predicate device_ref_ready<T>(device_ref: T) -> bool;
+predicate device_node_ref_in_tree<T, D>(node_ref: T, device_tree: D) -> bool;
+predicate device_node_ref_identity_stable<T>(node_ref: T) -> bool;
+predicate device_node_ref_properties_queryable<T>(node_ref: T) -> bool;
+predicate device_node_ref_compatible_queryable<T>(node_ref: T) -> bool;
+predicate device_node_ref_ready<T>(node_ref: T) -> bool;
 predicate device_core_storage_bound<T>(device: T) -> bool;
 predicate device_core_name_bound<T>(device: T) -> bool;
 predicate device_core_bus_bound<T, B>(device: T, bus: B) -> bool;
 predicate device_core_registered<T>(device: T) -> bool;
 predicate device_core_register_return_zero<T>(device: T) -> bool;
+predicate device_of_node_bound<T, N>(device: T, node_ref: N) -> bool;
+predicate device_fwnode_bound<T, N>(device: T, node_ref: N) -> bool;
 
 predicate platform_device_embeds_device<T, D>(platform_device: T, device: D) -> bool;
 predicate platform_device_name_bound<T>(platform_device: T) -> bool;
@@ -22,10 +29,35 @@ predicate platform_device_core_ref_ready<T, R>(platform_device: T, device_ref: R
 predicate platform_device_from_device_ref_ready<R, T>(device_ref: R, platform_device: T) -> bool;
 
 /*
- * DeviceType models Linux struct device: the common driver-core object that
- * can be registered globally and linked into a bus klist through DeviceRef.
+ * DeviceNodeRef is an abstract reference to a DeviceTree node. The compatible
+ * property remains owned by the DeviceTree node; DeviceType only holds a
+ * reference to it through SetNode.
  */
-type DeviceType: DeviceObject {
+type DeviceNodeRef {
+    processes {
+        Action::BindNode(device_tree: ResourceObject) {
+            state_effect: StateEffect::None;
+            depends_on {
+                device_tree.state == State::Ready;
+                device_tree_properties_queryable(device_tree);
+            }
+            ensures {
+                device_node_ref_in_tree(self, device_tree);
+                device_node_ref_identity_stable(self);
+                device_node_ref_properties_queryable(self);
+                device_node_ref_compatible_queryable(self);
+                device_node_ref_ready(self);
+            }
+        }
+    }
+}
+
+/*
+ * DeviceType models Linux struct device: the common driver-core object that
+ * can be registered globally, linked into a bus klist through DeviceRef, and
+ * associated with a firmware node through device_set_node().
+ */
+type DeviceType {
     processes {
         Action::Register {
             state_effect: StateEffect::None;
@@ -36,6 +68,22 @@ type DeviceType: DeviceObject {
             ensures {
                 device_core_registered(self);
                 device_core_register_return_zero(self);
+            }
+        }
+
+        /*
+         * SetNode corresponds to Linux device_set_node()/dev.of_node binding.
+         * It does not copy OF compatible data into struct device; later probe
+         * obtains compatible through the bound DeviceNodeRef.
+         */
+        Action::SetNode(node_ref: DeviceNodeRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                device_node_ref_ready(node_ref);
+            }
+            ensures {
+                device_of_node_bound(self, node_ref);
+                device_fwnode_bound(self, node_ref);
             }
         }
     }

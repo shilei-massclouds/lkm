@@ -105,6 +105,8 @@ predicate arceos_ex_must_of_platform_default_populate_scan_complete_after_candid
 predicate arceos_ex_must_of_platform_default_populate_defer_device_registration() -> bool;
 predicate arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor() -> bool;
 predicate arceos_ex_must_platform_device_embed_device_and_support_container_lookup() -> bool;
+predicate arceos_ex_must_device_object_kind_not_define_driver_core_semantics() -> bool;
+predicate arceos_ex_must_device_set_node_bind_ref_without_copying_compatible() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -1301,6 +1303,26 @@ type ArceosExInitcallCodingMust {
          * as to_platform_device!().
          */
         arceos_ex_must_platform_device_embed_device_and_support_container_lookup();
+
+        /*
+         * DeviceObject category shell:
+         *
+         * DeviceObject is only an early object category label. Reusable
+         * driver-core types such as DeviceType, BusType, and BusSubsysPrivate
+         * must carry their own semantics directly instead of inheriting from
+         * DeviceObject.
+         */
+        arceos_ex_must_device_object_kind_not_define_driver_core_semantics();
+
+        /*
+         * device_set_node boundary:
+         *
+         * DeviceType.SetNode must model Linux device_set_node()/dev.of_node by
+         * binding a core device to a DeviceNodeRef. It must not copy the OF
+         * compatible property into DeviceType or PlatformDeviceType; later
+         * probe/match must reach compatible through the bound DeviceNodeRef.
+         */
+        arceos_ex_must_device_set_node_bind_ref_without_copying_compatible();
 
         /*
          * OF platform scan completion:

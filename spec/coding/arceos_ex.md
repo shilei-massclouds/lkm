@@ -319,6 +319,11 @@ model 层的 `DeviceType` 对应 Linux `struct device`，不是 Linux `struct de
 必须保留从嵌入的 `DeviceRef` 找回外层 platform device 的 container_of-like 能力，可用 Rust 宏或等价 typed
 helper 表达，例如 `to_platform_device!()`。
 
+`DeviceObject` 这类空壳只作为早期模型的对象分类标签保留，不承担 Linux driver-core 语义；可复用类型
+`DeviceType`、`BusType` 和 `BusSubsysPrivate` 不应继承它来表达语义。`DeviceType.Action::SetNode` 对应 Linux
+`device_set_node()`/`dev.of_node` 绑定：它只把 core device 关联到 `DeviceNodeRef`/firmware node，`compatible`
+仍属于 DeviceTree node/property，后续 probe/match 必须经由该 node ref 获取 compatible。
+
 该 action 的遍历规则参考 Linux 6.12.37 `drivers/of/platform.c`：
 `of_platform_default_populate(NULL, ...)` 使用 `of_default_bus_match_table` 调用
 `of_platform_populate()`；`root == NULL` 时 root 解析为 `/`；`of_platform_populate()` 遍历 `/`
