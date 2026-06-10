@@ -19,6 +19,9 @@ predicate arceos_ex_must_page_allocator_buddy_use_zone_order_free_area() -> bool
 predicate arceos_ex_must_page_allocator_buddy_first_round_single_migratetype() -> bool;
 predicate arceos_ex_must_page_allocator_buddy_split_memblock_free_ranges() -> bool;
 predicate arceos_ex_must_page_allocator_buddy_use_page_metadata_nodes() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_use_intrusive_list() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_free_area_store_only_head_and_count() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_node_is_block_head_metadata() -> bool;
 predicate arceos_ex_must_page_allocator_buddy_avoid_heap_storage() -> bool;
 predicate arceos_ex_must_page_allocator_expose_linux_like_alloc_pages_api() -> bool;
 predicate arceos_ex_must_page_allocator_alloc_pages_return_owned_linear_mapped_pageref() -> bool;
@@ -231,6 +234,9 @@ type ArceosExMmCoreInitCodingMust {
          * on Vec, Box, heap, SLUB, or kmalloc storage.
          */
         arceos_ex_must_page_allocator_buddy_use_page_metadata_nodes();
+        arceos_ex_must_page_allocator_buddy_use_intrusive_list();
+        arceos_ex_must_page_allocator_buddy_free_area_store_only_head_and_count();
+        arceos_ex_must_page_allocator_buddy_node_is_block_head_metadata();
         arceos_ex_must_page_allocator_buddy_avoid_heap_storage();
 
         /*

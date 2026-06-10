@@ -771,6 +771,9 @@ Linux-like `free_area[MAX_ORDER]` 建模：每个 zone 拥有按 order 索引的
 MemBlock 可用区段并排除 reserved 区段，把剩余页切成 order 对齐的最大 buddy block；每个 free block 以 block head
 对应的 `PageMetadata` 作为 free-list 节点，并在 metadata 中记录 buddy order、allocated/free 状态和必要链接。实现不得用
 `Vec`、`Box`、普通 heap 或 SLUB/kmalloc 来承载 buddy 自身的 free-list 节点；这些 allocator 都必须建立在 buddy 之后。
+free-list 必须采用 intrusive list：`BuddyFreeArea` 只持有 list head 和 `nr_free` 计数，链表节点来自 free block 的 head
+`PageMetadata` 内嵌 link，语义对应 Linux `struct free_area.free_list[...]` 链接 `struct page.buddy_list`。
+除 block head 外，同一 buddy block 内的其它页 metadata 不得作为该 block 的 free-list 节点。
 
 `PageAllocator.Ready` 之后必须暴露正式的 Linux-like buddy API：`alloc_pages(order, gfp)`、order-0 convenience
 `alloc_page(gfp)` 和 `free_pages(page_ref, order)`。model 层对应 `PageAllocatorType.Action::AllocPages(order, gfp) -> PageRef`

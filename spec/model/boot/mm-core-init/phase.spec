@@ -206,7 +206,11 @@ object PageAllocatorBuddyFreePageSets: BuddyFreePageSetType {
                     buddy_free_page_sets_bound_to_allocator(PageAllocatorBuddyFreePageSets, PageAllocator);
                     buddy_free_page_sets_indexed_by_zone_and_order(PageAllocatorBuddyFreePageSets, Zones);
                     buddy_free_page_sets_use_single_migratetype(PageAllocatorBuddyFreePageSets);
+                    buddy_free_page_sets_use_intrusive_lists(PageAllocatorBuddyFreePageSets);
+                    buddy_free_page_sets_free_area_heads_ready(PageAllocatorBuddyFreePageSets);
                     buddy_free_page_sets_use_page_metadata_as_nodes(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+                    buddy_free_page_sets_nodes_are_block_head_metadata(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+                    buddy_free_page_sets_no_external_node_storage(PageAllocatorBuddyFreePageSets);
                     buddy_free_page_sets_populated_from_memblock(PageAllocatorBuddyFreePageSets, MemBlock, Zones);
                     buddy_free_page_sets_exclude_reserved_ranges(PageAllocatorBuddyFreePageSets, MemBlock);
                     buddy_free_page_sets_split_free_ranges_to_aligned_blocks(PageAllocatorBuddyFreePageSets);
@@ -221,7 +225,11 @@ object PageAllocatorBuddyFreePageSets: BuddyFreePageSetType {
             buddy_free_page_sets_bound_to_allocator(PageAllocatorBuddyFreePageSets, PageAllocator);
             buddy_free_page_sets_indexed_by_zone_and_order(PageAllocatorBuddyFreePageSets, Zones);
             buddy_free_page_sets_use_single_migratetype(PageAllocatorBuddyFreePageSets);
+            buddy_free_page_sets_use_intrusive_lists(PageAllocatorBuddyFreePageSets);
+            buddy_free_page_sets_free_area_heads_ready(PageAllocatorBuddyFreePageSets);
             buddy_free_page_sets_use_page_metadata_as_nodes(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+            buddy_free_page_sets_nodes_are_block_head_metadata(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+            buddy_free_page_sets_no_external_node_storage(PageAllocatorBuddyFreePageSets);
             buddy_free_page_sets_populated_from_memblock(PageAllocatorBuddyFreePageSets, MemBlock, Zones);
             buddy_free_page_sets_exclude_reserved_ranges(PageAllocatorBuddyFreePageSets, MemBlock);
             buddy_free_page_sets_split_free_ranges_to_aligned_blocks(PageAllocatorBuddyFreePageSets);
@@ -293,7 +301,11 @@ object PageAllocator: PageAllocatorType {
                     buddy_free_page_sets_bound_to_allocator(PageAllocatorBuddyFreePageSets, PageAllocator);
                     buddy_free_page_sets_indexed_by_zone_and_order(PageAllocatorBuddyFreePageSets, Zones);
                     buddy_free_page_sets_use_single_migratetype(PageAllocatorBuddyFreePageSets);
+                    buddy_free_page_sets_use_intrusive_lists(PageAllocatorBuddyFreePageSets);
+                    buddy_free_page_sets_free_area_heads_ready(PageAllocatorBuddyFreePageSets);
                     buddy_free_page_sets_use_page_metadata_as_nodes(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+                    buddy_free_page_sets_nodes_are_block_head_metadata(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+                    buddy_free_page_sets_no_external_node_storage(PageAllocatorBuddyFreePageSets);
                     buddy_free_page_sets_populated_from_memblock(PageAllocatorBuddyFreePageSets, MemBlock, Zones);
                     buddy_free_page_sets_exclude_reserved_ranges(PageAllocatorBuddyFreePageSets, MemBlock);
                     buddy_free_page_sets_split_free_ranges_to_aligned_blocks(PageAllocatorBuddyFreePageSets);
@@ -320,7 +332,11 @@ object PageAllocator: PageAllocatorType {
             buddy_free_page_sets_bound_to_allocator(PageAllocatorBuddyFreePageSets, PageAllocator);
             buddy_free_page_sets_indexed_by_zone_and_order(PageAllocatorBuddyFreePageSets, Zones);
             buddy_free_page_sets_use_single_migratetype(PageAllocatorBuddyFreePageSets);
+            buddy_free_page_sets_use_intrusive_lists(PageAllocatorBuddyFreePageSets);
+            buddy_free_page_sets_free_area_heads_ready(PageAllocatorBuddyFreePageSets);
             buddy_free_page_sets_use_page_metadata_as_nodes(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+            buddy_free_page_sets_nodes_are_block_head_metadata(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+            buddy_free_page_sets_no_external_node_storage(PageAllocatorBuddyFreePageSets);
             buddy_free_page_sets_populated_from_memblock(PageAllocatorBuddyFreePageSets, MemBlock, Zones);
             buddy_free_page_sets_exclude_reserved_ranges(PageAllocatorBuddyFreePageSets, MemBlock);
             buddy_free_page_sets_split_free_ranges_to_aligned_blocks(PageAllocatorBuddyFreePageSets);
