@@ -17,10 +17,12 @@ use crate::trace::Checkpoint;
 
 const MAX_BOOT_ZONES: usize = 3;
 const MAX_KMALLOC_CACHES: usize = 8;
+const MAX_KMALLOC_SLABS: usize = 32;
 const BUDDY_ORDER_COUNT: usize = 11;
 const BUDDY_INVALID_INDEX: usize = usize::MAX;
 const PAGE_METADATA_FLAG_BUDDY_FREE: usize = 1 << 0;
 const PAGE_METADATA_FLAG_BUDDY_ALLOCATED: usize = 1 << 1;
+const KMALLOC_NULL: usize = 0;
 const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
 const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
@@ -457,6 +459,16 @@ impl PageRef {
 
     pub const fn linear(self) -> LinearMappedPageAddr {
         self.linear
+    }
+}
+
+const fn empty_page_ref() -> PageRef {
+    PageRef {
+        pfn: Pfn::new(0),
+        metadata_index: 0,
+        metadata_linear: 0,
+        phys: PhysPageAddr::new(0),
+        linear: LinearMappedPageAddr::new(0),
     }
 }
 
@@ -1769,6 +1781,86 @@ impl PageAllocator {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct KmallocAllocRef {
+    addr: usize,
+    requested_size: usize,
+    cache_size: usize,
+    cache_index: usize,
+}
+
+impl KmallocAllocRef {
+    pub const fn addr(self) -> usize {
+        self.addr
+    }
+
+    pub const fn requested_size(self) -> usize {
+        self.requested_size
+    }
+
+    pub const fn cache_size(self) -> usize {
+        self.cache_size
+    }
+
+    pub const fn cache_index(self) -> usize {
+        self.cache_index
+    }
+}
+
+#[derive(Clone, Copy)]
+struct KmallocSlab {
+    page: PageRef,
+    base: usize,
+    object_size: usize,
+    object_count: usize,
+    free_count: usize,
+    cache_index: usize,
+}
+
+impl KmallocSlab {
+    const fn empty() -> Self {
+        Self {
+            page: empty_page_ref(),
+            base: 0,
+            object_size: 0,
+            object_count: 0,
+            free_count: 0,
+            cache_index: usize::MAX,
+        }
+    }
+
+    fn contains(&self, addr: usize) -> bool {
+        let Some(bytes) = self.object_size.checked_mul(self.object_count) else {
+            return false;
+        };
+        let Some(end) = self.base.checked_add(bytes) else {
+            return false;
+        };
+        self.base != 0
+            && self.object_size != 0
+            && addr >= self.base
+            && addr < end
+            && (addr - self.base).is_multiple_of(self.object_size)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct KmallocCache {
+    object_size: usize,
+    free_head: usize,
+    slab_count: usize,
+}
+
+impl KmallocCache {
+    const fn empty() -> Self {
+        Self {
+            object_size: 0,
+            free_head: KMALLOC_NULL,
+            slab_count: 0,
+        }
+    }
+}
+
 pub struct MemoryDebugHardening {
     lifecycle: Lifecycle,
     init_on_alloc: bool,
@@ -2047,6 +2139,41 @@ impl SlubAllocator {
         &self.kmalloc_caches
     }
 
+    pub fn kmalloc(
+        &mut self,
+        size: usize,
+        gfp: GfpFlags,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<KmallocAllocRef> {
+        if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
+            return None;
+        }
+        self.kmalloc_caches
+            .kmalloc(size, gfp, page_allocator, page_metadata_map, false)
+    }
+
+    pub fn kzalloc(
+        &mut self,
+        size: usize,
+        gfp: GfpFlags,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<KmallocAllocRef> {
+        if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
+            return None;
+        }
+        self.kmalloc_caches
+            .kmalloc(size, gfp, page_allocator, page_metadata_map, true)
+    }
+
+    pub fn kfree(&mut self, alloc_ref: KmallocAllocRef) -> bool {
+        if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
+            return false;
+        }
+        self.kmalloc_caches.kfree(alloc_ref)
+    }
+
     pub fn preset(
         &mut self,
         page_allocator: &PageAllocator,
@@ -2192,6 +2319,9 @@ pub struct KmallocCaches {
     random_caches_trimmed: bool,
     memcg_caches_trimmed: bool,
     sizes: [usize; MAX_KMALLOC_CACHES],
+    caches: [KmallocCache; MAX_KMALLOC_CACHES],
+    slabs: [KmallocSlab; MAX_KMALLOC_SLABS],
+    slab_count: usize,
     count: usize,
 }
 
@@ -2204,6 +2334,9 @@ impl KmallocCaches {
             random_caches_trimmed: false,
             memcg_caches_trimmed: false,
             sizes: [0; MAX_KMALLOC_CACHES],
+            caches: [KmallocCache::empty(); MAX_KMALLOC_CACHES],
+            slabs: [KmallocSlab::empty(); MAX_KMALLOC_SLABS],
+            slab_count: 0,
             count: 0,
         }
     }
@@ -2232,6 +2365,27 @@ impl KmallocCaches {
         self.count
     }
 
+    pub const fn slab_count(&self) -> usize {
+        self.slab_count
+    }
+
+    pub fn backing_page_count(&self) -> usize {
+        let mut count = 0usize;
+        let mut index = 0usize;
+        while index < self.slab_count {
+            if self.slabs[index].page.metadata_linear() != 0 {
+                count += 1;
+            }
+            index += 1;
+        }
+        count
+    }
+
+    pub fn kmalloc_size(&self, size: usize) -> Option<usize> {
+        let index = self.cache_index_for_size(size)?;
+        Some(self.caches[index].object_size)
+    }
+
     pub fn has_size(&self, size: usize) -> bool {
         let mut index = 0usize;
         while index < self.count {
@@ -2241,6 +2395,78 @@ impl KmallocCaches {
             index += 1;
         }
         false
+    }
+
+    fn kmalloc(
+        &mut self,
+        size: usize,
+        gfp: GfpFlags,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        zeroed: bool,
+    ) -> Option<KmallocAllocRef> {
+        if self.lifecycle.state() != State::Ready || size == 0 {
+            return None;
+        }
+        let cache_index = self.cache_index_for_size(size)?;
+        if self.caches[cache_index].free_head == KMALLOC_NULL
+            && !self.grow_cache(cache_index, gfp, page_allocator, page_metadata_map)
+        {
+            return None;
+        }
+
+        let addr = self.caches[cache_index].free_head;
+        if addr == KMALLOC_NULL {
+            return None;
+        }
+        let next = read_freelist_next(addr);
+        self.caches[cache_index].free_head = next;
+        let Some(slab_index) = self.slab_index_for_addr(addr) else {
+            return None;
+        };
+        if self.slabs[slab_index].free_count == 0 {
+            return None;
+        }
+        self.slabs[slab_index].free_count -= 1;
+
+        if zeroed {
+            unsafe {
+                core::ptr::write_bytes(addr as *mut u8, 0, size);
+            }
+        }
+
+        Some(KmallocAllocRef {
+            addr,
+            requested_size: size,
+            cache_size: self.caches[cache_index].object_size,
+            cache_index,
+        })
+    }
+
+    fn kfree(&mut self, alloc_ref: KmallocAllocRef) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || alloc_ref.addr() == KMALLOC_NULL
+            || alloc_ref.cache_index() >= self.count
+            || self.caches[alloc_ref.cache_index()].object_size != alloc_ref.cache_size()
+        {
+            return false;
+        }
+        let Some(slab_index) = self.slab_index_for_addr(alloc_ref.addr()) else {
+            return false;
+        };
+        if self.slabs[slab_index].cache_index != alloc_ref.cache_index()
+            || !self.slabs[slab_index].contains(alloc_ref.addr())
+            || self.slabs[slab_index].free_count >= self.slabs[slab_index].object_count
+            || self.freelist_contains(alloc_ref.cache_index(), alloc_ref.addr())
+        {
+            return false;
+        }
+
+        let cache_index = alloc_ref.cache_index();
+        write_freelist_next(alloc_ref.addr(), self.caches[cache_index].free_head);
+        self.caches[cache_index].free_head = alloc_ref.addr();
+        self.slabs[slab_index].free_count += 1;
+        true
     }
 
     fn setup(&mut self, slub_state: State, registry: &SlubCacheRegistry) -> EventResult {
@@ -2258,6 +2484,15 @@ impl KmallocCaches {
 
         self.sizes = [8, 16, 32, 64, 128, 256, 512, 1024];
         self.count = MAX_KMALLOC_CACHES;
+        let mut index = 0usize;
+        while index < self.count {
+            self.caches[index] = KmallocCache {
+                object_size: self.sizes[index],
+                free_head: KMALLOC_NULL,
+                slab_count: 0,
+            };
+            index += 1;
+        }
         self.size_index_ready = true;
         self.default_cache_ready = true;
         self.random_caches_trimmed = true;
@@ -2268,6 +2503,104 @@ impl KmallocCaches {
             State::Ready,
             Checkpoint::KmallocCachesReady,
         )
+    }
+
+    fn cache_index_for_size(&self, size: usize) -> Option<usize> {
+        if self.lifecycle.state() != State::Ready || size == 0 {
+            return None;
+        }
+        let mut index = 0usize;
+        while index < self.count {
+            if size <= self.caches[index].object_size {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn grow_cache(
+        &mut self,
+        cache_index: usize,
+        gfp: GfpFlags,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if cache_index >= self.count || self.slab_count >= MAX_KMALLOC_SLABS {
+            return false;
+        }
+        let object_size = self.caches[cache_index].object_size;
+        if object_size == 0 || page_metadata_map.page_size() < object_size {
+            return false;
+        }
+        let Some(page) = page_allocator.alloc_page(gfp, page_metadata_map) else {
+            return false;
+        };
+        let Some(base) = page_metadata_map.page_address(page) else {
+            page_allocator.free_pages(page, 0, page_metadata_map);
+            return false;
+        };
+        let object_count = page_metadata_map.page_size() / object_size;
+        if object_count == 0 {
+            page_allocator.free_pages(page, 0, page_metadata_map);
+            return false;
+        }
+
+        let mut head = KMALLOC_NULL;
+        let mut object_index = object_count;
+        while object_index != 0 {
+            object_index -= 1;
+            let Some(offset) = object_index.checked_mul(object_size) else {
+                page_allocator.free_pages(page, 0, page_metadata_map);
+                return false;
+            };
+            let Some(addr) = base.checked_add(offset) else {
+                page_allocator.free_pages(page, 0, page_metadata_map);
+                return false;
+            };
+            write_freelist_next(addr, head);
+            head = addr;
+        }
+
+        self.slabs[self.slab_count] = KmallocSlab {
+            page,
+            base,
+            object_size,
+            object_count,
+            free_count: object_count,
+            cache_index,
+        };
+        self.slab_count += 1;
+        self.caches[cache_index].free_head = head;
+        self.caches[cache_index].slab_count += 1;
+        true
+    }
+
+    fn slab_index_for_addr(&self, addr: usize) -> Option<usize> {
+        let mut index = 0usize;
+        while index < self.slab_count {
+            if self.slabs[index].contains(addr) {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn freelist_contains(&self, cache_index: usize, addr: usize) -> bool {
+        if cache_index >= self.count {
+            return false;
+        }
+        let mut current = self.caches[cache_index].free_head;
+        let mut scanned = 0usize;
+        while current != KMALLOC_NULL && scanned < MAX_KMALLOC_SLABS * 512 {
+            if current == addr {
+                return true;
+            }
+            current = read_freelist_next(current);
+            scanned += 1;
+        }
+        false
     }
 }
 
@@ -2864,6 +3197,16 @@ fn phys_to_pfn_value(phys: usize, page_size: usize) -> Option<usize> {
         return None;
     }
     Some(phys / page_size)
+}
+
+fn read_freelist_next(addr: usize) -> usize {
+    unsafe { core::ptr::read(addr as *const usize) }
+}
+
+fn write_freelist_next(addr: usize, next: usize) {
+    unsafe {
+        core::ptr::write(addr as *mut usize, next);
+    }
 }
 
 fn block_fits_in_range(pfn: usize, order: usize, page_size: usize, range: PhysRange) -> bool {

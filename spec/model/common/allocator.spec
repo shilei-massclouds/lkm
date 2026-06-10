@@ -22,6 +22,12 @@ type PhysPageAddr {
 type LinearMappedPageAddr {
 }
 
+type KmallocSize {
+}
+
+type KmallocAllocRef {
+}
+
 type PageMetadata {
 }
 
@@ -205,6 +211,23 @@ predicate phys_page_addr_page_aligned<T>(phys_addr: T) -> bool;
 predicate phys_page_addr_pfn_bound<T, P>(phys_addr: T, pfn: P) -> bool;
 predicate linear_page_addr_in_linear_map<T>(linear_addr: T) -> bool;
 predicate linear_page_addr_pfn_bound<T, P>(linear_addr: T, pfn: P) -> bool;
+predicate slub_allocator_kmalloc_api_ready<T>(allocator: T) -> bool;
+predicate slub_allocator_kzalloc_api_ready<T>(allocator: T) -> bool;
+predicate slub_allocator_kfree_api_ready<T>(allocator: T) -> bool;
+predicate slub_allocator_uses_page_allocator<T, P>(allocator: T, page_allocator: P) -> bool;
+predicate slub_allocator_kmalloc_called<T, S, G>(allocator: T, size: S, gfp: G) -> bool;
+predicate slub_allocator_kzalloc_called<T, S, G>(allocator: T, size: S, gfp: G) -> bool;
+predicate slub_allocator_kfree_called<T, R>(allocator: T, alloc_ref: R) -> bool;
+predicate kmalloc_caches_ready_for_size<T, S>(caches: T, size: S) -> bool;
+predicate kmalloc_caches_default_size_classes_ready<T>(caches: T) -> bool;
+predicate kmalloc_cache_size_class_selected<T, S>(caches: T, size: S) -> bool;
+predicate kmalloc_slab_backed_by_page_ref<T, P>(alloc_ref: T, page_ref: P) -> bool;
+predicate kmalloc_alloc_ref_ready<T>(alloc_ref: T) -> bool;
+predicate kmalloc_alloc_ref_size_bound<T, S>(alloc_ref: T, size: S) -> bool;
+predicate kmalloc_alloc_ref_linear_mapped<T>(alloc_ref: T) -> bool;
+predicate kmalloc_alloc_ref_zeroed<T>(alloc_ref: T) -> bool;
+predicate kmalloc_alloc_ref_exclusively_owned_by_caller<T>(alloc_ref: T) -> bool;
+predicate kmalloc_alloc_ref_released_to_slub<T, A>(alloc_ref: T, allocator: A) -> bool;
 
 type PageAllocatorType: MemoryObject {
     processes {
@@ -305,6 +328,79 @@ type PageAllocatorType: MemoryObject {
             }
             ensures {
                 page_allocator_virt_to_page_called(self, linear_addr);
+            }
+        }
+    }
+}
+
+type SlubAllocatorType: MemoryObject {
+    processes {
+        /*
+         * Kmalloc corresponds to Linux kmalloc(size, gfp). The returned
+         * allocation reference is caller-owned storage from a kmalloc size
+         * class backed by PageAllocator pages.
+         */
+        Action::Kmalloc(size: KmallocSize, gfp: GfpFlags) -> KmallocAllocRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                KmallocCaches.state == State::Ready;
+                PageAllocator.state == State::Ready;
+                slub_allocator_kmalloc_api_ready(self);
+                slub_allocator_kfree_api_ready(self);
+                slub_allocator_uses_page_allocator(self, PageAllocator);
+                kmalloc_caches_ready_for_size(KmallocCaches, size);
+                page_allocator_gfp_allowed(PageAllocator, gfp);
+            }
+            ensures {
+                slub_allocator_kmalloc_called(self, size, gfp);
+                kmalloc_cache_size_class_selected(KmallocCaches, size);
+            }
+            result {
+                Available: Success(kmalloc_alloc_ref_returned);
+                NoMemory: Failed(no_slab_objects_available);
+            }
+            deferred {
+                "当前 Kmalloc 规格只展开成功返回分配引用的常规路径；GFP reclaim、NUMA、memcg、debug redzone、freelist random/hardened 后续随完整 SLUB 模型展开。";
+            }
+        }
+
+        /*
+         * Kzalloc is kmalloc plus zeroing before the reference is returned.
+         */
+        Action::Kzalloc(size: KmallocSize, gfp: GfpFlags) -> KmallocAllocRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                KmallocCaches.state == State::Ready;
+                PageAllocator.state == State::Ready;
+                slub_allocator_kzalloc_api_ready(self);
+                slub_allocator_kfree_api_ready(self);
+                slub_allocator_uses_page_allocator(self, PageAllocator);
+                kmalloc_caches_ready_for_size(KmallocCaches, size);
+                page_allocator_gfp_allowed(PageAllocator, gfp);
+            }
+            ensures {
+                slub_allocator_kzalloc_called(self, size, gfp);
+                kmalloc_cache_size_class_selected(KmallocCaches, size);
+            }
+            result {
+                Available: Success(kmalloc_alloc_ref_returned);
+                NoMemory: Failed(no_slab_objects_available);
+            }
+        }
+
+        Action::Kfree(alloc_ref: KmallocAllocRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                slub_allocator_kfree_api_ready(self);
+                kmalloc_alloc_ref_ready(alloc_ref);
+                kmalloc_alloc_ref_exclusively_owned_by_caller(alloc_ref);
+            }
+            ensures {
+                slub_allocator_kfree_called(self, alloc_ref);
+                kmalloc_alloc_ref_released_to_slub(alloc_ref, self);
             }
         }
     }

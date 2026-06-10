@@ -31,6 +31,14 @@ predicate arceos_ex_must_memblock_disable_reaches_offline_not_destroyed() -> boo
 predicate arceos_ex_must_swiotlb_setup_before_memblock_disable() -> bool;
 predicate arceos_ex_must_memory_debug_hardening_use_static_branch_registry() -> bool;
 predicate arceos_ex_must_slub_bootstrap_before_kmalloc_caches_ready() -> bool;
+predicate arceos_ex_must_slub_expose_kmalloc_kzalloc_kfree_api() -> bool;
+predicate arceos_ex_must_slub_kmalloc_use_page_allocator_backing_pages() -> bool;
+predicate arceos_ex_must_slub_kmalloc_use_fixed_size_classes() -> bool;
+predicate arceos_ex_must_slub_kmalloc_use_slab_slot_freelist() -> bool;
+predicate arceos_ex_must_slub_kzalloc_zero_returned_object() -> bool;
+predicate arceos_ex_must_slub_kfree_recycle_object_to_cache() -> bool;
+predicate arceos_ex_must_slub_first_round_defer_complex_linux_paths() -> bool;
+predicate arceos_ex_must_slub_smoke_cover_kmalloc_kzalloc_kfree() -> bool;
 predicate arceos_ex_must_page_table_lock_cache_named_page_ptl() -> bool;
 predicate arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_not_page_tables() -> bool;
 predicate arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects() -> bool;
@@ -311,6 +319,32 @@ type ArceosExMmCoreInitCodingMust {
          * before KmallocCaches is considered Ready.
          */
         arceos_ex_must_slub_bootstrap_before_kmalloc_caches_ready();
+
+        /*
+         * Linux-like kmalloc API:
+         *
+         * Once SlubAllocator reaches Ready it must expose production
+         * kmalloc(size, gfp), kzalloc(size, gfp), and kfree(ref) APIs. The
+         * first round may use a minimal page-backed slab implementation, but
+         * it must allocate backing pages through PageAllocator rather than
+         * test hooks or MemBlock.
+         */
+        arceos_ex_must_slub_expose_kmalloc_kzalloc_kfree_api();
+        arceos_ex_must_slub_kmalloc_use_page_allocator_backing_pages();
+        arceos_ex_must_slub_kmalloc_use_fixed_size_classes();
+        arceos_ex_must_slub_kmalloc_use_slab_slot_freelist();
+        arceos_ex_must_slub_kzalloc_zero_returned_object();
+        arceos_ex_must_slub_kfree_recycle_object_to_cache();
+        arceos_ex_must_slub_first_round_defer_complex_linux_paths();
+
+        /*
+         * SLUB/kmalloc smoke:
+         *
+         * The kmalloc smoke coverage must use the formal kmalloc/kzalloc/kfree
+         * APIs to check writable allocations, zeroed kzalloc storage,
+         * independent same-size allocations, and free-list reuse.
+         */
+        arceos_ex_must_slub_smoke_cover_kmalloc_kzalloc_kfree();
 
         /*
          * Page table lock cache:

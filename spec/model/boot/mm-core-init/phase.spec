@@ -507,6 +507,7 @@ object KmallocCaches: MemoryObject {
                 ensures {
                     kmalloc_caches_ready(KmallocCaches, SlubCacheRegistry);
                     kmalloc_size_index_ready(KmallocCaches);
+                    kmalloc_caches_default_size_classes_ready(KmallocCaches);
                     default_kmalloc_cache_set_ready(KmallocCaches);
                     random_kmalloc_caches_trimmed(KmallocCaches);
                     memcg_kmalloc_caches_trimmed(KmallocCaches);
@@ -519,6 +520,7 @@ object KmallocCaches: MemoryObject {
         invariant {
             kmalloc_caches_ready(KmallocCaches, SlubCacheRegistry);
             kmalloc_size_index_ready(KmallocCaches);
+            kmalloc_caches_default_size_classes_ready(KmallocCaches);
             default_kmalloc_cache_set_ready(KmallocCaches);
             random_kmalloc_caches_trimmed(KmallocCaches);
             memcg_kmalloc_caches_trimmed(KmallocCaches);
@@ -530,7 +532,7 @@ object KmallocCaches: MemoryObject {
  * SlubAllocator 表示 CONFIG_SLUB=y 下的 kmem_cache_init() 自举路径。
  * 本子阶段只推进到 Linux slab_state=UP 对应的 Ready。
  */
-object SlubAllocator: MemoryObject {
+object SlubAllocator: SlubAllocatorType {
     initial_state: State::Base;
 
     state State::Base {
@@ -575,6 +577,10 @@ object SlubAllocator: MemoryObject {
                     slub_cpu_cache_state_ready(SlubAllocator, PerCpuStorage);
                     slub_cpuhp_step_registered(SlubAllocator, CpuHotplugState);
                     slub_state_up(SlubAllocator);
+                    slub_allocator_uses_page_allocator(SlubAllocator, PageAllocator);
+                    slub_allocator_kmalloc_api_ready(SlubAllocator);
+                    slub_allocator_kzalloc_api_ready(SlubAllocator);
+                    slub_allocator_kfree_api_ready(SlubAllocator);
                 }
             }
         }
@@ -589,6 +595,10 @@ object SlubAllocator: MemoryObject {
             slub_cpu_cache_state_ready(SlubAllocator, PerCpuStorage);
             slub_cpuhp_step_registered(SlubAllocator, CpuHotplugState);
             slub_state_up(SlubAllocator);
+            slub_allocator_uses_page_allocator(SlubAllocator, PageAllocator);
+            slub_allocator_kmalloc_api_ready(SlubAllocator);
+            slub_allocator_kzalloc_api_ready(SlubAllocator);
+            slub_allocator_kfree_api_ready(SlubAllocator);
         }
     }
 }

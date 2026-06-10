@@ -513,9 +513,14 @@ KUnit，也不得放宽 `scheduler_action` KUnit 对 `rest_init` 首次 schedule
 若为该闭环新增边界，必须是正式 scheduler/task API，不得新增 `test_*` 被测入口。
 
 PageAllocator API smoke 是动态容器前置链路的第一个运行期用例：它应通过正式 `alloc_pages(order, gfp)` 分配至少一个
-order-0 页引用，通过该 `PageRef` 的受限映射视图做有界读写校验，再用 `free_pages(page_ref, order)` 释放。该用例不得绕过
-正式对象 API，也不得读取 buddy free list、zone 统计等私有内部状态作为断言条件。SLUB/kmalloc 和 `GlobalAlloc`/`Vec` smoke
-必须在这个 PageAllocator smoke 之后推进。
+order-0 页引用，并至少覆盖一个高 order 分配，通过该 `PageRef` 的受限映射视图做有界读写校验，再用
+`free_pages(page_ref, order)` 释放。该用例不得绕过正式对象 API，也不得读取 buddy free list、zone 统计等私有内部状态作为断言条件。
+SLUB/kmalloc smoke 必须在这个 PageAllocator smoke 之后推进。
+
+SLUB/kmalloc API smoke 是动态容器前置链路的第二个运行期用例：它应通过正式 `kmalloc(size, gfp)`、`kzalloc(size, gfp)`
+和 `kfree(alloc_ref)` API 覆盖小对象分配、写读、零初始化、同尺寸多对象互不覆盖，以及释放后复用。该用例不得直接操作
+SLUB freelist、slab slot metadata 或 PageAllocator 内部状态；断言应通过分配引用的线性映射访问边界完成。`GlobalAlloc`/`Vec`
+smoke 必须在这个 SLUB/kmalloc smoke 之后推进。
 
 ### 启动与 smoke 输出风格
 
@@ -793,6 +798,21 @@ buddy pages，并且必须可通过已经建立的线性映射进行受限读写
 为索引的 `PageMetadata` 数组。`PageRef` 必须绑定到 `mem_map[pfn - start_pfn]` 对应 slot；PFN、物理页地址和 direct-map
 线性地址只是从该 slot 的 PFN 关系派生出的转换结果。将来若切换到 sparse/vmemmap，只能替换 metadata storage 布局，
 不得改变 `PageRef` 指向 page metadata 项这一契约。
+
+`SlubAllocator.Ready` 之后必须暴露正式的 Linux-like kmalloc API：`kmalloc(size, gfp)`、`kzalloc(size, gfp)` 和
+`kfree(alloc_ref)`。model 层对应 `SlubAllocatorType.Action::Kmalloc(size, gfp) -> KmallocAllocRef`、
+`SlubAllocatorType.Action::Kzalloc(size, gfp) -> KmallocAllocRef` 与
+`SlubAllocatorType.Action::Kfree(alloc_ref)`；coding 层可按 Rust 需要调整参数和返回封装，但必须保留 size、GFP、
+caller-owned allocation reference、线性映射读写、kzalloc 返回前清零，以及 kfree 释放后对象回到所属 kmalloc cache 的契约。
+
+当前第一轮 `arceos_ex` SLUB/kmalloc 实现只要求最小 page-backed slab：`KmallocCaches` 使用固定默认 size classes
+`8/16/32/64/128/256/512/1024`，请求 size 通过向上取整选择 size class；当某个 cache 没有空闲对象时，必须通过
+`PageAllocator.alloc_pages()` 获取 backing page，把 page 切成同尺寸 slots 并挂入该 cache 的 freelist。第一轮可先不在
+空 slab 时把整页归还给 `PageAllocator.free_pages()`，但所有 backing pages 必须由 `PageAllocator` 拥有并通过 `PageRef`
+建立 direct-map slot 地址。freelist 节点可以使用 slot 内存的 intrusive next pointer 或等价的固定元数据表示，但不得依赖
+`Vec`、`Box`、全局 heap 或 MemBlock。`kmalloc` 不保证清零；`kzalloc` 必须清零返回对象的 requested size 范围；
+`kfree` 必须拒绝不属于任一 kmalloc cache/slab 的引用，并把有效对象放回所属 cache 的 freelist。NUMA、per-CPU partial、
+slab debug redzone/poison、freelist random/hardened、memcg kmalloc、reclaim/compaction 和 slab sysfs/FULL 状态均 deferred。
 
 `VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址资源管理，不是页表映射器。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END` 页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、`VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、建立 free vmap space。
 
