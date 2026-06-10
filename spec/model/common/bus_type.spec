@@ -17,10 +17,6 @@ predicate bus_type_devices_kset_ready<T>(bus: T) -> bool;
 predicate bus_type_drivers_kset_ready<T>(bus: T) -> bool;
 predicate bus_type_autoprobe_enabled<T>(bus: T) -> bool;
 predicate bus_type_register_return_zero<T>(bus: T) -> bool;
-predicate bus_driver_ref_ready<T>(driver: T) -> bool;
-predicate bus_driver_ref_set_ready<T>(driver_refs: T) -> bool;
-predicate bus_driver_ref_set_contains<T, R>(driver_refs: T, driver_ref: R) -> bool;
-predicate bus_driver_ref_set_nonempty<T>(driver_refs: T) -> bool;
 predicate bus_type_device_added<T, U>(bus: T, device: U) -> bool;
 predicate bus_type_driver_added<T, U>(bus: T, driver: U) -> bool;
 predicate bus_type_devices_klist_nonempty<T>(bus: T) -> bool;
@@ -93,12 +89,6 @@ predicate platform_bus_mock_ns16550a_driver_probe_return_zero<T>(bus: T) -> bool
 predicate platform_bus_mock_ns16550a_device_matched<T>(bus: T) -> bool;
 predicate platform_bus_mock_ns16550a_device_bound<T>(bus: T) -> bool;
 
-type BusDriverRef {
-}
-
-type BusDriverRefSet {
-}
-
 /*
  * BusSubsysPrivate models Linux struct subsys_private as created by
  * bus_register(). Preset corresponds to kzalloc() and static field binding;
@@ -108,7 +98,7 @@ type BusDriverRefSet {
 type BusSubsysPrivate {
     owned {
         klist_devices: DeviceRefSet;
-        klist_drivers: BusDriverRefSet;
+        klist_drivers: DeviceDriverRefSet;
     }
 
     lifecycle {
@@ -144,7 +134,7 @@ type BusSubsysPrivate {
                 device_ref_set_ready(self.klist_devices);
                 bus_subsys_klist_drivers_ready(self);
                 bus_subsys_driver_ref_set_bound(self, self.klist_drivers);
-                bus_driver_ref_set_ready(self.klist_drivers);
+                device_driver_ref_set_ready(self.klist_drivers);
                 bus_subsys_probe_files_ready(self);
                 bus_subsys_groups_ready(self);
             }
@@ -215,20 +205,20 @@ type BusType {
          * subsys_private.klist_drivers. It is the reusable BusType boundary
          * that later Driver modeling can call from driver_register()/bus_add_driver().
          */
-        Action::AddDriver(driver: BusDriverRef) {
+        Action::AddDriver(driver: DeviceDriverRef) {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
                 bus_type_subsys_private_online(self, self.subsys);
                 bus_subsys_klist_drivers_ready(self.subsys);
-                bus_driver_ref_set_ready(self.subsys.klist_drivers);
-                bus_driver_ref_ready(driver);
+                device_driver_ref_set_ready(self.subsys.klist_drivers);
+                device_driver_ref_ready(driver);
             }
             ensures {
                 bus_type_driver_added(self, driver);
                 bus_type_drivers_klist_nonempty(self);
-                bus_driver_ref_set_contains(self.subsys.klist_drivers, driver);
-                bus_driver_ref_set_nonempty(self.subsys.klist_drivers);
+                device_driver_ref_set_contains(self.subsys.klist_drivers, driver);
+                device_driver_ref_set_nonempty(self.subsys.klist_drivers);
                 bus_subsys_klist_drivers_contains(self.subsys, driver);
             }
         }
@@ -237,7 +227,7 @@ type BusType {
          * ProbeDriver is the driver-side attach boundary: a registered driver
          * scans klist_devices and attempts bus-specific match/probe/bind.
          */
-        Action::ProbeDriver(driver: BusDriverRef) {
+        Action::ProbeDriver(driver: DeviceDriverRef) {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
@@ -245,7 +235,7 @@ type BusType {
                 bus_subsys_klist_devices_ready(self.subsys);
                 bus_type_devices_klist_nonempty(self);
                 device_ref_set_nonempty(self.subsys.klist_devices);
-                bus_driver_ref_ready(driver);
+                device_driver_ref_ready(driver);
             }
             ensures {
                 bus_type_probe_driver_scans_devices(self, driver);
@@ -264,7 +254,7 @@ type BusType {
                 bus_type_subsys_private_online(self, self.subsys);
                 bus_subsys_klist_drivers_ready(self.subsys);
                 bus_type_drivers_klist_nonempty(self);
-                bus_driver_ref_set_nonempty(self.subsys.klist_drivers);
+                device_driver_ref_set_nonempty(self.subsys.klist_drivers);
                 device_ref_ready(device);
             }
             ensures {
@@ -336,8 +326,8 @@ type PlatformBusType: BusType {
                 platform_device_set_nonempty(self.platform_devices);
             }
             drives {
-                self.Action::AddDriver(BusDriverRef::MockNs16550aPlatformDriver);
-                self.Action::ProbeDriver(BusDriverRef::MockNs16550aPlatformDriver);
+                self.Action::AddDriver(DeviceDriverRef::MockNs16550aPlatformDriver);
+                self.Action::ProbeDriver(DeviceDriverRef::MockNs16550aPlatformDriver);
             }
             ensures {
                 initcall_entry_invoked(InitcallEntry::MockNs16550aPlatformDriver);
@@ -349,12 +339,12 @@ type PlatformBusType: BusType {
                 platform_bus_mock_ns16550a_driver_probe_called(self);
                 platform_bus_mock_ns16550a_driver_probe_return_zero(self);
                 platform_bus_mock_ns16550a_device_bound(self);
-                bus_type_driver_added(self, BusDriverRef::MockNs16550aPlatformDriver);
+                bus_type_driver_added(self, DeviceDriverRef::MockNs16550aPlatformDriver);
                 bus_type_drivers_klist_nonempty(self);
-                bus_subsys_klist_drivers_contains(self.subsys, BusDriverRef::MockNs16550aPlatformDriver);
-                bus_type_probe_driver_scans_devices(self, BusDriverRef::MockNs16550aPlatformDriver);
-                bus_type_probe_driver_match_attempted(self, BusDriverRef::MockNs16550aPlatformDriver);
-                bus_type_driver_probe_bound_device(self, BusDriverRef::MockNs16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                bus_subsys_klist_drivers_contains(self.subsys, DeviceDriverRef::MockNs16550aPlatformDriver);
+                bus_type_probe_driver_scans_devices(self, DeviceDriverRef::MockNs16550aPlatformDriver);
+                bus_type_probe_driver_match_attempted(self, DeviceDriverRef::MockNs16550aPlatformDriver);
+                bus_type_driver_probe_bound_device(self, DeviceDriverRef::MockNs16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             }
         }
     }

@@ -145,12 +145,14 @@ predicate arceos_ex_must_of_platform_default_populate_emit_entry_scan_devices_ex
 predicate arceos_ex_must_of_platform_population_smoke_cover_refs_to_nodes() -> bool;
 predicate arceos_ex_must_of_platform_population_smoke_ignore_unrelated_initcall_entries() -> bool;
 predicate arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage() -> bool;
-predicate arceos_ex_must_bus_driver_ref_set_map_to_klist_like_storage() -> bool;
+predicate arceos_ex_must_device_driver_ref_set_map_to_klist_like_storage() -> bool;
 predicate arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs() -> bool;
 predicate arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry() -> bool;
 predicate arceos_ex_must_device_driver_descriptor_carry_name_bus_of_match_and_probe() -> bool;
 predicate arceos_ex_must_of_match_table_lower_to_static_compatible_array() -> bool;
-predicate arceos_ex_must_bus_driver_ref_reference_driver_descriptor_not_enum_special_case() -> bool;
+predicate arceos_ex_must_device_driver_ref_reference_driver_descriptor_not_enum_special_case() -> bool;
+predicate arceos_ex_must_device_driver_storage_keep_driver_refs_stable() -> bool;
+predicate arceos_ex_must_platform_driver_storage_use_static_or_pinned_owner() -> bool;
 predicate arceos_ex_must_platform_bus_match_use_driver_of_match_table_and_device_node() -> bool;
 predicate arceos_ex_must_mock_ns16550a_probe_avoid_platform_bus_hardcoded_compatible_branch() -> bool;
 predicate arceos_ex_must_platform_bus_probe_driver_scan_existing_devices() -> bool;
@@ -1584,19 +1586,24 @@ type ArceosExInitcallCodingMust {
          * The first platform-driver closure must use a Linux-like
          * device_initcall!() static entry to register the mock ns16550a
          * platform driver after OF population has created platform devices.
-         * PlatformBus.klist_drivers may be backed by Vec<BusDriverRef> in the
-         * current target, mirroring the earlier klist_devices compromise.
-         * ProbeDriver scans already published devices; ProbeDevice remains the
-         * symmetric path for devices added after drivers.
+         * PlatformBus.klist_drivers stores DeviceDriverRef membership entries.
+         * It may be backed by Vec<DeviceDriverRef> in the current target,
+         * mirroring the earlier klist_devices compromise. The Vec owns only
+         * copyable/stable refs, not driver objects. ProbeDriver scans already
+         * published devices; ProbeDevice remains the symmetric path for
+         * devices added after drivers.
          *
          * DeviceDriverType.of_match_table is a static descriptor field, not a
          * runtime setter. The concrete target must represent each registered
          * driver with a stable descriptor carrying name, bus binding,
          * of_match_table and probe function. The OF match table should lower
          * to a static compatible array analogous to Linux
-         * struct of_device_id[], and BusDriverRef/klist_drivers must reference
-         * that descriptor rather than acting as a closed enum of bus-specific
-         * special cases.
+         * struct of_device_id[], and DeviceDriverRef/klist_drivers must
+         * reference that descriptor rather than acting as a closed enum of
+         * bus-specific special cases. The referenced driver must be owned by
+         * static storage, pinned heap storage, or an arena/registry with stable
+         * handles; a plain Vec<PlatformDriver> is not valid if refs can point
+         * into elements that may move during growth.
          *
          * PlatformBus.match() must be the common matching boundary: it reads
          * driver.of_match_table and resolves device.dev.of_node through the
@@ -1605,12 +1612,14 @@ type ArceosExInitcallCodingMust {
          * platform bus implementation must not hard-code an ns16550a branch
          * as the only matching path.
          */
-        arceos_ex_must_bus_driver_ref_set_map_to_klist_like_storage();
+        arceos_ex_must_device_driver_ref_set_map_to_klist_like_storage();
         arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs();
         arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry();
         arceos_ex_must_device_driver_descriptor_carry_name_bus_of_match_and_probe();
         arceos_ex_must_of_match_table_lower_to_static_compatible_array();
-        arceos_ex_must_bus_driver_ref_reference_driver_descriptor_not_enum_special_case();
+        arceos_ex_must_device_driver_ref_reference_driver_descriptor_not_enum_special_case();
+        arceos_ex_must_device_driver_storage_keep_driver_refs_stable();
+        arceos_ex_must_platform_driver_storage_use_static_or_pinned_owner();
         arceos_ex_must_platform_bus_match_use_driver_of_match_table_and_device_node();
         arceos_ex_must_mock_ns16550a_probe_avoid_platform_bus_hardcoded_compatible_branch();
         arceos_ex_must_platform_bus_probe_driver_scan_existing_devices();

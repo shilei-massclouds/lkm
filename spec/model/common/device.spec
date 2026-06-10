@@ -37,6 +37,16 @@ predicate device_driver_bus_bound<T, B>(driver: T, bus: B) -> bool;
 predicate device_driver_of_match_table_bound<T, M>(driver: T, of_match_table: M) -> bool;
 predicate device_driver_registered<T>(driver: T) -> bool;
 predicate device_driver_register_return_zero<T>(driver: T) -> bool;
+predicate device_driver_storage_ready<T>(storage: T) -> bool;
+predicate device_driver_storage_pinned<T>(storage: T) -> bool;
+predicate device_driver_storage_contains_ref<T, R>(storage: T, driver_ref: R) -> bool;
+predicate device_driver_ref_targets<R, D>(driver_ref: R, driver: D) -> bool;
+predicate device_driver_ref_storage_bound<R, S>(driver_ref: R, storage: S) -> bool;
+predicate device_driver_ref_lifetime_stable<R>(driver_ref: R) -> bool;
+predicate device_driver_ref_ready<R>(driver_ref: R) -> bool;
+predicate device_driver_ref_set_ready<T>(driver_refs: T) -> bool;
+predicate device_driver_ref_set_contains<T, R>(driver_refs: T, driver_ref: R) -> bool;
+predicate device_driver_ref_set_nonempty<T>(driver_refs: T) -> bool;
 predicate of_match_table_ready<T>(of_match_table: T) -> bool;
 predicate of_match_table_contains<T, C>(of_match_table: T, compatible: C) -> bool;
 predicate platform_driver_extends_device_driver<T>(driver: T) -> bool;
@@ -154,6 +164,12 @@ type DeviceRefSet {
 type PlatformDeviceSet {
 }
 
+type DeviceDriverStorage {
+}
+
+type DeviceDriverRefSet {
+}
+
 type DeviceRef {
     processes {
         Action::BindDevice(device: DeviceType) {
@@ -176,6 +192,32 @@ type PlatformDeviceRef {
             ensures {
                 platform_device_ref_targets(self, platform_device);
                 platform_device_ref_ready(self);
+            }
+        }
+    }
+}
+
+/*
+ * DeviceDriverRef is the bus-visible reference to a concrete
+ * DeviceDriverType/PlatformDriverType instance. It does not own the driver;
+ * a separate stable storage object keeps the target alive while bus
+ * klist_drivers records membership.
+ */
+type DeviceDriverRef {
+    processes {
+        Action::BindDriver(driver: DeviceDriverType, storage: DeviceDriverStorage) {
+            state_effect: StateEffect::None;
+            depends_on {
+                device_driver_core_storage_bound(driver);
+                device_driver_storage_ready(storage);
+                device_driver_storage_pinned(storage);
+                device_driver_storage_contains_ref(storage, self);
+            }
+            ensures {
+                device_driver_ref_targets(self, driver);
+                device_driver_ref_storage_bound(self, storage);
+                device_driver_ref_lifetime_stable(self);
+                device_driver_ref_ready(self);
             }
         }
     }

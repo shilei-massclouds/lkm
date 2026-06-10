@@ -178,7 +178,7 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
                     device_ref_set_ready(PlatformBusSubsysPrivate.klist_devices);
                     bus_subsys_klist_drivers_ready(PlatformBusSubsysPrivate);
                     bus_subsys_driver_ref_set_bound(PlatformBusSubsysPrivate, PlatformBusSubsysPrivate.klist_drivers);
-                    bus_driver_ref_set_ready(PlatformBusSubsysPrivate.klist_drivers);
+                    device_driver_ref_set_ready(PlatformBusSubsysPrivate.klist_drivers);
                     bus_subsys_probe_files_ready(PlatformBusSubsysPrivate);
                     bus_subsys_groups_ready(PlatformBusSubsysPrivate);
                 }
@@ -205,7 +205,7 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
             device_ref_set_ready(PlatformBusSubsysPrivate.klist_devices);
             bus_subsys_klist_drivers_ready(PlatformBusSubsysPrivate);
             bus_subsys_driver_ref_set_bound(PlatformBusSubsysPrivate, PlatformBusSubsysPrivate.klist_drivers);
-            bus_driver_ref_set_ready(PlatformBusSubsysPrivate.klist_drivers);
+            device_driver_ref_set_ready(PlatformBusSubsysPrivate.klist_drivers);
             bus_subsys_probe_files_ready(PlatformBusSubsysPrivate);
             bus_subsys_groups_ready(PlatformBusSubsysPrivate);
         }
@@ -336,6 +336,45 @@ object PlatformBus: PlatformBusType {
 }
 
 /*
+ * MockNs16550aPlatformDriverStorage is the stable owner for the mock platform
+ * driver descriptor/runtime instance. Bus klist_drivers stores only
+ * DeviceDriverRef membership entries; this storage keeps the target alive.
+ */
+object MockNs16550aPlatformDriverStorage: DeviceDriverStorage {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    StaticObjects.state == State::Online;
+                }
+
+                ensures {
+                    device_driver_storage_ready(MockNs16550aPlatformDriverStorage);
+                    device_driver_storage_pinned(MockNs16550aPlatformDriverStorage);
+                    device_driver_storage_contains_ref(
+                        MockNs16550aPlatformDriverStorage,
+                        DeviceDriverRef::MockNs16550aPlatformDriver
+                    );
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            device_driver_storage_ready(MockNs16550aPlatformDriverStorage);
+            device_driver_storage_pinned(MockNs16550aPlatformDriverStorage);
+            device_driver_storage_contains_ref(
+                MockNs16550aPlatformDriverStorage,
+                DeviceDriverRef::MockNs16550aPlatformDriver
+            );
+        }
+    }
+}
+
+/*
  * MockNs16550aPlatformDriver 是当前用于打通 platform bus probe 闭环的
  * 临时 platform_driver。Preset 只声明 device_initcall entry 和静态
  * OF match table；真正的 register/probe/bind side effect 由
@@ -349,6 +388,7 @@ object MockNs16550aPlatformDriver: PlatformDriverType {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     StaticObjects.state == State::Online;
+                    MockNs16550aPlatformDriverStorage.state == State::Ready;
                 }
 
                 drives {
@@ -365,6 +405,13 @@ object MockNs16550aPlatformDriver: PlatformDriverType {
                     of_match_table_ready(MockNs16550aPlatformDriver.of_match_table);
                     of_match_table_contains(MockNs16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
                     platform_driver_extends_device_driver(MockNs16550aPlatformDriver);
+                    device_driver_ref_targets(DeviceDriverRef::MockNs16550aPlatformDriver, MockNs16550aPlatformDriver);
+                    device_driver_ref_storage_bound(
+                        DeviceDriverRef::MockNs16550aPlatformDriver,
+                        MockNs16550aPlatformDriverStorage
+                    );
+                    device_driver_ref_lifetime_stable(DeviceDriverRef::MockNs16550aPlatformDriver);
+                    device_driver_ref_ready(DeviceDriverRef::MockNs16550aPlatformDriver);
                     initcall_entry_declared(InitcallEntry::MockNs16550aPlatformDriver);
                     initcall_entry_has_prototype(InitcallEntry::MockNs16550aPlatformDriver, InitcallEntryPrototype);
                     initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
@@ -387,6 +434,13 @@ object MockNs16550aPlatformDriver: PlatformDriverType {
             of_match_table_ready(MockNs16550aPlatformDriver.of_match_table);
             of_match_table_contains(MockNs16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
             platform_driver_extends_device_driver(MockNs16550aPlatformDriver);
+            device_driver_ref_targets(DeviceDriverRef::MockNs16550aPlatformDriver, MockNs16550aPlatformDriver);
+            device_driver_ref_storage_bound(
+                DeviceDriverRef::MockNs16550aPlatformDriver,
+                MockNs16550aPlatformDriverStorage
+            );
+            device_driver_ref_lifetime_stable(DeviceDriverRef::MockNs16550aPlatformDriver);
+            device_driver_ref_ready(DeviceDriverRef::MockNs16550aPlatformDriver);
             initcall_entry_declared(InitcallEntry::MockNs16550aPlatformDriver);
             initcall_entry_has_prototype(InitcallEntry::MockNs16550aPlatformDriver, InitcallEntryPrototype);
             initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
@@ -437,6 +491,13 @@ object MockNs16550aPlatformDriver: PlatformDriverType {
             device_driver_of_match_table_bound(MockNs16550aPlatformDriver, MockNs16550aPlatformDriver.of_match_table);
             of_match_table_ready(MockNs16550aPlatformDriver.of_match_table);
             of_match_table_contains(MockNs16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
+            device_driver_ref_targets(DeviceDriverRef::MockNs16550aPlatformDriver, MockNs16550aPlatformDriver);
+            device_driver_ref_storage_bound(
+                DeviceDriverRef::MockNs16550aPlatformDriver,
+                MockNs16550aPlatformDriverStorage
+            );
+            device_driver_ref_lifetime_stable(DeviceDriverRef::MockNs16550aPlatformDriver);
+            device_driver_ref_ready(DeviceDriverRef::MockNs16550aPlatformDriver);
             platform_driver_matches_device_node(MockNs16550aPlatformDriver, DeviceNodeRef::Ns16550aSerial);
             platform_driver_probe_called(MockNs16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             platform_driver_probe_return_zero(MockNs16550aPlatformDriver, DeviceRef::Ns16550aSerial);
@@ -659,7 +720,7 @@ object InitcallTable: InitcallTableType {
                     platform_bus_mock_ns16550a_driver_probe_return_zero(PlatformBus);
                     platform_bus_mock_ns16550a_device_bound(PlatformBus);
                     bus_type_drivers_klist_nonempty(PlatformBus);
-                    bus_driver_ref_set_nonempty(PlatformBusSubsysPrivate.klist_drivers);
+                    device_driver_ref_set_nonempty(PlatformBusSubsysPrivate.klist_drivers);
                 }
             }
         }
@@ -719,7 +780,7 @@ object InitcallTable: InitcallTableType {
             platform_bus_mock_ns16550a_driver_probe_return_zero(PlatformBus);
             platform_bus_mock_ns16550a_device_bound(PlatformBus);
             bus_type_drivers_klist_nonempty(PlatformBus);
-            bus_driver_ref_set_nonempty(PlatformBusSubsysPrivate.klist_drivers);
+            device_driver_ref_set_nonempty(PlatformBusSubsysPrivate.klist_drivers);
         }
     }
 }
@@ -788,6 +849,7 @@ object InitcallPhase: PhaseObject {
                     PlatformBus.Event::Setup;
                     DriverCoreDeferred.Event::Setup;
                     IrqProcViewDeferred.Event::Setup;
+                    MockNs16550aPlatformDriverStorage.Event::Setup;
                     MockNs16550aPlatformDriver.Event::Preset;
                     CtorTable.Event::Setup;
                     InitcallTable.Event::Preset;
