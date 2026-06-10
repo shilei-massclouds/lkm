@@ -34,12 +34,13 @@ predicate device_core_probe_succeeded<T, D>(device: T, driver: D) -> bool;
 predicate device_driver_core_storage_bound<T>(driver: T) -> bool;
 predicate device_driver_name_bound<T>(driver: T) -> bool;
 predicate device_driver_bus_bound<T, B>(driver: T, bus: B) -> bool;
+predicate device_driver_of_match_table_bound<T, M>(driver: T, of_match_table: M) -> bool;
 predicate device_driver_registered<T>(driver: T) -> bool;
 predicate device_driver_register_return_zero<T>(driver: T) -> bool;
+predicate of_match_table_ready<T>(of_match_table: T) -> bool;
+predicate of_match_table_contains<T, C>(of_match_table: T, compatible: C) -> bool;
 predicate platform_driver_extends_device_driver<T>(driver: T) -> bool;
 predicate platform_driver_platform_bus_bound<T, B>(driver: T, bus: B) -> bool;
-predicate platform_driver_of_match_table_ready<T>(driver: T) -> bool;
-predicate platform_driver_of_match_table_contains<T, C>(driver: T, compatible: C) -> bool;
 predicate platform_driver_matches_device_node<T, N>(driver: T, node_ref: N) -> bool;
 predicate platform_driver_probe_called<T, D>(driver: T, device: D) -> bool;
 predicate platform_driver_probe_return_zero<T, D>(driver: T, device: D) -> bool;
@@ -73,6 +74,9 @@ type DeviceNodeId {
 }
 
 type CompatibleString {
+}
+
+type OfMatchTable {
 }
 
 /*
@@ -179,10 +183,14 @@ type PlatformDeviceRef {
 
 /*
  * DeviceDriverType models Linux struct device_driver. It captures the common
- * driver-core registration boundary: a driver has storage/name, is associated
- * with one bus, and is published through driver_register()/bus_add_driver().
+ * driver-core descriptor and registration boundary: a driver has
+ * storage/name, may statically bind an OF match table descriptor, is
+ * associated with one bus, and is published through
+ * driver_register()/bus_add_driver().
  */
 type DeviceDriverType {
+    of_match_table: OfMatchTable;
+
     processes {
         Action::Register(bus: ResourceObject) {
             state_effect: StateEffect::None;
@@ -202,8 +210,10 @@ type DeviceDriverType {
 
 /*
  * PlatformDriverType models Linux struct platform_driver: it embeds the
- * generic device-driver behavior, binds to platform_bus_type, carries an OF
- * match table, and probes a matching PlatformDevice through its core DeviceRef.
+ * generic device-driver behavior, binds to platform_bus_type, and probes a
+ * matching PlatformDevice through its core DeviceRef. OF matching uses the
+ * embedded DeviceDriverType.of_match_table descriptor; it is not a platform
+ * driver runtime action.
  */
 type PlatformDriverType: DeviceDriverType {
     processes {
@@ -219,20 +229,13 @@ type PlatformDriverType: DeviceDriverType {
             }
         }
 
-        Action::SetOfMatchTable(compatible: CompatibleString) {
-            state_effect: StateEffect::None;
-            ensures {
-                platform_driver_of_match_table_ready(self);
-                platform_driver_of_match_table_contains(self, compatible);
-            }
-        }
-
         Action::Probe(device: DeviceRef) {
             state_effect: StateEffect::None;
             depends_on {
                 device_ref_ready(device);
                 platform_driver_extends_device_driver(self);
-                platform_driver_of_match_table_ready(self);
+                device_driver_of_match_table_bound(self, self.of_match_table);
+                of_match_table_ready(self.of_match_table);
             }
             ensures {
                 platform_driver_probe_called(self, device);

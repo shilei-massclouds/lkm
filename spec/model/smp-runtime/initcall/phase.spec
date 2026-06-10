@@ -361,9 +361,10 @@ object MockNs16550aPlatformDriver: PlatformDriverType {
                 ensures {
                     device_driver_core_storage_bound(MockNs16550aPlatformDriver);
                     device_driver_name_bound(MockNs16550aPlatformDriver);
+                    device_driver_of_match_table_bound(MockNs16550aPlatformDriver, MockNs16550aPlatformDriver.of_match_table);
+                    of_match_table_ready(MockNs16550aPlatformDriver.of_match_table);
+                    of_match_table_contains(MockNs16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
                     platform_driver_extends_device_driver(MockNs16550aPlatformDriver);
-                    platform_driver_of_match_table_ready(MockNs16550aPlatformDriver);
-                    platform_driver_of_match_table_contains(MockNs16550aPlatformDriver, CompatibleString::Ns16550a);
                     initcall_entry_declared(InitcallEntry::MockNs16550aPlatformDriver);
                     initcall_entry_has_prototype(InitcallEntry::MockNs16550aPlatformDriver, InitcallEntryPrototype);
                     initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
@@ -382,9 +383,10 @@ object MockNs16550aPlatformDriver: PlatformDriverType {
         invariant {
             device_driver_core_storage_bound(MockNs16550aPlatformDriver);
             device_driver_name_bound(MockNs16550aPlatformDriver);
+            device_driver_of_match_table_bound(MockNs16550aPlatformDriver, MockNs16550aPlatformDriver.of_match_table);
+            of_match_table_ready(MockNs16550aPlatformDriver.of_match_table);
+            of_match_table_contains(MockNs16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
             platform_driver_extends_device_driver(MockNs16550aPlatformDriver);
-            platform_driver_of_match_table_ready(MockNs16550aPlatformDriver);
-            platform_driver_of_match_table_contains(MockNs16550aPlatformDriver, CompatibleString::Ns16550a);
             initcall_entry_declared(InitcallEntry::MockNs16550aPlatformDriver);
             initcall_entry_has_prototype(InitcallEntry::MockNs16550aPlatformDriver, InitcallEntryPrototype);
             initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
@@ -432,8 +434,9 @@ object MockNs16550aPlatformDriver: PlatformDriverType {
             device_driver_register_return_zero(MockNs16550aPlatformDriver);
             platform_driver_extends_device_driver(MockNs16550aPlatformDriver);
             platform_driver_platform_bus_bound(MockNs16550aPlatformDriver, PlatformBus);
-            platform_driver_of_match_table_ready(MockNs16550aPlatformDriver);
-            platform_driver_of_match_table_contains(MockNs16550aPlatformDriver, CompatibleString::Ns16550a);
+            device_driver_of_match_table_bound(MockNs16550aPlatformDriver, MockNs16550aPlatformDriver.of_match_table);
+            of_match_table_ready(MockNs16550aPlatformDriver.of_match_table);
+            of_match_table_contains(MockNs16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
             platform_driver_matches_device_node(MockNs16550aPlatformDriver, DeviceNodeRef::Ns16550aSerial);
             platform_driver_probe_called(MockNs16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             platform_driver_probe_return_zero(MockNs16550aPlatformDriver, DeviceRef::Ns16550aSerial);
