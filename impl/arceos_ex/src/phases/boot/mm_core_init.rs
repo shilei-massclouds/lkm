@@ -25,8 +25,11 @@ pub fn setup(ctx: &mut Context) -> ! {
 fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.memory_topology
         .setup(&ctx.zones, &ctx.cpu_group, &ctx.config)?;
+    ctx.page_metadata_map
+        .setup(&mut ctx.memblock, &ctx.zones, &ctx.vm, &ctx.config)?;
     ctx.page_allocator.preset(
         &ctx.memory_topology,
+        &ctx.page_metadata_map,
         &ctx.cpu_hotplug_state,
         &ctx.per_cpu_storage,
     )?;
@@ -98,8 +101,13 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.memory_topology.boot_memory_node().node_id() == 0
         && ctx.memory_topology.boot_memory_node().present_pages() != 0
         && ctx.memory_topology.boot_zone_set().state() == State::Ready
+        && ctx.page_metadata_map.state() == State::Ready
+        && ctx.page_metadata_map.metadata_count() != 0
+        && ctx.page_metadata_map.metadata_bytes() != 0
+        && ctx.page_metadata_map.metadata_storage_size() >= ctx.page_metadata_map.metadata_bytes()
         && ctx.page_allocator.state() == State::Ready
         && ctx.page_allocator.boot_zonelist_set().state() == State::Ready
+        && ctx.page_allocator.page_metadata_map_bound()
         && ctx.memory_debug_hardening.state() == State::Ready
         && !ctx.memory_debug_hardening.init_on_alloc()
         && !ctx.memory_debug_hardening.init_on_free()

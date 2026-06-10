@@ -41,8 +41,8 @@ use crate::objects::{
     maple_tree::MapleTree,
     memblock::MemBlock,
     mm_core::{
-        MemoryDebugHardening, MemoryTopology, MmStructCache, PageAllocator, PageTableCaches,
-        SlubAllocator, StackDepot, Swiotlb, VmallocAllocator,
+        MemoryDebugHardening, MemoryTopology, MmStructCache, PageAllocator, PageMetadataMap,
+        PageTableCaches, SlubAllocator, StackDepot, Swiotlb, VmallocAllocator,
     },
     params::Params,
     payload_param::PayloadParam,
@@ -130,6 +130,7 @@ pub struct Context {
     pub exception_table: ExceptionTable,
 
     pub memory_topology: MemoryTopology,
+    pub page_metadata_map: PageMetadataMap,
     pub page_allocator: PageAllocator,
     pub memory_debug_hardening: MemoryDebugHardening,
     pub stack_depot: StackDepot,
@@ -266,6 +267,7 @@ impl Context {
             randomness: Randomness::new(),
             exception_table: ExceptionTable::new(),
             memory_topology: MemoryTopology::new(),
+            page_metadata_map: PageMetadataMap::new(),
             page_allocator: PageAllocator::new(),
             memory_debug_hardening: MemoryDebugHardening::new(),
             stack_depot: StackDepot::new(),

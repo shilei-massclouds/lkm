@@ -89,6 +89,8 @@ type PageRef {
 predicate page_metadata_map_ready<T, Z>(metadata_map: T, zones: Z) -> bool;
 predicate page_metadata_map_covers_managed_pfns<T, Z>(metadata_map: T, zones: Z) -> bool;
 predicate page_metadata_map_uses_mem_map_or_vmemmap<T>(metadata_map: T) -> bool;
+predicate page_metadata_map_storage_allocated_from_memblock<T, M>(metadata_map: T, memblock: M) -> bool;
+predicate page_metadata_map_indexed_by_pfn<T>(metadata_map: T) -> bool;
 predicate page_metadata_map_item_ready<T>(page_metadata: T) -> bool;
 predicate page_metadata_map_item_in_map<T, M>(page_metadata: T, metadata_map: M) -> bool;
 predicate page_metadata_map_item_pfn_bound<T, P>(page_metadata: T, pfn: P) -> bool;

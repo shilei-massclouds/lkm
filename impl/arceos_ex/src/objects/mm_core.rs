@@ -354,9 +354,358 @@ impl BootZonelistSet {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct Pfn {
+    value: usize,
+}
+
+impl Pfn {
+    pub const fn new(value: usize) -> Self {
+        Self { value }
+    }
+
+    pub const fn value(self) -> usize {
+        self.value
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct PhysPageAddr {
+    addr: usize,
+}
+
+impl PhysPageAddr {
+    pub const fn new(addr: usize) -> Self {
+        Self { addr }
+    }
+
+    pub const fn value(self) -> usize {
+        self.addr
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct LinearMappedPageAddr {
+    addr: usize,
+}
+
+impl LinearMappedPageAddr {
+    pub const fn new(addr: usize) -> Self {
+        Self { addr }
+    }
+
+    pub const fn value(self) -> usize {
+        self.addr
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct PageRef {
+    pfn: Pfn,
+    metadata_index: usize,
+    metadata_linear: usize,
+    phys: PhysPageAddr,
+    linear: LinearMappedPageAddr,
+}
+
+impl PageRef {
+    pub const fn pfn(self) -> Pfn {
+        self.pfn
+    }
+
+    pub const fn metadata_index(self) -> usize {
+        self.metadata_index
+    }
+
+    pub const fn metadata_linear(self) -> usize {
+        self.metadata_linear
+    }
+
+    pub const fn phys(self) -> PhysPageAddr {
+        self.phys
+    }
+
+    pub const fn linear(self) -> LinearMappedPageAddr {
+        self.linear
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PageMetadata {
+    pfn: usize,
+    flags: usize,
+    refcount: usize,
+}
+
+impl PageMetadata {
+    const fn new(pfn: usize) -> Self {
+        Self {
+            pfn,
+            flags: 0,
+            refcount: 0,
+        }
+    }
+
+    pub const fn pfn(self) -> Pfn {
+        Pfn::new(self.pfn)
+    }
+}
+
+pub struct PageMetadataMap {
+    lifecycle: Lifecycle,
+    start_pfn: usize,
+    end_pfn: usize,
+    page_size: usize,
+    metadata_bytes: usize,
+    metadata_storage_size: usize,
+    metadata_storage: PhysRange,
+    metadata_storage_linear: usize,
+    linear_map_virt_start: usize,
+    metadata_count: usize,
+}
+
+impl PageMetadataMap {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            start_pfn: 0,
+            end_pfn: 0,
+            page_size: 0,
+            metadata_bytes: 0,
+            metadata_storage_size: 0,
+            metadata_storage: PhysRange::empty(),
+            metadata_storage_linear: 0,
+            linear_map_virt_start: 0,
+            metadata_count: 0,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn start_pfn(&self) -> Pfn {
+        Pfn::new(self.start_pfn)
+    }
+
+    pub const fn end_pfn(&self) -> Pfn {
+        Pfn::new(self.end_pfn)
+    }
+
+    pub const fn page_size(&self) -> usize {
+        self.page_size
+    }
+
+    pub const fn metadata_count(&self) -> usize {
+        self.metadata_count
+    }
+
+    pub const fn metadata_bytes(&self) -> usize {
+        self.metadata_bytes
+    }
+
+    pub const fn metadata_storage_size(&self) -> usize {
+        self.metadata_storage_size
+    }
+
+    pub const fn metadata_storage(&self) -> PhysRange {
+        self.metadata_storage
+    }
+
+    pub const fn metadata_storage_linear(&self) -> usize {
+        self.metadata_storage_linear
+    }
+
+    pub fn setup(
+        &mut self,
+        memblock: &mut MemBlock,
+        zones: &Zones,
+        vm: &Vm,
+        config: &Config,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || memblock.state() != State::Online
+            || zones.state() != State::Ready
+            || !vm.entry_successor_ready()
+            || config.state() != State::Online
+            || config.page_size() == 0
+            || !config.page_size().is_power_of_two()
+        {
+            return self.failed_setup();
+        }
+
+        let Some((start, end)) = zone_phys_bounds(zones) else {
+            return self.failed_setup();
+        };
+        if start >= end
+            || !start.is_multiple_of(config.page_size())
+            || !end.is_multiple_of(config.page_size())
+        {
+            return self.failed_setup();
+        }
+
+        let Some(start_pfn) = phys_to_pfn_value(start, config.page_size()) else {
+            return self.failed_setup();
+        };
+        let Some(end_pfn) = phys_to_pfn_value(end, config.page_size()) else {
+            return self.failed_setup();
+        };
+        let Some(metadata_count) = end_pfn.checked_sub(start_pfn) else {
+            return self.failed_setup();
+        };
+        if metadata_count == 0 {
+            return self.failed_setup();
+        }
+        let Some(metadata_bytes) = metadata_count.checked_mul(core::mem::size_of::<PageMetadata>())
+        else {
+            return self.failed_setup();
+        };
+        let Some(metadata_storage_size) = round_up_value(metadata_bytes, config.page_size()) else {
+            return self.failed_setup();
+        };
+        let Some(storage) = memblock.alloc_phys(metadata_storage_size, config.page_size()) else {
+            return self.failed_setup();
+        };
+        let Some(metadata_storage_linear) = config.phys_to_linear(storage.start()) else {
+            return self.failed_setup();
+        };
+        let Some(storage_end) = storage.start().checked_add(metadata_storage_size) else {
+            return self.failed_setup();
+        };
+        if storage.end() != storage_end || !storage.start().is_multiple_of(config.page_size()) {
+            return self.failed_setup();
+        }
+
+        self.start_pfn = start_pfn;
+        self.end_pfn = end_pfn;
+        self.page_size = config.page_size();
+        self.metadata_bytes = metadata_bytes;
+        self.metadata_storage_size = metadata_storage_size;
+        self.metadata_storage = storage;
+        self.metadata_storage_linear = metadata_storage_linear;
+        self.linear_map_virt_start = config.linear_map_virt_start();
+        self.metadata_count = metadata_count;
+        if !self.initialize_metadata() {
+            return self.failed_setup();
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::PageMetadataMapReady,
+        )
+    }
+
+    pub fn contains_pfn(&self, pfn: Pfn) -> bool {
+        self.lifecycle.state() == State::Ready
+            && pfn.value() >= self.start_pfn
+            && pfn.value() < self.end_pfn
+    }
+
+    pub fn pfn_to_page(&self, pfn: Pfn) -> Option<PageRef> {
+        if !self.contains_pfn(pfn) {
+            return None;
+        }
+        self.page_ref_from_pfn(pfn.value())
+    }
+
+    pub fn phys_to_page(&self, phys: PhysPageAddr) -> Option<PageRef> {
+        if self.lifecycle.state() != State::Ready || self.page_size == 0 {
+            return None;
+        }
+        if phys.value() % self.page_size != 0 {
+            return None;
+        }
+        let pfn = phys_to_pfn_value(phys.value(), self.page_size)?;
+        self.pfn_to_page(Pfn::new(pfn))
+    }
+
+    pub fn virt_to_page(&self, linear: LinearMappedPageAddr) -> Option<PageRef> {
+        if self.lifecycle.state() != State::Ready {
+            return None;
+        }
+        let phys = linear.value().checked_sub(self.linear_map_virt_start)?;
+        self.phys_to_page(PhysPageAddr::new(phys))
+    }
+
+    pub fn page_to_pfn(&self, page: PageRef) -> Option<Pfn> {
+        self.validate_page(page).then_some(page.pfn())
+    }
+
+    pub fn page_to_phys(&self, page: PageRef) -> Option<PhysPageAddr> {
+        self.validate_page(page).then_some(page.phys())
+    }
+
+    pub fn page_to_virt(&self, page: PageRef) -> Option<LinearMappedPageAddr> {
+        self.validate_page(page).then_some(page.linear())
+    }
+
+    pub fn page_address(&self, page: PageRef) -> Option<usize> {
+        self.page_to_virt(page).map(|addr| addr.value())
+    }
+
+    pub fn page_metadata_pfn(&self, page: PageRef) -> Option<Pfn> {
+        if !self.validate_page(page) {
+            return None;
+        }
+        let metadata = unsafe { (page.metadata_linear() as *const PageMetadata).read() };
+        Some(metadata.pfn())
+    }
+
+    fn page_ref_from_pfn(&self, pfn: usize) -> Option<PageRef> {
+        let metadata_index = pfn.checked_sub(self.start_pfn)?;
+        let metadata_offset = metadata_index.checked_mul(core::mem::size_of::<PageMetadata>())?;
+        let metadata_linear = self.metadata_storage_linear.checked_add(metadata_offset)?;
+        let phys = pfn.checked_mul(self.page_size)?;
+        let linear = phys.checked_add(self.linear_map_virt_start)?;
+        Some(PageRef {
+            pfn: Pfn::new(pfn),
+            metadata_index,
+            metadata_linear,
+            phys: PhysPageAddr::new(phys),
+            linear: LinearMappedPageAddr::new(linear),
+        })
+    }
+
+    fn initialize_metadata(&self) -> bool {
+        if self.metadata_storage_linear == 0 || self.metadata_count == 0 {
+            return false;
+        }
+
+        let base = self.metadata_storage_linear as *mut PageMetadata;
+        let mut index = 0usize;
+        while index < self.metadata_count {
+            let Some(pfn) = self.start_pfn.checked_add(index) else {
+                return false;
+            };
+            unsafe {
+                base.add(index).write(PageMetadata::new(pfn));
+            }
+            index += 1;
+        }
+        true
+    }
+
+    fn validate_page(&self, page: PageRef) -> bool {
+        self.pfn_to_page(page.pfn()) == Some(page)
+    }
+
+    fn failed_setup(&self) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Base,
+            State::Ready,
+        )
+    }
+}
+
 pub struct PageAllocator {
     lifecycle: Lifecycle,
     boot_zonelist_set: BootZonelistSet,
+    page_metadata_map_bound: bool,
     cpuhp_step_registered: bool,
     boot_pageset_checkpoint_ready: bool,
     handoff_complete: bool,
@@ -380,6 +729,7 @@ impl PageAllocator {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             boot_zonelist_set: BootZonelistSet::new(),
+            page_metadata_map_bound: false,
             cpuhp_step_registered: false,
             boot_pageset_checkpoint_ready: false,
             handoff_complete: false,
@@ -405,6 +755,10 @@ impl PageAllocator {
 
     pub const fn boot_zonelist_set(&self) -> &BootZonelistSet {
         &self.boot_zonelist_set
+    }
+
+    pub const fn page_metadata_map_bound(&self) -> bool {
+        self.page_metadata_map_bound
     }
 
     pub const fn cpuhp_step_registered(&self) -> bool {
@@ -487,12 +841,15 @@ impl PageAllocator {
     pub fn preset(
         &mut self,
         topology: &MemoryTopology,
+        page_metadata_map: &PageMetadataMap,
         cpu_hotplug_state: &CpuHotplugState,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || topology.state() != State::Ready
             || topology.boot_zone_set().state() != State::Ready
+            || page_metadata_map.state() != State::Ready
+            || page_metadata_map.metadata_count() == 0
             || cpu_hotplug_state.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
         {
@@ -505,6 +862,7 @@ impl PageAllocator {
         }
 
         self.boot_zonelist_set.setup(topology)?;
+        self.page_metadata_map_bound = true;
         self.cpuhp_step_registered = PAGE_ALLOC_CPUHP_STEP != 0;
         self.boot_pageset_checkpoint_ready = true;
 
@@ -1678,6 +2036,28 @@ fn build_zone_facts(zones: &Zones, config: &Config) -> Option<ZoneFacts> {
     })
 }
 
+fn zone_phys_bounds(zones: &Zones) -> Option<(usize, usize)> {
+    let mut start = usize::MAX;
+    let mut end = 0usize;
+    let mut found = false;
+
+    for kind in [ZoneKind::Dma32, ZoneKind::Normal, ZoneKind::Movable] {
+        let zone = zones.zone(kind)?;
+        if zone.is_empty() {
+            continue;
+        }
+        let range = zone.range();
+        if range.start() >= range.end() {
+            return None;
+        }
+        start = start.min(range.start());
+        end = end.max(range.end());
+        found = true;
+    }
+
+    found.then_some((start, end))
+}
+
 fn zone_present_pages(zones: &Zones, page_size: usize) -> Option<usize> {
     let mut total = 0usize;
     for kind in [ZoneKind::Dma32, ZoneKind::Normal, ZoneKind::Movable] {
@@ -1692,6 +2072,21 @@ fn bytes_to_pages(bytes: usize, page_size: usize) -> Option<usize> {
         return None;
     }
     Some(bytes / page_size)
+}
+
+fn phys_to_pfn_value(phys: usize, page_size: usize) -> Option<usize> {
+    if page_size == 0 || !page_size.is_power_of_two() || !phys.is_multiple_of(page_size) {
+        return None;
+    }
+    Some(phys / page_size)
+}
+
+fn round_up_value(value: usize, align: usize) -> Option<usize> {
+    if align == 0 || !align.is_power_of_two() {
+        return None;
+    }
+    let mask = align - 1;
+    value.checked_add(mask).map(|sum| sum & !mask)
 }
 
 fn round_up(value: usize, align: usize) -> Option<usize> {

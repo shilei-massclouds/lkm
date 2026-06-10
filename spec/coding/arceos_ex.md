@@ -778,6 +778,12 @@ buddy pages，并且必须可通过已经建立的线性映射进行受限读写
 `page_to_virt(page_ref)`/`page_address(page_ref)`。这些转换必须检查或依赖 PFN 有效、地址页对齐、地址属于已建立 direct map
 或 vmemmap 覆盖范围；不得把任意整数地址直接伪造成 `PageRef`。
 
+当前 `arceos_ex` 实现采用 flat `mem_map` 形式：`PageMetadataMap.setup()` 在 `MemBlock.Online` 且
+`SwapperVm.Online` 后，通过 `memblock.alloc_phys()` 分配一段页对齐的连续 metadata storage，并把它表示为以 PFN
+为索引的 `PageMetadata` 数组。`PageRef` 必须绑定到 `mem_map[pfn - start_pfn]` 对应 slot；PFN、物理页地址和 direct-map
+线性地址只是从该 slot 的 PFN 关系派生出的转换结果。将来若切换到 sparse/vmemmap，只能替换 metadata storage 布局，
+不得改变 `PageRef` 指向 page metadata 项这一契约。
+
 `VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址资源管理，不是页表映射器。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END` 页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、`VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、建立 free vmap space。
 
 `MmStructCache.setup()` 只建立 `"mm_struct"` cache。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。

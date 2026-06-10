@@ -155,6 +155,7 @@ object PageMetadataMap: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
+                    MemBlock.state == State::Online;
                     Zones.state == State::Ready;
                     SwapperVm.state == State::Online;
                 }
@@ -163,6 +164,8 @@ object PageMetadataMap: MemoryObject {
                     page_metadata_map_ready(PageMetadataMap, Zones);
                     page_metadata_map_covers_managed_pfns(PageMetadataMap, Zones);
                     page_metadata_map_uses_mem_map_or_vmemmap(PageMetadataMap);
+                    page_metadata_map_storage_allocated_from_memblock(PageMetadataMap, MemBlock);
+                    page_metadata_map_indexed_by_pfn(PageMetadataMap);
                 }
             }
         }
@@ -173,6 +176,8 @@ object PageMetadataMap: MemoryObject {
             page_metadata_map_ready(PageMetadataMap, Zones);
             page_metadata_map_covers_managed_pfns(PageMetadataMap, Zones);
             page_metadata_map_uses_mem_map_or_vmemmap(PageMetadataMap);
+            page_metadata_map_storage_allocated_from_memblock(PageMetadataMap, MemBlock);
+            page_metadata_map_indexed_by_pfn(PageMetadataMap);
         }
     }
 }
