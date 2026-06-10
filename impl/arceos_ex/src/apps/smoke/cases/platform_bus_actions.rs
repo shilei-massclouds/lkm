@@ -15,6 +15,7 @@ pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
     suite.scenario(&mut AddDeviceProbeDriverScenario::new());
     suite.scenario(&mut AddDriverProbeDeviceScenario::new());
+    suite.scenario(&mut Ns16550aProbeDeviceScenario::new());
     suite.result()
 }
 
@@ -104,7 +105,7 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
             "probe driver deferred",
             self.fixture
                 .bus
-                .probe_driver(BusDriverRef::MockPlatformDriver),
+                .probe_driver(BusDriverRef::MockPlatformDriver, &context_ref().device_tree),
         );
         assertions.assert(
             "probe driver scanned devices",
@@ -143,7 +144,9 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert_fail(
             "probe device before setup",
-            self.fixture.bus.probe_device(DeviceRef::new(usize::MAX)),
+            self.fixture
+                .bus
+                .probe_device(DeviceRef::new(usize::MAX), &context_ref().device_tree),
         );
         self.fixture.setup_ready(assertions);
     }
@@ -174,7 +177,9 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
         };
         assertions.assert_ok(
             "probe device deferred",
-            self.fixture.bus.probe_device(device_ref),
+            self.fixture
+                .bus
+                .probe_device(device_ref, &context_ref().device_tree),
         );
         assertions.assert(
             "probe device scanned drivers",
@@ -191,4 +196,98 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+struct Ns16550aProbeDeviceScenario {
+    fixture: PlatformBusActionsFixture,
+}
+
+impl Ns16550aProbeDeviceScenario {
+    fn new() -> Self {
+        Self {
+            fixture: PlatformBusActionsFixture::new(),
+        }
+    }
+}
+
+impl SmokeScenario for Ns16550aProbeDeviceScenario {
+    fn name(&self) -> &'static str {
+        "platform_bus_actions.ns16550a_probe_device"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.fixture.setup_ready(assertions);
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        let ctx = context_ref();
+        assertions.assert_ok(
+            "add ns16550a driver",
+            self.fixture
+                .bus
+                .add_driver(BusDriverRef::MockNs16550aPlatformDriver),
+        );
+
+        let Some(serial) = find_ns16550a_node(&ctx.device_tree) else {
+            assertions.assert("ns16550a node available", false);
+            return;
+        };
+        let result = self
+            .fixture
+            .bus
+            .add_smoke_platform_device(&ctx.device_tree, serial.id());
+        assertions.assert("add ns16550a platform device", result.is_ok());
+        let Some(device_ref) = result.ok() else {
+            return;
+        };
+
+        assertions.assert_ok(
+            "probe ns16550a device",
+            self.fixture.bus.probe_device(device_ref, &ctx.device_tree),
+        );
+        assertions.assert(
+            "probe device scanned registered drivers",
+            self.fixture.bus.probe_device_scanned_drivers(),
+        );
+        assertions.assert(
+            "ns16550a device matched",
+            self.fixture.bus.mock_ns16550a_device_matched(),
+        );
+        assertions.assert(
+            "ns16550a probe called",
+            self.fixture.bus.mock_ns16550a_probe_called(),
+        );
+        assertions.assert(
+            "ns16550a probe return zero",
+            self.fixture.bus.mock_ns16550a_probe_return_zero(),
+        );
+        assertions.assert(
+            "ns16550a device bound",
+            self.fixture.bus.mock_ns16550a_bound_device() == Some(device_ref),
+        );
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+fn find_ns16550a_node(
+    device_tree: &crate::objects::device_tree::DeviceTree,
+) -> Option<crate::objects::device_tree::DeviceNodeRef<'_>> {
+    let root = device_tree.root()?;
+    find_ns16550a_node_from(root)
+}
+
+fn find_ns16550a_node_from(
+    node: crate::objects::device_tree::DeviceNodeRef<'_>,
+) -> Option<crate::objects::device_tree::DeviceNodeRef<'_>> {
+    if node.has_compatible(b"ns16550a") {
+        return Some(node);
+    }
+
+    for child in node.children() {
+        if let Some(found) = find_ns16550a_node_from(child) {
+            return Some(found);
+        }
+    }
+    None
 }

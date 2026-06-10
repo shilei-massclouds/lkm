@@ -398,9 +398,36 @@ impl<'dt> DeviceNodeRef<'dt> {
         self.properties().find(|property| property.name() == name)
     }
 
+    pub fn has_compatible(&self, expected: &[u8]) -> bool {
+        self.property(b"compatible")
+            .is_some_and(|property| compatible_list_contains(property.raw_value(), expected))
+    }
+
     fn record(&self) -> Option<DeviceNodeRecord> {
         self.tree.record_node(self.index)
     }
+}
+
+fn compatible_list_contains(mut value: &[u8], expected: &[u8]) -> bool {
+    while !value.is_empty() {
+        let item_len = cstr_slice_len(value);
+        if item_len == expected.len() && &value[..item_len] == expected {
+            return true;
+        }
+        if item_len == value.len() {
+            return false;
+        }
+        value = &value[item_len + 1..];
+    }
+    false
+}
+
+fn cstr_slice_len(value: &[u8]) -> usize {
+    let mut len = 0usize;
+    while len < value.len() && value[len] != 0 {
+        len += 1;
+    }
+    len
 }
 
 #[derive(Clone, Copy)]

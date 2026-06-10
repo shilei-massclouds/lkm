@@ -18,6 +18,9 @@ predicate bus_type_drivers_kset_ready<T>(bus: T) -> bool;
 predicate bus_type_autoprobe_enabled<T>(bus: T) -> bool;
 predicate bus_type_register_return_zero<T>(bus: T) -> bool;
 predicate bus_driver_ref_ready<T>(driver: T) -> bool;
+predicate bus_driver_ref_set_ready<T>(driver_refs: T) -> bool;
+predicate bus_driver_ref_set_contains<T, R>(driver_refs: T, driver_ref: R) -> bool;
+predicate bus_driver_ref_set_nonempty<T>(driver_refs: T) -> bool;
 predicate bus_type_device_added<T, U>(bus: T, device: U) -> bool;
 predicate bus_type_driver_added<T, U>(bus: T, driver: U) -> bool;
 predicate bus_type_devices_klist_nonempty<T>(bus: T) -> bool;
@@ -26,6 +29,12 @@ predicate bus_type_probe_driver_deferred<T, U>(bus: T, driver: U) -> bool;
 predicate bus_type_probe_device_deferred<T, U>(bus: T, device: U) -> bool;
 predicate bus_type_probe_driver_scans_devices<T, U>(bus: T, driver: U) -> bool;
 predicate bus_type_probe_device_scans_drivers<T, U>(bus: T, device: U) -> bool;
+predicate bus_type_probe_driver_match_attempted<T, U>(bus: T, driver: U) -> bool;
+predicate bus_type_probe_device_match_attempted<T, U>(bus: T, device: U) -> bool;
+predicate bus_type_driver_matches_device<T, D, R>(bus: T, driver: D, device: R) -> bool;
+predicate bus_type_device_matches_driver<T, R, D>(bus: T, device: R, driver: D) -> bool;
+predicate bus_type_driver_probe_bound_device<T, D, R>(bus: T, driver: D, device: R) -> bool;
+predicate bus_type_device_probe_bound_driver<T, R, D>(bus: T, device: R, driver: D) -> bool;
 
 predicate bus_subsys_private_allocated<T>(subsys: T) -> bool;
 predicate bus_subsys_private_bound_to_bus<T, U>(subsys: T, bus: U) -> bool;
@@ -42,6 +51,7 @@ predicate bus_subsys_mutex_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_klist_devices_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_klist_drivers_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_device_ref_set_bound<T, S>(subsys: T, device_refs: S) -> bool;
+predicate bus_subsys_driver_ref_set_bound<T, S>(subsys: T, driver_refs: S) -> bool;
 predicate bus_subsys_klist_devices_contains<T, U>(subsys: T, device: U) -> bool;
 predicate bus_subsys_klist_drivers_contains<T, U>(subsys: T, driver: U) -> bool;
 predicate bus_subsys_probe_files_ready<T>(subsys: T) -> bool;
@@ -76,8 +86,17 @@ predicate platform_bus_platform_device_owner_ready<T, S>(bus: T, platform_device
 predicate platform_bus_devices_added_from_platform_device_set<T, S>(bus: T, platform_devices: S) -> bool;
 predicate of_platform_default_populate_device_node_ids_bound<T>(bus: T) -> bool;
 predicate of_platform_default_populate_platform_devices_owned<T, S>(bus: T, platform_devices: S) -> bool;
+predicate platform_bus_mock_ns16550a_driver_registered<T>(bus: T) -> bool;
+predicate platform_bus_mock_ns16550a_driver_match_table_ready<T>(bus: T) -> bool;
+predicate platform_bus_mock_ns16550a_driver_probe_called<T>(bus: T) -> bool;
+predicate platform_bus_mock_ns16550a_driver_probe_return_zero<T>(bus: T) -> bool;
+predicate platform_bus_mock_ns16550a_device_matched<T>(bus: T) -> bool;
+predicate platform_bus_mock_ns16550a_device_bound<T>(bus: T) -> bool;
 
 type BusDriverRef {
+}
+
+type BusDriverRefSet {
 }
 
 /*
@@ -89,6 +108,7 @@ type BusDriverRef {
 type BusSubsysPrivate {
     owned {
         klist_devices: DeviceRefSet;
+        klist_drivers: BusDriverRefSet;
     }
 
     lifecycle {
@@ -123,6 +143,8 @@ type BusSubsysPrivate {
                 bus_subsys_device_ref_set_bound(self, self.klist_devices);
                 device_ref_set_ready(self.klist_devices);
                 bus_subsys_klist_drivers_ready(self);
+                bus_subsys_driver_ref_set_bound(self, self.klist_drivers);
+                bus_driver_ref_set_ready(self.klist_drivers);
                 bus_subsys_probe_files_ready(self);
                 bus_subsys_groups_ready(self);
             }
@@ -199,19 +221,21 @@ type BusType {
                 self.state == State::Ready;
                 bus_type_subsys_private_online(self, self.subsys);
                 bus_subsys_klist_drivers_ready(self.subsys);
+                bus_driver_ref_set_ready(self.subsys.klist_drivers);
                 bus_driver_ref_ready(driver);
             }
             ensures {
                 bus_type_driver_added(self, driver);
                 bus_type_drivers_klist_nonempty(self);
+                bus_driver_ref_set_contains(self.subsys.klist_drivers, driver);
+                bus_driver_ref_set_nonempty(self.subsys.klist_drivers);
                 bus_subsys_klist_drivers_contains(self.subsys, driver);
             }
         }
 
         /*
-         * ProbeDriver is only the driver-side probe boundary for now: it proves
-         * a registered driver can scan klist_devices, but Device/Driver
-         * matching and binding are deferred until those types exist.
+         * ProbeDriver is the driver-side attach boundary: a registered driver
+         * scans klist_devices and attempts bus-specific match/probe/bind.
          */
         Action::ProbeDriver(driver: BusDriverRef) {
             state_effect: StateEffect::None;
@@ -224,18 +248,14 @@ type BusType {
                 bus_driver_ref_ready(driver);
             }
             ensures {
-                bus_type_probe_driver_deferred(self, driver);
                 bus_type_probe_driver_scans_devices(self, driver);
-            }
-            deferred {
-                "ProbeDriver 当前只建立 driver_attach()/bus_for_each_dev() 边界；真实 match/probe/bind 依赖 Device 和 Driver 类型建模后展开。";
+                bus_type_probe_driver_match_attempted(self, driver);
             }
         }
 
         /*
-         * ProbeDevice is the symmetric device-side probe boundary: it proves a
-         * registered device can scan klist_drivers, while real binding remains
-         * deferred.
+         * ProbeDevice is the symmetric device-side boundary: a device that has
+         * just reached the bus scans klist_drivers and attempts match/probe.
          */
         Action::ProbeDevice(device: DeviceRef) {
             state_effect: StateEffect::None;
@@ -244,14 +264,12 @@ type BusType {
                 bus_type_subsys_private_online(self, self.subsys);
                 bus_subsys_klist_drivers_ready(self.subsys);
                 bus_type_drivers_klist_nonempty(self);
+                bus_driver_ref_set_nonempty(self.subsys.klist_drivers);
                 device_ref_ready(device);
             }
             ensures {
-                bus_type_probe_device_deferred(self, device);
                 bus_type_probe_device_scans_drivers(self, device);
-            }
-            deferred {
-                "ProbeDevice 当前只建立 bus_probe_device()/device_initial_probe() 边界；真实 match/probe/bind 依赖 Device 和 Driver 类型建模后展开。";
+                bus_type_probe_device_match_attempted(self, device);
             }
         }
     }
@@ -302,6 +320,41 @@ type PlatformBusType: BusType {
                 platform_device_set_nonempty(self.platform_devices);
                 bus_type_devices_klist_nonempty(self);
                 device_ref_set_nonempty(self.subsys.klist_devices);
+            }
+        }
+
+        Action::RegisterMockNs16550aPlatformDriver {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                DeviceTree.state == State::Ready;
+                InitcallTable.state == State::Prepared;
+                bus_type_subsys_private_online(self, self.subsys);
+                bus_subsys_klist_drivers_ready(self.subsys);
+                bus_type_devices_klist_nonempty(self);
+                device_ref_set_nonempty(self.subsys.klist_devices);
+                platform_device_set_nonempty(self.platform_devices);
+            }
+            drives {
+                self.Action::AddDriver(BusDriverRef::MockNs16550aPlatformDriver);
+                self.Action::ProbeDriver(BusDriverRef::MockNs16550aPlatformDriver);
+            }
+            ensures {
+                initcall_entry_invoked(InitcallEntry::MockNs16550aPlatformDriver);
+                initcall_entry_return_recorded(InitcallEntry::MockNs16550aPlatformDriver);
+                initcall_entry_run_context_checked(InitcallEntry::MockNs16550aPlatformDriver);
+                platform_bus_mock_ns16550a_driver_registered(self);
+                platform_bus_mock_ns16550a_driver_match_table_ready(self);
+                platform_bus_mock_ns16550a_device_matched(self);
+                platform_bus_mock_ns16550a_driver_probe_called(self);
+                platform_bus_mock_ns16550a_driver_probe_return_zero(self);
+                platform_bus_mock_ns16550a_device_bound(self);
+                bus_type_driver_added(self, BusDriverRef::MockNs16550aPlatformDriver);
+                bus_type_drivers_klist_nonempty(self);
+                bus_subsys_klist_drivers_contains(self.subsys, BusDriverRef::MockNs16550aPlatformDriver);
+                bus_type_probe_driver_scans_devices(self, BusDriverRef::MockNs16550aPlatformDriver);
+                bus_type_probe_driver_match_attempted(self, BusDriverRef::MockNs16550aPlatformDriver);
+                bus_type_driver_probe_bound_device(self, BusDriverRef::MockNs16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             }
         }
     }

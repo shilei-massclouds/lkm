@@ -145,6 +145,13 @@ predicate arceos_ex_must_of_platform_default_populate_emit_entry_scan_devices_ex
 predicate arceos_ex_must_of_platform_population_smoke_cover_refs_to_nodes() -> bool;
 predicate arceos_ex_must_of_platform_population_smoke_ignore_unrelated_initcall_entries() -> bool;
 predicate arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage() -> bool;
+predicate arceos_ex_must_bus_driver_ref_set_map_to_klist_like_storage() -> bool;
+predicate arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs() -> bool;
+predicate arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry() -> bool;
+predicate arceos_ex_must_platform_bus_probe_driver_scan_existing_devices() -> bool;
+predicate arceos_ex_must_platform_bus_probe_device_scan_registered_drivers() -> bool;
+predicate arceos_ex_must_mock_ns16550a_driver_match_of_compatible_from_device_node() -> bool;
+predicate arceos_ex_must_mock_ns16550a_driver_smoke_cover_probe_and_bind() -> bool;
 predicate arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor() -> bool;
 predicate arceos_ex_must_platform_device_embed_device_and_support_container_lookup() -> bool;
 predicate arceos_ex_must_raw_intrusive_bus_list_not_own_device_lifetime() -> bool;
@@ -1558,12 +1565,35 @@ type ArceosExInitcallCodingMust {
          * create PlatformDeviceType instances from candidate nodes, bind each
          * embedded DeviceType to its DeviceNodeRef, register the core device,
          * and add the resulting DeviceRef to PlatformBusSubsysPrivate's
-         * DeviceRefSet through BusType.AddDevice. Driver match/probe/bind
-         * remains outside this boundary.
+         * DeviceRefSet through BusType.AddDevice. Driver match/probe/bind is
+         * outside this OF-populate action and belongs to later driver
+         * registration/probe initcalls.
          */
         arceos_ex_must_of_platform_default_populate_create_and_register_platform_devices();
         arceos_ex_must_of_platform_population_smoke_cover_refs_to_nodes();
         arceos_ex_must_of_platform_population_smoke_ignore_unrelated_initcall_entries();
+
+        /*
+         * Platform driver registration and probe:
+         *
+         * The first platform-driver closure must use a Linux-like
+         * device_initcall!() static entry to register the mock ns16550a
+         * platform driver after OF population has created platform devices.
+         * PlatformBus.klist_drivers may be backed by Vec<BusDriverRef> in the
+         * current target, mirroring the earlier klist_devices compromise.
+         * ProbeDriver scans already published devices; ProbeDevice remains the
+         * symmetric path for devices added after drivers. OF compatible match
+         * must resolve the DeviceNodeId through the persistent DeviceTree and
+         * read compatible from the node, not from copied fields on Device or
+         * PlatformDevice.
+         */
+        arceos_ex_must_bus_driver_ref_set_map_to_klist_like_storage();
+        arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs();
+        arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry();
+        arceos_ex_must_platform_bus_probe_driver_scan_existing_devices();
+        arceos_ex_must_platform_bus_probe_device_scan_registered_drivers();
+        arceos_ex_must_mock_ns16550a_driver_match_of_compatible_from_device_node();
+        arceos_ex_must_mock_ns16550a_driver_smoke_cover_probe_and_bind();
     }
 }
 
