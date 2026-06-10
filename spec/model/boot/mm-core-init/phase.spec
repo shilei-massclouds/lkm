@@ -3,7 +3,8 @@
  *
  * This subphase starts after trap_init() and ends at the mm_core_init()
  * return boundary. It turns early MemBlock-backed memory management into
- * core page, SLUB, page-table, vmalloc and mm_struct allocation foundations.
+ * core page, SLUB, global heap, page-table, vmalloc and mm_struct allocation
+ * foundations.
  */
 
 /*
@@ -604,6 +605,83 @@ object SlubAllocator: SlubAllocatorType {
 }
 
 /*
+ * KernelGlobalAllocator 表示 Rust GlobalAlloc 边界。它不是新的底层分配器，
+ * 而是把普通 heap allocation 映射到已经 Ready 的 SLUB/kmalloc。
+ */
+object KernelGlobalAllocator: KernelGlobalAllocatorType {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    SlubAllocator.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                }
+
+                ensures {
+                    kernel_global_allocator_ready(KernelGlobalAllocator, SlubAllocator);
+                    kernel_global_allocator_uses_slub_allocator(KernelGlobalAllocator, SlubAllocator);
+                    kernel_global_allocator_alloc_api_ready(KernelGlobalAllocator);
+                    kernel_global_allocator_alloc_zeroed_api_ready(KernelGlobalAllocator);
+                    kernel_global_allocator_dealloc_api_ready(KernelGlobalAllocator);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            SlubAllocator.state == State::Ready;
+            KmallocCaches.state == State::Ready;
+            kernel_global_allocator_ready(KernelGlobalAllocator, SlubAllocator);
+            kernel_global_allocator_uses_slub_allocator(KernelGlobalAllocator, SlubAllocator);
+            kernel_global_allocator_alloc_api_ready(KernelGlobalAllocator);
+            kernel_global_allocator_alloc_zeroed_api_ready(KernelGlobalAllocator);
+            kernel_global_allocator_dealloc_api_ready(KernelGlobalAllocator);
+        }
+    }
+}
+
+/*
+ * DynamicContainerRuntime 表示 Vec/List/Set 等普通动态容器可用的能力边界。
+ * 它依赖 KernelGlobalAllocator，而不直接依赖 MemBlock、PageAllocator 或 SLUB
+ * 私有结构。
+ */
+object DynamicContainerRuntime: MemoryObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    KernelGlobalAllocator.state == State::Ready;
+                }
+
+                ensures {
+                    dynamic_container_runtime_ready(DynamicContainerRuntime, KernelGlobalAllocator);
+                    dynamic_container_runtime_uses_global_allocator(DynamicContainerRuntime, KernelGlobalAllocator);
+                    dynamic_container_vec_api_ready(DynamicContainerRuntime);
+                    dynamic_container_list_api_ready(DynamicContainerRuntime);
+                    dynamic_container_set_api_ready(DynamicContainerRuntime);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            KernelGlobalAllocator.state == State::Ready;
+            dynamic_container_runtime_ready(DynamicContainerRuntime, KernelGlobalAllocator);
+            dynamic_container_runtime_uses_global_allocator(DynamicContainerRuntime, KernelGlobalAllocator);
+            dynamic_container_vec_api_ready(DynamicContainerRuntime);
+            dynamic_container_list_api_ready(DynamicContainerRuntime);
+            dynamic_container_set_api_ready(DynamicContainerRuntime);
+        }
+    }
+}
+
+/*
  * PageTableLockCache 对应 CONFIG_SPLIT_PTE_PTLOCKS=y 下的 "page->ptl" cache。
  */
 object PageTableLockCache: MemoryObject {
@@ -943,6 +1021,8 @@ object MmCoreInitPhase: PhaseObject {
                     PageAllocator.Event::Setup;
                     SlubAllocator.Event::Preset;
                     SlubAllocator.Event::Setup;
+                    KernelGlobalAllocator.Event::Setup;
+                    DynamicContainerRuntime.Event::Setup;
                     PageTableCaches.Event::Setup;
                     VmallocAllocator.Event::Setup;
                     MmStructCache.Event::Setup;

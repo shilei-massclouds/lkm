@@ -28,6 +28,12 @@ type KmallocSize {
 type KmallocAllocRef {
 }
 
+type AllocLayout {
+}
+
+type HeapAllocRef {
+}
+
 type PageMetadata {
 }
 
@@ -228,6 +234,31 @@ predicate kmalloc_alloc_ref_linear_mapped<T>(alloc_ref: T) -> bool;
 predicate kmalloc_alloc_ref_zeroed<T>(alloc_ref: T) -> bool;
 predicate kmalloc_alloc_ref_exclusively_owned_by_caller<T>(alloc_ref: T) -> bool;
 predicate kmalloc_alloc_ref_released_to_slub<T, A>(alloc_ref: T, allocator: A) -> bool;
+predicate kernel_global_allocator_ready<T, S>(allocator: T, slub_allocator: S) -> bool;
+predicate kernel_global_allocator_uses_slub_allocator<T, S>(allocator: T, slub_allocator: S) -> bool;
+predicate kernel_global_allocator_alloc_api_ready<T>(allocator: T) -> bool;
+predicate kernel_global_allocator_alloc_zeroed_api_ready<T>(allocator: T) -> bool;
+predicate kernel_global_allocator_dealloc_api_ready<T>(allocator: T) -> bool;
+predicate kernel_global_allocator_layout_supported<T, L>(allocator: T, layout: L) -> bool;
+predicate alloc_layout_size_nonzero<T>(layout: T) -> bool;
+predicate alloc_layout_size_bound<T, S>(layout: T, size: S) -> bool;
+predicate alloc_layout_align_bound<T, A>(layout: T, align: A) -> bool;
+predicate heap_alloc_ref_ready<T>(alloc_ref: T) -> bool;
+predicate heap_alloc_ref_layout_bound<T, L>(alloc_ref: T, layout: L) -> bool;
+predicate heap_alloc_ref_backed_by_kmalloc<T, K>(alloc_ref: T, kmalloc_ref: K) -> bool;
+predicate heap_alloc_ref_linear_mapped<T>(alloc_ref: T) -> bool;
+predicate heap_alloc_ref_zeroed<T>(alloc_ref: T) -> bool;
+predicate heap_alloc_ref_exclusively_owned_by_caller<T>(alloc_ref: T) -> bool;
+predicate heap_alloc_ref_released_to_global_allocator<T, A>(alloc_ref: T, allocator: A) -> bool;
+predicate kernel_global_allocator_alloc_called<T, L>(allocator: T, layout: L) -> bool;
+predicate kernel_global_allocator_alloc_zeroed_called<T, L>(allocator: T, layout: L) -> bool;
+predicate kernel_global_allocator_dealloc_called<T, R, L>(allocator: T, alloc_ref: R, layout: L) -> bool;
+predicate dynamic_container_runtime_ready<T, A>(runtime: T, allocator: A) -> bool;
+predicate dynamic_container_runtime_uses_global_allocator<T, A>(runtime: T, allocator: A) -> bool;
+predicate dynamic_container_vec_api_ready<T>(runtime: T) -> bool;
+predicate dynamic_container_list_api_ready<T>(runtime: T) -> bool;
+predicate dynamic_container_set_api_ready<T>(runtime: T) -> bool;
+predicate dynamic_container_storage_backed_by_heap_alloc_ref<T, R>(runtime: T, alloc_ref: R) -> bool;
 
 type PageAllocatorType: MemoryObject {
     processes {
@@ -401,6 +432,80 @@ type SlubAllocatorType: MemoryObject {
             ensures {
                 slub_allocator_kfree_called(self, alloc_ref);
                 kmalloc_alloc_ref_released_to_slub(alloc_ref, self);
+            }
+        }
+    }
+}
+
+type KernelGlobalAllocatorType: MemoryObject {
+    processes {
+        /*
+         * Alloc corresponds to the Rust GlobalAlloc::alloc(Layout) boundary
+         * used by Vec/Box and other ordinary heap-backed containers.
+         */
+        Action::Alloc(layout: AllocLayout) -> HeapAllocRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                SlubAllocator.state == State::Ready;
+                kernel_global_allocator_alloc_api_ready(self);
+                kernel_global_allocator_uses_slub_allocator(self, SlubAllocator);
+                kernel_global_allocator_layout_supported(self, layout);
+                alloc_layout_size_nonzero(layout);
+            }
+            ensures {
+                kernel_global_allocator_alloc_called(self, layout);
+            }
+            result {
+                Available: Success(heap_alloc_ref_returned);
+                NoMemory: Failed(no_heap_storage_available);
+            }
+            deferred {
+                "当前 GlobalAlloc 规格只展开 SLUB-backed 成功路径；large allocation、OOM policy、realloc 和特殊 alignment fallback 后续随完整 heap adapter 展开。";
+            }
+        }
+
+        /*
+         * AllocZeroed corresponds to GlobalAlloc::alloc_zeroed(Layout). It is
+         * the heap-facing equivalent of kzalloc for ordinary Rust containers.
+         */
+        Action::AllocZeroed(layout: AllocLayout) -> HeapAllocRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                SlubAllocator.state == State::Ready;
+                kernel_global_allocator_alloc_zeroed_api_ready(self);
+                kernel_global_allocator_uses_slub_allocator(self, SlubAllocator);
+                kernel_global_allocator_layout_supported(self, layout);
+                alloc_layout_size_nonzero(layout);
+            }
+            ensures {
+                kernel_global_allocator_alloc_zeroed_called(self, layout);
+            }
+            result {
+                Available: Success(heap_alloc_ref_returned);
+                NoMemory: Failed(no_heap_storage_available);
+            }
+        }
+
+        /*
+         * Dealloc corresponds to GlobalAlloc::dealloc(ptr, Layout). The
+         * implementation must recover the owning kmalloc slab/cache from the
+         * heap allocation reference before returning storage to SLUB.
+         */
+        Action::Dealloc(alloc_ref: HeapAllocRef, layout: AllocLayout) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                SlubAllocator.state == State::Ready;
+                kernel_global_allocator_dealloc_api_ready(self);
+                heap_alloc_ref_ready(alloc_ref);
+                heap_alloc_ref_layout_bound(alloc_ref, layout);
+                heap_alloc_ref_exclusively_owned_by_caller(alloc_ref);
+            }
+            ensures {
+                kernel_global_allocator_dealloc_called(self, alloc_ref, layout);
+                heap_alloc_ref_released_to_global_allocator(alloc_ref, self);
             }
         }
     }

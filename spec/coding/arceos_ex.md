@@ -522,6 +522,10 @@ SLUB/kmalloc API smoke 是动态容器前置链路的第二个运行期用例：
 SLUB freelist、slab slot metadata 或 PageAllocator 内部状态；断言应通过分配引用的线性映射访问边界完成。`GlobalAlloc`/`Vec`
 smoke 必须在这个 SLUB/kmalloc smoke 之后推进。
 
+GlobalAlloc/Vec smoke 是动态容器前置链路的第三个运行期用例：它应在 `KernelGlobalAllocator.Ready` 和
+`DynamicContainerRuntime.Ready` 之后，通过普通 `Vec` API push 足够元素以触发至少一次 grow，校验元素读回，并让 `Vec`
+正常 drop。该用例不得调用 SLUB/PageAllocator 私有接口，也不得通过测试专用 allocator hook 绕过正式 `GlobalAlloc` 路径。
+
 ### 启动与 smoke 输出风格
 
 启动日志和 smoke 用例输出主要服务人工审阅，SHOULD 优先采用接近 Linux 启动日志的清晰文本格式，而不是大量
@@ -813,6 +817,21 @@ caller-owned allocation reference、线性映射读写、kzalloc 返回前清零
 `Vec`、`Box`、全局 heap 或 MemBlock。`kmalloc` 不保证清零；`kzalloc` 必须清零返回对象的 requested size 范围；
 `kfree` 必须拒绝不属于任一 kmalloc cache/slab 的引用，并把有效对象放回所属 cache 的 freelist。NUMA、per-CPU partial、
 slab debug redzone/poison、freelist random/hardened、memcg kmalloc、reclaim/compaction 和 slab sysfs/FULL 状态均 deferred。
+
+`KernelGlobalAllocator.Setup` 必须发生在 `SlubAllocator.Ready` 之后，它表示 Rust `core::alloc::GlobalAlloc` 边界已经可用，
+而不是新的底层分配器。`GlobalAlloc::alloc(Layout)` 必须通过 SLUB `kmalloc` 获得 storage；
+`GlobalAlloc::alloc_zeroed(Layout)` 必须通过 `kzalloc` 或等价的 alloc 后清零实现；`GlobalAlloc::dealloc(ptr, Layout)`
+必须能从裸指针和 layout 找回所属 kmalloc slab/cache，再把对象交回 SLUB。实现不得在这一层直接调用 MemBlock、直接操作 buddy
+free list，或建立测试专用 heap。
+
+第一轮 `arceos_ex` GlobalAlloc layout 支持范围应显式受限：`size > 0`，`size <= 1024`，alignment 不超过当前 kmalloc slot
+天然能满足的范围。若实现通过 size class/page 对齐能够满足更大 alignment，可在 coding 注释和 smoke 中说明；否则必须对超出范围的
+layout 返回 null/失败，而不是返回未满足 alignment 的地址。后续 large allocation、realloc、OOM policy、per-CPU cache 和特殊
+alignment fallback 均 deferred。
+
+`DynamicContainerRuntime.Ready` 表示普通 `Vec`、List、Set 等动态容器可以通过 `KernelGlobalAllocator` 获取 storage。它不得
+让动态容器绕过 `GlobalAlloc` 直接拿 `KmallocAllocRef` 或 `PageRef`。后续平台总线 populate 若需要保存变长 `PlatformDevice`
+集合，应依赖该 runtime，而不是恢复固定容量数组。
 
 `VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址资源管理，不是页表映射器。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END` 页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、`VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、建立 free vmap space。
 

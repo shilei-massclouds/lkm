@@ -39,6 +39,14 @@ predicate arceos_ex_must_slub_kzalloc_zero_returned_object() -> bool;
 predicate arceos_ex_must_slub_kfree_recycle_object_to_cache() -> bool;
 predicate arceos_ex_must_slub_first_round_defer_complex_linux_paths() -> bool;
 predicate arceos_ex_must_slub_smoke_cover_kmalloc_kzalloc_kfree() -> bool;
+predicate arceos_ex_must_global_allocator_setup_after_slub_ready() -> bool;
+predicate arceos_ex_must_global_allocator_implement_core_alloc_globalalloc() -> bool;
+predicate arceos_ex_must_global_allocator_alloc_use_kmalloc() -> bool;
+predicate arceos_ex_must_global_allocator_alloc_zeroed_use_kzalloc_or_zeroing() -> bool;
+predicate arceos_ex_must_global_allocator_dealloc_recover_kmalloc_object_from_ptr() -> bool;
+predicate arceos_ex_must_global_allocator_support_documented_layout_subset() -> bool;
+predicate arceos_ex_must_dynamic_containers_require_global_allocator_ready() -> bool;
+predicate arceos_ex_must_dynamic_container_smoke_cover_vec_growth_drop() -> bool;
 predicate arceos_ex_must_page_table_lock_cache_named_page_ptl() -> bool;
 predicate arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_not_page_tables() -> bool;
 predicate arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects() -> bool;
@@ -345,6 +353,31 @@ type ArceosExMmCoreInitCodingMust {
          * independent same-size allocations, and free-list reuse.
          */
         arceos_ex_must_slub_smoke_cover_kmalloc_kzalloc_kfree();
+
+        /*
+         * Global allocator:
+         *
+         * KernelGlobalAllocator.setup() must run after SlubAllocator.Ready and
+         * expose the Rust GlobalAlloc boundary through SLUB/kmalloc. Ordinary
+         * dynamic containers must depend on this boundary rather than using
+         * MemBlock, PageAllocator internals, or SLUB private structures.
+         */
+        arceos_ex_must_global_allocator_setup_after_slub_ready();
+        arceos_ex_must_global_allocator_implement_core_alloc_globalalloc();
+        arceos_ex_must_global_allocator_alloc_use_kmalloc();
+        arceos_ex_must_global_allocator_alloc_zeroed_use_kzalloc_or_zeroing();
+        arceos_ex_must_global_allocator_dealloc_recover_kmalloc_object_from_ptr();
+        arceos_ex_must_global_allocator_support_documented_layout_subset();
+        arceos_ex_must_dynamic_containers_require_global_allocator_ready();
+
+        /*
+         * Dynamic container smoke:
+         *
+         * The first dynamic-container smoke must use Vec through the ordinary
+         * allocator path, force at least one growth, validate stored values,
+         * and drop the Vec without direct SLUB or PageAllocator access.
+         */
+        arceos_ex_must_dynamic_container_smoke_cover_vec_growth_drop();
 
         /*
          * Page table lock cache:
