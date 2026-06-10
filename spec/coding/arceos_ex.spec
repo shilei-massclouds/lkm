@@ -132,13 +132,23 @@ predicate arceos_ex_must_of_platform_default_populate_print_candidate_identity()
 predicate arceos_ex_must_action_checkpoints_use_entry_exit_and_semantic_points() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_scan_complete_after_candidate_print() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_create_and_register_platform_devices() -> bool;
-predicate arceos_ex_must_platform_bus_own_platform_devices_with_vec() -> bool;
+predicate arceos_ex_must_platform_bus_own_platform_devices_with_stable_storage() -> bool;
 predicate arceos_ex_must_platform_bus_klist_devices_use_vec_device_refs() -> bool;
 predicate arceos_ex_must_platform_device_creation_use_stable_device_node_id() -> bool;
+predicate arceos_ex_must_device_node_id_resolve_through_persistent_device_tree() -> bool;
+predicate arceos_ex_must_device_and_platform_device_store_node_id_not_borrowed_ref() -> bool;
+predicate arceos_ex_must_platform_device_storage_keep_device_refs_stable_across_vec_growth() -> bool;
+predicate arceos_ex_must_platform_bus_insert_owned_platform_device_before_klist_device_ref() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_require_dynamic_container_runtime_ready() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_emit_entry_scan_devices_exit_checkpoints() -> bool;
 predicate arceos_ex_must_of_platform_population_smoke_cover_refs_to_nodes() -> bool;
+predicate arceos_ex_must_of_platform_population_smoke_ignore_unrelated_initcall_entries() -> bool;
 predicate arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage() -> bool;
 predicate arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor() -> bool;
 predicate arceos_ex_must_platform_device_embed_device_and_support_container_lookup() -> bool;
+predicate arceos_ex_must_raw_intrusive_bus_list_not_own_device_lifetime() -> bool;
+predicate arceos_ex_must_future_intrusive_bus_list_wrap_storage_as_safe_intrusive_list() -> bool;
+predicate arceos_ex_must_safe_intrusive_list_hide_raw_nodes_and_return_stable_device_refs() -> bool;
 predicate arceos_ex_must_device_object_kind_not_define_driver_core_semantics() -> bool;
 predicate arceos_ex_must_device_set_node_bind_ref_without_copying_compatible() -> bool;
 predicate arceos_ex_must_device_node_ref_store_stable_handle_not_borrowed_view() -> bool;
@@ -1481,30 +1491,51 @@ type ArceosExInitcallCodingMust {
          * probe/match must reach compatible through the bound DeviceNodeRef.
          * The concrete Rust object must store a stable DeviceNodeId/node-index
          * or equivalent handle, not a long-lived borrowed DeviceNodeRef<'dt>.
+         * That id must be resolved through the persistent DeviceTree whenever
+         * name, compatible, status, or other OF properties are needed.
          */
         arceos_ex_must_device_set_node_bind_ref_without_copying_compatible();
         arceos_ex_must_device_node_ref_store_stable_handle_not_borrowed_view();
+        arceos_ex_must_device_node_id_resolve_through_persistent_device_tree();
+        arceos_ex_must_device_and_platform_device_store_node_id_not_borrowed_ref();
 
         /*
          * Platform device ownership:
          *
          * PlatformBus must own the PlatformDevice objects it creates during OF
-         * population. The current arceos_ex backing is a Vec<PlatformDevice>,
-         * enabled by DynamicContainerRuntime, so DeviceRef entries in
-         * klist_devices never outlive their containing PlatformDevice storage.
+         * population. The current arceos_ex backing must provide stable
+         * platform-device storage, so DeviceRef entries in klist_devices never
+         * outlive their containing PlatformDevice storage and are not
+         * invalidated by container growth. A plain Vec<PlatformDevice> is not
+         * sufficient if DeviceRef is a borrowed/raw reference to an embedded
+         * Device member; use stable handles, arena-style ids, or non-moving
+         * owned storage such as pinned/boxed platform devices. The platform
+         * device must be inserted into owned storage before its DeviceRef is
+         * published to klist_devices.
          */
-        arceos_ex_must_platform_bus_own_platform_devices_with_vec();
+        arceos_ex_must_of_platform_default_populate_require_dynamic_container_runtime_ready();
+        arceos_ex_must_platform_bus_own_platform_devices_with_stable_storage();
         arceos_ex_must_platform_device_creation_use_stable_device_node_id();
+        arceos_ex_must_platform_device_storage_keep_device_refs_stable_across_vec_growth();
+        arceos_ex_must_platform_bus_insert_owned_platform_device_before_klist_device_ref();
 
         /*
          * Bus device set storage:
          *
          * The model-level BusSubsysPrivate.klist_devices is a DeviceRefSet.
-         * Linux-like coding must back it with KList-like append/iterate
-         * storage, not a small action-smoke slot array.
+         * The first arceos_ex backing may use Vec<DeviceRef> as an append and
+         * iterate view, not a small action-smoke slot array. A future
+         * Linux-like intrusive-list backing must not expose the raw intrusive
+         * list as the lifetime owner: raw nodes only express membership. It
+         * must be wrapped by a SafeIntrusiveList-like abstraction that couples
+         * stable object storage with the raw list, hides raw nodes from public
+         * APIs, unlinks before drop, and returns stable DeviceRef views.
          */
         arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage();
         arceos_ex_must_platform_bus_klist_devices_use_vec_device_refs();
+        arceos_ex_must_raw_intrusive_bus_list_not_own_device_lifetime();
+        arceos_ex_must_future_intrusive_bus_list_wrap_storage_as_safe_intrusive_list();
+        arceos_ex_must_safe_intrusive_list_hide_raw_nodes_and_return_stable_device_refs();
 
         /*
          * OF platform scan completion:
@@ -1516,6 +1547,7 @@ type ArceosExInitcallCodingMust {
          * checkpoint, not to an Entry checkpoint.
          */
         arceos_ex_must_of_platform_default_populate_scan_complete_after_candidate_print();
+        arceos_ex_must_of_platform_default_populate_emit_entry_scan_devices_exit_checkpoints();
 
         /*
          * OF platform device creation:
@@ -1529,6 +1561,7 @@ type ArceosExInitcallCodingMust {
          */
         arceos_ex_must_of_platform_default_populate_create_and_register_platform_devices();
         arceos_ex_must_of_platform_population_smoke_cover_refs_to_nodes();
+        arceos_ex_must_of_platform_population_smoke_ignore_unrelated_initcall_entries();
     }
 }
 

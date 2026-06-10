@@ -314,11 +314,24 @@ sync slot 和 rootfs slot 可以作为静态收集 slot 保留其 Linux 排序�
 实例，绑定其内嵌 `DeviceType` 的 node 引用，注册 core device，并把对应 `DeviceRef` 加入
 `PlatformBusSubsysPrivate.klist_devices` 的 model 视图。
 
-当前 arceos_ex 实现应由 `PlatformBus` 拥有 OF population 生成的 `PlatformDevice` 生命周期：使用
-`Vec<PlatformDevice>` 保存对象本体，使用 `Vec<DeviceRef>` 作为 `PlatformBusSubsysPrivate.klist_devices`
-的第一轮 backing。`DeviceRef` 必须引用内嵌 `Device` 的稳定位置，且能通过 container_of-like helper
-回到外层 `PlatformDevice`；不得把 `DeviceRef` 指向临时栈对象、扫描局部对象或固定容量 action-smoke slot。
-该实现依赖 `DynamicContainerRuntime.Ready`，不再因为 allocator/Vec 能力缺失而使用固定数组替代正式存储。
+当前 arceos_ex 实现应由 `PlatformBus` 拥有 OF population 生成的 `PlatformDevice` 生命周期，并使用稳定的
+platform device storage；不得把 `DeviceRef` 指向临时栈对象、扫描局部对象或固定容量 action-smoke slot。
+如果 `DeviceRef` 表达为指向内嵌 `Device` 的裸指针或长期借用，普通 `Vec<PlatformDevice>` 不适合作为对象本体
+backing，因为扩容会移动 inline 元素并使引用失效。第一轮可以把 `DeviceRef` 表达为稳定 index/id handle，
+并通过 `PlatformBus.platform_devices` 解析回内嵌 `Device` 和外层 `PlatformDevice`；也可以使用
+`Vec<Pin<Box<PlatformDevice>>>` 或 arena-style storage，让 `Vec` 只保存 owning handle 而不移动对象本体。
+`PlatformBusSubsysPrivate.klist_devices` 的第一轮 backing 仍可以是 `Vec<DeviceRef>`。无论采用哪种 backing，
+都必须先把 `PlatformDevice` 放入 `PlatformBus` 拥有的 storage，再把对应 `DeviceRef` 追加到
+`PlatformBusSubsysPrivate.klist_devices`。该实现依赖 `DynamicContainerRuntime.Ready`，不再因为 allocator/Vec
+能力缺失而使用固定数组替代正式存储。
+
+Linux-like intrusive list 在 Rust 目标中不得直接作为对象生命周期方案。raw intrusive list 只表达 membership：
+它可以链接 `DevicePrivate.knode_bus` 这类内嵌节点，但不拥有外层 `Device`/`PlatformDevice`，也不能独立证明
+节点引用总是有效。未来若把 `klist_devices` backing 改为 intrusive list，必须经由
+`SafeIntrusiveList` 这类更高层结构封装：内部同时维护稳定对象 storage 和 raw intrusive list，对外只暴露
+insert/remove/iterate 等 safe 接口和稳定 `DeviceRef`/handle，不暴露可悬空的 raw node ref。插入顺序必须是
+先进入 owner storage，再挂 raw list；删除顺序必须是先从 raw list unlink，再释放 owner storage。当前第一轮
+实现不要求完成 `SafeIntrusiveList`，但语义上必须与这个未来 backing 保持一致。
 
 `DeviceNodeId` 是 OF node 的长期稳定身份。Platform device creation 应从 candidate node 获得
 `DeviceNodeId`，在 `PlatformDevice`/内嵌 `Device` 中保存该 id，并在需要读取 name/compatible/status 等属性时通过仍然
@@ -363,6 +376,10 @@ Action checkpoint 命名应使用 `Entry` 表示 action 入口，`Exit` 表示 a
 后置条件或中间完成点。当前 `of_platform_default_populate_init()` 的测试 checkpoint 是
 `OfPlatformDefaultPopulate.ScanComplete`：它必须位于 candidate 识别完成并已打印 name/compatible 之后，
 KUnit 对 candidate facts 的检查应挂在该点，而不是挂在入口点。
+当实现推进到创建设备阶段时，还应提供 `OfPlatformDefaultPopulate.DevicesAdded` 或等价语义 checkpoint，用于在
+`Exit` 前检查 `PlatformBus.platform_devices`、`klist_devices` 和 `DeviceRef -> PlatformDevice -> DeviceNodeId`
+链路；`Exit` 只表示 action 返回边界。smoke 预期不得假设 initcall table 中只有本测试注册的 entry，必须只断言
+本场景关心的 populate entry 已存在且执行结果正确，忽略其它无关 initcall entries。
 
 ## RootfsPhase 编码约束
 
