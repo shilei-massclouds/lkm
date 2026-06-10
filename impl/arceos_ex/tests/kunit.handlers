@@ -1,5 +1,6 @@
 # One handler name per line. Lines may contain comments after '#'.
 memblock
+page-allocator
 of-platform
 earlycon
 kernel-init-task

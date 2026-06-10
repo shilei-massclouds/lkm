@@ -42,10 +42,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.page_allocator.setup(
         &mut ctx.memblock,
         &ctx.zones,
+        &ctx.page_metadata_map,
         &ctx.config,
         &ctx.memory_debug_hardening,
         &ctx.swiotlb,
     )?;
+    crate::checkpoint::dispatch_mut(Checkpoint::PageAllocatorMemBlockHandoffReady, ctx);
     ctx.slub_allocator
         .preset(&ctx.page_allocator, &ctx.per_cpu_storage)?;
     ctx.slub_allocator.setup(
@@ -108,6 +110,9 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.page_allocator.state() == State::Ready
         && ctx.page_allocator.boot_zonelist_set().state() == State::Ready
         && ctx.page_allocator.page_metadata_map_bound()
+        && ctx.page_allocator.buddy_free_page_sets_ready()
+        && ctx.page_allocator.buddy_total_free_pages() != 0
+        && ctx.page_allocator.buddy_free_block_count() != 0
         && ctx.memory_debug_hardening.state() == State::Ready
         && !ctx.memory_debug_hardening.init_on_alloc()
         && !ctx.memory_debug_hardening.init_on_free()

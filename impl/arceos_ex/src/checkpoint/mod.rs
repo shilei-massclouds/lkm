@@ -1,6 +1,7 @@
 pub mod handlers;
 #[cfg(any(
     checkpoint_handler_memblock,
+    checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
     checkpoint_handler_scheduler_action,
