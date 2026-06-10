@@ -50,8 +50,12 @@ pub fn run() -> SmokeResult {
         || !platform_bus.of_platform_candidates_are_available()
         || !platform_bus.of_platform_candidate_names_printed()
         || !platform_bus.of_platform_candidate_compatibles_printed()
-        || !platform_bus.of_platform_device_registration_deferred()
+        || !platform_bus.of_platform_devices_created()
+        || !platform_bus.of_platform_devices_added()
         || platform_bus.of_platform_candidate_count() == 0
+        || platform_bus.platform_device_count() != platform_bus.of_platform_candidate_count()
+        || platform_bus.klist_device_count() != platform_bus.of_platform_candidate_count()
+        || !check_platform_device_ref_chain(platform_bus, &ctx.device_tree)
         || ctx.driver_core_deferred.state() != State::Ready
         || !ctx.driver_core_deferred.post_platform_deferred()
         || !ctx.driver_core_deferred.entry_position_preserved()
@@ -131,6 +135,30 @@ pub fn run() -> SmokeResult {
         ctx.initcall_table.entry_count()
     ));
     SmokeResult::Passed
+}
+
+fn check_platform_device_ref_chain(
+    platform_bus: &crate::objects::initcall::PlatformBus,
+    device_tree: &crate::objects::device_tree::DeviceTree,
+) -> bool {
+    let Some(device_ref) = platform_bus.klist_device_ref(0) else {
+        return false;
+    };
+    let Some(platform_device) = platform_bus.platform_device(device_ref) else {
+        return false;
+    };
+    if !platform_device.added()
+        || !platform_device.dev().registered()
+        || !platform_device.dev().bus_bound()
+        || !platform_device.id_bound()
+        || !platform_device.resources_bound()
+    {
+        return false;
+    }
+    let Some(node) = device_tree.node(platform_device.dev().node_id()) else {
+        return false;
+    };
+    !node.name().is_empty() && node.property(b"compatible").is_some()
 }
 
 fn check_entry_records(table: &InitcallTable) -> bool {

@@ -9,6 +9,7 @@ pub mod cpu_control;
 pub mod cpu_group;
 pub mod cpu_hotplug;
 pub mod cpu_id_map;
+pub mod device;
 pub mod device_tree;
 pub mod dma_cache_policy;
 pub mod early_dtb;

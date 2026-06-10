@@ -32,8 +32,12 @@ fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
         || !platform_bus.of_platform_candidates_are_available()
         || !platform_bus.of_platform_candidate_names_printed()
         || !platform_bus.of_platform_candidate_compatibles_printed()
-        || !platform_bus.of_platform_device_registration_deferred()
+        || !platform_bus.of_platform_devices_created()
+        || !platform_bus.of_platform_devices_added()
         || platform_bus.of_platform_candidate_count() == 0
+        || platform_bus.platform_device_count() != platform_bus.of_platform_candidate_count()
+        || platform_bus.klist_device_count() != platform_bus.of_platform_candidate_count()
+        || !first_platform_device_chain_valid(ctx)
     {
         kunit::fail(
             total,
@@ -48,7 +52,31 @@ fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
         "of_platform_candidates",
         platform_bus.of_platform_candidate_count(),
     );
+    kunit::diag_usize("platform_devices", platform_bus.platform_device_count());
+    kunit::diag_usize("klist_devices", platform_bus.klist_device_count());
     kunit::drain_printk_diag();
     kunit::pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
+}
+
+fn first_platform_device_chain_valid(ctx: &Context) -> bool {
+    let platform_bus = &ctx.platform_bus;
+    let Some(device_ref) = platform_bus.klist_device_ref(0) else {
+        return false;
+    };
+    let Some(platform_device) = platform_bus.platform_device(device_ref) else {
+        return false;
+    };
+    if !platform_device.added()
+        || !platform_device.dev().registered()
+        || !platform_device.dev().bus_bound()
+        || !platform_device.id_bound()
+        || !platform_device.resources_bound()
+    {
+        return false;
+    }
+    let Some(node) = ctx.device_tree.node(platform_device.dev().node_id()) else {
+        return false;
+    };
+    !node.name().is_empty() && node.property(b"compatible").is_some()
 }

@@ -1,4 +1,5 @@
 use super::{
+    device::{DeviceRef, PlatformDevice, PlatformDeviceStorage},
     device_tree::{DeviceNodeRef, DeviceTree},
     irq_time::IrqDispatchTree,
     mm_core::PageAllocator,
@@ -11,11 +12,11 @@ use crate::{
     context::Context,
     trace::{self, Checkpoint},
 };
+use alloc::vec::Vec;
 use core::mem::size_of;
 
 pub const INITCALL_LEVEL_COUNT: usize = 8;
 pub const INITCALL_RUN_RECORD_CAPACITY: usize = 16;
-pub const PLATFORM_BUS_ACTION_SLOT_COUNT: usize = 4;
 pub const OF_PLATFORM_CANDIDATE_CAPACITY: usize = 64;
 
 unsafe extern "C" {
@@ -320,17 +321,13 @@ const fn initcall_level_name(index: usize) -> InitcallLevelName {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum DeviceRef {
-    MockPlatformDevice,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum BusDriverRef {
     MockPlatformDriver,
 }
 
 #[derive(Clone, Copy)]
 pub struct OfPlatformCandidate<'dt> {
+    node_id: super::device_tree::DeviceNodeId,
     name: &'dt [u8],
     compatible: &'dt [u8],
 }
@@ -338,9 +335,14 @@ pub struct OfPlatformCandidate<'dt> {
 impl<'dt> OfPlatformCandidate<'dt> {
     const fn empty() -> Self {
         Self {
+            node_id: super::device_tree::DeviceNodeId::invalid(),
             name: &[],
             compatible: &[],
         }
+    }
+
+    pub const fn node_id(&self) -> super::device_tree::DeviceNodeId {
+        self.node_id
     }
 
     pub const fn name(&self) -> &'dt [u8] {
@@ -629,10 +631,9 @@ pub struct PlatformBus {
     autoprobe_enabled: bool,
     ops_bound: bool,
     register_return_zero: bool,
-    device_refs: [Option<DeviceRef>; PLATFORM_BUS_ACTION_SLOT_COUNT],
-    device_count: usize,
-    driver_refs: [Option<BusDriverRef>; PLATFORM_BUS_ACTION_SLOT_COUNT],
-    driver_count: usize,
+    platform_devices: PlatformDeviceStorage,
+    device_refs: Vec<DeviceRef>,
+    driver_refs: Vec<BusDriverRef>,
     probe_driver_deferred_count: usize,
     probe_device_deferred_count: usize,
     probe_driver_scanned_devices: bool,
@@ -646,7 +647,8 @@ pub struct PlatformBus {
     of_platform_candidates_are_available: bool,
     of_platform_candidate_names_printed: bool,
     of_platform_candidate_compatibles_printed: bool,
-    of_platform_device_registration_deferred: bool,
+    of_platform_devices_created: bool,
+    of_platform_devices_added: bool,
     of_platform_candidate_count: usize,
 }
 
@@ -660,10 +662,9 @@ impl PlatformBus {
             autoprobe_enabled: false,
             ops_bound: false,
             register_return_zero: false,
-            device_refs: [None; PLATFORM_BUS_ACTION_SLOT_COUNT],
-            device_count: 0,
-            driver_refs: [None; PLATFORM_BUS_ACTION_SLOT_COUNT],
-            driver_count: 0,
+            platform_devices: PlatformDeviceStorage::new(),
+            device_refs: Vec::new(),
+            driver_refs: Vec::new(),
             probe_driver_deferred_count: 0,
             probe_device_deferred_count: 0,
             probe_driver_scanned_devices: false,
@@ -677,7 +678,8 @@ impl PlatformBus {
             of_platform_candidates_are_available: false,
             of_platform_candidate_names_printed: false,
             of_platform_candidate_compatibles_printed: false,
-            of_platform_device_registration_deferred: false,
+            of_platform_devices_created: false,
+            of_platform_devices_added: false,
             of_platform_candidate_count: 0,
         }
     }
@@ -710,12 +712,28 @@ impl PlatformBus {
         self.register_return_zero
     }
 
-    pub const fn device_count(&self) -> usize {
-        self.device_count
+    pub fn device_count(&self) -> usize {
+        self.device_refs.len()
     }
 
-    pub const fn driver_count(&self) -> usize {
-        self.driver_count
+    pub fn driver_count(&self) -> usize {
+        self.driver_refs.len()
+    }
+
+    pub fn platform_device_count(&self) -> usize {
+        self.platform_devices.len()
+    }
+
+    pub fn klist_device_count(&self) -> usize {
+        self.device_refs.len()
+    }
+
+    pub fn klist_device_ref(&self, index: usize) -> Option<DeviceRef> {
+        self.device_refs.get(index).copied()
+    }
+
+    pub fn platform_device(&self, device: DeviceRef) -> Option<&super::device::PlatformDevice> {
+        self.platform_devices.get(device)
     }
 
     pub const fn probe_driver_deferred_count(&self) -> usize {
@@ -770,8 +788,12 @@ impl PlatformBus {
         self.of_platform_candidate_compatibles_printed
     }
 
-    pub const fn of_platform_device_registration_deferred(&self) -> bool {
-        self.of_platform_device_registration_deferred
+    pub const fn of_platform_devices_created(&self) -> bool {
+        self.of_platform_devices_created
+    }
+
+    pub const fn of_platform_devices_added(&self) -> bool {
+        self.of_platform_devices_added
     }
 
     pub const fn of_platform_candidate_count(&self) -> usize {
@@ -779,25 +801,11 @@ impl PlatformBus {
     }
 
     pub fn contains_device(&self, device: DeviceRef) -> bool {
-        let mut index = 0usize;
-        while index < self.device_count {
-            if self.device_refs[index] == Some(device) {
-                return true;
-            }
-            index += 1;
-        }
-        false
+        self.device_refs.contains(&device) && self.platform_devices.contains(device)
     }
 
     pub fn contains_driver(&self, driver: BusDriverRef) -> bool {
-        let mut index = 0usize;
-        while index < self.driver_count {
-            if self.driver_refs[index] == Some(driver) {
-                return true;
-            }
-            index += 1;
-        }
-        false
+        self.driver_refs.contains(&driver)
     }
 
     pub fn setup(
@@ -848,16 +856,44 @@ impl PlatformBus {
         self.of_platform_strict_compatible_required = true;
         self.of_platform_default_bus_match_table_used = true;
         self.of_platform_bus_nodes_recurse = candidates.bus_nodes_seen != 0;
-        self.of_platform_candidates_identified = candidates.count != 0;
+        self.of_platform_candidates_identified = candidates.count() != 0;
         self.of_platform_candidates_are_available = true;
-        self.of_platform_device_registration_deferred = true;
-        self.of_platform_candidate_count = candidates.count;
+        self.of_platform_candidate_count = candidates.count();
 
         print_of_platform_candidates(&candidates);
-        self.of_platform_candidate_names_printed = candidates.count != 0;
-        self.of_platform_candidate_compatibles_printed = candidates.count != 0;
+        self.of_platform_candidate_names_printed = candidates.count() != 0;
+        self.of_platform_candidate_compatibles_printed = candidates.count() != 0;
+        if !self.create_platform_devices_from_candidates(device_tree, &candidates) {
+            return InitcallReturn::Error(-1);
+        }
+        self.of_platform_devices_created = self.platform_device_count() == candidates.count();
+        self.of_platform_devices_added = self.klist_device_count() == candidates.count();
         trace::checkpoint(Checkpoint::OfPlatformDefaultPopulateScanComplete);
         InitcallReturn::Ok
+    }
+
+    fn create_platform_devices_from_candidates(
+        &mut self,
+        device_tree: &DeviceTree,
+        candidates: &OfPlatformCandidateSet<'_>,
+    ) -> bool {
+        let mut index = 0usize;
+        while index < candidates.count() {
+            let Some(candidate) = candidates.entry(index) else {
+                return false;
+            };
+            let Some(platform_device) =
+                PlatformDevice::from_node_id(device_tree, candidate.node_id())
+            else {
+                return false;
+            };
+            let device_ref = self.platform_devices.push(platform_device);
+            if self.add_device(device_ref).is_err() {
+                return false;
+            }
+            index += 1;
+        }
+        true
     }
 
     pub fn add_device(&mut self, device: DeviceRef) -> EventResult {
@@ -865,7 +901,7 @@ impl PlatformBus {
             || !self.registered
             || !self.devices_kset_ready
             || self.contains_device(device)
-            || self.device_count >= PLATFORM_BUS_ACTION_SLOT_COUNT
+            || !self.platform_devices.contains(device)
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -875,9 +911,21 @@ impl PlatformBus {
             );
         }
 
-        self.device_refs[self.device_count] = Some(device);
-        self.device_count += 1;
+        self.device_refs.push(device);
         Ok(())
+    }
+
+    pub fn add_smoke_platform_device(
+        &mut self,
+        device_tree: &DeviceTree,
+        node_id: super::device_tree::DeviceNodeId,
+    ) -> Result<DeviceRef, ()> {
+        let Some(platform_device) = PlatformDevice::from_node_id(device_tree, node_id) else {
+            return Err(());
+        };
+        let device_ref = self.platform_devices.push(platform_device);
+        self.add_device(device_ref).map_err(|_| ())?;
+        Ok(device_ref)
     }
 
     pub fn add_driver(&mut self, driver: BusDriverRef) -> EventResult {
@@ -885,7 +933,6 @@ impl PlatformBus {
             || !self.registered
             || !self.drivers_kset_ready
             || self.contains_driver(driver)
-            || self.driver_count >= PLATFORM_BUS_ACTION_SLOT_COUNT
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -895,8 +942,7 @@ impl PlatformBus {
             );
         }
 
-        self.driver_refs[self.driver_count] = Some(driver);
-        self.driver_count += 1;
+        self.driver_refs.push(driver);
         Ok(())
     }
 
@@ -904,7 +950,7 @@ impl PlatformBus {
         if self.lifecycle.state() != State::Ready
             || !self.registered
             || !self.devices_kset_ready
-            || self.device_count == 0
+            || self.device_refs.is_empty()
             || !is_bus_driver_ref_ready(driver)
         {
             return failed_condition(
@@ -924,7 +970,7 @@ impl PlatformBus {
         if self.lifecycle.state() != State::Ready
             || !self.registered
             || !self.drivers_kset_ready
-            || self.driver_count == 0
+            || self.driver_refs.is_empty()
             || !is_device_ref_ready(device)
         {
             return failed_condition(
@@ -941,8 +987,8 @@ impl PlatformBus {
     }
 }
 
-const fn is_device_ref_ready(device: DeviceRef) -> bool {
-    matches!(device, DeviceRef::MockPlatformDevice)
+const fn is_device_ref_ready(_device: DeviceRef) -> bool {
+    true
 }
 
 const fn is_bus_driver_ref_ready(driver: BusDriverRef) -> bool {
@@ -981,6 +1027,10 @@ impl<'dt> OfPlatformCandidateSet<'dt> {
             None
         }
     }
+
+    const fn count(&self) -> usize {
+        self.count
+    }
 }
 
 fn collect_of_platform_candidates(device_tree: &DeviceTree) -> Option<OfPlatformCandidateSet<'_>> {
@@ -1006,6 +1056,7 @@ fn collect_of_platform_bus_create<'dt>(
     }
 
     if !candidates.push(OfPlatformCandidate {
+        node_id: node.id(),
         name: node.name(),
         compatible: first_compatible(compatible.raw_value()),
     }) {
@@ -1076,11 +1127,11 @@ fn cstr_slice_len(value: &[u8]) -> usize {
 fn print_of_platform_candidates(candidates: &OfPlatformCandidateSet<'_>) {
     crate::objects::printk::write_fmt(format_args!(
         "of_platform: candidates={}\n",
-        candidates.count
+        candidates.count()
     ));
 
     let mut index = 0usize;
-    while index < candidates.count {
+    while index < candidates.count() {
         let Some(candidate) = candidates.entry(index) else {
             return;
         };
@@ -1630,6 +1681,20 @@ pub fn initcall_phase_ready(
         && platform_bus.autoprobe_enabled()
         && platform_bus.ops_bound()
         && platform_bus.register_return_zero()
+        && platform_bus.of_platform_source_tree_ready()
+        && platform_bus.of_platform_root_children_scanned()
+        && platform_bus.of_platform_strict_compatible_required()
+        && platform_bus.of_platform_default_bus_match_table_used()
+        && platform_bus.of_platform_bus_nodes_recurse()
+        && platform_bus.of_platform_candidates_identified()
+        && platform_bus.of_platform_candidates_are_available()
+        && platform_bus.of_platform_candidate_names_printed()
+        && platform_bus.of_platform_candidate_compatibles_printed()
+        && platform_bus.of_platform_devices_created()
+        && platform_bus.of_platform_devices_added()
+        && platform_bus.of_platform_candidate_count() != 0
+        && platform_bus.platform_device_count() == platform_bus.of_platform_candidate_count()
+        && platform_bus.klist_device_count() == platform_bus.of_platform_candidate_count()
         && driver_core.state() == State::Ready
         && driver_core.post_platform_deferred()
         && driver_core.entry_position_preserved()

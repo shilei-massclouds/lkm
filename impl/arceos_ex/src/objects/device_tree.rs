@@ -23,6 +23,19 @@ const MAX_DEPTH: usize = 64;
 const NO_INDEX: usize = usize::MAX;
 const ROOT_NODE_NAME: [u8; 1] = [b'/'];
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct DeviceNodeId(usize);
+
+impl DeviceNodeId {
+    pub const fn invalid() -> Self {
+        Self(NO_INDEX)
+    }
+
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
 pub struct DeviceTree {
     lifecycle: Lifecycle,
     storage: PhysRange,
@@ -285,6 +298,17 @@ impl DeviceTree {
         Some(DeviceNodeRef { tree: self, index })
     }
 
+    pub fn node(&self, id: DeviceNodeId) -> Option<DeviceNodeRef<'_>> {
+        if self.lifecycle.state() != State::Ready {
+            return None;
+        }
+        self.record_node(id.index())?;
+        Some(DeviceNodeRef {
+            tree: self,
+            index: id.index(),
+        })
+    }
+
     fn record_node(&self, index: usize) -> Option<DeviceNodeRecord> {
         self.records()?.node(index)
     }
@@ -328,6 +352,10 @@ pub struct DeviceNodeRef<'dt> {
 }
 
 impl<'dt> DeviceNodeRef<'dt> {
+    pub const fn id(&self) -> DeviceNodeId {
+        DeviceNodeId(self.index)
+    }
+
     pub fn name(&self) -> &'dt [u8] {
         self.record()
             .and_then(|record| raw_string_slice(record.name))
