@@ -148,6 +148,11 @@ predicate arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage() -> bool;
 predicate arceos_ex_must_bus_driver_ref_set_map_to_klist_like_storage() -> bool;
 predicate arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs() -> bool;
 predicate arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry() -> bool;
+predicate arceos_ex_must_device_driver_descriptor_carry_name_bus_of_match_and_probe() -> bool;
+predicate arceos_ex_must_of_match_table_lower_to_static_compatible_array() -> bool;
+predicate arceos_ex_must_bus_driver_ref_reference_driver_descriptor_not_enum_special_case() -> bool;
+predicate arceos_ex_must_platform_bus_match_use_driver_of_match_table_and_device_node() -> bool;
+predicate arceos_ex_must_mock_ns16550a_probe_avoid_platform_bus_hardcoded_compatible_branch() -> bool;
 predicate arceos_ex_must_platform_bus_probe_driver_scan_existing_devices() -> bool;
 predicate arceos_ex_must_platform_bus_probe_device_scan_registered_drivers() -> bool;
 predicate arceos_ex_must_mock_ns16550a_driver_match_of_compatible_from_device_node() -> bool;
@@ -1582,14 +1587,32 @@ type ArceosExInitcallCodingMust {
          * PlatformBus.klist_drivers may be backed by Vec<BusDriverRef> in the
          * current target, mirroring the earlier klist_devices compromise.
          * ProbeDriver scans already published devices; ProbeDevice remains the
-         * symmetric path for devices added after drivers. OF compatible match
-         * must resolve the DeviceNodeId through the persistent DeviceTree and
-         * read compatible from the node, not from copied fields on Device or
-         * PlatformDevice.
+         * symmetric path for devices added after drivers.
+         *
+         * DeviceDriverType.of_match_table is a static descriptor field, not a
+         * runtime setter. The concrete target must represent each registered
+         * driver with a stable descriptor carrying name, bus binding,
+         * of_match_table and probe function. The OF match table should lower
+         * to a static compatible array analogous to Linux
+         * struct of_device_id[], and BusDriverRef/klist_drivers must reference
+         * that descriptor rather than acting as a closed enum of bus-specific
+         * special cases.
+         *
+         * PlatformBus.match() must be the common matching boundary: it reads
+         * driver.of_match_table and resolves device.dev.of_node through the
+         * persistent DeviceTree, then compares compatible strings. Mock
+         * ns16550a may provide a static descriptor and probe function, but the
+         * platform bus implementation must not hard-code an ns16550a branch
+         * as the only matching path.
          */
         arceos_ex_must_bus_driver_ref_set_map_to_klist_like_storage();
         arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs();
         arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry();
+        arceos_ex_must_device_driver_descriptor_carry_name_bus_of_match_and_probe();
+        arceos_ex_must_of_match_table_lower_to_static_compatible_array();
+        arceos_ex_must_bus_driver_ref_reference_driver_descriptor_not_enum_special_case();
+        arceos_ex_must_platform_bus_match_use_driver_of_match_table_and_device_node();
+        arceos_ex_must_mock_ns16550a_probe_avoid_platform_bus_hardcoded_compatible_branch();
         arceos_ex_must_platform_bus_probe_driver_scan_existing_devices();
         arceos_ex_must_platform_bus_probe_device_scan_registered_drivers();
         arceos_ex_must_mock_ns16550a_driver_match_of_compatible_from_device_node();
