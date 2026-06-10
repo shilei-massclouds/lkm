@@ -11,6 +11,8 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
+    let platform_bus_root_device = &ctx.platform_bus_root_device;
+    let platform_bus = &ctx.platform_bus;
 
     if !phases::smp_runtime::initcall::is_ready() || !phases::smp_runtime::is_ready() {
         printk::write_str("initcall phase is not ready\n");
@@ -27,18 +29,18 @@ pub fn run() -> SmokeResult {
         || !ctx.driver_core_base.bus_registry_ready()
         || !ctx.driver_core_base.pre_platform_deferred()
         || !ctx.driver_core_base.pre_platform_order_preserved()
-        || ctx.platform_bus_device.state() != State::Ready
-        || !ctx.platform_bus_device.early_platform_cleanup_deferred()
-        || !ctx.platform_bus_device.static_device_registered()
-        || !ctx.platform_bus_device.device_name_bound()
-        || !ctx.platform_bus_device.register_return_zero()
-        || ctx.platform_bus_type.state() != State::Ready
-        || !ctx.platform_bus_type.registered()
-        || !ctx.platform_bus_type.devices_kset_ready()
-        || !ctx.platform_bus_type.drivers_kset_ready()
-        || !ctx.platform_bus_type.autoprobe_enabled()
-        || !ctx.platform_bus_type.ops_bound()
-        || !ctx.platform_bus_type.register_return_zero()
+        || platform_bus_root_device.state() != State::Ready
+        || !platform_bus_root_device.early_platform_cleanup_deferred()
+        || !platform_bus_root_device.static_device_registered()
+        || !platform_bus_root_device.device_name_bound()
+        || !platform_bus_root_device.register_return_zero()
+        || platform_bus.state() != State::Ready
+        || !platform_bus.registered()
+        || !platform_bus.devices_kset_ready()
+        || !platform_bus.drivers_kset_ready()
+        || !platform_bus.autoprobe_enabled()
+        || !platform_bus.ops_bound()
+        || !platform_bus.register_return_zero()
         || ctx.driver_core_deferred.state() != State::Ready
         || !ctx.driver_core_deferred.post_platform_deferred()
         || !ctx.driver_core_deferred.entry_position_preserved()

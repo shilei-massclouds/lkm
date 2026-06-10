@@ -5,7 +5,7 @@ use crate::{
     },
     context::context_ref,
     objects::{
-        initcall::{BusDeviceRef, BusDriverRef, PlatformBusType},
+        initcall::{BusDeviceRef, BusDriverRef, PlatformBus},
         state::State,
     },
 };
@@ -18,13 +18,13 @@ pub fn run() -> SmokeResult {
 }
 
 struct PlatformBusActionsFixture {
-    bus: PlatformBusType,
+    bus: PlatformBus,
 }
 
 impl PlatformBusActionsFixture {
     fn new() -> Self {
         Self {
-            bus: PlatformBusType::new(),
+            bus: PlatformBus::new(),
         }
     }
 
@@ -33,7 +33,7 @@ impl PlatformBusActionsFixture {
         assertions.assert_ok(
             "setup platform bus",
             self.bus
-                .setup(&ctx.driver_core_base, &ctx.platform_bus_device),
+                .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device),
         );
         assertions.assert("bus ready", self.bus.state() == State::Ready);
         assertions.assert("bus registered", self.bus.registered());

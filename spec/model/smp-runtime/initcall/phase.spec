@@ -73,12 +73,12 @@ object DriverCoreBase: DeviceObject {
 }
 
 /*
- * PlatformBusDevice 表示 platform_bus_init() 的第一段：
+ * PlatformBusRootDevice 表示 platform_bus_init() 的第一段：
  * early_platform_cleanup(); device_register(&platform_bus)。
  * 当前 RISC-V 路径下 early platform cleanup 不展开；platform_bus 是
  * 静态 struct device，注册成功后成为 /sys/devices 下的 root device。
  */
-object PlatformBusDevice: DeviceObject {
+object PlatformBusRootDevice: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -91,9 +91,9 @@ object PlatformBusDevice: DeviceObject {
 
                 ensures {
                     early_platform_cleanup_deferred();
-                    platform_bus_static_device_registered(PlatformBusDevice);
-                    platform_bus_device_name_bound(PlatformBusDevice);
-                    platform_bus_device_register_return_zero(PlatformBusDevice);
+                    platform_bus_static_device_registered(PlatformBusRootDevice);
+                    platform_bus_device_name_bound(PlatformBusRootDevice);
+                    platform_bus_device_register_return_zero(PlatformBusRootDevice);
                 }
             }
         }
@@ -102,9 +102,9 @@ object PlatformBusDevice: DeviceObject {
     state State::Ready {
         invariant {
             early_platform_cleanup_deferred();
-            platform_bus_static_device_registered(PlatformBusDevice);
-            platform_bus_device_name_bound(PlatformBusDevice);
-            platform_bus_device_register_return_zero(PlatformBusDevice);
+            platform_bus_static_device_registered(PlatformBusRootDevice);
+            platform_bus_device_name_bound(PlatformBusRootDevice);
+            platform_bus_device_register_return_zero(PlatformBusRootDevice);
         }
     }
 }
@@ -121,12 +121,12 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    PlatformBusType.state == State::Prepared;
+                    PlatformBus.state == State::Prepared;
                 }
 
                 ensures {
                     bus_subsys_private_allocated(PlatformBusSubsysPrivate);
-                    bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBusType);
+                    bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBus);
                     bus_subsys_notifier_ready(PlatformBusSubsysPrivate);
                     bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
                 }
@@ -137,7 +137,7 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
     state State::Prepared {
         invariant {
             bus_subsys_private_allocated(PlatformBusSubsysPrivate);
-            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBusType);
+            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBus);
             bus_subsys_notifier_ready(PlatformBusSubsysPrivate);
             bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
         }
@@ -157,7 +157,7 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
     state State::Ready {
         invariant {
             bus_subsys_private_allocated(PlatformBusSubsysPrivate);
-            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBusType);
+            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBus);
             bus_subsys_notifier_ready(PlatformBusSubsysPrivate);
             bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
             bus_subsys_kobject_named(PlatformBusSubsysPrivate);
@@ -185,7 +185,7 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
     state State::Online {
         invariant {
             bus_subsys_private_allocated(PlatformBusSubsysPrivate);
-            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBusType);
+            bus_subsys_private_bound_to_bus(PlatformBusSubsysPrivate, PlatformBus);
             bus_subsys_notifier_ready(PlatformBusSubsysPrivate);
             bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
             bus_subsys_kobject_named(PlatformBusSubsysPrivate);
@@ -205,13 +205,13 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
 }
 
 /*
- * PlatformBusType 是通用 BusType 的 platform 实例。Preset 对应静态
- * const struct bus_type platform_bus_type 的 name/ops/dev_groups 绑定，
- * 并声明 arch_initcall_sync(of_platform_default_populate_init) entry；
- * Setup 对应 platform_bus_init() 中的 bus_register(&platform_bus_type)。
+ * PlatformBus 是 PlatformBusType 的 singleton 实例。Preset 对应静态
+ * struct bus_type platform_bus_type 的 name/ops/dev_groups 绑定，并声明
+ * arch_initcall_sync(of_platform_default_populate_init) entry；Setup 对应
+ * platform_bus_init() 中的 bus_register(&platform_bus_type)。
  * 真正的 platform device/driver 枚举与 probe 留给后续 initcall。
  */
-object PlatformBusType: BusType {
+object PlatformBus: PlatformBusType {
     initial_state: State::Base;
 
     state State::Base {
@@ -229,18 +229,18 @@ object PlatformBusType: BusType {
                 }
 
                 ensures {
-                    bus_type_descriptor_bound(PlatformBusType);
-                    bus_type_name_bound(PlatformBusType);
-                    bus_type_ops_bound(PlatformBusType);
-                    platform_bus_type_ops_bound(PlatformBusType);
+                    bus_type_descriptor_bound(PlatformBus);
+                    bus_type_name_bound(PlatformBus);
+                    bus_type_ops_bound(PlatformBus);
+                    platform_bus_type_ops_bound(PlatformBus);
                     initcall_entry_declared(InitcallEntry::OfPlatformDefaultPopulate);
                     initcall_entry_has_prototype(InitcallEntry::OfPlatformDefaultPopulate, InitcallEntryPrototype);
                     initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
                     initcall_entry_prototype_returns_result(InitcallEntryPrototype);
-                    initcall_entry_owner_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType);
-                    initcall_entry_operation_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType.Action::OfPlatformDefaultPopulateInit);
+                    initcall_entry_owner_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBus);
+                    initcall_entry_operation_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBus.Action::OfPlatformDefaultPopulateInit);
                     initcall_table_registration_committed(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
-                    initcall_table_registration_owner_bound(InitcallTable, InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType);
+                    initcall_table_registration_owner_bound(InitcallTable, InitcallEntry::OfPlatformDefaultPopulate, PlatformBus);
                     initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
                 }
             }
@@ -249,18 +249,18 @@ object PlatformBusType: BusType {
 
     state State::Prepared {
         invariant {
-            bus_type_descriptor_bound(PlatformBusType);
-            bus_type_name_bound(PlatformBusType);
-            bus_type_ops_bound(PlatformBusType);
-            platform_bus_type_ops_bound(PlatformBusType);
+            bus_type_descriptor_bound(PlatformBus);
+            bus_type_name_bound(PlatformBus);
+            bus_type_ops_bound(PlatformBus);
+            platform_bus_type_ops_bound(PlatformBus);
             initcall_entry_declared(InitcallEntry::OfPlatformDefaultPopulate);
             initcall_entry_has_prototype(InitcallEntry::OfPlatformDefaultPopulate, InitcallEntryPrototype);
             initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
             initcall_entry_prototype_returns_result(InitcallEntryPrototype);
-            initcall_entry_owner_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType);
-            initcall_entry_operation_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType.Action::OfPlatformDefaultPopulateInit);
+            initcall_entry_owner_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBus);
+            initcall_entry_operation_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBus.Action::OfPlatformDefaultPopulateInit);
             initcall_table_registration_committed(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
-            initcall_table_registration_owner_bound(InitcallTable, InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType);
+            initcall_table_registration_owner_bound(InitcallTable, InitcallEntry::OfPlatformDefaultPopulate, PlatformBus);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
         }
 
@@ -268,7 +268,7 @@ object PlatformBusType: BusType {
             on Event::Setup -> State::Ready {
                 depends_on {
                     DriverCoreBase.state == State::Ready;
-                    PlatformBusDevice.state == State::Ready;
+                    PlatformBusRootDevice.state == State::Ready;
                 }
 
                 drives {
@@ -278,18 +278,18 @@ object PlatformBusType: BusType {
                 }
 
                 ensures {
-                    bus_type_subsys_private_ready(PlatformBusType, PlatformBusSubsysPrivate);
-                    bus_type_subsys_private_online(PlatformBusType, PlatformBusSubsysPrivate);
-                    bus_type_registered(PlatformBusType);
-                    bus_type_devices_kset_ready(PlatformBusType);
-                    bus_type_drivers_kset_ready(PlatformBusType);
-                    bus_type_autoprobe_enabled(PlatformBusType);
-                    bus_type_register_return_zero(PlatformBusType);
-                    platform_bus_type_registered(PlatformBusType);
-                    platform_bus_type_devices_kset_ready(PlatformBusType);
-                    platform_bus_type_drivers_kset_ready(PlatformBusType);
-                    platform_bus_type_autoprobe_enabled(PlatformBusType);
-                    platform_bus_register_return_zero(PlatformBusType);
+                    bus_type_subsys_private_ready(PlatformBus, PlatformBusSubsysPrivate);
+                    bus_type_subsys_private_online(PlatformBus, PlatformBusSubsysPrivate);
+                    bus_type_registered(PlatformBus);
+                    bus_type_devices_kset_ready(PlatformBus);
+                    bus_type_drivers_kset_ready(PlatformBus);
+                    bus_type_autoprobe_enabled(PlatformBus);
+                    bus_type_register_return_zero(PlatformBus);
+                    platform_bus_type_registered(PlatformBus);
+                    platform_bus_type_devices_kset_ready(PlatformBus);
+                    platform_bus_type_drivers_kset_ready(PlatformBus);
+                    platform_bus_type_autoprobe_enabled(PlatformBus);
+                    platform_bus_register_return_zero(PlatformBus);
                 }
             }
         }
@@ -297,52 +297,33 @@ object PlatformBusType: BusType {
 
     state State::Ready {
         invariant {
-            bus_type_descriptor_bound(PlatformBusType);
-            bus_type_name_bound(PlatformBusType);
-            bus_type_ops_bound(PlatformBusType);
-            bus_type_subsys_private_ready(PlatformBusType, PlatformBusSubsysPrivate);
-            bus_type_subsys_private_online(PlatformBusType, PlatformBusSubsysPrivate);
-            bus_type_registered(PlatformBusType);
-            bus_type_devices_kset_ready(PlatformBusType);
-            bus_type_drivers_kset_ready(PlatformBusType);
-            bus_type_autoprobe_enabled(PlatformBusType);
-            bus_type_register_return_zero(PlatformBusType);
-            platform_bus_type_ops_bound(PlatformBusType);
-            platform_bus_type_registered(PlatformBusType);
-            platform_bus_type_devices_kset_ready(PlatformBusType);
-            platform_bus_type_drivers_kset_ready(PlatformBusType);
-            platform_bus_type_autoprobe_enabled(PlatformBusType);
-            platform_bus_register_return_zero(PlatformBusType);
+            bus_type_descriptor_bound(PlatformBus);
+            bus_type_name_bound(PlatformBus);
+            bus_type_ops_bound(PlatformBus);
+            bus_type_subsys_private_ready(PlatformBus, PlatformBusSubsysPrivate);
+            bus_type_subsys_private_online(PlatformBus, PlatformBusSubsysPrivate);
+            bus_type_registered(PlatformBus);
+            bus_type_devices_kset_ready(PlatformBus);
+            bus_type_drivers_kset_ready(PlatformBus);
+            bus_type_autoprobe_enabled(PlatformBus);
+            bus_type_register_return_zero(PlatformBus);
+            platform_bus_type_ops_bound(PlatformBus);
+            platform_bus_type_registered(PlatformBus);
+            platform_bus_type_devices_kset_ready(PlatformBus);
+            platform_bus_type_drivers_kset_ready(PlatformBus);
+            platform_bus_type_autoprobe_enabled(PlatformBus);
+            platform_bus_register_return_zero(PlatformBus);
             initcall_entry_declared(InitcallEntry::OfPlatformDefaultPopulate);
             initcall_entry_has_prototype(InitcallEntry::OfPlatformDefaultPopulate, InitcallEntryPrototype);
             initcall_entry_prototype_no_payload_args(InitcallEntryPrototype);
             initcall_entry_prototype_returns_result(InitcallEntryPrototype);
-            initcall_entry_owner_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType);
-            initcall_entry_operation_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType.Action::OfPlatformDefaultPopulateInit);
+            initcall_entry_owner_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBus);
+            initcall_entry_operation_bound(InitcallEntry::OfPlatformDefaultPopulate, PlatformBus.Action::OfPlatformDefaultPopulateInit);
             initcall_table_registration_committed(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
-            initcall_table_registration_owner_bound(InitcallTable, InitcallEntry::OfPlatformDefaultPopulate, PlatformBusType);
+            initcall_table_registration_owner_bound(InitcallTable, InitcallEntry::OfPlatformDefaultPopulate, PlatformBus);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
         }
 
-        /*
-         * OfPlatformDefaultPopulateInit 是 arch_initcall_sync 注册到
-         * InitcallTable 的 PlatformBusType action。当前为空实现，只输出
-         * trace；真正的 of_platform_default_populate_init() 设备枚举在
-         * 下一轮展开。
-         */
-        actions {
-            Action::OfPlatformDefaultPopulateInit {
-                state_effect: StateEffect::None;
-                depends_on {
-                    InitcallTable.state == State::Prepared;
-                }
-                ensures {
-                    initcall_entry_invoked(InitcallEntry::OfPlatformDefaultPopulate);
-                    initcall_entry_return_recorded(InitcallEntry::OfPlatformDefaultPopulate);
-                    initcall_entry_run_context_checked(InitcallEntry::OfPlatformDefaultPopulate);
-                }
-            }
-        }
     }
 }
 
@@ -359,7 +340,7 @@ object DriverCoreDeferred: DeviceObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    PlatformBusType.state == State::Ready;
+                    PlatformBus.state == State::Ready;
                 }
 
                 ensures {
@@ -390,8 +371,8 @@ object IrqProcViewDeferred: KernelObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     DriverCoreBase.state == State::Ready;
-                    PlatformBusDevice.state == State::Ready;
-                    PlatformBusType.state == State::Ready;
+                    PlatformBusRootDevice.state == State::Ready;
+                    PlatformBus.state == State::Ready;
                     DriverCoreDeferred.state == State::Ready;
                     IrqDispatchTree.state == State::Ready;
                 }
@@ -461,7 +442,7 @@ object InitcallTable: InitcallTableType {
                 depends_on {
                     CtorTable.state == State::Ready;
                     StaticObjects.state == State::Online;
-                    PlatformBusType.state == State::Ready;
+                    PlatformBus.state == State::Ready;
                 }
 
                 ensures {
@@ -507,7 +488,7 @@ object InitcallTable: InitcallTableType {
                     initcall_table_run_levels_ready(InitcallTable);
                     initcall_table_entry_operation_bindings_ready(InitcallTable);
                     initcall_table_all_levels_ran(InitcallTable);
-                    PlatformBusType.Action::OfPlatformDefaultPopulateInit;
+                    PlatformBus.Action::OfPlatformDefaultPopulateInit;
                     initcall_command_line_scratch_reused_per_level(InitcallTable, SavedCommandLine);
                     initcall_param_parser_applied(InitcallTable);
                     initcall_filter_applied(InitcallTable);
@@ -557,8 +538,8 @@ object InitcallBoundary: KernelObject {
                 depends_on {
                     CpusetSmpTrimmed.state == State::Ready;
                     DriverCoreBase.state == State::Ready;
-                    PlatformBusDevice.state == State::Ready;
-                    PlatformBusType.state == State::Ready;
+                    PlatformBusRootDevice.state == State::Ready;
+                    PlatformBus.state == State::Ready;
                     DriverCoreDeferred.state == State::Ready;
                     IrqProcViewDeferred.state == State::Ready;
                     CtorTable.state == State::Ready;
@@ -603,9 +584,9 @@ object InitcallPhase: PhaseObject {
                 drives {
                     CpusetSmpTrimmed.Event::Setup;
                     DriverCoreBase.Event::Setup;
-                    PlatformBusDevice.Event::Setup;
-                    PlatformBusType.Event::Preset;
-                    PlatformBusType.Event::Setup;
+                    PlatformBusRootDevice.Event::Setup;
+                    PlatformBus.Event::Preset;
+                    PlatformBus.Event::Setup;
                     DriverCoreDeferred.Event::Setup;
                     IrqProcViewDeferred.Event::Setup;
                     CtorTable.Event::Setup;
@@ -619,8 +600,8 @@ object InitcallPhase: PhaseObject {
                     cpuset_smp_trimmed_noop();
                     driver_core_device_registry_ready(DriverCoreBase);
                     driver_core_bus_registry_ready(DriverCoreBase);
-                    platform_bus_static_device_registered(PlatformBusDevice);
-                    platform_bus_type_registered(PlatformBusType);
+                    platform_bus_static_device_registered(PlatformBusRootDevice);
+                    platform_bus_type_registered(PlatformBus);
                     driver_core_post_platform_deferred();
                     irq_proc_view_setup_deferred();
                     constructors_trimmed_or_empty(CtorTable);
@@ -637,8 +618,8 @@ object InitcallPhase: PhaseObject {
             RuntimeCorePhase.state == State::Ready;
             CpusetSmpTrimmed.state == State::Ready;
             DriverCoreBase.state == State::Ready;
-            PlatformBusDevice.state == State::Ready;
-            PlatformBusType.state == State::Ready;
+            PlatformBusRootDevice.state == State::Ready;
+            PlatformBus.state == State::Ready;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;

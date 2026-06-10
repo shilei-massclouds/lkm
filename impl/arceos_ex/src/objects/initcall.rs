@@ -195,7 +195,7 @@ fn postcore_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
 }
 
 fn of_platform_default_populate_init(ctx: ContextRef<'_>) -> InitcallReturn {
-    ctx.platform_bus_type.of_platform_default_populate_init()
+    ctx.platform_bus.of_platform_default_populate_init()
 }
 
 fn subsys_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
@@ -522,7 +522,7 @@ impl DriverCoreBase {
     }
 }
 
-pub struct PlatformBusDevice {
+pub struct PlatformBusRootDevice {
     lifecycle: Lifecycle,
     early_platform_cleanup_deferred: bool,
     static_device_registered: bool,
@@ -530,7 +530,7 @@ pub struct PlatformBusDevice {
     register_return_zero: bool,
 }
 
-impl PlatformBusDevice {
+impl PlatformBusRootDevice {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -588,7 +588,7 @@ impl PlatformBusDevice {
     }
 }
 
-pub struct PlatformBusType {
+pub struct PlatformBus {
     lifecycle: Lifecycle,
     registered: bool,
     devices_kset_ready: bool,
@@ -606,7 +606,7 @@ pub struct PlatformBusType {
     probe_device_scanned_drivers: bool,
 }
 
-impl PlatformBusType {
+impl PlatformBus {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -704,13 +704,13 @@ impl PlatformBusType {
     pub fn setup(
         &mut self,
         driver_core_base: &DriverCoreBase,
-        platform_bus_device: &PlatformBusDevice,
+        platform_bus_root_device: &PlatformBusRootDevice,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || driver_core_base.state() != State::Ready
             || !driver_core_base.bus_registry_ready()
-            || platform_bus_device.state() != State::Ready
-            || !platform_bus_device.static_device_registered()
+            || platform_bus_root_device.state() != State::Ready
+            || !platform_bus_root_device.static_device_registered()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -856,10 +856,10 @@ impl DriverCoreDeferred {
         self.entry_position_preserved
     }
 
-    pub fn setup(&mut self, platform_bus_type: &PlatformBusType) -> EventResult {
+    pub fn setup(&mut self, platform_bus: &PlatformBus) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || platform_bus_type.state() != State::Ready
-            || !platform_bus_type.registered()
+            || platform_bus.state() != State::Ready
+            || !platform_bus.registered()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -910,8 +910,8 @@ impl IrqProcViewDeferred {
     pub fn setup(
         &mut self,
         driver_core_base: &DriverCoreBase,
-        platform_bus_device: &PlatformBusDevice,
-        platform_bus_type: &PlatformBusType,
+        platform_bus_root_device: &PlatformBusRootDevice,
+        platform_bus: &PlatformBus,
         driver_core_deferred: &DriverCoreDeferred,
         irq_dispatch_tree: &IrqDispatchTree,
     ) -> EventResult {
@@ -919,10 +919,10 @@ impl IrqProcViewDeferred {
             || driver_core_base.state() != State::Ready
             || !driver_core_base.device_registry_ready()
             || !driver_core_base.bus_registry_ready()
-            || platform_bus_device.state() != State::Ready
-            || !platform_bus_device.static_device_registered()
-            || platform_bus_type.state() != State::Ready
-            || !platform_bus_type.registered()
+            || platform_bus_root_device.state() != State::Ready
+            || !platform_bus_root_device.static_device_registered()
+            || platform_bus.state() != State::Ready
+            || !platform_bus.registered()
             || driver_core_deferred.state() != State::Ready
             || !driver_core_deferred.post_platform_deferred()
             || irq_dispatch_tree.state() != State::Ready
@@ -1282,8 +1282,8 @@ impl InitcallBoundary {
         &mut self,
         cpuset: &CpusetSmpTrimmed,
         driver_core_base: &DriverCoreBase,
-        platform_bus_device: &PlatformBusDevice,
-        platform_bus_type: &PlatformBusType,
+        platform_bus_root_device: &PlatformBusRootDevice,
+        platform_bus: &PlatformBus,
         driver_core: &DriverCoreDeferred,
         irq_proc_view: &IrqProcViewDeferred,
         ctor_table: &CtorTable,
@@ -1294,10 +1294,10 @@ impl InitcallBoundary {
             || driver_core_base.state() != State::Ready
             || !driver_core_base.device_registry_ready()
             || !driver_core_base.bus_registry_ready()
-            || platform_bus_device.state() != State::Ready
-            || !platform_bus_device.static_device_registered()
-            || platform_bus_type.state() != State::Ready
-            || !platform_bus_type.registered()
+            || platform_bus_root_device.state() != State::Ready
+            || !platform_bus_root_device.static_device_registered()
+            || platform_bus.state() != State::Ready
+            || !platform_bus.registered()
             || driver_core.state() != State::Ready
             || !driver_core.post_platform_deferred()
             || irq_proc_view.state() != State::Ready
@@ -1326,8 +1326,8 @@ impl InitcallBoundary {
 pub fn initcall_phase_ready(
     cpuset: &CpusetSmpTrimmed,
     driver_core_base: &DriverCoreBase,
-    platform_bus_device: &PlatformBusDevice,
-    platform_bus_type: &PlatformBusType,
+    platform_bus_root_device: &PlatformBusRootDevice,
+    platform_bus: &PlatformBus,
     driver_core: &DriverCoreDeferred,
     irq_proc_view: &IrqProcViewDeferred,
     ctor_table: &CtorTable,
@@ -1341,18 +1341,18 @@ pub fn initcall_phase_ready(
         && driver_core_base.bus_registry_ready()
         && driver_core_base.pre_platform_deferred()
         && driver_core_base.pre_platform_order_preserved()
-        && platform_bus_device.state() == State::Ready
-        && platform_bus_device.early_platform_cleanup_deferred()
-        && platform_bus_device.static_device_registered()
-        && platform_bus_device.device_name_bound()
-        && platform_bus_device.register_return_zero()
-        && platform_bus_type.state() == State::Ready
-        && platform_bus_type.registered()
-        && platform_bus_type.devices_kset_ready()
-        && platform_bus_type.drivers_kset_ready()
-        && platform_bus_type.autoprobe_enabled()
-        && platform_bus_type.ops_bound()
-        && platform_bus_type.register_return_zero()
+        && platform_bus_root_device.state() == State::Ready
+        && platform_bus_root_device.early_platform_cleanup_deferred()
+        && platform_bus_root_device.static_device_registered()
+        && platform_bus_root_device.device_name_bound()
+        && platform_bus_root_device.register_return_zero()
+        && platform_bus.state() == State::Ready
+        && platform_bus.registered()
+        && platform_bus.devices_kset_ready()
+        && platform_bus.drivers_kset_ready()
+        && platform_bus.autoprobe_enabled()
+        && platform_bus.ops_bound()
+        && platform_bus.register_return_zero()
         && driver_core.state() == State::Ready
         && driver_core.post_platform_deferred()
         && driver_core.entry_position_preserved()

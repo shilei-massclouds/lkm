@@ -47,6 +47,17 @@ predicate bus_subsys_klist_drivers_contains<T, U>(subsys: T, driver: U) -> bool;
 predicate bus_subsys_probe_files_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_groups_ready<T>(subsys: T) -> bool;
 
+predicate early_platform_cleanup_deferred() -> bool;
+predicate platform_bus_static_device_registered<T>(device: T) -> bool;
+predicate platform_bus_device_name_bound<T>(device: T) -> bool;
+predicate platform_bus_device_register_return_zero<T>(device: T) -> bool;
+predicate platform_bus_type_ops_bound<T>(bus: T) -> bool;
+predicate platform_bus_type_registered<T>(bus: T) -> bool;
+predicate platform_bus_type_devices_kset_ready<T>(bus: T) -> bool;
+predicate platform_bus_type_drivers_kset_ready<T>(bus: T) -> bool;
+predicate platform_bus_type_autoprobe_enabled<T>(bus: T) -> bool;
+predicate platform_bus_register_return_zero<T>(bus: T) -> bool;
+
 type BusDeviceRef {
 }
 
@@ -215,6 +226,24 @@ type BusType: DeviceObject {
             }
             deferred {
                 "ProbeDevice 当前只建立 bus_probe_device()/device_initial_probe() 边界；真实 match/probe/bind 依赖 Device 和 Driver 类型建模后展开。";
+            }
+        }
+    }
+}
+
+/*
+ * PlatformBusType extends the generic BusType with platform-specific
+ * initcall behavior. Instances still carry the BusType lifecycle through
+ * object wrapper events while this type defines reusable platform actions.
+ */
+type PlatformBusType: BusType {
+    processes {
+        Action::OfPlatformDefaultPopulateInit {
+            state_effect: StateEffect::None;
+            ensures {
+                initcall_entry_invoked(InitcallEntry::OfPlatformDefaultPopulate);
+                initcall_entry_return_recorded(InitcallEntry::OfPlatformDefaultPopulate);
+                initcall_entry_run_context_checked(InitcallEntry::OfPlatformDefaultPopulate);
             }
         }
     }
