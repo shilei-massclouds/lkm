@@ -57,6 +57,16 @@ predicate platform_bus_type_devices_kset_ready<T>(bus: T) -> bool;
 predicate platform_bus_type_drivers_kset_ready<T>(bus: T) -> bool;
 predicate platform_bus_type_autoprobe_enabled<T>(bus: T) -> bool;
 predicate platform_bus_register_return_zero<T>(bus: T) -> bool;
+predicate of_platform_default_populate_source_tree_ready<T, D>(bus: T, device_tree: D) -> bool;
+predicate of_platform_default_populate_root_children_scanned<T, D>(bus: T, device_tree: D) -> bool;
+predicate of_platform_default_populate_strict_compatible_required<T>(bus: T) -> bool;
+predicate of_platform_default_populate_default_bus_match_table_used<T>(bus: T) -> bool;
+predicate of_platform_default_populate_bus_nodes_recurse<T>(bus: T) -> bool;
+predicate of_platform_default_populate_candidates_identified<T>(bus: T) -> bool;
+predicate of_platform_default_populate_candidates_are_available<T>(bus: T) -> bool;
+predicate of_platform_default_populate_candidate_names_printed<T>(bus: T) -> bool;
+predicate of_platform_default_populate_candidate_compatibles_printed<T>(bus: T) -> bool;
+predicate of_platform_default_populate_device_registration_deferred<T>(bus: T) -> bool;
 
 type BusDeviceRef {
 }
@@ -240,10 +250,28 @@ type PlatformBusType: BusType {
     processes {
         Action::OfPlatformDefaultPopulateInit {
             state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                DeviceTree.state == State::Ready;
+                InitcallTable.state == State::Prepared;
+            }
             ensures {
                 initcall_entry_invoked(InitcallEntry::OfPlatformDefaultPopulate);
                 initcall_entry_return_recorded(InitcallEntry::OfPlatformDefaultPopulate);
                 initcall_entry_run_context_checked(InitcallEntry::OfPlatformDefaultPopulate);
+                of_platform_default_populate_source_tree_ready(self, DeviceTree);
+                of_platform_default_populate_root_children_scanned(self, DeviceTree);
+                of_platform_default_populate_strict_compatible_required(self);
+                of_platform_default_populate_default_bus_match_table_used(self);
+                of_platform_default_populate_bus_nodes_recurse(self);
+                of_platform_default_populate_candidates_identified(self);
+                of_platform_default_populate_candidates_are_available(self);
+                of_platform_default_populate_candidate_names_printed(self);
+                of_platform_default_populate_candidate_compatibles_printed(self);
+                of_platform_default_populate_device_registration_deferred(self);
+            }
+            deferred {
+                "当前只建模 of_platform_default_populate_init() 从 DeviceTree root children 扫描并识别 OF platform device candidates；真正 of_platform_device_create()/device_add() 和加入 PlatformBus klist 留到 Device/Driver 建模后展开。";
             }
         }
     }

@@ -497,6 +497,16 @@ object InitcallTable: InitcallTableType {
                     initcall_entry_return_recorded(InitcallEntry::OfPlatformDefaultPopulate);
                     initcall_entry_skipped_recorded(InitcallEntry::OfPlatformDefaultPopulate);
                     initcall_entry_run_context_checked(InitcallEntry::OfPlatformDefaultPopulate);
+                    of_platform_default_populate_source_tree_ready(PlatformBus, DeviceTree);
+                    of_platform_default_populate_root_children_scanned(PlatformBus, DeviceTree);
+                    of_platform_default_populate_strict_compatible_required(PlatformBus);
+                    of_platform_default_populate_default_bus_match_table_used(PlatformBus);
+                    of_platform_default_populate_bus_nodes_recurse(PlatformBus);
+                    of_platform_default_populate_candidates_identified(PlatformBus);
+                    of_platform_default_populate_candidates_are_available(PlatformBus);
+                    of_platform_default_populate_candidate_names_printed(PlatformBus);
+                    of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
+                    of_platform_default_populate_device_registration_deferred(PlatformBus);
                 }
             }
         }
@@ -521,6 +531,16 @@ object InitcallTable: InitcallTableType {
             initcall_entry_return_recorded(InitcallEntry::OfPlatformDefaultPopulate);
             initcall_entry_skipped_recorded(InitcallEntry::OfPlatformDefaultPopulate);
             initcall_entry_run_context_checked(InitcallEntry::OfPlatformDefaultPopulate);
+            of_platform_default_populate_source_tree_ready(PlatformBus, DeviceTree);
+            of_platform_default_populate_root_children_scanned(PlatformBus, DeviceTree);
+            of_platform_default_populate_strict_compatible_required(PlatformBus);
+            of_platform_default_populate_default_bus_match_table_used(PlatformBus);
+            of_platform_default_populate_bus_nodes_recurse(PlatformBus);
+            of_platform_default_populate_candidates_identified(PlatformBus);
+            of_platform_default_populate_candidates_are_available(PlatformBus);
+            of_platform_default_populate_candidate_names_printed(PlatformBus);
+            of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
+            of_platform_default_populate_device_registration_deferred(PlatformBus);
         }
     }
 }
@@ -607,6 +627,10 @@ object InitcallPhase: PhaseObject {
                     constructors_trimmed_or_empty(CtorTable);
                     initcall_table_registered_entries_collected(InitcallTable);
                     initcall_table_all_levels_ran(InitcallTable);
+                    of_platform_default_populate_candidates_identified(PlatformBus);
+                    of_platform_default_populate_candidate_names_printed(PlatformBus);
+                    of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
+                    of_platform_default_populate_device_registration_deferred(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }
             }

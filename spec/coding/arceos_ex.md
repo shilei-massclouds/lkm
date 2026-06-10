@@ -308,6 +308,23 @@ sync slot 和 rootfs slot 可以作为静态收集 slot 保留其 Linux 排序�
 `RootfsPhase`。具体 entry 的目标副作用，例如 `of_platform_default_populate_init()` 填充 platform bus，应由
 对应对象规格和后续 smoke 测试覆盖，不混入 initcall 机制本身。
 
+`of_platform_default_populate_init()` 是 `PlatformBus` 的 entry action。它的源对象是正式
+`DeviceTree`，目标对象是 `PlatformBus`；`InitcallTable` 只负责按表执行该 entry，不拥有其目标副作用。
+当前实现步骤只覆盖 Linux-like candidate 识别，不声明 platform device 已创建，也不声明已经加入
+`BusType.klist_devices`。
+
+该 action 的遍历规则参考 Linux 6.12.37 `drivers/of/platform.c`：
+`of_platform_default_populate(NULL, ...)` 使用 `of_default_bus_match_table` 调用
+`of_platform_populate()`；`root == NULL` 时 root 解析为 `/`；`of_platform_populate()` 遍历 `/`
+的直接 child，并以 `strict=true` 调用 `of_platform_bus_create()`。因此每个被考虑的节点必须有
+`compatible` 属性；缺失 `compatible` 的节点跳过。可用性判断应按 `of_device_is_available()`：
+`status` 缺失、`status = "okay"` 或 `status = "ok"` 视为 available，其它状态跳过。节点被识别为
+candidate 后，只有当该节点匹配 Linux 默认 bus 表（`simple-bus`、`simple-mfd`、`isa`，以及未来配置启用时的
+`arm,amba-bus`）才递归扫描它的 children。
+
+在当前阶段，识别出的每个 candidate 必须打印节点 name 和 compatible，便于从 KUnit/smoke 输出中核对遍历结果。
+`of_platform_device_create()`、`device_add()`、`BusType.Action::AddDevice` 和 driver probe/bind 仍然 deferred。
+
 ## RootfsPhase 编码约束
 
 `RootfsPhase` 是 `SMP Runtime Phase` 的第四个子阶段，formal model 路径为

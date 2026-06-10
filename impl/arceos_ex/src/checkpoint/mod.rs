@@ -4,6 +4,7 @@ pub mod handlers;
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
     checkpoint_handler_scheduler_action,
+    checkpoint_handler_of_platform,
     checkpoint_handler_smoke
 ))]
 mod kunit;

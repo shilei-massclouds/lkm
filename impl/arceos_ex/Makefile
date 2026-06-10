@@ -14,7 +14,7 @@ endif
 endif
 PROBE_FILE_LIST := $(if $(PROBE_FILE),$(strip $(shell sed -e 's/#.*//' "$(PROBE_FILE)")),)
 PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST))
-KNOWN_PROBES := memblock earlycon kernel-init-task scheduler-action smoke
+KNOWN_PROBES := memblock earlycon kernel-init-task of-platform scheduler-action smoke
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))

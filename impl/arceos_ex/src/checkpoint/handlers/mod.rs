@@ -8,6 +8,8 @@ mod kernel_init_task;
 compile_error!("checkpoint handler memblock-api was renamed to memblock");
 #[cfg(checkpoint_handler_memblock)]
 mod memblock;
+#[cfg(checkpoint_handler_of_platform)]
+mod of_platform;
 #[cfg(checkpoint_handler_scheduler_action)]
 mod scheduler_action;
 #[cfg(checkpoint_handler_smoke)]
@@ -52,6 +54,8 @@ const POST_VM_HANDLERS: &[Handler] = &[
     trace::HANDLER,
     #[cfg(checkpoint_handler_memblock)]
     memblock::HANDLER,
+    #[cfg(checkpoint_handler_of_platform)]
+    of_platform::HANDLER,
     #[cfg(checkpoint_handler_earlycon)]
     earlycon::HANDLER,
     #[cfg(checkpoint_handler_kernel_init_task)]
@@ -70,6 +74,7 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_memblock,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
+    checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
     checkpoint_handler_smoke
 ))]
@@ -78,6 +83,10 @@ pub const fn kunit_case_count() -> usize {
     #[cfg(checkpoint_handler_memblock)]
     {
         count += memblock::KUNIT_CASE_COUNT;
+    }
+    #[cfg(checkpoint_handler_of_platform)]
+    {
+        count += of_platform::KUNIT_CASE_COUNT;
     }
     #[cfg(checkpoint_handler_earlycon)]
     {

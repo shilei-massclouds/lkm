@@ -45,6 +45,14 @@ pub fn diag_hex_pair(label: &str, first: usize, second: usize) {
     putchar(b'\n');
 }
 
+pub fn diag_usize(label: &str, value: usize) {
+    putstr("  # ");
+    putstr(label);
+    putstr("=");
+    put_usize(value);
+    putchar(b'\n');
+}
+
 pub fn drain_printk_diag() {
     let mut at_line_start = true;
     let mut wrote = false;

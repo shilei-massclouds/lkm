@@ -94,6 +94,13 @@ predicate arceos_ex_must_smp_bringup_keep_bp_ap_sync_explicit() -> bool;
 predicate arceos_ex_must_smp_bringup_make_secondary_cpus_online() -> bool;
 predicate arceos_ex_must_smp_bringup_keep_ap_internals_deferred() -> bool;
 predicate arceos_ex_must_smp_runtime_keep_later_subphases_deferred() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_use_device_tree_source() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_follow_linux_root_child_traversal() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_require_compatible_strict() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_recurse_default_bus_matches() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_filter_available_nodes() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_print_candidate_identity() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_defer_device_registration() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -1203,6 +1210,73 @@ type ArceosExInitcallCodingMust {
          * object model exists.
          */
         arceos_ex_must_initcall_keep_static_mechanism_separate_from_entry_effects();
+
+        /*
+         * OF platform default populate source:
+         *
+         * of_platform_default_populate_init() belongs to PlatformBus and must
+         * use the already Ready DeviceTree as its source object. The action is
+         * a source-to-target populate boundary from DeviceTree to PlatformBus,
+         * not an InitcallTable mechanism detail.
+         */
+        arceos_ex_must_of_platform_default_populate_use_device_tree_source();
+
+        /*
+         * Linux-like traversal:
+         *
+         * The initial implementation must follow Linux 6.12.37
+         * drivers/of/platform.c: of_platform_default_populate(NULL, ...)
+         * resolves root to "/", then of_platform_populate() iterates the
+         * root's direct children and calls of_platform_bus_create() with
+         * strict=true.
+         */
+        arceos_ex_must_of_platform_default_populate_follow_linux_root_child_traversal();
+
+        /*
+         * Strict compatible:
+         *
+         * Candidate identification must require a compatible property for each
+         * node considered by of_platform_bus_create(strict=true). Nodes without
+         * compatible are skipped.
+         */
+        arceos_ex_must_of_platform_default_populate_require_compatible_strict();
+
+        /*
+         * Default bus recursion:
+         *
+         * After identifying a compatible candidate, recursion into children
+         * must occur only for nodes matching the Linux default bus match table:
+         * simple-bus, simple-mfd, isa, and config-gated arm,amba-bus if the
+         * target later enables that path.
+         */
+        arceos_ex_must_of_platform_default_populate_recurse_default_bus_matches();
+
+        /*
+         * Availability filter:
+         *
+         * Candidate identification must mirror of_device_is_available(): a node
+         * is available when status is absent or is exactly "okay" or "ok".
+         */
+        arceos_ex_must_of_platform_default_populate_filter_available_nodes();
+
+        /*
+         * Candidate printout:
+         *
+         * For this modeling step the action must print every identified
+         * candidate's node name and compatible value so the traversal result is
+         * inspectable from smoke/KUnit output.
+         */
+        arceos_ex_must_of_platform_default_populate_print_candidate_identity();
+
+        /*
+         * Device registration deferred:
+         *
+         * This step must not claim that candidates have already become
+         * platform devices or BusType device refs. of_platform_device_create(),
+         * device_add() and bus klist membership remain deferred until the
+         * Device/Driver model is expanded.
+         */
+        arceos_ex_must_of_platform_default_populate_defer_device_registration();
     }
 }
 

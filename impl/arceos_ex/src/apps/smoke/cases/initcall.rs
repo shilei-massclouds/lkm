@@ -41,6 +41,17 @@ pub fn run() -> SmokeResult {
         || !platform_bus.autoprobe_enabled()
         || !platform_bus.ops_bound()
         || !platform_bus.register_return_zero()
+        || !platform_bus.of_platform_source_tree_ready()
+        || !platform_bus.of_platform_root_children_scanned()
+        || !platform_bus.of_platform_strict_compatible_required()
+        || !platform_bus.of_platform_default_bus_match_table_used()
+        || !platform_bus.of_platform_bus_nodes_recurse()
+        || !platform_bus.of_platform_candidates_identified()
+        || !platform_bus.of_platform_candidates_are_available()
+        || !platform_bus.of_platform_candidate_names_printed()
+        || !platform_bus.of_platform_candidate_compatibles_printed()
+        || !platform_bus.of_platform_device_registration_deferred()
+        || platform_bus.of_platform_candidate_count() == 0
         || ctx.driver_core_deferred.state() != State::Ready
         || !ctx.driver_core_deferred.post_platform_deferred()
         || !ctx.driver_core_deferred.entry_position_preserved()
