@@ -20,6 +20,7 @@ const MAX_KMALLOC_CACHES: usize = 8;
 const BUDDY_ORDER_COUNT: usize = 11;
 const BUDDY_INVALID_INDEX: usize = usize::MAX;
 const PAGE_METADATA_FLAG_BUDDY_FREE: usize = 1 << 0;
+const PAGE_METADATA_FLAG_BUDDY_ALLOCATED: usize = 1 << 1;
 const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
 const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
@@ -403,6 +404,32 @@ impl LinearMappedPageAddr {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+pub struct GfpFlags {
+    bits: usize,
+}
+
+impl GfpFlags {
+    pub const EMPTY: Self = Self { bits: 0 };
+    pub const KERNEL: Self = Self { bits: 1 << 0 };
+
+    pub const fn empty() -> Self {
+        Self::EMPTY
+    }
+
+    pub const fn kernel() -> Self {
+        Self::KERNEL
+    }
+
+    pub const fn bits(self) -> usize {
+        self.bits
+    }
+
+    const fn boot_buddy_allowed(self) -> bool {
+        self.bits & !Self::KERNEL.bits == 0
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct PageRef {
     pfn: Pfn,
     metadata_index: usize,
@@ -464,6 +491,10 @@ impl PageMetadata {
         self.flags & PAGE_METADATA_FLAG_BUDDY_FREE != 0
     }
 
+    pub const fn is_buddy_allocated(self) -> bool {
+        self.flags & PAGE_METADATA_FLAG_BUDDY_ALLOCATED != 0
+    }
+
     pub const fn buddy_order(self) -> usize {
         self.buddy_order
     }
@@ -485,11 +516,29 @@ impl PageMetadata {
     }
 
     fn mark_buddy_free(&mut self, order: usize, prev: usize, next: usize) {
+        self.flags &= !PAGE_METADATA_FLAG_BUDDY_ALLOCATED;
         self.flags |= PAGE_METADATA_FLAG_BUDDY_FREE;
         self.refcount = 0;
         self.buddy_order = order;
         self.buddy_prev = prev;
         self.buddy_next = next;
+    }
+
+    fn mark_buddy_allocated(&mut self, order: usize) {
+        self.flags &= !PAGE_METADATA_FLAG_BUDDY_FREE;
+        self.flags |= PAGE_METADATA_FLAG_BUDDY_ALLOCATED;
+        self.refcount = 1;
+        self.buddy_order = order;
+        self.buddy_prev = BUDDY_INVALID_INDEX;
+        self.buddy_next = BUDDY_INVALID_INDEX;
+    }
+
+    fn clear_buddy_state(&mut self) {
+        self.flags &= !(PAGE_METADATA_FLAG_BUDDY_FREE | PAGE_METADATA_FLAG_BUDDY_ALLOCATED);
+        self.refcount = 0;
+        self.buddy_order = 0;
+        self.buddy_prev = BUDDY_INVALID_INDEX;
+        self.buddy_next = BUDDY_INVALID_INDEX;
     }
 }
 
@@ -932,6 +981,133 @@ impl BuddyFreePageSets {
         Some(self.areas[self.zone_index(kind)?][order].nr_free)
     }
 
+    fn alloc_pages(
+        &mut self,
+        zonelist: &BootZonelistSet,
+        order: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<PageRef> {
+        if !self.ready
+            || zonelist.state() != State::Ready
+            || page_metadata_map.state() != State::Ready
+            || order >= BUDDY_ORDER_COUNT
+        {
+            return None;
+        }
+
+        let mut fallback_index = 0usize;
+        while fallback_index < zonelist.fallback_count() {
+            let Some(zone_kind) = zonelist.fallback_zone_kind(fallback_index) else {
+                return None;
+            };
+            let Some(zone_index) = self.zone_index(zone_kind) else {
+                fallback_index += 1;
+                continue;
+            };
+
+            let mut current_order = order;
+            while current_order < BUDDY_ORDER_COUNT {
+                if self.areas[zone_index][current_order].nr_free != 0 {
+                    let page =
+                        self.remove_head_free_block(zone_index, current_order, page_metadata_map)?;
+                    while current_order > order {
+                        current_order -= 1;
+                        let split_pfn = page.pfn().value().checked_add(1usize << current_order)?;
+                        if !self.add_free_block(
+                            zone_index,
+                            current_order,
+                            split_pfn,
+                            page_metadata_map,
+                        ) {
+                            return None;
+                        }
+                    }
+
+                    let mut metadata =
+                        page_metadata_map.metadata_by_index(page.metadata_index())?;
+                    if metadata.is_buddy_free() || metadata.is_buddy_allocated() {
+                        return None;
+                    }
+                    metadata.mark_buddy_allocated(order);
+                    if !page_metadata_map.write_metadata_by_index(page.metadata_index(), metadata) {
+                        return None;
+                    }
+                    return Some(page);
+                }
+                current_order += 1;
+            }
+            fallback_index += 1;
+        }
+
+        None
+    }
+
+    fn free_pages(
+        &mut self,
+        zone_index: usize,
+        zone_range: PhysRange,
+        page_size: usize,
+        page: PageRef,
+        order: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if !self.ready
+            || zone_index >= self.zone_count
+            || order >= BUDDY_ORDER_COUNT
+            || page_size == 0
+            || !page_size.is_power_of_two()
+            || !block_fits_in_range(page.pfn().value(), order, page_size, zone_range)
+        {
+            return false;
+        }
+
+        let Some(mut metadata) = page_metadata_map.metadata_by_index(page.metadata_index()) else {
+            return false;
+        };
+        if !metadata.is_buddy_allocated() || metadata.buddy_order() != order {
+            return false;
+        }
+        metadata.clear_buddy_state();
+        if !page_metadata_map.write_metadata_by_index(page.metadata_index(), metadata) {
+            return false;
+        }
+
+        let mut pfn = page.pfn().value();
+        let mut current_order = order;
+        while current_order + 1 < BUDDY_ORDER_COUNT {
+            let buddy_pfn = pfn ^ (1usize << current_order);
+            if !block_fits_in_range(buddy_pfn, current_order, page_size, zone_range) {
+                break;
+            }
+            let Some(buddy_page) = page_metadata_map.pfn_to_page(Pfn::new(buddy_pfn)) else {
+                break;
+            };
+            let Some(buddy_metadata) =
+                page_metadata_map.metadata_by_index(buddy_page.metadata_index())
+            else {
+                return false;
+            };
+            if !buddy_metadata.is_buddy_free() || buddy_metadata.buddy_order() != current_order {
+                break;
+            }
+            if self
+                .remove_free_block_by_index(
+                    zone_index,
+                    current_order,
+                    buddy_page.metadata_index(),
+                    page_metadata_map,
+                )
+                .is_none()
+            {
+                return false;
+            }
+            pfn = pfn.min(buddy_pfn);
+            current_order += 1;
+        }
+
+        self.add_free_block(zone_index, current_order, pfn, page_metadata_map)
+    }
+
     fn first_free_block(&self, page_metadata_map: &PageMetadataMap) -> Option<BuddyFreeBlock> {
         let mut zone_index = 0usize;
         while zone_index < self.zone_count {
@@ -951,6 +1127,78 @@ impl BuddyFreePageSets {
             zone_index += 1;
         }
         None
+    }
+
+    fn remove_head_free_block(
+        &mut self,
+        zone_index: usize,
+        order: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<PageRef> {
+        if zone_index >= self.zone_count || order >= BUDDY_ORDER_COUNT {
+            return None;
+        }
+        let head_index = self.areas[zone_index][order].head_index;
+        if head_index == BUDDY_INVALID_INDEX {
+            return None;
+        }
+        self.remove_free_block_by_index(zone_index, order, head_index, page_metadata_map)
+    }
+
+    fn remove_free_block_by_index(
+        &mut self,
+        zone_index: usize,
+        order: usize,
+        metadata_index: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<PageRef> {
+        if zone_index >= self.zone_count || order >= BUDDY_ORDER_COUNT {
+            return None;
+        }
+        let mut metadata = page_metadata_map.metadata_by_index(metadata_index)?;
+        if !metadata.is_buddy_free() || metadata.buddy_order() != order {
+            return None;
+        }
+
+        let prev = metadata.buddy_prev;
+        let next = metadata.buddy_next;
+        if prev == BUDDY_INVALID_INDEX {
+            if self.areas[zone_index][order].head_index != metadata_index {
+                return None;
+            }
+            self.areas[zone_index][order].head_index = next;
+        } else {
+            let mut prev_metadata = page_metadata_map.metadata_by_index(prev)?;
+            if prev_metadata.buddy_next != metadata_index {
+                return None;
+            }
+            prev_metadata.buddy_next = next;
+            if !page_metadata_map.write_metadata_by_index(prev, prev_metadata) {
+                return None;
+            }
+        }
+        if next != BUDDY_INVALID_INDEX {
+            let mut next_metadata = page_metadata_map.metadata_by_index(next)?;
+            if next_metadata.buddy_prev != metadata_index {
+                return None;
+            }
+            next_metadata.buddy_prev = prev;
+            if !page_metadata_map.write_metadata_by_index(next, next_metadata) {
+                return None;
+            }
+        }
+
+        metadata.clear_buddy_state();
+        if !page_metadata_map.write_metadata_by_index(metadata_index, metadata) {
+            return None;
+        }
+
+        let block_pages = 1usize.checked_shl(order as u32)?;
+        self.areas[zone_index][order].nr_free =
+            self.areas[zone_index][order].nr_free.checked_sub(1)?;
+        self.total_free_pages = self.total_free_pages.checked_sub(block_pages)?;
+        self.free_block_count = self.free_block_count.checked_sub(1)?;
+        page_metadata_map.page_ref_from_metadata_index(metadata_index)
     }
 
     fn zone_index(&self, kind: ZoneKind) -> Option<usize> {
@@ -1053,7 +1301,7 @@ impl BuddyFreePageSets {
         let Some(mut metadata) = page_metadata_map.metadata_by_index(metadata_index) else {
             return false;
         };
-        if metadata.is_buddy_free() {
+        if metadata.is_buddy_free() || metadata.is_buddy_allocated() {
             return false;
         }
 
@@ -1259,6 +1507,70 @@ impl PageAllocator {
             .first_free_block(page_metadata_map)
     }
 
+    pub fn alloc_pages(
+        &mut self,
+        order: usize,
+        gfp: GfpFlags,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<PageRef> {
+        if self.lifecycle.state() != State::Ready
+            || !self.handoff_complete
+            || !self.page_metadata_map_bound
+            || !gfp.boot_buddy_allowed()
+        {
+            return None;
+        }
+
+        let page = self.buddy_free_page_sets.alloc_pages(
+            &self.boot_zonelist_set,
+            order,
+            page_metadata_map,
+        )?;
+        if !self.sync_zone_free_pages() {
+            return None;
+        }
+        Some(page)
+    }
+
+    pub fn alloc_page(
+        &mut self,
+        gfp: GfpFlags,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<PageRef> {
+        self.alloc_pages(0, gfp, page_metadata_map)
+    }
+
+    pub fn free_pages(
+        &mut self,
+        page: PageRef,
+        order: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || !self.handoff_complete
+            || !self.page_metadata_map_bound
+            || order >= BUDDY_ORDER_COUNT
+        {
+            return false;
+        }
+
+        let Some(zone_index) = self.zone_fact_index_for_page(page, order, page_metadata_map) else {
+            return false;
+        };
+        let zone_range = self.zone_facts[zone_index].range();
+        if !self.buddy_free_page_sets.free_pages(
+            zone_index,
+            zone_range,
+            page_metadata_map.page_size(),
+            page,
+            order,
+            page_metadata_map,
+        ) {
+            return false;
+        }
+        self.sync_zone_free_pages()
+    }
+
     pub fn preset(
         &mut self,
         topology: &MemoryTopology,
@@ -1332,14 +1644,8 @@ impl PageAllocator {
             return self.failed_setup();
         }
 
-        let mut zone_index = 0usize;
-        while zone_index < self.zone_fact_count {
-            let kind = self.zone_facts[zone_index].kind();
-            let Some(free_pages) = self.buddy_free_page_sets.zone_free_pages(kind) else {
-                return self.failed_setup();
-            };
-            self.zone_facts[zone_index].free_pages = free_pages;
-            zone_index += 1;
+        if !self.sync_zone_free_pages() {
+            return self.failed_setup();
         }
 
         self.handoff_complete = self.totalram_pages != 0
@@ -1413,6 +1719,44 @@ impl PageAllocator {
             index += 1;
         }
         None
+    }
+
+    fn zone_fact_index_for_page(
+        &self,
+        page: PageRef,
+        order: usize,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<usize> {
+        if order >= BUDDY_ORDER_COUNT || page_metadata_map.page_to_pfn(page)? != page.pfn() {
+            return None;
+        }
+
+        let mut index = 0usize;
+        while index < self.zone_fact_count {
+            if block_fits_in_range(
+                page.pfn().value(),
+                order,
+                page_metadata_map.page_size(),
+                self.zone_facts[index].range(),
+            ) {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn sync_zone_free_pages(&mut self) -> bool {
+        let mut zone_index = 0usize;
+        while zone_index < self.zone_fact_count {
+            let kind = self.zone_facts[zone_index].kind();
+            let Some(free_pages) = self.buddy_free_page_sets.zone_free_pages(kind) else {
+                return false;
+            };
+            self.zone_facts[zone_index].free_pages = free_pages;
+            zone_index += 1;
+        }
+        true
     }
 
     fn failed_setup(&self) -> EventResult {
@@ -2520,6 +2864,22 @@ fn phys_to_pfn_value(phys: usize, page_size: usize) -> Option<usize> {
         return None;
     }
     Some(phys / page_size)
+}
+
+fn block_fits_in_range(pfn: usize, order: usize, page_size: usize, range: PhysRange) -> bool {
+    if order >= BUDDY_ORDER_COUNT || page_size == 0 || !page_size.is_power_of_two() {
+        return false;
+    }
+    let Some(start) = pfn.checked_mul(page_size) else {
+        return false;
+    };
+    let Some(bytes) = page_size.checked_mul(1usize << order) else {
+        return false;
+    };
+    let Some(end) = start.checked_add(bytes) else {
+        return false;
+    };
+    start >= range.start() && end <= range.end()
 }
 
 fn round_up_value(value: usize, align: usize) -> Option<usize> {
