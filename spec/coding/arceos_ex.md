@@ -771,6 +771,13 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 order、GFP 约束、返回 `PageRef`、caller-owned 语义和释放时 order 必须匹配的契约。返回的 `PageRef` 表示 2^order 个连续
 buddy pages，并且必须可通过已经建立的线性映射进行受限读写；它不得暴露 buddy free list 或 zone 内部结构。
 
+`PageRef` 的实现语义应对齐 Linux `struct page *`：它引用 `PageMetadataMap` 中的具体 page metadata 项，而不是直接等同
+物理地址或线性映射虚拟地址。`PageMetadataMap` 对应 Linux `mem_map` 或 RISC-V `SPARSEMEM_VMEMMAP` 下的 `vmemmap` 视图，
+必须覆盖 PageAllocator 管理的 PFN 范围。实现应提供并内部复用 Linux-like 转换边界：`pfn_to_page(pfn)`、
+`page_to_pfn(page_ref)`、`phys_to_page(phys)`、`page_to_phys(page_ref)`、`virt_to_page(linear_addr)` 和
+`page_to_virt(page_ref)`/`page_address(page_ref)`。这些转换必须检查或依赖 PFN 有效、地址页对齐、地址属于已建立 direct map
+或 vmemmap 覆盖范围；不得把任意整数地址直接伪造成 `PageRef`。
+
 `VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址资源管理，不是页表映射器。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END` 页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、`VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、建立 free vmap space。
 
 `MmStructCache.setup()` 只建立 `"mm_struct"` cache。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。

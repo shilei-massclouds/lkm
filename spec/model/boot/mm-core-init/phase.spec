@@ -144,6 +144,40 @@ object BootZonelistSet: MemoryObject {
 }
 
 /*
+ * PageMetadataMap 表示 Linux struct page metadata 视图：FLATMEM 下的
+ * mem_map 或 SPARSEMEM_VMEMMAP 下的 vmemmap。PageRef 指向这里的具体
+ * PageMetadata 项，再通过 PFN/物理地址/线性映射地址进行转换。
+ */
+object PageMetadataMap: MemoryObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Zones.state == State::Ready;
+                    SwapperVm.state == State::Online;
+                }
+
+                ensures {
+                    page_metadata_map_ready(PageMetadataMap, Zones);
+                    page_metadata_map_covers_managed_pfns(PageMetadataMap, Zones);
+                    page_metadata_map_uses_mem_map_or_vmemmap(PageMetadataMap);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            page_metadata_map_ready(PageMetadataMap, Zones);
+            page_metadata_map_covers_managed_pfns(PageMetadataMap, Zones);
+            page_metadata_map_uses_mem_map_or_vmemmap(PageMetadataMap);
+        }
+    }
+}
+
+/*
  * PageAllocator 覆盖 build_all_zonelists(NULL)、page_alloc_init_cpuhp()
  * 和 memblock_free_all()。Enable 保留给后续 page_alloc_init_late()。
  */
@@ -156,6 +190,7 @@ object PageAllocator: PageAllocatorType {
                 depends_on {
                     MemoryTopology.state == State::Ready;
                     BootZoneSet.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
                     CpuHotplugState.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                 }
@@ -168,6 +203,7 @@ object PageAllocator: PageAllocatorType {
                     page_allocator_zonelists_ready(PageAllocator, BootZonelistSet);
                     page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
                     page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
+                    page_allocator_page_metadata_map_bound(PageAllocator, PageMetadataMap);
                 }
             }
         }
@@ -179,6 +215,7 @@ object PageAllocator: PageAllocatorType {
             page_allocator_zonelists_ready(PageAllocator, BootZonelistSet);
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
             page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
+            page_allocator_page_metadata_map_bound(PageAllocator, PageMetadataMap);
         }
 
         events {
@@ -203,6 +240,7 @@ object PageAllocator: PageAllocatorType {
                     totalram_pages_accounted(PageAllocator);
                     page_allocator_alloc_pages_api_ready(PageAllocator);
                     page_allocator_free_pages_api_ready(PageAllocator);
+                    page_allocator_page_ref_conversion_api_ready(PageAllocator);
                 }
             }
         }
@@ -218,6 +256,7 @@ object PageAllocator: PageAllocatorType {
             totalram_pages_accounted(PageAllocator);
             page_allocator_alloc_pages_api_ready(PageAllocator);
             page_allocator_free_pages_api_ready(PageAllocator);
+            page_allocator_page_ref_conversion_api_ready(PageAllocator);
         }
 
     }
@@ -796,6 +835,7 @@ object MmCoreInitPhase: PhaseObject {
 
                 drives {
                     MemoryTopology.Event::Setup;
+                    PageMetadataMap.Event::Setup;
                     PageAllocator.Event::Preset;
                     MemoryDebugHardening.Event::Setup;
                     StackDepot.Event::Setup;
@@ -841,6 +881,7 @@ object MmCoreInitPhase: PhaseObject {
             BootMemoryNode.state == State::Ready;
             BootZoneSet.state == State::Ready;
             BootZonelistSet.state == State::Ready;
+            PageMetadataMap.state == State::Ready;
             PageAllocator.state == State::Ready;
             MemBlock.state == State::Offline;
             MemoryDebugHardening.state == State::Ready;
