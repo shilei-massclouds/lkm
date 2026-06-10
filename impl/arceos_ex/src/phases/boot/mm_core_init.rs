@@ -56,6 +56,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.per_cpu_storage,
         &ctx.cpu_hotplug_state,
     )?;
+    ctx.kernel_global_allocator.setup(&ctx.slub_allocator)?;
+    ctx.dynamic_container_runtime
+        .setup(&ctx.kernel_global_allocator)?;
     ctx.page_table_caches.setup(&ctx.slub_allocator, &ctx.vm)?;
     ctx.vmalloc_allocator.setup(
         &ctx.slub_allocator,
@@ -133,6 +136,16 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.slub_allocator.state() == State::Ready
         && ctx.slub_allocator.cache_registry().state() == State::Ready
         && ctx.slub_allocator.kmalloc_caches().state() == State::Ready
+        && ctx.kernel_global_allocator.state() == State::Ready
+        && ctx.kernel_global_allocator.uses_slub_allocator()
+        && ctx.kernel_global_allocator.alloc_api_ready()
+        && ctx.kernel_global_allocator.alloc_zeroed_api_ready()
+        && ctx.kernel_global_allocator.dealloc_api_ready()
+        && ctx.dynamic_container_runtime.state() == State::Ready
+        && ctx.dynamic_container_runtime.uses_global_allocator()
+        && ctx.dynamic_container_runtime.vec_api_ready()
+        && ctx.dynamic_container_runtime.list_api_ready()
+        && ctx.dynamic_container_runtime.set_api_ready()
         && ctx.page_table_caches.state() == State::Ready
         && ctx.page_table_caches.vmalloc_pgtable_preallocated()
         && ctx.page_table_caches.lock_cache().state() == State::Ready

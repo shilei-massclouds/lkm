@@ -1,5 +1,8 @@
 #![no_std]
 #![no_main]
+#![feature(alloc_error_handler)]
+
+extern crate alloc;
 
 mod apps;
 mod arch;
@@ -12,8 +15,12 @@ mod trace;
 use core::panic::PanicInfo;
 use core::sync::atomic::AtomicU8;
 
+use objects::mm_core::KernelGlobalAllocAdapter;
 use objects::state::{EventResult, LifecycleEvent, State};
 use trace::Checkpoint;
+
+#[global_allocator]
+static KERNEL_GLOBAL_ALLOCATOR: KernelGlobalAllocAdapter = KernelGlobalAllocAdapter;
 
 #[unsafe(link_section = ".data.phase")]
 static STARTUP_TIMELINE_STATE: AtomicU8 = AtomicU8::new(crate::phases::state::encode(State::Base));
@@ -45,5 +52,11 @@ fn startup_timeline_event() -> EventResult {
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     arch::riscv64::sbi::putstr("arceos_ex panic\n");
+    arch::riscv64::sbi::system_shutdown()
+}
+
+#[alloc_error_handler]
+fn alloc_error(_layout: core::alloc::Layout) -> ! {
+    arch::riscv64::sbi::putstr("arceos_ex allocation error\n");
     arch::riscv64::sbi::system_shutdown()
 }

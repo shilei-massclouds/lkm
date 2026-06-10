@@ -8,6 +8,7 @@ pub mod delay_loop;
 pub mod device_tree;
 pub mod fdt;
 pub mod finalize;
+pub mod global_alloc;
 pub mod hello;
 pub mod initcall;
 pub mod irq_open_prepare;

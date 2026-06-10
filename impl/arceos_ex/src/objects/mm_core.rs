@@ -14,6 +14,8 @@ use super::{
     zones::{ZoneKind, Zones},
 };
 use crate::trace::Checkpoint;
+use core::alloc::{GlobalAlloc, Layout};
+use core::ptr::null_mut;
 
 const MAX_BOOT_ZONES: usize = 3;
 const MAX_KMALLOC_CACHES: usize = 8;
@@ -27,6 +29,7 @@ const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
 const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
 const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
+const GLOBAL_ALLOC_MAX_SIZE: usize = 1024;
 
 #[derive(Clone, Copy)]
 pub struct ZoneRef {
@@ -2174,6 +2177,13 @@ impl SlubAllocator {
         self.kmalloc_caches.kfree(alloc_ref)
     }
 
+    pub fn kfree_addr(&mut self, addr: usize, size: usize) -> bool {
+        if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
+            return false;
+        }
+        self.kmalloc_caches.kfree_addr(addr, size)
+    }
+
     pub fn preset(
         &mut self,
         page_allocator: &PageAllocator,
@@ -2254,6 +2264,208 @@ impl SlubAllocator {
         self.flush_workqueue_ready = true;
         crate::trace::checkpoint(Checkpoint::SlubFlushWorkqueueReady);
         Ok(())
+    }
+}
+
+pub struct KernelGlobalAllocAdapter;
+
+unsafe impl GlobalAlloc for KernelGlobalAllocAdapter {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        global_alloc(layout, false)
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        global_alloc(layout, true)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if ptr.is_null() || !layout_supported(layout) {
+            return;
+        }
+        let ctx = crate::context::context();
+        if !ctx.slub_allocator.kfree_addr(ptr as usize, layout.size()) {
+            crate::arch::riscv64::sbi::putstr("arceos_ex global dealloc failed\n");
+            crate::arch::riscv64::sbi::system_shutdown();
+        }
+    }
+}
+
+fn global_alloc(layout: Layout, zeroed: bool) -> *mut u8 {
+    if !layout_supported(layout) {
+        return null_mut();
+    }
+    let ctx = crate::context::context();
+    let allocation = if zeroed {
+        ctx.slub_allocator.kzalloc(
+            layout.size(),
+            GfpFlags::kernel(),
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    } else {
+        ctx.slub_allocator.kmalloc(
+            layout.size(),
+            GfpFlags::kernel(),
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+        )
+    };
+    let Some(alloc_ref) = allocation else {
+        return null_mut();
+    };
+    if alloc_ref.addr().is_multiple_of(layout.align()) {
+        alloc_ref.addr() as *mut u8
+    } else {
+        let _ = ctx.slub_allocator.kfree(alloc_ref);
+        null_mut()
+    }
+}
+
+const fn layout_supported(layout: Layout) -> bool {
+    let Some(cache_size) = kmalloc_size_class_for(layout.size()) else {
+        return false;
+    };
+    layout.align() <= cache_size
+}
+
+const fn kmalloc_size_class_for(size: usize) -> Option<usize> {
+    if size == 0 || size > GLOBAL_ALLOC_MAX_SIZE {
+        return None;
+    }
+    let mut cache_size = 8usize;
+    while cache_size <= GLOBAL_ALLOC_MAX_SIZE {
+        if size <= cache_size {
+            return Some(cache_size);
+        }
+        cache_size <<= 1;
+    }
+    None
+}
+
+pub struct KernelGlobalAllocator {
+    lifecycle: Lifecycle,
+    alloc_api_ready: bool,
+    alloc_zeroed_api_ready: bool,
+    dealloc_api_ready: bool,
+    uses_slub_allocator: bool,
+}
+
+impl KernelGlobalAllocator {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            alloc_api_ready: false,
+            alloc_zeroed_api_ready: false,
+            dealloc_api_ready: false,
+            uses_slub_allocator: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn alloc_api_ready(&self) -> bool {
+        self.alloc_api_ready
+    }
+
+    pub const fn alloc_zeroed_api_ready(&self) -> bool {
+        self.alloc_zeroed_api_ready
+    }
+
+    pub const fn dealloc_api_ready(&self) -> bool {
+        self.dealloc_api_ready
+    }
+
+    pub const fn uses_slub_allocator(&self) -> bool {
+        self.uses_slub_allocator
+    }
+
+    pub fn setup(&mut self, slub_allocator: &SlubAllocator) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || slub_allocator.state() != State::Ready
+            || slub_allocator.kmalloc_caches().state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.alloc_api_ready = true;
+        self.alloc_zeroed_api_ready = true;
+        self.dealloc_api_ready = true;
+        self.uses_slub_allocator = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::KernelGlobalAllocatorReady,
+        )
+    }
+}
+
+pub struct DynamicContainerRuntime {
+    lifecycle: Lifecycle,
+    uses_global_allocator: bool,
+    vec_api_ready: bool,
+    list_api_ready: bool,
+    set_api_ready: bool,
+}
+
+impl DynamicContainerRuntime {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            uses_global_allocator: false,
+            vec_api_ready: false,
+            list_api_ready: false,
+            set_api_ready: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn uses_global_allocator(&self) -> bool {
+        self.uses_global_allocator
+    }
+
+    pub const fn vec_api_ready(&self) -> bool {
+        self.vec_api_ready
+    }
+
+    pub const fn list_api_ready(&self) -> bool {
+        self.list_api_ready
+    }
+
+    pub const fn set_api_ready(&self) -> bool {
+        self.set_api_ready
+    }
+
+    pub fn setup(&mut self, global_allocator: &KernelGlobalAllocator) -> EventResult {
+        if self.lifecycle.state() != State::Base || global_allocator.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.uses_global_allocator = true;
+        self.vec_api_ready = true;
+        self.list_api_ready = true;
+        self.set_api_ready = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::DynamicContainerRuntimeReady,
+        )
     }
 }
 
@@ -2386,6 +2598,21 @@ impl KmallocCaches {
         Some(self.caches[index].object_size)
     }
 
+    pub fn free_object_count(&self, size: usize) -> usize {
+        let Some(cache_index) = self.cache_index_for_size(size) else {
+            return 0;
+        };
+        let mut count = 0usize;
+        let mut slab_index = 0usize;
+        while slab_index < self.slab_count {
+            if self.slabs[slab_index].cache_index == cache_index {
+                count += self.slabs[slab_index].free_count;
+            }
+            slab_index += 1;
+        }
+        count
+    }
+
     pub fn has_size(&self, size: usize) -> bool {
         let mut index = 0usize;
         while index < self.count {
@@ -2467,6 +2694,26 @@ impl KmallocCaches {
         self.caches[cache_index].free_head = alloc_ref.addr();
         self.slabs[slab_index].free_count += 1;
         true
+    }
+
+    fn kfree_addr(&mut self, addr: usize, size: usize) -> bool {
+        if self.lifecycle.state() != State::Ready || addr == KMALLOC_NULL || size == 0 {
+            return false;
+        }
+        let Some(slab_index) = self.slab_index_for_addr(addr) else {
+            return false;
+        };
+        let cache_index = self.slabs[slab_index].cache_index;
+        if cache_index >= self.count || size > self.caches[cache_index].object_size {
+            return false;
+        }
+        let alloc_ref = KmallocAllocRef {
+            addr,
+            requested_size: size,
+            cache_size: self.caches[cache_index].object_size,
+            cache_index,
+        };
+        self.kfree(alloc_ref)
     }
 
     fn setup(&mut self, slub_state: State, registry: &SlubCacheRegistry) -> EventResult {
