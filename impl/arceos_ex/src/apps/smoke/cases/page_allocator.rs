@@ -2,7 +2,7 @@ use crate::{
     apps::smoke::SmokeResult,
     context::{context, Context},
     objects::{
-        mm_core::{GfpFlags, LinearMappedPageAddr, Pfn, PhysPageAddr},
+        mm_core::{GfpFlags, LinearMappedPageAddr, PageRef, Pfn, PhysPageAddr},
         printk,
         state::State,
     },
@@ -10,6 +10,8 @@ use crate::{
 
 const PAGE_ALLOCATOR_API_TEST_WORD: usize = 0x5041_4745_4150_4930;
 const PAGE_ALLOCATOR_CONVENIENCE_TEST_WORD: usize = 0x5041_4745_4150_4931;
+const PAGE_ALLOCATOR_ORDER_TEST_WORD: usize = 0x5041_4745_4150_4940;
+const PAGE_ALLOCATOR_MAX_TEST_ORDER: usize = 2;
 
 pub fn run() -> SmokeResult {
     let ctx = context();
@@ -17,7 +19,9 @@ pub fn run() -> SmokeResult {
     let Some(diag) = check_handoff_and_conversions(ctx) else {
         return SmokeResult::Failed;
     };
-    let Some((allocated_page_address, allocated_page_phys)) = run_alloc_free_api_smoke(ctx) else {
+    let Some((allocated_page_address, allocated_page_phys, tested_max_order)) =
+        run_alloc_free_api_smoke(ctx)
+    else {
         return SmokeResult::Failed;
     };
 
@@ -26,7 +30,7 @@ pub fn run() -> SmokeResult {
     let zonelist = page_allocator.boot_zonelist_set();
 
     printk::write_fmt(format_args!(
-        "fallback={} totalram_pages={} buddy_free={} buddy_blocks={} first_block_pages={} zone_facts={} first_zone={:#x}..{:#x} mem_map={} bytes={} first_page={:#x} metadata={:#x} alloc_page={:#x} alloc_phys={:#x} gfp={:#x}\n",
+        "fallback={} totalram_pages={} buddy_free={} buddy_blocks={} first_block_pages={} zone_facts={} first_zone={:#x}..{:#x} mem_map={} bytes={} first_page={:#x} metadata={:#x} alloc_page={:#x} alloc_phys={:#x} max_order={} gfp={:#x}\n",
         zonelist.fallback_count(),
         page_allocator.totalram_pages(),
         page_allocator.buddy_total_free_pages(),
@@ -41,6 +45,7 @@ pub fn run() -> SmokeResult {
         diag.first_page_metadata,
         allocated_page_address,
         allocated_page_phys,
+        tested_max_order,
         GfpFlags::kernel().bits()
     ));
     SmokeResult::Passed
@@ -218,7 +223,7 @@ fn check_handoff_and_conversions(ctx: &Context) -> Option<PageAllocatorDiag> {
     })
 }
 
-fn run_alloc_free_api_smoke(ctx: &mut Context) -> Option<(usize, usize)> {
+fn run_alloc_free_api_smoke(ctx: &mut Context) -> Option<(usize, usize, usize)> {
     let page = ctx
         .page_allocator
         .alloc_pages(0, GfpFlags::kernel(), &ctx.page_metadata_map)?;
@@ -251,7 +256,114 @@ fn run_alloc_free_api_smoke(ctx: &mut Context) -> Option<(usize, usize)> {
         printk::write_str("free_pages for alloc_page failed\n");
         return None;
     }
-    Some((page_address, page_phys))
+
+    if !run_order_alloc_free_smoke(ctx, 1, true) || !run_order_alloc_free_smoke(ctx, 2, false) {
+        return None;
+    }
+
+    Some((page_address, page_phys, PAGE_ALLOCATOR_MAX_TEST_ORDER))
+}
+
+fn run_order_alloc_free_smoke(ctx: &mut Context, order: usize, check_wrong_order: bool) -> bool {
+    let Some(page) =
+        ctx.page_allocator
+            .alloc_pages(order, GfpFlags::kernel(), &ctx.page_metadata_map)
+    else {
+        printk::write_fmt(format_args!("alloc_pages order {} failed\n", order));
+        return false;
+    };
+
+    if check_wrong_order
+        && ctx
+            .page_allocator
+            .free_pages(page, order - 1, &ctx.page_metadata_map)
+    {
+        printk::write_str("free_pages accepted mismatched order\n");
+        return false;
+    }
+
+    if !check_allocated_block(ctx, page, order) {
+        return false;
+    }
+    if !ctx
+        .page_allocator
+        .free_pages(page, order, &ctx.page_metadata_map)
+    {
+        printk::write_fmt(format_args!("free_pages order {} failed\n", order));
+        return false;
+    }
+    true
+}
+
+fn check_allocated_block(ctx: &Context, page: PageRef, order: usize) -> bool {
+    let page_count = 1usize << order;
+    let page_size = ctx.page_metadata_map.page_size();
+    let Some(base_phys) = ctx
+        .page_metadata_map
+        .page_to_phys(page)
+        .map(|addr| addr.value())
+    else {
+        printk::write_str("allocated block base phys conversion failed\n");
+        return false;
+    };
+    if !page.pfn().value().is_multiple_of(page_count) {
+        printk::write_fmt(format_args!(
+            "allocated block order {} pfn alignment invalid\n",
+            order
+        ));
+        return false;
+    }
+
+    let mut offset = 0usize;
+    while offset < page_count {
+        let Some(pfn) = page.pfn().value().checked_add(offset) else {
+            printk::write_str("allocated block pfn overflow\n");
+            return false;
+        };
+        let Some(current_page) = ctx.page_metadata_map.pfn_to_page(Pfn::new(pfn)) else {
+            printk::write_str("allocated block pfn_to_page failed\n");
+            return false;
+        };
+        let Some(current_phys) = ctx
+            .page_metadata_map
+            .page_to_phys(current_page)
+            .map(|addr| addr.value())
+        else {
+            printk::write_str("allocated block page_to_phys failed\n");
+            return false;
+        };
+        let Some(phys_offset) = offset.checked_mul(page_size) else {
+            printk::write_str("allocated block phys offset overflow\n");
+            return false;
+        };
+        let Some(expected_phys) = base_phys.checked_add(phys_offset) else {
+            printk::write_str("allocated block expected phys overflow\n");
+            return false;
+        };
+        if current_phys != expected_phys {
+            printk::write_fmt(format_args!(
+                "allocated block order {} phys continuity invalid\n",
+                order
+            ));
+            return false;
+        }
+        let Some(address) = ctx.page_metadata_map.page_address(current_page) else {
+            printk::write_str("allocated block page_address failed\n");
+            return false;
+        };
+        if !write_read_word(
+            address,
+            PAGE_ALLOCATOR_ORDER_TEST_WORD ^ (order << 8) ^ offset,
+        ) {
+            printk::write_fmt(format_args!(
+                "allocated block order {} readback failed\n",
+                order
+            ));
+            return false;
+        }
+        offset += 1;
+    }
+    true
 }
 
 fn write_read_word(address: usize, value: usize) -> bool {
