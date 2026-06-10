@@ -765,6 +765,13 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 `PageAllocator.setup()` 才对应 `memblock_free_all()`。该事件必须先要求 `Swiotlb.Ready` 和 `MemoryDebugHardening.Ready`，再把 MemBlock free ranges 交给 buddy/free page sets，并通过 `MemBlock.Disable` 使 `MemBlock.state == Offline`。本阶段不得执行 `memblock_discard()`，不得把 `MemBlock` 推进到 `Destroyed`。
 
+当前 minimal buddy 实现必须把 buddy free lists 建在 `PageAllocator` 内部，而不是作为依赖 heap 的外部容器。结构按
+Linux-like `free_area[MAX_ORDER]` 建模：每个 zone 拥有按 order 索引的 free area，第一轮只保留单一 migratetype，
+不展开 `MIGRATE_*` 分类、pageblock 迁移类型、compaction、reclaim 或 NUMA fallback。`PageAllocator.setup()` 遍历
+MemBlock 可用区段并排除 reserved 区段，把剩余页切成 order 对齐的最大 buddy block；每个 free block 以 block head
+对应的 `PageMetadata` 作为 free-list 节点，并在 metadata 中记录 buddy order、allocated/free 状态和必要链接。实现不得用
+`Vec`、`Box`、普通 heap 或 SLUB/kmalloc 来承载 buddy 自身的 free-list 节点；这些 allocator 都必须建立在 buddy 之后。
+
 `PageAllocator.Ready` 之后必须暴露正式的 Linux-like buddy API：`alloc_pages(order, gfp)`、order-0 convenience
 `alloc_page(gfp)` 和 `free_pages(page_ref, order)`。model 层对应 `PageAllocatorType.Action::AllocPages(order, gfp) -> PageRef`
 与 `PageAllocatorType.Action::FreePages(page_ref, order)`；coding 层可按 Rust 需要调整参数顺序或封装形式，但必须保留

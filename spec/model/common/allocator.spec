@@ -25,6 +25,39 @@ type LinearMappedPageAddr {
 type PageMetadata {
 }
 
+type BuddyFreeArea {
+}
+
+type BuddyFreePageSetType {
+    lifecycle {
+        /*
+         * Setup corresponds to the free_area population done by Linux
+         * memblock_free_all(): each released free range is split into
+         * pageblock-aligned buddy blocks and linked through the block head's
+         * PageMetadata.
+         */
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            depends_on {
+                MemBlock.state == State::Online;
+                Zones.state == State::Ready;
+                page_metadata_map_ready(PageMetadataMap, Zones);
+                page_metadata_map_indexed_by_pfn(PageMetadataMap);
+            }
+            ensures {
+                buddy_free_page_sets_ready(self);
+                buddy_free_page_sets_bound_to_allocator(self, owner);
+                buddy_free_page_sets_indexed_by_zone_and_order(self, Zones);
+                buddy_free_page_sets_use_single_migratetype(self);
+                buddy_free_page_sets_use_page_metadata_as_nodes(self, PageMetadataMap);
+                buddy_free_page_sets_populated_from_memblock(self, MemBlock, Zones);
+                buddy_free_page_sets_exclude_reserved_ranges(self, MemBlock);
+                buddy_free_page_sets_split_free_ranges_to_aligned_blocks(self);
+            }
+        }
+    }
+}
+
 type PageRef {
     processes {
         /*
@@ -94,7 +127,24 @@ predicate page_metadata_map_indexed_by_pfn<T>(metadata_map: T) -> bool;
 predicate page_metadata_map_item_ready<T>(page_metadata: T) -> bool;
 predicate page_metadata_map_item_in_map<T, M>(page_metadata: T, metadata_map: M) -> bool;
 predicate page_metadata_map_item_pfn_bound<T, P>(page_metadata: T, pfn: P) -> bool;
+predicate page_metadata_buddy_fields_ready<T>(page_metadata: T) -> bool;
+predicate page_metadata_buddy_free_node_ready<T>(page_metadata: T) -> bool;
+predicate page_metadata_buddy_order_recorded<T, O>(page_metadata: T, order: O) -> bool;
+predicate page_metadata_buddy_allocated_or_free_state_ready<T>(page_metadata: T) -> bool;
+predicate buddy_free_area_ready<T>(area: T) -> bool;
+predicate buddy_free_area_order_bound<T, O>(area: T, order: O) -> bool;
+predicate buddy_free_area_zone_bound<T, Z>(area: T, zone: Z) -> bool;
+predicate buddy_free_page_sets_ready<T>(sets: T) -> bool;
+predicate buddy_free_page_sets_bound_to_allocator<T, A>(sets: T, allocator: A) -> bool;
+predicate buddy_free_page_sets_indexed_by_zone_and_order<T, Z>(sets: T, zones: Z) -> bool;
+predicate buddy_free_page_sets_use_single_migratetype<T>(sets: T) -> bool;
+predicate buddy_free_page_sets_use_page_metadata_as_nodes<T, M>(sets: T, metadata_map: M) -> bool;
+predicate buddy_free_page_sets_populated_from_memblock<T, M, Z>(sets: T, memblock: M, zones: Z) -> bool;
+predicate buddy_free_page_sets_exclude_reserved_ranges<T, M>(sets: T, memblock: M) -> bool;
+predicate buddy_free_page_sets_split_free_ranges_to_aligned_blocks<T>(sets: T) -> bool;
 predicate page_allocator_page_metadata_map_bound<T, M>(allocator: T, metadata_map: M) -> bool;
+predicate page_allocator_buddy_free_page_sets_bound<T, S>(allocator: T, sets: S) -> bool;
+predicate page_allocator_free_pages_account_matches_buddy<T, S>(allocator: T, sets: S) -> bool;
 predicate page_allocator_alloc_pages_api_ready<T>(allocator: T) -> bool;
 predicate page_allocator_free_pages_api_ready<T>(allocator: T) -> bool;
 predicate page_allocator_page_ref_conversion_api_ready<T>(allocator: T) -> bool;

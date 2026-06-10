@@ -183,6 +183,53 @@ object PageMetadataMap: MemoryObject {
 }
 
 /*
+ * PageAllocatorBuddyFreePageSets 是 PageAllocator 内部的 buddy free_area
+ * 集合在模型中的具名视图。coding 层仍要求它落在 PageAllocator 内部，
+ * 不作为外部 heap 容器或独立 allocator。
+ */
+object PageAllocatorBuddyFreePageSets: BuddyFreePageSetType {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    MemBlock.state == State::Online;
+                    Zones.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                    page_metadata_map_ready(PageMetadataMap, Zones);
+                    page_metadata_map_indexed_by_pfn(PageMetadataMap);
+                }
+
+                ensures {
+                    buddy_free_page_sets_ready(PageAllocatorBuddyFreePageSets);
+                    buddy_free_page_sets_bound_to_allocator(PageAllocatorBuddyFreePageSets, PageAllocator);
+                    buddy_free_page_sets_indexed_by_zone_and_order(PageAllocatorBuddyFreePageSets, Zones);
+                    buddy_free_page_sets_use_single_migratetype(PageAllocatorBuddyFreePageSets);
+                    buddy_free_page_sets_use_page_metadata_as_nodes(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+                    buddy_free_page_sets_populated_from_memblock(PageAllocatorBuddyFreePageSets, MemBlock, Zones);
+                    buddy_free_page_sets_exclude_reserved_ranges(PageAllocatorBuddyFreePageSets, MemBlock);
+                    buddy_free_page_sets_split_free_ranges_to_aligned_blocks(PageAllocatorBuddyFreePageSets);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            buddy_free_page_sets_ready(PageAllocatorBuddyFreePageSets);
+            buddy_free_page_sets_bound_to_allocator(PageAllocatorBuddyFreePageSets, PageAllocator);
+            buddy_free_page_sets_indexed_by_zone_and_order(PageAllocatorBuddyFreePageSets, Zones);
+            buddy_free_page_sets_use_single_migratetype(PageAllocatorBuddyFreePageSets);
+            buddy_free_page_sets_use_page_metadata_as_nodes(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+            buddy_free_page_sets_populated_from_memblock(PageAllocatorBuddyFreePageSets, MemBlock, Zones);
+            buddy_free_page_sets_exclude_reserved_ranges(PageAllocatorBuddyFreePageSets, MemBlock);
+            buddy_free_page_sets_split_free_ranges_to_aligned_blocks(PageAllocatorBuddyFreePageSets);
+        }
+    }
+}
+
+/*
  * PageAllocator 覆盖 build_all_zonelists(NULL)、page_alloc_init_cpuhp()
  * 和 memblock_free_all()。Enable 保留给后续 page_alloc_init_late()。
  */
@@ -234,6 +281,7 @@ object PageAllocator: PageAllocatorType {
                 }
 
                 drives {
+                    PageAllocatorBuddyFreePageSets.Event::Setup;
                     MemBlock.Event::Disable;
                 }
 
@@ -241,7 +289,17 @@ object PageAllocator: PageAllocatorType {
                     page_allocator_ready(PageAllocator, Zones);
                     memblock_free_ranges_handed_to_page_allocator(MemBlock, PageAllocator);
                     zone_managed_pages_accounted(Zones, PageAllocator);
+                    buddy_free_page_sets_ready(PageAllocatorBuddyFreePageSets);
+                    buddy_free_page_sets_bound_to_allocator(PageAllocatorBuddyFreePageSets, PageAllocator);
+                    buddy_free_page_sets_indexed_by_zone_and_order(PageAllocatorBuddyFreePageSets, Zones);
+                    buddy_free_page_sets_use_single_migratetype(PageAllocatorBuddyFreePageSets);
+                    buddy_free_page_sets_use_page_metadata_as_nodes(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+                    buddy_free_page_sets_populated_from_memblock(PageAllocatorBuddyFreePageSets, MemBlock, Zones);
+                    buddy_free_page_sets_exclude_reserved_ranges(PageAllocatorBuddyFreePageSets, MemBlock);
+                    buddy_free_page_sets_split_free_ranges_to_aligned_blocks(PageAllocatorBuddyFreePageSets);
                     buddy_free_page_sets_populated(PageAllocator, Zones);
+                    page_allocator_buddy_free_page_sets_bound(PageAllocator, PageAllocatorBuddyFreePageSets);
+                    page_allocator_free_pages_account_matches_buddy(PageAllocator, PageAllocatorBuddyFreePageSets);
                     totalram_pages_accounted(PageAllocator);
                     page_allocator_alloc_pages_api_ready(PageAllocator);
                     page_allocator_free_pages_api_ready(PageAllocator);
@@ -257,7 +315,18 @@ object PageAllocator: PageAllocatorType {
             page_allocator_ready(PageAllocator, Zones);
             memblock_free_ranges_handed_to_page_allocator(MemBlock, PageAllocator);
             zone_managed_pages_accounted(Zones, PageAllocator);
+            PageAllocatorBuddyFreePageSets.state == State::Ready;
+            buddy_free_page_sets_ready(PageAllocatorBuddyFreePageSets);
+            buddy_free_page_sets_bound_to_allocator(PageAllocatorBuddyFreePageSets, PageAllocator);
+            buddy_free_page_sets_indexed_by_zone_and_order(PageAllocatorBuddyFreePageSets, Zones);
+            buddy_free_page_sets_use_single_migratetype(PageAllocatorBuddyFreePageSets);
+            buddy_free_page_sets_use_page_metadata_as_nodes(PageAllocatorBuddyFreePageSets, PageMetadataMap);
+            buddy_free_page_sets_populated_from_memblock(PageAllocatorBuddyFreePageSets, MemBlock, Zones);
+            buddy_free_page_sets_exclude_reserved_ranges(PageAllocatorBuddyFreePageSets, MemBlock);
+            buddy_free_page_sets_split_free_ranges_to_aligned_blocks(PageAllocatorBuddyFreePageSets);
             buddy_free_page_sets_populated(PageAllocator, Zones);
+            page_allocator_buddy_free_page_sets_bound(PageAllocator, PageAllocatorBuddyFreePageSets);
+            page_allocator_free_pages_account_matches_buddy(PageAllocator, PageAllocatorBuddyFreePageSets);
             totalram_pages_accounted(PageAllocator);
             page_allocator_alloc_pages_api_ready(PageAllocator);
             page_allocator_free_pages_api_ready(PageAllocator);
@@ -887,6 +956,7 @@ object MmCoreInitPhase: PhaseObject {
             BootZoneSet.state == State::Ready;
             BootZonelistSet.state == State::Ready;
             PageMetadataMap.state == State::Ready;
+            PageAllocatorBuddyFreePageSets.state == State::Ready;
             PageAllocator.state == State::Ready;
             MemBlock.state == State::Offline;
             MemoryDebugHardening.state == State::Ready;

@@ -14,6 +14,12 @@ predicate arceos_ex_must_device_tree_checkpoint_after_validation() -> bool;
 predicate arceos_ex_should_encapsulate_device_tree_unflatten_unsafe() -> bool;
 predicate arceos_ex_must_page_allocator_preset_only_builds_topology_and_hooks() -> bool;
 predicate arceos_ex_must_page_allocator_setup_hands_memblock_pages_to_buddy() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_lists_live_inside_page_allocator() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_use_zone_order_free_area() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_first_round_single_migratetype() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_split_memblock_free_ranges() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_use_page_metadata_nodes() -> bool;
+predicate arceos_ex_must_page_allocator_buddy_avoid_heap_storage() -> bool;
 predicate arceos_ex_must_page_allocator_expose_linux_like_alloc_pages_api() -> bool;
 predicate arceos_ex_must_page_allocator_alloc_pages_return_owned_linear_mapped_pageref() -> bool;
 predicate arceos_ex_must_page_allocator_free_pages_match_alloc_order() -> bool;
@@ -196,6 +202,36 @@ type ArceosExMmCoreInitCodingMust {
          * MemBlock through Disable to Offline.
          */
         arceos_ex_must_page_allocator_setup_hands_memblock_pages_to_buddy();
+
+        /*
+         * Minimal buddy free lists:
+         *
+         * PageAllocator.setup() must build buddy free lists as PageAllocator
+         * internal storage. The first implementation round uses per-zone,
+         * per-order free_area-like lists and a single migratetype.
+         */
+        arceos_ex_must_page_allocator_buddy_lists_live_inside_page_allocator();
+        arceos_ex_must_page_allocator_buddy_use_zone_order_free_area();
+        arceos_ex_must_page_allocator_buddy_first_round_single_migratetype();
+
+        /*
+         * MemBlock range splitting:
+         *
+         * The buddy setup must iterate MemBlock usable ranges, exclude
+         * reserved ranges, and split the remaining pages into order-aligned
+         * buddy blocks before linking them into the free areas.
+         */
+        arceos_ex_must_page_allocator_buddy_split_memblock_free_ranges();
+
+        /*
+         * Metadata-backed free nodes:
+         *
+         * Buddy free-list nodes must be represented through PageMetadata
+         * fields on the block head page. The buddy structure must not depend
+         * on Vec, Box, heap, SLUB, or kmalloc storage.
+         */
+        arceos_ex_must_page_allocator_buddy_use_page_metadata_nodes();
+        arceos_ex_must_page_allocator_buddy_avoid_heap_storage();
 
         /*
          * Linux-like buddy API:
