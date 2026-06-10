@@ -27,10 +27,6 @@ const ROOT_NODE_NAME: [u8; 1] = [b'/'];
 pub struct DeviceNodeId(usize);
 
 impl DeviceNodeId {
-    pub const fn invalid() -> Self {
-        Self(NO_INDEX)
-    }
-
     pub const fn index(self) -> usize {
         self.0
     }

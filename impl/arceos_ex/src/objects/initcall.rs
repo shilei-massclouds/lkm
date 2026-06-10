@@ -17,7 +17,6 @@ use core::mem::size_of;
 
 pub const INITCALL_LEVEL_COUNT: usize = 8;
 pub const INITCALL_RUN_RECORD_CAPACITY: usize = 16;
-pub const OF_PLATFORM_CANDIDATE_CAPACITY: usize = 64;
 
 unsafe extern "C" {
     static __initcall_pure_start: u8;
@@ -333,14 +332,6 @@ pub struct OfPlatformCandidate<'dt> {
 }
 
 impl<'dt> OfPlatformCandidate<'dt> {
-    const fn empty() -> Self {
-        Self {
-            node_id: super::device_tree::DeviceNodeId::invalid(),
-            name: &[],
-            compatible: &[],
-        }
-    }
-
     pub const fn node_id(&self) -> super::device_tree::DeviceNodeId {
         self.node_id
     }
@@ -996,40 +987,28 @@ const fn is_bus_driver_ref_ready(driver: BusDriverRef) -> bool {
 }
 
 struct OfPlatformCandidateSet<'dt> {
-    entries: [OfPlatformCandidate<'dt>; OF_PLATFORM_CANDIDATE_CAPACITY],
-    count: usize,
+    entries: Vec<OfPlatformCandidate<'dt>>,
     bus_nodes_seen: usize,
 }
 
 impl<'dt> OfPlatformCandidateSet<'dt> {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
-            entries: [OfPlatformCandidate::empty(); OF_PLATFORM_CANDIDATE_CAPACITY],
-            count: 0,
+            entries: Vec::new(),
             bus_nodes_seen: 0,
         }
     }
 
-    fn push(&mut self, candidate: OfPlatformCandidate<'dt>) -> bool {
-        if self.count >= OF_PLATFORM_CANDIDATE_CAPACITY {
-            return false;
-        }
-
-        self.entries[self.count] = candidate;
-        self.count += 1;
-        true
+    fn push(&mut self, candidate: OfPlatformCandidate<'dt>) {
+        self.entries.push(candidate);
     }
 
     fn entry(&self, index: usize) -> Option<OfPlatformCandidate<'dt>> {
-        if index < self.count {
-            Some(self.entries[index])
-        } else {
-            None
-        }
+        self.entries.get(index).copied()
     }
 
-    const fn count(&self) -> usize {
-        self.count
+    fn count(&self) -> usize {
+        self.entries.len()
     }
 }
 
@@ -1055,13 +1034,11 @@ fn collect_of_platform_bus_create<'dt>(
         return Some(());
     }
 
-    if !candidates.push(OfPlatformCandidate {
+    candidates.push(OfPlatformCandidate {
         node_id: node.id(),
         name: node.name(),
         compatible: first_compatible(compatible.raw_value()),
-    }) {
-        return None;
-    }
+    });
 
     if of_default_bus_match(node) {
         candidates.bus_nodes_seen += 1;
