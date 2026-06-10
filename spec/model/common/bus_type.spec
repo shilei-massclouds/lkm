@@ -41,6 +41,7 @@ predicate bus_subsys_interfaces_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_mutex_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_klist_devices_ready<T>(subsys: T) -> bool;
 predicate bus_subsys_klist_drivers_ready<T>(subsys: T) -> bool;
+predicate bus_subsys_device_ref_set_bound<T, S>(subsys: T, device_refs: S) -> bool;
 predicate bus_subsys_klist_devices_contains<T, U>(subsys: T, device: U) -> bool;
 predicate bus_subsys_klist_drivers_contains<T, U>(subsys: T, driver: U) -> bool;
 predicate bus_subsys_probe_files_ready<T>(subsys: T) -> bool;
@@ -66,7 +67,10 @@ predicate of_platform_default_populate_candidates_are_available<T>(bus: T) -> bo
 predicate of_platform_default_populate_candidate_names_printed<T>(bus: T) -> bool;
 predicate of_platform_default_populate_candidate_compatibles_printed<T>(bus: T) -> bool;
 predicate of_platform_default_populate_scan_complete_checkpoint<T>(bus: T) -> bool;
-predicate of_platform_default_populate_device_registration_deferred<T>(bus: T) -> bool;
+predicate of_platform_default_populate_node_refs_bound<T>(bus: T) -> bool;
+predicate of_platform_default_populate_platform_devices_created<T>(bus: T) -> bool;
+predicate of_platform_default_populate_device_refs_bound<T>(bus: T) -> bool;
+predicate of_platform_default_populate_devices_added_to_bus<T>(bus: T) -> bool;
 
 type BusDriverRef {
 }
@@ -78,6 +82,10 @@ type BusDriverRef {
  * device/driver containers and probe-control files.
  */
 type BusSubsysPrivate {
+    owned {
+        klist_devices: DeviceRefSet;
+    }
+
     lifecycle {
         Event::Preset {
             state_effect: StateEffect::Always;
@@ -107,6 +115,8 @@ type BusSubsysPrivate {
                 bus_subsys_interfaces_ready(self);
                 bus_subsys_mutex_ready(self);
                 bus_subsys_klist_devices_ready(self);
+                bus_subsys_device_ref_set_bound(self, self.klist_devices);
+                device_ref_set_ready(self.klist_devices);
                 bus_subsys_klist_drivers_ready(self);
                 bus_subsys_probe_files_ready(self);
                 bus_subsys_groups_ready(self);
@@ -161,11 +171,14 @@ type BusType {
                 self.state == State::Ready;
                 bus_type_subsys_private_online(self, self.subsys);
                 bus_subsys_klist_devices_ready(self.subsys);
+                device_ref_set_ready(self.subsys.klist_devices);
                 device_ref_ready(device);
             }
             ensures {
                 bus_type_device_added(self, device);
                 bus_type_devices_klist_nonempty(self);
+                device_ref_set_contains(self.subsys.klist_devices, device);
+                device_ref_set_nonempty(self.subsys.klist_devices);
                 bus_subsys_klist_devices_contains(self.subsys, device);
             }
         }
@@ -202,6 +215,7 @@ type BusType {
                 bus_type_subsys_private_online(self, self.subsys);
                 bus_subsys_klist_devices_ready(self.subsys);
                 bus_type_devices_klist_nonempty(self);
+                device_ref_set_nonempty(self.subsys.klist_devices);
                 bus_driver_ref_ready(driver);
             }
             ensures {
@@ -266,10 +280,12 @@ type PlatformBusType: BusType {
                 of_platform_default_populate_candidate_names_printed(self);
                 of_platform_default_populate_candidate_compatibles_printed(self);
                 of_platform_default_populate_scan_complete_checkpoint(self);
-                of_platform_default_populate_device_registration_deferred(self);
-            }
-            deferred {
-                "当前只建模 of_platform_default_populate_init() 从 DeviceTree root children 扫描并识别 OF platform device candidates；真正 of_platform_device_create()/device_add() 和加入 PlatformBus klist 留到 Device/Driver 建模后展开。";
+                of_platform_default_populate_node_refs_bound(self);
+                of_platform_default_populate_platform_devices_created(self);
+                of_platform_default_populate_device_refs_bound(self);
+                of_platform_default_populate_devices_added_to_bus(self);
+                bus_type_devices_klist_nonempty(self);
+                device_ref_set_nonempty(self.subsys.klist_devices);
             }
         }
     }

@@ -8,10 +8,14 @@
 
 predicate device_ref_targets<T, D>(device_ref: T, device: D) -> bool;
 predicate device_ref_ready<T>(device_ref: T) -> bool;
+predicate device_ref_set_ready<T>(device_refs: T) -> bool;
+predicate device_ref_set_contains<T, R>(device_refs: T, device_ref: R) -> bool;
+predicate device_ref_set_nonempty<T>(device_refs: T) -> bool;
 predicate device_node_ref_in_tree<T, D>(node_ref: T, device_tree: D) -> bool;
 predicate device_node_ref_identity_stable<T>(node_ref: T) -> bool;
 predicate device_node_ref_properties_queryable<T>(node_ref: T) -> bool;
 predicate device_node_ref_compatible_queryable<T>(node_ref: T) -> bool;
+predicate device_node_ref_lifetime_static<T>(node_ref: T) -> bool;
 predicate device_node_ref_ready<T>(node_ref: T) -> bool;
 predicate device_core_storage_bound<T>(device: T) -> bool;
 predicate device_core_name_bound<T>(device: T) -> bool;
@@ -25,8 +29,16 @@ predicate platform_device_embeds_device<T, D>(platform_device: T, device: D) -> 
 predicate platform_device_name_bound<T>(platform_device: T) -> bool;
 predicate platform_device_id_bound<T>(platform_device: T) -> bool;
 predicate platform_device_resources_bound<T>(platform_device: T) -> bool;
+predicate platform_device_allocated_from_node<T, N>(platform_device: T, node_ref: N) -> bool;
+predicate platform_device_node_bound<T, N>(platform_device: T, node_ref: N) -> bool;
+predicate platform_device_platform_bus_bound<T>(platform_device: T) -> bool;
+predicate platform_device_added<T>(platform_device: T) -> bool;
+predicate platform_device_add_return_zero<T>(platform_device: T) -> bool;
+predicate platform_device_ref_targets<R, T>(platform_device_ref: R, platform_device: T) -> bool;
+predicate platform_device_ref_ready<R>(platform_device_ref: R) -> bool;
 predicate platform_device_core_ref_ready<T, R>(platform_device: T, device_ref: R) -> bool;
 predicate platform_device_from_device_ref_ready<R, T>(device_ref: R, platform_device: T) -> bool;
+predicate platform_device_ref_from_device_ref_ready<D, P>(device_ref: D, platform_device_ref: P) -> bool;
 
 /*
  * DeviceNodeRef is an abstract reference to a DeviceTree node. The compatible
@@ -46,6 +58,7 @@ type DeviceNodeRef {
                 device_node_ref_identity_stable(self);
                 device_node_ref_properties_queryable(self);
                 device_node_ref_compatible_queryable(self);
+                device_node_ref_lifetime_static(self);
                 device_node_ref_ready(self);
             }
         }
@@ -58,6 +71,8 @@ type DeviceNodeRef {
  * associated with a firmware node through device_set_node().
  */
 type DeviceType {
+    of_node: DeviceNodeRef;
+
     processes {
         Action::Register {
             state_effect: StateEffect::None;
@@ -89,6 +104,9 @@ type DeviceType {
     }
 }
 
+type DeviceRefSet {
+}
+
 type DeviceRef {
     processes {
         Action::BindDevice(device: DeviceType) {
@@ -104,13 +122,25 @@ type DeviceRef {
     }
 }
 
+type PlatformDeviceRef {
+    processes {
+        Action::BindPlatformDevice(platform_device: PlatformDeviceType) {
+            state_effect: StateEffect::None;
+            ensures {
+                platform_device_ref_targets(self, platform_device);
+                platform_device_ref_ready(self);
+            }
+        }
+    }
+}
+
 /*
  * PlatformDeviceType models Linux struct platform_device. It embeds a core
  * DeviceType member and adds platform-specific identity/resources. Coding is
  * expected to provide a container_of-like conversion from DeviceRef back to the
  * owning PlatformDeviceType when platform bus matching/probe needs it.
  */
-type PlatformDeviceType: DeviceType {
+type PlatformDeviceType {
     owned {
         dev: DeviceType;
     }
@@ -127,6 +157,46 @@ type PlatformDeviceType: DeviceType {
                 device_ref_ready(device_ref);
                 platform_device_core_ref_ready(self, device_ref);
                 platform_device_from_device_ref_ready(device_ref, self);
+            }
+        }
+
+        /*
+         * CreateFromNode corresponds to the OF path
+         * of_platform_device_create_pdata() -> of_device_alloc() ->
+         * device_set_node() -> platform_device_add()/device_add().
+         */
+        Action::CreateFromNode(
+            node_ref: DeviceNodeRef,
+            device_ref: DeviceRef,
+            platform_device_ref: PlatformDeviceRef
+        ) {
+            state_effect: StateEffect::None;
+            depends_on {
+                device_node_ref_ready(node_ref);
+            }
+            ensures {
+                platform_device_allocated_from_node(self, node_ref);
+                platform_device_embeds_device(self, self.dev);
+                platform_device_name_bound(self);
+                platform_device_id_bound(self);
+                platform_device_resources_bound(self);
+                platform_device_node_bound(self, node_ref);
+                platform_device_platform_bus_bound(self);
+                device_core_storage_bound(self.dev);
+                device_core_name_bound(self.dev);
+                device_of_node_bound(self.dev, node_ref);
+                device_fwnode_bound(self.dev, node_ref);
+                device_core_registered(self.dev);
+                device_core_register_return_zero(self.dev);
+                device_ref_targets(device_ref, self.dev);
+                device_ref_ready(device_ref);
+                platform_device_ref_targets(platform_device_ref, self);
+                platform_device_ref_ready(platform_device_ref);
+                platform_device_core_ref_ready(self, device_ref);
+                platform_device_from_device_ref_ready(device_ref, self);
+                platform_device_ref_from_device_ref_ready(device_ref, platform_device_ref);
+                platform_device_added(self);
+                platform_device_add_return_zero(self);
             }
         }
     }

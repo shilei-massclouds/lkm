@@ -102,11 +102,13 @@ predicate arceos_ex_must_of_platform_default_populate_filter_available_nodes() -
 predicate arceos_ex_must_of_platform_default_populate_print_candidate_identity() -> bool;
 predicate arceos_ex_must_action_checkpoints_use_entry_exit_and_semantic_points() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_scan_complete_after_candidate_print() -> bool;
-predicate arceos_ex_must_of_platform_default_populate_defer_device_registration() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_create_and_register_platform_devices() -> bool;
+predicate arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage() -> bool;
 predicate arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor() -> bool;
 predicate arceos_ex_must_platform_device_embed_device_and_support_container_lookup() -> bool;
 predicate arceos_ex_must_device_object_kind_not_define_driver_core_semantics() -> bool;
 predicate arceos_ex_must_device_set_node_bind_ref_without_copying_compatible() -> bool;
+predicate arceos_ex_must_device_node_ref_store_stable_handle_not_borrowed_view() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -1289,8 +1291,8 @@ type ArceosExInitcallCodingMust {
          *
          * The formal DeviceType corresponds to Linux struct device, not Linux
          * struct device_type. Linux struct platform_device must be represented
-         * as PlatformDeviceType extending DeviceType while embedding a core
-         * device member.
+         * as PlatformDeviceType embedding a core DeviceType member, not as a
+         * subtype of the core device object itself.
          */
         arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor();
 
@@ -1321,8 +1323,20 @@ type ArceosExInitcallCodingMust {
          * binding a core device to a DeviceNodeRef. It must not copy the OF
          * compatible property into DeviceType or PlatformDeviceType; later
          * probe/match must reach compatible through the bound DeviceNodeRef.
+         * The concrete Rust object must store a stable DeviceNodeId/node-index
+         * or equivalent handle, not a long-lived borrowed DeviceNodeRef<'dt>.
          */
         arceos_ex_must_device_set_node_bind_ref_without_copying_compatible();
+        arceos_ex_must_device_node_ref_store_stable_handle_not_borrowed_view();
+
+        /*
+         * Bus device set storage:
+         *
+         * The model-level BusSubsysPrivate.klist_devices is a DeviceRefSet.
+         * Linux-like coding must back it with KList-like append/iterate
+         * storage, not a small action-smoke slot array.
+         */
+        arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage();
 
         /*
          * OF platform scan completion:
@@ -1336,14 +1350,16 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_of_platform_default_populate_scan_complete_after_candidate_print();
 
         /*
-         * Device registration deferred:
+         * OF platform device creation:
          *
-         * This step must not claim that candidates have already become
-         * platform devices or BusType device refs. of_platform_device_create(),
-         * device_add() and bus klist membership remain deferred until the
-         * Device/Driver model is expanded.
+         * After candidate scanning, of_platform_default_populate_init must
+         * create PlatformDeviceType instances from candidate nodes, bind each
+         * embedded DeviceType to its DeviceNodeRef, register the core device,
+         * and add the resulting DeviceRef to PlatformBusSubsysPrivate's
+         * DeviceRefSet through BusType.AddDevice. Driver match/probe/bind
+         * remains outside this boundary.
          */
-        arceos_ex_must_of_platform_default_populate_defer_device_registration();
+        arceos_ex_must_of_platform_default_populate_create_and_register_platform_devices();
     }
 }
 

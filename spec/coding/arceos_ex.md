@@ -310,8 +310,9 @@ sync slot 和 rootfs slot 可以作为静态收集 slot 保留其 Linux 排序�
 
 `of_platform_default_populate_init()` 是 `PlatformBus` 的 entry action。它的源对象是正式
 `DeviceTree`，目标对象是 `PlatformBus`；`InitcallTable` 只负责按表执行该 entry，不拥有其目标副作用。
-当前实现步骤只覆盖 Linux-like candidate 识别，不声明 platform device 已创建，也不声明已经以 `DeviceRef`
-加入 `BusType.klist_devices`。
+该 action 必须先完成 Linux-like candidate 识别，然后把每个 candidate node 构造成 `PlatformDeviceType`
+实例，绑定其内嵌 `DeviceType` 的 node 引用，注册 core device，并把对应 `DeviceRef` 加入
+`PlatformBusSubsysPrivate.klist_devices` 的 model 视图。
 
 model 层的 `DeviceType` 对应 Linux `struct device`，不是 Linux `struct device_type` 描述符；后者如需建模
 应另建 `DeviceTypeDescriptor` 或 `DeviceKind`。`PlatformDeviceType` 对应 Linux `struct platform_device`，
@@ -322,7 +323,10 @@ helper 表达，例如 `to_platform_device!()`。
 `DeviceObject` 这类空壳只作为早期模型的对象分类标签保留，不承担 Linux driver-core 语义；可复用类型
 `DeviceType`、`BusType` 和 `BusSubsysPrivate` 不应继承它来表达语义。`DeviceType.Action::SetNode` 对应 Linux
 `device_set_node()`/`dev.of_node` 绑定：它只把 core device 关联到 `DeviceNodeRef`/firmware node，`compatible`
-仍属于 DeviceTree node/property，后续 probe/match 必须经由该 node ref 获取 compatible。
+仍属于 DeviceTree node/property，后续 probe/match 必须经由该 node ref 获取 compatible。model 层的
+`DeviceType.of_node: DeviceNodeRef` 表示逻辑关联；coding 层不得把借用型 `DeviceNodeRef<'dt>` 长期存入
+`Context`，应存稳定 `DeviceNodeId`/node index/path handle，并在访问时通过仍然存在的 `DeviceTree` 解析出
+临时 `DeviceNodeRef<'_>`。
 
 该 action 的遍历规则参考 Linux 6.12.37 `drivers/of/platform.c`：
 `of_platform_default_populate(NULL, ...)` 使用 `of_default_bus_match_table` 调用
@@ -334,8 +338,12 @@ candidate 后，只有当该节点匹配 Linux 默认 bus 表（`simple-bus`、`
 `arm,amba-bus`）才递归扫描它的 children。
 
 在当前阶段，识别出的每个 candidate 必须打印节点 name 和 compatible，便于从 KUnit/smoke 输出中核对遍历结果。
-`of_platform_device_create()`、`device_add()`、`BusType.Action::AddDevice(DeviceRef)` 和 driver probe/bind 仍然
-deferred。
+随后必须按 Linux-like 顺序执行 `of_platform_device_create_pdata()`/`of_device_alloc()` 边界，建立
+`PlatformDeviceType` 实例和其内嵌 `DeviceType`，执行 `DeviceType.Action::SetNode`，绑定
+`pdev.dev.bus = &platform_bus_type`，再通过 `platform_device_add()`/`device_add()`/`bus_add_device()` 的建模边界
+调用 `BusType.Action::AddDevice(DeviceRef)`。model 层将 `subsys_private.klist_devices` 表达为
+`DeviceRefSet`，coding 层应实现为 KList-like 可追加、可遍历的链表/数组池视图；长度不得受早期 action smoke
+slot 限制。driver probe/bind 仍然 deferred。
 
 Action checkpoint 命名应使用 `Entry` 表示 action 入口，`Exit` 表示 action 返回边界；必要的中间观测点使用
 语义名称，例如 `ScanComplete`、`CandidatesIdentified` 或 `DevicesAdded`。不得用 `Called` 这类模糊名称承载
