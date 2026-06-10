@@ -6,7 +6,7 @@ use crate::{
     trace::Checkpoint,
 };
 
-const SCOPE: &[Checkpoint] = &[Checkpoint::OfPlatformDefaultPopulateInitCalled];
+const SCOPE: &[Checkpoint] = &[Checkpoint::OfPlatformDefaultPopulateScanComplete];
 pub const KUNIT_CASE_COUNT: usize = 1;
 
 pub const HANDLER: Handler = Handler {

@@ -203,7 +203,7 @@ fn of_platform_default_populate_init(ctx: ContextRef<'_>) -> InitcallReturn {
             .of_platform_default_populate_init(device_tree)
     };
     if result == InitcallReturn::Ok {
-        crate::checkpoint::dispatch_mut(Checkpoint::OfPlatformDefaultPopulateInitCalled, ctx);
+        crate::checkpoint::dispatch_mut(Checkpoint::OfPlatformDefaultPopulateScanComplete, ctx);
     }
     result
 }
@@ -856,7 +856,7 @@ impl PlatformBus {
         print_of_platform_candidates(&candidates);
         self.of_platform_candidate_names_printed = candidates.count != 0;
         self.of_platform_candidate_compatibles_printed = candidates.count != 0;
-        trace::checkpoint(Checkpoint::OfPlatformDefaultPopulateInitCalled);
+        trace::checkpoint(Checkpoint::OfPlatformDefaultPopulateScanComplete);
         InitcallReturn::Ok
     }
 

@@ -506,6 +506,7 @@ object InitcallTable: InitcallTableType {
                     of_platform_default_populate_candidates_are_available(PlatformBus);
                     of_platform_default_populate_candidate_names_printed(PlatformBus);
                     of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
+                    of_platform_default_populate_scan_complete_checkpoint(PlatformBus);
                     of_platform_default_populate_device_registration_deferred(PlatformBus);
                 }
             }
@@ -540,6 +541,7 @@ object InitcallTable: InitcallTableType {
             of_platform_default_populate_candidates_are_available(PlatformBus);
             of_platform_default_populate_candidate_names_printed(PlatformBus);
             of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
+            of_platform_default_populate_scan_complete_checkpoint(PlatformBus);
             of_platform_default_populate_device_registration_deferred(PlatformBus);
         }
     }
@@ -630,6 +632,7 @@ object InitcallPhase: PhaseObject {
                     of_platform_default_populate_candidates_identified(PlatformBus);
                     of_platform_default_populate_candidate_names_printed(PlatformBus);
                     of_platform_default_populate_candidate_compatibles_printed(PlatformBus);
+                    of_platform_default_populate_scan_complete_checkpoint(PlatformBus);
                     of_platform_default_populate_device_registration_deferred(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }

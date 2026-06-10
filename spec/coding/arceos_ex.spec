@@ -100,6 +100,8 @@ predicate arceos_ex_must_of_platform_default_populate_require_compatible_strict(
 predicate arceos_ex_must_of_platform_default_populate_recurse_default_bus_matches() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_filter_available_nodes() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_print_candidate_identity() -> bool;
+predicate arceos_ex_must_action_checkpoints_use_entry_exit_and_semantic_points() -> bool;
+predicate arceos_ex_must_of_platform_default_populate_scan_complete_after_candidate_print() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_defer_device_registration() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
@@ -1267,6 +1269,27 @@ type ArceosExInitcallCodingMust {
          * inspectable from smoke/KUnit output.
          */
         arceos_ex_must_of_platform_default_populate_print_candidate_identity();
+
+        /*
+         * Action checkpoint naming:
+         *
+         * Action checkpoints must use Entry for action entry, Exit for action
+         * return boundary, and semantic names for necessary middle points.
+         * Ambiguous names such as Called must not be used for postcondition
+         * or middle checkpoints.
+         */
+        arceos_ex_must_action_checkpoints_use_entry_exit_and_semantic_points();
+
+        /*
+         * OF platform scan completion:
+         *
+         * The currently tested OF platform checkpoint must be named
+         * OfPlatformDefaultPopulate.ScanComplete and must be emitted after
+         * candidates have been identified and their name/compatible pairs have
+         * been printed. KUnit coverage for candidate facts must attach to this
+         * checkpoint, not to an Entry checkpoint.
+         */
+        arceos_ex_must_of_platform_default_populate_scan_complete_after_candidate_print();
 
         /*
          * Device registration deferred:

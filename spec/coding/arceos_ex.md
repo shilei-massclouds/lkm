@@ -325,6 +325,12 @@ candidate 后，只有当该节点匹配 Linux 默认 bus 表（`simple-bus`、`
 在当前阶段，识别出的每个 candidate 必须打印节点 name 和 compatible，便于从 KUnit/smoke 输出中核对遍历结果。
 `of_platform_device_create()`、`device_add()`、`BusType.Action::AddDevice` 和 driver probe/bind 仍然 deferred。
 
+Action checkpoint 命名应使用 `Entry` 表示 action 入口，`Exit` 表示 action 返回边界；必要的中间观测点使用
+语义名称，例如 `ScanComplete`、`CandidatesIdentified` 或 `DevicesAdded`。不得用 `Called` 这类模糊名称承载
+后置条件或中间完成点。当前 `of_platform_default_populate_init()` 的测试 checkpoint 是
+`OfPlatformDefaultPopulate.ScanComplete`：它必须位于 candidate 识别完成并已打印 name/compatible 之后，
+KUnit 对 candidate facts 的检查应挂在该点，而不是挂在入口点。
+
 ## RootfsPhase 编码约束
 
 `RootfsPhase` 是 `SMP Runtime Phase` 的第四个子阶段，formal model 路径为

@@ -66,6 +66,7 @@ predicate of_platform_default_populate_candidates_identified<T>(bus: T) -> bool;
 predicate of_platform_default_populate_candidates_are_available<T>(bus: T) -> bool;
 predicate of_platform_default_populate_candidate_names_printed<T>(bus: T) -> bool;
 predicate of_platform_default_populate_candidate_compatibles_printed<T>(bus: T) -> bool;
+predicate of_platform_default_populate_scan_complete_checkpoint<T>(bus: T) -> bool;
 predicate of_platform_default_populate_device_registration_deferred<T>(bus: T) -> bool;
 
 type BusDeviceRef {
@@ -268,6 +269,7 @@ type PlatformBusType: BusType {
                 of_platform_default_populate_candidates_are_available(self);
                 of_platform_default_populate_candidate_names_printed(self);
                 of_platform_default_populate_candidate_compatibles_printed(self);
+                of_platform_default_populate_scan_complete_checkpoint(self);
                 of_platform_default_populate_device_registration_deferred(self);
             }
             deferred {
