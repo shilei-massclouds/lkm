@@ -47,6 +47,7 @@ predicate arceos_ex_must_global_allocator_dealloc_recover_kmalloc_object_from_pt
 predicate arceos_ex_must_global_allocator_support_documented_layout_subset() -> bool;
 predicate arceos_ex_must_dynamic_containers_require_global_allocator_ready() -> bool;
 predicate arceos_ex_must_dynamic_container_smoke_cover_vec_growth_drop() -> bool;
+predicate arceos_ex_must_dynamic_container_pressure_smoke_cover_layout_boundary() -> bool;
 predicate arceos_ex_must_page_table_lock_cache_named_page_ptl() -> bool;
 predicate arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_not_page_tables() -> bool;
 predicate arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects() -> bool;
@@ -392,6 +393,7 @@ type ArceosExMmCoreInitCodingMust {
          * and drop the Vec without direct SLUB or PageAllocator access.
          */
         arceos_ex_must_dynamic_container_smoke_cover_vec_growth_drop();
+        arceos_ex_must_dynamic_container_pressure_smoke_cover_layout_boundary();
 
         /*
          * Page table lock cache:

@@ -86,6 +86,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::global_alloc::run,
     },
     SmokeCase {
+        name: "allocator_pressure",
+        run: cases::allocator_pressure::run,
+    },
+    SmokeCase {
         name: "vmalloc",
         run: cases::vmalloc::run,
     },

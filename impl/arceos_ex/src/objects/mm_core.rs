@@ -29,7 +29,7 @@ const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
 const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
 const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
-const GLOBAL_ALLOC_MAX_SIZE: usize = 1024;
+pub const GLOBAL_ALLOC_MAX_SIZE: usize = 1024;
 
 #[derive(Clone, Copy)]
 pub struct ZoneRef {
