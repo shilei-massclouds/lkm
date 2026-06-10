@@ -9,8 +9,7 @@ use crate::{
     },
 };
 
-const CANDIDATE_SAFE_CAPACITY: usize = 16;
-const CANDIDATE_FAILING_CAPACITY: usize = 32;
+const CANDIDATE_REQUIRED_CAPACITY: usize = 32;
 
 pub fn run() -> SmokeResult {
     let ctx = context();
@@ -56,47 +55,31 @@ fn check_vec_usize_boundary() -> bool {
 
 fn check_of_platform_candidate_growth_boundary(candidate_count: usize) -> bool {
     let item_size = size_of::<OfPlatformCandidate<'static>>();
-    let Some(safe_bytes) = item_size.checked_mul(CANDIDATE_SAFE_CAPACITY) else {
-        printk::write_str("candidate safe layout overflow\n");
+    let Some(required_bytes) = item_size.checked_mul(CANDIDATE_REQUIRED_CAPACITY) else {
+        printk::write_str("candidate required layout overflow\n");
         return false;
     };
-    let Some(failing_bytes) = item_size.checked_mul(CANDIDATE_FAILING_CAPACITY) else {
-        printk::write_str("candidate failing layout overflow\n");
-        return false;
-    };
-    if safe_bytes > GLOBAL_ALLOC_MAX_SIZE || failing_bytes <= GLOBAL_ALLOC_MAX_SIZE {
-        printk::write_str("candidate layout no longer matches allocator pressure scenario\n");
+    if required_bytes > GLOBAL_ALLOC_MAX_SIZE {
+        printk::write_str("candidate Vec still exceeds global allocation boundary\n");
         return false;
     }
 
     let mut candidates: Vec<OfPlatformCandidate<'static>> = Vec::new();
     if candidates
-        .try_reserve_exact(CANDIDATE_SAFE_CAPACITY)
+        .try_reserve_exact(CANDIDATE_REQUIRED_CAPACITY)
         .is_err()
     {
-        printk::write_str("candidate Vec failed before global allocation boundary\n");
+        printk::write_str("candidate Vec failed inside global allocation boundary\n");
         return false;
     }
-    if candidates
-        .try_reserve_exact(CANDIDATE_FAILING_CAPACITY)
-        .is_ok()
-    {
-        printk::write_str("candidate Vec unexpectedly crossed global allocation boundary\n");
-        return false;
-    }
-    if candidate_count > CANDIDATE_SAFE_CAPACITY && candidate_count <= CANDIDATE_FAILING_CAPACITY {
+    if candidate_count <= CANDIDATE_REQUIRED_CAPACITY {
         printk::write_fmt(format_args!(
-            "allocator_pressure of_platform_candidates={} item_size={} cap_ok={} bytes_ok={} cap_fail={} bytes_fail={}\n",
-            candidate_count,
-            item_size,
-            CANDIDATE_SAFE_CAPACITY,
-            safe_bytes,
-            CANDIDATE_FAILING_CAPACITY,
-            failing_bytes
+            "allocator_pressure of_platform_candidates={} item_size={} cap_ok={} bytes_ok={}\n",
+            candidate_count, item_size, CANDIDATE_REQUIRED_CAPACITY, required_bytes
         ));
     } else {
         printk::write_fmt(format_args!(
-            "allocator_pressure candidate_count={} outside reproduced growth window item_size={}\n",
+            "allocator_pressure candidate_count={} exceeds smoke capacity item_size={}\n",
             candidate_count, item_size
         ));
     }

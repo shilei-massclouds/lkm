@@ -839,9 +839,10 @@ buddy pages，并且必须可通过已经建立的线性映射进行受限读写
 `SlubAllocatorType.Action::Kfree(alloc_ref)`；coding 层可按 Rust 需要调整参数和返回封装，但必须保留 size、GFP、
 caller-owned allocation reference、线性映射读写、kzalloc 返回前清零，以及 kfree 释放后对象回到所属 kmalloc cache 的契约。
 
-当前第一轮 `arceos_ex` SLUB/kmalloc 实现只要求最小 page-backed slab：`KmallocCaches` 使用固定默认 size classes
-`8/16/32/64/128/256/512/1024`，请求 size 通过向上取整选择 size class；当某个 cache 没有空闲对象时，必须通过
-`PageAllocator.alloc_pages()` 获取 backing page，把 page 切成同尺寸 slots 并挂入该 cache 的 freelist。第一轮可先不在
+当前第一轮 `arceos_ex` SLUB/kmalloc 实现只要求 Linux-like page-backed slab：`KmallocCaches` 使用固定默认 size classes
+`8/16/32/64/128/256/512/1024/2048/4096/8192`，请求 size 通过向上取整选择 size class；当某个 cache 没有空闲对象时，必须通过
+`PageAllocator.alloc_pages()` 获取 backing page，把 page 切成同尺寸 slots 并挂入该 cache 的 freelist。4KiB page 配置下，
+8KiB cache 必须使用 order-1 backing page，模拟 Linux `KMALLOC_MAX_CACHE_SIZE = PAGE_SIZE * 2` 的普通 kmalloc cache 边界。第一轮可先不在
 空 slab 时把整页归还给 `PageAllocator.free_pages()`，但所有 backing pages 必须由 `PageAllocator` 拥有并通过 `PageRef`
 建立 direct-map slot 地址。freelist 节点可以使用 slot 内存的 intrusive next pointer 或等价的固定元数据表示，但不得依赖
 `Vec`、`Box`、全局 heap 或 MemBlock。`kmalloc` 不保证清零；`kzalloc` 必须清零返回对象的 requested size 范围；
@@ -854,7 +855,7 @@ slab debug redzone/poison、freelist random/hardened、memcg kmalloc、reclaim/c
 必须能从裸指针和 layout 找回所属 kmalloc slab/cache，再把对象交回 SLUB。实现不得在这一层直接调用 MemBlock、直接操作 buddy
 free list，或建立测试专用 heap。
 
-第一轮 `arceos_ex` GlobalAlloc layout 支持范围应显式受限：`size > 0`，`size <= 1024`，alignment 不超过当前 kmalloc slot
+第一轮 `arceos_ex` GlobalAlloc layout 支持范围应显式受限：`size > 0`，`size <= 8192`，alignment 不超过当前 kmalloc slot
 天然能满足的范围。若实现通过 size class/page 对齐能够满足更大 alignment，可在 coding 注释和 smoke 中说明；否则必须对超出范围的
 layout 返回 null/失败，而不是返回未满足 alignment 的地址。后续 large allocation、realloc、OOM policy、per-CPU cache 和特殊
 alignment fallback 均 deferred。
@@ -862,7 +863,7 @@ alignment fallback 均 deferred。
 `DynamicContainerRuntime.Ready` 表示普通 `Vec`、List、Set 等动态容器可以通过 `KernelGlobalAllocator` 获取 storage。它不得
 让动态容器绕过 `GlobalAlloc` 直接拿 `KmallocAllocRef` 或 `PageRef`。后续平台总线 populate 若需要保存变长 `PlatformDevice`
 集合，应依赖该 runtime，而不是恢复固定容量数组。当前 `DynamicContainerRuntime.Ready` 只承诺 documented layout subset
-内的动态容器能力：`Vec` 增长导致的单次 `Layout` 若超过 `KernelGlobalAllocator` 第一轮 `size <= 1024` 边界，应以
+内的动态容器能力：`Vec` 增长导致的单次 `Layout` 若超过 `KernelGlobalAllocator` 第一轮 `size <= 8192` 边界，应以
 allocation failure 处理，而不能被解释为 `Vec` 语义本身可用性失效。涉及 initcall 批量对象创建的 smoke 应覆盖这种边界，
 避免普通 `push` 触发 `alloc_error_handler` 后只留下不可定位的关机日志。
 

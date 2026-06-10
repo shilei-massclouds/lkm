@@ -77,6 +77,7 @@ fn check_slub_facts(ctx: &Context) -> Option<()> {
         || !kmalloc.memcg_caches_trimmed()
         || !kmalloc.has_size(8)
         || !kmalloc.has_size(1024)
+        || !kmalloc.has_size(8192)
     {
         printk::write_str("kmalloc cache facts invalid\n");
         return None;

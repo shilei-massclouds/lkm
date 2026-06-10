@@ -18,7 +18,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
 
 const MAX_BOOT_ZONES: usize = 3;
-const MAX_KMALLOC_CACHES: usize = 8;
+const MAX_KMALLOC_CACHES: usize = 11;
 const MAX_KMALLOC_SLABS: usize = 32;
 const BUDDY_ORDER_COUNT: usize = 11;
 const BUDDY_INVALID_INDEX: usize = usize::MAX;
@@ -29,7 +29,7 @@ const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
 const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
 const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
-pub const GLOBAL_ALLOC_MAX_SIZE: usize = 1024;
+pub const GLOBAL_ALLOC_MAX_SIZE: usize = 8192;
 
 #[derive(Clone, Copy)]
 pub struct ZoneRef {
@@ -1813,6 +1813,7 @@ impl KmallocAllocRef {
 #[derive(Clone, Copy)]
 struct KmallocSlab {
     page: PageRef,
+    order: usize,
     base: usize,
     object_size: usize,
     object_count: usize,
@@ -1824,6 +1825,7 @@ impl KmallocSlab {
     const fn empty() -> Self {
         Self {
             page: empty_page_ref(),
+            order: 0,
             base: 0,
             object_size: 0,
             object_count: 0,
@@ -2321,6 +2323,20 @@ fn global_alloc(layout: Layout, zeroed: bool) -> *mut u8 {
     }
 }
 
+fn kmalloc_cache_order(object_size: usize, page_size: usize) -> Option<usize> {
+    if object_size == 0 || page_size == 0 || !page_size.is_power_of_two() {
+        return None;
+    }
+
+    if object_size <= page_size {
+        Some(0)
+    } else if object_size <= page_size.checked_mul(2)? {
+        Some(1)
+    } else {
+        None
+    }
+}
+
 const fn layout_supported(layout: Layout) -> bool {
     let Some(cache_size) = kmalloc_size_class_for(layout.size()) else {
         return false;
@@ -2586,7 +2602,7 @@ impl KmallocCaches {
         let mut index = 0usize;
         while index < self.slab_count {
             if self.slabs[index].page.metadata_linear() != 0 {
-                count += 1;
+                count += 1usize << self.slabs[index].order;
             }
             index += 1;
         }
@@ -2729,7 +2745,7 @@ impl KmallocCaches {
             );
         }
 
-        self.sizes = [8, 16, 32, 64, 128, 256, 512, 1024];
+        self.sizes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192];
         self.count = MAX_KMALLOC_CACHES;
         let mut index = 0usize;
         while index < self.count {
@@ -2777,19 +2793,20 @@ impl KmallocCaches {
             return false;
         }
         let object_size = self.caches[cache_index].object_size;
-        if object_size == 0 || page_metadata_map.page_size() < object_size {
+        let Some(order) = kmalloc_cache_order(object_size, page_metadata_map.page_size()) else {
             return false;
-        }
-        let Some(page) = page_allocator.alloc_page(gfp, page_metadata_map) else {
+        };
+        let Some(page) = page_allocator.alloc_pages(order, gfp, page_metadata_map) else {
             return false;
         };
         let Some(base) = page_metadata_map.page_address(page) else {
-            page_allocator.free_pages(page, 0, page_metadata_map);
+            page_allocator.free_pages(page, order, page_metadata_map);
             return false;
         };
-        let object_count = page_metadata_map.page_size() / object_size;
+        let slab_bytes = page_metadata_map.page_size() << order;
+        let object_count = slab_bytes / object_size;
         if object_count == 0 {
-            page_allocator.free_pages(page, 0, page_metadata_map);
+            page_allocator.free_pages(page, order, page_metadata_map);
             return false;
         }
 
@@ -2798,11 +2815,11 @@ impl KmallocCaches {
         while object_index != 0 {
             object_index -= 1;
             let Some(offset) = object_index.checked_mul(object_size) else {
-                page_allocator.free_pages(page, 0, page_metadata_map);
+                page_allocator.free_pages(page, order, page_metadata_map);
                 return false;
             };
             let Some(addr) = base.checked_add(offset) else {
-                page_allocator.free_pages(page, 0, page_metadata_map);
+                page_allocator.free_pages(page, order, page_metadata_map);
                 return false;
             };
             write_freelist_next(addr, head);
@@ -2811,6 +2828,7 @@ impl KmallocCaches {
 
         self.slabs[self.slab_count] = KmallocSlab {
             page,
+            order,
             base,
             object_size,
             object_count,
