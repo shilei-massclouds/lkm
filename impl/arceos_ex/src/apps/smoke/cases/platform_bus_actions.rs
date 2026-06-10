@@ -5,7 +5,7 @@ use crate::{
     },
     context::context_ref,
     objects::{
-        initcall::{BusDeviceRef, BusDriverRef, PlatformBus},
+        initcall::{BusDriverRef, DeviceRef, PlatformBus},
         state::State,
     },
 };
@@ -62,9 +62,7 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert_fail(
             "add device before setup",
-            self.fixture
-                .bus
-                .add_device(BusDeviceRef::MockPlatformDevice),
+            self.fixture.bus.add_device(DeviceRef::MockPlatformDevice),
         );
         self.fixture.setup_ready(assertions);
     }
@@ -72,22 +70,18 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
     fn run(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert_ok(
             "add device",
-            self.fixture
-                .bus
-                .add_device(BusDeviceRef::MockPlatformDevice),
+            self.fixture.bus.add_device(DeviceRef::MockPlatformDevice),
         );
         assertions.assert(
             "device listed",
             self.fixture
                 .bus
-                .contains_device(BusDeviceRef::MockPlatformDevice),
+                .contains_device(DeviceRef::MockPlatformDevice),
         );
         assertions.assert("device count", self.fixture.bus.device_count() == 1);
         assertions.assert_fail(
             "duplicate device",
-            self.fixture
-                .bus
-                .add_device(BusDeviceRef::MockPlatformDevice),
+            self.fixture.bus.add_device(DeviceRef::MockPlatformDevice),
         );
 
         assertions.assert_ok(
@@ -133,9 +127,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert_fail(
             "probe device before setup",
-            self.fixture
-                .bus
-                .probe_device(BusDeviceRef::MockPlatformDevice),
+            self.fixture.bus.probe_device(DeviceRef::MockPlatformDevice),
         );
         self.fixture.setup_ready(assertions);
     }
@@ -163,9 +155,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
 
         assertions.assert_ok(
             "probe device deferred",
-            self.fixture
-                .bus
-                .probe_device(BusDeviceRef::MockPlatformDevice),
+            self.fixture.bus.probe_device(DeviceRef::MockPlatformDevice),
         );
         assertions.assert(
             "probe device scanned drivers",

@@ -310,8 +310,14 @@ sync slot 和 rootfs slot 可以作为静态收集 slot 保留其 Linux 排序�
 
 `of_platform_default_populate_init()` 是 `PlatformBus` 的 entry action。它的源对象是正式
 `DeviceTree`，目标对象是 `PlatformBus`；`InitcallTable` 只负责按表执行该 entry，不拥有其目标副作用。
-当前实现步骤只覆盖 Linux-like candidate 识别，不声明 platform device 已创建，也不声明已经加入
-`BusType.klist_devices`。
+当前实现步骤只覆盖 Linux-like candidate 识别，不声明 platform device 已创建，也不声明已经以 `DeviceRef`
+加入 `BusType.klist_devices`。
+
+model 层的 `DeviceType` 对应 Linux `struct device`，不是 Linux `struct device_type` 描述符；后者如需建模
+应另建 `DeviceTypeDescriptor` 或 `DeviceKind`。`PlatformDeviceType` 对应 Linux `struct platform_device`，
+它在 `DeviceType` 语义基础上嵌入 core device，并维护 name/id/resource 等 platform-specific 信息。coding 层
+必须保留从嵌入的 `DeviceRef` 找回外层 platform device 的 container_of-like 能力，可用 Rust 宏或等价 typed
+helper 表达，例如 `to_platform_device!()`。
 
 该 action 的遍历规则参考 Linux 6.12.37 `drivers/of/platform.c`：
 `of_platform_default_populate(NULL, ...)` 使用 `of_default_bus_match_table` 调用
@@ -323,7 +329,8 @@ candidate 后，只有当该节点匹配 Linux 默认 bus 表（`simple-bus`、`
 `arm,amba-bus`）才递归扫描它的 children。
 
 在当前阶段，识别出的每个 candidate 必须打印节点 name 和 compatible，便于从 KUnit/smoke 输出中核对遍历结果。
-`of_platform_device_create()`、`device_add()`、`BusType.Action::AddDevice` 和 driver probe/bind 仍然 deferred。
+`of_platform_device_create()`、`device_add()`、`BusType.Action::AddDevice(DeviceRef)` 和 driver probe/bind 仍然
+deferred。
 
 Action checkpoint 命名应使用 `Entry` 表示 action 入口，`Exit` 表示 action 返回边界；必要的中间观测点使用
 语义名称，例如 `ScanComplete`、`CandidatesIdentified` 或 `DevicesAdded`。不得用 `Called` 这类模糊名称承载

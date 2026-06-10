@@ -78,7 +78,7 @@ object DriverCoreBase: DeviceObject {
  * 当前 RISC-V 路径下 early platform cleanup 不展开；platform_bus 是
  * 静态 struct device，注册成功后成为 /sys/devices 下的 root device。
  */
-object PlatformBusRootDevice: DeviceObject {
+object PlatformBusRootDevice: DeviceType {
     initial_state: State::Base;
 
     state State::Base {

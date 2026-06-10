@@ -320,7 +320,7 @@ const fn initcall_level_name(index: usize) -> InitcallLevelName {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub enum BusDeviceRef {
+pub enum DeviceRef {
     MockPlatformDevice,
 }
 
@@ -629,7 +629,7 @@ pub struct PlatformBus {
     autoprobe_enabled: bool,
     ops_bound: bool,
     register_return_zero: bool,
-    device_refs: [Option<BusDeviceRef>; PLATFORM_BUS_ACTION_SLOT_COUNT],
+    device_refs: [Option<DeviceRef>; PLATFORM_BUS_ACTION_SLOT_COUNT],
     device_count: usize,
     driver_refs: [Option<BusDriverRef>; PLATFORM_BUS_ACTION_SLOT_COUNT],
     driver_count: usize,
@@ -778,7 +778,7 @@ impl PlatformBus {
         self.of_platform_candidate_count
     }
 
-    pub fn contains_device(&self, device: BusDeviceRef) -> bool {
+    pub fn contains_device(&self, device: DeviceRef) -> bool {
         let mut index = 0usize;
         while index < self.device_count {
             if self.device_refs[index] == Some(device) {
@@ -860,7 +860,7 @@ impl PlatformBus {
         InitcallReturn::Ok
     }
 
-    pub fn add_device(&mut self, device: BusDeviceRef) -> EventResult {
+    pub fn add_device(&mut self, device: DeviceRef) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
             || !self.devices_kset_ready
@@ -920,12 +920,12 @@ impl PlatformBus {
         Ok(())
     }
 
-    pub fn probe_device(&mut self, device: BusDeviceRef) -> EventResult {
+    pub fn probe_device(&mut self, device: DeviceRef) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
             || !self.drivers_kset_ready
             || self.driver_count == 0
-            || !is_bus_device_ref_ready(device)
+            || !is_device_ref_ready(device)
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -941,8 +941,8 @@ impl PlatformBus {
     }
 }
 
-const fn is_bus_device_ref_ready(device: BusDeviceRef) -> bool {
-    matches!(device, BusDeviceRef::MockPlatformDevice)
+const fn is_device_ref_ready(device: DeviceRef) -> bool {
+    matches!(device, DeviceRef::MockPlatformDevice)
 }
 
 const fn is_bus_driver_ref_ready(driver: BusDriverRef) -> bool {

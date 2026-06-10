@@ -17,7 +17,6 @@ predicate bus_type_devices_kset_ready<T>(bus: T) -> bool;
 predicate bus_type_drivers_kset_ready<T>(bus: T) -> bool;
 predicate bus_type_autoprobe_enabled<T>(bus: T) -> bool;
 predicate bus_type_register_return_zero<T>(bus: T) -> bool;
-predicate bus_device_ref_ready<T>(device: T) -> bool;
 predicate bus_driver_ref_ready<T>(driver: T) -> bool;
 predicate bus_type_device_added<T, U>(bus: T, device: U) -> bool;
 predicate bus_type_driver_added<T, U>(bus: T, driver: U) -> bool;
@@ -68,9 +67,6 @@ predicate of_platform_default_populate_candidate_names_printed<T>(bus: T) -> boo
 predicate of_platform_default_populate_candidate_compatibles_printed<T>(bus: T) -> bool;
 predicate of_platform_default_populate_scan_complete_checkpoint<T>(bus: T) -> bool;
 predicate of_platform_default_populate_device_registration_deferred<T>(bus: T) -> bool;
-
-type BusDeviceRef {
-}
 
 type BusDriverRef {
 }
@@ -159,13 +155,13 @@ type BusType: DeviceObject {
          * subsys_private.klist_devices. It is the reusable BusType boundary
          * that later Device modeling can call from device_add()/bus_add_device().
          */
-        Action::AddDevice(device: BusDeviceRef) {
+        Action::AddDevice(device: DeviceRef) {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
                 bus_type_subsys_private_online(self, self.subsys);
                 bus_subsys_klist_devices_ready(self.subsys);
-                bus_device_ref_ready(device);
+                device_ref_ready(device);
             }
             ensures {
                 bus_type_device_added(self, device);
@@ -222,14 +218,14 @@ type BusType: DeviceObject {
          * registered device can scan klist_drivers, while real binding remains
          * deferred.
          */
-        Action::ProbeDevice(device: BusDeviceRef) {
+        Action::ProbeDevice(device: DeviceRef) {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
                 bus_type_subsys_private_online(self, self.subsys);
                 bus_subsys_klist_drivers_ready(self.subsys);
                 bus_type_drivers_klist_nonempty(self);
-                bus_device_ref_ready(device);
+                device_ref_ready(device);
             }
             ensures {
                 bus_type_probe_device_deferred(self, device);

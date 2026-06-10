@@ -103,6 +103,8 @@ predicate arceos_ex_must_of_platform_default_populate_print_candidate_identity()
 predicate arceos_ex_must_action_checkpoints_use_entry_exit_and_semantic_points() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_scan_complete_after_candidate_print() -> bool;
 predicate arceos_ex_must_of_platform_default_populate_defer_device_registration() -> bool;
+predicate arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor() -> bool;
+predicate arceos_ex_must_platform_device_embed_device_and_support_container_lookup() -> bool;
 
 type ArceosExDeviceTreeCodingMust {
     invariant {
@@ -1279,6 +1281,26 @@ type ArceosExInitcallCodingMust {
          * or middle checkpoints.
          */
         arceos_ex_must_action_checkpoints_use_entry_exit_and_semantic_points();
+
+        /*
+         * Device model naming:
+         *
+         * The formal DeviceType corresponds to Linux struct device, not Linux
+         * struct device_type. Linux struct platform_device must be represented
+         * as PlatformDeviceType extending DeviceType while embedding a core
+         * device member.
+         */
+        arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor();
+
+        /*
+         * Platform device core-member lookup:
+         *
+         * PlatformDeviceType coding must preserve a container_of-like
+         * conversion from the embedded DeviceRef back to the owning platform
+         * device, exposed through a Rust macro or equivalent typed helper such
+         * as to_platform_device!().
+         */
+        arceos_ex_must_platform_device_embed_device_and_support_container_lookup();
 
         /*
          * OF platform scan completion:
