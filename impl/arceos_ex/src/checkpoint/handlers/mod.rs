@@ -1,3 +1,5 @@
+#[cfg(checkpoint_handler_console_handoff)]
+mod console_handoff;
 #[cfg(checkpoint_sbi_char)]
 pub mod early_trace;
 #[cfg(checkpoint_handler_earlycon)]
@@ -66,6 +68,8 @@ const POST_VM_HANDLERS: &[Handler] = &[
     kernel_init_task::HANDLER,
     #[cfg(checkpoint_handler_scheduler_action)]
     scheduler_action::HANDLER,
+    #[cfg(checkpoint_handler_console_handoff)]
+    console_handoff::HANDLER,
     #[cfg(checkpoint_handler_smoke)]
     smoke::HANDLER,
 ];
@@ -81,6 +85,7 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_kernel_init_task,
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
+    checkpoint_handler_console_handoff,
     checkpoint_handler_smoke
 ))]
 pub const fn kunit_case_count() -> usize {
@@ -108,6 +113,10 @@ pub const fn kunit_case_count() -> usize {
     #[cfg(checkpoint_handler_scheduler_action)]
     {
         count += scheduler_action::KUNIT_CASE_COUNT;
+    }
+    #[cfg(checkpoint_handler_console_handoff)]
+    {
+        count += console_handoff::KUNIT_CASE_COUNT;
     }
     #[cfg(checkpoint_handler_smoke)]
     {

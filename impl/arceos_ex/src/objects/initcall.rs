@@ -1064,6 +1064,7 @@ impl PlatformBus {
             if result == ProbeResult::Bound {
                 self.ns16550a_bound_device = Some(device_ref);
                 self.ns16550a_probe_ioremaps_uart8250_port = ns16550a::uart8250_port_ioremapped()
+                    && ns16550a::uart8250_port_resources_ready()
                     && ioremap.mapping_count() != 0
                     && ioremap.mapping_for_device(device_ref).is_some();
                 self.ns16550a_probe_registers_uart8250_port = ns16550a::uart8250_port_registered();

@@ -3060,6 +3060,7 @@ impl VmapArea {
         self.size
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn flags(self) -> VmapAreaFlags {
         self.flags
     }
@@ -3068,6 +3069,7 @@ impl VmapArea {
         self.busy
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn end(self) -> usize {
         self.virt_base.saturating_add(self.size)
     }
@@ -3116,26 +3118,32 @@ impl VmapMapping {
         }
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn index(self) -> usize {
         self.index
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn area(self) -> VmapArea {
         self.area
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn phys_base(self) -> usize {
         self.phys_base
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn size(self) -> usize {
         self.size
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn protection(self) -> PageProtection {
         self.protection
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn installed(self) -> bool {
         self.installed
     }
@@ -3252,10 +3260,12 @@ impl VmallocAllocator {
         self.runtime_page_table_mapping_ready
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn area_count(&self) -> usize {
         self.area_count
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn mapping_count(&self) -> usize {
         self.mapping_count
     }
@@ -3367,6 +3377,7 @@ impl VmallocAllocator {
         Some(mapping)
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub fn area(&self, index: usize) -> Option<VmapArea> {
         if index < self.area_count {
             Some(self.areas[index])
@@ -3375,6 +3386,7 @@ impl VmallocAllocator {
         }
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub fn mapping(&self, index: usize) -> Option<VmapMapping> {
         if index < self.mapping_count {
             Some(self.mappings[index])

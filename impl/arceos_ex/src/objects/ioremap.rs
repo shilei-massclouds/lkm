@@ -74,10 +74,12 @@ impl IoMemoryMapping {
         self.membase
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn vmap_area(self) -> VmapArea {
         self.vmap_area
     }
 
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn vmap_mapping(self) -> VmapMapping {
         self.vmap_mapping
     }

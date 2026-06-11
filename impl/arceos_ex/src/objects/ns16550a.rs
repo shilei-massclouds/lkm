@@ -300,6 +300,7 @@ pub fn uart8250_port_registered() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn uart8250_port_device_ref() -> Option<DeviceRef> {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     if state.port.registered {
@@ -345,11 +346,13 @@ pub fn serial8250_console_registered() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_backend_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.serial_console_registered && state.write_backend.facts_ready(state.port)
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_uses_membase() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.write_backend.ready
@@ -359,6 +362,7 @@ pub fn serial8250_write_uses_membase() -> bool {
         && state.port.membase != state.port.mapbase
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_uses_lsr_thr_polling() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.write_backend.ready
@@ -368,11 +372,13 @@ pub fn serial8250_write_uses_lsr_thr_polling() -> bool {
         && state.write_backend.lsr_thre_mask == UART_LSR_THRE
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_does_not_use_sbi() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.write_backend.ready && !state.write_backend.uses_sbi
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_interrupt_output_deferred() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.write_backend.ready
@@ -380,6 +386,7 @@ pub fn serial8250_interrupt_output_deferred() -> bool {
         && !state.write_backend.interrupt_driven
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_call_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -390,6 +397,7 @@ pub fn serial8250_write_call_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_tx_byte_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -400,6 +408,7 @@ pub fn serial8250_tx_byte_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_mmio_writes_performed() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -410,6 +419,7 @@ pub fn serial8250_mmio_writes_performed() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_timed_out() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -420,6 +430,7 @@ pub fn serial8250_write_timed_out() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn stdout_path_matched() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -429,6 +440,7 @@ pub fn stdout_path_matched() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn stdout_path_available() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -497,19 +509,19 @@ pub fn write_console_bytes(bytes: &[u8]) -> bool {
     state.write_backend.record_write(bytes)
 }
 
-#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn probe_state_snapshot() -> Ns16550aProbeState {
     unsafe { *(&raw const NS16550A_PROBE_STATE).as_ref().unwrap() }
 }
 
-#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn restore_probe_state(snapshot: Ns16550aProbeState) {
     unsafe {
         *(&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() = snapshot;
     }
 }
 
-#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn reset_probe_state_for_smoke() {
     unsafe {
         *(&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() = Ns16550aProbeState::new();

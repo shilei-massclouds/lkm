@@ -292,6 +292,7 @@ pub fn register_serial8250_console(preferred_from_stdout: bool) -> bool {
 }
 
 #[allow(dead_code)]
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn set_keep_bootcon(enabled: bool) {
     unsafe {
         (&raw mut CONSOLE_REGISTRY)
@@ -346,6 +347,7 @@ pub fn serial8250_console_registered() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_consdev() -> bool {
     unsafe {
         (&raw const CONSOLE_REGISTRY)
@@ -355,6 +357,7 @@ pub fn serial8250_consdev() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_ready() -> bool {
     unsafe {
         (&raw const CONSOLE_REGISTRY)
@@ -373,6 +376,7 @@ pub fn preferred_console_from_stdout() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn keep_bootcon() -> bool {
     unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap().keep_bootcon }
 }
@@ -390,6 +394,7 @@ pub fn route() -> PrintkRoute {
     unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap().route }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn boot_pending_flushed_before_serial_handoff() -> bool {
     unsafe {
         (&raw const CONSOLE_REGISTRY)
@@ -399,6 +404,7 @@ pub fn boot_pending_flushed_before_serial_handoff() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn legacy_earlycon_drain_blocked_after_handoff() -> bool {
     unsafe {
         (&raw const CONSOLE_REGISTRY)
@@ -408,6 +414,7 @@ pub fn legacy_earlycon_drain_blocked_after_handoff() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_online_trace_emitted() -> bool {
     unsafe {
         (&raw const CONSOLE_REGISTRY)
@@ -417,6 +424,7 @@ pub fn serial8250_online_trace_emitted() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn boot_console_offline_trace_emitted() -> bool {
     unsafe {
         (&raw const CONSOLE_REGISTRY)
@@ -426,6 +434,7 @@ pub fn boot_console_offline_trace_emitted() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_delivered_records_not_replayed() -> bool {
     unsafe {
         (&raw const CONSOLE_REGISTRY)
@@ -441,19 +450,19 @@ pub fn earlycon_drain_allowed() -> bool {
         || (registry.keep_bootcon && registry.boot_console_online && !registry.handoff_complete)
 }
 
-#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn registry_snapshot() -> ConsoleRegistry {
     unsafe { *(&raw const CONSOLE_REGISTRY).as_ref().unwrap() }
 }
 
-#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn restore_registry(snapshot: ConsoleRegistry) {
     unsafe {
         *(&raw mut CONSOLE_REGISTRY).as_mut().unwrap() = snapshot;
     }
 }
 
-#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+#[cfg(checkpoint_handler_console_handoff)]
 pub fn reset_registry_for_smoke(keep_bootcon: bool) {
     unsafe {
         let registry = (&raw mut CONSOLE_REGISTRY).as_mut().unwrap();

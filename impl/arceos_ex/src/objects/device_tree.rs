@@ -348,7 +348,7 @@ impl DeviceTree {
         self.stdout_path_node.is_some()
     }
 
-    #[cfg(any(app_smoke, checkpoint_handler_smoke))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub fn without_stdout_path_for_smoke(&self) -> Self {
         Self {
             lifecycle: Lifecycle::new(self.lifecycle.state()),

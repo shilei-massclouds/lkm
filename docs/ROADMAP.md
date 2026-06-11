@@ -10,10 +10,10 @@
 
 ## 当前焦点
 
-1. 推进 `ioremap/vmalloc` 泛化：`console/earlycon handoff` 和 handoff 后输出去重已经完成，下一步重点是扩展 vmap area、映射元数据、MMIO 属性策略和释放边界。
-2. 收口 trace/SVG 输出体验，使推导过程图适合日常审阅。
-3. 建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
-4. 审计已完成启动阶段的 deferred 清单、核心对象和测试边界。
+1. 补齐 EarlyCon / BootConsole / ConsoleRegistry 分层说明：EarlyCon 是早期后端，BootConsole 是 printk registry 中的 `CON_BOOT` entry，ConsoleRegistry 负责 route/handoff/keep_bootcon。
+2. 推进 `ioremap/vmalloc` 泛化：`console/earlycon handoff` 和 handoff 后输出去重已经完成，下一步重点是扩展 vmap area、映射元数据、MMIO 属性策略和释放边界。
+3. 准备 PLIC/IRQ 前置链路；在 PLIC/IRQ 驱动可用前，serial8250 输出继续保持 polling。
+4. 收口 trace/SVG 输出体验，使推导过程图适合日常审阅；建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
 
 ## 已完成计划：console/earlycon handoff
 
@@ -35,6 +35,17 @@
 3. 补 MMIO 属性模型。当前 RISC-V 页表实现只完成最小 RW non-exec 映射事实；后续需要在规格层区分 device、non-cache、write-combine 和 normal memory 等属性选择，并明确哪些属性在当前架构实现中暂时 deferred，避免把“能访问”误写成“属性完整正确”。
 4. 准备 PLIC/IRQ 前置链路。建立 irqchip/irqdomain、platform IRQ resource 解析、serial8250 IRQ 绑定和中断上下文约束；只有这些对象可用后，再把 serial8250 从 polling 输出扩展为 interrupt-driven 输出。
 5. 维护验收边界。每次实现改动后执行 `make verify`、`make build APP=smoke` 和相关 smoke/KUnit；影响 console/boot 路径的改动继续用 `make run APP=hello` 检查用户可见输出，用 `make test` 做完整回归。
+
+## 执行中计划：console 边界收口到 ioremap/vmalloc
+
+按当前讨论确认的顺序逐项推进，每完成一项即更新本节状态并做一次提交：
+
+1. **已完成：收口 console 测试边界**：app smoke 已移除直接操作 console registry / backend 的场景，只保留公开 `printk` 输出、无重复输出和用户可见 payload 结果；default handoff/idempotent、dummy non-match、non-stdout 和 `keep_bootcon` 已迁到 checkpoint KUnit/action-level handler。验收：`make test` 中 KUnit 42/42、app smoke 36/36，总计 79/79。
+2. **补 EarlyCon / BootConsole / ConsoleRegistry 分层说明**：规格和 coding 文档明确 EarlyCon 是早期输出后端，BootConsole 是 printk registry 中包装 EarlyCon 的 `CON_BOOT` console entry，Serial8250Console 是真实 console entry，ConsoleRegistry 负责 route、handoff 和 `keep_bootcon` 策略。验收：`make verify` 仍为 0 obligation。
+3. **继续 ioremap/vmalloc 泛化**：扩展 `VmallocAllocator` 的 vmap area 管理、`vm_struct/vmap_area` 元数据、多 mapping record、unmap/free 边界；保持 `Ioremap` 负责设备物理资源和 MMIO 属性策略，`VmallocAllocator` 负责 VA 区间和页表映射执行。
+4. **补 MMIO 属性模型**：区分 device、non-cache、write-combine 和 normal memory；当前 RISC-V 页表实现无法完整表达的属性必须显式 deferred，不把“能访问”写成“属性完整正确”。
+5. **准备 PLIC/IRQ 前置链路**：建立 irqchip/irqdomain、platform IRQ resource 解析、serial8250 IRQ 绑定和中断上下文约束；只有这些对象可用后，才把 serial8250 从 polling 输出扩展为 interrupt-driven 输出。
+6. **实现 serial8250 interrupt-driven console**：依赖上一步完成后再做；当前不作为 immediate next。
 
 ## 统一计划
 
@@ -58,7 +69,12 @@
 | `P1` | 完成 | arceos_ex/platform | 实现 PlatformBus driver/probe 与 ns16550a driver 闭环 | 已完成首轮规格和实现：`BusType/PlatformBusType` 建模 `platform_driver_register()`，通过 `DeviceDriverRef` 加入 `klist_drivers` 后执行 driver-side probe；`Ns16550aPlatformDriver` 独立 common 规格和独立 Rust 模块已落地，真实 `of_serial` descriptor 使用 `of_match_table` 匹配 `compatible = "ns16550a"`，initcall 宏声明已移入 driver 自己模块，符合 Linux-like `device_initcall!` 静态 section 方式。KUnit/smoke 覆盖 `AddDevice + ProbeDriver`、`AddDriver + ProbeDevice` 和 ns16550a probe/bind。后续继续展开 UART 8250 资源解析、串口注册和 console handoff。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#initcallphase-编码约束) |
 | `P1` | 完成 | arceos_ex/console | 实现 console/earlycon handoff | 已完成首轮 Linux-like handoff：`stdout-path` 匹配的 ns16550a probe 会构造 `Uart8250Port`/`Serial8250Console`，完成 boot console 到 serial8250 console 的 route 切换；handoff 后 `printk::write_str()` 通过 ioremap/vmalloc 建立的 UART `membase` 进行 LSR/THR polling 输出，不再使用 SBI fallback；`keep_bootcon`、dummy non-match、非 stdout 设备不抢占 console 等 smoke 已覆盖。IRQ-driven 输出依赖 PLIC/IRQ 支持，当前保持 deferred。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P0` | 完成 | arceos_ex/console | 修复 handoff 后 `make run` 输出重复并显式 trace 交接 | 已确认根因是 handoff 只切换 printk route，没有同步移交 `PrintkBuffer` 的 legacy drain cursor；serial8250 已即时输出的记录曾被 payload 末尾直接调用 `earlycon::drain_printk()` 经 SBI 重放。已按 Linux-like `register_console()` 语义修复：serial8250 注册前先 flush boot pending records，serial route 成功交付后推进 legacy cursor，handoff 后 earlycon 进入 offline/disabled，后续 backend drain 访问触发 panic；hello/smoke 已移除直接 backend drain，只通过 printk 前端输出；同时在 real serial console online 和非 `keep_bootcon` 下 boot console offline 位置输出 trace，使 `make run LOG=trace APP=hello` 显式展示 `Serial8250Console.Online` 与 `BootConsole.Offline`。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
+| `P0` | 完成 | arceos_ex/console | 收口 console 测试边界 | 已将 app smoke 中偏内部的 console registry / backend 策略场景迁到 checkpoint KUnit/action-level；app smoke 只保留公开 `printk` 输出、无重复输出和用户可见 payload 结果。KUnit 覆盖 default handoff/idempotent、dummy non-match、non-stdout 和 `keep_bootcon`，完整 `make test` 为 79/79。 | [smoke 测试边界](../spec/coding/arceos_ex.md#smoke-测试边界) |
+| `P0` | 待办 | spec/console | 明确 EarlyCon / BootConsole / ConsoleRegistry 分层 | 在 model/coding 里补足概念边界：EarlyCon 是 early backend，BootConsole 是 printk registry 的 `CON_BOOT` entry，Serial8250Console 是 real console entry，ConsoleRegistry 承载 route/handoff/keep_bootcon。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P1` | 待办 | arceos_ex/mm | 泛化 ioremap/vmalloc 运行时映射 | 在当前最小 UART MMIO 映射闭环基础上，继续扩展 `VmallocAllocator` 的 vmap area 管理、`vm_struct/vmap_area` 元数据、跨 vmalloc 窗口映射、unmap/free 边界和重复映射策略；`Ioremap` 继续负责设备物理资源与 MMIO 属性策略，`VmallocAllocator` 只负责虚拟区间管理和页表映射执行。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#mmcoreinitphase-编码约束) |
+| `P1` | 待办 | arceos_ex/mm | 补 MMIO 属性模型 | 区分 device、non-cache、write-combine、normal memory 等属性选择；当前 RISC-V 页表实现无法完整表达的属性必须显式 deferred，不能把“能访问”写成“属性完整正确”。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#mmcoreinitphase-编码约束) |
+| `P1` | 待办 | arceos_ex/irq | 准备 PLIC/IRQ 与 serial8250 IRQ 前置链路 | 建立 irqchip/irqdomain、platform IRQ resource 解析、serial8250 IRQ 绑定和中断上下文约束；在这些对象可用前，serial8250 console 输出继续保持 polling。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
+| `P2` | 待办 | arceos_ex/console | serial8250 interrupt-driven console | 在 PLIC/IRQ 前置链路完成后，再实现 serial8250 中断输出路径；当前 polling 输出仍是唯一 ready 路径。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P1` | 完成 | arceos_ex/allocator | 查明 initcall 阶段动态分配压力失败原因 | 已确认根因是第一轮 `GlobalAlloc` 仅支持 `size <= 1024`，而 `Vec<OfPlatformCandidate>` 在当前 QEMU FDT 的 21 个 candidate 下会增长到 capacity 32，单次 allocation 为 1280 字节并触发 `alloc_error_handler`。已把普通 kmalloc cache 按 Linux-like `PAGE_SIZE * 2` 边界扩到 8KiB，补 allocator pressure smoke 覆盖该边界，并把临时 `OfPlatformCandidateSet` 改为 `Vec` backing；`PlatformDevice` 仍长期保存 `DeviceNodeId` 后通过 `DeviceTree` 解析 name/compatible。large allocation、realloc、特殊 alignment fallback 和完整 SLUB 复杂路径仍 deferred。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#mmcoreinitphase-编码约束) |
 | `P1` | 待办 | arceos_ex/smoke | 补充类型行为 smoke 双任务场景 | `RawSpinLock`、`Completion` 等 TypeBehavior smoke 当前先覆盖单任务、本地依赖对象场景。后续任务创建和调度测试 API 足够后，应补充最小双任务场景，用两个任务验证竞争、等待、唤醒、释放和跨任务可见性；启动两个任务即可，不要求先建立完整用户态或通用线程测试框架。 | [testing 规格](../spec/testing/README.md#测试目标分类) |
 | `P1` | 待办 | arceos_ex/codegen | 收敛 RISC-V64 linker script 生成方案 | 将当前直接生成完整 `riscv64.lds` 的实验收敛为 Linux 风格的 `riscv64.lds.S`：`codegen` 基于 `Config` 生成 `generated/config.lds.h` 等配置头，`.lds.S` 保留链接布局结构并经预处理生成最终 `.lds`；同时规划 Rust 侧配置生成，避免 `.lds`、Rust 常量和 codegen profile 各自维护同一配置值。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#目标边界) |
@@ -104,7 +120,7 @@
 - 截止提交 ce59606 (`arceos-ex add serial8250 polling console`)，PlatformBus 已完成设备 population、driver register/probe、真实 ns16550a probe/bind、UART 8250 资源解析、ioremap/vmalloc UART MMIO 映射和 console/earlycon handoff 首轮闭环；后续重点是 ioremap/vmalloc 泛化、MMIO 属性建模，以及 PLIC/IRQ 可用后的 serial8250 interrupt-driven 输出。
 - 已解决前置问题：`make run APP=hello` 的重复输出来自 handoff 后 `PrintkBuffer` legacy drain cursor 未移交，以及 payload 末尾直接调用 earlycon backend drain；当前已修复为 boot pending flush、serial delivered cursor 推进、handoff 后 EarlyCon offline/panic guard，并要求 hello/smoke 只走 printk 前端。已通过 `make run APP=hello`、`make run LOG=trace APP=hello` 与 `make test` 验证。
 - `SmpRuntimePhase` 已形成六个子阶段最小闭环：`PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
-- 最近完整验收已通过：`tools/pyveri/bin/pyveri spec/model/main.spec --derive --strict`；`make build APP=smoke`；`make test`；`make verify REPORT=graph`。当前 `make test` summary 为 `total=75 pass=75 fail=0`。
+- 最近完整验收已通过：`tools/pyveri/bin/pyveri spec/model/main.spec --derive --strict`；`make build APP=smoke`；`make test`；`make verify REPORT=graph`。当前 `make test` summary 为 `total=79 pass=79 fail=0`。
 - 当前 trace SVG 产物：`tools/out/trace/main.trace.svg`。
 - 上下文清理后恢复：先执行 `git status --short --branch`；预期工作树干净。
 
