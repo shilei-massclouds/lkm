@@ -958,13 +958,14 @@ ns16550a 或 console 专用路径。
 全局 `runtime_page_table_mapping_ready` 位重复置真。若 `PageTableCaches` 没有提供 vmalloc install range，
 或映射跨出当前已安装且可扩展的 vmalloc 页表范围，实现必须先通过 `PageTableCaches`/`PageAllocator`
 按需补充 L0/PTE 页表页；补充失败时必须返回失败，不得只记录 `VmapMapping.installed=true`。
-当前实现支持 `VMALLOC_START` 起始的预分配 L1/L0 页表池，并允许单次 mapping 跨越池内相邻 L0/PTE window；
-当目标 area 超出当前已安装 window 但仍落在 runtime slot 容量内时，`VmallocAllocator.map_page_range()`
-必须请求 `PageTableCaches` 分配并清零新的 L0/PTE 页表页，再安装映射。该限制必须通过 ready/failure fact
-暴露，后续再把固定 slot metadata 泛化为真正动态容量以覆盖完整 `VMALLOC_START..VMALLOC_END`。
+当前实现支持完整 `VMALLOC_START..VMALLOC_END` runtime vmalloc 地址空间：启动时只安装首批静态 L1/L0 页表，
+后续当目标 area 触及尚未安装的 L1/L0/PTE window 时，`VmallocAllocator.map_page_range()` 必须请求
+`PageTableCaches` 分配并清零新的页表页，并按需补充稀疏 slot metadata，再安装映射。该能力必须通过
+ready/failure fact 暴露；超出 `VMALLOC_END` 的 area 必须被拒绝。动态容量的 `VmapArea` / `VmapMapping`
+记录存储仍是后续边界，当前不能把页表 metadata 完整覆盖误写成 vm_struct/vmap_area 记录也已经无界动态化。
 具体实现不能只依赖底层 `vpn0` 越界失败；在调用页表安装前，`VmallocAllocator.map_page_range()` 必须显式确认
-`VmapArea` 完全落在当前 runtime mapping window 能力内，必要时先扩展该能力。落到固定 runtime slot
-容量之外的 area 当前必须失败并记录为 slot-capacity boundary，不能复用错误的 L0 表安装。同时，同一个 busy `VmapArea` 已经存在 installed
+`VmapArea` 完全落在 runtime mapping window 能力内，必要时先扩展该能力。落到 `VMALLOC_END` 之外的 area
+当前必须失败并记录为 range boundary，不能复用错误的 L0 表安装。同时，同一个 busy `VmapArea` 已经存在 installed
 `VmapMapping` 时，第二次 `map_page_range()` 必须失败，避免一个 area 产生多个并存页表映射记录。
 
 `VmallocAllocator.unmap_page_range()` / `free_vm_area()` 必须保持 Linux-like teardown 顺序：先清除

@@ -477,13 +477,14 @@ type ArceosExMmCoreInitCodingMust {
          * Runtime mapping window pool:
          *
          * VmallocAllocator.map_page_range() must support mappings within the
-         * explicitly preallocated runtime vmalloc L0/PTE window pool, including
-         * ranges that cross from one supported L0/PTE window into the next. It
-         * must allocate additional L0/PTE windows on demand through
-         * PageTableCaches/PageAllocator when a reserved vmap area extends
-         * beyond the currently installed pool, reject ranges beyond the current
-         * fixed runtime slot capacity, and reject a second mapping record for
-         * an area that already has an installed mapping.
+         * runtime vmalloc address space, including ranges that cross from one
+         * supported L0/PTE window into the next. It must allocate additional
+         * L1/L0 page-table pages and sparse slot metadata on demand through
+         * PageTableCaches/PageAllocator when a reserved vmap area touches an
+         * uninstalled window, reject ranges beyond VMALLOC_END, and reject a
+         * second mapping record for an area that already has an installed
+         * mapping. Dynamic-capacity VmapArea/VmapMapping record storage remains
+         * a separate follow-up boundary.
          */
         arceos_ex_must_vmalloc_support_preallocated_windows_and_reject_duplicate_mapping();
         arceos_ex_must_vmalloc_allocate_l0_windows_on_demand();

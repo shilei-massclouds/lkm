@@ -5,7 +5,7 @@ use super::{
     memblock::MemBlock,
     page_table::{
         aligned, map_linear_pmd_range, map_page_range, map_pmd_range, PageTableInstallRange,
-        PageTablePageSlot, SWAPPER_VMALLOC_L0_TABLES, VMALLOC_RUNTIME_L0_TABLE_SLOTS,
+        SWAPPER_VMALLOC_L0_TABLES,
     },
     raw_dtb::RawDtb,
     state::{Lifecycle, State},
@@ -204,6 +204,8 @@ impl StaticObjects {
         &self,
         kernel_image: &KernelImage,
         page_size: usize,
+        virt_end: usize,
+        l0_slot_chunk_addr: usize,
     ) -> Option<PageTableInstallRange> {
         let root = static_page_tables::swapper_pg_dir_mut(kernel_image);
         let vmalloc_l1_table = static_page_tables::swapper_vmalloc_l1_table_mut(kernel_image);
@@ -211,21 +213,26 @@ impl StaticObjects {
         let root_addr = root as *mut _ as usize;
         let l1_addr = vmalloc_l1_table as *mut _ as usize;
         let l1_phys = kernel_image.runtime_to_phys(l1_addr)?;
-        let mut slots = [PageTablePageSlot::empty(); VMALLOC_RUNTIME_L0_TABLE_SLOTS];
+        let mut range = PageTableInstallRange::new(
+            root_addr,
+            super::mm_core::VMALLOC_START,
+            virt_end,
+            page_size,
+        );
+        if !range.install_l0_slot_chunk(0, l0_slot_chunk_addr)
+            || !range.install_l1_table(0, l1_addr, l1_phys, page_size)
+        {
+            return None;
+        }
         let mut index = 0usize;
         while index < SWAPPER_VMALLOC_L0_TABLES {
             let l0_addr = &mut vmalloc_l0_tables[index] as *mut _ as usize;
             let l0_phys = kernel_image.runtime_to_phys(l0_addr)?;
-            slots[index] = PageTablePageSlot::new(l0_addr, l0_phys);
+            if !range.install_l0_table(index, l0_addr, l0_phys, page_size) {
+                return None;
+            }
             index += 1;
         }
-        Some(PageTableInstallRange::new(
-            root_addr,
-            l1_addr,
-            l1_phys,
-            slots,
-            super::mm_core::VMALLOC_START,
-            page_size,
-        ))
+        Some(range)
     }
 }

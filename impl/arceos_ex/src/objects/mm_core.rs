@@ -6,7 +6,11 @@ use super::{
     early_param::EarlyParam,
     kernel_image::KernelImage,
     memblock::MemBlock,
-    page_table::{map_page_range_runtime, unmap_page_range_runtime, PageTableInstallRange},
+    page_table::{
+        map_page_range_runtime, unmap_page_range_runtime, PageTableInstallRange,
+        PageTablePageSlotChunk, PAGE_TABLE_ENTRIES, VMALLOC_L0_SLOT_CHUNKS,
+        VMALLOC_L0_SLOT_CHUNK_SIZE, VMALLOC_RUNTIME_L0_TABLE_SLOTS, VMALLOC_RUNTIME_L1_TABLE_SLOTS,
+    },
     per_cpu_storage::PerCpuStorage,
     raw_dtb::PhysRange,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -17,6 +21,7 @@ use super::{
     zones::{ZoneKind, Zones},
 };
 use crate::{arch::riscv64::csr, trace::Checkpoint};
+use alloc::{boxed::Box, vec::Vec};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
 
@@ -35,7 +40,6 @@ const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
 const VMALLOC_RUNTIME_PAGE_SIZE: usize = 4096;
 const MAX_VMAP_AREAS: usize = 16;
 const MAX_VMAP_MAPPINGS: usize = 16;
-const MAX_DYNAMIC_VMALLOC_PGTABLES: usize = 12;
 pub const GLOBAL_ALLOC_MAX_SIZE: usize = 8192;
 
 #[derive(Clone, Copy)]
@@ -2880,10 +2884,11 @@ pub struct PageTableCaches {
     lifecycle: Lifecycle,
     lock_cache: PageTableLockCache,
     vmalloc_install_range: PageTableInstallRange,
-    dynamic_vmalloc_pgtable_pages: [PageRef; MAX_DYNAMIC_VMALLOC_PGTABLES],
-    dynamic_vmalloc_pgtable_count: usize,
+    vmalloc_l0_slot_chunks: Vec<Box<PageTablePageSlotChunk>>,
+    dynamic_vmalloc_pgtable_pages: Vec<PageRef>,
     vmalloc_pgtable_preallocated: bool,
     vmalloc_pgtable_dynamic_allocator_ready: bool,
+    vmalloc_pgtable_dynamic_metadata_ready: bool,
     modules_path_trimmed: bool,
     memory_hotplug_path_trimmed: bool,
 }
@@ -2894,10 +2899,11 @@ impl PageTableCaches {
             lifecycle: Lifecycle::new(State::Base),
             lock_cache: PageTableLockCache::new(),
             vmalloc_install_range: PageTableInstallRange::empty(),
-            dynamic_vmalloc_pgtable_pages: [empty_page_ref(); MAX_DYNAMIC_VMALLOC_PGTABLES],
-            dynamic_vmalloc_pgtable_count: 0,
+            vmalloc_l0_slot_chunks: Vec::new(),
+            dynamic_vmalloc_pgtable_pages: Vec::new(),
             vmalloc_pgtable_preallocated: false,
             vmalloc_pgtable_dynamic_allocator_ready: false,
+            vmalloc_pgtable_dynamic_metadata_ready: false,
             modules_path_trimmed: false,
             memory_hotplug_path_trimmed: false,
         }
@@ -2919,9 +2925,18 @@ impl PageTableCaches {
         self.vmalloc_pgtable_dynamic_allocator_ready
     }
 
+    pub const fn vmalloc_pgtable_dynamic_metadata_ready(&self) -> bool {
+        self.vmalloc_pgtable_dynamic_metadata_ready
+    }
+
     #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub const fn dynamic_vmalloc_pgtable_count(&self) -> usize {
-        self.dynamic_vmalloc_pgtable_count
+    pub fn dynamic_vmalloc_pgtable_count(&self) -> usize {
+        self.dynamic_vmalloc_pgtable_pages.len()
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub fn vmalloc_l0_slot_chunk_count(&self) -> usize {
+        self.vmalloc_l0_slot_chunks.len()
     }
 
     pub const fn vmalloc_install_range(&self) -> PageTableInstallRange {
@@ -2950,15 +2965,25 @@ impl PageTableCaches {
             return self.failed_setup();
         }
 
-        let Some(vmalloc_install_range) =
-            static_objects.swapper_vmalloc_install_range(kernel_image, VMALLOC_RUNTIME_PAGE_SIZE)
-        else {
+        if !vmalloc_runtime_shape_valid() {
+            return self.failed_setup();
+        }
+        let Some(l0_slot_chunk_addr) = self.alloc_l0_slot_chunk(0) else {
+            return self.failed_setup();
+        };
+        let Some(vmalloc_install_range) = static_objects.swapper_vmalloc_install_range(
+            kernel_image,
+            VMALLOC_RUNTIME_PAGE_SIZE,
+            VMALLOC_END,
+            l0_slot_chunk_addr,
+        ) else {
             return self.failed_setup();
         };
         self.lock_cache.setup(slub_allocator)?;
         self.vmalloc_install_range = vmalloc_install_range;
         self.vmalloc_pgtable_preallocated = true;
         self.vmalloc_pgtable_dynamic_allocator_ready = true;
+        self.vmalloc_pgtable_dynamic_metadata_ready = true;
         self.modules_path_trimmed = true;
         self.memory_hotplug_path_trimmed = true;
 
@@ -2979,45 +3004,122 @@ impl PageTableCaches {
         )
     }
 
-    pub fn ensure_vmalloc_l0_windows(
+    pub fn ensure_vmalloc_page_table_range(
         &mut self,
-        target_count: usize,
+        virt_start: usize,
+        bytes: usize,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
         config: &Config,
     ) -> Option<PageTableInstallRange> {
         if self.lifecycle.state() != State::Ready
             || !self.vmalloc_pgtable_dynamic_allocator_ready
-            || target_count == 0
-            || target_count > self.vmalloc_install_range.max_l0_table_count()
+            || !self.vmalloc_pgtable_dynamic_metadata_ready
+            || bytes == 0
             || config.page_size() == 0
             || !config.page_size().is_power_of_two()
         {
             return None;
         }
 
-        while self.vmalloc_install_range.l0_table_count() < target_count {
-            if self.dynamic_vmalloc_pgtable_count >= MAX_DYNAMIC_VMALLOC_PGTABLES {
-                return None;
-            }
-            let page = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)?;
-            let phys = page_metadata_map.page_to_phys(page)?.value();
-            let linear = config.phys_to_linear(phys)?;
-            unsafe {
-                core::ptr::write_bytes(linear as *mut u8, 0, config.page_size());
-            }
+        let first_l0_index = vmalloc_l0_window_index(virt_start)?;
+        let last_l0_index = vmalloc_l0_window_index(virt_start.checked_add(bytes - 1)?)?;
+        if last_l0_index >= self.vmalloc_install_range.max_l0_table_count() {
+            return None;
+        }
+
+        let mut l0_index = first_l0_index;
+        while l0_index <= last_l0_index {
+            self.ensure_vmalloc_l0_window(l0_index, page_allocator, page_metadata_map, config)?;
+            l0_index += 1;
+        }
+        Some(self.vmalloc_install_range)
+    }
+
+    fn ensure_vmalloc_l0_window(
+        &mut self,
+        l0_index: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+    ) -> Option<()> {
+        let l1_index = l0_index / PAGE_TABLE_ENTRIES;
+        let chunk_index = l0_index / VMALLOC_L0_SLOT_CHUNK_SIZE;
+        if l1_index >= VMALLOC_RUNTIME_L1_TABLE_SLOTS || chunk_index >= VMALLOC_L0_SLOT_CHUNKS {
+            return None;
+        }
+        if self
+            .vmalloc_install_range
+            .l0_slot_chunk_addr(chunk_index)
+            .is_none()
+        {
+            let chunk_addr = self.alloc_l0_slot_chunk(chunk_index)?;
             if !self
                 .vmalloc_install_range
-                .push_l0_table(linear, phys, config.page_size())
+                .install_l0_slot_chunk(chunk_index, chunk_addr)
             {
+                return None;
+            }
+        }
+        if self.vmalloc_install_range.l1_slot(l1_index).is_none() {
+            let (page, linear, phys) =
+                self.alloc_zeroed_pgtable_page(page_allocator, page_metadata_map, config)?;
+            if !self.vmalloc_install_range.install_l1_table(
+                l1_index,
+                linear,
+                phys,
+                config.page_size(),
+            ) {
                 let _ = page_allocator.free_pages(page, 0, page_metadata_map);
                 return None;
             }
-            self.dynamic_vmalloc_pgtable_pages[self.dynamic_vmalloc_pgtable_count] = page;
-            self.dynamic_vmalloc_pgtable_count += 1;
+            self.dynamic_vmalloc_pgtable_pages.push(page);
         }
+        if self.vmalloc_install_range.l0_slot(l0_index).is_none() {
+            let (page, linear, phys) =
+                self.alloc_zeroed_pgtable_page(page_allocator, page_metadata_map, config)?;
+            if !self.vmalloc_install_range.install_l0_table(
+                l0_index,
+                linear,
+                phys,
+                config.page_size(),
+            ) {
+                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+                return None;
+            }
+            self.dynamic_vmalloc_pgtable_pages.push(page);
+        }
+        Some(())
+    }
 
-        Some(self.vmalloc_install_range)
+    fn alloc_l0_slot_chunk(&mut self, chunk_index: usize) -> Option<usize> {
+        if chunk_index >= VMALLOC_L0_SLOT_CHUNKS
+            || self
+                .vmalloc_install_range
+                .l0_slot_chunk_addr(chunk_index)
+                .is_some()
+        {
+            return None;
+        }
+        let chunk = Box::new(PageTablePageSlotChunk::empty());
+        let chunk_addr = (&*chunk) as *const PageTablePageSlotChunk as usize;
+        self.vmalloc_l0_slot_chunks.push(chunk);
+        Some(chunk_addr)
+    }
+
+    fn alloc_zeroed_pgtable_page(
+        &mut self,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+    ) -> Option<(PageRef, usize, usize)> {
+        let page = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)?;
+        let phys = page_metadata_map.page_to_phys(page)?.value();
+        let linear = config.phys_to_linear(phys)?;
+        unsafe {
+            core::ptr::write_bytes(linear as *mut u8, 0, config.page_size());
+        }
+        Some((page, linear, phys))
     }
 }
 
@@ -3432,7 +3534,8 @@ impl VmallocAllocator {
         self.runtime_mapping_window_start = self.page_table_install_range.window_start();
         self.runtime_mapping_window_end = self.page_table_install_range.window_end();
         self.runtime_mapping_window_count = self.page_table_install_range.l0_table_count();
-        self.multi_window_mapping_supported = self.runtime_mapping_window_count > 1;
+        self.multi_window_mapping_supported =
+            self.page_table_install_range.max_l0_table_count() > 1;
     }
 
     #[cfg(checkpoint_handler_vmalloc_mapping)]
@@ -3512,7 +3615,8 @@ impl VmallocAllocator {
         self.runtime_mapping_window_start = self.page_table_install_range.window_start();
         self.runtime_mapping_window_end = self.page_table_install_range.window_end();
         self.runtime_mapping_window_count = self.page_table_install_range.l0_table_count();
-        self.multi_window_mapping_supported = self.runtime_mapping_window_count > 1;
+        self.multi_window_mapping_supported =
+            self.page_table_install_range.max_l0_table_count() > 1;
         self.preallocated_mapping_window_bound = true;
         self.dynamic_l0_window_allocation_supported =
             page_table_caches.vmalloc_pgtable_dynamic_allocator_ready();
@@ -3580,17 +3684,19 @@ impl VmallocAllocator {
         }
 
         if !self.area_within_runtime_mapping_window(area) {
-            let target_count = self.required_runtime_window_count(area)?;
-            self.page_table_install_range = page_table_caches.ensure_vmalloc_l0_windows(
-                target_count,
-                page_allocator,
-                page_metadata_map,
-                config,
-            )?;
-            self.refresh_runtime_mapping_window(page_table_caches);
-            if !self.area_within_runtime_mapping_window(area) {
-                return None;
-            }
+            return None;
+        }
+
+        self.page_table_install_range = page_table_caches.ensure_vmalloc_page_table_range(
+            area.virt_base(),
+            size,
+            page_allocator,
+            page_metadata_map,
+            config,
+        )?;
+        self.refresh_runtime_mapping_window(page_table_caches);
+        if !self.area_within_runtime_mapping_window(area) {
+            return None;
         }
 
         if !map_page_range_runtime(
@@ -3680,24 +3786,6 @@ impl VmallocAllocator {
         self.runtime_mapping_window_ready()
             && area.virt_base() >= self.runtime_mapping_window_start
             && area.end() <= self.runtime_mapping_window_end
-    }
-
-    fn required_runtime_window_count(&self, area: VmapArea) -> Option<usize> {
-        if area.virt_base() < self.runtime_mapping_window_start {
-            return None;
-        }
-        let window_size = self.page_table_install_range.l0_window_size();
-        if window_size == 0 {
-            return None;
-        }
-        let end = area.end();
-        if end <= self.runtime_mapping_window_start {
-            return None;
-        }
-        let covered = end.checked_sub(self.runtime_mapping_window_start)?;
-        covered
-            .checked_add(window_size - 1)
-            .map(|value| value / window_size)
     }
 
     #[allow(dead_code)]
@@ -4201,6 +4289,32 @@ fn next_reserved_overlap(memblock: &MemBlock, start: usize, end: usize) -> Optio
         index += 1;
     }
     best
+}
+
+fn vmalloc_runtime_shape_valid() -> bool {
+    let Some(range_size) = VMALLOC_END.checked_sub(VMALLOC_START) else {
+        return false;
+    };
+    let Some(l0_window_size) = VMALLOC_RUNTIME_PAGE_SIZE.checked_mul(PAGE_TABLE_ENTRIES) else {
+        return false;
+    };
+    let Some(l1_window_size) = l0_window_size.checked_mul(PAGE_TABLE_ENTRIES) else {
+        return false;
+    };
+    range_size == l1_window_size.saturating_mul(VMALLOC_RUNTIME_L1_TABLE_SLOTS)
+        && VMALLOC_RUNTIME_L0_TABLE_SLOTS
+            == VMALLOC_RUNTIME_L1_TABLE_SLOTS.saturating_mul(PAGE_TABLE_ENTRIES)
+        && VMALLOC_RUNTIME_L0_TABLE_SLOTS
+            == VMALLOC_L0_SLOT_CHUNKS.saturating_mul(VMALLOC_L0_SLOT_CHUNK_SIZE)
+}
+
+fn vmalloc_l0_window_index(virt: usize) -> Option<usize> {
+    if !(VMALLOC_START..VMALLOC_END).contains(&virt) {
+        return None;
+    }
+    let l0_window_size = VMALLOC_RUNTIME_PAGE_SIZE.checked_mul(PAGE_TABLE_ENTRIES)?;
+    let offset = virt.checked_sub(VMALLOC_START)?;
+    Some(offset / l0_window_size)
 }
 
 fn round_up(value: usize, align: usize) -> Option<usize> {

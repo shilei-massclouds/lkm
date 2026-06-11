@@ -484,6 +484,9 @@ fn run_window_duplicate_reject_with_page(
         || !ctx
             .page_table_caches
             .vmalloc_pgtable_dynamic_allocator_ready()
+        || !ctx
+            .page_table_caches
+            .vmalloc_pgtable_dynamic_metadata_ready()
     {
         return false;
     }
@@ -491,10 +494,10 @@ fn run_window_duplicate_reject_with_page(
     let window_start = ctx.vmalloc_allocator.runtime_mapping_window_start();
     let window_end = ctx.vmalloc_allocator.runtime_mapping_window_end();
     let window_count = ctx.vmalloc_allocator.runtime_mapping_window_count();
-    let first_window_size = window_end.saturating_sub(window_start) / window_count;
+    let first_window_size = page_size.saturating_mul(512);
     if window_start != crate::objects::mm_core::VMALLOC_START
         || window_end <= window_start
-        || window_count <= 1
+        || window_count < crate::objects::page_table::SWAPPER_VMALLOC_L0_TABLES
         || first_window_size <= cross_window_size
         || cross_window_size != page_size.saturating_mul(2)
         || !window_start.is_multiple_of(page_size)
@@ -585,7 +588,9 @@ fn run_window_duplicate_reject_with_page(
 
     let current_window_end = ctx.vmalloc_allocator.runtime_mapping_window_end();
     let current_window_count = ctx.vmalloc_allocator.runtime_mapping_window_count();
-    let dynamic_start = current_window_end.saturating_sub(page_size);
+    let dynamic_start = window_start
+        .saturating_add(first_window_size.saturating_mul(current_window_count))
+        .saturating_sub(page_size);
     let current = ctx
         .vmalloc_allocator
         .area(ctx.vmalloc_allocator.area_count().saturating_sub(1))
@@ -611,6 +616,7 @@ fn run_window_duplicate_reject_with_page(
     let base_dynamic_area_count = ctx.vmalloc_allocator.area_count();
     let base_dynamic_mapping_count = ctx.vmalloc_allocator.mapping_count();
     let base_dynamic_pgtable_count = ctx.page_table_caches.dynamic_vmalloc_pgtable_count();
+    let base_dynamic_chunk_count = ctx.page_table_caches.vmalloc_l0_slot_chunk_count();
     let Some(dynamic_area) = ctx
         .vmalloc_allocator
         .get_vm_area(cross_window_size, VmapAreaFlags::VmIoremap)
@@ -627,14 +633,17 @@ fn run_window_duplicate_reject_with_page(
         return false;
     };
     let dynamic_supported = dynamic_area.virt_base() == dynamic_start
-        && dynamic_area.end() == current_window_end.saturating_add(page_size)
+        && dynamic_area.end()
+            == window_start
+                .saturating_add(first_window_size.saturating_mul(current_window_count))
+                .saturating_add(page_size)
         && dynamic_mapping.installed()
         && ctx.vmalloc_allocator.runtime_mapping_window_count()
             == current_window_count.saturating_add(1)
-        && ctx.vmalloc_allocator.runtime_mapping_window_end()
-            == current_window_end.saturating_add(first_window_size)
+        && ctx.vmalloc_allocator.runtime_mapping_window_end() == current_window_end
         && ctx.page_table_caches.dynamic_vmalloc_pgtable_count()
             == base_dynamic_pgtable_count.saturating_add(1)
+        && ctx.page_table_caches.vmalloc_l0_slot_chunk_count() == base_dynamic_chunk_count
         && ctx.vmalloc_allocator.area_count() == base_dynamic_area_count.saturating_add(1)
         && ctx.vmalloc_allocator.mapping_count() == base_dynamic_mapping_count.saturating_add(1);
     if !dynamic_supported
@@ -648,43 +657,81 @@ fn run_window_duplicate_reject_with_page(
         return false;
     }
 
-    let capacity_end = window_start.saturating_add(
-        first_window_size
-            .saturating_mul(crate::objects::page_table::VMALLOC_RUNTIME_L0_TABLE_SLOTS),
-    );
-    let consumed = ctx
+    let far_start = window_end.saturating_sub(cross_window_size);
+    let current = ctx
         .vmalloc_allocator
         .area(ctx.vmalloc_allocator.area_count().saturating_sub(1))
-        .map(|last| last.end().saturating_sub(window_start))
-        .unwrap_or(0);
-    let cross_size = capacity_end
-        .saturating_sub(window_start)
-        .saturating_sub(consumed)
-        .saturating_add(page_size);
-    if cross_size <= page_size {
+        .map(|last| last.end())
+        .unwrap_or(window_start);
+    if current > far_start {
         return false;
     }
-    let before_cross_areas = ctx.vmalloc_allocator.area_count();
-    let before_cross_mappings = ctx.vmalloc_allocator.mapping_count();
-    let Some(cross_area) = ctx
+    let far_padding = far_start.saturating_sub(current);
+    if far_padding != 0 {
+        let Some(padding_area) = ctx
+            .vmalloc_allocator
+            .get_vm_area(far_padding, VmapAreaFlags::VmIoremap)
+        else {
+            return false;
+        };
+        if padding_area.end() != far_start || !ctx.vmalloc_allocator.free_vm_area(padding_area) {
+            return false;
+        }
+    }
+
+    let base_far_area_count = ctx.vmalloc_allocator.area_count();
+    let base_far_mapping_count = ctx.vmalloc_allocator.mapping_count();
+    let base_far_pgtable_count = ctx.page_table_caches.dynamic_vmalloc_pgtable_count();
+    let base_far_chunk_count = ctx.page_table_caches.vmalloc_l0_slot_chunk_count();
+    let Some(far_area) = ctx
         .vmalloc_allocator
-        .get_vm_area(cross_size, VmapAreaFlags::VmIoremap)
+        .get_vm_area(cross_window_size, VmapAreaFlags::VmIoremap)
     else {
         return false;
     };
-    cross_area.virt_base() < capacity_end
-        && cross_area.end() > capacity_end
-        && map_vmalloc_area(
-            ctx,
-            cross_area,
-            phys,
-            cross_area.size(),
-            PageProtection::IoMemory,
-        )
+    let Some(far_mapping) = map_vmalloc_area(
+        ctx,
+        far_area,
+        cross_window_phys,
+        cross_window_size,
+        PageProtection::IoMemory,
+    ) else {
+        return false;
+    };
+    let far_supported = far_area.virt_base() == far_start
+        && far_area.end() == window_end
+        && far_mapping.installed()
+        && ctx.vmalloc_allocator.runtime_mapping_window_end() == window_end
+        && ctx.vmalloc_allocator.runtime_mapping_window_count()
+            == current_window_count.saturating_add(2)
+        && ctx.page_table_caches.dynamic_vmalloc_pgtable_count()
+            == base_far_pgtable_count.saturating_add(2)
+        && ctx.page_table_caches.vmalloc_l0_slot_chunk_count()
+            == base_far_chunk_count.saturating_add(1)
+        && ctx.vmalloc_allocator.area_count() == base_far_area_count.saturating_add(1)
+        && ctx.vmalloc_allocator.mapping_count() == base_far_mapping_count.saturating_add(1);
+    if !far_supported || !teardown_mapping(&mut ctx.vmalloc_allocator, far_area, far_mapping, false)
+    {
+        return false;
+    }
+
+    let before_cross_areas = ctx.vmalloc_allocator.area_count();
+    let before_cross_mappings = ctx.vmalloc_allocator.mapping_count();
+    ctx.vmalloc_allocator
+        .get_vm_area(page_size.saturating_mul(2), VmapAreaFlags::VmIoremap)
         .is_none()
-        && ctx.vmalloc_allocator.area_count() == before_cross_areas.saturating_add(1)
+        && ctx
+            .page_table_caches
+            .ensure_vmalloc_page_table_range(
+                window_end.saturating_sub(page_size),
+                page_size.saturating_mul(2),
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
+            )
+            .is_none()
+        && ctx.vmalloc_allocator.area_count() == before_cross_areas
         && ctx.vmalloc_allocator.mapping_count() == before_cross_mappings
-        && ctx.vmalloc_allocator.free_vm_area(cross_area)
 }
 
 struct AllocatedPage {

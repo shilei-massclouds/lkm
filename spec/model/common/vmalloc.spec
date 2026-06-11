@@ -39,6 +39,8 @@ predicate vmalloc_allocator_runtime_mapping_window_bound<T, P>(allocator: T, pag
 predicate vmalloc_allocator_multi_window_mapping_supported<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_preallocated_mapping_window_bound<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_dynamic_l0_window_allocation_supported<T, P>(allocator: T, page_table_caches: P) -> bool;
+predicate vmalloc_pgtable_full_range_metadata_ready<P>(page_table_caches: P) -> bool;
+predicate vmalloc_allocator_full_vmalloc_range_metadata_supported<T, P>(allocator: T, page_table_caches: P) -> bool;
 predicate vmalloc_allocator_rejects_duplicate_area_mapping<T>(allocator: T) -> bool;
 
 predicate vmap_area_ref_ready<T>(area: T) -> bool;
@@ -119,6 +121,7 @@ type VmallocAllocatorType: MemoryObject {
                 vmalloc_allocator_runtime_page_table_mapping_ready(self, PageTableCaches);
                 vmalloc_allocator_runtime_mapping_window_bound(self, PageTableCaches);
                 vmalloc_allocator_dynamic_l0_window_allocation_supported(self, PageTableCaches);
+                vmalloc_allocator_full_vmalloc_range_metadata_supported(self, PageTableCaches);
                 vmap_area_ref_ready(area);
                 vmap_area_allocated(area, self);
                 vmap_area_address_space_bound(area, VmapAddressSpace);
@@ -136,7 +139,7 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_mapping_within_runtime_mapping_window(mapping);
             }
             deferred {
-                "Mappings beyond the current fixed runtime vmalloc L0/PTE metadata slot capacity are deferred until runtime page-table metadata becomes dynamically sized.";
+                "Dynamic-capacity vm_struct/vmap_area and VmapMapping record storage is deferred; the current implementation still has a fixed number of vmap area and mapping records.";
             }
         }
 

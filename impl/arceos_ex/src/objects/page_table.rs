@@ -2,8 +2,13 @@ use super::{config::Config, kernel_image::KernelImage};
 
 pub const SWAPPER_L1_TABLES: usize = 4;
 pub const SWAPPER_VMALLOC_L0_TABLES: usize = 4;
-pub const VMALLOC_RUNTIME_L0_TABLE_SLOTS: usize = 16;
 pub const PAGE_TABLE_ENTRIES: usize = 512;
+pub const VMALLOC_RUNTIME_L1_TABLE_SLOTS: usize = 32;
+pub const VMALLOC_RUNTIME_L0_TABLE_SLOTS: usize =
+    VMALLOC_RUNTIME_L1_TABLE_SLOTS * PAGE_TABLE_ENTRIES;
+pub const VMALLOC_L0_SLOT_CHUNK_SIZE: usize = 128;
+pub const VMALLOC_L0_SLOT_CHUNKS: usize =
+    VMALLOC_RUNTIME_L0_TABLE_SLOTS / VMALLOC_L0_SLOT_CHUNK_SIZE;
 const PTE_V: usize = 1 << 0;
 const PTE_R: usize = 1 << 1;
 const PTE_W: usize = 1 << 2;
@@ -73,14 +78,44 @@ impl PageTablePageSlot {
     }
 }
 
+pub struct PageTablePageSlotChunk {
+    slots: [PageTablePageSlot; VMALLOC_L0_SLOT_CHUNK_SIZE],
+}
+
+impl PageTablePageSlotChunk {
+    pub const fn empty() -> Self {
+        Self {
+            slots: [PageTablePageSlot::empty(); VMALLOC_L0_SLOT_CHUNK_SIZE],
+        }
+    }
+
+    pub const fn slot(&self, index: usize) -> Option<PageTablePageSlot> {
+        if index < VMALLOC_L0_SLOT_CHUNK_SIZE {
+            Some(self.slots[index])
+        } else {
+            None
+        }
+    }
+
+    pub fn set_slot(&mut self, index: usize, slot: PageTablePageSlot) -> bool {
+        if index >= VMALLOC_L0_SLOT_CHUNK_SIZE {
+            return false;
+        }
+        self.slots[index] = slot;
+        true
+    }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct PageTableInstallRange {
     root_addr: usize,
-    l1_addr: usize,
-    l1_phys: usize,
+    l1_table_count: usize,
+    l1_slots: [PageTablePageSlot; VMALLOC_RUNTIME_L1_TABLE_SLOTS],
     l0_table_count: usize,
-    l0_slots: [PageTablePageSlot; VMALLOC_RUNTIME_L0_TABLE_SLOTS],
+    l0_slot_chunk_addrs: [usize; VMALLOC_L0_SLOT_CHUNKS],
+    l0_slot_chunk_count: usize,
     virt_start: usize,
+    virt_end: usize,
     page_size: usize,
 }
 
@@ -88,42 +123,46 @@ impl PageTableInstallRange {
     pub const fn empty() -> Self {
         Self {
             root_addr: 0,
-            l1_addr: 0,
-            l1_phys: 0,
+            l1_table_count: 0,
+            l1_slots: [PageTablePageSlot::empty(); VMALLOC_RUNTIME_L1_TABLE_SLOTS],
             l0_table_count: 0,
-            l0_slots: [PageTablePageSlot::empty(); VMALLOC_RUNTIME_L0_TABLE_SLOTS],
+            l0_slot_chunk_addrs: [0; VMALLOC_L0_SLOT_CHUNKS],
+            l0_slot_chunk_count: 0,
             virt_start: 0,
+            virt_end: 0,
             page_size: 0,
         }
     }
 
     pub const fn new(
         root_addr: usize,
-        l1_addr: usize,
-        l1_phys: usize,
-        l0_slots: [PageTablePageSlot; VMALLOC_RUNTIME_L0_TABLE_SLOTS],
         virt_start: usize,
+        virt_end: usize,
         page_size: usize,
     ) -> Self {
         Self {
             root_addr,
-            l1_addr,
-            l1_phys,
-            l0_table_count: count_ready_slots(l0_slots),
-            l0_slots,
+            l1_table_count: 0,
+            l1_slots: [PageTablePageSlot::empty(); VMALLOC_RUNTIME_L1_TABLE_SLOTS],
+            l0_table_count: 0,
+            l0_slot_chunk_addrs: [0; VMALLOC_L0_SLOT_CHUNKS],
+            l0_slot_chunk_count: 0,
             virt_start,
+            virt_end,
             page_size,
         }
     }
 
     pub const fn ready(self) -> bool {
         self.root_addr != 0
-            && self.l1_addr != 0
-            && self.l1_phys != 0
+            && self.l1_table_count != 0
             && self.l0_table_count != 0
-            && self.l0_table_count <= VMALLOC_RUNTIME_L0_TABLE_SLOTS
-            && first_n_l0_slots_ready(self.l0_slots, self.l0_table_count)
+            && self.l1_table_count <= VMALLOC_RUNTIME_L1_TABLE_SLOTS
+            && self.l0_table_count <= self.max_l0_table_count()
+            && first_l1_slot_ready(self.l1_slots)
+            && self.l0_slot_chunk_count != 0
             && self.virt_start != 0
+            && self.virt_start < self.virt_end
             && self.page_size != 0
             && self.page_size.is_power_of_two()
     }
@@ -133,13 +172,11 @@ impl PageTableInstallRange {
     }
 
     pub const fn window_size(self) -> usize {
-        PAGE_TABLE_ENTRIES
-            .saturating_mul(self.page_size)
-            .saturating_mul(self.l0_table_count)
+        self.virt_end.saturating_sub(self.virt_start)
     }
 
     pub const fn window_end(self) -> usize {
-        self.virt_start.saturating_add(self.window_size())
+        self.virt_end
     }
 
     pub const fn l0_table_count(self) -> usize {
@@ -150,28 +187,107 @@ impl PageTableInstallRange {
         PAGE_TABLE_ENTRIES.saturating_mul(self.page_size)
     }
 
+    pub const fn l1_window_size(self) -> usize {
+        PAGE_TABLE_ENTRIES.saturating_mul(self.l0_window_size())
+    }
+
+    pub const fn max_l1_table_count(self) -> usize {
+        VMALLOC_RUNTIME_L1_TABLE_SLOTS
+    }
+
     pub const fn max_l0_table_count(self) -> usize {
         VMALLOC_RUNTIME_L0_TABLE_SLOTS
     }
 
-    pub const fn l0_slot(self, index: usize) -> Option<PageTablePageSlot> {
-        if index < self.l0_table_count {
-            Some(self.l0_slots[index])
+    pub const fn l1_slot(self, index: usize) -> Option<PageTablePageSlot> {
+        if index < VMALLOC_RUNTIME_L1_TABLE_SLOTS && self.l1_slots[index].ready() {
+            Some(self.l1_slots[index])
         } else {
             None
         }
     }
 
-    pub fn push_l0_table(&mut self, addr: usize, phys: usize, page_size: usize) -> bool {
-        if self.l0_table_count >= VMALLOC_RUNTIME_L0_TABLE_SLOTS
+    pub fn l0_slot(self, index: usize) -> Option<PageTablePageSlot> {
+        if index >= self.max_l0_table_count() {
+            return None;
+        }
+        let chunk_index = index / VMALLOC_L0_SLOT_CHUNK_SIZE;
+        let slot_index = index % VMALLOC_L0_SLOT_CHUNK_SIZE;
+        let chunk_addr = self.l0_slot_chunk_addrs[chunk_index];
+        if chunk_addr == 0 {
+            return None;
+        }
+        let chunk = unsafe { &*(chunk_addr as *const PageTablePageSlotChunk) };
+        let slot = chunk.slot(slot_index)?;
+        slot.ready().then_some(slot)
+    }
+
+    pub const fn l0_slot_chunk_addr(self, chunk_index: usize) -> Option<usize> {
+        if chunk_index < VMALLOC_L0_SLOT_CHUNKS && self.l0_slot_chunk_addrs[chunk_index] != 0 {
+            Some(self.l0_slot_chunk_addrs[chunk_index])
+        } else {
+            None
+        }
+    }
+
+    pub fn install_l0_slot_chunk(&mut self, chunk_index: usize, chunk_addr: usize) -> bool {
+        if chunk_index >= VMALLOC_L0_SLOT_CHUNKS || chunk_addr == 0 {
+            return false;
+        }
+        if self.l0_slot_chunk_addrs[chunk_index] == 0 {
+            self.l0_slot_chunk_count += 1;
+        }
+        self.l0_slot_chunk_addrs[chunk_index] = chunk_addr;
+        true
+    }
+
+    pub fn install_l1_table(
+        &mut self,
+        index: usize,
+        addr: usize,
+        phys: usize,
+        page_size: usize,
+    ) -> bool {
+        if index >= VMALLOC_RUNTIME_L1_TABLE_SLOTS
             || page_size != self.page_size
             || !page_table_storage_ready(addr, page_size)
             || !phys.is_multiple_of(page_size)
         {
             return false;
         }
-        self.l0_slots[self.l0_table_count] = PageTablePageSlot::new(addr, phys);
-        self.l0_table_count += 1;
+        if !self.l1_slots[index].ready() {
+            self.l1_table_count += 1;
+        }
+        self.l1_slots[index] = PageTablePageSlot::new(addr, phys);
+        true
+    }
+
+    pub fn install_l0_table(
+        &mut self,
+        index: usize,
+        addr: usize,
+        phys: usize,
+        page_size: usize,
+    ) -> bool {
+        if index >= self.max_l0_table_count()
+            || page_size != self.page_size
+            || !page_table_storage_ready(addr, page_size)
+            || !phys.is_multiple_of(page_size)
+        {
+            return false;
+        }
+        let chunk_index = index / VMALLOC_L0_SLOT_CHUNK_SIZE;
+        let slot_index = index % VMALLOC_L0_SLOT_CHUNK_SIZE;
+        let Some(chunk_addr) = self.l0_slot_chunk_addr(chunk_index) else {
+            return false;
+        };
+        let chunk = unsafe { &mut *(chunk_addr as *mut PageTablePageSlotChunk) };
+        if !chunk.slot(slot_index).is_some_and(PageTablePageSlot::ready) {
+            self.l0_table_count += 1;
+        }
+        if !chunk.set_slot(slot_index, PageTablePageSlot::new(addr, phys)) {
+            return false;
+        }
         true
     }
 }
@@ -302,29 +418,34 @@ pub fn map_page_range_runtime(
         return false;
     }
     let root = unsafe { &mut *(tables.root_addr as *mut PageTablePage) };
-    let l1_table = unsafe { &mut *(tables.l1_addr as *mut PageTablePage) };
     let page_count = covered / page_size;
     let mut virt = virt_start;
     let mut phys = phys_base;
     let mut remaining = page_count;
     while remaining != 0 {
-        let Some(window_index) = install_window_index(tables, virt) else {
+        let Some((l1_index, l0_index)) = install_window_indices(tables, virt) else {
             return false;
         };
         let vpn2 = sv39_index(virt, 30);
         let vpn1 = sv39_index(virt, 21);
-        if vpn2 != sv39_index(tables.window_start(), 30) || vpn1 >= PAGE_TABLE_ENTRIES {
+        if vpn2 != sv39_index(tables.window_start(), 30).saturating_add(l1_index)
+            || vpn1 >= PAGE_TABLE_ENTRIES
+        {
             return false;
         }
         let mut vpn0 = sv39_index(virt, 12);
         let pages_in_window = PAGE_TABLE_ENTRIES - vpn0;
         let chunk_pages = remaining.min(pages_in_window);
-        let Some(l0_addr) = l0_table_addr(tables, window_index) else {
+        let Some(l1_slot) = tables.l1_slot(l1_index) else {
             return false;
         };
-        let Some(l0_phys) = l0_table_phys(tables, window_index) else {
+        let Some(l0_addr) = l0_table_addr(tables, l0_index) else {
             return false;
         };
+        let Some(l0_phys) = l0_table_phys(tables, l0_index) else {
+            return false;
+        };
+        let l1_table = unsafe { &mut *(l1_slot.addr() as *mut PageTablePage) };
         let l0_table = unsafe { &mut *(l0_addr as *mut PageTablePage) };
         let mut chunk_remaining = chunk_pages;
         while chunk_remaining != 0 {
@@ -337,7 +458,7 @@ pub fn map_page_range_runtime(
             chunk_remaining -= 1;
         }
         l1_table.set(vpn1, table_pte(l0_phys));
-        root.set(vpn2, table_pte(tables.l1_phys));
+        root.set(vpn2, table_pte(l1_slot.phys()));
         let Some(next_virt) = virt.checked_add(chunk_pages * page_size) else {
             return false;
         };
@@ -370,30 +491,35 @@ pub fn unmap_page_range_runtime(
         return false;
     }
     let root = unsafe { &mut *(tables.root_addr as *mut PageTablePage) };
-    let l1_table = unsafe { &mut *(tables.l1_addr as *mut PageTablePage) };
     let page_count = covered / page_size;
     let mut virt = virt_start;
     let mut remaining = page_count;
     while remaining != 0 {
-        let Some(window_index) = install_window_index(tables, virt) else {
+        let Some((l1_index, l0_index)) = install_window_indices(tables, virt) else {
             return false;
         };
         let vpn2 = sv39_index(virt, 30);
         let vpn1 = sv39_index(virt, 21);
-        if vpn2 != sv39_index(tables.window_start(), 30) || vpn1 >= PAGE_TABLE_ENTRIES {
+        if vpn2 != sv39_index(tables.window_start(), 30).saturating_add(l1_index)
+            || vpn1 >= PAGE_TABLE_ENTRIES
+        {
             return false;
         }
         let mut vpn0 = sv39_index(virt, 12);
         let pages_in_window = PAGE_TABLE_ENTRIES - vpn0;
         let chunk_pages = remaining.min(pages_in_window);
-        let Some(l0_addr) = l0_table_addr(tables, window_index) else {
+        let Some(l1_slot) = tables.l1_slot(l1_index) else {
             return false;
         };
-        let Some(l0_phys) = l0_table_phys(tables, window_index) else {
+        let Some(l0_addr) = l0_table_addr(tables, l0_index) else {
             return false;
         };
+        let Some(l0_phys) = l0_table_phys(tables, l0_index) else {
+            return false;
+        };
+        let l1_table = unsafe { &mut *(l1_slot.addr() as *mut PageTablePage) };
         let l0_table = unsafe { &mut *(l0_addr as *mut PageTablePage) };
-        root.set(vpn2, table_pte(tables.l1_phys));
+        root.set(vpn2, table_pte(l1_slot.phys()));
         l1_table.set(vpn1, table_pte(l0_phys));
         let mut chunk_remaining = chunk_pages;
         while chunk_remaining != 0 {
@@ -475,43 +601,21 @@ fn sv39_index(virt: usize, shift: usize) -> usize {
 }
 
 fn install_range_valid(tables: PageTableInstallRange) -> bool {
-    let vpn1_start = sv39_index(tables.window_start(), 21);
+    let vpn2_start = sv39_index(tables.window_start(), 30);
     tables.ready()
         && sv39_index(tables.window_start(), 12) == 0
-        && vpn1_start
-            .checked_add(tables.l0_table_count())
-            .is_some_and(|vpn1_end| vpn1_end <= PAGE_TABLE_ENTRIES)
+        && sv39_index(tables.window_start(), 21) == 0
+        && tables
+            .l1_window_size()
+            .checked_mul(tables.max_l1_table_count())
+            .is_some_and(|size| tables.window_size() <= size)
+        && vpn2_start
+            .checked_add(tables.max_l1_table_count())
+            .is_some_and(|vpn2_end| vpn2_end <= PAGE_TABLE_ENTRIES)
 }
 
-const fn count_ready_slots(slots: [PageTablePageSlot; VMALLOC_RUNTIME_L0_TABLE_SLOTS]) -> usize {
-    let mut index = 0usize;
-    let mut count = 0usize;
-    while index < VMALLOC_RUNTIME_L0_TABLE_SLOTS {
-        if slots[index].ready() {
-            count += 1;
-        } else {
-            return count;
-        }
-        index += 1;
-    }
-    count
-}
-
-const fn first_n_l0_slots_ready(
-    slots: [PageTablePageSlot; VMALLOC_RUNTIME_L0_TABLE_SLOTS],
-    count: usize,
-) -> bool {
-    if count == 0 || count > VMALLOC_RUNTIME_L0_TABLE_SLOTS {
-        return false;
-    }
-    let mut index = 0usize;
-    while index < count {
-        if !slots[index].ready() {
-            return false;
-        }
-        index += 1;
-    }
-    true
+const fn first_l1_slot_ready(slots: [PageTablePageSlot; VMALLOC_RUNTIME_L1_TABLE_SLOTS]) -> bool {
+    slots[0].ready()
 }
 
 fn range_within_install_range(
@@ -532,11 +636,17 @@ fn install_window_index(tables: PageTableInstallRange, virt: usize) -> Option<us
         return None;
     }
     let index = offset / window_size;
-    if index < tables.l0_table_count {
+    if index < tables.max_l0_table_count() {
         Some(index)
     } else {
         None
     }
+}
+
+fn install_window_indices(tables: PageTableInstallRange, virt: usize) -> Option<(usize, usize)> {
+    let l0_index = install_window_index(tables, virt)?;
+    let l1_index = l0_index / PAGE_TABLE_ENTRIES;
+    (l1_index < tables.max_l1_table_count()).then_some((l1_index, l0_index))
 }
 
 fn l0_table_addr(tables: PageTableInstallRange, index: usize) -> Option<usize> {

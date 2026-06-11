@@ -166,6 +166,9 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx
             .page_table_caches
             .vmalloc_pgtable_dynamic_allocator_ready()
+        && ctx
+            .page_table_caches
+            .vmalloc_pgtable_dynamic_metadata_ready()
         && ctx.page_table_caches.lock_cache().state() == State::Ready
         && ctx.page_table_caches.lock_cache().page_ptl_cache_created()
         && ctx.vmalloc_allocator.state() == State::Ready

@@ -737,6 +737,7 @@ object PageTableCaches: MemoryObject {
                     page_table_caches_ready(PageTableCaches, PageTableLockCache);
                     riscv_vmalloc_pgtable_range_preallocated(PageTableCaches, SwapperVm);
                     vmalloc_pgtable_dynamic_allocator_ready(PageTableCaches, PageAllocator);
+                    vmalloc_pgtable_full_range_metadata_ready(PageTableCaches);
                     modules_pgtable_cache_path_trimmed(PageTableCaches);
                     memory_hotplug_pgtable_cache_path_trimmed(PageTableCaches);
                 }
@@ -750,6 +751,7 @@ object PageTableCaches: MemoryObject {
             page_table_caches_ready(PageTableCaches, PageTableLockCache);
             riscv_vmalloc_pgtable_range_preallocated(PageTableCaches, SwapperVm);
             vmalloc_pgtable_dynamic_allocator_ready(PageTableCaches, PageAllocator);
+            vmalloc_pgtable_full_range_metadata_ready(PageTableCaches);
             modules_pgtable_cache_path_trimmed(PageTableCaches);
             memory_hotplug_pgtable_cache_path_trimmed(PageTableCaches);
         }
@@ -951,6 +953,7 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_multi_window_mapping_supported(VmallocAllocator);
                     vmalloc_allocator_preallocated_mapping_window_bound(VmallocAllocator);
                     vmalloc_allocator_dynamic_l0_window_allocation_supported(VmallocAllocator, PageTableCaches);
+                    vmalloc_allocator_full_vmalloc_range_metadata_supported(VmallocAllocator, PageTableCaches);
                     vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
@@ -980,6 +983,7 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_multi_window_mapping_supported(VmallocAllocator);
             vmalloc_allocator_preallocated_mapping_window_bound(VmallocAllocator);
             vmalloc_allocator_dynamic_l0_window_allocation_supported(VmallocAllocator, PageTableCaches);
+            vmalloc_allocator_full_vmalloc_range_metadata_supported(VmallocAllocator, PageTableCaches);
             vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
         }
