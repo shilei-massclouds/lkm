@@ -9,6 +9,7 @@ use crate::{
         device_tree::DeviceTree,
         driver::MOCK_PLATFORM_DRIVER_REF,
         initcall::PlatformBus,
+        ioremap::Ioremap,
         ns16550a::{self, NS16550A_PLATFORM_DRIVER_REF},
         printk,
         state::State,
@@ -27,17 +28,29 @@ pub fn run() -> SmokeResult {
 
 struct PlatformBusActionsFixture {
     bus: PlatformBus,
+    ioremap: Ioremap,
 }
 
 impl PlatformBusActionsFixture {
     fn new() -> Self {
         Self {
             bus: PlatformBus::new(),
+            ioremap: Ioremap::new(),
         }
     }
 
     fn setup_ready(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context_ref();
+        assertions.assert_ok(
+            "setup ioremap",
+            self.ioremap.setup(
+                &ctx.vm,
+                &ctx.vmalloc_allocator,
+                &ctx.page_table_caches,
+                &ctx.fix_map,
+                &ctx.config,
+            ),
+        );
         assertions.assert_ok(
             "setup platform bus",
             self.bus
@@ -113,9 +126,11 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
         );
         assertions.assert_ok(
             "probe driver deferred",
-            self.fixture
-                .bus
-                .probe_driver(MOCK_PLATFORM_DRIVER_REF, &context_ref().device_tree),
+            self.fixture.bus.probe_driver(
+                MOCK_PLATFORM_DRIVER_REF,
+                &context_ref().device_tree,
+                &mut self.fixture.ioremap,
+            ),
         );
         assertions.assert(
             "probe driver scanned devices",
@@ -154,9 +169,11 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert_fail(
             "probe device before setup",
-            self.fixture
-                .bus
-                .probe_device(DeviceRef::new(usize::MAX), &context_ref().device_tree),
+            self.fixture.bus.probe_device(
+                DeviceRef::new(usize::MAX),
+                &context_ref().device_tree,
+                &mut self.fixture.ioremap,
+            ),
         );
         self.fixture.setup_ready(assertions);
     }
@@ -181,9 +198,11 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
         };
         assertions.assert_ok(
             "probe device deferred",
-            self.fixture
-                .bus
-                .probe_device(device_ref, &context_ref().device_tree),
+            self.fixture.bus.probe_device(
+                device_ref,
+                &context_ref().device_tree,
+                &mut self.fixture.ioremap,
+            ),
         );
         assertions.assert(
             "probe device scanned drivers",
@@ -245,7 +264,9 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
 
         assertions.assert_ok(
             "probe ns16550a device",
-            self.fixture.bus.probe_device(device_ref, &ctx.device_tree),
+            self.fixture
+                .bus
+                .probe_device(device_ref, &ctx.device_tree, &mut self.fixture.ioremap),
         );
         assertions.assert(
             "probe device scanned registered drivers",
@@ -266,6 +287,11 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
         assertions.assert(
             "ns16550a device bound",
             self.fixture.bus.ns16550a_bound_device() == Some(device_ref),
+        );
+        assertions.assert(
+            "ns16550a mmio ioremapped",
+            self.fixture.bus.ns16550a_probe_ioremaps_uart8250_port()
+                && ns16550a::uart8250_port_ioremapped(),
         );
         assertions.assert(
             "ns16550a uart8250 port registered",
@@ -433,7 +459,14 @@ impl SmokeScenario for KeepBootconScenario {
 
         assertions.assert_ok(
             "probe ns16550a device",
-            self.fixture.bus.probe_device(device_ref, &ctx.device_tree),
+            self.fixture
+                .bus
+                .probe_device(device_ref, &ctx.device_tree, &mut self.fixture.ioremap),
+        );
+        assertions.assert(
+            "keep_bootcon mmio ioremapped",
+            self.fixture.bus.ns16550a_probe_ioremaps_uart8250_port()
+                && ns16550a::uart8250_port_ioremapped(),
         );
         assertions.assert(
             "keep_bootcon serial console registered",

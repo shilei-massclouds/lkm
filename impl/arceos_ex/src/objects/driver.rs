@@ -1,9 +1,10 @@
 use super::{
     device::DeviceRef,
     device_tree::{DeviceNodeId, DeviceTree},
+    ioremap::Ioremap,
 };
 
-pub type PlatformProbe = fn(&DeviceTree, DeviceRef, DeviceNodeId) -> ProbeResult;
+pub type PlatformProbe = fn(&DeviceTree, &mut Ioremap, DeviceRef, DeviceNodeId) -> ProbeResult;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProbeResult {
@@ -96,10 +97,11 @@ impl PlatformDriver {
     pub fn probe(
         &self,
         device_tree: &DeviceTree,
+        ioremap: &mut Ioremap,
         device: DeviceRef,
         node_id: DeviceNodeId,
     ) -> ProbeResult {
-        (self.probe)(device_tree, device, node_id)
+        (self.probe)(device_tree, ioremap, device, node_id)
     }
 }
 
@@ -136,6 +138,7 @@ pub const MOCK_PLATFORM_DRIVER_REF: DeviceDriverRef = DeviceDriverRef::new(&MOCK
 
 fn mock_deferred_probe(
     _device_tree: &DeviceTree,
+    _ioremap: &mut Ioremap,
     _device: DeviceRef,
     _node_id: DeviceNodeId,
 ) -> ProbeResult {

@@ -107,9 +107,14 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                 depends_on {
                     InitcallTable.state == State::Ready;
                     PlatformBus.state == State::Ready;
+                    Ioremap.state == State::Ready;
                 }
 
                 drives {
+                    Ioremap.Action::MapDeviceMmio(
+                        device: DeviceRef::Ns16550aSerial,
+                        mapping: IoMemoryMappingRef::Ns16550aSerial
+                    );
                     Uart8250Port.Event::Setup;
                     Serial8250Console.Event::Setup;
                     ConsoleRegistry.Event::Setup;
@@ -125,7 +130,19 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     platform_driver_probe_called(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
                     platform_driver_probe_return_zero(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
                     platform_driver_bound_device(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                    ioremap_mapping_created(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                    ioremap_mapping_owner_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, DeviceRef::Ns16550aSerial);
+                    ioremap_mapping_phys_range_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                    ioremap_mapping_vmap_area_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, VmapAddressSpace);
+                    ioremap_mapping_uses_vm_ioremap_flag(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                    ioremap_mapping_uses_io_page_protection(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                    ioremap_mapping_page_aligned(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                    ioremap_mapping_membase_cookie_ready(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                    ioremap_mapping_not_linear_direct_map(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
                     uart8250_port_resources_ready(Uart8250Port, DeviceRef::Ns16550aSerial, DeviceTree);
+                    uart8250_port_mapbase_bound(Uart8250Port);
+                    uart8250_port_membase_ioremapped(Uart8250Port, Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                    uart8250_port_uses_ioremap(Uart8250Port);
                     uart8250_port_registered(Uart8250Port);
                     serial8250_console_registered(Serial8250Console, Uart8250Port);
                     console_handoff_ready(ConsoleHandoff, BootConsole, Serial8250Console);
@@ -136,6 +153,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     platform_bus_ns16550a_driver_probe_called(PlatformBus);
                     platform_bus_ns16550a_driver_probe_return_zero(PlatformBus);
                     platform_bus_ns16550a_device_bound(PlatformBus);
+                    platform_bus_ns16550a_probe_ioremaps_uart8250_port(PlatformBus, Ioremap, Uart8250Port);
                     platform_bus_ns16550a_probe_registers_uart8250_port(PlatformBus, Uart8250Port);
                     platform_bus_ns16550a_probe_registers_serial_console(PlatformBus, Serial8250Console);
                     platform_bus_ns16550a_probe_triggers_console_handoff(PlatformBus, ConsoleHandoff);
@@ -169,7 +187,19 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             platform_driver_probe_called(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             platform_driver_probe_return_zero(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             platform_driver_bound_device(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+            ioremap_mapping_created(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+            ioremap_mapping_owner_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, DeviceRef::Ns16550aSerial);
+            ioremap_mapping_phys_range_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+            ioremap_mapping_vmap_area_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, VmapAddressSpace);
+            ioremap_mapping_uses_vm_ioremap_flag(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+            ioremap_mapping_uses_io_page_protection(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+            ioremap_mapping_page_aligned(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+            ioremap_mapping_membase_cookie_ready(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+            ioremap_mapping_not_linear_direct_map(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
             uart8250_port_resources_ready(Uart8250Port, DeviceRef::Ns16550aSerial, DeviceTree);
+            uart8250_port_mapbase_bound(Uart8250Port);
+            uart8250_port_membase_ioremapped(Uart8250Port, Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+            uart8250_port_uses_ioremap(Uart8250Port);
             uart8250_port_registered(Uart8250Port);
             serial8250_console_registered(Serial8250Console, Uart8250Port);
             console_handoff_ready(ConsoleHandoff, BootConsole, Serial8250Console);
@@ -180,6 +210,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             platform_bus_ns16550a_driver_probe_called(PlatformBus);
             platform_bus_ns16550a_driver_probe_return_zero(PlatformBus);
             platform_bus_ns16550a_device_bound(PlatformBus);
+            platform_bus_ns16550a_probe_ioremaps_uart8250_port(PlatformBus, Ioremap, Uart8250Port);
             platform_bus_ns16550a_probe_registers_uart8250_port(PlatformBus, Uart8250Port);
             platform_bus_ns16550a_probe_registers_serial_console(PlatformBus, Serial8250Console);
             platform_bus_ns16550a_probe_triggers_console_handoff(PlatformBus, ConsoleHandoff);

@@ -62,6 +62,7 @@ pub fn run() -> SmokeResult {
         || !platform_bus.ns16550a_probe_called()
         || !platform_bus.ns16550a_probe_return_zero()
         || !check_ns16550a_bound_device(platform_bus, &ctx.device_tree)
+        || !platform_bus.ns16550a_probe_ioremaps_uart8250_port()
         || !platform_bus.ns16550a_probe_registers_uart8250_port()
         || !platform_bus.ns16550a_probe_registers_serial_console()
         || !platform_bus.ns16550a_probe_triggers_console_handoff()

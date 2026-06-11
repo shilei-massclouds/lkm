@@ -33,6 +33,7 @@ pub mod init_task;
 pub mod initcall;
 pub mod initcall_macros;
 pub mod interrupt_stream;
+pub mod ioremap;
 pub mod irq_open;
 pub mod irq_time;
 pub mod kernel_cmdline;

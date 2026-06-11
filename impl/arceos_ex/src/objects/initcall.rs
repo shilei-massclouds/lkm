@@ -2,6 +2,7 @@ use super::{
     device::{DeviceRef, PlatformDevice, PlatformDeviceStorage},
     device_tree::{DeviceNodeRef, DeviceTree},
     driver::{DeviceDriverRef, ProbeResult},
+    ioremap::Ioremap,
     irq_time::IrqDispatchTree,
     mm_core::PageAllocator,
     ns16550a,
@@ -541,6 +542,7 @@ pub struct PlatformBus {
     ns16550a_probe_called: bool,
     ns16550a_probe_return_zero: bool,
     ns16550a_bound_device: Option<DeviceRef>,
+    ns16550a_probe_ioremaps_uart8250_port: bool,
     ns16550a_probe_registers_uart8250_port: bool,
     ns16550a_probe_registers_serial_console: bool,
     ns16550a_probe_triggers_console_handoff: bool,
@@ -581,6 +583,7 @@ impl PlatformBus {
             ns16550a_probe_called: false,
             ns16550a_probe_return_zero: false,
             ns16550a_bound_device: None,
+            ns16550a_probe_ioremaps_uart8250_port: false,
             ns16550a_probe_registers_uart8250_port: false,
             ns16550a_probe_registers_serial_console: false,
             ns16550a_probe_triggers_console_handoff: false,
@@ -689,6 +692,10 @@ impl PlatformBus {
 
     pub const fn ns16550a_bound_device(&self) -> Option<DeviceRef> {
         self.ns16550a_bound_device
+    }
+
+    pub const fn ns16550a_probe_ioremaps_uart8250_port(&self) -> bool {
+        self.ns16550a_probe_ioremaps_uart8250_port
     }
 
     pub const fn ns16550a_probe_registers_uart8250_port(&self) -> bool {
@@ -906,6 +913,7 @@ impl PlatformBus {
         &mut self,
         driver: DeviceDriverRef,
         device_tree: &DeviceTree,
+        ioremap: &mut Ioremap,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
@@ -931,7 +939,7 @@ impl PlatformBus {
             );
         }
         if let Some(device_ref) = self.first_matching_device(driver, device_tree) {
-            self.probe_and_bind(driver, device_ref, device_tree);
+            self.probe_and_bind(driver, device_ref, device_tree, ioremap);
             return Ok(());
         }
 
@@ -939,7 +947,12 @@ impl PlatformBus {
         Ok(())
     }
 
-    pub fn probe_device(&mut self, device: DeviceRef, device_tree: &DeviceTree) -> EventResult {
+    pub fn probe_device(
+        &mut self,
+        device: DeviceRef,
+        device_tree: &DeviceTree,
+        ioremap: &mut Ioremap,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
             || !self.drivers_kset_ready
@@ -960,7 +973,7 @@ impl PlatformBus {
         while index < self.driver_refs.len() {
             let driver = self.driver_refs[index];
             if self.driver_matches_device(driver, device, device_tree) {
-                self.probe_and_bind(driver, device, device_tree);
+                self.probe_and_bind(driver, device, device_tree, ioremap);
                 return Ok(());
             }
             index += 1;
@@ -974,11 +987,12 @@ impl PlatformBus {
         &mut self,
         driver: DeviceDriverRef,
         device_tree: &DeviceTree,
+        ioremap: &mut Ioremap,
     ) -> InitcallReturn {
         if self.add_driver(driver).is_err() {
             return InitcallReturn::Error(-1);
         }
-        if self.probe_driver(driver, device_tree).is_err() {
+        if self.probe_driver(driver, device_tree, ioremap).is_err() {
             return InitcallReturn::Error(-1);
         }
         InitcallReturn::Ok
@@ -1026,18 +1040,24 @@ impl PlatformBus {
         driver: DeviceDriverRef,
         device_ref: DeviceRef,
         device_tree: &DeviceTree,
+        ioremap: &mut Ioremap,
     ) {
         let Some(platform_device) = self.platform_device(device_ref) else {
             return;
         };
         let node_id = platform_device.dev().node_id();
-        let result = driver.driver().probe(device_tree, device_ref, node_id);
+        let result = driver
+            .driver()
+            .probe(device_tree, ioremap, device_ref, node_id);
         if ns16550a::is_ns16550a_platform_driver(driver) {
             self.ns16550a_device_matched = true;
             self.ns16550a_probe_called = true;
             self.ns16550a_probe_return_zero = result == ProbeResult::Bound;
             if result == ProbeResult::Bound {
                 self.ns16550a_bound_device = Some(device_ref);
+                self.ns16550a_probe_ioremaps_uart8250_port = ns16550a::uart8250_port_ioremapped()
+                    && ioremap.mapping_count() != 0
+                    && ioremap.mapping_for_device(device_ref).is_some();
                 self.ns16550a_probe_registers_uart8250_port = ns16550a::uart8250_port_registered();
                 self.ns16550a_probe_registers_serial_console =
                     ns16550a::serial8250_console_registered();
@@ -1665,6 +1685,7 @@ impl InitcallBoundary {
             || !platform_bus_root_device.static_device_registered()
             || platform_bus.state() != State::Ready
             || !platform_bus.registered()
+            || !platform_bus.ns16550a_probe_ioremaps_uart8250_port()
             || driver_core.state() != State::Ready
             || !driver_core.post_platform_deferred()
             || irq_proc_view.state() != State::Ready
@@ -1740,6 +1761,7 @@ pub fn initcall_phase_ready(
         && platform_bus.ns16550a_probe_called()
         && platform_bus.ns16550a_probe_return_zero()
         && platform_bus.ns16550a_bound_device().is_some()
+        && platform_bus.ns16550a_probe_ioremaps_uart8250_port()
         && platform_bus.ns16550a_probe_registers_uart8250_port()
         && platform_bus.ns16550a_probe_registers_serial_console()
         && platform_bus.ns16550a_probe_triggers_console_handoff()

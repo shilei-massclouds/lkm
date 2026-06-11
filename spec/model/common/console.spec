@@ -28,6 +28,9 @@ predicate console_registry_printk_route_real_console<T, C>(registry: T, console:
 
 predicate uart8250_port_resources_ready<T, D, R>(port: T, device: D, device_tree: R) -> bool;
 predicate uart8250_port_mmio_resource_bound<T>(port: T) -> bool;
+predicate uart8250_port_mapbase_bound<T>(port: T) -> bool;
+predicate uart8250_port_membase_ioremapped<T, I, M>(port: T, ioremap: I, mapping: M) -> bool;
+predicate uart8250_port_uses_ioremap<T>(port: T) -> bool;
 predicate uart8250_port_reg_shift_ready<T>(port: T) -> bool;
 predicate uart8250_port_reg_io_width_ready<T>(port: T) -> bool;
 predicate uart8250_port_clock_ready<T>(port: T) -> bool;
@@ -129,6 +132,7 @@ object Uart8250Port: DeviceObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     DeviceTree.state == State::Ready;
+                    Ioremap.state == State::Ready;
                     platform_bus_ns16550a_driver_probe_return_zero(PlatformBus);
                     device_tree_stdout_path_resolves_to_node(DeviceTree, DeviceNodeRef::Ns16550aSerial);
                 }
@@ -136,6 +140,9 @@ object Uart8250Port: DeviceObject {
                 ensures {
                     uart8250_port_resources_ready(Uart8250Port, DeviceRef::Ns16550aSerial, DeviceTree);
                     uart8250_port_mmio_resource_bound(Uart8250Port);
+                    uart8250_port_mapbase_bound(Uart8250Port);
+                    uart8250_port_membase_ioremapped(Uart8250Port, Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                    uart8250_port_uses_ioremap(Uart8250Port);
                     uart8250_port_reg_shift_ready(Uart8250Port);
                     uart8250_port_reg_io_width_ready(Uart8250Port);
                     uart8250_port_clock_ready(Uart8250Port);
@@ -152,6 +159,9 @@ object Uart8250Port: DeviceObject {
         invariant {
             uart8250_port_resources_ready(Uart8250Port, DeviceRef::Ns16550aSerial, DeviceTree);
             uart8250_port_mmio_resource_bound(Uart8250Port);
+            uart8250_port_mapbase_bound(Uart8250Port);
+            uart8250_port_membase_ioremapped(Uart8250Port, Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+            uart8250_port_uses_ioremap(Uart8250Port);
             uart8250_port_reg_shift_ready(Uart8250Port);
             uart8250_port_reg_io_width_ready(Uart8250Port);
             uart8250_port_clock_ready(Uart8250Port);

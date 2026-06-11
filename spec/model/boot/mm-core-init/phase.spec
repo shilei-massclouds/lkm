@@ -953,6 +953,76 @@ object VmallocAllocator: MemoryObject {
 }
 
 /*
+ * Ioremap 表示 runtime ioremap() 服务：它复用 vmalloc/vmap 的虚拟地址
+ * area 管理，但映射对象是设备 MMIO 物理区间，且页表属性必须是 IO memory。
+ * 这不是 EarlyIoremap/FixMap 的早期临时 slot。
+ */
+object Ioremap: AddressSpaceObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    SwapperVm.state == State::Online;
+                    VmallocAllocator.state == State::Ready;
+                    VmapAddressSpace.state == State::Ready;
+                    PageTableCaches.state == State::Ready;
+                    FixMap.state == State::Ready;
+                }
+
+                ensures {
+                    ioremap_runtime_ready(Ioremap, VmallocAllocator, VmapAddressSpace, PageTableCaches);
+                    ioremap_uses_swapper_vm(Ioremap, SwapperVm);
+                    ioremap_uses_vmalloc_area_management(Ioremap, VmallocAllocator);
+                    ioremap_uses_vmap_address_space(Ioremap, VmapAddressSpace);
+                    ioremap_distinct_from_vmalloc_allocation(Ioremap);
+                    ioremap_does_not_use_fixmap(Ioremap, FixMap);
+                    ioremap_io_page_protection_ready(Ioremap);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            ioremap_runtime_ready(Ioremap, VmallocAllocator, VmapAddressSpace, PageTableCaches);
+            ioremap_uses_swapper_vm(Ioremap, SwapperVm);
+            ioremap_uses_vmalloc_area_management(Ioremap, VmallocAllocator);
+            ioremap_uses_vmap_address_space(Ioremap, VmapAddressSpace);
+            ioremap_distinct_from_vmalloc_allocation(Ioremap);
+            ioremap_does_not_use_fixmap(Ioremap, FixMap);
+            ioremap_io_page_protection_ready(Ioremap);
+        }
+
+        actions {
+            Action::MapDeviceMmio(device: DeviceRef, mapping: IoMemoryMappingRef) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    Ioremap.state == State::Ready;
+                    DeviceTree.state == State::Ready;
+                    VmapAddressSpace.state == State::Ready;
+                    device_ref_ready(device);
+                    ioremap_io_page_protection_ready(Ioremap);
+                }
+
+                ensures {
+                    ioremap_mapping_created(Ioremap, mapping);
+                    ioremap_mapping_owner_bound(Ioremap, mapping, device);
+                    ioremap_mapping_phys_range_bound(Ioremap, mapping);
+                    ioremap_mapping_vmap_area_bound(Ioremap, mapping, VmapAddressSpace);
+                    ioremap_mapping_uses_vm_ioremap_flag(Ioremap, mapping);
+                    ioremap_mapping_uses_io_page_protection(Ioremap, mapping);
+                    ioremap_mapping_page_aligned(Ioremap, mapping);
+                    ioremap_mapping_membase_cookie_ready(Ioremap, mapping);
+                    ioremap_mapping_not_linear_direct_map(Ioremap, mapping);
+                }
+            }
+        }
+    }
+}
+
+/*
  * MmStructCache 覆盖 mm_cache_init()，只建立 "mm_struct" cache。
  */
 object MmStructCache: MemoryObject {
@@ -1025,6 +1095,7 @@ object MmCoreInitPhase: PhaseObject {
                     DynamicContainerRuntime.Event::Setup;
                     PageTableCaches.Event::Setup;
                     VmallocAllocator.Event::Setup;
+                    Ioremap.Event::Setup;
                     MmStructCache.Event::Setup;
                 }
 
@@ -1079,6 +1150,7 @@ object MmCoreInitPhase: PhaseObject {
             VmapNodeSet.state == State::Ready;
             VmapBlockQueues.state == State::Ready;
             VfreeDeferredSet.state == State::Ready;
+            Ioremap.state == State::Ready;
             MmStructCache.state == State::Ready;
         }
     }

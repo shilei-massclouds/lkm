@@ -90,6 +90,7 @@ predicate platform_bus_ns16550a_driver_probe_called<T>(bus: T) -> bool;
 predicate platform_bus_ns16550a_driver_probe_return_zero<T>(bus: T) -> bool;
 predicate platform_bus_ns16550a_device_matched<T>(bus: T) -> bool;
 predicate platform_bus_ns16550a_device_bound<T>(bus: T) -> bool;
+predicate platform_bus_ns16550a_probe_ioremaps_uart8250_port<T, I, P>(bus: T, ioremap: I, port: P) -> bool;
 predicate platform_bus_ns16550a_probe_registers_uart8250_port<T, P>(bus: T, port: P) -> bool;
 predicate platform_bus_ns16550a_probe_registers_serial_console<T, C>(bus: T, console: C) -> bool;
 predicate platform_bus_ns16550a_probe_triggers_console_handoff<T, H>(bus: T, handoff: H) -> bool;
@@ -364,9 +365,14 @@ type PlatformBusType: BusType {
                 device_ref_set_nonempty(self.subsys.klist_devices);
                 platform_device_set_nonempty(self.platform_devices);
                 device_driver_ref_ready(DeviceDriverRef::Ns16550aPlatformDriver);
+                Ioremap.state == State::Ready;
             }
             drives {
                 self.Action::PlatformDriverRegister(DeviceDriverRef::Ns16550aPlatformDriver);
+                Ioremap.Action::MapDeviceMmio(
+                    device: DeviceRef::Ns16550aSerial,
+                    mapping: IoMemoryMappingRef::Ns16550aSerial
+                );
             }
             ensures {
                 initcall_entry_invoked(InitcallEntry::Ns16550aPlatformDriver);
@@ -380,6 +386,16 @@ type PlatformBusType: BusType {
                 platform_bus_ns16550a_driver_probe_called(self);
                 platform_bus_ns16550a_driver_probe_return_zero(self);
                 platform_bus_ns16550a_device_bound(self);
+                ioremap_mapping_created(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                ioremap_mapping_owner_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, DeviceRef::Ns16550aSerial);
+                ioremap_mapping_phys_range_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                ioremap_mapping_vmap_area_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, VmapAddressSpace);
+                ioremap_mapping_uses_vm_ioremap_flag(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                ioremap_mapping_uses_io_page_protection(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                ioremap_mapping_page_aligned(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                ioremap_mapping_membase_cookie_ready(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                ioremap_mapping_not_linear_direct_map(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
+                platform_bus_ns16550a_probe_ioremaps_uart8250_port(self, Ioremap, Uart8250Port);
                 platform_bus_ns16550a_probe_registers_uart8250_port(self, Uart8250Port);
                 platform_bus_ns16550a_probe_registers_serial_console(self, Serial8250Console);
                 platform_bus_ns16550a_probe_triggers_console_handoff(self, ConsoleHandoff);

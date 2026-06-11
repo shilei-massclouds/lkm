@@ -30,6 +30,7 @@ use crate::objects::{
         InitcallTable, IrqProcViewDeferred, PlatformBus, PlatformBusRootDevice,
     },
     interrupt_stream::InterruptStream,
+    ioremap::Ioremap,
     irq_open::{Console, DelayLoop, SchedClock},
     irq_time::{
         HrtimerCore, IpiMux, IrqController, IrqDispatchTree, Plic, RiscvIntc, RiscvTimerProvider,
@@ -141,6 +142,7 @@ pub struct Context {
     pub dynamic_container_runtime: DynamicContainerRuntime,
     pub page_table_caches: PageTableCaches,
     pub vmalloc_allocator: VmallocAllocator,
+    pub ioremap: Ioremap,
     pub mm_struct_cache: MmStructCache,
 
     pub scheduler: Scheduler,
@@ -280,6 +282,7 @@ impl Context {
             dynamic_container_runtime: DynamicContainerRuntime::new(),
             page_table_caches: PageTableCaches::new(),
             vmalloc_allocator: VmallocAllocator::new(),
+            ioremap: Ioremap::new(),
             mm_struct_cache: MmStructCache::new(),
             scheduler: Scheduler::new(),
             radix_tree: RadixTree::new(),

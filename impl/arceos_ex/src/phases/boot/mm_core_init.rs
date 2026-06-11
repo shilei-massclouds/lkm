@@ -65,6 +65,13 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.page_table_caches,
         &ctx.per_cpu_storage,
     )?;
+    ctx.ioremap.setup(
+        &ctx.vm,
+        &ctx.vmalloc_allocator,
+        &ctx.page_table_caches,
+        &ctx.fix_map,
+        &ctx.config,
+    )?;
     ctx.mm_struct_cache
         .setup(&ctx.slub_allocator, &ctx.cpu_group)
 }
@@ -156,6 +163,13 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.vmalloc_allocator.node_set().state() == State::Ready
         && ctx.vmalloc_allocator.block_queues().state() == State::Ready
         && ctx.vmalloc_allocator.deferred_set().state() == State::Ready
+        && ctx.ioremap.state() == State::Ready
+        && ctx.ioremap.runtime_ready()
+        && ctx.ioremap.uses_vmalloc_area_management()
+        && ctx.ioremap.uses_vmap_address_space()
+        && ctx.ioremap.distinct_from_vmalloc_allocation()
+        && ctx.ioremap.does_not_use_fixmap()
+        && ctx.ioremap.io_page_protection_ready()
         && ctx.mm_struct_cache.state() == State::Ready
         && ctx.mm_struct_cache.object_size() != 0
         && ctx.mm_struct_cache.saved_auxv_usercopy_ready()

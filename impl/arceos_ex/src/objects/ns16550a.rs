@@ -4,6 +4,7 @@ use super::{
     driver::{DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, ProbeResult},
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
+    ioremap::{IoMemoryMapping, Ioremap},
     printk,
 };
 
@@ -24,8 +25,9 @@ pub const NS16550A_PLATFORM_DRIVER_REF: DeviceDriverRef =
 pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
     crate::objects::printk::write_str("initcall: ns16550a_platform_driver_init\n");
     let device_tree = &ctx.device_tree;
+    let ioremap = &mut ctx.ioremap;
     ctx.platform_bus
-        .platform_driver_register(NS16550A_PLATFORM_DRIVER_REF, device_tree)
+        .platform_driver_register(NS16550A_PLATFORM_DRIVER_REF, device_tree, ioremap)
 }
 
 crate::device_initcall!(ns16550a_platform_driver_init);
@@ -38,8 +40,12 @@ pub fn is_ns16550a_platform_driver(driver: DeviceDriverRef) -> bool {
 pub struct Uart8250Port {
     node_id: DeviceNodeId,
     device_ref: DeviceRef,
-    mmio_base: u64,
-    mmio_size: u64,
+    mapbase: usize,
+    mapsize: usize,
+    membase: usize,
+    ioremapped: bool,
+    vm_ioremap: bool,
+    io_page_protection: bool,
     reg_shift: u32,
     reg_io_width: u32,
     clock_frequency: u32,
@@ -52,8 +58,12 @@ impl Uart8250Port {
         Self {
             node_id: DeviceNodeId::invalid(),
             device_ref: DeviceRef::new(usize::MAX),
-            mmio_base: 0,
-            mmio_size: 0,
+            mapbase: 0,
+            mapsize: 0,
+            membase: 0,
+            ioremapped: false,
+            vm_ioremap: false,
+            io_page_protection: false,
             reg_shift: 0,
             reg_io_width: 0,
             clock_frequency: 0,
@@ -106,10 +116,28 @@ pub fn uart8250_port_device_ref() -> Option<DeviceRef> {
 pub fn uart8250_port_resources_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.port.registered
-        && state.port.mmio_base != 0
-        && state.port.mmio_size != 0
+        && state.port.mapbase != 0
+        && state.port.mapsize != 0
+        && state.port.membase != 0
+        && state.port.membase != state.port.mapbase
+        && state.port.ioremapped
+        && state.port.vm_ioremap
+        && state.port.io_page_protection
+        && state.port.reg_shift <= 8
         && state.port.reg_io_width != 0
+        && (state.port.clock_frequency == DEFAULT_CLOCK_FREQUENCY
+            || state.port.clock_frequency > DEFAULT_CLOCK_FREQUENCY)
         && state.port.line != usize::MAX
+}
+
+pub fn uart8250_port_ioremapped() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered
+        && state.port.ioremapped
+        && state.port.vm_ioremap
+        && state.port.io_page_protection
+        && state.port.membase != 0
+        && state.port.membase != state.port.mapbase
 }
 
 pub fn serial8250_console_registered() -> bool {
@@ -141,12 +169,17 @@ pub fn handoff_triggered() -> bool {
 
 fn ns16550a_probe(
     device_tree: &DeviceTree,
+    ioremap: &mut Ioremap,
     device: DeviceRef,
     node_id: DeviceNodeId,
 ) -> ProbeResult {
-    let Some(port) = build_uart8250_port(device_tree, device, node_id) else {
+    let Some(mut port) = build_uart8250_port(device_tree, device, node_id) else {
         return ProbeResult::Deferred;
     };
+    let Some(mapping) = ioremap.map_device_mmio(device, port.mapbase, port.mapsize) else {
+        return ProbeResult::Deferred;
+    };
+    bind_ioremap_mapping(&mut port, mapping);
 
     let stdout_path_matched = device_tree.stdout_path_selects(port.node_id);
     let serial_console_registered =
@@ -195,6 +228,8 @@ fn build_uart8250_port(
     let size_cells = parent_size_cells(device_tree, node.id())?;
     let (mmio_base, used) = read_cells(reg_base, reg.len(), address_cells)?;
     let (mmio_size, _) = read_cells(reg_base.checked_add(used)?, reg.len() - used, size_cells)?;
+    let mapbase = usize::try_from(mmio_base).ok()?;
+    let mapsize = usize::try_from(mmio_size).ok()?;
 
     let reg_shift = read_property_u32(node.property(b"reg-shift")).unwrap_or(DEFAULT_REG_SHIFT);
     let reg_io_width =
@@ -205,14 +240,30 @@ fn build_uart8250_port(
     Some(Uart8250Port {
         node_id: node.id(),
         device_ref: device,
-        mmio_base,
-        mmio_size,
+        mapbase,
+        mapsize,
+        membase: 0,
+        ioremapped: false,
+        vm_ioremap: false,
+        io_page_protection: false,
         reg_shift,
         reg_io_width,
         clock_frequency,
         line: device.index(),
         registered: true,
     })
+}
+
+fn bind_ioremap_mapping(port: &mut Uart8250Port, mapping: IoMemoryMapping) {
+    port.membase = mapping.membase();
+    port.ioremapped = mapping.membase_cookie_ready()
+        && mapping.phys_base() == port.mapbase
+        && mapping.size() == port.mapsize
+        && mapping.page_phys_base() <= mapping.phys_base()
+        && mapping.mapped_size() >= mapping.size()
+        && mapping.virt_base() != 0;
+    port.vm_ioremap = mapping.uses_vm_ioremap();
+    port.io_page_protection = mapping.uses_io_page_protection();
 }
 
 fn parent_address_cells(device_tree: &DeviceTree, node_id: DeviceNodeId) -> Option<usize> {
