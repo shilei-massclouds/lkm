@@ -395,14 +395,21 @@ preferred console。
 时，才能把该 port 提升为 `Serial8250Console` 并触发 handoff。非 stdout-path 的 ns16550a 设备只能注册普通 port
 或记录 non-console port 事实，不得设置 consdev、不得切换 printk route、不得注销 boot console。
 
+`EarlyCon`、`BootConsole`、`Serial8250Console` 和 `ConsoleRegistry` 不得合并成一个实现对象。`EarlyCon`
+只表示早期 SBI 输出 backend 的生命周期和 direct backend access contract；它不是 printk registry entry。
+`BootConsole` 表示 printk registry 中包装 EarlyCon 的 `CON_BOOT` console entry，携带 boot/printbuffer 语义；
+`BootConsole.Enable` 之后 printk route 必须指向 boot console。真实 `Serial8250Console` 表示由
+`Uart8250Port` 注册出来的 real console entry，它只能经 `ConsoleRegistry` 的 `register_console()` 策略成为
+active printk route。
+
 `ConsoleRegistry` / `ConsoleHandoff` 的实现应集中承载在 printk console registry 或等价对象中，不得把 handoff
-状态散落成 driver 私有布尔值后再伪造 ready 事实。`BootConsole` 表示 earlycon 作为 `CON_BOOT` console
-注册后的身份；`BootConsole.Enable` 之后 printk route 必须指向 boot console。真实 `Serial8250Console`
-经 `register_console()` 成为 consdev 后，必须同时提交这些事实：real console registered、preferred-from-stdout、
-consdev、write backend ready、printk route 切到 serial8250、handoff complete。默认 `keep_bootcon == false`
-时，handoff 必须注销 boot console 或至少把 boot console 标为 offline，并记录 boot console removed/unregistered
-事实；`keep_bootcon == true` 时，boot console 必须保持 registered/online，但 printk route 仍切到 serial8250，
-handoff 仍视为完成。
+状态散落成 driver 私有布尔值后再伪造 ready 事实。drivers 只能请求注册 console，不能拥有 preferred-console
+选择、route 切换、boot pending cursor 移交、legacy earlycon drain 阻断或 `keep_bootcon` 决策。真实
+`Serial8250Console` 经 `register_console()` 成为 consdev 后，必须同时提交这些事实：real console registered、
+preferred-from-stdout、consdev、write backend ready、printk route 切到 serial8250、handoff complete。默认
+`keep_bootcon == false` 时，handoff 必须注销 boot console 或至少把 boot console 标为 offline，并记录 boot
+console removed/unregistered 事实；`keep_bootcon == true` 时，boot console 必须保持 registered/online，但
+printk route 仍切到 serial8250，handoff 仍视为完成。
 参考 Linux 6.12.37 `kernel/printk/printk.c::register_console()` 的交接边界，真实 serial console 成为
 `CON_CONSDEV` 后应显式输出 `Serial8250Console.Online` 或等价 trace；默认非 `keep_bootcon` 分支注销
 `CON_BOOT` boot console 时，应显式输出 `BootConsole.Offline` 或等价 trace。trace/SVG 必须能展示

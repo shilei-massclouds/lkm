@@ -169,7 +169,10 @@ predicate arceos_ex_must_device_tree_stdout_path_resolve_to_stable_node_id() -> 
 predicate arceos_ex_must_ns16550a_probe_parse_resources_from_platform_device_node() -> bool;
 predicate arceos_ex_must_ns16550a_probe_create_uart8250_port_object() -> bool;
 predicate arceos_ex_must_ns16550a_probe_register_serial8250_console_only_for_stdout_path() -> bool;
+predicate arceos_ex_must_earlycon_bootconsole_serialconsole_registry_stay_distinct() -> bool;
+predicate arceos_ex_must_boot_console_wrap_earlycon_as_con_boot_registry_entry() -> bool;
 predicate arceos_ex_must_console_registry_model_register_console_handoff_policy() -> bool;
+predicate arceos_ex_must_console_registry_own_route_cursor_and_keepbootcon_policy() -> bool;
 predicate arceos_ex_must_keep_bootcon_prevent_boot_console_unregister() -> bool;
 predicate arceos_ex_must_printk_route_switch_to_serial_console_fact_before_mmio_backend() -> bool;
 predicate arceos_ex_must_console_handoff_smoke_cover_stdout_path_match_and_nonmatch() -> bool;
@@ -1674,6 +1677,13 @@ type ArceosExInitcallCodingMust {
          * unregisters BootConsole unless keep_bootcon is set. The first
          * implementation may record facts for the route switch before
          * replacing the actual sink with UART MMIO polling writes.
+         *
+         * EarlyCon is the early SBI backend. BootConsole is the CON_BOOT
+         * registry entry wrapping that backend. Serial8250Console is the real
+         * console entry from the probed Uart8250Port. ConsoleRegistry owns the
+         * route, handoff cursor transfer and keep_bootcon policy; drivers only
+         * request registration and must not carry those global facts as
+         * private state.
          */
         arceos_ex_must_device_tree_parse_stdout_path_from_chosen();
         arceos_ex_must_device_tree_preserve_stdout_path_options_after_colon();
@@ -1681,7 +1691,10 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_ns16550a_probe_parse_resources_from_platform_device_node();
         arceos_ex_must_ns16550a_probe_create_uart8250_port_object();
         arceos_ex_must_ns16550a_probe_register_serial8250_console_only_for_stdout_path();
+        arceos_ex_must_earlycon_bootconsole_serialconsole_registry_stay_distinct();
+        arceos_ex_must_boot_console_wrap_earlycon_as_con_boot_registry_entry();
         arceos_ex_must_console_registry_model_register_console_handoff_policy();
+        arceos_ex_must_console_registry_own_route_cursor_and_keepbootcon_policy();
         arceos_ex_must_keep_bootcon_prevent_boot_console_unregister();
         arceos_ex_must_printk_route_switch_to_serial_console_fact_before_mmio_backend();
         arceos_ex_must_console_handoff_smoke_cover_stdout_path_match_and_nonmatch();

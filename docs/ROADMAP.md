@@ -10,10 +10,9 @@
 
 ## 当前焦点
 
-1. 补齐 EarlyCon / BootConsole / ConsoleRegistry 分层说明：EarlyCon 是早期后端，BootConsole 是 printk registry 中的 `CON_BOOT` entry，ConsoleRegistry 负责 route/handoff/keep_bootcon。
-2. 推进 `ioremap/vmalloc` 泛化：`console/earlycon handoff` 和 handoff 后输出去重已经完成，下一步重点是扩展 vmap area、映射元数据、MMIO 属性策略和释放边界。
-3. 准备 PLIC/IRQ 前置链路；在 PLIC/IRQ 驱动可用前，serial8250 输出继续保持 polling。
-4. 收口 trace/SVG 输出体验，使推导过程图适合日常审阅；建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
+1. 推进 `ioremap/vmalloc` 泛化：`console/earlycon handoff` 和 handoff 后输出去重已经完成，下一步重点是扩展 vmap area、映射元数据、MMIO 属性策略和释放边界。
+2. 准备 PLIC/IRQ 前置链路；在 PLIC/IRQ 驱动可用前，serial8250 输出继续保持 polling。
+3. 收口 trace/SVG 输出体验，使推导过程图适合日常审阅；建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
 
 ## 已完成计划：console/earlycon handoff
 
@@ -41,7 +40,7 @@
 按当前讨论确认的顺序逐项推进，每完成一项即更新本节状态并做一次提交：
 
 1. **已完成：收口 console 测试边界**：app smoke 已移除直接操作 console registry / backend 的场景，只保留公开 `printk` 输出、无重复输出和用户可见 payload 结果；default handoff/idempotent、dummy non-match、non-stdout 和 `keep_bootcon` 已迁到 checkpoint KUnit/action-level handler。验收：`make test` 中 KUnit 42/42、app smoke 36/36，总计 79/79。
-2. **补 EarlyCon / BootConsole / ConsoleRegistry 分层说明**：规格和 coding 文档明确 EarlyCon 是早期输出后端，BootConsole 是 printk registry 中包装 EarlyCon 的 `CON_BOOT` console entry，Serial8250Console 是真实 console entry，ConsoleRegistry 负责 route、handoff 和 `keep_bootcon` 策略。验收：`make verify` 仍为 0 obligation。
+2. **已完成：补 EarlyCon / BootConsole / ConsoleRegistry 分层说明**：model/coding 已明确 EarlyCon 是早期 SBI backend，BootConsole 是 printk registry 中包装 EarlyCon 的 `CON_BOOT` entry，Serial8250Console 是真实 console entry，ConsoleRegistry 负责 route、handoff cursor 移交和 `keep_bootcon` 策略；drivers 只能请求注册，不拥有这些全局策略事实。验收：`make verify` 仍为 0 obligation。
 3. **继续 ioremap/vmalloc 泛化**：扩展 `VmallocAllocator` 的 vmap area 管理、`vm_struct/vmap_area` 元数据、多 mapping record、unmap/free 边界；保持 `Ioremap` 负责设备物理资源和 MMIO 属性策略，`VmallocAllocator` 负责 VA 区间和页表映射执行。
 4. **补 MMIO 属性模型**：区分 device、non-cache、write-combine 和 normal memory；当前 RISC-V 页表实现无法完整表达的属性必须显式 deferred，不把“能访问”写成“属性完整正确”。
 5. **准备 PLIC/IRQ 前置链路**：建立 irqchip/irqdomain、platform IRQ resource 解析、serial8250 IRQ 绑定和中断上下文约束；只有这些对象可用后，才把 serial8250 从 polling 输出扩展为 interrupt-driven 输出。
@@ -70,7 +69,7 @@
 | `P1` | 完成 | arceos_ex/console | 实现 console/earlycon handoff | 已完成首轮 Linux-like handoff：`stdout-path` 匹配的 ns16550a probe 会构造 `Uart8250Port`/`Serial8250Console`，完成 boot console 到 serial8250 console 的 route 切换；handoff 后 `printk::write_str()` 通过 ioremap/vmalloc 建立的 UART `membase` 进行 LSR/THR polling 输出，不再使用 SBI fallback；`keep_bootcon`、dummy non-match、非 stdout 设备不抢占 console 等 smoke 已覆盖。IRQ-driven 输出依赖 PLIC/IRQ 支持，当前保持 deferred。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P0` | 完成 | arceos_ex/console | 修复 handoff 后 `make run` 输出重复并显式 trace 交接 | 已确认根因是 handoff 只切换 printk route，没有同步移交 `PrintkBuffer` 的 legacy drain cursor；serial8250 已即时输出的记录曾被 payload 末尾直接调用 `earlycon::drain_printk()` 经 SBI 重放。已按 Linux-like `register_console()` 语义修复：serial8250 注册前先 flush boot pending records，serial route 成功交付后推进 legacy cursor，handoff 后 earlycon 进入 offline/disabled，后续 backend drain 访问触发 panic；hello/smoke 已移除直接 backend drain，只通过 printk 前端输出；同时在 real serial console online 和非 `keep_bootcon` 下 boot console offline 位置输出 trace，使 `make run LOG=trace APP=hello` 显式展示 `Serial8250Console.Online` 与 `BootConsole.Offline`。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P0` | 完成 | arceos_ex/console | 收口 console 测试边界 | 已将 app smoke 中偏内部的 console registry / backend 策略场景迁到 checkpoint KUnit/action-level；app smoke 只保留公开 `printk` 输出、无重复输出和用户可见 payload 结果。KUnit 覆盖 default handoff/idempotent、dummy non-match、non-stdout 和 `keep_bootcon`，完整 `make test` 为 79/79。 | [smoke 测试边界](../spec/coding/arceos_ex.md#smoke-测试边界) |
-| `P0` | 待办 | spec/console | 明确 EarlyCon / BootConsole / ConsoleRegistry 分层 | 在 model/coding 里补足概念边界：EarlyCon 是 early backend，BootConsole 是 printk registry 的 `CON_BOOT` entry，Serial8250Console 是 real console entry，ConsoleRegistry 承载 route/handoff/keep_bootcon。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
+| `P0` | 完成 | spec/console | 明确 EarlyCon / BootConsole / ConsoleRegistry 分层 | 已在 model/coding 里补足概念边界：EarlyCon 是 early backend，BootConsole 是 printk registry 的 `CON_BOOT` entry，Serial8250Console 是 real console entry，ConsoleRegistry 承载 route、handoff cursor 移交和 `keep_bootcon`；drivers 只能请求注册，不拥有这些全局策略事实。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P1` | 待办 | arceos_ex/mm | 泛化 ioremap/vmalloc 运行时映射 | 在当前最小 UART MMIO 映射闭环基础上，继续扩展 `VmallocAllocator` 的 vmap area 管理、`vm_struct/vmap_area` 元数据、跨 vmalloc 窗口映射、unmap/free 边界和重复映射策略；`Ioremap` 继续负责设备物理资源与 MMIO 属性策略，`VmallocAllocator` 只负责虚拟区间管理和页表映射执行。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#mmcoreinitphase-编码约束) |
 | `P1` | 待办 | arceos_ex/mm | 补 MMIO 属性模型 | 区分 device、non-cache、write-combine、normal memory 等属性选择；当前 RISC-V 页表实现无法完整表达的属性必须显式 deferred，不能把“能访问”写成“属性完整正确”。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#mmcoreinitphase-编码约束) |
 | `P1` | 待办 | arceos_ex/irq | 准备 PLIC/IRQ 与 serial8250 IRQ 前置链路 | 建立 irqchip/irqdomain、platform IRQ resource 解析、serial8250 IRQ 绑定和中断上下文约束；在这些对象可用前，serial8250 console 输出继续保持 polling。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |

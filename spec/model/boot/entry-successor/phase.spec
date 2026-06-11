@@ -620,7 +620,9 @@ object PrintkBuffer: BufferObject {
 }
 
 /*
- * EarlyCon 表示正式 console 建立前的 SBI early console 后端。
+ * EarlyCon 表示正式 console 建立前的 SBI early console 后端。它只描述
+ * backend lifecycle 和 direct backend access contract；BootConsole 才是
+ * ConsoleRegistry 中包装 EarlyCon 的 CON_BOOT printk console entry。
  */
 object EarlyCon: ConsoleObject {
     initial_state: State::Base;

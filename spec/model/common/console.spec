@@ -6,6 +6,17 @@
  * - 8250 console registration creates a real ttyS console.
  * - When the real console becomes CON_CONSDEV, printk unregisters boot
  *   consoles unless keep_bootcon was requested.
+ *
+ * Layering rule:
+ * - EarlyCon is the early output backend object. It is not itself a printk
+ *   registry entry.
+ * - BootConsole is the printk console entry that wraps EarlyCon with CON_BOOT
+ *   and printbuffer semantics.
+ * - Serial8250Console is the real console entry registered by the probed 8250
+ *   port.
+ * - ConsoleRegistry owns register_console() policy, printk routing, handoff
+ *   cursor transfer and keep_bootcon decisions. Drivers may request
+ *   registration, but must not own these global policy facts.
  */
 
 predicate boot_console_registered<T, E>(boot_console: T, earlycon: E) -> bool;
@@ -104,6 +115,11 @@ object NonStdoutConsoleCandidate: ConsoleObject {
     }
 }
 
+/*
+ * BootConsole is a registry identity, not a second earlycon backend. Its write
+ * operation routes to EarlyCon while it is online, but its lifecycle tracks the
+ * CON_BOOT entry inside ConsoleRegistry.
+ */
 object BootConsole: ConsoleObject {
     initial_state: State::Base;
 
@@ -227,6 +243,10 @@ object Uart8250Port: DeviceObject {
     }
 }
 
+/*
+ * Serial8250Console is the real console entry created from Uart8250Port. It
+ * becomes the active printk route only through ConsoleRegistry policy.
+ */
 object Serial8250Console: ConsoleObject {
     initial_state: State::Base;
 
@@ -276,6 +296,11 @@ object Serial8250Console: ConsoleObject {
     }
 }
 
+/*
+ * ConsoleRegistry models printk's register_console() policy surface. It owns
+ * boot/real console membership, preferred-console selection, route switching,
+ * boot pending record flush, legacy earlycon drain blocking and keep_bootcon.
+ */
 object ConsoleRegistry: ConsoleObject {
     initial_state: State::Base;
 
@@ -387,6 +412,11 @@ object ConsoleRegistry: ConsoleObject {
     }
 }
 
+/*
+ * KeepBootconConsoleRegistry is the same registry policy with keep_bootcon
+ * enabled. BootConsole remains registered and online, while the active printk
+ * route still moves to Serial8250Console.
+ */
 object KeepBootconConsoleRegistry: ConsoleObject {
     initial_state: State::Base;
 
@@ -459,6 +489,11 @@ object KeepBootconConsoleRegistry: ConsoleObject {
     }
 }
 
+/*
+ * ConsoleHandoff is the transaction produced by registering the preferred real
+ * console. It commits route switch and backend shutdown facts; it must not be
+ * reimplemented as driver-private state.
+ */
 object ConsoleHandoff: ConsoleObject {
     initial_state: State::Base;
 
