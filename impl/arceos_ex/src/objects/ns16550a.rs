@@ -23,6 +23,8 @@ pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
         .platform_driver_register(NS16550A_PLATFORM_DRIVER_REF, device_tree)
 }
 
+crate::device_initcall!(ns16550a_platform_driver_init);
+
 pub fn is_ns16550a_platform_driver(driver: DeviceDriverRef) -> bool {
     driver == NS16550A_PLATFORM_DRIVER_REF
 }

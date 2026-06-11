@@ -148,6 +148,7 @@ predicate arceos_ex_must_bus_device_ref_set_map_to_klist_like_storage() -> bool;
 predicate arceos_ex_must_device_driver_ref_set_map_to_klist_like_storage() -> bool;
 predicate arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs() -> bool;
 predicate arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry() -> bool;
+predicate arceos_ex_must_concrete_driver_declare_own_initcall_in_driver_module() -> bool;
 predicate arceos_ex_must_device_driver_descriptor_carry_name_bus_of_match_and_probe() -> bool;
 predicate arceos_ex_must_of_match_table_lower_to_static_compatible_array() -> bool;
 predicate arceos_ex_must_device_driver_ref_reference_driver_descriptor_not_enum_special_case() -> bool;
@@ -1590,7 +1591,11 @@ type ArceosExInitcallCodingMust {
          * ns16550a-compatible OF serial platform driver, modeled in
          * spec/model/common/ns16550a_driver.spec and implemented in an
          * independent Rust module. Its Linux-like device_initcall!() static
-         * entry represents the initcall action. That action must call
+         * entry represents the initcall action. Concrete platform drivers
+         * must declare that initcall in the driver's own implementation
+         * module, beside the driver descriptor/probe code; the generic
+         * initcall core only provides the declaration macros, linker-section
+         * table collection, and level-order execution. That action must call
          * platform_driver_register() after OF population has created platform
          * devices; platform_driver_register() then reaches BusType.AddDriver,
          * records a DeviceDriverRef in PlatformBus.klist_drivers, and drives
@@ -1624,6 +1629,7 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_device_driver_ref_set_map_to_klist_like_storage();
         arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs();
         arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry();
+        arceos_ex_must_concrete_driver_declare_own_initcall_in_driver_module();
         arceos_ex_must_ns16550a_driver_spec_live_in_common_file();
         arceos_ex_must_ns16550a_driver_impl_live_in_independent_module();
         arceos_ex_must_ns16550a_initcall_action_call_platform_driver_register();

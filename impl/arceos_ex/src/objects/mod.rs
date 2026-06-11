@@ -31,6 +31,7 @@ pub mod init_mm;
 pub mod init_stack;
 pub mod init_task;
 pub mod initcall;
+pub mod initcall_macros;
 pub mod interrupt_stream;
 pub mod irq_open;
 pub mod irq_time;

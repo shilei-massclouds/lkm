@@ -4,7 +4,7 @@ use super::{
     driver::{DeviceDriverRef, ProbeResult},
     irq_time::IrqDispatchTree,
     mm_core::PageAllocator,
-    ns16550a::{is_ns16550a_platform_driver, ns16550a_platform_driver_init},
+    ns16550a::is_ns16550a_platform_driver,
     runtime_core::RuntimeCoreBoundary,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
@@ -83,106 +83,14 @@ impl InitcallEntry {
     }
 }
 
-macro_rules! define_initcall {
-    ($level:expr, $section:literal, $entry:ident) => {
-        const _: () = {
-            #[used]
-            #[unsafe(link_section = $section)]
-            static INITCALL_ENTRY: $crate::objects::initcall::InitcallEntry =
-                $crate::objects::initcall::InitcallEntry::new($level, stringify!($entry), $entry);
-        };
-    };
-}
-
-macro_rules! pure_initcall {
-    ($entry:ident) => {
-        define_initcall!(
-            $crate::objects::initcall::InitcallLevelName::Pure,
-            ".initcall.pure",
-            $entry
-        );
-    };
-}
-
-macro_rules! core_initcall {
-    ($entry:ident) => {
-        define_initcall!(
-            $crate::objects::initcall::InitcallLevelName::Core,
-            ".initcall.core",
-            $entry
-        );
-    };
-}
-
-macro_rules! postcore_initcall {
-    ($entry:ident) => {
-        define_initcall!(
-            $crate::objects::initcall::InitcallLevelName::Postcore,
-            ".initcall.postcore",
-            $entry
-        );
-    };
-}
-
-macro_rules! arch_initcall_sync {
-    ($entry:ident) => {
-        define_initcall!(
-            $crate::objects::initcall::InitcallLevelName::Arch,
-            ".initcall.arch",
-            $entry
-        );
-    };
-}
-
-macro_rules! subsys_initcall {
-    ($entry:ident) => {
-        define_initcall!(
-            $crate::objects::initcall::InitcallLevelName::Subsys,
-            ".initcall.subsys",
-            $entry
-        );
-    };
-}
-
-macro_rules! fs_initcall {
-    ($entry:ident) => {
-        define_initcall!(
-            $crate::objects::initcall::InitcallLevelName::Fs,
-            ".initcall.fs",
-            $entry
-        );
-    };
-}
-
-macro_rules! device_initcall {
-    ($entry:ident) => {
-        define_initcall!(
-            $crate::objects::initcall::InitcallLevelName::Device,
-            ".initcall.device",
-            $entry
-        );
-    };
-}
-
-macro_rules! late_initcall {
-    ($entry:ident) => {
-        define_initcall!(
-            $crate::objects::initcall::InitcallLevelName::Late,
-            ".initcall.late",
-            $entry
-        );
-    };
-}
-
-pure_initcall!(pure_smoke_initcall);
-core_initcall!(core_smoke_initcall);
-postcore_initcall!(postcore_smoke_initcall);
-arch_initcall_sync!(of_platform_default_populate_init);
-subsys_initcall!(subsys_smoke_initcall);
-fs_initcall!(fs_smoke_initcall);
-device_initcall!(device_smoke_initcall);
-device_initcall!(ns16550a_platform_driver_init);
-late_initcall!(late_smoke_initcall);
+crate::pure_initcall!(pure_smoke_initcall);
+crate::core_initcall!(core_smoke_initcall);
+crate::postcore_initcall!(postcore_smoke_initcall);
+crate::arch_initcall_sync!(of_platform_default_populate_init);
+crate::subsys_initcall!(subsys_smoke_initcall);
+crate::fs_initcall!(fs_smoke_initcall);
+crate::device_initcall!(device_smoke_initcall);
+crate::late_initcall!(late_smoke_initcall);
 
 fn pure_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
     crate::objects::printk::write_str("initcall: pure_smoke_initcall\n");
