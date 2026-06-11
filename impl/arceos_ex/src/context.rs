@@ -33,8 +33,8 @@ use crate::objects::{
     ioremap::Ioremap,
     irq_open::{Console, DelayLoop, SchedClock},
     irq_time::{
-        HrtimerCore, IpiMux, IrqController, IrqDispatchTree, Plic, RiscvIntc, RiscvTimerProvider,
-        SbiIpi, SmpCallFunction, Tick, Timekeeper, TimerWheel,
+        HrtimerCore, IpiMux, IrqChipInitTable, IrqController, IrqDispatchTree, Plic, PlicDriver,
+        RiscvIntc, RiscvTimerProvider, SbiIpi, SmpCallFunction, Tick, Timekeeper, TimerWheel,
     },
     kernel_cmdline::KernelCmdline,
     kernel_image::KernelImage,
@@ -154,6 +154,8 @@ pub struct Context {
 
     pub irq_controller: IrqController,
     pub riscv_intc: RiscvIntc,
+    pub irqchip_init_table: IrqChipInitTable,
+    pub plic_driver: PlicDriver,
     pub irq_dispatch_tree: IrqDispatchTree,
     pub plic: Plic,
     pub tick: Tick,
@@ -292,6 +294,8 @@ impl Context {
             rcu_core: RcuCore::new(),
             irq_controller: IrqController::new(),
             riscv_intc: RiscvIntc::new(),
+            irqchip_init_table: IrqChipInitTable::new(),
+            plic_driver: PlicDriver::new(),
             irq_dispatch_tree: IrqDispatchTree::new(),
             plic: Plic::new(),
             tick: Tick::new(),

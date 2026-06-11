@@ -56,6 +56,11 @@ predicate ioremap_normal_memory_attribute_deferred<T>(ioremap: T) -> bool;
 
 predicate ioremap_mapping_created<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_owner_bound<T, M, D>(ioremap: T, mapping: M, device: D) -> bool;
+predicate ioremap_mapping_owner_is_system_irqchip<T, M, C>(
+    ioremap: T,
+    mapping: M,
+    irqchip: C
+) -> bool;
 predicate ioremap_mapping_phys_range_bound<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_phys_range_from_device_resource<T, M, D>(
     ioremap: T,

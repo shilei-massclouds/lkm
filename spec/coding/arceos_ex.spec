@@ -73,6 +73,13 @@ predicate arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action() -> 
 predicate arceos_ex_must_irq_time_init_keep_task_and_smp_concurrency_closed() -> bool;
 predicate arceos_ex_must_irq_time_init_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_irq_time_init_expose_time_and_clockevent_smoke_actions() -> bool;
+predicate arceos_ex_must_model_plic_as_independent_irqchip_driver() -> bool;
+predicate arceos_ex_must_irqchip_init_entries_use_static_lds_section() -> bool;
+predicate arceos_ex_must_init_irq_chain_find_plic_driver_from_irqchip_section() -> bool;
+predicate arceos_ex_must_of_irq_init_call_plic_init_via_matched_section_entry() -> bool;
+predicate arceos_ex_must_plic_output_feed_riscv_intc_external_input() -> bool;
+predicate arceos_ex_must_plic_ioremap_as_system_irqchip_not_platform_device() -> bool;
+predicate arceos_ex_must_plic_setup_parse_dt_reg_ndev_and_interrupts_extended() -> bool;
 predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_open_prepare_run_after_irq_time_init() -> bool;
@@ -639,6 +646,81 @@ type ArceosExIrqTimeInitCodingMust {
          * must not be moved back to the beginning of a later IRQ-open phase.
          */
         arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action();
+
+        /*
+         * PLIC driver split:
+         *
+         * PLIC must be represented as an independent irqchip driver entry and
+         * provider object. The driver registration boundary is separate from
+         * the PLIC provider setup result; it must not collapse back into an
+         * IrqController boolean or an ordinary PlatformBus probe.
+         */
+        arceos_ex_must_model_plic_as_independent_irqchip_driver();
+
+        /*
+         * IRQCHIP_DECLARE lowering:
+         *
+         * PLIC irqchip init registration must lower to a retained static
+         * entry in an irqchip init LDS section. The implementation must not
+         * build the primary irqchip table by runtime push into a growable
+         * registry.
+         */
+        arceos_ex_must_irqchip_init_entries_use_static_lds_section();
+
+        /*
+         * init_IRQ call chain:
+         *
+         * The IrqTimeInitPhase implementation of init_IRQ() must call
+         * irqchip_init(), which must call of_irq_init() over the LDS-collected
+         * irqchip init section. PLIC setup must be reached because this chain
+         * finds the PLIC entry in that section, not because the phase directly
+         * invokes a PLIC-specific setup function.
+         */
+        arceos_ex_must_init_irq_chain_find_plic_driver_from_irqchip_section();
+
+        /*
+         * Compatible match and callback:
+         *
+         * of_irq_init() must match the DeviceTree interrupt-controller node's
+         * compatible against the section entry and invoke the matched PLIC
+         * init callback. Tests must cover both observations: the section entry
+         * is present, and the callback was invoked through traversal.
+         */
+        arceos_ex_must_of_irq_init_call_plic_init_via_matched_section_entry();
+
+        /*
+         * Parent interrupt link:
+         *
+         * PLIC's interrupt output must be modeled and implemented as feeding
+         * the external interrupt input of the parent RISC-V CPU local INTC.
+         * The external interrupt route may remain deferred, but the parent
+         * link must already be explicit before later claim/complete dispatch
+         * work can build on it.
+         */
+        arceos_ex_must_plic_output_feed_riscv_intc_external_input();
+
+        /*
+         * PLIC MMIO ownership:
+         *
+         * PLIC MMIO mapping must use the runtime ioremap/vmalloc mapping
+         * execution path, but its owner is the system irqchip itself. The
+         * implementation must not fabricate a PlatformDevice just to reuse
+         * device MMIO ownership, because UART platform devices later consume
+         * PLIC as their interrupt parent rather than owning the controller.
+         */
+        arceos_ex_must_plic_ioremap_as_system_irqchip_not_platform_device();
+
+        /*
+         * PLIC DT setup:
+         *
+         * The matched PLIC init callback must parse the DeviceTree interrupt
+         * controller node's reg range, riscv,ndev source count, and
+         * interrupts-extended parent input before marking Plic.Ready. The
+         * parent input must represent a RISC-V external interrupt line; strict
+         * phandle-to-boot-hart binding belongs to the later IRQ domain/source
+         * mapping step once DeviceTree phandle lookup is modeled.
+         */
+        arceos_ex_must_plic_setup_parse_dt_reg_ndev_and_interrupts_extended();
 
         /*
          * Concurrency scope:

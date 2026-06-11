@@ -63,6 +63,13 @@ SECTIONS
         __initcall_late_end = .;
     }
 
+    . = ALIGN(8);
+    .irqchip_init : AT(ADDR(.irqchip_init) - LOAD_OFFSET) {
+        __irqchip_init_start = .;
+        KEEP(*(.irqchip.init))
+        __irqchip_init_end = .;
+    }
+
     .data : AT(ADDR(.data) - LOAD_OFFSET) ALIGN(4K) {
         _sdata = .;
         PROVIDE(__global_pointer$ = . + 0x800);

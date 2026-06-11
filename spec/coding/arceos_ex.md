@@ -1086,7 +1086,7 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 
 `IrqTimeInitPhase` 已正式落到 `spec/model/interrupt/irq-time-init/`，属于 `InterruptPhase` 的第一个子阶段。实现侧边界和早期设计草案不同：`local_irq_enable()`
 不再属于后续中断开放期的开头，而是本阶段的结尾。阶段出口必须满足 `InterruptStream.Online`、boot CPU
-`sstatus.SIE` 已打开、`IrqController.Ready`、`RiscvIntc.Ready`、`IrqDispatchTree.Ready`、`Plic.Prepared`、`Tick.Ready`、
+`sstatus.SIE` 已打开、`IrqController.Ready`、`RiscvIntc.Ready`、`IrqDispatchTree.Ready`、`Plic.Ready`、`Tick.Ready`、
 `TimerWheel.Ready`、`HrtimerCore.Ready`、`Timekeeper.Ready`、`RiscvTimerProvider.Ready`、`Softirq.Ready`、`Randomness.Ready`、
 `SbiIpi.Ready`、`IpiMux.Ready` 和 `SmpCallFunction.Ready`。
 
@@ -1097,8 +1097,23 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 当前按 OpenSBI 下的 RISC-V S-mode 路径建模：`RiscvIntc` 表示每 hart 直连 CPU 的 local interrupt controller，
 `RiscvTimerProvider` 表示 Linux `timer-riscv` 风格的 time/clockevent provider，timer programming 走 SBI TIME 或后续 SSTC
 能力，而不是直接把 CLINT 作为本阶段对象。IPI 路径按 `SbiIpi` 提供 software IRQ mapping 和 send action，`IpiMux` 在其上建立虚拟
-IPI range；这对应 Linux `sbi-ipi` + generic `ipi-mux`。`Plic` 在本阶段只推进到 `Prepared` 占位，保留 external interrupt
-provider discovery 和 parent 关系，不开放 external IRQ route，也不注册外部中断 handler。
+IPI range；这对应 Linux `sbi-ipi` + generic `ipi-mux`。
+
+PLIC 是系统 irqchip，不是普通 `PlatformBus` driver probe。实现必须采用 Linux-like
+`init_IRQ() -> irqchip_init() -> of_irq_init()` 链路：`PlicDriver` 的 compatible/init callback entry
+通过 retained LDS section 静态注册，`IrqChipInitTable.preset()` 只建立该 section 的 entry view，
+`IrqChipInitTable.setup()` 才遍历 section、匹配 DeviceTree 中带 `interrupt-controller` 的 PLIC node，并调用匹配 entry
+的 PLIC init callback。代码不得在 `IrqTimeInitPhase` 中直接调用 PLIC 专用 setup 来绕过 section 遍历，也不得用运行时
+growable registry 作为主注册路径。当前必须至少支持 QEMU virt 常见的 `sifive,plic-1.0.0`，可同时支持
+`riscv,plic0`。
+
+`Plic` 在本阶段推进到最小 `Ready`：它确认 provider discovery、DeviceTree interrupt-controller node、compatible
+match、callback 调用事实、`reg` MMIO resource、`riscv,ndev` source count、`interrupts-extended` 中的 RISC-V external
+interrupt parent input，以及 PLIC 输出连接到上级 `RiscvIntc` external interrupt input 的父链关系。PLIC MMIO 必须通过
+runtime `ioremap`/`vmalloc` 映射执行路径建立，但 owner 是 system irqchip，而不是伪造的 `PlatformDevice`。external IRQ route、
+claim/complete、handler dispatch 和 UART interrupt-driven console 仍留给后续展开；当前 source enable/priority/threshold
+只表达 external-input context 的基础状态，不代表 UART 外部中断链已经可用。严格的 `interrupts-extended` phandle 到 boot hart
+local INTC 的反查绑定要等 DeviceTree phandle 查询能力建立后，在 IRQ domain/source mapping 步骤补上。
 
 本阶段打开的只是 boot CPU 本地中断总入口。普通任务并发、secondary CPU 并发、周期 tick 服务、workqueue worker
 kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提前解释为 Online。

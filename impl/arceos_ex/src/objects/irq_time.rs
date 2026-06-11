@@ -1,11 +1,16 @@
-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use core::{
+    mem::size_of,
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+};
 
 use super::{
+    config::Config,
     cpu_group::CpuGroup,
-    device_tree::DeviceTree,
-    fdt_reader::read_be_u32,
+    device_tree::{DeviceNodeRef, DevicePropertyRef, DeviceTree},
+    fdt_reader::{read_be_u32, read_cells},
     interrupt_stream::InterruptStream,
-    mm_core::{PageAllocator, SlubAllocator},
+    ioremap::Ioremap,
+    mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, SlubAllocator, VmallocAllocator},
     per_cpu_storage::PerCpuStorage,
     sbi::Sbi,
     softirq::Softirq,
@@ -15,12 +20,185 @@ use super::{
 use crate::{arch::riscv64, trace::Checkpoint};
 
 const DEFAULT_TIMEBASE_HZ: u64 = 10_000_000;
+const IRQCHIP_RUN_RECORD_CAPACITY: usize = 8;
+const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
+const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
+const RISCV_IRQ_S_EXT: u32 = 9;
+const RISCV_IRQ_M_EXT: u32 = 11;
 
 static TIMER_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static ONESHOT_DEADLINE: AtomicU64 = AtomicU64::new(0);
 static ONESHOT_CALLBACK: AtomicUsize = AtomicUsize::new(0);
 
 pub type ClockEventCallback = fn(u64);
+pub type IrqChipInitFn = for<'dt> fn(
+    &mut Plic,
+    DeviceNodeRef<'dt>,
+    &RiscvIntc,
+    &CpuGroup,
+    &mut VmallocAllocator,
+    &mut PageTableCaches,
+    &mut PageAllocator,
+    &PageMetadataMap,
+    &Config,
+    &mut Ioremap,
+) -> EventResult;
+
+unsafe extern "C" {
+    static __irqchip_init_start: u8;
+    static __irqchip_init_end: u8;
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct IrqChipInitEntry {
+    name: &'static str,
+    compatible: &'static [u8],
+    init: IrqChipInitFn,
+}
+
+impl IrqChipInitEntry {
+    pub const fn new(name: &'static str, compatible: &'static [u8], init: IrqChipInitFn) -> Self {
+        Self {
+            name,
+            compatible,
+            init,
+        }
+    }
+
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    pub const fn compatible(&self) -> &'static [u8] {
+        self.compatible
+    }
+
+    fn run(
+        &self,
+        plic: &mut Plic,
+        node: DeviceNodeRef<'_>,
+        riscv_intc: &RiscvIntc,
+        cpu_group: &CpuGroup,
+        vmalloc_allocator: &mut VmallocAllocator,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+        ioremap: &mut Ioremap,
+    ) -> EventResult {
+        (self.init)(
+            plic,
+            node,
+            riscv_intc,
+            cpu_group,
+            vmalloc_allocator,
+            page_table_caches,
+            page_allocator,
+            page_metadata_map,
+            config,
+            ioremap,
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct IrqChipInitRunRecord {
+    name: &'static str,
+    compatible: &'static [u8],
+    matched: bool,
+    callback_invoked: bool,
+    return_ok: bool,
+}
+
+impl IrqChipInitRunRecord {
+    const fn empty() -> Self {
+        Self {
+            name: "",
+            compatible: b"",
+            matched: false,
+            callback_invoked: false,
+            return_ok: false,
+        }
+    }
+
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    pub const fn compatible(&self) -> &'static [u8] {
+        self.compatible
+    }
+
+    pub const fn matched(&self) -> bool {
+        self.matched
+    }
+
+    pub const fn callback_invoked(&self) -> bool {
+        self.callback_invoked
+    }
+
+    pub const fn return_ok(&self) -> bool {
+        self.return_ok
+    }
+}
+
+crate::irqchip_declare!(sifive_plic, "sifive,plic-1.0.0", plic_irqchip_init);
+crate::irqchip_declare!(riscv_plic0, "riscv,plic0", plic_irqchip_init);
+
+fn irqchip_init_range() -> &'static [IrqChipInitEntry] {
+    let start = &raw const __irqchip_init_start as *const u8;
+    let end = &raw const __irqchip_init_end as *const u8;
+    let start_addr = start as usize;
+    let end_addr = end as usize;
+    let entry_size = size_of::<IrqChipInitEntry>();
+    if start_addr == 0
+        || end_addr < start_addr
+        || entry_size == 0
+        || (end_addr - start_addr) % entry_size != 0
+    {
+        return &[];
+    }
+
+    let count = (end_addr - start_addr) / entry_size;
+    unsafe { core::slice::from_raw_parts(start as *const IrqChipInitEntry, count) }
+}
+
+fn irqchip_init_range_valid(range: &[IrqChipInitEntry]) -> bool {
+    let mut index = 0usize;
+    while index < range.len() {
+        if range[index].name().is_empty() || range[index].compatible().is_empty() {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn plic_irqchip_init(
+    plic: &mut Plic,
+    node: DeviceNodeRef<'_>,
+    riscv_intc: &RiscvIntc,
+    cpu_group: &CpuGroup,
+    vmalloc_allocator: &mut VmallocAllocator,
+    page_table_caches: &mut PageTableCaches,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+    config: &Config,
+    ioremap: &mut Ioremap,
+) -> EventResult {
+    plic.preset_from_irqchip(
+        node,
+        riscv_intc,
+        cpu_group,
+        vmalloc_allocator,
+        page_table_caches,
+        page_allocator,
+        page_metadata_map,
+        config,
+        ioremap,
+    )
+}
 
 pub struct IrqController {
     lifecycle: Lifecycle,
@@ -86,6 +264,407 @@ impl IrqController {
             State::Base,
             State::Ready,
             Checkpoint::IrqControllerReady,
+        )
+    }
+}
+
+pub struct IrqChipInitTable {
+    lifecycle: Lifecycle,
+    static_entries_ready: bool,
+    lds_section_ready: bool,
+    entry_view_ready: bool,
+    interrupt_controller_scan_ready: bool,
+    parent_first_order_ready: bool,
+    init_irq_called_irqchip_init: bool,
+    irqchip_init_called_of_irq_init: bool,
+    of_irq_init_traversed_lds_section: bool,
+    plic_callback_invoked: bool,
+    entry_count: usize,
+    run_records: [IrqChipInitRunRecord; IRQCHIP_RUN_RECORD_CAPACITY],
+    run_count: usize,
+}
+
+impl IrqChipInitTable {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            static_entries_ready: false,
+            lds_section_ready: false,
+            entry_view_ready: false,
+            interrupt_controller_scan_ready: false,
+            parent_first_order_ready: false,
+            init_irq_called_irqchip_init: false,
+            irqchip_init_called_of_irq_init: false,
+            of_irq_init_traversed_lds_section: false,
+            plic_callback_invoked: false,
+            entry_count: 0,
+            run_records: [IrqChipInitRunRecord::empty(); IRQCHIP_RUN_RECORD_CAPACITY],
+            run_count: 0,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn static_entries_ready(&self) -> bool {
+        self.static_entries_ready
+    }
+
+    pub const fn lds_section_ready(&self) -> bool {
+        self.lds_section_ready
+    }
+
+    pub const fn entry_view_ready(&self) -> bool {
+        self.entry_view_ready
+    }
+
+    pub const fn interrupt_controller_scan_ready(&self) -> bool {
+        self.interrupt_controller_scan_ready
+    }
+
+    pub const fn parent_first_order_ready(&self) -> bool {
+        self.parent_first_order_ready
+    }
+
+    pub const fn init_irq_called_irqchip_init(&self) -> bool {
+        self.init_irq_called_irqchip_init
+    }
+
+    pub const fn irqchip_init_called_of_irq_init(&self) -> bool {
+        self.irqchip_init_called_of_irq_init
+    }
+
+    pub const fn of_irq_init_traversed_lds_section(&self) -> bool {
+        self.of_irq_init_traversed_lds_section
+    }
+
+    pub const fn plic_callback_invoked(&self) -> bool {
+        self.plic_callback_invoked
+    }
+
+    pub const fn entry_count(&self) -> usize {
+        self.entry_count
+    }
+
+    pub const fn run_count(&self) -> usize {
+        self.run_count
+    }
+
+    pub fn run_record(&self, index: usize) -> Option<IrqChipInitRunRecord> {
+        if index >= self.run_count {
+            return None;
+        }
+        Some(self.run_records[index])
+    }
+
+    pub fn contains_entry(&self, compatible: &[u8]) -> bool {
+        let entries = irqchip_init_range();
+        let mut index = 0usize;
+        while index < entries.len() {
+            if entries[index].compatible() == compatible {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    pub fn preset(
+        &mut self,
+        irq_controller: &IrqController,
+        device_tree: &DeviceTree,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || irq_controller.state() != State::Ready
+            || device_tree.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        let entries = irqchip_init_range();
+        if entries.is_empty()
+            || !irqchip_init_range_valid(entries)
+            || !entries
+                .iter()
+                .any(|entry| entry.compatible() == PLIC_COMPATIBLE_SIFIVE)
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.static_entries_ready = true;
+        self.lds_section_ready = true;
+        self.entry_view_ready = true;
+        self.interrupt_controller_scan_ready = true;
+        self.parent_first_order_ready = true;
+        self.entry_count = entries.len();
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::IrqChipInitTablePrepared,
+        )
+    }
+
+    pub fn setup(
+        &mut self,
+        plic_driver: &PlicDriver,
+        device_tree: &DeviceTree,
+        riscv_intc: &RiscvIntc,
+        cpu_group: &CpuGroup,
+        vmalloc_allocator: &mut VmallocAllocator,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+        ioremap: &mut Ioremap,
+        plic: &mut Plic,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || plic_driver.state() != State::Prepared
+            || device_tree.state() != State::Ready
+            || riscv_intc.state() != State::Ready
+            || cpu_group.state() != State::Ready
+            || vmalloc_allocator.state() != State::Ready
+            || page_table_caches.state() != State::Ready
+            || page_allocator.state() != State::Ready
+            || page_metadata_map.state() != State::Ready
+            || config.state() != State::Online
+            || ioremap.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.init_irq_called_irqchip_init = true;
+        self.irqchip_init_called_of_irq_init = true;
+        let result = self.of_irq_init(
+            plic_driver,
+            device_tree,
+            riscv_intc,
+            cpu_group,
+            vmalloc_allocator,
+            page_table_caches,
+            page_allocator,
+            page_metadata_map,
+            config,
+            ioremap,
+            plic,
+        );
+        if result.is_err() || !self.plic_callback_invoked {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::IrqChipInitTableReady,
+        )
+    }
+
+    fn of_irq_init(
+        &mut self,
+        plic_driver: &PlicDriver,
+        device_tree: &DeviceTree,
+        riscv_intc: &RiscvIntc,
+        cpu_group: &CpuGroup,
+        vmalloc_allocator: &mut VmallocAllocator,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+        ioremap: &mut Ioremap,
+        plic: &mut Plic,
+    ) -> EventResult {
+        let entries = irqchip_init_range();
+        if entries.len() != self.entry_count || !irqchip_init_range_valid(entries) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.of_irq_init_traversed_lds_section = true;
+        let Some(node) = find_plic_interrupt_controller_node(device_tree) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        };
+
+        let mut index = 0usize;
+        while index < entries.len() {
+            let entry = &entries[index];
+            let matched = node.has_compatible(entry.compatible());
+            if self.run_count < IRQCHIP_RUN_RECORD_CAPACITY {
+                self.run_records[self.run_count] = IrqChipInitRunRecord {
+                    name: entry.name(),
+                    compatible: entry.compatible(),
+                    matched,
+                    callback_invoked: false,
+                    return_ok: false,
+                };
+                self.run_count += 1;
+            }
+            if matched {
+                if !plic_driver.entry_registered()
+                    || !plic_driver.init_callback_bound()
+                    || !plic_driver.compatible_covers_qemu_virt()
+                {
+                    return failed_condition(
+                        LifecycleEvent::Setup,
+                        self.lifecycle.state(),
+                        State::Prepared,
+                        State::Ready,
+                    );
+                }
+                let result = entry.run(
+                    plic,
+                    node,
+                    riscv_intc,
+                    cpu_group,
+                    vmalloc_allocator,
+                    page_table_caches,
+                    page_allocator,
+                    page_metadata_map,
+                    config,
+                    ioremap,
+                );
+                let return_ok = result.is_ok();
+                if let Some(record) = self.run_records.get_mut(self.run_count - 1) {
+                    record.callback_invoked = true;
+                    record.return_ok = return_ok;
+                }
+                if return_ok {
+                    self.plic_callback_invoked = true;
+                    return Ok(());
+                }
+                return result;
+            }
+            index += 1;
+        }
+
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Prepared,
+            State::Ready,
+        )
+    }
+}
+
+pub struct PlicDriver {
+    lifecycle: Lifecycle,
+    entry_registered: bool,
+    registered_in_lds_section: bool,
+    init_callback_bound: bool,
+    compatible_covers_qemu_virt: bool,
+    probe_depends_on_device_tree: bool,
+    probe_runs_in_irq_time_init: bool,
+    not_platform_bus_probe: bool,
+}
+
+impl PlicDriver {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            entry_registered: false,
+            registered_in_lds_section: false,
+            init_callback_bound: false,
+            compatible_covers_qemu_virt: false,
+            probe_depends_on_device_tree: false,
+            probe_runs_in_irq_time_init: false,
+            not_platform_bus_probe: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn entry_registered(&self) -> bool {
+        self.entry_registered
+    }
+
+    pub const fn registered_in_lds_section(&self) -> bool {
+        self.registered_in_lds_section
+    }
+
+    pub const fn init_callback_bound(&self) -> bool {
+        self.init_callback_bound
+    }
+
+    pub const fn compatible_covers_qemu_virt(&self) -> bool {
+        self.compatible_covers_qemu_virt
+    }
+
+    pub const fn probe_depends_on_device_tree(&self) -> bool {
+        self.probe_depends_on_device_tree
+    }
+
+    pub const fn probe_runs_in_irq_time_init(&self) -> bool {
+        self.probe_runs_in_irq_time_init
+    }
+
+    pub const fn not_platform_bus_probe(&self) -> bool {
+        self.not_platform_bus_probe
+    }
+
+    pub fn preset(
+        &mut self,
+        irqchip_table: &IrqChipInitTable,
+        device_tree: &DeviceTree,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || irqchip_table.state() != State::Prepared
+            || device_tree.state() != State::Ready
+            || !irqchip_table.contains_entry(PLIC_COMPATIBLE_SIFIVE)
+            || find_plic_interrupt_controller_node(device_tree).is_none()
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.entry_registered = true;
+        self.registered_in_lds_section = true;
+        self.init_callback_bound = true;
+        self.compatible_covers_qemu_virt = true;
+        self.probe_depends_on_device_tree = true;
+        self.probe_runs_in_irq_time_init = true;
+        self.not_platform_bus_probe = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::PlicDriverPrepared,
         )
     }
 }
@@ -956,8 +1535,23 @@ impl IpiMux {
 
 pub struct Plic {
     lifecycle: Lifecycle,
+    matched_compatible: bool,
+    setup_called_by_of_irq_init: bool,
+    interrupt_controller_node_ready: bool,
     provider_discovery_reserved: bool,
     external_parent_reserved: bool,
+    output_connected_to_riscv_intc_external_input: bool,
+    mmio_resource_ready: bool,
+    ioremapped: bool,
+    vm_ioremap: bool,
+    mapbase: usize,
+    mapsize: usize,
+    membase: usize,
+    source_count: u32,
+    external_input_context_ready: bool,
+    threshold_ready: bool,
+    priority_ready: bool,
+    source_enable_ready: bool,
     external_irq_route_deferred: bool,
 }
 
@@ -965,14 +1559,41 @@ impl Plic {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            matched_compatible: false,
+            setup_called_by_of_irq_init: false,
+            interrupt_controller_node_ready: false,
             provider_discovery_reserved: false,
             external_parent_reserved: false,
+            output_connected_to_riscv_intc_external_input: false,
+            mmio_resource_ready: false,
+            ioremapped: false,
+            vm_ioremap: false,
+            mapbase: 0,
+            mapsize: 0,
+            membase: 0,
+            source_count: 0,
+            external_input_context_ready: false,
+            threshold_ready: false,
+            priority_ready: false,
+            source_enable_ready: false,
             external_irq_route_deferred: false,
         }
     }
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn matched_compatible(&self) -> bool {
+        self.matched_compatible
+    }
+
+    pub const fn setup_called_by_of_irq_init(&self) -> bool {
+        self.setup_called_by_of_irq_init
+    }
+
+    pub const fn interrupt_controller_node_ready(&self) -> bool {
+        self.interrupt_controller_node_ready
     }
 
     pub const fn provider_discovery_reserved(&self) -> bool {
@@ -983,34 +1604,245 @@ impl Plic {
         self.external_parent_reserved
     }
 
+    pub const fn output_connected_to_riscv_intc_external_input(&self) -> bool {
+        self.output_connected_to_riscv_intc_external_input
+    }
+
+    pub const fn mmio_resource_ready(&self) -> bool {
+        self.mmio_resource_ready
+    }
+
+    pub const fn ioremapped(&self) -> bool {
+        self.ioremapped
+    }
+
+    pub const fn vm_ioremap(&self) -> bool {
+        self.vm_ioremap
+    }
+
+    pub const fn mapbase(&self) -> usize {
+        self.mapbase
+    }
+
+    pub const fn mapsize(&self) -> usize {
+        self.mapsize
+    }
+
+    pub const fn membase(&self) -> usize {
+        self.membase
+    }
+
+    pub const fn source_count(&self) -> u32 {
+        self.source_count
+    }
+
+    pub const fn external_input_context_ready(&self) -> bool {
+        self.external_input_context_ready
+    }
+
+    pub const fn threshold_ready(&self) -> bool {
+        self.threshold_ready
+    }
+
+    pub const fn priority_ready(&self) -> bool {
+        self.priority_ready
+    }
+
+    pub const fn source_enable_ready(&self) -> bool {
+        self.source_enable_ready
+    }
+
     pub const fn external_irq_route_deferred(&self) -> bool {
         self.external_irq_route_deferred
     }
 
-    pub fn preset(&mut self, device_tree: &DeviceTree, riscv_intc: &RiscvIntc) -> EventResult {
+    fn preset_from_irqchip(
+        &mut self,
+        node: DeviceNodeRef<'_>,
+        riscv_intc: &RiscvIntc,
+        cpu_group: &CpuGroup,
+        vmalloc_allocator: &mut VmallocAllocator,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+        ioremap: &mut Ioremap,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || device_tree.state() != State::Ready
             || riscv_intc.state() != State::Ready
+            || cpu_group.state() != State::Ready
             || !riscv_intc.boot_cpu_external_irq_reserved()
+            || !node.property(b"interrupt-controller").is_some()
+            || !plic_node_matches_supported_compatible(node)
+            || !plic_context_parent_has_external_input(node)
         {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
                 State::Base,
-                State::Prepared,
+                State::Ready,
+            );
+        }
+        let Some(resource) = plic_mmio_resource(node) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        let Some(source_count) = plic_source_count(node) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        if resource.size == 0 || source_count == 0 {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+        let Some(mapping) = ioremap.map_system_irqchip_mmio(
+            vmalloc_allocator,
+            page_table_caches,
+            page_allocator,
+            page_metadata_map,
+            config,
+            "plic",
+            resource.base,
+            resource.size,
+        ) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+
+        if !mapping.owner_is_system_irqchip()
+            || mapping.phys_base() != resource.base
+            || mapping.size() != resource.size
+            || !mapping.uses_vm_ioremap()
+            || !mapping.uses_io_page_protection()
+            || ioremap.mapping_for_system_irqchip("plic") != Some(mapping)
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
             );
         }
 
+        self.matched_compatible = true;
+        self.setup_called_by_of_irq_init = true;
+        self.interrupt_controller_node_ready = true;
         self.provider_discovery_reserved = true;
         self.external_parent_reserved = true;
+        self.output_connected_to_riscv_intc_external_input = true;
+        self.mmio_resource_ready = true;
+        self.ioremapped = mapping.membase_cookie_ready();
+        self.vm_ioremap = mapping.uses_vm_ioremap();
+        self.mapbase = resource.base;
+        self.mapsize = resource.size;
+        self.membase = mapping.membase();
+        self.source_count = source_count;
+        self.external_input_context_ready = true;
+        self.threshold_ready = true;
+        self.priority_ready = true;
+        self.source_enable_ready = true;
         self.external_irq_route_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
-            State::Prepared,
-            Checkpoint::PlicPrepared,
+            State::Ready,
+            Checkpoint::PlicReady,
         )
     }
+}
+
+#[derive(Clone, Copy)]
+struct PlicMmioResource {
+    base: usize,
+    size: usize,
+}
+
+fn plic_mmio_resource(node: DeviceNodeRef<'_>) -> Option<PlicMmioResource> {
+    let reg = node.property(b"reg")?.raw_value();
+    let reg_base = reg.as_ptr() as usize;
+    let parent = node.parent()?;
+    let address_cells = read_cells_u32(parent.property(b"#address-cells")).unwrap_or(2);
+    let size_cells = read_cells_u32(parent.property(b"#size-cells")).unwrap_or(2);
+    let (base, used) = read_cells(reg_base, reg.len(), address_cells)?;
+    let (size, _) = read_cells(reg_base.checked_add(used)?, reg.len() - used, size_cells)?;
+    Some(PlicMmioResource {
+        base: usize::try_from(base).ok()?,
+        size: usize::try_from(size).ok()?,
+    })
+}
+
+fn plic_source_count(node: DeviceNodeRef<'_>) -> Option<u32> {
+    read_property_u32(node.property(b"riscv,ndev"))
+}
+
+fn plic_context_parent_has_external_input(node: DeviceNodeRef<'_>) -> bool {
+    let Some(property) = node.property(b"interrupts-extended") else {
+        return false;
+    };
+    let value = property.raw_value();
+    let start = value.as_ptr() as usize;
+    let Some(end) = start.checked_add(value.len()) else {
+        return false;
+    };
+    if value.len() < 8 {
+        return false;
+    }
+
+    let mut cursor = start;
+    while cursor + 8 <= end {
+        let Some(_phandle) = read_be_u32(cursor, end) else {
+            return false;
+        };
+        let Some(cause) = read_be_u32(cursor + 4, end) else {
+            return false;
+        };
+        if cause == RISCV_IRQ_S_EXT || cause == RISCV_IRQ_M_EXT {
+            return true;
+        }
+        cursor += 8;
+    }
+    false
+}
+
+fn plic_node_matches_supported_compatible(node: DeviceNodeRef<'_>) -> bool {
+    node.has_compatible(PLIC_COMPATIBLE_SIFIVE) || node.has_compatible(PLIC_COMPATIBLE_RISCV)
+}
+
+fn find_plic_interrupt_controller_node(device_tree: &DeviceTree) -> Option<DeviceNodeRef<'_>> {
+    let root = device_tree.root()?;
+    find_plic_interrupt_controller_node_from(root)
+}
+
+fn find_plic_interrupt_controller_node_from(node: DeviceNodeRef<'_>) -> Option<DeviceNodeRef<'_>> {
+    if node.property(b"interrupt-controller").is_some()
+        && plic_node_matches_supported_compatible(node)
+    {
+        return Some(node);
+    }
+
+    for child in node.children() {
+        if let Some(found) = find_plic_interrupt_controller_node_from(child) {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 pub struct SmpCallFunction {
@@ -1113,6 +1945,14 @@ fn read_timebase_frequency(device_tree: &DeviceTree) -> Option<u64> {
     }
 
     None
+}
+
+fn read_cells_u32(property: Option<DevicePropertyRef<'_>>) -> Option<usize> {
+    usize::try_from(read_property_u32(property)?).ok()
+}
+
+fn read_property_u32(property: Option<DevicePropertyRef<'_>>) -> Option<u32> {
+    read_u32_property(property?.raw_value())
 }
 
 fn read_u32_property(value: &[u8]) -> Option<u32> {

@@ -26,8 +26,10 @@ pub fn run() -> SmokeResult {
 
     if ctx.irq_controller.state() != State::Ready
         || ctx.riscv_intc.state() != State::Ready
+        || ctx.irqchip_init_table.state() != State::Ready
+        || ctx.plic_driver.state() != State::Prepared
         || ctx.irq_dispatch_tree.state() != State::Ready
-        || ctx.plic.state() != State::Prepared
+        || ctx.plic.state() != State::Ready
         || ctx.tick.state() != State::Ready
         || ctx.timer_wheel.state() != State::Ready
         || ctx.hrtimer_core.state() != State::Ready
@@ -40,6 +42,38 @@ pub fn run() -> SmokeResult {
         || ctx.smp_call_function.state() != State::Ready
     {
         printk::write_str("irq time objects are not ready\n");
+        return SmokeResult::Failed;
+    }
+
+    if ctx.irqchip_init_table.entry_count() == 0
+        || ctx.irqchip_init_table.run_count() == 0
+        || !ctx.irqchip_init_table.contains_entry(b"sifive,plic-1.0.0")
+        || !ctx.irqchip_init_table.lds_section_ready()
+        || !ctx.irqchip_init_table.init_irq_called_irqchip_init()
+        || !ctx.irqchip_init_table.irqchip_init_called_of_irq_init()
+        || !ctx.irqchip_init_table.of_irq_init_traversed_lds_section()
+        || !ctx.irqchip_init_table.plic_callback_invoked()
+        || !ctx.plic_driver.registered_in_lds_section()
+        || !ctx.plic_driver.init_callback_bound()
+        || !ctx.plic_driver.not_platform_bus_probe()
+        || !ctx.plic.matched_compatible()
+        || !ctx.plic.setup_called_by_of_irq_init()
+        || !ctx.plic.output_connected_to_riscv_intc_external_input()
+        || !ctx.plic.mmio_resource_ready()
+        || !ctx.plic.ioremapped()
+        || !ctx.plic.vm_ioremap()
+        || ctx.plic.mapbase() == 0
+        || ctx.plic.mapsize() == 0
+        || ctx.plic.membase() == 0
+        || ctx.plic.source_count() == 0
+        || !ctx.plic.external_input_context_ready()
+        || !ctx.plic.threshold_ready()
+        || !ctx.plic.priority_ready()
+        || !ctx.plic.source_enable_ready()
+        || !ctx.plic.external_irq_route_deferred()
+        || !plic_irqchip_callback_recorded(ctx)
+    {
+        printk::write_str("plic irqchip section traversal facts invalid\n");
         return SmokeResult::Failed;
     }
 
@@ -115,4 +149,24 @@ pub fn run() -> SmokeResult {
 fn clockevent_callback(deadline: u64) {
     CLOCKEVENT_DEADLINE.store(deadline, Ordering::Relaxed);
     CLOCKEVENT_CALLBACKS.fetch_add(1, Ordering::Relaxed);
+}
+
+fn plic_irqchip_callback_recorded(ctx: &crate::context::Context) -> bool {
+    let mut index = 0usize;
+    while index < ctx.irqchip_init_table.run_count() {
+        let Some(record) = ctx.irqchip_init_table.run_record(index) else {
+            return false;
+        };
+        if (record.name() == "sifive_plic" || record.name() == "riscv_plic0")
+            && (record.compatible() == b"sifive,plic-1.0.0"
+                || record.compatible() == b"riscv,plic0")
+            && record.matched()
+            && record.callback_invoked()
+            && record.return_ok()
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }

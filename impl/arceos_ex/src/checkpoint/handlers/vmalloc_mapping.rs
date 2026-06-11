@@ -606,17 +606,16 @@ fn run_window_duplicate_reject_with_page(
         return false;
     }
 
-    let current = ctx
-        .vmalloc_allocator
-        .area(ctx.vmalloc_allocator.area_count().saturating_sub(1))
-        .map(|last| last.end())
-        .unwrap_or(window_start);
-    let desired_cross_start = window_start
-        .saturating_add(first_window_size)
-        .saturating_sub(page_size);
-    if current > desired_cross_start {
+    let current = current_vmalloc_end(ctx, window_start);
+    let Some(desired_cross_start) = next_l0_cross_window_start(
+        current,
+        window_start,
+        window_end,
+        first_window_size,
+        page_size,
+    ) else {
         return false;
-    }
+    };
     let align_padding = desired_cross_start.saturating_sub(current);
     if align_padding != 0 {
         let Some(padding_area) = ctx
@@ -650,7 +649,7 @@ fn run_window_duplicate_reject_with_page(
         return false;
     };
     let cross_window_supported = cross_window_area.virt_base() == desired_cross_start
-        && cross_window_area.end() == window_start.saturating_add(first_window_size + page_size)
+        && cross_window_area.end() == desired_cross_start.saturating_add(cross_window_size)
         && cross_window_mapping.installed()
         && cross_window_mapping.size() == cross_window_size
         && ctx.vmalloc_allocator.area_count() == base_window_area_count.saturating_add(1)
@@ -812,6 +811,44 @@ fn run_window_duplicate_reject_with_page(
             .is_none()
         && ctx.vmalloc_allocator.area_count() == before_cross_areas
         && ctx.vmalloc_allocator.mapping_count() == before_cross_mappings
+}
+
+fn current_vmalloc_end(ctx: &Context, fallback: usize) -> usize {
+    ctx.vmalloc_allocator
+        .area(ctx.vmalloc_allocator.area_count().saturating_sub(1))
+        .map(|last| last.end())
+        .unwrap_or(fallback)
+}
+
+fn next_l0_cross_window_start(
+    current: usize,
+    window_start: usize,
+    window_end: usize,
+    window_size: usize,
+    page_size: usize,
+) -> Option<usize> {
+    if current < window_start || window_end <= window_start || window_size <= page_size {
+        return None;
+    }
+
+    let min_boundary = current.checked_add(page_size)?;
+    let min_offset = min_boundary.checked_sub(window_start)?;
+    let boundary_offset = round_up_to(min_offset, window_size)?;
+    let boundary = window_start.checked_add(boundary_offset)?;
+    let cross_start = boundary.checked_sub(page_size)?;
+    let cross_end = boundary.checked_add(page_size)?;
+    if boundary == window_start || cross_start < current || cross_end > window_end {
+        return None;
+    }
+    Some(cross_start)
+}
+
+fn round_up_to(value: usize, align: usize) -> Option<usize> {
+    if align == 0 || !align.is_power_of_two() {
+        return None;
+    }
+    let mask = align - 1;
+    value.checked_add(mask).map(|sum| sum & !mask)
 }
 
 struct AllocatedPage {

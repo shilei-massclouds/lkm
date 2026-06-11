@@ -36,6 +36,7 @@ pub mod interrupt_stream;
 pub mod ioremap;
 pub mod irq_open;
 pub mod irq_time;
+pub mod irqchip_macros;
 pub mod kernel_cmdline;
 pub mod kernel_image;
 pub mod lds;

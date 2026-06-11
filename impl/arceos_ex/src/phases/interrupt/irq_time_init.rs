@@ -32,13 +32,29 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.riscv_intc
         .setup(&ctx.device_tree, &ctx.irq_controller, &ctx.cpu_group)?;
+    ctx.irqchip_init_table
+        .preset(&ctx.irq_controller, &ctx.device_tree)?;
+    ctx.plic_driver
+        .preset(&ctx.irqchip_init_table, &ctx.device_tree)?;
+    ctx.irqchip_init_table.setup(
+        &ctx.plic_driver,
+        &ctx.device_tree,
+        &ctx.riscv_intc,
+        &ctx.cpu_group,
+        &mut ctx.vmalloc_allocator,
+        &mut ctx.page_table_caches,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+        &ctx.config,
+        &mut ctx.ioremap,
+        &mut ctx.plic,
+    )?;
     ctx.irq_dispatch_tree.setup(
         &ctx.irq_controller,
         &ctx.riscv_intc,
         &mut ctx.interrupt_stream,
         &ctx.cpu_group,
     )?;
-    ctx.plic.preset(&ctx.device_tree, &ctx.riscv_intc)?;
     ctx.tick.preset(&ctx.cpu_group, &ctx.per_cpu_storage)?;
     ctx.timer_wheel
         .setup(&ctx.per_cpu_storage, &ctx.cpu_group, &mut ctx.softirq)?;
@@ -111,15 +127,48 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.riscv_intc.boot_cpu_timer_irq_ready()
         && ctx.riscv_intc.boot_cpu_software_irq_ready()
         && ctx.riscv_intc.boot_cpu_external_irq_reserved()
+        && ctx.irqchip_init_table.state() == State::Ready
+        && ctx.irqchip_init_table.static_entries_ready()
+        && ctx.irqchip_init_table.lds_section_ready()
+        && ctx.irqchip_init_table.entry_view_ready()
+        && ctx.irqchip_init_table.interrupt_controller_scan_ready()
+        && ctx.irqchip_init_table.parent_first_order_ready()
+        && ctx.irqchip_init_table.init_irq_called_irqchip_init()
+        && ctx.irqchip_init_table.irqchip_init_called_of_irq_init()
+        && ctx.irqchip_init_table.of_irq_init_traversed_lds_section()
+        && ctx.irqchip_init_table.plic_callback_invoked()
+        && ctx.plic_driver.state() == State::Prepared
+        && ctx.plic_driver.entry_registered()
+        && ctx.plic_driver.registered_in_lds_section()
+        && ctx.plic_driver.init_callback_bound()
+        && ctx.plic_driver.compatible_covers_qemu_virt()
+        && ctx.plic_driver.probe_depends_on_device_tree()
+        && ctx.plic_driver.probe_runs_in_irq_time_init()
+        && ctx.plic_driver.not_platform_bus_probe()
         && ctx.irq_dispatch_tree.state() == State::Ready
         && ctx.irq_dispatch_tree.fallback_route_ready()
         && ctx.irq_dispatch_tree.timer_route_ready()
         && ctx.irq_dispatch_tree.software_route_reserved()
         && ctx.irq_dispatch_tree.external_route_deferred()
         && ctx.irq_dispatch_tree.boot_cpu_route_ready()
-        && ctx.plic.state() == State::Prepared
+        && ctx.plic.state() == State::Ready
+        && ctx.plic.matched_compatible()
+        && ctx.plic.setup_called_by_of_irq_init()
+        && ctx.plic.interrupt_controller_node_ready()
         && ctx.plic.provider_discovery_reserved()
         && ctx.plic.external_parent_reserved()
+        && ctx.plic.output_connected_to_riscv_intc_external_input()
+        && ctx.plic.mmio_resource_ready()
+        && ctx.plic.ioremapped()
+        && ctx.plic.vm_ioremap()
+        && ctx.plic.mapbase() != 0
+        && ctx.plic.mapsize() != 0
+        && ctx.plic.membase() != 0
+        && ctx.plic.source_count() != 0
+        && ctx.plic.external_input_context_ready()
+        && ctx.plic.threshold_ready()
+        && ctx.plic.priority_ready()
+        && ctx.plic.source_enable_ready()
         && ctx.plic.external_irq_route_deferred()
         && ctx.tick.state() == State::Ready
         && ctx.tick.control_ready()

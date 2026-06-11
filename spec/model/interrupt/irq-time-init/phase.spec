@@ -45,6 +45,85 @@ object IrqController: InterruptObject {
 }
 
 /*
+ * IrqChipInitTable 表示 irqchip_init()/of_irq_init() 可遍历的 irqchip
+ * init entry 视图。当前 target 必须由 retained LDS section 承载；
+ * init_IRQ() 调用链只能通过遍历该 section 找到具体 irqchip driver。
+ */
+object IrqChipInitTable: InterruptObject {
+    initial_state: State::Base;
+    parent: IrqController;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    IrqController.state == State::Ready;
+                    DeviceTree.state == State::Ready;
+                }
+
+                ensures {
+                    irqchip_init_table_static_entries_ready(IrqChipInitTable);
+                    irqchip_init_table_lds_section_ready(IrqChipInitTable);
+                    irqchip_init_table_entry_view_ready(IrqChipInitTable);
+                    of_irq_init_interrupt_controller_scan_ready(IrqChipInitTable, DeviceTree);
+                    of_irq_init_parent_first_order_ready(IrqChipInitTable, DeviceTree);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            irqchip_init_table_static_entries_ready(IrqChipInitTable);
+            irqchip_init_table_lds_section_ready(IrqChipInitTable);
+            irqchip_init_table_entry_view_ready(IrqChipInitTable);
+            of_irq_init_interrupt_controller_scan_ready(IrqChipInitTable, DeviceTree);
+            of_irq_init_parent_first_order_ready(IrqChipInitTable, DeviceTree);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    PlicDriver.state == State::Prepared;
+                    RiscvIntc.state == State::Ready;
+                    DeviceTree.state == State::Ready;
+                    Ioremap.state == State::Ready;
+                    VmallocAllocator.state == State::Ready;
+                    PageTableCaches.state == State::Ready;
+                    PageAllocator.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                }
+
+                drives {
+                    Plic.Event::Preset;
+                }
+
+                ensures {
+                    init_irq_calls_irqchip_init(IrqTimeInitPhase, IrqChipInitTable);
+                    irqchip_init_calls_of_irq_init(IrqChipInitTable);
+                    of_irq_init_traverses_irqchip_lds_section(IrqChipInitTable);
+                    of_irq_init_invokes_plic_init_callback(IrqChipInitTable, PlicDriver, Plic);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            irqchip_init_table_static_entries_ready(IrqChipInitTable);
+            irqchip_init_table_lds_section_ready(IrqChipInitTable);
+            irqchip_init_table_entry_view_ready(IrqChipInitTable);
+            of_irq_init_interrupt_controller_scan_ready(IrqChipInitTable, DeviceTree);
+            of_irq_init_parent_first_order_ready(IrqChipInitTable, DeviceTree);
+            init_irq_calls_irqchip_init(IrqTimeInitPhase, IrqChipInitTable);
+            irqchip_init_calls_of_irq_init(IrqChipInitTable);
+            of_irq_init_traverses_irqchip_lds_section(IrqChipInitTable);
+            of_irq_init_invokes_plic_init_callback(IrqChipInitTable, PlicDriver, Plic);
+        }
+    }
+}
+
+/*
  * RiscvIntc 表示每 hart 直连 CPU 的 RISC-V local interrupt controller。
  * 当前要求 boot CPU 的 INTC domain 建立，并能映射 timer/software/external
  * 三条本地 cause；external provider 仍由 PLIC 占位而不开放运行期路由。
@@ -516,25 +595,30 @@ object IpiMux: InterruptObject {
 }
 
 /*
- * Plic 表示 RISC-V 外部中断 provider 的占位。当前阶段只确认 PLIC/PLIC-like
- * provider 发现路径被保留，不创建 external IRQ 运行期路由。
+ * PlicDriver 表示 Linux-like IRQCHIP_DECLARE()/irqchip init entry 层。
+ * 它不是普通 PlatformBus driver；其 init callback 由 irqchip_init()
+ * 经 of_irq_init() 遍历 LDS section 并根据 DeviceTree compatible 匹配后调度。
  */
-object Plic: InterruptObject {
+object PlicDriver: InterruptObject {
     initial_state: State::Base;
-    parent: RiscvIntc;
+    parent: IrqChipInitTable;
 
     state State::Base {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    RiscvIntc.state == State::Ready;
+                    IrqChipInitTable.state == State::Prepared;
                     DeviceTree.state == State::Ready;
                 }
 
                 ensures {
-                    plic_provider_discovery_reserved(Plic, DeviceTree);
-                    plic_external_parent_reserved(Plic, RiscvIntc);
-                    plic_external_irq_route_deferred(Plic);
+                    plic_driver_irqchip_entry_registered(PlicDriver, IrqChipInitTable);
+                    plic_driver_registered_in_irqchip_lds_section(PlicDriver, IrqChipInitTable);
+                    plic_driver_init_callback_bound(PlicDriver, Plic);
+                    plic_driver_compatible_covers_qemu_virt(PlicDriver);
+                    plic_driver_probe_depends_on_device_tree(PlicDriver, DeviceTree);
+                    plic_driver_probe_runs_in_irq_time_init(PlicDriver);
+                    plic_driver_not_platform_bus_probe(PlicDriver);
                 }
             }
         }
@@ -542,8 +626,85 @@ object Plic: InterruptObject {
 
     state State::Prepared {
         invariant {
+            plic_driver_irqchip_entry_registered(PlicDriver, IrqChipInitTable);
+            plic_driver_registered_in_irqchip_lds_section(PlicDriver, IrqChipInitTable);
+            plic_driver_init_callback_bound(PlicDriver, Plic);
+            plic_driver_compatible_covers_qemu_virt(PlicDriver);
+            plic_driver_probe_depends_on_device_tree(PlicDriver, DeviceTree);
+            plic_driver_probe_runs_in_irq_time_init(PlicDriver);
+            plic_driver_not_platform_bus_probe(PlicDriver);
+        }
+    }
+}
+
+/*
+ * Plic 表示 RISC-V 外部中断 provider。当前阶段已经把 PLIC init callback
+ * 挂到 init_IRQ() -> irqchip_init() -> of_irq_init() -> LDS section
+ * traversal 链上，并完成 provider 的最小 setup：DT resource 解析、
+ * system-irqchip ioremap、external-input context 基础状态和父 INTC
+ * external 输入连接。external IRQ 运行期路由、claim/complete 和 handler
+ * dispatch 仍后续展开。
+ */
+object Plic: InterruptObject {
+    initial_state: State::Base;
+    parent: RiscvIntc;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Ready {
+                depends_on {
+                    RiscvIntc.state == State::Ready;
+                    IrqChipInitTable.state == State::Prepared;
+                    PlicDriver.state == State::Prepared;
+                    DeviceTree.state == State::Ready;
+                    Ioremap.state == State::Ready;
+                    VmallocAllocator.state == State::Ready;
+                    PageTableCaches.state == State::Ready;
+                    PageAllocator.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                }
+
+                ensures {
+                    of_irq_init_matched_plic_compatible(IrqChipInitTable, PlicDriver, DeviceTree);
+                    plic_setup_called_by_of_irq_init(Plic, IrqChipInitTable, PlicDriver);
+                    plic_node_interrupt_controller_ready(Plic, DeviceTree);
+                    plic_provider_discovery_reserved(Plic, DeviceTree);
+                    plic_external_parent_reserved(Plic, RiscvIntc);
+                    plic_output_connected_to_riscv_intc_external_input(Plic, RiscvIntc);
+                    plic_mmio_resource_ready(Plic, DeviceTree);
+                    plic_ioremap_mapping_created(Plic, Ioremap, IoMemoryMappingRef::Plic);
+                    ioremap_mapping_owner_is_system_irqchip(Ioremap, IoMemoryMappingRef::Plic, Plic);
+                    plic_ioremap_owner_is_system_irqchip(Plic, Ioremap, IoMemoryMappingRef::Plic);
+                    plic_ioremap_uses_vmalloc_mapping(Plic, VmallocAllocator, IoMemoryMappingRef::Plic);
+                    plic_source_count_ready(Plic, DeviceTree);
+                    plic_external_input_context_ready(Plic, RiscvIntc);
+                    plic_threshold_ready(Plic);
+                    plic_priority_ready(Plic);
+                    plic_source_enable_ready(Plic);
+                    plic_external_irq_route_deferred(Plic);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            of_irq_init_matched_plic_compatible(IrqChipInitTable, PlicDriver, DeviceTree);
+            plic_setup_called_by_of_irq_init(Plic, IrqChipInitTable, PlicDriver);
+            plic_node_interrupt_controller_ready(Plic, DeviceTree);
             plic_provider_discovery_reserved(Plic, DeviceTree);
             plic_external_parent_reserved(Plic, RiscvIntc);
+            plic_output_connected_to_riscv_intc_external_input(Plic, RiscvIntc);
+            plic_mmio_resource_ready(Plic, DeviceTree);
+            plic_ioremap_mapping_created(Plic, Ioremap, IoMemoryMappingRef::Plic);
+            ioremap_mapping_owner_is_system_irqchip(Ioremap, IoMemoryMappingRef::Plic, Plic);
+            plic_ioremap_owner_is_system_irqchip(Plic, Ioremap, IoMemoryMappingRef::Plic);
+            plic_ioremap_uses_vmalloc_mapping(Plic, VmallocAllocator, IoMemoryMappingRef::Plic);
+            plic_source_count_ready(Plic, DeviceTree);
+            plic_external_input_context_ready(Plic, RiscvIntc);
+            plic_threshold_ready(Plic);
+            plic_priority_ready(Plic);
+            plic_source_enable_ready(Plic);
             plic_external_irq_route_deferred(Plic);
         }
     }
@@ -608,8 +769,10 @@ object IrqTimeInitPhase: PhaseObject {
                 drives {
                     IrqController.Event::Setup;
                     RiscvIntc.Event::Setup;
+                    IrqChipInitTable.Event::Preset;
+                    PlicDriver.Event::Preset;
+                    IrqChipInitTable.Event::Setup;
                     IrqDispatchTree.Event::Setup;
-                    Plic.Event::Preset;
                     Tick.Event::Preset;
                     TimerWheel.Event::Setup;
                     HrtimerCore.Event::Setup;
@@ -651,7 +814,9 @@ object IrqTimeInitPhase: PhaseObject {
             IrqController.state == State::Ready;
             RiscvIntc.state == State::Ready;
             IrqDispatchTree.state == State::Ready;
-            Plic.state == State::Prepared;
+            IrqChipInitTable.state == State::Ready;
+            PlicDriver.state == State::Prepared;
+            Plic.state == State::Ready;
             Tick.state == State::Ready;
             TickBroadcast.state == State::Ready;
             TimerWheel.state == State::Ready;

@@ -14,6 +14,18 @@ use crate::trace::Checkpoint;
 const MAX_IOREMAP_MAPPINGS: usize = 4;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+pub enum MmioOwner {
+    PlatformDevice(DeviceRef),
+    SystemIrqChip(&'static str),
+}
+
+impl MmioOwner {
+    const fn platform_device(device: DeviceRef) -> Self {
+        Self::PlatformDevice(device)
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum MmioMappingKind {
     PlainDevice,
@@ -43,7 +55,7 @@ impl ArchMmioPageAttr {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct IoMemoryMapping {
-    device: DeviceRef,
+    owner: MmioOwner,
     phys_base: usize,
     size: usize,
     page_phys_base: usize,
@@ -64,7 +76,7 @@ pub struct IoMemoryMapping {
 impl IoMemoryMapping {
     const fn empty() -> Self {
         Self {
-            device: DeviceRef::new(usize::MAX),
+            owner: MmioOwner::PlatformDevice(DeviceRef::new(usize::MAX)),
             phys_base: 0,
             size: 0,
             page_phys_base: 0,
@@ -83,8 +95,20 @@ impl IoMemoryMapping {
         }
     }
 
+    pub const fn owner(self) -> MmioOwner {
+        self.owner
+    }
+
+    #[allow(dead_code)]
     pub const fn device(self) -> DeviceRef {
-        self.device
+        match self.owner {
+            MmioOwner::PlatformDevice(device) => device,
+            MmioOwner::SystemIrqChip(_) => DeviceRef::new(usize::MAX),
+        }
+    }
+
+    pub const fn owner_is_system_irqchip(self) -> bool {
+        matches!(self.owner, MmioOwner::SystemIrqChip(_))
     }
 
     pub const fn phys_base(self) -> usize {
@@ -388,19 +412,44 @@ impl Ioremap {
         phys_base: usize,
         size: usize,
     ) -> Option<IoMemoryMapping> {
-        self.map_device_mmio_with_kind(
+        self.map_mmio_for_owner(
             vmalloc_allocator,
             page_table_caches,
             page_allocator,
             page_metadata_map,
             config,
-            device,
+            MmioOwner::platform_device(device),
             phys_base,
             size,
             MmioMappingKind::PlainDevice,
         )
     }
 
+    pub fn map_system_irqchip_mmio(
+        &mut self,
+        vmalloc_allocator: &mut VmallocAllocator,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+        name: &'static str,
+        phys_base: usize,
+        size: usize,
+    ) -> Option<IoMemoryMapping> {
+        self.map_mmio_for_owner(
+            vmalloc_allocator,
+            page_table_caches,
+            page_allocator,
+            page_metadata_map,
+            config,
+            MmioOwner::SystemIrqChip(name),
+            phys_base,
+            size,
+            MmioMappingKind::PlainDevice,
+        )
+    }
+
+    #[allow(dead_code)]
     pub fn map_device_mmio_with_kind(
         &mut self,
         vmalloc_allocator: &mut VmallocAllocator,
@@ -413,12 +462,37 @@ impl Ioremap {
         size: usize,
         kind: MmioMappingKind,
     ) -> Option<IoMemoryMapping> {
+        self.map_mmio_for_owner(
+            vmalloc_allocator,
+            page_table_caches,
+            page_allocator,
+            page_metadata_map,
+            config,
+            MmioOwner::platform_device(device),
+            phys_base,
+            size,
+            kind,
+        )
+    }
+
+    fn map_mmio_for_owner(
+        &mut self,
+        vmalloc_allocator: &mut VmallocAllocator,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+        owner: MmioOwner,
+        phys_base: usize,
+        size: usize,
+        kind: MmioMappingKind,
+    ) -> Option<IoMemoryMapping> {
         let page_size = self.page_size;
         if !self.runtime_ready() || phys_base == 0 || size == 0 || !page_size.is_power_of_two() {
             return None;
         }
         let attr = self.resolve_arch_attr(kind)?;
-        if let Some(mapping) = self.mapping_for_device(device) {
+        if let Some(mapping) = self.mapping_for_owner(owner) {
             return Some(mapping);
         }
         if self.mapping_count >= MAX_IOREMAP_MAPPINGS {
@@ -443,7 +517,7 @@ impl Ioremap {
         let virt_base = vmap_area.virt_base();
         let membase = virt_base.checked_add(offset)?;
         let mapping = IoMemoryMapping {
-            device,
+            owner,
             phys_base,
             size,
             page_phys_base,
@@ -512,10 +586,18 @@ impl Ioremap {
     }
 
     pub fn mapping_for_device(&self, device: DeviceRef) -> Option<IoMemoryMapping> {
+        self.mapping_for_owner(MmioOwner::platform_device(device))
+    }
+
+    pub fn mapping_for_system_irqchip(&self, name: &'static str) -> Option<IoMemoryMapping> {
+        self.mapping_for_owner(MmioOwner::SystemIrqChip(name))
+    }
+
+    fn mapping_for_owner(&self, owner: MmioOwner) -> Option<IoMemoryMapping> {
         let mut index = 0usize;
         while index < self.mapping_count {
             let mapping = self.mappings[index];
-            if mapping.active() && mapping.device() == device {
+            if mapping.active() && mapping.owner() == owner {
                 return Some(mapping);
             }
             index += 1;
