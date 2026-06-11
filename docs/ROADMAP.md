@@ -10,22 +10,31 @@
 
 ## 当前焦点
 
-1. 深化真实 `ns16550a` platform driver：在已打通 `device_initcall! -> platform_driver_register() -> PlatformBus.klist_drivers -> probe` 闭环后，继续分析资源解析、UART 8250 注册和 console/earlycon handoff。
+1. 推进 `ioremap/vmalloc` 泛化：`console/earlycon handoff` 和 handoff 后输出去重已经完成，下一步重点是扩展 vmap area、映射元数据、MMIO 属性策略和释放边界。
 2. 收口 trace/SVG 输出体验，使推导过程图适合日常审阅。
 3. 建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
 4. 审计已完成启动阶段的 deferred 清单、核心对象和测试边界。
 
-## 即将执行计划：console/earlycon handoff
+## 已完成计划：console/earlycon handoff
 
-当前目标是在已建立的 `PlatformBus -> ns16550a platform driver probe` 闭环上，逐步实现 Linux-like 的 early console 到真实 serial console 交接。执行顺序如下：
+当前阶段已在 `PlatformBus -> ns16550a platform driver probe` 闭环上完成 Linux-like 的 early console 到真实 serial console 首轮交接。
 
-1. 对照 Linux `drivers/of/`、`drivers/tty/serial/8250/` 和 `kernel/printk/` 路径，确认 handoff 边界：`stdout-path` 选择 console 节点，OF platform population 生成 `PlatformDevice`，`ns16550a` driver probe 解析资源并注册 8250 port，真实 console 注册后由 printk 注销 boot console，除非 `keep_bootcon`。
-2. 先补 model 规格：明确 `EarlyCon`/`BootConsole`、`Serial8250Console`、`ConsoleRegistry` 或 `ConsoleDriverSet`、`DeviceTree.stdout_path`、`Ns16550aPlatformDriver.Probe` 和 `ConsoleHandoff` 之间的对象关系与事件边界。
-3. 再补 coding 规格：约束 driver-local `device_initcall!`、`platform_driver_register()`、`PlatformDevice -> Device -> DeviceNodeRef` 资源解析、`stdout-path` 匹配、`register_console()` 风格注册和 `keep_bootcon` 策略。
-4. 实现最小可观测闭环：先读取 `stdout-path`，构造 `Uart8250Port`/`Serial8250Console` 的最小对象和 trace/facts，在 `ns16550a` probe 成功且匹配 `stdout-path` 时触发 handoff。
-5. 分阶段替换输出后端：第一步允许仅记录真实 console 已注册和 printk route 已切换的事实；随后实现 UART MMIO polling write，让 handoff 后的 printk 真正通过 8250 serial console 输出。
-6. 补 smoke/KUnit：覆盖 `stdout-path` 命中后发生 handoff、非 `stdout-path` 设备不抢占 console、handoff 后 boot console 注销、`keep_bootcon` 保留 boot console，以及 handoff 后 printk 路由符合预期。
-7. 每次实现改动后执行 `make test` 并重新生成 trace SVG；纯规格或文档改动至少执行 `git diff --check`，必要时追加 spec derive/trace 校验。
+1. 已对照 Linux `drivers/of/`、`drivers/tty/serial/8250/` 和 `kernel/printk/` 路径，确认 handoff 边界：`stdout-path` 选择 console 节点，OF platform population 生成 `PlatformDevice`，`ns16550a` driver probe 解析资源并注册 8250 port，真实 console 注册后由 printk 切换输出路径，除非 `keep_bootcon`。
+2. 已补齐 model/coding 规格：明确 `EarlyCon`/`BootConsole`、`Serial8250Console`、`ConsoleRegistry`、`DeviceTree.stdout_path`、`Ns16550aPlatformDriver.Probe` 和 `ConsoleHandoff` 的对象关系、事件边界、`keep_bootcon` 策略和 handoff 后输出约束。
+3. 已实现最小可观测闭环：读取 `stdout-path`，构造 `Uart8250Port`/`Serial8250Console`，在 `ns16550a` probe 成功且匹配 `stdout-path` 时触发 handoff。
+4. 已实现 UART MMIO polling write：handoff 后 `printk::write_str()` 路由到 serial8250，通过 ioremap/vmalloc 建立的 `membase` 访问 UART，按 LSR/THR 轮询发送，当前不使用 SBI fallback。
+5. 已补 smoke/KUnit：覆盖 `stdout-path` 命中后 handoff、非 `stdout-path` 设备不抢占 console、handoff 后 boot console 注销、`keep_bootcon` 保留 boot console、dummy non-match，以及 handoff 后 printk 路由和 UART polling 输出事实。
+6. 已完成验收：`make verify`、`make build APP=smoke`、`make test` 均通过；当前实现提交为 `ce59606` (`arceos-ex add serial8250 polling console`)。
+
+## 下一步计划：ioremap/vmalloc 与 IRQ console 前置
+
+下一阶段不急于把 serial8250 切到中断输出；在 PLIC/IRQ 驱动可用前，console 输出继续保持 polling。建议按以下顺序推进：
+
+1. 收紧 vmalloc/ioremap 规格边界。把 `PageTableCaches` 提供的 vmalloc 页表安装能力、`VmallocAllocator.map_page_range()` 每次 action 产生的 `VmapMapping` 记录，以及 `Ioremap` 的设备物理资源/属性策略分清楚，避免把一次性 capability 和多次 mapping record 混在一起。
+2. 泛化当前运行时映射实现。当前支持的是最小预分配 vmalloc L1/L0 窗口，后续应扩展到更多 vmap area、跨窗口边界检查、重复映射策略、释放/拆映射边界和更完整的 `vm_struct/vmap_area` 元数据。这里要继续保持 Linux-like 分工：`VmallocAllocator` 管 VA 区间和页表映射执行，`Ioremap` 管设备物理资源来源和 MMIO 属性策略。
+3. 补 MMIO 属性模型。当前 RISC-V 页表实现只完成最小 RW non-exec 映射事实；后续需要在规格层区分 device、non-cache、write-combine 和 normal memory 等属性选择，并明确哪些属性在当前架构实现中暂时 deferred，避免把“能访问”误写成“属性完整正确”。
+4. 准备 PLIC/IRQ 前置链路。建立 irqchip/irqdomain、platform IRQ resource 解析、serial8250 IRQ 绑定和中断上下文约束；只有这些对象可用后，再把 serial8250 从 polling 输出扩展为 interrupt-driven 输出。
+5. 维护验收边界。每次实现改动后执行 `make verify`、`make build APP=smoke` 和相关 smoke/KUnit；影响 console/boot 路径的改动继续用 `make run APP=hello` 检查用户可见输出，用 `make test` 做完整回归。
 
 ## 统一计划
 
@@ -47,6 +56,9 @@
 | `P1` | 完成 | arceos_ex/smoke | 补齐内存分配 API 运行期 smoke | 已覆盖 `MemBlock::alloc_phys()` checkpoint probe、PageAllocator handoff KUnit、正式 PageAllocator `alloc_pages/free_pages` 与 `alloc_page/free_pages` 的 order-0 和高 order 分配、线性映射读写和释放；SLUB/kmalloc smoke 覆盖小对象分配、写读、`kzalloc` 清零、同尺寸对象独立和释放复用；GlobalAlloc/Vec smoke 通过普通 `Vec` API 触发 grow、校验读回并 drop。`vmalloc/vfree` 可在对应 API 实现后作为独立任务补充。测试保持不为 smoke 暴露无必要内部状态。 | [smoke 测试边界](../spec/coding/arceos_ex.md#smoke-测试边界) |
 | `P1` | 完成 | arceos_ex/platform | 实现 OF platform device population | 已完成首轮实现：`of_platform_default_populate_init()` 会把 DeviceTree 遍历出的 OF platform candidates 构造为 `PlatformDevice`，其内嵌 `Device` 通过稳定 `DeviceNodeId` 关联对应 node，注册 core device 后生成 `DeviceRef` 并加入 `PlatformBusSubsysPrivate.klist_devices` 的 `Vec<DeviceRef>` backing。`PlatformBus` 当前通过 `PlatformDeviceStorage = Vec<Pin<Box<PlatformDevice>>>` 持有设备对象生命周期，KUnit/smoke 已覆盖 candidate count、platform device count、bus device count 和 `DeviceRef -> PlatformDevice -> DeviceNodeId -> compatible` 解析链。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#initcallphase-编码约束) |
 | `P1` | 完成 | arceos_ex/platform | 实现 PlatformBus driver/probe 与 ns16550a driver 闭环 | 已完成首轮规格和实现：`BusType/PlatformBusType` 建模 `platform_driver_register()`，通过 `DeviceDriverRef` 加入 `klist_drivers` 后执行 driver-side probe；`Ns16550aPlatformDriver` 独立 common 规格和独立 Rust 模块已落地，真实 `of_serial` descriptor 使用 `of_match_table` 匹配 `compatible = "ns16550a"`，initcall 宏声明已移入 driver 自己模块，符合 Linux-like `device_initcall!` 静态 section 方式。KUnit/smoke 覆盖 `AddDevice + ProbeDriver`、`AddDriver + ProbeDevice` 和 ns16550a probe/bind。后续继续展开 UART 8250 资源解析、串口注册和 console handoff。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#initcallphase-编码约束) |
+| `P1` | 完成 | arceos_ex/console | 实现 console/earlycon handoff | 已完成首轮 Linux-like handoff：`stdout-path` 匹配的 ns16550a probe 会构造 `Uart8250Port`/`Serial8250Console`，完成 boot console 到 serial8250 console 的 route 切换；handoff 后 `printk::write_str()` 通过 ioremap/vmalloc 建立的 UART `membase` 进行 LSR/THR polling 输出，不再使用 SBI fallback；`keep_bootcon`、dummy non-match、非 stdout 设备不抢占 console 等 smoke 已覆盖。IRQ-driven 输出依赖 PLIC/IRQ 支持，当前保持 deferred。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
+| `P0` | 完成 | arceos_ex/console | 修复 handoff 后 `make run` 输出重复并显式 trace 交接 | 已确认根因是 handoff 只切换 printk route，没有同步移交 `PrintkBuffer` 的 legacy drain cursor；serial8250 已即时输出的记录仍会被 payload 末尾 `earlycon::drain_printk()` 经 SBI 重放。已按 Linux-like `register_console()` 语义修复：serial8250 注册前先 flush boot pending records，serial route 成功交付后推进 legacy cursor，handoff 后 earlycon drain guard 阻止重放；同时在 real serial console online 和非 `keep_bootcon` 下 boot console offline 位置输出 trace，使 `make run LOG=trace APP=hello` 显式展示 `Serial8250Console.Online` 与 `BootConsole.Offline`。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
+| `P1` | 待办 | arceos_ex/mm | 泛化 ioremap/vmalloc 运行时映射 | 在当前最小 UART MMIO 映射闭环基础上，继续扩展 `VmallocAllocator` 的 vmap area 管理、`vm_struct/vmap_area` 元数据、跨 vmalloc 窗口映射、unmap/free 边界和重复映射策略；`Ioremap` 继续负责设备物理资源与 MMIO 属性策略，`VmallocAllocator` 只负责虚拟区间管理和页表映射执行。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#mmcoreinitphase-编码约束) |
 | `P1` | 完成 | arceos_ex/allocator | 查明 initcall 阶段动态分配压力失败原因 | 已确认根因是第一轮 `GlobalAlloc` 仅支持 `size <= 1024`，而 `Vec<OfPlatformCandidate>` 在当前 QEMU FDT 的 21 个 candidate 下会增长到 capacity 32，单次 allocation 为 1280 字节并触发 `alloc_error_handler`。已把普通 kmalloc cache 按 Linux-like `PAGE_SIZE * 2` 边界扩到 8KiB，补 allocator pressure smoke 覆盖该边界，并把临时 `OfPlatformCandidateSet` 改为 `Vec` backing；`PlatformDevice` 仍长期保存 `DeviceNodeId` 后通过 `DeviceTree` 解析 name/compatible。large allocation、realloc、特殊 alignment fallback 和完整 SLUB 复杂路径仍 deferred。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#mmcoreinitphase-编码约束) |
 | `P1` | 待办 | arceos_ex/smoke | 补充类型行为 smoke 双任务场景 | `RawSpinLock`、`Completion` 等 TypeBehavior smoke 当前先覆盖单任务、本地依赖对象场景。后续任务创建和调度测试 API 足够后，应补充最小双任务场景，用两个任务验证竞争、等待、唤醒、释放和跨任务可见性；启动两个任务即可，不要求先建立完整用户态或通用线程测试框架。 | [testing 规格](../spec/testing/README.md#测试目标分类) |
 | `P1` | 待办 | arceos_ex/codegen | 收敛 RISC-V64 linker script 生成方案 | 将当前直接生成完整 `riscv64.lds` 的实验收敛为 Linux 风格的 `riscv64.lds.S`：`codegen` 基于 `Config` 生成 `generated/config.lds.h` 等配置头，`.lds.S` 保留链接布局结构并经预处理生成最终 `.lds`；同时规划 Rust 侧配置生成，避免 `.lds`、Rust 常量和 codegen profile 各自维护同一配置值。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#目标边界) |
@@ -89,7 +101,8 @@
 
 ## 当前交接标记
 
-- 截止提交 9f80f3e (`Move driver initcall declarations into driver modules`)，PlatformBus 已完成设备 population、driver register/probe 和真实 ns16550a 首轮 probe/bind 闭环；后续重点是 ns16550a 资源解析、UART 8250 注册和 console/earlycon handoff。
+- 截止提交 ce59606 (`arceos-ex add serial8250 polling console`)，PlatformBus 已完成设备 population、driver register/probe、真实 ns16550a probe/bind、UART 8250 资源解析、ioremap/vmalloc UART MMIO 映射和 console/earlycon handoff 首轮闭环；后续重点是 ioremap/vmalloc 泛化、MMIO 属性建模，以及 PLIC/IRQ 可用后的 serial8250 interrupt-driven 输出。
+- 已解决前置问题：`make run APP=hello` 的重复输出来自 handoff 后 `PrintkBuffer` legacy drain cursor 未移交；当前已修复为 boot pending flush、serial delivered cursor 推进和 earlycon drain guard，并通过 `make run APP=hello`、`make run LOG=trace APP=hello` 与 `make test` 验证。
 - `SmpRuntimePhase` 已形成六个子阶段最小闭环：`PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
 - 最近完整验收已通过：`tools/pyveri/bin/pyveri spec/model/main.spec --derive --strict`；`make build APP=smoke`；`make test`；`make verify REPORT=graph`。当前 `make test` summary 为 `total=75 pass=75 fail=0`。
 - 当前 trace SVG 产物：`tools/out/trace/main.trace.svg`。

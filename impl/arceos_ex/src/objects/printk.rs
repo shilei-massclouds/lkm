@@ -5,7 +5,7 @@ use super::{
     per_cpu_storage::PerCpuStorage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
-use crate::trace::Checkpoint;
+use crate::{arch::riscv64::sbi, trace, trace::Checkpoint};
 use core::fmt::{self, Write};
 
 #[allow(dead_code)]
@@ -34,6 +34,11 @@ pub struct ConsoleRegistry {
     serial8250_write_ready: bool,
     keep_bootcon: bool,
     handoff_complete: bool,
+    boot_pending_flushed_before_serial_handoff: bool,
+    legacy_earlycon_drain_blocked_after_handoff: bool,
+    serial8250_online_trace_emitted: bool,
+    boot_console_offline_trace_emitted: bool,
+    serial8250_delivered_records_not_replayed: bool,
     route: PrintkRoute,
 }
 
@@ -50,6 +55,11 @@ impl ConsoleRegistry {
             serial8250_write_ready: false,
             keep_bootcon: false,
             handoff_complete: false,
+            boot_pending_flushed_before_serial_handoff: false,
+            legacy_earlycon_drain_blocked_after_handoff: false,
+            serial8250_online_trace_emitted: false,
+            boot_console_offline_trace_emitted: false,
+            serial8250_delivered_records_not_replayed: false,
             route: PrintkRoute::BufferOnly,
         }
     }
@@ -67,16 +77,27 @@ impl ConsoleRegistry {
             return false;
         }
 
+        if self.handoff_complete {
+            return true;
+        }
+
+        drain_buffer_to(sbi::putchar);
+        self.boot_pending_flushed_before_serial_handoff = true;
         self.serial8250_console_registered = true;
         self.preferred_console_from_stdout = true;
         self.serial8250_consdev = true;
         self.serial8250_write_ready = true;
         self.route = PrintkRoute::Serial8250;
         self.handoff_complete = true;
+        self.legacy_earlycon_drain_blocked_after_handoff = true;
+        trace::checkpoint(Checkpoint::Serial8250ConsoleOnline);
+        self.serial8250_online_trace_emitted = true;
         if !self.keep_bootcon {
             self.boot_console_online = false;
             self.boot_console_unregistered = true;
             self.boot_console_removed_from_registry = true;
+            trace::checkpoint(Checkpoint::BootConsoleOffline);
+            self.boot_console_offline_trace_emitted = true;
         }
         true
     }
@@ -177,6 +198,10 @@ impl PrintkBuffer {
         }
     }
 
+    pub fn discard_delivered(&mut self) {
+        self.read = self.write;
+    }
+
     pub fn is_prepared(&self) -> bool {
         self.lifecycle.state() == State::Prepared
     }
@@ -211,14 +236,29 @@ pub fn preset() -> EventResult {
 
 #[allow(dead_code)]
 pub fn write_str(message: &str) {
+    write_bytes(message.as_bytes());
+}
+
+fn write_bytes(bytes: &[u8]) {
     unsafe {
         (&raw mut PRINTK_BUFFER)
             .as_mut()
             .unwrap()
-            .write_bytes(message.as_bytes());
+            .write_bytes(bytes);
     }
     if route() == PrintkRoute::Serial8250 {
-        let _ = ns16550a::write_console_bytes(message.as_bytes());
+        if ns16550a::write_console_bytes(bytes) {
+            unsafe {
+                (&raw mut PRINTK_BUFFER)
+                    .as_mut()
+                    .unwrap()
+                    .discard_delivered();
+                (&raw mut CONSOLE_REGISTRY)
+                    .as_mut()
+                    .unwrap()
+                    .serial8250_delivered_records_not_replayed = true;
+            }
+        }
     }
 }
 
@@ -339,6 +379,57 @@ pub fn route() -> PrintkRoute {
     unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap().route }
 }
 
+pub fn boot_pending_flushed_before_serial_handoff() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .boot_pending_flushed_before_serial_handoff
+    }
+}
+
+pub fn legacy_earlycon_drain_blocked_after_handoff() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .legacy_earlycon_drain_blocked_after_handoff
+    }
+}
+
+pub fn serial8250_online_trace_emitted() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .serial8250_online_trace_emitted
+    }
+}
+
+pub fn boot_console_offline_trace_emitted() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .boot_console_offline_trace_emitted
+    }
+}
+
+pub fn serial8250_delivered_records_not_replayed() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .serial8250_delivered_records_not_replayed
+    }
+}
+
+pub fn earlycon_drain_allowed() -> bool {
+    let registry = unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap() };
+    registry.route == PrintkRoute::BootConsole
+        || (registry.keep_bootcon && registry.boot_console_online && !registry.handoff_complete)
+}
+
 #[cfg(any(app_smoke, checkpoint_handler_smoke))]
 pub fn registry_snapshot() -> ConsoleRegistry {
     unsafe { *(&raw const CONSOLE_REGISTRY).as_ref().unwrap() }
@@ -376,12 +467,7 @@ pub fn setup(
 
 #[allow(dead_code)]
 pub fn write_byte(byte: u8) {
-    unsafe {
-        (&raw mut PRINTK_BUFFER)
-            .as_mut()
-            .unwrap()
-            .write_bytes(&[byte]);
-    }
+    write_bytes(&[byte]);
 }
 
 #[allow(dead_code)]
@@ -399,6 +485,11 @@ pub fn is_ready() -> bool {
 
 #[allow(dead_code)]
 pub fn drain_to(sink: impl FnMut(u8)) {
+    drain_buffer_to(sink);
+}
+
+#[allow(dead_code)]
+fn drain_buffer_to(sink: impl FnMut(u8)) {
     unsafe {
         (&raw mut PRINTK_BUFFER).as_mut().unwrap().drain_to(sink);
     }

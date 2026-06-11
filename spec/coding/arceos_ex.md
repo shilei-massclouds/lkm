@@ -403,6 +403,11 @@ consdev、write backend ready、printk route 切到 serial8250、handoff complet
 时，handoff 必须注销 boot console 或至少把 boot console 标为 offline，并记录 boot console removed/unregistered
 事实；`keep_bootcon == true` 时，boot console 必须保持 registered/online，但 printk route 仍切到 serial8250，
 handoff 仍视为完成。
+参考 Linux 6.12.37 `kernel/printk/printk.c::register_console()` 的交接边界，真实 serial console 成为
+`CON_CONSDEV` 后应显式输出 `Serial8250Console.Online` 或等价 trace；默认非 `keep_bootcon` 分支注销
+`CON_BOOT` boot console 时，应显式输出 `BootConsole.Offline` 或等价 trace。trace/SVG 必须能展示
+real console 上线和 boot console 下线的顺序；`keep_bootcon` 分支必须展示 serial console online 但 boot console
+retained，而不是误报 offline。
 
 `register_serial8250_console(preferred_from_stdout)` 或等价 API 必须模拟 `register_console()` 的策略分支：
 `preferred_from_stdout == false` 的 dummy/non-match console 注册请求不得改变 serial console facts、不得设置
@@ -418,11 +423,18 @@ handoff 后 `printk::write_str()` 或等价输出入口必须经 `ConsoleRegistr
 后，才能对 `membase` 派生出的 LSR/THR 地址做 `read_volatile`/`write_volatile`；不得直接访问 `mapbase`，
 也不得用 SBI 路径伪装真实 UART 写。由于 PLIC/IRQ 驱动尚不可用，本阶段不得实现或声明 interrupt-driven console
 output ready，只能记录 IRQ 输出路径 deferred。
+为避免 handoff 后重复输出，`ConsoleRegistry` 必须区分 printk 记录保存和 legacy boot-console drain cursor。
+注册 preferred serial8250 console 时，应先把 boot console pending records 按 boot console 路径 flush 并推进 cursor；
+serial8250 route 成功写出的记录必须标记为已交付，不得再被 `earlycon::drain_printk()` 经 SBI 重放。boot console
+offline 后，payload 或测试代码继续调用 `earlycon::drain_printk()` 不应作为正常 printk 输出路径；即使
+`keep_bootcon` 保留 boot console，本阶段 active printk route 仍是 serial8250，legacy earlycon drain 也不得重放
+handoff 后的正常 printk 记录。
 
 smoke/KUnit 应覆盖：`stdout-path` 命中后发生 `Uart8250Port` 与 `Serial8250Console` 注册、非 stdout-path 设备不抢占
 console、dummy/non-match console 不改变 registry、默认策略下 boot console 注销、`keep_bootcon` 保留 boot console、
 handoff 后 printk route facts 符合预期、serial console 的 `membase` 来自 ioremap/vmalloc 映射而不是 direct map，
-以及 serial8250 write 后端记录 polling、LSR/THR、membase、non-SBI、IRQ deferred 事实。
+serial8250 write 后端记录 polling、LSR/THR、membase、non-SBI、IRQ deferred 事实，以及 handoff 后正常 printk
+不会被 legacy earlycon/SBI drain 重放。
 
 ## RootfsPhase 编码约束
 

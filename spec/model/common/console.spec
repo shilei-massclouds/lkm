@@ -15,6 +15,7 @@ predicate boot_console_write_routes_to_earlycon<T, E>(boot_console: T, earlycon:
 predicate boot_console_kept_by_policy<T>(boot_console: T) -> bool;
 predicate boot_console_unregistered<T>(boot_console: T) -> bool;
 predicate boot_console_removed_from_registry<T, R>(boot_console: T, registry: R) -> bool;
+predicate boot_console_offline_trace_emitted<T>(boot_console: T) -> bool;
 
 predicate console_candidate_non_stdout_path<T, D>(candidate: T, device_tree: D) -> bool;
 predicate console_candidate_not_platform_topology_mutating<T>(candidate: T) -> bool;
@@ -38,6 +39,8 @@ predicate console_registry_non_stdout_preserves_boot_route<T, B, C>(
 predicate console_registry_non_stdout_leaves_real_console_unchanged<T, C>(registry: T, candidate: C) -> bool;
 predicate console_registry_non_stdout_no_handoff_committed<T, C>(registry: T, candidate: C) -> bool;
 predicate console_registry_duplicate_preferred_registration_idempotent<T, C>(registry: T, console: C) -> bool;
+predicate console_registry_flushes_boot_pending_before_serial_handoff<T>(registry: T) -> bool;
+predicate console_registry_blocks_legacy_earlycon_drain_after_handoff<T>(registry: T) -> bool;
 
 predicate uart8250_port_resources_ready<T, D, R>(port: T, device: D, device_tree: R) -> bool;
 predicate uart8250_port_mmio_resource_bound<T>(port: T) -> bool;
@@ -62,6 +65,8 @@ predicate serial8250_console_write_uses_uart_membase<T, P>(console: T, port: P) 
 predicate serial8250_console_write_uses_lsr_thr_polling<T, P>(console: T, port: P) -> bool;
 predicate serial8250_console_write_does_not_use_sbi<T>(console: T) -> bool;
 predicate serial8250_console_interrupt_output_deferred_until_irqchip<T>(console: T) -> bool;
+predicate serial8250_console_online_trace_emitted<T>(console: T) -> bool;
+predicate serial8250_console_delivered_records_not_replayed_by_earlycon<T>(console: T) -> bool;
 
 predicate console_handoff_ready<T, B, S>(handoff: T, boot_console: B, serial_console: S) -> bool;
 predicate console_handoff_triggered_by_register_console<T, R>(handoff: T, registry: R) -> bool;
@@ -154,6 +159,7 @@ object BootConsole: ConsoleObject {
                 ensures {
                     boot_console_unregistered(BootConsole);
                     boot_console_removed_from_registry(BootConsole, ConsoleRegistry);
+                    boot_console_offline_trace_emitted(BootConsole);
                 }
             }
         }
@@ -163,6 +169,7 @@ object BootConsole: ConsoleObject {
         invariant {
             boot_console_unregistered(BootConsole);
             boot_console_removed_from_registry(BootConsole, ConsoleRegistry);
+            boot_console_offline_trace_emitted(BootConsole);
         }
     }
 }
@@ -240,6 +247,8 @@ object Serial8250Console: ConsoleObject {
                     serial8250_console_write_uses_lsr_thr_polling(Serial8250Console, Uart8250Port);
                     serial8250_console_write_does_not_use_sbi(Serial8250Console);
                     serial8250_console_interrupt_output_deferred_until_irqchip(Serial8250Console);
+                    serial8250_console_online_trace_emitted(Serial8250Console);
+                    serial8250_console_delivered_records_not_replayed_by_earlycon(Serial8250Console);
                 }
             }
         }
@@ -257,6 +266,8 @@ object Serial8250Console: ConsoleObject {
             serial8250_console_write_uses_lsr_thr_polling(Serial8250Console, Uart8250Port);
             serial8250_console_write_does_not_use_sbi(Serial8250Console);
             serial8250_console_interrupt_output_deferred_until_irqchip(Serial8250Console);
+            serial8250_console_online_trace_emitted(Serial8250Console);
+            serial8250_console_delivered_records_not_replayed_by_earlycon(Serial8250Console);
         }
     }
 }
@@ -308,6 +319,8 @@ object ConsoleRegistry: ConsoleObject {
                     console_registry_keep_bootcon_policy_ready(ConsoleRegistry);
                     console_registry_keep_bootcon_disabled(ConsoleRegistry);
                     console_registry_printk_route_real_console(ConsoleRegistry, Serial8250Console);
+                    console_registry_flushes_boot_pending_before_serial_handoff(ConsoleRegistry);
+                    console_registry_blocks_legacy_earlycon_drain_after_handoff(ConsoleRegistry);
                 }
             }
 
@@ -345,6 +358,8 @@ object ConsoleRegistry: ConsoleObject {
             console_registry_keep_bootcon_policy_ready(ConsoleRegistry);
             console_registry_keep_bootcon_disabled(ConsoleRegistry);
             console_registry_printk_route_real_console(ConsoleRegistry, Serial8250Console);
+            console_registry_flushes_boot_pending_before_serial_handoff(ConsoleRegistry);
+            console_registry_blocks_legacy_earlycon_drain_after_handoff(ConsoleRegistry);
         }
 
         actions {
@@ -415,6 +430,8 @@ object KeepBootconConsoleRegistry: ConsoleObject {
                     console_registry_keep_bootcon_policy_ready(KeepBootconConsoleRegistry);
                     console_registry_keep_bootcon_enabled(KeepBootconConsoleRegistry);
                     console_registry_printk_route_real_console(KeepBootconConsoleRegistry, Serial8250Console);
+                    console_registry_flushes_boot_pending_before_serial_handoff(KeepBootconConsoleRegistry);
+                    console_registry_blocks_legacy_earlycon_drain_after_handoff(KeepBootconConsoleRegistry);
                     boot_console_kept_by_policy(BootConsole);
                 }
             }
@@ -431,6 +448,8 @@ object KeepBootconConsoleRegistry: ConsoleObject {
             console_registry_keep_bootcon_policy_ready(KeepBootconConsoleRegistry);
             console_registry_keep_bootcon_enabled(KeepBootconConsoleRegistry);
             console_registry_printk_route_real_console(KeepBootconConsoleRegistry, Serial8250Console);
+            console_registry_flushes_boot_pending_before_serial_handoff(KeepBootconConsoleRegistry);
+            console_registry_blocks_legacy_earlycon_drain_after_handoff(KeepBootconConsoleRegistry);
             boot_console_kept_by_policy(BootConsole);
         }
     }
@@ -458,6 +477,8 @@ object ConsoleHandoff: ConsoleObject {
                     console_handoff_triggered_by_register_console(ConsoleHandoff, ConsoleRegistry);
                     console_handoff_boot_console_unregistered(ConsoleHandoff, BootConsole);
                     console_handoff_printk_route_switched(ConsoleHandoff, ConsoleRegistry, Serial8250Console);
+                    serial8250_console_online_trace_emitted(Serial8250Console);
+                    boot_console_offline_trace_emitted(BootConsole);
                 }
             }
         }
@@ -473,6 +494,8 @@ object ConsoleHandoff: ConsoleObject {
             console_handoff_triggered_by_register_console(ConsoleHandoff, ConsoleRegistry);
             console_handoff_boot_console_unregistered(ConsoleHandoff, BootConsole);
             console_handoff_printk_route_switched(ConsoleHandoff, ConsoleRegistry, Serial8250Console);
+            serial8250_console_online_trace_emitted(Serial8250Console);
+            boot_console_offline_trace_emitted(BootConsole);
         }
     }
 }
@@ -502,6 +525,7 @@ object KeepBootconConsoleHandoff: ConsoleObject {
                         KeepBootconConsoleRegistry,
                         Serial8250Console
                     );
+                    serial8250_console_online_trace_emitted(Serial8250Console);
                     boot_console_kept_by_policy(BootConsole);
                     console_registry_has_boot_console(KeepBootconConsoleRegistry, BootConsole);
                 }
@@ -526,6 +550,7 @@ object KeepBootconConsoleHandoff: ConsoleObject {
                 KeepBootconConsoleRegistry,
                 Serial8250Console
             );
+            serial8250_console_online_trace_emitted(Serial8250Console);
             boot_console_kept_by_policy(BootConsole);
             console_registry_has_boot_console(KeepBootconConsoleRegistry, BootConsole);
         }

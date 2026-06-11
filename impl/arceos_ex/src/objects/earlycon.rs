@@ -92,7 +92,9 @@ pub fn enable() -> EventResult {
 
 #[allow(dead_code)]
 pub fn drain_printk() {
-    printk::drain_to(sbi::putchar);
+    if printk::earlycon_drain_allowed() {
+        printk::drain_to(sbi::putchar);
+    }
 }
 
 pub fn is_online() -> bool {

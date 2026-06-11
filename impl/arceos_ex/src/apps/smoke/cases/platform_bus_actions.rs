@@ -376,6 +376,13 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
                 && printk::route() == printk::PrintkRoute::Serial8250,
         );
         assertions.assert(
+            "console handoff trace and drain facts",
+            printk::boot_pending_flushed_before_serial_handoff()
+                && printk::legacy_earlycon_drain_blocked_after_handoff()
+                && printk::serial8250_online_trace_emitted()
+                && printk::boot_console_offline_trace_emitted(),
+        );
+        assertions.assert(
             "boot console unregistered by default",
             !printk::keep_bootcon()
                 && printk::boot_console_registered()
@@ -392,7 +399,8 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
                 && ns16550a::serial8250_tx_byte_count()
                     == tx_bytes.saturating_add("serial8250 smoke\n".len() + 1)
                 && ns16550a::serial8250_mmio_writes_performed()
-                && !ns16550a::serial8250_write_timed_out(),
+                && !ns16550a::serial8250_write_timed_out()
+                && printk::serial8250_delivered_records_not_replayed(),
         );
         let area_count = self.fixture.vmalloc_allocator.area_count();
         let mapping_count = self.fixture.vmalloc_allocator.mapping_count();
@@ -694,6 +702,13 @@ impl SmokeScenario for KeepBootconScenario {
                 && !printk::boot_console_unregistered()
                 && !printk::boot_console_removed_from_registry()
                 && printk::console_handoff_complete(),
+        );
+        assertions.assert(
+            "keep_bootcon handoff trace and drain facts",
+            printk::boot_pending_flushed_before_serial_handoff()
+                && printk::legacy_earlycon_drain_blocked_after_handoff()
+                && printk::serial8250_online_trace_emitted()
+                && !printk::boot_console_offline_trace_emitted(),
         );
         assertions.assert(
             "keep_bootcon route serial",
