@@ -5,6 +5,7 @@ use super::{
     memblock::MemBlock,
     page_table::{
         aligned, map_linear_pmd_range, map_page_range, map_pmd_range, PageTableInstallRange,
+        SWAPPER_VMALLOC_L0_TABLES,
     },
     raw_dtb::RawDtb,
     state::{Lifecycle, State},
@@ -147,12 +148,14 @@ impl StaticObjects {
         let root = static_page_tables::swapper_pg_dir_mut(kernel_image);
         let kernel_table = static_page_tables::swapper_kernel_pg_table_mut(kernel_image);
         let vmalloc_l1_table = static_page_tables::swapper_vmalloc_l1_table_mut(kernel_image);
-        let vmalloc_l0_table = static_page_tables::swapper_vmalloc_l0_table_mut(kernel_image);
+        let vmalloc_l0_tables = static_page_tables::swapper_vmalloc_l0_tables_mut(kernel_image);
         let linear_tables = static_page_tables::swapper_linear_pg_tables_mut(kernel_image);
         root.clear();
         kernel_table.clear();
         vmalloc_l1_table.clear();
-        vmalloc_l0_table.clear();
+        for table in vmalloc_l0_tables.iter_mut() {
+            table.clear();
+        }
         for table in linear_tables.iter_mut() {
             table.clear();
         }
@@ -204,10 +207,10 @@ impl StaticObjects {
     ) -> Option<PageTableInstallRange> {
         let root = static_page_tables::swapper_pg_dir_mut(kernel_image);
         let vmalloc_l1_table = static_page_tables::swapper_vmalloc_l1_table_mut(kernel_image);
-        let vmalloc_l0_table = static_page_tables::swapper_vmalloc_l0_table_mut(kernel_image);
+        let vmalloc_l0_tables = static_page_tables::swapper_vmalloc_l0_tables_mut(kernel_image);
         let root_addr = root as *mut _ as usize;
         let l1_addr = vmalloc_l1_table as *mut _ as usize;
-        let l0_addr = vmalloc_l0_table as *mut _ as usize;
+        let l0_addr = vmalloc_l0_tables.as_mut_ptr() as usize;
         let l1_phys = kernel_image.runtime_to_phys(l1_addr)?;
         let l0_phys = kernel_image.runtime_to_phys(l0_addr)?;
         Some(PageTableInstallRange::new(
@@ -216,6 +219,7 @@ impl StaticObjects {
             l0_addr,
             l1_phys,
             l0_phys,
+            SWAPPER_VMALLOC_L0_TABLES,
             super::mm_core::VMALLOC_START,
             page_size,
         ))

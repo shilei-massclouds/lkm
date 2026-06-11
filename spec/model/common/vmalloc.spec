@@ -36,7 +36,8 @@ predicate vmalloc_allocator_runtime_page_table_mapping_ready<T, P>(allocator: T,
 predicate vmalloc_allocator_mapping_policy_external<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_physical_resource_policy_external<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_runtime_mapping_window_bound<T, P>(allocator: T, page_table_caches: P) -> bool;
-predicate vmalloc_allocator_cross_window_mapping_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_multi_window_mapping_supported<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_preallocated_mapping_window_bound<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_rejects_duplicate_area_mapping<T>(allocator: T) -> bool;
 
 predicate vmap_area_ref_ready<T>(area: T) -> bool;
@@ -132,7 +133,7 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_mapping_within_runtime_mapping_window(mapping);
             }
             deferred {
-                "Mappings that require additional vmalloc L0/PTE windows are deferred until the runtime page-table install pool grows beyond the first preallocated window.";
+                "Mappings beyond the preallocated runtime vmalloc L0/PTE table pool are deferred until dynamic runtime page-table allocation is modeled.";
             }
         }
 

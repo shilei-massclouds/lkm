@@ -12,6 +12,7 @@ use crate::{
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
 const TEST_PAGE_COUNT: usize = 2;
+const VMALLOC_CROSS_WINDOW_TEST_ORDER: usize = 1;
 pub const KUNIT_CASE_COUNT: usize = 5;
 
 pub const HANDLER: Handler = Handler {
@@ -159,9 +160,26 @@ fn run_window_duplicate_reject(ctx: &mut Context) -> bool {
     let Some(page) = alloc_test_page(ctx) else {
         return false;
     };
+    let Some(cross_window_pages) = alloc_test_pages(ctx, VMALLOC_CROSS_WINDOW_TEST_ORDER) else {
+        let _ = ctx
+            .page_allocator
+            .free_pages(page.page, 0, &ctx.page_metadata_map);
+        return false;
+    };
 
-    let passed = run_window_duplicate_reject_with_page(ctx, page_size, page.phys);
+    let passed = run_window_duplicate_reject_with_page(
+        ctx,
+        page_size,
+        page.phys,
+        cross_window_pages.phys,
+        cross_window_pages.size(page_size),
+    );
     passed
+        && ctx.page_allocator.free_pages(
+            cross_window_pages.page,
+            cross_window_pages.order,
+            &ctx.page_metadata_map,
+        )
         && ctx
             .page_allocator
             .free_pages(page.page, 0, &ctx.page_metadata_map)
@@ -413,10 +431,17 @@ fn run_mmio_attributes_with_page(ctx: &mut Context, page_size: usize, phys: usiz
         .iounmap(&mut ctx.vmalloc_allocator, mapping.membase())
 }
 
-fn run_window_duplicate_reject_with_page(ctx: &mut Context, page_size: usize, phys: usize) -> bool {
+fn run_window_duplicate_reject_with_page(
+    ctx: &mut Context,
+    page_size: usize,
+    phys: usize,
+    cross_window_phys: usize,
+    cross_window_size: usize,
+) -> bool {
     let allocator = &mut ctx.vmalloc_allocator;
     if !allocator.runtime_mapping_window_ready()
-        || !allocator.cross_window_mapping_deferred()
+        || !allocator.multi_window_mapping_supported()
+        || !allocator.preallocated_mapping_window_bound()
         || !allocator.duplicate_area_mapping_rejected()
     {
         return false;
@@ -424,8 +449,13 @@ fn run_window_duplicate_reject_with_page(ctx: &mut Context, page_size: usize, ph
 
     let window_start = allocator.runtime_mapping_window_start();
     let window_end = allocator.runtime_mapping_window_end();
+    let window_count = allocator.runtime_mapping_window_count();
+    let first_window_size = window_end.saturating_sub(window_start) / window_count;
     if window_start != crate::objects::mm_core::VMALLOC_START
         || window_end <= window_start
+        || window_count <= 1
+        || first_window_size <= cross_window_size
+        || cross_window_size != page_size.saturating_mul(2)
         || !window_start.is_multiple_of(page_size)
         || !window_end.is_multiple_of(page_size)
     {
@@ -447,6 +477,54 @@ fn run_window_duplicate_reject_with_page(ctx: &mut Context, page_size: usize, ph
         && allocator.mapping_count() == base_mapping_count.saturating_add(1)
         && allocator.area_count() == base_area_count.saturating_add(1);
     if !duplicate_rejected || !teardown_mapping(allocator, area, mapping, false) {
+        return false;
+    }
+
+    let current = allocator
+        .area(allocator.area_count().saturating_sub(1))
+        .map(|last| last.end())
+        .unwrap_or(window_start);
+    let desired_cross_start = window_start
+        .saturating_add(first_window_size)
+        .saturating_sub(page_size);
+    if current > desired_cross_start {
+        return false;
+    }
+    let align_padding = desired_cross_start.saturating_sub(current);
+    if align_padding != 0 {
+        let Some(padding_area) = allocator.get_vm_area(align_padding, VmapAreaFlags::VmIoremap)
+        else {
+            return false;
+        };
+        if padding_area.end() != desired_cross_start || !allocator.free_vm_area(padding_area) {
+            return false;
+        }
+    }
+
+    let base_window_area_count = allocator.area_count();
+    let base_window_mapping_count = allocator.mapping_count();
+    let Some(cross_window_area) =
+        allocator.get_vm_area(cross_window_size, VmapAreaFlags::VmIoremap)
+    else {
+        return false;
+    };
+    let Some(cross_window_mapping) = allocator.map_page_range(
+        cross_window_area,
+        cross_window_phys,
+        cross_window_size,
+        PageProtection::IoMemory,
+    ) else {
+        return false;
+    };
+    let cross_window_supported = cross_window_area.virt_base() == desired_cross_start
+        && cross_window_area.end() == window_start.saturating_add(first_window_size + page_size)
+        && cross_window_mapping.installed()
+        && cross_window_mapping.size() == cross_window_size
+        && allocator.area_count() == base_window_area_count.saturating_add(1)
+        && allocator.mapping_count() == base_window_mapping_count.saturating_add(1);
+    if !cross_window_supported
+        || !teardown_mapping(allocator, cross_window_area, cross_window_mapping, false)
+    {
         return false;
     }
 
@@ -484,6 +562,13 @@ fn run_window_duplicate_reject_with_page(ctx: &mut Context, page_size: usize, ph
 struct AllocatedPage {
     page: PageRef,
     phys: usize,
+    order: usize,
+}
+
+impl AllocatedPage {
+    fn size(&self, page_size: usize) -> usize {
+        page_size << self.order
+    }
 }
 
 fn alloc_test_page(ctx: &mut Context) -> Option<AllocatedPage> {
@@ -500,7 +585,28 @@ fn alloc_test_page(ctx: &mut Context) -> Option<AllocatedPage> {
             .free_pages(page, 0, &ctx.page_metadata_map);
         return None;
     };
-    Some(AllocatedPage { page, phys })
+    Some(AllocatedPage {
+        page,
+        phys,
+        order: 0,
+    })
+}
+
+fn alloc_test_pages(ctx: &mut Context, order: usize) -> Option<AllocatedPage> {
+    let page = ctx
+        .page_allocator
+        .alloc_pages(order, GfpFlags::kernel(), &ctx.page_metadata_map)?;
+    let Some(phys) = ctx
+        .page_metadata_map
+        .page_to_phys(page)
+        .map(|addr| addr.value())
+    else {
+        let _ = ctx
+            .page_allocator
+            .free_pages(page, order, &ctx.page_metadata_map);
+        return None;
+    };
+    Some(AllocatedPage { page, phys, order })
 }
 
 fn teardown_mapping(

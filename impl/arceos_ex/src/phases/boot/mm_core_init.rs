@@ -176,7 +176,8 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.vmalloc_allocator.physical_resource_policy_external()
         && ctx.vmalloc_allocator.runtime_page_table_mapping_ready()
         && ctx.vmalloc_allocator.runtime_mapping_window_ready()
-        && ctx.vmalloc_allocator.cross_window_mapping_deferred()
+        && ctx.vmalloc_allocator.multi_window_mapping_supported()
+        && ctx.vmalloc_allocator.preallocated_mapping_window_bound()
         && ctx.vmalloc_allocator.duplicate_area_mapping_rejected()
         && ctx.ioremap.state() == State::Ready
         && ctx.ioremap.runtime_ready()

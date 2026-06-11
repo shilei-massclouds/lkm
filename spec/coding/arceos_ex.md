@@ -956,13 +956,13 @@ ns16550a 或 console 专用路径。
 映射安装。每次成功调用都必须产生一个独立的 `VmapMapping` 记录，绑定本次 `VmapArea`、调用方给出的
 物理页/PFN/range、`PageProtection` 和已安装页表项；这不是重新推进 `VmallocAllocator` 生命周期，也不是把
 全局 `runtime_page_table_mapping_ready` 位重复置真。若 `PageTableCaches` 没有提供 vmalloc install range，
-或映射跨出当前已预分配的最小 vmalloc 页表范围，实现必须返回失败，不得只记录 `VmapMapping.installed=true`。
-当前实现可以把支持范围限制在
-`VMALLOC_START` 起始的首个 L1/L0 页表窗口，但该限制必须通过 ready/failure fact 暴露，后续再泛化到完整
+或映射跨出当前已预分配的 vmalloc 页表池，实现必须返回失败，不得只记录 `VmapMapping.installed=true`。
+当前实现支持 `VMALLOC_START` 起始的预分配 L1/L0 页表池，并允许单次 mapping 跨越池内相邻 L0/PTE window；
+该限制必须通过 ready/failure fact 暴露，后续再由动态 runtime page-table allocation 泛化到完整
 `VMALLOC_START..VMALLOC_END`。
 具体实现不能只依赖底层 `vpn0` 越界失败；在调用页表安装前，`VmallocAllocator.map_page_range()` 必须显式确认
-`VmapArea` 完全落在当前 runtime mapping window 内。落到后续 L0/PTE window 的 area 当前必须失败并记录为
-cross-window deferred，不能复用首个 L0 表错误安装。同时，同一个 busy `VmapArea` 已经存在 installed
+`VmapArea` 完全落在当前预分配 runtime mapping window pool 内。落到池外的 area 当前必须失败并记录为
+preallocated-pool boundary，不能复用错误的 L0 表安装。同时，同一个 busy `VmapArea` 已经存在 installed
 `VmapMapping` 时，第二次 `map_page_range()` 必须失败，避免一个 area 产生多个并存页表映射记录。
 
 `VmallocAllocator.unmap_page_range()` / `free_vm_area()` 必须保持 Linux-like teardown 顺序：先清除

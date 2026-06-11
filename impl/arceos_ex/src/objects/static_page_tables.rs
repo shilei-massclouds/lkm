@@ -3,7 +3,10 @@ use crate::arch::riscv64::csr;
 use super::{
     config::Config,
     kernel_image::KernelImage,
-    page_table::{aligned, page_table_storage_ready, PageTablePage, SWAPPER_L1_TABLES},
+    page_table::{
+        aligned, page_table_storage_ready, PageTablePage, SWAPPER_L1_TABLES,
+        SWAPPER_VMALLOC_L0_TABLES,
+    },
 };
 
 pub(super) fn storage_ready(config: &Config) -> bool {
@@ -34,10 +37,8 @@ pub(super) fn storage_ready(config: &Config) -> bool {
     ) && page_table_storage_ready(
         core::ptr::addr_of!(SWAPPER_VMALLOC_L1_TABLE) as usize,
         config.page_size(),
-    ) && page_table_storage_ready(
-        core::ptr::addr_of!(SWAPPER_VMALLOC_L0_TABLE) as usize,
-        config.page_size(),
-    ) && swapper_linear_pg_tables_ready(config)
+    ) && swapper_vmalloc_l0_tables_ready(config)
+        && swapper_linear_pg_tables_ready(config)
 }
 
 pub(super) fn trampoline_satp(kernel_image: &KernelImage) -> Option<usize> {
@@ -134,16 +135,32 @@ pub(super) fn swapper_vmalloc_l1_table_mut(
     unsafe { &mut *(swapper_vmalloc_l1_table_addr(kernel_image) as *mut PageTablePage) }
 }
 
-pub(super) fn swapper_vmalloc_l0_table_mut(
+pub(super) fn swapper_vmalloc_l0_tables_mut(
     kernel_image: &KernelImage,
-) -> &'static mut PageTablePage {
-    unsafe { &mut *(swapper_vmalloc_l0_table_addr(kernel_image) as *mut PageTablePage) }
+) -> &'static mut [PageTablePage; SWAPPER_VMALLOC_L0_TABLES] {
+    unsafe {
+        &mut *(swapper_vmalloc_l0_tables_addr(kernel_image)
+            as *mut [PageTablePage; SWAPPER_VMALLOC_L0_TABLES])
+    }
 }
 
 fn swapper_linear_pg_tables_ready(config: &Config) -> bool {
     let mut index = 0;
     while index < SWAPPER_L1_TABLES {
         let addr = core::ptr::addr_of!(SWAPPER_LINEAR_PG_TABLES) as usize
+            + index * core::mem::size_of::<PageTablePage>();
+        if !page_table_storage_ready(addr, config.page_size()) {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn swapper_vmalloc_l0_tables_ready(config: &Config) -> bool {
+    let mut index = 0;
+    while index < SWAPPER_VMALLOC_L0_TABLES {
+        let addr = core::ptr::addr_of!(SWAPPER_VMALLOC_L0_PG_TABLES) as usize
             + index * core::mem::size_of::<PageTablePage>();
         if !page_table_storage_ready(addr, config.page_size()) {
             return false;
@@ -223,10 +240,10 @@ fn swapper_vmalloc_l1_table_addr(kernel_image: &KernelImage) -> usize {
     )
 }
 
-fn swapper_vmalloc_l0_table_addr(kernel_image: &KernelImage) -> usize {
+fn swapper_vmalloc_l0_tables_addr(kernel_image: &KernelImage) -> usize {
     runtime_addr(
         kernel_image,
-        core::ptr::addr_of!(SWAPPER_VMALLOC_L0_TABLE) as usize,
+        core::ptr::addr_of!(SWAPPER_VMALLOC_L0_PG_TABLES) as usize,
     )
 }
 
@@ -247,6 +264,7 @@ static mut EARLY_FIXMAP_L0_TABLE: PageTablePage = PageTablePage::zeroed();
 static mut SWAPPER_PG_DIR: PageTablePage = PageTablePage::zeroed();
 static mut SWAPPER_KERNEL_PG_TABLE: PageTablePage = PageTablePage::zeroed();
 static mut SWAPPER_VMALLOC_L1_TABLE: PageTablePage = PageTablePage::zeroed();
-static mut SWAPPER_VMALLOC_L0_TABLE: PageTablePage = PageTablePage::zeroed();
+static mut SWAPPER_VMALLOC_L0_PG_TABLES: [PageTablePage; SWAPPER_VMALLOC_L0_TABLES] =
+    [const { PageTablePage::zeroed() }; SWAPPER_VMALLOC_L0_TABLES];
 static mut SWAPPER_LINEAR_PG_TABLES: [PageTablePage; SWAPPER_L1_TABLES] =
     [const { PageTablePage::zeroed() }; SWAPPER_L1_TABLES];

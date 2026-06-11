@@ -1,6 +1,7 @@
 use super::{config::Config, kernel_image::KernelImage};
 
 pub const SWAPPER_L1_TABLES: usize = 4;
+pub const SWAPPER_VMALLOC_L0_TABLES: usize = 4;
 pub const PAGE_TABLE_ENTRIES: usize = 512;
 const PTE_V: usize = 1 << 0;
 const PTE_R: usize = 1 << 1;
@@ -37,9 +38,10 @@ impl PageTablePage {
 pub struct PageTableInstallRange {
     root_addr: usize,
     l1_addr: usize,
-    l0_addr: usize,
+    l0_base_addr: usize,
     l1_phys: usize,
-    l0_phys: usize,
+    l0_base_phys: usize,
+    l0_table_count: usize,
     virt_start: usize,
     page_size: usize,
 }
@@ -49,9 +51,10 @@ impl PageTableInstallRange {
         Self {
             root_addr: 0,
             l1_addr: 0,
-            l0_addr: 0,
+            l0_base_addr: 0,
             l1_phys: 0,
-            l0_phys: 0,
+            l0_base_phys: 0,
+            l0_table_count: 0,
             virt_start: 0,
             page_size: 0,
         }
@@ -60,18 +63,20 @@ impl PageTableInstallRange {
     pub const fn new(
         root_addr: usize,
         l1_addr: usize,
-        l0_addr: usize,
+        l0_base_addr: usize,
         l1_phys: usize,
-        l0_phys: usize,
+        l0_base_phys: usize,
+        l0_table_count: usize,
         virt_start: usize,
         page_size: usize,
     ) -> Self {
         Self {
             root_addr,
             l1_addr,
-            l0_addr,
+            l0_base_addr,
             l1_phys,
-            l0_phys,
+            l0_base_phys,
+            l0_table_count,
             virt_start,
             page_size,
         }
@@ -80,9 +85,11 @@ impl PageTableInstallRange {
     pub const fn ready(self) -> bool {
         self.root_addr != 0
             && self.l1_addr != 0
-            && self.l0_addr != 0
+            && self.l0_base_addr != 0
             && self.l1_phys != 0
-            && self.l0_phys != 0
+            && self.l0_base_phys != 0
+            && self.l0_table_count != 0
+            && self.l0_table_count <= PAGE_TABLE_ENTRIES
             && self.virt_start != 0
             && self.page_size != 0
             && self.page_size.is_power_of_two()
@@ -93,11 +100,21 @@ impl PageTableInstallRange {
     }
 
     pub const fn window_size(self) -> usize {
-        PAGE_TABLE_ENTRIES * self.page_size
+        PAGE_TABLE_ENTRIES
+            .saturating_mul(self.page_size)
+            .saturating_mul(self.l0_table_count)
     }
 
     pub const fn window_end(self) -> usize {
         self.virt_start.saturating_add(self.window_size())
+    }
+
+    pub const fn l0_table_count(self) -> usize {
+        self.l0_table_count
+    }
+
+    pub const fn l0_window_size(self) -> usize {
+        PAGE_TABLE_ENTRIES.saturating_mul(self.page_size)
     }
 }
 
@@ -206,9 +223,10 @@ pub fn map_page_range_runtime(
     bytes: usize,
     page_size: usize,
 ) -> bool {
-    if !tables.ready()
+    if !install_range_valid(tables)
         || bytes == 0
         || !aligned(virt_start, page_size)
+        || page_size != tables.page_size
         || !page_size.is_power_of_two()
     {
         return false;
@@ -222,30 +240,52 @@ pub fn map_page_range_runtime(
     let Some(covered) = round_up(mapped_bytes, page_size) else {
         return false;
     };
+    if !range_within_install_range(tables, virt_start, covered) {
+        return false;
+    }
     let root = unsafe { &mut *(tables.root_addr as *mut PageTablePage) };
     let l1_table = unsafe { &mut *(tables.l1_addr as *mut PageTablePage) };
-    let l0_table = unsafe { &mut *(tables.l0_addr as *mut PageTablePage) };
-    let vpn2 = sv39_index(virt_start, 30);
-    let vpn1 = sv39_index(virt_start, 21);
-    let mut vpn0 = sv39_index(virt_start, 12);
     let page_count = covered / page_size;
-    let Some(vpn0_end) = vpn0.checked_add(page_count) else {
-        return false;
-    };
-    if vpn0_end > PAGE_TABLE_ENTRIES {
-        return false;
-    }
+    let mut virt = virt_start;
     let mut phys = phys_base;
-    for _ in 0..page_count {
-        l0_table.set(vpn0, leaf_pte(phys, PTE_LEAF_RW));
-        vpn0 += 1;
-        let Some(next_phys) = phys.checked_add(page_size) else {
+    let mut remaining = page_count;
+    while remaining != 0 {
+        let Some(window_index) = install_window_index(tables, virt) else {
             return false;
         };
-        phys = next_phys;
+        let vpn2 = sv39_index(virt, 30);
+        let vpn1 = sv39_index(virt, 21);
+        if vpn2 != sv39_index(tables.window_start(), 30) || vpn1 >= PAGE_TABLE_ENTRIES {
+            return false;
+        }
+        let mut vpn0 = sv39_index(virt, 12);
+        let pages_in_window = PAGE_TABLE_ENTRIES - vpn0;
+        let chunk_pages = remaining.min(pages_in_window);
+        let Some(l0_addr) = l0_table_addr(tables, window_index) else {
+            return false;
+        };
+        let Some(l0_phys) = l0_table_phys(tables, window_index) else {
+            return false;
+        };
+        let l0_table = unsafe { &mut *(l0_addr as *mut PageTablePage) };
+        let mut chunk_remaining = chunk_pages;
+        while chunk_remaining != 0 {
+            l0_table.set(vpn0, leaf_pte(phys, PTE_LEAF_RW));
+            vpn0 += 1;
+            let Some(next_phys) = phys.checked_add(page_size) else {
+                return false;
+            };
+            phys = next_phys;
+            chunk_remaining -= 1;
+        }
+        l1_table.set(vpn1, table_pte(l0_phys));
+        root.set(vpn2, table_pte(tables.l1_phys));
+        let Some(next_virt) = virt.checked_add(chunk_pages * page_size) else {
+            return false;
+        };
+        virt = next_virt;
+        remaining -= chunk_pages;
     }
-    l1_table.set(vpn1, table_pte(tables.l0_phys));
-    root.set(vpn2, table_pte(tables.l1_phys));
     true
 }
 
@@ -256,9 +296,10 @@ pub fn unmap_page_range_runtime(
     bytes: usize,
     page_size: usize,
 ) -> bool {
-    if !tables.ready()
+    if !install_range_valid(tables)
         || bytes == 0
         || !aligned(virt_start, page_size)
+        || page_size != tables.page_size
         || !page_size.is_power_of_two()
     {
         return false;
@@ -267,25 +308,46 @@ pub fn unmap_page_range_runtime(
     let Some(covered) = round_up(bytes, page_size) else {
         return false;
     };
-    let root = unsafe { &mut *(tables.root_addr as *mut PageTablePage) };
-    let l1_table = unsafe { &mut *(tables.l1_addr as *mut PageTablePage) };
-    let l0_table = unsafe { &mut *(tables.l0_addr as *mut PageTablePage) };
-    let vpn2 = sv39_index(virt_start, 30);
-    let vpn1 = sv39_index(virt_start, 21);
-    let mut vpn0 = sv39_index(virt_start, 12);
-    let page_count = covered / page_size;
-    let Some(vpn0_end) = vpn0.checked_add(page_count) else {
-        return false;
-    };
-    if vpn0_end > PAGE_TABLE_ENTRIES {
+    if !range_within_install_range(tables, virt_start, covered) {
         return false;
     }
-
-    root.set(vpn2, table_pte(tables.l1_phys));
-    l1_table.set(vpn1, table_pte(tables.l0_phys));
-    for _ in 0..page_count {
-        l0_table.set(vpn0, 0);
-        vpn0 += 1;
+    let root = unsafe { &mut *(tables.root_addr as *mut PageTablePage) };
+    let l1_table = unsafe { &mut *(tables.l1_addr as *mut PageTablePage) };
+    let page_count = covered / page_size;
+    let mut virt = virt_start;
+    let mut remaining = page_count;
+    while remaining != 0 {
+        let Some(window_index) = install_window_index(tables, virt) else {
+            return false;
+        };
+        let vpn2 = sv39_index(virt, 30);
+        let vpn1 = sv39_index(virt, 21);
+        if vpn2 != sv39_index(tables.window_start(), 30) || vpn1 >= PAGE_TABLE_ENTRIES {
+            return false;
+        }
+        let mut vpn0 = sv39_index(virt, 12);
+        let pages_in_window = PAGE_TABLE_ENTRIES - vpn0;
+        let chunk_pages = remaining.min(pages_in_window);
+        let Some(l0_addr) = l0_table_addr(tables, window_index) else {
+            return false;
+        };
+        let Some(l0_phys) = l0_table_phys(tables, window_index) else {
+            return false;
+        };
+        let l0_table = unsafe { &mut *(l0_addr as *mut PageTablePage) };
+        root.set(vpn2, table_pte(tables.l1_phys));
+        l1_table.set(vpn1, table_pte(l0_phys));
+        let mut chunk_remaining = chunk_pages;
+        while chunk_remaining != 0 {
+            l0_table.set(vpn0, 0);
+            vpn0 += 1;
+            chunk_remaining -= 1;
+        }
+        let Some(next_virt) = virt.checked_add(chunk_pages * page_size) else {
+            return false;
+        };
+        virt = next_virt;
+        remaining -= chunk_pages;
     }
     true
 }
@@ -352,6 +414,58 @@ pub fn round_up(value: usize, align: usize) -> Option<usize> {
 
 fn sv39_index(virt: usize, shift: usize) -> usize {
     (virt >> shift) & 0x1ff
+}
+
+fn install_range_valid(tables: PageTableInstallRange) -> bool {
+    let vpn1_start = sv39_index(tables.window_start(), 21);
+    tables.ready()
+        && sv39_index(tables.window_start(), 12) == 0
+        && vpn1_start
+            .checked_add(tables.l0_table_count())
+            .is_some_and(|vpn1_end| vpn1_end <= PAGE_TABLE_ENTRIES)
+}
+
+fn range_within_install_range(
+    tables: PageTableInstallRange,
+    virt_start: usize,
+    bytes: usize,
+) -> bool {
+    let Some(virt_end) = virt_start.checked_add(bytes) else {
+        return false;
+    };
+    virt_start >= tables.window_start() && virt_end <= tables.window_end()
+}
+
+fn install_window_index(tables: PageTableInstallRange, virt: usize) -> Option<usize> {
+    let offset = virt.checked_sub(tables.window_start())?;
+    let window_size = tables.l0_window_size();
+    if window_size == 0 {
+        return None;
+    }
+    let index = offset / window_size;
+    if index < tables.l0_table_count {
+        Some(index)
+    } else {
+        None
+    }
+}
+
+fn l0_table_addr(tables: PageTableInstallRange, index: usize) -> Option<usize> {
+    if index >= tables.l0_table_count {
+        return None;
+    }
+    tables
+        .l0_base_addr
+        .checked_add(index.checked_mul(core::mem::size_of::<PageTablePage>())?)
+}
+
+fn l0_table_phys(tables: PageTableInstallRange, index: usize) -> Option<usize> {
+    if index >= tables.l0_table_count {
+        return None;
+    }
+    tables
+        .l0_base_phys
+        .checked_add(index.checked_mul(core::mem::size_of::<PageTablePage>())?)
 }
 
 fn table_pte(table_addr: usize) -> usize {

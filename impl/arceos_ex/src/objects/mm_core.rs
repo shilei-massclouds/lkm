@@ -3252,7 +3252,9 @@ pub struct VmallocAllocator {
     page_table_install_range: PageTableInstallRange,
     runtime_mapping_window_start: usize,
     runtime_mapping_window_end: usize,
-    cross_window_mapping_deferred: bool,
+    runtime_mapping_window_count: usize,
+    multi_window_mapping_supported: bool,
+    preallocated_mapping_window_bound: bool,
     duplicate_area_mapping_rejected: bool,
     next_vaddr: usize,
     area_count: usize,
@@ -3282,7 +3284,9 @@ impl VmallocAllocator {
             page_table_install_range: PageTableInstallRange::empty(),
             runtime_mapping_window_start: 0,
             runtime_mapping_window_end: 0,
-            cross_window_mapping_deferred: false,
+            runtime_mapping_window_count: 0,
+            multi_window_mapping_supported: false,
+            preallocated_mapping_window_bound: false,
             duplicate_area_mapping_rejected: false,
             next_vaddr: 0,
             area_count: 0,
@@ -3352,6 +3356,7 @@ impl VmallocAllocator {
     pub const fn runtime_mapping_window_ready(&self) -> bool {
         self.runtime_mapping_window_start != 0
             && self.runtime_mapping_window_start < self.runtime_mapping_window_end
+            && self.runtime_mapping_window_count != 0
     }
 
     #[cfg(checkpoint_handler_vmalloc_mapping)]
@@ -3364,8 +3369,17 @@ impl VmallocAllocator {
         self.runtime_mapping_window_end
     }
 
-    pub const fn cross_window_mapping_deferred(&self) -> bool {
-        self.cross_window_mapping_deferred
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn runtime_mapping_window_count(&self) -> usize {
+        self.runtime_mapping_window_count
+    }
+
+    pub const fn multi_window_mapping_supported(&self) -> bool {
+        self.multi_window_mapping_supported
+    }
+
+    pub const fn preallocated_mapping_window_bound(&self) -> bool {
+        self.preallocated_mapping_window_bound
     }
 
     pub const fn duplicate_area_mapping_rejected(&self) -> bool {
@@ -3417,7 +3431,9 @@ impl VmallocAllocator {
         self.runtime_page_table_mapping_ready = self.page_table_install_range.ready();
         self.runtime_mapping_window_start = self.page_table_install_range.window_start();
         self.runtime_mapping_window_end = self.page_table_install_range.window_end();
-        self.cross_window_mapping_deferred = true;
+        self.runtime_mapping_window_count = self.page_table_install_range.l0_table_count();
+        self.multi_window_mapping_supported = self.runtime_mapping_window_count > 1;
+        self.preallocated_mapping_window_bound = true;
         self.duplicate_area_mapping_rejected = true;
         self.next_vaddr = self.address_space.start();
         self.reclaim_hook_ready = true;

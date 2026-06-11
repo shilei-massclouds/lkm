@@ -943,7 +943,8 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_mapping_policy_external(VmallocAllocator);
                     vmalloc_allocator_physical_resource_policy_external(VmallocAllocator);
                     vmalloc_allocator_runtime_mapping_window_bound(VmallocAllocator, PageTableCaches);
-                    vmalloc_allocator_cross_window_mapping_deferred(VmallocAllocator);
+                    vmalloc_allocator_multi_window_mapping_supported(VmallocAllocator);
+                    vmalloc_allocator_preallocated_mapping_window_bound(VmallocAllocator);
                     vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
@@ -970,7 +971,8 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_mapping_policy_external(VmallocAllocator);
             vmalloc_allocator_physical_resource_policy_external(VmallocAllocator);
             vmalloc_allocator_runtime_mapping_window_bound(VmallocAllocator, PageTableCaches);
-            vmalloc_allocator_cross_window_mapping_deferred(VmallocAllocator);
+            vmalloc_allocator_multi_window_mapping_supported(VmallocAllocator);
+            vmalloc_allocator_preallocated_mapping_window_bound(VmallocAllocator);
             vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
         }
