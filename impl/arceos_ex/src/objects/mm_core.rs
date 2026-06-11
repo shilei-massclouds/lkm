@@ -20,6 +20,9 @@ use crate::{arch::riscv64::csr, trace::Checkpoint};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
 
+#[cfg(checkpoint_handler_vmalloc_mapping)]
+use super::page_table::unmap_page_range_runtime;
+
 const MAX_BOOT_ZONES: usize = 3;
 const MAX_KMALLOC_CACHES: usize = 11;
 const MAX_KMALLOC_SLABS: usize = 32;
@@ -3027,6 +3030,7 @@ pub struct VmapArea {
     busy: bool,
     vm_struct_metadata_ready: bool,
     vmap_area_metadata_ready: bool,
+    released: bool,
 }
 
 impl VmapArea {
@@ -3039,6 +3043,7 @@ impl VmapArea {
             busy: false,
             vm_struct_metadata_ready: false,
             vmap_area_metadata_ready: false,
+            released: false,
         }
     }
 
@@ -3051,7 +3056,17 @@ impl VmapArea {
             busy: true,
             vm_struct_metadata_ready: true,
             vmap_area_metadata_ready: true,
+            released: false,
         }
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    const fn release(mut self) -> Self {
+        self.busy = false;
+        self.vm_struct_metadata_ready = false;
+        self.vmap_area_metadata_ready = false;
+        self.released = true;
+        self
     }
 
     pub const fn index(self) -> usize {
@@ -3073,6 +3088,11 @@ impl VmapArea {
 
     pub const fn busy(self) -> bool {
         self.busy
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn released(self) -> bool {
+        self.released
     }
 
     #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
@@ -3104,6 +3124,7 @@ pub struct VmapMapping {
     protection: PageProtection,
     installed: bool,
     record_created: bool,
+    removed: bool,
 }
 
 impl VmapMapping {
@@ -3116,6 +3137,7 @@ impl VmapMapping {
             protection: PageProtection::IoMemory,
             installed: false,
             record_created: false,
+            removed: false,
         }
     }
 
@@ -3134,7 +3156,15 @@ impl VmapMapping {
             protection,
             installed: true,
             record_created: true,
+            removed: false,
         }
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    const fn remove(mut self) -> Self {
+        self.installed = false;
+        self.removed = true;
+        self
     }
 
     #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
@@ -3170,6 +3200,11 @@ impl VmapMapping {
     #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
     pub const fn record_created(self) -> bool {
         self.record_created
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn removed(self) -> bool {
+        self.removed
     }
 
     pub const fn uses_io_memory_protection(self) -> bool {
@@ -3401,6 +3436,50 @@ impl VmallocAllocator {
         Some(mapping)
     }
 
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub fn unmap_page_range(&mut self, mapping: VmapMapping) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || !self.page_range_mapping_api_ready
+            || !self.runtime_page_table_mapping_ready
+            || !mapping.record_created
+            || !mapping.installed
+            || mapping.removed
+            || !self.area_known(mapping.area)
+            || !self.mapping_known(mapping)
+        {
+            return false;
+        }
+
+        if !unmap_page_range_runtime(
+            self.page_table_install_range,
+            mapping.area.virt_base(),
+            mapping.size,
+            self.page_size(),
+        ) {
+            return false;
+        }
+        csr::sfence_vma();
+
+        self.mappings[mapping.index] = mapping.remove();
+        true
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub fn free_vm_area(&mut self, area: VmapArea) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || !self.vmap_area_api_ready
+            || !area.busy()
+            || area.released
+            || !self.area_known(area)
+            || self.area_has_installed_mapping(area)
+        {
+            return false;
+        }
+
+        self.areas[area.index()] = area.release();
+        true
+    }
+
     #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
     pub fn area(&self, index: usize) -> Option<VmapArea> {
         if index < self.area_count {
@@ -3421,6 +3500,24 @@ impl VmallocAllocator {
 
     fn area_known(&self, area: VmapArea) -> bool {
         area.busy() && area.index() < self.area_count && self.areas[area.index()] == area
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    fn mapping_known(&self, mapping: VmapMapping) -> bool {
+        mapping.index < self.mapping_count && self.mappings[mapping.index] == mapping
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    fn area_has_installed_mapping(&self, area: VmapArea) -> bool {
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = self.mappings[index];
+            if mapping.area == area && mapping.installed && !mapping.removed {
+                return true;
+            }
+            index += 1;
+        }
+        false
     }
 
     const fn page_size(&self) -> usize {

@@ -52,6 +52,7 @@ predicate arceos_ex_must_page_table_lock_cache_named_page_ptl() -> bool;
 predicate arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_and_execute_mappings() -> bool;
 predicate arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects() -> bool;
 predicate arceos_ex_must_vmalloc_map_page_range_record_each_mapping_action() -> bool;
+predicate arceos_ex_must_vmalloc_unmap_before_free_vmap_area() -> bool;
 predicate arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external_to_vmalloc() -> bool;
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
@@ -467,6 +468,16 @@ type ArceosExMmCoreInitCodingMust {
          * table entries. Reusing a global "mapping ready" bit is not enough.
          */
         arceos_ex_must_vmalloc_map_page_range_record_each_mapping_action();
+
+        /*
+         * Unmap/free boundary:
+         *
+         * VmallocAllocator must tear down installed page table mappings before
+         * releasing the corresponding vmap area metadata. The ioremap layer may
+         * request this flow, but the actual VA/PTE teardown remains owned by
+         * vmalloc/vmap.
+         */
+        arceos_ex_must_vmalloc_unmap_before_free_vmap_area();
 
         /*
          * Ioremap/vmalloc split:

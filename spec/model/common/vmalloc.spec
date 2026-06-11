@@ -120,6 +120,34 @@ type VmallocAllocatorType: MemoryObject {
         }
 
         /*
+         * UnmapPageRange corresponds to the vmalloc/vmap page-table teardown
+         * path used by vunmap()/iounmap(): remove the installed PTEs for a
+         * concrete mapping record before the vmap area metadata is released.
+         */
+        Action::UnmapPageRange(area: VmapAreaRef, mapping: VmapMappingRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                SwapperVm.state == State::Online;
+                PageTableCaches.state == State::Ready;
+                vmalloc_allocator_page_range_mapping_api_ready(self);
+                vmalloc_allocator_executes_page_table_mappings(self, SwapperVm);
+                vmalloc_allocator_runtime_page_table_mapping_ready(self, PageTableCaches);
+                vmap_area_ref_ready(area);
+                vmap_area_allocated(area, self);
+                vmap_mapping_ref_ready(mapping);
+                vmap_mapping_area_bound(mapping, area);
+                vmap_mapping_page_range_installed(mapping, SwapperVm);
+            }
+            ensures {
+                vmap_mapping_page_range_removed(mapping, SwapperVm);
+            }
+            deferred {
+                "Full vunmap/vfree cache/TLB batching, lazy purge, and per-cpu deferred free ordering are deferred to later vmalloc teardown modeling.";
+            }
+        }
+
+        /*
          * FreeVmArea models releasing a reserved vmap area and its metadata.
          * Full TLB/cache ordering is deferred to later vmalloc teardown work.
          */

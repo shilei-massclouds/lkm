@@ -961,6 +961,12 @@ ns16550a 或 console 专用路径。
 `VMALLOC_START` 起始的首个 L1/L0 页表窗口，但该限制必须通过 ready/failure fact 暴露，后续再泛化到完整
 `VMALLOC_START..VMALLOC_END`。
 
+`VmallocAllocator.unmap_page_range()` / `free_vm_area()` 必须保持 Linux-like teardown 顺序：先清除
+对应 `VmapMapping` 的页表映射并记录 removed fact，再释放 `VmapArea` 的 busy/`vm_struct`/`vmap_area`
+metadata。重复 unmap、重复 free、未 unmap 就 free 都必须失败。当前第一轮实现只做同步拆映射和元数据释放；
+完整 `vunmap/vfree` 的 cache/TLB batching、lazy purge、per-CPU deferred free 和 VA 区间复用仍 deferred。
+`Ioremap.iounmap()` 后续应只请求这条 vmalloc/vmap teardown 路径，不应自行清页表或维护 vmap free-list。
+
 `Ioremap` 是 MMIO 策略调用方：它负责从设备资源得到物理 MMIO range、选择 `VM_IOREMAP` flag、
 选择 IO memory protection、返回 `membase`/`__iomem` 语义并记录 not-linear-direct-map 事实。它不得维护
 自己的 vmap bump allocator、不得持有 `next_vaddr` 这类 area 分配 cursor，也不得直接越过

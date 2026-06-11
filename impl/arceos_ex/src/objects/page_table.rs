@@ -227,6 +227,47 @@ pub fn map_page_range_runtime(
     true
 }
 
+#[cfg(checkpoint_handler_vmalloc_mapping)]
+pub fn unmap_page_range_runtime(
+    tables: PageTableInstallRange,
+    virt_start: usize,
+    bytes: usize,
+    page_size: usize,
+) -> bool {
+    if !tables.ready()
+        || bytes == 0
+        || !aligned(virt_start, page_size)
+        || !page_size.is_power_of_two()
+    {
+        return false;
+    }
+
+    let Some(covered) = round_up(bytes, page_size) else {
+        return false;
+    };
+    let root = unsafe { &mut *(tables.root_addr as *mut PageTablePage) };
+    let l1_table = unsafe { &mut *(tables.l1_addr as *mut PageTablePage) };
+    let l0_table = unsafe { &mut *(tables.l0_addr as *mut PageTablePage) };
+    let vpn2 = sv39_index(virt_start, 30);
+    let vpn1 = sv39_index(virt_start, 21);
+    let mut vpn0 = sv39_index(virt_start, 12);
+    let page_count = covered / page_size;
+    let Some(vpn0_end) = vpn0.checked_add(page_count) else {
+        return false;
+    };
+    if vpn0_end > PAGE_TABLE_ENTRIES {
+        return false;
+    }
+
+    root.set(vpn2, table_pte(tables.l1_phys));
+    l1_table.set(vpn1, table_pte(tables.l0_phys));
+    for _ in 0..page_count {
+        l0_table.set(vpn0, 0);
+        vpn0 += 1;
+    }
+    true
+}
+
 pub fn map_linear_pmd_range(
     config: &Config,
     kernel_image: &KernelImage,
