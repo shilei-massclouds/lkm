@@ -227,7 +227,7 @@ pub fn map_page_range_runtime(
     true
 }
 
-#[cfg(checkpoint_handler_vmalloc_mapping)]
+#[allow(dead_code)]
 pub fn unmap_page_range_runtime(
     tables: PageTableInstallRange,
     virt_start: usize,

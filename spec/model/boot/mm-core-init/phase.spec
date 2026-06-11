@@ -1074,6 +1074,40 @@ object Ioremap: AddressSpaceObject {
                     vmap_mapping_page_aligned(VmapMappingRef::IoremapDeviceMmio);
                 }
             }
+
+            Action::UnmapDeviceMmio(mapping: IoMemoryMappingRef) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    Ioremap.state == State::Ready;
+                    VmallocAllocator.state == State::Ready;
+                    ioremap_mapping_created(Ioremap, mapping);
+                    ioremap_mapping_vmap_area_bound(Ioremap, mapping, VmapAreaRef::IoremapDeviceMmio);
+                    ioremap_mapping_vmalloc_mapping_bound(Ioremap, mapping, VmapMappingRef::IoremapDeviceMmio);
+                    ioremap_mapping_membase_cookie_ready(Ioremap, mapping);
+                    vmap_area_ref_ready(VmapAreaRef::IoremapDeviceMmio);
+                    vmap_area_allocated(VmapAreaRef::IoremapDeviceMmio, VmallocAllocator);
+                    vmap_mapping_ref_ready(VmapMappingRef::IoremapDeviceMmio);
+                    vmap_mapping_area_bound(VmapMappingRef::IoremapDeviceMmio, VmapAreaRef::IoremapDeviceMmio);
+                    vmap_mapping_page_range_installed(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
+                }
+
+                drives {
+                    VmallocAllocator.Action::UnmapPageRange(
+                        area: VmapAreaRef::IoremapDeviceMmio,
+                        mapping: VmapMappingRef::IoremapDeviceMmio
+                    );
+                    VmallocAllocator.Action::FreeVmArea(
+                        area: VmapAreaRef::IoremapDeviceMmio
+                    );
+                }
+
+                ensures {
+                    ioremap_mapping_unmapped(Ioremap, mapping);
+                    ioremap_mapping_membase_cookie_retired(Ioremap, mapping);
+                    vmap_mapping_page_range_removed(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
+                    vmap_area_released(VmapAreaRef::IoremapDeviceMmio, VmallocAllocator);
+                }
+            }
         }
     }
 }

@@ -2,13 +2,16 @@ use crate::{
     checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
     checkpoint::kunit,
     context::Context,
-    objects::mm_core::{GfpFlags, PageProtection, PageRef, VmapArea, VmapAreaFlags, VmapMapping},
+    objects::{
+        device::DeviceRef,
+        mm_core::{GfpFlags, PageProtection, PageRef, VmapArea, VmapAreaFlags, VmapMapping},
+    },
     trace::Checkpoint,
 };
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
 const TEST_PAGE_COUNT: usize = 2;
-pub const KUNIT_CASE_COUNT: usize = 2;
+pub const KUNIT_CASE_COUNT: usize = 3;
 
 pub const HANDLER: Handler = Handler {
     name: "vmalloc_mapping",
@@ -31,6 +34,12 @@ fn run(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
         ctx,
         "vmalloc_mapping.unmap_free",
         run_unmap_free,
+    ) || !run_case(
+        total,
+        checkpoint,
+        ctx,
+        "vmalloc_mapping.ioremap_iounmap",
+        run_ioremap_iounmap,
     ) {
         CheckpointOutcome::FailAndShutdown
     } else {
@@ -91,6 +100,22 @@ fn run_unmap_free(ctx: &mut Context) -> bool {
     };
 
     let passed = run_unmap_free_with_page(ctx, page_size, page.phys);
+    passed
+        && ctx
+            .page_allocator
+            .free_pages(page.page, 0, &ctx.page_metadata_map)
+}
+
+fn run_ioremap_iounmap(ctx: &mut Context) -> bool {
+    let page_size = ctx.config.page_size();
+    if page_size <= 64 || !page_size.is_power_of_two() {
+        return false;
+    };
+    let Some(page) = alloc_test_page(ctx) else {
+        return false;
+    };
+
+    let passed = run_ioremap_iounmap_with_page(ctx, page_size, page.phys);
     passed
         && ctx
             .page_allocator
@@ -190,6 +215,74 @@ fn run_unmap_free_with_page(ctx: &mut Context, page_size: usize, phys: usize) ->
     }
 
     teardown_mapping(allocator, area, mapping, true)
+}
+
+fn run_ioremap_iounmap_with_page(ctx: &mut Context, page_size: usize, phys: usize) -> bool {
+    let device = DeviceRef::new(usize::MAX - 1);
+    let phys_base = phys.saturating_add(16);
+    let size = 32usize;
+    let base_ioremap_count = ctx.ioremap.mapping_count();
+    let base_area_count = ctx.vmalloc_allocator.area_count();
+    let base_mapping_count = ctx.vmalloc_allocator.mapping_count();
+
+    let Some(mapping) =
+        ctx.ioremap
+            .map_device_mmio(&mut ctx.vmalloc_allocator, device, phys_base, size)
+    else {
+        return false;
+    };
+    let vmap_area = mapping.vmap_area();
+    let vmap_mapping = mapping.vmap_mapping();
+    let records_valid = mapping.active()
+        && !mapping.unmapped()
+        && mapping.device() == device
+        && mapping.phys_base() == phys_base
+        && mapping.page_phys_base() == phys
+        && mapping.mapped_size() == page_size
+        && mapping.membase() == mapping.virt_base().saturating_add(16)
+        && mapping.uses_vm_ioremap()
+        && mapping.uses_io_page_protection()
+        && ctx.ioremap.mapping_count() == base_ioremap_count.saturating_add(1)
+        && ctx.ioremap.mapping_for_device(device) == Some(mapping)
+        && ctx.vmalloc_allocator.area_count() == base_area_count.saturating_add(1)
+        && ctx.vmalloc_allocator.mapping_count() == base_mapping_count.saturating_add(1)
+        && ctx.vmalloc_allocator.area(vmap_area.index()) == Some(vmap_area)
+        && ctx.vmalloc_allocator.mapping(vmap_mapping.index()) == Some(vmap_mapping)
+        && vmap_area.busy()
+        && vmap_mapping.installed()
+        && !vmap_mapping.removed();
+    if !records_valid {
+        return false;
+    }
+
+    if !ctx
+        .ioremap
+        .iounmap(&mut ctx.vmalloc_allocator, mapping.membase())
+    {
+        return false;
+    }
+    let Some(retired_mapping) = ctx.ioremap.mapping(base_ioremap_count) else {
+        return false;
+    };
+    let Some(removed_vmap_mapping) = ctx.vmalloc_allocator.mapping(vmap_mapping.index()) else {
+        return false;
+    };
+    let Some(released_area) = ctx.vmalloc_allocator.area(vmap_area.index()) else {
+        return false;
+    };
+
+    retired_mapping.device() == device
+        && !retired_mapping.active()
+        && retired_mapping.unmapped()
+        && ctx.ioremap.mapping_for_device(device).is_none()
+        && removed_vmap_mapping.record_created()
+        && !removed_vmap_mapping.installed()
+        && removed_vmap_mapping.removed()
+        && !released_area.busy()
+        && released_area.released()
+        && !ctx
+            .ioremap
+            .iounmap(&mut ctx.vmalloc_allocator, mapping.membase())
 }
 
 struct AllocatedPage {

@@ -6,7 +6,7 @@ use super::{
     early_param::EarlyParam,
     kernel_image::KernelImage,
     memblock::MemBlock,
-    page_table::{map_page_range_runtime, PageTableInstallRange},
+    page_table::{map_page_range_runtime, unmap_page_range_runtime, PageTableInstallRange},
     per_cpu_storage::PerCpuStorage,
     raw_dtb::PhysRange,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -19,9 +19,6 @@ use super::{
 use crate::{arch::riscv64::csr, trace::Checkpoint};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
-
-#[cfg(checkpoint_handler_vmalloc_mapping)]
-use super::page_table::unmap_page_range_runtime;
 
 const MAX_BOOT_ZONES: usize = 3;
 const MAX_KMALLOC_CACHES: usize = 11;
@@ -3060,7 +3057,7 @@ impl VmapArea {
         }
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    #[allow(dead_code)]
     const fn release(mut self) -> Self {
         self.busy = false;
         self.vm_struct_metadata_ready = false;
@@ -3160,7 +3157,7 @@ impl VmapMapping {
         }
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    #[allow(dead_code)]
     const fn remove(mut self) -> Self {
         self.installed = false;
         self.removed = true;
@@ -3436,7 +3433,7 @@ impl VmallocAllocator {
         Some(mapping)
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    #[allow(dead_code)]
     pub fn unmap_page_range(&mut self, mapping: VmapMapping) -> bool {
         if self.lifecycle.state() != State::Ready
             || !self.page_range_mapping_api_ready
@@ -3464,7 +3461,7 @@ impl VmallocAllocator {
         true
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    #[allow(dead_code)]
     pub fn free_vm_area(&mut self, area: VmapArea) -> bool {
         if self.lifecycle.state() != State::Ready
             || !self.vmap_area_api_ready
@@ -3502,12 +3499,12 @@ impl VmallocAllocator {
         area.busy() && area.index() < self.area_count && self.areas[area.index()] == area
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    #[allow(dead_code)]
     fn mapping_known(&self, mapping: VmapMapping) -> bool {
         mapping.index < self.mapping_count && self.mappings[mapping.index] == mapping
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    #[allow(dead_code)]
     fn area_has_installed_mapping(&self, area: VmapArea) -> bool {
         let mut index = 0usize;
         while index < self.mapping_count {

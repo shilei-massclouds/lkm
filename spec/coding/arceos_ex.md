@@ -965,7 +965,10 @@ ns16550a 或 console 专用路径。
 对应 `VmapMapping` 的页表映射并记录 removed fact，再释放 `VmapArea` 的 busy/`vm_struct`/`vmap_area`
 metadata。重复 unmap、重复 free、未 unmap 就 free 都必须失败。当前第一轮实现只做同步拆映射和元数据释放；
 完整 `vunmap/vfree` 的 cache/TLB batching、lazy purge、per-CPU deferred free 和 VA 区间复用仍 deferred。
-`Ioremap.iounmap()` 后续应只请求这条 vmalloc/vmap teardown 路径，不应自行清页表或维护 vmap free-list。
+`Ioremap.iounmap()` 必须只请求这条 vmalloc/vmap teardown 路径：先由 `VmallocAllocator.unmap_page_range()`
+清除绑定的 `VmapMapping` 页表项，再由 `VmallocAllocator.free_vm_area()` 释放对应 vmap area metadata，
+最后把 ioremap cookie 标记为 retired/unmapped。`Ioremap` 不得自行清页表，也不得维护 vmap free-list。
+重复 `iounmap()` 或对未知 cookie 执行 `iounmap()` 必须失败。
 
 `Ioremap` 是 MMIO 策略调用方：它负责从设备资源得到物理 MMIO range、选择 `VM_IOREMAP` flag、
 选择 IO memory protection、返回 `membase`/`__iomem` 语义并记录 not-linear-direct-map 事实。它不得维护

@@ -26,6 +26,8 @@ pub struct IoMemoryMapping {
     vmap_mapping: VmapMapping,
     vm_ioremap: bool,
     io_page_protection: bool,
+    active: bool,
+    unmapped: bool,
 }
 
 impl IoMemoryMapping {
@@ -43,6 +45,8 @@ impl IoMemoryMapping {
             vmap_mapping: VmapMapping::empty(),
             vm_ioremap: false,
             io_page_protection: false,
+            active: false,
+            unmapped: false,
         }
     }
 
@@ -74,14 +78,23 @@ impl IoMemoryMapping {
         self.membase
     }
 
-    #[cfg(checkpoint_handler_console_handoff)]
+    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
     pub const fn vmap_area(self) -> VmapArea {
         self.vmap_area
     }
 
-    #[cfg(checkpoint_handler_console_handoff)]
+    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
     pub const fn vmap_mapping(self) -> VmapMapping {
         self.vmap_mapping
+    }
+
+    pub const fn active(self) -> bool {
+        self.active
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn unmapped(self) -> bool {
+        self.unmapped
     }
 
     pub const fn uses_vm_ioremap(self) -> bool {
@@ -109,6 +122,13 @@ impl IoMemoryMapping {
 
     const fn mapping_end(self) -> usize {
         self.virt_base.saturating_add(self.mapped_size)
+    }
+
+    #[allow(dead_code)]
+    const fn retire(mut self) -> Self {
+        self.active = false;
+        self.unmapped = true;
+        self
     }
 }
 
@@ -293,6 +313,8 @@ impl Ioremap {
             vmap_mapping,
             vm_ioremap: true,
             io_page_protection: true,
+            active: true,
+            unmapped: false,
         };
         if !mapping.page_aligned()
             || !mapping.membase_cookie_ready()
@@ -306,12 +328,58 @@ impl Ioremap {
         Some(mapping)
     }
 
+    #[allow(dead_code)]
+    pub fn iounmap(&mut self, vmalloc_allocator: &mut VmallocAllocator, membase: usize) -> bool {
+        let page_size = self.page_size;
+        if !self.runtime_ready() || membase == 0 || !page_size.is_power_of_two() {
+            return false;
+        }
+
+        let page_base = membase & !(page_size - 1);
+        let Some(index) = self.mapping_index_for_page_base(page_base) else {
+            return false;
+        };
+        let mapping = self.mappings[index];
+        if !mapping.active
+            || mapping.unmapped
+            || !vmalloc_allocator.unmap_page_range(mapping.vmap_mapping)
+            || !vmalloc_allocator.free_vm_area(mapping.vmap_area)
+        {
+            return false;
+        }
+
+        self.mappings[index] = mapping.retire();
+        true
+    }
+
     pub fn mapping_for_device(&self, device: DeviceRef) -> Option<IoMemoryMapping> {
         let mut index = 0usize;
         while index < self.mapping_count {
             let mapping = self.mappings[index];
-            if mapping.device() == device {
+            if mapping.active() && mapping.device() == device {
                 return Some(mapping);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub fn mapping(&self, index: usize) -> Option<IoMemoryMapping> {
+        if index < self.mapping_count {
+            Some(self.mappings[index])
+        } else {
+            None
+        }
+    }
+
+    #[allow(dead_code)]
+    fn mapping_index_for_page_base(&self, page_base: usize) -> Option<usize> {
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = self.mappings[index];
+            if mapping.active && !mapping.unmapped && mapping.virt_base == page_base {
+                return Some(index);
             }
             index += 1;
         }

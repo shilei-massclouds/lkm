@@ -54,6 +54,7 @@ predicate arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects() -> bool;
 predicate arceos_ex_must_vmalloc_map_page_range_record_each_mapping_action() -> bool;
 predicate arceos_ex_must_vmalloc_unmap_before_free_vmap_area() -> bool;
 predicate arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external_to_vmalloc() -> bool;
+predicate arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only() -> bool;
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
 predicate arceos_ex_must_startup_drive_boot_then_interrupt_then_payload() -> bool;
@@ -489,6 +490,16 @@ type ArceosExMmCoreInitCodingMust {
          * write-combine/normal memory attributes.
          */
         arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external_to_vmalloc();
+
+        /*
+         * Iounmap boundary:
+         *
+         * Ioremap.iounmap() must retire the ioremap cookie by requesting
+         * VmallocAllocator.unmap_page_range() followed by free_vm_area().
+         * Ioremap must not clear PTEs itself or maintain vmap free-space
+         * metadata.
+         */
+        arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only();
 
         /*
          * mm_struct only:

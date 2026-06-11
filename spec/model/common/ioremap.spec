@@ -11,6 +11,9 @@
  * - Ioremap decides the device physical resource and IO protection policy, but
  *   the vmap area reservation and VA/PA page-table mapping record are owned by
  *   the vmalloc/vmap subsystem.
+ * - iounmap() retires the ioremap cookie by asking vmalloc/vmap to tear down
+ *   the bound mapping and release the vmap area; it does not directly clear
+ *   PTEs or maintain vmap free-space metadata itself.
  * - This object is runtime ioremap, not EarlyIoremap/FixMap boot-time slots.
  */
 
@@ -51,3 +54,5 @@ predicate ioremap_mapping_uses_io_page_protection<T, M>(ioremap: T, mapping: M) 
 predicate ioremap_mapping_page_aligned<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_membase_cookie_ready<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_not_linear_direct_map<T, M>(ioremap: T, mapping: M) -> bool;
+predicate ioremap_mapping_unmapped<T, M>(ioremap: T, mapping: M) -> bool;
+predicate ioremap_mapping_membase_cookie_retired<T, M>(ioremap: T, mapping: M) -> bool;
