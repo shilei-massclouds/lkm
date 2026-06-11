@@ -410,13 +410,19 @@ consdev、不得完成 handoff，也不得影响 boot console route。dummy/non-
 临时 console 请求对象，不得为了测试去修改 DeviceTree 或平台设备拓扑。重复注册同一个 preferred serial console
 应保持幂等，不得重复分配 port、重复增加 registry entry 或重复执行 boot console unregister。
 
-第一轮可只记录 `PrintkBuffer` route 已切换到 serial console 的事实，实际字节输出仍暂由 SBI early console drain；
-后续补 UART MMIO polling write 后端时，必须消费 `Uart8250Port.membase` 和 `Serial8250Console.write_backend_ready`
-事实，不能直接回退到 SBI 路径伪装成真实 UART 写。
+handoff 后 `printk::write_str()` 或等价输出入口必须经 `ConsoleRegistry` route 分发到 `Serial8250Console`，
+不得继续停留在只写 `PrintkBuffer` 的事实层。当前 serial8250 后端必须建模为无中断 polling write：
+每个待发送字符按 Linux `uart_console_write()` 语义处理换行 CRLF，发送前观察 LSR/THRE ready 条件，然后写 THR/TX；
+寄存器地址必须从 `Uart8250Port.membase` 加 `reg_shift` 派生，并尊重 `reg_io_width`。代码只有在
+`VmallocAllocator.map_page_range()` 已把 vmap VA/PA 映射安装进当前 swapper 页表并记录 runtime mapping ready
+后，才能对 `membase` 派生出的 LSR/THR 地址做 `read_volatile`/`write_volatile`；不得直接访问 `mapbase`，
+也不得用 SBI 路径伪装真实 UART 写。由于 PLIC/IRQ 驱动尚不可用，本阶段不得实现或声明 interrupt-driven console
+output ready，只能记录 IRQ 输出路径 deferred。
 
 smoke/KUnit 应覆盖：`stdout-path` 命中后发生 `Uart8250Port` 与 `Serial8250Console` 注册、非 stdout-path 设备不抢占
 console、dummy/non-match console 不改变 registry、默认策略下 boot console 注销、`keep_bootcon` 保留 boot console、
-handoff 后 printk route facts 符合预期，以及 serial console 的 `membase` 来自 ioremap/vmalloc 映射而不是 direct map。
+handoff 后 printk route facts 符合预期、serial console 的 `membase` 来自 ioremap/vmalloc 映射而不是 direct map，
+以及 serial8250 write 后端记录 polling、LSR/THR、membase、non-SBI、IRQ deferred 事实。
 
 ## RootfsPhase 编码约束
 
@@ -915,6 +921,12 @@ MMIO 属性策略层。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `
 以及维护 `vm_struct`/`vmap_area` 元数据。当前第一轮实现可以只支持 runtime `ioremap` 需要的
 `VM_IOREMAP` area 和 IO memory protection，但 API 命名和状态事实必须保持通用，不能把接口写成
 ns16550a 或 console 专用路径。
+
+`VmallocAllocator.map_page_range()` 的 installed fact 必须对应当前 swapper 页表里的真实 vmap VA/PA
+映射安装。若 `PageTableCaches` 没有提供 vmalloc install range，或映射跨出当前已预分配的最小 vmalloc
+页表范围，实现必须返回失败，不得只记录 `VmapMapping.installed=true`。当前实现可以把支持范围限制在
+`VMALLOC_START` 起始的首个 L1/L0 页表窗口，但该限制必须通过 ready/failure fact 暴露，后续再泛化到完整
+`VMALLOC_START..VMALLOC_END`。
 
 `Ioremap` 是 MMIO 策略调用方：它负责从设备资源得到物理 MMIO range、选择 `VM_IOREMAP` flag、
 选择 IO memory protection、返回 `membase`/`__iomem` 语义并记录 not-linear-direct-map 事实。它不得维护

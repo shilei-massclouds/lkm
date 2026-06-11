@@ -1,6 +1,7 @@
 use super::{
     boot_param::BootParam,
     memblock::MemBlock,
+    ns16550a,
     per_cpu_storage::PerCpuStorage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
@@ -215,6 +216,9 @@ pub fn write_str(message: &str) {
             .as_mut()
             .unwrap()
             .write_bytes(message.as_bytes());
+    }
+    if route() == PrintkRoute::Serial8250 {
+        let _ = ns16550a::write_console_bytes(message.as_bytes());
     }
 }
 

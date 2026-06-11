@@ -10,6 +10,7 @@ const PTE_X: usize = 1 << 3;
 const PTE_A: usize = 1 << 6;
 const PTE_D: usize = 1 << 7;
 const PTE_TABLE: usize = PTE_V;
+const PTE_LEAF_RW: usize = PTE_V | PTE_R | PTE_W | PTE_A | PTE_D;
 const PTE_LEAF_RWX: usize = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
 
 #[repr(align(4096))]
@@ -30,6 +31,51 @@ impl PageTablePage {
 
     fn set(&mut self, index: usize, value: usize) {
         self.entries[index] = value;
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct PageTableInstallRange {
+    root_addr: usize,
+    l1_addr: usize,
+    l0_addr: usize,
+    l1_phys: usize,
+    l0_phys: usize,
+}
+
+impl PageTableInstallRange {
+    pub const fn empty() -> Self {
+        Self {
+            root_addr: 0,
+            l1_addr: 0,
+            l0_addr: 0,
+            l1_phys: 0,
+            l0_phys: 0,
+        }
+    }
+
+    pub const fn new(
+        root_addr: usize,
+        l1_addr: usize,
+        l0_addr: usize,
+        l1_phys: usize,
+        l0_phys: usize,
+    ) -> Self {
+        Self {
+            root_addr,
+            l1_addr,
+            l0_addr,
+            l1_phys,
+            l0_phys,
+        }
+    }
+
+    pub const fn ready(self) -> bool {
+        self.root_addr != 0
+            && self.l1_addr != 0
+            && self.l0_addr != 0
+            && self.l1_phys != 0
+            && self.l0_phys != 0
     }
 }
 
@@ -128,6 +174,56 @@ pub fn map_page_range(
     }
     l1_table.set(vpn1, table_pte(l0_table_phys));
     root.set(vpn2, table_pte(l1_table_phys));
+    true
+}
+
+pub fn map_page_range_runtime(
+    tables: PageTableInstallRange,
+    virt_start: usize,
+    phys_start: usize,
+    bytes: usize,
+    page_size: usize,
+) -> bool {
+    if !tables.ready()
+        || bytes == 0
+        || !aligned(virt_start, page_size)
+        || !page_size.is_power_of_two()
+    {
+        return false;
+    }
+
+    let page_offset = phys_start & (page_size - 1);
+    let phys_base = phys_start - page_offset;
+    let Some(mapped_bytes) = bytes.checked_add(page_offset) else {
+        return false;
+    };
+    let Some(covered) = round_up(mapped_bytes, page_size) else {
+        return false;
+    };
+    let root = unsafe { &mut *(tables.root_addr as *mut PageTablePage) };
+    let l1_table = unsafe { &mut *(tables.l1_addr as *mut PageTablePage) };
+    let l0_table = unsafe { &mut *(tables.l0_addr as *mut PageTablePage) };
+    let vpn2 = sv39_index(virt_start, 30);
+    let vpn1 = sv39_index(virt_start, 21);
+    let mut vpn0 = sv39_index(virt_start, 12);
+    let page_count = covered / page_size;
+    let Some(vpn0_end) = vpn0.checked_add(page_count) else {
+        return false;
+    };
+    if vpn0_end > PAGE_TABLE_ENTRIES {
+        return false;
+    }
+    let mut phys = phys_base;
+    for _ in 0..page_count {
+        l0_table.set(vpn0, leaf_pte(phys, PTE_LEAF_RW));
+        vpn0 += 1;
+        let Some(next_phys) = phys.checked_add(page_size) else {
+            return false;
+        };
+        phys = next_phys;
+    }
+    l1_table.set(vpn1, table_pte(tables.l0_phys));
+    root.set(vpn2, table_pte(tables.l1_phys));
     true
 }
 

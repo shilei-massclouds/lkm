@@ -237,12 +237,14 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
 }
 
 struct Ns16550aProbeDeviceScenario {
+    snapshot: Option<ConsoleProbeSnapshot>,
     fixture: PlatformBusActionsFixture,
 }
 
 impl Ns16550aProbeDeviceScenario {
     fn new() -> Self {
         Self {
+            snapshot: None,
             fixture: PlatformBusActionsFixture::new(),
         }
     }
@@ -254,6 +256,7 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
     }
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.snapshot = Some(ConsoleProbeSnapshot::take());
         self.fixture.setup_ready(assertions);
     }
 
@@ -357,6 +360,15 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
                 && ns16550a::serial8250_console_registered(),
         );
         assertions.assert(
+            "serial8250 polling write backend ready",
+            printk::serial8250_write_ready()
+                && ns16550a::serial8250_write_backend_ready()
+                && ns16550a::serial8250_write_uses_membase()
+                && ns16550a::serial8250_write_uses_lsr_thr_polling()
+                && ns16550a::serial8250_write_does_not_use_sbi()
+                && ns16550a::serial8250_interrupt_output_deferred(),
+        );
+        assertions.assert(
             "console handoff triggered",
             self.fixture.bus.ns16550a_probe_triggers_console_handoff()
                 && ns16550a::handoff_triggered()
@@ -370,6 +382,17 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
                 && !printk::boot_console_online()
                 && printk::boot_console_unregistered()
                 && printk::boot_console_removed_from_registry(),
+        );
+        let write_calls = ns16550a::serial8250_write_call_count();
+        let tx_bytes = ns16550a::serial8250_tx_byte_count();
+        printk::write_str("serial8250 smoke\n");
+        assertions.assert(
+            "serial8250 printk route uses polling backend",
+            ns16550a::serial8250_write_call_count() == write_calls.saturating_add(1)
+                && ns16550a::serial8250_tx_byte_count()
+                    == tx_bytes.saturating_add("serial8250 smoke\n".len() + 1)
+                && ns16550a::serial8250_mmio_writes_performed()
+                && !ns16550a::serial8250_write_timed_out(),
         );
         let area_count = self.fixture.vmalloc_allocator.area_count();
         let mapping_count = self.fixture.vmalloc_allocator.mapping_count();
@@ -388,7 +411,11 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
         );
     }
 
-    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {
+        if let Some(snapshot) = self.snapshot.take() {
+            snapshot.restore();
+        }
+    }
 }
 
 struct ConsoleProbeSnapshot {
@@ -412,17 +439,20 @@ impl ConsoleProbeSnapshot {
 
 struct DummyConsoleSnapshot {
     registry: printk::ConsoleRegistry,
+    probe: ns16550a::Ns16550aProbeState,
 }
 
 impl DummyConsoleSnapshot {
     fn take() -> Self {
         Self {
             registry: printk::registry_snapshot(),
+            probe: ns16550a::probe_state_snapshot(),
         }
     }
 
     fn restore(self) {
         printk::restore_registry(self.registry);
+        ns16550a::restore_probe_state(self.probe);
     }
 }
 
@@ -501,6 +531,7 @@ impl SmokeScenario for Ns16550aNonStdoutProbeScenario {
                 && !self.fixture.bus.ns16550a_probe_registers_serial_console()
                 && !self.fixture.bus.ns16550a_probe_triggers_console_handoff()
                 && !ns16550a::serial8250_console_registered()
+                && !ns16550a::serial8250_write_backend_ready()
                 && !ns16550a::handoff_triggered(),
         );
         assertions.assert(
@@ -550,6 +581,7 @@ impl SmokeScenario for DummyConsoleNonStdoutScenario {
         self.snapshot = Some(DummyConsoleSnapshot::take());
         printk::reset_registry_for_smoke(false);
         printk::register_boot_console();
+        ns16550a::reset_probe_state_for_smoke();
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
@@ -560,7 +592,8 @@ impl SmokeScenario for DummyConsoleNonStdoutScenario {
             !printk::serial8250_console_registered()
                 && !printk::preferred_console_from_stdout()
                 && !printk::serial8250_consdev()
-                && !printk::serial8250_write_ready(),
+                && !printk::serial8250_write_ready()
+                && !ns16550a::serial8250_write_backend_ready(),
         );
         assertions.assert(
             "dummy console keeps boot route",
@@ -667,7 +700,12 @@ impl SmokeScenario for KeepBootconScenario {
             ns16550a::handoff_triggered()
                 && printk::serial8250_consdev()
                 && printk::serial8250_write_ready()
-                && printk::route() == printk::PrintkRoute::Serial8250,
+                && printk::route() == printk::PrintkRoute::Serial8250
+                && ns16550a::serial8250_write_backend_ready()
+                && ns16550a::serial8250_write_uses_membase()
+                && ns16550a::serial8250_write_uses_lsr_thr_polling()
+                && ns16550a::serial8250_write_does_not_use_sbi()
+                && ns16550a::serial8250_interrupt_output_deferred(),
         );
     }
 

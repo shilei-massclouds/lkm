@@ -3,7 +3,9 @@ use super::{
     fix_map::FixMap,
     kernel_image::KernelImage,
     memblock::MemBlock,
-    page_table::{aligned, map_linear_pmd_range, map_page_range, map_pmd_range},
+    page_table::{
+        aligned, map_linear_pmd_range, map_page_range, map_pmd_range, PageTableInstallRange,
+    },
     raw_dtb::RawDtb,
     state::{Lifecycle, State},
     static_page_tables,
@@ -144,9 +146,13 @@ impl StaticObjects {
 
         let root = static_page_tables::swapper_pg_dir_mut(kernel_image);
         let kernel_table = static_page_tables::swapper_kernel_pg_table_mut(kernel_image);
+        let vmalloc_l1_table = static_page_tables::swapper_vmalloc_l1_table_mut(kernel_image);
+        let vmalloc_l0_table = static_page_tables::swapper_vmalloc_l0_table_mut(kernel_image);
         let linear_tables = static_page_tables::swapper_linear_pg_tables_mut(kernel_image);
         root.clear();
         kernel_table.clear();
+        vmalloc_l1_table.clear();
+        vmalloc_l0_table.clear();
         for table in linear_tables.iter_mut() {
             table.clear();
         }
@@ -189,5 +195,22 @@ impl StaticObjects {
         }
 
         true
+    }
+
+    pub fn swapper_vmalloc_install_range(
+        &self,
+        kernel_image: &KernelImage,
+    ) -> Option<PageTableInstallRange> {
+        let root = static_page_tables::swapper_pg_dir_mut(kernel_image);
+        let vmalloc_l1_table = static_page_tables::swapper_vmalloc_l1_table_mut(kernel_image);
+        let vmalloc_l0_table = static_page_tables::swapper_vmalloc_l0_table_mut(kernel_image);
+        let root_addr = root as *mut _ as usize;
+        let l1_addr = vmalloc_l1_table as *mut _ as usize;
+        let l0_addr = vmalloc_l0_table as *mut _ as usize;
+        let l1_phys = kernel_image.runtime_to_phys(l1_addr)?;
+        let l0_phys = kernel_image.runtime_to_phys(l0_addr)?;
+        Some(PageTableInstallRange::new(
+            root_addr, l1_addr, l0_addr, l1_phys, l0_phys,
+        ))
     }
 }

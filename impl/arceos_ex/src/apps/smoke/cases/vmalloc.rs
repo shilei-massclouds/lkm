@@ -17,6 +17,7 @@ pub fn run() -> SmokeResult {
         || !vmalloc.vmap_area_metadata_ready()
         || !vmalloc.mapping_policy_external()
         || !vmalloc.physical_resource_policy_external()
+        || !vmalloc.runtime_page_table_mapping_ready()
         || !vmalloc.reclaim_hook_ready()
     {
         printk::write_str("vmalloc allocator is not ready\n");

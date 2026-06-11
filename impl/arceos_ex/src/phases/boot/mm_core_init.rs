@@ -59,7 +59,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.kernel_global_allocator.setup(&ctx.slub_allocator)?;
     ctx.dynamic_container_runtime
         .setup(&ctx.kernel_global_allocator)?;
-    ctx.page_table_caches.setup(&ctx.slub_allocator, &ctx.vm)?;
+    ctx.page_table_caches.setup(
+        &ctx.slub_allocator,
+        &ctx.vm,
+        &ctx.static_objects,
+        &ctx.kernel_image,
+    )?;
     ctx.vmalloc_allocator.setup(
         &ctx.slub_allocator,
         &ctx.page_table_caches,
@@ -169,6 +174,7 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.vmalloc_allocator.vmap_area_metadata_ready()
         && ctx.vmalloc_allocator.mapping_policy_external()
         && ctx.vmalloc_allocator.physical_resource_policy_external()
+        && ctx.vmalloc_allocator.runtime_page_table_mapping_ready()
         && ctx.ioremap.state() == State::Ready
         && ctx.ioremap.runtime_ready()
         && ctx.ioremap.uses_vmalloc_area_management()

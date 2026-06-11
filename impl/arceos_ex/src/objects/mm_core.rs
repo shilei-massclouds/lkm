@@ -4,16 +4,19 @@ use super::{
     cpu_hotplug::CpuHotplugState,
     dma_cache_policy::DmaCachePolicy,
     early_param::EarlyParam,
+    kernel_image::KernelImage,
     memblock::MemBlock,
+    page_table::{map_page_range_runtime, PageTableInstallRange},
     per_cpu_storage::PerCpuStorage,
     raw_dtb::PhysRange,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::{StaticBranch, StaticKey},
+    static_objects::StaticObjects,
     vm::Vm,
     workqueue::Workqueue,
     zones::{ZoneKind, Zones},
 };
-use crate::trace::Checkpoint;
+use crate::{arch::riscv64::csr, trace::Checkpoint};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
 
@@ -2874,6 +2877,7 @@ impl KmallocCaches {
 pub struct PageTableCaches {
     lifecycle: Lifecycle,
     lock_cache: PageTableLockCache,
+    vmalloc_install_range: PageTableInstallRange,
     vmalloc_pgtable_preallocated: bool,
     modules_path_trimmed: bool,
     memory_hotplug_path_trimmed: bool,
@@ -2884,6 +2888,7 @@ impl PageTableCaches {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             lock_cache: PageTableLockCache::new(),
+            vmalloc_install_range: PageTableInstallRange::empty(),
             vmalloc_pgtable_preallocated: false,
             modules_path_trimmed: false,
             memory_hotplug_path_trimmed: false,
@@ -2902,7 +2907,17 @@ impl PageTableCaches {
         self.vmalloc_pgtable_preallocated
     }
 
-    pub fn setup(&mut self, slub_allocator: &SlubAllocator, vm: &Vm) -> EventResult {
+    pub const fn vmalloc_install_range(&self) -> PageTableInstallRange {
+        self.vmalloc_install_range
+    }
+
+    pub fn setup(
+        &mut self,
+        slub_allocator: &SlubAllocator,
+        vm: &Vm,
+        static_objects: &StaticObjects,
+        kernel_image: &KernelImage,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || slub_allocator.state() != State::Ready
             || vm.state() != State::Online
@@ -2911,7 +2926,13 @@ impl PageTableCaches {
             return self.failed_setup();
         }
 
+        let Some(vmalloc_install_range) =
+            static_objects.swapper_vmalloc_install_range(kernel_image)
+        else {
+            return self.failed_setup();
+        };
         self.lock_cache.setup(slub_allocator)?;
+        self.vmalloc_install_range = vmalloc_install_range;
         self.vmalloc_pgtable_preallocated = true;
         self.modules_path_trimmed = true;
         self.memory_hotplug_path_trimmed = true;
@@ -3138,6 +3159,8 @@ pub struct VmallocAllocator {
     vmap_area_metadata_ready: bool,
     mapping_policy_external: bool,
     physical_resource_policy_external: bool,
+    runtime_page_table_mapping_ready: bool,
+    page_table_install_range: PageTableInstallRange,
     next_vaddr: usize,
     area_count: usize,
     mapping_count: usize,
@@ -3162,6 +3185,8 @@ impl VmallocAllocator {
             vmap_area_metadata_ready: false,
             mapping_policy_external: false,
             physical_resource_policy_external: false,
+            runtime_page_table_mapping_ready: false,
+            page_table_install_range: PageTableInstallRange::empty(),
             next_vaddr: 0,
             area_count: 0,
             mapping_count: 0,
@@ -3223,6 +3248,10 @@ impl VmallocAllocator {
         self.physical_resource_policy_external
     }
 
+    pub const fn runtime_page_table_mapping_ready(&self) -> bool {
+        self.runtime_page_table_mapping_ready
+    }
+
     pub const fn area_count(&self) -> usize {
         self.area_count
     }
@@ -3262,6 +3291,8 @@ impl VmallocAllocator {
         self.vmap_area_metadata_ready = true;
         self.mapping_policy_external = true;
         self.physical_resource_policy_external = true;
+        self.page_table_install_range = page_table_caches.vmalloc_install_range();
+        self.runtime_page_table_mapping_ready = self.page_table_install_range.ready();
         self.next_vaddr = self.address_space.start();
         self.reclaim_hook_ready = true;
 
@@ -3306,6 +3337,7 @@ impl VmallocAllocator {
     ) -> Option<VmapMapping> {
         if self.lifecycle.state() != State::Ready
             || !self.page_range_mapping_api_ready
+            || !self.runtime_page_table_mapping_ready
             || self.mapping_count >= MAX_VMAP_MAPPINGS
             || phys_base == 0
             || size == 0
@@ -3317,6 +3349,17 @@ impl VmallocAllocator {
         {
             return None;
         }
+
+        if !map_page_range_runtime(
+            self.page_table_install_range,
+            area.virt_base(),
+            phys_base,
+            size,
+            self.page_size(),
+        ) {
+            return None;
+        }
+        csr::sfence_vma();
 
         let mapping = VmapMapping::new(self.mapping_count, area, phys_base, size, protection);
         self.mappings[self.mapping_count] = mapping;

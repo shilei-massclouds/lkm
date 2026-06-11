@@ -58,6 +58,10 @@ predicate serial8250_console_consdev<T>(console: T) -> bool;
 predicate serial8250_console_printbuffer_suppressed_for_boot_handoff<T>(console: T) -> bool;
 predicate serial8250_console_matches_stdout_path<T, D>(console: T, device_tree: D) -> bool;
 predicate serial8250_console_write_backend_ready<T, P>(console: T, port: P) -> bool;
+predicate serial8250_console_write_uses_uart_membase<T, P>(console: T, port: P) -> bool;
+predicate serial8250_console_write_uses_lsr_thr_polling<T, P>(console: T, port: P) -> bool;
+predicate serial8250_console_write_does_not_use_sbi<T>(console: T) -> bool;
+predicate serial8250_console_interrupt_output_deferred_until_irqchip<T>(console: T) -> bool;
 
 predicate console_handoff_ready<T, B, S>(handoff: T, boot_console: B, serial_console: S) -> bool;
 predicate console_handoff_triggered_by_register_console<T, R>(handoff: T, registry: R) -> bool;
@@ -232,6 +236,10 @@ object Serial8250Console: ConsoleObject {
                     serial8250_console_printbuffer_suppressed_for_boot_handoff(Serial8250Console);
                     serial8250_console_matches_stdout_path(Serial8250Console, DeviceTree);
                     serial8250_console_write_backend_ready(Serial8250Console, Uart8250Port);
+                    serial8250_console_write_uses_uart_membase(Serial8250Console, Uart8250Port);
+                    serial8250_console_write_uses_lsr_thr_polling(Serial8250Console, Uart8250Port);
+                    serial8250_console_write_does_not_use_sbi(Serial8250Console);
+                    serial8250_console_interrupt_output_deferred_until_irqchip(Serial8250Console);
                 }
             }
         }
@@ -245,6 +253,10 @@ object Serial8250Console: ConsoleObject {
             serial8250_console_printbuffer_suppressed_for_boot_handoff(Serial8250Console);
             serial8250_console_matches_stdout_path(Serial8250Console, DeviceTree);
             serial8250_console_write_backend_ready(Serial8250Console, Uart8250Port);
+            serial8250_console_write_uses_uart_membase(Serial8250Console, Uart8250Port);
+            serial8250_console_write_uses_lsr_thr_polling(Serial8250Console, Uart8250Port);
+            serial8250_console_write_does_not_use_sbi(Serial8250Console);
+            serial8250_console_interrupt_output_deferred_until_irqchip(Serial8250Console);
         }
     }
 }

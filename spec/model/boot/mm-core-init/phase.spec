@@ -939,6 +939,7 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_maintains_vm_struct_metadata(VmallocAllocator);
                     vmalloc_allocator_maintains_vmap_area_metadata(VmallocAllocator);
                     vmalloc_allocator_executes_page_table_mappings(VmallocAllocator, SwapperVm);
+                    vmalloc_allocator_runtime_page_table_mapping_ready(VmallocAllocator, PageTableCaches);
                     vmalloc_allocator_mapping_policy_external(VmallocAllocator);
                     vmalloc_allocator_physical_resource_policy_external(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
@@ -962,6 +963,7 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_maintains_vm_struct_metadata(VmallocAllocator);
             vmalloc_allocator_maintains_vmap_area_metadata(VmallocAllocator);
             vmalloc_allocator_executes_page_table_mappings(VmallocAllocator, SwapperVm);
+            vmalloc_allocator_runtime_page_table_mapping_ready(VmallocAllocator, PageTableCaches);
             vmalloc_allocator_mapping_policy_external(VmallocAllocator);
             vmalloc_allocator_physical_resource_policy_external(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);

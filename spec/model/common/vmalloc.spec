@@ -29,6 +29,7 @@ predicate vmalloc_allocator_manages_vmap_address_space<T, V>(allocator: T, vmap_
 predicate vmalloc_allocator_maintains_vm_struct_metadata<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_maintains_vmap_area_metadata<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_executes_page_table_mappings<T, S>(allocator: T, swapper_vm: S) -> bool;
+predicate vmalloc_allocator_runtime_page_table_mapping_ready<T, P>(allocator: T, page_table_caches: P) -> bool;
 predicate vmalloc_allocator_mapping_policy_external<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_physical_resource_policy_external<T>(allocator: T) -> bool;
 
@@ -96,6 +97,7 @@ type VmallocAllocatorType: MemoryObject {
                 PageTableCaches.state == State::Ready;
                 vmalloc_allocator_page_range_mapping_api_ready(self);
                 vmalloc_allocator_executes_page_table_mappings(self, SwapperVm);
+                vmalloc_allocator_runtime_page_table_mapping_ready(self, PageTableCaches);
                 vmap_area_ref_ready(area);
                 vmap_area_allocated(area, self);
                 vmap_area_address_space_bound(area, VmapAddressSpace);
