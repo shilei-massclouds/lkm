@@ -381,25 +381,42 @@ KUnit 对 candidate facts 的检查应挂在该点，而不是挂在入口点。
 链路；`Exit` 只表示 action 返回边界。smoke 预期不得假设 initcall table 中只有本测试注册的 entry，必须只断言
 本场景关心的 populate entry 已存在且执行结果正确，忽略其它无关 initcall entries。
 
-console/earlycon handoff 的第一轮实现应保持 Linux-like 边界，但允许先只记录可观测事实。正式
-`DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，
-冒号后是 console options，options 必须保留给后续 console setup，不应混入节点路径匹配。解析结果应保存为稳定
-`DeviceNodeId`/path handle，并在需要访问属性时通过仍然存在的 `DeviceTree` 解析临时 `DeviceNodeRef<'_>`。
+console/earlycon handoff 的实现必须保持 Linux-like `register_console()` 边界，但第一轮仍只要求对象级可观测事实。
+正式 `DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，
+冒号后是 console options。节点路径和 options 必须分开保存，options 保留给后续 console setup，不得混入节点路径匹配。
+解析结果应保存为稳定 `DeviceNodeId`/path handle，并在需要访问属性时通过仍然存在的 `DeviceTree` 解析临时
+`DeviceNodeRef<'_>`。若 `stdout-path` 缺失、解析失败或指向非 ns16550a 节点，当前最小实现不得猜测其它串口为
+preferred console。
 
 `ns16550a` probe 必须从 `PlatformDevice -> Device -> DeviceNodeId -> DeviceTree node` 路径解析 UART 资源，
 至少记录 MMIO resource、`reg-shift`、`reg-io-width`、`clock-frequency` 或等价默认 clock、line/index 分配和
-`serial8250_register_8250_port()` 风格返回事实。probe 只能在被绑定设备匹配 `stdout-path` 时注册
-`Serial8250Console` 并触发 handoff；非 stdout-path 的 ns16550a 设备只能注册普通 port 或记录非 console port
-事实，不得抢占 console。
+`serial8250_register_8250_port()` 风格返回事实。MMIO 映射必须继续经由 `Ioremap -> VmallocAllocator`
+路径；probe 不得绕过该路径直接把 `mapbase` 当作 `membase`。probe 只有在被绑定设备匹配 `stdout-path`
+时，才能把该 port 提升为 `Serial8250Console` 并触发 handoff。非 stdout-path 的 ns16550a 设备只能注册普通 port
+或记录 non-console port 事实，不得设置 consdev、不得切换 printk route、不得注销 boot console。
 
-`ConsoleRegistry` / `ConsoleHandoff` 的实现应模拟 printk `register_console()` 策略：`BootConsole` 表示
-earlycon 作为 `CON_BOOT` console 注册后的身份；真实 `Serial8250Console` 成为 consdev 后，printk route 切到真实
-console，并在 `keep_bootcon` 未设置时注销 boot console。若设置 `keep_bootcon`，handoff 应记录真实 console 已注册和
-route 已切换/可用，但 boot console 保持 online。第一轮可只记录 `PrintkBuffer` route 已切换到 serial console 的事实，
-实际字节仍暂由 SBI early console drain；后续再补 UART MMIO polling write 后端。
+`ConsoleRegistry` / `ConsoleHandoff` 的实现应集中承载在 printk console registry 或等价对象中，不得把 handoff
+状态散落成 driver 私有布尔值后再伪造 ready 事实。`BootConsole` 表示 earlycon 作为 `CON_BOOT` console
+注册后的身份；`BootConsole.Enable` 之后 printk route 必须指向 boot console。真实 `Serial8250Console`
+经 `register_console()` 成为 consdev 后，必须同时提交这些事实：real console registered、preferred-from-stdout、
+consdev、write backend ready、printk route 切到 serial8250、handoff complete。默认 `keep_bootcon == false`
+时，handoff 必须注销 boot console 或至少把 boot console 标为 offline，并记录 boot console removed/unregistered
+事实；`keep_bootcon == true` 时，boot console 必须保持 registered/online，但 printk route 仍切到 serial8250，
+handoff 仍视为完成。
+
+`register_serial8250_console(preferred_from_stdout)` 或等价 API 必须模拟 `register_console()` 的策略分支：
+`preferred_from_stdout == false` 的 dummy/non-match console 注册请求不得改变 serial console facts、不得设置
+consdev、不得完成 handoff，也不得影响 boot console route。dummy/non-match smoke 必须直接在 smoke 文件中定义
+临时 console 请求对象，不得为了测试去修改 DeviceTree 或平台设备拓扑。重复注册同一个 preferred serial console
+应保持幂等，不得重复分配 port、重复增加 registry entry 或重复执行 boot console unregister。
+
+第一轮可只记录 `PrintkBuffer` route 已切换到 serial console 的事实，实际字节输出仍暂由 SBI early console drain；
+后续补 UART MMIO polling write 后端时，必须消费 `Uart8250Port.membase` 和 `Serial8250Console.write_backend_ready`
+事实，不能直接回退到 SBI 路径伪装成真实 UART 写。
 
 smoke/KUnit 应覆盖：`stdout-path` 命中后发生 `Uart8250Port` 与 `Serial8250Console` 注册、非 stdout-path 设备不抢占
-console、默认策略下 boot console 注销、`keep_bootcon` 保留 boot console，以及 handoff 后 printk route facts 符合预期。
+console、dummy/non-match console 不改变 registry、默认策略下 boot console 注销、`keep_bootcon` 保留 boot console、
+handoff 后 printk route facts 符合预期，以及 serial console 的 `membase` 来自 ioremap/vmalloc 映射而不是 direct map。
 
 ## RootfsPhase 编码约束
 

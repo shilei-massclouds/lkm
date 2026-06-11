@@ -362,6 +362,29 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
                 && printk::console_handoff_complete()
                 && printk::route() == printk::PrintkRoute::Serial8250,
         );
+        assertions.assert(
+            "boot console unregistered by default",
+            !printk::keep_bootcon()
+                && printk::boot_console_registered()
+                && !printk::boot_console_online()
+                && printk::boot_console_unregistered()
+                && printk::boot_console_removed_from_registry(),
+        );
+        let area_count = self.fixture.vmalloc_allocator.area_count();
+        let mapping_count = self.fixture.vmalloc_allocator.mapping_count();
+        let registered_again = printk::register_serial8250_console(true);
+        assertions.assert("serial console duplicate accepted", registered_again);
+        assertions.assert(
+            "serial console duplicate idempotent",
+            self.fixture.vmalloc_allocator.area_count() == area_count
+                && self.fixture.vmalloc_allocator.mapping_count() == mapping_count
+                && printk::serial8250_console_registered()
+                && printk::preferred_console_from_stdout()
+                && printk::serial8250_consdev()
+                && printk::serial8250_write_ready()
+                && printk::console_handoff_complete()
+                && printk::route() == printk::PrintkRoute::Serial8250,
+        );
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
@@ -445,6 +468,8 @@ impl SmokeScenario for DummyConsoleNonStdoutScenario {
             "dummy console keeps boot route",
             printk::boot_console_registered()
                 && printk::boot_console_online()
+                && !printk::boot_console_unregistered()
+                && !printk::boot_console_removed_from_registry()
                 && !printk::console_handoff_complete()
                 && printk::route() == printk::PrintkRoute::BootConsole,
         );
@@ -535,6 +560,8 @@ impl SmokeScenario for KeepBootconScenario {
             printk::keep_bootcon()
                 && printk::boot_console_registered()
                 && printk::boot_console_online()
+                && !printk::boot_console_unregistered()
+                && !printk::boot_console_removed_from_registry()
                 && printk::console_handoff_complete(),
         );
         assertions.assert(

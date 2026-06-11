@@ -72,6 +72,8 @@ pub fn run() -> SmokeResult {
         || !ns16550a::handoff_triggered()
         || !printk::boot_console_registered()
         || printk::boot_console_online()
+        || !printk::boot_console_unregistered()
+        || !printk::boot_console_removed_from_registry()
         || !printk::serial8250_console_registered()
         || !printk::preferred_console_from_stdout()
         || !printk::serial8250_consdev()

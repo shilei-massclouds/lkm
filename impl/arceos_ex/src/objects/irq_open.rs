@@ -136,7 +136,8 @@ impl Console {
         self.serial_console_registered = printk::serial8250_console_registered();
         self.preferred_console_from_stdout = printk::preferred_console_from_stdout();
         self.printk_route_serial_console = printk::route() == printk::PrintkRoute::Serial8250;
-        self.boot_console_unregistered = !printk::keep_bootcon() && !printk::boot_console_online();
+        self.boot_console_unregistered =
+            printk::boot_console_unregistered() && printk::boot_console_removed_from_registry();
         self.handoff_complete = printk::console_handoff_complete();
         if self.handoff_complete {
             self.real_device_probe_deferred = false;

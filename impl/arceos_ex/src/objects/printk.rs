@@ -25,6 +25,8 @@ pub enum PrintkRoute {
 pub struct ConsoleRegistry {
     boot_console_registered: bool,
     boot_console_online: bool,
+    boot_console_unregistered: bool,
+    boot_console_removed_from_registry: bool,
     serial8250_console_registered: bool,
     preferred_console_from_stdout: bool,
     serial8250_consdev: bool,
@@ -39,6 +41,8 @@ impl ConsoleRegistry {
         Self {
             boot_console_registered: false,
             boot_console_online: false,
+            boot_console_unregistered: false,
+            boot_console_removed_from_registry: false,
             serial8250_console_registered: false,
             preferred_console_from_stdout: false,
             serial8250_consdev: false,
@@ -52,6 +56,8 @@ impl ConsoleRegistry {
     fn register_boot_console(&mut self) {
         self.boot_console_registered = true;
         self.boot_console_online = true;
+        self.boot_console_unregistered = false;
+        self.boot_console_removed_from_registry = false;
         self.route = PrintkRoute::BootConsole;
     }
 
@@ -68,6 +74,8 @@ impl ConsoleRegistry {
         self.handoff_complete = true;
         if !self.keep_bootcon {
             self.boot_console_online = false;
+            self.boot_console_unregistered = true;
+            self.boot_console_removed_from_registry = true;
         }
         true
     }
@@ -253,6 +261,24 @@ pub fn boot_console_online() -> bool {
             .as_ref()
             .unwrap()
             .boot_console_online
+    }
+}
+
+pub fn boot_console_unregistered() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .boot_console_unregistered
+    }
+}
+
+pub fn boot_console_removed_from_registry() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .boot_console_removed_from_registry
     }
 }
 
