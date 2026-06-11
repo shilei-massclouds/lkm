@@ -15,6 +15,18 @@
 3. 建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
 4. 审计已完成启动阶段的 deferred 清单、核心对象和测试边界。
 
+## 即将执行计划：console/earlycon handoff
+
+当前目标是在已建立的 `PlatformBus -> ns16550a platform driver probe` 闭环上，逐步实现 Linux-like 的 early console 到真实 serial console 交接。执行顺序如下：
+
+1. 对照 Linux `drivers/of/`、`drivers/tty/serial/8250/` 和 `kernel/printk/` 路径，确认 handoff 边界：`stdout-path` 选择 console 节点，OF platform population 生成 `PlatformDevice`，`ns16550a` driver probe 解析资源并注册 8250 port，真实 console 注册后由 printk 注销 boot console，除非 `keep_bootcon`。
+2. 先补 model 规格：明确 `EarlyCon`/`BootConsole`、`Serial8250Console`、`ConsoleRegistry` 或 `ConsoleDriverSet`、`DeviceTree.stdout_path`、`Ns16550aPlatformDriver.Probe` 和 `ConsoleHandoff` 之间的对象关系与事件边界。
+3. 再补 coding 规格：约束 driver-local `device_initcall!`、`platform_driver_register()`、`PlatformDevice -> Device -> DeviceNodeRef` 资源解析、`stdout-path` 匹配、`register_console()` 风格注册和 `keep_bootcon` 策略。
+4. 实现最小可观测闭环：先读取 `stdout-path`，构造 `Uart8250Port`/`Serial8250Console` 的最小对象和 trace/facts，在 `ns16550a` probe 成功且匹配 `stdout-path` 时触发 handoff。
+5. 分阶段替换输出后端：第一步允许仅记录真实 console 已注册和 printk route 已切换的事实；随后实现 UART MMIO polling write，让 handoff 后的 printk 真正通过 8250 serial console 输出。
+6. 补 smoke/KUnit：覆盖 `stdout-path` 命中后发生 handoff、非 `stdout-path` 设备不抢占 console、handoff 后 boot console 注销、`keep_bootcon` 保留 boot console，以及 handoff 后 printk 路由符合预期。
+7. 每次实现改动后执行 `make test` 并重新生成 trace SVG；纯规格或文档改动至少执行 `git diff --check`，必要时追加 spec derive/trace 校验。
+
 ## 统一计划
 
 | 优先级 | 状态 | 领域 | 任务 | 目标与说明 | 细节 |
