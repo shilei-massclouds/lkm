@@ -1,6 +1,7 @@
 use super::{
     device::{DeviceRef, PlatformDevice, PlatformDeviceStorage},
     device_tree::{DeviceNodeRef, DeviceTree},
+    driver::{DeviceDriverRef, ProbeResult, MOCK_NS16550A_PLATFORM_DRIVER_REF},
     irq_time::IrqDispatchTree,
     mm_core::PageAllocator,
     runtime_core::RuntimeCoreBoundary,
@@ -326,12 +327,6 @@ const fn initcall_level_name(index: usize) -> InitcallLevelName {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum BusDriverRef {
-    MockPlatformDriver,
-    MockNs16550aPlatformDriver,
-}
-
 #[derive(Clone, Copy)]
 pub struct OfPlatformCandidate<'dt> {
     node_id: super::device_tree::DeviceNodeId,
@@ -632,7 +627,7 @@ pub struct PlatformBus {
     register_return_zero: bool,
     platform_devices: PlatformDeviceStorage,
     device_refs: Vec<DeviceRef>,
-    driver_refs: Vec<BusDriverRef>,
+    driver_refs: Vec<DeviceDriverRef>,
     probe_driver_deferred_count: usize,
     probe_device_deferred_count: usize,
     probe_driver_scanned_devices: bool,
@@ -839,7 +834,7 @@ impl PlatformBus {
         self.device_refs.contains(&device) && self.platform_devices.contains(device)
     }
 
-    pub fn contains_driver(&self, driver: BusDriverRef) -> bool {
+    pub fn contains_driver(&self, driver: DeviceDriverRef) -> bool {
         self.driver_refs.contains(&driver)
     }
 
@@ -963,11 +958,12 @@ impl PlatformBus {
         Ok(device_ref)
     }
 
-    pub fn add_driver(&mut self, driver: BusDriverRef) -> EventResult {
+    pub fn add_driver(&mut self, driver: DeviceDriverRef) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
             || !self.drivers_kset_ready
             || self.contains_driver(driver)
+            || !is_device_driver_ref_ready(driver)
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -978,19 +974,23 @@ impl PlatformBus {
         }
 
         self.driver_refs.push(driver);
-        if driver == BusDriverRef::MockNs16550aPlatformDriver {
+        if driver.driver().is_mock_ns16550a_placeholder() {
             self.mock_ns16550a_driver_registered = true;
             self.mock_ns16550a_match_table_ready = true;
         }
         Ok(())
     }
 
-    pub fn probe_driver(&mut self, driver: BusDriverRef, device_tree: &DeviceTree) -> EventResult {
+    pub fn probe_driver(
+        &mut self,
+        driver: DeviceDriverRef,
+        device_tree: &DeviceTree,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
             || !self.devices_kset_ready
             || self.device_refs.is_empty()
-            || !is_bus_driver_ref_ready(driver)
+            || !is_device_driver_ref_ready(driver)
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -1001,24 +1001,16 @@ impl PlatformBus {
         }
 
         self.probe_driver_scanned_devices = true;
-        if driver == BusDriverRef::MockNs16550aPlatformDriver {
-            if !self.contains_driver(driver) {
-                return failed_condition(
-                    LifecycleEvent::Enable,
-                    self.lifecycle.state(),
-                    State::Ready,
-                    State::Ready,
-                );
-            }
-            let Some(device_ref) = self.first_matching_device(driver, device_tree) else {
-                return failed_condition(
-                    LifecycleEvent::Enable,
-                    self.lifecycle.state(),
-                    State::Ready,
-                    State::Ready,
-                );
-            };
-            self.bind_mock_ns16550a_device(device_ref);
+        if !self.contains_driver(driver) {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+        if let Some(device_ref) = self.first_matching_device(driver, device_tree) {
+            self.probe_and_bind(driver, device_ref, device_tree);
             return Ok(());
         }
 
@@ -1043,17 +1035,14 @@ impl PlatformBus {
         }
 
         self.probe_device_scanned_drivers = true;
-        if self
-            .driver_refs
-            .contains(&BusDriverRef::MockNs16550aPlatformDriver)
-            && self.driver_matches_device(
-                BusDriverRef::MockNs16550aPlatformDriver,
-                device,
-                device_tree,
-            )
-        {
-            self.bind_mock_ns16550a_device(device);
-            return Ok(());
+        let mut index = 0usize;
+        while index < self.driver_refs.len() {
+            let driver = self.driver_refs[index];
+            if self.driver_matches_device(driver, device, device_tree) {
+                self.probe_and_bind(driver, device, device_tree);
+                return Ok(());
+            }
+            index += 1;
         }
 
         self.probe_device_deferred_count += 1;
@@ -1065,14 +1054,11 @@ impl PlatformBus {
         device_tree: &DeviceTree,
     ) -> InitcallReturn {
         crate::objects::printk::write_str("initcall: mock_ns16550a_platform_driver_init\n");
-        if self
-            .add_driver(BusDriverRef::MockNs16550aPlatformDriver)
-            .is_err()
-        {
+        if self.add_driver(MOCK_NS16550A_PLATFORM_DRIVER_REF).is_err() {
             return InitcallReturn::Error(-1);
         }
         if self
-            .probe_driver(BusDriverRef::MockNs16550aPlatformDriver, device_tree)
+            .probe_driver(MOCK_NS16550A_PLATFORM_DRIVER_REF, device_tree)
             .is_err()
         {
             return InitcallReturn::Error(-1);
@@ -1082,7 +1068,7 @@ impl PlatformBus {
 
     fn first_matching_device(
         &self,
-        driver: BusDriverRef,
+        driver: DeviceDriverRef,
         device_tree: &DeviceTree,
     ) -> Option<DeviceRef> {
         let mut index = 0usize;
@@ -1098,27 +1084,44 @@ impl PlatformBus {
 
     fn driver_matches_device(
         &self,
-        driver: BusDriverRef,
+        driver: DeviceDriverRef,
         device_ref: DeviceRef,
         device_tree: &DeviceTree,
     ) -> bool {
-        if driver != BusDriverRef::MockNs16550aPlatformDriver {
-            return false;
-        }
         let Some(platform_device) = self.platform_device(device_ref) else {
             return false;
         };
         let Some(node) = device_tree.node(platform_device.dev().node_id()) else {
             return false;
         };
-        node.has_compatible(b"ns16550a")
+        node.compatibles().any(|compatible| {
+            driver
+                .driver()
+                .driver()
+                .of_match_table()
+                .matches(compatible)
+        })
     }
 
-    fn bind_mock_ns16550a_device(&mut self, device_ref: DeviceRef) {
-        self.mock_ns16550a_device_matched = true;
-        self.mock_ns16550a_probe_called = true;
-        self.mock_ns16550a_probe_return_zero = true;
-        self.mock_ns16550a_bound_device = Some(device_ref);
+    fn probe_and_bind(
+        &mut self,
+        driver: DeviceDriverRef,
+        device_ref: DeviceRef,
+        device_tree: &DeviceTree,
+    ) {
+        let result = driver.driver().probe(device_tree, device_ref);
+        if driver.driver().is_mock_ns16550a_placeholder() {
+            self.mock_ns16550a_device_matched = true;
+            self.mock_ns16550a_probe_called = true;
+            self.mock_ns16550a_probe_return_zero = result == ProbeResult::Bound;
+            if result == ProbeResult::Bound {
+                self.mock_ns16550a_bound_device = Some(device_ref);
+            }
+            self.print_mock_ns16550a_probe(device_ref);
+        }
+    }
+
+    fn print_mock_ns16550a_probe(&self, device_ref: DeviceRef) {
         crate::objects::printk::write_str("platform_driver: mock ns16550a probed ");
         let Some(platform_device) = self.platform_device(device_ref) else {
             crate::objects::printk::write_str("<missing>\n");
@@ -1136,11 +1139,8 @@ const fn is_device_ref_ready(_device: DeviceRef) -> bool {
     true
 }
 
-const fn is_bus_driver_ref_ready(driver: BusDriverRef) -> bool {
-    matches!(
-        driver,
-        BusDriverRef::MockPlatformDriver | BusDriverRef::MockNs16550aPlatformDriver
-    )
+fn is_device_driver_ref_ready(driver: DeviceDriverRef) -> bool {
+    !driver.driver().driver().name().is_empty()
 }
 
 struct OfPlatformCandidateSet<'dt> {

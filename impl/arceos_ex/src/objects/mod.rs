@@ -12,6 +12,7 @@ pub mod cpu_id_map;
 pub mod device;
 pub mod device_tree;
 pub mod dma_cache_policy;
+pub mod driver;
 pub mod early_dtb;
 pub mod early_ioremap;
 pub mod early_param;

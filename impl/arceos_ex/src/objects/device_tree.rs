@@ -403,8 +403,45 @@ impl<'dt> DeviceNodeRef<'dt> {
             .is_some_and(|property| compatible_list_contains(property.raw_value(), expected))
     }
 
+    pub fn compatibles(&self) -> CompatibleIter<'dt> {
+        CompatibleIter {
+            value: self
+                .property(b"compatible")
+                .map(|property| property.raw_value())
+                .unwrap_or(&[]),
+        }
+    }
+
     fn record(&self) -> Option<DeviceNodeRecord> {
         self.tree.record_node(self.index)
+    }
+}
+
+pub struct CompatibleIter<'dt> {
+    value: &'dt [u8],
+}
+
+impl<'dt> Iterator for CompatibleIter<'dt> {
+    type Item = &'dt [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.value.is_empty() {
+            return None;
+        }
+
+        let item_len = cstr_slice_len(self.value);
+        let item = &self.value[..item_len];
+        if item_len == self.value.len() {
+            self.value = &[];
+        } else {
+            self.value = &self.value[item_len + 1..];
+        }
+
+        if item.is_empty() {
+            self.next()
+        } else {
+            Some(item)
+        }
     }
 }
 

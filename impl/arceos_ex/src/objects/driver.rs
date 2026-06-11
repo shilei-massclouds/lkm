@@ -1,0 +1,154 @@
+use super::{device::DeviceRef, device_tree::DeviceTree};
+
+pub type PlatformProbe = fn(&DeviceTree, DeviceRef) -> ProbeResult;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum ProbeResult {
+    Bound,
+    Deferred,
+}
+
+pub struct OfMatchEntry {
+    compatible: &'static [u8],
+}
+
+impl OfMatchEntry {
+    pub const fn new(compatible: &'static [u8]) -> Self {
+        Self { compatible }
+    }
+
+    pub const fn compatible(&self) -> &'static [u8] {
+        self.compatible
+    }
+}
+
+pub struct OfMatchTable {
+    entries: &'static [OfMatchEntry],
+}
+
+impl OfMatchTable {
+    pub const fn new(entries: &'static [OfMatchEntry]) -> Self {
+        Self { entries }
+    }
+
+    pub const fn empty() -> Self {
+        Self { entries: &[] }
+    }
+
+    pub fn matches(&self, compatible: &[u8]) -> bool {
+        let mut index = 0usize;
+        while index < self.entries.len() {
+            if self.entries[index].compatible() == compatible {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+}
+
+pub struct DeviceDriver {
+    name: &'static str,
+    of_match_table: OfMatchTable,
+}
+
+impl DeviceDriver {
+    pub const fn new(name: &'static str, of_match_table: OfMatchTable) -> Self {
+        Self {
+            name,
+            of_match_table,
+        }
+    }
+
+    pub const fn name(&self) -> &'static str {
+        self.name
+    }
+
+    pub const fn of_match_table(&self) -> &OfMatchTable {
+        &self.of_match_table
+    }
+}
+
+pub struct PlatformDriver {
+    driver: DeviceDriver,
+    probe: PlatformProbe,
+    mock_ns16550a_placeholder: bool,
+}
+
+impl PlatformDriver {
+    pub const fn new(
+        name: &'static str,
+        of_match_table: OfMatchTable,
+        probe: PlatformProbe,
+        mock_ns16550a_placeholder: bool,
+    ) -> Self {
+        Self {
+            driver: DeviceDriver::new(name, of_match_table),
+            probe,
+            mock_ns16550a_placeholder,
+        }
+    }
+
+    pub const fn driver(&self) -> &DeviceDriver {
+        &self.driver
+    }
+
+    pub fn probe(&self, device_tree: &DeviceTree, device: DeviceRef) -> ProbeResult {
+        (self.probe)(device_tree, device)
+    }
+
+    pub const fn is_mock_ns16550a_placeholder(&self) -> bool {
+        self.mock_ns16550a_placeholder
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DeviceDriverRef {
+    driver: &'static PlatformDriver,
+}
+
+impl DeviceDriverRef {
+    pub const fn new(driver: &'static PlatformDriver) -> Self {
+        Self { driver }
+    }
+
+    pub const fn driver(self) -> &'static PlatformDriver {
+        self.driver
+    }
+}
+
+impl PartialEq for DeviceDriverRef {
+    fn eq(&self, other: &Self) -> bool {
+        core::ptr::eq(self.driver, other.driver)
+    }
+}
+
+impl Eq for DeviceDriverRef {}
+
+const MOCK_NS16550A_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"ns16550a")];
+
+pub static MOCK_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
+    "mock_platform_driver",
+    OfMatchTable::empty(),
+    mock_deferred_probe,
+    false,
+);
+
+pub static MOCK_NS16550A_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
+    "mock_ns16550a_platform_driver",
+    OfMatchTable::new(&MOCK_NS16550A_OF_MATCH),
+    mock_ns16550a_probe,
+    true,
+);
+
+pub const MOCK_PLATFORM_DRIVER_REF: DeviceDriverRef = DeviceDriverRef::new(&MOCK_PLATFORM_DRIVER);
+pub const MOCK_NS16550A_PLATFORM_DRIVER_REF: DeviceDriverRef =
+    DeviceDriverRef::new(&MOCK_NS16550A_PLATFORM_DRIVER);
+
+fn mock_deferred_probe(_device_tree: &DeviceTree, _device: DeviceRef) -> ProbeResult {
+    ProbeResult::Deferred
+}
+
+fn mock_ns16550a_probe(_device_tree: &DeviceTree, _device: DeviceRef) -> ProbeResult {
+    ProbeResult::Bound
+}

@@ -6,7 +6,8 @@ use crate::{
     context::context_ref,
     objects::{
         device::DeviceRef,
-        initcall::{BusDriverRef, PlatformBus},
+        driver::{MOCK_NS16550A_PLATFORM_DRIVER_REF, MOCK_PLATFORM_DRIVER_REF},
+        initcall::PlatformBus,
         state::State,
     },
 };
@@ -102,10 +103,14 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
         assertions.assert_fail("duplicate device", self.fixture.bus.add_device(device_ref));
 
         assertions.assert_ok(
+            "add deferred driver",
+            self.fixture.bus.add_driver(MOCK_PLATFORM_DRIVER_REF),
+        );
+        assertions.assert_ok(
             "probe driver deferred",
             self.fixture
                 .bus
-                .probe_driver(BusDriverRef::MockPlatformDriver, &context_ref().device_tree),
+                .probe_driver(MOCK_PLATFORM_DRIVER_REF, &context_ref().device_tree),
         );
         assertions.assert(
             "probe driver scanned devices",
@@ -116,8 +121,8 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
             self.fixture.bus.probe_driver_deferred_count() == 1,
         );
         assertions.assert(
-            "driver list untouched",
-            self.fixture.bus.driver_count() == 0,
+            "driver list populated",
+            self.fixture.bus.driver_count() == 1,
         );
     }
 
@@ -154,22 +159,16 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
     fn run(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert_ok(
             "add driver",
-            self.fixture
-                .bus
-                .add_driver(BusDriverRef::MockPlatformDriver),
+            self.fixture.bus.add_driver(MOCK_PLATFORM_DRIVER_REF),
         );
         assertions.assert(
             "driver listed",
-            self.fixture
-                .bus
-                .contains_driver(BusDriverRef::MockPlatformDriver),
+            self.fixture.bus.contains_driver(MOCK_PLATFORM_DRIVER_REF),
         );
         assertions.assert("driver count", self.fixture.bus.driver_count() == 1);
         assertions.assert_fail(
             "duplicate driver",
-            self.fixture
-                .bus
-                .add_driver(BusDriverRef::MockPlatformDriver),
+            self.fixture.bus.add_driver(MOCK_PLATFORM_DRIVER_REF),
         );
 
         let Some(device_ref) = self.fixture.add_smoke_device(assertions) else {
@@ -225,7 +224,7 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
             "add ns16550a driver",
             self.fixture
                 .bus
-                .add_driver(BusDriverRef::MockNs16550aPlatformDriver),
+                .add_driver(MOCK_NS16550A_PLATFORM_DRIVER_REF),
         );
 
         let Some(serial) = find_ns16550a_node(&ctx.device_tree) else {
