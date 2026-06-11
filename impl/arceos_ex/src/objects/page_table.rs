@@ -1,8 +1,7 @@
 use super::{config::Config, kernel_image::KernelImage};
 
 pub const SWAPPER_L1_TABLES: usize = 4;
-
-const PAGE_TABLE_ENTRIES: usize = 512;
+pub const PAGE_TABLE_ENTRIES: usize = 512;
 const PTE_V: usize = 1 << 0;
 const PTE_R: usize = 1 << 1;
 const PTE_W: usize = 1 << 2;
@@ -41,6 +40,8 @@ pub struct PageTableInstallRange {
     l0_addr: usize,
     l1_phys: usize,
     l0_phys: usize,
+    virt_start: usize,
+    page_size: usize,
 }
 
 impl PageTableInstallRange {
@@ -51,6 +52,8 @@ impl PageTableInstallRange {
             l0_addr: 0,
             l1_phys: 0,
             l0_phys: 0,
+            virt_start: 0,
+            page_size: 0,
         }
     }
 
@@ -60,6 +63,8 @@ impl PageTableInstallRange {
         l0_addr: usize,
         l1_phys: usize,
         l0_phys: usize,
+        virt_start: usize,
+        page_size: usize,
     ) -> Self {
         Self {
             root_addr,
@@ -67,6 +72,8 @@ impl PageTableInstallRange {
             l0_addr,
             l1_phys,
             l0_phys,
+            virt_start,
+            page_size,
         }
     }
 
@@ -76,6 +83,21 @@ impl PageTableInstallRange {
             && self.l0_addr != 0
             && self.l1_phys != 0
             && self.l0_phys != 0
+            && self.virt_start != 0
+            && self.page_size != 0
+            && self.page_size.is_power_of_two()
+    }
+
+    pub const fn window_start(self) -> usize {
+        self.virt_start
+    }
+
+    pub const fn window_size(self) -> usize {
+        PAGE_TABLE_ENTRIES * self.page_size
+    }
+
+    pub const fn window_end(self) -> usize {
+        self.virt_start.saturating_add(self.window_size())
     }
 }
 

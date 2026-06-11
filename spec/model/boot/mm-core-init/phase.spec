@@ -942,6 +942,9 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_runtime_page_table_mapping_ready(VmallocAllocator, PageTableCaches);
                     vmalloc_allocator_mapping_policy_external(VmallocAllocator);
                     vmalloc_allocator_physical_resource_policy_external(VmallocAllocator);
+                    vmalloc_allocator_runtime_mapping_window_bound(VmallocAllocator, PageTableCaches);
+                    vmalloc_allocator_cross_window_mapping_deferred(VmallocAllocator);
+                    vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
             }
@@ -966,6 +969,9 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_runtime_page_table_mapping_ready(VmallocAllocator, PageTableCaches);
             vmalloc_allocator_mapping_policy_external(VmallocAllocator);
             vmalloc_allocator_physical_resource_policy_external(VmallocAllocator);
+            vmalloc_allocator_runtime_mapping_window_bound(VmallocAllocator, PageTableCaches);
+            vmalloc_allocator_cross_window_mapping_deferred(VmallocAllocator);
+            vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
         }
     }
@@ -1084,14 +1090,17 @@ object Ioremap: AddressSpaceObject {
                     vmap_area_address_space_bound(VmapAreaRef::IoremapDeviceMmio, VmapAddressSpace);
                     vmap_area_flags_bound(VmapAreaRef::IoremapDeviceMmio, VmapAreaFlags::VmIoremap);
                     vmap_area_reserved_as_busy(VmapAreaRef::IoremapDeviceMmio, VmapAddressSpace);
+                    vmap_area_has_no_existing_mapping(VmapAreaRef::IoremapDeviceMmio, VmallocAllocator);
                     vmap_mapping_ref_ready(VmapMappingRef::IoremapDeviceMmio);
                     vmap_mapping_area_bound(VmapMappingRef::IoremapDeviceMmio, VmapAreaRef::IoremapDeviceMmio);
                     vmap_area_range_complete_for_mapping(VmapAreaRef::IoremapDeviceMmio, VmapMappingRef::IoremapDeviceMmio);
+                    vmap_area_has_no_existing_mapping(VmapAreaRef::IoremapDeviceMmio, VmallocAllocator);
                     vmap_mapping_phys_range_bound(VmapMappingRef::IoremapDeviceMmio);
                     vmap_mapping_page_range_installed(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
                     vmap_mapping_protection_bound(VmapMappingRef::IoremapDeviceMmio, PageProtectionRef::IoMemory);
                     vmap_mapping_protection_kind_bound(VmapMappingRef::IoremapDeviceMmio, VmapPageProtectionKind::IoMemory);
                     vmap_mapping_page_aligned(VmapMappingRef::IoremapDeviceMmio);
+                    vmap_mapping_within_runtime_mapping_window(VmapMappingRef::IoremapDeviceMmio);
                 }
             }
 

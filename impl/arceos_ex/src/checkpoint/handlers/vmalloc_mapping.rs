@@ -12,7 +12,7 @@ use crate::{
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
 const TEST_PAGE_COUNT: usize = 2;
-pub const KUNIT_CASE_COUNT: usize = 4;
+pub const KUNIT_CASE_COUNT: usize = 5;
 
 pub const HANDLER: Handler = Handler {
     name: "vmalloc_mapping",
@@ -47,6 +47,12 @@ fn run(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
         ctx,
         "vmalloc_mapping.mmio_attributes",
         run_mmio_attributes,
+    ) || !run_case(
+        total,
+        checkpoint,
+        ctx,
+        "vmalloc_mapping.window_duplicate_reject",
+        run_window_duplicate_reject,
     ) {
         CheckpointOutcome::FailAndShutdown
     } else {
@@ -139,6 +145,22 @@ fn run_mmio_attributes(ctx: &mut Context) -> bool {
     };
 
     let passed = run_mmio_attributes_with_page(ctx, page_size, page.phys);
+    passed
+        && ctx
+            .page_allocator
+            .free_pages(page.page, 0, &ctx.page_metadata_map)
+}
+
+fn run_window_duplicate_reject(ctx: &mut Context) -> bool {
+    let page_size = ctx.config.page_size();
+    if page_size == 0 || !page_size.is_power_of_two() {
+        return false;
+    };
+    let Some(page) = alloc_test_page(ctx) else {
+        return false;
+    };
+
+    let passed = run_window_duplicate_reject_with_page(ctx, page_size, page.phys);
     passed
         && ctx
             .page_allocator
@@ -389,6 +411,74 @@ fn run_mmio_attributes_with_page(ctx: &mut Context, page_size: usize, phys: usiz
 
     ctx.ioremap
         .iounmap(&mut ctx.vmalloc_allocator, mapping.membase())
+}
+
+fn run_window_duplicate_reject_with_page(ctx: &mut Context, page_size: usize, phys: usize) -> bool {
+    let allocator = &mut ctx.vmalloc_allocator;
+    if !allocator.runtime_mapping_window_ready()
+        || !allocator.cross_window_mapping_deferred()
+        || !allocator.duplicate_area_mapping_rejected()
+    {
+        return false;
+    }
+
+    let window_start = allocator.runtime_mapping_window_start();
+    let window_end = allocator.runtime_mapping_window_end();
+    if window_start != crate::objects::mm_core::VMALLOC_START
+        || window_end <= window_start
+        || !window_start.is_multiple_of(page_size)
+        || !window_end.is_multiple_of(page_size)
+    {
+        return false;
+    }
+
+    let base_area_count = allocator.area_count();
+    let base_mapping_count = allocator.mapping_count();
+    let Some(area) = allocator.get_vm_area(page_size, VmapAreaFlags::VmIoremap) else {
+        return false;
+    };
+    let Some(mapping) = allocator.map_page_range(area, phys, page_size, PageProtection::IoMemory)
+    else {
+        return false;
+    };
+    let duplicate_rejected = allocator
+        .map_page_range(area, phys, page_size, PageProtection::IoMemory)
+        .is_none()
+        && allocator.mapping_count() == base_mapping_count.saturating_add(1)
+        && allocator.area_count() == base_area_count.saturating_add(1);
+    if !duplicate_rejected || !teardown_mapping(allocator, area, mapping, false) {
+        return false;
+    }
+
+    let remaining_window = window_end.saturating_sub(allocator.runtime_mapping_window_start());
+    let consumed = allocator
+        .area(allocator.area_count().saturating_sub(1))
+        .map(|last| last.end().saturating_sub(window_start))
+        .unwrap_or(0);
+    let cross_size = remaining_window
+        .saturating_sub(consumed)
+        .saturating_add(page_size);
+    if cross_size <= page_size {
+        return false;
+    }
+    let before_cross_areas = allocator.area_count();
+    let before_cross_mappings = allocator.mapping_count();
+    let Some(cross_area) = allocator.get_vm_area(cross_size, VmapAreaFlags::VmIoremap) else {
+        return false;
+    };
+    cross_area.virt_base() < window_end
+        && cross_area.end() > window_end
+        && allocator
+            .map_page_range(
+                cross_area,
+                phys,
+                cross_area.size(),
+                PageProtection::IoMemory,
+            )
+            .is_none()
+        && allocator.area_count() == before_cross_areas.saturating_add(1)
+        && allocator.mapping_count() == before_cross_mappings
+        && allocator.free_vm_area(cross_area)
 }
 
 struct AllocatedPage {

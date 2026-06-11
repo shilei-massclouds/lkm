@@ -30,8 +30,9 @@ const PAGE_METADATA_FLAG_BUDDY_ALLOCATED: usize = 1 << 1;
 const KMALLOC_NULL: usize = 0;
 const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
-const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
+pub const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
 const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
+const VMALLOC_RUNTIME_PAGE_SIZE: usize = 4096;
 const MAX_VMAP_AREAS: usize = 16;
 const MAX_VMAP_MAPPINGS: usize = 16;
 pub const GLOBAL_ALLOC_MAX_SIZE: usize = 8192;
@@ -2927,7 +2928,7 @@ impl PageTableCaches {
         }
 
         let Some(vmalloc_install_range) =
-            static_objects.swapper_vmalloc_install_range(kernel_image)
+            static_objects.swapper_vmalloc_install_range(kernel_image, VMALLOC_RUNTIME_PAGE_SIZE)
         else {
             return self.failed_setup();
         };
@@ -3122,7 +3123,6 @@ impl VmapArea {
         self.vmap_area_metadata_ready
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
     pub const fn end(self) -> usize {
         self.virt_base.saturating_add(self.size)
     }
@@ -3250,6 +3250,10 @@ pub struct VmallocAllocator {
     physical_resource_policy_external: bool,
     runtime_page_table_mapping_ready: bool,
     page_table_install_range: PageTableInstallRange,
+    runtime_mapping_window_start: usize,
+    runtime_mapping_window_end: usize,
+    cross_window_mapping_deferred: bool,
+    duplicate_area_mapping_rejected: bool,
     next_vaddr: usize,
     area_count: usize,
     mapping_count: usize,
@@ -3276,6 +3280,10 @@ impl VmallocAllocator {
             physical_resource_policy_external: false,
             runtime_page_table_mapping_ready: false,
             page_table_install_range: PageTableInstallRange::empty(),
+            runtime_mapping_window_start: 0,
+            runtime_mapping_window_end: 0,
+            cross_window_mapping_deferred: false,
+            duplicate_area_mapping_rejected: false,
             next_vaddr: 0,
             area_count: 0,
             mapping_count: 0,
@@ -3341,6 +3349,29 @@ impl VmallocAllocator {
         self.runtime_page_table_mapping_ready
     }
 
+    pub const fn runtime_mapping_window_ready(&self) -> bool {
+        self.runtime_mapping_window_start != 0
+            && self.runtime_mapping_window_start < self.runtime_mapping_window_end
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn runtime_mapping_window_start(&self) -> usize {
+        self.runtime_mapping_window_start
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn runtime_mapping_window_end(&self) -> usize {
+        self.runtime_mapping_window_end
+    }
+
+    pub const fn cross_window_mapping_deferred(&self) -> bool {
+        self.cross_window_mapping_deferred
+    }
+
+    pub const fn duplicate_area_mapping_rejected(&self) -> bool {
+        self.duplicate_area_mapping_rejected
+    }
+
     #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
     pub const fn area_count(&self) -> usize {
         self.area_count
@@ -3384,6 +3415,10 @@ impl VmallocAllocator {
         self.physical_resource_policy_external = true;
         self.page_table_install_range = page_table_caches.vmalloc_install_range();
         self.runtime_page_table_mapping_ready = self.page_table_install_range.ready();
+        self.runtime_mapping_window_start = self.page_table_install_range.window_start();
+        self.runtime_mapping_window_end = self.page_table_install_range.window_end();
+        self.cross_window_mapping_deferred = true;
+        self.duplicate_area_mapping_rejected = true;
         self.next_vaddr = self.address_space.start();
         self.reclaim_hook_ready = true;
 
@@ -3434,6 +3469,8 @@ impl VmallocAllocator {
             || size == 0
             || !self.area_known(area)
             || size != area.size()
+            || self.area_has_installed_mapping(area)
+            || !self.area_within_runtime_mapping_window(area)
             || !phys_base.is_multiple_of(self.page_size())
             || !area.virt_base().is_multiple_of(self.page_size())
             || !size.is_multiple_of(self.page_size())
@@ -3522,6 +3559,12 @@ impl VmallocAllocator {
 
     fn area_known(&self, area: VmapArea) -> bool {
         area.busy() && area.index() < self.area_count && self.areas[area.index()] == area
+    }
+
+    fn area_within_runtime_mapping_window(&self, area: VmapArea) -> bool {
+        self.runtime_mapping_window_ready()
+            && area.virt_base() >= self.runtime_mapping_window_start
+            && area.end() <= self.runtime_mapping_window_end
     }
 
     #[allow(dead_code)]

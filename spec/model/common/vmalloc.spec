@@ -35,6 +35,9 @@ predicate vmalloc_allocator_executes_page_table_mappings<T, S>(allocator: T, swa
 predicate vmalloc_allocator_runtime_page_table_mapping_ready<T, P>(allocator: T, page_table_caches: P) -> bool;
 predicate vmalloc_allocator_mapping_policy_external<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_physical_resource_policy_external<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_runtime_mapping_window_bound<T, P>(allocator: T, page_table_caches: P) -> bool;
+predicate vmalloc_allocator_cross_window_mapping_deferred<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_rejects_duplicate_area_mapping<T>(allocator: T) -> bool;
 
 predicate vmap_area_ref_ready<T>(area: T) -> bool;
 predicate vmap_area_allocated<T, A>(area: T, allocator: A) -> bool;
@@ -55,6 +58,8 @@ predicate vmap_mapping_page_range_removed<T, S>(mapping: T, swapper_vm: S) -> bo
 predicate vmap_mapping_protection_bound<T, P>(mapping: T, protection: P) -> bool;
 predicate vmap_mapping_protection_kind_bound<T, K>(mapping: T, kind: K) -> bool;
 predicate vmap_mapping_page_aligned<T>(mapping: T) -> bool;
+predicate vmap_mapping_within_runtime_mapping_window<T>(mapping: T) -> bool;
+predicate vmap_area_has_no_existing_mapping<T, A>(area: T, allocator: A) -> bool;
 
 predicate vmap_flags_vm_ioremap<T>(flags: T) -> bool;
 predicate page_protection_io_memory<T>(protection: T) -> bool;
@@ -83,6 +88,7 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_area_alignment_bound(area);
                 vmap_area_flags_bound(area, flags);
                 vmap_area_reserved_as_busy(area, VmapAddressSpace);
+                vmap_area_has_no_existing_mapping(area, self);
             }
         }
 
@@ -108,9 +114,11 @@ type VmallocAllocatorType: MemoryObject {
                 vmalloc_allocator_page_range_mapping_api_ready(self);
                 vmalloc_allocator_executes_page_table_mappings(self, SwapperVm);
                 vmalloc_allocator_runtime_page_table_mapping_ready(self, PageTableCaches);
+                vmalloc_allocator_runtime_mapping_window_bound(self, PageTableCaches);
                 vmap_area_ref_ready(area);
                 vmap_area_allocated(area, self);
                 vmap_area_address_space_bound(area, VmapAddressSpace);
+                vmap_area_has_no_existing_mapping(area, self);
             }
             ensures {
                 vmap_mapping_ref_ready(mapping);
@@ -121,6 +129,10 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_mapping_page_range_installed(mapping, SwapperVm);
                 vmap_mapping_protection_bound(mapping, protection);
                 vmap_mapping_page_aligned(mapping);
+                vmap_mapping_within_runtime_mapping_window(mapping);
+            }
+            deferred {
+                "Mappings that require additional vmalloc L0/PTE windows are deferred until the runtime page-table install pool grows beyond the first preallocated window.";
             }
         }
 

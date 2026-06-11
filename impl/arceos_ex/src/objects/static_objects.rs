@@ -200,6 +200,7 @@ impl StaticObjects {
     pub fn swapper_vmalloc_install_range(
         &self,
         kernel_image: &KernelImage,
+        page_size: usize,
     ) -> Option<PageTableInstallRange> {
         let root = static_page_tables::swapper_pg_dir_mut(kernel_image);
         let vmalloc_l1_table = static_page_tables::swapper_vmalloc_l1_table_mut(kernel_image);
@@ -210,7 +211,13 @@ impl StaticObjects {
         let l1_phys = kernel_image.runtime_to_phys(l1_addr)?;
         let l0_phys = kernel_image.runtime_to_phys(l0_addr)?;
         Some(PageTableInstallRange::new(
-            root_addr, l1_addr, l0_addr, l1_phys, l0_phys,
+            root_addr,
+            l1_addr,
+            l0_addr,
+            l1_phys,
+            l0_phys,
+            super::mm_core::VMALLOC_START,
+            page_size,
         ))
     }
 }

@@ -960,6 +960,10 @@ ns16550a 或 console 专用路径。
 当前实现可以把支持范围限制在
 `VMALLOC_START` 起始的首个 L1/L0 页表窗口，但该限制必须通过 ready/failure fact 暴露，后续再泛化到完整
 `VMALLOC_START..VMALLOC_END`。
+具体实现不能只依赖底层 `vpn0` 越界失败；在调用页表安装前，`VmallocAllocator.map_page_range()` 必须显式确认
+`VmapArea` 完全落在当前 runtime mapping window 内。落到后续 L0/PTE window 的 area 当前必须失败并记录为
+cross-window deferred，不能复用首个 L0 表错误安装。同时，同一个 busy `VmapArea` 已经存在 installed
+`VmapMapping` 时，第二次 `map_page_range()` 必须失败，避免一个 area 产生多个并存页表映射记录。
 
 `VmallocAllocator.unmap_page_range()` / `free_vm_area()` 必须保持 Linux-like teardown 顺序：先清除
 对应 `VmapMapping` 的页表映射并记录 removed fact，再释放 `VmapArea` 的 busy/`vm_struct`/`vmap_area`
