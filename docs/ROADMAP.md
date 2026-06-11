@@ -10,7 +10,7 @@
 
 ## 当前焦点
 
-1. 深化 `of_platform_default_populate_init()` 后续问题：审计 initcall 阶段动态分配压力，继续为 platform bus/device/driver probe 建模和实现铺路。
+1. 深化真实 `ns16550a` platform driver：在已打通 `device_initcall! -> platform_driver_register() -> PlatformBus.klist_drivers -> probe` 闭环后，继续分析资源解析、UART 8250 注册和 console/earlycon handoff。
 2. 收口 trace/SVG 输出体验，使推导过程图适合日常审阅。
 3. 建立快速 CI，保护推导工具、核心规格和 `impl/arceos_ex` 最小构建。
 4. 审计已完成启动阶段的 deferred 清单、核心对象和测试边界。
@@ -33,7 +33,8 @@
 | `P1` | 进行中 | arceos_ex | 整理对象级源码结构 | 按 Object Coding Phase 映射规则整理源码结构：`main.rs` 承载 `startup-timeline`，`phases/` 按 Phase 包含层次拆分过程文件，`objects/` 按对象类别逐步拆成一对象一文件，并把资源对象统一收敛到全局 `Context`。目录分层另列为 P2。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#新增核心-crate) |
 | `P1` | 完成 | arceos_ex/allocator | 建立 KernelHeap/Allocator facade 作为动态容器前置任务 | OF platform device population 需要 `Vec<PlatformDevice>` 和 `Vec<DeviceRef>` 这类动态容器。该前置链路已经完成首轮闭环：PageMetadataMap 和 buddy/PageAllocator API 已可用，SLUB/kmalloc 已通过 PageAllocator backing pages 实现 `kmalloc/kzalloc/kfree`，`KernelGlobalAllocator` 已接入 `core::alloc::GlobalAlloc`，`DynamicContainerRuntime` 已标记 `Vec/List/Set` 普通动态容器能力可用。当前普通 kmalloc cache 参照 Linux-like `PAGE_SIZE * 2` 边界扩到 `size <= 8192`，alignment 必须由对应 kmalloc size class 天然满足；large allocation、realloc、特殊 alignment fallback 和完整 SLUB 复杂路径仍 deferred。 | [分配器 Facade](../spec/compose/README.md#分配器-facade) |
 | `P1` | 完成 | arceos_ex/smoke | 补齐内存分配 API 运行期 smoke | 已覆盖 `MemBlock::alloc_phys()` checkpoint probe、PageAllocator handoff KUnit、正式 PageAllocator `alloc_pages/free_pages` 与 `alloc_page/free_pages` 的 order-0 和高 order 分配、线性映射读写和释放；SLUB/kmalloc smoke 覆盖小对象分配、写读、`kzalloc` 清零、同尺寸对象独立和释放复用；GlobalAlloc/Vec smoke 通过普通 `Vec` API 触发 grow、校验读回并 drop。`vmalloc/vfree` 可在对应 API 实现后作为独立任务补充。测试保持不为 smoke 暴露无必要内部状态。 | [smoke 测试边界](../spec/coding/arceos_ex.md#smoke-测试边界) |
-| `P1` | 完成 | arceos_ex/platform | 实现 OF platform device population | 已完成首轮实现：`of_platform_default_populate_init()` 会把 DeviceTree 遍历出的 OF platform candidates 构造为 `PlatformDevice`，其内嵌 `Device` 通过稳定 `DeviceNodeId` 关联对应 node，注册 core device 后生成 `DeviceRef` 并加入 `PlatformBusSubsysPrivate.klist_devices` 的 `Vec<DeviceRef>` backing。`PlatformBus` 当前通过 `PlatformDeviceStorage = Vec<Pin<Box<PlatformDevice>>>` 持有设备对象生命周期，KUnit/smoke 已覆盖 candidate count、platform device count、bus device count 和 `DeviceRef -> PlatformDevice -> DeviceNodeId -> compatible` 解析链。后续 driver probe/bind 仍待建模。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#initcallphase-编码约束) |
+| `P1` | 完成 | arceos_ex/platform | 实现 OF platform device population | 已完成首轮实现：`of_platform_default_populate_init()` 会把 DeviceTree 遍历出的 OF platform candidates 构造为 `PlatformDevice`，其内嵌 `Device` 通过稳定 `DeviceNodeId` 关联对应 node，注册 core device 后生成 `DeviceRef` 并加入 `PlatformBusSubsysPrivate.klist_devices` 的 `Vec<DeviceRef>` backing。`PlatformBus` 当前通过 `PlatformDeviceStorage = Vec<Pin<Box<PlatformDevice>>>` 持有设备对象生命周期，KUnit/smoke 已覆盖 candidate count、platform device count、bus device count 和 `DeviceRef -> PlatformDevice -> DeviceNodeId -> compatible` 解析链。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#initcallphase-编码约束) |
+| `P1` | 完成 | arceos_ex/platform | 实现 PlatformBus driver/probe 与 ns16550a driver 闭环 | 已完成首轮规格和实现：`BusType/PlatformBusType` 建模 `platform_driver_register()`，通过 `DeviceDriverRef` 加入 `klist_drivers` 后执行 driver-side probe；`Ns16550aPlatformDriver` 独立 common 规格和独立 Rust 模块已落地，真实 `of_serial` descriptor 使用 `of_match_table` 匹配 `compatible = "ns16550a"`，initcall 宏声明已移入 driver 自己模块，符合 Linux-like `device_initcall!` 静态 section 方式。KUnit/smoke 覆盖 `AddDevice + ProbeDriver`、`AddDriver + ProbeDevice` 和 ns16550a probe/bind。后续继续展开 UART 8250 资源解析、串口注册和 console handoff。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#initcallphase-编码约束) |
 | `P1` | 完成 | arceos_ex/allocator | 查明 initcall 阶段动态分配压力失败原因 | 已确认根因是第一轮 `GlobalAlloc` 仅支持 `size <= 1024`，而 `Vec<OfPlatformCandidate>` 在当前 QEMU FDT 的 21 个 candidate 下会增长到 capacity 32，单次 allocation 为 1280 字节并触发 `alloc_error_handler`。已把普通 kmalloc cache 按 Linux-like `PAGE_SIZE * 2` 边界扩到 8KiB，补 allocator pressure smoke 覆盖该边界，并把临时 `OfPlatformCandidateSet` 改为 `Vec` backing；`PlatformDevice` 仍长期保存 `DeviceNodeId` 后通过 `DeviceTree` 解析 name/compatible。large allocation、realloc、特殊 alignment fallback 和完整 SLUB 复杂路径仍 deferred。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#mmcoreinitphase-编码约束) |
 | `P1` | 待办 | arceos_ex/smoke | 补充类型行为 smoke 双任务场景 | `RawSpinLock`、`Completion` 等 TypeBehavior smoke 当前先覆盖单任务、本地依赖对象场景。后续任务创建和调度测试 API 足够后，应补充最小双任务场景，用两个任务验证竞争、等待、唤醒、释放和跨任务可见性；启动两个任务即可，不要求先建立完整用户态或通用线程测试框架。 | [testing 规格](../spec/testing/README.md#测试目标分类) |
 | `P1` | 待办 | arceos_ex/codegen | 收敛 RISC-V64 linker script 生成方案 | 将当前直接生成完整 `riscv64.lds` 的实验收敛为 Linux 风格的 `riscv64.lds.S`：`codegen` 基于 `Config` 生成 `generated/config.lds.h` 等配置头，`.lds.S` 保留链接布局结构并经预处理生成最终 `.lds`；同时规划 Rust 侧配置生成，避免 `.lds`、Rust 常量和 codegen profile 各自维护同一配置值。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#目标边界) |
@@ -76,9 +77,9 @@
 
 ## 当前交接标记
 
-- 截止提交 b9af585 (`Implement global allocator Vec smoke`)，动态容器前置链路已完成首轮实现；OF platform device population 不再因 allocator/Vec 能力阻塞。
+- 截止提交 9f80f3e (`Move driver initcall declarations into driver modules`)，PlatformBus 已完成设备 population、driver register/probe 和真实 ns16550a 首轮 probe/bind 闭环；后续重点是 ns16550a 资源解析、UART 8250 注册和 console/earlycon handoff。
 - `SmpRuntimePhase` 已形成六个子阶段最小闭环：`PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
-- 最近完整验收已通过：`tools/pyveri/bin/pyveri spec/model/main.spec --derive --strict`；`make build APP=smoke`；`make test`；`make verify REPORT=graph`。当前 `make test` summary 为 `total=74 pass=74 fail=0`。
+- 最近完整验收已通过：`tools/pyveri/bin/pyveri spec/model/main.spec --derive --strict`；`make build APP=smoke`；`make test`；`make verify REPORT=graph`。当前 `make test` summary 为 `total=75 pass=75 fail=0`。
 - 当前 trace SVG 产物：`tools/out/trace/main.trace.svg`。
 - 上下文清理后恢复：先执行 `git status --short --branch`；预期工作树干净。
 
