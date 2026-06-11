@@ -1,0 +1,134 @@
+/*
+ * Generic vmalloc/vmap model.
+ *
+ * Linux reference shape:
+ * - __get_vm_area_caller() reserves a vm_struct/vmap_area from the vmalloc
+ *   virtual address space.
+ * - vmap/ioremap callers then ask the same subsystem to install or tear down
+ *   page-table mappings for caller-supplied pages, PFNs, or physical ranges.
+ * - The vmalloc layer owns virtual address area management and mapping
+ *   execution. Callers still own the physical resource source and the mapping
+ *   attribute policy.
+ */
+
+type VmapAreaRef {
+}
+
+type VmapMappingRef {
+}
+
+type VmapAreaFlags {
+}
+
+type PageProtectionRef {
+}
+
+predicate vmalloc_allocator_vmap_area_api_ready<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_page_range_mapping_api_ready<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_manages_vmap_address_space<T, V>(allocator: T, vmap_space: V) -> bool;
+predicate vmalloc_allocator_maintains_vm_struct_metadata<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_maintains_vmap_area_metadata<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_executes_page_table_mappings<T, S>(allocator: T, swapper_vm: S) -> bool;
+predicate vmalloc_allocator_mapping_policy_external<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_physical_resource_policy_external<T>(allocator: T) -> bool;
+
+predicate vmap_area_ref_ready<T>(area: T) -> bool;
+predicate vmap_area_allocated<T, A>(area: T, allocator: A) -> bool;
+predicate vmap_area_address_space_bound<T, V>(area: T, vmap_space: V) -> bool;
+predicate vmap_area_size_bound<T>(area: T) -> bool;
+predicate vmap_area_alignment_bound<T>(area: T) -> bool;
+predicate vmap_area_flags_bound<T, F>(area: T, flags: F) -> bool;
+predicate vmap_area_reserved_as_busy<T, V>(area: T, vmap_space: V) -> bool;
+predicate vmap_area_range_complete_for_mapping<T, M>(area: T, mapping: M) -> bool;
+predicate vmap_area_released<T, A>(area: T, allocator: A) -> bool;
+
+predicate vmap_mapping_ref_ready<T>(mapping: T) -> bool;
+predicate vmap_mapping_area_bound<T, A>(mapping: T, area: A) -> bool;
+predicate vmap_mapping_phys_range_bound<T>(mapping: T) -> bool;
+predicate vmap_mapping_page_range_installed<T, S>(mapping: T, swapper_vm: S) -> bool;
+predicate vmap_mapping_page_range_removed<T, S>(mapping: T, swapper_vm: S) -> bool;
+predicate vmap_mapping_protection_bound<T, P>(mapping: T, protection: P) -> bool;
+predicate vmap_mapping_page_aligned<T>(mapping: T) -> bool;
+
+predicate vmap_flags_vm_ioremap<T>(flags: T) -> bool;
+predicate page_protection_io_memory<T>(protection: T) -> bool;
+
+type VmallocAllocatorType: MemoryObject {
+    processes {
+        /*
+         * GetVmArea corresponds to Linux __get_vm_area_caller()/get_vm_area():
+         * reserve a contiguous vmap virtual-address area and attach flags.
+         */
+        Action::GetVmArea(area: VmapAreaRef, flags: VmapAreaFlags) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                VmapAddressSpace.state == State::Ready;
+                vmalloc_allocator_vmap_area_api_ready(self);
+                vmalloc_allocator_manages_vmap_address_space(self, VmapAddressSpace);
+                free_vmap_space_ready(VmapAddressSpace);
+            }
+            ensures {
+                vmap_area_ref_ready(area);
+                vmap_area_allocated(area, self);
+                vmap_area_address_space_bound(area, VmapAddressSpace);
+                vmap_area_size_bound(area);
+                vmap_area_alignment_bound(area);
+                vmap_area_flags_bound(area, flags);
+                vmap_area_reserved_as_busy(area, VmapAddressSpace);
+            }
+        }
+
+        /*
+         * MapPageRange corresponds to the vmap/ioremap page-table execution
+         * path. It maps caller-supplied physical pages/PFNs/ranges into an
+         * already reserved vmap area using caller-supplied protection flags.
+         */
+        Action::MapPageRange(
+            area: VmapAreaRef,
+            mapping: VmapMappingRef,
+            protection: PageProtectionRef
+        ) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                SwapperVm.state == State::Online;
+                PageTableCaches.state == State::Ready;
+                vmalloc_allocator_page_range_mapping_api_ready(self);
+                vmalloc_allocator_executes_page_table_mappings(self, SwapperVm);
+                vmap_area_ref_ready(area);
+                vmap_area_allocated(area, self);
+                vmap_area_address_space_bound(area, VmapAddressSpace);
+            }
+            ensures {
+                vmap_mapping_ref_ready(mapping);
+                vmap_mapping_area_bound(mapping, area);
+                vmap_area_range_complete_for_mapping(area, mapping);
+                vmap_mapping_phys_range_bound(mapping);
+                vmap_mapping_page_range_installed(mapping, SwapperVm);
+                vmap_mapping_protection_bound(mapping, protection);
+                vmap_mapping_page_aligned(mapping);
+            }
+        }
+
+        /*
+         * FreeVmArea models releasing a reserved vmap area and its metadata.
+         * Full TLB/cache ordering is deferred to later vmalloc teardown work.
+         */
+        Action::FreeVmArea(area: VmapAreaRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                vmalloc_allocator_vmap_area_api_ready(self);
+                vmap_area_ref_ready(area);
+                vmap_area_allocated(area, self);
+            }
+            ensures {
+                vmap_area_released(area, self);
+            }
+            deferred {
+                "Full vunmap/vfree TLB flush, lazy purge, and per-cpu deferred free ordering are deferred to later vmalloc teardown modeling.";
+            }
+        }
+    }
+}

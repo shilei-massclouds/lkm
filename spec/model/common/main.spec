@@ -76,6 +76,7 @@ enum RunQueueRuntimeState {
 
 include "device.spec";
 include "initcall.spec";
+include "vmalloc.spec";
 include "ioremap.spec";
 include "bus_type.spec";
 include "console.spec";

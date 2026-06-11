@@ -907,9 +907,10 @@ object VfreeDeferredSet: MemoryObject {
 }
 
 /*
- * VmallocAllocator 覆盖 vmalloc_init()。
+ * VmallocAllocator 覆盖 vmalloc_init()。它是 vmalloc/vmap 虚拟地址区间
+ * 管理器和映射执行器；物理资源来源与 pgprot 策略由调用方决定。
  */
-object VmallocAllocator: MemoryObject {
+object VmallocAllocator: VmallocAllocatorType {
     initial_state: State::Base;
 
     state State::Base {
@@ -932,6 +933,14 @@ object VmallocAllocator: MemoryObject {
                 ensures {
                     vmalloc_allocator_ready(VmallocAllocator, VmapAddressSpace, VmapNodeSet);
                     vmap_initialized(VmallocAllocator);
+                    vmalloc_allocator_vmap_area_api_ready(VmallocAllocator);
+                    vmalloc_allocator_page_range_mapping_api_ready(VmallocAllocator);
+                    vmalloc_allocator_manages_vmap_address_space(VmallocAllocator, VmapAddressSpace);
+                    vmalloc_allocator_maintains_vm_struct_metadata(VmallocAllocator);
+                    vmalloc_allocator_maintains_vmap_area_metadata(VmallocAllocator);
+                    vmalloc_allocator_executes_page_table_mappings(VmallocAllocator, SwapperVm);
+                    vmalloc_allocator_mapping_policy_external(VmallocAllocator);
+                    vmalloc_allocator_physical_resource_policy_external(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
             }
@@ -947,6 +956,14 @@ object VmallocAllocator: MemoryObject {
             VfreeDeferredSet.state == State::Ready;
             vmalloc_allocator_ready(VmallocAllocator, VmapAddressSpace, VmapNodeSet);
             vmap_initialized(VmallocAllocator);
+            vmalloc_allocator_vmap_area_api_ready(VmallocAllocator);
+            vmalloc_allocator_page_range_mapping_api_ready(VmallocAllocator);
+            vmalloc_allocator_manages_vmap_address_space(VmallocAllocator, VmapAddressSpace);
+            vmalloc_allocator_maintains_vm_struct_metadata(VmallocAllocator);
+            vmalloc_allocator_maintains_vmap_area_metadata(VmallocAllocator);
+            vmalloc_allocator_executes_page_table_mappings(VmallocAllocator, SwapperVm);
+            vmalloc_allocator_mapping_policy_external(VmallocAllocator);
+            vmalloc_allocator_physical_resource_policy_external(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
         }
     }
@@ -975,9 +992,12 @@ object Ioremap: AddressSpaceObject {
                     ioremap_runtime_ready(Ioremap, VmallocAllocator, VmapAddressSpace, PageTableCaches);
                     ioremap_uses_swapper_vm(Ioremap, SwapperVm);
                     ioremap_uses_vmalloc_area_management(Ioremap, VmallocAllocator);
+                    ioremap_uses_vmalloc_mapping_execution(Ioremap, VmallocAllocator);
                     ioremap_uses_vmap_address_space(Ioremap, VmapAddressSpace);
                     ioremap_distinct_from_vmalloc_allocation(Ioremap);
                     ioremap_does_not_use_fixmap(Ioremap, FixMap);
+                    ioremap_physical_resource_policy_ready(Ioremap);
+                    ioremap_vm_ioremap_flags_ready(Ioremap, VmapAreaFlags::VmIoremap);
                     ioremap_io_page_protection_ready(Ioremap);
                 }
             }
@@ -989,9 +1009,12 @@ object Ioremap: AddressSpaceObject {
             ioremap_runtime_ready(Ioremap, VmallocAllocator, VmapAddressSpace, PageTableCaches);
             ioremap_uses_swapper_vm(Ioremap, SwapperVm);
             ioremap_uses_vmalloc_area_management(Ioremap, VmallocAllocator);
+            ioremap_uses_vmalloc_mapping_execution(Ioremap, VmallocAllocator);
             ioremap_uses_vmap_address_space(Ioremap, VmapAddressSpace);
             ioremap_distinct_from_vmalloc_allocation(Ioremap);
             ioremap_does_not_use_fixmap(Ioremap, FixMap);
+            ioremap_physical_resource_policy_ready(Ioremap);
+            ioremap_vm_ioremap_flags_ready(Ioremap, VmapAreaFlags::VmIoremap);
             ioremap_io_page_protection_ready(Ioremap);
         }
 
@@ -1001,21 +1024,52 @@ object Ioremap: AddressSpaceObject {
                 depends_on {
                     Ioremap.state == State::Ready;
                     DeviceTree.state == State::Ready;
+                    VmallocAllocator.state == State::Ready;
                     VmapAddressSpace.state == State::Ready;
                     device_ref_ready(device);
+                    ioremap_physical_resource_policy_ready(Ioremap);
+                    ioremap_vm_ioremap_flags_ready(Ioremap, VmapAreaFlags::VmIoremap);
                     ioremap_io_page_protection_ready(Ioremap);
+                    vmap_flags_vm_ioremap(VmapAreaFlags::VmIoremap);
+                    page_protection_io_memory(PageProtectionRef::IoMemory);
+                }
+
+                drives {
+                    VmallocAllocator.Action::GetVmArea(
+                        area: VmapAreaRef::IoremapDeviceMmio,
+                        flags: VmapAreaFlags::VmIoremap
+                    );
+                    VmallocAllocator.Action::MapPageRange(
+                        area: VmapAreaRef::IoremapDeviceMmio,
+                        mapping: VmapMappingRef::IoremapDeviceMmio,
+                        protection: PageProtectionRef::IoMemory
+                    );
                 }
 
                 ensures {
                     ioremap_mapping_created(Ioremap, mapping);
                     ioremap_mapping_owner_bound(Ioremap, mapping, device);
                     ioremap_mapping_phys_range_bound(Ioremap, mapping);
-                    ioremap_mapping_vmap_area_bound(Ioremap, mapping, VmapAddressSpace);
+                    ioremap_mapping_phys_range_from_device_resource(Ioremap, mapping, device);
+                    ioremap_mapping_vmap_area_bound(Ioremap, mapping, VmapAreaRef::IoremapDeviceMmio);
+                    ioremap_mapping_vmalloc_mapping_bound(Ioremap, mapping, VmapMappingRef::IoremapDeviceMmio);
                     ioremap_mapping_uses_vm_ioremap_flag(Ioremap, mapping);
                     ioremap_mapping_uses_io_page_protection(Ioremap, mapping);
                     ioremap_mapping_page_aligned(Ioremap, mapping);
                     ioremap_mapping_membase_cookie_ready(Ioremap, mapping);
                     ioremap_mapping_not_linear_direct_map(Ioremap, mapping);
+                    vmap_area_ref_ready(VmapAreaRef::IoremapDeviceMmio);
+                    vmap_area_allocated(VmapAreaRef::IoremapDeviceMmio, VmallocAllocator);
+                    vmap_area_address_space_bound(VmapAreaRef::IoremapDeviceMmio, VmapAddressSpace);
+                    vmap_area_flags_bound(VmapAreaRef::IoremapDeviceMmio, VmapAreaFlags::VmIoremap);
+                    vmap_area_reserved_as_busy(VmapAreaRef::IoremapDeviceMmio, VmapAddressSpace);
+                    vmap_mapping_ref_ready(VmapMappingRef::IoremapDeviceMmio);
+                    vmap_mapping_area_bound(VmapMappingRef::IoremapDeviceMmio, VmapAreaRef::IoremapDeviceMmio);
+                    vmap_area_range_complete_for_mapping(VmapAreaRef::IoremapDeviceMmio, VmapMappingRef::IoremapDeviceMmio);
+                    vmap_mapping_phys_range_bound(VmapMappingRef::IoremapDeviceMmio);
+                    vmap_mapping_page_range_installed(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
+                    vmap_mapping_protection_bound(VmapMappingRef::IoremapDeviceMmio, PageProtectionRef::IoMemory);
+                    vmap_mapping_page_aligned(VmapMappingRef::IoremapDeviceMmio);
                 }
             }
         }

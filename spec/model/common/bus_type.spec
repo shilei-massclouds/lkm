@@ -389,7 +389,9 @@ type PlatformBusType: BusType {
                 ioremap_mapping_created(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
                 ioremap_mapping_owner_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, DeviceRef::Ns16550aSerial);
                 ioremap_mapping_phys_range_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
-                ioremap_mapping_vmap_area_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, VmapAddressSpace);
+                ioremap_mapping_phys_range_from_device_resource(Ioremap, IoMemoryMappingRef::Ns16550aSerial, DeviceRef::Ns16550aSerial);
+                ioremap_mapping_vmap_area_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, VmapAreaRef::IoremapDeviceMmio);
+                ioremap_mapping_vmalloc_mapping_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, VmapMappingRef::IoremapDeviceMmio);
                 ioremap_mapping_uses_vm_ioremap_flag(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
                 ioremap_mapping_uses_io_page_protection(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
                 ioremap_mapping_page_aligned(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
