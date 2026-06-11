@@ -13,7 +13,8 @@ use crate::{
 const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
 const TEST_PAGE_COUNT: usize = 2;
 const VMALLOC_CROSS_WINDOW_TEST_ORDER: usize = 1;
-pub const KUNIT_CASE_COUNT: usize = 5;
+const VMALLOC_DYNAMIC_RECORD_TEST_COUNT: usize = 17;
+pub const KUNIT_CASE_COUNT: usize = 6;
 
 pub const HANDLER: Handler = Handler {
     name: "vmalloc_mapping",
@@ -30,6 +31,12 @@ fn run(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
         ctx,
         "vmalloc_mapping.multi_record",
         run_multi_record,
+    ) || !run_case(
+        total,
+        checkpoint,
+        ctx,
+        "vmalloc_mapping.dynamic_records",
+        run_dynamic_records,
     ) || !run_case(
         total,
         checkpoint,
@@ -114,6 +121,25 @@ fn run_unmap_free(ctx: &mut Context) -> bool {
     };
 
     let passed = run_unmap_free_with_page(ctx, page_size, page.phys);
+    passed
+        && ctx
+            .page_allocator
+            .free_pages(page.page, 0, &ctx.page_metadata_map)
+}
+
+fn run_dynamic_records(ctx: &mut Context) -> bool {
+    let page_size = ctx.config.page_size();
+    if page_size == 0
+        || !page_size.is_power_of_two()
+        || !ctx.vmalloc_allocator.dynamic_record_storage_ready()
+    {
+        return false;
+    };
+    let Some(page) = alloc_test_page(ctx) else {
+        return false;
+    };
+
+    let passed = run_dynamic_records_with_page(ctx, page_size, page.phys);
     passed
         && ctx
             .page_allocator
@@ -292,6 +318,60 @@ fn run_unmap_free_with_page(ctx: &mut Context, page_size: usize, phys: usize) ->
     }
 
     teardown_mapping(allocator, area, mapping, true)
+}
+
+fn run_dynamic_records_with_page(ctx: &mut Context, page_size: usize, phys: usize) -> bool {
+    let base_area_count = ctx.vmalloc_allocator.area_count();
+    let base_mapping_count = ctx.vmalloc_allocator.mapping_count();
+    let mut areas = [VmapArea::empty(); VMALLOC_DYNAMIC_RECORD_TEST_COUNT];
+    let mut mappings = [VmapMapping::empty(); VMALLOC_DYNAMIC_RECORD_TEST_COUNT];
+
+    let mut index = 0usize;
+    while index < VMALLOC_DYNAMIC_RECORD_TEST_COUNT {
+        let Some(area) = ctx
+            .vmalloc_allocator
+            .get_vm_area(page_size, VmapAreaFlags::VmIoremap)
+        else {
+            return false;
+        };
+        let Some(mapping) = map_vmalloc_area(ctx, area, phys, page_size, PageProtection::IoMemory)
+        else {
+            return false;
+        };
+        if area.index() != base_area_count.saturating_add(index)
+            || mapping.index() != base_mapping_count.saturating_add(index)
+            || mapping.area() != area
+            || !mapping.installed()
+            || ctx.vmalloc_allocator.area(area.index()) != Some(area)
+            || ctx.vmalloc_allocator.mapping(mapping.index()) != Some(mapping)
+        {
+            return false;
+        }
+        areas[index] = area;
+        mappings[index] = mapping;
+        index += 1;
+    }
+
+    if ctx.vmalloc_allocator.area_count()
+        != base_area_count.saturating_add(VMALLOC_DYNAMIC_RECORD_TEST_COUNT)
+        || ctx.vmalloc_allocator.mapping_count()
+            != base_mapping_count.saturating_add(VMALLOC_DYNAMIC_RECORD_TEST_COUNT)
+    {
+        return false;
+    }
+
+    while index != 0 {
+        index -= 1;
+        if !teardown_mapping(
+            &mut ctx.vmalloc_allocator,
+            areas[index],
+            mappings[index],
+            false,
+        ) {
+            return false;
+        }
+    }
+    true
 }
 
 fn run_ioremap_iounmap_with_page(ctx: &mut Context, page_size: usize, phys: usize) -> bool {

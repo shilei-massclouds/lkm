@@ -955,6 +955,7 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_dynamic_l0_window_allocation_supported(VmallocAllocator, PageTableCaches);
                     vmalloc_allocator_full_vmalloc_range_metadata_supported(VmallocAllocator, PageTableCaches);
                     vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
+                    vmalloc_allocator_dynamic_record_storage_ready(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
             }
@@ -985,6 +986,7 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_dynamic_l0_window_allocation_supported(VmallocAllocator, PageTableCaches);
             vmalloc_allocator_full_vmalloc_range_metadata_supported(VmallocAllocator, PageTableCaches);
             vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
+            vmalloc_allocator_dynamic_record_storage_ready(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
         }
     }

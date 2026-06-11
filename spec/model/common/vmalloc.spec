@@ -41,6 +41,7 @@ predicate vmalloc_allocator_preallocated_mapping_window_bound<T>(allocator: T) -
 predicate vmalloc_allocator_dynamic_l0_window_allocation_supported<T, P>(allocator: T, page_table_caches: P) -> bool;
 predicate vmalloc_pgtable_full_range_metadata_ready<P>(page_table_caches: P) -> bool;
 predicate vmalloc_allocator_full_vmalloc_range_metadata_supported<T, P>(allocator: T, page_table_caches: P) -> bool;
+predicate vmalloc_allocator_dynamic_record_storage_ready<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_rejects_duplicate_area_mapping<T>(allocator: T) -> bool;
 
 predicate vmap_area_ref_ready<T>(area: T) -> bool;
@@ -83,6 +84,7 @@ type VmallocAllocatorType: MemoryObject {
                 vmalloc_allocator_vmap_area_api_ready(self);
                 vmalloc_allocator_manages_vmap_address_space(self, VmapAddressSpace);
                 free_vmap_space_ready(VmapAddressSpace);
+                vmalloc_allocator_dynamic_record_storage_ready(self);
             }
             ensures {
                 vmap_area_ref_ready(area);
@@ -122,6 +124,7 @@ type VmallocAllocatorType: MemoryObject {
                 vmalloc_allocator_runtime_mapping_window_bound(self, PageTableCaches);
                 vmalloc_allocator_dynamic_l0_window_allocation_supported(self, PageTableCaches);
                 vmalloc_allocator_full_vmalloc_range_metadata_supported(self, PageTableCaches);
+                vmalloc_allocator_dynamic_record_storage_ready(self);
                 vmap_area_ref_ready(area);
                 vmap_area_allocated(area, self);
                 vmap_area_address_space_bound(area, VmapAddressSpace);
@@ -139,7 +142,7 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_mapping_within_runtime_mapping_window(mapping);
             }
             deferred {
-                "Dynamic-capacity vm_struct/vmap_area and VmapMapping record storage is deferred; the current implementation still has a fixed number of vmap area and mapping records.";
+                "Full Linux vm_struct/vmap_area metadata behavior such as reusable holes, augmented-tree search, lazy purge batching, and concurrency/RCU details remains deferred.";
             }
         }
 

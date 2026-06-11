@@ -38,8 +38,6 @@ const SLUB_CPUHP_STEP: usize = 0x201;
 pub const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
 const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
 const VMALLOC_RUNTIME_PAGE_SIZE: usize = 4096;
-const MAX_VMAP_AREAS: usize = 16;
-const MAX_VMAP_MAPPINGS: usize = 16;
 pub const GLOBAL_ALLOC_MAX_SIZE: usize = 8192;
 
 #[derive(Clone, Copy)]
@@ -3424,11 +3422,10 @@ pub struct VmallocAllocator {
     preallocated_mapping_window_bound: bool,
     dynamic_l0_window_allocation_supported: bool,
     duplicate_area_mapping_rejected: bool,
+    dynamic_record_storage_ready: bool,
     next_vaddr: usize,
-    area_count: usize,
-    mapping_count: usize,
-    areas: [VmapArea; MAX_VMAP_AREAS],
-    mappings: [VmapMapping; MAX_VMAP_MAPPINGS],
+    areas: Vec<VmapArea>,
+    mappings: Vec<VmapMapping>,
     reclaim_hook_ready: bool,
 }
 
@@ -3457,11 +3454,10 @@ impl VmallocAllocator {
             preallocated_mapping_window_bound: false,
             dynamic_l0_window_allocation_supported: false,
             duplicate_area_mapping_rejected: false,
+            dynamic_record_storage_ready: false,
             next_vaddr: 0,
-            area_count: 0,
-            mapping_count: 0,
-            areas: [VmapArea::empty(); MAX_VMAP_AREAS],
-            mappings: [VmapMapping::empty(); MAX_VMAP_MAPPINGS],
+            areas: Vec::new(),
+            mappings: Vec::new(),
             reclaim_hook_ready: false,
         }
     }
@@ -3569,14 +3565,18 @@ impl VmallocAllocator {
         self.duplicate_area_mapping_rejected
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
-    pub const fn area_count(&self) -> usize {
-        self.area_count
+    pub const fn dynamic_record_storage_ready(&self) -> bool {
+        self.dynamic_record_storage_ready
     }
 
     #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
-    pub const fn mapping_count(&self) -> usize {
-        self.mapping_count
+    pub fn area_count(&self) -> usize {
+        self.areas.len()
+    }
+
+    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    pub fn mapping_count(&self) -> usize {
+        self.mappings.len()
     }
 
     pub const fn reclaim_hook_ready(&self) -> bool {
@@ -3621,6 +3621,7 @@ impl VmallocAllocator {
         self.dynamic_l0_window_allocation_supported =
             page_table_caches.vmalloc_pgtable_dynamic_allocator_ready();
         self.duplicate_area_mapping_rejected = true;
+        self.dynamic_record_storage_ready = true;
         self.next_vaddr = self.address_space.start();
         self.reclaim_hook_ready = true;
 
@@ -3635,9 +3636,9 @@ impl VmallocAllocator {
     pub fn get_vm_area(&mut self, size: usize, flags: VmapAreaFlags) -> Option<VmapArea> {
         if self.lifecycle.state() != State::Ready
             || !self.vmap_area_api_ready
+            || !self.dynamic_record_storage_ready
             || !self.address_space.free_space_ready()
             || size == 0
-            || self.area_count >= MAX_VMAP_AREAS
         {
             return None;
         }
@@ -3649,9 +3650,11 @@ impl VmallocAllocator {
             return None;
         }
 
-        let area = VmapArea::new(self.area_count, virt_base, aligned_size, flags);
-        self.areas[self.area_count] = area;
-        self.area_count += 1;
+        if self.areas.try_reserve(1).is_err() {
+            return None;
+        }
+        let area = VmapArea::new(self.areas.len(), virt_base, aligned_size, flags);
+        self.areas.push(area);
         self.next_vaddr = area_end;
         Some(area)
     }
@@ -3670,7 +3673,7 @@ impl VmallocAllocator {
         if self.lifecycle.state() != State::Ready
             || !self.page_range_mapping_api_ready
             || !self.runtime_page_table_mapping_ready
-            || self.mapping_count >= MAX_VMAP_MAPPINGS
+            || !self.dynamic_record_storage_ready
             || phys_base == 0
             || size == 0
             || !self.area_known(area)
@@ -3699,6 +3702,10 @@ impl VmallocAllocator {
             return None;
         }
 
+        if self.mappings.try_reserve(1).is_err() {
+            return None;
+        }
+
         if !map_page_range_runtime(
             self.page_table_install_range,
             area.virt_base(),
@@ -3710,9 +3717,8 @@ impl VmallocAllocator {
         }
         csr::sfence_vma();
 
-        let mapping = VmapMapping::new(self.mapping_count, area, phys_base, size, protection);
-        self.mappings[self.mapping_count] = mapping;
-        self.mapping_count += 1;
+        let mapping = VmapMapping::new(self.mappings.len(), area, phys_base, size, protection);
+        self.mappings.push(mapping);
         Some(mapping)
     }
 
@@ -3740,7 +3746,10 @@ impl VmallocAllocator {
         }
         csr::sfence_vma();
 
-        self.mappings[mapping.index] = mapping.remove();
+        let Some(slot) = self.mappings.get_mut(mapping.index) else {
+            return false;
+        };
+        *slot = mapping.remove();
         true
     }
 
@@ -3756,30 +3765,29 @@ impl VmallocAllocator {
             return false;
         }
 
-        self.areas[area.index()] = area.release();
+        let Some(slot) = self.areas.get_mut(area.index()) else {
+            return false;
+        };
+        *slot = area.release();
         true
     }
 
     #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
     pub fn area(&self, index: usize) -> Option<VmapArea> {
-        if index < self.area_count {
-            Some(self.areas[index])
-        } else {
-            None
-        }
+        self.areas.get(index).copied()
     }
 
     #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
     pub fn mapping(&self, index: usize) -> Option<VmapMapping> {
-        if index < self.mapping_count {
-            Some(self.mappings[index])
-        } else {
-            None
-        }
+        self.mappings.get(index).copied()
     }
 
     fn area_known(&self, area: VmapArea) -> bool {
-        area.busy() && area.index() < self.area_count && self.areas[area.index()] == area
+        area.busy()
+            && self
+                .areas
+                .get(area.index())
+                .is_some_and(|known| *known == area)
     }
 
     fn area_within_runtime_mapping_window(&self, area: VmapArea) -> bool {
@@ -3790,13 +3798,15 @@ impl VmallocAllocator {
 
     #[allow(dead_code)]
     fn mapping_known(&self, mapping: VmapMapping) -> bool {
-        mapping.index < self.mapping_count && self.mappings[mapping.index] == mapping
+        self.mappings
+            .get(mapping.index)
+            .is_some_and(|known| *known == mapping)
     }
 
     #[allow(dead_code)]
     fn area_has_installed_mapping(&self, area: VmapArea) -> bool {
         let mut index = 0usize;
-        while index < self.mapping_count {
+        while index < self.mappings.len() {
             let mapping = self.mappings[index];
             if mapping.area == area && mapping.installed && !mapping.removed {
                 return true;

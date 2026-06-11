@@ -483,8 +483,9 @@ type ArceosExMmCoreInitCodingMust {
          * PageTableCaches/PageAllocator when a reserved vmap area touches an
          * uninstalled window, reject ranges beyond VMALLOC_END, and reject a
          * second mapping record for an area that already has an installed
-         * mapping. Dynamic-capacity VmapArea/VmapMapping record storage remains
-         * a separate follow-up boundary.
+         * mapping. VmapArea/VmapMapping record storage must use dynamic
+         * container backing and must not fail at the former fixed test-slot
+         * capacity.
          */
         arceos_ex_must_vmalloc_support_preallocated_windows_and_reject_duplicate_mapping();
         arceos_ex_must_vmalloc_allocate_l0_windows_on_demand();

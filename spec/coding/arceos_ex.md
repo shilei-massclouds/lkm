@@ -961,8 +961,9 @@ ns16550a 或 console 专用路径。
 当前实现支持完整 `VMALLOC_START..VMALLOC_END` runtime vmalloc 地址空间：启动时只安装首批静态 L1/L0 页表，
 后续当目标 area 触及尚未安装的 L1/L0/PTE window 时，`VmallocAllocator.map_page_range()` 必须请求
 `PageTableCaches` 分配并清零新的页表页，并按需补充稀疏 slot metadata，再安装映射。该能力必须通过
-ready/failure fact 暴露；超出 `VMALLOC_END` 的 area 必须被拒绝。动态容量的 `VmapArea` / `VmapMapping`
-记录存储仍是后续边界，当前不能把页表 metadata 完整覆盖误写成 vm_struct/vmap_area 记录也已经无界动态化。
+ready/failure fact 暴露；超出 `VMALLOC_END` 的 area 必须被拒绝。`VmapArea` / `VmapMapping` 记录存储必须使用
+动态容器 backing，不能在旧的固定测试 slot 数量处失败；但完整 Linux `vm_struct/vmap_area` 行为，如空洞复用、
+增强树查找、lazy purge 批处理和并发/RCU 细节仍是后续边界。
 具体实现不能只依赖底层 `vpn0` 越界失败；在调用页表安装前，`VmallocAllocator.map_page_range()` 必须显式确认
 `VmapArea` 完全落在 runtime mapping window 能力内，必要时先扩展该能力。落到 `VMALLOC_END` 之外的 area
 当前必须失败并记录为 range boundary，不能复用错误的 L0 表安装。同时，同一个 busy `VmapArea` 已经存在 installed

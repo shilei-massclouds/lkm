@@ -191,6 +191,7 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
             .vmalloc_allocator
             .dynamic_l0_window_allocation_supported()
         && ctx.vmalloc_allocator.duplicate_area_mapping_rejected()
+        && ctx.vmalloc_allocator.dynamic_record_storage_ready()
         && ctx.ioremap.state() == State::Ready
         && ctx.ioremap.runtime_ready()
         && ctx.ioremap.uses_vmalloc_area_management()
