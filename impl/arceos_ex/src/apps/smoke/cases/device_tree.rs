@@ -72,6 +72,18 @@ pub fn run() -> SmokeResult {
         printk::write_str("device tree bootargs value invalid\n");
         return SmokeResult::Failed;
     }
+    let Some(stdout_node) = device_tree.stdout_path_node() else {
+        printk::write_str("device tree stdout-path node missing\n");
+        return SmokeResult::Failed;
+    };
+    if !stdout_node.has_compatible(b"ns16550a")
+        || !device_tree.stdout_path_selects(stdout_node.id())
+        || device_tree.stdout_path_node_id() != Some(stdout_node.id())
+    {
+        printk::write_str("device tree stdout-path target invalid\n");
+        return SmokeResult::Failed;
+    }
+    let _stdout_options = device_tree.stdout_path_options();
 
     let mut root_children = 0usize;
     for child in root.children() {

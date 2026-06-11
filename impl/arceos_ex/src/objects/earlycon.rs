@@ -63,6 +63,7 @@ impl EarlyCon {
             Checkpoint::EarlyConOnline,
         );
         if result.is_ok() {
+            printk::register_boot_console();
             printk::drain_to(sbi::putchar);
         }
         result

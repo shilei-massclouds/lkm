@@ -3,7 +3,7 @@ use crate::{
     context::context,
     objects::{
         initcall::{InitcallLevelName, InitcallLevelState, InitcallTable, INITCALL_LEVEL_COUNT},
-        printk,
+        ns16550a, printk,
         state::State,
     },
     phases,
@@ -62,6 +62,28 @@ pub fn run() -> SmokeResult {
         || !platform_bus.ns16550a_probe_called()
         || !platform_bus.ns16550a_probe_return_zero()
         || !check_ns16550a_bound_device(platform_bus, &ctx.device_tree)
+        || !platform_bus.ns16550a_probe_registers_uart8250_port()
+        || !platform_bus.ns16550a_probe_registers_serial_console()
+        || !platform_bus.ns16550a_probe_triggers_console_handoff()
+        || !ns16550a::uart8250_port_resources_ready()
+        || !ns16550a::stdout_path_matched()
+        || !ns16550a::serial8250_console_registered()
+        || !ns16550a::handoff_triggered()
+        || !printk::boot_console_registered()
+        || printk::boot_console_online()
+        || !printk::serial8250_console_registered()
+        || !printk::preferred_console_from_stdout()
+        || !printk::serial8250_consdev()
+        || !printk::serial8250_write_ready()
+        || printk::route() != printk::PrintkRoute::Serial8250
+        || !printk::console_handoff_complete()
+        || !ctx.console.registry_ready()
+        || !ctx.console.boot_console_registered()
+        || !ctx.console.serial_console_registered()
+        || !ctx.console.preferred_console_from_stdout()
+        || !ctx.console.printk_route_serial_console()
+        || !ctx.console.boot_console_unregistered()
+        || !ctx.console.handoff_complete()
         || ctx.driver_core_deferred.state() != State::Ready
         || !ctx.driver_core_deferred.post_platform_deferred()
         || !ctx.driver_core_deferred.entry_position_preserved()

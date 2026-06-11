@@ -36,6 +36,8 @@ pub fn run() -> SmokeResult {
         || !ctx.console.driver_set().early_registered()
         || !ctx.console.driver_set().serial_probe_deferred()
         || !ctx.console.driver_set().boot_console_unregister_deferred()
+        || (!ctx.console.real_device_probe_deferred() && !ctx.console.handoff_complete())
+        || (!ctx.console.earlycon_handoff_conditional() && !ctx.console.handoff_complete())
     {
         printk::write_str("console prepared facts invalid\n");
         return SmokeResult::Failed;

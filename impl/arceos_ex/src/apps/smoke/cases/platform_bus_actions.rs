@@ -5,8 +5,12 @@ use crate::{
     },
     context::context_ref,
     objects::{
-        device::DeviceRef, driver::MOCK_PLATFORM_DRIVER_REF, initcall::PlatformBus,
-        ns16550a::NS16550A_PLATFORM_DRIVER_REF, state::State,
+        device::DeviceRef,
+        driver::MOCK_PLATFORM_DRIVER_REF,
+        initcall::PlatformBus,
+        ns16550a::{self, NS16550A_PLATFORM_DRIVER_REF},
+        printk,
+        state::State,
     },
 };
 
@@ -259,6 +263,28 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
         assertions.assert(
             "ns16550a device bound",
             self.fixture.bus.ns16550a_bound_device() == Some(device_ref),
+        );
+        assertions.assert(
+            "ns16550a uart8250 port registered",
+            self.fixture.bus.ns16550a_probe_registers_uart8250_port()
+                && ns16550a::uart8250_port_registered(),
+        );
+        assertions.assert(
+            "ns16550a stdout-path matched",
+            ns16550a::stdout_path_matched()
+                && ns16550a::uart8250_port_device_ref() == Some(device_ref),
+        );
+        assertions.assert(
+            "serial8250 console registered",
+            self.fixture.bus.ns16550a_probe_registers_serial_console()
+                && ns16550a::serial8250_console_registered(),
+        );
+        assertions.assert(
+            "console handoff triggered",
+            self.fixture.bus.ns16550a_probe_triggers_console_handoff()
+                && ns16550a::handoff_triggered()
+                && printk::console_handoff_complete()
+                && printk::route() == printk::PrintkRoute::Serial8250,
         );
     }
 

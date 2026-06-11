@@ -22,6 +22,8 @@ const FDT_SIZE_DT_STRUCT: usize = 36;
 const MAX_DEPTH: usize = 64;
 const NO_INDEX: usize = usize::MAX;
 const ROOT_NODE_NAME: [u8; 1] = [b'/'];
+const STDOUT_PATH_PROPERTY: &[u8] = b"stdout-path";
+const LINUX_STDOUT_PATH_PROPERTY: &[u8] = b"linux,stdout-path";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct DeviceNodeId(usize);
@@ -29,6 +31,10 @@ pub struct DeviceNodeId(usize);
 impl DeviceNodeId {
     pub const fn index(self) -> usize {
         self.0
+    }
+
+    pub const fn invalid() -> Self {
+        Self(usize::MAX)
     }
 }
 
@@ -40,6 +46,8 @@ pub struct DeviceTree {
     node_count: usize,
     property_count: usize,
     max_depth: usize,
+    stdout_path_node: Option<DeviceNodeId>,
+    stdout_path_options: RawSlice,
 }
 
 impl DeviceTree {
@@ -52,6 +60,8 @@ impl DeviceTree {
             node_count: 0,
             property_count: 0,
             max_depth: 0,
+            stdout_path_node: None,
+            stdout_path_options: RawSlice::empty(),
         }
     }
 
@@ -118,12 +128,18 @@ impl DeviceTree {
             return self.failed_setup();
         }
 
+        let Some(stdout_path) = resolve_stdout_path(&records) else {
+            return self.failed_setup();
+        };
+
         self.storage = storage;
         self.storage_virt = storage_virt;
         self.storage_size = plan.storage_size;
         self.node_count = plan.node_count;
         self.property_count = plan.property_count;
         self.max_depth = plan.max_depth;
+        self.stdout_path_node = Some(DeviceNodeId(stdout_path.node_index));
+        self.stdout_path_options = stdout_path.options;
 
         if !self.ready_facts_hold(&view) {
             return self.failed_setup();
@@ -171,7 +187,9 @@ impl DeviceTree {
             return false;
         }
 
-        self.tree_links_valid(&records, view) && self.properties_queryable(&records, view)
+        self.tree_links_valid(&records, view)
+            && self.properties_queryable(&records, view)
+            && self.stdout_path_ready()
     }
 
     fn tree_links_valid(&self, records: &UnflattenStorage, _view: &FdtView) -> bool {
@@ -303,6 +321,31 @@ impl DeviceTree {
             tree: self,
             index: id.index(),
         })
+    }
+
+    pub fn stdout_path_node(&self) -> Option<DeviceNodeRef<'_>> {
+        self.node(self.stdout_path_node?)
+    }
+
+    pub const fn stdout_path_node_id(&self) -> Option<DeviceNodeId> {
+        self.stdout_path_node
+    }
+
+    pub fn stdout_path_options(&self) -> &[u8] {
+        raw_bytes_slice(self.stdout_path_options.addr, self.stdout_path_options.len).unwrap_or(&[])
+    }
+
+    pub fn stdout_path_selects(&self, node_id: DeviceNodeId) -> bool {
+        self.stdout_path_node == Some(node_id)
+    }
+
+    fn stdout_path_ready(&self) -> bool {
+        let Some(node_id) = self.stdout_path_node else {
+            return false;
+        };
+        self.record_node(node_id.index()).is_some()
+            && raw_bytes_slice(self.stdout_path_options.addr, self.stdout_path_options.len)
+                .is_some()
     }
 
     fn record_node(&self, index: usize) -> Option<DeviceNodeRecord> {
@@ -705,6 +748,24 @@ struct RawString {
     len: usize,
 }
 
+#[derive(Clone, Copy)]
+struct RawSlice {
+    addr: usize,
+    len: usize,
+}
+
+impl RawSlice {
+    const fn empty() -> Self {
+        Self { addr: 1, len: 0 }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StdoutPath {
+    node_index: usize,
+    options: RawSlice,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct DeviceNodeRecord {
@@ -891,6 +952,61 @@ impl UnflattenStorage {
         }
         None
     }
+
+    fn property_value<'a>(&self, node_index: usize, name: &[u8]) -> Option<&'a [u8]> {
+        let node = self.node(node_index)?;
+        let mut property = node.first_property;
+        let mut count = 0usize;
+        while property != NO_INDEX {
+            if count >= self.property_count {
+                return None;
+            }
+            let record = self.property(property)?;
+            if raw_string_matches_slice(record.name, name)? {
+                let len = cstr_slice_len(raw_bytes_slice(record.value_addr, record.value_len)?);
+                return raw_bytes_slice(record.value_addr, len);
+            }
+            property = record.next;
+            count += 1;
+        }
+        None
+    }
+
+    fn find_path(&self, path: &[u8]) -> Option<usize> {
+        if path == b"/" {
+            return Some(0);
+        }
+        if path.is_empty() || path[0] != b'/' {
+            return None;
+        }
+
+        let mut current = 0usize;
+        let mut cursor = 1usize;
+        while cursor < path.len() {
+            let segment_start = cursor;
+            while cursor < path.len() && path[cursor] != b'/' {
+                cursor += 1;
+            }
+            if cursor == segment_start {
+                return None;
+            }
+            current = self.find_child_by_name(current, &path[segment_start..cursor])?;
+            if cursor < path.len() && path[cursor] == b'/' {
+                cursor += 1;
+            }
+        }
+        Some(current)
+    }
+
+    fn resolve_path_or_alias(&self, path: &[u8]) -> Option<usize> {
+        if path.first() == Some(&b'/') {
+            return self.find_path(path);
+        }
+
+        let aliases = self.find_child_by_name(0, b"aliases")?;
+        let alias_value = self.property_value(aliases, path)?;
+        self.find_path(alias_value)
+    }
 }
 
 fn populate_device_tree(view: &FdtView, records: &UnflattenStorage, plan: &DeviceTreePlan) -> bool {
@@ -1009,6 +1125,38 @@ fn populate_device_tree(view: &FdtView, records: &UnflattenStorage, plan: &Devic
         }
     }
     false
+}
+
+fn resolve_stdout_path(records: &UnflattenStorage) -> Option<StdoutPath> {
+    let chosen = records.find_child_by_name(0, b"chosen")?;
+    let value = records
+        .property_value(chosen, STDOUT_PATH_PROPERTY)
+        .or_else(|| records.property_value(chosen, LINUX_STDOUT_PATH_PROPERTY))?;
+    let path_len = stdout_path_node_part_len(value);
+    if path_len == 0 {
+        return None;
+    }
+    let node_index = records.resolve_path_or_alias(&value[..path_len])?;
+    let options = if path_len < value.len() && value[path_len] == b':' {
+        RawSlice {
+            addr: value.as_ptr() as usize + path_len + 1,
+            len: value.len() - path_len - 1,
+        }
+    } else {
+        RawSlice::empty()
+    };
+    Some(StdoutPath {
+        node_index,
+        options,
+    })
+}
+
+fn stdout_path_node_part_len(value: &[u8]) -> usize {
+    let mut len = 0usize;
+    while len < value.len() && value[len] != 0 && value[len] != b':' {
+        len += 1;
+    }
+    len
 }
 
 fn raw_string_matches_slice(string: RawString, expected: &[u8]) -> Option<bool> {

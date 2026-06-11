@@ -1,6 +1,9 @@
-use super::{device::DeviceRef, device_tree::DeviceTree};
+use super::{
+    device::DeviceRef,
+    device_tree::{DeviceNodeId, DeviceTree},
+};
 
-pub type PlatformProbe = fn(&DeviceTree, DeviceRef) -> ProbeResult;
+pub type PlatformProbe = fn(&DeviceTree, DeviceRef, DeviceNodeId) -> ProbeResult;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProbeResult {
@@ -90,8 +93,13 @@ impl PlatformDriver {
         &self.driver
     }
 
-    pub fn probe(&self, device_tree: &DeviceTree, device: DeviceRef) -> ProbeResult {
-        (self.probe)(device_tree, device)
+    pub fn probe(
+        &self,
+        device_tree: &DeviceTree,
+        device: DeviceRef,
+        node_id: DeviceNodeId,
+    ) -> ProbeResult {
+        (self.probe)(device_tree, device, node_id)
     }
 }
 
@@ -126,6 +134,10 @@ pub static MOCK_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
 
 pub const MOCK_PLATFORM_DRIVER_REF: DeviceDriverRef = DeviceDriverRef::new(&MOCK_PLATFORM_DRIVER);
 
-fn mock_deferred_probe(_device_tree: &DeviceTree, _device: DeviceRef) -> ProbeResult {
+fn mock_deferred_probe(
+    _device_tree: &DeviceTree,
+    _device: DeviceRef,
+    _node_id: DeviceNodeId,
+) -> ProbeResult {
     ProbeResult::Deferred
 }

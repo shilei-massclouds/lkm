@@ -20,6 +20,13 @@ pub struct Console {
     initcall_table_scanned: bool,
     real_device_probe_deferred: bool,
     earlycon_handoff_conditional: bool,
+    registry_ready: bool,
+    boot_console_registered: bool,
+    serial_console_registered: bool,
+    preferred_console_from_stdout: bool,
+    printk_route_serial_console: bool,
+    boot_console_unregistered: bool,
+    handoff_complete: bool,
 }
 
 impl Console {
@@ -31,6 +38,13 @@ impl Console {
             initcall_table_scanned: false,
             real_device_probe_deferred: false,
             earlycon_handoff_conditional: false,
+            registry_ready: false,
+            boot_console_registered: false,
+            serial_console_registered: false,
+            preferred_console_from_stdout: false,
+            printk_route_serial_console: false,
+            boot_console_unregistered: false,
+            handoff_complete: false,
         }
     }
 
@@ -56,6 +70,34 @@ impl Console {
 
     pub const fn earlycon_handoff_conditional(&self) -> bool {
         self.earlycon_handoff_conditional
+    }
+
+    pub const fn registry_ready(&self) -> bool {
+        self.registry_ready
+    }
+
+    pub const fn boot_console_registered(&self) -> bool {
+        self.boot_console_registered
+    }
+
+    pub const fn serial_console_registered(&self) -> bool {
+        self.serial_console_registered
+    }
+
+    pub const fn preferred_console_from_stdout(&self) -> bool {
+        self.preferred_console_from_stdout
+    }
+
+    pub const fn printk_route_serial_console(&self) -> bool {
+        self.printk_route_serial_console
+    }
+
+    pub const fn boot_console_unregistered(&self) -> bool {
+        self.boot_console_unregistered
+    }
+
+    pub const fn handoff_complete(&self) -> bool {
+        self.handoff_complete
     }
 
     pub fn preset(&mut self, static_objects: &StaticObjects) -> EventResult {
@@ -84,6 +126,22 @@ impl Console {
             State::Prepared,
             Checkpoint::ConsolePrepared,
         )
+    }
+
+    pub fn refresh_handoff(&mut self) {
+        self.registry_ready = printk::boot_console_registered()
+            && printk::serial8250_console_registered()
+            && printk::preferred_console_from_stdout();
+        self.boot_console_registered = printk::boot_console_registered();
+        self.serial_console_registered = printk::serial8250_console_registered();
+        self.preferred_console_from_stdout = printk::preferred_console_from_stdout();
+        self.printk_route_serial_console = printk::route() == printk::PrintkRoute::Serial8250;
+        self.boot_console_unregistered = !printk::keep_bootcon() && !printk::boot_console_online();
+        self.handoff_complete = printk::console_handoff_complete();
+        if self.handoff_complete {
+            self.real_device_probe_deferred = false;
+            self.earlycon_handoff_conditional = false;
+        }
     }
 }
 

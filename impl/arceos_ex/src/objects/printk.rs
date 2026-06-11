@@ -12,6 +12,70 @@ const BUFFER_SIZE: usize = 4096;
 
 #[allow(dead_code)]
 static mut PRINTK_BUFFER: PrintkBuffer = PrintkBuffer::new();
+static mut CONSOLE_REGISTRY: ConsoleRegistry = ConsoleRegistry::new();
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum PrintkRoute {
+    BufferOnly,
+    BootConsole,
+    Serial8250,
+}
+
+pub struct ConsoleRegistry {
+    boot_console_registered: bool,
+    boot_console_online: bool,
+    serial8250_console_registered: bool,
+    preferred_console_from_stdout: bool,
+    serial8250_consdev: bool,
+    serial8250_write_ready: bool,
+    keep_bootcon: bool,
+    handoff_complete: bool,
+    route: PrintkRoute,
+}
+
+impl ConsoleRegistry {
+    pub const fn new() -> Self {
+        Self {
+            boot_console_registered: false,
+            boot_console_online: false,
+            serial8250_console_registered: false,
+            preferred_console_from_stdout: false,
+            serial8250_consdev: false,
+            serial8250_write_ready: false,
+            keep_bootcon: false,
+            handoff_complete: false,
+            route: PrintkRoute::BufferOnly,
+        }
+    }
+
+    fn register_boot_console(&mut self) {
+        self.boot_console_registered = true;
+        self.boot_console_online = true;
+        self.route = PrintkRoute::BootConsole;
+    }
+
+    fn register_serial8250_console(&mut self, preferred_from_stdout: bool) -> bool {
+        if !self.boot_console_registered || !preferred_from_stdout {
+            return false;
+        }
+
+        self.serial8250_console_registered = true;
+        self.preferred_console_from_stdout = true;
+        self.serial8250_consdev = true;
+        self.serial8250_write_ready = true;
+        self.route = PrintkRoute::Serial8250;
+        self.handoff_complete = true;
+        if !self.keep_bootcon {
+            self.boot_console_online = false;
+        }
+        true
+    }
+
+    #[allow(dead_code)]
+    fn set_keep_bootcon(&mut self, enabled: bool) {
+        self.keep_bootcon = enabled;
+    }
+}
 
 #[allow(dead_code)]
 pub struct PrintkBuffer {
@@ -143,6 +207,105 @@ pub fn write_str(message: &str) {
             .unwrap()
             .write_bytes(message.as_bytes());
     }
+}
+
+pub fn register_boot_console() {
+    unsafe {
+        (&raw mut CONSOLE_REGISTRY)
+            .as_mut()
+            .unwrap()
+            .register_boot_console();
+    }
+}
+
+pub fn register_serial8250_console(preferred_from_stdout: bool) -> bool {
+    unsafe {
+        (&raw mut CONSOLE_REGISTRY)
+            .as_mut()
+            .unwrap()
+            .register_serial8250_console(preferred_from_stdout)
+    }
+}
+
+#[allow(dead_code)]
+pub fn set_keep_bootcon(enabled: bool) {
+    unsafe {
+        (&raw mut CONSOLE_REGISTRY)
+            .as_mut()
+            .unwrap()
+            .set_keep_bootcon(enabled);
+    }
+}
+
+pub fn boot_console_registered() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .boot_console_registered
+    }
+}
+
+pub fn boot_console_online() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .boot_console_online
+    }
+}
+
+pub fn serial8250_console_registered() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .serial8250_console_registered
+    }
+}
+
+pub fn serial8250_consdev() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .serial8250_consdev
+    }
+}
+
+pub fn serial8250_write_ready() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .serial8250_write_ready
+    }
+}
+
+pub fn preferred_console_from_stdout() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .preferred_console_from_stdout
+    }
+}
+
+pub fn keep_bootcon() -> bool {
+    unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap().keep_bootcon }
+}
+
+pub fn console_handoff_complete() -> bool {
+    unsafe {
+        (&raw const CONSOLE_REGISTRY)
+            .as_ref()
+            .unwrap()
+            .handoff_complete
+    }
+}
+
+pub fn route() -> PrintkRoute {
+    unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap().route }
 }
 
 #[allow(dead_code)]

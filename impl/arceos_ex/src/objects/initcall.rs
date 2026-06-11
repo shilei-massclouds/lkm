@@ -4,7 +4,7 @@ use super::{
     driver::{DeviceDriverRef, ProbeResult},
     irq_time::IrqDispatchTree,
     mm_core::PageAllocator,
-    ns16550a::is_ns16550a_platform_driver,
+    ns16550a,
     runtime_core::RuntimeCoreBoundary,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
@@ -541,6 +541,9 @@ pub struct PlatformBus {
     ns16550a_probe_called: bool,
     ns16550a_probe_return_zero: bool,
     ns16550a_bound_device: Option<DeviceRef>,
+    ns16550a_probe_registers_uart8250_port: bool,
+    ns16550a_probe_registers_serial_console: bool,
+    ns16550a_probe_triggers_console_handoff: bool,
     of_platform_source_tree_ready: bool,
     of_platform_root_children_scanned: bool,
     of_platform_strict_compatible_required: bool,
@@ -578,6 +581,9 @@ impl PlatformBus {
             ns16550a_probe_called: false,
             ns16550a_probe_return_zero: false,
             ns16550a_bound_device: None,
+            ns16550a_probe_registers_uart8250_port: false,
+            ns16550a_probe_registers_serial_console: false,
+            ns16550a_probe_triggers_console_handoff: false,
             of_platform_source_tree_ready: false,
             of_platform_root_children_scanned: false,
             of_platform_strict_compatible_required: false,
@@ -683,6 +689,18 @@ impl PlatformBus {
 
     pub const fn ns16550a_bound_device(&self) -> Option<DeviceRef> {
         self.ns16550a_bound_device
+    }
+
+    pub const fn ns16550a_probe_registers_uart8250_port(&self) -> bool {
+        self.ns16550a_probe_registers_uart8250_port
+    }
+
+    pub const fn ns16550a_probe_registers_serial_console(&self) -> bool {
+        self.ns16550a_probe_registers_serial_console
+    }
+
+    pub const fn ns16550a_probe_triggers_console_handoff(&self) -> bool {
+        self.ns16550a_probe_triggers_console_handoff
     }
 
     pub const fn of_platform_source_tree_ready(&self) -> bool {
@@ -877,7 +895,7 @@ impl PlatformBus {
         }
 
         self.driver_refs.push(driver);
-        if is_ns16550a_platform_driver(driver) {
+        if ns16550a::is_ns16550a_platform_driver(driver) {
             self.ns16550a_driver_registered = true;
             self.ns16550a_match_table_ready = true;
         }
@@ -1009,13 +1027,21 @@ impl PlatformBus {
         device_ref: DeviceRef,
         device_tree: &DeviceTree,
     ) {
-        let result = driver.driver().probe(device_tree, device_ref);
-        if is_ns16550a_platform_driver(driver) {
+        let Some(platform_device) = self.platform_device(device_ref) else {
+            return;
+        };
+        let node_id = platform_device.dev().node_id();
+        let result = driver.driver().probe(device_tree, device_ref, node_id);
+        if ns16550a::is_ns16550a_platform_driver(driver) {
             self.ns16550a_device_matched = true;
             self.ns16550a_probe_called = true;
             self.ns16550a_probe_return_zero = result == ProbeResult::Bound;
             if result == ProbeResult::Bound {
                 self.ns16550a_bound_device = Some(device_ref);
+                self.ns16550a_probe_registers_uart8250_port = ns16550a::uart8250_port_registered();
+                self.ns16550a_probe_registers_serial_console =
+                    ns16550a::serial8250_console_registered();
+                self.ns16550a_probe_triggers_console_handoff = ns16550a::handoff_triggered();
             }
             self.print_ns16550a_probe(device_ref);
         }
@@ -1714,6 +1740,9 @@ pub fn initcall_phase_ready(
         && platform_bus.ns16550a_probe_called()
         && platform_bus.ns16550a_probe_return_zero()
         && platform_bus.ns16550a_bound_device().is_some()
+        && platform_bus.ns16550a_probe_registers_uart8250_port()
+        && platform_bus.ns16550a_probe_registers_serial_console()
+        && platform_bus.ns16550a_probe_triggers_console_handoff()
         && driver_core.state() == State::Ready
         && driver_core.post_platform_deferred()
         && driver_core.entry_position_preserved()

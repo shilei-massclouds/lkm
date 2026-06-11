@@ -69,6 +69,9 @@ fn run_initcall_table(ctx: &mut Context) -> EventResult {
     );
     let result = table.setup(ctx);
     ctx.initcall_table = table;
+    if result.is_ok() {
+        ctx.console.refresh_handoff();
+    }
     result
 }
 
