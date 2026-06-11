@@ -943,7 +943,8 @@ allocation failure 处理，而不能被解释为 `Vec` 语义本身可用性失
 MMIO 属性策略层。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END`
 页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、
 `VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、
-建立 free vmap space。
+建立 free vmap space。`PageTableCaches` / `SwapperVm` 提供“可以在 vmalloc 范围安装页表项”的能力；
+`VmallocAllocator.map_page_range()` 是每次 vmap VA/PA 映射的执行者，不能只把这个能力表示为一次性的 ready bit。
 
 `VmallocAllocator` 必须暴露与 model `VmallocAllocatorType` 对齐的最小运行期接口：申请/保留
 `VmapArea`，基于调用方给出的物理区间或 pages/PFN 信息和 `PageProtection` 执行 page range 映射，
@@ -952,8 +953,11 @@ MMIO 属性策略层。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `
 ns16550a 或 console 专用路径。
 
 `VmallocAllocator.map_page_range()` 的 installed fact 必须对应当前 swapper 页表里的真实 vmap VA/PA
-映射安装。若 `PageTableCaches` 没有提供 vmalloc install range，或映射跨出当前已预分配的最小 vmalloc
-页表范围，实现必须返回失败，不得只记录 `VmapMapping.installed=true`。当前实现可以把支持范围限制在
+映射安装。每次成功调用都必须产生一个独立的 `VmapMapping` 记录，绑定本次 `VmapArea`、调用方给出的
+物理页/PFN/range、`PageProtection` 和已安装页表项；这不是重新推进 `VmallocAllocator` 生命周期，也不是把
+全局 `runtime_page_table_mapping_ready` 位重复置真。若 `PageTableCaches` 没有提供 vmalloc install range，
+或映射跨出当前已预分配的最小 vmalloc 页表范围，实现必须返回失败，不得只记录 `VmapMapping.installed=true`。
+当前实现可以把支持范围限制在
 `VMALLOC_START` 起始的首个 L1/L0 页表窗口，但该限制必须通过 ready/failure fact 暴露，后续再泛化到完整
 `VMALLOC_START..VMALLOC_END`。
 

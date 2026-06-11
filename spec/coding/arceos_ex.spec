@@ -49,8 +49,10 @@ predicate arceos_ex_must_dynamic_containers_require_global_allocator_ready() -> 
 predicate arceos_ex_must_dynamic_container_smoke_cover_vec_growth_drop() -> bool;
 predicate arceos_ex_must_dynamic_container_pressure_smoke_cover_layout_boundary() -> bool;
 predicate arceos_ex_must_page_table_lock_cache_named_page_ptl() -> bool;
-predicate arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_not_page_tables() -> bool;
+predicate arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_and_execute_mappings() -> bool;
 predicate arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects() -> bool;
+predicate arceos_ex_must_vmalloc_map_page_range_record_each_mapping_action() -> bool;
+predicate arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external_to_vmalloc() -> bool;
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
 predicate arceos_ex_must_startup_drive_boot_then_interrupt_then_payload() -> bool;
@@ -440,11 +442,12 @@ type ArceosExMmCoreInitCodingMust {
          * Vmalloc boundary:
          *
          * VmallocAllocator.setup() must manage vmalloc/vmap virtual address
-         * resources and metadata. It must not be used as the page-table
-         * mapping implementation; page table range preparation belongs to
-         * PageTableCaches/SwapperVm facts.
+         * resources and metadata. VmallocAllocator.map_page_range() is the
+         * vmap mapping executor and must install VA/PA mappings using the
+         * PageTableCaches/SwapperVm capability already prepared for the
+         * vmalloc range.
          */
-        arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_not_page_tables();
+        arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_and_execute_mappings();
 
         /*
          * Vmap subobjects:
@@ -454,6 +457,27 @@ type ArceosExMmCoreInitCodingMust {
          * before VmallocAllocator.Ready is emitted.
          */
         arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects();
+
+        /*
+         * Mapping record boundary:
+         *
+         * Every successful map_page_range() action must create a distinct
+         * VmapMapping record bound to the reserved VmapArea, caller-supplied
+         * physical range/PFN/pages, protection, and installed swapper page
+         * table entries. Reusing a global "mapping ready" bit is not enough.
+         */
+        arceos_ex_must_vmalloc_map_page_range_record_each_mapping_action();
+
+        /*
+         * Ioremap/vmalloc split:
+         *
+         * Ioremap owns the device physical resource source and MMIO attribute
+         * policy. VmallocAllocator owns vmap VA allocation and mapping
+         * execution only; it must not parse DeviceTree/PCI BARs, decide
+         * whether a physical range is mappable, or choose device/non-cache/
+         * write-combine/normal memory attributes.
+         */
+        arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external_to_vmalloc();
 
         /*
          * mm_struct only:

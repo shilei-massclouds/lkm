@@ -44,6 +44,7 @@ predicate vmap_area_range_complete_for_mapping<T, M>(area: T, mapping: M) -> boo
 predicate vmap_area_released<T, A>(area: T, allocator: A) -> bool;
 
 predicate vmap_mapping_ref_ready<T>(mapping: T) -> bool;
+predicate vmap_mapping_record_created<T, M>(allocator: T, mapping: M) -> bool;
 predicate vmap_mapping_area_bound<T, A>(mapping: T, area: A) -> bool;
 predicate vmap_mapping_phys_range_bound<T>(mapping: T) -> bool;
 predicate vmap_mapping_page_range_installed<T, S>(mapping: T, swapper_vm: S) -> bool;
@@ -84,6 +85,10 @@ type VmallocAllocatorType: MemoryObject {
          * MapPageRange corresponds to the vmap/ioremap page-table execution
          * path. It maps caller-supplied physical pages/PFNs/ranges into an
          * already reserved vmap area using caller-supplied protection flags.
+         * Every successful action creates a VmapMapping record for that
+         * concrete area/physical-range/protection tuple; the caller may own
+         * the physical resource and attribute policy, but the vmalloc/vmap
+         * subsystem owns the installed mapping record.
          */
         Action::MapPageRange(
             area: VmapAreaRef,
@@ -104,6 +109,7 @@ type VmallocAllocatorType: MemoryObject {
             }
             ensures {
                 vmap_mapping_ref_ready(mapping);
+                vmap_mapping_record_created(self, mapping);
                 vmap_mapping_area_bound(mapping, area);
                 vmap_area_range_complete_for_mapping(area, mapping);
                 vmap_mapping_phys_range_bound(mapping);

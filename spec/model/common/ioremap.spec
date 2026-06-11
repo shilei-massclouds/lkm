@@ -8,6 +8,9 @@
  * - This is distinct from vmalloc(): both consume vmap virtual address space,
  *   but ioremap binds device physical MMIO ranges and returns an __iomem
  *   membase cookie instead of allocating RAM-backed kernel memory.
+ * - Ioremap decides the device physical resource and IO protection policy, but
+ *   the vmap area reservation and VA/PA page-table mapping record are owned by
+ *   the vmalloc/vmap subsystem.
  * - This object is runtime ioremap, not EarlyIoremap/FixMap boot-time slots.
  */
 
