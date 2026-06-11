@@ -53,6 +53,12 @@ object DeviceTree: ResourceObject {
                     device_tree_parent_name_lookup_ready(DeviceTree);
                     device_tree_properties_queryable(DeviceTree);
                     device_tree_property_raw_values_queryable(DeviceTree);
+                    device_tree_chosen_node_ready(DeviceTree);
+                    device_tree_stdout_path_property_ready(DeviceTree);
+                    device_tree_stdout_path_options_preserved(DeviceTree);
+                    device_tree_stdout_path_resolves_to_node(DeviceTree, DeviceNodeRef::Ns16550aSerial);
+                    device_tree_stdout_path_node_id_stable(DeviceTree, DeviceNodeId::Ns16550aSerial);
+                    device_tree_stdout_path_selects_console_node(DeviceTree, DeviceNodeRef::Ns16550aSerial);
                 }
             }
         }
@@ -80,6 +86,12 @@ object DeviceTree: ResourceObject {
             device_tree_parent_name_lookup_ready(DeviceTree);
             device_tree_properties_queryable(DeviceTree);
             device_tree_property_raw_values_queryable(DeviceTree);
+            device_tree_chosen_node_ready(DeviceTree);
+            device_tree_stdout_path_property_ready(DeviceTree);
+            device_tree_stdout_path_options_preserved(DeviceTree);
+            device_tree_stdout_path_resolves_to_node(DeviceTree, DeviceNodeRef::Ns16550aSerial);
+            device_tree_stdout_path_node_id_stable(DeviceTree, DeviceNodeId::Ns16550aSerial);
+            device_tree_stdout_path_selects_console_node(DeviceTree, DeviceNodeRef::Ns16550aSerial);
         }
     }
 }

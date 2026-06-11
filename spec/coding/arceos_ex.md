@@ -381,6 +381,26 @@ KUnit 对 candidate facts 的检查应挂在该点，而不是挂在入口点。
 链路；`Exit` 只表示 action 返回边界。smoke 预期不得假设 initcall table 中只有本测试注册的 entry，必须只断言
 本场景关心的 populate entry 已存在且执行结果正确，忽略其它无关 initcall entries。
 
+console/earlycon handoff 的第一轮实现应保持 Linux-like 边界，但允许先只记录可观测事实。正式
+`DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，
+冒号后是 console options，options 必须保留给后续 console setup，不应混入节点路径匹配。解析结果应保存为稳定
+`DeviceNodeId`/path handle，并在需要访问属性时通过仍然存在的 `DeviceTree` 解析临时 `DeviceNodeRef<'_>`。
+
+`ns16550a` probe 必须从 `PlatformDevice -> Device -> DeviceNodeId -> DeviceTree node` 路径解析 UART 资源，
+至少记录 MMIO resource、`reg-shift`、`reg-io-width`、`clock-frequency` 或等价默认 clock、line/index 分配和
+`serial8250_register_8250_port()` 风格返回事实。probe 只能在被绑定设备匹配 `stdout-path` 时注册
+`Serial8250Console` 并触发 handoff；非 stdout-path 的 ns16550a 设备只能注册普通 port 或记录非 console port
+事实，不得抢占 console。
+
+`ConsoleRegistry` / `ConsoleHandoff` 的实现应模拟 printk `register_console()` 策略：`BootConsole` 表示
+earlycon 作为 `CON_BOOT` console 注册后的身份；真实 `Serial8250Console` 成为 consdev 后，printk route 切到真实
+console，并在 `keep_bootcon` 未设置时注销 boot console。若设置 `keep_bootcon`，handoff 应记录真实 console 已注册和
+route 已切换/可用，但 boot console 保持 online。第一轮可只记录 `PrintkBuffer` route 已切换到 serial console 的事实，
+实际字节仍暂由 SBI early console drain；后续再补 UART MMIO polling write 后端。
+
+smoke/KUnit 应覆盖：`stdout-path` 命中后发生 `Uart8250Port` 与 `Serial8250Console` 注册、非 stdout-path 设备不抢占
+console、默认策略下 boot console 注销、`keep_bootcon` 保留 boot console，以及 handoff 后 printk route facts 符合预期。
+
 ## RootfsPhase 编码约束
 
 `RootfsPhase` 是 `SMP Runtime Phase` 的第四个子阶段，formal model 路径为

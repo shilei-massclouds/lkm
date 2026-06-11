@@ -121,6 +121,13 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     PlatformBus.state == State::Ready;
                 }
 
+                drives {
+                    Uart8250Port.Event::Setup;
+                    Serial8250Console.Event::Setup;
+                    ConsoleRegistry.Event::Setup;
+                    ConsoleHandoff.Event::Setup;
+                }
+
                 ensures {
                     device_driver_bus_bound(Ns16550aPlatformDriver, PlatformBus);
                     device_driver_registered(Ns16550aPlatformDriver);
@@ -130,12 +137,20 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     platform_driver_probe_called(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
                     platform_driver_probe_return_zero(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
                     platform_driver_bound_device(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                    uart8250_port_resources_ready(Uart8250Port, DeviceRef::Ns16550aSerial, DeviceTree);
+                    uart8250_port_registered(Uart8250Port);
+                    serial8250_console_registered(Serial8250Console, Uart8250Port);
+                    console_handoff_ready(ConsoleHandoff, BootConsole, Serial8250Console);
+                    console_handoff_printk_route_switched(ConsoleHandoff, ConsoleRegistry, Serial8250Console);
                     platform_bus_ns16550a_driver_registered(PlatformBus);
                     platform_bus_ns16550a_driver_match_table_ready(PlatformBus);
                     platform_bus_ns16550a_device_matched(PlatformBus);
                     platform_bus_ns16550a_driver_probe_called(PlatformBus);
                     platform_bus_ns16550a_driver_probe_return_zero(PlatformBus);
                     platform_bus_ns16550a_device_bound(PlatformBus);
+                    platform_bus_ns16550a_probe_registers_uart8250_port(PlatformBus, Uart8250Port);
+                    platform_bus_ns16550a_probe_registers_serial_console(PlatformBus, Serial8250Console);
+                    platform_bus_ns16550a_probe_triggers_console_handoff(PlatformBus, ConsoleHandoff);
                 }
             }
         }
@@ -160,16 +175,29 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             );
             device_driver_ref_lifetime_stable(DeviceDriverRef::Ns16550aPlatformDriver);
             device_driver_ref_ready(DeviceDriverRef::Ns16550aPlatformDriver);
+            Uart8250Port.state == State::Ready;
+            Serial8250Console.state == State::Ready;
+            ConsoleRegistry.state == State::Ready;
+            ConsoleHandoff.state == State::Ready;
+            BootConsole.state == State::Offline;
             platform_driver_matches_device_node(Ns16550aPlatformDriver, DeviceNodeRef::Ns16550aSerial);
             platform_driver_probe_called(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             platform_driver_probe_return_zero(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             platform_driver_bound_device(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+            uart8250_port_resources_ready(Uart8250Port, DeviceRef::Ns16550aSerial, DeviceTree);
+            uart8250_port_registered(Uart8250Port);
+            serial8250_console_registered(Serial8250Console, Uart8250Port);
+            console_handoff_ready(ConsoleHandoff, BootConsole, Serial8250Console);
+            console_handoff_printk_route_switched(ConsoleHandoff, ConsoleRegistry, Serial8250Console);
             platform_bus_ns16550a_driver_registered(PlatformBus);
             platform_bus_ns16550a_driver_match_table_ready(PlatformBus);
             platform_bus_ns16550a_device_matched(PlatformBus);
             platform_bus_ns16550a_driver_probe_called(PlatformBus);
             platform_bus_ns16550a_driver_probe_return_zero(PlatformBus);
             platform_bus_ns16550a_device_bound(PlatformBus);
+            platform_bus_ns16550a_probe_registers_uart8250_port(PlatformBus, Uart8250Port);
+            platform_bus_ns16550a_probe_registers_serial_console(PlatformBus, Serial8250Console);
+            platform_bus_ns16550a_probe_triggers_console_handoff(PlatformBus, ConsoleHandoff);
         }
     }
 }

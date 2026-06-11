@@ -163,6 +163,18 @@ predicate arceos_ex_must_platform_bus_probe_driver_scan_existing_devices() -> bo
 predicate arceos_ex_must_platform_bus_probe_device_scan_registered_drivers() -> bool;
 predicate arceos_ex_must_ns16550a_driver_match_of_compatible_from_device_node() -> bool;
 predicate arceos_ex_must_ns16550a_driver_smoke_cover_probe_and_bind() -> bool;
+predicate arceos_ex_must_device_tree_parse_stdout_path_from_chosen() -> bool;
+predicate arceos_ex_must_device_tree_preserve_stdout_path_options_after_colon() -> bool;
+predicate arceos_ex_must_device_tree_stdout_path_resolve_to_stable_node_id() -> bool;
+predicate arceos_ex_must_ns16550a_probe_parse_resources_from_platform_device_node() -> bool;
+predicate arceos_ex_must_ns16550a_probe_create_uart8250_port_object() -> bool;
+predicate arceos_ex_must_ns16550a_probe_register_serial8250_console_only_for_stdout_path() -> bool;
+predicate arceos_ex_must_console_registry_model_register_console_handoff_policy() -> bool;
+predicate arceos_ex_must_keep_bootcon_prevent_boot_console_unregister() -> bool;
+predicate arceos_ex_must_printk_route_switch_to_serial_console_fact_before_mmio_backend() -> bool;
+predicate arceos_ex_must_console_handoff_smoke_cover_stdout_path_match_and_nonmatch() -> bool;
+predicate arceos_ex_must_console_handoff_smoke_cover_keep_bootcon() -> bool;
+predicate arceos_ex_must_console_handoff_smoke_cover_printk_route() -> bool;
 predicate arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor() -> bool;
 predicate arceos_ex_must_platform_device_embed_device_and_support_container_lookup() -> bool;
 predicate arceos_ex_must_raw_intrusive_bus_list_not_own_device_lifetime() -> bool;
@@ -1644,6 +1656,37 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_platform_bus_probe_device_scan_registered_drivers();
         arceos_ex_must_ns16550a_driver_match_of_compatible_from_device_node();
         arceos_ex_must_ns16550a_driver_smoke_cover_probe_and_bind();
+
+        /*
+         * Console/earlycon handoff:
+         *
+         * The next platform-driver increment must model Linux-like handoff
+         * without jumping directly to a full UART backend. DeviceTree must
+         * parse /chosen/stdout-path or linux,stdout-path, split optional
+         * colon options, and resolve the selected node to a stable
+         * DeviceNodeId. The ns16550a probe must then parse resources from the
+         * matching PlatformDevice -> Device -> DeviceNodeId path, create a
+         * minimal Uart8250Port object, and register a Serial8250Console only
+         * when the probed device is the stdout-path device.
+         *
+         * The console registry must expose register_console()-style policy:
+         * real serial console registration switches the printk route and
+         * unregisters BootConsole unless keep_bootcon is set. The first
+         * implementation may record facts for the route switch before
+         * replacing the actual sink with UART MMIO polling writes.
+         */
+        arceos_ex_must_device_tree_parse_stdout_path_from_chosen();
+        arceos_ex_must_device_tree_preserve_stdout_path_options_after_colon();
+        arceos_ex_must_device_tree_stdout_path_resolve_to_stable_node_id();
+        arceos_ex_must_ns16550a_probe_parse_resources_from_platform_device_node();
+        arceos_ex_must_ns16550a_probe_create_uart8250_port_object();
+        arceos_ex_must_ns16550a_probe_register_serial8250_console_only_for_stdout_path();
+        arceos_ex_must_console_registry_model_register_console_handoff_policy();
+        arceos_ex_must_keep_bootcon_prevent_boot_console_unregister();
+        arceos_ex_must_printk_route_switch_to_serial_console_fact_before_mmio_backend();
+        arceos_ex_must_console_handoff_smoke_cover_stdout_path_match_and_nonmatch();
+        arceos_ex_must_console_handoff_smoke_cover_keep_bootcon();
+        arceos_ex_must_console_handoff_smoke_cover_printk_route();
     }
 }
 

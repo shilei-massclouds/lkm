@@ -90,6 +90,9 @@ predicate platform_bus_ns16550a_driver_probe_called<T>(bus: T) -> bool;
 predicate platform_bus_ns16550a_driver_probe_return_zero<T>(bus: T) -> bool;
 predicate platform_bus_ns16550a_device_matched<T>(bus: T) -> bool;
 predicate platform_bus_ns16550a_device_bound<T>(bus: T) -> bool;
+predicate platform_bus_ns16550a_probe_registers_uart8250_port<T, P>(bus: T, port: P) -> bool;
+predicate platform_bus_ns16550a_probe_registers_serial_console<T, C>(bus: T, console: C) -> bool;
+predicate platform_bus_ns16550a_probe_triggers_console_handoff<T, H>(bus: T, handoff: H) -> bool;
 
 /*
  * BusSubsysPrivate models Linux struct subsys_private as created by
@@ -377,6 +380,9 @@ type PlatformBusType: BusType {
                 platform_bus_ns16550a_driver_probe_called(self);
                 platform_bus_ns16550a_driver_probe_return_zero(self);
                 platform_bus_ns16550a_device_bound(self);
+                platform_bus_ns16550a_probe_registers_uart8250_port(self, Uart8250Port);
+                platform_bus_ns16550a_probe_registers_serial_console(self, Serial8250Console);
+                platform_bus_ns16550a_probe_triggers_console_handoff(self, ConsoleHandoff);
                 bus_type_driver_added(self, DeviceDriverRef::Ns16550aPlatformDriver);
                 bus_type_drivers_klist_nonempty(self);
                 bus_subsys_klist_drivers_contains(self.subsys, DeviceDriverRef::Ns16550aPlatformDriver);
