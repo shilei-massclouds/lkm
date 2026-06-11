@@ -977,9 +977,17 @@ metadata。重复 unmap、重复 free、未 unmap 就 free 都必须失败。当
 `VmallocAllocator.get_vm_area(...)` 和 `VmallocAllocator.map_page_range(...)`，然后只把返回的
 `VmapArea`/`VmapMapping` 绑定进 `IoMemoryMapping`。
 
+MMIO 属性必须显式建模，不能把“能通过 PTE 访问”偷换成“属性完整正确”。参照 Linux RISC-V
+`_PAGE_IOREMAP`/`PAGE_KERNEL_IO`、`pgprot_noncached()` 和 `pgprot_writecombine()` 的分工，
+`Ioremap` 必须区分 plain device、non-cache、write-combine 和 normal-memory alias 策略。当前实现只支持
+plain device ioremap，并记录 RISC-V `_PAGE_IOREMAP` 风格的 IO memory attribute fact；non-cache、
+write-combine、normal memory alias 先记录为 deferred/unsupported，不得返回成功 mapping 或让
+`VmallocAllocator` 代替 `Ioremap` 选择属性。
+
 测试必须覆盖这条分工：`VmallocAllocator` ready 后公开 area/mapping API；一次 ns16550a probe 后，
 `VmallocAllocator` 至少记录一个 `VM_IOREMAP` area 和对应 IO memory page-range mapping；`Ioremap`
 记录的 mapping 必须引用该 area/mapping，且 `membase != mapbase`、page-aligned、使用 IO protection。
+属性测试必须覆盖 plain device 成功、WC/NC/normal 策略不被误标为已支持。
 
 `MmStructCache.setup()` 只建立 `"mm_struct"` cache。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
 

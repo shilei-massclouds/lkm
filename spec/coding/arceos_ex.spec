@@ -55,6 +55,7 @@ predicate arceos_ex_must_vmalloc_map_page_range_record_each_mapping_action() -> 
 predicate arceos_ex_must_vmalloc_unmap_before_free_vmap_area() -> bool;
 predicate arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external_to_vmalloc() -> bool;
 predicate arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only() -> bool;
+predicate arceos_ex_must_ioremap_model_mmio_attribute_policy_explicitly() -> bool;
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
 predicate arceos_ex_must_startup_drive_boot_then_interrupt_then_payload() -> bool;
@@ -500,6 +501,17 @@ type ArceosExMmCoreInitCodingMust {
          * metadata.
          */
         arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only();
+
+        /*
+         * MMIO attributes:
+         *
+         * Ioremap must model device/non-cache/write-combine/normal-memory
+         * mapping attributes explicitly. The current RISC-V implementation may
+         * expose only plain device ioremap as supported; the remaining
+         * attributes must be recorded as deferred rather than inferred from a
+         * mapping that happens to be accessible.
+         */
+        arceos_ex_must_ioremap_model_mmio_attribute_policy_explicitly();
 
         /*
          * mm_struct only:

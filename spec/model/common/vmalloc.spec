@@ -23,6 +23,9 @@ type VmapAreaFlags {
 type PageProtectionRef {
 }
 
+type VmapPageProtectionKind {
+}
+
 predicate vmalloc_allocator_vmap_area_api_ready<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_page_range_mapping_api_ready<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_manages_vmap_address_space<T, V>(allocator: T, vmap_space: V) -> bool;
@@ -50,10 +53,12 @@ predicate vmap_mapping_phys_range_bound<T>(mapping: T) -> bool;
 predicate vmap_mapping_page_range_installed<T, S>(mapping: T, swapper_vm: S) -> bool;
 predicate vmap_mapping_page_range_removed<T, S>(mapping: T, swapper_vm: S) -> bool;
 predicate vmap_mapping_protection_bound<T, P>(mapping: T, protection: P) -> bool;
+predicate vmap_mapping_protection_kind_bound<T, K>(mapping: T, kind: K) -> bool;
 predicate vmap_mapping_page_aligned<T>(mapping: T) -> bool;
 
 predicate vmap_flags_vm_ioremap<T>(flags: T) -> bool;
 predicate page_protection_io_memory<T>(protection: T) -> bool;
+predicate page_protection_kind_io_memory<T>(kind: T) -> bool;
 
 type VmallocAllocatorType: MemoryObject {
     processes {

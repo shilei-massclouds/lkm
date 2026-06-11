@@ -13,6 +13,34 @@ use crate::trace::Checkpoint;
 const MAX_IOREMAP_MAPPINGS: usize = 4;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+#[allow(dead_code)]
+pub enum MmioMappingKind {
+    PlainDevice,
+    NonCached,
+    WriteCombine,
+    NormalMemory,
+}
+
+impl MmioMappingKind {
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn is_plain_device(self) -> bool {
+        matches!(self, Self::PlainDevice)
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum ArchMmioPageAttr {
+    RiscvPageIoremap,
+}
+
+impl ArchMmioPageAttr {
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn is_riscv_page_ioremap(self) -> bool {
+        matches!(self, Self::RiscvPageIoremap)
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct IoMemoryMapping {
     device: DeviceRef,
     phys_base: usize,
@@ -24,6 +52,8 @@ pub struct IoMemoryMapping {
     membase: usize,
     vmap_area: VmapArea,
     vmap_mapping: VmapMapping,
+    kind: MmioMappingKind,
+    arch_attr: ArchMmioPageAttr,
     vm_ioremap: bool,
     io_page_protection: bool,
     active: bool,
@@ -43,6 +73,8 @@ impl IoMemoryMapping {
             membase: 0,
             vmap_area: VmapArea::empty(),
             vmap_mapping: VmapMapping::empty(),
+            kind: MmioMappingKind::PlainDevice,
+            arch_attr: ArchMmioPageAttr::RiscvPageIoremap,
             vm_ioremap: false,
             io_page_protection: false,
             active: false,
@@ -105,6 +137,36 @@ impl IoMemoryMapping {
         self.io_page_protection && self.vmap_mapping.uses_io_memory_protection()
     }
 
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn kind(self) -> MmioMappingKind {
+        self.kind
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn arch_attr(self) -> ArchMmioPageAttr {
+        self.arch_attr
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn uses_plain_device_attribute(self) -> bool {
+        self.kind.is_plain_device() && self.arch_attr.is_riscv_page_ioremap()
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn claims_noncached(self) -> bool {
+        matches!(self.kind, MmioMappingKind::NonCached)
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn claims_writecombine(self) -> bool {
+        matches!(self.kind, MmioMappingKind::WriteCombine)
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn claims_normal_memory(self) -> bool {
+        matches!(self.kind, MmioMappingKind::NormalMemory)
+    }
+
     pub const fn page_aligned(self) -> bool {
         self.page_size != 0
             && self.page_phys_base.is_multiple_of(self.page_size)
@@ -145,6 +207,11 @@ pub struct Ioremap {
     physical_resource_policy_ready: bool,
     vm_ioremap_flags_ready: bool,
     io_page_protection_ready: bool,
+    mmio_attribute_policy_ready: bool,
+    plain_device_attribute_supported: bool,
+    noncached_attribute_deferred: bool,
+    writecombine_attribute_deferred: bool,
+    normal_memory_attribute_deferred: bool,
 }
 
 impl Ioremap {
@@ -162,6 +229,11 @@ impl Ioremap {
             physical_resource_policy_ready: false,
             vm_ioremap_flags_ready: false,
             io_page_protection_ready: false,
+            mmio_attribute_policy_ready: false,
+            plain_device_attribute_supported: false,
+            noncached_attribute_deferred: false,
+            writecombine_attribute_deferred: false,
+            normal_memory_attribute_deferred: false,
         }
     }
 
@@ -205,6 +277,31 @@ impl Ioremap {
         self.io_page_protection_ready
     }
 
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn mmio_attribute_policy_ready(&self) -> bool {
+        self.mmio_attribute_policy_ready
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn plain_device_attribute_supported(&self) -> bool {
+        self.plain_device_attribute_supported
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn noncached_attribute_deferred(&self) -> bool {
+        self.noncached_attribute_deferred
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn writecombine_attribute_deferred(&self) -> bool {
+        self.writecombine_attribute_deferred
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn normal_memory_attribute_deferred(&self) -> bool {
+        self.normal_memory_attribute_deferred
+    }
+
     pub fn runtime_ready(&self) -> bool {
         self.lifecycle.state() == State::Ready && self.foundation_ready()
     }
@@ -220,6 +317,11 @@ impl Ioremap {
             && self.physical_resource_policy_ready
             && self.vm_ioremap_flags_ready
             && self.io_page_protection_ready
+            && self.mmio_attribute_policy_ready
+            && self.plain_device_attribute_supported
+            && self.noncached_attribute_deferred
+            && self.writecombine_attribute_deferred
+            && self.normal_memory_attribute_deferred
     }
 
     pub fn setup(
@@ -256,6 +358,11 @@ impl Ioremap {
         self.physical_resource_policy_ready = true;
         self.vm_ioremap_flags_ready = true;
         self.io_page_protection_ready = true;
+        self.mmio_attribute_policy_ready = true;
+        self.plain_device_attribute_supported = true;
+        self.noncached_attribute_deferred = true;
+        self.writecombine_attribute_deferred = true;
+        self.normal_memory_attribute_deferred = true;
 
         if !self.foundation_ready() {
             return self.failed_setup();
@@ -276,10 +383,28 @@ impl Ioremap {
         phys_base: usize,
         size: usize,
     ) -> Option<IoMemoryMapping> {
+        self.map_device_mmio_with_kind(
+            vmalloc_allocator,
+            device,
+            phys_base,
+            size,
+            MmioMappingKind::PlainDevice,
+        )
+    }
+
+    pub fn map_device_mmio_with_kind(
+        &mut self,
+        vmalloc_allocator: &mut VmallocAllocator,
+        device: DeviceRef,
+        phys_base: usize,
+        size: usize,
+        kind: MmioMappingKind,
+    ) -> Option<IoMemoryMapping> {
         let page_size = self.page_size;
         if !self.runtime_ready() || phys_base == 0 || size == 0 || !page_size.is_power_of_two() {
             return None;
         }
+        let attr = self.resolve_arch_attr(kind)?;
         if let Some(mapping) = self.mapping_for_device(device) {
             return Some(mapping);
         }
@@ -311,6 +436,8 @@ impl Ioremap {
             membase,
             vmap_area,
             vmap_mapping,
+            kind,
+            arch_attr: attr,
             vm_ioremap: true,
             io_page_protection: true,
             active: true,
@@ -326,6 +453,21 @@ impl Ioremap {
         self.mappings[self.mapping_count] = mapping;
         self.mapping_count += 1;
         Some(mapping)
+    }
+
+    fn resolve_arch_attr(&self, kind: MmioMappingKind) -> Option<ArchMmioPageAttr> {
+        if !self.mmio_attribute_policy_ready {
+            return None;
+        }
+        match kind {
+            MmioMappingKind::PlainDevice if self.plain_device_attribute_supported => {
+                Some(ArchMmioPageAttr::RiscvPageIoremap)
+            }
+            MmioMappingKind::NonCached if self.noncached_attribute_deferred => None,
+            MmioMappingKind::WriteCombine if self.writecombine_attribute_deferred => None,
+            MmioMappingKind::NormalMemory if self.normal_memory_attribute_deferred => None,
+            _ => None,
+        }
     }
 
     #[allow(dead_code)]

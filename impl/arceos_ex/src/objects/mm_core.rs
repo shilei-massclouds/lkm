@@ -3016,6 +3016,26 @@ impl PageProtection {
     pub const fn is_io_memory(self) -> bool {
         matches!(self, Self::IoMemory)
     }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn kind(self) -> PageProtectionKind {
+        match self {
+            Self::IoMemory => PageProtectionKind::IoMemory,
+        }
+    }
+}
+
+#[cfg(checkpoint_handler_vmalloc_mapping)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum PageProtectionKind {
+    IoMemory,
+}
+
+#[cfg(checkpoint_handler_vmalloc_mapping)]
+impl PageProtectionKind {
+    pub const fn is_io_memory(self) -> bool {
+        matches!(self, Self::IoMemory)
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -3206,6 +3226,11 @@ impl VmapMapping {
 
     pub const fn uses_io_memory_protection(self) -> bool {
         self.protection.is_io_memory()
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn protection_kind(self) -> PageProtectionKind {
+        self.protection.kind()
     }
 }
 

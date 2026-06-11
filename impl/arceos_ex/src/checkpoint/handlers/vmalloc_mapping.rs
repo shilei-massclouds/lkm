@@ -4,6 +4,7 @@ use crate::{
     context::Context,
     objects::{
         device::DeviceRef,
+        ioremap::MmioMappingKind,
         mm_core::{GfpFlags, PageProtection, PageRef, VmapArea, VmapAreaFlags, VmapMapping},
     },
     trace::Checkpoint,
@@ -11,7 +12,7 @@ use crate::{
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
 const TEST_PAGE_COUNT: usize = 2;
-pub const KUNIT_CASE_COUNT: usize = 3;
+pub const KUNIT_CASE_COUNT: usize = 4;
 
 pub const HANDLER: Handler = Handler {
     name: "vmalloc_mapping",
@@ -40,6 +41,12 @@ fn run(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
         ctx,
         "vmalloc_mapping.ioremap_iounmap",
         run_ioremap_iounmap,
+    ) || !run_case(
+        total,
+        checkpoint,
+        ctx,
+        "vmalloc_mapping.mmio_attributes",
+        run_mmio_attributes,
     ) {
         CheckpointOutcome::FailAndShutdown
     } else {
@@ -116,6 +123,22 @@ fn run_ioremap_iounmap(ctx: &mut Context) -> bool {
     };
 
     let passed = run_ioremap_iounmap_with_page(ctx, page_size, page.phys);
+    passed
+        && ctx
+            .page_allocator
+            .free_pages(page.page, 0, &ctx.page_metadata_map)
+}
+
+fn run_mmio_attributes(ctx: &mut Context) -> bool {
+    let page_size = ctx.config.page_size();
+    if page_size <= 128 || !page_size.is_power_of_two() {
+        return false;
+    };
+    let Some(page) = alloc_test_page(ctx) else {
+        return false;
+    };
+
+    let passed = run_mmio_attributes_with_page(ctx, page_size, page.phys);
     passed
         && ctx
             .page_allocator
@@ -283,6 +306,89 @@ fn run_ioremap_iounmap_with_page(ctx: &mut Context, page_size: usize, phys: usiz
         && !ctx
             .ioremap
             .iounmap(&mut ctx.vmalloc_allocator, mapping.membase())
+}
+
+fn run_mmio_attributes_with_page(ctx: &mut Context, page_size: usize, phys: usize) -> bool {
+    let device = DeviceRef::new(usize::MAX - 2);
+    let unsupported_device = DeviceRef::new(usize::MAX - 3);
+
+    if !ctx.ioremap.mmio_attribute_policy_ready()
+        || !ctx.ioremap.plain_device_attribute_supported()
+        || !ctx.ioremap.noncached_attribute_deferred()
+        || !ctx.ioremap.writecombine_attribute_deferred()
+        || !ctx.ioremap.normal_memory_attribute_deferred()
+    {
+        return false;
+    }
+
+    let base_ioremap_count = ctx.ioremap.mapping_count();
+    let base_area_count = ctx.vmalloc_allocator.area_count();
+    let base_mapping_count = ctx.vmalloc_allocator.mapping_count();
+    let Some(mapping) = ctx.ioremap.map_device_mmio_with_kind(
+        &mut ctx.vmalloc_allocator,
+        device,
+        phys,
+        page_size,
+        MmioMappingKind::PlainDevice,
+    ) else {
+        return false;
+    };
+    let vmap_mapping = mapping.vmap_mapping();
+
+    let plain_device_valid = mapping.kind().is_plain_device()
+        && mapping.arch_attr().is_riscv_page_ioremap()
+        && mapping.uses_plain_device_attribute()
+        && !mapping.claims_noncached()
+        && !mapping.claims_writecombine()
+        && !mapping.claims_normal_memory()
+        && vmap_mapping.protection().is_io_memory()
+        && vmap_mapping.protection_kind().is_io_memory()
+        && ctx.ioremap.mapping_count() == base_ioremap_count.saturating_add(1)
+        && ctx.vmalloc_allocator.area_count() == base_area_count.saturating_add(1)
+        && ctx.vmalloc_allocator.mapping_count() == base_mapping_count.saturating_add(1);
+    if !plain_device_valid {
+        return false;
+    }
+
+    let unsupported_rejected = ctx
+        .ioremap
+        .map_device_mmio_with_kind(
+            &mut ctx.vmalloc_allocator,
+            unsupported_device,
+            phys,
+            page_size,
+            MmioMappingKind::NonCached,
+        )
+        .is_none()
+        && ctx
+            .ioremap
+            .map_device_mmio_with_kind(
+                &mut ctx.vmalloc_allocator,
+                unsupported_device,
+                phys,
+                page_size,
+                MmioMappingKind::WriteCombine,
+            )
+            .is_none()
+        && ctx
+            .ioremap
+            .map_device_mmio_with_kind(
+                &mut ctx.vmalloc_allocator,
+                unsupported_device,
+                phys,
+                page_size,
+                MmioMappingKind::NormalMemory,
+            )
+            .is_none()
+        && ctx.ioremap.mapping_count() == base_ioremap_count.saturating_add(1)
+        && ctx.vmalloc_allocator.area_count() == base_area_count.saturating_add(1)
+        && ctx.vmalloc_allocator.mapping_count() == base_mapping_count.saturating_add(1);
+    if !unsupported_rejected {
+        return false;
+    }
+
+    ctx.ioremap
+        .iounmap(&mut ctx.vmalloc_allocator, mapping.membase())
 }
 
 struct AllocatedPage {

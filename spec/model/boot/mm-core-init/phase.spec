@@ -1001,6 +1001,11 @@ object Ioremap: AddressSpaceObject {
                     ioremap_physical_resource_policy_ready(Ioremap);
                     ioremap_vm_ioremap_flags_ready(Ioremap, VmapAreaFlags::VmIoremap);
                     ioremap_io_page_protection_ready(Ioremap);
+                    ioremap_mmio_attribute_policy_ready(Ioremap);
+                    ioremap_plain_device_attribute_supported(Ioremap, ArchMmioPageAttrRef::RiscvPageIoremap);
+                    ioremap_noncached_attribute_deferred(Ioremap);
+                    ioremap_writecombine_attribute_deferred(Ioremap);
+                    ioremap_normal_memory_attribute_deferred(Ioremap);
                 }
             }
         }
@@ -1018,6 +1023,11 @@ object Ioremap: AddressSpaceObject {
             ioremap_physical_resource_policy_ready(Ioremap);
             ioremap_vm_ioremap_flags_ready(Ioremap, VmapAreaFlags::VmIoremap);
             ioremap_io_page_protection_ready(Ioremap);
+            ioremap_mmio_attribute_policy_ready(Ioremap);
+            ioremap_plain_device_attribute_supported(Ioremap, ArchMmioPageAttrRef::RiscvPageIoremap);
+            ioremap_noncached_attribute_deferred(Ioremap);
+            ioremap_writecombine_attribute_deferred(Ioremap);
+            ioremap_normal_memory_attribute_deferred(Ioremap);
         }
 
         actions {
@@ -1032,8 +1042,11 @@ object Ioremap: AddressSpaceObject {
                     ioremap_physical_resource_policy_ready(Ioremap);
                     ioremap_vm_ioremap_flags_ready(Ioremap, VmapAreaFlags::VmIoremap);
                     ioremap_io_page_protection_ready(Ioremap);
+                    ioremap_mmio_attribute_policy_ready(Ioremap);
+                    ioremap_plain_device_attribute_supported(Ioremap, ArchMmioPageAttrRef::RiscvPageIoremap);
                     vmap_flags_vm_ioremap(VmapAreaFlags::VmIoremap);
                     page_protection_io_memory(PageProtectionRef::IoMemory);
+                    page_protection_kind_io_memory(VmapPageProtectionKind::IoMemory);
                 }
 
                 drives {
@@ -1057,6 +1070,12 @@ object Ioremap: AddressSpaceObject {
                     ioremap_mapping_vmalloc_mapping_bound(Ioremap, mapping, VmapMappingRef::IoremapDeviceMmio);
                     ioremap_mapping_uses_vm_ioremap_flag(Ioremap, mapping);
                     ioremap_mapping_uses_io_page_protection(Ioremap, mapping);
+                    ioremap_mapping_kind_bound(Ioremap, mapping, MmioMappingKind::PlainDevice);
+                    ioremap_mapping_arch_attr_bound(Ioremap, mapping, ArchMmioPageAttrRef::RiscvPageIoremap);
+                    ioremap_mapping_uses_plain_device_attribute(Ioremap, mapping);
+                    ioremap_mapping_does_not_claim_noncached(Ioremap, mapping);
+                    ioremap_mapping_does_not_claim_writecombine(Ioremap, mapping);
+                    ioremap_mapping_does_not_claim_normal_memory(Ioremap, mapping);
                     ioremap_mapping_page_aligned(Ioremap, mapping);
                     ioremap_mapping_membase_cookie_ready(Ioremap, mapping);
                     ioremap_mapping_not_linear_direct_map(Ioremap, mapping);
@@ -1071,6 +1090,7 @@ object Ioremap: AddressSpaceObject {
                     vmap_mapping_phys_range_bound(VmapMappingRef::IoremapDeviceMmio);
                     vmap_mapping_page_range_installed(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
                     vmap_mapping_protection_bound(VmapMappingRef::IoremapDeviceMmio, PageProtectionRef::IoMemory);
+                    vmap_mapping_protection_kind_bound(VmapMappingRef::IoremapDeviceMmio, VmapPageProtectionKind::IoMemory);
                     vmap_mapping_page_aligned(VmapMappingRef::IoremapDeviceMmio);
                 }
             }
