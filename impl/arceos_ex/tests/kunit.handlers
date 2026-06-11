@@ -6,4 +6,5 @@ earlycon
 kernel-init-task
 scheduler-action
 console-handoff
+vmalloc-mapping
 smoke

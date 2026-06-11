@@ -6,6 +6,7 @@ pub mod handlers;
     checkpoint_handler_kernel_init_task,
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
+    checkpoint_handler_vmalloc_mapping,
     checkpoint_handler_of_platform,
     checkpoint_handler_smoke
 ))]
