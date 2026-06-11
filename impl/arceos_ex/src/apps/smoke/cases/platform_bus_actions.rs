@@ -6,6 +6,7 @@ use crate::{
     context::context_ref,
     objects::{
         device::DeviceRef,
+        device_tree::DeviceTree,
         driver::MOCK_PLATFORM_DRIVER_REF,
         initcall::PlatformBus,
         ns16550a::{self, NS16550A_PLATFORM_DRIVER_REF},
@@ -19,6 +20,8 @@ pub fn run() -> SmokeResult {
     suite.scenario(&mut AddDeviceProbeDriverScenario::new());
     suite.scenario(&mut AddDriverProbeDeviceScenario::new());
     suite.scenario(&mut Ns16550aProbeDeviceScenario::new());
+    suite.scenario(&mut DummyConsoleNonStdoutScenario::new());
+    suite.scenario(&mut KeepBootconScenario::new());
     suite.result()
 }
 
@@ -291,8 +294,179 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
 }
 
+struct ConsoleProbeSnapshot {
+    registry: printk::ConsoleRegistry,
+    probe: ns16550a::Ns16550aProbeState,
+}
+
+impl ConsoleProbeSnapshot {
+    fn take() -> Self {
+        Self {
+            registry: printk::registry_snapshot(),
+            probe: ns16550a::probe_state_snapshot(),
+        }
+    }
+
+    fn restore(self) {
+        printk::restore_registry(self.registry);
+        ns16550a::restore_probe_state(self.probe);
+    }
+}
+
+struct DummyConsoleSnapshot {
+    registry: printk::ConsoleRegistry,
+}
+
+impl DummyConsoleSnapshot {
+    fn take() -> Self {
+        Self {
+            registry: printk::registry_snapshot(),
+        }
+    }
+
+    fn restore(self) {
+        printk::restore_registry(self.registry);
+    }
+}
+
+struct DummyConsole;
+
+impl DummyConsole {
+    fn register(self) -> bool {
+        printk::register_serial8250_console(false)
+    }
+}
+
+struct DummyConsoleNonStdoutScenario {
+    snapshot: Option<DummyConsoleSnapshot>,
+}
+
+impl DummyConsoleNonStdoutScenario {
+    fn new() -> Self {
+        Self { snapshot: None }
+    }
+}
+
+impl SmokeScenario for DummyConsoleNonStdoutScenario {
+    fn name(&self) -> &'static str {
+        "platform_bus_actions.dummy_console_non_stdout"
+    }
+
+    fn setup(&mut self, _assertions: &mut SmokeAssertions) {
+        self.snapshot = Some(DummyConsoleSnapshot::take());
+        printk::reset_registry_for_smoke(false);
+        printk::register_boot_console();
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        let registered = DummyConsole.register();
+        assertions.assert("dummy console rejected", !registered);
+        assertions.assert(
+            "dummy console not registered",
+            !printk::serial8250_console_registered()
+                && !printk::preferred_console_from_stdout()
+                && !printk::serial8250_consdev()
+                && !printk::serial8250_write_ready(),
+        );
+        assertions.assert(
+            "dummy console keeps boot route",
+            printk::boot_console_registered()
+                && printk::boot_console_online()
+                && !printk::console_handoff_complete()
+                && printk::route() == printk::PrintkRoute::BootConsole,
+        );
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {
+        if let Some(snapshot) = self.snapshot.take() {
+            snapshot.restore();
+        }
+    }
+}
+
+struct KeepBootconScenario {
+    snapshot: Option<ConsoleProbeSnapshot>,
+    fixture: PlatformBusActionsFixture,
+}
+
+impl KeepBootconScenario {
+    fn new() -> Self {
+        Self {
+            snapshot: None,
+            fixture: PlatformBusActionsFixture::new(),
+        }
+    }
+}
+
+impl SmokeScenario for KeepBootconScenario {
+    fn name(&self) -> &'static str {
+        "platform_bus_actions.keep_bootcon"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.snapshot = Some(ConsoleProbeSnapshot::take());
+        printk::reset_registry_for_smoke(true);
+        printk::register_boot_console();
+        ns16550a::reset_probe_state_for_smoke();
+        self.fixture.setup_ready(assertions);
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        let ctx = context_ref();
+        assertions.assert_ok(
+            "add ns16550a driver",
+            self.fixture.bus.add_driver(NS16550A_PLATFORM_DRIVER_REF),
+        );
+
+        let Some(serial) = find_ns16550a_node(&ctx.device_tree) else {
+            assertions.assert("ns16550a node available", false);
+            return;
+        };
+        let result = self
+            .fixture
+            .bus
+            .add_smoke_platform_device(&ctx.device_tree, serial.id());
+        assertions.assert("add ns16550a platform device", result.is_ok());
+        let Some(device_ref) = result.ok() else {
+            return;
+        };
+
+        assertions.assert_ok(
+            "probe ns16550a device",
+            self.fixture.bus.probe_device(device_ref, &ctx.device_tree),
+        );
+        assertions.assert(
+            "keep_bootcon serial console registered",
+            self.fixture.bus.ns16550a_probe_registers_serial_console()
+                && ns16550a::serial8250_console_registered()
+                && printk::serial8250_console_registered()
+                && printk::preferred_console_from_stdout(),
+        );
+        assertions.assert(
+            "keep_bootcon retains boot console",
+            printk::keep_bootcon()
+                && printk::boot_console_registered()
+                && printk::boot_console_online()
+                && printk::console_handoff_complete(),
+        );
+        assertions.assert(
+            "keep_bootcon route serial",
+            ns16550a::handoff_triggered()
+                && printk::serial8250_consdev()
+                && printk::serial8250_write_ready()
+                && printk::route() == printk::PrintkRoute::Serial8250,
+        );
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {
+        if let Some(snapshot) = self.snapshot.take() {
+            snapshot.restore();
+        }
+    }
+}
+
 fn find_ns16550a_node(
-    device_tree: &crate::objects::device_tree::DeviceTree,
+    device_tree: &DeviceTree,
 ) -> Option<crate::objects::device_tree::DeviceNodeRef<'_>> {
     let root = device_tree.root()?;
     find_ns16550a_node_from(root)

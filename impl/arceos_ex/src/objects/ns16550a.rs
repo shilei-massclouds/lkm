@@ -63,6 +63,7 @@ impl Uart8250Port {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Ns16550aProbeState {
     port: Uart8250Port,
     serial_console_registered: bool,
@@ -90,15 +91,6 @@ pub fn uart8250_port_registered() -> bool {
             .unwrap()
             .port
             .registered
-    }
-}
-
-pub fn uart8250_port_node_id() -> Option<DeviceNodeId> {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
-    if state.port.registered {
-        Some(state.port.node_id)
-    } else {
-        None
     }
 }
 
@@ -170,6 +162,25 @@ fn ns16550a_probe(
     }
 
     ProbeResult::Bound
+}
+
+#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+pub fn probe_state_snapshot() -> Ns16550aProbeState {
+    unsafe { *(&raw const NS16550A_PROBE_STATE).as_ref().unwrap() }
+}
+
+#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+pub fn restore_probe_state(snapshot: Ns16550aProbeState) {
+    unsafe {
+        *(&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() = snapshot;
+    }
+}
+
+#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+pub fn reset_probe_state_for_smoke() {
+    unsafe {
+        *(&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() = Ns16550aProbeState::new();
+    }
 }
 
 fn build_uart8250_port(

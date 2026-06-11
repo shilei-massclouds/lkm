@@ -21,6 +21,7 @@ pub enum PrintkRoute {
     Serial8250,
 }
 
+#[derive(Clone, Copy)]
 pub struct ConsoleRegistry {
     boot_console_registered: bool,
     boot_console_online: bool,
@@ -306,6 +307,27 @@ pub fn console_handoff_complete() -> bool {
 
 pub fn route() -> PrintkRoute {
     unsafe { (&raw const CONSOLE_REGISTRY).as_ref().unwrap().route }
+}
+
+#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+pub fn registry_snapshot() -> ConsoleRegistry {
+    unsafe { *(&raw const CONSOLE_REGISTRY).as_ref().unwrap() }
+}
+
+#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+pub fn restore_registry(snapshot: ConsoleRegistry) {
+    unsafe {
+        *(&raw mut CONSOLE_REGISTRY).as_mut().unwrap() = snapshot;
+    }
+}
+
+#[cfg(any(app_smoke, checkpoint_handler_smoke))]
+pub fn reset_registry_for_smoke(keep_bootcon: bool) {
+    unsafe {
+        let registry = (&raw mut CONSOLE_REGISTRY).as_mut().unwrap();
+        *registry = ConsoleRegistry::new();
+        registry.set_keep_bootcon(keep_bootcon);
+    }
 }
 
 #[allow(dead_code)]
