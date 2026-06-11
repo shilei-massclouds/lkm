@@ -163,12 +163,21 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.vmalloc_allocator.node_set().state() == State::Ready
         && ctx.vmalloc_allocator.block_queues().state() == State::Ready
         && ctx.vmalloc_allocator.deferred_set().state() == State::Ready
+        && ctx.vmalloc_allocator.vmap_area_api_ready()
+        && ctx.vmalloc_allocator.page_range_mapping_api_ready()
+        && ctx.vmalloc_allocator.vm_struct_metadata_ready()
+        && ctx.vmalloc_allocator.vmap_area_metadata_ready()
+        && ctx.vmalloc_allocator.mapping_policy_external()
+        && ctx.vmalloc_allocator.physical_resource_policy_external()
         && ctx.ioremap.state() == State::Ready
         && ctx.ioremap.runtime_ready()
         && ctx.ioremap.uses_vmalloc_area_management()
+        && ctx.ioremap.uses_vmalloc_mapping_execution()
         && ctx.ioremap.uses_vmap_address_space()
         && ctx.ioremap.distinct_from_vmalloc_allocation()
         && ctx.ioremap.does_not_use_fixmap()
+        && ctx.ioremap.physical_resource_policy_ready()
+        && ctx.ioremap.vm_ioremap_flags_ready()
         && ctx.ioremap.io_page_protection_ready()
         && ctx.mm_struct_cache.state() == State::Ready
         && ctx.mm_struct_cache.object_size() != 0

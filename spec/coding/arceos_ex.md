@@ -887,7 +887,28 @@ alignment fallback 均 deferred。
 allocation failure 处理，而不能被解释为 `Vec` 语义本身可用性失效。涉及 initcall 批量对象创建的 smoke 应覆盖这种边界，
 避免普通 `push` 触发 `alloc_error_handler` 后只留下不可定位的关机日志。
 
-`VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址资源管理，不是页表映射器。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END` 页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、`VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、建立 free vmap space。
+`VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址区间管理和 vmap 映射执行，不是物理资源策略层，也不是
+MMIO 属性策略层。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END`
+页表范围预分配事实；`VmallocAllocator.setup()` 负责 `VmapAreaCache`、`VmapAddressSpace`、
+`VmapNodeSet`、`VmapBlockQueues` 和 `VfreeDeferredSet`，并导入已有 `vmlist` 作为 busy areas、
+建立 free vmap space。
+
+`VmallocAllocator` 必须暴露与 model `VmallocAllocatorType` 对齐的最小运行期接口：申请/保留
+`VmapArea`，基于调用方给出的物理区间或 pages/PFN 信息和 `PageProtection` 执行 page range 映射，
+以及维护 `vm_struct`/`vmap_area` 元数据。当前第一轮实现可以只支持 runtime `ioremap` 需要的
+`VM_IOREMAP` area 和 IO memory protection，但 API 命名和状态事实必须保持通用，不能把接口写成
+ns16550a 或 console 专用路径。
+
+`Ioremap` 是 MMIO 策略调用方：它负责从设备资源得到物理 MMIO range、选择 `VM_IOREMAP` flag、
+选择 IO memory protection、返回 `membase`/`__iomem` 语义并记录 not-linear-direct-map 事实。它不得维护
+自己的 vmap bump allocator、不得持有 `next_vaddr` 这类 area 分配 cursor，也不得直接越过
+`VmallocAllocator` 安装 vmap page range。`Ioremap.map_device_mmio()` 必须驱动
+`VmallocAllocator.get_vm_area(...)` 和 `VmallocAllocator.map_page_range(...)`，然后只把返回的
+`VmapArea`/`VmapMapping` 绑定进 `IoMemoryMapping`。
+
+测试必须覆盖这条分工：`VmallocAllocator` ready 后公开 area/mapping API；一次 ns16550a probe 后，
+`VmallocAllocator` 至少记录一个 `VM_IOREMAP` area 和对应 IO memory page-range mapping；`Ioremap`
+记录的 mapping 必须引用该 area/mapping，且 `membase != mapbase`、page-aligned、使用 IO protection。
 
 `MmStructCache.setup()` 只建立 `"mm_struct"` cache。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
 

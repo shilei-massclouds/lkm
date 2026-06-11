@@ -10,6 +10,7 @@ use crate::{
         driver::MOCK_PLATFORM_DRIVER_REF,
         initcall::PlatformBus,
         ioremap::Ioremap,
+        mm_core::VmallocAllocator,
         ns16550a::{self, NS16550A_PLATFORM_DRIVER_REF},
         printk,
         state::State,
@@ -28,6 +29,7 @@ pub fn run() -> SmokeResult {
 
 struct PlatformBusActionsFixture {
     bus: PlatformBus,
+    vmalloc_allocator: VmallocAllocator,
     ioremap: Ioremap,
 }
 
@@ -35,6 +37,7 @@ impl PlatformBusActionsFixture {
     fn new() -> Self {
         Self {
             bus: PlatformBus::new(),
+            vmalloc_allocator: VmallocAllocator::new(),
             ioremap: Ioremap::new(),
         }
     }
@@ -42,10 +45,18 @@ impl PlatformBusActionsFixture {
     fn setup_ready(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context_ref();
         assertions.assert_ok(
+            "setup vmalloc allocator",
+            self.vmalloc_allocator.setup(
+                &ctx.slub_allocator,
+                &ctx.page_table_caches,
+                &ctx.per_cpu_storage,
+            ),
+        );
+        assertions.assert_ok(
             "setup ioremap",
             self.ioremap.setup(
                 &ctx.vm,
-                &ctx.vmalloc_allocator,
+                &self.vmalloc_allocator,
                 &ctx.page_table_caches,
                 &ctx.fix_map,
                 &ctx.config,
@@ -129,6 +140,7 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
             self.fixture.bus.probe_driver(
                 MOCK_PLATFORM_DRIVER_REF,
                 &context_ref().device_tree,
+                &mut self.fixture.vmalloc_allocator,
                 &mut self.fixture.ioremap,
             ),
         );
@@ -172,6 +184,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
             self.fixture.bus.probe_device(
                 DeviceRef::new(usize::MAX),
                 &context_ref().device_tree,
+                &mut self.fixture.vmalloc_allocator,
                 &mut self.fixture.ioremap,
             ),
         );
@@ -201,6 +214,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
             self.fixture.bus.probe_device(
                 device_ref,
                 &context_ref().device_tree,
+                &mut self.fixture.vmalloc_allocator,
                 &mut self.fixture.ioremap,
             ),
         );
@@ -264,9 +278,12 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
 
         assertions.assert_ok(
             "probe ns16550a device",
-            self.fixture
-                .bus
-                .probe_device(device_ref, &ctx.device_tree, &mut self.fixture.ioremap),
+            self.fixture.bus.probe_device(
+                device_ref,
+                &ctx.device_tree,
+                &mut self.fixture.vmalloc_allocator,
+                &mut self.fixture.ioremap,
+            ),
         );
         assertions.assert(
             "probe device scanned registered drivers",
@@ -293,6 +310,36 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
             self.fixture.bus.ns16550a_probe_ioremaps_uart8250_port()
                 && ns16550a::uart8250_port_ioremapped(),
         );
+        assertions.assert(
+            "ns16550a vmalloc mapping executed",
+            self.fixture.vmalloc_allocator.area_count() != 0
+                && self.fixture.vmalloc_allocator.mapping_count() != 0,
+        );
+        if let Some(mapping) = self.fixture.ioremap.mapping_for_device(device_ref) {
+            let area = mapping.vmap_area();
+            let vmap_mapping = mapping.vmap_mapping();
+            assertions.assert(
+                "ns16550a ioremap area facts",
+                area.busy()
+                    && area.is_vm_ioremap()
+                    && area.flags().is_vm_ioremap()
+                    && area.end() == area.virt_base().saturating_add(area.size())
+                    && self.fixture.vmalloc_allocator.area(area.index()) == Some(area),
+            );
+            assertions.assert(
+                "ns16550a vmap mapping facts",
+                vmap_mapping.installed()
+                    && vmap_mapping.area() == area
+                    && vmap_mapping.index() == 0
+                    && vmap_mapping.phys_base() == mapping.page_phys_base()
+                    && vmap_mapping.size() == mapping.mapped_size()
+                    && vmap_mapping.protection().is_io_memory()
+                    && self.fixture.vmalloc_allocator.mapping(vmap_mapping.index())
+                        == Some(vmap_mapping),
+            );
+        } else {
+            assertions.assert("ns16550a ioremap mapping available", false);
+        }
         assertions.assert(
             "ns16550a uart8250 port registered",
             self.fixture.bus.ns16550a_probe_registers_uart8250_port()
@@ -459,14 +506,22 @@ impl SmokeScenario for KeepBootconScenario {
 
         assertions.assert_ok(
             "probe ns16550a device",
-            self.fixture
-                .bus
-                .probe_device(device_ref, &ctx.device_tree, &mut self.fixture.ioremap),
+            self.fixture.bus.probe_device(
+                device_ref,
+                &ctx.device_tree,
+                &mut self.fixture.vmalloc_allocator,
+                &mut self.fixture.ioremap,
+            ),
         );
         assertions.assert(
             "keep_bootcon mmio ioremapped",
             self.fixture.bus.ns16550a_probe_ioremaps_uart8250_port()
                 && ns16550a::uart8250_port_ioremapped(),
+        );
+        assertions.assert(
+            "keep_bootcon vmalloc mapping executed",
+            self.fixture.vmalloc_allocator.area_count() != 0
+                && self.fixture.vmalloc_allocator.mapping_count() != 0,
         );
         assertions.assert(
             "keep_bootcon serial console registered",

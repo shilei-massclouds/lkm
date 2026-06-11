@@ -2,7 +2,9 @@ use super::{
     config::Config,
     device::DeviceRef,
     fix_map::FixMap,
-    mm_core::{PageTableCaches, VmallocAllocator},
+    mm_core::{
+        PageProtection, PageTableCaches, VmallocAllocator, VmapArea, VmapAreaFlags, VmapMapping,
+    },
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
 };
@@ -20,6 +22,8 @@ pub struct IoMemoryMapping {
     mapped_size: usize,
     virt_base: usize,
     membase: usize,
+    vmap_area: VmapArea,
+    vmap_mapping: VmapMapping,
     vm_ioremap: bool,
     io_page_protection: bool,
 }
@@ -35,6 +39,8 @@ impl IoMemoryMapping {
             mapped_size: 0,
             virt_base: 0,
             membase: 0,
+            vmap_area: VmapArea::empty(),
+            vmap_mapping: VmapMapping::empty(),
             vm_ioremap: false,
             io_page_protection: false,
         }
@@ -68,12 +74,20 @@ impl IoMemoryMapping {
         self.membase
     }
 
+    pub const fn vmap_area(self) -> VmapArea {
+        self.vmap_area
+    }
+
+    pub const fn vmap_mapping(self) -> VmapMapping {
+        self.vmap_mapping
+    }
+
     pub const fn uses_vm_ioremap(self) -> bool {
-        self.vm_ioremap
+        self.vm_ioremap && self.vmap_area.is_vm_ioremap()
     }
 
     pub const fn uses_io_page_protection(self) -> bool {
-        self.io_page_protection
+        self.io_page_protection && self.vmap_mapping.uses_io_memory_protection()
     }
 
     pub const fn page_aligned(self) -> bool {
@@ -98,16 +112,16 @@ impl IoMemoryMapping {
 
 pub struct Ioremap {
     lifecycle: Lifecycle,
-    vmap_start: usize,
-    vmap_end: usize,
-    next_vaddr: usize,
     page_size: usize,
     mapping_count: usize,
     mappings: [IoMemoryMapping; MAX_IOREMAP_MAPPINGS],
     uses_vmalloc_area_management: bool,
+    uses_vmalloc_mapping_execution: bool,
     uses_vmap_address_space: bool,
     distinct_from_vmalloc_allocation: bool,
     does_not_use_fixmap: bool,
+    physical_resource_policy_ready: bool,
+    vm_ioremap_flags_ready: bool,
     io_page_protection_ready: bool,
 }
 
@@ -115,16 +129,16 @@ impl Ioremap {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            vmap_start: 0,
-            vmap_end: 0,
-            next_vaddr: 0,
             page_size: 0,
             mapping_count: 0,
             mappings: [IoMemoryMapping::empty(); MAX_IOREMAP_MAPPINGS],
             uses_vmalloc_area_management: false,
+            uses_vmalloc_mapping_execution: false,
             uses_vmap_address_space: false,
             distinct_from_vmalloc_allocation: false,
             does_not_use_fixmap: false,
+            physical_resource_policy_ready: false,
+            vm_ioremap_flags_ready: false,
             io_page_protection_ready: false,
         }
     }
@@ -141,6 +155,10 @@ impl Ioremap {
         self.uses_vmalloc_area_management
     }
 
+    pub const fn uses_vmalloc_mapping_execution(&self) -> bool {
+        self.uses_vmalloc_mapping_execution
+    }
+
     pub const fn uses_vmap_address_space(&self) -> bool {
         self.uses_vmap_address_space
     }
@@ -153,6 +171,14 @@ impl Ioremap {
         self.does_not_use_fixmap
     }
 
+    pub const fn physical_resource_policy_ready(&self) -> bool {
+        self.physical_resource_policy_ready
+    }
+
+    pub const fn vm_ioremap_flags_ready(&self) -> bool {
+        self.vm_ioremap_flags_ready
+    }
+
     pub const fn io_page_protection_ready(&self) -> bool {
         self.io_page_protection_ready
     }
@@ -162,14 +188,15 @@ impl Ioremap {
     }
 
     fn foundation_ready(&self) -> bool {
-        self.vmap_start != 0
-            && self.vmap_start < self.vmap_end
-            && self.page_size != 0
+        self.page_size != 0
             && self.page_size.is_power_of_two()
             && self.uses_vmalloc_area_management
+            && self.uses_vmalloc_mapping_execution
             && self.uses_vmap_address_space
             && self.distinct_from_vmalloc_allocation
             && self.does_not_use_fixmap
+            && self.physical_resource_policy_ready
+            && self.vm_ioremap_flags_ready
             && self.io_page_protection_ready
     }
 
@@ -197,14 +224,15 @@ impl Ioremap {
             return self.failed_setup();
         }
 
-        self.vmap_start = vmap_space.start();
-        self.vmap_end = vmap_space.end();
-        self.next_vaddr = self.vmap_start;
         self.page_size = config.page_size();
-        self.uses_vmalloc_area_management = vmalloc_allocator.initialized();
+        self.uses_vmalloc_area_management =
+            vmalloc_allocator.initialized() && vmalloc_allocator.vmap_area_api_ready();
+        self.uses_vmalloc_mapping_execution = vmalloc_allocator.page_range_mapping_api_ready();
         self.uses_vmap_address_space = vmap_space.free_space_ready();
         self.distinct_from_vmalloc_allocation = true;
         self.does_not_use_fixmap = true;
+        self.physical_resource_policy_ready = true;
+        self.vm_ioremap_flags_ready = true;
         self.io_page_protection_ready = true;
 
         if !self.foundation_ready() {
@@ -221,6 +249,7 @@ impl Ioremap {
 
     pub fn map_device_mmio(
         &mut self,
+        vmalloc_allocator: &mut VmallocAllocator,
         device: DeviceRef,
         phys_base: usize,
         size: usize,
@@ -240,11 +269,14 @@ impl Ioremap {
         let page_phys_base = phys_base.checked_sub(offset)?;
         let covered_size = size.checked_add(offset)?;
         let mapped_size = align_up(covered_size, page_size)?;
-        let virt_base = align_up(self.next_vaddr, page_size)?;
-        let area_end = virt_base.checked_add(mapped_size)?;
-        if area_end > self.vmap_end {
-            return None;
-        }
+        let vmap_area = vmalloc_allocator.get_vm_area(mapped_size, VmapAreaFlags::VmIoremap)?;
+        let vmap_mapping = vmalloc_allocator.map_page_range(
+            vmap_area,
+            page_phys_base,
+            mapped_size,
+            PageProtection::IoMemory,
+        )?;
+        let virt_base = vmap_area.virt_base();
         let membase = virt_base.checked_add(offset)?;
         let mapping = IoMemoryMapping {
             device,
@@ -255,6 +287,8 @@ impl Ioremap {
             mapped_size,
             virt_base,
             membase,
+            vmap_area,
+            vmap_mapping,
             vm_ioremap: true,
             io_page_protection: true,
         };
@@ -267,7 +301,6 @@ impl Ioremap {
 
         self.mappings[self.mapping_count] = mapping;
         self.mapping_count += 1;
-        self.next_vaddr = area_end;
         Some(mapping)
     }
 

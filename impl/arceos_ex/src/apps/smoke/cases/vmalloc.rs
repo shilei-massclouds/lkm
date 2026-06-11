@@ -9,7 +9,16 @@ pub fn run() -> SmokeResult {
     let vmalloc = &ctx.vmalloc_allocator;
     let address_space = vmalloc.address_space();
 
-    if vmalloc.state() != State::Ready || !vmalloc.initialized() || !vmalloc.reclaim_hook_ready() {
+    if vmalloc.state() != State::Ready
+        || !vmalloc.initialized()
+        || !vmalloc.vmap_area_api_ready()
+        || !vmalloc.page_range_mapping_api_ready()
+        || !vmalloc.vm_struct_metadata_ready()
+        || !vmalloc.vmap_area_metadata_ready()
+        || !vmalloc.mapping_policy_external()
+        || !vmalloc.physical_resource_policy_external()
+        || !vmalloc.reclaim_hook_ready()
+    {
         printk::write_str("vmalloc allocator is not ready\n");
         return SmokeResult::Failed;
     }

@@ -29,6 +29,8 @@ const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
 const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
 const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
+const MAX_VMAP_AREAS: usize = 16;
+const MAX_VMAP_MAPPINGS: usize = 16;
 pub const GLOBAL_ALLOC_MAX_SIZE: usize = 8192;
 
 #[derive(Clone, Copy)]
@@ -2973,6 +2975,155 @@ impl PageTableLockCache {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum VmapAreaFlags {
+    VmIoremap,
+}
+
+impl VmapAreaFlags {
+    pub const fn is_vm_ioremap(self) -> bool {
+        matches!(self, Self::VmIoremap)
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum PageProtection {
+    IoMemory,
+}
+
+impl PageProtection {
+    pub const fn is_io_memory(self) -> bool {
+        matches!(self, Self::IoMemory)
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct VmapArea {
+    index: usize,
+    virt_base: usize,
+    size: usize,
+    flags: VmapAreaFlags,
+    busy: bool,
+}
+
+impl VmapArea {
+    pub const fn empty() -> Self {
+        Self {
+            index: usize::MAX,
+            virt_base: 0,
+            size: 0,
+            flags: VmapAreaFlags::VmIoremap,
+            busy: false,
+        }
+    }
+
+    const fn new(index: usize, virt_base: usize, size: usize, flags: VmapAreaFlags) -> Self {
+        Self {
+            index,
+            virt_base,
+            size,
+            flags,
+            busy: true,
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        self.index
+    }
+
+    pub const fn virt_base(self) -> usize {
+        self.virt_base
+    }
+
+    pub const fn size(self) -> usize {
+        self.size
+    }
+
+    pub const fn flags(self) -> VmapAreaFlags {
+        self.flags
+    }
+
+    pub const fn busy(self) -> bool {
+        self.busy
+    }
+
+    pub const fn end(self) -> usize {
+        self.virt_base.saturating_add(self.size)
+    }
+
+    pub const fn is_vm_ioremap(self) -> bool {
+        self.flags.is_vm_ioremap()
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct VmapMapping {
+    index: usize,
+    area: VmapArea,
+    phys_base: usize,
+    size: usize,
+    protection: PageProtection,
+    installed: bool,
+}
+
+impl VmapMapping {
+    pub const fn empty() -> Self {
+        Self {
+            index: usize::MAX,
+            area: VmapArea::empty(),
+            phys_base: 0,
+            size: 0,
+            protection: PageProtection::IoMemory,
+            installed: false,
+        }
+    }
+
+    const fn new(
+        index: usize,
+        area: VmapArea,
+        phys_base: usize,
+        size: usize,
+        protection: PageProtection,
+    ) -> Self {
+        Self {
+            index,
+            area,
+            phys_base,
+            size,
+            protection,
+            installed: true,
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        self.index
+    }
+
+    pub const fn area(self) -> VmapArea {
+        self.area
+    }
+
+    pub const fn phys_base(self) -> usize {
+        self.phys_base
+    }
+
+    pub const fn size(self) -> usize {
+        self.size
+    }
+
+    pub const fn protection(self) -> PageProtection {
+        self.protection
+    }
+
+    pub const fn installed(self) -> bool {
+        self.installed
+    }
+
+    pub const fn uses_io_memory_protection(self) -> bool {
+        self.protection.is_io_memory()
+    }
+}
+
 pub struct VmallocAllocator {
     lifecycle: Lifecycle,
     area_cache: VmapAreaCache,
@@ -2981,6 +3132,17 @@ pub struct VmallocAllocator {
     block_queues: VmapBlockQueues,
     deferred_set: VfreeDeferredSet,
     initialized: bool,
+    vmap_area_api_ready: bool,
+    page_range_mapping_api_ready: bool,
+    vm_struct_metadata_ready: bool,
+    vmap_area_metadata_ready: bool,
+    mapping_policy_external: bool,
+    physical_resource_policy_external: bool,
+    next_vaddr: usize,
+    area_count: usize,
+    mapping_count: usize,
+    areas: [VmapArea; MAX_VMAP_AREAS],
+    mappings: [VmapMapping; MAX_VMAP_MAPPINGS],
     reclaim_hook_ready: bool,
 }
 
@@ -2994,6 +3156,17 @@ impl VmallocAllocator {
             block_queues: VmapBlockQueues::new(),
             deferred_set: VfreeDeferredSet::new(),
             initialized: false,
+            vmap_area_api_ready: false,
+            page_range_mapping_api_ready: false,
+            vm_struct_metadata_ready: false,
+            vmap_area_metadata_ready: false,
+            mapping_policy_external: false,
+            physical_resource_policy_external: false,
+            next_vaddr: 0,
+            area_count: 0,
+            mapping_count: 0,
+            areas: [VmapArea::empty(); MAX_VMAP_AREAS],
+            mappings: [VmapMapping::empty(); MAX_VMAP_MAPPINGS],
             reclaim_hook_ready: false,
         }
     }
@@ -3026,6 +3199,38 @@ impl VmallocAllocator {
         self.initialized
     }
 
+    pub const fn vmap_area_api_ready(&self) -> bool {
+        self.vmap_area_api_ready
+    }
+
+    pub const fn page_range_mapping_api_ready(&self) -> bool {
+        self.page_range_mapping_api_ready
+    }
+
+    pub const fn vm_struct_metadata_ready(&self) -> bool {
+        self.vm_struct_metadata_ready
+    }
+
+    pub const fn vmap_area_metadata_ready(&self) -> bool {
+        self.vmap_area_metadata_ready
+    }
+
+    pub const fn mapping_policy_external(&self) -> bool {
+        self.mapping_policy_external
+    }
+
+    pub const fn physical_resource_policy_external(&self) -> bool {
+        self.physical_resource_policy_external
+    }
+
+    pub const fn area_count(&self) -> usize {
+        self.area_count
+    }
+
+    pub const fn mapping_count(&self) -> usize {
+        self.mapping_count
+    }
+
     pub const fn reclaim_hook_ready(&self) -> bool {
         self.reclaim_hook_ready
     }
@@ -3051,6 +3256,13 @@ impl VmallocAllocator {
         self.block_queues.setup(&self.node_set, per_cpu_storage)?;
         self.deferred_set.setup(per_cpu_storage)?;
         self.initialized = true;
+        self.vmap_area_api_ready = true;
+        self.page_range_mapping_api_ready = true;
+        self.vm_struct_metadata_ready = true;
+        self.vmap_area_metadata_ready = true;
+        self.mapping_policy_external = true;
+        self.physical_resource_policy_external = true;
+        self.next_vaddr = self.address_space.start();
         self.reclaim_hook_ready = true;
 
         self.lifecycle.transition(
@@ -3059,6 +3271,81 @@ impl VmallocAllocator {
             State::Ready,
             Checkpoint::VmallocAllocatorReady,
         )
+    }
+
+    pub fn get_vm_area(&mut self, size: usize, flags: VmapAreaFlags) -> Option<VmapArea> {
+        if self.lifecycle.state() != State::Ready
+            || !self.vmap_area_api_ready
+            || !self.address_space.free_space_ready()
+            || size == 0
+            || self.area_count >= MAX_VMAP_AREAS
+        {
+            return None;
+        }
+
+        let aligned_size = align_up(size, self.page_size())?;
+        let virt_base = align_up(self.next_vaddr, self.page_size())?;
+        let area_end = virt_base.checked_add(aligned_size)?;
+        if area_end > self.address_space.end() {
+            return None;
+        }
+
+        let area = VmapArea::new(self.area_count, virt_base, aligned_size, flags);
+        self.areas[self.area_count] = area;
+        self.area_count += 1;
+        self.next_vaddr = area_end;
+        Some(area)
+    }
+
+    pub fn map_page_range(
+        &mut self,
+        area: VmapArea,
+        phys_base: usize,
+        size: usize,
+        protection: PageProtection,
+    ) -> Option<VmapMapping> {
+        if self.lifecycle.state() != State::Ready
+            || !self.page_range_mapping_api_ready
+            || self.mapping_count >= MAX_VMAP_MAPPINGS
+            || phys_base == 0
+            || size == 0
+            || !self.area_known(area)
+            || size != area.size()
+            || !phys_base.is_multiple_of(self.page_size())
+            || !area.virt_base().is_multiple_of(self.page_size())
+            || !size.is_multiple_of(self.page_size())
+        {
+            return None;
+        }
+
+        let mapping = VmapMapping::new(self.mapping_count, area, phys_base, size, protection);
+        self.mappings[self.mapping_count] = mapping;
+        self.mapping_count += 1;
+        Some(mapping)
+    }
+
+    pub fn area(&self, index: usize) -> Option<VmapArea> {
+        if index < self.area_count {
+            Some(self.areas[index])
+        } else {
+            None
+        }
+    }
+
+    pub fn mapping(&self, index: usize) -> Option<VmapMapping> {
+        if index < self.mapping_count {
+            Some(self.mappings[index])
+        } else {
+            None
+        }
+    }
+
+    fn area_known(&self, area: VmapArea) -> bool {
+        area.busy() && area.index() < self.area_count && self.areas[area.index()] == area
+    }
+
+    const fn page_size(&self) -> usize {
+        4096
     }
 
     fn failed_setup(&self) -> EventResult {
@@ -3173,6 +3460,14 @@ impl VmapAddressSpace {
             Checkpoint::VmapAddressSpaceReady,
         )
     }
+}
+
+fn align_up(value: usize, align: usize) -> Option<usize> {
+    if align == 0 || !align.is_power_of_two() {
+        return None;
+    }
+    let mask = align - 1;
+    Some(value.checked_add(mask)? & !mask)
 }
 
 pub struct VmapNodeSet {

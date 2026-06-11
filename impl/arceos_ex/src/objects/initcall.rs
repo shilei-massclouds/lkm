@@ -4,7 +4,7 @@ use super::{
     driver::{DeviceDriverRef, ProbeResult},
     ioremap::Ioremap,
     irq_time::IrqDispatchTree,
-    mm_core::PageAllocator,
+    mm_core::{PageAllocator, VmallocAllocator},
     ns16550a,
     runtime_core::RuntimeCoreBoundary,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -913,6 +913,7 @@ impl PlatformBus {
         &mut self,
         driver: DeviceDriverRef,
         device_tree: &DeviceTree,
+        vmalloc_allocator: &mut VmallocAllocator,
         ioremap: &mut Ioremap,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
@@ -939,7 +940,7 @@ impl PlatformBus {
             );
         }
         if let Some(device_ref) = self.first_matching_device(driver, device_tree) {
-            self.probe_and_bind(driver, device_ref, device_tree, ioremap);
+            self.probe_and_bind(driver, device_ref, device_tree, vmalloc_allocator, ioremap);
             return Ok(());
         }
 
@@ -951,6 +952,7 @@ impl PlatformBus {
         &mut self,
         device: DeviceRef,
         device_tree: &DeviceTree,
+        vmalloc_allocator: &mut VmallocAllocator,
         ioremap: &mut Ioremap,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
@@ -973,7 +975,7 @@ impl PlatformBus {
         while index < self.driver_refs.len() {
             let driver = self.driver_refs[index];
             if self.driver_matches_device(driver, device, device_tree) {
-                self.probe_and_bind(driver, device, device_tree, ioremap);
+                self.probe_and_bind(driver, device, device_tree, vmalloc_allocator, ioremap);
                 return Ok(());
             }
             index += 1;
@@ -987,12 +989,16 @@ impl PlatformBus {
         &mut self,
         driver: DeviceDriverRef,
         device_tree: &DeviceTree,
+        vmalloc_allocator: &mut VmallocAllocator,
         ioremap: &mut Ioremap,
     ) -> InitcallReturn {
         if self.add_driver(driver).is_err() {
             return InitcallReturn::Error(-1);
         }
-        if self.probe_driver(driver, device_tree, ioremap).is_err() {
+        if self
+            .probe_driver(driver, device_tree, vmalloc_allocator, ioremap)
+            .is_err()
+        {
             return InitcallReturn::Error(-1);
         }
         InitcallReturn::Ok
@@ -1040,15 +1046,17 @@ impl PlatformBus {
         driver: DeviceDriverRef,
         device_ref: DeviceRef,
         device_tree: &DeviceTree,
+        vmalloc_allocator: &mut VmallocAllocator,
         ioremap: &mut Ioremap,
     ) {
         let Some(platform_device) = self.platform_device(device_ref) else {
             return;
         };
         let node_id = platform_device.dev().node_id();
-        let result = driver
-            .driver()
-            .probe(device_tree, ioremap, device_ref, node_id);
+        let result =
+            driver
+                .driver()
+                .probe(device_tree, vmalloc_allocator, ioremap, device_ref, node_id);
         if ns16550a::is_ns16550a_platform_driver(driver) {
             self.ns16550a_device_matched = true;
             self.ns16550a_probe_called = true;
