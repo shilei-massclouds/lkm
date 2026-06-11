@@ -16,6 +16,9 @@ predicate boot_console_kept_by_policy<T>(boot_console: T) -> bool;
 predicate boot_console_unregistered<T>(boot_console: T) -> bool;
 predicate boot_console_removed_from_registry<T, R>(boot_console: T, registry: R) -> bool;
 
+predicate console_candidate_non_stdout_path<T, D>(candidate: T, device_tree: D) -> bool;
+predicate console_candidate_not_platform_topology_mutating<T>(candidate: T) -> bool;
+
 predicate console_registry_ready<T>(registry: T) -> bool;
 predicate console_registry_register_console_api_ready<T>(registry: T) -> bool;
 predicate console_registry_has_boot_console<T, B>(registry: T, boot_console: B) -> bool;
@@ -24,7 +27,17 @@ predicate console_registry_preferred_console_from_stdout_path<T, D>(registry: T,
 predicate console_registry_keep_bootcon_policy_ready<T>(registry: T) -> bool;
 predicate console_registry_keep_bootcon_disabled<T>(registry: T) -> bool;
 predicate console_registry_keep_bootcon_enabled<T>(registry: T) -> bool;
+predicate console_registry_printk_route_boot_console<T, B>(registry: T, boot_console: B) -> bool;
 predicate console_registry_printk_route_real_console<T, C>(registry: T, console: C) -> bool;
+predicate console_registry_non_stdout_registration_rejected<T, C>(registry: T, candidate: C) -> bool;
+predicate console_registry_non_stdout_preserves_boot_route<T, B, C>(
+    registry: T,
+    boot_console: B,
+    candidate: C
+) -> bool;
+predicate console_registry_non_stdout_leaves_real_console_unchanged<T, C>(registry: T, candidate: C) -> bool;
+predicate console_registry_non_stdout_no_handoff_committed<T, C>(registry: T, candidate: C) -> bool;
+predicate console_registry_duplicate_preferred_registration_idempotent<T, C>(registry: T, console: C) -> bool;
 
 predicate uart8250_port_resources_ready<T, D, R>(port: T, device: D, device_tree: R) -> bool;
 predicate uart8250_port_mmio_resource_bound<T>(port: T) -> bool;
@@ -51,6 +64,32 @@ predicate console_handoff_triggered_by_register_console<T, R>(handoff: T, regist
 predicate console_handoff_boot_console_unregistered<T, B>(handoff: T, boot_console: B) -> bool;
 predicate console_handoff_boot_console_retained_by_keep_bootcon<T, B>(handoff: T, boot_console: B) -> bool;
 predicate console_handoff_printk_route_switched<T, R, S>(handoff: T, registry: R, serial_console: S) -> bool;
+
+object NonStdoutConsoleCandidate: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    DeviceTree.state == State::Ready;
+                }
+
+                ensures {
+                    console_candidate_non_stdout_path(NonStdoutConsoleCandidate, DeviceTree);
+                    console_candidate_not_platform_topology_mutating(NonStdoutConsoleCandidate);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            console_candidate_non_stdout_path(NonStdoutConsoleCandidate, DeviceTree);
+            console_candidate_not_platform_topology_mutating(NonStdoutConsoleCandidate);
+        }
+    }
+}
 
 object BootConsole: ConsoleObject {
     initial_state: State::Base;
@@ -215,6 +254,31 @@ object ConsoleRegistry: ConsoleObject {
 
     state State::Base {
         events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    BootConsole.state == State::Online;
+                    PrintkBuffer.state == State::Prepared;
+                }
+
+                ensures {
+                    console_registry_register_console_api_ready(ConsoleRegistry);
+                    console_registry_has_boot_console(ConsoleRegistry, BootConsole);
+                    console_registry_keep_bootcon_policy_ready(ConsoleRegistry);
+                    console_registry_printk_route_boot_console(ConsoleRegistry, BootConsole);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            console_registry_register_console_api_ready(ConsoleRegistry);
+            console_registry_has_boot_console(ConsoleRegistry, BootConsole);
+            console_registry_keep_bootcon_policy_ready(ConsoleRegistry);
+            console_registry_printk_route_boot_console(ConsoleRegistry, BootConsole);
+        }
+
+        events {
             on Event::Setup -> State::Ready {
                 depends_on {
                     BootConsole.state == State::Online;
@@ -234,6 +298,29 @@ object ConsoleRegistry: ConsoleObject {
                     console_registry_printk_route_real_console(ConsoleRegistry, Serial8250Console);
                 }
             }
+
+        }
+
+        actions {
+            Action::RegisterNonStdoutConsole<C: ConsoleObject>(candidate: C) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    ConsoleRegistry.state == State::Prepared;
+                    BootConsole.state == State::Online;
+                    DeviceTree.state == State::Ready;
+                    console_registry_register_console_api_ready(ConsoleRegistry);
+                    console_candidate_non_stdout_path(candidate, DeviceTree);
+                    console_candidate_not_platform_topology_mutating(candidate);
+                }
+
+                ensures {
+                    console_registry_non_stdout_registration_rejected(ConsoleRegistry, candidate);
+                    console_registry_non_stdout_preserves_boot_route(ConsoleRegistry, BootConsole, candidate);
+                    console_registry_non_stdout_leaves_real_console_unchanged(ConsoleRegistry, candidate);
+                    console_registry_non_stdout_no_handoff_committed(ConsoleRegistry, candidate);
+                    console_registry_printk_route_boot_console(ConsoleRegistry, BootConsole);
+                }
+            }
         }
     }
 
@@ -246,6 +333,93 @@ object ConsoleRegistry: ConsoleObject {
             console_registry_keep_bootcon_policy_ready(ConsoleRegistry);
             console_registry_keep_bootcon_disabled(ConsoleRegistry);
             console_registry_printk_route_real_console(ConsoleRegistry, Serial8250Console);
+        }
+
+        actions {
+            Action::RegisterPreferredConsoleAgain<C: ConsoleObject>(console: C) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    ConsoleRegistry.state == State::Ready;
+                    console_registry_has_real_console(ConsoleRegistry, console);
+                    console_registry_preferred_console_from_stdout_path(ConsoleRegistry, DeviceTree);
+                    console_registry_printk_route_real_console(ConsoleRegistry, console);
+                }
+
+                ensures {
+                    console_registry_duplicate_preferred_registration_idempotent(ConsoleRegistry, console);
+                    console_registry_has_real_console(ConsoleRegistry, console);
+                    console_registry_preferred_console_from_stdout_path(ConsoleRegistry, DeviceTree);
+                    console_registry_printk_route_real_console(ConsoleRegistry, console);
+                }
+            }
+        }
+    }
+}
+
+object KeepBootconConsoleRegistry: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    BootConsole.state == State::Online;
+                    PrintkBuffer.state == State::Prepared;
+                }
+
+                ensures {
+                    console_registry_register_console_api_ready(KeepBootconConsoleRegistry);
+                    console_registry_has_boot_console(KeepBootconConsoleRegistry, BootConsole);
+                    console_registry_keep_bootcon_policy_ready(KeepBootconConsoleRegistry);
+                    console_registry_printk_route_boot_console(KeepBootconConsoleRegistry, BootConsole);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            console_registry_register_console_api_ready(KeepBootconConsoleRegistry);
+            console_registry_has_boot_console(KeepBootconConsoleRegistry, BootConsole);
+            console_registry_keep_bootcon_policy_ready(KeepBootconConsoleRegistry);
+            console_registry_printk_route_boot_console(KeepBootconConsoleRegistry, BootConsole);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    BootConsole.state == State::Online;
+                    Serial8250Console.state == State::Ready;
+                    PrintkBuffer.state == State::Ready;
+                    DeviceTree.state == State::Ready;
+                }
+
+                ensures {
+                    console_registry_ready(KeepBootconConsoleRegistry);
+                    console_registry_register_console_api_ready(KeepBootconConsoleRegistry);
+                    console_registry_has_boot_console(KeepBootconConsoleRegistry, BootConsole);
+                    console_registry_has_real_console(KeepBootconConsoleRegistry, Serial8250Console);
+                    console_registry_preferred_console_from_stdout_path(KeepBootconConsoleRegistry, DeviceTree);
+                    console_registry_keep_bootcon_policy_ready(KeepBootconConsoleRegistry);
+                    console_registry_keep_bootcon_enabled(KeepBootconConsoleRegistry);
+                    console_registry_printk_route_real_console(KeepBootconConsoleRegistry, Serial8250Console);
+                    boot_console_kept_by_policy(BootConsole);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            console_registry_ready(KeepBootconConsoleRegistry);
+            console_registry_register_console_api_ready(KeepBootconConsoleRegistry);
+            console_registry_has_boot_console(KeepBootconConsoleRegistry, BootConsole);
+            console_registry_has_real_console(KeepBootconConsoleRegistry, Serial8250Console);
+            console_registry_preferred_console_from_stdout_path(KeepBootconConsoleRegistry, DeviceTree);
+            console_registry_keep_bootcon_policy_ready(KeepBootconConsoleRegistry);
+            console_registry_keep_bootcon_enabled(KeepBootconConsoleRegistry);
+            console_registry_printk_route_real_console(KeepBootconConsoleRegistry, Serial8250Console);
+            boot_console_kept_by_policy(BootConsole);
         }
     }
 }
@@ -282,10 +456,66 @@ object ConsoleHandoff: ConsoleObject {
             BootConsole.state == State::Offline;
             Serial8250Console.state == State::Ready;
             ConsoleRegistry.state == State::Ready;
+            console_registry_keep_bootcon_disabled(ConsoleRegistry);
             console_handoff_ready(ConsoleHandoff, BootConsole, Serial8250Console);
             console_handoff_triggered_by_register_console(ConsoleHandoff, ConsoleRegistry);
             console_handoff_boot_console_unregistered(ConsoleHandoff, BootConsole);
             console_handoff_printk_route_switched(ConsoleHandoff, ConsoleRegistry, Serial8250Console);
+        }
+    }
+}
+
+object KeepBootconConsoleHandoff: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    KeepBootconConsoleRegistry.state == State::Ready;
+                    BootConsole.state == State::Online;
+                    Serial8250Console.state == State::Ready;
+                    console_registry_keep_bootcon_enabled(KeepBootconConsoleRegistry);
+                }
+
+                ensures {
+                    console_handoff_ready(KeepBootconConsoleHandoff, BootConsole, Serial8250Console);
+                    console_handoff_triggered_by_register_console(
+                        KeepBootconConsoleHandoff,
+                        KeepBootconConsoleRegistry
+                    );
+                    console_handoff_boot_console_retained_by_keep_bootcon(KeepBootconConsoleHandoff, BootConsole);
+                    console_handoff_printk_route_switched(
+                        KeepBootconConsoleHandoff,
+                        KeepBootconConsoleRegistry,
+                        Serial8250Console
+                    );
+                    boot_console_kept_by_policy(BootConsole);
+                    console_registry_has_boot_console(KeepBootconConsoleRegistry, BootConsole);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            BootConsole.state == State::Online;
+            Serial8250Console.state == State::Ready;
+            KeepBootconConsoleRegistry.state == State::Ready;
+            console_registry_keep_bootcon_enabled(KeepBootconConsoleRegistry);
+            console_handoff_ready(KeepBootconConsoleHandoff, BootConsole, Serial8250Console);
+            console_handoff_triggered_by_register_console(
+                KeepBootconConsoleHandoff,
+                KeepBootconConsoleRegistry
+            );
+            console_handoff_boot_console_retained_by_keep_bootcon(KeepBootconConsoleHandoff, BootConsole);
+            console_handoff_printk_route_switched(
+                KeepBootconConsoleHandoff,
+                KeepBootconConsoleRegistry,
+                Serial8250Console
+            );
+            boot_console_kept_by_policy(BootConsole);
+            console_registry_has_boot_console(KeepBootconConsoleRegistry, BootConsole);
         }
     }
 }

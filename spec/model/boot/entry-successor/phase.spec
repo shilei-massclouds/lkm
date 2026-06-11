@@ -691,12 +691,14 @@ object EarlyCon: ConsoleObject {
                 drives {
                     BootConsole.Event::Setup;
                     BootConsole.Event::Enable;
+                    ConsoleRegistry.Event::Preset;
                 }
 
                 ensures {
                     earlycon_backend_online(EarlyCon);
                     printk_buffer_flushed_to_earlycon(PrintkBuffer, EarlyCon);
                     boot_console_registered(BootConsole, EarlyCon);
+                    console_registry_has_boot_console(ConsoleRegistry, BootConsole);
                 }
             }
         }
