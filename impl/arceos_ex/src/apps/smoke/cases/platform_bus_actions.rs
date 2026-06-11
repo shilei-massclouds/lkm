@@ -22,6 +22,7 @@ pub fn run() -> SmokeResult {
     suite.scenario(&mut AddDeviceProbeDriverScenario::new());
     suite.scenario(&mut AddDriverProbeDeviceScenario::new());
     suite.scenario(&mut Ns16550aProbeDeviceScenario::new());
+    suite.scenario(&mut Ns16550aNonStdoutProbeScenario::new());
     suite.scenario(&mut DummyConsoleNonStdoutScenario::new());
     suite.scenario(&mut KeepBootconScenario::new());
     suite.result()
@@ -422,6 +423,103 @@ impl DummyConsoleSnapshot {
 
     fn restore(self) {
         printk::restore_registry(self.registry);
+    }
+}
+
+struct Ns16550aNonStdoutProbeScenario {
+    snapshot: Option<ConsoleProbeSnapshot>,
+    fixture: PlatformBusActionsFixture,
+}
+
+impl Ns16550aNonStdoutProbeScenario {
+    fn new() -> Self {
+        Self {
+            snapshot: None,
+            fixture: PlatformBusActionsFixture::new(),
+        }
+    }
+}
+
+impl SmokeScenario for Ns16550aNonStdoutProbeScenario {
+    fn name(&self) -> &'static str {
+        "platform_bus_actions.ns16550a_non_stdout_probe"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.snapshot = Some(ConsoleProbeSnapshot::take());
+        printk::reset_registry_for_smoke(false);
+        printk::register_boot_console();
+        ns16550a::reset_probe_state_for_smoke();
+        self.fixture.setup_ready(assertions);
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        let ctx = context_ref();
+        let device_tree = ctx.device_tree.without_stdout_path_for_smoke();
+        assertions.assert(
+            "stdout-path unavailable",
+            !device_tree.stdout_path_available(),
+        );
+        assertions.assert_ok(
+            "add ns16550a driver",
+            self.fixture.bus.add_driver(NS16550A_PLATFORM_DRIVER_REF),
+        );
+
+        let Some(serial) = find_ns16550a_node(&device_tree) else {
+            assertions.assert("ns16550a node available", false);
+            return;
+        };
+        let result = self
+            .fixture
+            .bus
+            .add_smoke_platform_device(&device_tree, serial.id());
+        assertions.assert("add ns16550a platform device", result.is_ok());
+        let Some(device_ref) = result.ok() else {
+            return;
+        };
+
+        assertions.assert_ok(
+            "probe ns16550a non-stdout device",
+            self.fixture.bus.probe_device(
+                device_ref,
+                &device_tree,
+                &mut self.fixture.vmalloc_allocator,
+                &mut self.fixture.ioremap,
+            ),
+        );
+        assertions.assert(
+            "non-stdout uart port registered",
+            self.fixture.bus.ns16550a_probe_registers_uart8250_port()
+                && ns16550a::uart8250_port_registered()
+                && self.fixture.bus.ns16550a_probe_ioremaps_uart8250_port()
+                && ns16550a::uart8250_port_ioremapped(),
+        );
+        assertions.assert(
+            "non-stdout does not register console",
+            !ns16550a::stdout_path_available()
+                && !ns16550a::stdout_path_matched()
+                && !self.fixture.bus.ns16550a_probe_registers_serial_console()
+                && !self.fixture.bus.ns16550a_probe_triggers_console_handoff()
+                && !ns16550a::serial8250_console_registered()
+                && !ns16550a::handoff_triggered(),
+        );
+        assertions.assert(
+            "non-stdout keeps boot route",
+            printk::boot_console_registered()
+                && printk::boot_console_online()
+                && !printk::serial8250_console_registered()
+                && !printk::preferred_console_from_stdout()
+                && !printk::console_handoff_complete()
+                && !printk::boot_console_unregistered()
+                && !printk::boot_console_removed_from_registry()
+                && printk::route() == printk::PrintkRoute::BootConsole,
+        );
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {
+        if let Some(snapshot) = self.snapshot.take() {
+            snapshot.restore();
+        }
     }
 }
 

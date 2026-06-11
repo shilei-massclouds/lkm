@@ -83,6 +83,7 @@ impl Uart8250Port {
 pub struct Ns16550aProbeState {
     port: Uart8250Port,
     serial_console_registered: bool,
+    stdout_path_available: bool,
     stdout_path_matched: bool,
     handoff_triggered: bool,
 }
@@ -92,6 +93,7 @@ impl Ns16550aProbeState {
         Self {
             port: Uart8250Port::empty(),
             serial_console_registered: false,
+            stdout_path_available: false,
             stdout_path_matched: false,
             handoff_triggered: false,
         }
@@ -164,6 +166,15 @@ pub fn stdout_path_matched() -> bool {
     }
 }
 
+pub fn stdout_path_available() -> bool {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .stdout_path_available
+    }
+}
+
 pub fn handoff_triggered() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -190,7 +201,9 @@ fn ns16550a_probe(
     };
     bind_ioremap_mapping(&mut port, mapping);
 
-    let stdout_path_matched = device_tree.stdout_path_selects(port.node_id);
+    let stdout_path_available = device_tree.stdout_path_available();
+    let stdout_path_matched =
+        stdout_path_available && device_tree.stdout_path_selects(port.node_id);
     let serial_console_registered =
         stdout_path_matched && printk::register_serial8250_console(true);
     let handoff_triggered = serial_console_registered && printk::console_handoff_complete();
@@ -199,6 +212,7 @@ fn ns16550a_probe(
         let state = (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap();
         state.port = port;
         state.serial_console_registered = serial_console_registered;
+        state.stdout_path_available = stdout_path_available;
         state.stdout_path_matched = stdout_path_matched;
         state.handoff_triggered = handoff_triggered;
     }

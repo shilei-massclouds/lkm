@@ -47,6 +47,7 @@ pub struct DeviceTree {
     property_count: usize,
     max_depth: usize,
     stdout_path_node: Option<DeviceNodeId>,
+    stdout_path_path: RawSlice,
     stdout_path_options: RawSlice,
 }
 
@@ -61,6 +62,7 @@ impl DeviceTree {
             property_count: 0,
             max_depth: 0,
             stdout_path_node: None,
+            stdout_path_path: RawSlice::empty(),
             stdout_path_options: RawSlice::empty(),
         }
     }
@@ -128,9 +130,7 @@ impl DeviceTree {
             return self.failed_setup();
         }
 
-        let Some(stdout_path) = resolve_stdout_path(&records) else {
-            return self.failed_setup();
-        };
+        let stdout_path = resolve_stdout_path(&records);
 
         self.storage = storage;
         self.storage_virt = storage_virt;
@@ -138,8 +138,13 @@ impl DeviceTree {
         self.node_count = plan.node_count;
         self.property_count = plan.property_count;
         self.max_depth = plan.max_depth;
-        self.stdout_path_node = Some(DeviceNodeId(stdout_path.node_index));
-        self.stdout_path_options = stdout_path.options;
+        self.stdout_path_node = stdout_path.map(|stdout_path| DeviceNodeId(stdout_path.node_index));
+        self.stdout_path_path = stdout_path
+            .map(|stdout_path| stdout_path.path)
+            .unwrap_or_else(RawSlice::empty);
+        self.stdout_path_options = stdout_path
+            .map(|stdout_path| stdout_path.options)
+            .unwrap_or_else(RawSlice::empty);
 
         if !self.ready_facts_hold(&view) {
             return self.failed_setup();
@@ -189,7 +194,7 @@ impl DeviceTree {
 
         self.tree_links_valid(&records, view)
             && self.properties_queryable(&records, view)
-            && self.stdout_path_ready()
+            && self.stdout_path_facts_hold()
     }
 
     fn tree_links_valid(&self, records: &UnflattenStorage, _view: &FdtView) -> bool {
@@ -331,21 +336,51 @@ impl DeviceTree {
         self.stdout_path_node
     }
 
+    pub fn stdout_path_path(&self) -> &[u8] {
+        raw_bytes_slice(self.stdout_path_path.addr, self.stdout_path_path.len).unwrap_or(&[])
+    }
+
     pub fn stdout_path_options(&self) -> &[u8] {
         raw_bytes_slice(self.stdout_path_options.addr, self.stdout_path_options.len).unwrap_or(&[])
+    }
+
+    pub const fn stdout_path_available(&self) -> bool {
+        self.stdout_path_node.is_some()
+    }
+
+    #[cfg(any(app_smoke, checkpoint_handler_smoke))]
+    pub fn without_stdout_path_for_smoke(&self) -> Self {
+        Self {
+            lifecycle: Lifecycle::new(self.lifecycle.state()),
+            storage: self.storage,
+            storage_virt: self.storage_virt,
+            storage_size: self.storage_size,
+            node_count: self.node_count,
+            property_count: self.property_count,
+            max_depth: self.max_depth,
+            stdout_path_node: None,
+            stdout_path_path: RawSlice::empty(),
+            stdout_path_options: RawSlice::empty(),
+        }
     }
 
     pub fn stdout_path_selects(&self, node_id: DeviceNodeId) -> bool {
         self.stdout_path_node == Some(node_id)
     }
 
-    fn stdout_path_ready(&self) -> bool {
-        let Some(node_id) = self.stdout_path_node else {
-            return false;
-        };
-        self.record_node(node_id.index()).is_some()
-            && raw_bytes_slice(self.stdout_path_options.addr, self.stdout_path_options.len)
-                .is_some()
+    fn stdout_path_facts_hold(&self) -> bool {
+        if let Some(node_id) = self.stdout_path_node {
+            self.record_node(node_id.index()).is_some()
+                && raw_bytes_slice(self.stdout_path_path.addr, self.stdout_path_path.len)
+                    .is_some_and(|path| !path.is_empty())
+                && raw_bytes_slice(self.stdout_path_options.addr, self.stdout_path_options.len)
+                    .is_some()
+        } else {
+            raw_bytes_slice(self.stdout_path_path.addr, self.stdout_path_path.len)
+                .is_some_and(|path| path.is_empty())
+                && raw_bytes_slice(self.stdout_path_options.addr, self.stdout_path_options.len)
+                    .is_some_and(|options| options.is_empty())
+        }
     }
 
     fn record_node(&self, index: usize) -> Option<DeviceNodeRecord> {
@@ -763,7 +798,24 @@ impl RawSlice {
 #[derive(Clone, Copy)]
 struct StdoutPath {
     node_index: usize,
+    path: RawSlice,
     options: RawSlice,
+}
+
+#[derive(Clone, Copy)]
+pub struct StdoutPathParts<'a> {
+    path: &'a [u8],
+    options: &'a [u8],
+}
+
+impl<'a> StdoutPathParts<'a> {
+    pub const fn path(self) -> &'a [u8] {
+        self.path
+    }
+
+    pub const fn options(self) -> &'a [u8] {
+        self.options
+    }
 }
 
 #[repr(C)]
@@ -1132,23 +1184,40 @@ fn resolve_stdout_path(records: &UnflattenStorage) -> Option<StdoutPath> {
     let value = records
         .property_value(chosen, STDOUT_PATH_PROPERTY)
         .or_else(|| records.property_value(chosen, LINUX_STDOUT_PATH_PROPERTY))?;
+    let parts = split_stdout_path_value(value)?;
+    let node_index = records.resolve_path_or_alias(parts.path())?;
+    let path = RawSlice {
+        addr: parts.path().as_ptr() as usize,
+        len: parts.path().len(),
+    };
+    let options = if parts.options().is_empty() {
+        RawSlice::empty()
+    } else {
+        RawSlice {
+            addr: parts.options().as_ptr() as usize,
+            len: parts.options().len(),
+        }
+    };
+    Some(StdoutPath {
+        node_index,
+        path,
+        options,
+    })
+}
+
+pub fn split_stdout_path_value(value: &[u8]) -> Option<StdoutPathParts<'_>> {
+    let value = &value[..cstr_slice_len(value)];
     let path_len = stdout_path_node_part_len(value);
     if path_len == 0 {
         return None;
     }
-    let node_index = records.resolve_path_or_alias(&value[..path_len])?;
+    let path = &value[..path_len];
     let options = if path_len < value.len() && value[path_len] == b':' {
-        RawSlice {
-            addr: value.as_ptr() as usize + path_len + 1,
-            len: value.len() - path_len - 1,
-        }
+        &value[path_len + 1..]
     } else {
-        RawSlice::empty()
+        &[]
     };
-    Some(StdoutPath {
-        node_index,
-        options,
-    })
+    Some(StdoutPathParts { path, options })
 }
 
 fn stdout_path_node_part_len(value: &[u8]) -> usize {

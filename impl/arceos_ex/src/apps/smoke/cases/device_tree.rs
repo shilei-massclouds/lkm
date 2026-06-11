@@ -1,7 +1,7 @@
 use crate::{
     apps::smoke::SmokeResult,
     context::context,
-    objects::{printk, state::State},
+    objects::{device_tree::split_stdout_path_value, printk, state::State},
 };
 
 pub fn run() -> SmokeResult {
@@ -76,14 +76,21 @@ pub fn run() -> SmokeResult {
         printk::write_str("device tree stdout-path node missing\n");
         return SmokeResult::Failed;
     };
+    let stdout_path = device_tree.stdout_path_path();
     if !stdout_node.has_compatible(b"ns16550a")
         || !device_tree.stdout_path_selects(stdout_node.id())
         || device_tree.stdout_path_node_id() != Some(stdout_node.id())
+        || stdout_path.is_empty()
+        || stdout_path.contains(&b':')
     {
         printk::write_str("device tree stdout-path target invalid\n");
         return SmokeResult::Failed;
     }
     let _stdout_options = device_tree.stdout_path_options();
+    if !stdout_path_split_contract_holds() {
+        printk::write_str("device tree stdout-path split contract invalid\n");
+        return SmokeResult::Failed;
+    }
 
     let mut root_children = 0usize;
     for child in root.children() {
@@ -120,6 +127,24 @@ pub fn run() -> SmokeResult {
         storage.end()
     ));
     SmokeResult::Passed
+}
+
+fn stdout_path_split_contract_holds() -> bool {
+    let Some(parts) = split_stdout_path_value(b"/soc/serial@10000000:115200n8") else {
+        return false;
+    };
+    if parts.path() != b"/soc/serial@10000000" || parts.options() != b"115200n8" {
+        return false;
+    }
+
+    let Some(parts) = split_stdout_path_value(b"/soc/serial@10000000\0ignored") else {
+        return false;
+    };
+    if parts.path() != b"/soc/serial@10000000" || !parts.options().is_empty() {
+        return false;
+    }
+
+    split_stdout_path_value(b":115200").is_none()
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
