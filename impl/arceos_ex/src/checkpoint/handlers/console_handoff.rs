@@ -229,10 +229,13 @@ impl ConsoleHandoffFixture {
             && self.vmalloc_allocator.area_count() != 0
             && self.vmalloc_allocator.mapping_count() != 0
             && area.busy()
+            && area.vm_struct_metadata_ready()
+            && area.vmap_area_metadata_ready()
             && area.is_vm_ioremap()
             && area.flags().is_vm_ioremap()
             && area.end() == area.virt_base().saturating_add(area.size())
             && self.vmalloc_allocator.area(area.index()) == Some(area)
+            && vmap_mapping.record_created()
             && vmap_mapping.installed()
             && vmap_mapping.area() == area
             && vmap_mapping.index() == 0

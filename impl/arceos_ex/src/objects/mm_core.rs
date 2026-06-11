@@ -3025,6 +3025,8 @@ pub struct VmapArea {
     size: usize,
     flags: VmapAreaFlags,
     busy: bool,
+    vm_struct_metadata_ready: bool,
+    vmap_area_metadata_ready: bool,
 }
 
 impl VmapArea {
@@ -3035,6 +3037,8 @@ impl VmapArea {
             size: 0,
             flags: VmapAreaFlags::VmIoremap,
             busy: false,
+            vm_struct_metadata_ready: false,
+            vmap_area_metadata_ready: false,
         }
     }
 
@@ -3045,6 +3049,8 @@ impl VmapArea {
             size,
             flags,
             busy: true,
+            vm_struct_metadata_ready: true,
+            vmap_area_metadata_ready: true,
         }
     }
 
@@ -3070,6 +3076,16 @@ impl VmapArea {
     }
 
     #[cfg(checkpoint_handler_console_handoff)]
+    pub const fn vm_struct_metadata_ready(self) -> bool {
+        self.vm_struct_metadata_ready
+    }
+
+    #[cfg(checkpoint_handler_console_handoff)]
+    pub const fn vmap_area_metadata_ready(self) -> bool {
+        self.vmap_area_metadata_ready
+    }
+
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn end(self) -> usize {
         self.virt_base.saturating_add(self.size)
     }
@@ -3087,6 +3103,7 @@ pub struct VmapMapping {
     size: usize,
     protection: PageProtection,
     installed: bool,
+    record_created: bool,
 }
 
 impl VmapMapping {
@@ -3098,6 +3115,7 @@ impl VmapMapping {
             size: 0,
             protection: PageProtection::IoMemory,
             installed: false,
+            record_created: false,
         }
     }
 
@@ -3115,6 +3133,7 @@ impl VmapMapping {
             size,
             protection,
             installed: true,
+            record_created: true,
         }
     }
 
@@ -3146,6 +3165,11 @@ impl VmapMapping {
     #[cfg(checkpoint_handler_console_handoff)]
     pub const fn installed(self) -> bool {
         self.installed
+    }
+
+    #[cfg(checkpoint_handler_console_handoff)]
+    pub const fn record_created(self) -> bool {
+        self.record_created
     }
 
     pub const fn uses_io_memory_protection(self) -> bool {
