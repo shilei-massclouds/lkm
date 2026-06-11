@@ -5,7 +5,7 @@ use super::{
     memblock::MemBlock,
     page_table::{
         aligned, map_linear_pmd_range, map_page_range, map_pmd_range, PageTableInstallRange,
-        SWAPPER_VMALLOC_L0_TABLES,
+        PageTablePageSlot, SWAPPER_VMALLOC_L0_TABLES, VMALLOC_RUNTIME_L0_TABLE_SLOTS,
     },
     raw_dtb::RawDtb,
     state::{Lifecycle, State},
@@ -210,16 +210,20 @@ impl StaticObjects {
         let vmalloc_l0_tables = static_page_tables::swapper_vmalloc_l0_tables_mut(kernel_image);
         let root_addr = root as *mut _ as usize;
         let l1_addr = vmalloc_l1_table as *mut _ as usize;
-        let l0_addr = vmalloc_l0_tables.as_mut_ptr() as usize;
         let l1_phys = kernel_image.runtime_to_phys(l1_addr)?;
-        let l0_phys = kernel_image.runtime_to_phys(l0_addr)?;
+        let mut slots = [PageTablePageSlot::empty(); VMALLOC_RUNTIME_L0_TABLE_SLOTS];
+        let mut index = 0usize;
+        while index < SWAPPER_VMALLOC_L0_TABLES {
+            let l0_addr = &mut vmalloc_l0_tables[index] as *mut _ as usize;
+            let l0_phys = kernel_image.runtime_to_phys(l0_addr)?;
+            slots[index] = PageTablePageSlot::new(l0_addr, l0_phys);
+            index += 1;
+        }
         Some(PageTableInstallRange::new(
             root_addr,
             l1_addr,
-            l0_addr,
             l1_phys,
-            l0_phys,
-            SWAPPER_VMALLOC_L0_TABLES,
+            slots,
             super::mm_core::VMALLOC_START,
             page_size,
         ))

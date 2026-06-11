@@ -38,6 +38,7 @@ predicate vmalloc_allocator_physical_resource_policy_external<T>(allocator: T) -
 predicate vmalloc_allocator_runtime_mapping_window_bound<T, P>(allocator: T, page_table_caches: P) -> bool;
 predicate vmalloc_allocator_multi_window_mapping_supported<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_preallocated_mapping_window_bound<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_dynamic_l0_window_allocation_supported<T, P>(allocator: T, page_table_caches: P) -> bool;
 predicate vmalloc_allocator_rejects_duplicate_area_mapping<T>(allocator: T) -> bool;
 
 predicate vmap_area_ref_ready<T>(area: T) -> bool;
@@ -112,10 +113,12 @@ type VmallocAllocatorType: MemoryObject {
                 self.state == State::Ready;
                 SwapperVm.state == State::Online;
                 PageTableCaches.state == State::Ready;
+                PageAllocator.state == State::Ready;
                 vmalloc_allocator_page_range_mapping_api_ready(self);
                 vmalloc_allocator_executes_page_table_mappings(self, SwapperVm);
                 vmalloc_allocator_runtime_page_table_mapping_ready(self, PageTableCaches);
                 vmalloc_allocator_runtime_mapping_window_bound(self, PageTableCaches);
+                vmalloc_allocator_dynamic_l0_window_allocation_supported(self, PageTableCaches);
                 vmap_area_ref_ready(area);
                 vmap_area_allocated(area, self);
                 vmap_area_address_space_bound(area, VmapAddressSpace);
@@ -133,7 +136,7 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_mapping_within_runtime_mapping_window(mapping);
             }
             deferred {
-                "Mappings beyond the preallocated runtime vmalloc L0/PTE table pool are deferred until dynamic runtime page-table allocation is modeled.";
+                "Mappings beyond the current fixed runtime vmalloc L0/PTE metadata slot capacity are deferred until runtime page-table metadata becomes dynamically sized.";
             }
         }
 

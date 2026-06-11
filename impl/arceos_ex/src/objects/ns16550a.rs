@@ -1,11 +1,12 @@
 use super::{
+    config::Config,
     device::DeviceRef,
     device_tree::{DeviceNodeId, DeviceTree},
     driver::{DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, ProbeResult},
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
     ioremap::{IoMemoryMapping, Ioremap},
-    mm_core::VmallocAllocator,
+    mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     printk,
 };
 
@@ -31,11 +32,19 @@ pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
     crate::objects::printk::write_str("initcall: ns16550a_platform_driver_init\n");
     let device_tree = &ctx.device_tree;
     let vmalloc_allocator = &mut ctx.vmalloc_allocator;
+    let page_table_caches = &mut ctx.page_table_caches;
+    let page_allocator = &mut ctx.page_allocator;
+    let page_metadata_map = &ctx.page_metadata_map;
+    let config = &ctx.config;
     let ioremap = &mut ctx.ioremap;
     ctx.platform_bus.platform_driver_register(
         NS16550A_PLATFORM_DRIVER_REF,
         device_tree,
         vmalloc_allocator,
+        page_table_caches,
+        page_allocator,
+        page_metadata_map,
+        config,
         ioremap,
     )
 }
@@ -462,6 +471,10 @@ pub fn handoff_triggered() -> bool {
 fn ns16550a_probe(
     device_tree: &DeviceTree,
     vmalloc_allocator: &mut VmallocAllocator,
+    page_table_caches: &mut PageTableCaches,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+    config: &Config,
     ioremap: &mut Ioremap,
     device: DeviceRef,
     node_id: DeviceNodeId,
@@ -469,9 +482,16 @@ fn ns16550a_probe(
     let Some(mut port) = build_uart8250_port(device_tree, device, node_id) else {
         return ProbeResult::Deferred;
     };
-    let Some(mapping) =
-        ioremap.map_device_mmio(vmalloc_allocator, device, port.mapbase, port.mapsize)
-    else {
+    let Some(mapping) = ioremap.map_device_mmio(
+        vmalloc_allocator,
+        page_table_caches,
+        page_allocator,
+        page_metadata_map,
+        config,
+        device,
+        port.mapbase,
+        port.mapsize,
+    ) else {
         return ProbeResult::Deferred;
     };
     bind_ioremap_mapping(&mut port, mapping);

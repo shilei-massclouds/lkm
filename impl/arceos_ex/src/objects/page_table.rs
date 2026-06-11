@@ -2,6 +2,7 @@ use super::{config::Config, kernel_image::KernelImage};
 
 pub const SWAPPER_L1_TABLES: usize = 4;
 pub const SWAPPER_VMALLOC_L0_TABLES: usize = 4;
+pub const VMALLOC_RUNTIME_L0_TABLE_SLOTS: usize = 16;
 pub const PAGE_TABLE_ENTRIES: usize = 512;
 const PTE_V: usize = 1 << 0;
 const PTE_R: usize = 1 << 1;
@@ -14,6 +15,7 @@ const PTE_LEAF_RW: usize = PTE_V | PTE_R | PTE_W | PTE_A | PTE_D;
 const PTE_LEAF_RWX: usize = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
 
 #[repr(align(4096))]
+#[derive(Clone, Copy)]
 pub struct PageTablePage {
     entries: [usize; PAGE_TABLE_ENTRIES],
 }
@@ -35,13 +37,49 @@ impl PageTablePage {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
+pub struct PageTablePageSlot {
+    addr: usize,
+    phys: usize,
+    present: bool,
+}
+
+impl PageTablePageSlot {
+    pub const fn empty() -> Self {
+        Self {
+            addr: 0,
+            phys: 0,
+            present: false,
+        }
+    }
+
+    pub const fn new(addr: usize, phys: usize) -> Self {
+        Self {
+            addr,
+            phys,
+            present: true,
+        }
+    }
+
+    pub const fn addr(self) -> usize {
+        self.addr
+    }
+
+    pub const fn phys(self) -> usize {
+        self.phys
+    }
+
+    pub const fn ready(self) -> bool {
+        self.present && self.addr != 0 && self.phys != 0
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct PageTableInstallRange {
     root_addr: usize,
     l1_addr: usize,
-    l0_base_addr: usize,
     l1_phys: usize,
-    l0_base_phys: usize,
     l0_table_count: usize,
+    l0_slots: [PageTablePageSlot; VMALLOC_RUNTIME_L0_TABLE_SLOTS],
     virt_start: usize,
     page_size: usize,
 }
@@ -51,10 +89,9 @@ impl PageTableInstallRange {
         Self {
             root_addr: 0,
             l1_addr: 0,
-            l0_base_addr: 0,
             l1_phys: 0,
-            l0_base_phys: 0,
             l0_table_count: 0,
+            l0_slots: [PageTablePageSlot::empty(); VMALLOC_RUNTIME_L0_TABLE_SLOTS],
             virt_start: 0,
             page_size: 0,
         }
@@ -63,20 +100,17 @@ impl PageTableInstallRange {
     pub const fn new(
         root_addr: usize,
         l1_addr: usize,
-        l0_base_addr: usize,
         l1_phys: usize,
-        l0_base_phys: usize,
-        l0_table_count: usize,
+        l0_slots: [PageTablePageSlot; VMALLOC_RUNTIME_L0_TABLE_SLOTS],
         virt_start: usize,
         page_size: usize,
     ) -> Self {
         Self {
             root_addr,
             l1_addr,
-            l0_base_addr,
             l1_phys,
-            l0_base_phys,
-            l0_table_count,
+            l0_table_count: count_ready_slots(l0_slots),
+            l0_slots,
             virt_start,
             page_size,
         }
@@ -85,11 +119,10 @@ impl PageTableInstallRange {
     pub const fn ready(self) -> bool {
         self.root_addr != 0
             && self.l1_addr != 0
-            && self.l0_base_addr != 0
             && self.l1_phys != 0
-            && self.l0_base_phys != 0
             && self.l0_table_count != 0
-            && self.l0_table_count <= PAGE_TABLE_ENTRIES
+            && self.l0_table_count <= VMALLOC_RUNTIME_L0_TABLE_SLOTS
+            && first_n_l0_slots_ready(self.l0_slots, self.l0_table_count)
             && self.virt_start != 0
             && self.page_size != 0
             && self.page_size.is_power_of_two()
@@ -115,6 +148,31 @@ impl PageTableInstallRange {
 
     pub const fn l0_window_size(self) -> usize {
         PAGE_TABLE_ENTRIES.saturating_mul(self.page_size)
+    }
+
+    pub const fn max_l0_table_count(self) -> usize {
+        VMALLOC_RUNTIME_L0_TABLE_SLOTS
+    }
+
+    pub const fn l0_slot(self, index: usize) -> Option<PageTablePageSlot> {
+        if index < self.l0_table_count {
+            Some(self.l0_slots[index])
+        } else {
+            None
+        }
+    }
+
+    pub fn push_l0_table(&mut self, addr: usize, phys: usize, page_size: usize) -> bool {
+        if self.l0_table_count >= VMALLOC_RUNTIME_L0_TABLE_SLOTS
+            || page_size != self.page_size
+            || !page_table_storage_ready(addr, page_size)
+            || !phys.is_multiple_of(page_size)
+        {
+            return false;
+        }
+        self.l0_slots[self.l0_table_count] = PageTablePageSlot::new(addr, phys);
+        self.l0_table_count += 1;
+        true
     }
 }
 
@@ -425,6 +483,37 @@ fn install_range_valid(tables: PageTableInstallRange) -> bool {
             .is_some_and(|vpn1_end| vpn1_end <= PAGE_TABLE_ENTRIES)
 }
 
+const fn count_ready_slots(slots: [PageTablePageSlot; VMALLOC_RUNTIME_L0_TABLE_SLOTS]) -> usize {
+    let mut index = 0usize;
+    let mut count = 0usize;
+    while index < VMALLOC_RUNTIME_L0_TABLE_SLOTS {
+        if slots[index].ready() {
+            count += 1;
+        } else {
+            return count;
+        }
+        index += 1;
+    }
+    count
+}
+
+const fn first_n_l0_slots_ready(
+    slots: [PageTablePageSlot; VMALLOC_RUNTIME_L0_TABLE_SLOTS],
+    count: usize,
+) -> bool {
+    if count == 0 || count > VMALLOC_RUNTIME_L0_TABLE_SLOTS {
+        return false;
+    }
+    let mut index = 0usize;
+    while index < count {
+        if !slots[index].ready() {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
 fn range_within_install_range(
     tables: PageTableInstallRange,
     virt_start: usize,
@@ -451,21 +540,11 @@ fn install_window_index(tables: PageTableInstallRange, virt: usize) -> Option<us
 }
 
 fn l0_table_addr(tables: PageTableInstallRange, index: usize) -> Option<usize> {
-    if index >= tables.l0_table_count {
-        return None;
-    }
-    tables
-        .l0_base_addr
-        .checked_add(index.checked_mul(core::mem::size_of::<PageTablePage>())?)
+    tables.l0_slot(index).map(|slot| slot.addr())
 }
 
 fn l0_table_phys(tables: PageTableInstallRange, index: usize) -> Option<usize> {
-    if index >= tables.l0_table_count {
-        return None;
-    }
-    tables
-        .l0_base_phys
-        .checked_add(index.checked_mul(core::mem::size_of::<PageTablePage>())?)
+    tables.l0_slot(index).map(|slot| slot.phys())
 }
 
 fn table_pte(table_addr: usize) -> usize {

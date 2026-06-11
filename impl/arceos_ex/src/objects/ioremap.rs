@@ -3,7 +3,8 @@ use super::{
     device::DeviceRef,
     fix_map::FixMap,
     mm_core::{
-        PageProtection, PageTableCaches, VmallocAllocator, VmapArea, VmapAreaFlags, VmapMapping,
+        PageAllocator, PageMetadataMap, PageProtection, PageTableCaches, VmallocAllocator,
+        VmapArea, VmapAreaFlags, VmapMapping,
     },
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
@@ -379,12 +380,20 @@ impl Ioremap {
     pub fn map_device_mmio(
         &mut self,
         vmalloc_allocator: &mut VmallocAllocator,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
         device: DeviceRef,
         phys_base: usize,
         size: usize,
     ) -> Option<IoMemoryMapping> {
         self.map_device_mmio_with_kind(
             vmalloc_allocator,
+            page_table_caches,
+            page_allocator,
+            page_metadata_map,
+            config,
             device,
             phys_base,
             size,
@@ -395,6 +404,10 @@ impl Ioremap {
     pub fn map_device_mmio_with_kind(
         &mut self,
         vmalloc_allocator: &mut VmallocAllocator,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
         device: DeviceRef,
         phys_base: usize,
         size: usize,
@@ -418,6 +431,10 @@ impl Ioremap {
         let mapped_size = align_up(covered_size, page_size)?;
         let vmap_area = vmalloc_allocator.get_vm_area(mapped_size, VmapAreaFlags::VmIoremap)?;
         let vmap_mapping = vmalloc_allocator.map_page_range(
+            page_table_caches,
+            page_allocator,
+            page_metadata_map,
+            config,
             vmap_area,
             page_phys_base,
             mapped_size,

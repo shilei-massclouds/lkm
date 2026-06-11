@@ -53,6 +53,7 @@ predicate arceos_ex_must_vmalloc_allocator_manage_vmap_addresses_and_execute_map
 predicate arceos_ex_must_vmalloc_setup_build_all_vmap_subobjects() -> bool;
 predicate arceos_ex_must_vmalloc_map_page_range_record_each_mapping_action() -> bool;
 predicate arceos_ex_must_vmalloc_support_preallocated_windows_and_reject_duplicate_mapping() -> bool;
+predicate arceos_ex_must_vmalloc_allocate_l0_windows_on_demand() -> bool;
 predicate arceos_ex_must_vmalloc_unmap_before_free_vmap_area() -> bool;
 predicate arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external_to_vmalloc() -> bool;
 predicate arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only() -> bool;
@@ -478,10 +479,14 @@ type ArceosExMmCoreInitCodingMust {
          * VmallocAllocator.map_page_range() must support mappings within the
          * explicitly preallocated runtime vmalloc L0/PTE window pool, including
          * ranges that cross from one supported L0/PTE window into the next. It
-         * must reject ranges outside that pool and reject a second mapping
-         * record for an area that already has an installed mapping.
+         * must allocate additional L0/PTE windows on demand through
+         * PageTableCaches/PageAllocator when a reserved vmap area extends
+         * beyond the currently installed pool, reject ranges beyond the current
+         * fixed runtime slot capacity, and reject a second mapping record for
+         * an area that already has an installed mapping.
          */
         arceos_ex_must_vmalloc_support_preallocated_windows_and_reject_duplicate_mapping();
+        arceos_ex_must_vmalloc_allocate_l0_windows_on_demand();
 
         /*
          * Unmap/free boundary:

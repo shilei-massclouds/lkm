@@ -5,8 +5,12 @@ use crate::{
     },
     context::context_ref,
     objects::{
-        device::DeviceRef, driver::MOCK_PLATFORM_DRIVER_REF, initcall::PlatformBus,
-        ioremap::Ioremap, mm_core::VmallocAllocator, state::State,
+        device::DeviceRef,
+        driver::MOCK_PLATFORM_DRIVER_REF,
+        initcall::PlatformBus,
+        ioremap::Ioremap,
+        mm_core::{PageAllocator, PageTableCaches, VmallocAllocator},
+        state::State,
     },
 };
 
@@ -19,6 +23,8 @@ pub fn run() -> SmokeResult {
 
 struct PlatformBusActionsFixture {
     bus: PlatformBus,
+    page_table_caches: PageTableCaches,
+    page_allocator: PageAllocator,
     vmalloc_allocator: VmallocAllocator,
     ioremap: Ioremap,
 }
@@ -27,6 +33,8 @@ impl PlatformBusActionsFixture {
     fn new() -> Self {
         Self {
             bus: PlatformBus::new(),
+            page_table_caches: PageTableCaches::new(),
+            page_allocator: PageAllocator::new(),
             vmalloc_allocator: VmallocAllocator::new(),
             ioremap: Ioremap::new(),
         }
@@ -35,10 +43,22 @@ impl PlatformBusActionsFixture {
     fn setup_ready(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context_ref();
         assertions.assert_ok(
+            "setup page table caches",
+            self.page_table_caches.setup(
+                &ctx.slub_allocator,
+                &ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
+                &ctx.vm,
+                &ctx.static_objects,
+                &ctx.kernel_image,
+            ),
+        );
+        assertions.assert_ok(
             "setup vmalloc allocator",
             self.vmalloc_allocator.setup(
                 &ctx.slub_allocator,
-                &ctx.page_table_caches,
+                &self.page_table_caches,
                 &ctx.per_cpu_storage,
             ),
         );
@@ -47,7 +67,7 @@ impl PlatformBusActionsFixture {
             self.ioremap.setup(
                 &ctx.vm,
                 &self.vmalloc_allocator,
-                &ctx.page_table_caches,
+                &self.page_table_caches,
                 &ctx.fix_map,
                 &ctx.config,
             ),
@@ -131,6 +151,10 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
                 MOCK_PLATFORM_DRIVER_REF,
                 &context_ref().device_tree,
                 &mut self.fixture.vmalloc_allocator,
+                &mut self.fixture.page_table_caches,
+                &mut self.fixture.page_allocator,
+                &context_ref().page_metadata_map,
+                &context_ref().config,
                 &mut self.fixture.ioremap,
             ),
         );
@@ -175,6 +199,10 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
                 DeviceRef::new(usize::MAX),
                 &context_ref().device_tree,
                 &mut self.fixture.vmalloc_allocator,
+                &mut self.fixture.page_table_caches,
+                &mut self.fixture.page_allocator,
+                &context_ref().page_metadata_map,
+                &context_ref().config,
                 &mut self.fixture.ioremap,
             ),
         );
@@ -205,6 +233,10 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
                 device_ref,
                 &context_ref().device_tree,
                 &mut self.fixture.vmalloc_allocator,
+                &mut self.fixture.page_table_caches,
+                &mut self.fixture.page_allocator,
+                &context_ref().page_metadata_map,
+                &context_ref().config,
                 &mut self.fixture.ioremap,
             ),
         );

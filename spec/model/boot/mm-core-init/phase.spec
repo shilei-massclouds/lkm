@@ -722,6 +722,9 @@ object PageTableCaches: MemoryObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     SlubAllocator.state == State::Ready;
+                    PageAllocator.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
+                    Config.state == State::Online;
                     SwapperVm.state == State::Online;
                     Vm.state == State::Online;
                 }
@@ -733,6 +736,7 @@ object PageTableCaches: MemoryObject {
                 ensures {
                     page_table_caches_ready(PageTableCaches, PageTableLockCache);
                     riscv_vmalloc_pgtable_range_preallocated(PageTableCaches, SwapperVm);
+                    vmalloc_pgtable_dynamic_allocator_ready(PageTableCaches, PageAllocator);
                     modules_pgtable_cache_path_trimmed(PageTableCaches);
                     memory_hotplug_pgtable_cache_path_trimmed(PageTableCaches);
                 }
@@ -745,6 +749,7 @@ object PageTableCaches: MemoryObject {
             PageTableLockCache.state == State::Ready;
             page_table_caches_ready(PageTableCaches, PageTableLockCache);
             riscv_vmalloc_pgtable_range_preallocated(PageTableCaches, SwapperVm);
+            vmalloc_pgtable_dynamic_allocator_ready(PageTableCaches, PageAllocator);
             modules_pgtable_cache_path_trimmed(PageTableCaches);
             memory_hotplug_pgtable_cache_path_trimmed(PageTableCaches);
         }
@@ -945,6 +950,7 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_runtime_mapping_window_bound(VmallocAllocator, PageTableCaches);
                     vmalloc_allocator_multi_window_mapping_supported(VmallocAllocator);
                     vmalloc_allocator_preallocated_mapping_window_bound(VmallocAllocator);
+                    vmalloc_allocator_dynamic_l0_window_allocation_supported(VmallocAllocator, PageTableCaches);
                     vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
@@ -973,6 +979,7 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_runtime_mapping_window_bound(VmallocAllocator, PageTableCaches);
             vmalloc_allocator_multi_window_mapping_supported(VmallocAllocator);
             vmalloc_allocator_preallocated_mapping_window_bound(VmallocAllocator);
+            vmalloc_allocator_dynamic_l0_window_allocation_supported(VmallocAllocator, PageTableCaches);
             vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
         }

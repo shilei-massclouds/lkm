@@ -7,7 +7,7 @@ use crate::{
         device_tree::DeviceTree,
         initcall::PlatformBus,
         ioremap::Ioremap,
-        mm_core::VmallocAllocator,
+        mm_core::{PageAllocator, PageTableCaches, VmallocAllocator},
         ns16550a::{self, NS16550A_PLATFORM_DRIVER_REF},
         printk,
         state::State,
@@ -120,6 +120,8 @@ fn finish(total: usize, name: &'static str, passed: bool) -> bool {
 
 struct ConsoleHandoffFixture {
     bus: PlatformBus,
+    page_table_caches: PageTableCaches,
+    page_allocator: PageAllocator,
     vmalloc_allocator: VmallocAllocator,
     ioremap: Ioremap,
     device_ref: Option<DeviceRef>,
@@ -129,6 +131,8 @@ impl ConsoleHandoffFixture {
     fn new() -> Self {
         Self {
             bus: PlatformBus::new(),
+            page_table_caches: PageTableCaches::new(),
+            page_allocator: PageAllocator::new(),
             vmalloc_allocator: VmallocAllocator::new(),
             ioremap: Ioremap::new(),
             device_ref: None,
@@ -137,19 +141,31 @@ impl ConsoleHandoffFixture {
 
     fn setup_ready(&mut self) -> bool {
         let ctx = context_ref();
-        self.vmalloc_allocator
+        self.page_table_caches
             .setup(
                 &ctx.slub_allocator,
-                &ctx.page_table_caches,
-                &ctx.per_cpu_storage,
+                &ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
+                &ctx.vm,
+                &ctx.static_objects,
+                &ctx.kernel_image,
             )
             .is_ok()
+            && self
+                .vmalloc_allocator
+                .setup(
+                    &ctx.slub_allocator,
+                    &self.page_table_caches,
+                    &ctx.per_cpu_storage,
+                )
+                .is_ok()
             && self
                 .ioremap
                 .setup(
                     &ctx.vm,
                     &self.vmalloc_allocator,
-                    &ctx.page_table_caches,
+                    &self.page_table_caches,
                     &ctx.fix_map,
                     &ctx.config,
                 )
@@ -171,6 +187,7 @@ impl ConsoleHandoffFixture {
     }
 
     fn probe_ns16550a_device(&mut self, device_tree: &DeviceTree) -> bool {
+        let ctx = context_ref();
         let Some(serial) = find_ns16550a_node(device_tree) else {
             return false;
         };
@@ -183,6 +200,10 @@ impl ConsoleHandoffFixture {
                 device_ref,
                 device_tree,
                 &mut self.vmalloc_allocator,
+                &mut self.page_table_caches,
+                &mut self.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
                 &mut self.ioremap,
             )
             .is_ok()

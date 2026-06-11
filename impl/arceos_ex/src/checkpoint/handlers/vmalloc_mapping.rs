@@ -195,22 +195,32 @@ fn run_multi_record_with_pages(
         return false;
     }
 
-    let allocator = &mut ctx.vmalloc_allocator;
-    let base_area_count = allocator.area_count();
-    let base_mapping_count = allocator.mapping_count();
+    let base_area_count = ctx.vmalloc_allocator.area_count();
+    let base_mapping_count = ctx.vmalloc_allocator.mapping_count();
 
-    let Some(first_area) = allocator.get_vm_area(page_size, VmapAreaFlags::VmIoremap) else {
-        return false;
-    };
-    let Some(second_area) = allocator.get_vm_area(page_size, VmapAreaFlags::VmIoremap) else {
-        return false;
-    };
-    let Some(first_mapping) =
-        allocator.map_page_range(first_area, first_phys, page_size, PageProtection::IoMemory)
+    let Some(first_area) = ctx
+        .vmalloc_allocator
+        .get_vm_area(page_size, VmapAreaFlags::VmIoremap)
     else {
         return false;
     };
-    let Some(second_mapping) = allocator.map_page_range(
+    let Some(second_area) = ctx
+        .vmalloc_allocator
+        .get_vm_area(page_size, VmapAreaFlags::VmIoremap)
+    else {
+        return false;
+    };
+    let Some(first_mapping) = map_vmalloc_area(
+        ctx,
+        first_area,
+        first_phys,
+        page_size,
+        PageProtection::IoMemory,
+    ) else {
+        return false;
+    };
+    let Some(second_mapping) = map_vmalloc_area(
+        ctx,
         second_area,
         second_phys,
         page_size,
@@ -219,6 +229,7 @@ fn run_multi_record_with_pages(
         return false;
     };
 
+    let allocator = &mut ctx.vmalloc_allocator;
     let records_valid = allocator.area_count() == base_area_count.saturating_add(TEST_PAGE_COUNT)
         && allocator.mapping_count() == base_mapping_count.saturating_add(TEST_PAGE_COUNT)
         && first_area.index() == base_area_count
@@ -258,17 +269,20 @@ fn run_multi_record_with_pages(
 }
 
 fn run_unmap_free_with_page(ctx: &mut Context, page_size: usize, phys: usize) -> bool {
-    let allocator = &mut ctx.vmalloc_allocator;
-    let base_area_count = allocator.area_count();
-    let base_mapping_count = allocator.mapping_count();
+    let base_area_count = ctx.vmalloc_allocator.area_count();
+    let base_mapping_count = ctx.vmalloc_allocator.mapping_count();
 
-    let Some(area) = allocator.get_vm_area(page_size, VmapAreaFlags::VmIoremap) else {
-        return false;
-    };
-    let Some(mapping) = allocator.map_page_range(area, phys, page_size, PageProtection::IoMemory)
+    let Some(area) = ctx
+        .vmalloc_allocator
+        .get_vm_area(page_size, VmapAreaFlags::VmIoremap)
     else {
         return false;
     };
+    let Some(mapping) = map_vmalloc_area(ctx, area, phys, page_size, PageProtection::IoMemory)
+    else {
+        return false;
+    };
+    let allocator = &mut ctx.vmalloc_allocator;
     if area.index() != base_area_count
         || mapping.index() != base_mapping_count
         || allocator.area(area.index()) != Some(area)
@@ -288,10 +302,16 @@ fn run_ioremap_iounmap_with_page(ctx: &mut Context, page_size: usize, phys: usiz
     let base_area_count = ctx.vmalloc_allocator.area_count();
     let base_mapping_count = ctx.vmalloc_allocator.mapping_count();
 
-    let Some(mapping) =
-        ctx.ioremap
-            .map_device_mmio(&mut ctx.vmalloc_allocator, device, phys_base, size)
-    else {
+    let Some(mapping) = ctx.ioremap.map_device_mmio(
+        &mut ctx.vmalloc_allocator,
+        &mut ctx.page_table_caches,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+        &ctx.config,
+        device,
+        phys_base,
+        size,
+    ) else {
         return false;
     };
     let vmap_area = mapping.vmap_area();
@@ -366,6 +386,10 @@ fn run_mmio_attributes_with_page(ctx: &mut Context, page_size: usize, phys: usiz
     let base_mapping_count = ctx.vmalloc_allocator.mapping_count();
     let Some(mapping) = ctx.ioremap.map_device_mmio_with_kind(
         &mut ctx.vmalloc_allocator,
+        &mut ctx.page_table_caches,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+        &ctx.config,
         device,
         phys,
         page_size,
@@ -394,6 +418,10 @@ fn run_mmio_attributes_with_page(ctx: &mut Context, page_size: usize, phys: usiz
         .ioremap
         .map_device_mmio_with_kind(
             &mut ctx.vmalloc_allocator,
+            &mut ctx.page_table_caches,
+            &mut ctx.page_allocator,
+            &ctx.page_metadata_map,
+            &ctx.config,
             unsupported_device,
             phys,
             page_size,
@@ -404,6 +432,10 @@ fn run_mmio_attributes_with_page(ctx: &mut Context, page_size: usize, phys: usiz
             .ioremap
             .map_device_mmio_with_kind(
                 &mut ctx.vmalloc_allocator,
+                &mut ctx.page_table_caches,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
                 unsupported_device,
                 phys,
                 page_size,
@@ -414,6 +446,10 @@ fn run_mmio_attributes_with_page(ctx: &mut Context, page_size: usize, phys: usiz
             .ioremap
             .map_device_mmio_with_kind(
                 &mut ctx.vmalloc_allocator,
+                &mut ctx.page_table_caches,
+                &mut ctx.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
                 unsupported_device,
                 phys,
                 page_size,
@@ -438,18 +474,23 @@ fn run_window_duplicate_reject_with_page(
     cross_window_phys: usize,
     cross_window_size: usize,
 ) -> bool {
-    let allocator = &mut ctx.vmalloc_allocator;
-    if !allocator.runtime_mapping_window_ready()
-        || !allocator.multi_window_mapping_supported()
-        || !allocator.preallocated_mapping_window_bound()
-        || !allocator.duplicate_area_mapping_rejected()
+    if !ctx.vmalloc_allocator.runtime_mapping_window_ready()
+        || !ctx.vmalloc_allocator.multi_window_mapping_supported()
+        || !ctx.vmalloc_allocator.preallocated_mapping_window_bound()
+        || !ctx
+            .vmalloc_allocator
+            .dynamic_l0_window_allocation_supported()
+        || !ctx.vmalloc_allocator.duplicate_area_mapping_rejected()
+        || !ctx
+            .page_table_caches
+            .vmalloc_pgtable_dynamic_allocator_ready()
     {
         return false;
     }
 
-    let window_start = allocator.runtime_mapping_window_start();
-    let window_end = allocator.runtime_mapping_window_end();
-    let window_count = allocator.runtime_mapping_window_count();
+    let window_start = ctx.vmalloc_allocator.runtime_mapping_window_start();
+    let window_end = ctx.vmalloc_allocator.runtime_mapping_window_end();
+    let window_count = ctx.vmalloc_allocator.runtime_mapping_window_count();
     let first_window_size = window_end.saturating_sub(window_start) / window_count;
     if window_start != crate::objects::mm_core::VMALLOC_START
         || window_end <= window_start
@@ -462,26 +503,29 @@ fn run_window_duplicate_reject_with_page(
         return false;
     }
 
-    let base_area_count = allocator.area_count();
-    let base_mapping_count = allocator.mapping_count();
-    let Some(area) = allocator.get_vm_area(page_size, VmapAreaFlags::VmIoremap) else {
-        return false;
-    };
-    let Some(mapping) = allocator.map_page_range(area, phys, page_size, PageProtection::IoMemory)
+    let base_area_count = ctx.vmalloc_allocator.area_count();
+    let base_mapping_count = ctx.vmalloc_allocator.mapping_count();
+    let Some(area) = ctx
+        .vmalloc_allocator
+        .get_vm_area(page_size, VmapAreaFlags::VmIoremap)
     else {
         return false;
     };
-    let duplicate_rejected = allocator
-        .map_page_range(area, phys, page_size, PageProtection::IoMemory)
+    let Some(mapping) = map_vmalloc_area(ctx, area, phys, page_size, PageProtection::IoMemory)
+    else {
+        return false;
+    };
+    let duplicate_rejected = map_vmalloc_area(ctx, area, phys, page_size, PageProtection::IoMemory)
         .is_none()
-        && allocator.mapping_count() == base_mapping_count.saturating_add(1)
-        && allocator.area_count() == base_area_count.saturating_add(1);
-    if !duplicate_rejected || !teardown_mapping(allocator, area, mapping, false) {
+        && ctx.vmalloc_allocator.mapping_count() == base_mapping_count.saturating_add(1)
+        && ctx.vmalloc_allocator.area_count() == base_area_count.saturating_add(1);
+    if !duplicate_rejected || !teardown_mapping(&mut ctx.vmalloc_allocator, area, mapping, false) {
         return false;
     }
 
-    let current = allocator
-        .area(allocator.area_count().saturating_sub(1))
+    let current = ctx
+        .vmalloc_allocator
+        .area(ctx.vmalloc_allocator.area_count().saturating_sub(1))
         .map(|last| last.end())
         .unwrap_or(window_start);
     let desired_cross_start = window_start
@@ -492,23 +536,29 @@ fn run_window_duplicate_reject_with_page(
     }
     let align_padding = desired_cross_start.saturating_sub(current);
     if align_padding != 0 {
-        let Some(padding_area) = allocator.get_vm_area(align_padding, VmapAreaFlags::VmIoremap)
+        let Some(padding_area) = ctx
+            .vmalloc_allocator
+            .get_vm_area(align_padding, VmapAreaFlags::VmIoremap)
         else {
             return false;
         };
-        if padding_area.end() != desired_cross_start || !allocator.free_vm_area(padding_area) {
+        if padding_area.end() != desired_cross_start
+            || !ctx.vmalloc_allocator.free_vm_area(padding_area)
+        {
             return false;
         }
     }
 
-    let base_window_area_count = allocator.area_count();
-    let base_window_mapping_count = allocator.mapping_count();
-    let Some(cross_window_area) =
-        allocator.get_vm_area(cross_window_size, VmapAreaFlags::VmIoremap)
+    let base_window_area_count = ctx.vmalloc_allocator.area_count();
+    let base_window_mapping_count = ctx.vmalloc_allocator.mapping_count();
+    let Some(cross_window_area) = ctx
+        .vmalloc_allocator
+        .get_vm_area(cross_window_size, VmapAreaFlags::VmIoremap)
     else {
         return false;
     };
-    let Some(cross_window_mapping) = allocator.map_page_range(
+    let Some(cross_window_mapping) = map_vmalloc_area(
+        ctx,
         cross_window_area,
         cross_window_phys,
         cross_window_size,
@@ -520,43 +570,121 @@ fn run_window_duplicate_reject_with_page(
         && cross_window_area.end() == window_start.saturating_add(first_window_size + page_size)
         && cross_window_mapping.installed()
         && cross_window_mapping.size() == cross_window_size
-        && allocator.area_count() == base_window_area_count.saturating_add(1)
-        && allocator.mapping_count() == base_window_mapping_count.saturating_add(1);
+        && ctx.vmalloc_allocator.area_count() == base_window_area_count.saturating_add(1)
+        && ctx.vmalloc_allocator.mapping_count() == base_window_mapping_count.saturating_add(1);
     if !cross_window_supported
-        || !teardown_mapping(allocator, cross_window_area, cross_window_mapping, false)
+        || !teardown_mapping(
+            &mut ctx.vmalloc_allocator,
+            cross_window_area,
+            cross_window_mapping,
+            false,
+        )
     {
         return false;
     }
 
-    let remaining_window = window_end.saturating_sub(allocator.runtime_mapping_window_start());
-    let consumed = allocator
-        .area(allocator.area_count().saturating_sub(1))
+    let current_window_end = ctx.vmalloc_allocator.runtime_mapping_window_end();
+    let current_window_count = ctx.vmalloc_allocator.runtime_mapping_window_count();
+    let dynamic_start = current_window_end.saturating_sub(page_size);
+    let current = ctx
+        .vmalloc_allocator
+        .area(ctx.vmalloc_allocator.area_count().saturating_sub(1))
+        .map(|last| last.end())
+        .unwrap_or(window_start);
+    if current > dynamic_start {
+        return false;
+    }
+    let dynamic_padding = dynamic_start.saturating_sub(current);
+    if dynamic_padding != 0 {
+        let Some(padding_area) = ctx
+            .vmalloc_allocator
+            .get_vm_area(dynamic_padding, VmapAreaFlags::VmIoremap)
+        else {
+            return false;
+        };
+        if padding_area.end() != dynamic_start || !ctx.vmalloc_allocator.free_vm_area(padding_area)
+        {
+            return false;
+        }
+    }
+
+    let base_dynamic_area_count = ctx.vmalloc_allocator.area_count();
+    let base_dynamic_mapping_count = ctx.vmalloc_allocator.mapping_count();
+    let base_dynamic_pgtable_count = ctx.page_table_caches.dynamic_vmalloc_pgtable_count();
+    let Some(dynamic_area) = ctx
+        .vmalloc_allocator
+        .get_vm_area(cross_window_size, VmapAreaFlags::VmIoremap)
+    else {
+        return false;
+    };
+    let Some(dynamic_mapping) = map_vmalloc_area(
+        ctx,
+        dynamic_area,
+        cross_window_phys,
+        cross_window_size,
+        PageProtection::IoMemory,
+    ) else {
+        return false;
+    };
+    let dynamic_supported = dynamic_area.virt_base() == dynamic_start
+        && dynamic_area.end() == current_window_end.saturating_add(page_size)
+        && dynamic_mapping.installed()
+        && ctx.vmalloc_allocator.runtime_mapping_window_count()
+            == current_window_count.saturating_add(1)
+        && ctx.vmalloc_allocator.runtime_mapping_window_end()
+            == current_window_end.saturating_add(first_window_size)
+        && ctx.page_table_caches.dynamic_vmalloc_pgtable_count()
+            == base_dynamic_pgtable_count.saturating_add(1)
+        && ctx.vmalloc_allocator.area_count() == base_dynamic_area_count.saturating_add(1)
+        && ctx.vmalloc_allocator.mapping_count() == base_dynamic_mapping_count.saturating_add(1);
+    if !dynamic_supported
+        || !teardown_mapping(
+            &mut ctx.vmalloc_allocator,
+            dynamic_area,
+            dynamic_mapping,
+            false,
+        )
+    {
+        return false;
+    }
+
+    let capacity_end = window_start.saturating_add(
+        first_window_size
+            .saturating_mul(crate::objects::page_table::VMALLOC_RUNTIME_L0_TABLE_SLOTS),
+    );
+    let consumed = ctx
+        .vmalloc_allocator
+        .area(ctx.vmalloc_allocator.area_count().saturating_sub(1))
         .map(|last| last.end().saturating_sub(window_start))
         .unwrap_or(0);
-    let cross_size = remaining_window
+    let cross_size = capacity_end
+        .saturating_sub(window_start)
         .saturating_sub(consumed)
         .saturating_add(page_size);
     if cross_size <= page_size {
         return false;
     }
-    let before_cross_areas = allocator.area_count();
-    let before_cross_mappings = allocator.mapping_count();
-    let Some(cross_area) = allocator.get_vm_area(cross_size, VmapAreaFlags::VmIoremap) else {
+    let before_cross_areas = ctx.vmalloc_allocator.area_count();
+    let before_cross_mappings = ctx.vmalloc_allocator.mapping_count();
+    let Some(cross_area) = ctx
+        .vmalloc_allocator
+        .get_vm_area(cross_size, VmapAreaFlags::VmIoremap)
+    else {
         return false;
     };
-    cross_area.virt_base() < window_end
-        && cross_area.end() > window_end
-        && allocator
-            .map_page_range(
-                cross_area,
-                phys,
-                cross_area.size(),
-                PageProtection::IoMemory,
-            )
-            .is_none()
-        && allocator.area_count() == before_cross_areas.saturating_add(1)
-        && allocator.mapping_count() == before_cross_mappings
-        && allocator.free_vm_area(cross_area)
+    cross_area.virt_base() < capacity_end
+        && cross_area.end() > capacity_end
+        && map_vmalloc_area(
+            ctx,
+            cross_area,
+            phys,
+            cross_area.size(),
+            PageProtection::IoMemory,
+        )
+        .is_none()
+        && ctx.vmalloc_allocator.area_count() == before_cross_areas.saturating_add(1)
+        && ctx.vmalloc_allocator.mapping_count() == before_cross_mappings
+        && ctx.vmalloc_allocator.free_vm_area(cross_area)
 }
 
 struct AllocatedPage {
@@ -569,6 +697,25 @@ impl AllocatedPage {
     fn size(&self, page_size: usize) -> usize {
         page_size << self.order
     }
+}
+
+fn map_vmalloc_area(
+    ctx: &mut Context,
+    area: VmapArea,
+    phys: usize,
+    size: usize,
+    protection: PageProtection,
+) -> Option<VmapMapping> {
+    ctx.vmalloc_allocator.map_page_range(
+        &mut ctx.page_table_caches,
+        &mut ctx.page_allocator,
+        &ctx.page_metadata_map,
+        &ctx.config,
+        area,
+        phys,
+        size,
+        protection,
+    )
 }
 
 fn alloc_test_page(ctx: &mut Context) -> Option<AllocatedPage> {

@@ -35,6 +35,7 @@ const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
 const VMALLOC_RUNTIME_PAGE_SIZE: usize = 4096;
 const MAX_VMAP_AREAS: usize = 16;
 const MAX_VMAP_MAPPINGS: usize = 16;
+const MAX_DYNAMIC_VMALLOC_PGTABLES: usize = 12;
 pub const GLOBAL_ALLOC_MAX_SIZE: usize = 8192;
 
 #[derive(Clone, Copy)]
@@ -2879,7 +2880,10 @@ pub struct PageTableCaches {
     lifecycle: Lifecycle,
     lock_cache: PageTableLockCache,
     vmalloc_install_range: PageTableInstallRange,
+    dynamic_vmalloc_pgtable_pages: [PageRef; MAX_DYNAMIC_VMALLOC_PGTABLES],
+    dynamic_vmalloc_pgtable_count: usize,
     vmalloc_pgtable_preallocated: bool,
+    vmalloc_pgtable_dynamic_allocator_ready: bool,
     modules_path_trimmed: bool,
     memory_hotplug_path_trimmed: bool,
 }
@@ -2890,7 +2894,10 @@ impl PageTableCaches {
             lifecycle: Lifecycle::new(State::Base),
             lock_cache: PageTableLockCache::new(),
             vmalloc_install_range: PageTableInstallRange::empty(),
+            dynamic_vmalloc_pgtable_pages: [empty_page_ref(); MAX_DYNAMIC_VMALLOC_PGTABLES],
+            dynamic_vmalloc_pgtable_count: 0,
             vmalloc_pgtable_preallocated: false,
+            vmalloc_pgtable_dynamic_allocator_ready: false,
             modules_path_trimmed: false,
             memory_hotplug_path_trimmed: false,
         }
@@ -2908,6 +2915,15 @@ impl PageTableCaches {
         self.vmalloc_pgtable_preallocated
     }
 
+    pub const fn vmalloc_pgtable_dynamic_allocator_ready(&self) -> bool {
+        self.vmalloc_pgtable_dynamic_allocator_ready
+    }
+
+    #[cfg(checkpoint_handler_vmalloc_mapping)]
+    pub const fn dynamic_vmalloc_pgtable_count(&self) -> usize {
+        self.dynamic_vmalloc_pgtable_count
+    }
+
     pub const fn vmalloc_install_range(&self) -> PageTableInstallRange {
         self.vmalloc_install_range
     }
@@ -2915,12 +2931,19 @@ impl PageTableCaches {
     pub fn setup(
         &mut self,
         slub_allocator: &SlubAllocator,
+        page_allocator: &PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
         vm: &Vm,
         static_objects: &StaticObjects,
         kernel_image: &KernelImage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || slub_allocator.state() != State::Ready
+            || page_allocator.state() != State::Ready
+            || page_metadata_map.state() != State::Ready
+            || config.state() != State::Online
+            || config.page_size() != VMALLOC_RUNTIME_PAGE_SIZE
             || vm.state() != State::Online
             || !vm.entry_successor_ready()
         {
@@ -2935,6 +2958,7 @@ impl PageTableCaches {
         self.lock_cache.setup(slub_allocator)?;
         self.vmalloc_install_range = vmalloc_install_range;
         self.vmalloc_pgtable_preallocated = true;
+        self.vmalloc_pgtable_dynamic_allocator_ready = true;
         self.modules_path_trimmed = true;
         self.memory_hotplug_path_trimmed = true;
 
@@ -2953,6 +2977,47 @@ impl PageTableCaches {
             State::Base,
             State::Ready,
         )
+    }
+
+    pub fn ensure_vmalloc_l0_windows(
+        &mut self,
+        target_count: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
+    ) -> Option<PageTableInstallRange> {
+        if self.lifecycle.state() != State::Ready
+            || !self.vmalloc_pgtable_dynamic_allocator_ready
+            || target_count == 0
+            || target_count > self.vmalloc_install_range.max_l0_table_count()
+            || config.page_size() == 0
+            || !config.page_size().is_power_of_two()
+        {
+            return None;
+        }
+
+        while self.vmalloc_install_range.l0_table_count() < target_count {
+            if self.dynamic_vmalloc_pgtable_count >= MAX_DYNAMIC_VMALLOC_PGTABLES {
+                return None;
+            }
+            let page = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)?;
+            let phys = page_metadata_map.page_to_phys(page)?.value();
+            let linear = config.phys_to_linear(phys)?;
+            unsafe {
+                core::ptr::write_bytes(linear as *mut u8, 0, config.page_size());
+            }
+            if !self
+                .vmalloc_install_range
+                .push_l0_table(linear, phys, config.page_size())
+            {
+                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+                return None;
+            }
+            self.dynamic_vmalloc_pgtable_pages[self.dynamic_vmalloc_pgtable_count] = page;
+            self.dynamic_vmalloc_pgtable_count += 1;
+        }
+
+        Some(self.vmalloc_install_range)
     }
 }
 
@@ -3255,6 +3320,7 @@ pub struct VmallocAllocator {
     runtime_mapping_window_count: usize,
     multi_window_mapping_supported: bool,
     preallocated_mapping_window_bound: bool,
+    dynamic_l0_window_allocation_supported: bool,
     duplicate_area_mapping_rejected: bool,
     next_vaddr: usize,
     area_count: usize,
@@ -3287,6 +3353,7 @@ impl VmallocAllocator {
             runtime_mapping_window_count: 0,
             multi_window_mapping_supported: false,
             preallocated_mapping_window_bound: false,
+            dynamic_l0_window_allocation_supported: false,
             duplicate_area_mapping_rejected: false,
             next_vaddr: 0,
             area_count: 0,
@@ -3359,6 +3426,15 @@ impl VmallocAllocator {
             && self.runtime_mapping_window_count != 0
     }
 
+    pub fn refresh_runtime_mapping_window(&mut self, page_table_caches: &PageTableCaches) {
+        self.page_table_install_range = page_table_caches.vmalloc_install_range();
+        self.runtime_page_table_mapping_ready = self.page_table_install_range.ready();
+        self.runtime_mapping_window_start = self.page_table_install_range.window_start();
+        self.runtime_mapping_window_end = self.page_table_install_range.window_end();
+        self.runtime_mapping_window_count = self.page_table_install_range.l0_table_count();
+        self.multi_window_mapping_supported = self.runtime_mapping_window_count > 1;
+    }
+
     #[cfg(checkpoint_handler_vmalloc_mapping)]
     pub const fn runtime_mapping_window_start(&self) -> usize {
         self.runtime_mapping_window_start
@@ -3380,6 +3456,10 @@ impl VmallocAllocator {
 
     pub const fn preallocated_mapping_window_bound(&self) -> bool {
         self.preallocated_mapping_window_bound
+    }
+
+    pub const fn dynamic_l0_window_allocation_supported(&self) -> bool {
+        self.dynamic_l0_window_allocation_supported
     }
 
     pub const fn duplicate_area_mapping_rejected(&self) -> bool {
@@ -3434,6 +3514,8 @@ impl VmallocAllocator {
         self.runtime_mapping_window_count = self.page_table_install_range.l0_table_count();
         self.multi_window_mapping_supported = self.runtime_mapping_window_count > 1;
         self.preallocated_mapping_window_bound = true;
+        self.dynamic_l0_window_allocation_supported =
+            page_table_caches.vmalloc_pgtable_dynamic_allocator_ready();
         self.duplicate_area_mapping_rejected = true;
         self.next_vaddr = self.address_space.start();
         self.reclaim_hook_ready = true;
@@ -3472,6 +3554,10 @@ impl VmallocAllocator {
 
     pub fn map_page_range(
         &mut self,
+        page_table_caches: &mut PageTableCaches,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+        config: &Config,
         area: VmapArea,
         phys_base: usize,
         size: usize,
@@ -3486,12 +3572,25 @@ impl VmallocAllocator {
             || !self.area_known(area)
             || size != area.size()
             || self.area_has_installed_mapping(area)
-            || !self.area_within_runtime_mapping_window(area)
             || !phys_base.is_multiple_of(self.page_size())
             || !area.virt_base().is_multiple_of(self.page_size())
             || !size.is_multiple_of(self.page_size())
         {
             return None;
+        }
+
+        if !self.area_within_runtime_mapping_window(area) {
+            let target_count = self.required_runtime_window_count(area)?;
+            self.page_table_install_range = page_table_caches.ensure_vmalloc_l0_windows(
+                target_count,
+                page_allocator,
+                page_metadata_map,
+                config,
+            )?;
+            self.refresh_runtime_mapping_window(page_table_caches);
+            if !self.area_within_runtime_mapping_window(area) {
+                return None;
+            }
         }
 
         if !map_page_range_runtime(
@@ -3581,6 +3680,24 @@ impl VmallocAllocator {
         self.runtime_mapping_window_ready()
             && area.virt_base() >= self.runtime_mapping_window_start
             && area.end() <= self.runtime_mapping_window_end
+    }
+
+    fn required_runtime_window_count(&self, area: VmapArea) -> Option<usize> {
+        if area.virt_base() < self.runtime_mapping_window_start {
+            return None;
+        }
+        let window_size = self.page_table_install_range.l0_window_size();
+        if window_size == 0 {
+            return None;
+        }
+        let end = area.end();
+        if end <= self.runtime_mapping_window_start {
+            return None;
+        }
+        let covered = end.checked_sub(self.runtime_mapping_window_start)?;
+        covered
+            .checked_add(window_size - 1)
+            .map(|value| value / window_size)
     }
 
     #[allow(dead_code)]
