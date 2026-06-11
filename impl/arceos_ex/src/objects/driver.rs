@@ -72,7 +72,6 @@ impl DeviceDriver {
 pub struct PlatformDriver {
     driver: DeviceDriver,
     probe: PlatformProbe,
-    mock_ns16550a_placeholder: bool,
 }
 
 impl PlatformDriver {
@@ -80,12 +79,10 @@ impl PlatformDriver {
         name: &'static str,
         of_match_table: OfMatchTable,
         probe: PlatformProbe,
-        mock_ns16550a_placeholder: bool,
     ) -> Self {
         Self {
             driver: DeviceDriver::new(name, of_match_table),
             probe,
-            mock_ns16550a_placeholder,
         }
     }
 
@@ -95,10 +92,6 @@ impl PlatformDriver {
 
     pub fn probe(&self, device_tree: &DeviceTree, device: DeviceRef) -> ProbeResult {
         (self.probe)(device_tree, device)
-    }
-
-    pub const fn is_mock_ns16550a_placeholder(&self) -> bool {
-        self.mock_ns16550a_placeholder
     }
 }
 
@@ -125,30 +118,14 @@ impl PartialEq for DeviceDriverRef {
 
 impl Eq for DeviceDriverRef {}
 
-const MOCK_NS16550A_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"ns16550a")];
-
 pub static MOCK_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
     "mock_platform_driver",
     OfMatchTable::empty(),
     mock_deferred_probe,
-    false,
-);
-
-pub static MOCK_NS16550A_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
-    "mock_ns16550a_platform_driver",
-    OfMatchTable::new(&MOCK_NS16550A_OF_MATCH),
-    mock_ns16550a_probe,
-    true,
 );
 
 pub const MOCK_PLATFORM_DRIVER_REF: DeviceDriverRef = DeviceDriverRef::new(&MOCK_PLATFORM_DRIVER);
-pub const MOCK_NS16550A_PLATFORM_DRIVER_REF: DeviceDriverRef =
-    DeviceDriverRef::new(&MOCK_NS16550A_PLATFORM_DRIVER);
 
 fn mock_deferred_probe(_device_tree: &DeviceTree, _device: DeviceRef) -> ProbeResult {
     ProbeResult::Deferred
-}
-
-fn mock_ns16550a_probe(_device_tree: &DeviceTree, _device: DeviceRef) -> ProbeResult {
-    ProbeResult::Bound
 }

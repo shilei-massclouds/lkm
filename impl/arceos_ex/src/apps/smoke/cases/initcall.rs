@@ -56,12 +56,12 @@ pub fn run() -> SmokeResult {
         || platform_bus.platform_device_count() != platform_bus.of_platform_candidate_count()
         || platform_bus.klist_device_count() != platform_bus.of_platform_candidate_count()
         || !check_platform_device_ref_chain(platform_bus, &ctx.device_tree)
-        || !platform_bus.mock_ns16550a_driver_registered()
-        || !platform_bus.mock_ns16550a_match_table_ready()
-        || !platform_bus.mock_ns16550a_device_matched()
-        || !platform_bus.mock_ns16550a_probe_called()
-        || !platform_bus.mock_ns16550a_probe_return_zero()
-        || !check_mock_ns16550a_bound_device(platform_bus, &ctx.device_tree)
+        || !platform_bus.ns16550a_driver_registered()
+        || !platform_bus.ns16550a_match_table_ready()
+        || !platform_bus.ns16550a_device_matched()
+        || !platform_bus.ns16550a_probe_called()
+        || !platform_bus.ns16550a_probe_return_zero()
+        || !check_ns16550a_bound_device(platform_bus, &ctx.device_tree)
         || ctx.driver_core_deferred.state() != State::Ready
         || !ctx.driver_core_deferred.post_platform_deferred()
         || !ctx.driver_core_deferred.entry_position_preserved()
@@ -201,7 +201,7 @@ fn check_static_section_entries(table: &InitcallTable) -> bool {
     ];
     let mut expected_index = 0usize;
     let mut entry_index = 0usize;
-    let mut mock_ns16550a_seen = false;
+    let mut ns16550a_seen = false;
 
     while entry_index < table.entry_count() {
         let Some(entry) = table.entry(entry_index) else {
@@ -217,24 +217,24 @@ fn check_static_section_entries(table: &InitcallTable) -> bool {
             expected_index += 1;
         }
         if entry.level() == InitcallLevelName::Device
-            && entry.name() == "mock_ns16550a_platform_driver_init"
+            && entry.name() == "ns16550a_platform_driver_init"
             && !entry.skipped()
             && entry.return_code() == 0
             && entry.run_context_checked()
         {
-            mock_ns16550a_seen = true;
+            ns16550a_seen = true;
         }
         entry_index += 1;
     }
 
-    expected_index == expected.len() && mock_ns16550a_seen
+    expected_index == expected.len() && ns16550a_seen
 }
 
-fn check_mock_ns16550a_bound_device(
+fn check_ns16550a_bound_device(
     platform_bus: &crate::objects::initcall::PlatformBus,
     device_tree: &crate::objects::device_tree::DeviceTree,
 ) -> bool {
-    let Some(device_ref) = platform_bus.mock_ns16550a_bound_device() else {
+    let Some(device_ref) = platform_bus.ns16550a_bound_device() else {
         return false;
     };
     let Some(platform_device) = platform_bus.platform_device(device_ref) else {

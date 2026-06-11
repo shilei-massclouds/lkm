@@ -154,11 +154,14 @@ predicate arceos_ex_must_device_driver_ref_reference_driver_descriptor_not_enum_
 predicate arceos_ex_must_device_driver_storage_keep_driver_refs_stable() -> bool;
 predicate arceos_ex_must_platform_driver_storage_use_static_or_pinned_owner() -> bool;
 predicate arceos_ex_must_platform_bus_match_use_driver_of_match_table_and_device_node() -> bool;
-predicate arceos_ex_must_mock_ns16550a_probe_avoid_platform_bus_hardcoded_compatible_branch() -> bool;
+predicate arceos_ex_must_ns16550a_driver_spec_live_in_common_file() -> bool;
+predicate arceos_ex_must_ns16550a_driver_impl_live_in_independent_module() -> bool;
+predicate arceos_ex_must_ns16550a_initcall_action_call_platform_driver_register() -> bool;
+predicate arceos_ex_must_ns16550a_probe_avoid_platform_bus_hardcoded_compatible_branch() -> bool;
 predicate arceos_ex_must_platform_bus_probe_driver_scan_existing_devices() -> bool;
 predicate arceos_ex_must_platform_bus_probe_device_scan_registered_drivers() -> bool;
-predicate arceos_ex_must_mock_ns16550a_driver_match_of_compatible_from_device_node() -> bool;
-predicate arceos_ex_must_mock_ns16550a_driver_smoke_cover_probe_and_bind() -> bool;
+predicate arceos_ex_must_ns16550a_driver_match_of_compatible_from_device_node() -> bool;
+predicate arceos_ex_must_ns16550a_driver_smoke_cover_probe_and_bind() -> bool;
 predicate arceos_ex_must_device_type_model_linux_struct_device_not_device_type_descriptor() -> bool;
 predicate arceos_ex_must_platform_device_embed_device_and_support_container_lookup() -> bool;
 predicate arceos_ex_must_raw_intrusive_bus_list_not_own_device_lifetime() -> bool;
@@ -1583,15 +1586,21 @@ type ArceosExInitcallCodingMust {
         /*
          * Platform driver registration and probe:
          *
-         * The first platform-driver closure must use a Linux-like
-         * device_initcall!() static entry to register the mock ns16550a
-         * platform driver after OF population has created platform devices.
+         * The first concrete platform-driver closure must be the real
+         * ns16550a-compatible OF serial platform driver, modeled in
+         * spec/model/common/ns16550a_driver.spec and implemented in an
+         * independent Rust module. Its Linux-like device_initcall!() static
+         * entry represents the initcall action. That action must call
+         * platform_driver_register() after OF population has created platform
+         * devices; platform_driver_register() then reaches BusType.AddDriver,
+         * records a DeviceDriverRef in PlatformBus.klist_drivers, and drives
+         * ProbeDriver when autoprobe is active. ProbeDevice remains the
+         * symmetric path for devices added after drivers.
+         *
          * PlatformBus.klist_drivers stores DeviceDriverRef membership entries.
          * It may be backed by Vec<DeviceDriverRef> in the current target,
          * mirroring the earlier klist_devices compromise. The Vec owns only
-         * copyable/stable refs, not driver objects. ProbeDriver scans already
-         * published devices; ProbeDevice remains the symmetric path for
-         * devices added after drivers.
+         * copyable/stable refs, not driver objects.
          *
          * DeviceDriverType.of_match_table is a static descriptor field, not a
          * runtime setter. The concrete target must represent each registered
@@ -1607,25 +1616,28 @@ type ArceosExInitcallCodingMust {
          *
          * PlatformBus.match() must be the common matching boundary: it reads
          * driver.of_match_table and resolves device.dev.of_node through the
-         * persistent DeviceTree, then compares compatible strings. Mock
-         * ns16550a may provide a static descriptor and probe function, but the
-         * platform bus implementation must not hard-code an ns16550a branch
-         * as the only matching path.
+         * persistent DeviceTree, then compares compatible strings. The
+         * ns16550a driver may provide a static descriptor and probe function,
+         * but the platform bus implementation must not hard-code an ns16550a
+         * compatible branch as the only matching path.
          */
         arceos_ex_must_device_driver_ref_set_map_to_klist_like_storage();
         arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs();
         arceos_ex_must_platform_driver_register_lower_to_device_initcall_static_entry();
+        arceos_ex_must_ns16550a_driver_spec_live_in_common_file();
+        arceos_ex_must_ns16550a_driver_impl_live_in_independent_module();
+        arceos_ex_must_ns16550a_initcall_action_call_platform_driver_register();
         arceos_ex_must_device_driver_descriptor_carry_name_bus_of_match_and_probe();
         arceos_ex_must_of_match_table_lower_to_static_compatible_array();
         arceos_ex_must_device_driver_ref_reference_driver_descriptor_not_enum_special_case();
         arceos_ex_must_device_driver_storage_keep_driver_refs_stable();
         arceos_ex_must_platform_driver_storage_use_static_or_pinned_owner();
         arceos_ex_must_platform_bus_match_use_driver_of_match_table_and_device_node();
-        arceos_ex_must_mock_ns16550a_probe_avoid_platform_bus_hardcoded_compatible_branch();
+        arceos_ex_must_ns16550a_probe_avoid_platform_bus_hardcoded_compatible_branch();
         arceos_ex_must_platform_bus_probe_driver_scan_existing_devices();
         arceos_ex_must_platform_bus_probe_device_scan_registered_drivers();
-        arceos_ex_must_mock_ns16550a_driver_match_of_compatible_from_device_node();
-        arceos_ex_must_mock_ns16550a_driver_smoke_cover_probe_and_bind();
+        arceos_ex_must_ns16550a_driver_match_of_compatible_from_device_node();
+        arceos_ex_must_ns16550a_driver_smoke_cover_probe_and_bind();
     }
 }
 

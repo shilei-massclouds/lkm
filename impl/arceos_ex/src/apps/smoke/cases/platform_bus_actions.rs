@@ -5,10 +5,8 @@ use crate::{
     },
     context::context_ref,
     objects::{
-        device::DeviceRef,
-        driver::{MOCK_NS16550A_PLATFORM_DRIVER_REF, MOCK_PLATFORM_DRIVER_REF},
-        initcall::PlatformBus,
-        state::State,
+        device::DeviceRef, driver::MOCK_PLATFORM_DRIVER_REF, initcall::PlatformBus,
+        ns16550a::NS16550A_PLATFORM_DRIVER_REF, state::State,
     },
 };
 
@@ -222,9 +220,7 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
         let ctx = context_ref();
         assertions.assert_ok(
             "add ns16550a driver",
-            self.fixture
-                .bus
-                .add_driver(MOCK_NS16550A_PLATFORM_DRIVER_REF),
+            self.fixture.bus.add_driver(NS16550A_PLATFORM_DRIVER_REF),
         );
 
         let Some(serial) = find_ns16550a_node(&ctx.device_tree) else {
@@ -250,19 +246,19 @@ impl SmokeScenario for Ns16550aProbeDeviceScenario {
         );
         assertions.assert(
             "ns16550a device matched",
-            self.fixture.bus.mock_ns16550a_device_matched(),
+            self.fixture.bus.ns16550a_device_matched(),
         );
         assertions.assert(
             "ns16550a probe called",
-            self.fixture.bus.mock_ns16550a_probe_called(),
+            self.fixture.bus.ns16550a_probe_called(),
         );
         assertions.assert(
             "ns16550a probe return zero",
-            self.fixture.bus.mock_ns16550a_probe_return_zero(),
+            self.fixture.bus.ns16550a_probe_return_zero(),
         );
         assertions.assert(
             "ns16550a device bound",
-            self.fixture.bus.mock_ns16550a_bound_device() == Some(device_ref),
+            self.fixture.bus.ns16550a_bound_device() == Some(device_ref),
         );
     }
 

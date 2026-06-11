@@ -82,12 +82,14 @@ predicate platform_bus_platform_device_owner_ready<T, S>(bus: T, platform_device
 predicate platform_bus_devices_added_from_platform_device_set<T, S>(bus: T, platform_devices: S) -> bool;
 predicate of_platform_default_populate_device_node_ids_bound<T>(bus: T) -> bool;
 predicate of_platform_default_populate_platform_devices_owned<T, S>(bus: T, platform_devices: S) -> bool;
-predicate platform_bus_mock_ns16550a_driver_registered<T>(bus: T) -> bool;
-predicate platform_bus_mock_ns16550a_driver_match_table_ready<T>(bus: T) -> bool;
-predicate platform_bus_mock_ns16550a_driver_probe_called<T>(bus: T) -> bool;
-predicate platform_bus_mock_ns16550a_driver_probe_return_zero<T>(bus: T) -> bool;
-predicate platform_bus_mock_ns16550a_device_matched<T>(bus: T) -> bool;
-predicate platform_bus_mock_ns16550a_device_bound<T>(bus: T) -> bool;
+predicate platform_driver_register_called<T, D>(bus: T, driver: D) -> bool;
+predicate platform_driver_register_return_zero<T, D>(bus: T, driver: D) -> bool;
+predicate platform_bus_ns16550a_driver_registered<T>(bus: T) -> bool;
+predicate platform_bus_ns16550a_driver_match_table_ready<T>(bus: T) -> bool;
+predicate platform_bus_ns16550a_driver_probe_called<T>(bus: T) -> bool;
+predicate platform_bus_ns16550a_driver_probe_return_zero<T>(bus: T) -> bool;
+predicate platform_bus_ns16550a_device_matched<T>(bus: T) -> bool;
+predicate platform_bus_ns16550a_device_bound<T>(bus: T) -> bool;
 
 /*
  * BusSubsysPrivate models Linux struct subsys_private as created by
@@ -313,7 +315,13 @@ type PlatformBusType: BusType {
             }
         }
 
-        Action::RegisterMockNs16550aPlatformDriver {
+        /*
+         * PlatformDriverRegister corresponds to Linux
+         * platform_driver_register(): the call enters driver_register() /
+         * bus_add_driver(), records the DeviceDriverRef in klist_drivers, and
+         * then performs the normal driver-side attach scan when autoprobe is on.
+         */
+        Action::PlatformDriverRegister(driver: DeviceDriverRef) {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
@@ -324,27 +332,57 @@ type PlatformBusType: BusType {
                 bus_type_devices_klist_nonempty(self);
                 device_ref_set_nonempty(self.subsys.klist_devices);
                 platform_device_set_nonempty(self.platform_devices);
+                device_driver_ref_ready(driver);
             }
             drives {
-                self.Action::AddDriver(DeviceDriverRef::MockNs16550aPlatformDriver);
-                self.Action::ProbeDriver(DeviceDriverRef::MockNs16550aPlatformDriver);
+                self.Action::AddDriver(driver);
+                self.Action::ProbeDriver(driver);
             }
             ensures {
-                initcall_entry_invoked(InitcallEntry::MockNs16550aPlatformDriver);
-                initcall_entry_return_recorded(InitcallEntry::MockNs16550aPlatformDriver);
-                initcall_entry_run_context_checked(InitcallEntry::MockNs16550aPlatformDriver);
-                platform_bus_mock_ns16550a_driver_registered(self);
-                platform_bus_mock_ns16550a_driver_match_table_ready(self);
-                platform_bus_mock_ns16550a_device_matched(self);
-                platform_bus_mock_ns16550a_driver_probe_called(self);
-                platform_bus_mock_ns16550a_driver_probe_return_zero(self);
-                platform_bus_mock_ns16550a_device_bound(self);
-                bus_type_driver_added(self, DeviceDriverRef::MockNs16550aPlatformDriver);
+                platform_driver_register_called(self, driver);
+                platform_driver_register_return_zero(self, driver);
+                bus_type_driver_added(self, driver);
                 bus_type_drivers_klist_nonempty(self);
-                bus_subsys_klist_drivers_contains(self.subsys, DeviceDriverRef::MockNs16550aPlatformDriver);
-                bus_type_probe_driver_scans_devices(self, DeviceDriverRef::MockNs16550aPlatformDriver);
-                bus_type_probe_driver_match_attempted(self, DeviceDriverRef::MockNs16550aPlatformDriver);
-                bus_type_driver_probe_bound_device(self, DeviceDriverRef::MockNs16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                bus_subsys_klist_drivers_contains(self.subsys, driver);
+                bus_type_probe_driver_scans_devices(self, driver);
+                bus_type_probe_driver_match_attempted(self, driver);
+            }
+        }
+
+        Action::RegisterNs16550aPlatformDriver {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                DeviceTree.state == State::Ready;
+                InitcallTable.state == State::Prepared;
+                bus_type_subsys_private_online(self, self.subsys);
+                bus_subsys_klist_drivers_ready(self.subsys);
+                bus_type_devices_klist_nonempty(self);
+                device_ref_set_nonempty(self.subsys.klist_devices);
+                platform_device_set_nonempty(self.platform_devices);
+                device_driver_ref_ready(DeviceDriverRef::Ns16550aPlatformDriver);
+            }
+            drives {
+                self.Action::PlatformDriverRegister(DeviceDriverRef::Ns16550aPlatformDriver);
+            }
+            ensures {
+                initcall_entry_invoked(InitcallEntry::Ns16550aPlatformDriver);
+                initcall_entry_return_recorded(InitcallEntry::Ns16550aPlatformDriver);
+                initcall_entry_run_context_checked(InitcallEntry::Ns16550aPlatformDriver);
+                platform_driver_register_called(self, DeviceDriverRef::Ns16550aPlatformDriver);
+                platform_driver_register_return_zero(self, DeviceDriverRef::Ns16550aPlatformDriver);
+                platform_bus_ns16550a_driver_registered(self);
+                platform_bus_ns16550a_driver_match_table_ready(self);
+                platform_bus_ns16550a_device_matched(self);
+                platform_bus_ns16550a_driver_probe_called(self);
+                platform_bus_ns16550a_driver_probe_return_zero(self);
+                platform_bus_ns16550a_device_bound(self);
+                bus_type_driver_added(self, DeviceDriverRef::Ns16550aPlatformDriver);
+                bus_type_drivers_klist_nonempty(self);
+                bus_subsys_klist_drivers_contains(self.subsys, DeviceDriverRef::Ns16550aPlatformDriver);
+                bus_type_probe_driver_scans_devices(self, DeviceDriverRef::Ns16550aPlatformDriver);
+                bus_type_probe_driver_match_attempted(self, DeviceDriverRef::Ns16550aPlatformDriver);
+                bus_type_driver_probe_bound_device(self, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             }
         }
     }

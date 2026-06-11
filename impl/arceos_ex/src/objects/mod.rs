@@ -40,6 +40,7 @@ pub mod lds;
 pub mod maple_tree;
 pub mod memblock;
 pub mod mm_core;
+pub mod ns16550a;
 pub mod page_table;
 pub mod params;
 pub mod payload_param;

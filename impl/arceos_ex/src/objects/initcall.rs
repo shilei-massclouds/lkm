@@ -1,9 +1,10 @@
 use super::{
     device::{DeviceRef, PlatformDevice, PlatformDeviceStorage},
     device_tree::{DeviceNodeRef, DeviceTree},
-    driver::{DeviceDriverRef, ProbeResult, MOCK_NS16550A_PLATFORM_DRIVER_REF},
+    driver::{DeviceDriverRef, ProbeResult},
     irq_time::IrqDispatchTree,
     mm_core::PageAllocator,
+    ns16550a::{is_ns16550a_platform_driver, ns16550a_platform_driver_init},
     runtime_core::RuntimeCoreBoundary,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_objects::StaticObjects,
@@ -180,7 +181,7 @@ arch_initcall_sync!(of_platform_default_populate_init);
 subsys_initcall!(subsys_smoke_initcall);
 fs_initcall!(fs_smoke_initcall);
 device_initcall!(device_smoke_initcall);
-device_initcall!(mock_ns16550a_platform_driver_init);
+device_initcall!(ns16550a_platform_driver_init);
 late_initcall!(late_smoke_initcall);
 
 fn pure_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
@@ -223,12 +224,6 @@ fn fs_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
 fn device_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
     crate::objects::printk::write_str("initcall: device_smoke_initcall\n");
     InitcallReturn::Ok
-}
-
-fn mock_ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
-    let device_tree = &ctx.device_tree;
-    ctx.platform_bus
-        .register_mock_ns16550a_platform_driver(device_tree)
 }
 
 fn late_smoke_initcall(_ctx: ContextRef<'_>) -> InitcallReturn {
@@ -632,12 +627,12 @@ pub struct PlatformBus {
     probe_device_deferred_count: usize,
     probe_driver_scanned_devices: bool,
     probe_device_scanned_drivers: bool,
-    mock_ns16550a_driver_registered: bool,
-    mock_ns16550a_match_table_ready: bool,
-    mock_ns16550a_device_matched: bool,
-    mock_ns16550a_probe_called: bool,
-    mock_ns16550a_probe_return_zero: bool,
-    mock_ns16550a_bound_device: Option<DeviceRef>,
+    ns16550a_driver_registered: bool,
+    ns16550a_match_table_ready: bool,
+    ns16550a_device_matched: bool,
+    ns16550a_probe_called: bool,
+    ns16550a_probe_return_zero: bool,
+    ns16550a_bound_device: Option<DeviceRef>,
     of_platform_source_tree_ready: bool,
     of_platform_root_children_scanned: bool,
     of_platform_strict_compatible_required: bool,
@@ -669,12 +664,12 @@ impl PlatformBus {
             probe_device_deferred_count: 0,
             probe_driver_scanned_devices: false,
             probe_device_scanned_drivers: false,
-            mock_ns16550a_driver_registered: false,
-            mock_ns16550a_match_table_ready: false,
-            mock_ns16550a_device_matched: false,
-            mock_ns16550a_probe_called: false,
-            mock_ns16550a_probe_return_zero: false,
-            mock_ns16550a_bound_device: None,
+            ns16550a_driver_registered: false,
+            ns16550a_match_table_ready: false,
+            ns16550a_device_matched: false,
+            ns16550a_probe_called: false,
+            ns16550a_probe_return_zero: false,
+            ns16550a_bound_device: None,
             of_platform_source_tree_ready: false,
             of_platform_root_children_scanned: false,
             of_platform_strict_compatible_required: false,
@@ -758,28 +753,28 @@ impl PlatformBus {
         self.probe_device_scanned_drivers
     }
 
-    pub const fn mock_ns16550a_driver_registered(&self) -> bool {
-        self.mock_ns16550a_driver_registered
+    pub const fn ns16550a_driver_registered(&self) -> bool {
+        self.ns16550a_driver_registered
     }
 
-    pub const fn mock_ns16550a_match_table_ready(&self) -> bool {
-        self.mock_ns16550a_match_table_ready
+    pub const fn ns16550a_match_table_ready(&self) -> bool {
+        self.ns16550a_match_table_ready
     }
 
-    pub const fn mock_ns16550a_device_matched(&self) -> bool {
-        self.mock_ns16550a_device_matched
+    pub const fn ns16550a_device_matched(&self) -> bool {
+        self.ns16550a_device_matched
     }
 
-    pub const fn mock_ns16550a_probe_called(&self) -> bool {
-        self.mock_ns16550a_probe_called
+    pub const fn ns16550a_probe_called(&self) -> bool {
+        self.ns16550a_probe_called
     }
 
-    pub const fn mock_ns16550a_probe_return_zero(&self) -> bool {
-        self.mock_ns16550a_probe_return_zero
+    pub const fn ns16550a_probe_return_zero(&self) -> bool {
+        self.ns16550a_probe_return_zero
     }
 
-    pub const fn mock_ns16550a_bound_device(&self) -> Option<DeviceRef> {
-        self.mock_ns16550a_bound_device
+    pub const fn ns16550a_bound_device(&self) -> Option<DeviceRef> {
+        self.ns16550a_bound_device
     }
 
     pub const fn of_platform_source_tree_ready(&self) -> bool {
@@ -974,9 +969,9 @@ impl PlatformBus {
         }
 
         self.driver_refs.push(driver);
-        if driver.driver().is_mock_ns16550a_placeholder() {
-            self.mock_ns16550a_driver_registered = true;
-            self.mock_ns16550a_match_table_ready = true;
+        if is_ns16550a_platform_driver(driver) {
+            self.ns16550a_driver_registered = true;
+            self.ns16550a_match_table_ready = true;
         }
         Ok(())
     }
@@ -1049,18 +1044,15 @@ impl PlatformBus {
         Ok(())
     }
 
-    pub fn register_mock_ns16550a_platform_driver(
+    pub fn platform_driver_register(
         &mut self,
+        driver: DeviceDriverRef,
         device_tree: &DeviceTree,
     ) -> InitcallReturn {
-        crate::objects::printk::write_str("initcall: mock_ns16550a_platform_driver_init\n");
-        if self.add_driver(MOCK_NS16550A_PLATFORM_DRIVER_REF).is_err() {
+        if self.add_driver(driver).is_err() {
             return InitcallReturn::Error(-1);
         }
-        if self
-            .probe_driver(MOCK_NS16550A_PLATFORM_DRIVER_REF, device_tree)
-            .is_err()
-        {
+        if self.probe_driver(driver, device_tree).is_err() {
             return InitcallReturn::Error(-1);
         }
         InitcallReturn::Ok
@@ -1110,19 +1102,19 @@ impl PlatformBus {
         device_tree: &DeviceTree,
     ) {
         let result = driver.driver().probe(device_tree, device_ref);
-        if driver.driver().is_mock_ns16550a_placeholder() {
-            self.mock_ns16550a_device_matched = true;
-            self.mock_ns16550a_probe_called = true;
-            self.mock_ns16550a_probe_return_zero = result == ProbeResult::Bound;
+        if is_ns16550a_platform_driver(driver) {
+            self.ns16550a_device_matched = true;
+            self.ns16550a_probe_called = true;
+            self.ns16550a_probe_return_zero = result == ProbeResult::Bound;
             if result == ProbeResult::Bound {
-                self.mock_ns16550a_bound_device = Some(device_ref);
+                self.ns16550a_bound_device = Some(device_ref);
             }
-            self.print_mock_ns16550a_probe(device_ref);
+            self.print_ns16550a_probe(device_ref);
         }
     }
 
-    fn print_mock_ns16550a_probe(&self, device_ref: DeviceRef) {
-        crate::objects::printk::write_str("platform_driver: mock ns16550a probed ");
+    fn print_ns16550a_probe(&self, device_ref: DeviceRef) {
+        crate::objects::printk::write_str("platform_driver: ns16550a probed ");
         let Some(platform_device) = self.platform_device(device_ref) else {
             crate::objects::printk::write_str("<missing>\n");
             return;
@@ -1808,12 +1800,12 @@ pub fn initcall_phase_ready(
         && platform_bus.of_platform_candidate_count() != 0
         && platform_bus.platform_device_count() == platform_bus.of_platform_candidate_count()
         && platform_bus.klist_device_count() == platform_bus.of_platform_candidate_count()
-        && platform_bus.mock_ns16550a_driver_registered()
-        && platform_bus.mock_ns16550a_match_table_ready()
-        && platform_bus.mock_ns16550a_device_matched()
-        && platform_bus.mock_ns16550a_probe_called()
-        && platform_bus.mock_ns16550a_probe_return_zero()
-        && platform_bus.mock_ns16550a_bound_device().is_some()
+        && platform_bus.ns16550a_driver_registered()
+        && platform_bus.ns16550a_match_table_ready()
+        && platform_bus.ns16550a_device_matched()
+        && platform_bus.ns16550a_probe_called()
+        && platform_bus.ns16550a_probe_return_zero()
+        && platform_bus.ns16550a_bound_device().is_some()
         && driver_core.state() == State::Ready
         && driver_core.post_platform_deferred()
         && driver_core.entry_position_preserved()

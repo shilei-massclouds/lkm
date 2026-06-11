@@ -77,6 +77,7 @@ enum RunQueueRuntimeState {
 include "device.spec";
 include "initcall.spec";
 include "bus_type.spec";
+include "ns16550a_driver.spec";
 include "allocator.spec";
 
 function addr_of<T>(value: T) -> AddrIdentity<T>;
