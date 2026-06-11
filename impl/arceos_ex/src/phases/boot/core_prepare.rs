@@ -181,5 +181,5 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.exception_stream.syscall_state() == State::Prepared
         && ctx.exception_stream.breakpoint_state() == State::Ready
         && ctx.exception_stream.unexpected_state() == State::Ready
-        && earlycon::is_online()
+        && (earlycon::is_online() || printk::console_handoff_complete())
 }

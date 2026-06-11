@@ -425,16 +425,26 @@ handoff 后 `printk::write_str()` 或等价输出入口必须经 `ConsoleRegistr
 output ready，只能记录 IRQ 输出路径 deferred。
 为避免 handoff 后重复输出，`ConsoleRegistry` 必须区分 printk 记录保存和 legacy boot-console drain cursor。
 注册 preferred serial8250 console 时，应先把 boot console pending records 按 boot console 路径 flush 并推进 cursor；
-serial8250 route 成功写出的记录必须标记为已交付，不得再被 `earlycon::drain_printk()` 经 SBI 重放。boot console
-offline 后，payload 或测试代码继续调用 `earlycon::drain_printk()` 不应作为正常 printk 输出路径；即使
-`keep_bootcon` 保留 boot console，本阶段 active printk route 仍是 serial8250，legacy earlycon drain 也不得重放
+serial8250 route 成功写出的记录必须标记为已交付，不得再被 `earlycon::drain_printk()` 经 SBI 重放。默认
+handoff 完成后，EarlyCon 后端必须进入 offline/disabled 状态；后续直接推进 earlycon event/action 或调用
+`earlycon::drain_printk()` 属于非法 backend 访问，必须触发 panic 或等价 contract violation，不能静默 no-op。
+EarlyCon 下线应输出 `EarlyCon.Offline` 或等价 trace，和 `Serial8250Console.Online`、`BootConsole.Offline`
+一起展示完整交接。
+即使 `keep_bootcon` 保留 boot console，本阶段 active printk route 仍是 serial8250，legacy earlycon drain 也不得重放
 handoff 后的正常 printk 记录。
+
+payload、hello app 和 app-level smoke 只能通过 `printk` 前端或等价公开输出 API 产生输出，不得 import 或直接调用
+`EarlyCon`、`BootConsole`、`Serial8250Console` 等 console backend，也不得为了收尾输出新增公开 `printk::flush()`
+这类刷新 API。flush/drain、record cursor 推进、panic/shutdown 前的必要输出处理都属于 printk/console 子系统内部策略。
+若需要直接验证 earlycon 或 console backend，只能放在 checkpoint KUnit 或等价的启动阶段单元测试中，并且测试挂点必须保证
+被测 backend 处于允许访问的生命周期阶段。
 
 smoke/KUnit 应覆盖：`stdout-path` 命中后发生 `Uart8250Port` 与 `Serial8250Console` 注册、非 stdout-path 设备不抢占
 console、dummy/non-match console 不改变 registry、默认策略下 boot console 注销、`keep_bootcon` 保留 boot console、
 handoff 后 printk route facts 符合预期、serial console 的 `membase` 来自 ioremap/vmalloc 映射而不是 direct map，
 serial8250 write 后端记录 polling、LSR/THR、membase、non-SBI、IRQ deferred 事实，以及 handoff 后正常 printk
-不会被 legacy earlycon/SBI drain 重放。
+不会被 legacy earlycon/SBI drain 重放。后续应把当前仍偏对象内部的 console registry 行为 smoke 逐步迁移到
+checkpoint KUnit/action-level 测试，app-level smoke 保留对公开 printk 输出和用户可见启动结果的验证。
 
 ## RootfsPhase 编码约束
 
@@ -565,7 +575,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 
 当前对象级实验不复用现有 ArceOS Unikernel 应用，不依赖 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust`。
 
-第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，输出 `Hello, world!` 后通过 SBI 关机。
+第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，只通过 printk 前端输出 `Hello, world!` 后通过 SBI 关机；它不得直接调用 early console 或 real console backend。
 
 所有 payload 的入口约定为 `run() -> !`。这表示控制流不返回启动编排链：Unikernel payload 可以进入服务循环或停机，未来宏内核 payload 可以加载首个用户态程序并完成用户态切换。若某个 payload 意外返回，应视为违反 `PayloadPhase.Enable` 的 no-return handoff 契约。
 

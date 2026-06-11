@@ -94,6 +94,7 @@ pub enum Checkpoint {
     EarlyConReady,
     #[allow(dead_code)]
     EarlyConOnline,
+    EarlyConOffline,
     Serial8250ConsoleOnline,
     BootConsoleOffline,
     CorePreparePhaseStarted,
@@ -446,6 +447,7 @@ impl Checkpoint {
             Self::EarlyConPrepared => "EarlyCon.Prepared",
             Self::EarlyConReady => "EarlyCon.Ready",
             Self::EarlyConOnline => "EarlyCon.Online",
+            Self::EarlyConOffline => "EarlyCon.Offline",
             Self::Serial8250ConsoleOnline => "Serial8250Console.Online",
             Self::BootConsoleOffline => "BootConsole.Offline",
             Self::CorePreparePhaseStarted => "CorePreparePhase.Started",

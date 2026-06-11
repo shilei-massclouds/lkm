@@ -185,5 +185,5 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.boot_cpu_local_interrupt.enabled()
         && csr::supervisor_interrupts_enabled()
         && printk::is_ready()
-        && earlycon::is_online()
+        && (earlycon::is_online() || printk::console_handoff_complete())
 }

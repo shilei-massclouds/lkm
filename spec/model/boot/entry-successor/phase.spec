@@ -712,6 +712,33 @@ object EarlyCon: ConsoleObject {
             earlycon_backend_online(EarlyCon);
             printk_buffer_flushed_to_earlycon(PrintkBuffer, EarlyCon);
         }
+
+        events {
+            /*
+             * Disable is driven by real console handoff. After this point
+             * earlycon is no longer a valid printk backend for payload code.
+             */
+            on Event::Disable -> State::Offline {
+                depends_on {
+                    ConsoleRegistry.state == State::Ready;
+                    console_registry_printk_route_real_console(ConsoleRegistry, Serial8250Console);
+                }
+
+                ensures {
+                    earlycon_backend_disabled_after_handoff(EarlyCon, ConsoleRegistry);
+                    earlycon_backend_access_panics_after_handoff(EarlyCon);
+                    earlycon_offline_trace_emitted(EarlyCon);
+                }
+            }
+        }
+    }
+
+    state State::Offline {
+        invariant {
+            earlycon_backend_disabled_after_handoff(EarlyCon, ConsoleRegistry);
+            earlycon_backend_access_panics_after_handoff(EarlyCon);
+            earlycon_offline_trace_emitted(EarlyCon);
+        }
     }
 }
 

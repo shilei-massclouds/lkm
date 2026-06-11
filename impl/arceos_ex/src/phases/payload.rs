@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicU8;
 
 use crate::{
     objects::{
-        earlycon, printk,
+        printk,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
@@ -57,5 +57,5 @@ fn payload_phase_dependencies_ready() -> bool {
         && crate::phases::boot::core_prepare::is_ready()
         && crate::phases::boot::mm_core_init::is_ready()
         && printk::is_ready()
-        && earlycon::is_online()
+        && (printk::boot_console_online() || printk::console_handoff_complete())
 }

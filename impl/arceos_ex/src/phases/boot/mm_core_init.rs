@@ -190,5 +190,5 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.mm_struct_cache.saved_auxv_usercopy_ready()
         && ctx.mm_struct_cache.vma_caches_deferred()
         && printk::is_ready()
-        && earlycon::is_online()
+        && (earlycon::is_online() || printk::console_handoff_complete())
 }

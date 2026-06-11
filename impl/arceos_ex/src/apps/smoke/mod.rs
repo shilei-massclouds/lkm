@@ -1,10 +1,7 @@
 pub mod cases;
 pub mod harness;
 
-use crate::{
-    arch::riscv64::sbi,
-    objects::{earlycon, printk},
-};
+use crate::{arch::riscv64::sbi, objects::printk};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum SmokeResult {
@@ -217,7 +214,6 @@ pub fn run() -> ! {
     printk::write_str(" total=");
     write_usize(total);
     printk::write_str("\n");
-    earlycon::drain_printk();
     sbi::system_shutdown()
 }
 

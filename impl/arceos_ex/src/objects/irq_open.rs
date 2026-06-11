@@ -103,7 +103,7 @@ impl Console {
     pub fn preset(&mut self, static_objects: &StaticObjects) -> EventResult {
         if self.lifecycle.state() != State::Base
             || !printk::is_ready()
-            || !earlycon::is_online()
+            || !(earlycon::is_online() || printk::console_handoff_complete())
             || static_objects.state() != State::Online
         {
             return failed_condition(

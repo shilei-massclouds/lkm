@@ -68,6 +68,24 @@ impl EarlyCon {
         }
         result
     }
+
+    pub fn disable_after_handoff(&mut self) -> EventResult {
+        match self.lifecycle.state() {
+            State::Online => self.lifecycle.transition(
+                LifecycleEvent::Disable,
+                State::Online,
+                State::Offline,
+                Checkpoint::EarlyConOffline,
+            ),
+            State::Offline => Ok(()),
+            state => failed_condition(
+                LifecycleEvent::Disable,
+                state,
+                State::Online,
+                State::Offline,
+            ),
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -91,10 +109,21 @@ pub fn enable() -> EventResult {
 }
 
 #[allow(dead_code)]
-pub fn drain_printk() {
-    if printk::earlycon_drain_allowed() {
-        printk::drain_to(sbi::putchar);
+pub fn disable_after_handoff() -> EventResult {
+    unsafe {
+        (&raw mut EARLY_CON)
+            .as_mut()
+            .unwrap()
+            .disable_after_handoff()
     }
+}
+
+#[allow(dead_code)]
+pub fn drain_printk() {
+    if !is_online() || !printk::earlycon_drain_allowed() {
+        panic!("earlycon drain after console handoff");
+    }
+    printk::drain_to(sbi::putchar);
 }
 
 pub fn is_online() -> bool {

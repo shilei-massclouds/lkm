@@ -99,7 +99,7 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.page_allocator.state() == State::Ready
         && ctx.per_cpu_storage.state() == State::Ready
         && printk::is_ready()
-        && earlycon::is_online()
+        && (earlycon::is_online() || printk::console_handoff_complete())
         && ctx.console.state() == State::Prepared
         && ctx.console.line_discipline_registry().state() == State::Prepared
         && ctx.console.line_discipline_registry().n_tty_registered()

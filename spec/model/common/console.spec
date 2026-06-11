@@ -16,6 +16,9 @@ predicate boot_console_kept_by_policy<T>(boot_console: T) -> bool;
 predicate boot_console_unregistered<T>(boot_console: T) -> bool;
 predicate boot_console_removed_from_registry<T, R>(boot_console: T, registry: R) -> bool;
 predicate boot_console_offline_trace_emitted<T>(boot_console: T) -> bool;
+predicate earlycon_backend_disabled_after_handoff<T, R>(earlycon: T, registry: R) -> bool;
+predicate earlycon_backend_access_panics_after_handoff<T>(earlycon: T) -> bool;
+predicate earlycon_offline_trace_emitted<T>(earlycon: T) -> bool;
 
 predicate console_candidate_non_stdout_path<T, D>(candidate: T, device_tree: D) -> bool;
 predicate console_candidate_not_platform_topology_mutating<T>(candidate: T) -> bool;
@@ -73,6 +76,7 @@ predicate console_handoff_triggered_by_register_console<T, R>(handoff: T, regist
 predicate console_handoff_boot_console_unregistered<T, B>(handoff: T, boot_console: B) -> bool;
 predicate console_handoff_boot_console_retained_by_keep_bootcon<T, B>(handoff: T, boot_console: B) -> bool;
 predicate console_handoff_printk_route_switched<T, R, S>(handoff: T, registry: R, serial_console: S) -> bool;
+predicate printk_frontend_only_for_payload_smoke<T, R>(payload: T, registry: R) -> bool;
 
 object NonStdoutConsoleCandidate: ConsoleObject {
     initial_state: State::Base;
@@ -470,6 +474,7 @@ object ConsoleHandoff: ConsoleObject {
 
                 drives {
                     BootConsole.Event::Disable;
+                    EarlyCon.Event::Disable;
                 }
 
                 ensures {
@@ -479,6 +484,10 @@ object ConsoleHandoff: ConsoleObject {
                     console_handoff_printk_route_switched(ConsoleHandoff, ConsoleRegistry, Serial8250Console);
                     serial8250_console_online_trace_emitted(Serial8250Console);
                     boot_console_offline_trace_emitted(BootConsole);
+                    earlycon_backend_disabled_after_handoff(EarlyCon, ConsoleRegistry);
+                    earlycon_backend_access_panics_after_handoff(EarlyCon);
+                    earlycon_offline_trace_emitted(EarlyCon);
+                    printk_frontend_only_for_payload_smoke(PayloadPhase, ConsoleRegistry);
                 }
             }
         }
@@ -496,6 +505,10 @@ object ConsoleHandoff: ConsoleObject {
             console_handoff_printk_route_switched(ConsoleHandoff, ConsoleRegistry, Serial8250Console);
             serial8250_console_online_trace_emitted(Serial8250Console);
             boot_console_offline_trace_emitted(BootConsole);
+            earlycon_backend_disabled_after_handoff(EarlyCon, ConsoleRegistry);
+            earlycon_backend_access_panics_after_handoff(EarlyCon);
+            earlycon_offline_trace_emitted(EarlyCon);
+            printk_frontend_only_for_payload_smoke(PayloadPhase, ConsoleRegistry);
         }
     }
 }

@@ -142,7 +142,7 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.rcu_core.tasks_rcu().enabled_flavor_count() != 0
         && ctx.rcu_core.tasks_rcu().gp_threads_deferred()
         && printk::is_ready()
-        && earlycon::is_online()
+        && (earlycon::is_online() || printk::console_handoff_complete())
         && !crate::arch::riscv64::csr::supervisor_interrupts_enabled()
 }
 

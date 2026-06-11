@@ -1,5 +1,6 @@
 use super::{
     boot_param::BootParam,
+    earlycon,
     memblock::MemBlock,
     ns16550a,
     per_cpu_storage::PerCpuStorage,
@@ -246,17 +247,21 @@ fn write_bytes(bytes: &[u8]) {
             .unwrap()
             .write_bytes(bytes);
     }
-    if route() == PrintkRoute::Serial8250 {
-        if ns16550a::write_console_bytes(bytes) {
-            unsafe {
-                (&raw mut PRINTK_BUFFER)
-                    .as_mut()
-                    .unwrap()
-                    .discard_delivered();
-                (&raw mut CONSOLE_REGISTRY)
-                    .as_mut()
-                    .unwrap()
-                    .serial8250_delivered_records_not_replayed = true;
+    match route() {
+        PrintkRoute::BufferOnly => {}
+        PrintkRoute::BootConsole => {}
+        PrintkRoute::Serial8250 => {
+            if ns16550a::write_console_bytes(bytes) {
+                unsafe {
+                    (&raw mut PRINTK_BUFFER)
+                        .as_mut()
+                        .unwrap()
+                        .discard_delivered();
+                    (&raw mut CONSOLE_REGISTRY)
+                        .as_mut()
+                        .unwrap()
+                        .serial8250_delivered_records_not_replayed = true;
+                }
             }
         }
     }
@@ -272,12 +277,18 @@ pub fn register_boot_console() {
 }
 
 pub fn register_serial8250_console(preferred_from_stdout: bool) -> bool {
-    unsafe {
+    let registered = unsafe {
         (&raw mut CONSOLE_REGISTRY)
             .as_mut()
             .unwrap()
             .register_serial8250_console(preferred_from_stdout)
+    };
+    if registered && console_handoff_complete() {
+        if earlycon::disable_after_handoff().is_err() {
+            panic!("earlycon disable failed during console handoff");
+        }
     }
+    registered
 }
 
 #[allow(dead_code)]
