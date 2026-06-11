@@ -21,10 +21,7 @@ object Ns16550aPlatformDriverStorage: DeviceDriverStorage {
                 ensures {
                     device_driver_storage_ready(Ns16550aPlatformDriverStorage);
                     device_driver_storage_pinned(Ns16550aPlatformDriverStorage);
-                    device_driver_storage_contains_ref(
-                        Ns16550aPlatformDriverStorage,
-                        DeviceDriverRef::Ns16550aPlatformDriver
-                    );
+                    device_driver_storage_contains_ref(Ns16550aPlatformDriverStorage, DeviceDriverRef::Ns16550aPlatformDriver);
                 }
             }
         }
@@ -34,10 +31,7 @@ object Ns16550aPlatformDriverStorage: DeviceDriverStorage {
         invariant {
             device_driver_storage_ready(Ns16550aPlatformDriverStorage);
             device_driver_storage_pinned(Ns16550aPlatformDriverStorage);
-            device_driver_storage_contains_ref(
-                Ns16550aPlatformDriverStorage,
-                DeviceDriverRef::Ns16550aPlatformDriver
-            );
+            device_driver_storage_contains_ref(Ns16550aPlatformDriverStorage, DeviceDriverRef::Ns16550aPlatformDriver);
         }
     }
 }
@@ -68,10 +62,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     of_match_table_contains(Ns16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
                     platform_driver_extends_device_driver(Ns16550aPlatformDriver);
                     device_driver_ref_targets(DeviceDriverRef::Ns16550aPlatformDriver, Ns16550aPlatformDriver);
-                    device_driver_ref_storage_bound(
-                        DeviceDriverRef::Ns16550aPlatformDriver,
-                        Ns16550aPlatformDriverStorage
-                    );
+                    device_driver_ref_storage_bound(DeviceDriverRef::Ns16550aPlatformDriver, Ns16550aPlatformDriverStorage);
                     device_driver_ref_lifetime_stable(DeviceDriverRef::Ns16550aPlatformDriver);
                     device_driver_ref_ready(DeviceDriverRef::Ns16550aPlatformDriver);
                     initcall_entry_declared(InitcallEntry::Ns16550aPlatformDriver);
@@ -97,10 +88,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             of_match_table_contains(Ns16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
             platform_driver_extends_device_driver(Ns16550aPlatformDriver);
             device_driver_ref_targets(DeviceDriverRef::Ns16550aPlatformDriver, Ns16550aPlatformDriver);
-            device_driver_ref_storage_bound(
-                DeviceDriverRef::Ns16550aPlatformDriver,
-                Ns16550aPlatformDriverStorage
-            );
+            device_driver_ref_storage_bound(DeviceDriverRef::Ns16550aPlatformDriver, Ns16550aPlatformDriverStorage);
             device_driver_ref_lifetime_stable(DeviceDriverRef::Ns16550aPlatformDriver);
             device_driver_ref_ready(DeviceDriverRef::Ns16550aPlatformDriver);
             initcall_entry_declared(InitcallEntry::Ns16550aPlatformDriver);
@@ -169,10 +157,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             of_match_table_ready(Ns16550aPlatformDriver.of_match_table);
             of_match_table_contains(Ns16550aPlatformDriver.of_match_table, CompatibleString::Ns16550a);
             device_driver_ref_targets(DeviceDriverRef::Ns16550aPlatformDriver, Ns16550aPlatformDriver);
-            device_driver_ref_storage_bound(
-                DeviceDriverRef::Ns16550aPlatformDriver,
-                Ns16550aPlatformDriverStorage
-            );
+            device_driver_ref_storage_bound(DeviceDriverRef::Ns16550aPlatformDriver, Ns16550aPlatformDriverStorage);
             device_driver_ref_lifetime_stable(DeviceDriverRef::Ns16550aPlatformDriver);
             device_driver_ref_ready(DeviceDriverRef::Ns16550aPlatformDriver);
             Uart8250Port.state == State::Ready;
