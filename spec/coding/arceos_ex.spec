@@ -78,6 +78,7 @@ predicate arceos_ex_must_irqchip_init_entries_use_static_lds_section() -> bool;
 predicate arceos_ex_must_init_irq_chain_find_plic_driver_from_irqchip_section() -> bool;
 predicate arceos_ex_must_of_irq_init_call_plic_init_via_matched_section_entry() -> bool;
 predicate arceos_ex_must_plic_output_feed_riscv_intc_external_input() -> bool;
+predicate arceos_ex_must_use_named_interrupt_causes_not_raw_numbers() -> bool;
 predicate arceos_ex_must_plic_ioremap_as_system_irqchip_not_platform_device() -> bool;
 predicate arceos_ex_must_plic_setup_parse_dt_reg_ndev_and_interrupts_extended() -> bool;
 predicate arceos_ex_must_model_irqdomain_as_type_and_plic_domain_as_instance() -> bool;
@@ -709,11 +710,27 @@ type ArceosExIrqTimeInitCodingMust {
          *
          * PLIC's interrupt output must be modeled and implemented as feeding
          * the external interrupt input of the parent RISC-V CPU local INTC.
-         * The external interrupt route may remain deferred, but the parent
-         * link must already be explicit before later claim/complete dispatch
-         * work can build on it.
+         * The UART external interrupt physical propagation chain is
+         * UART -> PLIC -> RISC-V root INTC -> CPU. This link records the
+         * physical parent chain only; it is separate from the software
+         * dispatch/claim chain. The chain has two independent source gates
+         * before a UART interrupt can reach the CPU: the PLIC UART source
+         * enable gate and the root INTC supervisor external input enable
+         * gate. Both may remain deferred here, but their ownership must be
+         * explicit.
          */
         arceos_ex_must_plic_output_feed_riscv_intc_external_input();
+
+        /*
+         * Named interrupt causes:
+         *
+         * Interrupt causes must be modeled and implemented through named
+         * architecture constants or refs. The RISC-V supervisor external
+         * interrupt cause is the root INTC EXT_IRQ/SEI input; specs and code
+         * must not describe the route by embedding the raw cause number in
+         * control-flow logic or prose.
+         */
+        arceos_ex_must_use_named_interrupt_causes_not_raw_numbers();
 
         /*
          * PLIC MMIO ownership:
@@ -773,7 +790,10 @@ type ArceosExIrqTimeInitCodingMust {
          *
          * The UART IRQ resource mapping step records the UART source/logical
          * IRQ binding only. It must not enable the PLIC source or declare
-         * serial8250 interrupt-driven console output ready.
+         * serial8250 interrupt-driven console output ready. The root INTC
+         * supervisor external input enable gate must also remain a distinct
+         * step; registering a handler or mapping a source must not silently
+         * open either gate.
          */
         arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler();
 
@@ -822,8 +842,8 @@ type ArceosExIrqTimeInitCodingMust {
          * External interrupt dispatch contract:
          *
          * The RISC-V root INTC external interrupt entry must be a parent
-         * entry that forwards to the PLIC chained handler. It must not know
-         * about UART or dispatch leaf device handlers directly.
+         * EXT_IRQ/SEI entry that forwards to the PLIC chained handler. It
+         * must not know about UART or dispatch leaf device handlers directly.
          */
         arceos_ex_must_root_intc_external_irq_enter_plic_chained_handler_only();
 

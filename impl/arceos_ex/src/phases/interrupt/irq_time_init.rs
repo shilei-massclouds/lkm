@@ -194,6 +194,7 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.plic.complete_writes_claimed_source()
         && ctx.plic.claim_before_dispatch()
         && ctx.plic.complete_after_handler()
+        && ctx.plic.uart_source_enable_deferred()
         && ctx.plic.uart_source_trigger_deferred()
         && ctx.plic_irq_domain.state() == State::Ready
         && ctx.plic_irq_domain.owner_bound()
@@ -250,6 +251,9 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.riscv_timer_provider.sbi_programming_ready()
         && ctx.interrupt_stream.timer_handler_ready()
         && ctx.interrupt_stream.external_handler_ready()
+        && ctx
+            .interrupt_stream
+            .supervisor_external_input_enable_deferred()
         && ctx.softirq.state() == State::Ready
         && ctx.softirq.action_table_ready()
         && ctx.softirq.pending_set_ready()

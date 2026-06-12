@@ -66,6 +66,9 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
     let source = ns16550a::uart8250_port_irq_source();
 
     ctx.plic.state() == State::Ready
+        && ctx
+            .interrupt_stream
+            .supervisor_external_input_enable_deferred()
         && ctx.plic.chained_handler_ready()
         && ctx.plic.claim_action_ready()
         && ctx.plic.complete_action_ready()
@@ -74,6 +77,7 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.plic.complete_writes_claimed_source()
         && ctx.plic.claim_before_dispatch()
         && ctx.plic.complete_after_handler()
+        && ctx.plic.uart_source_enable_deferred()
         && ctx.plic.uart_source_trigger_deferred()
         && ctx.plic.claim_count() == 0
         && ctx.plic.complete_count() == 0

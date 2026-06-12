@@ -24,8 +24,6 @@ const DEFAULT_TIMEBASE_HZ: u64 = 10_000_000;
 const IRQCHIP_RUN_RECORD_CAPACITY: usize = 8;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
-const RISCV_IRQ_S_EXT: u32 = 9;
-const RISCV_IRQ_M_EXT: u32 = 11;
 const PLIC_CONTEXT_BASE: usize = 0x200000;
 const PLIC_CONTEXT_SIZE: usize = 0x1000;
 const PLIC_CONTEXT_CLAIM: usize = 0x4;
@@ -1951,6 +1949,7 @@ pub struct Plic {
     complete_writes_claimed_source: bool,
     claim_before_dispatch: bool,
     complete_after_handler: bool,
+    uart_source_enable_deferred: bool,
     uart_source_trigger_deferred: bool,
     claim_count: usize,
     zero_claim_count: usize,
@@ -1991,6 +1990,7 @@ impl Plic {
             complete_writes_claimed_source: false,
             claim_before_dispatch: false,
             complete_after_handler: false,
+            uart_source_enable_deferred: false,
             uart_source_trigger_deferred: false,
             claim_count: 0,
             zero_claim_count: 0,
@@ -2113,6 +2113,10 @@ impl Plic {
 
     pub const fn complete_after_handler(&self) -> bool {
         self.complete_after_handler
+    }
+
+    pub const fn uart_source_enable_deferred(&self) -> bool {
+        self.uart_source_enable_deferred
     }
 
     pub const fn uart_source_trigger_deferred(&self) -> bool {
@@ -2276,6 +2280,7 @@ impl Plic {
         self.complete_writes_claimed_source = true;
         self.claim_before_dispatch = true;
         self.complete_after_handler = true;
+        self.uart_source_enable_deferred = true;
         self.uart_source_trigger_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
@@ -2738,10 +2743,10 @@ fn plic_external_context_index(node: DeviceNodeRef<'_>) -> Option<usize> {
         let Some(cause) = read_be_u32(cursor + 4, end) else {
             return None;
         };
-        if cause == RISCV_IRQ_S_EXT {
+        if cause == riscv64::SUPERVISOR_EXTERNAL_IRQ as u32 {
             return Some(index);
         }
-        if cause == RISCV_IRQ_M_EXT && machine_external_index.is_none() {
+        if cause == riscv64::MACHINE_EXTERNAL_IRQ && machine_external_index.is_none() {
             machine_external_index = Some(index);
         }
         cursor += 8;

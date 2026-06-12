@@ -126,8 +126,15 @@ object IrqChipInitTable: InterruptObject {
 /*
  * RiscvIntc 表示每 hart 直连 CPU 的 RISC-V local interrupt controller。
  * 当前要求 boot CPU 的 INTC domain 建立，并能映射 timer/software/external
- * 三条本地 cause；external cause 必须能作为 root entry 转交给 PLIC
- * chained handler，不能在 root INTC 内直接知道 UART 等叶子设备。
+ * 三条本地 cause。所有中断类型必须通过命名 cause ref 表达；RISC-V
+ * supervisor external interrupt 在本模型中命名为
+ * InterruptCauseRef::SupervisorExternalIrq，代码中可对应 EXT_IRQ/SEI
+ * 等架构命名，但不得在规格正文中依赖裸数字。
+ *
+ * SupervisorExternalIrq 必须能作为 root entry 转交给 PLIC chained
+ * handler，不能在 root INTC 内直接知道 UART 等叶子设备。它的输入
+ * gate 独立于 sstatus.SIE 总开关：只有 root INTC/InterruptStream 的
+ * supervisor external enable gate 打开后，PLIC 输出才可能进入 CPU。
  */
 object RiscvIntc: InterruptObject {
     initial_state: State::Base;
@@ -151,8 +158,10 @@ object RiscvIntc: InterruptObject {
                     boot_cpu_timer_irq_mapping_ready(RiscvIntc);
                     boot_cpu_software_irq_mapping_ready(RiscvIntc);
                     boot_cpu_external_irq_mapping_reserved(RiscvIntc);
+                    riscv_intc_external_irq_named_cause(RiscvIntc, InterruptCauseRef::SupervisorExternalIrq);
                     riscv_intc_external_irq_entry_ready(RiscvIntc);
                     riscv_intc_external_irq_does_not_dispatch_leaf_device(RiscvIntc);
+                    riscv_intc_external_input_enable_deferred(RiscvIntc, InterruptCauseRef::SupervisorExternalIrq);
                 }
             }
         }
@@ -168,8 +177,10 @@ object RiscvIntc: InterruptObject {
             boot_cpu_timer_irq_mapping_ready(RiscvIntc);
             boot_cpu_software_irq_mapping_ready(RiscvIntc);
             boot_cpu_external_irq_mapping_reserved(RiscvIntc);
+            riscv_intc_external_irq_named_cause(RiscvIntc, InterruptCauseRef::SupervisorExternalIrq);
             riscv_intc_external_irq_entry_ready(RiscvIntc);
             riscv_intc_external_irq_does_not_dispatch_leaf_device(RiscvIntc);
+            riscv_intc_external_input_enable_deferred(RiscvIntc, InterruptCauseRef::SupervisorExternalIrq);
         }
     }
 }
@@ -177,8 +188,9 @@ object RiscvIntc: InterruptObject {
 /*
  * IrqDispatchTree 表示 generic IRQ 分派树/路由表。它承接 IRQ domain
  * 映射结果，把硬件 interrupt cause 路由到具体 handler action；当前要求
- * timer route 可用，并建立 RISC-V external -> PLIC chained handler ->
- * PLIC irqdomain -> IRQ action 的运行期分发契约。
+ * timer route 可用，并建立 SupervisorExternalIrq -> PLIC chained handler ->
+ * PLIC irqdomain -> IRQ action 的运行期分发契约。这个对象描述软件
+ * 溯源/分发链，不替代物理传播链上的 source enable/input enable gate。
  */
 object IrqDispatchTree: InterruptObject {
     initial_state: State::Base;
@@ -203,6 +215,7 @@ object IrqDispatchTree: InterruptObject {
                     irq_dispatch_timer_route_ready(IrqDispatchTree, RiscvIntc);
                     irq_dispatch_software_route_reserved(IrqDispatchTree, RiscvIntc);
                     irq_dispatch_external_route_ready(IrqDispatchTree, RiscvIntc, Plic);
+                    irq_dispatch_external_route_uses_named_cause(IrqDispatchTree, InterruptCauseRef::SupervisorExternalIrq);
                     irq_dispatch_external_route_uses_plic_chained_handler(IrqDispatchTree, Plic);
                     irq_dispatch_external_route_uses_plic_irq_domain(IrqDispatchTree, PlicIrqDomain);
                     irq_dispatch_external_route_claims_before_dispatch(IrqDispatchTree, Plic);
@@ -220,6 +233,7 @@ object IrqDispatchTree: InterruptObject {
             irq_dispatch_timer_route_ready(IrqDispatchTree, RiscvIntc);
             irq_dispatch_software_route_reserved(IrqDispatchTree, RiscvIntc);
             irq_dispatch_external_route_ready(IrqDispatchTree, RiscvIntc, Plic);
+            irq_dispatch_external_route_uses_named_cause(IrqDispatchTree, InterruptCauseRef::SupervisorExternalIrq);
             irq_dispatch_external_route_uses_plic_chained_handler(IrqDispatchTree, Plic);
             irq_dispatch_external_route_uses_plic_irq_domain(IrqDispatchTree, PlicIrqDomain);
             irq_dispatch_external_route_claims_before_dispatch(IrqDispatchTree, Plic);
@@ -281,6 +295,9 @@ type IrqDomain: InterruptObject {
 }
 
 type HwirqRef {
+}
+
+type InterruptCauseRef {
 }
 
 type LogicalIrqRef {
@@ -362,14 +379,18 @@ predicate uart_irq_chain_kunit_observer_reads_deferred_trigger<T, P, R>(observer
 predicate uart_irq_chain_kunit_observer_reads_dispatch_contract<T, P, R>(observer: T, plic: P, registry: R) -> bool;
 
 predicate riscv_intc_external_irq_entry_ready<T>(intc: T) -> bool;
+predicate riscv_intc_external_irq_named_cause<T, C>(intc: T, cause: C) -> bool;
 predicate riscv_intc_external_irq_forwards_to_plic<T, P>(intc: T, plic: P) -> bool;
 predicate riscv_intc_external_irq_does_not_dispatch_leaf_device<T>(intc: T) -> bool;
+predicate riscv_intc_external_input_enable_deferred<T, C>(intc: T, cause: C) -> bool;
+predicate irq_dispatch_external_route_uses_named_cause<T, C>(dispatch_tree: T, cause: C) -> bool;
 predicate irq_dispatch_external_route_ready<T, R, P>(dispatch_tree: T, riscv_intc: R, plic: P) -> bool;
 predicate irq_dispatch_external_route_uses_plic_chained_handler<T, P>(dispatch_tree: T, plic: P) -> bool;
 predicate irq_dispatch_external_route_uses_plic_irq_domain<T, D>(dispatch_tree: T, domain: D) -> bool;
 predicate irq_dispatch_external_route_claims_before_dispatch<T, P>(dispatch_tree: T, plic: P) -> bool;
 predicate irq_dispatch_external_route_completes_after_handler<T, P>(dispatch_tree: T, plic: P) -> bool;
 predicate plic_chained_handler_ready<T, R>(plic: T, riscv_intc: R) -> bool;
+predicate plic_uart_source_enable_deferred<T, H>(plic: T, hwirq: H) -> bool;
 predicate plic_claim_action_ready<T>(plic: T) -> bool;
 predicate plic_complete_action_ready<T>(plic: T) -> bool;
 predicate plic_claim_reads_claim_register<T>(plic: T) -> bool;
@@ -1157,6 +1178,10 @@ object PlicDriver: InterruptObject {
  * external 输入连接。运行期 chained handler、claim/complete 和 generic
  * IRQ dispatch contract 已建立；具体 UART source enable 和真实触发仍后续
  * 展开。
+ *
+ * 物理传播链是 UART -> PLIC -> RiscvIntc -> CPU。当前只建立连接和
+ * 处理链 contract，不打开 UART 在 PLIC 上的 source enable gate，也不
+ * 打开 root INTC 的 SupervisorExternalIrq input enable gate。
  */
 object Plic: InterruptObject {
     initial_state: State::Base;
@@ -1195,6 +1220,7 @@ object Plic: InterruptObject {
                     plic_threshold_ready(Plic);
                     plic_priority_ready(Plic);
                     plic_source_enable_ready(Plic);
+                    plic_uart_source_enable_deferred(Plic, HwirqRef::PlicUart0);
                     plic_uart_source_trigger_deferred(Plic);
                     plic_chained_handler_ready(Plic, RiscvIntc);
                     plic_claim_action_ready(Plic);
@@ -1228,6 +1254,7 @@ object Plic: InterruptObject {
             plic_threshold_ready(Plic);
             plic_priority_ready(Plic);
             plic_source_enable_ready(Plic);
+            plic_uart_source_enable_deferred(Plic, HwirqRef::PlicUart0);
             plic_uart_source_trigger_deferred(Plic);
             plic_chained_handler_ready(Plic, RiscvIntc);
             plic_claim_action_ready(Plic);
@@ -1336,7 +1363,7 @@ object IrqTimeInitPhase: PhaseObject {
                     "profile_init() 暂缓：profile buffer 和 proc export 后续再建模。";
                     "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
-                    "PLIC UART source enable 与真实 UART 中断触发暂缓：当前建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，但不把 serial8250 console 声明为 interrupt-driven。";
+                    "PLIC UART source enable、root INTC SupervisorExternalIrq input enable 与真实 UART 中断触发暂缓：当前建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，但不把 serial8250 console 声明为 interrupt-driven。";
                 }
             }
         }

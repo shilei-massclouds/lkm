@@ -16,6 +16,9 @@ pub fn run() -> SmokeResult {
 
     if !phases::interrupt::irq_time_init::is_ready()
         || ctx.interrupt_stream.state() != State::Online
+        || !ctx
+            .interrupt_stream
+            .supervisor_external_input_enable_deferred()
         || ctx.boot_cpu_local_interrupt.state() != State::Ready
         || !ctx.boot_cpu_local_interrupt.enabled()
         || !csr::supervisor_interrupts_enabled()
@@ -80,6 +83,7 @@ pub fn run() -> SmokeResult {
         || !ctx.plic.complete_writes_claimed_source()
         || !ctx.plic.claim_before_dispatch()
         || !ctx.plic.complete_after_handler()
+        || !ctx.plic.uart_source_enable_deferred()
         || !ctx.plic.uart_source_trigger_deferred()
         || !ctx.plic_irq_domain.owner_bound()
         || !ctx.plic_irq_domain.hwirq_valid_range_ready()

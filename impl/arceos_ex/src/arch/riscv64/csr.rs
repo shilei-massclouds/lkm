@@ -1,9 +1,11 @@
 use core::arch::global_asm;
 
+use super::{SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ};
+
 #[allow(dead_code)]
 const SSTATUS_SIE: usize = 1 << 1;
-const SIE_STIE: usize = 1 << 5;
-const SIE_SEIE: usize = 1 << 9;
+const SIE_STIE: usize = 1 << SUPERVISOR_TIMER_IRQ;
+const SIE_SEIE: usize = 1 << SUPERVISOR_EXTERNAL_IRQ;
 const SSTATUS_VS: usize = 0b11 << 9;
 const SSTATUS_FS: usize = 0b11 << 13;
 

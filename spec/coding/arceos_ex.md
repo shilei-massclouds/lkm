@@ -1110,12 +1110,23 @@ growable registry 作为主注册路径。当前必须至少支持 QEMU virt 常
 `Plic` 在本阶段推进到最小 `Ready`：它确认 provider discovery、DeviceTree interrupt-controller node、compatible
 match、callback 调用事实、`reg` MMIO resource、`riscv,ndev` source count、`interrupts-extended` 中的 RISC-V external
 interrupt parent input，以及 PLIC 输出连接到上级 `RiscvIntc` external interrupt input 的父链关系。PLIC MMIO 必须通过
-runtime `ioremap`/`vmalloc` 映射执行路径建立，但 owner 是 system irqchip，而不是伪造的 `PlatformDevice`。运行期
-dispatch contract 必须仿照 Linux：RISC-V root INTC external entry 只转交给 PLIC chained handler，PLIC handler 先从 claim
-寄存器读取 source，经 `PlicIrqDomain`/generic IRQ core dispatch 到已注册 action，handler 返回后再把同一个 source 写回
-claim register complete；claim 返回 0 表示没有 pending source，不得调用 UART handler。当前 UART source enable 和真实 UART
-中断触发仍留给后续实现，serial8250 console 仍保持 polling，不得声明 interrupt-driven ready。严格的 `interrupts-extended`
-phandle 到 boot hart local INTC 的反查绑定要等 DeviceTree phandle 查询能力建立后，在 IRQ domain/source mapping 步骤补上。
+runtime `ioremap`/`vmalloc` 映射执行路径建立，但 owner 是 system irqchip，而不是伪造的 `PlatformDevice`。
+
+UART 外部中断建模必须分清两条方向相反的链。物理传播链是 `UART -> PLIC -> RiscvIntc -> CPU`：UART 作为 PLIC
+source，PLIC output 接到 hart local INTC 的 supervisor external input，最后 CPU 被 interrupt。该链要真正导通，需要两个
+独立 enable gate：PLIC 上 UART source 的 enable gate，以及 root INTC/`InterruptStream` 上 supervisor external input 的
+enable gate；二者都不同于 `sstatus.SIE` 总开关。当前这两个 gate 和真实 UART 触发仍 deferred，serial8250 console 仍保持
+polling，不得声明 interrupt-driven ready。
+
+软件处理/溯源链是 `CPU -> RiscvIntc -> PLIC -> UART`。运行期 dispatch contract 必须仿照 Linux：RISC-V root INTC
+`EXT_IRQ`/SEI entry 只转交给 PLIC chained handler，PLIC handler 先从 claim 寄存器读取 source，经
+`PlicIrqDomain`/generic IRQ core dispatch 到已注册 action，handler 返回后再把同一个 source 写回 claim register complete；
+claim 返回 0 表示没有 pending source，不得调用 UART handler。严格的 `interrupts-extended` phandle 到 boot hart local INTC
+的反查绑定要等 DeviceTree phandle 查询能力建立后，在 IRQ domain/source mapping 步骤补上。
+
+所有中断类型必须用命名 cause 表达，不得在规格或实现控制流中用裸数字描述。RISC-V supervisor external interrupt 在规格中
+称为 `InterruptCauseRef::SupervisorExternalIrq`，代码中应使用 `SUPERVISOR_EXTERNAL_IRQ`、`EXT_IRQ` 或同等架构命名常量；
+timer/software/external 等其它 cause 也适用同一规则。
 
 IRQ domain/source mapping 必须分清类型和实例：`IrqDomain` 是 IRQ core 的通用 mapping contract，
 `PlicIrqDomain` 是由 PLIC provider 创建的具体实例。`PlicIrqDomain` 只负责把一格 PLIC interrupt specifier

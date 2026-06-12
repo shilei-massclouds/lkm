@@ -1,6 +1,9 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::{arch::riscv64::csr, trace::Checkpoint};
+use crate::{
+    arch::riscv64::{csr, SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ},
+    trace::Checkpoint,
+};
 
 use super::{
     cpu_control::LocalInterruptControl,
@@ -13,8 +16,6 @@ const INTERRUPT_HANDLER_COUNT: usize = 16;
 const HANDLER_FALLBACK: u8 = 0;
 const HANDLER_TIMER: u8 = 1;
 const HANDLER_EXTERNAL: u8 = 2;
-const INTERRUPT_SUPERVISOR_TIMER: usize = 5;
-const INTERRUPT_SUPERVISOR_EXTERNAL: usize = 9;
 
 static INTERRUPT_HANDLER_POLICY: [AtomicU8; INTERRUPT_HANDLER_COUNT] =
     [const { AtomicU8::new(HANDLER_FALLBACK) }; INTERRUPT_HANDLER_COUNT];
@@ -28,6 +29,7 @@ pub struct InterruptStream {
     lifecycle: Lifecycle,
     timer_handler_ready: bool,
     external_handler_ready: bool,
+    supervisor_external_input_enable_deferred: bool,
     boot_cpu_local_interrupts_enabled: bool,
 }
 
@@ -37,6 +39,7 @@ impl InterruptStream {
             lifecycle: Lifecycle::new(State::Base),
             timer_handler_ready: false,
             external_handler_ready: false,
+            supervisor_external_input_enable_deferred: false,
             boot_cpu_local_interrupts_enabled: false,
         }
     }
@@ -67,6 +70,10 @@ impl InterruptStream {
 
     pub const fn external_handler_ready(&self) -> bool {
         self.external_handler_ready
+    }
+
+    pub const fn supervisor_external_input_enable_deferred(&self) -> bool {
+        self.supervisor_external_input_enable_deferred
     }
 
     pub const fn boot_cpu_local_interrupts_enabled(&self) -> bool {
@@ -103,7 +110,7 @@ impl InterruptStream {
             );
         }
 
-        bind_interrupt_policy(INTERRUPT_SUPERVISOR_TIMER, InterruptPolicy(HANDLER_TIMER));
+        bind_interrupt_policy(SUPERVISOR_TIMER_IRQ, InterruptPolicy(HANDLER_TIMER));
         self.timer_handler_ready = true;
         Ok(())
     }
@@ -118,11 +125,9 @@ impl InterruptStream {
             );
         }
 
-        bind_interrupt_policy(
-            INTERRUPT_SUPERVISOR_EXTERNAL,
-            InterruptPolicy(HANDLER_EXTERNAL),
-        );
+        bind_interrupt_policy(SUPERVISOR_EXTERNAL_IRQ, InterruptPolicy(HANDLER_EXTERNAL));
         self.external_handler_ready = true;
+        self.supervisor_external_input_enable_deferred = true;
         Ok(())
     }
 
