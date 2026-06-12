@@ -50,6 +50,13 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
         "uart_irq_handler_calls",
         ns16550a::uart8250_irq_handler_call_count(),
     );
+    sink.diag_usize("plic_claim_count", ctx.plic.claim_count());
+    sink.diag_usize("plic_complete_count", ctx.plic.complete_count());
+    sink.diag_usize("plic_dispatch_count", ctx.plic.dispatch_count());
+    sink.diag_usize(
+        "irq_dispatch_calls",
+        ctx.irq_handler_registry.dispatch_calls(),
+    );
     sink.pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
 }
@@ -59,17 +66,31 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
     let source = ns16550a::uart8250_port_irq_source();
 
     ctx.plic.state() == State::Ready
-        && ctx.plic.external_irq_route_deferred()
+        && ctx.plic.chained_handler_ready()
+        && ctx.plic.claim_action_ready()
+        && ctx.plic.complete_action_ready()
+        && ctx.plic.claim_reads_claim_register()
+        && ctx.plic.claim_zero_means_no_pending()
+        && ctx.plic.complete_writes_claimed_source()
+        && ctx.plic.claim_before_dispatch()
+        && ctx.plic.complete_after_handler()
+        && ctx.plic.uart_source_trigger_deferred()
+        && ctx.plic.claim_count() == 0
+        && ctx.plic.complete_count() == 0
+        && ctx.plic.dispatch_count() == 0
         && ctx.plic_irq_domain.state() == State::Ready
         && ctx.plic_irq_domain.enable_deferred()
+        && ctx.plic_irq_domain.dispatch_ops_ready()
         && ctx.irq_handler_registry.state() == State::Ready
         && ctx.irq_handler_registry.source_enable_deferred()
-        && ctx.irq_handler_registry.dispatch_deferred()
+        && ctx.irq_handler_registry.dispatch_ready()
+        && ctx.irq_handler_registry.dispatch_requires_hardirq_context()
+        && ctx.irq_handler_registry.dispatch_calls() == 0
         && ns16550a::uart8250_port_irq_resource_ready()
         && ns16550a::uart8250_port_logical_irq_ready()
         && ns16550a::uart8250_irq_handler_registered()
         && ns16550a::uart8250_irq_handler_hardirq_context_required()
-        && ns16550a::uart8250_irq_handler_dispatch_deferred()
+        && ns16550a::uart8250_irq_handler_dispatch_ready()
         && ns16550a::uart8250_irq_handler_call_count() == 0
         && plic_mapping_deferred(ctx, source, logical_irq)
         && irq_action_deferred(ctx, logical_irq)
@@ -96,6 +117,6 @@ fn irq_action_deferred(ctx: &Context, logical_irq: LogicalIrq) -> bool {
                 && action.hardirq_context_required()
                 && action.mapped_irq_required()
                 && action.source_not_enabled()
-                && action.dispatch_deferred()
+                && action.dispatch_ready()
         })
 }

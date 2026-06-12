@@ -1185,7 +1185,7 @@ impl PlatformBus {
                                     && action.duplicate_registration_rejected()
                                     && action.unmapped_registration_rejected()
                                     && action.source_not_enabled()
-                                    && action.dispatch_deferred()
+                                    && action.dispatch_ready()
                             });
                 self.ns16550a_probe_keeps_interrupt_output_deferred =
                     ns16550a::uart8250_interrupt_output_still_deferred();

@@ -296,7 +296,7 @@ impl ConsoleHandoffFixture {
             && ns16550a::uart8250_port_logical_irq_ready()
             && ns16550a::uart8250_irq_handler_registered()
             && ns16550a::uart8250_irq_handler_hardirq_context_required()
-            && ns16550a::uart8250_irq_handler_dispatch_deferred()
+            && ns16550a::uart8250_irq_handler_dispatch_ready()
             && self
                 .plic_irq_domain
                 .mapping_for_source(ns16550a::uart8250_port_irq_source())
@@ -317,7 +317,7 @@ impl ConsoleHandoffFixture {
                         && action.duplicate_registration_rejected()
                         && action.unmapped_registration_rejected()
                         && action.source_not_enabled()
-                        && action.dispatch_deferred()
+                        && action.dispatch_ready()
                 })
             && printk::serial8250_write_ready()
             && ns16550a::serial8250_write_backend_ready()

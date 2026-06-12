@@ -12,7 +12,9 @@ const INTERRUPT_HANDLER_COUNT: usize = 16;
 
 const HANDLER_FALLBACK: u8 = 0;
 const HANDLER_TIMER: u8 = 1;
+const HANDLER_EXTERNAL: u8 = 2;
 const INTERRUPT_SUPERVISOR_TIMER: usize = 5;
+const INTERRUPT_SUPERVISOR_EXTERNAL: usize = 9;
 
 static INTERRUPT_HANDLER_POLICY: [AtomicU8; INTERRUPT_HANDLER_COUNT] =
     [const { AtomicU8::new(HANDLER_FALLBACK) }; INTERRUPT_HANDLER_COUNT];
@@ -25,6 +27,7 @@ const FALLBACK_POLICY: InterruptPolicy = InterruptPolicy(HANDLER_FALLBACK);
 pub struct InterruptStream {
     lifecycle: Lifecycle,
     timer_handler_ready: bool,
+    external_handler_ready: bool,
     boot_cpu_local_interrupts_enabled: bool,
 }
 
@@ -33,6 +36,7 @@ impl InterruptStream {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             timer_handler_ready: false,
+            external_handler_ready: false,
             boot_cpu_local_interrupts_enabled: false,
         }
     }
@@ -59,6 +63,10 @@ impl InterruptStream {
 
     pub const fn timer_handler_ready(&self) -> bool {
         self.timer_handler_ready
+    }
+
+    pub const fn external_handler_ready(&self) -> bool {
+        self.external_handler_ready
     }
 
     pub const fn boot_cpu_local_interrupts_enabled(&self) -> bool {
@@ -100,8 +108,29 @@ impl InterruptStream {
         Ok(())
     }
 
+    pub fn bind_external_handler(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        bind_interrupt_policy(
+            INTERRUPT_SUPERVISOR_EXTERNAL,
+            InterruptPolicy(HANDLER_EXTERNAL),
+        );
+        self.external_handler_ready = true;
+        Ok(())
+    }
+
     pub fn enable(&mut self, local_interrupt: &mut LocalInterruptControl) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.timer_handler_ready {
+        if self.lifecycle.state() != State::Ready
+            || !self.timer_handler_ready
+            || !self.external_handler_ready
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -160,12 +189,17 @@ fn bind_interrupt_policy(cause: usize, policy: InterruptPolicy) {
 fn dispatch_handler_policy(handler: u8, scause: usize) {
     match handler {
         HANDLER_TIMER => timer_interrupt_handler(),
+        HANDLER_EXTERNAL => external_interrupt_handler(),
         _ => default_interrupt_handler(scause),
     }
 }
 
 fn timer_interrupt_handler() {
     crate::objects::irq_time::handle_timer_interrupt();
+}
+
+fn external_interrupt_handler() {
+    crate::objects::irq_time::handle_external_interrupt();
 }
 
 fn default_interrupt_handler(_scause: usize) -> ! {

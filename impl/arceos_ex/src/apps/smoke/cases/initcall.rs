@@ -289,7 +289,7 @@ fn check_uart_irq_handler(registry: &crate::objects::irq_time::IrqHandlerRegistr
     registry.action_count() != 0
         && crate::objects::ns16550a::uart8250_irq_handler_registered()
         && crate::objects::ns16550a::uart8250_irq_handler_hardirq_context_required()
-        && crate::objects::ns16550a::uart8250_irq_handler_dispatch_deferred()
+        && crate::objects::ns16550a::uart8250_irq_handler_dispatch_ready()
         && crate::objects::ns16550a::uart8250_irq_handler_call_count() == 0
         && registry
             .action_for_logical_irq(logical_irq)
@@ -301,7 +301,7 @@ fn check_uart_irq_handler(registry: &crate::objects::irq_time::IrqHandlerRegistr
                     && action.duplicate_registration_rejected()
                     && action.unmapped_registration_rejected()
                     && action.source_not_enabled()
-                    && action.dispatch_deferred()
+                    && action.dispatch_ready()
             })
 }
 

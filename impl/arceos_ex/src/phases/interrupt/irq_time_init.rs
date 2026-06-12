@@ -58,6 +58,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.riscv_intc,
         &mut ctx.interrupt_stream,
         &ctx.cpu_group,
+        &ctx.plic,
+        &ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
     )?;
     ctx.tick.preset(&ctx.cpu_group, &ctx.per_cpu_storage)?;
     ctx.timer_wheel
@@ -153,7 +156,17 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.irq_dispatch_tree.fallback_route_ready()
         && ctx.irq_dispatch_tree.timer_route_ready()
         && ctx.irq_dispatch_tree.software_route_reserved()
-        && ctx.irq_dispatch_tree.external_route_deferred()
+        && ctx.irq_dispatch_tree.external_route_ready()
+        && ctx
+            .irq_dispatch_tree
+            .external_route_uses_plic_chained_handler()
+        && ctx.irq_dispatch_tree.external_route_uses_plic_irq_domain()
+        && ctx
+            .irq_dispatch_tree
+            .external_route_claims_before_dispatch()
+        && ctx
+            .irq_dispatch_tree
+            .external_route_completes_after_handler()
         && ctx.irq_dispatch_tree.boot_cpu_route_ready()
         && ctx.plic.state() == State::Ready
         && ctx.plic.matched_compatible()
@@ -173,13 +186,22 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.plic.threshold_ready()
         && ctx.plic.priority_ready()
         && ctx.plic.source_enable_ready()
-        && ctx.plic.external_irq_route_deferred()
+        && ctx.plic.chained_handler_ready()
+        && ctx.plic.claim_action_ready()
+        && ctx.plic.complete_action_ready()
+        && ctx.plic.claim_reads_claim_register()
+        && ctx.plic.claim_zero_means_no_pending()
+        && ctx.plic.complete_writes_claimed_source()
+        && ctx.plic.claim_before_dispatch()
+        && ctx.plic.complete_after_handler()
+        && ctx.plic.uart_source_trigger_deferred()
         && ctx.plic_irq_domain.state() == State::Ready
         && ctx.plic_irq_domain.owner_bound()
         && ctx.plic_irq_domain.hwirq_valid_range_ready()
         && ctx.plic_irq_domain.logical_irq_allocator_ready()
         && ctx.plic_irq_domain.mapping_table_ready()
         && ctx.plic_irq_domain.translate_specifier_ready()
+        && ctx.plic_irq_domain.dispatch_ops_ready()
         && ctx.plic_irq_domain.source_zero_reserved()
         && ctx.plic_irq_domain.one_cell_specifier()
         && ctx.plic_irq_domain.enable_deferred()
@@ -192,7 +214,8 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.irq_handler_registry.unmapped_reject_ready()
         && ctx.irq_handler_registry.hardirq_context_guard_ready()
         && ctx.irq_handler_registry.source_enable_deferred()
-        && ctx.irq_handler_registry.dispatch_deferred()
+        && ctx.irq_handler_registry.dispatch_ready()
+        && ctx.irq_handler_registry.dispatch_requires_hardirq_context()
         && ctx.tick.state() == State::Ready
         && ctx.tick.control_ready()
         && ctx.tick.nohz_trimmed()
@@ -226,6 +249,7 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.riscv_timer_provider.irq_mapping_ready()
         && ctx.riscv_timer_provider.sbi_programming_ready()
         && ctx.interrupt_stream.timer_handler_ready()
+        && ctx.interrupt_stream.external_handler_ready()
         && ctx.softirq.state() == State::Ready
         && ctx.softirq.action_table_ready()
         && ctx.softirq.pending_set_ready()

@@ -85,7 +85,7 @@ pub struct Uart8250Port {
     irq_mapping_ready: bool,
     irq_handler_registered: bool,
     irq_handler_hardirq_context_required: bool,
-    irq_handler_dispatch_deferred: bool,
+    irq_handler_dispatch_ready: bool,
     interrupt_output_deferred: bool,
     line: usize,
     registered: bool,
@@ -112,7 +112,7 @@ impl Uart8250Port {
             irq_mapping_ready: false,
             irq_handler_registered: false,
             irq_handler_hardirq_context_required: false,
-            irq_handler_dispatch_deferred: false,
+            irq_handler_dispatch_ready: false,
             interrupt_output_deferred: false,
             line: usize::MAX,
             registered: false,
@@ -423,7 +423,7 @@ pub fn uart8250_irq_handler_registered() -> bool {
     state.port.registered
         && state.port.irq_handler_registered
         && state.port.irq_handler_hardirq_context_required
-        && state.port.irq_handler_dispatch_deferred
+        && state.port.irq_handler_dispatch_ready
 }
 
 pub fn uart8250_irq_handler_hardirq_context_required() -> bool {
@@ -431,13 +431,17 @@ pub fn uart8250_irq_handler_hardirq_context_required() -> bool {
     state.port.registered && state.port.irq_handler_hardirq_context_required
 }
 
-pub fn uart8250_irq_handler_dispatch_deferred() -> bool {
+pub fn uart8250_irq_handler_dispatch_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
-    state.port.registered && state.port.irq_handler_dispatch_deferred
+    state.port.registered && state.port.irq_handler_dispatch_ready
 }
 
 pub fn uart8250_irq_handler_call_count() -> usize {
     UART8250_IRQ_HANDLER_CALLS.load(Ordering::Acquire)
+}
+
+pub fn handle_uart_irq() {
+    UART8250_IRQ_HANDLER_CALLS.fetch_add(1, Ordering::AcqRel);
 }
 
 pub fn serial8250_console_registered() -> bool {
@@ -690,7 +694,7 @@ fn build_uart8250_port(
         irq_mapping_ready: false,
         irq_handler_registered: false,
         irq_handler_hardirq_context_required: false,
-        irq_handler_dispatch_deferred: false,
+        irq_handler_dispatch_ready: false,
         interrupt_output_deferred: true,
         line: device.index(),
         registered: true,
@@ -764,11 +768,11 @@ fn bind_irq_handler(
         && action.mapped_irq_required()
         && action.source_not_enabled();
     port.irq_handler_hardirq_context_required = action.hardirq_context_required();
-    port.irq_handler_dispatch_deferred = action.dispatch_deferred();
+    port.irq_handler_dispatch_ready = action.dispatch_ready();
     port.interrupt_output_deferred = true;
     port.irq_handler_registered
         && port.irq_handler_hardirq_context_required
-        && port.irq_handler_dispatch_deferred
+        && port.irq_handler_dispatch_ready
 }
 
 fn uart_interrupt_source(

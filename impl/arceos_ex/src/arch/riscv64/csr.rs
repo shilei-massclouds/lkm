@@ -3,6 +3,7 @@ use core::arch::global_asm;
 #[allow(dead_code)]
 const SSTATUS_SIE: usize = 1 << 1;
 const SIE_STIE: usize = 1 << 5;
+const SIE_SEIE: usize = 1 << 9;
 const SSTATUS_VS: usize = 0b11 << 9;
 const SSTATUS_FS: usize = 0b11 << 13;
 
@@ -87,6 +88,16 @@ pub fn disable_supervisor_timer_interrupt() {
 
 pub fn enable_supervisor_timer_interrupt() {
     set_sie_bits(SIE_STIE);
+}
+
+#[allow(dead_code)]
+pub fn disable_supervisor_external_interrupt() {
+    clear_sie_bits(SIE_SEIE);
+}
+
+#[allow(dead_code)]
+pub fn enable_supervisor_external_interrupt() {
+    set_sie_bits(SIE_SEIE);
 }
 
 pub fn read_gp() -> usize {

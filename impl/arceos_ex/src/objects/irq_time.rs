@@ -26,6 +26,9 @@ const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
 const RISCV_IRQ_S_EXT: u32 = 9;
 const RISCV_IRQ_M_EXT: u32 = 11;
+const PLIC_CONTEXT_BASE: usize = 0x200000;
+const PLIC_CONTEXT_SIZE: usize = 0x1000;
+const PLIC_CONTEXT_CLAIM: usize = 0x4;
 const PLIC_IRQ_MAPPING_CAPACITY: usize = 32;
 const PLIC_LOGICAL_IRQ_BASE: usize = 32;
 const IRQ_ACTION_CAPACITY: usize = 16;
@@ -349,8 +352,8 @@ impl IrqAction {
         !self.source_enabled
     }
 
-    pub const fn dispatch_deferred(&self) -> bool {
-        !self.dispatch_ready
+    pub const fn dispatch_ready(&self) -> bool {
+        self.dispatch_ready
     }
 
     fn setup_from_request(
@@ -380,7 +383,7 @@ impl IrqAction {
         self.duplicate_registration_rejected = true;
         self.unmapped_registration_rejected = true;
         self.source_enabled = false;
-        self.dispatch_ready = false;
+        self.dispatch_ready = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -395,7 +398,9 @@ pub struct IrqHandlerRegistry {
     unmapped_reject_ready: bool,
     hardirq_context_guard_ready: bool,
     source_enable_deferred: bool,
-    dispatch_deferred: bool,
+    dispatch_ready: bool,
+    dispatch_requires_hardirq_context: bool,
+    dispatch_calls: usize,
     duplicate_registration_rejected: bool,
     unmapped_registration_rejected: bool,
     actions: [IrqAction; IRQ_ACTION_CAPACITY],
@@ -413,7 +418,9 @@ impl IrqHandlerRegistry {
             unmapped_reject_ready: false,
             hardirq_context_guard_ready: false,
             source_enable_deferred: false,
-            dispatch_deferred: false,
+            dispatch_ready: false,
+            dispatch_requires_hardirq_context: false,
+            dispatch_calls: 0,
             duplicate_registration_rejected: false,
             unmapped_registration_rejected: false,
             actions: [const { IrqAction::empty() }; IRQ_ACTION_CAPACITY],
@@ -453,8 +460,17 @@ impl IrqHandlerRegistry {
         self.source_enable_deferred
     }
 
-    pub const fn dispatch_deferred(&self) -> bool {
-        self.dispatch_deferred
+    pub const fn dispatch_ready(&self) -> bool {
+        self.dispatch_ready
+    }
+
+    pub const fn dispatch_requires_hardirq_context(&self) -> bool {
+        self.dispatch_requires_hardirq_context
+    }
+
+    #[allow(dead_code)]
+    pub const fn dispatch_calls(&self) -> usize {
+        self.dispatch_calls
     }
 
     #[allow(dead_code)]
@@ -514,7 +530,8 @@ impl IrqHandlerRegistry {
         self.unmapped_reject_ready = true;
         self.hardirq_context_guard_ready = true;
         self.source_enable_deferred = true;
-        self.dispatch_deferred = true;
+        self.dispatch_ready = true;
+        self.dispatch_requires_hardirq_context = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -565,6 +582,35 @@ impl IrqHandlerRegistry {
             return false;
         }
         self.action_count += 1;
+        true
+    }
+
+    pub fn dispatch(&mut self, logical_irq: LogicalIrq) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || !self.dispatch_ready
+            || !self.dispatch_requires_hardirq_context
+            || !logical_irq.is_valid()
+        {
+            return false;
+        }
+        let Some(action) = self.action_for_logical_irq(logical_irq) else {
+            return false;
+        };
+        if action.state() != State::Ready
+            || !action.handler_bound()
+            || !action.hardirq_context_required()
+            || !action.mapped_irq_required()
+            || !action.dispatch_ready()
+        {
+            return false;
+        }
+
+        let handler_kind = action.handler_kind();
+        match handler_kind {
+            IrqHandlerKind::Ns16550aUart => crate::objects::ns16550a::handle_uart_irq(),
+            IrqHandlerKind::None => return false,
+        }
+        self.dispatch_calls = self.dispatch_calls.saturating_add(1);
         true
     }
 }
@@ -1075,7 +1121,11 @@ pub struct IrqDispatchTree {
     fallback_route_ready: bool,
     timer_route_ready: bool,
     software_route_reserved: bool,
-    external_route_deferred: bool,
+    external_route_ready: bool,
+    external_route_uses_plic_chained_handler: bool,
+    external_route_uses_plic_irq_domain: bool,
+    external_route_claims_before_dispatch: bool,
+    external_route_completes_after_handler: bool,
     boot_cpu_route_ready: bool,
 }
 
@@ -1086,7 +1136,11 @@ impl IrqDispatchTree {
             fallback_route_ready: false,
             timer_route_ready: false,
             software_route_reserved: false,
-            external_route_deferred: false,
+            external_route_ready: false,
+            external_route_uses_plic_chained_handler: false,
+            external_route_uses_plic_irq_domain: false,
+            external_route_claims_before_dispatch: false,
+            external_route_completes_after_handler: false,
             boot_cpu_route_ready: false,
         }
     }
@@ -1107,8 +1161,24 @@ impl IrqDispatchTree {
         self.software_route_reserved
     }
 
-    pub const fn external_route_deferred(&self) -> bool {
-        self.external_route_deferred
+    pub const fn external_route_ready(&self) -> bool {
+        self.external_route_ready
+    }
+
+    pub const fn external_route_uses_plic_chained_handler(&self) -> bool {
+        self.external_route_uses_plic_chained_handler
+    }
+
+    pub const fn external_route_uses_plic_irq_domain(&self) -> bool {
+        self.external_route_uses_plic_irq_domain
+    }
+
+    pub const fn external_route_claims_before_dispatch(&self) -> bool {
+        self.external_route_claims_before_dispatch
+    }
+
+    pub const fn external_route_completes_after_handler(&self) -> bool {
+        self.external_route_completes_after_handler
     }
 
     pub const fn boot_cpu_route_ready(&self) -> bool {
@@ -1121,6 +1191,9 @@ impl IrqDispatchTree {
         riscv_intc: &RiscvIntc,
         interrupt_stream: &mut InterruptStream,
         cpu_group: &CpuGroup,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || irq_controller.state() != State::Ready
@@ -1128,6 +1201,16 @@ impl IrqDispatchTree {
             || interrupt_stream.state() != State::Ready
             || cpu_group.state() != State::Ready
             || !riscv_intc.boot_cpu_timer_irq_ready()
+            || !riscv_intc.boot_cpu_external_irq_reserved()
+            || plic.state() != State::Ready
+            || !plic.chained_handler_ready()
+            || !plic.claim_action_ready()
+            || !plic.complete_action_ready()
+            || plic_irq_domain.state() != State::Ready
+            || !plic_irq_domain.dispatch_ops_ready()
+            || irq_handler_registry.state() != State::Ready
+            || !irq_handler_registry.dispatch_ready()
+            || !irq_handler_registry.dispatch_requires_hardirq_context()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -1138,10 +1221,15 @@ impl IrqDispatchTree {
         }
 
         interrupt_stream.bind_timer_handler()?;
+        interrupt_stream.bind_external_handler()?;
         self.fallback_route_ready = true;
         self.timer_route_ready = true;
         self.software_route_reserved = true;
-        self.external_route_deferred = true;
+        self.external_route_ready = true;
+        self.external_route_uses_plic_chained_handler = true;
+        self.external_route_uses_plic_irq_domain = true;
+        self.external_route_claims_before_dispatch = true;
+        self.external_route_completes_after_handler = true;
         self.boot_cpu_route_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -1849,11 +1937,27 @@ pub struct Plic {
     mapsize: usize,
     membase: usize,
     source_count: u32,
+    context_id: usize,
+    claim_addr: usize,
     external_input_context_ready: bool,
     threshold_ready: bool,
     priority_ready: bool,
     source_enable_ready: bool,
-    external_irq_route_deferred: bool,
+    chained_handler_ready: bool,
+    claim_action_ready: bool,
+    complete_action_ready: bool,
+    claim_reads_claim_register: bool,
+    claim_zero_means_no_pending: bool,
+    complete_writes_claimed_source: bool,
+    claim_before_dispatch: bool,
+    complete_after_handler: bool,
+    uart_source_trigger_deferred: bool,
+    claim_count: usize,
+    zero_claim_count: usize,
+    dispatch_count: usize,
+    complete_count: usize,
+    last_claimed_source: u32,
+    last_completed_source: u32,
 }
 
 impl Plic {
@@ -1873,11 +1977,27 @@ impl Plic {
             mapsize: 0,
             membase: 0,
             source_count: 0,
+            context_id: 0,
+            claim_addr: 0,
             external_input_context_ready: false,
             threshold_ready: false,
             priority_ready: false,
             source_enable_ready: false,
-            external_irq_route_deferred: false,
+            chained_handler_ready: false,
+            claim_action_ready: false,
+            complete_action_ready: false,
+            claim_reads_claim_register: false,
+            claim_zero_means_no_pending: false,
+            complete_writes_claimed_source: false,
+            claim_before_dispatch: false,
+            complete_after_handler: false,
+            uart_source_trigger_deferred: false,
+            claim_count: 0,
+            zero_claim_count: 0,
+            dispatch_count: 0,
+            complete_count: 0,
+            last_claimed_source: 0,
+            last_completed_source: 0,
         }
     }
 
@@ -1937,6 +2057,16 @@ impl Plic {
         self.source_count
     }
 
+    #[allow(dead_code)]
+    pub const fn context_id(&self) -> usize {
+        self.context_id
+    }
+
+    #[allow(dead_code)]
+    pub const fn claim_addr(&self) -> usize {
+        self.claim_addr
+    }
+
     pub const fn external_input_context_ready(&self) -> bool {
         self.external_input_context_ready
     }
@@ -1953,8 +2083,70 @@ impl Plic {
         self.source_enable_ready
     }
 
-    pub const fn external_irq_route_deferred(&self) -> bool {
-        self.external_irq_route_deferred
+    pub const fn chained_handler_ready(&self) -> bool {
+        self.chained_handler_ready
+    }
+
+    pub const fn claim_action_ready(&self) -> bool {
+        self.claim_action_ready
+    }
+
+    pub const fn complete_action_ready(&self) -> bool {
+        self.complete_action_ready
+    }
+
+    pub const fn claim_reads_claim_register(&self) -> bool {
+        self.claim_reads_claim_register
+    }
+
+    pub const fn claim_zero_means_no_pending(&self) -> bool {
+        self.claim_zero_means_no_pending
+    }
+
+    pub const fn complete_writes_claimed_source(&self) -> bool {
+        self.complete_writes_claimed_source
+    }
+
+    pub const fn claim_before_dispatch(&self) -> bool {
+        self.claim_before_dispatch
+    }
+
+    pub const fn complete_after_handler(&self) -> bool {
+        self.complete_after_handler
+    }
+
+    pub const fn uart_source_trigger_deferred(&self) -> bool {
+        self.uart_source_trigger_deferred
+    }
+
+    #[allow(dead_code)]
+    pub const fn claim_count(&self) -> usize {
+        self.claim_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn zero_claim_count(&self) -> usize {
+        self.zero_claim_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn dispatch_count(&self) -> usize {
+        self.dispatch_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn complete_count(&self) -> usize {
+        self.complete_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn last_claimed_source(&self) -> u32 {
+        self.last_claimed_source
+    }
+
+    #[allow(dead_code)]
+    pub const fn last_completed_source(&self) -> u32 {
+        self.last_completed_source
     }
 
     fn preset_from_irqchip(
@@ -2008,6 +2200,14 @@ impl Plic {
                 State::Ready,
             );
         }
+        let Some(context_id) = plic_external_context_index(node) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
         let Some(mapping) = ioremap.map_system_irqchip_mmio(
             vmalloc_allocator,
             page_table_caches,
@@ -2040,6 +2240,14 @@ impl Plic {
                 State::Ready,
             );
         }
+        let Some(claim_addr) = plic_context_claim_addr(mapping.membase(), context_id) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
 
         self.matched_compatible = true;
         self.setup_called_by_of_irq_init = true;
@@ -2054,17 +2262,88 @@ impl Plic {
         self.mapsize = resource.size;
         self.membase = mapping.membase();
         self.source_count = source_count;
+        self.context_id = context_id;
+        self.claim_addr = claim_addr;
         self.external_input_context_ready = true;
         self.threshold_ready = true;
         self.priority_ready = true;
         self.source_enable_ready = true;
-        self.external_irq_route_deferred = true;
+        self.chained_handler_ready = true;
+        self.claim_action_ready = true;
+        self.complete_action_ready = true;
+        self.claim_reads_claim_register = true;
+        self.claim_zero_means_no_pending = true;
+        self.complete_writes_claimed_source = true;
+        self.claim_before_dispatch = true;
+        self.complete_after_handler = true;
+        self.uart_source_trigger_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
             State::Ready,
             Checkpoint::PlicReady,
         )
+    }
+
+    pub fn handle_external_interrupt(
+        &mut self,
+        domain: &PlicIrqDomain,
+        registry: &mut IrqHandlerRegistry,
+    ) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || !self.chained_handler_ready
+            || !self.claim_action_ready
+            || !self.complete_action_ready
+            || !self.claim_before_dispatch
+            || !self.complete_after_handler
+            || domain.state() != State::Ready
+            || !domain.dispatch_ops_ready()
+            || registry.state() != State::Ready
+            || !registry.dispatch_ready()
+        {
+            return false;
+        }
+
+        let source = self.claim();
+        if source == 0 {
+            return false;
+        }
+        let dispatched = domain
+            .resolve_hwirq(source)
+            .is_some_and(|logical_irq| registry.dispatch(logical_irq));
+        if dispatched {
+            self.dispatch_count = self.dispatch_count.saturating_add(1);
+        }
+        self.complete(source);
+        dispatched
+    }
+
+    fn claim(&mut self) -> u32 {
+        if self.claim_addr == 0 || !self.claim_action_ready {
+            return 0;
+        }
+
+        let source = unsafe { core::ptr::read_volatile(self.claim_addr as *const u32) };
+        if source == 0 {
+            self.zero_claim_count = self.zero_claim_count.saturating_add(1);
+            return 0;
+        }
+
+        self.claim_count = self.claim_count.saturating_add(1);
+        self.last_claimed_source = source;
+        source
+    }
+
+    fn complete(&mut self, source: u32) {
+        if self.claim_addr == 0 || source == 0 || !self.complete_action_ready {
+            return;
+        }
+
+        unsafe {
+            core::ptr::write_volatile(self.claim_addr as *mut u32, source);
+        }
+        self.complete_count = self.complete_count.saturating_add(1);
+        self.last_completed_source = source;
     }
 }
 
@@ -2192,6 +2471,7 @@ pub struct PlicIrqDomain {
     logical_irq_allocator_ready: bool,
     mapping_table_ready: bool,
     translate_specifier_ready: bool,
+    dispatch_ops_ready: bool,
     source_zero_reserved: bool,
     one_cell_specifier: bool,
     enable_deferred: bool,
@@ -2210,6 +2490,7 @@ impl PlicIrqDomain {
             logical_irq_allocator_ready: false,
             mapping_table_ready: false,
             translate_specifier_ready: false,
+            dispatch_ops_ready: false,
             source_zero_reserved: false,
             one_cell_specifier: false,
             enable_deferred: false,
@@ -2242,6 +2523,10 @@ impl PlicIrqDomain {
 
     pub const fn translate_specifier_ready(&self) -> bool {
         self.translate_specifier_ready
+    }
+
+    pub const fn dispatch_ops_ready(&self) -> bool {
+        self.dispatch_ops_ready
     }
 
     pub const fn source_zero_reserved(&self) -> bool {
@@ -2332,6 +2617,7 @@ impl PlicIrqDomain {
         self.hwirq_valid_range_ready = true;
         self.logical_irq_allocator_ready = true;
         self.mapping_table_ready = true;
+        self.dispatch_ops_ready = true;
         self.source_zero_reserved = true;
         self.one_cell_specifier = true;
         self.enable_deferred = true;
@@ -2386,6 +2672,19 @@ impl PlicIrqDomain {
         self.next_logical_irq = self.next_logical_irq.saturating_add(1);
         Some(logical_irq)
     }
+
+    pub fn resolve_hwirq(&self, source: u32) -> Option<LogicalIrq> {
+        if self.lifecycle.state() != State::Ready
+            || !self.dispatch_ops_ready
+            || source == 0
+            || source > self.source_count
+        {
+            return None;
+        }
+
+        self.mapping_for_source(source)
+            .map(|mapping| mapping.logical_irq())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2413,32 +2712,49 @@ fn plic_source_count(node: DeviceNodeRef<'_>) -> Option<u32> {
 }
 
 fn plic_context_parent_has_external_input(node: DeviceNodeRef<'_>) -> bool {
+    plic_external_context_index(node).is_some()
+}
+
+fn plic_external_context_index(node: DeviceNodeRef<'_>) -> Option<usize> {
     let Some(property) = node.property(b"interrupts-extended") else {
-        return false;
+        return None;
     };
     let value = property.raw_value();
     let start = value.as_ptr() as usize;
     let Some(end) = start.checked_add(value.len()) else {
-        return false;
+        return None;
     };
     if value.len() < 8 {
-        return false;
+        return None;
     }
 
     let mut cursor = start;
+    let mut index = 0usize;
+    let mut machine_external_index = None;
     while cursor + 8 <= end {
         let Some(_phandle) = read_be_u32(cursor, end) else {
-            return false;
+            return None;
         };
         let Some(cause) = read_be_u32(cursor + 4, end) else {
-            return false;
+            return None;
         };
-        if cause == RISCV_IRQ_S_EXT || cause == RISCV_IRQ_M_EXT {
-            return true;
+        if cause == RISCV_IRQ_S_EXT {
+            return Some(index);
+        }
+        if cause == RISCV_IRQ_M_EXT && machine_external_index.is_none() {
+            machine_external_index = Some(index);
         }
         cursor += 8;
+        index += 1;
     }
-    false
+    machine_external_index
+}
+
+fn plic_context_claim_addr(membase: usize, context_id: usize) -> Option<usize> {
+    membase
+        .checked_add(PLIC_CONTEXT_BASE)?
+        .checked_add(context_id.checked_mul(PLIC_CONTEXT_SIZE)?)?
+        .checked_add(PLIC_CONTEXT_CLAIM)
 }
 
 fn plic_node_matches_supported_compatible(node: DeviceNodeRef<'_>) -> bool {
@@ -2540,6 +2856,14 @@ impl SmpCallFunction {
 
 pub fn timer_interrupt_count() -> usize {
     TIMER_INTERRUPT_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn handle_external_interrupt() {
+    let ctx = crate::context::context();
+    let plic = &mut ctx.plic;
+    let domain = &ctx.plic_irq_domain;
+    let registry = &mut ctx.irq_handler_registry;
+    plic.handle_external_interrupt(domain, registry);
 }
 
 pub fn handle_timer_interrupt() {
