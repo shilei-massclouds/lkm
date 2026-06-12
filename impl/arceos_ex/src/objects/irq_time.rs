@@ -1,6 +1,6 @@
 use core::{
     mem::size_of,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
 };
 
 use super::{
@@ -403,7 +403,7 @@ pub struct IrqHandlerRegistry {
     source_enable_deferred: bool,
     dispatch_ready: bool,
     dispatch_requires_hardirq_context: bool,
-    dispatch_calls: usize,
+    dispatch_calls: AtomicUsize,
     duplicate_registration_rejected: bool,
     unmapped_registration_rejected: bool,
     actions: [IrqAction; IRQ_ACTION_CAPACITY],
@@ -423,7 +423,7 @@ impl IrqHandlerRegistry {
             source_enable_deferred: false,
             dispatch_ready: false,
             dispatch_requires_hardirq_context: false,
-            dispatch_calls: 0,
+            dispatch_calls: AtomicUsize::new(0),
             duplicate_registration_rejected: false,
             unmapped_registration_rejected: false,
             actions: [const { IrqAction::empty() }; IRQ_ACTION_CAPACITY],
@@ -472,8 +472,8 @@ impl IrqHandlerRegistry {
     }
 
     #[allow(dead_code)]
-    pub const fn dispatch_calls(&self) -> usize {
-        self.dispatch_calls
+    pub fn dispatch_calls(&self) -> usize {
+        self.dispatch_calls.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
@@ -588,7 +588,7 @@ impl IrqHandlerRegistry {
         true
     }
 
-    pub fn dispatch(&mut self, logical_irq: LogicalIrq) -> bool {
+    pub fn dispatch(&self, logical_irq: LogicalIrq) -> bool {
         if self.lifecycle.state() != State::Ready
             || !self.dispatch_ready
             || !self.dispatch_requires_hardirq_context
@@ -613,7 +613,7 @@ impl IrqHandlerRegistry {
             IrqHandlerKind::Ns16550aUart => crate::objects::ns16550a::handle_uart_irq(),
             IrqHandlerKind::None => return false,
         }
-        self.dispatch_calls = self.dispatch_calls.saturating_add(1);
+        self.dispatch_calls.fetch_add(1, Ordering::AcqRel);
         true
     }
 }
@@ -1957,12 +1957,12 @@ pub struct Plic {
     claim_before_dispatch: bool,
     complete_after_handler: bool,
     uart_source_trigger_deferred: bool,
-    claim_count: usize,
-    zero_claim_count: usize,
-    dispatch_count: usize,
-    complete_count: usize,
-    last_claimed_source: u32,
-    last_completed_source: u32,
+    claim_count: AtomicUsize,
+    zero_claim_count: AtomicUsize,
+    dispatch_count: AtomicUsize,
+    complete_count: AtomicUsize,
+    last_claimed_source: AtomicU32,
+    last_completed_source: AtomicU32,
 }
 
 impl Plic {
@@ -1999,12 +1999,12 @@ impl Plic {
             claim_before_dispatch: false,
             complete_after_handler: false,
             uart_source_trigger_deferred: false,
-            claim_count: 0,
-            zero_claim_count: 0,
-            dispatch_count: 0,
-            complete_count: 0,
-            last_claimed_source: 0,
-            last_completed_source: 0,
+            claim_count: AtomicUsize::new(0),
+            zero_claim_count: AtomicUsize::new(0),
+            dispatch_count: AtomicUsize::new(0),
+            complete_count: AtomicUsize::new(0),
+            last_claimed_source: AtomicU32::new(0),
+            last_completed_source: AtomicU32::new(0),
         }
     }
 
@@ -2137,33 +2137,33 @@ impl Plic {
     }
 
     #[allow(dead_code)]
-    pub const fn claim_count(&self) -> usize {
-        self.claim_count
+    pub fn claim_count(&self) -> usize {
+        self.claim_count.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
-    pub const fn zero_claim_count(&self) -> usize {
-        self.zero_claim_count
+    pub fn zero_claim_count(&self) -> usize {
+        self.zero_claim_count.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
-    pub const fn dispatch_count(&self) -> usize {
-        self.dispatch_count
+    pub fn dispatch_count(&self) -> usize {
+        self.dispatch_count.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
-    pub const fn complete_count(&self) -> usize {
-        self.complete_count
+    pub fn complete_count(&self) -> usize {
+        self.complete_count.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
-    pub const fn last_claimed_source(&self) -> u32 {
-        self.last_claimed_source
+    pub fn last_claimed_source(&self) -> u32 {
+        self.last_claimed_source.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
-    pub const fn last_completed_source(&self) -> u32 {
-        self.last_completed_source
+    pub fn last_completed_source(&self) -> u32 {
+        self.last_completed_source.load(Ordering::Acquire)
     }
 
     fn preset_from_irqchip(
@@ -2184,7 +2184,7 @@ impl Plic {
             || !riscv_intc.boot_cpu_external_irq_reserved()
             || !node.property(b"interrupt-controller").is_some()
             || !plic_node_matches_supported_compatible(node)
-            || !plic_context_parent_has_external_input(node)
+            || !plic_context_parent_has_external_input(node, cpu_group)
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -2217,7 +2217,7 @@ impl Plic {
                 State::Ready,
             );
         }
-        let Some(context_id) = plic_external_context_index(node) else {
+        let Some(context_id) = plic_external_context_index(node, cpu_group) else {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
@@ -2322,9 +2322,9 @@ impl Plic {
     }
 
     pub fn handle_external_interrupt(
-        &mut self,
+        &self,
         domain: &PlicIrqDomain,
-        registry: &mut IrqHandlerRegistry,
+        registry: &IrqHandlerRegistry,
     ) -> bool {
         if self.lifecycle.state() != State::Ready
             || !self.chained_handler_ready
@@ -2348,7 +2348,7 @@ impl Plic {
             .resolve_hwirq(source)
             .is_some_and(|logical_irq| registry.dispatch(logical_irq));
         if dispatched {
-            self.dispatch_count = self.dispatch_count.saturating_add(1);
+            self.dispatch_count.fetch_add(1, Ordering::AcqRel);
         }
         self.complete(source);
         dispatched
@@ -2383,23 +2383,23 @@ impl Plic {
         unsafe { core::ptr::read_volatile(enable_addr as *const u32) & mask != 0 }
     }
 
-    fn claim(&mut self) -> u32 {
+    fn claim(&self) -> u32 {
         if self.claim_addr == 0 || !self.claim_action_ready {
             return 0;
         }
 
         let source = unsafe { core::ptr::read_volatile(self.claim_addr as *const u32) };
         if source == 0 {
-            self.zero_claim_count = self.zero_claim_count.saturating_add(1);
+            self.zero_claim_count.fetch_add(1, Ordering::AcqRel);
             return 0;
         }
 
-        self.claim_count = self.claim_count.saturating_add(1);
-        self.last_claimed_source = source;
+        self.claim_count.fetch_add(1, Ordering::AcqRel);
+        self.last_claimed_source.store(source, Ordering::Release);
         source
     }
 
-    fn complete(&mut self, source: u32) {
+    fn complete(&self, source: u32) {
         if self.claim_addr == 0 || source == 0 || !self.complete_action_ready {
             return;
         }
@@ -2407,8 +2407,8 @@ impl Plic {
         unsafe {
             core::ptr::write_volatile(self.claim_addr as *mut u32, source);
         }
-        self.complete_count = self.complete_count.saturating_add(1);
-        self.last_completed_source = source;
+        self.complete_count.fetch_add(1, Ordering::AcqRel);
+        self.last_completed_source.store(source, Ordering::Release);
     }
 }
 
@@ -2853,11 +2853,12 @@ fn plic_source_count(node: DeviceNodeRef<'_>) -> Option<u32> {
     read_property_u32(node.property(b"riscv,ndev"))
 }
 
-fn plic_context_parent_has_external_input(node: DeviceNodeRef<'_>) -> bool {
-    plic_external_context_index(node).is_some()
+fn plic_context_parent_has_external_input(node: DeviceNodeRef<'_>, cpu_group: &CpuGroup) -> bool {
+    plic_external_context_index(node, cpu_group).is_some()
 }
 
-fn plic_external_context_index(node: DeviceNodeRef<'_>) -> Option<usize> {
+fn plic_external_context_index(node: DeviceNodeRef<'_>, cpu_group: &CpuGroup) -> Option<usize> {
+    let boot_intc_phandle = boot_hart_intc_phandle(node, cpu_group.boot_hartid())?;
     let Some(property) = node.property(b"interrupts-extended") else {
         return None;
     };
@@ -2872,24 +2873,54 @@ fn plic_external_context_index(node: DeviceNodeRef<'_>) -> Option<usize> {
 
     let mut cursor = start;
     let mut index = 0usize;
-    let mut machine_external_index = None;
     while cursor + 8 <= end {
-        let Some(_phandle) = read_be_u32(cursor, end) else {
+        let Some(phandle) = read_be_u32(cursor, end) else {
             return None;
         };
         let Some(cause) = read_be_u32(cursor + 4, end) else {
             return None;
         };
-        if cause == riscv64::SUPERVISOR_EXTERNAL_IRQ as u32 {
+        if phandle == boot_intc_phandle && cause == riscv64::SUPERVISOR_EXTERNAL_IRQ as u32 {
             return Some(index);
-        }
-        if cause == riscv64::MACHINE_EXTERNAL_IRQ && machine_external_index.is_none() {
-            machine_external_index = Some(index);
         }
         cursor += 8;
         index += 1;
     }
-    machine_external_index
+    None
+}
+
+fn boot_hart_intc_phandle(plic_node: DeviceNodeRef<'_>, boot_hartid: usize) -> Option<u32> {
+    let cpus = plic_node
+        .parent()
+        .and_then(|parent| parent.parent())
+        .and_then(|root| root.children().find(|node| node.name() == b"cpus"))?;
+    let address_cells = read_cells_u32(cpus.property(b"#address-cells")).unwrap_or(1);
+    for cpu in cpus.children() {
+        let Some(reg) = cpu.property(b"reg") else {
+            continue;
+        };
+        let (hartid, _) = read_cells(
+            reg.raw_value().as_ptr() as usize,
+            reg.raw_value().len(),
+            address_cells,
+        )?;
+        if usize::try_from(hartid).ok()? != boot_hartid {
+            continue;
+        }
+        for child in cpu.children() {
+            if child.property(b"interrupt-controller").is_some()
+                && child.has_compatible(b"riscv,cpu-intc")
+            {
+                if let Some(phandle) = read_property_u32(child.property(b"phandle")) {
+                    return Some(phandle);
+                }
+                if let Some(phandle) = read_property_u32(child.property(b"linux,phandle")) {
+                    return Some(phandle);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn plic_context_claim_addr(membase: usize, context_id: usize) -> Option<usize> {
@@ -3028,6 +3059,159 @@ impl UartExternalIrqEnable {
     }
 }
 
+pub struct UartInterruptChainProbe {
+    lifecycle: Lifecycle,
+    uart_trigger_committed: bool,
+    plic_claim_observed: bool,
+    irq_dispatch_observed: bool,
+    uart_handler_observed: bool,
+    plic_complete_observed: bool,
+    console_polling_preserved: bool,
+}
+
+impl UartInterruptChainProbe {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            uart_trigger_committed: false,
+            plic_claim_observed: false,
+            irq_dispatch_observed: false,
+            uart_handler_observed: false,
+            plic_complete_observed: false,
+            console_polling_preserved: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn uart_trigger_committed(&self) -> bool {
+        self.uart_trigger_committed
+    }
+
+    pub const fn plic_claim_observed(&self) -> bool {
+        self.plic_claim_observed
+    }
+
+    pub const fn irq_dispatch_observed(&self) -> bool {
+        self.irq_dispatch_observed
+    }
+
+    pub const fn uart_handler_observed(&self) -> bool {
+        self.uart_handler_observed
+    }
+
+    pub const fn plic_complete_observed(&self) -> bool {
+        self.plic_complete_observed
+    }
+
+    pub const fn console_polling_preserved(&self) -> bool {
+        self.console_polling_preserved
+    }
+
+    pub fn setup(
+        &mut self,
+        uart_external_irq_enable: &UartExternalIrqEnable,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+    ) -> EventResult {
+        let source = super::ns16550a::uart8250_port_irq_source();
+        let logical_irq = super::ns16550a::uart8250_port_logical_irq();
+        if self.lifecycle.state() != State::Base
+            || uart_external_irq_enable.state() != State::Ready
+            || !uart_external_irq_enable.plic_source_gate_open()
+            || !uart_external_irq_enable.root_external_input_gate_open()
+            || plic.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || irq_handler_registry.state() != State::Ready
+            || !super::ns16550a::uart8250_port_logical_irq_ready()
+            || !super::ns16550a::uart8250_irq_handler_registered()
+            || !logical_irq.is_valid()
+            || plic_irq_domain
+                .mapping_for_source(source)
+                .is_none_or(|mapping| {
+                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
+                })
+            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let claim_before = plic.claim_count();
+        let complete_before = plic.complete_count();
+        let plic_dispatch_before = plic.dispatch_count();
+        let irq_dispatch_before = irq_handler_registry.dispatch_calls();
+        let handler_before = super::ns16550a::uart8250_irq_handler_call_count();
+        let handled_before = super::ns16550a::uart8250_thre_interrupt_handled_count();
+
+        if !super::ns16550a::trigger_uart8250_thre_interrupt_once() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        const SPIN_LIMIT: usize = 20_000_000;
+        let mut spins = 0usize;
+        while super::ns16550a::uart8250_thre_interrupt_handled_count() == handled_before
+            && spins < SPIN_LIMIT
+        {
+            core::hint::spin_loop();
+            spins += 1;
+        }
+        if super::ns16550a::uart8250_thre_interrupt_handled_count() == handled_before {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.uart_trigger_committed = super::ns16550a::uart8250_interrupt_trigger_ready()
+            && super::ns16550a::uart8250_thre_interrupt_request_count() != 0
+            && super::ns16550a::uart8250_thre_interrupt_handled();
+        self.plic_claim_observed =
+            plic.claim_count() > claim_before && plic.last_claimed_source() == source;
+        self.irq_dispatch_observed = plic.dispatch_count() > plic_dispatch_before
+            && irq_handler_registry.dispatch_calls() > irq_dispatch_before;
+        self.uart_handler_observed = super::ns16550a::uart8250_irq_handler_call_count()
+            > handler_before
+            && super::ns16550a::uart8250_thri_disabled_by_handler_count() != 0;
+        self.plic_complete_observed =
+            plic.complete_count() > complete_before && plic.last_completed_source() == source;
+        self.console_polling_preserved =
+            super::ns16550a::uart8250_interrupt_output_still_deferred();
+
+        if !self.uart_trigger_committed
+            || !self.plic_claim_observed
+            || !self.irq_dispatch_observed
+            || !self.uart_handler_observed
+            || !self.plic_complete_observed
+            || !self.console_polling_preserved
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
 fn find_plic_interrupt_controller_node(device_tree: &DeviceTree) -> Option<DeviceNodeRef<'_>> {
     let root = device_tree.root()?;
     find_plic_interrupt_controller_node_from(root)
@@ -3126,10 +3310,10 @@ pub fn timer_interrupt_count() -> usize {
 }
 
 pub fn handle_external_interrupt() {
-    let ctx = crate::context::context();
-    let plic = &mut ctx.plic;
+    let ctx = crate::context::context_ref();
+    let plic = &ctx.plic;
     let domain = &ctx.plic_irq_domain;
-    let registry = &mut ctx.irq_handler_registry;
+    let registry = &ctx.irq_handler_registry;
     plic.handle_external_interrupt(domain, registry);
 }
 

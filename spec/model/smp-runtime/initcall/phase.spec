@@ -628,6 +628,7 @@ object InitcallBoundary: KernelObject {
                     CtorTable.state == State::Ready;
                     InitcallTable.state == State::Ready;
                     UartExternalIrqEnable.state == State::Ready;
+                    UartInterruptChainProbe.state == State::Ready;
                 }
 
                 ensures {
@@ -680,6 +681,7 @@ object InitcallPhase: PhaseObject {
                     InitcallTable.Event::Setup;
                     Ns16550aPlatformDriver.Event::Setup;
                     UartExternalIrqEnable.Event::Setup;
+                    UartInterruptChainProbe.Event::Setup;
                     InitcallBoundary.Event::Setup;
                 }
 
@@ -721,6 +723,12 @@ object InitcallPhase: PhaseObject {
                     uart_external_irq_enable_opens_plic_source_gate(UartExternalIrqEnable, PlicIrqDomain, IrqGateRef::PlicUartSource);
                     uart_external_irq_enable_opens_root_input_gate(UartExternalIrqEnable, RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
                     uart_external_irq_enable_keeps_uart_trigger_deferred(UartExternalIrqEnable, Plic);
+                    uart_interrupt_chain_probe_ready(UartInterruptChainProbe);
+                    uart_interrupt_chain_probe_observes_plic_claim(UartInterruptChainProbe, Plic);
+                    uart_interrupt_chain_probe_observes_irq_dispatch(UartInterruptChainProbe, IrqHandlerRegistry);
+                    uart_interrupt_chain_probe_observes_uart_handler(UartInterruptChainProbe, IrqAction);
+                    uart_interrupt_chain_probe_observes_plic_complete(UartInterruptChainProbe, Plic);
+                    uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }
@@ -737,6 +745,7 @@ object InitcallPhase: PhaseObject {
             PlatformBus.state == State::Ready;
             Ns16550aPlatformDriver.state == State::Ready;
             UartExternalIrqEnable.state == State::Ready;
+            UartInterruptChainProbe.state == State::Ready;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;

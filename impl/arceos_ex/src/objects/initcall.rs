@@ -6,6 +6,7 @@ use super::{
     ioremap::Ioremap,
     irq_time::{
         IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain, UartExternalIrqEnable,
+        UartInterruptChainProbe,
     },
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
@@ -1811,6 +1812,7 @@ impl InitcallBoundary {
         ctor_table: &CtorTable,
         initcall_table: &InitcallTable,
         uart_external_irq_enable: &UartExternalIrqEnable,
+        uart_interrupt_chain_probe: &UartInterruptChainProbe,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpuset.state() != State::Ready
@@ -1832,6 +1834,13 @@ impl InitcallBoundary {
             || !uart_external_irq_enable.plic_source_gate_open()
             || !uart_external_irq_enable.root_external_input_gate_open()
             || !uart_external_irq_enable.uart_interrupt_output_deferred()
+            || uart_interrupt_chain_probe.state() != State::Ready
+            || !uart_interrupt_chain_probe.uart_trigger_committed()
+            || !uart_interrupt_chain_probe.plic_claim_observed()
+            || !uart_interrupt_chain_probe.irq_dispatch_observed()
+            || !uart_interrupt_chain_probe.uart_handler_observed()
+            || !uart_interrupt_chain_probe.plic_complete_observed()
+            || !uart_interrupt_chain_probe.console_polling_preserved()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -1861,6 +1870,7 @@ pub fn initcall_phase_ready(
     ctor_table: &CtorTable,
     initcall_table: &InitcallTable,
     uart_external_irq_enable: &UartExternalIrqEnable,
+    uart_interrupt_chain_probe: &UartInterruptChainProbe,
     boundary: &InitcallBoundary,
 ) -> bool {
     cpuset.state() == State::Ready
@@ -1932,6 +1942,13 @@ pub fn initcall_phase_ready(
         && uart_external_irq_enable.plic_source_gate_open()
         && uart_external_irq_enable.root_external_input_gate_open()
         && uart_external_irq_enable.uart_interrupt_output_deferred()
+        && uart_interrupt_chain_probe.state() == State::Ready
+        && uart_interrupt_chain_probe.uart_trigger_committed()
+        && uart_interrupt_chain_probe.plic_claim_observed()
+        && uart_interrupt_chain_probe.irq_dispatch_observed()
+        && uart_interrupt_chain_probe.uart_handler_observed()
+        && uart_interrupt_chain_probe.plic_complete_observed()
+        && uart_interrupt_chain_probe.console_polling_preserved()
         && boundary.state() == State::Ready
         && boundary.kunit_next_boundary()
 }

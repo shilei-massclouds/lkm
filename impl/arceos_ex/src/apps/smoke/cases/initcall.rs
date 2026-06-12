@@ -78,6 +78,13 @@ pub fn run() -> SmokeResult {
         || !ctx
             .uart_external_irq_enable
             .uart_interrupt_output_deferred()
+        || ctx.uart_interrupt_chain_probe.state() != State::Ready
+        || !ctx.uart_interrupt_chain_probe.uart_trigger_committed()
+        || !ctx.uart_interrupt_chain_probe.plic_claim_observed()
+        || !ctx.uart_interrupt_chain_probe.irq_dispatch_observed()
+        || !ctx.uart_interrupt_chain_probe.uart_handler_observed()
+        || !ctx.uart_interrupt_chain_probe.plic_complete_observed()
+        || !ctx.uart_interrupt_chain_probe.console_polling_preserved()
         || !ctx.interrupt_stream.supervisor_external_input_gate_open()
         || !ctx
             .irq_handler_registry
@@ -299,7 +306,12 @@ fn check_uart_irq_handler(registry: &crate::objects::irq_time::IrqHandlerRegistr
         && crate::objects::ns16550a::uart8250_irq_handler_registered()
         && crate::objects::ns16550a::uart8250_irq_handler_hardirq_context_required()
         && crate::objects::ns16550a::uart8250_irq_handler_dispatch_ready()
-        && crate::objects::ns16550a::uart8250_irq_handler_call_count() == 0
+        && crate::objects::ns16550a::uart8250_interrupt_trigger_ready()
+        && crate::objects::ns16550a::uart8250_thre_interrupt_handled()
+        && crate::objects::ns16550a::uart8250_thre_interrupt_request_count() != 0
+        && crate::objects::ns16550a::uart8250_thre_interrupt_handled_count() != 0
+        && crate::objects::ns16550a::uart8250_thri_disabled_by_handler_count() != 0
+        && crate::objects::ns16550a::uart8250_irq_handler_call_count() != 0
         && registry
             .action_for_logical_irq(logical_irq)
             .is_some_and(|action| {

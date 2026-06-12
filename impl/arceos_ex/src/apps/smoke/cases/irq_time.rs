@@ -84,7 +84,6 @@ pub fn run() -> SmokeResult {
         || !ctx.plic.complete_writes_claimed_source()
         || !ctx.plic.claim_before_dispatch()
         || !ctx.plic.complete_after_handler()
-        || !ctx.plic.uart_source_trigger_deferred()
         || !ctx.plic_irq_domain.owner_bound()
         || !ctx.plic_irq_domain.hwirq_valid_range_ready()
         || !ctx.plic_irq_domain.logical_irq_allocator_ready()

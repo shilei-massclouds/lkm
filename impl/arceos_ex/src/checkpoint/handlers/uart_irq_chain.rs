@@ -14,7 +14,7 @@ const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
 pub const KUNIT_CASE_COUNT: usize = 1;
 
 pub const HANDLER: Handler = Handler {
-    name: "uart_irq_chain.observer_baseline",
+    name: "uart_irq_chain.observer_real_path",
     priority: 92,
     scope: HandlerScope::Only(SCOPE),
     run: HandlerRun::Observe(run),
@@ -50,6 +50,16 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
         "uart_irq_handler_calls",
         ns16550a::uart8250_irq_handler_call_count(),
     );
+    sink.diag_usize(
+        "uart_thre_requests",
+        ns16550a::uart8250_thre_interrupt_request_count(),
+    );
+    sink.diag_usize(
+        "uart_thre_handled",
+        ns16550a::uart8250_thre_interrupt_handled_count(),
+    );
+    sink.diag_usize("uart_last_iir", ns16550a::uart8250_last_iir());
+    sink.diag_usize("uart_last_lsr", ns16550a::uart8250_last_lsr());
     sink.diag_usize("plic_claim_count", ctx.plic.claim_count());
     sink.diag_usize("plic_complete_count", ctx.plic.complete_count());
     sink.diag_usize("plic_dispatch_count", ctx.plic.dispatch_count());
@@ -76,6 +86,13 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx
             .uart_external_irq_enable
             .uart_interrupt_output_deferred()
+        && ctx.uart_interrupt_chain_probe.state() == State::Ready
+        && ctx.uart_interrupt_chain_probe.uart_trigger_committed()
+        && ctx.uart_interrupt_chain_probe.plic_claim_observed()
+        && ctx.uart_interrupt_chain_probe.irq_dispatch_observed()
+        && ctx.uart_interrupt_chain_probe.uart_handler_observed()
+        && ctx.uart_interrupt_chain_probe.plic_complete_observed()
+        && ctx.uart_interrupt_chain_probe.console_polling_preserved()
         && ctx.plic.chained_handler_ready()
         && ctx.plic.claim_action_ready()
         && ctx.plic.complete_action_ready()
@@ -84,10 +101,11 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.plic.complete_writes_claimed_source()
         && ctx.plic.claim_before_dispatch()
         && ctx.plic.complete_after_handler()
-        && ctx.plic.uart_source_trigger_deferred()
-        && ctx.plic.claim_count() == 0
-        && ctx.plic.complete_count() == 0
-        && ctx.plic.dispatch_count() == 0
+        && ctx.plic.claim_count() != 0
+        && ctx.plic.complete_count() != 0
+        && ctx.plic.dispatch_count() != 0
+        && ctx.plic.last_claimed_source() == source
+        && ctx.plic.last_completed_source() == source
         && ctx.plic_irq_domain.state() == State::Ready
         && ctx.plic_irq_domain.enable_deferred()
         && ctx.plic_irq_domain.dispatch_ops_ready()
@@ -95,13 +113,18 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.irq_handler_registry.source_enable_deferred()
         && ctx.irq_handler_registry.dispatch_ready()
         && ctx.irq_handler_registry.dispatch_requires_hardirq_context()
-        && ctx.irq_handler_registry.dispatch_calls() == 0
+        && ctx.irq_handler_registry.dispatch_calls() != 0
         && ns16550a::uart8250_port_irq_resource_ready()
         && ns16550a::uart8250_port_logical_irq_ready()
         && ns16550a::uart8250_irq_handler_registered()
         && ns16550a::uart8250_irq_handler_hardirq_context_required()
         && ns16550a::uart8250_irq_handler_dispatch_ready()
-        && ns16550a::uart8250_irq_handler_call_count() == 0
+        && ns16550a::uart8250_interrupt_trigger_ready()
+        && ns16550a::uart8250_thre_interrupt_handled()
+        && ns16550a::uart8250_thre_interrupt_request_count() != 0
+        && ns16550a::uart8250_thre_interrupt_handled_count() != 0
+        && ns16550a::uart8250_thri_disabled_by_handler_count() != 0
+        && ns16550a::uart8250_irq_handler_call_count() != 0
         && plic_mapping_enabled(ctx, source, logical_irq)
         && irq_action_deferred(ctx, logical_irq)
 }

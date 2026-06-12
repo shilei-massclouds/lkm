@@ -56,6 +56,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.irq_handler_registry,
         &mut ctx.interrupt_stream,
     )?;
+    ctx.uart_interrupt_chain_probe.setup(
+        &ctx.uart_external_irq_enable,
+        &ctx.plic,
+        &ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+    )?;
     ctx.initcall_boundary.setup(
         &ctx.cpuset_smp_trimmed,
         &ctx.driver_core_base,
@@ -66,6 +72,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.ctor_table,
         &ctx.initcall_table,
         &ctx.uart_external_irq_enable,
+        &ctx.uart_interrupt_chain_probe,
     )
 }
 
@@ -93,6 +100,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.ctor_table,
         &ctx.initcall_table,
         &ctx.uart_external_irq_enable,
+        &ctx.uart_interrupt_chain_probe,
         &ctx.initcall_boundary,
     ) {
         return failed_condition(

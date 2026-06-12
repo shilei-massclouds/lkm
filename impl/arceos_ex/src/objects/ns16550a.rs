@@ -16,14 +16,30 @@ const NS16550A_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"ns16550a")];
 const DEFAULT_REG_SHIFT: u32 = 0;
 const DEFAULT_REG_IO_WIDTH: u32 = 1;
 const DEFAULT_CLOCK_FREQUENCY: u32 = 0;
+const UART_RX: usize = 0;
 const UART_TX: usize = 0;
+const UART_IER: usize = 1;
+const UART_IIR: usize = 2;
+const UART_MCR: usize = 4;
 const UART_LSR: usize = 5;
+const UART_IER_THRI: usize = 1 << 1;
+const UART_IIR_NO_INT: usize = 1;
+const UART_IIR_ID: usize = 0x0e;
+const UART_IIR_THRI: usize = 0x02;
+const UART_MCR_OUT2: usize = 1 << 3;
+const UART_MCR_LOOP: usize = 1 << 4;
+const UART_LSR_DR: usize = 1;
 const UART_LSR_THRE: usize = 1 << 5;
 const UART_POLL_SPINS: usize = 100_000;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
 
 static UART8250_IRQ_HANDLER_CALLS: AtomicUsize = AtomicUsize::new(0);
+static UART8250_THRE_INTERRUPT_REQUESTS: AtomicUsize = AtomicUsize::new(0);
+static UART8250_THRE_INTERRUPT_HANDLED: AtomicUsize = AtomicUsize::new(0);
+static UART8250_THRI_DISABLED_BY_HANDLER: AtomicUsize = AtomicUsize::new(0);
+static UART8250_LAST_IIR: AtomicUsize = AtomicUsize::new(UART_IIR_NO_INT);
+static UART8250_LAST_LSR: AtomicUsize = AtomicUsize::new(0);
 
 pub static NS16550A_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
     "of_serial",
@@ -87,6 +103,10 @@ pub struct Uart8250Port {
     irq_handler_hardirq_context_required: bool,
     irq_handler_dispatch_ready: bool,
     interrupt_output_deferred: bool,
+    interrupt_trigger_ready: bool,
+    thre_interrupt_enabled: bool,
+    thre_interrupt_handled: bool,
+    thre_interrupt_loopback: bool,
     line: usize,
     registered: bool,
 }
@@ -114,6 +134,10 @@ impl Uart8250Port {
             irq_handler_hardirq_context_required: false,
             irq_handler_dispatch_ready: false,
             interrupt_output_deferred: false,
+            interrupt_trigger_ready: false,
+            thre_interrupt_enabled: false,
+            thre_interrupt_handled: false,
+            thre_interrupt_loopback: false,
             line: usize::MAX,
             registered: false,
         }
@@ -149,8 +173,14 @@ pub struct Serial8250WriteBackend {
     device_ref: DeviceRef,
     membase: usize,
     tx_addr: usize,
+    ier_addr: usize,
+    iir_addr: usize,
+    mcr_addr: usize,
     lsr_addr: usize,
     tx_offset: usize,
+    ier_offset: usize,
+    iir_offset: usize,
+    mcr_offset: usize,
     lsr_offset: usize,
     reg_shift: u32,
     reg_io_width: u32,
@@ -176,8 +206,14 @@ impl Serial8250WriteBackend {
             device_ref: DeviceRef::new(usize::MAX),
             membase: 0,
             tx_addr: 0,
+            ier_addr: 0,
+            iir_addr: 0,
+            mcr_addr: 0,
             lsr_addr: 0,
             tx_offset: 0,
+            ier_offset: 0,
+            iir_offset: 0,
+            mcr_offset: 0,
             lsr_offset: 0,
             reg_shift: 0,
             reg_io_width: 0,
@@ -210,16 +246,28 @@ impl Serial8250WriteBackend {
         }
 
         let tx_offset = uart_register_offset(port, UART_TX)?;
+        let ier_offset = uart_register_offset(port, UART_IER)?;
+        let iir_offset = uart_register_offset(port, UART_IIR)?;
+        let mcr_offset = uart_register_offset(port, UART_MCR)?;
         let lsr_offset = uart_register_offset(port, UART_LSR)?;
         let tx_addr = port.membase.checked_add(tx_offset)?;
+        let ier_addr = port.membase.checked_add(ier_offset)?;
+        let iir_addr = port.membase.checked_add(iir_offset)?;
+        let mcr_addr = port.membase.checked_add(mcr_offset)?;
         let lsr_addr = port.membase.checked_add(lsr_offset)?;
         Some(Self {
             ready: true,
             device_ref: port.device_ref,
             membase: port.membase,
             tx_addr,
+            ier_addr,
+            iir_addr,
+            mcr_addr,
             lsr_addr,
             tx_offset,
+            ier_offset,
+            iir_offset,
+            mcr_offset,
             lsr_offset,
             reg_shift: port.reg_shift,
             reg_io_width: port.reg_io_width,
@@ -287,19 +335,51 @@ impl Serial8250WriteBackend {
     }
 
     fn read_uart_lsr(&self) -> usize {
+        self.read_uart_reg(self.lsr_addr)
+    }
+
+    fn read_uart_rx(&self) -> usize {
+        self.read_uart_reg(self.membase + (UART_RX << self.reg_shift))
+    }
+
+    fn read_uart_iir(&self) -> usize {
+        self.read_uart_reg(self.iir_addr)
+    }
+
+    fn read_uart_ier(&self) -> usize {
+        self.read_uart_reg(self.ier_addr)
+    }
+
+    fn read_uart_mcr(&self) -> usize {
+        self.read_uart_reg(self.mcr_addr)
+    }
+
+    fn write_uart_ier(&self, value: usize) -> bool {
+        self.write_uart_reg(self.ier_addr, value)
+    }
+
+    fn write_uart_mcr(&self, value: usize) -> bool {
+        self.write_uart_reg(self.mcr_addr, value)
+    }
+
+    fn read_uart_reg(&self, addr: usize) -> usize {
         match self.reg_io_width {
-            1 => unsafe { core::ptr::read_volatile(self.lsr_addr as *const u8) as usize },
-            2 => unsafe { core::ptr::read_volatile(self.lsr_addr as *const u16) as usize },
-            4 => unsafe { core::ptr::read_volatile(self.lsr_addr as *const u32) as usize },
+            1 => unsafe { core::ptr::read_volatile(addr as *const u8) as usize },
+            2 => unsafe { core::ptr::read_volatile(addr as *const u16) as usize },
+            4 => unsafe { core::ptr::read_volatile(addr as *const u32) as usize },
             _ => 0,
         }
     }
 
     fn write_uart_tx(&self, byte: u8) -> bool {
+        self.write_uart_reg(self.tx_addr, byte as usize)
+    }
+
+    fn write_uart_reg(&self, addr: usize, value: usize) -> bool {
         match self.reg_io_width {
-            1 => unsafe { core::ptr::write_volatile(self.tx_addr as *mut u8, byte) },
-            2 => unsafe { core::ptr::write_volatile(self.tx_addr as *mut u16, byte as u16) },
-            4 => unsafe { core::ptr::write_volatile(self.tx_addr as *mut u32, byte as u32) },
+            1 => unsafe { core::ptr::write_volatile(addr as *mut u8, value as u8) },
+            2 => unsafe { core::ptr::write_volatile(addr as *mut u16, value as u16) },
+            4 => unsafe { core::ptr::write_volatile(addr as *mut u32, value as u32) },
             _ => return false,
         }
         true
@@ -311,8 +391,14 @@ impl Serial8250WriteBackend {
             && self.device_ref == port.device_ref
             && self.membase == port.membase
             && self.tx_addr == port.membase
+            && self.ier_addr == port.membase.saturating_add(self.ier_offset)
+            && self.iir_addr == port.membase.saturating_add(self.iir_offset)
+            && self.mcr_addr == port.membase.saturating_add(self.mcr_offset)
             && self.lsr_addr == port.membase.saturating_add(self.lsr_offset)
             && self.tx_offset == 0
+            && self.ier_offset == (UART_IER << port.reg_shift)
+            && self.iir_offset == (UART_IIR << port.reg_shift)
+            && self.mcr_offset == (UART_MCR << port.reg_shift)
             && self.lsr_offset == (UART_LSR << port.reg_shift)
             && self.reg_shift == port.reg_shift
             && self.reg_io_width == port.reg_io_width
@@ -418,6 +504,16 @@ pub fn uart8250_interrupt_output_still_deferred() -> bool {
     state.port.registered && state.port.interrupt_output_deferred
 }
 
+pub fn uart8250_interrupt_trigger_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered && state.port.interrupt_trigger_ready
+}
+
+pub fn uart8250_thre_interrupt_handled() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered && state.port.thre_interrupt_handled
+}
+
 pub fn uart8250_irq_handler_registered() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.port.registered
@@ -440,8 +536,105 @@ pub fn uart8250_irq_handler_call_count() -> usize {
     UART8250_IRQ_HANDLER_CALLS.load(Ordering::Acquire)
 }
 
+pub fn uart8250_thre_interrupt_request_count() -> usize {
+    UART8250_THRE_INTERRUPT_REQUESTS.load(Ordering::Acquire)
+}
+
+pub fn uart8250_thre_interrupt_handled_count() -> usize {
+    UART8250_THRE_INTERRUPT_HANDLED.load(Ordering::Acquire)
+}
+
+pub fn uart8250_thri_disabled_by_handler_count() -> usize {
+    UART8250_THRI_DISABLED_BY_HANDLER.load(Ordering::Acquire)
+}
+
+#[cfg(checkpoint_handler_uart_irq_chain)]
+pub fn uart8250_last_iir() -> usize {
+    UART8250_LAST_IIR.load(Ordering::Acquire)
+}
+
+#[cfg(checkpoint_handler_uart_irq_chain)]
+pub fn uart8250_last_lsr() -> usize {
+    UART8250_LAST_LSR.load(Ordering::Acquire)
+}
+
+pub fn trigger_uart8250_thre_interrupt_once() -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    if !state.port.registered
+        || !state.port.irq_handler_registered
+        || state.port.thre_interrupt_enabled
+        || state.port.thre_interrupt_handled
+        || !state.write_backend.facts_ready(state.port)
+    {
+        return false;
+    }
+
+    let lsr = state.write_backend.read_uart_lsr();
+    if lsr & UART_LSR_THRE == 0 {
+        return false;
+    }
+
+    let mcr = state.write_backend.read_uart_mcr();
+    if !state
+        .write_backend
+        .write_uart_mcr(mcr | UART_MCR_OUT2 | UART_MCR_LOOP)
+    {
+        return false;
+    }
+
+    let ier = state.write_backend.read_uart_ier() | UART_IER_THRI;
+    if !state.write_backend.write_uart_ier(ier) {
+        return false;
+    }
+    if !state.write_backend.write_uart_tx(0) {
+        return false;
+    }
+
+    state.port.interrupt_trigger_ready = true;
+    state.port.thre_interrupt_enabled = true;
+    state.port.thre_interrupt_loopback = true;
+    UART8250_THRE_INTERRUPT_REQUESTS.fetch_add(1, Ordering::AcqRel);
+    true
+}
+
 pub fn handle_uart_irq() {
     UART8250_IRQ_HANDLER_CALLS.fetch_add(1, Ordering::AcqRel);
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    if !state.port.registered || !state.port.thre_interrupt_enabled {
+        return;
+    }
+
+    let iir = state.write_backend.read_uart_iir();
+    let lsr = state.write_backend.read_uart_lsr();
+    UART8250_LAST_IIR.store(iir, Ordering::Release);
+    UART8250_LAST_LSR.store(lsr, Ordering::Release);
+    if iir & UART_IIR_NO_INT != 0 {
+        return;
+    }
+    if iir & UART_IIR_ID != UART_IIR_THRI {
+        return;
+    }
+    if lsr & UART_LSR_THRE == 0 {
+        return;
+    }
+
+    let ier = state.write_backend.read_uart_ier() & !UART_IER_THRI;
+    if state.write_backend.write_uart_ier(ier) {
+        if state.port.thre_interrupt_loopback {
+            let mcr = state.write_backend.read_uart_mcr();
+            let _ = state
+                .write_backend
+                .write_uart_mcr((mcr | UART_MCR_OUT2) & !UART_MCR_LOOP);
+            if state.write_backend.read_uart_lsr() & UART_LSR_DR != 0 {
+                let _ = state.write_backend.read_uart_rx();
+            }
+            state.port.thre_interrupt_loopback = false;
+        }
+        state.port.thre_interrupt_enabled = false;
+        state.port.thre_interrupt_handled = true;
+        UART8250_THRE_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
+        UART8250_THRI_DISABLED_BY_HANDLER.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 pub fn serial8250_console_registered() -> bool {
@@ -696,6 +889,10 @@ fn build_uart8250_port(
         irq_handler_hardirq_context_required: false,
         irq_handler_dispatch_ready: false,
         interrupt_output_deferred: true,
+        interrupt_trigger_ready: false,
+        thre_interrupt_enabled: false,
+        thre_interrupt_handled: false,
+        thre_interrupt_loopback: false,
         line: device.index(),
         registered: true,
     })

@@ -445,7 +445,7 @@ predicate uart_irq_chain_kunit_observer_does_not_call_handler<T>(observer: T) ->
 predicate uart_irq_chain_kunit_observer_does_not_claim_or_complete<T>(observer: T) -> bool;
 predicate uart_irq_chain_kunit_observer_does_not_modify_plic_state<T>(observer: T) -> bool;
 predicate uart_irq_chain_kunit_observer_reads_registered_action<T, R, A>(observer: T, registry: R, action: A) -> bool;
-predicate uart_irq_chain_kunit_observer_reads_deferred_trigger<T, P, R>(observer: T, plic: P, registry: R) -> bool;
+predicate uart_irq_chain_kunit_observer_reads_real_path_result<T, P, R, U>(observer: T, plic: P, registry: R, probe: U) -> bool;
 predicate uart_irq_chain_kunit_observer_reads_dispatch_contract<T, P, R>(observer: T, plic: P, registry: R) -> bool;
 
 predicate riscv_intc_external_irq_entry_ready<T>(intc: T) -> bool;
@@ -475,6 +475,13 @@ predicate uart_external_irq_enable_opens_plic_source_gate<T, D, G>(enable: T, do
 predicate uart_external_irq_enable_opens_root_input_gate<T, R, G>(enable: T, riscv_intc: R, gate: G) -> bool;
 predicate uart_external_irq_enable_requires_registered_handler<T, A>(enable: T, action: A) -> bool;
 predicate uart_external_irq_enable_keeps_uart_trigger_deferred<T, P>(enable: T, plic: P) -> bool;
+predicate uart_interrupt_chain_probe_ready<T>(probe: T) -> bool;
+predicate uart_interrupt_chain_probe_triggers_uart_once<T, U>(probe: T, uart: U) -> bool;
+predicate uart_interrupt_chain_probe_observes_plic_claim<T, P>(probe: T, plic: P) -> bool;
+predicate uart_interrupt_chain_probe_observes_irq_dispatch<T, R>(probe: T, registry: R) -> bool;
+predicate uart_interrupt_chain_probe_observes_uart_handler<T, A>(probe: T, action: A) -> bool;
+predicate uart_interrupt_chain_probe_observes_plic_complete<T, P>(probe: T, plic: P) -> bool;
+predicate uart_interrupt_chain_probe_preserves_polling_console<T, U>(probe: T, uart: U) -> bool;
 
 /*
  * IrqHandlerRegistry 是 IRQ core 侧的 handler/action registry。它记录
@@ -654,10 +661,11 @@ object UartIrqChainKunitObserver: InterruptObject {
                         IrqHandlerRegistry,
                         IrqActionRef::Ns16550aUart
                     );
-                    uart_irq_chain_kunit_observer_reads_deferred_trigger(
+                    uart_irq_chain_kunit_observer_reads_real_path_result(
                         UartIrqChainKunitObserver,
                         Plic,
-                        IrqHandlerRegistry
+                        IrqHandlerRegistry,
+                        UartInterruptChainProbe
                     );
                     uart_irq_chain_kunit_observer_reads_dispatch_contract(
                         UartIrqChainKunitObserver,
@@ -681,10 +689,11 @@ object UartIrqChainKunitObserver: InterruptObject {
                 IrqHandlerRegistry,
                 IrqActionRef::Ns16550aUart
             );
-            uart_irq_chain_kunit_observer_reads_deferred_trigger(
+            uart_irq_chain_kunit_observer_reads_real_path_result(
                 UartIrqChainKunitObserver,
                 Plic,
-                IrqHandlerRegistry
+                IrqHandlerRegistry,
+                UartInterruptChainProbe
             );
             uart_irq_chain_kunit_observer_reads_dispatch_contract(
                 UartIrqChainKunitObserver,
@@ -756,6 +765,74 @@ object UartExternalIrqEnable: InterruptObject {
             riscv_intc_external_input_enabled(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
             uart_external_irq_enable_keeps_uart_trigger_deferred(UartExternalIrqEnable, Plic);
             plic_uart_source_trigger_deferred(Plic);
+            uart8250_port_interrupt_output_still_deferred(Uart8250Port);
+        }
+    }
+}
+
+/*
+ * UartInterruptChainProbe 是生产侧的一次性外部中断链验证边界。
+ * 它在两个传播 gate 已打开后，按 Linux-like 8250 THRI 形状设置
+ * UART interrupt-output 条件、启用 THRI 并制造一次真实 TX empty edge，
+ * 之后由真实 trap/root INTC/PLIC/IRQ core 路径完成 claim -> dispatch
+ * -> handler -> complete。KUnit 只读取这个结果，不得触发该流程。
+ */
+object UartInterruptChainProbe: InterruptObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    UartExternalIrqEnable.state == State::Ready;
+                    Plic.state == State::Ready;
+                    RiscvIntc.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                    PlicIrqMapping.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                    IrqAction.state == State::Ready;
+                    Uart8250Port.state == State::Ready;
+                    irq_gate_open(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                    irq_gate_open(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                }
+
+                drives {
+                    Uart8250Port.Action::TriggerInterrupt(InterruptCauseRef::UartThre);
+                    RiscvIntc.Action::HandleExternalInput(InterruptCauseRef::SupervisorExternalIrq);
+                    Plic.Action::Claim(HwirqRef::PlicUart0);
+                    PlicIrqDomain.Action::Dispatch(LogicalIrqRef::Uart0);
+                    IrqHandlerRegistry.Action::Dispatch(LogicalIrqRef::Uart0);
+                    IrqAction.Action::Handle(IrqActionRef::Ns16550aUart);
+                    Plic.Action::Complete(HwirqRef::PlicUart0);
+                }
+
+                ensures {
+                    uart_interrupt_chain_probe_ready(UartInterruptChainProbe);
+                    uart_interrupt_chain_probe_triggers_uart_once(UartInterruptChainProbe, Uart8250Port);
+                    uart_interrupt_chain_probe_observes_plic_claim(UartInterruptChainProbe, Plic);
+                    uart_interrupt_chain_probe_observes_irq_dispatch(UartInterruptChainProbe, IrqHandlerRegistry);
+                    uart_interrupt_chain_probe_observes_uart_handler(UartInterruptChainProbe, IrqAction);
+                    uart_interrupt_chain_probe_observes_plic_complete(UartInterruptChainProbe, Plic);
+                    uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
+                    plic_claim_before_generic_irq_dispatch(Plic);
+                    plic_complete_after_irq_action_handler(Plic);
+                    irq_action_handler_runs_after_plic_claim(IrqAction, Plic);
+                    irq_action_handler_runs_before_plic_complete(IrqAction, Plic);
+                    uart8250_port_interrupt_output_still_deferred(Uart8250Port);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            uart_interrupt_chain_probe_ready(UartInterruptChainProbe);
+            uart_interrupt_chain_probe_triggers_uart_once(UartInterruptChainProbe, Uart8250Port);
+            uart_interrupt_chain_probe_observes_plic_claim(UartInterruptChainProbe, Plic);
+            uart_interrupt_chain_probe_observes_irq_dispatch(UartInterruptChainProbe, IrqHandlerRegistry);
+            uart_interrupt_chain_probe_observes_uart_handler(UartInterruptChainProbe, IrqAction);
+            uart_interrupt_chain_probe_observes_plic_complete(UartInterruptChainProbe, Plic);
+            uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
             uart8250_port_interrupt_output_still_deferred(Uart8250Port);
         }
     }
@@ -1517,7 +1594,7 @@ object IrqTimeInitPhase: PhaseObject {
                     "profile_init() 暂缓：profile buffer 和 proc export 后续再建模。";
                     "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
-                    "真实 UART 中断触发暂缓：当前建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，并由后续 UartExternalIrqEnable 显式打开 PLIC source gate 和 root external input gate，但不把 serial8250 console 声明为 interrupt-driven。";
+                    "完整 UART 运行期收发与 interrupt-driven console 暂缓：当前建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，后续 UartExternalIrqEnable 显式打开 PLIC source gate 和 root external input gate，UartInterruptChainProbe 执行一次性 THRE interrupt 验证，但不把 serial8250 console 声明为 interrupt-driven。";
                 }
             }
         }

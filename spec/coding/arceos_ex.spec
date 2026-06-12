@@ -87,6 +87,7 @@ predicate arceos_ex_must_plic_irq_domain_map_source_to_logical_irq_only() -> boo
 predicate arceos_ex_must_platform_irq_resource_parse_uart_interrupts_from_dt() -> bool;
 predicate arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler() -> bool;
 predicate arceos_ex_must_uart_external_irq_enable_be_explicit_boundary() -> bool;
+predicate arceos_ex_must_uart_interrupt_chain_probe_be_production_boundary() -> bool;
 predicate arceos_ex_must_model_irq_handler_registry_as_irq_core_object() -> bool;
 predicate arceos_ex_must_request_irq_require_mapped_logical_irq() -> bool;
 predicate arceos_ex_must_request_irq_record_handler_without_enabling_source() -> bool;
@@ -825,6 +826,22 @@ type ArceosExIrqTimeInitCodingMust {
          * complete, or mark serial8250 console output interrupt-driven.
          */
         arceos_ex_must_uart_external_irq_enable_be_explicit_boundary();
+
+        /*
+         * Production UART interrupt-chain probe:
+         *
+         * The first real UART interrupt may be triggered only by a named
+         * production boundary after UartExternalIrqEnable has opened both
+         * gates. That boundary must follow the Linux-like 8250 THRI shape:
+         * raise the UART interrupt-output precondition such as MCR.OUT2,
+         * enable UART_IER_THRI, and create a real TX-empty transition instead
+         * of assuming an IER write alone will always assert an interrupt. It
+         * then waits for the real root INTC -> PLIC claim -> IRQ dispatch ->
+         * UART handler -> PLIC complete path. KUnit/smoke code must only
+         * observe the resulting facts and counters; it must not call trigger,
+         * claim, complete, dispatch, or handler APIs directly.
+         */
+        arceos_ex_must_uart_interrupt_chain_probe_be_production_boundary();
 
         /*
          * IRQ handler registry:

@@ -1110,7 +1110,9 @@ growable registry 作为主注册路径。当前必须至少支持 QEMU virt 常
 `Plic` 在本阶段推进到最小 `Ready`：它确认 provider discovery、DeviceTree interrupt-controller node、compatible
 match、callback 调用事实、`reg` MMIO resource、`riscv,ndev` source count、`interrupts-extended` 中的 RISC-V external
 interrupt parent input，以及 PLIC 输出连接到上级 `RiscvIntc` external interrupt input 的父链关系。PLIC MMIO 必须通过
-runtime `ioremap`/`vmalloc` 映射执行路径建立，但 owner 是 system irqchip，而不是伪造的 `PlatformDevice`。
+runtime `ioremap`/`vmalloc` 映射执行路径建立，但 owner 是 system irqchip，而不是伪造的 `PlatformDevice`。PLIC 的
+context 选择必须反查 boot hart 的 `riscv,cpu-intc` phandle，并在 PLIC `interrupts-extended` 中匹配同一 phandle 的
+`SUPERVISOR_EXTERNAL_IRQ` 项；不得因为 QEMU boot hart 变化而启用其它 hart 的 PLIC context。
 
 UART 外部中断建模必须分清两条方向相反的链。物理传播链是 `UART -> PLIC -> RiscvIntc -> CPU`：UART 作为 PLIC
 source，PLIC output 接到 hart local INTC 的 supervisor external input，最后 CPU 被 interrupt。该链要真正导通，需要两个
@@ -1119,14 +1121,13 @@ enable gate；二者都不同于 `sstatus.SIE` 总开关。当前必须定义这
 `RiscvIntc`/`InterruptStream` 安装 supervisor external route 时定义，UART source gate 在 `PlicIrqMapping` 绑定
 `HwirqRef::PlicUart0` 到 UART logical IRQ 时定义。两个 gate 的显式 Enable action 必须由单独的
 `UartExternalIrqEnable` 边界执行：PLIC source gate 对应 PLIC context enable bitmap / source priority，root gate 对应
-RISC-V INTC `sie.SEIE` unmask。deferred 的是 UART 真实 interrupt trigger 和 interrupt-driven console 切换，serial8250
-console 仍保持 polling，不得声明 interrupt-driven ready。
+RISC-V INTC `sie.SEIE` unmask。`UartExternalIrqEnable` 仍不得制造 UART interrupt；真实一次性 UART THRE trigger 必须由后续
+`UartInterruptChainProbe` 生产边界执行。serial8250 console 仍保持 polling，不得声明 interrupt-driven ready。
 
 软件处理/溯源链是 `CPU -> RiscvIntc -> PLIC -> UART`。运行期 dispatch contract 必须仿照 Linux：RISC-V root INTC
 `EXT_IRQ`/SEI entry 只转交给 PLIC chained handler，PLIC handler 先从 claim 寄存器读取 source，经
 `PlicIrqDomain`/generic IRQ core dispatch 到已注册 action，handler 返回后再把同一个 source 写回 claim register complete；
-claim 返回 0 表示没有 pending source，不得调用 UART handler。严格的 `interrupts-extended` phandle 到 boot hart local INTC
-的反查绑定要等 DeviceTree phandle 查询能力建立后，在 IRQ domain/source mapping 步骤补上。
+claim 返回 0 表示没有 pending source，不得调用 UART handler。
 
 所有中断类型必须用命名 cause 表达，不得在规格或实现控制流中用裸数字描述。RISC-V supervisor external interrupt 在规格中
 称为 `InterruptCauseRef::SupervisorExternalIrq`，代码中应使用 `SUPERVISOR_EXTERNAL_IRQ`、`EXT_IRQ` 或同等架构命名常量；
@@ -1142,6 +1143,13 @@ source、不得注册 handler、不得执行 claim/complete 或 dispatch；建�
 `UartExternalIrqEnable` 只能在 UART IRQ resource、PLIC source mapping 和 `IrqHandlerRegistry` 中的 UART handler action
 都 ready 之后执行。它可以打开 PLIC UART source gate 和 root INTC supervisor external input gate，但仍不得直接触发 UART
 中断、调用 handler、执行 PLIC claim/complete，或把 serial8250 console 标记为 interrupt-driven。
+
+`UartInterruptChainProbe` 是生产侧一次性验证边界，不是 KUnit handler。它只能在 `UartExternalIrqEnable` ready 后执行，
+按照 Linux 8250 startup/THRI 语义打开 UART interrupt-output 前置条件：至少设置 MCR.OUT2，启用 `UART_IER_THRI`，
+并通过一次真实 TX empty 转换产生 THRE edge；不得只写 `UART_IER_THRI` 后假设硬件必然立即产生中断。随后等待真实
+trap/root INTC/PLIC/IRQ core 路径推进到 `PLIC claim -> logical IRQ dispatch -> UART handler -> PLIC complete`。
+UART handler 必须清掉 THRI，避免中断风暴；该 probe 仍不得把 console 输出切换为 interrupt-driven。KUnit/smoke
+只能读取该 probe 和计数结果，不能直接调用 trigger、root intc entry、PLIC claim/complete、IRQ dispatch 或 UART handler。
 
 `ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经
