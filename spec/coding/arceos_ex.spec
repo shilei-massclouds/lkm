@@ -88,6 +88,9 @@ predicate arceos_ex_must_model_irq_handler_registry_as_irq_core_object() -> bool
 predicate arceos_ex_must_request_irq_require_mapped_logical_irq() -> bool;
 predicate arceos_ex_must_request_irq_record_handler_without_enabling_source() -> bool;
 predicate arceos_ex_must_irq_handler_context_guard_remain_deferred_execution() -> bool;
+predicate arceos_ex_must_root_intc_external_irq_enter_plic_chained_handler_only() -> bool;
+predicate arceos_ex_must_plic_claim_before_irq_dispatch_and_complete_after_handler() -> bool;
+predicate arceos_ex_must_irq_core_dispatch_registered_action_by_logical_irq() -> bool;
 predicate arceos_ex_must_uart_irq_chain_kunit_remain_read_only_observer() -> bool;
 predicate arceos_ex_must_uart_irq_chain_kunit_not_drive_interrupt_flow() -> bool;
 predicate arceos_ex_must_kunit_handlers_receive_read_only_context_by_default() -> bool;
@@ -768,10 +771,9 @@ type ArceosExIrqTimeInitCodingMust {
         /*
          * Deferred interrupt output:
          *
-         * The first UART/PLIC integration step records the UART IRQ mapping
-         * only. It must not enable the PLIC source, register a handler, route
-         * claim/complete dispatch, or declare serial8250 interrupt-driven
-         * console output ready.
+         * The UART IRQ resource mapping step records the UART source/logical
+         * IRQ binding only. It must not enable the PLIC source or declare
+         * serial8250 interrupt-driven console output ready.
          */
         arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler();
 
@@ -801,8 +803,9 @@ type ArceosExIrqTimeInitCodingMust {
          *
          * ns16550a probe may request a UART handler record once its logical
          * IRQ is known, but this must not enable the PLIC source, install a
-         * claim/complete route, or mark serial8250 console output
-         * interrupt-driven.
+         * private claim/complete route, or mark serial8250 console output
+         * interrupt-driven. The route belongs to the root INTC/PLIC/IRQ core
+         * dispatch chain.
          */
         arceos_ex_must_request_irq_record_handler_without_enabling_source();
 
@@ -810,11 +813,40 @@ type ArceosExIrqTimeInitCodingMust {
          * Context guard:
          *
          * IrqAction records must carry a hardirq-context requirement before
-         * dispatch exists. The first registry step is still a static contract:
-         * it must not execute the handler or open sleep/process-only paths
-         * from interrupt context.
+         * they are dispatchable. IRQ dispatch must not open sleep/process-only
+         * paths from interrupt context.
          */
         arceos_ex_must_irq_handler_context_guard_remain_deferred_execution();
+
+        /*
+         * External interrupt dispatch contract:
+         *
+         * The RISC-V root INTC external interrupt entry must be a parent
+         * entry that forwards to the PLIC chained handler. It must not know
+         * about UART or dispatch leaf device handlers directly.
+         */
+        arceos_ex_must_root_intc_external_irq_enter_plic_chained_handler_only();
+
+        /*
+         * PLIC claim/complete order:
+         *
+         * The PLIC runtime handler must follow the Linux-like order: claim by
+         * reading the claim register, translate the claimed source through
+         * PlicIrqDomain/generic IRQ dispatch, run the registered action, then
+         * complete by writing the claimed source back. A zero claim means no
+         * pending source and must not call the UART handler.
+         */
+        arceos_ex_must_plic_claim_before_irq_dispatch_and_complete_after_handler();
+
+        /*
+         * IRQ core action dispatch:
+         *
+         * IRQ core dispatch must use the logical IRQ returned by
+         * PlicIrqDomain and run only an action registered in
+         * IrqHandlerRegistry. Missing mapping or missing action must not be
+         * treated as a successful UART interrupt.
+         */
+        arceos_ex_must_irq_core_dispatch_registered_action_by_logical_irq();
 
         /*
          * KUnit capability boundary:

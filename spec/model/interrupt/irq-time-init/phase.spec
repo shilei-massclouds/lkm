@@ -126,7 +126,8 @@ object IrqChipInitTable: InterruptObject {
 /*
  * RiscvIntc 表示每 hart 直连 CPU 的 RISC-V local interrupt controller。
  * 当前要求 boot CPU 的 INTC domain 建立，并能映射 timer/software/external
- * 三条本地 cause；external provider 仍由 PLIC 占位而不开放运行期路由。
+ * 三条本地 cause；external cause 必须能作为 root entry 转交给 PLIC
+ * chained handler，不能在 root INTC 内直接知道 UART 等叶子设备。
  */
 object RiscvIntc: InterruptObject {
     initial_state: State::Base;
@@ -150,6 +151,8 @@ object RiscvIntc: InterruptObject {
                     boot_cpu_timer_irq_mapping_ready(RiscvIntc);
                     boot_cpu_software_irq_mapping_ready(RiscvIntc);
                     boot_cpu_external_irq_mapping_reserved(RiscvIntc);
+                    riscv_intc_external_irq_entry_ready(RiscvIntc);
+                    riscv_intc_external_irq_does_not_dispatch_leaf_device(RiscvIntc);
                 }
             }
         }
@@ -165,14 +168,17 @@ object RiscvIntc: InterruptObject {
             boot_cpu_timer_irq_mapping_ready(RiscvIntc);
             boot_cpu_software_irq_mapping_ready(RiscvIntc);
             boot_cpu_external_irq_mapping_reserved(RiscvIntc);
+            riscv_intc_external_irq_entry_ready(RiscvIntc);
+            riscv_intc_external_irq_does_not_dispatch_leaf_device(RiscvIntc);
         }
     }
 }
 
 /*
  * IrqDispatchTree 表示 generic IRQ 分派树/路由表。它承接 IRQ domain
- * 映射结果，把硬件 interrupt cause 路由到具体 handler action；当前最小
- * 闭环只要求 RISC-V supervisor timer interrupt route 可用。
+ * 映射结果，把硬件 interrupt cause 路由到具体 handler action；当前要求
+ * timer route 可用，并建立 RISC-V external -> PLIC chained handler ->
+ * PLIC irqdomain -> IRQ action 的运行期分发契约。
  */
 object IrqDispatchTree: InterruptObject {
     initial_state: State::Base;
@@ -184,6 +190,9 @@ object IrqDispatchTree: InterruptObject {
                 depends_on {
                     IrqController.state == State::Ready;
                     RiscvIntc.state == State::Ready;
+                    Plic.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
                     InterruptStream.state == State::Ready;
                     CpuGroup.state == State::Ready;
                 }
@@ -193,7 +202,11 @@ object IrqDispatchTree: InterruptObject {
                     irq_dispatch_fallback_route_ready(IrqDispatchTree);
                     irq_dispatch_timer_route_ready(IrqDispatchTree, RiscvIntc);
                     irq_dispatch_software_route_reserved(IrqDispatchTree, RiscvIntc);
-                    irq_dispatch_external_route_deferred(IrqDispatchTree, RiscvIntc);
+                    irq_dispatch_external_route_ready(IrqDispatchTree, RiscvIntc, Plic);
+                    irq_dispatch_external_route_uses_plic_chained_handler(IrqDispatchTree, Plic);
+                    irq_dispatch_external_route_uses_plic_irq_domain(IrqDispatchTree, PlicIrqDomain);
+                    irq_dispatch_external_route_claims_before_dispatch(IrqDispatchTree, Plic);
+                    irq_dispatch_external_route_completes_after_handler(IrqDispatchTree, Plic);
                     irq_dispatch_boot_cpu_route_ready(IrqDispatchTree, BootCPU);
                 }
             }
@@ -206,7 +219,11 @@ object IrqDispatchTree: InterruptObject {
             irq_dispatch_fallback_route_ready(IrqDispatchTree);
             irq_dispatch_timer_route_ready(IrqDispatchTree, RiscvIntc);
             irq_dispatch_software_route_reserved(IrqDispatchTree, RiscvIntc);
-            irq_dispatch_external_route_deferred(IrqDispatchTree, RiscvIntc);
+            irq_dispatch_external_route_ready(IrqDispatchTree, RiscvIntc, Plic);
+            irq_dispatch_external_route_uses_plic_chained_handler(IrqDispatchTree, Plic);
+            irq_dispatch_external_route_uses_plic_irq_domain(IrqDispatchTree, PlicIrqDomain);
+            irq_dispatch_external_route_claims_before_dispatch(IrqDispatchTree, Plic);
+            irq_dispatch_external_route_completes_after_handler(IrqDispatchTree, Plic);
             irq_dispatch_boot_cpu_route_ready(IrqDispatchTree, BootCPU);
         }
     }
@@ -246,6 +263,20 @@ type IrqDomain: InterruptObject {
                 logical_irq_ref_ready(LogicalIrqRef::Uart0);
             }
         }
+
+        Action::ResolveHwirq(hwirq: HwirqRef) -> LogicalIrqRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                irq_domain_mapping_table_ready(self);
+                hwirq_ref_ready(hwirq);
+                irq_domain_hwirq_mapped(self, hwirq, LogicalIrqRef::Uart0);
+            }
+            ensures {
+                irq_domain_resolves_hwirq_to_logical_irq(self, hwirq, LogicalIrqRef::Uart0);
+                logical_irq_ref_ready(LogicalIrqRef::Uart0);
+            }
+        }
     }
 }
 
@@ -272,6 +303,7 @@ predicate irq_domain_translate_specifier_ready<T>(domain: T) -> bool;
 predicate irq_domain_translated_specifier<T, R>(domain: T, resource: R) -> bool;
 predicate irq_domain_hwirq_mapped<T, H, L>(domain: T, hwirq: H, logical_irq: L) -> bool;
 predicate irq_domain_mapping_record_ready<T, M>(domain: T, mapping: M) -> bool;
+predicate irq_domain_resolves_hwirq_to_logical_irq<T, H, L>(domain: T, hwirq: H, logical_irq: L) -> bool;
 predicate hwirq_ref_ready<T>(hwirq: T) -> bool;
 predicate logical_irq_ref_ready<T>(logical_irq: T) -> bool;
 
@@ -283,6 +315,7 @@ predicate plic_irq_domain_mapping_table_ready<T>(domain: T) -> bool;
 predicate plic_irq_domain_logical_allocator_ready<T>(domain: T) -> bool;
 predicate plic_irq_domain_translate_ops_ready<T>(domain: T) -> bool;
 predicate plic_irq_domain_enable_deferred<T>(domain: T) -> bool;
+predicate plic_irq_domain_dispatch_ops_ready<T>(domain: T) -> bool;
 
 predicate plic_irq_mapping_domain_bound<T, D>(mapping: T, domain: D) -> bool;
 predicate plic_irq_mapping_source_valid<T, P>(mapping: T, plic: P) -> bool;
@@ -301,8 +334,11 @@ predicate irq_handler_registry_duplicate_policy_ready<T>(registry: T) -> bool;
 predicate irq_handler_registry_unmapped_reject_ready<T>(registry: T) -> bool;
 predicate irq_handler_registry_hardirq_context_guard_ready<T>(registry: T) -> bool;
 predicate irq_handler_registry_source_enable_deferred<T>(registry: T) -> bool;
-predicate irq_handler_registry_dispatch_deferred<T>(registry: T) -> bool;
+predicate irq_handler_registry_dispatch_ready<T>(registry: T) -> bool;
 predicate irq_handler_registry_registered_action<T, A>(registry: T, action: A) -> bool;
+predicate irq_handler_registry_dispatch_requires_hardirq_context<T>(registry: T) -> bool;
+predicate irq_handler_registry_dispatch_requires_registered_action<T, A>(registry: T, action: A) -> bool;
+predicate irq_handler_registry_dispatch_uses_logical_irq<T, L>(registry: T, logical_irq: L) -> bool;
 
 predicate irq_action_logical_irq_bound<T, L>(action: T, logical_irq: L) -> bool;
 predicate irq_action_device_bound<T, D>(action: T, device: D) -> bool;
@@ -312,7 +348,9 @@ predicate irq_action_mapped_irq_required<T, M>(action: T, mapping: M) -> bool;
 predicate irq_action_duplicate_registration_rejected<T>(action: T) -> bool;
 predicate irq_action_unmapped_registration_rejected<T>(action: T) -> bool;
 predicate irq_action_does_not_enable_source<T>(action: T) -> bool;
-predicate irq_action_dispatch_deferred<T>(action: T) -> bool;
+predicate irq_action_dispatch_ready<T>(action: T) -> bool;
+predicate irq_action_handler_runs_after_plic_claim<T, P>(action: T, plic: P) -> bool;
+predicate irq_action_handler_runs_before_plic_complete<T, P>(action: T, plic: P) -> bool;
 
 predicate uart_irq_chain_kunit_observer_ready<T>(observer: T) -> bool;
 predicate uart_irq_chain_kunit_observer_read_only<T>(observer: T) -> bool;
@@ -320,11 +358,30 @@ predicate uart_irq_chain_kunit_observer_does_not_call_handler<T>(observer: T) ->
 predicate uart_irq_chain_kunit_observer_does_not_claim_or_complete<T>(observer: T) -> bool;
 predicate uart_irq_chain_kunit_observer_does_not_modify_plic_state<T>(observer: T) -> bool;
 predicate uart_irq_chain_kunit_observer_reads_registered_action<T, R, A>(observer: T, registry: R, action: A) -> bool;
-predicate uart_irq_chain_kunit_observer_reads_deferred_route<T, P, R>(observer: T, plic: P, registry: R) -> bool;
+predicate uart_irq_chain_kunit_observer_reads_deferred_trigger<T, P, R>(observer: T, plic: P, registry: R) -> bool;
+predicate uart_irq_chain_kunit_observer_reads_dispatch_contract<T, P, R>(observer: T, plic: P, registry: R) -> bool;
+
+predicate riscv_intc_external_irq_entry_ready<T>(intc: T) -> bool;
+predicate riscv_intc_external_irq_forwards_to_plic<T, P>(intc: T, plic: P) -> bool;
+predicate riscv_intc_external_irq_does_not_dispatch_leaf_device<T>(intc: T) -> bool;
+predicate irq_dispatch_external_route_ready<T, R, P>(dispatch_tree: T, riscv_intc: R, plic: P) -> bool;
+predicate irq_dispatch_external_route_uses_plic_chained_handler<T, P>(dispatch_tree: T, plic: P) -> bool;
+predicate irq_dispatch_external_route_uses_plic_irq_domain<T, D>(dispatch_tree: T, domain: D) -> bool;
+predicate irq_dispatch_external_route_claims_before_dispatch<T, P>(dispatch_tree: T, plic: P) -> bool;
+predicate irq_dispatch_external_route_completes_after_handler<T, P>(dispatch_tree: T, plic: P) -> bool;
+predicate plic_chained_handler_ready<T, R>(plic: T, riscv_intc: R) -> bool;
+predicate plic_claim_action_ready<T>(plic: T) -> bool;
+predicate plic_complete_action_ready<T>(plic: T) -> bool;
+predicate plic_claim_reads_claim_register<T>(plic: T) -> bool;
+predicate plic_claim_returns_zero_when_no_pending_source<T>(plic: T) -> bool;
+predicate plic_complete_writes_claimed_source<T>(plic: T) -> bool;
+predicate plic_claim_before_generic_irq_dispatch<T>(plic: T) -> bool;
+predicate plic_complete_after_irq_action_handler<T>(plic: T) -> bool;
 
 /*
- * IrqHandlerRegistry 是 IRQ core 侧的 handler/action registry。它只记录
- * request_irq 风格的 handler 绑定，不负责 PLIC source enable 或 dispatch。
+ * IrqHandlerRegistry 是 IRQ core 侧的 handler/action registry。它记录
+ * request_irq 风格的 handler 绑定，并提供 logical IRQ -> action 的
+ * dispatch 契约；source enable 仍属于 irqchip/source 层。
  */
 object IrqHandlerRegistry: InterruptObject {
     initial_state: State::Base;
@@ -349,7 +406,27 @@ object IrqHandlerRegistry: InterruptObject {
                 irq_action_duplicate_registration_rejected(action);
                 irq_action_unmapped_registration_rejected(action);
                 irq_action_does_not_enable_source(action);
-                irq_action_dispatch_deferred(action);
+                irq_action_dispatch_ready(action);
+                irq_handler_registry_dispatch_requires_registered_action(self, action);
+            }
+        }
+
+        Action::Dispatch(logical_irq: LogicalIrqRef) -> IrqActionRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                irq_handler_registry_dispatch_ready(self);
+                irq_handler_registry_registered_action(self, IrqActionRef::Ns16550aUart);
+                irq_handler_registry_dispatch_requires_hardirq_context(self);
+                logical_irq_ref_ready(logical_irq);
+            }
+
+            ensures {
+                irq_handler_registry_dispatch_uses_logical_irq(self, logical_irq);
+                irq_handler_registry_dispatch_requires_registered_action(self, IrqActionRef::Ns16550aUart);
+                irq_action_dispatch_ready(IrqAction);
+                irq_action_handler_runs_after_plic_claim(IrqAction, Plic);
+                irq_action_handler_runs_before_plic_complete(IrqAction, Plic);
             }
         }
     }
@@ -371,7 +448,8 @@ object IrqHandlerRegistry: InterruptObject {
                     irq_handler_registry_unmapped_reject_ready(IrqHandlerRegistry);
                     irq_handler_registry_hardirq_context_guard_ready(IrqHandlerRegistry);
                     irq_handler_registry_source_enable_deferred(IrqHandlerRegistry);
-                    irq_handler_registry_dispatch_deferred(IrqHandlerRegistry);
+                    irq_handler_registry_dispatch_ready(IrqHandlerRegistry);
+                    irq_handler_registry_dispatch_requires_hardirq_context(IrqHandlerRegistry);
                 }
             }
         }
@@ -387,14 +465,16 @@ object IrqHandlerRegistry: InterruptObject {
             irq_handler_registry_unmapped_reject_ready(IrqHandlerRegistry);
             irq_handler_registry_hardirq_context_guard_ready(IrqHandlerRegistry);
             irq_handler_registry_source_enable_deferred(IrqHandlerRegistry);
-            irq_handler_registry_dispatch_deferred(IrqHandlerRegistry);
+            irq_handler_registry_dispatch_ready(IrqHandlerRegistry);
+            irq_handler_registry_dispatch_requires_hardirq_context(IrqHandlerRegistry);
         }
     }
 }
 
 /*
  * IrqAction 表示 request_irq() 创建的一条 logical IRQ -> handler 记录。
- * 它可以要求 hardirq context，但本步骤不执行 handler、不 enable source。
+ * 它要求 hardirq context，并允许被 IRQ core dispatch；但本对象仍不拥有
+ * PLIC source enable，不能把 UART console 提前声明为 interrupt-driven。
  */
 object IrqAction: InterruptObject {
     initial_state: State::Base;
@@ -422,7 +502,9 @@ object IrqAction: InterruptObject {
                     irq_action_duplicate_registration_rejected(IrqAction);
                     irq_action_unmapped_registration_rejected(IrqAction);
                     irq_action_does_not_enable_source(IrqAction);
-                    irq_action_dispatch_deferred(IrqAction);
+                    irq_action_dispatch_ready(IrqAction);
+                    irq_action_handler_runs_after_plic_claim(IrqAction, Plic);
+                    irq_action_handler_runs_before_plic_complete(IrqAction, Plic);
                 }
             }
         }
@@ -439,7 +521,9 @@ object IrqAction: InterruptObject {
             irq_action_duplicate_registration_rejected(IrqAction);
             irq_action_unmapped_registration_rejected(IrqAction);
             irq_action_does_not_enable_source(IrqAction);
-            irq_action_dispatch_deferred(IrqAction);
+            irq_action_dispatch_ready(IrqAction);
+            irq_action_handler_runs_after_plic_claim(IrqAction, Plic);
+            irq_action_handler_runs_before_plic_complete(IrqAction, Plic);
         }
     }
 }
@@ -472,7 +556,12 @@ object UartIrqChainKunitObserver: InterruptObject {
                         IrqHandlerRegistry,
                         IrqActionRef::Ns16550aUart
                     );
-                    uart_irq_chain_kunit_observer_reads_deferred_route(
+                    uart_irq_chain_kunit_observer_reads_deferred_trigger(
+                        UartIrqChainKunitObserver,
+                        Plic,
+                        IrqHandlerRegistry
+                    );
+                    uart_irq_chain_kunit_observer_reads_dispatch_contract(
                         UartIrqChainKunitObserver,
                         Plic,
                         IrqHandlerRegistry
@@ -494,7 +583,12 @@ object UartIrqChainKunitObserver: InterruptObject {
                 IrqHandlerRegistry,
                 IrqActionRef::Ns16550aUart
             );
-            uart_irq_chain_kunit_observer_reads_deferred_route(
+            uart_irq_chain_kunit_observer_reads_deferred_trigger(
+                UartIrqChainKunitObserver,
+                Plic,
+                IrqHandlerRegistry
+            );
+            uart_irq_chain_kunit_observer_reads_dispatch_contract(
                 UartIrqChainKunitObserver,
                 Plic,
                 IrqHandlerRegistry
@@ -554,6 +648,7 @@ object PlicIrqDomain: IrqDomain {
                     plic_irq_domain_mapping_table_ready(PlicIrqDomain);
                     plic_irq_domain_logical_allocator_ready(PlicIrqDomain);
                     plic_irq_domain_enable_deferred(PlicIrqDomain);
+                    plic_irq_domain_dispatch_ops_ready(PlicIrqDomain);
                 }
             }
         }
@@ -574,6 +669,7 @@ object PlicIrqDomain: IrqDomain {
             plic_irq_domain_logical_allocator_ready(PlicIrqDomain);
             plic_irq_domain_translate_ops_ready(PlicIrqDomain);
             plic_irq_domain_enable_deferred(PlicIrqDomain);
+            plic_irq_domain_dispatch_ops_ready(PlicIrqDomain);
         }
     }
 }
@@ -1058,8 +1154,9 @@ object PlicDriver: InterruptObject {
  * 挂到 init_IRQ() -> irqchip_init() -> of_irq_init() -> LDS section
  * traversal 链上，并完成 provider 的最小 setup：DT resource 解析、
  * system-irqchip ioremap、external-input context 基础状态和父 INTC
- * external 输入连接。external IRQ 运行期路由、claim/complete 和 handler
- * dispatch 仍后续展开。
+ * external 输入连接。运行期 chained handler、claim/complete 和 generic
+ * IRQ dispatch contract 已建立；具体 UART source enable 和真实触发仍后续
+ * 展开。
  */
 object Plic: InterruptObject {
     initial_state: State::Base;
@@ -1087,6 +1184,7 @@ object Plic: InterruptObject {
                     plic_provider_discovery_reserved(Plic, DeviceTree);
                     plic_external_parent_reserved(Plic, RiscvIntc);
                     plic_output_connected_to_riscv_intc_external_input(Plic, RiscvIntc);
+                    riscv_intc_external_irq_forwards_to_plic(RiscvIntc, Plic);
                     plic_mmio_resource_ready(Plic, DeviceTree);
                     plic_ioremap_mapping_created(Plic, Ioremap, IoMemoryMappingRef::Plic);
                     ioremap_mapping_owner_is_system_irqchip(Ioremap, IoMemoryMappingRef::Plic, Plic);
@@ -1097,7 +1195,15 @@ object Plic: InterruptObject {
                     plic_threshold_ready(Plic);
                     plic_priority_ready(Plic);
                     plic_source_enable_ready(Plic);
-                    plic_external_irq_route_deferred(Plic);
+                    plic_uart_source_trigger_deferred(Plic);
+                    plic_chained_handler_ready(Plic, RiscvIntc);
+                    plic_claim_action_ready(Plic);
+                    plic_complete_action_ready(Plic);
+                    plic_claim_reads_claim_register(Plic);
+                    plic_claim_returns_zero_when_no_pending_source(Plic);
+                    plic_complete_writes_claimed_source(Plic);
+                    plic_claim_before_generic_irq_dispatch(Plic);
+                    plic_complete_after_irq_action_handler(Plic);
                 }
             }
         }
@@ -1111,6 +1217,7 @@ object Plic: InterruptObject {
             plic_provider_discovery_reserved(Plic, DeviceTree);
             plic_external_parent_reserved(Plic, RiscvIntc);
             plic_output_connected_to_riscv_intc_external_input(Plic, RiscvIntc);
+            riscv_intc_external_irq_forwards_to_plic(RiscvIntc, Plic);
             plic_mmio_resource_ready(Plic, DeviceTree);
             plic_ioremap_mapping_created(Plic, Ioremap, IoMemoryMappingRef::Plic);
             ioremap_mapping_owner_is_system_irqchip(Ioremap, IoMemoryMappingRef::Plic, Plic);
@@ -1121,7 +1228,15 @@ object Plic: InterruptObject {
             plic_threshold_ready(Plic);
             plic_priority_ready(Plic);
             plic_source_enable_ready(Plic);
-            plic_external_irq_route_deferred(Plic);
+            plic_uart_source_trigger_deferred(Plic);
+            plic_chained_handler_ready(Plic, RiscvIntc);
+            plic_claim_action_ready(Plic);
+            plic_complete_action_ready(Plic);
+            plic_claim_reads_claim_register(Plic);
+            plic_claim_returns_zero_when_no_pending_source(Plic);
+            plic_complete_writes_claimed_source(Plic);
+            plic_claim_before_generic_irq_dispatch(Plic);
+            plic_complete_after_irq_action_handler(Plic);
         }
     }
 }
@@ -1221,7 +1336,7 @@ object IrqTimeInitPhase: PhaseObject {
                     "profile_init() 暂缓：profile buffer 和 proc export 后续再建模。";
                     "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
-                    "PLIC external IRQ route 暂缓：当前只保留 provider discovery/parent reserved，不开放外部中断 handler。";
+                    "PLIC UART source enable 与真实 UART 中断触发暂缓：当前建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，但不把 serial8250 console 声明为 interrupt-driven。";
                 }
             }
         }

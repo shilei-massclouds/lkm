@@ -247,7 +247,9 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     irq_action_handler_bound(IrqAction);
                     irq_action_hardirq_context_required(IrqAction);
                     irq_action_does_not_enable_source(IrqAction);
-                    irq_action_dispatch_deferred(IrqAction);
+                    irq_action_dispatch_ready(IrqAction);
+                    irq_action_handler_runs_after_plic_claim(IrqAction, Plic);
+                    irq_action_handler_runs_before_plic_complete(IrqAction, Plic);
                     uart8250_port_irq_resource_ready(Uart8250Port, PlatformIrqResource);
                     uart8250_port_logical_irq_bound(Uart8250Port, LogicalIrqRef::Uart0);
                     uart8250_port_interrupt_output_still_deferred(Uart8250Port);
@@ -322,7 +324,9 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             irq_action_handler_bound(IrqAction);
             irq_action_hardirq_context_required(IrqAction);
             irq_action_does_not_enable_source(IrqAction);
-            irq_action_dispatch_deferred(IrqAction);
+            irq_action_dispatch_ready(IrqAction);
+            irq_action_handler_runs_after_plic_claim(IrqAction, Plic);
+            irq_action_handler_runs_before_plic_complete(IrqAction, Plic);
             uart8250_port_irq_resource_ready(Uart8250Port, PlatformIrqResource);
             uart8250_port_logical_irq_bound(Uart8250Port, LogicalIrqRef::Uart0);
             uart8250_port_interrupt_output_still_deferred(Uart8250Port);

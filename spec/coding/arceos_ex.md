@@ -1110,10 +1110,12 @@ growable registry 作为主注册路径。当前必须至少支持 QEMU virt 常
 `Plic` 在本阶段推进到最小 `Ready`：它确认 provider discovery、DeviceTree interrupt-controller node、compatible
 match、callback 调用事实、`reg` MMIO resource、`riscv,ndev` source count、`interrupts-extended` 中的 RISC-V external
 interrupt parent input，以及 PLIC 输出连接到上级 `RiscvIntc` external interrupt input 的父链关系。PLIC MMIO 必须通过
-runtime `ioremap`/`vmalloc` 映射执行路径建立，但 owner 是 system irqchip，而不是伪造的 `PlatformDevice`。external IRQ route、
-claim/complete、handler dispatch 和 UART interrupt-driven console 仍留给后续展开；当前 source enable/priority/threshold
-只表达 external-input context 的基础状态，不代表 UART 外部中断链已经可用。严格的 `interrupts-extended` phandle 到 boot hart
-local INTC 的反查绑定要等 DeviceTree phandle 查询能力建立后，在 IRQ domain/source mapping 步骤补上。
+runtime `ioremap`/`vmalloc` 映射执行路径建立，但 owner 是 system irqchip，而不是伪造的 `PlatformDevice`。运行期
+dispatch contract 必须仿照 Linux：RISC-V root INTC external entry 只转交给 PLIC chained handler，PLIC handler 先从 claim
+寄存器读取 source，经 `PlicIrqDomain`/generic IRQ core dispatch 到已注册 action，handler 返回后再把同一个 source 写回
+claim register complete；claim 返回 0 表示没有 pending source，不得调用 UART handler。当前 UART source enable 和真实 UART
+中断触发仍留给后续实现，serial8250 console 仍保持 polling，不得声明 interrupt-driven ready。严格的 `interrupts-extended`
+phandle 到 boot hart local INTC 的反查绑定要等 DeviceTree phandle 查询能力建立后，在 IRQ domain/source mapping 步骤补上。
 
 IRQ domain/source mapping 必须分清类型和实例：`IrqDomain` 是 IRQ core 的通用 mapping contract，
 `PlicIrqDomain` 是由 PLIC provider 创建的具体实例。`PlicIrqDomain` 只负责把一格 PLIC interrupt specifier
@@ -1130,8 +1132,9 @@ handler registry 必须作为 IRQ core 侧对象建模和实现。`IrqHandlerReg
 风格的 logical IRQ -> handler 绑定，输入 logical IRQ 必须已经由 `PlicIrqDomain` 映射；未映射 logical IRQ 注册必须失败，
 重复注册同一个 logical IRQ/device 必须按显式 duplicate policy 拒绝或保持幂等。`ns16550a` probe 可以在 UART logical IRQ
 ready 后请求注册最小 UART handler 记录，但不得把 handler 表藏在 UART driver 私有状态里，也不得因此 enable PLIC source、
-安装 claim/complete dispatch、执行 handler，或把 serial8250 console 标记为 interrupt-driven。handler action 必须携带
-hardirq context requirement，具体上下文切换和 handler 执行留给后续 dispatch 步骤验证。
+安装私有 claim/complete route，或把 serial8250 console 标记为 interrupt-driven。IRQ core dispatch 必须使用
+`PlicIrqDomain` 返回的 logical IRQ，只能调用 `IrqHandlerRegistry` 中已经注册的 action；缺失 mapping 或缺失 action 不得视为
+UART interrupt 成功。handler action 必须携带 hardirq context requirement，dispatch 时不得打开 sleep/process-only 路径。
 
 checkpoint KUnit handler 默认必须接收只读 `Context`。允许写入的能力必须通过显式 sink capability 传入，例如 KTAP 输出、
 tracer 或 auditor；sink 只能记录、审计或输出诊断，不得暴露对 `Context`、lifecycle 状态、IRQ 状态、设备状态或 scheduler
