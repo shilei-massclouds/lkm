@@ -1840,6 +1840,8 @@ impl InitcallBoundary {
             || !uart_interrupt_chain_probe.irq_dispatch_observed()
             || !uart_interrupt_chain_probe.uart_handler_observed()
             || !uart_interrupt_chain_probe.plic_complete_observed()
+            || !uart_interrupt_chain_probe.plic_loop_exit_observed()
+            || !uart_interrupt_chain_probe.irq_cycle_closed()
             || !uart_interrupt_chain_probe.console_polling_preserved()
         {
             return failed_condition(
@@ -1948,6 +1950,8 @@ pub fn initcall_phase_ready(
         && uart_interrupt_chain_probe.irq_dispatch_observed()
         && uart_interrupt_chain_probe.uart_handler_observed()
         && uart_interrupt_chain_probe.plic_complete_observed()
+        && uart_interrupt_chain_probe.plic_loop_exit_observed()
+        && uart_interrupt_chain_probe.irq_cycle_closed()
         && uart_interrupt_chain_probe.console_polling_preserved()
         && boundary.state() == State::Ready
         && boundary.kunit_next_boundary()

@@ -61,11 +61,21 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
     sink.diag_usize("uart_last_iir", ns16550a::uart8250_last_iir());
     sink.diag_usize("uart_last_lsr", ns16550a::uart8250_last_lsr());
     sink.diag_usize("plic_claim_count", ctx.plic.claim_count());
+    sink.diag_usize("plic_zero_claim_count", ctx.plic.zero_claim_count());
     sink.diag_usize("plic_complete_count", ctx.plic.complete_count());
     sink.diag_usize("plic_dispatch_count", ctx.plic.dispatch_count());
+    sink.diag_usize("plic_loop_exit_count", ctx.plic.loop_exit_count());
     sink.diag_usize(
         "irq_dispatch_calls",
         ctx.irq_handler_registry.dispatch_calls(),
+    );
+    sink.diag_usize(
+        "uart_irq_cycle_closed",
+        if ctx.uart_interrupt_chain_probe.irq_cycle_closed() {
+            1
+        } else {
+            0
+        },
     );
     sink.pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
@@ -92,6 +102,8 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.uart_interrupt_chain_probe.irq_dispatch_observed()
         && ctx.uart_interrupt_chain_probe.uart_handler_observed()
         && ctx.uart_interrupt_chain_probe.plic_complete_observed()
+        && ctx.uart_interrupt_chain_probe.plic_loop_exit_observed()
+        && ctx.uart_interrupt_chain_probe.irq_cycle_closed()
         && ctx.uart_interrupt_chain_probe.console_polling_preserved()
         && ctx.plic.chained_handler_ready()
         && ctx.plic.claim_action_ready()
@@ -99,11 +111,17 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.plic.claim_reads_claim_register()
         && ctx.plic.claim_zero_means_no_pending()
         && ctx.plic.complete_writes_claimed_source()
+        && ctx.plic.claim_loop_until_zero()
+        && ctx.plic.zero_claim_stops_dispatch()
+        && ctx.plic.completes_each_claimed_source()
         && ctx.plic.claim_before_dispatch()
         && ctx.plic.complete_after_handler()
         && ctx.plic.claim_count() != 0
+        && ctx.plic.zero_claim_count() != 0
         && ctx.plic.complete_count() != 0
         && ctx.plic.dispatch_count() != 0
+        && ctx.plic.loop_exit_count() != 0
+        && ctx.plic.complete_count() == ctx.plic.claim_count()
         && ctx.plic.last_claimed_source() == source
         && ctx.plic.last_completed_source() == source
         && ctx.plic_irq_domain.state() == State::Ready

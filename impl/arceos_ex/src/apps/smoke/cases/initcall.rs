@@ -84,6 +84,8 @@ pub fn run() -> SmokeResult {
         || !ctx.uart_interrupt_chain_probe.irq_dispatch_observed()
         || !ctx.uart_interrupt_chain_probe.uart_handler_observed()
         || !ctx.uart_interrupt_chain_probe.plic_complete_observed()
+        || !ctx.uart_interrupt_chain_probe.plic_loop_exit_observed()
+        || !ctx.uart_interrupt_chain_probe.irq_cycle_closed()
         || !ctx.uart_interrupt_chain_probe.console_polling_preserved()
         || !ctx.interrupt_stream.supervisor_external_input_gate_open()
         || !ctx

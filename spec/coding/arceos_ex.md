@@ -1127,7 +1127,10 @@ RISC-V INTC `sie.SEIE` unmask。`UartExternalIrqEnable` 仍不得制造 UART int
 软件处理/溯源链是 `CPU -> RiscvIntc -> PLIC -> UART`。运行期 dispatch contract 必须仿照 Linux：RISC-V root INTC
 `EXT_IRQ`/SEI entry 只转交给 PLIC chained handler，PLIC handler 先从 claim 寄存器读取 source，经
 `PlicIrqDomain`/generic IRQ core dispatch 到已注册 action，handler 返回后再把同一个 source 写回 claim register complete；
-claim 返回 0 表示没有 pending source，不得调用 UART handler。
+claim 返回 0 表示没有 pending source，不得调用 UART handler。PLIC chained handler 必须按 Linux
+`while ((hwirq = readl(claim)))` 形状循环 claim，直到 claim 返回 0 才退出；每个非零 claim 都必须完成一次
+domain dispatch 尝试，并对同一个 claimed source 执行 complete。缺失 mapping 或缺失 action 可以记录失败并继续保证
+complete，但不得把该次 dispatch 计为成功 UART handler。
 
 所有中断类型必须用命名 cause 表达，不得在规格或实现控制流中用裸数字描述。RISC-V supervisor external interrupt 在规格中
 称为 `InterruptCauseRef::SupervisorExternalIrq`，代码中应使用 `SUPERVISOR_EXTERNAL_IRQ`、`EXT_IRQ` 或同等架构命名常量；
@@ -1148,8 +1151,11 @@ source、不得注册 handler、不得执行 claim/complete 或 dispatch；建�
 按照 Linux 8250 startup/THRI 语义打开 UART interrupt-output 前置条件：至少设置 MCR.OUT2，启用 `UART_IER_THRI`，
 并通过一次真实 TX empty 转换产生 THRE edge；不得只写 `UART_IER_THRI` 后假设硬件必然立即产生中断。随后等待真实
 trap/root INTC/PLIC/IRQ core 路径推进到 `PLIC claim -> logical IRQ dispatch -> UART handler -> PLIC complete`。
-UART handler 必须清掉 THRI，避免中断风暴；该 probe 仍不得把 console 输出切换为 interrupt-driven。KUnit/smoke
-只能读取该 probe 和计数结果，不能直接调用 trigger、root intc entry、PLIC claim/complete、IRQ dispatch 或 UART handler。
+该 probe 不得只观察第一次 handler 调用；它必须从触发前 snapshot 观察一轮完整 IRQ cycle：UART THRE request、
+PLIC 非零 claim、IRQ dispatch、UART handler、PLIC complete、零 claim loop exit 都发生，并确认本轮非零 claim 与
+complete 成对、零 claim 与 loop exit 成对。UART handler 必须清掉 THRI，避免中断风暴；该 probe 仍不得把 console 输出切换为 interrupt-driven。
+KUnit/smoke 只能读取该 probe 和计数结果，不能直接调用 trigger、root intc entry、PLIC claim/complete、IRQ dispatch 或
+UART handler。
 
 `ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经

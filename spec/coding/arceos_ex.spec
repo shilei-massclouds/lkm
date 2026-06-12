@@ -88,6 +88,7 @@ predicate arceos_ex_must_platform_irq_resource_parse_uart_interrupts_from_dt() -
 predicate arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler() -> bool;
 predicate arceos_ex_must_uart_external_irq_enable_be_explicit_boundary() -> bool;
 predicate arceos_ex_must_uart_interrupt_chain_probe_be_production_boundary() -> bool;
+predicate arceos_ex_must_uart_interrupt_chain_probe_observe_full_irq_cycle() -> bool;
 predicate arceos_ex_must_model_irq_handler_registry_as_irq_core_object() -> bool;
 predicate arceos_ex_must_request_irq_require_mapped_logical_irq() -> bool;
 predicate arceos_ex_must_request_irq_record_handler_without_enabling_source() -> bool;
@@ -844,6 +845,17 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_uart_interrupt_chain_probe_be_production_boundary();
 
         /*
+         * UART interrupt cycle observation:
+         *
+         * UartInterruptChainProbe must not stop at the first handler call.
+         * It must observe one complete real IRQ cycle from a pre-trigger
+         * snapshot: THRE request, PLIC non-zero claim, IRQ dispatch, UART
+         * handler, PLIC complete, zero-claim loop exit, with non-zero claims
+         * paired with completes and zero claims paired with loop exits.
+         */
+        arceos_ex_must_uart_interrupt_chain_probe_observe_full_irq_cycle();
+
+        /*
          * IRQ handler registry:
          *
          * request_irq-style handler registration belongs to an IRQ core-side
@@ -899,8 +911,10 @@ type ArceosExIrqTimeInitCodingMust {
          * The PLIC runtime handler must follow the Linux-like order: claim by
          * reading the claim register, translate the claimed source through
          * PlicIrqDomain/generic IRQ dispatch, run the registered action, then
-         * complete by writing the claimed source back. A zero claim means no
-         * pending source and must not call the UART handler.
+         * complete by writing the claimed source back. It must loop until
+         * claim returns zero, and a zero claim must stop dispatch without
+         * calling the UART handler. Missing mapping/action may be reported,
+         * but each non-zero claimed source must still reach complete.
          */
         arceos_ex_must_plic_claim_before_irq_dispatch_and_complete_after_handler();
 

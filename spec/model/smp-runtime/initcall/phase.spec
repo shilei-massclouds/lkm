@@ -728,6 +728,8 @@ object InitcallPhase: PhaseObject {
                     uart_interrupt_chain_probe_observes_irq_dispatch(UartInterruptChainProbe, IrqHandlerRegistry);
                     uart_interrupt_chain_probe_observes_uart_handler(UartInterruptChainProbe, IrqAction);
                     uart_interrupt_chain_probe_observes_plic_complete(UartInterruptChainProbe, Plic);
+                    uart_interrupt_chain_probe_observes_plic_loop_exit(UartInterruptChainProbe, Plic);
+                    uart_interrupt_chain_probe_observes_irq_cycle_closure(UartInterruptChainProbe, Plic, IrqHandlerRegistry);
                     uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);

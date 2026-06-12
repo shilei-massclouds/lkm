@@ -569,30 +569,33 @@ pub fn trigger_uart8250_thre_interrupt_once() -> bool {
         return false;
     }
 
-    let lsr = state.write_backend.read_uart_lsr();
-    if lsr & UART_LSR_THRE == 0 {
-        return false;
+    let mut spins = 0usize;
+    while state.write_backend.read_uart_lsr() & UART_LSR_THRE == 0 {
+        if spins == UART_POLL_SPINS {
+            return false;
+        }
+        core::hint::spin_loop();
+        spins += 1;
     }
 
     let mcr = state.write_backend.read_uart_mcr();
-    if !state
-        .write_backend
-        .write_uart_mcr(mcr | UART_MCR_OUT2 | UART_MCR_LOOP)
-    {
+    state.port.interrupt_trigger_ready = true;
+    state.port.thre_interrupt_enabled = true;
+    state.port.thre_interrupt_loopback = false;
+    if !state.write_backend.write_uart_mcr(mcr | UART_MCR_OUT2) {
+        state.port.interrupt_trigger_ready = false;
+        state.port.thre_interrupt_enabled = false;
+        state.port.thre_interrupt_loopback = false;
         return false;
     }
 
     let ier = state.write_backend.read_uart_ier() | UART_IER_THRI;
     if !state.write_backend.write_uart_ier(ier) {
+        state.port.interrupt_trigger_ready = false;
+        state.port.thre_interrupt_enabled = false;
+        state.port.thre_interrupt_loopback = false;
         return false;
     }
-    if !state.write_backend.write_uart_tx(0) {
-        return false;
-    }
-
-    state.port.interrupt_trigger_ready = true;
-    state.port.thre_interrupt_enabled = true;
-    state.port.thre_interrupt_loopback = true;
     UART8250_THRE_INTERRUPT_REQUESTS.fetch_add(1, Ordering::AcqRel);
     true
 }

@@ -1954,6 +1954,9 @@ pub struct Plic {
     claim_reads_claim_register: bool,
     claim_zero_means_no_pending: bool,
     complete_writes_claimed_source: bool,
+    claim_loop_until_zero: bool,
+    zero_claim_stops_dispatch: bool,
+    completes_each_claimed_source: bool,
     claim_before_dispatch: bool,
     complete_after_handler: bool,
     uart_source_trigger_deferred: bool,
@@ -1961,6 +1964,7 @@ pub struct Plic {
     zero_claim_count: AtomicUsize,
     dispatch_count: AtomicUsize,
     complete_count: AtomicUsize,
+    loop_exit_count: AtomicUsize,
     last_claimed_source: AtomicU32,
     last_completed_source: AtomicU32,
 }
@@ -1996,6 +2000,9 @@ impl Plic {
             claim_reads_claim_register: false,
             claim_zero_means_no_pending: false,
             complete_writes_claimed_source: false,
+            claim_loop_until_zero: false,
+            zero_claim_stops_dispatch: false,
+            completes_each_claimed_source: false,
             claim_before_dispatch: false,
             complete_after_handler: false,
             uart_source_trigger_deferred: false,
@@ -2003,6 +2010,7 @@ impl Plic {
             zero_claim_count: AtomicUsize::new(0),
             dispatch_count: AtomicUsize::new(0),
             complete_count: AtomicUsize::new(0),
+            loop_exit_count: AtomicUsize::new(0),
             last_claimed_source: AtomicU32::new(0),
             last_completed_source: AtomicU32::new(0),
         }
@@ -2124,6 +2132,18 @@ impl Plic {
         self.complete_writes_claimed_source
     }
 
+    pub const fn claim_loop_until_zero(&self) -> bool {
+        self.claim_loop_until_zero
+    }
+
+    pub const fn zero_claim_stops_dispatch(&self) -> bool {
+        self.zero_claim_stops_dispatch
+    }
+
+    pub const fn completes_each_claimed_source(&self) -> bool {
+        self.completes_each_claimed_source
+    }
+
     pub const fn claim_before_dispatch(&self) -> bool {
         self.claim_before_dispatch
     }
@@ -2154,6 +2174,11 @@ impl Plic {
     #[allow(dead_code)]
     pub fn complete_count(&self) -> usize {
         self.complete_count.load(Ordering::Acquire)
+    }
+
+    #[allow(dead_code)]
+    pub fn loop_exit_count(&self) -> usize {
+        self.loop_exit_count.load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
@@ -2310,6 +2335,9 @@ impl Plic {
         self.claim_reads_claim_register = true;
         self.claim_zero_means_no_pending = true;
         self.complete_writes_claimed_source = true;
+        self.claim_loop_until_zero = true;
+        self.zero_claim_stops_dispatch = true;
+        self.completes_each_claimed_source = true;
         self.claim_before_dispatch = true;
         self.complete_after_handler = true;
         self.uart_source_trigger_deferred = true;
@@ -2330,6 +2358,9 @@ impl Plic {
             || !self.chained_handler_ready
             || !self.claim_action_ready
             || !self.complete_action_ready
+            || !self.claim_loop_until_zero
+            || !self.zero_claim_stops_dispatch
+            || !self.completes_each_claimed_source
             || !self.claim_before_dispatch
             || !self.complete_after_handler
             || domain.state() != State::Ready
@@ -2340,18 +2371,25 @@ impl Plic {
             return false;
         }
 
-        let source = self.claim();
-        if source == 0 {
-            return false;
+        let mut any_dispatched = false;
+        loop {
+            let source = self.claim();
+            if source == 0 {
+                self.loop_exit_count.fetch_add(1, Ordering::AcqRel);
+                break;
+            }
+
+            let dispatched = domain
+                .resolve_hwirq(source)
+                .is_some_and(|logical_irq| registry.dispatch(logical_irq));
+            if dispatched {
+                self.dispatch_count.fetch_add(1, Ordering::AcqRel);
+                any_dispatched = true;
+            }
+            self.complete(source);
         }
-        let dispatched = domain
-            .resolve_hwirq(source)
-            .is_some_and(|logical_irq| registry.dispatch(logical_irq));
-        if dispatched {
-            self.dispatch_count.fetch_add(1, Ordering::AcqRel);
-        }
-        self.complete(source);
-        dispatched
+
+        any_dispatched
     }
 
     fn enable_source(&self, source: u32) -> bool {
@@ -3066,7 +3104,25 @@ pub struct UartInterruptChainProbe {
     irq_dispatch_observed: bool,
     uart_handler_observed: bool,
     plic_complete_observed: bool,
+    plic_loop_exit_observed: bool,
+    irq_cycle_closed: bool,
     console_polling_preserved: bool,
+}
+
+const UART_IRQ_CYCLE_SPIN_LIMIT: usize = 20_000_000;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct UartIrqCycleSnapshot {
+    requests: usize,
+    claims: usize,
+    zero_claims: usize,
+    plic_dispatches: usize,
+    completes: usize,
+    loop_exits: usize,
+    irq_dispatches: usize,
+    handler_calls: usize,
+    handled: usize,
+    thri_disabled: usize,
 }
 
 impl UartInterruptChainProbe {
@@ -3078,6 +3134,8 @@ impl UartInterruptChainProbe {
             irq_dispatch_observed: false,
             uart_handler_observed: false,
             plic_complete_observed: false,
+            plic_loop_exit_observed: false,
+            irq_cycle_closed: false,
             console_polling_preserved: false,
         }
     }
@@ -3104,6 +3162,14 @@ impl UartInterruptChainProbe {
 
     pub const fn plic_complete_observed(&self) -> bool {
         self.plic_complete_observed
+    }
+
+    pub const fn plic_loop_exit_observed(&self) -> bool {
+        self.plic_loop_exit_observed
+    }
+
+    pub const fn irq_cycle_closed(&self) -> bool {
+        self.irq_cycle_closed
     }
 
     pub const fn console_polling_preserved(&self) -> bool {
@@ -3144,12 +3210,7 @@ impl UartInterruptChainProbe {
             );
         }
 
-        let claim_before = plic.claim_count();
-        let complete_before = plic.complete_count();
-        let plic_dispatch_before = plic.dispatch_count();
-        let irq_dispatch_before = irq_handler_registry.dispatch_calls();
-        let handler_before = super::ns16550a::uart8250_irq_handler_call_count();
-        let handled_before = super::ns16550a::uart8250_thre_interrupt_handled_count();
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
 
         if !super::ns16550a::trigger_uart8250_thre_interrupt_once() {
             return failed_condition(
@@ -3160,15 +3221,7 @@ impl UartInterruptChainProbe {
             );
         }
 
-        const SPIN_LIMIT: usize = 20_000_000;
-        let mut spins = 0usize;
-        while super::ns16550a::uart8250_thre_interrupt_handled_count() == handled_before
-            && spins < SPIN_LIMIT
-        {
-            core::hint::spin_loop();
-            spins += 1;
-        }
-        if super::ns16550a::uart8250_thre_interrupt_handled_count() == handled_before {
+        if !wait_uart_irq_cycle_closed(plic, irq_handler_registry, baseline, source) {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -3177,18 +3230,27 @@ impl UartInterruptChainProbe {
             );
         }
 
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
         self.uart_trigger_committed = super::ns16550a::uart8250_interrupt_trigger_ready()
-            && super::ns16550a::uart8250_thre_interrupt_request_count() != 0
+            && observed.requests > baseline.requests
             && super::ns16550a::uart8250_thre_interrupt_handled();
         self.plic_claim_observed =
-            plic.claim_count() > claim_before && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = plic.dispatch_count() > plic_dispatch_before
-            && irq_handler_registry.dispatch_calls() > irq_dispatch_before;
-        self.uart_handler_observed = super::ns16550a::uart8250_irq_handler_call_count()
-            > handler_before
-            && super::ns16550a::uart8250_thri_disabled_by_handler_count() != 0;
+            observed.claims > baseline.claims && plic.last_claimed_source() == source;
+        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+            && observed.irq_dispatches > baseline.irq_dispatches;
+        self.uart_handler_observed = observed.handler_calls > baseline.handler_calls
+            && observed.thri_disabled > baseline.thri_disabled;
         self.plic_complete_observed =
-            plic.complete_count() > complete_before && plic.last_completed_source() == source;
+            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.plic_loop_exit_observed = plic.claim_loop_until_zero()
+            && plic.zero_claim_stops_dispatch()
+            && plic.completes_each_claimed_source()
+            && observed.zero_claims > baseline.zero_claims
+            && observed.loop_exits > baseline.loop_exits
+            && observed.completes.saturating_sub(baseline.completes)
+                == observed.claims.saturating_sub(baseline.claims);
+        self.irq_cycle_closed =
+            uart_irq_cycle_completed_and_closed(plic, observed, baseline, source);
         self.console_polling_preserved =
             super::ns16550a::uart8250_interrupt_output_still_deferred();
 
@@ -3197,6 +3259,8 @@ impl UartInterruptChainProbe {
             || !self.irq_dispatch_observed
             || !self.uart_handler_observed
             || !self.plic_complete_observed
+            || !self.plic_loop_exit_observed
+            || !self.irq_cycle_closed
             || !self.console_polling_preserved
         {
             return failed_condition(
@@ -3210,6 +3274,72 @@ impl UartInterruptChainProbe {
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
+}
+
+fn uart_irq_cycle_snapshot(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+) -> UartIrqCycleSnapshot {
+    UartIrqCycleSnapshot {
+        requests: super::ns16550a::uart8250_thre_interrupt_request_count(),
+        claims: plic.claim_count(),
+        zero_claims: plic.zero_claim_count(),
+        plic_dispatches: plic.dispatch_count(),
+        completes: plic.complete_count(),
+        loop_exits: plic.loop_exit_count(),
+        irq_dispatches: irq_handler_registry.dispatch_calls(),
+        handler_calls: super::ns16550a::uart8250_irq_handler_call_count(),
+        handled: super::ns16550a::uart8250_thre_interrupt_handled_count(),
+        thri_disabled: super::ns16550a::uart8250_thri_disabled_by_handler_count(),
+    }
+}
+
+fn wait_uart_irq_cycle_closed(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+    baseline: UartIrqCycleSnapshot,
+    source: u32,
+) -> bool {
+    let mut spins = 0usize;
+
+    while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        if uart_irq_cycle_completed_and_closed(plic, current, baseline, source) {
+            return true;
+        }
+
+        core::hint::spin_loop();
+        spins += 1;
+    }
+
+    false
+}
+
+fn uart_irq_cycle_completed_and_closed(
+    plic: &Plic,
+    current: UartIrqCycleSnapshot,
+    baseline: UartIrqCycleSnapshot,
+    source: u32,
+) -> bool {
+    let claim_delta = current.claims.saturating_sub(baseline.claims);
+    let complete_delta = current.completes.saturating_sub(baseline.completes);
+    let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
+    let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
+
+    current.requests > baseline.requests
+        && current.claims > baseline.claims
+        && current.plic_dispatches > baseline.plic_dispatches
+        && current.irq_dispatches > baseline.irq_dispatches
+        && current.handler_calls > baseline.handler_calls
+        && current.handled > baseline.handled
+        && current.thri_disabled > baseline.thri_disabled
+        && current.completes > baseline.completes
+        && current.zero_claims > baseline.zero_claims
+        && current.loop_exits > baseline.loop_exits
+        && claim_delta == complete_delta
+        && zero_claim_delta == loop_exit_delta
+        && plic.last_claimed_source() == source
+        && plic.last_completed_source() == source
 }
 
 fn find_plic_interrupt_controller_node(device_tree: &DeviceTree) -> Option<DeviceNodeRef<'_>> {

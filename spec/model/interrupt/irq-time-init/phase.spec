@@ -468,6 +468,9 @@ predicate plic_complete_action_ready<T>(plic: T) -> bool;
 predicate plic_claim_reads_claim_register<T>(plic: T) -> bool;
 predicate plic_claim_returns_zero_when_no_pending_source<T>(plic: T) -> bool;
 predicate plic_complete_writes_claimed_source<T>(plic: T) -> bool;
+predicate plic_chained_handler_claim_loop_until_zero<T>(plic: T) -> bool;
+predicate plic_chained_handler_zero_claim_stops_dispatch<T>(plic: T) -> bool;
+predicate plic_chained_handler_completes_each_claimed_source<T>(plic: T) -> bool;
 predicate plic_claim_before_generic_irq_dispatch<T>(plic: T) -> bool;
 predicate plic_complete_after_irq_action_handler<T>(plic: T) -> bool;
 predicate uart_external_irq_enable_ready<T>(enable: T) -> bool;
@@ -481,6 +484,8 @@ predicate uart_interrupt_chain_probe_observes_plic_claim<T, P>(probe: T, plic: P
 predicate uart_interrupt_chain_probe_observes_irq_dispatch<T, R>(probe: T, registry: R) -> bool;
 predicate uart_interrupt_chain_probe_observes_uart_handler<T, A>(probe: T, action: A) -> bool;
 predicate uart_interrupt_chain_probe_observes_plic_complete<T, P>(probe: T, plic: P) -> bool;
+predicate uart_interrupt_chain_probe_observes_plic_loop_exit<T, P>(probe: T, plic: P) -> bool;
+predicate uart_interrupt_chain_probe_observes_irq_cycle_closure<T, P, R>(probe: T, plic: P, registry: R) -> bool;
 predicate uart_interrupt_chain_probe_preserves_polling_console<T, U>(probe: T, uart: U) -> bool;
 
 /*
@@ -813,7 +818,12 @@ object UartInterruptChainProbe: InterruptObject {
                     uart_interrupt_chain_probe_observes_irq_dispatch(UartInterruptChainProbe, IrqHandlerRegistry);
                     uart_interrupt_chain_probe_observes_uart_handler(UartInterruptChainProbe, IrqAction);
                     uart_interrupt_chain_probe_observes_plic_complete(UartInterruptChainProbe, Plic);
+                    uart_interrupt_chain_probe_observes_plic_loop_exit(UartInterruptChainProbe, Plic);
+                    uart_interrupt_chain_probe_observes_irq_cycle_closure(UartInterruptChainProbe, Plic, IrqHandlerRegistry);
                     uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
+                    plic_chained_handler_claim_loop_until_zero(Plic);
+                    plic_chained_handler_zero_claim_stops_dispatch(Plic);
+                    plic_chained_handler_completes_each_claimed_source(Plic);
                     plic_claim_before_generic_irq_dispatch(Plic);
                     plic_complete_after_irq_action_handler(Plic);
                     irq_action_handler_runs_after_plic_claim(IrqAction, Plic);
@@ -832,7 +842,12 @@ object UartInterruptChainProbe: InterruptObject {
             uart_interrupt_chain_probe_observes_irq_dispatch(UartInterruptChainProbe, IrqHandlerRegistry);
             uart_interrupt_chain_probe_observes_uart_handler(UartInterruptChainProbe, IrqAction);
             uart_interrupt_chain_probe_observes_plic_complete(UartInterruptChainProbe, Plic);
+            uart_interrupt_chain_probe_observes_plic_loop_exit(UartInterruptChainProbe, Plic);
+            uart_interrupt_chain_probe_observes_irq_cycle_closure(UartInterruptChainProbe, Plic, IrqHandlerRegistry);
             uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
+            plic_chained_handler_claim_loop_until_zero(Plic);
+            plic_chained_handler_zero_claim_stops_dispatch(Plic);
+            plic_chained_handler_completes_each_claimed_source(Plic);
             uart8250_port_interrupt_output_still_deferred(Uart8250Port);
         }
     }
@@ -1460,6 +1475,9 @@ object Plic: InterruptObject {
                     plic_claim_reads_claim_register(Plic);
                     plic_claim_returns_zero_when_no_pending_source(Plic);
                     plic_complete_writes_claimed_source(Plic);
+                    plic_chained_handler_claim_loop_until_zero(Plic);
+                    plic_chained_handler_zero_claim_stops_dispatch(Plic);
+                    plic_chained_handler_completes_each_claimed_source(Plic);
                     plic_claim_before_generic_irq_dispatch(Plic);
                     plic_complete_after_irq_action_handler(Plic);
                 }
@@ -1493,6 +1511,9 @@ object Plic: InterruptObject {
             plic_claim_reads_claim_register(Plic);
             plic_claim_returns_zero_when_no_pending_source(Plic);
             plic_complete_writes_claimed_source(Plic);
+            plic_chained_handler_claim_loop_until_zero(Plic);
+            plic_chained_handler_zero_claim_stops_dispatch(Plic);
+            plic_chained_handler_completes_each_claimed_source(Plic);
             plic_claim_before_generic_irq_dispatch(Plic);
             plic_complete_after_irq_action_handler(Plic);
         }
