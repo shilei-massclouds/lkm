@@ -627,6 +627,7 @@ object InitcallBoundary: KernelObject {
                     IrqProcViewDeferred.state == State::Ready;
                     CtorTable.state == State::Ready;
                     InitcallTable.state == State::Ready;
+                    UartExternalIrqEnable.state == State::Ready;
                 }
 
                 ensures {
@@ -678,6 +679,7 @@ object InitcallPhase: PhaseObject {
                     InitcallTable.Event::Preset;
                     InitcallTable.Event::Setup;
                     Ns16550aPlatformDriver.Event::Setup;
+                    UartExternalIrqEnable.Event::Setup;
                     InitcallBoundary.Event::Setup;
                 }
 
@@ -715,6 +717,10 @@ object InitcallPhase: PhaseObject {
                     platform_bus_ns16550a_driver_probe_called(PlatformBus);
                     platform_bus_ns16550a_driver_probe_return_zero(PlatformBus);
                     platform_bus_ns16550a_device_bound(PlatformBus);
+                    uart_external_irq_enable_ready(UartExternalIrqEnable);
+                    uart_external_irq_enable_opens_plic_source_gate(UartExternalIrqEnable, PlicIrqDomain, IrqGateRef::PlicUartSource);
+                    uart_external_irq_enable_opens_root_input_gate(UartExternalIrqEnable, RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    uart_external_irq_enable_keeps_uart_trigger_deferred(UartExternalIrqEnable, Plic);
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }
@@ -730,6 +736,7 @@ object InitcallPhase: PhaseObject {
             PlatformBusRootDevice.state == State::Ready;
             PlatformBus.state == State::Ready;
             Ns16550aPlatformDriver.state == State::Ready;
+            UartExternalIrqEnable.state == State::Ready;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;

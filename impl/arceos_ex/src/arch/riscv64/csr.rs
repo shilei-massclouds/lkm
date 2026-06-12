@@ -136,6 +136,10 @@ pub fn supervisor_interrupts_enabled() -> bool {
     read_sstatus() & SSTATUS_SIE != 0
 }
 
+pub fn supervisor_external_interrupt_enabled() -> bool {
+    read_sie() & SIE_SEIE != 0
+}
+
 pub fn read_satp() -> usize {
     let value: usize;
 

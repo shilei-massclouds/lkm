@@ -1117,8 +1117,10 @@ source，PLIC output 接到 hart local INTC 的 supervisor external input，最�
 独立 enable gate：PLIC 上 UART source 的 enable gate，以及 root INTC/`InterruptStream` 上 supervisor external input 的
 enable gate；二者都不同于 `sstatus.SIE` 总开关。当前必须定义这两个 gate 的身份和 closed 状态：root gate 在
 `RiscvIntc`/`InterruptStream` 安装 supervisor external route 时定义，UART source gate 在 `PlicIrqMapping` 绑定
-`HwirqRef::PlicUart0` 到 UART logical IRQ 时定义。deferred 的是两个 gate 的显式 Enable action 和真实 UART 触发，
-serial8250 console 仍保持 polling，不得声明 interrupt-driven ready。
+`HwirqRef::PlicUart0` 到 UART logical IRQ 时定义。两个 gate 的显式 Enable action 必须由单独的
+`UartExternalIrqEnable` 边界执行：PLIC source gate 对应 PLIC context enable bitmap / source priority，root gate 对应
+RISC-V INTC `sie.SEIE` unmask。deferred 的是 UART 真实 interrupt trigger 和 interrupt-driven console 切换，serial8250
+console 仍保持 polling，不得声明 interrupt-driven ready。
 
 软件处理/溯源链是 `CPU -> RiscvIntc -> PLIC -> UART`。运行期 dispatch contract 必须仿照 Linux：RISC-V root INTC
 `EXT_IRQ`/SEI entry 只转交给 PLIC chained handler，PLIC handler 先从 claim 寄存器读取 source，经
@@ -1136,6 +1138,10 @@ IRQ domain/source mapping 必须分清类型和实例：`IrqDomain` 是 IRQ core
 `1..=riscv,ndev` 范围内，重复映射同一个 source 必须返回已有 logical IRQ 而不是新增记录。该层不得 enable PLIC
 source、不得注册 handler、不得执行 claim/complete 或 dispatch；建立 UART source mapping 时只允许把对应 source gate
 定义为 closed，并记录 source enable deferred。
+
+`UartExternalIrqEnable` 只能在 UART IRQ resource、PLIC source mapping 和 `IrqHandlerRegistry` 中的 UART handler action
+都 ready 之后执行。它可以打开 PLIC UART source gate 和 root INTC supervisor external input gate，但仍不得直接触发 UART
+中断、调用 handler、执行 PLIC claim/complete，或把 serial8250 console 标记为 interrupt-driven。
 
 `ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经

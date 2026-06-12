@@ -32,6 +32,7 @@ pub struct InterruptStream {
     supervisor_external_input_gate_defined: bool,
     supervisor_external_input_gate_closed: bool,
     supervisor_external_input_enable_deferred: bool,
+    supervisor_external_input_gate_open: bool,
     boot_cpu_local_interrupts_enabled: bool,
 }
 
@@ -44,6 +45,7 @@ impl InterruptStream {
             supervisor_external_input_gate_defined: false,
             supervisor_external_input_gate_closed: false,
             supervisor_external_input_enable_deferred: false,
+            supervisor_external_input_gate_open: false,
             boot_cpu_local_interrupts_enabled: false,
         }
     }
@@ -86,6 +88,10 @@ impl InterruptStream {
 
     pub const fn supervisor_external_input_enable_deferred(&self) -> bool {
         self.supervisor_external_input_enable_deferred
+    }
+
+    pub const fn supervisor_external_input_gate_open(&self) -> bool {
+        self.supervisor_external_input_gate_open
     }
 
     pub const fn boot_cpu_local_interrupts_enabled(&self) -> bool {
@@ -142,6 +148,36 @@ impl InterruptStream {
         self.supervisor_external_input_gate_defined = true;
         self.supervisor_external_input_gate_closed = true;
         self.supervisor_external_input_enable_deferred = true;
+        Ok(())
+    }
+
+    pub fn enable_supervisor_external_input(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.external_handler_ready
+            || !self.supervisor_external_input_gate_defined
+            || !self.supervisor_external_input_gate_closed
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        csr::enable_supervisor_external_interrupt();
+        if !csr::supervisor_external_interrupt_enabled() {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.supervisor_external_input_gate_closed = false;
+        self.supervisor_external_input_enable_deferred = false;
+        self.supervisor_external_input_gate_open = true;
         Ok(())
     }
 

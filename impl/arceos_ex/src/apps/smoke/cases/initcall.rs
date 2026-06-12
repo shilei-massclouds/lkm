@@ -72,6 +72,13 @@ pub fn run() -> SmokeResult {
         || !crate::objects::ns16550a::uart8250_port_logical_irq_ready()
         || !check_uart_irq_mapping(&ctx.plic_irq_domain)
         || !check_uart_irq_handler(&ctx.irq_handler_registry)
+        || ctx.uart_external_irq_enable.state() != State::Ready
+        || !ctx.uart_external_irq_enable.plic_source_gate_open()
+        || !ctx.uart_external_irq_enable.root_external_input_gate_open()
+        || !ctx
+            .uart_external_irq_enable
+            .uart_interrupt_output_deferred()
+        || !ctx.interrupt_stream.supervisor_external_input_gate_open()
         || !ctx
             .irq_handler_registry
             .has_handler_for_logical_irq(crate::objects::ns16550a::uart8250_port_logical_irq())
@@ -280,9 +287,8 @@ fn check_uart_irq_mapping(domain: &crate::objects::irq_time::PlicIrqDomain) -> b
                 && mapping.source_range_checked()
                 && mapping.duplicate_source_idempotent()
                 && mapping.source_gate_defined()
-                && mapping.source_gate_closed()
-                && mapping.source_enable_deferred()
-                && mapping.source_not_enabled()
+                && mapping.source_gate_open()
+                && mapping.source_enabled()
                 && mapping.handler_not_registered()
         })
 }

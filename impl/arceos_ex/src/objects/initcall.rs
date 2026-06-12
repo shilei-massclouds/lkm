@@ -4,7 +4,9 @@ use super::{
     device_tree::{DeviceNodeRef, DeviceTree},
     driver::{DeviceDriverRef, ProbeResult},
     ioremap::Ioremap,
-    irq_time::{IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain},
+    irq_time::{
+        IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain, UartExternalIrqEnable,
+    },
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
     runtime_core::RuntimeCoreBoundary,
@@ -1808,6 +1810,7 @@ impl InitcallBoundary {
         irq_proc_view: &IrqProcViewDeferred,
         ctor_table: &CtorTable,
         initcall_table: &InitcallTable,
+        uart_external_irq_enable: &UartExternalIrqEnable,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpuset.state() != State::Ready
@@ -1825,6 +1828,10 @@ impl InitcallBoundary {
             || ctor_table.state() != State::Ready
             || initcall_table.state() != State::Ready
             || !initcall_table.all_levels_ran()
+            || uart_external_irq_enable.state() != State::Ready
+            || !uart_external_irq_enable.plic_source_gate_open()
+            || !uart_external_irq_enable.root_external_input_gate_open()
+            || !uart_external_irq_enable.uart_interrupt_output_deferred()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -1853,6 +1860,7 @@ pub fn initcall_phase_ready(
     irq_proc_view: &IrqProcViewDeferred,
     ctor_table: &CtorTable,
     initcall_table: &InitcallTable,
+    uart_external_irq_enable: &UartExternalIrqEnable,
     boundary: &InitcallBoundary,
 ) -> bool {
     cpuset.state() == State::Ready
@@ -1920,6 +1928,10 @@ pub fn initcall_phase_ready(
         && initcall_table.all_registered_entries_ran()
         && all_levels_done_public(initcall_table)
         && all_entries_checked_public(initcall_table)
+        && uart_external_irq_enable.state() == State::Ready
+        && uart_external_irq_enable.plic_source_gate_open()
+        && uart_external_irq_enable.root_external_input_gate_open()
+        && uart_external_irq_enable.uart_interrupt_output_deferred()
         && boundary.state() == State::Ready
         && boundary.kunit_next_boundary()
 }

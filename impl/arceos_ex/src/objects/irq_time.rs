@@ -24,8 +24,13 @@ const DEFAULT_TIMEBASE_HZ: u64 = 10_000_000;
 const IRQCHIP_RUN_RECORD_CAPACITY: usize = 8;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
+const PLIC_PRIORITY_BASE: usize = 0;
+const PLIC_PRIORITY_PER_ID: usize = 4;
+const PLIC_CONTEXT_ENABLE_BASE: usize = 0x2000;
+const PLIC_CONTEXT_ENABLE_SIZE: usize = 0x80;
 const PLIC_CONTEXT_BASE: usize = 0x200000;
 const PLIC_CONTEXT_SIZE: usize = 0x1000;
+const PLIC_CONTEXT_THRESHOLD: usize = 0x00;
 const PLIC_CONTEXT_CLAIM: usize = 0x4;
 const PLIC_IRQ_MAPPING_CAPACITY: usize = 32;
 const PLIC_LOGICAL_IRQ_BASE: usize = 32;
@@ -1937,6 +1942,8 @@ pub struct Plic {
     source_count: u32,
     context_id: usize,
     claim_addr: usize,
+    enable_addr: usize,
+    threshold_addr: usize,
     external_input_context_ready: bool,
     threshold_ready: bool,
     priority_ready: bool,
@@ -1977,6 +1984,8 @@ impl Plic {
             source_count: 0,
             context_id: 0,
             claim_addr: 0,
+            enable_addr: 0,
+            threshold_addr: 0,
             external_input_context_ready: false,
             threshold_ready: false,
             priority_ready: false,
@@ -2063,6 +2072,16 @@ impl Plic {
     #[allow(dead_code)]
     pub const fn claim_addr(&self) -> usize {
         self.claim_addr
+    }
+
+    #[allow(dead_code)]
+    pub const fn enable_addr(&self) -> usize {
+        self.enable_addr
+    }
+
+    #[allow(dead_code)]
+    pub const fn threshold_addr(&self) -> usize {
+        self.threshold_addr
     }
 
     pub const fn external_input_context_ready(&self) -> bool {
@@ -2246,6 +2265,23 @@ impl Plic {
                 State::Ready,
             );
         };
+        let Some(enable_addr) = plic_context_enable_addr(mapping.membase(), context_id) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        let Some(threshold_addr) = plic_context_threshold_addr(mapping.membase(), context_id)
+        else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
 
         self.matched_compatible = true;
         self.setup_called_by_of_irq_init = true;
@@ -2262,6 +2298,8 @@ impl Plic {
         self.source_count = source_count;
         self.context_id = context_id;
         self.claim_addr = claim_addr;
+        self.enable_addr = enable_addr;
+        self.threshold_addr = threshold_addr;
         self.external_input_context_ready = true;
         self.threshold_ready = true;
         self.priority_ready = true;
@@ -2314,6 +2352,35 @@ impl Plic {
         }
         self.complete(source);
         dispatched
+    }
+
+    fn enable_source(&self, source: u32) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || !self.source_enable_ready
+            || self.enable_addr == 0
+            || self.threshold_addr == 0
+            || source == 0
+            || source > self.source_count
+        {
+            return false;
+        }
+
+        let Some(priority_addr) = plic_priority_addr(self.membase, source) else {
+            return false;
+        };
+        let Some(enable_addr) = plic_source_enable_addr(self.enable_addr, source) else {
+            return false;
+        };
+        let mask = 1u32 << (source % 32);
+
+        unsafe {
+            core::ptr::write_volatile(priority_addr as *mut u32, 1);
+            let enabled = core::ptr::read_volatile(enable_addr as *const u32);
+            core::ptr::write_volatile(enable_addr as *mut u32, enabled | mask);
+            core::ptr::write_volatile(self.threshold_addr as *mut u32, 0);
+        }
+
+        unsafe { core::ptr::read_volatile(enable_addr as *const u32) & mask != 0 }
     }
 
     fn claim(&mut self) -> u32 {
@@ -2435,12 +2502,20 @@ impl PlicIrqMapping {
         self.source_gate_closed
     }
 
+    pub const fn source_gate_open(&self) -> bool {
+        self.source_gate_defined && !self.source_gate_closed && self.source_enabled
+    }
+
     pub const fn source_enable_deferred(&self) -> bool {
         self.source_enable_deferred
     }
 
     pub const fn source_not_enabled(&self) -> bool {
         !self.source_enabled
+    }
+
+    pub const fn source_enabled(&self) -> bool {
+        self.source_enabled
     }
 
     pub const fn handler_not_registered(&self) -> bool {
@@ -2480,6 +2555,28 @@ impl PlicIrqMapping {
         self.handler_registered = false;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    fn enable_source_gate(&mut self, plic: &Plic) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.source_gate_defined
+            || !self.source_gate_closed
+            || !self.source_enable_deferred
+            || self.source_enabled
+            || !plic.enable_source(self.source)
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.source_gate_closed = false;
+        self.source_enable_deferred = false;
+        self.source_enabled = true;
+        Ok(())
     }
 }
 
@@ -2704,6 +2801,32 @@ impl PlicIrqDomain {
         self.mapping_for_source(source)
             .map(|mapping| mapping.logical_irq())
     }
+
+    pub fn enable_source_gate(&mut self, plic: &Plic, source: u32) -> EventResult {
+        if self.lifecycle.state() != State::Ready || plic.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            if self.mappings[index].source() == source {
+                return self.mappings[index].enable_source_gate(plic);
+            }
+            index += 1;
+        }
+
+        failed_condition(
+            LifecycleEvent::Enable,
+            self.lifecycle.state(),
+            State::Ready,
+            State::Ready,
+        )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2776,8 +2899,133 @@ fn plic_context_claim_addr(membase: usize, context_id: usize) -> Option<usize> {
         .checked_add(PLIC_CONTEXT_CLAIM)
 }
 
+fn plic_context_enable_addr(membase: usize, context_id: usize) -> Option<usize> {
+    membase
+        .checked_add(PLIC_CONTEXT_ENABLE_BASE)?
+        .checked_add(context_id.checked_mul(PLIC_CONTEXT_ENABLE_SIZE)?)
+}
+
+fn plic_context_threshold_addr(membase: usize, context_id: usize) -> Option<usize> {
+    membase
+        .checked_add(PLIC_CONTEXT_BASE)?
+        .checked_add(context_id.checked_mul(PLIC_CONTEXT_SIZE)?)?
+        .checked_add(PLIC_CONTEXT_THRESHOLD)
+}
+
+fn plic_priority_addr(membase: usize, source: u32) -> Option<usize> {
+    membase.checked_add(PLIC_PRIORITY_BASE)?.checked_add(
+        usize::try_from(source)
+            .ok()?
+            .checked_mul(PLIC_PRIORITY_PER_ID)?,
+    )
+}
+
+fn plic_source_enable_addr(enable_base: usize, source: u32) -> Option<usize> {
+    enable_base.checked_add(
+        usize::try_from(source / 32)
+            .ok()?
+            .checked_mul(size_of::<u32>())?,
+    )
+}
+
 fn plic_node_matches_supported_compatible(node: DeviceNodeRef<'_>) -> bool {
     node.has_compatible(PLIC_COMPATIBLE_SIFIVE) || node.has_compatible(PLIC_COMPATIBLE_RISCV)
+}
+
+pub struct UartExternalIrqEnable {
+    lifecycle: Lifecycle,
+    plic_source_gate_open: bool,
+    root_external_input_gate_open: bool,
+    uart_interrupt_output_deferred: bool,
+}
+
+impl UartExternalIrqEnable {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            plic_source_gate_open: false,
+            root_external_input_gate_open: false,
+            uart_interrupt_output_deferred: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn plic_source_gate_open(&self) -> bool {
+        self.plic_source_gate_open
+    }
+
+    pub const fn root_external_input_gate_open(&self) -> bool {
+        self.root_external_input_gate_open
+    }
+
+    pub const fn uart_interrupt_output_deferred(&self) -> bool {
+        self.uart_interrupt_output_deferred
+    }
+
+    pub fn setup(
+        &mut self,
+        plic: &Plic,
+        plic_irq_domain: &mut PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+        interrupt_stream: &mut InterruptStream,
+    ) -> EventResult {
+        let source = super::ns16550a::uart8250_port_irq_source();
+        let logical_irq = super::ns16550a::uart8250_port_logical_irq();
+        if self.lifecycle.state() != State::Base
+            || plic.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || irq_handler_registry.state() != State::Ready
+            || !super::ns16550a::uart8250_port_irq_resource_ready()
+            || !super::ns16550a::uart8250_port_logical_irq_ready()
+            || !super::ns16550a::uart8250_irq_handler_registered()
+            || !logical_irq.is_valid()
+            || plic_irq_domain
+                .mapping_for_source(source)
+                .is_none_or(|mapping| mapping.logical_irq() != logical_irq)
+            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
+            || interrupt_stream.state() != State::Online
+            || !interrupt_stream.external_handler_ready()
+            || !interrupt_stream.supervisor_external_input_gate_defined()
+            || !interrupt_stream.supervisor_external_input_gate_closed()
+            || !interrupt_stream.supervisor_external_input_enable_deferred()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        plic_irq_domain.enable_source_gate(plic, source)?;
+        interrupt_stream.enable_supervisor_external_input()?;
+        let Some(mapping) = plic_irq_domain.mapping_for_source(source) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        if !mapping.source_gate_open() || !interrupt_stream.supervisor_external_input_gate_open() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.plic_source_gate_open = true;
+        self.root_external_input_gate_open = true;
+        self.uart_interrupt_output_deferred =
+            super::ns16550a::uart8250_interrupt_output_still_deferred();
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
 }
 
 fn find_plic_interrupt_controller_node(device_tree: &DeviceTree) -> Option<DeviceNodeRef<'_>> {

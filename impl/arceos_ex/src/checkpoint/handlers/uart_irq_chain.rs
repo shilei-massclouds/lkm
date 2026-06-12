@@ -69,10 +69,13 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx
             .interrupt_stream
             .supervisor_external_input_gate_defined()
-        && ctx.interrupt_stream.supervisor_external_input_gate_closed()
+        && ctx.interrupt_stream.supervisor_external_input_gate_open()
+        && ctx.uart_external_irq_enable.state() == State::Ready
+        && ctx.uart_external_irq_enable.plic_source_gate_open()
+        && ctx.uart_external_irq_enable.root_external_input_gate_open()
         && ctx
-            .interrupt_stream
-            .supervisor_external_input_enable_deferred()
+            .uart_external_irq_enable
+            .uart_interrupt_output_deferred()
         && ctx.plic.chained_handler_ready()
         && ctx.plic.claim_action_ready()
         && ctx.plic.complete_action_ready()
@@ -99,11 +102,11 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ns16550a::uart8250_irq_handler_hardirq_context_required()
         && ns16550a::uart8250_irq_handler_dispatch_ready()
         && ns16550a::uart8250_irq_handler_call_count() == 0
-        && plic_mapping_deferred(ctx, source, logical_irq)
+        && plic_mapping_enabled(ctx, source, logical_irq)
         && irq_action_deferred(ctx, logical_irq)
 }
 
-fn plic_mapping_deferred(ctx: &Context, source: u32, logical_irq: LogicalIrq) -> bool {
+fn plic_mapping_enabled(ctx: &Context, source: u32, logical_irq: LogicalIrq) -> bool {
     ctx.plic_irq_domain
         .mapping_for_source(source)
         .is_some_and(|mapping| {
@@ -111,9 +114,8 @@ fn plic_mapping_deferred(ctx: &Context, source: u32, logical_irq: LogicalIrq) ->
                 && mapping.domain_bound()
                 && mapping.source_valid()
                 && mapping.source_gate_defined()
-                && mapping.source_gate_closed()
-                && mapping.source_enable_deferred()
-                && mapping.source_not_enabled()
+                && mapping.source_gate_open()
+                && mapping.source_enabled()
                 && mapping.handler_not_registered()
         })
 }

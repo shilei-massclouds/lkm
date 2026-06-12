@@ -50,6 +50,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.initcall_table
         .preset(&ctx.ctor_table, &ctx.static_objects)?;
     run_initcall_table(ctx)?;
+    ctx.uart_external_irq_enable.setup(
+        &ctx.plic,
+        &mut ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+        &mut ctx.interrupt_stream,
+    )?;
     ctx.initcall_boundary.setup(
         &ctx.cpuset_smp_trimmed,
         &ctx.driver_core_base,
@@ -59,6 +65,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.irq_proc_view_deferred,
         &ctx.ctor_table,
         &ctx.initcall_table,
+        &ctx.uart_external_irq_enable,
     )
 }
 
@@ -85,6 +92,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.irq_proc_view_deferred,
         &ctx.ctor_table,
         &ctx.initcall_table,
+        &ctx.uart_external_irq_enable,
         &ctx.initcall_boundary,
     ) {
         return failed_condition(

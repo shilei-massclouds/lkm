@@ -86,6 +86,7 @@ predicate arceos_ex_must_model_irqdomain_as_type_and_plic_domain_as_instance() -
 predicate arceos_ex_must_plic_irq_domain_map_source_to_logical_irq_only() -> bool;
 predicate arceos_ex_must_platform_irq_resource_parse_uart_interrupts_from_dt() -> bool;
 predicate arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler() -> bool;
+predicate arceos_ex_must_uart_external_irq_enable_be_explicit_boundary() -> bool;
 predicate arceos_ex_must_model_irq_handler_registry_as_irq_core_object() -> bool;
 predicate arceos_ex_must_request_irq_require_mapped_logical_irq() -> bool;
 predicate arceos_ex_must_request_irq_record_handler_without_enabling_source() -> bool;
@@ -811,6 +812,19 @@ type ArceosExIrqTimeInitCodingMust {
          * silently open either gate.
          */
         arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler();
+
+        /*
+         * Explicit external IRQ enable:
+         *
+         * After UART IRQ resource mapping and request_irq() action recording,
+         * the implementation may open the two external propagation gates only
+         * through a named UartExternalIrqEnable boundary. That boundary must
+         * perform the PLIC UART source enable and the root INTC supervisor
+         * external input unmask as separate observable facts. It must not
+         * fabricate a UART interrupt, call the handler, run PLIC claim or
+         * complete, or mark serial8250 console output interrupt-driven.
+         */
+        arceos_ex_must_uart_external_irq_enable_be_explicit_boundary();
 
         /*
          * IRQ handler registry:

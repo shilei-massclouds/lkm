@@ -140,6 +140,22 @@ object RiscvIntc: InterruptObject {
     initial_state: State::Base;
     parent: IrqController;
 
+    processes {
+        Action::EnableExternalInput(gate: IrqGateRef) -> IrqGateRef {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                irq_gate_defined(self, gate);
+                irq_gate_closed(self, gate);
+                riscv_intc_external_input_enable_deferred(self, gate, InterruptCauseRef::SupervisorExternalIrq);
+            }
+            ensures {
+                irq_gate_open(self, gate);
+                riscv_intc_external_input_enabled(self, gate, InterruptCauseRef::SupervisorExternalIrq);
+            }
+        }
+    }
+
     state State::Base {
         events {
             on Event::Setup -> State::Ready {
@@ -299,6 +315,21 @@ type IrqDomain: InterruptObject {
                 logical_irq_ref_ready(LogicalIrqRef::Uart0);
             }
         }
+
+        Action::EnableSourceGate(hwirq: HwirqRef, gate: IrqGateRef) -> IrqGateRef {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                irq_domain_hwirq_mapped(self, hwirq, LogicalIrqRef::Uart0);
+                irq_gate_defined(PlicIrqMapping, gate);
+                irq_gate_closed(PlicIrqMapping, gate);
+                plic_irq_mapping_source_enable_deferred(PlicIrqMapping, gate);
+            }
+            ensures {
+                irq_gate_open(PlicIrqMapping, gate);
+                plic_irq_mapping_source_enabled(PlicIrqMapping, gate);
+            }
+        }
     }
 }
 
@@ -357,6 +388,7 @@ predicate logical_irq_ref_ready<T>(logical_irq: T) -> bool;
 predicate irq_gate_defined<T, G>(owner: T, gate: G) -> bool;
 predicate irq_gate_closed<T, G>(owner: T, gate: G) -> bool;
 predicate irq_gate_open<T, G>(owner: T, gate: G) -> bool;
+predicate irq_gate_enable_action_committed<T, G>(owner: T, gate: G) -> bool;
 
 predicate plic_irq_domain_owner_bound<T, P>(domain: T, plic: P) -> bool;
 predicate plic_irq_domain_source_range_bound<T, P>(domain: T, plic: P) -> bool;
@@ -377,6 +409,7 @@ predicate plic_irq_mapping_duplicate_source_idempotent<T, D>(mapping: T, domain:
 predicate plic_irq_mapping_source_gate_defined<T, G, H>(mapping: T, gate: G, hwirq: H) -> bool;
 predicate plic_irq_mapping_source_gate_closed<T, G>(mapping: T, gate: G) -> bool;
 predicate plic_irq_mapping_source_enable_deferred<T, G>(mapping: T, gate: G) -> bool;
+predicate plic_irq_mapping_source_enabled<T, G>(mapping: T, gate: G) -> bool;
 predicate plic_irq_mapping_source_not_enabled<T>(mapping: T) -> bool;
 predicate plic_irq_mapping_handler_not_registered<T>(mapping: T) -> bool;
 
@@ -422,6 +455,7 @@ predicate riscv_intc_external_irq_does_not_dispatch_leaf_device<T>(intc: T) -> b
 predicate riscv_intc_external_input_gate_defined<T, G, C>(intc: T, gate: G, cause: C) -> bool;
 predicate riscv_intc_external_input_gate_closed<T, G>(intc: T, gate: G) -> bool;
 predicate riscv_intc_external_input_enable_deferred<T, G, C>(intc: T, gate: G, cause: C) -> bool;
+predicate riscv_intc_external_input_enabled<T, G, C>(intc: T, gate: G, cause: C) -> bool;
 predicate irq_dispatch_external_route_uses_named_cause<T, C>(dispatch_tree: T, cause: C) -> bool;
 predicate irq_dispatch_external_route_ready<T, R, P>(dispatch_tree: T, riscv_intc: R, plic: P) -> bool;
 predicate irq_dispatch_external_route_uses_plic_chained_handler<T, P>(dispatch_tree: T, plic: P) -> bool;
@@ -436,6 +470,11 @@ predicate plic_claim_returns_zero_when_no_pending_source<T>(plic: T) -> bool;
 predicate plic_complete_writes_claimed_source<T>(plic: T) -> bool;
 predicate plic_claim_before_generic_irq_dispatch<T>(plic: T) -> bool;
 predicate plic_complete_after_irq_action_handler<T>(plic: T) -> bool;
+predicate uart_external_irq_enable_ready<T>(enable: T) -> bool;
+predicate uart_external_irq_enable_opens_plic_source_gate<T, D, G>(enable: T, domain: D, gate: G) -> bool;
+predicate uart_external_irq_enable_opens_root_input_gate<T, R, G>(enable: T, riscv_intc: R, gate: G) -> bool;
+predicate uart_external_irq_enable_requires_registered_handler<T, A>(enable: T, action: A) -> bool;
+predicate uart_external_irq_enable_keeps_uart_trigger_deferred<T, P>(enable: T, plic: P) -> bool;
 
 /*
  * IrqHandlerRegistry 是 IRQ core 侧的 handler/action registry。它记录
@@ -652,6 +691,72 @@ object UartIrqChainKunitObserver: InterruptObject {
                 Plic,
                 IrqHandlerRegistry
             );
+        }
+    }
+}
+
+/*
+ * UartExternalIrqEnable 是 UART 外部中断物理传播链的显式 enable 边界。
+ * 它发生在 UART source mapping 和 request_irq action 记录之后，打开
+ * PLIC UART source gate 和 root INTC SupervisorExternalIrq input gate；
+ * 但不制造 UART interrupt trigger，也不把 serial8250 console 改为
+ * interrupt-driven。
+ */
+object UartExternalIrqEnable: InterruptObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Plic.state == State::Ready;
+                    RiscvIntc.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                    PlicIrqMapping.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                    IrqAction.state == State::Ready;
+                    Uart8250Port.state == State::Ready;
+                }
+
+                drives {
+                    PlicIrqDomain.Action::EnableSourceGate(HwirqRef::PlicUart0, IrqGateRef::PlicUartSource);
+                    RiscvIntc.Action::EnableExternalInput(IrqGateRef::RootSupervisorExternalInput);
+                }
+
+                ensures {
+                    uart_external_irq_enable_ready(UartExternalIrqEnable);
+                    uart_external_irq_enable_requires_registered_handler(UartExternalIrqEnable, IrqAction);
+                    uart_external_irq_enable_opens_plic_source_gate(UartExternalIrqEnable, PlicIrqDomain, IrqGateRef::PlicUartSource);
+                    uart_external_irq_enable_opens_root_input_gate(UartExternalIrqEnable, RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    irq_gate_open(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                    irq_gate_open(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    irq_gate_enable_action_committed(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                    irq_gate_enable_action_committed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    plic_irq_mapping_source_enabled(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                    riscv_intc_external_input_enabled(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
+                    uart_external_irq_enable_keeps_uart_trigger_deferred(UartExternalIrqEnable, Plic);
+                    plic_uart_source_trigger_deferred(Plic);
+                    uart8250_port_interrupt_output_still_deferred(Uart8250Port);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            uart_external_irq_enable_ready(UartExternalIrqEnable);
+            uart_external_irq_enable_requires_registered_handler(UartExternalIrqEnable, IrqAction);
+            uart_external_irq_enable_opens_plic_source_gate(UartExternalIrqEnable, PlicIrqDomain, IrqGateRef::PlicUartSource);
+            uart_external_irq_enable_opens_root_input_gate(UartExternalIrqEnable, RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+            irq_gate_open(PlicIrqMapping, IrqGateRef::PlicUartSource);
+            irq_gate_open(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+            irq_gate_enable_action_committed(PlicIrqMapping, IrqGateRef::PlicUartSource);
+            irq_gate_enable_action_committed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+            plic_irq_mapping_source_enabled(PlicIrqMapping, IrqGateRef::PlicUartSource);
+            riscv_intc_external_input_enabled(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
+            uart_external_irq_enable_keeps_uart_trigger_deferred(UartExternalIrqEnable, Plic);
+            plic_uart_source_trigger_deferred(Plic);
+            uart8250_port_interrupt_output_still_deferred(Uart8250Port);
         }
     }
 }
@@ -1412,7 +1517,7 @@ object IrqTimeInitPhase: PhaseObject {
                     "profile_init() 暂缓：profile buffer 和 proc export 后续再建模。";
                     "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
-                    "PLIC UART source enable、root INTC SupervisorExternalIrq input enable 与真实 UART 中断触发暂缓：当前建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，但不把 serial8250 console 声明为 interrupt-driven。";
+                    "真实 UART 中断触发暂缓：当前建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，并由后续 UartExternalIrqEnable 显式打开 PLIC source gate 和 root external input gate，但不把 serial8250 console 声明为 interrupt-driven。";
                 }
             }
         }
