@@ -34,9 +34,9 @@
 3. **已完成：coding 规格 LDS 段注册约束**。已规定 PLIC init entry 必须静态放入 irqchip init section，类似 initcall；`of_irq_init()` 实现必须遍历该 section，而不是运行时手动 push 注册项；匹配项覆盖当前 QEMU virt 的 `sifive,plic-1.0.0`，并保留 `riscv,plic0`。
 4. **已完成：irqchip init table 骨架**。已增加 irqchip init entry 类型、`.irqchip.init` section、codegen/linker start/end 符号、遍历函数和 PLIC init entry；`make test` 的 `smoke.irq_time` 已验证 entry 来自 LDS section、compatible 被匹配、callback 经遍历被调用。
 5. **已完成：PLIC setup 最小闭环**。已从设备树解析 PLIC node、`reg`、`riscv,ndev` 和 `interrupts-extended` 中的 external interrupt parent input；已用 runtime `ioremap`/`vmalloc` 以 system irqchip owner 映射 PLIC MMIO；已建立 external-input context 的 threshold、priority、source enable 基础状态；当前 `Plic` 已升级为最小 `Ready`，但 external IRQ route、claim/complete、handler dispatch，以及严格 phandle-to-boot-hart 绑定仍 deferred。
-6. **已完成：IRQ domain / source mapping**。已建立 `IrqDomain` 通用契约和 `PlicIrqDomain` 实例；`IrqTimeInitPhase` 在 `Plic.Ready` 后推进 domain 到 `Ready`；`Ns16550aPlatformDriver` probe 已解析 UART `interrupts`/`interrupt-parent`，确认父节点是 PLIC，并把 UART PLIC source 映射到 logical IRQ。当前只记录 IRQ resource/mapping，PLIC source 未 enable，handler 未注册，console 输出仍保持 polling。
-7. **下一步：handler registry 与上下文约束**。增加最小 `request_irq` / handler registration 记录；覆盖 duplicate registration 拒绝、未映射 IRQ 拒绝、未启用 PLIC route 拒绝；建立 hardirq context guard，handler 内不能走睡眠或普通进程上下文路径。
-8. **实现：UART 外部中断链验证**。注册最小 UART IRQ handler；启用 UART 中断条件和 PLIC source；通过 trace/KUnit 验证 `PLIC claim -> irq dispatch -> UART handler -> PLIC complete`。
+6. **已完成：IRQ domain / source mapping**。已建立 `IrqDomain` 通用契约和 `PlicIrqDomain` 实例；`IrqTimeInitPhase` 在 `Plic.Ready` 后推进 domain 到 `Ready`；`Ns16550aPlatformDriver` probe 已解析 UART `interrupts`/`interrupt-parent`，确认父节点是 PLIC，并把 UART PLIC source 映射到 logical IRQ。`PlicIrqDomain` 仍只拥有 source -> logical IRQ 映射，不拥有 handler，也不启用 PLIC source；console 输出保持 polling。
+7. **已完成：handler registry 与上下文约束**。已增加 `IrqHandlerRegistry` / `IrqAction` 和最小 `request_irq` 记录；`Ns16550aPlatformDriver` 在 UART logical IRQ 映射后登记最小 UART handler action；smoke/KUnit 覆盖 duplicate registration 拒绝、未映射 logical IRQ 拒绝、hardirq context requirement、source enable deferred、dispatch deferred。当前 handler 只作为 IRQ core action 元数据存在，不执行 handler，不 claim/complete，不声明 serial8250 interrupt-driven ready。
+8. **下一步：UART 外部中断链验证**。实现 PLIC source enable、claim/complete 和最小 IRQ dispatch；启用 UART 中断条件后，通过 trace/KUnit 验证 `PLIC claim -> irq dispatch -> UART handler -> PLIC complete`。
 9. **后续：serial8250 interrupt-driven console**。只有外部中断链稳定后，再把 console 输出从 polling 扩展到 interrupt-driven；这一步单独计划和提交。
 
 ## 执行中计划：console 边界收口到 ioremap/vmalloc
@@ -54,7 +54,7 @@
 
 | 优先级 | 状态 | 领域 | 任务 | 目标与说明 | 细节 |
 | --- | --- | --- | --- | --- | --- |
-| `P0` | 进行中 | arceos_ex/irq | 实现 PLIC 驱动并用 UART 验证外部中断链 | 已完成 irqchip init、PLIC provider setup、system irqchip MMIO ioremap、`PlicIrqDomain` source -> logical IRQ mapping，以及 ns16550a UART IRQ resource 解析/绑定。下一步进入 handler registry、上下文约束、PLIC source enable、claim/complete 和 serial8250 handler dispatch；近期验收目标仍是通过 UART 驱动触发并观察 PLIC claim -> irq dispatch -> UART handler -> PLIC complete 的外部中断链。console 输出可继续保持 polling，不能提前声明 interrupt-driven ready。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
+| `P0` | 进行中 | arceos_ex/irq | 实现 PLIC 驱动并用 UART 验证外部中断链 | 已完成 irqchip init、PLIC provider setup、system irqchip MMIO ioremap、`PlicIrqDomain` source -> logical IRQ mapping、ns16550a UART IRQ resource 解析/绑定，以及 IRQ core 侧 `IrqHandlerRegistry` / `request_irq` 最小 handler action 记录。下一步进入 PLIC source enable、claim/complete 和 serial8250 handler dispatch；近期验收目标仍是通过 UART 驱动触发并观察 PLIC claim -> irq dispatch -> UART handler -> PLIC complete 的外部中断链。console 输出可继续保持 polling，不能提前声明 interrupt-driven ready。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P1` | 待办 | trace/view | 收口 trace/SVG 输出体验 | 系统检查基础图、state 注释图、event 注释图、state+event 注释图四种输出；优先处理 `depends_on` 长线、完整图过高、标签简化/分行、关键非状态谓词事实展示、主 trace action 展开深度约束，以及布局常量是否暴露为 render 参数等问题，使 trace 图适合日常审阅。深层 action/process 内部细节后续应进入专门的 action 展开图。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#step-c1-收口-trace-输出和注释数据流) |
 | `P1` | 待办 | trace/view | 优化 trace context 框显示 | 当前 context 框在深层嵌套和长作用域下过高，文字位置也容易远离关键 action，影响阅读。后续应优化 context 高度控制、文本锚定/居中策略、跨行标签布局和框体视觉层级，使上下文边界可读但不压迫主 trace。 | [pyveri DEVELOPMENT](../tools/pyveri/DEVELOPMENT.md#view) |
 | `P1` | 待办 | CI | 建立 GitHub Actions 快速 CI | 覆盖推导工具质量、核心规格推导、trace 生成 smoke、顶层 `make verify` 和 `impl/arceos_ex` 最小构建；不发布 Pages，不跑耗时 QEMU 全量任务。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#ci-与项目主页) |
@@ -121,7 +121,7 @@
 
 ## 当前交接标记
 
-- 截止提交 `0316c1f` (`arceos-ex use dynamic vmalloc records`)，PlatformBus 已完成设备 population、driver register/probe、真实 ns16550a probe/bind、UART 8250 资源解析、ioremap/vmalloc UART MMIO 映射和 console/earlycon handoff 首轮闭环；ioremap/vmalloc 已完成职责边界收口、MMIO 属性首轮建模、完整 VMALLOC runtime 映射范围、按需页表页追加和动态 `VmapArea` / `VmapMapping` 记录 backing。后续重点是实现 PLIC 驱动，并与 UART 驱动结合验证外部中断链；serial8250 interrupt-driven console 在该链路验证后再推进。
+- 当前 PLIC/IRQ 前置链路已推进到 `IrqHandlerRegistry` / `request_irq`：PlatformBus 已完成设备 population、driver register/probe、真实 ns16550a probe/bind、UART 8250 资源解析、ioremap/vmalloc UART MMIO 映射、console/earlycon handoff、PLIC irqchip init/provider setup、`PlicIrqDomain` source -> logical IRQ mapping，以及 UART IRQ handler action 登记。后续重点是实现 PLIC source enable、claim/complete 和最小 dispatch，并与 UART 驱动结合验证外部中断链；serial8250 interrupt-driven console 在该链路验证后再推进。
 - 已解决前置问题：`make run APP=hello` 的重复输出来自 handoff 后 `PrintkBuffer` legacy drain cursor 未移交，以及 payload 末尾直接调用 earlycon backend drain；当前已修复为 boot pending flush、serial delivered cursor 推进、handoff 后 EarlyCon offline/panic guard，并要求 hello/smoke 只走 printk 前端。已通过 `make run APP=hello`、`make run LOG=trace APP=hello` 与 `make test` 验证。
 - `SmpRuntimePhase` 已形成六个子阶段最小闭环：`PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
 - 最近完整验收已通过：`make build APP=smoke`；`make test-kunit`；`make verify`；`make test`。当前 `make test` summary 为 `total=85 pass=85 fail=0`。

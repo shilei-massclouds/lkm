@@ -261,6 +261,9 @@ type PlicIrqMappingRef {
 type PlatformIrqResourceRef {
 }
 
+type IrqActionRef {
+}
+
 predicate irq_domain_owner_irqchip<T, C>(domain: T, irqchip: C) -> bool;
 predicate irq_domain_hwirq_valid_range_ready<T>(domain: T) -> bool;
 predicate irq_domain_logical_irq_allocator_ready<T>(domain: T) -> bool;
@@ -289,6 +292,149 @@ predicate plic_irq_mapping_logical_irq_assigned<T, L>(mapping: T, logical_irq: L
 predicate plic_irq_mapping_duplicate_source_idempotent<T, D>(mapping: T, domain: D) -> bool;
 predicate plic_irq_mapping_source_not_enabled<T>(mapping: T) -> bool;
 predicate plic_irq_mapping_handler_not_registered<T>(mapping: T) -> bool;
+
+predicate irq_handler_registry_ready<T>(registry: T) -> bool;
+predicate irq_handler_registry_action_table_ready<T>(registry: T) -> bool;
+predicate irq_handler_registry_owner_irq_core<T>(registry: T) -> bool;
+predicate irq_handler_registry_requires_mapped_logical_irq<T, D>(registry: T, domain: D) -> bool;
+predicate irq_handler_registry_duplicate_policy_ready<T>(registry: T) -> bool;
+predicate irq_handler_registry_unmapped_reject_ready<T>(registry: T) -> bool;
+predicate irq_handler_registry_hardirq_context_guard_ready<T>(registry: T) -> bool;
+predicate irq_handler_registry_source_enable_deferred<T>(registry: T) -> bool;
+predicate irq_handler_registry_dispatch_deferred<T>(registry: T) -> bool;
+predicate irq_handler_registry_registered_action<T, A>(registry: T, action: A) -> bool;
+
+predicate irq_action_logical_irq_bound<T, L>(action: T, logical_irq: L) -> bool;
+predicate irq_action_device_bound<T, D>(action: T, device: D) -> bool;
+predicate irq_action_handler_bound<T>(action: T) -> bool;
+predicate irq_action_hardirq_context_required<T>(action: T) -> bool;
+predicate irq_action_mapped_irq_required<T, M>(action: T, mapping: M) -> bool;
+predicate irq_action_duplicate_registration_rejected<T>(action: T) -> bool;
+predicate irq_action_unmapped_registration_rejected<T>(action: T) -> bool;
+predicate irq_action_does_not_enable_source<T>(action: T) -> bool;
+predicate irq_action_dispatch_deferred<T>(action: T) -> bool;
+
+/*
+ * IrqHandlerRegistry 是 IRQ core 侧的 handler/action registry。它只记录
+ * request_irq 风格的 handler 绑定，不负责 PLIC source enable 或 dispatch。
+ */
+object IrqHandlerRegistry: InterruptObject {
+    initial_state: State::Base;
+
+    processes {
+        Action::RequestIrq(logical_irq: LogicalIrqRef, action: IrqActionRef) -> IrqActionRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                PlicIrqDomain.state == State::Ready;
+                PlicIrqMapping.state == State::Ready;
+                logical_irq_ref_ready(logical_irq);
+                irq_handler_registry_action_table_ready(self);
+                irq_handler_registry_requires_mapped_logical_irq(self, PlicIrqDomain);
+            }
+
+            ensures {
+                irq_handler_registry_registered_action(self, action);
+                irq_action_logical_irq_bound(action, logical_irq);
+                irq_action_mapped_irq_required(action, PlicIrqMappingRef::Uart0);
+                irq_action_hardirq_context_required(action);
+                irq_action_duplicate_registration_rejected(action);
+                irq_action_unmapped_registration_rejected(action);
+                irq_action_does_not_enable_source(action);
+                irq_action_dispatch_deferred(action);
+            }
+        }
+    }
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    IrqController.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                }
+
+                ensures {
+                    irq_handler_registry_ready(IrqHandlerRegistry);
+                    irq_handler_registry_action_table_ready(IrqHandlerRegistry);
+                    irq_handler_registry_owner_irq_core(IrqHandlerRegistry);
+                    irq_handler_registry_requires_mapped_logical_irq(IrqHandlerRegistry, PlicIrqDomain);
+                    irq_handler_registry_duplicate_policy_ready(IrqHandlerRegistry);
+                    irq_handler_registry_unmapped_reject_ready(IrqHandlerRegistry);
+                    irq_handler_registry_hardirq_context_guard_ready(IrqHandlerRegistry);
+                    irq_handler_registry_source_enable_deferred(IrqHandlerRegistry);
+                    irq_handler_registry_dispatch_deferred(IrqHandlerRegistry);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            irq_handler_registry_ready(IrqHandlerRegistry);
+            irq_handler_registry_action_table_ready(IrqHandlerRegistry);
+            irq_handler_registry_owner_irq_core(IrqHandlerRegistry);
+            irq_handler_registry_requires_mapped_logical_irq(IrqHandlerRegistry, PlicIrqDomain);
+            irq_handler_registry_duplicate_policy_ready(IrqHandlerRegistry);
+            irq_handler_registry_unmapped_reject_ready(IrqHandlerRegistry);
+            irq_handler_registry_hardirq_context_guard_ready(IrqHandlerRegistry);
+            irq_handler_registry_source_enable_deferred(IrqHandlerRegistry);
+            irq_handler_registry_dispatch_deferred(IrqHandlerRegistry);
+        }
+    }
+}
+
+/*
+ * IrqAction 表示 request_irq() 创建的一条 logical IRQ -> handler 记录。
+ * 它可以要求 hardirq context，但本步骤不执行 handler、不 enable source。
+ */
+object IrqAction: InterruptObject {
+    initial_state: State::Base;
+    parent: IrqHandlerRegistry;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    IrqHandlerRegistry.state == State::Ready;
+                    PlicIrqMapping.state == State::Ready;
+                }
+
+                drives {
+                    IrqHandlerRegistry.Action::RequestIrq(LogicalIrqRef::Uart0, IrqActionRef::Ns16550aUart);
+                }
+
+                ensures {
+                    irq_handler_registry_registered_action(IrqHandlerRegistry, IrqActionRef::Ns16550aUart);
+                    irq_action_logical_irq_bound(IrqAction, LogicalIrqRef::Uart0);
+                    irq_action_device_bound(IrqAction, DeviceRef::Ns16550aSerial);
+                    irq_action_handler_bound(IrqAction);
+                    irq_action_hardirq_context_required(IrqAction);
+                    irq_action_mapped_irq_required(IrqAction, PlicIrqMappingRef::Uart0);
+                    irq_action_duplicate_registration_rejected(IrqAction);
+                    irq_action_unmapped_registration_rejected(IrqAction);
+                    irq_action_does_not_enable_source(IrqAction);
+                    irq_action_dispatch_deferred(IrqAction);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            irq_handler_registry_registered_action(IrqHandlerRegistry, IrqActionRef::Ns16550aUart);
+            irq_action_logical_irq_bound(IrqAction, LogicalIrqRef::Uart0);
+            irq_action_device_bound(IrqAction, DeviceRef::Ns16550aSerial);
+            irq_action_handler_bound(IrqAction);
+            irq_action_hardirq_context_required(IrqAction);
+            irq_action_mapped_irq_required(IrqAction, PlicIrqMappingRef::Uart0);
+            irq_action_duplicate_registration_rejected(IrqAction);
+            irq_action_unmapped_registration_rejected(IrqAction);
+            irq_action_does_not_enable_source(IrqAction);
+            irq_action_dispatch_deferred(IrqAction);
+        }
+    }
+}
 
 /*
  * PlicIrqDomain 是 PLIC provider 创建的具体 IRQ domain 实例。
@@ -977,6 +1123,7 @@ object IrqTimeInitPhase: PhaseObject {
                     IrqChipInitTable.Event::Setup;
                     PlicIrqDomain.Event::Preset;
                     PlicIrqDomain.Event::Setup;
+                    IrqHandlerRegistry.Event::Setup;
                     IrqDispatchTree.Event::Setup;
                     Tick.Event::Preset;
                     TimerWheel.Event::Setup;
@@ -1023,6 +1170,7 @@ object IrqTimeInitPhase: PhaseObject {
             PlicDriver.state == State::Prepared;
             Plic.state == State::Ready;
             PlicIrqDomain.state == State::Ready;
+            IrqHandlerRegistry.state == State::Ready;
             Tick.state == State::Ready;
             TickBroadcast.state == State::Ready;
             TimerWheel.state == State::Ready;

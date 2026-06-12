@@ -9,7 +9,7 @@ use crate::{
         driver::MOCK_PLATFORM_DRIVER_REF,
         initcall::PlatformBus,
         ioremap::Ioremap,
-        irq_time::PlicIrqDomain,
+        irq_time::{IrqHandlerRegistry, PlicIrqDomain},
         mm_core::{PageAllocator, PageTableCaches, VmallocAllocator},
         state::State,
     },
@@ -29,6 +29,7 @@ struct PlatformBusActionsFixture {
     vmalloc_allocator: VmallocAllocator,
     ioremap: Ioremap,
     plic_irq_domain: PlicIrqDomain,
+    irq_handler_registry: IrqHandlerRegistry,
 }
 
 impl PlatformBusActionsFixture {
@@ -40,6 +41,7 @@ impl PlatformBusActionsFixture {
             vmalloc_allocator: VmallocAllocator::new(),
             ioremap: Ioremap::new(),
             plic_irq_domain: PlicIrqDomain::new(),
+            irq_handler_registry: IrqHandlerRegistry::new(),
         }
     }
 
@@ -88,10 +90,19 @@ impl PlatformBusActionsFixture {
             "setup plic irq domain",
             self.plic_irq_domain.setup(&ctx.plic, &ctx.irq_controller),
         );
+        assertions.assert_ok(
+            "setup irq handler registry",
+            self.irq_handler_registry
+                .setup(&ctx.irq_controller, &self.plic_irq_domain),
+        );
         assertions.assert("bus ready", self.bus.state() == State::Ready);
         assertions.assert(
             "plic irq domain ready",
             self.plic_irq_domain.state() == State::Ready,
+        );
+        assertions.assert(
+            "irq handler registry ready",
+            self.irq_handler_registry.state() == State::Ready,
         );
         assertions.assert("bus registered", self.bus.registered());
         assertions.assert("devices kset ready", self.bus.devices_kset_ready());
@@ -172,6 +183,7 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
                 &context_ref().config,
                 &mut self.fixture.ioremap,
                 &mut self.fixture.plic_irq_domain,
+                &mut self.fixture.irq_handler_registry,
             ),
         );
         assertions.assert(
@@ -221,6 +233,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
                 &context_ref().config,
                 &mut self.fixture.ioremap,
                 &mut self.fixture.plic_irq_domain,
+                &mut self.fixture.irq_handler_registry,
             ),
         );
         self.fixture.setup_ready(assertions);
@@ -256,6 +269,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
                 &context_ref().config,
                 &mut self.fixture.ioremap,
                 &mut self.fixture.plic_irq_domain,
+                &mut self.fixture.irq_handler_registry,
             ),
         );
         assertions.assert(

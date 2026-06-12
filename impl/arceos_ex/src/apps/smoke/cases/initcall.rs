@@ -66,10 +66,15 @@ pub fn run() -> SmokeResult {
         || !platform_bus.ns16550a_probe_registers_uart8250_port()
         || !platform_bus.ns16550a_probe_records_uart_irq_resource()
         || !platform_bus.ns16550a_probe_records_uart_irq_mapping()
+        || !platform_bus.ns16550a_probe_registers_uart_irq_handler()
         || !platform_bus.ns16550a_probe_keeps_interrupt_output_deferred()
         || !crate::objects::ns16550a::uart8250_port_irq_resource_ready()
         || !crate::objects::ns16550a::uart8250_port_logical_irq_ready()
         || !check_uart_irq_mapping(&ctx.plic_irq_domain)
+        || !check_uart_irq_handler(&ctx.irq_handler_registry)
+        || !ctx
+            .irq_handler_registry
+            .has_handler_for_logical_irq(crate::objects::ns16550a::uart8250_port_logical_irq())
         || !platform_bus.ns16550a_probe_registers_serial_console()
         || !platform_bus.ns16550a_probe_triggers_console_handoff()
         || !ctx.console.registry_ready()
@@ -277,6 +282,26 @@ fn check_uart_irq_mapping(domain: &crate::objects::irq_time::PlicIrqDomain) -> b
                 && mapping.source_not_enabled()
                 && mapping.handler_not_registered()
         })
+}
+
+fn check_uart_irq_handler(registry: &crate::objects::irq_time::IrqHandlerRegistry) -> bool {
+    let logical_irq = crate::objects::ns16550a::uart8250_port_logical_irq();
+    registry.action_count() != 0
+        && crate::objects::ns16550a::uart8250_irq_handler_registered()
+        && crate::objects::ns16550a::uart8250_irq_handler_hardirq_context_required()
+        && crate::objects::ns16550a::uart8250_irq_handler_dispatch_deferred()
+        && registry
+            .action_for_logical_irq(logical_irq)
+            .is_some_and(|action| {
+                action.handler_kind() == crate::objects::irq_time::IrqHandlerKind::Ns16550aUart
+                    && action.handler_bound()
+                    && action.hardirq_context_required()
+                    && action.mapped_irq_required()
+                    && action.duplicate_registration_rejected()
+                    && action.unmapped_registration_rejected()
+                    && action.source_not_enabled()
+                    && action.dispatch_deferred()
+            })
 }
 
 const fn expected_level_name(index: usize) -> InitcallLevelName {

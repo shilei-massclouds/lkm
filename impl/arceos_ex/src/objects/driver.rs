@@ -3,7 +3,7 @@ use super::{
     device::DeviceRef,
     device_tree::{DeviceNodeId, DeviceTree},
     ioremap::Ioremap,
-    irq_time::PlicIrqDomain,
+    irq_time::{IrqHandlerRegistry, PlicIrqDomain},
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
 };
 
@@ -16,6 +16,7 @@ pub type PlatformProbe = fn(
     &Config,
     &mut Ioremap,
     &mut PlicIrqDomain,
+    &mut IrqHandlerRegistry,
     DeviceRef,
     DeviceNodeId,
 ) -> ProbeResult;
@@ -118,6 +119,7 @@ impl PlatformDriver {
         config: &Config,
         ioremap: &mut Ioremap,
         plic_irq_domain: &mut PlicIrqDomain,
+        irq_handler_registry: &mut IrqHandlerRegistry,
         device: DeviceRef,
         node_id: DeviceNodeId,
     ) -> ProbeResult {
@@ -130,6 +132,7 @@ impl PlatformDriver {
             config,
             ioremap,
             plic_irq_domain,
+            irq_handler_registry,
             device,
             node_id,
         )
@@ -176,6 +179,7 @@ fn mock_deferred_probe(
     _config: &Config,
     _ioremap: &mut Ioremap,
     _plic_irq_domain: &mut PlicIrqDomain,
+    _irq_handler_registry: &mut IrqHandlerRegistry,
     _device: DeviceRef,
     _node_id: DeviceNodeId,
 ) -> ProbeResult {

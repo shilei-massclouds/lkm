@@ -197,6 +197,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     PlatformBus.state == State::Ready;
                     Ioremap.state == State::Ready;
                     PlicIrqDomain.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
                 }
 
                 drives {
@@ -206,6 +207,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     );
                     PlatformIrqResource.Event::Preset;
                     PlatformIrqResource.Event::Setup;
+                    IrqAction.Event::Setup;
                     Uart8250Port.Event::Setup;
                     Serial8250Console.Event::Setup;
                     ConsoleRegistry.Event::Setup;
@@ -239,6 +241,13 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     platform_irq_resource_ready(PlatformIrqResource);
                     platform_irq_resource_logical_irq_bound(PlatformIrqResource, LogicalIrqRef::Uart0);
                     plic_irq_mapping_logical_irq_assigned(PlicIrqMapping, LogicalIrqRef::Uart0);
+                    irq_handler_registry_registered_action(IrqHandlerRegistry, IrqActionRef::Ns16550aUart);
+                    irq_action_logical_irq_bound(IrqAction, LogicalIrqRef::Uart0);
+                    irq_action_device_bound(IrqAction, DeviceRef::Ns16550aSerial);
+                    irq_action_handler_bound(IrqAction);
+                    irq_action_hardirq_context_required(IrqAction);
+                    irq_action_does_not_enable_source(IrqAction);
+                    irq_action_dispatch_deferred(IrqAction);
                     uart8250_port_irq_resource_ready(Uart8250Port, PlatformIrqResource);
                     uart8250_port_logical_irq_bound(Uart8250Port, LogicalIrqRef::Uart0);
                     uart8250_port_interrupt_output_still_deferred(Uart8250Port);
@@ -280,6 +289,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             Uart8250Port.state == State::Ready;
             PlatformIrqResource.state == State::Ready;
             PlicIrqMapping.state == State::Ready;
+            IrqAction.state == State::Ready;
             Serial8250Console.state == State::Ready;
             ConsoleRegistry.state == State::Ready;
             ConsoleHandoff.state == State::Ready;
@@ -306,6 +316,13 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             platform_irq_resource_ready(PlatformIrqResource);
             platform_irq_resource_logical_irq_bound(PlatformIrqResource, LogicalIrqRef::Uart0);
             plic_irq_mapping_logical_irq_assigned(PlicIrqMapping, LogicalIrqRef::Uart0);
+            irq_handler_registry_registered_action(IrqHandlerRegistry, IrqActionRef::Ns16550aUart);
+            irq_action_logical_irq_bound(IrqAction, LogicalIrqRef::Uart0);
+            irq_action_device_bound(IrqAction, DeviceRef::Ns16550aSerial);
+            irq_action_handler_bound(IrqAction);
+            irq_action_hardirq_context_required(IrqAction);
+            irq_action_does_not_enable_source(IrqAction);
+            irq_action_dispatch_deferred(IrqAction);
             uart8250_port_irq_resource_ready(Uart8250Port, PlatformIrqResource);
             uart8250_port_logical_irq_bound(Uart8250Port, LogicalIrqRef::Uart0);
             uart8250_port_interrupt_output_still_deferred(Uart8250Port);

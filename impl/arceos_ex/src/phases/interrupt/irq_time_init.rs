@@ -51,6 +51,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.plic_irq_domain.preset(&ctx.plic, &ctx.irq_controller)?;
     ctx.plic_irq_domain.setup(&ctx.plic, &ctx.irq_controller)?;
+    ctx.irq_handler_registry
+        .setup(&ctx.irq_controller, &ctx.plic_irq_domain)?;
     ctx.irq_dispatch_tree.setup(
         &ctx.irq_controller,
         &ctx.riscv_intc,
@@ -182,6 +184,15 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.plic_irq_domain.one_cell_specifier()
         && ctx.plic_irq_domain.enable_deferred()
         && ctx.plic_irq_domain.source_count() == ctx.plic.source_count()
+        && ctx.irq_handler_registry.state() == State::Ready
+        && ctx.irq_handler_registry.action_table_ready()
+        && ctx.irq_handler_registry.owner_irq_core()
+        && ctx.irq_handler_registry.requires_mapped_logical_irq()
+        && ctx.irq_handler_registry.duplicate_policy_ready()
+        && ctx.irq_handler_registry.unmapped_reject_ready()
+        && ctx.irq_handler_registry.hardirq_context_guard_ready()
+        && ctx.irq_handler_registry.source_enable_deferred()
+        && ctx.irq_handler_registry.dispatch_deferred()
         && ctx.tick.state() == State::Ready
         && ctx.tick.control_ready()
         && ctx.tick.nohz_trimmed()

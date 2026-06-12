@@ -1126,6 +1126,13 @@ resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-p
 `PlicIrqDomain` 建立 UART source 到 logical IRQ 的记录，并把 logical IRQ 保存在 `Uart8250Port`。这一步只说明外部中断链的
 资源和 logical IRQ 绑定已经建立；serial8250 console 输出仍保持 polling，UART interrupt output 继续记录为 deferred。
 
+handler registry 必须作为 IRQ core 侧对象建模和实现。`IrqHandlerRegistry` / `IrqAction` 记录 `request_irq`
+风格的 logical IRQ -> handler 绑定，输入 logical IRQ 必须已经由 `PlicIrqDomain` 映射；未映射 logical IRQ 注册必须失败，
+重复注册同一个 logical IRQ/device 必须按显式 duplicate policy 拒绝或保持幂等。`ns16550a` probe 可以在 UART logical IRQ
+ready 后请求注册最小 UART handler 记录，但不得把 handler 表藏在 UART driver 私有状态里，也不得因此 enable PLIC source、
+安装 claim/complete dispatch、执行 handler，或把 serial8250 console 标记为 interrupt-driven。handler action 必须携带
+hardirq context requirement，具体上下文切换和 handler 执行留给后续 dispatch 步骤验证。
+
 本阶段打开的只是 boot CPU 本地中断总入口。普通任务并发、secondary CPU 并发、周期 tick 服务、workqueue worker
 kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提前解释为 Online。
 

@@ -7,7 +7,7 @@ use crate::{
         device_tree::DeviceTree,
         initcall::PlatformBus,
         ioremap::Ioremap,
-        irq_time::PlicIrqDomain,
+        irq_time::{IrqHandlerKind, IrqHandlerRegistry, LogicalIrq, PlicIrqDomain},
         mm_core::{PageAllocator, PageTableCaches, VmallocAllocator},
         ns16550a::{self, NS16550A_PLATFORM_DRIVER_REF},
         printk,
@@ -48,7 +48,8 @@ fn run_default_handoff(total: usize, checkpoint: Checkpoint) -> bool {
         && fixture.probe_stdout_device()
         && fixture.assert_default_handoff()
         && fixture.assert_serial_write_path()
-        && fixture.assert_duplicate_preferred_idempotent();
+        && fixture.assert_duplicate_preferred_idempotent()
+        && fixture.assert_irq_handler_registry_guards();
     snapshot.restore();
     finish(total, name, passed)
 }
@@ -126,6 +127,7 @@ struct ConsoleHandoffFixture {
     vmalloc_allocator: VmallocAllocator,
     ioremap: Ioremap,
     plic_irq_domain: PlicIrqDomain,
+    irq_handler_registry: IrqHandlerRegistry,
     device_ref: Option<DeviceRef>,
 }
 
@@ -138,6 +140,7 @@ impl ConsoleHandoffFixture {
             vmalloc_allocator: VmallocAllocator::new(),
             ioremap: Ioremap::new(),
             plic_irq_domain: PlicIrqDomain::new(),
+            irq_handler_registry: IrqHandlerRegistry::new(),
             device_ref: None,
         }
     }
@@ -185,8 +188,13 @@ impl ConsoleHandoffFixture {
                 .plic_irq_domain
                 .setup(&ctx.plic, &ctx.irq_controller)
                 .is_ok()
+            && self
+                .irq_handler_registry
+                .setup(&ctx.irq_controller, &self.plic_irq_domain)
+                .is_ok()
             && self.bus.state() == State::Ready
             && self.plic_irq_domain.state() == State::Ready
+            && self.irq_handler_registry.state() == State::Ready
     }
 
     fn add_ns16550a_driver(&mut self) -> bool {
@@ -218,6 +226,7 @@ impl ConsoleHandoffFixture {
                 &ctx.config,
                 &mut self.ioremap,
                 &mut self.plic_irq_domain,
+                &mut self.irq_handler_registry,
             )
             .is_ok()
     }
@@ -280,10 +289,14 @@ impl ConsoleHandoffFixture {
             && self.bus.ns16550a_probe_registers_uart8250_port()
             && self.bus.ns16550a_probe_records_uart_irq_resource()
             && self.bus.ns16550a_probe_records_uart_irq_mapping()
+            && self.bus.ns16550a_probe_registers_uart_irq_handler()
             && self.bus.ns16550a_probe_keeps_interrupt_output_deferred()
             && ns16550a::uart8250_port_registered()
             && ns16550a::uart8250_port_irq_resource_ready()
             && ns16550a::uart8250_port_logical_irq_ready()
+            && ns16550a::uart8250_irq_handler_registered()
+            && ns16550a::uart8250_irq_handler_hardirq_context_required()
+            && ns16550a::uart8250_irq_handler_dispatch_deferred()
             && self
                 .plic_irq_domain
                 .mapping_for_source(ns16550a::uart8250_port_irq_source())
@@ -291,6 +304,20 @@ impl ConsoleHandoffFixture {
                     mapping.logical_irq() == ns16550a::uart8250_port_logical_irq()
                         && mapping.source_not_enabled()
                         && mapping.handler_not_registered()
+                })
+            && self
+                .irq_handler_registry
+                .action_for_logical_irq(ns16550a::uart8250_port_logical_irq())
+                .is_some_and(|action| {
+                    action.device() == device_ref
+                        && action.handler_kind() == IrqHandlerKind::Ns16550aUart
+                        && action.handler_bound()
+                        && action.hardirq_context_required()
+                        && action.mapped_irq_required()
+                        && action.duplicate_registration_rejected()
+                        && action.unmapped_registration_rejected()
+                        && action.source_not_enabled()
+                        && action.dispatch_deferred()
                 })
             && printk::serial8250_write_ready()
             && ns16550a::serial8250_write_backend_ready()
@@ -320,12 +347,40 @@ impl ConsoleHandoffFixture {
             && self.vmalloc_allocator.area_count() == area_count
             && self.vmalloc_allocator.mapping_count() == mapping_count
             && self.plic_irq_domain.mapping_count() == irq_mapping_count
+            && self.irq_handler_registry.action_count() == 1
             && printk::serial8250_console_registered()
             && printk::preferred_console_from_stdout()
             && printk::serial8250_consdev()
             && printk::serial8250_write_ready()
             && printk::console_handoff_complete()
             && printk::route() == printk::PrintkRoute::Serial8250
+    }
+
+    fn assert_irq_handler_registry_guards(&mut self) -> bool {
+        let Some(device_ref) = self.device_ref else {
+            return false;
+        };
+        let action_count = self.irq_handler_registry.action_count();
+        let duplicate = self.irq_handler_registry.request_irq(
+            &self.plic_irq_domain,
+            ns16550a::uart8250_port_logical_irq(),
+            device_ref,
+            IrqHandlerKind::Ns16550aUart,
+        );
+        let unmapped = self.irq_handler_registry.request_irq(
+            &self.plic_irq_domain,
+            LogicalIrq::new(usize::MAX - 1),
+            device_ref,
+            IrqHandlerKind::Ns16550aUart,
+        );
+        !duplicate
+            && !unmapped
+            && self.irq_handler_registry.action_count() == action_count
+            && self.irq_handler_registry.duplicate_registration_rejected()
+            && self.irq_handler_registry.unmapped_registration_rejected()
+            && self
+                .irq_handler_registry
+                .has_handler_for_logical_irq(ns16550a::uart8250_port_logical_irq())
     }
 
     fn assert_non_stdout_preserves_boot_route(&self) -> bool {
@@ -336,9 +391,11 @@ impl ConsoleHandoffFixture {
             && ns16550a::uart8250_port_registered()
             && self.bus.ns16550a_probe_records_uart_irq_resource()
             && self.bus.ns16550a_probe_records_uart_irq_mapping()
+            && self.bus.ns16550a_probe_registers_uart_irq_handler()
             && self.bus.ns16550a_probe_keeps_interrupt_output_deferred()
             && self.bus.ns16550a_probe_ioremaps_uart8250_port()
             && ns16550a::uart8250_port_ioremapped()
+            && ns16550a::uart8250_irq_handler_registered()
             && self.ioremap.mapping_for_device(device_ref).is_some()
             && !ns16550a::stdout_path_available()
             && !ns16550a::stdout_path_matched()

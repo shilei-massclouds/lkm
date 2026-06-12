@@ -6,6 +6,7 @@ use core::{
 use super::{
     config::Config,
     cpu_group::CpuGroup,
+    device::DeviceRef,
     device_tree::{DeviceNodeRef, DevicePropertyRef, DeviceTree},
     fdt_reader::{read_be_u32, read_cells},
     interrupt_stream::InterruptStream,
@@ -27,6 +28,7 @@ const RISCV_IRQ_S_EXT: u32 = 9;
 const RISCV_IRQ_M_EXT: u32 = 11;
 const PLIC_IRQ_MAPPING_CAPACITY: usize = 32;
 const PLIC_LOGICAL_IRQ_BASE: usize = 32;
+const IRQ_ACTION_CAPACITY: usize = 16;
 
 static TIMER_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static ONESHOT_DEADLINE: AtomicU64 = AtomicU64::new(0);
@@ -267,6 +269,303 @@ impl IrqController {
             State::Ready,
             Checkpoint::IrqControllerReady,
         )
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum IrqHandlerKind {
+    None,
+    Ns16550aUart,
+}
+
+pub struct IrqAction {
+    lifecycle: Lifecycle,
+    logical_irq: LogicalIrq,
+    device: DeviceRef,
+    handler_kind: IrqHandlerKind,
+    handler_bound: bool,
+    hardirq_context_required: bool,
+    mapped_irq_required: bool,
+    duplicate_registration_rejected: bool,
+    unmapped_registration_rejected: bool,
+    source_enabled: bool,
+    dispatch_ready: bool,
+}
+
+impl IrqAction {
+    const fn empty() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            logical_irq: LogicalIrq::invalid(),
+            device: DeviceRef::new(usize::MAX),
+            handler_kind: IrqHandlerKind::None,
+            handler_bound: false,
+            hardirq_context_required: false,
+            mapped_irq_required: false,
+            duplicate_registration_rejected: false,
+            unmapped_registration_rejected: false,
+            source_enabled: false,
+            dispatch_ready: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn logical_irq(&self) -> LogicalIrq {
+        self.logical_irq
+    }
+
+    pub const fn device(&self) -> DeviceRef {
+        self.device
+    }
+
+    pub const fn handler_kind(&self) -> IrqHandlerKind {
+        self.handler_kind
+    }
+
+    pub const fn handler_bound(&self) -> bool {
+        self.handler_bound
+    }
+
+    pub const fn hardirq_context_required(&self) -> bool {
+        self.hardirq_context_required
+    }
+
+    pub const fn mapped_irq_required(&self) -> bool {
+        self.mapped_irq_required
+    }
+
+    pub const fn duplicate_registration_rejected(&self) -> bool {
+        self.duplicate_registration_rejected
+    }
+
+    pub const fn unmapped_registration_rejected(&self) -> bool {
+        self.unmapped_registration_rejected
+    }
+
+    pub const fn source_not_enabled(&self) -> bool {
+        !self.source_enabled
+    }
+
+    pub const fn dispatch_deferred(&self) -> bool {
+        !self.dispatch_ready
+    }
+
+    fn setup_from_request(
+        &mut self,
+        logical_irq: LogicalIrq,
+        device: DeviceRef,
+        handler_kind: IrqHandlerKind,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || !logical_irq.is_valid()
+            || handler_kind == IrqHandlerKind::None
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.logical_irq = logical_irq;
+        self.device = device;
+        self.handler_kind = handler_kind;
+        self.handler_bound = true;
+        self.hardirq_context_required = true;
+        self.mapped_irq_required = true;
+        self.duplicate_registration_rejected = true;
+        self.unmapped_registration_rejected = true;
+        self.source_enabled = false;
+        self.dispatch_ready = false;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
+pub struct IrqHandlerRegistry {
+    lifecycle: Lifecycle,
+    action_table_ready: bool,
+    owner_irq_core: bool,
+    requires_mapped_logical_irq: bool,
+    duplicate_policy_ready: bool,
+    unmapped_reject_ready: bool,
+    hardirq_context_guard_ready: bool,
+    source_enable_deferred: bool,
+    dispatch_deferred: bool,
+    duplicate_registration_rejected: bool,
+    unmapped_registration_rejected: bool,
+    actions: [IrqAction; IRQ_ACTION_CAPACITY],
+    action_count: usize,
+}
+
+impl IrqHandlerRegistry {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            action_table_ready: false,
+            owner_irq_core: false,
+            requires_mapped_logical_irq: false,
+            duplicate_policy_ready: false,
+            unmapped_reject_ready: false,
+            hardirq_context_guard_ready: false,
+            source_enable_deferred: false,
+            dispatch_deferred: false,
+            duplicate_registration_rejected: false,
+            unmapped_registration_rejected: false,
+            actions: [const { IrqAction::empty() }; IRQ_ACTION_CAPACITY],
+            action_count: 0,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn action_table_ready(&self) -> bool {
+        self.action_table_ready
+    }
+
+    pub const fn owner_irq_core(&self) -> bool {
+        self.owner_irq_core
+    }
+
+    pub const fn requires_mapped_logical_irq(&self) -> bool {
+        self.requires_mapped_logical_irq
+    }
+
+    pub const fn duplicate_policy_ready(&self) -> bool {
+        self.duplicate_policy_ready
+    }
+
+    pub const fn unmapped_reject_ready(&self) -> bool {
+        self.unmapped_reject_ready
+    }
+
+    pub const fn hardirq_context_guard_ready(&self) -> bool {
+        self.hardirq_context_guard_ready
+    }
+
+    pub const fn source_enable_deferred(&self) -> bool {
+        self.source_enable_deferred
+    }
+
+    pub const fn dispatch_deferred(&self) -> bool {
+        self.dispatch_deferred
+    }
+
+    #[allow(dead_code)]
+    pub const fn duplicate_registration_rejected(&self) -> bool {
+        self.duplicate_registration_rejected
+    }
+
+    #[allow(dead_code)]
+    pub const fn unmapped_registration_rejected(&self) -> bool {
+        self.unmapped_registration_rejected
+    }
+
+    pub const fn action_count(&self) -> usize {
+        self.action_count
+    }
+
+    pub fn action_for_logical_irq(&self, logical_irq: LogicalIrq) -> Option<&IrqAction> {
+        let mut index = 0usize;
+        while index < self.action_count {
+            let action = &self.actions[index];
+            if action.logical_irq() == logical_irq {
+                return Some(action);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    pub fn has_handler_for_logical_irq(&self, logical_irq: LogicalIrq) -> bool {
+        self.action_for_logical_irq(logical_irq)
+            .is_some_and(|action| action.state() == State::Ready && action.handler_bound())
+    }
+
+    pub fn setup(
+        &mut self,
+        irq_controller: &IrqController,
+        plic_irq_domain: &PlicIrqDomain,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || irq_controller.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || !plic_irq_domain.mapping_table_ready()
+            || !plic_irq_domain.enable_deferred()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.action_table_ready = true;
+        self.owner_irq_core = true;
+        self.requires_mapped_logical_irq = true;
+        self.duplicate_policy_ready = true;
+        self.unmapped_reject_ready = true;
+        self.hardirq_context_guard_ready = true;
+        self.source_enable_deferred = true;
+        self.dispatch_deferred = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::IrqHandlerRegistryReady,
+        )
+    }
+
+    pub fn request_irq(
+        &mut self,
+        plic_irq_domain: &PlicIrqDomain,
+        logical_irq: LogicalIrq,
+        device: DeviceRef,
+        handler_kind: IrqHandlerKind,
+    ) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || !self.action_table_ready
+            || !self.owner_irq_core
+            || !self.requires_mapped_logical_irq
+            || !self.duplicate_policy_ready
+            || !self.unmapped_reject_ready
+            || !self.hardirq_context_guard_ready
+            || !logical_irq.is_valid()
+            || handler_kind == IrqHandlerKind::None
+        {
+            return false;
+        }
+        if plic_irq_domain
+            .mapping_for_logical_irq(logical_irq)
+            .is_none()
+        {
+            self.unmapped_registration_rejected = true;
+            return false;
+        }
+        if self.action_for_logical_irq(logical_irq).is_some() {
+            self.duplicate_registration_rejected = true;
+            return false;
+        }
+        if self.action_count >= IRQ_ACTION_CAPACITY {
+            return false;
+        }
+
+        let index = self.action_count;
+        if self.actions[index]
+            .setup_from_request(logical_irq, device, handler_kind)
+            .is_err()
+        {
+            return false;
+        }
+        self.action_count += 1;
+        true
     }
 }
 
@@ -1970,6 +2269,18 @@ impl PlicIrqDomain {
         while index < self.mapping_count {
             let mapping = &self.mappings[index];
             if mapping.source() == source {
+                return Some(mapping);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    pub fn mapping_for_logical_irq(&self, logical_irq: LogicalIrq) -> Option<&PlicIrqMapping> {
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = &self.mappings[index];
+            if mapping.logical_irq() == logical_irq {
                 return Some(mapping);
             }
             index += 1;

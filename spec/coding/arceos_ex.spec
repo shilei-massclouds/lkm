@@ -84,6 +84,10 @@ predicate arceos_ex_must_model_irqdomain_as_type_and_plic_domain_as_instance() -
 predicate arceos_ex_must_plic_irq_domain_map_source_to_logical_irq_only() -> bool;
 predicate arceos_ex_must_platform_irq_resource_parse_uart_interrupts_from_dt() -> bool;
 predicate arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler() -> bool;
+predicate arceos_ex_must_model_irq_handler_registry_as_irq_core_object() -> bool;
+predicate arceos_ex_must_request_irq_require_mapped_logical_irq() -> bool;
+predicate arceos_ex_must_request_irq_record_handler_without_enabling_source() -> bool;
+predicate arceos_ex_must_irq_handler_context_guard_remain_deferred_execution() -> bool;
 predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_open_prepare_run_after_irq_time_init() -> bool;
@@ -765,6 +769,47 @@ type ArceosExIrqTimeInitCodingMust {
          * console output ready.
          */
         arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler();
+
+        /*
+         * IRQ handler registry:
+         *
+         * request_irq-style handler registration belongs to an IRQ core-side
+         * IrqHandlerRegistry/IrqAction object. The implementation must not
+         * store handler ownership in PlicIrqDomain, PlicIrqMapping, or
+         * ns16550a driver-private ad hoc tables.
+         */
+        arceos_ex_must_model_irq_handler_registry_as_irq_core_object();
+
+        /*
+         * request_irq input contract:
+         *
+         * The minimal request_irq path must require a logical IRQ that was
+         * already produced by PlicIrqDomain for a valid PLIC source. Attempts
+         * to register an unmapped logical IRQ must fail, and duplicate
+         * registration for the same logical IRQ/device must be rejected or
+         * represented as the explicit duplicate policy.
+         */
+        arceos_ex_must_request_irq_require_mapped_logical_irq();
+
+        /*
+         * Handler registration boundary:
+         *
+         * ns16550a probe may request a UART handler record once its logical
+         * IRQ is known, but this must not enable the PLIC source, install a
+         * claim/complete route, or mark serial8250 console output
+         * interrupt-driven.
+         */
+        arceos_ex_must_request_irq_record_handler_without_enabling_source();
+
+        /*
+         * Context guard:
+         *
+         * IrqAction records must carry a hardirq-context requirement before
+         * dispatch exists. The first registry step is still a static contract:
+         * it must not execute the handler or open sleep/process-only paths
+         * from interrupt context.
+         */
+        arceos_ex_must_irq_handler_context_guard_remain_deferred_execution();
 
         /*
          * Concurrency scope:

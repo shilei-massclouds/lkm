@@ -6,7 +6,7 @@ use super::{
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
     ioremap::{IoMemoryMapping, Ioremap},
-    irq_time::{LogicalIrq, PlicIrqDomain},
+    irq_time::{IrqHandlerKind, IrqHandlerRegistry, LogicalIrq, PlicIrqDomain},
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     printk,
 };
@@ -41,6 +41,7 @@ pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
     let config = &ctx.config;
     let ioremap = &mut ctx.ioremap;
     let plic_irq_domain = &mut ctx.plic_irq_domain;
+    let irq_handler_registry = &mut ctx.irq_handler_registry;
     ctx.platform_bus.platform_driver_register(
         NS16550A_PLATFORM_DRIVER_REF,
         device_tree,
@@ -51,6 +52,7 @@ pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
         config,
         ioremap,
         plic_irq_domain,
+        irq_handler_registry,
     )
 }
 
@@ -78,6 +80,9 @@ pub struct Uart8250Port {
     irq_resource_ready: bool,
     irq_parent_plic: bool,
     irq_mapping_ready: bool,
+    irq_handler_registered: bool,
+    irq_handler_hardirq_context_required: bool,
+    irq_handler_dispatch_deferred: bool,
     interrupt_output_deferred: bool,
     line: usize,
     registered: bool,
@@ -102,6 +107,9 @@ impl Uart8250Port {
             irq_resource_ready: false,
             irq_parent_plic: false,
             irq_mapping_ready: false,
+            irq_handler_registered: false,
+            irq_handler_hardirq_context_required: false,
+            irq_handler_dispatch_deferred: false,
             interrupt_output_deferred: false,
             line: usize::MAX,
             registered: false,
@@ -407,6 +415,24 @@ pub fn uart8250_interrupt_output_still_deferred() -> bool {
     state.port.registered && state.port.interrupt_output_deferred
 }
 
+pub fn uart8250_irq_handler_registered() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered
+        && state.port.irq_handler_registered
+        && state.port.irq_handler_hardirq_context_required
+        && state.port.irq_handler_dispatch_deferred
+}
+
+pub fn uart8250_irq_handler_hardirq_context_required() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered && state.port.irq_handler_hardirq_context_required
+}
+
+pub fn uart8250_irq_handler_dispatch_deferred() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered && state.port.irq_handler_dispatch_deferred
+}
+
 pub fn serial8250_console_registered() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -538,6 +564,7 @@ fn ns16550a_probe(
     config: &Config,
     ioremap: &mut Ioremap,
     plic_irq_domain: &mut PlicIrqDomain,
+    irq_handler_registry: &mut IrqHandlerRegistry,
     device: DeviceRef,
     node_id: DeviceNodeId,
 ) -> ProbeResult {
@@ -558,6 +585,9 @@ fn ns16550a_probe(
     };
     bind_ioremap_mapping(&mut port, mapping);
     if !bind_irq_resource(&mut port, device_tree, plic_irq_domain) {
+        return ProbeResult::Deferred;
+    }
+    if !bind_irq_handler(&mut port, plic_irq_domain, irq_handler_registry) {
         return ProbeResult::Deferred;
     }
 
@@ -651,6 +681,9 @@ fn build_uart8250_port(
         irq_resource_ready: false,
         irq_parent_plic: false,
         irq_mapping_ready: false,
+        irq_handler_registered: false,
+        irq_handler_hardirq_context_required: false,
+        irq_handler_dispatch_deferred: false,
         interrupt_output_deferred: true,
         line: device.index(),
         registered: true,
@@ -695,6 +728,40 @@ fn bind_irq_resource(
         });
     port.interrupt_output_deferred = true;
     port.irq_mapping_ready
+}
+
+fn bind_irq_handler(
+    port: &mut Uart8250Port,
+    plic_irq_domain: &PlicIrqDomain,
+    irq_handler_registry: &mut IrqHandlerRegistry,
+) -> bool {
+    if !port.registered || !port.irq_mapping_ready || !port.logical_irq.is_valid() {
+        return false;
+    }
+    if !irq_handler_registry.request_irq(
+        plic_irq_domain,
+        port.logical_irq,
+        port.device_ref,
+        IrqHandlerKind::Ns16550aUart,
+    ) {
+        return false;
+    }
+    let Some(action) = irq_handler_registry.action_for_logical_irq(port.logical_irq) else {
+        return false;
+    };
+
+    port.irq_handler_registered = action.logical_irq() == port.logical_irq
+        && action.device() == port.device_ref
+        && action.handler_kind() == IrqHandlerKind::Ns16550aUart
+        && action.handler_bound()
+        && action.mapped_irq_required()
+        && action.source_not_enabled();
+    port.irq_handler_hardirq_context_required = action.hardirq_context_required();
+    port.irq_handler_dispatch_deferred = action.dispatch_deferred();
+    port.interrupt_output_deferred = true;
+    port.irq_handler_registered
+        && port.irq_handler_hardirq_context_required
+        && port.irq_handler_dispatch_deferred
 }
 
 fn uart_interrupt_source(

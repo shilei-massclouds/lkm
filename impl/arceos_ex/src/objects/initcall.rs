@@ -4,7 +4,7 @@ use super::{
     device_tree::{DeviceNodeRef, DeviceTree},
     driver::{DeviceDriverRef, ProbeResult},
     ioremap::Ioremap,
-    irq_time::{IrqDispatchTree, PlicIrqDomain},
+    irq_time::{IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain},
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
     runtime_core::RuntimeCoreBoundary,
@@ -547,6 +547,7 @@ pub struct PlatformBus {
     ns16550a_probe_registers_uart8250_port: bool,
     ns16550a_probe_records_uart_irq_resource: bool,
     ns16550a_probe_records_uart_irq_mapping: bool,
+    ns16550a_probe_registers_uart_irq_handler: bool,
     ns16550a_probe_keeps_interrupt_output_deferred: bool,
     ns16550a_probe_registers_serial_console: bool,
     ns16550a_probe_triggers_console_handoff: bool,
@@ -591,6 +592,7 @@ impl PlatformBus {
             ns16550a_probe_registers_uart8250_port: false,
             ns16550a_probe_records_uart_irq_resource: false,
             ns16550a_probe_records_uart_irq_mapping: false,
+            ns16550a_probe_registers_uart_irq_handler: false,
             ns16550a_probe_keeps_interrupt_output_deferred: false,
             ns16550a_probe_registers_serial_console: false,
             ns16550a_probe_triggers_console_handoff: false,
@@ -715,6 +717,10 @@ impl PlatformBus {
 
     pub const fn ns16550a_probe_records_uart_irq_mapping(&self) -> bool {
         self.ns16550a_probe_records_uart_irq_mapping
+    }
+
+    pub const fn ns16550a_probe_registers_uart_irq_handler(&self) -> bool {
+        self.ns16550a_probe_registers_uart_irq_handler
     }
 
     pub const fn ns16550a_probe_keeps_interrupt_output_deferred(&self) -> bool {
@@ -939,6 +945,7 @@ impl PlatformBus {
         config: &Config,
         ioremap: &mut Ioremap,
         plic_irq_domain: &mut PlicIrqDomain,
+        irq_handler_registry: &mut IrqHandlerRegistry,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
@@ -975,6 +982,7 @@ impl PlatformBus {
                 config,
                 ioremap,
                 plic_irq_domain,
+                irq_handler_registry,
             );
             return Ok(());
         }
@@ -994,6 +1002,7 @@ impl PlatformBus {
         config: &Config,
         ioremap: &mut Ioremap,
         plic_irq_domain: &mut PlicIrqDomain,
+        irq_handler_registry: &mut IrqHandlerRegistry,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
@@ -1026,6 +1035,7 @@ impl PlatformBus {
                     config,
                     ioremap,
                     plic_irq_domain,
+                    irq_handler_registry,
                 );
                 return Ok(());
             }
@@ -1047,6 +1057,7 @@ impl PlatformBus {
         config: &Config,
         ioremap: &mut Ioremap,
         plic_irq_domain: &mut PlicIrqDomain,
+        irq_handler_registry: &mut IrqHandlerRegistry,
     ) -> InitcallReturn {
         if self.add_driver(driver).is_err() {
             return InitcallReturn::Error(-1);
@@ -1062,6 +1073,7 @@ impl PlatformBus {
                 config,
                 ioremap,
                 plic_irq_domain,
+                irq_handler_registry,
             )
             .is_err()
         {
@@ -1119,6 +1131,7 @@ impl PlatformBus {
         config: &Config,
         ioremap: &mut Ioremap,
         plic_irq_domain: &mut PlicIrqDomain,
+        irq_handler_registry: &mut IrqHandlerRegistry,
     ) {
         let Some(platform_device) = self.platform_device(device_ref) else {
             return;
@@ -1133,6 +1146,7 @@ impl PlatformBus {
             config,
             ioremap,
             plic_irq_domain,
+            irq_handler_registry,
             device_ref,
             node_id,
         );
@@ -1157,6 +1171,21 @@ impl PlatformBus {
                                 mapping.logical_irq() == ns16550a::uart8250_port_logical_irq()
                                     && mapping.source_not_enabled()
                                     && mapping.handler_not_registered()
+                            });
+                self.ns16550a_probe_registers_uart_irq_handler =
+                    ns16550a::uart8250_irq_handler_registered()
+                        && irq_handler_registry
+                            .action_for_logical_irq(ns16550a::uart8250_port_logical_irq())
+                            .is_some_and(|action| {
+                                action.device() == device_ref
+                                    && action.handler_kind() == IrqHandlerKind::Ns16550aUart
+                                    && action.handler_bound()
+                                    && action.hardirq_context_required()
+                                    && action.mapped_irq_required()
+                                    && action.duplicate_registration_rejected()
+                                    && action.unmapped_registration_rejected()
+                                    && action.source_not_enabled()
+                                    && action.dispatch_deferred()
                             });
                 self.ns16550a_probe_keeps_interrupt_output_deferred =
                     ns16550a::uart8250_interrupt_output_still_deferred();
