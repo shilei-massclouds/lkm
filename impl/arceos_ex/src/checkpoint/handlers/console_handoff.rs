@@ -302,6 +302,9 @@ impl ConsoleHandoffFixture {
                 .mapping_for_source(ns16550a::uart8250_port_irq_source())
                 .is_some_and(|mapping| {
                     mapping.logical_irq() == ns16550a::uart8250_port_logical_irq()
+                        && mapping.source_gate_defined()
+                        && mapping.source_gate_closed()
+                        && mapping.source_enable_deferred()
                         && mapping.source_not_enabled()
                         && mapping.handler_not_registered()
                 })

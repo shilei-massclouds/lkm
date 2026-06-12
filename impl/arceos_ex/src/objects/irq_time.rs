@@ -1949,7 +1949,6 @@ pub struct Plic {
     complete_writes_claimed_source: bool,
     claim_before_dispatch: bool,
     complete_after_handler: bool,
-    uart_source_enable_deferred: bool,
     uart_source_trigger_deferred: bool,
     claim_count: usize,
     zero_claim_count: usize,
@@ -1990,7 +1989,6 @@ impl Plic {
             complete_writes_claimed_source: false,
             claim_before_dispatch: false,
             complete_after_handler: false,
-            uart_source_enable_deferred: false,
             uart_source_trigger_deferred: false,
             claim_count: 0,
             zero_claim_count: 0,
@@ -2113,10 +2111,6 @@ impl Plic {
 
     pub const fn complete_after_handler(&self) -> bool {
         self.complete_after_handler
-    }
-
-    pub const fn uart_source_enable_deferred(&self) -> bool {
-        self.uart_source_enable_deferred
     }
 
     pub const fn uart_source_trigger_deferred(&self) -> bool {
@@ -2280,7 +2274,6 @@ impl Plic {
         self.complete_writes_claimed_source = true;
         self.claim_before_dispatch = true;
         self.complete_after_handler = true;
-        self.uart_source_enable_deferred = true;
         self.uart_source_trigger_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
@@ -2380,6 +2373,9 @@ pub struct PlicIrqMapping {
     source_zero_rejected: bool,
     source_range_checked: bool,
     duplicate_source_idempotent: bool,
+    source_gate_defined: bool,
+    source_gate_closed: bool,
+    source_enable_deferred: bool,
     source_enabled: bool,
     handler_registered: bool,
 }
@@ -2395,6 +2391,9 @@ impl PlicIrqMapping {
             source_zero_rejected: false,
             source_range_checked: false,
             duplicate_source_idempotent: false,
+            source_gate_defined: false,
+            source_gate_closed: false,
+            source_enable_deferred: false,
             source_enabled: false,
             handler_registered: false,
         }
@@ -2426,6 +2425,18 @@ impl PlicIrqMapping {
 
     pub const fn duplicate_source_idempotent(&self) -> bool {
         self.duplicate_source_idempotent
+    }
+
+    pub const fn source_gate_defined(&self) -> bool {
+        self.source_gate_defined
+    }
+
+    pub const fn source_gate_closed(&self) -> bool {
+        self.source_gate_closed
+    }
+
+    pub const fn source_enable_deferred(&self) -> bool {
+        self.source_enable_deferred
     }
 
     pub const fn source_not_enabled(&self) -> bool {
@@ -2462,6 +2473,9 @@ impl PlicIrqMapping {
         self.source_zero_rejected = true;
         self.source_range_checked = true;
         self.duplicate_source_idempotent = true;
+        self.source_gate_defined = true;
+        self.source_gate_closed = true;
+        self.source_enable_deferred = true;
         self.source_enabled = false;
         self.handler_registered = false;
         self.lifecycle

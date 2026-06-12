@@ -29,6 +29,8 @@ pub struct InterruptStream {
     lifecycle: Lifecycle,
     timer_handler_ready: bool,
     external_handler_ready: bool,
+    supervisor_external_input_gate_defined: bool,
+    supervisor_external_input_gate_closed: bool,
     supervisor_external_input_enable_deferred: bool,
     boot_cpu_local_interrupts_enabled: bool,
 }
@@ -39,6 +41,8 @@ impl InterruptStream {
             lifecycle: Lifecycle::new(State::Base),
             timer_handler_ready: false,
             external_handler_ready: false,
+            supervisor_external_input_gate_defined: false,
+            supervisor_external_input_gate_closed: false,
             supervisor_external_input_enable_deferred: false,
             boot_cpu_local_interrupts_enabled: false,
         }
@@ -70,6 +74,14 @@ impl InterruptStream {
 
     pub const fn external_handler_ready(&self) -> bool {
         self.external_handler_ready
+    }
+
+    pub const fn supervisor_external_input_gate_defined(&self) -> bool {
+        self.supervisor_external_input_gate_defined
+    }
+
+    pub const fn supervisor_external_input_gate_closed(&self) -> bool {
+        self.supervisor_external_input_gate_closed
     }
 
     pub const fn supervisor_external_input_enable_deferred(&self) -> bool {
@@ -127,6 +139,8 @@ impl InterruptStream {
 
         bind_interrupt_policy(SUPERVISOR_EXTERNAL_IRQ, InterruptPolicy(HANDLER_EXTERNAL));
         self.external_handler_ready = true;
+        self.supervisor_external_input_gate_defined = true;
+        self.supervisor_external_input_gate_closed = true;
         self.supervisor_external_input_enable_deferred = true;
         Ok(())
     }

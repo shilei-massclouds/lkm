@@ -734,6 +734,9 @@ fn bind_irq_resource(
                 && mapping.source_zero_rejected()
                 && mapping.source_range_checked()
                 && mapping.duplicate_source_idempotent()
+                && mapping.source_gate_defined()
+                && mapping.source_gate_closed()
+                && mapping.source_enable_deferred()
                 && mapping.source_not_enabled()
                 && mapping.handler_not_registered()
         });

@@ -79,6 +79,7 @@ predicate arceos_ex_must_init_irq_chain_find_plic_driver_from_irqchip_section() 
 predicate arceos_ex_must_of_irq_init_call_plic_init_via_matched_section_entry() -> bool;
 predicate arceos_ex_must_plic_output_feed_riscv_intc_external_input() -> bool;
 predicate arceos_ex_must_use_named_interrupt_causes_not_raw_numbers() -> bool;
+predicate arceos_ex_must_model_external_irq_gates_as_named_closed_gates() -> bool;
 predicate arceos_ex_must_plic_ioremap_as_system_irqchip_not_platform_device() -> bool;
 predicate arceos_ex_must_plic_setup_parse_dt_reg_ndev_and_interrupts_extended() -> bool;
 predicate arceos_ex_must_model_irqdomain_as_type_and_plic_domain_as_instance() -> bool;
@@ -713,11 +714,10 @@ type ArceosExIrqTimeInitCodingMust {
          * The UART external interrupt physical propagation chain is
          * UART -> PLIC -> RISC-V root INTC -> CPU. This link records the
          * physical parent chain only; it is separate from the software
-         * dispatch/claim chain. The chain has two independent source gates
+         * dispatch/claim chain. The chain has two independent gates
          * before a UART interrupt can reach the CPU: the PLIC UART source
          * enable gate and the root INTC supervisor external input enable
-         * gate. Both may remain deferred here, but their ownership must be
-         * explicit.
+         * gate. Their ownership and identity must be explicit.
          */
         arceos_ex_must_plic_output_feed_riscv_intc_external_input();
 
@@ -731,6 +731,21 @@ type ArceosExIrqTimeInitCodingMust {
          * control-flow logic or prose.
          */
         arceos_ex_must_use_named_interrupt_causes_not_raw_numbers();
+
+        /*
+         * External IRQ gates:
+         *
+         * The two UART external propagation gates must be modeled as named
+         * gates with observable Closed state before any runtime source-enable
+         * work. The root supervisor external input gate is defined when the
+         * RiscvIntc/InterruptStream external route is installed. The PLIC
+         * UART source gate is defined by the PlicIrqMapping that binds
+         * HwirqRef::PlicUart0 to the UART logical IRQ. Mapping,
+         * request_irq(), and chained-handler setup may define these facts,
+         * but must defer the explicit Enable action and must not silently
+         * open either gate.
+         */
+        arceos_ex_must_model_external_irq_gates_as_named_closed_gates();
 
         /*
          * PLIC MMIO ownership:
@@ -791,9 +806,9 @@ type ArceosExIrqTimeInitCodingMust {
          * The UART IRQ resource mapping step records the UART source/logical
          * IRQ binding only. It must not enable the PLIC source or declare
          * serial8250 interrupt-driven console output ready. The root INTC
-         * supervisor external input enable gate must also remain a distinct
-         * step; registering a handler or mapping a source must not silently
-         * open either gate.
+         * supervisor external input gate and PLIC UART source gate must both
+         * remain Closed; registering a handler or mapping a source must not
+         * silently open either gate.
          */
         arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler();
 

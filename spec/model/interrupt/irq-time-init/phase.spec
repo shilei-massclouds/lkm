@@ -161,7 +161,11 @@ object RiscvIntc: InterruptObject {
                     riscv_intc_external_irq_named_cause(RiscvIntc, InterruptCauseRef::SupervisorExternalIrq);
                     riscv_intc_external_irq_entry_ready(RiscvIntc);
                     riscv_intc_external_irq_does_not_dispatch_leaf_device(RiscvIntc);
-                    riscv_intc_external_input_enable_deferred(RiscvIntc, InterruptCauseRef::SupervisorExternalIrq);
+                    irq_gate_defined(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    irq_gate_closed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    riscv_intc_external_input_gate_defined(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
+                    riscv_intc_external_input_gate_closed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    riscv_intc_external_input_enable_deferred(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
                 }
             }
         }
@@ -180,7 +184,11 @@ object RiscvIntc: InterruptObject {
             riscv_intc_external_irq_named_cause(RiscvIntc, InterruptCauseRef::SupervisorExternalIrq);
             riscv_intc_external_irq_entry_ready(RiscvIntc);
             riscv_intc_external_irq_does_not_dispatch_leaf_device(RiscvIntc);
-            riscv_intc_external_input_enable_deferred(RiscvIntc, InterruptCauseRef::SupervisorExternalIrq);
+            irq_gate_defined(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+            irq_gate_closed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+            riscv_intc_external_input_gate_defined(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
+            riscv_intc_external_input_gate_closed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+            riscv_intc_external_input_enable_deferred(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
         }
     }
 }
@@ -300,6 +308,29 @@ type HwirqRef {
 type InterruptCauseRef {
 }
 
+type IrqGateRef {
+}
+
+/*
+ * IrqGate 表示中断物理传播链上的受控开关。gate 的身份和当前状态可以在
+ * 建立拓扑/映射时定义；Enable 是后续显式动作。当前阶段只要求两个 gate
+ * 被命名并保持 closed，不能因为建立 route/mapping/request_irq 而隐式打开。
+ */
+type IrqGate: InterruptObject {
+    processes {
+        Action::Enable(gate: IrqGateRef) -> IrqGateRef {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                irq_gate_defined(self, gate);
+                irq_gate_closed(self, gate);
+            }
+            ensures {
+                irq_gate_open(self, gate);
+            }
+        }
+    }
+}
+
 type LogicalIrqRef {
 }
 
@@ -323,6 +354,9 @@ predicate irq_domain_mapping_record_ready<T, M>(domain: T, mapping: M) -> bool;
 predicate irq_domain_resolves_hwirq_to_logical_irq<T, H, L>(domain: T, hwirq: H, logical_irq: L) -> bool;
 predicate hwirq_ref_ready<T>(hwirq: T) -> bool;
 predicate logical_irq_ref_ready<T>(logical_irq: T) -> bool;
+predicate irq_gate_defined<T, G>(owner: T, gate: G) -> bool;
+predicate irq_gate_closed<T, G>(owner: T, gate: G) -> bool;
+predicate irq_gate_open<T, G>(owner: T, gate: G) -> bool;
 
 predicate plic_irq_domain_owner_bound<T, P>(domain: T, plic: P) -> bool;
 predicate plic_irq_domain_source_range_bound<T, P>(domain: T, plic: P) -> bool;
@@ -340,6 +374,9 @@ predicate plic_irq_mapping_source_zero_rejected<T>(mapping: T) -> bool;
 predicate plic_irq_mapping_source_range_checked<T, P>(mapping: T, plic: P) -> bool;
 predicate plic_irq_mapping_logical_irq_assigned<T, L>(mapping: T, logical_irq: L) -> bool;
 predicate plic_irq_mapping_duplicate_source_idempotent<T, D>(mapping: T, domain: D) -> bool;
+predicate plic_irq_mapping_source_gate_defined<T, G, H>(mapping: T, gate: G, hwirq: H) -> bool;
+predicate plic_irq_mapping_source_gate_closed<T, G>(mapping: T, gate: G) -> bool;
+predicate plic_irq_mapping_source_enable_deferred<T, G>(mapping: T, gate: G) -> bool;
 predicate plic_irq_mapping_source_not_enabled<T>(mapping: T) -> bool;
 predicate plic_irq_mapping_handler_not_registered<T>(mapping: T) -> bool;
 
@@ -382,7 +419,9 @@ predicate riscv_intc_external_irq_entry_ready<T>(intc: T) -> bool;
 predicate riscv_intc_external_irq_named_cause<T, C>(intc: T, cause: C) -> bool;
 predicate riscv_intc_external_irq_forwards_to_plic<T, P>(intc: T, plic: P) -> bool;
 predicate riscv_intc_external_irq_does_not_dispatch_leaf_device<T>(intc: T) -> bool;
-predicate riscv_intc_external_input_enable_deferred<T, C>(intc: T, cause: C) -> bool;
+predicate riscv_intc_external_input_gate_defined<T, G, C>(intc: T, gate: G, cause: C) -> bool;
+predicate riscv_intc_external_input_gate_closed<T, G>(intc: T, gate: G) -> bool;
+predicate riscv_intc_external_input_enable_deferred<T, G, C>(intc: T, gate: G, cause: C) -> bool;
 predicate irq_dispatch_external_route_uses_named_cause<T, C>(dispatch_tree: T, cause: C) -> bool;
 predicate irq_dispatch_external_route_ready<T, R, P>(dispatch_tree: T, riscv_intc: R, plic: P) -> bool;
 predicate irq_dispatch_external_route_uses_plic_chained_handler<T, P>(dispatch_tree: T, plic: P) -> bool;
@@ -390,7 +429,6 @@ predicate irq_dispatch_external_route_uses_plic_irq_domain<T, D>(dispatch_tree: 
 predicate irq_dispatch_external_route_claims_before_dispatch<T, P>(dispatch_tree: T, plic: P) -> bool;
 predicate irq_dispatch_external_route_completes_after_handler<T, P>(dispatch_tree: T, plic: P) -> bool;
 predicate plic_chained_handler_ready<T, R>(plic: T, riscv_intc: R) -> bool;
-predicate plic_uart_source_enable_deferred<T, H>(plic: T, hwirq: H) -> bool;
 predicate plic_claim_action_ready<T>(plic: T) -> bool;
 predicate plic_complete_action_ready<T>(plic: T) -> bool;
 predicate plic_claim_reads_claim_register<T>(plic: T) -> bool;
@@ -697,7 +735,9 @@ object PlicIrqDomain: IrqDomain {
 
 /*
  * PlicIrqMapping 是 PlicIrqDomain 内的一条 source -> logical IRQ 记录。
- * Setup 建立映射记录并保持 source disabled / handler unregistered。
+ * Setup 建立映射记录，同时定义 UART source gate 并保持 gate closed /
+ * source disabled / handler unregistered。source gate 的 Enable action
+ * 后续显式展开，不由 mapping 或 request_irq 隐式执行。
  */
 object PlicIrqMapping: InterruptObject {
     initial_state: State::Base;
@@ -721,6 +761,11 @@ object PlicIrqMapping: InterruptObject {
                     plic_irq_mapping_source_range_checked(PlicIrqMapping, Plic);
                     plic_irq_mapping_logical_irq_assigned(PlicIrqMapping, LogicalIrqRef::Uart0);
                     plic_irq_mapping_duplicate_source_idempotent(PlicIrqMapping, PlicIrqDomain);
+                    irq_gate_defined(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                    irq_gate_closed(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                    plic_irq_mapping_source_gate_defined(PlicIrqMapping, IrqGateRef::PlicUartSource, HwirqRef::PlicUart0);
+                    plic_irq_mapping_source_gate_closed(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                    plic_irq_mapping_source_enable_deferred(PlicIrqMapping, IrqGateRef::PlicUartSource);
                     plic_irq_mapping_source_not_enabled(PlicIrqMapping);
                     plic_irq_mapping_handler_not_registered(PlicIrqMapping);
                 }
@@ -739,6 +784,11 @@ object PlicIrqMapping: InterruptObject {
             plic_irq_mapping_source_range_checked(PlicIrqMapping, Plic);
             plic_irq_mapping_logical_irq_assigned(PlicIrqMapping, LogicalIrqRef::Uart0);
             plic_irq_mapping_duplicate_source_idempotent(PlicIrqMapping, PlicIrqDomain);
+            irq_gate_defined(PlicIrqMapping, IrqGateRef::PlicUartSource);
+            irq_gate_closed(PlicIrqMapping, IrqGateRef::PlicUartSource);
+            plic_irq_mapping_source_gate_defined(PlicIrqMapping, IrqGateRef::PlicUartSource, HwirqRef::PlicUart0);
+            plic_irq_mapping_source_gate_closed(PlicIrqMapping, IrqGateRef::PlicUartSource);
+            plic_irq_mapping_source_enable_deferred(PlicIrqMapping, IrqGateRef::PlicUartSource);
             plic_irq_mapping_source_not_enabled(PlicIrqMapping);
             plic_irq_mapping_handler_not_registered(PlicIrqMapping);
         }
@@ -1176,8 +1226,9 @@ object PlicDriver: InterruptObject {
  * traversal 链上，并完成 provider 的最小 setup：DT resource 解析、
  * system-irqchip ioremap、external-input context 基础状态和父 INTC
  * external 输入连接。运行期 chained handler、claim/complete 和 generic
- * IRQ dispatch contract 已建立；具体 UART source enable 和真实触发仍后续
- * 展开。
+ * IRQ dispatch contract 已建立；具体 UART source gate 要等
+ * PlicIrqMapping 绑定 HwirqRef::PlicUart0 后定义，source enable 和真实
+ * 触发仍后续展开。
  *
  * 物理传播链是 UART -> PLIC -> RiscvIntc -> CPU。当前只建立连接和
  * 处理链 contract，不打开 UART 在 PLIC 上的 source enable gate，也不
@@ -1220,7 +1271,6 @@ object Plic: InterruptObject {
                     plic_threshold_ready(Plic);
                     plic_priority_ready(Plic);
                     plic_source_enable_ready(Plic);
-                    plic_uart_source_enable_deferred(Plic, HwirqRef::PlicUart0);
                     plic_uart_source_trigger_deferred(Plic);
                     plic_chained_handler_ready(Plic, RiscvIntc);
                     plic_claim_action_ready(Plic);
@@ -1254,7 +1304,6 @@ object Plic: InterruptObject {
             plic_threshold_ready(Plic);
             plic_priority_ready(Plic);
             plic_source_enable_ready(Plic);
-            plic_uart_source_enable_deferred(Plic, HwirqRef::PlicUart0);
             plic_uart_source_trigger_deferred(Plic);
             plic_chained_handler_ready(Plic, RiscvIntc);
             plic_claim_action_ready(Plic);

@@ -68,6 +68,10 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
     ctx.plic.state() == State::Ready
         && ctx
             .interrupt_stream
+            .supervisor_external_input_gate_defined()
+        && ctx.interrupt_stream.supervisor_external_input_gate_closed()
+        && ctx
+            .interrupt_stream
             .supervisor_external_input_enable_deferred()
         && ctx.plic.chained_handler_ready()
         && ctx.plic.claim_action_ready()
@@ -77,7 +81,6 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.plic.complete_writes_claimed_source()
         && ctx.plic.claim_before_dispatch()
         && ctx.plic.complete_after_handler()
-        && ctx.plic.uart_source_enable_deferred()
         && ctx.plic.uart_source_trigger_deferred()
         && ctx.plic.claim_count() == 0
         && ctx.plic.complete_count() == 0
@@ -107,6 +110,9 @@ fn plic_mapping_deferred(ctx: &Context, source: u32, logical_irq: LogicalIrq) ->
             mapping.logical_irq() == logical_irq
                 && mapping.domain_bound()
                 && mapping.source_valid()
+                && mapping.source_gate_defined()
+                && mapping.source_gate_closed()
+                && mapping.source_enable_deferred()
                 && mapping.source_not_enabled()
                 && mapping.handler_not_registered()
         })
