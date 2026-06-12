@@ -36,6 +36,94 @@ object Ns16550aPlatformDriverStorage: DeviceDriverStorage {
     }
 }
 
+/*
+ * PlatformIrqResource represents the IRQ resource parsed from the platform
+ * device's OF node. For ns16550a on QEMU virt this is the UART interrupt
+ * specifier whose interrupt parent is the PLIC. It is not a handler and not
+ * the PLIC domain mapping itself.
+ */
+object PlatformIrqResource: ResourceObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    DeviceTree.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                }
+
+                ensures {
+                    platform_irq_resource_device_bound(PlatformIrqResource, DeviceRef::Ns16550aSerial);
+                    platform_irq_resource_node_bound(PlatformIrqResource, DeviceNodeRef::Ns16550aSerial);
+                    platform_irq_resource_interrupt_parent_is_plic(PlatformIrqResource, Plic);
+                    platform_irq_resource_raw_specifier_ready(PlatformIrqResource);
+                    platform_irq_resource_specifier_cells_ready(PlatformIrqResource);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            platform_irq_resource_device_bound(PlatformIrqResource, DeviceRef::Ns16550aSerial);
+            platform_irq_resource_node_bound(PlatformIrqResource, DeviceNodeRef::Ns16550aSerial);
+            platform_irq_resource_interrupt_parent_is_plic(PlatformIrqResource, Plic);
+            platform_irq_resource_raw_specifier_ready(PlatformIrqResource);
+            platform_irq_resource_specifier_cells_ready(PlatformIrqResource);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    PlicIrqDomain.state == State::Ready;
+                    PlatformIrqResource.state == State::Prepared;
+                }
+
+                drives {
+                    PlicIrqDomain.Action::TranslateIrqSpecifier(PlatformIrqResourceRef::Ns16550aSerial);
+                    PlicIrqDomain.Action::MapHwirq(HwirqRef::PlicUart0, PlicIrqMappingRef::Uart0);
+                    PlicIrqMapping.Event::Setup;
+                }
+
+                ensures {
+                    platform_irq_resource_translated_by_domain(PlatformIrqResource, PlicIrqDomain);
+                    platform_irq_resource_hwirq_bound(PlatformIrqResource, HwirqRef::PlicUart0);
+                    platform_irq_resource_logical_irq_bound(PlatformIrqResource, LogicalIrqRef::Uart0);
+                    platform_irq_resource_ready(PlatformIrqResource);
+                    platform_irq_resource_not_handler_registration(PlatformIrqResource);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            platform_irq_resource_device_bound(PlatformIrqResource, DeviceRef::Ns16550aSerial);
+            platform_irq_resource_node_bound(PlatformIrqResource, DeviceNodeRef::Ns16550aSerial);
+            platform_irq_resource_interrupt_parent_is_plic(PlatformIrqResource, Plic);
+            platform_irq_resource_raw_specifier_ready(PlatformIrqResource);
+            platform_irq_resource_specifier_cells_ready(PlatformIrqResource);
+            platform_irq_resource_translated_by_domain(PlatformIrqResource, PlicIrqDomain);
+            platform_irq_resource_hwirq_bound(PlatformIrqResource, HwirqRef::PlicUart0);
+            platform_irq_resource_logical_irq_bound(PlatformIrqResource, LogicalIrqRef::Uart0);
+            platform_irq_resource_ready(PlatformIrqResource);
+            platform_irq_resource_not_handler_registration(PlatformIrqResource);
+        }
+    }
+}
+
+predicate platform_irq_resource_device_bound<T, D>(resource: T, device: D) -> bool;
+predicate platform_irq_resource_node_bound<T, N>(resource: T, node: N) -> bool;
+predicate platform_irq_resource_interrupt_parent_is_plic<T, P>(resource: T, plic: P) -> bool;
+predicate platform_irq_resource_raw_specifier_ready<T>(resource: T) -> bool;
+predicate platform_irq_resource_specifier_cells_ready<T>(resource: T) -> bool;
+predicate platform_irq_resource_translated_by_domain<T, D>(resource: T, domain: D) -> bool;
+predicate platform_irq_resource_hwirq_bound<T, H>(resource: T, hwirq: H) -> bool;
+predicate platform_irq_resource_logical_irq_bound<T, L>(resource: T, logical_irq: L) -> bool;
+predicate platform_irq_resource_ready<T>(resource: T) -> bool;
+predicate platform_irq_resource_not_handler_registration<T>(resource: T) -> bool;
+
 object Ns16550aPlatformDriver: PlatformDriverType {
     initial_state: State::Base;
 
@@ -108,6 +196,7 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     InitcallTable.state == State::Ready;
                     PlatformBus.state == State::Ready;
                     Ioremap.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
                 }
 
                 drives {
@@ -115,6 +204,8 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                         device: DeviceRef::Ns16550aSerial,
                         mapping: IoMemoryMappingRef::Ns16550aSerial
                     );
+                    PlatformIrqResource.Event::Preset;
+                    PlatformIrqResource.Event::Setup;
                     Uart8250Port.Event::Setup;
                     Serial8250Console.Event::Setup;
                     ConsoleRegistry.Event::Setup;
@@ -145,6 +236,12 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     uart8250_port_mapbase_bound(Uart8250Port);
                     uart8250_port_membase_ioremapped(Uart8250Port, Ioremap, IoMemoryMappingRef::Ns16550aSerial);
                     uart8250_port_uses_ioremap(Uart8250Port);
+                    platform_irq_resource_ready(PlatformIrqResource);
+                    platform_irq_resource_logical_irq_bound(PlatformIrqResource, LogicalIrqRef::Uart0);
+                    plic_irq_mapping_logical_irq_assigned(PlicIrqMapping, LogicalIrqRef::Uart0);
+                    uart8250_port_irq_resource_ready(Uart8250Port, PlatformIrqResource);
+                    uart8250_port_logical_irq_bound(Uart8250Port, LogicalIrqRef::Uart0);
+                    uart8250_port_interrupt_output_still_deferred(Uart8250Port);
                     uart8250_port_registered(Uart8250Port);
                     serial8250_console_registered(Serial8250Console, Uart8250Port);
                     console_handoff_ready(ConsoleHandoff, BootConsole, Serial8250Console);
@@ -181,6 +278,8 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             device_driver_ref_lifetime_stable(DeviceDriverRef::Ns16550aPlatformDriver);
             device_driver_ref_ready(DeviceDriverRef::Ns16550aPlatformDriver);
             Uart8250Port.state == State::Ready;
+            PlatformIrqResource.state == State::Ready;
+            PlicIrqMapping.state == State::Ready;
             Serial8250Console.state == State::Ready;
             ConsoleRegistry.state == State::Ready;
             ConsoleHandoff.state == State::Ready;
@@ -204,6 +303,12 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             uart8250_port_mapbase_bound(Uart8250Port);
             uart8250_port_membase_ioremapped(Uart8250Port, Ioremap, IoMemoryMappingRef::Ns16550aSerial);
             uart8250_port_uses_ioremap(Uart8250Port);
+            platform_irq_resource_ready(PlatformIrqResource);
+            platform_irq_resource_logical_irq_bound(PlatformIrqResource, LogicalIrqRef::Uart0);
+            plic_irq_mapping_logical_irq_assigned(PlicIrqMapping, LogicalIrqRef::Uart0);
+            uart8250_port_irq_resource_ready(Uart8250Port, PlatformIrqResource);
+            uart8250_port_logical_irq_bound(Uart8250Port, LogicalIrqRef::Uart0);
+            uart8250_port_interrupt_output_still_deferred(Uart8250Port);
             uart8250_port_registered(Uart8250Port);
             serial8250_console_registered(Serial8250Console, Uart8250Port);
             console_handoff_ready(ConsoleHandoff, BootConsole, Serial8250Console);

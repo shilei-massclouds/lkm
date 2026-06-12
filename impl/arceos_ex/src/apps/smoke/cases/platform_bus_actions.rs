@@ -9,6 +9,7 @@ use crate::{
         driver::MOCK_PLATFORM_DRIVER_REF,
         initcall::PlatformBus,
         ioremap::Ioremap,
+        irq_time::PlicIrqDomain,
         mm_core::{PageAllocator, PageTableCaches, VmallocAllocator},
         state::State,
     },
@@ -27,6 +28,7 @@ struct PlatformBusActionsFixture {
     page_allocator: PageAllocator,
     vmalloc_allocator: VmallocAllocator,
     ioremap: Ioremap,
+    plic_irq_domain: PlicIrqDomain,
 }
 
 impl PlatformBusActionsFixture {
@@ -37,6 +39,7 @@ impl PlatformBusActionsFixture {
             page_allocator: PageAllocator::new(),
             vmalloc_allocator: VmallocAllocator::new(),
             ioremap: Ioremap::new(),
+            plic_irq_domain: PlicIrqDomain::new(),
         }
     }
 
@@ -77,7 +80,19 @@ impl PlatformBusActionsFixture {
             self.bus
                 .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device),
         );
+        assertions.assert_ok(
+            "preset plic irq domain",
+            self.plic_irq_domain.preset(&ctx.plic, &ctx.irq_controller),
+        );
+        assertions.assert_ok(
+            "setup plic irq domain",
+            self.plic_irq_domain.setup(&ctx.plic, &ctx.irq_controller),
+        );
         assertions.assert("bus ready", self.bus.state() == State::Ready);
+        assertions.assert(
+            "plic irq domain ready",
+            self.plic_irq_domain.state() == State::Ready,
+        );
         assertions.assert("bus registered", self.bus.registered());
         assertions.assert("devices kset ready", self.bus.devices_kset_ready());
         assertions.assert("drivers kset ready", self.bus.drivers_kset_ready());
@@ -156,6 +171,7 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
                 &context_ref().page_metadata_map,
                 &context_ref().config,
                 &mut self.fixture.ioremap,
+                &mut self.fixture.plic_irq_domain,
             ),
         );
         assertions.assert(
@@ -204,6 +220,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
                 &context_ref().page_metadata_map,
                 &context_ref().config,
                 &mut self.fixture.ioremap,
+                &mut self.fixture.plic_irq_domain,
             ),
         );
         self.fixture.setup_ready(assertions);
@@ -238,6 +255,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
                 &context_ref().page_metadata_map,
                 &context_ref().config,
                 &mut self.fixture.ioremap,
+                &mut self.fixture.plic_irq_domain,
             ),
         );
         assertions.assert(

@@ -38,7 +38,7 @@ impl InterruptStream {
     }
 
     pub fn adopt_head_preset(&mut self) -> EventResult {
-        if csr::read_sie() != 0 || csr::read_sip() != 0 {
+        if csr::read_sie() != 0 {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
@@ -47,6 +47,7 @@ impl InterruptStream {
             );
         }
 
+        csr::clear_supervisor_interrupt_pending();
         reset_interrupt_handlers();
         self.lifecycle
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)

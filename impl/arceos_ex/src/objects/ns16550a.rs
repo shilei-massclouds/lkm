@@ -6,6 +6,7 @@ use super::{
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
     ioremap::{IoMemoryMapping, Ioremap},
+    irq_time::{LogicalIrq, PlicIrqDomain},
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     printk,
 };
@@ -18,6 +19,8 @@ const UART_TX: usize = 0;
 const UART_LSR: usize = 5;
 const UART_LSR_THRE: usize = 1 << 5;
 const UART_POLL_SPINS: usize = 100_000;
+const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
+const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
 
 pub static NS16550A_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
     "of_serial",
@@ -37,6 +40,7 @@ pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
     let page_metadata_map = &ctx.page_metadata_map;
     let config = &ctx.config;
     let ioremap = &mut ctx.ioremap;
+    let plic_irq_domain = &mut ctx.plic_irq_domain;
     ctx.platform_bus.platform_driver_register(
         NS16550A_PLATFORM_DRIVER_REF,
         device_tree,
@@ -46,6 +50,7 @@ pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
         page_metadata_map,
         config,
         ioremap,
+        plic_irq_domain,
     )
 }
 
@@ -68,6 +73,12 @@ pub struct Uart8250Port {
     reg_shift: u32,
     reg_io_width: u32,
     clock_frequency: u32,
+    irq_source: u32,
+    logical_irq: LogicalIrq,
+    irq_resource_ready: bool,
+    irq_parent_plic: bool,
+    irq_mapping_ready: bool,
+    interrupt_output_deferred: bool,
     line: usize,
     registered: bool,
 }
@@ -86,6 +97,12 @@ impl Uart8250Port {
             reg_shift: 0,
             reg_io_width: 0,
             clock_frequency: 0,
+            irq_source: 0,
+            logical_irq: LogicalIrq::invalid(),
+            irq_resource_ready: false,
+            irq_parent_plic: false,
+            irq_mapping_ready: false,
+            interrupt_output_deferred: false,
             line: usize::MAX,
             registered: false,
         }
@@ -333,6 +350,12 @@ pub fn uart8250_port_resources_ready() -> bool {
         && uart_reg_io_width_supported(state.port.reg_io_width)
         && (state.port.clock_frequency == DEFAULT_CLOCK_FREQUENCY
             || state.port.clock_frequency > DEFAULT_CLOCK_FREQUENCY)
+        && state.port.irq_resource_ready
+        && state.port.irq_parent_plic
+        && state.port.irq_source != 0
+        && state.port.irq_mapping_ready
+        && state.port.logical_irq.is_valid()
+        && state.port.interrupt_output_deferred
         && state.port.line != usize::MAX
 }
 
@@ -344,6 +367,44 @@ pub fn uart8250_port_ioremapped() -> bool {
         && state.port.io_page_protection
         && state.port.membase != 0
         && state.port.membase != state.port.mapbase
+}
+
+pub fn uart8250_port_irq_resource_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered
+        && state.port.irq_resource_ready
+        && state.port.irq_parent_plic
+        && state.port.irq_source != 0
+}
+
+pub fn uart8250_port_logical_irq_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered && state.port.irq_mapping_ready && state.port.logical_irq.is_valid()
+}
+
+pub fn uart8250_port_irq_source() -> u32 {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .port
+            .irq_source
+    }
+}
+
+pub fn uart8250_port_logical_irq() -> LogicalIrq {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .port
+            .logical_irq
+    }
+}
+
+pub fn uart8250_interrupt_output_still_deferred() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered && state.port.interrupt_output_deferred
 }
 
 pub fn serial8250_console_registered() -> bool {
@@ -476,6 +537,7 @@ fn ns16550a_probe(
     page_metadata_map: &PageMetadataMap,
     config: &Config,
     ioremap: &mut Ioremap,
+    plic_irq_domain: &mut PlicIrqDomain,
     device: DeviceRef,
     node_id: DeviceNodeId,
 ) -> ProbeResult {
@@ -495,6 +557,9 @@ fn ns16550a_probe(
         return ProbeResult::Deferred;
     };
     bind_ioremap_mapping(&mut port, mapping);
+    if !bind_irq_resource(&mut port, device_tree, plic_irq_domain) {
+        return ProbeResult::Deferred;
+    }
 
     let stdout_path_available = device_tree.stdout_path_available();
     let stdout_path_matched =
@@ -581,9 +646,110 @@ fn build_uart8250_port(
         reg_shift,
         reg_io_width,
         clock_frequency,
+        irq_source: 0,
+        logical_irq: LogicalIrq::invalid(),
+        irq_resource_ready: false,
+        irq_parent_plic: false,
+        irq_mapping_ready: false,
+        interrupt_output_deferred: true,
         line: device.index(),
         registered: true,
     })
+}
+
+fn bind_irq_resource(
+    port: &mut Uart8250Port,
+    device_tree: &DeviceTree,
+    plic_irq_domain: &mut PlicIrqDomain,
+) -> bool {
+    if plic_irq_domain.state() != super::state::State::Ready {
+        return false;
+    }
+    let Some(node) = device_tree.node(port.node_id) else {
+        return false;
+    };
+    if !interrupt_parent_is_plic(device_tree, node) {
+        return false;
+    }
+    let Some(source) = uart_interrupt_source(node, plic_irq_domain) else {
+        return false;
+    };
+    let Some(logical_irq) = plic_irq_domain.map_source(source) else {
+        return false;
+    };
+
+    port.irq_source = source;
+    port.logical_irq = logical_irq;
+    port.irq_resource_ready = true;
+    port.irq_parent_plic = true;
+    port.irq_mapping_ready = plic_irq_domain
+        .mapping_for_source(source)
+        .is_some_and(|mapping| {
+            mapping.logical_irq() == logical_irq
+                && mapping.source_valid()
+                && mapping.source_zero_rejected()
+                && mapping.source_range_checked()
+                && mapping.duplicate_source_idempotent()
+                && mapping.source_not_enabled()
+                && mapping.handler_not_registered()
+        });
+    port.interrupt_output_deferred = true;
+    port.irq_mapping_ready
+}
+
+fn uart_interrupt_source(
+    node: super::device_tree::DeviceNodeRef<'_>,
+    domain: &PlicIrqDomain,
+) -> Option<u32> {
+    let value = node.property(b"interrupts")?.raw_value();
+    let start = value.as_ptr() as usize;
+    let source = read_be_u32(start, start.checked_add(value.len())?)?;
+    domain.translate_one_cell_specifier(&[source])
+}
+
+fn interrupt_parent_is_plic(
+    device_tree: &DeviceTree,
+    node: super::device_tree::DeviceNodeRef<'_>,
+) -> bool {
+    let Some(phandle) = inherited_interrupt_parent_phandle(node) else {
+        return false;
+    };
+    device_tree
+        .root()
+        .and_then(|root| find_node_by_phandle(root, phandle))
+        .is_some_and(|parent| {
+            parent.property(b"interrupt-controller").is_some()
+                && (parent.has_compatible(PLIC_COMPATIBLE_SIFIVE)
+                    || parent.has_compatible(PLIC_COMPATIBLE_RISCV))
+        })
+}
+
+fn inherited_interrupt_parent_phandle(
+    mut node: super::device_tree::DeviceNodeRef<'_>,
+) -> Option<u32> {
+    loop {
+        if let Some(phandle) = read_property_u32(node.property(b"interrupt-parent")) {
+            return Some(phandle);
+        }
+        node = node.parent()?;
+    }
+}
+
+fn find_node_by_phandle<'dt>(
+    node: super::device_tree::DeviceNodeRef<'dt>,
+    phandle: u32,
+) -> Option<super::device_tree::DeviceNodeRef<'dt>> {
+    if read_property_u32(node.property(b"phandle")) == Some(phandle)
+        || read_property_u32(node.property(b"linux,phandle")) == Some(phandle)
+    {
+        return Some(node);
+    }
+    for child in node.children() {
+        if let Some(found) = find_node_by_phandle(child, phandle) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn bind_ioremap_mapping(port: &mut Uart8250Port, mapping: IoMemoryMapping) {

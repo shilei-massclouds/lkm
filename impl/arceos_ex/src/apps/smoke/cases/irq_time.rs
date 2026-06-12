@@ -30,6 +30,7 @@ pub fn run() -> SmokeResult {
         || ctx.plic_driver.state() != State::Prepared
         || ctx.irq_dispatch_tree.state() != State::Ready
         || ctx.plic.state() != State::Ready
+        || ctx.plic_irq_domain.state() != State::Ready
         || ctx.tick.state() != State::Ready
         || ctx.timer_wheel.state() != State::Ready
         || ctx.hrtimer_core.state() != State::Ready
@@ -71,6 +72,23 @@ pub fn run() -> SmokeResult {
         || !ctx.plic.priority_ready()
         || !ctx.plic.source_enable_ready()
         || !ctx.plic.external_irq_route_deferred()
+        || !ctx.plic_irq_domain.owner_bound()
+        || !ctx.plic_irq_domain.hwirq_valid_range_ready()
+        || !ctx.plic_irq_domain.logical_irq_allocator_ready()
+        || !ctx.plic_irq_domain.mapping_table_ready()
+        || !ctx.plic_irq_domain.translate_specifier_ready()
+        || !ctx.plic_irq_domain.source_zero_reserved()
+        || !ctx.plic_irq_domain.one_cell_specifier()
+        || !ctx.plic_irq_domain.enable_deferred()
+        || ctx.plic_irq_domain.source_count() != ctx.plic.source_count()
+        || ctx
+            .plic_irq_domain
+            .translate_one_cell_specifier(&[0])
+            .is_some()
+        || ctx
+            .plic_irq_domain
+            .translate_one_cell_specifier(&[ctx.plic.source_count().saturating_add(1)])
+            .is_some()
         || !plic_irqchip_callback_recorded(ctx)
     {
         printk::write_str("plic irqchip section traversal facts invalid\n");

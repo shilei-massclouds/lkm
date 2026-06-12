@@ -7,6 +7,7 @@ use crate::{
         device_tree::DeviceTree,
         initcall::PlatformBus,
         ioremap::Ioremap,
+        irq_time::PlicIrqDomain,
         mm_core::{PageAllocator, PageTableCaches, VmallocAllocator},
         ns16550a::{self, NS16550A_PLATFORM_DRIVER_REF},
         printk,
@@ -124,6 +125,7 @@ struct ConsoleHandoffFixture {
     page_allocator: PageAllocator,
     vmalloc_allocator: VmallocAllocator,
     ioremap: Ioremap,
+    plic_irq_domain: PlicIrqDomain,
     device_ref: Option<DeviceRef>,
 }
 
@@ -135,6 +137,7 @@ impl ConsoleHandoffFixture {
             page_allocator: PageAllocator::new(),
             vmalloc_allocator: VmallocAllocator::new(),
             ioremap: Ioremap::new(),
+            plic_irq_domain: PlicIrqDomain::new(),
             device_ref: None,
         }
     }
@@ -174,7 +177,16 @@ impl ConsoleHandoffFixture {
                 .bus
                 .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device)
                 .is_ok()
+            && self
+                .plic_irq_domain
+                .preset(&ctx.plic, &ctx.irq_controller)
+                .is_ok()
+            && self
+                .plic_irq_domain
+                .setup(&ctx.plic, &ctx.irq_controller)
+                .is_ok()
             && self.bus.state() == State::Ready
+            && self.plic_irq_domain.state() == State::Ready
     }
 
     fn add_ns16550a_driver(&mut self) -> bool {
@@ -205,6 +217,7 @@ impl ConsoleHandoffFixture {
                 &ctx.page_metadata_map,
                 &ctx.config,
                 &mut self.ioremap,
+                &mut self.plic_irq_domain,
             )
             .is_ok()
     }
@@ -265,7 +278,20 @@ impl ConsoleHandoffFixture {
             && vmap_mapping.protection().is_io_memory()
             && self.vmalloc_allocator.mapping(vmap_mapping.index()) == Some(vmap_mapping)
             && self.bus.ns16550a_probe_registers_uart8250_port()
+            && self.bus.ns16550a_probe_records_uart_irq_resource()
+            && self.bus.ns16550a_probe_records_uart_irq_mapping()
+            && self.bus.ns16550a_probe_keeps_interrupt_output_deferred()
             && ns16550a::uart8250_port_registered()
+            && ns16550a::uart8250_port_irq_resource_ready()
+            && ns16550a::uart8250_port_logical_irq_ready()
+            && self
+                .plic_irq_domain
+                .mapping_for_source(ns16550a::uart8250_port_irq_source())
+                .is_some_and(|mapping| {
+                    mapping.logical_irq() == ns16550a::uart8250_port_logical_irq()
+                        && mapping.source_not_enabled()
+                        && mapping.handler_not_registered()
+                })
             && printk::serial8250_write_ready()
             && ns16550a::serial8250_write_backend_ready()
             && ns16550a::serial8250_write_uses_membase()
@@ -289,9 +315,11 @@ impl ConsoleHandoffFixture {
     fn assert_duplicate_preferred_idempotent(&self) -> bool {
         let area_count = self.vmalloc_allocator.area_count();
         let mapping_count = self.vmalloc_allocator.mapping_count();
+        let irq_mapping_count = self.plic_irq_domain.mapping_count();
         printk::register_serial8250_console(true)
             && self.vmalloc_allocator.area_count() == area_count
             && self.vmalloc_allocator.mapping_count() == mapping_count
+            && self.plic_irq_domain.mapping_count() == irq_mapping_count
             && printk::serial8250_console_registered()
             && printk::preferred_console_from_stdout()
             && printk::serial8250_consdev()
@@ -306,6 +334,9 @@ impl ConsoleHandoffFixture {
         };
         self.bus.ns16550a_probe_registers_uart8250_port()
             && ns16550a::uart8250_port_registered()
+            && self.bus.ns16550a_probe_records_uart_irq_resource()
+            && self.bus.ns16550a_probe_records_uart_irq_mapping()
+            && self.bus.ns16550a_probe_keeps_interrupt_output_deferred()
             && self.bus.ns16550a_probe_ioremaps_uart8250_port()
             && ns16550a::uart8250_port_ioremapped()
             && self.ioremap.mapping_for_device(device_ref).is_some()

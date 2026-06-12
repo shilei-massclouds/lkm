@@ -80,6 +80,10 @@ predicate arceos_ex_must_of_irq_init_call_plic_init_via_matched_section_entry() 
 predicate arceos_ex_must_plic_output_feed_riscv_intc_external_input() -> bool;
 predicate arceos_ex_must_plic_ioremap_as_system_irqchip_not_platform_device() -> bool;
 predicate arceos_ex_must_plic_setup_parse_dt_reg_ndev_and_interrupts_extended() -> bool;
+predicate arceos_ex_must_model_irqdomain_as_type_and_plic_domain_as_instance() -> bool;
+predicate arceos_ex_must_plic_irq_domain_map_source_to_logical_irq_only() -> bool;
+predicate arceos_ex_must_platform_irq_resource_parse_uart_interrupts_from_dt() -> bool;
+predicate arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler() -> bool;
 predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_open_prepare_run_after_irq_time_init() -> bool;
@@ -721,6 +725,46 @@ type ArceosExIrqTimeInitCodingMust {
          * mapping step once DeviceTree phandle lookup is modeled.
          */
         arceos_ex_must_plic_setup_parse_dt_reg_ndev_and_interrupts_extended();
+
+        /*
+         * IRQ domain split:
+         *
+         * IrqDomain is the generic IRQ core mapping contract, while
+         * PlicIrqDomain is the concrete instance owned by the PLIC provider.
+         * The implementation must not collapse logical IRQ allocation into
+         * Plic itself or into ns16550a driver-private state.
+         */
+        arceos_ex_must_model_irqdomain_as_type_and_plic_domain_as_instance();
+
+        /*
+         * PLIC source mapping:
+         *
+         * PlicIrqDomain may translate a one-cell PLIC interrupt specifier and
+         * create an idempotent source -> logical IRQ mapping. It must reject
+         * source 0 and sources outside the PLIC source count, and duplicate
+         * mapping of the same source must return the existing logical IRQ.
+         */
+        arceos_ex_must_plic_irq_domain_map_source_to_logical_irq_only();
+
+        /*
+         * UART IRQ resource:
+         *
+         * ns16550a platform probe must parse its IRQ resource from the
+         * platform device's DeviceTree node, including the interrupt specifier
+         * and PLIC interrupt parent. It must then bind the UART port to the
+         * PLIC logical IRQ returned by PlicIrqDomain.
+         */
+        arceos_ex_must_platform_irq_resource_parse_uart_interrupts_from_dt();
+
+        /*
+         * Deferred interrupt output:
+         *
+         * The first UART/PLIC integration step records the UART IRQ mapping
+         * only. It must not enable the PLIC source, register a handler, route
+         * claim/complete dispatch, or declare serial8250 interrupt-driven
+         * console output ready.
+         */
+        arceos_ex_must_uart_irq_mapping_not_enable_source_or_handler();
 
         /*
          * Concurrency scope:

@@ -49,6 +49,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.ioremap,
         &mut ctx.plic,
     )?;
+    ctx.plic_irq_domain.preset(&ctx.plic, &ctx.irq_controller)?;
+    ctx.plic_irq_domain.setup(&ctx.plic, &ctx.irq_controller)?;
     ctx.irq_dispatch_tree.setup(
         &ctx.irq_controller,
         &ctx.riscv_intc,
@@ -170,6 +172,16 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.plic.priority_ready()
         && ctx.plic.source_enable_ready()
         && ctx.plic.external_irq_route_deferred()
+        && ctx.plic_irq_domain.state() == State::Ready
+        && ctx.plic_irq_domain.owner_bound()
+        && ctx.plic_irq_domain.hwirq_valid_range_ready()
+        && ctx.plic_irq_domain.logical_irq_allocator_ready()
+        && ctx.plic_irq_domain.mapping_table_ready()
+        && ctx.plic_irq_domain.translate_specifier_ready()
+        && ctx.plic_irq_domain.source_zero_reserved()
+        && ctx.plic_irq_domain.one_cell_specifier()
+        && ctx.plic_irq_domain.enable_deferred()
+        && ctx.plic_irq_domain.source_count() == ctx.plic.source_count()
         && ctx.tick.state() == State::Ready
         && ctx.tick.control_ready()
         && ctx.tick.nohz_trimmed()

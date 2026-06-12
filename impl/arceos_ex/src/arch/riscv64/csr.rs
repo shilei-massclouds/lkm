@@ -66,14 +66,10 @@ pub fn read_sie() -> usize {
     value
 }
 
-pub fn read_sip() -> usize {
-    let value: usize;
-
+pub fn clear_supervisor_interrupt_pending() {
     unsafe {
-        core::arch::asm!("csrr {value}, sip", value = out(reg) value, options(nostack, nomem));
+        core::arch::asm!("csrw sip, zero", options(nostack, nomem));
     }
-
-    value
 }
 
 #[allow(dead_code)]

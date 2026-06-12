@@ -64,6 +64,12 @@ pub fn run() -> SmokeResult {
         || !check_ns16550a_bound_device(platform_bus, &ctx.device_tree)
         || !platform_bus.ns16550a_probe_ioremaps_uart8250_port()
         || !platform_bus.ns16550a_probe_registers_uart8250_port()
+        || !platform_bus.ns16550a_probe_records_uart_irq_resource()
+        || !platform_bus.ns16550a_probe_records_uart_irq_mapping()
+        || !platform_bus.ns16550a_probe_keeps_interrupt_output_deferred()
+        || !crate::objects::ns16550a::uart8250_port_irq_resource_ready()
+        || !crate::objects::ns16550a::uart8250_port_logical_irq_ready()
+        || !check_uart_irq_mapping(&ctx.plic_irq_domain)
         || !platform_bus.ns16550a_probe_registers_serial_console()
         || !platform_bus.ns16550a_probe_triggers_console_handoff()
         || !ctx.console.registry_ready()
@@ -255,6 +261,22 @@ fn check_ns16550a_bound_device(
         return false;
     };
     node.has_compatible(b"ns16550a")
+}
+
+fn check_uart_irq_mapping(domain: &crate::objects::irq_time::PlicIrqDomain) -> bool {
+    let source = crate::objects::ns16550a::uart8250_port_irq_source();
+    let logical_irq = crate::objects::ns16550a::uart8250_port_logical_irq();
+    domain.mapping_count() != 0
+        && domain.mapping_for_source(source).is_some_and(|mapping| {
+            mapping.logical_irq() == logical_irq
+                && mapping.domain_bound()
+                && mapping.source_valid()
+                && mapping.source_zero_rejected()
+                && mapping.source_range_checked()
+                && mapping.duplicate_source_idempotent()
+                && mapping.source_not_enabled()
+                && mapping.handler_not_registered()
+        })
 }
 
 const fn expected_level_name(index: usize) -> InitcallLevelName {

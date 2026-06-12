@@ -213,6 +213,209 @@ object IrqDispatchTree: InterruptObject {
 }
 
 /*
+ * IrqDomain 是 IRQ core 的通用映射契约：负责把硬件 IRQ 编号/
+ * interrupt specifier 翻译并映射为 logical IRQ。它不负责硬件 enable、
+ * handler 注册或 interrupt dispatch。
+ */
+type IrqDomain: InterruptObject {
+    processes {
+        Action::TranslateIrqSpecifier(resource: PlatformIrqResourceRef) -> HwirqRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                irq_domain_translate_specifier_ready(self);
+                platform_irq_resource_raw_specifier_ready(resource);
+            }
+            ensures {
+                irq_domain_translated_specifier(self, resource);
+                hwirq_ref_ready(HwirqRef::PlicUart0);
+            }
+        }
+
+        Action::MapHwirq(hwirq: HwirqRef, mapping: PlicIrqMappingRef) -> LogicalIrqRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                irq_domain_logical_irq_allocator_ready(self);
+                irq_domain_mapping_table_ready(self);
+                hwirq_ref_ready(hwirq);
+            }
+            ensures {
+                irq_domain_hwirq_mapped(self, hwirq, LogicalIrqRef::Uart0);
+                irq_domain_mapping_record_ready(self, mapping);
+                logical_irq_ref_ready(LogicalIrqRef::Uart0);
+            }
+        }
+    }
+}
+
+type HwirqRef {
+}
+
+type LogicalIrqRef {
+}
+
+type PlicIrqMappingRef {
+}
+
+type PlatformIrqResourceRef {
+}
+
+predicate irq_domain_owner_irqchip<T, C>(domain: T, irqchip: C) -> bool;
+predicate irq_domain_hwirq_valid_range_ready<T>(domain: T) -> bool;
+predicate irq_domain_logical_irq_allocator_ready<T>(domain: T) -> bool;
+predicate irq_domain_mapping_table_ready<T>(domain: T) -> bool;
+predicate irq_domain_translate_specifier_ready<T>(domain: T) -> bool;
+predicate irq_domain_translated_specifier<T, R>(domain: T, resource: R) -> bool;
+predicate irq_domain_hwirq_mapped<T, H, L>(domain: T, hwirq: H, logical_irq: L) -> bool;
+predicate irq_domain_mapping_record_ready<T, M>(domain: T, mapping: M) -> bool;
+predicate hwirq_ref_ready<T>(hwirq: T) -> bool;
+predicate logical_irq_ref_ready<T>(logical_irq: T) -> bool;
+
+predicate plic_irq_domain_owner_bound<T, P>(domain: T, plic: P) -> bool;
+predicate plic_irq_domain_source_range_bound<T, P>(domain: T, plic: P) -> bool;
+predicate plic_irq_domain_source_zero_reserved<T>(domain: T) -> bool;
+predicate plic_irq_domain_one_cell_specifier<T>(domain: T) -> bool;
+predicate plic_irq_domain_mapping_table_ready<T>(domain: T) -> bool;
+predicate plic_irq_domain_logical_allocator_ready<T>(domain: T) -> bool;
+predicate plic_irq_domain_translate_ops_ready<T>(domain: T) -> bool;
+predicate plic_irq_domain_enable_deferred<T>(domain: T) -> bool;
+
+predicate plic_irq_mapping_domain_bound<T, D>(mapping: T, domain: D) -> bool;
+predicate plic_irq_mapping_source_valid<T, P>(mapping: T, plic: P) -> bool;
+predicate plic_irq_mapping_source_zero_rejected<T>(mapping: T) -> bool;
+predicate plic_irq_mapping_source_range_checked<T, P>(mapping: T, plic: P) -> bool;
+predicate plic_irq_mapping_logical_irq_assigned<T, L>(mapping: T, logical_irq: L) -> bool;
+predicate plic_irq_mapping_duplicate_source_idempotent<T, D>(mapping: T, domain: D) -> bool;
+predicate plic_irq_mapping_source_not_enabled<T>(mapping: T) -> bool;
+predicate plic_irq_mapping_handler_not_registered<T>(mapping: T) -> bool;
+
+/*
+ * PlicIrqDomain 是 PLIC provider 创建的具体 IRQ domain 实例。
+ * 它只建立 source/specifier 到 logical IRQ 的映射能力，不开放 source
+ * enable、handler 或 dispatch。
+ */
+object PlicIrqDomain: IrqDomain {
+    initial_state: State::Base;
+    parent: Plic;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    Plic.state == State::Ready;
+                    IrqController.state == State::Ready;
+                }
+
+                ensures {
+                    irq_domain_owner_irqchip(PlicIrqDomain, Plic);
+                    plic_irq_domain_owner_bound(PlicIrqDomain, Plic);
+                    plic_irq_domain_translate_ops_ready(PlicIrqDomain);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            irq_domain_owner_irqchip(PlicIrqDomain, Plic);
+            plic_irq_domain_owner_bound(PlicIrqDomain, Plic);
+            plic_irq_domain_translate_ops_ready(PlicIrqDomain);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Plic.state == State::Ready;
+                    IrqController.state == State::Ready;
+                }
+
+                ensures {
+                    irq_domain_hwirq_valid_range_ready(PlicIrqDomain);
+                    irq_domain_logical_irq_allocator_ready(PlicIrqDomain);
+                    irq_domain_mapping_table_ready(PlicIrqDomain);
+                    irq_domain_translate_specifier_ready(PlicIrqDomain);
+                    plic_irq_domain_source_range_bound(PlicIrqDomain, Plic);
+                    plic_irq_domain_source_zero_reserved(PlicIrqDomain);
+                    plic_irq_domain_one_cell_specifier(PlicIrqDomain);
+                    plic_irq_domain_mapping_table_ready(PlicIrqDomain);
+                    plic_irq_domain_logical_allocator_ready(PlicIrqDomain);
+                    plic_irq_domain_enable_deferred(PlicIrqDomain);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            irq_domain_owner_irqchip(PlicIrqDomain, Plic);
+            irq_domain_hwirq_valid_range_ready(PlicIrqDomain);
+            irq_domain_logical_irq_allocator_ready(PlicIrqDomain);
+            irq_domain_mapping_table_ready(PlicIrqDomain);
+            irq_domain_translate_specifier_ready(PlicIrqDomain);
+            plic_irq_domain_owner_bound(PlicIrqDomain, Plic);
+            plic_irq_domain_source_range_bound(PlicIrqDomain, Plic);
+            plic_irq_domain_source_zero_reserved(PlicIrqDomain);
+            plic_irq_domain_one_cell_specifier(PlicIrqDomain);
+            plic_irq_domain_mapping_table_ready(PlicIrqDomain);
+            plic_irq_domain_logical_allocator_ready(PlicIrqDomain);
+            plic_irq_domain_translate_ops_ready(PlicIrqDomain);
+            plic_irq_domain_enable_deferred(PlicIrqDomain);
+        }
+    }
+}
+
+/*
+ * PlicIrqMapping 是 PlicIrqDomain 内的一条 source -> logical IRQ 记录。
+ * Setup 建立映射记录并保持 source disabled / handler unregistered。
+ */
+object PlicIrqMapping: InterruptObject {
+    initial_state: State::Base;
+    parent: PlicIrqDomain;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    PlicIrqDomain.state == State::Ready;
+                    Plic.state == State::Ready;
+                }
+
+                ensures {
+                    irq_domain_hwirq_mapped(PlicIrqDomain, HwirqRef::PlicUart0, LogicalIrqRef::Uart0);
+                    irq_domain_mapping_record_ready(PlicIrqDomain, PlicIrqMappingRef::Uart0);
+                    logical_irq_ref_ready(LogicalIrqRef::Uart0);
+                    plic_irq_mapping_domain_bound(PlicIrqMapping, PlicIrqDomain);
+                    plic_irq_mapping_source_valid(PlicIrqMapping, Plic);
+                    plic_irq_mapping_source_zero_rejected(PlicIrqMapping);
+                    plic_irq_mapping_source_range_checked(PlicIrqMapping, Plic);
+                    plic_irq_mapping_logical_irq_assigned(PlicIrqMapping, LogicalIrqRef::Uart0);
+                    plic_irq_mapping_duplicate_source_idempotent(PlicIrqMapping, PlicIrqDomain);
+                    plic_irq_mapping_source_not_enabled(PlicIrqMapping);
+                    plic_irq_mapping_handler_not_registered(PlicIrqMapping);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            irq_domain_hwirq_mapped(PlicIrqDomain, HwirqRef::PlicUart0, LogicalIrqRef::Uart0);
+            irq_domain_mapping_record_ready(PlicIrqDomain, PlicIrqMappingRef::Uart0);
+            logical_irq_ref_ready(LogicalIrqRef::Uart0);
+            plic_irq_mapping_domain_bound(PlicIrqMapping, PlicIrqDomain);
+            plic_irq_mapping_source_valid(PlicIrqMapping, Plic);
+            plic_irq_mapping_source_zero_rejected(PlicIrqMapping);
+            plic_irq_mapping_source_range_checked(PlicIrqMapping, Plic);
+            plic_irq_mapping_logical_irq_assigned(PlicIrqMapping, LogicalIrqRef::Uart0);
+            plic_irq_mapping_duplicate_source_idempotent(PlicIrqMapping, PlicIrqDomain);
+            plic_irq_mapping_source_not_enabled(PlicIrqMapping);
+            plic_irq_mapping_handler_not_registered(PlicIrqMapping);
+        }
+    }
+}
+
+/*
  * Tick 表示 tick_init() 建立的 tick/broadcast 控制壳。RISC-V timer
  * provider 注册 clockevent 后补完 boot CPU tick device，使其 Ready。
  */
@@ -772,6 +975,8 @@ object IrqTimeInitPhase: PhaseObject {
                     IrqChipInitTable.Event::Preset;
                     PlicDriver.Event::Preset;
                     IrqChipInitTable.Event::Setup;
+                    PlicIrqDomain.Event::Preset;
+                    PlicIrqDomain.Event::Setup;
                     IrqDispatchTree.Event::Setup;
                     Tick.Event::Preset;
                     TimerWheel.Event::Setup;
@@ -817,6 +1022,7 @@ object IrqTimeInitPhase: PhaseObject {
             IrqChipInitTable.state == State::Ready;
             PlicDriver.state == State::Prepared;
             Plic.state == State::Ready;
+            PlicIrqDomain.state == State::Ready;
             Tick.state == State::Ready;
             TickBroadcast.state == State::Ready;
             TimerWheel.state == State::Ready;

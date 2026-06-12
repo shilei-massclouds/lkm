@@ -25,6 +25,8 @@ const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
 const RISCV_IRQ_S_EXT: u32 = 9;
 const RISCV_IRQ_M_EXT: u32 = 11;
+const PLIC_IRQ_MAPPING_CAPACITY: usize = 32;
+const PLIC_LOGICAL_IRQ_BASE: usize = 32;
 
 static TIMER_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static ONESHOT_DEADLINE: AtomicU64 = AtomicU64::new(0);
@@ -1764,6 +1766,314 @@ impl Plic {
             State::Ready,
             Checkpoint::PlicReady,
         )
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct LogicalIrq {
+    value: usize,
+}
+
+impl LogicalIrq {
+    pub const fn invalid() -> Self {
+        Self { value: 0 }
+    }
+
+    pub const fn new(value: usize) -> Self {
+        Self { value }
+    }
+
+    pub const fn is_valid(self) -> bool {
+        self.value != 0
+    }
+}
+
+pub struct PlicIrqMapping {
+    lifecycle: Lifecycle,
+    source: u32,
+    logical_irq: LogicalIrq,
+    domain_bound: bool,
+    source_valid: bool,
+    source_zero_rejected: bool,
+    source_range_checked: bool,
+    duplicate_source_idempotent: bool,
+    source_enabled: bool,
+    handler_registered: bool,
+}
+
+impl PlicIrqMapping {
+    const fn empty() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            source: 0,
+            logical_irq: LogicalIrq::invalid(),
+            domain_bound: false,
+            source_valid: false,
+            source_zero_rejected: false,
+            source_range_checked: false,
+            duplicate_source_idempotent: false,
+            source_enabled: false,
+            handler_registered: false,
+        }
+    }
+
+    pub const fn source(&self) -> u32 {
+        self.source
+    }
+
+    pub const fn logical_irq(&self) -> LogicalIrq {
+        self.logical_irq
+    }
+
+    pub const fn domain_bound(&self) -> bool {
+        self.domain_bound
+    }
+
+    pub const fn source_valid(&self) -> bool {
+        self.source_valid
+    }
+
+    pub const fn source_zero_rejected(&self) -> bool {
+        self.source_zero_rejected
+    }
+
+    pub const fn source_range_checked(&self) -> bool {
+        self.source_range_checked
+    }
+
+    pub const fn duplicate_source_idempotent(&self) -> bool {
+        self.duplicate_source_idempotent
+    }
+
+    pub const fn source_not_enabled(&self) -> bool {
+        !self.source_enabled
+    }
+
+    pub const fn handler_not_registered(&self) -> bool {
+        !self.handler_registered
+    }
+
+    fn setup_from_domain(
+        &mut self,
+        source: u32,
+        logical_irq: LogicalIrq,
+        source_count: u32,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || source == 0
+            || source > source_count
+            || !logical_irq.is_valid()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.source = source;
+        self.logical_irq = logical_irq;
+        self.domain_bound = true;
+        self.source_valid = true;
+        self.source_zero_rejected = true;
+        self.source_range_checked = true;
+        self.duplicate_source_idempotent = true;
+        self.source_enabled = false;
+        self.handler_registered = false;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
+pub struct PlicIrqDomain {
+    lifecycle: Lifecycle,
+    owner_bound: bool,
+    hwirq_valid_range_ready: bool,
+    logical_irq_allocator_ready: bool,
+    mapping_table_ready: bool,
+    translate_specifier_ready: bool,
+    source_zero_reserved: bool,
+    one_cell_specifier: bool,
+    enable_deferred: bool,
+    source_count: u32,
+    next_logical_irq: usize,
+    mappings: [PlicIrqMapping; PLIC_IRQ_MAPPING_CAPACITY],
+    mapping_count: usize,
+}
+
+impl PlicIrqDomain {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            owner_bound: false,
+            hwirq_valid_range_ready: false,
+            logical_irq_allocator_ready: false,
+            mapping_table_ready: false,
+            translate_specifier_ready: false,
+            source_zero_reserved: false,
+            one_cell_specifier: false,
+            enable_deferred: false,
+            source_count: 0,
+            next_logical_irq: PLIC_LOGICAL_IRQ_BASE,
+            mappings: [const { PlicIrqMapping::empty() }; PLIC_IRQ_MAPPING_CAPACITY],
+            mapping_count: 0,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn owner_bound(&self) -> bool {
+        self.owner_bound
+    }
+
+    pub const fn hwirq_valid_range_ready(&self) -> bool {
+        self.hwirq_valid_range_ready
+    }
+
+    pub const fn logical_irq_allocator_ready(&self) -> bool {
+        self.logical_irq_allocator_ready
+    }
+
+    pub const fn mapping_table_ready(&self) -> bool {
+        self.mapping_table_ready
+    }
+
+    pub const fn translate_specifier_ready(&self) -> bool {
+        self.translate_specifier_ready
+    }
+
+    pub const fn source_zero_reserved(&self) -> bool {
+        self.source_zero_reserved
+    }
+
+    pub const fn one_cell_specifier(&self) -> bool {
+        self.one_cell_specifier
+    }
+
+    pub const fn enable_deferred(&self) -> bool {
+        self.enable_deferred
+    }
+
+    pub const fn source_count(&self) -> u32 {
+        self.source_count
+    }
+
+    pub const fn mapping_count(&self) -> usize {
+        self.mapping_count
+    }
+
+    pub fn mapping_for_source(&self, source: u32) -> Option<&PlicIrqMapping> {
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = &self.mappings[index];
+            if mapping.source() == source {
+                return Some(mapping);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    pub fn preset(&mut self, plic: &Plic, irq_controller: &IrqController) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || plic.state() != State::Ready
+            || irq_controller.state() != State::Ready
+            || plic.source_count() == 0
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.owner_bound = true;
+        self.translate_specifier_ready = true;
+        self.source_count = plic.source_count();
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::PlicIrqDomainPrepared,
+        )
+    }
+
+    pub fn setup(&mut self, plic: &Plic, irq_controller: &IrqController) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || plic.state() != State::Ready
+            || irq_controller.state() != State::Ready
+            || self.source_count != plic.source_count()
+            || !self.owner_bound
+            || !self.translate_specifier_ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.hwirq_valid_range_ready = true;
+        self.logical_irq_allocator_ready = true;
+        self.mapping_table_ready = true;
+        self.source_zero_reserved = true;
+        self.one_cell_specifier = true;
+        self.enable_deferred = true;
+        self.next_logical_irq = PLIC_LOGICAL_IRQ_BASE;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::PlicIrqDomainReady,
+        )
+    }
+
+    pub fn translate_one_cell_specifier(&self, specifier: &[u32]) -> Option<u32> {
+        if self.lifecycle.state() != State::Ready
+            || !self.translate_specifier_ready
+            || !self.one_cell_specifier
+            || specifier.len() != 1
+        {
+            return None;
+        }
+        let source = specifier[0];
+        if source == 0 || source > self.source_count {
+            return None;
+        }
+        Some(source)
+    }
+
+    pub fn map_source(&mut self, source: u32) -> Option<LogicalIrq> {
+        if self.lifecycle.state() != State::Ready
+            || !self.logical_irq_allocator_ready
+            || !self.mapping_table_ready
+            || source == 0
+            || source > self.source_count
+        {
+            return None;
+        }
+        if let Some(mapping) = self.mapping_for_source(source) {
+            return Some(mapping.logical_irq());
+        }
+        if self.mapping_count >= PLIC_IRQ_MAPPING_CAPACITY {
+            return None;
+        }
+        let logical_irq = LogicalIrq::new(self.next_logical_irq);
+        let mapping_index = self.mapping_count;
+        if self.mappings[mapping_index]
+            .setup_from_domain(source, logical_irq, self.source_count)
+            .is_err()
+        {
+            return None;
+        }
+        self.mapping_count += 1;
+        self.next_logical_irq = self.next_logical_irq.saturating_add(1);
+        Some(logical_irq)
     }
 }
 

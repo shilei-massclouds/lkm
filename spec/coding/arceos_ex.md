@@ -1115,6 +1115,17 @@ claim/complete、handler dispatch 和 UART interrupt-driven console 仍留给后
 只表达 external-input context 的基础状态，不代表 UART 外部中断链已经可用。严格的 `interrupts-extended` phandle 到 boot hart
 local INTC 的反查绑定要等 DeviceTree phandle 查询能力建立后，在 IRQ domain/source mapping 步骤补上。
 
+IRQ domain/source mapping 必须分清类型和实例：`IrqDomain` 是 IRQ core 的通用 mapping contract，
+`PlicIrqDomain` 是由 PLIC provider 创建的具体实例。`PlicIrqDomain` 只负责把一格 PLIC interrupt specifier
+翻译成 PLIC source，并把合法 source 映射成 logical IRQ；source 0 必须视为 reserved/invalid，source 必须落在
+`1..=riscv,ndev` 范围内，重复映射同一个 source 必须返回已有 logical IRQ 而不是新增记录。该层不得 enable PLIC
+source、不得注册 handler、不得执行 claim/complete 或 dispatch。
+
+`ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
+resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经
+`PlicIrqDomain` 建立 UART source 到 logical IRQ 的记录，并把 logical IRQ 保存在 `Uart8250Port`。这一步只说明外部中断链的
+资源和 logical IRQ 绑定已经建立；serial8250 console 输出仍保持 polling，UART interrupt output 继续记录为 deferred。
+
 本阶段打开的只是 boot CPU 本地中断总入口。普通任务并发、secondary CPU 并发、周期 tick 服务、workqueue worker
 kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提前解释为 Online。
 

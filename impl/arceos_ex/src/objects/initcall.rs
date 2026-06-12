@@ -4,7 +4,7 @@ use super::{
     device_tree::{DeviceNodeRef, DeviceTree},
     driver::{DeviceDriverRef, ProbeResult},
     ioremap::Ioremap,
-    irq_time::IrqDispatchTree,
+    irq_time::{IrqDispatchTree, PlicIrqDomain},
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
     runtime_core::RuntimeCoreBoundary,
@@ -545,6 +545,9 @@ pub struct PlatformBus {
     ns16550a_bound_device: Option<DeviceRef>,
     ns16550a_probe_ioremaps_uart8250_port: bool,
     ns16550a_probe_registers_uart8250_port: bool,
+    ns16550a_probe_records_uart_irq_resource: bool,
+    ns16550a_probe_records_uart_irq_mapping: bool,
+    ns16550a_probe_keeps_interrupt_output_deferred: bool,
     ns16550a_probe_registers_serial_console: bool,
     ns16550a_probe_triggers_console_handoff: bool,
     of_platform_source_tree_ready: bool,
@@ -586,6 +589,9 @@ impl PlatformBus {
             ns16550a_bound_device: None,
             ns16550a_probe_ioremaps_uart8250_port: false,
             ns16550a_probe_registers_uart8250_port: false,
+            ns16550a_probe_records_uart_irq_resource: false,
+            ns16550a_probe_records_uart_irq_mapping: false,
+            ns16550a_probe_keeps_interrupt_output_deferred: false,
             ns16550a_probe_registers_serial_console: false,
             ns16550a_probe_triggers_console_handoff: false,
             of_platform_source_tree_ready: false,
@@ -701,6 +707,18 @@ impl PlatformBus {
 
     pub const fn ns16550a_probe_registers_uart8250_port(&self) -> bool {
         self.ns16550a_probe_registers_uart8250_port
+    }
+
+    pub const fn ns16550a_probe_records_uart_irq_resource(&self) -> bool {
+        self.ns16550a_probe_records_uart_irq_resource
+    }
+
+    pub const fn ns16550a_probe_records_uart_irq_mapping(&self) -> bool {
+        self.ns16550a_probe_records_uart_irq_mapping
+    }
+
+    pub const fn ns16550a_probe_keeps_interrupt_output_deferred(&self) -> bool {
+        self.ns16550a_probe_keeps_interrupt_output_deferred
     }
 
     pub const fn ns16550a_probe_registers_serial_console(&self) -> bool {
@@ -920,6 +938,7 @@ impl PlatformBus {
         page_metadata_map: &PageMetadataMap,
         config: &Config,
         ioremap: &mut Ioremap,
+        plic_irq_domain: &mut PlicIrqDomain,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
@@ -955,6 +974,7 @@ impl PlatformBus {
                 page_metadata_map,
                 config,
                 ioremap,
+                plic_irq_domain,
             );
             return Ok(());
         }
@@ -973,6 +993,7 @@ impl PlatformBus {
         page_metadata_map: &PageMetadataMap,
         config: &Config,
         ioremap: &mut Ioremap,
+        plic_irq_domain: &mut PlicIrqDomain,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
@@ -1004,6 +1025,7 @@ impl PlatformBus {
                     page_metadata_map,
                     config,
                     ioremap,
+                    plic_irq_domain,
                 );
                 return Ok(());
             }
@@ -1024,6 +1046,7 @@ impl PlatformBus {
         page_metadata_map: &PageMetadataMap,
         config: &Config,
         ioremap: &mut Ioremap,
+        plic_irq_domain: &mut PlicIrqDomain,
     ) -> InitcallReturn {
         if self.add_driver(driver).is_err() {
             return InitcallReturn::Error(-1);
@@ -1038,6 +1061,7 @@ impl PlatformBus {
                 page_metadata_map,
                 config,
                 ioremap,
+                plic_irq_domain,
             )
             .is_err()
         {
@@ -1094,6 +1118,7 @@ impl PlatformBus {
         page_metadata_map: &PageMetadataMap,
         config: &Config,
         ioremap: &mut Ioremap,
+        plic_irq_domain: &mut PlicIrqDomain,
     ) {
         let Some(platform_device) = self.platform_device(device_ref) else {
             return;
@@ -1107,6 +1132,7 @@ impl PlatformBus {
             page_metadata_map,
             config,
             ioremap,
+            plic_irq_domain,
             device_ref,
             node_id,
         );
@@ -1121,6 +1147,19 @@ impl PlatformBus {
                     && ioremap.mapping_count() != 0
                     && ioremap.mapping_for_device(device_ref).is_some();
                 self.ns16550a_probe_registers_uart8250_port = ns16550a::uart8250_port_registered();
+                self.ns16550a_probe_records_uart_irq_resource =
+                    ns16550a::uart8250_port_irq_resource_ready();
+                self.ns16550a_probe_records_uart_irq_mapping =
+                    ns16550a::uart8250_port_logical_irq_ready()
+                        && plic_irq_domain
+                            .mapping_for_source(ns16550a::uart8250_port_irq_source())
+                            .is_some_and(|mapping| {
+                                mapping.logical_irq() == ns16550a::uart8250_port_logical_irq()
+                                    && mapping.source_not_enabled()
+                                    && mapping.handler_not_registered()
+                            });
+                self.ns16550a_probe_keeps_interrupt_output_deferred =
+                    ns16550a::uart8250_interrupt_output_still_deferred();
                 self.ns16550a_probe_registers_serial_console =
                     ns16550a::serial8250_console_registered();
                 self.ns16550a_probe_triggers_console_handoff = ns16550a::handoff_triggered();
