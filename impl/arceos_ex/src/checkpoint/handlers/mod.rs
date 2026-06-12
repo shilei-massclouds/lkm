@@ -20,6 +20,8 @@ mod scheduler_action;
 mod smoke;
 #[cfg(checkpoint_sbi_char)]
 mod trace;
+#[cfg(checkpoint_handler_uart_irq_chain)]
+mod uart_irq_chain;
 #[cfg(checkpoint_handler_vmalloc_mapping)]
 mod vmalloc_mapping;
 
@@ -72,6 +74,8 @@ const POST_VM_HANDLERS: &[Handler] = &[
     scheduler_action::HANDLER,
     #[cfg(checkpoint_handler_console_handoff)]
     console_handoff::HANDLER,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
+    uart_irq_chain::HANDLER,
     #[cfg(checkpoint_handler_vmalloc_mapping)]
     vmalloc_mapping::HANDLER,
     #[cfg(checkpoint_handler_smoke)]
@@ -90,6 +94,7 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
+    checkpoint_handler_uart_irq_chain,
     checkpoint_handler_vmalloc_mapping,
     checkpoint_handler_smoke
 ))]
@@ -122,6 +127,10 @@ pub const fn kunit_case_count() -> usize {
     #[cfg(checkpoint_handler_console_handoff)]
     {
         count += console_handoff::KUNIT_CASE_COUNT;
+    }
+    #[cfg(checkpoint_handler_uart_irq_chain)]
+    {
+        count += uart_irq_chain::KUNIT_CASE_COUNT;
     }
     #[cfg(checkpoint_handler_vmalloc_mapping)]
     {

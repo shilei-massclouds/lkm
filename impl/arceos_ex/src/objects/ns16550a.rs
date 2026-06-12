@@ -10,6 +10,7 @@ use super::{
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     printk,
 };
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 const NS16550A_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"ns16550a")];
 const DEFAULT_REG_SHIFT: u32 = 0;
@@ -21,6 +22,8 @@ const UART_LSR_THRE: usize = 1 << 5;
 const UART_POLL_SPINS: usize = 100_000;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
+
+static UART8250_IRQ_HANDLER_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 pub static NS16550A_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
     "of_serial",
@@ -431,6 +434,10 @@ pub fn uart8250_irq_handler_hardirq_context_required() -> bool {
 pub fn uart8250_irq_handler_dispatch_deferred() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.port.registered && state.port.irq_handler_dispatch_deferred
+}
+
+pub fn uart8250_irq_handler_call_count() -> usize {
+    UART8250_IRQ_HANDLER_CALLS.load(Ordering::Acquire)
 }
 
 pub fn serial8250_console_registered() -> bool {

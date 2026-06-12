@@ -88,6 +88,8 @@ predicate arceos_ex_must_model_irq_handler_registry_as_irq_core_object() -> bool
 predicate arceos_ex_must_request_irq_require_mapped_logical_irq() -> bool;
 predicate arceos_ex_must_request_irq_record_handler_without_enabling_source() -> bool;
 predicate arceos_ex_must_irq_handler_context_guard_remain_deferred_execution() -> bool;
+predicate arceos_ex_must_uart_irq_chain_kunit_remain_read_only_observer() -> bool;
+predicate arceos_ex_must_uart_irq_chain_kunit_not_drive_interrupt_flow() -> bool;
 predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_open_prepare_run_after_irq_time_init() -> bool;
@@ -810,6 +812,28 @@ type ArceosExIrqTimeInitCodingMust {
          * from interrupt context.
          */
         arceos_ex_must_irq_handler_context_guard_remain_deferred_execution();
+
+        /*
+         * UART IRQ chain KUnit boundary:
+         *
+         * The checkpoint KUnit for the first UART external interrupt chain is
+         * an observer. It may read trace points, counters and object facts,
+         * but it must not call the UART handler, PLIC claim/complete, root
+         * intc entry, request_irq, source-enable APIs, or mutate pending/
+         * claimed state to manufacture progress.
+         */
+        arceos_ex_must_uart_irq_chain_kunit_remain_read_only_observer();
+
+        /*
+         * Flow ownership:
+         *
+         * The interrupt flow must be advanced by real implementation paths:
+         * UART interrupt emission, hart external interrupt entry, root intc
+         * dispatch, PLIC claim, IRQ core dispatch, UART handler and PLIC
+         * complete. KUnit can only assert before/after snapshots of those
+         * facts.
+         */
+        arceos_ex_must_uart_irq_chain_kunit_not_drive_interrupt_flow();
 
         /*
          * Concurrency scope:

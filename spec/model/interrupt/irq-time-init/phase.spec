@@ -314,6 +314,14 @@ predicate irq_action_unmapped_registration_rejected<T>(action: T) -> bool;
 predicate irq_action_does_not_enable_source<T>(action: T) -> bool;
 predicate irq_action_dispatch_deferred<T>(action: T) -> bool;
 
+predicate uart_irq_chain_kunit_observer_ready<T>(observer: T) -> bool;
+predicate uart_irq_chain_kunit_observer_read_only<T>(observer: T) -> bool;
+predicate uart_irq_chain_kunit_observer_does_not_call_handler<T>(observer: T) -> bool;
+predicate uart_irq_chain_kunit_observer_does_not_claim_or_complete<T>(observer: T) -> bool;
+predicate uart_irq_chain_kunit_observer_does_not_modify_plic_state<T>(observer: T) -> bool;
+predicate uart_irq_chain_kunit_observer_reads_registered_action<T, R, A>(observer: T, registry: R, action: A) -> bool;
+predicate uart_irq_chain_kunit_observer_reads_deferred_route<T, P, R>(observer: T, plic: P, registry: R) -> bool;
+
 /*
  * IrqHandlerRegistry 是 IRQ core 侧的 handler/action registry。它只记录
  * request_irq 风格的 handler 绑定，不负责 PLIC source enable 或 dispatch。
@@ -432,6 +440,65 @@ object IrqAction: InterruptObject {
             irq_action_unmapped_registration_rejected(IrqAction);
             irq_action_does_not_enable_source(IrqAction);
             irq_action_dispatch_deferred(IrqAction);
+        }
+    }
+}
+
+/*
+ * UartIrqChainKunitObserver 是 checkpoint KUnit 侧的只读观察者。
+ * 它建立测试检查机制，但不得充当或干预中断处理流程。
+ */
+object UartIrqChainKunitObserver: InterruptObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Plic.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                    IrqAction.state == State::Ready;
+                }
+
+                ensures {
+                    uart_irq_chain_kunit_observer_ready(UartIrqChainKunitObserver);
+                    uart_irq_chain_kunit_observer_read_only(UartIrqChainKunitObserver);
+                    uart_irq_chain_kunit_observer_does_not_call_handler(UartIrqChainKunitObserver);
+                    uart_irq_chain_kunit_observer_does_not_claim_or_complete(UartIrqChainKunitObserver);
+                    uart_irq_chain_kunit_observer_does_not_modify_plic_state(UartIrqChainKunitObserver);
+                    uart_irq_chain_kunit_observer_reads_registered_action(
+                        UartIrqChainKunitObserver,
+                        IrqHandlerRegistry,
+                        IrqActionRef::Ns16550aUart
+                    );
+                    uart_irq_chain_kunit_observer_reads_deferred_route(
+                        UartIrqChainKunitObserver,
+                        Plic,
+                        IrqHandlerRegistry
+                    );
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            uart_irq_chain_kunit_observer_ready(UartIrqChainKunitObserver);
+            uart_irq_chain_kunit_observer_read_only(UartIrqChainKunitObserver);
+            uart_irq_chain_kunit_observer_does_not_call_handler(UartIrqChainKunitObserver);
+            uart_irq_chain_kunit_observer_does_not_claim_or_complete(UartIrqChainKunitObserver);
+            uart_irq_chain_kunit_observer_does_not_modify_plic_state(UartIrqChainKunitObserver);
+            uart_irq_chain_kunit_observer_reads_registered_action(
+                UartIrqChainKunitObserver,
+                IrqHandlerRegistry,
+                IrqActionRef::Ns16550aUart
+            );
+            uart_irq_chain_kunit_observer_reads_deferred_route(
+                UartIrqChainKunitObserver,
+                Plic,
+                IrqHandlerRegistry
+            );
         }
     }
 }
