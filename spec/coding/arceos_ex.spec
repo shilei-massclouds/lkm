@@ -90,6 +90,9 @@ predicate arceos_ex_must_request_irq_record_handler_without_enabling_source() ->
 predicate arceos_ex_must_irq_handler_context_guard_remain_deferred_execution() -> bool;
 predicate arceos_ex_must_uart_irq_chain_kunit_remain_read_only_observer() -> bool;
 predicate arceos_ex_must_uart_irq_chain_kunit_not_drive_interrupt_flow() -> bool;
+predicate arceos_ex_must_kunit_handlers_receive_read_only_context_by_default() -> bool;
+predicate arceos_ex_must_kunit_writes_go_through_limited_sink_capability() -> bool;
+predicate arceos_ex_must_kunit_sink_not_access_or_mutate_context_objects() -> bool;
 predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_open_prepare_run_after_irq_time_init() -> bool;
@@ -814,13 +817,34 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_irq_handler_context_guard_remain_deferred_execution();
 
         /*
+         * KUnit capability boundary:
+         *
+         * New checkpoint KUnit handlers must receive Context as read-only
+         * input by default. Writable access is limited to an explicit sink
+         * capability such as KTAP output, tracer or auditor objects.
+         */
+        arceos_ex_must_kunit_handlers_receive_read_only_context_by_default();
+
+        /*
+         * Sink-only writes:
+         *
+         * A KUnit sink may record, audit or emit diagnostics, but it must not
+         * expose access to Context, lifecycle state, IRQ state, device state
+         * or scheduler state. Adding a new writable sink requires an explicit
+         * coding/spec contract.
+         */
+        arceos_ex_must_kunit_writes_go_through_limited_sink_capability();
+        arceos_ex_must_kunit_sink_not_access_or_mutate_context_objects();
+
+        /*
          * UART IRQ chain KUnit boundary:
          *
          * The checkpoint KUnit for the first UART external interrupt chain is
-         * an observer. It may read trace points, counters and object facts,
-         * but it must not call the UART handler, PLIC claim/complete, root
-         * intc entry, request_irq, source-enable APIs, or mutate pending/
-         * claimed state to manufacture progress.
+         * an observer. It may read trace points, counters and object facts
+         * from read-only Context, and may write only to its KUnit sink. It
+         * must not call the UART handler, PLIC claim/complete, root intc
+         * entry, request_irq, source-enable APIs, or mutate pending/claimed
+         * state to manufacture progress.
          */
         arceos_ex_must_uart_irq_chain_kunit_remain_read_only_observer();
 

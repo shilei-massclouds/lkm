@@ -1,6 +1,6 @@
 use crate::{
     checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
-    checkpoint::kunit,
+    checkpoint::kunit::KunitSink,
     context::Context,
     objects::{
         irq_time::{IrqHandlerKind, LogicalIrq},
@@ -17,15 +17,15 @@ pub const HANDLER: Handler = Handler {
     name: "uart_irq_chain.observer_baseline",
     priority: 92,
     scope: HandlerScope::Only(SCOPE),
-    run: HandlerRun::Read(run),
+    run: HandlerRun::Observe(run),
 };
 
-fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> CheckpointOutcome {
     let total = super::kunit_case_count();
-    kunit::start_case(total, "", HANDLER.name, checkpoint);
+    sink.start_case(total, "", HANDLER.name, checkpoint);
 
     if !observer_baseline_valid(ctx) {
-        kunit::fail(
+        sink.fail(
             total,
             "",
             HANDLER.name,
@@ -34,11 +34,11 @@ fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
         return CheckpointOutcome::FailAndShutdown;
     }
 
-    kunit::diag_usize(
+    sink.diag_usize(
         "uart_irq_source",
         ns16550a::uart8250_port_irq_source() as usize,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "uart_logical_irq_valid",
         if ns16550a::uart8250_port_logical_irq().is_valid() {
             1
@@ -46,11 +46,11 @@ fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
             0
         },
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "uart_irq_handler_calls",
         ns16550a::uart8250_irq_handler_call_count(),
     );
-    kunit::pass(total, "", HANDLER.name);
+    sink.pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
 }
 

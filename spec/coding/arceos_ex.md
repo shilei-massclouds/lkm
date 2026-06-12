@@ -1133,11 +1133,15 @@ ready 后请求注册最小 UART handler 记录，但不得把 handler 表藏在
 安装 claim/complete dispatch、执行 handler，或把 serial8250 console 标记为 interrupt-driven。handler action 必须携带
 hardirq context requirement，具体上下文切换和 handler 执行留给后续 dispatch 步骤验证。
 
-UART 外部中断链的 checkpoint KUnit 必须是旁路观察者，而不是流程参与者。它只能读取 trace、counter 和对象事实 snapshot；
-不得直接调用 UART handler、root intc entry、PLIC claim/complete、`request_irq` 或 source-enable API，也不得手动修改
-pending/claimed/enable 状态来伪造链路推进。真实链路必须由实现路径推进：UART 发出中断、hart 收到 external interrupt、
-root intc 分派到 PLIC、PLIC claim、IRQ core dispatch、UART handler、PLIC complete；KUnit 只能断言这些步骤前后的
-可观测事实。
+checkpoint KUnit handler 默认必须接收只读 `Context`。允许写入的能力必须通过显式 sink capability 传入，例如 KTAP 输出、
+tracer 或 auditor；sink 只能记录、审计或输出诊断，不得暴露对 `Context`、lifecycle 状态、IRQ 状态、设备状态或 scheduler
+状态的可写访问。现有 `&mut Context` handler 属于兼容迁移路径，新增 observer 应优先使用 `(&Context, &mut sink)` 形式。
+
+UART 外部中断链的 checkpoint KUnit 必须是旁路观察者，而不是流程参与者。它只能读取 trace、counter 和对象事实 snapshot，
+并且只能通过受限 sink 写诊断；不得直接调用 UART handler、root intc entry、PLIC claim/complete、`request_irq` 或
+source-enable API，也不得手动修改 pending/claimed/enable 状态来伪造链路推进。真实链路必须由实现路径推进：UART 发出中断、
+hart 收到 external interrupt、root intc 分派到 PLIC、PLIC claim、IRQ core dispatch、UART handler、PLIC complete；
+KUnit 只能断言这些步骤前后的可观测事实。
 
 本阶段打开的只是 boot CPU 本地中断总入口。普通任务并发、secondary CPU 并发、周期 tick 服务、workqueue worker
 kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提前解释为 Online。

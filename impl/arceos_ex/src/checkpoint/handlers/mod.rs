@@ -25,6 +25,8 @@ mod uart_irq_chain;
 #[cfg(checkpoint_handler_vmalloc_mapping)]
 mod vmalloc_mapping;
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
+use crate::checkpoint::kunit::{KtapSink, KunitSink};
 use crate::{context::Context, trace::Checkpoint};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -47,6 +49,8 @@ pub enum HandlerScope {
 pub enum HandlerRun {
     Read(fn(Checkpoint, &Context) -> CheckpointOutcome),
     Write(fn(Checkpoint, &mut Context) -> CheckpointOutcome),
+    #[cfg(checkpoint_handler_uart_irq_chain)]
+    Observe(fn(Checkpoint, &Context, &mut dyn KunitSink) -> CheckpointOutcome),
 }
 
 #[allow(dead_code)]
@@ -153,6 +157,11 @@ pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutc
                 let outcome = match handler.run {
                     HandlerRun::Read(run) => run(checkpoint, ctx),
                     HandlerRun::Write(run) => run(checkpoint, ctx),
+                    #[cfg(checkpoint_handler_uart_irq_chain)]
+                    HandlerRun::Observe(run) => {
+                        let mut sink = KtapSink;
+                        run(checkpoint, ctx, &mut sink)
+                    }
                 };
                 if outcome != CheckpointOutcome::Continue {
                     return outcome;
