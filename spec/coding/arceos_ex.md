@@ -473,15 +473,21 @@ context 和 port lock/irqsave，读取 IIR/LSR，先处理 RX，再检查 modem 
 LSR_DR/BI 代表的 RX byte，使用 bounded drain 策略，驱动 `TtyFlipBuffer.InsertChar(byte)` 和
 `TtyFlipBuffer.Push(record)`；首轮验收终点是 flip-buffer push，不进入完整 N_TTY read。
 `TransmitChars` 使用 tx_loadsz/FIFO 策略并在队列空时停止 THRI；`StartTx`/`StopTx` 分别只负责设置/清除 THRI。
-`TtyXmitFifo.Enqueue/DequeueForTx` 只描述普通 TTY write FIFO 接口，必须与当前 printk console TX queue 分离；
-普通 TTY write 的完整接入可以后置。
+`TtyXmitFifo.Enqueue/DequeueForTx` 描述普通 TTY write FIFO 接口，必须与当前 printk console TX queue 分离；
+完整 line discipline/file write 入口可以后置，但受控 ordinary TTY write probe 可以先接入 runtime TX/THRI。
 
 ordinary TTY TX FIFO 的首轮实现只能建立 `TtyXmitFifo` 自身的 enqueue/dequeue 可观测边界。实现必须通过独立
 `TtyXmitFifoProbe` 或等价生产边界提交固定探针 byte，并验证 enqueue 后能 dequeue 同一 byte、dequeue 后 FIFO
 为空、无 overflow/underflow；该 probe 不得调用 `printk` 前端，不得写 UART THR，不得设置 `UART_IER_THRI`，
 不得改变 serial8250 console 的 printk TX queue/kick/drain counters。KUnit 只能读取这些结果并通过受限 sink
-输出诊断，不能直接 enqueue/dequeue 或触发 UART handler。把 ordinary TTY write 接到 `StartTx/TransmitChars`
-和真实 THRI 中断的工作必须后续单独建模。
+输出诊断，不能直接 enqueue/dequeue 或触发 UART handler。
+
+ordinary TTY write 接入 runtime TX/THRI 的首轮必须通过独立 `TtyWriteRuntimeTxProbe` 或等价生产边界执行：
+probe 先向 `TtyXmitFifo` enqueue 固定 byte，再经 `Serial8250RuntimePort.StartTx` 设置 `UART_IER_THRI`，随后等待真实
+`root INTC -> PLIC claim -> IrqAction -> Serial8250RuntimePort.HandleInterrupt -> TransmitChars -> TtyXmitFifo.DequeueForTx`
+链路 drain FIFO 并清掉 THRI。该路径可以复用 8250 THR/MMIO 写和 PLIC/IRQ dispatch，但不得复用 printk console TX queue，
+不得增加 printk write call，不得让 KUnit/smoke 直接调用 handler 或手动 drain FIFO；KUnit 只能观察 enqueue/dequeue
+计数、THRI kick、handler drain、PLIC claim/complete/zero-claim loop exit、queue empty 和 last byte。
 
 首轮 RX 验证应采用 8250 loopback probe，而不是修改设备树或让 KUnit 人工制造中断。`Serial8250RxLoopbackProbe`
 或等价生产边界负责保存 MCR、设置 loopback、由 smoke/probe 路径提供一个 TX 字符、写入 UART TX，让硬件回送成

@@ -159,6 +159,7 @@ predicate tty_xmit_fifo_bound_to_tty_port<T, P>(xmit_fifo: T, tty_port: P) -> bo
 predicate tty_xmit_fifo_for_ordinary_tty_write<T>(xmit_fifo: T) -> bool;
 predicate tty_xmit_fifo_distinct_from_printk_console_tx<T, C>(xmit_fifo: T, console: C) -> bool;
 predicate tty_xmit_fifo_runtime_tx_integration_deferred<T>(xmit_fifo: T) -> bool;
+predicate tty_xmit_fifo_runtime_tx_integrated<T, R>(xmit_fifo: T, runtime: R) -> bool;
 predicate tty_xmit_fifo_ready<T, P>(xmit_fifo: T, tty_port: P) -> bool;
 predicate tty_xmit_fifo_byte_queued<T, B>(xmit_fifo: T, byte: B) -> bool;
 predicate tty_xmit_fifo_dequeue_returns<T, B>(xmit_fifo: T, byte: B) -> bool;
@@ -179,6 +180,22 @@ predicate tty_xmit_fifo_probe_keeps_runtime_tx_deferred<T, F>(probe: T, xmit_fif
 predicate tty_xmit_fifo_probe_does_not_kick_uart_thri<T, P>(probe: T, port: P) -> bool;
 predicate tty_xmit_fifo_probe_does_not_mutate_printk_tx_queue<T, C>(probe: T, console: C) -> bool;
 predicate tty_xmit_fifo_probe_no_overflow<T, F>(probe: T, xmit_fifo: F) -> bool;
+
+predicate tty_write_runtime_tx_probe_ready<T>(probe: T) -> bool;
+predicate tty_write_runtime_tx_probe_production_side<T>(probe: T) -> bool;
+predicate tty_write_runtime_tx_probe_kunit_not_stimulus<T>(probe: T) -> bool;
+predicate tty_write_runtime_tx_probe_enqueues_xmit_fifo<T, F>(probe: T, xmit_fifo: F) -> bool;
+predicate tty_write_runtime_tx_probe_starts_thri<T, R>(probe: T, runtime: R) -> bool;
+predicate tty_write_runtime_tx_probe_observes_plic_claim<T, P>(probe: T, plic: P) -> bool;
+predicate tty_write_runtime_tx_probe_observes_irq_dispatch<T, R>(probe: T, registry: R) -> bool;
+predicate tty_write_runtime_tx_probe_observes_runtime_handler<T, R>(probe: T, runtime: R) -> bool;
+predicate tty_write_runtime_tx_probe_drains_xmit_fifo<T, F>(probe: T, xmit_fifo: F) -> bool;
+predicate tty_write_runtime_tx_probe_observes_plic_complete<T, P>(probe: T, plic: P) -> bool;
+predicate tty_write_runtime_tx_probe_observes_plic_loop_exit<T, P>(probe: T, plic: P) -> bool;
+predicate tty_write_runtime_tx_probe_queue_empty_after_irq<T, F>(probe: T, xmit_fifo: F) -> bool;
+predicate tty_write_runtime_tx_probe_does_not_mutate_printk_tx_queue<T, C>(probe: T, console: C) -> bool;
+predicate tty_write_runtime_tx_probe_local_irq_guard_observed<T>(probe: T) -> bool;
+predicate tty_write_runtime_tx_probe_last_byte_matched<T, B>(probe: T, byte: B) -> bool;
 
 predicate serial8250_rx_loopback_probe_ready<T>(probe: T) -> bool;
 predicate serial8250_rx_loopback_probe_production_side<T>(probe: T) -> bool;
@@ -754,7 +771,6 @@ object TtyXmitFifo: ConsoleObject {
             tty_xmit_fifo_bound_to_tty_port(TtyXmitFifo, TtyPort);
             tty_xmit_fifo_for_ordinary_tty_write(TtyXmitFifo);
             tty_xmit_fifo_distinct_from_printk_console_tx(TtyXmitFifo, Serial8250Console);
-            tty_xmit_fifo_runtime_tx_integration_deferred(TtyXmitFifo);
             tty_xmit_fifo_ready(TtyXmitFifo, TtyPort);
         }
     }
@@ -819,6 +835,99 @@ object TtyXmitFifoProbe: ConsoleObject {
             tty_xmit_fifo_probe_ready(TtyXmitFifoProbe);
             tty_xmit_fifo_probe_production_side(TtyXmitFifoProbe);
             tty_xmit_fifo_probe_kunit_not_stimulus(TtyXmitFifoProbe);
+        }
+    }
+}
+
+/*
+ * TtyWriteRuntimeTxProbe is the first controlled ordinary-TTY write TX
+ * integration. It submits one byte through TtyXmitFifo, starts THRI through
+ * Serial8250RuntimePort, and observes the normal PLIC/IRQ/runtime handler
+ * cycle draining the FIFO without using printk's console TX queue.
+ */
+object TtyWriteRuntimeTxProbe: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    TtyXmitFifoProbe.state == State::Ready;
+                    TtyPort.state == State::Online;
+                    TtyXmitFifo.state == State::Ready;
+                    Serial8250RuntimePort.state == State::Online;
+                    UartExternalIrqEnable.state == State::Ready;
+                    Plic.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                }
+
+                drives {
+                    TtyXmitFifo.Action::Enqueue(Serial8250TxByteRef::Uart0TxProbe);
+                    Serial8250RuntimePort.Action::StartTx;
+                    RiscvIntc.Action::HandleExternalInput(InterruptCauseRef::SupervisorExternalIrq);
+                    Plic.Action::Claim(HwirqRef::PlicUart0);
+                    PlicIrqDomain.Action::Dispatch(LogicalIrqRef::Uart0);
+                    IrqHandlerRegistry.Action::Dispatch(LogicalIrqRef::Uart0);
+                    Serial8250RuntimePort.Action::HandleInterrupt(InterruptCauseRef::SupervisorExternalIrq);
+                    Serial8250RuntimePort.Action::TransmitChars;
+                    TtyXmitFifo.Action::DequeueForTx;
+                    Plic.Action::Complete(HwirqRef::PlicUart0);
+                }
+
+                ensures {
+                    tty_write_runtime_tx_probe_ready(TtyWriteRuntimeTxProbe);
+                    tty_write_runtime_tx_probe_production_side(TtyWriteRuntimeTxProbe);
+                    tty_write_runtime_tx_probe_kunit_not_stimulus(TtyWriteRuntimeTxProbe);
+                    tty_write_runtime_tx_probe_enqueues_xmit_fifo(
+                        TtyWriteRuntimeTxProbe,
+                        TtyXmitFifo
+                    );
+                    tty_write_runtime_tx_probe_starts_thri(
+                        TtyWriteRuntimeTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    tty_write_runtime_tx_probe_observes_plic_claim(TtyWriteRuntimeTxProbe, Plic);
+                    tty_write_runtime_tx_probe_observes_irq_dispatch(
+                        TtyWriteRuntimeTxProbe,
+                        IrqHandlerRegistry
+                    );
+                    tty_write_runtime_tx_probe_observes_runtime_handler(
+                        TtyWriteRuntimeTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    tty_write_runtime_tx_probe_drains_xmit_fifo(
+                        TtyWriteRuntimeTxProbe,
+                        TtyXmitFifo
+                    );
+                    tty_write_runtime_tx_probe_observes_plic_complete(TtyWriteRuntimeTxProbe, Plic);
+                    tty_write_runtime_tx_probe_observes_plic_loop_exit(TtyWriteRuntimeTxProbe, Plic);
+                    tty_write_runtime_tx_probe_queue_empty_after_irq(
+                        TtyWriteRuntimeTxProbe,
+                        TtyXmitFifo
+                    );
+                    tty_write_runtime_tx_probe_does_not_mutate_printk_tx_queue(
+                        TtyWriteRuntimeTxProbe,
+                        Serial8250Console
+                    );
+                    tty_write_runtime_tx_probe_local_irq_guard_observed(TtyWriteRuntimeTxProbe);
+                    tty_write_runtime_tx_probe_last_byte_matched(
+                        TtyWriteRuntimeTxProbe,
+                        Serial8250TxByteRef::Uart0TxProbe
+                    );
+                    tty_xmit_fifo_runtime_tx_integrated(TtyXmitFifo, Serial8250RuntimePort);
+                    tty_xmit_fifo_dequeue_returns(TtyXmitFifo, Serial8250TxByteRef::Uart0TxProbe);
+                    serial8250_runtime_port_start_tx_sets_thri(Serial8250RuntimePort);
+                    serial8250_runtime_port_transmit_chars_stops_thri_when_empty(Serial8250RuntimePort);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            tty_write_runtime_tx_probe_ready(TtyWriteRuntimeTxProbe);
+            tty_write_runtime_tx_probe_production_side(TtyWriteRuntimeTxProbe);
+            tty_write_runtime_tx_probe_kunit_not_stimulus(TtyWriteRuntimeTxProbe);
         }
     }
 }

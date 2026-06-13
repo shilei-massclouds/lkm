@@ -162,7 +162,7 @@ pub fn run() -> SmokeResult {
         || crate::objects::ns16550a::tty_flip_buffer_last_pushed_len() == 0
         || crate::objects::ns16550a::tty_flip_buffer_overflowed()
         || !crate::objects::ns16550a::tty_xmit_fifo_ready()
-        || !crate::objects::ns16550a::tty_xmit_fifo_deferred_from_console_tx()
+        || !crate::objects::ns16550a::tty_xmit_fifo_runtime_tx_integrated()
         || ctx.tty_xmit_fifo_probe.state() != State::Ready
         || !ctx.tty_xmit_fifo_probe.enqueue_committed()
         || !ctx.tty_xmit_fifo_probe.dequeue_committed()
@@ -174,10 +174,28 @@ pub fn run() -> SmokeResult {
         || !ctx.tty_xmit_fifo_probe.no_uart_thri_kick()
         || !ctx.tty_xmit_fifo_probe.no_overflow_observed()
         || !ctx.tty_xmit_fifo_probe.no_underflow_observed()
+        || ctx.tty_write_runtime_tx_probe.state() != State::Ready
+        || !ctx.tty_write_runtime_tx_probe.xmit_fifo_enqueued()
+        || !ctx.tty_write_runtime_tx_probe.start_tx_committed()
+        || !ctx.tty_write_runtime_tx_probe.plic_claim_observed()
+        || !ctx.tty_write_runtime_tx_probe.irq_dispatch_observed()
+        || !ctx.tty_write_runtime_tx_probe.uart_handler_observed()
+        || !ctx.tty_write_runtime_tx_probe.xmit_fifo_drained()
+        || !ctx.tty_write_runtime_tx_probe.plic_complete_observed()
+        || !ctx
+            .tty_write_runtime_tx_probe
+            .zero_claim_loop_exit_observed()
+        || !ctx.tty_write_runtime_tx_probe.queue_empty_after_irq()
+        || !ctx.tty_write_runtime_tx_probe.printk_tx_queue_unchanged()
+        || !ctx.tty_write_runtime_tx_probe.local_irq_guard_observed()
+        || !ctx.tty_write_runtime_tx_probe.last_byte_matched()
         || !crate::objects::ns16550a::tty_xmit_fifo_round_trip_ready()
         || crate::objects::ns16550a::tty_xmit_fifo_queue_len() != 0
         || crate::objects::ns16550a::tty_xmit_fifo_enqueue_count() == 0
         || crate::objects::ns16550a::tty_xmit_fifo_dequeue_count() == 0
+        || crate::objects::ns16550a::tty_xmit_fifo_runtime_tx_kick_count() == 0
+        || crate::objects::ns16550a::tty_xmit_fifo_runtime_tx_drain_count() == 0
+        || crate::objects::ns16550a::tty_xmit_fifo_runtime_tx_empty_stop_count() == 0
         || crate::objects::ns16550a::uart8250_rx_interrupt_request_count() == 0
         || crate::objects::ns16550a::uart8250_rx_interrupt_handled_count() == 0
         || crate::objects::ns16550a::serial8250_tx_irq_drain_count() == 0

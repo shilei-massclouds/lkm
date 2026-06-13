@@ -3166,11 +3166,28 @@ pub struct TtyXmitFifoProbe {
     no_underflow_observed: bool,
 }
 
+pub struct TtyWriteRuntimeTxProbe {
+    lifecycle: Lifecycle,
+    xmit_fifo_enqueued: bool,
+    start_tx_committed: bool,
+    plic_claim_observed: bool,
+    irq_dispatch_observed: bool,
+    uart_handler_observed: bool,
+    xmit_fifo_drained: bool,
+    plic_complete_observed: bool,
+    zero_claim_loop_exit_observed: bool,
+    queue_empty_after_irq: bool,
+    printk_tx_queue_unchanged: bool,
+    local_irq_guard_observed: bool,
+    last_byte_matched: bool,
+}
+
 const UART_IRQ_CYCLE_SPIN_LIMIT: usize = 20_000_000;
 const SERIAL8250_IRQ_TX_PROBE_MESSAGE: &str = "serial8250 irq console\n";
 const SERIAL8250_RX_LOOPBACK_BYTE: u8 = b'R';
 const SERIAL8250_RX_BATCH_LOOPBACK_BYTES: &[u8] = b"rx42";
 const TTY_XMIT_FIFO_PROBE_BYTE: u8 = b'T';
+const TTY_WRITE_RUNTIME_TX_PROBE_BYTE: u8 = b'W';
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct UartIrqCycleSnapshot {
@@ -4027,6 +4044,209 @@ impl TtyXmitFifoProbe {
     }
 }
 
+impl TtyWriteRuntimeTxProbe {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            xmit_fifo_enqueued: false,
+            start_tx_committed: false,
+            plic_claim_observed: false,
+            irq_dispatch_observed: false,
+            uart_handler_observed: false,
+            xmit_fifo_drained: false,
+            plic_complete_observed: false,
+            zero_claim_loop_exit_observed: false,
+            queue_empty_after_irq: false,
+            printk_tx_queue_unchanged: false,
+            local_irq_guard_observed: false,
+            last_byte_matched: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn xmit_fifo_enqueued(&self) -> bool {
+        self.xmit_fifo_enqueued
+    }
+
+    pub const fn start_tx_committed(&self) -> bool {
+        self.start_tx_committed
+    }
+
+    pub const fn plic_claim_observed(&self) -> bool {
+        self.plic_claim_observed
+    }
+
+    pub const fn irq_dispatch_observed(&self) -> bool {
+        self.irq_dispatch_observed
+    }
+
+    pub const fn uart_handler_observed(&self) -> bool {
+        self.uart_handler_observed
+    }
+
+    pub const fn xmit_fifo_drained(&self) -> bool {
+        self.xmit_fifo_drained
+    }
+
+    pub const fn plic_complete_observed(&self) -> bool {
+        self.plic_complete_observed
+    }
+
+    pub const fn zero_claim_loop_exit_observed(&self) -> bool {
+        self.zero_claim_loop_exit_observed
+    }
+
+    pub const fn queue_empty_after_irq(&self) -> bool {
+        self.queue_empty_after_irq
+    }
+
+    pub const fn printk_tx_queue_unchanged(&self) -> bool {
+        self.printk_tx_queue_unchanged
+    }
+
+    pub const fn local_irq_guard_observed(&self) -> bool {
+        self.local_irq_guard_observed
+    }
+
+    pub const fn last_byte_matched(&self) -> bool {
+        self.last_byte_matched
+    }
+
+    pub fn setup(
+        &mut self,
+        xmit_fifo_probe: &TtyXmitFifoProbe,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+    ) -> EventResult {
+        let source = super::ns16550a::uart8250_port_irq_source();
+        let logical_irq = super::ns16550a::uart8250_port_logical_irq();
+        if self.lifecycle.state() != State::Base
+            || xmit_fifo_probe.state() != State::Ready
+            || !xmit_fifo_probe.runtime_tx_deferred()
+            || plic.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || irq_handler_registry.state() != State::Ready
+            || !super::ns16550a::tty_xmit_fifo_ready()
+            || !super::ns16550a::serial8250_runtime_port_ready()
+            || !super::ns16550a::serial8250_runtime_console_tx_ready()
+            || super::ns16550a::serial8250_tx_queue_len() != 0
+            || !logical_irq.is_valid()
+            || plic_irq_domain
+                .mapping_for_source(source)
+                .is_none_or(|mapping| {
+                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
+                })
+            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline_enqueues = super::ns16550a::tty_xmit_fifo_enqueue_count();
+        let baseline_dequeues = super::ns16550a::tty_xmit_fifo_dequeue_count();
+        let baseline_kicks = super::ns16550a::tty_xmit_fifo_runtime_tx_kick_count();
+        let baseline_drains = super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count();
+        let baseline_console_queue = super::ns16550a::serial8250_tx_queue_len();
+        let baseline_console_writes =
+            super::ns16550a::serial8250_write_call_count_available_for_irq_probe();
+        let baseline_console_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
+        let baseline_console_drains = super::ns16550a::serial8250_tx_irq_drain_count();
+
+        if !super::ns16550a::start_tty_xmit_fifo_runtime_tx(TTY_WRITE_RUNTIME_TX_PROBE_BYTE) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        if !wait_tty_write_runtime_tx_closed(
+            plic,
+            irq_handler_registry,
+            baseline,
+            baseline_drains,
+            source,
+        ) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        self.xmit_fifo_enqueued =
+            super::ns16550a::tty_xmit_fifo_enqueue_count() > baseline_enqueues;
+        self.start_tx_committed = super::ns16550a::tty_xmit_fifo_runtime_tx_kick_count()
+            > baseline_kicks
+            && super::ns16550a::tty_xmit_fifo_runtime_tx_integrated();
+        self.plic_claim_observed =
+            observed.claims > baseline.claims && plic.last_claimed_source() == source;
+        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+            && observed.irq_dispatches > baseline.irq_dispatches;
+        self.uart_handler_observed = observed.handler_calls > baseline.handler_calls
+            && observed.handled > baseline.handled
+            && observed.thri_disabled > baseline.thri_disabled;
+        self.xmit_fifo_drained = super::ns16550a::tty_xmit_fifo_dequeue_count() > baseline_dequeues
+            && super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count() > baseline_drains;
+        self.plic_complete_observed =
+            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
+            && observed.loop_exits > baseline.loop_exits;
+        self.queue_empty_after_irq = super::ns16550a::tty_xmit_fifo_queue_len() == 0
+            && super::ns16550a::tty_xmit_fifo_runtime_tx_empty_stop_count() != 0
+            && !super::ns16550a::tty_xmit_fifo_overflowed()
+            && !super::ns16550a::tty_xmit_fifo_underflowed();
+        self.printk_tx_queue_unchanged = super::ns16550a::serial8250_tx_queue_len()
+            == baseline_console_queue
+            && super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
+                == baseline_console_writes
+            && super::ns16550a::serial8250_tx_irq_kick_count() == baseline_console_kicks
+            && super::ns16550a::serial8250_tx_irq_drain_count() == baseline_console_drains;
+        self.local_irq_guard_observed =
+            super::ns16550a::tty_xmit_fifo_runtime_tx_guarded_by_local_irq_save();
+        self.last_byte_matched = super::ns16550a::tty_xmit_fifo_last_enqueued()
+            == TTY_WRITE_RUNTIME_TX_PROBE_BYTE
+            && super::ns16550a::tty_xmit_fifo_last_dequeued() == TTY_WRITE_RUNTIME_TX_PROBE_BYTE;
+
+        if !self.xmit_fifo_enqueued
+            || !self.start_tx_committed
+            || !self.plic_claim_observed
+            || !self.irq_dispatch_observed
+            || !self.uart_handler_observed
+            || !self.xmit_fifo_drained
+            || !self.plic_complete_observed
+            || !self.zero_claim_loop_exit_observed
+            || !self.queue_empty_after_irq
+            || !self.printk_tx_queue_unchanged
+            || !self.local_irq_guard_observed
+            || !self.last_byte_matched
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        crate::trace::checkpoint(Checkpoint::TtyWriteRuntimeTxReady);
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
 fn uart_irq_cycle_snapshot(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
@@ -4047,6 +4267,43 @@ fn uart_irq_cycle_snapshot(
         flip_pushes: super::ns16550a::tty_flip_buffer_push_count(),
         flip_inserted: super::ns16550a::tty_flip_buffer_total_inserted(),
     }
+}
+
+fn wait_tty_write_runtime_tx_closed(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+    baseline: UartIrqCycleSnapshot,
+    baseline_drains: usize,
+    source: u32,
+) -> bool {
+    let mut spins = 0usize;
+
+    while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        if current.requests > baseline.requests
+            && current.claims > baseline.claims
+            && current.plic_dispatches > baseline.plic_dispatches
+            && current.irq_dispatches > baseline.irq_dispatches
+            && current.handler_calls > baseline.handler_calls
+            && current.handled > baseline.handled
+            && current.thri_disabled > baseline.thri_disabled
+            && current.completes > baseline.completes
+            && current.zero_claims > baseline.zero_claims
+            && current.loop_exits > baseline.loop_exits
+            && super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count() > baseline_drains
+            && super::ns16550a::tty_xmit_fifo_queue_len() == 0
+            && plic.last_claimed_source() == source
+            && plic.last_completed_source() == source
+            && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
+        {
+            return true;
+        }
+
+        core::hint::spin_loop();
+        spins += 1;
+    }
+
+    false
 }
 
 fn wait_serial8250_rx_batch_loopback_closed(

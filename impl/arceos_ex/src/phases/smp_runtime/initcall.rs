@@ -84,6 +84,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.tty_xmit_fifo_probe
         .setup(&ctx.serial8250_rx_batch_loopback_probe)?;
+    ctx.tty_write_runtime_tx_probe.setup(
+        &ctx.tty_xmit_fifo_probe,
+        &ctx.plic,
+        &ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+    )?;
     ctx.initcall_boundary.setup(
         &ctx.cpuset_smp_trimmed,
         &ctx.driver_core_base,
@@ -99,6 +105,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.serial8250_rx_loopback_probe,
         &ctx.serial8250_rx_batch_loopback_probe,
         &ctx.tty_xmit_fifo_probe,
+        &ctx.tty_write_runtime_tx_probe,
     )
 }
 
@@ -131,6 +138,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.serial8250_rx_loopback_probe,
         &ctx.serial8250_rx_batch_loopback_probe,
         &ctx.tty_xmit_fifo_probe,
+        &ctx.tty_write_runtime_tx_probe,
         &ctx.initcall_boundary,
     ) {
         return failed_condition(

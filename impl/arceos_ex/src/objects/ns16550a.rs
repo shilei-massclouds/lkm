@@ -339,6 +339,7 @@ pub struct TtyXmitFifo {
     ordinary_tty_write_path: bool,
     distinct_from_printk_console_tx: bool,
     runtime_tx_integration_deferred: bool,
+    runtime_tx_integrated: bool,
     buffer: [u8; TTY_XMIT_FIFO_SIZE],
     head: usize,
     tail: usize,
@@ -347,6 +348,10 @@ pub struct TtyXmitFifo {
     dequeue_count: usize,
     last_enqueued: u8,
     last_dequeued: u8,
+    runtime_tx_kicks: usize,
+    runtime_tx_drains: usize,
+    runtime_tx_empty_stops: usize,
+    runtime_tx_guarded_by_local_irq_save: bool,
     overflowed: bool,
     underflowed: bool,
 }
@@ -359,6 +364,7 @@ impl TtyXmitFifo {
             ordinary_tty_write_path: false,
             distinct_from_printk_console_tx: true,
             runtime_tx_integration_deferred: true,
+            runtime_tx_integrated: false,
             buffer: [0; TTY_XMIT_FIFO_SIZE],
             head: 0,
             tail: 0,
@@ -367,6 +373,10 @@ impl TtyXmitFifo {
             dequeue_count: 0,
             last_enqueued: 0,
             last_dequeued: 0,
+            runtime_tx_kicks: 0,
+            runtime_tx_drains: 0,
+            runtime_tx_empty_stops: 0,
+            runtime_tx_guarded_by_local_irq_save: false,
             overflowed: false,
             underflowed: false,
         }
@@ -383,6 +393,7 @@ impl TtyXmitFifo {
             ordinary_tty_write_path: true,
             distinct_from_printk_console_tx: true,
             runtime_tx_integration_deferred: true,
+            runtime_tx_integrated: false,
             buffer: [0; TTY_XMIT_FIFO_SIZE],
             head: 0,
             tail: 0,
@@ -391,6 +402,10 @@ impl TtyXmitFifo {
             dequeue_count: 0,
             last_enqueued: 0,
             last_dequeued: 0,
+            runtime_tx_kicks: 0,
+            runtime_tx_drains: 0,
+            runtime_tx_empty_stops: 0,
+            runtime_tx_guarded_by_local_irq_save: false,
             overflowed: false,
             underflowed: false,
         }
@@ -403,7 +418,6 @@ impl TtyXmitFifo {
             && self.bound_to_tty_port
             && self.ordinary_tty_write_path
             && self.distinct_from_printk_console_tx
-            && self.runtime_tx_integration_deferred
     }
 
     fn enqueue(&mut self, byte: u8) -> bool {
@@ -432,6 +446,11 @@ impl TtyXmitFifo {
         self.dequeue_count = self.dequeue_count.saturating_add(1);
         self.last_dequeued = byte;
         Some(byte)
+    }
+
+    fn mark_runtime_tx_integrated(&mut self) {
+        self.runtime_tx_integration_deferred = false;
+        self.runtime_tx_integrated = true;
     }
 }
 
@@ -887,6 +906,18 @@ impl Serial8250WriteBackend {
         if self.tx_queued == 0 {
             return true;
         }
+        if !self.kick_tx_interrupt_hw_locked() {
+            return false;
+        }
+        self.tx_irq_kicks = self.tx_irq_kicks.saturating_add(1);
+        true
+    }
+
+    fn kick_ordinary_tty_tx_interrupt_locked(&mut self) -> bool {
+        self.kick_tx_interrupt_hw_locked()
+    }
+
+    fn kick_tx_interrupt_hw_locked(&mut self) -> bool {
         let mcr = self.read_uart_mcr();
         if !self.write_uart_mcr(mcr | UART_MCR_OUT2) {
             return false;
@@ -895,7 +926,6 @@ impl Serial8250WriteBackend {
         if !self.write_uart_ier(ier | UART_IER_THRI) {
             return false;
         }
-        self.tx_irq_kicks = self.tx_irq_kicks.saturating_add(1);
         UART8250_THRE_INTERRUPT_REQUESTS.fetch_add(1, Ordering::AcqRel);
         true
     }
@@ -1384,6 +1414,14 @@ pub fn tty_xmit_fifo_deferred_from_console_tx() -> bool {
         && state.tty_xmit_fifo.runtime_tx_integration_deferred
 }
 
+pub fn tty_xmit_fifo_runtime_tx_integrated() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_xmit_fifo.facts_ready(state.tty_port)
+        && state.tty_xmit_fifo.distinct_from_printk_console_tx
+        && !state.tty_xmit_fifo.runtime_tx_integration_deferred
+        && state.tty_xmit_fifo.runtime_tx_integrated
+}
+
 pub fn probe_tty_xmit_fifo_round_trip(byte: u8) -> bool {
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
     if !state.tty_xmit_fifo.facts_ready(state.tty_port) {
@@ -1473,6 +1511,46 @@ pub fn tty_xmit_fifo_underflowed() -> bool {
             .unwrap()
             .tty_xmit_fifo
             .underflowed
+    }
+}
+
+pub fn tty_xmit_fifo_runtime_tx_kick_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .runtime_tx_kicks
+    }
+}
+
+pub fn tty_xmit_fifo_runtime_tx_drain_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .runtime_tx_drains
+    }
+}
+
+pub fn tty_xmit_fifo_runtime_tx_empty_stop_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .runtime_tx_empty_stops
+    }
+}
+
+pub fn tty_xmit_fifo_runtime_tx_guarded_by_local_irq_save() -> bool {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .runtime_tx_guarded_by_local_irq_save
     }
 }
 
@@ -1714,6 +1792,41 @@ pub fn trigger_serial8250_rx_loopback_batch(bytes: &[u8]) -> bool {
     ok
 }
 
+pub fn start_tty_xmit_fifo_runtime_tx(byte: u8) -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    if !state.port.registered
+        || !state.port.irq_handler_registered
+        || !state.port.interrupt_driven_ready
+        || !state.write_backend.interrupt_driven
+        || !state.runtime_port.online
+        || !state.runtime_port.thri_demand_driven
+        || !state.tty_port.online
+        || !state.tty_xmit_fifo.facts_ready(state.tty_port)
+        || state.tty_xmit_fifo.queued != 0
+        || state.tty_xmit_fifo.overflowed
+        || state.tty_xmit_fifo.underflowed
+        || state.write_backend.tx_queued != 0
+        || state.write_backend.tx_queue_overflow
+        || state.port.thre_interrupt_enabled
+    {
+        return false;
+    }
+
+    let saved = csr::save_and_disable_supervisor_interrupts();
+    state.tty_xmit_fifo.runtime_tx_guarded_by_local_irq_save = true;
+    let ok = state.tty_xmit_fifo.enqueue(byte)
+        && state.write_backend.kick_ordinary_tty_tx_interrupt_locked();
+    if ok {
+        state.tty_xmit_fifo.mark_runtime_tx_integrated();
+        state.tty_xmit_fifo.runtime_tx_kicks =
+            state.tty_xmit_fifo.runtime_tx_kicks.saturating_add(1);
+        state.port.thre_interrupt_enabled = true;
+        state.port.thre_interrupt_handled = false;
+    }
+    csr::restore_supervisor_interrupts(saved);
+    ok
+}
+
 pub fn handle_uart_irq() {
     UART8250_IRQ_HANDLER_CALLS.fetch_add(1, Ordering::AcqRel);
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
@@ -1740,6 +1853,29 @@ pub fn handle_uart_irq() {
         || lsr & UART_LSR_THRE == 0
         || !state.port.thre_interrupt_enabled
     {
+        return;
+    }
+
+    if state.write_backend.interrupt_driven && state.write_backend.tx_queued != 0 {
+        if !state.write_backend.drain_one_tx_irq() {
+            return;
+        }
+        state.port.thre_interrupt_enabled = state.write_backend.tx_queued != 0;
+        state.port.thre_interrupt_handled = state.write_backend.tx_queued == 0;
+        UART8250_THRE_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
+        return;
+    }
+
+    if state.write_backend.interrupt_driven
+        && state.tty_xmit_fifo.runtime_tx_integrated
+        && state.tty_xmit_fifo.queued != 0
+    {
+        if !drain_tty_xmit_fifo_irq(state) {
+            return;
+        }
+        state.port.thre_interrupt_enabled = state.tty_xmit_fifo.queued != 0;
+        state.port.thre_interrupt_handled = state.tty_xmit_fifo.queued == 0;
+        UART8250_THRE_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
         return;
     }
 
@@ -1777,6 +1913,39 @@ fn is_uart_rx_interrupt(interrupt_id: usize) -> bool {
         interrupt_id,
         UART_IIR_RDI | UART_IIR_RLSI | UART_IIR_RX_TIMEOUT
     )
+}
+
+fn drain_tty_xmit_fifo_irq(state: &mut Ns16550aProbeState) -> bool {
+    if !state.write_backend.interrupt_driven || !state.tty_xmit_fifo.runtime_tx_integrated {
+        return false;
+    }
+
+    while state.tty_xmit_fifo.queued != 0 {
+        if state.write_backend.read_uart_lsr() & UART_LSR_THRE == 0 {
+            return true;
+        }
+        let Some(byte) = state.tty_xmit_fifo.dequeue_for_tx() else {
+            return false;
+        };
+        if !state.write_backend.write_uart_tx(byte) {
+            return false;
+        }
+        state.write_backend.tx_bytes_submitted =
+            state.write_backend.tx_bytes_submitted.saturating_add(1);
+        state.write_backend.last_tx_byte = byte;
+        state.write_backend.mmio_writes_performed = true;
+        state.tty_xmit_fifo.runtime_tx_drains =
+            state.tty_xmit_fifo.runtime_tx_drains.saturating_add(1);
+    }
+
+    let ier = state.write_backend.read_uart_ier() & !UART_IER_THRI;
+    if state.write_backend.write_uart_ier(ier) {
+        state.tty_xmit_fifo.runtime_tx_empty_stops =
+            state.tty_xmit_fifo.runtime_tx_empty_stops.saturating_add(1);
+        UART8250_THRI_DISABLED_BY_HANDLER.fetch_add(1, Ordering::AcqRel);
+        return true;
+    }
+    false
 }
 
 fn handle_rx_chars(state: &mut Ns16550aProbeState, initial_lsr: usize) -> bool {

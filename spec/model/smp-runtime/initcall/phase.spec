@@ -691,6 +691,7 @@ object InitcallPhase: PhaseObject {
                     Serial8250RxLoopbackProbe.Event::Setup;
                     Serial8250RxBatchLoopbackProbe.Event::Setup;
                     TtyXmitFifoProbe.Event::Setup;
+                    TtyWriteRuntimeTxProbe.Event::Setup;
                     InitcallBoundary.Event::Setup;
                 }
 
@@ -791,6 +792,41 @@ object InitcallPhase: PhaseObject {
                         Serial8250Console
                     );
                     tty_xmit_fifo_probe_no_overflow(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_write_runtime_tx_probe_ready(TtyWriteRuntimeTxProbe);
+                    tty_write_runtime_tx_probe_enqueues_xmit_fifo(
+                        TtyWriteRuntimeTxProbe,
+                        TtyXmitFifo
+                    );
+                    tty_write_runtime_tx_probe_starts_thri(
+                        TtyWriteRuntimeTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    tty_write_runtime_tx_probe_observes_plic_claim(TtyWriteRuntimeTxProbe, Plic);
+                    tty_write_runtime_tx_probe_observes_irq_dispatch(
+                        TtyWriteRuntimeTxProbe,
+                        IrqHandlerRegistry
+                    );
+                    tty_write_runtime_tx_probe_observes_runtime_handler(
+                        TtyWriteRuntimeTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    tty_write_runtime_tx_probe_drains_xmit_fifo(TtyWriteRuntimeTxProbe, TtyXmitFifo);
+                    tty_write_runtime_tx_probe_observes_plic_complete(TtyWriteRuntimeTxProbe, Plic);
+                    tty_write_runtime_tx_probe_observes_plic_loop_exit(TtyWriteRuntimeTxProbe, Plic);
+                    tty_write_runtime_tx_probe_queue_empty_after_irq(
+                        TtyWriteRuntimeTxProbe,
+                        TtyXmitFifo
+                    );
+                    tty_write_runtime_tx_probe_does_not_mutate_printk_tx_queue(
+                        TtyWriteRuntimeTxProbe,
+                        Serial8250Console
+                    );
+                    tty_write_runtime_tx_probe_local_irq_guard_observed(TtyWriteRuntimeTxProbe);
+                    tty_write_runtime_tx_probe_last_byte_matched(
+                        TtyWriteRuntimeTxProbe,
+                        Serial8250TxByteRef::Uart0TxProbe
+                    );
+                    tty_xmit_fifo_runtime_tx_integrated(TtyXmitFifo, Serial8250RuntimePort);
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }
@@ -816,6 +852,7 @@ object InitcallPhase: PhaseObject {
             Serial8250RxLoopbackProbe.state == State::Ready;
             Serial8250RxBatchLoopbackProbe.state == State::Ready;
             TtyXmitFifoProbe.state == State::Ready;
+            TtyWriteRuntimeTxProbe.state == State::Ready;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;
