@@ -76,6 +76,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
     )?;
+    ctx.serial8250_rx_batch_loopback_probe.setup(
+        &ctx.serial8250_rx_loopback_probe,
+        &ctx.plic,
+        &ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+    )?;
     ctx.initcall_boundary.setup(
         &ctx.cpuset_smp_trimmed,
         &ctx.driver_core_base,
@@ -89,6 +95,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.uart_interrupt_chain_probe,
         &ctx.serial8250_console_irq_tx_probe,
         &ctx.serial8250_rx_loopback_probe,
+        &ctx.serial8250_rx_batch_loopback_probe,
     )
 }
 
@@ -119,6 +126,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.uart_interrupt_chain_probe,
         &ctx.serial8250_console_irq_tx_probe,
         &ctx.serial8250_rx_loopback_probe,
+        &ctx.serial8250_rx_batch_loopback_probe,
         &ctx.initcall_boundary,
     ) {
         return failed_condition(

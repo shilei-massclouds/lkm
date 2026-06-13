@@ -3136,9 +3136,26 @@ pub struct Serial8250RxLoopbackProbe {
     last_byte_matched: bool,
 }
 
+pub struct Serial8250RxBatchLoopbackProbe {
+    lifecycle: Lifecycle,
+    batch_stimulus_committed: bool,
+    plic_claim_observed: bool,
+    irq_dispatch_observed: bool,
+    uart_handler_received_batch: bool,
+    flip_buffer_batch_pushed: bool,
+    plic_complete_observed: bool,
+    zero_claim_loop_exit_observed: bool,
+    irq_cycle_closed: bool,
+    bounded_drain_observed: bool,
+    batch_count_matched: bool,
+    last_byte_matched: bool,
+    no_overflow_observed: bool,
+}
+
 const UART_IRQ_CYCLE_SPIN_LIMIT: usize = 20_000_000;
 const SERIAL8250_IRQ_TX_PROBE_MESSAGE: &str = "serial8250 irq console\n";
 const SERIAL8250_RX_LOOPBACK_BYTE: u8 = b'R';
+const SERIAL8250_RX_BATCH_LOOPBACK_BYTES: &[u8] = b"rx42";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct UartIrqCycleSnapshot {
@@ -3668,6 +3685,198 @@ impl Serial8250RxLoopbackProbe {
     }
 }
 
+impl Serial8250RxBatchLoopbackProbe {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            batch_stimulus_committed: false,
+            plic_claim_observed: false,
+            irq_dispatch_observed: false,
+            uart_handler_received_batch: false,
+            flip_buffer_batch_pushed: false,
+            plic_complete_observed: false,
+            zero_claim_loop_exit_observed: false,
+            irq_cycle_closed: false,
+            bounded_drain_observed: false,
+            batch_count_matched: false,
+            last_byte_matched: false,
+            no_overflow_observed: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn batch_stimulus_committed(&self) -> bool {
+        self.batch_stimulus_committed
+    }
+
+    pub const fn plic_claim_observed(&self) -> bool {
+        self.plic_claim_observed
+    }
+
+    pub const fn irq_dispatch_observed(&self) -> bool {
+        self.irq_dispatch_observed
+    }
+
+    pub const fn uart_handler_received_batch(&self) -> bool {
+        self.uart_handler_received_batch
+    }
+
+    pub const fn flip_buffer_batch_pushed(&self) -> bool {
+        self.flip_buffer_batch_pushed
+    }
+
+    pub const fn plic_complete_observed(&self) -> bool {
+        self.plic_complete_observed
+    }
+
+    pub const fn zero_claim_loop_exit_observed(&self) -> bool {
+        self.zero_claim_loop_exit_observed
+    }
+
+    pub const fn irq_cycle_closed(&self) -> bool {
+        self.irq_cycle_closed
+    }
+
+    pub const fn bounded_drain_observed(&self) -> bool {
+        self.bounded_drain_observed
+    }
+
+    pub const fn batch_count_matched(&self) -> bool {
+        self.batch_count_matched
+    }
+
+    pub const fn last_byte_matched(&self) -> bool {
+        self.last_byte_matched
+    }
+
+    pub const fn no_overflow_observed(&self) -> bool {
+        self.no_overflow_observed
+    }
+
+    pub fn setup(
+        &mut self,
+        rx_loopback_probe: &Serial8250RxLoopbackProbe,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+    ) -> EventResult {
+        let source = super::ns16550a::uart8250_port_irq_source();
+        let logical_irq = super::ns16550a::uart8250_port_logical_irq();
+        let expected_len = SERIAL8250_RX_BATCH_LOOPBACK_BYTES.len();
+        let expected_last = SERIAL8250_RX_BATCH_LOOPBACK_BYTES[expected_len - 1];
+        if self.lifecycle.state() != State::Base
+            || rx_loopback_probe.state() != State::Ready
+            || !rx_loopback_probe.rx_runtime_enabled()
+            || !rx_loopback_probe.irq_cycle_closed()
+            || plic.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || irq_handler_registry.state() != State::Ready
+            || !super::ns16550a::serial8250_runtime_rx_enabled()
+            || !super::ns16550a::serial8250_runtime_rx_fifo_enabled()
+            || expected_len == 0
+            || expected_len > super::ns16550a::serial8250_runtime_rx_drain_limit()
+            || !logical_irq.is_valid()
+            || plic_irq_domain
+                .mapping_for_source(source)
+                .is_none_or(|mapping| {
+                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
+                })
+            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        if !super::ns16550a::trigger_serial8250_rx_loopback_batch(
+            SERIAL8250_RX_BATCH_LOOPBACK_BYTES,
+        ) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        if !wait_serial8250_rx_batch_loopback_closed(
+            plic,
+            irq_handler_registry,
+            baseline,
+            source,
+            expected_len,
+            expected_last,
+        ) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let inserted_delta = observed
+            .flip_inserted
+            .saturating_sub(baseline.flip_inserted);
+        self.batch_stimulus_committed = observed.rx_requests > baseline.rx_requests;
+        self.plic_claim_observed =
+            observed.claims > baseline.claims && plic.last_claimed_source() == source;
+        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+            && observed.irq_dispatches > baseline.irq_dispatches;
+        self.uart_handler_received_batch = observed.handler_calls > baseline.handler_calls
+            && observed.rx_handled > baseline.rx_handled;
+        self.flip_buffer_batch_pushed = observed.flip_pushes > baseline.flip_pushes
+            && inserted_delta == expected_len
+            && super::ns16550a::tty_flip_buffer_last_pushed_len() == expected_len;
+        self.plic_complete_observed =
+            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
+            && observed.loop_exits > baseline.loop_exits;
+        self.irq_cycle_closed =
+            uart_rx_cycle_completed_and_closed(plic, observed, baseline, source);
+        self.bounded_drain_observed = expected_len
+            <= super::ns16550a::serial8250_runtime_rx_drain_limit()
+            && super::ns16550a::tty_flip_buffer_last_pushed_len() == expected_len;
+        self.batch_count_matched = inserted_delta == expected_len;
+        self.last_byte_matched =
+            super::ns16550a::serial8250_runtime_rx_last_byte() == expected_last;
+        self.no_overflow_observed = !super::ns16550a::tty_flip_buffer_overflowed();
+
+        if !self.batch_stimulus_committed
+            || !self.plic_claim_observed
+            || !self.irq_dispatch_observed
+            || !self.uart_handler_received_batch
+            || !self.flip_buffer_batch_pushed
+            || !self.plic_complete_observed
+            || !self.zero_claim_loop_exit_observed
+            || !self.irq_cycle_closed
+            || !self.bounded_drain_observed
+            || !self.batch_count_matched
+            || !self.last_byte_matched
+            || !self.no_overflow_observed
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        crate::trace::checkpoint(Checkpoint::Serial8250RxBatchLoopbackReady);
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
 fn uart_irq_cycle_snapshot(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
@@ -3688,6 +3897,48 @@ fn uart_irq_cycle_snapshot(
         flip_pushes: super::ns16550a::tty_flip_buffer_push_count(),
         flip_inserted: super::ns16550a::tty_flip_buffer_total_inserted(),
     }
+}
+
+fn wait_serial8250_rx_batch_loopback_closed(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+    baseline: UartIrqCycleSnapshot,
+    source: u32,
+    expected_len: usize,
+    expected_last: u8,
+) -> bool {
+    let mut spins = 0usize;
+
+    while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        if current.rx_requests > baseline.rx_requests
+            && current.claims > baseline.claims
+            && current.plic_dispatches > baseline.plic_dispatches
+            && current.irq_dispatches > baseline.irq_dispatches
+            && current.handler_calls > baseline.handler_calls
+            && current.rx_handled > baseline.rx_handled
+            && current.flip_pushes > baseline.flip_pushes
+            && current.flip_inserted.saturating_sub(baseline.flip_inserted) == expected_len
+            && current.completes > baseline.completes
+            && current.zero_claims > baseline.zero_claims
+            && current.loop_exits > baseline.loop_exits
+            && super::ns16550a::serial8250_runtime_rx_enabled()
+            && super::ns16550a::serial8250_runtime_rx_fifo_enabled()
+            && super::ns16550a::tty_flip_buffer_last_pushed_len() == expected_len
+            && super::ns16550a::serial8250_runtime_rx_last_byte() == expected_last
+            && !super::ns16550a::tty_flip_buffer_overflowed()
+            && plic.last_claimed_source() == source
+            && plic.last_completed_source() == source
+            && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
+        {
+            return true;
+        }
+
+        core::hint::spin_loop();
+        spins += 1;
+    }
+
+    false
 }
 
 fn wait_serial8250_rx_loopback_closed(

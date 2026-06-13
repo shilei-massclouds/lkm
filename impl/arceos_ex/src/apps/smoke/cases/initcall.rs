@@ -121,10 +121,40 @@ pub fn run() -> SmokeResult {
             .zero_claim_loop_exit_observed()
         || !ctx.serial8250_rx_loopback_probe.irq_cycle_closed()
         || !ctx.serial8250_rx_loopback_probe.last_byte_matched()
+        || ctx.serial8250_rx_batch_loopback_probe.state() != State::Ready
+        || !ctx
+            .serial8250_rx_batch_loopback_probe
+            .batch_stimulus_committed()
+        || !ctx.serial8250_rx_batch_loopback_probe.plic_claim_observed()
+        || !ctx
+            .serial8250_rx_batch_loopback_probe
+            .irq_dispatch_observed()
+        || !ctx
+            .serial8250_rx_batch_loopback_probe
+            .uart_handler_received_batch()
+        || !ctx
+            .serial8250_rx_batch_loopback_probe
+            .flip_buffer_batch_pushed()
+        || !ctx
+            .serial8250_rx_batch_loopback_probe
+            .plic_complete_observed()
+        || !ctx
+            .serial8250_rx_batch_loopback_probe
+            .zero_claim_loop_exit_observed()
+        || !ctx.serial8250_rx_batch_loopback_probe.irq_cycle_closed()
+        || !ctx
+            .serial8250_rx_batch_loopback_probe
+            .bounded_drain_observed()
+        || !ctx.serial8250_rx_batch_loopback_probe.batch_count_matched()
+        || !ctx.serial8250_rx_batch_loopback_probe.last_byte_matched()
+        || !ctx
+            .serial8250_rx_batch_loopback_probe
+            .no_overflow_observed()
         || !crate::objects::ns16550a::uart8250_interrupt_driven_ready()
         || !crate::objects::ns16550a::serial8250_runtime_port_ready()
         || !crate::objects::ns16550a::serial8250_runtime_console_tx_ready()
         || !crate::objects::ns16550a::serial8250_runtime_rx_enabled()
+        || !crate::objects::ns16550a::serial8250_runtime_rx_fifo_enabled()
         || !crate::objects::ns16550a::tty_port_ready()
         || !crate::objects::ns16550a::tty_port_not_backend_owner()
         || !crate::objects::ns16550a::tty_flip_buffer_ready()

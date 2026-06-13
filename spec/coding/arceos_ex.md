@@ -480,8 +480,11 @@ LSR_DR/BI 代表的 RX byte，使用 bounded drain 策略，驱动 `TtyFlipBuffe
 或等价生产边界负责保存 MCR、设置 loopback、由 smoke/probe 路径提供一个 TX 字符、写入 UART TX，让硬件回送成
 RX 并触发真实 RDI/RLSI interrupt；随后必须走真实 `UART -> PLIC -> root INTC -> IrqAction dispatch ->
 Serial8250RuntimePort.HandleInterrupt -> ReceiveChars -> TtyFlipBuffer.Push` 链路，probe 结束后恢复 MCR。
-首轮只要求单字符闭环；后续可以增加固定小上限的连续字符 smoke 项，验证 bounded drain、有限批量处理和
-flip-buffer push/batch 计数。KUnit 在这条路径中只能作为 observer/checker：它可以读取 counters/facts/trace 并向
+首轮单字符闭环已经完成；有限批量补强必须通过独立 `Serial8250RxBatchLoopbackProbe` 或等价生产边界执行，
+使用固定小批量且批量长度必须小于 `Serial8250RuntimePort` 的 RX drain limit。该 probe 可以写入 UART TX 产生
+loopback RX，但必须仍走真实 PLIC/IRQ/runtime handler 路径，并观察一次 bounded `ReceiveChars` 把批量字符 insert 后
+push 到 `TtyFlipBuffer`；验收至少要求 batch insert 数、last pushed len、last byte、无 overflow、claim/complete 和
+zero-claim loop exit 闭合。KUnit 在这条路径中只能作为 observer/checker：它可以读取 counters/facts/trace 并向
 受限 sink 输出诊断，但不得写 TX 字符、不得设置 loopback、不得调用 handler、不得 claim/complete PLIC，也不得改
 pending/enable 状态。smoke 可以作为生产侧 stimulus，但也不能直接调用 backend handler；它只能通过公开/受控的
 前端或 runtime probe 入口提交字符。

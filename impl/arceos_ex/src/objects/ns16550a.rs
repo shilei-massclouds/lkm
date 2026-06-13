@@ -21,11 +21,15 @@ const UART_RX: usize = 0;
 const UART_TX: usize = 0;
 const UART_IER: usize = 1;
 const UART_IIR: usize = 2;
+const UART_FCR: usize = 2;
 const UART_MCR: usize = 4;
 const UART_LSR: usize = 5;
 const UART_IER_RDI: usize = 1 << 0;
 const UART_IER_THRI: usize = 1 << 1;
 const UART_IER_RLSI: usize = 1 << 2;
+const UART_FCR_ENABLE_FIFO: usize = 1 << 0;
+const UART_FCR_CLEAR_RCVR: usize = 1 << 1;
+const UART_FCR_CLEAR_XMIT: usize = 1 << 2;
 const UART_IIR_NO_INT: usize = 1;
 const UART_IIR_ID: usize = 0x0e;
 const UART_IIR_THRI: usize = 0x02;
@@ -393,6 +397,7 @@ pub struct Serial8250RuntimePort {
     rdi_enabled: bool,
     rlsi_enabled: bool,
     thri_demand_driven: bool,
+    rx_fifo_enabled: bool,
     rx_interrupts_deferred_until_enable: bool,
     n_tty_read_deferred: bool,
     console_tx_interrupt_driven: bool,
@@ -421,6 +426,7 @@ impl Serial8250RuntimePort {
             rdi_enabled: false,
             rlsi_enabled: false,
             thri_demand_driven: false,
+            rx_fifo_enabled: false,
             rx_interrupts_deferred_until_enable: true,
             n_tty_read_deferred: true,
             console_tx_interrupt_driven: false,
@@ -482,6 +488,7 @@ impl Serial8250RuntimePort {
             rdi_enabled: false,
             rlsi_enabled: false,
             thri_demand_driven: true,
+            rx_fifo_enabled: false,
             rx_interrupts_deferred_until_enable: true,
             n_tty_read_deferred: true,
             console_tx_interrupt_driven: false,
@@ -531,6 +538,7 @@ impl Serial8250RuntimePort {
             || self.online
             || self.rdi_enabled
             || self.rlsi_enabled
+            || self.rx_fifo_enabled
         {
             return false;
         }
@@ -538,6 +546,7 @@ impl Serial8250RuntimePort {
         self.online = true;
         self.rdi_enabled = true;
         self.rlsi_enabled = true;
+        self.rx_fifo_enabled = true;
         self.rx_interrupts_deferred_until_enable = false;
         true
     }
@@ -920,6 +929,10 @@ impl Serial8250WriteBackend {
 
     fn write_uart_ier(&self, value: usize) -> bool {
         self.write_uart_reg(self.ier_addr, value)
+    }
+
+    fn write_uart_fcr(&self, value: usize) -> bool {
+        self.write_uart_reg(self.membase + (UART_FCR << self.reg_shift), value)
     }
 
     fn write_uart_mcr(&self, value: usize) -> bool {
@@ -1342,10 +1355,31 @@ pub fn serial8250_runtime_rx_enabled() -> bool {
         && state.runtime_port.online
         && state.runtime_port.rdi_enabled
         && state.runtime_port.rlsi_enabled
+        && state.runtime_port.rx_fifo_enabled
         && !state.runtime_port.rx_interrupts_deferred_until_enable
         && state.tty_port.ready
         && state.tty_port.initialized
         && state.tty_port.online
+}
+
+pub fn serial8250_runtime_rx_fifo_enabled() -> bool {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .runtime_port
+            .rx_fifo_enabled
+    }
+}
+
+pub fn serial8250_runtime_rx_drain_limit() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .runtime_port
+            .rx_drain_limit
+    }
 }
 
 pub fn serial8250_runtime_rx_last_byte() -> u8 {
@@ -1452,7 +1486,9 @@ pub fn enable_serial8250_runtime_rx() -> bool {
         return false;
     }
 
-    if !state.tty_port.enable_for_uart_startup()
+    let fcr = UART_FCR_ENABLE_FIFO | UART_FCR_CLEAR_RCVR | UART_FCR_CLEAR_XMIT;
+    if !state.write_backend.write_uart_fcr(fcr)
+        || !state.tty_port.enable_for_uart_startup()
         || !state.runtime_port.enable_rx_runtime(state.tty_port)
     {
         return false;
@@ -1482,6 +1518,44 @@ pub fn trigger_serial8250_rx_loopback_once(byte: u8) -> bool {
             .write_uart_mcr(mcr | UART_MCR_OUT2 | UART_MCR_LOOP)
         && state.write_backend.write_uart_tx(byte)
         && state.write_backend.write_uart_mcr(mcr);
+    csr::restore_supervisor_interrupts(saved);
+    if ok {
+        UART8250_RX_INTERRUPT_REQUESTS.fetch_add(1, Ordering::AcqRel);
+    }
+    ok
+}
+
+pub fn trigger_serial8250_rx_loopback_batch(bytes: &[u8]) -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    if bytes.is_empty()
+        || bytes.len() > state.runtime_port.rx_drain_limit
+        || bytes.len() > TTY_FLIP_BUFFER_SIZE
+        || !state.port.registered
+        || !state.port.irq_handler_registered
+        || !state.write_backend.interrupt_driven
+        || !state.runtime_port.online
+        || !state.runtime_port.rdi_enabled
+        || !state.runtime_port.rlsi_enabled
+        || !state.runtime_port.rx_fifo_enabled
+        || state.tty_flip_buffer.push_count == 0
+        || state.tty_flip_buffer.pending_len != 0
+        || state.tty_flip_buffer.overflowed
+    {
+        return false;
+    }
+
+    let saved = csr::save_and_disable_supervisor_interrupts();
+    let mcr = state.write_backend.read_uart_mcr();
+    let fcr = UART_FCR_ENABLE_FIFO | UART_FCR_CLEAR_RCVR | UART_FCR_CLEAR_XMIT;
+    let mut ok = state.write_backend.wait_for_tx_ready()
+        && state.write_backend.write_uart_fcr(fcr)
+        && state
+            .write_backend
+            .write_uart_mcr(mcr | UART_MCR_OUT2 | UART_MCR_LOOP);
+    for byte in bytes {
+        ok = ok && state.write_backend.write_uart_tx(*byte);
+    }
+    ok = ok && state.write_backend.write_uart_mcr(mcr);
     csr::restore_supervisor_interrupts(saved);
     if ok {
         UART8250_RX_INTERRUPT_REQUESTS.fetch_add(1, Ordering::AcqRel);

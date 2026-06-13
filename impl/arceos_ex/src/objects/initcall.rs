@@ -6,8 +6,8 @@ use super::{
     ioremap::Ioremap,
     irq_time::{
         IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain,
-        Serial8250ConsoleIrqTxProbe, Serial8250RxLoopbackProbe, UartExternalIrqEnable,
-        UartInterruptChainProbe,
+        Serial8250ConsoleIrqTxProbe, Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe,
+        UartExternalIrqEnable, UartInterruptChainProbe,
     },
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
@@ -1816,6 +1816,7 @@ impl InitcallBoundary {
         uart_interrupt_chain_probe: &UartInterruptChainProbe,
         serial8250_console_irq_tx_probe: &Serial8250ConsoleIrqTxProbe,
         serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
+        serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpuset.state() != State::Ready
@@ -1867,6 +1868,19 @@ impl InitcallBoundary {
             || !serial8250_rx_loopback_probe.zero_claim_loop_exit_observed()
             || !serial8250_rx_loopback_probe.irq_cycle_closed()
             || !serial8250_rx_loopback_probe.last_byte_matched()
+            || serial8250_rx_batch_loopback_probe.state() != State::Ready
+            || !serial8250_rx_batch_loopback_probe.batch_stimulus_committed()
+            || !serial8250_rx_batch_loopback_probe.plic_claim_observed()
+            || !serial8250_rx_batch_loopback_probe.irq_dispatch_observed()
+            || !serial8250_rx_batch_loopback_probe.uart_handler_received_batch()
+            || !serial8250_rx_batch_loopback_probe.flip_buffer_batch_pushed()
+            || !serial8250_rx_batch_loopback_probe.plic_complete_observed()
+            || !serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed()
+            || !serial8250_rx_batch_loopback_probe.irq_cycle_closed()
+            || !serial8250_rx_batch_loopback_probe.bounded_drain_observed()
+            || !serial8250_rx_batch_loopback_probe.batch_count_matched()
+            || !serial8250_rx_batch_loopback_probe.last_byte_matched()
+            || !serial8250_rx_batch_loopback_probe.no_overflow_observed()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -1899,6 +1913,7 @@ pub fn initcall_phase_ready(
     uart_interrupt_chain_probe: &UartInterruptChainProbe,
     serial8250_console_irq_tx_probe: &Serial8250ConsoleIrqTxProbe,
     serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
+    serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
     boundary: &InitcallBoundary,
 ) -> bool {
     cpuset.state() == State::Ready
@@ -2000,6 +2015,19 @@ pub fn initcall_phase_ready(
         && serial8250_rx_loopback_probe.zero_claim_loop_exit_observed()
         && serial8250_rx_loopback_probe.irq_cycle_closed()
         && serial8250_rx_loopback_probe.last_byte_matched()
+        && serial8250_rx_batch_loopback_probe.state() == State::Ready
+        && serial8250_rx_batch_loopback_probe.batch_stimulus_committed()
+        && serial8250_rx_batch_loopback_probe.plic_claim_observed()
+        && serial8250_rx_batch_loopback_probe.irq_dispatch_observed()
+        && serial8250_rx_batch_loopback_probe.uart_handler_received_batch()
+        && serial8250_rx_batch_loopback_probe.flip_buffer_batch_pushed()
+        && serial8250_rx_batch_loopback_probe.plic_complete_observed()
+        && serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed()
+        && serial8250_rx_batch_loopback_probe.irq_cycle_closed()
+        && serial8250_rx_batch_loopback_probe.bounded_drain_observed()
+        && serial8250_rx_batch_loopback_probe.batch_count_matched()
+        && serial8250_rx_batch_loopback_probe.last_byte_matched()
+        && serial8250_rx_batch_loopback_probe.no_overflow_observed()
         && boundary.state() == State::Ready
         && boundary.kunit_next_boundary()
 }

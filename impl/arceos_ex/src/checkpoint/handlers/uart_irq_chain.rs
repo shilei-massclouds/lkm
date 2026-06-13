@@ -113,6 +113,18 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
         },
     );
     sink.diag_usize(
+        "serial8250_runtime_rx_fifo_enabled",
+        if ns16550a::serial8250_runtime_rx_fifo_enabled() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_runtime_rx_drain_limit",
+        ns16550a::serial8250_runtime_rx_drain_limit(),
+    );
+    sink.diag_usize(
         "serial8250_rx_requests",
         ns16550a::uart8250_rx_interrupt_request_count(),
     );
@@ -214,10 +226,40 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
             .zero_claim_loop_exit_observed()
         && ctx.serial8250_rx_loopback_probe.irq_cycle_closed()
         && ctx.serial8250_rx_loopback_probe.last_byte_matched()
+        && ctx.serial8250_rx_batch_loopback_probe.state() == State::Ready
+        && ctx
+            .serial8250_rx_batch_loopback_probe
+            .batch_stimulus_committed()
+        && ctx.serial8250_rx_batch_loopback_probe.plic_claim_observed()
+        && ctx
+            .serial8250_rx_batch_loopback_probe
+            .irq_dispatch_observed()
+        && ctx
+            .serial8250_rx_batch_loopback_probe
+            .uart_handler_received_batch()
+        && ctx
+            .serial8250_rx_batch_loopback_probe
+            .flip_buffer_batch_pushed()
+        && ctx
+            .serial8250_rx_batch_loopback_probe
+            .plic_complete_observed()
+        && ctx
+            .serial8250_rx_batch_loopback_probe
+            .zero_claim_loop_exit_observed()
+        && ctx.serial8250_rx_batch_loopback_probe.irq_cycle_closed()
+        && ctx
+            .serial8250_rx_batch_loopback_probe
+            .bounded_drain_observed()
+        && ctx.serial8250_rx_batch_loopback_probe.batch_count_matched()
+        && ctx.serial8250_rx_batch_loopback_probe.last_byte_matched()
+        && ctx
+            .serial8250_rx_batch_loopback_probe
+            .no_overflow_observed()
         && ns16550a::uart8250_interrupt_driven_ready()
         && ns16550a::serial8250_runtime_port_ready()
         && ns16550a::serial8250_runtime_console_tx_ready()
         && ns16550a::serial8250_runtime_rx_enabled()
+        && ns16550a::serial8250_runtime_rx_fifo_enabled()
         && ns16550a::tty_port_ready()
         && ns16550a::tty_port_not_backend_owner()
         && ns16550a::tty_flip_buffer_ready()

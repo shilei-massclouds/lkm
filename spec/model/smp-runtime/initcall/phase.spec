@@ -684,6 +684,12 @@ object InitcallPhase: PhaseObject {
                     UartExternalIrqEnable.Event::Setup;
                     UartInterruptChainProbe.Event::Setup;
                     Serial8250Console.Event::Enable;
+                    TtyPort.Event::Setup;
+                    Serial8250RuntimePort.Event::Setup;
+                    TtyPort.Event::Enable;
+                    Serial8250RuntimePort.Event::Enable;
+                    Serial8250RxLoopbackProbe.Event::Setup;
+                    Serial8250RxBatchLoopbackProbe.Event::Setup;
                     InitcallBoundary.Event::Setup;
                 }
 
@@ -738,6 +744,32 @@ object InitcallPhase: PhaseObject {
                     serial8250_console_tx_irq_kicks_thri(Serial8250Console);
                     serial8250_console_tx_irq_handler_drains_queue(Serial8250Console);
                     serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
+                    tty_port_ready(TtyPort, Uart8250Port, TtyFlipBuffer, TtyXmitFifo);
+                    tty_port_initialized(TtyPort);
+                    tty_flip_buffer_ready(TtyFlipBuffer, TtyPort);
+                    tty_xmit_fifo_ready(TtyXmitFifo, TtyPort);
+                    serial8250_runtime_port_ready(Serial8250RuntimePort, Uart8250Port, IrqAction, TtyPort);
+                    serial8250_runtime_port_online(Serial8250RuntimePort);
+                    serial8250_runtime_port_rdi_enabled(Serial8250RuntimePort);
+                    serial8250_runtime_port_rlsi_enabled(Serial8250RuntimePort);
+                    serial8250_rx_loopback_probe_ready(Serial8250RxLoopbackProbe);
+                    serial8250_rx_loopback_probe_single_byte_first_round(
+                        Serial8250RxLoopbackProbe,
+                        Serial8250RxByteRef::Uart0RxProbe
+                    );
+                    serial8250_rx_batch_loopback_probe_ready(Serial8250RxBatchLoopbackProbe);
+                    serial8250_rx_batch_loopback_probe_bounded_drain_observed(
+                        Serial8250RxBatchLoopbackProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_rx_batch_loopback_probe_batch_count_matched(
+                        Serial8250RxBatchLoopbackProbe,
+                        TtyFlipBuffer
+                    );
+                    serial8250_rx_batch_loopback_probe_no_overflow(
+                        Serial8250RxBatchLoopbackProbe,
+                        TtyFlipBuffer
+                    );
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }
@@ -756,6 +788,12 @@ object InitcallPhase: PhaseObject {
             UartExternalIrqEnable.state == State::Ready;
             UartInterruptChainProbe.state == State::Ready;
             Serial8250Console.state == State::Online;
+            TtyPort.state == State::Online;
+            TtyFlipBuffer.state == State::Ready;
+            TtyXmitFifo.state == State::Ready;
+            Serial8250RuntimePort.state == State::Online;
+            Serial8250RxLoopbackProbe.state == State::Ready;
+            Serial8250RxBatchLoopbackProbe.state == State::Ready;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;
