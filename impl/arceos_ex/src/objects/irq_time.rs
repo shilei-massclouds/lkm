@@ -3152,10 +3152,25 @@ pub struct Serial8250RxBatchLoopbackProbe {
     no_overflow_observed: bool,
 }
 
+pub struct TtyXmitFifoProbe {
+    lifecycle: Lifecycle,
+    enqueue_committed: bool,
+    dequeue_committed: bool,
+    byte_round_trip: bool,
+    queue_empty_after_dequeue: bool,
+    distinct_from_printk_console_tx: bool,
+    runtime_tx_deferred: bool,
+    printk_tx_queue_unchanged: bool,
+    no_uart_thri_kick: bool,
+    no_overflow_observed: bool,
+    no_underflow_observed: bool,
+}
+
 const UART_IRQ_CYCLE_SPIN_LIMIT: usize = 20_000_000;
 const SERIAL8250_IRQ_TX_PROBE_MESSAGE: &str = "serial8250 irq console\n";
 const SERIAL8250_RX_LOOPBACK_BYTE: u8 = b'R';
 const SERIAL8250_RX_BATCH_LOOPBACK_BYTES: &[u8] = b"rx42";
+const TTY_XMIT_FIFO_PROBE_BYTE: u8 = b'T';
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct UartIrqCycleSnapshot {
@@ -3872,6 +3887,141 @@ impl Serial8250RxBatchLoopbackProbe {
         }
 
         crate::trace::checkpoint(Checkpoint::Serial8250RxBatchLoopbackReady);
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
+impl TtyXmitFifoProbe {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            enqueue_committed: false,
+            dequeue_committed: false,
+            byte_round_trip: false,
+            queue_empty_after_dequeue: false,
+            distinct_from_printk_console_tx: false,
+            runtime_tx_deferred: false,
+            printk_tx_queue_unchanged: false,
+            no_uart_thri_kick: false,
+            no_overflow_observed: false,
+            no_underflow_observed: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn enqueue_committed(&self) -> bool {
+        self.enqueue_committed
+    }
+
+    pub const fn dequeue_committed(&self) -> bool {
+        self.dequeue_committed
+    }
+
+    pub const fn byte_round_trip(&self) -> bool {
+        self.byte_round_trip
+    }
+
+    pub const fn queue_empty_after_dequeue(&self) -> bool {
+        self.queue_empty_after_dequeue
+    }
+
+    pub const fn distinct_from_printk_console_tx(&self) -> bool {
+        self.distinct_from_printk_console_tx
+    }
+
+    pub const fn runtime_tx_deferred(&self) -> bool {
+        self.runtime_tx_deferred
+    }
+
+    pub const fn printk_tx_queue_unchanged(&self) -> bool {
+        self.printk_tx_queue_unchanged
+    }
+
+    pub const fn no_uart_thri_kick(&self) -> bool {
+        self.no_uart_thri_kick
+    }
+
+    pub const fn no_overflow_observed(&self) -> bool {
+        self.no_overflow_observed
+    }
+
+    pub const fn no_underflow_observed(&self) -> bool {
+        self.no_underflow_observed
+    }
+
+    pub fn setup(&mut self, rx_batch_probe: &Serial8250RxBatchLoopbackProbe) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || rx_batch_probe.state() != State::Ready
+            || !rx_batch_probe.no_overflow_observed()
+            || !super::ns16550a::tty_xmit_fifo_ready()
+            || !super::ns16550a::tty_xmit_fifo_deferred_from_console_tx()
+            || !super::ns16550a::serial8250_runtime_port_ready()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let baseline_enqueues = super::ns16550a::tty_xmit_fifo_enqueue_count();
+        let baseline_dequeues = super::ns16550a::tty_xmit_fifo_dequeue_count();
+        let baseline_console_queue = super::ns16550a::serial8250_tx_queue_len();
+        let baseline_console_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
+        let baseline_console_drains = super::ns16550a::serial8250_tx_irq_drain_count();
+
+        if !super::ns16550a::probe_tty_xmit_fifo_round_trip(TTY_XMIT_FIFO_PROBE_BYTE) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.enqueue_committed = super::ns16550a::tty_xmit_fifo_enqueue_count() > baseline_enqueues;
+        self.dequeue_committed = super::ns16550a::tty_xmit_fifo_dequeue_count() > baseline_dequeues;
+        self.byte_round_trip = super::ns16550a::tty_xmit_fifo_last_enqueued()
+            == TTY_XMIT_FIFO_PROBE_BYTE
+            && super::ns16550a::tty_xmit_fifo_last_dequeued() == TTY_XMIT_FIFO_PROBE_BYTE
+            && super::ns16550a::tty_xmit_fifo_round_trip_ready();
+        self.queue_empty_after_dequeue = super::ns16550a::tty_xmit_fifo_queue_len() == 0;
+        self.distinct_from_printk_console_tx =
+            super::ns16550a::tty_xmit_fifo_deferred_from_console_tx();
+        self.runtime_tx_deferred = super::ns16550a::tty_xmit_fifo_deferred_from_console_tx();
+        self.printk_tx_queue_unchanged = super::ns16550a::serial8250_tx_queue_len()
+            == baseline_console_queue
+            && super::ns16550a::serial8250_tx_irq_drain_count() == baseline_console_drains;
+        self.no_uart_thri_kick =
+            super::ns16550a::serial8250_tx_irq_kick_count() == baseline_console_kicks;
+        self.no_overflow_observed = !super::ns16550a::tty_xmit_fifo_overflowed();
+        self.no_underflow_observed = !super::ns16550a::tty_xmit_fifo_underflowed();
+
+        if !self.enqueue_committed
+            || !self.dequeue_committed
+            || !self.byte_round_trip
+            || !self.queue_empty_after_dequeue
+            || !self.distinct_from_printk_console_tx
+            || !self.runtime_tx_deferred
+            || !self.printk_tx_queue_unchanged
+            || !self.no_uart_thri_kick
+            || !self.no_overflow_observed
+            || !self.no_underflow_observed
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        crate::trace::checkpoint(Checkpoint::TtyXmitFifoProbeReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }

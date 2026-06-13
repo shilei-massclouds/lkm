@@ -476,6 +476,13 @@ LSR_DR/BI 代表的 RX byte，使用 bounded drain 策略，驱动 `TtyFlipBuffe
 `TtyXmitFifo.Enqueue/DequeueForTx` 只描述普通 TTY write FIFO 接口，必须与当前 printk console TX queue 分离；
 普通 TTY write 的完整接入可以后置。
 
+ordinary TTY TX FIFO 的首轮实现只能建立 `TtyXmitFifo` 自身的 enqueue/dequeue 可观测边界。实现必须通过独立
+`TtyXmitFifoProbe` 或等价生产边界提交固定探针 byte，并验证 enqueue 后能 dequeue 同一 byte、dequeue 后 FIFO
+为空、无 overflow/underflow；该 probe 不得调用 `printk` 前端，不得写 UART THR，不得设置 `UART_IER_THRI`，
+不得改变 serial8250 console 的 printk TX queue/kick/drain counters。KUnit 只能读取这些结果并通过受限 sink
+输出诊断，不能直接 enqueue/dequeue 或触发 UART handler。把 ordinary TTY write 接到 `StartTx/TransmitChars`
+和真实 THRI 中断的工作必须后续单独建模。
+
 首轮 RX 验证应采用 8250 loopback probe，而不是修改设备树或让 KUnit 人工制造中断。`Serial8250RxLoopbackProbe`
 或等价生产边界负责保存 MCR、设置 loopback、由 smoke/probe 路径提供一个 TX 字符、写入 UART TX，让硬件回送成
 RX 并触发真实 RDI/RLSI interrupt；随后必须走真实 `UART -> PLIC -> root INTC -> IrqAction dispatch ->

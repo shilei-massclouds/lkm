@@ -690,6 +690,7 @@ object InitcallPhase: PhaseObject {
                     Serial8250RuntimePort.Event::Enable;
                     Serial8250RxLoopbackProbe.Event::Setup;
                     Serial8250RxBatchLoopbackProbe.Event::Setup;
+                    TtyXmitFifoProbe.Event::Setup;
                     InitcallBoundary.Event::Setup;
                 }
 
@@ -770,6 +771,26 @@ object InitcallPhase: PhaseObject {
                         Serial8250RxBatchLoopbackProbe,
                         TtyFlipBuffer
                     );
+                    tty_xmit_fifo_probe_ready(TtyXmitFifoProbe);
+                    tty_xmit_fifo_probe_enqueue_committed(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_probe_dequeue_committed(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_probe_byte_round_trip(
+                        TtyXmitFifoProbe,
+                        Serial8250TxByteRef::Uart0TxProbe
+                    );
+                    tty_xmit_fifo_probe_queue_empty_after_dequeue(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_probe_distinct_from_printk_console_tx(
+                        TtyXmitFifoProbe,
+                        TtyXmitFifo,
+                        Serial8250Console
+                    );
+                    tty_xmit_fifo_probe_keeps_runtime_tx_deferred(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_probe_does_not_kick_uart_thri(TtyXmitFifoProbe, Uart8250Port);
+                    tty_xmit_fifo_probe_does_not_mutate_printk_tx_queue(
+                        TtyXmitFifoProbe,
+                        Serial8250Console
+                    );
+                    tty_xmit_fifo_probe_no_overflow(TtyXmitFifoProbe, TtyXmitFifo);
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }
@@ -794,6 +815,7 @@ object InitcallPhase: PhaseObject {
             Serial8250RuntimePort.state == State::Online;
             Serial8250RxLoopbackProbe.state == State::Ready;
             Serial8250RxBatchLoopbackProbe.state == State::Ready;
+            TtyXmitFifoProbe.state == State::Ready;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;

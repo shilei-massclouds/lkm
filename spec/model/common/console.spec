@@ -163,6 +163,23 @@ predicate tty_xmit_fifo_ready<T, P>(xmit_fifo: T, tty_port: P) -> bool;
 predicate tty_xmit_fifo_byte_queued<T, B>(xmit_fifo: T, byte: B) -> bool;
 predicate tty_xmit_fifo_dequeue_returns<T, B>(xmit_fifo: T, byte: B) -> bool;
 
+predicate tty_xmit_fifo_probe_ready<T>(probe: T) -> bool;
+predicate tty_xmit_fifo_probe_production_side<T>(probe: T) -> bool;
+predicate tty_xmit_fifo_probe_kunit_not_stimulus<T>(probe: T) -> bool;
+predicate tty_xmit_fifo_probe_enqueue_committed<T, F>(probe: T, xmit_fifo: F) -> bool;
+predicate tty_xmit_fifo_probe_dequeue_committed<T, F>(probe: T, xmit_fifo: F) -> bool;
+predicate tty_xmit_fifo_probe_byte_round_trip<T, B>(probe: T, byte: B) -> bool;
+predicate tty_xmit_fifo_probe_queue_empty_after_dequeue<T, F>(probe: T, xmit_fifo: F) -> bool;
+predicate tty_xmit_fifo_probe_distinct_from_printk_console_tx<T, F, C>(
+    probe: T,
+    xmit_fifo: F,
+    console: C
+) -> bool;
+predicate tty_xmit_fifo_probe_keeps_runtime_tx_deferred<T, F>(probe: T, xmit_fifo: F) -> bool;
+predicate tty_xmit_fifo_probe_does_not_kick_uart_thri<T, P>(probe: T, port: P) -> bool;
+predicate tty_xmit_fifo_probe_does_not_mutate_printk_tx_queue<T, C>(probe: T, console: C) -> bool;
+predicate tty_xmit_fifo_probe_no_overflow<T, F>(probe: T, xmit_fifo: F) -> bool;
+
 predicate serial8250_rx_loopback_probe_ready<T>(probe: T) -> bool;
 predicate serial8250_rx_loopback_probe_production_side<T>(probe: T) -> bool;
 predicate serial8250_rx_loopback_probe_uses_smoke_stimulus<T>(probe: T) -> bool;
@@ -739,6 +756,69 @@ object TtyXmitFifo: ConsoleObject {
             tty_xmit_fifo_distinct_from_printk_console_tx(TtyXmitFifo, Serial8250Console);
             tty_xmit_fifo_runtime_tx_integration_deferred(TtyXmitFifo);
             tty_xmit_fifo_ready(TtyXmitFifo, TtyPort);
+        }
+    }
+}
+
+/*
+ * TtyXmitFifoProbe is the first controlled ordinary-TTY TX FIFO stimulus.
+ * It exercises only TtyXmitFifo enqueue/dequeue and proves that this FIFO is
+ * still separate from printk console TX and from UART THRI interrupt kicking.
+ */
+object TtyXmitFifoProbe: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    TtyPort.state == State::Online;
+                    TtyXmitFifo.state == State::Ready;
+                    Serial8250Console.state == State::Online;
+                    Serial8250RuntimePort.state == State::Online;
+                    Serial8250RxBatchLoopbackProbe.state == State::Ready;
+                }
+
+                drives {
+                    TtyXmitFifo.Action::Enqueue(Serial8250TxByteRef::Uart0TxProbe);
+                    TtyXmitFifo.Action::DequeueForTx;
+                }
+
+                ensures {
+                    tty_xmit_fifo_probe_ready(TtyXmitFifoProbe);
+                    tty_xmit_fifo_probe_production_side(TtyXmitFifoProbe);
+                    tty_xmit_fifo_probe_kunit_not_stimulus(TtyXmitFifoProbe);
+                    tty_xmit_fifo_probe_enqueue_committed(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_probe_dequeue_committed(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_probe_byte_round_trip(
+                        TtyXmitFifoProbe,
+                        Serial8250TxByteRef::Uart0TxProbe
+                    );
+                    tty_xmit_fifo_probe_queue_empty_after_dequeue(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_probe_distinct_from_printk_console_tx(
+                        TtyXmitFifoProbe,
+                        TtyXmitFifo,
+                        Serial8250Console
+                    );
+                    tty_xmit_fifo_probe_keeps_runtime_tx_deferred(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_probe_does_not_kick_uart_thri(TtyXmitFifoProbe, Uart8250Port);
+                    tty_xmit_fifo_probe_does_not_mutate_printk_tx_queue(
+                        TtyXmitFifoProbe,
+                        Serial8250Console
+                    );
+                    tty_xmit_fifo_probe_no_overflow(TtyXmitFifoProbe, TtyXmitFifo);
+                    tty_xmit_fifo_byte_queued(TtyXmitFifo, Serial8250TxByteRef::Uart0TxProbe);
+                    tty_xmit_fifo_dequeue_returns(TtyXmitFifo, Serial8250TxByteRef::Uart0TxProbe);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            tty_xmit_fifo_probe_ready(TtyXmitFifoProbe);
+            tty_xmit_fifo_probe_production_side(TtyXmitFifoProbe);
+            tty_xmit_fifo_probe_kunit_not_stimulus(TtyXmitFifoProbe);
         }
     }
 }

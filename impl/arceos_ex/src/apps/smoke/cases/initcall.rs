@@ -163,6 +163,21 @@ pub fn run() -> SmokeResult {
         || crate::objects::ns16550a::tty_flip_buffer_overflowed()
         || !crate::objects::ns16550a::tty_xmit_fifo_ready()
         || !crate::objects::ns16550a::tty_xmit_fifo_deferred_from_console_tx()
+        || ctx.tty_xmit_fifo_probe.state() != State::Ready
+        || !ctx.tty_xmit_fifo_probe.enqueue_committed()
+        || !ctx.tty_xmit_fifo_probe.dequeue_committed()
+        || !ctx.tty_xmit_fifo_probe.byte_round_trip()
+        || !ctx.tty_xmit_fifo_probe.queue_empty_after_dequeue()
+        || !ctx.tty_xmit_fifo_probe.distinct_from_printk_console_tx()
+        || !ctx.tty_xmit_fifo_probe.runtime_tx_deferred()
+        || !ctx.tty_xmit_fifo_probe.printk_tx_queue_unchanged()
+        || !ctx.tty_xmit_fifo_probe.no_uart_thri_kick()
+        || !ctx.tty_xmit_fifo_probe.no_overflow_observed()
+        || !ctx.tty_xmit_fifo_probe.no_underflow_observed()
+        || !crate::objects::ns16550a::tty_xmit_fifo_round_trip_ready()
+        || crate::objects::ns16550a::tty_xmit_fifo_queue_len() != 0
+        || crate::objects::ns16550a::tty_xmit_fifo_enqueue_count() == 0
+        || crate::objects::ns16550a::tty_xmit_fifo_dequeue_count() == 0
         || crate::objects::ns16550a::uart8250_rx_interrupt_request_count() == 0
         || crate::objects::ns16550a::uart8250_rx_interrupt_handled_count() == 0
         || crate::objects::ns16550a::serial8250_tx_irq_drain_count() == 0

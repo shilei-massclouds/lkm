@@ -44,6 +44,7 @@ const UART_POLL_SPINS: usize = 100_000;
 const UART_RX_DRAIN_LIMIT: usize = 16;
 const UART_TX_QUEUE_SIZE: usize = 512;
 const TTY_FLIP_BUFFER_SIZE: usize = 64;
+const TTY_XMIT_FIFO_SIZE: usize = 64;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
 
@@ -338,6 +339,16 @@ pub struct TtyXmitFifo {
     ordinary_tty_write_path: bool,
     distinct_from_printk_console_tx: bool,
     runtime_tx_integration_deferred: bool,
+    buffer: [u8; TTY_XMIT_FIFO_SIZE],
+    head: usize,
+    tail: usize,
+    queued: usize,
+    enqueue_count: usize,
+    dequeue_count: usize,
+    last_enqueued: u8,
+    last_dequeued: u8,
+    overflowed: bool,
+    underflowed: bool,
 }
 
 impl TtyXmitFifo {
@@ -348,6 +359,16 @@ impl TtyXmitFifo {
             ordinary_tty_write_path: false,
             distinct_from_printk_console_tx: true,
             runtime_tx_integration_deferred: true,
+            buffer: [0; TTY_XMIT_FIFO_SIZE],
+            head: 0,
+            tail: 0,
+            queued: 0,
+            enqueue_count: 0,
+            dequeue_count: 0,
+            last_enqueued: 0,
+            last_dequeued: 0,
+            overflowed: false,
+            underflowed: false,
         }
     }
 
@@ -362,6 +383,16 @@ impl TtyXmitFifo {
             ordinary_tty_write_path: true,
             distinct_from_printk_console_tx: true,
             runtime_tx_integration_deferred: true,
+            buffer: [0; TTY_XMIT_FIFO_SIZE],
+            head: 0,
+            tail: 0,
+            queued: 0,
+            enqueue_count: 0,
+            dequeue_count: 0,
+            last_enqueued: 0,
+            last_dequeued: 0,
+            overflowed: false,
+            underflowed: false,
         }
     }
 
@@ -373,6 +404,34 @@ impl TtyXmitFifo {
             && self.ordinary_tty_write_path
             && self.distinct_from_printk_console_tx
             && self.runtime_tx_integration_deferred
+    }
+
+    fn enqueue(&mut self, byte: u8) -> bool {
+        if !self.ready || self.queued == TTY_XMIT_FIFO_SIZE {
+            self.overflowed = true;
+            return false;
+        }
+
+        self.buffer[self.tail] = byte;
+        self.tail = (self.tail + 1) % TTY_XMIT_FIFO_SIZE;
+        self.queued += 1;
+        self.enqueue_count = self.enqueue_count.saturating_add(1);
+        self.last_enqueued = byte;
+        true
+    }
+
+    fn dequeue_for_tx(&mut self) -> Option<u8> {
+        if !self.ready || self.queued == 0 {
+            self.underflowed = true;
+            return None;
+        }
+
+        let byte = self.buffer[self.head];
+        self.head = (self.head + 1) % TTY_XMIT_FIFO_SIZE;
+        self.queued -= 1;
+        self.dequeue_count = self.dequeue_count.saturating_add(1);
+        self.last_dequeued = byte;
+        Some(byte)
     }
 }
 
@@ -1323,6 +1382,98 @@ pub fn tty_xmit_fifo_deferred_from_console_tx() -> bool {
     state.tty_xmit_fifo.ready
         && state.tty_xmit_fifo.distinct_from_printk_console_tx
         && state.tty_xmit_fifo.runtime_tx_integration_deferred
+}
+
+pub fn probe_tty_xmit_fifo_round_trip(byte: u8) -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    if !state.tty_xmit_fifo.facts_ready(state.tty_port) {
+        return false;
+    }
+    if !state.tty_xmit_fifo.enqueue(byte) {
+        return false;
+    }
+    state.tty_xmit_fifo.dequeue_for_tx() == Some(byte)
+}
+
+pub fn tty_xmit_fifo_round_trip_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_xmit_fifo.facts_ready(state.tty_port)
+        && state.tty_xmit_fifo.enqueue_count != 0
+        && state.tty_xmit_fifo.dequeue_count != 0
+        && state.tty_xmit_fifo.queued == 0
+        && state.tty_xmit_fifo.last_enqueued == state.tty_xmit_fifo.last_dequeued
+        && !state.tty_xmit_fifo.overflowed
+        && !state.tty_xmit_fifo.underflowed
+}
+
+pub fn tty_xmit_fifo_queue_len() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .queued
+    }
+}
+
+pub fn tty_xmit_fifo_enqueue_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .enqueue_count
+    }
+}
+
+pub fn tty_xmit_fifo_dequeue_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .dequeue_count
+    }
+}
+
+pub fn tty_xmit_fifo_last_enqueued() -> u8 {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .last_enqueued
+    }
+}
+
+pub fn tty_xmit_fifo_last_dequeued() -> u8 {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .last_dequeued
+    }
+}
+
+pub fn tty_xmit_fifo_overflowed() -> bool {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .overflowed
+    }
+}
+
+pub fn tty_xmit_fifo_underflowed() -> bool {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_xmit_fifo
+            .underflowed
+    }
 }
 
 pub fn serial8250_runtime_port_ready() -> bool {

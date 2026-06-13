@@ -7,7 +7,7 @@ use super::{
     irq_time::{
         IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain,
         Serial8250ConsoleIrqTxProbe, Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe,
-        UartExternalIrqEnable, UartInterruptChainProbe,
+        TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
     },
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
@@ -1817,6 +1817,7 @@ impl InitcallBoundary {
         serial8250_console_irq_tx_probe: &Serial8250ConsoleIrqTxProbe,
         serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
         serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
+        tty_xmit_fifo_probe: &TtyXmitFifoProbe,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpuset.state() != State::Ready
@@ -1881,6 +1882,17 @@ impl InitcallBoundary {
             || !serial8250_rx_batch_loopback_probe.batch_count_matched()
             || !serial8250_rx_batch_loopback_probe.last_byte_matched()
             || !serial8250_rx_batch_loopback_probe.no_overflow_observed()
+            || tty_xmit_fifo_probe.state() != State::Ready
+            || !tty_xmit_fifo_probe.enqueue_committed()
+            || !tty_xmit_fifo_probe.dequeue_committed()
+            || !tty_xmit_fifo_probe.byte_round_trip()
+            || !tty_xmit_fifo_probe.queue_empty_after_dequeue()
+            || !tty_xmit_fifo_probe.distinct_from_printk_console_tx()
+            || !tty_xmit_fifo_probe.runtime_tx_deferred()
+            || !tty_xmit_fifo_probe.printk_tx_queue_unchanged()
+            || !tty_xmit_fifo_probe.no_uart_thri_kick()
+            || !tty_xmit_fifo_probe.no_overflow_observed()
+            || !tty_xmit_fifo_probe.no_underflow_observed()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -1914,6 +1926,7 @@ pub fn initcall_phase_ready(
     serial8250_console_irq_tx_probe: &Serial8250ConsoleIrqTxProbe,
     serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
     serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
+    tty_xmit_fifo_probe: &TtyXmitFifoProbe,
     boundary: &InitcallBoundary,
 ) -> bool {
     cpuset.state() == State::Ready
@@ -2028,6 +2041,17 @@ pub fn initcall_phase_ready(
         && serial8250_rx_batch_loopback_probe.batch_count_matched()
         && serial8250_rx_batch_loopback_probe.last_byte_matched()
         && serial8250_rx_batch_loopback_probe.no_overflow_observed()
+        && tty_xmit_fifo_probe.state() == State::Ready
+        && tty_xmit_fifo_probe.enqueue_committed()
+        && tty_xmit_fifo_probe.dequeue_committed()
+        && tty_xmit_fifo_probe.byte_round_trip()
+        && tty_xmit_fifo_probe.queue_empty_after_dequeue()
+        && tty_xmit_fifo_probe.distinct_from_printk_console_tx()
+        && tty_xmit_fifo_probe.runtime_tx_deferred()
+        && tty_xmit_fifo_probe.printk_tx_queue_unchanged()
+        && tty_xmit_fifo_probe.no_uart_thri_kick()
+        && tty_xmit_fifo_probe.no_overflow_observed()
+        && tty_xmit_fifo_probe.no_underflow_observed()
         && boundary.state() == State::Ready
         && boundary.kunit_next_boundary()
 }
