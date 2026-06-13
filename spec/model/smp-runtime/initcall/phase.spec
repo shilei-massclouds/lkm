@@ -687,6 +687,7 @@ object InitcallPhase: PhaseObject {
                     Serial8250ConsoleBurstIrqTxProbe.Event::Setup;
                     Serial8250ConsoleLongIrqTxProbe.Event::Setup;
                     Serial8250ConsoleLongBurstIrqTxProbe.Event::Setup;
+                    Serial8250ConsoleTxQuiesceProbe.Event::Setup;
                     TtyPort.Event::Setup;
                     Serial8250RuntimePort.Event::Setup;
                     TtyPort.Event::Enable;
@@ -972,6 +973,44 @@ object InitcallPhase: PhaseObject {
                         Serial8250ConsoleLongBurstIrqTxProbe,
                         TtyXmitFifo
                     );
+                    serial8250_console_tx_quiesce_probe_ready(Serial8250ConsoleTxQuiesceProbe);
+                    serial8250_console_tx_quiesce_probe_production_side(
+                        Serial8250ConsoleTxQuiesceProbe
+                    );
+                    serial8250_console_tx_quiesce_probe_kunit_not_stimulus(
+                        Serial8250ConsoleTxQuiesceProbe
+                    );
+                    serial8250_console_tx_quiesce_probe_does_not_write_printk(
+                        Serial8250ConsoleTxQuiesceProbe
+                    );
+                    serial8250_console_tx_quiesce_probe_observes_queue_empty(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_tx_quiesce_probe_observes_thri_stopped(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_tx_quiesce_probe_no_spurious_plic_claim(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Plic
+                    );
+                    serial8250_console_tx_quiesce_probe_no_spurious_irq_dispatch(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        IrqHandlerRegistry
+                    );
+                    serial8250_console_tx_quiesce_probe_no_uart_tx_drain(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_tx_quiesce_probe_no_tty_xmit_mutation(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        TtyXmitFifo
+                    );
+                    serial8250_console_tx_quiesce_probe_no_overflow(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Serial8250Console
+                    );
                     serial8250_runtime_port_transmit_chars_keeps_thri_when_queue_nonempty(
                         Serial8250RuntimePort
                     );
@@ -1147,6 +1186,7 @@ object InitcallPhase: PhaseObject {
             Serial8250ConsoleBurstIrqTxProbe.state == State::Ready;
             Serial8250ConsoleLongIrqTxProbe.state == State::Ready;
             Serial8250ConsoleLongBurstIrqTxProbe.state == State::Ready;
+            Serial8250ConsoleTxQuiesceProbe.state == State::Ready;
             TtyPort.state == State::Online;
             TtyFlipBuffer.state == State::Ready;
             TtyXmitFifo.state == State::Ready;

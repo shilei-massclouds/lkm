@@ -1262,6 +1262,12 @@ CRLF 展开后都必须超过单轮 `tx_loadsz`，真实 PLIC claim/IRQ dispatch
 各自 `ceil(record_bytes / tx_loadsz)` 后累加计算，并要求 budget hit、write call 数、CRLF 插入数、
 总 drain byte、last byte、queue empty、无 overflow 和 ordinary `TtyXmitFifo` 未变化全部匹配。该 probe 仍不得直接调用
 serial8250 console/backend、不得暴露 printk flush API，也不得引入 file/stdout/stdin 或用户态 write/read 语义。
+`Serial8250ConsoleTxQuiesceProbe` 或等价生产边界必须在 long-burst probe ready 后执行一个不提交新 printk 的静止性检查：
+它只能读取 TX/IRQ/PLIC/TTY 计数快照并做 bounded idle observation，不得调用 `printk` 前端、不得 kick THRI、不得调用
+root INTC/PLIC/IRQ/UART handler，也不得修改普通 `TtyXmitFifo`。验收至少要求 console TX queue 仍为空、THRI 已由
+handler stop/clear、printk write/kick/drain 计数不变、PLIC claim/IRQ dispatch/UART handler 计数不增加、ordinary
+TTY xmit FIFO enqueue/dequeue/runtime drain 计数不变、无 console TX overflow。该 probe 用于防止长 printk burst 后出现
+空转 TX interrupt 或重复 drain；它不是公开 `printk::flush()`，也不推进 file/stdout/stdin 或用户态 I/O 语义。
 
 `ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经

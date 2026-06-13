@@ -259,6 +259,27 @@ pub fn run() -> SmokeResult {
         || !ctx
             .serial8250_console_long_burst_irq_tx_probe
             .tty_xmit_fifo_unchanged()
+        || ctx.serial8250_console_tx_quiesce_probe.state() != State::Ready
+        || !ctx.serial8250_console_tx_quiesce_probe.no_printk_write()
+        || !ctx
+            .serial8250_console_tx_quiesce_probe
+            .tx_queue_empty_observed()
+        || !ctx
+            .serial8250_console_tx_quiesce_probe
+            .thri_stopped_observed()
+        || !ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_spurious_plic_claim()
+        || !ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_spurious_irq_dispatch()
+        || !ctx.serial8250_console_tx_quiesce_probe.no_uart_tx_drain()
+        || !ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_tty_xmit_fifo_mutation()
+        || !ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_overflow_observed()
         || ctx.serial8250_rx_loopback_probe.state() != State::Ready
         || !ctx.serial8250_rx_loopback_probe.rx_runtime_enabled()
         || !ctx

@@ -406,6 +406,17 @@ predicate serial8250_console_long_burst_irq_tx_probe_does_not_mutate_tty_xmit_fi
     probe: T,
     xmit_fifo: F
 ) -> bool;
+predicate serial8250_console_tx_quiesce_probe_ready<T>(probe: T) -> bool;
+predicate serial8250_console_tx_quiesce_probe_production_side<T>(probe: T) -> bool;
+predicate serial8250_console_tx_quiesce_probe_kunit_not_stimulus<T>(probe: T) -> bool;
+predicate serial8250_console_tx_quiesce_probe_does_not_write_printk<T>(probe: T) -> bool;
+predicate serial8250_console_tx_quiesce_probe_observes_queue_empty<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_tx_quiesce_probe_observes_thri_stopped<T, R>(probe: T, runtime: R) -> bool;
+predicate serial8250_console_tx_quiesce_probe_no_spurious_plic_claim<T, P>(probe: T, plic: P) -> bool;
+predicate serial8250_console_tx_quiesce_probe_no_spurious_irq_dispatch<T, R>(probe: T, registry: R) -> bool;
+predicate serial8250_console_tx_quiesce_probe_no_uart_tx_drain<T, R>(probe: T, runtime: R) -> bool;
+predicate serial8250_console_tx_quiesce_probe_no_tty_xmit_mutation<T, F>(probe: T, xmit_fifo: F) -> bool;
+predicate serial8250_console_tx_quiesce_probe_no_overflow<T, C>(probe: T, console: C) -> bool;
 
 predicate console_handoff_ready<T, B, S>(handoff: T, boot_console: B, serial_console: S) -> bool;
 predicate console_handoff_triggered_by_register_console<T, R>(handoff: T, registry: R) -> bool;
@@ -1892,6 +1903,79 @@ object Serial8250ConsoleLongBurstIrqTxProbe: ConsoleObject {
                     serial8250_runtime_port_transmit_chars_keeps_thri_when_queue_nonempty(
                         Serial8250RuntimePort
                     );
+                    serial8250_runtime_port_transmit_chars_stops_thri_when_empty(
+                        Serial8250RuntimePort
+                    );
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+    }
+}
+
+/*
+ * Serial8250ConsoleTxQuiesceProbe is the post-load stability boundary for
+ * printk console TX. It does not submit another printk record and does not
+ * call any backend handler. It only observes that, after the long-burst probe
+ * drained the queue and stopped THRI, a bounded idle window produces no extra
+ * PLIC claim, IRQ dispatch, UART handler drain, printk write or ordinary TTY
+ * xmit FIFO mutation.
+ */
+object Serial8250ConsoleTxQuiesceProbe: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Serial8250ConsoleLongBurstIrqTxProbe.state == State::Ready;
+                    Serial8250Console.state == State::Online;
+                    Plic.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                }
+
+                ensures {
+                    serial8250_console_tx_quiesce_probe_ready(Serial8250ConsoleTxQuiesceProbe);
+                    serial8250_console_tx_quiesce_probe_production_side(
+                        Serial8250ConsoleTxQuiesceProbe
+                    );
+                    serial8250_console_tx_quiesce_probe_kunit_not_stimulus(
+                        Serial8250ConsoleTxQuiesceProbe
+                    );
+                    serial8250_console_tx_quiesce_probe_does_not_write_printk(
+                        Serial8250ConsoleTxQuiesceProbe
+                    );
+                    serial8250_console_tx_quiesce_probe_observes_queue_empty(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_tx_quiesce_probe_observes_thri_stopped(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_tx_quiesce_probe_no_spurious_plic_claim(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Plic
+                    );
+                    serial8250_console_tx_quiesce_probe_no_spurious_irq_dispatch(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        IrqHandlerRegistry
+                    );
+                    serial8250_console_tx_quiesce_probe_no_uart_tx_drain(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_tx_quiesce_probe_no_tty_xmit_mutation(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        TtyXmitFifo
+                    );
+                    serial8250_console_tx_quiesce_probe_no_overflow(
+                        Serial8250ConsoleTxQuiesceProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
                     serial8250_runtime_port_transmit_chars_stops_thri_when_empty(
                         Serial8250RuntimePort
                     );

@@ -3200,6 +3200,18 @@ pub struct Serial8250ConsoleLongBurstIrqTxProbe {
     tty_xmit_fifo_unchanged: bool,
 }
 
+pub struct Serial8250ConsoleTxQuiesceProbe {
+    lifecycle: Lifecycle,
+    no_printk_write: bool,
+    tx_queue_empty_observed: bool,
+    thri_stopped_observed: bool,
+    no_spurious_plic_claim: bool,
+    no_spurious_irq_dispatch: bool,
+    no_uart_tx_drain: bool,
+    no_tty_xmit_fifo_mutation: bool,
+    no_overflow_observed: bool,
+}
+
 pub struct Serial8250RxBatchLoopbackProbe {
     lifecycle: Lifecycle,
     batch_stimulus_committed: bool,
@@ -4397,6 +4409,157 @@ impl Serial8250ConsoleLongBurstIrqTxProbe {
     }
 }
 
+impl Serial8250ConsoleTxQuiesceProbe {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            no_printk_write: false,
+            tx_queue_empty_observed: false,
+            thri_stopped_observed: false,
+            no_spurious_plic_claim: false,
+            no_spurious_irq_dispatch: false,
+            no_uart_tx_drain: false,
+            no_tty_xmit_fifo_mutation: false,
+            no_overflow_observed: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn no_printk_write(&self) -> bool {
+        self.no_printk_write
+    }
+
+    pub const fn tx_queue_empty_observed(&self) -> bool {
+        self.tx_queue_empty_observed
+    }
+
+    pub const fn thri_stopped_observed(&self) -> bool {
+        self.thri_stopped_observed
+    }
+
+    pub const fn no_spurious_plic_claim(&self) -> bool {
+        self.no_spurious_plic_claim
+    }
+
+    pub const fn no_spurious_irq_dispatch(&self) -> bool {
+        self.no_spurious_irq_dispatch
+    }
+
+    pub const fn no_uart_tx_drain(&self) -> bool {
+        self.no_uart_tx_drain
+    }
+
+    pub const fn no_tty_xmit_fifo_mutation(&self) -> bool {
+        self.no_tty_xmit_fifo_mutation
+    }
+
+    pub const fn no_overflow_observed(&self) -> bool {
+        self.no_overflow_observed
+    }
+
+    pub fn setup(
+        &mut self,
+        console_long_burst_irq_tx_probe: &Serial8250ConsoleLongBurstIrqTxProbe,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+    ) -> EventResult {
+        let source = super::ns16550a::uart8250_port_irq_source();
+        let logical_irq = super::ns16550a::uart8250_port_logical_irq();
+        if self.lifecycle.state() != State::Base
+            || console_long_burst_irq_tx_probe.state() != State::Ready
+            || !console_long_burst_irq_tx_probe.tx_queue_empty_after_irq()
+            || !console_long_burst_irq_tx_probe.tx_load_budget_observed()
+            || !console_long_burst_irq_tx_probe.no_overflow_observed()
+            || !console_long_burst_irq_tx_probe.tty_xmit_fifo_unchanged()
+            || plic.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || irq_handler_registry.state() != State::Ready
+            || !super::printk::console_handoff_complete()
+            || !super::ns16550a::serial8250_console_registered()
+            || !super::ns16550a::serial8250_runtime_console_tx_ready()
+            || super::ns16550a::serial8250_tx_queue_len() != 0
+            || super::ns16550a::serial8250_tx_irq_empty_stop_count() == 0
+            || super::ns16550a::serial8250_tx_queue_overflowed()
+            || !logical_irq.is_valid()
+            || plic_irq_domain
+                .mapping_for_source(source)
+                .is_none_or(|mapping| {
+                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
+                })
+            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline_write_calls =
+            super::ns16550a::serial8250_write_call_count_available_for_irq_probe();
+        let baseline_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
+        let baseline_drains = super::ns16550a::serial8250_tx_irq_drain_count();
+        let baseline_empty_stops = super::ns16550a::serial8250_tx_irq_empty_stop_count();
+        let baseline_tty_enqueues = super::ns16550a::tty_xmit_fifo_enqueue_count();
+        let baseline_tty_dequeues = super::ns16550a::tty_xmit_fifo_dequeue_count();
+        let baseline_tty_runtime_drains = super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count();
+
+        wait_serial8250_tx_quiesce_window();
+
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        self.no_printk_write =
+            super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
+                == baseline_write_calls
+                && super::ns16550a::serial8250_tx_irq_kick_count() == baseline_kicks;
+        self.tx_queue_empty_observed = super::ns16550a::serial8250_tx_queue_len() == 0;
+        self.thri_stopped_observed = super::ns16550a::serial8250_tx_irq_empty_stop_count()
+            == baseline_empty_stops
+            && observed.thri_disabled == baseline.thri_disabled;
+        self.no_spurious_plic_claim = observed.claims == baseline.claims
+            && observed.zero_claims == baseline.zero_claims
+            && observed.completes == baseline.completes
+            && observed.loop_exits == baseline.loop_exits;
+        self.no_spurious_irq_dispatch = observed.plic_dispatches == baseline.plic_dispatches
+            && observed.irq_dispatches == baseline.irq_dispatches
+            && observed.handler_calls == baseline.handler_calls
+            && observed.handled == baseline.handled;
+        self.no_uart_tx_drain = super::ns16550a::serial8250_tx_irq_drain_count() == baseline_drains;
+        self.no_tty_xmit_fifo_mutation = super::ns16550a::tty_xmit_fifo_enqueue_count()
+            == baseline_tty_enqueues
+            && super::ns16550a::tty_xmit_fifo_dequeue_count() == baseline_tty_dequeues
+            && super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count()
+                == baseline_tty_runtime_drains;
+        self.no_overflow_observed = !super::ns16550a::serial8250_tx_queue_overflowed();
+
+        if !self.no_printk_write
+            || !self.tx_queue_empty_observed
+            || !self.thri_stopped_observed
+            || !self.no_spurious_plic_claim
+            || !self.no_spurious_irq_dispatch
+            || !self.no_uart_tx_drain
+            || !self.no_tty_xmit_fifo_mutation
+            || !self.no_overflow_observed
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        crate::trace::checkpoint(Checkpoint::Serial8250ConsoleTxQuiesceReady);
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
 impl Serial8250RxLoopbackProbe {
     pub const fn new() -> Self {
         Self {
@@ -4461,7 +4624,7 @@ impl Serial8250RxLoopbackProbe {
     pub fn setup(
         &mut self,
         uart_external_irq_enable: &UartExternalIrqEnable,
-        serial8250_console_long_burst_irq_tx_probe: &Serial8250ConsoleLongBurstIrqTxProbe,
+        serial8250_console_tx_quiesce_probe: &Serial8250ConsoleTxQuiesceProbe,
         plic: &Plic,
         plic_irq_domain: &PlicIrqDomain,
         irq_handler_registry: &IrqHandlerRegistry,
@@ -4472,10 +4635,12 @@ impl Serial8250RxLoopbackProbe {
             || uart_external_irq_enable.state() != State::Ready
             || !uart_external_irq_enable.plic_source_gate_open()
             || !uart_external_irq_enable.root_external_input_gate_open()
-            || serial8250_console_long_burst_irq_tx_probe.state() != State::Ready
-            || !serial8250_console_long_burst_irq_tx_probe.tx_queue_empty_after_irq()
-            || !serial8250_console_long_burst_irq_tx_probe.multiple_irq_rounds_observed()
-            || !serial8250_console_long_burst_irq_tx_probe.tx_load_budget_observed()
+            || serial8250_console_tx_quiesce_probe.state() != State::Ready
+            || !serial8250_console_tx_quiesce_probe.tx_queue_empty_observed()
+            || !serial8250_console_tx_quiesce_probe.thri_stopped_observed()
+            || !serial8250_console_tx_quiesce_probe.no_spurious_plic_claim()
+            || !serial8250_console_tx_quiesce_probe.no_spurious_irq_dispatch()
+            || !serial8250_console_tx_quiesce_probe.no_uart_tx_drain()
             || plic.state() != State::Ready
             || plic_irq_domain.state() != State::Ready
             || irq_handler_registry.state() != State::Ready
@@ -5430,6 +5595,14 @@ fn wait_tty_write_runtime_tx_closed(
     }
 
     false
+}
+
+fn wait_serial8250_tx_quiesce_window() {
+    let mut spins = 0usize;
+    while spins < UART_IRQ_CYCLE_SPIN_LIMIT / 16 {
+        core::hint::spin_loop();
+        spins += 1;
+    }
 }
 
 fn serial8250_console_burst_expected_tx_bytes() -> usize {

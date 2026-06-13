@@ -316,6 +316,55 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
         },
     );
     sink.diag_usize(
+        "serial8250_console_tx_quiesce_ready",
+        if ctx.serial8250_console_tx_quiesce_probe.state() == State::Ready {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_console_tx_quiesce_no_printk_write",
+        if ctx.serial8250_console_tx_quiesce_probe.no_printk_write() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_console_tx_quiesce_no_spurious_irq",
+        if ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_spurious_plic_claim()
+            && ctx
+                .serial8250_console_tx_quiesce_probe
+                .no_spurious_irq_dispatch()
+        {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_console_tx_quiesce_no_uart_tx_drain",
+        if ctx.serial8250_console_tx_quiesce_probe.no_uart_tx_drain() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_console_tx_quiesce_no_tty_xmit_mutation",
+        if ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_tty_xmit_fifo_mutation()
+        {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
         "tty_xmit_fifo_probe_ready",
         if ctx.tty_xmit_fifo_probe.state() == State::Ready {
             1
@@ -617,6 +666,27 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx
             .serial8250_console_long_burst_irq_tx_probe
             .tty_xmit_fifo_unchanged()
+        && ctx.serial8250_console_tx_quiesce_probe.state() == State::Ready
+        && ctx.serial8250_console_tx_quiesce_probe.no_printk_write()
+        && ctx
+            .serial8250_console_tx_quiesce_probe
+            .tx_queue_empty_observed()
+        && ctx
+            .serial8250_console_tx_quiesce_probe
+            .thri_stopped_observed()
+        && ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_spurious_plic_claim()
+        && ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_spurious_irq_dispatch()
+        && ctx.serial8250_console_tx_quiesce_probe.no_uart_tx_drain()
+        && ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_tty_xmit_fifo_mutation()
+        && ctx
+            .serial8250_console_tx_quiesce_probe
+            .no_overflow_observed()
         && ctx.serial8250_rx_loopback_probe.state() == State::Ready
         && ctx.serial8250_rx_loopback_probe.rx_runtime_enabled()
         && ctx

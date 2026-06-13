@@ -8,8 +8,9 @@ use super::{
         IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain,
         Serial8250ConsoleBurstIrqTxProbe, Serial8250ConsoleIrqTxProbe,
         Serial8250ConsoleLongBurstIrqTxProbe, Serial8250ConsoleLongIrqTxProbe,
-        Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe, TtyWriteBatchRuntimeTxProbe,
-        TtyWriteRuntimeTxProbe, TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
+        Serial8250ConsoleTxQuiesceProbe, Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe,
+        TtyWriteBatchRuntimeTxProbe, TtyWriteRuntimeTxProbe, TtyXmitFifoProbe,
+        UartExternalIrqEnable, UartInterruptChainProbe,
     },
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
@@ -1820,6 +1821,7 @@ impl InitcallBoundary {
         serial8250_console_burst_irq_tx_probe: &Serial8250ConsoleBurstIrqTxProbe,
         serial8250_console_long_irq_tx_probe: &Serial8250ConsoleLongIrqTxProbe,
         serial8250_console_long_burst_irq_tx_probe: &Serial8250ConsoleLongBurstIrqTxProbe,
+        serial8250_console_tx_quiesce_probe: &Serial8250ConsoleTxQuiesceProbe,
         serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
         serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
         tty_xmit_fifo_probe: &TtyXmitFifoProbe,
@@ -1920,6 +1922,15 @@ impl InitcallBoundary {
             || !serial8250_console_long_burst_irq_tx_probe.local_irq_guard_observed()
             || !serial8250_console_long_burst_irq_tx_probe.no_overflow_observed()
             || !serial8250_console_long_burst_irq_tx_probe.tty_xmit_fifo_unchanged()
+            || serial8250_console_tx_quiesce_probe.state() != State::Ready
+            || !serial8250_console_tx_quiesce_probe.no_printk_write()
+            || !serial8250_console_tx_quiesce_probe.tx_queue_empty_observed()
+            || !serial8250_console_tx_quiesce_probe.thri_stopped_observed()
+            || !serial8250_console_tx_quiesce_probe.no_spurious_plic_claim()
+            || !serial8250_console_tx_quiesce_probe.no_spurious_irq_dispatch()
+            || !serial8250_console_tx_quiesce_probe.no_uart_tx_drain()
+            || !serial8250_console_tx_quiesce_probe.no_tty_xmit_fifo_mutation()
+            || !serial8250_console_tx_quiesce_probe.no_overflow_observed()
             || serial8250_rx_loopback_probe.state() != State::Ready
             || !serial8250_rx_loopback_probe.rx_runtime_enabled()
             || !serial8250_rx_loopback_probe.loopback_stimulus_committed()
@@ -2020,6 +2031,7 @@ pub fn initcall_phase_ready(
     serial8250_console_burst_irq_tx_probe: &Serial8250ConsoleBurstIrqTxProbe,
     serial8250_console_long_irq_tx_probe: &Serial8250ConsoleLongIrqTxProbe,
     serial8250_console_long_burst_irq_tx_probe: &Serial8250ConsoleLongBurstIrqTxProbe,
+    serial8250_console_tx_quiesce_probe: &Serial8250ConsoleTxQuiesceProbe,
     serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
     serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
     tty_xmit_fifo_probe: &TtyXmitFifoProbe,
@@ -2170,6 +2182,15 @@ pub fn initcall_phase_ready(
         && serial8250_console_long_burst_irq_tx_probe.local_irq_guard_observed()
         && serial8250_console_long_burst_irq_tx_probe.no_overflow_observed()
         && serial8250_console_long_burst_irq_tx_probe.tty_xmit_fifo_unchanged()
+        && serial8250_console_tx_quiesce_probe.state() == State::Ready
+        && serial8250_console_tx_quiesce_probe.no_printk_write()
+        && serial8250_console_tx_quiesce_probe.tx_queue_empty_observed()
+        && serial8250_console_tx_quiesce_probe.thri_stopped_observed()
+        && serial8250_console_tx_quiesce_probe.no_spurious_plic_claim()
+        && serial8250_console_tx_quiesce_probe.no_spurious_irq_dispatch()
+        && serial8250_console_tx_quiesce_probe.no_uart_tx_drain()
+        && serial8250_console_tx_quiesce_probe.no_tty_xmit_fifo_mutation()
+        && serial8250_console_tx_quiesce_probe.no_overflow_observed()
         && serial8250_rx_loopback_probe.state() == State::Ready
         && serial8250_rx_loopback_probe.rx_runtime_enabled()
         && serial8250_rx_loopback_probe.loopback_stimulus_committed()
