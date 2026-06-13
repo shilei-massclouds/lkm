@@ -23,10 +23,15 @@ const UART_IER: usize = 1;
 const UART_IIR: usize = 2;
 const UART_MCR: usize = 4;
 const UART_LSR: usize = 5;
+const UART_IER_RDI: usize = 1 << 0;
 const UART_IER_THRI: usize = 1 << 1;
+const UART_IER_RLSI: usize = 1 << 2;
 const UART_IIR_NO_INT: usize = 1;
 const UART_IIR_ID: usize = 0x0e;
 const UART_IIR_THRI: usize = 0x02;
+const UART_IIR_RDI: usize = 0x04;
+const UART_IIR_RLSI: usize = 0x06;
+const UART_IIR_RX_TIMEOUT: usize = 0x0c;
 const UART_MCR_OUT2: usize = 1 << 3;
 const UART_MCR_LOOP: usize = 1 << 4;
 const UART_LSR_DR: usize = 1;
@@ -42,6 +47,8 @@ static UART8250_IRQ_HANDLER_CALLS: AtomicUsize = AtomicUsize::new(0);
 static UART8250_THRE_INTERRUPT_REQUESTS: AtomicUsize = AtomicUsize::new(0);
 static UART8250_THRE_INTERRUPT_HANDLED: AtomicUsize = AtomicUsize::new(0);
 static UART8250_THRI_DISABLED_BY_HANDLER: AtomicUsize = AtomicUsize::new(0);
+static UART8250_RX_INTERRUPT_REQUESTS: AtomicUsize = AtomicUsize::new(0);
+static UART8250_RX_INTERRUPT_HANDLED: AtomicUsize = AtomicUsize::new(0);
 static UART8250_LAST_IIR: AtomicUsize = AtomicUsize::new(UART_IIR_NO_INT);
 static UART8250_LAST_LSR: AtomicUsize = AtomicUsize::new(0);
 
@@ -218,6 +225,16 @@ impl TtyPort {
             && self.no_console_registry_policy
             && self.uart_startup_drives_runtime_enable
     }
+
+    fn enable_for_uart_startup(&mut self) -> bool {
+        if !self.ready || self.initialized || self.online {
+            return false;
+        }
+
+        self.initialized = true;
+        self.online = true;
+        true
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -283,6 +300,30 @@ impl TtyFlipBuffer {
             && self.rx_staging_only
             && self.push_is_observation_boundary
             && self.n_tty_read_deferred
+    }
+
+    fn insert_char(&mut self, byte: u8) -> bool {
+        if !self.ready || self.pending_len >= TTY_FLIP_BUFFER_SIZE {
+            self.overflowed = true;
+            return false;
+        }
+
+        self.buffer[self.pending_len] = byte;
+        self.pending_len += 1;
+        self.total_inserted = self.total_inserted.saturating_add(1);
+        self.last_byte = byte;
+        true
+    }
+
+    fn push(&mut self) -> bool {
+        if !self.ready || self.pending_len == 0 {
+            return false;
+        }
+
+        self.last_pushed_len = self.pending_len;
+        self.push_count = self.push_count.saturating_add(1);
+        self.pending_len = 0;
+        true
     }
 }
 
@@ -474,12 +515,31 @@ impl Serial8250RuntimePort {
             && self.tty_flip_buffer_bound
             && self.tty_xmit_fifo_bound
             && self.thri_demand_driven
-            && self.rx_interrupts_deferred_until_enable
             && self.n_tty_read_deferred
             && self.rx_drain_limit == UART_RX_DRAIN_LIMIT
             && tty_port.facts_ready(port)
             && flip_buffer.facts_ready(tty_port)
             && xmit_fifo.facts_ready(tty_port)
+    }
+
+    fn enable_rx_runtime(&mut self, tty_port: TtyPort) -> bool {
+        if !self.ready
+            || !self.console_tx_interrupt_driven
+            || !tty_port.ready
+            || !tty_port.initialized
+            || !tty_port.online
+            || self.online
+            || self.rdi_enabled
+            || self.rlsi_enabled
+        {
+            return false;
+        }
+
+        self.online = true;
+        self.rdi_enabled = true;
+        self.rlsi_enabled = true;
+        self.rx_interrupts_deferred_until_enable = false;
+        true
     }
 }
 
@@ -1035,9 +1095,6 @@ pub fn uart8250_interrupt_driven_ready() -> bool {
             state.tty_xmit_fifo,
         )
         && state.runtime_port.console_tx_interrupt_driven
-        && !state.runtime_port.online
-        && !state.runtime_port.rdi_enabled
-        && !state.runtime_port.rlsi_enabled
         && state.write_backend.irq_driven_facts_ready(state.port)
 }
 
@@ -1083,6 +1140,14 @@ pub fn uart8250_thre_interrupt_handled_count() -> usize {
 
 pub fn uart8250_thri_disabled_by_handler_count() -> usize {
     UART8250_THRI_DISABLED_BY_HANDLER.load(Ordering::Acquire)
+}
+
+pub fn uart8250_rx_interrupt_request_count() -> usize {
+    UART8250_RX_INTERRUPT_REQUESTS.load(Ordering::Acquire)
+}
+
+pub fn uart8250_rx_interrupt_handled_count() -> usize {
+    UART8250_RX_INTERRUPT_HANDLED.load(Ordering::Acquire)
 }
 
 pub fn serial8250_tx_queue_len() -> usize {
@@ -1158,14 +1223,6 @@ pub fn tty_port_not_backend_owner() -> bool {
         && state.tty_port.no_console_registry_policy
 }
 
-pub fn tty_port_runtime_deferred() -> bool {
-    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
-    state.tty_port.ready
-        && !state.tty_port.initialized
-        && !state.tty_port.online
-        && state.tty_port.uart_startup_drives_runtime_enable
-}
-
 pub fn tty_flip_buffer_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_flip_buffer.facts_ready(state.tty_port)
@@ -1181,6 +1238,66 @@ pub fn tty_flip_buffer_empty() -> bool {
         && state.tty_flip_buffer.last_byte == 0
         && !state.tty_flip_buffer.overflowed
         && state.tty_flip_buffer.buffer[0] == 0
+}
+
+pub fn tty_flip_buffer_pushed() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_flip_buffer.ready
+        && state.tty_flip_buffer.pending_len == 0
+        && state.tty_flip_buffer.push_count != 0
+        && state.tty_flip_buffer.total_inserted != 0
+        && state.tty_flip_buffer.last_pushed_len != 0
+        && !state.tty_flip_buffer.overflowed
+}
+
+pub fn tty_flip_buffer_push_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_flip_buffer
+            .push_count
+    }
+}
+
+pub fn tty_flip_buffer_total_inserted() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_flip_buffer
+            .total_inserted
+    }
+}
+
+pub fn tty_flip_buffer_last_pushed_len() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_flip_buffer
+            .last_pushed_len
+    }
+}
+
+pub fn tty_flip_buffer_last_byte() -> u8 {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_flip_buffer
+            .last_byte
+    }
+}
+
+pub fn tty_flip_buffer_overflowed() -> bool {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .tty_flip_buffer
+            .overflowed
+    }
 }
 
 pub fn tty_xmit_fifo_ready() -> bool {
@@ -1216,11 +1333,23 @@ pub fn serial8250_runtime_rx_deferred() -> bool {
 
 pub fn serial8250_runtime_console_tx_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.runtime_port.ready && state.runtime_port.console_tx_interrupt_driven
+}
+
+pub fn serial8250_runtime_rx_enabled() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.runtime_port.ready
-        && state.runtime_port.console_tx_interrupt_driven
-        && !state.runtime_port.online
-        && !state.runtime_port.rdi_enabled
-        && !state.runtime_port.rlsi_enabled
+        && state.runtime_port.online
+        && state.runtime_port.rdi_enabled
+        && state.runtime_port.rlsi_enabled
+        && !state.runtime_port.rx_interrupts_deferred_until_enable
+        && state.tty_port.ready
+        && state.tty_port.initialized
+        && state.tty_port.online
+}
+
+pub fn serial8250_runtime_rx_last_byte() -> u8 {
+    tty_flip_buffer_last_byte()
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
@@ -1298,10 +1427,72 @@ pub fn enable_serial8250_interrupt_driven_console() -> bool {
     true
 }
 
+pub fn enable_serial8250_runtime_rx() -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    if !state.port.registered
+        || !state.port.irq_handler_registered
+        || !state.port.interrupt_driven_ready
+        || !state.write_backend.irq_driven_facts_ready(state.port)
+        || !state.runtime_port.facts_ready(
+            state.port,
+            state.tty_port,
+            state.tty_flip_buffer,
+            state.tty_xmit_fifo,
+        )
+    {
+        return false;
+    }
+
+    if state.tty_port.initialized
+        || state.tty_port.online
+        || state.runtime_port.online
+        || state.runtime_port.rdi_enabled
+        || state.runtime_port.rlsi_enabled
+    {
+        return false;
+    }
+
+    if !state.tty_port.enable_for_uart_startup()
+        || !state.runtime_port.enable_rx_runtime(state.tty_port)
+    {
+        return false;
+    }
+    let ier = state.write_backend.read_uart_ier() | UART_IER_RDI | UART_IER_RLSI;
+    state.write_backend.write_uart_ier(ier)
+}
+
+pub fn trigger_serial8250_rx_loopback_once(byte: u8) -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    if !state.port.registered
+        || !state.port.irq_handler_registered
+        || !state.write_backend.interrupt_driven
+        || !state.runtime_port.online
+        || !state.runtime_port.rdi_enabled
+        || !state.runtime_port.rlsi_enabled
+        || state.tty_flip_buffer.push_count != 0
+    {
+        return false;
+    }
+
+    let saved = csr::save_and_disable_supervisor_interrupts();
+    let mcr = state.write_backend.read_uart_mcr();
+    let ok = state.write_backend.wait_for_tx_ready()
+        && state
+            .write_backend
+            .write_uart_mcr(mcr | UART_MCR_OUT2 | UART_MCR_LOOP)
+        && state.write_backend.write_uart_tx(byte)
+        && state.write_backend.write_uart_mcr(mcr);
+    csr::restore_supervisor_interrupts(saved);
+    if ok {
+        UART8250_RX_INTERRUPT_REQUESTS.fetch_add(1, Ordering::AcqRel);
+    }
+    ok
+}
+
 pub fn handle_uart_irq() {
     UART8250_IRQ_HANDLER_CALLS.fetch_add(1, Ordering::AcqRel);
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
-    if !state.port.registered || !state.port.thre_interrupt_enabled {
+    if !state.port.registered {
         return;
     }
 
@@ -1312,10 +1503,18 @@ pub fn handle_uart_irq() {
     if iir & UART_IIR_NO_INT != 0 {
         return;
     }
-    if iir & UART_IIR_ID != UART_IIR_THRI {
-        return;
+
+    let interrupt_id = iir & UART_IIR_ID;
+    if is_uart_rx_interrupt(interrupt_id) && state.runtime_port.online {
+        if handle_rx_chars(state, lsr) {
+            UART8250_RX_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
+        }
     }
-    if lsr & UART_LSR_THRE == 0 {
+
+    if interrupt_id != UART_IIR_THRI
+        || lsr & UART_LSR_THRE == 0
+        || !state.port.thre_interrupt_enabled
+    {
         return;
     }
 
@@ -1346,6 +1545,38 @@ pub fn handle_uart_irq() {
         UART8250_THRE_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
         UART8250_THRI_DISABLED_BY_HANDLER.fetch_add(1, Ordering::AcqRel);
     }
+}
+
+fn is_uart_rx_interrupt(interrupt_id: usize) -> bool {
+    matches!(
+        interrupt_id,
+        UART_IIR_RDI | UART_IIR_RLSI | UART_IIR_RX_TIMEOUT
+    )
+}
+
+fn handle_rx_chars(state: &mut Ns16550aProbeState, initial_lsr: usize) -> bool {
+    if !state.runtime_port.online
+        || !state.runtime_port.rdi_enabled
+        || !state.runtime_port.rlsi_enabled
+        || !state.tty_flip_buffer.ready
+    {
+        return false;
+    }
+
+    let mut lsr = initial_lsr;
+    let mut drained = 0usize;
+    let mut inserted = false;
+    while drained < state.runtime_port.rx_drain_limit && lsr & UART_LSR_DR != 0 {
+        let byte = state.write_backend.read_uart_rx() as u8;
+        if !state.tty_flip_buffer.insert_char(byte) {
+            break;
+        }
+        inserted = true;
+        drained += 1;
+        lsr = state.write_backend.read_uart_lsr();
+    }
+
+    inserted && state.tty_flip_buffer.push()
 }
 
 pub fn serial8250_console_registered() -> bool {

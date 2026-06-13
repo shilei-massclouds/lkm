@@ -3122,12 +3122,28 @@ pub struct Serial8250ConsoleIrqTxProbe {
     local_irq_guard_observed: bool,
 }
 
+pub struct Serial8250RxLoopbackProbe {
+    lifecycle: Lifecycle,
+    rx_runtime_enabled: bool,
+    loopback_stimulus_committed: bool,
+    plic_claim_observed: bool,
+    irq_dispatch_observed: bool,
+    uart_handler_received_rx: bool,
+    flip_buffer_pushed: bool,
+    plic_complete_observed: bool,
+    zero_claim_loop_exit_observed: bool,
+    irq_cycle_closed: bool,
+    last_byte_matched: bool,
+}
+
 const UART_IRQ_CYCLE_SPIN_LIMIT: usize = 20_000_000;
 const SERIAL8250_IRQ_TX_PROBE_MESSAGE: &str = "serial8250 irq console\n";
+const SERIAL8250_RX_LOOPBACK_BYTE: u8 = b'R';
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct UartIrqCycleSnapshot {
     requests: usize,
+    rx_requests: usize,
     claims: usize,
     zero_claims: usize,
     plic_dispatches: usize,
@@ -3136,7 +3152,10 @@ struct UartIrqCycleSnapshot {
     irq_dispatches: usize,
     handler_calls: usize,
     handled: usize,
+    rx_handled: usize,
     thri_disabled: usize,
+    flip_pushes: usize,
+    flip_inserted: usize,
 }
 
 impl UartInterruptChainProbe {
@@ -3461,12 +3480,201 @@ impl Serial8250ConsoleIrqTxProbe {
     }
 }
 
+impl Serial8250RxLoopbackProbe {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            rx_runtime_enabled: false,
+            loopback_stimulus_committed: false,
+            plic_claim_observed: false,
+            irq_dispatch_observed: false,
+            uart_handler_received_rx: false,
+            flip_buffer_pushed: false,
+            plic_complete_observed: false,
+            zero_claim_loop_exit_observed: false,
+            irq_cycle_closed: false,
+            last_byte_matched: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn rx_runtime_enabled(&self) -> bool {
+        self.rx_runtime_enabled
+    }
+
+    pub const fn loopback_stimulus_committed(&self) -> bool {
+        self.loopback_stimulus_committed
+    }
+
+    pub const fn plic_claim_observed(&self) -> bool {
+        self.plic_claim_observed
+    }
+
+    pub const fn irq_dispatch_observed(&self) -> bool {
+        self.irq_dispatch_observed
+    }
+
+    pub const fn uart_handler_received_rx(&self) -> bool {
+        self.uart_handler_received_rx
+    }
+
+    pub const fn flip_buffer_pushed(&self) -> bool {
+        self.flip_buffer_pushed
+    }
+
+    pub const fn plic_complete_observed(&self) -> bool {
+        self.plic_complete_observed
+    }
+
+    pub const fn zero_claim_loop_exit_observed(&self) -> bool {
+        self.zero_claim_loop_exit_observed
+    }
+
+    pub const fn irq_cycle_closed(&self) -> bool {
+        self.irq_cycle_closed
+    }
+
+    pub const fn last_byte_matched(&self) -> bool {
+        self.last_byte_matched
+    }
+
+    pub fn setup(
+        &mut self,
+        uart_external_irq_enable: &UartExternalIrqEnable,
+        serial8250_console_irq_tx_probe: &Serial8250ConsoleIrqTxProbe,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+    ) -> EventResult {
+        let source = super::ns16550a::uart8250_port_irq_source();
+        let logical_irq = super::ns16550a::uart8250_port_logical_irq();
+        if self.lifecycle.state() != State::Base
+            || uart_external_irq_enable.state() != State::Ready
+            || !uart_external_irq_enable.plic_source_gate_open()
+            || !uart_external_irq_enable.root_external_input_gate_open()
+            || serial8250_console_irq_tx_probe.state() != State::Ready
+            || !serial8250_console_irq_tx_probe.interrupt_driven_enabled()
+            || !serial8250_console_irq_tx_probe.tx_queue_empty_after_irq()
+            || plic.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || irq_handler_registry.state() != State::Ready
+            || !super::ns16550a::serial8250_runtime_port_ready()
+            || !super::ns16550a::serial8250_runtime_console_tx_ready()
+            || !super::ns16550a::serial8250_runtime_rx_deferred()
+            || !super::ns16550a::tty_flip_buffer_empty()
+            || !logical_irq.is_valid()
+            || plic_irq_domain
+                .mapping_for_source(source)
+                .is_none_or(|mapping| {
+                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
+                })
+            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        if !super::ns16550a::enable_serial8250_runtime_rx() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+        self.rx_runtime_enabled = super::ns16550a::serial8250_runtime_rx_enabled();
+        if !self.rx_runtime_enabled {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        if !super::ns16550a::trigger_serial8250_rx_loopback_once(SERIAL8250_RX_LOOPBACK_BYTE) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        if !wait_serial8250_rx_loopback_closed(
+            plic,
+            irq_handler_registry,
+            baseline,
+            source,
+            SERIAL8250_RX_LOOPBACK_BYTE,
+        ) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        self.loopback_stimulus_committed = observed.rx_requests > baseline.rx_requests;
+        self.plic_claim_observed =
+            observed.claims > baseline.claims && plic.last_claimed_source() == source;
+        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+            && observed.irq_dispatches > baseline.irq_dispatches;
+        self.uart_handler_received_rx = observed.handler_calls > baseline.handler_calls
+            && observed.rx_handled > baseline.rx_handled;
+        self.flip_buffer_pushed = observed.flip_pushes > baseline.flip_pushes
+            && observed.flip_inserted > baseline.flip_inserted
+            && super::ns16550a::tty_flip_buffer_pushed();
+        self.plic_complete_observed =
+            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
+            && observed.loop_exits > baseline.loop_exits;
+        self.irq_cycle_closed =
+            uart_rx_cycle_completed_and_closed(plic, observed, baseline, source);
+        self.last_byte_matched =
+            super::ns16550a::serial8250_runtime_rx_last_byte() == SERIAL8250_RX_LOOPBACK_BYTE;
+
+        if !self.loopback_stimulus_committed
+            || !self.plic_claim_observed
+            || !self.irq_dispatch_observed
+            || !self.uart_handler_received_rx
+            || !self.flip_buffer_pushed
+            || !self.plic_complete_observed
+            || !self.zero_claim_loop_exit_observed
+            || !self.irq_cycle_closed
+            || !self.last_byte_matched
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        crate::trace::checkpoint(Checkpoint::Serial8250RxLoopbackReady);
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
 fn uart_irq_cycle_snapshot(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
 ) -> UartIrqCycleSnapshot {
     UartIrqCycleSnapshot {
         requests: super::ns16550a::uart8250_thre_interrupt_request_count(),
+        rx_requests: super::ns16550a::uart8250_rx_interrupt_request_count(),
         claims: plic.claim_count(),
         zero_claims: plic.zero_claim_count(),
         plic_dispatches: plic.dispatch_count(),
@@ -3475,8 +3683,77 @@ fn uart_irq_cycle_snapshot(
         irq_dispatches: irq_handler_registry.dispatch_calls(),
         handler_calls: super::ns16550a::uart8250_irq_handler_call_count(),
         handled: super::ns16550a::uart8250_thre_interrupt_handled_count(),
+        rx_handled: super::ns16550a::uart8250_rx_interrupt_handled_count(),
         thri_disabled: super::ns16550a::uart8250_thri_disabled_by_handler_count(),
+        flip_pushes: super::ns16550a::tty_flip_buffer_push_count(),
+        flip_inserted: super::ns16550a::tty_flip_buffer_total_inserted(),
     }
+}
+
+fn wait_serial8250_rx_loopback_closed(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+    baseline: UartIrqCycleSnapshot,
+    source: u32,
+    expected_byte: u8,
+) -> bool {
+    let mut spins = 0usize;
+
+    while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        if current.rx_requests > baseline.rx_requests
+            && current.claims > baseline.claims
+            && current.plic_dispatches > baseline.plic_dispatches
+            && current.irq_dispatches > baseline.irq_dispatches
+            && current.handler_calls > baseline.handler_calls
+            && current.rx_handled > baseline.rx_handled
+            && current.flip_pushes > baseline.flip_pushes
+            && current.flip_inserted > baseline.flip_inserted
+            && current.completes > baseline.completes
+            && current.zero_claims > baseline.zero_claims
+            && current.loop_exits > baseline.loop_exits
+            && super::ns16550a::serial8250_runtime_rx_enabled()
+            && super::ns16550a::serial8250_runtime_rx_last_byte() == expected_byte
+            && plic.last_claimed_source() == source
+            && plic.last_completed_source() == source
+            && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
+        {
+            return true;
+        }
+
+        core::hint::spin_loop();
+        spins += 1;
+    }
+
+    false
+}
+
+fn uart_rx_cycle_completed_and_closed(
+    plic: &Plic,
+    current: UartIrqCycleSnapshot,
+    baseline: UartIrqCycleSnapshot,
+    source: u32,
+) -> bool {
+    let claim_delta = current.claims.saturating_sub(baseline.claims);
+    let complete_delta = current.completes.saturating_sub(baseline.completes);
+    let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
+    let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
+
+    current.rx_requests > baseline.rx_requests
+        && current.claims > baseline.claims
+        && current.plic_dispatches > baseline.plic_dispatches
+        && current.irq_dispatches > baseline.irq_dispatches
+        && current.handler_calls > baseline.handler_calls
+        && current.rx_handled > baseline.rx_handled
+        && current.flip_pushes > baseline.flip_pushes
+        && current.flip_inserted > baseline.flip_inserted
+        && current.completes > baseline.completes
+        && current.zero_claims > baseline.zero_claims
+        && current.loop_exits > baseline.loop_exits
+        && claim_delta == complete_delta
+        && zero_claim_delta == loop_exit_delta
+        && plic.last_claimed_source() == source
+        && plic.last_completed_source() == source
 }
 
 fn wait_uart_irq_cycle_closed(

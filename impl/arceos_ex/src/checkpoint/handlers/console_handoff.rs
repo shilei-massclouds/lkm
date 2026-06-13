@@ -299,7 +299,6 @@ impl ConsoleHandoffFixture {
             && ns16550a::uart8250_irq_handler_dispatch_ready()
             && ns16550a::tty_port_ready()
             && ns16550a::tty_port_not_backend_owner()
-            && ns16550a::tty_port_runtime_deferred()
             && ns16550a::tty_flip_buffer_ready()
             && ns16550a::tty_flip_buffer_empty()
             && ns16550a::tty_xmit_fifo_ready()

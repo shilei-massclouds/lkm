@@ -106,17 +106,35 @@ pub fn run() -> SmokeResult {
         || !ctx
             .serial8250_console_irq_tx_probe
             .local_irq_guard_observed()
+        || ctx.serial8250_rx_loopback_probe.state() != State::Ready
+        || !ctx.serial8250_rx_loopback_probe.rx_runtime_enabled()
+        || !ctx
+            .serial8250_rx_loopback_probe
+            .loopback_stimulus_committed()
+        || !ctx.serial8250_rx_loopback_probe.plic_claim_observed()
+        || !ctx.serial8250_rx_loopback_probe.irq_dispatch_observed()
+        || !ctx.serial8250_rx_loopback_probe.uart_handler_received_rx()
+        || !ctx.serial8250_rx_loopback_probe.flip_buffer_pushed()
+        || !ctx.serial8250_rx_loopback_probe.plic_complete_observed()
+        || !ctx
+            .serial8250_rx_loopback_probe
+            .zero_claim_loop_exit_observed()
+        || !ctx.serial8250_rx_loopback_probe.irq_cycle_closed()
+        || !ctx.serial8250_rx_loopback_probe.last_byte_matched()
         || !crate::objects::ns16550a::uart8250_interrupt_driven_ready()
         || !crate::objects::ns16550a::serial8250_runtime_port_ready()
         || !crate::objects::ns16550a::serial8250_runtime_console_tx_ready()
-        || !crate::objects::ns16550a::serial8250_runtime_rx_deferred()
+        || !crate::objects::ns16550a::serial8250_runtime_rx_enabled()
         || !crate::objects::ns16550a::tty_port_ready()
         || !crate::objects::ns16550a::tty_port_not_backend_owner()
-        || !crate::objects::ns16550a::tty_port_runtime_deferred()
         || !crate::objects::ns16550a::tty_flip_buffer_ready()
-        || !crate::objects::ns16550a::tty_flip_buffer_empty()
+        || !crate::objects::ns16550a::tty_flip_buffer_pushed()
+        || crate::objects::ns16550a::tty_flip_buffer_last_pushed_len() == 0
+        || crate::objects::ns16550a::tty_flip_buffer_overflowed()
         || !crate::objects::ns16550a::tty_xmit_fifo_ready()
         || !crate::objects::ns16550a::tty_xmit_fifo_deferred_from_console_tx()
+        || crate::objects::ns16550a::uart8250_rx_interrupt_request_count() == 0
+        || crate::objects::ns16550a::uart8250_rx_interrupt_handled_count() == 0
         || crate::objects::ns16550a::serial8250_tx_irq_drain_count() == 0
         || crate::objects::ns16550a::serial8250_tx_queue_len() != 0
         || !ctx.interrupt_stream.supervisor_external_input_gate_open()

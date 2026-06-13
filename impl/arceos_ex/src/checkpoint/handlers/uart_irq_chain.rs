@@ -97,8 +97,45 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
         },
     );
     sink.diag_usize(
-        "serial8250_runtime_rx_deferred",
-        if ns16550a::serial8250_runtime_rx_deferred() {
+        "serial8250_runtime_rx_previously_deferred",
+        if !ns16550a::serial8250_runtime_rx_enabled() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_runtime_rx_enabled",
+        if ns16550a::serial8250_runtime_rx_enabled() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_rx_requests",
+        ns16550a::uart8250_rx_interrupt_request_count(),
+    );
+    sink.diag_usize(
+        "serial8250_rx_handled",
+        ns16550a::uart8250_rx_interrupt_handled_count(),
+    );
+    sink.diag_usize("tty_flip_pushes", ns16550a::tty_flip_buffer_push_count());
+    sink.diag_usize(
+        "tty_flip_inserted",
+        ns16550a::tty_flip_buffer_total_inserted(),
+    );
+    sink.diag_usize(
+        "tty_flip_last_pushed_len",
+        ns16550a::tty_flip_buffer_last_pushed_len(),
+    );
+    sink.diag_usize(
+        "tty_flip_last_byte",
+        ns16550a::tty_flip_buffer_last_byte() as usize,
+    );
+    sink.diag_usize(
+        "tty_flip_overflowed",
+        if ns16550a::tty_flip_buffer_overflowed() {
             1
         } else {
             0
@@ -162,17 +199,35 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx
             .serial8250_console_irq_tx_probe
             .local_irq_guard_observed()
+        && ctx.serial8250_rx_loopback_probe.state() == State::Ready
+        && ctx.serial8250_rx_loopback_probe.rx_runtime_enabled()
+        && ctx
+            .serial8250_rx_loopback_probe
+            .loopback_stimulus_committed()
+        && ctx.serial8250_rx_loopback_probe.plic_claim_observed()
+        && ctx.serial8250_rx_loopback_probe.irq_dispatch_observed()
+        && ctx.serial8250_rx_loopback_probe.uart_handler_received_rx()
+        && ctx.serial8250_rx_loopback_probe.flip_buffer_pushed()
+        && ctx.serial8250_rx_loopback_probe.plic_complete_observed()
+        && ctx
+            .serial8250_rx_loopback_probe
+            .zero_claim_loop_exit_observed()
+        && ctx.serial8250_rx_loopback_probe.irq_cycle_closed()
+        && ctx.serial8250_rx_loopback_probe.last_byte_matched()
         && ns16550a::uart8250_interrupt_driven_ready()
         && ns16550a::serial8250_runtime_port_ready()
         && ns16550a::serial8250_runtime_console_tx_ready()
-        && ns16550a::serial8250_runtime_rx_deferred()
+        && ns16550a::serial8250_runtime_rx_enabled()
         && ns16550a::tty_port_ready()
         && ns16550a::tty_port_not_backend_owner()
-        && ns16550a::tty_port_runtime_deferred()
         && ns16550a::tty_flip_buffer_ready()
-        && ns16550a::tty_flip_buffer_empty()
+        && ns16550a::tty_flip_buffer_pushed()
+        && ns16550a::tty_flip_buffer_last_pushed_len() != 0
+        && !ns16550a::tty_flip_buffer_overflowed()
         && ns16550a::tty_xmit_fifo_ready()
         && ns16550a::tty_xmit_fifo_deferred_from_console_tx()
+        && ns16550a::uart8250_rx_interrupt_request_count() != 0
+        && ns16550a::uart8250_rx_interrupt_handled_count() != 0
         && ns16550a::serial8250_tx_irq_drain_count() != 0
         && ns16550a::serial8250_tx_queue_len() == 0
         && ctx.plic.chained_handler_ready()
