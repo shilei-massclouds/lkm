@@ -82,6 +82,11 @@ predicate serial8250_console_write_uses_uart_membase<T, P>(console: T, port: P) 
 predicate serial8250_console_write_uses_lsr_thr_polling<T, P>(console: T, port: P) -> bool;
 predicate serial8250_console_write_does_not_use_sbi<T>(console: T) -> bool;
 predicate serial8250_console_interrupt_output_deferred_until_irqchip<T>(console: T) -> bool;
+predicate serial8250_console_interrupt_driven_ready<T>(console: T) -> bool;
+predicate serial8250_console_tx_queue_guarded_by_local_irq_save<T>(console: T) -> bool;
+predicate serial8250_console_tx_irq_kicks_thri<T>(console: T) -> bool;
+predicate serial8250_console_tx_irq_handler_drains_queue<T>(console: T) -> bool;
+predicate serial8250_console_tx_queue_empty_after_irq<T>(console: T) -> bool;
 predicate serial8250_console_online_trace_emitted<T>(console: T) -> bool;
 predicate serial8250_console_delivered_records_not_replayed_by_earlycon<T>(console: T) -> bool;
 
@@ -293,6 +298,41 @@ object Serial8250Console: ConsoleObject {
             serial8250_console_write_uses_lsr_thr_polling(Serial8250Console, Uart8250Port);
             serial8250_console_write_does_not_use_sbi(Serial8250Console);
             serial8250_console_interrupt_output_deferred_until_irqchip(Serial8250Console);
+            serial8250_console_online_trace_emitted(Serial8250Console);
+            serial8250_console_delivered_records_not_replayed_by_earlycon(Serial8250Console);
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                depends_on {
+                    UartInterruptChainProbe.state == State::Ready;
+                }
+
+                ensures {
+                    serial8250_console_interrupt_driven_ready(Serial8250Console);
+                    serial8250_console_tx_queue_guarded_by_local_irq_save(Serial8250Console);
+                    serial8250_console_tx_irq_kicks_thri(Serial8250Console);
+                    serial8250_console_tx_irq_handler_drains_queue(Serial8250Console);
+                    serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            serial8250_console_registered(Serial8250Console, Uart8250Port);
+            serial8250_console_real_console(Serial8250Console);
+            serial8250_console_consdev(Serial8250Console);
+            serial8250_console_matches_stdout_path(Serial8250Console, DeviceTree);
+            serial8250_console_write_backend_ready(Serial8250Console, Uart8250Port);
+            serial8250_console_write_uses_uart_membase(Serial8250Console, Uart8250Port);
+            serial8250_console_write_does_not_use_sbi(Serial8250Console);
+            serial8250_console_interrupt_driven_ready(Serial8250Console);
+            serial8250_console_tx_queue_guarded_by_local_irq_save(Serial8250Console);
+            serial8250_console_tx_irq_kicks_thri(Serial8250Console);
+            serial8250_console_tx_irq_handler_drains_queue(Serial8250Console);
+            serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
             serial8250_console_online_trace_emitted(Serial8250Console);
             serial8250_console_delivered_records_not_replayed_by_earlycon(Serial8250Console);
         }

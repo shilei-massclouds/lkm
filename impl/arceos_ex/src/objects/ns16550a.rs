@@ -10,6 +10,7 @@ use super::{
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     printk,
 };
+use crate::{arch::riscv64::csr, trace, trace::Checkpoint};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 const NS16550A_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"ns16550a")];
@@ -31,6 +32,7 @@ const UART_MCR_LOOP: usize = 1 << 4;
 const UART_LSR_DR: usize = 1;
 const UART_LSR_THRE: usize = 1 << 5;
 const UART_POLL_SPINS: usize = 100_000;
+const UART_TX_QUEUE_SIZE: usize = 512;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
 
@@ -103,6 +105,7 @@ pub struct Uart8250Port {
     irq_handler_hardirq_context_required: bool,
     irq_handler_dispatch_ready: bool,
     interrupt_output_deferred: bool,
+    interrupt_driven_ready: bool,
     interrupt_trigger_ready: bool,
     thre_interrupt_enabled: bool,
     thre_interrupt_handled: bool,
@@ -134,6 +137,7 @@ impl Uart8250Port {
             irq_handler_hardirq_context_required: false,
             irq_handler_dispatch_ready: false,
             interrupt_output_deferred: false,
+            interrupt_driven_ready: false,
             interrupt_trigger_ready: false,
             thre_interrupt_enabled: false,
             thre_interrupt_handled: false,
@@ -190,6 +194,15 @@ pub struct Serial8250WriteBackend {
     uses_sbi: bool,
     interrupt_driven: bool,
     interrupt_output_deferred: bool,
+    tx_queue: [u8; UART_TX_QUEUE_SIZE],
+    tx_head: usize,
+    tx_tail: usize,
+    tx_queued: usize,
+    tx_queue_overflow: bool,
+    tx_irq_kicks: usize,
+    tx_irq_drains: usize,
+    tx_irq_empty_stop: usize,
+    tx_irq_guarded_by_local_irq_save: bool,
     write_calls: usize,
     bytes_accepted: usize,
     tx_bytes_submitted: usize,
@@ -223,6 +236,15 @@ impl Serial8250WriteBackend {
             uses_sbi: false,
             interrupt_driven: false,
             interrupt_output_deferred: false,
+            tx_queue: [0; UART_TX_QUEUE_SIZE],
+            tx_head: 0,
+            tx_tail: 0,
+            tx_queued: 0,
+            tx_queue_overflow: false,
+            tx_irq_kicks: 0,
+            tx_irq_drains: 0,
+            tx_irq_empty_stop: 0,
+            tx_irq_guarded_by_local_irq_save: false,
             write_calls: 0,
             bytes_accepted: 0,
             tx_bytes_submitted: 0,
@@ -277,6 +299,15 @@ impl Serial8250WriteBackend {
             uses_sbi: false,
             interrupt_driven: false,
             interrupt_output_deferred: true,
+            tx_queue: [0; UART_TX_QUEUE_SIZE],
+            tx_head: 0,
+            tx_tail: 0,
+            tx_queued: 0,
+            tx_queue_overflow: false,
+            tx_irq_kicks: 0,
+            tx_irq_drains: 0,
+            tx_irq_empty_stop: 0,
+            tx_irq_guarded_by_local_irq_save: false,
             write_calls: 0,
             bytes_accepted: 0,
             tx_bytes_submitted: 0,
@@ -288,12 +319,19 @@ impl Serial8250WriteBackend {
     }
 
     fn record_write(&mut self, bytes: &[u8]) -> bool {
-        if !self.ready || !self.uses_lsr_thr_polling || self.uses_sbi || self.interrupt_driven {
+        if !self.ready || self.uses_sbi {
             return false;
         }
 
         self.write_calls = self.write_calls.saturating_add(1);
         self.bytes_accepted = self.bytes_accepted.saturating_add(bytes.len());
+        if self.interrupt_driven {
+            return self.enqueue_console_bytes_and_kick(bytes);
+        }
+
+        if !self.uses_lsr_thr_polling {
+            return false;
+        }
         for byte in bytes {
             if *byte == b'\n' {
                 if !self.write_tx_byte(b'\r') {
@@ -303,6 +341,129 @@ impl Serial8250WriteBackend {
             }
             if !self.write_tx_byte(*byte) {
                 return false;
+            }
+        }
+        true
+    }
+
+    fn enable_interrupt_driven(&mut self) -> bool {
+        if !self.ready
+            || !self.uses_uart_membase
+            || self.uses_sbi
+            || self.interrupt_driven
+            || !self.interrupt_output_deferred
+        {
+            return false;
+        }
+
+        self.uses_lsr_thr_polling = false;
+        self.interrupt_driven = true;
+        self.interrupt_output_deferred = false;
+        self.tx_head = 0;
+        self.tx_tail = 0;
+        self.tx_queued = 0;
+        self.tx_queue_overflow = false;
+        self.tx_irq_kicks = 0;
+        self.tx_irq_drains = 0;
+        self.tx_irq_empty_stop = 0;
+        self.tx_irq_guarded_by_local_irq_save = false;
+        trace::checkpoint(Checkpoint::Serial8250ConsoleIrqDrivenReady);
+        true
+    }
+
+    fn enqueue_console_bytes_and_kick(&mut self, bytes: &[u8]) -> bool {
+        let saved = csr::save_and_disable_supervisor_interrupts();
+        self.tx_irq_guarded_by_local_irq_save = true;
+        let mut ok = true;
+        for byte in bytes {
+            if *byte == b'\n' {
+                ok &= self.enqueue_tx_byte(b'\r');
+                if ok {
+                    self.crlf_insertions = self.crlf_insertions.saturating_add(1);
+                }
+            }
+            ok &= self.enqueue_tx_byte(*byte);
+        }
+        let kicked = ok && self.kick_tx_interrupt_locked();
+        csr::restore_supervisor_interrupts(saved);
+        ok && kicked
+    }
+
+    fn enqueue_tx_byte(&mut self, byte: u8) -> bool {
+        if self.tx_queued == UART_TX_QUEUE_SIZE {
+            self.tx_queue_overflow = true;
+            return false;
+        }
+
+        self.tx_queue[self.tx_tail] = byte;
+        self.tx_tail = (self.tx_tail + 1) % UART_TX_QUEUE_SIZE;
+        self.tx_queued += 1;
+        true
+    }
+
+    fn pop_tx_byte(&mut self) -> Option<u8> {
+        if self.tx_queued == 0 {
+            return None;
+        }
+
+        let byte = self.tx_queue[self.tx_head];
+        self.tx_head = (self.tx_head + 1) % UART_TX_QUEUE_SIZE;
+        self.tx_queued -= 1;
+        Some(byte)
+    }
+
+    fn kick_tx_interrupt_locked(&mut self) -> bool {
+        if self.tx_queued == 0 {
+            return true;
+        }
+        let mcr = self.read_uart_mcr();
+        if !self.write_uart_mcr(mcr | UART_MCR_OUT2) {
+            return false;
+        }
+        let ier = self.read_uart_ier();
+        if !self.write_uart_ier(ier | UART_IER_THRI) {
+            return false;
+        }
+        self.tx_irq_kicks = self.tx_irq_kicks.saturating_add(1);
+        UART8250_THRE_INTERRUPT_REQUESTS.fetch_add(1, Ordering::AcqRel);
+        true
+    }
+
+    fn drain_one_tx_irq(&mut self) -> bool {
+        if !self.interrupt_driven {
+            return false;
+        }
+        if self.tx_queued == 0 {
+            let ier = self.read_uart_ier() & !UART_IER_THRI;
+            if self.write_uart_ier(ier) {
+                self.tx_irq_empty_stop = self.tx_irq_empty_stop.saturating_add(1);
+                UART8250_THRI_DISABLED_BY_HANDLER.fetch_add(1, Ordering::AcqRel);
+                return true;
+            }
+            return false;
+        }
+
+        while self.tx_queued != 0 {
+            if self.read_uart_lsr() & UART_LSR_THRE == 0 {
+                return true;
+            }
+            let Some(byte) = self.pop_tx_byte() else {
+                break;
+            };
+            if !self.write_uart_tx(byte) {
+                return false;
+            }
+            self.tx_bytes_submitted = self.tx_bytes_submitted.saturating_add(1);
+            self.last_tx_byte = byte;
+            self.mmio_writes_performed = true;
+            self.tx_irq_drains = self.tx_irq_drains.saturating_add(1);
+        }
+
+        if self.tx_queued == 0 {
+            let ier = self.read_uart_ier() & !UART_IER_THRI;
+            if self.write_uart_ier(ier) {
+                self.tx_irq_empty_stop = self.tx_irq_empty_stop.saturating_add(1);
+                UART8250_THRI_DISABLED_BY_HANDLER.fetch_add(1, Ordering::AcqRel);
             }
         }
         true
@@ -409,6 +570,22 @@ impl Serial8250WriteBackend {
             && !self.interrupt_driven
             && self.interrupt_output_deferred
     }
+
+    fn irq_driven_facts_ready(self, port: Uart8250Port) -> bool {
+        self.ready
+            && port.registered
+            && port.interrupt_driven_ready
+            && self.device_ref == port.device_ref
+            && self.membase == port.membase
+            && self.tx_addr == port.membase
+            && self.uses_uart_membase
+            && !self.uses_lsr_thr_polling
+            && !self.uses_sbi
+            && self.interrupt_driven
+            && !self.interrupt_output_deferred
+            && self.tx_irq_guarded_by_local_irq_save
+            && !self.tx_queue_overflow
+    }
 }
 
 static mut NS16550A_PROBE_STATE: Ns16550aProbeState = Ns16550aProbeState::new();
@@ -452,7 +629,6 @@ pub fn uart8250_port_resources_ready() -> bool {
         && state.port.irq_source != 0
         && state.port.irq_mapping_ready
         && state.port.logical_irq.is_valid()
-        && state.port.interrupt_output_deferred
         && state.port.line != usize::MAX
 }
 
@@ -504,6 +680,14 @@ pub fn uart8250_interrupt_output_still_deferred() -> bool {
     state.port.registered && state.port.interrupt_output_deferred
 }
 
+pub fn uart8250_interrupt_driven_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered
+        && state.port.interrupt_driven_ready
+        && !state.port.interrupt_output_deferred
+        && state.write_backend.irq_driven_facts_ready(state.port)
+}
+
 pub fn uart8250_interrupt_trigger_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.port.registered && state.port.interrupt_trigger_ready
@@ -546,6 +730,66 @@ pub fn uart8250_thre_interrupt_handled_count() -> usize {
 
 pub fn uart8250_thri_disabled_by_handler_count() -> usize {
     UART8250_THRI_DISABLED_BY_HANDLER.load(Ordering::Acquire)
+}
+
+pub fn serial8250_tx_queue_len() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .tx_queued
+    }
+}
+
+pub fn serial8250_tx_irq_kick_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .tx_irq_kicks
+    }
+}
+
+pub fn serial8250_tx_irq_drain_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .tx_irq_drains
+    }
+}
+
+pub fn serial8250_tx_irq_empty_stop_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .tx_irq_empty_stop
+    }
+}
+
+pub fn serial8250_tx_queue_overflowed() -> bool {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .tx_queue_overflow
+    }
+}
+
+pub fn serial8250_tx_queue_guarded_by_local_irq_save() -> bool {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .tx_irq_guarded_by_local_irq_save
+    }
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
@@ -600,6 +844,25 @@ pub fn trigger_uart8250_thre_interrupt_once() -> bool {
     true
 }
 
+pub fn enable_serial8250_interrupt_driven_console() -> bool {
+    let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
+    if !state.serial_console_registered
+        || !state.handoff_triggered
+        || !state.port.registered
+        || !state.port.irq_handler_registered
+        || !state.write_backend.facts_ready(state.port)
+    {
+        return false;
+    }
+
+    if !state.write_backend.enable_interrupt_driven() {
+        return false;
+    }
+    state.port.interrupt_output_deferred = false;
+    state.port.interrupt_driven_ready = true;
+    true
+}
+
 pub fn handle_uart_irq() {
     UART8250_IRQ_HANDLER_CALLS.fetch_add(1, Ordering::AcqRel);
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
@@ -618,6 +881,16 @@ pub fn handle_uart_irq() {
         return;
     }
     if lsr & UART_LSR_THRE == 0 {
+        return;
+    }
+
+    if state.write_backend.interrupt_driven {
+        if !state.write_backend.drain_one_tx_irq() {
+            return;
+        }
+        state.port.thre_interrupt_enabled = state.write_backend.tx_queued != 0;
+        state.port.thre_interrupt_handled = state.write_backend.tx_queued == 0;
+        UART8250_THRE_INTERRUPT_HANDLED.fetch_add(1, Ordering::AcqRel);
         return;
     }
 
@@ -691,6 +964,10 @@ pub fn serial8250_interrupt_output_deferred() -> bool {
 
 #[cfg(checkpoint_handler_console_handoff)]
 pub fn serial8250_write_call_count() -> usize {
+    serial8250_write_call_count_available_for_irq_probe()
+}
+
+pub fn serial8250_write_call_count_available_for_irq_probe() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
             .as_ref()
@@ -825,10 +1102,26 @@ fn ns16550a_probe(
 
 pub fn write_console_bytes(bytes: &[u8]) -> bool {
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
-    if !state.serial_console_registered || !state.write_backend.facts_ready(state.port) {
+    if !state.serial_console_registered
+        || !(state.write_backend.facts_ready(state.port)
+            || state.write_backend.interrupt_driven
+                && state.write_backend.ready
+                && state.port.interrupt_driven_ready)
+    {
         return false;
     }
-    state.write_backend.record_write(bytes)
+    let interrupt_driven = state.write_backend.interrupt_driven;
+    if interrupt_driven {
+        state.port.thre_interrupt_enabled = true;
+        state.port.thre_interrupt_handled = false;
+    }
+    let delivered = state.write_backend.record_write(bytes);
+    if delivered && interrupt_driven {
+        state.port.thre_interrupt_enabled = state.write_backend.tx_queued != 0;
+    } else if !delivered && interrupt_driven {
+        state.port.thre_interrupt_enabled = false;
+    }
+    delivered
 }
 
 #[cfg(checkpoint_handler_console_handoff)]
@@ -892,6 +1185,7 @@ fn build_uart8250_port(
         irq_handler_hardirq_context_required: false,
         irq_handler_dispatch_ready: false,
         interrupt_output_deferred: true,
+        interrupt_driven_ready: false,
         interrupt_trigger_ready: false,
         thre_interrupt_enabled: false,
         thre_interrupt_handled: false,

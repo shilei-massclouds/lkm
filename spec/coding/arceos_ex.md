@@ -423,13 +423,19 @@ consdev、不得完成 handoff，也不得影响 boot console route。dummy/non-
 应保持幂等，不得重复分配 port、重复增加 registry entry 或重复执行 boot console unregister。
 
 handoff 后 `printk::write_str()` 或等价输出入口必须经 `ConsoleRegistry` route 分发到 `Serial8250Console`，
-不得继续停留在只写 `PrintkBuffer` 的事实层。当前 serial8250 后端必须建模为无中断 polling write：
+不得继续停留在只写 `PrintkBuffer` 的事实层。在 PLIC/UART 外部中断链打开前，serial8250 后端必须建模为无中断 polling write：
 每个待发送字符按 Linux `uart_console_write()` 语义处理换行 CRLF，发送前观察 LSR/THRE ready 条件，然后写 THR/TX；
 寄存器地址必须从 `Uart8250Port.membase` 加 `reg_shift` 派生，并尊重 `reg_io_width`。代码只有在
 `VmallocAllocator.map_page_range()` 已把 vmap VA/PA 映射安装进当前 swapper 页表并记录 runtime mapping ready
 后，才能对 `membase` 派生出的 LSR/THR 地址做 `read_volatile`/`write_volatile`；不得直接访问 `mapbase`，
-也不得用 SBI 路径伪装真实 UART 写。由于 PLIC/IRQ 驱动尚不可用，本阶段不得实现或声明 interrupt-driven console
-output ready，只能记录 IRQ 输出路径 deferred。
+也不得用 SBI 路径伪装真实 UART 写。PLIC source gate 和 root external input gate 尚未打开前，不得声明
+interrupt-driven console output ready，只能记录 IRQ 输出路径 deferred。
+在 `UartInterruptChainProbe` 已证明 `UART -> PLIC -> IRQ core -> UART handler` 一轮 claim/complete/zero-claim
+闭合之后，必须通过独立的 `Serial8250ConsoleIrqTxProbe` 或等价生产边界把 runtime TX 路径切换为 interrupt-driven：
+`printk` 前端只提交输出记录，serial8250 后端把 CRLF 后的字节放入 TX queue，在保存并关闭本地中断的临界区内 kick
+`UART_IER_THRI`，随后由真实 UART THRE interrupt 经 PLIC claim loop 和 IRQ core dispatch 调用 UART handler；
+handler 必须按 Linux `serial8250_handle_irq()` / `serial8250_tx_chars()` 形状在 THRE 条件下 drain TX queue，
+队列清空后清掉 THRI，不能由 smoke/KUnit 直接调用 handler 或手动 drain 后端。
 为避免 handoff 后重复输出，`ConsoleRegistry` 必须区分 printk 记录保存和 legacy boot-console drain cursor。
 注册 preferred serial8250 console 时，应先把 boot console pending records 按 boot console 路径 flush 并推进 cursor；
 serial8250 route 成功写出的记录必须标记为已交付，不得再被 `earlycon::drain_printk()` 经 SBI 重放。默认
@@ -1157,10 +1163,17 @@ complete 成对、零 claim 与 loop exit 成对。UART handler 必须清掉 THR
 KUnit/smoke 只能读取该 probe 和计数结果，不能直接调用 trigger、root intc entry、PLIC claim/complete、IRQ dispatch 或
 UART handler。
 
+`Serial8250ConsoleIrqTxProbe` 必须在 `UartInterruptChainProbe` ready 之后执行。它可以把 serial8250 console 从
+handoff 后的 polling/backend-deferred 状态推进到 runtime interrupt-driven TX 状态，但必须通过公开 `printk` 前端提交
+一条探针输出，由真实 THRI 中断驱动 UART handler drain TX queue，并观察 TX queue kick、UART handler drain、PLIC
+claim/complete、zero-claim loop exit、queue empty 和本地中断保存/恢复 guard facts。该 probe 是生产边界，不是
+KUnit handler；KUnit 只能读取它留下的 fact/counter/sink 诊断，不能参与 TX drain 流程。
+
 `ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经
 `PlicIrqDomain` 建立 UART source 到 logical IRQ 的记录，并把 logical IRQ 保存在 `Uart8250Port`。这一步只说明外部中断链的
-资源和 logical IRQ 绑定已经建立；serial8250 console 输出仍保持 polling，UART interrupt output 继续记录为 deferred。
+资源和 logical IRQ 绑定已经建立；platform probe 当场仍保持 polling，UART interrupt output 继续记录为 deferred，直到
+`Serial8250ConsoleIrqTxProbe` 在中断链 ready 后显式切换。
 
 handler registry 必须作为 IRQ core 侧对象建模和实现。`IrqHandlerRegistry` / `IrqAction` 记录 `request_irq`
 风格的 logical IRQ -> handler 绑定，输入 logical IRQ 必须已经由 `PlicIrqDomain` 映射；未映射 logical IRQ 注册必须失败，

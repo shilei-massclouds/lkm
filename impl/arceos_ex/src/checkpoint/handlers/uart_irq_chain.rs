@@ -77,6 +77,25 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
             0
         },
     );
+    sink.diag_usize(
+        "serial8250_irq_tx_ready",
+        if ctx
+            .serial8250_console_irq_tx_probe
+            .interrupt_driven_enabled()
+        {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_tx_irq_drains",
+        ns16550a::serial8250_tx_irq_drain_count(),
+    );
+    sink.diag_usize(
+        "serial8250_tx_queue_len",
+        ns16550a::serial8250_tx_queue_len(),
+    );
     sink.pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
 }
@@ -105,6 +124,31 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.uart_interrupt_chain_probe.plic_loop_exit_observed()
         && ctx.uart_interrupt_chain_probe.irq_cycle_closed()
         && ctx.uart_interrupt_chain_probe.console_polling_preserved()
+        && ctx.serial8250_console_irq_tx_probe.state() == State::Ready
+        && ctx
+            .serial8250_console_irq_tx_probe
+            .interrupt_driven_enabled()
+        && ctx
+            .serial8250_console_irq_tx_probe
+            .printk_frontend_submitted()
+        && ctx.serial8250_console_irq_tx_probe.tx_queue_kicked()
+        && ctx
+            .serial8250_console_irq_tx_probe
+            .uart_handler_drained_tx()
+        && ctx.serial8250_console_irq_tx_probe.plic_claim_observed()
+        && ctx.serial8250_console_irq_tx_probe.plic_complete_observed()
+        && ctx
+            .serial8250_console_irq_tx_probe
+            .zero_claim_loop_exit_observed()
+        && ctx
+            .serial8250_console_irq_tx_probe
+            .tx_queue_empty_after_irq()
+        && ctx
+            .serial8250_console_irq_tx_probe
+            .local_irq_guard_observed()
+        && ns16550a::uart8250_interrupt_driven_ready()
+        && ns16550a::serial8250_tx_irq_drain_count() != 0
+        && ns16550a::serial8250_tx_queue_len() == 0
         && ctx.plic.chained_handler_ready()
         && ctx.plic.claim_action_ready()
         && ctx.plic.complete_action_ready()

@@ -3109,7 +3109,21 @@ pub struct UartInterruptChainProbe {
     console_polling_preserved: bool,
 }
 
+pub struct Serial8250ConsoleIrqTxProbe {
+    lifecycle: Lifecycle,
+    interrupt_driven_enabled: bool,
+    printk_frontend_submitted: bool,
+    tx_queue_kicked: bool,
+    uart_handler_drained_tx: bool,
+    plic_claim_observed: bool,
+    plic_complete_observed: bool,
+    zero_claim_loop_exit_observed: bool,
+    tx_queue_empty_after_irq: bool,
+    local_irq_guard_observed: bool,
+}
+
 const UART_IRQ_CYCLE_SPIN_LIMIT: usize = 20_000_000;
+const SERIAL8250_IRQ_TX_PROBE_MESSAGE: &str = "serial8250 irq console\n";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct UartIrqCycleSnapshot {
@@ -3276,6 +3290,177 @@ impl UartInterruptChainProbe {
     }
 }
 
+impl Serial8250ConsoleIrqTxProbe {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            interrupt_driven_enabled: false,
+            printk_frontend_submitted: false,
+            tx_queue_kicked: false,
+            uart_handler_drained_tx: false,
+            plic_claim_observed: false,
+            plic_complete_observed: false,
+            zero_claim_loop_exit_observed: false,
+            tx_queue_empty_after_irq: false,
+            local_irq_guard_observed: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn interrupt_driven_enabled(&self) -> bool {
+        self.interrupt_driven_enabled
+    }
+
+    pub const fn printk_frontend_submitted(&self) -> bool {
+        self.printk_frontend_submitted
+    }
+
+    pub const fn tx_queue_kicked(&self) -> bool {
+        self.tx_queue_kicked
+    }
+
+    pub const fn uart_handler_drained_tx(&self) -> bool {
+        self.uart_handler_drained_tx
+    }
+
+    pub const fn plic_claim_observed(&self) -> bool {
+        self.plic_claim_observed
+    }
+
+    pub const fn plic_complete_observed(&self) -> bool {
+        self.plic_complete_observed
+    }
+
+    pub const fn zero_claim_loop_exit_observed(&self) -> bool {
+        self.zero_claim_loop_exit_observed
+    }
+
+    pub const fn tx_queue_empty_after_irq(&self) -> bool {
+        self.tx_queue_empty_after_irq
+    }
+
+    pub const fn local_irq_guard_observed(&self) -> bool {
+        self.local_irq_guard_observed
+    }
+
+    pub fn setup(
+        &mut self,
+        uart_external_irq_enable: &UartExternalIrqEnable,
+        uart_interrupt_chain_probe: &UartInterruptChainProbe,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+    ) -> EventResult {
+        let source = super::ns16550a::uart8250_port_irq_source();
+        let logical_irq = super::ns16550a::uart8250_port_logical_irq();
+        if self.lifecycle.state() != State::Base
+            || uart_external_irq_enable.state() != State::Ready
+            || !uart_external_irq_enable.plic_source_gate_open()
+            || !uart_external_irq_enable.root_external_input_gate_open()
+            || uart_interrupt_chain_probe.state() != State::Ready
+            || !uart_interrupt_chain_probe.irq_cycle_closed()
+            || !uart_interrupt_chain_probe.console_polling_preserved()
+            || plic.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || irq_handler_registry.state() != State::Ready
+            || !super::printk::console_handoff_complete()
+            || !super::ns16550a::serial8250_console_registered()
+            || !logical_irq.is_valid()
+            || plic_irq_domain
+                .mapping_for_source(source)
+                .is_none_or(|mapping| {
+                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
+                })
+            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        if !super::ns16550a::enable_serial8250_interrupt_driven_console() {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
+        let baseline_drains = super::ns16550a::serial8250_tx_irq_drain_count();
+        let baseline_write_calls =
+            super::ns16550a::serial8250_write_call_count_available_for_irq_probe();
+
+        super::printk::write_str(SERIAL8250_IRQ_TX_PROBE_MESSAGE);
+
+        let expected_tx_bytes = SERIAL8250_IRQ_TX_PROBE_MESSAGE.len().saturating_add(1);
+        if !wait_serial8250_irq_tx_closed(
+            plic,
+            irq_handler_registry,
+            baseline,
+            baseline_drains,
+            expected_tx_bytes,
+            source,
+        ) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        self.interrupt_driven_enabled = super::ns16550a::uart8250_interrupt_driven_ready();
+        self.printk_frontend_submitted =
+            super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
+                > baseline_write_calls;
+        self.tx_queue_kicked = super::ns16550a::serial8250_tx_irq_kick_count() > baseline_kicks;
+        self.uart_handler_drained_tx = super::ns16550a::serial8250_tx_irq_drain_count()
+            >= baseline_drains.saturating_add(expected_tx_bytes);
+        self.plic_claim_observed =
+            observed.claims > baseline.claims && plic.last_claimed_source() == source;
+        self.plic_complete_observed =
+            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
+            && observed.loop_exits > baseline.loop_exits;
+        self.tx_queue_empty_after_irq = super::ns16550a::serial8250_tx_queue_len() == 0
+            && super::ns16550a::serial8250_tx_irq_empty_stop_count() != 0
+            && !super::ns16550a::serial8250_tx_queue_overflowed();
+        self.local_irq_guard_observed =
+            super::ns16550a::serial8250_tx_queue_guarded_by_local_irq_save();
+
+        if !self.interrupt_driven_enabled
+            || !self.printk_frontend_submitted
+            || !self.tx_queue_kicked
+            || !self.uart_handler_drained_tx
+            || !self.plic_claim_observed
+            || !self.plic_complete_observed
+            || !self.zero_claim_loop_exit_observed
+            || !self.tx_queue_empty_after_irq
+            || !self.local_irq_guard_observed
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
 fn uart_irq_cycle_snapshot(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
@@ -3305,6 +3490,45 @@ fn wait_uart_irq_cycle_closed(
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
         let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
         if uart_irq_cycle_completed_and_closed(plic, current, baseline, source) {
+            return true;
+        }
+
+        core::hint::spin_loop();
+        spins += 1;
+    }
+
+    false
+}
+
+fn wait_serial8250_irq_tx_closed(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+    baseline: UartIrqCycleSnapshot,
+    baseline_drains: usize,
+    expected_tx_bytes: usize,
+    source: u32,
+) -> bool {
+    let mut spins = 0usize;
+
+    while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        if current.requests > baseline.requests
+            && current.claims > baseline.claims
+            && current.plic_dispatches > baseline.plic_dispatches
+            && current.irq_dispatches > baseline.irq_dispatches
+            && current.handler_calls > baseline.handler_calls
+            && current.handled > baseline.handled
+            && current.thri_disabled > baseline.thri_disabled
+            && current.completes > baseline.completes
+            && current.zero_claims > baseline.zero_claims
+            && current.loop_exits > baseline.loop_exits
+            && super::ns16550a::serial8250_tx_irq_drain_count()
+                >= baseline_drains.saturating_add(expected_tx_bytes)
+            && super::ns16550a::serial8250_tx_queue_len() == 0
+            && plic.last_claimed_source() == source
+            && plic.last_completed_source() == source
+            && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
+        {
             return true;
         }
 

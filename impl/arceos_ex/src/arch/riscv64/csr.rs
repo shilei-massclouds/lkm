@@ -136,6 +136,20 @@ pub fn supervisor_interrupts_enabled() -> bool {
     read_sstatus() & SSTATUS_SIE != 0
 }
 
+pub fn save_and_disable_supervisor_interrupts() -> usize {
+    let saved = read_sstatus();
+    disable_supervisor_interrupts();
+    saved
+}
+
+pub fn restore_supervisor_interrupts(saved_sstatus: usize) {
+    if saved_sstatus & SSTATUS_SIE != 0 {
+        enable_supervisor_interrupts();
+    } else {
+        disable_supervisor_interrupts();
+    }
+}
+
 pub fn supervisor_external_interrupt_enabled() -> bool {
     read_sie() & SIE_SEIE != 0
 }

@@ -24,7 +24,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.driver_core_base.state() != State::Ready
+    let driver_core_invalid = ctx.driver_core_base.state() != State::Ready
         || !ctx.driver_core_base.device_registry_ready()
         || !ctx.driver_core_base.bus_registry_ready()
         || !ctx.driver_core_base.pre_platform_deferred()
@@ -75,9 +75,6 @@ pub fn run() -> SmokeResult {
         || ctx.uart_external_irq_enable.state() != State::Ready
         || !ctx.uart_external_irq_enable.plic_source_gate_open()
         || !ctx.uart_external_irq_enable.root_external_input_gate_open()
-        || !ctx
-            .uart_external_irq_enable
-            .uart_interrupt_output_deferred()
         || ctx.uart_interrupt_chain_probe.state() != State::Ready
         || !ctx.uart_interrupt_chain_probe.uart_trigger_committed()
         || !ctx.uart_interrupt_chain_probe.plic_claim_observed()
@@ -87,6 +84,31 @@ pub fn run() -> SmokeResult {
         || !ctx.uart_interrupt_chain_probe.plic_loop_exit_observed()
         || !ctx.uart_interrupt_chain_probe.irq_cycle_closed()
         || !ctx.uart_interrupt_chain_probe.console_polling_preserved()
+        || ctx.serial8250_console_irq_tx_probe.state() != State::Ready
+        || !ctx
+            .serial8250_console_irq_tx_probe
+            .interrupt_driven_enabled()
+        || !ctx
+            .serial8250_console_irq_tx_probe
+            .printk_frontend_submitted()
+        || !ctx.serial8250_console_irq_tx_probe.tx_queue_kicked()
+        || !ctx
+            .serial8250_console_irq_tx_probe
+            .uart_handler_drained_tx()
+        || !ctx.serial8250_console_irq_tx_probe.plic_claim_observed()
+        || !ctx.serial8250_console_irq_tx_probe.plic_complete_observed()
+        || !ctx
+            .serial8250_console_irq_tx_probe
+            .zero_claim_loop_exit_observed()
+        || !ctx
+            .serial8250_console_irq_tx_probe
+            .tx_queue_empty_after_irq()
+        || !ctx
+            .serial8250_console_irq_tx_probe
+            .local_irq_guard_observed()
+        || !crate::objects::ns16550a::uart8250_interrupt_driven_ready()
+        || crate::objects::ns16550a::serial8250_tx_irq_drain_count() == 0
+        || crate::objects::ns16550a::serial8250_tx_queue_len() != 0
         || !ctx.interrupt_stream.supervisor_external_input_gate_open()
         || !ctx
             .irq_handler_registry
@@ -105,8 +127,8 @@ pub fn run() -> SmokeResult {
         || !ctx.driver_core_deferred.entry_position_preserved()
         || ctx.irq_proc_view_deferred.state() != State::Ready
         || !ctx.irq_proc_view_deferred.setup_deferred()
-        || !ctx.irq_proc_view_deferred.proc_irq_export_deferred()
-    {
+        || !ctx.irq_proc_view_deferred.proc_irq_export_deferred();
+    if driver_core_invalid {
         printk::write_str("initcall driver core facts invalid\n");
         return SmokeResult::Failed;
     }
@@ -323,7 +345,6 @@ fn check_uart_irq_handler(registry: &crate::objects::irq_time::IrqHandlerRegistr
                     && action.mapped_irq_required()
                     && action.duplicate_registration_rejected()
                     && action.unmapped_registration_rejected()
-                    && action.source_not_enabled()
                     && action.dispatch_ready()
             })
 }

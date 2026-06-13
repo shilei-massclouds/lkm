@@ -629,6 +629,7 @@ object InitcallBoundary: KernelObject {
                     InitcallTable.state == State::Ready;
                     UartExternalIrqEnable.state == State::Ready;
                     UartInterruptChainProbe.state == State::Ready;
+                    Serial8250Console.state == State::Online;
                 }
 
                 ensures {
@@ -682,6 +683,7 @@ object InitcallPhase: PhaseObject {
                     Ns16550aPlatformDriver.Event::Setup;
                     UartExternalIrqEnable.Event::Setup;
                     UartInterruptChainProbe.Event::Setup;
+                    Serial8250Console.Event::Enable;
                     InitcallBoundary.Event::Setup;
                 }
 
@@ -731,6 +733,11 @@ object InitcallPhase: PhaseObject {
                     uart_interrupt_chain_probe_observes_plic_loop_exit(UartInterruptChainProbe, Plic);
                     uart_interrupt_chain_probe_observes_irq_cycle_closure(UartInterruptChainProbe, Plic, IrqHandlerRegistry);
                     uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
+                    serial8250_console_interrupt_driven_ready(Serial8250Console);
+                    serial8250_console_tx_queue_guarded_by_local_irq_save(Serial8250Console);
+                    serial8250_console_tx_irq_kicks_thri(Serial8250Console);
+                    serial8250_console_tx_irq_handler_drains_queue(Serial8250Console);
+                    serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     initcall_boundary_ready(InitcallBoundary);
                 }
@@ -748,6 +755,7 @@ object InitcallPhase: PhaseObject {
             Ns16550aPlatformDriver.state == State::Ready;
             UartExternalIrqEnable.state == State::Ready;
             UartInterruptChainProbe.state == State::Ready;
+            Serial8250Console.state == State::Online;
             DriverCoreDeferred.state == State::Ready;
             IrqProcViewDeferred.state == State::Ready;
             CtorTable.state == State::Ready;
