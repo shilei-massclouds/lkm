@@ -1243,6 +1243,13 @@ handoff 后的 polling/backend-deferred 状态推进到 runtime interrupt-driven
 claim/complete、zero-claim loop exit、queue empty 和本地中断保存/恢复 guard facts。该 probe 是生产边界，不是
 KUnit handler；KUnit 只能读取它留下的 fact/counter/sink 诊断，不能参与 TX drain 流程。
 
+kernel printk 是当前 serial8250 runtime TX 的主线。`Serial8250ConsoleBurstIrqTxProbe` 或等价生产边界必须在
+`Serial8250ConsoleIrqTxProbe` ready 后执行，通过公开 `printk` 前端连续提交多条固定探针输出，随后仍由真实
+THRI/PLIC/IRQ/runtime handler 路径 drain serial8250 console TX queue。验收至少要求 write call 增量匹配记录数、
+CRLF 后的 drain 增量匹配预期字节数、TX queue empty、last byte 匹配、无 queue overflow、本地中断 guard 可观察、
+PLIC claim/complete/zero-claim loop exit 闭合，并确认 ordinary `TtyXmitFifo` 的 enqueue/dequeue/runtime drain
+计数不被 printk probe 修改。该轮不得引入 file/stdout/stdin、line discipline 或用户态 write/read 语义；这些只列为后续缓行。
+
 `ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经
 `PlicIrqDomain` 建立 UART source 到 logical IRQ 的记录，并把 logical IRQ 保存在 `Uart8250Port`。这一步只说明外部中断链的

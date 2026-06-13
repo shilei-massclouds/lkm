@@ -1292,6 +1292,36 @@ pub fn serial8250_tx_irq_empty_stop_count() -> usize {
     }
 }
 
+pub fn serial8250_tx_byte_count_available_for_irq_probe() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .tx_bytes_submitted
+    }
+}
+
+pub fn serial8250_tx_crlf_insertion_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .crlf_insertions
+    }
+}
+
+pub fn serial8250_last_tx_byte() -> u8 {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .last_tx_byte
+    }
+}
+
 pub fn serial8250_tx_queue_overflowed() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)

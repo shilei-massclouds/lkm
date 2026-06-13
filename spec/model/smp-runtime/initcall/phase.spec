@@ -684,6 +684,7 @@ object InitcallPhase: PhaseObject {
                     UartExternalIrqEnable.Event::Setup;
                     UartInterruptChainProbe.Event::Setup;
                     Serial8250Console.Event::Enable;
+                    Serial8250ConsoleBurstIrqTxProbe.Event::Setup;
                     TtyPort.Event::Setup;
                     Serial8250RuntimePort.Event::Setup;
                     TtyPort.Event::Enable;
@@ -747,6 +748,69 @@ object InitcallPhase: PhaseObject {
                     serial8250_console_tx_irq_kicks_thri(Serial8250Console);
                     serial8250_console_tx_irq_handler_drains_queue(Serial8250Console);
                     serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
+                    serial8250_console_burst_irq_tx_probe_ready(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_uses_printk_frontend(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_submits_multiple_records(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_kicks_thri(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_plic_claim(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_irq_dispatch(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        IrqHandlerRegistry
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_runtime_handler(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_burst_irq_tx_probe_drains_console_tx_queue(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_plic_complete(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_plic_loop_exit(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_burst_irq_tx_probe_queue_empty_after_irq(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_write_count_matched(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_drain_count_matched(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_last_byte_matched(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_local_irq_guard_observed(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_no_overflow(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_does_not_mutate_tty_xmit_fifo(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        TtyXmitFifo
+                    );
                     tty_port_ready(TtyPort, Uart8250Port, TtyFlipBuffer, TtyXmitFifo);
                     tty_port_initialized(TtyPort);
                     tty_flip_buffer_ready(TtyFlipBuffer, TtyPort);
@@ -916,6 +980,7 @@ object InitcallPhase: PhaseObject {
             UartExternalIrqEnable.state == State::Ready;
             UartInterruptChainProbe.state == State::Ready;
             Serial8250Console.state == State::Online;
+            Serial8250ConsoleBurstIrqTxProbe.state == State::Ready;
             TtyPort.state == State::Online;
             TtyFlipBuffer.state == State::Ready;
             TtyXmitFifo.state == State::Ready;

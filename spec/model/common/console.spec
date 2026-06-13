@@ -287,6 +287,32 @@ predicate serial8250_console_tx_queue_empty_after_irq<T>(console: T) -> bool;
 predicate serial8250_console_online_trace_emitted<T>(console: T) -> bool;
 predicate serial8250_console_delivered_records_not_replayed_by_earlycon<T>(console: T) -> bool;
 
+predicate serial8250_console_burst_irq_tx_probe_ready<T>(probe: T) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_production_side<T>(probe: T) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_kunit_not_stimulus<T>(probe: T) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_uses_printk_frontend<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_submits_multiple_records<T>(probe: T) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_kicks_thri<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_observes_plic_claim<T, P>(probe: T, plic: P) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_observes_irq_dispatch<T, R>(probe: T, registry: R) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_observes_runtime_handler<T, R>(probe: T, runtime: R) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_drains_console_tx_queue<T, C>(
+    probe: T,
+    console: C
+) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_observes_plic_complete<T, P>(probe: T, plic: P) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_observes_plic_loop_exit<T, P>(probe: T, plic: P) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_queue_empty_after_irq<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_write_count_matched<T>(probe: T) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_drain_count_matched<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_last_byte_matched<T>(probe: T) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_local_irq_guard_observed<T>(probe: T) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_no_overflow<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_burst_irq_tx_probe_does_not_mutate_tty_xmit_fifo<T, F>(
+    probe: T,
+    xmit_fifo: F
+) -> bool;
+
 predicate console_handoff_ready<T, B, S>(handoff: T, boot_console: B, serial_console: S) -> bool;
 predicate console_handoff_triggered_by_register_console<T, R>(handoff: T, registry: R) -> bool;
 predicate console_handoff_boot_console_unregistered<T, B>(handoff: T, boot_console: B) -> bool;
@@ -1397,6 +1423,116 @@ object Serial8250Console: ConsoleObject {
             serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
             serial8250_console_online_trace_emitted(Serial8250Console);
             serial8250_console_delivered_records_not_replayed_by_earlycon(Serial8250Console);
+        }
+    }
+}
+
+/*
+ * Serial8250ConsoleBurstIrqTxProbe is the printk-console stability follow-up.
+ * It submits multiple printk records through the public printk frontend and
+ * observes the same interrupt-driven serial8250 console queue drain without
+ * touching ordinary TTY TX state.
+ */
+object Serial8250ConsoleBurstIrqTxProbe: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Serial8250Console.state == State::Online;
+                    UartExternalIrqEnable.state == State::Ready;
+                    Plic.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                }
+
+                drives {
+                    Serial8250RuntimePort.Action::StartTx;
+                    RiscvIntc.Action::HandleExternalInput(InterruptCauseRef::SupervisorExternalIrq);
+                    Plic.Action::Claim(HwirqRef::PlicUart0);
+                    PlicIrqDomain.Action::Dispatch(LogicalIrqRef::Uart0);
+                    IrqHandlerRegistry.Action::Dispatch(LogicalIrqRef::Uart0);
+                    Serial8250RuntimePort.Action::HandleInterrupt(InterruptCauseRef::SupervisorExternalIrq);
+                    Serial8250RuntimePort.Action::TransmitChars;
+                    Plic.Action::Complete(HwirqRef::PlicUart0);
+                }
+
+                ensures {
+                    serial8250_console_burst_irq_tx_probe_ready(Serial8250ConsoleBurstIrqTxProbe);
+                    serial8250_console_burst_irq_tx_probe_production_side(Serial8250ConsoleBurstIrqTxProbe);
+                    serial8250_console_burst_irq_tx_probe_kunit_not_stimulus(Serial8250ConsoleBurstIrqTxProbe);
+                    serial8250_console_burst_irq_tx_probe_uses_printk_frontend(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_submits_multiple_records(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_kicks_thri(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_plic_claim(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_irq_dispatch(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        IrqHandlerRegistry
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_runtime_handler(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_burst_irq_tx_probe_drains_console_tx_queue(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_plic_complete(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_burst_irq_tx_probe_observes_plic_loop_exit(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_burst_irq_tx_probe_queue_empty_after_irq(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_write_count_matched(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_drain_count_matched(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_last_byte_matched(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_local_irq_guard_observed(
+                        Serial8250ConsoleBurstIrqTxProbe
+                    );
+                    serial8250_console_burst_irq_tx_probe_no_overflow(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_burst_irq_tx_probe_does_not_mutate_tty_xmit_fifo(
+                        Serial8250ConsoleBurstIrqTxProbe,
+                        TtyXmitFifo
+                    );
+                    serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
+                    serial8250_runtime_port_transmit_chars_stops_thri_when_empty(Serial8250RuntimePort);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            serial8250_console_burst_irq_tx_probe_ready(Serial8250ConsoleBurstIrqTxProbe);
+            serial8250_console_burst_irq_tx_probe_production_side(Serial8250ConsoleBurstIrqTxProbe);
+            serial8250_console_burst_irq_tx_probe_kunit_not_stimulus(Serial8250ConsoleBurstIrqTxProbe);
         }
     }
 }
