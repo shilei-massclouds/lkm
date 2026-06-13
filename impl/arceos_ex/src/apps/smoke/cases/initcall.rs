@@ -107,6 +107,16 @@ pub fn run() -> SmokeResult {
             .serial8250_console_irq_tx_probe
             .local_irq_guard_observed()
         || !crate::objects::ns16550a::uart8250_interrupt_driven_ready()
+        || !crate::objects::ns16550a::serial8250_runtime_port_ready()
+        || !crate::objects::ns16550a::serial8250_runtime_console_tx_ready()
+        || !crate::objects::ns16550a::serial8250_runtime_rx_deferred()
+        || !crate::objects::ns16550a::tty_port_ready()
+        || !crate::objects::ns16550a::tty_port_not_backend_owner()
+        || !crate::objects::ns16550a::tty_port_runtime_deferred()
+        || !crate::objects::ns16550a::tty_flip_buffer_ready()
+        || !crate::objects::ns16550a::tty_flip_buffer_empty()
+        || !crate::objects::ns16550a::tty_xmit_fifo_ready()
+        || !crate::objects::ns16550a::tty_xmit_fifo_deferred_from_console_tx()
         || crate::objects::ns16550a::serial8250_tx_irq_drain_count() == 0
         || crate::objects::ns16550a::serial8250_tx_queue_len() != 0
         || !ctx.interrupt_stream.supervisor_external_input_gate_open()

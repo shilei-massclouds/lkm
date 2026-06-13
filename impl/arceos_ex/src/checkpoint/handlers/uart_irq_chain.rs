@@ -89,6 +89,22 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
         },
     );
     sink.diag_usize(
+        "serial8250_runtime_tx_ready",
+        if ns16550a::serial8250_runtime_console_tx_ready() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_runtime_rx_deferred",
+        if ns16550a::serial8250_runtime_rx_deferred() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
         "serial8250_tx_irq_drains",
         ns16550a::serial8250_tx_irq_drain_count(),
     );
@@ -147,6 +163,16 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
             .serial8250_console_irq_tx_probe
             .local_irq_guard_observed()
         && ns16550a::uart8250_interrupt_driven_ready()
+        && ns16550a::serial8250_runtime_port_ready()
+        && ns16550a::serial8250_runtime_console_tx_ready()
+        && ns16550a::serial8250_runtime_rx_deferred()
+        && ns16550a::tty_port_ready()
+        && ns16550a::tty_port_not_backend_owner()
+        && ns16550a::tty_port_runtime_deferred()
+        && ns16550a::tty_flip_buffer_ready()
+        && ns16550a::tty_flip_buffer_empty()
+        && ns16550a::tty_xmit_fifo_ready()
+        && ns16550a::tty_xmit_fifo_deferred_from_console_tx()
         && ns16550a::serial8250_tx_irq_drain_count() != 0
         && ns16550a::serial8250_tx_queue_len() == 0
         && ctx.plic.chained_handler_ready()

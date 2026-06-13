@@ -32,7 +32,9 @@ const UART_MCR_LOOP: usize = 1 << 4;
 const UART_LSR_DR: usize = 1;
 const UART_LSR_THRE: usize = 1 << 5;
 const UART_POLL_SPINS: usize = 100_000;
+const UART_RX_DRAIN_LIMIT: usize = 16;
 const UART_TX_QUEUE_SIZE: usize = 512;
+const TTY_FLIP_BUFFER_SIZE: usize = 64;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
 
@@ -149,8 +151,345 @@ impl Uart8250Port {
 }
 
 #[derive(Clone, Copy)]
+pub struct TtyPort {
+    ready: bool,
+    initialized: bool,
+    online: bool,
+    device_ref: DeviceRef,
+    line: usize,
+    bound_to_uart8250: bool,
+    owns_flip_buffer: bool,
+    owns_xmit_fifo: bool,
+    no_mmio_access: bool,
+    no_irq_dispatch: bool,
+    no_console_registry_policy: bool,
+    uart_startup_drives_runtime_enable: bool,
+}
+
+impl TtyPort {
+    const fn empty() -> Self {
+        Self {
+            ready: false,
+            initialized: false,
+            online: false,
+            device_ref: DeviceRef::new(usize::MAX),
+            line: usize::MAX,
+            bound_to_uart8250: false,
+            owns_flip_buffer: false,
+            owns_xmit_fifo: false,
+            no_mmio_access: true,
+            no_irq_dispatch: true,
+            no_console_registry_policy: true,
+            uart_startup_drives_runtime_enable: false,
+        }
+    }
+
+    fn from_port(port: Uart8250Port) -> Self {
+        if !port.registered || port.line == usize::MAX {
+            return Self::empty();
+        }
+
+        Self {
+            ready: true,
+            initialized: false,
+            online: false,
+            device_ref: port.device_ref,
+            line: port.line,
+            bound_to_uart8250: true,
+            owns_flip_buffer: true,
+            owns_xmit_fifo: true,
+            no_mmio_access: true,
+            no_irq_dispatch: true,
+            no_console_registry_policy: true,
+            uart_startup_drives_runtime_enable: true,
+        }
+    }
+
+    fn facts_ready(self, port: Uart8250Port) -> bool {
+        self.ready
+            && port.registered
+            && self.device_ref == port.device_ref
+            && self.line == port.line
+            && self.bound_to_uart8250
+            && self.owns_flip_buffer
+            && self.owns_xmit_fifo
+            && self.no_mmio_access
+            && self.no_irq_dispatch
+            && self.no_console_registry_policy
+            && self.uart_startup_drives_runtime_enable
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct TtyFlipBuffer {
+    ready: bool,
+    bound_to_tty_port: bool,
+    rx_staging_only: bool,
+    push_is_observation_boundary: bool,
+    n_tty_read_deferred: bool,
+    buffer: [u8; TTY_FLIP_BUFFER_SIZE],
+    pending_len: usize,
+    push_count: usize,
+    total_inserted: usize,
+    last_pushed_len: usize,
+    last_byte: u8,
+    overflowed: bool,
+}
+
+impl TtyFlipBuffer {
+    const fn empty() -> Self {
+        Self {
+            ready: false,
+            bound_to_tty_port: false,
+            rx_staging_only: false,
+            push_is_observation_boundary: false,
+            n_tty_read_deferred: true,
+            buffer: [0; TTY_FLIP_BUFFER_SIZE],
+            pending_len: 0,
+            push_count: 0,
+            total_inserted: 0,
+            last_pushed_len: 0,
+            last_byte: 0,
+            overflowed: false,
+        }
+    }
+
+    fn from_tty_port(tty_port: TtyPort) -> Self {
+        if !tty_port.ready || !tty_port.owns_flip_buffer {
+            return Self::empty();
+        }
+
+        Self {
+            ready: true,
+            bound_to_tty_port: true,
+            rx_staging_only: true,
+            push_is_observation_boundary: true,
+            n_tty_read_deferred: true,
+            buffer: [0; TTY_FLIP_BUFFER_SIZE],
+            pending_len: 0,
+            push_count: 0,
+            total_inserted: 0,
+            last_pushed_len: 0,
+            last_byte: 0,
+            overflowed: false,
+        }
+    }
+
+    fn facts_ready(self, tty_port: TtyPort) -> bool {
+        self.ready
+            && tty_port.ready
+            && tty_port.owns_flip_buffer
+            && self.bound_to_tty_port
+            && self.rx_staging_only
+            && self.push_is_observation_boundary
+            && self.n_tty_read_deferred
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct TtyXmitFifo {
+    ready: bool,
+    bound_to_tty_port: bool,
+    ordinary_tty_write_path: bool,
+    distinct_from_printk_console_tx: bool,
+    runtime_tx_integration_deferred: bool,
+}
+
+impl TtyXmitFifo {
+    const fn empty() -> Self {
+        Self {
+            ready: false,
+            bound_to_tty_port: false,
+            ordinary_tty_write_path: false,
+            distinct_from_printk_console_tx: true,
+            runtime_tx_integration_deferred: true,
+        }
+    }
+
+    fn from_tty_port(tty_port: TtyPort) -> Self {
+        if !tty_port.ready || !tty_port.owns_xmit_fifo {
+            return Self::empty();
+        }
+
+        Self {
+            ready: true,
+            bound_to_tty_port: true,
+            ordinary_tty_write_path: true,
+            distinct_from_printk_console_tx: true,
+            runtime_tx_integration_deferred: true,
+        }
+    }
+
+    fn facts_ready(self, tty_port: TtyPort) -> bool {
+        self.ready
+            && tty_port.ready
+            && tty_port.owns_xmit_fifo
+            && self.bound_to_tty_port
+            && self.ordinary_tty_write_path
+            && self.distinct_from_printk_console_tx
+            && self.runtime_tx_integration_deferred
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Serial8250RuntimePort {
+    ready: bool,
+    online: bool,
+    device_ref: DeviceRef,
+    membase: usize,
+    rx_addr: usize,
+    tx_addr: usize,
+    ier_addr: usize,
+    iir_addr: usize,
+    lsr_addr: usize,
+    reg_shift: u32,
+    reg_io_width: u32,
+    handles_ier_iir_lsr: bool,
+    handler_requires_hardirq: bool,
+    owns_port_lock_irqsave: bool,
+    tty_flip_buffer_bound: bool,
+    tty_xmit_fifo_bound: bool,
+    rdi_enabled: bool,
+    rlsi_enabled: bool,
+    thri_demand_driven: bool,
+    rx_interrupts_deferred_until_enable: bool,
+    n_tty_read_deferred: bool,
+    console_tx_interrupt_driven: bool,
+    rx_drain_limit: usize,
+}
+
+impl Serial8250RuntimePort {
+    const fn empty() -> Self {
+        Self {
+            ready: false,
+            online: false,
+            device_ref: DeviceRef::new(usize::MAX),
+            membase: 0,
+            rx_addr: 0,
+            tx_addr: 0,
+            ier_addr: 0,
+            iir_addr: 0,
+            lsr_addr: 0,
+            reg_shift: 0,
+            reg_io_width: 0,
+            handles_ier_iir_lsr: false,
+            handler_requires_hardirq: false,
+            owns_port_lock_irqsave: false,
+            tty_flip_buffer_bound: false,
+            tty_xmit_fifo_bound: false,
+            rdi_enabled: false,
+            rlsi_enabled: false,
+            thri_demand_driven: false,
+            rx_interrupts_deferred_until_enable: true,
+            n_tty_read_deferred: true,
+            console_tx_interrupt_driven: false,
+            rx_drain_limit: 0,
+        }
+    }
+
+    fn from_port(
+        port: Uart8250Port,
+        tty_port: TtyPort,
+        flip_buffer: TtyFlipBuffer,
+        xmit_fifo: TtyXmitFifo,
+    ) -> Option<Self> {
+        if !port.registered
+            || !port.ioremapped
+            || !port.irq_handler_registered
+            || !tty_port.facts_ready(port)
+            || !flip_buffer.facts_ready(tty_port)
+            || !xmit_fifo.facts_ready(tty_port)
+            || !uart_reg_io_width_supported(port.reg_io_width)
+            || port.reg_shift > 8
+        {
+            return None;
+        }
+
+        let rx_addr = port
+            .membase
+            .checked_add(uart_register_offset(port, UART_RX)?)?;
+        let tx_addr = port
+            .membase
+            .checked_add(uart_register_offset(port, UART_TX)?)?;
+        let ier_addr = port
+            .membase
+            .checked_add(uart_register_offset(port, UART_IER)?)?;
+        let iir_addr = port
+            .membase
+            .checked_add(uart_register_offset(port, UART_IIR)?)?;
+        let lsr_addr = port
+            .membase
+            .checked_add(uart_register_offset(port, UART_LSR)?)?;
+
+        Some(Self {
+            ready: true,
+            online: false,
+            device_ref: port.device_ref,
+            membase: port.membase,
+            rx_addr,
+            tx_addr,
+            ier_addr,
+            iir_addr,
+            lsr_addr,
+            reg_shift: port.reg_shift,
+            reg_io_width: port.reg_io_width,
+            handles_ier_iir_lsr: true,
+            handler_requires_hardirq: true,
+            owns_port_lock_irqsave: true,
+            tty_flip_buffer_bound: true,
+            tty_xmit_fifo_bound: true,
+            rdi_enabled: false,
+            rlsi_enabled: false,
+            thri_demand_driven: true,
+            rx_interrupts_deferred_until_enable: true,
+            n_tty_read_deferred: true,
+            console_tx_interrupt_driven: false,
+            rx_drain_limit: UART_RX_DRAIN_LIMIT,
+        })
+    }
+
+    fn facts_ready(
+        self,
+        port: Uart8250Port,
+        tty_port: TtyPort,
+        flip_buffer: TtyFlipBuffer,
+        xmit_fifo: TtyXmitFifo,
+    ) -> bool {
+        self.ready
+            && port.registered
+            && port.ioremapped
+            && port.irq_handler_registered
+            && self.device_ref == port.device_ref
+            && self.membase == port.membase
+            && self.rx_addr == port.membase
+            && self.tx_addr == port.membase
+            && self.ier_addr == port.membase.saturating_add(UART_IER << port.reg_shift)
+            && self.iir_addr == port.membase.saturating_add(UART_IIR << port.reg_shift)
+            && self.lsr_addr == port.membase.saturating_add(UART_LSR << port.reg_shift)
+            && self.reg_shift == port.reg_shift
+            && self.reg_io_width == port.reg_io_width
+            && self.handles_ier_iir_lsr
+            && self.handler_requires_hardirq
+            && self.owns_port_lock_irqsave
+            && self.tty_flip_buffer_bound
+            && self.tty_xmit_fifo_bound
+            && self.thri_demand_driven
+            && self.rx_interrupts_deferred_until_enable
+            && self.n_tty_read_deferred
+            && self.rx_drain_limit == UART_RX_DRAIN_LIMIT
+            && tty_port.facts_ready(port)
+            && flip_buffer.facts_ready(tty_port)
+            && xmit_fifo.facts_ready(tty_port)
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct Ns16550aProbeState {
     port: Uart8250Port,
+    tty_port: TtyPort,
+    tty_flip_buffer: TtyFlipBuffer,
+    tty_xmit_fifo: TtyXmitFifo,
+    runtime_port: Serial8250RuntimePort,
     write_backend: Serial8250WriteBackend,
     serial_console_registered: bool,
     stdout_path_available: bool,
@@ -162,6 +501,10 @@ impl Ns16550aProbeState {
     pub const fn new() -> Self {
         Self {
             port: Uart8250Port::empty(),
+            tty_port: TtyPort::empty(),
+            tty_flip_buffer: TtyFlipBuffer::empty(),
+            tty_xmit_fifo: TtyXmitFifo::empty(),
+            runtime_port: Serial8250RuntimePort::empty(),
             write_backend: Serial8250WriteBackend::empty(),
             serial_console_registered: false,
             stdout_path_available: false,
@@ -685,6 +1028,16 @@ pub fn uart8250_interrupt_driven_ready() -> bool {
     state.port.registered
         && state.port.interrupt_driven_ready
         && !state.port.interrupt_output_deferred
+        && state.runtime_port.facts_ready(
+            state.port,
+            state.tty_port,
+            state.tty_flip_buffer,
+            state.tty_xmit_fifo,
+        )
+        && state.runtime_port.console_tx_interrupt_driven
+        && !state.runtime_port.online
+        && !state.runtime_port.rdi_enabled
+        && !state.runtime_port.rlsi_enabled
         && state.write_backend.irq_driven_facts_ready(state.port)
 }
 
@@ -792,6 +1145,84 @@ pub fn serial8250_tx_queue_guarded_by_local_irq_save() -> bool {
     }
 }
 
+pub fn tty_port_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_port.facts_ready(state.port)
+}
+
+pub fn tty_port_not_backend_owner() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_port.ready
+        && state.tty_port.no_mmio_access
+        && state.tty_port.no_irq_dispatch
+        && state.tty_port.no_console_registry_policy
+}
+
+pub fn tty_port_runtime_deferred() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_port.ready
+        && !state.tty_port.initialized
+        && !state.tty_port.online
+        && state.tty_port.uart_startup_drives_runtime_enable
+}
+
+pub fn tty_flip_buffer_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_flip_buffer.facts_ready(state.tty_port)
+}
+
+pub fn tty_flip_buffer_empty() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_flip_buffer.ready
+        && state.tty_flip_buffer.pending_len == 0
+        && state.tty_flip_buffer.push_count == 0
+        && state.tty_flip_buffer.total_inserted == 0
+        && state.tty_flip_buffer.last_pushed_len == 0
+        && state.tty_flip_buffer.last_byte == 0
+        && !state.tty_flip_buffer.overflowed
+        && state.tty_flip_buffer.buffer[0] == 0
+}
+
+pub fn tty_xmit_fifo_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_xmit_fifo.facts_ready(state.tty_port)
+}
+
+pub fn tty_xmit_fifo_deferred_from_console_tx() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.tty_xmit_fifo.ready
+        && state.tty_xmit_fifo.distinct_from_printk_console_tx
+        && state.tty_xmit_fifo.runtime_tx_integration_deferred
+}
+
+pub fn serial8250_runtime_port_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.runtime_port.facts_ready(
+        state.port,
+        state.tty_port,
+        state.tty_flip_buffer,
+        state.tty_xmit_fifo,
+    )
+}
+
+pub fn serial8250_runtime_rx_deferred() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.runtime_port.ready
+        && !state.runtime_port.online
+        && !state.runtime_port.rdi_enabled
+        && !state.runtime_port.rlsi_enabled
+        && state.runtime_port.rx_interrupts_deferred_until_enable
+}
+
+pub fn serial8250_runtime_console_tx_ready() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.runtime_port.ready
+        && state.runtime_port.console_tx_interrupt_driven
+        && !state.runtime_port.online
+        && !state.runtime_port.rdi_enabled
+        && !state.runtime_port.rlsi_enabled
+}
+
 #[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn uart8250_last_iir() -> usize {
     UART8250_LAST_IIR.load(Ordering::Acquire)
@@ -854,10 +1285,14 @@ pub fn enable_serial8250_interrupt_driven_console() -> bool {
     {
         return false;
     }
+    if !state.runtime_port.ready || state.runtime_port.console_tx_interrupt_driven {
+        return false;
+    }
 
     if !state.write_backend.enable_interrupt_driven() {
         return false;
     }
+    state.runtime_port.console_tx_interrupt_driven = true;
     state.port.interrupt_output_deferred = false;
     state.port.interrupt_driven_ready = true;
     true
@@ -1085,11 +1520,21 @@ fn ns16550a_probe(
     } else {
         Serial8250WriteBackend::empty()
     };
+    let tty_port = TtyPort::from_port(port);
+    let tty_flip_buffer = TtyFlipBuffer::from_tty_port(tty_port);
+    let tty_xmit_fifo = TtyXmitFifo::from_tty_port(tty_port);
+    let runtime_port =
+        Serial8250RuntimePort::from_port(port, tty_port, tty_flip_buffer, tty_xmit_fifo)
+            .unwrap_or(Serial8250RuntimePort::empty());
     let handoff_triggered = serial_console_registered && printk::console_handoff_complete();
 
     unsafe {
         let state = (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap();
         state.port = port;
+        state.tty_port = tty_port;
+        state.tty_flip_buffer = tty_flip_buffer;
+        state.tty_xmit_fifo = tty_xmit_fifo;
+        state.runtime_port = runtime_port;
         state.write_backend = write_backend;
         state.serial_console_registered = serial_console_registered;
         state.stdout_path_available = stdout_path_available;
