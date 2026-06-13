@@ -233,6 +233,33 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
         "tty_xmit_fifo_runtime_tx_empty_stops",
         ns16550a::tty_xmit_fifo_runtime_tx_empty_stop_count(),
     );
+    sink.diag_usize(
+        "tty_write_batch_runtime_tx_ready",
+        if ctx.tty_write_batch_runtime_tx_probe.state() == State::Ready {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "tty_write_batch_runtime_tx_bounded_drain",
+        if ctx
+            .tty_write_batch_runtime_tx_probe
+            .bounded_drain_observed()
+        {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "tty_write_batch_runtime_tx_count_matched",
+        if ctx.tty_write_batch_runtime_tx_probe.batch_count_matched() {
+            1
+        } else {
+            0
+        },
+    );
     sink.pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
 }
@@ -366,6 +393,38 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.tty_write_runtime_tx_probe.printk_tx_queue_unchanged()
         && ctx.tty_write_runtime_tx_probe.local_irq_guard_observed()
         && ctx.tty_write_runtime_tx_probe.last_byte_matched()
+        && ctx.tty_write_batch_runtime_tx_probe.state() == State::Ready
+        && ctx.tty_write_batch_runtime_tx_probe.fixed_bounded_batch()
+        && ctx
+            .tty_write_batch_runtime_tx_probe
+            .xmit_fifo_batch_enqueued()
+        && ctx.tty_write_batch_runtime_tx_probe.start_tx_committed()
+        && ctx.tty_write_batch_runtime_tx_probe.plic_claim_observed()
+        && ctx.tty_write_batch_runtime_tx_probe.irq_dispatch_observed()
+        && ctx.tty_write_batch_runtime_tx_probe.uart_handler_observed()
+        && ctx
+            .tty_write_batch_runtime_tx_probe
+            .xmit_fifo_batch_drained()
+        && ctx
+            .tty_write_batch_runtime_tx_probe
+            .plic_complete_observed()
+        && ctx
+            .tty_write_batch_runtime_tx_probe
+            .zero_claim_loop_exit_observed()
+        && ctx.tty_write_batch_runtime_tx_probe.queue_empty_after_irq()
+        && ctx
+            .tty_write_batch_runtime_tx_probe
+            .printk_tx_queue_unchanged()
+        && ctx
+            .tty_write_batch_runtime_tx_probe
+            .local_irq_guard_observed()
+        && ctx
+            .tty_write_batch_runtime_tx_probe
+            .bounded_drain_observed()
+        && ctx.tty_write_batch_runtime_tx_probe.batch_count_matched()
+        && ctx.tty_write_batch_runtime_tx_probe.last_byte_matched()
+        && ctx.tty_write_batch_runtime_tx_probe.no_overflow_observed()
+        && ctx.tty_write_batch_runtime_tx_probe.no_underflow_observed()
         && ns16550a::tty_xmit_fifo_round_trip_ready()
         && ns16550a::tty_xmit_fifo_runtime_tx_kick_count() != 0
         && ns16550a::tty_xmit_fifo_runtime_tx_drain_count() != 0

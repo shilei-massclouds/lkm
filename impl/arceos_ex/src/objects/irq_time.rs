@@ -3182,12 +3182,34 @@ pub struct TtyWriteRuntimeTxProbe {
     last_byte_matched: bool,
 }
 
+pub struct TtyWriteBatchRuntimeTxProbe {
+    lifecycle: Lifecycle,
+    fixed_bounded_batch: bool,
+    xmit_fifo_batch_enqueued: bool,
+    start_tx_committed: bool,
+    plic_claim_observed: bool,
+    irq_dispatch_observed: bool,
+    uart_handler_observed: bool,
+    xmit_fifo_batch_drained: bool,
+    plic_complete_observed: bool,
+    zero_claim_loop_exit_observed: bool,
+    queue_empty_after_irq: bool,
+    printk_tx_queue_unchanged: bool,
+    local_irq_guard_observed: bool,
+    bounded_drain_observed: bool,
+    batch_count_matched: bool,
+    last_byte_matched: bool,
+    no_overflow_observed: bool,
+    no_underflow_observed: bool,
+}
+
 const UART_IRQ_CYCLE_SPIN_LIMIT: usize = 20_000_000;
 const SERIAL8250_IRQ_TX_PROBE_MESSAGE: &str = "serial8250 irq console\n";
 const SERIAL8250_RX_LOOPBACK_BYTE: u8 = b'R';
 const SERIAL8250_RX_BATCH_LOOPBACK_BYTES: &[u8] = b"rx42";
 const TTY_XMIT_FIFO_PROBE_BYTE: u8 = b'T';
 const TTY_WRITE_RUNTIME_TX_PROBE_BYTE: u8 = b'W';
+const TTY_WRITE_RUNTIME_TX_BATCH_BYTES: &[u8] = b"tx04";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct UartIrqCycleSnapshot {
@@ -4175,6 +4197,7 @@ impl TtyWriteRuntimeTxProbe {
             irq_handler_registry,
             baseline,
             baseline_drains,
+            1,
             source,
         ) {
             return failed_condition(
@@ -4247,6 +4270,260 @@ impl TtyWriteRuntimeTxProbe {
     }
 }
 
+impl TtyWriteBatchRuntimeTxProbe {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            fixed_bounded_batch: false,
+            xmit_fifo_batch_enqueued: false,
+            start_tx_committed: false,
+            plic_claim_observed: false,
+            irq_dispatch_observed: false,
+            uart_handler_observed: false,
+            xmit_fifo_batch_drained: false,
+            plic_complete_observed: false,
+            zero_claim_loop_exit_observed: false,
+            queue_empty_after_irq: false,
+            printk_tx_queue_unchanged: false,
+            local_irq_guard_observed: false,
+            bounded_drain_observed: false,
+            batch_count_matched: false,
+            last_byte_matched: false,
+            no_overflow_observed: false,
+            no_underflow_observed: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn fixed_bounded_batch(&self) -> bool {
+        self.fixed_bounded_batch
+    }
+
+    pub const fn xmit_fifo_batch_enqueued(&self) -> bool {
+        self.xmit_fifo_batch_enqueued
+    }
+
+    pub const fn start_tx_committed(&self) -> bool {
+        self.start_tx_committed
+    }
+
+    pub const fn plic_claim_observed(&self) -> bool {
+        self.plic_claim_observed
+    }
+
+    pub const fn irq_dispatch_observed(&self) -> bool {
+        self.irq_dispatch_observed
+    }
+
+    pub const fn uart_handler_observed(&self) -> bool {
+        self.uart_handler_observed
+    }
+
+    pub const fn xmit_fifo_batch_drained(&self) -> bool {
+        self.xmit_fifo_batch_drained
+    }
+
+    pub const fn plic_complete_observed(&self) -> bool {
+        self.plic_complete_observed
+    }
+
+    pub const fn zero_claim_loop_exit_observed(&self) -> bool {
+        self.zero_claim_loop_exit_observed
+    }
+
+    pub const fn queue_empty_after_irq(&self) -> bool {
+        self.queue_empty_after_irq
+    }
+
+    pub const fn printk_tx_queue_unchanged(&self) -> bool {
+        self.printk_tx_queue_unchanged
+    }
+
+    pub const fn local_irq_guard_observed(&self) -> bool {
+        self.local_irq_guard_observed
+    }
+
+    pub const fn bounded_drain_observed(&self) -> bool {
+        self.bounded_drain_observed
+    }
+
+    pub const fn batch_count_matched(&self) -> bool {
+        self.batch_count_matched
+    }
+
+    pub const fn last_byte_matched(&self) -> bool {
+        self.last_byte_matched
+    }
+
+    pub const fn no_overflow_observed(&self) -> bool {
+        self.no_overflow_observed
+    }
+
+    pub const fn no_underflow_observed(&self) -> bool {
+        self.no_underflow_observed
+    }
+
+    pub fn setup(
+        &mut self,
+        runtime_tx_probe: &TtyWriteRuntimeTxProbe,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+    ) -> EventResult {
+        let source = super::ns16550a::uart8250_port_irq_source();
+        let logical_irq = super::ns16550a::uart8250_port_logical_irq();
+        let expected_len = TTY_WRITE_RUNTIME_TX_BATCH_BYTES.len();
+        let expected_last = TTY_WRITE_RUNTIME_TX_BATCH_BYTES[expected_len - 1];
+        if self.lifecycle.state() != State::Base
+            || runtime_tx_probe.state() != State::Ready
+            || !runtime_tx_probe.queue_empty_after_irq()
+            || !runtime_tx_probe.printk_tx_queue_unchanged()
+            || plic.state() != State::Ready
+            || plic_irq_domain.state() != State::Ready
+            || irq_handler_registry.state() != State::Ready
+            || !super::ns16550a::tty_xmit_fifo_ready()
+            || !super::ns16550a::tty_xmit_fifo_runtime_tx_integrated()
+            || !super::ns16550a::serial8250_runtime_port_ready()
+            || !super::ns16550a::serial8250_runtime_console_tx_ready()
+            || super::ns16550a::tty_xmit_fifo_queue_len() != 0
+            || super::ns16550a::serial8250_tx_queue_len() != 0
+            || expected_len <= 1
+            || expected_len > super::ns16550a::tty_xmit_fifo_capacity()
+            || !logical_irq.is_valid()
+            || plic_irq_domain
+                .mapping_for_source(source)
+                .is_none_or(|mapping| {
+                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
+                })
+            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline_enqueues = super::ns16550a::tty_xmit_fifo_enqueue_count();
+        let baseline_dequeues = super::ns16550a::tty_xmit_fifo_dequeue_count();
+        let baseline_kicks = super::ns16550a::tty_xmit_fifo_runtime_tx_kick_count();
+        let baseline_drains = super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count();
+        let baseline_console_queue = super::ns16550a::serial8250_tx_queue_len();
+        let baseline_console_writes =
+            super::ns16550a::serial8250_write_call_count_available_for_irq_probe();
+        let baseline_console_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
+        let baseline_console_drains = super::ns16550a::serial8250_tx_irq_drain_count();
+
+        if !super::ns16550a::start_tty_xmit_fifo_runtime_tx_batch(TTY_WRITE_RUNTIME_TX_BATCH_BYTES)
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        if !wait_tty_write_runtime_tx_closed(
+            plic,
+            irq_handler_registry,
+            baseline,
+            baseline_drains,
+            expected_len,
+            source,
+        ) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let enqueue_delta =
+            super::ns16550a::tty_xmit_fifo_enqueue_count().saturating_sub(baseline_enqueues);
+        let dequeue_delta =
+            super::ns16550a::tty_xmit_fifo_dequeue_count().saturating_sub(baseline_dequeues);
+        let drain_delta =
+            super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count().saturating_sub(baseline_drains);
+        self.fixed_bounded_batch =
+            expected_len > 1 && expected_len <= super::ns16550a::tty_xmit_fifo_capacity();
+        self.xmit_fifo_batch_enqueued = enqueue_delta == expected_len;
+        self.start_tx_committed = super::ns16550a::tty_xmit_fifo_runtime_tx_kick_count()
+            > baseline_kicks
+            && super::ns16550a::tty_xmit_fifo_runtime_tx_integrated();
+        self.plic_claim_observed =
+            observed.claims > baseline.claims && plic.last_claimed_source() == source;
+        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+            && observed.irq_dispatches > baseline.irq_dispatches;
+        self.uart_handler_observed = observed.handler_calls > baseline.handler_calls
+            && observed.handled > baseline.handled
+            && observed.thri_disabled > baseline.thri_disabled;
+        self.xmit_fifo_batch_drained = dequeue_delta == expected_len && drain_delta == expected_len;
+        self.plic_complete_observed =
+            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
+            && observed.loop_exits > baseline.loop_exits;
+        self.queue_empty_after_irq = super::ns16550a::tty_xmit_fifo_queue_len() == 0
+            && super::ns16550a::tty_xmit_fifo_runtime_tx_empty_stop_count() != 0
+            && !super::ns16550a::tty_xmit_fifo_overflowed()
+            && !super::ns16550a::tty_xmit_fifo_underflowed();
+        self.printk_tx_queue_unchanged = super::ns16550a::serial8250_tx_queue_len()
+            == baseline_console_queue
+            && super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
+                == baseline_console_writes
+            && super::ns16550a::serial8250_tx_irq_kick_count() == baseline_console_kicks
+            && super::ns16550a::serial8250_tx_irq_drain_count() == baseline_console_drains;
+        self.local_irq_guard_observed =
+            super::ns16550a::tty_xmit_fifo_runtime_tx_guarded_by_local_irq_save();
+        self.bounded_drain_observed = drain_delta == expected_len
+            && expected_len <= super::ns16550a::tty_xmit_fifo_capacity();
+        self.batch_count_matched = enqueue_delta == expected_len
+            && dequeue_delta == expected_len
+            && drain_delta == expected_len;
+        self.last_byte_matched = super::ns16550a::tty_xmit_fifo_last_enqueued() == expected_last
+            && super::ns16550a::tty_xmit_fifo_last_dequeued() == expected_last;
+        self.no_overflow_observed = !super::ns16550a::tty_xmit_fifo_overflowed();
+        self.no_underflow_observed = !super::ns16550a::tty_xmit_fifo_underflowed();
+
+        if !self.fixed_bounded_batch
+            || !self.xmit_fifo_batch_enqueued
+            || !self.start_tx_committed
+            || !self.plic_claim_observed
+            || !self.irq_dispatch_observed
+            || !self.uart_handler_observed
+            || !self.xmit_fifo_batch_drained
+            || !self.plic_complete_observed
+            || !self.zero_claim_loop_exit_observed
+            || !self.queue_empty_after_irq
+            || !self.printk_tx_queue_unchanged
+            || !self.local_irq_guard_observed
+            || !self.bounded_drain_observed
+            || !self.batch_count_matched
+            || !self.last_byte_matched
+            || !self.no_overflow_observed
+            || !self.no_underflow_observed
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        crate::trace::checkpoint(Checkpoint::TtyWriteBatchRuntimeTxReady);
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
 fn uart_irq_cycle_snapshot(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
@@ -4274,6 +4551,7 @@ fn wait_tty_write_runtime_tx_closed(
     irq_handler_registry: &IrqHandlerRegistry,
     baseline: UartIrqCycleSnapshot,
     baseline_drains: usize,
+    expected_drain_delta: usize,
     source: u32,
 ) -> bool {
     let mut spins = 0usize;
@@ -4290,7 +4568,8 @@ fn wait_tty_write_runtime_tx_closed(
             && current.completes > baseline.completes
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
-            && super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count() > baseline_drains
+            && super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count()
+                >= baseline_drains.saturating_add(expected_drain_delta)
             && super::ns16550a::tty_xmit_fifo_queue_len() == 0
             && plic.last_claimed_source() == source
             && plic.last_completed_source() == source

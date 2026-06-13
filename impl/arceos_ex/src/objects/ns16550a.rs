@@ -1454,6 +1454,10 @@ pub fn tty_xmit_fifo_queue_len() -> usize {
     }
 }
 
+pub const fn tty_xmit_fifo_capacity() -> usize {
+    TTY_XMIT_FIFO_SIZE
+}
+
 pub fn tty_xmit_fifo_enqueue_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1793,8 +1797,18 @@ pub fn trigger_serial8250_rx_loopback_batch(bytes: &[u8]) -> bool {
 }
 
 pub fn start_tty_xmit_fifo_runtime_tx(byte: u8) -> bool {
+    start_tty_xmit_fifo_runtime_tx_bytes(&[byte])
+}
+
+pub fn start_tty_xmit_fifo_runtime_tx_batch(bytes: &[u8]) -> bool {
+    start_tty_xmit_fifo_runtime_tx_bytes(bytes)
+}
+
+fn start_tty_xmit_fifo_runtime_tx_bytes(bytes: &[u8]) -> bool {
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
-    if !state.port.registered
+    if bytes.is_empty()
+        || bytes.len() > TTY_XMIT_FIFO_SIZE
+        || !state.port.registered
         || !state.port.irq_handler_registered
         || !state.port.interrupt_driven_ready
         || !state.write_backend.interrupt_driven
@@ -1814,8 +1828,11 @@ pub fn start_tty_xmit_fifo_runtime_tx(byte: u8) -> bool {
 
     let saved = csr::save_and_disable_supervisor_interrupts();
     state.tty_xmit_fifo.runtime_tx_guarded_by_local_irq_save = true;
-    let ok = state.tty_xmit_fifo.enqueue(byte)
-        && state.write_backend.kick_ordinary_tty_tx_interrupt_locked();
+    let mut ok = true;
+    for byte in bytes {
+        ok = ok && state.tty_xmit_fifo.enqueue(*byte);
+    }
+    ok = ok && state.write_backend.kick_ordinary_tty_tx_interrupt_locked();
     if ok {
         state.tty_xmit_fifo.mark_runtime_tx_integrated();
         state.tty_xmit_fifo.runtime_tx_kicks =

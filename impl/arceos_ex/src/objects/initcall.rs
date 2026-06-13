@@ -7,7 +7,8 @@ use super::{
     irq_time::{
         IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain,
         Serial8250ConsoleIrqTxProbe, Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe,
-        TtyWriteRuntimeTxProbe, TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
+        TtyWriteBatchRuntimeTxProbe, TtyWriteRuntimeTxProbe, TtyXmitFifoProbe,
+        UartExternalIrqEnable, UartInterruptChainProbe,
     },
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
@@ -1819,6 +1820,7 @@ impl InitcallBoundary {
         serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
         tty_xmit_fifo_probe: &TtyXmitFifoProbe,
         tty_write_runtime_tx_probe: &TtyWriteRuntimeTxProbe,
+        tty_write_batch_runtime_tx_probe: &TtyWriteBatchRuntimeTxProbe,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpuset.state() != State::Ready
@@ -1907,6 +1909,24 @@ impl InitcallBoundary {
             || !tty_write_runtime_tx_probe.printk_tx_queue_unchanged()
             || !tty_write_runtime_tx_probe.local_irq_guard_observed()
             || !tty_write_runtime_tx_probe.last_byte_matched()
+            || tty_write_batch_runtime_tx_probe.state() != State::Ready
+            || !tty_write_batch_runtime_tx_probe.fixed_bounded_batch()
+            || !tty_write_batch_runtime_tx_probe.xmit_fifo_batch_enqueued()
+            || !tty_write_batch_runtime_tx_probe.start_tx_committed()
+            || !tty_write_batch_runtime_tx_probe.plic_claim_observed()
+            || !tty_write_batch_runtime_tx_probe.irq_dispatch_observed()
+            || !tty_write_batch_runtime_tx_probe.uart_handler_observed()
+            || !tty_write_batch_runtime_tx_probe.xmit_fifo_batch_drained()
+            || !tty_write_batch_runtime_tx_probe.plic_complete_observed()
+            || !tty_write_batch_runtime_tx_probe.zero_claim_loop_exit_observed()
+            || !tty_write_batch_runtime_tx_probe.queue_empty_after_irq()
+            || !tty_write_batch_runtime_tx_probe.printk_tx_queue_unchanged()
+            || !tty_write_batch_runtime_tx_probe.local_irq_guard_observed()
+            || !tty_write_batch_runtime_tx_probe.bounded_drain_observed()
+            || !tty_write_batch_runtime_tx_probe.batch_count_matched()
+            || !tty_write_batch_runtime_tx_probe.last_byte_matched()
+            || !tty_write_batch_runtime_tx_probe.no_overflow_observed()
+            || !tty_write_batch_runtime_tx_probe.no_underflow_observed()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -1942,6 +1962,7 @@ pub fn initcall_phase_ready(
     serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
     tty_xmit_fifo_probe: &TtyXmitFifoProbe,
     tty_write_runtime_tx_probe: &TtyWriteRuntimeTxProbe,
+    tty_write_batch_runtime_tx_probe: &TtyWriteBatchRuntimeTxProbe,
     boundary: &InitcallBoundary,
 ) -> bool {
     cpuset.state() == State::Ready
@@ -2080,6 +2101,24 @@ pub fn initcall_phase_ready(
         && tty_write_runtime_tx_probe.printk_tx_queue_unchanged()
         && tty_write_runtime_tx_probe.local_irq_guard_observed()
         && tty_write_runtime_tx_probe.last_byte_matched()
+        && tty_write_batch_runtime_tx_probe.state() == State::Ready
+        && tty_write_batch_runtime_tx_probe.fixed_bounded_batch()
+        && tty_write_batch_runtime_tx_probe.xmit_fifo_batch_enqueued()
+        && tty_write_batch_runtime_tx_probe.start_tx_committed()
+        && tty_write_batch_runtime_tx_probe.plic_claim_observed()
+        && tty_write_batch_runtime_tx_probe.irq_dispatch_observed()
+        && tty_write_batch_runtime_tx_probe.uart_handler_observed()
+        && tty_write_batch_runtime_tx_probe.xmit_fifo_batch_drained()
+        && tty_write_batch_runtime_tx_probe.plic_complete_observed()
+        && tty_write_batch_runtime_tx_probe.zero_claim_loop_exit_observed()
+        && tty_write_batch_runtime_tx_probe.queue_empty_after_irq()
+        && tty_write_batch_runtime_tx_probe.printk_tx_queue_unchanged()
+        && tty_write_batch_runtime_tx_probe.local_irq_guard_observed()
+        && tty_write_batch_runtime_tx_probe.bounded_drain_observed()
+        && tty_write_batch_runtime_tx_probe.batch_count_matched()
+        && tty_write_batch_runtime_tx_probe.last_byte_matched()
+        && tty_write_batch_runtime_tx_probe.no_overflow_observed()
+        && tty_write_batch_runtime_tx_probe.no_underflow_observed()
         && boundary.state() == State::Ready
         && boundary.kunit_next_boundary()
 }

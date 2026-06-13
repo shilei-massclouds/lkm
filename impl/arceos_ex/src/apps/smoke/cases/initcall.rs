@@ -189,6 +189,38 @@ pub fn run() -> SmokeResult {
         || !ctx.tty_write_runtime_tx_probe.printk_tx_queue_unchanged()
         || !ctx.tty_write_runtime_tx_probe.local_irq_guard_observed()
         || !ctx.tty_write_runtime_tx_probe.last_byte_matched()
+        || ctx.tty_write_batch_runtime_tx_probe.state() != State::Ready
+        || !ctx.tty_write_batch_runtime_tx_probe.fixed_bounded_batch()
+        || !ctx
+            .tty_write_batch_runtime_tx_probe
+            .xmit_fifo_batch_enqueued()
+        || !ctx.tty_write_batch_runtime_tx_probe.start_tx_committed()
+        || !ctx.tty_write_batch_runtime_tx_probe.plic_claim_observed()
+        || !ctx.tty_write_batch_runtime_tx_probe.irq_dispatch_observed()
+        || !ctx.tty_write_batch_runtime_tx_probe.uart_handler_observed()
+        || !ctx
+            .tty_write_batch_runtime_tx_probe
+            .xmit_fifo_batch_drained()
+        || !ctx
+            .tty_write_batch_runtime_tx_probe
+            .plic_complete_observed()
+        || !ctx
+            .tty_write_batch_runtime_tx_probe
+            .zero_claim_loop_exit_observed()
+        || !ctx.tty_write_batch_runtime_tx_probe.queue_empty_after_irq()
+        || !ctx
+            .tty_write_batch_runtime_tx_probe
+            .printk_tx_queue_unchanged()
+        || !ctx
+            .tty_write_batch_runtime_tx_probe
+            .local_irq_guard_observed()
+        || !ctx
+            .tty_write_batch_runtime_tx_probe
+            .bounded_drain_observed()
+        || !ctx.tty_write_batch_runtime_tx_probe.batch_count_matched()
+        || !ctx.tty_write_batch_runtime_tx_probe.last_byte_matched()
+        || !ctx.tty_write_batch_runtime_tx_probe.no_overflow_observed()
+        || !ctx.tty_write_batch_runtime_tx_probe.no_underflow_observed()
         || !crate::objects::ns16550a::tty_xmit_fifo_round_trip_ready()
         || crate::objects::ns16550a::tty_xmit_fifo_queue_len() != 0
         || crate::objects::ns16550a::tty_xmit_fifo_enqueue_count() == 0

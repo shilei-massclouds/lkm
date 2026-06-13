@@ -489,6 +489,15 @@ probe 先向 `TtyXmitFifo` enqueue 固定 byte，再经 `Serial8250RuntimePort.S
 不得增加 printk write call，不得让 KUnit/smoke 直接调用 handler 或手动 drain FIFO；KUnit 只能观察 enqueue/dequeue
 计数、THRI kick、handler drain、PLIC claim/complete/zero-claim loop exit、queue empty 和 last byte。
 
+ordinary TTY write 的第二轮批量补强必须通过独立 `TtyWriteBatchRuntimeTxProbe` 或等价生产边界执行，并且只能在
+`TtyWriteRuntimeTxProbe` 单 byte 闭环 Ready 之后运行。该 probe 使用固定小批量，批量长度必须小于当前
+`TtyXmitFifo` 容量和 runtime TX drain/tx_loadsz 预算；它可以一次 enqueue 多个 ordinary TTY byte，然后只经
+`Serial8250RuntimePort.StartTx` 打开 THRI，让真实 PLIC/IRQ/runtime handler 的 `TransmitChars` drain 批量 FIFO。
+验收至少要求 enqueue/dequeue/runtime drain 的增量匹配批量长度、queue empty、last byte 匹配、无 overflow/underflow、
+local irq guard 可观察、PLIC claim/complete/zero-claim loop exit 闭合，并继续验证 printk console TX queue/write/kick/drain
+计数不变。该 probe 仍不引入公开 `printk::flush()`、完整 `tty_write()`/line discipline/file write API，也不得让
+KUnit/smoke 直接调用 handler 或手动 drain FIFO。
+
 首轮 RX 验证应采用 8250 loopback probe，而不是修改设备树或让 KUnit 人工制造中断。`Serial8250RxLoopbackProbe`
 或等价生产边界负责保存 MCR、设置 loopback、由 smoke/probe 路径提供一个 TX 字符、写入 UART TX，让硬件回送成
 RX 并触发真实 RDI/RLSI interrupt；随后必须走真实 `UART -> PLIC -> root INTC -> IrqAction dispatch ->
