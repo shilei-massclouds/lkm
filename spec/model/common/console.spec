@@ -1504,10 +1504,6 @@ object Serial8250Console: ConsoleObject {
 
                 ensures {
                     serial8250_console_interrupt_driven_ready(Serial8250Console);
-                    serial8250_console_tx_queue_guarded_by_local_irq_save(Serial8250Console);
-                    serial8250_console_tx_irq_kicks_thri(Serial8250Console);
-                    serial8250_console_tx_irq_handler_drains_queue(Serial8250Console);
-                    serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
                 }
             }
         }
@@ -1523,10 +1519,6 @@ object Serial8250Console: ConsoleObject {
             serial8250_console_write_uses_uart_membase(Serial8250Console, Uart8250Port);
             serial8250_console_write_does_not_use_sbi(Serial8250Console);
             serial8250_console_interrupt_driven_ready(Serial8250Console);
-            serial8250_console_tx_queue_guarded_by_local_irq_save(Serial8250Console);
-            serial8250_console_tx_irq_kicks_thri(Serial8250Console);
-            serial8250_console_tx_irq_handler_drains_queue(Serial8250Console);
-            serial8250_console_tx_queue_empty_after_irq(Serial8250Console);
             serial8250_console_online_trace_emitted(Serial8250Console);
             serial8250_console_delivered_records_not_replayed_by_earlycon(Serial8250Console);
         }

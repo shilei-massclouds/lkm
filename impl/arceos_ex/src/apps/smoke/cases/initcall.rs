@@ -84,202 +84,6 @@ pub fn run() -> SmokeResult {
         || !ctx.uart_interrupt_chain_probe.plic_loop_exit_observed()
         || !ctx.uart_interrupt_chain_probe.irq_cycle_closed()
         || !ctx.uart_interrupt_chain_probe.console_polling_preserved()
-        || ctx.serial8250_console_irq_tx_probe.state() != State::Ready
-        || !ctx
-            .serial8250_console_irq_tx_probe
-            .interrupt_driven_enabled()
-        || !ctx
-            .serial8250_console_irq_tx_probe
-            .printk_frontend_submitted()
-        || !ctx.serial8250_console_irq_tx_probe.tx_queue_kicked()
-        || !ctx
-            .serial8250_console_irq_tx_probe
-            .uart_handler_drained_tx()
-        || !ctx.serial8250_console_irq_tx_probe.plic_claim_observed()
-        || !ctx.serial8250_console_irq_tx_probe.plic_complete_observed()
-        || !ctx
-            .serial8250_console_irq_tx_probe
-            .zero_claim_loop_exit_observed()
-        || !ctx
-            .serial8250_console_irq_tx_probe
-            .tx_queue_empty_after_irq()
-        || !ctx
-            .serial8250_console_irq_tx_probe
-            .local_irq_guard_observed()
-        || ctx.serial8250_console_burst_irq_tx_probe.state() != State::Ready
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .printk_frontend_submitted()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .multiple_records_submitted()
-        || !ctx.serial8250_console_burst_irq_tx_probe.tx_queue_kicked()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .plic_claim_observed()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .irq_dispatch_observed()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .uart_handler_drained_tx()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .plic_complete_observed()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .zero_claim_loop_exit_observed()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .tx_queue_empty_after_irq()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .write_count_matched()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .drain_count_matched()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .last_byte_matched()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .local_irq_guard_observed()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .no_overflow_observed()
-        || !ctx
-            .serial8250_console_burst_irq_tx_probe
-            .tty_xmit_fifo_unchanged()
-        || ctx.serial8250_console_long_irq_tx_probe.state() != State::Ready
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .printk_frontend_submitted()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .tx_load_size_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .message_exceeds_single_load()
-        || !ctx.serial8250_console_long_irq_tx_probe.tx_queue_kicked()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .plic_claim_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .irq_dispatch_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .uart_handler_drained_tx()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .multiple_irq_rounds_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .tx_load_budget_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .plic_complete_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .zero_claim_loop_exit_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .tx_queue_empty_after_irq()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .write_count_matched()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .drain_count_matched()
-        || !ctx.serial8250_console_long_irq_tx_probe.last_byte_matched()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .local_irq_guard_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .no_overflow_observed()
-        || !ctx
-            .serial8250_console_long_irq_tx_probe
-            .tty_xmit_fifo_unchanged()
-        || ctx.serial8250_console_long_burst_irq_tx_probe.state() != State::Ready
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .printk_frontend_submitted()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .multiple_records_submitted()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .tx_load_size_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .each_record_exceeds_single_load()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .tx_queue_kicked()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .plic_claim_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .irq_dispatch_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .uart_handler_drained_tx()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .multiple_irq_rounds_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .tx_load_budget_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .plic_complete_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .zero_claim_loop_exit_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .tx_queue_empty_after_irq()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .write_count_matched()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .drain_count_matched()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .last_byte_matched()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .local_irq_guard_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .no_overflow_observed()
-        || !ctx
-            .serial8250_console_long_burst_irq_tx_probe
-            .tty_xmit_fifo_unchanged()
-        || ctx.serial8250_console_tx_quiesce_probe.state() != State::Ready
-        || !ctx.serial8250_console_tx_quiesce_probe.no_printk_write()
-        || !ctx
-            .serial8250_console_tx_quiesce_probe
-            .tx_queue_empty_observed()
-        || !ctx
-            .serial8250_console_tx_quiesce_probe
-            .thri_stopped_observed()
-        || !ctx
-            .serial8250_console_tx_quiesce_probe
-            .no_spurious_plic_claim()
-        || !ctx
-            .serial8250_console_tx_quiesce_probe
-            .no_spurious_irq_dispatch()
-        || !ctx.serial8250_console_tx_quiesce_probe.no_uart_tx_drain()
-        || !ctx
-            .serial8250_console_tx_quiesce_probe
-            .no_tty_xmit_fifo_mutation()
-        || !ctx
-            .serial8250_console_tx_quiesce_probe
-            .no_overflow_observed()
         || ctx.serial8250_rx_loopback_probe.state() != State::Ready
         || !ctx.serial8250_rx_loopback_probe.rx_runtime_enabled()
         || !ctx
@@ -324,7 +128,7 @@ pub fn run() -> SmokeResult {
         || !ctx
             .serial8250_rx_batch_loopback_probe
             .no_overflow_observed()
-        || !crate::objects::ns16550a::uart8250_interrupt_driven_ready()
+        || !crate::objects::ns16550a::uart8250_interrupt_driven_configured()
         || !crate::objects::ns16550a::serial8250_runtime_port_ready()
         || !crate::objects::ns16550a::serial8250_runtime_console_tx_ready()
         || !crate::objects::ns16550a::serial8250_runtime_rx_enabled()
@@ -336,7 +140,6 @@ pub fn run() -> SmokeResult {
         || crate::objects::ns16550a::tty_flip_buffer_last_pushed_len() == 0
         || crate::objects::ns16550a::tty_flip_buffer_overflowed()
         || !crate::objects::ns16550a::tty_xmit_fifo_ready()
-        || !crate::objects::ns16550a::tty_xmit_fifo_runtime_tx_integrated()
         || ctx.tty_xmit_fifo_probe.state() != State::Ready
         || !ctx.tty_xmit_fifo_probe.enqueue_committed()
         || !ctx.tty_xmit_fifo_probe.dequeue_committed()
@@ -348,63 +151,12 @@ pub fn run() -> SmokeResult {
         || !ctx.tty_xmit_fifo_probe.no_uart_thri_kick()
         || !ctx.tty_xmit_fifo_probe.no_overflow_observed()
         || !ctx.tty_xmit_fifo_probe.no_underflow_observed()
-        || ctx.tty_write_runtime_tx_probe.state() != State::Ready
-        || !ctx.tty_write_runtime_tx_probe.xmit_fifo_enqueued()
-        || !ctx.tty_write_runtime_tx_probe.start_tx_committed()
-        || !ctx.tty_write_runtime_tx_probe.plic_claim_observed()
-        || !ctx.tty_write_runtime_tx_probe.irq_dispatch_observed()
-        || !ctx.tty_write_runtime_tx_probe.uart_handler_observed()
-        || !ctx.tty_write_runtime_tx_probe.xmit_fifo_drained()
-        || !ctx.tty_write_runtime_tx_probe.plic_complete_observed()
-        || !ctx
-            .tty_write_runtime_tx_probe
-            .zero_claim_loop_exit_observed()
-        || !ctx.tty_write_runtime_tx_probe.queue_empty_after_irq()
-        || !ctx.tty_write_runtime_tx_probe.printk_tx_queue_unchanged()
-        || !ctx.tty_write_runtime_tx_probe.local_irq_guard_observed()
-        || !ctx.tty_write_runtime_tx_probe.last_byte_matched()
-        || ctx.tty_write_batch_runtime_tx_probe.state() != State::Ready
-        || !ctx.tty_write_batch_runtime_tx_probe.fixed_bounded_batch()
-        || !ctx
-            .tty_write_batch_runtime_tx_probe
-            .xmit_fifo_batch_enqueued()
-        || !ctx.tty_write_batch_runtime_tx_probe.start_tx_committed()
-        || !ctx.tty_write_batch_runtime_tx_probe.plic_claim_observed()
-        || !ctx.tty_write_batch_runtime_tx_probe.irq_dispatch_observed()
-        || !ctx.tty_write_batch_runtime_tx_probe.uart_handler_observed()
-        || !ctx
-            .tty_write_batch_runtime_tx_probe
-            .xmit_fifo_batch_drained()
-        || !ctx
-            .tty_write_batch_runtime_tx_probe
-            .plic_complete_observed()
-        || !ctx
-            .tty_write_batch_runtime_tx_probe
-            .zero_claim_loop_exit_observed()
-        || !ctx.tty_write_batch_runtime_tx_probe.queue_empty_after_irq()
-        || !ctx
-            .tty_write_batch_runtime_tx_probe
-            .printk_tx_queue_unchanged()
-        || !ctx
-            .tty_write_batch_runtime_tx_probe
-            .local_irq_guard_observed()
-        || !ctx
-            .tty_write_batch_runtime_tx_probe
-            .bounded_drain_observed()
-        || !ctx.tty_write_batch_runtime_tx_probe.batch_count_matched()
-        || !ctx.tty_write_batch_runtime_tx_probe.last_byte_matched()
-        || !ctx.tty_write_batch_runtime_tx_probe.no_overflow_observed()
-        || !ctx.tty_write_batch_runtime_tx_probe.no_underflow_observed()
         || !crate::objects::ns16550a::tty_xmit_fifo_round_trip_ready()
         || crate::objects::ns16550a::tty_xmit_fifo_queue_len() != 0
         || crate::objects::ns16550a::tty_xmit_fifo_enqueue_count() == 0
         || crate::objects::ns16550a::tty_xmit_fifo_dequeue_count() == 0
-        || crate::objects::ns16550a::tty_xmit_fifo_runtime_tx_kick_count() == 0
-        || crate::objects::ns16550a::tty_xmit_fifo_runtime_tx_drain_count() == 0
-        || crate::objects::ns16550a::tty_xmit_fifo_runtime_tx_empty_stop_count() == 0
         || crate::objects::ns16550a::uart8250_rx_interrupt_request_count() == 0
         || crate::objects::ns16550a::uart8250_rx_interrupt_handled_count() == 0
-        || crate::objects::ns16550a::serial8250_tx_irq_drain_count() == 0
         || crate::objects::ns16550a::serial8250_tx_queue_len() != 0
         || !ctx.interrupt_stream.supervisor_external_input_gate_open()
         || !ctx

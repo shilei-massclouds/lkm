@@ -62,6 +62,66 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
     )?;
+    enable_serial8250_interrupt_driven_console()?;
+    setup_uart_irq_chain_payload_probes(ctx)?;
+    ctx.serial8250_rx_loopback_probe.setup(
+        &ctx.uart_external_irq_enable,
+        &ctx.plic,
+        &ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+    )?;
+    ctx.serial8250_rx_batch_loopback_probe.setup(
+        &ctx.serial8250_rx_loopback_probe,
+        &ctx.plic,
+        &ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+    )?;
+    ctx.tty_xmit_fifo_probe
+        .setup(&ctx.serial8250_rx_batch_loopback_probe)?;
+    setup_tty_runtime_tx_payload_probes(ctx)?;
+    ctx.initcall_boundary.setup(
+        &ctx.cpuset_smp_trimmed,
+        &ctx.driver_core_base,
+        &ctx.platform_bus_root_device,
+        &ctx.platform_bus,
+        &ctx.driver_core_deferred,
+        &ctx.irq_proc_view_deferred,
+        &ctx.ctor_table,
+        &ctx.initcall_table,
+        &ctx.uart_external_irq_enable,
+        &ctx.uart_interrupt_chain_probe,
+        &ctx.serial8250_rx_loopback_probe,
+        &ctx.serial8250_rx_batch_loopback_probe,
+        &ctx.tty_xmit_fifo_probe,
+    )
+}
+
+fn enable_serial8250_interrupt_driven_console() -> EventResult {
+    if !crate::objects::ns16550a::serial8250_runtime_console_tx_ready()
+        && !crate::objects::ns16550a::enable_serial8250_interrupt_driven_console()
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Ready,
+        );
+    }
+
+    if !crate::objects::ns16550a::uart8250_interrupt_driven_configured() {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Ready,
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(checkpoint_handler_uart_irq_chain)]
+fn setup_uart_irq_chain_payload_probes(ctx: &mut Context) -> EventResult {
     ctx.serial8250_console_irq_tx_probe.setup(
         &ctx.uart_external_irq_enable,
         &ctx.uart_interrupt_chain_probe,
@@ -92,22 +152,16 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.plic,
         &ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
-    )?;
-    ctx.serial8250_rx_loopback_probe.setup(
-        &ctx.uart_external_irq_enable,
-        &ctx.serial8250_console_tx_quiesce_probe,
-        &ctx.plic,
-        &ctx.plic_irq_domain,
-        &ctx.irq_handler_registry,
-    )?;
-    ctx.serial8250_rx_batch_loopback_probe.setup(
-        &ctx.serial8250_rx_loopback_probe,
-        &ctx.plic,
-        &ctx.plic_irq_domain,
-        &ctx.irq_handler_registry,
-    )?;
-    ctx.tty_xmit_fifo_probe
-        .setup(&ctx.serial8250_rx_batch_loopback_probe)?;
+    )
+}
+
+#[cfg(not(checkpoint_handler_uart_irq_chain))]
+fn setup_uart_irq_chain_payload_probes(_ctx: &mut Context) -> EventResult {
+    Ok(())
+}
+
+#[cfg(checkpoint_handler_uart_irq_chain)]
+fn setup_tty_runtime_tx_payload_probes(ctx: &mut Context) -> EventResult {
     ctx.tty_write_runtime_tx_probe.setup(
         &ctx.tty_xmit_fifo_probe,
         &ctx.plic,
@@ -119,29 +173,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.plic,
         &ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
-    )?;
-    ctx.initcall_boundary.setup(
-        &ctx.cpuset_smp_trimmed,
-        &ctx.driver_core_base,
-        &ctx.platform_bus_root_device,
-        &ctx.platform_bus,
-        &ctx.driver_core_deferred,
-        &ctx.irq_proc_view_deferred,
-        &ctx.ctor_table,
-        &ctx.initcall_table,
-        &ctx.uart_external_irq_enable,
-        &ctx.uart_interrupt_chain_probe,
-        &ctx.serial8250_console_irq_tx_probe,
-        &ctx.serial8250_console_burst_irq_tx_probe,
-        &ctx.serial8250_console_long_irq_tx_probe,
-        &ctx.serial8250_console_long_burst_irq_tx_probe,
-        &ctx.serial8250_console_tx_quiesce_probe,
-        &ctx.serial8250_rx_loopback_probe,
-        &ctx.serial8250_rx_batch_loopback_probe,
-        &ctx.tty_xmit_fifo_probe,
-        &ctx.tty_write_runtime_tx_probe,
-        &ctx.tty_write_batch_runtime_tx_probe,
     )
+}
+
+#[cfg(not(checkpoint_handler_uart_irq_chain))]
+fn setup_tty_runtime_tx_payload_probes(_ctx: &mut Context) -> EventResult {
+    Ok(())
 }
 
 fn run_initcall_table(ctx: &mut Context) -> EventResult {
@@ -169,16 +206,9 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.initcall_table,
         &ctx.uart_external_irq_enable,
         &ctx.uart_interrupt_chain_probe,
-        &ctx.serial8250_console_irq_tx_probe,
-        &ctx.serial8250_console_burst_irq_tx_probe,
-        &ctx.serial8250_console_long_irq_tx_probe,
-        &ctx.serial8250_console_long_burst_irq_tx_probe,
-        &ctx.serial8250_console_tx_quiesce_probe,
         &ctx.serial8250_rx_loopback_probe,
         &ctx.serial8250_rx_batch_loopback_probe,
         &ctx.tty_xmit_fifo_probe,
-        &ctx.tty_write_runtime_tx_probe,
-        &ctx.tty_write_batch_runtime_tx_probe,
         &ctx.initcall_boundary,
     ) {
         return failed_condition(

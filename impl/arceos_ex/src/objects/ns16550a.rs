@@ -340,6 +340,7 @@ pub struct TtyXmitFifo {
     ordinary_tty_write_path: bool,
     distinct_from_printk_console_tx: bool,
     runtime_tx_integration_deferred: bool,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     runtime_tx_integrated: bool,
     buffer: [u8; TTY_XMIT_FIFO_SIZE],
     head: usize,
@@ -349,9 +350,13 @@ pub struct TtyXmitFifo {
     dequeue_count: usize,
     last_enqueued: u8,
     last_dequeued: u8,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     runtime_tx_kicks: usize,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     runtime_tx_drains: usize,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     runtime_tx_empty_stops: usize,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     runtime_tx_guarded_by_local_irq_save: bool,
     overflowed: bool,
     underflowed: bool,
@@ -365,6 +370,7 @@ impl TtyXmitFifo {
             ordinary_tty_write_path: false,
             distinct_from_printk_console_tx: true,
             runtime_tx_integration_deferred: true,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_integrated: false,
             buffer: [0; TTY_XMIT_FIFO_SIZE],
             head: 0,
@@ -374,9 +380,13 @@ impl TtyXmitFifo {
             dequeue_count: 0,
             last_enqueued: 0,
             last_dequeued: 0,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_kicks: 0,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_drains: 0,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_empty_stops: 0,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_guarded_by_local_irq_save: false,
             overflowed: false,
             underflowed: false,
@@ -394,6 +404,7 @@ impl TtyXmitFifo {
             ordinary_tty_write_path: true,
             distinct_from_printk_console_tx: true,
             runtime_tx_integration_deferred: true,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_integrated: false,
             buffer: [0; TTY_XMIT_FIFO_SIZE],
             head: 0,
@@ -403,9 +414,13 @@ impl TtyXmitFifo {
             dequeue_count: 0,
             last_enqueued: 0,
             last_dequeued: 0,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_kicks: 0,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_drains: 0,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_empty_stops: 0,
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             runtime_tx_guarded_by_local_irq_save: false,
             overflowed: false,
             underflowed: false,
@@ -449,6 +464,7 @@ impl TtyXmitFifo {
         Some(byte)
     }
 
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     fn mark_runtime_tx_integrated(&mut self) {
         self.runtime_tx_integration_deferred = false;
         self.runtime_tx_integrated = true;
@@ -925,6 +941,7 @@ impl Serial8250WriteBackend {
         true
     }
 
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     fn kick_ordinary_tty_tx_interrupt_locked(&mut self) -> bool {
         self.kick_tx_interrupt_hw_locked()
     }
@@ -1094,6 +1111,7 @@ impl Serial8250WriteBackend {
             && self.tx_load_size == UART_TX_LOAD_SIZE
     }
 
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     fn irq_driven_facts_ready(self, port: Uart8250Port) -> bool {
         self.ready
             && port.registered
@@ -1204,6 +1222,7 @@ pub fn uart8250_interrupt_output_still_deferred() -> bool {
     state.port.registered && state.port.interrupt_output_deferred
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn uart8250_interrupt_driven_ready() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.port.registered
@@ -1217,6 +1236,23 @@ pub fn uart8250_interrupt_driven_ready() -> bool {
         )
         && state.runtime_port.console_tx_interrupt_driven
         && state.write_backend.irq_driven_facts_ready(state.port)
+}
+
+pub fn uart8250_interrupt_driven_configured() -> bool {
+    let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
+    state.port.registered
+        && state.port.interrupt_driven_ready
+        && !state.port.interrupt_output_deferred
+        && state.runtime_port.facts_ready(
+            state.port,
+            state.tty_port,
+            state.tty_flip_buffer,
+            state.tty_xmit_fifo,
+        )
+        && state.runtime_port.console_tx_interrupt_driven
+        && state.write_backend.ready
+        && state.write_backend.interrupt_driven
+        && !state.write_backend.interrupt_output_deferred
 }
 
 pub fn uart8250_interrupt_trigger_ready() -> bool {
@@ -1301,6 +1337,7 @@ pub fn serial8250_tx_irq_drain_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_irq_budget_hit_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1311,6 +1348,7 @@ pub fn serial8250_tx_irq_budget_hit_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_irq_empty_stop_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1321,6 +1359,7 @@ pub fn serial8250_tx_irq_empty_stop_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_byte_count_available_for_irq_probe() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1331,6 +1370,7 @@ pub fn serial8250_tx_byte_count_available_for_irq_probe() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_crlf_insertion_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1341,6 +1381,7 @@ pub fn serial8250_tx_crlf_insertion_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_last_tx_byte() -> u8 {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1351,6 +1392,7 @@ pub fn serial8250_last_tx_byte() -> u8 {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_queue_overflowed() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1361,6 +1403,7 @@ pub fn serial8250_tx_queue_overflowed() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_tx_queue_guarded_by_local_irq_save() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1473,6 +1516,7 @@ pub fn tty_xmit_fifo_deferred_from_console_tx() -> bool {
         && state.tty_xmit_fifo.runtime_tx_integration_deferred
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_integrated() -> bool {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     state.tty_xmit_fifo.facts_ready(state.tty_port)
@@ -1513,6 +1557,7 @@ pub fn tty_xmit_fifo_queue_len() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub const fn tty_xmit_fifo_capacity() -> usize {
     TTY_XMIT_FIFO_SIZE
 }
@@ -1577,6 +1622,7 @@ pub fn tty_xmit_fifo_underflowed() -> bool {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_kick_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1587,6 +1633,7 @@ pub fn tty_xmit_fifo_runtime_tx_kick_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_drain_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1597,6 +1644,7 @@ pub fn tty_xmit_fifo_runtime_tx_drain_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_empty_stop_count() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1607,6 +1655,7 @@ pub fn tty_xmit_fifo_runtime_tx_empty_stop_count() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn tty_xmit_fifo_runtime_tx_guarded_by_local_irq_save() -> bool {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1674,6 +1723,7 @@ pub fn serial8250_runtime_rx_drain_limit() -> usize {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn serial8250_runtime_tx_load_size() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)
@@ -1768,7 +1818,9 @@ pub fn enable_serial8250_runtime_rx() -> bool {
     if !state.port.registered
         || !state.port.irq_handler_registered
         || !state.port.interrupt_driven_ready
-        || !state.write_backend.irq_driven_facts_ready(state.port)
+        || !state.write_backend.ready
+        || !state.write_backend.interrupt_driven
+        || state.write_backend.interrupt_output_deferred
         || !state.runtime_port.facts_ready(
             state.port,
             state.tty_port,
@@ -1865,14 +1917,17 @@ pub fn trigger_serial8250_rx_loopback_batch(bytes: &[u8]) -> bool {
     ok
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn start_tty_xmit_fifo_runtime_tx(byte: u8) -> bool {
     start_tty_xmit_fifo_runtime_tx_bytes(&[byte])
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub fn start_tty_xmit_fifo_runtime_tx_batch(bytes: &[u8]) -> bool {
     start_tty_xmit_fifo_runtime_tx_bytes(bytes)
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn start_tty_xmit_fifo_runtime_tx_bytes(bytes: &[u8]) -> bool {
     let state = unsafe { (&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() };
     if bytes.is_empty()
@@ -1952,6 +2007,7 @@ pub fn handle_uart_irq() {
         return;
     }
 
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     if state.write_backend.interrupt_driven
         && state.tty_xmit_fifo.runtime_tx_integrated
         && state.tty_xmit_fifo.queued != 0
@@ -2001,6 +2057,7 @@ fn is_uart_rx_interrupt(interrupt_id: usize) -> bool {
     )
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn drain_tty_xmit_fifo_irq(state: &mut Ns16550aProbeState) -> bool {
     if !state.write_backend.interrupt_driven || !state.tty_xmit_fifo.runtime_tx_integrated {
         return false;
@@ -2113,6 +2170,7 @@ pub fn serial8250_write_call_count() -> usize {
     serial8250_write_call_count_available_for_irq_probe()
 }
 
+#[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_uart_irq_chain))]
 pub fn serial8250_write_call_count_available_for_irq_probe() -> usize {
     unsafe {
         (&raw const NS16550A_PROBE_STATE)

@@ -1252,6 +1252,10 @@ handoff 后的 polling/backend-deferred 状态推进到 runtime interrupt-driven
 一条探针输出，由真实 THRI 中断驱动 UART handler drain TX queue，并观察 TX queue kick、UART handler drain、PLIC
 claim/complete、zero-claim loop exit、queue empty 和本地中断保存/恢复 guard facts。该 probe 是生产边界，不是
 KUnit handler；KUnit 只能读取它留下的 fact/counter/sink 诊断，不能参与 TX drain 流程。
+普通 `make run`/app smoke 路径不得默认执行会产生用户可见 payload 的 TX probe，例如固定 printk burst、long burst 或
+ordinary TTY write 的 `W`/`tx04` 测试字节；这些 payload probe 只能在 checkpoint/KUnit 测试构建中由生产路径按顺序触发，
+然后由只读 KUnit observer 校验事实。KUnit handler 本身仍不得写字符、调用 printk、触发 IRQ、claim/complete 或直接推进
+handler/drain。
 
 kernel printk 是当前 serial8250 runtime TX 的主线。`Serial8250ConsoleBurstIrqTxProbe` 或等价生产边界必须在
 `Serial8250ConsoleIrqTxProbe` ready 后执行，通过公开 `printk` 前端连续提交多条固定探针输出，随后仍由真实
@@ -1283,7 +1287,8 @@ TTY xmit FIFO enqueue/dequeue/runtime drain 计数不变、无 console TX overfl
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经
 `PlicIrqDomain` 建立 UART source 到 logical IRQ 的记录，并把 logical IRQ 保存在 `Uart8250Port`。这一步只说明外部中断链的
 资源和 logical IRQ 绑定已经建立；platform probe 当场仍保持 polling，UART interrupt output 继续记录为 deferred，直到
-`Serial8250ConsoleIrqTxProbe` 在中断链 ready 后显式切换。
+`UartInterruptChainProbe` 已证明一轮外部中断链闭合后，initcall 生产路径显式切换到 interrupt-driven console TX；
+可见 TX load/pressure probe 是否执行由 checkpoint/KUnit 测试配置决定，不属于普通启动输出。
 
 handler registry 必须作为 IRQ core 侧对象建模和实现。`IrqHandlerRegistry` / `IrqAction` 记录 `request_irq`
 风格的 logical IRQ -> handler 绑定，输入 logical IRQ 必须已经由 `PlicIrqDomain` 映射；未映射 logical IRQ 注册必须失败，

@@ -3109,6 +3109,7 @@ pub struct UartInterruptChainProbe {
     console_polling_preserved: bool,
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub struct Serial8250ConsoleIrqTxProbe {
     lifecycle: Lifecycle,
     interrupt_driven_enabled: bool,
@@ -3136,6 +3137,7 @@ pub struct Serial8250RxLoopbackProbe {
     last_byte_matched: bool,
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub struct Serial8250ConsoleBurstIrqTxProbe {
     lifecycle: Lifecycle,
     printk_frontend_submitted: bool,
@@ -3155,6 +3157,7 @@ pub struct Serial8250ConsoleBurstIrqTxProbe {
     tty_xmit_fifo_unchanged: bool,
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub struct Serial8250ConsoleLongIrqTxProbe {
     lifecycle: Lifecycle,
     printk_frontend_submitted: bool,
@@ -3177,6 +3180,7 @@ pub struct Serial8250ConsoleLongIrqTxProbe {
     tty_xmit_fifo_unchanged: bool,
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub struct Serial8250ConsoleLongBurstIrqTxProbe {
     lifecycle: Lifecycle,
     printk_frontend_submitted: bool,
@@ -3200,6 +3204,7 @@ pub struct Serial8250ConsoleLongBurstIrqTxProbe {
     tty_xmit_fifo_unchanged: bool,
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub struct Serial8250ConsoleTxQuiesceProbe {
     lifecycle: Lifecycle,
     no_printk_write: bool,
@@ -3242,6 +3247,7 @@ pub struct TtyXmitFifoProbe {
     no_underflow_observed: bool,
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub struct TtyWriteRuntimeTxProbe {
     lifecycle: Lifecycle,
     xmit_fifo_enqueued: bool,
@@ -3258,6 +3264,7 @@ pub struct TtyWriteRuntimeTxProbe {
     last_byte_matched: bool,
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 pub struct TtyWriteBatchRuntimeTxProbe {
     lifecycle: Lifecycle,
     fixed_bounded_batch: bool,
@@ -3280,9 +3287,13 @@ pub struct TtyWriteBatchRuntimeTxProbe {
 }
 
 const UART_IRQ_CYCLE_SPIN_LIMIT: usize = 20_000_000;
+#[cfg(checkpoint_handler_uart_irq_chain)]
 const SERIAL8250_IRQ_TX_PROBE_MESSAGE: &str = "serial8250 irq console\n";
+#[cfg(checkpoint_handler_uart_irq_chain)]
 const SERIAL8250_BURST_IRQ_TX_PROBE_MESSAGES: &[&str] = &["printk burst A\n", "printk burst B\n"];
+#[cfg(checkpoint_handler_uart_irq_chain)]
 const SERIAL8250_LONG_IRQ_TX_PROBE_MESSAGE: &str = "printk long tx load 0123456789abcdef\n";
+#[cfg(checkpoint_handler_uart_irq_chain)]
 const SERIAL8250_LONG_BURST_IRQ_TX_PROBE_MESSAGES: &[&str] = &[
     "printk long burst A 0123456789abcdef\n",
     "printk long burst B fedcba9876543210\n",
@@ -3291,7 +3302,9 @@ const SERIAL8250_LONG_BURST_IRQ_TX_PROBE_MESSAGES: &[&str] = &[
 const SERIAL8250_RX_LOOPBACK_BYTE: u8 = b'R';
 const SERIAL8250_RX_BATCH_LOOPBACK_BYTES: &[u8] = b"rx42";
 const TTY_XMIT_FIFO_PROBE_BYTE: u8 = b'T';
+#[cfg(checkpoint_handler_uart_irq_chain)]
 const TTY_WRITE_RUNTIME_TX_PROBE_BYTE: u8 = b'W';
+#[cfg(checkpoint_handler_uart_irq_chain)]
 const TTY_WRITE_RUNTIME_TX_BATCH_BYTES: &[u8] = b"tx04";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -3463,6 +3476,7 @@ impl UartInterruptChainProbe {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 impl Serial8250ConsoleIrqTxProbe {
     pub const fn new() -> Self {
         Self {
@@ -3557,7 +3571,18 @@ impl Serial8250ConsoleIrqTxProbe {
             );
         }
 
-        if !super::ns16550a::enable_serial8250_interrupt_driven_console() {
+        if !super::ns16550a::serial8250_runtime_console_tx_ready()
+            && !super::ns16550a::enable_serial8250_interrupt_driven_console()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        if !super::ns16550a::uart8250_interrupt_driven_configured() {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -3634,6 +3659,7 @@ impl Serial8250ConsoleIrqTxProbe {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 impl Serial8250ConsoleBurstIrqTxProbe {
     pub const fn new() -> Self {
         Self {
@@ -3862,6 +3888,7 @@ impl Serial8250ConsoleBurstIrqTxProbe {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 impl Serial8250ConsoleLongIrqTxProbe {
     pub const fn new() -> Self {
         Self {
@@ -4123,6 +4150,7 @@ impl Serial8250ConsoleLongIrqTxProbe {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 impl Serial8250ConsoleLongBurstIrqTxProbe {
     pub const fn new() -> Self {
         Self {
@@ -4409,6 +4437,7 @@ impl Serial8250ConsoleLongBurstIrqTxProbe {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 impl Serial8250ConsoleTxQuiesceProbe {
     pub const fn new() -> Self {
         Self {
@@ -4624,7 +4653,6 @@ impl Serial8250RxLoopbackProbe {
     pub fn setup(
         &mut self,
         uart_external_irq_enable: &UartExternalIrqEnable,
-        serial8250_console_tx_quiesce_probe: &Serial8250ConsoleTxQuiesceProbe,
         plic: &Plic,
         plic_irq_domain: &PlicIrqDomain,
         irq_handler_registry: &IrqHandlerRegistry,
@@ -4635,15 +4663,10 @@ impl Serial8250RxLoopbackProbe {
             || uart_external_irq_enable.state() != State::Ready
             || !uart_external_irq_enable.plic_source_gate_open()
             || !uart_external_irq_enable.root_external_input_gate_open()
-            || serial8250_console_tx_quiesce_probe.state() != State::Ready
-            || !serial8250_console_tx_quiesce_probe.tx_queue_empty_observed()
-            || !serial8250_console_tx_quiesce_probe.thri_stopped_observed()
-            || !serial8250_console_tx_quiesce_probe.no_spurious_plic_claim()
-            || !serial8250_console_tx_quiesce_probe.no_spurious_irq_dispatch()
-            || !serial8250_console_tx_quiesce_probe.no_uart_tx_drain()
             || plic.state() != State::Ready
             || plic_irq_domain.state() != State::Ready
             || irq_handler_registry.state() != State::Ready
+            || !super::ns16550a::uart8250_interrupt_driven_configured()
             || !super::ns16550a::serial8250_runtime_port_ready()
             || !super::ns16550a::serial8250_runtime_console_tx_ready()
             || !super::ns16550a::serial8250_runtime_rx_deferred()
@@ -5078,6 +5101,7 @@ impl TtyXmitFifoProbe {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 impl TtyWriteRuntimeTxProbe {
     pub const fn new() -> Self {
         Self {
@@ -5282,6 +5306,7 @@ impl TtyWriteRuntimeTxProbe {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 impl TtyWriteBatchRuntimeTxProbe {
     pub const fn new() -> Self {
         Self {
@@ -5558,6 +5583,7 @@ fn uart_irq_cycle_snapshot(
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn wait_tty_write_runtime_tx_closed(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
@@ -5597,6 +5623,7 @@ fn wait_tty_write_runtime_tx_closed(
     false
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn wait_serial8250_tx_quiesce_window() {
     let mut spins = 0usize;
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT / 16 {
@@ -5605,6 +5632,7 @@ fn wait_serial8250_tx_quiesce_window() {
     }
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_burst_expected_tx_bytes() -> usize {
     let mut total = 0usize;
     for message in SERIAL8250_BURST_IRQ_TX_PROBE_MESSAGES {
@@ -5613,10 +5641,12 @@ fn serial8250_console_burst_expected_tx_bytes() -> usize {
     total
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_message_expected_tx_bytes(message: &str) -> usize {
     message.len().saturating_add(count_newlines(message))
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_burst_expected_crlf_insertions() -> usize {
     let mut total = 0usize;
     for message in SERIAL8250_BURST_IRQ_TX_PROBE_MESSAGES {
@@ -5625,6 +5655,7 @@ fn serial8250_console_burst_expected_crlf_insertions() -> usize {
     total
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_burst_expected_last_byte() -> u8 {
     let Some(last_message) = SERIAL8250_BURST_IRQ_TX_PROBE_MESSAGES.last() else {
         return 0;
@@ -5632,6 +5663,7 @@ fn serial8250_console_burst_expected_last_byte() -> u8 {
     last_message.as_bytes().last().copied().unwrap_or(0)
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_long_burst_expected_tx_bytes() -> usize {
     let mut total = 0usize;
     for message in SERIAL8250_LONG_BURST_IRQ_TX_PROBE_MESSAGES {
@@ -5640,6 +5672,7 @@ fn serial8250_console_long_burst_expected_tx_bytes() -> usize {
     total
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_long_burst_expected_crlf_insertions() -> usize {
     let mut total = 0usize;
     for message in SERIAL8250_LONG_BURST_IRQ_TX_PROBE_MESSAGES {
@@ -5648,6 +5681,7 @@ fn serial8250_console_long_burst_expected_crlf_insertions() -> usize {
     total
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_long_burst_expected_last_byte() -> u8 {
     let Some(last_message) = SERIAL8250_LONG_BURST_IRQ_TX_PROBE_MESSAGES.last() else {
         return 0;
@@ -5655,6 +5689,7 @@ fn serial8250_console_long_burst_expected_last_byte() -> u8 {
     last_message.as_bytes().last().copied().unwrap_or(0)
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_long_burst_each_record_exceeds_single_load(tx_load_size: usize) -> bool {
     if tx_load_size == 0 {
         return false;
@@ -5667,6 +5702,7 @@ fn serial8250_console_long_burst_each_record_exceeds_single_load(tx_load_size: u
     true
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_long_burst_expected_irq_rounds(tx_load_size: usize) -> usize {
     let mut total = 0usize;
     for message in SERIAL8250_LONG_BURST_IRQ_TX_PROBE_MESSAGES {
@@ -5678,6 +5714,7 @@ fn serial8250_console_long_burst_expected_irq_rounds(tx_load_size: usize) -> usi
     total
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_console_long_burst_expected_budget_hits(tx_load_size: usize) -> usize {
     let mut total = 0usize;
     for message in SERIAL8250_LONG_BURST_IRQ_TX_PROBE_MESSAGES {
@@ -5690,6 +5727,7 @@ fn serial8250_console_long_burst_expected_budget_hits(tx_load_size: usize) -> us
     total
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn serial8250_expected_tx_irq_rounds(total_bytes: usize, tx_load_size: usize) -> usize {
     if total_bytes == 0 || tx_load_size == 0 {
         return 0;
@@ -5697,6 +5735,7 @@ fn serial8250_expected_tx_irq_rounds(total_bytes: usize, tx_load_size: usize) ->
     total_bytes.saturating_add(tx_load_size - 1) / tx_load_size
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn count_newlines(message: &str) -> usize {
     let mut count = 0usize;
     for byte in message.as_bytes() {
@@ -5836,6 +5875,7 @@ fn wait_uart_irq_cycle_closed(
     false
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn wait_serial8250_irq_tx_closed(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
@@ -5875,6 +5915,7 @@ fn wait_serial8250_irq_tx_closed(
     false
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn wait_serial8250_long_irq_tx_closed(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
@@ -5919,6 +5960,7 @@ fn wait_serial8250_long_irq_tx_closed(
     false
 }
 
+#[cfg(checkpoint_handler_uart_irq_chain)]
 fn wait_serial8250_long_burst_irq_tx_closed(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,

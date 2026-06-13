@@ -1,3 +1,9 @@
+#[cfg(checkpoint_handler_uart_irq_chain)]
+use crate::objects::irq_time::{
+    Serial8250ConsoleBurstIrqTxProbe, Serial8250ConsoleIrqTxProbe,
+    Serial8250ConsoleLongBurstIrqTxProbe, Serial8250ConsoleLongIrqTxProbe,
+    Serial8250ConsoleTxQuiesceProbe, TtyWriteBatchRuntimeTxProbe, TtyWriteRuntimeTxProbe,
+};
 use crate::objects::state::EventResult;
 use crate::objects::{
     boot_param::BootParam,
@@ -35,11 +41,8 @@ use crate::objects::{
     irq_time::{
         HrtimerCore, IpiMux, IrqChipInitTable, IrqController, IrqDispatchTree, IrqHandlerRegistry,
         Plic, PlicDriver, PlicIrqDomain, RiscvIntc, RiscvTimerProvider, SbiIpi,
-        Serial8250ConsoleBurstIrqTxProbe, Serial8250ConsoleIrqTxProbe,
-        Serial8250ConsoleLongBurstIrqTxProbe, Serial8250ConsoleLongIrqTxProbe,
-        Serial8250ConsoleTxQuiesceProbe, Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe,
-        SmpCallFunction, Tick, Timekeeper, TimerWheel, TtyWriteBatchRuntimeTxProbe,
-        TtyWriteRuntimeTxProbe, TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
+        Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe, SmpCallFunction, Tick,
+        Timekeeper, TimerWheel, TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
     },
     kernel_cmdline::KernelCmdline,
     kernel_image::KernelImage,
@@ -167,15 +170,22 @@ pub struct Context {
     pub irq_handler_registry: IrqHandlerRegistry,
     pub uart_external_irq_enable: UartExternalIrqEnable,
     pub uart_interrupt_chain_probe: UartInterruptChainProbe,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     pub serial8250_console_irq_tx_probe: Serial8250ConsoleIrqTxProbe,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     pub serial8250_console_burst_irq_tx_probe: Serial8250ConsoleBurstIrqTxProbe,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     pub serial8250_console_long_irq_tx_probe: Serial8250ConsoleLongIrqTxProbe,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     pub serial8250_console_long_burst_irq_tx_probe: Serial8250ConsoleLongBurstIrqTxProbe,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     pub serial8250_console_tx_quiesce_probe: Serial8250ConsoleTxQuiesceProbe,
     pub serial8250_rx_loopback_probe: Serial8250RxLoopbackProbe,
     pub serial8250_rx_batch_loopback_probe: Serial8250RxBatchLoopbackProbe,
     pub tty_xmit_fifo_probe: TtyXmitFifoProbe,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     pub tty_write_runtime_tx_probe: TtyWriteRuntimeTxProbe,
+    #[cfg(checkpoint_handler_uart_irq_chain)]
     pub tty_write_batch_runtime_tx_probe: TtyWriteBatchRuntimeTxProbe,
     pub tick: Tick,
     pub timer_wheel: TimerWheel,
@@ -321,15 +331,22 @@ impl Context {
             irq_handler_registry: IrqHandlerRegistry::new(),
             uart_external_irq_enable: UartExternalIrqEnable::new(),
             uart_interrupt_chain_probe: UartInterruptChainProbe::new(),
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             serial8250_console_irq_tx_probe: Serial8250ConsoleIrqTxProbe::new(),
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             serial8250_console_burst_irq_tx_probe: Serial8250ConsoleBurstIrqTxProbe::new(),
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             serial8250_console_long_irq_tx_probe: Serial8250ConsoleLongIrqTxProbe::new(),
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             serial8250_console_long_burst_irq_tx_probe: Serial8250ConsoleLongBurstIrqTxProbe::new(),
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             serial8250_console_tx_quiesce_probe: Serial8250ConsoleTxQuiesceProbe::new(),
             serial8250_rx_loopback_probe: Serial8250RxLoopbackProbe::new(),
             serial8250_rx_batch_loopback_probe: Serial8250RxBatchLoopbackProbe::new(),
             tty_xmit_fifo_probe: TtyXmitFifoProbe::new(),
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             tty_write_runtime_tx_probe: TtyWriteRuntimeTxProbe::new(),
+            #[cfg(checkpoint_handler_uart_irq_chain)]
             tty_write_batch_runtime_tx_probe: TtyWriteBatchRuntimeTxProbe::new(),
             tick: Tick::new(),
             timer_wheel: TimerWheel::new(),
