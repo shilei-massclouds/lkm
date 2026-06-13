@@ -437,6 +437,16 @@ interrupt-driven console output ready，只能记录 IRQ 输出路径 deferred�
 handler 必须按 Linux `serial8250_handle_irq()` / `serial8250_tx_chars()` 形状在 THRE 条件下 drain TX queue，
 队列清空后清掉 THRI，不能由 smoke/KUnit 直接调用 handler 或手动 drain 后端。
 
+当前 kernel `printk` console TX 基线 contract 已收口为：app/payload/smoke 只能通过 `printk` 或等价公开输出前端提交
+输出，不得直接 import 或调用 `EarlyCon`、`BootConsole`、`Serial8250Console`、`Serial8250RuntimePort` 等 backend，
+也不得新增公开 `printk::flush()` 来推进 drain；`Serial8250Console` 只负责把 CRLF 展开后的 printk bytes 入队并
+kick THRI，实际 byte drain 只能发生在真实 `root INTC -> PLIC claim -> IRQ core -> Serial8250RuntimePort.HandleInterrupt ->
+TransmitChars` 路径中；KUnit/checkpoint handler 只能读取 fact/counter/trace 并写入受限 sink，不得触发 IRQ、claim/complete、
+调用 UART handler、修改 TX queue 或推进 drain。`Serial8250ConsoleTxQuiesceProbe` ready 后，任意后续实现变更都必须保持
+queue empty、THRI stopped、bounded idle 期间无新增 PLIC claim、IRQ dispatch、UART handler drain、printk kick/drain 或
+ordinary `TtyXmitFifo` mutation；若要改变 queue full、reentrant printk 或 irq-disabled/hardirq 上下文下的行为，必须先补
+明确规格和独立 probe，不得借现有 smoke/KUnit 隐式改变这条基线。
+
 下一轮 serial8250 runtime RX/TTY/FIFO 建模必须先固定对象职责和协作关系，再定义 event/action。对象边界如下：
 `Uart8250Port` 继续只表示 platform probe 得到的 8250 资源实例，拥有 MMIO resource、`mapbase/membase`、
 `reg_shift/reg_io_width`、clock、line 和 logical IRQ 绑定；它不得承担 console handoff、TTY buffering、PLIC
