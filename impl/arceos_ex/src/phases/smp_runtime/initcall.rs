@@ -81,9 +81,15 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
     )?;
+    ctx.serial8250_console_long_burst_irq_tx_probe.setup(
+        &ctx.serial8250_console_long_irq_tx_probe,
+        &ctx.plic,
+        &ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+    )?;
     ctx.serial8250_rx_loopback_probe.setup(
         &ctx.uart_external_irq_enable,
-        &ctx.serial8250_console_long_irq_tx_probe,
+        &ctx.serial8250_console_long_burst_irq_tx_probe,
         &ctx.plic,
         &ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
@@ -122,6 +128,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.serial8250_console_irq_tx_probe,
         &ctx.serial8250_console_burst_irq_tx_probe,
         &ctx.serial8250_console_long_irq_tx_probe,
+        &ctx.serial8250_console_long_burst_irq_tx_probe,
         &ctx.serial8250_rx_loopback_probe,
         &ctx.serial8250_rx_batch_loopback_probe,
         &ctx.tty_xmit_fifo_probe,
@@ -158,6 +165,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.serial8250_console_irq_tx_probe,
         &ctx.serial8250_console_burst_irq_tx_probe,
         &ctx.serial8250_console_long_irq_tx_probe,
+        &ctx.serial8250_console_long_burst_irq_tx_probe,
         &ctx.serial8250_rx_loopback_probe,
         &ctx.serial8250_rx_batch_loopback_probe,
         &ctx.tty_xmit_fifo_probe,

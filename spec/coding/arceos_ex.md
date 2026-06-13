@@ -1257,6 +1257,11 @@ serial8250 TX drain 必须显式建模和实现 `tx_loadsz` 预算。`Serial8250
 或等价生产边界必须在 burst printk probe ready 后执行，通过公开 `printk` 提交一条 CRLF 展开后超过单轮 `tx_loadsz`
 的固定消息，并观察至少两个真实 PLIC claim/IRQ dispatch/UART handler/complete 回合、budget hit、drain byte 增量精确匹配、
 queue empty、last byte 匹配和 ordinary `TtyXmitFifo` 未变化。KUnit/smoke 仍只能读取这些事实和诊断，不能手动推进 drain。
+`Serial8250ConsoleLongBurstIrqTxProbe` 或等价生产边界必须随后通过公开 `printk` 连续提交多条固定长记录；每条记录
+CRLF 展开后都必须超过单轮 `tx_loadsz`，真实 PLIC claim/IRQ dispatch/UART handler/complete 回合至少按每条记录
+各自 `ceil(record_bytes / tx_loadsz)` 后累加计算，并要求 budget hit、write call 数、CRLF 插入数、
+总 drain byte、last byte、queue empty、无 overflow 和 ordinary `TtyXmitFifo` 未变化全部匹配。该 probe 仍不得直接调用
+serial8250 console/backend、不得暴露 printk flush API，也不得引入 file/stdout/stdin 或用户态 write/read 语义。
 
 `ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经

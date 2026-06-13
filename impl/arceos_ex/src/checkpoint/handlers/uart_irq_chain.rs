@@ -264,6 +264,58 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> Check
         },
     );
     sink.diag_usize(
+        "serial8250_console_long_burst_irq_tx_ready",
+        if ctx.serial8250_console_long_burst_irq_tx_probe.state() == State::Ready {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_console_long_burst_records",
+        if ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .multiple_records_submitted()
+        {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_console_long_burst_each_record_exceeds_load",
+        if ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .each_record_exceeds_single_load()
+        {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_console_long_burst_budget",
+        if ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .tx_load_budget_observed()
+        {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "serial8250_console_long_burst_drain_count_matched",
+        if ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .drain_count_matched()
+        {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
         "tty_xmit_fifo_probe_ready",
         if ctx.tty_xmit_fifo_probe.state() == State::Ready {
             1
@@ -506,6 +558,64 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
             .no_overflow_observed()
         && ctx
             .serial8250_console_long_irq_tx_probe
+            .tty_xmit_fifo_unchanged()
+        && ctx.serial8250_console_long_burst_irq_tx_probe.state() == State::Ready
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .printk_frontend_submitted()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .multiple_records_submitted()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .tx_load_size_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .each_record_exceeds_single_load()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .tx_queue_kicked()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .plic_claim_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .irq_dispatch_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .uart_handler_drained_tx()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .multiple_irq_rounds_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .tx_load_budget_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .plic_complete_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .zero_claim_loop_exit_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .tx_queue_empty_after_irq()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .write_count_matched()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .drain_count_matched()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .last_byte_matched()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .local_irq_guard_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
+            .no_overflow_observed()
+        && ctx
+            .serial8250_console_long_burst_irq_tx_probe
             .tty_xmit_fifo_unchanged()
         && ctx.serial8250_rx_loopback_probe.state() == State::Ready
         && ctx.serial8250_rx_loopback_probe.rx_runtime_enabled()

@@ -7,9 +7,9 @@ use super::{
     irq_time::{
         IrqDispatchTree, IrqHandlerKind, IrqHandlerRegistry, PlicIrqDomain,
         Serial8250ConsoleBurstIrqTxProbe, Serial8250ConsoleIrqTxProbe,
-        Serial8250ConsoleLongIrqTxProbe, Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe,
-        TtyWriteBatchRuntimeTxProbe, TtyWriteRuntimeTxProbe, TtyXmitFifoProbe,
-        UartExternalIrqEnable, UartInterruptChainProbe,
+        Serial8250ConsoleLongBurstIrqTxProbe, Serial8250ConsoleLongIrqTxProbe,
+        Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe, TtyWriteBatchRuntimeTxProbe,
+        TtyWriteRuntimeTxProbe, TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
     },
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     ns16550a,
@@ -1819,6 +1819,7 @@ impl InitcallBoundary {
         serial8250_console_irq_tx_probe: &Serial8250ConsoleIrqTxProbe,
         serial8250_console_burst_irq_tx_probe: &Serial8250ConsoleBurstIrqTxProbe,
         serial8250_console_long_irq_tx_probe: &Serial8250ConsoleLongIrqTxProbe,
+        serial8250_console_long_burst_irq_tx_probe: &Serial8250ConsoleLongBurstIrqTxProbe,
         serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
         serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
         tty_xmit_fifo_probe: &TtyXmitFifoProbe,
@@ -1899,6 +1900,26 @@ impl InitcallBoundary {
             || !serial8250_console_long_irq_tx_probe.local_irq_guard_observed()
             || !serial8250_console_long_irq_tx_probe.no_overflow_observed()
             || !serial8250_console_long_irq_tx_probe.tty_xmit_fifo_unchanged()
+            || serial8250_console_long_burst_irq_tx_probe.state() != State::Ready
+            || !serial8250_console_long_burst_irq_tx_probe.printk_frontend_submitted()
+            || !serial8250_console_long_burst_irq_tx_probe.multiple_records_submitted()
+            || !serial8250_console_long_burst_irq_tx_probe.tx_load_size_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.each_record_exceeds_single_load()
+            || !serial8250_console_long_burst_irq_tx_probe.tx_queue_kicked()
+            || !serial8250_console_long_burst_irq_tx_probe.plic_claim_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.irq_dispatch_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.uart_handler_drained_tx()
+            || !serial8250_console_long_burst_irq_tx_probe.multiple_irq_rounds_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.tx_load_budget_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.plic_complete_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.zero_claim_loop_exit_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.tx_queue_empty_after_irq()
+            || !serial8250_console_long_burst_irq_tx_probe.write_count_matched()
+            || !serial8250_console_long_burst_irq_tx_probe.drain_count_matched()
+            || !serial8250_console_long_burst_irq_tx_probe.last_byte_matched()
+            || !serial8250_console_long_burst_irq_tx_probe.local_irq_guard_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.no_overflow_observed()
+            || !serial8250_console_long_burst_irq_tx_probe.tty_xmit_fifo_unchanged()
             || serial8250_rx_loopback_probe.state() != State::Ready
             || !serial8250_rx_loopback_probe.rx_runtime_enabled()
             || !serial8250_rx_loopback_probe.loopback_stimulus_committed()
@@ -1998,6 +2019,7 @@ pub fn initcall_phase_ready(
     serial8250_console_irq_tx_probe: &Serial8250ConsoleIrqTxProbe,
     serial8250_console_burst_irq_tx_probe: &Serial8250ConsoleBurstIrqTxProbe,
     serial8250_console_long_irq_tx_probe: &Serial8250ConsoleLongIrqTxProbe,
+    serial8250_console_long_burst_irq_tx_probe: &Serial8250ConsoleLongBurstIrqTxProbe,
     serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
     serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
     tty_xmit_fifo_probe: &TtyXmitFifoProbe,
@@ -2128,6 +2150,26 @@ pub fn initcall_phase_ready(
         && serial8250_console_long_irq_tx_probe.local_irq_guard_observed()
         && serial8250_console_long_irq_tx_probe.no_overflow_observed()
         && serial8250_console_long_irq_tx_probe.tty_xmit_fifo_unchanged()
+        && serial8250_console_long_burst_irq_tx_probe.state() == State::Ready
+        && serial8250_console_long_burst_irq_tx_probe.printk_frontend_submitted()
+        && serial8250_console_long_burst_irq_tx_probe.multiple_records_submitted()
+        && serial8250_console_long_burst_irq_tx_probe.tx_load_size_observed()
+        && serial8250_console_long_burst_irq_tx_probe.each_record_exceeds_single_load()
+        && serial8250_console_long_burst_irq_tx_probe.tx_queue_kicked()
+        && serial8250_console_long_burst_irq_tx_probe.plic_claim_observed()
+        && serial8250_console_long_burst_irq_tx_probe.irq_dispatch_observed()
+        && serial8250_console_long_burst_irq_tx_probe.uart_handler_drained_tx()
+        && serial8250_console_long_burst_irq_tx_probe.multiple_irq_rounds_observed()
+        && serial8250_console_long_burst_irq_tx_probe.tx_load_budget_observed()
+        && serial8250_console_long_burst_irq_tx_probe.plic_complete_observed()
+        && serial8250_console_long_burst_irq_tx_probe.zero_claim_loop_exit_observed()
+        && serial8250_console_long_burst_irq_tx_probe.tx_queue_empty_after_irq()
+        && serial8250_console_long_burst_irq_tx_probe.write_count_matched()
+        && serial8250_console_long_burst_irq_tx_probe.drain_count_matched()
+        && serial8250_console_long_burst_irq_tx_probe.last_byte_matched()
+        && serial8250_console_long_burst_irq_tx_probe.local_irq_guard_observed()
+        && serial8250_console_long_burst_irq_tx_probe.no_overflow_observed()
+        && serial8250_console_long_burst_irq_tx_probe.tty_xmit_fifo_unchanged()
         && serial8250_rx_loopback_probe.state() == State::Ready
         && serial8250_rx_loopback_probe.rx_runtime_enabled()
         && serial8250_rx_loopback_probe.loopback_stimulus_committed()
