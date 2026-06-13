@@ -42,6 +42,7 @@ const UART_LSR_DR: usize = 1;
 const UART_LSR_THRE: usize = 1 << 5;
 const UART_POLL_SPINS: usize = 100_000;
 const UART_RX_DRAIN_LIMIT: usize = 16;
+const UART_TX_LOAD_SIZE: usize = 8;
 const UART_TX_QUEUE_SIZE: usize = 512;
 const TTY_FLIP_BUFFER_SIZE: usize = 64;
 const TTY_XMIT_FIFO_SIZE: usize = 64;
@@ -480,6 +481,7 @@ pub struct Serial8250RuntimePort {
     n_tty_read_deferred: bool,
     console_tx_interrupt_driven: bool,
     rx_drain_limit: usize,
+    tx_load_size: usize,
 }
 
 impl Serial8250RuntimePort {
@@ -509,6 +511,7 @@ impl Serial8250RuntimePort {
             n_tty_read_deferred: true,
             console_tx_interrupt_driven: false,
             rx_drain_limit: 0,
+            tx_load_size: 0,
         }
     }
 
@@ -571,6 +574,7 @@ impl Serial8250RuntimePort {
             n_tty_read_deferred: true,
             console_tx_interrupt_driven: false,
             rx_drain_limit: UART_RX_DRAIN_LIMIT,
+            tx_load_size: UART_TX_LOAD_SIZE,
         })
     }
 
@@ -602,6 +606,7 @@ impl Serial8250RuntimePort {
             && self.thri_demand_driven
             && self.n_tty_read_deferred
             && self.rx_drain_limit == UART_RX_DRAIN_LIMIT
+            && self.tx_load_size == UART_TX_LOAD_SIZE
             && tty_port.facts_ready(port)
             && flip_buffer.facts_ready(tty_port)
             && xmit_fifo.facts_ready(tty_port)
@@ -684,6 +689,7 @@ pub struct Serial8250WriteBackend {
     uses_sbi: bool,
     interrupt_driven: bool,
     interrupt_output_deferred: bool,
+    tx_load_size: usize,
     tx_queue: [u8; UART_TX_QUEUE_SIZE],
     tx_head: usize,
     tx_tail: usize,
@@ -691,6 +697,7 @@ pub struct Serial8250WriteBackend {
     tx_queue_overflow: bool,
     tx_irq_kicks: usize,
     tx_irq_drains: usize,
+    tx_irq_budget_hits: usize,
     tx_irq_empty_stop: usize,
     tx_irq_guarded_by_local_irq_save: bool,
     write_calls: usize,
@@ -726,6 +733,7 @@ impl Serial8250WriteBackend {
             uses_sbi: false,
             interrupt_driven: false,
             interrupt_output_deferred: false,
+            tx_load_size: 0,
             tx_queue: [0; UART_TX_QUEUE_SIZE],
             tx_head: 0,
             tx_tail: 0,
@@ -733,6 +741,7 @@ impl Serial8250WriteBackend {
             tx_queue_overflow: false,
             tx_irq_kicks: 0,
             tx_irq_drains: 0,
+            tx_irq_budget_hits: 0,
             tx_irq_empty_stop: 0,
             tx_irq_guarded_by_local_irq_save: false,
             write_calls: 0,
@@ -789,6 +798,7 @@ impl Serial8250WriteBackend {
             uses_sbi: false,
             interrupt_driven: false,
             interrupt_output_deferred: true,
+            tx_load_size: UART_TX_LOAD_SIZE,
             tx_queue: [0; UART_TX_QUEUE_SIZE],
             tx_head: 0,
             tx_tail: 0,
@@ -796,6 +806,7 @@ impl Serial8250WriteBackend {
             tx_queue_overflow: false,
             tx_irq_kicks: 0,
             tx_irq_drains: 0,
+            tx_irq_budget_hits: 0,
             tx_irq_empty_stop: 0,
             tx_irq_guarded_by_local_irq_save: false,
             write_calls: 0,
@@ -855,6 +866,7 @@ impl Serial8250WriteBackend {
         self.tx_queue_overflow = false;
         self.tx_irq_kicks = 0;
         self.tx_irq_drains = 0;
+        self.tx_irq_budget_hits = 0;
         self.tx_irq_empty_stop = 0;
         self.tx_irq_guarded_by_local_irq_save = false;
         trace::checkpoint(Checkpoint::Serial8250ConsoleIrqDrivenReady);
@@ -931,7 +943,7 @@ impl Serial8250WriteBackend {
     }
 
     fn drain_one_tx_irq(&mut self) -> bool {
-        if !self.interrupt_driven {
+        if !self.interrupt_driven || self.tx_load_size == 0 {
             return false;
         }
         if self.tx_queued == 0 {
@@ -944,7 +956,8 @@ impl Serial8250WriteBackend {
             return false;
         }
 
-        while self.tx_queued != 0 {
+        let mut drained = 0usize;
+        while self.tx_queued != 0 && drained < self.tx_load_size {
             if self.read_uart_lsr() & UART_LSR_THRE == 0 {
                 return true;
             }
@@ -958,14 +971,18 @@ impl Serial8250WriteBackend {
             self.last_tx_byte = byte;
             self.mmio_writes_performed = true;
             self.tx_irq_drains = self.tx_irq_drains.saturating_add(1);
+            drained = drained.saturating_add(1);
         }
 
-        if self.tx_queued == 0 {
-            let ier = self.read_uart_ier() & !UART_IER_THRI;
-            if self.write_uart_ier(ier) {
-                self.tx_irq_empty_stop = self.tx_irq_empty_stop.saturating_add(1);
-                UART8250_THRI_DISABLED_BY_HANDLER.fetch_add(1, Ordering::AcqRel);
-            }
+        if self.tx_queued != 0 {
+            self.tx_irq_budget_hits = self.tx_irq_budget_hits.saturating_add(1);
+            return true;
+        }
+
+        let ier = self.read_uart_ier() & !UART_IER_THRI;
+        if self.write_uart_ier(ier) {
+            self.tx_irq_empty_stop = self.tx_irq_empty_stop.saturating_add(1);
+            UART8250_THRI_DISABLED_BY_HANDLER.fetch_add(1, Ordering::AcqRel);
         }
         true
     }
@@ -1074,6 +1091,7 @@ impl Serial8250WriteBackend {
             && !self.uses_sbi
             && !self.interrupt_driven
             && self.interrupt_output_deferred
+            && self.tx_load_size == UART_TX_LOAD_SIZE
     }
 
     fn irq_driven_facts_ready(self, port: Uart8250Port) -> bool {
@@ -1088,6 +1106,7 @@ impl Serial8250WriteBackend {
             && !self.uses_sbi
             && self.interrupt_driven
             && !self.interrupt_output_deferred
+            && self.tx_load_size == UART_TX_LOAD_SIZE
             && self.tx_irq_guarded_by_local_irq_save
             && !self.tx_queue_overflow
     }
@@ -1279,6 +1298,16 @@ pub fn serial8250_tx_irq_drain_count() -> usize {
             .unwrap()
             .write_backend
             .tx_irq_drains
+    }
+}
+
+pub fn serial8250_tx_irq_budget_hit_count() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .write_backend
+            .tx_irq_budget_hits
     }
 }
 
@@ -1642,6 +1671,16 @@ pub fn serial8250_runtime_rx_drain_limit() -> usize {
             .unwrap()
             .runtime_port
             .rx_drain_limit
+    }
+}
+
+pub fn serial8250_runtime_tx_load_size() -> usize {
+    unsafe {
+        (&raw const NS16550A_PROBE_STATE)
+            .as_ref()
+            .unwrap()
+            .runtime_port
+            .tx_load_size
     }
 }
 

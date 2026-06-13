@@ -129,6 +129,7 @@ predicate serial8250_runtime_port_receive_chars_bounded<T>(runtime: T) -> bool;
 predicate serial8250_runtime_port_receive_chars_batch_within_limit<T, B>(runtime: T, batch: B) -> bool;
 predicate serial8250_runtime_port_receive_chars_pushes_flip_buffer<T, F>(runtime: T, flip_buffer: F) -> bool;
 predicate serial8250_runtime_port_transmit_chars_uses_tx_load_size<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_transmit_chars_keeps_thri_when_queue_nonempty<T>(runtime: T) -> bool;
 predicate serial8250_runtime_port_transmit_chars_stops_thri_when_empty<T>(runtime: T) -> bool;
 predicate serial8250_runtime_port_start_tx_sets_thri<T>(runtime: T) -> bool;
 predicate serial8250_runtime_port_stop_tx_clears_thri<T>(runtime: T) -> bool;
@@ -309,6 +310,37 @@ predicate serial8250_console_burst_irq_tx_probe_last_byte_matched<T>(probe: T) -
 predicate serial8250_console_burst_irq_tx_probe_local_irq_guard_observed<T>(probe: T) -> bool;
 predicate serial8250_console_burst_irq_tx_probe_no_overflow<T, C>(probe: T, console: C) -> bool;
 predicate serial8250_console_burst_irq_tx_probe_does_not_mutate_tty_xmit_fifo<T, F>(
+    probe: T,
+    xmit_fifo: F
+) -> bool;
+predicate serial8250_console_long_irq_tx_probe_ready<T>(probe: T) -> bool;
+predicate serial8250_console_long_irq_tx_probe_production_side<T>(probe: T) -> bool;
+predicate serial8250_console_long_irq_tx_probe_kunit_not_stimulus<T>(probe: T) -> bool;
+predicate serial8250_console_long_irq_tx_probe_uses_printk_frontend<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_long_irq_tx_probe_observes_tx_load_size<T, R>(probe: T, runtime: R) -> bool;
+predicate serial8250_console_long_irq_tx_probe_message_exceeds_single_load<T>(probe: T) -> bool;
+predicate serial8250_console_long_irq_tx_probe_kicks_thri<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_long_irq_tx_probe_observes_plic_claim<T, P>(probe: T, plic: P) -> bool;
+predicate serial8250_console_long_irq_tx_probe_observes_irq_dispatch<T, R>(probe: T, registry: R) -> bool;
+predicate serial8250_console_long_irq_tx_probe_observes_runtime_handler<T, R>(probe: T, runtime: R) -> bool;
+predicate serial8250_console_long_irq_tx_probe_observes_multiple_irq_rounds<T, P>(
+    probe: T,
+    plic: P
+) -> bool;
+predicate serial8250_console_long_irq_tx_probe_observes_tx_load_budget<T, R>(probe: T, runtime: R) -> bool;
+predicate serial8250_console_long_irq_tx_probe_drains_console_tx_queue<T, C>(
+    probe: T,
+    console: C
+) -> bool;
+predicate serial8250_console_long_irq_tx_probe_observes_plic_complete<T, P>(probe: T, plic: P) -> bool;
+predicate serial8250_console_long_irq_tx_probe_observes_plic_loop_exit<T, P>(probe: T, plic: P) -> bool;
+predicate serial8250_console_long_irq_tx_probe_queue_empty_after_irq<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_long_irq_tx_probe_write_count_matched<T>(probe: T) -> bool;
+predicate serial8250_console_long_irq_tx_probe_drain_count_matched<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_long_irq_tx_probe_last_byte_matched<T>(probe: T) -> bool;
+predicate serial8250_console_long_irq_tx_probe_local_irq_guard_observed<T>(probe: T) -> bool;
+predicate serial8250_console_long_irq_tx_probe_no_overflow<T, C>(probe: T, console: C) -> bool;
+predicate serial8250_console_long_irq_tx_probe_does_not_mutate_tty_xmit_fifo<T, F>(
     probe: T,
     xmit_fifo: F
 ) -> bool;
@@ -541,6 +573,7 @@ object Serial8250RuntimePort: DeviceObject {
             }
             ensures {
                 serial8250_runtime_port_transmit_chars_uses_tx_load_size(self);
+                serial8250_runtime_port_transmit_chars_keeps_thri_when_queue_nonempty(self);
                 serial8250_runtime_port_transmit_chars_stops_thri_when_empty(self);
             }
         }
@@ -1533,6 +1566,139 @@ object Serial8250ConsoleBurstIrqTxProbe: ConsoleObject {
             serial8250_console_burst_irq_tx_probe_ready(Serial8250ConsoleBurstIrqTxProbe);
             serial8250_console_burst_irq_tx_probe_production_side(Serial8250ConsoleBurstIrqTxProbe);
             serial8250_console_burst_irq_tx_probe_kunit_not_stimulus(Serial8250ConsoleBurstIrqTxProbe);
+        }
+    }
+}
+
+/*
+ * Serial8250ConsoleLongIrqTxProbe submits one printk record whose CRLF-expanded
+ * byte count exceeds one tx_loadsz. It observes that the real THRI/PLIC/IRQ
+ * path drains it across multiple handler rounds; it does not touch TTY TX.
+ */
+object Serial8250ConsoleLongIrqTxProbe: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Serial8250ConsoleBurstIrqTxProbe.state == State::Ready;
+                    Serial8250Console.state == State::Online;
+                    UartExternalIrqEnable.state == State::Ready;
+                    Plic.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                }
+
+                drives {
+                    Serial8250RuntimePort.Action::StartTx;
+                    RiscvIntc.Action::HandleExternalInput(InterruptCauseRef::SupervisorExternalIrq);
+                    Plic.Action::Claim(HwirqRef::PlicUart0);
+                    PlicIrqDomain.Action::Dispatch(LogicalIrqRef::Uart0);
+                    IrqHandlerRegistry.Action::Dispatch(LogicalIrqRef::Uart0);
+                    Serial8250RuntimePort.Action::HandleInterrupt(InterruptCauseRef::SupervisorExternalIrq);
+                    Serial8250RuntimePort.Action::TransmitChars;
+                    Plic.Action::Complete(HwirqRef::PlicUart0);
+                    Plic.Action::Claim(HwirqRef::PlicUart0);
+                    PlicIrqDomain.Action::Dispatch(LogicalIrqRef::Uart0);
+                    IrqHandlerRegistry.Action::Dispatch(LogicalIrqRef::Uart0);
+                    Serial8250RuntimePort.Action::HandleInterrupt(InterruptCauseRef::SupervisorExternalIrq);
+                    Serial8250RuntimePort.Action::TransmitChars;
+                    Plic.Action::Complete(HwirqRef::PlicUart0);
+                }
+
+                ensures {
+                    serial8250_console_long_irq_tx_probe_ready(Serial8250ConsoleLongIrqTxProbe);
+                    serial8250_console_long_irq_tx_probe_production_side(Serial8250ConsoleLongIrqTxProbe);
+                    serial8250_console_long_irq_tx_probe_kunit_not_stimulus(Serial8250ConsoleLongIrqTxProbe);
+                    serial8250_console_long_irq_tx_probe_uses_printk_frontend(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_tx_load_size(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_long_irq_tx_probe_message_exceeds_single_load(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_kicks_thri(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_plic_claim(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_irq_dispatch(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        IrqHandlerRegistry
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_runtime_handler(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_multiple_irq_rounds(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_tx_load_budget(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_long_irq_tx_probe_drains_console_tx_queue(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_plic_complete(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_plic_loop_exit(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_long_irq_tx_probe_queue_empty_after_irq(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_write_count_matched(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_drain_count_matched(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_last_byte_matched(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_local_irq_guard_observed(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_no_overflow(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_does_not_mutate_tty_xmit_fifo(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        TtyXmitFifo
+                    );
+                    serial8250_runtime_port_transmit_chars_uses_tx_load_size(Serial8250RuntimePort);
+                    serial8250_runtime_port_transmit_chars_keeps_thri_when_queue_nonempty(
+                        Serial8250RuntimePort
+                    );
+                    serial8250_runtime_port_transmit_chars_stops_thri_when_empty(
+                        Serial8250RuntimePort
+                    );
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            serial8250_console_long_irq_tx_probe_ready(Serial8250ConsoleLongIrqTxProbe);
+            serial8250_console_long_irq_tx_probe_production_side(Serial8250ConsoleLongIrqTxProbe);
+            serial8250_console_long_irq_tx_probe_kunit_not_stimulus(Serial8250ConsoleLongIrqTxProbe);
         }
     }
 }

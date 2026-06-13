@@ -1615,7 +1615,7 @@ object IrqTimeInitPhase: PhaseObject {
                     "profile_init() 暂缓：profile buffer 和 proc export 后续再建模。";
                     "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
-                    "完整 UART RX、TTY runtime、FIFO load size 和复杂并发策略暂缓；当前 IRQ-time/initcall 路径已建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，并在 InitcallPhase 后续边界由 Serial8250Console.Enable/Serial8250ConsoleIrqTxProbe 完成 interrupt-driven TX 首轮。";
+                    "更完整 UART RX、ordinary TTY runtime/FIFO 策略和复杂并发策略暂缓；当前 IRQ-time/initcall 路径已建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，并在 InitcallPhase 后续边界由 Serial8250Console.Enable/Serial8250ConsoleIrqTxProbe 完成 interrupt-driven TX 首轮。";
                 }
             }
         }

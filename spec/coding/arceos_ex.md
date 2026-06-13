@@ -1250,6 +1250,14 @@ CRLF 后的 drain 增量匹配预期字节数、TX queue empty、last byte 匹�
 PLIC claim/complete/zero-claim loop exit 闭合，并确认 ordinary `TtyXmitFifo` 的 enqueue/dequeue/runtime drain
 计数不被 printk probe 修改。该轮不得引入 file/stdout/stdin、line discipline 或用户态 write/read 语义；这些只列为后续缓行。
 
+serial8250 TX drain 必须显式建模和实现 `tx_loadsz` 预算。`Serial8250RuntimePort::TransmitChars` 或等价 handler 路径
+每次 THRI handler 最多提交 `tx_loadsz` 个 console TX byte；如果 console TX queue 仍非空，必须保持 THRI enabled，
+等待下一次真实 THRE/PLIC/IRQ handler round 继续 drain；只有 queue 为空时才执行 `StopTx`/clear THRI。`tx_loadsz`
+属于 8250 runtime/port 策略，不属于 `printk` frontend、PLIC、IRQ domain 或 KUnit observer。`Serial8250ConsoleLongIrqTxProbe`
+或等价生产边界必须在 burst printk probe ready 后执行，通过公开 `printk` 提交一条 CRLF 展开后超过单轮 `tx_loadsz`
+的固定消息，并观察至少两个真实 PLIC claim/IRQ dispatch/UART handler/complete 回合、budget hit、drain byte 增量精确匹配、
+queue empty、last byte 匹配和 ordinary `TtyXmitFifo` 未变化。KUnit/smoke 仍只能读取这些事实和诊断，不能手动推进 drain。
+
 `ns16550a` 的 platform probe 在解析 MMIO、寄存器宽度和 clock 之外，还必须从自己的 DeviceTree node 解析 UART IRQ
 resource：读取 `interrupts` specifier，解析直接或继承的 `interrupt-parent`，确认父节点是当前 PLIC irqchip，然后经
 `PlicIrqDomain` 建立 UART source 到 logical IRQ 的记录，并把 logical IRQ 保存在 `Uart8250Port`。这一步只说明外部中断链的

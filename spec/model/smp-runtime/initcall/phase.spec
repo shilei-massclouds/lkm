@@ -685,6 +685,7 @@ object InitcallPhase: PhaseObject {
                     UartInterruptChainProbe.Event::Setup;
                     Serial8250Console.Event::Enable;
                     Serial8250ConsoleBurstIrqTxProbe.Event::Setup;
+                    Serial8250ConsoleLongIrqTxProbe.Event::Setup;
                     TtyPort.Event::Setup;
                     Serial8250RuntimePort.Event::Setup;
                     TtyPort.Event::Enable;
@@ -810,6 +811,84 @@ object InitcallPhase: PhaseObject {
                     serial8250_console_burst_irq_tx_probe_does_not_mutate_tty_xmit_fifo(
                         Serial8250ConsoleBurstIrqTxProbe,
                         TtyXmitFifo
+                    );
+                    serial8250_console_long_irq_tx_probe_ready(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_uses_printk_frontend(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_tx_load_size(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_long_irq_tx_probe_message_exceeds_single_load(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_kicks_thri(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_plic_claim(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_irq_dispatch(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        IrqHandlerRegistry
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_runtime_handler(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_multiple_irq_rounds(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_tx_load_budget(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_console_long_irq_tx_probe_drains_console_tx_queue(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_plic_complete(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_long_irq_tx_probe_observes_plic_loop_exit(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Plic
+                    );
+                    serial8250_console_long_irq_tx_probe_queue_empty_after_irq(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_write_count_matched(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_drain_count_matched(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_last_byte_matched(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_local_irq_guard_observed(
+                        Serial8250ConsoleLongIrqTxProbe
+                    );
+                    serial8250_console_long_irq_tx_probe_no_overflow(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        Serial8250Console
+                    );
+                    serial8250_console_long_irq_tx_probe_does_not_mutate_tty_xmit_fifo(
+                        Serial8250ConsoleLongIrqTxProbe,
+                        TtyXmitFifo
+                    );
+                    serial8250_runtime_port_transmit_chars_keeps_thri_when_queue_nonempty(
+                        Serial8250RuntimePort
                     );
                     tty_port_ready(TtyPort, Uart8250Port, TtyFlipBuffer, TtyXmitFifo);
                     tty_port_initialized(TtyPort);
@@ -981,6 +1060,7 @@ object InitcallPhase: PhaseObject {
             UartInterruptChainProbe.state == State::Ready;
             Serial8250Console.state == State::Online;
             Serial8250ConsoleBurstIrqTxProbe.state == State::Ready;
+            Serial8250ConsoleLongIrqTxProbe.state == State::Ready;
             TtyPort.state == State::Online;
             TtyFlipBuffer.state == State::Ready;
             TtyXmitFifo.state == State::Ready;
