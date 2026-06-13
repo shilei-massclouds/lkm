@@ -17,6 +17,17 @@
  * - ConsoleRegistry owns register_console() policy, printk routing, handoff
  *   cursor transfer and keep_bootcon decisions. Drivers may request
  *   registration, but must not own these global policy facts.
+ *
+ * Next runtime layer:
+ * - Uart8250Port remains the platform-probed resource instance: MMIO, irq,
+ *   line, clock and register access shape.
+ * - Serial8250RuntimePort is the 8250 runtime behavior layer over that port:
+ *   IER/IIR/LSR handling, IRQ-time RX/TX dispatch shape and port locking.
+ * - Serial8250Console is only the printk console entry; it may submit TX work
+ *   to the runtime port, but it is not the TTY runtime and does not own RX.
+ * - TtyPort is the minimal uart_state/tty_port container bound to the 8250
+ *   line; TtyFlipBuffer and TtyXmitFifo model the RX staging buffer and
+ *   future ordinary TTY TX FIFO separately from printk console TX.
  */
 
 predicate boot_console_registered<T, E>(boot_console: T, earlycon: E) -> bool;
@@ -71,6 +82,103 @@ predicate uart8250_port_line_assigned<T>(port: T) -> bool;
 predicate uart8250_port_registered<T>(port: T) -> bool;
 predicate uart8250_port_registration_returned_line<T>(port: T) -> bool;
 predicate uart8250_port_bound_to_stdout_node<T, D>(port: T, device_tree: D) -> bool;
+
+type Serial8250RxByteRef {
+}
+
+type Serial8250TxByteRef {
+}
+
+type TtyFlipBufferRecordRef {
+}
+
+predicate serial8250_runtime_port_over_uart8250_port<T, P>(runtime: T, port: P) -> bool;
+predicate serial8250_runtime_port_owns_irqtime_register_state<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_handles_ier_iir_lsr<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_owns_port_lock_irqsave<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_not_device_tree_parser<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_not_irqchip_controller<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_not_console_registry<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_cooperates_with_irq_action<T, A>(runtime: T, action: A) -> bool;
+predicate serial8250_runtime_port_cooperates_with_tty_port<T, P>(runtime: T, tty_port: P) -> bool;
+predicate serial8250_runtime_port_accepts_console_tx_from<T, C>(runtime: T, console: C) -> bool;
+predicate serial8250_runtime_port_ready<T, P, A, TP>(runtime: T, port: P, action: A, tty_port: TP) -> bool;
+predicate serial8250_runtime_port_online<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_tty_flip_buffer_bound<T, F>(runtime: T, flip_buffer: F) -> bool;
+predicate serial8250_runtime_port_tty_xmit_fifo_bound<T, X>(runtime: T, xmit_fifo: X) -> bool;
+predicate serial8250_runtime_port_rx_interrupts_deferred_until_enable<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_rdi_enabled<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_rlsi_enabled<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_thri_demand_driven<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_handle_interrupt_requires_hardirq<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_handle_interrupt_reads_iir<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_handle_interrupt_reads_lsr<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_handle_interrupt_checks_modem_status<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_handle_interrupt_rx_before_tx<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_handle_interrupt_no_plic_claim_or_complete<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_handle_rx_interrupt<T, C>(runtime: T, cause: C) -> bool;
+predicate serial8250_runtime_port_handle_tx_interrupt<T, C>(runtime: T, cause: C) -> bool;
+predicate serial8250_runtime_port_receive_chars_consumes_lsr_dr<T, B>(runtime: T, byte: B) -> bool;
+predicate serial8250_runtime_port_receive_chars_bounded<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_receive_chars_pushes_flip_buffer<T, F>(runtime: T, flip_buffer: F) -> bool;
+predicate serial8250_runtime_port_transmit_chars_uses_tx_load_size<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_transmit_chars_stops_thri_when_empty<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_start_tx_sets_thri<T>(runtime: T) -> bool;
+predicate serial8250_runtime_port_stop_tx_clears_thri<T>(runtime: T) -> bool;
+
+predicate tty_port_bound_to_uart8250_port<T, P>(tty_port: T, port: P) -> bool;
+predicate tty_port_minimal_uart_state_container<T>(tty_port: T) -> bool;
+predicate tty_port_owns_flip_buffer<T, F>(tty_port: T, flip_buffer: F) -> bool;
+predicate tty_port_owns_xmit_fifo<T, X>(tty_port: T, xmit_fifo: X) -> bool;
+predicate tty_port_not_mmio_accessor<T>(tty_port: T) -> bool;
+predicate tty_port_not_irq_dispatcher<T>(tty_port: T) -> bool;
+predicate tty_port_not_console_registry<T>(tty_port: T) -> bool;
+predicate tty_port_ready<T, P, F, X>(tty_port: T, port: P, flip_buffer: F, xmit_fifo: X) -> bool;
+predicate tty_port_n_tty_line_discipline_available<T, L>(tty_port: T, registry: L) -> bool;
+predicate tty_port_initialized<T>(tty_port: T) -> bool;
+predicate tty_port_uart_startup_drives_runtime_enable<T, R>(tty_port: T, runtime: R) -> bool;
+
+predicate tty_flip_buffer_bound_to_tty_port<T, P>(flip_buffer: T, tty_port: P) -> bool;
+predicate tty_flip_buffer_rx_staging_only<T>(flip_buffer: T) -> bool;
+predicate tty_flip_buffer_push_is_rx_observation_boundary<T>(flip_buffer: T) -> bool;
+predicate tty_flip_buffer_does_not_model_full_n_tty_read<T>(flip_buffer: T) -> bool;
+predicate tty_flip_buffer_ready<T, P>(flip_buffer: T, tty_port: P) -> bool;
+predicate tty_flip_buffer_record_ready<T, R>(flip_buffer: T, record: R) -> bool;
+predicate tty_flip_buffer_char_inserted<T, B, R>(flip_buffer: T, byte: B, record: R) -> bool;
+predicate tty_flip_buffer_push_committed<T, R>(flip_buffer: T, record: R) -> bool;
+predicate tty_flip_buffer_push_after_rx_insert<T, R>(flip_buffer: T, record: R) -> bool;
+
+predicate tty_xmit_fifo_bound_to_tty_port<T, P>(xmit_fifo: T, tty_port: P) -> bool;
+predicate tty_xmit_fifo_for_ordinary_tty_write<T>(xmit_fifo: T) -> bool;
+predicate tty_xmit_fifo_distinct_from_printk_console_tx<T, C>(xmit_fifo: T, console: C) -> bool;
+predicate tty_xmit_fifo_runtime_tx_integration_deferred<T>(xmit_fifo: T) -> bool;
+predicate tty_xmit_fifo_ready<T, P>(xmit_fifo: T, tty_port: P) -> bool;
+predicate tty_xmit_fifo_byte_queued<T, B>(xmit_fifo: T, byte: B) -> bool;
+predicate tty_xmit_fifo_dequeue_returns<T, B>(xmit_fifo: T, byte: B) -> bool;
+
+predicate serial8250_rx_loopback_probe_ready<T>(probe: T) -> bool;
+predicate serial8250_rx_loopback_probe_production_side<T>(probe: T) -> bool;
+predicate serial8250_rx_loopback_probe_uses_smoke_stimulus<T>(probe: T) -> bool;
+predicate serial8250_rx_loopback_probe_kunit_not_stimulus<T>(probe: T) -> bool;
+predicate serial8250_rx_loopback_probe_saves_mcr<T, P>(probe: T, port: P) -> bool;
+predicate serial8250_rx_loopback_probe_enables_loopback<T, P>(probe: T, port: P) -> bool;
+predicate serial8250_rx_loopback_probe_writes_tx_byte<T, B>(probe: T, byte: B) -> bool;
+predicate serial8250_rx_loopback_probe_triggers_real_rx_interrupt<T, P>(probe: T, plic: P) -> bool;
+predicate serial8250_rx_loopback_probe_observes_irq_dispatch<T, R>(probe: T, registry: R) -> bool;
+predicate serial8250_rx_loopback_probe_observes_runtime_handler<T, R>(probe: T, runtime: R) -> bool;
+predicate serial8250_rx_loopback_probe_observes_flip_buffer_push<T, F>(probe: T, flip_buffer: F) -> bool;
+predicate serial8250_rx_loopback_probe_restores_mcr<T, P>(probe: T, port: P) -> bool;
+predicate serial8250_rx_loopback_probe_single_byte_first_round<T, B>(probe: T, byte: B) -> bool;
+predicate serial8250_rx_loopback_probe_bounded_batch_followup_allowed<T>(probe: T) -> bool;
+
+predicate serial8250_rx_kunit_observer_ready<T>(observer: T) -> bool;
+predicate serial8250_rx_kunit_observer_read_only<T>(observer: T) -> bool;
+predicate serial8250_rx_kunit_observer_does_not_write_tx<T>(observer: T) -> bool;
+predicate serial8250_rx_kunit_observer_does_not_set_loopback<T>(observer: T) -> bool;
+predicate serial8250_rx_kunit_observer_does_not_call_handler<T>(observer: T) -> bool;
+predicate serial8250_rx_kunit_observer_does_not_claim_or_complete<T>(observer: T) -> bool;
+predicate serial8250_rx_kunit_observer_reads_loopback_probe<T, P>(observer: T, probe: P) -> bool;
+predicate serial8250_rx_kunit_observer_reads_flip_buffer_result<T, F>(observer: T, flip_buffer: F) -> bool;
 
 predicate serial8250_console_registered<T, P>(console: T, port: P) -> bool;
 predicate serial8250_console_real_console<T>(console: T) -> bool;
@@ -247,6 +355,499 @@ object Uart8250Port: DeviceObject {
             uart8250_port_registered(Uart8250Port);
             uart8250_port_registration_returned_line(Uart8250Port);
             uart8250_port_bound_to_stdout_node(Uart8250Port, DeviceTree);
+        }
+    }
+}
+
+/*
+ * Serial8250RuntimePort is the runtime behavior layer over Uart8250Port. It
+ * owns the 8250 IRQ-time register/lock/dispatch shape, while Uart8250Port
+ * keeps resource identity and Serial8250Console keeps printk console policy.
+ * It models the Linux-like serial8250_handle_irq() boundary: IRQ core enters
+ * through IrqAction, this object reads IIR/LSR under the port lock, handles RX
+ * before TX, and never owns PLIC claim/complete.
+ */
+object Serial8250RuntimePort: DeviceObject {
+    initial_state: State::Base;
+
+    processes {
+        Action::HandleInterrupt(cause: InterruptCauseRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                IrqAction.state == State::Ready;
+                serial8250_runtime_port_handle_interrupt_requires_hardirq(self);
+                serial8250_runtime_port_handles_ier_iir_lsr(self);
+                serial8250_runtime_port_owns_port_lock_irqsave(self);
+            }
+            drives {
+                self.Action::ReceiveChars(Serial8250RxByteRef::Uart0RxProbe);
+                self.Action::TransmitChars;
+            }
+            ensures {
+                serial8250_runtime_port_handle_interrupt_reads_iir(self);
+                serial8250_runtime_port_handle_interrupt_reads_lsr(self);
+                serial8250_runtime_port_handle_interrupt_checks_modem_status(self);
+                serial8250_runtime_port_handle_interrupt_rx_before_tx(self);
+                serial8250_runtime_port_handle_interrupt_no_plic_claim_or_complete(self);
+                serial8250_runtime_port_handle_rx_interrupt(self, cause);
+                serial8250_runtime_port_handle_tx_interrupt(self, cause);
+            }
+        }
+
+        Action::ReceiveChars(byte: Serial8250RxByteRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                TtyFlipBuffer.state == State::Ready;
+                serial8250_runtime_port_rdi_enabled(self);
+                serial8250_runtime_port_rlsi_enabled(self);
+            }
+            drives {
+                TtyFlipBuffer.Action::InsertChar(byte);
+                TtyFlipBuffer.Action::Push(TtyFlipBufferRecordRef::Uart0RxProbe);
+            }
+            ensures {
+                serial8250_runtime_port_receive_chars_consumes_lsr_dr(self, byte);
+                serial8250_runtime_port_receive_chars_bounded(self);
+                serial8250_runtime_port_receive_chars_pushes_flip_buffer(self, TtyFlipBuffer);
+            }
+        }
+
+        Action::TransmitChars {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+                serial8250_runtime_port_thri_demand_driven(self);
+            }
+            ensures {
+                serial8250_runtime_port_transmit_chars_uses_tx_load_size(self);
+                serial8250_runtime_port_transmit_chars_stops_thri_when_empty(self);
+            }
+        }
+
+        Action::StartTx {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+            }
+            ensures {
+                serial8250_runtime_port_start_tx_sets_thri(self);
+            }
+        }
+
+        Action::StopTx {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Online;
+            }
+            ensures {
+                serial8250_runtime_port_stop_tx_clears_thri(self);
+            }
+        }
+    }
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Uart8250Port.state == State::Ready;
+                    IrqAction.state == State::Ready;
+                    TtyPort.state == State::Ready;
+                }
+
+                ensures {
+                    serial8250_runtime_port_over_uart8250_port(Serial8250RuntimePort, Uart8250Port);
+                    serial8250_runtime_port_owns_irqtime_register_state(Serial8250RuntimePort);
+                    serial8250_runtime_port_handles_ier_iir_lsr(Serial8250RuntimePort);
+                    serial8250_runtime_port_owns_port_lock_irqsave(Serial8250RuntimePort);
+                    serial8250_runtime_port_not_device_tree_parser(Serial8250RuntimePort);
+                    serial8250_runtime_port_not_irqchip_controller(Serial8250RuntimePort);
+                    serial8250_runtime_port_not_console_registry(Serial8250RuntimePort);
+                    serial8250_runtime_port_cooperates_with_irq_action(Serial8250RuntimePort, IrqAction);
+                    serial8250_runtime_port_cooperates_with_tty_port(Serial8250RuntimePort, TtyPort);
+                    serial8250_runtime_port_accepts_console_tx_from(Serial8250RuntimePort, Serial8250Console);
+                    serial8250_runtime_port_tty_flip_buffer_bound(Serial8250RuntimePort, TtyFlipBuffer);
+                    serial8250_runtime_port_tty_xmit_fifo_bound(Serial8250RuntimePort, TtyXmitFifo);
+                    serial8250_runtime_port_rx_interrupts_deferred_until_enable(Serial8250RuntimePort);
+                    serial8250_runtime_port_handle_interrupt_requires_hardirq(Serial8250RuntimePort);
+                    serial8250_runtime_port_ready(Serial8250RuntimePort, Uart8250Port, IrqAction, TtyPort);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            serial8250_runtime_port_over_uart8250_port(Serial8250RuntimePort, Uart8250Port);
+            serial8250_runtime_port_ready(Serial8250RuntimePort, Uart8250Port, IrqAction, TtyPort);
+            serial8250_runtime_port_handles_ier_iir_lsr(Serial8250RuntimePort);
+            serial8250_runtime_port_owns_port_lock_irqsave(Serial8250RuntimePort);
+            serial8250_runtime_port_handle_interrupt_requires_hardirq(Serial8250RuntimePort);
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                depends_on {
+                    Serial8250RuntimePort.state == State::Ready;
+                    UartExternalIrqEnable.state == State::Ready;
+                    TtyPort.state == State::Online;
+                }
+
+                ensures {
+                    serial8250_runtime_port_online(Serial8250RuntimePort);
+                    serial8250_runtime_port_rdi_enabled(Serial8250RuntimePort);
+                    serial8250_runtime_port_rlsi_enabled(Serial8250RuntimePort);
+                    serial8250_runtime_port_thri_demand_driven(Serial8250RuntimePort);
+                    serial8250_runtime_port_handle_interrupt_requires_hardirq(Serial8250RuntimePort);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            serial8250_runtime_port_over_uart8250_port(Serial8250RuntimePort, Uart8250Port);
+            serial8250_runtime_port_ready(Serial8250RuntimePort, Uart8250Port, IrqAction, TtyPort);
+            serial8250_runtime_port_online(Serial8250RuntimePort);
+            serial8250_runtime_port_rdi_enabled(Serial8250RuntimePort);
+            serial8250_runtime_port_rlsi_enabled(Serial8250RuntimePort);
+            serial8250_runtime_port_thri_demand_driven(Serial8250RuntimePort);
+            serial8250_runtime_port_handle_interrupt_requires_hardirq(Serial8250RuntimePort);
+        }
+    }
+}
+
+/*
+ * TtyPort is the minimal uart_state/tty_port container bound to the 8250 line.
+ * It connects the runtime UART port to RX flip-buffer and future ordinary TTY
+ * TX FIFO state, but it does not access MMIO, dispatch IRQs or own console
+ * registry policy.
+ */
+object TtyPort: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Uart8250Port.state == State::Ready;
+                    TtyLineDisciplineRegistry.state == State::Prepared;
+                }
+
+                drives {
+                    TtyFlipBuffer.Event::Setup;
+                    TtyXmitFifo.Event::Setup;
+                }
+
+                ensures {
+                    tty_port_bound_to_uart8250_port(TtyPort, Uart8250Port);
+                    tty_port_minimal_uart_state_container(TtyPort);
+                    tty_port_owns_flip_buffer(TtyPort, TtyFlipBuffer);
+                    tty_port_owns_xmit_fifo(TtyPort, TtyXmitFifo);
+                    tty_port_not_mmio_accessor(TtyPort);
+                    tty_port_not_irq_dispatcher(TtyPort);
+                    tty_port_not_console_registry(TtyPort);
+                    tty_port_n_tty_line_discipline_available(TtyPort, TtyLineDisciplineRegistry);
+                    tty_port_ready(TtyPort, Uart8250Port, TtyFlipBuffer, TtyXmitFifo);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            tty_port_bound_to_uart8250_port(TtyPort, Uart8250Port);
+            tty_port_minimal_uart_state_container(TtyPort);
+            tty_port_owns_flip_buffer(TtyPort, TtyFlipBuffer);
+            tty_port_owns_xmit_fifo(TtyPort, TtyXmitFifo);
+            tty_port_not_mmio_accessor(TtyPort);
+            tty_port_not_irq_dispatcher(TtyPort);
+            tty_port_not_console_registry(TtyPort);
+            tty_port_n_tty_line_discipline_available(TtyPort, TtyLineDisciplineRegistry);
+            tty_port_ready(TtyPort, Uart8250Port, TtyFlipBuffer, TtyXmitFifo);
+        }
+
+        events {
+            on Event::Enable -> State::Online {
+                depends_on {
+                    TtyPort.state == State::Ready;
+                    TtyFlipBuffer.state == State::Ready;
+                    TtyXmitFifo.state == State::Ready;
+                }
+
+                ensures {
+                    tty_port_initialized(TtyPort);
+                    tty_port_uart_startup_drives_runtime_enable(TtyPort, Serial8250RuntimePort);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            tty_port_bound_to_uart8250_port(TtyPort, Uart8250Port);
+            tty_port_ready(TtyPort, Uart8250Port, TtyFlipBuffer, TtyXmitFifo);
+            tty_port_initialized(TtyPort);
+            tty_port_uart_startup_drives_runtime_enable(TtyPort, Serial8250RuntimePort);
+        }
+    }
+}
+
+/*
+ * TtyFlipBuffer is the RX staging boundary reached by serial8250 RX interrupt
+ * handling. The first RX round should validate insert/push, not full N_TTY or
+ * userspace read semantics.
+ */
+object TtyFlipBuffer: ConsoleObject {
+    initial_state: State::Base;
+
+    processes {
+        Action::InsertChar(byte: Serial8250RxByteRef) -> TtyFlipBufferRecordRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                tty_flip_buffer_ready(self, TtyPort);
+            }
+            ensures {
+                tty_flip_buffer_record_ready(self, TtyFlipBufferRecordRef::Uart0RxProbe);
+                tty_flip_buffer_char_inserted(self, byte, TtyFlipBufferRecordRef::Uart0RxProbe);
+            }
+        }
+
+        Action::Push(record: TtyFlipBufferRecordRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                tty_flip_buffer_record_ready(self, record);
+            }
+            ensures {
+                tty_flip_buffer_push_committed(self, record);
+                tty_flip_buffer_push_after_rx_insert(self, record);
+            }
+        }
+    }
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Uart8250Port.state == State::Ready;
+                    TtyLineDisciplineRegistry.state == State::Prepared;
+                }
+
+                ensures {
+                    tty_flip_buffer_bound_to_tty_port(TtyFlipBuffer, TtyPort);
+                    tty_flip_buffer_rx_staging_only(TtyFlipBuffer);
+                    tty_flip_buffer_push_is_rx_observation_boundary(TtyFlipBuffer);
+                    tty_flip_buffer_does_not_model_full_n_tty_read(TtyFlipBuffer);
+                    tty_flip_buffer_ready(TtyFlipBuffer, TtyPort);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            tty_flip_buffer_bound_to_tty_port(TtyFlipBuffer, TtyPort);
+            tty_flip_buffer_rx_staging_only(TtyFlipBuffer);
+            tty_flip_buffer_push_is_rx_observation_boundary(TtyFlipBuffer);
+            tty_flip_buffer_does_not_model_full_n_tty_read(TtyFlipBuffer);
+            tty_flip_buffer_ready(TtyFlipBuffer, TtyPort);
+        }
+    }
+}
+
+/*
+ * TtyXmitFifo is the ordinary TTY write FIFO. It is intentionally distinct
+ * from the printk console TX queue already used by Serial8250Console.
+ */
+object TtyXmitFifo: ConsoleObject {
+    initial_state: State::Base;
+
+    processes {
+        Action::Enqueue(byte: Serial8250TxByteRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                tty_xmit_fifo_ready(self, TtyPort);
+            }
+            ensures {
+                tty_xmit_fifo_byte_queued(self, byte);
+            }
+        }
+
+        Action::DequeueForTx -> Serial8250TxByteRef {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                tty_xmit_fifo_ready(self, TtyPort);
+            }
+            ensures {
+                tty_xmit_fifo_dequeue_returns(self, Serial8250TxByteRef::Uart0TxProbe);
+            }
+        }
+    }
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Uart8250Port.state == State::Ready;
+                }
+
+                ensures {
+                    tty_xmit_fifo_bound_to_tty_port(TtyXmitFifo, TtyPort);
+                    tty_xmit_fifo_for_ordinary_tty_write(TtyXmitFifo);
+                    tty_xmit_fifo_distinct_from_printk_console_tx(TtyXmitFifo, Serial8250Console);
+                    tty_xmit_fifo_runtime_tx_integration_deferred(TtyXmitFifo);
+                    tty_xmit_fifo_ready(TtyXmitFifo, TtyPort);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            tty_xmit_fifo_bound_to_tty_port(TtyXmitFifo, TtyPort);
+            tty_xmit_fifo_for_ordinary_tty_write(TtyXmitFifo);
+            tty_xmit_fifo_distinct_from_printk_console_tx(TtyXmitFifo, Serial8250Console);
+            tty_xmit_fifo_runtime_tx_integration_deferred(TtyXmitFifo);
+            tty_xmit_fifo_ready(TtyXmitFifo, TtyPort);
+        }
+    }
+}
+
+/*
+ * Serial8250RxLoopbackProbe is the production-side RX stimulus boundary for
+ * the first runtime RX round. It uses 8250 loopback: save MCR, enable
+ * loopback, write one TX byte supplied by the smoke/probe path, let hardware
+ * produce a real RX interrupt, observe the normal PLIC/IRQ/runtime path, then
+ * restore MCR. It is not a KUnit observer.
+ */
+object Serial8250RxLoopbackProbe: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Serial8250RuntimePort.state == State::Online;
+                    UartExternalIrqEnable.state == State::Ready;
+                    Plic.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
+                    TtyFlipBuffer.state == State::Ready;
+                }
+
+                drives {
+                    Serial8250RuntimePort.Action::StartTx;
+                    RiscvIntc.Action::HandleExternalInput(InterruptCauseRef::SupervisorExternalIrq);
+                    Plic.Action::Claim(HwirqRef::PlicUart0);
+                    PlicIrqDomain.Action::Dispatch(LogicalIrqRef::Uart0);
+                    IrqHandlerRegistry.Action::Dispatch(LogicalIrqRef::Uart0);
+                    Serial8250RuntimePort.Action::HandleInterrupt(InterruptCauseRef::SupervisorExternalIrq);
+                    Plic.Action::Complete(HwirqRef::PlicUart0);
+                }
+
+                ensures {
+                    serial8250_rx_loopback_probe_ready(Serial8250RxLoopbackProbe);
+                    serial8250_rx_loopback_probe_production_side(Serial8250RxLoopbackProbe);
+                    serial8250_rx_loopback_probe_uses_smoke_stimulus(Serial8250RxLoopbackProbe);
+                    serial8250_rx_loopback_probe_kunit_not_stimulus(Serial8250RxLoopbackProbe);
+                    serial8250_rx_loopback_probe_saves_mcr(Serial8250RxLoopbackProbe, Uart8250Port);
+                    serial8250_rx_loopback_probe_enables_loopback(Serial8250RxLoopbackProbe, Uart8250Port);
+                    serial8250_rx_loopback_probe_writes_tx_byte(
+                        Serial8250RxLoopbackProbe,
+                        Serial8250TxByteRef::Uart0TxProbe
+                    );
+                    serial8250_rx_loopback_probe_triggers_real_rx_interrupt(Serial8250RxLoopbackProbe, Plic);
+                    serial8250_rx_loopback_probe_observes_irq_dispatch(Serial8250RxLoopbackProbe, IrqHandlerRegistry);
+                    serial8250_rx_loopback_probe_observes_runtime_handler(
+                        Serial8250RxLoopbackProbe,
+                        Serial8250RuntimePort
+                    );
+                    serial8250_rx_loopback_probe_observes_flip_buffer_push(
+                        Serial8250RxLoopbackProbe,
+                        TtyFlipBuffer
+                    );
+                    serial8250_rx_loopback_probe_restores_mcr(Serial8250RxLoopbackProbe, Uart8250Port);
+                    serial8250_rx_loopback_probe_single_byte_first_round(
+                        Serial8250RxLoopbackProbe,
+                        Serial8250RxByteRef::Uart0RxProbe
+                    );
+                    serial8250_rx_loopback_probe_bounded_batch_followup_allowed(Serial8250RxLoopbackProbe);
+                    tty_flip_buffer_push_committed(TtyFlipBuffer, TtyFlipBufferRecordRef::Uart0RxProbe);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            serial8250_rx_loopback_probe_ready(Serial8250RxLoopbackProbe);
+            serial8250_rx_loopback_probe_production_side(Serial8250RxLoopbackProbe);
+            serial8250_rx_loopback_probe_uses_smoke_stimulus(Serial8250RxLoopbackProbe);
+            serial8250_rx_loopback_probe_kunit_not_stimulus(Serial8250RxLoopbackProbe);
+            serial8250_rx_loopback_probe_restores_mcr(Serial8250RxLoopbackProbe, Uart8250Port);
+            serial8250_rx_loopback_probe_single_byte_first_round(
+                Serial8250RxLoopbackProbe,
+                Serial8250RxByteRef::Uart0RxProbe
+            );
+            tty_flip_buffer_push_committed(TtyFlipBuffer, TtyFlipBufferRecordRef::Uart0RxProbe);
+        }
+    }
+}
+
+/*
+ * Serial8250RxKunitObserver is only the checker for the RX loopback result.
+ * It may read counters/facts and emit diagnostics through the allowed sink,
+ * but it must not write TX, set loopback, call handlers, or touch PLIC
+ * claim/complete state.
+ */
+object Serial8250RxKunitObserver: ConsoleObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Serial8250RxLoopbackProbe.state == State::Ready;
+                    TtyFlipBuffer.state == State::Ready;
+                }
+
+                ensures {
+                    serial8250_rx_kunit_observer_ready(Serial8250RxKunitObserver);
+                    serial8250_rx_kunit_observer_read_only(Serial8250RxKunitObserver);
+                    serial8250_rx_kunit_observer_does_not_write_tx(Serial8250RxKunitObserver);
+                    serial8250_rx_kunit_observer_does_not_set_loopback(Serial8250RxKunitObserver);
+                    serial8250_rx_kunit_observer_does_not_call_handler(Serial8250RxKunitObserver);
+                    serial8250_rx_kunit_observer_does_not_claim_or_complete(Serial8250RxKunitObserver);
+                    serial8250_rx_kunit_observer_reads_loopback_probe(
+                        Serial8250RxKunitObserver,
+                        Serial8250RxLoopbackProbe
+                    );
+                    serial8250_rx_kunit_observer_reads_flip_buffer_result(
+                        Serial8250RxKunitObserver,
+                        TtyFlipBuffer
+                    );
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            serial8250_rx_kunit_observer_ready(Serial8250RxKunitObserver);
+            serial8250_rx_kunit_observer_read_only(Serial8250RxKunitObserver);
+            serial8250_rx_kunit_observer_does_not_write_tx(Serial8250RxKunitObserver);
+            serial8250_rx_kunit_observer_does_not_set_loopback(Serial8250RxKunitObserver);
+            serial8250_rx_kunit_observer_does_not_call_handler(Serial8250RxKunitObserver);
+            serial8250_rx_kunit_observer_does_not_claim_or_complete(Serial8250RxKunitObserver);
+            serial8250_rx_kunit_observer_reads_loopback_probe(
+                Serial8250RxKunitObserver,
+                Serial8250RxLoopbackProbe
+            );
+            serial8250_rx_kunit_observer_reads_flip_buffer_result(Serial8250RxKunitObserver, TtyFlipBuffer);
         }
     }
 }

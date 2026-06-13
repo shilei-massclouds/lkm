@@ -436,6 +436,55 @@ interrupt-driven console output ready，只能记录 IRQ 输出路径 deferred�
 `UART_IER_THRI`，随后由真实 UART THRE interrupt 经 PLIC claim loop 和 IRQ core dispatch 调用 UART handler；
 handler 必须按 Linux `serial8250_handle_irq()` / `serial8250_tx_chars()` 形状在 THRE 条件下 drain TX queue，
 队列清空后清掉 THRI，不能由 smoke/KUnit 直接调用 handler 或手动 drain 后端。
+
+下一轮 serial8250 runtime RX/TTY/FIFO 建模必须先固定对象职责和协作关系，再定义 event/action。对象边界如下：
+`Uart8250Port` 继续只表示 platform probe 得到的 8250 资源实例，拥有 MMIO resource、`mapbase/membase`、
+`reg_shift/reg_io_width`、clock、line 和 logical IRQ 绑定；它不得承担 console handoff、TTY buffering、PLIC
+claim/complete 或用户态 TTY 语义。`Serial8250RuntimePort` 表示覆盖在 `Uart8250Port` 之上的 8250 运行期行为层，
+负责 IER/IIR/LSR 状态、RDI/RLSI/THRI enable/disable、port lock/irqsave 以及 RX/TX handler 分发形状；
+它不得解析设备树、执行 irqdomain translate、拥有 console registry 策略或直接 claim/complete PLIC。
+`Serial8250Console` 继续只表示 printk registry 中的 real console entry，负责把 printk console 输出提交给
+serial8250 runtime TX 路径；它不是 TTY runtime，也不拥有 RX。`TtyPort` 表示最小 `uart_state/tty_port`
+容器，绑定 UART line 并连接 `TtyFlipBuffer` 与 `TtyXmitFifo`；它不得访问 UART MMIO、分发 IRQ 或拥有 console
+registry 策略。`TtyFlipBuffer` 是 RX interrupt 到 TTY 层之间的 staging buffer，下一轮首个闭环只验证
+insert/push，不展开完整 N_TTY read。`TtyXmitFifo` 表示普通 TTY write 的 TX FIFO，必须与当前 printk console
+TX queue 区分开；普通 TTY write 接入可以后置。
+
+上述对象的协作关系按三条链描述。设备构成链是
+`DeviceTree ns16550a node -> PlatformDevice -> Uart8250Port -> Serial8250RuntimePort`。console 输出协作链是
+`printk -> ConsoleRegistry -> Serial8250Console -> Serial8250RuntimePort.StartTx -> UART THRI interrupt ->
+IrqAction -> Serial8250RuntimePort.HandleInterrupt -> TransmitChars`。RX 输入协作链是
+`UART RX byte -> PLIC source -> root INTC -> PLIC claim -> IrqAction.Dispatch -> Serial8250RuntimePort.HandleInterrupt ->
+ReceiveChars -> TtyFlipBuffer.Insert/Push`。下一步定义 event/action 时必须以这些边界为前提；测试对象只能观察这些
+生产链路的结果，不能代替链路中的 IRQ、handler 或 backend 调用。
+
+serial8250 runtime RX/TTY/FIFO 的 event/action 边界应按以下接口收敛。`TtyPort.Event::Setup` 建立最小
+`uart_state/tty_port` 容器，驱动 `TtyFlipBuffer.Event::Setup` 和 `TtyXmitFifo.Event::Setup`，并依赖
+`TtyLineDisciplineRegistry.Prepared`，但不访问 UART MMIO、不注册 IRQ handler、不改变 console route。
+`TtyPort.Event::Enable` 对应最小 `uart_startup()` 边界，只把 TTY port 标记 initialized，并允许后续
+`Serial8250RuntimePort.Event::Enable` 打开 RX runtime；完整 open/close、termios、hangup 和用户态 file 语义后续展开。
+`Serial8250RuntimePort.Event::Setup` 依赖 `Uart8250Port.Ready`、`IrqAction.Ready` 和 `TtyPort.Ready`，只建立
+IER/IIR/LSR、port lock/irqsave、TTY buffer 绑定和 handler shape；`Serial8250RuntimePort.Event::Enable` 依赖
+`UartExternalIrqEnable.Ready` 和 `TtyPort.Online`，打开 RDI/RLSI，并保持 THRI 为 demand-driven。
+
+运行期 action 只能经生产链路调用。`Serial8250RuntimePort.Action::HandleInterrupt(cause)` 必须要求 hardirq
+context 和 port lock/irqsave，读取 IIR/LSR，先处理 RX，再检查 modem status，再在 `LSR_THRE && IER_THRI`
+条件下处理 TX；它不得 claim/complete PLIC，也不得由 KUnit/smoke 直接调用。`ReceiveChars(byte)` 消费
+LSR_DR/BI 代表的 RX byte，使用 bounded drain 策略，驱动 `TtyFlipBuffer.InsertChar(byte)` 和
+`TtyFlipBuffer.Push(record)`；首轮验收终点是 flip-buffer push，不进入完整 N_TTY read。
+`TransmitChars` 使用 tx_loadsz/FIFO 策略并在队列空时停止 THRI；`StartTx`/`StopTx` 分别只负责设置/清除 THRI。
+`TtyXmitFifo.Enqueue/DequeueForTx` 只描述普通 TTY write FIFO 接口，必须与当前 printk console TX queue 分离；
+普通 TTY write 的完整接入可以后置。
+
+首轮 RX 验证应采用 8250 loopback probe，而不是修改设备树或让 KUnit 人工制造中断。`Serial8250RxLoopbackProbe`
+或等价生产边界负责保存 MCR、设置 loopback、由 smoke/probe 路径提供一个 TX 字符、写入 UART TX，让硬件回送成
+RX 并触发真实 RDI/RLSI interrupt；随后必须走真实 `UART -> PLIC -> root INTC -> IrqAction dispatch ->
+Serial8250RuntimePort.HandleInterrupt -> ReceiveChars -> TtyFlipBuffer.Push` 链路，probe 结束后恢复 MCR。
+首轮只要求单字符闭环；后续可以增加固定小上限的连续字符 smoke 项，验证 bounded drain、有限批量处理和
+flip-buffer push/batch 计数。KUnit 在这条路径中只能作为 observer/checker：它可以读取 counters/facts/trace 并向
+受限 sink 输出诊断，但不得写 TX 字符、不得设置 loopback、不得调用 handler、不得 claim/complete PLIC，也不得改
+pending/enable 状态。smoke 可以作为生产侧 stimulus，但也不能直接调用 backend handler；它只能通过公开/受控的
+前端或 runtime probe 入口提交字符。
 为避免 handoff 后重复输出，`ConsoleRegistry` 必须区分 printk 记录保存和 legacy boot-console drain cursor。
 注册 preferred serial8250 console 时，应先把 boot console pending records 按 boot console 路径 flush 并推进 cursor；
 serial8250 route 成功写出的记录必须标记为已交付，不得再被 `earlycon::drain_printk()` 经 SBI 重放。默认
