@@ -276,23 +276,23 @@ fn set_exception_policy(cause: usize, policy: ExceptionPolicy) {
 fn dispatch_handler_frame(handler: u8, frame: &mut TrapFrame) {
     match handler {
         HANDLER_BREAKPOINT => breakpoint_exception_handler(frame),
-        HANDLER_PAGE_FAULT => page_fault_exception_handler(frame.scause),
-        HANDLER_SYSCALL_DISABLED => syscall_disabled_exception_handler(frame.scause),
-        HANDLER_UNEXPECTED => unexpected_exception_handler(frame.scause),
-        _ => default_exception_handler(frame.scause),
+        HANDLER_PAGE_FAULT => page_fault_exception_handler(frame),
+        HANDLER_SYSCALL_DISABLED => syscall_disabled_exception_handler(frame),
+        HANDLER_UNEXPECTED => unexpected_exception_handler(frame),
+        _ => default_exception_handler(frame),
     }
 }
 
-fn default_exception_handler(_scause: usize) -> ! {
-    panic_dispatch("exception fallback panic\n")
+fn default_exception_handler(frame: &TrapFrame) -> ! {
+    panic_dispatch_frame("exception fallback panic", frame)
 }
 
-fn page_fault_exception_handler(_scause: usize) -> ! {
-    panic_dispatch("page fault exception\n")
+fn page_fault_exception_handler(frame: &TrapFrame) -> ! {
+    panic_dispatch_frame("page fault exception", frame)
 }
 
-fn syscall_disabled_exception_handler(_scause: usize) -> ! {
-    panic_dispatch("syscall exception not enabled\n")
+fn syscall_disabled_exception_handler(frame: &TrapFrame) -> ! {
+    panic_dispatch_frame("syscall exception not enabled", frame)
 }
 
 fn breakpoint_exception_handler(frame: &mut TrapFrame) {
@@ -351,8 +351,8 @@ pub fn resume_after_breakpoint(frame: &mut TrapFrame) {
         .wrapping_add(breakpoint_instruction_length(frame.sepc));
 }
 
-fn unexpected_exception_handler(_scause: usize) -> ! {
-    panic_dispatch("unexpected exception\n")
+fn unexpected_exception_handler(frame: &TrapFrame) -> ! {
+    panic_dispatch_frame("unexpected exception", frame)
 }
 
 fn breakpoint_instruction_length(sepc: usize) -> usize {
@@ -367,4 +367,29 @@ fn breakpoint_instruction_length(sepc: usize) -> usize {
 fn panic_dispatch(message: &str) -> ! {
     crate::arch::riscv64::sbi::putstr(message);
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn panic_dispatch_frame(message: &str, frame: &TrapFrame) -> ! {
+    crate::arch::riscv64::sbi::putstr(message);
+    crate::arch::riscv64::sbi::putstr(" scause=0x");
+    print_hex(frame.scause);
+    crate::arch::riscv64::sbi::putstr(" sepc=0x");
+    print_hex(frame.sepc);
+    crate::arch::riscv64::sbi::putstr(" stval=0x");
+    print_hex(frame.stval);
+    crate::arch::riscv64::sbi::putstr(" gp=0x");
+    print_hex(crate::arch::riscv64::csr::read_gp());
+    crate::arch::riscv64::sbi::putstr(" tp=0x");
+    print_hex(crate::arch::riscv64::csr::read_tp());
+    crate::arch::riscv64::sbi::putchar(b'\n');
+    crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn print_hex(value: usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        crate::arch::riscv64::sbi::putchar(HEX[(value >> shift) & 0xf]);
+    }
 }

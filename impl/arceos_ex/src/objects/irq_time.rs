@@ -1960,12 +1960,19 @@ pub struct Plic {
     claim_before_dispatch: bool,
     complete_after_handler: bool,
     uart_source_trigger_deferred: bool,
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     claim_count: AtomicUsize,
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     zero_claim_count: AtomicUsize,
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     dispatch_count: AtomicUsize,
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     complete_count: AtomicUsize,
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     loop_exit_count: AtomicUsize,
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     last_claimed_source: AtomicU32,
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     last_completed_source: AtomicU32,
 }
 
@@ -2158,37 +2165,86 @@ impl Plic {
 
     #[allow(dead_code)]
     pub fn claim_count(&self) -> usize {
-        self.claim_count.load(Ordering::Acquire)
+        #[cfg(plic_provider_linux_object)]
+        {
+            crate::objects::linux_plic_shim::runtime_claim_count()
+        }
+        #[cfg(not(plic_provider_linux_object))]
+        {
+            self.claim_count.load(Ordering::Acquire)
+        }
     }
 
     #[allow(dead_code)]
     pub fn zero_claim_count(&self) -> usize {
-        self.zero_claim_count.load(Ordering::Acquire)
+        #[cfg(plic_provider_linux_object)]
+        {
+            crate::objects::linux_plic_shim::runtime_zero_claim_count()
+        }
+        #[cfg(not(plic_provider_linux_object))]
+        {
+            self.zero_claim_count.load(Ordering::Acquire)
+        }
     }
 
     #[allow(dead_code)]
     pub fn dispatch_count(&self) -> usize {
-        self.dispatch_count.load(Ordering::Acquire)
+        #[cfg(plic_provider_linux_object)]
+        {
+            crate::objects::linux_plic_shim::runtime_dispatch_count()
+        }
+        #[cfg(not(plic_provider_linux_object))]
+        {
+            self.dispatch_count.load(Ordering::Acquire)
+        }
     }
 
     #[allow(dead_code)]
     pub fn complete_count(&self) -> usize {
-        self.complete_count.load(Ordering::Acquire)
+        #[cfg(plic_provider_linux_object)]
+        {
+            crate::objects::linux_plic_shim::runtime_complete_count()
+        }
+        #[cfg(not(plic_provider_linux_object))]
+        {
+            self.complete_count.load(Ordering::Acquire)
+        }
     }
 
     #[allow(dead_code)]
     pub fn loop_exit_count(&self) -> usize {
-        self.loop_exit_count.load(Ordering::Acquire)
+        #[cfg(plic_provider_linux_object)]
+        {
+            crate::objects::linux_plic_shim::runtime_loop_exit_count()
+        }
+        #[cfg(not(plic_provider_linux_object))]
+        {
+            self.loop_exit_count.load(Ordering::Acquire)
+        }
     }
 
     #[allow(dead_code)]
     pub fn last_claimed_source(&self) -> u32 {
-        self.last_claimed_source.load(Ordering::Acquire)
+        #[cfg(plic_provider_linux_object)]
+        {
+            crate::objects::linux_plic_shim::runtime_last_claimed_source()
+        }
+        #[cfg(not(plic_provider_linux_object))]
+        {
+            self.last_claimed_source.load(Ordering::Acquire)
+        }
     }
 
     #[allow(dead_code)]
     pub fn last_completed_source(&self) -> u32 {
-        self.last_completed_source.load(Ordering::Acquire)
+        #[cfg(plic_provider_linux_object)]
+        {
+            crate::objects::linux_plic_shim::runtime_last_completed_source()
+        }
+        #[cfg(not(plic_provider_linux_object))]
+        {
+            self.last_completed_source.load(Ordering::Acquire)
+        }
     }
 
     fn preset_from_irqchip(
@@ -2349,6 +2405,7 @@ impl Plic {
         )
     }
 
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     pub fn handle_external_interrupt(
         &self,
         domain: &PlicIrqDomain,
@@ -2421,6 +2478,7 @@ impl Plic {
         unsafe { core::ptr::read_volatile(enable_addr as *const u32) & mask != 0 }
     }
 
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     fn claim(&self) -> u32 {
         if self.claim_addr == 0 || !self.claim_action_ready {
             return 0;
@@ -2437,6 +2495,7 @@ impl Plic {
         source
     }
 
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     fn complete(&self, source: u32) {
         if self.claim_addr == 0 || source == 0 || !self.complete_action_ready {
             return;
@@ -6144,11 +6203,19 @@ pub fn timer_interrupt_count() -> usize {
 }
 
 pub fn handle_external_interrupt() {
-    let ctx = crate::context::context_ref();
-    let plic = &ctx.plic;
-    let domain = &ctx.plic_irq_domain;
-    let registry = &ctx.irq_handler_registry;
-    plic.handle_external_interrupt(domain, registry);
+    #[cfg(plic_provider_linux_object)]
+    {
+        crate::objects::linux_plic_shim::handle_external_interrupt();
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    {
+        let ctx = crate::context::context_ref();
+        let plic = &ctx.plic;
+        let domain = &ctx.plic_irq_domain;
+        let registry = &ctx.irq_handler_registry;
+        plic.handle_external_interrupt(domain, registry);
+    }
 }
 
 pub fn handle_timer_interrupt() {

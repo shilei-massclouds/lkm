@@ -257,7 +257,27 @@ fn external_interrupt_handler() {
     crate::objects::irq_time::handle_external_interrupt();
 }
 
-fn default_interrupt_handler(_scause: usize) -> ! {
-    crate::arch::riscv64::sbi::putstr("interrupt fallback panic\n");
+fn default_interrupt_handler(scause: usize) -> ! {
+    let cause = scause & !SCAUSE_INTERRUPT_BIT;
+    crate::arch::riscv64::sbi::putstr("interrupt fallback panic scause=0x");
+    print_hex(scause);
+    crate::arch::riscv64::sbi::putstr(" cause=0x");
+    print_hex(cause);
+    crate::arch::riscv64::sbi::putstr(" policy=0x");
+    print_hex(read_interrupt_handler_policy(scause) as usize);
+    crate::arch::riscv64::sbi::putstr(" gp=0x");
+    print_hex(crate::arch::riscv64::csr::read_gp());
+    crate::arch::riscv64::sbi::putstr(" tp=0x");
+    print_hex(crate::arch::riscv64::csr::read_tp());
+    crate::arch::riscv64::sbi::putchar(b'\n');
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn print_hex(value: usize) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut shift = usize::BITS as usize;
+    while shift != 0 {
+        shift -= 4;
+        crate::arch::riscv64::sbi::putchar(HEX[(value >> shift) & 0xf]);
+    }
 }

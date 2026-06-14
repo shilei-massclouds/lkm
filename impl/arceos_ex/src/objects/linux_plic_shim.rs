@@ -1,7 +1,7 @@
 use core::{
     ffi::c_void,
     mem::size_of,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
 };
 
 use super::{
@@ -56,6 +56,14 @@ static LINUX_PLIC_OF_IRQ_PARSE_CALLS: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_OF_IRQ_PARSE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_OF_MATCH_CALLS: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_OF_PROPERTY_NDEV_CALLS: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_RUNTIME_CLAIM_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_RUNTIME_ZERO_CLAIM_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_RUNTIME_DISPATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_RUNTIME_COMPLETE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_RUNTIME_LOOP_EXIT_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_SAVED_RUST_TP: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE: AtomicU32 = AtomicU32::new(0);
+static LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE: AtomicU32 = AtomicU32::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -164,6 +172,15 @@ const LINUX_IRQ_DOMAIN_OPS_OFFSET: usize = 24;
 const LINUX_IRQ_DOMAIN_HOST_DATA_OFFSET: usize = 32;
 const LINUX_IRQ_DOMAIN_INFO_OPS_OFFSET: usize = 48;
 const LINUX_IRQ_DOMAIN_INFO_HOST_DATA_OFFSET: usize = 56;
+const LINUX_IRQ_DESC_SIZE: usize = 256;
+const LINUX_IRQ_CHIP_SIZE: usize = 128;
+const LINUX_IRQ_DESC_IRQ_DATA_OFFSET: usize = 48;
+const LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 4;
+const LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 24;
+const LINUX_IRQ_CHIP_IRQ_EOI_OFFSET: usize = 72;
+const LINUX_PLIC_CONTEXT_BASE: usize = 0x200000;
+const LINUX_PLIC_CONTEXT_SIZE: usize = 0x1000;
+const LINUX_PLIC_CONTEXT_CLAIM: usize = 0x04;
 const LINUX_THREAD_INFO_SIZE: usize = 2048;
 const LINUX_THREAD_INFO_CPU_OFFSET: usize = 32;
 const LINUX_TASK_STACK_CANARY_OFFSET: usize = 1232;
@@ -184,6 +201,8 @@ static mut LINUX_PLIC_PLATFORM_DEVICE_VIEW: LinuxPlatformDeviceProbeView =
 static mut LINUX_PLIC_PARENT_INTC_NODE: usize = 0;
 static mut LINUX_PLIC_IRQ_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_DOMAIN_SIZE];
 static mut LINUX_PLIC_INTC_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_DOMAIN_SIZE];
+static mut LINUX_PLIC_PARENT_IRQ_DESC: [u8; LINUX_IRQ_DESC_SIZE] = [0; LINUX_IRQ_DESC_SIZE];
+static mut LINUX_PLIC_PARENT_IRQ_CHIP: [u8; LINUX_IRQ_CHIP_SIZE] = [0; LINUX_IRQ_CHIP_SIZE];
 static mut LINUX_PLIC_THREAD_INFO: LinuxThreadInfoView = LinuxThreadInfoView {
     bytes: [0; LINUX_THREAD_INFO_SIZE],
 };
@@ -251,6 +270,34 @@ pub fn platform_driver_probe_ptr() -> usize {
     }
 
     unsafe { (*driver).probe }
+}
+
+pub fn runtime_claim_count() -> usize {
+    LINUX_PLIC_RUNTIME_CLAIM_COUNT.load(Ordering::Acquire)
+}
+
+pub fn runtime_zero_claim_count() -> usize {
+    LINUX_PLIC_RUNTIME_ZERO_CLAIM_COUNT.load(Ordering::Acquire)
+}
+
+pub fn runtime_dispatch_count() -> usize {
+    LINUX_PLIC_RUNTIME_DISPATCH_COUNT.load(Ordering::Acquire)
+}
+
+pub fn runtime_complete_count() -> usize {
+    LINUX_PLIC_RUNTIME_COMPLETE_COUNT.load(Ordering::Acquire)
+}
+
+pub fn runtime_loop_exit_count() -> usize {
+    LINUX_PLIC_RUNTIME_LOOP_EXIT_COUNT.load(Ordering::Acquire)
+}
+
+pub fn runtime_last_claimed_source() -> u32 {
+    LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE.load(Ordering::Acquire)
+}
+
+pub fn runtime_last_completed_source() -> u32 {
+    LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.load(Ordering::Acquire)
 }
 
 pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
@@ -400,6 +447,18 @@ pub fn platform_driver_match_and_probe(device_tree: &DeviceTree, plic: &Plic) ->
     Ok(())
 }
 
+pub fn handle_external_interrupt() {
+    let handler = LINUX_PLIC_CHAINED_HANDLER.load(Ordering::Acquire);
+    if handler == 0 {
+        return;
+    }
+
+    prepare_linux_parent_irq_desc();
+    let desc = &raw mut LINUX_PLIC_PARENT_IRQ_DESC as *mut u8 as *mut c_void;
+    let handler: unsafe extern "C" fn(*mut c_void) = unsafe { core::mem::transmute(handler) };
+    unsafe { call_linux_chained_irq_handler(handler, desc) };
+}
+
 fn plic_node_available(device_tree: &DeviceTree) -> bool {
     device_tree
         .find_node(b"/soc/plic@c000000")
@@ -507,11 +566,30 @@ fn linux_plic_alloc(size: usize, align: usize) -> *mut c_void {
 
 unsafe fn call_linux_platform_probe(probe: LinuxPlatformProbe, pdev: *mut c_void) -> i32 {
     prepare_linux_thread_info();
-    let saved_tp = crate::arch::riscv64::csr::read_tp();
+    let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
+    let saved_tp = current_rust_tp_for_linux_call();
+    remember_rust_tp(saved_tp);
     crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
     let ret = unsafe { probe(pdev) };
     crate::arch::riscv64::csr::write_tp(saved_tp);
+    crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
     ret
+}
+
+unsafe fn call_linux_chained_irq_handler(
+    handler: unsafe extern "C" fn(*mut c_void),
+    desc: *mut c_void,
+) {
+    prepare_linux_thread_info();
+    let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
+    let saved_tp = current_rust_tp_for_linux_call();
+    remember_rust_tp(saved_tp);
+    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+    unsafe { handler(desc) };
+    crate::arch::riscv64::csr::write_tp(saved_tp);
+    crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+    LINUX_PLIC_RUNTIME_ZERO_CLAIM_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_RUNTIME_LOOP_EXIT_COUNT.fetch_add(1, Ordering::AcqRel);
 }
 
 fn prepare_linux_thread_info() {
@@ -526,8 +604,61 @@ fn prepare_linux_thread_info() {
     }
 }
 
+fn prepare_linux_parent_irq_desc() {
+    unsafe {
+        let desc = (&raw mut LINUX_PLIC_PARENT_IRQ_DESC).cast::<u8>();
+        let chip = (&raw mut LINUX_PLIC_PARENT_IRQ_CHIP).cast::<u8>();
+        core::ptr::write_bytes(desc, 0, LINUX_IRQ_DESC_SIZE);
+        core::ptr::write_bytes(chip, 0, LINUX_IRQ_CHIP_SIZE);
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET).cast::<u32>(),
+            LINUX_RV_IRQ_EXT,
+        );
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET)
+                .cast::<usize>(),
+            chip as usize,
+        );
+        core::ptr::write(
+            chip.add(LINUX_IRQ_CHIP_IRQ_EOI_OFFSET).cast::<usize>(),
+            linux_plic_parent_irq_eoi as usize,
+        );
+    }
+}
+
 fn linux_thread_info_base() -> *mut u8 {
     (&raw mut LINUX_PLIC_THREAD_INFO).cast::<u8>()
+}
+
+fn linux_thread_info_addr() -> usize {
+    linux_thread_info_base() as usize
+}
+
+fn current_rust_tp_for_linux_call() -> usize {
+    let current = crate::arch::riscv64::csr::read_tp();
+    if current != linux_thread_info_addr() {
+        return current;
+    }
+
+    LINUX_PLIC_SAVED_RUST_TP.load(Ordering::Acquire)
+}
+
+fn remember_rust_tp(tp: usize) {
+    if tp != 0 && tp != linux_thread_info_addr() {
+        LINUX_PLIC_SAVED_RUST_TP.store(tp, Ordering::Release);
+    }
+}
+
+extern "C" fn linux_plic_parent_irq_eoi(_data: *mut c_void) {}
+
+fn plic_context_claim_addr() -> usize {
+    let membase = LINUX_PLIC_MEMBASE.load(Ordering::Acquire);
+    let context_id = LINUX_PLIC_CONTEXT_ID.load(Ordering::Acquire);
+    membase
+        .checked_add(LINUX_PLIC_CONTEXT_BASE)
+        .and_then(|base| base.checked_add(context_id.saturating_mul(LINUX_PLIC_CONTEXT_SIZE)))
+        .and_then(|base| base.checked_add(LINUX_PLIC_CONTEXT_CLAIM))
+        .unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]
@@ -727,8 +858,44 @@ pub extern "C" fn enable_percpu_irq() {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn generic_handle_domain_irq() -> i32 {
-    trap("generic_handle_domain_irq")
+pub extern "C" fn generic_handle_domain_irq(domain: *mut c_void, hwirq: usize) -> i32 {
+    let expected_domain = LINUX_PLIC_DOMAIN_PTR.load(Ordering::Acquire) as *mut c_void;
+    if domain.is_null() || domain != expected_domain || hwirq == 0 {
+        return -22;
+    }
+
+    let Ok(source) = u32::try_from(hwirq) else {
+        return -22;
+    };
+    LINUX_PLIC_RUNTIME_CLAIM_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE.store(source, Ordering::Release);
+
+    let linux_tp = crate::arch::riscv64::csr::read_tp();
+    let rust_tp = LINUX_PLIC_SAVED_RUST_TP.load(Ordering::Acquire);
+    if rust_tp != 0 {
+        crate::arch::riscv64::csr::write_tp(rust_tp);
+    }
+    let ctx = crate::context::context_ref();
+    let mapped = ctx
+        .plic_irq_domain
+        .resolve_hwirq(source)
+        .is_some_and(|logical_irq| ctx.irq_handler_registry.dispatch(logical_irq));
+    crate::arch::riscv64::csr::disable_supervisor_interrupts();
+
+    let claim_addr = plic_context_claim_addr();
+    if claim_addr != 0 {
+        unsafe { core::ptr::write_volatile(claim_addr as *mut u32, source) };
+        LINUX_PLIC_RUNTIME_COMPLETE_COUNT.fetch_add(1, Ordering::AcqRel);
+        LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.store(source, Ordering::Release);
+    }
+    crate::arch::riscv64::csr::write_tp(linux_tp);
+
+    if mapped {
+        LINUX_PLIC_RUNTIME_DISPATCH_COUNT.fetch_add(1, Ordering::AcqRel);
+        0
+    } else {
+        -22
+    }
 }
 
 #[unsafe(no_mangle)]

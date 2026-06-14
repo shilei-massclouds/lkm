@@ -3070,7 +3070,15 @@ plic_platform_probe -> plic_probe -> OF/resource/context/domain/chained handler`
 `irq_domain.ops/host_data`、`__irq_set_handler` 传入的 parent IRQ 和 handler 指针等数据。只要流程和这些 checkpoint 上的
 数据都可预期并被验证，通常就足以约束黑盒交互并辅助定位问题。
 
-第五，不强求一次性完成完整静态分析。后续可以按运行中“踩雷/排雷”的方式推进：每遇到一个 undefined symbol、回调路径或
+第五，黑盒运行边界还必须跟踪架构上下文寄存器视图，尤其是 RISC-V `tp`。Linux PLIC object 会通过 `tp` 访问
+Linux `thread_info` / per-CPU 数据；`arceos_ex` 的 Rust 路径则需要自己的 `tp`。因此进入 `irq-sifive-plic.o` 前可以
+切换到 Linux `thread_info` 视图，但返回 Rust dispatch、checkpoint、异常/中断分派或其它 `arceos_ex` 代码前必须恢复
+Rust `tp`。Linux `tp` 激活期间如果允许本地中断嵌套，trap entry 会把 Linux `tp` 保存进现场，后续常规 Rust 路径可能在
+错误的 `tp` 下访问对象并触发页故障或状态错读。第一轮排雷已经以 `scause/sepc/stval/gp/tp` panic 诊断确认过这一类问题：
+一次 load page fault 的 `tp` 等于 Linux `LINUX_PLIC_THREAD_INFO`，说明 Linux `tp` 泄漏到了 Rust 执行上下文。后续类似
+问题应优先检查 `tp`/`gp`、SIE 保存恢复、per-CPU offset 和 trap frame，而不是先假设 PLIC claim/complete 语义本身错误。
+
+第六，不强求一次性完成完整静态分析。后续可以按运行中“踩雷/排雷”的方式推进：每遇到一个 undefined symbol、回调路径或
 异常现象，就判断问题属于流程未到达、边界数据不符合预期、二进制 ABI 视图不一致、shim 语义不足，还是需要讨论的大对象或
 策略缺口；修复后补充相应 checkpoint/KUnit 断言，再进入下一轮运行。必要时可以使用反汇编、`addr2line` 或 GDB 作为辅助，
 例如确认结构体偏移、优化后的访问方式、崩溃 PC 对应源码位置或 local symbol 范围，但这些工具是兜底手段，不替代源码和
@@ -3183,6 +3191,26 @@ UART、console、IRQ action 等路径感知两套不同 PLIC API。
 `plic_driver.probe`。`irq_domain`、`irq_chip`、chained handler 和 CPU/syscore 回调是 `probe` 成功后注册出的 IRQ
 服务面。后续讨论 `nm -u` 下接口时，应围绕 `platform_driver/probe` 及其后续 IRQ 服务面逐项判断哪些 Linux 依赖必须真实
 实现，哪些可以作为单核启动试验的受限 stub，哪些需要在 `arceos_ex` 中建立正式对象语义。
+
+### 当前首轮运行闭合状态
+
+截至当前轮次，`PLIC_PROVIDER=linux-object` 已不再只停留在 probe/domain/chained handler 注册事实观测上。`arceos_ex`
+已经能在 RISC-V supervisor external interrupt 路径中调用 Linux object 注册出的 `plic_handle_irq`，由该黑盒函数读取
+PLIC claim register 并调用 `generic_handle_domain_irq(priv->irqdomain, hwirq)`。当前 `generic_handle_domain_irq` 仍是
+薄 shim：它校验 Linux domain 指针和 hwirq，临时恢复 Rust `tp` 后复用现有 `PlicIrqDomain` 与 `IrqHandlerRegistry`
+分发 UART logical IRQ，随后在等价位置写回 claim register 完成 source，并更新共同观测计数。外层 Linux 调用窗口保存并
+恢复 SIE 与 `tp`，Linux `tp` 激活期间关闭本地中断，避免嵌套 trap 捕获 Linux `thread_info` 视图。
+
+这一路径已经通过 `make -C impl/arceos_ex run APP=smoke PLIC_PROVIDER=linux-object PROBE=linux-plic,uart-irq-chain`
+验证：`linux_plic.boundary_facts` 和 `uart_irq_chain.observer_real_path` 均通过，smoke 结果为
+`passed=36 failed=0 total=36`。其中 UART IRQ chain 观察到 Linux PLIC object provider 下的
+claim/dispatch/complete/zero-claim/loop-exit 计数闭合，说明首轮黑盒 runtime claim loop 已经承接现有 UART action。
+
+这仍不是完整 Linux generic IRQ core 复用。当前 `irq_domain_set_info`、`irq_get_irq_data`、`handle_fasteoi_irq`、
+`handle_edge_irq` 以及 true `plic_chip.irq_eoi` / `plic_edge_chip.irq_ack` flow 仍归入 deferred；当前 complete 由
+`generic_handle_domain_irq` shim 在 UART action dispatch 之后写 claim register，属于保持顺序等价的首轮 bridge。下一轮
+若要提高二进制对齐度，应把 leaf IRQ flow handler、`irq_data` 布局和 chip callback 逐步换成 Linux-shaped 真实路径，
+同时保持上层 UART/console/smoke 不感知 provider 差异。
 
 ### 上接口仍需讨论的问题
 
