@@ -68,6 +68,12 @@ static LINUX_PLIC_RUNTIME_LOOP_EXIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_SAVED_RUST_TP: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE: AtomicU32 = AtomicU32::new(0);
 static LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE: AtomicU32 = AtomicU32::new(0);
+static LINUX_PLIC_CHIP_ENABLE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_DISABLE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_MASK_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_UNMASK_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_EOI_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_CALLBACK_PROBE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -157,6 +163,47 @@ impl LinuxPlicLeafIrqRecord {
 }
 
 #[derive(Clone, Copy)]
+enum LinuxIrqChipCallbackSlot {
+    Enable,
+    Disable,
+    Mask,
+    Unmask,
+    Eoi,
+}
+
+impl LinuxIrqChipCallbackSlot {
+    const fn offset(self) -> usize {
+        match self {
+            Self::Enable => LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET,
+            Self::Disable => LINUX_IRQ_CHIP_IRQ_DISABLE_OFFSET,
+            Self::Mask => LINUX_IRQ_CHIP_IRQ_MASK_OFFSET,
+            Self::Unmask => LINUX_IRQ_CHIP_IRQ_UNMASK_OFFSET,
+            Self::Eoi => LINUX_IRQ_CHIP_IRQ_EOI_OFFSET,
+        }
+    }
+
+    fn note_success(self) {
+        match self {
+            Self::Enable => {
+                LINUX_PLIC_CHIP_ENABLE_COUNT.fetch_add(1, Ordering::AcqRel);
+            }
+            Self::Disable => {
+                LINUX_PLIC_CHIP_DISABLE_COUNT.fetch_add(1, Ordering::AcqRel);
+            }
+            Self::Mask => {
+                LINUX_PLIC_CHIP_MASK_COUNT.fetch_add(1, Ordering::AcqRel);
+            }
+            Self::Unmask => {
+                LINUX_PLIC_CHIP_UNMASK_COUNT.fetch_add(1, Ordering::AcqRel);
+            }
+            Self::Eoi => {
+                LINUX_PLIC_CHIP_EOI_COUNT.fetch_add(1, Ordering::AcqRel);
+            }
+        };
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct LinuxPlicBoundaryFacts {
     pub initcall_seq: usize,
     pub driver_register_seq: usize,
@@ -200,6 +247,12 @@ pub struct LinuxPlicBoundaryFacts {
     pub of_match_calls: usize,
     pub of_property_ndev_calls: usize,
     pub heap_used: usize,
+    pub chip_enable_count: usize,
+    pub chip_disable_count: usize,
+    pub chip_mask_count: usize,
+    pub chip_unmask_count: usize,
+    pub chip_eoi_count: usize,
+    pub chip_callback_probe_successes: usize,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -223,6 +276,9 @@ const LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSE
 const LINUX_IRQ_DESC_IRQ_DATA_CHIP_DATA_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 48;
 const LINUX_IRQ_COMMON_EFFECTIVE_AFFINITY_OFFSET: usize = 32;
 const LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET: usize = 24;
+const LINUX_IRQ_CHIP_IRQ_DISABLE_OFFSET: usize = 32;
+const LINUX_IRQ_CHIP_IRQ_MASK_OFFSET: usize = 48;
+const LINUX_IRQ_CHIP_IRQ_UNMASK_OFFSET: usize = 64;
 const LINUX_IRQ_CHIP_IRQ_EOI_OFFSET: usize = 72;
 const LINUX_THREAD_INFO_SIZE: usize = 2048;
 const LINUX_THREAD_INFO_CPU_OFFSET: usize = 32;
@@ -415,6 +471,13 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         of_match_calls: LINUX_PLIC_OF_MATCH_CALLS.load(Ordering::Acquire),
         of_property_ndev_calls: LINUX_PLIC_OF_PROPERTY_NDEV_CALLS.load(Ordering::Acquire),
         heap_used: LINUX_PLIC_HEAP_OFFSET.load(Ordering::Acquire),
+        chip_enable_count: LINUX_PLIC_CHIP_ENABLE_COUNT.load(Ordering::Acquire),
+        chip_disable_count: LINUX_PLIC_CHIP_DISABLE_COUNT.load(Ordering::Acquire),
+        chip_mask_count: LINUX_PLIC_CHIP_MASK_COUNT.load(Ordering::Acquire),
+        chip_unmask_count: LINUX_PLIC_CHIP_UNMASK_COUNT.load(Ordering::Acquire),
+        chip_eoi_count: LINUX_PLIC_CHIP_EOI_COUNT.load(Ordering::Acquire),
+        chip_callback_probe_successes: LINUX_PLIC_CHIP_CALLBACK_PROBE_SUCCESSES
+            .load(Ordering::Acquire),
     }
 }
 
@@ -849,18 +912,24 @@ unsafe fn call_linux_domain_alloc(domain: *mut c_void, virq: u32, hwirq: u32) ->
 unsafe fn call_linux_chip_callback(
     record: LinuxPlicLeafIrqRecord,
     irq_data: *mut c_void,
-    offset: usize,
+    slot: LinuxIrqChipCallbackSlot,
 ) -> bool {
     if record.chip == 0 || irq_data.is_null() {
         return false;
     }
-    let callback =
-        unsafe { core::ptr::read((record.chip as *const u8).add(offset).cast::<usize>()) };
+    let callback = unsafe {
+        core::ptr::read(
+            (record.chip as *const u8)
+                .add(slot.offset())
+                .cast::<usize>(),
+        )
+    };
     if callback == 0 {
         return false;
     }
     let callback: LinuxIrqChipCallback = unsafe { core::mem::transmute(callback) };
     unsafe { callback(irq_data) };
+    slot.note_success();
     true
 }
 
@@ -893,12 +962,50 @@ pub fn enable_mapped_source(source: u32, logical_irq: LogicalIrq) -> bool {
     let enabled = ensure_linux_leaf_irq(domain, source, virq).is_some_and(|index| {
         let record = linux_leaf_record(index);
         let irq_data = linux_leaf_irq_data_ptr(index);
-        unsafe { call_linux_chip_callback(record, irq_data, LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET) }
+        unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Enable) }
     });
 
     crate::arch::riscv64::csr::write_tp(saved_tp);
     crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
     enabled
+}
+
+pub fn probe_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -> bool {
+    if source == 0 || !logical_irq.is_valid() {
+        return false;
+    }
+    let domain = LINUX_PLIC_DOMAIN_PTR.load(Ordering::Acquire) as *mut c_void;
+    let Ok(virq) = u32::try_from(logical_irq.as_usize()) else {
+        return false;
+    };
+
+    prepare_linux_thread_info();
+    let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
+    let saved_tp = current_rust_tp_for_linux_call();
+    remember_rust_tp(saved_tp);
+    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+
+    let callbacks_ok = ensure_linux_leaf_irq(domain, source, virq).is_some_and(|index| {
+        let record = linux_leaf_record(index);
+        let irq_data = linux_leaf_irq_data_ptr(index);
+        let disable_ok = unsafe {
+            call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Disable)
+        };
+        let enable_ok =
+            unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Enable) };
+        let mask_ok =
+            unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Mask) };
+        let unmask_ok =
+            unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Unmask) };
+        disable_ok && enable_ok && mask_ok && unmask_ok
+    });
+
+    crate::arch::riscv64::csr::write_tp(saved_tp);
+    crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+    if callbacks_ok {
+        LINUX_PLIC_CHIP_CALLBACK_PROBE_SUCCESSES.fetch_add(1, Ordering::AcqRel);
+    }
+    callbacks_ok
 }
 
 fn linux_thread_info_base() -> *mut u8 {
@@ -1204,7 +1311,7 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
         crate::arch::riscv64::csr::write_tp(linux_tp);
     }
 
-    if unsafe { call_linux_chip_callback(record, irq_data, LINUX_IRQ_CHIP_IRQ_EOI_OFFSET) } {
+    if unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Eoi) } {
         LINUX_PLIC_RUNTIME_COMPLETE_COUNT.fetch_add(1, Ordering::AcqRel);
         LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.store(record.hwirq, Ordering::Release);
     }

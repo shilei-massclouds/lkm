@@ -2,7 +2,10 @@ use crate::{
     checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
     checkpoint::kunit,
     context::Context,
-    objects::linux_plic_shim::{self, LinuxPlicBoundaryFacts},
+    objects::{
+        linux_plic_shim::{self, LinuxPlicBoundaryFacts},
+        ns16550a,
+    },
     trace::Checkpoint,
 };
 
@@ -13,16 +16,20 @@ pub const HANDLER: Handler = Handler {
     name: "linux_plic.boundary_facts",
     priority: 88,
     scope: HandlerScope::Only(SCOPE),
-    run: HandlerRun::Read(run),
+    run: HandlerRun::Write(run),
 };
 
-fn run(checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, _ctx: &mut Context) -> CheckpointOutcome {
     let total = super::kunit_case_count();
     kunit::start_case(total, "", HANDLER.name, checkpoint);
 
+    let chip_callback_probe_ok = linux_plic_shim::probe_uart_leaf_chip_callbacks(
+        ns16550a::uart8250_port_irq_source(),
+        ns16550a::uart8250_port_logical_irq(),
+    );
     let facts = linux_plic_shim::boundary_facts();
     emit_facts(facts);
-    if !facts_valid(facts) {
+    if !chip_callback_probe_ok || !facts_valid(facts) {
         kunit::fail(total, "", HANDLER.name, "Linux PLIC boundary facts invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
@@ -70,6 +77,15 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts) {
     kunit::diag_usize("of_match_calls", facts.of_match_calls);
     kunit::diag_usize("of_property_ndev_calls", facts.of_property_ndev_calls);
     kunit::diag_usize("heap_used", facts.heap_used);
+    kunit::diag_usize("chip_enable_count", facts.chip_enable_count);
+    kunit::diag_usize("chip_disable_count", facts.chip_disable_count);
+    kunit::diag_usize("chip_mask_count", facts.chip_mask_count);
+    kunit::diag_usize("chip_unmask_count", facts.chip_unmask_count);
+    kunit::diag_usize("chip_eoi_count", facts.chip_eoi_count);
+    kunit::diag_usize(
+        "chip_callback_probe_successes",
+        facts.chip_callback_probe_successes,
+    );
 }
 
 fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
@@ -113,6 +129,11 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
         && facts.of_match_calls != 0
         && facts.of_property_ndev_calls != 0
         && facts.heap_used != 0
+        && facts.chip_enable_count >= 2
+        && facts.chip_disable_count != 0
+        && facts.chip_mask_count != 0
+        && facts.chip_unmask_count != 0
+        && facts.chip_callback_probe_successes != 0
 }
 
 fn strictly_before(before: usize, after: usize) -> bool {
