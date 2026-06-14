@@ -3243,7 +3243,9 @@ shim 通过 `irq_modify_status()` 把 `IRQ_NOPROBE` 写入 UART leaf desc status
 
 这一路径已经通过 `make -C impl/arceos_ex run APP=smoke PLIC_PROVIDER=linux-object PROBE=linux-plic,uart-irq-chain`
 验证：`linux_plic.boundary_facts` 和 `uart_irq_chain.observer_real_path` 均通过，smoke 结果为
-`passed=36 failed=0 total=36`。其中 UART IRQ chain 观察到 Linux PLIC object provider 下的
+`passed=36 failed=0 total=36`。阶段收束时还通过了顶层 `make test`，summary 为
+`overall total=86 pass=86 fail=0`，其中 spec verify `1/1`、KUnit checkpoints `49/49`、app smoke `36/36`。
+其中 UART IRQ chain 观察到 Linux PLIC object provider 下的
 claim/dispatch/complete/zero-claim/loop-exit 计数闭合，说明黑盒 runtime claim loop 和 Linux `plic_chip.irq_eoi`
 callback 已经承接现有 UART action；同一只读 checkpoint 输出还约束了前述 callback exercise event 中
 `irq_enable/irq_disable/irq_mask/irq_unmask` 至少各成功执行一次，disabled IRQ eoi 分支至少执行一次，并且
@@ -3261,6 +3263,14 @@ status 包含 chained handler 声明的 `IRQ_NOREQUEST/IRQ_NOPROBE/IRQ_NOTHREAD`
 当前保持 deferred。`mask/unmask/disable/disabled-eoi/edge-ack/unmapped-fail` 目前只属于显式 exercise event 覆盖的
 callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecycle，还需要再补真实路径语义。
 下一轮应继续扩展这些边界，同时保持上层 UART/console/smoke 不感知 provider 差异。
+
+当前阶段差异分类如下。已覆盖：Linux initcall6、platform driver register/match/probe、PLIC domain/chained
+handler 注册、UART leaf mapping、Linux PLIC claim loop、`handle_fasteoi_irq -> plic_chip.irq_eoi` runtime、UART
+source gate enable、chip callback exercise、unmapped hwirq fail boundary、parent IRQ startup/chained EOI/status、
+leaf `IRQ_NOPROBE` status，以及 native/linux-object provider 共享的薄 `objects::plic_provider` contract。显式
+deferred：ratelimit/打印提示、完整 root INTC irqchip、完整 `irq_desc/irq_common_data` lifecycle、request/free/action/depth/threaded
+路径、CPU hotplug/offline、SMP affinity、suspend/resume 和真实 edge 平台 runtime。当前没有把这些 deferred 项伪装为
+已支持；若后续运行路径实际踩到其中任一项，应按“踩雷/排雷”方式补正式语义，或在必须新增大对象/方向策略不清时暂停讨论。
 
 ### 上接口仍需讨论的问题
 
