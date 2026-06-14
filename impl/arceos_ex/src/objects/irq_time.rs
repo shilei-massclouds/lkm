@@ -2167,86 +2167,37 @@ impl Plic {
 
     #[allow(dead_code)]
     pub fn claim_count(&self) -> usize {
-        #[cfg(plic_provider_linux_object)]
-        {
-            crate::objects::linux_plic_shim::runtime_claim_count()
-        }
-        #[cfg(not(plic_provider_linux_object))]
-        {
-            self.claim_count.load(Ordering::Acquire)
-        }
+        super::plic_provider::claim_count(self)
     }
 
     #[allow(dead_code)]
     pub fn zero_claim_count(&self) -> usize {
-        #[cfg(plic_provider_linux_object)]
-        {
-            crate::objects::linux_plic_shim::runtime_zero_claim_count()
-        }
-        #[cfg(not(plic_provider_linux_object))]
-        {
-            self.zero_claim_count.load(Ordering::Acquire)
-        }
+        super::plic_provider::zero_claim_count(self)
     }
 
     #[allow(dead_code)]
     pub fn dispatch_count(&self) -> usize {
-        #[cfg(plic_provider_linux_object)]
-        {
-            crate::objects::linux_plic_shim::runtime_dispatch_count()
-        }
-        #[cfg(not(plic_provider_linux_object))]
-        {
-            self.dispatch_count.load(Ordering::Acquire)
-        }
+        super::plic_provider::dispatch_count(self)
     }
 
     #[allow(dead_code)]
     pub fn complete_count(&self) -> usize {
-        #[cfg(plic_provider_linux_object)]
-        {
-            crate::objects::linux_plic_shim::runtime_complete_count()
-        }
-        #[cfg(not(plic_provider_linux_object))]
-        {
-            self.complete_count.load(Ordering::Acquire)
-        }
+        super::plic_provider::complete_count(self)
     }
 
     #[allow(dead_code)]
     pub fn loop_exit_count(&self) -> usize {
-        #[cfg(plic_provider_linux_object)]
-        {
-            crate::objects::linux_plic_shim::runtime_loop_exit_count()
-        }
-        #[cfg(not(plic_provider_linux_object))]
-        {
-            self.loop_exit_count.load(Ordering::Acquire)
-        }
+        super::plic_provider::loop_exit_count(self)
     }
 
     #[allow(dead_code)]
     pub fn last_claimed_source(&self) -> u32 {
-        #[cfg(plic_provider_linux_object)]
-        {
-            crate::objects::linux_plic_shim::runtime_last_claimed_source()
-        }
-        #[cfg(not(plic_provider_linux_object))]
-        {
-            self.last_claimed_source.load(Ordering::Acquire)
-        }
+        super::plic_provider::last_claimed_source(self)
     }
 
     #[allow(dead_code)]
     pub fn last_completed_source(&self) -> u32 {
-        #[cfg(plic_provider_linux_object)]
-        {
-            crate::objects::linux_plic_shim::runtime_last_completed_source()
-        }
-        #[cfg(not(plic_provider_linux_object))]
-        {
-            self.last_completed_source.load(Ordering::Acquire)
-        }
+        super::plic_provider::last_completed_source(self)
     }
 
     fn preset_from_irqchip(
@@ -2408,7 +2359,7 @@ impl Plic {
     }
 
     #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
-    pub fn handle_external_interrupt(
+    pub(crate) fn native_handle_external_interrupt(
         &self,
         domain: &PlicIrqDomain,
         registry: &IrqHandlerRegistry,
@@ -2452,7 +2403,7 @@ impl Plic {
     }
 
     #[cfg(not(plic_provider_linux_object))]
-    fn enable_source(&self, source: u32) -> bool {
+    pub(crate) fn native_enable_source(&self, source: u32) -> bool {
         if self.lifecycle.state() != State::Ready
             || !self.source_enable_ready
             || self.enable_addr == 0
@@ -2479,25 +2430,6 @@ impl Plic {
         }
 
         unsafe { core::ptr::read_volatile(enable_addr as *const u32) & mask != 0 }
-    }
-
-    #[cfg(plic_provider_linux_object)]
-    fn enable_mapped_source(&self, source: u32, logical_irq: LogicalIrq) -> bool {
-        if self.lifecycle.state() != State::Ready
-            || !self.source_enable_ready
-            || source == 0
-            || source > self.source_count
-            || !logical_irq.is_valid()
-        {
-            return false;
-        }
-
-        crate::objects::linux_plic_shim::enable_mapped_source(source, logical_irq)
-    }
-
-    #[cfg(not(plic_provider_linux_object))]
-    fn enable_mapped_source(&self, source: u32, _logical_irq: LogicalIrq) -> bool {
-        self.enable_source(source)
     }
 
     #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
@@ -2528,6 +2460,41 @@ impl Plic {
         }
         self.complete_count.fetch_add(1, Ordering::AcqRel);
         self.last_completed_source.store(source, Ordering::Release);
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_claim_count(&self) -> usize {
+        self.claim_count.load(Ordering::Acquire)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_zero_claim_count(&self) -> usize {
+        self.zero_claim_count.load(Ordering::Acquire)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_dispatch_count(&self) -> usize {
+        self.dispatch_count.load(Ordering::Acquire)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_complete_count(&self) -> usize {
+        self.complete_count.load(Ordering::Acquire)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_loop_exit_count(&self) -> usize {
+        self.loop_exit_count.load(Ordering::Acquire)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_last_claimed_source(&self) -> u32 {
+        self.last_claimed_source.load(Ordering::Acquire)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_last_completed_source(&self) -> u32 {
+        self.last_completed_source.load(Ordering::Acquire)
     }
 }
 
@@ -2687,7 +2654,7 @@ impl PlicIrqMapping {
             || !self.source_gate_closed
             || !self.source_enable_deferred
             || self.source_enabled
-            || !plic.enable_mapped_source(self.source, self.logical_irq)
+            || !super::plic_provider::enable_mapped_source(plic, self.source, self.logical_irq)
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -6232,19 +6199,12 @@ pub fn timer_interrupt_count() -> usize {
 }
 
 pub fn handle_external_interrupt() {
-    #[cfg(plic_provider_linux_object)]
-    {
-        crate::objects::linux_plic_shim::handle_external_interrupt();
-    }
-
-    #[cfg(not(plic_provider_linux_object))]
-    {
-        let ctx = crate::context::context_ref();
-        let plic = &ctx.plic;
-        let domain = &ctx.plic_irq_domain;
-        let registry = &ctx.irq_handler_registry;
-        plic.handle_external_interrupt(domain, registry);
-    }
+    let ctx = crate::context::context_ref();
+    super::plic_provider::handle_external_interrupt(
+        &ctx.plic,
+        &ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+    );
 }
 
 pub fn handle_timer_interrupt() {

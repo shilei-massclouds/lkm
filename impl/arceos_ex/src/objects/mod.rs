@@ -52,6 +52,7 @@ pub mod payload_param;
 pub mod per_cpu_storage;
 pub mod physical_memory;
 pub mod platform_cpu_info;
+pub mod plic_provider;
 pub mod pre_smp_init;
 pub mod printk;
 pub mod process_prepare;

@@ -610,16 +610,17 @@ pub fn platform_driver_match_and_probe(device_tree: &DeviceTree, plic: &Plic) ->
     Ok(())
 }
 
-pub fn handle_external_interrupt() {
+pub fn handle_external_interrupt() -> bool {
     let handler = LINUX_PLIC_CHAINED_HANDLER.load(Ordering::Acquire);
     if handler == 0 {
-        return;
+        return false;
     }
 
     prepare_linux_parent_irq_desc();
     let desc = &raw mut LINUX_PLIC_PARENT_IRQ_DESC as *mut u8 as *mut c_void;
     let handler: unsafe extern "C" fn(*mut c_void) = unsafe { core::mem::transmute(handler) };
     unsafe { call_linux_chained_irq_handler(handler, desc) };
+    true
 }
 
 fn plic_node_available(device_tree: &DeviceTree) -> bool {
