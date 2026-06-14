@@ -120,6 +120,15 @@ static LINUX_PLIC_IRQ_DESC_ACTION_MATCH_COUNT: AtomicUsize = AtomicUsize::new(0)
 static LINUX_PLIC_IRQ_DESC_ACTION_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_IRQ_DESC_ACTION_LAST_ACTION: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_IRQ_DESC_ACTION_LAST_READBACK: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_DESC_STATUS_WRITE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_DESC_STATUS_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_DESC_STATUS_LAST_STATUS: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_COMMON_STATE_WRITE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_COMMON_STATE_DISABLED_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_COMMON_STATE_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_COMMON_STATE_LAST_STATE: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_LEAF_ACTION_LAST_DESC_STATUS: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_LEAF_ACTION_LAST_COMMON_STATE: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -369,6 +378,15 @@ pub struct LinuxPlicBoundaryFacts {
     pub irq_desc_action_last_irq: usize,
     pub irq_desc_action_last_action: usize,
     pub irq_desc_action_last_readback: usize,
+    pub irq_desc_status_write_count: usize,
+    pub irq_desc_status_last_irq: usize,
+    pub irq_desc_status_last_status: usize,
+    pub irq_common_state_write_count: usize,
+    pub irq_common_state_disabled_count: usize,
+    pub irq_common_state_last_irq: usize,
+    pub irq_common_state_last_state: usize,
+    pub leaf_action_last_desc_status: usize,
+    pub leaf_action_last_common_state: usize,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -386,6 +404,9 @@ const LINUX_IRQ_FWSPEC_PARAM_COUNT: usize = 16;
 const LINUX_PLIC_LEAF_IRQ_CAPACITY: usize = 32;
 const LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET: usize = 112;
 const LINUX_IRQ_DESC_ACTION_OFFSET: usize = LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET + size_of::<usize>();
+const LINUX_IRQ_DESC_STATUS_OFFSET: usize = LINUX_IRQ_DESC_ACTION_OFFSET + size_of::<usize>();
+const LINUX_IRQ_DESC_INTERNAL_STATE_OFFSET: usize = LINUX_IRQ_DESC_STATUS_OFFSET + size_of::<u32>();
+const LINUX_IRQ_DESC_DEPTH_OFFSET: usize = LINUX_IRQ_DESC_INTERNAL_STATE_OFFSET + size_of::<u32>();
 const LINUX_IRQ_DESC_IRQ_DATA_OFFSET: usize = 48;
 const LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 4;
 const LINUX_IRQ_DESC_IRQ_DATA_HWIRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 8;
@@ -680,6 +701,19 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         irq_desc_action_last_action: LINUX_PLIC_IRQ_DESC_ACTION_LAST_ACTION.load(Ordering::Acquire),
         irq_desc_action_last_readback: LINUX_PLIC_IRQ_DESC_ACTION_LAST_READBACK
             .load(Ordering::Acquire),
+        irq_desc_status_write_count: LINUX_PLIC_IRQ_DESC_STATUS_WRITE_COUNT.load(Ordering::Acquire),
+        irq_desc_status_last_irq: LINUX_PLIC_IRQ_DESC_STATUS_LAST_IRQ.load(Ordering::Acquire),
+        irq_desc_status_last_status: LINUX_PLIC_IRQ_DESC_STATUS_LAST_STATUS.load(Ordering::Acquire),
+        irq_common_state_write_count: LINUX_PLIC_IRQ_COMMON_STATE_WRITE_COUNT
+            .load(Ordering::Acquire),
+        irq_common_state_disabled_count: LINUX_PLIC_IRQ_COMMON_STATE_DISABLED_COUNT
+            .load(Ordering::Acquire),
+        irq_common_state_last_irq: LINUX_PLIC_IRQ_COMMON_STATE_LAST_IRQ.load(Ordering::Acquire),
+        irq_common_state_last_state: LINUX_PLIC_IRQ_COMMON_STATE_LAST_STATE.load(Ordering::Acquire),
+        leaf_action_last_desc_status: LINUX_PLIC_LEAF_ACTION_LAST_DESC_STATUS
+            .load(Ordering::Acquire),
+        leaf_action_last_common_state: LINUX_PLIC_LEAF_ACTION_LAST_COMMON_STATE
+            .load(Ordering::Acquire),
     }
 }
 
@@ -933,7 +967,11 @@ fn prepare_linux_parent_irq_desc() {
             chip as usize,
             0,
         );
-        linux_write_irq_status(desc, LINUX_PLIC_PARENT_STATUS.load(Ordering::Acquire));
+        linux_write_desc_status(
+            desc,
+            LINUX_RV_IRQ_EXT,
+            LINUX_PLIC_PARENT_STATUS.load(Ordering::Acquire),
+        );
         core::ptr::write_bytes(chip, 0, LINUX_IRQ_CHIP_SIZE);
         core::ptr::write(
             chip.add(LINUX_IRQ_CHIP_IRQ_EOI_OFFSET).cast::<usize>(),
@@ -979,6 +1017,10 @@ unsafe fn prepare_linux_irq_desc(
             desc.add(LINUX_IRQ_COMMON_EFFECTIVE_AFFINITY_OFFSET)
                 .cast::<usize>(),
             1,
+        );
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_DEPTH_OFFSET).cast::<u32>(),
+            LINUX_IRQ_ACTION_DEPTH_ENABLED as u32,
         );
     }
 }
@@ -1076,14 +1118,17 @@ fn linux_read_desc_action(desc: *mut u8) -> usize {
 }
 
 unsafe fn linux_set_irq_disabled(desc: *mut u8, disabled: bool) {
-    let state = unsafe { desc.add(LINUX_IRQ_COMMON_STATE_OFFSET).cast::<u32>() };
-    let current = unsafe { core::ptr::read(state) };
+    let irq = linux_read_desc_irq(desc);
+    let current = linux_read_common_state(desc);
     let next = if disabled {
         current | LINUX_IRQD_IRQ_DISABLED
     } else {
         current & !LINUX_IRQD_IRQ_DISABLED
     };
-    unsafe { linux_write_irq_status(desc, next) };
+    linux_write_common_state(desc, irq, next);
+    if disabled {
+        LINUX_PLIC_IRQ_COMMON_STATE_DISABLED_COUNT.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 unsafe fn linux_irq_chip_data_from_desc(desc: *mut u8) -> usize {
@@ -1136,13 +1181,36 @@ fn linux_store_leaf_record(index: usize, record: LinuxPlicLeafIrqRecord) {
     unsafe { core::ptr::write(records.add(index), record) };
 }
 
-unsafe fn linux_write_irq_status(desc: *mut u8, status: u32) {
+fn linux_read_desc_irq(desc: *mut u8) -> u32 {
+    unsafe { core::ptr::read(desc.add(LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET).cast::<u32>()) }
+}
+
+fn linux_read_common_state(desc: *mut u8) -> u32 {
+    unsafe { core::ptr::read(desc.add(LINUX_IRQ_COMMON_STATE_OFFSET).cast::<u32>()) }
+}
+
+fn linux_write_common_state(desc: *mut u8, irq: u32, state: u32) {
+    unsafe { core::ptr::write(desc.add(LINUX_IRQ_COMMON_STATE_OFFSET).cast::<u32>(), state) };
+    LINUX_PLIC_IRQ_COMMON_STATE_WRITE_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_IRQ_COMMON_STATE_LAST_IRQ.store(irq as usize, Ordering::Release);
+    LINUX_PLIC_IRQ_COMMON_STATE_LAST_STATE.store(state as usize, Ordering::Release);
+}
+
+fn linux_read_desc_status(desc: *mut u8) -> u32 {
+    unsafe { core::ptr::read(desc.add(LINUX_IRQ_DESC_STATUS_OFFSET).cast::<u32>()) }
+}
+
+fn linux_write_desc_status(desc: *mut u8, irq: u32, status: u32) {
     unsafe {
-        core::ptr::write(
-            desc.add(LINUX_IRQ_COMMON_STATE_OFFSET).cast::<u32>(),
-            status,
-        )
-    };
+        core::ptr::write(desc.add(LINUX_IRQ_DESC_STATUS_OFFSET).cast::<u32>(), status);
+    }
+    LINUX_PLIC_IRQ_DESC_STATUS_WRITE_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_IRQ_DESC_STATUS_LAST_IRQ.store(irq as usize, Ordering::Release);
+    LINUX_PLIC_IRQ_DESC_STATUS_LAST_STATUS.store(status as usize, Ordering::Release);
+}
+
+fn linux_read_desc_depth(desc: *mut u8) -> u32 {
+    unsafe { core::ptr::read(desc.add(LINUX_IRQ_DESC_DEPTH_OFFSET).cast::<u32>()) }
 }
 
 fn linux_modify_irq_status(irq: u32, clear: u32, set: u32) -> Option<u32> {
@@ -1151,10 +1219,8 @@ fn linux_modify_irq_status(irq: u32, clear: u32, set: u32) -> Option<u32> {
         let current = LINUX_PLIC_PARENT_STATUS.load(Ordering::Acquire);
         let next = (current & !clear) | set;
         LINUX_PLIC_PARENT_STATUS.store(next, Ordering::Release);
-        unsafe {
-            let desc = (&raw mut LINUX_PLIC_PARENT_IRQ_DESC).cast::<u8>();
-            linux_write_irq_status(desc, next);
-        }
+        let desc = (&raw mut LINUX_PLIC_PARENT_IRQ_DESC).cast::<u8>();
+        linux_write_desc_status(desc, irq, next);
         return Some(next);
     }
 
@@ -1162,7 +1228,7 @@ fn linux_modify_irq_status(irq: u32, clear: u32, set: u32) -> Option<u32> {
     let mut record = linux_leaf_record(index);
     record.status = (record.status & !clear) | set;
     linux_store_leaf_record(index, record);
-    unsafe { linux_write_irq_status(linux_leaf_desc_ptr(index), record.status) };
+    linux_write_desc_status(linux_leaf_desc_ptr(index), irq, record.status);
     Some(record.status)
 }
 
@@ -1235,6 +1301,9 @@ fn note_linux_leaf_action_view(
     ctx: &crate::context::Context,
     record: LinuxPlicLeafIrqRecord,
     desc_action: usize,
+    desc_status: u32,
+    common_state: u32,
+    desc_depth: u32,
 ) -> bool {
     let logical_irq = LogicalIrq::new(record.virq as usize);
     let Some(action) = ctx.irq_handler_registry.action_for_logical_irq(logical_irq) else {
@@ -1267,19 +1336,27 @@ fn note_linux_leaf_action_view(
     if desc_action == 0 || desc_action != record.action {
         return false;
     }
+    if desc_status != record.status || desc_depth as usize != LINUX_IRQ_ACTION_DEPTH_ENABLED {
+        return false;
+    }
+    if common_state & LINUX_IRQD_IRQ_DISABLED != 0 {
+        return false;
+    }
 
     LINUX_PLIC_LEAF_ACTION_PREPARE_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_ACTION_REQUEST_MATCH_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_ACTION_CHAIN_MATCH_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_IRQ_DESC_ACTION_MATCH_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_LEAF_ACTION_LAST_IRQ.store(record.virq as usize, Ordering::Release);
-    LINUX_PLIC_LEAF_ACTION_LAST_DEPTH.store(LINUX_IRQ_ACTION_DEPTH_ENABLED, Ordering::Release);
+    LINUX_PLIC_LEAF_ACTION_LAST_DEPTH.store(desc_depth as usize, Ordering::Release);
     LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_KIND.store(
         linux_irq_handler_kind_code(action.handler_kind()),
         Ordering::Release,
     );
     LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_BOUND.store(true, Ordering::Release);
     LINUX_PLIC_IRQ_DESC_ACTION_LAST_READBACK.store(desc_action, Ordering::Release);
+    LINUX_PLIC_LEAF_ACTION_LAST_DESC_STATUS.store(desc_status as usize, Ordering::Release);
+    LINUX_PLIC_LEAF_ACTION_LAST_COMMON_STATE.store(common_state as usize, Ordering::Release);
     true
 }
 
@@ -1294,7 +1371,7 @@ unsafe fn linux_update_leaf_record_from_desc(index: usize) -> LinuxPlicLeafIrqRe
         record.flow_handler =
             core::ptr::read(desc.add(LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET).cast::<usize>());
         record.action = linux_read_desc_action(desc);
-        linux_write_irq_status(desc, record.status);
+        linux_write_desc_status(desc, record.virq, record.status);
         linux_store_leaf_record(index, record);
     }
     record
@@ -1895,7 +1972,11 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
         return;
     };
     let record = linux_leaf_record(index);
-    let desc_action = linux_read_desc_action(desc.cast::<u8>());
+    let desc = desc.cast::<u8>();
+    let desc_action = linux_read_desc_action(desc);
+    let desc_status = linux_read_desc_status(desc);
+    let common_state = linux_read_common_state(desc);
+    let desc_depth = linux_read_desc_depth(desc);
     let irq_data = linux_leaf_irq_data_ptr(index);
 
     let linux_tp = crate::arch::riscv64::csr::read_tp();
@@ -1904,7 +1985,14 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
     if rust_tp != 0 {
         crate::arch::riscv64::csr::write_tp(rust_tp);
         let ctx = crate::context::context_ref();
-        let action_ready = note_linux_leaf_action_view(ctx, record, desc_action);
+        let action_ready = note_linux_leaf_action_view(
+            ctx,
+            record,
+            desc_action,
+            desc_status,
+            common_state,
+            desc_depth,
+        );
         dispatched = action_ready
             && ctx
                 .irq_handler_registry

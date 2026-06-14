@@ -3266,6 +3266,11 @@ status 包含 chained handler 声明的 `IRQ_NOREQUEST/IRQ_NOPROBE/IRQ_NOTHREAD`
 request action-chain 指针一致。这个对齐仍是最小 request/action 数据面，不表示已经实现完整 Linux `free_irq/threaded`
 生命周期。
 
+本轮进一步把 Linux `irq_desc.status_use_accessors` 与 `irq_common_data.state_use_accessors` 分离：`irq_modify_status()`
+写入 leaf/parent desc status，`IRQD_IRQ_DISABLED` 只在 common state 中临时置位用于 disabled EOI exercise，runtime
+dispatch 前会读回 desc status、common state 和 depth，确认 `IRQ_NOPROBE` 留在 desc status、common state 未保留
+disabled bit，depth 仍为 0。
+
 这仍不是完整 Linux generic IRQ core 复用。当前只覆盖 QEMU/SiFive PLIC 的无 edge quirk、level IRQ 主线；
 `plic_edge_chip.irq_ack` 和 unmapped IRQ fail 已通过 synthetic boundary exercise 覆盖，但真实 edge 平台 runtime
 以及更完整 `irq_desc`/`irq_common_data` 行为仍归入后续排雷；unmapped IRQ 的 ratelimit/打印属于非关键提示能力，
@@ -3277,7 +3282,7 @@ callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecyc
 handler 注册、UART leaf mapping、Linux PLIC claim loop、`handle_fasteoi_irq -> plic_chip.irq_eoi` runtime、UART
 source gate enable、chip callback exercise、unmapped hwirq fail boundary、parent IRQ startup/chained EOI/status、
 leaf `IRQ_NOPROBE` status、UART leaf action/depth 最小数据面、`request_irq` 成功路径到 provider action request
-事实的最小对齐、request action-chain view、真实 Linux `irq_desc.action` 偏移写入与 runtime leaf dispatch 的匹配，以及 native/linux-object provider
+事实的最小对齐、request action-chain view、真实 Linux `irq_desc.action` 偏移写入、desc status/common state 分离读回与 runtime leaf dispatch 的匹配，以及 native/linux-object provider
 共享的薄 `objects::plic_provider` contract。显式
 deferred：ratelimit/打印提示、完整 root INTC irqchip、完整 `irq_desc/irq_common_data` lifecycle、free/threaded
 路径、CPU hotplug/offline、SMP affinity、suspend/resume 和真实 edge 平台 runtime。当前没有把这些 deferred 项伪装为

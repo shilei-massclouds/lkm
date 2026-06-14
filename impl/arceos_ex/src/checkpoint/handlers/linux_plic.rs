@@ -195,6 +195,36 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts) {
         "irq_desc_action_last_readback",
         facts.irq_desc_action_last_readback,
     );
+    kunit::diag_usize(
+        "irq_desc_status_write_count",
+        facts.irq_desc_status_write_count,
+    );
+    kunit::diag_usize("irq_desc_status_last_irq", facts.irq_desc_status_last_irq);
+    kunit::diag_usize(
+        "irq_desc_status_last_status",
+        facts.irq_desc_status_last_status,
+    );
+    kunit::diag_usize(
+        "irq_common_state_write_count",
+        facts.irq_common_state_write_count,
+    );
+    kunit::diag_usize(
+        "irq_common_state_disabled_count",
+        facts.irq_common_state_disabled_count,
+    );
+    kunit::diag_usize("irq_common_state_last_irq", facts.irq_common_state_last_irq);
+    kunit::diag_usize(
+        "irq_common_state_last_state",
+        facts.irq_common_state_last_state,
+    );
+    kunit::diag_usize(
+        "leaf_action_last_desc_status",
+        facts.leaf_action_last_desc_status,
+    );
+    kunit::diag_usize(
+        "leaf_action_last_common_state",
+        facts.leaf_action_last_common_state,
+    );
 }
 
 fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
@@ -287,6 +317,17 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
         && facts.irq_desc_action_last_irq == ns16550a::uart8250_port_logical_irq().as_usize()
         && facts.irq_desc_action_last_action == facts.action_chain_last_action
         && facts.irq_desc_action_last_readback == facts.action_chain_last_action
+        && facts.irq_desc_status_write_count != 0
+        && (facts.irq_desc_status_last_irq == facts.parent_irq
+            || facts.irq_desc_status_last_irq == ns16550a::uart8250_port_logical_irq().as_usize())
+        && facts.irq_desc_status_last_status & linux_irq_noprobe() as usize != 0
+        && facts.irq_common_state_write_count != 0
+        && facts.irq_common_state_disabled_count != 0
+        && facts.irq_common_state_last_irq == ns16550a::uart8250_port_logical_irq().as_usize()
+        && facts.irq_common_state_last_state & linux_irqd_irq_disabled() as usize == 0
+        && facts.leaf_action_last_desc_status == facts.irq_modify_status_last_status
+        && facts.leaf_action_last_desc_status & linux_irq_noprobe() as usize != 0
+        && facts.leaf_action_last_common_state & linux_irqd_irq_disabled() as usize == 0
 }
 
 fn strictly_before(before: usize, after: usize) -> bool {
@@ -307,6 +348,10 @@ const fn linux_irq_norequest() -> u32 {
 }
 
 const fn linux_irq_nothread() -> u32 {
+    1u32 << 16
+}
+
+const fn linux_irqd_irq_disabled() -> u32 {
     1u32 << 16
 }
 
