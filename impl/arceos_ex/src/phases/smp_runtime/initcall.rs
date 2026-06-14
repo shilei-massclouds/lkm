@@ -57,10 +57,11 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.irq_handler_registry,
         &mut ctx.interrupt_stream,
     )?;
-    crate::objects::plic_provider::exercise_uart_leaf_boundaries(
+    crate::objects::plic_provider::exercise_uart_leaf_chip_callbacks(
         crate::objects::ns16550a::uart8250_port_irq_source(),
         crate::objects::ns16550a::uart8250_port_logical_irq(),
     )?;
+    crate::objects::plic_provider::exercise_unmapped_irq_boundary()?;
     ctx.uart_interrupt_chain_probe.setup(
         &ctx.uart_external_irq_enable,
         &ctx.plic,

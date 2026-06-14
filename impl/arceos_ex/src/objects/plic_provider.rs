@@ -10,8 +10,12 @@ pub fn setup_registered_provider(device_tree: &DeviceTree, plic: &Plic) -> Event
     provider_setup_registered_provider(device_tree, plic)
 }
 
-pub fn exercise_uart_leaf_boundaries(source: u32, logical_irq: LogicalIrq) -> EventResult {
-    provider_exercise_uart_leaf_boundaries(source, logical_irq)
+pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -> EventResult {
+    provider_exercise_uart_leaf_chip_callbacks(source, logical_irq)
+}
+
+pub fn exercise_unmapped_irq_boundary() -> EventResult {
+    provider_exercise_unmapped_irq_boundary()
 }
 
 pub fn translate_one_cell_specifier(domain: &PlicIrqDomain, specifier: &[u32]) -> Option<u32> {
@@ -129,15 +133,35 @@ fn provider_setup_registered_provider(device_tree: &DeviceTree, plic: &Plic) -> 
 }
 
 #[cfg(not(plic_provider_linux_object))]
-fn provider_exercise_uart_leaf_boundaries(_source: u32, _logical_irq: LogicalIrq) -> EventResult {
+fn provider_exercise_uart_leaf_chip_callbacks(
+    _source: u32,
+    _logical_irq: LogicalIrq,
+) -> EventResult {
     Ok(())
 }
 
 #[cfg(plic_provider_linux_object)]
-fn provider_exercise_uart_leaf_boundaries(source: u32, logical_irq: LogicalIrq) -> EventResult {
-    if !super::linux_plic_shim::exercise_uart_leaf_chip_callbacks(source, logical_irq)
-        || !super::linux_plic_shim::exercise_unmapped_irq_boundary()
-    {
+fn provider_exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -> EventResult {
+    if !super::linux_plic_shim::exercise_uart_leaf_chip_callbacks(source, logical_irq) {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Ready,
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn provider_exercise_unmapped_irq_boundary() -> EventResult {
+    Ok(())
+}
+
+#[cfg(plic_provider_linux_object)]
+fn provider_exercise_unmapped_irq_boundary() -> EventResult {
+    if !super::linux_plic_shim::exercise_unmapped_irq_boundary() {
         return failed_condition(
             LifecycleEvent::Setup,
             State::Base,

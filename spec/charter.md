@@ -3189,12 +3189,13 @@ UART、console、IRQ action 等路径感知两套不同 PLIC API。
 
 当前已把 provider 后端 setup、domain translate/map/resolve 和运行期服务入口先收敛为一个薄 `plic_provider` contract：
 上层触发 provider 注册/匹配/probe、解析/建立/查询 PLIC hwirq 映射、打开 UART source gate、处理 supervisor external
-interrupt、执行 UART leaf chip/unmapped boundary exercise，以及读取 claim/dispatch/complete/zero-claim/loop-exit 观测计数时，
+interrupt、执行 UART leaf chip callback exercise、执行 unmapped IRQ fail boundary exercise，以及读取 claim/dispatch/complete/zero-claim/loop-exit 观测计数时，
 只调用同一组 provider API。原生 provider 在该 contract 下保留 no-op provider setup，并调用 Rust `Plic`/`PlicIrqDomain`
 的 MMIO claim/complete/source enable 和 source -> logical IRQ 映射实现；Linux object provider 在该 contract 下调用
 `irq-sifive-plic.o` 的 initcall6/platform match/probe、注册出的 chained handler、`plic_chip.irq_enable` 和 shim 记录的
 运行期事实。这一步不试图把上接口做成厚 adaptor，而是先保证 InitcallPhase 和上层 IRQ/UART/console 路径不感知 provider
-差异；chip callback 的完整 provider contract 继续按后续边界逐项收敛。
+差异；当前 chip callback exercise 与 unmapped fail exercise 已拆成两个独立 provider event，后续重点转向更完整
+generic IRQ core 语义。
 
 本阶段关于上接口的结论是：`irq-sifive-plic.o` 的初始化入口层上接口集中在 Linux `platform_driver`，核心回调是
 `plic_driver.probe`。`irq_domain`、`irq_chip`、chained handler 和 CPU/syscore 回调是 `probe` 成功后注册出的 IRQ
@@ -3225,8 +3226,9 @@ UART leaf `irq_data` 调用 Linux `plic_chip.irq_disable -> irq_enable -> irq_ma
 exercise，用于验证二进制对象内部 edge chip callback 和 `irq_desc/irq_data` 交换布局，不表示 QEMU/SiFive 默认
 runtime 主线已经变成 edge IRQ。同一组显式边界还覆盖 valid domain + unmapped hwirq 的失败返回：适配层调用同一个
 `generic_handle_domain_irq` 下接口入口，确认其返回 `-EINVAL` 并记录 unmapped source/errno；Linux 原路径中的
-`pr_warn_ratelimited()` 属于非关键提示能力，本轮不强求执行，`___ratelimit` 仅作为 deferred no-op 兜底。该 event
-最终恢复为 enabled/unmasked 状态，不改变后续 UART IRQ 闭合路径，
+`pr_warn_ratelimited()` 属于非关键提示能力，本轮不强求执行，`___ratelimit` 仅作为 deferred no-op 兜底。这两个
+exercise 在 provider contract 上已经是独立 event：前者覆盖 chip callback 服务面，后者覆盖 valid domain + unmapped
+hwirq fail boundary。chip callback event 最终恢复为 enabled/unmasked 状态，不改变后续 UART IRQ 闭合路径，
 `linux_plic.boundary_facts` checkpoint 只读观察它留下的计数事实。随后 flow handler 进入 `handle_fasteoi_irq`：先恢复 Rust `tp` 分发
 `IrqHandlerRegistry` 中的 UART action，再切回 Linux `tp` 调用 `plic_chip.irq_eoi(irq_data)`，由 Linux
 `plic_irq_eoi` 写回 claim register 完成 source。外层 Linux 调用窗口保存并恢复 SIE 与 `tp`，Linux `tp` 激活期间关闭
@@ -3260,9 +3262,10 @@ callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecyc
    platform match/probe 子流程；无论选择哪种，都不能改变 `plic_driver_init -> __platform_driver_register ->
    platform match -> .probe` 这条对象可见流程，外部框架状态和上层 IRQ 使用者也不应变化。
 2. 原生 PLIC 的对等上接口：provider setup、domain translate/map/resolve、运行期 source gate、external interrupt
-   handling、boundary exercise 和计数观测已经通过极薄 provider wrapper 对齐到同一 contract。仍需决定 chip callback
-   层是否也暴露 platform-driver-like `irq_chip` 和 chained handler 形态，或者继续以内部薄 wrapper 对齐。目标是条件
-   编译切换时，上层 `IrqDispatchTree/RiscvIntc/IrqHandlerRegistry` 等对象不发生语义变化。
+   handling、UART leaf chip callback exercise、unmapped IRQ fail boundary exercise 和计数观测已经通过极薄 provider
+   wrapper 对齐到同一 contract。当前不把原生 provider 强行包装成完整 Linux `irq_chip` 对象；chip callback 对齐先以
+   provider event 表达，保持上层 `IrqDispatchTree/RiscvIntc/IrqHandlerRegistry` 等对象不发生语义变化。若后续需要真实
+   Linux generic IRQ lifecycle，再决定是否提升为正式 `irq_chip` 形态。
 3. 二进制结构布局边界：需要列出首轮必须二进制兼容的上接口结构，包括 `struct platform_driver`、`struct platform_device`、
    `struct device` / `fwnode_handle`、`struct of_device_id`、`struct irq_domain_ops`、`struct irq_chip`、
    `struct irq_desc`、`struct irq_data`、`cpumask` 和 per-CPU `plic_handlers` 访问所依赖的布局。只要
