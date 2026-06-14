@@ -18,6 +18,7 @@ SECTIONS
     }
 
     .text : AT(ADDR(.text) - LOAD_OFFSET) ALIGN(4K) {
+        KEEP(*(.init.text .init.text.*))
         *(.text .text.*)
     }
     _etext = .;
@@ -64,6 +65,34 @@ SECTIONS
     }
 
     . = ALIGN(8);
+    .linux_initcall : AT(ADDR(.linux_initcall) - LOAD_OFFSET) {
+        __linux_initcall6_start = .;
+        KEEP(*(.initcall6.init))
+        __linux_initcall6_end = .;
+    }
+
+    . = ALIGN(8);
+    __irqchip_of_table : AT(ADDR(__irqchip_of_table) - LOAD_OFFSET) {
+        __linux_irqchip_of_table_start = .;
+        KEEP(*(__irqchip_of_table))
+        __linux_irqchip_of_table_end = .;
+    }
+
+    . = ALIGN(8);
+    .alternative : AT(ADDR(.alternative) - LOAD_OFFSET) {
+        __linux_alternative_start = .;
+        KEEP(*(.alternative))
+        __linux_alternative_end = .;
+    }
+
+    . = ALIGN(8);
+    __bug_table : AT(ADDR(__bug_table) - LOAD_OFFSET) {
+        __linux_bug_table_start = .;
+        KEEP(*(__bug_table))
+        __linux_bug_table_end = .;
+    }
+
+    . = ALIGN(8);
     .irqchip_init : AT(ADDR(.irqchip_init) - LOAD_OFFSET) {
         __irqchip_init_start = .;
         KEEP(*(.irqchip.init))
@@ -85,17 +114,18 @@ SECTIONS
         __per_cpu_start = .;
         KEEP(*(.data..percpu..first))
         . = ALIGN(4K);
-        *(.data..percpu..page_aligned)
+        KEEP(*(.data..percpu..page_aligned))
         . = ALIGN(64);
-        *(.data..percpu..read_mostly)
+        KEEP(*(.data..percpu..read_mostly))
         . = ALIGN(64);
-        *(.data..percpu)
-        *(.data..percpu.*)
+        KEEP(*(.data..percpu))
+        KEEP(*(.data..percpu.*))
         . = ALIGN(64);
         __per_cpu_end = .;
     }
 
     .data.tail : AT(ADDR(.data.tail) - LOAD_OFFSET) ALIGN(4K) {
+        KEEP(*(.data..ro_after_init))
         *(.data.*)
     }
 

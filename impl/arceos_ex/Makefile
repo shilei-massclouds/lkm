@@ -7,6 +7,12 @@ empty :=
 space := $(empty) $(empty)
 PROBE ?=
 PROBE_FILE ?=
+PLIC_PROVIDER ?= native
+KNOWN_PLIC_PROVIDERS := native linux-object
+UNKNOWN_PLIC_PROVIDER := $(filter-out $(KNOWN_PLIC_PROVIDERS),$(PLIC_PROVIDER))
+ifneq ($(UNKNOWN_PLIC_PROVIDER),)
+$(error unknown PLIC_PROVIDER: $(PLIC_PROVIDER))
+endif
 ifneq ($(PROBE_FILE),)
 ifeq ($(wildcard $(PROBE_FILE)),)
 $(error PROBE_FILE not found: $(PROBE_FILE))
@@ -22,13 +28,15 @@ endif
 PROBE_CFGS := $(foreach probe,$(PROBE_LIST),--cfg checkpoint_handler_$(subst -,_,$(probe)))
 PROBE_BUILD_LABEL := $(subst $(space),+,$(PROBE_LIST))
 PROBE_BUILD_SUFFIX := $(if $(PROBE_LIST),/probe-$(subst /,_,$(subst .,_,$(PROBE_BUILD_LABEL))))
-BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)$(PROBE_BUILD_SUFFIX)
+PLIC_PROVIDER_SUFFIX := $(if $(filter native,$(PLIC_PROVIDER)),,/plic-$(PLIC_PROVIDER))
+BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)$(PLIC_PROVIDER_SUFFIX)$(PROBE_BUILD_SUFFIX)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
 KERNEL_BIN := $(BUILD_DIR)/arceos_ex.bin
-TRACE_KERNEL_BIN := build/$(TARGET)/trace/$(APP)$(PROBE_BUILD_SUFFIX)/arceos_ex.bin
+TRACE_KERNEL_BIN := build/$(TARGET)/trace/$(APP)$(PLIC_PROVIDER_SUFFIX)$(PROBE_BUILD_SUFFIX)/arceos_ex.bin
 LINKER := linker/riscv64.lds
 SOURCES := $(shell find src -name '*.rs')
 ROOT := ../..
+LINUX_PLIC_OBJ := $(ROOT)/impl/third_party/linux/6.12.37/riscv64-lp64/objects/drivers/irqchip/irq-sifive-plic.o
 RUSTC ?= rustc +nightly-2025-05-20
 RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
 QEMU ?= qemu-system-riscv64
@@ -41,6 +49,8 @@ MODEL_SPECS := $(shell find $(ROOT)/spec/model -name '*.spec')
 CODEGEN_SOURCES := $(shell find $(ROOT)/tools/codegen/src $(ROOT)/tools/common/src -name '*.py')
 EXTRA_RUSTFLAGS ?=
 APP_CFG := app_$(subst -,_,$(APP))
+PLIC_PROVIDER_CFG := --cfg plic_provider_$(subst -,_,$(PLIC_PROVIDER))
+PLIC_PROVIDER_LINK_ARGS := $(if $(filter linux-object,$(PLIC_PROVIDER)),-C link-arg=$(LINUX_PLIC_OBJ),)
 
 RUSTFLAGS := \
 	$(if $(filter hello,$(APP)),-A dead_code,) \
@@ -51,7 +61,9 @@ RUSTFLAGS := \
 	-C link-arg=-T$(LINKER) \
 	-C link-arg=-static \
 	--cfg $(APP_CFG) \
+	$(PLIC_PROVIDER_CFG) \
 	$(PROBE_CFGS) \
+	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
 .PHONY: build run generate clean
@@ -80,10 +92,10 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 
 run:
 ifeq ($(LOG),trace)
-	$(MAKE) PROFILE=trace APP=$(APP) PROBE="$(PROBE)" PROBE_FILE="$(PROBE_FILE)" EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
+	$(MAKE) PROFILE=trace APP=$(APP) PROBE="$(PROBE)" PROBE_FILE="$(PROBE_FILE)" PLIC_PROVIDER=$(PLIC_PROVIDER) EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(TRACE_KERNEL_BIN)
 else
-	$(MAKE) build APP=$(APP) PROBE="$(PROBE)" PROBE_FILE="$(PROBE_FILE)"
+	$(MAKE) build APP=$(APP) PROBE="$(PROBE)" PROBE_FILE="$(PROBE_FILE)" PLIC_PROVIDER=$(PLIC_PROVIDER)
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio -append "$(QEMU_APPEND)" -kernel $(KERNEL_BIN)
 endif
 
