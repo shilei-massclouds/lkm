@@ -57,6 +57,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.irq_handler_registry,
         &mut ctx.interrupt_stream,
     )?;
+    exercise_linux_plic_uart_chip_callbacks()?;
     ctx.uart_interrupt_chain_probe.setup(
         &ctx.uart_external_irq_enable,
         &ctx.plic,
@@ -120,6 +121,28 @@ fn enable_serial8250_interrupt_driven_console() -> EventResult {
         );
     }
 
+    Ok(())
+}
+
+#[cfg(plic_provider_linux_object)]
+fn exercise_linux_plic_uart_chip_callbacks() -> EventResult {
+    if !crate::objects::linux_plic_shim::exercise_uart_leaf_chip_callbacks(
+        crate::objects::ns16550a::uart8250_port_irq_source(),
+        crate::objects::ns16550a::uart8250_port_logical_irq(),
+    ) {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Ready,
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn exercise_linux_plic_uart_chip_callbacks() -> EventResult {
     Ok(())
 }
 

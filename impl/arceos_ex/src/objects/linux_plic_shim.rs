@@ -970,7 +970,7 @@ pub fn enable_mapped_source(source: u32, logical_irq: LogicalIrq) -> bool {
     enabled
 }
 
-pub fn probe_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -> bool {
+pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -> bool {
     if source == 0 || !logical_irq.is_valid() {
         return false;
     }

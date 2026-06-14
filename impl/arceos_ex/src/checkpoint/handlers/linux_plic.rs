@@ -2,10 +2,7 @@ use crate::{
     checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
     checkpoint::kunit,
     context::Context,
-    objects::{
-        linux_plic_shim::{self, LinuxPlicBoundaryFacts},
-        ns16550a,
-    },
+    objects::linux_plic_shim::{self, LinuxPlicBoundaryFacts},
     trace::Checkpoint,
 };
 
@@ -16,20 +13,16 @@ pub const HANDLER: Handler = Handler {
     name: "linux_plic.boundary_facts",
     priority: 88,
     scope: HandlerScope::Only(SCOPE),
-    run: HandlerRun::Write(run),
+    run: HandlerRun::Read(run),
 };
 
-fn run(checkpoint: Checkpoint, _ctx: &mut Context) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
     let total = super::kunit_case_count();
     kunit::start_case(total, "", HANDLER.name, checkpoint);
 
-    let chip_callback_probe_ok = linux_plic_shim::probe_uart_leaf_chip_callbacks(
-        ns16550a::uart8250_port_irq_source(),
-        ns16550a::uart8250_port_logical_irq(),
-    );
     let facts = linux_plic_shim::boundary_facts();
     emit_facts(facts);
-    if !chip_callback_probe_ok || !facts_valid(facts) {
+    if !facts_valid(facts) {
         kunit::fail(total, "", HANDLER.name, "Linux PLIC boundary facts invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
