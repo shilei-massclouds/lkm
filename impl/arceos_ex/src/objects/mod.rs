@@ -40,6 +40,8 @@ pub mod irqchip_macros;
 pub mod kernel_cmdline;
 pub mod kernel_image;
 pub mod lds;
+#[cfg(plic_provider_linux_object)]
+pub mod linux_plic_shim;
 pub mod maple_tree;
 pub mod memblock;
 pub mod mm_core;
