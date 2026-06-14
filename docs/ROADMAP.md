@@ -11,7 +11,7 @@
 ## 当前焦点
 
 1. PLIC 驱动、UART 外部中断链和 serial8250 interrupt-driven console TX 当前轮已阶段性收尾：irqchip/irqdomain、PLIC 独立驱动对象、设备树驱动的 PLIC setup、platform IRQ resource 解析、serial8250 IRQ 绑定、handler registry、中断上下文约束、root INTC -> PLIC -> UART handler dispatch、一轮 UART THRE interrupt cycle 的 claim/complete/zero-claim 闭合，以及 `printk` 前端提交后由 THRI 中断驱动 UART handler drain TX queue 的 runtime TX 闭环均已验证。kernel `printk` console 稳定性已覆盖连续/批量 printk burst、Linux-like `tx_loadsz` 预算、单条长 printk 多轮 drain、多条长 printk long-burst，以及 long-burst 后的 `Serial8250ConsoleTxQuiesceProbe`；固定 burst/long-burst 和 ordinary TTY write `W`/`tx04` 等用户可见 TX/TTY 测试负载已经收口到 checkpoint/KUnit 测试构建，普通 `make run` 不再打印固定探针字节。
-2. 下一阶段 P0 改为本项目与 Linux 6.12.37 的交叉验证，首轮聚焦 `drivers/irqchip/irq-sifive-plic.o` 二进制复用。参考源码位置为 `~/gitStudy/linux-6.12.37`；当前目标不是继续扩展功能，而是在 `arceos_ex` 中通过条件编译在原生 PLIC provider 与 Linux PLIC object provider 之间替换，建立 Linux 源码路径、当前 formal model、coding 规格、实现、checkpoint/trace/smoke/KUnit 之间的交叉引用和差异分类，把缺口明确归入“已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离、疑似 bug”。
+2. 本项目与 Linux 6.12.37 的交叉验证首轮已完成 PLIC 二进制复用收尾：`drivers/irqchip/irq-sifive-plic.o` 已能在 `arceos_ex` 中作为 Linux object provider 承接 UART 外部中断主线，并与 native provider 收敛到同一薄 provider contract。参考源码位置为 `~/gitStudy/linux-6.12.37`；后续不再主动扩展 PLIC deferred 项，除非新目标实际踩到。
 3. 维持 `ioremap/vmalloc` 当前首轮成果：runtime page-table metadata 已覆盖完整 `VMALLOC_START..VMALLOC_END`，支持按需追加 L1/L0/PTE 页表页，`VmapArea` / `VmapMapping` 记录已改为动态容器 backing；更完整的 `vm_struct/vmap_area` 行为，例如空洞复用、增强树查找、lazy purge 和并发边界，降为后续补强，除非交叉验证发现其阻塞 IRQ/driver 路径的一致性。
 4. serial8250 runtime RX/TTY/FIFO 补强继续保留为后续项。当前对象框架和 event/action 已确认，RX 单字符/批量 loopback、ordinary TTY TX FIFO 最小 enqueue/dequeue，以及 ordinary TTY write 经 `TtyXmitFifo -> StartTx/THRI -> handler TransmitChars` 的单 byte 和固定小批量真实 IRQ 闭合均已完成；后续是否继续展开 printk TX 异常/压力边界、TTY runtime 分层或用户态 I/O，应先经过 Linux 交叉验证结果排序。
 
@@ -104,6 +104,7 @@ PLIC 收尾后的后续策略：
 | 优先级 | 状态 | 领域 | 任务 | 目标与说明 | 细节 |
 | --- | --- | --- | --- | --- | --- |
 | `P0` | 当前 | model/coding/arceos_ex | Linux 6.12.37 交叉验证 | 以 `~/gitStudy/linux-6.12.37` 为参考源码，建立 Linux 路径、formal model、coding 规格、`arceos_ex` 实现和 checkpoint/KUnit/smoke 观测点之间的 cross-reference；对近期闭环做差异分类：已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离、疑似 bug。首轮优先审计 start_kernel 阶段划分、irqchip/PLIC、OF platform/ns16550a、console handoff、ioremap/vmalloc 和 serial8250 interrupt-driven printk TX。 | 本文档；[项目章程](../spec/charter.md) |
+| `P0` | 意向 | compose/arceos_ex | 对象封装为组件试验 | PLIC 首轮二进制复用基线冻结后，下一阶段准备做试验：选择已有对象，探索如何把对象级实现封装为组件。当前只记录方向，不展开组件边界、crate 结构、接口或迁移步骤。 | [compose 规格](../spec/compose/README.md) |
 | `P0` | 完成首轮 | arceos_ex/irq | 实现 PLIC 驱动并用 UART 验证外部中断链 | 已完成 irqchip init、PLIC provider setup、system irqchip MMIO ioremap、`PlicIrqDomain` source -> logical IRQ mapping、ns16550a UART IRQ resource 解析/绑定、IRQ core 侧 `IrqHandlerRegistry` / `request_irq` 最小 handler action 记录、两个外部传播 gate 的命名和显式 enable 边界，以及一轮真实 UART THRE interrupt cycle 下的 PLIC claim loop -> irq dispatch -> UART handler -> PLIC complete -> zero claim loop exit 验证，并确认 claim/complete 与 zero-claim/loop-exit 成对闭合。该 probe 不提前声明 interrupt-driven ready；runtime TX 切换已由 serial8250 console TX 任务完成。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P0` | 完成当前轮 | arceos_ex/console | serial8250 interrupt-driven console TX | 已在 PLIC/UART 外部中断链 ready 后实现 runtime TX 首轮：`printk` 前端提交输出，serial8250 后端在本地中断保存/恢复 guard 内 enqueue TX bytes 并 kick THRI，真实 UART THRE interrupt 经 PLIC claim loop / IRQ core dispatch 到 UART handler，handler drain TX queue 后清 THRI，并观察 PLIC complete 与 zero-claim loop exit。当前轮已补连续/批量 printk、Linux-like `tx_loadsz` 预算、单条长 printk 多轮 drain、多条长 printk long-burst，以及 long-burst 后 queue empty/THRI stopped/no-spurious-IRQ quiesce 检查；可见测试 payload 已收口到 checkpoint/KUnit 构建。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P1` | 待办 | arceos_ex/console | printk TX 异常/压力边界 | 在 Linux 交叉验证给出差异分类后，规格化 TX queue full、overflow/drop/truncate/pending、hardirq/irq-disabled 上下文、reentrant printk 和 handler 内 printk deferred 策略；先定 model/coding 约束和 probe，再改实现。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
@@ -181,7 +182,7 @@ PLIC 收尾后的后续策略：
 - `SmpRuntimePhase` 已形成六个子阶段最小闭环：`PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
 - 最近完整验收已通过：`make verify`；`make build APP=smoke`；`make run APP=smoke`；`make run`；`make test-kunit`；`make test`。当前 `make test` summary 为 `total=86 pass=86 fail=0`；普通 `make run`/app smoke 不再出现固定 burst、long-burst 或 `Wtx04` 探针 payload，checkpoint/KUnit 构建仍保留这些生产路径 payload 并由只读 KUnit observer 校验。
 - 当前 trace SVG 产物：`tools/out/trace/main.trace.svg`。
-- 下一步恢复时优先继续 Linux 6.12.37 PLIC object 二进制复用：从当前已通过的 `linux_plic.boundary_facts` checkpoint 出发，补强 native provider 对等 contract 和更完整 generic IRQ core 语义，并把差异归入“已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离、疑似 bug”。不要在未完成该层分类前直接继续 printk TX 异常、TTY runtime 或用户态 I/O 功能扩展。
+- 下一阶段意向：在 PLIC 首轮基线冻结后，准备做“对象封装为组件”的试验。当前只记录方向，不展开实施计划；恢复时先围绕组件封装试验明确对象选择、封装边界和验收方式，再进入实现。
 - 上下文清理后恢复：先执行 `git status --short --branch`；预期工作树干净。
 
 ## 细节文档索引
