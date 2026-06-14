@@ -91,6 +91,12 @@ static LINUX_PLIC_PARENT_ENABLE_PERCPU_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_TYPE: AtomicU32 = AtomicU32::new(0);
 static LINUX_PLIC_PARENT_IRQ_EOI_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_PARENT_STATUS: AtomicU32 = AtomicU32::new(0);
+static LINUX_PLIC_IRQ_MODIFY_STATUS_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_CLEAR: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_SET: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_STATUS: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -165,6 +171,7 @@ struct LinuxPlicLeafIrqRecord {
     hwirq: u32,
     chip: usize,
     flow_handler: usize,
+    status: u32,
 }
 
 impl LinuxPlicLeafIrqRecord {
@@ -175,6 +182,7 @@ impl LinuxPlicLeafIrqRecord {
             hwirq: 0,
             chip: 0,
             flow_handler: 0,
+            status: 0,
         }
     }
 }
@@ -291,6 +299,12 @@ pub struct LinuxPlicBoundaryFacts {
     pub parent_enable_percpu_last_irq: usize,
     pub parent_enable_percpu_last_type: u32,
     pub parent_irq_eoi_count: usize,
+    pub parent_status: u32,
+    pub irq_modify_status_count: usize,
+    pub irq_modify_status_last_irq: usize,
+    pub irq_modify_status_last_clear: usize,
+    pub irq_modify_status_last_set: usize,
+    pub irq_modify_status_last_status: usize,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -316,6 +330,9 @@ const LINUX_IRQ_DESC_IRQ_DATA_CHIP_DATA_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_
 const LINUX_IRQ_COMMON_STATE_OFFSET: usize = 0;
 const LINUX_IRQ_COMMON_EFFECTIVE_AFFINITY_OFFSET: usize = 32;
 const LINUX_IRQD_IRQ_DISABLED: u32 = 1 << 16;
+const LINUX_IRQ_NOPROBE: u32 = 1 << 10;
+const LINUX_IRQ_NOREQUEST: u32 = 1 << 11;
+const LINUX_IRQ_NOTHREAD: u32 = 1 << 16;
 const LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET: usize = 24;
 const LINUX_IRQ_CHIP_IRQ_DISABLE_OFFSET: usize = 32;
 const LINUX_IRQ_CHIP_IRQ_ACK_OFFSET: usize = 40;
@@ -547,6 +564,14 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         parent_enable_percpu_last_type: LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_TYPE
             .load(Ordering::Acquire),
         parent_irq_eoi_count: LINUX_PLIC_PARENT_IRQ_EOI_COUNT.load(Ordering::Acquire),
+        parent_status: LINUX_PLIC_PARENT_STATUS.load(Ordering::Acquire),
+        irq_modify_status_count: LINUX_PLIC_IRQ_MODIFY_STATUS_COUNT.load(Ordering::Acquire),
+        irq_modify_status_last_irq: LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_IRQ.load(Ordering::Acquire),
+        irq_modify_status_last_clear: LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_CLEAR
+            .load(Ordering::Acquire),
+        irq_modify_status_last_set: LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_SET.load(Ordering::Acquire),
+        irq_modify_status_last_status: LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_STATUS
+            .load(Ordering::Acquire),
     }
 }
 
@@ -800,6 +825,7 @@ fn prepare_linux_parent_irq_desc() {
             chip as usize,
             0,
         );
+        linux_write_irq_status(desc, LINUX_PLIC_PARENT_STATUS.load(Ordering::Acquire));
         core::ptr::write_bytes(chip, 0, LINUX_IRQ_CHIP_SIZE);
         core::ptr::write(
             chip.add(LINUX_IRQ_CHIP_IRQ_EOI_OFFSET).cast::<usize>(),
@@ -913,7 +939,7 @@ unsafe fn linux_set_irq_disabled(desc: *mut u8, disabled: bool) {
     } else {
         current & !LINUX_IRQD_IRQ_DISABLED
     };
-    unsafe { core::ptr::write(state, next) };
+    unsafe { linux_write_irq_status(desc, next) };
 }
 
 unsafe fn linux_irq_chip_data_from_desc(desc: *mut u8) -> usize {
@@ -961,6 +987,41 @@ fn linux_leaf_record(index: usize) -> LinuxPlicLeafIrqRecord {
     unsafe { core::ptr::read(records.add(index)) }
 }
 
+fn linux_store_leaf_record(index: usize, record: LinuxPlicLeafIrqRecord) {
+    let records = (&raw mut LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
+    unsafe { core::ptr::write(records.add(index), record) };
+}
+
+unsafe fn linux_write_irq_status(desc: *mut u8, status: u32) {
+    unsafe {
+        core::ptr::write(
+            desc.add(LINUX_IRQ_COMMON_STATE_OFFSET).cast::<u32>(),
+            status,
+        )
+    };
+}
+
+fn linux_modify_irq_status(irq: u32, clear: u32, set: u32) -> Option<u32> {
+    let parent = LINUX_PLIC_PARENT_IRQ.load(Ordering::Acquire);
+    if parent != 0 && irq as usize == parent {
+        let current = LINUX_PLIC_PARENT_STATUS.load(Ordering::Acquire);
+        let next = (current & !clear) | set;
+        LINUX_PLIC_PARENT_STATUS.store(next, Ordering::Release);
+        unsafe {
+            let desc = (&raw mut LINUX_PLIC_PARENT_IRQ_DESC).cast::<u8>();
+            linux_write_irq_status(desc, next);
+        }
+        return Some(next);
+    }
+
+    let index = linux_leaf_record_index_by_virq(irq)?;
+    let mut record = linux_leaf_record(index);
+    record.status = (record.status & !clear) | set;
+    linux_store_leaf_record(index, record);
+    unsafe { linux_write_irq_status(linux_leaf_desc_ptr(index), record.status) };
+    Some(record.status)
+}
+
 fn linux_unmapped_hwirq_candidate() -> Option<u32> {
     let mut source = LINUX_PLIC_SOURCE_COUNT.load(Ordering::Acquire) as u32;
     while source != 0 {
@@ -988,8 +1049,8 @@ unsafe fn linux_update_leaf_record_from_desc(index: usize) -> LinuxPlicLeafIrqRe
         );
         record.flow_handler =
             core::ptr::read(desc.add(LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET).cast::<usize>());
-        let records = (&raw mut LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
-        core::ptr::write(records.add(index), record);
+        linux_write_irq_status(desc, record.status);
+        linux_store_leaf_record(index, record);
     }
     record
 }
@@ -1031,6 +1092,7 @@ fn linux_store_leaf_irq_record(
                 hwirq,
                 chip,
                 flow_handler,
+                status: 0,
             },
         );
     }
@@ -1426,6 +1488,13 @@ pub extern "C" fn __irq_set_handler(
     LINUX_PLIC_CHAINED_IRQ.store(irq as usize, Ordering::Release);
     LINUX_PLIC_CHAINED_HANDLER.store(handler as usize, Ordering::Release);
     LINUX_PLIC_CHAINED_IS_CHAINED.store(is_chained as usize, Ordering::Release);
+    if is_chained != 0 {
+        let _ = linux_modify_irq_status(
+            irq,
+            0,
+            LINUX_IRQ_NOREQUEST | LINUX_IRQ_NOPROBE | LINUX_IRQ_NOTHREAD,
+        );
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -1753,7 +1822,16 @@ pub extern "C" fn irq_get_irq_data(irq: u32) -> *mut c_void {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_modify_status(_irq: u32, _clear: u32, _set: u32) {}
+pub extern "C" fn irq_modify_status(irq: u32, clear: u32, set: u32) {
+    let Some(status) = linux_modify_irq_status(irq, clear, set) else {
+        return;
+    };
+    LINUX_PLIC_IRQ_MODIFY_STATUS_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_IRQ.store(irq as usize, Ordering::Release);
+    LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_CLEAR.store(clear as usize, Ordering::Release);
+    LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_SET.store(set as usize, Ordering::Release);
+    LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_STATUS.store(status as usize, Ordering::Release);
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn irq_set_affinity(_irq: u32, _mask: *const c_void) -> i32 {

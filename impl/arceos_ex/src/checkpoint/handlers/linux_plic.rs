@@ -2,7 +2,10 @@ use crate::{
     checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
     checkpoint::kunit,
     context::Context,
-    objects::linux_plic_shim::{self, LinuxPlicBoundaryFacts},
+    objects::{
+        linux_plic_shim::{self, LinuxPlicBoundaryFacts},
+        ns16550a,
+    },
     trace::Checkpoint,
 };
 
@@ -116,6 +119,24 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts) {
         facts.parent_enable_percpu_last_type as usize,
     );
     kunit::diag_usize("parent_irq_eoi_count", facts.parent_irq_eoi_count);
+    kunit::diag_usize("parent_status", facts.parent_status as usize);
+    kunit::diag_usize("irq_modify_status_count", facts.irq_modify_status_count);
+    kunit::diag_usize(
+        "irq_modify_status_last_irq",
+        facts.irq_modify_status_last_irq,
+    );
+    kunit::diag_usize(
+        "irq_modify_status_last_clear",
+        facts.irq_modify_status_last_clear,
+    );
+    kunit::diag_usize(
+        "irq_modify_status_last_set",
+        facts.irq_modify_status_last_set,
+    );
+    kunit::diag_usize(
+        "irq_modify_status_last_status",
+        facts.irq_modify_status_last_status,
+    );
 }
 
 fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
@@ -178,8 +199,31 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
         && facts.parent_enable_percpu_count != 0
         && facts.parent_enable_percpu_last_irq == facts.parent_irq
         && facts.parent_enable_percpu_last_type == 0
+        && parent_chained_status_valid(facts.parent_status)
+        && facts.irq_modify_status_count != 0
+        && facts.irq_modify_status_last_irq == ns16550a::uart8250_port_logical_irq().as_usize()
+        && facts.irq_modify_status_last_clear == 0
+        && facts.irq_modify_status_last_set == linux_irq_noprobe() as usize
+        && facts.irq_modify_status_last_status & linux_irq_noprobe() as usize != 0
 }
 
 fn strictly_before(before: usize, after: usize) -> bool {
     before != 0 && after != 0 && before < after
+}
+
+fn parent_chained_status_valid(status: u32) -> bool {
+    let required = linux_irq_norequest() | linux_irq_noprobe() | linux_irq_nothread();
+    status & required == required
+}
+
+const fn linux_irq_noprobe() -> u32 {
+    1u32 << 10
+}
+
+const fn linux_irq_norequest() -> u32 {
+    1u32 << 11
+}
+
+const fn linux_irq_nothread() -> u32 {
+    1u32 << 16
 }

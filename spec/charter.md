@@ -3235,8 +3235,11 @@ hwirq fail boundary。chip callback event 最终恢复为 enabled/unmasked 状�
 `plic_irq_eoi` 写回 claim register 完成 source。外层 Linux 调用窗口保存并恢复 SIE 与 `tp`，Linux `tp` 激活期间关闭
 本地中断，避免嵌套 trap 捕获 Linux `thread_info` 视图。parent chained handler 的 `irq_desc/irq_chip` 目前提供
 fasteoi 形态的最小视图，`chained_irq_enter()` 因 parent chip 有 `irq_eoi` 而不做 entry mask/ack，`chained_irq_exit()`
-调用 parent EOI 并被 checkpoint 记录；这验证 PLIC 没有绕过 RISC-V root INTC parent IRQ 关系，但仍不等价于完整
-Linux root INTC irqchip 复用。
+调用 parent EOI 并被 checkpoint 记录；parent chained handler 注册还会记录 Linux generic IRQ core 自动声明的
+`IRQ_NOREQUEST/IRQ_NOPROBE/IRQ_NOTHREAD` status。leaf map 阶段中，Linux object 调用 `irq_set_noprobe(virq)`，
+shim 通过 `irq_modify_status()` 把 `IRQ_NOPROBE` 写入 UART leaf desc status 并记录最后一次 clear/set/status 事实。
+这些验证 PLIC 没有绕过 RISC-V root INTC parent IRQ 关系，并覆盖了当前 PLIC leaf map 会踩到的最小 desc status 数据面；
+但仍不等价于完整 Linux root INTC irqchip 或完整 irqdesc 生命周期复用。
 
 这一路径已经通过 `make -C impl/arceos_ex run APP=smoke PLIC_PROVIDER=linux-object PROBE=linux-plic,uart-irq-chain`
 验证：`linux_plic.boundary_facts` 和 `uart_irq_chain.observer_real_path` 均通过，smoke 结果为
@@ -3248,7 +3251,9 @@ edge synthetic boundary 中 `irq_set_type` 至少完成 edge/level 两次切换�
 unmapped IRQ fail boundary 中，checkpoint 还要求 failure count 非零、last errno 为 22，并且 exercise success 非零。
 parent/chained IRQ 边界中，checkpoint 还要求 parent desc 至少被准备、`irq_get_irq_data(parent)` 至少被读取、
 `enable_percpu_irq(parent, type)` 至少被调用一次，且 parent IRQ 号和 trigger type 与当前 QEMU/RISC-V root external
-IRQ 事实一致；parent EOI 计数作为 chained handler runtime 观察事实输出。
+IRQ 事实一致；parent EOI 计数作为 chained handler runtime 观察事实输出。desc status 边界中，checkpoint 要求 parent
+status 包含 chained handler 声明的 `IRQ_NOREQUEST/IRQ_NOPROBE/IRQ_NOTHREAD`，并要求 UART leaf map 的
+`irq_set_noprobe()` 经 `irq_modify_status()` 留下 `IRQ_NOPROBE` 状态。
 
 这仍不是完整 Linux generic IRQ core 复用。当前只覆盖 QEMU/SiFive PLIC 的无 edge quirk、level IRQ 主线；
 `plic_edge_chip.irq_ack` 和 unmapped IRQ fail 已通过 synthetic boundary exercise 覆盖，但真实 edge 平台 runtime
@@ -3283,13 +3288,14 @@ callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecyc
 5. IRQ flow 与 complete 位置：level IRQ 主线已通过 `handle_fasteoi_irq -> plic_chip.irq_eoi` 接入 Linux-shaped
    complete；`plic_chip.irq_enable/irq_disable/irq_mask/irq_unmask`、disabled IRQ eoi 分支和 synthetic edge
    `handle_edge_irq -> plic_edge_chip.irq_ack` 已先通过显式 exercise event 验证 callback service 面可达；unmapped
-   hwirq 的 `generic_handle_domain_irq -> -EINVAL` fail boundary 也已通过显式 event 验证。后续仍需补更完整
-   `irq_desc`/`irq_common_data` 语义；unmapped IRQ ratelimit/打印保持 deferred。
+   hwirq 的 `generic_handle_domain_irq -> -EINVAL` fail boundary 也已通过显式 event 验证。当前已补 parent chained
+   status 和 leaf `IRQ_NOPROBE` 的最小 `irq_desc` status 语义；更完整 `irq_desc`/`irq_common_data` 生命周期、
+   action/depth/threaded/request/free 等语义仍待后续排雷；unmapped IRQ ratelimit/打印保持 deferred。
    这些边界共同保证
    `claim -> dispatch -> eoi/ack -> next claim -> zero claim exit` 的顺序和特殊路径等价。
 6. chained handler 与 root INTC 关系：parent `RV_IRQ_EXT` logical IRQ、`irq_get_irq_data(parent)`、
    `enable_percpu_irq(parent, trigger_type)`、parent fasteoi chip 和 `chained_irq_exit -> parent irq_eoi` 的最小事实
-   已被 checkpoint 覆盖。Linux PLIC provider 当前没有绕过 RISC-V INTC 直接成为 trap root handler；但完整 parent
+   已被 checkpoint 覆盖，parent chained handler status 也已记录。Linux PLIC provider 当前没有绕过 RISC-V INTC 直接成为 trap root handler；但完整 parent
    irqchip、entry mask/ack、root INTC domain 以及多 parent IRQ 语义仍未复用，后续若进入这些路径需要继续补正式语义。
 7. 生命周期范围：CPU hotplug、syscore suspend/resume、SMP affinity 和 edge interrupt quirk 在第一轮是否纳入强等价，
    需要明确裁剪策略。当前 `cpuhp_setup_state` 已按 Linux `invoke=true` 语义触发 boot CPU startup，满足 threshold
