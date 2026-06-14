@@ -6,6 +6,8 @@ pub mod early_trace;
 mod earlycon;
 #[cfg(checkpoint_handler_kernel_init_task)]
 mod kernel_init_task;
+#[cfg(all(checkpoint_handler_linux_plic, plic_provider_linux_object))]
+mod linux_plic;
 #[cfg(checkpoint_handler_memblock_api)]
 compile_error!("checkpoint handler memblock-api was renamed to memblock");
 #[cfg(checkpoint_handler_memblock)]
@@ -74,6 +76,8 @@ const POST_VM_HANDLERS: &[Handler] = &[
     earlycon::HANDLER,
     #[cfg(checkpoint_handler_kernel_init_task)]
     kernel_init_task::HANDLER,
+    #[cfg(all(checkpoint_handler_linux_plic, plic_provider_linux_object))]
+    linux_plic::HANDLER,
     #[cfg(checkpoint_handler_scheduler_action)]
     scheduler_action::HANDLER,
     #[cfg(checkpoint_handler_console_handoff)]
@@ -95,6 +99,7 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
+    checkpoint_handler_linux_plic,
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
@@ -123,6 +128,10 @@ pub const fn kunit_case_count() -> usize {
     #[cfg(checkpoint_handler_kernel_init_task)]
     {
         count += kernel_init_task::KUNIT_CASE_COUNT;
+    }
+    #[cfg(all(checkpoint_handler_linux_plic, plic_provider_linux_object))]
+    {
+        count += linux_plic::KUNIT_CASE_COUNT;
     }
     #[cfg(checkpoint_handler_scheduler_action)]
     {

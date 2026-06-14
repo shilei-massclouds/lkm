@@ -3035,9 +3035,46 @@ callback，则属于上接口，因为后续由内核框架主动调用。
 首轮只实现当前功能闭环必须的依赖；调试、打印、审计、ratelimit 等非关键能力可以简化或标记为 deferred，但这种简化不能改变
 PLIC 驱动的主控制流，也不能让对象文件误以为某个关键 Linux 子系统已经完整接入。
 
+后续进入“踩雷/排雷”阶段时，应以 `arceos_ex` 已经跑通的原生 PLIC/IRQ/UART 近似等价实现为主要承载基础，优先做小规模
+内核对象对齐和薄 shim 补充。若某个 undefined symbol 或回调路径暴露出必须新增正式对象、大块功能缺失，或者出现难以判断
+的方向策略问题，应暂停继续编码，先把该问题归入差异分类并讨论解决方向。
+
 这一定义服务于本轮替换目标：在整个内核框架、上层 IRQ 使用者和可观测功能不变的前提下，通过条件编译在
 `arceos_ex` 原生 PLIC provider 与 Linux `irq-sifive-plic.o` provider 之间切换。条件编译只应切换 provider/backend，
 不应要求 UART、serial8250、IRQ action、checkpoint 或 smoke 路径感知两套不同 PLIC API。
+
+### 黑盒二进制驱动调试跟踪方法
+
+Linux 二进制驱动虽然不能修改，但并不是不可分析。`arceos_ex` 与黑盒驱动之间按照 Linux 内核框架中基本确定的协作流程
+交互，接口边界上会交换可预期的数据。因此，后续调试和排雷应优先采用“源码建立预期、边界 checkpoint 观测、KUnit 固化
+约束、运行踩雷推进、静态分析兜底”的方法。
+
+第一，预期流程主要从 Linux 6.12.37 源码和对应 `.config` 建立，不把反汇编作为常规前置步骤。对于
+`irq-sifive-plic.o`，首轮预期流程是 `.initcall6.init -> __platform_driver_register -> platform compatible match ->
+plic_platform_probe -> plic_probe -> OF/resource/context/domain/chained handler`。每个流程点都应记录主动调用方、被调用接口、
+关键输入数据、预期返回值、预期状态变化和对应 Linux 源码位置。
+
+第二，观测点应放在黑盒边界，而不是黑盒内部。上接口观测内核框架主动调用驱动的点，例如 `.probe`、
+`irq_domain_ops`、`irq_chip`、chained handler、CPU hotplug callback 和 syscore callback；下接口观测驱动主动调用内核
+框架的点，即 `nm -u` 暴露出的 undefined symbols。每个边界观测点应尽量记录接口名、关键参数、返回值、对象地址和必要的
+布局校验结果。
+
+第三，调试信息应优先沉淀为 checkpoint/KUnit 可验证事实，而不是只依赖临时串口日志。例如 PLIC 复用路径中可逐步建立
+`LinuxPlicDriverRegistered`、`LinuxPlicPlatformMatched`、`LinuxPlicProbeEntered`、`LinuxPlicProbeReturnedZero`、
+`LinuxPlicDomainCreated`、`LinuxPlicChainedHandlerRegistered` 等事实，并在 KUnit 或 checkpoint observer 中检查这些
+事实的顺序和数据是否符合预期。
+
+第四，边界数据交换是定位问题的重点。对 PLIC 试验而言，至少应跟踪 `platform_driver.probe`、
+`platform_driver.driver.of_match_table`、`platform_device.dev.fwnode`、`fwnode_handle.ops`、`riscv,ndev`、
+`interrupts-extended`、PLIC `membase/source_count/context_id`、Linux `thread_info.cpu`、`__per_cpu_offset`、
+`irq_domain.ops/host_data`、`__irq_set_handler` 传入的 parent IRQ 和 handler 指针等数据。只要流程和这些 checkpoint 上的
+数据都可预期并被验证，通常就足以约束黑盒交互并辅助定位问题。
+
+第五，不强求一次性完成完整静态分析。后续可以按运行中“踩雷/排雷”的方式推进：每遇到一个 undefined symbol、回调路径或
+异常现象，就判断问题属于流程未到达、边界数据不符合预期、二进制 ABI 视图不一致、shim 语义不足，还是需要讨论的大对象或
+策略缺口；修复后补充相应 checkpoint/KUnit 断言，再进入下一轮运行。必要时可以使用反汇编、`addr2line` 或 GDB 作为辅助，
+例如确认结构体偏移、优化后的访问方式、崩溃 PC 对应源码位置或 local symbol 范围，但这些工具是兜底手段，不替代源码和
+运行 checkpoint 的主线。
 
 本节先分析 `上接口`。`下接口` 另行逐项展开。
 

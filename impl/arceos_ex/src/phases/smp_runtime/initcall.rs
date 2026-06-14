@@ -50,7 +50,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.initcall_table
         .preset(&ctx.ctor_table, &ctx.static_objects)?;
     run_initcall_table(ctx)?;
-    run_linux_plic_initcall6()?;
+    run_linux_plic_initcall6(ctx)?;
     ctx.uart_external_irq_enable.setup(
         &ctx.plic,
         &mut ctx.plic_irq_domain,
@@ -94,7 +94,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.serial8250_rx_loopback_probe,
         &ctx.serial8250_rx_batch_loopback_probe,
         &ctx.tty_xmit_fifo_probe,
-    )
+    )?;
+    crate::checkpoint::dispatch_mut(Checkpoint::InitcallBoundaryReady, ctx);
+    Ok(())
 }
 
 fn enable_serial8250_interrupt_driven_console() -> EventResult {
@@ -196,7 +198,7 @@ fn run_initcall_table(ctx: &mut Context) -> EventResult {
 }
 
 #[cfg(plic_provider_linux_object)]
-fn run_linux_plic_initcall6() -> EventResult {
+fn run_linux_plic_initcall6(ctx: &Context) -> EventResult {
     crate::objects::linux_plic_shim::run_linux_initcall6()?;
     if !crate::objects::linux_plic_shim::platform_driver_registered()
         || crate::objects::linux_plic_shim::platform_driver_probe_ptr() == 0
@@ -209,11 +211,11 @@ fn run_linux_plic_initcall6() -> EventResult {
         );
     }
 
-    Ok(())
+    crate::objects::linux_plic_shim::platform_driver_match_and_probe(&ctx.device_tree, &ctx.plic)
 }
 
 #[cfg(not(plic_provider_linux_object))]
-fn run_linux_plic_initcall6() -> EventResult {
+fn run_linux_plic_initcall6(_ctx: &Context) -> EventResult {
     Ok(())
 }
 
