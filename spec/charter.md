@@ -3012,6 +3012,33 @@ source enable、claim/complete 和 chained dispatch 不能同时生效。
 2. `下接口`：Linux `irq-sifive-plic.o` 自身依赖的 Linux 内核接口，也就是
    `riscv64-linux-gnu-nm -u irq-sifive-plic.o` 暴露出的未定义符号及其语义。
 
+接口类型按主动调用方区分。`上接口` 是内核框架主动调用驱动实现的 callback/object contract；`下接口` 是驱动主动调用
+内核框架提供的服务。由此，注册动作本身通常属于下接口，例如 `plic_driver_init()` 调用
+`__platform_driver_register()`、`plic_probe()` 调用 `irq_domain_create_linear()` 或 `irq_set_chained_handler()`；
+注册进去的 `platform_driver`、`irq_domain_ops`、`irq_chip`、chained handler、CPU hotplug callback 和 syscore
+callback，则属于上接口，因为后续由内核框架主动调用。
+
+由于本轮目标对象是不可修改的 Linux 二进制 `irq-sifive-plic.o`，这里的对齐必须是二进制对齐，而不仅是源码概念对齐。
+符号名、调用约定、结构体布局、section/initcall 形态、回调签名、per-CPU 访问模型和对象生命周期，都必须让该二进制对象
+按它在 Linux 中的假设运行。为实现对齐，`arceos_ex` 现有 PLIC 实现的上接口可以调整到同一个 provider contract 下；
+必要时可以增加 adaptor，但 adaptor 应尽量薄，只做 ABI、对象视图或注册路径转换，不承载 PLIC 业务语义。预期上接口应尽量
+直接收敛为共同 contract；下接口由于要满足 `irq-sifive-plic.o` 主动调用的 Linux 符号，通常难以避免 Linux ABI shim。
+
+更严格地说，`irq-sifive-plic.o` 在本试验中应被视为只能通过公开接口交互的黑盒。`arceos_ex` 不能修改、插桩或重编译
+这个对象；同样地，从该对象的视角看，外部环境仍然应表现为 Linux，它只会通过 Linux 内核面向驱动公开的接口与外部交互。
+因此，接口边界上双方可见或交换的数据结构必须保持严格的二进制布局一致，调用流程也必须按 Linux 中的交互顺序发生，不能用
+“语义大致相同”的私有流程替换对象文件实际观察到的 Linux 流程。
+
+下接口补齐也遵循这个黑盒原则：以 `riscv64-linux-gnu-nm -u irq-sifive-plic.o` 发现的 undefined symbols 为入口，
+逐符号建立该对象可见的 Linux 环境。对全局变量，应优先让 `arceos_ex` 现有对象或新增 adaptor 提供 ABI 对齐的对象视图；
+对函数，应先提供签名、调用约定和失败边界正确的兜底实现，默认可以 `panic`，再按启动路径实际“踩到”的依赖逐项补齐真实语义。
+首轮只实现当前功能闭环必须的依赖；调试、打印、审计、ratelimit 等非关键能力可以简化或标记为 deferred，但这种简化不能改变
+PLIC 驱动的主控制流，也不能让对象文件误以为某个关键 Linux 子系统已经完整接入。
+
+这一定义服务于本轮替换目标：在整个内核框架、上层 IRQ 使用者和可观测功能不变的前提下，通过条件编译在
+`arceos_ex` 原生 PLIC provider 与 Linux `irq-sifive-plic.o` provider 之间切换。条件编译只应切换 provider/backend，
+不应要求 UART、serial8250、IRQ action、checkpoint 或 smoke 路径感知两套不同 PLIC API。
+
 本节先分析 `上接口`。`下接口` 另行逐项展开。
 
 ### `irq-sifive-plic.o` 服务接口
@@ -3021,31 +3048,39 @@ source enable、claim/complete 和 chained dispatch 不能同时生效。
 `plic_probe`、`plic_handle_irq`、`plic_irq_enable`、`plic_irq_eoi`、`plic_irqdomain_ops`、`plic_chip`
 等符号均是 local 符号。外部不能稳定地把它当成“调用某个导出函数即可获得 PLIC 服务”的对象来使用。
 
-它真正暴露给 Linux 其它子系统的上接口，是若干由 linker section、driver core、irqchip core 和 generic IRQ
-core 消费的数据结构和回调链：
+它真正暴露给 Linux 内核框架的上接口，应首先看作标准 `platform_driver` 接口，而不是一个 irqchip init
+callback。`builtin_platform_driver(plic_driver)` 确实会通过 `.initcall6.init` 留下一个注册动作，但该动作的语义是把
+`plic_driver` 注册到 platform 总线；它只是到达 platform driver core 的路径，不是 PLIC 驱动自己的核心服务接口。
+因此，当前试验中应把 `struct platform_driver plic_driver` 作为上接口的主体，其中最关键的服务入口是 `.probe`。
+
+`probe` 成功后，PLIC 驱动再向 generic IRQ core 注册 irq domain、irq chip 和 chained handler。这些结构是 PLIC
+驱动通过 platform probe 产出的后续 IRQ 服务面，应与“如何被内核框架发现并初始化”的上接口入口层分开记录：
 
 | 服务面 | Linux 承载 | 服务语义 |
 |---|---|---|
-| builtin platform driver 入口 | `.initcall6.init -> plic_driver_init -> __platform_driver_register(&plic_driver, ...)` | 把 `plic_driver` 注册到 Linux platform driver core。`plic_driver.driver.of_match_table` 指向 `plic_match`，当前包含 `"sifive,plic-1.0.0"`、`"riscv,plic0"`、`"andestech,nceplic100"`、`"thead,c900-plic"`；`.probe = plic_platform_probe`，最终调用 `plic_probe(pdev->dev.fwnode)`。 |
-| early irqchip 表入口 | `__irqchip_of_table` 中的 `IRQCHIP_DECLARE(riscv, "allwinner,sun20i-d1-plic", plic_early_probe)` | 供 `irqchip_init() -> of_irq_init(__irqchip_of_table)` 扫描 DeviceTree interrupt-controller node 后直接调用 init callback。注意当前对象文件中这一条只覆盖 `"allwinner,sun20i-d1-plic"`，不覆盖常见的 `"sifive,plic-1.0.0"` / `"riscv,plic0"`。 |
-| probe/setup 入口 | `plic_platform_probe()` 或 `plic_early_probe()` 间接进入 `plic_probe(fwnode)` | 解析固件节点，映射 PLIC MMIO，建立 `struct plic_priv` 和 per-CPU `struct plic_handler`，初始化 priority/enable/threshold，创建 PLIC irq domain，并在条件满足时把 PLIC chained handler 接到 RISC-V INTC 的 external interrupt 上。 |
-| IRQ domain provider | `irq_domain_create_linear(fwnode, nr_irqs + 1, &plic_irqdomain_ops, priv)` | 向 generic IRQ core 提供 PLIC source 到 Linux logical IRQ 的映射服务。`plic_irqdomain_ops.translate` 解析 firmware interrupt specifier，`alloc` 调用内部 map，把 hwirq 绑定到 `plic_chip` 和 `handle_fasteoi_irq`，`free` 使用 `irq_domain_free_irqs_top`。 |
-| IRQ chip 控制回调 | `plic_chip` / `plic_edge_chip` | 向 generic IRQ core 提供 per-source 控制能力：`irq_enable`、`irq_disable`、`irq_mask`、`irq_unmask`、`irq_eoi`，SMP 下还有 `irq_set_affinity`；带 edge quirk 的平台通过 `irq_set_type` 在 `handle_edge_irq` 和 `handle_fasteoi_irq` 间切换。 |
-| chained handler | `irq_set_chained_handler(plic_parent_irq, plic_handle_irq)` | 把 RISC-V root INTC 的 `RV_IRQ_EXT` logical IRQ 连接到 PLIC。`plic_handle_irq` 从当前 hart context 的 claim register 循环读取非零 source，并调用 `generic_handle_domain_irq(priv->irqdomain, hwirq)` 分发；claim 为 0 时退出循环。 |
-| CPU hotplug/syscore 生命周期回调 | `cpuhp_setup_state(..., plic_starting_cpu, plic_dying_cpu)` 和 `register_syscore_ops(&plic_irq_syscore_ops)` | CPU online/offline 时启停 parent percpu IRQ 并设置 threshold；系统 suspend/resume 时保存和恢复 priority/enable 寄存器。第一轮单核启动闭环可先作为受限服务或 deferred 路径处理，但对象文件已经把它们作为服务面注册出去。 |
+| platform driver 上接口 | `struct platform_driver plic_driver` | PLIC 驱动交给 Linux driver core / platform bus 的核心接口。`.driver.name = "riscv-plic"`，`.driver.of_match_table = plic_match`，`.driver.acpi_match_table = ACPI_PTR(plic_acpi_match)`，`.probe = plic_platform_probe`。 |
+| platform 总线注册路径 | `.initcall6.init -> plic_driver_init -> __platform_driver_register(&plic_driver, ...)` | 这是 `builtin_platform_driver(plic_driver)` 产生的注册动作。它负责把 `plic_driver` 放入 platform bus driver 集合，使后续 platform device 匹配可以调用 `.probe`；它本身不等同于 PLIC 专用初始化入口。 |
+| compatible match 表 | `plic_match` | `plic_driver.driver.of_match_table` 指向该表，当前包含 `"sifive,plic-1.0.0"`、`"riscv,plic0"`、`"andestech,nceplic100"`、`"thead,c900-plic"`。platform bus 依据该表把 PLIC platform device 绑定到 `plic_driver`。 |
+| 核心 probe 入口 | `plic_platform_probe(struct platform_device *pdev)` | 这是当前 PLIC 驱动最重要的上接口回调。它从 `pdev->dev.fwnode` 取得固件节点并调用内部 `plic_probe(fwnode)`，随后解析节点、映射 MMIO、建立私有状态、初始化 context，并注册 IRQ core 服务。 |
+| 例外 early irqchip 表入口 | `__irqchip_of_table` 中的 `IRQCHIP_DECLARE(riscv, "allwinner,sun20i-d1-plic", plic_early_probe)` | 这是当前源码额外保留的特殊 early irqchip 路径，只覆盖 `"allwinner,sun20i-d1-plic"`，不覆盖常见的 `"sifive,plic-1.0.0"` / `"riscv,plic0"`。因此本项目首轮复用常见 PLIC 时，不应把该表项视为主上接口。 |
+| probe 后 IRQ domain 服务面 | `irq_domain_create_linear(fwnode, nr_irqs + 1, &plic_irqdomain_ops, priv)` | `plic_probe()` 产出的 generic IRQ core 服务。它提供 PLIC source 到 Linux logical IRQ 的映射；`plic_irqdomain_ops.translate` 解析 firmware interrupt specifier，`alloc` 调用内部 map，把 hwirq 绑定到 `plic_chip` 和 `handle_fasteoi_irq`。 |
+| probe 后 IRQ chip 控制服务面 | `plic_chip` / `plic_edge_chip` | `plic_probe()` 产出的 per-source 控制能力：`irq_enable`、`irq_disable`、`irq_mask`、`irq_unmask`、`irq_eoi`，SMP 下还有 `irq_set_affinity`；带 edge quirk 的平台通过 `irq_set_type` 在 `handle_edge_irq` 和 `handle_fasteoi_irq` 间切换。 |
+| probe 后 chained handler 服务面 | `irq_set_chained_handler(plic_parent_irq, plic_handle_irq)` | `plic_probe()` 在条件满足时把 RISC-V root INTC 的 `RV_IRQ_EXT` logical IRQ 连接到 PLIC。`plic_handle_irq` 从当前 hart context 的 claim register 循环读取非零 source，并调用 `generic_handle_domain_irq(priv->irqdomain, hwirq)` 分发；claim 为 0 时退出循环。 |
+| probe 后 CPU hotplug/syscore 服务面 | `cpuhp_setup_state(..., plic_starting_cpu, plic_dying_cpu)` 和 `register_syscore_ops(&plic_irq_syscore_ops)` | CPU online/offline 时启停 parent percpu IRQ 并设置 threshold；系统 suspend/resume 时保存和恢复 priority/enable 寄存器。第一轮单核启动闭环可先作为受限服务或 deferred 路径处理，但对象文件已经把它们作为服务面注册出去。 |
 
-因此，`irq-sifive-plic.o` 的上接口应理解为“Linux irqchip driver 对 Linux 框架注册的一组服务面”，而不是
-`Plic.claim()` / `Plic.complete()` 这类可直接调用的手写 API。`arceos_ex` 要复用该对象，需要让自己的适配层能消费
-这些 Linux 风格服务面，或者在不改变对象文件的前提下用等价方式驱动这些服务面。
+因此，`irq-sifive-plic.o` 的上接口应理解为“一个 Linux platform driver 对 platform bus 暴露 `.probe`，再由
+`.probe` 建立 IRQ core 服务面”，而不是 `Plic.claim()` / `Plic.complete()` 这类可直接调用的手写 API，也不是
+常规 irqchip init section 中的直接 init callback。`arceos_ex` 要复用该对象，首先需要让自己的适配层能注册并匹配
+这个 `platform_driver`，再由 `.probe` 驱动后续 IRQ 服务面建立。
 
 ### 服务接口的关键语义
 
-第一，常见 QEMU virt / SiFive PLIC 兼容串对应的启动入口，主要是 platform driver 路径，而不是
-`IRQCHIP_DECLARE` early table 路径。当前对象文件的 `__irqchip_of_table` 只记录
-`"allwinner,sun20i-d1-plic" -> plic_early_probe`。若目标 DeviceTree 节点是 `"sifive,plic-1.0.0"` 或
-`"riscv,plic0"`，直接复用对象文件时，适配层应优先考虑执行 `.initcall6.init`，通过
-`__platform_driver_register` 接住 `plic_driver`，再由 platform-device / driver match 触发 `.probe`。如果继续沿用
-`arceos_ex` 现有的 `irqchip_init() -> of_irq_init()` 静态 irqchip section 路径，就无法仅凭该对象文件匹配
+第一，常见 QEMU virt / SiFive PLIC 兼容串对应的主入口是 platform driver 的 `.probe`，而不是
+`IRQCHIP_DECLARE` early table 中的 init callback。当前对象文件的 `__irqchip_of_table` 只记录
+`"allwinner,sun20i-d1-plic" -> plic_early_probe`；`"sifive,plic-1.0.0"` / `"riscv,plic0"` 由
+`plic_driver.driver.of_match_table` 覆盖。直接复用对象文件时，适配层应通过 `builtin_platform_driver` 产生的
+注册路径接住 `plic_driver`，让 platform device / driver match 触发 `.probe`。如果继续沿用 `arceos_ex` 现有的
+`irqchip_init() -> of_irq_init()` 静态 irqchip section 路径，就无法仅凭该对象文件匹配
 `"sifive,plic-1.0.0"` / `"riscv,plic0"`。
 
 第二，`plic_probe()` 完成后提供给上层的不是一个裸 PLIC 句柄，而是 generic IRQ core 中的 domain/chip/handler
@@ -3080,15 +3115,18 @@ context 的 enable bit，并通过 priority register unmask source；`irq_disabl
 
 ### `arceos_ex` 上接口适配方向
 
-第一轮适配建议把 `irq-sifive-plic.o` 看作一个 Linux framework object，而不是一个硬件访问函数库。上接口适配层至少
-需要覆盖以下消费路径：
+第一轮对齐建议把 `irq-sifive-plic.o` 看作一个 Linux framework object，而不是一个硬件访问函数库。上接口本身应尽量
+收敛为共同 contract，不在 callback 语义上再包厚 adaptor；但为了让不可修改的二进制对象被 `arceos_ex` 内核框架发现、
+注册和调用，仍需要确认以下消费/注册路径。严格地说，其中若干 `Adapter` 是服务于对象文件下接口调用的 Linux ABI shim；
+它们的结果是让内核框架能够按共同上接口调用 PLIC provider，而不是把 PLIC 业务语义搬入 adaptor。
 
-1. `LinuxObjectInitcallAdapter`：能够发现并执行对象文件中的 `.initcall6.init` 入口，或者以等价方式触发
-   `plic_driver_init`。由于 `plic_driver_init` 是 local symbol，直接按名字调用不是稳定方案；更合适的是通过 linker
-   section 或 initcall 表驱动。
-2. `LinuxPlatformDriverAdapter`：为 `__platform_driver_register` 提供最小语义，能够接收并保存 `struct platform_driver`
+1. `LinuxPlatformDriverAdapter`：为 `__platform_driver_register` 提供最小语义，能够接收并保存 `struct platform_driver`
    指针，依据 DeviceTree 中 PLIC node 的 compatible 与 `of_match_table` 匹配，然后构造足够的 `platform_device` /
    `device.fwnode` 视图触发 `.probe`。这是当前 `"sifive,plic-1.0.0"` / `"riscv,plic0"` 路径的重点。
+2. `LinuxInitcallRegistrationAdapter`：能够发现并执行对象文件中的 `.initcall6.init` 注册动作，或者以等价方式触发
+   `plic_driver_init`，但它的职责只到“把 `plic_driver` 注册进 platform bus”为止；它不是 PLIC 专用 probe/setup
+   适配器。由于 `plic_driver_init` 是 local symbol，直接按名字调用不是稳定方案；更合适的是通过 linker section 或
+   initcall 表驱动。
 3. `LinuxIrqDomainAdapter`：能够让 `irq_domain_create_linear`、`irq_create_mapping`、`generic_handle_domain_irq`、
    `irq_domain_set_info` 等调用形成与 `arceos_ex` logical IRQ / `IrqHandlerRegistry` 等价的映射和分发结果。
 4. `LinuxIrqChipAdapter`：能够保存并调用 `plic_chip` / `plic_edge_chip` 的 `irq_data` 回调，使 mask/unmask/eoi 等动作由
@@ -3104,9 +3142,44 @@ context 的 enable bit，并通过 priority register unmask source；`irq_disabl
 domain/chip/chained handler 服务。这样后续差分验证可以比较同一规格对象在两种 provider 下的状态和行为，而不是让上层
 UART、console、IRQ action 等路径感知两套不同 PLIC API。
 
-本阶段关于上接口的结论是：`irq-sifive-plic.o` 可复用的服务接口集中在 Linux driver/irqchip/irqdomain/irqchip-callback
-框架边界上。后续讨论 `nm -u` 下接口时，应围绕这些服务面逐项判断哪些 Linux 依赖必须真实实现，哪些可以作为单核启动试验
-的受限 stub，哪些需要在 `arceos_ex` 中建立正式对象语义。
+本阶段关于上接口的结论是：`irq-sifive-plic.o` 的初始化入口层上接口集中在 Linux `platform_driver`，核心回调是
+`plic_driver.probe`。`irq_domain`、`irq_chip`、chained handler 和 CPU/syscore 回调是 `probe` 成功后注册出的 IRQ
+服务面。后续讨论 `nm -u` 下接口时，应围绕 `platform_driver/probe` 及其后续 IRQ 服务面逐项判断哪些 Linux 依赖必须真实
+实现，哪些可以作为单核启动试验的受限 stub，哪些需要在 `arceos_ex` 中建立正式对象语义。
+
+### 上接口仍需讨论的问题
+
+当前上接口的大方向已经明确，但要达到二进制替换和对等 provider 切换，仍有几类问题需要继续收敛：
+这些问题不是讨论是否修改 Linux 对象或重写其流程，而是决定 `arceos_ex` 侧如何构造足够真实的 Linux 可见环境，并把
+原生 PLIC provider 对齐到同一上层 contract。
+
+1. `probe` 触发时机：Linux 常见 PLIC 路径通过 builtin platform driver 注册后由 platform device match 触发
+   `.probe`，而 `arceos_ex` 现有 PLIC 路径发生在中断时间准备期。需要决定 Linux object provider 在
+   `arceos_ex` 中是按 Linux initcall/platform 时序触发，还是在现有 `IrqTimeInitPhase` 边界内执行一个受控的
+   platform match/probe 子流程；无论选择哪种，都不能改变 `plic_driver_init -> __platform_driver_register ->
+   platform match -> .probe` 这条对象可见流程，外部框架状态和上层 IRQ 使用者也不应变化。
+2. 原生 PLIC 的对等上接口：需要决定 `arceos_ex` 原生 PLIC 是否也暴露 platform-driver-like `probe`、`irq_domain_ops`、
+   `irq_chip` 和 chained handler 形态，或者只在内部通过极薄 provider wrapper 对齐到同一 contract。目标是条件编译
+   切换时，上层 `IrqDispatchTree/RiscvIntc/IrqHandlerRegistry` 等对象不发生语义变化。
+3. 二进制结构布局边界：需要列出首轮必须二进制兼容的上接口结构，包括 `struct platform_driver`、`struct platform_device`、
+   `struct device` / `fwnode_handle`、`struct of_device_id`、`struct irq_domain_ops`、`struct irq_chip`、
+   `struct irq_desc`、`struct irq_data`、`cpumask` 和 per-CPU `plic_handlers` 访问所依赖的布局。只要
+   `irq-sifive-plic.o` 会解引用或写入，就不能只用语义 mock。
+4. IRQ domain 编号语义：需要确认 PLIC source 0 保留、`nr_irqs + 1` domain size、`riscv,ndev` 范围、重复 source
+   mapping、logical IRQ 分配、`irq_fwspec` 参数修改、`gsi_base` 以及 one-cell/two-cell translate 的行为，确保
+   Linux provider 与原生 provider 对 UART 等外设产出同一个 logical IRQ 语义。
+5. IRQ flow 与 complete 位置：需要明确第一轮是否实现足够的 `handle_fasteoi_irq` / `handle_edge_irq` flow，使
+   `plic_chip.irq_eoi` / `plic_edge_chip.irq_ack` 自然发生；如果使用简化 IRQ core，也必须保证
+   `claim -> dispatch -> eoi/ack -> next claim -> zero claim exit` 的顺序和 disabled IRQ 特殊路径等价。
+6. chained handler 与 root INTC 关系：需要确认 parent `RV_IRQ_EXT` logical IRQ、`irq_desc`、parent chip、
+   `chained_irq_enter/exit` 和 `riscv_get_intc_hwnode()` 的最小真实语义。Linux PLIC provider 不能绕过 RISC-V INTC
+   直接成为 trap root handler。
+7. 生命周期范围：CPU hotplug、syscore suspend/resume、SMP affinity 和 edge interrupt quirk 在第一轮是否纳入强等价，
+   需要明确裁剪策略。若首轮限定为 boot CPU、DeviceTree、无 suspend 的受限语义，应在上接口表中记录哪些 callback 已注册但
+   暂不要求触发；若对象实际进入尚未实现的关键路径，应进入明确的 panic/fail 边界，而不是静默伪造成功。
+8. 观测点对齐：Linux 二进制对象本身不能插桩修改，因此 claim、complete、zero-claim、dispatch、source gate 等现有
+   checkpoint 需要决定挂在共同 IRQ core/adaptor 观察点，还是只比较外部可见效果。不能为了观测方便改变
+   `irq-sifive-plic.o` 的 callback 顺序。
 
 ## 测试与验证
 
