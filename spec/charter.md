@@ -3258,8 +3258,11 @@ status 包含 chained handler 声明的 `IRQ_NOREQUEST/IRQ_NOPROBE/IRQ_NOTHREAD`
 `irq_set_noprobe()` 经 `irq_modify_status()` 留下 `IRQ_NOPROBE` 状态。leaf action/depth 边界中，checkpoint
 还要求 Linux-object provider 在 `handle_fasteoi_irq` runtime 中为 UART leaf 准备过 action 视图、确认 action
 已绑定、depth 为 0，并在同一 logical IRQ 上完成 action dispatch。该视图当前由 shim 从既有 `IrqHandlerRegistry`
-投影得到，用于约束 Linux generic IRQ flow 与 arceos_ex 现有 action 表的对齐，不表示已经实现完整 Linux
-`request_irq/free_irq/threaded` 生命周期。
+投影得到，用于约束 Linux generic IRQ flow 与 arceos_ex 现有 action 表的对齐。本轮还把
+`IrqHandlerRegistry::request_irq()` 成功路径接到 provider 边界：native provider 为 no-op，Linux-object provider
+记录 logical IRQ、device ref 和 handler kind 的 action request 事实；runtime leaf action 视图必须与该 request
+事实匹配后才 dispatch。这个对齐仍是最小 request/action 数据面，不表示已经实现完整 Linux `free_irq/threaded`
+生命周期。
 
 这仍不是完整 Linux generic IRQ core 复用。当前只覆盖 QEMU/SiFive PLIC 的无 edge quirk、level IRQ 主线；
 `plic_edge_chip.irq_ack` 和 unmapped IRQ fail 已通过 synthetic boundary exercise 覆盖，但真实 edge 平台 runtime
@@ -3271,8 +3274,9 @@ callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecyc
 当前阶段差异分类如下。已覆盖：Linux initcall6、platform driver register/match/probe、PLIC domain/chained
 handler 注册、UART leaf mapping、Linux PLIC claim loop、`handle_fasteoi_irq -> plic_chip.irq_eoi` runtime、UART
 source gate enable、chip callback exercise、unmapped hwirq fail boundary、parent IRQ startup/chained EOI/status、
-leaf `IRQ_NOPROBE` status、UART leaf action/depth 最小数据面，以及 native/linux-object provider 共享的薄 `objects::plic_provider` contract。显式
-deferred：ratelimit/打印提示、完整 root INTC irqchip、完整 `irq_desc/irq_common_data` lifecycle、request/free/threaded
+leaf `IRQ_NOPROBE` status、UART leaf action/depth 最小数据面、`request_irq` 成功路径到 provider action request
+事实的最小对齐，以及 native/linux-object provider 共享的薄 `objects::plic_provider` contract。显式
+deferred：ratelimit/打印提示、完整 root INTC irqchip、完整 `irq_desc/irq_common_data` lifecycle、free/threaded
 路径、CPU hotplug/offline、SMP affinity、suspend/resume 和真实 edge 平台 runtime。当前没有把这些 deferred 项伪装为
 已支持；若后续运行路径实际踩到其中任一项，应按“踩雷/排雷”方式补正式语义，或在必须新增大对象/方向策略不清时暂停讨论。
 

@@ -1,8 +1,9 @@
 #[cfg(plic_provider_linux_object)]
 use super::state::{failed_condition, LifecycleEvent};
 use super::{
+    device::DeviceRef,
     device_tree::DeviceTree,
-    irq_time::{IrqHandlerRegistry, LogicalIrq, Plic, PlicIrqDomain},
+    irq_time::{IrqHandlerKind, IrqHandlerRegistry, LogicalIrq, Plic, PlicIrqDomain},
     state::{EventResult, State},
 };
 
@@ -28,6 +29,18 @@ pub fn map_source(domain: &mut PlicIrqDomain, source: u32) -> Option<LogicalIrq>
 
 pub fn resolve_hwirq(domain: &PlicIrqDomain, source: u32) -> Option<LogicalIrq> {
     provider_resolve_hwirq(domain, source)
+}
+
+pub fn record_irq_action_request(
+    logical_irq: LogicalIrq,
+    device: DeviceRef,
+    handler_kind: IrqHandlerKind,
+) -> bool {
+    if !logical_irq.is_valid() || handler_kind == IrqHandlerKind::None {
+        return false;
+    }
+
+    provider_record_irq_action_request(logical_irq, device, handler_kind)
 }
 
 pub fn enable_mapped_source(plic: &Plic, source: u32, logical_irq: LogicalIrq) -> bool {
@@ -195,6 +208,24 @@ fn provider_resolve_hwirq(domain: &PlicIrqDomain, source: u32) -> Option<Logical
     }
 
     domain.native_resolve_hwirq(source)
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn provider_record_irq_action_request(
+    _logical_irq: LogicalIrq,
+    _device: DeviceRef,
+    _handler_kind: IrqHandlerKind,
+) -> bool {
+    true
+}
+
+#[cfg(plic_provider_linux_object)]
+fn provider_record_irq_action_request(
+    logical_irq: LogicalIrq,
+    device: DeviceRef,
+    handler_kind: IrqHandlerKind,
+) -> bool {
+    super::linux_plic_shim::record_irq_action_request(logical_irq, device, handler_kind)
 }
 
 #[cfg(not(plic_provider_linux_object))]

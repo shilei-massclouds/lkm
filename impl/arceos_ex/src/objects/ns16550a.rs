@@ -1142,7 +1142,7 @@ pub fn uart8250_port_registered() -> bool {
     }
 }
 
-#[cfg(checkpoint_handler_console_handoff)]
+#[allow(dead_code)]
 pub fn uart8250_port_device_ref() -> Option<DeviceRef> {
     let state = unsafe { (&raw const NS16550A_PROBE_STATE).as_ref().unwrap() };
     if state.port.registered {

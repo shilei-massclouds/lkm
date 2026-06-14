@@ -579,6 +579,10 @@ impl IrqHandlerRegistry {
             return false;
         }
 
+        if !super::plic_provider::record_irq_action_request(logical_irq, device, handler_kind) {
+            return false;
+        }
+
         let index = self.action_count;
         if self.actions[index]
             .setup_from_request(logical_irq, device, handler_kind)
