@@ -12,9 +12,10 @@ use super::{
 
 type LinuxInitcall = unsafe extern "C" fn() -> i32;
 type LinuxPlatformProbe = unsafe extern "C" fn(*mut c_void) -> i32;
+type LinuxCpuHotplugStartup = unsafe extern "C" fn(u32) -> i32;
 type LinuxIrqDomainAlloc = unsafe extern "C" fn(*mut c_void, u32, u32, *mut c_void) -> i32;
 type LinuxIrqFlowHandler = unsafe extern "C" fn(*mut c_void);
-type LinuxIrqChipEoi = unsafe extern "C" fn(*mut c_void);
+type LinuxIrqChipCallback = unsafe extern "C" fn(*mut c_void);
 
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
@@ -220,6 +221,8 @@ const LINUX_IRQ_DESC_IRQ_DATA_HWIRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFS
 const LINUX_IRQ_DESC_IRQ_DATA_COMMON_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 16;
 const LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 24;
 const LINUX_IRQ_DESC_IRQ_DATA_CHIP_DATA_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 48;
+const LINUX_IRQ_COMMON_EFFECTIVE_AFFINITY_OFFSET: usize = 32;
+const LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET: usize = 24;
 const LINUX_IRQ_CHIP_IRQ_EOI_OFFSET: usize = 72;
 const LINUX_THREAD_INFO_SIZE: usize = 2048;
 const LINUX_THREAD_INFO_CPU_OFFSET: usize = 32;
@@ -704,6 +707,11 @@ unsafe fn prepare_linux_irq_desc(
                 .cast::<usize>(),
             chip_data,
         );
+        core::ptr::write(
+            desc.add(LINUX_IRQ_COMMON_EFFECTIVE_AFFINITY_OFFSET)
+                .cast::<usize>(),
+            1,
+        );
     }
 }
 
@@ -838,22 +846,21 @@ unsafe fn call_linux_domain_alloc(domain: *mut c_void, virq: u32, hwirq: u32) ->
     unsafe { alloc(domain, virq, 1, (&raw mut fwspec).cast::<c_void>()) }
 }
 
-unsafe fn call_linux_chip_eoi(record: LinuxPlicLeafIrqRecord, irq_data: *mut c_void) -> bool {
+unsafe fn call_linux_chip_callback(
+    record: LinuxPlicLeafIrqRecord,
+    irq_data: *mut c_void,
+    offset: usize,
+) -> bool {
     if record.chip == 0 || irq_data.is_null() {
         return false;
     }
-    let eoi = unsafe {
-        core::ptr::read(
-            (record.chip as *const u8)
-                .add(LINUX_IRQ_CHIP_IRQ_EOI_OFFSET)
-                .cast::<usize>(),
-        )
-    };
-    if eoi == 0 {
+    let callback =
+        unsafe { core::ptr::read((record.chip as *const u8).add(offset).cast::<usize>()) };
+    if callback == 0 {
         return false;
     }
-    let eoi: LinuxIrqChipEoi = unsafe { core::mem::transmute(eoi) };
-    unsafe { eoi(irq_data) };
+    let callback: LinuxIrqChipCallback = unsafe { core::mem::transmute(callback) };
+    unsafe { callback(irq_data) };
     true
 }
 
@@ -866,6 +873,32 @@ fn ensure_linux_leaf_irq(domain: *mut c_void, hwirq: u32, virq: u32) -> Option<u
         return None;
     }
     linux_leaf_record_index_by_hwirq(hwirq)
+}
+
+pub fn enable_mapped_source(source: u32, logical_irq: LogicalIrq) -> bool {
+    if source == 0 || !logical_irq.is_valid() {
+        return false;
+    }
+    let domain = LINUX_PLIC_DOMAIN_PTR.load(Ordering::Acquire) as *mut c_void;
+    let Ok(virq) = u32::try_from(logical_irq.as_usize()) else {
+        return false;
+    };
+
+    prepare_linux_thread_info();
+    let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
+    let saved_tp = current_rust_tp_for_linux_call();
+    remember_rust_tp(saved_tp);
+    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+
+    let enabled = ensure_linux_leaf_irq(domain, source, virq).is_some_and(|index| {
+        let record = linux_leaf_record(index);
+        let irq_data = linux_leaf_irq_data_ptr(index);
+        unsafe { call_linux_chip_callback(record, irq_data, LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET) }
+    });
+
+    crate::arch::riscv64::csr::write_tp(saved_tp);
+    crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+    enabled
 }
 
 fn linux_thread_info_base() -> *mut u8 {
@@ -989,9 +1022,20 @@ pub extern "C" fn ___ratelimit() -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn __cpuhp_setup_state() -> i32 {
+pub extern "C" fn __cpuhp_setup_state(
+    _state: i32,
+    _name: *const u8,
+    invoke: bool,
+    startup: *mut c_void,
+    _teardown: *mut c_void,
+    _multi_instance: bool,
+) -> i32 {
     debug("linux plic shim: cpuhp\n");
     LINUX_PLIC_CPUHP_SEQ.store(next_event_seq(), Ordering::Release);
+    if invoke && !startup.is_null() {
+        let startup: LinuxCpuHotplugStartup = unsafe { core::mem::transmute(startup) };
+        return unsafe { startup(LINUX_BOOT_CPU_ID) };
+    }
     0
 }
 
@@ -1080,13 +1124,13 @@ pub extern "C" fn devm_platform_ioremap_resource() -> *mut c_void {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn disable_percpu_irq() {
-    trap("disable_percpu_irq")
+pub extern "C" fn disable_percpu_irq(_irq: u32) {
+    debug("linux plic shim: disable percpu irq\n");
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn enable_percpu_irq() {
-    trap("enable_percpu_irq")
+pub extern "C" fn enable_percpu_irq(_irq: u32, _irq_type: u32) {
+    debug("linux plic shim: enable percpu irq\n");
 }
 
 #[unsafe(no_mangle)]
@@ -1160,7 +1204,7 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
         crate::arch::riscv64::csr::write_tp(linux_tp);
     }
 
-    if unsafe { call_linux_chip_eoi(record, irq_data) } {
+    if unsafe { call_linux_chip_callback(record, irq_data, LINUX_IRQ_CHIP_IRQ_EOI_OFFSET) } {
         LINUX_PLIC_RUNTIME_COMPLETE_COUNT.fetch_add(1, Ordering::AcqRel);
         LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.store(record.hwirq, Ordering::Release);
     }

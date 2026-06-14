@@ -3201,7 +3201,12 @@ bridge 推进为 Linux-shaped leaf IRQ flow：`generic_handle_domain_irq` 校验
 Rust `tp` 查找现有 `PlicIrqDomain` logical IRQ；若该 hwirq 尚未建立 Linux leaf 视图，则调用 Linux 对象的
 `plic_irqdomain_ops.alloc`，让黑盒对象内部执行 `plic_irq_domain_translate -> plic_irqdomain_map -> irq_domain_set_info`。
 `irq_domain_set_info` 只作为薄 shim 记录 Linux 对象交出的 `plic_chip`、`handle_fasteoi_irq` 和 leaf `irq_desc/irq_data`
-视图，不承载 PLIC 业务语义。随后 flow handler 进入 `handle_fasteoi_irq`：先恢复 Rust `tp` 分发
+视图，不承载 PLIC 业务语义。UART source gate 打开也已从原生 PLIC MMIO 写入推进到 Linux chip callback：适配层先确保
+对应 hwirq 的 leaf mapping 已建立，再在 Linux `tp` 下调用 `plic_chip.irq_enable(irq_data)`，由 Linux 对象打开
+context enable bit 并保持 priority unmask 语义。`cpuhp_setup_state(..., invoke=true, startup=plic_starting_cpu, ...)`
+当前会立即调用 boot CPU startup，使 Linux 对象自己把当前 hart threshold 置为 `PLIC_ENABLE_THRESHOLD`；其中
+`enable_percpu_irq(parent_irq, trigger_type)` 暂作为 parent external IRQ gate 的受限 no-op，下游 root external input gate
+仍由 `arceos_ex` 既有 `InterruptStream` 打开。随后 flow handler 进入 `handle_fasteoi_irq`：先恢复 Rust `tp` 分发
 `IrqHandlerRegistry` 中的 UART action，再切回 Linux `tp` 调用 `plic_chip.irq_eoi(irq_data)`，由 Linux
 `plic_irq_eoi` 写回 claim register 完成 source。外层 Linux 调用窗口保存并恢复 SIE 与 `tp`，Linux `tp` 激活期间关闭
 本地中断，避免嵌套 trap 捕获 Linux `thread_info` 视图。
@@ -3213,7 +3218,7 @@ claim/dispatch/complete/zero-claim/loop-exit 计数闭合，说明黑盒 runtime
 callback 已经承接现有 UART action。
 
 这仍不是完整 Linux generic IRQ core 复用。当前只覆盖 QEMU/SiFive PLIC 的无 edge quirk、level IRQ 主线；
-`handle_edge_irq` 仍只是兼容入口，`plic_edge_chip.irq_ack`、disabled IRQ eoi 特殊路径、mask/unmask/enable/disable、
+`handle_edge_irq` 仍只是兼容入口，`plic_edge_chip.irq_ack`、disabled IRQ eoi 特殊路径、mask/unmask/disable、
 unmapped IRQ ratelimit/打印以及更完整 `irq_desc`/`irq_common_data` 行为仍归入后续排雷。下一轮应继续扩展这些边界，同时
 保持上层 UART/console/smoke 不感知 provider 差异。
 
@@ -3246,8 +3251,10 @@ unmapped IRQ ratelimit/打印以及更完整 `irq_desc`/`irq_common_data` 行为
    `chained_irq_enter/exit` 和 `riscv_get_intc_hwnode()` 的最小真实语义。Linux PLIC provider 不能绕过 RISC-V INTC
    直接成为 trap root handler。
 7. 生命周期范围：CPU hotplug、syscore suspend/resume、SMP affinity 和 edge interrupt quirk 在第一轮是否纳入强等价，
-   需要明确裁剪策略。若首轮限定为 boot CPU、DeviceTree、无 suspend 的受限语义，应在上接口表中记录哪些 callback 已注册但
-   暂不要求触发；若对象实际进入尚未实现的关键路径，应进入明确的 panic/fail 边界，而不是静默伪造成功。
+   需要明确裁剪策略。当前 `cpuhp_setup_state` 已按 Linux `invoke=true` 语义触发 boot CPU startup，满足 threshold
+   打开路径；parent `enable_percpu_irq` 仍是受限 no-op，真实 root external input gate 由现有 `InterruptStream` 控制。
+   若后续对象进入 suspend/resume、CPU offline 或非 boot CPU affinity 路径，应进入明确的 panic/fail 边界或补正式语义，
+   而不是静默伪造成功。
 8. 观测点对齐：Linux 二进制对象本身不能插桩修改，因此 claim、complete、zero-claim、dispatch、source gate 等现有
    checkpoint 需要决定挂在共同 IRQ core/adaptor 观察点，还是只比较外部可见效果。不能为了观测方便改变
    `irq-sifive-plic.o` 的 callback 顺序。

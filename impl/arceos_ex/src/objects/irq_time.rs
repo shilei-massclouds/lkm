@@ -24,7 +24,9 @@ const DEFAULT_TIMEBASE_HZ: u64 = 10_000_000;
 const IRQCHIP_RUN_RECORD_CAPACITY: usize = 8;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
+#[cfg(not(plic_provider_linux_object))]
 const PLIC_PRIORITY_BASE: usize = 0;
+#[cfg(not(plic_provider_linux_object))]
 const PLIC_PRIORITY_PER_ID: usize = 4;
 const PLIC_CONTEXT_ENABLE_BASE: usize = 0x2000;
 const PLIC_CONTEXT_ENABLE_SIZE: usize = 0x80;
@@ -2449,6 +2451,7 @@ impl Plic {
         any_dispatched
     }
 
+    #[cfg(not(plic_provider_linux_object))]
     fn enable_source(&self, source: u32) -> bool {
         if self.lifecycle.state() != State::Ready
             || !self.source_enable_ready
@@ -2476,6 +2479,25 @@ impl Plic {
         }
 
         unsafe { core::ptr::read_volatile(enable_addr as *const u32) & mask != 0 }
+    }
+
+    #[cfg(plic_provider_linux_object)]
+    fn enable_mapped_source(&self, source: u32, logical_irq: LogicalIrq) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || !self.source_enable_ready
+            || source == 0
+            || source > self.source_count
+            || !logical_irq.is_valid()
+        {
+            return false;
+        }
+
+        crate::objects::linux_plic_shim::enable_mapped_source(source, logical_irq)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    fn enable_mapped_source(&self, source: u32, _logical_irq: LogicalIrq) -> bool {
+        self.enable_source(source)
     }
 
     #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
@@ -2665,7 +2687,7 @@ impl PlicIrqMapping {
             || !self.source_gate_closed
             || !self.source_enable_deferred
             || self.source_enabled
-            || !plic.enable_source(self.source)
+            || !plic.enable_mapped_source(self.source, self.logical_irq)
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -3045,6 +3067,7 @@ fn plic_context_threshold_addr(membase: usize, context_id: usize) -> Option<usiz
         .checked_add(PLIC_CONTEXT_THRESHOLD)
 }
 
+#[cfg(not(plic_provider_linux_object))]
 fn plic_priority_addr(membase: usize, source: u32) -> Option<usize> {
     membase.checked_add(PLIC_PRIORITY_BASE)?.checked_add(
         usize::try_from(source)
@@ -3053,6 +3076,7 @@ fn plic_priority_addr(membase: usize, source: u32) -> Option<usize> {
     )
 }
 
+#[cfg(not(plic_provider_linux_object))]
 fn plic_source_enable_addr(enable_base: usize, source: u32) -> Option<usize> {
     enable_base.checked_add(
         usize::try_from(source / 32)
