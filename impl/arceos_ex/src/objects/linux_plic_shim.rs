@@ -69,6 +69,11 @@ static LINUX_PLIC_RUNTIME_LOOP_EXIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_SAVED_RUST_TP: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE: AtomicU32 = AtomicU32::new(0);
 static LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE: AtomicU32 = AtomicU32::new(0);
+static LINUX_PLIC_UNMAPPED_IRQ_FAILURE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_UNMAPPED_IRQ_LAST_SOURCE: AtomicU32 = AtomicU32::new(0);
+static LINUX_PLIC_UNMAPPED_IRQ_LAST_ERRNO: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_UNMAPPED_IRQ_EXERCISE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_RATELIMIT_DEFERRED_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_ENABLE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_DISABLE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_MASK_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -258,6 +263,11 @@ pub struct LinuxPlicBoundaryFacts {
     pub of_match_calls: usize,
     pub of_property_ndev_calls: usize,
     pub heap_used: usize,
+    pub unmapped_irq_failure_count: usize,
+    pub unmapped_irq_last_source: u32,
+    pub unmapped_irq_last_errno: usize,
+    pub unmapped_irq_exercise_successes: usize,
+    pub ratelimit_deferred_count: usize,
     pub chip_enable_count: usize,
     pub chip_disable_count: usize,
     pub chip_mask_count: usize,
@@ -307,6 +317,8 @@ const LINUX_TASK_STACK_CANARY_OFFSET: usize = 1232;
 const LINUX_BOOT_CPU_ID: u32 = 0;
 const LINUX_IRQ_TYPE_EDGE_RISING: u32 = 1;
 const LINUX_IRQ_TYPE_LEVEL_HIGH: u32 = 4;
+const LINUX_EINVAL: i32 = -22;
+const LINUX_EINVAL_ERRNO: usize = 22;
 const LINUX_PLIC_PRIV_QUIRKS_OFFSET: usize = 32;
 const LINUX_PLIC_QUIRK_EDGE_INTERRUPT: usize = 1;
 const DEBUG_LINUX_PLIC_SHIM: bool = false;
@@ -496,6 +508,12 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         of_match_calls: LINUX_PLIC_OF_MATCH_CALLS.load(Ordering::Acquire),
         of_property_ndev_calls: LINUX_PLIC_OF_PROPERTY_NDEV_CALLS.load(Ordering::Acquire),
         heap_used: LINUX_PLIC_HEAP_OFFSET.load(Ordering::Acquire),
+        unmapped_irq_failure_count: LINUX_PLIC_UNMAPPED_IRQ_FAILURE_COUNT.load(Ordering::Acquire),
+        unmapped_irq_last_source: LINUX_PLIC_UNMAPPED_IRQ_LAST_SOURCE.load(Ordering::Acquire),
+        unmapped_irq_last_errno: LINUX_PLIC_UNMAPPED_IRQ_LAST_ERRNO.load(Ordering::Acquire),
+        unmapped_irq_exercise_successes: LINUX_PLIC_UNMAPPED_IRQ_EXERCISE_SUCCESSES
+            .load(Ordering::Acquire),
+        ratelimit_deferred_count: LINUX_PLIC_RATELIMIT_DEFERRED_COUNT.load(Ordering::Acquire),
         chip_enable_count: LINUX_PLIC_CHIP_ENABLE_COUNT.load(Ordering::Acquire),
         chip_disable_count: LINUX_PLIC_CHIP_DISABLE_COUNT.load(Ordering::Acquire),
         chip_mask_count: LINUX_PLIC_CHIP_MASK_COUNT.load(Ordering::Acquire),
@@ -921,6 +939,23 @@ fn linux_leaf_record(index: usize) -> LinuxPlicLeafIrqRecord {
     unsafe { core::ptr::read(records.add(index)) }
 }
 
+fn linux_unmapped_hwirq_candidate() -> Option<u32> {
+    let mut source = LINUX_PLIC_SOURCE_COUNT.load(Ordering::Acquire) as u32;
+    while source != 0 {
+        if linux_leaf_record_index_by_hwirq(source).is_none() {
+            return Some(source);
+        }
+        source -= 1;
+    }
+    None
+}
+
+fn note_unmapped_irq_failure(source: u32, ret: i32) {
+    LINUX_PLIC_UNMAPPED_IRQ_FAILURE_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_UNMAPPED_IRQ_LAST_SOURCE.store(source, Ordering::Release);
+    LINUX_PLIC_UNMAPPED_IRQ_LAST_ERRNO.store(ret.unsigned_abs() as usize, Ordering::Release);
+}
+
 unsafe fn linux_update_leaf_record_from_desc(index: usize) -> LinuxPlicLeafIrqRecord {
     let desc = linux_leaf_desc_ptr(index);
     let mut record = linux_leaf_record(index);
@@ -1151,6 +1186,32 @@ pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -
     callbacks_ok
 }
 
+pub fn exercise_unmapped_irq_boundary() -> bool {
+    let domain = LINUX_PLIC_DOMAIN_PTR.load(Ordering::Acquire) as *mut c_void;
+    let Some(source) = linux_unmapped_hwirq_candidate() else {
+        return false;
+    };
+
+    prepare_linux_thread_info();
+    let saved_sstatus = crate::arch::riscv64::csr::save_and_disable_supervisor_interrupts();
+    let saved_tp = current_rust_tp_for_linux_call();
+    remember_rust_tp(saved_tp);
+    crate::arch::riscv64::csr::write_tp(linux_thread_info_base() as usize);
+
+    let ret = generic_handle_domain_irq_inner(domain, source as usize, false);
+
+    crate::arch::riscv64::csr::write_tp(saved_tp);
+    crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
+
+    let ok = ret == LINUX_EINVAL
+        && LINUX_PLIC_UNMAPPED_IRQ_LAST_SOURCE.load(Ordering::Acquire) == source
+        && LINUX_PLIC_UNMAPPED_IRQ_LAST_ERRNO.load(Ordering::Acquire) == LINUX_EINVAL_ERRNO;
+    if ok {
+        LINUX_PLIC_UNMAPPED_IRQ_EXERCISE_SUCCESSES.fetch_add(1, Ordering::AcqRel);
+    }
+    ok
+}
+
 unsafe fn exercise_uart_leaf_edge_ack(index: usize) -> bool {
     let desc = linux_leaf_desc_ptr(index);
     let irq_data = linux_leaf_irq_data_ptr(index);
@@ -1307,7 +1368,8 @@ pub static of_fwnode_ops: [usize; 8] = [0; 8];
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ___ratelimit() -> i32 {
-    trap("___ratelimit")
+    LINUX_PLIC_RATELIMIT_DEFERRED_COUNT.fetch_add(1, Ordering::AcqRel);
+    0
 }
 
 #[unsafe(no_mangle)]
@@ -1424,16 +1486,26 @@ pub extern "C" fn enable_percpu_irq(_irq: u32, _irq_type: u32) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn generic_handle_domain_irq(domain: *mut c_void, hwirq: usize) -> i32 {
+    generic_handle_domain_irq_inner(domain, hwirq, true)
+}
+
+fn generic_handle_domain_irq_inner(
+    domain: *mut c_void,
+    hwirq: usize,
+    record_runtime_claim: bool,
+) -> i32 {
     let expected_domain = LINUX_PLIC_DOMAIN_PTR.load(Ordering::Acquire) as *mut c_void;
     if domain.is_null() || domain != expected_domain || hwirq == 0 {
-        return -22;
+        return LINUX_EINVAL;
     }
 
     let Ok(source) = u32::try_from(hwirq) else {
-        return -22;
+        return LINUX_EINVAL;
     };
-    LINUX_PLIC_RUNTIME_CLAIM_COUNT.fetch_add(1, Ordering::AcqRel);
-    LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE.store(source, Ordering::Release);
+    if record_runtime_claim {
+        LINUX_PLIC_RUNTIME_CLAIM_COUNT.fetch_add(1, Ordering::AcqRel);
+        LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE.store(source, Ordering::Release);
+    }
 
     let linux_tp = crate::arch::riscv64::csr::read_tp();
     let rust_tp = LINUX_PLIC_SAVED_RUST_TP.load(Ordering::Acquire);
@@ -1444,22 +1516,23 @@ pub extern "C" fn generic_handle_domain_irq(domain: *mut c_void, hwirq: usize) -
     let Some(logical_irq) = ctx.plic_irq_domain.resolve_hwirq(source) else {
         crate::arch::riscv64::csr::disable_supervisor_interrupts();
         crate::arch::riscv64::csr::write_tp(linux_tp);
-        return -22;
+        note_unmapped_irq_failure(source, LINUX_EINVAL);
+        return LINUX_EINVAL;
     };
     let Ok(virq) = u32::try_from(logical_irq.as_usize()) else {
         crate::arch::riscv64::csr::disable_supervisor_interrupts();
         crate::arch::riscv64::csr::write_tp(linux_tp);
-        return -22;
+        return LINUX_EINVAL;
     };
     crate::arch::riscv64::csr::disable_supervisor_interrupts();
     crate::arch::riscv64::csr::write_tp(linux_tp);
 
     let Some(index) = ensure_linux_leaf_irq(domain, source, virq) else {
-        return -22;
+        return LINUX_EINVAL;
     };
     let record = linux_leaf_record(index);
     if record.flow_handler == 0 {
-        return -22;
+        return LINUX_EINVAL;
     }
     let handler: LinuxIrqFlowHandler = unsafe { core::mem::transmute(record.flow_handler) };
     let desc = linux_leaf_desc_ptr(index).cast::<c_void>();

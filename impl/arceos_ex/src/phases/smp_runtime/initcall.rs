@@ -129,7 +129,8 @@ fn exercise_linux_plic_uart_chip_callbacks() -> EventResult {
     if !crate::objects::linux_plic_shim::exercise_uart_leaf_chip_callbacks(
         crate::objects::ns16550a::uart8250_port_irq_source(),
         crate::objects::ns16550a::uart8250_port_logical_irq(),
-    ) {
+    ) || !crate::objects::linux_plic_shim::exercise_unmapped_irq_boundary()
+    {
         return failed_condition(
             LifecycleEvent::Setup,
             State::Base,

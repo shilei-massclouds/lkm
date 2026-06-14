@@ -70,6 +70,20 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts) {
     kunit::diag_usize("of_match_calls", facts.of_match_calls);
     kunit::diag_usize("of_property_ndev_calls", facts.of_property_ndev_calls);
     kunit::diag_usize("heap_used", facts.heap_used);
+    kunit::diag_usize(
+        "unmapped_irq_failure_count",
+        facts.unmapped_irq_failure_count,
+    );
+    kunit::diag_usize(
+        "unmapped_irq_last_source",
+        facts.unmapped_irq_last_source as usize,
+    );
+    kunit::diag_usize("unmapped_irq_last_errno", facts.unmapped_irq_last_errno);
+    kunit::diag_usize(
+        "unmapped_irq_exercise_successes",
+        facts.unmapped_irq_exercise_successes,
+    );
+    kunit::diag_usize("ratelimit_deferred_count", facts.ratelimit_deferred_count);
     kunit::diag_usize("chip_enable_count", facts.chip_enable_count);
     kunit::diag_usize("chip_disable_count", facts.chip_disable_count);
     kunit::diag_usize("chip_mask_count", facts.chip_mask_count);
@@ -130,6 +144,10 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
         && facts.of_match_calls != 0
         && facts.of_property_ndev_calls != 0
         && facts.heap_used != 0
+        && facts.unmapped_irq_failure_count != 0
+        && facts.unmapped_irq_last_source != 0
+        && facts.unmapped_irq_last_errno == 22
+        && facts.unmapped_irq_exercise_successes != 0
         && facts.chip_enable_count >= 2
         && facts.chip_disable_count != 0
         && facts.chip_mask_count != 0
