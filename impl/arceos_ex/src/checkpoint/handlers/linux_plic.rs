@@ -166,6 +166,18 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts) {
         "action_request_match_count",
         facts.action_request_match_count,
     );
+    kunit::diag_usize(
+        "action_chain_install_count",
+        facts.action_chain_install_count,
+    );
+    kunit::diag_usize("action_chain_match_count", facts.action_chain_match_count);
+    kunit::diag_usize("action_chain_last_irq", facts.action_chain_last_irq);
+    kunit::diag_usize("action_chain_last_action", facts.action_chain_last_action);
+    kunit::diag_usize("action_chain_last_device", facts.action_chain_last_device);
+    kunit::diag_usize(
+        "action_chain_last_handler_kind",
+        facts.action_chain_last_handler_kind,
+    );
 }
 
 fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
@@ -246,6 +258,13 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
             == ns16550a::uart8250_port_device_ref().map_or(usize::MAX, |device| device.index())
         && facts.action_request_last_handler_kind == linux_irq_handler_kind_ns16550a_uart()
         && facts.action_request_match_count != 0
+        && facts.action_chain_install_count != 0
+        && facts.action_chain_match_count != 0
+        && facts.action_chain_last_irq == ns16550a::uart8250_port_logical_irq().as_usize()
+        && facts.action_chain_last_action != 0
+        && facts.action_chain_last_device
+            == ns16550a::uart8250_port_device_ref().map_or(usize::MAX, |device| device.index())
+        && facts.action_chain_last_handler_kind == linux_irq_handler_kind_ns16550a_uart()
 }
 
 fn strictly_before(before: usize, after: usize) -> bool {

@@ -109,6 +109,12 @@ static LINUX_PLIC_ACTION_REQUEST_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_ACTION_REQUEST_LAST_DEVICE: AtomicUsize = AtomicUsize::new(usize::MAX);
 static LINUX_PLIC_ACTION_REQUEST_LAST_HANDLER_KIND: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_ACTION_REQUEST_MATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_ACTION_CHAIN_INSTALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_ACTION_CHAIN_MATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_ACTION_CHAIN_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_ACTION_CHAIN_LAST_ACTION: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE: AtomicUsize = AtomicUsize::new(usize::MAX);
+static LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -183,6 +189,7 @@ struct LinuxPlicLeafIrqRecord {
     hwirq: u32,
     chip: usize,
     flow_handler: usize,
+    action: usize,
     status: u32,
 }
 
@@ -194,9 +201,18 @@ impl LinuxPlicLeafIrqRecord {
             hwirq: 0,
             chip: 0,
             flow_handler: 0,
+            action: 0,
             status: 0,
         }
     }
+}
+
+#[repr(C)]
+struct LinuxIrqActionView {
+    irq: usize,
+    device: usize,
+    handler_kind: usize,
+    next: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -328,6 +344,12 @@ pub struct LinuxPlicBoundaryFacts {
     pub action_request_last_device: usize,
     pub action_request_last_handler_kind: usize,
     pub action_request_match_count: usize,
+    pub action_chain_install_count: usize,
+    pub action_chain_match_count: usize,
+    pub action_chain_last_irq: usize,
+    pub action_chain_last_action: usize,
+    pub action_chain_last_device: usize,
+    pub action_chain_last_handler_kind: usize,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -392,6 +414,12 @@ static mut LINUX_PLIC_IRQ_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_DO
 static mut LINUX_PLIC_INTC_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_DOMAIN_SIZE];
 static mut LINUX_PLIC_PARENT_IRQ_DESC: [u8; LINUX_IRQ_DESC_SIZE] = [0; LINUX_IRQ_DESC_SIZE];
 static mut LINUX_PLIC_PARENT_IRQ_CHIP: [u8; LINUX_IRQ_CHIP_SIZE] = [0; LINUX_IRQ_CHIP_SIZE];
+static mut LINUX_PLIC_IRQ_ACTION_VIEW: LinuxIrqActionView = LinuxIrqActionView {
+    irq: 0,
+    device: usize::MAX,
+    handler_kind: 0,
+    next: 0,
+};
 static mut LINUX_PLIC_LEAF_IRQ_RECORDS: [LinuxPlicLeafIrqRecord; LINUX_PLIC_LEAF_IRQ_CAPACITY] =
     [const { LinuxPlicLeafIrqRecord::empty() }; LINUX_PLIC_LEAF_IRQ_CAPACITY];
 static mut LINUX_PLIC_LEAF_IRQ_DESCS: [LinuxIrqDescView; LINUX_PLIC_LEAF_IRQ_CAPACITY] = [const {
@@ -610,6 +638,13 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         action_request_last_handler_kind: LINUX_PLIC_ACTION_REQUEST_LAST_HANDLER_KIND
             .load(Ordering::Acquire),
         action_request_match_count: LINUX_PLIC_ACTION_REQUEST_MATCH_COUNT.load(Ordering::Acquire),
+        action_chain_install_count: LINUX_PLIC_ACTION_CHAIN_INSTALL_COUNT.load(Ordering::Acquire),
+        action_chain_match_count: LINUX_PLIC_ACTION_CHAIN_MATCH_COUNT.load(Ordering::Acquire),
+        action_chain_last_irq: LINUX_PLIC_ACTION_CHAIN_LAST_IRQ.load(Ordering::Acquire),
+        action_chain_last_action: LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.load(Ordering::Acquire),
+        action_chain_last_device: LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE.load(Ordering::Acquire),
+        action_chain_last_handler_kind: LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND
+            .load(Ordering::Acquire),
     }
 }
 
@@ -1098,6 +1133,20 @@ pub fn record_irq_action_request(
     LINUX_PLIC_ACTION_REQUEST_LAST_DEVICE.store(device.index(), Ordering::Release);
     LINUX_PLIC_ACTION_REQUEST_LAST_HANDLER_KIND
         .store(linux_irq_handler_kind_code(handler_kind), Ordering::Release);
+    unsafe {
+        let action = (&raw mut LINUX_PLIC_IRQ_ACTION_VIEW).as_mut().unwrap();
+        action.irq = logical_irq.as_usize();
+        action.device = device.index();
+        action.handler_kind = linux_irq_handler_kind_code(handler_kind);
+        action.next = 0;
+        let action_ptr = action as *mut LinuxIrqActionView as usize;
+        LINUX_PLIC_ACTION_CHAIN_INSTALL_COUNT.fetch_add(1, Ordering::AcqRel);
+        LINUX_PLIC_ACTION_CHAIN_LAST_IRQ.store(logical_irq.as_usize(), Ordering::Release);
+        LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.store(action_ptr, Ordering::Release);
+        LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE.store(device.index(), Ordering::Release);
+        LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND
+            .store(linux_irq_handler_kind_code(handler_kind), Ordering::Release);
+    }
     true
 }
 
@@ -1124,9 +1173,19 @@ fn note_linux_leaf_action_view(
     {
         return false;
     }
+    if record.action == 0
+        || LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.load(Ordering::Acquire) != record.action
+        || LINUX_PLIC_ACTION_CHAIN_LAST_IRQ.load(Ordering::Acquire) != record.virq as usize
+        || LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE.load(Ordering::Acquire) != action.device().index()
+        || LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND.load(Ordering::Acquire)
+            != linux_irq_handler_kind_code(action.handler_kind())
+    {
+        return false;
+    }
 
     LINUX_PLIC_LEAF_ACTION_PREPARE_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_ACTION_REQUEST_MATCH_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_ACTION_CHAIN_MATCH_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_LEAF_ACTION_LAST_IRQ.store(record.virq as usize, Ordering::Release);
     LINUX_PLIC_LEAF_ACTION_LAST_DEPTH.store(LINUX_IRQ_ACTION_DEPTH_ENABLED, Ordering::Release);
     LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_KIND.store(
@@ -1190,6 +1249,7 @@ fn linux_store_leaf_irq_record(
                 hwirq,
                 chip,
                 flow_handler,
+                action: LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.load(Ordering::Acquire),
                 status: 0,
             },
         );
