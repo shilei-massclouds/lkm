@@ -101,6 +101,21 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts) {
         "edge_callback_exercise_successes",
         facts.edge_callback_exercise_successes,
     );
+    kunit::diag_usize("parent_desc_prepare_count", facts.parent_desc_prepare_count);
+    kunit::diag_usize("parent_irq_data_get_count", facts.parent_irq_data_get_count);
+    kunit::diag_usize(
+        "parent_enable_percpu_count",
+        facts.parent_enable_percpu_count,
+    );
+    kunit::diag_usize(
+        "parent_enable_percpu_last_irq",
+        facts.parent_enable_percpu_last_irq,
+    );
+    kunit::diag_usize(
+        "parent_enable_percpu_last_type",
+        facts.parent_enable_percpu_last_type as usize,
+    );
+    kunit::diag_usize("parent_irq_eoi_count", facts.parent_irq_eoi_count);
 }
 
 fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
@@ -158,6 +173,11 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
         && facts.chip_edge_ack_count != 0
         && facts.chip_callback_exercise_successes != 0
         && facts.edge_callback_exercise_successes != 0
+        && facts.parent_desc_prepare_count != 0
+        && facts.parent_irq_data_get_count != 0
+        && facts.parent_enable_percpu_count != 0
+        && facts.parent_enable_percpu_last_irq == facts.parent_irq
+        && facts.parent_enable_percpu_last_type == 0
 }
 
 fn strictly_before(before: usize, after: usize) -> bool {

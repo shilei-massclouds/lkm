@@ -85,6 +85,12 @@ static LINUX_PLIC_CHIP_DISABLED_EOI_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_EDGE_ACK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_CALLBACK_EXERCISE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_EDGE_CALLBACK_EXERCISE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_PARENT_DESC_PREPARE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_PARENT_IRQ_DATA_GET_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_PARENT_ENABLE_PERCPU_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_TYPE: AtomicU32 = AtomicU32::new(0);
+static LINUX_PLIC_PARENT_IRQ_EOI_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -279,6 +285,12 @@ pub struct LinuxPlicBoundaryFacts {
     pub chip_edge_ack_count: usize,
     pub chip_callback_exercise_successes: usize,
     pub edge_callback_exercise_successes: usize,
+    pub parent_desc_prepare_count: usize,
+    pub parent_irq_data_get_count: usize,
+    pub parent_enable_percpu_count: usize,
+    pub parent_enable_percpu_last_irq: usize,
+    pub parent_enable_percpu_last_type: u32,
+    pub parent_irq_eoi_count: usize,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -527,6 +539,14 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
             .load(Ordering::Acquire),
         edge_callback_exercise_successes: LINUX_PLIC_EDGE_CALLBACK_EXERCISE_SUCCESSES
             .load(Ordering::Acquire),
+        parent_desc_prepare_count: LINUX_PLIC_PARENT_DESC_PREPARE_COUNT.load(Ordering::Acquire),
+        parent_irq_data_get_count: LINUX_PLIC_PARENT_IRQ_DATA_GET_COUNT.load(Ordering::Acquire),
+        parent_enable_percpu_count: LINUX_PLIC_PARENT_ENABLE_PERCPU_COUNT.load(Ordering::Acquire),
+        parent_enable_percpu_last_irq: LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_IRQ
+            .load(Ordering::Acquire),
+        parent_enable_percpu_last_type: LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_TYPE
+            .load(Ordering::Acquire),
+        parent_irq_eoi_count: LINUX_PLIC_PARENT_IRQ_EOI_COUNT.load(Ordering::Acquire),
     }
 }
 
@@ -769,6 +789,7 @@ fn prepare_linux_thread_info() {
 }
 
 fn prepare_linux_parent_irq_desc() {
+    LINUX_PLIC_PARENT_DESC_PREPARE_COUNT.fetch_add(1, Ordering::AcqRel);
     unsafe {
         let desc = (&raw mut LINUX_PLIC_PARENT_IRQ_DESC).cast::<u8>();
         let chip = (&raw mut LINUX_PLIC_PARENT_IRQ_CHIP).cast::<u8>();
@@ -1275,7 +1296,9 @@ fn remember_rust_tp(tp: usize) {
     }
 }
 
-extern "C" fn linux_plic_parent_irq_eoi(_data: *mut c_void) {}
+extern "C" fn linux_plic_parent_irq_eoi(_data: *mut c_void) {
+    LINUX_PLIC_PARENT_IRQ_EOI_COUNT.fetch_add(1, Ordering::AcqRel);
+}
 
 #[unsafe(no_mangle)]
 pub static mut __cpu_online_mask: [usize; 1] = [1];
@@ -1483,6 +1506,9 @@ pub extern "C" fn disable_percpu_irq(_irq: u32) {
 #[unsafe(no_mangle)]
 pub extern "C" fn enable_percpu_irq(_irq: u32, _irq_type: u32) {
     debug("linux plic shim: enable percpu irq\n");
+    LINUX_PLIC_PARENT_ENABLE_PERCPU_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_IRQ.store(_irq as usize, Ordering::Release);
+    LINUX_PLIC_PARENT_ENABLE_PERCPU_LAST_TYPE.store(_irq_type, Ordering::Release);
 }
 
 #[unsafe(no_mangle)]
@@ -1714,6 +1740,7 @@ pub extern "C" fn irq_find_matching_fwspec(_fwspec: *const c_void, _bus_token: u
 pub extern "C" fn irq_get_irq_data(irq: u32) -> *mut c_void {
     let parent = LINUX_PLIC_PARENT_IRQ.load(Ordering::Acquire);
     if parent != 0 && irq as usize == parent {
+        LINUX_PLIC_PARENT_IRQ_DATA_GET_COUNT.fetch_add(1, Ordering::AcqRel);
         prepare_linux_parent_irq_desc();
         let desc = (&raw mut LINUX_PLIC_PARENT_IRQ_DESC).cast::<u8>();
         return linux_irq_data_from_desc(desc);

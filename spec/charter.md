@@ -3215,8 +3215,9 @@ Rust `tp` 查找现有 `PlicIrqDomain` logical IRQ；若该 hwirq 尚未建立 L
 对应 hwirq 的 leaf mapping 已建立，再在 Linux `tp` 下调用 `plic_chip.irq_enable(irq_data)`，由 Linux 对象打开
 context enable bit 并保持 priority unmask 语义。`cpuhp_setup_state(..., invoke=true, startup=plic_starting_cpu, ...)`
 当前会立即调用 boot CPU startup，使 Linux 对象自己把当前 hart threshold 置为 `PLIC_ENABLE_THRESHOLD`；其中
-`enable_percpu_irq(parent_irq, trigger_type)` 暂作为 parent external IRQ gate 的受限 no-op，下游 root external input gate
-仍由 `arceos_ex` 既有 `InterruptStream` 打开。随后显式执行 Linux PLIC UART chip callback exercise event：基于同一
+`irq_get_trigger_type(parent_irq)` 通过 `irq_get_irq_data(parent_irq)` 读取 parent `irq_desc/irq_data` 视图，
+`enable_percpu_irq(parent_irq, trigger_type)` 记录 parent external IRQ gate 的 Linux generic-core 数据面。真实 root
+external input gate 仍由 `arceos_ex` 既有 `InterruptStream` 打开。随后显式执行 Linux PLIC UART chip callback exercise event：基于同一
 UART leaf `irq_data` 调用 Linux `plic_chip.irq_disable -> irq_enable -> irq_mask -> irq_unmask`，并临时设置
 `IRQD_IRQ_DISABLED` 调用一次 `plic_chip.irq_eoi`，以验证黑盒 chip callback 服务面、交换数据布局和 disabled IRQ eoi
 特殊分支是否可用；同一 event 还临时开启 leaf 所属 `plic_priv` 的 `PLIC_QUIRK_EDGE_INTERRUPT`，调用 Linux object
@@ -3232,7 +3233,10 @@ hwirq fail boundary。chip callback event 最终恢复为 enabled/unmasked 状�
 `linux_plic.boundary_facts` checkpoint 只读观察它留下的计数事实。随后 flow handler 进入 `handle_fasteoi_irq`：先恢复 Rust `tp` 分发
 `IrqHandlerRegistry` 中的 UART action，再切回 Linux `tp` 调用 `plic_chip.irq_eoi(irq_data)`，由 Linux
 `plic_irq_eoi` 写回 claim register 完成 source。外层 Linux 调用窗口保存并恢复 SIE 与 `tp`，Linux `tp` 激活期间关闭
-本地中断，避免嵌套 trap 捕获 Linux `thread_info` 视图。
+本地中断，避免嵌套 trap 捕获 Linux `thread_info` 视图。parent chained handler 的 `irq_desc/irq_chip` 目前提供
+fasteoi 形态的最小视图，`chained_irq_enter()` 因 parent chip 有 `irq_eoi` 而不做 entry mask/ack，`chained_irq_exit()`
+调用 parent EOI 并被 checkpoint 记录；这验证 PLIC 没有绕过 RISC-V root INTC parent IRQ 关系，但仍不等价于完整
+Linux root INTC irqchip 复用。
 
 这一路径已经通过 `make -C impl/arceos_ex run APP=smoke PLIC_PROVIDER=linux-object PROBE=linux-plic,uart-irq-chain`
 验证：`linux_plic.boundary_facts` 和 `uart_irq_chain.observer_real_path` 均通过，smoke 结果为
@@ -3242,6 +3246,9 @@ callback 已经承接现有 UART action；同一只读 checkpoint 输出还约�
 `irq_enable/irq_disable/irq_mask/irq_unmask` 至少各成功执行一次，disabled IRQ eoi 分支至少执行一次，并且
 edge synthetic boundary 中 `irq_set_type` 至少完成 edge/level 两次切换、`plic_edge_chip.irq_ack` 至少执行一次。
 unmapped IRQ fail boundary 中，checkpoint 还要求 failure count 非零、last errno 为 22，并且 exercise success 非零。
+parent/chained IRQ 边界中，checkpoint 还要求 parent desc 至少被准备、`irq_get_irq_data(parent)` 至少被读取、
+`enable_percpu_irq(parent, type)` 至少被调用一次，且 parent IRQ 号和 trigger type 与当前 QEMU/RISC-V root external
+IRQ 事实一致；parent EOI 计数作为 chained handler runtime 观察事实输出。
 
 这仍不是完整 Linux generic IRQ core 复用。当前只覆盖 QEMU/SiFive PLIC 的无 edge quirk、level IRQ 主线；
 `plic_edge_chip.irq_ack` 和 unmapped IRQ fail 已通过 synthetic boundary exercise 覆盖，但真实 edge 平台 runtime
@@ -3280,12 +3287,13 @@ callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecyc
    `irq_desc`/`irq_common_data` 语义；unmapped IRQ ratelimit/打印保持 deferred。
    这些边界共同保证
    `claim -> dispatch -> eoi/ack -> next claim -> zero claim exit` 的顺序和特殊路径等价。
-6. chained handler 与 root INTC 关系：需要确认 parent `RV_IRQ_EXT` logical IRQ、`irq_desc`、parent chip、
-   `chained_irq_enter/exit` 和 `riscv_get_intc_hwnode()` 的最小真实语义。Linux PLIC provider 不能绕过 RISC-V INTC
-   直接成为 trap root handler。
+6. chained handler 与 root INTC 关系：parent `RV_IRQ_EXT` logical IRQ、`irq_get_irq_data(parent)`、
+   `enable_percpu_irq(parent, trigger_type)`、parent fasteoi chip 和 `chained_irq_exit -> parent irq_eoi` 的最小事实
+   已被 checkpoint 覆盖。Linux PLIC provider 当前没有绕过 RISC-V INTC 直接成为 trap root handler；但完整 parent
+   irqchip、entry mask/ack、root INTC domain 以及多 parent IRQ 语义仍未复用，后续若进入这些路径需要继续补正式语义。
 7. 生命周期范围：CPU hotplug、syscore suspend/resume、SMP affinity 和 edge interrupt quirk 在第一轮是否纳入强等价，
    需要明确裁剪策略。当前 `cpuhp_setup_state` 已按 Linux `invoke=true` 语义触发 boot CPU startup，满足 threshold
-   打开路径；parent `enable_percpu_irq` 仍是受限 no-op，真实 root external input gate 由现有 `InterruptStream` 控制。
+   打开路径；parent `enable_percpu_irq` 目前记录 Linux 数据面但不直接控制硬件 gate，真实 root external input gate 由现有 `InterruptStream` 控制。
    若后续对象进入 suspend/resume、CPU offline 或非 boot CPU affinity 路径，应进入明确的 panic/fail 边界或补正式语义，
    而不是静默伪造成功。
 8. 观测点对齐：Linux 二进制对象本身不能插桩修改，因此 claim、complete、zero-claim、dispatch、source gate 等现有
