@@ -3194,8 +3194,9 @@ interrupt、执行 UART leaf chip callback exercise、执行 unmapped IRQ fail b
 的 MMIO claim/complete/source enable 和 source -> logical IRQ 映射实现；Linux object provider 在该 contract 下调用
 `irq-sifive-plic.o` 的 initcall6/platform match/probe、注册出的 chained handler、`plic_chip.irq_enable` 和 shim 记录的
 运行期事实。这一步不试图把上接口做成厚 adaptor，而是先保证 InitcallPhase 和上层 IRQ/UART/console 路径不感知 provider
-差异；当前 chip callback exercise 与 unmapped fail exercise 已拆成两个独立 provider event，后续重点转向更完整
-generic IRQ core 语义。
+差异；当前 chip callback exercise 与 unmapped fail exercise 已拆成两个独立 provider event。PLIC 首轮二进制复用
+到此冻结为基线，后续不再主动追求完整 generic IRQ core 复用；只有新目标实际踩到 deferred 路径时，才按“踩雷/排雷”
+方式补最小正式语义。
 
 本阶段关于上接口的结论是：`irq-sifive-plic.o` 的初始化入口层上接口集中在 Linux `platform_driver`，核心回调是
 `plic_driver.probe`。`irq_domain`、`irq_chip`、chained handler 和 CPU/syscore 回调是 `probe` 成功后注册出的 IRQ
@@ -3275,8 +3276,8 @@ disabled bit，depth 仍为 0。
 `plic_edge_chip.irq_ack` 和 unmapped IRQ fail 已通过 synthetic boundary exercise 覆盖，但真实 edge 平台 runtime
 以及更完整 `irq_desc`/`irq_common_data` 行为仍归入后续排雷；unmapped IRQ 的 ratelimit/打印属于非关键提示能力，
 当前保持 deferred。`mask/unmask/disable/disabled-eoi/edge-ack/unmapped-fail` 目前只属于显式 exercise event 覆盖的
-callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecycle，还需要再补真实路径语义。
-下一轮应继续扩展这些边界，同时保持上层 UART/console/smoke 不感知 provider 差异。
+callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecycle，还需要再补真实路径语义。PLIC 首轮
+基线在这里收尾，不再为了补齐 deferred 项而继续主动扩展这些边界；后续只有新目标实际踩到这些路径，才继续补充。
 
 当前阶段差异分类如下。已覆盖：Linux initcall6、platform driver register/match/probe、PLIC domain/chained
 handler 注册、UART leaf mapping、Linux PLIC claim loop、`handle_fasteoi_irq -> plic_chip.irq_eoi` runtime、UART
@@ -3288,11 +3289,17 @@ deferred：ratelimit/打印提示、完整 root INTC irqchip、完整 `irq_desc/
 路径、CPU hotplug/offline、SMP affinity、suspend/resume 和真实 edge 平台 runtime。当前没有把这些 deferred 项伪装为
 已支持；若后续运行路径实际踩到其中任一项，应按“踩雷/排雷”方式补正式语义，或在必须新增大对象/方向策略不清时暂停讨论。
 
+PLIC 二进制复用首轮到此收尾。当前基线已经足以证明 `irq-sifive-plic.o` 可以作为黑盒 Linux object provider，在
+`arceos_ex` 上层框架不感知 provider 差异的前提下承接 UART 外部中断主线。后续不再以“完整补齐 Linux generic IRQ
+core”为当前目标；free/threaded、完整 irqdesc lifecycle、root INTC irqchip、SMP affinity、CPU hotplug/offline、
+suspend/resume 和真实 edge runtime 都作为明确 deferred 项保留。若后续 Linux 交叉验证切换到新的对象或新的运行目标，
+并实际踩到这些边界，再按最小必要原则排雷。
+
 ### 上接口仍需讨论的问题
 
-当前上接口的大方向已经明确，但要达到二进制替换和对等 provider 切换，仍有几类问题需要继续收敛：
-这些问题不是讨论是否修改 Linux 对象或重写其流程，而是决定 `arceos_ex` 侧如何构造足够真实的 Linux 可见环境，并把
-原生 PLIC provider 对齐到同一上层 contract。
+当前上接口的大方向已经明确，首轮二进制替换和 provider contract 对齐也已完成。下面问题不再作为 PLIC 首轮继续实施
+的待办清单，而是保留为后续重新进入 PLIC 排雷时的检查索引：这些问题不是讨论是否修改 Linux 对象或重写其流程，而是
+决定 `arceos_ex` 侧如何构造足够真实的 Linux 可见环境，并把原生 PLIC provider 对齐到同一上层 contract。
 
 1. `probe` 触发时机：Linux 常见 PLIC 路径通过 builtin platform driver 注册后由 platform device match 触发
    `.probe`，而 `arceos_ex` 现有 PLIC 路径发生在中断时间准备期。需要决定 Linux object provider 在
