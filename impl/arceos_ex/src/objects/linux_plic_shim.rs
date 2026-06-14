@@ -73,7 +73,8 @@ static LINUX_PLIC_CHIP_DISABLE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_MASK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_UNMASK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_EOI_COUNT: AtomicUsize = AtomicUsize::new(0);
-static LINUX_PLIC_CHIP_CALLBACK_PROBE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_DISABLED_EOI_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_CALLBACK_EXERCISE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -252,7 +253,8 @@ pub struct LinuxPlicBoundaryFacts {
     pub chip_mask_count: usize,
     pub chip_unmask_count: usize,
     pub chip_eoi_count: usize,
-    pub chip_callback_probe_successes: usize,
+    pub chip_disabled_eoi_count: usize,
+    pub chip_callback_exercise_successes: usize,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -274,7 +276,9 @@ const LINUX_IRQ_DESC_IRQ_DATA_HWIRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFS
 const LINUX_IRQ_DESC_IRQ_DATA_COMMON_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 16;
 const LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 24;
 const LINUX_IRQ_DESC_IRQ_DATA_CHIP_DATA_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 48;
+const LINUX_IRQ_COMMON_STATE_OFFSET: usize = 0;
 const LINUX_IRQ_COMMON_EFFECTIVE_AFFINITY_OFFSET: usize = 32;
+const LINUX_IRQD_IRQ_DISABLED: u32 = 1 << 16;
 const LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET: usize = 24;
 const LINUX_IRQ_CHIP_IRQ_DISABLE_OFFSET: usize = 32;
 const LINUX_IRQ_CHIP_IRQ_MASK_OFFSET: usize = 48;
@@ -476,7 +480,8 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         chip_mask_count: LINUX_PLIC_CHIP_MASK_COUNT.load(Ordering::Acquire),
         chip_unmask_count: LINUX_PLIC_CHIP_UNMASK_COUNT.load(Ordering::Acquire),
         chip_eoi_count: LINUX_PLIC_CHIP_EOI_COUNT.load(Ordering::Acquire),
-        chip_callback_probe_successes: LINUX_PLIC_CHIP_CALLBACK_PROBE_SUCCESSES
+        chip_disabled_eoi_count: LINUX_PLIC_CHIP_DISABLED_EOI_COUNT.load(Ordering::Acquire),
+        chip_callback_exercise_successes: LINUX_PLIC_CHIP_CALLBACK_EXERCISE_SUCCESSES
             .load(Ordering::Acquire),
     }
 }
@@ -834,6 +839,17 @@ fn linux_leaf_irq_data_ptr(index: usize) -> *mut c_void {
     linux_irq_data_from_desc(linux_leaf_desc_ptr(index))
 }
 
+unsafe fn linux_set_irq_disabled(desc: *mut u8, disabled: bool) {
+    let state = unsafe { desc.add(LINUX_IRQ_COMMON_STATE_OFFSET).cast::<u32>() };
+    let current = unsafe { core::ptr::read(state) };
+    let next = if disabled {
+        current | LINUX_IRQD_IRQ_DISABLED
+    } else {
+        current & !LINUX_IRQD_IRQ_DISABLED
+    };
+    unsafe { core::ptr::write(state, next) };
+}
+
 fn linux_leaf_record(index: usize) -> LinuxPlicLeafIrqRecord {
     let records = (&raw const LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
     unsafe { core::ptr::read(records.add(index)) }
@@ -987,6 +1003,7 @@ pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -
 
     let callbacks_ok = ensure_linux_leaf_irq(domain, source, virq).is_some_and(|index| {
         let record = linux_leaf_record(index);
+        let desc = linux_leaf_desc_ptr(index);
         let irq_data = linux_leaf_irq_data_ptr(index);
         let disable_ok = unsafe {
             call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Disable)
@@ -997,13 +1014,24 @@ pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -
             unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Mask) };
         let unmask_ok =
             unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Unmask) };
-        disable_ok && enable_ok && mask_ok && unmask_ok
+        let disabled_eoi_ok = unsafe {
+            linux_set_irq_disabled(desc, true);
+            let ok = call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Eoi);
+            linux_set_irq_disabled(desc, false);
+            ok
+        };
+        let restore_enable_ok =
+            unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Enable) };
+        if disabled_eoi_ok {
+            LINUX_PLIC_CHIP_DISABLED_EOI_COUNT.fetch_add(1, Ordering::AcqRel);
+        }
+        disable_ok && enable_ok && mask_ok && unmask_ok && disabled_eoi_ok && restore_enable_ok
     });
 
     crate::arch::riscv64::csr::write_tp(saved_tp);
     crate::arch::riscv64::csr::restore_supervisor_interrupts(saved_sstatus);
     if callbacks_ok {
-        LINUX_PLIC_CHIP_CALLBACK_PROBE_SUCCESSES.fetch_add(1, Ordering::AcqRel);
+        LINUX_PLIC_CHIP_CALLBACK_EXERCISE_SUCCESSES.fetch_add(1, Ordering::AcqRel);
     }
     callbacks_ok
 }
