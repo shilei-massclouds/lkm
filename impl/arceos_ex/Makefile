@@ -1,4 +1,4 @@
-TARGET := riscv64gc-unknown-none-elf
+TARGET := riscv64imac-unknown-none-elf
 LOG ?= info
 PROFILE ?= release
 APP ?= smoke
