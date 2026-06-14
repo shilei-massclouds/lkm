@@ -3209,7 +3209,12 @@ context enable bit 并保持 priority unmask 语义。`cpuhp_setup_state(..., in
 仍由 `arceos_ex` 既有 `InterruptStream` 打开。随后显式执行 Linux PLIC UART chip callback exercise event：基于同一
 UART leaf `irq_data` 调用 Linux `plic_chip.irq_disable -> irq_enable -> irq_mask -> irq_unmask`，并临时设置
 `IRQD_IRQ_DISABLED` 调用一次 `plic_chip.irq_eoi`，以验证黑盒 chip callback 服务面、交换数据布局和 disabled IRQ eoi
-特殊分支是否可用；该 event 最终恢复为 enabled/unmasked 状态，不改变后续 UART IRQ 闭合路径，
+特殊分支是否可用；同一 event 还临时开启 leaf 所属 `plic_priv` 的 `PLIC_QUIRK_EDGE_INTERRUPT`，调用 Linux object
+自身的 `irq_set_type(EDGE_RISING)` 让内联 `irq_set_chip_handler_name_locked()` 把 leaf 切换为
+`plic_edge_chip` / `handle_edge_irq`，随后调用 `plic_edge_chip.irq_ack` 覆盖 edge ack 分支，再用
+`irq_set_type(LEVEL_HIGH)` 恢复 `plic_chip` / `handle_fasteoi_irq`。该 edge 覆盖是 synthetic boundary
+exercise，用于验证二进制对象内部 edge chip callback 和 `irq_desc/irq_data` 交换布局，不表示 QEMU/SiFive 默认
+runtime 主线已经变成 edge IRQ。该 event 最终恢复为 enabled/unmasked 状态，不改变后续 UART IRQ 闭合路径，
 `linux_plic.boundary_facts` checkpoint 只读观察它留下的计数事实。随后 flow handler 进入 `handle_fasteoi_irq`：先恢复 Rust `tp` 分发
 `IrqHandlerRegistry` 中的 UART action，再切回 Linux `tp` 调用 `plic_chip.irq_eoi(irq_data)`，由 Linux
 `plic_irq_eoi` 写回 claim register 完成 source。外层 Linux 调用窗口保存并恢复 SIE 与 `tp`，Linux `tp` 激活期间关闭
@@ -3220,12 +3225,14 @@ UART leaf `irq_data` 调用 Linux `plic_chip.irq_disable -> irq_enable -> irq_ma
 `passed=36 failed=0 total=36`。其中 UART IRQ chain 观察到 Linux PLIC object provider 下的
 claim/dispatch/complete/zero-claim/loop-exit 计数闭合，说明黑盒 runtime claim loop 和 Linux `plic_chip.irq_eoi`
 callback 已经承接现有 UART action；同一只读 checkpoint 输出还约束了前述 callback exercise event 中
-`irq_enable/irq_disable/irq_mask/irq_unmask` 至少各成功执行一次，且 disabled IRQ eoi 分支至少执行一次。
+`irq_enable/irq_disable/irq_mask/irq_unmask` 至少各成功执行一次，disabled IRQ eoi 分支至少执行一次，并且
+edge synthetic boundary 中 `irq_set_type` 至少完成 edge/level 两次切换、`plic_edge_chip.irq_ack` 至少执行一次。
 
 这仍不是完整 Linux generic IRQ core 复用。当前只覆盖 QEMU/SiFive PLIC 的无 edge quirk、level IRQ 主线；
-`handle_edge_irq` 仍只是兼容入口，`plic_edge_chip.irq_ack`、unmapped IRQ fail 边界以及更完整
-`irq_desc`/`irq_common_data` 行为仍归入后续排雷；unmapped IRQ 的 ratelimit/打印属于非关键提示能力，当前保持
-deferred。`mask/unmask/disable/disabled-eoi` 目前只属于显式 exercise event 覆盖的 callback service 面；若后续接入完整 Linux generic IRQ lifecycle，还需要再补真实路径语义。
+`plic_edge_chip.irq_ack` 已通过 synthetic boundary exercise 覆盖，但真实 edge 平台 runtime、unmapped IRQ fail
+边界以及更完整 `irq_desc`/`irq_common_data` 行为仍归入后续排雷；unmapped IRQ 的 ratelimit/打印属于非关键提示能力，
+当前保持 deferred。`mask/unmask/disable/disabled-eoi/edge-ack` 目前只属于显式 exercise event 覆盖的 callback
+service 面；若后续接入完整 Linux generic IRQ lifecycle，还需要再补真实路径语义。
 下一轮应继续扩展这些边界，同时保持上层 UART/console/smoke 不感知 provider 差异。
 
 ### 上接口仍需讨论的问题
@@ -3250,8 +3257,8 @@ deferred。`mask/unmask/disable/disabled-eoi` 目前只属于显式 exercise eve
    mapping、logical IRQ 分配、`irq_fwspec` 参数修改、`gsi_base` 以及 one-cell/two-cell translate 的行为，确保
    Linux provider 与原生 provider 对 UART 等外设产出同一个 logical IRQ 语义。
 5. IRQ flow 与 complete 位置：level IRQ 主线已通过 `handle_fasteoi_irq -> plic_chip.irq_eoi` 接入 Linux-shaped
-   complete；`plic_chip.irq_enable/irq_disable/irq_mask/irq_unmask` 和 disabled IRQ eoi 分支已先通过显式 exercise
-   event 验证 callback service 面可达。后续仍需补 edge quirk 下的 `handle_edge_irq -> plic_edge_chip.irq_ack`、
+   complete；`plic_chip.irq_enable/irq_disable/irq_mask/irq_unmask`、disabled IRQ eoi 分支和 synthetic edge
+   `handle_edge_irq -> plic_edge_chip.irq_ack` 已先通过显式 exercise event 验证 callback service 面可达。后续仍需补
    unmapped IRQ fail 边界，以及更完整 `irq_desc`/`irq_common_data` 语义；unmapped IRQ ratelimit/打印保持 deferred。
    这些边界共同保证
    `claim -> dispatch -> eoi/ack -> next claim -> zero claim exit` 的顺序和特殊路径等价。

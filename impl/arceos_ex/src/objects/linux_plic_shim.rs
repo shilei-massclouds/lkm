@@ -16,6 +16,7 @@ type LinuxCpuHotplugStartup = unsafe extern "C" fn(u32) -> i32;
 type LinuxIrqDomainAlloc = unsafe extern "C" fn(*mut c_void, u32, u32, *mut c_void) -> i32;
 type LinuxIrqFlowHandler = unsafe extern "C" fn(*mut c_void);
 type LinuxIrqChipCallback = unsafe extern "C" fn(*mut c_void);
+type LinuxIrqChipSetType = unsafe extern "C" fn(*mut c_void, u32) -> i32;
 
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
@@ -72,9 +73,13 @@ static LINUX_PLIC_CHIP_ENABLE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_DISABLE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_MASK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_UNMASK_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_ACK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_EOI_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_SET_TYPE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_DISABLED_EOI_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_CHIP_EDGE_ACK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_CHIP_CALLBACK_EXERCISE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_EDGE_CALLBACK_EXERCISE_SUCCESSES: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -167,6 +172,7 @@ impl LinuxPlicLeafIrqRecord {
 enum LinuxIrqChipCallbackSlot {
     Enable,
     Disable,
+    Ack,
     Mask,
     Unmask,
     Eoi,
@@ -177,6 +183,7 @@ impl LinuxIrqChipCallbackSlot {
         match self {
             Self::Enable => LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET,
             Self::Disable => LINUX_IRQ_CHIP_IRQ_DISABLE_OFFSET,
+            Self::Ack => LINUX_IRQ_CHIP_IRQ_ACK_OFFSET,
             Self::Mask => LINUX_IRQ_CHIP_IRQ_MASK_OFFSET,
             Self::Unmask => LINUX_IRQ_CHIP_IRQ_UNMASK_OFFSET,
             Self::Eoi => LINUX_IRQ_CHIP_IRQ_EOI_OFFSET,
@@ -190,6 +197,9 @@ impl LinuxIrqChipCallbackSlot {
             }
             Self::Disable => {
                 LINUX_PLIC_CHIP_DISABLE_COUNT.fetch_add(1, Ordering::AcqRel);
+            }
+            Self::Ack => {
+                LINUX_PLIC_CHIP_ACK_COUNT.fetch_add(1, Ordering::AcqRel);
             }
             Self::Mask => {
                 LINUX_PLIC_CHIP_MASK_COUNT.fetch_add(1, Ordering::AcqRel);
@@ -252,9 +262,13 @@ pub struct LinuxPlicBoundaryFacts {
     pub chip_disable_count: usize,
     pub chip_mask_count: usize,
     pub chip_unmask_count: usize,
+    pub chip_ack_count: usize,
     pub chip_eoi_count: usize,
+    pub chip_set_type_count: usize,
     pub chip_disabled_eoi_count: usize,
+    pub chip_edge_ack_count: usize,
     pub chip_callback_exercise_successes: usize,
+    pub edge_callback_exercise_successes: usize,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -270,6 +284,7 @@ const LINUX_IRQ_DESC_SIZE: usize = 512;
 const LINUX_IRQ_CHIP_SIZE: usize = 128;
 const LINUX_IRQ_FWSPEC_PARAM_COUNT: usize = 16;
 const LINUX_PLIC_LEAF_IRQ_CAPACITY: usize = 32;
+const LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET: usize = 112;
 const LINUX_IRQ_DESC_IRQ_DATA_OFFSET: usize = 48;
 const LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 4;
 const LINUX_IRQ_DESC_IRQ_DATA_HWIRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 8;
@@ -281,13 +296,19 @@ const LINUX_IRQ_COMMON_EFFECTIVE_AFFINITY_OFFSET: usize = 32;
 const LINUX_IRQD_IRQ_DISABLED: u32 = 1 << 16;
 const LINUX_IRQ_CHIP_IRQ_ENABLE_OFFSET: usize = 24;
 const LINUX_IRQ_CHIP_IRQ_DISABLE_OFFSET: usize = 32;
+const LINUX_IRQ_CHIP_IRQ_ACK_OFFSET: usize = 40;
 const LINUX_IRQ_CHIP_IRQ_MASK_OFFSET: usize = 48;
 const LINUX_IRQ_CHIP_IRQ_UNMASK_OFFSET: usize = 64;
 const LINUX_IRQ_CHIP_IRQ_EOI_OFFSET: usize = 72;
+const LINUX_IRQ_CHIP_IRQ_SET_TYPE_OFFSET: usize = 96;
 const LINUX_THREAD_INFO_SIZE: usize = 2048;
 const LINUX_THREAD_INFO_CPU_OFFSET: usize = 32;
 const LINUX_TASK_STACK_CANARY_OFFSET: usize = 1232;
 const LINUX_BOOT_CPU_ID: u32 = 0;
+const LINUX_IRQ_TYPE_EDGE_RISING: u32 = 1;
+const LINUX_IRQ_TYPE_LEVEL_HIGH: u32 = 4;
+const LINUX_PLIC_PRIV_QUIRKS_OFFSET: usize = 32;
+const LINUX_PLIC_QUIRK_EDGE_INTERRUPT: usize = 1;
 const DEBUG_LINUX_PLIC_SHIM: bool = false;
 
 static mut LINUX_PLIC_FWNODE_VIEW: LinuxOfFwnodeView = LinuxOfFwnodeView {
@@ -479,9 +500,14 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         chip_disable_count: LINUX_PLIC_CHIP_DISABLE_COUNT.load(Ordering::Acquire),
         chip_mask_count: LINUX_PLIC_CHIP_MASK_COUNT.load(Ordering::Acquire),
         chip_unmask_count: LINUX_PLIC_CHIP_UNMASK_COUNT.load(Ordering::Acquire),
+        chip_ack_count: LINUX_PLIC_CHIP_ACK_COUNT.load(Ordering::Acquire),
         chip_eoi_count: LINUX_PLIC_CHIP_EOI_COUNT.load(Ordering::Acquire),
+        chip_set_type_count: LINUX_PLIC_CHIP_SET_TYPE_COUNT.load(Ordering::Acquire),
         chip_disabled_eoi_count: LINUX_PLIC_CHIP_DISABLED_EOI_COUNT.load(Ordering::Acquire),
+        chip_edge_ack_count: LINUX_PLIC_CHIP_EDGE_ACK_COUNT.load(Ordering::Acquire),
         chip_callback_exercise_successes: LINUX_PLIC_CHIP_CALLBACK_EXERCISE_SUCCESSES
+            .load(Ordering::Acquire),
+        edge_callback_exercise_successes: LINUX_PLIC_EDGE_CALLBACK_EXERCISE_SUCCESSES
             .load(Ordering::Acquire),
     }
 }
@@ -850,9 +876,65 @@ unsafe fn linux_set_irq_disabled(desc: *mut u8, disabled: bool) {
     unsafe { core::ptr::write(state, next) };
 }
 
+unsafe fn linux_irq_chip_data_from_desc(desc: *mut u8) -> usize {
+    unsafe {
+        core::ptr::read(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_CHIP_DATA_OFFSET)
+                .cast::<usize>(),
+        )
+    }
+}
+
+unsafe fn linux_set_plic_edge_quirk(chip_data: usize, enabled: bool) -> Option<usize> {
+    if chip_data == 0 {
+        return None;
+    }
+
+    let quirks = unsafe {
+        (chip_data as *mut u8)
+            .add(LINUX_PLIC_PRIV_QUIRKS_OFFSET)
+            .cast::<usize>()
+    };
+    let previous = unsafe { core::ptr::read(quirks) };
+    let next = if enabled {
+        previous | LINUX_PLIC_QUIRK_EDGE_INTERRUPT
+    } else {
+        previous & !LINUX_PLIC_QUIRK_EDGE_INTERRUPT
+    };
+    unsafe { core::ptr::write(quirks, next) };
+    Some(previous)
+}
+
+unsafe fn linux_restore_plic_quirks(chip_data: usize, previous: usize) {
+    unsafe {
+        core::ptr::write(
+            (chip_data as *mut u8)
+                .add(LINUX_PLIC_PRIV_QUIRKS_OFFSET)
+                .cast::<usize>(),
+            previous,
+        );
+    }
+}
+
 fn linux_leaf_record(index: usize) -> LinuxPlicLeafIrqRecord {
     let records = (&raw const LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
     unsafe { core::ptr::read(records.add(index)) }
+}
+
+unsafe fn linux_update_leaf_record_from_desc(index: usize) -> LinuxPlicLeafIrqRecord {
+    let desc = linux_leaf_desc_ptr(index);
+    let mut record = linux_leaf_record(index);
+    unsafe {
+        record.chip = core::ptr::read(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET)
+                .cast::<usize>(),
+        );
+        record.flow_handler =
+            core::ptr::read(desc.add(LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET).cast::<usize>());
+        let records = (&raw mut LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
+        core::ptr::write(records.add(index), record);
+    }
+    record
 }
 
 fn linux_store_leaf_irq_record(
@@ -949,6 +1031,32 @@ unsafe fn call_linux_chip_callback(
     true
 }
 
+unsafe fn call_linux_chip_set_type(
+    record: LinuxPlicLeafIrqRecord,
+    irq_data: *mut c_void,
+    irq_type: u32,
+) -> i32 {
+    if record.chip == 0 || irq_data.is_null() {
+        return -22;
+    }
+    let callback = unsafe {
+        core::ptr::read(
+            (record.chip as *const u8)
+                .add(LINUX_IRQ_CHIP_IRQ_SET_TYPE_OFFSET)
+                .cast::<usize>(),
+        )
+    };
+    if callback == 0 {
+        return -22;
+    }
+    let callback: LinuxIrqChipSetType = unsafe { core::mem::transmute(callback) };
+    let ret = unsafe { callback(irq_data, irq_type) };
+    if ret == 0 {
+        LINUX_PLIC_CHIP_SET_TYPE_COUNT.fetch_add(1, Ordering::AcqRel);
+    }
+    ret
+}
+
 fn ensure_linux_leaf_irq(domain: *mut c_void, hwirq: u32, virq: u32) -> Option<usize> {
     if let Some(index) = linux_leaf_record_index_by_hwirq(hwirq) {
         return Some(index);
@@ -1025,7 +1133,14 @@ pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -
         if disabled_eoi_ok {
             LINUX_PLIC_CHIP_DISABLED_EOI_COUNT.fetch_add(1, Ordering::AcqRel);
         }
-        disable_ok && enable_ok && mask_ok && unmask_ok && disabled_eoi_ok && restore_enable_ok
+        let edge_ack_ok = unsafe { exercise_uart_leaf_edge_ack(index) };
+        disable_ok
+            && enable_ok
+            && mask_ok
+            && unmask_ok
+            && disabled_eoi_ok
+            && restore_enable_ok
+            && edge_ack_ok
     });
 
     crate::arch::riscv64::csr::write_tp(saved_tp);
@@ -1034,6 +1149,45 @@ pub fn exercise_uart_leaf_chip_callbacks(source: u32, logical_irq: LogicalIrq) -
         LINUX_PLIC_CHIP_CALLBACK_EXERCISE_SUCCESSES.fetch_add(1, Ordering::AcqRel);
     }
     callbacks_ok
+}
+
+unsafe fn exercise_uart_leaf_edge_ack(index: usize) -> bool {
+    let desc = linux_leaf_desc_ptr(index);
+    let irq_data = linux_leaf_irq_data_ptr(index);
+    let chip_data = unsafe { linux_irq_chip_data_from_desc(desc) };
+    let Some(previous_quirks) = (unsafe { linux_set_plic_edge_quirk(chip_data, true) }) else {
+        return false;
+    };
+
+    let level_chip = linux_leaf_record(index).chip;
+    let edge_set_type_ok = unsafe {
+        call_linux_chip_set_type(
+            linux_leaf_record(index),
+            irq_data,
+            LINUX_IRQ_TYPE_EDGE_RISING,
+        )
+    } == 0;
+    let edge_record = unsafe { linux_update_leaf_record_from_desc(index) };
+    let edge_handler_ok = edge_record.flow_handler == handle_edge_irq as usize;
+    let edge_ack_ok =
+        unsafe { call_linux_chip_callback(edge_record, irq_data, LinuxIrqChipCallbackSlot::Ack) };
+    let level_set_type_ok =
+        unsafe { call_linux_chip_set_type(edge_record, irq_data, LINUX_IRQ_TYPE_LEVEL_HIGH) } == 0;
+    let level_record = unsafe { linux_update_leaf_record_from_desc(index) };
+    let level_handler_ok =
+        level_record.chip == level_chip && level_record.flow_handler == handle_fasteoi_irq as usize;
+    unsafe { linux_restore_plic_quirks(chip_data, previous_quirks) };
+
+    if edge_ack_ok {
+        LINUX_PLIC_CHIP_EDGE_ACK_COUNT.fetch_add(1, Ordering::AcqRel);
+    }
+
+    let exercise_ok =
+        edge_set_type_ok && edge_handler_ok && edge_ack_ok && level_set_type_ok && level_handler_ok;
+    if exercise_ok {
+        LINUX_PLIC_EDGE_CALLBACK_EXERCISE_SUCCESSES.fetch_add(1, Ordering::AcqRel);
+    }
+    exercise_ok
 }
 
 fn linux_thread_info_base() -> *mut u8 {

@@ -74,11 +74,18 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts) {
     kunit::diag_usize("chip_disable_count", facts.chip_disable_count);
     kunit::diag_usize("chip_mask_count", facts.chip_mask_count);
     kunit::diag_usize("chip_unmask_count", facts.chip_unmask_count);
+    kunit::diag_usize("chip_ack_count", facts.chip_ack_count);
     kunit::diag_usize("chip_eoi_count", facts.chip_eoi_count);
+    kunit::diag_usize("chip_set_type_count", facts.chip_set_type_count);
     kunit::diag_usize("chip_disabled_eoi_count", facts.chip_disabled_eoi_count);
+    kunit::diag_usize("chip_edge_ack_count", facts.chip_edge_ack_count);
     kunit::diag_usize(
         "chip_callback_exercise_successes",
         facts.chip_callback_exercise_successes,
+    );
+    kunit::diag_usize(
+        "edge_callback_exercise_successes",
+        facts.edge_callback_exercise_successes,
     );
 }
 
@@ -127,8 +134,12 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
         && facts.chip_disable_count != 0
         && facts.chip_mask_count != 0
         && facts.chip_unmask_count != 0
+        && facts.chip_ack_count != 0
+        && facts.chip_set_type_count >= 2
         && facts.chip_disabled_eoi_count != 0
+        && facts.chip_edge_ack_count != 0
         && facts.chip_callback_exercise_successes != 0
+        && facts.edge_callback_exercise_successes != 0
 }
 
 fn strictly_before(before: usize, after: usize) -> bool {
