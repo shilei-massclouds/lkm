@@ -11,17 +11,40 @@
 ## 当前焦点
 
 1. PLIC 驱动、UART 外部中断链和 serial8250 interrupt-driven console TX 当前轮已阶段性收尾：irqchip/irqdomain、PLIC 独立驱动对象、设备树驱动的 PLIC setup、platform IRQ resource 解析、serial8250 IRQ 绑定、handler registry、中断上下文约束、root INTC -> PLIC -> UART handler dispatch、一轮 UART THRE interrupt cycle 的 claim/complete/zero-claim 闭合，以及 `printk` 前端提交后由 THRI 中断驱动 UART handler drain TX queue 的 runtime TX 闭环均已验证。kernel `printk` console 稳定性已覆盖连续/批量 printk burst、Linux-like `tx_loadsz` 预算、单条长 printk 多轮 drain、多条长 printk long-burst，以及 long-burst 后的 `Serial8250ConsoleTxQuiesceProbe`；固定 burst/long-burst 和 ordinary TTY write `W`/`tx04` 等用户可见 TX/TTY 测试负载已经收口到 checkpoint/KUnit 测试构建，普通 `make run` 不再打印固定探针字节。
-2. 下一阶段 P0 改为本项目与 Linux 6.12.37 的交叉验证。参考源码位置为 `~/gitStudy/linux-6.12.37`；首轮目标不是继续扩展功能，而是建立 Linux 源码路径、当前 formal model、coding 规格、`arceos_ex` 实现、checkpoint/trace/smoke/KUnit 之间的交叉引用和差异分类，把缺口明确归入“已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离、疑似 bug”。
+2. 下一阶段 P0 改为本项目与 Linux 6.12.37 的交叉验证，首轮聚焦 `drivers/irqchip/irq-sifive-plic.o` 二进制复用。参考源码位置为 `~/gitStudy/linux-6.12.37`；当前目标不是继续扩展功能，而是在 `arceos_ex` 中通过条件编译在原生 PLIC provider 与 Linux PLIC object provider 之间替换，建立 Linux 源码路径、当前 formal model、coding 规格、实现、checkpoint/trace/smoke/KUnit 之间的交叉引用和差异分类，把缺口明确归入“已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离、疑似 bug”。
 3. 维持 `ioremap/vmalloc` 当前首轮成果：runtime page-table metadata 已覆盖完整 `VMALLOC_START..VMALLOC_END`，支持按需追加 L1/L0/PTE 页表页，`VmapArea` / `VmapMapping` 记录已改为动态容器 backing；更完整的 `vm_struct/vmap_area` 行为，例如空洞复用、增强树查找、lazy purge 和并发边界，降为后续补强，除非交叉验证发现其阻塞 IRQ/driver 路径的一致性。
 4. serial8250 runtime RX/TTY/FIFO 补强继续保留为后续项。当前对象框架和 event/action 已确认，RX 单字符/批量 loopback、ordinary TTY TX FIFO 最小 enqueue/dequeue，以及 ordinary TTY write 经 `TtyXmitFifo -> StartTx/THRI -> handler TransmitChars` 的单 byte 和固定小批量真实 IRQ 闭合均已完成；后续是否继续展开 printk TX 异常/压力边界、TTY runtime 分层或用户态 I/O，应先经过 Linux 交叉验证结果排序。
 
-## 下一阶段计划：Linux 交叉验证
+## 下一阶段计划：Linux 6.12.37 PLIC 二进制复用
 
-1. 建立交叉验证基线：确认参考源码 `~/gitStudy/linux-6.12.37`、目标架构 `riscv64`、当前 QEMU virt / default config 假设，以及本项目当前 `make verify` / `make test` / `make run` 可观测输出。
-2. 建立首轮 cross-reference 表：Linux 文件/函数、模型 phase/object/event/action、coding 约束、`impl/arceos_ex` 实现路径、checkpoint/trace/smoke/KUnit 观测点必须能互相追踪。
-3. 首批审计范围优先覆盖近期闭环：`start_kernel()` 到当前 `PayloadPhase` 的阶段划分、`init_IRQ()/irqchip_init()/of_irq_init()`、PLIC irqchip/provider、irqdomain/source mapping、OF platform population、ns16550a platform probe、console/earlycon handoff、ioremap/vmalloc、serial8250 interrupt-driven printk TX。
-4. 对每个差异做分类：已覆盖且一致、已覆盖但抽象层不同、模型显式 deferred、coding 规格缺口、实现缺口、刻意偏离 Linux、疑似 bug。只有分类明确后，才进入 model/coding 更新或代码实现。
-5. 交付物优先是文档和规格约束：更新 roadmap、model deferred、coding 约束和必要的测试观察点；不要把交叉验证发现的问题直接绕过规格落到代码里。
+本节是当前 P0 的执行清单。每完成一项即更新本节状态并做一次提交；实现变更仍遵循先规格/约束、再代码、再验证的顺序。
+`make test` 能够通过是判断阶段计划目标达成的重要验收手段。为实现 Linux PLIC object 对齐，当前部分规格、推导、实现和
+测试都可以随执行过程调整，但调整必须服务于 Linux 公开接口和二进制复用目标，并在差异分类中记录清楚。
+
+### 已确认原则
+
+1. 条件编译选择的是 provider 文件组和链接对象，而不是在同一组 Rust 源码内部做大量细粒度裁剪。默认 provider 仍为 `native`；启用 Linux 路径时选择 `irq-sifive-plic.o + Linux ABI/adaptor shim`，并排除原生 PLIC 对同一硬件的 claim/complete/source enable 接管。
+2. 首轮采用简单直接链接方案：`PLIC_PROVIDER=linux-object` 时直接把 `irq-sifive-plic.o` 作为 linker input 传入。静态库封装暂不作为首轮目标；后续若改为 `.a`，必须通过 `--whole-archive` 确保没有全局入口符号的对象文件也会被拉入最终内核。
+3. `arceos_ex` 向 Linux PLIC object 的 RISC-V ABI 对齐。当前 Linux `irq-sifive-plic.o` 为 LP64/soft-float ABI，首轮应优先把 `arceos_ex` 切到 soft-float target，例如 `riscv64imac-unknown-none-elf` 或等价 custom target，而不是要求 Linux 对象适配当前 double-float ABI。
+4. 上层机制直接向 Linux 形态收敛。Linux object 可见的 initcall section、platform driver、OF/fwnode、irq_domain、irq_chip、chained handler、per-CPU/cpumask 和 lifecycle callback 以 Linux contract 为准；`arceos_ex` 现有对象作为内部承载或 native provider 实现，不再保留一套厚转换后的私有上接口。
+5. 下接口按 `nm -u` 逐符号“埋雷”补齐。函数先提供 ABI 正确的兜底实现，默认 panic/fail；全局变量先提供布局和符号名正确的最小对象。只有启动路径实际踩到且功能闭环必须的依赖，才逐项补真实语义；调试、打印、审计、ratelimit 等非关键能力可简化或标记 deferred。
+6. 第三方 Linux 二进制对象放入 `impl/third_party/...`，首轮建议路径为 `impl/third_party/linux/6.12.37/riscv64-lp64/`，并保留 Linux 原始相对路径、构建配置和来源说明。
+
+### 执行清单
+
+1. **待执行：建立 Linux PLIC object 输入基线**。确认 `~/gitStudy/linux-6.12.37/drivers/irqchip/irq-sifive-plic.o` 的 ELF header、RISC-V flags、section 列表、defined/local symbols、`nm -u` undefined symbols 和 Linux 构建配置；把这些记录到 `impl/third_party/linux/6.12.37/riscv64-lp64/manifest.md` 或等价文档中。验收标准：对象来源、ABI、section、undefined symbol 清单和生成方式可复现。
+2. **待执行：建立 `impl/third_party` 目录与对象落位规则**。创建 `impl/third_party/linux/6.12.37/riscv64-lp64/objects/drivers/irqchip/`，放置或引用 `irq-sifive-plic.o`，并明确该目录只保存第三方输入和少量 provenance 文件，不混入 `arceos_ex` 自研 shim。验收标准：路径稳定、来源清楚、后续 Makefile 可通过变量引用该对象。
+3. **待执行：将 `arceos_ex` ABI 切到 Linux 对齐的 soft-float 目标**。把默认 RISC-V target 从当前 `riscv64gc-unknown-none-elf` 调整到 LP64/soft-float 目标，优先验证 `riscv64imac-unknown-none-elf`；完成后先不引入 Linux `.o`，只用 native provider 跑现有 `make build APP=smoke`、必要的 `make run APP=smoke` 和 ELF flags 检查。验收标准：native 路径功能不退化，最终 kernel ELF flags 与 Linux object ABI 不冲突。
+4. **待执行：加入 provider 级条件编译开关**。在构建入口增加 `PLIC_PROVIDER ?= native`，支持 `native` 和 `linux-object`，非法值直接报错。该开关只选择 provider 文件组、cfg 边界和 linker input，避免在业务 Rust 文件内部大量分散 `#[cfg]`。验收标准：默认 native 构建结果保持现状；`PLIC_PROVIDER=linux-object` 能进入 Linux provider 构建路径。
+5. **待执行：首轮直接链接 `irq-sifive-plic.o`**。在 `PLIC_PROVIDER=linux-object` 时把 `impl/third_party/.../irq-sifive-plic.o` 作为 `rustc` linker input 传入，先不封装静态库。验收标准：linker 确认对象被纳入最终链接，下一步失败点收敛到 ABI、section 或 undefined symbols，而不是对象未被拉入。
+6. **待执行：对齐 Linux linker section 入口**。为 Linux object 增加独立的 Linux-shaped section ranges，至少识别 `.initcall6.init`、`.data..percpu`、`__irqchip_of_table`，并按实际链接错误决定是否保留 `__bug_table`、`.alternative` 等 section。不要把 `.initcall6.init` 混入现有 Rust `InitcallEntry` section，因为二者 entry 格式不同。验收标准：Linux initcall6 裸函数指针 range 可遍历，per-CPU 初始数据有明确放置边界，early irqchip table 被记录但首轮不作为常见 PLIC 主入口。
+7. **待执行：生成下接口 undefined symbol 台账并建立兜底 shim**。以 `riscv64-linux-gnu-nm -u irq-sifive-plic.o` 为输入，建立符号台账：全局变量、普通函数、IRQ core、OF/fwnode、platform driver、memory allocator、per-CPU/cpumask、spinlock、printk/ratelimit、stack protector 等分类。先实现 exact symbol shim，使链接可以通过；未实现语义的函数进入 panic/fail 边界。验收标准：`PLIC_PROVIDER=linux-object` 至少能完成链接，或只剩被明确归档的非 shim 类链接问题。
+8. **待执行：实现 Linux initcall6 与 platform driver 最小真实路径**。执行 `.initcall6.init` 中的 PLIC driver initcall，提供 `__platform_driver_register` 的最小语义，保存 `struct platform_driver`，构造 Linux 可见的 `platform_device/device/fwnode` 视图，并通过 compatible match 触发 `.probe`。验收标准：`plic_driver` 经 Linux 形态注册，QEMU virt PLIC compatible 能匹配，`plic_platform_probe()` 被真实调用。
+9. **待执行：补齐 `plic_probe()` 必须下接口语义**。围绕 probe 路径实现必要 OF 属性读取、资源/ioremap、kmalloc/kfree、per-CPU/cpumask、hartid/cpuid、spinlock 和 syscore/cpuhp 受限语义；非首轮必须路径保持 deferred 或 panic/fail。验收标准：`plic_probe()` 能完成 PLIC 私有状态创建、context 选择、MMIO 映射和后续 IRQ core 注册调用。
+10. **待执行：对齐 Linux IRQ domain / irq_chip / chained handler 服务面**。实现或适配 `irq_domain_create_linear`、`irq_domain_set_info`、`irq_create_mapping_affinity`、`generic_handle_domain_irq`、`irq_get_irq_data`、`__irq_set_handler`、`handle_fasteoi_irq`、`handle_edge_irq` 等路径，使 Linux PLIC object 注册出的 domain/chip/handler 能驱动现有 IRQ action 和 UART handler。验收标准：UART PLIC source 映射到与 native provider 等价的 logical IRQ，claim -> dispatch -> eoi/ack -> next claim -> zero claim exit 顺序可观测。
+11. **待执行：让 native PLIC provider 收敛到同一上层 contract**。在不引入厚 adaptor 的前提下，把原生 PLIC provider 调整为同一 Linux-shaped provider contract 的另一个实现。条件编译切换 provider 后，上层 `IrqDispatchTree`、`RiscvIntc`、`IrqHandlerRegistry`、serial8250 console TX 等使用者不感知两套 PLIC API。验收标准：native 和 linux-object provider 共用同一组上层测试入口和观测点。
+12. **待执行：建立分层验证闭环**。按 link-only、initcall 注册、platform match/probe、domain/chip/chained 注册、UART interrupt cycle 五层推进验证。每层都要有 checkpoint/KUnit/smoke 或 trace 观察点，并记录与 native provider 的差异分类。验收标准：至少恢复当前 UART THRE interrupt cycle：root INTC external -> Linux PLIC chained handler -> claim -> generic IRQ dispatch -> UART action -> eoi/complete -> zero claim loop exit；阶段收束时 `make test` 应通过，除非某项失败已经被明确归入本节待办并作为下一项阻塞问题处理。
+13. **待执行：同步规格与差异分类**。每完成一层，把发现的问题更新到 `spec/charter.md`、必要的 coding/model 规格和本 roadmap。差异必须归入已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离或疑似 bug；未分类前不直接把 workaround 落入主体实现。
 
 ## 已完成计划：console/earlycon handoff
 
