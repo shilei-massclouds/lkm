@@ -115,6 +115,11 @@ static LINUX_PLIC_ACTION_CHAIN_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_ACTION_CHAIN_LAST_ACTION: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE: AtomicUsize = AtomicUsize::new(usize::MAX);
 static LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_DESC_ACTION_WRITE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_DESC_ACTION_MATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_DESC_ACTION_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_DESC_ACTION_LAST_ACTION: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_IRQ_DESC_ACTION_LAST_READBACK: AtomicUsize = AtomicUsize::new(0);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -209,10 +214,19 @@ impl LinuxPlicLeafIrqRecord {
 
 #[repr(C)]
 struct LinuxIrqActionView {
-    irq: usize,
-    device: usize,
-    handler_kind: usize,
+    handler: usize,
+    dev_id: usize,
+    percpu_dev_id: usize,
     next: usize,
+    thread_fn: usize,
+    thread: usize,
+    secondary: usize,
+    irq: u32,
+    flags: u32,
+    thread_flags: usize,
+    thread_mask: usize,
+    name: usize,
+    dir: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -350,6 +364,11 @@ pub struct LinuxPlicBoundaryFacts {
     pub action_chain_last_action: usize,
     pub action_chain_last_device: usize,
     pub action_chain_last_handler_kind: usize,
+    pub irq_desc_action_write_count: usize,
+    pub irq_desc_action_match_count: usize,
+    pub irq_desc_action_last_irq: usize,
+    pub irq_desc_action_last_action: usize,
+    pub irq_desc_action_last_readback: usize,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -366,6 +385,7 @@ const LINUX_IRQ_CHIP_SIZE: usize = 128;
 const LINUX_IRQ_FWSPEC_PARAM_COUNT: usize = 16;
 const LINUX_PLIC_LEAF_IRQ_CAPACITY: usize = 32;
 const LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET: usize = 112;
+const LINUX_IRQ_DESC_ACTION_OFFSET: usize = LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET + size_of::<usize>();
 const LINUX_IRQ_DESC_IRQ_DATA_OFFSET: usize = 48;
 const LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 4;
 const LINUX_IRQ_DESC_IRQ_DATA_HWIRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 8;
@@ -415,10 +435,19 @@ static mut LINUX_PLIC_INTC_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_D
 static mut LINUX_PLIC_PARENT_IRQ_DESC: [u8; LINUX_IRQ_DESC_SIZE] = [0; LINUX_IRQ_DESC_SIZE];
 static mut LINUX_PLIC_PARENT_IRQ_CHIP: [u8; LINUX_IRQ_CHIP_SIZE] = [0; LINUX_IRQ_CHIP_SIZE];
 static mut LINUX_PLIC_IRQ_ACTION_VIEW: LinuxIrqActionView = LinuxIrqActionView {
-    irq: 0,
-    device: usize::MAX,
-    handler_kind: 0,
+    handler: 0,
+    dev_id: 0,
+    percpu_dev_id: 0,
     next: 0,
+    thread_fn: 0,
+    thread: 0,
+    secondary: 0,
+    irq: 0,
+    flags: 0,
+    thread_flags: 0,
+    thread_mask: 0,
+    name: 0,
+    dir: 0,
 };
 static mut LINUX_PLIC_LEAF_IRQ_RECORDS: [LinuxPlicLeafIrqRecord; LINUX_PLIC_LEAF_IRQ_CAPACITY] =
     [const { LinuxPlicLeafIrqRecord::empty() }; LINUX_PLIC_LEAF_IRQ_CAPACITY];
@@ -644,6 +673,12 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
         action_chain_last_action: LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.load(Ordering::Acquire),
         action_chain_last_device: LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE.load(Ordering::Acquire),
         action_chain_last_handler_kind: LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND
+            .load(Ordering::Acquire),
+        irq_desc_action_write_count: LINUX_PLIC_IRQ_DESC_ACTION_WRITE_COUNT.load(Ordering::Acquire),
+        irq_desc_action_match_count: LINUX_PLIC_IRQ_DESC_ACTION_MATCH_COUNT.load(Ordering::Acquire),
+        irq_desc_action_last_irq: LINUX_PLIC_IRQ_DESC_ACTION_LAST_IRQ.load(Ordering::Acquire),
+        irq_desc_action_last_action: LINUX_PLIC_IRQ_DESC_ACTION_LAST_ACTION.load(Ordering::Acquire),
+        irq_desc_action_last_readback: LINUX_PLIC_IRQ_DESC_ACTION_LAST_READBACK
             .load(Ordering::Acquire),
     }
 }
@@ -1004,6 +1039,42 @@ fn linux_leaf_irq_data_ptr(index: usize) -> *mut c_void {
     linux_irq_data_from_desc(linux_leaf_desc_ptr(index))
 }
 
+unsafe fn linux_write_desc_action(desc: *mut u8, irq: u32, action: usize) {
+    if action == 0 {
+        return;
+    }
+
+    unsafe {
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_ACTION_OFFSET).cast::<usize>(),
+            action,
+        );
+    }
+    LINUX_PLIC_IRQ_DESC_ACTION_WRITE_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_IRQ_DESC_ACTION_LAST_IRQ.store(irq as usize, Ordering::Release);
+    LINUX_PLIC_IRQ_DESC_ACTION_LAST_ACTION.store(action, Ordering::Release);
+}
+
+fn linux_write_leaf_desc_action_if_present(irq: u32, action: usize) -> bool {
+    if action == 0 {
+        return false;
+    }
+    let Some(index) = linux_leaf_record_index_by_virq(irq) else {
+        return false;
+    };
+
+    let desc = linux_leaf_desc_ptr(index);
+    unsafe { linux_write_desc_action(desc, irq, action) };
+    let mut record = linux_leaf_record(index);
+    record.action = action;
+    linux_store_leaf_record(index, record);
+    true
+}
+
+fn linux_read_desc_action(desc: *mut u8) -> usize {
+    unsafe { core::ptr::read(desc.add(LINUX_IRQ_DESC_ACTION_OFFSET).cast::<usize>()) }
+}
+
 unsafe fn linux_set_irq_disabled(desc: *mut u8, disabled: bool) {
     let state = unsafe { desc.add(LINUX_IRQ_COMMON_STATE_OFFSET).cast::<u32>() };
     let current = unsafe { core::ptr::read(state) };
@@ -1135,10 +1206,19 @@ pub fn record_irq_action_request(
         .store(linux_irq_handler_kind_code(handler_kind), Ordering::Release);
     unsafe {
         let action = (&raw mut LINUX_PLIC_IRQ_ACTION_VIEW).as_mut().unwrap();
-        action.irq = logical_irq.as_usize();
-        action.device = device.index();
-        action.handler_kind = linux_irq_handler_kind_code(handler_kind);
+        action.handler = linux_irq_handler_kind_code(handler_kind);
+        action.dev_id = device.index();
+        action.percpu_dev_id = 0;
         action.next = 0;
+        action.thread_fn = 0;
+        action.thread = 0;
+        action.secondary = 0;
+        action.irq = logical_irq.as_usize() as u32;
+        action.flags = 0;
+        action.thread_flags = 0;
+        action.thread_mask = 0;
+        action.name = 0;
+        action.dir = 0;
         let action_ptr = action as *mut LinuxIrqActionView as usize;
         LINUX_PLIC_ACTION_CHAIN_INSTALL_COUNT.fetch_add(1, Ordering::AcqRel);
         LINUX_PLIC_ACTION_CHAIN_LAST_IRQ.store(logical_irq.as_usize(), Ordering::Release);
@@ -1146,6 +1226,7 @@ pub fn record_irq_action_request(
         LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE.store(device.index(), Ordering::Release);
         LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND
             .store(linux_irq_handler_kind_code(handler_kind), Ordering::Release);
+        linux_write_leaf_desc_action_if_present(logical_irq.as_usize() as u32, action_ptr);
     }
     true
 }
@@ -1153,6 +1234,7 @@ pub fn record_irq_action_request(
 fn note_linux_leaf_action_view(
     ctx: &crate::context::Context,
     record: LinuxPlicLeafIrqRecord,
+    desc_action: usize,
 ) -> bool {
     let logical_irq = LogicalIrq::new(record.virq as usize);
     let Some(action) = ctx.irq_handler_registry.action_for_logical_irq(logical_irq) else {
@@ -1182,10 +1264,14 @@ fn note_linux_leaf_action_view(
     {
         return false;
     }
+    if desc_action == 0 || desc_action != record.action {
+        return false;
+    }
 
     LINUX_PLIC_LEAF_ACTION_PREPARE_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_ACTION_REQUEST_MATCH_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_ACTION_CHAIN_MATCH_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_IRQ_DESC_ACTION_MATCH_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_LEAF_ACTION_LAST_IRQ.store(record.virq as usize, Ordering::Release);
     LINUX_PLIC_LEAF_ACTION_LAST_DEPTH.store(LINUX_IRQ_ACTION_DEPTH_ENABLED, Ordering::Release);
     LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_KIND.store(
@@ -1193,6 +1279,7 @@ fn note_linux_leaf_action_view(
         Ordering::Release,
     );
     LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_BOUND.store(true, Ordering::Release);
+    LINUX_PLIC_IRQ_DESC_ACTION_LAST_READBACK.store(desc_action, Ordering::Release);
     true
 }
 
@@ -1206,6 +1293,7 @@ unsafe fn linux_update_leaf_record_from_desc(index: usize) -> LinuxPlicLeafIrqRe
         );
         record.flow_handler =
             core::ptr::read(desc.add(LINUX_IRQ_DESC_HANDLE_IRQ_OFFSET).cast::<usize>());
+        record.action = linux_read_desc_action(desc);
         linux_write_irq_status(desc, record.status);
         linux_store_leaf_record(index, record);
     }
@@ -1240,6 +1328,8 @@ fn linux_store_leaf_irq_record(
     unsafe {
         let desc = linux_leaf_desc_ptr(index);
         prepare_linux_irq_desc(desc, virq, hwirq as usize, chip, chip_data);
+        let action = LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.load(Ordering::Acquire);
+        linux_write_desc_action(desc, virq, action);
         let records = (&raw mut LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
         core::ptr::write(
             records.add(index),
@@ -1249,7 +1339,7 @@ fn linux_store_leaf_irq_record(
                 hwirq,
                 chip,
                 flow_handler,
-                action: LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.load(Ordering::Acquire),
+                action,
                 status: 0,
             },
         );
@@ -1805,6 +1895,7 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
         return;
     };
     let record = linux_leaf_record(index);
+    let desc_action = linux_read_desc_action(desc.cast::<u8>());
     let irq_data = linux_leaf_irq_data_ptr(index);
 
     let linux_tp = crate::arch::riscv64::csr::read_tp();
@@ -1813,7 +1904,7 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
     if rust_tp != 0 {
         crate::arch::riscv64::csr::write_tp(rust_tp);
         let ctx = crate::context::context_ref();
-        let action_ready = note_linux_leaf_action_view(ctx, record);
+        let action_ready = note_linux_leaf_action_view(ctx, record, desc_action);
         dispatched = action_ready
             && ctx
                 .irq_handler_registry
