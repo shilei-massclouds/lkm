@@ -6,12 +6,15 @@ use core::{
 
 use super::{
     device_tree::DeviceTree,
-    irq_time::Plic,
+    irq_time::{LogicalIrq, Plic},
     state::{failed_condition, EventResult, LifecycleEvent, State},
 };
 
 type LinuxInitcall = unsafe extern "C" fn() -> i32;
 type LinuxPlatformProbe = unsafe extern "C" fn(*mut c_void) -> i32;
+type LinuxIrqDomainAlloc = unsafe extern "C" fn(*mut c_void, u32, u32, *mut c_void) -> i32;
+type LinuxIrqFlowHandler = unsafe extern "C" fn(*mut c_void);
+type LinuxIrqChipEoi = unsafe extern "C" fn(*mut c_void);
 
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
@@ -113,9 +116,43 @@ pub struct LinuxOfPhandleArgs {
     args: [u32; 16],
 }
 
+#[repr(C)]
+struct LinuxIrqFwspec {
+    fwnode: *mut c_void,
+    param_count: i32,
+    param: [u32; LINUX_IRQ_FWSPEC_PARAM_COUNT],
+}
+
 #[repr(C, align(16))]
 struct LinuxThreadInfoView {
     bytes: [u8; LINUX_THREAD_INFO_SIZE],
+}
+
+#[repr(C, align(8))]
+#[derive(Clone, Copy)]
+struct LinuxIrqDescView {
+    bytes: [u8; LINUX_IRQ_DESC_SIZE],
+}
+
+#[derive(Clone, Copy)]
+struct LinuxPlicLeafIrqRecord {
+    in_use: bool,
+    virq: u32,
+    hwirq: u32,
+    chip: usize,
+    flow_handler: usize,
+}
+
+impl LinuxPlicLeafIrqRecord {
+    const fn empty() -> Self {
+        Self {
+            in_use: false,
+            virq: 0,
+            hwirq: 0,
+            chip: 0,
+            flow_handler: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -172,15 +209,18 @@ const LINUX_IRQ_DOMAIN_OPS_OFFSET: usize = 24;
 const LINUX_IRQ_DOMAIN_HOST_DATA_OFFSET: usize = 32;
 const LINUX_IRQ_DOMAIN_INFO_OPS_OFFSET: usize = 48;
 const LINUX_IRQ_DOMAIN_INFO_HOST_DATA_OFFSET: usize = 56;
-const LINUX_IRQ_DESC_SIZE: usize = 256;
+const LINUX_IRQ_DOMAIN_OPS_ALLOC_OFFSET: usize = 40;
+const LINUX_IRQ_DESC_SIZE: usize = 512;
 const LINUX_IRQ_CHIP_SIZE: usize = 128;
+const LINUX_IRQ_FWSPEC_PARAM_COUNT: usize = 16;
+const LINUX_PLIC_LEAF_IRQ_CAPACITY: usize = 32;
 const LINUX_IRQ_DESC_IRQ_DATA_OFFSET: usize = 48;
 const LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 4;
+const LINUX_IRQ_DESC_IRQ_DATA_HWIRQ_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 8;
+const LINUX_IRQ_DESC_IRQ_DATA_COMMON_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 16;
 const LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 24;
+const LINUX_IRQ_DESC_IRQ_DATA_CHIP_DATA_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_OFFSET + 48;
 const LINUX_IRQ_CHIP_IRQ_EOI_OFFSET: usize = 72;
-const LINUX_PLIC_CONTEXT_BASE: usize = 0x200000;
-const LINUX_PLIC_CONTEXT_SIZE: usize = 0x1000;
-const LINUX_PLIC_CONTEXT_CLAIM: usize = 0x04;
 const LINUX_THREAD_INFO_SIZE: usize = 2048;
 const LINUX_THREAD_INFO_CPU_OFFSET: usize = 32;
 const LINUX_TASK_STACK_CANARY_OFFSET: usize = 1232;
@@ -203,6 +243,14 @@ static mut LINUX_PLIC_IRQ_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_DO
 static mut LINUX_PLIC_INTC_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_DOMAIN_SIZE];
 static mut LINUX_PLIC_PARENT_IRQ_DESC: [u8; LINUX_IRQ_DESC_SIZE] = [0; LINUX_IRQ_DESC_SIZE];
 static mut LINUX_PLIC_PARENT_IRQ_CHIP: [u8; LINUX_IRQ_CHIP_SIZE] = [0; LINUX_IRQ_CHIP_SIZE];
+static mut LINUX_PLIC_LEAF_IRQ_RECORDS: [LinuxPlicLeafIrqRecord; LINUX_PLIC_LEAF_IRQ_CAPACITY] =
+    [const { LinuxPlicLeafIrqRecord::empty() }; LINUX_PLIC_LEAF_IRQ_CAPACITY];
+static mut LINUX_PLIC_LEAF_IRQ_DESCS: [LinuxIrqDescView; LINUX_PLIC_LEAF_IRQ_CAPACITY] = [const {
+    LinuxIrqDescView {
+        bytes: [0; LINUX_IRQ_DESC_SIZE],
+    }
+};
+    LINUX_PLIC_LEAF_IRQ_CAPACITY];
 static mut LINUX_PLIC_THREAD_INFO: LinuxThreadInfoView = LinuxThreadInfoView {
     bytes: [0; LINUX_THREAD_INFO_SIZE],
 };
@@ -608,22 +656,216 @@ fn prepare_linux_parent_irq_desc() {
     unsafe {
         let desc = (&raw mut LINUX_PLIC_PARENT_IRQ_DESC).cast::<u8>();
         let chip = (&raw mut LINUX_PLIC_PARENT_IRQ_CHIP).cast::<u8>();
-        core::ptr::write_bytes(desc, 0, LINUX_IRQ_DESC_SIZE);
-        core::ptr::write_bytes(chip, 0, LINUX_IRQ_CHIP_SIZE);
-        core::ptr::write(
-            desc.add(LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET).cast::<u32>(),
+        prepare_linux_irq_desc(
+            desc,
             LINUX_RV_IRQ_EXT,
-        );
-        core::ptr::write(
-            desc.add(LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET)
-                .cast::<usize>(),
+            LINUX_RV_IRQ_EXT as usize,
             chip as usize,
+            0,
         );
+        core::ptr::write_bytes(chip, 0, LINUX_IRQ_CHIP_SIZE);
         core::ptr::write(
             chip.add(LINUX_IRQ_CHIP_IRQ_EOI_OFFSET).cast::<usize>(),
             linux_plic_parent_irq_eoi as usize,
         );
     }
+}
+
+unsafe fn prepare_linux_irq_desc(
+    desc: *mut u8,
+    virq: u32,
+    hwirq: usize,
+    chip: usize,
+    chip_data: usize,
+) {
+    unsafe {
+        core::ptr::write_bytes(desc, 0, LINUX_IRQ_DESC_SIZE);
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_IRQ_OFFSET).cast::<u32>(),
+            virq,
+        );
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_HWIRQ_OFFSET)
+                .cast::<usize>(),
+            hwirq,
+        );
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_COMMON_OFFSET)
+                .cast::<usize>(),
+            desc as usize,
+        );
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_CHIP_OFFSET)
+                .cast::<usize>(),
+            chip,
+        );
+        core::ptr::write(
+            desc.add(LINUX_IRQ_DESC_IRQ_DATA_CHIP_DATA_OFFSET)
+                .cast::<usize>(),
+            chip_data,
+        );
+    }
+}
+
+fn linux_irq_data_from_desc(desc: *mut u8) -> *mut c_void {
+    unsafe { desc.add(LINUX_IRQ_DESC_IRQ_DATA_OFFSET).cast::<c_void>() }
+}
+
+fn linux_leaf_record_index_by_hwirq(hwirq: u32) -> Option<usize> {
+    let records = (&raw const LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
+    let mut index = 0usize;
+    while index < LINUX_PLIC_LEAF_IRQ_CAPACITY {
+        let record = unsafe { core::ptr::read(records.add(index)) };
+        if record.in_use && record.hwirq == hwirq {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn linux_leaf_record_index_by_virq(virq: u32) -> Option<usize> {
+    let records = (&raw const LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
+    let mut index = 0usize;
+    while index < LINUX_PLIC_LEAF_IRQ_CAPACITY {
+        let record = unsafe { core::ptr::read(records.add(index)) };
+        if record.in_use && record.virq == virq {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn linux_leaf_record_index_by_desc(desc: *const c_void) -> Option<usize> {
+    let descs = (&raw const LINUX_PLIC_LEAF_IRQ_DESCS).cast::<LinuxIrqDescView>();
+    let mut index = 0usize;
+    while index < LINUX_PLIC_LEAF_IRQ_CAPACITY {
+        let expected = unsafe { descs.add(index).cast::<c_void>() };
+        if expected == desc {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn linux_leaf_desc_ptr(index: usize) -> *mut u8 {
+    unsafe {
+        (&raw mut LINUX_PLIC_LEAF_IRQ_DESCS)
+            .cast::<LinuxIrqDescView>()
+            .add(index)
+            .cast::<u8>()
+    }
+}
+
+fn linux_leaf_irq_data_ptr(index: usize) -> *mut c_void {
+    linux_irq_data_from_desc(linux_leaf_desc_ptr(index))
+}
+
+fn linux_leaf_record(index: usize) -> LinuxPlicLeafIrqRecord {
+    let records = (&raw const LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
+    unsafe { core::ptr::read(records.add(index)) }
+}
+
+fn linux_store_leaf_irq_record(
+    virq: u32,
+    hwirq: u32,
+    chip: usize,
+    chip_data: usize,
+    flow_handler: usize,
+) -> bool {
+    let index = linux_leaf_record_index_by_hwirq(hwirq)
+        .or_else(|| linux_leaf_record_index_by_virq(virq))
+        .or_else(|| {
+            let records = (&raw const LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
+            let mut index = 0usize;
+            while index < LINUX_PLIC_LEAF_IRQ_CAPACITY {
+                let record = unsafe { core::ptr::read(records.add(index)) };
+                if !record.in_use {
+                    return Some(index);
+                }
+                index += 1;
+            }
+            None
+        });
+    let Some(index) = index else {
+        return false;
+    };
+
+    unsafe {
+        let desc = linux_leaf_desc_ptr(index);
+        prepare_linux_irq_desc(desc, virq, hwirq as usize, chip, chip_data);
+        let records = (&raw mut LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
+        core::ptr::write(
+            records.add(index),
+            LinuxPlicLeafIrqRecord {
+                in_use: true,
+                virq,
+                hwirq,
+                chip,
+                flow_handler,
+            },
+        );
+    }
+    true
+}
+
+unsafe fn call_linux_domain_alloc(domain: *mut c_void, virq: u32, hwirq: u32) -> i32 {
+    let ops = LINUX_PLIC_DOMAIN_OPS.load(Ordering::Acquire);
+    if domain.is_null() || ops == 0 {
+        return -22;
+    }
+
+    let alloc = unsafe {
+        core::ptr::read(
+            (ops as *const u8)
+                .add(LINUX_IRQ_DOMAIN_OPS_ALLOC_OFFSET)
+                .cast::<usize>(),
+        )
+    };
+    if alloc == 0 {
+        return -22;
+    }
+
+    let mut fwspec = LinuxIrqFwspec {
+        fwnode: core::ptr::null_mut(),
+        param_count: 1,
+        param: [0; LINUX_IRQ_FWSPEC_PARAM_COUNT],
+    };
+    fwspec.param[0] = hwirq;
+    let alloc: LinuxIrqDomainAlloc = unsafe { core::mem::transmute(alloc) };
+    unsafe { alloc(domain, virq, 1, (&raw mut fwspec).cast::<c_void>()) }
+}
+
+unsafe fn call_linux_chip_eoi(record: LinuxPlicLeafIrqRecord, irq_data: *mut c_void) -> bool {
+    if record.chip == 0 || irq_data.is_null() {
+        return false;
+    }
+    let eoi = unsafe {
+        core::ptr::read(
+            (record.chip as *const u8)
+                .add(LINUX_IRQ_CHIP_IRQ_EOI_OFFSET)
+                .cast::<usize>(),
+        )
+    };
+    if eoi == 0 {
+        return false;
+    }
+    let eoi: LinuxIrqChipEoi = unsafe { core::mem::transmute(eoi) };
+    unsafe { eoi(irq_data) };
+    true
+}
+
+fn ensure_linux_leaf_irq(domain: *mut c_void, hwirq: u32, virq: u32) -> Option<usize> {
+    if let Some(index) = linux_leaf_record_index_by_hwirq(hwirq) {
+        return Some(index);
+    }
+    let ret = unsafe { call_linux_domain_alloc(domain, virq, hwirq) };
+    if ret != 0 {
+        return None;
+    }
+    linux_leaf_record_index_by_hwirq(hwirq)
 }
 
 fn linux_thread_info_base() -> *mut u8 {
@@ -650,16 +892,6 @@ fn remember_rust_tp(tp: usize) {
 }
 
 extern "C" fn linux_plic_parent_irq_eoi(_data: *mut c_void) {}
-
-fn plic_context_claim_addr() -> usize {
-    let membase = LINUX_PLIC_MEMBASE.load(Ordering::Acquire);
-    let context_id = LINUX_PLIC_CONTEXT_ID.load(Ordering::Acquire);
-    membase
-        .checked_add(LINUX_PLIC_CONTEXT_BASE)
-        .and_then(|base| base.checked_add(context_id.saturating_mul(LINUX_PLIC_CONTEXT_SIZE)))
-        .and_then(|base| base.checked_add(LINUX_PLIC_CONTEXT_CLAIM))
-        .unwrap_or(0)
-}
 
 #[unsafe(no_mangle)]
 pub static mut __cpu_online_mask: [usize; 1] = [1];
@@ -876,36 +1108,65 @@ pub extern "C" fn generic_handle_domain_irq(domain: *mut c_void, hwirq: usize) -
         crate::arch::riscv64::csr::write_tp(rust_tp);
     }
     let ctx = crate::context::context_ref();
-    let mapped = ctx
-        .plic_irq_domain
-        .resolve_hwirq(source)
-        .is_some_and(|logical_irq| ctx.irq_handler_registry.dispatch(logical_irq));
+    let Some(logical_irq) = ctx.plic_irq_domain.resolve_hwirq(source) else {
+        crate::arch::riscv64::csr::disable_supervisor_interrupts();
+        crate::arch::riscv64::csr::write_tp(linux_tp);
+        return -22;
+    };
+    let Ok(virq) = u32::try_from(logical_irq.as_usize()) else {
+        crate::arch::riscv64::csr::disable_supervisor_interrupts();
+        crate::arch::riscv64::csr::write_tp(linux_tp);
+        return -22;
+    };
     crate::arch::riscv64::csr::disable_supervisor_interrupts();
-
-    let claim_addr = plic_context_claim_addr();
-    if claim_addr != 0 {
-        unsafe { core::ptr::write_volatile(claim_addr as *mut u32, source) };
-        LINUX_PLIC_RUNTIME_COMPLETE_COUNT.fetch_add(1, Ordering::AcqRel);
-        LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.store(source, Ordering::Release);
-    }
     crate::arch::riscv64::csr::write_tp(linux_tp);
 
-    if mapped {
-        LINUX_PLIC_RUNTIME_DISPATCH_COUNT.fetch_add(1, Ordering::AcqRel);
-        0
-    } else {
-        -22
+    let Some(index) = ensure_linux_leaf_irq(domain, source, virq) else {
+        return -22;
+    };
+    let record = linux_leaf_record(index);
+    if record.flow_handler == 0 {
+        return -22;
     }
+    let handler: LinuxIrqFlowHandler = unsafe { core::mem::transmute(record.flow_handler) };
+    let desc = linux_leaf_desc_ptr(index).cast::<c_void>();
+    unsafe { handler(desc) };
+    0
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn handle_edge_irq() {
-    trap("handle_edge_irq")
+pub extern "C" fn handle_edge_irq(desc: *mut c_void) {
+    handle_fasteoi_irq(desc)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn handle_fasteoi_irq() {
-    trap("handle_fasteoi_irq")
+pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
+    let Some(index) = linux_leaf_record_index_by_desc(desc) else {
+        return;
+    };
+    let record = linux_leaf_record(index);
+    let irq_data = linux_leaf_irq_data_ptr(index);
+
+    let linux_tp = crate::arch::riscv64::csr::read_tp();
+    let rust_tp = LINUX_PLIC_SAVED_RUST_TP.load(Ordering::Acquire);
+    let mut dispatched = false;
+    if rust_tp != 0 {
+        crate::arch::riscv64::csr::write_tp(rust_tp);
+        let ctx = crate::context::context_ref();
+        dispatched = ctx
+            .irq_handler_registry
+            .dispatch(LogicalIrq::new(record.virq as usize));
+        crate::arch::riscv64::csr::disable_supervisor_interrupts();
+        crate::arch::riscv64::csr::write_tp(linux_tp);
+    }
+
+    if unsafe { call_linux_chip_eoi(record, irq_data) } {
+        LINUX_PLIC_RUNTIME_COMPLETE_COUNT.fetch_add(1, Ordering::AcqRel);
+        LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.store(record.hwirq, Ordering::Release);
+    }
+    if dispatched {
+        LINUX_PLIC_RUNTIME_DISPATCH_COUNT.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -977,13 +1238,57 @@ pub extern "C" fn irq_domain_instantiate(info: *mut c_void) -> *mut c_void {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_domain_set_info() {
-    trap("irq_domain_set_info")
+pub extern "C" fn irq_domain_set_info(
+    domain: *mut c_void,
+    virq: u32,
+    hwirq: usize,
+    chip: *const c_void,
+    chip_data: *mut c_void,
+    handler: *mut c_void,
+    _handler_data: *mut c_void,
+    _handler_name: *const u8,
+) {
+    let expected_domain = LINUX_PLIC_DOMAIN_PTR.load(Ordering::Acquire) as *mut c_void;
+    if domain.is_null()
+        || domain != expected_domain
+        || virq == 0
+        || hwirq == 0
+        || chip.is_null()
+        || handler.is_null()
+    {
+        return;
+    }
+    let Ok(hwirq) = u32::try_from(hwirq) else {
+        return;
+    };
+    let _ = linux_store_leaf_irq_record(
+        virq,
+        hwirq,
+        chip as usize,
+        chip_data as usize,
+        handler as usize,
+    );
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_domain_translate_onecell() -> i32 {
-    trap("irq_domain_translate_onecell")
+pub extern "C" fn irq_domain_translate_onecell(
+    _domain: *mut c_void,
+    fwspec: *mut c_void,
+    out_hwirq: *mut usize,
+    out_type: *mut u32,
+) -> i32 {
+    if fwspec.is_null() || out_hwirq.is_null() || out_type.is_null() {
+        return -22;
+    }
+    let fwspec = unsafe { &*fwspec.cast::<LinuxIrqFwspec>() };
+    if fwspec.param_count < 1 {
+        return -22;
+    }
+    unsafe {
+        *out_hwirq = fwspec.param[0] as usize;
+        *out_type = 0;
+    }
+    0
 }
 
 #[unsafe(no_mangle)]
@@ -999,8 +1304,18 @@ pub extern "C" fn irq_find_matching_fwspec(_fwspec: *const c_void, _bus_token: u
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_get_irq_data() -> *mut c_void {
-    trap("irq_get_irq_data")
+pub extern "C" fn irq_get_irq_data(irq: u32) -> *mut c_void {
+    let parent = LINUX_PLIC_PARENT_IRQ.load(Ordering::Acquire);
+    if parent != 0 && irq as usize == parent {
+        prepare_linux_parent_irq_desc();
+        let desc = (&raw mut LINUX_PLIC_PARENT_IRQ_DESC).cast::<u8>();
+        return linux_irq_data_from_desc(desc);
+    }
+
+    if let Some(index) = linux_leaf_record_index_by_virq(irq) {
+        return linux_leaf_irq_data_ptr(index);
+    }
+    core::ptr::null_mut()
 }
 
 #[unsafe(no_mangle)]

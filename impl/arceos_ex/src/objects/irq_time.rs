@@ -2526,6 +2526,11 @@ impl LogicalIrq {
     pub const fn is_valid(self) -> bool {
         self.value != 0
     }
+
+    #[cfg_attr(not(plic_provider_linux_object), allow(dead_code))]
+    pub const fn as_usize(self) -> usize {
+        self.value
+    }
 }
 
 pub struct PlicIrqMapping {

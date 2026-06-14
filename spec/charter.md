@@ -3192,25 +3192,30 @@ UART、console、IRQ action 等路径感知两套不同 PLIC API。
 服务面。后续讨论 `nm -u` 下接口时，应围绕 `platform_driver/probe` 及其后续 IRQ 服务面逐项判断哪些 Linux 依赖必须真实
 实现，哪些可以作为单核启动试验的受限 stub，哪些需要在 `arceos_ex` 中建立正式对象语义。
 
-### 当前首轮运行闭合状态
+### 当前运行闭合状态
 
 截至当前轮次，`PLIC_PROVIDER=linux-object` 已不再只停留在 probe/domain/chained handler 注册事实观测上。`arceos_ex`
 已经能在 RISC-V supervisor external interrupt 路径中调用 Linux object 注册出的 `plic_handle_irq`，由该黑盒函数读取
-PLIC claim register 并调用 `generic_handle_domain_irq(priv->irqdomain, hwirq)`。当前 `generic_handle_domain_irq` 仍是
-薄 shim：它校验 Linux domain 指针和 hwirq，临时恢复 Rust `tp` 后复用现有 `PlicIrqDomain` 与 `IrqHandlerRegistry`
-分发 UART logical IRQ，随后在等价位置写回 claim register 完成 source，并更新共同观测计数。外层 Linux 调用窗口保存并
-恢复 SIE 与 `tp`，Linux `tp` 激活期间关闭本地中断，避免嵌套 trap 捕获 Linux `thread_info` 视图。
+PLIC claim register 并调用 `generic_handle_domain_irq(priv->irqdomain, hwirq)`。当前 runtime 已从第一轮 direct-complete
+bridge 推进为 Linux-shaped leaf IRQ flow：`generic_handle_domain_irq` 校验 Linux domain 指针和 hwirq 后，临时恢复
+Rust `tp` 查找现有 `PlicIrqDomain` logical IRQ；若该 hwirq 尚未建立 Linux leaf 视图，则调用 Linux 对象的
+`plic_irqdomain_ops.alloc`，让黑盒对象内部执行 `plic_irq_domain_translate -> plic_irqdomain_map -> irq_domain_set_info`。
+`irq_domain_set_info` 只作为薄 shim 记录 Linux 对象交出的 `plic_chip`、`handle_fasteoi_irq` 和 leaf `irq_desc/irq_data`
+视图，不承载 PLIC 业务语义。随后 flow handler 进入 `handle_fasteoi_irq`：先恢复 Rust `tp` 分发
+`IrqHandlerRegistry` 中的 UART action，再切回 Linux `tp` 调用 `plic_chip.irq_eoi(irq_data)`，由 Linux
+`plic_irq_eoi` 写回 claim register 完成 source。外层 Linux 调用窗口保存并恢复 SIE 与 `tp`，Linux `tp` 激活期间关闭
+本地中断，避免嵌套 trap 捕获 Linux `thread_info` 视图。
 
 这一路径已经通过 `make -C impl/arceos_ex run APP=smoke PLIC_PROVIDER=linux-object PROBE=linux-plic,uart-irq-chain`
 验证：`linux_plic.boundary_facts` 和 `uart_irq_chain.observer_real_path` 均通过，smoke 结果为
 `passed=36 failed=0 total=36`。其中 UART IRQ chain 观察到 Linux PLIC object provider 下的
-claim/dispatch/complete/zero-claim/loop-exit 计数闭合，说明首轮黑盒 runtime claim loop 已经承接现有 UART action。
+claim/dispatch/complete/zero-claim/loop-exit 计数闭合，说明黑盒 runtime claim loop 和 Linux `plic_chip.irq_eoi`
+callback 已经承接现有 UART action。
 
-这仍不是完整 Linux generic IRQ core 复用。当前 `irq_domain_set_info`、`irq_get_irq_data`、`handle_fasteoi_irq`、
-`handle_edge_irq` 以及 true `plic_chip.irq_eoi` / `plic_edge_chip.irq_ack` flow 仍归入 deferred；当前 complete 由
-`generic_handle_domain_irq` shim 在 UART action dispatch 之后写 claim register，属于保持顺序等价的首轮 bridge。下一轮
-若要提高二进制对齐度，应把 leaf IRQ flow handler、`irq_data` 布局和 chip callback 逐步换成 Linux-shaped 真实路径，
-同时保持上层 UART/console/smoke 不感知 provider 差异。
+这仍不是完整 Linux generic IRQ core 复用。当前只覆盖 QEMU/SiFive PLIC 的无 edge quirk、level IRQ 主线；
+`handle_edge_irq` 仍只是兼容入口，`plic_edge_chip.irq_ack`、disabled IRQ eoi 特殊路径、mask/unmask/enable/disable、
+unmapped IRQ ratelimit/打印以及更完整 `irq_desc`/`irq_common_data` 行为仍归入后续排雷。下一轮应继续扩展这些边界，同时
+保持上层 UART/console/smoke 不感知 provider 差异。
 
 ### 上接口仍需讨论的问题
 
@@ -3233,9 +3238,10 @@ claim/dispatch/complete/zero-claim/loop-exit 计数闭合，说明首轮黑盒 r
 4. IRQ domain 编号语义：需要确认 PLIC source 0 保留、`nr_irqs + 1` domain size、`riscv,ndev` 范围、重复 source
    mapping、logical IRQ 分配、`irq_fwspec` 参数修改、`gsi_base` 以及 one-cell/two-cell translate 的行为，确保
    Linux provider 与原生 provider 对 UART 等外设产出同一个 logical IRQ 语义。
-5. IRQ flow 与 complete 位置：需要明确第一轮是否实现足够的 `handle_fasteoi_irq` / `handle_edge_irq` flow，使
-   `plic_chip.irq_eoi` / `plic_edge_chip.irq_ack` 自然发生；如果使用简化 IRQ core，也必须保证
-   `claim -> dispatch -> eoi/ack -> next claim -> zero claim exit` 的顺序和 disabled IRQ 特殊路径等价。
+5. IRQ flow 与 complete 位置：level IRQ 主线已通过 `handle_fasteoi_irq -> plic_chip.irq_eoi` 接入 Linux-shaped
+   complete；后续仍需补 edge quirk 下的 `handle_edge_irq -> plic_edge_chip.irq_ack`、disabled IRQ 特殊 eoi 路径、
+   unmapped IRQ fail/ratelimit，以及更完整 `irq_desc`/`irq_common_data` 语义，保证
+   `claim -> dispatch -> eoi/ack -> next claim -> zero claim exit` 的顺序和特殊路径等价。
 6. chained handler 与 root INTC 关系：需要确认 parent `RV_IRQ_EXT` logical IRQ、`irq_desc`、parent chip、
    `chained_irq_enter/exit` 和 `riscv_get_intc_hwnode()` 的最小真实语义。Linux PLIC provider 不能绕过 RISC-V INTC
    直接成为 trap root handler。
