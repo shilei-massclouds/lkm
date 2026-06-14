@@ -46,6 +46,19 @@
 12. **待执行：建立分层验证闭环**。按 link-only、initcall 注册、platform match/probe、domain/chip/chained 注册、UART interrupt cycle 五层推进验证。每层都要有 checkpoint/KUnit/smoke 或 trace 观察点，并记录与 native provider 的差异分类。验收标准：至少恢复当前 UART THRE interrupt cycle：root INTC external -> Linux PLIC chained handler -> claim -> generic IRQ dispatch -> UART action -> eoi/complete -> zero claim loop exit；阶段收束时 `make test` 应通过，除非某项失败已经被明确归入本节待办并作为下一项阻塞问题处理。
 13. **待执行：同步规格与差异分类**。每完成一层，把发现的问题更新到 `spec/charter.md`、必要的 coding/model 规格和本 roadmap。差异必须归入已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离或疑似 bug；未分类前不直接把 workaround 落入主体实现。
 
+### 当前进度与后续计划
+
+当前已完成 `irq-sifive-plic.o` 的输入基线、第三方落位、soft-float ABI 对齐、provider 级条件编译、直接链接、Linux section `KEEP`、undefined symbol exact shim，以及 initcall6 执行到 platform driver 注册的最小真实路径。`PLIC_PROVIDER=linux-object make run APP=smoke` 当前可通过 `__platform_driver_register` 记录检查，证明 Linux object 已被链接并通过 `.initcall6.init` 主动注册 `plic_driver`；但这还不是 provider 替换完成，`plic_platform_probe()` 尚未被调用，PLIC claim/complete、irq_domain、irq_chip 和 chained handler 仍未切到 Linux object 实现。
+
+后续按下面顺序推进：
+
+1. 完成第 8 项剩余工作：严格对照 Linux 6.12.37 头文件和对象访问方式，构造最小 `platform_device/device/fwnode` 可见视图，通过 compatible match 调用 `plic_driver.probe`，让 `plic_platform_probe()` 真实进入。
+2. 进入第 9 项：按 `plic_probe()` 实际踩到的符号逐个补真实语义，优先 OF/fwnode 属性读取、platform resource/ioremap、hartid/cpuid、kmalloc/kfree、per-CPU/cpumask、spinlock、syscore/cpuhp；打印、ratelimit、调试和审计继续保持 deferred 或兜底 fail。
+3. 进入第 10 项：对齐 Linux `irq_domain`、`irq_chip`、chained handler 和 generic IRQ dispatch，使 Linux PLIC object 注册出的 domain/chip/handler 能承接现有 UART IRQ action。
+4. 进入第 11 项：把 native PLIC provider 收敛到同一 Linux-shaped provider contract，让 provider 切换只改变链接输入和 provider 文件组，上层 IRQ/UART/console 路径不感知差异。
+5. 进入第 12 项：按 link-only、initcall 注册、platform match/probe、domain/chip/chained 注册、UART interrupt cycle 五层建立 checkpoint/KUnit/smoke 或 trace 观测。
+6. 每一层完成后同步第 13 项：更新 `spec/charter.md`、必要 coding/model 规格和本 roadmap；阶段目标收束时必须以 `make test` 通过作为重要验收，若失败则把失败明确归入下一项阻塞问题。
+
 ## 已完成计划：console/earlycon handoff
 
 当前阶段已在 `PlatformBus -> ns16550a platform driver probe` 闭环上完成 Linux-like 的 early console 到真实 serial console 首轮交接。
@@ -163,11 +176,12 @@
 ## 当前交接标记
 
 - 当前 PLIC/IRQ 前置链路已完成首轮 `UartInterruptChainProbe` 验证：PlatformBus 已完成设备 population、driver register/probe、真实 ns16550a probe/bind、UART 8250 资源解析、ioremap/vmalloc UART MMIO 映射、console/earlycon handoff、PLIC irqchip init/provider setup、`PlicIrqDomain` source -> logical IRQ mapping、UART IRQ handler action 登记、root external input gate / UART source gate 显式 open，以及一轮真实 UART THRE interrupt cycle 下的 PLIC claim loop、IRQ dispatch、UART handler、PLIC complete、zero claim loop exit 和成对闭合观测。serial8250 console 已切到 interrupt-driven TX 当前轮：`printk` 经 TX queue + THRI 中断由真实 handler drain，已覆盖 burst、long、long-burst 和 quiesce/no-spurious-IRQ 检查；更完整 RX/TTY runtime、file/stdout/stdin 和用户态 I/O 后续单独推进。
+- Linux PLIC object 复用当前推进到专项路径：`irq-sifive-plic.o` 已落位到 `impl/third_party/linux/6.12.37/riscv64-lp64/`，`arceos_ex` 默认 RISC-V ABI 已切到 soft-float，`PLIC_PROVIDER=linux-object` 会直接链接该对象并保留 Linux init/irqchip/alternative/bug/percpu sections。`objects/linux_plic_shim.rs` 已覆盖 `nm -u` 发现的 undefined symbols；`.initcall6.init` 已被执行，`__platform_driver_register` 已记录 `plic_driver` 且 `.probe` 非空。当前尚未调用 `plic_platform_probe()`，因此 Linux object 路径还没有替换 native PLIC claim/complete/domain/chip/chained handler。
 - 已解决前置问题：`make run APP=hello` 的重复输出来自 handoff 后 `PrintkBuffer` legacy drain cursor 未移交，以及 payload 末尾直接调用 earlycon backend drain；当前已修复为 boot pending flush、serial delivered cursor 推进、handoff 后 EarlyCon offline/panic guard，并要求 hello/smoke 只走 printk 前端。已通过 `make run APP=hello`、`make run LOG=trace APP=hello` 与 `make test` 验证。
 - `SmpRuntimePhase` 已形成六个子阶段最小闭环：`PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
 - 最近完整验收已通过：`make verify`；`make build APP=smoke`；`make run APP=smoke`；`make run`；`make test-kunit`；`make test`。当前 `make test` summary 为 `total=86 pass=86 fail=0`；普通 `make run`/app smoke 不再出现固定 burst、long-burst 或 `Wtx04` 探针 payload，checkpoint/KUnit 构建仍保留这些生产路径 payload 并由只读 KUnit observer 校验。
 - 当前 trace SVG 产物：`tools/out/trace/main.trace.svg`。
-- 下一步恢复时优先进入 Linux 6.12.37 交叉验证：先建立 `~/gitStudy/linux-6.12.37` 源码路径到 model/coding/implementation/test/checkpoint 的 cross-reference 表，再按“已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离、疑似 bug”分类差异。不要在未完成分类前直接继续 printk TX 异常、TTY runtime 或用户态 I/O 功能扩展。
+- 下一步恢复时优先继续 Linux 6.12.37 PLIC object 二进制复用：从 Linux 可见的 `platform_device/device/fwnode` 最小视图和 compatible match 开始，真实调用 `plic_platform_probe()`；随后按 probe 触发的 undefined symbol 逐个补真实语义，并把差异归入“已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离、疑似 bug”。不要在未完成该层分类前直接继续 printk TX 异常、TTY runtime 或用户态 I/O 功能扩展。
 - 上下文清理后恢复：先执行 `git status --short --branch`；预期工作树干净。
 
 ## 细节文档索引
