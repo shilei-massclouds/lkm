@@ -1,10 +1,41 @@
-use core::ffi::c_void;
+use core::{ffi::c_void, mem::size_of};
+
+use super::state::{failed_condition, EventResult, LifecycleEvent, State};
+
+type LinuxInitcall = unsafe extern "C" fn() -> i32;
+
+unsafe extern "C" {
+    static __linux_initcall6_start: usize;
+    static __linux_initcall6_end: usize;
+}
 
 fn trap(symbol: &str) -> ! {
     crate::arch::riscv64::sbi::putstr("linux plic shim trap: ");
     crate::arch::riscv64::sbi::putstr(symbol);
     crate::arch::riscv64::sbi::putstr("\n");
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+pub fn run_linux_initcall6() -> EventResult {
+    let start = &raw const __linux_initcall6_start as *const usize as usize;
+    let end = &raw const __linux_initcall6_end as *const usize as usize;
+    let entry_size = size_of::<LinuxInitcall>();
+    if start == 0 || end <= start || entry_size == 0 || (end - start) % entry_size != 0 {
+        return failed_condition(LifecycleEvent::Setup, State::Base, State::Ready, State::Ready);
+    }
+
+    let count = (end - start) / entry_size;
+    let entries = unsafe { core::slice::from_raw_parts(start as *const LinuxInitcall, count) };
+    let mut index = 0usize;
+    while index < entries.len() {
+        let ret = unsafe { entries[index]() };
+        if ret != 0 {
+            return failed_condition(LifecycleEvent::Setup, State::Base, State::Ready, State::Ready);
+        }
+        index += 1;
+    }
+
+    Ok(())
 }
 
 #[unsafe(no_mangle)]

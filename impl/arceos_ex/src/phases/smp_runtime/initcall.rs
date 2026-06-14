@@ -50,6 +50,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.initcall_table
         .preset(&ctx.ctor_table, &ctx.static_objects)?;
     run_initcall_table(ctx)?;
+    run_linux_plic_initcall6()?;
     ctx.uart_external_irq_enable.setup(
         &ctx.plic,
         &mut ctx.plic_irq_domain,
@@ -192,6 +193,16 @@ fn run_initcall_table(ctx: &mut Context) -> EventResult {
         ctx.console.refresh_handoff();
     }
     result
+}
+
+#[cfg(plic_provider_linux_object)]
+fn run_linux_plic_initcall6() -> EventResult {
+    crate::objects::linux_plic_shim::run_linux_initcall6()
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn run_linux_plic_initcall6() -> EventResult {
+    Ok(())
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {
