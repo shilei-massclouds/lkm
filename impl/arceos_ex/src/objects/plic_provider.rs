@@ -14,6 +14,18 @@ pub fn exercise_uart_leaf_boundaries(source: u32, logical_irq: LogicalIrq) -> Ev
     provider_exercise_uart_leaf_boundaries(source, logical_irq)
 }
 
+pub fn translate_one_cell_specifier(domain: &PlicIrqDomain, specifier: &[u32]) -> Option<u32> {
+    provider_translate_one_cell_specifier(domain, specifier)
+}
+
+pub fn map_source(domain: &mut PlicIrqDomain, source: u32) -> Option<LogicalIrq> {
+    provider_map_source(domain, source)
+}
+
+pub fn resolve_hwirq(domain: &PlicIrqDomain, source: u32) -> Option<LogicalIrq> {
+    provider_resolve_hwirq(domain, source)
+}
+
 pub fn enable_mapped_source(plic: &Plic, source: u32, logical_irq: LogicalIrq) -> bool {
     if plic.state() != State::Ready
         || !plic.source_enable_ready()
@@ -83,6 +95,17 @@ fn runtime_ready(plic: &Plic, domain: &PlicIrqDomain, registry: &IrqHandlerRegis
         && registry.dispatch_ready()
 }
 
+fn domain_ready(domain: &PlicIrqDomain) -> bool {
+    domain.state() == State::Ready
+        && domain.hwirq_valid_range_ready()
+        && domain.logical_irq_allocator_ready()
+        && domain.mapping_table_ready()
+        && domain.translate_specifier_ready()
+        && domain.dispatch_ops_ready()
+        && domain.source_zero_reserved()
+        && domain.one_cell_specifier()
+}
+
 #[cfg(not(plic_provider_linux_object))]
 fn provider_setup_registered_provider(_device_tree: &DeviceTree, _plic: &Plic) -> EventResult {
     Ok(())
@@ -124,6 +147,30 @@ fn provider_exercise_uart_leaf_boundaries(source: u32, logical_irq: LogicalIrq) 
     }
 
     Ok(())
+}
+
+fn provider_translate_one_cell_specifier(domain: &PlicIrqDomain, specifier: &[u32]) -> Option<u32> {
+    if !domain_ready(domain) {
+        return None;
+    }
+
+    domain.native_translate_one_cell_specifier(specifier)
+}
+
+fn provider_map_source(domain: &mut PlicIrqDomain, source: u32) -> Option<LogicalIrq> {
+    if !domain_ready(domain) {
+        return None;
+    }
+
+    domain.native_map_source(source)
+}
+
+fn provider_resolve_hwirq(domain: &PlicIrqDomain, source: u32) -> Option<LogicalIrq> {
+    if !domain_ready(domain) {
+        return None;
+    }
+
+    domain.native_resolve_hwirq(source)
 }
 
 #[cfg(not(plic_provider_linux_object))]

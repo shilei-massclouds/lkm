@@ -2838,6 +2838,10 @@ impl PlicIrqDomain {
     }
 
     pub fn translate_one_cell_specifier(&self, specifier: &[u32]) -> Option<u32> {
+        super::plic_provider::translate_one_cell_specifier(self, specifier)
+    }
+
+    pub(crate) fn native_translate_one_cell_specifier(&self, specifier: &[u32]) -> Option<u32> {
         if self.lifecycle.state() != State::Ready
             || !self.translate_specifier_ready
             || !self.one_cell_specifier
@@ -2853,6 +2857,10 @@ impl PlicIrqDomain {
     }
 
     pub fn map_source(&mut self, source: u32) -> Option<LogicalIrq> {
+        super::plic_provider::map_source(self, source)
+    }
+
+    pub(crate) fn native_map_source(&mut self, source: u32) -> Option<LogicalIrq> {
         if self.lifecycle.state() != State::Ready
             || !self.logical_irq_allocator_ready
             || !self.mapping_table_ready
@@ -2881,6 +2889,10 @@ impl PlicIrqDomain {
     }
 
     pub fn resolve_hwirq(&self, source: u32) -> Option<LogicalIrq> {
+        super::plic_provider::resolve_hwirq(self, source)
+    }
+
+    pub(crate) fn native_resolve_hwirq(&self, source: u32) -> Option<LogicalIrq> {
         if self.lifecycle.state() != State::Ready
             || !self.dispatch_ops_ready
             || source == 0
