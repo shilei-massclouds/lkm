@@ -137,6 +137,21 @@ fn emit_facts(facts: LinuxPlicBoundaryFacts) {
         "irq_modify_status_last_status",
         facts.irq_modify_status_last_status,
     );
+    kunit::diag_usize("leaf_action_prepare_count", facts.leaf_action_prepare_count);
+    kunit::diag_usize(
+        "leaf_action_dispatch_count",
+        facts.leaf_action_dispatch_count,
+    );
+    kunit::diag_usize("leaf_action_last_irq", facts.leaf_action_last_irq);
+    kunit::diag_usize("leaf_action_last_depth", facts.leaf_action_last_depth);
+    kunit::diag_usize(
+        "leaf_action_last_handler_kind",
+        facts.leaf_action_last_handler_kind,
+    );
+    kunit::diag_usize(
+        "leaf_action_last_handler_bound",
+        facts.leaf_action_last_handler_bound as usize,
+    );
 }
 
 fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
@@ -205,6 +220,12 @@ fn facts_valid(facts: LinuxPlicBoundaryFacts) -> bool {
         && facts.irq_modify_status_last_clear == 0
         && facts.irq_modify_status_last_set == linux_irq_noprobe() as usize
         && facts.irq_modify_status_last_status & linux_irq_noprobe() as usize != 0
+        && facts.leaf_action_prepare_count != 0
+        && facts.leaf_action_dispatch_count != 0
+        && facts.leaf_action_last_irq == ns16550a::uart8250_port_logical_irq().as_usize()
+        && facts.leaf_action_last_depth == linux_irq_action_depth_enabled()
+        && facts.leaf_action_last_handler_kind == linux_irq_handler_kind_ns16550a_uart()
+        && facts.leaf_action_last_handler_bound
 }
 
 fn strictly_before(before: usize, after: usize) -> bool {
@@ -226,4 +247,12 @@ const fn linux_irq_norequest() -> u32 {
 
 const fn linux_irq_nothread() -> u32 {
     1u32 << 16
+}
+
+const fn linux_irq_action_depth_enabled() -> usize {
+    0
+}
+
+const fn linux_irq_handler_kind_ns16550a_uart() -> usize {
+    1
 }

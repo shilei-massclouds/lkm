@@ -6,7 +6,7 @@ use core::{
 
 use super::{
     device_tree::DeviceTree,
-    irq_time::{LogicalIrq, Plic},
+    irq_time::{IrqHandlerKind, LogicalIrq, Plic},
     state::{failed_condition, EventResult, LifecycleEvent, State},
 };
 
@@ -97,6 +97,12 @@ static LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_CLEAR: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_SET: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_STATUS: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_LEAF_ACTION_PREPARE_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_LEAF_ACTION_DISPATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_LEAF_ACTION_LAST_IRQ: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_LEAF_ACTION_LAST_DEPTH: AtomicUsize = AtomicUsize::new(usize::MAX);
+static LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_KIND: AtomicUsize = AtomicUsize::new(0);
+static LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_BOUND: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
 struct LinuxPlatformDriver {
@@ -305,6 +311,12 @@ pub struct LinuxPlicBoundaryFacts {
     pub irq_modify_status_last_clear: usize,
     pub irq_modify_status_last_set: usize,
     pub irq_modify_status_last_status: usize,
+    pub leaf_action_prepare_count: usize,
+    pub leaf_action_dispatch_count: usize,
+    pub leaf_action_last_irq: usize,
+    pub leaf_action_last_depth: usize,
+    pub leaf_action_last_handler_kind: usize,
+    pub leaf_action_last_handler_bound: bool,
 }
 
 const LINUX_PLATFORM_DEVICE_FWNODE_OFFSET: usize = 744;
@@ -330,6 +342,7 @@ const LINUX_IRQ_DESC_IRQ_DATA_CHIP_DATA_OFFSET: usize = LINUX_IRQ_DESC_IRQ_DATA_
 const LINUX_IRQ_COMMON_STATE_OFFSET: usize = 0;
 const LINUX_IRQ_COMMON_EFFECTIVE_AFFINITY_OFFSET: usize = 32;
 const LINUX_IRQD_IRQ_DISABLED: u32 = 1 << 16;
+const LINUX_IRQ_ACTION_DEPTH_ENABLED: usize = 0;
 const LINUX_IRQ_NOPROBE: u32 = 1 << 10;
 const LINUX_IRQ_NOREQUEST: u32 = 1 << 11;
 const LINUX_IRQ_NOTHREAD: u32 = 1 << 16;
@@ -571,6 +584,14 @@ pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
             .load(Ordering::Acquire),
         irq_modify_status_last_set: LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_SET.load(Ordering::Acquire),
         irq_modify_status_last_status: LINUX_PLIC_IRQ_MODIFY_STATUS_LAST_STATUS
+            .load(Ordering::Acquire),
+        leaf_action_prepare_count: LINUX_PLIC_LEAF_ACTION_PREPARE_COUNT.load(Ordering::Acquire),
+        leaf_action_dispatch_count: LINUX_PLIC_LEAF_ACTION_DISPATCH_COUNT.load(Ordering::Acquire),
+        leaf_action_last_irq: LINUX_PLIC_LEAF_ACTION_LAST_IRQ.load(Ordering::Acquire),
+        leaf_action_last_depth: LINUX_PLIC_LEAF_ACTION_LAST_DEPTH.load(Ordering::Acquire),
+        leaf_action_last_handler_kind: LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_KIND
+            .load(Ordering::Acquire),
+        leaf_action_last_handler_bound: LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_BOUND
             .load(Ordering::Acquire),
     }
 }
@@ -1037,6 +1058,41 @@ fn note_unmapped_irq_failure(source: u32, ret: i32) {
     LINUX_PLIC_UNMAPPED_IRQ_FAILURE_COUNT.fetch_add(1, Ordering::AcqRel);
     LINUX_PLIC_UNMAPPED_IRQ_LAST_SOURCE.store(source, Ordering::Release);
     LINUX_PLIC_UNMAPPED_IRQ_LAST_ERRNO.store(ret.unsigned_abs() as usize, Ordering::Release);
+}
+
+fn linux_irq_handler_kind_code(kind: IrqHandlerKind) -> usize {
+    match kind {
+        IrqHandlerKind::None => 0,
+        IrqHandlerKind::Ns16550aUart => 1,
+    }
+}
+
+fn note_linux_leaf_action_view(
+    ctx: &crate::context::Context,
+    record: LinuxPlicLeafIrqRecord,
+) -> bool {
+    let logical_irq = LogicalIrq::new(record.virq as usize);
+    let Some(action) = ctx.irq_handler_registry.action_for_logical_irq(logical_irq) else {
+        return false;
+    };
+    let handler_bound = action.state() == State::Ready
+        && action.handler_bound()
+        && action.hardirq_context_required()
+        && action.mapped_irq_required()
+        && action.dispatch_ready();
+    if !handler_bound || action.handler_kind() == IrqHandlerKind::None {
+        return false;
+    }
+
+    LINUX_PLIC_LEAF_ACTION_PREPARE_COUNT.fetch_add(1, Ordering::AcqRel);
+    LINUX_PLIC_LEAF_ACTION_LAST_IRQ.store(record.virq as usize, Ordering::Release);
+    LINUX_PLIC_LEAF_ACTION_LAST_DEPTH.store(LINUX_IRQ_ACTION_DEPTH_ENABLED, Ordering::Release);
+    LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_KIND.store(
+        linux_irq_handler_kind_code(action.handler_kind()),
+        Ordering::Release,
+    );
+    LINUX_PLIC_LEAF_ACTION_LAST_HANDLER_BOUND.store(true, Ordering::Release);
+    true
 }
 
 unsafe fn linux_update_leaf_record_from_desc(index: usize) -> LinuxPlicLeafIrqRecord {
@@ -1655,9 +1711,11 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
     if rust_tp != 0 {
         crate::arch::riscv64::csr::write_tp(rust_tp);
         let ctx = crate::context::context_ref();
-        dispatched = ctx
-            .irq_handler_registry
-            .dispatch(LogicalIrq::new(record.virq as usize));
+        let action_ready = note_linux_leaf_action_view(ctx, record);
+        dispatched = action_ready
+            && ctx
+                .irq_handler_registry
+                .dispatch(LogicalIrq::new(record.virq as usize));
         crate::arch::riscv64::csr::disable_supervisor_interrupts();
         crate::arch::riscv64::csr::write_tp(linux_tp);
     }
@@ -1667,6 +1725,7 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
         LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.store(record.hwirq, Ordering::Release);
     }
     if dispatched {
+        LINUX_PLIC_LEAF_ACTION_DISPATCH_COUNT.fetch_add(1, Ordering::AcqRel);
         LINUX_PLIC_RUNTIME_DISPATCH_COUNT.fetch_add(1, Ordering::AcqRel);
     }
 }
