@@ -1,4 +1,8 @@
-use core::{ffi::c_void, mem::size_of};
+use core::{
+    ffi::c_void,
+    mem::size_of,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 use super::state::{failed_condition, EventResult, LifecycleEvent, State};
 
@@ -7,6 +11,14 @@ type LinuxInitcall = unsafe extern "C" fn() -> i32;
 unsafe extern "C" {
     static __linux_initcall6_start: usize;
     static __linux_initcall6_end: usize;
+}
+
+static PLATFORM_DRIVER_REGISTERED: AtomicBool = AtomicBool::new(false);
+static PLATFORM_DRIVER_PTR: AtomicUsize = AtomicUsize::new(0);
+
+#[repr(C)]
+struct LinuxPlatformDriver {
+    probe: usize,
 }
 
 fn trap(symbol: &str) -> ! {
@@ -36,6 +48,19 @@ pub fn run_linux_initcall6() -> EventResult {
     }
 
     Ok(())
+}
+
+pub fn platform_driver_registered() -> bool {
+    PLATFORM_DRIVER_REGISTERED.load(Ordering::Acquire)
+}
+
+pub fn platform_driver_probe_ptr() -> usize {
+    let driver = PLATFORM_DRIVER_PTR.load(Ordering::Acquire) as *const LinuxPlatformDriver;
+    if driver.is_null() {
+        return 0;
+    }
+
+    unsafe { (*driver).probe }
 }
 
 #[unsafe(no_mangle)]
@@ -154,8 +179,14 @@ pub extern "C" fn __kmalloc_noprof() -> *mut c_void {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn __platform_driver_register() -> i32 {
-    trap("__platform_driver_register")
+pub extern "C" fn __platform_driver_register(driver: *mut c_void, _owner: *mut c_void) -> i32 {
+    if driver.is_null() {
+        return -1;
+    }
+
+    PLATFORM_DRIVER_PTR.store(driver as usize, Ordering::Release);
+    PLATFORM_DRIVER_REGISTERED.store(true, Ordering::Release);
+    0
 }
 
 #[unsafe(no_mangle)]

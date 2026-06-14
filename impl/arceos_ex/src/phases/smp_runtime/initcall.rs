@@ -197,7 +197,19 @@ fn run_initcall_table(ctx: &mut Context) -> EventResult {
 
 #[cfg(plic_provider_linux_object)]
 fn run_linux_plic_initcall6() -> EventResult {
-    crate::objects::linux_plic_shim::run_linux_initcall6()
+    crate::objects::linux_plic_shim::run_linux_initcall6()?;
+    if !crate::objects::linux_plic_shim::platform_driver_registered()
+        || crate::objects::linux_plic_shim::platform_driver_probe_ptr() == 0
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Ready,
+        );
+    }
+
+    Ok(())
 }
 
 #[cfg(not(plic_provider_linux_object))]
