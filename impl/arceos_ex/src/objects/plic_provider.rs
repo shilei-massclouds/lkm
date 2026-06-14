@@ -1,7 +1,18 @@
+#[cfg(plic_provider_linux_object)]
+use super::state::{failed_condition, LifecycleEvent};
 use super::{
+    device_tree::DeviceTree,
     irq_time::{IrqHandlerRegistry, LogicalIrq, Plic, PlicIrqDomain},
-    state::State,
+    state::{EventResult, State},
 };
+
+pub fn setup_registered_provider(device_tree: &DeviceTree, plic: &Plic) -> EventResult {
+    provider_setup_registered_provider(device_tree, plic)
+}
+
+pub fn exercise_uart_leaf_boundaries(source: u32, logical_irq: LogicalIrq) -> EventResult {
+    provider_exercise_uart_leaf_boundaries(source, logical_irq)
+}
 
 pub fn enable_mapped_source(plic: &Plic, source: u32, logical_irq: LogicalIrq) -> bool {
     if plic.state() != State::Ready
@@ -70,6 +81,49 @@ fn runtime_ready(plic: &Plic, domain: &PlicIrqDomain, registry: &IrqHandlerRegis
         && domain.dispatch_ops_ready()
         && registry.state() == State::Ready
         && registry.dispatch_ready()
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn provider_setup_registered_provider(_device_tree: &DeviceTree, _plic: &Plic) -> EventResult {
+    Ok(())
+}
+
+#[cfg(plic_provider_linux_object)]
+fn provider_setup_registered_provider(device_tree: &DeviceTree, plic: &Plic) -> EventResult {
+    super::linux_plic_shim::run_linux_initcall6()?;
+    if !super::linux_plic_shim::platform_driver_registered()
+        || super::linux_plic_shim::platform_driver_probe_ptr() == 0
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Ready,
+        );
+    }
+
+    super::linux_plic_shim::platform_driver_match_and_probe(device_tree, plic)
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn provider_exercise_uart_leaf_boundaries(_source: u32, _logical_irq: LogicalIrq) -> EventResult {
+    Ok(())
+}
+
+#[cfg(plic_provider_linux_object)]
+fn provider_exercise_uart_leaf_boundaries(source: u32, logical_irq: LogicalIrq) -> EventResult {
+    if !super::linux_plic_shim::exercise_uart_leaf_chip_callbacks(source, logical_irq)
+        || !super::linux_plic_shim::exercise_unmapped_irq_boundary()
+    {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Ready,
+        );
+    }
+
+    Ok(())
 }
 
 #[cfg(not(plic_provider_linux_object))]

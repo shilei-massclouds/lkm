@@ -3187,12 +3187,13 @@ context 的 enable bit，并通过 priority register unmask source；`irq_disabl
 domain/chip/chained handler 服务。这样后续差分验证可以比较同一规格对象在两种 provider 下的状态和行为，而不是让上层
 UART、console、IRQ action 等路径感知两套不同 PLIC API。
 
-当前已把运行期服务入口先收敛为一个薄 `plic_provider` contract：上层打开 UART source gate、处理 supervisor
-external interrupt，以及读取 claim/dispatch/complete/zero-claim/loop-exit 观测计数时，只调用同一组 provider API。
-原生 provider 在该 contract 下调用 Rust `Plic` 的 MMIO claim/complete/source enable 实现；Linux object provider 在
-该 contract 下调用 `irq-sifive-plic.o` 注册出的 chained handler、`plic_chip.irq_enable` 和 shim 记录的运行期事实。
-这一步不试图把上接口做成厚 adaptor，而是先保证上层 IRQ/UART/console 路径不感知 provider 差异；init/probe/domain/chip
-callback 的完整 provider contract 继续按后续边界逐项收敛。
+当前已把 provider 后端 setup 和运行期服务入口先收敛为一个薄 `plic_provider` contract：上层触发 provider
+注册/匹配/probe、打开 UART source gate、处理 supervisor external interrupt、执行 UART leaf chip/unmapped boundary
+exercise，以及读取 claim/dispatch/complete/zero-claim/loop-exit 观测计数时，只调用同一组 provider API。原生 provider
+在该 contract 下保留 no-op provider setup，并调用 Rust `Plic` 的 MMIO claim/complete/source enable 实现；Linux object
+provider 在该 contract 下调用 `irq-sifive-plic.o` 的 initcall6/platform match/probe、注册出的 chained handler、
+`plic_chip.irq_enable` 和 shim 记录的运行期事实。这一步不试图把上接口做成厚 adaptor，而是先保证 InitcallPhase 和上层
+IRQ/UART/console 路径不感知 provider 差异；domain/chip callback 的完整 provider contract 继续按后续边界逐项收敛。
 
 本阶段关于上接口的结论是：`irq-sifive-plic.o` 的初始化入口层上接口集中在 Linux `platform_driver`，核心回调是
 `plic_driver.probe`。`irq_domain`、`irq_chip`、chained handler 和 CPU/syscore 回调是 `probe` 成功后注册出的 IRQ
@@ -3257,10 +3258,10 @@ callback/service/fail boundary；若后续接入完整 Linux generic IRQ lifecyc
    `arceos_ex` 中是按 Linux initcall/platform 时序触发，还是在现有 `IrqTimeInitPhase` 边界内执行一个受控的
    platform match/probe 子流程；无论选择哪种，都不能改变 `plic_driver_init -> __platform_driver_register ->
    platform match -> .probe` 这条对象可见流程，外部框架状态和上层 IRQ 使用者也不应变化。
-2. 原生 PLIC 的对等上接口：运行期 source gate、external interrupt handling 和计数观测已经通过极薄 provider wrapper
-   对齐到同一 contract。仍需决定 init/probe/domain/chip callback 层是否也暴露 platform-driver-like `probe`、
-   `irq_domain_ops`、`irq_chip` 和 chained handler 形态，或者继续以内部薄 wrapper 对齐。目标是条件编译切换时，上层
-   `IrqDispatchTree/RiscvIntc/IrqHandlerRegistry` 等对象不发生语义变化。
+2. 原生 PLIC 的对等上接口：provider setup、运行期 source gate、external interrupt handling、boundary exercise 和
+   计数观测已经通过极薄 provider wrapper 对齐到同一 contract。仍需决定 domain/chip callback 层是否也暴露
+   platform-driver-like `irq_domain_ops`、`irq_chip` 和 chained handler 形态，或者继续以内部薄 wrapper 对齐。目标是
+   条件编译切换时，上层 `IrqDispatchTree/RiscvIntc/IrqHandlerRegistry` 等对象不发生语义变化。
 3. 二进制结构布局边界：需要列出首轮必须二进制兼容的上接口结构，包括 `struct platform_driver`、`struct platform_device`、
    `struct device` / `fwnode_handle`、`struct of_device_id`、`struct irq_domain_ops`、`struct irq_chip`、
    `struct irq_desc`、`struct irq_data`、`cpumask` 和 per-CPU `plic_handlers` 访问所依赖的布局。只要

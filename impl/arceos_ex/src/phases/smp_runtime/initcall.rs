@@ -50,14 +50,17 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.initcall_table
         .preset(&ctx.ctor_table, &ctx.static_objects)?;
     run_initcall_table(ctx)?;
-    run_linux_plic_initcall6(ctx)?;
+    crate::objects::plic_provider::setup_registered_provider(&ctx.device_tree, &ctx.plic)?;
     ctx.uart_external_irq_enable.setup(
         &ctx.plic,
         &mut ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
         &mut ctx.interrupt_stream,
     )?;
-    exercise_linux_plic_uart_chip_callbacks()?;
+    crate::objects::plic_provider::exercise_uart_leaf_boundaries(
+        crate::objects::ns16550a::uart8250_port_irq_source(),
+        crate::objects::ns16550a::uart8250_port_logical_irq(),
+    )?;
     ctx.uart_interrupt_chain_probe.setup(
         &ctx.uart_external_irq_enable,
         &ctx.plic,
@@ -121,29 +124,6 @@ fn enable_serial8250_interrupt_driven_console() -> EventResult {
         );
     }
 
-    Ok(())
-}
-
-#[cfg(plic_provider_linux_object)]
-fn exercise_linux_plic_uart_chip_callbacks() -> EventResult {
-    if !crate::objects::linux_plic_shim::exercise_uart_leaf_chip_callbacks(
-        crate::objects::ns16550a::uart8250_port_irq_source(),
-        crate::objects::ns16550a::uart8250_port_logical_irq(),
-    ) || !crate::objects::linux_plic_shim::exercise_unmapped_irq_boundary()
-    {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            State::Ready,
-        );
-    }
-
-    Ok(())
-}
-
-#[cfg(not(plic_provider_linux_object))]
-fn exercise_linux_plic_uart_chip_callbacks() -> EventResult {
     Ok(())
 }
 
@@ -219,28 +199,6 @@ fn run_initcall_table(ctx: &mut Context) -> EventResult {
         ctx.console.refresh_handoff();
     }
     result
-}
-
-#[cfg(plic_provider_linux_object)]
-fn run_linux_plic_initcall6(ctx: &Context) -> EventResult {
-    crate::objects::linux_plic_shim::run_linux_initcall6()?;
-    if !crate::objects::linux_plic_shim::platform_driver_registered()
-        || crate::objects::linux_plic_shim::platform_driver_probe_ptr() == 0
-    {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            State::Ready,
-        );
-    }
-
-    crate::objects::linux_plic_shim::platform_driver_match_and_probe(&ctx.device_tree, &ctx.plic)
-}
-
-#[cfg(not(plic_provider_linux_object))]
-fn run_linux_plic_initcall6(_ctx: &Context) -> EventResult {
-    Ok(())
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {
