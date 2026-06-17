@@ -51,6 +51,83 @@
 
 组合封装阶段可以复用 ArceOS 的接口形状、目录习惯和成熟构建路径，但不得因为 ArceOS 现有模块边界而改变模型对象的状态迁移。
 
+## arceos_ex 组件化试验计划
+
+本节记录当前人与 AI 讨论形成的工程共识。它是可持续补充的协作备忘录，不是正式规格；其中已经稳定、需要强约束的部分再进入 [`main.spec`](main.spec)。
+
+`arceos_ex` 采用与 ArceOS 并行的 `_ex` 组件体系。crate 包名必须带 `-ex` 后缀以避免和现有 ArceOS 组件冲突，例如 `ax-hal-ex`、`ax-runtime-ex`、`ax-alloc-ex`、`ax-mm-ex`、`ax-task-ex`、`ax-std-ex`、`ax-api-ex`、`ax-feat-ex`。目录仍按 ArceOS 习惯组织；`os/arceos_ex/modules/axhal`、`os/arceos_ex/modules/axruntime` 这类目录名可以不带 `_ex`，因为上级目录已经区分；新增到顶层 `components/` 的 ex 组件目录必须带 `_ex` 后缀，例如 `components/someboot_ex`。
+
+组件源码内部可以通过 Cargo 依赖别名保持 ArceOS 风格的 Rust 路径，例如：
+
+```toml
+ax-hal = { package = "ax-hal-ex", path = "../axhal" }
+ax-task = { package = "ax-task-ex", path = "../axtask" }
+```
+
+这样包名区分实现，代码仍可使用 `ax_hal::...`、`ax_task::...` 等接口形态。公开 API 应尽量与 ArceOS 对应组件兼容；真正不同的语义或边界必须记录原因。
+
+主干启动链按以下组件衔接：
+
+```text
+someboot-ex -> axplat-dyn-ex -> axruntime-ex -> apps(payload)
+```
+
+在当前 tgoskits/ArceOS 构建逻辑中，`riscv64` 默认启用动态平台路径，即默认 `plat_dyn = true`。因此在 `riscv64` + `plat-dyn` 场景下，上述链条可视为 ArceOS 的组件级主启动链。其符号级控制流大致为：
+
+```text
+firmware/OpenSBI
+  -> someboot::_head/kernel_entry
+  -> someboot::prime_entry
+  -> __someboot_main
+  -> axplat-dyn::boot::main
+  -> ax_plat::call_main
+  -> __axplat_main
+  -> axruntime::rust_main
+  -> ax_app_entry
+  -> app main
+```
+
+`someboot-ex`、`axplat-dyn-ex`、`axruntime-ex` 和 `apps(payload)` 是启动链上的四个组件级节点。`axplat-dyn-ex` 内部可以继续使用 `ax-plat` 的接口和宏机制完成桥接，例如 `ax_plat::call_main` 到 `axruntime-ex` 的入口映射。
+
+LKM 子阶段在第一轮组件化中按以下规则归属：
+
+- `入口前导期` 子阶段放入 `someboot-ex`，负责最低层入口、启动参数、linker/entry layout、BSS、栈和进入下一启动节点前的早期准备。
+- `payload` 子阶段对应 `apps(payload)`，第一轮从 helloworld 起步，后续由 normal tests 逐步扩展。
+- 除 `入口前导期` 和 `payload` 之外的其它 LKM 启动子阶段，第一轮统一归入 `axruntime-ex`，由它作为启动编排层承接并调度。
+- `axplat-dyn-ex` 第一轮只作为 `someboot-ex` 到 `axruntime-ex` 的中间桥接和动态平台入口适配层，不放置 LKM 子阶段对象。
+
+上述归属是启动链封装的初始策略，不表示所有对象永久属于 `axruntime-ex`。后续若某个子阶段本质上是在初始化资源对象，例如 allocator、task、mm、driver、IRQ 等，应逐步下沉到对应功能组件；`axruntime-ex` 保留调用编排，功能组件承接资源对象和公开接口 shim。
+
+LKM 中的阶段对象应优先封装进上述沿启动线衔接的主干组件。LKM 中的资源对象按功能组件逐步封装，例如 `axtask-ex`、`ax-alloc-ex`、`ax-mm-ex` 等。功能组件应通过内部 shim 把公开接口映射到内部资源对象接口，避免应用侧或测试侧直接依赖 LKM 对象实现细节。
+
+推荐实现顺序：
+
+1. 先扩展 tgoskits 构建方式，新增 `cargo xtask arceos_ex ...` 目标，并使用独立 snapshot，例如 `.arceos_ex.toml`。
+2. 建立 `os/arceos_ex` 和必要 `_ex` 组件骨架，使 helloworld 的 ex 依赖图可以解析。
+3. 分析并实现主干组件前后顺序和衔接接口，先打通 `someboot-ex -> axplat-dyn-ex -> axruntime-ex -> payload`。
+4. 把 LKM 阶段对象按主干链封装进对应组件。
+5. 以测试为引导逐步封装资源对象；第一验收点是 helloworld，即 `cargo xtask arceos_ex qemu --arch riscv64`。
+6. 后续 normal tests 按简单到复杂拆分成若干小组，引导 `ax-alloc-ex`、`ax-mm-ex`、`axtask-ex`、IRQ、FS、NET 等功能组件逐步成形。
+
+测试源码本身不得因为 `arceos_ex` 目标而修改。`arceos_ex test` 应在构建层完成依赖选择或重定向，让测试中原本面向 ArceOS 的 `ax-std`、`ax-api`、`ax-feat` 等接口解析到 `_ex` 组件体系。若某个测试需要新公开接口，优先检查是否应该补齐兼容 shim；只有当模型或对象边界确实要求改变接口时，才记录例外。
+
+### 调用链与功能组件推进计划
+
+启动链打通之后，下一步重点转向调用链。当前需要区分两条链：
+
+- 启动链：`someboot-ex -> axplat-dyn-ex -> axruntime-ex -> apps(payload)`，负责从固件入口推进到应用入口。
+- 调用链：`apps(payload) -> ax-std-ex -> ax-api-ex -> 功能组件_ex -> shim -> LKM 对象`，负责应用和测试调用公开接口时如何落到对象实现。
+
+`helloworld` 通过只说明最短 console 调用链已经可用，即 `ax-std-ex::println! -> ax-api-ex console -> ax-hal-ex console -> early console`。这不等价于 `ulib` 和 `api` 两层已经完整具备。后续补齐 `ax-std-ex`、`ax-api-ex` 和功能组件时，应把测试失败区分为三类：公开接口形状缺失、shim 映射缺失、底层 LKM 对象能力缺失。只有前两类适合直接通过组件封装解决；第三类需要回到对象能力本身评估。
+
+测试支持排序应考虑 LKM 当前对象能力，而不只按测试名或 ArceOS 组件依赖排序。优先处理不强依赖新对象能力的兼容面，例如 `core`/`alloc` re-export、`println!` 宏兼容、`Duration`、`Vec`、`atomic` 等基础类型和宏；再处理已有对象可能支撑的 console、time、基础 task/sync 等接口；`fs`、`net`、`display`、`backtrace` 等依赖面更宽的测试应靠后，因为即使引入 `_ex` 组件壳，缺少对应 LKM 资源对象也无法真正通过。
+
+当引入功能组件，例如 `axtask-ex`、`axmm-ex`、`axfs-ex`、`ax-alloc-ex` 等，应按三步推进：
+
+1. 先引入接口兼容的 `_ex` 组件壳。crate 包名带 `-ex` 后缀，公开接口尽量贴近 ArceOS 对应组件，使 `ax-std-ex`、`ax-api-ex` 和测试依赖图可以解析到 `_ex` 组件体系。此阶段可以只提供最小实现或明确的 unsupported 路径，但不要修改测试源码。
+2. 在组件内部增加 shim 层，把公开接口映射到 `components/arceos_objects_ex/` 内部已有对象接口。应用、测试和上层组件不应直接依赖对象内部实现；对象接口通过组件 shim 暴露。
+3. 尝试把相关对象从 `components/arceos_objects_ex/` 迁移到对应 `_ex` 功能组件内部，使资源对象和功能组件边界逐步一致。该步骤是尽力目标，不强求一次完成；若因为依赖环、初始化顺序或对象共享冲突暂时做不到，应保留公共对象组件并记录原因。
+
 ## 输出 Facade
 
 对象级输出路径应先由 `PrintkBuffer`、`EarlyCon` 和后续正式 `Console` 承担。`Object Coding Phase` 可以先引入启动期内部 `printk`/`println-like` 前端，用于输出 `arceos_ex` 启动 banner；应用侧 `axstd::println!` 是另一个前端入口，用于 `helloworld` 等 Unikernel payload。二者不是同一个入口，但应汇聚到同一条缓冲路径；`info!/debug!/warn!/error!` 和 panic 输出等更完整前端后续也应汇聚到该路径：
