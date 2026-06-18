@@ -526,6 +526,31 @@ impl PlatformBusRootDevice {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PlatformBusProbeObservation {
+    driver: DeviceDriverRef,
+    device: DeviceRef,
+    match_attempted: bool,
+    matched: bool,
+    probe_called: bool,
+    probe_return_zero: bool,
+    bound: bool,
+}
+
+impl PlatformBusProbeObservation {
+    const fn new(driver: DeviceDriverRef, device: DeviceRef) -> Self {
+        Self {
+            driver,
+            device,
+            match_attempted: false,
+            matched: false,
+            probe_called: false,
+            probe_return_zero: false,
+            bound: false,
+        }
+    }
+}
+
 pub struct PlatformBus {
     lifecycle: Lifecycle,
     registered: bool,
@@ -541,6 +566,7 @@ pub struct PlatformBus {
     probe_device_deferred_count: usize,
     probe_driver_scanned_devices: bool,
     probe_device_scanned_drivers: bool,
+    probe_observations: Vec<PlatformBusProbeObservation>,
     ns16550a_driver_registered: bool,
     ns16550a_match_table_ready: bool,
     ns16550a_device_matched: bool,
@@ -586,6 +612,7 @@ impl PlatformBus {
             probe_device_deferred_count: 0,
             probe_driver_scanned_devices: false,
             probe_device_scanned_drivers: false,
+            probe_observations: Vec::new(),
             ns16550a_driver_registered: false,
             ns16550a_match_table_ready: false,
             ns16550a_device_matched: false,
@@ -681,6 +708,43 @@ impl PlatformBus {
 
     pub const fn probe_device_scanned_drivers(&self) -> bool {
         self.probe_device_scanned_drivers
+    }
+
+    pub fn platform_device_discovered(&self, device: DeviceRef) -> bool {
+        self.contains_device(device)
+    }
+
+    pub fn platform_driver_registered(&self, driver: DeviceDriverRef) -> bool {
+        self.contains_driver(driver)
+    }
+
+    pub fn platform_match_attempted(&self, driver: DeviceDriverRef, device: DeviceRef) -> bool {
+        self.probe_observation(driver, device)
+            .is_some_and(|observation| observation.match_attempted)
+    }
+
+    pub fn platform_driver_matched_device(
+        &self,
+        driver: DeviceDriverRef,
+        device: DeviceRef,
+    ) -> bool {
+        self.probe_observation(driver, device)
+            .is_some_and(|observation| observation.matched)
+    }
+
+    pub fn platform_probe_called(&self, driver: DeviceDriverRef, device: DeviceRef) -> bool {
+        self.probe_observation(driver, device)
+            .is_some_and(|observation| observation.probe_called)
+    }
+
+    pub fn platform_probe_return_zero(&self, driver: DeviceDriverRef, device: DeviceRef) -> bool {
+        self.probe_observation(driver, device)
+            .is_some_and(|observation| observation.probe_return_zero)
+    }
+
+    pub fn platform_device_bound(&self, driver: DeviceDriverRef, device: DeviceRef) -> bool {
+        self.probe_observation(driver, device)
+            .is_some_and(|observation| observation.bound)
     }
 
     pub const fn ns16550a_driver_registered(&self) -> bool {
@@ -1027,7 +1091,9 @@ impl PlatformBus {
         let mut index = 0usize;
         while index < self.driver_refs.len() {
             let driver = self.driver_refs[index];
-            if self.driver_matches_device(driver, device, device_tree) {
+            let matched = self.driver_matches_device(driver, device, device_tree);
+            self.record_match_attempt(driver, device, matched);
+            if matched {
                 self.probe_and_bind(
                     driver,
                     device,
@@ -1087,14 +1153,16 @@ impl PlatformBus {
     }
 
     fn first_matching_device(
-        &self,
+        &mut self,
         driver: DeviceDriverRef,
         device_tree: &DeviceTree,
     ) -> Option<DeviceRef> {
         let mut index = 0usize;
         while index < self.device_refs.len() {
             let device_ref = self.device_refs[index];
-            if self.driver_matches_device(driver, device_ref, device_tree) {
+            let matched = self.driver_matches_device(driver, device_ref, device_tree);
+            self.record_match_attempt(driver, device_ref, matched);
+            if matched {
                 return Some(device_ref);
             }
             index += 1;
@@ -1154,6 +1222,7 @@ impl PlatformBus {
             device_ref,
             node_id,
         );
+        self.record_probe_result(driver, device_ref, result);
         if ns16550a::is_ns16550a_platform_driver(driver) {
             self.ns16550a_device_matched = true;
             self.ns16550a_probe_called = true;
@@ -1201,6 +1270,64 @@ impl PlatformBus {
                 self.ns16550a_probe_triggers_console_handoff = ns16550a::handoff_triggered();
             }
             self.print_ns16550a_probe(device_ref);
+        }
+    }
+
+    fn probe_observation(
+        &self,
+        driver: DeviceDriverRef,
+        device: DeviceRef,
+    ) -> Option<&PlatformBusProbeObservation> {
+        self.probe_observations
+            .iter()
+            .find(|observation| observation.driver == driver && observation.device == device)
+    }
+
+    fn probe_observation_index(&self, driver: DeviceDriverRef, device: DeviceRef) -> Option<usize> {
+        let mut index = 0usize;
+        while index < self.probe_observations.len() {
+            let observation = self.probe_observations[index];
+            if observation.driver == driver && observation.device == device {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn probe_observation_mut(
+        &mut self,
+        driver: DeviceDriverRef,
+        device: DeviceRef,
+    ) -> &mut PlatformBusProbeObservation {
+        if let Some(index) = self.probe_observation_index(driver, device) {
+            return &mut self.probe_observations[index];
+        }
+        self.probe_observations
+            .push(PlatformBusProbeObservation::new(driver, device));
+        let index = self.probe_observations.len() - 1;
+        &mut self.probe_observations[index]
+    }
+
+    fn record_match_attempt(&mut self, driver: DeviceDriverRef, device: DeviceRef, matched: bool) {
+        let observation = self.probe_observation_mut(driver, device);
+        observation.match_attempted = true;
+        if matched {
+            observation.matched = true;
+        }
+    }
+
+    fn record_probe_result(
+        &mut self,
+        driver: DeviceDriverRef,
+        device: DeviceRef,
+        result: ProbeResult,
+    ) {
+        let observation = self.probe_observation_mut(driver, device);
+        observation.probe_called = true;
+        observation.probe_return_zero = result == ProbeResult::Bound;
+        if result == ProbeResult::Bound {
+            observation.bound = true;
         }
     }
 

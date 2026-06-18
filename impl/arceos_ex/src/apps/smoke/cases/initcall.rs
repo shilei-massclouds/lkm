@@ -62,6 +62,7 @@ pub fn run() -> SmokeResult {
         || !platform_bus.ns16550a_probe_called()
         || !platform_bus.ns16550a_probe_return_zero()
         || !check_ns16550a_bound_device(platform_bus, &ctx.device_tree)
+        || !check_ns16550a_platform_bus_observations(platform_bus)
         || !platform_bus.ns16550a_probe_ioremaps_uart8250_port()
         || !platform_bus.ns16550a_probe_registers_uart8250_port()
         || !platform_bus.ns16550a_probe_records_uart_irq_resource()
@@ -353,6 +354,22 @@ fn check_ns16550a_bound_device(
         return false;
     };
     node.has_compatible(b"ns16550a")
+}
+
+fn check_ns16550a_platform_bus_observations(
+    platform_bus: &crate::objects::initcall::PlatformBus,
+) -> bool {
+    let Some(device_ref) = platform_bus.ns16550a_bound_device() else {
+        return false;
+    };
+    let driver = crate::objects::ns16550a::NS16550A_PLATFORM_DRIVER_REF;
+    platform_bus.platform_driver_registered(driver)
+        && platform_bus.platform_device_discovered(device_ref)
+        && platform_bus.platform_match_attempted(driver, device_ref)
+        && platform_bus.platform_driver_matched_device(driver, device_ref)
+        && platform_bus.platform_probe_called(driver, device_ref)
+        && platform_bus.platform_probe_return_zero(driver, device_ref)
+        && platform_bus.platform_device_bound(driver, device_ref)
 }
 
 fn check_uart_irq_mapping(domain: &crate::objects::irq_time::PlicIrqDomain) -> bool {

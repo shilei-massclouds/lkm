@@ -156,6 +156,10 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
             "device listed",
             self.fixture.bus.contains_device(device_ref),
         );
+        assertions.assert(
+            "platform device discovered",
+            self.fixture.bus.platform_device_discovered(device_ref),
+        );
         assertions.assert("device count", self.fixture.bus.device_count() == 1);
         assertions.assert(
             "platform device count",
@@ -170,6 +174,12 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
         assertions.assert_ok(
             "add deferred driver",
             self.fixture.bus.add_driver(MOCK_PLATFORM_DRIVER_REF),
+        );
+        assertions.assert(
+            "platform driver registered",
+            self.fixture
+                .bus
+                .platform_driver_registered(MOCK_PLATFORM_DRIVER_REF),
         );
         assertions.assert_ok(
             "probe driver deferred",
@@ -189,6 +199,40 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
         assertions.assert(
             "probe driver scanned devices",
             self.fixture.bus.probe_driver_scanned_devices(),
+        );
+        assertions.assert(
+            "platform match attempted",
+            self.fixture
+                .bus
+                .platform_match_attempted(MOCK_PLATFORM_DRIVER_REF, device_ref),
+        );
+        assertions.assert(
+            "platform device not matched",
+            !self
+                .fixture
+                .bus
+                .platform_driver_matched_device(MOCK_PLATFORM_DRIVER_REF, device_ref),
+        );
+        assertions.assert(
+            "platform probe not called",
+            !self
+                .fixture
+                .bus
+                .platform_probe_called(MOCK_PLATFORM_DRIVER_REF, device_ref),
+        );
+        assertions.assert(
+            "platform probe did not return zero",
+            !self
+                .fixture
+                .bus
+                .platform_probe_return_zero(MOCK_PLATFORM_DRIVER_REF, device_ref),
+        );
+        assertions.assert(
+            "platform device not bound",
+            !self
+                .fixture
+                .bus
+                .platform_device_bound(MOCK_PLATFORM_DRIVER_REF, device_ref),
         );
         assertions.assert(
             "probe driver deferred count",
@@ -248,6 +292,12 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
             "driver listed",
             self.fixture.bus.contains_driver(MOCK_PLATFORM_DRIVER_REF),
         );
+        assertions.assert(
+            "platform driver registered",
+            self.fixture
+                .bus
+                .platform_driver_registered(MOCK_PLATFORM_DRIVER_REF),
+        );
         assertions.assert("driver count", self.fixture.bus.driver_count() == 1);
         assertions.assert_fail(
             "duplicate driver",
@@ -257,6 +307,10 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
         let Some(device_ref) = self.fixture.add_smoke_device(assertions) else {
             return;
         };
+        assertions.assert(
+            "platform device discovered",
+            self.fixture.bus.platform_device_discovered(device_ref),
+        );
         assertions.assert_ok(
             "probe device deferred",
             self.fixture.bus.probe_device(
@@ -275,6 +329,40 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
         assertions.assert(
             "probe device scanned drivers",
             self.fixture.bus.probe_device_scanned_drivers(),
+        );
+        assertions.assert(
+            "platform match attempted",
+            self.fixture
+                .bus
+                .platform_match_attempted(MOCK_PLATFORM_DRIVER_REF, device_ref),
+        );
+        assertions.assert(
+            "platform device not matched",
+            !self
+                .fixture
+                .bus
+                .platform_driver_matched_device(MOCK_PLATFORM_DRIVER_REF, device_ref),
+        );
+        assertions.assert(
+            "platform probe not called",
+            !self
+                .fixture
+                .bus
+                .platform_probe_called(MOCK_PLATFORM_DRIVER_REF, device_ref),
+        );
+        assertions.assert(
+            "platform probe did not return zero",
+            !self
+                .fixture
+                .bus
+                .platform_probe_return_zero(MOCK_PLATFORM_DRIVER_REF, device_ref),
+        );
+        assertions.assert(
+            "platform device not bound",
+            !self
+                .fixture
+                .bus
+                .platform_device_bound(MOCK_PLATFORM_DRIVER_REF, device_ref),
         );
         assertions.assert(
             "probe device deferred count",

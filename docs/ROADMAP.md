@@ -14,6 +14,7 @@
 2. 本项目与 Linux 6.12.37 的交叉验证首轮已完成 PLIC 二进制复用收尾：`drivers/irqchip/irq-sifive-plic.o` 已能在 `arceos_ex` 中作为 Linux object provider 承接 UART 外部中断主线，并与 native provider 收敛到同一薄 provider contract。参考源码位置为 `~/gitStudy/linux-6.12.37`；后续不再主动扩展 PLIC deferred 项，除非新目标实际踩到。
 3. 维持 `ioremap/vmalloc` 当前首轮成果：runtime page-table metadata 已覆盖完整 `VMALLOC_START..VMALLOC_END`，支持按需追加 L1/L0/PTE 页表页，`VmapArea` / `VmapMapping` 记录已改为动态容器 backing；更完整的 `vm_struct/vmap_area` 行为，例如空洞复用、增强树查找、lazy purge 和并发边界，降为后续补强，除非交叉验证发现其阻塞 IRQ/driver 路径的一致性。
 4. serial8250 runtime RX/TTY/FIFO 补强继续保留为后续项。当前对象框架和 event/action 已确认，RX 单字符/批量 loopback、ordinary TTY TX FIFO 最小 enqueue/dequeue，以及 ordinary TTY write 经 `TtyXmitFifo -> StartTx/THRI -> handler TransmitChars` 的单 byte 和固定小批量真实 IRQ 闭合均已完成；后续是否继续展开 printk TX 异常/压力边界、TTY runtime 分层或用户态 I/O，应先经过 Linux 交叉验证结果排序。
+5. 下一阶段切换到 `virtio-rng` 和 virtio 基础对象建模/实现：以 Linux 6.12.37 的 `drivers/virtio/virtio_mmio.c`、`drivers/virtio/virtio.c`、`drivers/virtio/virtio_ring.c`、`drivers/char/hw_random/virtio-rng.c`、`include/uapi/linux/virtio_mmio.h` 和 `include/uapi/linux/virtio_ids.h` 为参考，先用 `virtio-rng` 推动 `virtio-mmio` platform driver、virtio core、split virtqueue 和真实 virtqueue completion 的最小闭环。当前不接文件系统、`/dev/hwrng`、内核随机池或 `virtio-blk`；对象级和 fake integration 用 smoke，真实 QEMU 链路用 checkpoint/KUnit 只读观察。
 
 ## 下一阶段计划：Linux 6.12.37 PLIC 二进制复用
 
@@ -58,6 +59,35 @@ PLIC 收尾后的后续策略：
 2. 继续保持非关键能力 deferred：ratelimit/打印提示可继续简化，除非它们成为定位新问题的必要证据。
 3. 后续若重新进入 PLIC 排雷，仍以 checkpoint/KUnit/smoke 和 `make test` 作为阶段验收；若出现必须新增正式对象、大功能缺失或方向策略难以判断的问题，先归类并讨论，再进入实现。
 4. PLIC 基线冻结后，可以把后续工作重心转向 Linux 交叉验证的下一个目标或用户指定的新阶段；每次切换目标前仍需同步 `spec/charter.md`、必要 coding/model 规格和本 roadmap。
+
+## 下一阶段计划：virtio-rng 与 virtio 基础对象
+
+本节是当前 P0 的执行清单。目标不是完整 virtio 子系统，而是用最简单的真实 virtio 设备 `virtio-rng` 推动可复用的 `virtio-mmio`、virtio core 和 split virtqueue 对象建模与实现。每完成一步必须先检查并确认执行结果，再进入下一步；检查结果应同步到本节状态，必要时同步 `spec/charter.md`、`spec/model` 和 `spec/coding/arceos_ex.md`。
+
+### 已确认原则
+
+1. `PlatformDevice` 和 `PlatformDriver` 保持为通用类型/机制边界；`Ns16550aPlatformDriver`、`VirtioMmioPlatformDriver`、`VirtioMmioPlatformDevice`、`VirtioMmioTransportDevice`、`VirtioDevice` 和 `VirtioRngDevice` 是具体实例对象或实例集合。
+2. platform bus probe 观测分两层：第一层是通用 driver-core/platform-bus 事实，例如 driver registered、device discovered、match attempted、probe called、probe returned 和 device bound；第二层是具体对象事实，例如 driver/device ref 是否指向 `VirtioMmioPlatformDriver` / `VirtioMmioPlatformDevice`、compatible 是否落在预期集合、MMIO header 是否有效、virtio device id 是否为 `VIRTIO_ID_RNG`。
+3. `virtio-mmio` 是普通 platform bus driver，首轮通过 `device_initcall` / platform driver register / OF match / probe 接入现有 `PlatformBus`，不要绕过 platform 总线直接扫描 FDT。
+4. `virtio-rng` 首轮只作为真实 virtqueue 数据流闭合验证：提交一个 input buffer、notify、completion、`get_buf len > 0`。不接 hwrng 子系统、不接随机池、不暴露用户态接口，也不判断随机性质量。
+5. split virtqueue 首轮只支持 single queue、direct descriptor、`add_inbuf`、`kick`、`get_buf`。packed ring、indirect descriptor、event idx、多队列、完整 DMA API/cache maintenance、reset/remove/suspend/resume 先显式 deferred。
+6. 测试分层固定为：对象 API 和 fake integration 走 smoke；真实 QEMU `virtio-rng-device` 链路走 checkpoint/KUnit 只读 observer。checkpoint/KUnit 不直接调用 driver/ring/IRQ action，不伪造 completion。
+
+### 执行清单
+
+1. **已完成首轮：泛化 platform bus 观测事实并保持 ns16550a 回归**。已新增通用 driver/device/match/probe/bind 观测事实和 `PlatformBus` 查询接口，smoke 同时覆盖 mock deferred 的通用 platform bus 行为与真实 ns16550a probe/bind 的通用观测结果；`platform_bus_ns16550a_*` 暂保留为 UART 专属回归锚点，不作为后续 virtio-mmio 的通用 bus 事实扩展方式。验收已通过：`git diff --check`、`make verify`、`make build APP=smoke`、`make run APP=smoke` 和 `make test`；diff 未扩大到 virtio 实现。
+2. **待办：定义并实现 `VirtioMmioPlatformDriver` 与 `VirtioMmioPlatformDevice` 首轮模型**。新增 `compatible = "virtio,mmio"` 的 platform driver 规格和静态 initcall，probe 从 `PlatformDevice -> DeviceNodeId -> DeviceTree node` 路径解析 `reg`、`interrupts`、`interrupt-parent`，通过 `Ioremap.Action::MapDeviceMmio` 建立 MMIO mapping，并读取 virtio-mmio magic/version/device_id/vendor_id。验收：fake header smoke 覆盖 valid/invalid magic、unsupported version、device_id 0 placeholder、device_id 4 rng candidate；真实 QEMU 设备尚可 deferred。
+3. **待办：建立 virtio core 最小 bus/device/driver 模型**。新增 `VirtioBus`、`VirtioDevice`、`VirtioDriver`、`VirtioDeviceId` 和 status/features 最小状态机，`virtio-mmio` probe 读到非 0 device id 后注册 `VirtioDevice`，`VirtioRngDriver` 通过 `VIRTIO_ID_RNG = 4` 匹配。验收：smoke 覆盖 driver match、status 顺序、feature accept/reject、非 rng device 不绑定。
+4. **待办：建立 split `VirtioSplitRing` / `VirtQueue` 最小模型与实现**。实现 descriptor table、avail ring、used ring、free descriptor 管理、single inbuf 提交、fake used completion 和 `get_buf`。验收：smoke 覆盖初始化、`add_inbuf`、desc exhausted、fake completion、empty completion、len 记录和 buffer ownership 边界。
+5. **待办：实现 `VirtioRngDriver` / `VirtioRngDevice` fake integration 闭环**。probe 创建 single input queue，`request_entropy()` 提交 32/64 字节 input buffer，fake transport completion 后 `complete_entropy()` 更新 `data_avail` / `data_idx` / request counters。验收：smoke 覆盖 probe、request、completion `len > 0`、重复 request、len 0、removed/reset 后拒绝；不接 hwrng/random/user API。
+6. **待办：接入真实 QEMU `virtio-rng-device` checkpoint/KUnit 闭环**。为 `impl/arceos_ex` 增加受控 QEMU 设备参数和 `PROBE=virtio-rng`，真实路径必须经过 FDT `virtio,mmio` node、platform bus probe、MMIO header、virtio core match、split virtqueue `add_inbuf`、MMIO notify、PLIC IRQ、virtio-mmio IRQ ack、used ring `get_buf`。验收：checkpoint/KUnit 只读确认 `device_id == 4`、request/notify/irq/get_buf 计数闭合、completion `len > 0`；普通 `make run` 不输出固定随机 payload。
+
+### 每步确认要求
+
+- 每一步开始前先确认 `git status --short --branch`，避免混入非本步变更。
+- 每一步实现前先同步相关规格或 coding 约束；若发现模型边界不清，先暂停在规格层讨论。
+- 每一步完成后至少执行对应 smoke/KUnit/checkpoint 命令和 `git diff --check`；涉及 `impl/arceos_ex` runtime 行为的步骤优先再跑 `make build APP=smoke` 和相关 `make run`。
+- 每一步通过后更新本节状态和统一计划；失败时记录失败命令、失败点和下一步修正方向，不继续推进后续步骤。
 
 ## 已完成计划：console/earlycon handoff
 
@@ -104,7 +134,8 @@ PLIC 收尾后的后续策略：
 | 优先级 | 状态 | 领域 | 任务 | 目标与说明 | 细节 |
 | --- | --- | --- | --- | --- | --- |
 | `P0` | 当前 | model/coding/arceos_ex | Linux 6.12.37 交叉验证 | 以 `~/gitStudy/linux-6.12.37` 为参考源码，建立 Linux 路径、formal model、coding 规格、`arceos_ex` 实现和 checkpoint/KUnit/smoke 观测点之间的 cross-reference；对近期闭环做差异分类：已覆盖、显式 deferred、规格缺口、实现缺口、刻意偏离、疑似 bug。首轮优先审计 start_kernel 阶段划分、irqchip/PLIC、OF platform/ns16550a、console handoff、ioremap/vmalloc 和 serial8250 interrupt-driven printk TX。 | 本文档；[项目章程](../spec/charter.md) |
-| `P0` | 意向 | compose/arceos_ex | 对象封装为组件试验 | PLIC 首轮二进制复用基线冻结后，下一阶段准备做试验：选择已有对象，探索如何把对象级实现封装为组件。当前只记录方向，不展开组件边界、crate 结构、接口或迁移步骤。 | [compose 规格](../spec/compose/README.md) |
+| `P0` | 当前 | model/coding/arceos_ex/virtio | virtio-rng 与 virtio 基础对象首轮闭环 | 参照 Linux 6.12.37 `virtio_mmio.c`、`virtio.c`、`virtio_ring.c` 和 `virtio-rng.c`，先泛化 platform bus 观测事实，再以 `virtio-rng` 驱动 `VirtioMmioPlatformDriver`、`VirtioDevice`、`VirtioBus`、`VirtQueue`、`VirtioSplitRing` 和 `VirtioRngDevice` 的规格与实现。首轮只验证真实 virtqueue input buffer completion，不接 hwrng、随机池、文件系统、用户态接口或 `virtio-blk`。 | 本文档；[virtio 规格待补](../spec/coding/arceos_ex.md) |
+| `P2` | 延期 | compose/arceos_ex | 对象封装为组件试验 | 作为后续低优先级探索项保留；不作为 PLIC 首轮二进制复用基线冻结后的默认下一阶段。恢复时再选择已有对象，明确组件边界、crate 结构、接口和验收方式。 | [compose 规格](../spec/compose/README.md) |
 | `P0` | 完成首轮 | arceos_ex/irq | 实现 PLIC 驱动并用 UART 验证外部中断链 | 已完成 irqchip init、PLIC provider setup、system irqchip MMIO ioremap、`PlicIrqDomain` source -> logical IRQ mapping、ns16550a UART IRQ resource 解析/绑定、IRQ core 侧 `IrqHandlerRegistry` / `request_irq` 最小 handler action 记录、两个外部传播 gate 的命名和显式 enable 边界，以及一轮真实 UART THRE interrupt cycle 下的 PLIC claim loop -> irq dispatch -> UART handler -> PLIC complete -> zero claim loop exit 验证，并确认 claim/complete 与 zero-claim/loop-exit 成对闭合。该 probe 不提前声明 interrupt-driven ready；runtime TX 切换已由 serial8250 console TX 任务完成。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P0` | 完成当前轮 | arceos_ex/console | serial8250 interrupt-driven console TX | 已在 PLIC/UART 外部中断链 ready 后实现 runtime TX 首轮：`printk` 前端提交输出，serial8250 后端在本地中断保存/恢复 guard 内 enqueue TX bytes 并 kick THRI，真实 UART THRE interrupt 经 PLIC claim loop / IRQ core dispatch 到 UART handler，handler drain TX queue 后清 THRI，并观察 PLIC complete 与 zero-claim loop exit。当前轮已补连续/批量 printk、Linux-like `tx_loadsz` 预算、单条长 printk 多轮 drain、多条长 printk long-burst，以及 long-burst 后 queue empty/THRI stopped/no-spurious-IRQ quiesce 检查；可见测试 payload 已收口到 checkpoint/KUnit 构建。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
 | `P1` | 待办 | arceos_ex/console | printk TX 异常/压力边界 | 在 Linux 交叉验证给出差异分类后，规格化 TX queue full、overflow/drop/truncate/pending、hardirq/irq-disabled 上下文、reentrant printk 和 handler 内 printk deferred 策略；先定 model/coding 约束和 probe，再改实现。 | [arceos_ex 说明](../spec/coding/arceos_ex.md#consoleearlycon-handoff-编码约束) |
@@ -182,7 +213,8 @@ PLIC 收尾后的后续策略：
 - `SmpRuntimePhase` 已形成六个子阶段最小闭环：`PreSmpInitPhase`、`SmpBringupPhase`、`RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和 `FinalizePhase`。BP 主线已经贯通；AP 内部 entry/callback 细节仍保持 deferred，BP/AP 同步量已经显式记录。
 - 最近完整验收已通过：`make verify`；`make build APP=smoke`；`make run APP=smoke`；`make run`；`make test-kunit`；`make test`。当前 `make test` summary 为 `total=86 pass=86 fail=0`；普通 `make run`/app smoke 不再出现固定 burst、long-burst 或 `Wtx04` 探针 payload，checkpoint/KUnit 构建仍保留这些生产路径 payload 并由只读 KUnit observer 校验。
 - 当前 trace SVG 产物：`tools/out/trace/main.trace.svg`。
-- 下一阶段意向：在 PLIC 首轮基线冻结后，准备做“对象封装为组件”的试验。当前只记录方向，不展开实施计划；恢复时先围绕组件封装试验明确对象选择、封装边界和验收方式，再进入实现。
+- 当前下一步：进入 `virtio-rng` 与 virtio 基础对象首轮闭环。第 1 步“泛化 platform bus 观测事实并保持 ns16550a 回归”已完成首轮并通过检查；下一步执行第 2 步“定义并实现 `VirtioMmioPlatformDriver` 与 `VirtioMmioPlatformDevice` 首轮模型”。每完成一步都必须先检查和确认执行结果，再推进下一步。
+- 后续低优先级探索：对象封装为组件试验暂不作为 PLIC 首轮基线冻结后的默认下一阶段。恢复时先围绕组件封装试验明确对象选择、封装边界和验收方式，再进入实现。
 - 上下文清理后恢复：先执行 `git status --short --branch`；预期工作树干净。
 
 ## 细节文档索引

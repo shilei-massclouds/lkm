@@ -223,6 +223,13 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                     platform_driver_probe_called(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
                     platform_driver_probe_return_zero(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
                     platform_driver_bound_device(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                    platform_bus_driver_registered(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver);
+                    platform_bus_device_discovered(PlatformBus, DeviceRef::Ns16550aSerial);
+                    platform_bus_match_attempted(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                    platform_bus_driver_matched_device(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                    platform_bus_probe_called(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                    platform_bus_probe_return_zero(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                    platform_bus_device_bound(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
                     ioremap_mapping_created(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
                     ioremap_mapping_owner_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, DeviceRef::Ns16550aSerial);
                     ioremap_mapping_phys_range_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
@@ -300,6 +307,13 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             platform_driver_probe_called(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             platform_driver_probe_return_zero(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             platform_driver_bound_device(Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+            platform_bus_driver_registered(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver);
+            platform_bus_device_discovered(PlatformBus, DeviceRef::Ns16550aSerial);
+            platform_bus_match_attempted(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+            platform_bus_driver_matched_device(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+            platform_bus_probe_called(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+            platform_bus_probe_return_zero(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+            platform_bus_device_bound(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             ioremap_mapping_created(Ioremap, IoMemoryMappingRef::Ns16550aSerial);
             ioremap_mapping_owner_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial, DeviceRef::Ns16550aSerial);
             ioremap_mapping_phys_range_bound(Ioremap, IoMemoryMappingRef::Ns16550aSerial);

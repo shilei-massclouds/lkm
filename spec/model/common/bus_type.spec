@@ -84,6 +84,13 @@ predicate of_platform_default_populate_device_node_ids_bound<T>(bus: T) -> bool;
 predicate of_platform_default_populate_platform_devices_owned<T, S>(bus: T, platform_devices: S) -> bool;
 predicate platform_driver_register_called<T, D>(bus: T, driver: D) -> bool;
 predicate platform_driver_register_return_zero<T, D>(bus: T, driver: D) -> bool;
+predicate platform_bus_driver_registered<T, D>(bus: T, driver: D) -> bool;
+predicate platform_bus_device_discovered<T, R>(bus: T, device: R) -> bool;
+predicate platform_bus_match_attempted<T, D, R>(bus: T, driver: D, device: R) -> bool;
+predicate platform_bus_driver_matched_device<T, D, R>(bus: T, driver: D, device: R) -> bool;
+predicate platform_bus_probe_called<T, D, R>(bus: T, driver: D, device: R) -> bool;
+predicate platform_bus_probe_return_zero<T, D, R>(bus: T, driver: D, device: R) -> bool;
+predicate platform_bus_device_bound<T, D, R>(bus: T, driver: D, device: R) -> bool;
 predicate platform_bus_ns16550a_driver_registered<T>(bus: T) -> bool;
 predicate platform_bus_ns16550a_driver_match_table_ready<T>(bus: T) -> bool;
 predicate platform_bus_ns16550a_driver_probe_called<T>(bus: T) -> bool;
@@ -345,6 +352,7 @@ type PlatformBusType: BusType {
             ensures {
                 platform_driver_register_called(self, driver);
                 platform_driver_register_return_zero(self, driver);
+                platform_bus_driver_registered(self, driver);
                 bus_type_driver_added(self, driver);
                 bus_type_drivers_klist_nonempty(self);
                 bus_subsys_klist_drivers_contains(self.subsys, driver);
@@ -380,6 +388,13 @@ type PlatformBusType: BusType {
                 initcall_entry_run_context_checked(InitcallEntry::Ns16550aPlatformDriver);
                 platform_driver_register_called(self, DeviceDriverRef::Ns16550aPlatformDriver);
                 platform_driver_register_return_zero(self, DeviceDriverRef::Ns16550aPlatformDriver);
+                platform_bus_driver_registered(self, DeviceDriverRef::Ns16550aPlatformDriver);
+                platform_bus_device_discovered(self, DeviceRef::Ns16550aSerial);
+                platform_bus_match_attempted(self, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                platform_bus_driver_matched_device(self, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                platform_bus_probe_called(self, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                platform_bus_probe_return_zero(self, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
+                platform_bus_device_bound(self, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
                 platform_bus_ns16550a_driver_registered(self);
                 platform_bus_ns16550a_driver_match_table_ready(self);
                 platform_bus_ns16550a_device_matched(self);
