@@ -83,6 +83,7 @@ include "console.spec";
 include "ns16550a_driver.spec";
 include "virtio.spec";
 include "virtio_mmio.spec";
+include "virtio_ring.spec";
 include "allocator.spec";
 
 function addr_of<T>(value: T) -> AddrIdentity<T>;

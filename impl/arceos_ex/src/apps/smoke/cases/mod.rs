@@ -33,5 +33,6 @@ pub mod slub;
 pub mod smp_bringup;
 pub mod task_creation_core;
 pub mod virtio_mmio;
+pub mod virtio_ring;
 pub mod vmalloc;
 pub mod zones;

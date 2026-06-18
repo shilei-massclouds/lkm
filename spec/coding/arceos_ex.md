@@ -435,6 +435,15 @@ registration 等窄能力。普通 driver probe 不得直接接收 `&mut Context
 在普通对象上增加测试专用 method；缺少可观测边界时，应先补 model/coding 规格中的正式对象 API 或只读
 checkpoint observer。
 
+`VirtioSplitRing` / `VirtQueue` 首轮应单独放在 `objects::virtio_ring`，作为可复用 ring/queue 对象，而不是塞入
+`virtio.rs`。首轮只支持 single queue、split ring、direct descriptor、单个 input buffer、`add_inbuf`、
+`kick` 记录、fake used completion 和 `get_buf`；packed ring、indirect descriptor、event idx、多队列、
+真实 MMIO notify/IRQ、DMA API/cache maintenance、reset/remove/suspend/resume 必须显式 deferred。实现不得把
+smoke 中的小队列容量固化为编译期固定数组；ring backing 应按设备给出的 `queue_size` 建立，当前实现可以用
+`Vec` 作为临时 backing，后续真实路径再替换为 DMA/coherent allocation。对象 API
+和 fake integration 使用 smoke 覆盖，真实 QEMU `virtio-rng-device` completion 后续只通过 checkpoint/KUnit
+只读 observer 检查，不得让 KUnit handler 调用 ring action 或伪造 completion。
+
 console/earlycon handoff 的实现必须保持 Linux-like `register_console()` 边界，但第一轮仍只要求对象级可观测事实。
 正式 `DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，
 冒号后是 console options。节点路径和 options 必须分开保存，options 保留给后续 console setup，不得混入节点路径匹配。
