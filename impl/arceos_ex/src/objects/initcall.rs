@@ -1,7 +1,7 @@
 use super::{
     device::{DeviceRef, PlatformDevice, PlatformDeviceStorage},
     device_tree::{DeviceNodeRef, DeviceTree},
-    driver::{DeviceDriverRef, PlatformProbeResources, ProbeResult},
+    driver::{DeviceDriverRef, PlatformProbeContext, ProbeResult},
     irq_time::{
         IrqDispatchTree, IrqHandlerKind, Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe,
         TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
@@ -1015,7 +1015,7 @@ impl PlatformBus {
     pub fn probe_driver(
         &mut self,
         driver: DeviceDriverRef,
-        resources: &mut PlatformProbeResources<'_>,
+        context: &mut PlatformProbeContext<'_>,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
@@ -1045,11 +1045,11 @@ impl PlatformBus {
         while index < self.device_refs.len() {
             let device_ref = self.device_refs[index];
             let device_matched =
-                self.driver_matches_device(driver, device_ref, resources.device_tree);
+                self.driver_matches_device(driver, device_ref, context.device_tree());
             self.record_match_attempt(driver, device_ref, device_matched);
             if device_matched {
                 matched = true;
-                self.probe_and_bind(driver, device_ref, resources);
+                self.probe_and_bind(driver, device_ref, context);
             }
             index += 1;
         }
@@ -1063,7 +1063,7 @@ impl PlatformBus {
     pub fn probe_device(
         &mut self,
         device: DeviceRef,
-        resources: &mut PlatformProbeResources<'_>,
+        context: &mut PlatformProbeContext<'_>,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.registered
@@ -1084,10 +1084,10 @@ impl PlatformBus {
         let mut index = 0usize;
         while index < self.driver_refs.len() {
             let driver = self.driver_refs[index];
-            let matched = self.driver_matches_device(driver, device, resources.device_tree);
+            let matched = self.driver_matches_device(driver, device, context.device_tree());
             self.record_match_attempt(driver, device, matched);
             if matched {
-                self.probe_and_bind(driver, device, resources);
+                self.probe_and_bind(driver, device, context);
                 return Ok(());
             }
             index += 1;
@@ -1100,12 +1100,12 @@ impl PlatformBus {
     pub fn platform_driver_register(
         &mut self,
         driver: DeviceDriverRef,
-        resources: &mut PlatformProbeResources<'_>,
+        context: &mut PlatformProbeContext<'_>,
     ) -> InitcallReturn {
         if self.add_driver(driver).is_err() {
             return InitcallReturn::Error(-1);
         }
-        if self.probe_driver(driver, resources).is_err() {
+        if self.probe_driver(driver, context).is_err() {
             return InitcallReturn::Error(-1);
         }
         InitcallReturn::Ok
@@ -1136,13 +1136,13 @@ impl PlatformBus {
         &mut self,
         driver: DeviceDriverRef,
         device_ref: DeviceRef,
-        resources: &mut PlatformProbeResources<'_>,
+        context: &mut PlatformProbeContext<'_>,
     ) {
         let Some(platform_device) = self.platform_device(device_ref) else {
             return;
         };
         let node_id = platform_device.dev().node_id();
-        let result = driver.driver().probe(resources, device_ref, node_id);
+        let result = driver.driver().probe(context, device_ref, node_id);
         self.record_probe_result(driver, device_ref, result);
         if ns16550a::is_ns16550a_platform_driver(driver) {
             self.ns16550a_device_matched = true;
@@ -1152,16 +1152,14 @@ impl PlatformBus {
                 self.ns16550a_bound_device = Some(device_ref);
                 self.ns16550a_probe_ioremaps_uart8250_port = ns16550a::uart8250_port_ioremapped()
                     && ns16550a::uart8250_port_resources_ready()
-                    && resources.ioremap.mapping_count() != 0
-                    && resources.ioremap.mapping_for_device(device_ref).is_some();
+                    && context.ioremap_has_platform_device_mapping(device_ref);
                 self.ns16550a_probe_registers_uart8250_port = ns16550a::uart8250_port_registered();
                 self.ns16550a_probe_records_uart_irq_resource =
                     ns16550a::uart8250_port_irq_resource_ready();
                 self.ns16550a_probe_records_uart_irq_mapping =
                     ns16550a::uart8250_port_logical_irq_ready()
-                        && resources
-                            .plic_irq_domain
-                            .mapping_for_source(ns16550a::uart8250_port_irq_source())
+                        && context
+                            .plic_mapping_for_source(ns16550a::uart8250_port_irq_source())
                             .is_some_and(|mapping| {
                                 mapping.logical_irq() == ns16550a::uart8250_port_logical_irq()
                                     && mapping.source_gate_defined()
@@ -1172,9 +1170,8 @@ impl PlatformBus {
                             });
                 self.ns16550a_probe_registers_uart_irq_handler =
                     ns16550a::uart8250_irq_handler_registered()
-                        && resources
-                            .irq_handler_registry
-                            .action_for_logical_irq(ns16550a::uart8250_port_logical_irq())
+                        && context
+                            .irq_action_for_logical_irq(ns16550a::uart8250_port_logical_irq())
                             .is_some_and(|action| {
                                 action.device() == device_ref
                                     && action.handler_kind() == IrqHandlerKind::Ns16550aUart

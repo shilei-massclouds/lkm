@@ -417,10 +417,12 @@ device registration API 构造 `VirtioDevice`。`VirtioDevice` 是 generic virti
 `VirtioMmioTransportDevice`；`VirtioMmioTransportDevice` 仍只表示 transport，不应和 `VirtioDevice`
 合并。`device_id == 0` 的 placeholder slot 必须被拒绝或跳过，不得注册到 `VirtioBus`。
 
-`PlatformBus` 的 public API 不得出现 `VirtioBus` 这样的 virtio-specific 业务参数。若实现需要把
-`Context` 中的多个资源传给 platform driver probe，应使用中性的 probe resources/context 对象；该对象只是
-`Context` 到 driver probe 的能力传递边界，不改变对象所有权，也不表示 `PlatformBus` 拥有这些资源。普通
-driver probe 不得通过全局 `context()` 反向抓取可变全局对象。
+`PlatformBus` 的 public API 不得出现 `VirtioBus` 这样的 virtio-specific 业务参数，也不得把 IRQ/MM
+allocator/ioremap 等 Context 字段展开成长参数列表。platform driver probe 应接收 `PlatformProbeContext`
+这类由 `Context` 在单次 probe 期间临时打开的窗口：它不拥有对象，不得被 driver 保存，字段必须保持私有，
+只能通过正式生产 API 暴露 OF node lookup、platform-device MMIO mapping、IRQ binding、virtio device
+registration 等窄能力。普通 driver probe 不得直接接收 `&mut Context`，也不得通过全局 `context()` 反向抓取
+可变全局对象。
 
 真实 QEMU `virtio-rng-device` 链路必须通过 checkpoint/KUnit 只读 observer 观测
 `ctx.virtio_bus` 中的 `VirtioDevice`、对应的 MMIO transport 和 platform bus 通用 probe 事实。

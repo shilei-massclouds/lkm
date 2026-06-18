@@ -17,6 +17,7 @@ use crate::objects::{
     cpu_id_map::CpuIdMap,
     device_tree::DeviceTree,
     dma_cache_policy::DmaCachePolicy,
+    driver::DeviceDriverRef,
     early_dtb::EarlyDtb,
     early_ioremap::EarlyIoremap,
     early_param::EarlyParam,
@@ -33,7 +34,7 @@ use crate::objects::{
     init_task::InitTask,
     initcall::{
         CpusetSmpTrimmed, CtorTable, DriverCoreBase, DriverCoreDeferred, InitcallBoundary,
-        InitcallTable, IrqProcViewDeferred, PlatformBus, PlatformBusRootDevice,
+        InitcallReturn, InitcallTable, IrqProcViewDeferred, PlatformBus, PlatformBusRootDevice,
     },
     interrupt_stream::InterruptStream,
     ioremap::Ioremap,
@@ -440,6 +441,23 @@ impl Context {
         self.scheduler
             .smoke_scheduler_task_mut()
             .mark_yielded_back()
+    }
+
+    pub fn platform_driver_register(&mut self, driver: DeviceDriverRef) -> InitcallReturn {
+        let mut probe_context = crate::objects::driver::PlatformProbeContext::new(
+            &self.device_tree,
+            &mut self.vmalloc_allocator,
+            &mut self.page_table_caches,
+            &mut self.page_allocator,
+            &self.page_metadata_map,
+            &self.config,
+            &mut self.ioremap,
+            &mut self.plic_irq_domain,
+            &mut self.irq_handler_registry,
+            &mut self.virtio_bus,
+        );
+        self.platform_bus
+            .platform_driver_register(driver, &mut probe_context)
     }
 }
 

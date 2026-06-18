@@ -2,13 +2,13 @@ use super::{
     device::DeviceRef,
     device_tree::{DeviceNodeId, DeviceTree},
     driver::{
-        DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, PlatformProbeResources,
+        DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, PlatformProbeContext,
         ProbeResult,
     },
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
     ioremap::IoMemoryMapping,
-    irq_time::{IrqHandlerKind, IrqHandlerRegistry, LogicalIrq, PlicIrqDomain},
+    irq_time::{IrqHandlerKind, LogicalIrq},
     printk,
 };
 use crate::{arch::riscv64::csr, trace, trace::Checkpoint};
@@ -70,29 +70,7 @@ pub const NS16550A_PLATFORM_DRIVER_REF: DeviceDriverRef =
 
 pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
     crate::objects::printk::write_str("initcall: ns16550a_platform_driver_init\n");
-    let device_tree = &ctx.device_tree;
-    let vmalloc_allocator = &mut ctx.vmalloc_allocator;
-    let page_table_caches = &mut ctx.page_table_caches;
-    let page_allocator = &mut ctx.page_allocator;
-    let page_metadata_map = &ctx.page_metadata_map;
-    let config = &ctx.config;
-    let ioremap = &mut ctx.ioremap;
-    let plic_irq_domain = &mut ctx.plic_irq_domain;
-    let irq_handler_registry = &mut ctx.irq_handler_registry;
-    let mut resources = PlatformProbeResources {
-        device_tree,
-        vmalloc_allocator,
-        page_table_caches,
-        page_allocator,
-        page_metadata_map,
-        config,
-        ioremap,
-        plic_irq_domain,
-        irq_handler_registry,
-        virtio_bus: &mut ctx.virtio_bus,
-    };
-    ctx.platform_bus
-        .platform_driver_register(NS16550A_PLATFORM_DRIVER_REF, &mut resources)
+    ctx.platform_driver_register(NS16550A_PLATFORM_DRIVER_REF)
 }
 
 crate::device_initcall!(ns16550a_platform_driver_init);
@@ -2247,40 +2225,27 @@ pub fn handoff_triggered() -> bool {
 }
 
 fn ns16550a_probe(
-    resources: &mut PlatformProbeResources<'_>,
+    context: &mut PlatformProbeContext<'_>,
     device: DeviceRef,
     node_id: DeviceNodeId,
 ) -> ProbeResult {
-    let Some(mut port) = build_uart8250_port(resources.device_tree, device, node_id) else {
+    let Some(mut port) = build_uart8250_port(context.device_tree(), device, node_id) else {
         return ProbeResult::Deferred;
     };
-    let Some(mapping) = resources.ioremap.map_device_mmio(
-        resources.vmalloc_allocator,
-        resources.page_table_caches,
-        resources.page_allocator,
-        resources.page_metadata_map,
-        resources.config,
-        device,
-        port.mapbase,
-        port.mapsize,
-    ) else {
+    let Some(mapping) = context.map_platform_device_mmio(device, port.mapbase, port.mapsize) else {
         return ProbeResult::Deferred;
     };
     bind_ioremap_mapping(&mut port, mapping);
-    if !bind_irq_resource(&mut port, resources.device_tree, resources.plic_irq_domain) {
+    if !bind_irq_resource(&mut port, context) {
         return ProbeResult::Deferred;
     }
-    if !bind_irq_handler(
-        &mut port,
-        resources.plic_irq_domain,
-        resources.irq_handler_registry,
-    ) {
+    if !bind_irq_handler(&mut port, context) {
         return ProbeResult::Deferred;
     }
 
-    let stdout_path_available = resources.device_tree.stdout_path_available();
+    let stdout_path_available = context.device_tree().stdout_path_available();
     let stdout_path_matched =
-        stdout_path_available && resources.device_tree.stdout_path_selects(port.node_id);
+        stdout_path_available && context.device_tree().stdout_path_selects(port.node_id);
     let serial_console_registered =
         stdout_path_matched && printk::register_serial8250_console(true);
     let write_backend = if serial_console_registered {
@@ -2389,24 +2354,17 @@ fn build_uart8250_port(
     })
 }
 
-fn bind_irq_resource(
-    port: &mut Uart8250Port,
-    device_tree: &DeviceTree,
-    plic_irq_domain: &mut PlicIrqDomain,
-) -> bool {
-    if plic_irq_domain.state() != super::state::State::Ready {
-        return false;
-    }
-    let Some(node) = device_tree.node(port.node_id) else {
+fn bind_irq_resource(port: &mut Uart8250Port, context: &mut PlatformProbeContext<'_>) -> bool {
+    let Some(node) = context.device_tree().node(port.node_id) else {
         return false;
     };
-    if !interrupt_parent_is_plic(device_tree, node) {
+    if !interrupt_parent_is_plic(context.device_tree(), node) {
         return false;
     }
-    let Some(source) = uart_interrupt_source(node, plic_irq_domain) else {
+    let Some(source) = uart_interrupt_source(context, node) else {
         return false;
     };
-    let Some(logical_irq) = plic_irq_domain.map_source(source) else {
+    let Some(logical_irq) = context.map_plic_source(source) else {
         return false;
     };
 
@@ -2414,8 +2372,8 @@ fn bind_irq_resource(
     port.logical_irq = logical_irq;
     port.irq_resource_ready = true;
     port.irq_parent_plic = true;
-    port.irq_mapping_ready = plic_irq_domain
-        .mapping_for_source(source)
+    port.irq_mapping_ready = context
+        .plic_mapping_for_source(source)
         .is_some_and(|mapping| {
             mapping.logical_irq() == logical_irq
                 && mapping.source_valid()
@@ -2432,23 +2390,18 @@ fn bind_irq_resource(
     port.irq_mapping_ready
 }
 
-fn bind_irq_handler(
-    port: &mut Uart8250Port,
-    plic_irq_domain: &PlicIrqDomain,
-    irq_handler_registry: &mut IrqHandlerRegistry,
-) -> bool {
+fn bind_irq_handler(port: &mut Uart8250Port, context: &mut PlatformProbeContext<'_>) -> bool {
     if !port.registered || !port.irq_mapping_ready || !port.logical_irq.is_valid() {
         return false;
     }
-    if !irq_handler_registry.request_irq(
-        plic_irq_domain,
+    if !context.request_irq(
         port.logical_irq,
         port.device_ref,
         IrqHandlerKind::Ns16550aUart,
     ) {
         return false;
     }
-    let Some(action) = irq_handler_registry.action_for_logical_irq(port.logical_irq) else {
+    let Some(action) = context.irq_action_for_logical_irq(port.logical_irq) else {
         return false;
     };
 
@@ -2467,13 +2420,13 @@ fn bind_irq_handler(
 }
 
 fn uart_interrupt_source(
+    context: &PlatformProbeContext<'_>,
     node: super::device_tree::DeviceNodeRef<'_>,
-    domain: &PlicIrqDomain,
 ) -> Option<u32> {
     let value = node.property(b"interrupts")?.raw_value();
     let start = value.as_ptr() as usize;
     let source = read_be_u32(start, start.checked_add(value.len())?)?;
-    domain.translate_one_cell_specifier(&[source])
+    context.translate_plic_one_cell_specifier(&[source])
 }
 
 fn interrupt_parent_is_plic(

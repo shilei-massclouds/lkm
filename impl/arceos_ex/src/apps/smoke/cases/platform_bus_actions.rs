@@ -6,7 +6,7 @@ use crate::{
     context::context_ref,
     objects::{
         device::DeviceRef,
-        driver::{PlatformProbeResources, MOCK_PLATFORM_DRIVER_REF},
+        driver::{PlatformProbeContext, MOCK_PLATFORM_DRIVER_REF},
         initcall::PlatformBus,
         ioremap::Ioremap,
         irq_time::{IrqHandlerRegistry, PlicIrqDomain},
@@ -84,19 +84,19 @@ impl ProbeSupport {
         }
     }
 
-    fn resources<'a>(&'a mut self, ctx: &'a crate::context::Context) -> PlatformProbeResources<'a> {
-        PlatformProbeResources {
-            device_tree: &ctx.device_tree,
-            vmalloc_allocator: &mut self.vmalloc_allocator,
-            page_table_caches: &mut self.page_table_caches,
-            page_allocator: &mut self.page_allocator,
-            page_metadata_map: &ctx.page_metadata_map,
-            config: &ctx.config,
-            ioremap: &mut self.ioremap,
-            plic_irq_domain: &mut self.plic_irq_domain,
-            irq_handler_registry: &mut self.irq_handler_registry,
-            virtio_bus: &mut self.virtio_bus,
-        }
+    fn resources<'a>(&'a mut self, ctx: &'a crate::context::Context) -> PlatformProbeContext<'a> {
+        PlatformProbeContext::new(
+            &ctx.device_tree,
+            &mut self.vmalloc_allocator,
+            &mut self.page_table_caches,
+            &mut self.page_allocator,
+            &ctx.page_metadata_map,
+            &ctx.config,
+            &mut self.ioremap,
+            &mut self.plic_irq_domain,
+            &mut self.irq_handler_registry,
+            &mut self.virtio_bus,
+        )
     }
 }
 

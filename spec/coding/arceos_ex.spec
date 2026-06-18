@@ -202,6 +202,11 @@ predicate arceos_ex_must_platform_bus_probe_driver_scan_existing_devices() -> bo
 predicate arceos_ex_must_platform_bus_probe_device_scan_registered_drivers() -> bool;
 predicate arceos_ex_must_ns16550a_driver_match_of_compatible_from_device_node() -> bool;
 predicate arceos_ex_must_ns16550a_driver_smoke_cover_probe_and_bind() -> bool;
+predicate arceos_ex_must_platform_probe_context_be_context_temporary_window() -> bool;
+predicate arceos_ex_must_platform_probe_not_receive_mut_context_directly() -> bool;
+predicate arceos_ex_must_platform_probe_context_fields_private() -> bool;
+predicate arceos_ex_must_platform_probe_context_expose_narrow_capability_methods() -> bool;
+predicate arceos_ex_must_platform_bus_api_not_expose_subsystem_specific_probe_args() -> bool;
 predicate arceos_ex_must_device_tree_parse_stdout_path_from_chosen() -> bool;
 predicate arceos_ex_must_device_tree_preserve_stdout_path_options_after_colon() -> bool;
 predicate arceos_ex_must_device_tree_stdout_path_resolve_to_stable_node_id() -> bool;
@@ -2075,6 +2080,17 @@ type ArceosExInitcallCodingMust {
          * ns16550a driver may provide a static descriptor and probe function,
          * but the platform bus implementation must not hard-code an ns16550a
          * compatible branch as the only matching path.
+         *
+         * Platform driver probe must receive a PlatformProbeContext-style
+         * temporary window derived from Context for the single probe action.
+         * The probe context is non-owning and must not be stored by drivers.
+         * It must not be a public bag of Context fields: fields stay private
+         * and driver code reaches subsystems only through narrow production
+         * capability methods such as OF node lookup, platform-device MMIO
+         * mapping, IRQ binding, and virtio device registration. Platform
+         * probe functions must not receive raw &mut Context, and PlatformBus
+         * public APIs must not expose virtio-specific or IRQ/MM allocator
+         * argument lists.
          */
         arceos_ex_must_device_driver_ref_set_map_to_klist_like_storage();
         arceos_ex_must_platform_bus_klist_drivers_use_vec_driver_refs();
@@ -2094,6 +2110,11 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_platform_bus_probe_device_scan_registered_drivers();
         arceos_ex_must_ns16550a_driver_match_of_compatible_from_device_node();
         arceos_ex_must_ns16550a_driver_smoke_cover_probe_and_bind();
+        arceos_ex_must_platform_probe_context_be_context_temporary_window();
+        arceos_ex_must_platform_probe_not_receive_mut_context_directly();
+        arceos_ex_must_platform_probe_context_fields_private();
+        arceos_ex_must_platform_probe_context_expose_narrow_capability_methods();
+        arceos_ex_must_platform_bus_api_not_expose_subsystem_specific_probe_args();
 
         /*
          * Console/earlycon handoff:

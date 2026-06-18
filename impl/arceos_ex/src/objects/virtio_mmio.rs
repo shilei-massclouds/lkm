@@ -2,7 +2,7 @@ use super::{
     device::DeviceRef,
     device_tree::{DeviceNodeId, DeviceTree},
     driver::{
-        DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, PlatformProbeResources,
+        DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, PlatformProbeContext,
         ProbeResult,
     },
     fdt_reader::{read_be_u32, read_cells},
@@ -28,21 +28,7 @@ pub const VIRTIO_MMIO_PLATFORM_DRIVER_REF: DeviceDriverRef =
 
 pub fn virtio_mmio_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
     crate::objects::printk::write_str("initcall: virtio_mmio_platform_driver_init\n");
-    let mut resources = PlatformProbeResources {
-        device_tree: &ctx.device_tree,
-        vmalloc_allocator: &mut ctx.vmalloc_allocator,
-        page_table_caches: &mut ctx.page_table_caches,
-        page_allocator: &mut ctx.page_allocator,
-        page_metadata_map: &ctx.page_metadata_map,
-        config: &ctx.config,
-        ioremap: &mut ctx.ioremap,
-        plic_irq_domain: &mut ctx.plic_irq_domain,
-        irq_handler_registry: &mut ctx.irq_handler_registry,
-        virtio_bus: &mut ctx.virtio_bus,
-    };
-    let result = ctx
-        .platform_bus
-        .platform_driver_register(VIRTIO_MMIO_PLATFORM_DRIVER_REF, &mut resources);
+    let result = ctx.platform_driver_register(VIRTIO_MMIO_PLATFORM_DRIVER_REF);
     if result == InitcallReturn::Ok && ctx.virtio_bus.device_count() != 0 {
         checkpoint::dispatch(Checkpoint::VirtioBusDeviceAdded, ctx);
     }
@@ -259,24 +245,17 @@ impl VirtioMmioHeader {
 }
 
 fn virtio_mmio_probe(
-    resources: &mut PlatformProbeResources<'_>,
+    context: &mut PlatformProbeContext<'_>,
     device: DeviceRef,
     node_id: DeviceNodeId,
 ) -> ProbeResult {
-    let Some(base_transport) = build_transport_from_node(resources.device_tree, device, node_id)
+    let Some(base_transport) = build_transport_from_node(context.device_tree(), device, node_id)
     else {
         return ProbeResult::Deferred;
     };
-    let Some(mapping) = resources.ioremap.map_device_mmio(
-        resources.vmalloc_allocator,
-        resources.page_table_caches,
-        resources.page_allocator,
-        resources.page_metadata_map,
-        resources.config,
-        device,
-        base_transport.mapbase,
-        base_transport.mapsize,
-    ) else {
+    let Some(mapping) =
+        context.map_platform_device_mmio(device, base_transport.mapbase, base_transport.mapsize)
+    else {
         return ProbeResult::Deferred;
     };
 
@@ -286,11 +265,7 @@ fn virtio_mmio_probe(
     print_probe(transport);
 
     if transport.header_valid() {
-        if resources
-            .virtio_bus
-            .register_mmio_device(transport)
-            .is_some()
-        {
+        if context.register_virtio_mmio_device(transport).is_some() {
             ProbeResult::Bound
         } else {
             ProbeResult::Deferred

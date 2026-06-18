@@ -102,6 +102,17 @@ predicate platform_bus_ns16550a_probe_registers_uart8250_port<T, P>(bus: T, port
 predicate platform_bus_ns16550a_probe_registers_serial_console<T, C>(bus: T, console: C) -> bool;
 predicate platform_bus_ns16550a_probe_triggers_console_handoff<T, H>(bus: T, handoff: H) -> bool;
 
+predicate platform_probe_context_derived_from_context<T, C>(probe_context: T, context: C) -> bool;
+predicate platform_probe_context_temporary_window<T>(probe_context: T) -> bool;
+predicate platform_probe_context_non_owning<T>(probe_context: T) -> bool;
+predicate platform_probe_context_fields_private<T>(probe_context: T) -> bool;
+predicate platform_probe_context_no_escape<T>(probe_context: T) -> bool;
+predicate platform_probe_context_capability_api_bound<T>(probe_context: T) -> bool;
+predicate platform_probe_context_device_tree_access_bound<T, D>(probe_context: T, device_tree: D) -> bool;
+predicate platform_probe_context_ioremap_capability_bound<T, I>(probe_context: T, ioremap: I) -> bool;
+predicate platform_probe_context_irq_capability_bound<T, D, R>(probe_context: T, domain: D, registry: R) -> bool;
+predicate platform_probe_context_virtio_bus_capability_bound<T, B>(probe_context: T, bus: B) -> bool;
+
 /*
  * BusSubsysPrivate models Linux struct subsys_private as created by
  * bus_register(). Preset corresponds to kzalloc() and static field binding;
@@ -489,6 +500,37 @@ type PlatformBusType: BusType {
                     DeviceDriverRef::VirtioMmioPlatformDriver,
                     DeviceRef::VirtioMmioPlatformDevice
                 );
+            }
+        }
+    }
+}
+
+/*
+ * PlatformProbeContext is not a resource owner. It is the short-lived window
+ * that Context opens for one platform-driver probe. The window carries only
+ * declared capabilities such as OF lookup, device MMIO mapping, IRQ binding,
+ * and subsystem registration. Platform drivers must not receive raw Context or
+ * a public bag of Context fields.
+ */
+type PlatformProbeContext {
+    lifecycle {
+        Event::Preset {
+            state_effect: StateEffect::Always;
+            depends_on {
+                DeviceTree.state == State::Ready;
+                PlatformBus.state == State::Ready;
+            }
+            ensures {
+                platform_probe_context_derived_from_context(self, Context);
+                platform_probe_context_temporary_window(self);
+                platform_probe_context_non_owning(self);
+                platform_probe_context_fields_private(self);
+                platform_probe_context_no_escape(self);
+                platform_probe_context_capability_api_bound(self);
+                platform_probe_context_device_tree_access_bound(self, DeviceTree);
+                platform_probe_context_ioremap_capability_bound(self, Ioremap);
+                platform_probe_context_irq_capability_bound(self, PlicIrqDomain, IrqHandlerRegistry);
+                platform_probe_context_virtio_bus_capability_bound(self, VirtioBus);
             }
         }
     }
