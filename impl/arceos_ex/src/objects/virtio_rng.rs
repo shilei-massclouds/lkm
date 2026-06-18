@@ -1,4 +1,6 @@
 use super::{
+    completion::Completion,
+    hwrng::{HwRngCore, HwRngDevice, HwRngDeviceRef, HwRngError, HwRngProvider},
     irq_time::{IrqHandlerRegistry, Plic, PlicIrqDomain},
     kernel_image::KernelImage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -37,11 +39,19 @@ pub enum VirtioRngError {
     Removed,
     Queue(VirtqueueError),
     TransportUnavailable,
+    HwRng(HwRngError),
+    NoDataAvailable,
 }
 
 impl From<VirtqueueError> for VirtioRngError {
     fn from(error: VirtqueueError) -> Self {
         Self::Queue(error)
+    }
+}
+
+impl From<HwRngError> for VirtioRngError {
+    fn from(error: HwRngError) -> Self {
+        Self::HwRng(error)
     }
 }
 
@@ -52,6 +62,9 @@ pub struct VirtioRngDriver {
     probe_called: bool,
     probe_return_zero: bool,
     matched_device: bool,
+    scan_callback_bound: bool,
+    scan_called: bool,
+    scan_registered_hwrng: bool,
 }
 
 impl VirtioRngDriver {
@@ -63,6 +76,9 @@ impl VirtioRngDriver {
             probe_called: false,
             probe_return_zero: false,
             matched_device: false,
+            scan_callback_bound: false,
+            scan_called: false,
+            scan_registered_hwrng: false,
         }
     }
 
@@ -90,6 +106,18 @@ impl VirtioRngDriver {
         self.matched_device
     }
 
+    pub const fn scan_callback_bound(&self) -> bool {
+        self.scan_callback_bound
+    }
+
+    pub const fn scan_called(&self) -> bool {
+        self.scan_called
+    }
+
+    pub const fn scan_registered_hwrng(&self) -> bool {
+        self.scan_registered_hwrng
+    }
+
     pub fn setup(&mut self, virtio_bus: &VirtioBus) -> EventResult {
         if self.lifecycle.state() != State::Base
             || virtio_bus.state() != State::Ready
@@ -105,6 +133,7 @@ impl VirtioRngDriver {
 
         self.name_bound = true;
         self.id_table_contains_rng = true;
+        self.scan_callback_bound = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -131,16 +160,38 @@ impl VirtioRngDriver {
         self.probe_return_zero = true;
         Ok(rng)
     }
+
+    pub fn scan(
+        &mut self,
+        rng: &mut VirtioRngDevice,
+        hwrng_core: &mut HwRngCore,
+    ) -> Result<HwRngDeviceRef, VirtioRngError> {
+        if self.lifecycle.state() != State::Ready || !self.scan_callback_bound {
+            return Err(VirtioRngError::DriverNotReady);
+        }
+        if rng.state() != State::Ready {
+            return Err(VirtioRngError::DeviceNotReady);
+        }
+
+        let device_ref = rng.register_hwrng(hwrng_core)?;
+        self.scan_called = true;
+        self.scan_registered_hwrng = true;
+        Ok(device_ref)
+    }
 }
 
 pub struct VirtioRngDevice {
     lifecycle: Lifecycle,
     virtio_device: VirtioDevice,
     queue: VirtQueue,
+    hwrng: HwRngDevice,
+    have_data: Completion,
     single_input_queue: bool,
-    hwrng_registration_deferred: bool,
+    hwrng_embedded: bool,
+    hwrng_register_done: bool,
     random_pool_deferred: bool,
-    user_api_deferred: bool,
+    dev_hwrng_plumbing_deferred: bool,
+    blocking_wait_deferred: bool,
     real_notify_irq_deferred: bool,
     real_notify_irq_ready: bool,
     probe_common_requested_entropy: bool,
@@ -156,6 +207,15 @@ pub struct VirtioRngDevice {
     complete_gets_used_buffer: bool,
     data_avail_updated: bool,
     data_idx_reset: bool,
+    have_data_completion_ready: bool,
+    have_data_reinitialized: bool,
+    have_data_completed: bool,
+    read_consumes_available_data: bool,
+    read_updates_data_idx: bool,
+    read_updates_data_avail: bool,
+    read_requeues_when_empty: bool,
+    read_count: usize,
+    last_read_len: usize,
     removed_rejects_io: bool,
     data_avail: u32,
     data_idx: u32,
@@ -172,10 +232,14 @@ impl VirtioRngDevice {
             lifecycle: Lifecycle::new(State::Base),
             virtio_device,
             queue: VirtQueue::new(VIRTIO_RNG_QUEUE_SIZE),
+            hwrng: HwRngDevice::new_virtio_rng(0),
+            have_data: Completion::new(),
             single_input_queue: false,
-            hwrng_registration_deferred: false,
+            hwrng_embedded: false,
+            hwrng_register_done: false,
             random_pool_deferred: false,
-            user_api_deferred: false,
+            dev_hwrng_plumbing_deferred: false,
+            blocking_wait_deferred: false,
             real_notify_irq_deferred: false,
             real_notify_irq_ready: false,
             probe_common_requested_entropy: false,
@@ -191,6 +255,15 @@ impl VirtioRngDevice {
             complete_gets_used_buffer: false,
             data_avail_updated: false,
             data_idx_reset: false,
+            have_data_completion_ready: false,
+            have_data_reinitialized: false,
+            have_data_completed: false,
+            read_consumes_available_data: false,
+            read_updates_data_idx: false,
+            read_updates_data_avail: false,
+            read_requeues_when_empty: false,
+            read_count: 0,
+            last_read_len: 0,
             removed_rejects_io: false,
             data_avail: 0,
             data_idx: 0,
@@ -214,20 +287,36 @@ impl VirtioRngDevice {
         &self.queue
     }
 
+    pub const fn hwrng(&self) -> &HwRngDevice {
+        &self.hwrng
+    }
+
+    pub const fn have_data(&self) -> &Completion {
+        &self.have_data
+    }
+
     pub const fn single_input_queue(&self) -> bool {
         self.single_input_queue
     }
 
-    pub const fn hwrng_registration_deferred(&self) -> bool {
-        self.hwrng_registration_deferred
+    pub const fn hwrng_embedded(&self) -> bool {
+        self.hwrng_embedded
+    }
+
+    pub const fn hwrng_register_done(&self) -> bool {
+        self.hwrng_register_done
     }
 
     pub const fn random_pool_deferred(&self) -> bool {
         self.random_pool_deferred
     }
 
-    pub const fn user_api_deferred(&self) -> bool {
-        self.user_api_deferred
+    pub const fn dev_hwrng_plumbing_deferred(&self) -> bool {
+        self.dev_hwrng_plumbing_deferred
+    }
+
+    pub const fn blocking_wait_deferred(&self) -> bool {
+        self.blocking_wait_deferred
     }
 
     pub const fn real_notify_irq_deferred(&self) -> bool {
@@ -292,6 +381,44 @@ impl VirtioRngDevice {
         self.data_idx
     }
 
+    pub const fn have_data_completion_ready(&self) -> bool {
+        self.have_data_completion_ready
+    }
+
+    #[allow(dead_code)]
+    pub const fn have_data_reinitialized(&self) -> bool {
+        self.have_data_reinitialized
+    }
+
+    #[allow(dead_code)]
+    pub const fn have_data_completed(&self) -> bool {
+        self.have_data_completed
+    }
+
+    pub const fn read_consumes_available_data(&self) -> bool {
+        self.read_consumes_available_data
+    }
+
+    pub const fn read_updates_data_idx(&self) -> bool {
+        self.read_updates_data_idx
+    }
+
+    pub const fn read_updates_data_avail(&self) -> bool {
+        self.read_updates_data_avail
+    }
+
+    pub const fn read_requeues_when_empty(&self) -> bool {
+        self.read_requeues_when_empty
+    }
+
+    pub const fn read_count(&self) -> usize {
+        self.read_count
+    }
+
+    pub const fn last_read_len(&self) -> usize {
+        self.last_read_len
+    }
+
     pub const fn request_count(&self) -> usize {
         self.request_count
     }
@@ -322,11 +449,22 @@ impl VirtioRngDevice {
         self.queue
             .setup()
             .map_err(|_| VirtioRngError::DeviceNotReady)?;
+        self.hwrng
+            .setup()
+            .map_err(|_| VirtioRngError::DeviceNotReady)?;
+        self.have_data
+            .setup()
+            .map_err(|_| VirtioRngError::DeviceNotReady)?;
+        self.have_data
+            .enable()
+            .map_err(|_| VirtioRngError::DeviceNotReady)?;
         self.single_input_queue = true;
-        self.hwrng_registration_deferred = true;
+        self.hwrng_embedded = true;
         self.random_pool_deferred = true;
-        self.user_api_deferred = true;
+        self.dev_hwrng_plumbing_deferred = true;
+        self.blocking_wait_deferred = true;
         self.real_notify_irq_deferred = true;
+        self.have_data_completion_ready = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
             .map_err(|_| VirtioRngError::DeviceNotReady)
@@ -354,6 +492,10 @@ impl VirtioRngDevice {
 
         let token = self.queue.add_inbuf(buffer_addr, buffer_len)?;
         self.queue.kick()?;
+        self.have_data
+            .reinit()
+            .map_err(|_| VirtioRngError::DeviceNotReady)?;
+        self.have_data_reinitialized = true;
         self.pending_token = Some(token);
         self.pending_buffer_addr = buffer_addr;
         self.pending_buffer_len = buffer_len;
@@ -454,6 +596,10 @@ impl VirtioRngDevice {
         };
         let token = self.queue.add_inbuf(buffer_addr, buffer_len)?;
         self.queue.kick_mmio(transport)?;
+        self.have_data
+            .reinit()
+            .map_err(|_| VirtioRngError::DeviceNotReady)?;
+        self.have_data_reinitialized = true;
         self.pending_token = Some(token);
         self.pending_buffer_addr = buffer_addr;
         self.pending_buffer_len = buffer_len;
@@ -482,8 +628,6 @@ impl VirtioRngDevice {
 
         let used = self.queue.get_buf()?;
         self.pending_token = None;
-        self.pending_buffer_addr = 0;
-        self.pending_buffer_len = 0;
         self.request_pending = false;
         self.complete_gets_used_buffer = true;
         self.data_avail = used.len();
@@ -491,6 +635,10 @@ impl VirtioRngDevice {
         self.data_avail_updated = true;
         self.data_idx_reset = true;
         self.completion_count = self.completion_count.saturating_add(1);
+        self.have_data
+            .complete()
+            .map_err(|_| VirtioRngError::DeviceNotReady)?;
+        self.have_data_completed = true;
         Ok(used.len())
     }
 
@@ -508,8 +656,6 @@ impl VirtioRngDevice {
 
         let used = self.queue.get_buf_from_device()?;
         self.pending_token = None;
-        self.pending_buffer_addr = 0;
-        self.pending_buffer_len = 0;
         self.request_pending = false;
         self.complete_gets_used_buffer = true;
         self.data_avail = used.len();
@@ -518,7 +664,81 @@ impl VirtioRngDevice {
         self.data_idx_reset = true;
         self.irq_count = self.irq_count.saturating_add(1);
         self.completion_count = self.completion_count.saturating_add(1);
+        self.have_data
+            .complete()
+            .map_err(|_| VirtioRngError::DeviceNotReady)?;
+        self.have_data_completed = true;
         Ok(used.len())
+    }
+
+    pub fn register_hwrng(
+        &mut self,
+        hwrng_core: &mut HwRngCore,
+    ) -> Result<HwRngDeviceRef, VirtioRngError> {
+        if self.lifecycle.state() != State::Ready || !self.hwrng_embedded {
+            return Err(VirtioRngError::DeviceNotReady);
+        }
+        if self.hwrng_register_done {
+            return self
+                .hwrng
+                .device_ref()
+                .ok_or(VirtioRngError::HwRng(HwRngError::ProviderUnavailable));
+        }
+
+        let device_ref = hwrng_core.register(&mut self.hwrng)?;
+        self.hwrng_register_done = true;
+        Ok(device_ref)
+    }
+
+    pub fn read_entropy(&mut self, buffer: &mut [u8], wait: bool) -> Result<usize, VirtioRngError> {
+        if self.lifecycle.state() == State::Destroyed {
+            self.removed_rejects_io = true;
+            return Err(VirtioRngError::Removed);
+        }
+        if self.lifecycle.state() != State::Ready {
+            return Err(VirtioRngError::DeviceNotReady);
+        }
+        if wait {
+            self.blocking_wait_deferred = true;
+        }
+        if buffer.is_empty() || self.data_avail == 0 {
+            return Err(VirtioRngError::NoDataAvailable);
+        }
+
+        let available = self.data_avail as usize;
+        let copy_len = core::cmp::min(buffer.len(), available);
+        let start = self.data_idx as usize;
+        let entropy = entropy_buffer_bytes();
+        let end = core::cmp::min(start.saturating_add(copy_len), entropy.len());
+        if end <= start {
+            return Err(VirtioRngError::NoDataAvailable);
+        }
+        let actual_len = end - start;
+        buffer[..actual_len].copy_from_slice(&entropy[start..end]);
+        self.data_idx = self.data_idx.saturating_add(actual_len as u32);
+        self.data_avail = self.data_avail.saturating_sub(actual_len as u32);
+        self.read_consumes_available_data = true;
+        self.read_updates_data_idx = true;
+        self.read_updates_data_avail = true;
+        self.read_count = self.read_count.saturating_add(1);
+        self.last_read_len = actual_len;
+        self.hwrng.record_read(actual_len);
+
+        if self.data_avail == 0 {
+            self.read_requeues_when_empty = true;
+            if self.real_notify_irq_ready && !self.request_pending {
+                let (buffer_addr, buffer_len) =
+                    entropy_buffer_request(&crate::context::context_ref().kernel_image)?;
+                self.request_entropy_mmio(buffer_addr, buffer_len)?;
+            } else if self.pending_buffer_addr != 0
+                && self.pending_buffer_len != 0
+                && !self.request_pending
+            {
+                self.request_entropy(self.pending_buffer_addr, self.pending_buffer_len)?;
+            }
+        }
+
+        Ok(actual_len)
     }
 
     pub fn cleanup(&mut self) -> Result<(), VirtioRngError> {
@@ -536,6 +756,25 @@ impl VirtioRngDevice {
         self.lifecycle
             .adopt_transition(LifecycleEvent::Cleanup, State::Ready, State::Destroyed)
             .map_err(|_| VirtioRngError::DeviceNotReady)
+    }
+}
+
+impl HwRngProvider for VirtioRngDevice {
+    fn read_hwrng(
+        &mut self,
+        device_ref: HwRngDeviceRef,
+        buffer: &mut [u8],
+        wait: bool,
+    ) -> Result<usize, HwRngError> {
+        if self.hwrng.device_ref() != Some(device_ref) || !self.hwrng_register_done {
+            return Err(HwRngError::ProviderUnavailable);
+        }
+        self.read_entropy(buffer, wait)
+            .map_err(|error| match error {
+                VirtioRngError::NoDataAvailable => HwRngError::EmptyRead,
+                VirtioRngError::HwRng(error) => error,
+                _ => HwRngError::ProviderUnavailable,
+            })
     }
 }
 
@@ -588,6 +827,7 @@ impl VirtioRngRuntime {
 pub fn setup_live_driver(
     context_runtime: &mut VirtioRngRuntime,
     virtio_bus: &VirtioBus,
+    hwrng_core: &mut HwRngCore,
     kernel_image: &KernelImage,
     plic: &Plic,
     plic_irq_domain: &mut PlicIrqDomain,
@@ -618,6 +858,10 @@ pub fn setup_live_driver(
         .probe(device)
         .map_err(|_| live_setup_error())?;
     rng.setup_real_transport(kernel_image, plic, plic_irq_domain, irq_handler_registry)
+        .map_err(|_| live_setup_error())?;
+    runtime
+        .driver
+        .scan(&mut rng, hwrng_core)
         .map_err(|_| live_setup_error())?;
     runtime.live_device_ref = Some(device.device_ref());
     runtime.device = Some(rng);
@@ -706,6 +950,15 @@ fn entropy_buffer_request(kernel_image: &KernelImage) -> Result<(usize, u32), Vi
         .runtime_to_phys(virt)
         .ok_or(VirtioRngError::InvalidBuffer)?;
     Ok((phys, VIRTIO_RNG_BUFFER_SIZE as u32))
+}
+
+fn entropy_buffer_bytes() -> &'static [u8; VIRTIO_RNG_BUFFER_SIZE] {
+    unsafe {
+        &(&raw const VIRTIO_RNG_ENTROPY_BUFFER)
+            .as_ref()
+            .unwrap()
+            .bytes
+    }
 }
 
 fn live_setup_error() -> super::state::EventError {

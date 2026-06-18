@@ -38,6 +38,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.platform_bus
         .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device)?;
     ctx.virtio_bus.setup(&ctx.platform_bus)?;
+    ctx.hwrng_core.setup(&ctx.driver_core_base)?;
     ctx.driver_core_deferred.setup(&ctx.platform_bus)?;
     ctx.irq_proc_view_deferred.setup(
         &ctx.driver_core_base,
@@ -55,6 +56,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     crate::objects::virtio_rng::setup_live_driver(
         &mut ctx.virtio_rng_runtime,
         &ctx.virtio_bus,
+        &mut ctx.hwrng_core,
         &ctx.kernel_image,
         &ctx.plic,
         &mut ctx.plic_irq_domain,

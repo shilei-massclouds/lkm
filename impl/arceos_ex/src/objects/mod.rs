@@ -27,6 +27,7 @@ pub mod fdt_parser;
 pub mod fdt_reader;
 pub mod finalize;
 pub mod fix_map;
+pub mod hwrng;
 pub mod init_mm;
 pub mod init_stack;
 pub mod init_task;

@@ -5,6 +5,7 @@ use crate::{
     },
     context::context,
     objects::{
+        hwrng::HwRngCore,
         state::State,
         virtio::VirtioDevice,
         virtio_rng::{VirtioRngDevice, VirtioRngDriver, VirtioRngError},
@@ -29,6 +30,7 @@ pub fn run() -> SmokeResult {
     suite.scenario(&mut RepeatRequestScenario::new());
     suite.scenario(&mut InvalidCompletionScenario::new());
     suite.scenario(&mut RemovedRejectsIoScenario::new());
+    suite.scenario(&mut HwrngReadScenario::new());
     suite.result()
 }
 
@@ -55,6 +57,7 @@ impl VirtioRngFixture {
         assertions.assert("driver ready", self.driver.state() == State::Ready);
         assertions.assert("driver name", self.driver.name_bound());
         assertions.assert("driver id table", self.driver.id_table_contains_rng());
+        assertions.assert("driver scan callback", self.driver.scan_callback_bound());
 
         let Some(device) = rng_virtio_device() else {
             assertions.assert("rng virtio device", false);
@@ -95,9 +98,23 @@ impl VirtioRngFixture {
         );
         assertions.assert("single queue", rng.single_input_queue());
         assertions.assert("queue ready", rng.queue().state() == State::Ready);
-        assertions.assert("hwrng deferred", rng.hwrng_registration_deferred());
+        assertions.assert("hwrng embedded", rng.hwrng_embedded());
+        assertions.assert("hwrng ready", rng.hwrng().state() == State::Ready);
+        assertions.assert("hwrng name", rng.hwrng().name_bound());
+        assertions.assert("hwrng read callback", rng.hwrng().read_callback_bound());
+        assertions.assert(
+            "hwrng cleanup callback",
+            rng.hwrng().cleanup_callback_bound(),
+        );
+        assertions.assert("hwrng priv", rng.hwrng().priv_points_to_provider());
+        assertions.assert("have data ready", rng.have_data_completion_ready());
+        assertions.assert("have data online", rng.have_data().state() == State::Online);
         assertions.assert("random pool deferred", rng.random_pool_deferred());
-        assertions.assert("user api deferred", rng.user_api_deferred());
+        assertions.assert(
+            "dev hwrng plumbing deferred",
+            rng.dev_hwrng_plumbing_deferred(),
+        );
+        assertions.assert("blocking wait deferred", rng.blocking_wait_deferred());
         assertions.assert("notify irq deferred", rng.real_notify_irq_deferred());
     }
 
@@ -350,6 +367,115 @@ impl SmokeScenario for RemovedRejectsIoScenario {
             "complete rejected",
             rng.complete_entropy() == Err(VirtioRngError::Removed),
         );
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+struct HwrngReadScenario {
+    fixture: VirtioRngFixture,
+    hwrng_core: HwRngCore,
+}
+
+impl HwrngReadScenario {
+    const fn new() -> Self {
+        Self {
+            fixture: VirtioRngFixture::new(),
+            hwrng_core: HwRngCore::new(),
+        }
+    }
+}
+
+impl SmokeScenario for HwrngReadScenario {
+    fn name(&self) -> &'static str {
+        "virtio_rng.hwrng_read_current"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.fixture.setup_probed(assertions);
+        let ctx = context();
+        assertions.assert_ok(
+            "hwrng core setup",
+            self.hwrng_core.setup(&ctx.driver_core_base),
+        );
+        assertions.assert("hwrng core ready", self.hwrng_core.state() == State::Ready);
+        assertions.assert("hwrng registry ready", self.hwrng_core.registry_ready());
+        assertions.assert("hwrng current slot", self.hwrng_core.current_slot_ready());
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        let VirtioRngFixture { driver, device } = &mut self.fixture;
+        let Some(rng) = device.as_mut() else {
+            assertions.assert("rng device present", false);
+            return;
+        };
+        assertions.assert_ok(
+            "request entropy",
+            rng.request_entropy(ENTROPY_BUFFER_ADDR, 64),
+        );
+        assertions.assert_ok("fake complete", rng.fake_transport_complete(32));
+        let len = match rng.complete_entropy() {
+            Ok(len) => len,
+            Err(_) => {
+                assertions.assert("complete entropy", false);
+                return;
+            }
+        };
+        assertions.assert("completion len", len == 32);
+
+        match driver.scan(rng, &mut self.hwrng_core) {
+            Ok(device_ref) => {
+                assertions.assert("scan called", driver.scan_called());
+                assertions.assert("scan registered", driver.scan_registered_hwrng());
+                assertions.assert("hwrng register done", rng.hwrng_register_done());
+                assertions.assert("hwrng registered", rng.hwrng().registered());
+                assertions.assert("hwrng current", rng.hwrng().current());
+                assertions.assert(
+                    "current ref",
+                    self.hwrng_core.current_device() == Some(device_ref),
+                );
+            }
+            Err(_) => {
+                assertions.assert("scan hwrng", false);
+                return;
+            }
+        }
+
+        let mut out = [0u8; 32];
+        let read_len = match self.hwrng_core.read_current(rng, &mut out, false) {
+            Ok(len) => len,
+            Err(_) => {
+                assertions.assert("hwrng read current", false);
+                return;
+            }
+        };
+        assertions.assert("read len", read_len == out.len());
+        assertions.assert("hwrng core read", self.hwrng_core.read_current_count() == 1);
+        assertions.assert(
+            "hwrng ref acquired",
+            self.hwrng_core.current_rng_ref_acquired(),
+        );
+        assertions.assert(
+            "hwrng read invoked",
+            self.hwrng_core.current_rng_read_invoked(),
+        );
+        assertions.assert("hwrng copied", self.hwrng_core.read_copies_from_current());
+        assertions.assert("hwrng nonblocking", self.hwrng_core.read_nonblocking());
+        assertions.assert(
+            "hwrng last len",
+            self.hwrng_core.last_read_len() == out.len(),
+        );
+        assertions.assert("rng read count", rng.read_count() == 1);
+        assertions.assert("rng last read", rng.last_read_len() == out.len());
+        assertions.assert("rng consumed", rng.read_consumes_available_data());
+        assertions.assert("rng idx update", rng.read_updates_data_idx());
+        assertions.assert("rng avail update", rng.read_updates_data_avail());
+        assertions.assert("remaining data", rng.data_avail() == 0);
+        assertions.assert("data idx reset for next request", rng.data_idx() == 0);
+        assertions.assert("requeued when empty", rng.read_requeues_when_empty());
+        assertions.assert("next request pending", rng.request_pending());
+        assertions.assert("request count", rng.request_count() == 2);
+        assertions.assert("nonzero bytes", out.iter().any(|byte| *byte != 0));
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}

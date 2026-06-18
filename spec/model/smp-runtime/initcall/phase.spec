@@ -693,6 +693,7 @@ object InitcallPhase: PhaseObject {
                     PlatformBus.Event::Preset;
                     PlatformBus.Event::Setup;
                     VirtioBus.Event::Setup;
+                    HwRngCore.Event::Setup;
                     DriverCoreDeferred.Event::Setup;
                     IrqProcViewDeferred.Event::Setup;
                     Ns16550aPlatformDriverStorage.Event::Setup;
@@ -726,6 +727,9 @@ object InitcallPhase: PhaseObject {
                     platform_bus_type_registered(PlatformBus);
                     virtio_bus_registered(VirtioBus);
                     virtio_bus_platform_independent(VirtioBus);
+                    hwrng_core_initialized(HwRngCore);
+                    hwrng_core_registry_ready(HwRngCore);
+                    hwrng_core_current_slot_ready(HwRngCore);
                     driver_core_post_platform_deferred();
                     irq_proc_view_setup_deferred();
                     constructors_trimmed_or_empty(CtorTable);

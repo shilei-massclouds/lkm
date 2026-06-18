@@ -463,8 +463,16 @@ fake ring backing 应按设备给出的 `queue_size` 建立，真实 static back
 virtio-mmio IRQ handler 调用 `complete_entropy()` 后应触发 `VirtioRng.EntropyReady` checkpoint，由
 checkpoint/KUnit 只读 observer 检查 `device_id == 4`、request/notify/irq/get_buf/completion 计数、`len > 0`
 和 data buffer 非全零。若启动路径需要等待真实完成，只能实现为生产对象的 bounded wait/poll 边界，且不得由
-KUnit handler 修改普通对象。`hwrng_register()`、随机池、文件系统、用户态 read、freeze/restore 和完整
-reset/remove 资源回收必须显式 deferred。
+KUnit handler 修改普通对象。`hwrng_register()` 不得混入 `probe_common()`：Linux-like 边界是 `probe` 建立
+`VirtioRngDevice`、single queue、embedded `HwRngDevice` 和 `have_data: Completion` 子实例，并提交第一笔
+pending entropy request；随后 `scan` callback 才调用 `HwRngCore::register()` 注册 embedded `HwRngDevice`。
+`HwRngCore` 必须维护 registered hwrng 列表和 `current_rng`，首轮允许只有 `virtio_rng.0` 一个设备并在注册后
+成为 current；命名应使用 `current`，不要用 `default`。使用者读取时必须经 `HwRngCore::read_current()` /
+`HwRngDevice::read()` 转发到 `VirtioRngDevice::read_entropy()`，不得让 smoke 或普通调用直接绕过 hwrng core
+访问 virtio-rng 私有 read 路径。`VirtioRngDevice` 的 `have_data` 使用已有 `Completion` Type 作为内部子实例，
+不建立新的顶层 `Completion` 对象；首轮 read 只覆盖已完成数据的 nonblocking 消费和耗尽后自动重新提交
+entropy request，blocking wait、random pool fill thread、misc `/dev/hwrng`、sysfs `rng_current`/quality、
+freeze/restore 和完整 reset/remove 资源回收必须显式 deferred。
 
 console/earlycon handoff 的实现必须保持 Linux-like `register_console()` 边界，但第一轮仍只要求对象级可观测事实。
 正式 `DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，
