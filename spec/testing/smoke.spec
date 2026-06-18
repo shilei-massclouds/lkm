@@ -15,6 +15,8 @@ predicate testing_tests_must_not_modify_functional_api_for_tests() -> bool;
 predicate testing_kunit_checkpoint_must_be_read_only_observer_by_default() -> bool;
 predicate testing_kunit_checkpoint_must_not_add_test_only_subject_api() -> bool;
 predicate testing_action_level_kunit_must_record_capability() -> bool;
+predicate testing_checkpoint_handler_run_must_have_read_only_context_and_sink() -> bool;
+predicate testing_checkpoint_handler_run_must_not_have_write_variant() -> bool;
 predicate testing_new_smoke_tests_must_not_join_kunit_by_default() -> bool;
 predicate testing_new_kunit_tests_must_not_join_smoke_by_default() -> bool;
 predicate testing_cross_registration_must_record_reason() -> bool;
@@ -74,6 +76,17 @@ type TestImplementationPrinciples {
          * capability.
          */
         testing_kunit_checkpoint_must_be_read_only_observer_by_default();
+
+        /*
+         * HandlerRun type boundary:
+         *
+         * MUST: checkpoint KUnit handlers must use a read-only Context plus an
+         * explicit Sink capability. The ordinary handler enum must not expose
+         * a Write variant, &mut Context, or an equivalent mutable Context
+         * escape hatch.
+         */
+        testing_checkpoint_handler_run_must_have_read_only_context_and_sink();
+        testing_checkpoint_handler_run_must_not_have_write_variant();
 
         /*
          * KUnit still cannot add subject APIs:

@@ -11,24 +11,36 @@ mod linux_plic;
 #[cfg(checkpoint_handler_memblock_api)]
 compile_error!("checkpoint handler memblock-api was renamed to memblock");
 #[cfg(checkpoint_handler_memblock)]
-mod memblock;
+compile_error!("checkpoint handler memblock mutates state; cover it through app smoke or an explicit action-level probe");
+#[cfg(checkpoint_handler_vmalloc_mapping)]
+compile_error!("checkpoint handler vmalloc-mapping mutates state; cover it through app smoke or an explicit action-level probe");
+#[cfg(checkpoint_handler_smoke)]
+compile_error!(
+    "checkpoint handler smoke runs app smoke cases; app smoke must remain outside checkpoint KUnit"
+);
 #[cfg(checkpoint_handler_of_platform)]
 mod of_platform;
 #[cfg(checkpoint_handler_page_allocator)]
 mod page_allocator;
 #[cfg(checkpoint_handler_scheduler_action)]
 mod scheduler_action;
-#[cfg(checkpoint_handler_smoke)]
-mod smoke;
 #[cfg(checkpoint_sbi_char)]
 mod trace;
 #[cfg(checkpoint_handler_uart_irq_chain)]
 mod uart_irq_chain;
-#[cfg(checkpoint_handler_vmalloc_mapping)]
-mod vmalloc_mapping;
 
-#[cfg(checkpoint_handler_uart_irq_chain)]
-use crate::checkpoint::kunit::{KtapSink, KunitSink};
+#[cfg(any(
+    checkpoint_sbi_char,
+    checkpoint_handler_page_allocator,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_kernel_init_task,
+    checkpoint_handler_linux_plic,
+    checkpoint_handler_of_platform,
+    checkpoint_handler_scheduler_action,
+    checkpoint_handler_console_handoff,
+    checkpoint_handler_uart_irq_chain
+))]
+use crate::checkpoint::kunit::{KtapSink, Sink};
 use crate::{context::Context, trace::Checkpoint};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -47,12 +59,23 @@ pub enum HandlerScope {
     Only(&'static [Checkpoint]),
 }
 
+// Checkpoint handlers are observers. Do not add a `Write` variant, pass
+// `&mut Context`, or otherwise let handlers mutate ordinary Context objects.
+// Writable capability is intentionally limited to `Sink`.
+#[cfg(any(
+    checkpoint_sbi_char,
+    checkpoint_handler_page_allocator,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_kernel_init_task,
+    checkpoint_handler_linux_plic,
+    checkpoint_handler_of_platform,
+    checkpoint_handler_scheduler_action,
+    checkpoint_handler_console_handoff,
+    checkpoint_handler_uart_irq_chain
+))]
 #[allow(dead_code)]
 pub enum HandlerRun {
-    Read(fn(Checkpoint, &Context) -> CheckpointOutcome),
-    Write(fn(Checkpoint, &mut Context) -> CheckpointOutcome),
-    #[cfg(checkpoint_handler_uart_irq_chain)]
-    Observe(fn(Checkpoint, &Context, &mut dyn KunitSink) -> CheckpointOutcome),
+    Observe(fn(Checkpoint, &Context, &mut dyn Sink) -> CheckpointOutcome),
 }
 
 #[allow(dead_code)]
@@ -60,14 +83,23 @@ pub struct Handler {
     pub name: &'static str,
     pub priority: i16,
     pub scope: HandlerScope,
+    #[cfg(any(
+        checkpoint_sbi_char,
+        checkpoint_handler_page_allocator,
+        checkpoint_handler_earlycon,
+        checkpoint_handler_kernel_init_task,
+        checkpoint_handler_linux_plic,
+        checkpoint_handler_of_platform,
+        checkpoint_handler_scheduler_action,
+        checkpoint_handler_console_handoff,
+        checkpoint_handler_uart_irq_chain
+    ))]
     pub run: HandlerRun,
 }
 
 const POST_VM_HANDLERS: &[Handler] = &[
     #[cfg(checkpoint_sbi_char)]
     trace::HANDLER,
-    #[cfg(checkpoint_handler_memblock)]
-    memblock::HANDLER,
     #[cfg(checkpoint_handler_page_allocator)]
     page_allocator::HANDLER,
     #[cfg(checkpoint_handler_of_platform)]
@@ -84,10 +116,6 @@ const POST_VM_HANDLERS: &[Handler] = &[
     console_handoff::HANDLER,
     #[cfg(checkpoint_handler_uart_irq_chain)]
     uart_irq_chain::HANDLER,
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    vmalloc_mapping::HANDLER,
-    #[cfg(checkpoint_handler_smoke)]
-    smoke::HANDLER,
 ];
 
 pub const fn has_post_vm_handlers() -> bool {
@@ -95,7 +123,6 @@ pub const fn has_post_vm_handlers() -> bool {
 }
 
 #[cfg(any(
-    checkpoint_handler_memblock,
     checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
@@ -103,16 +130,10 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
-    checkpoint_handler_uart_irq_chain,
-    checkpoint_handler_vmalloc_mapping,
-    checkpoint_handler_smoke
+    checkpoint_handler_uart_irq_chain
 ))]
 pub const fn kunit_case_count() -> usize {
     let mut count = 0usize;
-    #[cfg(checkpoint_handler_memblock)]
-    {
-        count += memblock::KUNIT_CASE_COUNT;
-    }
     #[cfg(checkpoint_handler_page_allocator)]
     {
         count += page_allocator::KUNIT_CASE_COUNT;
@@ -145,18 +166,21 @@ pub const fn kunit_case_count() -> usize {
     {
         count += uart_irq_chain::KUNIT_CASE_COUNT;
     }
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    {
-        count += vmalloc_mapping::KUNIT_CASE_COUNT;
-    }
-    #[cfg(checkpoint_handler_smoke)]
-    {
-        count += smoke::KUNIT_CASE_COUNT;
-    }
     count
 }
 
-pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
+#[cfg(any(
+    checkpoint_sbi_char,
+    checkpoint_handler_page_allocator,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_kernel_init_task,
+    checkpoint_handler_linux_plic,
+    checkpoint_handler_of_platform,
+    checkpoint_handler_scheduler_action,
+    checkpoint_handler_console_handoff,
+    checkpoint_handler_uart_irq_chain
+))]
+pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     let mut current_priority = next_priority(checkpoint, None);
     while let Some(priority) = current_priority {
         let mut index = 0usize;
@@ -164,9 +188,6 @@ pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutc
             let handler = &POST_VM_HANDLERS[index];
             if handler.priority == priority && handler_matches(handler, checkpoint) {
                 let outcome = match handler.run {
-                    HandlerRun::Read(run) => run(checkpoint, ctx),
-                    HandlerRun::Write(run) => run(checkpoint, ctx),
-                    #[cfg(checkpoint_handler_uart_irq_chain)]
                     HandlerRun::Observe(run) => {
                         let mut sink = KtapSink;
                         run(checkpoint, ctx, &mut sink)
@@ -184,6 +205,22 @@ pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutc
     CheckpointOutcome::Continue
 }
 
+#[cfg(not(any(
+    checkpoint_sbi_char,
+    checkpoint_handler_page_allocator,
+    checkpoint_handler_earlycon,
+    checkpoint_handler_kernel_init_task,
+    checkpoint_handler_linux_plic,
+    checkpoint_handler_of_platform,
+    checkpoint_handler_scheduler_action,
+    checkpoint_handler_console_handoff,
+    checkpoint_handler_uart_irq_chain
+)))]
+pub fn dispatch(_checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
+    CheckpointOutcome::Continue
+}
+
+#[allow(dead_code)]
 fn next_priority(checkpoint: Checkpoint, after: Option<i16>) -> Option<i16> {
     let mut next = None;
     let mut index = 0usize;
@@ -200,6 +237,7 @@ fn next_priority(checkpoint: Checkpoint, after: Option<i16>) -> Option<i16> {
     next
 }
 
+#[allow(dead_code)]
 fn handler_matches(handler: &Handler, checkpoint: Checkpoint) -> bool {
     match handler.scope {
         HandlerScope::All => true,

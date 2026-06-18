@@ -47,7 +47,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.memory_debug_hardening,
         &ctx.swiotlb,
     )?;
-    crate::checkpoint::dispatch_mut(Checkpoint::PageAllocatorMemBlockHandoffReady, ctx);
+    crate::checkpoint::dispatch(Checkpoint::PageAllocatorMemBlockHandoffReady, ctx);
     ctx.slub_allocator
         .preset(&ctx.page_allocator, &ctx.per_cpu_storage)?;
     ctx.slub_allocator.setup(

@@ -1,6 +1,8 @@
 use crate::{
-    checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
-    checkpoint::kunit,
+    checkpoint::{
+        handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
+        kunit::Sink,
+    },
     context::Context,
     objects::{
         linux_plic_shim::{self, LinuxPlicBoundaryFacts},
@@ -16,212 +18,212 @@ pub const HANDLER: Handler = Handler {
     name: "linux_plic.boundary_facts",
     priority: 88,
     scope: HandlerScope::Only(SCOPE),
-    run: HandlerRun::Read(run),
+    run: HandlerRun::Observe(run),
 };
 
-fn run(checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, _ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
     let total = super::kunit_case_count();
-    kunit::start_case(total, "", HANDLER.name, checkpoint);
+    sink.start_case(total, "", HANDLER.name, checkpoint);
 
     let facts = linux_plic_shim::boundary_facts();
-    emit_facts(facts);
+    emit_facts(facts, sink);
     if !facts_valid(facts) {
-        kunit::fail(total, "", HANDLER.name, "Linux PLIC boundary facts invalid");
+        sink.fail(total, "", HANDLER.name, "Linux PLIC boundary facts invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
 
-    kunit::pass(total, "", HANDLER.name);
+    sink.pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
 }
 
-fn emit_facts(facts: LinuxPlicBoundaryFacts) {
-    kunit::diag_usize("initcall_seq", facts.initcall_seq);
-    kunit::diag_usize("driver_register_seq", facts.driver_register_seq);
-    kunit::diag_usize("platform_match_seq", facts.platform_match_seq);
-    kunit::diag_usize("probe_enter_seq", facts.probe_enter_seq);
-    kunit::diag_usize("domain_instantiate_seq", facts.domain_instantiate_seq);
-    kunit::diag_usize("find_parent_domain_seq", facts.find_parent_domain_seq);
-    kunit::diag_usize("create_mapping_seq", facts.create_mapping_seq);
-    kunit::diag_usize("set_handler_seq", facts.set_handler_seq);
-    kunit::diag_usize("cpuhp_seq", facts.cpuhp_seq);
-    kunit::diag_usize("syscore_seq", facts.syscore_seq);
-    kunit::diag_usize("probe_return_seq", facts.probe_return_seq);
-    kunit::diag_usize("driver_ptr", facts.driver_ptr);
-    kunit::diag_usize("probe_ptr", facts.probe_ptr);
-    kunit::diag_usize("platform_device_ptr", facts.platform_device_ptr);
-    kunit::diag_usize("fwnode_ptr", facts.fwnode_ptr);
-    kunit::diag_usize("fwnode_ops_ptr", facts.fwnode_ops_ptr);
-    kunit::diag_usize("expected_fwnode_ops_ptr", facts.expected_fwnode_ops_ptr);
-    kunit::diag_usize("membase", facts.membase);
-    kunit::diag_usize("source_count", facts.source_count);
-    kunit::diag_usize("context_count", facts.context_count);
-    kunit::diag_usize("context_id", facts.context_id);
-    kunit::diag_usize("domain_ptr", facts.domain_ptr);
-    kunit::diag_usize("domain_ops", facts.domain_ops);
-    kunit::diag_usize("domain_host_data", facts.domain_host_data);
-    kunit::diag_usize("parent_irq", facts.parent_irq);
-    kunit::diag_usize("chained_irq", facts.chained_irq);
-    kunit::diag_usize("chained_handler", facts.chained_handler);
-    kunit::diag_usize("chained_is_chained", facts.chained_is_chained);
-    kunit::diag_usize("thread_info_base", facts.thread_info_base);
-    kunit::diag_usize("thread_info_cpu", facts.thread_info_cpu as usize);
-    kunit::diag_usize("per_cpu_offset0", facts.per_cpu_offset0);
-    kunit::diag_usize("of_iomap_calls", facts.of_iomap_calls);
-    kunit::diag_usize("of_irq_count_calls", facts.of_irq_count_calls);
-    kunit::diag_usize("of_irq_parse_calls", facts.of_irq_parse_calls);
-    kunit::diag_usize("of_irq_parse_successes", facts.of_irq_parse_successes);
-    kunit::diag_usize("of_match_calls", facts.of_match_calls);
-    kunit::diag_usize("of_property_ndev_calls", facts.of_property_ndev_calls);
-    kunit::diag_usize("heap_used", facts.heap_used);
-    kunit::diag_usize(
+fn emit_facts(facts: LinuxPlicBoundaryFacts, sink: &mut dyn Sink) {
+    sink.diag_usize("initcall_seq", facts.initcall_seq);
+    sink.diag_usize("driver_register_seq", facts.driver_register_seq);
+    sink.diag_usize("platform_match_seq", facts.platform_match_seq);
+    sink.diag_usize("probe_enter_seq", facts.probe_enter_seq);
+    sink.diag_usize("domain_instantiate_seq", facts.domain_instantiate_seq);
+    sink.diag_usize("find_parent_domain_seq", facts.find_parent_domain_seq);
+    sink.diag_usize("create_mapping_seq", facts.create_mapping_seq);
+    sink.diag_usize("set_handler_seq", facts.set_handler_seq);
+    sink.diag_usize("cpuhp_seq", facts.cpuhp_seq);
+    sink.diag_usize("syscore_seq", facts.syscore_seq);
+    sink.diag_usize("probe_return_seq", facts.probe_return_seq);
+    sink.diag_usize("driver_ptr", facts.driver_ptr);
+    sink.diag_usize("probe_ptr", facts.probe_ptr);
+    sink.diag_usize("platform_device_ptr", facts.platform_device_ptr);
+    sink.diag_usize("fwnode_ptr", facts.fwnode_ptr);
+    sink.diag_usize("fwnode_ops_ptr", facts.fwnode_ops_ptr);
+    sink.diag_usize("expected_fwnode_ops_ptr", facts.expected_fwnode_ops_ptr);
+    sink.diag_usize("membase", facts.membase);
+    sink.diag_usize("source_count", facts.source_count);
+    sink.diag_usize("context_count", facts.context_count);
+    sink.diag_usize("context_id", facts.context_id);
+    sink.diag_usize("domain_ptr", facts.domain_ptr);
+    sink.diag_usize("domain_ops", facts.domain_ops);
+    sink.diag_usize("domain_host_data", facts.domain_host_data);
+    sink.diag_usize("parent_irq", facts.parent_irq);
+    sink.diag_usize("chained_irq", facts.chained_irq);
+    sink.diag_usize("chained_handler", facts.chained_handler);
+    sink.diag_usize("chained_is_chained", facts.chained_is_chained);
+    sink.diag_usize("thread_info_base", facts.thread_info_base);
+    sink.diag_usize("thread_info_cpu", facts.thread_info_cpu as usize);
+    sink.diag_usize("per_cpu_offset0", facts.per_cpu_offset0);
+    sink.diag_usize("of_iomap_calls", facts.of_iomap_calls);
+    sink.diag_usize("of_irq_count_calls", facts.of_irq_count_calls);
+    sink.diag_usize("of_irq_parse_calls", facts.of_irq_parse_calls);
+    sink.diag_usize("of_irq_parse_successes", facts.of_irq_parse_successes);
+    sink.diag_usize("of_match_calls", facts.of_match_calls);
+    sink.diag_usize("of_property_ndev_calls", facts.of_property_ndev_calls);
+    sink.diag_usize("heap_used", facts.heap_used);
+    sink.diag_usize(
         "unmapped_irq_failure_count",
         facts.unmapped_irq_failure_count,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "unmapped_irq_last_source",
         facts.unmapped_irq_last_source as usize,
     );
-    kunit::diag_usize("unmapped_irq_last_errno", facts.unmapped_irq_last_errno);
-    kunit::diag_usize(
+    sink.diag_usize("unmapped_irq_last_errno", facts.unmapped_irq_last_errno);
+    sink.diag_usize(
         "unmapped_irq_exercise_successes",
         facts.unmapped_irq_exercise_successes,
     );
-    kunit::diag_usize("ratelimit_deferred_count", facts.ratelimit_deferred_count);
-    kunit::diag_usize("chip_enable_count", facts.chip_enable_count);
-    kunit::diag_usize("chip_disable_count", facts.chip_disable_count);
-    kunit::diag_usize("chip_mask_count", facts.chip_mask_count);
-    kunit::diag_usize("chip_unmask_count", facts.chip_unmask_count);
-    kunit::diag_usize("chip_ack_count", facts.chip_ack_count);
-    kunit::diag_usize("chip_eoi_count", facts.chip_eoi_count);
-    kunit::diag_usize("chip_set_type_count", facts.chip_set_type_count);
-    kunit::diag_usize("chip_disabled_eoi_count", facts.chip_disabled_eoi_count);
-    kunit::diag_usize("chip_edge_ack_count", facts.chip_edge_ack_count);
-    kunit::diag_usize(
+    sink.diag_usize("ratelimit_deferred_count", facts.ratelimit_deferred_count);
+    sink.diag_usize("chip_enable_count", facts.chip_enable_count);
+    sink.diag_usize("chip_disable_count", facts.chip_disable_count);
+    sink.diag_usize("chip_mask_count", facts.chip_mask_count);
+    sink.diag_usize("chip_unmask_count", facts.chip_unmask_count);
+    sink.diag_usize("chip_ack_count", facts.chip_ack_count);
+    sink.diag_usize("chip_eoi_count", facts.chip_eoi_count);
+    sink.diag_usize("chip_set_type_count", facts.chip_set_type_count);
+    sink.diag_usize("chip_disabled_eoi_count", facts.chip_disabled_eoi_count);
+    sink.diag_usize("chip_edge_ack_count", facts.chip_edge_ack_count);
+    sink.diag_usize(
         "chip_callback_exercise_successes",
         facts.chip_callback_exercise_successes,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "edge_callback_exercise_successes",
         facts.edge_callback_exercise_successes,
     );
-    kunit::diag_usize("parent_desc_prepare_count", facts.parent_desc_prepare_count);
-    kunit::diag_usize("parent_irq_data_get_count", facts.parent_irq_data_get_count);
-    kunit::diag_usize(
+    sink.diag_usize("parent_desc_prepare_count", facts.parent_desc_prepare_count);
+    sink.diag_usize("parent_irq_data_get_count", facts.parent_irq_data_get_count);
+    sink.diag_usize(
         "parent_enable_percpu_count",
         facts.parent_enable_percpu_count,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "parent_enable_percpu_last_irq",
         facts.parent_enable_percpu_last_irq,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "parent_enable_percpu_last_type",
         facts.parent_enable_percpu_last_type as usize,
     );
-    kunit::diag_usize("parent_irq_eoi_count", facts.parent_irq_eoi_count);
-    kunit::diag_usize("parent_status", facts.parent_status as usize);
-    kunit::diag_usize("irq_modify_status_count", facts.irq_modify_status_count);
-    kunit::diag_usize(
+    sink.diag_usize("parent_irq_eoi_count", facts.parent_irq_eoi_count);
+    sink.diag_usize("parent_status", facts.parent_status as usize);
+    sink.diag_usize("irq_modify_status_count", facts.irq_modify_status_count);
+    sink.diag_usize(
         "irq_modify_status_last_irq",
         facts.irq_modify_status_last_irq,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_modify_status_last_clear",
         facts.irq_modify_status_last_clear,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_modify_status_last_set",
         facts.irq_modify_status_last_set,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_modify_status_last_status",
         facts.irq_modify_status_last_status,
     );
-    kunit::diag_usize("leaf_action_prepare_count", facts.leaf_action_prepare_count);
-    kunit::diag_usize(
+    sink.diag_usize("leaf_action_prepare_count", facts.leaf_action_prepare_count);
+    sink.diag_usize(
         "leaf_action_dispatch_count",
         facts.leaf_action_dispatch_count,
     );
-    kunit::diag_usize("leaf_action_last_irq", facts.leaf_action_last_irq);
-    kunit::diag_usize("leaf_action_last_depth", facts.leaf_action_last_depth);
-    kunit::diag_usize(
+    sink.diag_usize("leaf_action_last_irq", facts.leaf_action_last_irq);
+    sink.diag_usize("leaf_action_last_depth", facts.leaf_action_last_depth);
+    sink.diag_usize(
         "leaf_action_last_handler_kind",
         facts.leaf_action_last_handler_kind,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "leaf_action_last_handler_bound",
         facts.leaf_action_last_handler_bound as usize,
     );
-    kunit::diag_usize("action_request_count", facts.action_request_count);
-    kunit::diag_usize("action_request_last_irq", facts.action_request_last_irq);
-    kunit::diag_usize(
+    sink.diag_usize("action_request_count", facts.action_request_count);
+    sink.diag_usize("action_request_last_irq", facts.action_request_last_irq);
+    sink.diag_usize(
         "action_request_last_device",
         facts.action_request_last_device,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "action_request_last_handler_kind",
         facts.action_request_last_handler_kind,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "action_request_match_count",
         facts.action_request_match_count,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "action_chain_install_count",
         facts.action_chain_install_count,
     );
-    kunit::diag_usize("action_chain_match_count", facts.action_chain_match_count);
-    kunit::diag_usize("action_chain_last_irq", facts.action_chain_last_irq);
-    kunit::diag_usize("action_chain_last_action", facts.action_chain_last_action);
-    kunit::diag_usize("action_chain_last_device", facts.action_chain_last_device);
-    kunit::diag_usize(
+    sink.diag_usize("action_chain_match_count", facts.action_chain_match_count);
+    sink.diag_usize("action_chain_last_irq", facts.action_chain_last_irq);
+    sink.diag_usize("action_chain_last_action", facts.action_chain_last_action);
+    sink.diag_usize("action_chain_last_device", facts.action_chain_last_device);
+    sink.diag_usize(
         "action_chain_last_handler_kind",
         facts.action_chain_last_handler_kind,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_desc_action_write_count",
         facts.irq_desc_action_write_count,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_desc_action_match_count",
         facts.irq_desc_action_match_count,
     );
-    kunit::diag_usize("irq_desc_action_last_irq", facts.irq_desc_action_last_irq);
-    kunit::diag_usize(
+    sink.diag_usize("irq_desc_action_last_irq", facts.irq_desc_action_last_irq);
+    sink.diag_usize(
         "irq_desc_action_last_action",
         facts.irq_desc_action_last_action,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_desc_action_last_readback",
         facts.irq_desc_action_last_readback,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_desc_status_write_count",
         facts.irq_desc_status_write_count,
     );
-    kunit::diag_usize("irq_desc_status_last_irq", facts.irq_desc_status_last_irq);
-    kunit::diag_usize(
+    sink.diag_usize("irq_desc_status_last_irq", facts.irq_desc_status_last_irq);
+    sink.diag_usize(
         "irq_desc_status_last_status",
         facts.irq_desc_status_last_status,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_common_state_write_count",
         facts.irq_common_state_write_count,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "irq_common_state_disabled_count",
         facts.irq_common_state_disabled_count,
     );
-    kunit::diag_usize("irq_common_state_last_irq", facts.irq_common_state_last_irq);
-    kunit::diag_usize(
+    sink.diag_usize("irq_common_state_last_irq", facts.irq_common_state_last_irq);
+    sink.diag_usize(
         "irq_common_state_last_state",
         facts.irq_common_state_last_state,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "leaf_action_last_desc_status",
         facts.leaf_action_last_desc_status,
     );
-    kunit::diag_usize(
+    sink.diag_usize(
         "leaf_action_last_common_state",
         facts.leaf_action_last_common_state,
     );

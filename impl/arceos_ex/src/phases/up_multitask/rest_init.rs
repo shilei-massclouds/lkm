@@ -55,7 +55,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.init_task,
         &ctx.scheduler,
     )?;
-    crate::checkpoint::dispatch_mut(Checkpoint::KernelInitTaskReady, ctx);
+    crate::checkpoint::dispatch(Checkpoint::KernelInitTaskReady, ctx);
     ctx.kernel_init_task_pi_lock.setup()?;
     ctx.kernel_init_task.enable(
         &mut ctx.scheduler,
@@ -64,7 +64,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.boot_cpu_current_task,
         &mut ctx.kernel_init_task_pi_lock,
     )?;
-    crate::checkpoint::dispatch_mut(Checkpoint::KernelInitTaskOnline, ctx);
+    crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
     if !ctx
         .kernel_init_task
         .pin_to_boot_cpu(ctx.scheduler.boot_runqueue().cpu_id())
@@ -195,10 +195,10 @@ fn schedule_once_from_preempt_disabled_context(ctx: &mut Context) -> EventResult
     {
         return failed_dispatch_preset();
     }
-    crate::checkpoint::dispatch_mut(Checkpoint::SchedulerPickNextTaskExit, ctx);
-    crate::checkpoint::dispatch_mut(Checkpoint::SchedulerSwitchToEntry, ctx);
-    crate::checkpoint::dispatch_mut(Checkpoint::SchedulerSwitchToExit, ctx);
-    crate::checkpoint::dispatch_mut(Checkpoint::SchedulerScheduleExit, ctx);
+    crate::checkpoint::dispatch(Checkpoint::SchedulerPickNextTaskExit, ctx);
+    crate::checkpoint::dispatch(Checkpoint::SchedulerSwitchToEntry, ctx);
+    crate::checkpoint::dispatch(Checkpoint::SchedulerSwitchToExit, ctx);
+    crate::checkpoint::dispatch(Checkpoint::SchedulerScheduleExit, ctx);
     Ok(())
 }
 

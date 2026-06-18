@@ -9,16 +9,35 @@ static FINISHED: AtomicBool = AtomicBool::new(false);
 static NEXT_CASE: AtomicUsize = AtomicUsize::new(1);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 
-pub trait KunitSink {
+#[allow(dead_code)]
+pub trait Sink {
     fn start_case(&mut self, total: usize, prefix: &str, name: &str, checkpoint: Checkpoint);
     fn pass(&mut self, total: usize, prefix: &str, name: &str);
     fn fail(&mut self, total: usize, prefix: &str, name: &str, reason: &str);
+    fn diag_hex_pair(&mut self, label: &str, first: usize, second: usize);
     fn diag_usize(&mut self, label: &str, value: usize);
+    fn drain_printk_diag(&mut self);
+}
+
+pub struct DummySink;
+
+impl Sink for DummySink {
+    fn start_case(&mut self, _total: usize, _prefix: &str, _name: &str, _checkpoint: Checkpoint) {}
+
+    fn pass(&mut self, _total: usize, _prefix: &str, _name: &str) {}
+
+    fn fail(&mut self, _total: usize, _prefix: &str, _name: &str, _reason: &str) {}
+
+    fn diag_hex_pair(&mut self, _label: &str, _first: usize, _second: usize) {}
+
+    fn diag_usize(&mut self, _label: &str, _value: usize) {}
+
+    fn drain_printk_diag(&mut self) {}
 }
 
 pub struct KtapSink;
 
-impl KunitSink for KtapSink {
+impl Sink for KtapSink {
     fn start_case(&mut self, total: usize, prefix: &str, name: &str, checkpoint: Checkpoint) {
         start_case(total, prefix, name, checkpoint);
     }
@@ -31,12 +50,20 @@ impl KunitSink for KtapSink {
         fail(total, prefix, name, reason);
     }
 
+    fn diag_hex_pair(&mut self, label: &str, first: usize, second: usize) {
+        diag_hex_pair(label, first, second);
+    }
+
     fn diag_usize(&mut self, label: &str, value: usize) {
         diag_usize(label, value);
     }
+
+    fn drain_printk_diag(&mut self) {
+        drain_printk_diag();
+    }
 }
 
-pub fn start_case(total: usize, prefix: &str, name: &str, checkpoint: Checkpoint) {
+fn start_case(total: usize, prefix: &str, name: &str, checkpoint: Checkpoint) {
     start(total);
     putstr("  # checkpoint: ");
     putstr(checkpoint.name());
@@ -47,22 +74,22 @@ pub fn start_case(total: usize, prefix: &str, name: &str, checkpoint: Checkpoint
     putchar(b'\n');
 }
 
-pub fn pass(total: usize, prefix: &str, name: &str) {
+fn pass(total: usize, prefix: &str, name: &str) {
     result(total, true, prefix, name);
 }
 
-pub fn fail(total: usize, prefix: &str, name: &str, reason: &str) {
+fn fail(total: usize, prefix: &str, name: &str, reason: &str) {
     diag(reason);
     result(total, false, prefix, name);
 }
 
-pub fn diag(message: &str) {
+fn diag(message: &str) {
     putstr("  # ");
     putstr(message);
     putchar(b'\n');
 }
 
-pub fn diag_hex_pair(label: &str, first: usize, second: usize) {
+fn diag_hex_pair(label: &str, first: usize, second: usize) {
     putstr("  # ");
     putstr(label);
     putstr("=0x");
@@ -72,7 +99,7 @@ pub fn diag_hex_pair(label: &str, first: usize, second: usize) {
     putchar(b'\n');
 }
 
-pub fn diag_usize(label: &str, value: usize) {
+fn diag_usize(label: &str, value: usize) {
     putstr("  # ");
     putstr(label);
     putstr("=");
@@ -80,7 +107,7 @@ pub fn diag_usize(label: &str, value: usize) {
     putchar(b'\n');
 }
 
-pub fn drain_printk_diag() {
+fn drain_printk_diag() {
     let mut at_line_start = true;
     let mut wrote = false;
     printk::drain_to(|byte| {

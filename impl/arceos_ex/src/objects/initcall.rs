@@ -120,7 +120,7 @@ fn of_platform_default_populate_init(ctx: ContextRef<'_>) -> InitcallReturn {
             .of_platform_default_populate_init(device_tree)
     };
     if result == InitcallReturn::Ok {
-        crate::checkpoint::dispatch_mut(Checkpoint::OfPlatformDefaultPopulateScanComplete, ctx);
+        crate::checkpoint::dispatch(Checkpoint::OfPlatformDefaultPopulateScanComplete, ctx);
     }
     result
 }

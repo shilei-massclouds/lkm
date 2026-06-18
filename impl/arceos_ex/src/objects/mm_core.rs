@@ -2927,16 +2927,6 @@ impl PageTableCaches {
         self.vmalloc_pgtable_dynamic_metadata_ready
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub fn dynamic_vmalloc_pgtable_count(&self) -> usize {
-        self.dynamic_vmalloc_pgtable_pages.len()
-    }
-
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub fn vmalloc_l0_slot_chunk_count(&self) -> usize {
-        self.vmalloc_l0_slot_chunks.len()
-    }
-
     pub const fn vmalloc_install_range(&self) -> PageTableInstallRange {
         self.vmalloc_install_range
     }
@@ -3182,26 +3172,6 @@ impl PageProtection {
     pub const fn is_io_memory(self) -> bool {
         matches!(self, Self::IoMemory)
     }
-
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub const fn kind(self) -> PageProtectionKind {
-        match self {
-            Self::IoMemory => PageProtectionKind::IoMemory,
-        }
-    }
-}
-
-#[cfg(checkpoint_handler_vmalloc_mapping)]
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum PageProtectionKind {
-    IoMemory,
-}
-
-#[cfg(checkpoint_handler_vmalloc_mapping)]
-impl PageProtectionKind {
-    pub const fn is_io_memory(self) -> bool {
-        matches!(self, Self::IoMemory)
-    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -3264,7 +3234,7 @@ impl VmapArea {
         self.size
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn flags(self) -> VmapAreaFlags {
         self.flags
     }
@@ -3273,17 +3243,12 @@ impl VmapArea {
         self.busy
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub const fn released(self) -> bool {
-        self.released
-    }
-
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn vm_struct_metadata_ready(self) -> bool {
         self.vm_struct_metadata_ready
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn vmap_area_metadata_ready(self) -> bool {
         self.vmap_area_metadata_ready
     }
@@ -3349,53 +3314,43 @@ impl VmapMapping {
         self
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn index(self) -> usize {
         self.index
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn area(self) -> VmapArea {
         self.area
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn phys_base(self) -> usize {
         self.phys_base
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn size(self) -> usize {
         self.size
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn protection(self) -> PageProtection {
         self.protection
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn installed(self) -> bool {
         self.installed
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub const fn record_created(self) -> bool {
         self.record_created
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub const fn removed(self) -> bool {
-        self.removed
-    }
-
     pub const fn uses_io_memory_protection(self) -> bool {
         self.protection.is_io_memory()
-    }
-
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub const fn protection_kind(self) -> PageProtectionKind {
-        self.protection.kind()
     }
 }
 
@@ -3534,21 +3489,6 @@ impl VmallocAllocator {
             self.page_table_install_range.max_l0_table_count() > 1;
     }
 
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub const fn runtime_mapping_window_start(&self) -> usize {
-        self.runtime_mapping_window_start
-    }
-
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub const fn runtime_mapping_window_end(&self) -> usize {
-        self.runtime_mapping_window_end
-    }
-
-    #[cfg(checkpoint_handler_vmalloc_mapping)]
-    pub const fn runtime_mapping_window_count(&self) -> usize {
-        self.runtime_mapping_window_count
-    }
-
     pub const fn multi_window_mapping_supported(&self) -> bool {
         self.multi_window_mapping_supported
     }
@@ -3569,12 +3509,12 @@ impl VmallocAllocator {
         self.dynamic_record_storage_ready
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub fn area_count(&self) -> usize {
         self.areas.len()
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub fn mapping_count(&self) -> usize {
         self.mappings.len()
     }
@@ -3772,12 +3712,12 @@ impl VmallocAllocator {
         true
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub fn area(&self, index: usize) -> Option<VmapArea> {
         self.areas.get(index).copied()
     }
 
-    #[cfg(any(checkpoint_handler_console_handoff, checkpoint_handler_vmalloc_mapping))]
+    #[cfg(checkpoint_handler_console_handoff)]
     pub fn mapping(&self, index: usize) -> Option<VmapMapping> {
         self.mappings.get(index).copied()
     }

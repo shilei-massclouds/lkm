@@ -101,6 +101,10 @@ predicate arceos_ex_must_uart_irq_chain_kunit_not_drive_interrupt_flow() -> bool
 predicate arceos_ex_must_kunit_handlers_receive_read_only_context_by_default() -> bool;
 predicate arceos_ex_must_kunit_writes_go_through_limited_sink_capability() -> bool;
 predicate arceos_ex_must_kunit_sink_not_access_or_mutate_context_objects() -> bool;
+predicate arceos_ex_must_checkpoint_handler_run_keep_single_observer_variant() -> bool;
+predicate arceos_ex_must_checkpoint_handler_run_not_accept_mut_context() -> bool;
+predicate arceos_ex_must_not_reintroduce_checkpoint_write_handler_variant() -> bool;
+predicate arceos_ex_must_not_register_smoke_cases_as_checkpoint_handlers() -> bool;
 predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_open_prepare_run_after_irq_time_init() -> bool;
@@ -934,8 +938,21 @@ type ArceosExIrqTimeInitCodingMust {
          * New checkpoint KUnit handlers must receive Context as read-only
          * input by default. Writable access is limited to an explicit sink
          * capability such as KTAP output, tracer or auditor objects.
+         *
+         * MUST: HandlerRun has exactly one ordinary checkpoint-handler
+         * capability shape, equivalent to:
+         *
+         *   Observe(fn(Checkpoint, &Context, &mut dyn Sink) -> CheckpointOutcome)
+         *
+         * The enum must not regain Read/Write variants or any variant that
+         * accepts &mut Context. Changing this prototype requires a prior
+         * coding-spec update that names a separate action-level probe
+         * capability; it must not be done as a local handler convenience.
          */
         arceos_ex_must_kunit_handlers_receive_read_only_context_by_default();
+        arceos_ex_must_checkpoint_handler_run_keep_single_observer_variant();
+        arceos_ex_must_checkpoint_handler_run_not_accept_mut_context();
+        arceos_ex_must_not_reintroduce_checkpoint_write_handler_variant();
 
         /*
          * Sink-only writes:
@@ -947,6 +964,16 @@ type ArceosExIrqTimeInitCodingMust {
          */
         arceos_ex_must_kunit_writes_go_through_limited_sink_capability();
         arceos_ex_must_kunit_sink_not_access_or_mutate_context_objects();
+
+        /*
+         * Smoke separation:
+         *
+         * MUST: app smoke cases remain under the smoke app/harness, not under
+         * checkpoint KUnit handlers. Mutating object API tests that are useful
+         * should be modeled as app smoke or explicit action-level probes, not
+         * by re-registering smoke as a checkpoint handler.
+         */
+        arceos_ex_must_not_register_smoke_cases_as_checkpoint_handlers();
 
         /*
          * UART IRQ chain KUnit boundary:

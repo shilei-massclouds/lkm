@@ -23,6 +23,8 @@
 
 checkpoint/KUnit handler 默认是只读 observer。它只能读取真实 checkpoint 时刻已经存在的对象 facts、counter、trace 或 sink 输出，不得为了测试便利调用 driver/probe/ring/IRQ action，不得 reset/snapshot/restore 普通对象状态，不得伪造 completion 或设备事件，也不得要求被测对象新增测试专用后门。
 
+checkpoint/KUnit handler 原型必须是只读 `Context` 加受限 `Sink`，即等价于 `fn(Checkpoint, &Context, &mut dyn Sink) -> CheckpointOutcome`。不得恢复 `Write` handler、`&mut Context` 参数，或任何能修改普通 context 对象的等价入口。
+
 若某个 checkpoint KUnit 确实必须执行会改变对象内部数据的 action，必须先在 testing/coding 规格中明确它是 action-level probe，写清允许的最小 capability、状态清理边界和为什么不能通过 smoke 或只读 observer 覆盖。没有明确记录时，一律按只读 observer 处理。
 
 新增 smoke 测试默认只注册到 smoke 执行入口，不自动加入 checkpoint KUnit。若确需复用到 KUnit，必须记录它验证的 checkpoint 事实和不能仅由 smoke 覆盖的理由。

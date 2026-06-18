@@ -100,7 +100,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.serial8250_rx_batch_loopback_probe,
         &ctx.tty_xmit_fifo_probe,
     )?;
-    crate::checkpoint::dispatch_mut(Checkpoint::InitcallBoundaryReady, ctx);
+    crate::checkpoint::dispatch(Checkpoint::InitcallBoundaryReady, ctx);
     Ok(())
 }
 

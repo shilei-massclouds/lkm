@@ -1,6 +1,6 @@
 pub mod handlers;
 #[cfg(any(
-    checkpoint_handler_memblock,
+    checkpoint_sbi_char,
     checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
@@ -8,9 +8,7 @@ pub mod handlers;
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
-    checkpoint_handler_vmalloc_mapping,
-    checkpoint_handler_of_platform,
-    checkpoint_handler_smoke
+    checkpoint_handler_of_platform
 ))]
 mod kunit;
 
@@ -37,7 +35,7 @@ pub fn dispatch_pre_context(_checkpoint: Checkpoint) {
     }
 }
 
-pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) {
+pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) {
     if !POST_VM_CHECKPOINTS_ENABLED.load(Ordering::Acquire) || !handlers::has_post_vm_handlers() {
         return;
     }
@@ -46,7 +44,7 @@ pub fn dispatch_mut(checkpoint: Checkpoint, ctx: &mut Context) {
         checkpoint_reentry_shutdown();
     }
 
-    let outcome = handlers::dispatch_mut(checkpoint, ctx);
+    let outcome = handlers::dispatch(checkpoint, ctx);
     CHECKPOINT_HANDLER_ACTIVE.store(false, Ordering::Release);
     apply_outcome(checkpoint, outcome);
 }

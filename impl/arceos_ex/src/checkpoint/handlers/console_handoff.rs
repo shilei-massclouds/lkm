@@ -1,6 +1,8 @@
 use crate::{
-    checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
-    checkpoint::kunit,
+    checkpoint::{
+        handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
+        kunit::Sink,
+    },
     context::Context,
     objects::{
         device::DeviceRef,
@@ -19,21 +21,21 @@ pub const HANDLER: Handler = Handler {
     name: "console_handoff.real_path",
     priority: 90,
     scope: HandlerScope::Only(SCOPE),
-    run: HandlerRun::Read(run),
+    run: HandlerRun::Observe(run),
 };
 
-fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
     let total = super::kunit_case_count();
-    kunit::start_case(total, "", HANDLER.name, checkpoint);
+    sink.start_case(total, "", HANDLER.name, checkpoint);
 
     if console_handoff_observed(ctx) {
-        kunit::diag_usize("serial8250_writes", ns16550a::serial8250_write_call_count());
-        kunit::diag_usize("serial8250_tx_bytes", ns16550a::serial8250_tx_byte_count());
-        kunit::pass(total, "", HANDLER.name);
+        sink.diag_usize("serial8250_writes", ns16550a::serial8250_write_call_count());
+        sink.diag_usize("serial8250_tx_bytes", ns16550a::serial8250_tx_byte_count());
+        sink.pass(total, "", HANDLER.name);
         CheckpointOutcome::Continue
     } else {
-        diag_observation(ctx);
-        kunit::fail(total, "", HANDLER.name, "console handoff facts invalid");
+        diag_observation(ctx, sink);
+        sink.fail(total, "", HANDLER.name, "console handoff facts invalid");
         CheckpointOutcome::FailAndShutdown
     }
 }
@@ -152,26 +154,26 @@ fn irq_action_observed(ctx: &Context, device_ref: DeviceRef) -> bool {
         })
 }
 
-fn diag_observation(ctx: &Context) {
+fn diag_observation(ctx: &Context, sink: &mut dyn Sink) {
     let bound = ctx.platform_bus.ns16550a_bound_device();
-    kunit::diag_usize(
+    sink.diag_usize(
         "ns16550a_bound_device",
         bound.map_or(usize::MAX, |device| device.index()),
     );
 
     if let Some(device_ref) = bound {
-        kunit::diag_usize(
+        sink.diag_usize(
             "platform_probe",
             platform_probe_observed(ctx, device_ref) as usize,
         );
-        kunit::diag_usize(
+        sink.diag_usize(
             "ns16550a_console",
             ns16550a_console_observed(device_ref) as usize,
         );
-        kunit::diag_usize("ioremap", ioremap_observed(ctx, device_ref) as usize);
-        kunit::diag_usize("irq_action", irq_action_observed(ctx, device_ref) as usize);
+        sink.diag_usize("ioremap", ioremap_observed(ctx, device_ref) as usize);
+        sink.diag_usize("irq_action", irq_action_observed(ctx, device_ref) as usize);
     }
 
-    kunit::diag_usize("printk_handoff", printk_handoff_observed() as usize);
-    kunit::diag_usize("plic_mapping", plic_mapping_observed(ctx) as usize);
+    sink.diag_usize("printk_handoff", printk_handoff_observed() as usize);
+    sink.diag_usize("plic_mapping", plic_mapping_observed(ctx) as usize);
 }

@@ -3244,8 +3244,9 @@ shim 通过 `irq_modify_status()` 把 `IRQ_NOPROBE` 写入 UART leaf desc status
 
 这一路径已经通过 `make -C impl/arceos_ex run APP=smoke PLIC_PROVIDER=linux-object PROBE=linux-plic,uart-irq-chain`
 验证：`linux_plic.boundary_facts` 和 `uart_irq_chain.observer_real_path` 均通过，smoke 结果为
-`passed=36 failed=0 total=36`。阶段收束时还通过了顶层 `make test`，summary 为
-`overall total=86 pass=86 fail=0`，其中 spec verify `1/1`、KUnit checkpoints `49/49`、app smoke `36/36`。
+`passed=36 failed=0 total=36`。当前顶层 `make test` 仍通过，summary 为
+`overall total=49 pass=49 fail=0`，其中 spec verify `1/1`、KUnit checkpoints `11/11`、app smoke `37/37`。
+checkpoint/KUnit handler 已收口为只读 observer，不再注册 app smoke 或需要修改 live `Context` 的 action。
 其中 UART IRQ chain 观察到 Linux PLIC object provider 下的
 claim/dispatch/complete/zero-claim/loop-exit 计数闭合，说明黑盒 runtime claim loop 和 Linux `plic_chip.irq_eoi`
 callback 已经承接现有 UART action；同一只读 checkpoint 输出还约束了前述 callback exercise event 中

@@ -53,6 +53,12 @@
 
 若测试暴露出缺少可调用边界，应先判断该能力是否属于正式对象 action/API：属于正式语义的，补 model/coding 规格并让生产路径和测试路径共享同一入口；仅用于构造测试场景的，放入 smoke fixture、checkpoint handler 或 test harness，不进入普通对象 API。checkpoint/KUnit handler 默认只读真实路径 facts；需要执行 mutating action 时，必须在 testing/coding 规格中明确 action-level probe capability、可写范围和清理边界。
 
+MUST：普通 checkpoint handler 的 `HandlerRun` 原型只能保留只读 observer 形态：
+`Observe(fn(Checkpoint, &Context, &mut dyn Sink) -> CheckpointOutcome)`。不得重新加入 `Write`
+变体、`&mut Context` 参数，或任何可修改 `Context` 普通对象的等价入口。可写能力只能通过受限 `Sink`
+暴露。app smoke case 不得作为 checkpoint handler 注册；需要改变对象状态的测试应放在 app smoke 或明确建模的
+action-level probe 中。
+
 ## 入口命令
 
 当前入口统一使用仓库顶层 `Makefile`，默认内核为 `arceos_ex`。

@@ -1,6 +1,6 @@
 use crate::{
     checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
-    checkpoint::kunit::KunitSink,
+    checkpoint::kunit::Sink,
     context::Context,
     objects::{
         irq_time::{IrqHandlerKind, LogicalIrq},
@@ -20,7 +20,7 @@ pub const HANDLER: Handler = Handler {
     run: HandlerRun::Observe(run),
 };
 
-fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn KunitSink) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
     let total = super::kunit_case_count();
     sink.start_case(total, "", HANDLER.name, checkpoint);
 

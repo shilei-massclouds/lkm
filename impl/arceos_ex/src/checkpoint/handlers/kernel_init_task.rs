@@ -1,6 +1,8 @@
 use crate::{
-    checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
-    checkpoint::kunit,
+    checkpoint::{
+        handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
+        kunit::Sink,
+    },
     context::Context,
     objects::{
         rest_init::{TaskEntry, TaskKind, KERNEL_INIT_PID},
@@ -19,21 +21,21 @@ pub const HANDLER: Handler = Handler {
     name: "kernel_init_task",
     priority: 80,
     scope: HandlerScope::Only(SCOPE),
-    run: HandlerRun::Write(run),
+    run: HandlerRun::Observe(run),
 };
 
-fn run(checkpoint: Checkpoint, ctx: &mut Context) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
     match checkpoint {
-        Checkpoint::KernelInitTaskReady => check_ready(checkpoint, ctx),
-        Checkpoint::KernelInitTaskOnline => check_online(checkpoint, ctx),
+        Checkpoint::KernelInitTaskReady => check_ready(checkpoint, ctx, sink),
+        Checkpoint::KernelInitTaskOnline => check_online(checkpoint, ctx, sink),
         _ => CheckpointOutcome::Continue,
     }
 }
 
-fn check_ready(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+fn check_ready(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
     let total = super::kunit_case_count();
     let name = "kernel_init_task.ready";
-    kunit::start_case(total, "", name, checkpoint);
+    sink.start_case(total, "", name, checkpoint);
 
     if ctx.kernel_init_task.state() != State::Ready
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
@@ -53,18 +55,18 @@ fn check_ready(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
             .contains_task(ctx.kernel_init_task.pid())
         || ctx.scheduler.boot_runqueue().task_count() != 0
     {
-        kunit::fail(total, "", name, "KernelInitTask Ready facts invalid");
+        sink.fail(total, "", name, "KernelInitTask Ready facts invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
 
-    kunit::pass(total, "", name);
+    sink.pass(total, "", name);
     CheckpointOutcome::Continue
 }
 
-fn check_online(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+fn check_online(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
     let total = super::kunit_case_count();
     let name = "kernel_init_task.online";
-    kunit::start_case(total, "", name, checkpoint);
+    sink.start_case(total, "", name, checkpoint);
 
     if ctx.kernel_init_task.state() != State::Online
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
@@ -78,10 +80,10 @@ fn check_online(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
             .contains_task(ctx.kernel_init_task.pid())
         || ctx.scheduler.boot_runqueue().task_count() != 1
     {
-        kunit::fail(total, "", name, "KernelInitTask Online facts invalid");
+        sink.fail(total, "", name, "KernelInitTask Online facts invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
 
-    kunit::pass(total, "", name);
+    sink.pass(total, "", name);
     CheckpointOutcome::Continue
 }

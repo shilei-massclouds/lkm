@@ -1,6 +1,8 @@
 use crate::{
-    checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
-    checkpoint::kunit,
+    checkpoint::{
+        handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
+        kunit::Sink,
+    },
     context::Context,
     objects::state::State,
     trace::Checkpoint,
@@ -13,12 +15,12 @@ pub const HANDLER: Handler = Handler {
     name: "of_platform",
     priority: 100,
     scope: HandlerScope::Only(SCOPE),
-    run: HandlerRun::Read(run),
+    run: HandlerRun::Observe(run),
 };
 
-fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
     let total = super::kunit_case_count();
-    kunit::start_case(total, "", HANDLER.name, checkpoint);
+    sink.start_case(total, "", HANDLER.name, checkpoint);
 
     let platform_bus = &ctx.platform_bus;
     if ctx.device_tree.state() != State::Ready
@@ -39,7 +41,7 @@ fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
         || platform_bus.klist_device_count() != platform_bus.of_platform_candidate_count()
         || !first_platform_device_chain_valid(ctx)
     {
-        kunit::fail(
+        sink.fail(
             total,
             "",
             HANDLER.name,
@@ -48,14 +50,14 @@ fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
         return CheckpointOutcome::FailAndShutdown;
     }
 
-    kunit::diag_usize(
+    sink.diag_usize(
         "of_platform_candidates",
         platform_bus.of_platform_candidate_count(),
     );
-    kunit::diag_usize("platform_devices", platform_bus.platform_device_count());
-    kunit::diag_usize("klist_devices", platform_bus.klist_device_count());
-    kunit::drain_printk_diag();
-    kunit::pass(total, "", HANDLER.name);
+    sink.diag_usize("platform_devices", platform_bus.platform_device_count());
+    sink.diag_usize("klist_devices", platform_bus.klist_device_count());
+    sink.drain_printk_diag();
+    sink.pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
 }
 

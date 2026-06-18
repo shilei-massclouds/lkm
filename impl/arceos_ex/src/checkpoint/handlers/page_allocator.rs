@@ -1,6 +1,8 @@
 use crate::{
-    checkpoint::handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
-    checkpoint::kunit,
+    checkpoint::{
+        handlers::{CheckpointOutcome, Handler, HandlerRun, HandlerScope},
+        kunit::Sink,
+    },
     context::Context,
     objects::{mm_core::PageAllocator, raw_dtb::PhysRange, state::State},
     trace::Checkpoint,
@@ -13,18 +15,18 @@ pub const HANDLER: Handler = Handler {
     name: "page_allocator",
     priority: 100,
     scope: HandlerScope::Only(SCOPE),
-    run: HandlerRun::Read(run),
+    run: HandlerRun::Observe(run),
 };
 
-fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
+fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
     let total = super::kunit_case_count();
-    kunit::start_case(total, "", HANDLER.name, checkpoint);
+    sink.start_case(total, "", HANDLER.name, checkpoint);
 
     let page_allocator = &ctx.page_allocator;
     let page_metadata_map = &ctx.page_metadata_map;
     let page_size = ctx.config.page_size();
     let Some(expected_free_pages) = expected_free_pages(ctx, page_size) else {
-        kunit::fail(
+        sink.fail(
             total,
             "",
             HANDLER.name,
@@ -33,7 +35,7 @@ fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
         return CheckpointOutcome::FailAndShutdown;
     };
     let Some(zone_free_pages) = zone_free_pages(page_allocator) else {
-        kunit::fail(total, "", HANDLER.name, "zone free page accounting failed");
+        sink.fail(total, "", HANDLER.name, "zone free page accounting failed");
         return CheckpointOutcome::FailAndShutdown;
     };
 
@@ -47,47 +49,47 @@ fn run(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
         || page_allocator.buddy_total_free_pages() != expected_free_pages
         || zone_free_pages != expected_free_pages
     {
-        kunit::diag_usize("expected_free_pages", expected_free_pages);
-        kunit::diag_usize("buddy_free_pages", page_allocator.buddy_total_free_pages());
-        kunit::diag_usize("zone_free_pages", zone_free_pages);
-        kunit::fail(total, "", HANDLER.name, "handoff facts invalid");
+        sink.diag_usize("expected_free_pages", expected_free_pages);
+        sink.diag_usize("buddy_free_pages", page_allocator.buddy_total_free_pages());
+        sink.diag_usize("zone_free_pages", zone_free_pages);
+        sink.fail(total, "", HANDLER.name, "handoff facts invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
 
     let Some(block) = page_allocator.first_buddy_free_block(page_metadata_map) else {
-        kunit::fail(total, "", HANDLER.name, "first buddy block missing");
+        sink.fail(total, "", HANDLER.name, "first buddy block missing");
         return CheckpointOutcome::FailAndShutdown;
     };
     let Some(is_free) = page_metadata_map.page_metadata_is_buddy_free(block.page()) else {
-        kunit::fail(total, "", HANDLER.name, "buddy metadata missing");
+        sink.fail(total, "", HANDLER.name, "buddy metadata missing");
         return CheckpointOutcome::FailAndShutdown;
     };
     let Some(order) = page_metadata_map.page_metadata_buddy_order(block.page()) else {
-        kunit::fail(total, "", HANDLER.name, "buddy order missing");
+        sink.fail(total, "", HANDLER.name, "buddy order missing");
         return CheckpointOutcome::FailAndShutdown;
     };
     let Some(order_count) = page_allocator.buddy_order_free_count(block.zone(), block.order())
     else {
-        kunit::fail(total, "", HANDLER.name, "buddy order count missing");
+        sink.fail(total, "", HANDLER.name, "buddy order count missing");
         return CheckpointOutcome::FailAndShutdown;
     };
     if !is_free || order != block.order() || order_count == 0 {
-        kunit::fail(total, "", HANDLER.name, "buddy block metadata invalid");
+        sink.fail(total, "", HANDLER.name, "buddy block metadata invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
     let Some(metadata) = page_metadata_map.page_metadata(block.page()) else {
-        kunit::fail(total, "", HANDLER.name, "buddy metadata read failed");
+        sink.fail(total, "", HANDLER.name, "buddy metadata read failed");
         return CheckpointOutcome::FailAndShutdown;
     };
     if metadata.buddy_prev().is_some() {
-        kunit::fail(total, "", HANDLER.name, "buddy list head prev link invalid");
+        sink.fail(total, "", HANDLER.name, "buddy list head prev link invalid");
         return CheckpointOutcome::FailAndShutdown;
     }
 
-    kunit::diag_usize("expected_free_pages", expected_free_pages);
-    kunit::diag_usize("buddy_free_pages", page_allocator.buddy_total_free_pages());
-    kunit::diag_usize("buddy_blocks", page_allocator.buddy_free_block_count());
-    kunit::pass(total, "", HANDLER.name);
+    sink.diag_usize("expected_free_pages", expected_free_pages);
+    sink.diag_usize("buddy_free_pages", page_allocator.buddy_total_free_pages());
+    sink.diag_usize("buddy_blocks", page_allocator.buddy_free_block_count());
+    sink.pass(total, "", HANDLER.name);
     CheckpointOutcome::Continue
 }
 

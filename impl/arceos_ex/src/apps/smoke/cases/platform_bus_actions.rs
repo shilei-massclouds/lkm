@@ -24,86 +24,23 @@ pub fn run() -> SmokeResult {
 
 struct PlatformBusActionsFixture {
     bus: PlatformBus,
-    page_table_caches: PageTableCaches,
-    page_allocator: PageAllocator,
-    vmalloc_allocator: VmallocAllocator,
-    ioremap: Ioremap,
-    plic_irq_domain: PlicIrqDomain,
-    irq_handler_registry: IrqHandlerRegistry,
 }
 
 impl PlatformBusActionsFixture {
     fn new() -> Self {
         Self {
             bus: PlatformBus::new(),
-            page_table_caches: PageTableCaches::new(),
-            page_allocator: PageAllocator::new(),
-            vmalloc_allocator: VmallocAllocator::new(),
-            ioremap: Ioremap::new(),
-            plic_irq_domain: PlicIrqDomain::new(),
-            irq_handler_registry: IrqHandlerRegistry::new(),
         }
     }
 
     fn setup_ready(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context_ref();
         assertions.assert_ok(
-            "setup page table caches",
-            self.page_table_caches.setup(
-                &ctx.slub_allocator,
-                &ctx.page_allocator,
-                &ctx.page_metadata_map,
-                &ctx.config,
-                &ctx.vm,
-                &ctx.static_objects,
-                &ctx.kernel_image,
-            ),
-        );
-        assertions.assert_ok(
-            "setup vmalloc allocator",
-            self.vmalloc_allocator.setup(
-                &ctx.slub_allocator,
-                &self.page_table_caches,
-                &ctx.per_cpu_storage,
-            ),
-        );
-        assertions.assert_ok(
-            "setup ioremap",
-            self.ioremap.setup(
-                &ctx.vm,
-                &self.vmalloc_allocator,
-                &self.page_table_caches,
-                &ctx.fix_map,
-                &ctx.config,
-            ),
-        );
-        assertions.assert_ok(
             "setup platform bus",
             self.bus
                 .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device),
         );
-        assertions.assert_ok(
-            "preset plic irq domain",
-            self.plic_irq_domain.preset(&ctx.plic, &ctx.irq_controller),
-        );
-        assertions.assert_ok(
-            "setup plic irq domain",
-            self.plic_irq_domain.setup(&ctx.plic, &ctx.irq_controller),
-        );
-        assertions.assert_ok(
-            "setup irq handler registry",
-            self.irq_handler_registry
-                .setup(&ctx.irq_controller, &self.plic_irq_domain),
-        );
         assertions.assert("bus ready", self.bus.state() == State::Ready);
-        assertions.assert(
-            "plic irq domain ready",
-            self.plic_irq_domain.state() == State::Ready,
-        );
-        assertions.assert(
-            "irq handler registry ready",
-            self.irq_handler_registry.state() == State::Ready,
-        );
         assertions.assert("bus registered", self.bus.registered());
         assertions.assert("devices kset ready", self.bus.devices_kset_ready());
         assertions.assert("drivers kset ready", self.bus.drivers_kset_ready());
@@ -120,6 +57,28 @@ impl PlatformBusActionsFixture {
             .add_platform_device_from_node(&ctx.device_tree, root.id());
         assertions.assert("add platform device from node", result.is_ok());
         result.ok()
+    }
+}
+
+struct ProbeSupport {
+    page_table_caches: PageTableCaches,
+    page_allocator: PageAllocator,
+    vmalloc_allocator: VmallocAllocator,
+    ioremap: Ioremap,
+    plic_irq_domain: PlicIrqDomain,
+    irq_handler_registry: IrqHandlerRegistry,
+}
+
+impl ProbeSupport {
+    fn new() -> Self {
+        Self {
+            page_table_caches: PageTableCaches::new(),
+            page_allocator: PageAllocator::new(),
+            vmalloc_allocator: VmallocAllocator::new(),
+            ioremap: Ioremap::new(),
+            plic_irq_domain: PlicIrqDomain::new(),
+            irq_handler_registry: IrqHandlerRegistry::new(),
+        }
     }
 }
 
@@ -181,21 +140,22 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
                 .bus
                 .platform_driver_registered(MOCK_PLATFORM_DRIVER_REF),
         );
-        assertions.assert_ok(
-            "probe driver deferred",
+        assertions.assert_ok("probe driver deferred", {
+            let ctx = context_ref();
+            let mut support = ProbeSupport::new();
             self.fixture.bus.probe_driver(
                 MOCK_PLATFORM_DRIVER_REF,
-                &context_ref().device_tree,
-                &mut self.fixture.vmalloc_allocator,
-                &mut self.fixture.page_table_caches,
-                &mut self.fixture.page_allocator,
-                &context_ref().page_metadata_map,
-                &context_ref().config,
-                &mut self.fixture.ioremap,
-                &mut self.fixture.plic_irq_domain,
-                &mut self.fixture.irq_handler_registry,
-            ),
-        );
+                &ctx.device_tree,
+                &mut support.vmalloc_allocator,
+                &mut support.page_table_caches,
+                &mut support.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
+                &mut support.ioremap,
+                &mut support.plic_irq_domain,
+                &mut support.irq_handler_registry,
+            )
+        });
         assertions.assert(
             "probe driver scanned devices",
             self.fixture.bus.probe_driver_scanned_devices(),
@@ -265,21 +225,22 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
     }
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
-        assertions.assert_fail(
-            "probe device before setup",
+        assertions.assert_fail("probe device before setup", {
+            let ctx = context_ref();
+            let mut support = ProbeSupport::new();
             self.fixture.bus.probe_device(
                 DeviceRef::new(usize::MAX),
-                &context_ref().device_tree,
-                &mut self.fixture.vmalloc_allocator,
-                &mut self.fixture.page_table_caches,
-                &mut self.fixture.page_allocator,
-                &context_ref().page_metadata_map,
-                &context_ref().config,
-                &mut self.fixture.ioremap,
-                &mut self.fixture.plic_irq_domain,
-                &mut self.fixture.irq_handler_registry,
-            ),
-        );
+                &ctx.device_tree,
+                &mut support.vmalloc_allocator,
+                &mut support.page_table_caches,
+                &mut support.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
+                &mut support.ioremap,
+                &mut support.plic_irq_domain,
+                &mut support.irq_handler_registry,
+            )
+        });
         self.fixture.setup_ready(assertions);
     }
 
@@ -311,21 +272,22 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
             "platform device discovered",
             self.fixture.bus.platform_device_discovered(device_ref),
         );
-        assertions.assert_ok(
-            "probe device deferred",
+        assertions.assert_ok("probe device deferred", {
+            let ctx = context_ref();
+            let mut support = ProbeSupport::new();
             self.fixture.bus.probe_device(
                 device_ref,
-                &context_ref().device_tree,
-                &mut self.fixture.vmalloc_allocator,
-                &mut self.fixture.page_table_caches,
-                &mut self.fixture.page_allocator,
-                &context_ref().page_metadata_map,
-                &context_ref().config,
-                &mut self.fixture.ioremap,
-                &mut self.fixture.plic_irq_domain,
-                &mut self.fixture.irq_handler_registry,
-            ),
-        );
+                &ctx.device_tree,
+                &mut support.vmalloc_allocator,
+                &mut support.page_table_caches,
+                &mut support.page_allocator,
+                &ctx.page_metadata_map,
+                &ctx.config,
+                &mut support.ioremap,
+                &mut support.plic_irq_domain,
+                &mut support.irq_handler_registry,
+            )
+        });
         assertions.assert(
             "probe device scanned drivers",
             self.fixture.bus.probe_device_scanned_drivers(),
