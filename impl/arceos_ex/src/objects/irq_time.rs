@@ -284,6 +284,7 @@ impl IrqController {
 pub enum IrqHandlerKind {
     None,
     Ns16550aUart,
+    VirtioMmio,
 }
 
 pub struct IrqAction {
@@ -617,6 +618,7 @@ impl IrqHandlerRegistry {
         let handler_kind = action.handler_kind();
         match handler_kind {
             IrqHandlerKind::Ns16550aUart => crate::objects::ns16550a::handle_uart_irq(),
+            IrqHandlerKind::VirtioMmio => crate::objects::virtio_mmio::handle_virtio_mmio_irq(),
             IrqHandlerKind::None => return false,
         }
         self.dispatch_calls.fetch_add(1, Ordering::AcqRel);

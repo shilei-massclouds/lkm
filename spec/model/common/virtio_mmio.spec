@@ -28,6 +28,9 @@ predicate virtio_mmio_transport_platform_device_bound<T, D>(transport: T, device
 predicate virtio_mmio_transport_ioremapped<T, I>(transport: T, ioremap: I) -> bool;
 predicate virtio_mmio_transport_mmio_base_bound<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_irq_source_bound<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_logical_irq_bound<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_irq_handler_registered<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_irq_source_gate_open<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_header_read<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_magic_valid<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_version_supported<T>(transport: T) -> bool;
@@ -36,6 +39,9 @@ predicate virtio_mmio_transport_vendor_id_read<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_placeholder_device<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_rng_candidate<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_ready_for_virtio_core<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_legacy_queue_setup_supported<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_modern_queue_setup_supported<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_irq_ack_ready<T>(transport: T) -> bool;
 
 object VirtioMmioPlatformDriverStorage: DeviceDriverStorage {
     initial_state: State::Base;
@@ -82,6 +88,8 @@ object VirtioMmioTransportDevice: ResourceObject {
                     virtio_mmio_transport_ioremapped(VirtioMmioTransportDevice, Ioremap);
                     virtio_mmio_transport_mmio_base_bound(VirtioMmioTransportDevice);
                     virtio_mmio_transport_irq_source_bound(VirtioMmioTransportDevice);
+                    virtio_mmio_transport_logical_irq_bound(VirtioMmioTransportDevice);
+                    virtio_mmio_transport_irq_handler_registered(VirtioMmioTransportDevice);
                     virtio_mmio_transport_header_read(VirtioMmioTransportDevice);
                     virtio_mmio_transport_magic_valid(VirtioMmioTransportDevice);
                     virtio_mmio_transport_version_supported(VirtioMmioTransportDevice);
@@ -89,6 +97,9 @@ object VirtioMmioTransportDevice: ResourceObject {
                     virtio_mmio_transport_vendor_id_read(VirtioMmioTransportDevice);
                     virtio_mmio_transport_rng_candidate(VirtioMmioTransportDevice);
                     virtio_mmio_transport_ready_for_virtio_core(VirtioMmioTransportDevice);
+                    virtio_mmio_transport_legacy_queue_setup_supported(VirtioMmioTransportDevice);
+                    virtio_mmio_transport_modern_queue_setup_supported(VirtioMmioTransportDevice);
+                    virtio_mmio_transport_irq_ack_ready(VirtioMmioTransportDevice);
                 }
             }
         }
@@ -105,6 +116,8 @@ object VirtioMmioTransportDevice: ResourceObject {
             virtio_mmio_transport_ioremapped(VirtioMmioTransportDevice, Ioremap);
             virtio_mmio_transport_mmio_base_bound(VirtioMmioTransportDevice);
             virtio_mmio_transport_irq_source_bound(VirtioMmioTransportDevice);
+            virtio_mmio_transport_logical_irq_bound(VirtioMmioTransportDevice);
+            virtio_mmio_transport_irq_handler_registered(VirtioMmioTransportDevice);
             virtio_mmio_transport_header_read(VirtioMmioTransportDevice);
             virtio_mmio_transport_magic_valid(VirtioMmioTransportDevice);
             virtio_mmio_transport_version_supported(VirtioMmioTransportDevice);
@@ -112,6 +125,9 @@ object VirtioMmioTransportDevice: ResourceObject {
             virtio_mmio_transport_vendor_id_read(VirtioMmioTransportDevice);
             virtio_mmio_transport_rng_candidate(VirtioMmioTransportDevice);
             virtio_mmio_transport_ready_for_virtio_core(VirtioMmioTransportDevice);
+            virtio_mmio_transport_legacy_queue_setup_supported(VirtioMmioTransportDevice);
+            virtio_mmio_transport_modern_queue_setup_supported(VirtioMmioTransportDevice);
+            virtio_mmio_transport_irq_ack_ready(VirtioMmioTransportDevice);
         }
     }
 

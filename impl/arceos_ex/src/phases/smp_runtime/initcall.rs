@@ -52,6 +52,14 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .preset(&ctx.ctor_table, &ctx.static_objects)?;
     run_initcall_table(ctx)?;
     crate::objects::plic_provider::setup_registered_provider(&ctx.device_tree, &ctx.plic)?;
+    crate::objects::virtio_rng::setup_live_driver(
+        &mut ctx.virtio_rng_runtime,
+        &ctx.virtio_bus,
+        &ctx.kernel_image,
+        &ctx.plic,
+        &mut ctx.plic_irq_domain,
+        &ctx.irq_handler_registry,
+    )?;
     ctx.uart_external_irq_enable.setup(
         &ctx.plic,
         &mut ctx.plic_irq_domain,

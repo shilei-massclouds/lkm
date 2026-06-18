@@ -1,12 +1,14 @@
 /*
- * Virtio RNG driver/device model, fake integration slice.
+ * Virtio RNG driver/device model.
  *
  * This follows the small core of Linux drivers/char/hw_random/virtio-rng.c:
  * a virtio driver matches VIRTIO_ID_RNG, probes a generic VirtioDevice, owns a
- * single input VirtQueue, submits one input buffer, receives a used-buffer
- * completion, and updates data_avail/data_idx. hwrng registration, random
- * pool integration, user-visible reads, real notify/IRQ, freeze/restore, and
- * full remove/reset teardown stay deferred.
+ * single input VirtQueue, submits one input buffer during probe_common,
+ * receives a used-buffer completion through the virtio-mmio IRQ callback, and
+ * updates data_avail/data_idx. hwrng registration, random pool integration,
+ * user-visible reads, freeze/restore, and full remove/reset teardown stay
+ * deferred. Fake completion remains an object/smoke fixture path and must not
+ * be driven by checkpoint/KUnit handlers.
  */
 
 predicate virtio_rng_driver_declared<T>(driver: T) -> bool;
@@ -23,15 +25,19 @@ predicate virtio_rng_device_ready<T>(device: T) -> bool;
 predicate virtio_rng_hwrng_registration_deferred<T>(device: T) -> bool;
 predicate virtio_rng_random_pool_deferred<T>(device: T) -> bool;
 predicate virtio_rng_user_api_deferred<T>(device: T) -> bool;
-predicate virtio_rng_real_notify_irq_deferred<T>(device: T) -> bool;
+predicate virtio_rng_real_notify_irq_ready<T>(device: T) -> bool;
+predicate virtio_rng_probe_common_requests_entropy<T>(device: T) -> bool;
 
 predicate virtio_rng_request_pending<T>(device: T) -> bool;
 predicate virtio_rng_request_submits_inbuf<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_rng_request_kicks_queue<T, Q>(device: T, queue: Q) -> bool;
+predicate virtio_rng_request_notifies_mmio<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_rng_request_count_incremented<T>(device: T) -> bool;
 predicate virtio_rng_repeat_request_rejected<T>(device: T) -> bool;
 predicate virtio_rng_zero_len_completion_rejected<T>(device: T) -> bool;
 predicate virtio_rng_fake_transport_completion_recorded<T, Q>(device: T, queue: Q) -> bool;
+predicate virtio_rng_mmio_irq_acknowledged<T>(device: T) -> bool;
+predicate virtio_rng_irq_callback_invoked<T>(device: T) -> bool;
 predicate virtio_rng_complete_gets_used_buffer<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_rng_complete_updates_data_avail<T>(device: T) -> bool;
 predicate virtio_rng_complete_resets_data_idx<T>(device: T) -> bool;
@@ -95,7 +101,6 @@ object VirtioRngDevice: DeviceObject {
                     virtio_rng_hwrng_registration_deferred(self);
                     virtio_rng_random_pool_deferred(self);
                     virtio_rng_user_api_deferred(self);
-                    virtio_rng_real_notify_irq_deferred(self);
                 }
             }
         }
@@ -110,7 +115,6 @@ object VirtioRngDevice: DeviceObject {
             virtio_rng_hwrng_registration_deferred(self);
             virtio_rng_random_pool_deferred(self);
             virtio_rng_user_api_deferred(self);
-            virtio_rng_real_notify_irq_deferred(self);
         }
 
         events {
@@ -123,6 +127,19 @@ object VirtioRngDevice: DeviceObject {
         }
 
         processes {
+            Action::SetupRealTransport {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VirtioMmioTransportDevice.state == State::Ready;
+                    VirtQueue.state == State::Ready;
+                }
+                ensures {
+                    virtio_rng_real_notify_irq_ready(self);
+                    virtio_rng_probe_common_requests_entropy(self);
+                    virtio_rng_request_pending(self);
+                }
+            }
+
             Action::RequestEntropy {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -136,6 +153,7 @@ object VirtioRngDevice: DeviceObject {
                     virtio_rng_request_pending(self);
                     virtio_rng_request_submits_inbuf(self, VirtQueue);
                     virtio_rng_request_kicks_queue(self, VirtQueue);
+                    virtio_rng_request_notifies_mmio(self, VirtQueue);
                     virtio_rng_request_count_incremented(self);
                     virtio_rng_repeat_request_rejected(self);
                 }
@@ -158,12 +176,31 @@ object VirtioRngDevice: DeviceObject {
             Action::CompleteEntropy {
                 state_effect: StateEffect::None;
                 depends_on {
-                    virtio_rng_fake_transport_completion_recorded(self, VirtQueue);
+                    virtio_rng_fake_transport_completion_recorded(self, VirtQueue) || virtio_rng_irq_callback_invoked(self);
                 }
                 drives {
                     VirtQueue.Action::GetBuf;
                 }
                 ensures {
+                    virtio_rng_complete_gets_used_buffer(self, VirtQueue);
+                    virtio_rng_complete_updates_data_avail(self);
+                    virtio_rng_complete_resets_data_idx(self);
+                    virtio_rng_completion_count_incremented(self);
+                }
+            }
+
+            Action::VirtioMmioIrqComplete {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_rng_request_pending(self);
+                    virtqueue_real_used_completion_observed(VirtQueue);
+                }
+                drives {
+                    VirtQueue.Action::GetBuf;
+                }
+                ensures {
+                    virtio_rng_mmio_irq_acknowledged(self);
+                    virtio_rng_irq_callback_invoked(self);
                     virtio_rng_complete_gets_used_buffer(self, VirtQueue);
                     virtio_rng_complete_updates_data_avail(self);
                     virtio_rng_complete_resets_data_idx(self);

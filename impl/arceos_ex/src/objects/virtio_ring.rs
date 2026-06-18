@@ -1,9 +1,22 @@
 use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
 use alloc::vec::Vec;
+use core::{mem::size_of, ptr};
 
 const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
 const VIRTQUEUE_DESC_NONE: u16 = u16::MAX;
+const VRING_USED_F_NO_NOTIFY: u16 = 1;
+const STATIC_REAL_QUEUE_SIZE: u16 = 8;
+const STATIC_REAL_QUEUE_BYTES: usize = 8192;
+
+#[repr(C, align(4096))]
+struct StaticVirtqueueBacking {
+    bytes: [u8; STATIC_REAL_QUEUE_BYTES],
+}
+
+static mut STATIC_REAL_QUEUE_BACKING: StaticVirtqueueBacking = StaticVirtqueueBacking {
+    bytes: [0; STATIC_REAL_QUEUE_BYTES],
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VirtqueueError {
@@ -15,6 +28,9 @@ pub enum VirtqueueError {
     UsedRingFull,
     UsedLengthTooLarge,
     NoUsedBuffer,
+    RingBackingUnavailable,
+    QueueSizeUnsupported,
+    TransportUnavailable,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -74,6 +90,63 @@ impl VirtqDescriptor {
 
     pub const fn direct(self) -> bool {
         self.flags & VIRTQ_DESC_F_NEXT == 0 && self.next == VIRTQUEUE_DESC_NONE
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RawVirtqDescriptor {
+    addr: u64,
+    len: u32,
+    flags: u16,
+    next: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RawVirtqUsedElem {
+    id: u32,
+    len: u32,
+}
+
+#[derive(Clone, Copy)]
+pub struct VirtioSplitRingLayout {
+    queue_size: u16,
+    desc_virt: usize,
+    avail_virt: usize,
+    used_virt: usize,
+    desc_phys: usize,
+    avail_phys: usize,
+    used_phys: usize,
+}
+
+impl VirtioSplitRingLayout {
+    const fn empty() -> Self {
+        Self {
+            queue_size: 0,
+            desc_virt: 0,
+            avail_virt: 0,
+            used_virt: 0,
+            desc_phys: 0,
+            avail_phys: 0,
+            used_phys: 0,
+        }
+    }
+
+    pub const fn queue_size(self) -> u16 {
+        self.queue_size
+    }
+
+    pub const fn desc_phys(self) -> usize {
+        self.desc_phys
+    }
+
+    pub const fn avail_phys(self) -> usize {
+        self.avail_phys
+    }
+
+    pub const fn used_phys(self) -> usize {
+        self.used_phys
     }
 }
 
@@ -141,6 +214,10 @@ pub struct VirtioSplitRing {
     indirect_descriptors_deferred: bool,
     event_idx_deferred: bool,
     dma_cache_deferred: bool,
+    static_coherent_backing_ready: bool,
+    desc_avail_used_layout_ready: bool,
+    device_visible_phys_addr_ready: bool,
+    real_layout: VirtioSplitRingLayout,
     descriptor_exhaustion_rejected: bool,
     empty_get_rejected: bool,
     buffer_ownership_released: bool,
@@ -163,6 +240,10 @@ impl VirtioSplitRing {
             indirect_descriptors_deferred: false,
             event_idx_deferred: false,
             dma_cache_deferred: false,
+            static_coherent_backing_ready: false,
+            desc_avail_used_layout_ready: false,
+            device_visible_phys_addr_ready: false,
+            real_layout: VirtioSplitRingLayout::empty(),
             descriptor_exhaustion_rejected: false,
             empty_get_rejected: false,
             buffer_ownership_released: false,
@@ -341,6 +422,134 @@ impl VirtioSplitRing {
     fn ring_index(&self, index: u16) -> usize {
         usize::from(index % self.queue_size)
     }
+
+    fn setup_static_real_backing(
+        &mut self,
+        kernel_image: &super::kernel_image::KernelImage,
+        queue_size: u16,
+    ) -> Result<VirtioSplitRingLayout, VirtqueueError> {
+        if self.lifecycle.state() != State::Ready
+            || queue_size == 0
+            || queue_size > STATIC_REAL_QUEUE_SIZE
+            || !queue_size.is_power_of_two()
+        {
+            return Err(VirtqueueError::QueueSizeUnsupported);
+        }
+
+        let backing_virt = unsafe {
+            let backing = (&raw mut STATIC_REAL_QUEUE_BACKING)
+                .as_mut()
+                .ok_or(VirtqueueError::RingBackingUnavailable)?;
+            backing.bytes.fill(0);
+            backing.bytes.as_mut_ptr() as usize
+        };
+        let desc_virt = backing_virt;
+        let desc_bytes = align_up(usize::from(queue_size) * size_of::<RawVirtqDescriptor>(), 2)
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let avail_virt = backing_virt
+            .checked_add(desc_bytes)
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let avail_bytes = 4usize
+            .checked_add(
+                usize::from(queue_size)
+                    .checked_mul(size_of::<u16>())
+                    .ok_or(VirtqueueError::RingBackingUnavailable)?,
+            )
+            .and_then(|size| size.checked_add(size_of::<u16>()))
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let used_offset = align_up(
+            desc_bytes
+                .checked_add(avail_bytes)
+                .ok_or(VirtqueueError::RingBackingUnavailable)?,
+            4096,
+        )
+        .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let used_virt = backing_virt
+            .checked_add(used_offset)
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let used_bytes = 4usize
+            .checked_add(
+                usize::from(queue_size)
+                    .checked_mul(size_of::<RawVirtqUsedElem>())
+                    .ok_or(VirtqueueError::RingBackingUnavailable)?,
+            )
+            .and_then(|size| size.checked_add(size_of::<u16>()))
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let end = used_virt
+            .checked_add(used_bytes)
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        if end > backing_virt + STATIC_REAL_QUEUE_BYTES {
+            return Err(VirtqueueError::RingBackingUnavailable);
+        }
+
+        let desc_phys = kernel_image
+            .runtime_to_phys(desc_virt)
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let avail_phys = kernel_image
+            .runtime_to_phys(avail_virt)
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let used_phys = kernel_image
+            .runtime_to_phys(used_virt)
+            .ok_or(VirtqueueError::RingBackingUnavailable)?;
+        let layout = VirtioSplitRingLayout {
+            queue_size,
+            desc_virt,
+            avail_virt,
+            used_virt,
+            desc_phys,
+            avail_phys,
+            used_phys,
+        };
+        self.real_layout = layout;
+        self.static_coherent_backing_ready = true;
+        self.desc_avail_used_layout_ready = true;
+        self.device_visible_phys_addr_ready = desc_phys != 0 && avail_phys != 0 && used_phys != 0;
+        if self.device_visible_phys_addr_ready {
+            Ok(layout)
+        } else {
+            Err(VirtqueueError::RingBackingUnavailable)
+        }
+    }
+
+    fn raw_desc_ptr(&self, index: u16) -> Option<*mut RawVirtqDescriptor> {
+        if self.real_layout.desc_virt == 0 || index >= self.real_layout.queue_size {
+            return None;
+        }
+        Some((self.real_layout.desc_virt as *mut RawVirtqDescriptor).wrapping_add(index as usize))
+    }
+
+    fn raw_avail_flags_ptr(&self) -> Option<*mut u16> {
+        if self.real_layout.avail_virt == 0 {
+            return None;
+        }
+        Some(self.real_layout.avail_virt as *mut u16)
+    }
+
+    fn raw_avail_idx_ptr(&self) -> Option<*mut u16> {
+        Some(unsafe { self.raw_avail_flags_ptr()?.add(1) })
+    }
+
+    fn raw_avail_ring_ptr(&self, index: u16) -> Option<*mut u16> {
+        let ring_base = unsafe { self.raw_avail_flags_ptr()?.add(2) };
+        Some(unsafe { ring_base.add(self.ring_index(index)) })
+    }
+
+    fn raw_used_flags_ptr(&self) -> Option<*const u16> {
+        if self.real_layout.used_virt == 0 {
+            return None;
+        }
+        Some(self.real_layout.used_virt as *const u16)
+    }
+
+    fn raw_used_idx_ptr(&self) -> Option<*const u16> {
+        Some(unsafe { self.raw_used_flags_ptr()?.add(1) })
+    }
+
+    fn raw_used_ring_ptr(&self, index: u16) -> Option<*const RawVirtqUsedElem> {
+        let ring_base =
+            unsafe { (self.real_layout.used_virt as *const u16).add(2) } as *const RawVirtqUsedElem;
+        Some(unsafe { ring_base.add(self.ring_index(index)) })
+    }
 }
 
 pub struct VirtQueue {
@@ -355,6 +564,15 @@ pub struct VirtQueue {
     get_buf_returns_len: bool,
     get_buf_empty_rejected: bool,
     buffer_ownership_released: bool,
+    real_backing_ready: bool,
+    queue_index: u16,
+    queue_num_max_observed: bool,
+    legacy_mmio_queue_pfn_written: bool,
+    modern_mmio_queue_addrs_written: bool,
+    mmio_queue_ready_written: bool,
+    mmio_notify_written: bool,
+    real_used_completion_observed: bool,
+    last_used_len: u32,
     submitted_count: usize,
     kick_count: usize,
     completion_count: usize,
@@ -375,6 +593,15 @@ impl VirtQueue {
             get_buf_returns_len: false,
             get_buf_empty_rejected: false,
             buffer_ownership_released: false,
+            real_backing_ready: false,
+            queue_index: 0,
+            queue_num_max_observed: false,
+            legacy_mmio_queue_pfn_written: false,
+            modern_mmio_queue_addrs_written: false,
+            mmio_queue_ready_written: false,
+            mmio_notify_written: false,
+            real_used_completion_observed: false,
+            last_used_len: 0,
             submitted_count: 0,
             kick_count: 0,
             completion_count: 0,
@@ -426,6 +653,51 @@ impl VirtQueue {
         self.buffer_ownership_released
     }
 
+    #[allow(dead_code)]
+    pub const fn real_backing_ready(&self) -> bool {
+        self.real_backing_ready
+    }
+
+    #[allow(dead_code)]
+    pub const fn queue_index(&self) -> u16 {
+        self.queue_index
+    }
+
+    #[allow(dead_code)]
+    pub const fn queue_num_max_observed(&self) -> bool {
+        self.queue_num_max_observed
+    }
+
+    #[allow(dead_code)]
+    pub const fn legacy_mmio_queue_pfn_written(&self) -> bool {
+        self.legacy_mmio_queue_pfn_written
+    }
+
+    #[allow(dead_code)]
+    pub const fn modern_mmio_queue_addrs_written(&self) -> bool {
+        self.modern_mmio_queue_addrs_written
+    }
+
+    #[allow(dead_code)]
+    pub const fn mmio_queue_ready_written(&self) -> bool {
+        self.mmio_queue_ready_written
+    }
+
+    #[allow(dead_code)]
+    pub const fn mmio_notify_written(&self) -> bool {
+        self.mmio_notify_written
+    }
+
+    #[allow(dead_code)]
+    pub const fn real_used_completion_observed(&self) -> bool {
+        self.real_used_completion_observed
+    }
+
+    #[allow(dead_code)]
+    pub const fn last_used_len(&self) -> u32 {
+        self.last_used_len
+    }
+
     pub const fn submitted_count(&self) -> usize {
         self.submitted_count
     }
@@ -456,6 +728,41 @@ impl VirtQueue {
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
+    pub fn setup_real_mmio(
+        &mut self,
+        kernel_image: &super::kernel_image::KernelImage,
+        transport: super::virtio_mmio::VirtioMmioTransportDevice,
+        queue_index: u16,
+    ) -> Result<(), VirtqueueError> {
+        if self.lifecycle.state() == State::Base {
+            self.setup().map_err(|_| VirtqueueError::NotReady)?;
+        }
+        if self.lifecycle.state() != State::Ready {
+            return Err(VirtqueueError::NotReady);
+        }
+        let layout = self
+            .ring
+            .setup_static_real_backing(kernel_image, self.ring.queue_size())?;
+        let setup = super::virtio_mmio::setup_queue(
+            transport,
+            super::virtio_mmio::VirtioMmioQueueConfig {
+                queue_index,
+                queue_size: layout.queue_size(),
+                desc_phys: layout.desc_phys(),
+                avail_phys: layout.avail_phys(),
+                used_phys: layout.used_phys(),
+            },
+        )
+        .ok_or(VirtqueueError::TransportUnavailable)?;
+        self.queue_index = queue_index;
+        self.queue_num_max_observed = setup.num_max >= setup.queue_size;
+        self.legacy_mmio_queue_pfn_written = setup.legacy_pfn_written;
+        self.modern_mmio_queue_addrs_written = setup.modern_addrs_written;
+        self.mmio_queue_ready_written = setup.queue_ready_written;
+        self.real_backing_ready = true;
+        Ok(())
+    }
+
     pub fn add_inbuf(
         &mut self,
         addr: usize,
@@ -481,10 +788,45 @@ impl VirtQueue {
             active: true,
             completed: false,
         };
+        if self.real_backing_ready {
+            let Some(raw_desc) = self.ring.raw_desc_ptr(head) else {
+                return Err(VirtqueueError::RingBackingUnavailable);
+            };
+            unsafe {
+                ptr::write_volatile(
+                    raw_desc,
+                    RawVirtqDescriptor {
+                        addr: addr as u64,
+                        len,
+                        flags: VIRTQ_DESC_F_WRITE,
+                        next: 0,
+                    },
+                );
+            }
+        }
 
         let avail_slot = self.ring.ring_index(self.ring.avail_idx);
         self.ring.avail_ring[avail_slot] = head;
+        if self.real_backing_ready {
+            let Some(raw_avail_entry) = self.ring.raw_avail_ring_ptr(self.ring.avail_idx) else {
+                return Err(VirtqueueError::RingBackingUnavailable);
+            };
+            unsafe {
+                ptr::write_volatile(raw_avail_entry, head);
+                if let Some(flags) = self.ring.raw_avail_flags_ptr() {
+                    ptr::write_volatile(flags, 0);
+                }
+            }
+        }
         self.ring.avail_idx = self.ring.avail_idx.wrapping_add(1);
+        if self.real_backing_ready {
+            let Some(raw_avail_idx) = self.ring.raw_avail_idx_ptr() else {
+                return Err(VirtqueueError::RingBackingUnavailable);
+            };
+            unsafe {
+                ptr::write_volatile(raw_avail_idx, self.ring.avail_idx);
+            }
+        }
         self.input_buffer_added = true;
         self.free_descriptor_consumed = true;
         self.avail_index_advanced = true;
@@ -501,6 +843,18 @@ impl VirtQueue {
         }
         self.kick_recorded = true;
         self.kick_count = self.kick_count.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn kick_mmio(
+        &mut self,
+        transport: super::virtio_mmio::VirtioMmioTransportDevice,
+    ) -> Result<(), VirtqueueError> {
+        self.kick()?;
+        if !super::virtio_mmio::notify_queue(transport, self.queue_index) {
+            return Err(VirtqueueError::TransportUnavailable);
+        }
+        self.mmio_notify_written = true;
         Ok(())
     }
 
@@ -573,4 +927,56 @@ impl VirtQueue {
             descriptor_len: descriptor.len(),
         })
     }
+
+    pub fn get_buf_from_device(&mut self) -> Result<VirtqueueUsedBuffer, VirtqueueError> {
+        if self.lifecycle.state() != State::Ready || !self.real_backing_ready {
+            return Err(VirtqueueError::NotReady);
+        }
+        let used_idx = unsafe {
+            let Some(ptr) = self.ring.raw_used_idx_ptr() else {
+                return Err(VirtqueueError::RingBackingUnavailable);
+            };
+            ptr::read_volatile(ptr)
+        };
+        self.ring.used_idx = used_idx;
+        if self.ring.last_used_idx == used_idx {
+            self.ring.empty_get_rejected = true;
+            self.get_buf_empty_rejected = true;
+            return Err(VirtqueueError::NoUsedBuffer);
+        }
+
+        let used = unsafe {
+            let Some(ptr) = self.ring.raw_used_ring_ptr(self.ring.last_used_idx) else {
+                return Err(VirtqueueError::RingBackingUnavailable);
+            };
+            ptr::read_volatile(ptr)
+        };
+        let id = u16::try_from(used.id).map_err(|_| VirtqueueError::InvalidToken)?;
+        let desc_index = usize::from(id);
+        if desc_index >= self.ring.descriptors.len() || !self.ring.descriptors[desc_index].active {
+            return Err(VirtqueueError::InvalidToken);
+        }
+        if used.len > self.ring.descriptors[desc_index].len {
+            return Err(VirtqueueError::UsedLengthTooLarge);
+        }
+        let used_slot = self.ring.ring_index(self.ring.last_used_idx);
+        self.ring.used_ring[used_slot] = VirtqUsedElem { id, len: used.len };
+        self.ring.descriptors[desc_index].completed = true;
+        self.real_used_completion_observed = true;
+        self.used_index_advanced = true;
+        self.completion_count = self.completion_count.saturating_add(1);
+        self.last_used_len = used.len;
+        let buffer = self.get_buf()?;
+        if let Some(flags) = self.ring.raw_used_flags_ptr() {
+            let _ = unsafe { ptr::read_volatile(flags) & VRING_USED_F_NO_NOTIFY };
+        }
+        Ok(buffer)
+    }
+}
+
+fn align_up(value: usize, align: usize) -> Option<usize> {
+    if align == 0 || !align.is_power_of_two() {
+        return None;
+    }
+    value.checked_add(align - 1).map(|v| v & !(align - 1))
 }

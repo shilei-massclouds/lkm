@@ -1,11 +1,29 @@
 use super::{
+    irq_time::{IrqHandlerRegistry, Plic, PlicIrqDomain},
+    kernel_image::KernelImage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    virtio::{VirtioBus, VirtioDevice},
-    virtio_mmio::VIRTIO_ID_RNG,
+    virtio::{VirtioBus, VirtioDevice, VirtioDeviceRef},
+    virtio_mmio::{VirtioMmioTransportDevice, VIRTIO_ID_RNG},
     virtio_ring::{VirtQueue, VirtqueueBufferToken, VirtqueueError},
 };
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 pub const VIRTIO_RNG_QUEUE_SIZE: u16 = 4;
+const VIRTIO_RNG_QUEUE_INDEX: u16 = 0;
+const VIRTIO_RNG_BUFFER_SIZE: usize = 64;
+
+#[repr(C, align(64))]
+struct EntropyBuffer {
+    bytes: [u8; VIRTIO_RNG_BUFFER_SIZE],
+}
+
+static mut VIRTIO_RNG_ENTROPY_BUFFER: EntropyBuffer = EntropyBuffer {
+    bytes: [0; VIRTIO_RNG_BUFFER_SIZE],
+};
+static VIRTIO_RNG_LAST_IRQ_STATUS: AtomicU32 = AtomicU32::new(0);
+static VIRTIO_RNG_IRQ_COMPLETION_CALLS: AtomicUsize = AtomicUsize::new(0);
+static VIRTIO_RNG_ENTROPY_READY_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
+static VIRTIO_RNG_LIVE_PTR: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VirtioRngError {
@@ -18,6 +36,7 @@ pub enum VirtioRngError {
     ZeroLengthCompletion,
     Removed,
     Queue(VirtqueueError),
+    TransportUnavailable,
 }
 
 impl From<VirtqueueError> for VirtioRngError {
@@ -123,6 +142,8 @@ pub struct VirtioRngDevice {
     random_pool_deferred: bool,
     user_api_deferred: bool,
     real_notify_irq_deferred: bool,
+    real_notify_irq_ready: bool,
+    probe_common_requested_entropy: bool,
     pending_token: Option<VirtqueueBufferToken>,
     pending_buffer_addr: usize,
     pending_buffer_len: u32,
@@ -140,6 +161,8 @@ pub struct VirtioRngDevice {
     data_idx: u32,
     request_count: usize,
     fake_completion_count: usize,
+    notify_count: usize,
+    irq_count: usize,
     completion_count: usize,
 }
 
@@ -154,6 +177,8 @@ impl VirtioRngDevice {
             random_pool_deferred: false,
             user_api_deferred: false,
             real_notify_irq_deferred: false,
+            real_notify_irq_ready: false,
+            probe_common_requested_entropy: false,
             pending_token: None,
             pending_buffer_addr: 0,
             pending_buffer_len: 0,
@@ -171,6 +196,8 @@ impl VirtioRngDevice {
             data_idx: 0,
             request_count: 0,
             fake_completion_count: 0,
+            notify_count: 0,
+            irq_count: 0,
             completion_count: 0,
         }
     }
@@ -205,6 +232,16 @@ impl VirtioRngDevice {
 
     pub const fn real_notify_irq_deferred(&self) -> bool {
         self.real_notify_irq_deferred
+    }
+
+    #[allow(dead_code)]
+    pub const fn real_notify_irq_ready(&self) -> bool {
+        self.real_notify_irq_ready
+    }
+
+    #[allow(dead_code)]
+    pub const fn probe_common_requested_entropy(&self) -> bool {
+        self.probe_common_requested_entropy
     }
 
     pub const fn request_pending(&self) -> bool {
@@ -261,6 +298,16 @@ impl VirtioRngDevice {
 
     pub const fn fake_completion_count(&self) -> usize {
         self.fake_completion_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn notify_count(&self) -> usize {
+        self.notify_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn irq_count(&self) -> usize {
+        self.irq_count
     }
 
     pub const fn completion_count(&self) -> usize {
@@ -320,6 +367,46 @@ impl VirtioRngDevice {
         Ok(())
     }
 
+    pub fn setup_real_transport(
+        &mut self,
+        kernel_image: &KernelImage,
+        plic: &Plic,
+        plic_irq_domain: &mut PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+    ) -> Result<(), VirtioRngError> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(VirtioRngError::DeviceNotReady);
+        }
+        let Some(mut transport) = self.virtio_device.mmio_transport() else {
+            return Err(VirtioRngError::TransportUnavailable);
+        };
+        if !transport.irq_handler_registered()
+            || !irq_handler_registry.has_handler_for_logical_irq(transport.logical_irq())
+        {
+            return Err(VirtioRngError::TransportUnavailable);
+        }
+        if !super::virtio_mmio::reset_status(transport)
+            || !super::virtio_mmio::driver_status_setup(transport)
+        {
+            return Err(VirtioRngError::TransportUnavailable);
+        }
+        self.queue
+            .setup_real_mmio(kernel_image, transport, VIRTIO_RNG_QUEUE_INDEX)?;
+        if !super::virtio_mmio::driver_status_ready(transport) {
+            return Err(VirtioRngError::TransportUnavailable);
+        }
+        if !transport.enable_irq_source_gate(plic, plic_irq_domain) {
+            return Err(VirtioRngError::TransportUnavailable);
+        }
+        self.virtio_device.update_mmio_transport(transport);
+        self.real_notify_irq_ready = true;
+        self.real_notify_irq_deferred = false;
+        let (buffer_addr, buffer_len) = entropy_buffer_request(kernel_image)?;
+        self.request_entropy_mmio(buffer_addr, buffer_len)?;
+        self.probe_common_requested_entropy = true;
+        Ok(())
+    }
+
     pub fn fake_transport_complete(&mut self, len: u32) -> Result<(), VirtioRngError> {
         if self.lifecycle.state() == State::Destroyed {
             self.removed_rejects_io = true;
@@ -339,6 +426,45 @@ impl VirtioRngDevice {
         self.queue.fake_complete_used(token, len)?;
         self.fake_transport_completion_recorded = true;
         self.fake_completion_count = self.fake_completion_count.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn request_entropy_mmio(
+        &mut self,
+        buffer_addr: usize,
+        buffer_len: u32,
+    ) -> Result<(), VirtioRngError> {
+        if self.lifecycle.state() == State::Destroyed {
+            self.removed_rejects_io = true;
+            return Err(VirtioRngError::Removed);
+        }
+        if self.lifecycle.state() != State::Ready || !self.real_notify_irq_ready {
+            return Err(VirtioRngError::DeviceNotReady);
+        }
+        if buffer_addr == 0 || buffer_len == 0 {
+            return Err(VirtioRngError::InvalidBuffer);
+        }
+        if self.request_pending {
+            self.repeat_request_rejected = true;
+            return Err(VirtioRngError::RequestPending);
+        }
+
+        let Some(transport) = self.virtio_device.mmio_transport() else {
+            return Err(VirtioRngError::TransportUnavailable);
+        };
+        let token = self.queue.add_inbuf(buffer_addr, buffer_len)?;
+        self.queue.kick_mmio(transport)?;
+        self.pending_token = Some(token);
+        self.pending_buffer_addr = buffer_addr;
+        self.pending_buffer_len = buffer_len;
+        self.request_pending = true;
+        self.request_submits_inbuf = true;
+        self.request_kicks_queue = true;
+        self.data_avail = 0;
+        self.data_idx = 0;
+        self.data_idx_reset = true;
+        self.request_count = self.request_count.saturating_add(1);
+        self.notify_count = self.notify_count.saturating_add(1);
         Ok(())
     }
 
@@ -368,6 +494,33 @@ impl VirtioRngDevice {
         Ok(used.len())
     }
 
+    pub fn complete_entropy_from_irq(&mut self) -> Result<u32, VirtioRngError> {
+        if self.lifecycle.state() == State::Destroyed {
+            self.removed_rejects_io = true;
+            return Err(VirtioRngError::Removed);
+        }
+        if self.lifecycle.state() != State::Ready || !self.real_notify_irq_ready {
+            return Err(VirtioRngError::DeviceNotReady);
+        }
+        if !self.request_pending {
+            return Err(VirtioRngError::NoRequestPending);
+        }
+
+        let used = self.queue.get_buf_from_device()?;
+        self.pending_token = None;
+        self.pending_buffer_addr = 0;
+        self.pending_buffer_len = 0;
+        self.request_pending = false;
+        self.complete_gets_used_buffer = true;
+        self.data_avail = used.len();
+        self.data_idx = 0;
+        self.data_avail_updated = true;
+        self.data_idx_reset = true;
+        self.irq_count = self.irq_count.saturating_add(1);
+        self.completion_count = self.completion_count.saturating_add(1);
+        Ok(used.len())
+    }
+
     pub fn cleanup(&mut self) -> Result<(), VirtioRngError> {
         if self.lifecycle.state() != State::Ready {
             return Err(VirtioRngError::DeviceNotReady);
@@ -384,4 +537,183 @@ impl VirtioRngDevice {
             .adopt_transition(LifecycleEvent::Cleanup, State::Ready, State::Destroyed)
             .map_err(|_| VirtioRngError::DeviceNotReady)
     }
+}
+
+pub struct VirtioRngRuntime {
+    driver: VirtioRngDriver,
+    device: Option<VirtioRngDevice>,
+    live_device_ref: Option<VirtioDeviceRef>,
+    real_probe_attempted: bool,
+    real_probe_succeeded: bool,
+    real_completion_len: u32,
+}
+
+impl VirtioRngRuntime {
+    pub const fn new() -> Self {
+        Self {
+            driver: VirtioRngDriver::new(),
+            device: None,
+            live_device_ref: None,
+            real_probe_attempted: false,
+            real_probe_succeeded: false,
+            real_completion_len: 0,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub const fn driver(&self) -> &VirtioRngDriver {
+        &self.driver
+    }
+
+    pub const fn device(&self) -> Option<&VirtioRngDevice> {
+        self.device.as_ref()
+    }
+
+    #[allow(dead_code)]
+    pub const fn real_probe_attempted(&self) -> bool {
+        self.real_probe_attempted
+    }
+
+    #[allow(dead_code)]
+    pub const fn real_probe_succeeded(&self) -> bool {
+        self.real_probe_succeeded
+    }
+
+    #[allow(dead_code)]
+    pub const fn real_completion_len(&self) -> u32 {
+        self.real_completion_len
+    }
+}
+
+pub fn setup_live_driver(
+    context_runtime: &mut VirtioRngRuntime,
+    virtio_bus: &VirtioBus,
+    kernel_image: &KernelImage,
+    plic: &Plic,
+    plic_irq_domain: &mut PlicIrqDomain,
+    irq_handler_registry: &IrqHandlerRegistry,
+) -> EventResult {
+    VIRTIO_RNG_LIVE_PTR.store(
+        context_runtime as *mut VirtioRngRuntime as usize,
+        Ordering::Release,
+    );
+    let runtime = context_runtime;
+    runtime.real_probe_attempted = true;
+    if runtime.driver.state() == State::Base {
+        runtime.driver.setup(virtio_bus)?;
+    }
+    let Some(device) = virtio_bus.rng_device() else {
+        return failed_condition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            State::Ready,
+        );
+    };
+    if runtime.live_device_ref == Some(device.device_ref()) && runtime.real_probe_succeeded {
+        return Ok(());
+    }
+    let mut rng = runtime
+        .driver
+        .probe(device)
+        .map_err(|_| live_setup_error())?;
+    rng.setup_real_transport(kernel_image, plic, plic_irq_domain, irq_handler_registry)
+        .map_err(|_| live_setup_error())?;
+    runtime.live_device_ref = Some(device.device_ref());
+    runtime.device = Some(rng);
+    runtime.real_probe_succeeded = true;
+    Ok(())
+}
+
+pub fn live_runtime() -> Option<&'static VirtioRngRuntime> {
+    let ptr = VIRTIO_RNG_LIVE_PTR.load(Ordering::Acquire);
+    if ptr == 0 {
+        return None;
+    }
+    unsafe { (ptr as *const VirtioRngRuntime).as_ref() }
+}
+
+fn live_runtime_mut() -> Option<&'static mut VirtioRngRuntime> {
+    let ptr = VIRTIO_RNG_LIVE_PTR.load(Ordering::Acquire);
+    if ptr == 0 {
+        return None;
+    }
+    unsafe { (ptr as *mut VirtioRngRuntime).as_mut() }
+}
+
+pub fn live_mmio_transport() -> Option<VirtioMmioTransportDevice> {
+    live_runtime()?.device()?.virtio_device().mmio_transport()
+}
+
+pub fn note_mmio_irq(status: u32) {
+    VIRTIO_RNG_LAST_IRQ_STATUS.store(status, Ordering::Release);
+}
+
+pub fn handle_irq_completion() {
+    VIRTIO_RNG_IRQ_COMPLETION_CALLS.fetch_add(1, Ordering::AcqRel);
+    let Some(runtime) = live_runtime_mut() else {
+        return;
+    };
+    let Some(device) = runtime.device.as_mut() else {
+        return;
+    };
+    let Ok(len) = device.complete_entropy_from_irq() else {
+        return;
+    };
+    runtime.real_completion_len = len;
+    VIRTIO_RNG_ENTROPY_READY_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
+    crate::checkpoint::dispatch(
+        crate::trace::Checkpoint::VirtioRngEntropyReady,
+        crate::context::context_ref(),
+    );
+}
+
+#[allow(dead_code)]
+pub fn last_irq_status() -> u32 {
+    VIRTIO_RNG_LAST_IRQ_STATUS.load(Ordering::Acquire)
+}
+
+#[allow(dead_code)]
+pub fn irq_completion_calls() -> usize {
+    VIRTIO_RNG_IRQ_COMPLETION_CALLS.load(Ordering::Acquire)
+}
+
+#[allow(dead_code)]
+pub fn entropy_ready_checkpoints() -> usize {
+    VIRTIO_RNG_ENTROPY_READY_CHECKPOINTS.load(Ordering::Acquire)
+}
+
+#[allow(dead_code)]
+pub fn entropy_buffer_nonzero() -> bool {
+    let bytes = unsafe {
+        &(&raw const VIRTIO_RNG_ENTROPY_BUFFER)
+            .as_ref()
+            .unwrap()
+            .bytes
+    };
+    bytes.iter().any(|byte| *byte != 0)
+}
+
+fn entropy_buffer_request(kernel_image: &KernelImage) -> Result<(usize, u32), VirtioRngError> {
+    let virt = unsafe {
+        (&raw mut VIRTIO_RNG_ENTROPY_BUFFER)
+            .as_mut()
+            .ok_or(VirtioRngError::InvalidBuffer)?
+            .bytes
+            .as_mut_ptr() as usize
+    };
+    let phys = kernel_image
+        .runtime_to_phys(virt)
+        .ok_or(VirtioRngError::InvalidBuffer)?;
+    Ok((phys, VIRTIO_RNG_BUFFER_SIZE as u32))
+}
+
+fn live_setup_error() -> super::state::EventError {
+    super::state::EventError::failed(
+        super::state::EventErrorCode::ConditionFailed,
+        LifecycleEvent::Setup,
+        State::Base,
+        State::Ready,
+        State::Ready,
+    )
 }

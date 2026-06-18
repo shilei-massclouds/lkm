@@ -8,14 +8,46 @@ use super::{
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
     ioremap::IoMemoryMapping,
+    irq_time::{IrqHandlerKind, LogicalIrq},
 };
 use crate::{checkpoint, trace::Checkpoint};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 const VIRTIO_MMIO_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"virtio,mmio")];
 const VIRTIO_MMIO_MAGIC: u32 = u32::from_le_bytes(*b"virt");
 const VIRTIO_MMIO_VERSION_MIN: u32 = 1;
 const VIRTIO_MMIO_VERSION_MAX: u32 = 2;
 pub const VIRTIO_ID_RNG: u32 = 4;
+pub const VIRTIO_MMIO_GUEST_PAGE_SIZE: usize = 4096;
+pub const VIRTIO_MMIO_VRING_ALIGN: usize = 4096;
+pub const VIRTIO_MMIO_INT_VRING: u32 = 1 << 0;
+const VIRTIO_MMIO_DEVICE_FEATURES: usize = 0x010;
+const VIRTIO_MMIO_DEVICE_FEATURES_SEL: usize = 0x014;
+const VIRTIO_MMIO_DRIVER_FEATURES: usize = 0x020;
+const VIRTIO_MMIO_DRIVER_FEATURES_SEL: usize = 0x024;
+const VIRTIO_MMIO_GUEST_PAGE_SIZE_REG: usize = 0x028;
+const VIRTIO_MMIO_QUEUE_SEL: usize = 0x030;
+const VIRTIO_MMIO_QUEUE_NUM_MAX: usize = 0x034;
+const VIRTIO_MMIO_QUEUE_NUM: usize = 0x038;
+const VIRTIO_MMIO_QUEUE_ALIGN: usize = 0x03c;
+const VIRTIO_MMIO_QUEUE_PFN: usize = 0x040;
+const VIRTIO_MMIO_QUEUE_READY: usize = 0x044;
+const VIRTIO_MMIO_QUEUE_NOTIFY: usize = 0x050;
+const VIRTIO_MMIO_INTERRUPT_STATUS: usize = 0x060;
+const VIRTIO_MMIO_INTERRUPT_ACK: usize = 0x064;
+const VIRTIO_MMIO_STATUS: usize = 0x070;
+const VIRTIO_MMIO_QUEUE_DESC_LOW: usize = 0x080;
+const VIRTIO_MMIO_QUEUE_DESC_HIGH: usize = 0x084;
+const VIRTIO_MMIO_QUEUE_AVAIL_LOW: usize = 0x090;
+const VIRTIO_MMIO_QUEUE_AVAIL_HIGH: usize = 0x094;
+const VIRTIO_MMIO_QUEUE_USED_LOW: usize = 0x0a0;
+const VIRTIO_MMIO_QUEUE_USED_HIGH: usize = 0x0a4;
+const VIRTIO_CONFIG_S_ACKNOWLEDGE: u32 = 1;
+const VIRTIO_CONFIG_S_DRIVER: u32 = 2;
+const VIRTIO_CONFIG_S_DRIVER_OK: u32 = 4;
+const VIRTIO_CONFIG_S_FEATURES_OK: u32 = 8;
+
+static VIRTIO_MMIO_IRQ_HANDLER_CALLS: AtomicUsize = AtomicUsize::new(0);
 
 pub static VIRTIO_MMIO_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
     "virtio-mmio",
@@ -60,6 +92,10 @@ pub struct VirtioMmioTransportDevice {
     mapsize: usize,
     membase: usize,
     irq_source: Option<u32>,
+    logical_irq: LogicalIrq,
+    irq_mapping_ready: bool,
+    irq_handler_registered: bool,
+    irq_source_gate_open: bool,
     ioremapped: bool,
     vm_ioremap: bool,
     io_page_protection: bool,
@@ -81,6 +117,10 @@ impl VirtioMmioTransportDevice {
             mapsize: 0,
             membase: 0,
             irq_source: None,
+            logical_irq: LogicalIrq::invalid(),
+            irq_mapping_ready: false,
+            irq_handler_registered: false,
+            irq_source_gate_open: false,
             ioremapped: false,
             vm_ioremap: false,
             io_page_protection: false,
@@ -115,6 +155,22 @@ impl VirtioMmioTransportDevice {
 
     pub const fn irq_source(self) -> Option<u32> {
         self.irq_source
+    }
+
+    pub const fn logical_irq(self) -> LogicalIrq {
+        self.logical_irq
+    }
+
+    pub const fn irq_mapping_ready(self) -> bool {
+        self.irq_mapping_ready
+    }
+
+    pub const fn irq_handler_registered(self) -> bool {
+        self.irq_handler_registered
+    }
+
+    pub const fn irq_source_gate_open(self) -> bool {
+        self.irq_source_gate_open
     }
 
     pub const fn ioremapped(self) -> bool {
@@ -165,7 +221,12 @@ impl VirtioMmioTransportDevice {
     }
 
     pub const fn ready_for_virtio_core(self) -> bool {
-        self.header_valid() && self.ioremapped && self.mapsize != 0 && self.membase != 0
+        self.header_valid()
+            && self.ioremapped
+            && self.mapsize != 0
+            && self.membase != 0
+            && self.irq_mapping_ready
+            && self.irq_handler_registered
     }
 
     fn with_header(mut self, header: VirtioMmioHeader) -> Self {
@@ -190,6 +251,69 @@ impl VirtioMmioTransportDevice {
         self.vm_ioremap = mapping.uses_vm_ioremap();
         self.io_page_protection = mapping.uses_io_page_protection();
         self
+    }
+
+    fn bind_irq(mut self, context: &mut PlatformProbeContext<'_>) -> Self {
+        let Some(source) = self.irq_source else {
+            return self;
+        };
+        let Some(logical_irq) = context.map_plic_source(source) else {
+            return self;
+        };
+
+        self.logical_irq = logical_irq;
+        self.irq_mapping_ready = context
+            .plic_mapping_for_source(source)
+            .is_some_and(|mapping| {
+                mapping.logical_irq() == logical_irq
+                    && mapping.source_valid()
+                    && mapping.source_gate_defined()
+                    && mapping.source_gate_closed()
+                    && mapping.source_not_enabled()
+            });
+        if !self.irq_mapping_ready {
+            return self;
+        }
+
+        if context.request_irq(logical_irq, self.device_ref, IrqHandlerKind::VirtioMmio) {
+            self.irq_handler_registered = context
+                .irq_action_for_logical_irq(logical_irq)
+                .is_some_and(|action| {
+                    action.logical_irq() == logical_irq
+                        && action.device() == self.device_ref
+                        && action.handler_kind() == IrqHandlerKind::VirtioMmio
+                        && action.handler_bound()
+                        && action.mapped_irq_required()
+                        && action.dispatch_ready()
+                });
+        }
+        self
+    }
+
+    pub fn enable_irq_source_gate(
+        &mut self,
+        plic: &super::irq_time::Plic,
+        plic_irq_domain: &mut super::irq_time::PlicIrqDomain,
+    ) -> bool {
+        if self.irq_source_gate_open {
+            return true;
+        }
+        let Some(source) = self.irq_source else {
+            return false;
+        };
+        if !self.irq_mapping_ready || !self.logical_irq.is_valid() {
+            return false;
+        }
+        if plic_irq_domain.enable_source_gate(plic, source).is_err() {
+            return false;
+        }
+        self.irq_source_gate_open =
+            plic_irq_domain
+                .mapping_for_source(source)
+                .is_some_and(|mapping| {
+                    mapping.logical_irq() == self.logical_irq && mapping.source_gate_open()
+                });
+        self.irq_source_gate_open
     }
 }
 
@@ -265,6 +389,7 @@ fn virtio_mmio_probe(
     print_probe(transport);
 
     if transport.header_valid() {
+        let transport = transport.bind_irq(context);
         if context.register_virtio_mmio_device(transport).is_some() {
             ProbeResult::Bound
         } else {
@@ -325,6 +450,204 @@ fn read_mmio_u32(base: usize, offset: usize) -> u32 {
         return 0;
     };
     unsafe { core::ptr::read_volatile(addr as *const u32) }
+}
+
+fn write_mmio_u32(base: usize, offset: usize, value: u32) -> bool {
+    let Some(addr) = base.checked_add(offset) else {
+        return false;
+    };
+    unsafe {
+        core::ptr::write_volatile(addr as *mut u32, value);
+    }
+    true
+}
+
+fn write_mmio_u64_halves(base: usize, low_offset: usize, high_offset: usize, value: usize) -> bool {
+    write_mmio_u32(base, low_offset, value as u32)
+        && write_mmio_u32(base, high_offset, (value >> 32) as u32)
+}
+
+pub fn reset_status(transport: VirtioMmioTransportDevice) -> bool {
+    write_mmio_u32(transport.membase(), VIRTIO_MMIO_STATUS, 0)
+}
+
+pub fn driver_status_setup(transport: VirtioMmioTransportDevice) -> bool {
+    let base = transport.membase();
+    if !write_mmio_u32(base, VIRTIO_MMIO_STATUS, VIRTIO_CONFIG_S_ACKNOWLEDGE) {
+        return false;
+    }
+    if !write_mmio_u32(
+        base,
+        VIRTIO_MMIO_STATUS,
+        VIRTIO_CONFIG_S_ACKNOWLEDGE | VIRTIO_CONFIG_S_DRIVER,
+    ) {
+        return false;
+    }
+
+    let _ = write_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES_SEL, 0);
+    let _ = read_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES);
+    let _ = write_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES_SEL, 1);
+    let _ = read_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES);
+    let _ = write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL, 0);
+    let _ = write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES, 0);
+    let _ = write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL, 1);
+    let _ = write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES, 0);
+
+    if transport.version() == 2 {
+        if !write_mmio_u32(
+            base,
+            VIRTIO_MMIO_STATUS,
+            VIRTIO_CONFIG_S_ACKNOWLEDGE | VIRTIO_CONFIG_S_DRIVER | VIRTIO_CONFIG_S_FEATURES_OK,
+        ) {
+            return false;
+        }
+        let status = read_mmio_u32(base, VIRTIO_MMIO_STATUS);
+        if status & VIRTIO_CONFIG_S_FEATURES_OK == 0 {
+            return false;
+        }
+    }
+    true
+}
+
+pub fn driver_status_ready(transport: VirtioMmioTransportDevice) -> bool {
+    let status = read_mmio_u32(transport.membase(), VIRTIO_MMIO_STATUS);
+    write_mmio_u32(
+        transport.membase(),
+        VIRTIO_MMIO_STATUS,
+        status | VIRTIO_CONFIG_S_DRIVER_OK,
+    )
+}
+
+#[derive(Clone, Copy)]
+pub struct VirtioMmioQueueConfig {
+    pub queue_index: u16,
+    pub queue_size: u16,
+    pub desc_phys: usize,
+    pub avail_phys: usize,
+    pub used_phys: usize,
+}
+
+#[derive(Clone, Copy)]
+pub struct VirtioMmioQueueSetupResult {
+    pub queue_size: u16,
+    pub num_max: u16,
+    pub legacy_pfn_written: bool,
+    pub modern_addrs_written: bool,
+    pub queue_ready_written: bool,
+}
+
+impl VirtioMmioQueueSetupResult {}
+
+pub fn setup_queue(
+    transport: VirtioMmioTransportDevice,
+    config: VirtioMmioQueueConfig,
+) -> Option<VirtioMmioQueueSetupResult> {
+    let base = transport.membase();
+    write_mmio_u32(base, VIRTIO_MMIO_QUEUE_SEL, u32::from(config.queue_index));
+    let num_max = read_mmio_u32(base, VIRTIO_MMIO_QUEUE_NUM_MAX);
+    if num_max == 0 || config.queue_size == 0 || u32::from(config.queue_size) > num_max {
+        return None;
+    }
+
+    if transport.version() == 1 {
+        if !write_mmio_u32(
+            base,
+            VIRTIO_MMIO_GUEST_PAGE_SIZE_REG,
+            VIRTIO_MMIO_GUEST_PAGE_SIZE as u32,
+        ) {
+            return None;
+        }
+        if !write_mmio_u32(base, VIRTIO_MMIO_QUEUE_NUM, u32::from(config.queue_size)) {
+            return None;
+        }
+        if !write_mmio_u32(
+            base,
+            VIRTIO_MMIO_QUEUE_ALIGN,
+            VIRTIO_MMIO_VRING_ALIGN as u32,
+        ) {
+            return None;
+        }
+        let pfn = config.desc_phys >> 12;
+        if pfn >> 32 != 0 {
+            return None;
+        }
+        if !write_mmio_u32(base, VIRTIO_MMIO_QUEUE_PFN, pfn as u32) {
+            return None;
+        }
+        let num_max = u16::try_from(num_max).ok()?;
+        return Some(VirtioMmioQueueSetupResult {
+            queue_size: config.queue_size,
+            num_max,
+            legacy_pfn_written: true,
+            modern_addrs_written: false,
+            queue_ready_written: false,
+        });
+    }
+
+    if transport.version() == 2 {
+        if !write_mmio_u32(base, VIRTIO_MMIO_QUEUE_NUM, u32::from(config.queue_size))
+            || !write_mmio_u64_halves(
+                base,
+                VIRTIO_MMIO_QUEUE_DESC_LOW,
+                VIRTIO_MMIO_QUEUE_DESC_HIGH,
+                config.desc_phys,
+            )
+            || !write_mmio_u64_halves(
+                base,
+                VIRTIO_MMIO_QUEUE_AVAIL_LOW,
+                VIRTIO_MMIO_QUEUE_AVAIL_HIGH,
+                config.avail_phys,
+            )
+            || !write_mmio_u64_halves(
+                base,
+                VIRTIO_MMIO_QUEUE_USED_LOW,
+                VIRTIO_MMIO_QUEUE_USED_HIGH,
+                config.used_phys,
+            )
+            || !write_mmio_u32(base, VIRTIO_MMIO_QUEUE_READY, 1)
+        {
+            return None;
+        }
+        let num_max = u16::try_from(num_max).ok()?;
+        return Some(VirtioMmioQueueSetupResult {
+            queue_size: config.queue_size,
+            num_max,
+            legacy_pfn_written: false,
+            modern_addrs_written: true,
+            queue_ready_written: true,
+        });
+    }
+
+    None
+}
+
+pub fn notify_queue(transport: VirtioMmioTransportDevice, queue_index: u16) -> bool {
+    write_mmio_u32(
+        transport.membase(),
+        VIRTIO_MMIO_QUEUE_NOTIFY,
+        u32::from(queue_index),
+    )
+}
+
+pub fn handle_virtio_mmio_irq() {
+    VIRTIO_MMIO_IRQ_HANDLER_CALLS.fetch_add(1, Ordering::AcqRel);
+    let Some(transport) = crate::objects::virtio_rng::live_mmio_transport() else {
+        return;
+    };
+    let status = read_mmio_u32(transport.membase(), VIRTIO_MMIO_INTERRUPT_STATUS);
+    if status == 0 {
+        return;
+    }
+    let _ = write_mmio_u32(transport.membase(), VIRTIO_MMIO_INTERRUPT_ACK, status);
+    crate::objects::virtio_rng::note_mmio_irq(status);
+    if status & VIRTIO_MMIO_INT_VRING != 0 {
+        crate::objects::virtio_rng::handle_irq_completion();
+    }
+}
+
+#[allow(dead_code)]
+pub fn irq_handler_calls() -> usize {
+    VIRTIO_MMIO_IRQ_HANDLER_CALLS.load(Ordering::Acquire)
 }
 
 fn print_probe(transport: VirtioMmioTransportDevice) {

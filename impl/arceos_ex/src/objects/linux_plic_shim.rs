@@ -1253,6 +1253,7 @@ fn linux_irq_handler_kind_code(kind: IrqHandlerKind) -> usize {
     match kind {
         IrqHandlerKind::None => 0,
         IrqHandlerKind::Ns16550aUart => 1,
+        IrqHandlerKind::VirtioMmio => 2,
     }
 }
 

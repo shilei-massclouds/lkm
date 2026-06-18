@@ -30,6 +30,8 @@ mod trace;
 mod uart_irq_chain;
 #[cfg(checkpoint_handler_virtio_bus)]
 mod virtio_bus;
+#[cfg(checkpoint_handler_virtio_rng)]
+mod virtio_rng;
 
 #[cfg(any(
     checkpoint_sbi_char,
@@ -41,7 +43,8 @@ mod virtio_bus;
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
-    checkpoint_handler_virtio_bus
+    checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_rng
 ))]
 use crate::checkpoint::kunit::{KtapSink, Sink};
 use crate::{context::Context, trace::Checkpoint};
@@ -75,7 +78,8 @@ pub enum HandlerScope {
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
-    checkpoint_handler_virtio_bus
+    checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_rng
 ))]
 #[allow(dead_code)]
 pub enum HandlerRun {
@@ -97,7 +101,8 @@ pub struct Handler {
         checkpoint_handler_scheduler_action,
         checkpoint_handler_console_handoff,
         checkpoint_handler_uart_irq_chain,
-        checkpoint_handler_virtio_bus
+        checkpoint_handler_virtio_bus,
+        checkpoint_handler_virtio_rng
     ))]
     pub run: HandlerRun,
 }
@@ -123,6 +128,8 @@ const POST_VM_HANDLERS: &[Handler] = &[
     uart_irq_chain::HANDLER,
     #[cfg(checkpoint_handler_virtio_bus)]
     virtio_bus::HANDLER,
+    #[cfg(checkpoint_handler_virtio_rng)]
+    virtio_rng::HANDLER,
 ];
 
 pub const fn has_post_vm_handlers() -> bool {
@@ -138,7 +145,8 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
-    checkpoint_handler_virtio_bus
+    checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_rng
 ))]
 pub const fn kunit_case_count() -> usize {
     let mut count = 0usize;
@@ -178,6 +186,10 @@ pub const fn kunit_case_count() -> usize {
     {
         count += virtio_bus::KUNIT_CASE_COUNT;
     }
+    #[cfg(checkpoint_handler_virtio_rng)]
+    {
+        count += virtio_rng::KUNIT_CASE_COUNT;
+    }
     count
 }
 
@@ -191,7 +203,8 @@ pub const fn kunit_case_count() -> usize {
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
-    checkpoint_handler_virtio_bus
+    checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_rng
 ))]
 pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     let mut current_priority = next_priority(checkpoint, None);
@@ -228,7 +241,8 @@ pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     checkpoint_handler_scheduler_action,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
-    checkpoint_handler_virtio_bus
+    checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_rng
 )))]
 pub fn dispatch(_checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
     CheckpointOutcome::Continue

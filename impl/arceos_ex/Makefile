@@ -20,7 +20,7 @@ endif
 endif
 PROBE_FILE_LIST := $(if $(PROBE_FILE),$(strip $(shell sed -e 's/#.*//' "$(PROBE_FILE)")),)
 PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST))
-KNOWN_PROBES := memblock page-allocator earlycon kernel-init-task of-platform scheduler-action console-handoff uart-irq-chain virtio-bus vmalloc-mapping linux-plic smoke
+KNOWN_PROBES := memblock page-allocator earlycon kernel-init-task of-platform scheduler-action console-handoff uart-irq-chain virtio-bus virtio-rng vmalloc-mapping linux-plic smoke
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))

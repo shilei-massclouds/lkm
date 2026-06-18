@@ -430,28 +430,41 @@ registration 等窄能力。普通 driver probe 不得直接接收 `&mut Context
 `VirtioBus` 后应删除 smoke 对它的依赖。app smoke 可以继续覆盖纯函数/fixture 层的 header classifier
 或后续 fake integration，但不应读取启动期临时 summary 来替代 `VirtioBus` 事实。
 
-首轮只建模和实现 virtio core bus/device 注册；virtqueue、feature negotiation、driver binding、
-`VirtioRngDevice` request/completion 和 IRQ/notify 闭合按 roadmap 后续步骤推进。不得为了 KUnit/smoke
-在普通对象上增加测试专用 method；缺少可观测边界时，应先补 model/coding 规格中的正式对象 API 或只读
-checkpoint observer。
+virtio core bus/device 注册完成后，`virtio-rng` 的真实 QEMU 路径必须继续走正式生产链路：
+`VirtioBus` 上出现 generic `VirtioDevice` 后，由 `VirtioRngDriver` 匹配 `device_id == VIRTIO_ID_RNG`，
+probe 生成 `VirtioRngDevice`，再按 Linux `probe_common()` 语义建立 single input queue、设置 device ready
+并提交一次 pending entropy request。不得由 KUnit handler 或 app smoke 触发真实 probe/request/IRQ action；
+缺少可观测边界时，应先补 model/coding 规格中的正式对象 API 或只读 checkpoint observer。
 
 `VirtioSplitRing` / `VirtQueue` 首轮应单独放在 `objects::virtio_ring`，作为可复用 ring/queue 对象，而不是塞入
-`virtio.rs`。首轮只支持 single queue、split ring、direct descriptor、单个 input buffer、`add_inbuf`、
-`kick` 记录、fake used completion 和 `get_buf`；packed ring、indirect descriptor、event idx、多队列、
-真实 MMIO notify/IRQ、DMA API/cache maintenance、reset/remove/suspend/resume 必须显式 deferred。实现不得把
-smoke 中的小队列容量固化为编译期固定数组；ring backing 应按设备给出的 `queue_size` 建立，当前实现可以用
-`Vec` 作为临时 backing，后续真实路径再替换为 DMA/coherent allocation。对象 API
-和 fake integration 使用 smoke 覆盖，真实 QEMU `virtio-rng-device` completion 后续只通过 checkpoint/KUnit
-只读 observer 检查，不得让 KUnit handler 调用 ring action 或伪造 completion。
+`virtio.rs`。对象/fake integration 路径继续支持 single queue、split ring、direct descriptor、单个 input
+buffer、`add_inbuf`、`kick` 记录、fake used completion 和 `get_buf`；真实 QEMU 路径必须增加设备可见的
+split-ring backing、MMIO queue setup、`QueueNotify` 和 IRQ 后 `get_buf`。当前真实路径可以使用一个页对齐
+static coherent backing 作为首轮受限实现，并通过 `KernelImage::runtime_to_phys()` 计算设备可见物理地址；
+通用 DMA/coherent allocator、cache maintenance、SWIOTLB/IOMMU、packed ring、indirect descriptor、event idx、
+多队列、reset/remove/suspend/resume 仍显式 deferred。实现不得把 smoke 中的小队列容量固化为编译期固定数组；
+fake ring backing 应按设备给出的 `queue_size` 建立，真实 static backing 的容量必须由 queue setup 检查
+`QUEUE_NUM_MAX` 后受控选择。
 
-`VirtioRngDriver` / `VirtioRngDevice` fake integration 首轮应单独放在 `objects::virtio_rng`。driver probe
+`virtio-mmio` queue setup 必须按 Linux 6.12.37 `drivers/virtio/virtio_mmio.c` 的分支建模：version 1 legacy
+设备写 `GUEST_PAGE_SIZE`、`QUEUE_SEL`、`QUEUE_NUM`、`QUEUE_ALIGN` 和 `QUEUE_PFN`；version 2 modern 设备写
+`QUEUE_SEL`、`QUEUE_NUM`、`QUEUE_DESC/AVAIL/USED` 低高地址和 `QUEUE_READY`。当前 QEMU `virtio-rng-device`
+可实际走 legacy 或 modern 任一路径，但代码必须从 MMIO `VERSION` 判定，不得硬编码为单一路径。`QueueNotify`
+必须写 queue index；IRQ handler 必须读取 `INTERRUPT_STATUS`，写回 `INTERRUPT_ACK`，仅在 vring interrupt bit
+存在时调用 ring/rng completion callback。
+
+`VirtioRngDriver` / `VirtioRngDevice` fake integration 和真实 QEMU 最小路径均放在 `objects::virtio_rng`。driver probe
 输入必须是 generic `VirtioDevice`，并通过正式 `device_id == VIRTIO_ID_RNG` 匹配；不得为了 smoke 新增绕过
 `VirtioDevice` / `VirtQueue` 的测试专用构造或直接写内部状态的后门。`VirtioRngDevice` 持有 single input
 `VirtQueue`，正式 API 只覆盖 `probe`、`request_entropy`、`fake_transport_complete`、`complete_entropy`
 和 `cleanup/remove` 边界；fake completion 可以封装调用 `VirtQueue::fake_complete_used()`，但仍是对象 API，
 不是 KUnit/checkpoint handler 行为。首轮只维护 `data_avail`、`data_idx`、request/completion counters
-和 pending request 状态；`hwrng_register()`、随机池、文件系统、用户态 read、真实 MMIO notify/IRQ、
-freeze/restore 和完整 reset/remove 资源回收必须显式 deferred。
+和 pending request 状态。真实路径中 `request_entropy()` 必须提交真实 input buffer、kick/notify queue；
+virtio-mmio IRQ handler 调用 `complete_entropy()` 后应触发 `VirtioRng.EntropyReady` checkpoint，由
+checkpoint/KUnit 只读 observer 检查 `device_id == 4`、request/notify/irq/get_buf/completion 计数、`len > 0`
+和 data buffer 非全零。若启动路径需要等待真实完成，只能实现为生产对象的 bounded wait/poll 边界，且不得由
+KUnit handler 修改普通对象。`hwrng_register()`、随机池、文件系统、用户态 read、freeze/restore 和完整
+reset/remove 资源回收必须显式 deferred。
 
 console/earlycon handoff 的实现必须保持 Linux-like `register_console()` 边界，但第一轮仍只要求对象级可观测事实。
 正式 `DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，

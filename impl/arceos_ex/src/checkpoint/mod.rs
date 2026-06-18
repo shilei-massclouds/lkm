@@ -9,6 +9,7 @@ pub mod handlers;
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
+    checkpoint_handler_virtio_rng,
     checkpoint_handler_of_platform
 ))]
 mod kunit;

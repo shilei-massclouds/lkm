@@ -1,11 +1,13 @@
 /*
  * Virtio split virtqueue model, first slice.
  *
- * This models the reusable virtio_ring.c split-ring boundary needed before
- * virtio-rng fake integration. The first slice is deliberately small:
- * one queue, direct descriptors, add_inbuf, fake used completion, and get_buf.
- * Packed rings, indirect descriptors, event idx, real MMIO notify/IRQ, DMA API
- * and cache maintenance stay deferred.
+ * This models the reusable virtio_ring.c split-ring boundary needed by
+ * virtio-rng. The first fake slice used Vec-backed descriptors and fake used
+ * completions. The real QEMU slice adds one device-visible split ring backing,
+ * MMIO notify, and used-ring get_buf after a virtio-mmio interrupt. Packed
+ * rings, indirect descriptors, event idx, multi-queue devices, a general DMA
+ * allocator, cache maintenance, reset/remove, suspend/resume, and filesystem
+ * users stay deferred.
  */
 
 predicate virtio_split_ring_allocated<T>(ring: T) -> bool;
@@ -20,14 +22,24 @@ predicate virtio_split_ring_direct_descriptors_only<T>(ring: T) -> bool;
 predicate virtio_split_ring_indirect_descriptors_deferred<T>(ring: T) -> bool;
 predicate virtio_split_ring_event_idx_deferred<T>(ring: T) -> bool;
 predicate virtio_split_ring_dma_cache_deferred<T>(ring: T) -> bool;
+predicate virtio_split_ring_static_coherent_backing_ready<T>(ring: T) -> bool;
+predicate virtio_split_ring_desc_avail_used_layout_ready<T>(ring: T) -> bool;
+predicate virtio_split_ring_device_visible_phys_addr_ready<T>(ring: T) -> bool;
 
 predicate virtqueue_split_ring_bound<T, R>(queue: T, ring: R) -> bool;
+predicate virtqueue_index_bound<T>(queue: T) -> bool;
+predicate virtqueue_num_max_observed<T>(queue: T) -> bool;
+predicate virtqueue_legacy_mmio_queue_pfn_written<T>(queue: T) -> bool;
+predicate virtqueue_modern_mmio_queue_addrs_written<T>(queue: T) -> bool;
+predicate virtqueue_mmio_queue_ready_written<T>(queue: T) -> bool;
 predicate virtqueue_input_buffer_added<T>(queue: T) -> bool;
 predicate virtqueue_free_descriptor_consumed<T>(queue: T) -> bool;
 predicate virtqueue_avail_index_advanced<T>(queue: T) -> bool;
 predicate virtqueue_kick_recorded<T>(queue: T) -> bool;
+predicate virtqueue_mmio_notify_written<T>(queue: T) -> bool;
 predicate virtqueue_descriptor_exhaustion_rejected<T>(queue: T) -> bool;
 predicate virtqueue_fake_completion_recorded<T>(queue: T) -> bool;
+predicate virtqueue_real_used_completion_observed<T>(queue: T) -> bool;
 predicate virtqueue_used_index_advanced<T>(queue: T) -> bool;
 predicate virtqueue_get_buf_returns_len<T>(queue: T) -> bool;
 predicate virtqueue_get_buf_empty_rejected<T>(queue: T) -> bool;
@@ -56,6 +68,9 @@ object VirtioSplitRing: ResourceObject {
                     virtio_split_ring_indirect_descriptors_deferred(self);
                     virtio_split_ring_event_idx_deferred(self);
                     virtio_split_ring_dma_cache_deferred(self);
+                    virtio_split_ring_static_coherent_backing_ready(self);
+                    virtio_split_ring_desc_avail_used_layout_ready(self);
+                    virtio_split_ring_device_visible_phys_addr_ready(self);
                 }
             }
         }
@@ -75,6 +90,9 @@ object VirtioSplitRing: ResourceObject {
             virtio_split_ring_indirect_descriptors_deferred(self);
             virtio_split_ring_event_idx_deferred(self);
             virtio_split_ring_dma_cache_deferred(self);
+            virtio_split_ring_static_coherent_backing_ready(self);
+            virtio_split_ring_desc_avail_used_layout_ready(self);
+            virtio_split_ring_device_visible_phys_addr_ready(self);
         }
     }
 }
@@ -91,6 +109,11 @@ object VirtQueue: ResourceObject {
 
                 ensures {
                     virtqueue_split_ring_bound(self, VirtioSplitRing);
+                    virtqueue_index_bound(self);
+                    virtqueue_num_max_observed(self);
+                    virtqueue_legacy_mmio_queue_pfn_written(self);
+                    virtqueue_modern_mmio_queue_addrs_written(self);
+                    virtqueue_mmio_queue_ready_written(self);
                 }
             }
         }
@@ -99,6 +122,7 @@ object VirtQueue: ResourceObject {
     state State::Ready {
         invariant {
             virtqueue_split_ring_bound(self, VirtioSplitRing);
+            virtqueue_index_bound(self);
         }
 
         processes {
@@ -122,6 +146,7 @@ object VirtQueue: ResourceObject {
                 }
                 ensures {
                     virtqueue_kick_recorded(self);
+                    virtqueue_mmio_notify_written(self);
                 }
             }
 
@@ -139,7 +164,7 @@ object VirtQueue: ResourceObject {
             Action::GetBuf {
                 state_effect: StateEffect::None;
                 depends_on {
-                    virtqueue_fake_completion_recorded(self);
+                    virtqueue_fake_completion_recorded(self) || virtqueue_real_used_completion_observed(self);
                 }
                 ensures {
                     virtqueue_get_buf_returns_len(self);

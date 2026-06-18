@@ -115,6 +115,14 @@ impl VirtioDevice {
             VirtioTransportDevice::Mmio(transport) => Some(transport),
         }
     }
+
+    pub fn update_mmio_transport(&mut self, transport: VirtioMmioTransportDevice) -> bool {
+        if !self.transport_is_mmio() || self.platform_device_ref() != transport.device_ref() {
+            return false;
+        }
+        self.transport = VirtioTransportDevice::Mmio(transport);
+        true
+    }
 }
 
 pub struct VirtioBus {
