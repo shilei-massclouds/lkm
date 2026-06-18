@@ -1,14 +1,15 @@
 use super::{
-    config::Config,
     device::DeviceRef,
     device_tree::{DeviceNodeId, DeviceTree},
-    driver::{DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, ProbeResult},
+    driver::{
+        DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, PlatformProbeResources,
+        ProbeResult,
+    },
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
-    ioremap::{IoMemoryMapping, Ioremap},
-    irq_time::{IrqHandlerRegistry, PlicIrqDomain},
-    mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
+    ioremap::IoMemoryMapping,
 };
+use crate::{checkpoint, trace::Checkpoint};
 
 const VIRTIO_MMIO_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"virtio,mmio")];
 const VIRTIO_MMIO_MAGIC: u32 = u32::from_le_bytes(*b"virt");
@@ -27,22 +28,30 @@ pub const VIRTIO_MMIO_PLATFORM_DRIVER_REF: DeviceDriverRef =
 
 pub fn virtio_mmio_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
     crate::objects::printk::write_str("initcall: virtio_mmio_platform_driver_init\n");
-    ctx.platform_bus.platform_driver_register(
-        VIRTIO_MMIO_PLATFORM_DRIVER_REF,
-        &ctx.device_tree,
-        &mut ctx.vmalloc_allocator,
-        &mut ctx.page_table_caches,
-        &mut ctx.page_allocator,
-        &ctx.page_metadata_map,
-        &ctx.config,
-        &mut ctx.ioremap,
-        &mut ctx.plic_irq_domain,
-        &mut ctx.irq_handler_registry,
-    )
+    let mut resources = PlatformProbeResources {
+        device_tree: &ctx.device_tree,
+        vmalloc_allocator: &mut ctx.vmalloc_allocator,
+        page_table_caches: &mut ctx.page_table_caches,
+        page_allocator: &mut ctx.page_allocator,
+        page_metadata_map: &ctx.page_metadata_map,
+        config: &ctx.config,
+        ioremap: &mut ctx.ioremap,
+        plic_irq_domain: &mut ctx.plic_irq_domain,
+        irq_handler_registry: &mut ctx.irq_handler_registry,
+        virtio_bus: &mut ctx.virtio_bus,
+    };
+    let result = ctx
+        .platform_bus
+        .platform_driver_register(VIRTIO_MMIO_PLATFORM_DRIVER_REF, &mut resources);
+    if result == InitcallReturn::Ok && ctx.virtio_bus.device_count() != 0 {
+        checkpoint::dispatch(Checkpoint::VirtioBusDeviceAdded, ctx);
+    }
+    result
 }
 
 crate::device_initcall!(virtio_mmio_platform_driver_init);
 
+#[allow(dead_code)]
 pub fn is_virtio_mmio_platform_driver(driver: DeviceDriverRef) -> bool {
     driver == VIRTIO_MMIO_PLATFORM_DRIVER_REF
 }
@@ -57,6 +66,7 @@ pub enum VirtioMmioHeaderStatus {
 }
 
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub struct VirtioMmioTransportDevice {
     device_ref: DeviceRef,
     node_id: DeviceNodeId,
@@ -75,6 +85,7 @@ pub struct VirtioMmioTransportDevice {
     rng_candidate: bool,
 }
 
+#[allow(dead_code)]
 impl VirtioMmioTransportDevice {
     const fn empty() -> Self {
         Self {
@@ -124,8 +135,20 @@ impl VirtioMmioTransportDevice {
         self.ioremapped
     }
 
+    pub const fn vm_ioremap(self) -> bool {
+        self.vm_ioremap
+    }
+
+    pub const fn io_page_protection(self) -> bool {
+        self.io_page_protection
+    }
+
     pub const fn header_valid(self) -> bool {
         matches!(self.header_status, VirtioMmioHeaderStatus::Valid)
+    }
+
+    pub const fn header_status(self) -> VirtioMmioHeaderStatus {
+        self.header_status
     }
 
     pub const fn placeholder_device(self) -> bool {
@@ -143,8 +166,20 @@ impl VirtioMmioTransportDevice {
         self.version
     }
 
+    pub const fn device_id(self) -> u32 {
+        self.device_id
+    }
+
     pub const fn vendor_id(self) -> u32 {
         self.vendor_id
+    }
+
+    pub const fn rng_candidate(self) -> bool {
+        self.rng_candidate
+    }
+
+    pub const fn ready_for_virtio_core(self) -> bool {
+        self.header_valid() && self.ioremapped && self.mapsize != 0 && self.membase != 0
     }
 
     fn with_header(mut self, header: VirtioMmioHeader) -> Self {
@@ -169,89 +204,6 @@ impl VirtioMmioTransportDevice {
         self.vm_ioremap = mapping.uses_vm_ioremap();
         self.io_page_protection = mapping.uses_io_page_protection();
         self
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct VirtioMmioProbeSummary {
-    probe_called: bool,
-    matched_devices: usize,
-    transport_count: usize,
-    placeholder_count: usize,
-    invalid_magic_count: usize,
-    unsupported_version_count: usize,
-    rng_candidate_count: usize,
-    last_transport: VirtioMmioTransportDevice,
-}
-
-impl VirtioMmioProbeSummary {
-    const fn new() -> Self {
-        Self {
-            probe_called: false,
-            matched_devices: 0,
-            transport_count: 0,
-            placeholder_count: 0,
-            invalid_magic_count: 0,
-            unsupported_version_count: 0,
-            rng_candidate_count: 0,
-            last_transport: VirtioMmioTransportDevice::empty(),
-        }
-    }
-
-    pub const fn probe_called(self) -> bool {
-        self.probe_called
-    }
-
-    pub const fn matched_devices(self) -> usize {
-        self.matched_devices
-    }
-
-    pub const fn transport_count(self) -> usize {
-        self.transport_count
-    }
-
-    pub const fn placeholder_count(self) -> usize {
-        self.placeholder_count
-    }
-
-    pub const fn invalid_magic_count(self) -> usize {
-        self.invalid_magic_count
-    }
-
-    pub const fn unsupported_version_count(self) -> usize {
-        self.unsupported_version_count
-    }
-
-    pub const fn rng_candidate_count(self) -> usize {
-        self.rng_candidate_count
-    }
-
-    pub const fn last_transport(self) -> VirtioMmioTransportDevice {
-        self.last_transport
-    }
-
-    fn record(&mut self, transport: VirtioMmioTransportDevice) {
-        self.probe_called = true;
-        self.matched_devices = self.matched_devices.saturating_add(1);
-        self.last_transport = transport;
-        match transport.header_status {
-            VirtioMmioHeaderStatus::Valid => {
-                self.transport_count = self.transport_count.saturating_add(1);
-                if transport.rng_candidate {
-                    self.rng_candidate_count = self.rng_candidate_count.saturating_add(1);
-                }
-            }
-            VirtioMmioHeaderStatus::InvalidMagic => {
-                self.invalid_magic_count = self.invalid_magic_count.saturating_add(1);
-            }
-            VirtioMmioHeaderStatus::UnsupportedVersion => {
-                self.unsupported_version_count = self.unsupported_version_count.saturating_add(1);
-            }
-            VirtioMmioHeaderStatus::PlaceholderDevice => {
-                self.placeholder_count = self.placeholder_count.saturating_add(1);
-            }
-            VirtioMmioHeaderStatus::Unknown => {}
-        }
     }
 }
 
@@ -306,34 +258,21 @@ impl VirtioMmioHeader {
     }
 }
 
-static mut VIRTIO_MMIO_PROBE_SUMMARY: VirtioMmioProbeSummary = VirtioMmioProbeSummary::new();
-
-pub fn probe_summary() -> VirtioMmioProbeSummary {
-    unsafe { *(&raw const VIRTIO_MMIO_PROBE_SUMMARY).as_ref().unwrap() }
-}
-
 fn virtio_mmio_probe(
-    device_tree: &DeviceTree,
-    vmalloc_allocator: &mut VmallocAllocator,
-    page_table_caches: &mut PageTableCaches,
-    page_allocator: &mut PageAllocator,
-    page_metadata_map: &PageMetadataMap,
-    config: &Config,
-    ioremap: &mut Ioremap,
-    _plic_irq_domain: &mut PlicIrqDomain,
-    _irq_handler_registry: &mut IrqHandlerRegistry,
+    resources: &mut PlatformProbeResources<'_>,
     device: DeviceRef,
     node_id: DeviceNodeId,
 ) -> ProbeResult {
-    let Some(base_transport) = build_transport_from_node(device_tree, device, node_id) else {
+    let Some(base_transport) = build_transport_from_node(resources.device_tree, device, node_id)
+    else {
         return ProbeResult::Deferred;
     };
-    let Some(mapping) = ioremap.map_device_mmio(
-        vmalloc_allocator,
-        page_table_caches,
-        page_allocator,
-        page_metadata_map,
-        config,
+    let Some(mapping) = resources.ioremap.map_device_mmio(
+        resources.vmalloc_allocator,
+        resources.page_table_caches,
+        resources.page_allocator,
+        resources.page_metadata_map,
+        resources.config,
         device,
         base_transport.mapbase,
         base_transport.mapsize,
@@ -344,11 +283,18 @@ fn virtio_mmio_probe(
     let transport = base_transport.bind_ioremap(mapping);
     let header = read_header_from_mmio(transport.membase);
     let transport = transport.with_header(header);
-    record_probe(transport);
     print_probe(transport);
 
     if transport.header_valid() {
-        ProbeResult::Bound
+        if resources
+            .virtio_bus
+            .register_mmio_device(transport)
+            .is_some()
+        {
+            ProbeResult::Bound
+        } else {
+            ProbeResult::Deferred
+        }
     } else {
         ProbeResult::Rejected
     }
@@ -404,13 +350,6 @@ fn read_mmio_u32(base: usize, offset: usize) -> u32 {
         return 0;
     };
     unsafe { core::ptr::read_volatile(addr as *const u32) }
-}
-
-fn record_probe(transport: VirtioMmioTransportDevice) {
-    unsafe {
-        let summary = (&raw mut VIRTIO_MMIO_PROBE_SUMMARY).as_mut().unwrap();
-        summary.record(transport);
-    }
 }
 
 fn print_probe(transport: VirtioMmioTransportDevice) {

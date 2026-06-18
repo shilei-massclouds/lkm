@@ -1,13 +1,14 @@
 use super::{
-    config::Config,
     device::DeviceRef,
     device_tree::{DeviceNodeId, DeviceTree},
-    driver::{DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, ProbeResult},
+    driver::{
+        DeviceDriverRef, OfMatchEntry, OfMatchTable, PlatformDriver, PlatformProbeResources,
+        ProbeResult,
+    },
     fdt_reader::{read_be_u32, read_cells},
     initcall::{ContextRef, InitcallReturn},
-    ioremap::{IoMemoryMapping, Ioremap},
+    ioremap::IoMemoryMapping,
     irq_time::{IrqHandlerKind, IrqHandlerRegistry, LogicalIrq, PlicIrqDomain},
-    mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
     printk,
 };
 use crate::{arch::riscv64::csr, trace, trace::Checkpoint};
@@ -78,8 +79,7 @@ pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
     let ioremap = &mut ctx.ioremap;
     let plic_irq_domain = &mut ctx.plic_irq_domain;
     let irq_handler_registry = &mut ctx.irq_handler_registry;
-    ctx.platform_bus.platform_driver_register(
-        NS16550A_PLATFORM_DRIVER_REF,
+    let mut resources = PlatformProbeResources {
         device_tree,
         vmalloc_allocator,
         page_table_caches,
@@ -89,7 +89,10 @@ pub fn ns16550a_platform_driver_init(ctx: ContextRef<'_>) -> InitcallReturn {
         ioremap,
         plic_irq_domain,
         irq_handler_registry,
-    )
+        virtio_bus: &mut ctx.virtio_bus,
+    };
+    ctx.platform_bus
+        .platform_driver_register(NS16550A_PLATFORM_DRIVER_REF, &mut resources)
 }
 
 crate::device_initcall!(ns16550a_platform_driver_init);
@@ -2244,27 +2247,19 @@ pub fn handoff_triggered() -> bool {
 }
 
 fn ns16550a_probe(
-    device_tree: &DeviceTree,
-    vmalloc_allocator: &mut VmallocAllocator,
-    page_table_caches: &mut PageTableCaches,
-    page_allocator: &mut PageAllocator,
-    page_metadata_map: &PageMetadataMap,
-    config: &Config,
-    ioremap: &mut Ioremap,
-    plic_irq_domain: &mut PlicIrqDomain,
-    irq_handler_registry: &mut IrqHandlerRegistry,
+    resources: &mut PlatformProbeResources<'_>,
     device: DeviceRef,
     node_id: DeviceNodeId,
 ) -> ProbeResult {
-    let Some(mut port) = build_uart8250_port(device_tree, device, node_id) else {
+    let Some(mut port) = build_uart8250_port(resources.device_tree, device, node_id) else {
         return ProbeResult::Deferred;
     };
-    let Some(mapping) = ioremap.map_device_mmio(
-        vmalloc_allocator,
-        page_table_caches,
-        page_allocator,
-        page_metadata_map,
-        config,
+    let Some(mapping) = resources.ioremap.map_device_mmio(
+        resources.vmalloc_allocator,
+        resources.page_table_caches,
+        resources.page_allocator,
+        resources.page_metadata_map,
+        resources.config,
         device,
         port.mapbase,
         port.mapsize,
@@ -2272,16 +2267,20 @@ fn ns16550a_probe(
         return ProbeResult::Deferred;
     };
     bind_ioremap_mapping(&mut port, mapping);
-    if !bind_irq_resource(&mut port, device_tree, plic_irq_domain) {
+    if !bind_irq_resource(&mut port, resources.device_tree, resources.plic_irq_domain) {
         return ProbeResult::Deferred;
     }
-    if !bind_irq_handler(&mut port, plic_irq_domain, irq_handler_registry) {
+    if !bind_irq_handler(
+        &mut port,
+        resources.plic_irq_domain,
+        resources.irq_handler_registry,
+    ) {
         return ProbeResult::Deferred;
     }
 
-    let stdout_path_available = device_tree.stdout_path_available();
+    let stdout_path_available = resources.device_tree.stdout_path_available();
     let stdout_path_matched =
-        stdout_path_available && device_tree.stdout_path_selects(port.node_id);
+        stdout_path_available && resources.device_tree.stdout_path_selects(port.node_id);
     let serial_console_registered =
         stdout_path_matched && printk::register_serial8250_console(true);
     let write_backend = if serial_console_registered {

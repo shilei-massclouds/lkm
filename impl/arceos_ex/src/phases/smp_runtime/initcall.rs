@@ -37,6 +37,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.driver_core_base, &ctx.static_objects)?;
     ctx.platform_bus
         .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device)?;
+    ctx.virtio_bus.setup(&ctx.platform_bus)?;
     ctx.driver_core_deferred.setup(&ctx.platform_bus)?;
     ctx.irq_proc_view_deferred.setup(
         &ctx.driver_core_base,
@@ -90,6 +91,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.driver_core_base,
         &ctx.platform_bus_root_device,
         &ctx.platform_bus,
+        &ctx.virtio_bus,
         &ctx.driver_core_deferred,
         &ctx.irq_proc_view_deferred,
         &ctx.ctor_table,
@@ -208,6 +210,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.driver_core_base,
         &ctx.platform_bus_root_device,
         &ctx.platform_bus,
+        &ctx.virtio_bus,
         &ctx.driver_core_deferred,
         &ctx.irq_proc_view_deferred,
         &ctx.ctor_table,

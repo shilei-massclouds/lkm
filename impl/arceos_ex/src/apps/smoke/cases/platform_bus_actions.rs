@@ -6,12 +6,13 @@ use crate::{
     context::context_ref,
     objects::{
         device::DeviceRef,
-        driver::MOCK_PLATFORM_DRIVER_REF,
+        driver::{PlatformProbeResources, MOCK_PLATFORM_DRIVER_REF},
         initcall::PlatformBus,
         ioremap::Ioremap,
         irq_time::{IrqHandlerRegistry, PlicIrqDomain},
         mm_core::{PageAllocator, PageTableCaches, VmallocAllocator},
         state::State,
+        virtio::VirtioBus,
     },
 };
 
@@ -67,6 +68,7 @@ struct ProbeSupport {
     ioremap: Ioremap,
     plic_irq_domain: PlicIrqDomain,
     irq_handler_registry: IrqHandlerRegistry,
+    virtio_bus: VirtioBus,
 }
 
 impl ProbeSupport {
@@ -78,6 +80,22 @@ impl ProbeSupport {
             ioremap: Ioremap::new(),
             plic_irq_domain: PlicIrqDomain::new(),
             irq_handler_registry: IrqHandlerRegistry::new(),
+            virtio_bus: VirtioBus::new(),
+        }
+    }
+
+    fn resources<'a>(&'a mut self, ctx: &'a crate::context::Context) -> PlatformProbeResources<'a> {
+        PlatformProbeResources {
+            device_tree: &ctx.device_tree,
+            vmalloc_allocator: &mut self.vmalloc_allocator,
+            page_table_caches: &mut self.page_table_caches,
+            page_allocator: &mut self.page_allocator,
+            page_metadata_map: &ctx.page_metadata_map,
+            config: &ctx.config,
+            ioremap: &mut self.ioremap,
+            plic_irq_domain: &mut self.plic_irq_domain,
+            irq_handler_registry: &mut self.irq_handler_registry,
+            virtio_bus: &mut self.virtio_bus,
         }
     }
 }
@@ -143,18 +161,10 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
         assertions.assert_ok("probe driver deferred", {
             let ctx = context_ref();
             let mut support = ProbeSupport::new();
-            self.fixture.bus.probe_driver(
-                MOCK_PLATFORM_DRIVER_REF,
-                &ctx.device_tree,
-                &mut support.vmalloc_allocator,
-                &mut support.page_table_caches,
-                &mut support.page_allocator,
-                &ctx.page_metadata_map,
-                &ctx.config,
-                &mut support.ioremap,
-                &mut support.plic_irq_domain,
-                &mut support.irq_handler_registry,
-            )
+            let mut resources = support.resources(ctx);
+            self.fixture
+                .bus
+                .probe_driver(MOCK_PLATFORM_DRIVER_REF, &mut resources)
         });
         assertions.assert(
             "probe driver scanned devices",
@@ -228,18 +238,10 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
         assertions.assert_fail("probe device before setup", {
             let ctx = context_ref();
             let mut support = ProbeSupport::new();
-            self.fixture.bus.probe_device(
-                DeviceRef::new(usize::MAX),
-                &ctx.device_tree,
-                &mut support.vmalloc_allocator,
-                &mut support.page_table_caches,
-                &mut support.page_allocator,
-                &ctx.page_metadata_map,
-                &ctx.config,
-                &mut support.ioremap,
-                &mut support.plic_irq_domain,
-                &mut support.irq_handler_registry,
-            )
+            let mut resources = support.resources(ctx);
+            self.fixture
+                .bus
+                .probe_device(DeviceRef::new(usize::MAX), &mut resources)
         });
         self.fixture.setup_ready(assertions);
     }
@@ -275,18 +277,8 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
         assertions.assert_ok("probe device deferred", {
             let ctx = context_ref();
             let mut support = ProbeSupport::new();
-            self.fixture.bus.probe_device(
-                device_ref,
-                &ctx.device_tree,
-                &mut support.vmalloc_allocator,
-                &mut support.page_table_caches,
-                &mut support.page_allocator,
-                &ctx.page_metadata_map,
-                &ctx.config,
-                &mut support.ioremap,
-                &mut support.plic_irq_domain,
-                &mut support.irq_handler_registry,
-            )
+            let mut resources = support.resources(ctx);
+            self.fixture.bus.probe_device(device_ref, &mut resources)
         });
         assertions.assert(
             "probe device scanned drivers",

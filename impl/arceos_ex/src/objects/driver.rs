@@ -5,21 +5,24 @@ use super::{
     ioremap::Ioremap,
     irq_time::{IrqHandlerRegistry, PlicIrqDomain},
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, VmallocAllocator},
+    virtio::VirtioBus,
 };
 
-pub type PlatformProbe = fn(
-    &DeviceTree,
-    &mut VmallocAllocator,
-    &mut PageTableCaches,
-    &mut PageAllocator,
-    &PageMetadataMap,
-    &Config,
-    &mut Ioremap,
-    &mut PlicIrqDomain,
-    &mut IrqHandlerRegistry,
-    DeviceRef,
-    DeviceNodeId,
-) -> ProbeResult;
+pub struct PlatformProbeResources<'a> {
+    pub device_tree: &'a DeviceTree,
+    pub vmalloc_allocator: &'a mut VmallocAllocator,
+    pub page_table_caches: &'a mut PageTableCaches,
+    pub page_allocator: &'a mut PageAllocator,
+    pub page_metadata_map: &'a PageMetadataMap,
+    pub config: &'a Config,
+    pub ioremap: &'a mut Ioremap,
+    pub plic_irq_domain: &'a mut PlicIrqDomain,
+    pub irq_handler_registry: &'a mut IrqHandlerRegistry,
+    pub virtio_bus: &'a mut VirtioBus,
+}
+
+pub type PlatformProbe =
+    for<'a> fn(&mut PlatformProbeResources<'a>, DeviceRef, DeviceNodeId) -> ProbeResult;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ProbeResult {
@@ -112,31 +115,11 @@ impl PlatformDriver {
 
     pub fn probe(
         &self,
-        device_tree: &DeviceTree,
-        vmalloc_allocator: &mut VmallocAllocator,
-        page_table_caches: &mut PageTableCaches,
-        page_allocator: &mut PageAllocator,
-        page_metadata_map: &PageMetadataMap,
-        config: &Config,
-        ioremap: &mut Ioremap,
-        plic_irq_domain: &mut PlicIrqDomain,
-        irq_handler_registry: &mut IrqHandlerRegistry,
+        resources: &mut PlatformProbeResources<'_>,
         device: DeviceRef,
         node_id: DeviceNodeId,
     ) -> ProbeResult {
-        (self.probe)(
-            device_tree,
-            vmalloc_allocator,
-            page_table_caches,
-            page_allocator,
-            page_metadata_map,
-            config,
-            ioremap,
-            plic_irq_domain,
-            irq_handler_registry,
-            device,
-            node_id,
-        )
+        (self.probe)(resources, device, node_id)
     }
 }
 
@@ -172,15 +155,7 @@ pub static MOCK_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
 pub const MOCK_PLATFORM_DRIVER_REF: DeviceDriverRef = DeviceDriverRef::new(&MOCK_PLATFORM_DRIVER);
 
 fn mock_deferred_probe(
-    _device_tree: &DeviceTree,
-    _vmalloc_allocator: &mut VmallocAllocator,
-    _page_table_caches: &mut PageTableCaches,
-    _page_allocator: &mut PageAllocator,
-    _page_metadata_map: &PageMetadataMap,
-    _config: &Config,
-    _ioremap: &mut Ioremap,
-    _plic_irq_domain: &mut PlicIrqDomain,
-    _irq_handler_registry: &mut IrqHandlerRegistry,
+    _resources: &mut PlatformProbeResources<'_>,
     _device: DeviceRef,
     _node_id: DeviceNodeId,
 ) -> ProbeResult {

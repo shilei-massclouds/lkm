@@ -1,9 +1,10 @@
 /*
  * Virtio MMIO transport model, first slice.
  *
- * This models Linux drivers/virtio/virtio_mmio.c only up to the platform
- * driver and transport/header boundary. Virtio core registration and virtqueue
- * setup are intentionally left to the following virtio core/ring steps.
+ * This models Linux drivers/virtio/virtio_mmio.c up to the platform driver,
+ * transport/header boundary, and the handoff into virtio core. VirtioBus is a
+ * Context-owned global object; PlatformBus does not own VirtioBus and does not
+ * expose virtio-specific probe parameters.
  */
 
 predicate virtio_mmio_driver_storage_ready<T>(storage: T) -> bool;
@@ -193,6 +194,7 @@ object VirtioMmioPlatformDriver: PlatformDriverType {
                 depends_on {
                     InitcallTable.state == State::Ready;
                     PlatformBus.state == State::Ready;
+                    VirtioBus.state == State::Ready;
                     Ioremap.state == State::Ready;
                 }
 
@@ -202,6 +204,7 @@ object VirtioMmioPlatformDriver: PlatformDriverType {
                         mapping: IoMemoryMappingRef::VirtioMmio
                     );
                     VirtioMmioTransportDevice.Event::Setup;
+                    VirtioDevice.Event::Setup;
                 }
 
                 ensures {
@@ -233,6 +236,11 @@ object VirtioMmioPlatformDriver: PlatformDriverType {
                     ioremap_mapping_page_aligned(Ioremap, IoMemoryMappingRef::VirtioMmio);
                     ioremap_mapping_membase_cookie_ready(Ioremap, IoMemoryMappingRef::VirtioMmio);
                     ioremap_mapping_not_linear_direct_map(Ioremap, IoMemoryMappingRef::VirtioMmio);
+                    virtio_bus_registered(VirtioBus);
+                    virtio_bus_platform_independent(VirtioBus);
+                    virtio_device_registered_on_bus(VirtioDevice, VirtioBus);
+                    virtio_device_transport_bound(VirtioDevice, VirtioMmioTransportDevice);
+                    virtio_device_transport_is_mmio(VirtioDevice, VirtioMmioTransportDevice);
                 }
             }
         }
@@ -258,6 +266,11 @@ object VirtioMmioPlatformDriver: PlatformDriverType {
             platform_bus_device_bound(PlatformBus, DeviceDriverRef::VirtioMmioPlatformDriver, DeviceRef::VirtioMmioPlatformDevice);
             VirtioMmioTransportDevice.state == State::Ready;
             virtio_mmio_transport_ready_for_virtio_core(VirtioMmioTransportDevice);
+            VirtioBus.state == State::Ready;
+            VirtioDevice.state == State::Ready;
+            virtio_device_registered_on_bus(VirtioDevice, VirtioBus);
+            virtio_device_transport_bound(VirtioDevice, VirtioMmioTransportDevice);
+            virtio_device_transport_is_mmio(VirtioDevice, VirtioMmioTransportDevice);
         }
     }
 }

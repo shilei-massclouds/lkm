@@ -381,6 +381,7 @@ object IrqProcViewDeferred: KernelObject {
                     DriverCoreBase.state == State::Ready;
                     PlatformBusRootDevice.state == State::Ready;
                     PlatformBus.state == State::Ready;
+                    VirtioBus.state == State::Ready;
                     DriverCoreDeferred.state == State::Ready;
                     IrqDispatchTree.state == State::Ready;
                 }
@@ -691,6 +692,7 @@ object InitcallPhase: PhaseObject {
                     PlatformBusRootDevice.Event::Setup;
                     PlatformBus.Event::Preset;
                     PlatformBus.Event::Setup;
+                    VirtioBus.Event::Setup;
                     DriverCoreDeferred.Event::Setup;
                     IrqProcViewDeferred.Event::Setup;
                     Ns16550aPlatformDriverStorage.Event::Setup;
@@ -722,6 +724,8 @@ object InitcallPhase: PhaseObject {
                     driver_core_bus_registry_ready(DriverCoreBase);
                     platform_bus_static_device_registered(PlatformBusRootDevice);
                     platform_bus_type_registered(PlatformBus);
+                    virtio_bus_registered(VirtioBus);
+                    virtio_bus_platform_independent(VirtioBus);
                     driver_core_post_platform_deferred();
                     irq_proc_view_setup_deferred();
                     constructors_trimmed_or_empty(CtorTable);
@@ -756,6 +760,9 @@ object InitcallPhase: PhaseObject {
                     platform_bus_ns16550a_driver_probe_called(PlatformBus);
                     platform_bus_ns16550a_driver_probe_return_zero(PlatformBus);
                     platform_bus_ns16550a_device_bound(PlatformBus);
+                    virtio_device_registered_on_bus(VirtioDevice, VirtioBus);
+                    virtio_device_transport_bound(VirtioDevice, VirtioMmioTransportDevice);
+                    virtio_device_transport_is_mmio(VirtioDevice, VirtioMmioTransportDevice);
                     uart_external_irq_enable_ready(UartExternalIrqEnable);
                     uart_external_irq_enable_opens_plic_source_gate(UartExternalIrqEnable, PlicIrqDomain, IrqGateRef::PlicUartSource);
                     uart_external_irq_enable_opens_root_input_gate(UartExternalIrqEnable, RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
@@ -829,9 +836,11 @@ object InitcallPhase: PhaseObject {
             DriverCoreBase.state == State::Ready;
             PlatformBusRootDevice.state == State::Ready;
             PlatformBus.state == State::Ready;
+            VirtioBus.state == State::Ready;
             Ns16550aPlatformDriver.state == State::Ready;
             VirtioMmioPlatformDriver.state == State::Ready;
             VirtioMmioTransportDevice.state == State::Ready;
+            VirtioDevice.state == State::Ready;
             UartExternalIrqEnable.state == State::Ready;
             UartInterruptChainProbe.state == State::Ready;
             Serial8250Console.state == State::Online;

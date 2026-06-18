@@ -90,8 +90,8 @@ make clean
 验证最终 payload 可观测行为。新增 checkpoint KUnit handler 时必须加入该 handler 文件，除非它需要单独的
 测试入口并在 coding 规格中记录原因。
 `impl/arceos_ex/Makefile` 默认通过 `QEMU_DEVICES` 启用一个 `virtio-rng-device`，使 virtio-mmio/platform bus
-smoke 能观察到真实 `device_id == VIRTIO_ID_RNG` 的 MMIO transport。需要回到裸 QEMU virt placeholder
-slot 场景时，可显式传入 `QEMU_DEVICES=`。
+和 `VirtioBus` checkpoint/KUnit 能观察到真实 `device_id == VIRTIO_ID_RNG` 的 MMIO transport 与 generic
+`VirtioDevice`。需要回到裸 QEMU virt placeholder slot 场景时，可显式传入 `QEMU_DEVICES=`。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
@@ -397,6 +397,41 @@ KUnit 对 candidate facts 的检查应挂在该点，而不是挂在入口点。
 `Exit` 前检查 `PlatformBus.platform_devices`、`klist_devices` 和 `DeviceRef -> PlatformDevice -> DeviceNodeId`
 链路；`Exit` 只表示 action 返回边界。smoke 预期不得假设 initcall table 中只有本测试注册的 entry，必须只断言
 本场景关心的 populate entry 已存在且执行结果正确，忽略其它无关 initcall entries。
+
+### virtio-mmio 与 VirtioBus 编码约束
+
+`VirtioBus` 是 `Context` 下的全局 virtio core bus 实例，与 `PlatformBus` 并列存在；它不得作为
+`PlatformBus` 的 owned 子对象，也不得由 `PlatformBus` 维护 virtio-specific 状态。`PlatformBus`
+的职责保持为通用 driver-core/platform-bus 机制：保存 platform device/driver 集合，执行 OF match、
+调用 driver probe，并记录通用 registered/matched/probe/bound 事实。
+
+`VirtioMmioPlatformDriver` 是普通 platform driver。它必须通过 `device_initcall` 调用
+`platform_driver_register()`，再由 `PlatformBus` 的 OF match/probe 路径进入 `virtio_mmio_probe()`；
+不得绕过 platform bus 直接扫描 FDT。`VirtioMmioTransportDevice` 表示单个 platform/MMIO transport
+实例，来源必须是 `PlatformDevice -> Device -> DeviceNodeId -> DeviceTree node`，并通过 `Ioremap`
+建立 `membase` 后读取 virtio-mmio header。
+
+`virtio_mmio_probe()` 读到 valid、非 placeholder 的 header 后，才可以调用 `VirtioBus` 的正式
+device registration API 构造 `VirtioDevice`。`VirtioDevice` 是 generic virtio core device，拥有
+`device_id/vendor_id/status` 等 core 事实，并通过 transport reference 关联回
+`VirtioMmioTransportDevice`；`VirtioMmioTransportDevice` 仍只表示 transport，不应和 `VirtioDevice`
+合并。`device_id == 0` 的 placeholder slot 必须被拒绝或跳过，不得注册到 `VirtioBus`。
+
+`PlatformBus` 的 public API 不得出现 `VirtioBus` 这样的 virtio-specific 业务参数。若实现需要把
+`Context` 中的多个资源传给 platform driver probe，应使用中性的 probe resources/context 对象；该对象只是
+`Context` 到 driver probe 的能力传递边界，不改变对象所有权，也不表示 `PlatformBus` 拥有这些资源。普通
+driver probe 不得通过全局 `context()` 反向抓取可变全局对象。
+
+真实 QEMU `virtio-rng-device` 链路必须通过 checkpoint/KUnit 只读 observer 观测
+`ctx.virtio_bus` 中的 `VirtioDevice`、对应的 MMIO transport 和 platform bus 通用 probe 事实。
+`VIRTIO_MMIO_PROBE_SUMMARY`、`probe_summary()` 或等价全局 summary 只能作为临时调试手段；建立
+`VirtioBus` 后应删除 smoke 对它的依赖。app smoke 可以继续覆盖纯函数/fixture 层的 header classifier
+或后续 fake integration，但不应读取启动期临时 summary 来替代 `VirtioBus` 事实。
+
+首轮只建模和实现 virtio core bus/device 注册；virtqueue、feature negotiation、driver binding、
+`VirtioRngDevice` request/completion 和 IRQ/notify 闭合按 roadmap 后续步骤推进。不得为了 KUnit/smoke
+在普通对象上增加测试专用 method；缺少可观测边界时，应先补 model/coding 规格中的正式对象 API 或只读
+checkpoint observer。
 
 console/earlycon handoff 的实现必须保持 Linux-like `register_console()` 边界，但第一轮仍只要求对象级可观测事实。
 正式 `DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，
