@@ -1,7 +1,7 @@
 use super::{
     cache_block_info::CacheBlockInfo,
     cpu_capabilities::CpuCapabilities,
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
 

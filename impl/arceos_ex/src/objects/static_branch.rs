@@ -1,6 +1,6 @@
 use super::{
     kernel_image::KernelImage,
-    state::{EventResult, Lifecycle, LifecycleEvent, State, failed_condition},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
 };
 use crate::trace::Checkpoint;
