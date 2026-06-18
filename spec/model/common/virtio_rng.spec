@@ -9,8 +9,10 @@
  * HwRngCore; users then read through HwRngCore.current_rng rather than reaching
  * into VirtioRngDevice directly. Random pool integration, /dev/hwrng plumbing,
  * sysfs selection, freeze/restore, blocking wait semantics and full
- * remove/reset teardown stay deferred. Fake completion remains an object/smoke
- * fixture path and must not be driven by checkpoint/KUnit handlers.
+ * remove/reset teardown stay deferred. Object-level smoke may construct a
+ * ready used-buffer fixture before calling the normal completion consumer, but
+ * that construction is not a VirtioRngDevice action/API. checkpoint/KUnit
+ * handlers stay read-only observers and must not drive driver/ring/IRQ actions.
  */
 
 predicate virtio_rng_driver_declared<T>(driver: T) -> bool;
@@ -45,7 +47,7 @@ predicate virtio_rng_request_notifies_mmio<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_rng_request_count_incremented<T>(device: T) -> bool;
 predicate virtio_rng_repeat_request_rejected<T>(device: T) -> bool;
 predicate virtio_rng_zero_len_completion_rejected<T>(device: T) -> bool;
-predicate virtio_rng_fake_transport_completion_recorded<T, Q>(device: T, queue: Q) -> bool;
+predicate virtio_rng_fixture_completion_ready<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_rng_mmio_irq_acknowledged<T>(device: T) -> bool;
 predicate virtio_rng_irq_callback_invoked<T>(device: T) -> bool;
 predicate virtio_rng_complete_gets_used_buffer<T, Q>(device: T, queue: Q) -> bool;
@@ -210,24 +212,10 @@ object VirtioRngDevice: DeviceObject {
                 }
             }
 
-            Action::FakeTransportComplete {
-                state_effect: StateEffect::None;
-                depends_on {
-                    virtio_rng_request_pending(self);
-                }
-                drives {
-                    VirtQueue.Action::FakeCompleteUsed;
-                }
-                ensures {
-                    virtio_rng_fake_transport_completion_recorded(self, VirtQueue);
-                    virtio_rng_zero_len_completion_rejected(self);
-                }
-            }
-
             Action::CompleteEntropy {
                 state_effect: StateEffect::None;
                 depends_on {
-                    virtio_rng_fake_transport_completion_recorded(self, VirtQueue) || virtio_rng_irq_callback_invoked(self);
+                    virtio_rng_fixture_completion_ready(self, VirtQueue) || virtio_rng_irq_callback_invoked(self);
                 }
                 drives {
                     VirtQueue.Action::GetBuf;
@@ -238,6 +226,7 @@ object VirtioRngDevice: DeviceObject {
                     virtio_rng_complete_resets_data_idx(self);
                     virtio_rng_completion_count_incremented(self);
                     virtio_rng_have_data_completion_completed(self);
+                    virtio_rng_zero_len_completion_rejected(self);
                 }
             }
 

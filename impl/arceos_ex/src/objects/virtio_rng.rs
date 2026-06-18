@@ -202,7 +202,6 @@ pub struct VirtioRngDevice {
     request_submits_inbuf: bool,
     request_kicks_queue: bool,
     repeat_request_rejected: bool,
-    fake_transport_completion_recorded: bool,
     zero_len_completion_rejected: bool,
     complete_gets_used_buffer: bool,
     data_avail_updated: bool,
@@ -220,7 +219,6 @@ pub struct VirtioRngDevice {
     data_avail: u32,
     data_idx: u32,
     request_count: usize,
-    fake_completion_count: usize,
     notify_count: usize,
     irq_count: usize,
     completion_count: usize,
@@ -250,7 +248,6 @@ impl VirtioRngDevice {
             request_submits_inbuf: false,
             request_kicks_queue: false,
             repeat_request_rejected: false,
-            fake_transport_completion_recorded: false,
             zero_len_completion_rejected: false,
             complete_gets_used_buffer: false,
             data_avail_updated: false,
@@ -268,7 +265,6 @@ impl VirtioRngDevice {
             data_avail: 0,
             data_idx: 0,
             request_count: 0,
-            fake_completion_count: 0,
             notify_count: 0,
             irq_count: 0,
             completion_count: 0,
@@ -349,10 +345,6 @@ impl VirtioRngDevice {
         self.repeat_request_rejected
     }
 
-    pub const fn fake_transport_completion_recorded(&self) -> bool {
-        self.fake_transport_completion_recorded
-    }
-
     pub const fn zero_len_completion_rejected(&self) -> bool {
         self.zero_len_completion_rejected
     }
@@ -421,10 +413,6 @@ impl VirtioRngDevice {
 
     pub const fn request_count(&self) -> usize {
         self.request_count
-    }
-
-    pub const fn fake_completion_count(&self) -> usize {
-        self.fake_completion_count
     }
 
     #[allow(dead_code)]
@@ -549,28 +537,6 @@ impl VirtioRngDevice {
         Ok(())
     }
 
-    pub fn fake_transport_complete(&mut self, len: u32) -> Result<(), VirtioRngError> {
-        if self.lifecycle.state() == State::Destroyed {
-            self.removed_rejects_io = true;
-            return Err(VirtioRngError::Removed);
-        }
-        if self.lifecycle.state() != State::Ready {
-            return Err(VirtioRngError::DeviceNotReady);
-        }
-        let Some(token) = self.pending_token else {
-            return Err(VirtioRngError::NoRequestPending);
-        };
-        if len == 0 {
-            self.zero_len_completion_rejected = true;
-            return Err(VirtioRngError::ZeroLengthCompletion);
-        }
-
-        self.queue.fake_complete_used(token, len)?;
-        self.fake_transport_completion_recorded = true;
-        self.fake_completion_count = self.fake_completion_count.saturating_add(1);
-        Ok(())
-    }
-
     pub fn request_entropy_mmio(
         &mut self,
         buffer_addr: usize,
@@ -630,6 +596,10 @@ impl VirtioRngDevice {
         self.pending_token = None;
         self.request_pending = false;
         self.complete_gets_used_buffer = true;
+        if used.len() == 0 {
+            self.zero_len_completion_rejected = true;
+            return Err(VirtioRngError::ZeroLengthCompletion);
+        }
         self.data_avail = used.len();
         self.data_idx = 0;
         self.data_avail_updated = true;
@@ -658,6 +628,10 @@ impl VirtioRngDevice {
         self.pending_token = None;
         self.request_pending = false;
         self.complete_gets_used_buffer = true;
+        if used.len() == 0 {
+            self.zero_len_completion_rejected = true;
+            return Err(VirtioRngError::ZeroLengthCompletion);
+        }
         self.data_avail = used.len();
         self.data_idx = 0;
         self.data_avail_updated = true;
@@ -756,6 +730,21 @@ impl VirtioRngDevice {
         self.lifecycle
             .adopt_transition(LifecycleEvent::Cleanup, State::Ready, State::Destroyed)
             .map_err(|_| VirtioRngError::DeviceNotReady)
+    }
+}
+
+#[cfg(app_smoke)]
+pub(crate) mod smoke_fixture {
+    use super::{VirtioRngDevice, VirtioRngError};
+    use crate::objects::virtio_ring::smoke_fixture as ring_smoke_fixture;
+
+    pub(crate) fn prepare_completion(
+        rng: &mut VirtioRngDevice,
+        len: u32,
+    ) -> Result<(), VirtioRngError> {
+        let token = rng.pending_token.ok_or(VirtioRngError::NoRequestPending)?;
+        ring_smoke_fixture::prepare_used_entry(&mut rng.queue, token, len)
+            .map_err(VirtioRngError::from)
     }
 }
 

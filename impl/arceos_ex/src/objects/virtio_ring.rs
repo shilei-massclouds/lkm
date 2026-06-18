@@ -559,7 +559,6 @@ pub struct VirtQueue {
     free_descriptor_consumed: bool,
     avail_index_advanced: bool,
     kick_recorded: bool,
-    fake_completion_recorded: bool,
     used_index_advanced: bool,
     get_buf_returns_len: bool,
     get_buf_empty_rejected: bool,
@@ -588,7 +587,6 @@ impl VirtQueue {
             free_descriptor_consumed: false,
             avail_index_advanced: false,
             kick_recorded: false,
-            fake_completion_recorded: false,
             used_index_advanced: false,
             get_buf_returns_len: false,
             get_buf_empty_rejected: false,
@@ -631,10 +629,6 @@ impl VirtQueue {
 
     pub const fn kick_recorded(&self) -> bool {
         self.kick_recorded
-    }
-
-    pub const fn fake_completion_recorded(&self) -> bool {
-        self.fake_completion_recorded
     }
 
     pub const fn used_index_advanced(&self) -> bool {
@@ -858,42 +852,6 @@ impl VirtQueue {
         Ok(())
     }
 
-    pub fn fake_complete_used(
-        &mut self,
-        token: VirtqueueBufferToken,
-        len: u32,
-    ) -> Result<(), VirtqueueError> {
-        if self.lifecycle.state() != State::Ready {
-            return Err(VirtqueueError::NotReady);
-        }
-        let index = usize::from(token.head());
-        if index >= self.ring.descriptors.len() || !self.ring.descriptors[index].active {
-            return Err(VirtqueueError::InvalidToken);
-        }
-        if self.ring.descriptors[index].completed {
-            return Err(VirtqueueError::AlreadyCompleted);
-        }
-        if len > self.ring.descriptors[index].len {
-            return Err(VirtqueueError::UsedLengthTooLarge);
-        }
-        let pending_used = self.ring.used_idx.wrapping_sub(self.ring.last_used_idx);
-        if pending_used >= self.ring.queue_size {
-            return Err(VirtqueueError::UsedRingFull);
-        }
-
-        let used_slot = self.ring.ring_index(self.ring.used_idx);
-        self.ring.used_ring[used_slot] = VirtqUsedElem {
-            id: token.head(),
-            len,
-        };
-        self.ring.used_idx = self.ring.used_idx.wrapping_add(1);
-        self.ring.descriptors[index].completed = true;
-        self.fake_completion_recorded = true;
-        self.used_index_advanced = true;
-        self.completion_count = self.completion_count.saturating_add(1);
-        Ok(())
-    }
-
     pub fn get_buf(&mut self) -> Result<VirtqueueUsedBuffer, VirtqueueError> {
         if self.lifecycle.state() != State::Ready {
             return Err(VirtqueueError::NotReady);
@@ -971,6 +929,46 @@ impl VirtQueue {
             let _ = unsafe { ptr::read_volatile(flags) & VRING_USED_F_NO_NOTIFY };
         }
         Ok(buffer)
+    }
+}
+
+#[cfg(app_smoke)]
+pub(crate) mod smoke_fixture {
+    use super::{State, VirtQueue, VirtqUsedElem, VirtqueueBufferToken, VirtqueueError};
+
+    pub(crate) fn prepare_used_entry(
+        queue: &mut VirtQueue,
+        token: VirtqueueBufferToken,
+        len: u32,
+    ) -> Result<(), VirtqueueError> {
+        if queue.lifecycle.state() != State::Ready {
+            return Err(VirtqueueError::NotReady);
+        }
+        let index = usize::from(token.head());
+        if index >= queue.ring.descriptors.len() || !queue.ring.descriptors[index].active {
+            return Err(VirtqueueError::InvalidToken);
+        }
+        if queue.ring.descriptors[index].completed {
+            return Err(VirtqueueError::AlreadyCompleted);
+        }
+        if len > queue.ring.descriptors[index].len {
+            return Err(VirtqueueError::UsedLengthTooLarge);
+        }
+        let pending_used = queue.ring.used_idx.wrapping_sub(queue.ring.last_used_idx);
+        if pending_used >= queue.ring.queue_size {
+            return Err(VirtqueueError::UsedRingFull);
+        }
+
+        let used_slot = queue.ring.ring_index(queue.ring.used_idx);
+        queue.ring.used_ring[used_slot] = VirtqUsedElem {
+            id: token.head(),
+            len,
+        };
+        queue.ring.used_idx = queue.ring.used_idx.wrapping_add(1);
+        queue.ring.descriptors[index].completed = true;
+        queue.used_index_advanced = true;
+        queue.completion_count = queue.completion_count.saturating_add(1);
+        Ok(())
     }
 }
 

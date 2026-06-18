@@ -53,6 +53,8 @@
 
 若测试暴露出缺少可调用边界，应先判断该能力是否属于正式对象 action/API：属于正式语义的，补 model/coding 规格并让生产路径和测试路径共享同一入口；仅用于构造测试场景的，放入 smoke fixture、checkpoint handler 或 test harness，不进入普通对象 API。checkpoint/KUnit handler 默认只读真实路径 facts；需要执行 mutating action 时，必须在 testing/coding 规格中明确 action-level probe capability、可写范围和清理边界。
 
+MUST：处理 `fake_*`、mock、completion injection 这类历史接口时，顶层原则优先于局部章节。若接口只被 smoke/KUnit 用来构造条件，即使它模拟的是现实中会发生的外部事件，也不得留在普通对象 API 或 coding 规格的正式 API 列表中；应下沉到 smoke fixture/test harness，或转化为只读 checkpoint observer。只有生产路径也会调用、并且承载正式运行时语义的入口，才能作为普通对象 API 保留。
+
 MUST：普通 checkpoint handler 的 `HandlerRun` 原型只能保留只读 observer 形态：
 `Observe(fn(Checkpoint, &Context, &mut dyn Sink) -> CheckpointOutcome)`。不得重新加入 `Write`
 变体、`&mut Context` 参数，或任何可修改 `Context` 普通对象的等价入口。可写能力只能通过受限 `Sink`
@@ -428,7 +430,7 @@ registration 等窄能力。普通 driver probe 不得直接接收 `&mut Context
 `ctx.virtio_bus` 中的 `VirtioDevice`、对应的 MMIO transport 和 platform bus 通用 probe 事实。
 `VIRTIO_MMIO_PROBE_SUMMARY`、`probe_summary()` 或等价全局 summary 只能作为临时调试手段；建立
 `VirtioBus` 后应删除 smoke 对它的依赖。app smoke 可以继续覆盖纯函数/fixture 层的 header classifier
-或后续 fake integration，但不应读取启动期临时 summary 来替代 `VirtioBus` 事实。
+或后续对象级 fixture/integration，但不应读取启动期临时 summary 来替代 `VirtioBus` 事实。
 
 virtio core bus/device 注册完成后，`virtio-rng` 的真实 QEMU 路径必须继续走正式生产链路：
 `VirtioBus` 上出现 generic `VirtioDevice` 后，由 `VirtioRngDriver` 匹配 `device_id == VIRTIO_ID_RNG`，
@@ -437,13 +439,14 @@ probe 生成 `VirtioRngDevice`，再按 Linux `probe_common()` 语义建立 sing
 缺少可观测边界时，应先补 model/coding 规格中的正式对象 API 或只读 checkpoint observer。
 
 `VirtioSplitRing` / `VirtQueue` 首轮应单独放在 `objects::virtio_ring`，作为可复用 ring/queue 对象，而不是塞入
-`virtio.rs`。对象/fake integration 路径继续支持 single queue、split ring、direct descriptor、单个 input
-buffer、`add_inbuf`、`kick` 记录、fake used completion 和 `get_buf`；真实 QEMU 路径必须增加设备可见的
+`virtio.rs`。对象级 integration 路径继续支持 single queue、split ring、direct descriptor、单个 input
+buffer、`add_inbuf`、`kick` 记录和 `get_buf`；smoke 若要构造 used entry，只能放在 fixture/test harness，
+不得作为 `VirtQueue` 普通 API。真实 QEMU 路径必须增加设备可见的
 split-ring backing、MMIO queue setup、`QueueNotify` 和 IRQ 后 `get_buf`。当前真实路径可以使用一个页对齐
 static coherent backing 作为首轮受限实现，并通过 `KernelImage::runtime_to_phys()` 计算设备可见物理地址；
 通用 DMA/coherent allocator、cache maintenance、SWIOTLB/IOMMU、packed ring、indirect descriptor、event idx、
 多队列、reset/remove/suspend/resume 仍显式 deferred。实现不得把 smoke 中的小队列容量固化为编译期固定数组；
-fake ring backing 应按设备给出的 `queue_size` 建立，真实 static backing 的容量必须由 queue setup 检查
+对象级 ring backing 应按设备给出的 `queue_size` 建立，真实 static backing 的容量必须由 queue setup 检查
 `QUEUE_NUM_MAX` 后受控选择。
 
 `virtio-mmio` queue setup 必须按 Linux 6.12.37 `drivers/virtio/virtio_mmio.c` 的分支建模：version 1 legacy
@@ -453,12 +456,13 @@ fake ring backing 应按设备给出的 `queue_size` 建立，真实 static back
 必须写 queue index；IRQ handler 必须读取 `INTERRUPT_STATUS`，写回 `INTERRUPT_ACK`，仅在 vring interrupt bit
 存在时调用 ring/rng completion callback。
 
-`VirtioRngDriver` / `VirtioRngDevice` fake integration 和真实 QEMU 最小路径均放在 `objects::virtio_rng`。driver probe
+`VirtioRngDriver` / `VirtioRngDevice` 对象级 integration 和真实 QEMU 最小路径均放在 `objects::virtio_rng`。driver probe
 输入必须是 generic `VirtioDevice`，并通过正式 `device_id == VIRTIO_ID_RNG` 匹配；不得为了 smoke 新增绕过
 `VirtioDevice` / `VirtQueue` 的测试专用构造或直接写内部状态的后门。`VirtioRngDevice` 持有 single input
-`VirtQueue`，正式 API 只覆盖 `probe`、`request_entropy`、`fake_transport_complete`、`complete_entropy`
-和 `cleanup/remove` 边界；fake completion 可以封装调用 `VirtQueue::fake_complete_used()`，但仍是对象 API，
-不是 KUnit/checkpoint handler 行为。首轮只维护 `data_avail`、`data_idx`、request/completion counters
+`VirtQueue`，正式 API 只覆盖 `probe`、`request_entropy`、`complete_entropy`、真实 IRQ completion
+和 `cleanup/remove` 边界；不得暴露 `transport_complete`、`device_complete_used` 或等价 completion injection
+入口作为普通对象 API。smoke 可以通过 fixture 在调用 `complete_entropy()` 前构造 used entry 条件，
+但 fixture 不得被生产路径引用，也不是 KUnit/checkpoint handler 行为。首轮只维护 `data_avail`、`data_idx`、request/completion counters
 和 pending request 状态。真实路径中 `request_entropy()` 必须提交真实 input buffer、kick/notify queue；
 virtio-mmio IRQ handler 调用 `complete_entropy()` 后应触发 `VirtioRng.EntropyReady` checkpoint，由
 checkpoint/KUnit 只读 observer 检查 `device_id == 4`、request/notify/irq/get_buf/completion 计数、`len > 0`

@@ -2,9 +2,11 @@
  * Virtio split virtqueue model, first slice.
  *
  * This models the reusable virtio_ring.c split-ring boundary needed by
- * virtio-rng. The first fake slice used Vec-backed descriptors and fake used
- * completions. The real QEMU slice adds one device-visible split ring backing,
- * MMIO notify, and used-ring get_buf after a virtio-mmio interrupt. Packed
+ * virtio-rng. The object-level slice uses Vec-backed descriptors; smoke
+ * fixtures may construct a ready used-ring entry as test data, but that
+ * construction is not a VirtQueue action/API. The real QEMU slice adds one
+ * device-visible split ring backing, MMIO notify, and used-ring get_buf after
+ * a virtio-mmio interrupt. Packed
  * rings, indirect descriptors, event idx, multi-queue devices, a general DMA
  * allocator, cache maintenance, reset/remove, suspend/resume, and filesystem
  * users stay deferred.
@@ -38,7 +40,7 @@ predicate virtqueue_avail_index_advanced<T>(queue: T) -> bool;
 predicate virtqueue_kick_recorded<T>(queue: T) -> bool;
 predicate virtqueue_mmio_notify_written<T>(queue: T) -> bool;
 predicate virtqueue_descriptor_exhaustion_rejected<T>(queue: T) -> bool;
-predicate virtqueue_fake_completion_recorded<T>(queue: T) -> bool;
+predicate virtqueue_fixture_used_entry_ready<T>(queue: T) -> bool;
 predicate virtqueue_real_used_completion_observed<T>(queue: T) -> bool;
 predicate virtqueue_used_index_advanced<T>(queue: T) -> bool;
 predicate virtqueue_get_buf_returns_len<T>(queue: T) -> bool;
@@ -150,21 +152,10 @@ object VirtQueue: ResourceObject {
                 }
             }
 
-            Action::FakeCompleteUsed {
-                state_effect: StateEffect::None;
-                depends_on {
-                    virtqueue_input_buffer_added(self);
-                }
-                ensures {
-                    virtqueue_fake_completion_recorded(self);
-                    virtqueue_used_index_advanced(self);
-                }
-            }
-
             Action::GetBuf {
                 state_effect: StateEffect::None;
                 depends_on {
-                    virtqueue_fake_completion_recorded(self) || virtqueue_real_used_completion_observed(self);
+                    virtqueue_fixture_used_entry_ready(self) || virtqueue_real_used_completion_observed(self);
                 }
                 ensures {
                     virtqueue_get_buf_returns_len(self);

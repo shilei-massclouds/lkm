@@ -5,7 +5,7 @@ use crate::{
     },
     objects::{
         state::State,
-        virtio_ring::{VirtQueue, VirtqueueError},
+        virtio_ring::{smoke_fixture, VirtQueue, VirtqueueError},
     },
 };
 
@@ -154,12 +154,8 @@ impl SmokeScenario for SingleInbufCompletionScenario {
         assertions.assert("kick count", self.fixture.queue.kick_count() == 1);
 
         assertions.assert_ok(
-            "fake complete",
-            self.fixture.queue.fake_complete_used(token, 32),
-        );
-        assertions.assert(
-            "fake completion",
-            self.fixture.queue.fake_completion_recorded(),
+            "fixture used entry",
+            smoke_fixture::prepare_used_entry(&mut self.fixture.queue, token, 32),
         );
         assertions.assert("used advanced", self.fixture.queue.used_index_advanced());
         assertions.assert(
@@ -333,16 +329,16 @@ impl SmokeScenario for InvalidCompletionScenario {
         };
         assertions.assert(
             "too large completion",
-            self.fixture.queue.fake_complete_used(token, BUFFER_LEN + 1)
+            smoke_fixture::prepare_used_entry(&mut self.fixture.queue, token, BUFFER_LEN + 1)
                 == Err(VirtqueueError::UsedLengthTooLarge),
         );
         assertions.assert_ok(
             "valid completion",
-            self.fixture.queue.fake_complete_used(token, BUFFER_LEN),
+            smoke_fixture::prepare_used_entry(&mut self.fixture.queue, token, BUFFER_LEN),
         );
         assertions.assert(
             "duplicate completion",
-            self.fixture.queue.fake_complete_used(token, BUFFER_LEN)
+            smoke_fixture::prepare_used_entry(&mut self.fixture.queue, token, BUFFER_LEN)
                 == Err(VirtqueueError::AlreadyCompleted),
         );
     }

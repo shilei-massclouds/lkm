@@ -8,7 +8,9 @@ use crate::{
         hwrng::HwRngCore,
         state::State,
         virtio::VirtioDevice,
-        virtio_rng::{VirtioRngDevice, VirtioRngDriver, VirtioRngError},
+        virtio_rng::{
+            smoke_fixture as rng_smoke_fixture, VirtioRngDevice, VirtioRngDriver, VirtioRngError,
+        },
     },
 };
 
@@ -125,6 +127,10 @@ impl VirtioRngFixture {
         };
         Some(rng)
     }
+
+    fn prepare_completion(rng: &mut VirtioRngDevice, len: u32) -> Result<(), VirtioRngError> {
+        rng_smoke_fixture::prepare_completion(rng, len)
+    }
 }
 
 struct ProbeScenario {
@@ -205,11 +211,9 @@ impl SmokeScenario for RequestCompletionScenario {
         assertions.assert("queue kicked", rng.queue().kick_count() == 1);
 
         assertions.assert_ok(
-            "fake complete",
-            rng.fake_transport_complete(self.completion_len),
+            "fixture completion",
+            VirtioRngFixture::prepare_completion(rng, self.completion_len),
         );
-        assertions.assert("fake recorded", rng.fake_transport_completion_recorded());
-        assertions.assert("fake count", rng.fake_completion_count() == 1);
 
         let len = match rng.complete_entropy() {
             Ok(len) => len,
@@ -305,8 +309,8 @@ impl SmokeScenario for InvalidCompletionScenario {
             rng.complete_entropy() == Err(VirtioRngError::NoRequestPending),
         );
         assertions.assert(
-            "fake without request",
-            rng.fake_transport_complete(1) == Err(VirtioRngError::NoRequestPending),
+            "fixture without request",
+            VirtioRngFixture::prepare_completion(rng, 1) == Err(VirtioRngError::NoRequestPending),
         );
         assertions.assert(
             "zero buffer",
@@ -317,9 +321,13 @@ impl SmokeScenario for InvalidCompletionScenario {
             rng.request_entropy(ENTROPY_BUFFER_ADDR, 0) == Err(VirtioRngError::InvalidBuffer),
         );
         assertions.assert_ok("request", rng.request_entropy(ENTROPY_BUFFER_ADDR, 32));
+        assertions.assert_ok(
+            "fixture zero completion",
+            VirtioRngFixture::prepare_completion(rng, 0),
+        );
         assertions.assert(
             "zero completion",
-            rng.fake_transport_complete(0) == Err(VirtioRngError::ZeroLengthCompletion),
+            rng.complete_entropy() == Err(VirtioRngError::ZeroLengthCompletion),
         );
         assertions.assert("zero recorded", rng.zero_len_completion_rejected());
     }
@@ -358,10 +366,6 @@ impl SmokeScenario for RemovedRejectsIoScenario {
         assertions.assert(
             "request rejected",
             rng.request_entropy(ENTROPY_BUFFER_ADDR, 32) == Err(VirtioRngError::Removed),
-        );
-        assertions.assert(
-            "fake rejected",
-            rng.fake_transport_complete(1) == Err(VirtioRngError::Removed),
         );
         assertions.assert(
             "complete rejected",
@@ -413,7 +417,10 @@ impl SmokeScenario for HwrngReadScenario {
             "request entropy",
             rng.request_entropy(ENTROPY_BUFFER_ADDR, 64),
         );
-        assertions.assert_ok("fake complete", rng.fake_transport_complete(32));
+        assertions.assert_ok(
+            "fixture completion",
+            VirtioRngFixture::prepare_completion(rng, 32),
+        );
         let len = match rng.complete_entropy() {
             Ok(len) => len,
             Err(_) => {
