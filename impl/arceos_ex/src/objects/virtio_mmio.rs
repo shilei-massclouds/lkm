@@ -416,12 +416,21 @@ fn record_probe(transport: VirtioMmioTransportDevice) {
 fn print_probe(transport: VirtioMmioTransportDevice) {
     crate::objects::printk::write_str("platform_driver: virtio-mmio probed ");
     crate::objects::printk::write_fmt(format_args!(
-        "device=node#{} id={} version={} status={}\n",
+        "device=node#{} type={} id={} version={} status={}\n",
         transport.node_id.index(),
+        virtio_device_type_name(transport.device_id),
         transport.device_id,
         transport.version,
         header_status_name(transport.header_status),
     ));
+}
+
+fn virtio_device_type_name(device_id: u32) -> &'static str {
+    match device_id {
+        0 => "placeholder",
+        VIRTIO_ID_RNG => "rng",
+        _ => "unknown",
+    }
 }
 
 fn header_status_name(status: VirtioMmioHeaderStatus) -> &'static str {

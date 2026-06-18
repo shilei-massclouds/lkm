@@ -94,7 +94,7 @@ impl SmokeScenario for PlatformProbeObservationScenario {
                 + summary.unsupported_version_count()
                 == summary.matched_devices(),
         );
-        assertions.assert("no rng device yet", summary.rng_candidate_count() == 0);
+        assertions.assert("rng device discovered", summary.rng_candidate_count() != 0);
 
         let mut observed_match = false;
         let mut observed_probe = false;

@@ -75,6 +75,9 @@ make clean
 聚合 checkpoint/KUnit handler 在 `APP=hello` 路径下验证局部对象和 action 边界，第三步运行 `APP=smoke`
 验证最终 payload 可观测行为。新增 checkpoint KUnit handler 时必须加入该 handler 文件，除非它需要单独的
 测试入口并在 coding 规格中记录原因。
+`impl/arceos_ex/Makefile` 默认通过 `QEMU_DEVICES` 启用一个 `virtio-rng-device`，使 virtio-mmio/platform bus
+smoke 能观察到真实 `device_id == VIRTIO_ID_RNG` 的 MMIO transport。需要回到裸 QEMU virt placeholder
+slot 场景时，可显式传入 `QEMU_DEVICES=`。
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
