@@ -278,7 +278,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "CurrentTaskRef.Action::SetCurrent(task: BootIdleTask)"
+                    == "CurrentTaskRef.Action::SetCurrent(task: KernelInitTask)"
                     and record["proof_class"] == "type_process_commit"
                     and record["proof_provider"] == "within_context"
                     and "Scheduler.Action::SwitchTo" in (record["process_parent"] or "")
@@ -287,7 +287,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "task_ref_targets(CurrentTaskRef, BootIdleTask)"
+                    record["expression"] == "task_ref_targets(CurrentTaskRef, KernelInitTask)"
                     and record["proof_class"] == "type_process_ensures"
                     and record["proof_provider"] == "within_context"
                     for record in proved
@@ -306,7 +306,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "task_thread_context_core_restored(BootIdleTask.thread_context)"
+                    == "task_thread_context_core_restored(KernelInitTask.thread_context)"
                     and record["proof_class"] == "type_process_ensures"
                     and record["proof_provider"] == "within_context"
                     for record in proved

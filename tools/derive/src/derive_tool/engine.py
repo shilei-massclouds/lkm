@@ -845,12 +845,23 @@ class _Deriver:
                 return False
 
             bindings: dict[str, dict[str, str]] = {}
-            if not self._drive_blocks(event.decl.drives, event, bindings=bindings):
+            event_result_hints = _block_entries(event.decl.ensures)
+            if not self._drive_blocks(
+                event.decl.drives,
+                event,
+                bindings=bindings,
+                result_hints=event_result_hints,
+            ):
                 exit_message = "drives blocked"
                 return False
 
             for within in event.decl.within:
-                if not self._execute_within(within, event, bindings=bindings):
+                if not self._execute_within(
+                    within,
+                    event,
+                    bindings=bindings,
+                    result_hints=event_result_hints,
+                ):
                     exit_message = f"within blocked: {within.context}"
                     return False
 
@@ -907,6 +918,7 @@ class _Deriver:
         action_provider: str = "action_drive",
         bindings: dict[str, dict[str, str]] | None = None,
         process_parent: str | None = None,
+        result_hints: tuple[str, ...] = (),
     ) -> bool:
         bindings = bindings if bindings is not None else {}
         for block in blocks:
@@ -918,6 +930,7 @@ class _Deriver:
                     action_provider=action_provider,
                     bindings=bindings,
                     process_parent=process_parent,
+                    result_hints=result_hints,
                 ):
                     return False
         return True
@@ -931,10 +944,12 @@ class _Deriver:
         action_provider: str,
         bindings: dict[str, dict[str, str]],
         process_parent: str | None,
+        result_hints: tuple[str, ...],
     ) -> bool:
         bind = _ACTION_BIND_RE.match(entry)
         if bind is not None:
             name, type_name, object_name, action_name, args = bind.group(1, 2, 3, 4, 5)
+            obj = self.model.objects.get(object_name)
             display_call = _process_call_expression(
                 f"{object_name}.Action::{action_name}", args
             )
@@ -965,9 +980,21 @@ class _Deriver:
                 )
             expression = f"let {name}: {type_name} <- {call}"
             bindings[name] = {"type": type_name}
-            result_value = _action_result_value(
-                self.model, object_name, action_name, type_name
+            process_type = ref_process_type or (obj.kind if obj is not None else None)
+            result_value = _action_result_value_from_hints(
+                self.model,
+                object_name,
+                action_name,
+                type_name,
+                args,
+                process_type,
+                result_hints,
+                bindings,
             )
+            if result_value is None:
+                result_value = _action_result_value(
+                    self.model, object_name, action_name, type_name
+                )
             if result_value is not None:
                 bindings[name]["value"] = result_value
             self._record(
@@ -985,7 +1012,6 @@ class _Deriver:
                 process_parent=process_parent,
             )
             parent_expression = display_expression if expression != display_expression else expression
-            obj = self.model.objects.get(object_name)
             if ref_process_type is not None:
                 target_object = _ref_process_self_name(
                     self.model, receiver, ref_process_type, object_name
@@ -1002,6 +1028,7 @@ class _Deriver:
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
+                    result_hints=result_hints,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1027,6 +1054,7 @@ class _Deriver:
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
+                    result_hints=result_hints,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1094,6 +1122,7 @@ class _Deriver:
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
+                    result_hints=result_hints,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1164,6 +1193,7 @@ class _Deriver:
                 action_provider=action_provider,
                 process_parent=parent_expression,
                 bindings=bindings,
+                result_hints=result_hints,
             ):
                 return False
             self._record_type_process_ensures(
@@ -1232,6 +1262,7 @@ class _Deriver:
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
+                    result_hints=result_hints,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1287,6 +1318,7 @@ class _Deriver:
                         action_provider=action_provider,
                         process_parent=parent_expression,
                         bindings=bindings,
+                        result_hints=result_hints,
                     ):
                         return False
                     self._record_type_process_ensures(
@@ -1327,14 +1359,25 @@ class _Deriver:
                 target_object = _ref_process_self_name(
                     self.model, receiver, process_type, receiver_name
                 )
+                canonical_args = _canonical_process_args(
+                    self.model,
+                    process_type,
+                    "Action",
+                    action_name,
+                    args,
+                    bindings,
+                )
+                canonical_entry = _process_call_expression(
+                    f"{receiver_name}.Action::{action_name}", canonical_args
+                )
                 expression = _normalize_ref_process_expression(
                     self.model,
                     receiver_name,
                     receiver_type,
                     "Action",
                     action_name,
-                    args,
-                    entry,
+                    canonical_args,
+                    canonical_entry,
                 )
                 display_expression = _process_call_expression(
                     f"{receiver_name}.Action::{action_name}", args
@@ -1367,6 +1410,7 @@ class _Deriver:
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
+                    result_hints=result_hints,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1437,6 +1481,7 @@ class _Deriver:
                 action_provider=action_provider,
                 process_parent=parent_expression,
                 bindings=bindings,
+                result_hints=result_hints,
             ):
                 return False
             self._record_type_process_ensures(
@@ -1464,14 +1509,25 @@ class _Deriver:
                 target_object = _ref_process_self_name(
                     self.model, receiver, process_type, object_name
                 )
+                canonical_args = _canonical_process_args(
+                    self.model,
+                    process_type,
+                    "Action",
+                    action_name,
+                    args,
+                    bindings,
+                )
+                canonical_entry = _process_call_expression(
+                    f"{object_name}.Action::{action_name}", canonical_args
+                )
                 expression = _normalize_ref_process_expression(
                     self.model,
                     object_name,
                     receiver_type or "",
                     "Action",
                     action_name,
-                    args,
-                    entry,
+                    canonical_args,
+                    canonical_entry,
                 )
                 display_expression = _process_call_expression(
                     f"{object_name}.Action::{action_name}", args
@@ -1504,6 +1560,7 @@ class _Deriver:
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
+                    result_hints=result_hints,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1557,6 +1614,7 @@ class _Deriver:
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
+                    result_hints=result_hints,
                 ):
                     return False
                 self._record_type_process_ensures(
@@ -1595,6 +1653,7 @@ class _Deriver:
         action_provider: str,
         process_parent: str | None = None,
         bindings: dict[str, dict[str, str]] | None = None,
+        result_hints: tuple[str, ...] = (),
     ) -> bool:
         key = (type_name, self_name, process_kind, process_name)
         if key in self.process_stack:
@@ -1610,6 +1669,12 @@ class _Deriver:
 
         drives = _process_drives(self.model, type_name, process_kind, process_name)
         withins = _process_withins(self.model, type_name, process_kind, process_name)
+        process_ensures = _process_ensures(
+            self.model,
+            type_name,
+            process_kind,
+            process_name,
+        )
         if not drives and not withins:
             return True
 
@@ -1628,11 +1693,16 @@ class _Deriver:
         drive_bindings = dict(inherited_bindings)
         for name, value in argument_bindings.items():
             inherited = inherited_bindings.get(value)
+            param_type = signature.get(name)
             if inherited is not None:
-                drive_bindings[name] = dict(inherited)
+                drive_bindings[name] = _process_param_binding(
+                    self.model,
+                    inherited,
+                    value,
+                    param_type,
+                )
                 drive_bindings[name]["display"] = value
                 continue
-            param_type = signature.get(name)
             ref_type = (
                 param_type
                 if param_type in _REF_TARGET_PROCESS_TYPES
@@ -1643,6 +1713,15 @@ class _Deriver:
             else:
                 drive_bindings[name] = {"type": "ProcessArgument", "value": value}
         drive_bindings["self"] = {"type": "Self", "value": self_name}
+        hint_replacements = dict(replacements)
+        for name in argument_bindings:
+            value = drive_bindings.get(name, {}).get("value")
+            if value is not None:
+                hint_replacements[name] = value
+        local_result_hints = result_hints + tuple(
+            _substitute_process_bindings(ensure, hint_replacements)
+            for ensure in process_ensures
+        )
 
         self.process_stack.append(key)
         try:
@@ -1668,6 +1747,7 @@ class _Deriver:
                     action_provider=action_provider,
                     bindings=drive_bindings,
                     process_parent=process_parent,
+                    result_hints=local_result_hints,
                 ):
                     return False
             for within in withins:
@@ -1677,6 +1757,7 @@ class _Deriver:
                     event,
                     bindings=drive_bindings,
                     process_parent=process_parent,
+                    result_hints=local_result_hints,
                 ):
                     return False
         finally:
@@ -1690,9 +1771,11 @@ class _Deriver:
         *,
         bindings: dict[str, dict[str, str]] | None = None,
         process_parent: str | None = None,
+        result_hints: tuple[str, ...] = (),
     ) -> bool:
         bindings = dict(bindings or {})
         bindings.update(_within_parameter_bindings(within.parameters, bindings))
+        local_result_hints = result_hints + _block_entries(within.ensures)
         context = self.model.exclusive_contexts.get(within.context)
         if context is None:
             self._record(
@@ -1747,6 +1830,7 @@ class _Deriver:
             action_provider="within_context",
             bindings=bindings,
             process_parent=process_parent,
+            result_hints=local_result_hints,
         ):
             return False
         for child_within in within.within:
@@ -1755,6 +1839,7 @@ class _Deriver:
                 event,
                 bindings=bindings,
                 process_parent=process_parent,
+                result_hints=local_result_hints,
             ):
                 return False
         if not self._prove_blocks(
@@ -1870,9 +1955,21 @@ class _Deriver:
         )
         inherited_bindings = dict(bindings or {})
         replacements: dict[str, str] = {"self": self_name}
+        signature = dict(
+            _process_signature(self.model, type_name, process_kind, process_name) or ()
+        )
         for name, value in argument_bindings.items():
             inherited = inherited_bindings.get(value)
-            replacements[name] = inherited.get("value", value) if inherited else value
+            if inherited is not None:
+                binding = _process_param_binding(
+                    self.model,
+                    inherited,
+                    value,
+                    signature.get(name),
+                )
+                replacements[name] = binding.get("value", value)
+            else:
+                replacements[name] = value
         for ensure in _process_ensures(
             self.model,
             type_name,
@@ -2199,7 +2296,8 @@ class _Deriver:
         for within in entered_by.decl.within:
             ensure_blocks.extend(within.ensures)
         for block in ensure_blocks:
-            if expression not in block.entries:
+            expression_key = _fact_key(expression)
+            if expression_key not in {_fact_key(entry) for entry in block.entries}:
                 continue
             classification = _classify_obligation(
                 expression, kind, state.object_name
@@ -2901,6 +2999,24 @@ def _within_parameter_bindings(
     return bindings
 
 
+def _process_param_binding(
+    model: ObjectModel,
+    inherited: dict[str, str],
+    display: str,
+    param_type: str | None,
+) -> dict[str, str]:
+    binding = dict(inherited)
+    if param_type is None:
+        return binding
+    target_type = _REF_TARGET_PROCESS_TYPES.get(inherited.get("type", ""))
+    if target_type != param_type:
+        return binding
+    target_object = _ref_value_target_object(model, inherited.get("value"))
+    if target_object is not None:
+        binding = {"type": param_type, "value": target_object, "display": display}
+    return binding
+
+
 def _canonicalize_ref_aliases(
     expression: str, bindings: dict[str, dict[str, str]]
 ) -> str:
@@ -3457,7 +3573,7 @@ def _parse_process_parameters(params: str) -> tuple[tuple[str, str], ...]:
 def _uses_named_args(args: str) -> bool:
     return any(
         re.match(r"\s*[a-z][A-Za-z0-9_]*\s*:(?!:)", item) is not None
-        for item in args.split(",")
+        for item in _split_args(args)
     )
 
 
@@ -3500,6 +3616,195 @@ def _action_result_value(
             if match is not None:
                 return match.group(1)
     return None
+
+
+def _action_result_value_from_hints(
+    model: ObjectModel,
+    object_name: str,
+    action_name: str,
+    type_name: str,
+    args: str | None,
+    process_type: str | None,
+    hints: tuple[str, ...],
+    bindings: dict[str, dict[str, str]],
+) -> str | None:
+    signature = (
+        _process_signature(model, process_type, "Action", action_name)
+        if process_type is not None
+        else None
+    )
+    call_args = _canonical_call_args(args, signature, bindings)
+    receiver = _canonical_ref_value(object_name, bindings)
+    if type_name == "RunQueueRef" and action_name == "SelectRunQueue":
+        task_ref = call_args.get("task_ref")
+        if task_ref is None:
+            return None
+        return _result_value_from_predicate(
+            hints,
+            "scheduler_select_runqueue_returns",
+            (receiver, task_ref),
+        )
+    if type_name == "TaskRef" and action_name == "PickNextTask":
+        prev_ref = call_args.get("prev_ref")
+        if prev_ref is None:
+            return None
+        return _result_value_from_predicate(
+            hints,
+            "runqueue_pick_next_task_returns",
+            (receiver, prev_ref),
+        )
+    return None
+
+
+def _canonical_call_args(
+    args: str | None,
+    signature: tuple[tuple[str, str], ...] | None,
+    bindings: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    if args is None or signature is None:
+        return {}
+    raw_args = _split_args(args)
+    if _uses_named_args(args):
+        by_name: dict[str, str] = {}
+        for item in raw_args:
+            name, sep, value = item.partition(":")
+            if sep:
+                by_name[name.strip()] = _canonical_ref_value(value.strip(), bindings)
+        return by_name
+    if len(raw_args) != len(signature):
+        return {}
+    return {
+        name: _canonical_ref_value(value, bindings)
+        for (name, _type_name), value in zip(signature, raw_args, strict=True)
+    }
+
+
+def _canonical_ref_value(
+    value: str, bindings: dict[str, dict[str, str]]
+) -> str:
+    binding = bindings.get(value)
+    if binding is not None:
+        return binding.get("value", value)
+    return value
+
+
+def _canonical_process_args(
+    model: ObjectModel,
+    type_name: str,
+    process_kind: str,
+    process_name: str,
+    args: str | None,
+    bindings: dict[str, dict[str, str]],
+) -> str | None:
+    signature = _process_signature(model, type_name, process_kind, process_name)
+    if args is None or signature is None:
+        return args
+    raw_args = _split_args(args)
+    if _uses_named_args(args):
+        rendered: list[str] = []
+        signature_by_name = dict(signature)
+        for item in raw_args:
+            name, sep, value = item.partition(":")
+            if not sep:
+                rendered.append(item)
+                continue
+            arg_name = name.strip()
+            rendered.append(
+                f"{arg_name}: "
+                + _canonical_process_arg_value(
+                    model,
+                    value.strip(),
+                    signature_by_name.get(arg_name),
+                    bindings,
+                )
+            )
+        return ", ".join(rendered)
+    if len(raw_args) != len(signature):
+        return args
+    return ", ".join(
+        _canonical_process_arg_value(model, value, param_type, bindings)
+        for (_param_name, param_type), value in zip(signature, raw_args, strict=True)
+    )
+
+
+def _canonical_process_arg_value(
+    model: ObjectModel,
+    value: str,
+    param_type: str | None,
+    bindings: dict[str, dict[str, str]],
+) -> str:
+    binding = bindings.get(value)
+    if binding is None:
+        return value
+    return _process_param_binding(model, binding, value, param_type).get("value", value)
+
+
+def _result_value_from_predicate(
+    hints: tuple[str, ...],
+    predicate: str,
+    expected_prefix: tuple[str, ...],
+) -> str | None:
+    for hint in reversed(hints):
+        parsed = _predicate_args(hint)
+        if parsed is None:
+            continue
+        hint_predicate, hint_args = parsed
+        if (
+            hint_predicate == predicate
+            and len(hint_args) == len(expected_prefix) + 1
+            and tuple(hint_args[: len(expected_prefix)]) == expected_prefix
+        ):
+            return hint_args[-1]
+    return None
+
+
+def _predicate_args(expression: str) -> tuple[str, tuple[str, ...]] | None:
+    match = re.match(r"\A([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\Z", expression.strip(), re.S)
+    if match is None:
+        return None
+    return match.group(1), tuple(_split_args(match.group(2)))
+
+
+def _split_args(args: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in args:
+        if in_string:
+            current.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            current.append(char)
+        elif char == "(":
+            depth += 1
+            current.append(char)
+        elif char == ")":
+            depth -= 1
+            current.append(char)
+        elif char == "," and depth == 0:
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+        else:
+            current.append(char)
+    part = "".join(current).strip()
+    if part:
+        parts.append(part)
+    return parts
+
+
+def _block_entries(blocks: list[Block]) -> tuple[str, ...]:
+    return tuple(entry for block in blocks for entry in block.entries)
 
 
 def _context_object(event: EventDef | None, state: StateDef | None) -> str | None:
@@ -3735,6 +4040,35 @@ def _predicate_name(expression: str) -> str | None:
     if match is None:
         return None
     return match.group(1)
+
+
+def _fact_key(expression: str) -> str:
+    stripped = expression.strip()
+    if _predicate_name(stripped) is None:
+        return stripped
+    return _remove_unquoted_whitespace(stripped)
+
+
+def _remove_unquoted_whitespace(text: str) -> str:
+    chars: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            chars.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            chars.append(char)
+        elif not char.isspace():
+            chars.append(char)
+    return "".join(chars)
 
 
 def _attrs_accessible_proof(

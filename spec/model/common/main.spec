@@ -81,6 +81,7 @@ include "ioremap.spec";
 include "bus_type.spec";
 include "console.spec";
 include "ns16550a_driver.spec";
+include "virtio_mmio.spec";
 include "allocator.spec";
 
 function addr_of<T>(value: T) -> AddrIdentity<T>;

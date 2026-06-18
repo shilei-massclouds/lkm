@@ -424,5 +424,72 @@ type PlatformBusType: BusType {
                 bus_type_driver_probe_bound_device(self, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
             }
         }
+
+        Action::RegisterVirtioMmioPlatformDriver {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                DeviceTree.state == State::Ready;
+                InitcallTable.state == State::Prepared;
+                bus_type_subsys_private_online(self, self.subsys);
+                bus_subsys_klist_drivers_ready(self.subsys);
+                bus_type_devices_klist_nonempty(self);
+                device_ref_set_nonempty(self.subsys.klist_devices);
+                platform_device_set_nonempty(self.platform_devices);
+                device_driver_ref_ready(DeviceDriverRef::VirtioMmioPlatformDriver);
+                Ioremap.state == State::Ready;
+            }
+            drives {
+                self.Action::PlatformDriverRegister(DeviceDriverRef::VirtioMmioPlatformDriver);
+                Ioremap.Action::MapDeviceMmio(
+                    device: DeviceRef::VirtioMmioPlatformDevice,
+                    mapping: IoMemoryMappingRef::VirtioMmio
+                );
+            }
+            ensures {
+                initcall_entry_invoked(InitcallEntry::VirtioMmioPlatformDriver);
+                initcall_entry_return_recorded(InitcallEntry::VirtioMmioPlatformDriver);
+                initcall_entry_run_context_checked(InitcallEntry::VirtioMmioPlatformDriver);
+                platform_driver_register_called(self, DeviceDriverRef::VirtioMmioPlatformDriver);
+                platform_driver_register_return_zero(self, DeviceDriverRef::VirtioMmioPlatformDriver);
+                platform_bus_driver_registered(self, DeviceDriverRef::VirtioMmioPlatformDriver);
+                platform_bus_device_discovered(self, DeviceRef::VirtioMmioPlatformDevice);
+                platform_bus_match_attempted(
+                    self,
+                    DeviceDriverRef::VirtioMmioPlatformDriver,
+                    DeviceRef::VirtioMmioPlatformDevice
+                );
+                platform_bus_driver_matched_device(
+                    self,
+                    DeviceDriverRef::VirtioMmioPlatformDriver,
+                    DeviceRef::VirtioMmioPlatformDevice
+                );
+                platform_bus_probe_called(
+                    self,
+                    DeviceDriverRef::VirtioMmioPlatformDriver,
+                    DeviceRef::VirtioMmioPlatformDevice
+                );
+                platform_bus_probe_return_zero(
+                    self,
+                    DeviceDriverRef::VirtioMmioPlatformDriver,
+                    DeviceRef::VirtioMmioPlatformDevice
+                );
+                platform_bus_device_bound(
+                    self,
+                    DeviceDriverRef::VirtioMmioPlatformDriver,
+                    DeviceRef::VirtioMmioPlatformDevice
+                );
+                bus_type_driver_added(self, DeviceDriverRef::VirtioMmioPlatformDriver);
+                bus_type_drivers_klist_nonempty(self);
+                bus_subsys_klist_drivers_contains(self.subsys, DeviceDriverRef::VirtioMmioPlatformDriver);
+                bus_type_probe_driver_scans_devices(self, DeviceDriverRef::VirtioMmioPlatformDriver);
+                bus_type_probe_driver_match_attempted(self, DeviceDriverRef::VirtioMmioPlatformDriver);
+                bus_type_driver_probe_bound_device(
+                    self,
+                    DeviceDriverRef::VirtioMmioPlatformDriver,
+                    DeviceRef::VirtioMmioPlatformDevice
+                );
+            }
+        }
     }
 }

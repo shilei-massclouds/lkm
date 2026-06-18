@@ -534,6 +534,7 @@ struct PlatformBusProbeObservation {
     matched: bool,
     probe_called: bool,
     probe_return_zero: bool,
+    probe_result: Option<ProbeResult>,
     bound: bool,
 }
 
@@ -546,6 +547,7 @@ impl PlatformBusProbeObservation {
             matched: false,
             probe_called: false,
             probe_return_zero: false,
+            probe_result: None,
             bound: false,
         }
     }
@@ -740,6 +742,15 @@ impl PlatformBus {
     pub fn platform_probe_return_zero(&self, driver: DeviceDriverRef, device: DeviceRef) -> bool {
         self.probe_observation(driver, device)
             .is_some_and(|observation| observation.probe_return_zero)
+    }
+
+    pub fn platform_probe_result(
+        &self,
+        driver: DeviceDriverRef,
+        device: DeviceRef,
+    ) -> Option<ProbeResult> {
+        self.probe_observation(driver, device)
+            .and_then(|observation| observation.probe_result)
     }
 
     pub fn platform_device_bound(&self, driver: DeviceDriverRef, device: DeviceRef) -> bool {
@@ -1038,24 +1049,34 @@ impl PlatformBus {
                 State::Ready,
             );
         }
-        if let Some(device_ref) = self.first_matching_device(driver, device_tree) {
-            self.probe_and_bind(
-                driver,
-                device_ref,
-                device_tree,
-                vmalloc_allocator,
-                page_table_caches,
-                page_allocator,
-                page_metadata_map,
-                config,
-                ioremap,
-                plic_irq_domain,
-                irq_handler_registry,
-            );
-            return Ok(());
+        let mut matched = false;
+        let mut index = 0usize;
+        while index < self.device_refs.len() {
+            let device_ref = self.device_refs[index];
+            let device_matched = self.driver_matches_device(driver, device_ref, device_tree);
+            self.record_match_attempt(driver, device_ref, device_matched);
+            if device_matched {
+                matched = true;
+                self.probe_and_bind(
+                    driver,
+                    device_ref,
+                    device_tree,
+                    vmalloc_allocator,
+                    page_table_caches,
+                    page_allocator,
+                    page_metadata_map,
+                    config,
+                    ioremap,
+                    plic_irq_domain,
+                    irq_handler_registry,
+                );
+            }
+            index += 1;
         }
 
-        self.probe_driver_deferred_count += 1;
+        if !matched {
+            self.probe_driver_deferred_count += 1;
+        }
         Ok(())
     }
 
@@ -1150,24 +1171,6 @@ impl PlatformBus {
             return InitcallReturn::Error(-1);
         }
         InitcallReturn::Ok
-    }
-
-    fn first_matching_device(
-        &mut self,
-        driver: DeviceDriverRef,
-        device_tree: &DeviceTree,
-    ) -> Option<DeviceRef> {
-        let mut index = 0usize;
-        while index < self.device_refs.len() {
-            let device_ref = self.device_refs[index];
-            let matched = self.driver_matches_device(driver, device_ref, device_tree);
-            self.record_match_attempt(driver, device_ref, matched);
-            if matched {
-                return Some(device_ref);
-            }
-            index += 1;
-        }
-        None
     }
 
     fn driver_matches_device(
@@ -1325,6 +1328,7 @@ impl PlatformBus {
     ) {
         let observation = self.probe_observation_mut(driver, device);
         observation.probe_called = true;
+        observation.probe_result = Some(result);
         observation.probe_return_zero = result == ProbeResult::Bound;
         if result == ProbeResult::Bound {
             observation.bound = true;

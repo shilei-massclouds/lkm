@@ -11,7 +11,7 @@ use super::{
 };
 use crate::trace::Checkpoint;
 
-const MAX_IOREMAP_MAPPINGS: usize = 4;
+const MAX_IOREMAP_MAPPINGS: usize = 16;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum MmioOwner {

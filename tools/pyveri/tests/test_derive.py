@@ -131,6 +131,139 @@ class DerivationTests(unittest.TestCase):
         )
 
 
+    def test_event_ensures_match_multiline_invariant_predicates(self) -> None:
+        result = build_model(
+            parse_text(
+                """
+                object A: PhaseObject {
+                    initial_state: State::Base;
+
+                    state State::Base {
+                        events {
+                            on Event::Setup -> State::Ready {
+                                ensures {
+                                    object_ref_targets(DeviceRef::VirtioMmioPlatformDevice, VirtioMmioTransportDevice);
+                                }
+                            }
+                        }
+                    }
+
+                    state State::Ready {
+                        invariant {
+                            object_ref_targets(
+                                DeviceRef::VirtioMmioPlatformDevice,
+                                VirtioMmioTransportDevice
+                            );
+                        }
+                    }
+                }
+                """
+            )
+        )
+
+        derivation = derive(result.model, "A.Event::Setup")
+
+        self.assertTrue(derivation.ok)
+        self.assertFalse(
+            any(record.status is DerivationStatus.OBLIGATION for record in derivation.records)
+        )
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_provider == "event_ensures"
+                and record.predicate == "object_ref_targets"
+                and "object_ref_targets(\n" in (record.expression or "")
+                for record in derivation.records
+            )
+        )
+
+
+    def test_action_result_binding_prefers_process_result_hints(self) -> None:
+        result = build_model(
+            parse_text(
+                """
+                predicate runqueue_pick_next_task_returns<T, U, V>(runqueue_ref: T, prev_ref: U, next_ref: V) -> bool;
+                predicate task_ref_targets<T, U>(task_ref: T, task: U) -> bool;
+
+                type Task {
+                }
+
+                type TaskRef {
+                    processes {
+                        Action::SetCurrent(task: Task) {
+                            ensures {
+                                task_ref_targets(self, task);
+                            }
+                        }
+                    }
+                }
+
+                type RunQueue {
+                    processes {
+                        Action::PickNextTask(prev_ref: TaskRef) -> TaskRef {
+                            ensures {
+                                runqueue_pick_next_task_returns(CurrentRunQueueRef, prev_ref, CurrentTaskRef);
+                            }
+                        }
+                    }
+                }
+
+                type Scheduler {
+                    processes {
+                        Action::Schedule {
+                            drives {
+                                let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef);
+                                CurrentTaskRef.Action::SetCurrent(task: next);
+                            }
+
+                            ensures {
+                                runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, KernelInitTaskRef);
+                            }
+                        }
+                    }
+                }
+
+                object A: Scheduler {
+                    initial_state: State::Base;
+
+                    state State::Base {
+                        events {
+                            on Event::Setup -> State::Ready {
+                                drives {
+                                    A.Action::Schedule;
+                                }
+                            }
+                        }
+                    }
+
+                    state State::Ready {
+                    }
+                }
+            """
+            )
+        )
+
+        derivation = derive(result.model, "A.Event::Setup")
+
+        self.assertTrue(derivation.ok)
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_class == "type_process_commit"
+                and record.expression == "CurrentTaskRef.Action::SetCurrent(task: KernelInitTask)"
+                for record in derivation.records
+            )
+        )
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_class == "type_process_ensures"
+                and record.expression == "task_ref_targets(CurrentTaskRef, KernelInitTask)"
+                for record in derivation.records
+            )
+        )
+
+
     def test_within_ensures_can_satisfy_target_invariants(self) -> None:
         result = build_model(
             parse_text(

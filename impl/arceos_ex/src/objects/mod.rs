@@ -77,6 +77,7 @@ pub mod static_page_tables;
 pub mod swapper_vm;
 pub mod task;
 pub mod trampoline_vm;
+pub mod virtio_mmio;
 pub mod vm;
 pub mod vm_setup;
 pub mod workqueue;

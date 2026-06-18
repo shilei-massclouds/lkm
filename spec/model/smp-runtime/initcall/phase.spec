@@ -452,6 +452,7 @@ object InitcallTable: InitcallTableType {
                     StaticObjects.state == State::Online;
                     PlatformBus.state == State::Ready;
                     Ns16550aPlatformDriver.state == State::Prepared;
+                    VirtioMmioPlatformDriver.state == State::Prepared;
                 }
 
                 ensures {
@@ -464,6 +465,7 @@ object InitcallTable: InitcallTableType {
                     initcall_table_entry_operation_bindings_ready(InitcallTable);
                     initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
                     initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::Ns16550aPlatformDriver);
+                    initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::VirtioMmioPlatformDriver);
                 }
             }
         }
@@ -480,6 +482,7 @@ object InitcallTable: InitcallTableType {
             initcall_table_entry_operation_bindings_ready(InitcallTable);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::Ns16550aPlatformDriver);
+            initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::VirtioMmioPlatformDriver);
         }
 
         events {
@@ -567,6 +570,7 @@ object InitcallTable: InitcallTableType {
             initcall_table_entry_operation_bindings_ready(InitcallTable);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::Ns16550aPlatformDriver);
+            initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::VirtioMmioPlatformDriver);
             initcall_table_all_levels_ran(InitcallTable);
             initcall_entry_invoked(InitcallEntry::OfPlatformDefaultPopulate);
             initcall_command_line_scratch_reused_per_level(InitcallTable, SavedCommandLine);
@@ -691,10 +695,13 @@ object InitcallPhase: PhaseObject {
                     IrqProcViewDeferred.Event::Setup;
                     Ns16550aPlatformDriverStorage.Event::Setup;
                     Ns16550aPlatformDriver.Event::Preset;
+                    VirtioMmioPlatformDriverStorage.Event::Setup;
+                    VirtioMmioPlatformDriver.Event::Preset;
                     CtorTable.Event::Setup;
                     InitcallTable.Event::Preset;
                     InitcallTable.Event::Setup;
                     Ns16550aPlatformDriver.Event::Setup;
+                    VirtioMmioPlatformDriver.Event::Setup;
                     UartExternalIrqEnable.Event::Setup;
                     UartInterruptChainProbe.Event::Setup;
                     Serial8250Console.Event::Enable;
@@ -823,6 +830,8 @@ object InitcallPhase: PhaseObject {
             PlatformBusRootDevice.state == State::Ready;
             PlatformBus.state == State::Ready;
             Ns16550aPlatformDriver.state == State::Ready;
+            VirtioMmioPlatformDriver.state == State::Ready;
+            VirtioMmioTransportDevice.state == State::Ready;
             UartExternalIrqEnable.state == State::Ready;
             UartInterruptChainProbe.state == State::Ready;
             Serial8250Console.state == State::Online;

@@ -48,6 +48,7 @@ type InitcallEntryPrototype {
 enum InitcallEntry {
     OfPlatformDefaultPopulate,
     Ns16550aPlatformDriver,
+    VirtioMmioPlatformDriver,
 }
 
 predicate initcall_entry_prototype_no_payload_args<T>(prototype: T) -> bool;

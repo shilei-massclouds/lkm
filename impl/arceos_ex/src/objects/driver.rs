@@ -25,6 +25,7 @@ pub type PlatformProbe = fn(
 pub enum ProbeResult {
     Bound,
     Deferred,
+    Rejected,
 }
 
 pub struct OfMatchEntry {
