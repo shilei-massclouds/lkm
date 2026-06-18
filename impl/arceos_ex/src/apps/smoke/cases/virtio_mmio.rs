@@ -7,10 +7,13 @@ use crate::{
     objects::{
         driver::ProbeResult,
         virtio_mmio::{
-            self, VirtioMmioHeader, VirtioMmioHeaderStatus, VIRTIO_MMIO_PLATFORM_DRIVER_REF,
+            self, VirtioMmioHeader, VirtioMmioHeaderStatus, VIRTIO_ID_RNG,
+            VIRTIO_MMIO_PLATFORM_DRIVER_REF,
         },
     },
 };
+
+const VIRTIO_MMIO_VENDOR_QEMU: u32 = u32::from_le_bytes(*b"QEMU");
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -29,12 +32,15 @@ impl SmokeScenario for HeaderClassifierScenario {
     fn setup(&mut self, _assertions: &mut SmokeAssertions) {}
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        let valid_rng = VirtioMmioHeader::valid_rng(0x554d4551);
+        let valid_rng = VirtioMmioHeader::valid_device(VIRTIO_ID_RNG, VIRTIO_MMIO_VENDOR_QEMU);
         assertions.assert("valid rng header", valid_rng.valid());
         assertions.assert("valid rng candidate", valid_rng.rng_candidate());
-        assertions.assert("valid rng id", valid_rng.device_id() == 4);
+        assertions.assert("valid rng id", valid_rng.device_id() == VIRTIO_ID_RNG);
         assertions.assert("valid rng version", valid_rng.version() == 2);
-        assertions.assert("valid rng vendor", valid_rng.vendor_id() == 0x554d4551);
+        assertions.assert(
+            "valid rng vendor",
+            valid_rng.vendor_id() == VIRTIO_MMIO_VENDOR_QEMU,
+        );
 
         let invalid_magic = VirtioMmioHeader::new(0, 2, 4, 1);
         assertions.assert(

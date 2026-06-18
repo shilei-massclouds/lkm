@@ -14,7 +14,7 @@ const VIRTIO_MMIO_OF_MATCH: [OfMatchEntry; 1] = [OfMatchEntry::new(b"virtio,mmio
 const VIRTIO_MMIO_MAGIC: u32 = u32::from_le_bytes(*b"virt");
 const VIRTIO_MMIO_VERSION_MIN: u32 = 1;
 const VIRTIO_MMIO_VERSION_MAX: u32 = 2;
-const VIRTIO_ID_RNG: u32 = 4;
+pub const VIRTIO_ID_RNG: u32 = 4;
 
 pub static VIRTIO_MMIO_PLATFORM_DRIVER: PlatformDriver = PlatformDriver::new(
     "virtio-mmio",
@@ -273,8 +273,8 @@ impl VirtioMmioHeader {
         }
     }
 
-    pub const fn valid_rng(vendor_id: u32) -> Self {
-        Self::new(VIRTIO_MMIO_MAGIC, 2, VIRTIO_ID_RNG, vendor_id)
+    pub const fn valid_device(device_id: u32, vendor_id: u32) -> Self {
+        Self::new(VIRTIO_MMIO_MAGIC, 2, device_id, vendor_id)
     }
 
     pub const fn status(self) -> VirtioMmioHeaderStatus {
