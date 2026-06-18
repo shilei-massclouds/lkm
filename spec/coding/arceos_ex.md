@@ -444,6 +444,15 @@ smoke 中的小队列容量固化为编译期固定数组；ring backing 应按�
 和 fake integration 使用 smoke 覆盖，真实 QEMU `virtio-rng-device` completion 后续只通过 checkpoint/KUnit
 只读 observer 检查，不得让 KUnit handler 调用 ring action 或伪造 completion。
 
+`VirtioRngDriver` / `VirtioRngDevice` fake integration 首轮应单独放在 `objects::virtio_rng`。driver probe
+输入必须是 generic `VirtioDevice`，并通过正式 `device_id == VIRTIO_ID_RNG` 匹配；不得为了 smoke 新增绕过
+`VirtioDevice` / `VirtQueue` 的测试专用构造或直接写内部状态的后门。`VirtioRngDevice` 持有 single input
+`VirtQueue`，正式 API 只覆盖 `probe`、`request_entropy`、`fake_transport_complete`、`complete_entropy`
+和 `cleanup/remove` 边界；fake completion 可以封装调用 `VirtQueue::fake_complete_used()`，但仍是对象 API，
+不是 KUnit/checkpoint handler 行为。首轮只维护 `data_avail`、`data_idx`、request/completion counters
+和 pending request 状态；`hwrng_register()`、随机池、文件系统、用户态 read、真实 MMIO notify/IRQ、
+freeze/restore 和完整 reset/remove 资源回收必须显式 deferred。
+
 console/earlycon handoff 的实现必须保持 Linux-like `register_console()` 边界，但第一轮仍只要求对象级可观测事实。
 正式 `DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，
 冒号后是 console options。节点路径和 options 必须分开保存，options 保留给后续 console setup，不得混入节点路径匹配。

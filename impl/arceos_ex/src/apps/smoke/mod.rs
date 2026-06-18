@@ -163,6 +163,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::virtio_ring::run,
     },
     SmokeCase {
+        name: "virtio_rng",
+        run: cases::virtio_rng::run,
+    },
+    SmokeCase {
         name: "rootfs",
         run: cases::rootfs::run,
     },
