@@ -450,27 +450,6 @@ pub fn earlycon_drain_allowed() -> bool {
         || (registry.keep_bootcon && registry.boot_console_online && !registry.handoff_complete)
 }
 
-#[cfg(checkpoint_handler_console_handoff)]
-pub fn registry_snapshot() -> ConsoleRegistry {
-    unsafe { *(&raw const CONSOLE_REGISTRY).as_ref().unwrap() }
-}
-
-#[cfg(checkpoint_handler_console_handoff)]
-pub fn restore_registry(snapshot: ConsoleRegistry) {
-    unsafe {
-        *(&raw mut CONSOLE_REGISTRY).as_mut().unwrap() = snapshot;
-    }
-}
-
-#[cfg(checkpoint_handler_console_handoff)]
-pub fn reset_registry_for_smoke(keep_bootcon: bool) {
-    unsafe {
-        let registry = (&raw mut CONSOLE_REGISTRY).as_mut().unwrap();
-        *registry = ConsoleRegistry::new();
-        registry.set_keep_bootcon(keep_bootcon);
-    }
-}
-
 #[allow(dead_code)]
 pub fn setup(
     memblock: &MemBlock,

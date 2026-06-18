@@ -348,22 +348,6 @@ impl DeviceTree {
         self.stdout_path_node.is_some()
     }
 
-    #[cfg(checkpoint_handler_console_handoff)]
-    pub fn without_stdout_path_for_smoke(&self) -> Self {
-        Self {
-            lifecycle: Lifecycle::new(self.lifecycle.state()),
-            storage: self.storage,
-            storage_virt: self.storage_virt,
-            storage_size: self.storage_size,
-            node_count: self.node_count,
-            property_count: self.property_count,
-            max_depth: self.max_depth,
-            stdout_path_node: None,
-            stdout_path_path: RawSlice::empty(),
-            stdout_path_options: RawSlice::empty(),
-        }
-    }
-
     pub fn stdout_path_selects(&self, node_id: DeviceNodeId) -> bool {
         self.stdout_path_node == Some(node_id)
     }

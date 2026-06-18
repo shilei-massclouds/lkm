@@ -2338,25 +2338,6 @@ pub fn write_console_bytes(bytes: &[u8]) -> bool {
     delivered
 }
 
-#[cfg(checkpoint_handler_console_handoff)]
-pub fn probe_state_snapshot() -> Ns16550aProbeState {
-    unsafe { *(&raw const NS16550A_PROBE_STATE).as_ref().unwrap() }
-}
-
-#[cfg(checkpoint_handler_console_handoff)]
-pub fn restore_probe_state(snapshot: Ns16550aProbeState) {
-    unsafe {
-        *(&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() = snapshot;
-    }
-}
-
-#[cfg(checkpoint_handler_console_handoff)]
-pub fn reset_probe_state_for_smoke() {
-    unsafe {
-        *(&raw mut NS16550A_PROBE_STATE).as_mut().unwrap() = Ns16550aProbeState::new();
-    }
-}
-
 fn build_uart8250_port(
     device_tree: &DeviceTree,
     device: DeviceRef,

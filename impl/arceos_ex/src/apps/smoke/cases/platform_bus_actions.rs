@@ -109,7 +109,7 @@ impl PlatformBusActionsFixture {
         assertions.assert("drivers kset ready", self.bus.drivers_kset_ready());
     }
 
-    fn add_smoke_device(&mut self, assertions: &mut SmokeAssertions) -> Option<DeviceRef> {
+    fn add_platform_device(&mut self, assertions: &mut SmokeAssertions) -> Option<DeviceRef> {
         let ctx = context_ref();
         let Some(root) = ctx.device_tree.root() else {
             assertions.assert("device tree root available", false);
@@ -117,8 +117,8 @@ impl PlatformBusActionsFixture {
         };
         let result = self
             .bus
-            .add_smoke_platform_device(&ctx.device_tree, root.id());
-        assertions.assert("add smoke platform device", result.is_ok());
+            .add_platform_device_from_node(&ctx.device_tree, root.id());
+        assertions.assert("add platform device from node", result.is_ok());
         result.ok()
     }
 }
@@ -149,7 +149,7 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        let Some(device_ref) = self.fixture.add_smoke_device(assertions) else {
+        let Some(device_ref) = self.fixture.add_platform_device(assertions) else {
             return;
         };
         assertions.assert(
@@ -304,7 +304,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
             self.fixture.bus.add_driver(MOCK_PLATFORM_DRIVER_REF),
         );
 
-        let Some(device_ref) = self.fixture.add_smoke_device(assertions) else {
+        let Some(device_ref) = self.fixture.add_platform_device(assertions) else {
             return;
         };
         assertions.assert(

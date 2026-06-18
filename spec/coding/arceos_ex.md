@@ -45,6 +45,14 @@
 
 实现分层上，Phase 对象只作为过程编排存在；非 Phase 对象原则上应在 Rust 中有明确承载，例如 struct、静态单例或启动上下文字段。
 
+## 顶级编码原则
+
+普通对象 API 只能服务正式模型语义、运行时语义或真实观测事实。不得为了 smoke、KUnit、checkpoint 或调试便利，在普通对象上新增
+`test_*`、`*_for_smoke`、reset/snapshot/restore、fake completion、mock injection 等测试专用入口；也不得为了测试放宽
+正式 API 的签名、可见性、状态前置条件或错误语义。
+
+若测试暴露出缺少可调用边界，应先判断该能力是否属于正式对象 action/API：属于正式语义的，补 model/coding 规格并让生产路径和测试路径共享同一入口；仅用于构造测试场景的，放入 smoke fixture、checkpoint handler 或 test harness，不进入普通对象 API。checkpoint/KUnit handler 默认只读真实路径 facts；需要执行 mutating action 时，必须在 testing/coding 规格中明确 action-level probe capability、可写范围和清理边界。
+
 ## 入口命令
 
 当前入口统一使用仓库顶层 `Makefile`，默认内核为 `arceos_ex`。

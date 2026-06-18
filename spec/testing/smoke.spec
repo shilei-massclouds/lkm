@@ -12,6 +12,9 @@ predicate testing_smoke_category_kernel_environment_bound_defined() -> bool;
 
 predicate testing_tests_must_not_add_test_only_subject_api() -> bool;
 predicate testing_tests_must_not_modify_functional_api_for_tests() -> bool;
+predicate testing_kunit_checkpoint_must_be_read_only_observer_by_default() -> bool;
+predicate testing_kunit_checkpoint_must_not_add_test_only_subject_api() -> bool;
+predicate testing_action_level_kunit_must_record_capability() -> bool;
 predicate testing_new_smoke_tests_must_not_join_kunit_by_default() -> bool;
 predicate testing_new_kunit_tests_must_not_join_smoke_by_default() -> bool;
 predicate testing_cross_registration_must_record_reason() -> bool;
@@ -60,6 +63,37 @@ type TestImplementationPrinciples {
          * to write. API changes must be justified by model/coding semantics.
          */
         testing_tests_must_not_modify_functional_api_for_tests();
+
+        /*
+         * Checkpoint KUnit is read-only by default:
+         *
+         * A checkpoint/KUnit handler observes live checkpoint facts. It must
+         * not drive probe, IRQ, ring, completion or other production actions,
+         * mutate object state, or synthesize events unless the handler is
+         * explicitly specified as an action-level probe with a minimal named
+         * capability.
+         */
+        testing_kunit_checkpoint_must_be_read_only_observer_by_default();
+
+        /*
+         * KUnit still cannot add subject APIs:
+         *
+         * Checkpoint/KUnit coverage must not cause test-only methods,
+         * snapshot/reset hooks, fake-completion hooks or mock-injection
+         * methods to be added to the subject object. If the capability is real,
+         * model and implement it as a formal object API or probe object.
+         */
+        testing_kunit_checkpoint_must_not_add_test_only_subject_api();
+
+        /*
+         * Explicit action-level KUnit:
+         *
+         * If a checkpoint KUnit handler must execute a mutating action, the
+         * testing and coding specs must name the action-level boundary,
+         * allowed capability and cleanup expectations. Silence means observer
+         * only.
+         */
+        testing_action_level_kunit_must_record_capability();
 
         /*
          * Smoke registration default:

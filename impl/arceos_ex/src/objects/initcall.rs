@@ -977,7 +977,7 @@ impl PlatformBus {
         Ok(())
     }
 
-    pub fn add_smoke_platform_device(
+    pub fn add_platform_device_from_node(
         &mut self,
         device_tree: &DeviceTree,
         node_id: super::device_tree::DeviceNodeId,
