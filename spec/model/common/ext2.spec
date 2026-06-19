@@ -75,13 +75,21 @@ predicate ext2_inode_indirect_blocks_deferred<T, I>(fs: T, inode: I) -> bool;
 
 predicate ext2_root_lookup_name_bound<T, D>(fs: T, dirent: D) -> bool;
 predicate ext2_root_lookup_reads_root_dir<T, I>(fs: T, root: I) -> bool;
+predicate ext2_root_lookup_scans_direct_blocks<T, I>(fs: T, root: I) -> bool;
+predicate ext2_root_lookup_multi_direct_block_supported<T>(fs: T) -> bool;
+predicate ext2_root_lookup_not_found_is_nonfatal<T>(fs: T) -> bool;
+predicate ext2_root_lookup_indirect_blocks_deferred<T>(fs: T) -> bool;
 predicate ext2_root_lookup_dirent_valid<T, D>(fs: T, dirent: D) -> bool;
 predicate ext2_root_lookup_returns_inode<T, D, I>(fs: T, dirent: D, inode: I) -> bool;
 
 predicate ext2_file_read_uses_direct_block<T, R, I>(fs: T, read: R, file: I) -> bool;
+predicate ext2_file_read_scans_direct_blocks<T, R, I>(fs: T, read: R, file: I) -> bool;
+predicate ext2_file_read_multi_direct_block_supported<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_uses_buffer_head<T, R, B>(fs: T, read: R, bh: B) -> bool;
 predicate ext2_file_read_copies_to_caller<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_len_matches_inode_size<T, R, I>(fs: T, read: R, file: I) -> bool;
+predicate ext2_file_read_short_buffer_rejected<T, R>(fs: T, read: R) -> bool;
+predicate ext2_file_read_indirect_blocks_deferred<T, R>(fs: T, read: R) -> bool;
 
 object Ext2Driver: ResourceObject {
     initial_state: State::Base;
@@ -274,6 +282,10 @@ object Ext2FileSystem: ResourceObject {
                 ensures {
                     ext2_root_lookup_name_bound(self, Ext2DirEntryRef::RootLookup);
                     ext2_root_lookup_reads_root_dir(self, Ext2InodeRef::Root);
+                    ext2_root_lookup_scans_direct_blocks(self, Ext2InodeRef::Root);
+                    ext2_root_lookup_multi_direct_block_supported(self);
+                    ext2_root_lookup_not_found_is_nonfatal(self);
+                    ext2_root_lookup_indirect_blocks_deferred(self);
                     ext2_root_lookup_dirent_valid(self, Ext2DirEntryRef::RootLookup);
                     ext2_inode_record_ready(self, Ext2InodeRef::LookupFile);
                     ext2_inode_number_bound(self, Ext2InodeRef::LookupFile);
@@ -298,9 +310,24 @@ object Ext2FileSystem: ResourceObject {
                 }
                 ensures {
                     ext2_file_read_uses_direct_block(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
+                    ext2_file_read_scans_direct_blocks(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
+                    ext2_file_read_multi_direct_block_supported(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_uses_buffer_head(self, Ext2FileReadRef::LookupFile, BufferHead);
                     ext2_file_read_copies_to_caller(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_len_matches_inode_size(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
+                    ext2_file_read_indirect_blocks_deferred(self, Ext2FileReadRef::LookupFile);
+                }
+            }
+
+            Action::RejectLookupFileShortBuffer {
+                state_effect: StateEffect::None;
+                depends_on {
+                    Ext2FileSystem.state == State::Online;
+                    ext2_inode_is_regular_file(self, Ext2InodeRef::LookupFile);
+                    ext2_inode_size_bound(self, Ext2InodeRef::LookupFile);
+                }
+                ensures {
+                    ext2_file_read_short_buffer_rejected(self, Ext2FileReadRef::LookupFile);
                 }
             }
         }

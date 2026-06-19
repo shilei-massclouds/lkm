@@ -48,6 +48,9 @@ FS_TYPE ?= ext2
 EXT2_BLOCK_SIZE ?=
 EXT2_SMOKE_FILE_NAME ?= smoke.txt
 EXT2_SMOKE_FILE_CONTENT ?= arceos_ex ext2 smoke
+EXT2_SMOKE_LARGE_FILE_NAME ?= smoke-large.bin
+EXT2_SMOKE_LARGE_FILE_SIZE ?= 5120
+EXT2_SMOKE_LARGE_FILE_BYTE ?= L
 DEBUGFS ?= debugfs
 EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
@@ -106,6 +109,8 @@ ifeq ($(FS_TYPE),ext2)
 	mkfs.ext2 -q -F $(EXT2_MKFS_BLOCK_ARGS) $(VIRTIO_BLK_IMAGE)
 	printf '%s\n' "$(EXT2_SMOKE_FILE_CONTENT)" > $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt
 	$(DEBUGFS) -w -R "write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt /$(EXT2_SMOKE_FILE_NAME)" $(VIRTIO_BLK_IMAGE) >/dev/null
+	yes "$(EXT2_SMOKE_LARGE_FILE_BYTE)" | tr -d '\n' | dd of=$(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-large-file.bin bs=1 count=$(EXT2_SMOKE_LARGE_FILE_SIZE) status=none
+	$(DEBUGFS) -w -R "write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-large-file.bin /$(EXT2_SMOKE_LARGE_FILE_NAME)" $(VIRTIO_BLK_IMAGE) >/dev/null
 else ifeq ($(FS_TYPE),none)
 else
 	$(error unknown FS_TYPE: $(FS_TYPE))

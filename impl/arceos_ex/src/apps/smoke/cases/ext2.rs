@@ -7,12 +7,15 @@ use crate::{
     objects::{
         ext2::{
             Ext2Driver, Ext2Error, Ext2FileSystem, Ext2FileType, Ext2Volume, EXT2_MAX_BLOCK_SIZE,
-            EXT2_ROOT_INO, EXT2_SMOKE_FILE_CONTENT, EXT2_SMOKE_FILE_NAME,
+            EXT2_ROOT_INO, EXT2_SMOKE_LARGE_FILE_BYTE, EXT2_SMOKE_LARGE_FILE_NAME,
+            EXT2_SMOKE_LARGE_FILE_SIZE,
         },
         state::State,
         virtio_blk,
     },
 };
+
+static mut LARGE_READ_BUFFER: [u8; EXT2_SMOKE_LARGE_FILE_SIZE] = [0; EXT2_SMOKE_LARGE_FILE_SIZE];
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -143,14 +146,27 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         let lookup = fs.lookup_root(
             &mut ctx.block_device_registry,
             &mut provider,
-            EXT2_SMOKE_FILE_NAME,
+            EXT2_SMOKE_LARGE_FILE_NAME,
         );
-        assertions.assert_ok("lookup smoke file", lookup);
+        assertions.assert_ok("lookup smoke large file", lookup);
         let dirent = fs.lookup_dirent();
         assertions.assert("lookup name", fs.lookup_name_bound());
         assertions.assert("lookup reads root", fs.lookup_reads_root_dir());
+        assertions.assert(
+            "lookup scans direct",
+            fs.lookup_direct_blocks_scanned() >= 1,
+        );
+        assertions.assert(
+            "lookup multi direct",
+            fs.lookup_multi_direct_block_supported(),
+        );
+        assertions.assert("lookup notfound nonfatal", fs.lookup_not_found_nonfatal());
+        assertions.assert(
+            "lookup indirect deferred",
+            fs.lookup_indirect_blocks_deferred(),
+        );
         assertions.assert("dirent valid", fs.lookup_dirent_valid());
-        assertions.assert("dirent name", dirent.name() == EXT2_SMOKE_FILE_NAME);
+        assertions.assert("dirent name", dirent.name() == EXT2_SMOKE_LARGE_FILE_NAME);
         assertions.assert("dirent inode", dirent.inode() != 0);
         assertions.assert(
             "dirent type",
@@ -163,21 +179,54 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             fs.lookup_file_inode().direct_blocks()[0] != 0,
         );
 
-        let mut buffer = [0u8; 64];
-        let read = fs.read_lookup_file(&mut ctx.block_device_registry, &mut provider, &mut buffer);
+        let mut short_buffer = [0u8; 64];
+        let short_read = fs.read_lookup_file(
+            &mut ctx.block_device_registry,
+            &mut provider,
+            &mut short_buffer,
+        );
+        assertions.assert(
+            "short buffer rejected",
+            matches!(short_read, Err(Ext2Error::ShortBuffer))
+                && fs.file_read_short_buffer_rejected(),
+        );
+
+        let buffer = unsafe {
+            let ptr = core::ptr::addr_of_mut!(LARGE_READ_BUFFER);
+            &mut *ptr
+        };
+        buffer.fill(0);
+        let read = fs.read_lookup_file(&mut ctx.block_device_registry, &mut provider, buffer);
         let Ok(len) = read else {
             assertions.assert("read file", false);
             return;
         };
-        assertions.assert("read len", len == EXT2_SMOKE_FILE_CONTENT.len());
-        assertions.assert("read content", &buffer[..len] == EXT2_SMOKE_FILE_CONTENT);
+        assertions.assert("read len", len == EXT2_SMOKE_LARGE_FILE_SIZE);
+        assertions.assert(
+            "read content",
+            buffer[..len]
+                .iter()
+                .all(|byte| *byte == EXT2_SMOKE_LARGE_FILE_BYTE),
+        );
         assertions.assert("last read len", fs.last_file_read_len() == len);
         assertions.assert("read direct", fs.file_read_uses_direct_block());
+        assertions.assert(
+            "read scans direct",
+            fs.file_read_direct_blocks_scanned() >= 2,
+        );
+        assertions.assert(
+            "read multi direct",
+            fs.file_read_multi_direct_block_supported(),
+        );
         assertions.assert("read buffer head", fs.file_read_uses_buffer_head());
         assertions.assert("read copies", fs.file_read_copies_to_caller());
         assertions.assert(
             "read len matches inode",
             fs.file_read_len_matches_inode_size(),
+        );
+        assertions.assert(
+            "read indirect deferred",
+            fs.file_read_indirect_blocks_deferred(),
         );
     }
 

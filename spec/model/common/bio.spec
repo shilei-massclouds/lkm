@@ -13,7 +13,9 @@
  *
  * Full request_queue ownership, tag sets, schedulers, page cache, writeback,
  * multi-page bios, async completion callbacks, write/flush/discard, and buffer
- * cache lifetime management remain deferred.
+ * cache lifetime management remain deferred. BufferHead owns its data buffer,
+ * but the data storage must not be a large inline stack object; 4KiB filesystem
+ * blocks are carried by heap-backed or equivalent exclusive dynamic storage.
  */
 
 enum BioOp {
@@ -43,6 +45,8 @@ predicate buffer_head_targets_block_device<T, D>(bh: T, device: D) -> bool;
 predicate buffer_head_sector_bound<T>(bh: T) -> bool;
 predicate buffer_head_size_bound<T>(bh: T) -> bool;
 predicate buffer_head_data_buffer_owned<T>(bh: T) -> bool;
+predicate buffer_head_data_buffer_dynamic_storage<T, R>(bh: T, alloc_ref: R) -> bool;
+predicate buffer_head_no_large_inline_stack_data<T>(bh: T) -> bool;
 predicate buffer_head_sb_bread_called<T>(bh: T) -> bool;
 predicate buffer_head_bread_gfp_called<T>(bh: T) -> bool;
 predicate buffer_head_uses_submit_bio_wait<T, B>(bh: T, bio: B) -> bool;
@@ -143,6 +147,8 @@ object BufferHead: ResourceObject {
                     BlockDevice.state == State::Ready;
                     block_device_registered(BlockDevice, BlockDeviceRegistry);
                     Bio.state == State::Ready;
+                    KernelGlobalAllocator.state == State::Ready;
+                    kernel_global_allocator_alloc_zeroed_api_ready(KernelGlobalAllocator);
                 }
 
                 ensures {
@@ -151,6 +157,8 @@ object BufferHead: ResourceObject {
                     buffer_head_sector_bound(self);
                     buffer_head_size_bound(self);
                     buffer_head_data_buffer_owned(self);
+                    buffer_head_data_buffer_dynamic_storage(self, HeapAllocRef);
+                    buffer_head_no_large_inline_stack_data(self);
                 }
             }
         }
@@ -163,6 +171,8 @@ object BufferHead: ResourceObject {
             buffer_head_sector_bound(self);
             buffer_head_size_bound(self);
             buffer_head_data_buffer_owned(self);
+            buffer_head_data_buffer_dynamic_storage(self, HeapAllocRef);
+            buffer_head_no_large_inline_stack_data(self);
         }
 
         actions {

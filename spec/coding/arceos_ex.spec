@@ -129,10 +129,12 @@ predicate arceos_ex_must_completion_smoke_cover_setup_complete_and_token_flow() 
 predicate arceos_ex_must_block_io_model_bio_buffer_head_before_ext2() -> bool;
 predicate arceos_ex_must_block_io_registry_read_remain_lower_level_adapter() -> bool;
 predicate arceos_ex_must_block_io_smoke_use_sb_bread_path() -> bool;
+predicate arceos_ex_must_buffer_head_data_not_be_large_stack_storage() -> bool;
 predicate arceos_ex_must_ext2_first_slice_read_only_and_buffer_head_based() -> bool;
 predicate arceos_ex_must_ext2_support_4k_buffer_and_block_sizes() -> bool;
 predicate arceos_ex_must_ext2_model_driver_volume_filesystem_lifecycle() -> bool;
-predicate arceos_ex_must_ext2_smoke_use_fixed_disk_file() -> bool;
+predicate arceos_ex_must_ext2_read_path_support_multi_direct_blocks() -> bool;
+predicate arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file() -> bool;
 predicate arceos_ex_must_ext2_defer_vfs_page_cache_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
@@ -1287,6 +1289,16 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_block_io_smoke_use_sb_bread_path();
 
         /*
+         * BufferHead storage:
+         *
+         * BufferHead may carry up to 4KiB ext2 blocks, so its data payload
+         * must not be embedded as a large stack-allocated array or returned
+         * through nested stack frames. The BufferHead object should own
+         * heap-backed or equivalent exclusive dynamic storage for block data.
+         */
+        arceos_ex_must_buffer_head_data_not_be_large_stack_storage();
+
+        /*
          * Read-only ext2 first slice:
          *
          * The next filesystem step must model and implement the Linux
@@ -1324,14 +1336,27 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_ext2_support_4k_buffer_and_block_sizes();
 
         /*
+         * Direct-block read path generalization:
+         *
+         * Ext2FileSystem::LookupRootName must scan root directory direct
+         * blocks until a matching dirent is found or the direct range is
+         * exhausted. Ext2FileSystem::ReadLookupFile must read a regular file
+         * across multiple direct blocks up to inode size, reject too-small
+         * caller buffers with ShortBuffer, and keep indirect blocks explicit
+         * deferred scope.
+         */
+        arceos_ex_must_ext2_read_path_support_multi_direct_blocks();
+
+        /*
          * Stable smoke target:
          *
-         * make disk should place a deterministic small regular file in the
-         * ext2 image when FS_TYPE=ext2, and the first ext2 smoke should mount
-         * the default block device read-only, lookup that root-directory
-         * filename, and read its content through direct blocks.
+         * make disk should place deterministic ext2 files in the image when
+         * FS_TYPE=ext2. The ext2 smoke must keep using the read-only
+         * Ext2FileSystem path through BufferHead, and must include a file whose
+         * size spans more than one ext2 block so the multi-direct-block path is
+         * actually observed.
          */
-        arceos_ex_must_ext2_smoke_use_fixed_disk_file();
+        arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file();
 
         /*
          * Deferred ext2 scope:

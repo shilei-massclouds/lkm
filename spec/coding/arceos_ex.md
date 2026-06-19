@@ -493,12 +493,17 @@ Linux-like `Bio`、最小同步 `submit_bio_wait()` / `blk_mq_submit_bio()` 壳�
 负责 default 或 `devt` lookup 以及 provider dispatch，但高层文件系统面向的读路径不应继续把 registry read 当作公开
 块层入口。app smoke 当前读取 ext2 superblock sector 时应经 `sb_bread()` 得到 `BufferHead`，再观察其 uptodate、
 提交/完成、数据非零和 ext2 magic 事实；smoke 可以继续检查底层 registry read 事实，但不得绕过 bio/buffer_head
-直接调用 registry read API。
+直接调用 registry read API。`BufferHead` 需要承载最多 4KiB 的 ext2 block data，因此 data payload 不得以内联
+大数组形式压在调用栈或嵌套返回栈帧中；应由 `BufferHead` 拥有 heap-backed 或等价的独占动态存储，避免 block read
+路径破坏 boot/runtime stack 上的 IRQ、scheduler 等全局状态。
 
-read-only ext2 首轮必须继续走 `BufferHead`。实现边界对应 Linux 6.12.37 `ext2_fill_super()` /
+read-only ext2 必须继续走 `BufferHead`。实现边界对应 Linux 6.12.37 `ext2_fill_super()` /
 `ext2_iget()` / `ext2_find_entry()` / direct-block read：读取 superblock、校验 magic/block size、读取 group
-descriptor、读取 `EXT2_ROOT_INO`，遍历 root directory 中的 dirent，lookup 一个固定小文件，再按 inode direct
-block 把文件内容拷贝给调用者。`make disk` 在 `FS_TYPE=ext2` 时应写入该固定小文件，保证 smoke 读取内容稳定。
+descriptor、读取 `EXT2_ROOT_INO`，遍历 root directory direct blocks 中的 dirent，lookup 稳定测试文件，再按
+inode direct blocks 把文件内容拷贝给调用者。当前泛化步骤必须支持 root directory 多 direct-block 扫描和 regular
+file 多 direct-block 读取；caller buffer 不足时返回 `ShortBuffer`，遇到 indirect block 需求时返回
+`IndirectBlocksUnsupported`，不得静默截断或绕过 `BufferHead`。`make disk` 在 `FS_TYPE=ext2` 时应写入稳定文件，
+并至少包含一个跨 ext2 block 的 regular file，保证 smoke 能观察 multi-direct-block read path。
 Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem`：`Ext2Driver` 取代旧的
 `Ext2Type`，承载 Linux `file_system_type` 以及当前建模的 super/inode/file operation set；
 `Ext2Volume` 表示默认块设备上按 ext2 规范组织的 on-disk volume，由 `Preset` 经 `BufferHead` 检查确认，
@@ -514,7 +519,7 @@ block size 后，group descriptor、inode table、目录和文件数据读取必
 sector 的映射。`make disk` 默认不应再强制 `mkfs.ext2 -b 1024`；如需覆盖 block size，应通过显式参数表达。
 本轮不把 ext2 接入 VFS/rootfs mount，不实现 page cache/folio、间接块、symlink、权限、xattr、quota、block
 allocation、写路径、remount 或错误恢复；这些必须保持 deferred。ext2 smoke 可以显式 mount 默认块设备的只读
-`Ext2FileSystem` 对象并读固定文件，但不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。
+`Ext2FileSystem` 对象并读稳定测试文件，但不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。
 
 `devfs` 的首轮实现属于 `InitcallPhase` 收敛边界：它必须在 `VfsCore` 初始 rootfs mount 已存在、`HwRngCore`
 和 `BlockDeviceRegistry` 已 Ready、且 virtio-rng/virtio-blk live driver 已完成注册之后挂载 `/dev`，再创建

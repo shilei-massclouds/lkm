@@ -4,6 +4,7 @@ use super::{
     },
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
+use alloc::vec::Vec;
 
 pub const BUFFER_HEAD_SECTOR_SIZE: usize = 512;
 pub const BUFFER_HEAD_MAX_SIZE: usize = 4096;
@@ -25,6 +26,7 @@ pub enum BlockIoError {
     DeviceMissing,
     DeviceNotReady,
     InvalidBlockSize,
+    NoMemory,
     ShortRead,
 }
 
@@ -163,7 +165,7 @@ pub struct BufferHead {
     devt: DevT,
     sector: u64,
     block_size: usize,
-    data: [u8; BUFFER_HEAD_MAX_SIZE],
+    data: Vec<u8>,
     len: usize,
     bio: Bio,
     sb_bread_called: bool,
@@ -179,21 +181,26 @@ impl BufferHead {
         sector: u64,
         block_size: usize,
         submit_path: BioSubmitPath,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BlockIoError> {
+        let mut data = Vec::new();
+        data.try_reserve_exact(block_size)
+            .map_err(|_| BlockIoError::NoMemory)?;
+        data.resize(block_size, 0);
+
+        Ok(Self {
             lifecycle: Lifecycle::new(State::Base),
             device_ref,
             devt,
             sector,
             block_size,
-            data: [0; BUFFER_HEAD_MAX_SIZE],
+            data,
             len: 0,
             bio: Bio::new_read(device_ref, devt, sector, block_size, submit_path),
             sb_bread_called: false,
             bread_gfp_called: false,
             uptodate: false,
             data_nonzero: false,
-        }
+        })
     }
 
     pub const fn state(&self) -> State {
@@ -252,6 +259,7 @@ impl BufferHead {
         if self.lifecycle.state() != State::Base
             || !valid_block_size(self.block_size)
             || self.bio.len() != self.block_size
+            || self.data.len() != self.block_size
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -302,7 +310,7 @@ pub fn sb_bread_default<P: BlockDeviceProvider>(
         sector,
         BUFFER_HEAD_SECTOR_SIZE,
         BioSubmitPath::DefaultBlockDevice,
-    );
+    )?;
     bh.setup().map_err(|_| BlockIoError::DeviceNotReady)?;
     let len = submit_bio_wait_default(
         registry,
@@ -350,7 +358,7 @@ pub fn sb_bread_by_devt_block<P: BlockDeviceProvider>(
         sector,
         block_size,
         BioSubmitPath::MajorMinorLookup,
-    );
+    )?;
     bh.setup().map_err(|_| BlockIoError::DeviceNotReady)?;
     let len = submit_bio_wait_by_devt(
         registry,

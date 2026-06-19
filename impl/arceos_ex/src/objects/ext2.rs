@@ -14,8 +14,9 @@ pub const EXT2_SUPERBLOCK_OFFSET: usize = 1024;
 const EXT2_SUPERBLOCK_PROBE_BLOCK: u64 = (EXT2_SUPERBLOCK_OFFSET / EXT2_MIN_BLOCK_SIZE) as u64;
 pub const EXT2_N_BLOCKS: usize = 15;
 pub const EXT2_NDIR_BLOCKS: usize = 12;
-pub const EXT2_SMOKE_FILE_NAME: &[u8] = b"smoke.txt";
-pub const EXT2_SMOKE_FILE_CONTENT: &[u8] = b"arceos_ex ext2 smoke\n";
+pub const EXT2_SMOKE_LARGE_FILE_NAME: &[u8] = b"smoke-large.bin";
+pub const EXT2_SMOKE_LARGE_FILE_SIZE: usize = 5120;
+pub const EXT2_SMOKE_LARGE_FILE_BYTE: u8 = b'L';
 
 const EXT2_NAME_MAX: usize = 32;
 const EXT2_GOOD_OLD_INODE_SIZE: u16 = 128;
@@ -384,13 +385,21 @@ pub struct Ext2FileSystem {
     lookup_file_inode: Ext2InodeRecord,
     lookup_name_bound: bool,
     lookup_reads_root_dir: bool,
+    lookup_direct_blocks_scanned: usize,
+    lookup_multi_direct_block_supported: bool,
+    lookup_not_found_nonfatal: bool,
+    lookup_indirect_blocks_deferred: bool,
     lookup_dirent_valid: bool,
     lookup_returns_inode: bool,
     last_file_read_len: usize,
     file_read_uses_direct_block: bool,
+    file_read_direct_blocks_scanned: usize,
+    file_read_multi_direct_block_supported: bool,
     file_read_uses_buffer_head: bool,
     file_read_copies_to_caller: bool,
     file_read_len_matches_inode_size: bool,
+    file_read_short_buffer_rejected: bool,
+    file_read_indirect_blocks_deferred: bool,
 }
 
 #[allow(dead_code)]
@@ -423,13 +432,21 @@ impl Ext2FileSystem {
             lookup_file_inode: Ext2InodeRecord::empty(),
             lookup_name_bound: false,
             lookup_reads_root_dir: false,
+            lookup_direct_blocks_scanned: 0,
+            lookup_multi_direct_block_supported: false,
+            lookup_not_found_nonfatal: true,
+            lookup_indirect_blocks_deferred: true,
             lookup_dirent_valid: false,
             lookup_returns_inode: false,
             last_file_read_len: 0,
             file_read_uses_direct_block: false,
+            file_read_direct_blocks_scanned: 0,
+            file_read_multi_direct_block_supported: false,
             file_read_uses_buffer_head: false,
             file_read_copies_to_caller: false,
             file_read_len_matches_inode_size: false,
+            file_read_short_buffer_rejected: false,
+            file_read_indirect_blocks_deferred: true,
         }
     }
 
@@ -537,6 +554,22 @@ impl Ext2FileSystem {
         self.lookup_reads_root_dir
     }
 
+    pub const fn lookup_direct_blocks_scanned(&self) -> usize {
+        self.lookup_direct_blocks_scanned
+    }
+
+    pub const fn lookup_multi_direct_block_supported(&self) -> bool {
+        self.lookup_multi_direct_block_supported
+    }
+
+    pub const fn lookup_not_found_nonfatal(&self) -> bool {
+        self.lookup_not_found_nonfatal
+    }
+
+    pub const fn lookup_indirect_blocks_deferred(&self) -> bool {
+        self.lookup_indirect_blocks_deferred
+    }
+
     pub const fn lookup_dirent_valid(&self) -> bool {
         self.lookup_dirent_valid
     }
@@ -553,6 +586,14 @@ impl Ext2FileSystem {
         self.file_read_uses_direct_block
     }
 
+    pub const fn file_read_direct_blocks_scanned(&self) -> usize {
+        self.file_read_direct_blocks_scanned
+    }
+
+    pub const fn file_read_multi_direct_block_supported(&self) -> bool {
+        self.file_read_multi_direct_block_supported
+    }
+
     pub const fn file_read_uses_buffer_head(&self) -> bool {
         self.file_read_uses_buffer_head
     }
@@ -563,6 +604,14 @@ impl Ext2FileSystem {
 
     pub const fn file_read_len_matches_inode_size(&self) -> bool {
         self.file_read_len_matches_inode_size
+    }
+
+    pub const fn file_read_short_buffer_rejected(&self) -> bool {
+        self.file_read_short_buffer_rejected
+    }
+
+    pub const fn file_read_indirect_blocks_deferred(&self) -> bool {
+        self.file_read_indirect_blocks_deferred
     }
 
     pub fn preset(&mut self, driver: &Ext2Driver, volume: &Ext2Volume) -> Result<(), Ext2Error> {
@@ -672,13 +721,27 @@ impl Ext2FileSystem {
             return Err(Ext2Error::DeviceMissing);
         };
 
+        self.lookup_name_bound = false;
         self.lookup_reads_root_dir = true;
+        self.lookup_direct_blocks_scanned = 0;
+        self.lookup_multi_direct_block_supported = true;
+        self.lookup_not_found_nonfatal = true;
+        self.lookup_indirect_blocks_deferred = self.root_inode.indirect_blocks_deferred();
+        self.lookup_dirent_valid = false;
+        self.lookup_returns_inode = false;
+        let mut dir_bytes_remaining =
+            usize::try_from(self.root_inode.size()).map_err(|_| Ext2Error::InvalidDirEntry)?;
         for block in self.root_inode.direct_blocks {
+            if dir_bytes_remaining == 0 {
+                break;
+            }
             if block == 0 {
                 continue;
             }
             let bh = read_fs_block(registry, provider, devt, block, self.block_size)?;
-            if let Some(dirent) = find_dirent(bh.data(), self.root_inode.size, name)? {
+            self.lookup_direct_blocks_scanned += 1;
+            let dir_block_len = min(dir_bytes_remaining, bh.data().len());
+            if let Some(dirent) = find_dirent(&bh.data()[..dir_block_len], name)? {
                 self.lookup_name_bound = true;
                 self.lookup_dirent_valid = true;
                 self.lookup_dirent = dirent;
@@ -689,6 +752,7 @@ impl Ext2FileSystem {
                 }
                 return Ok(dirent);
             }
+            dir_bytes_remaining -= dir_block_len;
         }
         Err(Ext2Error::NotFound)
     }
@@ -711,7 +775,15 @@ impl Ext2FileSystem {
         }
         let file_size =
             usize::try_from(self.lookup_file_inode.size()).map_err(|_| Ext2Error::InvalidInode)?;
+        self.file_read_uses_direct_block = false;
+        self.file_read_direct_blocks_scanned = 0;
+        self.file_read_multi_direct_block_supported = true;
+        self.file_read_uses_buffer_head = false;
+        self.file_read_copies_to_caller = false;
+        self.file_read_len_matches_inode_size = false;
+        self.file_read_indirect_blocks_deferred = self.lookup_file_inode.indirect_blocks_deferred();
         if buffer.len() < file_size {
+            self.file_read_short_buffer_rejected = true;
             return Err(Ext2Error::ShortBuffer);
         }
         let Some(devt) = self.devt else {
@@ -727,6 +799,7 @@ impl Ext2FileSystem {
                 return Err(Ext2Error::IndirectBlocksUnsupported);
             }
             let bh = read_fs_block(registry, provider, devt, block, self.block_size)?;
+            self.file_read_direct_blocks_scanned += 1;
             let to_copy = min(file_size - copied, bh.data().len());
             buffer[copied..copied + to_copy].copy_from_slice(&bh.data()[..to_copy]);
             copied += to_copy;
@@ -734,7 +807,7 @@ impl Ext2FileSystem {
             self.file_read_uses_direct_block = true;
         }
         if copied != file_size {
-            return Err(Ext2Error::ShortBuffer);
+            return Err(Ext2Error::IndirectBlocksUnsupported);
         }
 
         self.last_file_read_len = copied;
@@ -918,15 +991,8 @@ fn parse_inode(ino: u32, data: &[u8], offset: usize) -> Result<Ext2InodeRecord, 
     })
 }
 
-fn find_dirent(
-    data: &[u8],
-    inode_size: u32,
-    needle: &[u8],
-) -> Result<Option<Ext2DirEntryRecord>, Ext2Error> {
-    let limit = min(
-        data.len(),
-        usize::try_from(inode_size).map_err(|_| Ext2Error::InvalidDirEntry)?,
-    );
+fn find_dirent(data: &[u8], needle: &[u8]) -> Result<Option<Ext2DirEntryRecord>, Ext2Error> {
+    let limit = data.len();
     let mut offset = 0usize;
     while offset + 8 <= limit {
         let inode = le_u32(data, offset)?;
