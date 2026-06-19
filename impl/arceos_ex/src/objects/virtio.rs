@@ -3,7 +3,7 @@ use super::{
     device_tree::DeviceNodeId,
     initcall::PlatformBus,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    virtio_mmio::{VirtioMmioTransportDevice, VIRTIO_ID_RNG},
+    virtio_mmio::{VirtioMmioTransportDevice, VIRTIO_ID_BLOCK, VIRTIO_ID_RNG},
 };
 use crate::trace::Checkpoint;
 use alloc::vec::Vec;
@@ -130,6 +130,14 @@ impl VirtioDevice {
 
     pub const fn is_rng(self) -> bool {
         self.device_id == VIRTIO_ID_RNG
+    }
+
+    pub const fn is_block(self) -> bool {
+        self.device_id == VIRTIO_ID_BLOCK
+    }
+
+    pub const fn supported_id(self) -> bool {
+        self.is_rng() || self.is_block()
     }
 
     pub const fn status_reset(self) -> bool {
@@ -328,6 +336,7 @@ pub struct VirtioBus {
     devices: Vec<VirtioDevice>,
     mmio_transport_count: usize,
     rng_device_count: usize,
+    block_device_count: usize,
 }
 
 #[allow(dead_code)]
@@ -339,6 +348,7 @@ impl VirtioBus {
             devices: Vec::new(),
             mmio_transport_count: 0,
             rng_device_count: 0,
+            block_device_count: 0,
         }
     }
 
@@ -362,6 +372,10 @@ impl VirtioBus {
         self.rng_device_count
     }
 
+    pub const fn block_device_count(&self) -> usize {
+        self.block_device_count
+    }
+
     pub fn device(&self, device_ref: VirtioDeviceRef) -> Option<VirtioDevice> {
         self.devices.get(device_ref.index()).copied()
     }
@@ -372,6 +386,13 @@ impl VirtioBus {
 
     pub fn rng_device(&self) -> Option<VirtioDevice> {
         self.devices.iter().copied().find(|device| device.is_rng())
+    }
+
+    pub fn block_device(&self) -> Option<VirtioDevice> {
+        self.devices
+            .iter()
+            .copied()
+            .find(|device| device.is_block())
     }
 
     pub fn contains_platform_device(&self, platform_device_ref: DeviceRef) -> bool {
@@ -420,6 +441,9 @@ impl VirtioBus {
         self.mmio_transport_count = self.mmio_transport_count.saturating_add(1);
         if device.is_rng() {
             self.rng_device_count = self.rng_device_count.saturating_add(1);
+        }
+        if device.is_block() {
+            self.block_device_count = self.block_device_count.saturating_add(1);
         }
         crate::trace::checkpoint(Checkpoint::VirtioBusDeviceAdded);
         Some(device_ref)

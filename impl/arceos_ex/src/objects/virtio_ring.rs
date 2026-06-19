@@ -1,6 +1,10 @@
 use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
 use alloc::vec::Vec;
-use core::{mem::size_of, ptr};
+use core::{
+    mem::size_of,
+    ptr,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 const VIRTQ_DESC_F_NEXT: u16 = 1;
 const VIRTQ_DESC_F_WRITE: u16 = 2;
@@ -8,15 +12,21 @@ const VIRTQUEUE_DESC_NONE: u16 = u16::MAX;
 const VRING_USED_F_NO_NOTIFY: u16 = 1;
 const STATIC_REAL_QUEUE_SIZE: u16 = 8;
 const STATIC_REAL_QUEUE_BYTES: usize = 8192;
+const STATIC_REAL_QUEUE_SLOTS: usize = 4;
 
 #[repr(C, align(4096))]
 struct StaticVirtqueueBacking {
     bytes: [u8; STATIC_REAL_QUEUE_BYTES],
 }
 
-static mut STATIC_REAL_QUEUE_BACKING: StaticVirtqueueBacking = StaticVirtqueueBacking {
-    bytes: [0; STATIC_REAL_QUEUE_BYTES],
+static mut STATIC_REAL_QUEUE_BACKING: [StaticVirtqueueBacking; STATIC_REAL_QUEUE_SLOTS] = [const {
+    StaticVirtqueueBacking {
+        bytes: [0; STATIC_REAL_QUEUE_BYTES],
+    }
 };
+    STATIC_REAL_QUEUE_SLOTS];
+
+static NEXT_STATIC_REAL_QUEUE_SLOT: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VirtqueueError {
@@ -296,6 +306,7 @@ pub struct VirtioSplitRing {
     event_idx_deferred: bool,
     dma_cache_deferred: bool,
     static_coherent_backing_ready: bool,
+    static_coherent_backing_slot: Option<usize>,
     desc_avail_used_layout_ready: bool,
     device_visible_phys_addr_ready: bool,
     real_layout: VirtioSplitRingLayout,
@@ -322,6 +333,7 @@ impl VirtioSplitRing {
             event_idx_deferred: false,
             dma_cache_deferred: false,
             static_coherent_backing_ready: false,
+            static_coherent_backing_slot: None,
             desc_avail_used_layout_ready: false,
             device_visible_phys_addr_ready: false,
             real_layout: VirtioSplitRingLayout::empty(),
@@ -598,9 +610,24 @@ impl VirtioSplitRing {
             return Err(VirtqueueError::QueueSizeUnsupported);
         }
 
+        let slot = match self.static_coherent_backing_slot {
+            Some(slot) => slot,
+            None => {
+                let slot = NEXT_STATIC_REAL_QUEUE_SLOT.fetch_add(1, Ordering::AcqRel);
+                if slot >= STATIC_REAL_QUEUE_SLOTS {
+                    return Err(VirtqueueError::RingBackingUnavailable);
+                }
+                self.static_coherent_backing_slot = Some(slot);
+                slot
+            }
+        };
+
         let backing_virt = unsafe {
-            let backing = (&raw mut STATIC_REAL_QUEUE_BACKING)
+            let backings = (&raw mut STATIC_REAL_QUEUE_BACKING)
                 .as_mut()
+                .ok_or(VirtqueueError::RingBackingUnavailable)?;
+            let backing = backings
+                .get_mut(slot)
                 .ok_or(VirtqueueError::RingBackingUnavailable)?;
             backing.bytes.fill(0);
             backing.bytes.as_mut_ptr() as usize

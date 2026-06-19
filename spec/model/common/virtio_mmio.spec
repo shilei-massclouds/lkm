@@ -38,6 +38,8 @@ predicate virtio_mmio_transport_device_id_read<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_vendor_id_read<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_placeholder_device<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_rng_candidate<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_block_candidate<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_supported_device<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_ready_for_virtio_core<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_legacy_queue_setup_supported<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_modern_queue_setup_supported<T>(transport: T) -> bool;
@@ -111,7 +113,7 @@ object VirtioMmioTransportDevice: ResourceObject {
                     virtio_mmio_transport_version_supported(VirtioMmioTransportDevice);
                     virtio_mmio_transport_device_id_read(VirtioMmioTransportDevice);
                     virtio_mmio_transport_vendor_id_read(VirtioMmioTransportDevice);
-                    virtio_mmio_transport_rng_candidate(VirtioMmioTransportDevice);
+                    virtio_mmio_transport_supported_device(VirtioMmioTransportDevice);
                     virtio_mmio_transport_ready_for_virtio_core(VirtioMmioTransportDevice);
                     virtio_mmio_transport_legacy_queue_setup_supported(VirtioMmioTransportDevice);
                     virtio_mmio_transport_modern_queue_setup_supported(VirtioMmioTransportDevice);
@@ -139,7 +141,7 @@ object VirtioMmioTransportDevice: ResourceObject {
             virtio_mmio_transport_version_supported(VirtioMmioTransportDevice);
             virtio_mmio_transport_device_id_read(VirtioMmioTransportDevice);
             virtio_mmio_transport_vendor_id_read(VirtioMmioTransportDevice);
-            virtio_mmio_transport_rng_candidate(VirtioMmioTransportDevice);
+            virtio_mmio_transport_supported_device(VirtioMmioTransportDevice);
             virtio_mmio_transport_ready_for_virtio_core(VirtioMmioTransportDevice);
             virtio_mmio_transport_legacy_queue_setup_supported(VirtioMmioTransportDevice);
             virtio_mmio_transport_modern_queue_setup_supported(VirtioMmioTransportDevice);

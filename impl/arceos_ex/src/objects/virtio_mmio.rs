@@ -107,6 +107,7 @@ pub struct VirtioMmioTransportDevice {
     device_id: u32,
     vendor_id: u32,
     rng_candidate: bool,
+    block_candidate: bool,
     status_reset_written: bool,
     status_acknowledge_written: bool,
     status_driver_written: bool,
@@ -149,6 +150,7 @@ impl VirtioMmioTransportDevice {
             device_id: 0,
             vendor_id: 0,
             rng_candidate: false,
+            block_candidate: false,
             status_reset_written: false,
             status_acknowledge_written: false,
             status_driver_written: false,
@@ -256,6 +258,14 @@ impl VirtioMmioTransportDevice {
         self.rng_candidate
     }
 
+    pub const fn block_candidate(self) -> bool {
+        self.block_candidate
+    }
+
+    pub const fn supported_device(self) -> bool {
+        self.rng_candidate || self.block_candidate
+    }
+
     pub const fn status_reset_written(self) -> bool {
         self.status_reset_written
     }
@@ -341,6 +351,8 @@ impl VirtioMmioTransportDevice {
         self.header_status = classify_header(header);
         self.rng_candidate =
             self.header_status == VirtioMmioHeaderStatus::Valid && self.device_id == VIRTIO_ID_RNG;
+        self.block_candidate = self.header_status == VirtioMmioHeaderStatus::Valid
+            && self.device_id == VIRTIO_ID_BLOCK;
         self
     }
 
@@ -457,6 +469,11 @@ impl VirtioMmioHeader {
 
     pub const fn rng_candidate(self) -> bool {
         self.valid() && self.device_id == VIRTIO_ID_RNG
+    }
+
+    #[allow(dead_code)]
+    pub const fn block_candidate(self) -> bool {
+        self.valid() && self.device_id == VIRTIO_ID_BLOCK
     }
 
     pub const fn version(self) -> u32 {

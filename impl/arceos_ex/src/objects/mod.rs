@@ -79,6 +79,7 @@ pub mod swapper_vm;
 pub mod task;
 pub mod trampoline_vm;
 pub mod virtio;
+pub mod virtio_blk;
 pub mod virtio_mmio;
 pub mod virtio_ring;
 pub mod virtio_rng;

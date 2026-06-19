@@ -7,4 +7,5 @@ scheduler-action
 console-handoff
 uart-irq-chain
 virtio-bus
+virtio-blk
 virtio-rng

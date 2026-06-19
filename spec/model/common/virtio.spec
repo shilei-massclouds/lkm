@@ -4,7 +4,9 @@
  * VirtioBus is a global core bus instance owned by Context. It is not owned by
  * PlatformBus. PlatformBus only matches and calls the virtio-mmio platform
  * driver's probe; the virtio-mmio driver then registers a generic VirtioDevice
- * with VirtioBus after a valid transport header has been observed.
+ * with VirtioBus after a valid transport header has been observed. Device
+ * type specific drivers, such as virtio-rng and virtio-blk, refine the
+ * generic device id facts in their own specs.
  *
  * The device-side API is intentionally transport-neutral. Drivers such as
  * virtio-rng and virtio-blk should request status setup, feature negotiation,
@@ -20,6 +22,7 @@ predicate virtio_bus_device_added<T, D>(bus: T, device: D) -> bool;
 predicate virtio_bus_device_count_nonzero<T>(bus: T) -> bool;
 predicate virtio_bus_rng_device_count_nonzero<T>(bus: T) -> bool;
 predicate virtio_bus_block_device_count_nonzero<T>(bus: T) -> bool;
+predicate virtio_bus_supported_device_count_nonzero<T>(bus: T) -> bool;
 predicate virtio_bus_mmio_transport_count_nonzero<T>(bus: T) -> bool;
 
 predicate virtio_device_allocated<T>(device: T) -> bool;
@@ -35,6 +38,7 @@ predicate virtio_device_status_driver_ok<T>(device: T) -> bool;
 predicate virtio_device_transport_bound<T, R>(device: T, transport: R) -> bool;
 predicate virtio_device_transport_is_mmio<T, R>(device: T, transport: R) -> bool;
 predicate virtio_device_platform_device_ref_bound<T, R>(device: T, platform_device: R) -> bool;
+predicate virtio_device_supported_id<T>(device: T) -> bool;
 predicate virtio_device_rng_id<T>(device: T) -> bool;
 predicate virtio_device_block_id<T>(device: T) -> bool;
 predicate virtio_device_features_read<T>(device: T) -> bool;
@@ -116,10 +120,9 @@ object VirtioDevice: Device {
                     virtio_device_registered_on_bus(VirtioDevice, VirtioBus);
                     virtio_bus_device_added(VirtioBus, VirtioDevice);
                     virtio_bus_device_count_nonzero(VirtioBus);
+                    virtio_bus_supported_device_count_nonzero(VirtioBus);
                     virtio_bus_mmio_transport_count_nonzero(VirtioBus);
-                    virtio_device_id_bound(VirtioDevice, VirtioDeviceId::Rng);
-                    virtio_device_rng_id(VirtioDevice);
-                    virtio_bus_rng_device_count_nonzero(VirtioBus);
+                    virtio_device_supported_id(VirtioDevice);
                     virtio_device_vendor_id_bound(VirtioDevice);
                     virtio_device_status_registered(VirtioDevice);
                     virtio_device_transport_bound(VirtioDevice, VirtioMmioTransportDevice);
@@ -138,8 +141,7 @@ object VirtioDevice: Device {
         invariant {
             virtio_device_allocated(VirtioDevice);
             virtio_device_registered_on_bus(VirtioDevice, VirtioBus);
-            virtio_device_id_bound(VirtioDevice, VirtioDeviceId::Rng);
-            virtio_device_rng_id(VirtioDevice);
+            virtio_device_supported_id(VirtioDevice);
             virtio_device_vendor_id_bound(VirtioDevice);
             virtio_device_status_registered(VirtioDevice);
             virtio_device_transport_bound(VirtioDevice, VirtioMmioTransportDevice);

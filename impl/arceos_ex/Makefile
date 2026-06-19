@@ -20,7 +20,7 @@ endif
 endif
 PROBE_FILE_LIST := $(if $(PROBE_FILE),$(strip $(shell sed -e 's/#.*//' "$(PROBE_FILE)")),)
 PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST))
-KNOWN_PROBES := memblock page-allocator earlycon kernel-init-task of-platform scheduler-action console-handoff uart-irq-chain virtio-bus virtio-rng vmalloc-mapping linux-plic smoke
+KNOWN_PROBES := memblock page-allocator earlycon kernel-init-task of-platform scheduler-action console-handoff uart-irq-chain virtio-bus virtio-blk virtio-rng vmalloc-mapping linux-plic smoke
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))
@@ -42,7 +42,9 @@ RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
 QEMU ?= qemu-system-riscv64
 QEMU_SMP ?= 8
 QEMU_APPEND ?= earlycon=sbi
-QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0
+VIRTIO_BLK_IMAGE ?= build/virtio-blk.raw
+VIRTIO_BLK_IMAGE_SIZE ?= 1M
+QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
 MODEL_JSON := $(ROOT)/tools/out/codegen/main.model.json
@@ -67,7 +69,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate clean
+.PHONY: build run generate disk clean
 
 build: generate $(KERNEL_BIN)
 
@@ -91,7 +93,11 @@ $(KERNEL_ELF): $(SOURCES) $(LINKER)
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(RUST_OBJCOPY) --strip-all -O binary $< $@
 
-run:
+disk:
+	mkdir -p $(dir $(VIRTIO_BLK_IMAGE))
+	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $(VIRTIO_BLK_IMAGE)
+
+run: disk
 ifeq ($(LOG),trace)
 	$(MAKE) PROFILE=trace APP=$(APP) PROBE="$(PROBE)" PROBE_FILE="$(PROBE_FILE)" PLIC_PROVIDER=$(PLIC_PROVIDER) EXTRA_RUSTFLAGS="--cfg checkpoint_sbi_char" build
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio $(QEMU_DEVICES) -append "$(QEMU_APPEND)" -kernel $(TRACE_KERNEL_BIN)
