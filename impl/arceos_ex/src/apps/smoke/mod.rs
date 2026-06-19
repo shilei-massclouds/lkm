@@ -167,6 +167,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::virtio_rng::run,
     },
     SmokeCase {
+        name: "block_device",
+        run: cases::block_device::run,
+    },
+    SmokeCase {
         name: "rootfs",
         run: cases::rootfs::run,
     },

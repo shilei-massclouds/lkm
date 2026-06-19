@@ -6,14 +6,15 @@
  * driver matches VIRTIO_ID_BLOCK, probes a generic VirtioDevice, reads the
  * block capacity, sets up one request virtqueue, reaches DRIVER_OK, submits a
  * virtio_blk_outhdr + data buffer + status byte descriptor chain, notifies the
- * queue, consumes the device used-buffer completion, and registers a
- * BlockDevice so the disk is discoverable by major/minor or default lookup. The
- * default test disk may be formatted as ext2 so the read buffer has
- * deterministic nonzero bytes, but this spec does not introduce an
- * ext2/filesystem object. Full blk-mq tag sets, request_queue, bio/page cache,
- * partition scan, flush/discard/write-zeroes, multi-queue and reset/remove
- * remain deferred. checkpoint/KUnit handlers are read-only observers and must
- * not drive blk, ring, transport, block registry or bus actions.
+ * queue, consumes the device used-buffer completion, registers a BlockDevice so
+ * the disk is discoverable by major/minor or default lookup, and serves a
+ * minimal block-level read through that registered BlockDevice. The default
+ * test disk may be formatted as ext2 so the read buffer has deterministic
+ * nonzero bytes, but this spec does not introduce an ext2/filesystem object.
+ * Full blk-mq tag sets, request_queue, bio/page cache, partition scan,
+ * flush/discard/write-zeroes, multi-queue and reset/remove remain deferred.
+ * checkpoint/KUnit handlers are read-only observers and must not drive blk,
+ * ring, transport, block registry or bus actions.
  */
 
 predicate virtio_blk_driver_declared<T>(driver: T) -> bool;
@@ -48,6 +49,8 @@ predicate virtio_blk_read_request_done<T>(device: T) -> bool;
 predicate virtio_blk_block_device_embedded<T, D>(device: T, block_device: D) -> bool;
 predicate virtio_blk_registers_block_device<T, D>(device: T, block_device: D) -> bool;
 predicate virtio_blk_block_device_registered<T, D, C>(device: T, block_device: D, core: C) -> bool;
+predicate virtio_blk_serves_block_read<T, D>(device: T, block_device: D) -> bool;
+predicate virtio_blk_block_read_copies_to_caller<T, D>(device: T, block_device: D) -> bool;
 predicate virtio_blk_filesystem_parse_deferred<T>(device: T) -> bool;
 predicate virtio_blk_multi_queue_deferred<T>(device: T) -> bool;
 predicate virtio_blk_reset_remove_deferred<T>(device: T) -> bool;
@@ -139,6 +142,7 @@ object VirtioBlkDevice: DeviceObject {
                     VirtioDevice.Action::ReadConfig;
                     VirtioDevice.Action::SetupQueue;
                     VirtioDevice.Action::SetDriverOk;
+                    VirtioMmioTransportDevice.Action::EnableIrqSourceGate;
                 }
                 ensures {
                     virtio_device_status_reset(VirtioDevice);
@@ -150,6 +154,7 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_device_config_capacity_read(VirtioDevice);
                     virtio_device_queue_setup_done(VirtioDevice);
                     virtio_device_status_driver_ok(VirtioDevice);
+                    virtio_mmio_transport_irq_source_gate_open(VirtioMmioTransportDevice);
                     virtio_blk_device_capacity_read(self);
                     virtio_blk_device_capacity_nonzero(self);
                     virtio_blk_device_queue_setup_done(self);
@@ -223,6 +228,27 @@ object VirtioBlkDevice: DeviceObject {
                     block_device_default(BlockDevice, BlockDeviceRegistry);
                     block_core_major_minor_lookup_returns(BlockDeviceRegistry, BlockDevice);
                     virtio_blk_block_device_registered(self, BlockDevice, BlockDeviceRegistry);
+                }
+            }
+
+            Action::ServeBlockRead {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_blk_device_ready(self);
+                    block_device_registered(BlockDevice, BlockDeviceRegistry);
+                    block_device_provider_is_virtio_blk(BlockDevice, self);
+                    VirtQueue.state == State::Ready;
+                }
+                drives {
+                    self.Action::SubmitReadRequest;
+                    self.Action::CompleteReadRequest;
+                }
+                ensures {
+                    virtio_blk_serves_block_read(self, BlockDevice);
+                    virtio_blk_read_request_done(self);
+                    virtio_blk_complete_status_ok(self);
+                    virtio_blk_complete_data_nonzero(self);
+                    virtio_blk_block_read_copies_to_caller(self, BlockDevice);
                 }
             }
         }

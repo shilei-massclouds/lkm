@@ -72,6 +72,12 @@ fn run_discovery_config(
     );
     sink.diag_usize("virtio_blk_queue_ready", device.queue_setup_done() as usize);
     sink.diag_usize("virtio_blk_driver_ok", device.driver_ok() as usize);
+    if let Some(transport) = virtio_device.mmio_transport() {
+        sink.diag_usize(
+            "virtio_blk_irq_source_gate_open",
+            transport.irq_source_gate_open() as usize,
+        );
+    }
     sink.diag_usize(
         "virtio_blk_read_submitted",
         device.read_request_submitted() as usize,
@@ -191,6 +197,7 @@ fn blk_facts_valid(ctx: &Context) -> bool {
             .is_some_and(|capacity| capacity != 0)
         && transport.queue_setup_done()
         && transport.status_driver_ok_written()
+        && transport.irq_source_gate_open()
         && ctx
             .platform_bus
             .platform_driver_registered(VIRTIO_MMIO_PLATFORM_DRIVER_REF)

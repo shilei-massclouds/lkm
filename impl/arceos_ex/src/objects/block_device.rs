@@ -55,6 +55,17 @@ pub enum BlockDeviceError {
     DeviceNotReady,
     DuplicateDev,
     NoDevice,
+    ProviderUnavailable,
+    EmptyRead,
+}
+
+pub trait BlockDeviceProvider {
+    fn read_block(
+        &mut self,
+        device_ref: BlockDeviceRef,
+        sector: u64,
+        buffer: &mut [u8],
+    ) -> Result<usize, BlockDeviceError>;
 }
 
 pub struct BlockDevice {
@@ -63,11 +74,19 @@ pub struct BlockDevice {
     name: [u8; 16],
     name_len: usize,
     provider_kind: BlockDeviceProviderKind,
+    read_callback_bound: bool,
     capacity_sectors: u64,
     sector_size: u32,
     devt: Option<DevT>,
     registered: bool,
     default_device: bool,
+    read_count: usize,
+    last_read_sector: u64,
+    last_read_len: usize,
+    read_submitted: bool,
+    read_completion_observed: bool,
+    read_copies_to_caller: bool,
+    read_returns_nonzero: bool,
 }
 
 #[allow(dead_code)]
@@ -83,11 +102,19 @@ impl BlockDevice {
             name,
             name_len: 3,
             provider_kind: BlockDeviceProviderKind::VirtioBlk,
+            read_callback_bound: false,
             capacity_sectors: 0,
             sector_size: 512,
             devt: None,
             registered: false,
             default_device: false,
+            read_count: 0,
+            last_read_sector: 0,
+            last_read_len: 0,
+            read_submitted: false,
+            read_completion_observed: false,
+            read_copies_to_caller: false,
+            read_returns_nonzero: false,
         }
     }
 
@@ -110,6 +137,10 @@ impl BlockDevice {
     #[allow(dead_code)]
     pub const fn provider_kind(&self) -> BlockDeviceProviderKind {
         self.provider_kind
+    }
+
+    pub const fn read_callback_bound(&self) -> bool {
+        self.read_callback_bound
     }
 
     pub const fn capacity_sectors(&self) -> u64 {
@@ -140,6 +171,34 @@ impl BlockDevice {
         self.default_device
     }
 
+    pub const fn read_count(&self) -> usize {
+        self.read_count
+    }
+
+    pub const fn last_read_sector(&self) -> u64 {
+        self.last_read_sector
+    }
+
+    pub const fn last_read_len(&self) -> usize {
+        self.last_read_len
+    }
+
+    pub const fn read_submitted(&self) -> bool {
+        self.read_submitted
+    }
+
+    pub const fn read_completion_observed(&self) -> bool {
+        self.read_completion_observed
+    }
+
+    pub const fn read_copies_to_caller(&self) -> bool {
+        self.read_copies_to_caller
+    }
+
+    pub const fn read_returns_nonzero(&self) -> bool {
+        self.read_returns_nonzero
+    }
+
     pub fn setup_from_virtio_blk(&mut self, capacity_sectors: u64) -> EventResult {
         if self.lifecycle.state() != State::Base || capacity_sectors == 0 || !self.name_bound() {
             return failed_condition(
@@ -151,6 +210,7 @@ impl BlockDevice {
         }
 
         self.capacity_sectors = capacity_sectors;
+        self.read_callback_bound = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -163,6 +223,16 @@ impl BlockDevice {
 
     fn mark_default(&mut self) {
         self.default_device = true;
+    }
+
+    pub(crate) fn record_read(&mut self, sector: u64, len: usize, nonzero: bool) {
+        self.read_count = self.read_count.saturating_add(1);
+        self.last_read_sector = sector;
+        self.last_read_len = len;
+        self.read_submitted = true;
+        self.read_completion_observed = true;
+        self.read_copies_to_caller = true;
+        self.read_returns_nonzero = nonzero;
     }
 }
 
@@ -178,6 +248,9 @@ pub struct BlockDeviceRegistryEntry {
     devt: DevT,
     registered: bool,
     default_device: bool,
+    read_count: usize,
+    last_read_sector: u64,
+    last_read_len: usize,
 }
 
 #[allow(dead_code)]
@@ -193,6 +266,9 @@ impl BlockDeviceRegistryEntry {
             devt: device.devt?,
             registered: true,
             default_device: false,
+            read_count: 0,
+            last_read_sector: 0,
+            last_read_len: 0,
         })
     }
 
@@ -228,8 +304,26 @@ impl BlockDeviceRegistryEntry {
         self.default_device
     }
 
+    pub const fn read_count(&self) -> usize {
+        self.read_count
+    }
+
+    pub const fn last_read_sector(&self) -> u64 {
+        self.last_read_sector
+    }
+
+    pub const fn last_read_len(&self) -> usize {
+        self.last_read_len
+    }
+
     fn mark_default(&mut self) {
         self.default_device = true;
+    }
+
+    fn record_read(&mut self, sector: u64, len: usize) {
+        self.read_count = self.read_count.saturating_add(1);
+        self.last_read_sector = sector;
+        self.last_read_len = len;
     }
 }
 
@@ -250,6 +344,16 @@ pub struct BlockDeviceRegistry {
     device_add_disk_return_zero: bool,
     major_minor_lookup_ready: bool,
     register_count: usize,
+    read_default_count: usize,
+    read_by_devt_count: usize,
+    last_read_sector: u64,
+    last_read_len: usize,
+    default_device_ref_acquired: bool,
+    major_minor_ref_acquired: bool,
+    read_invokes_provider: bool,
+    read_completion_observed: bool,
+    read_copies_to_caller: bool,
+    read_returns_nonzero: bool,
 }
 
 #[allow(dead_code)]
@@ -272,6 +376,16 @@ impl BlockDeviceRegistry {
             device_add_disk_return_zero: false,
             major_minor_lookup_ready: false,
             register_count: 0,
+            read_default_count: 0,
+            read_by_devt_count: 0,
+            last_read_sector: 0,
+            last_read_len: 0,
+            default_device_ref_acquired: false,
+            major_minor_ref_acquired: false,
+            read_invokes_provider: false,
+            read_completion_observed: false,
+            read_copies_to_caller: false,
+            read_returns_nonzero: false,
         }
     }
 
@@ -353,6 +467,46 @@ impl BlockDeviceRegistry {
         self.register_count
     }
 
+    pub const fn read_default_count(&self) -> usize {
+        self.read_default_count
+    }
+
+    pub const fn read_by_devt_count(&self) -> usize {
+        self.read_by_devt_count
+    }
+
+    pub const fn last_read_sector(&self) -> u64 {
+        self.last_read_sector
+    }
+
+    pub const fn last_read_len(&self) -> usize {
+        self.last_read_len
+    }
+
+    pub const fn default_device_ref_acquired(&self) -> bool {
+        self.default_device_ref_acquired
+    }
+
+    pub const fn major_minor_ref_acquired(&self) -> bool {
+        self.major_minor_ref_acquired
+    }
+
+    pub const fn read_invokes_provider(&self) -> bool {
+        self.read_invokes_provider
+    }
+
+    pub const fn read_completion_observed(&self) -> bool {
+        self.read_completion_observed
+    }
+
+    pub const fn read_copies_to_caller(&self) -> bool {
+        self.read_copies_to_caller
+    }
+
+    pub const fn read_returns_nonzero(&self) -> bool {
+        self.read_returns_nonzero
+    }
+
     pub fn setup(
         &mut self,
         driver_core_base: &crate::objects::initcall::DriverCoreBase,
@@ -385,7 +539,11 @@ impl BlockDeviceRegistry {
         if self.lifecycle.state() != State::Ready {
             return Err(BlockDeviceError::CoreNotReady);
         }
-        if device.state() != State::Ready || !device.name_bound() || !device.capacity_bound() {
+        if device.state() != State::Ready
+            || !device.name_bound()
+            || !device.capacity_bound()
+            || !device.read_callback_bound()
+        {
             return Err(BlockDeviceError::DeviceNotReady);
         }
 
@@ -411,5 +569,76 @@ impl BlockDeviceRegistry {
         self.devices.push(entry);
         self.register_count = self.register_count.saturating_add(1);
         Ok(device_ref)
+    }
+
+    pub fn read_default<P: BlockDeviceProvider>(
+        &mut self,
+        provider: &mut P,
+        sector: u64,
+        buffer: &mut [u8],
+    ) -> Result<usize, BlockDeviceError> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(BlockDeviceError::CoreNotReady);
+        }
+        let Some(device_ref) = self.default_device else {
+            return Err(BlockDeviceError::NoDevice);
+        };
+        self.default_device_ref_acquired = true;
+        let len = self.read_device(provider, device_ref, sector, buffer)?;
+        self.read_default_count = self.read_default_count.saturating_add(1);
+        Ok(len)
+    }
+
+    pub fn read_by_devt<P: BlockDeviceProvider>(
+        &mut self,
+        provider: &mut P,
+        devt: DevT,
+        sector: u64,
+        buffer: &mut [u8],
+    ) -> Result<usize, BlockDeviceError> {
+        if self.lifecycle.state() != State::Ready || !self.major_minor_lookup_ready {
+            return Err(BlockDeviceError::CoreNotReady);
+        }
+        let Some(device_ref) = self.lookup(devt).map(|entry| entry.device_ref()) else {
+            return Err(BlockDeviceError::NoDevice);
+        };
+        self.major_minor_ref_acquired = true;
+        let len = self.read_device(provider, device_ref, sector, buffer)?;
+        self.read_by_devt_count = self.read_by_devt_count.saturating_add(1);
+        Ok(len)
+    }
+
+    fn read_device<P: BlockDeviceProvider>(
+        &mut self,
+        provider: &mut P,
+        device_ref: BlockDeviceRef,
+        sector: u64,
+        buffer: &mut [u8],
+    ) -> Result<usize, BlockDeviceError> {
+        let Some(entry) = self.devices.get(device_ref.index()) else {
+            return Err(BlockDeviceError::NoDevice);
+        };
+        if !entry.registered() || buffer.is_empty() {
+            return Err(BlockDeviceError::DeviceNotReady);
+        }
+
+        self.read_invokes_provider = true;
+        let len = provider.read_block(device_ref, sector, buffer)?;
+        if len == 0 {
+            return Err(BlockDeviceError::EmptyRead);
+        }
+        let nonzero = buffer[..len].iter().any(|byte| *byte != 0);
+        if !nonzero {
+            return Err(BlockDeviceError::EmptyRead);
+        }
+        if let Some(entry) = self.devices.get_mut(device_ref.index()) {
+            entry.record_read(sector, len);
+        }
+        self.last_read_sector = sector;
+        self.last_read_len = len;
+        self.read_completion_observed = true;
+        self.read_copies_to_caller = true;
+        self.read_returns_nonzero = true;
+        Ok(len)
     }
 }

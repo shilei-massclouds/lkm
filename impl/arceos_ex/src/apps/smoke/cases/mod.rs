@@ -1,4 +1,5 @@
 pub mod allocator_pressure;
+pub mod block_device;
 pub mod breakpoint;
 pub mod cache_block_info;
 pub mod completion;

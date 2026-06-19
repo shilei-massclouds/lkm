@@ -192,6 +192,7 @@ object VirtioRngDevice: DeviceObject {
                     VirtioDevice.Action::NegotiateFeatures;
                     VirtioDevice.Action::SetupQueue;
                     VirtioDevice.Action::SetDriverOk;
+                    VirtioMmioTransportDevice.Action::EnableIrqSourceGate;
                 }
                 ensures {
                     virtio_device_status_reset(VirtioDevice);
@@ -202,6 +203,7 @@ object VirtioRngDevice: DeviceObject {
                     virtio_device_feature_negotiation_done(VirtioDevice);
                     virtio_device_queue_setup_done(VirtioDevice);
                     virtio_device_status_driver_ok(VirtioDevice);
+                    virtio_mmio_transport_irq_source_gate_open(VirtioMmioTransportDevice);
                     virtio_rng_real_notify_irq_ready(self);
                     virtio_rng_probe_common_requests_entropy(self);
                     virtio_rng_request_pending(self);

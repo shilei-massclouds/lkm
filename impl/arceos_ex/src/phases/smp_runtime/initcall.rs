@@ -59,6 +59,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.virtio_bus,
         &mut ctx.block_device_registry,
         &ctx.kernel_image,
+        &ctx.plic,
+        &mut ctx.plic_irq_domain,
     )?;
     crate::objects::virtio_rng::setup_live_driver(
         &mut ctx.virtio_rng_runtime,

@@ -216,6 +216,19 @@ object VirtioMmioTransportDevice: ResourceObject {
                 }
             }
 
+            Action::EnableIrqSourceGate {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_mmio_transport_irq_source_bound(self);
+                    virtio_mmio_transport_logical_irq_bound(self);
+                    virtio_mmio_transport_irq_handler_registered(self);
+                    virtio_mmio_transport_status_driver_ok_written(self);
+                }
+                ensures {
+                    virtio_mmio_transport_irq_source_gate_open(self);
+                }
+            }
+
             Action::NotifyQueue {
                 state_effect: StateEffect::None;
                 depends_on {

@@ -1,5 +1,8 @@
 use super::{
-    block_device::{BlockDevice, BlockDeviceRef, BlockDeviceRegistry},
+    block_device::{
+        BlockDevice, BlockDeviceError, BlockDeviceProvider, BlockDeviceRef, BlockDeviceRegistry,
+    },
+    irq_time::{Plic, PlicIrqDomain},
     kernel_image::KernelImage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     virtio::{VirtioBus, VirtioDevice, VirtioDeviceRef},
@@ -17,6 +20,7 @@ const VIRTIO_BLK_EXT2_SUPERBLOCK_SECTOR: u64 = 2;
 const EXT2_SUPER_MAGIC_OFFSET_IN_SECTOR: usize = 56;
 const EXT2_SUPER_MAGIC: u16 = 0xef53;
 const VIRTIO_BLK_READ_BUFFER_SIZE: usize = VIRTIO_BLK_SECTOR_SIZE;
+const VIRTIO_BLK_READ_WAIT_SPINS: usize = 1_000_000;
 
 #[repr(C)]
 struct VirtioBlkOutHdr {
@@ -195,6 +199,8 @@ pub struct VirtioBlkDevice {
     filesystem_parse_deferred: bool,
     multi_queue_deferred: bool,
     reset_remove_deferred: bool,
+    block_read_served: bool,
+    block_read_copies_to_caller: bool,
 }
 
 #[allow(dead_code)]
@@ -238,6 +244,8 @@ impl VirtioBlkDevice {
             filesystem_parse_deferred: true,
             multi_queue_deferred: true,
             reset_remove_deferred: true,
+            block_read_served: false,
+            block_read_copies_to_caller: false,
         }
     }
 
@@ -377,6 +385,14 @@ impl VirtioBlkDevice {
         self.reset_remove_deferred
     }
 
+    pub const fn block_read_served(&self) -> bool {
+        self.block_read_served
+    }
+
+    pub const fn block_read_copies_to_caller(&self) -> bool {
+        self.block_read_copies_to_caller
+    }
+
     fn setup(&mut self) -> Result<(), VirtioBlkError> {
         if self.lifecycle.state() != State::Base {
             return Err(VirtioBlkError::DeviceNotReady);
@@ -393,6 +409,8 @@ impl VirtioBlkDevice {
     pub fn setup_real_transport(
         &mut self,
         kernel_image: &KernelImage,
+        plic: &Plic,
+        plic_irq_domain: &mut PlicIrqDomain,
     ) -> Result<(), VirtioBlkError> {
         if self.lifecycle.state() != State::Ready {
             return Err(VirtioBlkError::DeviceNotReady);
@@ -426,6 +444,13 @@ impl VirtioBlkDevice {
             return Err(VirtioBlkError::TransportUnavailable);
         }
         self.driver_ok = self.virtio_device.status_driver_ok();
+        let Some(mut transport) = self.virtio_device.mmio_transport() else {
+            return Err(VirtioBlkError::TransportUnavailable);
+        };
+        if !transport.enable_irq_source_gate(plic, plic_irq_domain) {
+            return Err(VirtioBlkError::TransportUnavailable);
+        }
+        self.virtio_device.update_mmio_transport(transport);
         self.block_device
             .setup_from_virtio_blk(capacity)
             .map_err(|_| VirtioBlkError::DeviceNotReady)?;
@@ -461,35 +486,7 @@ impl VirtioBlkDevice {
         }
 
         let (header_phys, data_phys, status_phys) = prepare_read_request(kernel_image, sector)?;
-        let header_len = u32::try_from(core::mem::size_of::<VirtioBlkOutHdr>())
-            .map_err(|_| VirtioBlkError::InvalidBuffer)?;
-        let data_len = u32::try_from(VIRTIO_BLK_READ_BUFFER_SIZE)
-            .map_err(|_| VirtioBlkError::InvalidBuffer)?;
-        let token = self.queue.add_chain(&[
-            VirtqueueDescriptorSpec::out(header_phys, header_len),
-            VirtqueueDescriptorSpec::inbuf(data_phys, data_len),
-            VirtqueueDescriptorSpec::inbuf(status_phys, 1),
-        ])?;
-        self.pending_token = Some(token);
-        self.pending_sector = sector;
-        self.pending_data_len = data_len;
-        self.read_header_prepared = true;
-        self.read_data_buffer_prepared = true;
-        self.read_status_buffer_prepared = true;
-        self.read_request_pending = true;
-        self.read_request_submitted = true;
-        self.last_sector = sector;
-        self.request_count = self.request_count.saturating_add(1);
-        if self.virtio_device.notify_queue(&mut self.queue).is_err() {
-            self.pending_token = None;
-            self.pending_sector = 0;
-            self.pending_data_len = 0;
-            self.read_request_pending = false;
-            return Err(VirtioBlkError::TransportUnavailable);
-        }
-        self.read_request_notified = true;
-        self.notify_count = self.notify_count.saturating_add(1);
-        Ok(())
+        self.submit_prepared_read_chain(header_phys, data_phys, status_phys, sector)
     }
 
     pub fn note_mmio_irq(&mut self, status: u32) {
@@ -538,6 +535,29 @@ impl VirtioBlkDevice {
     }
 }
 
+pub struct VirtioBlkLiveProvider {
+    kernel_virt_start: usize,
+    kernel_virt_offset: usize,
+}
+
+impl BlockDeviceProvider for VirtioBlkLiveProvider {
+    fn read_block(
+        &mut self,
+        device_ref: BlockDeviceRef,
+        sector: u64,
+        buffer: &mut [u8],
+    ) -> Result<usize, BlockDeviceError> {
+        read_live_block(self, device_ref, sector, buffer)
+    }
+}
+
+pub fn live_provider(kernel_image: &KernelImage) -> VirtioBlkLiveProvider {
+    VirtioBlkLiveProvider {
+        kernel_virt_start: kernel_image.virt_start(),
+        kernel_virt_offset: kernel_image.virt_offset(),
+    }
+}
+
 pub struct VirtioBlkRuntime {
     driver: VirtioBlkDriver,
     device: Option<VirtioBlkDevice>,
@@ -580,6 +600,8 @@ pub fn setup_live_driver(
     virtio_bus: &VirtioBus,
     block_registry: &mut BlockDeviceRegistry,
     kernel_image: &KernelImage,
+    plic: &Plic,
+    plic_irq_domain: &mut PlicIrqDomain,
 ) -> EventResult {
     VIRTIO_BLK_LIVE_PTR.store(runtime as *mut VirtioBlkRuntime as usize, Ordering::Release);
     runtime.real_probe_attempted = true;
@@ -602,7 +624,7 @@ pub fn setup_live_driver(
         .probe(device)
         .map_err(|_| live_setup_error())?;
     block
-        .setup_real_transport(kernel_image)
+        .setup_real_transport(kernel_image, plic, plic_irq_domain)
         .map_err(|_| live_setup_error())?;
     runtime.live_device_ref = Some(device.device_ref());
     runtime.device = Some(block);
@@ -665,11 +687,15 @@ pub fn handle_irq_completion() {
     if device.complete_read_from_irq().is_err() {
         return;
     }
-    VIRTIO_BLK_READ_READY_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
-    crate::checkpoint::dispatch(
-        crate::trace::Checkpoint::VirtioBlkReadReady,
-        crate::context::context_ref(),
-    );
+    if VIRTIO_BLK_READ_READY_CHECKPOINTS
+        .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        crate::checkpoint::dispatch(
+            crate::trace::Checkpoint::VirtioBlkReadReady,
+            crate::context::context_ref(),
+        );
+    }
 }
 
 #[allow(dead_code)]
@@ -726,6 +752,216 @@ fn prepare_read_request(
         .runtime_to_phys(status_virt)
         .ok_or(VirtioBlkError::InvalidBuffer)?;
     Ok((header_phys, data_phys, status_phys))
+}
+
+fn prepare_read_request_with_mapping(
+    provider: &VirtioBlkLiveProvider,
+    sector: u64,
+) -> Result<(usize, usize, usize), VirtioBlkError> {
+    let request = unsafe {
+        (&raw mut VIRTIO_BLK_READ_REQUEST)
+            .as_mut()
+            .ok_or(VirtioBlkError::InvalidBuffer)?
+    };
+    request.header = VirtioBlkOutHdr {
+        request_type: VIRTIO_BLK_T_IN,
+        reserved: 0,
+        sector,
+    };
+    request.data.fill(0);
+    request.status = 0xff;
+    let header_virt = core::ptr::addr_of!(request.header) as usize;
+    let data_virt = request.data.as_ptr() as usize;
+    let status_virt = core::ptr::addr_of!(request.status) as usize;
+    let header_phys = provider
+        .runtime_to_phys(header_virt)
+        .ok_or(VirtioBlkError::InvalidBuffer)?;
+    let data_phys = provider
+        .runtime_to_phys(data_virt)
+        .ok_or(VirtioBlkError::InvalidBuffer)?;
+    let status_phys = provider
+        .runtime_to_phys(status_virt)
+        .ok_or(VirtioBlkError::InvalidBuffer)?;
+    Ok((header_phys, data_phys, status_phys))
+}
+
+fn read_live_block(
+    provider: &VirtioBlkLiveProvider,
+    device_ref: BlockDeviceRef,
+    sector: u64,
+    buffer: &mut [u8],
+) -> Result<usize, BlockDeviceError> {
+    if buffer.is_empty() {
+        return Err(BlockDeviceError::DeviceNotReady);
+    }
+
+    wait_for_no_pending_read()?;
+    let start_completion_count = {
+        let runtime = live_runtime_mut().ok_or(BlockDeviceError::ProviderUnavailable)?;
+        let device = runtime
+            .device
+            .as_mut()
+            .ok_or(BlockDeviceError::ProviderUnavailable)?;
+        if device.block_device.device_ref() != Some(device_ref) || !device.block_device.registered()
+        {
+            return Err(BlockDeviceError::ProviderUnavailable);
+        }
+        let start_completion_count = device.completion_count();
+        device
+            .submit_read_sector_with_mapping(provider, sector)
+            .map_err(block_error_from_virtio)?;
+        start_completion_count
+    };
+    wait_for_completion_after(start_completion_count)?;
+
+    let len = copy_read_request_data(buffer);
+    if len == 0 {
+        return Err(BlockDeviceError::EmptyRead);
+    }
+    let nonzero = buffer[..len].iter().any(|byte| *byte != 0);
+    if !nonzero {
+        return Err(BlockDeviceError::EmptyRead);
+    }
+
+    let runtime = live_runtime_mut().ok_or(BlockDeviceError::ProviderUnavailable)?;
+    let device = runtime
+        .device
+        .as_mut()
+        .ok_or(BlockDeviceError::ProviderUnavailable)?;
+    if device.block_device.device_ref() != Some(device_ref) {
+        return Err(BlockDeviceError::ProviderUnavailable);
+    }
+    device.block_read_served = true;
+    device.block_read_copies_to_caller = true;
+    device.block_device.record_read(sector, len, nonzero);
+    Ok(len)
+}
+
+impl VirtioBlkDevice {
+    fn submit_read_sector_with_mapping(
+        &mut self,
+        provider: &VirtioBlkLiveProvider,
+        sector: u64,
+    ) -> Result<(), VirtioBlkError> {
+        if self.lifecycle.state() != State::Ready || !self.driver_ok {
+            return Err(VirtioBlkError::DeviceNotReady);
+        }
+        if self.read_request_pending {
+            return Err(VirtioBlkError::RequestPending);
+        }
+
+        let (header_phys, data_phys, status_phys) =
+            prepare_read_request_with_mapping(provider, sector)?;
+        self.submit_prepared_read_chain(header_phys, data_phys, status_phys, sector)
+    }
+
+    fn submit_prepared_read_chain(
+        &mut self,
+        header_phys: usize,
+        data_phys: usize,
+        status_phys: usize,
+        sector: u64,
+    ) -> Result<(), VirtioBlkError> {
+        let header_len = u32::try_from(core::mem::size_of::<VirtioBlkOutHdr>())
+            .map_err(|_| VirtioBlkError::InvalidBuffer)?;
+        let data_len = u32::try_from(VIRTIO_BLK_READ_BUFFER_SIZE)
+            .map_err(|_| VirtioBlkError::InvalidBuffer)?;
+        let token = self.queue.add_chain(&[
+            VirtqueueDescriptorSpec::out(header_phys, header_len),
+            VirtqueueDescriptorSpec::inbuf(data_phys, data_len),
+            VirtqueueDescriptorSpec::inbuf(status_phys, 1),
+        ])?;
+        self.pending_token = Some(token);
+        self.pending_sector = sector;
+        self.pending_data_len = data_len;
+        self.read_header_prepared = true;
+        self.read_data_buffer_prepared = true;
+        self.read_status_buffer_prepared = true;
+        self.read_request_pending = true;
+        self.read_request_submitted = true;
+        self.last_sector = sector;
+        self.request_count = self.request_count.saturating_add(1);
+        if self.virtio_device.notify_queue(&mut self.queue).is_err() {
+            self.pending_token = None;
+            self.pending_sector = 0;
+            self.pending_data_len = 0;
+            self.read_request_pending = false;
+            return Err(VirtioBlkError::TransportUnavailable);
+        }
+        self.read_request_notified = true;
+        self.notify_count = self.notify_count.saturating_add(1);
+        Ok(())
+    }
+}
+
+impl VirtioBlkLiveProvider {
+    fn runtime_to_phys(&self, addr: usize) -> Option<usize> {
+        if addr >= self.kernel_virt_start {
+            addr.checked_sub(self.kernel_virt_offset)
+        } else {
+            Some(addr)
+        }
+    }
+}
+
+fn wait_for_no_pending_read() -> Result<(), BlockDeviceError> {
+    let mut remaining = VIRTIO_BLK_READ_WAIT_SPINS;
+    while remaining != 0 {
+        let Some(runtime) = live_runtime() else {
+            return Err(BlockDeviceError::ProviderUnavailable);
+        };
+        let Some(device) = runtime.device() else {
+            return Err(BlockDeviceError::ProviderUnavailable);
+        };
+        if !device.read_request_pending() {
+            return Ok(());
+        }
+        core::hint::spin_loop();
+        remaining -= 1;
+    }
+    Err(BlockDeviceError::ProviderUnavailable)
+}
+
+fn wait_for_completion_after(start_completion_count: usize) -> Result<(), BlockDeviceError> {
+    let mut remaining = VIRTIO_BLK_READ_WAIT_SPINS;
+    while remaining != 0 {
+        let Some(runtime) = live_runtime() else {
+            return Err(BlockDeviceError::ProviderUnavailable);
+        };
+        let Some(device) = runtime.device() else {
+            return Err(BlockDeviceError::ProviderUnavailable);
+        };
+        if !device.read_request_pending() && device.completion_count() > start_completion_count {
+            return Ok(());
+        }
+        core::hint::spin_loop();
+        remaining -= 1;
+    }
+    Err(BlockDeviceError::ProviderUnavailable)
+}
+
+fn copy_read_request_data(buffer: &mut [u8]) -> usize {
+    unsafe {
+        (&raw const VIRTIO_BLK_READ_REQUEST)
+            .as_ref()
+            .map_or(0, |request| {
+                let len = core::cmp::min(buffer.len(), request.data.len());
+                buffer[..len].copy_from_slice(&request.data[..len]);
+                len
+            })
+    }
+}
+
+fn block_error_from_virtio(error: VirtioBlkError) -> BlockDeviceError {
+    match error {
+        VirtioBlkError::DeviceNotReady
+        | VirtioBlkError::InvalidBuffer
+        | VirtioBlkError::RequestPending => BlockDeviceError::DeviceNotReady,
+        VirtioBlkError::NoRequestPending
+        | VirtioBlkError::BadStatus
+        | VirtioBlkError::DataMismatch => BlockDeviceError::ProviderUnavailable,
+        _ => BlockDeviceError::ProviderUnavailable,
+    }
 }
 
 fn read_request_status() -> u8 {
