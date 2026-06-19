@@ -2228,12 +2228,17 @@ type ArceosExRootfsCodingMust {
          * RootFS enable:
          *
          * prepare_namespace() must be represented by RootFsEnableDeferred in
-         * this round. Root device probing, filesystem selection, devtmpfs
-         * mount, MS_MOVE and chroot(".") must remain unimplemented details.
+         * this round. It may record that DevFs is mounted and the block
+         * registry default device is available as the root device candidate,
+         * but real filesystem mount, MS_MOVE and chroot(".") must remain
+         * unimplemented details. Rootfs smoke must observe those existing
+         * objects and must not add test-only device APIs or read block devices
+         * through a VFS file path.
          * The initial ramfs-backed rootfs mount belongs to ProcessPreparePhase
          * vfs_caches_init()/mnt_init(), not to this RootfsPhase enable step.
          */
-        arceos_ex_must_rootfs_keep_rootfs_enable_deferred_only();
+        arceos_ex_must_rootfs_prepare_namespace_inputs_use_existing_devfs_and_block_registry();
+        arceos_ex_must_rootfs_keep_real_mount_move_chroot_deferred();
 
         /*
          * Integrity keys:

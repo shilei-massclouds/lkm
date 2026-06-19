@@ -663,8 +663,10 @@ checkpoint KUnit/action-level 测试，app-level smoke 保留对公开 printk �
 
 初始 rootfs mount 不属于本阶段首次创建：它已经在 `ProcessPreparePhase` 的 `VfsCore.Setup` /
 `RamFsType.Setup` / `VfsCore.MountInitialRamFsRoot` 中对应 Linux `vfs_caches_init()->mnt_init()->init_mount_tree()` 完成。
-本阶段的 `RootFsEnableDeferred` 只表示后续 `prepare_namespace()` 中从初始 ramfs/rootfs backing 走向真实 root
-device、devtmpfs、`MS_MOVE` 和 `chroot(".")` 的 enable 位置。
+本阶段的 `RootFsEnableDeferred` 表示后续 `prepare_namespace()` 中从初始 ramfs/rootfs backing 走向真实 root
+device、devtmpfs、`MS_MOVE` 和 `chroot(".")` 的 enable 位置。当前首轮可以记录 prepare_namespace 的输入条件：
+初始 ramfs rootfs 仍为当前 root，`DevFs` 已挂载，`BlockDeviceRegistry` 已有默认块设备作为 root device
+candidate；但不得执行真实文件系统挂载、`MS_MOVE` 或 `chroot(".")`。
 
 本阶段覆盖 `kunit_run_all_tests()`、`wait_for_initramfs()`、`console_on_rootfs()`、
 `init_eaccess(ramdisk_execute_command)` 对应 checkpoint、`prepare_namespace()` 和
@@ -674,11 +676,13 @@ trimmed/no-op，不得单独升格为 `KUnitPhase`。
 `InitramfsSyncDeferred`、`RootfsConsoleDeferred`、`RootFsEnableDeferred` 和 `IntegrityKeysDeferred`
 在本轮只保留 deferred/position-preserved 语义。其中 `init_eaccess(ramdisk_execute_command)` 是 required
 checkpoint，必须记录当前 Linux-like 路径要求进入 `prepare_namespace()` 分支。`RootFsEnableDeferred`
-不得伪造真实 root device 探测、devtmpfs mount、`MS_MOVE` 或 `chroot(".")` 已完成。
+不得伪造真实文件系统挂载、`MS_MOVE` 或 `chroot(".")` 已完成。root device candidate 只能来自已有
+`BlockDeviceRegistry.default_device`，`/dev` 条件只能来自已有 `DevFs`，不得为了 rootfs smoke 新增测试专用
+设备 API 或通过 VFS file path 读取块设备。
 
 测试应覆盖 `RootfsPhase.Ready`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
-ramdisk eaccess 强制进入 prepare_namespace、RootFS enable deferred、integrity keys deferred，以及下一入口仍是
-`FinalizePhase`。
+ramdisk eaccess 强制进入 prepare_namespace、prepare_namespace 输入条件已具备、初始 ramfs rootfs 仍为当前 root、
+RootFS real mount/MS_MOVE/chroot deferred、integrity keys deferred，以及下一入口仍是 `FinalizePhase`。
 
 ## FinalizePhase 编码约束
 

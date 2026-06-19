@@ -39,6 +39,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.rootfs_console_deferred,
         &ctx.saved_command_line,
         &ctx.kernel_init_task,
+        &ctx.vfs_core,
+        &ctx.devfs,
+        &ctx.block_device_registry,
     )?;
     ctx.integrity_keys_deferred
         .setup(&ctx.rootfs_enable_deferred)?;

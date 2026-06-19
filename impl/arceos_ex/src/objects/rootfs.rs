@@ -1,8 +1,11 @@
 use super::{
+    block_device::{BlockDeviceRef, BlockDeviceRegistry, DevT},
     command_line::SavedCommandLine,
+    devfs::DevFs,
     initcall::InitcallBoundary,
     rest_init::{KernelInitTask, KERNEL_INIT_PID},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    vfs::{FileSystemKind, VfsCore},
     workqueue::Workqueue,
 };
 use crate::trace::Checkpoint;
@@ -171,8 +174,17 @@ impl RootfsConsoleDeferred {
 pub struct RootFsEnableDeferred {
     lifecycle: Lifecycle,
     ramdisk_eaccess_requires_prepare_namespace: bool,
+    prepare_namespace_inputs_ready: bool,
+    initial_ramfs_still_active: bool,
+    devfs_available: bool,
+    block_root_device_candidate_bound: bool,
+    root_device_ref: Option<BlockDeviceRef>,
+    root_device_devt: Option<DevT>,
     enable_deferred: bool,
     prepare_namespace_position_preserved: bool,
+    real_mount_deferred: bool,
+    ms_move_deferred: bool,
+    chroot_deferred: bool,
 }
 
 impl RootFsEnableDeferred {
@@ -180,8 +192,17 @@ impl RootFsEnableDeferred {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             ramdisk_eaccess_requires_prepare_namespace: false,
+            prepare_namespace_inputs_ready: false,
+            initial_ramfs_still_active: false,
+            devfs_available: false,
+            block_root_device_candidate_bound: false,
+            root_device_ref: None,
+            root_device_devt: None,
             enable_deferred: false,
             prepare_namespace_position_preserved: false,
+            real_mount_deferred: false,
+            ms_move_deferred: false,
+            chroot_deferred: false,
         }
     }
 
@@ -193,6 +214,30 @@ impl RootFsEnableDeferred {
         self.ramdisk_eaccess_requires_prepare_namespace
     }
 
+    pub const fn prepare_namespace_inputs_ready(&self) -> bool {
+        self.prepare_namespace_inputs_ready
+    }
+
+    pub const fn initial_ramfs_still_active(&self) -> bool {
+        self.initial_ramfs_still_active
+    }
+
+    pub const fn devfs_available(&self) -> bool {
+        self.devfs_available
+    }
+
+    pub const fn block_root_device_candidate_bound(&self) -> bool {
+        self.block_root_device_candidate_bound
+    }
+
+    pub const fn root_device_ref(&self) -> Option<BlockDeviceRef> {
+        self.root_device_ref
+    }
+
+    pub const fn root_device_devt(&self) -> Option<DevT> {
+        self.root_device_devt
+    }
+
     pub const fn enable_deferred(&self) -> bool {
         self.enable_deferred
     }
@@ -201,11 +246,26 @@ impl RootFsEnableDeferred {
         self.prepare_namespace_position_preserved
     }
 
+    pub const fn real_mount_deferred(&self) -> bool {
+        self.real_mount_deferred
+    }
+
+    pub const fn ms_move_deferred(&self) -> bool {
+        self.ms_move_deferred
+    }
+
+    pub const fn chroot_deferred(&self) -> bool {
+        self.chroot_deferred
+    }
+
     pub fn setup(
         &mut self,
         rootfs_console: &RootfsConsoleDeferred,
         saved_command_line: &SavedCommandLine,
         kernel_init_task: &KernelInitTask,
+        vfs_core: &VfsCore,
+        devfs: &DevFs,
+        block_registry: &BlockDeviceRegistry,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || rootfs_console.state() != State::Ready
@@ -213,6 +273,65 @@ impl RootFsEnableDeferred {
             || saved_command_line.state() != State::Ready
             || kernel_init_task.state() != State::Online
             || kernel_init_task.pid() != KERNEL_INIT_PID
+            || vfs_core.state() != State::Ready
+            || !vfs_core.rootfs_mount_created()
+            || devfs.state() != State::Ready
+            || !devfs.mounted()
+            || !devfs.block_node_listed()
+            || block_registry.state() != State::Ready
+            || !block_registry.default_device_slot_ready()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let Some(root_mount_ref) = vfs_core.current_root_mount() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        let Some(root_mount) = vfs_core.mount(root_mount_ref) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        if root_mount.fs_kind() != FileSystemKind::RamFs {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let Some(default_entry) = block_registry.default_entry() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        let Some(block_node) = devfs.block_node() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        if block_node.block_device_ref() != Some(default_entry.device_ref())
+            || block_node.devt() != Some(default_entry.devt())
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -223,8 +342,17 @@ impl RootFsEnableDeferred {
         }
 
         self.ramdisk_eaccess_requires_prepare_namespace = true;
+        self.prepare_namespace_inputs_ready = true;
+        self.initial_ramfs_still_active = true;
+        self.devfs_available = true;
+        self.block_root_device_candidate_bound = true;
+        self.root_device_ref = Some(default_entry.device_ref());
+        self.root_device_devt = Some(default_entry.devt());
         self.enable_deferred = true;
         self.prepare_namespace_position_preserved = true;
+        self.real_mount_deferred = true;
+        self.ms_move_deferred = true;
+        self.chroot_deferred = true;
         crate::trace::checkpoint(Checkpoint::RamdiskExecuteCommandEaccessCheckpoint);
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -272,6 +400,8 @@ impl IntegrityKeysDeferred {
         if self.lifecycle.state() != State::Base
             || rootfs_enable.state() != State::Ready
             || !rootfs_enable.enable_deferred()
+            || !rootfs_enable.prepare_namespace_inputs_ready()
+            || !rootfs_enable.real_mount_deferred()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -331,7 +461,14 @@ impl RootfsBoundary {
             || !rootfs_console.setup_deferred()
             || rootfs_enable.state() != State::Ready
             || !rootfs_enable.ramdisk_eaccess_requires_prepare_namespace()
+            || !rootfs_enable.prepare_namespace_inputs_ready()
+            || !rootfs_enable.initial_ramfs_still_active()
+            || !rootfs_enable.devfs_available()
+            || !rootfs_enable.block_root_device_candidate_bound()
             || !rootfs_enable.enable_deferred()
+            || !rootfs_enable.real_mount_deferred()
+            || !rootfs_enable.ms_move_deferred()
+            || !rootfs_enable.chroot_deferred()
             || integrity_keys.state() != State::Ready
             || !integrity_keys.setup_deferred()
         {
@@ -372,8 +509,17 @@ pub fn rootfs_phase_ready(
         && rootfs_console.pid1_console_fd_position_preserved()
         && rootfs_enable.state() == State::Ready
         && rootfs_enable.ramdisk_eaccess_requires_prepare_namespace()
+        && rootfs_enable.prepare_namespace_inputs_ready()
+        && rootfs_enable.initial_ramfs_still_active()
+        && rootfs_enable.devfs_available()
+        && rootfs_enable.block_root_device_candidate_bound()
+        && rootfs_enable.root_device_ref().is_some()
+        && rootfs_enable.root_device_devt().is_some()
         && rootfs_enable.enable_deferred()
         && rootfs_enable.prepare_namespace_position_preserved()
+        && rootfs_enable.real_mount_deferred()
+        && rootfs_enable.ms_move_deferred()
+        && rootfs_enable.chroot_deferred()
         && integrity_keys.state() == State::Ready
         && integrity_keys.setup_deferred()
         && integrity_keys.load_keys_position_preserved()

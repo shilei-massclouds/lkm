@@ -102,9 +102,20 @@ object RootfsConsoleDeferred: KernelObject {
 
 /*
  * RootFsEnableDeferred represents the prepare_namespace() position. RootFS is
- * the target top-level filesystem view, but the actual device/fs probing,
- * devtmpfs mount, MS_MOVE and chroot details remain deferred in this round.
+ * the target top-level filesystem view. This slice records that the supported
+ * Linux-like path enters prepare_namespace(), that /dev is already mounted,
+ * and that the default block device is available as the first root device
+ * candidate. The actual filesystem mount, MS_MOVE and chroot details remain
+ * deferred in this round.
  */
+predicate rootfs_prepare_namespace_inputs_ready<T>(rootfs_enable: T) -> bool;
+predicate rootfs_initial_ramfs_still_active<T>(rootfs_enable: T) -> bool;
+predicate rootfs_devfs_available<T, D>(rootfs_enable: T, devfs: D) -> bool;
+predicate rootfs_block_root_device_candidate_bound<T, B>(rootfs_enable: T, block_registry: B) -> bool;
+predicate rootfs_real_mount_deferred<T>(rootfs_enable: T) -> bool;
+predicate rootfs_ms_move_deferred<T>(rootfs_enable: T) -> bool;
+predicate rootfs_chroot_deferred<T>(rootfs_enable: T) -> bool;
+
 object RootFsEnableDeferred: KernelObject {
     initial_state: State::Base;
 
@@ -115,12 +126,26 @@ object RootFsEnableDeferred: KernelObject {
                     RootfsConsoleDeferred.state == State::Ready;
                     SavedCommandLine.state == State::Ready;
                     KernelInitTask.state == State::Online;
+                    VfsCore.state == State::Ready;
+                    rootfs_mount_created(VfsCore);
+                    DevFs.state == State::Ready;
+                    devfs_mount_created(VfsCore);
+                    devfs_block_node_bound(DevFs, BlockDeviceRegistry);
+                    BlockDeviceRegistry.state == State::Ready;
+                    block_core_default_device_slot_ready(BlockDeviceRegistry);
                 }
 
                 ensures {
                     ramdisk_execute_command_eaccess_requires_prepare_namespace();
+                    rootfs_prepare_namespace_inputs_ready(RootFsEnableDeferred);
+                    rootfs_initial_ramfs_still_active(RootFsEnableDeferred);
+                    rootfs_devfs_available(RootFsEnableDeferred, DevFs);
+                    rootfs_block_root_device_candidate_bound(RootFsEnableDeferred, BlockDeviceRegistry);
                     rootfs_enable_deferred();
                     rootfs_prepare_namespace_position_preserved();
+                    rootfs_real_mount_deferred(RootFsEnableDeferred);
+                    rootfs_ms_move_deferred(RootFsEnableDeferred);
+                    rootfs_chroot_deferred(RootFsEnableDeferred);
                 }
             }
         }
@@ -129,8 +154,15 @@ object RootFsEnableDeferred: KernelObject {
     state State::Ready {
         invariant {
             ramdisk_execute_command_eaccess_requires_prepare_namespace();
+            rootfs_prepare_namespace_inputs_ready(RootFsEnableDeferred);
+            rootfs_initial_ramfs_still_active(RootFsEnableDeferred);
+            rootfs_devfs_available(RootFsEnableDeferred, DevFs);
+            rootfs_block_root_device_candidate_bound(RootFsEnableDeferred, BlockDeviceRegistry);
             rootfs_enable_deferred();
             rootfs_prepare_namespace_position_preserved();
+            rootfs_real_mount_deferred(RootFsEnableDeferred);
+            rootfs_ms_move_deferred(RootFsEnableDeferred);
+            rootfs_chroot_deferred(RootFsEnableDeferred);
         }
     }
 }
@@ -234,7 +266,11 @@ object RootfsPhase: PhaseObject {
                     initramfs_sync_wait_deferred();
                     rootfs_console_setup_deferred();
                     ramdisk_execute_command_eaccess_requires_prepare_namespace();
+                    rootfs_prepare_namespace_inputs_ready(RootFsEnableDeferred);
+                    rootfs_devfs_available(RootFsEnableDeferred, DevFs);
+                    rootfs_block_root_device_candidate_bound(RootFsEnableDeferred, BlockDeviceRegistry);
                     rootfs_enable_deferred();
+                    rootfs_real_mount_deferred(RootFsEnableDeferred);
                     integrity_keys_setup_deferred();
                     rootfs_boundary_ready(RootfsBoundary);
                 }
