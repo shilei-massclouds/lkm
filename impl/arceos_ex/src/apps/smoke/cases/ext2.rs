@@ -154,7 +154,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert("lookup reads root", fs.lookup_reads_root_dir());
         assertions.assert(
             "lookup scans direct",
-            fs.lookup_direct_blocks_scanned() >= 1,
+            fs.lookup_direct_blocks_scanned() >= 2,
         );
         assertions.assert(
             "lookup multi direct",

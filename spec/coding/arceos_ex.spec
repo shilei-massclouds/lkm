@@ -135,6 +135,7 @@ predicate arceos_ex_must_ext2_support_4k_buffer_and_block_sizes() -> bool;
 predicate arceos_ex_must_ext2_model_driver_volume_filesystem_lifecycle() -> bool;
 predicate arceos_ex_must_ext2_read_path_support_multi_direct_blocks() -> bool;
 predicate arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file() -> bool;
+predicate arceos_ex_must_ext2_smoke_observe_cross_block_root_lookup() -> bool;
 predicate arceos_ex_must_ext2_defer_vfs_page_cache_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
@@ -1357,6 +1358,15 @@ type ArceosExBlockIoCodingMust {
          * actually observed.
          */
         arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file();
+
+        /*
+         * Cross-block root lookup observation:
+         *
+         * The ext2 smoke disk must also force the target lookup file's root
+         * directory entry beyond the first ext2 directory block, so smoke
+         * observes LookupRootName scanning at least two direct blocks.
+         */
+        arceos_ex_must_ext2_smoke_observe_cross_block_root_lookup();
 
         /*
          * Deferred ext2 scope:

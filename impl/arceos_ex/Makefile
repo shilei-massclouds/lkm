@@ -51,7 +51,10 @@ EXT2_SMOKE_FILE_CONTENT ?= arceos_ex ext2 smoke
 EXT2_SMOKE_LARGE_FILE_NAME ?= smoke-large.bin
 EXT2_SMOKE_LARGE_FILE_SIZE ?= 5120
 EXT2_SMOKE_LARGE_FILE_BYTE ?= L
+EXT2_SMOKE_FILLER_COUNT ?= 180
+EXT2_SMOKE_FILLER_PREFIX ?= ext2-smoke-filler-entry-
 DEBUGFS ?= debugfs
+EXT2_MKFS_FEATURE_ARGS ?= -O ^dir_index
 EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
@@ -106,11 +109,18 @@ disk:
 	mkdir -p $(dir $(VIRTIO_BLK_IMAGE))
 	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $(VIRTIO_BLK_IMAGE)
 ifeq ($(FS_TYPE),ext2)
-	mkfs.ext2 -q -F $(EXT2_MKFS_BLOCK_ARGS) $(VIRTIO_BLK_IMAGE)
+	mkfs.ext2 -q -F $(EXT2_MKFS_FEATURE_ARGS) $(EXT2_MKFS_BLOCK_ARGS) $(VIRTIO_BLK_IMAGE)
 	printf '%s\n' "$(EXT2_SMOKE_FILE_CONTENT)" > $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt
-	$(DEBUGFS) -w -R "write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt /$(EXT2_SMOKE_FILE_NAME)" $(VIRTIO_BLK_IMAGE) >/dev/null
+	printf 'x\n' > $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-filler.txt
 	yes "$(EXT2_SMOKE_LARGE_FILE_BYTE)" | tr -d '\n' | dd of=$(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-large-file.bin bs=1 count=$(EXT2_SMOKE_LARGE_FILE_SIZE) status=none
-	$(DEBUGFS) -w -R "write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-large-file.bin /$(EXT2_SMOKE_LARGE_FILE_NAME)" $(VIRTIO_BLK_IMAGE) >/dev/null
+	printf 'write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt /$(EXT2_SMOKE_FILE_NAME)\n' > $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke.debugfs
+	if [ "$(EXT2_SMOKE_FILLER_COUNT)" -gt 0 ]; then \
+		for index in $$(seq -w 0 $$(($(EXT2_SMOKE_FILLER_COUNT) - 1))); do \
+			printf 'write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-filler.txt /$(EXT2_SMOKE_FILLER_PREFIX)%s\n' "$$index" >> $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke.debugfs; \
+		done; \
+	fi
+	printf 'write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-large-file.bin /$(EXT2_SMOKE_LARGE_FILE_NAME)\n' >> $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke.debugfs
+	$(DEBUGFS) -w -f $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke.debugfs $(VIRTIO_BLK_IMAGE) >/dev/null
 else ifeq ($(FS_TYPE),none)
 else
 	$(error unknown FS_TYPE: $(FS_TYPE))

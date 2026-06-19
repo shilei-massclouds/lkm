@@ -503,7 +503,9 @@ descriptor、读取 `EXT2_ROOT_INO`，遍历 root directory direct blocks 中的
 inode direct blocks 把文件内容拷贝给调用者。当前泛化步骤必须支持 root directory 多 direct-block 扫描和 regular
 file 多 direct-block 读取；caller buffer 不足时返回 `ShortBuffer`，遇到 indirect block 需求时返回
 `IndirectBlocksUnsupported`，不得静默截断或绕过 `BufferHead`。`make disk` 在 `FS_TYPE=ext2` 时应写入稳定文件，
-并至少包含一个跨 ext2 block 的 regular file，保证 smoke 能观察 multi-direct-block read path。
+并至少包含一个跨 ext2 block 的 regular file，保证 smoke 能观察 multi-direct-block read path；同时应构造足够
+root directory filler entries，使目标文件 dirent 落到第一个 root directory block 之后，smoke 必须观察到
+`LookupRootName` 至少扫描两个 direct blocks。
 Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem`：`Ext2Driver` 取代旧的
 `Ext2Type`，承载 Linux `file_system_type` 以及当前建模的 super/inode/file operation set；
 `Ext2Volume` 表示默认块设备上按 ext2 规范组织的 on-disk volume，由 `Preset` 经 `BufferHead` 检查确认，

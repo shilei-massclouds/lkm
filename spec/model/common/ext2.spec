@@ -77,6 +77,7 @@ predicate ext2_root_lookup_name_bound<T, D>(fs: T, dirent: D) -> bool;
 predicate ext2_root_lookup_reads_root_dir<T, I>(fs: T, root: I) -> bool;
 predicate ext2_root_lookup_scans_direct_blocks<T, I>(fs: T, root: I) -> bool;
 predicate ext2_root_lookup_multi_direct_block_supported<T>(fs: T) -> bool;
+predicate ext2_root_lookup_multi_direct_block_observed<T>(fs: T) -> bool;
 predicate ext2_root_lookup_not_found_is_nonfatal<T>(fs: T) -> bool;
 predicate ext2_root_lookup_indirect_blocks_deferred<T>(fs: T) -> bool;
 predicate ext2_root_lookup_dirent_valid<T, D>(fs: T, dirent: D) -> bool;
@@ -284,6 +285,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_root_lookup_reads_root_dir(self, Ext2InodeRef::Root);
                     ext2_root_lookup_scans_direct_blocks(self, Ext2InodeRef::Root);
                     ext2_root_lookup_multi_direct_block_supported(self);
+                    ext2_root_lookup_multi_direct_block_observed(self);
                     ext2_root_lookup_not_found_is_nonfatal(self);
                     ext2_root_lookup_indirect_blocks_deferred(self);
                     ext2_root_lookup_dirent_valid(self, Ext2DirEntryRef::RootLookup);
