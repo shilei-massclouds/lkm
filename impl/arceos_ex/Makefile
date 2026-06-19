@@ -43,7 +43,8 @@ QEMU ?= qemu-system-riscv64
 QEMU_SMP ?= 8
 QEMU_APPEND ?= earlycon=sbi
 VIRTIO_BLK_IMAGE ?= build/virtio-blk.raw
-VIRTIO_BLK_IMAGE_SIZE ?= 1M
+VIRTIO_BLK_IMAGE_SIZE ?= 8M
+FS_TYPE ?= ext2
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
@@ -96,6 +97,12 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 disk:
 	mkdir -p $(dir $(VIRTIO_BLK_IMAGE))
 	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $(VIRTIO_BLK_IMAGE)
+ifeq ($(FS_TYPE),ext2)
+	mkfs.ext2 -q -F $(VIRTIO_BLK_IMAGE)
+else ifeq ($(FS_TYPE),none)
+else
+	$(error unknown FS_TYPE: $(FS_TYPE))
+endif
 
 run: disk
 ifeq ($(LOG),trace)

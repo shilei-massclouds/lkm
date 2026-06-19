@@ -1,14 +1,17 @@
 /*
- * Virtio block driver/device model, first discovery/config slice.
+ * Virtio block driver/device model, first read-request slice.
  *
- * This follows the early shape of Linux drivers/block/virtio_blk.c without
- * entering the block layer or submitting I/O: a virtio driver matches
- * VIRTIO_ID_BLOCK, probes a generic VirtioDevice, reads the block capacity
- * from virtio config space, sets up one request virtqueue, and reaches
- * DRIVER_OK. Request construction, interrupts/completion, tag sets, gendisk,
- * partitions, filesystem use, flush/discard/write-zeroes, multi-queue and
- * reset/remove remain deferred. checkpoint/KUnit handlers are read-only
- * observers and must not drive blk, ring, transport or bus actions.
+ * This follows the early shape of Linux drivers/block/virtio_blk.c through one
+ * real read request without entering the block layer: a virtio driver matches
+ * VIRTIO_ID_BLOCK, probes a generic VirtioDevice, reads the block capacity,
+ * sets up one request virtqueue, reaches DRIVER_OK, submits a
+ * virtio_blk_outhdr + data buffer + status byte descriptor chain, notifies the
+ * queue, and consumes the device used-buffer completion. The default test disk
+ * may be formatted as ext2 so the read buffer has deterministic nonzero bytes,
+ * but this spec does not introduce an ext2/filesystem object. Tag sets,
+ * gendisk, partitions, filesystem parsing, flush/discard/write-zeroes,
+ * multi-queue and reset/remove remain deferred. checkpoint/KUnit handlers are
+ * read-only observers and must not drive blk, ring, transport or bus actions.
  */
 
 predicate virtio_blk_driver_declared<T>(driver: T) -> bool;
@@ -26,8 +29,22 @@ predicate virtio_blk_device_capacity_nonzero<T>(device: T) -> bool;
 predicate virtio_blk_device_queue_setup_done<T>(device: T) -> bool;
 predicate virtio_blk_device_driver_ok<T>(device: T) -> bool;
 predicate virtio_blk_device_ready<T>(device: T) -> bool;
-predicate virtio_blk_request_io_deferred<T>(device: T) -> bool;
+predicate virtio_blk_read_header_prepared<T>(device: T) -> bool;
+predicate virtio_blk_read_data_buffer_prepared<T>(device: T) -> bool;
+predicate virtio_blk_read_status_buffer_prepared<T>(device: T) -> bool;
+predicate virtio_blk_read_request_submitted<T, Q>(device: T, queue: Q) -> bool;
+predicate virtio_blk_read_request_notifies_mmio<T, Q>(device: T, queue: Q) -> bool;
+predicate virtio_blk_read_request_pending<T>(device: T) -> bool;
+predicate virtio_blk_mmio_irq_acknowledged<T>(device: T) -> bool;
+predicate virtio_blk_irq_callback_invoked<T>(device: T) -> bool;
+predicate virtio_blk_complete_gets_used_buffer<T, Q>(device: T, queue: Q) -> bool;
+predicate virtio_blk_complete_status_ok<T>(device: T) -> bool;
+predicate virtio_blk_complete_data_nonzero<T>(device: T) -> bool;
+predicate virtio_blk_complete_ext2_magic_observed<T>(device: T) -> bool;
+predicate virtio_blk_completion_count_incremented<T>(device: T) -> bool;
+predicate virtio_blk_read_request_done<T>(device: T) -> bool;
 predicate virtio_blk_block_layer_deferred<T>(device: T) -> bool;
+predicate virtio_blk_filesystem_parse_deferred<T>(device: T) -> bool;
 predicate virtio_blk_multi_queue_deferred<T>(device: T) -> bool;
 predicate virtio_blk_reset_remove_deferred<T>(device: T) -> bool;
 
@@ -83,8 +100,8 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_device_allocated(self);
                     virtio_blk_device_bound_to_virtio_device(self, VirtioDevice);
                     virtio_blk_device_single_request_queue(self, VirtQueue);
-                    virtio_blk_request_io_deferred(self);
                     virtio_blk_block_layer_deferred(self);
+                    virtio_blk_filesystem_parse_deferred(self);
                     virtio_blk_multi_queue_deferred(self);
                     virtio_blk_reset_remove_deferred(self);
                 }
@@ -97,8 +114,8 @@ object VirtioBlkDevice: DeviceObject {
             virtio_blk_device_allocated(self);
             virtio_blk_device_bound_to_virtio_device(self, VirtioDevice);
             virtio_blk_device_single_request_queue(self, VirtQueue);
-            virtio_blk_request_io_deferred(self);
             virtio_blk_block_layer_deferred(self);
+            virtio_blk_filesystem_parse_deferred(self);
             virtio_blk_multi_queue_deferred(self);
             virtio_blk_reset_remove_deferred(self);
         }
@@ -134,6 +151,53 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_device_queue_setup_done(self);
                     virtio_blk_device_driver_ok(self);
                     virtio_blk_device_ready(self);
+                }
+            }
+
+            Action::SubmitReadRequest {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_blk_device_ready(self);
+                    virtio_device_status_driver_ok(VirtioDevice);
+                    VirtQueue.state == State::Ready;
+                }
+                drives {
+                    VirtQueue.Action::AddDescriptorChain;
+                    VirtQueue.Action::Kick;
+                    VirtioDevice.Action::NotifyQueue;
+                }
+                ensures {
+                    virtqueue_out_descriptor_added(VirtQueue);
+                    virtqueue_in_descriptor_added(VirtQueue);
+                    virtqueue_chain_head_published(VirtQueue);
+                    virtio_device_queue_notify_done(VirtioDevice);
+                    virtio_blk_read_header_prepared(self);
+                    virtio_blk_read_data_buffer_prepared(self);
+                    virtio_blk_read_status_buffer_prepared(self);
+                    virtio_blk_read_request_submitted(self, VirtQueue);
+                    virtio_blk_read_request_notifies_mmio(self, VirtQueue);
+                    virtio_blk_read_request_pending(self);
+                }
+            }
+
+            Action::CompleteReadRequest {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_blk_read_request_pending(self);
+                    virtqueue_real_used_completion_observed(VirtQueue);
+                }
+                drives {
+                    VirtQueue.Action::GetBuf;
+                }
+                ensures {
+                    virtio_blk_mmio_irq_acknowledged(self);
+                    virtio_blk_irq_callback_invoked(self);
+                    virtio_blk_complete_gets_used_buffer(self, VirtQueue);
+                    virtio_blk_complete_status_ok(self);
+                    virtio_blk_complete_data_nonzero(self);
+                    virtio_blk_complete_ext2_magic_observed(self);
+                    virtio_blk_completion_count_incremented(self);
+                    virtio_blk_read_request_done(self);
                 }
             }
         }

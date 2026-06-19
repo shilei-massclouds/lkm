@@ -814,18 +814,40 @@ pub fn notify_queue(transport: &mut VirtioMmioTransportDevice, queue_index: u16)
 
 pub fn handle_virtio_mmio_irq() {
     VIRTIO_MMIO_IRQ_HANDLER_CALLS.fetch_add(1, Ordering::AcqRel);
-    let Some(transport) = crate::objects::virtio_rng::live_mmio_transport() else {
-        return;
+    let _ = handle_virtio_blk_irq();
+    let _ = handle_virtio_rng_irq();
+}
+
+fn handle_virtio_blk_irq() -> bool {
+    let Some(transport) = crate::objects::virtio_blk::live_mmio_transport() else {
+        return false;
     };
     let status = read_mmio_u32(transport.membase(), VIRTIO_MMIO_INTERRUPT_STATUS);
     if status == 0 {
-        return;
+        return false;
+    }
+    let _ = write_mmio_u32(transport.membase(), VIRTIO_MMIO_INTERRUPT_ACK, status);
+    crate::objects::virtio_blk::note_mmio_irq(status);
+    if status & VIRTIO_MMIO_INT_VRING != 0 {
+        crate::objects::virtio_blk::handle_irq_completion();
+    }
+    true
+}
+
+fn handle_virtio_rng_irq() -> bool {
+    let Some(transport) = crate::objects::virtio_rng::live_mmio_transport() else {
+        return false;
+    };
+    let status = read_mmio_u32(transport.membase(), VIRTIO_MMIO_INTERRUPT_STATUS);
+    if status == 0 {
+        return false;
     }
     let _ = write_mmio_u32(transport.membase(), VIRTIO_MMIO_INTERRUPT_ACK, status);
     crate::objects::virtio_rng::note_mmio_irq(status);
     if status & VIRTIO_MMIO_INT_VRING != 0 {
         crate::objects::virtio_rng::handle_irq_completion();
     }
+    true
 }
 
 #[allow(dead_code)]
