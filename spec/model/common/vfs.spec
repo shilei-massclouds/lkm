@@ -8,9 +8,11 @@
  * anchors used as the traversal start. Directory entries are represented by
  * Dentry objects bound to Inode objects. Device nodes are only named VFS
  * entries in this slice; device file operations stay with the owning device
- * subsystems. Block-backed filesystems, page cache, mount namespace,
- * permissions, credentials, path walk corner cases, rename, symlink, hardlink,
- * open flags and file descriptor tables stay deferred.
+ * subsystems. The only block-backed filesystem path currently admitted is a
+ * read-only ext2 mount whose lookup/read operations dispatch to Ext2FileSystem.
+ * Page cache, mount namespace, permissions, credentials, path walk corner
+ * cases, rename, symlink, hardlink, open flags and file descriptor tables stay
+ * deferred.
  */
 
 enum VfsInodeKind {
@@ -41,11 +43,15 @@ predicate devfs_mount_created<T>(core: T) -> bool;
 predicate mount_allocated<T>(mount: T) -> bool;
 predicate mount_fs_type_bound<T, F>(mount: T, fs_type: F) -> bool;
 predicate mount_devfs_type_bound<T>(mount: T) -> bool;
+predicate mount_ext2_type_bound<T>(mount: T) -> bool;
 predicate mount_superblock_bound<T, S>(mount: T, superblock: S) -> bool;
 predicate mount_root_dentry_bound<T, D>(mount: T, dentry: D) -> bool;
 predicate mount_point_bound<T, D>(mount: T, mount_point: D) -> bool;
 predicate vfs_current_root_mount_set<T, M>(core: T, mount: M) -> bool;
 predicate vfs_current_root_dentry_set<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_ext2_mount_created<T, F>(core: T, fs: F) -> bool;
+predicate vfs_ext2_lookup_dispatches_backend<T, F>(core: T, fs: F) -> bool;
+predicate vfs_ext2_read_dispatches_backend<T, F>(core: T, fs: F) -> bool;
 
 predicate superblock_allocated<T>(superblock: T) -> bool;
 predicate superblock_fs_type_bound<T, F>(superblock: T, fs_type: F) -> bool;
@@ -54,6 +60,7 @@ predicate superblock_root_inode_bound<T, I>(superblock: T, inode: I) -> bool;
 predicate superblock_root_dentry_inode_matches<T, D, I>(superblock: T, dentry: D, inode: I) -> bool;
 predicate superblock_ramfs_private_bound<T>(superblock: T) -> bool;
 predicate superblock_devfs_private_bound<T>(superblock: T) -> bool;
+predicate superblock_ext2_private_bound<T>(superblock: T) -> bool;
 
 predicate inode_allocated<T>(inode: T) -> bool;
 predicate inode_superblock_bound<T, S>(inode: T, superblock: S) -> bool;
@@ -61,6 +68,8 @@ predicate inode_kind_is<T>(inode: T, kind: VfsInodeKind) -> bool;
 predicate inode_directory_children_ready<T>(inode: T) -> bool;
 predicate inode_file_data_ready<T>(inode: T) -> bool;
 predicate inode_size_updated<T>(inode: T) -> bool;
+predicate inode_ext2_inode_bound<T, I>(inode: T, ext2_inode: I) -> bool;
+predicate inode_read_only_backed<T>(inode: T) -> bool;
 
 predicate dentry_allocated<T>(dentry: T) -> bool;
 predicate dentry_name_bound<T>(dentry: T) -> bool;
@@ -80,6 +89,7 @@ predicate file_inode_bound<T, I>(file: T, inode: I) -> bool;
 predicate file_position_ready<T>(file: T) -> bool;
 predicate file_write_committed<T>(file: T) -> bool;
 predicate file_read_returns_written_data<T>(file: T) -> bool;
+predicate file_read_returns_backend_data<T>(file: T) -> bool;
 
 object FileSystemType: ResourceObject {
     initial_state: State::Base;
@@ -276,6 +286,43 @@ object VfsCore: ResourceObject {
                 }
             }
 
+            Action::MountExt2At(mount_point: Dentry, fs: Ext2FileSystem) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    Ext2FileSystem.state == State::Ready;
+                    dentry_positive(mount_point);
+                    inode_kind_is(Inode, VfsInodeKind::Directory);
+                    ext2_filesystem_root_dentry_bound(fs);
+                    ext2_inode_is_root_dir(fs, Ext2InodeRef::Root);
+                }
+                drives {
+                    SuperBlock.Event::Setup;
+                    Inode.Event::Setup;
+                    Inode.Action::CreateRootDirectory;
+                    Dentry.Event::Setup;
+                    Dentry.Action::CreateRoot;
+                    Mount.Event::Setup;
+                }
+                ensures {
+                    mount_allocated(Mount);
+                    mount_ext2_type_bound(Mount);
+                    mount_superblock_bound(Mount, SuperBlock);
+                    mount_root_dentry_bound(Mount, Dentry);
+                    mount_point_bound(Mount, mount_point);
+                    dentry_mount_root_redirects(mount_point, Dentry);
+                    superblock_allocated(SuperBlock);
+                    superblock_ext2_private_bound(SuperBlock);
+                    superblock_root_dentry_bound(SuperBlock, Dentry);
+                    superblock_root_inode_bound(SuperBlock, Inode);
+                    superblock_root_dentry_inode_matches(SuperBlock, Dentry, Inode);
+                    inode_kind_is(Inode, VfsInodeKind::Directory);
+                    inode_ext2_inode_bound(Inode, Ext2InodeRef::Root);
+                    inode_read_only_backed(Inode);
+                    vfs_ext2_mount_created(VfsCore, fs);
+                }
+            }
+
             Action::SetRoot {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -296,6 +343,32 @@ object VfsCore: ResourceObject {
                 }
                 ensures {
                     dentry_lookup_returns(VfsCore, Dentry);
+                }
+            }
+
+            Action::LookupExt2ReadOnly {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    Ext2FileSystem.state == State::Online;
+                    mount_ext2_type_bound(Mount);
+                    dentry_positive(Dentry);
+                    inode_kind_is(Inode, VfsInodeKind::Directory);
+                }
+                drives {
+                    Ext2FileSystem.Action::LookupRootName;
+                    Inode.Event::Setup;
+                    Inode.Action::CreateFile;
+                    Dentry.Event::Setup;
+                    Dentry.Action::InsertChild;
+                }
+                ensures {
+                    vfs_ext2_lookup_dispatches_backend(VfsCore, Ext2FileSystem);
+                    dentry_lookup_returns(VfsCore, Dentry);
+                    inode_kind_is(Inode, VfsInodeKind::RegularFile);
+                    inode_ext2_inode_bound(Inode, Ext2InodeRef::LookupFile);
+                    inode_read_only_backed(Inode);
+                    dentry_child_inserted(Dentry, Dentry);
                 }
             }
 
@@ -393,6 +466,25 @@ object VfsCore: ResourceObject {
                 }
                 ensures {
                     file_read_returns_written_data(File);
+                }
+            }
+
+            Action::ReadExt2File {
+                state_effect: StateEffect::None;
+                depends_on {
+                    file_allocated(File);
+                    Ext2FileSystem.state == State::Online;
+                    mount_ext2_type_bound(Mount);
+                    inode_kind_is(Inode, VfsInodeKind::RegularFile);
+                    inode_read_only_backed(Inode);
+                    inode_ext2_inode_bound(Inode, Ext2InodeRef::LookupFile);
+                }
+                drives {
+                    Ext2FileSystem.Action::ReadVfsFile;
+                }
+                ensures {
+                    vfs_ext2_read_dispatches_backend(VfsCore, Ext2FileSystem);
+                    file_read_returns_backend_data(File);
                 }
             }
 

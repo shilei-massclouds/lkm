@@ -136,7 +136,8 @@ predicate arceos_ex_must_ext2_model_driver_volume_filesystem_lifecycle() -> bool
 predicate arceos_ex_must_ext2_read_path_support_multi_direct_blocks() -> bool;
 predicate arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file() -> bool;
 predicate arceos_ex_must_ext2_smoke_observe_cross_block_root_lookup() -> bool;
-predicate arceos_ex_must_ext2_defer_vfs_page_cache_and_writes() -> bool;
+predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
+predicate arceos_ex_must_ext2_defer_page_cache_indirect_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
 predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
@@ -1318,8 +1319,8 @@ type ArceosExBlockIoCodingMust {
          * BufferHead; absence or invalid layout is an ordinary non-fatal
          * result. Ext2FileSystem must model the mounted in-memory filesystem
          * instance: Preset depends on Ext2Volume, Setup expands metadata/root
-         * entry facts, and Enable only records the VFS mount-to-parent
-         * boundary while real VFS mount integration remains deferred.
+         * entry facts, and Enable mounts the read-only ext2 instance into
+         * VFS through the minimal mount-to-parent boundary.
          */
         arceos_ex_must_ext2_model_driver_volume_filesystem_lifecycle();
 
@@ -1369,13 +1370,25 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_ext2_smoke_observe_cross_block_root_lookup();
 
         /*
+         * Minimal VFS read-only mount:
+         *
+         * The next ext2 step must let VfsCore mount a prepared Ext2FileSystem
+         * at a normal VFS dentry and route lookup/open/read through VFS before
+         * dispatching to Ext2FileSystem's BufferHead-backed direct-block
+         * backend. Smoke must read the deterministic ext2 file through that
+         * VFS mount path instead of treating direct Ext2FileSystem calls as
+         * the acceptance boundary.
+         */
+        arceos_ex_must_ext2_support_minimal_vfs_read_only_mount();
+
+        /*
          * Deferred ext2 scope:
          *
-         * VFS mount integration, page cache/folios, indirect blocks, symlinks,
+         * Full pathname walk, page cache/folios, indirect blocks, symlinks,
          * permissions, xattrs, quotas, allocation, writes and remount/error
          * recovery remain explicit deferred scope in this slice.
          */
-        arceos_ex_must_ext2_defer_vfs_page_cache_and_writes();
+        arceos_ex_must_ext2_defer_page_cache_indirect_and_writes();
     }
 }
 

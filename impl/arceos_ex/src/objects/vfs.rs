@@ -1,4 +1,8 @@
-use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
+use super::{
+    block_device::{BlockDeviceProvider, BlockDeviceRegistry},
+    ext2::{Ext2DirEntryRecord, Ext2Error, Ext2FileSystem, Ext2InodeRecord},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+};
 use alloc::vec::Vec;
 
 pub const VFS_NAME_MAX: usize = 32;
@@ -7,6 +11,7 @@ pub const VFS_NAME_MAX: usize = 32;
 pub enum FileSystemKind {
     RamFs,
     DevFs,
+    Ext2,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -107,6 +112,36 @@ pub enum VfsError {
     AlreadyExists,
     NotFound,
     DirectoryNotEmpty,
+    ReadOnly,
+    ShortBuffer,
+    Backend,
+}
+
+impl From<Ext2Error> for VfsError {
+    fn from(error: Ext2Error) -> Self {
+        match error {
+            Ext2Error::NotFound => Self::NotFound,
+            Ext2Error::NotDirectory => Self::NotDirectory,
+            Ext2Error::NotRegularFile => Self::NotFile,
+            Ext2Error::ShortBuffer => Self::ShortBuffer,
+            _ => Self::Backend,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Ext2InodeBinding {
+    ino: u32,
+}
+
+impl Ext2InodeBinding {
+    const fn new(ino: u32) -> Self {
+        Self { ino }
+    }
+
+    pub const fn ino(&self) -> u32 {
+        self.ino
+    }
 }
 
 pub struct FileSystemType {
@@ -270,6 +305,7 @@ pub struct SuperBlock {
     root_dentry_ref: Option<DentryRef>,
     ramfs_private_bound: bool,
     devfs_private_bound: bool,
+    ext2_private_bound: bool,
 }
 
 impl SuperBlock {
@@ -281,6 +317,7 @@ impl SuperBlock {
             root_dentry_ref: None,
             ramfs_private_bound: matches!(fs_kind, FileSystemKind::RamFs),
             devfs_private_bound: matches!(fs_kind, FileSystemKind::DevFs),
+            ext2_private_bound: matches!(fs_kind, FileSystemKind::Ext2),
         }
     }
 
@@ -308,6 +345,10 @@ impl SuperBlock {
         self.devfs_private_bound
     }
 
+    pub const fn ext2_private_bound(&self) -> bool {
+        self.ext2_private_bound
+    }
+
     fn bind_root(&mut self, root_inode_ref: InodeRef, root_dentry_ref: DentryRef) {
         self.root_inode_ref = Some(root_inode_ref);
         self.root_dentry_ref = Some(root_dentry_ref);
@@ -321,6 +362,8 @@ pub struct Inode {
     size: usize,
     children: Vec<DentryRef>,
     data: Vec<u8>,
+    ext2_binding: Option<Ext2InodeBinding>,
+    read_only_backed: bool,
     removed: bool,
 }
 
@@ -333,6 +376,8 @@ impl Inode {
             size: 0,
             children: Vec::new(),
             data: Vec::new(),
+            ext2_binding: None,
+            read_only_backed: false,
             removed: false,
         }
     }
@@ -357,6 +402,14 @@ impl Inode {
         self.removed
     }
 
+    pub const fn ext2_binding(&self) -> Option<Ext2InodeBinding> {
+        self.ext2_binding
+    }
+
+    pub const fn read_only_backed(&self) -> bool {
+        self.read_only_backed
+    }
+
     pub fn child_count(&self) -> usize {
         self.children.len()
     }
@@ -367,6 +420,12 @@ impl Inode {
 
     fn is_file(&self) -> bool {
         self.kind == VfsInodeKind::RegularFile
+    }
+
+    fn bind_ext2_inode(&mut self, inode: &Ext2InodeRecord) {
+        self.ext2_binding = Some(Ext2InodeBinding::new(inode.ino()));
+        self.read_only_backed = true;
+        self.size = inode.size() as usize;
     }
 }
 
@@ -457,6 +516,7 @@ pub struct File {
     position: usize,
     write_committed: bool,
     read_returns_written_data: bool,
+    read_returns_backend_data: bool,
     last_write_len: usize,
     last_read_len: usize,
 }
@@ -470,6 +530,7 @@ impl File {
             position: 0,
             write_committed: false,
             read_returns_written_data: false,
+            read_returns_backend_data: false,
             last_write_len: 0,
             last_read_len: 0,
         }
@@ -497,6 +558,10 @@ impl File {
 
     pub const fn read_returns_written_data(&self) -> bool {
         self.read_returns_written_data
+    }
+
+    pub const fn read_returns_backend_data(&self) -> bool {
+        self.read_returns_backend_data
     }
 
     pub const fn last_write_len(&self) -> usize {
@@ -577,6 +642,10 @@ pub struct VfsCore {
     readdir_lists: bool,
     file_write_committed: bool,
     file_read_returns_written_data: bool,
+    ext2_mount_created: bool,
+    ext2_lookup_dispatched: bool,
+    ext2_read_dispatched: bool,
+    file_read_returns_backend_data: bool,
 }
 
 impl VfsCore {
@@ -609,6 +678,10 @@ impl VfsCore {
             readdir_lists: false,
             file_write_committed: false,
             file_read_returns_written_data: false,
+            ext2_mount_created: false,
+            ext2_lookup_dispatched: false,
+            ext2_read_dispatched: false,
+            file_read_returns_backend_data: false,
         }
     }
 
@@ -720,6 +793,22 @@ impl VfsCore {
         self.file_read_returns_written_data
     }
 
+    pub const fn ext2_mount_created(&self) -> bool {
+        self.ext2_mount_created
+    }
+
+    pub const fn ext2_lookup_dispatched(&self) -> bool {
+        self.ext2_lookup_dispatched
+    }
+
+    pub const fn ext2_read_dispatched(&self) -> bool {
+        self.ext2_read_dispatched
+    }
+
+    pub const fn file_read_returns_backend_data(&self) -> bool {
+        self.file_read_returns_backend_data
+    }
+
     pub fn setup(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Base {
             return failed_condition(
@@ -798,6 +887,36 @@ impl VfsCore {
             .dentry_mut(mount_point_ref)
             .ok_or(VfsError::InvalidRef)?;
         mount_point.bind_mount_root(root_dentry_ref);
+        Ok(mount_ref)
+    }
+
+    pub fn mount_ext2_at(
+        &mut self,
+        fs: &Ext2FileSystem,
+        mount_point_ref: DentryRef,
+    ) -> Result<MountRef, VfsError> {
+        self.ensure_mount_point(mount_point_ref)?;
+        if fs.state() != State::Ready || !fs.ready() || !fs.root_dentry_bound() {
+            return Err(VfsError::FsTypeNotReady);
+        }
+
+        let mount_ref = self.create_mount(FileSystemKind::Ext2, Some(mount_point_ref))?;
+        let root_dentry_ref = self
+            .mount(mount_ref)
+            .ok_or(VfsError::InvalidRef)?
+            .root_dentry_ref();
+        let root_inode_ref = self
+            .dentry(root_dentry_ref)
+            .ok_or(VfsError::InvalidRef)?
+            .inode_ref();
+        let root_inode = self.inode_mut(root_inode_ref).ok_or(VfsError::InvalidRef)?;
+        root_inode.bind_ext2_inode(fs.root_inode());
+
+        let mount_point = self
+            .dentry_mut(mount_point_ref)
+            .ok_or(VfsError::InvalidRef)?;
+        mount_point.bind_mount_root(root_dentry_ref);
+        self.ext2_mount_created = true;
         Ok(mount_ref)
     }
 
@@ -914,6 +1033,43 @@ impl VfsCore {
         Ok(child_ref)
     }
 
+    pub fn lookup_ext2_child<P: BlockDeviceProvider>(
+        &mut self,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        parent_ref: DentryRef,
+        name: &[u8],
+    ) -> Result<DentryRef, VfsError> {
+        self.lookup_count = self.lookup_count.saturating_add(1);
+        let parent_ref = self.follow_mount(parent_ref)?;
+        let parent = self.positive_dentry(parent_ref)?;
+        let parent_inode = self.inode(parent.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if parent_inode.superblock_ref() != parent.superblock_ref()
+            || parent_inode.kind() != VfsInodeKind::Directory
+            || !parent_inode.read_only_backed()
+        {
+            return Err(VfsError::NotDirectory);
+        }
+        let superblock = self
+            .superblock(parent.superblock_ref())
+            .ok_or(VfsError::InvalidRef)?;
+        if superblock.fs_kind() != FileSystemKind::Ext2 || !superblock.ext2_private_bound() {
+            return Err(VfsError::FsTypeMissing);
+        }
+        if let Ok(existing) = self.find_child(parent_ref, name) {
+            self.lookup_returned = true;
+            return Ok(existing);
+        }
+
+        let dirent = fs.lookup_root(registry, provider, name)?;
+        let file_inode = *fs.lookup_file_inode();
+        let child_ref = self.insert_ext2_lookup_child(parent_ref, &dirent, &file_inode)?;
+        self.lookup_returned = true;
+        self.ext2_lookup_dispatched = true;
+        Ok(child_ref)
+    }
+
     pub fn create_dir(
         &mut self,
         parent_ref: DentryRef,
@@ -959,6 +1115,9 @@ impl VfsCore {
         let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
         let end = offset.saturating_add(data.len());
         let inode = self.inode_mut(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if inode.read_only_backed() {
+            return Err(VfsError::ReadOnly);
+        }
         if !inode.is_file() || inode.removed() {
             return Err(VfsError::NotFile);
         }
@@ -1009,6 +1168,38 @@ impl VfsCore {
         };
         self.read_count = self.read_count.saturating_add(1);
         self.file_read_returns_written_data |= read_returns_written_data;
+        Ok(len)
+    }
+
+    pub fn read_ext2_file<P: BlockDeviceProvider>(
+        &mut self,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        file_ref: FileRef,
+        offset: usize,
+        buffer: &mut [u8],
+    ) -> Result<usize, VfsError> {
+        if offset != 0 {
+            return Err(VfsError::Backend);
+        }
+        let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
+        let inode = self.inode(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if !inode.is_file() || inode.removed() {
+            return Err(VfsError::NotFile);
+        }
+        if !inode.read_only_backed() || inode.ext2_binding().is_none() {
+            return Err(VfsError::FsTypeMissing);
+        }
+
+        let len = fs.read_vfs_file(registry, provider, buffer)?;
+        let file = self.file_mut(file_ref).ok_or(VfsError::InvalidRef)?;
+        file.position = len;
+        file.last_read_len = len;
+        file.read_returns_backend_data = true;
+        self.read_count = self.read_count.saturating_add(1);
+        self.ext2_read_dispatched = true;
+        self.file_read_returns_backend_data = true;
         Ok(len)
     }
 
@@ -1104,6 +1295,47 @@ impl VfsCore {
         let inode_ref = InodeRef::new(self.inodes.len());
         self.inodes
             .push(Inode::new(inode_ref, superblock_ref, kind));
+
+        let dentry_ref = DentryRef::new(self.dentries.len());
+        self.dentries.push(Dentry::new(
+            dentry_ref,
+            superblock_ref,
+            Some(parent_ref),
+            inode_ref,
+            name_buf,
+            name_len,
+        ));
+
+        let parent_inode = self
+            .inode_mut(parent_inode_ref)
+            .ok_or(VfsError::InvalidRef)?;
+        parent_inode.children.push(dentry_ref);
+        self.insert_count = self.insert_count.saturating_add(1);
+        Ok(dentry_ref)
+    }
+
+    fn insert_ext2_lookup_child(
+        &mut self,
+        parent_ref: DentryRef,
+        dirent: &Ext2DirEntryRecord,
+        inode: &Ext2InodeRecord,
+    ) -> Result<DentryRef, VfsError> {
+        let (name_buf, name_len) = copy_name(dirent.name())?;
+        let parent = self.positive_dentry(parent_ref)?;
+        let superblock_ref = parent.superblock_ref();
+        let parent_inode_ref = parent.inode_ref();
+        if !self
+            .inode(parent_inode_ref)
+            .ok_or(VfsError::InvalidRef)?
+            .is_directory()
+        {
+            return Err(VfsError::NotDirectory);
+        }
+
+        let inode_ref = InodeRef::new(self.inodes.len());
+        let mut vfs_inode = Inode::new(inode_ref, superblock_ref, VfsInodeKind::RegularFile);
+        vfs_inode.bind_ext2_inode(inode);
+        self.inodes.push(vfs_inode);
 
         let dentry_ref = DentryRef::new(self.dentries.len());
         self.dentries.push(Dentry::new(

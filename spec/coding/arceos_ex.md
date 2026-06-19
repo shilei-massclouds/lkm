@@ -511,17 +511,19 @@ Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem
 `Ext2Volume` 表示默认块设备上按 ext2 规范组织的 on-disk volume，由 `Preset` 经 `BufferHead` 检查确认，
 不存在或格式不匹配是普通非致命结果，不应 panic 或终止内核；`Ext2FileSystem` 表示一次 mount 后的内存中文件系统实例，
 `Preset` 绑定 `Ext2Driver` 和 `Ext2Volume`，`Setup` 解析元信息并建立 root dentry/inode 入口事实，
-`Enable` 只记录挂接到上级 VFS 目录节点的生命周期边界。当前真实 VFS mount integration 仍保持 deferred，不得把该事实解释为已经完成真实 VFS 挂载。
+`Enable` 必须通过 `VfsCore` 把只读 ext2 实例挂接到上级 VFS 目录节点。当前只要求最小 read-only mount/read：
+VFS 负责 mount point、dentry、open/read 入口和观测事实，实际 lookup/read 后端仍调度到 `Ext2FileSystem`
+的 `BufferHead` + direct-block 路径。
 superblock 字段、group descriptor、inode record、dirent 和 file-read result 首轮只是 `Ext2FileSystem`
-下的结构化记录/事实，不独立建生命周期；后续若实现 inode cache、refcount、evict 或完整 VFS mount integration，
+下的结构化记录/事实，不独立建生命周期；后续若实现 inode cache、refcount、evict 或完整 path walk/page cache，
 再讨论是否把 inode 等提升为对象。
 当前 4K Buffer 步骤必须把 `BufferHead` 和 virtio-blk read buffer 扩到至少 4KiB，并让 `Ext2Volume` /
 `Ext2FileSystem` 支持 ext2 `block_size` 为 1024、2048 和 4096。superblock 仍按 ext2 规则从 byte offset 1024 读取；解析出实际
 block size 后，group descriptor、inode table、目录和文件数据读取必须使用真实 filesystem block number 到
 sector 的映射。`make disk` 默认不应再强制 `mkfs.ext2 -b 1024`；如需覆盖 block size，应通过显式参数表达。
-本轮不把 ext2 接入 VFS/rootfs mount，不实现 page cache/folio、间接块、symlink、权限、xattr、quota、block
-allocation、写路径、remount 或错误恢复；这些必须保持 deferred。ext2 smoke 可以显式 mount 默认块设备的只读
-`Ext2FileSystem` 对象并读稳定测试文件，但不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。
+本轮只把 ext2 接入一个显式 VFS mount/read 路径，不实现完整 pathname walk、rootfs 切换、page cache/folio、间接块、
+symlink、权限、xattr、quota、block allocation、写路径、remount 或错误恢复；这些必须保持 deferred。ext2 smoke
+必须通过 VFS mount 后的 lookup/open/read 读取稳定测试文件，同时仍不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。
 
 `devfs` 的首轮实现属于 `InitcallPhase` 收敛边界：它必须在 `VfsCore` 初始 rootfs mount 已存在、`HwRngCore`
 和 `BlockDeviceRegistry` 已 Ready、且 virtio-rng/virtio-blk live driver 已完成注册之后挂载 `/dev`，再创建

@@ -2,7 +2,7 @@ use super::{
     bio::{self, BufferHead, BUFFER_HEAD_MAX_SIZE},
     block_device::{BlockDeviceProvider, BlockDeviceRegistry, DevT},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    vfs::VfsCore,
+    vfs::{DentryRef, MountRef, VfsCore},
 };
 use core::cmp::min;
 
@@ -375,9 +375,12 @@ pub struct Ext2FileSystem {
     group_desc_read: bool,
     ready: bool,
     mount_boundary_recorded: bool,
+    vfs_mount_ref: Option<MountRef>,
+    vfs_mount_point_ref: Option<DentryRef>,
+    vfs_lookup_entry_bound: bool,
+    vfs_read_entry_bound: bool,
     operations_bound: bool,
     root_dentry_bound: bool,
-    vfs_integration_deferred: bool,
     page_cache_deferred: bool,
     write_paths_deferred: bool,
     root_inode: Ext2InodeRecord,
@@ -400,6 +403,7 @@ pub struct Ext2FileSystem {
     file_read_len_matches_inode_size: bool,
     file_read_short_buffer_rejected: bool,
     file_read_indirect_blocks_deferred: bool,
+    file_read_entered_from_vfs: bool,
 }
 
 #[allow(dead_code)]
@@ -422,9 +426,12 @@ impl Ext2FileSystem {
             group_desc_read: false,
             ready: false,
             mount_boundary_recorded: false,
+            vfs_mount_ref: None,
+            vfs_mount_point_ref: None,
+            vfs_lookup_entry_bound: false,
+            vfs_read_entry_bound: false,
             operations_bound: false,
             root_dentry_bound: false,
-            vfs_integration_deferred: true,
             page_cache_deferred: true,
             write_paths_deferred: true,
             root_inode: Ext2InodeRecord::empty(),
@@ -447,6 +454,7 @@ impl Ext2FileSystem {
             file_read_len_matches_inode_size: false,
             file_read_short_buffer_rejected: false,
             file_read_indirect_blocks_deferred: true,
+            file_read_entered_from_vfs: false,
         }
     }
 
@@ -514,16 +522,28 @@ impl Ext2FileSystem {
         self.mount_boundary_recorded
     }
 
+    pub const fn vfs_mount_ref(&self) -> Option<MountRef> {
+        self.vfs_mount_ref
+    }
+
+    pub const fn vfs_mount_point_ref(&self) -> Option<DentryRef> {
+        self.vfs_mount_point_ref
+    }
+
+    pub const fn vfs_lookup_entry_bound(&self) -> bool {
+        self.vfs_lookup_entry_bound
+    }
+
+    pub const fn vfs_read_entry_bound(&self) -> bool {
+        self.vfs_read_entry_bound
+    }
+
     pub const fn operations_bound(&self) -> bool {
         self.operations_bound
     }
 
     pub const fn root_dentry_bound(&self) -> bool {
         self.root_dentry_bound
-    }
-
-    pub const fn vfs_integration_deferred(&self) -> bool {
-        self.vfs_integration_deferred
     }
 
     pub const fn page_cache_deferred(&self) -> bool {
@@ -614,6 +634,10 @@ impl Ext2FileSystem {
         self.file_read_indirect_blocks_deferred
     }
 
+    pub const fn file_read_entered_from_vfs(&self) -> bool {
+        self.file_read_entered_from_vfs
+    }
+
     pub fn preset(&mut self, driver: &Ext2Driver, volume: &Ext2Volume) -> Result<(), Ext2Error> {
         if driver.state() != State::Ready || !driver.mount_callback_bound() {
             return Err(Ext2Error::DriverNotReady);
@@ -687,7 +711,11 @@ impl Ext2FileSystem {
             .map_err(|_| Ext2Error::InvalidState)
     }
 
-    pub fn enable_deferred(&mut self, vfs_core: &VfsCore) -> Result<(), Ext2Error> {
+    pub fn enable(
+        &mut self,
+        vfs_core: &mut VfsCore,
+        mount_point_ref: DentryRef,
+    ) -> Result<MountRef, Ext2Error> {
         if self.lifecycle.state() != State::Ready || !self.ready || !self.root_dentry_bound {
             return Err(Ext2Error::FileSystemNotReady);
         }
@@ -695,11 +723,18 @@ impl Ext2FileSystem {
             return Err(Ext2Error::FileSystemNotReady);
         }
 
+        let mount_ref = vfs_core
+            .mount_ext2_at(self, mount_point_ref)
+            .map_err(|_| Ext2Error::InvalidState)?;
         self.mount_boundary_recorded = true;
-        self.vfs_integration_deferred = true;
+        self.vfs_mount_ref = Some(mount_ref);
+        self.vfs_mount_point_ref = Some(mount_point_ref);
+        self.vfs_lookup_entry_bound = true;
+        self.vfs_read_entry_bound = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
-            .map_err(|_| Ext2Error::InvalidState)
+            .map_err(|_| Ext2Error::InvalidState)?;
+        Ok(mount_ref)
     }
 
     pub fn lookup_root<P: BlockDeviceProvider>(
@@ -814,6 +849,19 @@ impl Ext2FileSystem {
         self.file_read_copies_to_caller = true;
         self.file_read_len_matches_inode_size = copied == file_size;
         Ok(copied)
+    }
+
+    pub fn read_vfs_file<P: BlockDeviceProvider>(
+        &mut self,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        buffer: &mut [u8],
+    ) -> Result<usize, Ext2Error> {
+        if !self.vfs_read_entry_bound {
+            return Err(Ext2Error::FileSystemNotReady);
+        }
+        self.file_read_entered_from_vfs = true;
+        self.read_lookup_file(registry, provider, buffer)
     }
 
     fn read_inode<P: BlockDeviceProvider>(

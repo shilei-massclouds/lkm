@@ -11,11 +11,13 @@ use crate::{
             EXT2_SMOKE_LARGE_FILE_SIZE,
         },
         state::State,
+        vfs::{FileSystemKind, VfsError, VfsInodeKind},
         virtio_blk,
     },
 };
 
 static mut LARGE_READ_BUFFER: [u8; EXT2_SMOKE_LARGE_FILE_SIZE] = [0; EXT2_SMOKE_LARGE_FILE_SIZE];
+const EXT2_MOUNT_POINT_NAME: &[u8] = b"mnt_ext2";
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -33,7 +35,7 @@ impl Ext2ReadOnlyScenario {
 
 impl SmokeScenario for Ext2ReadOnlyScenario {
     fn name(&self) -> &'static str {
-        "ext2.read_only_root_lookup_and_file_read"
+        "ext2.vfs_read_only_mount_lookup_and_file_read"
     }
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
@@ -108,11 +110,33 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         if fs.state() != State::Ready {
             return;
         }
-        assert_ext2_result(
-            assertions,
-            "filesystem enable",
-            fs.enable_deferred(&ctx.vfs_core),
-        );
+        let Some(root_dentry_ref) = ctx.vfs_core.current_root_dentry() else {
+            assertions.assert("root dentry present", false);
+            return;
+        };
+        let mount_point_ref = match ctx
+            .vfs_core
+            .lookup_child(root_dentry_ref, EXT2_MOUNT_POINT_NAME)
+        {
+            Ok(dentry_ref) => dentry_ref,
+            Err(_) => match ctx
+                .vfs_core
+                .create_dir(root_dentry_ref, EXT2_MOUNT_POINT_NAME)
+            {
+                Ok(dentry_ref) => dentry_ref,
+                Err(_) => {
+                    assertions.assert("create ext2 mount point", false);
+                    return;
+                }
+            },
+        };
+        let mount_ref = match fs.enable(&mut ctx.vfs_core, mount_point_ref) {
+            Ok(mount_ref) => mount_ref,
+            Err(error) => {
+                assert_ext2_result(assertions, "filesystem enable", Err(error));
+                return;
+            }
+        };
         if fs.state() != State::Online {
             return;
         }
@@ -120,6 +144,16 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert("filesystem devt", fs.devt() == Some(devt));
         assertions.assert("filesystem ready", fs.ready());
         assertions.assert("filesystem mount boundary", fs.mount_boundary_recorded());
+        assertions.assert(
+            "filesystem vfs mount",
+            fs.vfs_mount_ref() == Some(mount_ref),
+        );
+        assertions.assert(
+            "filesystem vfs mount point",
+            fs.vfs_mount_point_ref() == Some(mount_point_ref),
+        );
+        assertions.assert("filesystem vfs lookup", fs.vfs_lookup_entry_bound());
+        assertions.assert("filesystem vfs read", fs.vfs_read_entry_bound());
         assertions.assert("filesystem operations", fs.operations_bound());
         assertions.assert("filesystem root dentry", fs.root_dentry_bound());
         assertions.assert("superblock read", fs.superblock_read());
@@ -133,9 +167,57 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert("blocks count", fs.blocks_count() != 0);
         assertions.assert("blocks per group", fs.blocks_per_group() != 0);
         assertions.assert("inodes per group", fs.inodes_per_group() != 0);
-        assertions.assert("vfs deferred", fs.vfs_integration_deferred());
+        assertions.assert("vfs integrated", fs.vfs_mount_ref().is_some());
         assertions.assert("page cache deferred", fs.page_cache_deferred());
         assertions.assert("writes deferred", fs.write_paths_deferred());
+        assertions.assert("vfs ext2 mount fact", ctx.vfs_core.ext2_mount_created());
+
+        let Some(mount) = ctx.vfs_core.mount(mount_ref) else {
+            assertions.assert("vfs ext2 mount", false);
+            return;
+        };
+        assertions.assert("vfs mount kind", mount.fs_kind() == FileSystemKind::Ext2);
+        assertions.assert(
+            "vfs mount point",
+            mount.mount_point_ref() == Some(mount_point_ref),
+        );
+        let Some(superblock) = ctx.vfs_core.superblock(mount.superblock_ref()) else {
+            assertions.assert("vfs ext2 superblock", false);
+            return;
+        };
+        assertions.assert(
+            "vfs superblock kind",
+            superblock.fs_kind() == FileSystemKind::Ext2,
+        );
+        assertions.assert("vfs superblock private", superblock.ext2_private_bound());
+        let ext2_root_ref = mount.root_dentry_ref();
+        let Some(mount_point) = ctx.vfs_core.dentry(mount_point_ref) else {
+            assertions.assert("vfs mount point dentry", false);
+            return;
+        };
+        assertions.assert(
+            "vfs mount redirects",
+            mount_point.mounted_root() == Some(ext2_root_ref),
+        );
+        let Some(ext2_root) = ctx.vfs_core.dentry(ext2_root_ref) else {
+            assertions.assert("vfs ext2 root dentry", false);
+            return;
+        };
+        let Some(ext2_root_inode) = ctx.vfs_core.inode(ext2_root.inode_ref()) else {
+            assertions.assert("vfs ext2 root inode", false);
+            return;
+        };
+        assertions.assert(
+            "vfs root dir",
+            ext2_root_inode.kind() == VfsInodeKind::Directory,
+        );
+        assertions.assert("vfs root readonly", ext2_root_inode.read_only_backed());
+        assertions.assert(
+            "vfs root ext2 ino",
+            ext2_root_inode
+                .ext2_binding()
+                .is_some_and(|binding| binding.ino() == EXT2_ROOT_INO),
+        );
 
         let root = fs.root_inode();
         assertions.assert("root ino", root.ino() == EXT2_ROOT_INO);
@@ -143,12 +225,18 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert("root direct block", root.direct_blocks()[0] != 0);
         assertions.assert("root indirect deferred", root.indirect_blocks_deferred());
 
-        let lookup = fs.lookup_root(
+        let lookup = ctx.vfs_core.lookup_ext2_child(
+            &mut fs,
             &mut ctx.block_device_registry,
             &mut provider,
+            mount_point_ref,
             EXT2_SMOKE_LARGE_FILE_NAME,
         );
         assertions.assert_ok("lookup smoke large file", lookup);
+        let file_dentry_ref = match lookup {
+            Ok(dentry_ref) => dentry_ref,
+            Err(_) => return,
+        };
         let dirent = fs.lookup_dirent();
         assertions.assert("lookup name", fs.lookup_name_bound());
         assertions.assert("lookup reads root", fs.lookup_reads_root_dir());
@@ -178,16 +266,64 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             "file direct block",
             fs.lookup_file_inode().direct_blocks()[0] != 0,
         );
+        assertions.assert("vfs lookup fact", ctx.vfs_core.ext2_lookup_dispatched());
+        let Some(file_dentry) = ctx.vfs_core.dentry(file_dentry_ref) else {
+            assertions.assert("vfs file dentry", false);
+            return;
+        };
+        assertions.assert(
+            "vfs file name",
+            file_dentry.name() == EXT2_SMOKE_LARGE_FILE_NAME,
+        );
+        let file_inode_ref = file_dentry.inode_ref();
+        let Some(file_inode) = ctx.vfs_core.inode(file_inode_ref) else {
+            assertions.assert("vfs file inode", false);
+            return;
+        };
+        assertions.assert(
+            "vfs file kind",
+            file_inode.kind() == VfsInodeKind::RegularFile,
+        );
+        assertions.assert("vfs file readonly", file_inode.read_only_backed());
+        assertions.assert(
+            "vfs file ext2 ino",
+            file_inode
+                .ext2_binding()
+                .is_some_and(|binding| binding.ino() == dirent.inode()),
+        );
+        assertions.assert(
+            "vfs file size",
+            file_inode.size() == EXT2_SMOKE_LARGE_FILE_SIZE,
+        );
+        let file_ref = match ctx.vfs_core.open_file(file_dentry_ref) {
+            Ok(file_ref) => file_ref,
+            Err(_) => {
+                assertions.assert("vfs open ext2 file", false);
+                return;
+            }
+        };
+        let Some(file) = ctx.vfs_core.file(file_ref) else {
+            assertions.assert("vfs file object", false);
+            return;
+        };
+        assertions.assert(
+            "vfs file dentry bound",
+            file.dentry_ref() == file_dentry_ref,
+        );
+        assertions.assert("vfs file inode bound", file.inode_ref() == file_inode_ref);
 
         let mut short_buffer = [0u8; 64];
-        let short_read = fs.read_lookup_file(
+        let short_read = ctx.vfs_core.read_ext2_file(
+            &mut fs,
             &mut ctx.block_device_registry,
             &mut provider,
+            file_ref,
+            0,
             &mut short_buffer,
         );
         assertions.assert(
             "short buffer rejected",
-            matches!(short_read, Err(Ext2Error::ShortBuffer))
+            matches!(short_read, Err(VfsError::ShortBuffer))
                 && fs.file_read_short_buffer_rejected(),
         );
 
@@ -196,7 +332,14 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             &mut *ptr
         };
         buffer.fill(0);
-        let read = fs.read_lookup_file(&mut ctx.block_device_registry, &mut provider, buffer);
+        let read = ctx.vfs_core.read_ext2_file(
+            &mut fs,
+            &mut ctx.block_device_registry,
+            &mut provider,
+            file_ref,
+            0,
+            buffer,
+        );
         let Ok(len) = read else {
             assertions.assert("read file", false);
             return;
@@ -227,6 +370,21 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert(
             "read indirect deferred",
             fs.file_read_indirect_blocks_deferred(),
+        );
+        assertions.assert("read entered from vfs", fs.file_read_entered_from_vfs());
+        assertions.assert("vfs read fact", ctx.vfs_core.ext2_read_dispatched());
+        assertions.assert(
+            "vfs read backend data",
+            ctx.vfs_core.file_read_returns_backend_data(),
+        );
+        let Some(file_after_read) = ctx.vfs_core.file(file_ref) else {
+            assertions.assert("vfs file after read", false);
+            return;
+        };
+        assertions.assert("vfs file read len", file_after_read.last_read_len() == len);
+        assertions.assert(
+            "vfs file backend data",
+            file_after_read.read_returns_backend_data(),
         );
     }
 

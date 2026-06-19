@@ -14,8 +14,9 @@
  *   the parsed metadata, operation-set binding and root dentry/inode entry
  *   point. Superblock fields, group descriptor, inode records, dirents and
  *   file-read results are still structured records/facts owned by
- *   Ext2FileSystem in this slice; later inode cache, iget refcounting, eviction
- *   or VFS mount integration may promote some of them if needed.
+ *   Ext2FileSystem in this slice. The current VFS integration is a minimal
+ *   read-only mount/read backend; later inode cache, iget refcounting, eviction
+ *   and full path walk/page-cache behavior may promote more of them if needed.
  */
 
 enum Ext2InodeRef {
@@ -60,7 +61,9 @@ predicate ext2_filesystem_operations_bound<T, D>(fs: T, driver: D) -> bool;
 predicate ext2_filesystem_root_dentry_bound<T>(fs: T) -> bool;
 predicate ext2_filesystem_ready<T>(fs: T) -> bool;
 predicate ext2_filesystem_mount_boundary_recorded<T>(fs: T) -> bool;
-predicate ext2_filesystem_vfs_integration_deferred<T>(fs: T) -> bool;
+predicate ext2_filesystem_vfs_mount_bound<T, V>(fs: T, vfs: V) -> bool;
+predicate ext2_filesystem_vfs_lookup_entry_bound<T>(fs: T) -> bool;
+predicate ext2_filesystem_vfs_read_entry_bound<T>(fs: T) -> bool;
 predicate ext2_filesystem_page_cache_deferred<T>(fs: T) -> bool;
 predicate ext2_filesystem_write_paths_deferred<T>(fs: T) -> bool;
 
@@ -91,6 +94,7 @@ predicate ext2_file_read_copies_to_caller<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_len_matches_inode_size<T, R, I>(fs: T, read: R, file: I) -> bool;
 predicate ext2_file_read_short_buffer_rejected<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_indirect_blocks_deferred<T, R>(fs: T, read: R) -> bool;
+predicate ext2_file_read_entered_from_vfs<T, R>(fs: T, read: R) -> bool;
 
 object Ext2Driver: ResourceObject {
     initial_state: State::Base;
@@ -221,7 +225,6 @@ object Ext2FileSystem: ResourceObject {
                     ext2_inode_is_root_dir(self, Ext2InodeRef::Root);
                     ext2_inode_indirect_blocks_deferred(self, Ext2InodeRef::Root);
                     ext2_filesystem_ready(self);
-                    ext2_filesystem_vfs_integration_deferred(self);
                     ext2_filesystem_page_cache_deferred(self);
                     ext2_filesystem_write_paths_deferred(self);
                 }
@@ -242,7 +245,6 @@ object Ext2FileSystem: ResourceObject {
             ext2_inode_record_ready(self, Ext2InodeRef::Root);
             ext2_inode_is_root_dir(self, Ext2InodeRef::Root);
             ext2_filesystem_ready(self);
-            ext2_filesystem_vfs_integration_deferred(self);
             ext2_filesystem_page_cache_deferred(self);
             ext2_filesystem_write_paths_deferred(self);
         }
@@ -254,9 +256,16 @@ object Ext2FileSystem: ResourceObject {
                     Ext2FileSystem.state == State::Ready;
                     ext2_filesystem_root_dentry_bound(self);
                 }
+                drives {
+                    VfsCore.Action::MountExt2At;
+                }
                 ensures {
                     ext2_filesystem_mount_boundary_recorded(self);
-                    ext2_filesystem_vfs_integration_deferred(self);
+                    ext2_filesystem_vfs_mount_bound(self, VfsCore);
+                    ext2_filesystem_vfs_lookup_entry_bound(self);
+                    ext2_filesystem_vfs_read_entry_bound(self);
+                    ext2_filesystem_page_cache_deferred(self);
+                    ext2_filesystem_write_paths_deferred(self);
                 }
             }
         }
@@ -267,7 +276,11 @@ object Ext2FileSystem: ResourceObject {
             ext2_filesystem_allocated(self);
             ext2_filesystem_ready(self);
             ext2_filesystem_mount_boundary_recorded(self);
-            ext2_filesystem_vfs_integration_deferred(self);
+            ext2_filesystem_vfs_mount_bound(self, VfsCore);
+            ext2_filesystem_vfs_lookup_entry_bound(self);
+            ext2_filesystem_vfs_read_entry_bound(self);
+            ext2_filesystem_page_cache_deferred(self);
+            ext2_filesystem_write_paths_deferred(self);
         }
 
         actions {
@@ -311,6 +324,29 @@ object Ext2FileSystem: ResourceObject {
                     BufferHead.Action::SbBreadByMajorMinor;
                 }
                 ensures {
+                    ext2_file_read_uses_direct_block(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
+                    ext2_file_read_scans_direct_blocks(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
+                    ext2_file_read_multi_direct_block_supported(self, Ext2FileReadRef::LookupFile);
+                    ext2_file_read_uses_buffer_head(self, Ext2FileReadRef::LookupFile, BufferHead);
+                    ext2_file_read_copies_to_caller(self, Ext2FileReadRef::LookupFile);
+                    ext2_file_read_len_matches_inode_size(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
+                    ext2_file_read_indirect_blocks_deferred(self, Ext2FileReadRef::LookupFile);
+                }
+            }
+
+            Action::ReadVfsFile {
+                state_effect: StateEffect::None;
+                depends_on {
+                    Ext2FileSystem.state == State::Online;
+                    ext2_filesystem_vfs_read_entry_bound(self);
+                    ext2_inode_is_regular_file(self, Ext2InodeRef::LookupFile);
+                    ext2_inode_direct_blocks_bound(self, Ext2InodeRef::LookupFile);
+                }
+                drives {
+                    BufferHead.Action::SbBreadByMajorMinor;
+                }
+                ensures {
+                    ext2_file_read_entered_from_vfs(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_uses_direct_block(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_scans_direct_blocks(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_multi_direct_block_supported(self, Ext2FileReadRef::LookupFile);
