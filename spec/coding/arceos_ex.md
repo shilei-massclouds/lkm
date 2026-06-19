@@ -503,6 +503,10 @@ block 把文件内容拷贝给调用者。`make disk` 在 `FS_TYPE=ext2` 时应�
 后者对应一次成功 `ext2_fill_super()` 后得到的 mounted instance。superblock 字段、group descriptor、inode
 record、dirent 和 file-read result 首轮只是 `Ext2Mount` 下的结构化记录/事实，不独立建生命周期；后续若实现 inode cache、
 refcount、evict 或 VFS mount integration，再讨论是否把 inode 等提升为对象。
+当前 4K Buffer 步骤必须把 `BufferHead` 和 virtio-blk read buffer 扩到至少 4KiB，并让 `Ext2Mount` 支持
+ext2 `block_size` 为 1024、2048 和 4096。superblock 仍按 ext2 规则从 byte offset 1024 读取；解析出实际
+block size 后，group descriptor、inode table、目录和文件数据读取必须使用真实 filesystem block number 到
+sector 的映射。`make disk` 默认不应再强制 `mkfs.ext2 -b 1024`；如需覆盖 block size，应通过显式参数表达。
 本轮不把 ext2 接入 VFS/rootfs mount，不实现 page cache/folio、间接块、symlink、权限、xattr、quota、block
 allocation、写路径、remount 或错误恢复；这些必须保持 deferred。ext2 smoke 可以显式 mount 默认块设备的只读
 `Ext2Mount` 对象并读固定文件，但不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。

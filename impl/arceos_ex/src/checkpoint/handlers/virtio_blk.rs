@@ -16,7 +16,7 @@ use crate::{
 };
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::VirtioBlkReady, Checkpoint::VirtioBlkReadReady];
-const VIRTIO_BLK_FIRST_READ_MAX_USED_LEN: u32 = 1025;
+const VIRTIO_BLK_FIRST_READ_MAX_USED_LEN: u32 = 4097;
 pub const KUNIT_CASE_COUNT: usize = 2;
 
 pub const HANDLER: Handler = Handler {

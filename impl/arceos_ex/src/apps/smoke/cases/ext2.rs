@@ -6,7 +6,7 @@ use crate::{
     context::context,
     objects::{
         ext2::{
-            Ext2FileType, Ext2Mount, Ext2Type, EXT2_MIN_BLOCK_SIZE, EXT2_ROOT_INO,
+            Ext2Error, Ext2FileType, Ext2Mount, Ext2Type, EXT2_MAX_BLOCK_SIZE, EXT2_ROOT_INO,
             EXT2_SMOKE_FILE_CONTENT, EXT2_SMOKE_FILE_NAME,
         },
         state::State,
@@ -69,7 +69,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         let mut provider = virtio_blk::live_provider(&ctx.kernel_image);
         let mut mount = Ext2Mount::new();
         let mounted = mount.mount_default(&fs_type, &mut ctx.block_device_registry, &mut provider);
-        assertions.assert_ok("mount default", mounted);
+        assert_mount_default(assertions, mounted);
         if mount.state() != State::Ready {
             return;
         }
@@ -78,7 +78,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert("mount ready", mount.ready());
         assertions.assert("superblock read", mount.superblock_read());
         assertions.assert("magic valid", mount.magic_valid());
-        assertions.assert("block size", mount.block_size() == EXT2_MIN_BLOCK_SIZE);
+        assertions.assert("block size", mount.block_size() == EXT2_MAX_BLOCK_SIZE);
         assertions.assert("block size supported", mount.block_size_supported());
         assertions.assert("group desc read", mount.group_desc_read());
         assertions.assert("inode table", mount.group_inode_table_block() != 0);
@@ -140,4 +140,37 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+fn assert_mount_default(assertions: &mut SmokeAssertions, result: Result<(), Ext2Error>) {
+    match result {
+        Ok(()) => assertions.assert("mount default", true),
+        Err(Ext2Error::TypeNotReady) => assertions.assert("mount default: type not ready", false),
+        Err(Ext2Error::MountNotReady) => assertions.assert("mount default: mount not ready", false),
+        Err(Ext2Error::InvalidState) => assertions.assert("mount default: invalid state", false),
+        Err(Ext2Error::DeviceMissing) => assertions.assert("mount default: device missing", false),
+        Err(Ext2Error::Io) => assertions.assert("mount default: io", false),
+        Err(Ext2Error::InvalidSuperblock) => {
+            assertions.assert("mount default: invalid superblock", false)
+        }
+        Err(Ext2Error::UnsupportedBlockSize) => {
+            assertions.assert("mount default: unsupported block size", false)
+        }
+        Err(Ext2Error::InvalidGroupDesc) => {
+            assertions.assert("mount default: invalid group desc", false)
+        }
+        Err(Ext2Error::InvalidInode) => assertions.assert("mount default: invalid inode", false),
+        Err(Ext2Error::InvalidDirEntry) => {
+            assertions.assert("mount default: invalid dir entry", false)
+        }
+        Err(Ext2Error::NotFound) => assertions.assert("mount default: not found", false),
+        Err(Ext2Error::NotDirectory) => assertions.assert("mount default: not directory", false),
+        Err(Ext2Error::NotRegularFile) => {
+            assertions.assert("mount default: not regular file", false)
+        }
+        Err(Ext2Error::IndirectBlocksUnsupported) => {
+            assertions.assert("mount default: indirect blocks unsupported", false)
+        }
+        Err(Ext2Error::ShortBuffer) => assertions.assert("mount default: short buffer", false),
+    }
 }

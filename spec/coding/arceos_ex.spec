@@ -130,6 +130,7 @@ predicate arceos_ex_must_block_io_model_bio_buffer_head_before_ext2() -> bool;
 predicate arceos_ex_must_block_io_registry_read_remain_lower_level_adapter() -> bool;
 predicate arceos_ex_must_block_io_smoke_use_sb_bread_path() -> bool;
 predicate arceos_ex_must_ext2_first_slice_read_only_and_buffer_head_based() -> bool;
+predicate arceos_ex_must_ext2_support_4k_buffer_and_block_sizes() -> bool;
 predicate arceos_ex_must_ext2_smoke_use_fixed_disk_file() -> bool;
 predicate arceos_ex_must_ext2_defer_vfs_page_cache_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
@@ -1293,6 +1294,18 @@ type ArceosExBlockIoCodingMust {
          * the Bio/BufferHead layer by calling VirtioBlkDevice private reads.
          */
         arceos_ex_must_ext2_first_slice_read_only_and_buffer_head_based();
+
+        /*
+         * 4K Buffer / ext2 block-size support:
+         *
+         * The next ext2 step must raise BufferHead and virtio-blk read buffers
+         * to at least 4KiB, and Ext2Mount must accept ext2 block_size values
+         * 1024, 2048 and 4096. The superblock is still discovered at byte
+         * offset 1024; after parsing it, group descriptor and inode/data block
+         * reads must use the actual filesystem block size and block-number
+         * layout. make disk must not force 1KiB blocks by default.
+         */
+        arceos_ex_must_ext2_support_4k_buffer_and_block_sizes();
 
         /*
          * Stable smoke target:

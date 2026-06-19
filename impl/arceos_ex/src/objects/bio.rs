@@ -6,7 +6,7 @@ use super::{
 };
 
 pub const BUFFER_HEAD_SECTOR_SIZE: usize = 512;
-pub const BUFFER_HEAD_MAX_SIZE: usize = 1024;
+pub const BUFFER_HEAD_MAX_SIZE: usize = 4096;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum BioOp {

@@ -15,11 +15,10 @@ const VIRTIO_BLK_QUEUE_SIZE: u16 = 8;
 const VIRTIO_BLK_QUEUE_INDEX: u16 = 0;
 const VIRTIO_BLK_T_IN: u32 = 0;
 const VIRTIO_BLK_S_OK: u8 = 0;
-const VIRTIO_BLK_SECTOR_SIZE: usize = 512;
 const VIRTIO_BLK_EXT2_SUPERBLOCK_SECTOR: u64 = 2;
 const EXT2_SUPER_MAGIC_OFFSET_IN_SECTOR: usize = 56;
 const EXT2_SUPER_MAGIC: u16 = 0xef53;
-const VIRTIO_BLK_READ_BUFFER_SIZE: usize = VIRTIO_BLK_SECTOR_SIZE * 2;
+const VIRTIO_BLK_READ_BUFFER_SIZE: usize = 4096;
 const VIRTIO_BLK_READ_WAIT_SPINS: usize = 1_000_000;
 
 #[repr(C)]
@@ -486,7 +485,13 @@ impl VirtioBlkDevice {
         }
 
         let (header_phys, data_phys, status_phys) = prepare_read_request(kernel_image, sector)?;
-        self.submit_prepared_read_chain(header_phys, data_phys, status_phys, sector)
+        self.submit_prepared_read_chain(
+            header_phys,
+            data_phys,
+            status_phys,
+            sector,
+            VIRTIO_BLK_READ_BUFFER_SIZE,
+        )
     }
 
     pub fn note_mmio_irq(&mut self, status: u32) {
@@ -811,14 +816,16 @@ fn read_live_block(
             return Err(BlockDeviceError::ProviderUnavailable);
         }
         let start_completion_count = device.completion_count();
+        let request_len = core::cmp::min(buffer.len(), VIRTIO_BLK_READ_BUFFER_SIZE);
         device
-            .submit_read_sector_with_mapping(provider, sector)
+            .submit_read_sector_with_mapping(provider, sector, request_len)
             .map_err(block_error_from_virtio)?;
         start_completion_count
     };
     wait_for_completion_after(start_completion_count)?;
 
-    let len = copy_read_request_data(buffer);
+    let data_len = last_read_data_len().ok_or(BlockDeviceError::ProviderUnavailable)?;
+    let len = copy_read_request_data(buffer, data_len);
     if len == 0 {
         return Err(BlockDeviceError::EmptyRead);
     }
@@ -843,6 +850,7 @@ impl VirtioBlkDevice {
         &mut self,
         provider: &VirtioBlkLiveProvider,
         sector: u64,
+        data_len: usize,
     ) -> Result<(), VirtioBlkError> {
         if self.lifecycle.state() != State::Ready || !self.driver_ok {
             return Err(VirtioBlkError::DeviceNotReady);
@@ -850,10 +858,13 @@ impl VirtioBlkDevice {
         if self.read_request_pending {
             return Err(VirtioBlkError::RequestPending);
         }
+        if data_len == 0 || data_len > VIRTIO_BLK_READ_BUFFER_SIZE {
+            return Err(VirtioBlkError::InvalidBuffer);
+        }
 
         let (header_phys, data_phys, status_phys) =
             prepare_read_request_with_mapping(provider, sector)?;
-        self.submit_prepared_read_chain(header_phys, data_phys, status_phys, sector)
+        self.submit_prepared_read_chain(header_phys, data_phys, status_phys, sector, data_len)
     }
 
     fn submit_prepared_read_chain(
@@ -862,11 +873,11 @@ impl VirtioBlkDevice {
         data_phys: usize,
         status_phys: usize,
         sector: u64,
+        data_len: usize,
     ) -> Result<(), VirtioBlkError> {
         let header_len = u32::try_from(core::mem::size_of::<VirtioBlkOutHdr>())
             .map_err(|_| VirtioBlkError::InvalidBuffer)?;
-        let data_len = u32::try_from(VIRTIO_BLK_READ_BUFFER_SIZE)
-            .map_err(|_| VirtioBlkError::InvalidBuffer)?;
+        let data_len = u32::try_from(data_len).map_err(|_| VirtioBlkError::InvalidBuffer)?;
         let token = self.queue.add_chain(&[
             VirtqueueDescriptorSpec::out(header_phys, header_len),
             VirtqueueDescriptorSpec::inbuf(data_phys, data_len),
@@ -941,12 +952,20 @@ fn wait_for_completion_after(start_completion_count: usize) -> Result<(), BlockD
     Err(BlockDeviceError::ProviderUnavailable)
 }
 
-fn copy_read_request_data(buffer: &mut [u8]) -> usize {
+fn last_read_data_len() -> Option<usize> {
+    let runtime = live_runtime()?;
+    let device = runtime.device()?;
+    let len = usize::try_from(device.last_used_len()).ok()?;
+    len.checked_sub(1)
+}
+
+fn copy_read_request_data(buffer: &mut [u8], data_len: usize) -> usize {
     unsafe {
         (&raw const VIRTIO_BLK_READ_REQUEST)
             .as_ref()
             .map_or(0, |request| {
-                let len = core::cmp::min(buffer.len(), request.data.len());
+                let len =
+                    core::cmp::min(buffer.len(), core::cmp::min(data_len, request.data.len()));
                 buffer[..len].copy_from_slice(&request.data[..len]);
                 len
             })

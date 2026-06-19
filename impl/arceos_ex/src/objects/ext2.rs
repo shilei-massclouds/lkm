@@ -8,6 +8,9 @@ use core::cmp::min;
 pub const EXT2_SUPER_MAGIC: u16 = 0xef53;
 pub const EXT2_ROOT_INO: u32 = 2;
 pub const EXT2_MIN_BLOCK_SIZE: usize = 1024;
+pub const EXT2_MAX_BLOCK_SIZE: usize = 4096;
+pub const EXT2_SUPERBLOCK_OFFSET: usize = 1024;
+const EXT2_SUPERBLOCK_PROBE_BLOCK: u64 = (EXT2_SUPERBLOCK_OFFSET / EXT2_MIN_BLOCK_SIZE) as u64;
 pub const EXT2_N_BLOCKS: usize = 15;
 pub const EXT2_NDIR_BLOCKS: usize = 12;
 pub const EXT2_SMOKE_FILE_NAME: &[u8] = b"smoke.txt";
@@ -409,15 +412,14 @@ impl Ext2Mount {
         };
         let devt = default_entry.devt();
 
-        let super_bh =
-            bio::sb_bread_by_devt_block(registry, provider, devt, 1, EXT2_MIN_BLOCK_SIZE)?;
+        let super_bh = read_superblock_probe(registry, provider, devt)?;
         let superblock = parse_superblock(super_bh.data())?;
         self.superblock_read = true;
         self.magic_valid = superblock.magic == EXT2_SUPER_MAGIC;
         if !self.magic_valid {
             return Err(Ext2Error::InvalidSuperblock);
         }
-        if superblock.block_size != EXT2_MIN_BLOCK_SIZE {
+        if !supported_block_size(superblock.block_size) {
             return Err(Ext2Error::UnsupportedBlockSize);
         }
         if superblock.inodes_per_group == 0 || superblock.blocks_per_group == 0 {
@@ -439,11 +441,7 @@ impl Ext2Mount {
         self.first_inode = superblock.first_inode;
         self.block_size_supported = true;
 
-        let group_desc_block = if self.block_size == EXT2_MIN_BLOCK_SIZE {
-            2
-        } else {
-            1
-        };
+        let group_desc_block = group_descriptor_block(self.block_size);
         let group_bh = read_fs_block(registry, provider, devt, group_desc_block, self.block_size)?;
         let group_desc = parse_group_desc(group_bh.data())?;
         if group_desc.inode_table_block == 0 {
@@ -605,11 +603,26 @@ fn read_fs_block<P: BlockDeviceProvider>(
     block: u32,
     block_size: usize,
 ) -> Result<BufferHead, Ext2Error> {
-    if block_size > BUFFER_HEAD_MAX_SIZE || block_size != EXT2_MIN_BLOCK_SIZE {
+    if !supported_block_size(block_size) || block_size > BUFFER_HEAD_MAX_SIZE {
         return Err(Ext2Error::UnsupportedBlockSize);
     }
     bio::sb_bread_by_devt_block(registry, provider, devt, u64::from(block), block_size)
         .map_err(Ext2Error::from)
+}
+
+fn read_superblock_probe<P: BlockDeviceProvider>(
+    registry: &mut BlockDeviceRegistry,
+    provider: &mut P,
+    devt: DevT,
+) -> Result<BufferHead, Ext2Error> {
+    bio::sb_bread_by_devt_block(
+        registry,
+        provider,
+        devt,
+        EXT2_SUPERBLOCK_PROBE_BLOCK,
+        EXT2_MIN_BLOCK_SIZE,
+    )
+    .map_err(Ext2Error::from)
 }
 
 fn parse_superblock(data: &[u8]) -> Result<Ext2SuperBlockRecord, Ext2Error> {
@@ -631,10 +644,13 @@ fn parse_superblock(data: &[u8]) -> Result<Ext2SuperBlockRecord, Ext2Error> {
     } else {
         le_u16(data, 0x58)?
     };
-    if log_block_size > 0 || log_frag_size != log_block_size {
+    if log_block_size > 2 || log_frag_size != log_block_size {
         return Err(Ext2Error::UnsupportedBlockSize);
     }
     let block_size = EXT2_MIN_BLOCK_SIZE << log_block_size;
+    if !supported_block_size(block_size) {
+        return Err(Ext2Error::UnsupportedBlockSize);
+    }
 
     Ok(Ext2SuperBlockRecord {
         inodes_count,
@@ -646,6 +662,18 @@ fn parse_superblock(data: &[u8]) -> Result<Ext2SuperBlockRecord, Ext2Error> {
         first_inode,
         inode_size,
     })
+}
+
+const fn supported_block_size(block_size: usize) -> bool {
+    block_size == EXT2_MIN_BLOCK_SIZE || block_size == 2048 || block_size == EXT2_MAX_BLOCK_SIZE
+}
+
+const fn group_descriptor_block(block_size: usize) -> u32 {
+    if block_size == EXT2_MIN_BLOCK_SIZE {
+        2
+    } else {
+        1
+    }
 }
 
 fn parse_group_desc(data: &[u8]) -> Result<Ext2GroupDescRecord, Ext2Error> {

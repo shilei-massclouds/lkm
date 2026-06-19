@@ -33,6 +33,7 @@ predicate ext2_mount_targets_block_device<T, D>(mount: T, device: D) -> bool;
 predicate ext2_mount_superblock_read<T, B>(mount: T, bh: B) -> bool;
 predicate ext2_mount_magic_valid<T>(mount: T) -> bool;
 predicate ext2_mount_block_size_supported<T>(mount: T) -> bool;
+predicate ext2_mount_block_size_1024_or_2048_or_4096<T>(mount: T) -> bool;
 predicate ext2_mount_group_desc_read<T, B>(mount: T, bh: B) -> bool;
 predicate ext2_mount_ready<T>(mount: T) -> bool;
 predicate ext2_mount_vfs_integration_deferred<T>(mount: T) -> bool;
@@ -108,6 +109,7 @@ object Ext2Mount: ResourceObject {
                     ext2_mount_superblock_read(self, BufferHead);
                     ext2_mount_magic_valid(self);
                     ext2_mount_block_size_supported(self);
+                    ext2_mount_block_size_1024_or_2048_or_4096(self);
                     ext2_mount_group_desc_read(self, BufferHead);
                     ext2_inode_record_ready(self, Ext2InodeRef::Root);
                     ext2_inode_number_bound(self, Ext2InodeRef::Root);
@@ -130,6 +132,7 @@ object Ext2Mount: ResourceObject {
             ext2_mount_allocated(self);
             ext2_mount_magic_valid(self);
             ext2_mount_block_size_supported(self);
+            ext2_mount_block_size_1024_or_2048_or_4096(self);
             ext2_inode_record_ready(self, Ext2InodeRef::Root);
             ext2_inode_is_root_dir(self, Ext2InodeRef::Root);
             ext2_mount_ready(self);

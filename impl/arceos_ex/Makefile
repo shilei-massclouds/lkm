@@ -45,9 +45,11 @@ QEMU_APPEND ?= earlycon=sbi
 VIRTIO_BLK_IMAGE ?= build/virtio-blk.raw
 VIRTIO_BLK_IMAGE_SIZE ?= 8M
 FS_TYPE ?= ext2
+EXT2_BLOCK_SIZE ?=
 EXT2_SMOKE_FILE_NAME ?= smoke.txt
 EXT2_SMOKE_FILE_CONTENT ?= arceos_ex ext2 smoke
 DEBUGFS ?= debugfs
+EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
@@ -101,7 +103,7 @@ disk:
 	mkdir -p $(dir $(VIRTIO_BLK_IMAGE))
 	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $(VIRTIO_BLK_IMAGE)
 ifeq ($(FS_TYPE),ext2)
-	mkfs.ext2 -q -F -b 1024 $(VIRTIO_BLK_IMAGE)
+	mkfs.ext2 -q -F $(EXT2_MKFS_BLOCK_ARGS) $(VIRTIO_BLK_IMAGE)
 	printf '%s\n' "$(EXT2_SMOKE_FILE_CONTENT)" > $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt
 	$(DEBUGFS) -w -R "write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt /$(EXT2_SMOKE_FILE_NAME)" $(VIRTIO_BLK_IMAGE) >/dev/null
 else ifeq ($(FS_TYPE),none)
