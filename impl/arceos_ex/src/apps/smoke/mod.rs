@@ -179,6 +179,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::block_device::run,
     },
     SmokeCase {
+        name: "ext2",
+        run: cases::ext2::run,
+    },
+    SmokeCase {
         name: "rootfs",
         run: cases::rootfs::run,
     },

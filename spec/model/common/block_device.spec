@@ -134,7 +134,6 @@ object BlockDeviceRegistry: ResourceObject {
                     block_core_read_invokes_provider(BlockDeviceRegistry, BlockDevice);
                     block_core_read_completion_observed(BlockDeviceRegistry, BlockDevice);
                     block_core_read_copies_to_caller(BlockDeviceRegistry, BlockDevice);
-                    block_core_read_returns_nonzero(BlockDeviceRegistry);
                 }
             }
 
@@ -155,7 +154,6 @@ object BlockDeviceRegistry: ResourceObject {
                     block_core_read_invokes_provider(BlockDeviceRegistry, BlockDevice);
                     block_core_read_completion_observed(BlockDeviceRegistry, BlockDevice);
                     block_core_read_copies_to_caller(BlockDeviceRegistry, BlockDevice);
-                    block_core_read_returns_nonzero(BlockDeviceRegistry);
                 }
             }
         }
@@ -209,7 +207,6 @@ object BlockDevice: DeviceObject {
                     block_device_read_submitted(BlockDevice);
                     block_device_read_completion_observed(BlockDevice);
                     block_device_read_copies_to_caller(BlockDevice);
-                    block_device_read_returns_nonzero(BlockDevice);
                     block_device_read_count_incremented(BlockDevice);
                 }
             }

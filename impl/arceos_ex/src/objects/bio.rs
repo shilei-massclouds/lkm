@@ -6,6 +6,7 @@ use super::{
 };
 
 pub const BUFFER_HEAD_SECTOR_SIZE: usize = 512;
+pub const BUFFER_HEAD_MAX_SIZE: usize = 1024;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum BioOp {
@@ -25,7 +26,6 @@ pub enum BlockIoError {
     DeviceNotReady,
     InvalidBlockSize,
     ShortRead,
-    EmptyRead,
 }
 
 impl From<BlockDeviceError> for BlockIoError {
@@ -163,7 +163,7 @@ pub struct BufferHead {
     devt: DevT,
     sector: u64,
     block_size: usize,
-    data: [u8; BUFFER_HEAD_SECTOR_SIZE],
+    data: [u8; BUFFER_HEAD_MAX_SIZE],
     len: usize,
     bio: Bio,
     sb_bread_called: bool,
@@ -177,6 +177,7 @@ impl BufferHead {
         device_ref: BlockDeviceRef,
         devt: DevT,
         sector: u64,
+        block_size: usize,
         submit_path: BioSubmitPath,
     ) -> Self {
         Self {
@@ -184,16 +185,10 @@ impl BufferHead {
             device_ref,
             devt,
             sector,
-            block_size: BUFFER_HEAD_SECTOR_SIZE,
-            data: [0; BUFFER_HEAD_SECTOR_SIZE],
+            block_size,
+            data: [0; BUFFER_HEAD_MAX_SIZE],
             len: 0,
-            bio: Bio::new_read(
-                device_ref,
-                devt,
-                sector,
-                BUFFER_HEAD_SECTOR_SIZE,
-                submit_path,
-            ),
+            bio: Bio::new_read(device_ref, devt, sector, block_size, submit_path),
             sb_bread_called: false,
             bread_gfp_called: false,
             uptodate: false,
@@ -254,7 +249,10 @@ impl BufferHead {
     }
 
     fn setup(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Base || self.block_size == 0 {
+        if self.lifecycle.state() != State::Base
+            || !valid_block_size(self.block_size)
+            || self.bio.len() != self.block_size
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -273,15 +271,12 @@ impl BufferHead {
             return Err(BlockIoError::ShortRead);
         }
         let nonzero = self.data[..len].iter().any(|byte| *byte != 0);
-        if !nonzero {
-            return Err(BlockIoError::EmptyRead);
-        }
 
         self.len = len;
         self.sb_bread_called = true;
         self.bread_gfp_called = true;
         self.uptodate = true;
-        self.data_nonzero = true;
+        self.data_nonzero = nonzero;
         Ok(())
     }
 }
@@ -296,14 +291,26 @@ pub fn sb_bread_default<P: BlockDeviceProvider>(
     };
     let device_ref = entry.device_ref();
     let devt = entry.devt();
-    let block_size = entry.sector_size() as usize;
-    if block_size != BUFFER_HEAD_SECTOR_SIZE {
+    let sector_size = entry.sector_size() as usize;
+    if sector_size != BUFFER_HEAD_SECTOR_SIZE {
         return Err(BlockIoError::InvalidBlockSize);
     }
 
-    let mut bh = BufferHead::new(device_ref, devt, sector, BioSubmitPath::DefaultBlockDevice);
+    let mut bh = BufferHead::new(
+        device_ref,
+        devt,
+        sector,
+        BUFFER_HEAD_SECTOR_SIZE,
+        BioSubmitPath::DefaultBlockDevice,
+    );
     bh.setup().map_err(|_| BlockIoError::DeviceNotReady)?;
-    let len = submit_bio_wait_default(registry, provider, &mut bh.bio, sector, &mut bh.data)?;
+    let len = submit_bio_wait_default(
+        registry,
+        provider,
+        &mut bh.bio,
+        sector,
+        &mut bh.data[..BUFFER_HEAD_SECTOR_SIZE],
+    )?;
     bh.mark_read_complete(len)?;
     Ok(bh)
 }
@@ -314,18 +321,45 @@ pub fn sb_bread_by_devt<P: BlockDeviceProvider>(
     devt: DevT,
     sector: u64,
 ) -> Result<BufferHead, BlockIoError> {
+    sb_bread_by_devt_block(registry, provider, devt, sector, BUFFER_HEAD_SECTOR_SIZE)
+}
+
+pub fn sb_bread_by_devt_block<P: BlockDeviceProvider>(
+    registry: &mut BlockDeviceRegistry,
+    provider: &mut P,
+    devt: DevT,
+    block: u64,
+    block_size: usize,
+) -> Result<BufferHead, BlockIoError> {
     let Some(entry) = registry.lookup(devt) else {
         return Err(BlockIoError::DeviceMissing);
     };
     let device_ref = entry.device_ref();
-    let block_size = entry.sector_size() as usize;
-    if block_size != BUFFER_HEAD_SECTOR_SIZE {
+    let sector_size = entry.sector_size() as usize;
+    if sector_size != BUFFER_HEAD_SECTOR_SIZE || !valid_block_size(block_size) {
         return Err(BlockIoError::InvalidBlockSize);
     }
+    let sectors_per_block = (block_size / BUFFER_HEAD_SECTOR_SIZE) as u64;
+    let Some(sector) = block.checked_mul(sectors_per_block) else {
+        return Err(BlockIoError::InvalidBlockSize);
+    };
 
-    let mut bh = BufferHead::new(device_ref, devt, sector, BioSubmitPath::MajorMinorLookup);
+    let mut bh = BufferHead::new(
+        device_ref,
+        devt,
+        sector,
+        block_size,
+        BioSubmitPath::MajorMinorLookup,
+    );
     bh.setup().map_err(|_| BlockIoError::DeviceNotReady)?;
-    let len = submit_bio_wait_by_devt(registry, provider, &mut bh.bio, devt, sector, &mut bh.data)?;
+    let len = submit_bio_wait_by_devt(
+        registry,
+        provider,
+        &mut bh.bio,
+        devt,
+        sector,
+        &mut bh.data[..block_size],
+    )?;
     bh.mark_read_complete(len)?;
     Ok(bh)
 }
@@ -346,6 +380,12 @@ fn submit_bio_wait_default<P: BlockDeviceProvider>(
     let len = registry.read_default(provider, sector, buffer)?;
     bio.mark_submitted();
     Ok(len)
+}
+
+const fn valid_block_size(block_size: usize) -> bool {
+    block_size != 0
+        && block_size <= BUFFER_HEAD_MAX_SIZE
+        && block_size % BUFFER_HEAD_SECTOR_SIZE == 0
 }
 
 fn submit_bio_wait_by_devt<P: BlockDeviceProvider>(

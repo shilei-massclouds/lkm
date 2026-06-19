@@ -87,6 +87,7 @@ include "virtio_ring.spec";
 include "block_device.spec";
 include "bio.spec";
 include "virtio_blk.spec";
+include "ext2.spec";
 include "hwrng.spec";
 include "virtio_rng.spec";
 include "vfs.spec";

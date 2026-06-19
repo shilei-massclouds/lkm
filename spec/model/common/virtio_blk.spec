@@ -8,9 +8,9 @@
  * virtio_blk_outhdr + data buffer + status byte descriptor chain, notifies the
  * queue, consumes the device used-buffer completion, registers a BlockDevice so
  * the disk is discoverable by major/minor or default lookup, and serves a
- * minimal block-level read through that registered BlockDevice. The default
- * test disk may be formatted as ext2 so the read buffer has deterministic
- * nonzero bytes, but this spec does not introduce an ext2/filesystem object.
+ * minimal block-level read through that registered BlockDevice. The early
+ * startup superblock probe may observe deterministic ext2 magic, but ordinary
+ * block reads are not required to return nonzero data.
  * Full blk-mq tag sets, request_queue, bio/page cache, partition scan,
  * flush/discard/write-zeroes, multi-queue and reset/remove remain deferred.
  * checkpoint/KUnit handlers are read-only observers and must not drive blk,
@@ -203,8 +203,6 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_irq_callback_invoked(self);
                     virtio_blk_complete_gets_used_buffer(self, VirtQueue);
                     virtio_blk_complete_status_ok(self);
-                    virtio_blk_complete_data_nonzero(self);
-                    virtio_blk_complete_ext2_magic_observed(self);
                     virtio_blk_completion_count_incremented(self);
                     virtio_blk_read_request_done(self);
                 }
@@ -247,7 +245,6 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_serves_block_read(self, BlockDevice);
                     virtio_blk_read_request_done(self);
                     virtio_blk_complete_status_ok(self);
-                    virtio_blk_complete_data_nonzero(self);
                     virtio_blk_block_read_copies_to_caller(self, BlockDevice);
                 }
             }

@@ -19,7 +19,7 @@ const VIRTIO_BLK_SECTOR_SIZE: usize = 512;
 const VIRTIO_BLK_EXT2_SUPERBLOCK_SECTOR: u64 = 2;
 const EXT2_SUPER_MAGIC_OFFSET_IN_SECTOR: usize = 56;
 const EXT2_SUPER_MAGIC: u16 = 0xef53;
-const VIRTIO_BLK_READ_BUFFER_SIZE: usize = VIRTIO_BLK_SECTOR_SIZE;
+const VIRTIO_BLK_READ_BUFFER_SIZE: usize = VIRTIO_BLK_SECTOR_SIZE * 2;
 const VIRTIO_BLK_READ_WAIT_SPINS: usize = 1_000_000;
 
 #[repr(C)]
@@ -523,7 +523,11 @@ impl VirtioBlkDevice {
         self.complete_status_ok = true;
         self.complete_data_nonzero = read_request_data_nonzero();
         self.complete_ext2_magic_observed = read_request_ext2_magic_observed();
-        if !self.complete_data_nonzero || !self.complete_ext2_magic_observed {
+        let required_superblock_probe =
+            self.pending_sector == VIRTIO_BLK_EXT2_SUPERBLOCK_SECTOR && self.request_count == 1;
+        if required_superblock_probe
+            && (!self.complete_data_nonzero || !self.complete_ext2_magic_observed)
+        {
             return Err(VirtioBlkError::DataMismatch);
         }
         self.pending_token = None;
@@ -819,9 +823,6 @@ fn read_live_block(
         return Err(BlockDeviceError::EmptyRead);
     }
     let nonzero = buffer[..len].iter().any(|byte| *byte != 0);
-    if !nonzero {
-        return Err(BlockDeviceError::EmptyRead);
-    }
 
     let runtime = live_runtime_mut().ok_or(BlockDeviceError::ProviderUnavailable)?;
     let device = runtime

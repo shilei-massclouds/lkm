@@ -232,7 +232,7 @@ impl BlockDevice {
         self.read_submitted = true;
         self.read_completion_observed = true;
         self.read_copies_to_caller = true;
-        self.read_returns_nonzero = nonzero;
+        self.read_returns_nonzero = self.read_returns_nonzero || nonzero;
     }
 }
 
@@ -628,9 +628,6 @@ impl BlockDeviceRegistry {
             return Err(BlockDeviceError::EmptyRead);
         }
         let nonzero = buffer[..len].iter().any(|byte| *byte != 0);
-        if !nonzero {
-            return Err(BlockDeviceError::EmptyRead);
-        }
         if let Some(entry) = self.devices.get_mut(device_ref.index()) {
             entry.record_read(sector, len);
         }
@@ -638,7 +635,7 @@ impl BlockDeviceRegistry {
         self.last_read_len = len;
         self.read_completion_observed = true;
         self.read_copies_to_caller = true;
-        self.read_returns_nonzero = true;
+        self.read_returns_nonzero = self.read_returns_nonzero || nonzero;
         Ok(len)
     }
 }

@@ -129,6 +129,9 @@ predicate arceos_ex_must_completion_smoke_cover_setup_complete_and_token_flow() 
 predicate arceos_ex_must_block_io_model_bio_buffer_head_before_ext2() -> bool;
 predicate arceos_ex_must_block_io_registry_read_remain_lower_level_adapter() -> bool;
 predicate arceos_ex_must_block_io_smoke_use_sb_bread_path() -> bool;
+predicate arceos_ex_must_ext2_first_slice_read_only_and_buffer_head_based() -> bool;
+predicate arceos_ex_must_ext2_smoke_use_fixed_disk_file() -> bool;
+predicate arceos_ex_must_ext2_defer_vfs_page_cache_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
 predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
@@ -1280,6 +1283,35 @@ type ArceosExBlockIoCodingMust {
          * block I/O adapter by directly calling registry read APIs.
          */
         arceos_ex_must_block_io_smoke_use_sb_bread_path();
+
+        /*
+         * Read-only ext2 first slice:
+         *
+         * The next filesystem step must model and implement the Linux
+         * ext2_fill_super()/ext2_iget()/ext2_find_entry()/direct-block read
+         * shape over BufferHead. It must remain read-only and must not bypass
+         * the Bio/BufferHead layer by calling VirtioBlkDevice private reads.
+         */
+        arceos_ex_must_ext2_first_slice_read_only_and_buffer_head_based();
+
+        /*
+         * Stable smoke target:
+         *
+         * make disk should place a deterministic small regular file in the
+         * ext2 image when FS_TYPE=ext2, and the first ext2 smoke should mount
+         * the default block device read-only, lookup that root-directory
+         * filename, and read its content through direct blocks.
+         */
+        arceos_ex_must_ext2_smoke_use_fixed_disk_file();
+
+        /*
+         * Deferred ext2 scope:
+         *
+         * VFS mount integration, page cache/folios, indirect blocks, symlinks,
+         * permissions, xattrs, quotas, allocation, writes and remount/error
+         * recovery remain explicit deferred scope in this slice.
+         */
+        arceos_ex_must_ext2_defer_vfs_page_cache_and_writes();
     }
 }
 

@@ -16,6 +16,7 @@ use crate::{
 };
 
 const SCOPE: &[Checkpoint] = &[Checkpoint::VirtioBlkReady, Checkpoint::VirtioBlkReadReady];
+const VIRTIO_BLK_FIRST_READ_MAX_USED_LEN: u32 = 1025;
 pub const KUNIT_CASE_COUNT: usize = 2;
 
 pub const HANDLER: Handler = Handler {
@@ -297,7 +298,7 @@ fn blk_read_facts_valid(ctx: &Context) -> bool {
         && device.irq_count() == 1
         && device.completion_count() == 1
         && device.last_status() == 0
-        && device.last_used_len() <= 513
+        && device.last_used_len() <= VIRTIO_BLK_FIRST_READ_MAX_USED_LEN
         && device.last_sector() == 2
         && device.queue().out_descriptor_added()
         && device.queue().in_descriptor_added()

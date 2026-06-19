@@ -47,6 +47,7 @@ predicate buffer_head_sb_bread_called<T>(bh: T) -> bool;
 predicate buffer_head_bread_gfp_called<T>(bh: T) -> bool;
 predicate buffer_head_uses_submit_bio_wait<T, B>(bh: T, bio: B) -> bool;
 predicate buffer_head_uptodate<T>(bh: T) -> bool;
+predicate buffer_head_data_ready<T>(bh: T) -> bool;
 predicate buffer_head_data_nonzero<T>(bh: T) -> bool;
 predicate buffer_head_ext2_superblock_sector_read<T>(bh: T) -> bool;
 
@@ -180,8 +181,7 @@ object BufferHead: ResourceObject {
                     buffer_head_bread_gfp_called(self);
                     buffer_head_uses_submit_bio_wait(self, Bio);
                     buffer_head_uptodate(self);
-                    buffer_head_data_nonzero(self);
-                    buffer_head_ext2_superblock_sector_read(self);
+                    buffer_head_data_ready(self);
                 }
             }
 
@@ -200,8 +200,7 @@ object BufferHead: ResourceObject {
                     buffer_head_bread_gfp_called(self);
                     buffer_head_uses_submit_bio_wait(self, Bio);
                     buffer_head_uptodate(self);
-                    buffer_head_data_nonzero(self);
-                    buffer_head_ext2_superblock_sector_read(self);
+                    buffer_head_data_ready(self);
                 }
             }
         }

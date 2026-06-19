@@ -495,6 +495,18 @@ Linux-like `Bio`、最小同步 `submit_bio_wait()` / `blk_mq_submit_bio()` 壳�
 提交/完成、数据非零和 ext2 magic 事实；smoke 可以继续检查底层 registry read 事实，但不得绕过 bio/buffer_head
 直接调用 registry read API。
 
+read-only ext2 首轮必须继续走 `BufferHead`。实现边界对应 Linux 6.12.37 `ext2_fill_super()` /
+`ext2_iget()` / `ext2_find_entry()` / direct-block read：读取 superblock、校验 magic/block size、读取 group
+descriptor、读取 `EXT2_ROOT_INO`，遍历 root directory 中的 dirent，lookup 一个固定小文件，再按 inode direct
+block 把文件内容拷贝给调用者。`make disk` 在 `FS_TYPE=ext2` 时应写入该固定小文件，保证 smoke 读取内容稳定。
+对象生命周期只划分到 `Ext2Type` 和 `Ext2Mount`：前者对应 Linux `file_system_type` / mount callback descriptor，
+后者对应一次成功 `ext2_fill_super()` 后得到的 mounted instance。superblock 字段、group descriptor、inode
+record、dirent 和 file-read result 首轮只是 `Ext2Mount` 下的结构化记录/事实，不独立建生命周期；后续若实现 inode cache、
+refcount、evict 或 VFS mount integration，再讨论是否把 inode 等提升为对象。
+本轮不把 ext2 接入 VFS/rootfs mount，不实现 page cache/folio、间接块、symlink、权限、xattr、quota、block
+allocation、写路径、remount 或错误恢复；这些必须保持 deferred。ext2 smoke 可以显式 mount 默认块设备的只读
+`Ext2Mount` 对象并读固定文件，但不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。
+
 `devfs` 的首轮实现属于 `InitcallPhase` 收敛边界：它必须在 `VfsCore` 初始 rootfs mount 已存在、`HwRngCore`
 和 `BlockDeviceRegistry` 已 Ready、且 virtio-rng/virtio-blk live driver 已完成注册之后挂载 `/dev`，再创建
 当前 hwrng 和默认 block device 对应的设备节点。smoke 验证只能观察 `/dev` 节点、hwrng current 绑定和 block

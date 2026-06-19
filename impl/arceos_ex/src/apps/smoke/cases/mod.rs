@@ -9,6 +9,7 @@ pub mod current_runqueue_ref;
 pub mod delay_loop;
 pub mod devfs;
 pub mod device_tree;
+pub mod ext2;
 pub mod fdt;
 pub mod finalize;
 pub mod global_alloc;

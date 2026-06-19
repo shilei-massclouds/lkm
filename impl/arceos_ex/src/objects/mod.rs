@@ -24,6 +24,7 @@ pub mod earlycon;
 pub mod event_stream;
 pub mod exception_stream;
 pub mod exception_table;
+pub mod ext2;
 pub mod fdt;
 pub mod fdt_facts;
 pub mod fdt_parser;
