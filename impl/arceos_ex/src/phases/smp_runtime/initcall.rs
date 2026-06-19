@@ -71,6 +71,11 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
     )?;
+    ctx.devfs.setup(
+        &mut ctx.vfs_core,
+        &ctx.hwrng_core,
+        &ctx.block_device_registry,
+    )?;
     ctx.uart_external_irq_enable.setup(
         &ctx.plic,
         &mut ctx.plic_irq_domain,
@@ -111,6 +116,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.platform_bus_root_device,
         &ctx.platform_bus,
         &ctx.virtio_bus,
+        &ctx.devfs,
         &ctx.driver_core_deferred,
         &ctx.irq_proc_view_deferred,
         &ctx.ctor_table,
@@ -230,6 +236,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.platform_bus_root_device,
         &ctx.platform_bus,
         &ctx.virtio_bus,
+        &ctx.devfs,
         &ctx.driver_core_deferred,
         &ctx.irq_proc_view_deferred,
         &ctx.ctor_table,

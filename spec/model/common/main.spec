@@ -89,6 +89,7 @@ include "virtio_blk.spec";
 include "hwrng.spec";
 include "virtio_rng.spec";
 include "vfs.spec";
+include "devfs.spec";
 include "allocator.spec";
 
 function addr_of<T>(value: T) -> AddrIdentity<T>;

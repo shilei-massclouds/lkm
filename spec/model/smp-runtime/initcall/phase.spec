@@ -642,6 +642,7 @@ object InitcallBoundary: KernelObject {
                     DriverCoreBase.state == State::Ready;
                     PlatformBusRootDevice.state == State::Ready;
                     PlatformBus.state == State::Ready;
+                    DevFs.state == State::Ready;
                     DriverCoreDeferred.state == State::Ready;
                     IrqProcViewDeferred.state == State::Ready;
                     CtorTable.state == State::Ready;
@@ -694,6 +695,7 @@ object InitcallPhase: PhaseObject {
                     PlatformBus.Event::Setup;
                     VirtioBus.Event::Setup;
                     HwRngCore.Event::Setup;
+                    BlockDeviceRegistry.Event::Setup;
                     DriverCoreDeferred.Event::Setup;
                     IrqProcViewDeferred.Event::Setup;
                     Ns16550aPlatformDriverStorage.Event::Setup;
@@ -705,6 +707,7 @@ object InitcallPhase: PhaseObject {
                     InitcallTable.Event::Setup;
                     Ns16550aPlatformDriver.Event::Setup;
                     VirtioMmioPlatformDriver.Event::Setup;
+                    DevFs.Event::Setup;
                     UartExternalIrqEnable.Event::Setup;
                     UartInterruptChainProbe.Event::Setup;
                     Serial8250Console.Event::Enable;
@@ -730,6 +733,17 @@ object InitcallPhase: PhaseObject {
                     hwrng_core_initialized(HwRngCore);
                     hwrng_core_registry_ready(HwRngCore);
                     hwrng_core_current_slot_ready(HwRngCore);
+                    block_core_initialized(BlockDeviceRegistry);
+                    block_core_registry_ready(BlockDeviceRegistry);
+                    block_core_major_allocator_ready(BlockDeviceRegistry);
+                    block_core_default_device_slot_ready(BlockDeviceRegistry);
+                    devfs_initialized(DevFs);
+                    devfs_mount_created(VfsCore);
+                    devfs_hwrng_node_bound(DevFs, HwRngCore);
+                    devfs_block_node_bound(DevFs, BlockDeviceRegistry);
+                    devfs_hwrng_node_listed(DevFs);
+                    devfs_block_node_listed(DevFs);
+                    devfs_device_file_ops_deferred(DevFs);
                     driver_core_post_platform_deferred();
                     irq_proc_view_setup_deferred();
                     constructors_trimmed_or_empty(CtorTable);
@@ -841,6 +855,9 @@ object InitcallPhase: PhaseObject {
             PlatformBusRootDevice.state == State::Ready;
             PlatformBus.state == State::Ready;
             VirtioBus.state == State::Ready;
+            HwRngCore.state == State::Ready;
+            BlockDeviceRegistry.state == State::Ready;
+            DevFs.state == State::Ready;
             Ns16550aPlatformDriver.state == State::Ready;
             VirtioMmioPlatformDriver.state == State::Ready;
             VirtioMmioTransportDevice.state == State::Ready;

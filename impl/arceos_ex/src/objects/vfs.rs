@@ -6,12 +6,14 @@ pub const VFS_NAME_MAX: usize = 32;
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum FileSystemKind {
     RamFs,
+    DevFs,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VfsInodeKind {
     Directory,
     RegularFile,
+    DeviceNode,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -96,6 +98,7 @@ pub enum VfsError {
     FsTypeAlreadyRegistered,
     FsTypeMissing,
     MountMissing,
+    AlreadyMounted,
     InvalidRef,
     InvalidName,
     NameTooLong,
@@ -266,6 +269,7 @@ pub struct SuperBlock {
     root_inode_ref: Option<InodeRef>,
     root_dentry_ref: Option<DentryRef>,
     ramfs_private_bound: bool,
+    devfs_private_bound: bool,
 }
 
 impl SuperBlock {
@@ -276,6 +280,7 @@ impl SuperBlock {
             root_inode_ref: None,
             root_dentry_ref: None,
             ramfs_private_bound: matches!(fs_kind, FileSystemKind::RamFs),
+            devfs_private_bound: matches!(fs_kind, FileSystemKind::DevFs),
         }
     }
 
@@ -297,6 +302,10 @@ impl SuperBlock {
 
     pub const fn ramfs_private_bound(&self) -> bool {
         self.ramfs_private_bound
+    }
+
+    pub const fn devfs_private_bound(&self) -> bool {
+        self.devfs_private_bound
     }
 
     fn bind_root(&mut self, root_inode_ref: InodeRef, root_dentry_ref: DentryRef) {
@@ -763,15 +772,24 @@ impl VfsCore {
         fs_type: &RamFsType,
         mount_point_ref: DentryRef,
     ) -> Result<MountRef, VfsError> {
-        let mount_point = self.positive_dentry(mount_point_ref)?;
-        let mount_point_inode = self
-            .inode(mount_point.inode_ref())
-            .ok_or(VfsError::InvalidRef)?;
-        if !mount_point_inode.is_directory() {
-            return Err(VfsError::NotDirectory);
-        }
+        self.ensure_mount_point(mount_point_ref)?;
 
         let mount_ref = self.create_ramfs_mount(fs_type, Some(mount_point_ref))?;
+        let root_dentry_ref = self
+            .mount(mount_ref)
+            .ok_or(VfsError::InvalidRef)?
+            .root_dentry_ref();
+        let mount_point = self
+            .dentry_mut(mount_point_ref)
+            .ok_or(VfsError::InvalidRef)?;
+        mount_point.bind_mount_root(root_dentry_ref);
+        Ok(mount_ref)
+    }
+
+    pub fn mount_devfs_at(&mut self, mount_point_ref: DentryRef) -> Result<MountRef, VfsError> {
+        self.ensure_mount_point(mount_point_ref)?;
+
+        let mount_ref = self.create_mount(FileSystemKind::DevFs, Some(mount_point_ref))?;
         let root_dentry_ref = self
             .mount(mount_ref)
             .ok_or(VfsError::InvalidRef)?
@@ -798,9 +816,21 @@ impl VfsCore {
             return Err(VfsError::FsTypeNotReady);
         }
 
+        self.create_mount(FileSystemKind::RamFs, mount_point_ref)
+    }
+
+    fn create_mount(
+        &mut self,
+        fs_kind: FileSystemKind,
+        mount_point_ref: Option<DentryRef>,
+    ) -> Result<MountRef, VfsError> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(VfsError::CoreNotReady);
+        }
+
         let superblock_ref = SuperBlockRef::new(self.superblocks.len());
         self.superblocks
-            .push(SuperBlock::new(superblock_ref, FileSystemKind::RamFs));
+            .push(SuperBlock::new(superblock_ref, fs_kind));
 
         let root_inode_ref = InodeRef::new(self.inodes.len());
         self.inodes.push(Inode::new(
@@ -828,7 +858,7 @@ impl VfsCore {
         let mount_ref = MountRef::new(self.mounts.len());
         self.mounts.push(Mount::new(
             mount_ref,
-            FileSystemKind::RamFs,
+            fs_kind,
             superblock_ref,
             root_dentry_ref,
             mount_point_ref,
@@ -898,6 +928,14 @@ impl VfsCore {
         name: &[u8],
     ) -> Result<DentryRef, VfsError> {
         self.create_child(parent_ref, name, VfsInodeKind::RegularFile)
+    }
+
+    pub fn create_device_node(
+        &mut self,
+        parent_ref: DentryRef,
+        name: &[u8],
+    ) -> Result<DentryRef, VfsError> {
+        self.create_child(parent_ref, name, VfsInodeKind::DeviceNode)
     }
 
     pub fn open_file(&mut self, dentry_ref: DentryRef) -> Result<FileRef, VfsError> {
@@ -1083,6 +1121,20 @@ impl VfsCore {
         parent_inode.children.push(dentry_ref);
         self.insert_count = self.insert_count.saturating_add(1);
         Ok(dentry_ref)
+    }
+
+    fn ensure_mount_point(&self, mount_point_ref: DentryRef) -> Result<(), VfsError> {
+        let mount_point = self.positive_dentry(mount_point_ref)?;
+        if mount_point.mounted_root().is_some() {
+            return Err(VfsError::AlreadyMounted);
+        }
+        let mount_point_inode = self
+            .inode(mount_point.inode_ref())
+            .ok_or(VfsError::InvalidRef)?;
+        if !mount_point_inode.is_directory() {
+            return Err(VfsError::NotDirectory);
+        }
+        Ok(())
     }
 
     fn find_child(&self, parent_ref: DentryRef, name: &[u8]) -> Result<DentryRef, VfsError> {

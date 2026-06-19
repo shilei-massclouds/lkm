@@ -123,6 +123,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::ramfs::run,
     },
     SmokeCase {
+        name: "devfs",
+        run: cases::devfs::run,
+    },
+    SmokeCase {
         name: "task_creation_core",
         run: cases::task_creation_core::run,
     },

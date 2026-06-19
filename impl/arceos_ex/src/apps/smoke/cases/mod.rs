@@ -7,6 +7,7 @@ pub mod cpu_capabilities;
 pub mod cpu_id_map;
 pub mod current_runqueue_ref;
 pub mod delay_loop;
+pub mod devfs;
 pub mod device_tree;
 pub mod fdt;
 pub mod finalize;

@@ -1,4 +1,5 @@
 use super::{
+    devfs::DevFs,
     device::{DeviceRef, PlatformDevice, PlatformDeviceStorage},
     device_tree::{DeviceNodeRef, DeviceTree},
     driver::{DeviceDriverRef, PlatformProbeContext, ProbeResult},
@@ -1857,6 +1858,7 @@ impl InitcallBoundary {
         platform_bus_root_device: &PlatformBusRootDevice,
         platform_bus: &PlatformBus,
         virtio_bus: &VirtioBus,
+        devfs: &DevFs,
         driver_core: &DriverCoreDeferred,
         irq_proc_view: &IrqProcViewDeferred,
         ctor_table: &CtorTable,
@@ -1879,6 +1881,14 @@ impl InitcallBoundary {
             || !platform_bus.ns16550a_probe_ioremaps_uart8250_port()
             || virtio_bus.state() != State::Ready
             || !virtio_bus.registered()
+            || devfs.state() != State::Ready
+            || !devfs.initialized()
+            || !devfs.mounted()
+            || !devfs.hwrng_node_listed()
+            || !devfs.block_node_listed()
+            || !devfs.device_file_ops_deferred()
+            || !devfs.uevent_deferred()
+            || !devfs.sysfs_deferred()
             || driver_core.state() != State::Ready
             || !driver_core.post_platform_deferred()
             || irq_proc_view.state() != State::Ready
@@ -1958,6 +1968,7 @@ pub fn initcall_phase_ready(
     platform_bus_root_device: &PlatformBusRootDevice,
     platform_bus: &PlatformBus,
     virtio_bus: &VirtioBus,
+    devfs: &DevFs,
     driver_core: &DriverCoreDeferred,
     irq_proc_view: &IrqProcViewDeferred,
     ctor_table: &CtorTable,
@@ -1990,6 +2001,14 @@ pub fn initcall_phase_ready(
         && platform_bus.register_return_zero()
         && virtio_bus.state() == State::Ready
         && virtio_bus.registered()
+        && devfs.state() == State::Ready
+        && devfs.initialized()
+        && devfs.mounted()
+        && devfs.hwrng_node_listed()
+        && devfs.block_node_listed()
+        && devfs.device_file_ops_deferred()
+        && devfs.uevent_deferred()
+        && devfs.sysfs_deferred()
         && platform_bus.of_platform_source_tree_ready()
         && platform_bus.of_platform_root_children_scanned()
         && platform_bus.of_platform_strict_compatible_required()

@@ -2149,6 +2149,19 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_ns16550a_probe_parse_resources_from_platform_device_node();
         arceos_ex_must_ns16550a_probe_create_uart8250_port_object();
         arceos_ex_must_ns16550a_probe_register_serial8250_console_only_for_stdout_path();
+        /*
+         * devfs first slice:
+         *
+         * DevFs must be an InitcallPhase object, not part of the initial
+         * ProcessPreparePhase rootfs mount. It must mount /dev only after the
+         * initial VFS rootfs exists and the hwrng/block registries plus their
+         * live virtio drivers have published current/default device surfaces.
+         * The first smoke validation must observe hwrng and block device nodes
+         * and registry bindings only; it must not add test-only production APIs
+         * and must not require reads through a VFS file path.
+         */
+        arceos_ex_must_devfs_mount_after_hwrng_and_block_registration();
+        arceos_ex_must_devfs_smoke_observe_nodes_without_file_path_read();
         arceos_ex_must_earlycon_bootconsole_serialconsole_registry_stay_distinct();
         arceos_ex_must_boot_console_wrap_earlycon_as_con_boot_registry_entry();
         arceos_ex_must_console_registry_model_register_console_handoff_policy();

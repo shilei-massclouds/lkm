@@ -1,19 +1,22 @@
 /*
- * Minimal VFS and ramfs model.
+ * Minimal VFS, ramfs and devfs mount substrate model.
  *
  * This first slice follows the Linux VFS shape only far enough to mount an
  * in-memory ramfs instance and exercise pathname operations through VFS
  * objects. FileSystemType is the type/driver descriptor; Mount and SuperBlock
  * are per-mount instance state; SuperBlock owns the root dentry/root inode
  * anchors used as the traversal start. Directory entries are represented by
- * Dentry objects bound to Inode objects. Block-backed filesystems, page cache,
- * mount namespace, permissions, credentials, path walk corner cases, rename,
- * symlink, hardlink, open flags and file descriptor tables stay deferred.
+ * Dentry objects bound to Inode objects. Device nodes are only named VFS
+ * entries in this slice; device file operations stay with the owning device
+ * subsystems. Block-backed filesystems, page cache, mount namespace,
+ * permissions, credentials, path walk corner cases, rename, symlink, hardlink,
+ * open flags and file descriptor tables stay deferred.
  */
 
 enum VfsInodeKind {
     Directory,
     RegularFile,
+    DeviceNode,
 }
 
 predicate vfs_core_initialized<T>(core: T) -> bool;
@@ -33,9 +36,11 @@ predicate ramfs_type_is_memory_backed<T>(fs_type: T) -> bool;
 predicate ramfs_type_registered<T, F>(core: T, fs_type: F) -> bool;
 predicate rootfs_fs_type_uses_ramfs<T>(fs_type: T) -> bool;
 predicate rootfs_mount_created<T>(core: T) -> bool;
+predicate devfs_mount_created<T>(core: T) -> bool;
 
 predicate mount_allocated<T>(mount: T) -> bool;
 predicate mount_fs_type_bound<T, F>(mount: T, fs_type: F) -> bool;
+predicate mount_devfs_type_bound<T>(mount: T) -> bool;
 predicate mount_superblock_bound<T, S>(mount: T, superblock: S) -> bool;
 predicate mount_root_dentry_bound<T, D>(mount: T, dentry: D) -> bool;
 predicate mount_point_bound<T, D>(mount: T, mount_point: D) -> bool;
@@ -48,6 +53,7 @@ predicate superblock_root_dentry_bound<T, D>(superblock: T, dentry: D) -> bool;
 predicate superblock_root_inode_bound<T, I>(superblock: T, inode: I) -> bool;
 predicate superblock_root_dentry_inode_matches<T, D, I>(superblock: T, dentry: D, inode: I) -> bool;
 predicate superblock_ramfs_private_bound<T>(superblock: T) -> bool;
+predicate superblock_devfs_private_bound<T>(superblock: T) -> bool;
 
 predicate inode_allocated<T>(inode: T) -> bool;
 predicate inode_superblock_bound<T, S>(inode: T, superblock: S) -> bool;
@@ -64,6 +70,7 @@ predicate dentry_positive<T>(dentry: T) -> bool;
 predicate dentry_child_inserted<T, P>(dentry: T, parent: P) -> bool;
 predicate dentry_child_removed<T, P>(dentry: T, parent: P) -> bool;
 predicate dentry_mount_root_redirects<T, D>(mount_point: T, root: D) -> bool;
+predicate dentry_device_node_bound<T>(dentry: T) -> bool;
 predicate dentry_lookup_returns<T, D>(core: T, dentry: D) -> bool;
 predicate dentry_readdir_lists<T, D>(core: T, dentry: D) -> bool;
 
@@ -236,6 +243,39 @@ object VfsCore: ResourceObject {
                 }
             }
 
+            Action::MountDevFsAt(mount_point: Dentry) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    dentry_positive(mount_point);
+                    inode_kind_is(Inode, VfsInodeKind::Directory);
+                }
+                drives {
+                    SuperBlock.Event::Setup;
+                    Inode.Event::Setup;
+                    Inode.Action::CreateRootDirectory;
+                    Dentry.Event::Setup;
+                    Dentry.Action::CreateRoot;
+                    Mount.Event::Setup;
+                }
+                ensures {
+                    mount_allocated(Mount);
+                    mount_devfs_type_bound(Mount);
+                    mount_superblock_bound(Mount, SuperBlock);
+                    mount_root_dentry_bound(Mount, Dentry);
+                    mount_point_bound(Mount, mount_point);
+                    dentry_mount_root_redirects(mount_point, Dentry);
+                    superblock_allocated(SuperBlock);
+                    superblock_devfs_private_bound(SuperBlock);
+                    superblock_root_dentry_bound(SuperBlock, Dentry);
+                    superblock_root_inode_bound(SuperBlock, Inode);
+                    superblock_root_dentry_inode_matches(SuperBlock, Dentry, Inode);
+                    inode_kind_is(Inode, VfsInodeKind::Directory);
+                    inode_directory_children_ready(Inode);
+                    devfs_mount_created(VfsCore);
+                }
+            }
+
             Action::SetRoot {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -293,6 +333,25 @@ object VfsCore: ResourceObject {
                 ensures {
                     inode_kind_is(Inode, VfsInodeKind::RegularFile);
                     inode_file_data_ready(Inode);
+                    dentry_child_inserted(Dentry, Dentry);
+                }
+            }
+
+            Action::CreateDeviceNode {
+                state_effect: StateEffect::None;
+                depends_on {
+                    vfs_current_root_dentry_set(VfsCore, Dentry);
+                    inode_kind_is(Inode, VfsInodeKind::Directory);
+                }
+                drives {
+                    Inode.Event::Setup;
+                    Inode.Action::CreateDeviceNode;
+                    Dentry.Event::Setup;
+                    Dentry.Action::InsertChild;
+                }
+                ensures {
+                    inode_kind_is(Inode, VfsInodeKind::DeviceNode);
+                    dentry_device_node_bound(Dentry);
                     dentry_child_inserted(Dentry, Dentry);
                 }
             }
@@ -374,7 +433,6 @@ object Mount: ResourceObject {
                 }
                 ensures {
                     mount_allocated(Mount);
-                    mount_fs_type_bound(Mount, RamFsType);
                     mount_superblock_bound(Mount, SuperBlock);
                     mount_root_dentry_bound(Mount, Dentry);
                 }
@@ -385,7 +443,6 @@ object Mount: ResourceObject {
     state State::Ready {
         invariant {
             mount_allocated(Mount);
-            mount_fs_type_bound(Mount, RamFsType);
             mount_superblock_bound(Mount, SuperBlock);
             mount_root_dentry_bound(Mount, Dentry);
         }
@@ -398,13 +455,8 @@ object SuperBlock: ResourceObject {
     state State::Base {
         events {
             on Event::Setup -> State::Ready {
-                depends_on {
-                    ramfs_type_registered(VfsCore, RamFsType);
-                }
                 ensures {
                     superblock_allocated(SuperBlock);
-                    superblock_fs_type_bound(SuperBlock, RamFsType);
-                    superblock_ramfs_private_bound(SuperBlock);
                 }
             }
         }
@@ -413,8 +465,6 @@ object SuperBlock: ResourceObject {
     state State::Ready {
         invariant {
             superblock_allocated(SuperBlock);
-            superblock_fs_type_bound(SuperBlock, RamFsType);
-            superblock_ramfs_private_bound(SuperBlock);
         }
     }
 }
@@ -466,6 +516,16 @@ object Inode: ResourceObject {
                 ensures {
                     inode_kind_is(Inode, VfsInodeKind::RegularFile);
                     inode_file_data_ready(Inode);
+                }
+            }
+
+            Action::CreateDeviceNode {
+                state_effect: StateEffect::None;
+                depends_on {
+                    Inode.state == State::Ready;
+                }
+                ensures {
+                    inode_kind_is(Inode, VfsInodeKind::DeviceNode);
                 }
             }
         }

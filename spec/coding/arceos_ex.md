@@ -130,6 +130,9 @@ keyring 和 security 对象按 formal trace 后续推进。`VfsCore.Setup` 只�
 page-cache、net namespace、`signals_init()`、真实 mount namespace 切换以及实际任务创建仍保持 deferred 或
 trimmed checkpoint，不应伪装成完整运行期服务。
 
+`devfs` 不属于 `ProcessPreparePhase` 的初始 rootfs mount 行为。它必须在后续已有设备 registry 可用之后挂载到
+初始 rootfs 的 `/dev` 位置；`ProcessPreparePhase` 只提供可被后续挂载消费的 VFS/root dentry/superblock 基础。
+
 `TaskCreationCore` 还必须提供 `copy_process()`/`kernel_clone()` 的通用创建契约。后续 `rest_init()` 创建
 `KernelInitTask` 或 `KthreaddTask` 时传入的 `TaskEntry` 要绑定到新任务的启动 context，并决定该任务第一次被调度后的执行入口；它不是创建完成后补写的描述性字段。当前正式规格要求 `KernelInitTask` 绑定 `TaskEntry::KernelInit`，`KthreaddTask` 绑定 `TaskEntry::Kthreadd`。
 
@@ -479,6 +482,15 @@ pending entropy request；随后 `scan` callback 才调用 `HwRngCore::register(
 不建立新的顶层 `Completion` 对象；首轮 read 只覆盖已完成数据的 nonblocking 消费和耗尽后自动重新提交
 entropy request，blocking wait、random pool fill thread、misc `/dev/hwrng`、sysfs `rng_current`/quality、
 freeze/restore 和完整 reset/remove 资源回收必须显式 deferred。
+
+`/dev/hwrng` 的完整 miscdevice/file operation 仍保持 deferred；但 devfs 可以在 hwrng core 已有 current rng
+之后创建只用于命名空间可发现性的 `hwrng` 设备节点。该节点不得绕过 `HwRngCore::read_current()` 引入新的读取后门。
+
+`devfs` 的首轮实现属于 `InitcallPhase` 收敛边界：它必须在 `VfsCore` 初始 rootfs mount 已存在、`HwRngCore`
+和 `BlockDeviceRegistry` 已 Ready、且 virtio-rng/virtio-blk live driver 已完成注册之后挂载 `/dev`，再创建
+当前 hwrng 和默认 block device 对应的设备节点。smoke 验证只能观察 `/dev` 节点、hwrng current 绑定和 block
+default/devt 绑定；本步不得为了测试新增对象 API，也不要求通过 VFS file path 读写设备。device file ops、uevent、
+sysfs、权限模型、devtmpfs kernel thread 和用户态设备管理仍保持 deferred。
 
 console/earlycon handoff 的实现必须保持 Linux-like `register_console()` 边界，但第一轮仍只要求对象级可观测事实。
 正式 `DeviceTree` 应解析 `/chosen/stdout-path`，缺失时兼容 `linux,stdout-path`；属性值中冒号前是节点路径，
