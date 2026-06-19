@@ -2,6 +2,7 @@ use super::{
     bio::{self, BufferHead, BUFFER_HEAD_MAX_SIZE},
     block_device::{BlockDeviceProvider, BlockDeviceRegistry, DevT},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    vfs::VfsCore,
 };
 use core::cmp::min;
 
@@ -23,8 +24,9 @@ const EXT2_S_IFREG: u16 = 0x8000;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Ext2Error {
-    TypeNotReady,
-    MountNotReady,
+    DriverNotReady,
+    VolumeNotReady,
+    FileSystemNotReady,
     InvalidState,
     DeviceMissing,
     Io,
@@ -49,21 +51,27 @@ impl From<bio::BlockIoError> for Ext2Error {
     }
 }
 
-pub struct Ext2Type {
+pub struct Ext2Driver {
     lifecycle: Lifecycle,
-    declared: bool,
+    registered: bool,
     read_only: bool,
     mount_callback_bound: bool,
+    super_operations_bound: bool,
+    inode_operations_bound: bool,
+    file_operations_bound: bool,
 }
 
 #[allow(dead_code)]
-impl Ext2Type {
+impl Ext2Driver {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            declared: false,
+            registered: false,
             read_only: false,
             mount_callback_bound: false,
+            super_operations_bound: false,
+            inode_operations_bound: false,
+            file_operations_bound: false,
         }
     }
 
@@ -71,8 +79,8 @@ impl Ext2Type {
         self.lifecycle.state()
     }
 
-    pub const fn declared(&self) -> bool {
-        self.declared
+    pub const fn registered(&self) -> bool {
+        self.registered
     }
 
     pub const fn read_only(&self) -> bool {
@@ -81,6 +89,18 @@ impl Ext2Type {
 
     pub const fn mount_callback_bound(&self) -> bool {
         self.mount_callback_bound
+    }
+
+    pub const fn super_operations_bound(&self) -> bool {
+        self.super_operations_bound
+    }
+
+    pub const fn inode_operations_bound(&self) -> bool {
+        self.inode_operations_bound
+    }
+
+    pub const fn file_operations_bound(&self) -> bool {
+        self.file_operations_bound
     }
 
     pub fn setup(&mut self, registry: &BlockDeviceRegistry) -> EventResult {
@@ -93,11 +113,143 @@ impl Ext2Type {
             );
         }
 
-        self.declared = true;
+        self.registered = true;
         self.read_only = true;
         self.mount_callback_bound = true;
+        self.super_operations_bound = true;
+        self.inode_operations_bound = true;
+        self.file_operations_bound = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
+pub struct Ext2Volume {
+    lifecycle: Lifecycle,
+    devt: Option<DevT>,
+    block_size: usize,
+    inodes_count: u32,
+    blocks_count: u32,
+    blocks_per_group: u32,
+    inodes_per_group: u32,
+    inode_size: u16,
+    first_inode: u32,
+    superblock_read: bool,
+    magic_valid: bool,
+    layout_valid: bool,
+    block_size_supported: bool,
+    not_found_nonfatal: bool,
+}
+
+#[allow(dead_code)]
+impl Ext2Volume {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            devt: None,
+            block_size: 0,
+            inodes_count: 0,
+            blocks_count: 0,
+            blocks_per_group: 0,
+            inodes_per_group: 0,
+            inode_size: 0,
+            first_inode: 0,
+            superblock_read: false,
+            magic_valid: false,
+            layout_valid: false,
+            block_size_supported: false,
+            not_found_nonfatal: true,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn devt(&self) -> Option<DevT> {
+        self.devt
+    }
+
+    pub const fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    pub const fn inodes_count(&self) -> u32 {
+        self.inodes_count
+    }
+
+    pub const fn blocks_count(&self) -> u32 {
+        self.blocks_count
+    }
+
+    pub const fn blocks_per_group(&self) -> u32 {
+        self.blocks_per_group
+    }
+
+    pub const fn inodes_per_group(&self) -> u32 {
+        self.inodes_per_group
+    }
+
+    pub const fn inode_size(&self) -> u16 {
+        self.inode_size
+    }
+
+    pub const fn first_inode(&self) -> u32 {
+        self.first_inode
+    }
+
+    pub const fn superblock_read(&self) -> bool {
+        self.superblock_read
+    }
+
+    pub const fn magic_valid(&self) -> bool {
+        self.magic_valid
+    }
+
+    pub const fn layout_valid(&self) -> bool {
+        self.layout_valid
+    }
+
+    pub const fn block_size_supported(&self) -> bool {
+        self.block_size_supported
+    }
+
+    pub const fn not_found_nonfatal(&self) -> bool {
+        self.not_found_nonfatal
+    }
+
+    pub fn preset_default<P: BlockDeviceProvider>(
+        &mut self,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+    ) -> Result<(), Ext2Error> {
+        if self.lifecycle.state() != State::Base {
+            return Err(Ext2Error::InvalidState);
+        }
+        let Some(default_entry) = registry.default_entry() else {
+            return Err(Ext2Error::DeviceMissing);
+        };
+        let devt = default_entry.devt();
+
+        let super_bh = read_superblock_probe(registry, provider, devt)?;
+        let superblock = parse_superblock(super_bh.data())?;
+        validate_superblock(&superblock)?;
+
+        self.devt = Some(devt);
+        self.block_size = superblock.block_size;
+        self.inodes_count = superblock.inodes_count;
+        self.blocks_count = superblock.blocks_count;
+        self.blocks_per_group = superblock.blocks_per_group;
+        self.inodes_per_group = superblock.inodes_per_group;
+        self.inode_size = superblock.inode_size;
+        self.first_inode = superblock.first_inode;
+        self.superblock_read = true;
+        self.magic_valid = true;
+        self.layout_valid = true;
+        self.block_size_supported = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Ready)
+            .map_err(|_| Ext2Error::InvalidState)
     }
 }
 
@@ -205,7 +357,7 @@ impl Ext2DirEntryRecord {
     }
 }
 
-pub struct Ext2Mount {
+pub struct Ext2FileSystem {
     lifecycle: Lifecycle,
     devt: Option<DevT>,
     block_size: usize,
@@ -221,6 +373,9 @@ pub struct Ext2Mount {
     block_size_supported: bool,
     group_desc_read: bool,
     ready: bool,
+    mount_boundary_recorded: bool,
+    operations_bound: bool,
+    root_dentry_bound: bool,
     vfs_integration_deferred: bool,
     page_cache_deferred: bool,
     write_paths_deferred: bool,
@@ -239,7 +394,7 @@ pub struct Ext2Mount {
 }
 
 #[allow(dead_code)]
-impl Ext2Mount {
+impl Ext2FileSystem {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -257,6 +412,9 @@ impl Ext2Mount {
             block_size_supported: false,
             group_desc_read: false,
             ready: false,
+            mount_boundary_recorded: false,
+            operations_bound: false,
+            root_dentry_bound: false,
             vfs_integration_deferred: true,
             page_cache_deferred: true,
             write_paths_deferred: true,
@@ -335,6 +493,18 @@ impl Ext2Mount {
         self.ready
     }
 
+    pub const fn mount_boundary_recorded(&self) -> bool {
+        self.mount_boundary_recorded
+    }
+
+    pub const fn operations_bound(&self) -> bool {
+        self.operations_bound
+    }
+
+    pub const fn root_dentry_bound(&self) -> bool {
+        self.root_dentry_bound
+    }
+
     pub const fn vfs_integration_deferred(&self) -> bool {
         self.vfs_integration_deferred
     }
@@ -395,51 +565,58 @@ impl Ext2Mount {
         self.file_read_len_matches_inode_size
     }
 
-    pub fn mount_default<P: BlockDeviceProvider>(
-        &mut self,
-        fs_type: &Ext2Type,
-        registry: &mut BlockDeviceRegistry,
-        provider: &mut P,
-    ) -> Result<(), Ext2Error> {
-        if fs_type.state() != State::Ready || !fs_type.mount_callback_bound() {
-            return Err(Ext2Error::TypeNotReady);
+    pub fn preset(&mut self, driver: &Ext2Driver, volume: &Ext2Volume) -> Result<(), Ext2Error> {
+        if driver.state() != State::Ready || !driver.mount_callback_bound() {
+            return Err(Ext2Error::DriverNotReady);
+        }
+        if volume.state() != State::Ready {
+            return Err(Ext2Error::VolumeNotReady);
         }
         if self.lifecycle.state() != State::Base {
             return Err(Ext2Error::InvalidState);
         }
-        let Some(default_entry) = registry.default_entry() else {
+
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+            .map_err(|_| Ext2Error::InvalidState)
+    }
+
+    pub fn setup<P: BlockDeviceProvider>(
+        &mut self,
+        driver: &Ext2Driver,
+        volume: &Ext2Volume,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+    ) -> Result<(), Ext2Error> {
+        if driver.state() != State::Ready
+            || !driver.super_operations_bound()
+            || !driver.inode_operations_bound()
+            || !driver.file_operations_bound()
+        {
+            return Err(Ext2Error::DriverNotReady);
+        }
+        if volume.state() != State::Ready {
+            return Err(Ext2Error::VolumeNotReady);
+        }
+        if self.lifecycle.state() != State::Prepared {
+            return Err(Ext2Error::InvalidState);
+        }
+        let Some(devt) = volume.devt() else {
             return Err(Ext2Error::DeviceMissing);
         };
-        let devt = default_entry.devt();
-
-        let super_bh = read_superblock_probe(registry, provider, devt)?;
-        let superblock = parse_superblock(super_bh.data())?;
-        self.superblock_read = true;
-        self.magic_valid = superblock.magic == EXT2_SUPER_MAGIC;
-        if !self.magic_valid {
-            return Err(Ext2Error::InvalidSuperblock);
-        }
-        if !supported_block_size(superblock.block_size) {
-            return Err(Ext2Error::UnsupportedBlockSize);
-        }
-        if superblock.inodes_per_group == 0 || superblock.blocks_per_group == 0 {
-            return Err(Ext2Error::InvalidSuperblock);
-        }
-        if superblock.inode_size < EXT2_GOOD_OLD_INODE_SIZE
-            || usize::from(superblock.inode_size) > superblock.block_size
-        {
-            return Err(Ext2Error::InvalidSuperblock);
-        }
 
         self.devt = Some(devt);
-        self.block_size = superblock.block_size;
-        self.inodes_count = superblock.inodes_count;
-        self.blocks_count = superblock.blocks_count;
-        self.blocks_per_group = superblock.blocks_per_group;
-        self.inodes_per_group = superblock.inodes_per_group;
-        self.inode_size = superblock.inode_size;
-        self.first_inode = superblock.first_inode;
-        self.block_size_supported = true;
+        self.block_size = volume.block_size();
+        self.inodes_count = volume.inodes_count();
+        self.blocks_count = volume.blocks_count();
+        self.blocks_per_group = volume.blocks_per_group();
+        self.inodes_per_group = volume.inodes_per_group();
+        self.inode_size = volume.inode_size();
+        self.first_inode = volume.first_inode();
+        self.superblock_read = volume.superblock_read();
+        self.magic_valid = volume.magic_valid();
+        self.block_size_supported = volume.block_size_supported();
+        self.operations_bound = true;
 
         let group_desc_block = group_descriptor_block(self.block_size);
         let group_bh = read_fs_block(registry, provider, devt, group_desc_block, self.block_size)?;
@@ -454,9 +631,25 @@ impl Ext2Mount {
         if !self.root_inode.is_root_dir() {
             return Err(Ext2Error::NotDirectory);
         }
+        self.root_dentry_bound = true;
         self.ready = true;
         self.lifecycle
-            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
+            .map_err(|_| Ext2Error::InvalidState)
+    }
+
+    pub fn enable_deferred(&mut self, vfs_core: &VfsCore) -> Result<(), Ext2Error> {
+        if self.lifecycle.state() != State::Ready || !self.ready || !self.root_dentry_bound {
+            return Err(Ext2Error::FileSystemNotReady);
+        }
+        if vfs_core.state() != State::Ready {
+            return Err(Ext2Error::FileSystemNotReady);
+        }
+
+        self.mount_boundary_recorded = true;
+        self.vfs_integration_deferred = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
             .map_err(|_| Ext2Error::InvalidState)
     }
 
@@ -466,8 +659,8 @@ impl Ext2Mount {
         provider: &mut P,
         name: &[u8],
     ) -> Result<Ext2DirEntryRecord, Ext2Error> {
-        if self.lifecycle.state() != State::Ready || !self.ready {
-            return Err(Ext2Error::MountNotReady);
+        if self.lifecycle.state() != State::Online || !self.ready || !self.mount_boundary_recorded {
+            return Err(Ext2Error::FileSystemNotReady);
         }
         if !self.root_inode.is_dir() {
             return Err(Ext2Error::NotDirectory);
@@ -506,8 +699,12 @@ impl Ext2Mount {
         provider: &mut P,
         buffer: &mut [u8],
     ) -> Result<usize, Ext2Error> {
-        if self.lifecycle.state() != State::Ready || !self.ready || !self.lookup_returns_inode {
-            return Err(Ext2Error::MountNotReady);
+        if self.lifecycle.state() != State::Online
+            || !self.ready
+            || !self.mount_boundary_recorded
+            || !self.lookup_returns_inode
+        {
+            return Err(Ext2Error::FileSystemNotReady);
         }
         if !self.lookup_file_inode.is_regular_file() {
             return Err(Ext2Error::NotRegularFile);
@@ -662,6 +859,24 @@ fn parse_superblock(data: &[u8]) -> Result<Ext2SuperBlockRecord, Ext2Error> {
         first_inode,
         inode_size,
     })
+}
+
+fn validate_superblock(superblock: &Ext2SuperBlockRecord) -> Result<(), Ext2Error> {
+    if superblock.magic != EXT2_SUPER_MAGIC {
+        return Err(Ext2Error::InvalidSuperblock);
+    }
+    if !supported_block_size(superblock.block_size) {
+        return Err(Ext2Error::UnsupportedBlockSize);
+    }
+    if superblock.inodes_per_group == 0 || superblock.blocks_per_group == 0 {
+        return Err(Ext2Error::InvalidSuperblock);
+    }
+    if superblock.inode_size < EXT2_GOOD_OLD_INODE_SIZE
+        || usize::from(superblock.inode_size) > superblock.block_size
+    {
+        return Err(Ext2Error::InvalidSuperblock);
+    }
+    Ok(())
 }
 
 const fn supported_block_size(block_size: usize) -> bool {

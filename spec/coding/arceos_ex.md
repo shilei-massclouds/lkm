@@ -499,17 +499,22 @@ read-only ext2 首轮必须继续走 `BufferHead`。实现边界对应 Linux 6.1
 `ext2_iget()` / `ext2_find_entry()` / direct-block read：读取 superblock、校验 magic/block size、读取 group
 descriptor、读取 `EXT2_ROOT_INO`，遍历 root directory 中的 dirent，lookup 一个固定小文件，再按 inode direct
 block 把文件内容拷贝给调用者。`make disk` 在 `FS_TYPE=ext2` 时应写入该固定小文件，保证 smoke 读取内容稳定。
-对象生命周期只划分到 `Ext2Type` 和 `Ext2Mount`：前者对应 Linux `file_system_type` / mount callback descriptor，
-后者对应一次成功 `ext2_fill_super()` 后得到的 mounted instance。superblock 字段、group descriptor、inode
-record、dirent 和 file-read result 首轮只是 `Ext2Mount` 下的结构化记录/事实，不独立建生命周期；后续若实现 inode cache、
-refcount、evict 或 VFS mount integration，再讨论是否把 inode 等提升为对象。
-当前 4K Buffer 步骤必须把 `BufferHead` 和 virtio-blk read buffer 扩到至少 4KiB，并让 `Ext2Mount` 支持
-ext2 `block_size` 为 1024、2048 和 4096。superblock 仍按 ext2 规则从 byte offset 1024 读取；解析出实际
+Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem`：`Ext2Driver` 取代旧的
+`Ext2Type`，承载 Linux `file_system_type` 以及当前建模的 super/inode/file operation set；
+`Ext2Volume` 表示默认块设备上按 ext2 规范组织的 on-disk volume，由 `Preset` 经 `BufferHead` 检查确认，
+不存在或格式不匹配是普通非致命结果，不应 panic 或终止内核；`Ext2FileSystem` 表示一次 mount 后的内存中文件系统实例，
+`Preset` 绑定 `Ext2Driver` 和 `Ext2Volume`，`Setup` 解析元信息并建立 root dentry/inode 入口事实，
+`Enable` 只记录挂接到上级 VFS 目录节点的生命周期边界。当前真实 VFS mount integration 仍保持 deferred，不得把该事实解释为已经完成真实 VFS 挂载。
+superblock 字段、group descriptor、inode record、dirent 和 file-read result 首轮只是 `Ext2FileSystem`
+下的结构化记录/事实，不独立建生命周期；后续若实现 inode cache、refcount、evict 或完整 VFS mount integration，
+再讨论是否把 inode 等提升为对象。
+当前 4K Buffer 步骤必须把 `BufferHead` 和 virtio-blk read buffer 扩到至少 4KiB，并让 `Ext2Volume` /
+`Ext2FileSystem` 支持 ext2 `block_size` 为 1024、2048 和 4096。superblock 仍按 ext2 规则从 byte offset 1024 读取；解析出实际
 block size 后，group descriptor、inode table、目录和文件数据读取必须使用真实 filesystem block number 到
 sector 的映射。`make disk` 默认不应再强制 `mkfs.ext2 -b 1024`；如需覆盖 block size，应通过显式参数表达。
 本轮不把 ext2 接入 VFS/rootfs mount，不实现 page cache/folio、间接块、symlink、权限、xattr、quota、block
 allocation、写路径、remount 或错误恢复；这些必须保持 deferred。ext2 smoke 可以显式 mount 默认块设备的只读
-`Ext2Mount` 对象并读固定文件，但不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。
+`Ext2FileSystem` 对象并读固定文件，但不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。
 
 `devfs` 的首轮实现属于 `InitcallPhase` 收敛边界：它必须在 `VfsCore` 初始 rootfs mount 已存在、`HwRngCore`
 和 `BlockDeviceRegistry` 已 Ready、且 virtio-rng/virtio-blk live driver 已完成注册之后挂载 `/dev`，再创建
