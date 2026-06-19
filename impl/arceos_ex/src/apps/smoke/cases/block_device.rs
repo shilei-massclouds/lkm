@@ -5,6 +5,7 @@ use crate::{
     },
     context::context,
     objects::{
+        bio::{self, BioSubmitPath, BUFFER_HEAD_SECTOR_SIZE},
         block_device::{BlockDeviceProviderKind, VIRTBLK_FIRST_MINOR, VIRTBLK_MAJOR},
         state::State,
         virtio_blk,
@@ -31,7 +32,7 @@ impl BlockDeviceReadScenario {
 
 impl SmokeScenario for BlockDeviceReadScenario {
     fn name(&self) -> &'static str {
-        "block_device.read_default_and_devt"
+        "block_io.buffer_head_read_default_and_devt"
     }
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
@@ -61,58 +62,134 @@ impl SmokeScenario for BlockDeviceReadScenario {
     }
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
-        let mut default_buf = [0u8; 512];
-        let mut devt_buf = [0u8; 512];
-
         let ctx = context();
         let Some(default_entry) = ctx.block_device_registry.default_entry() else {
             assertions.assert("default entry", false);
             return;
         };
         let devt = default_entry.devt();
+        let default_device_ref = default_entry.device_ref();
+        let provider_kind = default_entry.provider_kind();
         assertions.assert(
             "provider virtio blk",
-            default_entry.provider_kind() == BlockDeviceProviderKind::VirtioBlk,
+            provider_kind == BlockDeviceProviderKind::VirtioBlk,
         );
         assertions.assert("major", devt.major() == VIRTBLK_MAJOR);
         assertions.assert("minor", devt.minor() == VIRTBLK_FIRST_MINOR);
 
         let mut provider = virtio_blk::live_provider(&ctx.kernel_image);
-        let default_len = match ctx.block_device_registry.read_default(
+        let default_bh = match bio::sb_bread_default(
+            &mut ctx.block_device_registry,
             &mut provider,
             EXT2_SUPERBLOCK_SECTOR,
-            &mut default_buf,
         ) {
-            Ok(len) => len,
+            Ok(bh) => bh,
             Err(_) => {
-                assertions.assert("read default", false);
+                assertions.assert("sb_bread default", false);
                 return;
             }
         };
-        assertions.assert("default len", default_len == default_buf.len());
-        assertions.assert("default nonzero", default_buf.iter().any(|byte| *byte != 0));
-        assertions.assert("default ext2", ext2_magic_observed(&default_buf));
+        assertions.assert("default bh ready", default_bh.state() == State::Ready);
+        assertions.assert(
+            "default bh len",
+            default_bh.len() == BUFFER_HEAD_SECTOR_SIZE,
+        );
+        assertions.assert("default bh uptodate", default_bh.uptodate());
+        assertions.assert("default bh nonzero", default_bh.data_nonzero());
+        assertions.assert("default bh ext2", ext2_magic_observed(default_bh.data()));
+        assertions.assert(
+            "default bh sector",
+            default_bh.sector() == EXT2_SUPERBLOCK_SECTOR,
+        );
+        assertions.assert("default bh devt", default_bh.devt() == devt);
+        assertions.assert(
+            "default bh device",
+            default_bh.device_ref() == default_device_ref,
+        );
+        assertions.assert(
+            "default bh block size",
+            default_bh.block_size() == BUFFER_HEAD_SECTOR_SIZE,
+        );
+        assertions.assert("default sb_bread", default_bh.sb_bread_called());
+        assertions.assert("default bread_gfp", default_bh.bread_gfp_called());
+        assertions.assert("default submit_bio", default_bh.submit_bio_wait_used());
+        assertions.assert(
+            "default bio path",
+            default_bh.bio().submit_path() == BioSubmitPath::DefaultBlockDevice,
+        );
+        assertions.assert("default bio submitted", default_bh.bio().submitted());
+        assertions.assert(
+            "default bio completion",
+            default_bh.bio().completion_observed(),
+        );
+        assertions.assert("default bio status", default_bh.bio().status_ok());
+        assertions.assert("default bio copies", default_bh.bio().copies_to_caller());
+        assertions.assert(
+            "default bio blk mq",
+            default_bh.bio().blk_mq_submit_bio_entered(),
+        );
+        assertions.assert(
+            "default bio device",
+            default_bh.bio().device_ref() == default_device_ref,
+        );
+        assertions.assert("default bio devt", default_bh.bio().devt() == devt);
+        assertions.assert(
+            "default bio sector",
+            default_bh.bio().sector() == EXT2_SUPERBLOCK_SECTOR,
+        );
+        assertions.assert(
+            "default bio len",
+            default_bh.bio().len() == BUFFER_HEAD_SECTOR_SIZE,
+        );
+        assertions.assert("default bio buffer", default_bh.bio().buffer_bound());
         assertions.assert(
             "default read recorded",
             ctx.block_device_registry.read_default_count() == 1
                 && ctx.block_device_registry.default_device_ref_acquired(),
         );
 
-        let devt_len = match ctx.block_device_registry.read_by_devt(
+        let devt_bh = match bio::sb_bread_by_devt(
+            &mut ctx.block_device_registry,
             &mut provider,
             devt,
             EXT2_SUPERBLOCK_SECTOR,
-            &mut devt_buf,
         ) {
-            Ok(len) => len,
+            Ok(bh) => bh,
             Err(_) => {
-                assertions.assert("read devt", false);
+                assertions.assert("sb_bread devt", false);
                 return;
             }
         };
-        assertions.assert("devt len", devt_len == devt_buf.len());
-        assertions.assert("devt nonzero", devt_buf.iter().any(|byte| *byte != 0));
-        assertions.assert("devt ext2", ext2_magic_observed(&devt_buf));
+        assertions.assert("devt bh ready", devt_bh.state() == State::Ready);
+        assertions.assert("devt bh len", devt_bh.len() == BUFFER_HEAD_SECTOR_SIZE);
+        assertions.assert("devt bh uptodate", devt_bh.uptodate());
+        assertions.assert("devt bh nonzero", devt_bh.data_nonzero());
+        assertions.assert("devt bh ext2", ext2_magic_observed(devt_bh.data()));
+        assertions.assert("devt bh sector", devt_bh.sector() == EXT2_SUPERBLOCK_SECTOR);
+        assertions.assert("devt bh devt", devt_bh.devt() == devt);
+        assertions.assert(
+            "devt bh block size",
+            devt_bh.block_size() == BUFFER_HEAD_SECTOR_SIZE,
+        );
+        assertions.assert("devt submit_bio", devt_bh.submit_bio_wait_used());
+        assertions.assert(
+            "devt bio path",
+            devt_bh.bio().submit_path() == BioSubmitPath::MajorMinorLookup,
+        );
+        assertions.assert("devt bio submitted", devt_bh.bio().submitted());
+        assertions.assert("devt bio completion", devt_bh.bio().completion_observed());
+        assertions.assert("devt bio status", devt_bh.bio().status_ok());
+        assertions.assert("devt bio copies", devt_bh.bio().copies_to_caller());
+        assertions.assert(
+            "devt bio device",
+            devt_bh.bio().device_ref() == default_device_ref,
+        );
+        assertions.assert("devt bio devt", devt_bh.bio().devt() == devt);
+        assertions.assert(
+            "devt bio sector",
+            devt_bh.bio().sector() == EXT2_SUPERBLOCK_SECTOR,
+        );
+        assertions.assert("devt bio buffer", devt_bh.bio().buffer_bound());
         assertions.assert(
             "devt read recorded",
             ctx.block_device_registry.read_by_devt_count() == 1
@@ -137,7 +214,7 @@ impl SmokeScenario for BlockDeviceReadScenario {
         assertions.assert(
             "registry last read",
             ctx.block_device_registry.last_read_sector() == EXT2_SUPERBLOCK_SECTOR
-                && ctx.block_device_registry.last_read_len() == devt_buf.len(),
+                && ctx.block_device_registry.last_read_len() == devt_bh.len(),
         );
 
         let Some(device) = ctx.virtio_blk_runtime.device() else {
@@ -161,7 +238,7 @@ impl SmokeScenario for BlockDeviceReadScenario {
             "block read sector",
             block.last_read_sector() == EXT2_SUPERBLOCK_SECTOR,
         );
-        assertions.assert("block read len", block.last_read_len() == devt_buf.len());
+        assertions.assert("block read len", block.last_read_len() == devt_bh.len());
         assertions.assert("block submitted", block.read_submitted());
         assertions.assert("block completion", block.read_completion_observed());
         assertions.assert("block copies", block.read_copies_to_caller());

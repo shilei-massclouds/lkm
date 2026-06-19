@@ -85,6 +85,7 @@ include "virtio.spec";
 include "virtio_mmio.spec";
 include "virtio_ring.spec";
 include "block_device.spec";
+include "bio.spec";
 include "virtio_blk.spec";
 include "hwrng.spec";
 include "virtio_rng.spec";

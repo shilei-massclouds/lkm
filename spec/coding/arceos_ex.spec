@@ -126,6 +126,9 @@ predicate arceos_ex_must_completion_own_simple_wait_queue() -> bool;
 predicate arceos_ex_must_completion_processes_keep_state_effects() -> bool;
 predicate arceos_ex_must_completion_instances_drive_type_processes() -> bool;
 predicate arceos_ex_must_completion_smoke_cover_setup_complete_and_token_flow() -> bool;
+predicate arceos_ex_must_block_io_model_bio_buffer_head_before_ext2() -> bool;
+predicate arceos_ex_must_block_io_registry_read_remain_lower_level_adapter() -> bool;
+predicate arceos_ex_must_block_io_smoke_use_sb_bread_path() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
 predicate arceos_ex_must_rest_init_run_after_process_prepare() -> bool;
@@ -1240,6 +1243,43 @@ type ArceosExCompletionCodingMust {
          * verify the live kthreadd_done/KthreaddReadyGate instance.
          */
         arceos_ex_must_completion_smoke_cover_setup_complete_and_token_flow();
+    }
+}
+
+type ArceosExBlockIoCodingMust {
+    invariant {
+        /*
+         * Linux-like block I/O adapter:
+         *
+         * Before read-only ext2 is introduced, the first filesystem-facing
+         * block I/O surface must be modeled as Bio, submit_bio_wait(),
+         * minimal blk_mq_submit_bio(), and BufferHead/sb_bread(). It must not
+         * introduce BlockReadRequest or BlockIoBuffer as substitute Linux
+         * top-level objects.
+         */
+        arceos_ex_must_block_io_model_bio_buffer_head_before_ext2();
+
+        /*
+         * Registry read role:
+         *
+         * BlockDeviceRegistry::read_default()/read_by_devt(), or equivalent
+         * direct registry reads, are a lower-level synchronous adapter below
+         * submit_bio_wait(). They may continue to perform default/dev_t lookup
+         * and provider dispatch, but higher filesystem-facing paths should
+         * enter through Bio/BufferHead rather than treating registry reads as
+         * the public block layer.
+         */
+        arceos_ex_must_block_io_registry_read_remain_lower_level_adapter();
+
+        /*
+         * Smoke entry:
+         *
+         * App smoke coverage for the current ext2-superblock read must use
+         * sb_bread()/BufferHead over submit_bio_wait(). It may still validate
+         * registry facts produced underneath, but it must not bypass the new
+         * block I/O adapter by directly calling registry read APIs.
+         */
+        arceos_ex_must_block_io_smoke_use_sb_bread_path();
     }
 }
 

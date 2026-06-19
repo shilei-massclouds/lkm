@@ -4,11 +4,12 @@
  * This follows the Linux block surface only far enough for virtio-blk to
  * publish a system-visible disk identity. Linux virtio_blk allocates a gendisk,
  * binds a major/first_minor, sets capacity, and calls device_add_disk(). This
- * first slice keeps those observable registry facts and exposes a minimal
- * block-level read entry, but defers blk-mq tag sets, request_queue, bio/page
- * cache, partition scan, uevents, sysfs, and /dev node plumbing. Users must
- * discover the registered device through BlockDeviceRegistry rather than
- * reaching directly into VirtioBlkDevice for system-level lookup.
+ * first slice keeps those observable registry facts and exposes a lower-level
+ * synchronous read entry used by the minimal bio adapter, but defers full
+ * blk-mq tag sets, request_queue ownership, page cache, partition scan,
+ * uevents, sysfs, and /dev node plumbing. Users must discover the registered
+ * device through BlockDeviceRegistry rather than reaching directly into
+ * VirtioBlkDevice for system-level lookup.
  */
 
 predicate block_core_initialized<T>(core: T) -> bool;
@@ -16,6 +17,10 @@ predicate block_core_registry_ready<T>(core: T) -> bool;
 predicate block_core_major_allocator_ready<T>(core: T) -> bool;
 predicate block_core_default_device_slot_ready<T>(core: T) -> bool;
 predicate block_core_request_queue_deferred<T>(core: T) -> bool;
+/*
+ * Means the full page-cache-backed bio stack is deferred. A minimal
+ * synchronous Bio/BufferHead adapter is modeled separately in bio.spec.
+ */
 predicate block_core_bio_page_cache_deferred<T>(core: T) -> bool;
 predicate block_core_partition_scan_deferred<T>(core: T) -> bool;
 predicate block_core_dev_node_deferred<T>(core: T) -> bool;

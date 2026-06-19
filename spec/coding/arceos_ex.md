@@ -486,6 +486,15 @@ freeze/restore 和完整 reset/remove 资源回收必须显式 deferred。
 `/dev/hwrng` 的完整 miscdevice/file operation 仍保持 deferred；但 devfs 可以在 hwrng core 已有 current rng
 之后创建只用于命名空间可发现性的 `hwrng` 设备节点。该节点不得绕过 `HwRngCore::read_current()` 引入新的读取后门。
 
+`Bio` / `submit_bio_wait()` / `BufferHead` 是 read-only ext2 前的下一层块 I/O 边界。当前实现必须先建立
+Linux-like `Bio`、最小同步 `submit_bio_wait()` / `blk_mq_submit_bio()` 壳，以及 `BufferHead` /
+`sb_bread()` / `__bread_gfp()` 路径；不得用 `BlockReadRequest` 或 `BlockIoBuffer` 代替这些 Linux 对应主对象。
+`BlockDeviceRegistry::read_default()` / `read_by_devt()` 可以保留为 `submit_bio_wait()` 下面的同步 adapter，
+负责 default 或 `devt` lookup 以及 provider dispatch，但高层文件系统面向的读路径不应继续把 registry read 当作公开
+块层入口。app smoke 当前读取 ext2 superblock sector 时应经 `sb_bread()` 得到 `BufferHead`，再观察其 uptodate、
+提交/完成、数据非零和 ext2 magic 事实；smoke 可以继续检查底层 registry read 事实，但不得绕过 bio/buffer_head
+直接调用 registry read API。
+
 `devfs` 的首轮实现属于 `InitcallPhase` 收敛边界：它必须在 `VfsCore` 初始 rootfs mount 已存在、`HwRngCore`
 和 `BlockDeviceRegistry` 已 Ready、且 virtio-rng/virtio-blk live driver 已完成注册之后挂载 `/dev`，再创建
 当前 hwrng 和默认 block device 对应的设备节点。smoke 验证只能观察 `/dev` 节点、hwrng current 绑定和 block
