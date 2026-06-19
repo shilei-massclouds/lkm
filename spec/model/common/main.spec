@@ -84,6 +84,7 @@ include "ns16550a_driver.spec";
 include "virtio.spec";
 include "virtio_mmio.spec";
 include "virtio_ring.spec";
+include "block_device.spec";
 include "virtio_blk.spec";
 include "hwrng.spec";
 include "virtio_rng.spec";

@@ -1,4 +1,5 @@
 use super::{
+    block_device::{BlockDevice, BlockDeviceRef, BlockDeviceRegistry},
     kernel_image::KernelImage,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     virtio::{VirtioBus, VirtioDevice, VirtioDeviceRef},
@@ -56,6 +57,7 @@ pub enum VirtioBlkError {
     NoRequestPending,
     BadStatus,
     DataMismatch,
+    BlockRegistry,
     Queue(VirtqueueError),
     TransportUnavailable,
 }
@@ -159,6 +161,7 @@ pub struct VirtioBlkDevice {
     lifecycle: Lifecycle,
     virtio_device: VirtioDevice,
     queue: VirtQueue,
+    block_device: BlockDevice,
     single_request_queue: bool,
     capacity: Option<u64>,
     capacity_read: bool,
@@ -188,7 +191,7 @@ pub struct VirtioBlkDevice {
     last_status: u8,
     last_used_len: u32,
     last_sector: u64,
-    block_layer_deferred: bool,
+    request_queue_deferred: bool,
     filesystem_parse_deferred: bool,
     multi_queue_deferred: bool,
     reset_remove_deferred: bool,
@@ -201,6 +204,7 @@ impl VirtioBlkDevice {
             lifecycle: Lifecycle::new(State::Base),
             virtio_device,
             queue: VirtQueue::new(VIRTIO_BLK_QUEUE_SIZE),
+            block_device: BlockDevice::new_virtio_blk(0),
             single_request_queue: false,
             capacity: None,
             capacity_read: false,
@@ -230,7 +234,7 @@ impl VirtioBlkDevice {
             last_status: 0xff,
             last_used_len: 0,
             last_sector: 0,
-            block_layer_deferred: true,
+            request_queue_deferred: true,
             filesystem_parse_deferred: true,
             multi_queue_deferred: true,
             reset_remove_deferred: true,
@@ -247,6 +251,10 @@ impl VirtioBlkDevice {
 
     pub const fn queue(&self) -> &VirtQueue {
         &self.queue
+    }
+
+    pub const fn block_device(&self) -> &BlockDevice {
+        &self.block_device
     }
 
     pub const fn single_request_queue(&self) -> bool {
@@ -353,8 +361,8 @@ impl VirtioBlkDevice {
         self.last_sector
     }
 
-    pub const fn block_layer_deferred(&self) -> bool {
-        self.block_layer_deferred
+    pub const fn request_queue_deferred(&self) -> bool {
+        self.request_queue_deferred
     }
 
     pub const fn filesystem_parse_deferred(&self) -> bool {
@@ -418,7 +426,19 @@ impl VirtioBlkDevice {
             return Err(VirtioBlkError::TransportUnavailable);
         }
         self.driver_ok = self.virtio_device.status_driver_ok();
+        self.block_device
+            .setup_from_virtio_blk(capacity)
+            .map_err(|_| VirtioBlkError::DeviceNotReady)?;
         Ok(())
+    }
+
+    pub fn register_block_device(
+        &mut self,
+        registry: &mut BlockDeviceRegistry,
+    ) -> Result<BlockDeviceRef, VirtioBlkError> {
+        registry
+            .register(&mut self.block_device)
+            .map_err(|_| VirtioBlkError::BlockRegistry)
     }
 
     pub fn submit_ext2_superblock_read(
@@ -558,6 +578,7 @@ impl VirtioBlkRuntime {
 pub fn setup_live_driver(
     runtime: &mut VirtioBlkRuntime,
     virtio_bus: &VirtioBus,
+    block_registry: &mut BlockDeviceRegistry,
     kernel_image: &KernelImage,
 ) -> EventResult {
     VIRTIO_BLK_LIVE_PTR.store(runtime as *mut VirtioBlkRuntime as usize, Ordering::Release);
@@ -585,13 +606,16 @@ pub fn setup_live_driver(
         .map_err(|_| live_setup_error())?;
     runtime.live_device_ref = Some(device.device_ref());
     runtime.device = Some(block);
-    runtime.real_probe_succeeded = true;
     let Some(block) = runtime.device.as_mut() else {
         return Err(live_setup_error());
     };
     block
+        .register_block_device(block_registry)
+        .map_err(|_| live_setup_error())?;
+    block
         .submit_ext2_superblock_read(kernel_image)
         .map_err(|_| live_setup_error())?;
+    runtime.real_probe_succeeded = true;
     crate::checkpoint::dispatch(
         crate::trace::Checkpoint::VirtioBlkReady,
         crate::context::context_ref(),

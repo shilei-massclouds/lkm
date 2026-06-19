@@ -6,6 +6,7 @@ use crate::objects::irq_time::{
 };
 use crate::objects::state::EventResult;
 use crate::objects::{
+    block_device::BlockDeviceRegistry,
     boot_param::BootParam,
     cache_block_info::CacheBlockInfo,
     command_line::{CommandLine, SavedCommandLine, StaticCommandLine},
@@ -242,6 +243,7 @@ pub struct Context {
     pub platform_bus: PlatformBus,
     pub virtio_bus: VirtioBus,
     pub hwrng_core: HwRngCore,
+    pub block_device_registry: BlockDeviceRegistry,
     pub virtio_blk_runtime: VirtioBlkRuntime,
     pub virtio_rng_runtime: VirtioRngRuntime,
     pub driver_core_deferred: DriverCoreDeferred,
@@ -404,6 +406,7 @@ impl Context {
             platform_bus: PlatformBus::new(),
             virtio_bus: VirtioBus::new(),
             hwrng_core: HwRngCore::new(),
+            block_device_registry: BlockDeviceRegistry::new(),
             virtio_blk_runtime: VirtioBlkRuntime::new(),
             virtio_rng_runtime: VirtioRngRuntime::new(),
             driver_core_deferred: DriverCoreDeferred::new(),

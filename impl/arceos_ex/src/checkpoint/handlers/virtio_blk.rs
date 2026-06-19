@@ -5,6 +5,9 @@ use crate::{
     },
     context::Context,
     objects::{
+        block_device::{
+            BlockDeviceProviderKind, VIRTBLK_FIRST_MINOR, VIRTBLK_MAJOR, VIRTBLK_MINORS,
+        },
         state::State,
         virtio_blk,
         virtio_mmio::{self, VIRTIO_ID_BLOCK, VIRTIO_MMIO_PLATFORM_DRIVER_REF},
@@ -59,6 +62,14 @@ fn run_discovery_config(
     );
     sink.diag_usize("virtio_blk_device_id", virtio_device.device_id() as usize);
     sink.diag_usize("virtio_blk_capacity_sectors", capacity as usize);
+    sink.diag_usize(
+        "block_registry_devices",
+        ctx.block_device_registry.device_count(),
+    );
+    sink.diag_usize(
+        "block_registry_default_present",
+        ctx.block_device_registry.default_device().is_some() as usize,
+    );
     sink.diag_usize("virtio_blk_queue_ready", device.queue_setup_done() as usize);
     sink.diag_usize("virtio_blk_driver_ok", device.driver_ok() as usize);
     sink.diag_usize(
@@ -160,12 +171,13 @@ fn blk_facts_valid(ctx: &Context) -> bool {
         && device.queue().state() == State::Ready
         && device.queue().real_backing_ready()
         && device.queue().queue_num_max_observed()
+        && blk_block_registry_facts_valid(ctx)
         && device.capacity_read()
         && device.capacity_nonzero()
         && device.capacity().is_some_and(|capacity| capacity != 0)
         && device.queue_setup_done()
         && device.driver_ok()
-        && device.block_layer_deferred()
+        && device.request_queue_deferred()
         && device.filesystem_parse_deferred()
         && device.multi_queue_deferred()
         && device.reset_remove_deferred()
@@ -189,6 +201,67 @@ fn blk_facts_valid(ctx: &Context) -> bool {
             VIRTIO_MMIO_PLATFORM_DRIVER_REF,
             virtio_device.platform_device_ref(),
         )
+}
+
+fn blk_block_registry_facts_valid(ctx: &Context) -> bool {
+    let Some(device) = ctx.virtio_blk_runtime.device() else {
+        return false;
+    };
+    let block_device = device.block_device();
+    let registry = &ctx.block_device_registry;
+    let Some(device_ref) = block_device.device_ref() else {
+        return false;
+    };
+    let Some(devt) = block_device.devt() else {
+        return false;
+    };
+    let Some(entry) = registry.device(device_ref) else {
+        return false;
+    };
+    let Some(default_entry) = registry.default_entry() else {
+        return false;
+    };
+    let Some(lookup_entry) = registry.lookup(devt) else {
+        return false;
+    };
+
+    registry.state() == State::Ready
+        && registry.registry_ready()
+        && registry.major_allocator_ready()
+        && registry.default_device_slot_ready()
+        && registry.request_queue_deferred()
+        && registry.bio_page_cache_deferred()
+        && registry.partition_scan_deferred()
+        && registry.dev_node_deferred()
+        && registry.register_blkdev_called()
+        && registry.register_blkdev_returned_major()
+        && registry.device_add_disk_called()
+        && registry.device_add_disk_return_zero()
+        && registry.major_minor_lookup_ready()
+        && registry.register_count() == 1
+        && registry.device_count() == 1
+        && registry.default_device() == Some(device_ref)
+        && block_device.state() == State::Ready
+        && block_device.name_bound()
+        && block_device.capacity_bound()
+        && block_device.capacity_sectors() == device.capacity().unwrap_or(0)
+        && block_device.sector_size() == 512
+        && block_device.registered()
+        && block_device.default_device()
+        && block_device.major_minor_bound()
+        && devt.major() == VIRTBLK_MAJOR
+        && devt.minor() == VIRTBLK_FIRST_MINOR
+        && VIRTBLK_MINORS != 0
+        && entry.device_ref() == device_ref
+        && entry.provider_kind() == BlockDeviceProviderKind::VirtioBlk
+        && entry.capacity_sectors() == block_device.capacity_sectors()
+        && entry.sector_size() == block_device.sector_size()
+        && entry.devt() == devt
+        && entry.registered()
+        && entry.default_device()
+        && default_entry.device_ref() == device_ref
+        && lookup_entry.device_ref() == device_ref
+        && entry.name() == block_device.name()
 }
 
 fn blk_read_facts_valid(ctx: &Context) -> bool {
