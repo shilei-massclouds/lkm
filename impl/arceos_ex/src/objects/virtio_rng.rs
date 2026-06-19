@@ -507,7 +507,7 @@ impl VirtioRngDevice {
         if self.lifecycle.state() != State::Ready {
             return Err(VirtioRngError::DeviceNotReady);
         }
-        let Some(mut transport) = self.virtio_device.mmio_transport() else {
+        let Some(transport) = self.virtio_device.mmio_transport() else {
             return Err(VirtioRngError::TransportUnavailable);
         };
         if !transport.irq_handler_registered()
@@ -515,16 +515,20 @@ impl VirtioRngDevice {
         {
             return Err(VirtioRngError::TransportUnavailable);
         }
-        if !super::virtio_mmio::reset_status(transport)
-            || !super::virtio_mmio::driver_status_setup(transport)
+        if !self.virtio_device.reset_status()
+            || !self.virtio_device.setup_driver_status()
+            || !self.virtio_device.negotiate_features(0)
         {
             return Err(VirtioRngError::TransportUnavailable);
         }
-        self.queue
-            .setup_real_mmio(kernel_image, transport, VIRTIO_RNG_QUEUE_INDEX)?;
-        if !super::virtio_mmio::driver_status_ready(transport) {
+        self.virtio_device
+            .setup_queue(&mut self.queue, kernel_image, VIRTIO_RNG_QUEUE_INDEX)?;
+        if !self.virtio_device.set_driver_ok() {
             return Err(VirtioRngError::TransportUnavailable);
         }
+        let Some(mut transport) = self.virtio_device.mmio_transport() else {
+            return Err(VirtioRngError::TransportUnavailable);
+        };
         if !transport.enable_irq_source_gate(plic, plic_irq_domain) {
             return Err(VirtioRngError::TransportUnavailable);
         }
@@ -557,11 +561,8 @@ impl VirtioRngDevice {
             return Err(VirtioRngError::RequestPending);
         }
 
-        let Some(transport) = self.virtio_device.mmio_transport() else {
-            return Err(VirtioRngError::TransportUnavailable);
-        };
         let token = self.queue.add_inbuf(buffer_addr, buffer_len)?;
-        self.queue.kick_mmio(transport)?;
+        self.virtio_device.notify_queue(&mut self.queue)?;
         self.have_data
             .reinit()
             .map_err(|_| VirtioRngError::DeviceNotReady)?;

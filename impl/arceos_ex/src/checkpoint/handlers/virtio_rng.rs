@@ -85,6 +85,54 @@ fn emit_diag(ctx: &Context, sink: &mut dyn Sink) {
     sink.diag_usize("virtio_rng_irq_count", device.irq_count());
     sink.diag_usize("virtio_rng_completions", device.completion_count());
     sink.diag_usize(
+        "virtio_status_reset",
+        if device.virtio_device().status_reset() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "virtio_status_driver_seen",
+        if device.virtio_device().status_driver_seen() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "virtio_features_negotiated",
+        if device.virtio_device().feature_negotiation_done() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "virtio_queue_setup_done",
+        if device.virtio_device().queue_setup_done() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "virtio_status_driver_ok",
+        if device.virtio_device().status_driver_ok() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
+        "virtio_queue_notify_done",
+        if device.virtio_device().queue_notify_done() {
+            1
+        } else {
+            0
+        },
+    );
+    sink.diag_usize(
         "virtio_rng_request_pending",
         if device.request_pending() { 1 } else { 0 },
     );
@@ -136,6 +184,16 @@ fn real_completion_facts_valid(ctx: &Context) -> bool {
         && runtime.real_completion_len() == device.data_avail()
         && device.state() == State::Ready
         && device.virtio_device().device_id() == VIRTIO_ID_RNG
+        && device.virtio_device().status_reset()
+        && device.virtio_device().status_acknowledged()
+        && device.virtio_device().status_driver_seen()
+        && device.virtio_device().features_read()
+        && device.virtio_device().driver_features_written()
+        && device.virtio_device().feature_negotiation_done()
+        && device.virtio_device().status_features_ok()
+        && device.virtio_device().queue_setup_done()
+        && device.virtio_device().status_driver_ok()
+        && device.virtio_device().queue_notify_done()
         && device.real_notify_irq_ready()
         && device.probe_common_requested_entropy()
         && !device.request_pending()

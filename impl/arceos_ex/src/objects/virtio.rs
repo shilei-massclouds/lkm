@@ -51,6 +51,23 @@ pub struct VirtioDevice {
     vendor_id: u32,
     state: VirtioDeviceState,
     transport: VirtioTransportDevice,
+    status_reset: bool,
+    status_acknowledged: bool,
+    status_driver_seen: bool,
+    status_features_ok: bool,
+    status_driver_ok: bool,
+    features_read: bool,
+    driver_features_written: bool,
+    feature_negotiation_done: bool,
+    config_access_ready: bool,
+    config_capacity_read: bool,
+    config_capacity: Option<u64>,
+    config_read_deferred: bool,
+    single_queue_discovered: bool,
+    queue_setup_done: bool,
+    queue_notify_done: bool,
+    multi_queue_deferred: bool,
+    reset_remove_deferred: bool,
 }
 
 #[allow(dead_code)]
@@ -65,6 +82,23 @@ impl VirtioDevice {
             vendor_id: transport.vendor_id(),
             state: VirtioDeviceState::Registered,
             transport: VirtioTransportDevice::Mmio(transport),
+            status_reset: false,
+            status_acknowledged: false,
+            status_driver_seen: false,
+            status_features_ok: false,
+            status_driver_ok: false,
+            features_read: false,
+            driver_features_written: false,
+            feature_negotiation_done: false,
+            config_access_ready: true,
+            config_capacity_read: false,
+            config_capacity: None,
+            config_read_deferred: true,
+            single_queue_discovered: false,
+            queue_setup_done: false,
+            queue_notify_done: false,
+            multi_queue_deferred: true,
+            reset_remove_deferred: true,
         }
     }
 
@@ -98,6 +132,74 @@ impl VirtioDevice {
         self.device_id == VIRTIO_ID_RNG
     }
 
+    pub const fn status_reset(self) -> bool {
+        self.status_reset
+    }
+
+    pub const fn status_acknowledged(self) -> bool {
+        self.status_acknowledged
+    }
+
+    pub const fn status_driver_seen(self) -> bool {
+        self.status_driver_seen
+    }
+
+    pub const fn status_features_ok(self) -> bool {
+        self.status_features_ok
+    }
+
+    pub const fn status_driver_ok(self) -> bool {
+        self.status_driver_ok
+    }
+
+    pub const fn features_read(self) -> bool {
+        self.features_read
+    }
+
+    pub const fn driver_features_written(self) -> bool {
+        self.driver_features_written
+    }
+
+    pub const fn feature_negotiation_done(self) -> bool {
+        self.feature_negotiation_done
+    }
+
+    pub const fn config_access_ready(self) -> bool {
+        self.config_access_ready
+    }
+
+    pub const fn config_capacity_read(self) -> bool {
+        self.config_capacity_read
+    }
+
+    pub const fn config_capacity(self) -> Option<u64> {
+        self.config_capacity
+    }
+
+    pub const fn config_read_deferred(self) -> bool {
+        self.config_read_deferred
+    }
+
+    pub const fn single_queue_discovered(self) -> bool {
+        self.single_queue_discovered
+    }
+
+    pub const fn queue_setup_done(self) -> bool {
+        self.queue_setup_done
+    }
+
+    pub const fn queue_notify_done(self) -> bool {
+        self.queue_notify_done
+    }
+
+    pub const fn multi_queue_deferred(self) -> bool {
+        self.multi_queue_deferred
+    }
+
+    pub const fn reset_remove_deferred(self) -> bool {
+        self.reset_remove_deferred
+    }
+
     pub const fn platform_device_ref(self) -> DeviceRef {
         match self.transport {
             VirtioTransportDevice::Mmio(transport) => transport.device_ref(),
@@ -122,6 +224,101 @@ impl VirtioDevice {
         }
         self.transport = VirtioTransportDevice::Mmio(transport);
         true
+    }
+
+    pub fn reset_status(&mut self) -> bool {
+        let VirtioTransportDevice::Mmio(mut transport) = self.transport;
+        if !super::virtio_mmio::reset_status(&mut transport) {
+            return false;
+        }
+        self.status_reset = transport.status_reset_written();
+        self.status_acknowledged = false;
+        self.status_driver_seen = false;
+        self.status_features_ok = false;
+        self.status_driver_ok = false;
+        self.transport = VirtioTransportDevice::Mmio(transport);
+        true
+    }
+
+    pub fn setup_driver_status(&mut self) -> bool {
+        let VirtioTransportDevice::Mmio(mut transport) = self.transport;
+        if !self.status_reset || !super::virtio_mmio::setup_driver_status(&mut transport) {
+            return false;
+        }
+        self.status_acknowledged = transport.status_acknowledge_written();
+        self.status_driver_seen = transport.status_driver_written();
+        self.transport = VirtioTransportDevice::Mmio(transport);
+        true
+    }
+
+    pub fn negotiate_features(&mut self, driver_features: u64) -> bool {
+        let VirtioTransportDevice::Mmio(mut transport) = self.transport;
+        if !self.status_driver_seen
+            || !super::virtio_mmio::negotiate_features(&mut transport, driver_features)
+        {
+            return false;
+        }
+        self.features_read = transport.device_features_read();
+        self.driver_features_written = transport.driver_features_written();
+        self.status_features_ok =
+            transport.version() == 1 || transport.status_features_ok_written();
+        self.feature_negotiation_done = transport.feature_negotiation_done();
+        self.transport = VirtioTransportDevice::Mmio(transport);
+        true
+    }
+
+    pub fn read_config_capacity(&mut self) -> Option<u64> {
+        let VirtioTransportDevice::Mmio(mut transport) = self.transport;
+        if !self.config_access_ready || !self.feature_negotiation_done {
+            return None;
+        }
+        let capacity = super::virtio_mmio::read_config_capacity(&mut transport)?;
+        self.config_capacity_read = transport.config_capacity_read();
+        self.config_capacity = transport.config_capacity();
+        self.config_read_deferred = false;
+        self.transport = VirtioTransportDevice::Mmio(transport);
+        Some(capacity)
+    }
+
+    pub fn setup_queue(
+        &mut self,
+        queue: &mut super::virtio_ring::VirtQueue,
+        kernel_image: &super::kernel_image::KernelImage,
+        queue_index: u16,
+    ) -> Result<(), super::virtio_ring::VirtqueueError> {
+        let VirtioTransportDevice::Mmio(mut transport) = self.transport;
+        if !self.feature_negotiation_done {
+            return Err(super::virtio_ring::VirtqueueError::TransportUnavailable);
+        }
+        queue.setup_real_mmio(kernel_image, &mut transport, queue_index)?;
+        self.single_queue_discovered = queue.queue_num_max_observed();
+        self.queue_setup_done = transport.queue_setup_done();
+        self.transport = VirtioTransportDevice::Mmio(transport);
+        Ok(())
+    }
+
+    pub fn set_driver_ok(&mut self) -> bool {
+        let VirtioTransportDevice::Mmio(mut transport) = self.transport;
+        if !self.queue_setup_done || !super::virtio_mmio::set_driver_ok(&mut transport) {
+            return false;
+        }
+        self.status_driver_ok = transport.status_driver_ok_written();
+        self.transport = VirtioTransportDevice::Mmio(transport);
+        true
+    }
+
+    pub fn notify_queue(
+        &mut self,
+        queue: &mut super::virtio_ring::VirtQueue,
+    ) -> Result<(), super::virtio_ring::VirtqueueError> {
+        let VirtioTransportDevice::Mmio(mut transport) = self.transport;
+        if !self.status_driver_ok {
+            return Err(super::virtio_ring::VirtqueueError::TransportUnavailable);
+        }
+        queue.kick_mmio(&mut transport)?;
+        self.queue_notify_done = transport.queue_notify_written();
+        self.transport = VirtioTransportDevice::Mmio(transport);
+        Ok(())
     }
 }
 

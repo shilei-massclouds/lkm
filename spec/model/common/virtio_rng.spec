@@ -182,10 +182,26 @@ object VirtioRngDevice: DeviceObject {
             Action::SetupRealTransport {
                 state_effect: StateEffect::None;
                 depends_on {
+                    VirtioDevice.state == State::Ready;
                     VirtioMmioTransportDevice.state == State::Ready;
                     VirtQueue.state == State::Ready;
                 }
+                drives {
+                    VirtioDevice.Action::ResetStatus;
+                    VirtioDevice.Action::SetupDriverStatus;
+                    VirtioDevice.Action::NegotiateFeatures;
+                    VirtioDevice.Action::SetupQueue;
+                    VirtioDevice.Action::SetDriverOk;
+                }
                 ensures {
+                    virtio_device_status_reset(VirtioDevice);
+                    virtio_device_status_acknowledged(VirtioDevice);
+                    virtio_device_status_driver_seen(VirtioDevice);
+                    virtio_device_features_read(VirtioDevice);
+                    virtio_device_driver_features_written(VirtioDevice);
+                    virtio_device_feature_negotiation_done(VirtioDevice);
+                    virtio_device_queue_setup_done(VirtioDevice);
+                    virtio_device_status_driver_ok(VirtioDevice);
                     virtio_rng_real_notify_irq_ready(self);
                     virtio_rng_probe_common_requests_entropy(self);
                     virtio_rng_request_pending(self);
@@ -200,8 +216,10 @@ object VirtioRngDevice: DeviceObject {
                 drives {
                     VirtQueue.Action::AddInbuf;
                     VirtQueue.Action::Kick;
+                    VirtioDevice.Action::NotifyQueue;
                 }
                 ensures {
+                    virtio_device_queue_notify_done(VirtioDevice);
                     virtio_rng_request_pending(self);
                     virtio_rng_request_submits_inbuf(self, VirtQueue);
                     virtio_rng_request_kicks_queue(self, VirtQueue);

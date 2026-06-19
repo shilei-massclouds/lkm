@@ -180,7 +180,7 @@ object VirtQueue: ResourceObject {
             Action::Kick {
                 state_effect: StateEffect::None;
                 depends_on {
-                    virtqueue_input_buffer_added(self);
+                    virtqueue_chain_head_published(self);
                 }
                 ensures {
                     virtqueue_kick_recorded(self);

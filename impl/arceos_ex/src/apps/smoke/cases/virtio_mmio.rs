@@ -3,7 +3,9 @@ use crate::{
         harness::{SmokeAssertions, SmokeScenario, SmokeSuite},
         SmokeResult,
     },
-    objects::virtio_mmio::{VirtioMmioHeader, VirtioMmioHeaderStatus, VIRTIO_ID_RNG},
+    objects::virtio_mmio::{
+        VirtioMmioHeader, VirtioMmioHeaderStatus, VIRTIO_ID_BLOCK, VIRTIO_ID_RNG,
+    },
 };
 
 const VIRTIO_MMIO_VENDOR_QEMU: u32 = u32::from_le_bytes(*b"QEMU");
@@ -33,6 +35,11 @@ impl SmokeScenario for HeaderClassifierScenario {
             "valid rng vendor",
             valid_rng.vendor_id() == VIRTIO_MMIO_VENDOR_QEMU,
         );
+
+        let valid_block = VirtioMmioHeader::valid_device(VIRTIO_ID_BLOCK, VIRTIO_MMIO_VENDOR_QEMU);
+        assertions.assert("valid block header", valid_block.valid());
+        assertions.assert("valid block not rng", !valid_block.rng_candidate());
+        assertions.assert("valid block id", valid_block.device_id() == VIRTIO_ID_BLOCK);
 
         let invalid_magic = VirtioMmioHeader::new(0, 2, 4, 1);
         assertions.assert(

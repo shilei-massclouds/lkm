@@ -118,6 +118,19 @@ impl VirtioRngFixture {
         );
         assertions.assert("blocking wait deferred", rng.blocking_wait_deferred());
         assertions.assert("notify irq deferred", rng.real_notify_irq_deferred());
+        assertions.assert("config access", rng.virtio_device().config_access_ready());
+        assertions.assert(
+            "config deferred",
+            rng.virtio_device().config_read_deferred(),
+        );
+        assertions.assert(
+            "multi queue deferred",
+            rng.virtio_device().multi_queue_deferred(),
+        );
+        assertions.assert(
+            "reset/remove deferred",
+            rng.virtio_device().reset_remove_deferred(),
+        );
     }
 
     fn rng_mut(&mut self, assertions: &mut SmokeAssertions) -> Option<&mut VirtioRngDevice> {

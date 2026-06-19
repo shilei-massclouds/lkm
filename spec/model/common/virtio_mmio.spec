@@ -42,6 +42,22 @@ predicate virtio_mmio_transport_ready_for_virtio_core<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_legacy_queue_setup_supported<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_modern_queue_setup_supported<T>(transport: T) -> bool;
 predicate virtio_mmio_transport_irq_ack_ready<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_status_reset_written<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_status_acknowledge_written<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_status_driver_written<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_status_features_ok_written<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_status_driver_ok_written<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_device_features_read<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_driver_features_written<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_feature_negotiation_done<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_config_space_read<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_config_capacity_read<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_queue_selected<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_queue_num_max_read<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_queue_num_written<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_queue_setup_done<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_queue_ready_written<T>(transport: T) -> bool;
+predicate virtio_mmio_transport_queue_notify_written<T>(transport: T) -> bool;
 
 object VirtioMmioPlatformDriverStorage: DeviceDriverStorage {
     initial_state: State::Base;
@@ -128,6 +144,85 @@ object VirtioMmioTransportDevice: ResourceObject {
             virtio_mmio_transport_legacy_queue_setup_supported(VirtioMmioTransportDevice);
             virtio_mmio_transport_modern_queue_setup_supported(VirtioMmioTransportDevice);
             virtio_mmio_transport_irq_ack_ready(VirtioMmioTransportDevice);
+        }
+
+        processes {
+            Action::ResetStatus {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_mmio_transport_ready_for_virtio_core(self);
+                }
+                ensures {
+                    virtio_mmio_transport_status_reset_written(self);
+                }
+            }
+
+            Action::SetupDriverStatus {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_mmio_transport_status_reset_written(self);
+                }
+                ensures {
+                    virtio_mmio_transport_status_acknowledge_written(self);
+                    virtio_mmio_transport_status_driver_written(self);
+                }
+            }
+
+            Action::NegotiateFeatures {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_mmio_transport_status_driver_written(self);
+                }
+                ensures {
+                    virtio_mmio_transport_device_features_read(self);
+                    virtio_mmio_transport_driver_features_written(self);
+                    virtio_mmio_transport_feature_negotiation_done(self);
+                }
+            }
+
+            Action::ReadConfig {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_mmio_transport_status_features_ok_written(self);
+                }
+                ensures {
+                    virtio_mmio_transport_config_space_read(self);
+                    virtio_mmio_transport_config_capacity_read(self);
+                }
+            }
+
+            Action::SetupQueue {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_mmio_transport_device_features_read(self);
+                }
+                ensures {
+                    virtio_mmio_transport_queue_selected(self);
+                    virtio_mmio_transport_queue_num_max_read(self);
+                    virtio_mmio_transport_queue_num_written(self);
+                    virtio_mmio_transport_queue_setup_done(self);
+                }
+            }
+
+            Action::SetDriverOk {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_mmio_transport_queue_num_written(self);
+                }
+                ensures {
+                    virtio_mmio_transport_status_driver_ok_written(self);
+                }
+            }
+
+            Action::NotifyQueue {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_mmio_transport_status_driver_ok_written(self);
+                }
+                ensures {
+                    virtio_mmio_transport_queue_notify_written(self);
+                }
+            }
         }
     }
 

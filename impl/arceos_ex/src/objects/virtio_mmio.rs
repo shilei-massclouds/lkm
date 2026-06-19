@@ -18,6 +18,7 @@ const VIRTIO_MMIO_MAGIC: u32 = u32::from_le_bytes(*b"virt");
 const VIRTIO_MMIO_VERSION_MIN: u32 = 1;
 const VIRTIO_MMIO_VERSION_MAX: u32 = 2;
 pub const VIRTIO_ID_RNG: u32 = 4;
+pub const VIRTIO_ID_BLOCK: u32 = 2;
 pub const VIRTIO_MMIO_GUEST_PAGE_SIZE: usize = 4096;
 pub const VIRTIO_MMIO_VRING_ALIGN: usize = 4096;
 pub const VIRTIO_MMIO_INT_VRING: u32 = 1 << 0;
@@ -42,6 +43,7 @@ const VIRTIO_MMIO_QUEUE_AVAIL_LOW: usize = 0x090;
 const VIRTIO_MMIO_QUEUE_AVAIL_HIGH: usize = 0x094;
 const VIRTIO_MMIO_QUEUE_USED_LOW: usize = 0x0a0;
 const VIRTIO_MMIO_QUEUE_USED_HIGH: usize = 0x0a4;
+const VIRTIO_MMIO_CONFIG: usize = 0x100;
 const VIRTIO_CONFIG_S_ACKNOWLEDGE: u32 = 1;
 const VIRTIO_CONFIG_S_DRIVER: u32 = 2;
 const VIRTIO_CONFIG_S_DRIVER_OK: u32 = 4;
@@ -105,6 +107,23 @@ pub struct VirtioMmioTransportDevice {
     device_id: u32,
     vendor_id: u32,
     rng_candidate: bool,
+    status_reset_written: bool,
+    status_acknowledge_written: bool,
+    status_driver_written: bool,
+    status_features_ok_written: bool,
+    status_driver_ok_written: bool,
+    device_features_read: bool,
+    driver_features_written: bool,
+    feature_negotiation_done: bool,
+    config_space_read: bool,
+    config_capacity_read: bool,
+    config_capacity: Option<u64>,
+    queue_selected: bool,
+    queue_num_max_read: bool,
+    queue_num_written: bool,
+    queue_setup_done: bool,
+    queue_ready_written: bool,
+    queue_notify_written: bool,
 }
 
 #[allow(dead_code)]
@@ -130,6 +149,23 @@ impl VirtioMmioTransportDevice {
             device_id: 0,
             vendor_id: 0,
             rng_candidate: false,
+            status_reset_written: false,
+            status_acknowledge_written: false,
+            status_driver_written: false,
+            status_features_ok_written: false,
+            status_driver_ok_written: false,
+            device_features_read: false,
+            driver_features_written: false,
+            feature_negotiation_done: false,
+            config_space_read: false,
+            config_capacity_read: false,
+            config_capacity: None,
+            queue_selected: false,
+            queue_num_max_read: false,
+            queue_num_written: false,
+            queue_setup_done: false,
+            queue_ready_written: false,
+            queue_notify_written: false,
         }
     }
 
@@ -218,6 +254,74 @@ impl VirtioMmioTransportDevice {
 
     pub const fn rng_candidate(self) -> bool {
         self.rng_candidate
+    }
+
+    pub const fn status_reset_written(self) -> bool {
+        self.status_reset_written
+    }
+
+    pub const fn status_acknowledge_written(self) -> bool {
+        self.status_acknowledge_written
+    }
+
+    pub const fn status_driver_written(self) -> bool {
+        self.status_driver_written
+    }
+
+    pub const fn status_features_ok_written(self) -> bool {
+        self.status_features_ok_written
+    }
+
+    pub const fn status_driver_ok_written(self) -> bool {
+        self.status_driver_ok_written
+    }
+
+    pub const fn device_features_read(self) -> bool {
+        self.device_features_read
+    }
+
+    pub const fn driver_features_written(self) -> bool {
+        self.driver_features_written
+    }
+
+    pub const fn feature_negotiation_done(self) -> bool {
+        self.feature_negotiation_done
+    }
+
+    pub const fn config_space_read(self) -> bool {
+        self.config_space_read
+    }
+
+    pub const fn config_capacity_read(self) -> bool {
+        self.config_capacity_read
+    }
+
+    pub const fn config_capacity(self) -> Option<u64> {
+        self.config_capacity
+    }
+
+    pub const fn queue_selected(self) -> bool {
+        self.queue_selected
+    }
+
+    pub const fn queue_num_max_read(self) -> bool {
+        self.queue_num_max_read
+    }
+
+    pub const fn queue_num_written(self) -> bool {
+        self.queue_num_written
+    }
+
+    pub const fn queue_setup_done(self) -> bool {
+        self.queue_setup_done
+    }
+
+    pub const fn queue_ready_written(self) -> bool {
+        self.queue_ready_written
+    }
+
+    pub const fn queue_notify_written(self) -> bool {
+        self.queue_notify_written
     }
 
     pub const fn ready_for_virtio_core(self) -> bool {
@@ -452,6 +556,12 @@ fn read_mmio_u32(base: usize, offset: usize) -> u32 {
     unsafe { core::ptr::read_volatile(addr as *const u32) }
 }
 
+fn read_mmio_u64(base: usize, offset: usize) -> u64 {
+    let low = read_mmio_u32(base, offset) as u64;
+    let high = read_mmio_u32(base, offset.saturating_add(4)) as u64;
+    low | (high << 32)
+}
+
 fn write_mmio_u32(base: usize, offset: usize, value: u32) -> bool {
     let Some(addr) = base.checked_add(offset) else {
         return false;
@@ -467,15 +577,24 @@ fn write_mmio_u64_halves(base: usize, low_offset: usize, high_offset: usize, val
         && write_mmio_u32(base, high_offset, (value >> 32) as u32)
 }
 
-pub fn reset_status(transport: VirtioMmioTransportDevice) -> bool {
-    write_mmio_u32(transport.membase(), VIRTIO_MMIO_STATUS, 0)
+pub fn reset_status(transport: &mut VirtioMmioTransportDevice) -> bool {
+    if !write_mmio_u32(transport.membase(), VIRTIO_MMIO_STATUS, 0) {
+        return false;
+    }
+    transport.status_reset_written = true;
+    transport.status_acknowledge_written = false;
+    transport.status_driver_written = false;
+    transport.status_features_ok_written = false;
+    transport.status_driver_ok_written = false;
+    true
 }
 
-pub fn driver_status_setup(transport: VirtioMmioTransportDevice) -> bool {
+pub fn setup_driver_status(transport: &mut VirtioMmioTransportDevice) -> bool {
     let base = transport.membase();
     if !write_mmio_u32(base, VIRTIO_MMIO_STATUS, VIRTIO_CONFIG_S_ACKNOWLEDGE) {
         return false;
     }
+    transport.status_acknowledge_written = true;
     if !write_mmio_u32(
         base,
         VIRTIO_MMIO_STATUS,
@@ -483,15 +602,34 @@ pub fn driver_status_setup(transport: VirtioMmioTransportDevice) -> bool {
     ) {
         return false;
     }
+    transport.status_driver_written = true;
+    true
+}
 
-    let _ = write_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES_SEL, 0);
-    let _ = read_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES);
-    let _ = write_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES_SEL, 1);
-    let _ = read_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES);
-    let _ = write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL, 0);
-    let _ = write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES, 0);
-    let _ = write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL, 1);
-    let _ = write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES, 0);
+pub fn negotiate_features(transport: &mut VirtioMmioTransportDevice, driver_features: u64) -> bool {
+    let base = transport.membase();
+    if !write_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES_SEL, 0) {
+        return false;
+    }
+    let _device_features_low = read_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES);
+    if !write_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES_SEL, 1) {
+        return false;
+    }
+    let _device_features_high = read_mmio_u32(base, VIRTIO_MMIO_DEVICE_FEATURES);
+    transport.device_features_read = true;
+
+    if !write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL, 0)
+        || !write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES, driver_features as u32)
+        || !write_mmio_u32(base, VIRTIO_MMIO_DRIVER_FEATURES_SEL, 1)
+        || !write_mmio_u32(
+            base,
+            VIRTIO_MMIO_DRIVER_FEATURES,
+            (driver_features >> 32) as u32,
+        )
+    {
+        return false;
+    }
+    transport.driver_features_written = true;
 
     if transport.version() == 2 {
         if !write_mmio_u32(
@@ -505,17 +643,34 @@ pub fn driver_status_setup(transport: VirtioMmioTransportDevice) -> bool {
         if status & VIRTIO_CONFIG_S_FEATURES_OK == 0 {
             return false;
         }
+        transport.status_features_ok_written = true;
     }
+    transport.feature_negotiation_done = true;
     true
 }
 
-pub fn driver_status_ready(transport: VirtioMmioTransportDevice) -> bool {
+pub fn read_config_capacity(transport: &mut VirtioMmioTransportDevice) -> Option<u64> {
+    if !transport.ready_for_virtio_core() {
+        return None;
+    }
+    let capacity = read_mmio_u64(transport.membase(), VIRTIO_MMIO_CONFIG);
+    transport.config_space_read = true;
+    transport.config_capacity_read = true;
+    transport.config_capacity = Some(capacity);
+    Some(capacity)
+}
+
+pub fn set_driver_ok(transport: &mut VirtioMmioTransportDevice) -> bool {
     let status = read_mmio_u32(transport.membase(), VIRTIO_MMIO_STATUS);
-    write_mmio_u32(
+    if !write_mmio_u32(
         transport.membase(),
         VIRTIO_MMIO_STATUS,
         status | VIRTIO_CONFIG_S_DRIVER_OK,
-    )
+    ) {
+        return false;
+    }
+    transport.status_driver_ok_written = true;
+    true
 }
 
 #[derive(Clone, Copy)]
@@ -539,12 +694,14 @@ pub struct VirtioMmioQueueSetupResult {
 impl VirtioMmioQueueSetupResult {}
 
 pub fn setup_queue(
-    transport: VirtioMmioTransportDevice,
+    transport: &mut VirtioMmioTransportDevice,
     config: VirtioMmioQueueConfig,
 ) -> Option<VirtioMmioQueueSetupResult> {
     let base = transport.membase();
     write_mmio_u32(base, VIRTIO_MMIO_QUEUE_SEL, u32::from(config.queue_index));
+    transport.queue_selected = true;
     let num_max = read_mmio_u32(base, VIRTIO_MMIO_QUEUE_NUM_MAX);
+    transport.queue_num_max_read = true;
     if num_max == 0 || config.queue_size == 0 || u32::from(config.queue_size) > num_max {
         return None;
     }
@@ -560,6 +717,7 @@ pub fn setup_queue(
         if !write_mmio_u32(base, VIRTIO_MMIO_QUEUE_NUM, u32::from(config.queue_size)) {
             return None;
         }
+        transport.queue_num_written = true;
         if !write_mmio_u32(
             base,
             VIRTIO_MMIO_QUEUE_ALIGN,
@@ -574,6 +732,7 @@ pub fn setup_queue(
         if !write_mmio_u32(base, VIRTIO_MMIO_QUEUE_PFN, pfn as u32) {
             return None;
         }
+        transport.queue_setup_done = true;
         let num_max = u16::try_from(num_max).ok()?;
         return Some(VirtioMmioQueueSetupResult {
             queue_size: config.queue_size,
@@ -608,6 +767,9 @@ pub fn setup_queue(
         {
             return None;
         }
+        transport.queue_num_written = true;
+        transport.queue_setup_done = true;
+        transport.queue_ready_written = true;
         let num_max = u16::try_from(num_max).ok()?;
         return Some(VirtioMmioQueueSetupResult {
             queue_size: config.queue_size,
@@ -621,12 +783,16 @@ pub fn setup_queue(
     None
 }
 
-pub fn notify_queue(transport: VirtioMmioTransportDevice, queue_index: u16) -> bool {
-    write_mmio_u32(
+pub fn notify_queue(transport: &mut VirtioMmioTransportDevice, queue_index: u16) -> bool {
+    if !write_mmio_u32(
         transport.membase(),
         VIRTIO_MMIO_QUEUE_NOTIFY,
         u32::from(queue_index),
-    )
+    ) {
+        return false;
+    }
+    transport.queue_notify_written = true;
+    true
 }
 
 pub fn handle_virtio_mmio_irq() {
@@ -665,6 +831,7 @@ fn print_probe(transport: VirtioMmioTransportDevice) {
 fn virtio_device_type_name(device_id: u32) -> &'static str {
     match device_id {
         0 => "placeholder",
+        VIRTIO_ID_BLOCK => "blk",
         VIRTIO_ID_RNG => "rng",
         _ => "unknown",
     }

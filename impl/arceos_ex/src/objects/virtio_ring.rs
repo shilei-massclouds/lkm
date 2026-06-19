@@ -931,7 +931,7 @@ impl VirtQueue {
     pub fn setup_real_mmio(
         &mut self,
         kernel_image: &super::kernel_image::KernelImage,
-        transport: super::virtio_mmio::VirtioMmioTransportDevice,
+        transport: &mut super::virtio_mmio::VirtioMmioTransportDevice,
         queue_index: u16,
     ) -> Result<(), VirtqueueError> {
         if self.lifecycle.state() == State::Base {
@@ -1107,7 +1107,7 @@ impl VirtQueue {
         if self.lifecycle.state() != State::Ready {
             return Err(VirtqueueError::NotReady);
         }
-        if !self.input_buffer_added {
+        if !self.chain_head_published {
             return Err(VirtqueueError::InvalidToken);
         }
         self.kick_recorded = true;
@@ -1117,7 +1117,7 @@ impl VirtQueue {
 
     pub fn kick_mmio(
         &mut self,
-        transport: super::virtio_mmio::VirtioMmioTransportDevice,
+        transport: &mut super::virtio_mmio::VirtioMmioTransportDevice,
     ) -> Result<(), VirtqueueError> {
         self.kick()?;
         if !super::virtio_mmio::notify_queue(transport, self.queue_index) {
