@@ -125,8 +125,10 @@ workqueue worker、RCU GP kthread、完整 softirq 执行或 SMP 并发。
 `TaskCreationCore.Setup` 是本阶段的主要收敛点：它必须依赖 `RootPidNamespace.Ready`、
 `CredentialCore.Prepared`、`BootInitTask.Online`、CPU/SLUB 事实和异常分发事实，并在同一事件中驱动
 `VectorContext.Preset` 与 `UprobeCore.Setup`。`SignalCore`、`TaskFileContext`、`VmaCore`、namespace、
-keyring 和 security 对象按 formal trace 后续推进。VFS/proc/page-cache/net namespace、`signals_init()` 以及
-实际任务创建仍保持 deferred 或 trimmed checkpoint，不应伪装成完整运行期服务。
+keyring 和 security 对象按 formal trace 后续推进。`VfsCore.Setup` 只覆盖 Linux `vfs_caches_init()` 的最小
+全局结构和 `mnt_init()->init_mount_tree()` 的初始 rootfs mount；当前 rootfs backing 必须是 ramfs。procfs、
+page-cache、net namespace、`signals_init()`、真实 mount namespace 切换以及实际任务创建仍保持 deferred 或
+trimmed checkpoint，不应伪装成完整运行期服务。
 
 `TaskCreationCore` 还必须提供 `copy_process()`/`kernel_clone()` 的通用创建契约。后续 `rest_init()` 创建
 `KernelInitTask` 或 `KthreaddTask` 时传入的 `TaskEntry` 要绑定到新任务的启动 context，并决定该任务第一次被调度后的执行入口；它不是创建完成后补写的描述性字段。当前正式规格要求 `KernelInitTask` 绑定 `TaskEntry::KernelInit`，`KthreaddTask` 绑定 `TaskEntry::Kthreadd`。
@@ -646,6 +648,11 @@ checkpoint KUnit/action-level 测试，app-level smoke 保留对公开 printk �
 `spec/model/smp-runtime/rootfs/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/rootfs.rs`。该阶段必须在 `InitcallPhase.Ready` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `kernel_init_freeable()` 的 rootfs 准备边界。
+
+初始 rootfs mount 不属于本阶段首次创建：它已经在 `ProcessPreparePhase` 的 `VfsCore.Setup` /
+`RamFsType.Setup` / `VfsCore.MountInitialRamFsRoot` 中对应 Linux `vfs_caches_init()->mnt_init()->init_mount_tree()` 完成。
+本阶段的 `RootFsEnableDeferred` 只表示后续 `prepare_namespace()` 中从初始 ramfs/rootfs backing 走向真实 root
+device、devtmpfs、`MS_MOVE` 和 `chroot(".")` 的 enable 位置。
 
 本阶段覆盖 `kunit_run_all_tests()`、`wait_for_initramfs()`、`console_on_rootfs()`、
 `init_eaccess(ramdisk_execute_command)` 对应 checkpoint、`prepare_namespace()` 和

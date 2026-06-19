@@ -23,6 +23,7 @@ pub mod platform_bus_actions;
 pub mod pre_smp_init;
 pub mod print;
 pub mod process_prepare;
+pub mod ramfs;
 pub mod raw_spinlock;
 pub mod resource_tree;
 pub mod rest_init;

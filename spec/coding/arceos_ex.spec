@@ -1143,8 +1143,10 @@ type ArceosExProcessPrepareCodingMust {
          *
          * This phase must keep task concurrency and SMP concurrency closed and
          * must not implicitly start workqueue workers, RCU GP kthreads, full
-         * softirq execution, network namespace runtime or VFS/proc visible
-         * services.
+         * softirq execution, network namespace runtime or proc visible
+         * services. The only VFS service allowed here is the Linux-like
+         * vfs_caches_init()/mnt_init() slice that creates the initial
+         * ramfs-backed rootfs mount.
          */
         arceos_ex_must_process_prepare_keep_runtime_services_deferred();
 
@@ -2215,6 +2217,8 @@ type ArceosExRootfsCodingMust {
          * prepare_namespace() must be represented by RootFsEnableDeferred in
          * this round. Root device probing, filesystem selection, devtmpfs
          * mount, MS_MOVE and chroot(".") must remain unimplemented details.
+         * The initial ramfs-backed rootfs mount belongs to ProcessPreparePhase
+         * vfs_caches_init()/mnt_init(), not to this RootfsPhase enable step.
          */
         arceos_ex_must_rootfs_keep_rootfs_enable_deferred_only();
 

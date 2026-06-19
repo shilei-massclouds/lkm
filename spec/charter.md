@@ -2055,7 +2055,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 这个边界承接 `IrqOpenPreparePhase` 的出口事实：boot CPU 本地中断总入口已经开放，console、sched clock 和 busy-wait delay API 已经达到启动期可用边界，但系统仍处于单根启动初始化流中，尚未创建 PID 1、`kthreadd` 或进入调度/idle 运行路径。选择在 `rest_init()` 前结束，是因为 `rest_init()` 会创建 `kernel_init` 和 `kthreadd`，设置 `system_state = SYSTEM_SCHEDULING`，并让 boot idle thread 进入 `schedule_preempt_disabled()` / `cpu_startup_entry(CPUHP_ONLINE)`；因此它是从“为第一个任务准备对象基础设施”切换到“任务系统开始运行”的自然边界。
 
-本子阶段的主线语义是为 `rest_init()` 创建第一个用户态初始化线程和内核线程管理者准备最小对象基础设施：PID、fork、thread stack、cred、anon VMA、proc caches、UTS namespace 壳、key/security 等对象在这一段进入可用或准备状态。从 `dbg_late_init()` 到 `kcsan_init()` 的尾段按批量策略处理：当前配置下为空实现的路径标记为 trimmed/no-op；其它大多服务用户态应用启动后的 namespace、VFS/pagecache、proc/ns/pidfs、seq_file 或信号队列能力，当前保留 Linux 时序位置但标记为 deferred，不在本子阶段推进到 `Ready`。
+本子阶段的主线语义是为 `rest_init()` 创建第一个用户态初始化线程和内核线程管理者准备最小对象基础设施：PID、fork、thread stack、cred、anon VMA、proc caches、UTS namespace 壳、key/security 等对象在这一段进入可用或准备状态。当前还恢复 `vfs_caches_init()` 中的 `VfsCore.setup()` 与 `mnt_init()->init_mount_tree()` 对应的初始 rootfs mount：Linux 的 `rootfs_fs_type` 默认使用 ramfs backing，初始 mount tree 在此时建立，并设置当前 root/pwd 的起点。从 `dbg_late_init()` 到 `kcsan_init()` 的尾段按批量策略处理：当前配置下为空实现的路径标记为 trimmed/no-op；其它大多服务用户态应用启动后的 namespace、pagecache、proc/ns/pidfs、seq_file 或信号队列能力，当前保留 Linux 时序位置但标记为 deferred，不在本子阶段推进到 `Ready`。
 
 当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_THREAD_INFO_IN_TASK=y`、`CONFIG_VMAP_STACK=y`、`CONFIG_PER_VMA_LOCK=y`、`CONFIG_RISCV_ISA_V=y`、`CONFIG_RISCV_ISA_V_PREEMPTIVE=y`、`CONFIG_NAMESPACES=y`、`CONFIG_UTS_NS=y`、`CONFIG_PID_NS=y`、`CONFIG_NET=y`、`CONFIG_NET_NS=y`、`CONFIG_PROC_FS=y`、`CONFIG_KEYS=y`、`CONFIG_SECURITY=y`、`CONFIG_DEBUG_FS=y` 和 `CONFIG_UPROBES=y`。同时，当前未启用 `CONFIG_CGROUPS`、`CONFIG_TASKSTATS`、`CONFIG_TASK_DELAY_ACCT`、`CONFIG_ACPI`、`CONFIG_KCSAN`、`CONFIG_KGDB`、`CONFIG_LOCKDEP` 和 `CONFIG_X86`。因此，本阶段图示和清单先按该配置区分主线 formal、deferred、checkpoint 与裁剪 no-op 路径。
 
@@ -2076,7 +2076,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 11. `namespace proxy 对象`（暂名 `NsProxy`）：覆盖 `proc_caches_init()` 中的 `nsproxy_cache_init()`。`NsProxy` 是 task 指向各类 namespace 实例的聚合引用对象，不是 `UtsNamespace` 或 `NetNamespace` 的子对象；当前只创建 `nsproxy` cache，建模为 `NsProxy.preset()` 并推进到 `Prepared`。
 12. `namespace 基础对象集合`：覆盖 `uts_ns_init()` 与后续 `net_ns_init()`，并和 `NsProxy` 形成关联。当前 `CONFIG_UTS_NS=y` 时，`uts_ns_init()` 建模为 `UtsNamespace.preset()`：它只创建 `"uts_namespace"` usercopy cache，供后续 `copy_utsname(CLONE_NEWUTS)` 动态创建 UTS namespace 使用；静态根对象 `init_uts_ns` 不是在此处创建，`get/put/free_uts_ns()`、`proc_ns_operations` 和 hostname/domainname sysctl 等运行期语义留给后续 `setup()` 或运行期 action。当前 `CONFIG_NET_NS=y` 下 `net_ns_init()` 有实质初始化，但位于 `dbg_late_init()` 之后，按本轮批量策略标记为 `NetNamespace.setup()` deferred。
 13. `权限与安全对象集合`：覆盖 `key_init()` 和 `security_init()`。`KeyringCore.setup()` 创建 `key_jar` cache，登记内建 key type registry 中的 `keyring/dead/user/logon` 四类基础 key type，并把静态 `root_key_user` 插入 `key_user_tree`，使 key 分配、key type 查找和 root key quota tracking 具备基础可用性；当前 `CONFIG_PERSISTENT_KEYRINGS=n`，persistent keyring 不进入主线。`SecurityCore.setup()` 在 kmalloc 可用后追加 early LSM 名称，解析 `CONFIG_LSM` 与启动参数形成 `ordered_lsms`，计算 cred/file/inode/task/key/sock 等对象的 `LsmBlobLayout`，必要时创建 `lsm_file_cache` 与 `lsm_inode_cache`，为当前 task/cred 补齐 early LSM state，并初始化已启用 LSM，使其通过 `security_add_hooks()` 注册到 `LsmHookDispatcher`/static call table。当前 `CapabilityLsm` 作为 `LSM_ORDER_FIRST` 稳定进入主线；`SelinuxLsm`、`AppArmorLsm` 等虽然可被编译进内核，但默认 `CONFIG_LSM` 未选中时只作为条件候选，不画成当前主线对象。二者都不是 `CredentialCore` 的子对象，但会被凭据、文件和进程访问控制路径引用。
-14. `VFS 与进程可见文件系统对象集合`：覆盖 `vfs_caches_init()`、`pagecache_init()`、`seq_file_init()`、`proc_root_init()`、`nsfs_init()` 和 `pidfs_init()`。当前保留 `VfsCore`、`PageCache`、`SeqFileCore`、`Procfs`、`Nsfs`、`Pidfs` 六个候选对象，但这些调用均位于 `dbg_late_init()` 之后，且主要服务用户态应用启动后的文件系统、页缓存、文本导出和进程可见伪文件系统能力；本子阶段统一标记为 deferred，不推进对象状态。
+14. `VFS 与进程可见文件系统对象集合`：覆盖 `vfs_caches_init()`、`pagecache_init()`、`seq_file_init()`、`proc_root_init()`、`nsfs_init()` 和 `pidfs_init()`。当前 `VfsCore.setup()` 建立 VFS 文件系统类型注册表、mount 表、dentry/inode/file 表等最小承载；`RamFsType.setup()` 表示 rootfs 默认 ramfs backing；随后 `VfsCore.MountInitialRamFsRoot` 对应 Linux `mnt_init()->init_mount_tree()`，建立初始 rootfs mount、superblock、root dentry/root inode 和当前 root 起点。`PageCache`、`SeqFileCore`、`Procfs`、`Nsfs`、`Pidfs` 仍作为候选对象保留 Linux 时序位置，但本轮不推进到 `Ready`。
 15. `信号核心对象`（暂名 `SignalCore`）的正式 setup：覆盖 `signals_init()`。它先执行 `siginfo_buildtime_checks()`，再创建 `sigqueue` cache，使 task signal delivery 和 queued signal 分配路径的基础结构完整；当前按尾段批量策略标记为 deferred，`SignalCore` 保持前序 `Prepared`。
 16. `控制与统计裁剪路径`：覆盖 `cpuset_init()`、`cgroup_init()`、`taskstats_init_early()` 和 `delayacct_init()`。当前 `CONFIG_CGROUPS=n`、`CONFIG_TASKSTATS=n` 且 `CONFIG_TASK_DELAY_ACCT` 未启用，相关调用为空实现或裁剪路径；未来启用后再恢复为 `Cpuset.setup()`、`CgroupCore.setup()`、`Taskstats.setup()` 与 `DelayAccounting.setup()`。
 17. `尾部平台/调试裁剪路径`：覆盖 X86 EFI runtime 切换、`dbg_late_init()`、`acpi_subsystem_init()`、`arch_post_acpi_subsys_init()` 和 `kcsan_init()`。当前 RISC-V/default_config 下分别因 `CONFIG_X86=n`、`CONFIG_KGDB=n`、`CONFIG_ACPI=n` 和 `CONFIG_KCSAN=n` 进入 trimmed/no-op；这些调用保留位置，但不作为本阶段主线结束状态。
@@ -2115,7 +2115,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 | `security_init()` | formal candidate: `SecurityCore.setup()` | 当前 `CONFIG_SECURITY=y`，建立 `ordered_lsms`、`LsmBlobLayout` 与 `LsmHookDispatcher`，并初始化默认主线的 `CapabilityLsm`；SELinux/AppArmor 等仅在被 `CONFIG_LSM` 或启动参数选中时进入主线。 |
 | `dbg_late_init()` | trimmed/no-op | 当前 `CONFIG_KGDB=n`，宏为空；未来启用后恢复为 `KernelDebugger.late_setup()` 或等价对象过程。 |
 | `net_ns_init()` | deferred | 当前 `CONFIG_NET=y` 且 `CONFIG_NET_NS=y`，有实质初始化；但位于尾段批量处理范围，暂不推进 `NetNamespace.setup()`。 |
-| `vfs_caches_init()` | deferred | 初始化 VFS 运行期 cache 和全局结构；当前保留 Linux 时序位置，后续用户态/VFS 路径展开时恢复 `VfsCore.setup()`。 |
+| `vfs_caches_init()` / `mnt_init()` / `init_mount_tree()` | formal: `VfsCore.setup()` + `RamFsType.setup()` + `VfsCore.MountInitialRamFsRoot` | 建立 VFS 最小全局结构和初始 rootfs mount；当前 rootfs backing 为 ramfs。Page cache、procfs/nsfs/pidfs 和完整 mount namespace 仍 deferred。 |
 | `pagecache_init()` | deferred | 初始化 page cache 基础结构；当前不推进 `PageCache.setup()`。 |
 | `signals_init()` | deferred | 执行 `siginfo` 编译期检查并创建 `sigqueue` cache；当前 `SignalCore` 保持 `Prepared`，后续再推进 setup。 |
 | `seq_file_init()` | deferred | 初始化 seq_file iterator/cache 基础；主要服务 procfs/debugfs 等文本导出路径，当前不推进 `SeqFileCore.setup()`。 |
@@ -2156,7 +2156,8 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `SignalCore.state == Prepared`
 - `KeyringCore.state == Ready`
 - `SecurityCore.state == Ready`，表示 LSM 顺序、blob 布局、hook dispatcher/static call table 已完成基础装配，默认主线的 `CapabilityLsm` hooks 已注册
-- `NetNamespace.setup()`、`VfsCore.setup()`、`PageCache.setup()`、`SignalCore.setup()`、`SeqFileCore.setup()`、`Procfs.setup()`、`Nsfs.setup()` 和 `Pidfs.setup()` 均保留 Linux 时序位置但在本子阶段 deferred
+- `VfsCore.state == Ready` 且初始 rootfs mount 已建立：`rootfs_fs_type` 默认使用 ramfs backing，root mount、superblock、root dentry/root inode 和当前 root 起点已经可观察
+- `NetNamespace.setup()`、`PageCache.setup()`、`SignalCore.setup()`、`SeqFileCore.setup()`、`Procfs.setup()`、`Nsfs.setup()` 和 `Pidfs.setup()` 均保留 Linux 时序位置但在本子阶段 deferred
 - `X86EfiRuntimeSwitch`、`KernelDebuggerLate`、`Cpuset`、`CgroupCore`、`Taskstats`、`DelayAccounting`、`AcpiSubsystem`、`ArchPostAcpi` 和 `KcsanRuntime` 均按当前配置记录为 trimmed/no-op
 - 下一阶段的起点是 `rest_init()`，它将创建 `kernel_init` 与 `kthreadd`，并把系统推进到 `SYSTEM_SCHEDULING`；这也是从 `InterruptPhase` 转入 `UP Multitask Phase` 的边界
 

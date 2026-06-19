@@ -119,6 +119,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::process_prepare::run,
     },
     SmokeCase {
+        name: "ramfs",
+        run: cases::ramfs::run,
+    },
+    SmokeCase {
         name: "task_creation_core",
         run: cases::task_creation_core::run,
     },

@@ -1,7 +1,11 @@
 use crate::{
     apps::smoke::SmokeResult,
     context::context,
-    objects::{printk, state::State},
+    objects::{
+        printk,
+        state::State,
+        vfs::{FileSystemKind, VfsInodeKind},
+    },
     phases,
 };
 
@@ -69,8 +73,51 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    let Some(root_mount_ref) = ctx.vfs_core.current_root_mount() else {
+        printk::write_str("vfs root mount missing\n");
+        return SmokeResult::Failed;
+    };
+    let Some(root_dentry_ref) = ctx.vfs_core.current_root_dentry() else {
+        printk::write_str("vfs root dentry missing\n");
+        return SmokeResult::Failed;
+    };
+    let Some(root_mount) = ctx.vfs_core.mount(root_mount_ref) else {
+        printk::write_str("vfs root mount invalid\n");
+        return SmokeResult::Failed;
+    };
+    let Some(root_superblock) = ctx.vfs_core.superblock(root_mount.superblock_ref()) else {
+        printk::write_str("vfs root superblock invalid\n");
+        return SmokeResult::Failed;
+    };
+    let Some(root_inode_ref) = root_superblock.root_inode_ref() else {
+        printk::write_str("vfs root inode missing\n");
+        return SmokeResult::Failed;
+    };
+    let Some(root_dentry) = ctx.vfs_core.dentry(root_dentry_ref) else {
+        printk::write_str("vfs root dentry invalid\n");
+        return SmokeResult::Failed;
+    };
+    let Some(root_inode) = ctx.vfs_core.inode(root_inode_ref) else {
+        printk::write_str("vfs root inode invalid\n");
+        return SmokeResult::Failed;
+    };
+    if ctx.vfs_core.state() != State::Ready
+        || ctx.ramfs_type.state() != State::Ready
+        || !ctx.vfs_core.ramfs_registered()
+        || !ctx.vfs_core.rootfs_mount_created()
+        || root_mount.fs_kind() != FileSystemKind::RamFs
+        || root_mount.root_dentry_ref() != root_dentry_ref
+        || root_superblock.root_dentry_ref() != Some(root_dentry_ref)
+        || root_dentry.name() != b"/"
+        || root_dentry.inode_ref() != root_inode_ref
+        || root_inode.kind() != VfsInodeKind::Directory
+    {
+        printk::write_str("vfs rootfs facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     printk::write_fmt(format_args!(
-        "process_prepare pid_max={} max_threads={} key_types={} vector={}\n",
+        "process_prepare pid_max={} max_threads={} key_types={} vector={} rootfs=ramfs\n",
         ctx.root_pid_namespace.pid_max(),
         ctx.task_creation_core.max_threads(),
         ctx.keyring_core.builtin_key_type_count(),

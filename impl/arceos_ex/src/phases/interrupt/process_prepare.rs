@@ -3,7 +3,8 @@ use crate::{
     context::Context,
     objects::{
         process_prepare::TaskCreationSetup,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{failed_condition, EventError, EventErrorCode, EventResult, LifecycleEvent, State},
+        vfs::{FileSystemKind, VfsInodeKind},
     },
     trace::Checkpoint,
 };
@@ -71,9 +72,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.slub_allocator,
         &ctx.static_branch,
     )?;
+    setup_vfs_rootfs(ctx)?;
     checkpoint_dbg_late_init_noop()?;
     checkpoint_net_namespace_deferred()?;
-    checkpoint_vfs_core_deferred()?;
     checkpoint_page_cache_deferred()?;
     checkpoint_signal_core_setup_deferred()?;
     checkpoint_seq_file_core_deferred()?;
@@ -91,6 +92,28 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
 
 fn handoff() -> ! {
     crate::phases::interrupt::setup_after_children()
+}
+
+fn setup_vfs_rootfs(ctx: &mut Context) -> EventResult {
+    ctx.vfs_core.setup()?;
+    ctx.ramfs_type.setup()?;
+    ctx.vfs_core
+        .register_ramfs_type(&ctx.ramfs_type)
+        .map_err(|_| vfs_setup_error(ctx))?;
+    ctx.vfs_core
+        .mount_initial_ramfs_root(&ctx.ramfs_type)
+        .map_err(|_| vfs_setup_error(ctx))?;
+    Ok(())
+}
+
+fn vfs_setup_error(ctx: &Context) -> EventError {
+    EventError::failed(
+        EventErrorCode::ConditionFailed,
+        LifecycleEvent::Setup,
+        ctx.vfs_core.state(),
+        State::Ready,
+        State::Ready,
+    )
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {
@@ -206,6 +229,66 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.security_core.hook_dispatcher_ready()
         && ctx.security_core.capability_hook_count() != 0
         && ctx.security_core.optional_lsms_deferred()
+        && ctx.vfs_core.state() == State::Ready
+        && ctx.vfs_core.fs_type_registry_ready()
+        && ctx.vfs_core.mount_table_ready()
+        && ctx.vfs_core.dentry_cache_ready()
+        && ctx.vfs_core.inode_table_ready()
+        && ctx.vfs_core.file_table_ready()
+        && ctx.vfs_core.page_cache_deferred()
+        && ctx.vfs_core.permissions_deferred()
+        && ctx.vfs_core.mount_namespace_deferred()
+        && ctx.ramfs_type.state() == State::Ready
+        && ctx.ramfs_type.memory_backed()
+        && ctx.vfs_core.ramfs_registered()
+        && ctx.vfs_core.rootfs_mount_created()
+        && rootfs_mount_facts_ready(ctx)
+}
+
+fn rootfs_mount_facts_ready(ctx: &Context) -> bool {
+    let Some(mount_ref) = ctx.vfs_core.current_root_mount() else {
+        return false;
+    };
+    let Some(root_dentry_ref) = ctx.vfs_core.current_root_dentry() else {
+        return false;
+    };
+    let Some(mount) = ctx.vfs_core.mount(mount_ref) else {
+        return false;
+    };
+    if !mount.mounted()
+        || mount.fs_kind() != FileSystemKind::RamFs
+        || mount.root_dentry_ref() != root_dentry_ref
+    {
+        return false;
+    }
+
+    let Some(superblock) = ctx.vfs_core.superblock(mount.superblock_ref()) else {
+        return false;
+    };
+    let Some(root_inode_ref) = superblock.root_inode_ref() else {
+        return false;
+    };
+    if superblock.fs_kind() != FileSystemKind::RamFs
+        || !superblock.ramfs_private_bound()
+        || superblock.root_dentry_ref() != Some(root_dentry_ref)
+    {
+        return false;
+    }
+
+    let Some(root_dentry) = ctx.vfs_core.dentry(root_dentry_ref) else {
+        return false;
+    };
+    let Some(root_inode) = ctx.vfs_core.inode(root_inode_ref) else {
+        return false;
+    };
+    root_dentry.parent().is_none()
+        && root_dentry.positive()
+        && !root_dentry.removed()
+        && root_dentry.name() == b"/"
+        && root_dentry.inode_ref() == root_inode_ref
+        && root_inode.superblock_ref() == mount.superblock_ref()
+        && root_inode.kind() == VfsInodeKind::Directory
+        && !root_inode.removed()
 }
 
 fn checkpoint_x86_efi_runtime_switch_trimmed() -> EventResult {
@@ -230,11 +313,6 @@ fn checkpoint_dbg_late_init_noop() -> EventResult {
 
 fn checkpoint_net_namespace_deferred() -> EventResult {
     crate::trace::checkpoint(Checkpoint::NetNamespaceDeferred);
-    Ok(())
-}
-
-fn checkpoint_vfs_core_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::VfsCoreDeferred);
     Ok(())
 }
 

@@ -602,6 +602,10 @@ object ProcessPreparePhase: PhaseObject {
                     UtsNamespace.Event::Preset;
                     KeyringCore.Event::Setup;
                     SecurityCore.Event::Setup;
+                    VfsCore.Event::Setup;
+                    RamFsType.Event::Setup;
+                    VfsCore.Action::RegisterRamFsType(RamFsType);
+                    VfsCore.Action::MountInitialRamFsRoot;
                 }
 
                 ensures {
@@ -617,6 +621,20 @@ object ProcessPreparePhase: PhaseObject {
                     x86_efi_runtime_switch_trimmed();
                     shadow_call_stack_init_trimmed();
                     lockdep_init_task_trimmed();
+                    vfs_core_initialized(VfsCore);
+                    vfs_core_fs_type_registry_ready(VfsCore);
+                    vfs_core_mount_table_ready(VfsCore);
+                    vfs_core_dentry_cache_ready(VfsCore);
+                    vfs_core_inode_table_ready(VfsCore);
+                    vfs_core_file_table_ready(VfsCore);
+                    ramfs_type_registered(VfsCore, RamFsType);
+                    rootfs_fs_type_uses_ramfs(RamFsType);
+                    rootfs_mount_created(VfsCore);
+                    vfs_current_root_mount_set(VfsCore, Mount);
+                    vfs_current_root_dentry_set(VfsCore, Dentry);
+                    superblock_root_dentry_bound(SuperBlock, Dentry);
+                    superblock_root_inode_bound(SuperBlock, Inode);
+                    superblock_root_dentry_inode_matches(SuperBlock, Dentry, Inode);
                     dbg_late_init_trimmed();
                     cpuset_init_trimmed();
                     cgroup_init_trimmed();
@@ -629,7 +647,7 @@ object ProcessPreparePhase: PhaseObject {
 
                 deferred {
                     "NetNamespace.setup() 保留 Linux net_ns_init() 时序位置，当前不推进网络 namespace 运行期对象。";
-                    "VfsCore.setup()、PageCache.setup()、SeqFileCore.setup()、Procfs.setup()、Nsfs.setup() 和 Pidfs.setup() 服务用户态/VFS/proc 可见路径，当前保留为 deferred。";
+                    "VfsCore.setup() 当前覆盖 Linux vfs_caches_init()/mnt_init() 中 rootfs 初始挂载：rootfs_fs_type 默认使用 ramfs backing，并由 init_mount_tree() 建立初始 root mount；PageCache.setup()、SeqFileCore.setup()、Procfs.setup()、Nsfs.setup() 和 Pidfs.setup() 仍保留为 deferred。";
                     "SignalCore.setup()/signals_init() 暂缓；本阶段只要求 sighand/signal cache 进入 Prepared。";
                     "RootPidNamespace 的 alloc_pid/free_pid/find_pid_ns 等运行期 action 留给 rest_init() 和后续任务创建路径。";
                     "TaskCreationCore 不创建 kernel_init 或 kthreadd；rest_init() 才推进这些任务对象和 SYSTEM_SCHEDULING。";
@@ -654,6 +672,19 @@ object ProcessPreparePhase: PhaseObject {
             UtsNamespace.state == State::Prepared;
             KeyringCore.state == State::Ready;
             SecurityCore.state == State::Ready;
+            VfsCore.state == State::Ready;
+            RamFsType.state == State::Ready;
+            vfs_core_initialized(VfsCore);
+            vfs_core_fs_type_registry_ready(VfsCore);
+            vfs_core_mount_table_ready(VfsCore);
+            vfs_core_dentry_cache_ready(VfsCore);
+            vfs_core_inode_table_ready(VfsCore);
+            vfs_core_file_table_ready(VfsCore);
+            ramfs_type_registered(VfsCore, RamFsType);
+            rootfs_fs_type_uses_ramfs(RamFsType);
+            rootfs_mount_created(VfsCore);
+            vfs_current_root_mount_set(VfsCore, Mount);
+            vfs_current_root_dentry_set(VfsCore, Dentry);
             process_prepare_ready(ProcessPreparePhase);
             rest_init_inputs_ready(ProcessPreparePhase, RootPidNamespace, TaskCreationCore, CredentialCore);
             boot_cpu_local_irq_enabled();
