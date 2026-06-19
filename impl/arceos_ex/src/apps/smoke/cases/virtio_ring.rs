@@ -5,7 +5,7 @@ use crate::{
     },
     objects::{
         state::State,
-        virtio_ring::{smoke_fixture, VirtQueue, VirtqueueError},
+        virtio_ring::{smoke_fixture, VirtQueue, VirtqueueDescriptorSpec, VirtqueueError},
     },
 };
 
@@ -16,6 +16,7 @@ pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
     suite.scenario(&mut SplitRingLifecycleScenario::new());
     suite.scenario(&mut SingleInbufCompletionScenario::new());
+    suite.scenario(&mut DescriptorChainScenario::new());
     suite.scenario(&mut DescriptorExhaustionScenario::new());
     suite.scenario(&mut EmptyCompletionScenario::new());
     suite.scenario(&mut InvalidCompletionScenario::new());
@@ -49,7 +50,10 @@ impl VirtQueueFixture {
         );
         assertions.assert("free list ready", self.queue.ring().free_list_ready());
         assertions.assert("single queue", self.queue.ring().single_queue());
-        assertions.assert("direct desc", self.queue.ring().direct_descriptors_only());
+        assertions.assert(
+            "direct chain",
+            self.queue.ring().direct_descriptor_chain_ready(),
+        );
         assertions.assert(
             "indirect deferred",
             self.queue.ring().indirect_descriptors_deferred(),
@@ -125,7 +129,18 @@ impl SmokeScenario for SingleInbufCompletionScenario {
         assertions.assert("input added", self.fixture.queue.input_buffer_added());
         assertions.assert(
             "free descriptor consumed",
-            self.fixture.queue.free_descriptor_consumed(),
+            self.fixture.queue.free_descriptors_consumed(),
+        );
+        assertions.assert(
+            "chain allocated",
+            self.fixture.queue.descriptor_chain_allocated(),
+        );
+        assertions.assert("chain direct", self.fixture.queue.descriptor_chain_direct());
+        assertions.assert("chain in", self.fixture.queue.in_descriptor_added());
+        assertions.assert("chain published", self.fixture.queue.chain_head_published());
+        assertions.assert(
+            "chain count matched",
+            self.fixture.queue.chain_free_descriptor_count_matched(),
         );
         assertions.assert("avail advanced", self.fixture.queue.avail_index_advanced());
         assertions.assert("submitted", self.fixture.queue.submitted_count() == 1);
@@ -148,6 +163,7 @@ impl SmokeScenario for SingleInbufCompletionScenario {
         assertions.assert("descriptor not completed", !descriptor.completed());
         assertions.assert("descriptor writable", descriptor.writable());
         assertions.assert("descriptor direct", descriptor.direct());
+        assertions.assert("descriptor no next", !descriptor.has_next());
 
         assertions.assert_ok("kick", self.fixture.queue.kick());
         assertions.assert("kick recorded", self.fixture.queue.kick_recorded());
@@ -186,9 +202,15 @@ impl SmokeScenario for SingleInbufCompletionScenario {
             "descriptor len carried",
             used.descriptor_len() == BUFFER_LEN,
         );
+        assertions.assert("in descriptor len", used.in_descriptor_len() == BUFFER_LEN);
+        assertions.assert("descriptor count", used.descriptor_count() == 1);
         assertions.assert(
             "get buf returns len",
             self.fixture.queue.get_buf_returns_len(),
+        );
+        assertions.assert(
+            "chain released",
+            self.fixture.queue.descriptor_chain_released(),
         );
         assertions.assert(
             "ownership released",
@@ -201,6 +223,109 @@ impl SmokeScenario for SingleInbufCompletionScenario {
             "last used idx",
             self.fixture.queue.ring().last_used_idx() == 1,
         );
+    }
+
+    fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+struct DescriptorChainScenario {
+    fixture: VirtQueueFixture,
+}
+
+impl DescriptorChainScenario {
+    fn new() -> Self {
+        Self {
+            fixture: VirtQueueFixture::new(4),
+        }
+    }
+}
+
+impl SmokeScenario for DescriptorChainScenario {
+    fn name(&self) -> &'static str {
+        "virtio_ring.descriptor_chain"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.fixture.setup_ready(assertions);
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        let specs = [
+            VirtqueueDescriptorSpec::out(BUFFER_ADDR, 16),
+            VirtqueueDescriptorSpec::inbuf(BUFFER_ADDR + 64, 128),
+            VirtqueueDescriptorSpec::inbuf(BUFFER_ADDR + 256, 1),
+        ];
+        let token = match self.fixture.queue.add_chain(&specs) {
+            Ok(token) => token,
+            Err(_) => {
+                assertions.assert("add chain", false);
+                return;
+            }
+        };
+        assertions.assert(
+            "chain allocated",
+            self.fixture.queue.descriptor_chain_allocated(),
+        );
+        assertions.assert("chain direct", self.fixture.queue.descriptor_chain_direct());
+        assertions.assert("chain out", self.fixture.queue.out_descriptor_added());
+        assertions.assert("chain in", self.fixture.queue.in_descriptor_added());
+        assertions.assert("chain published", self.fixture.queue.chain_head_published());
+        assertions.assert(
+            "chain count matched",
+            self.fixture.queue.chain_free_descriptor_count_matched(),
+        );
+        assertions.assert(
+            "free count dec",
+            self.fixture.queue.ring().free_count() == 1,
+        );
+        assertions.assert("avail idx", self.fixture.queue.ring().avail_idx() == 1);
+        assertions.assert(
+            "avail head",
+            self.fixture.queue.ring().avail_entry(0) == Some(token.head()),
+        );
+
+        let Some(first) = self.fixture.queue.ring().descriptor(token) else {
+            assertions.assert("first descriptor", false);
+            return;
+        };
+        let second_index = first.next();
+        let Some(second) = self.fixture.queue.ring().descriptor_by_index(second_index) else {
+            assertions.assert("second descriptor", false);
+            return;
+        };
+        let third_index = second.next();
+        let Some(third) = self.fixture.queue.ring().descriptor_by_index(third_index) else {
+            assertions.assert("third descriptor", false);
+            return;
+        };
+        assertions.assert("first out", !first.writable());
+        assertions.assert("first next", first.has_next());
+        assertions.assert("second in", second.writable());
+        assertions.assert("second next", second.has_next());
+        assertions.assert("third in", third.writable());
+        assertions.assert("third last", !third.has_next() && third.direct());
+
+        assertions.assert_ok(
+            "fixture used entry",
+            smoke_fixture::prepare_used_entry(&mut self.fixture.queue, token, 128),
+        );
+        let used = match self.fixture.queue.get_buf() {
+            Ok(used) => used,
+            Err(_) => {
+                assertions.assert("get chain", false);
+                return;
+            }
+        };
+        assertions.assert("used token", used.token() == token);
+        assertions.assert("used len", used.len() == 128);
+        assertions.assert("first len", used.descriptor_len() == 16);
+        assertions.assert("in len", used.in_descriptor_len() == 129);
+        assertions.assert("descriptor count", used.descriptor_count() == 3);
+        assertions.assert(
+            "chain released",
+            self.fixture.queue.descriptor_chain_released(),
+        );
+        assertions.assert("free restored", self.fixture.queue.ring().free_count() == 4);
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
@@ -243,6 +368,27 @@ impl SmokeScenario for DescriptorExhaustionScenario {
             "exhaustion recorded",
             self.fixture.queue.ring().descriptor_exhaustion_rejected(),
         );
+
+        let mut chain_queue = VirtQueue::new(2);
+        assertions.assert_ok("chain queue setup", chain_queue.setup());
+        assertions.assert(
+            "oversized chain",
+            chain_queue.add_chain(&[
+                VirtqueueDescriptorSpec::out(BUFFER_ADDR, 16),
+                VirtqueueDescriptorSpec::inbuf(BUFFER_ADDR + 64, 16),
+                VirtqueueDescriptorSpec::inbuf(BUFFER_ADDR + 128, 1),
+            ]) == Err(VirtqueueError::ChainTooLong),
+        );
+        assertions.assert("oversized chain free", chain_queue.ring().free_count() == 2);
+        assertions.assert_ok("consume one", chain_queue.add_inbuf(BUFFER_ADDR + 192, 16));
+        assertions.assert(
+            "insufficient chain",
+            chain_queue.add_chain(&[
+                VirtqueueDescriptorSpec::out(BUFFER_ADDR + 256, 16),
+                VirtqueueDescriptorSpec::inbuf(BUFFER_ADDR + 320, 16),
+            ]) == Err(VirtqueueError::NoFreeDescriptor),
+        );
+        assertions.assert("atomic failure", chain_queue.ring().free_count() == 1);
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
@@ -319,6 +465,17 @@ impl SmokeScenario for InvalidCompletionScenario {
         assertions.assert(
             "zero len",
             self.fixture.queue.add_inbuf(BUFFER_ADDR, 0) == Err(VirtqueueError::InvalidBuffer),
+        );
+        assertions.assert(
+            "empty chain",
+            self.fixture.queue.add_chain(&[]) == Err(VirtqueueError::InvalidBuffer),
+        );
+        assertions.assert(
+            "chain invalid descriptor",
+            self.fixture.queue.add_chain(&[
+                VirtqueueDescriptorSpec::out(BUFFER_ADDR, 16),
+                VirtqueueDescriptorSpec::inbuf(0, 16),
+            ]) == Err(VirtqueueError::InvalidBuffer),
         );
         let token = match self.fixture.queue.add_inbuf(BUFFER_ADDR, BUFFER_LEN) {
             Ok(token) => token,

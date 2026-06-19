@@ -23,6 +23,7 @@ pub enum VirtqueueError {
     NotReady,
     InvalidBuffer,
     NoFreeDescriptor,
+    ChainTooLong,
     InvalidToken,
     AlreadyCompleted,
     UsedRingFull,
@@ -88,8 +89,70 @@ impl VirtqDescriptor {
         self.flags & VIRTQ_DESC_F_WRITE != 0
     }
 
+    pub const fn has_next(self) -> bool {
+        self.flags & VIRTQ_DESC_F_NEXT != 0
+    }
+
+    pub const fn next(self) -> u16 {
+        self.next
+    }
+
     pub const fn direct(self) -> bool {
         self.flags & VIRTQ_DESC_F_NEXT == 0 && self.next == VIRTQUEUE_DESC_NONE
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum VirtqueueDescriptorDirection {
+    Out,
+    In,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct VirtqueueDescriptorSpec {
+    addr: usize,
+    len: u32,
+    direction: VirtqueueDescriptorDirection,
+}
+
+impl VirtqueueDescriptorSpec {
+    pub const fn out(addr: usize, len: u32) -> Self {
+        Self {
+            addr,
+            len,
+            direction: VirtqueueDescriptorDirection::Out,
+        }
+    }
+
+    pub const fn inbuf(addr: usize, len: u32) -> Self {
+        Self {
+            addr,
+            len,
+            direction: VirtqueueDescriptorDirection::In,
+        }
+    }
+
+    const fn flags(self) -> u16 {
+        match self.direction {
+            VirtqueueDescriptorDirection::Out => 0,
+            VirtqueueDescriptorDirection::In => VIRTQ_DESC_F_WRITE,
+        }
+    }
+
+    const fn addr(self) -> usize {
+        self.addr
+    }
+
+    const fn len(self) -> u32 {
+        self.len
+    }
+
+    const fn is_in(self) -> bool {
+        matches!(self.direction, VirtqueueDescriptorDirection::In)
+    }
+
+    const fn is_out(self) -> bool {
+        matches!(self.direction, VirtqueueDescriptorDirection::Out)
     }
 }
 
@@ -179,6 +242,8 @@ pub struct VirtqueueUsedBuffer {
     addr: usize,
     len: u32,
     descriptor_len: u32,
+    in_descriptor_len: u32,
+    descriptor_count: u16,
 }
 
 impl VirtqueueUsedBuffer {
@@ -197,6 +262,22 @@ impl VirtqueueUsedBuffer {
     pub const fn descriptor_len(self) -> u32 {
         self.descriptor_len
     }
+
+    pub const fn in_descriptor_len(self) -> u32 {
+        self.in_descriptor_len
+    }
+
+    pub const fn descriptor_count(self) -> u16 {
+        self.descriptor_count
+    }
+}
+
+struct VirtqueueChainStats {
+    count: u16,
+    first_addr: usize,
+    first_len: u32,
+    total_len: u32,
+    in_len: u32,
 }
 
 pub struct VirtioSplitRing {
@@ -210,7 +291,7 @@ pub struct VirtioSplitRing {
     avail_idx: u16,
     used_idx: u16,
     last_used_idx: u16,
-    direct_descriptors_only: bool,
+    direct_descriptor_chain_ready: bool,
     indirect_descriptors_deferred: bool,
     event_idx_deferred: bool,
     dma_cache_deferred: bool,
@@ -236,7 +317,7 @@ impl VirtioSplitRing {
             avail_idx: 0,
             used_idx: 0,
             last_used_idx: 0,
-            direct_descriptors_only: false,
+            direct_descriptor_chain_ready: false,
             indirect_descriptors_deferred: false,
             event_idx_deferred: false,
             dma_cache_deferred: false,
@@ -280,8 +361,8 @@ impl VirtioSplitRing {
         true
     }
 
-    pub const fn direct_descriptors_only(&self) -> bool {
-        self.direct_descriptors_only
+    pub const fn direct_descriptor_chain_ready(&self) -> bool {
+        self.direct_descriptor_chain_ready
     }
 
     pub const fn indirect_descriptors_deferred(&self) -> bool {
@@ -325,7 +406,11 @@ impl VirtioSplitRing {
     }
 
     pub fn descriptor(&self, token: VirtqueueBufferToken) -> Option<VirtqDescriptor> {
-        let index = usize::from(token.head());
+        self.descriptor_by_index(token.head())
+    }
+
+    pub fn descriptor_by_index(&self, descriptor_index: u16) -> Option<VirtqDescriptor> {
+        let index = usize::from(descriptor_index);
         if index >= self.descriptors.len() {
             return None;
         }
@@ -381,7 +466,7 @@ impl VirtioSplitRing {
         self.avail_idx = 0;
         self.used_idx = 0;
         self.last_used_idx = 0;
-        self.direct_descriptors_only = true;
+        self.direct_descriptor_chain_ready = true;
         self.indirect_descriptors_deferred = true;
         self.event_idx_deferred = true;
         self.dma_cache_deferred = true;
@@ -406,17 +491,94 @@ impl VirtioSplitRing {
         Some(head)
     }
 
-    fn release_descriptor(&mut self, head: u16) {
-        let index = usize::from(head);
+    fn restore_free_descriptor(&mut self, descriptor_index: u16) {
+        let index = usize::from(descriptor_index);
         if index >= self.descriptors.len() {
             return;
         }
         self.descriptors[index] = VirtqDescriptor::empty();
         self.descriptors[index].next_free = self.free_head.unwrap_or(VIRTQUEUE_DESC_NONE);
-        self.free_head = Some(head);
+        self.free_head = Some(descriptor_index);
         if self.free_count < self.queue_size {
             self.free_count = self.free_count.saturating_add(1);
         }
+    }
+
+    fn restore_allocated_descriptors(&mut self, allocated: &[u16]) {
+        let mut index = allocated.len();
+        while index > 0 {
+            index -= 1;
+            self.restore_free_descriptor(allocated[index]);
+        }
+    }
+
+    fn release_descriptor_chain(&mut self, head: u16) -> u16 {
+        let mut next = head;
+        let mut released = 0u16;
+        loop {
+            let index = usize::from(next);
+            if index >= self.descriptors.len() || !self.descriptors[index].active {
+                break;
+            }
+            let descriptor = self.descriptors[index];
+            let has_next = descriptor.has_next();
+            let next_descriptor = descriptor.next();
+            self.restore_free_descriptor(next);
+            released = released.saturating_add(1);
+            if !has_next {
+                break;
+            }
+            next = next_descriptor;
+        }
+        released
+    }
+
+    fn active_chain_stats(&self, head: u16) -> Option<VirtqueueChainStats> {
+        let index = usize::from(head);
+        if index >= self.descriptors.len() || !self.descriptors[index].active {
+            return None;
+        }
+
+        let mut next = head;
+        let mut count = 0u16;
+        let mut first_addr = 0usize;
+        let mut first_len = 0u32;
+        let mut total_len = 0u32;
+        let mut in_len = 0u32;
+        loop {
+            let descriptor_index = usize::from(next);
+            if descriptor_index >= self.descriptors.len() {
+                return None;
+            }
+            let descriptor = self.descriptors[descriptor_index];
+            if !descriptor.active {
+                return None;
+            }
+            if count == 0 {
+                first_addr = descriptor.addr();
+                first_len = descriptor.len();
+            }
+            total_len = total_len.saturating_add(descriptor.len());
+            if descriptor.writable() {
+                in_len = in_len.saturating_add(descriptor.len());
+            }
+            count = count.saturating_add(1);
+            if !descriptor.has_next() {
+                break;
+            }
+            if count >= self.queue_size {
+                return None;
+            }
+            next = descriptor.next();
+        }
+
+        Some(VirtqueueChainStats {
+            count,
+            first_addr,
+            first_len,
+            total_len,
+            in_len,
+        })
     }
 
     fn ring_index(&self, index: u16) -> usize {
@@ -556,12 +718,20 @@ pub struct VirtQueue {
     lifecycle: Lifecycle,
     ring: VirtioSplitRing,
     input_buffer_added: bool,
-    free_descriptor_consumed: bool,
+    descriptor_chain_allocated: bool,
+    descriptor_chain_direct: bool,
+    out_descriptor_added: bool,
+    in_descriptor_added: bool,
+    chain_head_published: bool,
+    chain_free_descriptor_count_matched: bool,
+    chain_allocation_atomic: bool,
+    free_descriptors_consumed: bool,
     avail_index_advanced: bool,
     kick_recorded: bool,
     used_index_advanced: bool,
     get_buf_returns_len: bool,
     get_buf_empty_rejected: bool,
+    descriptor_chain_released: bool,
     buffer_ownership_released: bool,
     real_backing_ready: bool,
     queue_index: u16,
@@ -584,12 +754,20 @@ impl VirtQueue {
             lifecycle: Lifecycle::new(State::Base),
             ring: VirtioSplitRing::new(queue_size),
             input_buffer_added: false,
-            free_descriptor_consumed: false,
+            descriptor_chain_allocated: false,
+            descriptor_chain_direct: false,
+            out_descriptor_added: false,
+            in_descriptor_added: false,
+            chain_head_published: false,
+            chain_free_descriptor_count_matched: false,
+            chain_allocation_atomic: false,
+            free_descriptors_consumed: false,
             avail_index_advanced: false,
             kick_recorded: false,
             used_index_advanced: false,
             get_buf_returns_len: false,
             get_buf_empty_rejected: false,
+            descriptor_chain_released: false,
             buffer_ownership_released: false,
             real_backing_ready: false,
             queue_index: 0,
@@ -619,8 +797,32 @@ impl VirtQueue {
         self.input_buffer_added
     }
 
-    pub const fn free_descriptor_consumed(&self) -> bool {
-        self.free_descriptor_consumed
+    pub const fn free_descriptors_consumed(&self) -> bool {
+        self.free_descriptors_consumed
+    }
+
+    pub const fn descriptor_chain_allocated(&self) -> bool {
+        self.descriptor_chain_allocated
+    }
+
+    pub const fn descriptor_chain_direct(&self) -> bool {
+        self.descriptor_chain_direct
+    }
+
+    pub const fn out_descriptor_added(&self) -> bool {
+        self.out_descriptor_added
+    }
+
+    pub const fn in_descriptor_added(&self) -> bool {
+        self.in_descriptor_added
+    }
+
+    pub const fn chain_head_published(&self) -> bool {
+        self.chain_head_published
+    }
+
+    pub const fn chain_free_descriptor_count_matched(&self) -> bool {
+        self.chain_free_descriptor_count_matched
     }
 
     pub const fn avail_index_advanced(&self) -> bool {
@@ -641,6 +843,10 @@ impl VirtQueue {
 
     pub const fn get_buf_empty_rejected(&self) -> bool {
         self.get_buf_empty_rejected
+    }
+
+    pub const fn descriptor_chain_released(&self) -> bool {
+        self.descriptor_chain_released
     }
 
     pub const fn buffer_ownership_released(&self) -> bool {
@@ -762,40 +968,98 @@ impl VirtQueue {
         addr: usize,
         len: u32,
     ) -> Result<VirtqueueBufferToken, VirtqueueError> {
+        self.add_chain(&[VirtqueueDescriptorSpec::inbuf(addr, len)])
+    }
+
+    pub fn add_chain(
+        &mut self,
+        specs: &[VirtqueueDescriptorSpec],
+    ) -> Result<VirtqueueBufferToken, VirtqueueError> {
         if self.lifecycle.state() != State::Ready {
             return Err(VirtqueueError::NotReady);
         }
-        if addr == 0 || len == 0 {
+        if specs.is_empty() {
             return Err(VirtqueueError::InvalidBuffer);
         }
-        let Some(head) = self.ring.pop_free_descriptor() else {
+        if specs.len() > usize::from(self.ring.queue_size()) {
+            return Err(VirtqueueError::ChainTooLong);
+        }
+        if specs.len() > usize::from(self.ring.free_count()) {
             self.ring.descriptor_exhaustion_rejected = true;
             return Err(VirtqueueError::NoFreeDescriptor);
-        };
-        let desc_index = usize::from(head);
-        self.ring.descriptors[desc_index] = VirtqDescriptor {
-            addr,
-            len,
-            flags: VIRTQ_DESC_F_WRITE,
-            next: VIRTQUEUE_DESC_NONE,
-            next_free: VIRTQUEUE_DESC_NONE,
-            active: true,
-            completed: false,
-        };
+        }
         if self.real_backing_ready {
-            let Some(raw_desc) = self.ring.raw_desc_ptr(head) else {
+            if self.ring.raw_avail_ring_ptr(self.ring.avail_idx).is_none()
+                || self.ring.raw_avail_idx_ptr().is_none()
+            {
                 return Err(VirtqueueError::RingBackingUnavailable);
+            }
+        }
+        for spec in specs {
+            if spec.addr() == 0 || spec.len() == 0 {
+                return Err(VirtqueueError::InvalidBuffer);
+            }
+        }
+
+        let mut allocated = Vec::new();
+        for _ in specs {
+            let Some(descriptor) = self.ring.pop_free_descriptor() else {
+                self.ring.restore_allocated_descriptors(&allocated);
+                self.ring.descriptor_exhaustion_rejected = true;
+                self.chain_allocation_atomic = true;
+                return Err(VirtqueueError::NoFreeDescriptor);
             };
-            unsafe {
-                ptr::write_volatile(
-                    raw_desc,
-                    RawVirtqDescriptor {
-                        addr: addr as u64,
-                        len,
-                        flags: VIRTQ_DESC_F_WRITE,
-                        next: 0,
-                    },
-                );
+            allocated.push(descriptor);
+        }
+
+        let head = allocated[0];
+        let before_free_count = self
+            .ring
+            .free_count()
+            .saturating_add(allocated.len() as u16);
+        let mut saw_in = false;
+        let mut saw_out = false;
+        for (index, spec) in specs.iter().enumerate() {
+            let descriptor = allocated[index];
+            let has_next = index + 1 < allocated.len();
+            let next = if has_next {
+                allocated[index + 1]
+            } else {
+                VIRTQUEUE_DESC_NONE
+            };
+            let flags = spec.flags() | if has_next { VIRTQ_DESC_F_NEXT } else { 0 };
+            let desc_index = usize::from(descriptor);
+            self.ring.descriptors[desc_index] = VirtqDescriptor {
+                addr: spec.addr(),
+                len: spec.len(),
+                flags,
+                next,
+                next_free: VIRTQUEUE_DESC_NONE,
+                active: true,
+                completed: false,
+            };
+            if spec.is_in() {
+                saw_in = true;
+            }
+            if spec.is_out() {
+                saw_out = true;
+            }
+            if self.real_backing_ready {
+                let Some(raw_desc) = self.ring.raw_desc_ptr(descriptor) else {
+                    self.ring.restore_allocated_descriptors(&allocated);
+                    return Err(VirtqueueError::RingBackingUnavailable);
+                };
+                unsafe {
+                    ptr::write_volatile(
+                        raw_desc,
+                        RawVirtqDescriptor {
+                            addr: spec.addr() as u64,
+                            len: spec.len(),
+                            flags,
+                            next: if has_next { next } else { 0 },
+                        },
+                    );
+                }
             }
         }
 
@@ -821,8 +1085,19 @@ impl VirtQueue {
                 ptr::write_volatile(raw_avail_idx, self.ring.avail_idx);
             }
         }
-        self.input_buffer_added = true;
-        self.free_descriptor_consumed = true;
+        self.input_buffer_added |= specs.len() == 1 && saw_in && !saw_out;
+        self.descriptor_chain_allocated = true;
+        self.descriptor_chain_direct = true;
+        self.out_descriptor_added |= saw_out;
+        self.in_descriptor_added |= saw_in;
+        self.chain_head_published = true;
+        self.chain_free_descriptor_count_matched = self
+            .ring
+            .free_count()
+            .saturating_add(allocated.len() as u16)
+            == before_free_count;
+        self.chain_allocation_atomic = true;
+        self.free_descriptors_consumed = true;
         self.avail_index_advanced = true;
         self.submitted_count = self.submitted_count.saturating_add(1);
         Ok(VirtqueueBufferToken { head })
@@ -864,25 +1139,35 @@ impl VirtQueue {
 
         let used_slot = self.ring.ring_index(self.ring.last_used_idx);
         let used = self.ring.used_ring[used_slot];
-        let desc_index = usize::from(used.id());
-        if desc_index >= self.ring.descriptors.len()
-            || !self.ring.descriptors[desc_index].active
-            || !self.ring.descriptors[desc_index].completed
-        {
+        let Some(stats) = self.ring.active_chain_stats(used.id()) else {
+            return Err(VirtqueueError::InvalidToken);
+        };
+        let head_index = usize::from(used.id());
+        if !self.ring.descriptors[head_index].completed {
             return Err(VirtqueueError::InvalidToken);
         }
-        let descriptor = self.ring.descriptors[desc_index];
+        let writable_limit = if stats.in_len == 0 {
+            stats.total_len
+        } else {
+            stats.in_len
+        };
+        if used.len() > writable_limit {
+            return Err(VirtqueueError::UsedLengthTooLarge);
+        }
         self.ring.last_used_idx = self.ring.last_used_idx.wrapping_add(1);
-        self.ring.release_descriptor(used.id());
+        self.ring.release_descriptor_chain(used.id());
         self.ring.buffer_ownership_released = true;
         self.get_buf_returns_len = true;
+        self.descriptor_chain_released = true;
         self.buffer_ownership_released = true;
         self.get_buf_count = self.get_buf_count.saturating_add(1);
         Ok(VirtqueueUsedBuffer {
             token: VirtqueueBufferToken { head: used.id() },
-            addr: descriptor.addr(),
+            addr: stats.first_addr,
             len: used.len(),
-            descriptor_len: descriptor.len(),
+            descriptor_len: stats.first_len,
+            in_descriptor_len: stats.in_len,
+            descriptor_count: stats.count,
         })
     }
 
@@ -910,16 +1195,20 @@ impl VirtQueue {
             ptr::read_volatile(ptr)
         };
         let id = u16::try_from(used.id).map_err(|_| VirtqueueError::InvalidToken)?;
-        let desc_index = usize::from(id);
-        if desc_index >= self.ring.descriptors.len() || !self.ring.descriptors[desc_index].active {
+        let Some(stats) = self.ring.active_chain_stats(id) else {
             return Err(VirtqueueError::InvalidToken);
-        }
-        if used.len > self.ring.descriptors[desc_index].len {
+        };
+        let writable_limit = if stats.in_len == 0 {
+            stats.total_len
+        } else {
+            stats.in_len
+        };
+        if used.len > writable_limit {
             return Err(VirtqueueError::UsedLengthTooLarge);
         }
         let used_slot = self.ring.ring_index(self.ring.last_used_idx);
         self.ring.used_ring[used_slot] = VirtqUsedElem { id, len: used.len };
-        self.ring.descriptors[desc_index].completed = true;
+        self.ring.descriptors[usize::from(id)].completed = true;
         self.real_used_completion_observed = true;
         self.used_index_advanced = true;
         self.completion_count = self.completion_count.saturating_add(1);
@@ -944,14 +1233,19 @@ pub(crate) mod smoke_fixture {
         if queue.lifecycle.state() != State::Ready {
             return Err(VirtqueueError::NotReady);
         }
-        let index = usize::from(token.head());
-        if index >= queue.ring.descriptors.len() || !queue.ring.descriptors[index].active {
+        let Some(stats) = queue.ring.active_chain_stats(token.head()) else {
             return Err(VirtqueueError::InvalidToken);
-        }
-        if queue.ring.descriptors[index].completed {
+        };
+        let head_index = usize::from(token.head());
+        if queue.ring.descriptors[head_index].completed {
             return Err(VirtqueueError::AlreadyCompleted);
         }
-        if len > queue.ring.descriptors[index].len {
+        let writable_limit = if stats.in_len == 0 {
+            stats.total_len
+        } else {
+            stats.in_len
+        };
+        if len > writable_limit {
             return Err(VirtqueueError::UsedLengthTooLarge);
         }
         let pending_used = queue.ring.used_idx.wrapping_sub(queue.ring.last_used_idx);
@@ -965,7 +1259,7 @@ pub(crate) mod smoke_fixture {
             len,
         };
         queue.ring.used_idx = queue.ring.used_idx.wrapping_add(1);
-        queue.ring.descriptors[index].completed = true;
+        queue.ring.descriptors[head_index].completed = true;
         queue.used_index_advanced = true;
         queue.completion_count = queue.completion_count.saturating_add(1);
         Ok(())
