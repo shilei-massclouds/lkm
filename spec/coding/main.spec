@@ -6,6 +6,7 @@
  */
 
 include "mapping.spec";
+include "build.spec";
 include "riscv64.spec";
 include "rust.spec";
 include "arceos_ex.spec";

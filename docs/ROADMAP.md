@@ -15,6 +15,7 @@
 3. 维持 `ioremap/vmalloc` 当前首轮成果：runtime page-table metadata 已覆盖完整 `VMALLOC_START..VMALLOC_END`，支持按需追加 L1/L0/PTE 页表页，`VmapArea` / `VmapMapping` 记录已改为动态容器 backing；更完整的 `vm_struct/vmap_area` 行为，例如空洞复用、增强树查找、lazy purge 和并发边界，降为后续补强，除非交叉验证发现其阻塞 IRQ/driver 路径的一致性。
 4. serial8250 runtime RX/TTY/FIFO 补强继续保留为后续项。当前对象框架和 event/action 已确认，RX 单字符/批量 loopback、ordinary TTY TX FIFO 最小 enqueue/dequeue，以及 ordinary TTY write 经 `TtyXmitFifo -> StartTx/THRI -> handler TransmitChars` 的单 byte 和固定小批量真实 IRQ 闭合均已完成；后续是否继续展开 printk TX 异常/压力边界、TTY runtime 分层或用户态 I/O，应先经过 Linux 交叉验证结果排序。
 5. `virtio-rng` 与 virtio 基础对象首轮闭环已完成：`virtio-mmio` platform driver、`VirtioBus` / `VirtioDevice`、split `VirtQueue`、真实 QEMU `virtio-rng-device` completion、Linux-like `HwRngCore` / `HwRngDevice` 和 `virtrng_scan` / read 边界均已验证。`virtio-blk` 已推进到真实 QEMU `virtio-blk-device` 发现/config/单队列 setup/DRIVER_OK、最小 read request、Linux-like `BlockDeviceRegistry` / major-minor 可发现对象、经 `Bio` / `submit_bio_wait` / `BufferHead` / `sb_bread` 完成真实块读，以及 read-only ext2 显式 mount/root lookup/direct-block file read；4K Buffer / 4K ext2 block 支持和 Ext2 多 direct-block read path 泛化已完成。
+6. 若当前目标调整为尽快加载并运行一个用户态 `helloworld`，P0 应从“补齐完整 VFS/page cache/TTY”切换为受限但真实的用户态闭环：从 ext2 rootfs 读取一个小型 no-libc RISC-V ELF，经 `KernelInitTask`/`PayloadPhase` 进入 U-mode，先只支持 `write(1/2, ...)` 与 `exit/exit_group` syscall。page cache、完整 fd table、TTY/N_TTY、动态链接、`brk/mmap`、Ext2 indirect block 和完整 `/dev` 语义不作为首个用户态 hello 的阻塞条件。
 
 ## 下一阶段计划：Linux 6.12.37 PLIC 二进制复用
 
@@ -104,6 +105,33 @@ PLIC 收尾后的后续策略：
 25. **后续计划：page cache / address_space / folio read path**。当前 ext2 read 仍直接经 `BufferHead` 读 direct blocks。后续在规格层引入 Linux-like `AddressSpace`、page cache/folio 和 readpage/readahead 边界，让 VFS read 逐步从直接 block copy 迁移到 page cache 语义；writeback 和 mmap 仍后置。
 26. **后续计划：Ext2 indirect block read 支持**。在 direct blocks、VFS path 和 page cache 边界稳定后，再扩展 Ext2 单级 indirect block read；double/triple indirect、allocation 和写路径继续 deferred。验收建议通过 `make disk` 构造超过 12 个 direct blocks 的只读文件，并经 VFS path read 验证。
 
+## 下一阶段计划：用户态 helloworld 快速路径
+
+若把“尽快加载并运行一个用户态 `helloworld`”作为下一阶段目标，计划调整为先打通最短真实闭环，而不是先补齐完整 Linux 文件和终端栈。当前 ext2 rootfs、VFS path read、virtio-blk、PLIC/UART console 已足够支撑首轮用户态 hello 的输入和输出路径。
+
+优先级调整：
+
+1. `P0` 提升：`PayloadPhase` 的 Linux-like 用户态入口、`kernel_init`/`run_init_process` 形状、ELF loader、用户地址空间、RISC-V U-mode entry/trap、最小 syscall。
+2. `P0` 保留但收窄：rootfs 后命名空间只要求 `/init` 可从当前 ext2 root 读取；`/dev` remount、完整 mount namespace 和 device file ops 不阻塞首轮 hello。
+3. `P1/P2` 后移：page cache、Ext2 indirect block、完整 fd table、TTY/N_TTY、stdin/stdout 文件后端、动态链接、`brk/mmap`、fork/wait/signal。
+
+快速路径任务项：
+
+1. **规格先行：用户态入口对象边界**。新增或补强 `ExecCore`、`ElfLoader`、`UserAddressSpace`、`UserStack`、`UserTrap`、`SyscallTable` 和 `UserInitProgram` 的模型边界；明确 `KernelInitTask` 在 `PayloadPhase` 中执行 `run_init_process("/init")`，成功后不返回启动编排链。
+2. **构建与磁盘镜像输入**。增加小型 no-libc RISC-V 用户 ELF 构建目标，建议先用汇编或 `no_std` Rust 产物，直接通过 syscall 输出并退出；`make disk` 将该 ELF 放入 ext2 rootfs 的 `/init`。首轮要求 ELF 足够小，能被当前 direct-block ext2 read path 读取，避免把 Ext2 indirect block 变成前置阻塞项。
+3. **VFS 到 ELF loader**。`ExecCore` 通过当前 `FsStruct.root` 和 VFS path API 打开并读取 `/init`；`ElfLoader` 只支持 ELF64 little-endian RISC-V、静态可执行、`PT_LOAD` 段、`R/RW/RX` 权限、`.bss` 清零和 entry point 记录。不支持解释器、动态链接、shared object、权限/xattr 和 shebang。
+4. **用户地址空间和栈**。建立最小 `UserAddressSpace`/`MmStruct` 实例，分配用户页并复制 ELF 段，建立一段用户栈；用户页必须带 `U` 权限，内核映射必须不可被 U-mode 访问。RISC-V trap entry 所需内核入口映射必须在用户页表下可执行且保持 `U=0`，避免 U-mode trap 后无法进入 S-mode handler。
+5. **U-mode 进入和 trap 返回**。构造用户 trap frame，设置 `sepc=elf_entry`、用户 `sp`、`sstatus.SPP=U`、`SPIE=1`，经 `sret` 进入用户态。异常入口至少区分 user ecall、非法指令、页错误和其他 unexpected trap；unexpected trap 应记录诊断并终止用户进程或关机，不继续静默运行。
+6. **最小 syscall 闭环**。首轮只实现 `write(fd=1/2, user_buf, len)` 和 `exit/exit_group(status)`；`write` 通过受限 `UserCopy` 从用户地址空间复制字节，再转发到现有 `printk`/serial console 输出。此路径不是完整用户态标准 I/O，完整 fd table、`/dev/console`、TTY/N_TTY 和 line discipline 后续再补。
+7. **验收与观测**。新增只读 checkpoint/KUnit 或 smoke 观测 `init ELF loaded`、`entered user mode`、`write syscall observed`、`exit status == 0`。验收命令至少包括 `make verify`、`make build APP=smoke`、`make run APP=smoke`、`make run APP=user-hello`、`make test` 和 `git diff --check`；`make run APP=user-hello` 应能在 QEMU 输出用户态 hello 文本并由用户态 `exit(0)` 触发受控关机。
+
+首轮明确不做：
+
+- 不运行 musl/glibc 静态大程序，除非先接受 Ext2 indirect block、更多 syscall 和 `brk/mmap` 成为前置任务。
+- 不实现完整 `open/read/write/close` fd table；首轮 `write` 是 syscall 到 console 的窄路径。
+- 不实现动态链接器、环境变量、完整 argv/auxv、权限检查、信号、fork/wait 或多用户进程调度。
+- 不把 page cache 或 TTY/N_TTY 作为用户态 hello 的前置条件。
+
 ### 每步确认要求
 
 - 每一步开始前先确认 `git status --short --branch`，避免混入非本步变更。
@@ -170,9 +198,14 @@ PLIC 收尾后的后续策略：
 | `P0` | 完成当前轮 | model/coding/arceos_ex/block/fs | Ext2 root directory 跨 block lookup 观测 | 在现有 direct-block lookup 实现基础上，补强 `make disk` 的稳定 ext2 镜像构造，让目标文件 dirent 落到 root directory 第二个 direct block，并让 smoke 通过真实 virtio-blk/ext2 路径观察 lookup 扫描至少两个 direct blocks。 | 本文档 |
 | `P0` | 完成当前轮 | model/coding/arceos_ex/vfs/fs | Ext2 最小 VFS read-only mount/read | 已把 `Ext2FileSystem.Enable` 从 deferred mount boundary 推进为显式 `VfsCore` read-only mount：VFS 承载 mount point、Ext2 superblock/private、read-only dentry/inode、lookup/open/read 入口，实际 lookup/read 后端仍调度到 Ext2 的 BufferHead + direct-block 路径；smoke 通过 VFS lookup/open/read 读取跨 block `smoke-large.bin`。page cache、indirect block 和写路径继续 deferred。 | 本文档；[arceos_ex 说明](../spec/coding/arceos_ex.md) |
 | `P0` | 完成当前轮 | model/coding/arceos_ex/vfs | VFS 最小 pathname walk / rootfs path read | 已让 path walk 从 `FsStruct.root` 出发解析绝对路径，支持 mount crossing，并在 rootfs 切到 ext2 后通过统一 path API 直接读取 `/smoke.txt` 与 `/smoke-large.bin`；首轮仍不做权限、symlink、`.`/`..`、fd table 或 syscall。 | 本文档 |
-| `P0` | 待办 | model/coding/arceos_ex/vfs/fs | Ext2 VFS inode/dentry cache 边界收敛 | 对齐 Linux `iget` / dentry cache 形状，明确 repeated lookup、negative lookup、inode identity、refcount/evict deferred 边界，再决定 Ext2 inode record 是否从 `Ext2FileSystem` 结构化事实提升为独立对象。 | 本文档 |
 | `P0` | 完成当前轮 | model/coding/arceos_ex/rootfs/fs | RootfsPhase 真实 ext2 root mount/root switch | 已在 `RootFS.Event::Enable` 中挂载默认块设备上的 ext2 root candidate 到 `/root` staging point，再执行 `MS_MOVE` 与 `FsStruct.ChrootDot`，使当前 root/pwd 指向 ext2 root；rootfs smoke 直接读取 `/smoke.txt`。 | 本文档 |
-| `P0` | 待办 | model/coding/arceos_ex/rootfs/fs | RootfsPhase root switch 后的命名空间补强 | 明确 `/dev` 在 ext2 root 下的挂接策略、mount namespace 与任务 `FsStruct` 的更多运行期规则，并为后续用户态 payload 提供稳定根目录视图。 | 本文档 |
+| `P0` | 待办 | model/coding/arceos_ex/payload/user | 用户态 helloworld 快速路径规格 | 先定义 `ExecCore`、`ElfLoader`、`UserAddressSpace`、`UserStack`、`UserTrap`、`SyscallTable` 和 `UserInitProgram` 的对象边界；明确 `KernelInitTask` 在 `PayloadPhase` 中执行 `run_init_process("/init")`，成功后进入 U-mode 且不返回启动编排链。 | 本文档 |
+| `P0` | 待办 | build/rootfs/user | 用户 init ELF 与 ext2 镜像输入 | 增加小型 no-libc RISC-V 用户 ELF 构建目标，并让 `make disk` 将其放入 ext2 rootfs 的 `/init`；首轮要求 ELF 足够小，能被当前 direct-block ext2 read path 读取，避免 Ext2 indirect block 成为前置阻塞项。 | 本文档 |
+| `P0` | 待办 | model/coding/arceos_ex/exec/mm | ELF loader 与用户地址空间 | 通过当前 `FsStruct.root` 和 VFS path API 读取 `/init`，只支持 ELF64 little-endian RISC-V 静态可执行、`PT_LOAD`、`.bss` 清零和 entry point；建立最小用户页表和用户栈，用户页带 `U` 权限，内核映射保持 `U=0`。 | 本文档 |
+| `P0` | 待办 | model/coding/arceos_ex/trap/syscall | U-mode entry 与最小 syscall | 构造用户 trap frame，经 `sret` 进入 U-mode；trap 入口首轮处理 user ecall、非法指令、页错误和 unexpected trap；syscall 只支持 `write(1/2, user_buf, len)` 与 `exit/exit_group(status)`，`write` 通过受限 `UserCopy` 转发到现有 printk/serial console。 | 本文档 |
+| `P0` | 待办 | validation/user | user-hello 验收闭环 | 新增只读 checkpoint/KUnit 或 smoke 观测 `init ELF loaded`、`entered user mode`、`write syscall observed`、`exit status == 0`；验收必须包含 `make verify`、`make build APP=smoke`、`make run APP=smoke`、`make run APP=user-hello`、`make test` 和 `git diff --check`。 | 本文档 |
+| `P1` | 待办 | model/coding/arceos_ex/rootfs/fs | RootfsPhase root switch 后的命名空间补强 | 明确 `/dev` 在 ext2 root 下的挂接策略、mount namespace 与任务 `FsStruct` 的更多运行期规则；这些对完整用户态系统重要，但不阻塞首轮 `/init` user helloworld。 | 本文档 |
+| `P1` | 待办 | model/coding/arceos_ex/vfs/fs | Ext2 VFS inode/dentry cache 边界收敛 | 对齐 Linux `iget` / dentry cache 形状，明确 repeated lookup、negative lookup、inode identity、refcount/evict deferred 边界，再决定 Ext2 inode record 是否从 `Ext2FileSystem` 结构化事实提升为独立对象；不阻塞首轮 user helloworld。 | 本文档 |
 | `P1` | 待办 | model/coding/arceos_ex/mm/fs | page cache / address_space / folio read path | 规格化 Linux-like `AddressSpace`、page cache/folio 和 readpage/readahead 边界，让 VFS read 从直接 block copy 逐步迁移到 page cache 语义；writeback 和 mmap 后置。 | 本文档 |
 | `P1` | 待办 | model/coding/arceos_ex/block/fs | Ext2 indirect block read 支持 | 在 direct blocks、VFS path 和 page cache 边界稳定后支持单级 indirect block read；double/triple indirect、allocation 和写路径继续 deferred。 | 本文档 |
 | `P2` | 延期 | compose/arceos_ex | 对象封装为组件试验 | 作为后续低优先级探索项保留；不作为 PLIC 首轮基线冻结后的默认下一阶段。恢复时再选择已有对象，明确组件边界、crate 结构、接口和验收方式。 | [compose 规格](../spec/compose/README.md) |

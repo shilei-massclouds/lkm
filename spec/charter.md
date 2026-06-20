@@ -108,18 +108,19 @@
 12. 对象与消息模型
 13. 流模型
 14. 启动与实体化
-15. 组件模型
-16. 生命周期
-17. 接口与通信
-18. 配置与装配
-19. 扩展机制
-20. 运行时与资源管理
-21. 错误处理
-22. 安全与隔离
-23. Linux 6.12.37 交叉验证
-24. 测试与验证
-25. 兼容性策略
-26. 未决问题
+15. 文件系统的分析
+16. 组件模型
+17. 生命周期
+18. 接口与通信
+19. 配置与装配
+20. 扩展机制
+21. 运行时与资源管理
+22. 错误处理
+23. 安全与隔离
+24. Linux 6.12.37 交叉验证
+25. 测试与验证
+26. 兼容性策略
+27. 未决问题
 
 ## 背景与目标
 
@@ -2760,6 +2761,8 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 图 35 用于说明 `SMP Runtime Phase` 子阶段 4 的对象分类和依赖关系。左侧是阶段边界，中间是 rootfs、console、namespace 和 integrity 主线对象，右侧记录当前配置下的 KUnit 裁剪、early userspace init 条件分支和 devtmpfs/root device 关联事实。
 
+Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs 子阶段中展开，见后文“文件系统的分析”章节。
+
 ##### SMP Runtime Phase 子阶段 4 过程处理清单（初稿）
 
 | Linux 6.12.37 调用 / 规格补充动作 | 规格处理 | 备注 |
@@ -2959,6 +2962,49 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 因此，后续对组件、扩展点、生命周期和装配关系的定义，都需要明确它们所依赖的前置环境、所处的实体化阶段，以及它们能作用于哪些已经建立完成或正在建立中的对象。同时，也需要明确这些对象之间以何种消息语义相互作用与协作。
 
 从对象层级的角度看，组件化内核所处理的并不是一个扁平对象集合，而是一个不断由低级对象支撑高级对象、再由高级对象开启新一轮建立过程的螺旋上升结构。
+
+## 文件系统的分析
+
+本章集中说明文件系统相关对象的建模意图。文件系统既参与启动阶段中的 rootfs 准备，也在运行期为路径解析、文件读写、设备节点和用户态 `exec` 提供基础，因此不应只作为某个启动子阶段的局部细节处理。
+
+Ext2 是当前第一个被具体展开的磁盘文件系统类型。它的建模方式也应作为后续 Ext4、XFS 等其它文件系统类型的参考模板：优先区分“文件系统驱动/操作集合”“块设备上的 on-disk 布局或 volume”“mount 后的内存中文件系统实例”三类对象，再讨论它们如何接入 VFS、RootFS 和任务 `FsStruct`。不同文件系统可以有自己的元数据结构、日志/事务、extent 或分配策略，但不应因此把驱动、磁盘布局和 mount 后实例混为一个对象。
+
+### Ext2 对象建模说明
+
+Ext2 的建模原则应先在本章程中以自然语言确定对象意图，再落到 `spec/model` 和 `spec/coding` 的正式规格，最后才指导实现。实现已经存在或 roadmap 已经列出任务，并不能反过来替代这一步；若后续 Ext2 对象边界发生变化，也应先回到这里或对应上级说明中修正意图，再同步正式规格。
+
+当前 Ext2 不建模为一个单一的大对象，也不把 Linux `file_system_type`、磁盘布局和 mount 后的文件系统实例混在一起。它至少拆为三个核心对象：
+
+1. `Ext2Driver`：表示 Ext2 的驱动/操作集合。它对应 Linux 中由文件系统驱动提供的操作族，例如 super operations、inode operations、file operations，以及当前 read-only 路径中的 lookup/read 等后端动作。它不是某个磁盘实例，也不持有当前 mount 树；它回答的是“Ext2 这种格式如何被识别、装载和操作”。
+2. `Ext2Volume`：表示某个块设备上按照 Ext2 规范组织的 on-disk 数据布局。它承载 superblock、block group descriptor、inode table、data blocks、dirent 等磁盘元数据和用户数据的存在性事实。`Ext2Volume` 属于 mount 前的准备对象：它可以通过 `BlockDeviceRegistry`、`Bio`、`BufferHead` 等块读路径确认某个块设备上是否存在可支持的 Ext2 布局。不存在或不支持 Ext2 volume 是普通非致命失败，不应导致内核崩溃或终止，只会使依赖该 volume 的后续文件系统实例无法建立。
+3. `Ext2FileSystem`：表示 Ext2 被 mount 后形成的内存中文件系统实例。它依赖 `Ext2Driver` 和 `Ext2Volume`，并在 setup 阶段把磁盘上的扁平布局“立体化”为可遍历的对象视图，例如 superblock view、root inode、root dentry、目录项、文件 inode 和 read-only file data 后端。它是核心运行对象；系统经由 VFS path walk、open/read 和 rootfs 挂载关系访问它，而不是让调用者直接裸访问 `Ext2Volume`。
+
+这三个对象与 VFS/rootfs 的关系如下：
+
+- `BlockDeviceRegistry` 提供默认块设备或指定 `devt` 的发现入口；`Bio` / `BufferHead` 提供同步块读入口；它们是 `Ext2Volume` 的输入路径。
+- `Ext2Volume` 只证明和解释块设备上的 Ext2 布局，不负责 VFS mount，也不持有当前 root/pwd。
+- `Ext2Driver` 提供操作集合；`Ext2FileSystem` 在运行中调用这些操作集合来执行 lookup/read 等后端动作。
+- `VfsCore` 维护 mount、superblock、inode、dentry、file 和 path walk 这类系统可见对象；它把 Ext2 的 root dentry/inode 暴露为 VFS 树的一部分。
+- `RootFS.enable()` 对应 `prepare_namespace()` 中选择真实 root 的过程。当前支持路径是先把 `Ext2FileSystem` staging mount 到 `/root`，再执行 `VfsCore.Action::MoveMountToRoot`，最后由 `FsStruct.Action::ChrootDot` 更新当前任务的 `root` 与 `pwd`。
+- `FsStruct` 是任务从属的文件系统视图对象，至少包含 `root` 和 `pwd` 两个 dentry 引用。路径解析从 `FsStruct.root` 或 `FsStruct.pwd` 出发，而不是从 `Ext2FileSystem` 内部全局变量出发。
+
+`Ext2FileSystem` 的生命周期当前可按如下方式理解：
+
+1. `Preset`：确认 `Ext2Driver` 已就绪，并确认存在可支持的 `Ext2Volume`。若 volume 不存在或不支持，事件失败但不形成 kernel panic。
+2. `Setup`：基于 `Ext2Volume` 读取和解释 superblock、group descriptor、root inode/root dentry 等必要结构，把 on-disk 布局展开为内存中可遍历的文件系统实例。
+3. `Enable`：通过 `VfsCore` 把该文件系统实例挂到上级文件系统的某个目录节点上。对 rootfs 主线而言，当前先挂到 `/root` staging point，再由 `RootFS.enable()` 驱动 mount move 和 chroot。
+
+首轮 Ext2 明确限定为 read-only、no page cache、no indirect block、no write。direct block 读取、root directory direct-block 扫描和普通文件多 direct-block 读取可作为当前支持能力；page cache / address_space / folio、single/double/triple indirect blocks、allocation/writeback、权限/xattr/quota、remount 和错误恢复属于后续对象扩展，不应在当前对象事实中伪装为已完成。
+
+<p align="center">
+  <img src="pic/ext2-object-model.svg" alt="Ext2 对象建模关系" width="900">
+</p>
+
+<p align="center">
+  图 FS-1 Ext2 对象建模关系
+</p>
+
+图 FS-1 展示了 `Ext2Driver`、`Ext2Volume`、`Ext2FileSystem`、`VfsCore`、`RootFS` 和 `FsStruct` 之间的基本关系。它强调 Ext2 的磁盘布局事实、驱动操作集合和 mount 后内存实例是三个不同对象；VFS/rootfs 负责把该实例纳入系统可见路径和当前任务根视图。
 
 ## 组件模型
 
