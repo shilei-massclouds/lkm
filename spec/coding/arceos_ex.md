@@ -706,10 +706,11 @@ checkpoint KUnit/action-level 测试，app-level smoke 保留对公开 printk �
 `RamFsType.Setup` / `VfsCore.MountInitialRamFsRoot` 中对应 Linux `vfs_caches_init()->mnt_init()->init_mount_tree()` 完成。
 本阶段的 `RootFS.Event::Enable` 表示 `prepare_namespace()` 中从初始 ramfs/rootfs backing 走向真实 root device 的
 enable 位置；`RootFS` 是顶层根文件系统视图对象，不得把 enable 位置再建成独立对象。本轮必须记录
-prepare_namespace 的输入条件：初始 ramfs rootfs 仍为当前 root，`DevFs` 已挂载，
+prepare_namespace 的输入条件：初始 ramfs rootfs 已存在，`FsStruct.root/pwd` 仍指向初始 root，`DevFs` 已挂载，
 `BlockDeviceRegistry` 已有默认块设备作为 root device candidate；随后基于该默认块设备建立
 `Ext2Driver` / `Ext2Volume` / `Ext2FileSystem` 链，并按 Linux `do_mount_root()` 的形态把真实 ext2 文件系统挂载到临时
-`/root` 目录。`MS_MOVE` 到 `/` 和 `chroot(".")` 仍不得执行，留到下一轮 root 切换语义。
+`/root` 目录。随后必须把该 ext2 mount 通过 `VfsCore.Action::MoveMountToRoot` 移到 `/`，再通过
+`FsStruct.Action::ChrootDot` 把任务可见的 `root/pwd` 切到 ext2 root；这两个动作在规格上必须分开表达。
 
 本阶段覆盖 `kunit_run_all_tests()`、`wait_for_initramfs()`、`console_on_rootfs()`、
 `init_eaccess(ramdisk_execute_command)` 对应 checkpoint、`prepare_namespace()` 和
@@ -718,14 +719,16 @@ trimmed/no-op，不得单独升格为 `KUnitPhase`。
 
 `InitramfsSyncDeferred`、`RootfsConsoleDeferred` 和 `IntegrityKeysDeferred` 在本轮仍只保留
 deferred/position-preserved 语义。其中 `init_eaccess(ramdisk_execute_command)` 是 required checkpoint，必须记录当前
-Linux-like 路径要求进入 `prepare_namespace()` 分支。`RootFS.Event::Enable` 不得伪造 `MS_MOVE` 或 `chroot(".")` 已完成；
+Linux-like 路径要求进入 `prepare_namespace()` 分支。`RootFS.Event::Enable` 必须真实更新 VFS mount 与 `FsStruct.root/pwd`
+事实，不得用单独测试 API 或 summary 伪造 `MS_MOVE` / `chroot(".")` 已完成；
 root device candidate 只能来自已有 `BlockDeviceRegistry.default_device`，`/dev` 条件只能来自已有 `DevFs`，不得为了
-rootfs smoke 新增测试专用设备 API。
+rootfs smoke 新增测试专用设备 API。当前不把 `DevFs` 偷偷 remount 到新的 ext2 root 下；相关行为留给后续 mount
+namespace/devtmpfs 轮次。
 
 测试应覆盖 `RootfsPhase.Ready`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
-ramdisk eaccess 强制进入 prepare_namespace、prepare_namespace 输入条件已具备、初始 ramfs rootfs 仍为当前 root、
-真实 ext2 root staging mount 已建立于 `/root`、`MS_MOVE/chroot` deferred、integrity keys deferred，以及下一入口仍是
-`FinalizePhase`。
+ramdisk eaccess 强制进入 prepare_namespace、prepare_namespace 输入条件已具备、真实 ext2 root staging mount 曾建立于
+`/root`、`MS_MOVE` 挂载移动完成、`FsStruct.ChrootDot` 完成、当前 root 为 ext2、可直接读取 `/smoke.txt`、
+integrity keys deferred，以及下一入口仍是 `FinalizePhase`。
 
 ## FinalizePhase 编码约束
 

@@ -2,7 +2,7 @@ use super::{
     block_device::{BlockDeviceRef, BlockDeviceRegistry, DevT},
     hwrng::{HwRngCore, HwRngDeviceRef},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    vfs::{DentryRef, MountRef, VfsCore, VfsError, VFS_NAME_MAX},
+    vfs::{DentryRef, FsStruct, MountRef, VfsCore, VfsError, VFS_NAME_MAX},
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -169,12 +169,14 @@ impl DevFs {
     pub fn setup(
         &mut self,
         vfs: &mut VfsCore,
+        fs_struct: &FsStruct,
         hwrng_core: &HwRngCore,
         block_registry: &BlockDeviceRegistry,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || vfs.state() != State::Ready
             || !vfs.rootfs_mount_created()
+            || fs_struct.state() != State::Ready
             || hwrng_core.state() != State::Ready
             || !hwrng_core.current_slot_ready()
             || block_registry.state() != State::Ready
@@ -203,7 +205,7 @@ impl DevFs {
             return self.setup_failed();
         }
 
-        let Some(root_ref) = vfs.current_root_dentry() else {
+        let Some(root_ref) = fs_struct.root_dentry() else {
             return self.setup_failed();
         };
 

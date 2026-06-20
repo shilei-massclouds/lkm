@@ -138,6 +138,7 @@ predicate arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file() -> bool;
 predicate arceos_ex_must_ext2_smoke_observe_cross_block_root_lookup() -> bool;
 predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
 predicate arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read() -> bool;
+predicate arceos_ex_must_rootfs_move_ext2_mount_and_chroot_dot_as_separate_actions() -> bool;
 predicate arceos_ex_must_ext2_defer_page_cache_indirect_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
@@ -2400,14 +2401,17 @@ type ArceosExRootfsCodingMust {
         arceos_ex_must_rootfs_mount_ext2_at_linux_root_staging_point();
 
         /*
-         * Deferred root switch:
+         * Root switch:
          *
-         * This round must not perform Linux's final init_mount(".", "/",
-         * MS_MOVE, NULL) or init_chroot(".") semantics. The current root stays
-         * the initial ramfs-backed rootfs after the ext2 /root staging mount;
-         * root switching, mount move and chroot are the next round's boundary.
+         * After the Linux-like temporary /root ext2 staging mount,
+         * RootFS.Event::Enable must drive VfsCore.Action::MoveMountToRoot and
+         * FsStruct.Action::ChrootDot as separate model actions. FsStruct owns
+         * the task-visible root/pwd dentry refs; VfsCore must not keep a
+         * parallel current-root singleton. Smoke must observe current root as
+         * ext2 and read /smoke.txt directly without remounting /dev under the
+         * new root.
          */
-        arceos_ex_must_rootfs_keep_root_switch_move_chroot_deferred();
+        arceos_ex_must_rootfs_move_ext2_mount_and_chroot_dot_as_separate_actions();
 
         /*
          * Integrity keys:

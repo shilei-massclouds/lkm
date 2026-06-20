@@ -28,7 +28,9 @@ object DevFs: ResourceObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
                     rootfs_mount_created(VfsCore);
+                    fs_struct_root_dentry_set(FsStruct, Dentry);
                     HwRngCore.state == State::Ready;
                     hwrng_core_current_slot_ready(HwRngCore);
                     BlockDeviceRegistry.state == State::Ready;

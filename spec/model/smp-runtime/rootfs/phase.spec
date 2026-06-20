@@ -108,8 +108,8 @@ object RootfsConsoleDeferred: KernelObject {
  * records that the supported Linux-like path enters prepare_namespace(), that
  * /dev is already mounted, and that the default block device is available as
  * the first root device candidate. It mounts the prepared ext2 filesystem at
- * Linux's temporary /root mount point. The final MS_MOVE to / and chroot(".")
- * are intentionally deferred to the next round.
+ * Linux's temporary /root mount point, then performs the final MS_MOVE to /
+ * and chroot(".") as two separate actions.
  */
 predicate rootfs_prepare_namespace_inputs_ready<T>(rootfs: T) -> bool;
 predicate rootfs_initial_ramfs_still_active<T>(rootfs: T) -> bool;
@@ -120,8 +120,9 @@ predicate rootfs_ext2_volume_ready<T, V>(rootfs: T, volume: V) -> bool;
 predicate rootfs_ext2_filesystem_ready<T, F>(rootfs: T, fs: F) -> bool;
 predicate rootfs_real_mount_point_created<T, D>(rootfs: T, mount_point: D) -> bool;
 predicate rootfs_real_ext2_mount_created<T, M>(rootfs: T, mount: M) -> bool;
-predicate rootfs_ms_move_deferred<T>(rootfs: T) -> bool;
-predicate rootfs_chroot_deferred<T>(rootfs: T) -> bool;
+predicate rootfs_ms_move_done<T, M>(rootfs: T, mount: M) -> bool;
+predicate rootfs_chroot_dot_done<T, F>(rootfs: T, fs: F) -> bool;
+predicate rootfs_current_root_is_real_ext2<T, F>(rootfs: T, fs: F) -> bool;
 
 object RootFS: KernelObject {
     initial_state: State::Ready;
@@ -134,7 +135,10 @@ object RootFS: KernelObject {
                     SavedCommandLine.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
                     rootfs_mount_created(VfsCore);
+                    fs_struct_root_dentry_set(FsStruct, Dentry);
+                    fs_struct_pwd_dentry_set(FsStruct, Dentry);
                     DevFs.state == State::Ready;
                     devfs_mount_created(VfsCore);
                     devfs_block_node_bound(DevFs, BlockDeviceRegistry);
@@ -148,6 +152,9 @@ object RootFS: KernelObject {
                 drives {
                     Ext2FileSystem.Event::Enable;
                     VfsCore.Action::MountExt2At;
+                    VfsCore.Action::MoveMountToRoot;
+                    FsStruct.Action::Chdir;
+                    FsStruct.Action::ChrootDot;
                 }
 
                 ensures {
@@ -162,8 +169,9 @@ object RootFS: KernelObject {
                     rootfs_real_mount_point_created(RootFS, Dentry);
                     rootfs_real_ext2_mount_created(RootFS, Mount);
                     rootfs_prepare_namespace_position_preserved();
-                    rootfs_ms_move_deferred(RootFS);
-                    rootfs_chroot_deferred(RootFS);
+                    rootfs_ms_move_done(RootFS, Mount);
+                    rootfs_chroot_dot_done(RootFS, FsStruct);
+                    rootfs_current_root_is_real_ext2(RootFS, Ext2FileSystem);
                 }
             }
         }
@@ -181,8 +189,9 @@ object RootFS: KernelObject {
             rootfs_ext2_filesystem_ready(RootFS, Ext2FileSystem);
             rootfs_real_ext2_mount_created(RootFS, Mount);
             rootfs_prepare_namespace_position_preserved();
-            rootfs_ms_move_deferred(RootFS);
-            rootfs_chroot_deferred(RootFS);
+            rootfs_ms_move_done(RootFS, Mount);
+            rootfs_chroot_dot_done(RootFS, FsStruct);
+            rootfs_current_root_is_real_ext2(RootFS, Ext2FileSystem);
         }
     }
 }
@@ -296,8 +305,9 @@ object RootfsPhase: PhaseObject {
                     rootfs_devfs_available(RootFS, DevFs);
                     rootfs_block_root_device_candidate_bound(RootFS, BlockDeviceRegistry);
                     rootfs_real_ext2_mount_created(RootFS, Mount);
-                    rootfs_ms_move_deferred(RootFS);
-                    rootfs_chroot_deferred(RootFS);
+                    rootfs_ms_move_done(RootFS, Mount);
+                    rootfs_chroot_dot_done(RootFS, FsStruct);
+                    rootfs_current_root_is_real_ext2(RootFS, Ext2FileSystem);
                     integrity_keys_setup_deferred();
                     rootfs_boundary_ready(RootfsBoundary);
                 }

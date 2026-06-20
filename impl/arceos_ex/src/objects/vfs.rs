@@ -118,6 +118,135 @@ pub enum VfsError {
     UnsupportedPath,
 }
 
+pub struct FsStruct {
+    lifecycle: Lifecycle,
+    root_dentry: Option<DentryRef>,
+    pwd_dentry: Option<DentryRef>,
+    initial_root_bound: bool,
+    root_pwd_same: bool,
+    pwd_chdir_to_real_root: bool,
+    chroot_dot_done: bool,
+}
+
+impl FsStruct {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            root_dentry: None,
+            pwd_dentry: None,
+            initial_root_bound: false,
+            root_pwd_same: false,
+            pwd_chdir_to_real_root: false,
+            chroot_dot_done: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn root_dentry(&self) -> Option<DentryRef> {
+        self.root_dentry
+    }
+
+    pub const fn pwd_dentry(&self) -> Option<DentryRef> {
+        self.pwd_dentry
+    }
+
+    pub const fn initial_root_bound(&self) -> bool {
+        self.initial_root_bound
+    }
+
+    pub const fn root_pwd_same(&self) -> bool {
+        self.root_pwd_same
+    }
+
+    pub const fn pwd_chdir_to_real_root(&self) -> bool {
+        self.pwd_chdir_to_real_root
+    }
+
+    pub const fn chroot_dot_done(&self) -> bool {
+        self.chroot_dot_done
+    }
+
+    pub fn setup(&mut self, vfs: &VfsCore) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || vfs.state() != State::Ready
+            || !vfs.rootfs_mount_created()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        let Some(root_ref) = vfs.rootfs_root_dentry() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        if vfs.dentry(root_ref).is_none_or(|dentry| !dentry.positive()) {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.root_dentry = Some(root_ref);
+        self.pwd_dentry = Some(root_ref);
+        self.initial_root_bound = true;
+        self.root_pwd_same = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    pub fn chdir(&mut self, vfs: &VfsCore, dentry_ref: DentryRef) -> Result<(), VfsError> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(VfsError::InvalidRef);
+        }
+        let dentry = vfs.dentry(dentry_ref).ok_or(VfsError::InvalidRef)?;
+        if !dentry.positive() || dentry.removed() {
+            return Err(VfsError::NotFound);
+        }
+        let inode = vfs.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if !inode.is_directory() {
+            return Err(VfsError::NotDirectory);
+        }
+
+        self.pwd_dentry = Some(dentry_ref);
+        self.root_pwd_same = self.root_dentry == self.pwd_dentry;
+        self.pwd_chdir_to_real_root = true;
+        Ok(())
+    }
+
+    pub fn chroot_dot(&mut self, vfs: &VfsCore) -> Result<(), VfsError> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(VfsError::InvalidRef);
+        }
+        let pwd_ref = self.pwd_dentry.ok_or(VfsError::InvalidRef)?;
+        let dentry = vfs.dentry(pwd_ref).ok_or(VfsError::InvalidRef)?;
+        if !dentry.positive() || dentry.removed() {
+            return Err(VfsError::NotFound);
+        }
+        let inode = vfs.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if !inode.is_directory() {
+            return Err(VfsError::NotDirectory);
+        }
+
+        self.root_dentry = Some(pwd_ref);
+        self.root_pwd_same = true;
+        self.chroot_dot_done = true;
+        Ok(())
+    }
+}
+
 impl From<Ext2Error> for VfsError {
     fn from(error: Ext2Error) -> Self {
         match error {
@@ -296,6 +425,10 @@ impl Mount {
 
     pub const fn mounted(&self) -> bool {
         self.mounted
+    }
+
+    fn set_mount_point(&mut self, mount_point_ref: DentryRef) {
+        self.mount_point_ref = Some(mount_point_ref);
     }
 }
 
@@ -504,6 +637,10 @@ impl Dentry {
         self.mounted_root = Some(root_dentry_ref);
     }
 
+    fn clear_mount_root(&mut self) {
+        self.mounted_root = None;
+    }
+
     fn mark_removed(&mut self) {
         self.positive = false;
         self.removed = true;
@@ -627,8 +764,8 @@ pub struct VfsCore {
     inodes: Vec<Inode>,
     dentries: Vec<Dentry>,
     files: Vec<File>,
-    current_root_mount: Option<MountRef>,
-    current_root_dentry: Option<DentryRef>,
+    rootfs_mount: Option<MountRef>,
+    rootfs_root_dentry: Option<DentryRef>,
     lookup_count: usize,
     insert_count: usize,
     remove_count: usize,
@@ -648,6 +785,7 @@ pub struct VfsCore {
     path_walk_crossed_mount: bool,
     open_path_allocated_file: bool,
     read_path_returns_data: bool,
+    mount_moved_to_root: bool,
 }
 
 impl VfsCore {
@@ -668,8 +806,8 @@ impl VfsCore {
             inodes: Vec::new(),
             dentries: Vec::new(),
             files: Vec::new(),
-            current_root_mount: None,
-            current_root_dentry: None,
+            rootfs_mount: None,
+            rootfs_root_dentry: None,
             lookup_count: 0,
             insert_count: 0,
             remove_count: 0,
@@ -689,6 +827,7 @@ impl VfsCore {
             path_walk_crossed_mount: false,
             open_path_allocated_file: false,
             read_path_returns_data: false,
+            mount_moved_to_root: false,
         }
     }
 
@@ -752,12 +891,12 @@ impl VfsCore {
         self.files.len()
     }
 
-    pub const fn current_root_mount(&self) -> Option<MountRef> {
-        self.current_root_mount
+    pub const fn rootfs_root_dentry(&self) -> Option<DentryRef> {
+        self.rootfs_root_dentry
     }
 
-    pub const fn current_root_dentry(&self) -> Option<DentryRef> {
-        self.current_root_dentry
+    pub const fn mount_moved_to_root(&self) -> bool {
+        self.mount_moved_to_root
     }
 
     pub const fn lookup_count(&self) -> usize {
@@ -880,7 +1019,12 @@ impl VfsCore {
 
     pub fn mount_initial_ramfs_root(&mut self, fs_type: &RamFsType) -> Result<MountRef, VfsError> {
         let mount_ref = self.create_ramfs_mount(fs_type, None)?;
-        self.set_root(mount_ref)?;
+        let root_dentry_ref = self
+            .mount(mount_ref)
+            .ok_or(VfsError::InvalidRef)?
+            .root_dentry_ref();
+        self.rootfs_mount = Some(mount_ref);
+        self.rootfs_root_dentry = Some(root_dentry_ref);
         Ok(mount_ref)
     }
 
@@ -1014,20 +1158,80 @@ impl VfsCore {
     }
 
     pub const fn rootfs_mount_created(&self) -> bool {
-        self.current_root_mount.is_some() && self.current_root_dentry.is_some()
+        self.rootfs_mount.is_some() && self.rootfs_root_dentry.is_some()
     }
 
-    pub fn set_root(&mut self, mount_ref: MountRef) -> Result<(), VfsError> {
-        let Some(mount) = self.mount(mount_ref) else {
-            return Err(VfsError::MountMissing);
-        };
+    pub fn move_mount_to_root(
+        &mut self,
+        mount_ref: MountRef,
+        root_dentry_ref: DentryRef,
+    ) -> Result<DentryRef, VfsError> {
+        let root = self.positive_dentry(root_dentry_ref)?;
+        let root_inode = self.inode(root.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if !root_inode.is_directory() {
+            return Err(VfsError::NotDirectory);
+        }
+        let moved_root_ref = self
+            .mount(mount_ref)
+            .ok_or(VfsError::MountMissing)?
+            .root_dentry_ref();
+        let mount = self.mount(mount_ref).ok_or(VfsError::MountMissing)?;
         if !mount.mounted() {
             return Err(VfsError::MountMissing);
         }
-        let root_dentry_ref = mount.root_dentry_ref();
-        self.current_root_mount = Some(mount_ref);
-        self.current_root_dentry = Some(root_dentry_ref);
-        Ok(())
+        let old_mount_point_ref = mount.mount_point_ref();
+        if let Some(old_mount_point_ref) = old_mount_point_ref {
+            let old_mount_point = self
+                .dentry_mut(old_mount_point_ref)
+                .ok_or(VfsError::InvalidRef)?;
+            old_mount_point.clear_mount_root();
+        }
+        let root_dentry = self
+            .dentry_mut(root_dentry_ref)
+            .ok_or(VfsError::InvalidRef)?;
+        root_dentry.bind_mount_root(moved_root_ref);
+        let Some(mount) = self.mount_mut(mount_ref) else {
+            return Err(VfsError::MountMissing);
+        };
+        mount.set_mount_point(root_dentry_ref);
+        self.mount_moved_to_root = true;
+        Ok(moved_root_ref)
+    }
+
+    pub fn current_root_dentry(&self, fs_struct: &FsStruct) -> Option<DentryRef> {
+        fs_struct.root_dentry()
+    }
+
+    pub fn current_pwd_dentry(&self, fs_struct: &FsStruct) -> Option<DentryRef> {
+        fs_struct.pwd_dentry()
+    }
+
+    pub fn current_root_mount(&self, fs_struct: &FsStruct) -> Option<MountRef> {
+        let root_ref = fs_struct.root_dentry()?;
+        self.mounts
+            .iter()
+            .find(|mount| mount.root_dentry_ref() == root_ref)
+            .map(|mount| mount.mount_ref())
+    }
+
+    pub fn current_root_is_ext2(&self, fs_struct: &FsStruct) -> bool {
+        let Some(mount_ref) = self.current_root_mount(fs_struct) else {
+            return false;
+        };
+        self.mount(mount_ref)
+            .is_some_and(|mount| mount.fs_kind() == FileSystemKind::Ext2)
+    }
+
+    pub fn initial_root_dentry(&self) -> Option<DentryRef> {
+        self.rootfs_root_dentry
+    }
+
+    pub fn initial_root_mount(&self) -> Option<MountRef> {
+        self.rootfs_mount
+    }
+
+    pub fn mount_mut(&mut self, mount_ref: MountRef) -> Option<&mut Mount> {
+        self.mounts.get_mut(mount_ref.index())
     }
 
     pub fn mount(&self, mount_ref: MountRef) -> Option<&Mount> {
@@ -1136,6 +1340,7 @@ impl VfsCore {
 
     pub fn walk_path<P: BlockDeviceProvider>(
         &mut self,
+        fs_struct: &FsStruct,
         fs: &mut Ext2FileSystem,
         registry: &mut BlockDeviceRegistry,
         provider: &mut P,
@@ -1147,8 +1352,9 @@ impl VfsCore {
         if !path.starts_with(b"/") {
             return Err(VfsError::UnsupportedPath);
         }
-        let mut current = self.current_root_dentry.ok_or(VfsError::MountMissing)?;
+        let mut current = fs_struct.root_dentry().ok_or(VfsError::MountMissing)?;
         self.path_walk_resolved = false;
+        self.path_walk_crossed_mount = false;
         for component in path.split(|byte| *byte == b'/') {
             if component.is_empty() {
                 continue;
@@ -1171,12 +1377,13 @@ impl VfsCore {
 
     pub fn open_path<P: BlockDeviceProvider>(
         &mut self,
+        fs_struct: &FsStruct,
         fs: &mut Ext2FileSystem,
         registry: &mut BlockDeviceRegistry,
         provider: &mut P,
         path: &[u8],
     ) -> Result<FileRef, VfsError> {
-        let dentry_ref = self.walk_path(fs, registry, provider, path)?;
+        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
         let file_ref = self.open_file(dentry_ref)?;
         self.open_path_allocated_file = true;
         Ok(file_ref)
@@ -1184,13 +1391,14 @@ impl VfsCore {
 
     pub fn read_path<P: BlockDeviceProvider>(
         &mut self,
+        fs_struct: &FsStruct,
         fs: &mut Ext2FileSystem,
         registry: &mut BlockDeviceRegistry,
         provider: &mut P,
         path: &[u8],
         buffer: &mut [u8],
     ) -> Result<usize, VfsError> {
-        let file_ref = self.open_path(fs, registry, provider, path)?;
+        let file_ref = self.open_path(fs_struct, fs, registry, provider, path)?;
         let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
         let len = if self
             .inode(inode_ref)

@@ -54,11 +54,11 @@ impl SmokeScenario for RamFsOperationsScenario {
         assertions.assert("rootfs inode count", ctx.vfs_core.inode_count() >= 1);
         assertions.assert("rootfs dentry count", ctx.vfs_core.dentry_count() >= 1);
 
-        let Some(mount_ref) = ctx.vfs_core.current_root_mount() else {
+        let Some(mount_ref) = ctx.vfs_core.initial_root_mount() else {
             assertions.assert("root mount present", false);
             return;
         };
-        let Some(root_dentry_ref) = ctx.vfs_core.current_root_dentry() else {
+        let Some(root_dentry_ref) = ctx.vfs_core.initial_root_dentry() else {
             assertions.assert("root dentry present", false);
             return;
         };
@@ -122,7 +122,11 @@ impl SmokeScenario for RamFsOperationsScenario {
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
         let ctx = context();
-        let Some(root_dentry) = ctx.vfs_core.current_root_dentry() else {
+        let Some(root_dentry) = ctx
+            .rootfs
+            .real_mount_point_ref()
+            .or_else(|| ctx.vfs_core.initial_root_dentry())
+        else {
             assertions.assert("root dentry", false);
             return;
         };

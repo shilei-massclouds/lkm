@@ -73,11 +73,11 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    let Some(root_mount_ref) = ctx.vfs_core.current_root_mount() else {
+    let Some(root_mount_ref) = ctx.vfs_core.initial_root_mount() else {
         printk::write_str("vfs root mount missing\n");
         return SmokeResult::Failed;
     };
-    let Some(root_dentry_ref) = ctx.vfs_core.current_root_dentry() else {
+    let Some(root_dentry_ref) = ctx.vfs_core.initial_root_dentry() else {
         printk::write_str("vfs root dentry missing\n");
         return SmokeResult::Failed;
     };

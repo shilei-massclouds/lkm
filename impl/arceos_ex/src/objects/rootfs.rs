@@ -6,7 +6,7 @@ use super::{
     initcall::InitcallBoundary,
     rest_init::{KernelInitTask, KERNEL_INIT_PID},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    vfs::{DentryRef, FileSystemKind, MountRef, VfsCore},
+    vfs::{DentryRef, FileSystemKind, FsStruct, MountRef, VfsCore},
     workqueue::Workqueue,
 };
 use crate::trace::Checkpoint;
@@ -191,8 +191,9 @@ pub struct RootFS {
     real_mount_point_ref: Option<DentryRef>,
     real_mount_ref: Option<MountRef>,
     prepare_namespace_position_preserved: bool,
-    ms_move_deferred: bool,
-    chroot_deferred: bool,
+    ms_move_done: bool,
+    chroot_dot_done: bool,
+    current_root_is_real_ext2: bool,
 }
 
 impl RootFS {
@@ -214,8 +215,9 @@ impl RootFS {
             real_mount_point_ref: None,
             real_mount_ref: None,
             prepare_namespace_position_preserved: false,
-            ms_move_deferred: false,
-            chroot_deferred: false,
+            ms_move_done: false,
+            chroot_dot_done: false,
+            current_root_is_real_ext2: false,
         }
     }
 
@@ -283,12 +285,16 @@ impl RootFS {
         self.prepare_namespace_position_preserved
     }
 
-    pub const fn ms_move_deferred(&self) -> bool {
-        self.ms_move_deferred
+    pub const fn ms_move_done(&self) -> bool {
+        self.ms_move_done
     }
 
-    pub const fn chroot_deferred(&self) -> bool {
-        self.chroot_deferred
+    pub const fn chroot_dot_done(&self) -> bool {
+        self.chroot_dot_done
+    }
+
+    pub const fn current_root_is_real_ext2(&self) -> bool {
+        self.current_root_is_real_ext2
     }
 
     pub fn enable(
@@ -297,6 +303,7 @@ impl RootFS {
         saved_command_line: &SavedCommandLine,
         kernel_init_task: &KernelInitTask,
         vfs_core: &mut VfsCore,
+        fs_struct: &mut FsStruct,
         devfs: &DevFs,
         block_registry: &BlockDeviceRegistry,
         ext2_driver: &Ext2Driver,
@@ -311,6 +318,7 @@ impl RootFS {
             || kernel_init_task.pid() != KERNEL_INIT_PID
             || vfs_core.state() != State::Ready
             || !vfs_core.rootfs_mount_created()
+            || fs_struct.state() != State::Ready
             || devfs.state() != State::Ready
             || !devfs.mounted()
             || !devfs.block_node_listed()
@@ -329,7 +337,7 @@ impl RootFS {
             );
         }
 
-        let Some(root_mount_ref) = vfs_core.current_root_mount() else {
+        let Some(root_mount_ref) = vfs_core.initial_root_mount() else {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -353,7 +361,24 @@ impl RootFS {
                 State::Online,
             );
         }
-        let root_dentry_ref = root_mount.root_dentry_ref();
+        let Some(root_dentry_ref) = fs_struct.root_dentry() else {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        };
+        if root_dentry_ref != root_mount.root_dentry_ref()
+            || fs_struct.pwd_dentry() != Some(root_dentry_ref)
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
 
         let Some(default_entry) = block_registry.default_entry() else {
             return failed_condition(
@@ -406,6 +431,25 @@ impl RootFS {
                 State::Online,
             );
         };
+        let Ok(real_root_ref) = vfs_core.move_mount_to_root(mount_ref, root_dentry_ref) else {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        };
+        if fs_struct.chdir(vfs_core, real_root_ref).is_err()
+            || fs_struct.chroot_dot(vfs_core).is_err()
+            || !vfs_core.current_root_is_ext2(fs_struct)
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
 
         self.ramdisk_eaccess_requires_prepare_namespace = true;
         self.prepare_namespace_inputs_ready = true;
@@ -422,8 +466,9 @@ impl RootFS {
         self.real_mount_point_ref = Some(mount_point_ref);
         self.real_mount_ref = Some(mount_ref);
         self.prepare_namespace_position_preserved = true;
-        self.ms_move_deferred = true;
-        self.chroot_deferred = true;
+        self.ms_move_done = true;
+        self.chroot_dot_done = true;
+        self.current_root_is_real_ext2 = true;
         crate::trace::checkpoint(Checkpoint::RamdiskExecuteCommandEaccessCheckpoint);
         self.lifecycle.transition(
             LifecycleEvent::Enable,
@@ -472,7 +517,7 @@ impl IntegrityKeysDeferred {
             || rootfs.state() != State::Online
             || !rootfs.prepare_namespace_inputs_ready()
             || !rootfs.real_ext2_mount_created()
-            || !rootfs.ms_move_deferred()
+            || !rootfs.ms_move_done()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -541,8 +586,9 @@ impl RootfsBoundary {
             || !rootfs.ext2_filesystem_ready()
             || !rootfs.real_mount_point_created()
             || !rootfs.real_ext2_mount_created()
-            || !rootfs.ms_move_deferred()
-            || !rootfs.chroot_deferred()
+            || !rootfs.ms_move_done()
+            || !rootfs.chroot_dot_done()
+            || !rootfs.current_root_is_real_ext2()
             || integrity_keys.state() != State::Ready
             || !integrity_keys.setup_deferred()
         {
@@ -597,8 +643,9 @@ pub fn rootfs_phase_ready(
         && rootfs.real_mount_point_ref().is_some()
         && rootfs.real_mount_ref().is_some()
         && rootfs.prepare_namespace_position_preserved()
-        && rootfs.ms_move_deferred()
-        && rootfs.chroot_deferred()
+        && rootfs.ms_move_done()
+        && rootfs.chroot_dot_done()
+        && rootfs.current_root_is_real_ext2()
         && integrity_keys.state() == State::Ready
         && integrity_keys.setup_deferred()
         && integrity_keys.load_keys_position_preserved()

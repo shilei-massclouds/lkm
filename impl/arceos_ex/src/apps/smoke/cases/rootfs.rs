@@ -2,13 +2,19 @@ use crate::{
     apps::smoke::SmokeResult,
     context::context,
     objects::{
+        ext2::{EXT2_SMOKE_FILE_CONTENT, EXT2_SMOKE_FILE_NAME},
         printk,
         rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
         state::State,
         vfs::{FileSystemKind, VfsInodeKind},
+        virtio_blk,
     },
     phases,
 };
+
+static mut ROOTFS_READ_BUFFER: [u8; EXT2_SMOKE_FILE_CONTENT.len()] =
+    [0; EXT2_SMOKE_FILE_CONTENT.len()];
+const ROOTFS_SMOKE_FILE_PATH: &[u8] = b"/smoke.txt";
 
 pub fn run() -> SmokeResult {
     let ctx = context();
@@ -58,14 +64,24 @@ pub fn run() -> SmokeResult {
         || !ctx.rootfs.ext2_filesystem_ready()
         || !ctx.rootfs.real_mount_point_created()
         || !ctx.rootfs.real_ext2_mount_created()
-        || !ctx.rootfs.ms_move_deferred()
-        || !ctx.rootfs.chroot_deferred()
+        || !ctx.rootfs.ms_move_done()
+        || !ctx.rootfs.chroot_dot_done()
+        || !ctx.rootfs.current_root_is_real_ext2()
     {
         printk::write_str("rootfs enable facts invalid\n");
         return SmokeResult::Failed;
     }
 
-    let Some(root_mount_ref) = ctx.vfs_core.current_root_mount() else {
+    if ctx.fs_struct.state() != State::Ready
+        || !ctx.fs_struct.pwd_chdir_to_real_root()
+        || !ctx.fs_struct.chroot_dot_done()
+        || !ctx.fs_struct.root_pwd_same()
+    {
+        printk::write_str("fs_struct root switch facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
+    let Some(root_mount_ref) = ctx.vfs_core.current_root_mount(&ctx.fs_struct) else {
         printk::write_str("rootfs current root mount missing\n");
         return SmokeResult::Failed;
     };
@@ -73,8 +89,17 @@ pub fn run() -> SmokeResult {
         printk::write_str("rootfs current root mount invalid\n");
         return SmokeResult::Failed;
     };
-    if root_mount.fs_kind() != FileSystemKind::RamFs {
-        printk::write_str("rootfs current root is not initial ramfs\n");
+    let Some(current_root_ref) = ctx.vfs_core.current_root_dentry(&ctx.fs_struct) else {
+        printk::write_str("rootfs current root dentry missing\n");
+        return SmokeResult::Failed;
+    };
+    if root_mount.fs_kind() != FileSystemKind::Ext2
+        || root_mount.root_dentry_ref() != current_root_ref
+        || ctx.vfs_core.current_pwd_dentry(&ctx.fs_struct) != Some(current_root_ref)
+        || !ctx.vfs_core.current_root_is_ext2(&ctx.fs_struct)
+        || !ctx.vfs_core.mount_moved_to_root()
+    {
+        printk::write_str("rootfs current root is not ext2\n");
         return SmokeResult::Failed;
     }
 
@@ -124,10 +149,23 @@ pub fn run() -> SmokeResult {
     };
     if real_mount_point.name() != ROOTFS_REAL_MOUNT_POINT_NAME
         || real_mount.fs_kind() != FileSystemKind::Ext2
-        || real_mount.mount_point_ref() != Some(real_mount_point_ref)
-        || real_mount_point.mounted_root() != Some(real_mount.root_dentry_ref())
+        || real_mount.mount_point_ref() != ctx.vfs_core.initial_root_dentry()
+        || real_mount.root_dentry_ref() != current_root_ref
+        || real_mount_point.mounted_root().is_some()
     {
-        printk::write_str("rootfs ext2 staging mount facts invalid\n");
+        printk::write_str("rootfs ext2 moved mount facts invalid\n");
+        return SmokeResult::Failed;
+    }
+    let Some(initial_root_ref) = ctx.vfs_core.initial_root_dentry() else {
+        printk::write_str("initial root dentry missing\n");
+        return SmokeResult::Failed;
+    };
+    let Some(initial_root) = ctx.vfs_core.dentry(initial_root_ref) else {
+        printk::write_str("initial root dentry invalid\n");
+        return SmokeResult::Failed;
+    };
+    if initial_root.mounted_root() != Some(current_root_ref) {
+        printk::write_str("rootfs moved root binding invalid\n");
         return SmokeResult::Failed;
     }
     if ctx.ext2_driver.state() != State::Ready
@@ -160,6 +198,34 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    let mut provider = virtio_blk::live_provider(&ctx.kernel_image);
+    let buffer = unsafe {
+        let ptr = core::ptr::addr_of_mut!(ROOTFS_READ_BUFFER);
+        &mut *ptr
+    };
+    buffer.fill(0);
+    match ctx.vfs_core.read_path(
+        &ctx.fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &mut provider,
+        ROOTFS_SMOKE_FILE_PATH,
+        buffer,
+    ) {
+        Ok(len)
+            if len == EXT2_SMOKE_FILE_CONTENT.len()
+                && &buffer[..len] == EXT2_SMOKE_FILE_CONTENT
+                && ctx.ext2_filesystem.lookup_dirent().name() == EXT2_SMOKE_FILE_NAME => {}
+        _ => {
+            printk::write_str("rootfs direct ext2 read failed\n");
+            return SmokeResult::Failed;
+        }
+    }
+    if ctx.vfs_core.path_walk_crossed_mount() {
+        printk::write_str("rootfs direct read unexpectedly crossed mount\n");
+        return SmokeResult::Failed;
+    }
+
     if ctx.integrity_keys_deferred.state() != State::Ready
         || !ctx.integrity_keys_deferred.setup_deferred()
         || !ctx.integrity_keys_deferred.load_keys_position_preserved()
@@ -175,6 +241,6 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    printk::write_str("rootfs next=finalize ext2_mount=/root root_switch=deferred\n");
+    printk::write_str("rootfs next=finalize current_root=ext2 read=/smoke.txt\n");
     SmokeResult::Passed
 }

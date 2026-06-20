@@ -56,6 +56,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.saved_command_line,
         &ctx.kernel_init_task,
         &mut ctx.vfs_core,
+        &mut ctx.fs_struct,
         &ctx.devfs,
         &ctx.block_device_registry,
         &ctx.ext2_driver,

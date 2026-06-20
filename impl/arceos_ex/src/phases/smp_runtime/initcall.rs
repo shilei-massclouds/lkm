@@ -73,6 +73,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.devfs.setup(
         &mut ctx.vfs_core,
+        &ctx.fs_struct,
         &ctx.hwrng_core,
         &ctx.block_device_registry,
     )?;

@@ -606,6 +606,7 @@ object ProcessPreparePhase: PhaseObject {
                     RamFsType.Event::Setup;
                     VfsCore.Action::RegisterRamFsType(RamFsType);
                     VfsCore.Action::MountInitialRamFsRoot;
+                    FsStruct.Event::Setup;
                 }
 
                 ensures {
@@ -630,8 +631,11 @@ object ProcessPreparePhase: PhaseObject {
                     ramfs_type_registered(VfsCore, RamFsType);
                     rootfs_fs_type_uses_ramfs(RamFsType);
                     rootfs_mount_created(VfsCore);
-                    vfs_current_root_mount_set(VfsCore, Mount);
-                    vfs_current_root_dentry_set(VfsCore, Dentry);
+                    vfs_rootfs_mount_set(VfsCore, Mount);
+                    vfs_rootfs_dentry_set(VfsCore, Dentry);
+                    fs_struct_root_dentry_set(FsStruct, Dentry);
+                    fs_struct_pwd_dentry_set(FsStruct, Dentry);
+                    fs_struct_root_pwd_same(FsStruct);
                     superblock_root_dentry_bound(SuperBlock, Dentry);
                     superblock_root_inode_bound(SuperBlock, Inode);
                     superblock_root_dentry_inode_matches(SuperBlock, Dentry, Inode);
@@ -673,6 +677,7 @@ object ProcessPreparePhase: PhaseObject {
             KeyringCore.state == State::Ready;
             SecurityCore.state == State::Ready;
             VfsCore.state == State::Ready;
+            FsStruct.state == State::Ready;
             RamFsType.state == State::Ready;
             vfs_core_initialized(VfsCore);
             vfs_core_fs_type_registry_ready(VfsCore);
@@ -683,8 +688,11 @@ object ProcessPreparePhase: PhaseObject {
             ramfs_type_registered(VfsCore, RamFsType);
             rootfs_fs_type_uses_ramfs(RamFsType);
             rootfs_mount_created(VfsCore);
-            vfs_current_root_mount_set(VfsCore, Mount);
-            vfs_current_root_dentry_set(VfsCore, Dentry);
+            vfs_rootfs_mount_set(VfsCore, Mount);
+            vfs_rootfs_dentry_set(VfsCore, Dentry);
+            fs_struct_root_dentry_set(FsStruct, Dentry);
+            fs_struct_pwd_dentry_set(FsStruct, Dentry);
+            fs_struct_root_pwd_same(FsStruct);
             process_prepare_ready(ProcessPreparePhase);
             rest_init_inputs_ready(ProcessPreparePhase, RootPidNamespace, TaskCreationCore, CredentialCore);
             boot_cpu_local_irq_enabled();

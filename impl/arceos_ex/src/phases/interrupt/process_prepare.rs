@@ -103,6 +103,7 @@ fn setup_vfs_rootfs(ctx: &mut Context) -> EventResult {
     ctx.vfs_core
         .mount_initial_ramfs_root(&ctx.ramfs_type)
         .map_err(|_| vfs_setup_error(ctx))?;
+    ctx.fs_struct.setup(&ctx.vfs_core)?;
     Ok(())
 }
 
@@ -238,6 +239,9 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.vfs_core.page_cache_deferred()
         && ctx.vfs_core.permissions_deferred()
         && ctx.vfs_core.mount_namespace_deferred()
+        && ctx.fs_struct.state() == State::Ready
+        && ctx.fs_struct.initial_root_bound()
+        && ctx.fs_struct.root_pwd_same()
         && ctx.ramfs_type.state() == State::Ready
         && ctx.ramfs_type.memory_backed()
         && ctx.vfs_core.ramfs_registered()
@@ -246,12 +250,15 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
 }
 
 fn rootfs_mount_facts_ready(ctx: &Context) -> bool {
-    let Some(mount_ref) = ctx.vfs_core.current_root_mount() else {
+    let Some(mount_ref) = ctx.vfs_core.initial_root_mount() else {
         return false;
     };
-    let Some(root_dentry_ref) = ctx.vfs_core.current_root_dentry() else {
+    let Some(root_dentry_ref) = ctx.fs_struct.root_dentry() else {
         return false;
     };
+    if ctx.fs_struct.pwd_dentry() != Some(root_dentry_ref) {
+        return false;
+    }
     let Some(mount) = ctx.vfs_core.mount(mount_ref) else {
         return false;
     };

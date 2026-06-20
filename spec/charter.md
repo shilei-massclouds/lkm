@@ -2740,7 +2740,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 2. `KUnit 测试路径`（暂名 `KUnitRuntimeTrimmed`）：覆盖 `kunit_run_all_tests()`。当前 `CONFIG_KUNIT=n`，按 trimmed/no-op 记录；它属于 `RootfsPhase` 的入口动作，不单独形成 `KUnitPhase`。
 3. `Initramfs 同步对象`（暂名 `InitramfsSyncDeferred`）：覆盖 `wait_for_initramfs()`。它等待 initramfs async domain 到达 cookie 边界；若 initramfs cookie 不存在，只记录早期访问警告路径。当前轮次不深入 initramfs 异步展开和 cookie/domain 细节，标记为 `deferred: InitramfsSync.wait()`。
 4. `rootfs console 对象`（暂名 `RootfsConsoleDeferred`）：覆盖 `console_on_rootfs()`。它打开 `/dev/console`，并通过 `init_dup()` 建立 PID 1 的 stdin/stdout/stderr。由于它属于用户态入口 fd 准备细节，当前轮次保留时序位置，标记为 `deferred: RootfsConsole.setup()`。
-5. `根文件系统 enable 事件`（目标对象为 `RootFS`）：覆盖 `prepare_namespace()`。`RootFS` 是顶层对象，表示当前系统根文件系统视图/根挂载树；它取代原先暂名 `RootNamespace`，避免把 Linux mount namespace 实现细节误认为规格对象。早期 `RootFS` 的 backing 指向内存中的 `RamFS`/`rootfs`，后续真实 backing 可以是 `Ext4RootFS`、其它块设备文件系统或当前配置支持的 root filesystem。`init_eaccess(ramdisk_execute_command)` 作为前置 checkpoint，当前规格要求结果必须满足调用 `prepare_namespace()` 的条件，即 early userspace init 不可直接执行；若 early userspace init 可执行并导致跳过 `prepare_namespace()`，当前 Linux-like 变种视为不支持路径或错误边界。满足条件后，`prepare_namespace()` 由 `RootFS.enable()` 表达：当前轮次先完成 Linux `do_mount_root()` 形态的真实 ext2 文件系统 `/root` staging mount；最终 `MS_MOVE` 到 `/` 和 `chroot(".")` 留给下一轮 root 切换语义。
+5. `根文件系统 enable 事件`（目标对象为 `RootFS`）：覆盖 `prepare_namespace()`。`RootFS` 是顶层对象，表示当前系统根文件系统视图/根挂载树；它取代原先暂名 `RootNamespace`，避免把 Linux mount namespace 实现细节误认为规格对象。早期 `RootFS` 的 backing 指向内存中的 `RamFS`/`rootfs`，后续真实 backing 可以是 `Ext4RootFS`、其它块设备文件系统或当前配置支持的 root filesystem。`init_eaccess(ramdisk_execute_command)` 作为前置 checkpoint，当前规格要求结果必须满足调用 `prepare_namespace()` 的条件，即 early userspace init 不可直接执行；若 early userspace init 可执行并导致跳过 `prepare_namespace()`，当前 Linux-like 变种视为不支持路径或错误边界。满足条件后，`prepare_namespace()` 由 `RootFS.enable()` 表达：当前轮次先完成 Linux `do_mount_root()` 形态的真实 ext2 文件系统 `/root` staging mount，再分开执行 `VfsCore.Action::MoveMountToRoot` 与 `FsStruct.Action::ChrootDot`，使任务可见的当前 root/pwd 指向 ext2 root。
 6. `完整性 key 加载对象`（暂名 `IntegrityKeysDeferred`）：覆盖 `integrity_load_keys()`。当前 `CONFIG_INTEGRITY=y` 时它执行 IMA/EVM X.509 key 加载路径；由于该路径属于安全/完整性子系统的后续细化内容，当前轮次保留 Linux 时序位置，标记为 `deferred: IntegrityKeys.setup()`。
 7. `rootfs 准备边界对象`（暂名 `RootfsBoundary`）：聚合上述时序位置，并把下一入口固定为 `FinalizePhase`。
 
@@ -2748,7 +2748,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 1. `RootFS.preset()`：对应更早的 `init_rootfs()` / `rootfs_fs_type` 准备。它确定初始 rootfs backing 类型，默认是 `RamFS`，在启用 tmpfs 且启动参数条件满足时可以选择 `TmpFS`；结束后记录 `RootFS.fs_type_ready == true` 和 `RootFS.initial_backing_candidate`。
 2. `RootFS.setup()`：对应更早的 `init_mount_tree()`。它创建初始 rootfs mount tree，分配初始 mount namespace，并把 `init_task.nsproxy->mnt_ns`、`current->fs.root` 和 `current->fs.pwd` 指向该 rootfs；结束后 `RootFS.state == Ready`，但 backing 仍是初始内存 rootfs。
-3. `RootFS.enable()`：对应当前 `prepare_namespace()`。它在 `init_eaccess(ramdisk_execute_command)` required checkpoint 成立后执行；当前轮次完成真实 ext2 文件系统的 `/root` staging mount，并保持当前 root 仍为初始 ramfs/rootfs，`MS_MOVE` 和 `chroot(".")` deferred。完成后 `RootFS.state == Online` 表示 prepare_namespace 的当前支持部分已经执行完毕。
+3. `RootFS.enable()`：对应当前 `prepare_namespace()`。它在 `init_eaccess(ramdisk_execute_command)` required checkpoint 成立后执行；当前轮次完成真实 ext2 文件系统的 `/root` staging mount、`MS_MOVE` 挂载移动和 `chroot(".")`。完成后 `RootFS.state == Online` 表示 prepare_namespace 的当前支持部分已经执行完毕，`FsStruct.root/pwd` 均指向 ext2 root。
 
 <p align="center">
   <img src="pic/rootfs-objects.svg" alt="rootfs 准备期对象分类与相互关系" width="900">
@@ -2768,7 +2768,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 | `wait_for_initramfs()` | deferred: `InitramfsSync.wait()` | 等待 initramfs async cookie 对应 domain；当前不展开 async domain/cookie 细节，无 cookie 时只形成 warning/checkpoint。 |
 | `console_on_rootfs()` | deferred: `RootfsConsole.setup()` | 打开 `/dev/console` 并复制为 PID 1 的 stdin/stdout/stderr；当前保留用户态入口 fd 准备位置，不进入主线对象状态。 |
 | `init_eaccess(ramdisk_execute_command)` | required checkpoint | 当前 Linux-like 规格要求该检查必须满足调用 `prepare_namespace()` 的条件；若 early userspace init 可执行并跳过 root namespace 准备，当前视为不支持路径或错误边界。 |
-| `prepare_namespace()` | event: `RootFS.enable()` | `RootFS` 是顶层根文件系统对象；当前完成真实 ext2 文件系统的 `/root` staging mount。root device fallback、其它 fs type、initrd/NFS/CIFS、最终 `MS_MOVE` 与 `chroot(".")` 仍 deferred。 |
+| `prepare_namespace()` | event: `RootFS.enable()` | `RootFS` 是顶层根文件系统对象；当前完成真实 ext2 文件系统的 `/root` staging mount、`MS_MOVE` 挂载移动和 `chroot(".")`。root device fallback、其它 fs type、initrd/NFS/CIFS 仍 deferred。 |
 | `integrity_load_keys()` | deferred: `IntegrityKeys.setup()` | 保留 IMA/EVM X.509 key 加载时序位置；当前不展开 integrity keyring、IMA/EVM 条件和证书加载细节。 |
 
 <p align="center">
@@ -2785,7 +2785,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 - `RootfsPhase.state == Ready`
 - `InitramfsSync` 和 `RootfsConsole` 保留时序位置，但当前轮次标记为 deferred
-- `RootFS.enable()` 已完成当前支持的 `prepare_namespace()` 前半段：`init_eaccess(ramdisk_execute_command)` 必须满足调用条件，真实 ext2 root staging mount 已建立在 `/root`，最终 root 切换仍 deferred
+- `RootFS.enable()` 已完成当前支持的 `prepare_namespace()` 路径：`init_eaccess(ramdisk_execute_command)` 必须满足调用条件，真实 ext2 root staging mount 已建立在 `/root`，`MS_MOVE` 与 `chroot(".")` 已完成，当前 root/pwd 指向 ext2 root
 - `IntegrityKeys` 保留时序位置，但当前轮次标记为 deferred
 - `KunitRuntime` 按当前配置记录为 trimmed/no-op
 - 下一子阶段入口是 `kernel_init_freeable()` 返回后的 `async_synchronize_full()`
@@ -2878,7 +2878,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 - `RootfsPhase.state == Ready`
 - `RootfsConsole` / `console_on_rootfs()` 保留时序位置；当前轮次标记为 deferred，不作为 `PayloadPhase` 的强 `Ready` 前置条件
 - `PayloadParam.state == Ready`
-- Linux-like 路径下，`RootFS` 已完成当前支持的 `prepare_namespace()` 前半段，真实 ext2 root staging mount 已建立在 `/root`；最终 `MS_MOVE` 和 `chroot(".")` root 切换语义仍 deferred
+- Linux-like 路径下，`RootFS` 已完成当前支持的 `prepare_namespace()` 路径，真实 ext2 root staging mount 曾建立在 `/root`，`MS_MOVE` 和 `chroot(".")` 已完成，任务可见 root/pwd 指向 ext2 root
 - Linux-like 路径下，`ExecCore`、`BinaryFormatRegistry`、VFS、credential/security 和 mm 相关对象已经由前序 initcall/VFS/安全路径准备到可执行第一个用户态程序的最低状态
 
 当前先将 `PayloadPhase` 的对象和边界记录如下：

@@ -17,7 +17,7 @@ use crate::{
 };
 
 static mut LARGE_READ_BUFFER: [u8; EXT2_SMOKE_LARGE_FILE_SIZE] = [0; EXT2_SMOKE_LARGE_FILE_SIZE];
-const EXT2_SMOKE_LARGE_FILE_PATH: &[u8] = b"/root/smoke-large.bin";
+const EXT2_SMOKE_LARGE_FILE_PATH: &[u8] = b"/smoke-large.bin";
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -146,7 +146,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert("vfs mount kind", mount.fs_kind() == FileSystemKind::Ext2);
         assertions.assert(
             "vfs mount point",
-            mount.mount_point_ref() == Some(mount_point_ref),
+            mount.mount_point_ref() == ctx.vfs_core.initial_root_dentry(),
         );
         let Some(superblock) = ctx.vfs_core.superblock(mount.superblock_ref()) else {
             assertions.assert("vfs ext2 superblock", false);
@@ -166,10 +166,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             "vfs mount point name",
             mount_point.name() == ROOTFS_REAL_MOUNT_POINT_NAME,
         );
-        assertions.assert(
-            "vfs mount redirects",
-            mount_point.mounted_root() == Some(ext2_root_ref),
-        );
+        assertions.assert("vfs mount redirects", mount_point.mounted_root().is_none());
         let Some(ext2_root) = ctx.vfs_core.dentry(ext2_root_ref) else {
             assertions.assert("vfs ext2 root dentry", false);
             return;
@@ -202,6 +199,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         };
         buffer.fill(0);
         let read = ctx.vfs_core.read_path(
+            &ctx.fs_struct,
             &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
             &mut provider,
@@ -257,10 +255,10 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             ctx.vfs_core.absolute_path_walk_supported(),
         );
         assertions.assert("path walk resolved", ctx.vfs_core.path_walk_resolved());
-        assertions.assert("path mount crossed", ctx.vfs_core.path_walk_crossed_mount());
         assertions.assert("open path file", ctx.vfs_core.open_path_allocated_file());
         assertions.assert("read path data", ctx.vfs_core.read_path_returns_data());
         let file_dentry_ref = match ctx.vfs_core.walk_path(
+            &ctx.fs_struct,
             &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
             &mut provider,
