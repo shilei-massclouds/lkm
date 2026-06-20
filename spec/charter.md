@@ -2869,7 +2869,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 当前先保留两个规格变种：
 
-1. `UserBootPayload`：Linux-like 变种，基于 Linux 的第一个用户态 init 选择与 `kernel_execve()` 交接路径建模。它不创建新的 PID 1，而是驱动前序已经建立的 `KernelInitTask` / PID 1 在当前执行任务上执行 `kernel_execve()`，成功后该任务成为 `UserInitProcess`。
+1. `UserBootPayload`：Linux-like 变种，基于 Linux 的第一个用户态 init 选择与 `kernel_execve()` 交接路径建模。它不创建新的 PID 1，而是驱动前序已经建立的 `KernelInitTask` / PID 1 在当前执行任务上读取并进入首个用户态 ELF，成功后该任务成为 `UserInitProcess`。
 2. `UnikernelApp`：内核态应用变种，当前只做粗粒度规格约束。它要求 selected app、入口、参数和基础输出设施可用；`enable()` 调用 app 入口并把启动编排链交给 app，不展开 VFS、binfmt、用户态地址空间和 exec 细节。
 
 本阶段的输入事实至少包括：
@@ -2882,7 +2882,8 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 - `RootfsConsole` / `console_on_rootfs()` 保留时序位置；当前轮次标记为 deferred，不作为 `PayloadPhase` 的强 `Ready` 前置条件
 - `PayloadParam.state == Ready`
 - Linux-like 路径下，`RootFS` 已完成当前支持的 `prepare_namespace()` 路径，真实 ext2 root staging mount 曾建立在 `/root`，`MS_MOVE` 和 `chroot(".")` 已完成，任务可见 root/pwd 指向 ext2 root
-- Linux-like 路径下，`ExecCore`、`BinaryFormatRegistry`、VFS、credential/security 和 mm 相关对象已经由前序 initcall/VFS/安全路径准备到可执行第一个用户态程序的最低状态
+- Linux-like 路径下，VFS、`ElfObject`、`UserAddressSpace`、`UserStack`、`UserTrapFrame` 和 `SyscallException` 相关对象已经准备到可执行第一个用户态程序的最低状态
+- 当前磁盘 rootfs 仍是 whole-disk ext2；`PartitionTable` / `BlockPartition` 暂不建模，等磁盘镜像切换为带分区表时再引入
 
 当前先将 `PayloadPhase` 的对象和边界记录如下：
 
@@ -2891,10 +2892,13 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 3. `Unikernel 应用对象`（暂名 `UnikernelApp`）：Unikernel 变种对象。当前只记录粗粒度约束：app 已选定、入口存在、payload 参数可用、基础输出设施可用；`enable()` 调用 app 入口，不把 Linux-like 的 `kernel_execve()` 细节套入该路径。
 4. `init 候选集合属性`（`UserBootPayload.candidates`）：覆盖 Linux 中 `ramdisk_execute_command`、`execute_command`、`CONFIG_DEFAULT_INIT` 和固定 fallback 列表。它是 `UserBootPayload` 的属性/选择上下文，不作为独立生命周期对象。由于前序 `RootfsPhase` 已要求 `init_eaccess(ramdisk_execute_command)` 必须满足调用 `prepare_namespace()` 的条件，当前 Linux-like 规格中 `ramdisk_execute_command` 分支只作为 checkpoint 保留，此处不会执行 `run_init_process(ramdisk_execute_command)`。有效候选顺序从 `execute_command`（来自 `init=`）开始，随后是 `CONFIG_DEFAULT_INIT`、`/sbin/init`、`/etc/init`、`/bin/init`、`/bin/sh`。其中 `init=` 指定路径失败会立即 panic；其它候选失败按 Linux 规则继续尝试或记录错误。
 5. `init 参数与环境对象`（暂名 `InitArgEnv`）：覆盖 `argv_init` 和 `envp_init`。`run_init_process(init_filename)` 会把 `argv_init[0]` 改为当前候选路径，再把 `argv_init` / `envp_init` 传给 `kernel_execve()`。`PayloadParam`、unknown boot options 和 `rdinit=` / `init=` 解析在前序阶段已经提供输入。
-6. `exec 核心对象`（暂名 `ExecCore`）：覆盖 `kernel_execve()` 及其进入用户态程序镜像的核心动作。它是 `UserBootPayload` 的依赖和执行动作，不是 `PayloadPhase` 中新建的基础设施；`alloc_bprm()`、参数/环境计数与复制、`bprm_execve()`、`exec_binprm()` 和 binary handler 搜索等内部细节，当前轮次标记为 deferred。
-7. `二进制格式注册表对象`（暂名 `BinaryFormatRegistry`）：覆盖 ELF、script 等 `linux_binfmt` handler 的注册集合。它主要由前序 initcall 建立；`PayloadPhase` 只引用它来完成第一个用户态程序的格式识别和加载。
-8. `用户态 init 进程对象`（暂名 `UserInitProcess`）：表示 PID 1 在 `kernel_execve()` 成功后的用户态身份。它是本阶段 Linux-like 路径的核心结果对象，不是新建 task，而是 `KernelInitTask` 在 exec 成功后发生身份转换和不可逆交接的结果。`KernelInitTask.exec_to(UserInitProcess, path, argv, envp)` 是 identity transition action，不作为 `KernelInitTask` 的标准生命周期 slot；成功后 `UserInitProcess.state == Online`。
-9. `payload 失败终端`（暂名 `PayloadPanic`）：覆盖 Linux-like 路径中 `init=` 指定 init 失败或所有候选 init 均失败后的 panic。它是失败终端，不是正常生命周期对象。
+6. `ELF 对象`（暂名 `ElfObject`）：表示从 rootfs 读取到内存后的用户态 ELF 镜像及其解析结果。它不是 `ElfLoader`，load 不是独立生命周期阶段。`ElfObject.preset()` 检查当前内核支持的 ELF 类型；`ElfObject.setup()` 解析 ELF header / program headers，并把 `PT_LOAD` 段映射到 `UserAddressSpace`，包含 `.bss` 清零、段权限和 entry point 记录；`ElfObject.enable()` 只确认 entry、用户栈和 trap frame 等进入用户态条件满足，并交给 `UserBootPayload`。
+7. `用户地址空间对象`（暂名 `UserAddressSpace`）：表示每个用户态进程独立的低地址用户区映射。它是多实例对象；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续表示内核共享地址空间实例，不改成普通多实例用户地址空间。首轮仅要求最小用户页表、用户页 `U` 权限、内核页 `U=0`、ELF 段映射和用户栈映射；完整 VMA 树、`mmap`、COW 和 page fault recovery 后续再展开。
+8. `用户栈对象`（暂名 `UserStack`）：表示第一个用户程序的初始用户栈。首轮可以只建立固定大小栈和最小 argv/envp 布局；完整 auxv、随机化、guard page 和动态栈扩展后续再展开。
+9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。它是 `UserBootPayload` 执行最终 `sret` 的输入。
+10. `系统调用分发对象`（暂名 `SyscallDispatcher` / `SyscallTable`）：表示 `SyscallException` 下的分发表和最小 handler 集合。syscall 不作为新的根对象建模，而是 `ExceptionStream` 的具体异常分支；首轮只要求 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。
+11. `用户态 init 进程对象`（暂名 `UserInitProcess`）：表示 PID 1 在进入用户态 ELF 成功后的用户态身份。它是本阶段 Linux-like 路径的核心结果对象，不是新建 task，而是 `KernelInitTask` 在 exec 成功后发生身份转换和不可逆交接的结果。`KernelInitTask.exec_to(UserInitProcess, path, argv, envp)` 是 identity transition action，不作为 `KernelInitTask` 的标准生命周期 slot；成功后 `UserInitProcess.state == Online`。
+12. `payload 失败终端`（暂名 `PayloadPanic`）：覆盖 Linux-like 路径中 `init=` 指定 init 失败或所有候选 init 均失败后的 panic。它是失败终端，不是正常生命周期对象。
 
 <p align="center">
   <img src="pic/payload-objects.svg" alt="Payload 交接期对象分类与相互关系" width="900">
@@ -2915,7 +2919,10 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 | `UserBootPayload.setup()` | formal candidate | 建立 `UserBootPayload.candidates`、参数/环境和 exec 前置条件；不创建新的 PID 1。 |
 | `ramdisk_execute_command` branch | checkpoint: no run | 前序 `RootfsPhase` 已要求进入 `prepare_namespace()` 分支；此处不会执行 `run_init_process(ramdisk_execute_command)`，仅保留 Linux 原始条件位置。 |
 | `run_init_process(init_filename)` | action: `UserBootPayload.try_candidate(path)` | 设置 `argv_init[0] = init_filename`，打印候选、参数和环境，然后调用 `kernel_execve()`。 |
-| `kernel_execve(init_filename, argv_init, envp_init)` | action: `ExecCore.execve()`，内部 deferred | 当前轮次只建模为 exec 依赖动作；`linux_binprm`、argv/envp 复制、`bprm_execve()`、binary handler 搜索等细节延后展开。 |
+| `kernel_execve(init_filename, argv_init, envp_init)` | action: `UserBootPayload.try_candidate(path)` drives `VfsCore.ReadPath` / `ElfObject` / `UserAddressSpace` | 当前轮次以固定 `/init` 小型 ELF 打通首个用户态闭环；`linux_binprm`、完整 argv/envp 复制、`bprm_execve()`、binary handler 搜索等细节延后展开。 |
+| ELF 类型检查 | event: `ElfObject.preset()` | 检查 ELF64、little-endian、RISC-V、当前支持的 executable 类型；失败是普通候选失败，不导致内核崩溃，除非该候选来自强制 `init=`。 |
+| ELF 解析与装载 | event: `ElfObject.setup()` | 解析 ELF header / program headers，并把 `PT_LOAD` 段映射到 `UserAddressSpace`；不单独引入 `ElfLoader` 或 `Load` 生命周期阶段。 |
+| 用户态入口就绪 | event: `ElfObject.enable()` | 确认 entry、用户栈和 `UserTrapFrame` 已就绪，交给 `UserBootPayload` 做最终 U-mode handoff。 |
 | `execute_command` branch | action: `UserBootPayload.try_candidate(path, requested=true)` | 来自 `init=`；若成功则通过 `KernelInitTask.exec_to(UserInitProcess, ...)` 完成交接；若失败则进入 `PayloadPanic.requested_init_failed()`，不继续默认/fallback 候选。 |
 | `CONFIG_DEFAULT_INIT` branch | action: `UserBootPayload.try_candidate(path, default=true)` | 配置非空时尝试；成功则交接到 `UserInitProcess`；失败只记录错误并继续 fallback。 |
 | `try_to_run_init_process("/sbin/init" ... "/bin/sh")` | action: `UserBootPayload.try_fallbacks()` | 固定 fallback 列表；每个候选仍调用 `try_candidate(path)`；`-ENOENT` 静默，其它错误打印后继续。 |
@@ -2930,7 +2937,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
   图 40 Payload 交接期 Linux-like 对象构建时序
 </p>
 
-图 40 按 Linux 6.12.37 `kernel_init()` 中 `do_sysctl_args()` 返回后的有效调用顺序展示 `UserBootPayload` 的 Linux-like 交接路径。绿色节点表示主线 formal/action 候选，蓝色节点表示 exec/binfmt 依赖动作，紫色节点表示成功后的不可逆交接，灰色节点表示 checkpoint，橙色虚线节点表示失败终端或继续尝试分支。
+图 40 按 Linux 6.12.37 `kernel_init()` 中 `do_sysctl_args()` 返回后的有效调用顺序展示 `UserBootPayload` 的 Linux-like 交接路径。绿色节点表示主线 formal/action 候选，蓝色节点表示 VFS/ELF/用户地址空间依赖动作，紫色节点表示成功后的不可逆交接，灰色节点表示 checkpoint，橙色虚线节点表示失败终端或继续尝试分支。
 
 本阶段的结束状态暂定至少包含：
 
@@ -2940,8 +2947,10 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 - Linux-like 路径下，`KernelInitTask` 不再作为启动编排任务继续返回；其 PID 1 身份已经由 `kernel_execve()` 转换为用户态 init
 - Linux-like 路径下，`UserBootPayload.selected_path` 已确定
 - Linux-like 路径下，`InitArgEnv.argv0 == UserBootPayload.selected_path`
-- Linux-like 路径下，`ExecCore.last_exec == success`
-- `BinaryFormatRegistry` 只作为依赖对象被引用，不在本阶段新建
+- Linux-like 路径下，`ElfObject.state == Online`
+- Linux-like 路径下，`UserAddressSpace.state == Online`
+- Linux-like 路径下，`UserTrapFrame` 已绑定 entry 和用户栈
+- Linux-like 路径下，`SyscallException` 通过 `SyscallDispatcher` / `SyscallTable` 支持最小 `write` 与 `exit/exit_group`
 - Unikernel 路径下，`UnikernelApp.state == Online`，但不要求存在 `UserInitProcess`
 - 如果 Linux-like 路径进入 `PayloadPanic`，则该路径是失败终端，不满足 `PayloadPhase.state == Online`
 

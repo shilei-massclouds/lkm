@@ -29,7 +29,7 @@ object PayloadPhase: PhaseObject {
         events {
             /*
              * Setup 确认 selected payload 可进入。当前规格只抽象 payload 选择和
-             * 前置条件，不在这里区分 Unikernel、测试 payload 或用户态首进程。
+             * 前置条件；Linux-like 用户态首进程路径由 UserBootPayload 承载。
              */
             on Event::Setup -> State::Ready {
                 depends_on {
@@ -46,6 +46,10 @@ object PayloadPhase: PhaseObject {
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     payload_phase_next_boundary();
+                }
+
+                drives {
+                    UserBootPayload.Event::Setup;
                 }
 
                 ensures {
@@ -82,6 +86,10 @@ object PayloadPhase: PhaseObject {
              * 的运行期语义是不返回：payload 要么进入服务循环，要么最终停机。
              */
             on Event::Enable -> State::Online {
+                drives {
+                    UserBootPayload.Event::Enable;
+                }
+
                 ensures {
                     selected_payload_ready();
                     selected_payload_no_return_handoff();

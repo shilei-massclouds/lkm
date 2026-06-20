@@ -170,6 +170,7 @@ object VfsCore: ResourceObject {
                     vfs_core_dentry_cache_ready(VfsCore);
                     vfs_core_inode_table_ready(VfsCore);
                     vfs_core_file_table_ready(VfsCore);
+                    vfs_absolute_path_walk_supported(VfsCore);
                     vfs_core_page_cache_deferred(VfsCore);
                     vfs_core_permissions_deferred(VfsCore);
                     vfs_core_mount_namespace_deferred(VfsCore);
@@ -186,6 +187,7 @@ object VfsCore: ResourceObject {
             vfs_core_dentry_cache_ready(VfsCore);
             vfs_core_inode_table_ready(VfsCore);
             vfs_core_file_table_ready(VfsCore);
+            vfs_absolute_path_walk_supported(VfsCore);
         }
 
         actions {

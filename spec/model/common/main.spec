@@ -93,6 +93,7 @@ include "virtio_rng.spec";
 include "vfs.spec";
 include "devfs.spec";
 include "allocator.spec";
+include "user_boot.spec";
 
 function addr_of<T>(value: T) -> AddrIdentity<T>;
 function phys_addr<T>(value: T) -> PhysAddr<T>;

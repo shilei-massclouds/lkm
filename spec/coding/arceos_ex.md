@@ -759,6 +759,14 @@ sysctl args deferred，以及下一入口仍是 `PayloadPhase`。
 KernelInitTask 的执行线从 `SmpRuntimePhase` 入口开始：`rest_init()` 通过 `TaskCreationCore` 把
 `TaskEntry::KernelInit` 绑定到 `KernelInitTask`，并提交 release/dispatch facts；`SmpRuntimePhase` 的首个子阶段 `PreSmpInitPhase` 消费这些 entry/release/dispatch facts 后进入。后续阶段按 phase 顺序衔接到 `FinalizePhase`，再自然进入 `PayloadPhase`。因此 selected payload 的执行归属应从这条连续执行线推出，而不是由 `PayloadPhase` 单独声明一个调用者事实。`BootIdleTask` 只负责 idle loop、need_resched observation 和 schedule boundary；`KthreaddTask` 当前提供内核线程管理者 ready/provider 事实和最小 schedule-loop 入口边界。
 
+`UserBootPayload` 是 Linux-like 用户态首进程路径的 selected payload 变种。代码生成或手写实现必须保持以下边界：
+
+- syscall 入口沿用 `ExceptionStream -> SyscallException`，不得为了用户态 hello 新增独立根 `Syscall` 对象或绕过异常分发。
+- 用户可执行文件对象命名为 `ElfObject`，不得生成单独的 `ElfLoader` 资源对象。`ElfObject.Preset` 只检查 ELF 类型支持；`ElfObject.Setup` 解析 ELF header / program headers，并完成 `PT_LOAD` 到 `UserAddressSpace` 的映射和 `.bss` 清零；`ElfObject.Enable` 只确认 entry、用户栈和 trap frame 已可用于进入用户态。
+- `UserAddressSpace` 是多实例用户地址空间对象，低地址用户区独立；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续是内核共享地址空间实例，不应被改造成普通多实例用户地址空间类型。
+- 当前 rootfs 输入是 whole-disk ext2；`UserBootPayload` 不应要求 `PartitionTable` / `BlockPartition`。若未来磁盘镜像切换为带分区表，再补分区对象建模。
+- 首轮 `SyscallDispatcher` / `SyscallTable` 只覆盖 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。`write` 通过受限 `UserCopy` 转发到现有 printk/serial console，不等价于完整 fd table、`/dev/console` 或 TTY/N_TTY。
+
 ## Pre-VM lifecycle 代码生成约束
 
 `Lifecycle` 是对象模型贯穿内核生命周期的核心保障机制：它既覆盖入口前导期，也覆盖后续核心初始化和 payload handoff。其实现应按内核基础设施对待，优先保证确定性、可审计性和 pre-VM 安全性；必要时可以用手写汇编实现关键路径，而不是完全依赖编译器对普通 Rust 控制流的 lowering。
@@ -837,7 +845,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 
 当前对象级实验不复用现有 ArceOS Unikernel 应用，不依赖 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust`。
 
-第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，只通过 printk 前端输出 `Hello, world!` 后通过 SBI 关机；它不得直接调用 early console 或 real console backend。
+第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。后续 `APP=user-hello` / `UserBootPayload` 作为第三类 selected payload 接入同一选择机制，用于从当前 rootfs 读取 `/init` 并进入第一个用户态 ELF。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，只通过 printk 前端输出 `Hello, world!` 后通过 SBI 关机；它不得直接调用 early console 或 real console backend。
 
 所有 payload 的入口约定为 `run() -> !`。这表示控制流不返回启动编排链：Unikernel payload 可以进入服务循环或停机，未来宏内核 payload 可以加载首个用户态程序并完成用户态切换。若某个 payload 意外返回，应视为违反 `PayloadPhase.Enable` 的 no-return handoff 契约。
 

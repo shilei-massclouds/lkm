@@ -65,6 +65,13 @@ predicate arceos_ex_must_payload_require_interrupt_phase_ready() -> bool;
 predicate arceos_ex_must_payload_follow_smp_runtime_not_nested_under_it() -> bool;
 predicate arceos_ex_must_payload_require_finalize_ready() -> bool;
 predicate arceos_ex_must_kernel_init_execution_line_reach_payload() -> bool;
+predicate arceos_ex_must_user_boot_payload_be_selected_payload_variant() -> bool;
+predicate arceos_ex_must_user_boot_use_existing_syscall_exception() -> bool;
+predicate arceos_ex_must_not_generate_elf_loader_object() -> bool;
+predicate arceos_ex_must_elf_object_setup_map_pt_load_segments() -> bool;
+predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
+predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
+predicate arceos_ex_must_user_boot_not_require_partition_objects_for_whole_disk_ext2() -> bool;
 predicate arceos_ex_must_action_lowering_use_context_ref_and_typed_packet() -> bool;
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
@@ -658,6 +665,60 @@ type ArceosExStartupPhaseCodingMust {
          * isolated payload-only fact.
          */
         arceos_ex_must_kernel_init_execution_line_reach_payload();
+
+        /*
+         * UserBootPayload selected variant:
+         *
+         * The first user-mode program path is a selected payload variant named
+         * UserBootPayload. It is driven by PayloadPhase setup/enable and must
+         * not be implemented as an unrelated phase or as a second root
+         * startup chain.
+         */
+        arceos_ex_must_user_boot_payload_be_selected_payload_variant();
+
+        /*
+         * Syscall ownership:
+         *
+         * User-mode ecall/syscall handling must extend the existing
+         * SyscallException branch under ExceptionStream. Code generation must
+         * not introduce a separate root Syscall object that bypasses
+         * ExceptionStream dispatch.
+         */
+        arceos_ex_must_user_boot_use_existing_syscall_exception();
+
+        /*
+         * ELF object boundary:
+         *
+         * The user executable model object is ElfObject. Code generation must
+         * not create a separate ElfLoader resource object for this slice.
+         * Loading PT_LOAD segments into UserAddressSpace belongs to
+         * ElfObject.Setup; ElfObject.Enable only confirms user-entry
+         * preconditions and hands them to UserBootPayload.
+         */
+        arceos_ex_must_not_generate_elf_loader_object();
+        arceos_ex_must_elf_object_setup_map_pt_load_segments();
+
+        /*
+         * User address-space boundary:
+         *
+         * UserAddressSpace is the multi-instance user address-space object.
+         * Its low half is per user process; its high half shares or references
+         * SwapperVm. SwapperVm remains the single kernel shared address-space
+         * instance and must not be mechanically converted into a user address
+         * space type with arbitrary instances.
+         */
+        arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
+        arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();
+
+        /*
+         * Whole-disk ext2 input:
+         *
+         * The current rootfs image is a whole-disk ext2 filesystem. The
+         * UserBootPayload path must not require PartitionTable or
+         * BlockPartition objects until the disk image format is changed to
+         * include a partition table.
+         */
+        arceos_ex_must_user_boot_not_require_partition_objects_for_whole_disk_ext2();
     }
 }
 

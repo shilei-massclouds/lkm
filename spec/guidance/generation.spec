@@ -11,6 +11,9 @@ predicate guidance_agent_must_read_concrete_spec_requirements_before_implementat
 predicate guidance_agent_must_implement_only_after_reading_requirements() -> bool;
 predicate guidance_agent_must_check_generated_result_against_principles_after_implementation() -> bool;
 predicate guidance_agent_must_check_generated_result_against_concrete_requirements_after_implementation() -> bool;
+predicate guidance_user_boot_codegen_must_read_user_boot_specs_first() -> bool;
+predicate guidance_user_boot_codegen_must_use_consensus_object_names() -> bool;
+predicate guidance_user_boot_codegen_must_not_create_test_only_or_transitional_objects() -> bool;
 
 type GenerationAgentWorkflow {
     invariant {
@@ -42,5 +45,35 @@ type GenerationAgentWorkflow {
          */
         guidance_agent_must_check_generated_result_against_principles_after_implementation();
         guidance_agent_must_check_generated_result_against_concrete_requirements_after_implementation();
+    }
+}
+
+type UserBootGenerationWorkflow {
+    invariant {
+        /*
+         * Before generating code for the first user-mode program path, the
+         * generator must read the user boot model and the concrete coding
+         * constraints that define UserBootPayload, ElfObject,
+         * UserAddressSpace, UserStack, UserTrapFrame and the
+         * SyscallException-backed syscall dispatcher.
+         */
+        guidance_user_boot_codegen_must_read_user_boot_specs_first();
+
+        /*
+         * Generated code must use the agreed object names and boundaries:
+         * UserBootPayload, ElfObject, UserAddressSpace, UserStack,
+         * UserTrapFrame, SyscallDispatcher and SyscallTable. It must not
+         * resurrect superseded names such as ElfLoader, ExecCore or MmStruct
+         * for the first user-mode hello slice.
+         */
+        guidance_user_boot_codegen_must_use_consensus_object_names();
+
+        /*
+         * The user boot path must be generated from model/coding semantics,
+         * not from ad hoc test helpers. A generator must not add test-only
+         * object APIs, fake partition objects for a whole-disk ext2 image, or
+         * transitional loader objects that are absent from the model.
+         */
+        guidance_user_boot_codegen_must_not_create_test_only_or_transitional_objects();
     }
 }
