@@ -121,8 +121,10 @@ object VirtioDevice: Device {
                     virtio_bus_device_added(VirtioBus, VirtioDevice);
                     virtio_bus_device_count_nonzero(VirtioBus);
                     virtio_bus_supported_device_count_nonzero(VirtioBus);
+                    virtio_bus_block_device_count_nonzero(VirtioBus);
                     virtio_bus_mmio_transport_count_nonzero(VirtioBus);
                     virtio_device_supported_id(VirtioDevice);
+                    virtio_device_block_id(VirtioDevice);
                     virtio_device_vendor_id_bound(VirtioDevice);
                     virtio_device_status_registered(VirtioDevice);
                     virtio_device_transport_bound(VirtioDevice, VirtioMmioTransportDevice);
@@ -142,6 +144,7 @@ object VirtioDevice: Device {
             virtio_device_allocated(VirtioDevice);
             virtio_device_registered_on_bus(VirtioDevice, VirtioBus);
             virtio_device_supported_id(VirtioDevice);
+            virtio_device_block_id(VirtioDevice);
             virtio_device_vendor_id_bound(VirtioDevice);
             virtio_device_status_registered(VirtioDevice);
             virtio_device_transport_bound(VirtioDevice, VirtioMmioTransportDevice);

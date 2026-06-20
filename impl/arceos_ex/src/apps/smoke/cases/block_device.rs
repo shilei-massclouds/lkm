@@ -78,6 +78,16 @@ impl SmokeScenario for BlockDeviceReadScenario {
         assertions.assert("minor", devt.minor() == VIRTBLK_FIRST_MINOR);
 
         let mut provider = virtio_blk::live_provider(&ctx.kernel_image);
+        let default_read_count_before = ctx.block_device_registry.read_default_count();
+        let devt_read_count_before = ctx.block_device_registry.read_by_devt_count();
+        let Some(device_before) = ctx.virtio_blk_runtime.device() else {
+            assertions.assert("virtio blk device before", false);
+            return;
+        };
+        let request_count_before = device_before.request_count();
+        let completion_count_before = device_before.completion_count();
+        let block_read_count_before = device_before.block_device().read_count();
+
         let default_bh = match bio::sb_bread_default(
             &mut ctx.block_device_registry,
             &mut provider,
@@ -144,7 +154,8 @@ impl SmokeScenario for BlockDeviceReadScenario {
         assertions.assert("default bio buffer", default_bh.bio().buffer_bound());
         assertions.assert(
             "default read recorded",
-            ctx.block_device_registry.read_default_count() == 1
+            ctx.block_device_registry.read_default_count()
+                == default_read_count_before.saturating_add(1)
                 && ctx.block_device_registry.default_device_ref_acquired(),
         );
 
@@ -192,7 +203,8 @@ impl SmokeScenario for BlockDeviceReadScenario {
         assertions.assert("devt bio buffer", devt_bh.bio().buffer_bound());
         assertions.assert(
             "devt read recorded",
-            ctx.block_device_registry.read_by_devt_count() == 1
+            ctx.block_device_registry.read_by_devt_count()
+                == devt_read_count_before.saturating_add(1)
                 && ctx.block_device_registry.major_minor_ref_acquired(),
         );
         assertions.assert(
@@ -223,8 +235,14 @@ impl SmokeScenario for BlockDeviceReadScenario {
         };
         assertions.assert("block served", device.block_read_served());
         assertions.assert("block copied", device.block_read_copies_to_caller());
-        assertions.assert("blk request count", device.request_count() >= 3);
-        assertions.assert("blk completion count", device.completion_count() >= 3);
+        assertions.assert(
+            "blk request count",
+            device.request_count() == request_count_before.saturating_add(2),
+        );
+        assertions.assert(
+            "blk completion count",
+            device.completion_count() == completion_count_before.saturating_add(2),
+        );
         assertions.assert(
             "blk last sector",
             device.last_sector() == EXT2_SUPERBLOCK_SECTOR,
@@ -233,7 +251,10 @@ impl SmokeScenario for BlockDeviceReadScenario {
         assertions.assert("blk status", device.last_status() == 0);
 
         let block = device.block_device();
-        assertions.assert("block read count", block.read_count() == 2);
+        assertions.assert(
+            "block read count",
+            block.read_count() == block_read_count_before.saturating_add(2),
+        );
         assertions.assert(
             "block read sector",
             block.last_read_sector() == EXT2_SUPERBLOCK_SECTOR,

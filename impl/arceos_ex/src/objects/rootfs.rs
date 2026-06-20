@@ -2,13 +2,16 @@ use super::{
     block_device::{BlockDeviceRef, BlockDeviceRegistry, DevT},
     command_line::SavedCommandLine,
     devfs::DevFs,
+    ext2::{Ext2Driver, Ext2FileSystem, Ext2Volume},
     initcall::InitcallBoundary,
     rest_init::{KernelInitTask, KERNEL_INIT_PID},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    vfs::{FileSystemKind, VfsCore},
+    vfs::{DentryRef, FileSystemKind, MountRef, VfsCore},
     workqueue::Workqueue,
 };
 use crate::trace::Checkpoint;
+
+pub const ROOTFS_REAL_MOUNT_POINT_NAME: &[u8] = b"root";
 
 pub struct KUnitRuntimeTrimmed {
     lifecycle: Lifecycle,
@@ -171,7 +174,7 @@ impl RootfsConsoleDeferred {
     }
 }
 
-pub struct RootFsEnableDeferred {
+pub struct RootFS {
     lifecycle: Lifecycle,
     ramdisk_eaccess_requires_prepare_namespace: bool,
     prepare_namespace_inputs_ready: bool,
@@ -180,17 +183,22 @@ pub struct RootFsEnableDeferred {
     block_root_device_candidate_bound: bool,
     root_device_ref: Option<BlockDeviceRef>,
     root_device_devt: Option<DevT>,
-    enable_deferred: bool,
+    ext2_driver_ready: bool,
+    ext2_volume_ready: bool,
+    ext2_filesystem_ready: bool,
+    real_mount_point_created: bool,
+    real_ext2_mount_created: bool,
+    real_mount_point_ref: Option<DentryRef>,
+    real_mount_ref: Option<MountRef>,
     prepare_namespace_position_preserved: bool,
-    real_mount_deferred: bool,
     ms_move_deferred: bool,
     chroot_deferred: bool,
 }
 
-impl RootFsEnableDeferred {
+impl RootFS {
     pub const fn new() -> Self {
         Self {
-            lifecycle: Lifecycle::new(State::Base),
+            lifecycle: Lifecycle::new(State::Ready),
             ramdisk_eaccess_requires_prepare_namespace: false,
             prepare_namespace_inputs_ready: false,
             initial_ramfs_still_active: false,
@@ -198,9 +206,14 @@ impl RootFsEnableDeferred {
             block_root_device_candidate_bound: false,
             root_device_ref: None,
             root_device_devt: None,
-            enable_deferred: false,
+            ext2_driver_ready: false,
+            ext2_volume_ready: false,
+            ext2_filesystem_ready: false,
+            real_mount_point_created: false,
+            real_ext2_mount_created: false,
+            real_mount_point_ref: None,
+            real_mount_ref: None,
             prepare_namespace_position_preserved: false,
-            real_mount_deferred: false,
             ms_move_deferred: false,
             chroot_deferred: false,
         }
@@ -238,16 +251,36 @@ impl RootFsEnableDeferred {
         self.root_device_devt
     }
 
-    pub const fn enable_deferred(&self) -> bool {
-        self.enable_deferred
+    pub const fn ext2_driver_ready(&self) -> bool {
+        self.ext2_driver_ready
+    }
+
+    pub const fn ext2_volume_ready(&self) -> bool {
+        self.ext2_volume_ready
+    }
+
+    pub const fn ext2_filesystem_ready(&self) -> bool {
+        self.ext2_filesystem_ready
+    }
+
+    pub const fn real_mount_point_created(&self) -> bool {
+        self.real_mount_point_created
+    }
+
+    pub const fn real_ext2_mount_created(&self) -> bool {
+        self.real_ext2_mount_created
+    }
+
+    pub const fn real_mount_point_ref(&self) -> Option<DentryRef> {
+        self.real_mount_point_ref
+    }
+
+    pub const fn real_mount_ref(&self) -> Option<MountRef> {
+        self.real_mount_ref
     }
 
     pub const fn prepare_namespace_position_preserved(&self) -> bool {
         self.prepare_namespace_position_preserved
-    }
-
-    pub const fn real_mount_deferred(&self) -> bool {
-        self.real_mount_deferred
     }
 
     pub const fn ms_move_deferred(&self) -> bool {
@@ -258,16 +291,19 @@ impl RootFsEnableDeferred {
         self.chroot_deferred
     }
 
-    pub fn setup(
+    pub fn enable(
         &mut self,
         rootfs_console: &RootfsConsoleDeferred,
         saved_command_line: &SavedCommandLine,
         kernel_init_task: &KernelInitTask,
-        vfs_core: &VfsCore,
+        vfs_core: &mut VfsCore,
         devfs: &DevFs,
         block_registry: &BlockDeviceRegistry,
+        ext2_driver: &Ext2Driver,
+        ext2_volume: &Ext2Volume,
+        ext2_filesystem: &mut Ext2FileSystem,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Base
+        if self.lifecycle.state() != State::Ready
             || rootfs_console.state() != State::Ready
             || !rootfs_console.setup_deferred()
             || saved_command_line.state() != State::Ready
@@ -280,66 +316,96 @@ impl RootFsEnableDeferred {
             || !devfs.block_node_listed()
             || block_registry.state() != State::Ready
             || !block_registry.default_device_slot_ready()
+            || ext2_driver.state() != State::Ready
+            || ext2_volume.state() != State::Ready
+            || ext2_filesystem.state() != State::Ready
+            || !ext2_filesystem.ready()
         {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Enable,
                 self.lifecycle.state(),
-                State::Base,
                 State::Ready,
+                State::Online,
             );
         }
 
         let Some(root_mount_ref) = vfs_core.current_root_mount() else {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Enable,
                 self.lifecycle.state(),
-                State::Base,
                 State::Ready,
+                State::Online,
             );
         };
         let Some(root_mount) = vfs_core.mount(root_mount_ref) else {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Enable,
                 self.lifecycle.state(),
-                State::Base,
                 State::Ready,
+                State::Online,
             );
         };
         if root_mount.fs_kind() != FileSystemKind::RamFs {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Enable,
                 self.lifecycle.state(),
-                State::Base,
                 State::Ready,
+                State::Online,
             );
         }
+        let root_dentry_ref = root_mount.root_dentry_ref();
 
         let Some(default_entry) = block_registry.default_entry() else {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Enable,
                 self.lifecycle.state(),
-                State::Base,
                 State::Ready,
+                State::Online,
             );
         };
         let Some(block_node) = devfs.block_node() else {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Enable,
                 self.lifecycle.state(),
-                State::Base,
                 State::Ready,
+                State::Online,
             );
         };
         if block_node.block_device_ref() != Some(default_entry.device_ref())
             || block_node.devt() != Some(default_entry.devt())
         {
             return failed_condition(
-                LifecycleEvent::Setup,
+                LifecycleEvent::Enable,
                 self.lifecycle.state(),
-                State::Base,
                 State::Ready,
+                State::Online,
             );
         }
+
+        let mount_point_ref = match vfs_core
+            .lookup_child(root_dentry_ref, ROOTFS_REAL_MOUNT_POINT_NAME)
+        {
+            Ok(dentry_ref) => dentry_ref,
+            Err(_) => match vfs_core.create_dir(root_dentry_ref, ROOTFS_REAL_MOUNT_POINT_NAME) {
+                Ok(dentry_ref) => dentry_ref,
+                Err(_) => {
+                    return failed_condition(
+                        LifecycleEvent::Enable,
+                        self.lifecycle.state(),
+                        State::Ready,
+                        State::Online,
+                    );
+                }
+            },
+        };
+        let Ok(mount_ref) = ext2_filesystem.enable(vfs_core, mount_point_ref) else {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        };
 
         self.ramdisk_eaccess_requires_prepare_namespace = true;
         self.prepare_namespace_inputs_ready = true;
@@ -348,17 +414,22 @@ impl RootFsEnableDeferred {
         self.block_root_device_candidate_bound = true;
         self.root_device_ref = Some(default_entry.device_ref());
         self.root_device_devt = Some(default_entry.devt());
-        self.enable_deferred = true;
+        self.ext2_driver_ready = true;
+        self.ext2_volume_ready = true;
+        self.ext2_filesystem_ready = true;
+        self.real_mount_point_created = true;
+        self.real_ext2_mount_created = true;
+        self.real_mount_point_ref = Some(mount_point_ref);
+        self.real_mount_ref = Some(mount_ref);
         self.prepare_namespace_position_preserved = true;
-        self.real_mount_deferred = true;
         self.ms_move_deferred = true;
         self.chroot_deferred = true;
         crate::trace::checkpoint(Checkpoint::RamdiskExecuteCommandEaccessCheckpoint);
         self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
+            LifecycleEvent::Enable,
             State::Ready,
-            Checkpoint::RootFsEnableDeferredReady,
+            State::Online,
+            Checkpoint::RootFSOnline,
         )
     }
 }
@@ -396,12 +467,12 @@ impl IntegrityKeysDeferred {
         self.config_integrity_enabled
     }
 
-    pub fn setup(&mut self, rootfs_enable: &RootFsEnableDeferred) -> EventResult {
+    pub fn setup(&mut self, rootfs: &RootFS) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || rootfs_enable.state() != State::Ready
-            || !rootfs_enable.enable_deferred()
-            || !rootfs_enable.prepare_namespace_inputs_ready()
-            || !rootfs_enable.real_mount_deferred()
+            || rootfs.state() != State::Online
+            || !rootfs.prepare_namespace_inputs_ready()
+            || !rootfs.real_ext2_mount_created()
+            || !rootfs.ms_move_deferred()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -449,7 +520,7 @@ impl RootfsBoundary {
         kunit: &KUnitRuntimeTrimmed,
         initramfs_sync: &InitramfsSyncDeferred,
         rootfs_console: &RootfsConsoleDeferred,
-        rootfs_enable: &RootFsEnableDeferred,
+        rootfs: &RootFS,
         integrity_keys: &IntegrityKeysDeferred,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
@@ -459,16 +530,19 @@ impl RootfsBoundary {
             || !initramfs_sync.wait_deferred()
             || rootfs_console.state() != State::Ready
             || !rootfs_console.setup_deferred()
-            || rootfs_enable.state() != State::Ready
-            || !rootfs_enable.ramdisk_eaccess_requires_prepare_namespace()
-            || !rootfs_enable.prepare_namespace_inputs_ready()
-            || !rootfs_enable.initial_ramfs_still_active()
-            || !rootfs_enable.devfs_available()
-            || !rootfs_enable.block_root_device_candidate_bound()
-            || !rootfs_enable.enable_deferred()
-            || !rootfs_enable.real_mount_deferred()
-            || !rootfs_enable.ms_move_deferred()
-            || !rootfs_enable.chroot_deferred()
+            || rootfs.state() != State::Online
+            || !rootfs.ramdisk_eaccess_requires_prepare_namespace()
+            || !rootfs.prepare_namespace_inputs_ready()
+            || !rootfs.initial_ramfs_still_active()
+            || !rootfs.devfs_available()
+            || !rootfs.block_root_device_candidate_bound()
+            || !rootfs.ext2_driver_ready()
+            || !rootfs.ext2_volume_ready()
+            || !rootfs.ext2_filesystem_ready()
+            || !rootfs.real_mount_point_created()
+            || !rootfs.real_ext2_mount_created()
+            || !rootfs.ms_move_deferred()
+            || !rootfs.chroot_deferred()
             || integrity_keys.state() != State::Ready
             || !integrity_keys.setup_deferred()
         {
@@ -494,7 +568,7 @@ pub fn rootfs_phase_ready(
     kunit: &KUnitRuntimeTrimmed,
     initramfs_sync: &InitramfsSyncDeferred,
     rootfs_console: &RootfsConsoleDeferred,
-    rootfs_enable: &RootFsEnableDeferred,
+    rootfs: &RootFS,
     integrity_keys: &IntegrityKeysDeferred,
     boundary: &RootfsBoundary,
 ) -> bool {
@@ -507,19 +581,24 @@ pub fn rootfs_phase_ready(
         && rootfs_console.state() == State::Ready
         && rootfs_console.setup_deferred()
         && rootfs_console.pid1_console_fd_position_preserved()
-        && rootfs_enable.state() == State::Ready
-        && rootfs_enable.ramdisk_eaccess_requires_prepare_namespace()
-        && rootfs_enable.prepare_namespace_inputs_ready()
-        && rootfs_enable.initial_ramfs_still_active()
-        && rootfs_enable.devfs_available()
-        && rootfs_enable.block_root_device_candidate_bound()
-        && rootfs_enable.root_device_ref().is_some()
-        && rootfs_enable.root_device_devt().is_some()
-        && rootfs_enable.enable_deferred()
-        && rootfs_enable.prepare_namespace_position_preserved()
-        && rootfs_enable.real_mount_deferred()
-        && rootfs_enable.ms_move_deferred()
-        && rootfs_enable.chroot_deferred()
+        && rootfs.state() == State::Online
+        && rootfs.ramdisk_eaccess_requires_prepare_namespace()
+        && rootfs.prepare_namespace_inputs_ready()
+        && rootfs.initial_ramfs_still_active()
+        && rootfs.devfs_available()
+        && rootfs.block_root_device_candidate_bound()
+        && rootfs.root_device_ref().is_some()
+        && rootfs.root_device_devt().is_some()
+        && rootfs.ext2_driver_ready()
+        && rootfs.ext2_volume_ready()
+        && rootfs.ext2_filesystem_ready()
+        && rootfs.real_mount_point_created()
+        && rootfs.real_ext2_mount_created()
+        && rootfs.real_mount_point_ref().is_some()
+        && rootfs.real_mount_ref().is_some()
+        && rootfs.prepare_namespace_position_preserved()
+        && rootfs.ms_move_deferred()
+        && rootfs.chroot_deferred()
         && integrity_keys.state() == State::Ready
         && integrity_keys.setup_deferred()
         && integrity_keys.load_keys_position_preserved()

@@ -521,9 +521,11 @@ superblock 字段、group descriptor、inode record、dirent 和 file-read resul
 `Ext2FileSystem` 支持 ext2 `block_size` 为 1024、2048 和 4096。superblock 仍按 ext2 规则从 byte offset 1024 读取；解析出实际
 block size 后，group descriptor、inode table、目录和文件数据读取必须使用真实 filesystem block number 到
 sector 的映射。`make disk` 默认不应再强制 `mkfs.ext2 -b 1024`；如需覆盖 block size，应通过显式参数表达。
-本轮只把 ext2 接入一个显式 VFS mount/read 路径，不实现完整 pathname walk、rootfs 切换、page cache/folio、间接块、
-symlink、权限、xattr、quota、block allocation、写路径、remount 或错误恢复；这些必须保持 deferred。ext2 smoke
-必须通过 VFS mount 后的 lookup/open/read 读取稳定测试文件，同时仍不得通过 VirtioBlkDevice 私有入口绕过 `sb_bread()`。
+本轮把 ext2 接入一个显式 VFS mount/read 路径，并支持最小 absolute pathname walk/read：从 current root 出发，
+逐级 lookup 直接子节点，遇到 mount point 时 crossing 到 mounted root，再完成 open/read。相对路径、cwd、symlink、
+权限、fd table、rootfs 切换、page cache/folio、间接块、xattr、quota、block allocation、写路径、remount 或错误恢复
+必须保持 deferred。ext2 smoke 必须通过 VFS path read 读取稳定测试文件，同时仍不得通过 VirtioBlkDevice 私有入口绕过
+`sb_bread()`。
 
 `devfs` 的首轮实现属于 `InitcallPhase` 收敛边界：它必须在 `VfsCore` 初始 rootfs mount 已存在、`HwRngCore`
 和 `BlockDeviceRegistry` 已 Ready、且 virtio-rng/virtio-blk live driver 已完成注册之后挂载 `/dev`，再创建
@@ -702,26 +704,28 @@ checkpoint KUnit/action-level 测试，app-level smoke 保留对公开 printk �
 
 初始 rootfs mount 不属于本阶段首次创建：它已经在 `ProcessPreparePhase` 的 `VfsCore.Setup` /
 `RamFsType.Setup` / `VfsCore.MountInitialRamFsRoot` 中对应 Linux `vfs_caches_init()->mnt_init()->init_mount_tree()` 完成。
-本阶段的 `RootFsEnableDeferred` 表示后续 `prepare_namespace()` 中从初始 ramfs/rootfs backing 走向真实 root
-device、devtmpfs、`MS_MOVE` 和 `chroot(".")` 的 enable 位置。当前首轮可以记录 prepare_namespace 的输入条件：
-初始 ramfs rootfs 仍为当前 root，`DevFs` 已挂载，`BlockDeviceRegistry` 已有默认块设备作为 root device
-candidate；但不得执行真实文件系统挂载、`MS_MOVE` 或 `chroot(".")`。
+本阶段的 `RootFS.Event::Enable` 表示 `prepare_namespace()` 中从初始 ramfs/rootfs backing 走向真实 root device 的
+enable 位置；`RootFS` 是顶层根文件系统视图对象，不得把 enable 位置再建成独立对象。本轮必须记录
+prepare_namespace 的输入条件：初始 ramfs rootfs 仍为当前 root，`DevFs` 已挂载，
+`BlockDeviceRegistry` 已有默认块设备作为 root device candidate；随后基于该默认块设备建立
+`Ext2Driver` / `Ext2Volume` / `Ext2FileSystem` 链，并按 Linux `do_mount_root()` 的形态把真实 ext2 文件系统挂载到临时
+`/root` 目录。`MS_MOVE` 到 `/` 和 `chroot(".")` 仍不得执行，留到下一轮 root 切换语义。
 
 本阶段覆盖 `kunit_run_all_tests()`、`wait_for_initramfs()`、`console_on_rootfs()`、
 `init_eaccess(ramdisk_execute_command)` 对应 checkpoint、`prepare_namespace()` 和
 `integrity_load_keys()` 的时序位置。当前 `CONFIG_KUNIT=n`，`kunit_run_all_tests()` 必须建模为
 trimmed/no-op，不得单独升格为 `KUnitPhase`。
 
-`InitramfsSyncDeferred`、`RootfsConsoleDeferred`、`RootFsEnableDeferred` 和 `IntegrityKeysDeferred`
-在本轮只保留 deferred/position-preserved 语义。其中 `init_eaccess(ramdisk_execute_command)` 是 required
-checkpoint，必须记录当前 Linux-like 路径要求进入 `prepare_namespace()` 分支。`RootFsEnableDeferred`
-不得伪造真实文件系统挂载、`MS_MOVE` 或 `chroot(".")` 已完成。root device candidate 只能来自已有
-`BlockDeviceRegistry.default_device`，`/dev` 条件只能来自已有 `DevFs`，不得为了 rootfs smoke 新增测试专用
-设备 API 或通过 VFS file path 读取块设备。
+`InitramfsSyncDeferred`、`RootfsConsoleDeferred` 和 `IntegrityKeysDeferred` 在本轮仍只保留
+deferred/position-preserved 语义。其中 `init_eaccess(ramdisk_execute_command)` 是 required checkpoint，必须记录当前
+Linux-like 路径要求进入 `prepare_namespace()` 分支。`RootFS.Event::Enable` 不得伪造 `MS_MOVE` 或 `chroot(".")` 已完成；
+root device candidate 只能来自已有 `BlockDeviceRegistry.default_device`，`/dev` 条件只能来自已有 `DevFs`，不得为了
+rootfs smoke 新增测试专用设备 API。
 
 测试应覆盖 `RootfsPhase.Ready`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
 ramdisk eaccess 强制进入 prepare_namespace、prepare_namespace 输入条件已具备、初始 ramfs rootfs 仍为当前 root、
-RootFS real mount/MS_MOVE/chroot deferred、integrity keys deferred，以及下一入口仍是 `FinalizePhase`。
+真实 ext2 root staging mount 已建立于 `/root`、`MS_MOVE/chroot` deferred、integrity keys deferred，以及下一入口仍是
+`FinalizePhase`。
 
 ## FinalizePhase 编码约束
 

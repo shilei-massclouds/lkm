@@ -137,6 +137,7 @@ predicate arceos_ex_must_ext2_read_path_support_multi_direct_blocks() -> bool;
 predicate arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file() -> bool;
 predicate arceos_ex_must_ext2_smoke_observe_cross_block_root_lookup() -> bool;
 predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
+predicate arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read() -> bool;
 predicate arceos_ex_must_ext2_defer_page_cache_indirect_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
@@ -1382,11 +1383,21 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_ext2_support_minimal_vfs_read_only_mount();
 
         /*
+         * Minimal pathname walk/read:
+         *
+         * VfsCore must support absolute path walk from current root, direct
+         * component lookup, mount crossing, open-by-path and read-by-path for
+         * the currently modeled ramfs/devfs/ext2 subset. Relative paths, cwd,
+         * symlinks, permissions, fd tables and page cache remain deferred.
+         */
+        arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read();
+
+        /*
          * Deferred ext2 scope:
          *
-         * Full pathname walk, page cache/folios, indirect blocks, symlinks,
-         * permissions, xattrs, quotas, allocation, writes and remount/error
-         * recovery remain explicit deferred scope in this slice.
+         * Page cache/folios, indirect blocks, symlinks, permissions, xattrs,
+         * quotas, allocation, writes and remount/error recovery remain
+         * explicit deferred scope in this slice.
          */
         arceos_ex_must_ext2_defer_page_cache_indirect_and_writes();
     }
@@ -2376,18 +2387,27 @@ type ArceosExRootfsCodingMust {
         /*
          * RootFS enable:
          *
-         * prepare_namespace() must be represented by RootFsEnableDeferred in
-         * this round. It may record that DevFs is mounted and the block
-         * registry default device is available as the root device candidate,
-         * but real filesystem mount, MS_MOVE and chroot(".") must remain
-         * unimplemented details. Rootfs smoke must observe those existing
-         * objects and must not add test-only device APIs or read block devices
-         * through a VFS file path.
+         * prepare_namespace() must be represented by RootFS.Event::Enable in
+         * this round, not by a separate enable-position object. It must use the
+         * already mounted DevFs and the
+         * BlockDeviceRegistry default device as the root device candidate,
+         * construct the Ext2Driver/Ext2Volume/Ext2FileSystem chain, and mount
+         * that ext2 filesystem at Linux's temporary /root mount point.
          * The initial ramfs-backed rootfs mount belongs to ProcessPreparePhase
          * vfs_caches_init()/mnt_init(), not to this RootfsPhase enable step.
          */
         arceos_ex_must_rootfs_prepare_namespace_inputs_use_existing_devfs_and_block_registry();
-        arceos_ex_must_rootfs_keep_real_mount_move_chroot_deferred();
+        arceos_ex_must_rootfs_mount_ext2_at_linux_root_staging_point();
+
+        /*
+         * Deferred root switch:
+         *
+         * This round must not perform Linux's final init_mount(".", "/",
+         * MS_MOVE, NULL) or init_chroot(".") semantics. The current root stays
+         * the initial ramfs-backed rootfs after the ext2 /root staging mount;
+         * root switching, mount move and chroot are the next round's boundary.
+         */
+        arceos_ex_must_rootfs_keep_root_switch_move_chroot_deferred();
 
         /*
          * Integrity keys:

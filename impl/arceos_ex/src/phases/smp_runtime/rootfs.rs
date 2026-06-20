@@ -2,7 +2,7 @@ use crate::{
     context::Context,
     objects::{
         rootfs::rootfs_phase_ready,
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        state::{failed_condition, EventError, EventErrorCode, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
 };
@@ -35,22 +35,50 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.kunit_runtime_trimmed, &ctx.workqueue)?;
     ctx.rootfs_console_deferred
         .setup(&ctx.initramfs_sync_deferred, &ctx.kernel_init_task)?;
-    ctx.rootfs_enable_deferred.setup(
+    let mut provider = crate::objects::virtio_blk::live_provider(&ctx.kernel_image);
+    ctx.ext2_driver.setup(&ctx.block_device_registry)?;
+    ctx.ext2_volume
+        .preset_default(&mut ctx.block_device_registry, &mut provider)
+        .map_err(|_| rootfs_setup_error())?;
+    ctx.ext2_filesystem
+        .preset(&ctx.ext2_driver, &ctx.ext2_volume)
+        .map_err(|_| rootfs_setup_error())?;
+    ctx.ext2_filesystem
+        .setup(
+            &ctx.ext2_driver,
+            &ctx.ext2_volume,
+            &mut ctx.block_device_registry,
+            &mut provider,
+        )
+        .map_err(|_| rootfs_setup_error())?;
+    ctx.rootfs.enable(
         &ctx.rootfs_console_deferred,
         &ctx.saved_command_line,
         &ctx.kernel_init_task,
-        &ctx.vfs_core,
+        &mut ctx.vfs_core,
         &ctx.devfs,
         &ctx.block_device_registry,
+        &ctx.ext2_driver,
+        &ctx.ext2_volume,
+        &mut ctx.ext2_filesystem,
     )?;
-    ctx.integrity_keys_deferred
-        .setup(&ctx.rootfs_enable_deferred)?;
+    ctx.integrity_keys_deferred.setup(&ctx.rootfs)?;
     ctx.rootfs_boundary.setup(
         &ctx.kunit_runtime_trimmed,
         &ctx.initramfs_sync_deferred,
         &ctx.rootfs_console_deferred,
-        &ctx.rootfs_enable_deferred,
+        &ctx.rootfs,
         &ctx.integrity_keys_deferred,
+    )
+}
+
+fn rootfs_setup_error() -> EventError {
+    EventError::failed(
+        EventErrorCode::ConditionFailed,
+        LifecycleEvent::Setup,
+        State::Base,
+        State::Ready,
+        State::Ready,
     )
 }
 
@@ -59,7 +87,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.kunit_runtime_trimmed,
         &ctx.initramfs_sync_deferred,
         &ctx.rootfs_console_deferred,
-        &ctx.rootfs_enable_deferred,
+        &ctx.rootfs,
         &ctx.integrity_keys_deferred,
         &ctx.rootfs_boundary,
     ) {

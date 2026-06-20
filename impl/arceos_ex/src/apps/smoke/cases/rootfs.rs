@@ -3,6 +3,7 @@ use crate::{
     context::context,
     objects::{
         printk,
+        rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
         state::State,
         vfs::{FileSystemKind, VfsInodeKind},
     },
@@ -45,25 +46,22 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.rootfs_enable_deferred.state() != State::Ready
-        || !ctx
-            .rootfs_enable_deferred
-            .ramdisk_eaccess_requires_prepare_namespace()
-        || !ctx.rootfs_enable_deferred.enable_deferred()
-        || !ctx
-            .rootfs_enable_deferred
-            .prepare_namespace_position_preserved()
-        || !ctx.rootfs_enable_deferred.prepare_namespace_inputs_ready()
-        || !ctx.rootfs_enable_deferred.initial_ramfs_still_active()
-        || !ctx.rootfs_enable_deferred.devfs_available()
-        || !ctx
-            .rootfs_enable_deferred
-            .block_root_device_candidate_bound()
-        || !ctx.rootfs_enable_deferred.real_mount_deferred()
-        || !ctx.rootfs_enable_deferred.ms_move_deferred()
-        || !ctx.rootfs_enable_deferred.chroot_deferred()
+    if ctx.rootfs.state() != State::Online
+        || !ctx.rootfs.ramdisk_eaccess_requires_prepare_namespace()
+        || !ctx.rootfs.prepare_namespace_position_preserved()
+        || !ctx.rootfs.prepare_namespace_inputs_ready()
+        || !ctx.rootfs.initial_ramfs_still_active()
+        || !ctx.rootfs.devfs_available()
+        || !ctx.rootfs.block_root_device_candidate_bound()
+        || !ctx.rootfs.ext2_driver_ready()
+        || !ctx.rootfs.ext2_volume_ready()
+        || !ctx.rootfs.ext2_filesystem_ready()
+        || !ctx.rootfs.real_mount_point_created()
+        || !ctx.rootfs.real_ext2_mount_created()
+        || !ctx.rootfs.ms_move_deferred()
+        || !ctx.rootfs.chroot_deferred()
     {
-        printk::write_str("rootfs enable deferred facts invalid\n");
+        printk::write_str("rootfs enable facts invalid\n");
         return SmokeResult::Failed;
     }
 
@@ -101,10 +99,44 @@ pub fn run() -> SmokeResult {
         printk::write_str("root block device candidate missing\n");
         return SmokeResult::Failed;
     };
-    if ctx.rootfs_enable_deferred.root_device_ref() != Some(default_entry.device_ref())
-        || ctx.rootfs_enable_deferred.root_device_devt() != Some(default_entry.devt())
+    if ctx.rootfs.root_device_ref() != Some(default_entry.device_ref())
+        || ctx.rootfs.root_device_devt() != Some(default_entry.devt())
     {
         printk::write_str("root block device candidate binding invalid\n");
+        return SmokeResult::Failed;
+    }
+
+    let Some(real_mount_point_ref) = ctx.rootfs.real_mount_point_ref() else {
+        printk::write_str("rootfs ext2 mount point missing\n");
+        return SmokeResult::Failed;
+    };
+    let Some(real_mount_ref) = ctx.rootfs.real_mount_ref() else {
+        printk::write_str("rootfs ext2 mount missing\n");
+        return SmokeResult::Failed;
+    };
+    let Some(real_mount_point) = ctx.vfs_core.dentry(real_mount_point_ref) else {
+        printk::write_str("rootfs ext2 mount point invalid\n");
+        return SmokeResult::Failed;
+    };
+    let Some(real_mount) = ctx.vfs_core.mount(real_mount_ref) else {
+        printk::write_str("rootfs ext2 mount invalid\n");
+        return SmokeResult::Failed;
+    };
+    if real_mount_point.name() != ROOTFS_REAL_MOUNT_POINT_NAME
+        || real_mount.fs_kind() != FileSystemKind::Ext2
+        || real_mount.mount_point_ref() != Some(real_mount_point_ref)
+        || real_mount_point.mounted_root() != Some(real_mount.root_dentry_ref())
+    {
+        printk::write_str("rootfs ext2 staging mount facts invalid\n");
+        return SmokeResult::Failed;
+    }
+    if ctx.ext2_driver.state() != State::Ready
+        || ctx.ext2_volume.state() != State::Ready
+        || ctx.ext2_filesystem.state() != State::Online
+        || ctx.ext2_filesystem.vfs_mount_ref() != Some(real_mount_ref)
+        || ctx.ext2_filesystem.vfs_mount_point_ref() != Some(real_mount_point_ref)
+    {
+        printk::write_str("rootfs ext2 object facts invalid\n");
         return SmokeResult::Failed;
     }
 
@@ -143,6 +175,6 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    printk::write_str("rootfs next=finalize prepare_namespace_inputs=ready real_mount=deferred\n");
+    printk::write_str("rootfs next=finalize ext2_mount=/root root_switch=deferred\n");
     SmokeResult::Passed
 }

@@ -115,6 +115,7 @@ pub enum VfsError {
     ReadOnly,
     ShortBuffer,
     Backend,
+    UnsupportedPath,
 }
 
 impl From<Ext2Error> for VfsError {
@@ -560,10 +561,6 @@ impl File {
         self.read_returns_written_data
     }
 
-    pub const fn read_returns_backend_data(&self) -> bool {
-        self.read_returns_backend_data
-    }
-
     pub const fn last_write_len(&self) -> usize {
         self.last_write_len
     }
@@ -646,6 +643,11 @@ pub struct VfsCore {
     ext2_lookup_dispatched: bool,
     ext2_read_dispatched: bool,
     file_read_returns_backend_data: bool,
+    absolute_path_walk_supported: bool,
+    path_walk_resolved: bool,
+    path_walk_crossed_mount: bool,
+    open_path_allocated_file: bool,
+    read_path_returns_data: bool,
 }
 
 impl VfsCore {
@@ -682,6 +684,11 @@ impl VfsCore {
             ext2_lookup_dispatched: false,
             ext2_read_dispatched: false,
             file_read_returns_backend_data: false,
+            absolute_path_walk_supported: false,
+            path_walk_resolved: false,
+            path_walk_crossed_mount: false,
+            open_path_allocated_file: false,
+            read_path_returns_data: false,
         }
     }
 
@@ -809,6 +816,26 @@ impl VfsCore {
         self.file_read_returns_backend_data
     }
 
+    pub const fn absolute_path_walk_supported(&self) -> bool {
+        self.absolute_path_walk_supported
+    }
+
+    pub const fn path_walk_resolved(&self) -> bool {
+        self.path_walk_resolved
+    }
+
+    pub const fn path_walk_crossed_mount(&self) -> bool {
+        self.path_walk_crossed_mount
+    }
+
+    pub const fn open_path_allocated_file(&self) -> bool {
+        self.open_path_allocated_file
+    }
+
+    pub const fn read_path_returns_data(&self) -> bool {
+        self.read_path_returns_data
+    }
+
     pub fn setup(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Base {
             return failed_condition(
@@ -827,6 +854,7 @@ impl VfsCore {
         self.page_cache_deferred = true;
         self.permissions_deferred = true;
         self.mount_namespace_deferred = true;
+        self.absolute_path_walk_supported = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
@@ -1106,6 +1134,77 @@ impl VfsCore {
         Ok(file_ref)
     }
 
+    pub fn walk_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<DentryRef, VfsError> {
+        if self.lifecycle.state() != State::Ready {
+            return Err(VfsError::CoreNotReady);
+        }
+        if !path.starts_with(b"/") {
+            return Err(VfsError::UnsupportedPath);
+        }
+        let mut current = self.current_root_dentry.ok_or(VfsError::MountMissing)?;
+        self.path_walk_resolved = false;
+        for component in path.split(|byte| *byte == b'/') {
+            if component.is_empty() {
+                continue;
+            }
+            let before_mount = current;
+            current = self.follow_mount(current)?;
+            if current != before_mount {
+                self.path_walk_crossed_mount = true;
+            }
+            current = self.lookup_component(fs, registry, provider, current, component)?;
+        }
+        let before_mount = current;
+        current = self.follow_mount(current)?;
+        if current != before_mount {
+            self.path_walk_crossed_mount = true;
+        }
+        self.path_walk_resolved = true;
+        Ok(current)
+    }
+
+    pub fn open_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<FileRef, VfsError> {
+        let dentry_ref = self.walk_path(fs, registry, provider, path)?;
+        let file_ref = self.open_file(dentry_ref)?;
+        self.open_path_allocated_file = true;
+        Ok(file_ref)
+    }
+
+    pub fn read_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+        buffer: &mut [u8],
+    ) -> Result<usize, VfsError> {
+        let file_ref = self.open_path(fs, registry, provider, path)?;
+        let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
+        let len = if self
+            .inode(inode_ref)
+            .ok_or(VfsError::InvalidRef)?
+            .read_only_backed()
+        {
+            self.read_ext2_file(fs, registry, provider, file_ref, 0, buffer)?
+        } else {
+            self.read_file(file_ref, 0, buffer)?
+        };
+        self.read_path_returns_data = len != 0;
+        Ok(len)
+    }
+
     pub fn write_file(
         &mut self,
         file_ref: FileRef,
@@ -1353,6 +1452,29 @@ impl VfsCore {
         parent_inode.children.push(dentry_ref);
         self.insert_count = self.insert_count.saturating_add(1);
         Ok(dentry_ref)
+    }
+
+    fn lookup_component<P: BlockDeviceProvider>(
+        &mut self,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        parent_ref: DentryRef,
+        name: &[u8],
+    ) -> Result<DentryRef, VfsError> {
+        let parent_ref = self.follow_mount(parent_ref)?;
+        let parent = self.positive_dentry(parent_ref)?;
+        let parent_inode = self.inode(parent.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if !parent_inode.is_directory() {
+            return Err(VfsError::NotDirectory);
+        }
+        let superblock = self
+            .superblock(parent.superblock_ref())
+            .ok_or(VfsError::InvalidRef)?;
+        if superblock.fs_kind() == FileSystemKind::Ext2 {
+            return self.lookup_ext2_child(fs, registry, provider, parent_ref, name);
+        }
+        self.lookup_child(parent_ref, name)
     }
 
     fn ensure_mount_point(&self, mount_point_ref: DentryRef) -> Result<(), VfsError> {

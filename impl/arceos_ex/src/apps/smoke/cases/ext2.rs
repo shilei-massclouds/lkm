@@ -6,18 +6,18 @@ use crate::{
     context::context,
     objects::{
         ext2::{
-            Ext2Driver, Ext2Error, Ext2FileSystem, Ext2FileType, Ext2Volume, EXT2_MAX_BLOCK_SIZE,
-            EXT2_ROOT_INO, EXT2_SMOKE_LARGE_FILE_BYTE, EXT2_SMOKE_LARGE_FILE_NAME,
-            EXT2_SMOKE_LARGE_FILE_SIZE,
+            Ext2FileType, EXT2_MAX_BLOCK_SIZE, EXT2_ROOT_INO, EXT2_SMOKE_LARGE_FILE_BYTE,
+            EXT2_SMOKE_LARGE_FILE_NAME, EXT2_SMOKE_LARGE_FILE_SIZE,
         },
+        rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
         state::State,
-        vfs::{FileSystemKind, VfsError, VfsInodeKind},
+        vfs::{FileSystemKind, VfsInodeKind},
         virtio_blk,
     },
 };
 
 static mut LARGE_READ_BUFFER: [u8; EXT2_SMOKE_LARGE_FILE_SIZE] = [0; EXT2_SMOKE_LARGE_FILE_SIZE];
-const EXT2_MOUNT_POINT_NAME: &[u8] = b"mnt_ext2";
+const EXT2_SMOKE_LARGE_FILE_PATH: &[u8] = b"/root/smoke-large.bin";
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -35,7 +35,7 @@ impl Ext2ReadOnlyScenario {
 
 impl SmokeScenario for Ext2ReadOnlyScenario {
     fn name(&self) -> &'static str {
-        "ext2.vfs_read_only_mount_lookup_and_file_read"
+        "ext2.vfs_path_read_only_mount_lookup_and_file_read"
     }
 
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
@@ -65,81 +65,48 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         let devt = default_entry.devt();
 
         let mut provider = virtio_blk::live_provider(&ctx.kernel_image);
-        let mut driver = Ext2Driver::new();
-        assertions.assert_ok(
-            "ext2 driver setup",
-            driver.setup(&ctx.block_device_registry),
+        assertions.assert("driver ready", ctx.ext2_driver.state() == State::Ready);
+        assertions.assert("driver registered", ctx.ext2_driver.registered());
+        assertions.assert("driver read only", ctx.ext2_driver.read_only());
+        assertions.assert(
+            "driver mount callback",
+            ctx.ext2_driver.mount_callback_bound(),
         );
-        assertions.assert("driver ready", driver.state() == State::Ready);
-        assertions.assert("driver registered", driver.registered());
-        assertions.assert("driver read only", driver.read_only());
-        assertions.assert("driver mount callback", driver.mount_callback_bound());
-        assertions.assert("driver super ops", driver.super_operations_bound());
-        assertions.assert("driver inode ops", driver.inode_operations_bound());
-        assertions.assert("driver file ops", driver.file_operations_bound());
+        assertions.assert("driver super ops", ctx.ext2_driver.super_operations_bound());
+        assertions.assert("driver inode ops", ctx.ext2_driver.inode_operations_bound());
+        assertions.assert("driver file ops", ctx.ext2_driver.file_operations_bound());
 
-        let mut volume = Ext2Volume::new();
-        let volume_preset = volume.preset_default(&mut ctx.block_device_registry, &mut provider);
-        assert_ext2_result(assertions, "volume preset", volume_preset);
-        if volume.state() != State::Ready {
-            return;
-        }
-        assertions.assert("volume devt", volume.devt() == Some(devt));
-        assertions.assert("volume superblock read", volume.superblock_read());
-        assertions.assert("volume magic valid", volume.magic_valid());
-        assertions.assert("volume layout valid", volume.layout_valid());
+        assertions.assert("volume ready", ctx.ext2_volume.state() == State::Ready);
+        assertions.assert("volume devt", ctx.ext2_volume.devt() == Some(devt));
+        assertions.assert("volume superblock read", ctx.ext2_volume.superblock_read());
+        assertions.assert("volume magic valid", ctx.ext2_volume.magic_valid());
+        assertions.assert("volume layout valid", ctx.ext2_volume.layout_valid());
         assertions.assert(
             "volume block size",
-            volume.block_size() == EXT2_MAX_BLOCK_SIZE,
+            ctx.ext2_volume.block_size() == EXT2_MAX_BLOCK_SIZE,
         );
-        assertions.assert("volume block size supported", volume.block_size_supported());
-        assertions.assert("volume nonfatal absent", volume.not_found_nonfatal());
+        assertions.assert(
+            "volume block size supported",
+            ctx.ext2_volume.block_size_supported(),
+        );
+        assertions.assert(
+            "volume nonfatal absent",
+            ctx.ext2_volume.not_found_nonfatal(),
+        );
 
-        let mut fs = Ext2FileSystem::new();
-        assert_ext2_result(assertions, "filesystem preset", fs.preset(&driver, &volume));
-        if fs.state() != State::Prepared {
+        if ctx.ext2_filesystem.state() != State::Online {
+            assertions.assert("filesystem online", false);
             return;
         }
-        let setup = fs.setup(
-            &driver,
-            &volume,
-            &mut ctx.block_device_registry,
-            &mut provider,
-        );
-        assert_ext2_result(assertions, "filesystem setup", setup);
-        if fs.state() != State::Ready {
-            return;
-        }
-        let Some(root_dentry_ref) = ctx.vfs_core.current_root_dentry() else {
-            assertions.assert("root dentry present", false);
+        let fs = &ctx.ext2_filesystem;
+        let Some(mount_ref) = fs.vfs_mount_ref() else {
+            assertions.assert("filesystem vfs mount", false);
             return;
         };
-        let mount_point_ref = match ctx
-            .vfs_core
-            .lookup_child(root_dentry_ref, EXT2_MOUNT_POINT_NAME)
-        {
-            Ok(dentry_ref) => dentry_ref,
-            Err(_) => match ctx
-                .vfs_core
-                .create_dir(root_dentry_ref, EXT2_MOUNT_POINT_NAME)
-            {
-                Ok(dentry_ref) => dentry_ref,
-                Err(_) => {
-                    assertions.assert("create ext2 mount point", false);
-                    return;
-                }
-            },
-        };
-        let mount_ref = match fs.enable(&mut ctx.vfs_core, mount_point_ref) {
-            Ok(mount_ref) => mount_ref,
-            Err(error) => {
-                assert_ext2_result(assertions, "filesystem enable", Err(error));
-                return;
-            }
-        };
-        if fs.state() != State::Online {
+        let Some(mount_point_ref) = fs.vfs_mount_point_ref() else {
+            assertions.assert("filesystem vfs mount point", false);
             return;
-        }
+        };
 
         assertions.assert("filesystem devt", fs.devt() == Some(devt));
         assertions.assert("filesystem ready", fs.ready());
@@ -196,6 +163,10 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             return;
         };
         assertions.assert(
+            "vfs mount point name",
+            mount_point.name() == ROOTFS_REAL_MOUNT_POINT_NAME,
+        );
+        assertions.assert(
             "vfs mount redirects",
             mount_point.mounted_root() == Some(ext2_root_ref),
         );
@@ -225,57 +196,101 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         assertions.assert("root direct block", root.direct_blocks()[0] != 0);
         assertions.assert("root indirect deferred", root.indirect_blocks_deferred());
 
-        let lookup = ctx.vfs_core.lookup_ext2_child(
-            &mut fs,
+        let buffer = unsafe {
+            let ptr = core::ptr::addr_of_mut!(LARGE_READ_BUFFER);
+            &mut *ptr
+        };
+        buffer.fill(0);
+        let read = ctx.vfs_core.read_path(
+            &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
             &mut provider,
-            mount_point_ref,
-            EXT2_SMOKE_LARGE_FILE_NAME,
+            EXT2_SMOKE_LARGE_FILE_PATH,
+            buffer,
         );
-        assertions.assert_ok("lookup smoke large file", lookup);
-        let file_dentry_ref = match lookup {
-            Ok(dentry_ref) => dentry_ref,
-            Err(_) => return,
+        let Ok(len) = read else {
+            assertions.assert("read path", false);
+            return;
         };
-        let dirent = fs.lookup_dirent();
-        assertions.assert("lookup name", fs.lookup_name_bound());
-        assertions.assert("lookup reads root", fs.lookup_reads_root_dir());
+
+        let dirent = *ctx.ext2_filesystem.lookup_dirent();
+        assertions.assert("lookup name", ctx.ext2_filesystem.lookup_name_bound());
+        assertions.assert(
+            "lookup reads root",
+            ctx.ext2_filesystem.lookup_reads_root_dir(),
+        );
         assertions.assert(
             "lookup scans direct",
-            fs.lookup_direct_blocks_scanned() >= 2,
+            ctx.ext2_filesystem.lookup_direct_blocks_scanned() >= 2,
         );
         assertions.assert(
             "lookup multi direct",
-            fs.lookup_multi_direct_block_supported(),
+            ctx.ext2_filesystem.lookup_multi_direct_block_supported(),
         );
-        assertions.assert("lookup notfound nonfatal", fs.lookup_not_found_nonfatal());
+        assertions.assert(
+            "lookup notfound nonfatal",
+            ctx.ext2_filesystem.lookup_not_found_nonfatal(),
+        );
         assertions.assert(
             "lookup indirect deferred",
-            fs.lookup_indirect_blocks_deferred(),
+            ctx.ext2_filesystem.lookup_indirect_blocks_deferred(),
         );
-        assertions.assert("dirent valid", fs.lookup_dirent_valid());
+        assertions.assert("dirent valid", ctx.ext2_filesystem.lookup_dirent_valid());
         assertions.assert("dirent name", dirent.name() == EXT2_SMOKE_LARGE_FILE_NAME);
         assertions.assert("dirent inode", dirent.inode() != 0);
         assertions.assert(
             "dirent type",
             dirent.file_type() == Ext2FileType::RegularFile,
         );
-        assertions.assert("lookup inode", fs.lookup_returns_inode());
-        assertions.assert("file regular", fs.lookup_file_inode().is_regular_file());
+        assertions.assert("lookup inode", ctx.ext2_filesystem.lookup_returns_inode());
+        assertions.assert(
+            "file regular",
+            ctx.ext2_filesystem.lookup_file_inode().is_regular_file(),
+        );
         assertions.assert(
             "file direct block",
-            fs.lookup_file_inode().direct_blocks()[0] != 0,
+            ctx.ext2_filesystem.lookup_file_inode().direct_blocks()[0] != 0,
         );
         assertions.assert("vfs lookup fact", ctx.vfs_core.ext2_lookup_dispatched());
+        assertions.assert(
+            "absolute path walk supported",
+            ctx.vfs_core.absolute_path_walk_supported(),
+        );
+        assertions.assert("path walk resolved", ctx.vfs_core.path_walk_resolved());
+        assertions.assert("path mount crossed", ctx.vfs_core.path_walk_crossed_mount());
+        assertions.assert("open path file", ctx.vfs_core.open_path_allocated_file());
+        assertions.assert("read path data", ctx.vfs_core.read_path_returns_data());
+        let file_dentry_ref = match ctx.vfs_core.walk_path(
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &mut provider,
+            EXT2_SMOKE_LARGE_FILE_PATH,
+        ) {
+            Ok(dentry_ref) => dentry_ref,
+            Err(_) => {
+                assertions.assert("vfs walk file path", false);
+                return;
+            }
+        };
         let Some(file_dentry) = ctx.vfs_core.dentry(file_dentry_ref) else {
             assertions.assert("vfs file dentry", false);
             return;
         };
-        assertions.assert(
-            "vfs file name",
-            file_dentry.name() == EXT2_SMOKE_LARGE_FILE_NAME,
-        );
-        let file_inode_ref = file_dentry.inode_ref();
+        let file_name_matches = file_dentry.name() == EXT2_SMOKE_LARGE_FILE_NAME;
+        let file_dentry_ref_value = file_dentry.dentry_ref();
+        let file_ref = match ctx.vfs_core.open_file(file_dentry_ref) {
+            Ok(file_ref) => file_ref,
+            Err(_) => {
+                assertions.assert("vfs open ext2 file", false);
+                return;
+            }
+        };
+        let Some(file) = ctx.vfs_core.file(file_ref) else {
+            assertions.assert("vfs file object", false);
+            return;
+        };
+        assertions.assert("vfs file name", file_name_matches);
+        let file_inode_ref = file.inode_ref();
         let Some(file_inode) = ctx.vfs_core.inode(file_inode_ref) else {
             assertions.assert("vfs file inode", false);
             return;
@@ -295,55 +310,12 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             "vfs file size",
             file_inode.size() == EXT2_SMOKE_LARGE_FILE_SIZE,
         );
-        let file_ref = match ctx.vfs_core.open_file(file_dentry_ref) {
-            Ok(file_ref) => file_ref,
-            Err(_) => {
-                assertions.assert("vfs open ext2 file", false);
-                return;
-            }
-        };
-        let Some(file) = ctx.vfs_core.file(file_ref) else {
-            assertions.assert("vfs file object", false);
-            return;
-        };
         assertions.assert(
             "vfs file dentry bound",
-            file.dentry_ref() == file_dentry_ref,
+            file.dentry_ref() == file_dentry_ref_value,
         );
         assertions.assert("vfs file inode bound", file.inode_ref() == file_inode_ref);
 
-        let mut short_buffer = [0u8; 64];
-        let short_read = ctx.vfs_core.read_ext2_file(
-            &mut fs,
-            &mut ctx.block_device_registry,
-            &mut provider,
-            file_ref,
-            0,
-            &mut short_buffer,
-        );
-        assertions.assert(
-            "short buffer rejected",
-            matches!(short_read, Err(VfsError::ShortBuffer))
-                && fs.file_read_short_buffer_rejected(),
-        );
-
-        let buffer = unsafe {
-            let ptr = core::ptr::addr_of_mut!(LARGE_READ_BUFFER);
-            &mut *ptr
-        };
-        buffer.fill(0);
-        let read = ctx.vfs_core.read_ext2_file(
-            &mut fs,
-            &mut ctx.block_device_registry,
-            &mut provider,
-            file_ref,
-            0,
-            buffer,
-        );
-        let Ok(len) = read else {
-            assertions.assert("read file", false);
-            return;
-        };
         assertions.assert("read len", len == EXT2_SMOKE_LARGE_FILE_SIZE);
         assertions.assert(
             "read content",
@@ -351,80 +323,48 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
                 .iter()
                 .all(|byte| *byte == EXT2_SMOKE_LARGE_FILE_BYTE),
         );
-        assertions.assert("last read len", fs.last_file_read_len() == len);
-        assertions.assert("read direct", fs.file_read_uses_direct_block());
+        assertions.assert(
+            "last read len",
+            ctx.ext2_filesystem.last_file_read_len() == len,
+        );
+        assertions.assert(
+            "read direct",
+            ctx.ext2_filesystem.file_read_uses_direct_block(),
+        );
         assertions.assert(
             "read scans direct",
-            fs.file_read_direct_blocks_scanned() >= 2,
+            ctx.ext2_filesystem.file_read_direct_blocks_scanned() >= 2,
         );
         assertions.assert(
             "read multi direct",
-            fs.file_read_multi_direct_block_supported(),
+            ctx.ext2_filesystem.file_read_multi_direct_block_supported(),
         );
-        assertions.assert("read buffer head", fs.file_read_uses_buffer_head());
-        assertions.assert("read copies", fs.file_read_copies_to_caller());
+        assertions.assert(
+            "read buffer head",
+            ctx.ext2_filesystem.file_read_uses_buffer_head(),
+        );
+        assertions.assert(
+            "read copies",
+            ctx.ext2_filesystem.file_read_copies_to_caller(),
+        );
         assertions.assert(
             "read len matches inode",
-            fs.file_read_len_matches_inode_size(),
+            ctx.ext2_filesystem.file_read_len_matches_inode_size(),
         );
         assertions.assert(
             "read indirect deferred",
-            fs.file_read_indirect_blocks_deferred(),
+            ctx.ext2_filesystem.file_read_indirect_blocks_deferred(),
         );
-        assertions.assert("read entered from vfs", fs.file_read_entered_from_vfs());
+        assertions.assert(
+            "read entered from vfs",
+            ctx.ext2_filesystem.file_read_entered_from_vfs(),
+        );
         assertions.assert("vfs read fact", ctx.vfs_core.ext2_read_dispatched());
         assertions.assert(
             "vfs read backend data",
             ctx.vfs_core.file_read_returns_backend_data(),
         );
-        let Some(file_after_read) = ctx.vfs_core.file(file_ref) else {
-            assertions.assert("vfs file after read", false);
-            return;
-        };
-        assertions.assert("vfs file read len", file_after_read.last_read_len() == len);
-        assertions.assert(
-            "vfs file backend data",
-            file_after_read.read_returns_backend_data(),
-        );
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
-}
-
-fn assert_ext2_result(
-    assertions: &mut SmokeAssertions,
-    label: &'static str,
-    result: Result<(), Ext2Error>,
-) {
-    match result {
-        Ok(()) => assertions.assert(label, true),
-        Err(Ext2Error::DriverNotReady) => assertions.assert("ext2 error: driver not ready", false),
-        Err(Ext2Error::VolumeNotReady) => assertions.assert("ext2 error: volume not ready", false),
-        Err(Ext2Error::FileSystemNotReady) => {
-            assertions.assert("ext2 error: filesystem not ready", false)
-        }
-        Err(Ext2Error::InvalidState) => assertions.assert("ext2 error: invalid state", false),
-        Err(Ext2Error::DeviceMissing) => assertions.assert("ext2 error: device missing", false),
-        Err(Ext2Error::Io) => assertions.assert("ext2 error: io", false),
-        Err(Ext2Error::InvalidSuperblock) => {
-            assertions.assert("ext2 error: invalid superblock", false)
-        }
-        Err(Ext2Error::UnsupportedBlockSize) => {
-            assertions.assert("ext2 error: unsupported block size", false)
-        }
-        Err(Ext2Error::InvalidGroupDesc) => {
-            assertions.assert("ext2 error: invalid group desc", false)
-        }
-        Err(Ext2Error::InvalidInode) => assertions.assert("ext2 error: invalid inode", false),
-        Err(Ext2Error::InvalidDirEntry) => {
-            assertions.assert("ext2 error: invalid dir entry", false)
-        }
-        Err(Ext2Error::NotFound) => assertions.assert("ext2 error: not found", false),
-        Err(Ext2Error::NotDirectory) => assertions.assert("ext2 error: not directory", false),
-        Err(Ext2Error::NotRegularFile) => assertions.assert("ext2 error: not regular file", false),
-        Err(Ext2Error::IndirectBlocksUnsupported) => {
-            assertions.assert("ext2 error: indirect blocks unsupported", false)
-        }
-        Err(Ext2Error::ShortBuffer) => assertions.assert("ext2 error: short buffer", false),
-    }
 }

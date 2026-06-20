@@ -10,9 +10,10 @@
  * entries in this slice; device file operations stay with the owning device
  * subsystems. The only block-backed filesystem path currently admitted is a
  * read-only ext2 mount whose lookup/read operations dispatch to Ext2FileSystem.
- * Page cache, mount namespace, permissions, credentials, path walk corner
- * cases, rename, symlink, hardlink, open flags and file descriptor tables stay
- * deferred.
+ * The current path-walk slice supports absolute paths, direct child lookup and
+ * mount crossing. Page cache, mount namespace, permissions, credentials,
+ * relative cwd, symlinks, rename, hardlink, open flags and file descriptor
+ * tables stay deferred.
  */
 
 enum VfsInodeKind {
@@ -52,6 +53,13 @@ predicate vfs_current_root_dentry_set<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_ext2_mount_created<T, F>(core: T, fs: F) -> bool;
 predicate vfs_ext2_lookup_dispatches_backend<T, F>(core: T, fs: F) -> bool;
 predicate vfs_ext2_read_dispatches_backend<T, F>(core: T, fs: F) -> bool;
+predicate vfs_absolute_path_walk_supported<T>(core: T) -> bool;
+predicate vfs_path_absolute<T>(path: T) -> bool;
+predicate vfs_path_components_bound<T>(path: T) -> bool;
+predicate vfs_path_walk_resolves<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_path_walk_crosses_mount<T, M>(core: T, mount: M) -> bool;
+predicate vfs_open_path_allocates_file<T, F>(core: T, file: F) -> bool;
+predicate vfs_read_path_returns_data<T, F>(core: T, file: F) -> bool;
 
 predicate superblock_allocated<T>(superblock: T) -> bool;
 predicate superblock_fs_type_bound<T, F>(superblock: T, fs_type: F) -> bool;
@@ -346,6 +354,38 @@ object VfsCore: ResourceObject {
                 }
             }
 
+            Action::WalkPath(path: Path) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    vfs_current_root_dentry_set(VfsCore, Dentry);
+                    dentry_positive(Dentry);
+                    vfs_path_absolute(path);
+                    vfs_path_components_bound(path);
+                    vfs_absolute_path_walk_supported(VfsCore);
+                }
+                drives {
+                    PathWalk.Event::Setup;
+                    VfsCore.Action::Lookup;
+                    VfsCore.Action::FollowMount;
+                }
+                ensures {
+                    vfs_path_walk_resolves(VfsCore, Dentry);
+                }
+            }
+
+            Action::FollowMount(mount_point: Dentry) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    dentry_positive(mount_point);
+                }
+                ensures {
+                    vfs_path_walk_crosses_mount(VfsCore, Mount);
+                    dentry_mount_root_redirects(mount_point, Dentry);
+                }
+            }
+
             Action::LookupExt2ReadOnly {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -446,6 +486,27 @@ object VfsCore: ResourceObject {
                 }
             }
 
+            Action::OpenPath(path: Path) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    vfs_path_absolute(path);
+                    vfs_path_walk_resolves(VfsCore, Dentry);
+                    inode_kind_is(Inode, VfsInodeKind::RegularFile);
+                }
+                drives {
+                    VfsCore.Action::WalkPath;
+                    File.Event::Setup;
+                }
+                ensures {
+                    file_allocated(File);
+                    file_dentry_bound(File, Dentry);
+                    file_inode_bound(File, Inode);
+                    file_position_ready(File);
+                    vfs_open_path_allocates_file(VfsCore, File);
+                }
+            }
+
             Action::WriteFile {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -488,6 +549,25 @@ object VfsCore: ResourceObject {
                 }
             }
 
+            Action::ReadPath(path: Path) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    vfs_path_absolute(path);
+                    vfs_path_walk_resolves(VfsCore, Dentry);
+                    file_allocated(File);
+                }
+                drives {
+                    VfsCore.Action::WalkPath;
+                    VfsCore.Action::OpenPath;
+                    VfsCore.Action::ReadFile;
+                    VfsCore.Action::ReadExt2File;
+                }
+                ensures {
+                    vfs_read_path_returns_data(VfsCore, File);
+                }
+            }
+
             Action::ReadDir {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -509,6 +589,55 @@ object VfsCore: ResourceObject {
                     dentry_child_removed(Dentry, Dentry);
                 }
             }
+        }
+    }
+}
+
+object Path: ResourceObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                ensures {
+                    vfs_path_absolute(Path);
+                    vfs_path_components_bound(Path);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            vfs_path_absolute(Path);
+            vfs_path_components_bound(Path);
+        }
+    }
+}
+
+object PathWalk: ResourceObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    Path.state == State::Ready;
+                    vfs_current_root_dentry_set(VfsCore, Dentry);
+                }
+                ensures {
+                    vfs_absolute_path_walk_supported(VfsCore);
+                    vfs_path_walk_resolves(VfsCore, Dentry);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            vfs_absolute_path_walk_supported(VfsCore);
+            vfs_path_walk_resolves(VfsCore, Dentry);
         }
     }
 }

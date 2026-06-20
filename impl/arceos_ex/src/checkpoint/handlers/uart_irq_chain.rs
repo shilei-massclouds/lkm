@@ -827,8 +827,8 @@ fn observer_baseline_valid(ctx: &Context) -> bool {
         && ctx.plic.dispatch_count() != 0
         && ctx.plic.loop_exit_count() != 0
         && ctx.plic.complete_count() == ctx.plic.claim_count()
-        && ctx.plic.last_claimed_source() == source
-        && ctx.plic.last_completed_source() == source
+        // Later devices, such as virtio-blk during rootfs mount, may legally
+        // update PLIC's last claimed/completed source before PayloadPhase.
         && ctx.plic_irq_domain.state() == State::Ready
         && ctx.plic_irq_domain.enable_deferred()
         && ctx.plic_irq_domain.dispatch_ops_ready()

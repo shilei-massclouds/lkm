@@ -345,7 +345,7 @@ pub enum Checkpoint {
     InitramfsSyncDeferredReady,
     RootfsConsoleDeferredReady,
     RamdiskExecuteCommandEaccessCheckpoint,
-    RootFsEnableDeferredReady,
+    RootFSOnline,
     IntegrityKeysDeferredReady,
     RootfsBoundaryReady,
     FinalizePhaseStarted,
@@ -721,7 +721,7 @@ impl Checkpoint {
             Self::RamdiskExecuteCommandEaccessCheckpoint => {
                 "RamdiskExecuteCommand.EaccessCheckpoint"
             }
-            Self::RootFsEnableDeferredReady => "RootFS.EnableDeferredReady",
+            Self::RootFSOnline => "RootFS.Online",
             Self::IntegrityKeysDeferredReady => "IntegrityKeys.DeferredReady",
             Self::RootfsBoundaryReady => "RootfsBoundary.Ready",
             Self::FinalizePhaseStarted => "FinalizePhase.Started",
