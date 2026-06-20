@@ -2,7 +2,10 @@ use crate::{
     apps::smoke::SmokeResult,
     context::context,
     objects::{
-        ext2::{EXT2_SMOKE_FILE_CONTENT, EXT2_SMOKE_FILE_NAME},
+        ext2::{
+            EXT2_ALPINE_RELEASE_FILE_CONTENT, EXT2_ALPINE_RELEASE_FILE_NAME,
+            EXT2_ALPINE_RELEASE_PATH,
+        },
         printk,
         rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
         state::State,
@@ -12,9 +15,8 @@ use crate::{
     phases,
 };
 
-static mut ROOTFS_READ_BUFFER: [u8; EXT2_SMOKE_FILE_CONTENT.len()] =
-    [0; EXT2_SMOKE_FILE_CONTENT.len()];
-const ROOTFS_SMOKE_FILE_PATH: &[u8] = b"/smoke.txt";
+static mut ROOTFS_READ_BUFFER: [u8; EXT2_ALPINE_RELEASE_FILE_CONTENT.len()] =
+    [0; EXT2_ALPINE_RELEASE_FILE_CONTENT.len()];
 
 pub fn run() -> SmokeResult {
     let ctx = context();
@@ -209,13 +211,13 @@ pub fn run() -> SmokeResult {
         &mut ctx.ext2_filesystem,
         &mut ctx.block_device_registry,
         &mut provider,
-        ROOTFS_SMOKE_FILE_PATH,
+        EXT2_ALPINE_RELEASE_PATH,
         buffer,
     ) {
         Ok(len)
-            if len == EXT2_SMOKE_FILE_CONTENT.len()
-                && &buffer[..len] == EXT2_SMOKE_FILE_CONTENT
-                && ctx.ext2_filesystem.lookup_dirent().name() == EXT2_SMOKE_FILE_NAME => {}
+            if len == EXT2_ALPINE_RELEASE_FILE_CONTENT.len()
+                && &buffer[..len] == EXT2_ALPINE_RELEASE_FILE_CONTENT
+                && ctx.ext2_filesystem.lookup_dirent().name() == EXT2_ALPINE_RELEASE_FILE_NAME => {}
         _ => {
             printk::write_str("rootfs direct ext2 read failed\n");
             return SmokeResult::Failed;
@@ -241,6 +243,6 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    printk::write_str("rootfs next=finalize current_root=ext2 read=/smoke.txt\n");
+    printk::write_str("rootfs next=finalize current_root=ext2 read=/etc/alpine-release\n");
     SmokeResult::Passed
 }

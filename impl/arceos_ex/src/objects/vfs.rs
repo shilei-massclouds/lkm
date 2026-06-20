@@ -1294,9 +1294,14 @@ impl VfsCore {
             return Ok(existing);
         }
 
-        let dirent = fs.lookup_root(registry, provider, name)?;
-        let file_inode = *fs.lookup_file_inode();
-        let child_ref = self.insert_ext2_lookup_child(parent_ref, &dirent, &file_inode)?;
+        let parent_ext2_ino = parent_inode
+            .ext2_binding()
+            .ok_or(VfsError::FsTypeMissing)?
+            .ino();
+        let parent_ext2_inode = fs.read_inode_record(registry, provider, parent_ext2_ino)?;
+        let dirent = fs.lookup_child(registry, provider, &parent_ext2_inode, name)?;
+        let child_inode = *fs.lookup_file_inode();
+        let child_ref = self.insert_ext2_lookup_child(parent_ref, &dirent, &child_inode)?;
         self.lookup_returned = true;
         self.ext2_lookup_dispatched = true;
         Ok(child_ref)
@@ -1499,7 +1504,8 @@ impl VfsCore {
             return Err(VfsError::FsTypeMissing);
         }
 
-        let len = fs.read_vfs_file(registry, provider, buffer)?;
+        let ino = inode.ext2_binding().ok_or(VfsError::FsTypeMissing)?.ino();
+        let len = fs.read_vfs_file(registry, provider, ino, buffer)?;
         let file = self.file_mut(file_ref).ok_or(VfsError::InvalidRef)?;
         file.position = len;
         file.last_read_len = len;
@@ -1639,8 +1645,15 @@ impl VfsCore {
             return Err(VfsError::NotDirectory);
         }
 
+        let kind = if inode.is_dir() {
+            VfsInodeKind::Directory
+        } else if inode.is_regular_file() {
+            VfsInodeKind::RegularFile
+        } else {
+            return Err(VfsError::UnsupportedPath);
+        };
         let inode_ref = InodeRef::new(self.inodes.len());
-        let mut vfs_inode = Inode::new(inode_ref, superblock_ref, VfsInodeKind::RegularFile);
+        let mut vfs_inode = Inode::new(inode_ref, superblock_ref, kind);
         vfs_inode.bind_ext2_inode(inode);
         self.inodes.push(vfs_inode);
 

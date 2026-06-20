@@ -13,10 +13,13 @@ KERNEL_DIR := impl/$(KERNEL)
 PYVERI ?= tools/pyveri/bin/pyveri
 PROBE_FILE_ARG := $(if $(PROBE_FILE),PROBE_FILE="$(abspath $(PROBE_FILE))",)
 
-.PHONY: build run verify test test-verify test-kunit test-smoke clean
+.PHONY: build run disk verify test test-verify test-kunit test-smoke clean
 
 build:
 	$(MAKE) -C $(KERNEL_DIR) build APP=$(APP) PROBE="$(PROBE)" $(PROBE_FILE_ARG)
+
+disk:
+	$(MAKE) -C $(KERNEL_DIR) disk
 
 run:
 ifeq ($(LOG),trace)

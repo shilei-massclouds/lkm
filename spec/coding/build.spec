@@ -10,6 +10,8 @@ predicate build_must_keep_top_level_make_as_stable_entry() -> bool;
 predicate build_must_delegate_kernel_specific_rules_to_kernel_dir() -> bool;
 predicate build_must_keep_targets_composable() -> bool;
 predicate build_must_make_disk_reproducible_input_builder() -> bool;
+predicate build_must_make_disk_create_image_only_when_missing_by_default() -> bool;
+predicate build_must_cache_downloaded_rootfs_inputs_under_build() -> bool;
 predicate build_must_run_depend_on_required_runtime_inputs() -> bool;
 predicate build_must_not_hide_model_codegen_or_verification_boundaries() -> bool;
 predicate build_must_preserve_app_payload_selection_as_explicit_parameter() -> bool;
@@ -61,10 +63,30 @@ type BuildAndScriptCodingMust {
          * make disk is the canonical builder for runtime block-device images
          * used by QEMU. It must be reproducible from explicit Make variables
          * such as image path, size, file-system type, file-system block size
-         * and deterministic fixture file names/content. Kernel runtime code
-         * must not depend on manually prepared local disk state.
+         * and the rootfs source URL/cache path. Kernel runtime code must not
+         * depend on manually prepared local disk state.
          */
         build_must_make_disk_reproducible_input_builder();
+
+        /*
+         * Idempotent disk creation:
+         *
+         * The default make disk behavior must create the configured disk image
+         * only when the image path is missing. Existing runtime disk images
+         * are local runtime state and must not be reformatted by default; an
+         * explicit clean/delete/rebuild step is required to regenerate them.
+         */
+        build_must_make_disk_create_image_only_when_missing_by_default();
+
+        /*
+         * Downloaded rootfs cache:
+         *
+         * Downloaded rootfs inputs such as Alpine minirootfs tarballs must be
+         * cached under a build artifact directory controlled by Make
+         * variables. If the cached tarball exists, routine disk creation must
+         * not download it again.
+         */
+        build_must_cache_downloaded_rootfs_inputs_under_build();
 
         /*
          * Runtime dependencies:
@@ -98,10 +120,10 @@ type BuildAndScriptCodingMust {
         /*
          * External tool commands:
          *
-         * External tools such as rustc, rust-objcopy, QEMU, mkfs, debugfs and
-         * pyveri must be configurable through Make variables or documented
-         * script parameters. Hard-coded host-local absolute paths are not
-         * allowed in ordinary build targets.
+         * External tools such as rustc, rust-objcopy, QEMU, wget, tar, mkfs
+         * and pyveri must be configurable through Make variables or
+         * documented script parameters. Hard-coded host-local absolute paths
+         * are not allowed in ordinary build targets.
          */
         build_must_stage_external_tools_as_configurable_commands();
 

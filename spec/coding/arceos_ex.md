@@ -499,13 +499,12 @@ Linux-like `Bio`、最小同步 `submit_bio_wait()` / `blk_mq_submit_bio()` 壳�
 
 read-only ext2 必须继续走 `BufferHead`。实现边界对应 Linux 6.12.37 `ext2_fill_super()` /
 `ext2_iget()` / `ext2_find_entry()` / direct-block read：读取 superblock、校验 magic/block size、读取 group
-descriptor、读取 `EXT2_ROOT_INO`，遍历 root directory direct blocks 中的 dirent，lookup 稳定测试文件，再按
-inode direct blocks 把文件内容拷贝给调用者。当前泛化步骤必须支持 root directory 多 direct-block 扫描和 regular
+descriptor、读取 `EXT2_ROOT_INO`，遍历目录 direct blocks 中的 dirent，lookup 稳定文件，再按
+inode direct blocks 把文件内容拷贝给调用者。当前泛化步骤必须支持目录 direct-block 扫描和 regular
 file 多 direct-block 读取；caller buffer 不足时返回 `ShortBuffer`，遇到 indirect block 需求时返回
-`IndirectBlocksUnsupported`，不得静默截断或绕过 `BufferHead`。`make disk` 在 `FS_TYPE=ext2` 时应写入稳定文件，
-并至少包含一个跨 ext2 block 的 regular file，保证 smoke 能观察 multi-direct-block read path；同时应构造足够
-root directory filler entries，使目标文件 dirent 落到第一个 root directory block 之后，smoke 必须观察到
-`LookupRootName` 至少扫描两个 direct blocks。
+`IndirectBlocksUnsupported`，不得静默截断或绕过 `BufferHead`。`make disk` 在 `FS_TYPE=ext2` 时应从
+Alpine minirootfs tarball 构造真实 rootfs，而不是为 smoke 写入专用文件或 filler entries；smoke 应选择该
+rootfs 中稳定存在的普通文件，至少覆盖一个跨 ext2 block 的 regular file，保证能观察 multi-direct-block read path。
 Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem`：`Ext2Driver` 取代旧的
 `Ext2Type`，承载 Linux `file_system_type` 以及当前建模的 super/inode/file operation set；
 `Ext2Volume` 表示默认块设备上按 ext2 规范组织的 on-disk volume，由 `Preset` 经 `BufferHead` 检查确认，
@@ -727,7 +726,7 @@ namespace/devtmpfs 轮次。
 
 测试应覆盖 `RootfsPhase.Ready`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
 ramdisk eaccess 强制进入 prepare_namespace、prepare_namespace 输入条件已具备、真实 ext2 root staging mount 曾建立于
-`/root`、`MS_MOVE` 挂载移动完成、`FsStruct.ChrootDot` 完成、当前 root 为 ext2、可直接读取 `/smoke.txt`、
+`/root`、`MS_MOVE` 挂载移动完成、`FsStruct.ChrootDot` 完成、当前 root 为 ext2、可直接读取 `/etc/alpine-release`、
 integrity keys deferred，以及下一入口仍是 `FinalizePhase`。
 
 ## FinalizePhase 编码约束

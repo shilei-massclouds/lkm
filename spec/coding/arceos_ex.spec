@@ -134,8 +134,8 @@ predicate arceos_ex_must_ext2_first_slice_read_only_and_buffer_head_based() -> b
 predicate arceos_ex_must_ext2_support_4k_buffer_and_block_sizes() -> bool;
 predicate arceos_ex_must_ext2_model_driver_volume_filesystem_lifecycle() -> bool;
 predicate arceos_ex_must_ext2_read_path_support_multi_direct_blocks() -> bool;
-predicate arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file() -> bool;
-predicate arceos_ex_must_ext2_smoke_observe_cross_block_root_lookup() -> bool;
+predicate arceos_ex_must_ext2_smoke_use_stable_alpine_rootfs_files() -> bool;
+predicate arceos_ex_must_ext2_lookup_support_path_components_from_directories() -> bool;
 predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
 predicate arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read() -> bool;
 predicate arceos_ex_must_rootfs_move_ext2_mount_and_chroot_dot_as_separate_actions() -> bool;
@@ -1342,34 +1342,37 @@ type ArceosExBlockIoCodingMust {
         /*
          * Direct-block read path generalization:
          *
-         * Ext2FileSystem::LookupRootName must scan root directory direct
-         * blocks until a matching dirent is found or the direct range is
-         * exhausted. Ext2FileSystem::ReadLookupFile must read a regular file
-         * across multiple direct blocks up to inode size, reject too-small
-         * caller buffers with ShortBuffer, and keep indirect blocks explicit
-         * deferred scope.
+         * Ext2FileSystem directory lookup must scan direct blocks of the
+         * current ext2 directory inode until a matching dirent is found or the
+         * direct range is exhausted. Ext2FileSystem file read must read a
+         * regular file across multiple direct blocks up to inode size, reject
+         * too-small caller buffers with ShortBuffer, and keep indirect blocks
+         * explicit deferred scope.
          */
         arceos_ex_must_ext2_read_path_support_multi_direct_blocks();
 
         /*
-         * Stable smoke target:
+         * Stable Alpine smoke targets:
          *
-         * make disk should place deterministic ext2 files in the image when
-         * FS_TYPE=ext2. The ext2 smoke must keep using the read-only
-         * Ext2FileSystem path through BufferHead, and must include a file whose
-         * size spans more than one ext2 block so the multi-direct-block path is
-         * actually observed.
+         * make disk must construct the ext2 image from the configured Alpine
+         * minirootfs tarball instead of creating smoke-only files. The ext2
+         * smoke must keep using the read-only Ext2FileSystem path through
+         * BufferHead, and must choose stable files from that rootfs, including
+         * a regular file whose size spans more than one ext2 block so the
+         * multi-direct-block path is actually observed.
          */
-        arceos_ex_must_ext2_smoke_use_stable_cross_block_disk_file();
+        arceos_ex_must_ext2_smoke_use_stable_alpine_rootfs_files();
 
         /*
-         * Cross-block root lookup observation:
+         * Directory path lookup:
          *
-         * The ext2 smoke disk must also force the target lookup file's root
-         * directory entry beyond the first ext2 directory block, so smoke
-         * observes LookupRootName scanning at least two direct blocks.
+         * Since the rootfs is no longer a handcrafted root directory fixture,
+         * VFS/ext2 lookup must support path components below arbitrary ext2
+         * directories backed by direct blocks. Smoke must not require artificial
+         * root-directory filler entries just to move a dirent into a later
+         * block.
          */
-        arceos_ex_must_ext2_smoke_observe_cross_block_root_lookup();
+        arceos_ex_must_ext2_lookup_support_path_components_from_directories();
 
         /*
          * Minimal VFS read-only mount:
@@ -2408,8 +2411,8 @@ type ArceosExRootfsCodingMust {
          * FsStruct.Action::ChrootDot as separate model actions. FsStruct owns
          * the task-visible root/pwd dentry refs; VfsCore must not keep a
          * parallel current-root singleton. Smoke must observe current root as
-         * ext2 and read /smoke.txt directly without remounting /dev under the
-         * new root.
+         * ext2 and read /etc/alpine-release directly without remounting /dev
+         * under the new root.
          */
         arceos_ex_must_rootfs_move_ext2_mount_and_chroot_dot_as_separate_actions();
 

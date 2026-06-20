@@ -31,7 +31,7 @@ Targets must remain composable:
 
 - `generate` creates generated source inputs such as linker scripts from model/codegen inputs.
 - `build` compiles the kernel image and must not mutate runtime disk images.
-- `disk` builds block-device images and deterministic file-system fixtures.
+- `disk` builds block-device images from documented rootfs inputs.
 - `run` prepares required runtime inputs, builds the selected kernel/payload and starts QEMU.
 - `verify` runs formal derivation or trace generation.
 - `test-verify`, `test-kunit` and `test-smoke` are independently runnable validation stages.
@@ -47,10 +47,14 @@ A helper script may improve reporting, for example by aggregating test summaries
 - `VIRTIO_BLK_IMAGE_SIZE`
 - `FS_TYPE`
 - `EXT2_BLOCK_SIZE`
-- deterministic fixture file names and contents
-- tool variables such as `DEBUGFS`
+- `ROOTFS_URL`
+- `ROOTFS_TARBALL`
+- `ROOTFS_STAGING_DIR`
+- tool variables such as `WGET`, `TAR` and `MKFS_EXT2`
 
-For ext2 fixtures, the build rule may create temporary host files and a temporary debugfs command file in the build directory. Those files are generated runtime inputs, not source files.
+By default, `make disk` should create the configured `VIRTIO_BLK_IMAGE` only when that image does not exist. Existing disk images are local runtime state and must not be reformatted by routine `run` or `test` entry points. Regenerating the image requires an explicit clean/delete/rebuild action.
+
+For ext2 rootfs images, the default source is the Alpine minirootfs tarball identified by `ROOTFS_URL`. The tarball must be cached under the kernel build directory through `ROOTFS_TARBALL`, for example `build/rootfs-cache/alpine-minirootfs-3.24.1-riscv64.tar.gz`. If the cached tarball exists, `make disk` must reuse it instead of downloading it again. The extracted staging tree belongs under `ROOTFS_STAGING_DIR` and is generated runtime input, not source.
 
 When a QEMU configuration includes `virtio-blk`, `make run` must depend on `disk`. `make build` should not create or reformat disk images.
 
@@ -83,8 +87,9 @@ External tools must be configurable by variables or documented script parameters
 - `RUST_OBJCOPY`
 - `QEMU`
 - `PYVERI`
-- `DEBUGFS`
-- `mkfs.ext2`
+- `WGET`
+- `TAR`
+- `MKFS_EXT2`
 
 Ordinary build targets must not depend on host-local absolute paths unless the path is a documented source input, such as a third-party object intentionally stored under the repository.
 

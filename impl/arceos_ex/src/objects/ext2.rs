@@ -14,11 +14,12 @@ pub const EXT2_SUPERBLOCK_OFFSET: usize = 1024;
 const EXT2_SUPERBLOCK_PROBE_BLOCK: u64 = (EXT2_SUPERBLOCK_OFFSET / EXT2_MIN_BLOCK_SIZE) as u64;
 pub const EXT2_N_BLOCKS: usize = 15;
 pub const EXT2_NDIR_BLOCKS: usize = 12;
-pub const EXT2_SMOKE_FILE_NAME: &[u8] = b"smoke.txt";
-pub const EXT2_SMOKE_FILE_CONTENT: &[u8] = b"arceos_ex ext2 smoke\n";
-pub const EXT2_SMOKE_LARGE_FILE_NAME: &[u8] = b"smoke-large.bin";
-pub const EXT2_SMOKE_LARGE_FILE_SIZE: usize = 5120;
-pub const EXT2_SMOKE_LARGE_FILE_BYTE: u8 = b'L';
+pub const EXT2_ALPINE_RELEASE_PATH: &[u8] = b"/etc/alpine-release";
+pub const EXT2_ALPINE_RELEASE_FILE_NAME: &[u8] = b"alpine-release";
+pub const EXT2_ALPINE_RELEASE_FILE_CONTENT: &[u8] = b"3.24.1\n";
+pub const EXT2_ALPINE_INSTALLED_DB_PATH: &[u8] = b"/lib/apk/db/installed";
+pub const EXT2_ALPINE_INSTALLED_DB_FILE_NAME: &[u8] = b"installed";
+pub const EXT2_ALPINE_INSTALLED_DB_MAX_SIZE: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
 
 const EXT2_NAME_MAX: usize = 32;
 const EXT2_GOOD_OLD_INODE_SIZE: u16 = 128;
@@ -389,7 +390,7 @@ pub struct Ext2FileSystem {
     lookup_dirent: Ext2DirEntryRecord,
     lookup_file_inode: Ext2InodeRecord,
     lookup_name_bound: bool,
-    lookup_reads_root_dir: bool,
+    lookup_reads_dir: bool,
     lookup_direct_blocks_scanned: usize,
     lookup_multi_direct_block_supported: bool,
     lookup_not_found_nonfatal: bool,
@@ -440,7 +441,7 @@ impl Ext2FileSystem {
             lookup_dirent: Ext2DirEntryRecord::empty(),
             lookup_file_inode: Ext2InodeRecord::empty(),
             lookup_name_bound: false,
-            lookup_reads_root_dir: false,
+            lookup_reads_dir: false,
             lookup_direct_blocks_scanned: 0,
             lookup_multi_direct_block_supported: false,
             lookup_not_found_nonfatal: true,
@@ -572,8 +573,8 @@ impl Ext2FileSystem {
         self.lookup_name_bound
     }
 
-    pub const fn lookup_reads_root_dir(&self) -> bool {
-        self.lookup_reads_root_dir
+    pub const fn lookup_reads_dir(&self) -> bool {
+        self.lookup_reads_dir
     }
 
     pub const fn lookup_direct_blocks_scanned(&self) -> usize {
@@ -745,10 +746,21 @@ impl Ext2FileSystem {
         provider: &mut P,
         name: &[u8],
     ) -> Result<Ext2DirEntryRecord, Ext2Error> {
+        let root_inode = self.root_inode;
+        self.lookup_child(registry, provider, &root_inode, name)
+    }
+
+    pub fn lookup_child<P: BlockDeviceProvider>(
+        &mut self,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        parent_inode: &Ext2InodeRecord,
+        name: &[u8],
+    ) -> Result<Ext2DirEntryRecord, Ext2Error> {
         if self.lifecycle.state() != State::Online || !self.ready || !self.mount_boundary_recorded {
             return Err(Ext2Error::FileSystemNotReady);
         }
-        if !self.root_inode.is_dir() {
+        if !parent_inode.is_dir() {
             return Err(Ext2Error::NotDirectory);
         }
         if name.is_empty() || name.len() > EXT2_NAME_MAX {
@@ -759,16 +771,16 @@ impl Ext2FileSystem {
         };
 
         self.lookup_name_bound = false;
-        self.lookup_reads_root_dir = true;
+        self.lookup_reads_dir = true;
         self.lookup_direct_blocks_scanned = 0;
         self.lookup_multi_direct_block_supported = true;
         self.lookup_not_found_nonfatal = true;
-        self.lookup_indirect_blocks_deferred = self.root_inode.indirect_blocks_deferred();
+        self.lookup_indirect_blocks_deferred = parent_inode.indirect_blocks_deferred();
         self.lookup_dirent_valid = false;
         self.lookup_returns_inode = false;
         let mut dir_bytes_remaining =
-            usize::try_from(self.root_inode.size()).map_err(|_| Ext2Error::InvalidDirEntry)?;
-        for block in self.root_inode.direct_blocks {
+            usize::try_from(parent_inode.size()).map_err(|_| Ext2Error::InvalidDirEntry)?;
+        for block in parent_inode.direct_blocks {
             if dir_bytes_remaining == 0 {
                 break;
             }
@@ -784,8 +796,8 @@ impl Ext2FileSystem {
                 self.lookup_dirent = dirent;
                 self.lookup_file_inode = self.read_inode(registry, provider, dirent.inode())?;
                 self.lookup_returns_inode = true;
-                if !self.lookup_file_inode.is_regular_file() {
-                    return Err(Ext2Error::NotRegularFile);
+                if !self.lookup_file_inode.is_regular_file() && !self.lookup_file_inode.is_dir() {
+                    return Err(Ext2Error::InvalidInode);
                 }
                 return Ok(dirent);
             }
@@ -800,25 +812,31 @@ impl Ext2FileSystem {
         provider: &mut P,
         buffer: &mut [u8],
     ) -> Result<usize, Ext2Error> {
-        if self.lifecycle.state() != State::Online
-            || !self.ready
-            || !self.mount_boundary_recorded
-            || !self.lookup_returns_inode
-        {
+        let inode = self.lookup_file_inode;
+        self.read_file_inode(registry, provider, &inode, buffer)
+    }
+
+    pub fn read_file_inode<P: BlockDeviceProvider>(
+        &mut self,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        inode: &Ext2InodeRecord,
+        buffer: &mut [u8],
+    ) -> Result<usize, Ext2Error> {
+        if self.lifecycle.state() != State::Online || !self.ready || !self.mount_boundary_recorded {
             return Err(Ext2Error::FileSystemNotReady);
         }
-        if !self.lookup_file_inode.is_regular_file() {
+        if !inode.is_regular_file() {
             return Err(Ext2Error::NotRegularFile);
         }
-        let file_size =
-            usize::try_from(self.lookup_file_inode.size()).map_err(|_| Ext2Error::InvalidInode)?;
+        let file_size = usize::try_from(inode.size()).map_err(|_| Ext2Error::InvalidInode)?;
         self.file_read_uses_direct_block = false;
         self.file_read_direct_blocks_scanned = 0;
         self.file_read_multi_direct_block_supported = true;
         self.file_read_uses_buffer_head = false;
         self.file_read_copies_to_caller = false;
         self.file_read_len_matches_inode_size = false;
-        self.file_read_indirect_blocks_deferred = self.lookup_file_inode.indirect_blocks_deferred();
+        self.file_read_indirect_blocks_deferred = inode.indirect_blocks_deferred();
         if buffer.len() < file_size {
             self.file_read_short_buffer_rejected = true;
             return Err(Ext2Error::ShortBuffer);
@@ -828,7 +846,7 @@ impl Ext2FileSystem {
         };
 
         let mut copied = 0usize;
-        for block in self.lookup_file_inode.direct_blocks {
+        for block in inode.direct_blocks {
             if copied == file_size {
                 break;
             }
@@ -857,13 +875,24 @@ impl Ext2FileSystem {
         &mut self,
         registry: &mut BlockDeviceRegistry,
         provider: &mut P,
+        ino: u32,
         buffer: &mut [u8],
     ) -> Result<usize, Ext2Error> {
         if !self.vfs_read_entry_bound {
             return Err(Ext2Error::FileSystemNotReady);
         }
         self.file_read_entered_from_vfs = true;
-        self.read_lookup_file(registry, provider, buffer)
+        let inode = self.read_inode(registry, provider, ino)?;
+        self.read_file_inode(registry, provider, &inode, buffer)
+    }
+
+    pub fn read_inode_record<P: BlockDeviceProvider>(
+        &self,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        ino: u32,
+    ) -> Result<Ext2InodeRecord, Ext2Error> {
+        self.read_inode(registry, provider, ino)
     }
 
     fn read_inode<P: BlockDeviceProvider>(
@@ -1053,7 +1082,6 @@ fn find_dirent(data: &[u8], needle: &[u8]) -> Result<Option<Ext2DirEntryRecord>,
         let name_len_usize = usize::from(name_len);
         if rec_len_usize < 8
             || rec_len_usize % 4 != 0
-            || name_len_usize > EXT2_NAME_MAX
             || name_len_usize > rec_len_usize.saturating_sub(8)
             || offset + rec_len_usize > limit
         {

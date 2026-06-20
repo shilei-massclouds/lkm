@@ -43,17 +43,15 @@ QEMU ?= qemu-system-riscv64
 QEMU_SMP ?= 8
 QEMU_APPEND ?= earlycon=sbi
 VIRTIO_BLK_IMAGE ?= build/virtio-blk.raw
-VIRTIO_BLK_IMAGE_SIZE ?= 8M
+VIRTIO_BLK_IMAGE_SIZE ?= 64M
 FS_TYPE ?= ext2
 EXT2_BLOCK_SIZE ?=
-EXT2_SMOKE_FILE_NAME ?= smoke.txt
-EXT2_SMOKE_FILE_CONTENT ?= arceos_ex ext2 smoke
-EXT2_SMOKE_LARGE_FILE_NAME ?= smoke-large.bin
-EXT2_SMOKE_LARGE_FILE_SIZE ?= 5120
-EXT2_SMOKE_LARGE_FILE_BYTE ?= L
-EXT2_SMOKE_FILLER_COUNT ?= 180
-EXT2_SMOKE_FILLER_PREFIX ?= ext2-smoke-filler-entry-
-DEBUGFS ?= debugfs
+ROOTFS_URL ?= https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/riscv64/alpine-minirootfs-3.24.1-riscv64.tar.gz
+ROOTFS_TARBALL ?= build/rootfs-cache/alpine-minirootfs-3.24.1-riscv64.tar.gz
+ROOTFS_STAGING_DIR ?= build/rootfs-staging
+WGET ?= wget
+TAR ?= tar
+MKFS_EXT2 ?= mkfs.ext2
 EXT2_MKFS_FEATURE_ARGS ?= -O ^dir_index
 EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
@@ -81,7 +79,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate disk clean
+.PHONY: build run generate disk rootfs-tarball clean
 
 build: generate $(KERNEL_BIN)
 
@@ -105,23 +103,26 @@ $(KERNEL_ELF): $(SOURCES) $(LINKER)
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(RUST_OBJCOPY) --strip-all -O binary $< $@
 
-disk:
-	mkdir -p $(dir $(VIRTIO_BLK_IMAGE))
-	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $(VIRTIO_BLK_IMAGE)
+disk: $(VIRTIO_BLK_IMAGE)
+
+rootfs-tarball: $(ROOTFS_TARBALL)
+
+$(ROOTFS_TARBALL):
+	mkdir -p $(dir $@)
+	$(WGET) -O $@.tmp $(ROOTFS_URL)
+	mv $@.tmp $@
+
+$(VIRTIO_BLK_IMAGE):
+	mkdir -p $(dir $@)
 ifeq ($(FS_TYPE),ext2)
-	mkfs.ext2 -q -F $(EXT2_MKFS_FEATURE_ARGS) $(EXT2_MKFS_BLOCK_ARGS) $(VIRTIO_BLK_IMAGE)
-	printf '%s\n' "$(EXT2_SMOKE_FILE_CONTENT)" > $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt
-	printf 'x\n' > $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-filler.txt
-	yes "$(EXT2_SMOKE_LARGE_FILE_BYTE)" | tr -d '\n' | dd of=$(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-large-file.bin bs=1 count=$(EXT2_SMOKE_LARGE_FILE_SIZE) status=none
-	printf 'write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-file.txt /$(EXT2_SMOKE_FILE_NAME)\n' > $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke.debugfs
-	if [ "$(EXT2_SMOKE_FILLER_COUNT)" -gt 0 ]; then \
-		for index in $$(seq -w 0 $$(($(EXT2_SMOKE_FILLER_COUNT) - 1))); do \
-			printf 'write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-filler.txt /$(EXT2_SMOKE_FILLER_PREFIX)%s\n' "$$index" >> $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke.debugfs; \
-		done; \
-	fi
-	printf 'write $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke-large-file.bin /$(EXT2_SMOKE_LARGE_FILE_NAME)\n' >> $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke.debugfs
-	$(DEBUGFS) -w -f $(dir $(VIRTIO_BLK_IMAGE))/ext2-smoke.debugfs $(VIRTIO_BLK_IMAGE) >/dev/null
+	$(MAKE) rootfs-tarball ROOTFS_TARBALL="$(ROOTFS_TARBALL)" ROOTFS_URL="$(ROOTFS_URL)" WGET="$(WGET)"
+	rm -rf $(ROOTFS_STAGING_DIR)
+	mkdir -p $(ROOTFS_STAGING_DIR)
+	$(TAR) --no-same-owner -xzf $(ROOTFS_TARBALL) -C $(ROOTFS_STAGING_DIR)
+	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $@
+	$(MKFS_EXT2) -q -F $(EXT2_MKFS_FEATURE_ARGS) $(EXT2_MKFS_BLOCK_ARGS) -d $(ROOTFS_STAGING_DIR) $@
 else ifeq ($(FS_TYPE),none)
+	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $@
 else
 	$(error unknown FS_TYPE: $(FS_TYPE))
 endif

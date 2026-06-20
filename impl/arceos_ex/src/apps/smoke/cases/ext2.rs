@@ -6,8 +6,8 @@ use crate::{
     context::context,
     objects::{
         ext2::{
-            Ext2FileType, EXT2_MAX_BLOCK_SIZE, EXT2_ROOT_INO, EXT2_SMOKE_LARGE_FILE_BYTE,
-            EXT2_SMOKE_LARGE_FILE_NAME, EXT2_SMOKE_LARGE_FILE_SIZE,
+            Ext2FileType, EXT2_ALPINE_INSTALLED_DB_FILE_NAME, EXT2_ALPINE_INSTALLED_DB_MAX_SIZE,
+            EXT2_ALPINE_INSTALLED_DB_PATH, EXT2_MAX_BLOCK_SIZE, EXT2_ROOT_INO,
         },
         rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
         state::State,
@@ -16,8 +16,8 @@ use crate::{
     },
 };
 
-static mut LARGE_READ_BUFFER: [u8; EXT2_SMOKE_LARGE_FILE_SIZE] = [0; EXT2_SMOKE_LARGE_FILE_SIZE];
-const EXT2_SMOKE_LARGE_FILE_PATH: &[u8] = b"/smoke-large.bin";
+static mut LARGE_READ_BUFFER: [u8; EXT2_ALPINE_INSTALLED_DB_MAX_SIZE] =
+    [0; EXT2_ALPINE_INSTALLED_DB_MAX_SIZE];
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -203,7 +203,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
             &mut provider,
-            EXT2_SMOKE_LARGE_FILE_PATH,
+            EXT2_ALPINE_INSTALLED_DB_PATH,
             buffer,
         );
         let Ok(len) = read else {
@@ -213,13 +213,10 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
 
         let dirent = *ctx.ext2_filesystem.lookup_dirent();
         assertions.assert("lookup name", ctx.ext2_filesystem.lookup_name_bound());
-        assertions.assert(
-            "lookup reads root",
-            ctx.ext2_filesystem.lookup_reads_root_dir(),
-        );
+        assertions.assert("lookup reads dir", ctx.ext2_filesystem.lookup_reads_dir());
         assertions.assert(
             "lookup scans direct",
-            ctx.ext2_filesystem.lookup_direct_blocks_scanned() >= 2,
+            ctx.ext2_filesystem.lookup_direct_blocks_scanned() >= 1,
         );
         assertions.assert(
             "lookup multi direct",
@@ -234,7 +231,10 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             ctx.ext2_filesystem.lookup_indirect_blocks_deferred(),
         );
         assertions.assert("dirent valid", ctx.ext2_filesystem.lookup_dirent_valid());
-        assertions.assert("dirent name", dirent.name() == EXT2_SMOKE_LARGE_FILE_NAME);
+        assertions.assert(
+            "dirent name",
+            dirent.name() == EXT2_ALPINE_INSTALLED_DB_FILE_NAME,
+        );
         assertions.assert("dirent inode", dirent.inode() != 0);
         assertions.assert(
             "dirent type",
@@ -262,7 +262,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             &mut ctx.ext2_filesystem,
             &mut ctx.block_device_registry,
             &mut provider,
-            EXT2_SMOKE_LARGE_FILE_PATH,
+            EXT2_ALPINE_INSTALLED_DB_PATH,
         ) {
             Ok(dentry_ref) => dentry_ref,
             Err(_) => {
@@ -274,7 +274,7 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             assertions.assert("vfs file dentry", false);
             return;
         };
-        let file_name_matches = file_dentry.name() == EXT2_SMOKE_LARGE_FILE_NAME;
+        let file_name_matches = file_dentry.name() == EXT2_ALPINE_INSTALLED_DB_FILE_NAME;
         let file_dentry_ref_value = file_dentry.dentry_ref();
         let file_ref = match ctx.vfs_core.open_file(file_dentry_ref) {
             Ok(file_ref) => file_ref,
@@ -305,8 +305,9 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
                 .is_some_and(|binding| binding.ino() == dirent.inode()),
         );
         assertions.assert(
-            "vfs file size",
-            file_inode.size() == EXT2_SMOKE_LARGE_FILE_SIZE,
+            "vfs file spans blocks",
+            file_inode.size() > EXT2_MAX_BLOCK_SIZE
+                && file_inode.size() <= EXT2_ALPINE_INSTALLED_DB_MAX_SIZE,
         );
         assertions.assert(
             "vfs file dentry bound",
@@ -314,12 +315,14 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
         );
         assertions.assert("vfs file inode bound", file.inode_ref() == file_inode_ref);
 
-        assertions.assert("read len", len == EXT2_SMOKE_LARGE_FILE_SIZE);
+        assertions.assert(
+            "read len",
+            len > EXT2_MAX_BLOCK_SIZE && len <= EXT2_ALPINE_INSTALLED_DB_MAX_SIZE,
+        );
         assertions.assert(
             "read content",
-            buffer[..len]
-                .iter()
-                .all(|byte| *byte == EXT2_SMOKE_LARGE_FILE_BYTE),
+            contains_bytes(&buffer[..len], b"P:alpine-baselayout\n")
+                && contains_bytes(&buffer[..len], b"A:riscv64\n"),
         );
         assertions.assert(
             "last read len",
@@ -365,4 +368,13 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
