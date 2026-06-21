@@ -58,8 +58,6 @@ pub enum UserInitPathRef {
 }
 
 static USER_INIT_RUNTIME_ENTERED: AtomicU8 = AtomicU8::new(0);
-static USER_INIT_RUNTIME_WRITE_OBSERVED: AtomicU8 = AtomicU8::new(0);
-static USER_INIT_RUNTIME_EXIT_OBSERVED: AtomicU8 = AtomicU8::new(0);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ElfError {
@@ -1553,8 +1551,6 @@ pub struct UserInitProcess {
     syscall_dispatch_bound: bool,
     syscall_arguments_extracted: bool,
     runtime_entered: bool,
-    syscall_write_observed: bool,
-    syscall_exit_observed: bool,
 }
 
 #[allow(dead_code)]
@@ -1582,8 +1578,6 @@ impl UserInitProcess {
             syscall_dispatch_bound: false,
             syscall_arguments_extracted: false,
             runtime_entered: false,
-            syscall_write_observed: false,
-            syscall_exit_observed: false,
         }
     }
 
@@ -1669,14 +1663,6 @@ impl UserInitProcess {
 
     pub const fn runtime_entered(&self) -> bool {
         self.runtime_entered
-    }
-
-    pub const fn syscall_write_observed(&self) -> bool {
-        self.syscall_write_observed
-    }
-
-    pub const fn syscall_exit_observed(&self) -> bool {
-        self.syscall_exit_observed
     }
 
     pub fn setup(
@@ -1770,56 +1756,9 @@ impl UserInitProcess {
         Ok(())
     }
 
-    pub fn observe_syscall_write(&mut self, syscall_table: &SyscallTable) -> EventResult {
-        if self.lifecycle.state() != State::Online
-            || syscall_table.state() != State::Ready
-            || !self.syscall_context_bound
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-
-        self.syscall_write_observed = true;
-        USER_INIT_RUNTIME_WRITE_OBSERVED.store(1, Ordering::Release);
-        Ok(())
-    }
-
-    pub fn observe_syscall_exit(&mut self, syscall_table: &SyscallTable) -> EventResult {
-        if self.lifecycle.state() != State::Online
-            || syscall_table.state() != State::Ready
-            || !self.syscall_context_bound
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-
-        self.syscall_exit_observed = true;
-        USER_INIT_RUNTIME_EXIT_OBSERVED.store(1, Ordering::Release);
-        Ok(())
-    }
-
     pub fn refresh_runtime_observations(&mut self) {
         self.runtime_entered |= USER_INIT_RUNTIME_ENTERED.load(Ordering::Acquire) != 0;
-        self.syscall_write_observed |=
-            USER_INIT_RUNTIME_WRITE_OBSERVED.load(Ordering::Acquire) != 0;
-        self.syscall_exit_observed |= USER_INIT_RUNTIME_EXIT_OBSERVED.load(Ordering::Acquire) != 0;
     }
-}
-
-pub fn observe_user_init_syscall_write() {
-    USER_INIT_RUNTIME_WRITE_OBSERVED.store(1, Ordering::Release);
-}
-
-pub fn observe_user_init_syscall_exit() {
-    USER_INIT_RUNTIME_EXIT_OBSERVED.store(1, Ordering::Release);
 }
 
 pub struct UserBootPayload {
@@ -2092,7 +2031,10 @@ pub fn run_first_user_init(
         user_boot_panic("user init process enter failed\n");
     }
 
-    crate::trace::checkpoint(crate::trace::Checkpoint::UserModeEntry);
+    crate::checkpoint::dispatch(
+        crate::trace::Checkpoint::UserModeEntry,
+        crate::context::context_ref(),
+    );
     unsafe {
         crate::arch::riscv64::csr::enter_user_mode(
             address_space.satp_token(),

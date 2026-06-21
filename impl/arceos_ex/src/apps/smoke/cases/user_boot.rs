@@ -441,8 +441,8 @@ impl SmokeScenario for UserBootElfScenario {
             "user init runtime not entered by smoke",
             !process.user_entry_ready()
                 && !process.runtime_entered()
-                && !process.syscall_write_observed()
-                && !process.syscall_exit_observed(),
+                && !ctx.syscall_table.write_observed()
+                && !ctx.syscall_table.exit_observed(),
         );
     }
 

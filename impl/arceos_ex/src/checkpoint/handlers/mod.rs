@@ -86,7 +86,8 @@ pub enum HandlerScope {
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
-    checkpoint_handler_virtio_rng
+    checkpoint_handler_virtio_rng,
+    checkpoint_handler_user_boot
 ))]
 #[allow(dead_code)]
 pub enum HandlerRun {

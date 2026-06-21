@@ -20,12 +20,6 @@ enum UserInitPathRef {
     DefaultInit,
 }
 
-enum UserSyscallRef {
-    Write,
-    Exit,
-    ExitGroup,
-}
-
 predicate user_boot_payload_selected<T>(payload: T) -> bool;
 predicate user_boot_payload_candidates_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_default_init_path_bound<T>(payload: T) -> bool;
@@ -118,9 +112,9 @@ predicate syscall_exception_extracts_arguments<T>(exception: T) -> bool;
 predicate user_trap_return_ready() -> bool;
 predicate user_trap_return_switches_satp() -> bool;
 predicate user_trap_entry_uses_kernel_stack<T>(frame: T) -> bool;
-predicate user_syscall_write_observed<T>(table: T) -> bool;
-predicate user_syscall_exit_observed<T>(table: T) -> bool;
-predicate user_mode_entry_observed<T>(frame: T) -> bool;
+predicate syscall_table_write_observed<T>(table: T) -> bool;
+predicate syscall_table_exit_observed<T>(table: T) -> bool;
+predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
 
 predicate user_init_process_online<T>(process: T) -> bool;
 predicate user_init_process_reuses_kernel_init_task<T, K>(process: T, task: K) -> bool;
@@ -483,7 +477,7 @@ object SyscallTable: ResourceObject {
                 ensures {
                     syscall_write_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
-                    user_syscall_write_observed(self);
+                    syscall_table_write_observed(self);
                 }
             }
 
@@ -494,7 +488,7 @@ object SyscallTable: ResourceObject {
 
                 ensures {
                     syscall_exit_records_status(self);
-                    user_syscall_exit_observed(self);
+                    syscall_table_exit_observed(self);
                 }
             }
 
@@ -505,7 +499,7 @@ object SyscallTable: ResourceObject {
 
                 ensures {
                     syscall_exit_records_status(self);
-                    user_syscall_exit_observed(self);
+                    syscall_table_exit_observed(self);
                 }
             }
         }
@@ -620,41 +614,12 @@ object UserInitProcess: ResourceObject {
 
                 ensures {
                     user_init_process_user_entry_ready(self);
-                    user_mode_entry_observed(UserTrapFrame);
+                    user_init_process_enter_user_mode_observed(self, UserTrapFrame);
                     user_trap_return_switches_satp();
                     user_trap_entry_uses_kernel_stack(UserTrapFrame);
                 }
             }
 
-            on Action::ObserveSyscallWrite {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                    SyscallTable.state == State::Ready;
-                }
-
-                ensures {
-                    user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
-                    syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
-                    syscall_exception_extracts_arguments(SyscallException);
-                    user_syscall_write_observed(SyscallTable);
-                }
-            }
-
-            on Action::ObserveSyscallExit {
-                depends_on {
-                    UserInitProcess.state == State::Online;
-                    SyscallException.state == State::Online;
-                    SyscallTable.state == State::Ready;
-                }
-
-                ensures {
-                    user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
-                    syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
-                    syscall_exception_extracts_arguments(SyscallException);
-                    user_syscall_exit_observed(SyscallTable);
-                }
-            }
         }
     }
 }

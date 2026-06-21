@@ -65,6 +65,8 @@ pub struct SyscallTable {
     write_usercopy_ready: bool,
     write_routes_to_console: bool,
     exit_records_status: bool,
+    write_observed: AtomicU8,
+    exit_observed: AtomicU8,
 }
 
 impl SyscallTable {
@@ -78,6 +80,8 @@ impl SyscallTable {
             write_usercopy_ready: false,
             write_routes_to_console: false,
             exit_records_status: false,
+            write_observed: AtomicU8::new(0),
+            exit_observed: AtomicU8::new(0),
         }
     }
 
@@ -122,6 +126,16 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn write_observed(&self) -> bool {
+        self.write_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn exit_observed(&self) -> bool {
+        self.exit_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn setup(&mut self, syscall_exception_state: State) -> EventResult {
         if self.lifecycle.state() != State::Base || syscall_exception_state != State::Ready {
             return failed_condition(
@@ -154,7 +168,7 @@ impl SyscallTable {
             return;
         }
 
-        syscall_table_write(frame);
+        syscall_table_write(self, frame);
     }
 
     pub fn exit(&self, frame: &mut TrapFrame) -> ! {
@@ -165,7 +179,7 @@ impl SyscallTable {
             panic_dispatch("syscall exit table entry not ready\n");
         }
 
-        syscall_table_exit(frame)
+        syscall_table_exit(self, frame)
     }
 
     pub fn exit_group(&self, frame: &mut TrapFrame) -> ! {
@@ -176,7 +190,7 @@ impl SyscallTable {
             panic_dispatch("syscall exit_group table entry not ready\n");
         }
 
-        syscall_table_exit(frame)
+        syscall_table_exit(self, frame)
     }
 }
 
@@ -495,7 +509,7 @@ fn complete_unsupported_syscall(frame: &mut TrapFrame) {
     frame.sepc = frame.sepc.wrapping_add(4);
 }
 
-fn syscall_table_write(frame: &mut TrapFrame) {
+fn syscall_table_write(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let user_ptr = frame.reg(11);
     let len = frame.reg(12);
@@ -510,16 +524,16 @@ fn syscall_table_write(frame: &mut TrapFrame) {
         return;
     }
 
-    crate::objects::user_boot::observe_user_init_syscall_write();
-    crate::trace::checkpoint(Checkpoint::UserSyscallWrite);
+    table.write_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(Checkpoint::SyscallTableWrite, crate::context::context_ref());
     crate::objects::printk::write_bytes(&buffer[..len]);
     frame.set_reg(10, len);
     frame.sepc = frame.sepc.wrapping_add(4);
 }
 
-fn syscall_table_exit(frame: &mut TrapFrame) -> ! {
-    crate::objects::user_boot::observe_user_init_syscall_exit();
-    crate::trace::checkpoint(Checkpoint::UserSyscallExit);
+fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) -> ! {
+    table.exit_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(Checkpoint::SyscallTableExit, crate::context::context_ref());
     let status = frame.reg(10);
     crate::arch::riscv64::sbi::putstr("user exit status=");
     print_decimal(status);

@@ -4,13 +4,28 @@ use crate::{
         kunit::Sink,
     },
     context::Context,
-    objects::user_boot::{
-        ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame, USER_INIT_EXPECTED_MESSAGE,
+    objects::{
+        state::State,
+        user_boot::{
+            ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame,
+            USER_INIT_EXPECTED_MESSAGE,
+        },
     },
     trace::Checkpoint,
 };
 
-const SCOPE: &[Checkpoint] = &[Checkpoint::PayloadPhaseOnline];
+const SCOPE: &[Checkpoint] = &[
+    Checkpoint::PayloadPhaseOnline,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserModeEntry,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableWrite,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableExit,
+];
+#[cfg(app_user_boot)]
+pub const KUNIT_CASE_COUNT: usize = 9;
+#[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 6;
 
 pub const HANDLER: Handler = Handler {
@@ -21,15 +36,156 @@ pub const HANDLER: Handler = Handler {
 };
 
 fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
-    let _ = ctx;
     let total = super::kunit_case_count();
-    run_valid_fixture(checkpoint, sink, total);
-    run_bad_magic(checkpoint, sink, total);
-    run_wrong_machine(checkpoint, sink, total);
-    run_invalid_segment(checkpoint, sink, total);
-    run_bss_plan(checkpoint, sink, total);
-    run_trap_frame_rejects_unready_inputs(checkpoint, sink, total);
+    match checkpoint {
+        Checkpoint::PayloadPhaseOnline => {
+            run_valid_fixture(checkpoint, sink, total);
+            run_bad_magic(checkpoint, sink, total);
+            run_wrong_machine(checkpoint, sink, total);
+            run_invalid_segment(checkpoint, sink, total);
+            run_bss_plan(checkpoint, sink, total);
+            run_trap_frame_rejects_unready_inputs(checkpoint, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserModeEntry => {
+            run_user_mode_entry(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableWrite => {
+            run_syscall_table_write(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableExit => {
+            run_syscall_table_exit(checkpoint, ctx, sink, total);
+        }
+        _ => {}
+    }
     CheckpointOutcome::Continue
+}
+
+#[cfg(app_user_boot)]
+fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink, total: usize) {
+    let name = "user_boot.user_init_process.enter_user_mode";
+    sink.start_case(total, "", name, checkpoint);
+
+    let process = &ctx.user_init_process;
+    let valid = process.state() == State::Online
+        && process.reuses_kernel_init_task()
+        && process.pid1_preserved()
+        && process.exec_identity_handoff()
+        && process.address_space_bound()
+        && process.fs_struct_inherited()
+        && process.trap_frame_bound()
+        && process.syscall_context_bound()
+        && process.trap_return_bound()
+        && process.user_entry_ready()
+        && process.runtime_entered()
+        && ctx.user_address_space.state() == State::Online
+        && ctx.user_address_space.runtime_ready()
+        && ctx.user_trap_frame.state() == State::Ready
+        && ctx.user_trap_frame.sret_ready();
+
+    sink.diag_usize(
+        "user_init_runtime_entered",
+        process.runtime_entered() as usize,
+    );
+    sink.diag_usize("user_entry_ready", process.user_entry_ready() as usize);
+    sink.diag_usize(
+        "user_address_space_runtime_ready",
+        ctx.user_address_space.runtime_ready() as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "user mode entry facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_write(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.write";
+    sink.start_case(total, "", name, checkpoint);
+
+    let process = &ctx.user_init_process;
+    let table = &ctx.syscall_table;
+    let valid = process.state() == State::Online
+        && process.runtime_entered()
+        && process.syscall_context_bound()
+        && process.syscall_dispatch_bound()
+        && process.syscall_arguments_extracted()
+        && table.state() == State::Ready
+        && table.bound_to_exception()
+        && table.write_supported()
+        && table.write_usercopy_ready()
+        && table.write_routes_to_console()
+        && table.write_observed()
+        && ctx.exception_stream.syscall_state() == State::Online;
+
+    sink.diag_usize(
+        "syscall_table_write_observed",
+        table.write_observed() as usize,
+    );
+    sink.diag_usize(
+        "syscall_table_write_supported",
+        table.write_supported() as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "syscall table write facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_exit(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.exit";
+    sink.start_case(total, "", name, checkpoint);
+
+    let process = &ctx.user_init_process;
+    let table = &ctx.syscall_table;
+    let valid = process.state() == State::Online
+        && process.runtime_entered()
+        && process.syscall_context_bound()
+        && table.state() == State::Ready
+        && table.bound_to_exception()
+        && table.exit_supported()
+        && table.exit_group_supported()
+        && table.exit_records_status()
+        && table.write_observed()
+        && table.exit_observed()
+        && ctx.exception_stream.syscall_state() == State::Online;
+
+    sink.diag_usize(
+        "syscall_table_write_observed",
+        table.write_observed() as usize,
+    );
+    sink.diag_usize(
+        "syscall_table_exit_observed",
+        table.exit_observed() as usize,
+    );
+    sink.diag_usize(
+        "syscall_table_exit_supported",
+        table.exit_supported() as usize,
+    );
+    sink.diag_usize(
+        "syscall_table_exit_group_supported",
+        table.exit_group_supported() as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "syscall table exit facts invalid");
+    }
 }
 
 fn run_valid_fixture(checkpoint: Checkpoint, sink: &mut dyn Sink, total: usize) {
