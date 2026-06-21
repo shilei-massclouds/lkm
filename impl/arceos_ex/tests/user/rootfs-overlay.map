@@ -1,0 +1,2 @@
+# target      test        toolchain  link
+/sbin/init    init_hello

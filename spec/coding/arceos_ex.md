@@ -508,11 +508,14 @@ rootfs 中稳定存在的普通文件，至少覆盖一个跨 ext2 block 的 reg
 当前临时用户态 init fixture 必须通过构造期 overlay 注入 rootfs：这里的 overlay 不是运行期 overlayfs，而是在镜像构造时把
 用户态测试程序编译产物拷贝到 staging rootfs 的目标路径。目标路径存在时应替换目标路径本身，包括替换已有 symlink；不存在时创建。
 用户态测试程序源文件必须放在 `impl/arceos_ex/tests/user/` 下，并通过该目录自己的 Makefile 编译；内核主 Makefile
-只选择测试程序、工具链、链接方式、输出路径和 overlay 目标，不直接承载用户态编译细节。默认 overlay 把
-`tests/user/init_hello.S` 的产物放到 `/sbin/init`，但配置必须允许关闭 overlay，也必须允许后续用户态测试程序覆盖
-`/sbin/init` 或其它 rootfs 内可执行路径。用户态测试 Makefile 必须预留 GNU GCC / musl GCC 和 static / dynamic
-四种组合的选择入口；当前首轮默认仍可只使用 GNU static 汇编测试。`make disk` 默认只在磁盘文件不存在时创建；已有磁盘不得因为
-overlay 配置变化而被隐式重建，强制重建必须由 `make disk FORCE=1` 或 `make disk-clean` 后再 `make disk` 明确触发。
+只负责读取 overlay 映射文件、选择默认工具链/链接方式、指定输出目录和执行 rootfs 拷贝，不直接承载用户态编译细节。
+默认 `ROOTFS_OVERLAY_MAP` 为 `tests/user/rootfs-overlay.map`；`ROOTFS_OVERLAY=none` 时必须跳过映射文件，
+否则逐行读取该 map。每个非注释行声明 rootfs 目标路径、用户态测试程序名，以及可选的 toolchain/link mode；未写 toolchain
+或 link mode 时分别使用 `ROOTFS_OVERLAY_TOOLCHAIN` 和 `ROOTFS_OVERLAY_LINK`。默认 map 把 `tests/user/init_hello.S`
+的产物放到 `/sbin/init`，但配置必须允许后续用户态测试程序覆盖 `/sbin/init` 或其它 rootfs 内可执行路径。用户态测试
+Makefile 必须预留 GNU GCC / musl GCC 和 static / dynamic 四种组合的选择入口；当前首轮默认仍可只使用 GNU static
+汇编测试。`make disk` 默认只在磁盘文件不存在时创建；已有磁盘不得因为 overlay 配置变化而被隐式重建，强制重建必须由
+`make disk FORCE=1` 或 `make disk-clean` 后再 `make disk` 明确触发。
 Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem`：`Ext2Driver` 取代旧的
 `Ext2Type`，承载 Linux `file_system_type` 以及当前建模的 super/inode/file operation set；
 `Ext2Volume` 表示默认块设备上按 ext2 规范组织的 on-disk volume，由 `Preset` 经 `BufferHead` 检查确认，

@@ -54,16 +54,13 @@ TAR ?= tar
 MKFS_EXT2 ?= mkfs.ext2
 EXT2_MKFS_FEATURE_ARGS ?= -O ^dir_index
 EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
-ROOTFS_OVERLAY ?= user-init
-ROOTFS_OVERLAY_TEST ?= init_hello
-ROOTFS_OVERLAY_TEST_SRC ?=
-ROOTFS_OVERLAY_TARGET ?= /sbin/init
+ROOTFS_OVERLAY ?= default
+ROOTFS_OVERLAY_MAP ?= tests/user/rootfs-overlay.map
+ROOTFS_OVERLAY_OUTPUT_DIR ?= build/rootfs-user-tests
 ROOTFS_OVERLAY_TOOLCHAIN ?= gnu
 ROOTFS_OVERLAY_LINK ?= static
-ROOTFS_OVERLAY_OUTPUT ?= build/rootfs-user-tests/$(ROOTFS_OVERLAY_TEST)-$(ROOTFS_OVERLAY_TOOLCHAIN)-$(ROOTFS_OVERLAY_LINK)
 ROOTFS_OVERLAY_GNU_CC ?= riscv64-linux-gnu-gcc
 ROOTFS_OVERLAY_MUSL_CC ?= riscv64-linux-musl-gcc
-ROOTFS_OVERLAY_TEST_SRC_EFFECTIVE := $(if $(strip $(ROOTFS_OVERLAY_TEST_SRC)),$(ROOTFS_OVERLAY_TEST_SRC),$(ROOTFS_OVERLAY_TEST).S)
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
@@ -130,14 +127,29 @@ $(ROOTFS_TARBALL):
 	mv $@.tmp $@
 
 rootfs-overlay:
-	$(MAKE) -B -C tests/user build \
-		USER_TEST="$(ROOTFS_OVERLAY_TEST)" \
-		USER_TEST_OUT="$(abspath $(ROOTFS_OVERLAY_OUTPUT))" \
-		USER_TEST_TOOLCHAIN="$(ROOTFS_OVERLAY_TOOLCHAIN)" \
-		USER_TEST_LINK="$(ROOTFS_OVERLAY_LINK)" \
-		GNU_CC="$(ROOTFS_OVERLAY_GNU_CC)" \
-		MUSL_CC="$(ROOTFS_OVERLAY_MUSL_CC)" \
-		USER_TEST_SRC="$(ROOTFS_OVERLAY_TEST_SRC_EFFECTIVE)"
+	case "$(ROOTFS_OVERLAY)" in none) exit 0;; esac; \
+	test -f "$(ROOTFS_OVERLAY_MAP)"; \
+	while read -r target test toolchain link extra; do \
+		case "$$target" in ""|\#*) continue;; esac; \
+		if [ -n "$$extra" ]; then echo "too many fields in $(ROOTFS_OVERLAY_MAP): $$target $$test $$toolchain $$link $$extra"; exit 1; fi; \
+		case "$$target" in /*) ;; *) echo "overlay target must be absolute: $$target"; exit 1;; esac; \
+		if [ -z "$$test" ]; then echo "overlay test missing for $$target"; exit 1; fi; \
+		toolchain="$${toolchain:-$(ROOTFS_OVERLAY_TOOLCHAIN)}"; \
+		link="$${link:-$(ROOTFS_OVERLAY_LINK)}"; \
+		output="$(abspath $(ROOTFS_OVERLAY_OUTPUT_DIR))/$$test-$$toolchain-$$link"; \
+		$(MAKE) -B -C tests/user build \
+			USER_TEST="$$test" \
+			USER_TEST_OUT="$$output" \
+			USER_TEST_TOOLCHAIN="$$toolchain" \
+			USER_TEST_LINK="$$link" \
+			GNU_CC="$(ROOTFS_OVERLAY_GNU_CC)" \
+			MUSL_CC="$(ROOTFS_OVERLAY_MUSL_CC)" \
+			USER_TEST_SRC="$$test.S"; \
+		mkdir -p "$(ROOTFS_STAGING_DIR)$$(dirname "$$target")"; \
+		rm -f "$(ROOTFS_STAGING_DIR)$$target"; \
+		cp "$$output" "$(ROOTFS_STAGING_DIR)$$target"; \
+		chmod 0755 "$(ROOTFS_STAGING_DIR)$$target"; \
+	done < "$(ROOTFS_OVERLAY_MAP)"
 
 $(VIRTIO_BLK_IMAGE):
 	mkdir -p $(dir $@)
@@ -147,12 +159,7 @@ ifeq ($(FS_TYPE),ext2)
 	mkdir -p $(ROOTFS_STAGING_DIR)
 	$(TAR) --no-same-owner -xzf $(ROOTFS_TARBALL) -C $(ROOTFS_STAGING_DIR)
 ifneq ($(ROOTFS_OVERLAY),none)
-	case "$(ROOTFS_OVERLAY_TARGET)" in /*) ;; *) echo "ROOTFS_OVERLAY_TARGET must be an absolute rootfs path"; exit 1;; esac
 	$(MAKE) rootfs-overlay
-	mkdir -p $(dir $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET))
-	rm -f $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET)
-	cp $(ROOTFS_OVERLAY_OUTPUT) $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET)
-	chmod 0755 $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET)
 endif
 	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $@
 	$(MKFS_EXT2) -q -F $(EXT2_MKFS_FEATURE_ARGS) $(EXT2_MKFS_BLOCK_ARGS) -d $(ROOTFS_STAGING_DIR) $@

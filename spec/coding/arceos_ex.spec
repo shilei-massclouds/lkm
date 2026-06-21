@@ -158,6 +158,7 @@ predicate arceos_ex_must_ext2_read_path_support_multi_direct_blocks() -> bool;
 predicate arceos_ex_must_ext2_smoke_use_stable_alpine_rootfs_files() -> bool;
 predicate arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build() -> bool;
 predicate arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides() -> bool;
+predicate arceos_ex_must_rootfs_overlay_read_default_map_unless_disabled() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode() -> bool;
@@ -1517,20 +1518,25 @@ type ArceosExBlockIoCodingMust {
          * operation MUST copy a built fixture output into the staged rootfs
          * target path; if the target exists, including a symlink, the target
          * path itself must be replaced. The default temporary target is
-         * /sbin/init, while the mechanism must also allow no overlay and
-         * future user-test/target overrides. User-mode overlay test programs
-         * MUST live under impl/arceos_ex/tests/user/ and MUST be built through
-         * a dedicated user-test Makefile, so the kernel Makefile does not own
-         * user-mode compiler details. That Makefile MUST expose toolchain and
-         * link-mode selection for GNU vs musl GCC and static vs dynamic
-         * linking, even if the current default remains the minimal GNU static
-         * assembly test. make disk must only create the disk image when it is
-         * missing by default; overlay configuration changes must not silently
-         * rebuild an existing disk image. Explicit rebuild remains a command
-         * decision through FORCE=1 or disk-clean.
+         * /sbin/init. ROOTFS_OVERLAY=none MUST skip overlay processing;
+         * otherwise the kernel Makefile MUST read ROOTFS_OVERLAY_MAP, whose
+         * default is impl/arceos_ex/tests/user/rootfs-overlay.map. Each
+         * non-comment map row declares a rootfs target path, user test name,
+         * and optional toolchain/link mode; omitted toolchain/link fields use
+         * ROOTFS_OVERLAY_TOOLCHAIN and ROOTFS_OVERLAY_LINK defaults. User-mode
+         * overlay test programs MUST live under impl/arceos_ex/tests/user/ and
+         * MUST be built through a dedicated user-test Makefile, so the kernel
+         * Makefile does not own user-mode compiler details. That Makefile MUST
+         * expose toolchain and link-mode selection for GNU vs musl GCC and
+         * static vs dynamic linking, even if the current default remains the
+         * minimal GNU static assembly test. make disk must only create the disk
+         * image when it is missing by default; overlay configuration changes
+         * must not silently rebuild an existing disk image. Explicit rebuild
+         * remains a command decision through FORCE=1 or disk-clean.
          */
         arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
         arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();
+        arceos_ex_must_rootfs_overlay_read_default_map_unless_disabled();
         arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user();
         arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile();
         arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode();
