@@ -32,6 +32,7 @@ predicate user_boot_payload_uses_current_fs_struct<T, F>(payload: T, fs: F) -> b
 predicate user_boot_payload_reads_init_from_vfs<T, V>(payload: T, vfs: V) -> bool;
 predicate user_boot_payload_no_partition_dependency<T>(payload: T) -> bool;
 predicate user_boot_payload_partition_objects_deferred<T>(payload: T) -> bool;
+predicate user_boot_payload_driven_by_kernel_init_task<T, K>(payload: T, task: K) -> bool;
 predicate user_boot_payload_try_candidate_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_selected_path_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) -> bool;
@@ -62,6 +63,9 @@ predicate elf_object_load_merged_into_setup<T>(elf: T) -> bool;
 predicate elf_object_user_entry_ready<T>(elf: T) -> bool;
 
 predicate user_address_space_allocated<T>(space: T) -> bool;
+predicate user_address_space_first_instance<T>(space: T) -> bool;
+predicate user_address_space_bound_to_kernel_init_task<T, K>(space: T, task: K) -> bool;
+predicate kernel_init_task_first_user_address_space_bound<K, T>(task: K, space: T) -> bool;
 predicate user_address_space_low_half_private<T>(space: T) -> bool;
 predicate user_address_space_high_half_shares_swapper<T, S>(space: T, swapper: S) -> bool;
 predicate user_address_space_kernel_pages_u_disabled<T>(space: T) -> bool;
@@ -72,12 +76,18 @@ predicate user_address_space_elf_load_plan_consumed<T, E>(space: T, elf: E) -> b
 predicate user_address_space_segment_mappings_bound<T>(space: T) -> bool;
 predicate user_address_space_entry_mapping_executable<T>(space: T) -> bool;
 predicate user_address_space_bss_zero_plan_consumed<T, E>(space: T, elf: E) -> bool;
+predicate user_address_space_backing_pages_allocated<T>(space: T) -> bool;
+predicate user_address_space_elf_file_bytes_copied<T, E>(space: T, elf: E) -> bool;
+predicate user_address_space_bss_bytes_zeroed<T, E>(space: T, elf: E) -> bool;
+predicate user_address_space_page_table_view_ready<T>(space: T) -> bool;
 predicate user_address_space_runtime_ready<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
 
 predicate user_stack_allocated<T>(stack: T) -> bool;
 predicate user_stack_fixed_size_bound<T>(stack: T) -> bool;
 predicate user_stack_mapped_into_address_space<T, A>(stack: T, space: A) -> bool;
+predicate user_stack_backing_pages_allocated<T>(stack: T) -> bool;
+predicate user_stack_zeroed<T>(stack: T) -> bool;
 predicate user_stack_initial_sp_bound<T>(stack: T) -> bool;
 predicate user_stack_minimal_arg_env_bound<T>(stack: T) -> bool;
 
@@ -86,6 +96,8 @@ predicate user_trap_frame_entry_bound<T, E>(frame: T, elf: E) -> bool;
 predicate user_trap_frame_sp_bound<T, S>(frame: T, stack: S) -> bool;
 predicate user_trap_frame_sstatus_user_mode<T>(frame: T) -> bool;
 predicate user_trap_frame_sret_ready<T>(frame: T) -> bool;
+predicate user_trap_frame_address_space_bound<T, A>(frame: T, space: A) -> bool;
+predicate user_trap_frame_prepared_but_not_entered<T>(frame: T) -> bool;
 
 predicate syscall_dispatcher_ready<T>(dispatcher: T) -> bool;
 predicate syscall_dispatcher_bound_to_exception<T, E>(dispatcher: T, exception: E) -> bool;
@@ -115,10 +127,14 @@ object UserAddressSpace: ResourceObject {
                     SwapperVm.state == State::Online;
                     PageAllocator.state == State::Ready;
                     KernelGlobalAllocator.state == State::Ready;
+                    KernelInitTask.state == State::Online;
                 }
 
                 ensures {
                     user_address_space_allocated(self);
+                    user_address_space_first_instance(self);
+                    user_address_space_bound_to_kernel_init_task(self, KernelInitTask);
+                    kernel_init_task_first_user_address_space_bound(KernelInitTask, self);
                     user_address_space_low_half_private(self);
                     user_address_space_high_half_shares_swapper(self, SwapperVm);
                     user_address_space_kernel_pages_u_disabled(self);
@@ -131,6 +147,9 @@ object UserAddressSpace: ResourceObject {
     state State::Prepared {
         invariant {
             user_address_space_allocated(self);
+            user_address_space_first_instance(self);
+            user_address_space_bound_to_kernel_init_task(self, KernelInitTask);
+            kernel_init_task_first_user_address_space_bound(KernelInitTask, self);
             user_address_space_low_half_private(self);
             user_address_space_high_half_shares_swapper(self, SwapperVm);
             user_address_space_kernel_pages_u_disabled(self);
@@ -150,6 +169,10 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_segment_mappings_bound(self);
                     user_address_space_entry_mapping_executable(self);
                     user_address_space_bss_zero_plan_consumed(self, ElfObject);
+                    user_address_space_backing_pages_allocated(self);
+                    user_address_space_elf_file_bytes_copied(self, ElfObject);
+                    user_address_space_bss_bytes_zeroed(self, ElfObject);
+                    user_address_space_page_table_view_ready(self);
                     user_address_space_elf_segments_mapped(self, ElfObject);
                     user_address_space_stack_mapped(self, UserStack);
                     elf_object_mapped_to_user_address_space(ElfObject, self);
@@ -162,6 +185,9 @@ object UserAddressSpace: ResourceObject {
     state State::Ready {
         invariant {
             user_address_space_allocated(self);
+            user_address_space_first_instance(self);
+            user_address_space_bound_to_kernel_init_task(self, KernelInitTask);
+            kernel_init_task_first_user_address_space_bound(KernelInitTask, self);
             user_address_space_low_half_private(self);
             user_address_space_high_half_shares_swapper(self, SwapperVm);
             user_address_space_kernel_pages_u_disabled(self);
@@ -170,6 +196,10 @@ object UserAddressSpace: ResourceObject {
             user_address_space_segment_mappings_bound(self);
             user_address_space_entry_mapping_executable(self);
             user_address_space_bss_zero_plan_consumed(self, ElfObject);
+            user_address_space_backing_pages_allocated(self);
+            user_address_space_elf_file_bytes_copied(self, ElfObject);
+            user_address_space_bss_bytes_zeroed(self, ElfObject);
+            user_address_space_page_table_view_ready(self);
             user_address_space_elf_segments_mapped(self, ElfObject);
             user_address_space_stack_mapped(self, UserStack);
             elf_object_mapped_to_user_address_space(ElfObject, self);
@@ -192,6 +222,9 @@ object UserAddressSpace: ResourceObject {
     state State::Online {
         invariant {
             user_address_space_runtime_ready(self);
+            user_address_space_first_instance(self);
+            user_address_space_bound_to_kernel_init_task(self, KernelInitTask);
+            kernel_init_task_first_user_address_space_bound(KernelInitTask, self);
         }
     }
 }
@@ -211,6 +244,8 @@ object UserStack: ResourceObject {
                     user_stack_allocated(self);
                     user_stack_fixed_size_bound(self);
                     user_stack_mapped_into_address_space(self, UserAddressSpace);
+                    user_stack_backing_pages_allocated(self);
+                    user_stack_zeroed(self);
                     user_stack_initial_sp_bound(self);
                     user_stack_minimal_arg_env_bound(self);
                 }
@@ -223,6 +258,8 @@ object UserStack: ResourceObject {
             user_stack_allocated(self);
             user_stack_fixed_size_bound(self);
             user_stack_mapped_into_address_space(self, UserAddressSpace);
+            user_stack_backing_pages_allocated(self);
+            user_stack_zeroed(self);
             user_stack_initial_sp_bound(self);
             user_stack_minimal_arg_env_bound(self);
         }
@@ -330,8 +367,10 @@ object UserTrapFrame: ResourceObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
+                    UserAddressSpace.state == State::Ready;
                     ElfObject.state == State::Ready;
                     UserStack.state == State::Ready;
+                    KernelInitTask.state == State::Online;
                 }
 
                 ensures {
@@ -340,6 +379,8 @@ object UserTrapFrame: ResourceObject {
                     user_trap_frame_sp_bound(self, UserStack);
                     user_trap_frame_sstatus_user_mode(self);
                     user_trap_frame_sret_ready(self);
+                    user_trap_frame_address_space_bound(self, UserAddressSpace);
+                    user_trap_frame_prepared_but_not_entered(self);
                     user_trap_return_ready();
                 }
             }
@@ -353,6 +394,8 @@ object UserTrapFrame: ResourceObject {
             user_trap_frame_sp_bound(self, UserStack);
             user_trap_frame_sstatus_user_mode(self);
             user_trap_frame_sret_ready(self);
+            user_trap_frame_address_space_bound(self, UserAddressSpace);
+            user_trap_frame_prepared_but_not_entered(self);
             user_trap_return_ready();
         }
     }
@@ -498,6 +541,7 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_uses_current_fs_struct(self, FsStruct);
                     user_boot_payload_no_partition_dependency(self);
                     user_boot_payload_partition_objects_deferred(self);
+                    user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
                     user_boot_payload_try_candidate_bound(self);
                 }
             }
@@ -512,6 +556,7 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_uses_current_fs_struct(self, FsStruct);
             user_boot_payload_no_partition_dependency(self);
             user_boot_payload_partition_objects_deferred(self);
+            user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
             user_boot_payload_try_candidate_bound(self);
         }
 
@@ -584,6 +629,7 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_selected(self);
             user_boot_payload_reads_init_from_vfs(self, VfsCore);
             user_boot_payload_selected_path_bound(self);
+            user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
             user_boot_payload_enters_user_mode(self);
             user_boot_payload_no_return_handoff(self);
         }

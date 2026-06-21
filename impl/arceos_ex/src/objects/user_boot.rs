@@ -1,5 +1,6 @@
 use super::{
-    mm_core::{KernelGlobalAllocator, PageAllocator},
+    mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
+    rest_init::KernelInitTask,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     swapper_vm::SwapperVm,
 };
@@ -24,6 +25,8 @@ const ELF_PF_R: u32 = 4;
 const ELF64_PHDR_SIZE: usize = 56;
 const MAX_LOAD_SEGMENTS: usize = 8;
 const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS + 1;
+const MAX_MAPPING_BACKING_PAGES: usize = 32;
+const MAX_STACK_PAGES: usize = USER_STACK_SIZE / USER_PAGE_SIZE;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ElfError {
@@ -42,8 +45,11 @@ pub enum ElfError {
     EntryOutsideExecutableSegment,
     MissingExpectedContent,
     TooManyMappings,
+    TooManyMappingPages,
     MissingExecutableEntryMapping,
     InvalidStack,
+    BackingAllocationFailed,
+    UserCopyOutOfRange,
 }
 
 #[derive(Clone, Copy)]
@@ -130,6 +136,7 @@ pub struct UserMapping {
     kind: UserMappingKind,
     vaddr: usize,
     memsz: usize,
+    page_offset: usize,
     file_offset: usize,
     filesz: usize,
     readable: bool,
@@ -137,6 +144,11 @@ pub struct UserMapping {
     executable: bool,
     user_accessible: bool,
     bss_zero_bytes: usize,
+    backing_pages: [Option<PageRef>; MAX_MAPPING_BACKING_PAGES],
+    backing_page_count: usize,
+    file_bytes_copied: usize,
+    bss_bytes_zeroed: usize,
+    page_table_entry_bound: bool,
 }
 
 impl UserMapping {
@@ -145,6 +157,7 @@ impl UserMapping {
             kind: UserMappingKind::Empty,
             vaddr: 0,
             memsz: 0,
+            page_offset: 0,
             file_offset: 0,
             filesz: 0,
             readable: false,
@@ -152,14 +165,20 @@ impl UserMapping {
             executable: false,
             user_accessible: false,
             bss_zero_bytes: 0,
+            backing_pages: [None; MAX_MAPPING_BACKING_PAGES],
+            backing_page_count: 0,
+            file_bytes_copied: 0,
+            bss_bytes_zeroed: 0,
+            page_table_entry_bound: false,
         }
     }
 
-    const fn from_segment(segment: ElfLoadSegment) -> Self {
+    fn from_segment(segment: ElfLoadSegment) -> Self {
         Self {
             kind: UserMappingKind::ElfSegment,
             vaddr: segment.vaddr,
             memsz: segment.memsz,
+            page_offset: segment.vaddr % USER_PAGE_SIZE,
             file_offset: segment.offset,
             filesz: segment.filesz,
             readable: segment.readable(),
@@ -167,14 +186,20 @@ impl UserMapping {
             executable: segment.executable(),
             user_accessible: true,
             bss_zero_bytes: segment.memsz - segment.filesz,
+            backing_pages: [None; MAX_MAPPING_BACKING_PAGES],
+            backing_page_count: 0,
+            file_bytes_copied: 0,
+            bss_bytes_zeroed: 0,
+            page_table_entry_bound: false,
         }
     }
 
-    const fn from_stack(stack: &UserStack) -> Self {
-        Self {
+    fn from_stack(stack: &UserStack) -> Self {
+        let mut mapping = Self {
             kind: UserMappingKind::Stack,
             vaddr: stack.base,
             memsz: stack.size,
+            page_offset: 0,
             file_offset: 0,
             filesz: 0,
             readable: true,
@@ -182,7 +207,19 @@ impl UserMapping {
             executable: false,
             user_accessible: true,
             bss_zero_bytes: stack.size,
+            backing_pages: [None; MAX_MAPPING_BACKING_PAGES],
+            backing_page_count: 0,
+            file_bytes_copied: 0,
+            bss_bytes_zeroed: stack.size,
+            page_table_entry_bound: stack.backing_pages_allocated,
+        };
+        let mut index = 0usize;
+        while index < stack.backing_page_count && index < MAX_MAPPING_BACKING_PAGES {
+            mapping.backing_pages[index] = stack.backing_pages[index];
+            index += 1;
         }
+        mapping.backing_page_count = stack.backing_page_count;
+        mapping
     }
 
     pub const fn kind(&self) -> UserMappingKind {
@@ -195,6 +232,10 @@ impl UserMapping {
 
     pub const fn memsz(&self) -> usize {
         self.memsz
+    }
+
+    pub const fn page_offset(&self) -> usize {
+        self.page_offset
     }
 
     pub const fn file_offset(&self) -> usize {
@@ -225,6 +266,30 @@ impl UserMapping {
         self.bss_zero_bytes
     }
 
+    pub const fn backing_page_count(&self) -> usize {
+        self.backing_page_count
+    }
+
+    pub const fn backing_page(&self, index: usize) -> Option<PageRef> {
+        if index < self.backing_page_count {
+            self.backing_pages[index]
+        } else {
+            None
+        }
+    }
+
+    pub const fn file_bytes_copied(&self) -> usize {
+        self.file_bytes_copied
+    }
+
+    pub const fn bss_bytes_zeroed(&self) -> usize {
+        self.bss_bytes_zeroed
+    }
+
+    pub const fn page_table_entry_bound(&self) -> bool {
+        self.page_table_entry_bound
+    }
+
     pub const fn end_vaddr(&self) -> usize {
         self.vaddr + self.memsz
     }
@@ -239,9 +304,13 @@ pub struct UserStack {
     base: usize,
     top: usize,
     size: usize,
+    backing_pages: [Option<PageRef>; MAX_STACK_PAGES],
+    backing_page_count: usize,
     allocated: bool,
     fixed_size_bound: bool,
     mapped_into_address_space: bool,
+    backing_pages_allocated: bool,
+    zeroed: bool,
     initial_sp_bound: bool,
     minimal_arg_env_bound: bool,
 }
@@ -254,9 +323,13 @@ impl UserStack {
             base: 0,
             top: 0,
             size: 0,
+            backing_pages: [None; MAX_STACK_PAGES],
+            backing_page_count: 0,
             allocated: false,
             fixed_size_bound: false,
             mapped_into_address_space: false,
+            backing_pages_allocated: false,
+            zeroed: false,
             initial_sp_bound: false,
             minimal_arg_env_bound: false,
         }
@@ -286,12 +359,32 @@ impl UserStack {
         self.allocated
     }
 
+    pub const fn backing_page_count(&self) -> usize {
+        self.backing_page_count
+    }
+
+    pub const fn backing_page(&self, index: usize) -> Option<PageRef> {
+        if index < self.backing_page_count {
+            self.backing_pages[index]
+        } else {
+            None
+        }
+    }
+
     pub const fn fixed_size_bound(&self) -> bool {
         self.fixed_size_bound
     }
 
     pub const fn mapped_into_address_space(&self) -> bool {
         self.mapped_into_address_space
+    }
+
+    pub const fn backing_pages_allocated(&self) -> bool {
+        self.backing_pages_allocated
+    }
+
+    pub const fn zeroed(&self) -> bool {
+        self.zeroed
     }
 
     pub const fn initial_sp_bound(&self) -> bool {
@@ -305,7 +398,8 @@ impl UserStack {
     pub fn setup(
         &mut self,
         address_space: &UserAddressSpace,
-        page_allocator: &PageAllocator,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || address_space.state() != State::Prepared
@@ -322,9 +416,44 @@ impl UserStack {
         self.size = USER_STACK_SIZE;
         self.top = USER_STACK_TOP;
         self.base = USER_STACK_TOP - USER_STACK_SIZE;
+        self.backing_pages = [None; MAX_STACK_PAGES];
+        self.backing_page_count = 0;
+        let mut index = 0usize;
+        while index < MAX_STACK_PAGES {
+            let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)
+            else {
+                while self.backing_page_count > 0 {
+                    self.backing_page_count -= 1;
+                    if let Some(allocated) = self.backing_pages[self.backing_page_count] {
+                        let _ = page_allocator.free_pages(allocated, 0, page_metadata_map);
+                    }
+                }
+                return failed_condition(
+                    LifecycleEvent::Setup,
+                    self.lifecycle.state(),
+                    State::Base,
+                    State::Ready,
+                );
+            };
+            let Some(linear) = page_metadata_map.page_address(page) else {
+                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+                return failed_condition(
+                    LifecycleEvent::Setup,
+                    self.lifecycle.state(),
+                    State::Base,
+                    State::Ready,
+                );
+            };
+            unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
+            self.backing_pages[index] = Some(page);
+            self.backing_page_count += 1;
+            index += 1;
+        }
         self.allocated = true;
         self.fixed_size_bound = true;
         self.mapped_into_address_space = true;
+        self.backing_pages_allocated = true;
+        self.zeroed = true;
         self.initial_sp_bound = true;
         self.minimal_arg_env_bound = true;
         self.lifecycle
@@ -335,6 +464,8 @@ impl UserStack {
 pub struct UserAddressSpace {
     lifecycle: Lifecycle,
     allocated: bool,
+    first_instance: bool,
+    bound_to_kernel_init_task: bool,
     low_half_private: bool,
     high_half_shares_swapper: bool,
     kernel_pages_u_disabled: bool,
@@ -343,6 +474,10 @@ pub struct UserAddressSpace {
     segment_mappings_bound: bool,
     entry_mapping_executable: bool,
     bss_zero_plan_consumed: bool,
+    backing_pages_allocated: bool,
+    elf_file_bytes_copied: bool,
+    bss_bytes_zeroed: bool,
+    page_table_view_ready: bool,
     elf_segments_mapped: bool,
     stack_mapped: bool,
     elf_mapped: bool,
@@ -360,6 +495,8 @@ impl UserAddressSpace {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             allocated: false,
+            first_instance: false,
+            bound_to_kernel_init_task: false,
             low_half_private: false,
             high_half_shares_swapper: false,
             kernel_pages_u_disabled: false,
@@ -368,6 +505,10 @@ impl UserAddressSpace {
             segment_mappings_bound: false,
             entry_mapping_executable: false,
             bss_zero_plan_consumed: false,
+            backing_pages_allocated: false,
+            elf_file_bytes_copied: false,
+            bss_bytes_zeroed: false,
+            page_table_view_ready: false,
             elf_segments_mapped: false,
             stack_mapped: false,
             elf_mapped: false,
@@ -386,6 +527,14 @@ impl UserAddressSpace {
 
     pub const fn allocated(&self) -> bool {
         self.allocated
+    }
+
+    pub const fn first_instance(&self) -> bool {
+        self.first_instance
+    }
+
+    pub const fn bound_to_kernel_init_task(&self) -> bool {
+        self.bound_to_kernel_init_task
     }
 
     pub const fn low_half_private(&self) -> bool {
@@ -418,6 +567,22 @@ impl UserAddressSpace {
 
     pub const fn bss_zero_plan_consumed(&self) -> bool {
         self.bss_zero_plan_consumed
+    }
+
+    pub const fn backing_pages_allocated(&self) -> bool {
+        self.backing_pages_allocated
+    }
+
+    pub const fn elf_file_bytes_copied(&self) -> bool {
+        self.elf_file_bytes_copied
+    }
+
+    pub const fn bss_bytes_zeroed(&self) -> bool {
+        self.bss_bytes_zeroed
+    }
+
+    pub const fn page_table_view_ready(&self) -> bool {
+        self.page_table_view_ready
     }
 
     pub const fn elf_segments_mapped(&self) -> bool {
@@ -469,11 +634,13 @@ impl UserAddressSpace {
         swapper_vm: &SwapperVm,
         page_allocator: &PageAllocator,
         global_allocator: &KernelGlobalAllocator,
+        kernel_init_task: &KernelInitTask,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || swapper_vm.state() != State::Online
             || page_allocator.state() != State::Ready
             || global_allocator.state() != State::Ready
+            || kernel_init_task.state() != State::Online
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -484,6 +651,8 @@ impl UserAddressSpace {
         }
 
         self.allocated = true;
+        self.first_instance = true;
+        self.bound_to_kernel_init_task = true;
         self.low_half_private = true;
         self.high_half_shares_swapper = true;
         self.kernel_pages_u_disabled = true;
@@ -491,7 +660,14 @@ impl UserAddressSpace {
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    pub fn setup(&mut self, elf: &ElfObject, stack: &UserStack) -> Result<(), ElfError> {
+    pub fn setup(
+        &mut self,
+        elf: &ElfObject,
+        stack: &UserStack,
+        image: &[u8],
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Result<(), ElfError> {
         if self.lifecycle.state() != State::Prepared
             || elf.state() != State::Ready
             || stack.state() != State::Ready
@@ -514,7 +690,7 @@ impl UserAddressSpace {
             let Some(segment) = elf.load_segment(index) else {
                 return Err(ElfError::InvalidProgramHeader);
             };
-            let mapping = UserMapping::from_segment(segment);
+            let mut mapping = UserMapping::from_segment(segment);
             if mapping.memsz() == 0
                 || !mapping.user_accessible()
                 || mapping
@@ -524,6 +700,19 @@ impl UserAddressSpace {
                 || mapping.vaddr().checked_add(mapping.memsz()).is_none()
             {
                 return Err(ElfError::InvalidProgramHeader);
+            }
+            if let Err(error) =
+                materialize_mapping(&mut mapping, image, page_allocator, page_metadata_map)
+            {
+                release_mappings(
+                    &mut self.mappings,
+                    self.mapping_count,
+                    page_allocator,
+                    page_metadata_map,
+                );
+                self.mapping_count = 0;
+                self.segment_mapping_count = 0;
+                return Err(error);
             }
             self.mappings[self.mapping_count] = mapping;
             self.mapping_count += 1;
@@ -547,6 +736,13 @@ impl UserAddressSpace {
         self.segment_mappings_bound = self.segment_mapping_count == elf.load_segment_count();
         self.entry_mapping_executable = true;
         self.bss_zero_plan_consumed = elf.bss_zero_plan_bound();
+        self.backing_pages_allocated =
+            mappings_have_backing_pages(&self.mappings, self.mapping_count);
+        self.elf_file_bytes_copied =
+            mapping_file_bytes_match(&self.mappings, self.segment_mapping_count);
+        self.bss_bytes_zeroed = mapping_bss_bytes_match(&self.mappings, self.segment_mapping_count);
+        self.page_table_view_ready =
+            mappings_have_page_table_entries(&self.mappings, self.mapping_count);
         self.elf_segments_mapped = true;
         self.stack_mapped = true;
         self.elf_mapped = true;
@@ -554,6 +750,122 @@ impl UserAddressSpace {
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
             .map_err(|_| ElfError::InvalidState)
+    }
+}
+
+pub const SSTATUS_SPP_USER_CLEAR: usize = 0;
+pub const SSTATUS_SPIE_SET: usize = 1 << 5;
+
+pub struct UserTrapFrame {
+    lifecycle: Lifecycle,
+    entry: usize,
+    sp: usize,
+    sstatus: usize,
+    allocated: bool,
+    entry_bound: bool,
+    sp_bound: bool,
+    sstatus_user_mode: bool,
+    sret_ready: bool,
+    address_space_bound: bool,
+    prepared_but_not_entered: bool,
+}
+
+#[allow(dead_code)]
+impl UserTrapFrame {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            entry: 0,
+            sp: 0,
+            sstatus: 0,
+            allocated: false,
+            entry_bound: false,
+            sp_bound: false,
+            sstatus_user_mode: false,
+            sret_ready: false,
+            address_space_bound: false,
+            prepared_but_not_entered: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn entry(&self) -> usize {
+        self.entry
+    }
+
+    pub const fn sp(&self) -> usize {
+        self.sp
+    }
+
+    pub const fn sstatus(&self) -> usize {
+        self.sstatus
+    }
+
+    pub const fn allocated(&self) -> bool {
+        self.allocated
+    }
+
+    pub const fn entry_bound(&self) -> bool {
+        self.entry_bound
+    }
+
+    pub const fn sp_bound(&self) -> bool {
+        self.sp_bound
+    }
+
+    pub const fn sstatus_user_mode(&self) -> bool {
+        self.sstatus_user_mode
+    }
+
+    pub const fn sret_ready(&self) -> bool {
+        self.sret_ready
+    }
+
+    pub const fn address_space_bound(&self) -> bool {
+        self.address_space_bound
+    }
+
+    pub const fn prepared_but_not_entered(&self) -> bool {
+        self.prepared_but_not_entered
+    }
+
+    pub fn setup(
+        &mut self,
+        address_space: &UserAddressSpace,
+        elf: &ElfObject,
+        stack: &UserStack,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || address_space.state() != State::Ready
+            || elf.state() != State::Ready
+            || stack.state() != State::Ready
+            || !address_space.page_table_view_ready()
+            || !address_space.entry_mapping_executable()
+            || !address_space.bound_to_kernel_init_task()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.entry = elf.entry();
+        self.sp = stack.initial_sp();
+        self.sstatus = SSTATUS_SPIE_SET | SSTATUS_SPP_USER_CLEAR;
+        self.allocated = true;
+        self.entry_bound = true;
+        self.sp_bound = true;
+        self.sstatus_user_mode = true;
+        self.sret_ready = true;
+        self.address_space_bound = true;
+        self.prepared_but_not_entered = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 }
 
@@ -788,6 +1100,7 @@ pub struct UserBootPayload {
     uses_current_fs_struct: bool,
     no_partition_dependency: bool,
     partition_objects_deferred: bool,
+    driven_by_kernel_init_task: bool,
     try_candidate_bound: bool,
     selected_path_bound: bool,
     reads_init_from_vfs: bool,
@@ -804,6 +1117,7 @@ impl UserBootPayload {
             uses_current_fs_struct: false,
             no_partition_dependency: false,
             partition_objects_deferred: false,
+            driven_by_kernel_init_task: false,
             try_candidate_bound: false,
             selected_path_bound: false,
             reads_init_from_vfs: false,
@@ -838,6 +1152,10 @@ impl UserBootPayload {
         self.partition_objects_deferred
     }
 
+    pub const fn driven_by_kernel_init_task(&self) -> bool {
+        self.driven_by_kernel_init_task
+    }
+
     pub const fn try_candidate_bound(&self) -> bool {
         self.try_candidate_bound
     }
@@ -850,8 +1168,8 @@ impl UserBootPayload {
         self.reads_init_from_vfs
     }
 
-    pub fn setup(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Base {
+    pub fn setup(&mut self, kernel_init_task: &KernelInitTask) -> EventResult {
+        if self.lifecycle.state() != State::Base || kernel_init_task.state() != State::Online {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -866,6 +1184,7 @@ impl UserBootPayload {
         self.uses_current_fs_struct = true;
         self.no_partition_dependency = true;
         self.partition_objects_deferred = true;
+        self.driven_by_kernel_init_task = true;
         self.try_candidate_bound = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
@@ -1044,6 +1363,205 @@ fn entry_mapping_is_executable(
         index += 1;
     }
     false
+}
+
+fn materialize_mapping(
+    mapping: &mut UserMapping,
+    image: &[u8],
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) -> Result<(), ElfError> {
+    let page_count = pages_for_range(mapping.page_offset, mapping.memsz)?;
+    if page_count > MAX_MAPPING_BACKING_PAGES {
+        return Err(ElfError::TooManyMappingPages);
+    }
+    if mapping
+        .file_offset()
+        .checked_add(mapping.filesz())
+        .filter(|end| *end <= image.len())
+        .is_none()
+    {
+        return Err(ElfError::InvalidProgramHeader);
+    }
+
+    let mut index = 0usize;
+    while index < page_count {
+        let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map) else {
+            release_mapping_pages(mapping, page_allocator, page_metadata_map);
+            return Err(ElfError::BackingAllocationFailed);
+        };
+        let Some(linear) = page_metadata_map.page_address(page) else {
+            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            release_mapping_pages(mapping, page_allocator, page_metadata_map);
+            return Err(ElfError::BackingAllocationFailed);
+        };
+        unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
+        mapping.backing_pages[index] = Some(page);
+        mapping.backing_page_count += 1;
+        index += 1;
+    }
+
+    if let Err(error) = copy_mapping_bytes(
+        mapping,
+        image,
+        page_metadata_map,
+        0,
+        mapping.file_offset(),
+        mapping.filesz(),
+    ) {
+        release_mapping_pages(mapping, page_allocator, page_metadata_map);
+        return Err(error);
+    }
+    mapping.file_bytes_copied = mapping.filesz();
+    mapping.bss_bytes_zeroed = mapping.bss_zero_bytes();
+    mapping.page_table_entry_bound = true;
+    Ok(())
+}
+
+fn release_mapping_pages(
+    mapping: &mut UserMapping,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) {
+    while mapping.backing_page_count > 0 {
+        mapping.backing_page_count -= 1;
+        if let Some(page) = mapping.backing_pages[mapping.backing_page_count] {
+            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            mapping.backing_pages[mapping.backing_page_count] = None;
+        }
+    }
+}
+
+fn release_mappings(
+    mappings: &mut [UserMapping; MAX_USER_MAPPINGS],
+    count: usize,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) {
+    let mut index = 0usize;
+    while index < count {
+        release_mapping_pages(&mut mappings[index], page_allocator, page_metadata_map);
+        mappings[index] = UserMapping::empty();
+        index += 1;
+    }
+}
+
+fn copy_mapping_bytes(
+    mapping: &UserMapping,
+    image: &[u8],
+    page_metadata_map: &PageMetadataMap,
+    user_offset: usize,
+    file_offset: usize,
+    len: usize,
+) -> Result<(), ElfError> {
+    if file_offset
+        .checked_add(len)
+        .filter(|end| *end <= image.len())
+        .is_none()
+        || user_offset
+            .checked_add(len)
+            .filter(|end| *end <= mapping.memsz())
+            .is_none()
+    {
+        return Err(ElfError::UserCopyOutOfRange);
+    }
+
+    let mut remaining = len;
+    let mut copied = 0usize;
+    while remaining > 0 {
+        let absolute = mapping.page_offset() + user_offset + copied;
+        let page_index = absolute / USER_PAGE_SIZE;
+        let page_offset = absolute % USER_PAGE_SIZE;
+        let chunk = min_usize(remaining, USER_PAGE_SIZE - page_offset);
+        let Some(page) = mapping.backing_page(page_index) else {
+            return Err(ElfError::BackingAllocationFailed);
+        };
+        let Some(linear) = page_metadata_map.page_address(page) else {
+            return Err(ElfError::BackingAllocationFailed);
+        };
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                image.as_ptr().add(file_offset + copied),
+                (linear + page_offset) as *mut u8,
+                chunk,
+            );
+        }
+        copied += chunk;
+        remaining -= chunk;
+    }
+    Ok(())
+}
+
+fn pages_for_range(offset: usize, len: usize) -> Result<usize, ElfError> {
+    if offset >= USER_PAGE_SIZE {
+        return Err(ElfError::InvalidProgramHeader);
+    }
+    if len == 0 {
+        return Ok(0);
+    }
+    let end = offset
+        .checked_add(len)
+        .ok_or(ElfError::InvalidProgramHeader)?;
+    Ok((end + USER_PAGE_SIZE - 1) / USER_PAGE_SIZE)
+}
+
+fn mappings_have_backing_pages(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: usize) -> bool {
+    let mut index = 0usize;
+    while index < count {
+        if mappings[index].backing_page_count() == 0 {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn mapping_file_bytes_match(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: usize) -> bool {
+    let mut index = 0usize;
+    while index < count {
+        if mappings[index].kind() == UserMappingKind::ElfSegment
+            && mappings[index].file_bytes_copied() != mappings[index].filesz()
+        {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn mapping_bss_bytes_match(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: usize) -> bool {
+    let mut index = 0usize;
+    while index < count {
+        if mappings[index].kind() == UserMappingKind::ElfSegment
+            && mappings[index].bss_bytes_zeroed() != mappings[index].bss_zero_bytes()
+        {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn mappings_have_page_table_entries(
+    mappings: &[UserMapping; MAX_USER_MAPPINGS],
+    count: usize,
+) -> bool {
+    let mut index = 0usize;
+    while index < count {
+        if !mappings[index].page_table_entry_bound() {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+const fn min_usize(a: usize, b: usize) -> usize {
+    if a < b {
+        a
+    } else {
+        b
+    }
 }
 
 fn loadable_content_contains(input: &[u8], parsed: &ParsedLoadSegments, needle: &[u8]) -> bool {

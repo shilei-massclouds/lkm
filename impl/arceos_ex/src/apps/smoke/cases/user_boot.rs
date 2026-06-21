@@ -71,7 +71,10 @@ impl SmokeScenario for UserBootElfScenario {
         };
         let image = &buffer[..len];
 
-        assertions.assert("payload setup", ctx.user_boot_payload.setup().is_ok());
+        assertions.assert(
+            "payload setup",
+            ctx.user_boot_payload.setup(&ctx.kernel_init_task).is_ok(),
+        );
         assertions.assert("elf preset", ctx.elf_object.preset_from_vfs(image).is_ok());
         assertions.assert("elf setup", ctx.elf_object.setup(image).is_ok());
         assertions.assert(
@@ -85,19 +88,36 @@ impl SmokeScenario for UserBootElfScenario {
                     ctx.vm.swapper_vm(),
                     &ctx.page_allocator,
                     &ctx.kernel_global_allocator,
+                    &ctx.kernel_init_task,
                 )
                 .is_ok(),
         );
         assertions.assert(
             "user stack setup",
             ctx.user_stack
-                .setup(&ctx.user_address_space, &ctx.page_allocator)
+                .setup(
+                    &ctx.user_address_space,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                )
                 .is_ok(),
         );
         assertions.assert(
             "address space setup",
             ctx.user_address_space
-                .setup(&ctx.elf_object, &ctx.user_stack)
+                .setup(
+                    &ctx.elf_object,
+                    &ctx.user_stack,
+                    image,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                )
+                .is_ok(),
+        );
+        assertions.assert(
+            "trap frame setup",
+            ctx.user_trap_frame
+                .setup(&ctx.user_address_space, &ctx.elf_object, &ctx.user_stack)
                 .is_ok(),
         );
 
@@ -175,10 +195,22 @@ impl SmokeScenario for UserBootElfScenario {
                 && ctx.user_boot_payload.selected_path_bound()
                 && ctx.user_boot_payload.reads_init_from_vfs(),
         );
+        assertions.assert(
+            "payload kernel init",
+            ctx.user_boot_payload.driven_by_kernel_init_task()
+                && ctx.kernel_init_task.state() == State::Online,
+        );
 
         let space = &ctx.user_address_space;
         assertions.assert("address space ready", space.state() == State::Ready);
-        assertions.assert("address space allocated", space.allocated());
+        assertions.assert(
+            "address space allocated",
+            space.allocated() && space.first_instance(),
+        );
+        assertions.assert(
+            "address space kernel init binding",
+            space.bound_to_kernel_init_task() && ctx.kernel_init_task.state() == State::Online,
+        );
         assertions.assert(
             "address space halves",
             space.low_half_private()
@@ -197,6 +229,13 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "address space bss",
             space.bss_zero_plan_consumed() && space.elf_bss_zeroed(),
+        );
+        assertions.assert(
+            "address space backing",
+            space.backing_pages_allocated()
+                && space.elf_file_bytes_copied()
+                && space.bss_bytes_zeroed()
+                && space.page_table_view_ready(),
         );
         assertions.assert(
             "address space entry",
@@ -221,7 +260,18 @@ impl SmokeScenario for UserBootElfScenario {
                 && first_mapping.user_accessible()
                 && first_mapping.readable()
                 && first_mapping.executable()
+                && first_mapping.backing_page_count() >= 1
+                && first_mapping.file_bytes_copied() == first_segment.filesz()
+                && first_mapping.page_table_entry_bound()
                 && first_mapping.bss_zero_bytes() == first_segment.memsz() - first_segment.filesz(),
+        );
+        assertions.assert(
+            "first mapping content",
+            mapping_contains(
+                first_mapping,
+                &ctx.page_metadata_map,
+                USER_INIT_EXPECTED_MESSAGE,
+            ),
         );
 
         let stack = &ctx.user_stack;
@@ -231,6 +281,8 @@ impl SmokeScenario for UserBootElfScenario {
             stack.allocated()
                 && stack.fixed_size_bound()
                 && stack.mapped_into_address_space()
+                && stack.backing_pages_allocated()
+                && stack.zeroed()
                 && stack.initial_sp_bound()
                 && stack.minimal_arg_env_bound(),
         );
@@ -242,6 +294,15 @@ impl SmokeScenario for UserBootElfScenario {
                 && stack.base() + stack.size() == USER_STACK_TOP
                 && stack.base() % USER_PAGE_SIZE == 0
                 && stack.top() % USER_PAGE_SIZE == 0,
+        );
+        assertions.assert(
+            "user stack pages",
+            stack.backing_page_count() == USER_STACK_SIZE / USER_PAGE_SIZE
+                && stack.backing_page(0).is_some(),
+        );
+        assertions.assert(
+            "user stack zeroed",
+            stack_first_page_zeroed(stack, &ctx.page_metadata_map),
         );
         let Some(stack_mapping) = space.stack_mapping() else {
             assertions.assert("stack mapping", false);
@@ -258,7 +319,93 @@ impl SmokeScenario for UserBootElfScenario {
                 && !stack_mapping.executable()
                 && stack_mapping.user_accessible(),
         );
+
+        let trap = &ctx.user_trap_frame;
+        assertions.assert("trap frame ready", trap.state() == State::Ready);
+        assertions.assert(
+            "trap frame facts",
+            trap.allocated()
+                && trap.entry_bound()
+                && trap.sp_bound()
+                && trap.sstatus_user_mode()
+                && trap.sret_ready()
+                && trap.address_space_bound()
+                && trap.prepared_but_not_entered(),
+        );
+        assertions.assert(
+            "trap frame registers",
+            trap.entry() == elf.entry()
+                && trap.sp() == stack.initial_sp()
+                && trap.sstatus() == crate::objects::user_boot::SSTATUS_SPIE_SET,
+        );
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+fn mapping_contains(
+    mapping: crate::objects::user_boot::UserMapping,
+    page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
+    needle: &[u8],
+) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if mapping.filesz() < needle.len() {
+        return false;
+    }
+    let mut offset = 0usize;
+    while offset + needle.len() <= mapping.filesz() {
+        let mut matched = true;
+        let mut index = 0usize;
+        while index < needle.len() {
+            if mapping_byte_at(mapping, page_metadata_map, offset + index) != Some(needle[index]) {
+                matched = false;
+                break;
+            }
+            index += 1;
+        }
+        if matched {
+            return true;
+        }
+        offset += 1;
+    }
+    false
+}
+
+fn mapping_byte_at(
+    mapping: crate::objects::user_boot::UserMapping,
+    page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
+    file_offset: usize,
+) -> Option<u8> {
+    if file_offset >= mapping.filesz() {
+        return None;
+    }
+    let absolute = mapping.page_offset() + file_offset;
+    let page_index = absolute / USER_PAGE_SIZE;
+    let page_offset = absolute % USER_PAGE_SIZE;
+    let page = mapping.backing_page(page_index)?;
+    let linear = page_metadata_map.page_address(page)?;
+    Some(unsafe { *((linear + page_offset) as *const u8) })
+}
+
+fn stack_first_page_zeroed(
+    stack: &crate::objects::user_boot::UserStack,
+    page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
+) -> bool {
+    let Some(page) = stack.backing_page(0) else {
+        return false;
+    };
+    let Some(linear) = page_metadata_map.page_address(page) else {
+        return false;
+    };
+    let mut index = 0usize;
+    while index < USER_PAGE_SIZE {
+        let byte = unsafe { *((linear + index) as *const u8) };
+        if byte != 0 {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }

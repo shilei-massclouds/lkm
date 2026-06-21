@@ -762,9 +762,11 @@ KernelInitTask 的执行线从 `SmpRuntimePhase` 入口开始：`rest_init()` �
 `UserBootPayload` 是 Linux-like 用户态首进程路径的 selected payload 变种。代码生成或手写实现必须保持以下边界：
 
 - syscall 入口沿用 `ExceptionStream -> SyscallException`，不得为了用户态 hello 新增独立根 `Syscall` 对象或绕过异常分发。
+- `UserBootPayload.Setup` 必须由已经到达 `PayloadPhase` 的 `KernelInitTask` 执行线驱动；实现应记录 payload 归属事实，而不是把用户态入口建模为独立启动根。
 - 用户可执行文件对象命名为 `ElfObject`，不得生成单独的 `ElfLoader` 资源对象。`ElfObject.Preset` 只检查 ELF 类型支持；`ElfObject.Setup` 解析 ELF header / program headers，并形成 `PT_LOAD` 映射计划、段权限、entry 和 `.bss` 清零计划；真实映射到 `UserAddressSpace` 与 `.bss` 清零事实归 `UserAddressSpace.Setup`。`ElfObject.Enable` 只确认 entry、用户栈和 trap frame 已可用于进入用户态。
-- `UserAddressSpace` 是多实例用户地址空间对象，低地址用户区独立；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续是内核共享地址空间实例，不应被改造成普通多实例用户地址空间类型。
-- 首轮 `UserAddressSpace.Setup` 可以只消费 `ElfObject` 的 `PT_LOAD` 映射计划，记录 segment/stack mapping facts、用户页 `U` 权限事实和内核映射 `U=0` 事实；在 trap/syscall 轮次建模前，不得标记 `runtime_ready`、不得切换到用户页表、不得执行 `sret`、不得设置 `SyscallDispatcher` 或 `UserInitProcess` 状态。
+- `UserAddressSpace` 是多实例用户地址空间对象，低地址用户区独立；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续是内核共享地址空间实例，不应被改造成普通多实例用户地址空间类型。首个 `UserAddressSpace` 实例必须在 `Preset` 时依赖 `KernelInitTask.Online`，并记录 `KernelInitTask` 绑定该首个用户地址空间的事实，供后续 stack、ELF mapping 和 trap frame setup 消费；该绑定只表示 kernel_init 用户态启动路径已拥有待启用地址空间，不表示已经写入 `satp` 或完成硬件地址空间切换。
+- 首轮 `UserAddressSpace.Setup` 可以只消费 `ElfObject` 的 `PT_LOAD` 映射计划，记录 segment/stack mapping facts、用户页 `U` 权限事实和内核映射 `U=0` 事实；切换前最后一轮可以继续分配 backing pages、复制 ELF 文件内容、清零 `.bss`/stack，并建立 page-table-shaped view 供下一轮 U-mode entry 消费。在 trap/syscall 轮次建模前，不得标记 `runtime_ready`、不得切换到用户页表、不得执行 `sret`、不得设置 `SyscallDispatcher` 或 `UserInitProcess` 状态。
+- `UserTrapFrame.Setup` 只准备 `sepc=elf.entry`、`sp=user_stack.initial_sp`、用户态 `sstatus` 事实和关联的 `UserAddressSpace`，表示下一轮可以由统一 trap return 消费；它本身不得执行 `sret` 或观察用户态已经进入。
 - 当前 rootfs 输入是 whole-disk ext2；`UserBootPayload` 不应要求 `PartitionTable` / `BlockPartition`。若未来磁盘镜像切换为带分区表，再补分区对象建模。
 - 首轮 `SyscallDispatcher` / `SyscallTable` 只覆盖 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。`write` 通过受限 `UserCopy` 转发到现有 printk/serial console，不等价于完整 fd table、`/dev/console` 或 TTY/N_TTY。
 - 针对当前临时 `/init` ELF 的 smoke/KUnit 验证只能读取 `ElfObject` 正常模型事实，例如 entry、`PT_LOAD` 数量、段权限、entry 是否落在可执行段、以及 fixture 内容字节是否位于 loadable 文件内容中；不得为了测试给普通对象增加 `test_only_*` 或等价专用 API。

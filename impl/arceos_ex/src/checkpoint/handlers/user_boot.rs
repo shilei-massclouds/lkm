@@ -4,12 +4,8 @@ use crate::{
         kunit::Sink,
     },
     context::Context,
-    objects::{
-        state::State,
-        user_boot::{
-            ElfError, ElfObject, UserAddressSpace, UserMappingKind, UserStack,
-            USER_INIT_EXPECTED_MESSAGE, USER_STACK_SIZE, USER_STACK_TOP,
-        },
+    objects::user_boot::{
+        ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame, USER_INIT_EXPECTED_MESSAGE,
     },
     trace::Checkpoint,
 };
@@ -25,13 +21,14 @@ pub const HANDLER: Handler = Handler {
 };
 
 fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
+    let _ = ctx;
     let total = super::kunit_case_count();
     run_valid_fixture(checkpoint, sink, total);
     run_bad_magic(checkpoint, sink, total);
     run_wrong_machine(checkpoint, sink, total);
     run_invalid_segment(checkpoint, sink, total);
-    run_address_space_mapping(checkpoint, ctx, sink, total);
-    run_address_space_requires_ready_elf(checkpoint, ctx, sink, total);
+    run_bss_plan(checkpoint, sink, total);
+    run_trap_frame_rejects_unready_inputs(checkpoint, sink, total);
     CheckpointOutcome::Continue
 }
 
@@ -147,134 +144,63 @@ fn run_invalid_segment(checkpoint: Checkpoint, sink: &mut dyn Sink, total: usize
     }
 }
 
-fn run_address_space_mapping(
-    checkpoint: Checkpoint,
-    ctx: &Context,
-    sink: &mut dyn Sink,
-    total: usize,
-) {
-    let name = "user_boot.address_space.mapping_plan";
+fn run_bss_plan(checkpoint: Checkpoint, sink: &mut dyn Sink, total: usize) {
+    let name = "user_boot.elf_parser.bss_plan";
     sink.start_case(total, "", name, checkpoint);
 
-    let Some((elf, mut address_space, stack)) = ready_mapping_fixture(ctx) else {
-        sink.fail(total, "", name, "fixture setup failed");
-        return;
-    };
-
-    if address_space.setup(&elf, &stack).is_err() {
-        sink.fail(total, "", name, "address space setup failed");
-        return;
-    }
-
-    let Some(first_mapping) = address_space.mapping(0) else {
-        sink.fail(total, "", name, "first mapping missing");
-        return;
-    };
-    let Some(stack_mapping) = address_space.stack_mapping() else {
-        sink.fail(total, "", name, "stack mapping missing");
-        return;
-    };
-
-    let valid = address_space.state() == State::Ready
-        && address_space.allocated()
-        && address_space.low_half_private()
-        && address_space.high_half_shares_swapper()
-        && address_space.kernel_pages_u_disabled()
-        && address_space.user_pages_u_enabled()
-        && address_space.elf_load_plan_consumed()
-        && address_space.segment_mappings_bound()
-        && address_space.entry_mapping_executable()
-        && address_space.bss_zero_plan_consumed()
-        && address_space.elf_segments_mapped()
-        && address_space.stack_mapped()
-        && address_space.elf_mapped()
-        && address_space.elf_bss_zeroed()
-        && !address_space.runtime_ready()
-        && address_space.segment_mapping_count() == 1
-        && address_space.mapping_count() == 2
-        && first_mapping.kind() == UserMappingKind::ElfSegment
-        && first_mapping.vaddr() == 0x10000
-        && first_mapping.filesz() == 256
-        && first_mapping.memsz() == 512
-        && first_mapping.readable()
-        && first_mapping.executable()
-        && first_mapping.user_accessible()
-        && first_mapping.bss_zero_bytes() == 256
-        && stack.state() == State::Ready
-        && stack.size() == USER_STACK_SIZE
-        && stack.top() == USER_STACK_TOP
-        && stack_mapping.kind() == UserMappingKind::Stack
-        && stack_mapping.vaddr() == stack.base()
-        && stack_mapping.memsz() == USER_STACK_SIZE
-        && stack_mapping.writable()
-        && !stack_mapping.executable();
-
-    if !valid {
-        sink.fail(total, "", name, "address space facts invalid");
-        return;
-    }
-
-    sink.diag_usize("user_mappings", address_space.mapping_count());
-    sink.pass(total, "", name);
-}
-
-fn run_address_space_requires_ready_elf(
-    checkpoint: Checkpoint,
-    ctx: &Context,
-    sink: &mut dyn Sink,
-    total: usize,
-) {
-    let name = "user_boot.address_space.requires_ready_elf";
-    sink.start_case(total, "", name, checkpoint);
-
-    let mut address_space = UserAddressSpace::new();
-    if address_space
-        .preset(
-            ctx.vm.swapper_vm(),
-            &ctx.page_allocator,
-            &ctx.kernel_global_allocator,
-        )
-        .is_err()
-    {
-        sink.fail(total, "", name, "address space preset failed");
-        return;
-    }
-    let mut stack = UserStack::new();
-    if stack.setup(&address_space, &ctx.page_allocator).is_err() {
-        sink.fail(total, "", name, "stack setup failed");
-        return;
-    }
-    let elf = ElfObject::new();
-
-    match address_space.setup(&elf, &stack) {
-        Err(ElfError::InvalidState) => sink.pass(total, "", name),
-        _ => sink.fail(total, "", name, "unready ELF accepted"),
-    }
-}
-
-fn ready_mapping_fixture(ctx: &Context) -> Option<(ElfObject, UserAddressSpace, UserStack)> {
     let mut image = FixtureElf::new();
     image.write_supported_header();
     image.write_load_segment(0, 0, 0x10000, 256, 512, 5, 0x1000);
     image.write_message(0x80);
 
     let mut elf = ElfObject::new();
-    elf.preset_from_vfs(image.as_slice()).ok()?;
-    elf.setup(image.as_slice()).ok()?;
+    if elf.preset_from_vfs(image.as_slice()).is_err() || elf.setup(image.as_slice()).is_err() {
+        sink.fail(total, "", name, "fixture ELF did not parse");
+        return;
+    }
+    let Some(segment) = elf.load_segment(0) else {
+        sink.fail(total, "", name, "load segment missing");
+        return;
+    };
 
-    let mut address_space = UserAddressSpace::new();
-    address_space
-        .preset(
-            ctx.vm.swapper_vm(),
-            &ctx.page_allocator,
-            &ctx.kernel_global_allocator,
-        )
-        .ok()?;
+    if elf.bss_zero_plan_bound()
+        && segment.filesz() == 256
+        && segment.memsz() == 512
+        && segment.memsz() - segment.filesz() == 256
+    {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "bss plan facts invalid");
+    }
+}
 
-    let mut stack = UserStack::new();
-    stack.setup(&address_space, &ctx.page_allocator).ok()?;
+fn run_trap_frame_rejects_unready_inputs(
+    checkpoint: Checkpoint,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.trap_frame.rejects_unready_inputs";
+    sink.start_case(total, "", name, checkpoint);
 
-    Some((elf, address_space, stack))
+    let mut image = FixtureElf::new();
+    image.write_supported_header();
+    image.write_load_segment(0, 0, 0x10000, image.len(), image.len(), 5, 0x1000);
+    image.write_message(0x80);
+
+    let mut elf = ElfObject::new();
+    if elf.preset_from_vfs(image.as_slice()).is_err() || elf.setup(image.as_slice()).is_err() {
+        sink.fail(total, "", name, "fixture ELF did not parse");
+        return;
+    }
+
+    let address_space = UserAddressSpace::new();
+    let stack = UserStack::new();
+    let mut frame = UserTrapFrame::new();
+    if frame.setup(&address_space, &elf, &stack).is_err() {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "unready inputs accepted");
+    }
 }
 
 struct FixtureElf {

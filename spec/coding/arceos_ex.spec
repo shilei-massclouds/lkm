@@ -69,8 +69,13 @@ predicate arceos_ex_must_user_boot_payload_be_selected_payload_variant() -> bool
 predicate arceos_ex_must_user_boot_use_existing_syscall_exception() -> bool;
 predicate arceos_ex_must_not_generate_elf_loader_object() -> bool;
 predicate arceos_ex_must_elf_object_setup_build_pt_load_mapping_plan() -> bool;
+predicate arceos_ex_must_validate_user_init_elf_without_test_only_object_api() -> bool;
+predicate arceos_ex_must_user_boot_payload_bind_kernel_init_task() -> bool;
+predicate arceos_ex_must_first_user_address_space_bind_kernel_init_task() -> bool;
 predicate arceos_ex_must_user_address_space_setup_consume_elf_load_plan() -> bool;
+predicate arceos_ex_must_user_address_space_setup_materialize_pre_switch_backing() -> bool;
 predicate arceos_ex_must_user_address_space_round_not_enter_user_mode() -> bool;
+predicate arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
 predicate arceos_ex_must_user_boot_not_require_partition_objects_for_whole_disk_ext2() -> bool;
@@ -721,15 +726,30 @@ type ArceosExStartupPhaseCodingMust {
          * instance and must not be mechanically converted into a user address
          * space type with arbitrary instances.
          *
+         * The first UserAddressSpace instance belongs to the KernelInitTask
+         * execution line that reached PayloadPhase. Preset must require
+         * KernelInitTask.Online and record the first-instance binding before
+         * stack, ELF mappings or trap-frame setup consume the address space.
+         * This expresses the Linux-like kernel_init/kernel_execve handoff
+         * without claiming that satp has already switched to a user page
+         * table.
+         *
          * The first implementation round may stop at UserAddressSpace.Ready:
          * UserAddressSpace.Setup consumes ElfObject's PT_LOAD mapping plan and
          * records segment/stack mapping facts, user-page U permission facts and
-         * kernel-page U=0 facts. It must not mark runtime_ready, switch to a
-         * user page table, execute sret, or set up syscall/UserInitProcess
-         * state before the explicit trap/syscall round is modeled.
+         * kernel-page U=0 facts. The pre-switch round extends that to allocate
+         * backing pages, copy ELF file bytes, zero .bss/stack bytes and build a
+         * page-table-shaped view that can be consumed by the next U-mode entry
+         * round. It must not mark runtime_ready, switch to a user page table,
+         * execute sret, or set up syscall/UserInitProcess state before the
+         * explicit trap/syscall round is modeled.
          */
+        arceos_ex_must_user_boot_payload_bind_kernel_init_task();
+        arceos_ex_must_first_user_address_space_bind_kernel_init_task();
         arceos_ex_must_user_address_space_setup_consume_elf_load_plan();
+        arceos_ex_must_user_address_space_setup_materialize_pre_switch_backing();
         arceos_ex_must_user_address_space_round_not_enter_user_mode();
+        arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
         arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();
 
