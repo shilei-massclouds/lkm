@@ -46,6 +46,8 @@ const BREAKPOINT_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_BREAKPOINT);
 const UNEXPECTED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_UNEXPECTED);
 #[cfg(app_user_boot)]
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
+#[cfg(not(app_user_boot))]
+const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
@@ -281,7 +283,6 @@ impl ExceptionStream {
         )
     }
 
-    #[cfg(app_user_boot)]
     pub fn syscall_setup(&mut self, table: &mut SyscallTable) -> EventResult {
         self.syscall.setup(
             self.lifecycle.state(),
@@ -291,7 +292,6 @@ impl ExceptionStream {
         table.setup(self.syscall.state())
     }
 
-    #[cfg(app_user_boot)]
     pub fn syscall_enable(&mut self, table: &SyscallTable) -> EventResult {
         self.syscall.enable(self.lifecycle.state(), table)
     }
@@ -361,7 +361,6 @@ impl ExceptionKind {
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
-    #[cfg(app_user_boot)]
     fn enable(
         &mut self,
         exception_stream_state: State,
@@ -511,6 +510,7 @@ fn syscall_table_write(frame: &mut TrapFrame) {
         return;
     }
 
+    crate::objects::user_boot::observe_user_init_syscall_write();
     crate::trace::checkpoint(Checkpoint::UserSyscallWrite);
     crate::objects::printk::write_bytes(&buffer[..len]);
     frame.set_reg(10, len);
@@ -518,6 +518,7 @@ fn syscall_table_write(frame: &mut TrapFrame) {
 }
 
 fn syscall_table_exit(frame: &mut TrapFrame) -> ! {
+    crate::objects::user_boot::observe_user_init_syscall_exit();
     crate::trace::checkpoint(Checkpoint::UserSyscallExit);
     let status = frame.reg(10);
     crate::arch::riscv64::sbi::putstr("user exit status=");

@@ -10,6 +10,7 @@ pub fn run() -> ! {
         &mut ctx.user_address_space,
         &mut ctx.user_stack,
         &mut ctx.user_trap_frame,
+        &mut ctx.user_init_process,
         &mut ctx.vfs_core,
         &ctx.fs_struct,
         &mut ctx.ext2_filesystem,

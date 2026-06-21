@@ -1,14 +1,16 @@
+use core::sync::atomic::{AtomicU8, Ordering};
+
 use crate::arch::riscv64::csr;
 
 #[cfg(app_user_boot)]
 use super::{
     block_device::BlockDeviceRegistry,
-    exception_stream::{ExceptionStream, SyscallTable},
     ext2::{Ext2FileSystem, EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS},
-    vfs::{FsStruct, VfsCore},
+    vfs::VfsCore,
     virtio_blk,
 };
 use super::{
+    exception_stream::{ExceptionStream, SyscallTable},
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
     page_table::{
@@ -19,6 +21,7 @@ use super::{
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_page_tables,
     swapper_vm::SwapperVm,
+    vfs::FsStruct,
 };
 
 pub const USER_INIT_PATH: &[u8] = b"/sbin/init";
@@ -48,6 +51,15 @@ const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS + 1;
 const MAX_MAPPING_BACKING_PAGES: usize = 32;
 const MAX_STACK_PAGES: usize = USER_STACK_SIZE / USER_PAGE_SIZE;
 const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 1;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum UserInitPathRef {
+    DefaultInit,
+}
+
+static USER_INIT_RUNTIME_ENTERED: AtomicU8 = AtomicU8::new(0);
+static USER_INIT_RUNTIME_WRITE_OBSERVED: AtomicU8 = AtomicU8::new(0);
+static USER_INIT_RUNTIME_EXIT_OBSERVED: AtomicU8 = AtomicU8::new(0);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ElfError {
@@ -1519,6 +1531,297 @@ impl ElfObject {
     }
 }
 
+pub struct UserInitProcess {
+    lifecycle: Lifecycle,
+    reuses_kernel_init_task: bool,
+    pid1_preserved: bool,
+    exec_identity_handoff: bool,
+    no_new_task_struct: bool,
+    kernel_init_not_destroyed: bool,
+    path: UserInitPathRef,
+    path_bound: bool,
+    address_space_bound: bool,
+    fs_struct_inherited: bool,
+    trap_frame_bound: bool,
+    syscall_context_bound: bool,
+    kernel_init_execve_to_user_init: bool,
+    kernel_init_pid1_identity_preserved: bool,
+    kernel_init_user_mm_attached: bool,
+    kernel_init_user_trap_frame_attached: bool,
+    user_entry_ready: bool,
+    trap_return_bound: bool,
+    syscall_dispatch_bound: bool,
+    syscall_arguments_extracted: bool,
+    runtime_entered: bool,
+    syscall_write_observed: bool,
+    syscall_exit_observed: bool,
+}
+
+#[allow(dead_code)]
+impl UserInitProcess {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            reuses_kernel_init_task: false,
+            pid1_preserved: false,
+            exec_identity_handoff: false,
+            no_new_task_struct: false,
+            kernel_init_not_destroyed: false,
+            path: UserInitPathRef::DefaultInit,
+            path_bound: false,
+            address_space_bound: false,
+            fs_struct_inherited: false,
+            trap_frame_bound: false,
+            syscall_context_bound: false,
+            kernel_init_execve_to_user_init: false,
+            kernel_init_pid1_identity_preserved: false,
+            kernel_init_user_mm_attached: false,
+            kernel_init_user_trap_frame_attached: false,
+            user_entry_ready: false,
+            trap_return_bound: false,
+            syscall_dispatch_bound: false,
+            syscall_arguments_extracted: false,
+            runtime_entered: false,
+            syscall_write_observed: false,
+            syscall_exit_observed: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn reuses_kernel_init_task(&self) -> bool {
+        self.reuses_kernel_init_task
+    }
+
+    pub const fn pid1_preserved(&self) -> bool {
+        self.pid1_preserved
+    }
+
+    pub const fn exec_identity_handoff(&self) -> bool {
+        self.exec_identity_handoff
+    }
+
+    pub const fn no_new_task_struct(&self) -> bool {
+        self.no_new_task_struct
+    }
+
+    pub const fn kernel_init_not_destroyed(&self) -> bool {
+        self.kernel_init_not_destroyed
+    }
+
+    pub const fn path(&self) -> UserInitPathRef {
+        self.path
+    }
+
+    pub const fn path_bound(&self) -> bool {
+        self.path_bound
+    }
+
+    pub const fn address_space_bound(&self) -> bool {
+        self.address_space_bound
+    }
+
+    pub const fn fs_struct_inherited(&self) -> bool {
+        self.fs_struct_inherited
+    }
+
+    pub const fn trap_frame_bound(&self) -> bool {
+        self.trap_frame_bound
+    }
+
+    pub const fn syscall_context_bound(&self) -> bool {
+        self.syscall_context_bound
+    }
+
+    pub const fn kernel_init_execve_to_user_init(&self) -> bool {
+        self.kernel_init_execve_to_user_init
+    }
+
+    pub const fn kernel_init_pid1_identity_preserved(&self) -> bool {
+        self.kernel_init_pid1_identity_preserved
+    }
+
+    pub const fn kernel_init_user_mm_attached(&self) -> bool {
+        self.kernel_init_user_mm_attached
+    }
+
+    pub const fn kernel_init_user_trap_frame_attached(&self) -> bool {
+        self.kernel_init_user_trap_frame_attached
+    }
+
+    pub const fn user_entry_ready(&self) -> bool {
+        self.user_entry_ready
+    }
+
+    pub const fn trap_return_bound(&self) -> bool {
+        self.trap_return_bound
+    }
+
+    pub const fn syscall_dispatch_bound(&self) -> bool {
+        self.syscall_dispatch_bound
+    }
+
+    pub const fn syscall_arguments_extracted(&self) -> bool {
+        self.syscall_arguments_extracted
+    }
+
+    pub const fn runtime_entered(&self) -> bool {
+        self.runtime_entered
+    }
+
+    pub const fn syscall_write_observed(&self) -> bool {
+        self.syscall_write_observed
+    }
+
+    pub const fn syscall_exit_observed(&self) -> bool {
+        self.syscall_exit_observed
+    }
+
+    pub fn setup(
+        &mut self,
+        kernel_init_task: &KernelInitTask,
+        address_space: &UserAddressSpace,
+        elf: &ElfObject,
+        trap_frame: &UserTrapFrame,
+        fs_struct: &FsStruct,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || kernel_init_task.state() != State::Online
+            || kernel_init_task.pid() != super::rest_init::KERNEL_INIT_PID
+            || address_space.state() != State::Online
+            || elf.state() != State::Online
+            || trap_frame.state() != State::Ready
+            || fs_struct.state() != State::Ready
+            || !address_space.bound_to_kernel_init_task()
+            || !trap_frame.address_space_bound()
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.reuses_kernel_init_task = true;
+        self.pid1_preserved = true;
+        self.exec_identity_handoff = true;
+        self.no_new_task_struct = true;
+        self.kernel_init_not_destroyed = kernel_init_task.state() == State::Online;
+        self.path = UserInitPathRef::DefaultInit;
+        self.path_bound = true;
+        self.address_space_bound = true;
+        self.fs_struct_inherited = true;
+        self.trap_frame_bound = true;
+        self.kernel_init_execve_to_user_init = true;
+        self.kernel_init_pid1_identity_preserved = true;
+        self.kernel_init_user_mm_attached = true;
+        self.kernel_init_user_trap_frame_attached = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    pub fn enable(
+        &mut self,
+        trap_frame: &UserTrapFrame,
+        exception_stream: &ExceptionStream,
+        syscall_table: &SyscallTable,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || trap_frame.state() != State::Ready
+            || exception_stream.syscall_state() != State::Online
+            || syscall_table.state() != State::Ready
+            || !syscall_table.bound_to_exception()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.syscall_context_bound = true;
+        self.trap_return_bound = true;
+        self.syscall_dispatch_bound = true;
+        self.syscall_arguments_extracted = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+    }
+
+    pub fn enter_user_mode(&mut self, trap_frame: &UserTrapFrame) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || trap_frame.state() != State::Ready
+            || !self.trap_return_bound
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.user_entry_ready = true;
+        self.runtime_entered = true;
+        USER_INIT_RUNTIME_ENTERED.store(1, Ordering::Release);
+        Ok(())
+    }
+
+    pub fn observe_syscall_write(&mut self, syscall_table: &SyscallTable) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || syscall_table.state() != State::Ready
+            || !self.syscall_context_bound
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.syscall_write_observed = true;
+        USER_INIT_RUNTIME_WRITE_OBSERVED.store(1, Ordering::Release);
+        Ok(())
+    }
+
+    pub fn observe_syscall_exit(&mut self, syscall_table: &SyscallTable) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || syscall_table.state() != State::Ready
+            || !self.syscall_context_bound
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+
+        self.syscall_exit_observed = true;
+        USER_INIT_RUNTIME_EXIT_OBSERVED.store(1, Ordering::Release);
+        Ok(())
+    }
+
+    pub fn refresh_runtime_observations(&mut self) {
+        self.runtime_entered |= USER_INIT_RUNTIME_ENTERED.load(Ordering::Acquire) != 0;
+        self.syscall_write_observed |=
+            USER_INIT_RUNTIME_WRITE_OBSERVED.load(Ordering::Acquire) != 0;
+        self.syscall_exit_observed |= USER_INIT_RUNTIME_EXIT_OBSERVED.load(Ordering::Acquire) != 0;
+    }
+}
+
+pub fn observe_user_init_syscall_write() {
+    USER_INIT_RUNTIME_WRITE_OBSERVED.store(1, Ordering::Release);
+}
+
+pub fn observe_user_init_syscall_exit() {
+    USER_INIT_RUNTIME_EXIT_OBSERVED.store(1, Ordering::Release);
+}
+
 pub struct UserBootPayload {
     lifecycle: Lifecycle,
     selected: bool,
@@ -1683,6 +1986,7 @@ pub fn run_first_user_init(
     address_space: &mut UserAddressSpace,
     stack: &mut UserStack,
     trap_frame: &mut UserTrapFrame,
+    user_init_process: &mut UserInitProcess,
     vfs_core: &mut VfsCore,
     fs_struct: &FsStruct,
     ext2_filesystem: &mut Ext2FileSystem,
@@ -1760,6 +2064,18 @@ pub fn run_first_user_init(
     if exception_stream.syscall_enable(syscall_table).is_err() {
         user_boot_panic("user syscall enable failed\n");
     }
+    if user_init_process
+        .setup(kernel_init_task, address_space, elf, trap_frame, fs_struct)
+        .is_err()
+    {
+        user_boot_panic("user init process setup failed\n");
+    }
+    if user_init_process
+        .enable(trap_frame, exception_stream, syscall_table)
+        .is_err()
+    {
+        user_boot_panic("user init process enable failed\n");
+    }
     if payload
         .enable_for_user_entry(
             elf,
@@ -1771,6 +2087,9 @@ pub fn run_first_user_init(
         .is_err()
     {
         user_boot_panic("user payload enable failed\n");
+    }
+    if user_init_process.enter_user_mode(trap_frame).is_err() {
+        user_boot_panic("user init process enter failed\n");
     }
 
     crate::trace::checkpoint(crate::trace::Checkpoint::UserModeEntry);

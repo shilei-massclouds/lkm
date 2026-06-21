@@ -124,8 +124,21 @@ predicate user_mode_entry_observed<T>(frame: T) -> bool;
 
 predicate user_init_process_online<T>(process: T) -> bool;
 predicate user_init_process_reuses_kernel_init_task<T, K>(process: T, task: K) -> bool;
+predicate user_init_process_pid1_preserved<T, K>(process: T, task: K) -> bool;
+predicate user_init_process_exec_identity_handoff<T, K>(process: T, task: K) -> bool;
+predicate user_init_process_no_new_task_struct<T>(process: T) -> bool;
+predicate user_init_process_kernel_init_not_destroyed<T, K>(process: T, task: K) -> bool;
 predicate user_init_process_path_bound<T, P>(process: T, path: P) -> bool;
 predicate user_init_process_address_space_bound<T, A>(process: T, space: A) -> bool;
+predicate user_init_process_fs_struct_inherited<T, F>(process: T, fs: F) -> bool;
+predicate user_init_process_trap_frame_bound<T, R>(process: T, frame: R) -> bool;
+predicate user_init_process_syscall_context_bound<T, E, S>(process: T, exception: E, table: S) -> bool;
+predicate user_init_process_user_entry_ready<T>(process: T) -> bool;
+predicate user_init_process_trap_return_bound<T, R>(process: T, frame: R) -> bool;
+predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> bool;
+predicate kernel_init_task_pid1_identity_preserved<K>(task: K) -> bool;
+predicate kernel_init_task_user_mm_attached<K, A>(task: K, space: A) -> bool;
+predicate kernel_init_task_user_trap_frame_attached<K, R>(task: K, frame: R) -> bool;
 
 object UserAddressSpace: ResourceObject {
     initial_state: State::Base;
@@ -509,12 +522,24 @@ object UserInitProcess: ResourceObject {
                     KernelInitTask.state == State::Online;
                     UserAddressSpace.state == State::Online;
                     ElfObject.state == State::Online;
+                    UserTrapFrame.state == State::Ready;
+                    FsStruct.state == State::Ready;
                 }
 
                 ensures {
                     user_init_process_reuses_kernel_init_task(self, KernelInitTask);
+                    user_init_process_pid1_preserved(self, KernelInitTask);
+                    user_init_process_exec_identity_handoff(self, KernelInitTask);
+                    user_init_process_no_new_task_struct(self);
+                    user_init_process_kernel_init_not_destroyed(self, KernelInitTask);
                     user_init_process_path_bound(self, UserInitPathRef::DefaultInit);
                     user_init_process_address_space_bound(self, UserAddressSpace);
+                    user_init_process_fs_struct_inherited(self, FsStruct);
+                    user_init_process_trap_frame_bound(self, UserTrapFrame);
+                    kernel_init_task_execve_to_user_init(KernelInitTask, self);
+                    kernel_init_task_pid1_identity_preserved(KernelInitTask);
+                    kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
+                    kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
                 }
             }
         }
@@ -523,8 +548,18 @@ object UserInitProcess: ResourceObject {
     state State::Ready {
         invariant {
             user_init_process_reuses_kernel_init_task(self, KernelInitTask);
+            user_init_process_pid1_preserved(self, KernelInitTask);
+            user_init_process_exec_identity_handoff(self, KernelInitTask);
+            user_init_process_no_new_task_struct(self);
+            user_init_process_kernel_init_not_destroyed(self, KernelInitTask);
             user_init_process_path_bound(self, UserInitPathRef::DefaultInit);
             user_init_process_address_space_bound(self, UserAddressSpace);
+            user_init_process_fs_struct_inherited(self, FsStruct);
+            user_init_process_trap_frame_bound(self, UserTrapFrame);
+            kernel_init_task_execve_to_user_init(KernelInitTask, self);
+            kernel_init_task_pid1_identity_preserved(KernelInitTask);
+            kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
+            kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
         }
 
         events {
@@ -537,13 +572,19 @@ object UserInitProcess: ResourceObject {
 
                 ensures {
                     user_init_process_online(self);
-                    user_mode_entry_observed(UserTrapFrame);
-                    user_trap_return_switches_satp();
-                    user_trap_entry_uses_kernel_stack(UserTrapFrame);
+                    user_init_process_pid1_preserved(self, KernelInitTask);
+                    user_init_process_exec_identity_handoff(self, KernelInitTask);
+                    user_init_process_address_space_bound(self, UserAddressSpace);
+                    user_init_process_fs_struct_inherited(self, FsStruct);
+                    user_init_process_trap_frame_bound(self, UserTrapFrame);
+                    user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
+                    kernel_init_task_execve_to_user_init(KernelInitTask, self);
+                    kernel_init_task_pid1_identity_preserved(KernelInitTask);
+                    kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
+                    kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
+                    user_init_process_trap_return_bound(self, UserTrapFrame);
                     syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
                     syscall_exception_extracts_arguments(SyscallException);
-                    user_syscall_write_observed(SyscallTable);
-                    user_syscall_exit_observed(SyscallTable);
                 }
             }
         }
@@ -553,11 +594,67 @@ object UserInitProcess: ResourceObject {
         invariant {
             user_init_process_online(self);
             user_init_process_reuses_kernel_init_task(self, KernelInitTask);
+            user_init_process_pid1_preserved(self, KernelInitTask);
+            user_init_process_exec_identity_handoff(self, KernelInitTask);
+            user_init_process_no_new_task_struct(self);
+            user_init_process_kernel_init_not_destroyed(self, KernelInitTask);
             user_init_process_address_space_bound(self, UserAddressSpace);
-            user_mode_entry_observed(UserTrapFrame);
+            user_init_process_fs_struct_inherited(self, FsStruct);
+            user_init_process_trap_frame_bound(self, UserTrapFrame);
+            user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
+            kernel_init_task_execve_to_user_init(KernelInitTask, self);
+            kernel_init_task_pid1_identity_preserved(KernelInitTask);
+            kernel_init_task_user_mm_attached(KernelInitTask, UserAddressSpace);
+            kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
+            user_init_process_trap_return_bound(self, UserTrapFrame);
             syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
-            user_syscall_write_observed(SyscallTable);
-            user_syscall_exit_observed(SyscallTable);
+        }
+
+        actions {
+            on Action::EnterUserMode {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    UserAddressSpace.state == State::Online;
+                    UserTrapFrame.state == State::Ready;
+                }
+
+                ensures {
+                    user_init_process_user_entry_ready(self);
+                    user_mode_entry_observed(UserTrapFrame);
+                    user_trap_return_switches_satp();
+                    user_trap_entry_uses_kernel_stack(UserTrapFrame);
+                }
+            }
+
+            on Action::ObserveSyscallWrite {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                    SyscallTable.state == State::Ready;
+                }
+
+                ensures {
+                    user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
+                    syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
+                    syscall_exception_extracts_arguments(SyscallException);
+                    user_syscall_write_observed(SyscallTable);
+                }
+            }
+
+            on Action::ObserveSyscallExit {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                    SyscallTable.state == State::Ready;
+                }
+
+                ensures {
+                    user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
+                    syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
+                    syscall_exception_extracts_arguments(SyscallException);
+                    user_syscall_exit_observed(SyscallTable);
+                }
+            }
         }
     }
 }
@@ -646,6 +743,7 @@ object UserBootPayload: ResourceObject {
                     SyscallException.Event::Enable;
                     UserInitProcess.Event::Setup;
                     UserInitProcess.Event::Enable;
+                    UserInitProcess.Action::EnterUserMode;
                 }
 
                 ensures {

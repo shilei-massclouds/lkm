@@ -90,7 +90,9 @@ use crate::objects::{
     softirq::Softirq,
     static_branch::StaticBranch,
     static_objects::StaticObjects,
-    user_boot::{ElfObject, UserAddressSpace, UserBootPayload, UserStack, UserTrapFrame},
+    user_boot::{
+        ElfObject, UserAddressSpace, UserBootPayload, UserInitProcess, UserStack, UserTrapFrame,
+    },
     vfs::{FsStruct, RamFsType, VfsCore},
     virtio::VirtioBus,
     virtio_blk::VirtioBlkRuntime,
@@ -281,6 +283,7 @@ pub struct Context {
     pub user_address_space: UserAddressSpace,
     pub user_stack: UserStack,
     pub user_trap_frame: UserTrapFrame,
+    pub user_init_process: UserInitProcess,
 }
 
 impl Context {
@@ -457,6 +460,7 @@ impl Context {
             user_address_space: UserAddressSpace::new(),
             user_stack: UserStack::new(),
             user_trap_frame: UserTrapFrame::new(),
+            user_init_process: UserInitProcess::new(),
         }
     }
 

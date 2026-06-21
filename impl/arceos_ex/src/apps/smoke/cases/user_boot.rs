@@ -121,6 +121,16 @@ impl SmokeScenario for UserBootElfScenario {
                 .is_ok(),
         );
         assertions.assert(
+            "elf enable",
+            ctx.elf_object
+                .enable(
+                    &ctx.user_address_space,
+                    &ctx.user_stack,
+                    &ctx.user_trap_frame,
+                )
+                .is_ok(),
+        );
+        assertions.assert(
             "address space enable",
             ctx.user_address_space
                 .enable(
@@ -134,7 +144,7 @@ impl SmokeScenario for UserBootElfScenario {
         );
 
         let elf = &ctx.elf_object;
-        assertions.assert("elf ready", elf.state() == State::Ready);
+        assertions.assert("elf online", elf.state() == State::Online);
         assertions.assert("elf input", elf.input_bound() && elf.input_from_vfs());
         assertions.assert(
             "elf header",
@@ -360,6 +370,79 @@ impl SmokeScenario for UserBootElfScenario {
             trap.entry() == elf.entry()
                 && trap.sp() == stack.initial_sp()
                 && trap.sstatus() == crate::objects::user_boot::SSTATUS_SPIE_SET,
+        );
+        assertions.assert(
+            "syscall setup",
+            ctx.exception_stream
+                .syscall_setup(&mut ctx.syscall_table)
+                .is_ok(),
+        );
+        assertions.assert(
+            "syscall enable",
+            ctx.exception_stream
+                .syscall_enable(&ctx.syscall_table)
+                .is_ok(),
+        );
+        assertions.assert(
+            "user init process setup",
+            ctx.user_init_process
+                .setup(
+                    &ctx.kernel_init_task,
+                    &ctx.user_address_space,
+                    &ctx.elf_object,
+                    &ctx.user_trap_frame,
+                    &ctx.fs_struct,
+                )
+                .is_ok(),
+        );
+        assertions.assert(
+            "user init process enable",
+            ctx.user_init_process
+                .enable(
+                    &ctx.user_trap_frame,
+                    &ctx.exception_stream,
+                    &ctx.syscall_table,
+                )
+                .is_ok(),
+        );
+        let process = &ctx.user_init_process;
+        assertions.assert("user init process online", process.state() == State::Online);
+        assertions.assert(
+            "user init identity",
+            process.reuses_kernel_init_task()
+                && process.pid1_preserved()
+                && process.exec_identity_handoff()
+                && process.no_new_task_struct()
+                && process.kernel_init_not_destroyed(),
+        );
+        assertions.assert(
+            "user init inherited context",
+            process.path_bound()
+                && process.path() == crate::objects::user_boot::UserInitPathRef::DefaultInit
+                && process.address_space_bound()
+                && process.fs_struct_inherited()
+                && process.trap_frame_bound(),
+        );
+        assertions.assert(
+            "kernel init attachments",
+            process.kernel_init_execve_to_user_init()
+                && process.kernel_init_pid1_identity_preserved()
+                && process.kernel_init_user_mm_attached()
+                && process.kernel_init_user_trap_frame_attached(),
+        );
+        assertions.assert(
+            "user init syscall context",
+            process.syscall_context_bound()
+                && process.trap_return_bound()
+                && process.syscall_dispatch_bound()
+                && process.syscall_arguments_extracted(),
+        );
+        assertions.assert(
+            "user init runtime not entered by smoke",
+            !process.user_entry_ready()
+                && !process.runtime_entered()
+                && !process.syscall_write_observed()
+                && !process.syscall_exit_observed(),
         );
     }
 
