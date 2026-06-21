@@ -1,7 +1,15 @@
+use crate::arch::riscv64::csr;
+
 use super::{
+    kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
+    page_table::{
+        copy_high_half_root_entries, page_table_storage_ready, sv39_indices, table_pte_from_phys,
+        user_leaf_pte_from_phys, PageTablePage,
+    },
     rest_init::KernelInitTask,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    static_page_tables,
     swapper_vm::SwapperVm,
 };
 
@@ -27,6 +35,7 @@ const MAX_LOAD_SEGMENTS: usize = 8;
 const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS + 1;
 const MAX_MAPPING_BACKING_PAGES: usize = 32;
 const MAX_STACK_PAGES: usize = USER_STACK_SIZE / USER_PAGE_SIZE;
+const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 1;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ElfError {
@@ -49,6 +58,8 @@ pub enum ElfError {
     MissingExecutableEntryMapping,
     InvalidStack,
     BackingAllocationFailed,
+    PageTableAllocationFailed,
+    PageTableInstallFailed,
     UserCopyOutOfRange,
 }
 
@@ -483,10 +494,36 @@ pub struct UserAddressSpace {
     elf_mapped: bool,
     elf_bss_zeroed: bool,
     runtime_ready: bool,
+    real_page_table_allocated: bool,
+    user_leaf_ptes_installed: bool,
+    high_half_root_entries_shared: bool,
+    satp_token_ready: bool,
+    prepared_but_not_current: bool,
+    satp_token: usize,
+    user_leaf_pte_count: usize,
+    page_table_root: Option<PageRef>,
+    page_table_l1: Option<PageRef>,
+    page_table_l0s: [UserL0TableSlot; MAX_USER_L0_TABLES],
+    page_table_l0_count: usize,
     mappings: [UserMapping; MAX_USER_MAPPINGS],
     mapping_count: usize,
     segment_mapping_count: usize,
     stack_mapping_index: usize,
+}
+
+#[derive(Clone, Copy)]
+struct UserL0TableSlot {
+    vpn1: usize,
+    page: Option<PageRef>,
+}
+
+impl UserL0TableSlot {
+    const fn empty() -> Self {
+        Self {
+            vpn1: 0,
+            page: None,
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -514,6 +551,17 @@ impl UserAddressSpace {
             elf_mapped: false,
             elf_bss_zeroed: false,
             runtime_ready: false,
+            real_page_table_allocated: false,
+            user_leaf_ptes_installed: false,
+            high_half_root_entries_shared: false,
+            satp_token_ready: false,
+            prepared_but_not_current: false,
+            satp_token: 0,
+            user_leaf_pte_count: 0,
+            page_table_root: None,
+            page_table_l1: None,
+            page_table_l0s: [UserL0TableSlot::empty(); MAX_USER_L0_TABLES],
+            page_table_l0_count: 0,
             mappings: [UserMapping::empty(); MAX_USER_MAPPINGS],
             mapping_count: 0,
             segment_mapping_count: 0,
@@ -603,6 +651,38 @@ impl UserAddressSpace {
 
     pub const fn runtime_ready(&self) -> bool {
         self.runtime_ready
+    }
+
+    pub const fn real_page_table_allocated(&self) -> bool {
+        self.real_page_table_allocated
+    }
+
+    pub const fn user_leaf_ptes_installed(&self) -> bool {
+        self.user_leaf_ptes_installed
+    }
+
+    pub const fn high_half_root_entries_shared(&self) -> bool {
+        self.high_half_root_entries_shared
+    }
+
+    pub const fn satp_token_ready(&self) -> bool {
+        self.satp_token_ready
+    }
+
+    pub const fn prepared_but_not_current(&self) -> bool {
+        self.prepared_but_not_current
+    }
+
+    pub const fn satp_token(&self) -> usize {
+        self.satp_token
+    }
+
+    pub const fn user_leaf_pte_count(&self) -> usize {
+        self.user_leaf_pte_count
+    }
+
+    pub const fn page_table_l0_count(&self) -> usize {
+        self.page_table_l0_count
     }
 
     pub const fn mapping_count(&self) -> usize {
@@ -751,6 +831,298 @@ impl UserAddressSpace {
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
             .map_err(|_| ElfError::InvalidState)
     }
+
+    pub fn enable(
+        &mut self,
+        trap_frame: &UserTrapFrame,
+        swapper_vm: &SwapperVm,
+        kernel_image: &KernelImage,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Result<(), ElfError> {
+        if self.lifecycle.state() != State::Ready
+            || trap_frame.state() != State::Ready
+            || swapper_vm.state() != State::Online
+            || page_allocator.state() != State::Ready
+            || page_metadata_map.state() != State::Ready
+            || !self.page_table_view_ready()
+            || !self.entry_mapping_executable()
+        {
+            return Err(ElfError::InvalidState);
+        }
+
+        self.release_page_table_pages(page_allocator, page_metadata_map);
+        if !self.allocate_base_page_tables(page_allocator, page_metadata_map) {
+            self.release_page_table_pages(page_allocator, page_metadata_map);
+            return Err(ElfError::PageTableAllocationFailed);
+        }
+        if !self.copy_swapper_high_half(kernel_image, page_metadata_map)
+            || !self.install_all_user_leaf_ptes(page_allocator, page_metadata_map)
+        {
+            self.release_page_table_pages(page_allocator, page_metadata_map);
+            return Err(ElfError::PageTableInstallFailed);
+        }
+
+        let Some(root) = self.page_table_root else {
+            self.release_page_table_pages(page_allocator, page_metadata_map);
+            return Err(ElfError::PageTableInstallFailed);
+        };
+        let root_phys = root.phys().value();
+        if root_phys == 0 {
+            self.release_page_table_pages(page_allocator, page_metadata_map);
+            return Err(ElfError::PageTableInstallFailed);
+        }
+
+        self.satp_token = csr::SATP_MODE_SV39 | (root_phys >> 12);
+        self.satp_token_ready = true;
+        self.real_page_table_allocated = true;
+        self.runtime_ready = true;
+        self.prepared_but_not_current = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+            .map_err(|_| ElfError::InvalidState)
+    }
+
+    fn allocate_base_page_tables(
+        &mut self,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let Some(root) = allocate_zeroed_page_table_page(page_allocator, page_metadata_map) else {
+            return false;
+        };
+        let Some(l1) = allocate_zeroed_page_table_page(page_allocator, page_metadata_map) else {
+            let _ = page_allocator.free_pages(root, 0, page_metadata_map);
+            return false;
+        };
+
+        self.page_table_root = Some(root);
+        self.page_table_l1 = Some(l1);
+        self.page_table_l0s = [UserL0TableSlot::empty(); MAX_USER_L0_TABLES];
+        self.page_table_l0_count = 0;
+        self.user_leaf_pte_count = 0;
+        true
+    }
+
+    fn copy_swapper_high_half(
+        &mut self,
+        kernel_image: &KernelImage,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let Some(root_page) = self.page_table_root else {
+            return false;
+        };
+        let Some(root_table) = page_table_page_mut(root_page, page_metadata_map) else {
+            return false;
+        };
+        let copied = copy_high_half_root_entries(
+            root_table,
+            static_page_tables::swapper_pg_dir(kernel_image),
+        );
+        self.high_half_root_entries_shared = copied != 0;
+        self.high_half_root_entries_shared
+    }
+
+    fn install_all_user_leaf_ptes(
+        &mut self,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = self.mappings[index];
+            if !self.install_mapping_ptes(mapping, page_allocator, page_metadata_map) {
+                return false;
+            }
+            index += 1;
+        }
+        self.user_leaf_ptes_installed = self.user_leaf_pte_count != 0
+            && self.user_leaf_pte_count
+                == total_mapping_page_count(&self.mappings, self.mapping_count);
+        self.user_leaf_ptes_installed
+    }
+
+    fn install_mapping_ptes(
+        &mut self,
+        mapping: UserMapping,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if mapping.kind() == UserMappingKind::Empty
+            || !mapping.user_accessible()
+            || mapping.backing_page_count() == 0
+            || mapping.vaddr().checked_sub(mapping.page_offset()).is_none()
+        {
+            return false;
+        }
+
+        let mut virt = mapping.vaddr() - mapping.page_offset();
+        let mut page_index = 0usize;
+        while page_index < mapping.backing_page_count() {
+            let Some(page) = mapping.backing_page(page_index) else {
+                return false;
+            };
+            if !self.install_user_leaf_pte(
+                virt,
+                page.phys().value(),
+                mapping.readable(),
+                mapping.writable(),
+                mapping.executable(),
+                page_allocator,
+                page_metadata_map,
+            ) {
+                return false;
+            }
+            let Some(next_virt) = virt.checked_add(USER_PAGE_SIZE) else {
+                return false;
+            };
+            virt = next_virt;
+            page_index += 1;
+        }
+        true
+    }
+
+    fn install_user_leaf_pte(
+        &mut self,
+        virt: usize,
+        phys: usize,
+        readable: bool,
+        writable: bool,
+        executable: bool,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> bool {
+        if virt % USER_PAGE_SIZE != 0 || phys % USER_PAGE_SIZE != 0 {
+            return false;
+        }
+        let (vpn2, vpn1, vpn0) = sv39_indices(virt);
+        if vpn2 != 0 {
+            return false;
+        }
+        let Some(root_page) = self.page_table_root else {
+            return false;
+        };
+        let Some(l1_page) = self.page_table_l1 else {
+            return false;
+        };
+        let Some(l0_page) = self.l0_page_for_vpn1(vpn1, page_allocator, page_metadata_map) else {
+            return false;
+        };
+        let Some(root_table) = page_table_page_mut(root_page, page_metadata_map) else {
+            return false;
+        };
+        if !root_table.set_entry(vpn2, table_pte_from_phys(l1_page.phys().value())) {
+            return false;
+        }
+        let Some(l1_table) = page_table_page_mut(l1_page, page_metadata_map) else {
+            return false;
+        };
+        if !l1_table.set_entry(vpn1, table_pte_from_phys(l0_page.phys().value())) {
+            return false;
+        }
+        let Some(leaf) = user_leaf_pte_from_phys(phys, readable, writable, executable) else {
+            return false;
+        };
+        let Some(l0_table) = page_table_page_mut(l0_page, page_metadata_map) else {
+            return false;
+        };
+        if !l0_table.set_entry(vpn0, leaf) {
+            return false;
+        }
+        self.user_leaf_pte_count += 1;
+        true
+    }
+
+    fn l0_page_for_vpn1(
+        &mut self,
+        vpn1: usize,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<PageRef> {
+        let mut index = 0usize;
+        while index < self.page_table_l0_count {
+            let slot = self.page_table_l0s[index];
+            if slot.page.is_some() && slot.vpn1 == vpn1 {
+                return slot.page;
+            }
+            index += 1;
+        }
+
+        if self.page_table_l0_count >= MAX_USER_L0_TABLES {
+            return None;
+        }
+        let page = allocate_zeroed_page_table_page(page_allocator, page_metadata_map)?;
+        self.page_table_l0s[self.page_table_l0_count] = UserL0TableSlot {
+            vpn1,
+            page: Some(page),
+        };
+        self.page_table_l0_count += 1;
+        Some(page)
+    }
+
+    fn release_page_table_pages(
+        &mut self,
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) {
+        let mut index = 0usize;
+        while index < self.page_table_l0_count {
+            if let Some(page) = self.page_table_l0s[index].page.take() {
+                let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            }
+            index += 1;
+        }
+        if let Some(page) = self.page_table_l1.take() {
+            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+        }
+        if let Some(page) = self.page_table_root.take() {
+            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+        }
+        self.page_table_l0s = [UserL0TableSlot::empty(); MAX_USER_L0_TABLES];
+        self.page_table_l0_count = 0;
+        self.user_leaf_pte_count = 0;
+        self.real_page_table_allocated = false;
+        self.user_leaf_ptes_installed = false;
+        self.high_half_root_entries_shared = false;
+        self.satp_token_ready = false;
+        self.prepared_but_not_current = false;
+        self.satp_token = 0;
+        self.runtime_ready = false;
+    }
+}
+
+fn allocate_zeroed_page_table_page(
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) -> Option<PageRef> {
+    let page = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map)?;
+    let Some(table) = page_table_page_mut(page, page_metadata_map) else {
+        let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+        return None;
+    };
+    table.clear();
+    Some(page)
+}
+
+fn page_table_page_mut(
+    page: PageRef,
+    page_metadata_map: &PageMetadataMap,
+) -> Option<&'static mut PageTablePage> {
+    let linear = page_metadata_map.page_address(page)?;
+    if !page_table_storage_ready(linear, USER_PAGE_SIZE) {
+        return None;
+    }
+    Some(unsafe { &mut *(linear as *mut PageTablePage) })
+}
+
+fn total_mapping_page_count(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: usize) -> usize {
+    let mut pages = 0usize;
+    let mut index = 0usize;
+    while index < count {
+        pages += mappings[index].backing_page_count();
+        index += 1;
+    }
+    pages
 }
 
 pub const SSTATUS_SPP_USER_CLEAR: usize = 0;

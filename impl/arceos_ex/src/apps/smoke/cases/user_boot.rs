@@ -120,6 +120,18 @@ impl SmokeScenario for UserBootElfScenario {
                 .setup(&ctx.user_address_space, &ctx.elf_object, &ctx.user_stack)
                 .is_ok(),
         );
+        assertions.assert(
+            "address space enable",
+            ctx.user_address_space
+                .enable(
+                    &ctx.user_trap_frame,
+                    ctx.vm.swapper_vm(),
+                    &ctx.kernel_image,
+                    &mut ctx.page_allocator,
+                    &ctx.page_metadata_map,
+                )
+                .is_ok(),
+        );
 
         let elf = &ctx.elf_object;
         assertions.assert("elf ready", elf.state() == State::Ready);
@@ -202,7 +214,7 @@ impl SmokeScenario for UserBootElfScenario {
         );
 
         let space = &ctx.user_address_space;
-        assertions.assert("address space ready", space.state() == State::Ready);
+        assertions.assert("address space online", space.state() == State::Online);
         assertions.assert(
             "address space allocated",
             space.allocated() && space.first_instance(),
@@ -239,7 +251,18 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert(
             "address space entry",
-            space.entry_mapping_executable() && !space.runtime_ready(),
+            space.entry_mapping_executable() && space.runtime_ready(),
+        );
+        assertions.assert(
+            "address space real page table",
+            space.real_page_table_allocated()
+                && space.user_leaf_ptes_installed()
+                && space.high_half_root_entries_shared()
+                && space.satp_token_ready()
+                && space.prepared_but_not_current()
+                && space.satp_token() != 0
+                && space.user_leaf_pte_count() >= space.mapping_count()
+                && space.page_table_l0_count() >= 1,
         );
         assertions.assert(
             "address space mapping count",

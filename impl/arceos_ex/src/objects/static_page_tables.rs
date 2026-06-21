@@ -114,6 +114,10 @@ pub(super) fn swapper_pg_dir_mut(kernel_image: &KernelImage) -> &'static mut Pag
     unsafe { &mut *(swapper_pg_dir_addr(kernel_image) as *mut PageTablePage) }
 }
 
+pub(super) fn swapper_pg_dir(kernel_image: &KernelImage) -> &'static PageTablePage {
+    unsafe { &*(swapper_pg_dir_addr(kernel_image) as *const PageTablePage) }
+}
+
 pub(super) fn swapper_kernel_pg_table_mut(
     kernel_image: &KernelImage,
 ) -> &'static mut PageTablePage {

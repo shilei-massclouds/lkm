@@ -80,6 +80,11 @@ predicate user_address_space_backing_pages_allocated<T>(space: T) -> bool;
 predicate user_address_space_elf_file_bytes_copied<T, E>(space: T, elf: E) -> bool;
 predicate user_address_space_bss_bytes_zeroed<T, E>(space: T, elf: E) -> bool;
 predicate user_address_space_page_table_view_ready<T>(space: T) -> bool;
+predicate user_address_space_real_page_table_allocated<T>(space: T) -> bool;
+predicate user_address_space_user_leaf_ptes_installed<T>(space: T) -> bool;
+predicate user_address_space_high_half_root_entries_shared<T, S>(space: T, swapper: S) -> bool;
+predicate user_address_space_satp_token_ready<T>(space: T) -> bool;
+predicate user_address_space_prepared_but_not_current<T>(space: T) -> bool;
 predicate user_address_space_runtime_ready<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
 
@@ -210,9 +215,17 @@ object UserAddressSpace: ResourceObject {
             on Event::Enable -> State::Online {
                 depends_on {
                     UserTrapFrame.state == State::Ready;
+                    SwapperVm.state == State::Online;
+                    PageAllocator.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
                 }
 
                 ensures {
+                    user_address_space_real_page_table_allocated(self);
+                    user_address_space_user_leaf_ptes_installed(self);
+                    user_address_space_high_half_root_entries_shared(self, SwapperVm);
+                    user_address_space_satp_token_ready(self);
+                    user_address_space_prepared_but_not_current(self);
                     user_address_space_runtime_ready(self);
                 }
             }
@@ -221,6 +234,11 @@ object UserAddressSpace: ResourceObject {
 
     state State::Online {
         invariant {
+            user_address_space_real_page_table_allocated(self);
+            user_address_space_user_leaf_ptes_installed(self);
+            user_address_space_high_half_root_entries_shared(self, SwapperVm);
+            user_address_space_satp_token_ready(self);
+            user_address_space_prepared_but_not_current(self);
             user_address_space_runtime_ready(self);
             user_address_space_first_instance(self);
             user_address_space_bound_to_kernel_init_task(self, KernelInitTask);

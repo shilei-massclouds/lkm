@@ -74,6 +74,8 @@ predicate arceos_ex_must_user_boot_payload_bind_kernel_init_task() -> bool;
 predicate arceos_ex_must_first_user_address_space_bind_kernel_init_task() -> bool;
 predicate arceos_ex_must_user_address_space_setup_consume_elf_load_plan() -> bool;
 predicate arceos_ex_must_user_address_space_setup_materialize_pre_switch_backing() -> bool;
+predicate arceos_ex_must_user_address_space_enable_build_real_page_table() -> bool;
+predicate arceos_ex_must_user_address_space_enable_prepare_satp_without_switch() -> bool;
 predicate arceos_ex_must_user_address_space_round_not_enter_user_mode() -> bool;
 predicate arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
@@ -734,20 +736,26 @@ type ArceosExStartupPhaseCodingMust {
          * without claiming that satp has already switched to a user page
          * table.
          *
-         * The first implementation round may stop at UserAddressSpace.Ready:
          * UserAddressSpace.Setup consumes ElfObject's PT_LOAD mapping plan and
          * records segment/stack mapping facts, user-page U permission facts and
-         * kernel-page U=0 facts. The pre-switch round extends that to allocate
-         * backing pages, copy ELF file bytes, zero .bss/stack bytes and build a
-         * page-table-shaped view that can be consumed by the next U-mode entry
-         * round. It must not mark runtime_ready, switch to a user page table,
-         * execute sret, or set up syscall/UserInitProcess state before the
-         * explicit trap/syscall round is modeled.
+         * kernel-page U=0 facts. It may allocate backing pages, copy ELF file
+         * bytes, zero .bss/stack bytes and build a page-table-shaped view.
+         *
+         * UserAddressSpace.Enable is the real pre-switch satp-ready boundary.
+         * It may allocate real Sv39 user page-table pages, install low-half
+         * user leaf PTEs, copy/share SwapperVm high-half root entries, produce
+         * a satp token and mark runtime_ready as "ready for the next trap
+         * return consumer". It MUST also preserve a prepared-but-not-current
+         * fact, and MUST NOT write satp, perform the address-space switching
+         * sfence.vma, execute sret, or set up syscall/UserInitProcess state
+         * before the explicit trap/syscall round is modeled.
          */
         arceos_ex_must_user_boot_payload_bind_kernel_init_task();
         arceos_ex_must_first_user_address_space_bind_kernel_init_task();
         arceos_ex_must_user_address_space_setup_consume_elf_load_plan();
         arceos_ex_must_user_address_space_setup_materialize_pre_switch_backing();
+        arceos_ex_must_user_address_space_enable_build_real_page_table();
+        arceos_ex_must_user_address_space_enable_prepare_satp_without_switch();
         arceos_ex_must_user_address_space_round_not_enter_user_mode();
         arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();

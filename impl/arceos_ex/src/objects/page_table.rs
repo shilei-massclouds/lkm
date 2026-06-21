@@ -13,11 +13,13 @@ const PTE_V: usize = 1 << 0;
 const PTE_R: usize = 1 << 1;
 const PTE_W: usize = 1 << 2;
 const PTE_X: usize = 1 << 3;
+const PTE_U: usize = 1 << 4;
 const PTE_A: usize = 1 << 6;
 const PTE_D: usize = 1 << 7;
 const PTE_TABLE: usize = PTE_V;
 const PTE_LEAF_RW: usize = PTE_V | PTE_R | PTE_W | PTE_A | PTE_D;
 const PTE_LEAF_RWX: usize = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D;
+const SV39_HIGH_HALF_ROOT_INDEX: usize = 256;
 
 #[repr(align(4096))]
 #[derive(Clone, Copy)]
@@ -34,6 +36,22 @@ impl PageTablePage {
 
     pub fn clear(&mut self) {
         self.entries.fill(0);
+    }
+
+    pub fn entry(&self, index: usize) -> Option<usize> {
+        if index < PAGE_TABLE_ENTRIES {
+            Some(self.entries[index])
+        } else {
+            None
+        }
+    }
+
+    pub fn set_entry(&mut self, index: usize, value: usize) -> bool {
+        if index >= PAGE_TABLE_ENTRIES {
+            return false;
+        }
+        self.entries[index] = value;
+        true
     }
 
     fn set(&mut self, index: usize, value: usize) {
@@ -594,6 +612,55 @@ pub fn aligned(value: usize, align: usize) -> bool {
 pub fn round_up(value: usize, align: usize) -> Option<usize> {
     let addend = align.checked_sub(1)?;
     value.checked_add(addend).map(|sum| sum & !addend)
+}
+
+pub fn sv39_indices(virt: usize) -> (usize, usize, usize) {
+    (
+        sv39_index(virt, 30),
+        sv39_index(virt, 21),
+        sv39_index(virt, 12),
+    )
+}
+
+pub fn table_pte_from_phys(table_phys: usize) -> usize {
+    table_pte(table_phys)
+}
+
+pub fn user_leaf_pte_from_phys(
+    phys: usize,
+    readable: bool,
+    writable: bool,
+    executable: bool,
+) -> Option<usize> {
+    if phys & 0xfff != 0 || (!readable && writable) || (!readable && !writable && !executable) {
+        return None;
+    }
+
+    let mut flags = PTE_V | PTE_U | PTE_A | PTE_D;
+    if readable {
+        flags |= PTE_R;
+    }
+    if writable {
+        flags |= PTE_W;
+    }
+    if executable {
+        flags |= PTE_X;
+    }
+    Some(leaf_pte(phys, flags))
+}
+
+pub fn copy_high_half_root_entries(dst: &mut PageTablePage, src: &PageTablePage) -> usize {
+    let mut copied = 0usize;
+    let mut index = SV39_HIGH_HALF_ROOT_INDEX;
+    while index < PAGE_TABLE_ENTRIES {
+        if let Some(entry) = src.entry(index) {
+            if entry != 0 && dst.set_entry(index, entry) {
+                copied += 1;
+            }
+        }
+        index += 1;
+    }
+    copied
 }
 
 fn sv39_index(virt: usize, shift: usize) -> usize {
