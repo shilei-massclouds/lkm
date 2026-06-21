@@ -7,8 +7,9 @@
  * treats the result as an ElfObject, builds a PT_LOAD mapping plan, maps that
  * plan into a UserAddressSpace, prepares a UserStack and UserTrapFrame, then
  * enters U-mode. Syscalls remain under the existing SyscallException branch of
- * ExceptionStream; this file only adds the minimal dispatcher/table objects
- * consumed by that branch.
+ * ExceptionStream. SyscallException owns syscall entry validation, argument
+ * extraction and dispatch selection; this slice only adds SyscallTable as the
+ * minimal action table consumed by that branch.
  *
  * The current root disk image is a whole-disk ext2 filesystem. PartitionTable
  * and BlockPartition objects are intentionally deferred until the disk image
@@ -104,21 +105,21 @@ predicate user_trap_frame_sret_ready<T>(frame: T) -> bool;
 predicate user_trap_frame_address_space_bound<T, A>(frame: T, space: A) -> bool;
 predicate user_trap_frame_prepared_but_not_entered<T>(frame: T) -> bool;
 
-predicate syscall_dispatcher_ready<T>(dispatcher: T) -> bool;
-predicate syscall_dispatcher_bound_to_exception<T, E>(dispatcher: T, exception: E) -> bool;
 predicate syscall_table_ready<T>(table: T) -> bool;
-predicate syscall_table_bound_to_dispatcher<T, D>(table: T, dispatcher: D) -> bool;
+predicate syscall_table_bound_to_exception<T, E>(table: T, exception: E) -> bool;
 predicate syscall_table_write_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_group_supported<T>(table: T) -> bool;
 predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
+predicate syscall_exception_dispatches_via_table<T, S>(exception: T, table: S) -> bool;
+predicate syscall_exception_extracts_arguments<T>(exception: T) -> bool;
 predicate user_trap_return_ready() -> bool;
 predicate user_trap_return_switches_satp() -> bool;
 predicate user_trap_entry_uses_kernel_stack<T>(frame: T) -> bool;
-predicate user_syscall_write_observed<T>(dispatcher: T) -> bool;
-predicate user_syscall_exit_observed<T>(dispatcher: T) -> bool;
+predicate user_syscall_write_observed<T>(table: T) -> bool;
+predicate user_syscall_exit_observed<T>(table: T) -> bool;
 predicate user_mode_entry_observed<T>(frame: T) -> bool;
 
 predicate user_init_process_online<T>(process: T) -> bool;
@@ -431,10 +432,12 @@ object SyscallTable: ResourceObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     ConsoleRegistry.state == State::Ready;
+                    SyscallException.state == State::Ready;
                 }
 
                 ensures {
                     syscall_table_ready(self);
+                    syscall_table_bound_to_exception(self, SyscallException);
                     syscall_table_write_supported(self);
                     syscall_table_exit_supported(self);
                     syscall_table_exit_group_supported(self);
@@ -449,6 +452,7 @@ object SyscallTable: ResourceObject {
     state State::Ready {
         invariant {
             syscall_table_ready(self);
+            syscall_table_bound_to_exception(self, SyscallException);
             syscall_table_write_supported(self);
             syscall_table_exit_supported(self);
             syscall_table_exit_group_supported(self);
@@ -456,36 +460,41 @@ object SyscallTable: ResourceObject {
             syscall_write_routes_to_console(self);
             syscall_exit_records_status(self);
         }
-    }
-}
 
-object SyscallDispatcher: ResourceObject {
-    initial_state: State::Base;
-
-    state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        actions {
+            on Action::Write {
                 depends_on {
-                    SyscallException.state == State::Ready;
-                    SyscallTable.state == State::Ready;
+                    SyscallException.state == State::Online;
                 }
 
                 ensures {
-                    syscall_dispatcher_ready(self);
-                    syscall_dispatcher_bound_to_exception(self, SyscallException);
-                    syscall_table_bound_to_dispatcher(SyscallTable, self);
-                    syscall_table_ready();
+                    syscall_write_usercopy_ready(self);
+                    syscall_write_routes_to_console(self);
+                    user_syscall_write_observed(self);
                 }
             }
-        }
-    }
 
-    state State::Ready {
-        invariant {
-            syscall_dispatcher_ready(self);
-            syscall_dispatcher_bound_to_exception(self, SyscallException);
-            syscall_table_bound_to_dispatcher(SyscallTable, self);
-            syscall_table_ready();
+            on Action::Exit {
+                depends_on {
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    syscall_exit_records_status(self);
+                    user_syscall_exit_observed(self);
+                }
+            }
+
+            on Action::ExitGroup {
+                depends_on {
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    syscall_exit_records_status(self);
+                    user_syscall_exit_observed(self);
+                }
+            }
         }
     }
 }
@@ -522,7 +531,7 @@ object UserInitProcess: ResourceObject {
             on Event::Enable -> State::Online {
                 depends_on {
                     UserTrapFrame.state == State::Ready;
-                    SyscallDispatcher.state == State::Ready;
+                    SyscallTable.state == State::Ready;
                     SyscallException.state == State::Online;
                 }
 
@@ -531,8 +540,10 @@ object UserInitProcess: ResourceObject {
                     user_mode_entry_observed(UserTrapFrame);
                     user_trap_return_switches_satp();
                     user_trap_entry_uses_kernel_stack(UserTrapFrame);
-                    user_syscall_write_observed(SyscallDispatcher);
-                    user_syscall_exit_observed(SyscallDispatcher);
+                    syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
+                    syscall_exception_extracts_arguments(SyscallException);
+                    user_syscall_write_observed(SyscallTable);
+                    user_syscall_exit_observed(SyscallTable);
                 }
             }
         }
@@ -544,8 +555,9 @@ object UserInitProcess: ResourceObject {
             user_init_process_reuses_kernel_init_task(self, KernelInitTask);
             user_init_process_address_space_bound(self, UserAddressSpace);
             user_mode_entry_observed(UserTrapFrame);
-            user_syscall_write_observed(SyscallDispatcher);
-            user_syscall_exit_observed(SyscallDispatcher);
+            syscall_exception_dispatches_via_table(SyscallException, SyscallTable);
+            user_syscall_write_observed(SyscallTable);
+            user_syscall_exit_observed(SyscallTable);
         }
     }
 }
@@ -631,7 +643,6 @@ object UserBootPayload: ResourceObject {
                     UserAddressSpace.Event::Enable;
                     SyscallException.Event::Setup;
                     SyscallTable.Event::Setup;
-                    SyscallDispatcher.Event::Setup;
                     SyscallException.Event::Enable;
                     UserInitProcess.Event::Setup;
                     UserInitProcess.Event::Enable;
@@ -641,7 +652,7 @@ object UserBootPayload: ResourceObject {
                     ElfObject.state == State::Online;
                     UserAddressSpace.state == State::Online;
                     UserTrapFrame.state == State::Ready;
-                    SyscallDispatcher.state == State::Ready;
+                    SyscallTable.state == State::Ready;
                     SyscallException.state == State::Online;
                     UserInitProcess.state == State::Online;
                     user_boot_payload_reads_init_from_vfs(self, VfsCore);

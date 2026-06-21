@@ -699,7 +699,7 @@ object SyscallException: FlowObject {
             on Event::Enable -> State::Online {
                 depends_on {
                     user_trap_return_ready();
-                    syscall_table_ready();
+                    SyscallTable.state == State::Ready;
                 }
 
                 ensures {

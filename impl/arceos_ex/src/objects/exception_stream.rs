@@ -51,6 +51,133 @@ const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
 const USER_COPY_MAX: usize = 256;
 
+static SYSCALL_TABLE_READY: AtomicU8 = AtomicU8::new(0);
+
+pub struct SyscallTable {
+    lifecycle: Lifecycle,
+    #[allow(dead_code)]
+    bound_to_exception: bool,
+    write_supported: bool,
+    exit_supported: bool,
+    exit_group_supported: bool,
+    write_usercopy_ready: bool,
+    write_routes_to_console: bool,
+    exit_records_status: bool,
+}
+
+impl SyscallTable {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            bound_to_exception: false,
+            write_supported: false,
+            exit_supported: false,
+            exit_group_supported: false,
+            write_usercopy_ready: false,
+            write_routes_to_console: false,
+            exit_records_status: false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    #[allow(dead_code)]
+    pub const fn bound_to_exception(&self) -> bool {
+        self.bound_to_exception
+    }
+
+    #[allow(dead_code)]
+    pub const fn write_supported(&self) -> bool {
+        self.write_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn exit_supported(&self) -> bool {
+        self.exit_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn exit_group_supported(&self) -> bool {
+        self.exit_group_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn write_usercopy_ready(&self) -> bool {
+        self.write_usercopy_ready
+    }
+
+    #[allow(dead_code)]
+    pub const fn write_routes_to_console(&self) -> bool {
+        self.write_routes_to_console
+    }
+
+    #[allow(dead_code)]
+    pub const fn exit_records_status(&self) -> bool {
+        self.exit_records_status
+    }
+
+    #[allow(dead_code)]
+    pub fn setup(&mut self, syscall_exception_state: State) -> EventResult {
+        if self.lifecycle.state() != State::Base || syscall_exception_state != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.bound_to_exception = true;
+        self.write_supported = true;
+        self.exit_supported = true;
+        self.exit_group_supported = true;
+        self.write_usercopy_ready = true;
+        self.write_routes_to_console = true;
+        self.exit_records_status = true;
+        SYSCALL_TABLE_READY.store(1, Ordering::Relaxed);
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    pub fn write(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.write_supported
+            || !self.write_usercopy_ready
+            || !self.write_routes_to_console
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_write(frame);
+    }
+
+    pub fn exit(&self, frame: &mut TrapFrame) -> ! {
+        if self.lifecycle.state() != State::Ready
+            || !self.exit_supported
+            || !self.exit_records_status
+        {
+            panic_dispatch("syscall exit table entry not ready\n");
+        }
+
+        syscall_table_exit(frame)
+    }
+
+    pub fn exit_group(&self, frame: &mut TrapFrame) -> ! {
+        if self.lifecycle.state() != State::Ready
+            || !self.exit_group_supported
+            || !self.exit_records_status
+        {
+            panic_dispatch("syscall exit_group table entry not ready\n");
+        }
+
+        syscall_table_exit(frame)
+    }
+}
+
 pub struct ExceptionStream {
     lifecycle: Lifecycle,
     page_fault: ExceptionKind,
@@ -155,17 +282,18 @@ impl ExceptionStream {
     }
 
     #[cfg(app_user_boot)]
-    pub fn syscall_setup(&mut self) -> EventResult {
+    pub fn syscall_setup(&mut self, table: &mut SyscallTable) -> EventResult {
         self.syscall.setup(
             self.lifecycle.state(),
             ExceptionHandlerBinding::Causes(&SYSCALL_CAUSES),
             SYSCALL_POLICY,
-        )
+        )?;
+        table.setup(self.syscall.state())
     }
 
     #[cfg(app_user_boot)]
-    pub fn syscall_enable(&mut self) -> EventResult {
-        self.syscall.enable(self.lifecycle.state())
+    pub fn syscall_enable(&mut self, table: &SyscallTable) -> EventResult {
+        self.syscall.enable(self.lifecycle.state(), table)
     }
 
     pub fn page_fault_state(&self) -> State {
@@ -234,8 +362,16 @@ impl ExceptionKind {
     }
 
     #[cfg(app_user_boot)]
-    fn enable(&mut self, exception_stream_state: State) -> EventResult {
-        if exception_stream_state != State::Ready || self.lifecycle.state() != State::Ready {
+    fn enable(
+        &mut self,
+        exception_stream_state: State,
+        syscall_table: &SyscallTable,
+    ) -> EventResult {
+        if exception_stream_state != State::Ready
+            || self.lifecycle.state() != State::Ready
+            || syscall_table.state() != State::Ready
+            || !syscall_table.bound_to_exception()
+        {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -322,6 +458,14 @@ fn dispatch_handler_frame(handler: u8, frame: &mut TrapFrame) {
     }
 }
 
+fn syscall_table_ref() -> Option<&'static SyscallTable> {
+    if SYSCALL_TABLE_READY.load(Ordering::Relaxed) == 0 {
+        return None;
+    }
+
+    Some(&crate::context::context_ref().syscall_table)
+}
+
 fn default_exception_handler(frame: &TrapFrame) -> ! {
     panic_dispatch_frame("exception fallback panic", frame)
 }
@@ -335,30 +479,35 @@ fn syscall_disabled_exception_handler(frame: &TrapFrame) -> ! {
 }
 
 fn syscall_exception_handler(frame: &mut TrapFrame) {
+    let Some(table) = syscall_table_ref() else {
+        panic_dispatch("syscall table not ready\n");
+    };
+
     match frame.reg(17) {
-        SYSCALL_WRITE => syscall_write(frame),
-        SYSCALL_EXIT | SYSCALL_EXIT_GROUP => syscall_exit(frame),
-        _ => {
-            frame.set_reg(10, usize::MAX);
-            frame.sepc = frame.sepc.wrapping_add(4);
-        }
+        SYSCALL_WRITE => table.write(frame),
+        SYSCALL_EXIT => table.exit(frame),
+        SYSCALL_EXIT_GROUP => table.exit_group(frame),
+        _ => complete_unsupported_syscall(frame),
     }
 }
 
-fn syscall_write(frame: &mut TrapFrame) {
+fn complete_unsupported_syscall(frame: &mut TrapFrame) {
+    frame.set_reg(10, usize::MAX);
+    frame.sepc = frame.sepc.wrapping_add(4);
+}
+
+fn syscall_table_write(frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let user_ptr = frame.reg(11);
     let len = frame.reg(12);
     if !(fd == 1 || fd == 2) || len > USER_COPY_MAX {
-        frame.set_reg(10, usize::MAX);
-        frame.sepc = frame.sepc.wrapping_add(4);
+        complete_unsupported_syscall(frame);
         return;
     }
 
     let mut buffer = [0u8; USER_COPY_MAX];
     if !copy_from_user(user_ptr, &mut buffer[..len]) {
-        frame.set_reg(10, usize::MAX);
-        frame.sepc = frame.sepc.wrapping_add(4);
+        complete_unsupported_syscall(frame);
         return;
     }
 
@@ -368,7 +517,7 @@ fn syscall_write(frame: &mut TrapFrame) {
     frame.sepc = frame.sepc.wrapping_add(4);
 }
 
-fn syscall_exit(frame: &mut TrapFrame) -> ! {
+fn syscall_table_exit(frame: &mut TrapFrame) -> ! {
     crate::trace::checkpoint(Checkpoint::UserSyscallExit);
     let status = frame.reg(10);
     crate::arch::riscv64::sbi::putstr("user exit status=");

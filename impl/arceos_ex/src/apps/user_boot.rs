@@ -21,5 +21,6 @@ pub fn run() -> ! {
         &ctx.page_metadata_map,
         &ctx.kernel_global_allocator,
         &mut ctx.exception_stream,
+        &mut ctx.syscall_table,
     )
 }

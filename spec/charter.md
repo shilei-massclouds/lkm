@@ -2896,7 +2896,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 7. `用户地址空间对象`（暂名 `UserAddressSpace`）：表示每个用户态进程独立的低地址用户区映射。它是多实例对象；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续表示内核共享地址空间实例，不改成普通多实例用户地址空间。首轮仅要求最小用户页表、用户页 `U` 权限、内核页 `U=0`、ELF 段映射和用户栈映射；完整 VMA 树、`mmap`、COW 和 page fault recovery 后续再展开。
 8. `用户栈对象`（暂名 `UserStack`）：表示第一个用户程序的初始用户栈。首轮可以只建立固定大小栈和最小 argv/envp 布局；完整 auxv、随机化、guard page 和动态栈扩展后续再展开。
 9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。它是 `UserBootPayload` 执行最终 `sret` 的输入。
-10. `系统调用分发对象`（暂名 `SyscallDispatcher` / `SyscallTable`）：表示 `SyscallException` 下的分发表和最小 handler 集合。syscall 不作为新的根对象建模，而是 `ExceptionStream` 的具体异常分支；首轮只要求 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。
+10. `系统调用入口与表对象`（`SyscallException` / `SyscallTable`）：`SyscallException` 是 `ExceptionStream` 下已有的 ecall/syscall 异常对象，负责用户态 syscall 入口、来源检查、参数提取和分发选择；不再单独建立 `SyscallDispatcher` 对象。`SyscallTable` 是独立分发表对象，承载当前支持的 syscall action 集合；具体 syscall 不是资源对象，而是 `SyscallTable.Action::Write`、`SyscallTable.Action::Exit`、`SyscallTable.Action::ExitGroup` 等 action。首轮只要求 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。
 11. `用户态 init 进程对象`（暂名 `UserInitProcess`）：表示 PID 1 在进入用户态 ELF 成功后的用户态身份。它是本阶段 Linux-like 路径的核心结果对象，不是新建 task，而是 `KernelInitTask` 在 exec 成功后发生身份转换和不可逆交接的结果。`KernelInitTask.exec_to(UserInitProcess, path, argv, envp)` 是 identity transition action，不作为 `KernelInitTask` 的标准生命周期 slot；成功后 `UserInitProcess.state == Online`。
 12. `payload 失败终端`（暂名 `PayloadPanic`）：覆盖 Linux-like 路径中 `init=` 指定 init 失败或所有候选 init 均失败后的 panic。它是失败终端，不是正常生命周期对象。
 
@@ -2950,7 +2950,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 - Linux-like 路径下，`ElfObject.state == Online`
 - Linux-like 路径下，`UserAddressSpace.state == Online`
 - Linux-like 路径下，`UserTrapFrame` 已绑定 entry 和用户栈
-- Linux-like 路径下，`SyscallException` 通过 `SyscallDispatcher` / `SyscallTable` 支持最小 `write` 与 `exit/exit_group`
+- Linux-like 路径下，`SyscallException` 绑定 `SyscallTable`，并通过 `SyscallTable` actions 支持最小 `write` 与 `exit/exit_group`
 - Unikernel 路径下，`UnikernelApp.state == Online`，但不要求存在 `UserInitProcess`
 - 如果 Linux-like 路径进入 `PayloadPanic`，则该路径是失败终端，不满足 `PayloadPhase.state == Online`
 

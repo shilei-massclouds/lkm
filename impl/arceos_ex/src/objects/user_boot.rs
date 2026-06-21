@@ -3,7 +3,7 @@ use crate::arch::riscv64::csr;
 #[cfg(app_user_boot)]
 use super::{
     block_device::BlockDeviceRegistry,
-    exception_stream::ExceptionStream,
+    exception_stream::{ExceptionStream, SyscallTable},
     ext2::{Ext2FileSystem, EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS},
     vfs::{FsStruct, VfsCore},
     virtio_blk,
@@ -1651,11 +1651,13 @@ impl UserBootPayload {
         address_space: &UserAddressSpace,
         trap_frame: &UserTrapFrame,
         exception_stream: &ExceptionStream,
+        syscall_table: &SyscallTable,
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || elf.state() != State::Online
             || address_space.state() != State::Online
             || trap_frame.state() != State::Ready
+            || syscall_table.state() != State::Ready
             || exception_stream.syscall_state() != State::Online
         {
             return failed_condition(
@@ -1692,6 +1694,7 @@ pub fn run_first_user_init(
     page_metadata_map: &PageMetadataMap,
     kernel_global_allocator: &KernelGlobalAllocator,
     exception_stream: &mut ExceptionStream,
+    syscall_table: &mut SyscallTable,
 ) -> ! {
     if payload.setup(kernel_init_task).is_err() {
         user_boot_panic("user payload setup failed\n");
@@ -1751,14 +1754,20 @@ pub fn run_first_user_init(
     {
         user_boot_panic("user address space enable failed\n");
     }
-    if exception_stream.syscall_setup().is_err() {
+    if exception_stream.syscall_setup(syscall_table).is_err() {
         user_boot_panic("user syscall setup failed\n");
     }
-    if exception_stream.syscall_enable().is_err() {
+    if exception_stream.syscall_enable(syscall_table).is_err() {
         user_boot_panic("user syscall enable failed\n");
     }
     if payload
-        .enable_for_user_entry(elf, address_space, trap_frame, exception_stream)
+        .enable_for_user_entry(
+            elf,
+            address_space,
+            trap_frame,
+            exception_stream,
+            syscall_table,
+        )
         .is_err()
     {
         user_boot_panic("user payload enable failed\n");

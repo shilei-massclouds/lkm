@@ -81,6 +81,8 @@ predicate arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret() -> bool;
 predicate arceos_ex_must_user_mode_entry_use_existing_trap_return_path() -> bool;
 predicate arceos_ex_must_user_trap_entry_switch_to_kernel_stack() -> bool;
 predicate arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch() -> bool;
+predicate arceos_ex_must_not_generate_syscall_dispatcher_object() -> bool;
+predicate arceos_ex_must_syscall_table_hold_concrete_syscall_actions() -> bool;
 predicate arceos_ex_must_user_syscall_write_copy_from_user_address_space() -> bool;
 predicate arceos_ex_must_user_syscall_exit_stop_first_user_process() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
@@ -773,9 +775,13 @@ type ArceosExStartupPhaseCodingMust {
          * User ecall must enter the existing ExceptionStream ->
          * SyscallException branch and install a concrete syscall policy there.
          * Code generation MUST NOT create a new root Syscall object or bypass
-         * ExceptionStream dispatch. The first dispatcher only handles
-         * write(1/2, user_buf, len) by copying bytes from the current
-         * UserAddressSpace and routing them to the existing console path, plus
+         * ExceptionStream dispatch. It also MUST NOT create a separate
+         * SyscallDispatcher object: SyscallException owns syscall entry,
+         * source validation, argument extraction and dispatch selection.
+         * SyscallTable is the independent table object and concrete syscalls
+         * are SyscallTable actions. The first table only handles write(1/2,
+         * user_buf, len) by copying bytes from the current UserAddressSpace
+         * and routing them to the existing console path, plus
          * exit/exit_group(status) by recording/stopping the first user process
          * boundary. It does not implement a full fd table, devfs console file,
          * TTY line discipline, fork/wait or signal semantics.
@@ -791,6 +797,8 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_user_mode_entry_use_existing_trap_return_path();
         arceos_ex_must_user_trap_entry_switch_to_kernel_stack();
         arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch();
+        arceos_ex_must_not_generate_syscall_dispatcher_object();
+        arceos_ex_must_syscall_table_hold_concrete_syscall_actions();
         arceos_ex_must_user_syscall_write_copy_from_user_address_space();
         arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
