@@ -4,7 +4,7 @@ use crate::{
     objects::{
         ext2::{
             EXT2_ALPINE_RELEASE_FILE_CONTENT, EXT2_ALPINE_RELEASE_FILE_NAME,
-            EXT2_ALPINE_RELEASE_PATH,
+            EXT2_ALPINE_RELEASE_PATH, EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS,
         },
         printk,
         rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
@@ -17,6 +17,17 @@ use crate::{
 
 static mut ROOTFS_READ_BUFFER: [u8; EXT2_ALPINE_RELEASE_FILE_CONTENT.len()] =
     [0; EXT2_ALPINE_RELEASE_FILE_CONTENT.len()];
+static mut ROOTFS_INIT_READ_BUFFER: [u8; TEMP_USER_INIT_MAX_READ] = [0; TEMP_USER_INIT_MAX_READ];
+
+const TEMP_USER_INIT_PATH: &[u8] = b"/init";
+const TEMP_USER_INIT_FILE_NAME: &[u8] = b"init";
+const TEMP_USER_INIT_MAX_READ: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
+const ELF_HEADER_LEN: usize = 64;
+const ELF_CLASS_64: u8 = 2;
+const ELF_DATA_LSB: u8 = 1;
+const ELF_VERSION_CURRENT: u8 = 1;
+const ELF_TYPE_EXEC: u16 = 2;
+const ELF_MACHINE_RISCV: u16 = 243;
 
 pub fn run() -> SmokeResult {
     let ctx = context();
@@ -228,6 +239,29 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    let init_buffer = unsafe {
+        let ptr = core::ptr::addr_of_mut!(ROOTFS_INIT_READ_BUFFER);
+        &mut *ptr
+    };
+    init_buffer.fill(0);
+    match ctx.vfs_core.read_path(
+        &ctx.fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &mut provider,
+        TEMP_USER_INIT_PATH,
+        init_buffer,
+    ) {
+        Ok(len)
+            if len >= ELF_HEADER_LEN
+                && is_temp_user_init_elf(&init_buffer[..len])
+                && ctx.ext2_filesystem.lookup_dirent().name() == TEMP_USER_INIT_FILE_NAME => {}
+        _ => {
+            printk::write_str("rootfs temporary /init ELF read failed\n");
+            return SmokeResult::Failed;
+        }
+    }
+
     if ctx.integrity_keys_deferred.state() != State::Ready
         || !ctx.integrity_keys_deferred.setup_deferred()
         || !ctx.integrity_keys_deferred.load_keys_position_preserved()
@@ -243,6 +277,22 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    printk::write_str("rootfs next=finalize current_root=ext2 read=/etc/alpine-release\n");
+    printk::write_str("rootfs next=finalize current_root=ext2 read=/etc/alpine-release init=elf\n");
     SmokeResult::Passed
+}
+
+fn is_temp_user_init_elf(buffer: &[u8]) -> bool {
+    if buffer.len() < ELF_HEADER_LEN {
+        return false;
+    }
+    if &buffer[0..4] != b"\x7fELF"
+        || buffer[4] != ELF_CLASS_64
+        || buffer[5] != ELF_DATA_LSB
+        || buffer[6] != ELF_VERSION_CURRENT
+    {
+        return false;
+    }
+
+    u16::from_le_bytes([buffer[16], buffer[17]]) == ELF_TYPE_EXEC
+        && u16::from_le_bytes([buffer[18], buffer[19]]) == ELF_MACHINE_RISCV
 }

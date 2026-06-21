@@ -54,6 +54,10 @@ TAR ?= tar
 MKFS_EXT2 ?= mkfs.ext2
 EXT2_MKFS_FEATURE_ARGS ?= -O ^dir_index
 EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
+TEMP_USER_INIT_SRC := fixtures/user_init.S
+TEMP_USER_INIT_ELF := build/rootfs-fixtures/init
+TEMP_USER_INIT_CC ?= riscv64-linux-gnu-gcc
+TEMP_USER_INIT_CFLAGS ?= -nostdlib -static -march=rv64imac -mabi=lp64 -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
@@ -112,13 +116,20 @@ $(ROOTFS_TARBALL):
 	$(WGET) -O $@.tmp $(ROOTFS_URL)
 	mv $@.tmp $@
 
+$(TEMP_USER_INIT_ELF): $(TEMP_USER_INIT_SRC)
+	mkdir -p $(dir $@)
+	$(TEMP_USER_INIT_CC) $(TEMP_USER_INIT_CFLAGS) -o $@ $<
+
 $(VIRTIO_BLK_IMAGE):
 	mkdir -p $(dir $@)
 ifeq ($(FS_TYPE),ext2)
 	$(MAKE) rootfs-tarball ROOTFS_TARBALL="$(ROOTFS_TARBALL)" ROOTFS_URL="$(ROOTFS_URL)" WGET="$(WGET)"
+	$(MAKE) $(TEMP_USER_INIT_ELF) TEMP_USER_INIT_CC="$(TEMP_USER_INIT_CC)" TEMP_USER_INIT_CFLAGS="$(TEMP_USER_INIT_CFLAGS)"
 	rm -rf $(ROOTFS_STAGING_DIR)
 	mkdir -p $(ROOTFS_STAGING_DIR)
 	$(TAR) --no-same-owner -xzf $(ROOTFS_TARBALL) -C $(ROOTFS_STAGING_DIR)
+	cp $(TEMP_USER_INIT_ELF) $(ROOTFS_STAGING_DIR)/init
+	chmod 0755 $(ROOTFS_STAGING_DIR)/init
 	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $@
 	$(MKFS_EXT2) -q -F $(EXT2_MKFS_FEATURE_ARGS) $(EXT2_MKFS_BLOCK_ARGS) -d $(ROOTFS_STAGING_DIR) $@
 else ifeq ($(FS_TYPE),none)
