@@ -1,9 +1,16 @@
-use super::state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State};
+use super::{
+    mm_core::{KernelGlobalAllocator, PageAllocator},
+    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    swapper_vm::SwapperVm,
+};
 
 pub const USER_INIT_PATH: &[u8] = b"/init";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
 
 pub const ELF_HEADER_LEN: usize = 64;
+pub const USER_STACK_SIZE: usize = 16 * 1024;
+pub const USER_STACK_TOP: usize = 0x4000_0000;
+pub const USER_PAGE_SIZE: usize = 4096;
 const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 const ELF_CLASS_64: u8 = 2;
 const ELF_DATA_LSB: u8 = 1;
@@ -16,6 +23,7 @@ const ELF_PF_W: u32 = 2;
 const ELF_PF_R: u32 = 4;
 const ELF64_PHDR_SIZE: usize = 56;
 const MAX_LOAD_SEGMENTS: usize = 8;
+const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS + 1;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ElfError {
@@ -33,6 +41,9 @@ pub enum ElfError {
     MissingLoadSegment,
     EntryOutsideExecutableSegment,
     MissingExpectedContent,
+    TooManyMappings,
+    MissingExecutableEntryMapping,
+    InvalidStack,
 }
 
 #[derive(Clone, Copy)]
@@ -104,6 +115,445 @@ impl ElfLoadSegment {
 
     const fn contains_vaddr(&self, addr: usize) -> bool {
         self.vaddr <= addr && addr < self.vaddr_end()
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum UserMappingKind {
+    Empty,
+    ElfSegment,
+    Stack,
+}
+
+#[derive(Clone, Copy)]
+pub struct UserMapping {
+    kind: UserMappingKind,
+    vaddr: usize,
+    memsz: usize,
+    file_offset: usize,
+    filesz: usize,
+    readable: bool,
+    writable: bool,
+    executable: bool,
+    user_accessible: bool,
+    bss_zero_bytes: usize,
+}
+
+impl UserMapping {
+    const fn empty() -> Self {
+        Self {
+            kind: UserMappingKind::Empty,
+            vaddr: 0,
+            memsz: 0,
+            file_offset: 0,
+            filesz: 0,
+            readable: false,
+            writable: false,
+            executable: false,
+            user_accessible: false,
+            bss_zero_bytes: 0,
+        }
+    }
+
+    const fn from_segment(segment: ElfLoadSegment) -> Self {
+        Self {
+            kind: UserMappingKind::ElfSegment,
+            vaddr: segment.vaddr,
+            memsz: segment.memsz,
+            file_offset: segment.offset,
+            filesz: segment.filesz,
+            readable: segment.readable(),
+            writable: segment.writable(),
+            executable: segment.executable(),
+            user_accessible: true,
+            bss_zero_bytes: segment.memsz - segment.filesz,
+        }
+    }
+
+    const fn from_stack(stack: &UserStack) -> Self {
+        Self {
+            kind: UserMappingKind::Stack,
+            vaddr: stack.base,
+            memsz: stack.size,
+            file_offset: 0,
+            filesz: 0,
+            readable: true,
+            writable: true,
+            executable: false,
+            user_accessible: true,
+            bss_zero_bytes: stack.size,
+        }
+    }
+
+    pub const fn kind(&self) -> UserMappingKind {
+        self.kind
+    }
+
+    pub const fn vaddr(&self) -> usize {
+        self.vaddr
+    }
+
+    pub const fn memsz(&self) -> usize {
+        self.memsz
+    }
+
+    pub const fn file_offset(&self) -> usize {
+        self.file_offset
+    }
+
+    pub const fn filesz(&self) -> usize {
+        self.filesz
+    }
+
+    pub const fn readable(&self) -> bool {
+        self.readable
+    }
+
+    pub const fn writable(&self) -> bool {
+        self.writable
+    }
+
+    pub const fn executable(&self) -> bool {
+        self.executable
+    }
+
+    pub const fn user_accessible(&self) -> bool {
+        self.user_accessible
+    }
+
+    pub const fn bss_zero_bytes(&self) -> usize {
+        self.bss_zero_bytes
+    }
+
+    pub const fn end_vaddr(&self) -> usize {
+        self.vaddr + self.memsz
+    }
+
+    const fn contains_vaddr(&self, addr: usize) -> bool {
+        self.vaddr <= addr && addr < self.end_vaddr()
+    }
+}
+
+pub struct UserStack {
+    lifecycle: Lifecycle,
+    base: usize,
+    top: usize,
+    size: usize,
+    allocated: bool,
+    fixed_size_bound: bool,
+    mapped_into_address_space: bool,
+    initial_sp_bound: bool,
+    minimal_arg_env_bound: bool,
+}
+
+#[allow(dead_code)]
+impl UserStack {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            base: 0,
+            top: 0,
+            size: 0,
+            allocated: false,
+            fixed_size_bound: false,
+            mapped_into_address_space: false,
+            initial_sp_bound: false,
+            minimal_arg_env_bound: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn base(&self) -> usize {
+        self.base
+    }
+
+    pub const fn top(&self) -> usize {
+        self.top
+    }
+
+    pub const fn size(&self) -> usize {
+        self.size
+    }
+
+    pub const fn initial_sp(&self) -> usize {
+        self.top
+    }
+
+    pub const fn allocated(&self) -> bool {
+        self.allocated
+    }
+
+    pub const fn fixed_size_bound(&self) -> bool {
+        self.fixed_size_bound
+    }
+
+    pub const fn mapped_into_address_space(&self) -> bool {
+        self.mapped_into_address_space
+    }
+
+    pub const fn initial_sp_bound(&self) -> bool {
+        self.initial_sp_bound
+    }
+
+    pub const fn minimal_arg_env_bound(&self) -> bool {
+        self.minimal_arg_env_bound
+    }
+
+    pub fn setup(
+        &mut self,
+        address_space: &UserAddressSpace,
+        page_allocator: &PageAllocator,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || address_space.state() != State::Prepared
+            || page_allocator.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.size = USER_STACK_SIZE;
+        self.top = USER_STACK_TOP;
+        self.base = USER_STACK_TOP - USER_STACK_SIZE;
+        self.allocated = true;
+        self.fixed_size_bound = true;
+        self.mapped_into_address_space = true;
+        self.initial_sp_bound = true;
+        self.minimal_arg_env_bound = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
+
+pub struct UserAddressSpace {
+    lifecycle: Lifecycle,
+    allocated: bool,
+    low_half_private: bool,
+    high_half_shares_swapper: bool,
+    kernel_pages_u_disabled: bool,
+    user_pages_u_enabled: bool,
+    elf_load_plan_consumed: bool,
+    segment_mappings_bound: bool,
+    entry_mapping_executable: bool,
+    bss_zero_plan_consumed: bool,
+    elf_segments_mapped: bool,
+    stack_mapped: bool,
+    elf_mapped: bool,
+    elf_bss_zeroed: bool,
+    runtime_ready: bool,
+    mappings: [UserMapping; MAX_USER_MAPPINGS],
+    mapping_count: usize,
+    segment_mapping_count: usize,
+    stack_mapping_index: usize,
+}
+
+#[allow(dead_code)]
+impl UserAddressSpace {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            allocated: false,
+            low_half_private: false,
+            high_half_shares_swapper: false,
+            kernel_pages_u_disabled: false,
+            user_pages_u_enabled: false,
+            elf_load_plan_consumed: false,
+            segment_mappings_bound: false,
+            entry_mapping_executable: false,
+            bss_zero_plan_consumed: false,
+            elf_segments_mapped: false,
+            stack_mapped: false,
+            elf_mapped: false,
+            elf_bss_zeroed: false,
+            runtime_ready: false,
+            mappings: [UserMapping::empty(); MAX_USER_MAPPINGS],
+            mapping_count: 0,
+            segment_mapping_count: 0,
+            stack_mapping_index: 0,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn allocated(&self) -> bool {
+        self.allocated
+    }
+
+    pub const fn low_half_private(&self) -> bool {
+        self.low_half_private
+    }
+
+    pub const fn high_half_shares_swapper(&self) -> bool {
+        self.high_half_shares_swapper
+    }
+
+    pub const fn kernel_pages_u_disabled(&self) -> bool {
+        self.kernel_pages_u_disabled
+    }
+
+    pub const fn user_pages_u_enabled(&self) -> bool {
+        self.user_pages_u_enabled
+    }
+
+    pub const fn elf_load_plan_consumed(&self) -> bool {
+        self.elf_load_plan_consumed
+    }
+
+    pub const fn segment_mappings_bound(&self) -> bool {
+        self.segment_mappings_bound
+    }
+
+    pub const fn entry_mapping_executable(&self) -> bool {
+        self.entry_mapping_executable
+    }
+
+    pub const fn bss_zero_plan_consumed(&self) -> bool {
+        self.bss_zero_plan_consumed
+    }
+
+    pub const fn elf_segments_mapped(&self) -> bool {
+        self.elf_segments_mapped
+    }
+
+    pub const fn stack_mapped(&self) -> bool {
+        self.stack_mapped
+    }
+
+    pub const fn elf_mapped(&self) -> bool {
+        self.elf_mapped
+    }
+
+    pub const fn elf_bss_zeroed(&self) -> bool {
+        self.elf_bss_zeroed
+    }
+
+    pub const fn runtime_ready(&self) -> bool {
+        self.runtime_ready
+    }
+
+    pub const fn mapping_count(&self) -> usize {
+        self.mapping_count
+    }
+
+    pub const fn segment_mapping_count(&self) -> usize {
+        self.segment_mapping_count
+    }
+
+    pub const fn mapping(&self, index: usize) -> Option<UserMapping> {
+        if index < self.mapping_count {
+            Some(self.mappings[index])
+        } else {
+            None
+        }
+    }
+
+    pub const fn stack_mapping(&self) -> Option<UserMapping> {
+        if self.stack_mapped && self.stack_mapping_index < self.mapping_count {
+            Some(self.mappings[self.stack_mapping_index])
+        } else {
+            None
+        }
+    }
+
+    pub fn preset(
+        &mut self,
+        swapper_vm: &SwapperVm,
+        page_allocator: &PageAllocator,
+        global_allocator: &KernelGlobalAllocator,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || swapper_vm.state() != State::Online
+            || page_allocator.state() != State::Ready
+            || global_allocator.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.allocated = true;
+        self.low_half_private = true;
+        self.high_half_shares_swapper = true;
+        self.kernel_pages_u_disabled = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+    }
+
+    pub fn setup(&mut self, elf: &ElfObject, stack: &UserStack) -> Result<(), ElfError> {
+        if self.lifecycle.state() != State::Prepared
+            || elf.state() != State::Ready
+            || stack.state() != State::Ready
+        {
+            return Err(ElfError::InvalidState);
+        }
+        if !stack.mapped_into_address_space() || stack.size() == 0 {
+            return Err(ElfError::InvalidStack);
+        }
+
+        self.mappings = [UserMapping::empty(); MAX_USER_MAPPINGS];
+        self.mapping_count = 0;
+        self.segment_mapping_count = 0;
+
+        let mut index = 0usize;
+        while index < elf.load_segment_count() {
+            if self.mapping_count >= MAX_USER_MAPPINGS {
+                return Err(ElfError::TooManyMappings);
+            }
+            let Some(segment) = elf.load_segment(index) else {
+                return Err(ElfError::InvalidProgramHeader);
+            };
+            let mapping = UserMapping::from_segment(segment);
+            if mapping.memsz() == 0
+                || !mapping.user_accessible()
+                || mapping
+                    .file_offset()
+                    .checked_add(mapping.filesz())
+                    .is_none()
+                || mapping.vaddr().checked_add(mapping.memsz()).is_none()
+            {
+                return Err(ElfError::InvalidProgramHeader);
+            }
+            self.mappings[self.mapping_count] = mapping;
+            self.mapping_count += 1;
+            self.segment_mapping_count += 1;
+            index += 1;
+        }
+
+        if !entry_mapping_is_executable(&self.mappings, self.mapping_count, elf.entry()) {
+            return Err(ElfError::MissingExecutableEntryMapping);
+        }
+
+        if self.mapping_count >= MAX_USER_MAPPINGS {
+            return Err(ElfError::TooManyMappings);
+        }
+        self.stack_mapping_index = self.mapping_count;
+        self.mappings[self.mapping_count] = UserMapping::from_stack(stack);
+        self.mapping_count += 1;
+
+        self.user_pages_u_enabled = true;
+        self.elf_load_plan_consumed = true;
+        self.segment_mappings_bound = self.segment_mapping_count == elf.load_segment_count();
+        self.entry_mapping_executable = true;
+        self.bss_zero_plan_consumed = elf.bss_zero_plan_bound();
+        self.elf_segments_mapped = true;
+        self.stack_mapped = true;
+        self.elf_mapped = true;
+        self.elf_bss_zeroed = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
+            .map_err(|_| ElfError::InvalidState)
     }
 }
 
@@ -570,6 +1020,25 @@ fn entry_in_executable_segment(
     while index < count {
         let segment = segments[index];
         if segment.executable() && segment.contains_vaddr(entry) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn entry_mapping_is_executable(
+    mappings: &[UserMapping; MAX_USER_MAPPINGS],
+    count: usize,
+    entry: usize,
+) -> bool {
+    let mut index = 0usize;
+    while index < count {
+        let mapping = mappings[index];
+        if mapping.kind() == UserMappingKind::ElfSegment
+            && mapping.executable()
+            && mapping.contains_vaddr(entry)
+        {
             return true;
         }
         index += 1;

@@ -764,6 +764,7 @@ KernelInitTask 的执行线从 `SmpRuntimePhase` 入口开始：`rest_init()` �
 - syscall 入口沿用 `ExceptionStream -> SyscallException`，不得为了用户态 hello 新增独立根 `Syscall` 对象或绕过异常分发。
 - 用户可执行文件对象命名为 `ElfObject`，不得生成单独的 `ElfLoader` 资源对象。`ElfObject.Preset` 只检查 ELF 类型支持；`ElfObject.Setup` 解析 ELF header / program headers，并形成 `PT_LOAD` 映射计划、段权限、entry 和 `.bss` 清零计划；真实映射到 `UserAddressSpace` 与 `.bss` 清零事实归 `UserAddressSpace.Setup`。`ElfObject.Enable` 只确认 entry、用户栈和 trap frame 已可用于进入用户态。
 - `UserAddressSpace` 是多实例用户地址空间对象，低地址用户区独立；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续是内核共享地址空间实例，不应被改造成普通多实例用户地址空间类型。
+- 首轮 `UserAddressSpace.Setup` 可以只消费 `ElfObject` 的 `PT_LOAD` 映射计划，记录 segment/stack mapping facts、用户页 `U` 权限事实和内核映射 `U=0` 事实；在 trap/syscall 轮次建模前，不得标记 `runtime_ready`、不得切换到用户页表、不得执行 `sret`、不得设置 `SyscallDispatcher` 或 `UserInitProcess` 状态。
 - 当前 rootfs 输入是 whole-disk ext2；`UserBootPayload` 不应要求 `PartitionTable` / `BlockPartition`。若未来磁盘镜像切换为带分区表，再补分区对象建模。
 - 首轮 `SyscallDispatcher` / `SyscallTable` 只覆盖 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。`write` 通过受限 `UserCopy` 转发到现有 printk/serial console，不等价于完整 fd table、`/dev/console` 或 TTY/N_TTY。
 - 针对当前临时 `/init` ELF 的 smoke/KUnit 验证只能读取 `ElfObject` 正常模型事实，例如 entry、`PT_LOAD` 数量、段权限、entry 是否落在可执行段、以及 fixture 内容字节是否位于 loadable 文件内容中；不得为了测试给普通对象增加 `test_only_*` 或等价专用 API。

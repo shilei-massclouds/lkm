@@ -68,6 +68,10 @@ predicate user_address_space_kernel_pages_u_disabled<T>(space: T) -> bool;
 predicate user_address_space_user_pages_u_enabled<T>(space: T) -> bool;
 predicate user_address_space_elf_segments_mapped<T, E>(space: T, elf: E) -> bool;
 predicate user_address_space_stack_mapped<T, S>(space: T, stack: S) -> bool;
+predicate user_address_space_elf_load_plan_consumed<T, E>(space: T, elf: E) -> bool;
+predicate user_address_space_segment_mappings_bound<T>(space: T) -> bool;
+predicate user_address_space_entry_mapping_executable<T>(space: T) -> bool;
+predicate user_address_space_bss_zero_plan_consumed<T, E>(space: T, elf: E) -> bool;
 predicate user_address_space_runtime_ready<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
 
@@ -142,6 +146,10 @@ object UserAddressSpace: ResourceObject {
 
                 ensures {
                     user_address_space_user_pages_u_enabled(self);
+                    user_address_space_elf_load_plan_consumed(self, ElfObject);
+                    user_address_space_segment_mappings_bound(self);
+                    user_address_space_entry_mapping_executable(self);
+                    user_address_space_bss_zero_plan_consumed(self, ElfObject);
                     user_address_space_elf_segments_mapped(self, ElfObject);
                     user_address_space_stack_mapped(self, UserStack);
                     elf_object_mapped_to_user_address_space(ElfObject, self);
@@ -158,6 +166,10 @@ object UserAddressSpace: ResourceObject {
             user_address_space_high_half_shares_swapper(self, SwapperVm);
             user_address_space_kernel_pages_u_disabled(self);
             user_address_space_user_pages_u_enabled(self);
+            user_address_space_elf_load_plan_consumed(self, ElfObject);
+            user_address_space_segment_mappings_bound(self);
+            user_address_space_entry_mapping_executable(self);
+            user_address_space_bss_zero_plan_consumed(self, ElfObject);
             user_address_space_elf_segments_mapped(self, ElfObject);
             user_address_space_stack_mapped(self, UserStack);
             elf_object_mapped_to_user_address_space(ElfObject, self);
@@ -533,13 +545,13 @@ object UserBootPayload: ResourceObject {
 
                 drives {
                     VfsCore.Action::ReadPath(Path, FsStruct);
-                    UserAddressSpace.Event::Preset;
-                    UserStack.Event::Setup;
                     ElfObject.Event::Preset;
                     ElfObject.Event::Setup;
                     UserBootPayload.Action::TryCandidate(UserInitPathRef::DefaultInit);
-                    UserTrapFrame.Event::Setup;
+                    UserAddressSpace.Event::Preset;
+                    UserStack.Event::Setup;
                     UserAddressSpace.Event::Setup;
+                    UserTrapFrame.Event::Setup;
                     ElfObject.Event::Enable;
                     UserAddressSpace.Event::Enable;
                     SyscallException.Event::Setup;

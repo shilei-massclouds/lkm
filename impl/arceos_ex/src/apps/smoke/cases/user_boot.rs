@@ -7,7 +7,10 @@ use crate::{
     objects::{
         ext2::{EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS},
         state::State,
-        user_boot::{USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH},
+        user_boot::{
+            UserMappingKind, USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE,
+            USER_STACK_SIZE, USER_STACK_TOP,
+        },
         virtio_blk,
     },
 };
@@ -74,6 +77,28 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "payload try candidate",
             ctx.user_boot_payload.try_candidate(&ctx.elf_object).is_ok(),
+        );
+        assertions.assert(
+            "address space preset",
+            ctx.user_address_space
+                .preset(
+                    ctx.vm.swapper_vm(),
+                    &ctx.page_allocator,
+                    &ctx.kernel_global_allocator,
+                )
+                .is_ok(),
+        );
+        assertions.assert(
+            "user stack setup",
+            ctx.user_stack
+                .setup(&ctx.user_address_space, &ctx.page_allocator)
+                .is_ok(),
+        );
+        assertions.assert(
+            "address space setup",
+            ctx.user_address_space
+                .setup(&ctx.elf_object, &ctx.user_stack)
+                .is_ok(),
         );
 
         let elf = &ctx.elf_object;
@@ -149,6 +174,89 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.user_boot_payload.try_candidate_bound()
                 && ctx.user_boot_payload.selected_path_bound()
                 && ctx.user_boot_payload.reads_init_from_vfs(),
+        );
+
+        let space = &ctx.user_address_space;
+        assertions.assert("address space ready", space.state() == State::Ready);
+        assertions.assert("address space allocated", space.allocated());
+        assertions.assert(
+            "address space halves",
+            space.low_half_private()
+                && space.high_half_shares_swapper()
+                && space.kernel_pages_u_disabled(),
+        );
+        assertions.assert(
+            "address space mappings",
+            space.user_pages_u_enabled()
+                && space.elf_load_plan_consumed()
+                && space.segment_mappings_bound()
+                && space.elf_segments_mapped()
+                && space.stack_mapped()
+                && space.elf_mapped(),
+        );
+        assertions.assert(
+            "address space bss",
+            space.bss_zero_plan_consumed() && space.elf_bss_zeroed(),
+        );
+        assertions.assert(
+            "address space entry",
+            space.entry_mapping_executable() && !space.runtime_ready(),
+        );
+        assertions.assert(
+            "address space mapping count",
+            space.segment_mapping_count() == elf.load_segment_count()
+                && space.mapping_count() == elf.load_segment_count() + 1,
+        );
+
+        let Some(first_mapping) = space.mapping(0) else {
+            assertions.assert("first mapping", false);
+            return;
+        };
+        assertions.assert(
+            "first mapping facts",
+            first_mapping.kind() == UserMappingKind::ElfSegment
+                && first_mapping.vaddr() == first_segment.vaddr()
+                && first_mapping.memsz() == first_segment.memsz()
+                && first_mapping.filesz() == first_segment.filesz()
+                && first_mapping.user_accessible()
+                && first_mapping.readable()
+                && first_mapping.executable()
+                && first_mapping.bss_zero_bytes() == first_segment.memsz() - first_segment.filesz(),
+        );
+
+        let stack = &ctx.user_stack;
+        assertions.assert("user stack ready", stack.state() == State::Ready);
+        assertions.assert(
+            "user stack facts",
+            stack.allocated()
+                && stack.fixed_size_bound()
+                && stack.mapped_into_address_space()
+                && stack.initial_sp_bound()
+                && stack.minimal_arg_env_bound(),
+        );
+        assertions.assert(
+            "user stack bounds",
+            stack.size() == USER_STACK_SIZE
+                && stack.top() == USER_STACK_TOP
+                && stack.initial_sp() == USER_STACK_TOP
+                && stack.base() + stack.size() == USER_STACK_TOP
+                && stack.base() % USER_PAGE_SIZE == 0
+                && stack.top() % USER_PAGE_SIZE == 0,
+        );
+        let Some(stack_mapping) = space.stack_mapping() else {
+            assertions.assert("stack mapping", false);
+            return;
+        };
+        assertions.assert(
+            "stack mapping facts",
+            stack_mapping.kind() == UserMappingKind::Stack
+                && stack_mapping.vaddr() == stack.base()
+                && stack_mapping.memsz() == stack.size()
+                && stack_mapping.filesz() == 0
+                && stack_mapping.readable()
+                && stack_mapping.writable()
+                && !stack_mapping.executable()
+                && stack_mapping.user_accessible(),
         );
     }
 

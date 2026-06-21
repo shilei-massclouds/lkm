@@ -68,7 +68,9 @@ predicate arceos_ex_must_kernel_init_execution_line_reach_payload() -> bool;
 predicate arceos_ex_must_user_boot_payload_be_selected_payload_variant() -> bool;
 predicate arceos_ex_must_user_boot_use_existing_syscall_exception() -> bool;
 predicate arceos_ex_must_not_generate_elf_loader_object() -> bool;
-predicate arceos_ex_must_elf_object_setup_map_pt_load_segments() -> bool;
+predicate arceos_ex_must_elf_object_setup_build_pt_load_mapping_plan() -> bool;
+predicate arceos_ex_must_user_address_space_setup_consume_elf_load_plan() -> bool;
+predicate arceos_ex_must_user_address_space_round_not_enter_user_mode() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
 predicate arceos_ex_must_user_boot_not_require_partition_objects_for_whole_disk_ext2() -> bool;
@@ -697,7 +699,7 @@ type ArceosExStartupPhaseCodingMust {
          * preconditions and hands them to UserBootPayload.
          */
         arceos_ex_must_not_generate_elf_loader_object();
-        arceos_ex_must_elf_object_setup_map_pt_load_segments();
+        arceos_ex_must_elf_object_setup_build_pt_load_mapping_plan();
 
         /*
          * User init ELF validation boundary:
@@ -718,7 +720,16 @@ type ArceosExStartupPhaseCodingMust {
          * SwapperVm. SwapperVm remains the single kernel shared address-space
          * instance and must not be mechanically converted into a user address
          * space type with arbitrary instances.
+         *
+         * The first implementation round may stop at UserAddressSpace.Ready:
+         * UserAddressSpace.Setup consumes ElfObject's PT_LOAD mapping plan and
+         * records segment/stack mapping facts, user-page U permission facts and
+         * kernel-page U=0 facts. It must not mark runtime_ready, switch to a
+         * user page table, execute sret, or set up syscall/UserInitProcess
+         * state before the explicit trap/syscall round is modeled.
          */
+        arceos_ex_must_user_address_space_setup_consume_elf_load_plan();
+        arceos_ex_must_user_address_space_round_not_enter_user_mode();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
         arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();
 

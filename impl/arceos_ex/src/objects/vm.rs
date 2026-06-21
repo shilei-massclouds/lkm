@@ -223,4 +223,8 @@ impl Vm {
             && self.swapper_vm.state() == State::Online
             && self.early_vm.state() == State::Destroyed
     }
+
+    pub const fn swapper_vm(&self) -> &SwapperVm {
+        &self.swapper_vm
+    }
 }
