@@ -3,10 +3,10 @@
  *
  * This slice models the shortest Linux-like path from PayloadPhase to the
  * first user-mode program. The selected payload variant is UserBootPayload.
- * It reads an init candidate such as /init from the current VFS root, treats
- * the result as an ElfObject, builds a PT_LOAD mapping plan, maps that plan
- * into a UserAddressSpace, prepares a UserStack and UserTrapFrame, then enters
- * U-mode. Syscalls remain under the existing SyscallException branch of
+ * It reads an init candidate such as /sbin/init from the current VFS root,
+ * treats the result as an ElfObject, builds a PT_LOAD mapping plan, maps that
+ * plan into a UserAddressSpace, prepares a UserStack and UserTrapFrame, then
+ * enters U-mode. Syscalls remain under the existing SyscallException branch of
  * ExceptionStream; this file only adds the minimal dispatcher/table objects
  * consumed by that branch.
  *

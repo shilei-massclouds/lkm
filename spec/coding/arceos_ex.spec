@@ -156,6 +156,9 @@ predicate arceos_ex_must_ext2_support_4k_buffer_and_block_sizes() -> bool;
 predicate arceos_ex_must_ext2_model_driver_volume_filesystem_lifecycle() -> bool;
 predicate arceos_ex_must_ext2_read_path_support_multi_direct_blocks() -> bool;
 predicate arceos_ex_must_ext2_smoke_use_stable_alpine_rootfs_files() -> bool;
+predicate arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build() -> bool;
+predicate arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides() -> bool;
+predicate arceos_ex_must_disk_build_default_not_rebuild_existing_image() -> bool;
 predicate arceos_ex_must_ext2_lookup_support_path_components_from_directories() -> bool;
 predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
 predicate arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read() -> bool;
@@ -716,11 +719,11 @@ type ArceosExStartupPhaseCodingMust {
         /*
          * User init ELF validation boundary:
          *
-         * Smoke/KUnit may verify the temporary /init ELF's normal metadata and
-         * content facts through ElfObject state, such as entry, PT_LOAD segment
-         * count, permissions and expected embedded bytes. Implementations MUST
-         * NOT add test-only methods or APIs to ordinary objects for this
-         * validation.
+         * Smoke/KUnit may verify the temporary /sbin/init overlay ELF's normal
+         * metadata and content facts through ElfObject state, such as entry,
+         * PT_LOAD segment count, permissions and expected embedded bytes.
+         * Implementations MUST NOT add test-only methods or APIs to ordinary
+         * objects for this validation.
          */
         arceos_ex_must_validate_user_init_elf_without_test_only_object_api();
 
@@ -1502,6 +1505,24 @@ type ArceosExBlockIoCodingMust {
          * multi-direct-block path is actually observed.
          */
         arceos_ex_must_ext2_smoke_use_stable_alpine_rootfs_files();
+
+        /*
+         * Build-time rootfs overlay:
+         *
+         * The current temporary user init fixture is supplied by a rootfs
+         * image-construction overlay, not by runtime overlayfs. The overlay
+         * operation MUST copy a built fixture output into the staged rootfs
+         * target path; if the target exists, including a symlink, the target
+         * path itself must be replaced. The default temporary target is
+         * /sbin/init, while the mechanism must also allow no overlay and
+         * future fixture/target overrides. make disk must only create the
+         * disk image when it is missing by default; overlay configuration
+         * changes must not silently rebuild an existing disk image. Explicit
+         * rebuild remains a command decision through FORCE=1 or disk-clean.
+         */
+        arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
+        arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();
+        arceos_ex_must_disk_build_default_not_rebuild_existing_image();
 
         /*
          * Directory path lookup:

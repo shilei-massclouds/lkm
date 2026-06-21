@@ -505,6 +505,11 @@ file 多 direct-block 读取；caller buffer 不足时返回 `ShortBuffer`，遇
 `IndirectBlocksUnsupported`，不得静默截断或绕过 `BufferHead`。`make disk` 在 `FS_TYPE=ext2` 时应从
 Alpine minirootfs tarball 构造真实 rootfs，而不是为 smoke 写入专用文件或 filler entries；smoke 应选择该
 rootfs 中稳定存在的普通文件，至少覆盖一个跨 ext2 block 的 regular file，保证能观察 multi-direct-block read path。
+当前临时用户态 init fixture 必须通过构造期 overlay 注入 rootfs：这里的 overlay 不是运行期 overlayfs，而是在镜像构造时把
+fixture 编译产物拷贝到 staging rootfs 的目标路径。目标路径存在时应替换目标路径本身，包括替换已有 symlink；不存在时创建。
+默认 overlay 把 `fixtures/user_init.S` 的产物放到 `/sbin/init`，但配置必须允许关闭 overlay，也必须允许后续 fixture 覆盖
+`/sbin/init` 或其它 rootfs 内可执行路径。`make disk` 默认只在磁盘文件不存在时创建；已有磁盘不得因为 overlay 配置变化而被
+隐式重建，强制重建必须由 `make disk FORCE=1` 或 `make disk-clean` 后再 `make disk` 明确触发。
 Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem`：`Ext2Driver` 取代旧的
 `Ext2Type`，承载 Linux `file_system_type` 以及当前建模的 super/inode/file operation set；
 `Ext2Volume` 表示默认块设备上按 ext2 规范组织的 on-disk volume，由 `Preset` 经 `BufferHead` 检查确认，
@@ -771,7 +776,7 @@ KernelInitTask 的执行线从 `SmpRuntimePhase` 入口开始：`rest_init()` �
 - 用户态 `ecall` 必须进入既有 `ExceptionStream -> SyscallException` 分支并由该分支安装具体 syscall policy，不得新增独立根 `Syscall` 对象或绕过异常分发。首轮 syscall 只处理 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`：`write` 从当前 `UserAddressSpace` 受限复制用户字节并转发到现有 printk/serial console，`exit/exit_group` 记录首个用户进程结束并停机或完成 no-return handoff；它不等价于完整 fd table、`/dev/console` 文件、TTY/N_TTY、fork/wait 或 signal。
 - 当前 rootfs 输入是 whole-disk ext2；`UserBootPayload` 不应要求 `PartitionTable` / `BlockPartition`。若未来磁盘镜像切换为带分区表，再补分区对象建模。
 - 首轮 `SyscallDispatcher` / `SyscallTable` 只覆盖 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。`write` 通过受限 `UserCopy` 转发到现有 printk/serial console，不等价于完整 fd table、`/dev/console` 或 TTY/N_TTY。
-- 针对当前临时 `/init` ELF 的 smoke/KUnit 验证只能读取 `ElfObject` 正常模型事实，例如 entry、`PT_LOAD` 数量、段权限、entry 是否落在可执行段、以及 fixture 内容字节是否位于 loadable 文件内容中；不得为了测试给普通对象增加 `test_only_*` 或等价专用 API。
+- 针对当前临时 `/sbin/init` overlay ELF 的 smoke/KUnit 验证只能读取 `ElfObject` 正常模型事实，例如 entry、`PT_LOAD` 数量、段权限、entry 是否落在可执行段、以及 fixture 内容字节是否位于 loadable 文件内容中；不得为了测试给普通对象增加 `test_only_*` 或等价专用 API。
 
 ## Pre-VM lifecycle 代码生成约束
 
@@ -851,7 +856,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 
 当前对象级实验不复用现有 ArceOS Unikernel 应用，不依赖 `ax-std`、`ax-api`、`ax-feat` 或 `arceos-rust`。
 
-第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。后续 `APP=user-hello` / `UserBootPayload` 作为第三类 selected payload 接入同一选择机制，用于从当前 rootfs 读取 `/init` 并进入第一个用户态 ELF。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，只通过 printk 前端输出 `Hello, world!` 后通过 SBI 关机；它不得直接调用 early console 或 real console backend。
+第一轮保留两个内建 payload：默认 `APP=smoke` 和最小独立 `APP=hello`。后续 `APP=user-hello` / `UserBootPayload` 作为第三类 selected payload 接入同一选择机制，用于从当前 rootfs 读取 `/sbin/init` 并进入第一个用户态 ELF。对象级初始化完成后，启动链沿 `KernelInitTask` 的 `TaskEntry::KernelInit` 从 `PreSmpInitPhase` 开始的连续执行线进入 `PayloadPhase`，在 `PayloadPhase.Enable` 提交后调用 selected payload 的 `run() -> !`。当前 `smoke` payload 在 `impl/arceos_ex/src/apps/smoke/cases/` 下维护可返回测试用例，首批覆盖输出路径、格式化输出、MemBlock 分配和 FDT 查询。`APP=hello` 仍作为最小独立 payload，只通过 printk 前端输出 `Hello, world!` 后通过 SBI 关机；它不得直接调用 early console 或 real console backend。
 
 所有 payload 的入口约定为 `run() -> !`。这表示控制流不返回启动编排链：Unikernel payload 可以进入服务循环或停机，未来宏内核 payload 可以加载首个用户态程序并完成用户态切换。若某个 payload 意外返回，应视为违反 `PayloadPhase.Enable` 的 no-return handoff 契约。
 

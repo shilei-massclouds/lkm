@@ -66,7 +66,7 @@ impl SmokeScenario for UserBootElfScenario {
             USER_INIT_PATH,
             buffer,
         ) else {
-            assertions.assert("read /init", false);
+            assertions.assert("read /sbin/init", false);
             return;
         };
         let image = &buffer[..len];

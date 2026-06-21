@@ -54,10 +54,12 @@ TAR ?= tar
 MKFS_EXT2 ?= mkfs.ext2
 EXT2_MKFS_FEATURE_ARGS ?= -O ^dir_index
 EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
-TEMP_USER_INIT_SRC := fixtures/user_init.S
-TEMP_USER_INIT_ELF := build/rootfs-fixtures/init
-TEMP_USER_INIT_CC ?= riscv64-linux-gnu-gcc
-TEMP_USER_INIT_CFLAGS ?= -nostdlib -static -march=rv64imac -mabi=lp64 -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none
+ROOTFS_OVERLAY ?= user-init
+ROOTFS_OVERLAY_SRC ?= fixtures/user_init.S
+ROOTFS_OVERLAY_OUTPUT ?= build/rootfs-fixtures/$(ROOTFS_OVERLAY)
+ROOTFS_OVERLAY_TARGET ?= /sbin/init
+ROOTFS_OVERLAY_CC ?= riscv64-linux-gnu-gcc
+ROOTFS_OVERLAY_CFLAGS ?= -nostdlib -static -march=rv64imac -mabi=lp64 -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
@@ -83,7 +85,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate disk rootfs-tarball clean
+.PHONY: build run generate disk disk-clean rootfs-tarball clean
 
 build: generate $(KERNEL_BIN)
 
@@ -107,7 +109,14 @@ $(KERNEL_ELF): $(SOURCES) $(LINKER)
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(RUST_OBJCOPY) --strip-all -O binary $< $@
 
-disk: $(VIRTIO_BLK_IMAGE)
+disk:
+ifeq ($(FORCE),1)
+	rm -f $(VIRTIO_BLK_IMAGE)
+endif
+	$(MAKE) $(VIRTIO_BLK_IMAGE)
+
+disk-clean:
+	rm -f $(VIRTIO_BLK_IMAGE)
 
 rootfs-tarball: $(ROOTFS_TARBALL)
 
@@ -116,20 +125,25 @@ $(ROOTFS_TARBALL):
 	$(WGET) -O $@.tmp $(ROOTFS_URL)
 	mv $@.tmp $@
 
-$(TEMP_USER_INIT_ELF): $(TEMP_USER_INIT_SRC)
+$(ROOTFS_OVERLAY_OUTPUT): $(ROOTFS_OVERLAY_SRC)
 	mkdir -p $(dir $@)
-	$(TEMP_USER_INIT_CC) $(TEMP_USER_INIT_CFLAGS) -o $@ $<
+	$(ROOTFS_OVERLAY_CC) $(ROOTFS_OVERLAY_CFLAGS) -o $@ $<
 
 $(VIRTIO_BLK_IMAGE):
 	mkdir -p $(dir $@)
 ifeq ($(FS_TYPE),ext2)
 	$(MAKE) rootfs-tarball ROOTFS_TARBALL="$(ROOTFS_TARBALL)" ROOTFS_URL="$(ROOTFS_URL)" WGET="$(WGET)"
-	$(MAKE) $(TEMP_USER_INIT_ELF) TEMP_USER_INIT_CC="$(TEMP_USER_INIT_CC)" TEMP_USER_INIT_CFLAGS="$(TEMP_USER_INIT_CFLAGS)"
 	rm -rf $(ROOTFS_STAGING_DIR)
 	mkdir -p $(ROOTFS_STAGING_DIR)
 	$(TAR) --no-same-owner -xzf $(ROOTFS_TARBALL) -C $(ROOTFS_STAGING_DIR)
-	cp $(TEMP_USER_INIT_ELF) $(ROOTFS_STAGING_DIR)/init
-	chmod 0755 $(ROOTFS_STAGING_DIR)/init
+ifneq ($(ROOTFS_OVERLAY),none)
+	case "$(ROOTFS_OVERLAY_TARGET)" in /*) ;; *) echo "ROOTFS_OVERLAY_TARGET must be an absolute rootfs path"; exit 1;; esac
+	$(MAKE) $(ROOTFS_OVERLAY_OUTPUT) ROOTFS_OVERLAY_CC="$(ROOTFS_OVERLAY_CC)" ROOTFS_OVERLAY_CFLAGS="$(ROOTFS_OVERLAY_CFLAGS)"
+	mkdir -p $(dir $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET))
+	rm -f $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET)
+	cp $(ROOTFS_OVERLAY_OUTPUT) $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET)
+	chmod 0755 $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET)
+endif
 	truncate -s $(VIRTIO_BLK_IMAGE_SIZE) $@
 	$(MKFS_EXT2) -q -F $(EXT2_MKFS_FEATURE_ARGS) $(EXT2_MKFS_BLOCK_ARGS) -d $(ROOTFS_STAGING_DIR) $@
 else ifeq ($(FS_TYPE),none)

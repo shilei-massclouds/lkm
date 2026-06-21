@@ -21,7 +21,7 @@ use super::{
     swapper_vm::SwapperVm,
 };
 
-pub const USER_INIT_PATH: &[u8] = b"/init";
+pub const USER_INIT_PATH: &[u8] = b"/sbin/init";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
 
 pub const ELF_HEADER_LEN: usize = 64;
@@ -1798,7 +1798,7 @@ fn read_user_init_image(
         USER_INIT_PATH,
         buffer,
     ) else {
-        user_boot_panic("read /init failed\n");
+        user_boot_panic("read /sbin/init failed\n");
     };
     &buffer[..len]
 }
