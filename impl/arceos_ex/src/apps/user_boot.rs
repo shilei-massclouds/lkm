@@ -1,7 +1,7 @@
 use crate::{context::context, objects::printk, objects::user_boot};
 
 pub fn run() -> ! {
-    printk::write_str("arceos_ex user hello start\n");
+    printk::write_str("arceos_ex user boot start\n");
     let ctx = context();
 
     user_boot::run_first_user_init(

@@ -1,6 +1,6 @@
 use crate::arch::riscv64::csr;
 
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 use super::{
     block_device::BlockDeviceRegistry,
     exception_stream::ExceptionStream,
@@ -25,12 +25,12 @@ pub const USER_INIT_PATH: &[u8] = b"/sbin/init";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
 
 pub const ELF_HEADER_LEN: usize = 64;
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 pub const USER_BOOT_READ_MAX: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
 pub const USER_STACK_SIZE: usize = 16 * 1024;
 pub const USER_STACK_TOP: usize = 0x4000_0000;
 pub const USER_PAGE_SIZE: usize = 4096;
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
 const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 const ELF_CLASS_64: u8 = 2;
@@ -1140,17 +1140,17 @@ fn total_mapping_page_count(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: 
 pub const SSTATUS_SPP_USER_CLEAR: usize = 0;
 pub const SSTATUS_SPIE_SET: usize = 1 << 5;
 
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 #[repr(align(16))]
 struct UserKernelTrapStack {
     bytes: [u8; USER_KERNEL_TRAP_STACK_SIZE],
 }
 
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 static mut USER_KERNEL_TRAP_STACK: UserKernelTrapStack = UserKernelTrapStack {
     bytes: [0; USER_KERNEL_TRAP_STACK_SIZE],
 };
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 static mut USER_BOOT_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
 
 pub struct UserTrapFrame {
@@ -1644,7 +1644,7 @@ impl UserBootPayload {
         Ok(())
     }
 
-    #[cfg(app_user_hello)]
+    #[cfg(app_user_boot)]
     pub fn enable_for_user_entry(
         &mut self,
         elf: &ElfObject,
@@ -1673,7 +1673,7 @@ impl UserBootPayload {
     }
 }
 
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 #[allow(clippy::too_many_arguments)]
 pub fn run_first_user_init(
     payload: &mut UserBootPayload,
@@ -1776,7 +1776,7 @@ pub fn run_first_user_init(
     }
 }
 
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 fn read_user_init_image(
     vfs_core: &mut VfsCore,
     fs_struct: &FsStruct,
@@ -1803,7 +1803,7 @@ fn read_user_init_image(
     &buffer[..len]
 }
 
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 fn user_kernel_trap_stack_top() -> usize {
     unsafe {
         let base = core::ptr::addr_of!(USER_KERNEL_TRAP_STACK.bytes) as usize;
@@ -1811,7 +1811,7 @@ fn user_kernel_trap_stack_top() -> usize {
     }
 }
 
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 fn user_boot_panic(message: &str) -> ! {
     crate::arch::riscv64::sbi::putstr(message);
     crate::arch::riscv64::sbi::system_shutdown()

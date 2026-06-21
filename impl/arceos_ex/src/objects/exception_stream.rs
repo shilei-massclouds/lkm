@@ -44,7 +44,7 @@ const PAGE_FAULT_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_PAGE_FAULT);
 const SYSCALL_DISABLED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
 const BREAKPOINT_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_BREAKPOINT);
 const UNEXPECTED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_UNEXPECTED);
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_EXIT: usize = 93;
@@ -154,7 +154,7 @@ impl ExceptionStream {
         )
     }
 
-    #[cfg(app_user_hello)]
+    #[cfg(app_user_boot)]
     pub fn syscall_setup(&mut self) -> EventResult {
         self.syscall.setup(
             self.lifecycle.state(),
@@ -163,7 +163,7 @@ impl ExceptionStream {
         )
     }
 
-    #[cfg(app_user_hello)]
+    #[cfg(app_user_boot)]
     pub fn syscall_enable(&mut self) -> EventResult {
         self.syscall.enable(self.lifecycle.state())
     }
@@ -233,7 +233,7 @@ impl ExceptionKind {
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
     }
 
-    #[cfg(app_user_hello)]
+    #[cfg(app_user_boot)]
     fn enable(&mut self, exception_stream_state: State) -> EventResult {
         if exception_stream_state != State::Ready || self.lifecycle.state() != State::Ready {
             return failed_condition(

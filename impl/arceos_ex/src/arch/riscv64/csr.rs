@@ -74,7 +74,7 @@ unsafe extern "C" {
         continuation_virt: usize,
         kernel_virt_offset: usize,
     ) -> !;
-    #[cfg(app_user_hello)]
+    #[cfg(app_user_boot)]
     fn arceos_ex_enter_user_mode(
         user_satp: usize,
         user_entry: usize,
@@ -261,7 +261,7 @@ pub unsafe fn switch_to_early_vm(
     }
 }
 
-#[cfg(app_user_hello)]
+#[cfg(app_user_boot)]
 pub unsafe fn enter_user_mode(
     user_satp: usize,
     user_entry: usize,

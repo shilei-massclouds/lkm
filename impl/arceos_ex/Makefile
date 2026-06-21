@@ -73,7 +73,7 @@ PLIC_PROVIDER_CFG := --cfg plic_provider_$(subst -,_,$(PLIC_PROVIDER))
 PLIC_PROVIDER_LINK_ARGS := $(if $(filter linux-object,$(PLIC_PROVIDER)),-C link-arg=$(LINUX_PLIC_OBJ),)
 
 RUSTFLAGS := \
-	$(if $(filter hello user-hello,$(APP)),-A dead_code,) \
+	$(if $(filter hello user-boot,$(APP)),-A dead_code,) \
 	-C opt-level=2 \
 	-C panic=abort \
 	-C relocation-model=static \
