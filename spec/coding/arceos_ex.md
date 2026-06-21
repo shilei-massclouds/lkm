@@ -506,10 +506,13 @@ file 多 direct-block 读取；caller buffer 不足时返回 `ShortBuffer`，遇
 Alpine minirootfs tarball 构造真实 rootfs，而不是为 smoke 写入专用文件或 filler entries；smoke 应选择该
 rootfs 中稳定存在的普通文件，至少覆盖一个跨 ext2 block 的 regular file，保证能观察 multi-direct-block read path。
 当前临时用户态 init fixture 必须通过构造期 overlay 注入 rootfs：这里的 overlay 不是运行期 overlayfs，而是在镜像构造时把
-fixture 编译产物拷贝到 staging rootfs 的目标路径。目标路径存在时应替换目标路径本身，包括替换已有 symlink；不存在时创建。
-默认 overlay 把 `fixtures/user_init.S` 的产物放到 `/sbin/init`，但配置必须允许关闭 overlay，也必须允许后续 fixture 覆盖
-`/sbin/init` 或其它 rootfs 内可执行路径。`make disk` 默认只在磁盘文件不存在时创建；已有磁盘不得因为 overlay 配置变化而被
-隐式重建，强制重建必须由 `make disk FORCE=1` 或 `make disk-clean` 后再 `make disk` 明确触发。
+用户态测试程序编译产物拷贝到 staging rootfs 的目标路径。目标路径存在时应替换目标路径本身，包括替换已有 symlink；不存在时创建。
+用户态测试程序源文件必须放在 `impl/arceos_ex/tests/user/` 下，并通过该目录自己的 Makefile 编译；内核主 Makefile
+只选择测试程序、工具链、链接方式、输出路径和 overlay 目标，不直接承载用户态编译细节。默认 overlay 把
+`tests/user/init_hello.S` 的产物放到 `/sbin/init`，但配置必须允许关闭 overlay，也必须允许后续用户态测试程序覆盖
+`/sbin/init` 或其它 rootfs 内可执行路径。用户态测试 Makefile 必须预留 GNU GCC / musl GCC 和 static / dynamic
+四种组合的选择入口；当前首轮默认仍可只使用 GNU static 汇编测试。`make disk` 默认只在磁盘文件不存在时创建；已有磁盘不得因为
+overlay 配置变化而被隐式重建，强制重建必须由 `make disk FORCE=1` 或 `make disk-clean` 后再 `make disk` 明确触发。
 Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem`：`Ext2Driver` 取代旧的
 `Ext2Type`，承载 Linux `file_system_type` 以及当前建模的 super/inode/file operation set；
 `Ext2Volume` 表示默认块设备上按 ext2 规范组织的 on-disk volume，由 `Preset` 经 `BufferHead` 检查确认，

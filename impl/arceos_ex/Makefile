@@ -55,11 +55,15 @@ MKFS_EXT2 ?= mkfs.ext2
 EXT2_MKFS_FEATURE_ARGS ?= -O ^dir_index
 EXT2_MKFS_BLOCK_ARGS := $(if $(strip $(EXT2_BLOCK_SIZE)),-b $(EXT2_BLOCK_SIZE),)
 ROOTFS_OVERLAY ?= user-init
-ROOTFS_OVERLAY_SRC ?= fixtures/user_init.S
-ROOTFS_OVERLAY_OUTPUT ?= build/rootfs-fixtures/$(ROOTFS_OVERLAY)
+ROOTFS_OVERLAY_TEST ?= init_hello
+ROOTFS_OVERLAY_TEST_SRC ?=
 ROOTFS_OVERLAY_TARGET ?= /sbin/init
-ROOTFS_OVERLAY_CC ?= riscv64-linux-gnu-gcc
-ROOTFS_OVERLAY_CFLAGS ?= -nostdlib -static -march=rv64imac -mabi=lp64 -Wl,-e,_start -Wl,-Ttext=0x10000 -Wl,--build-id=none
+ROOTFS_OVERLAY_TOOLCHAIN ?= gnu
+ROOTFS_OVERLAY_LINK ?= static
+ROOTFS_OVERLAY_OUTPUT ?= build/rootfs-user-tests/$(ROOTFS_OVERLAY_TEST)-$(ROOTFS_OVERLAY_TOOLCHAIN)-$(ROOTFS_OVERLAY_LINK)
+ROOTFS_OVERLAY_GNU_CC ?= riscv64-linux-gnu-gcc
+ROOTFS_OVERLAY_MUSL_CC ?= riscv64-linux-musl-gcc
+ROOTFS_OVERLAY_TEST_SRC_EFFECTIVE := $(if $(strip $(ROOTFS_OVERLAY_TEST_SRC)),$(ROOTFS_OVERLAY_TEST_SRC),$(ROOTFS_OVERLAY_TEST).S)
 QEMU_DEVICES ?= -object rng-random,id=rng0,filename=/dev/urandom -device virtio-rng-device,rng=rng0 -drive file=$(VIRTIO_BLK_IMAGE),if=none,format=raw,id=blk0 -device virtio-blk-device,drive=blk0
 PYVERI ?= $(ROOT)/tools/pyveri/bin/pyveri
 CODEGEN_PYTHONPATH := $(ROOT)/tools/common/src:$(ROOT)/tools/codegen/src
@@ -85,7 +89,7 @@ RUSTFLAGS := \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 
-.PHONY: build run generate disk disk-clean rootfs-tarball clean
+.PHONY: build run generate disk disk-clean rootfs-tarball rootfs-overlay clean
 
 build: generate $(KERNEL_BIN)
 
@@ -125,9 +129,15 @@ $(ROOTFS_TARBALL):
 	$(WGET) -O $@.tmp $(ROOTFS_URL)
 	mv $@.tmp $@
 
-$(ROOTFS_OVERLAY_OUTPUT): $(ROOTFS_OVERLAY_SRC)
-	mkdir -p $(dir $@)
-	$(ROOTFS_OVERLAY_CC) $(ROOTFS_OVERLAY_CFLAGS) -o $@ $<
+rootfs-overlay:
+	$(MAKE) -B -C tests/user build \
+		USER_TEST="$(ROOTFS_OVERLAY_TEST)" \
+		USER_TEST_OUT="$(abspath $(ROOTFS_OVERLAY_OUTPUT))" \
+		USER_TEST_TOOLCHAIN="$(ROOTFS_OVERLAY_TOOLCHAIN)" \
+		USER_TEST_LINK="$(ROOTFS_OVERLAY_LINK)" \
+		GNU_CC="$(ROOTFS_OVERLAY_GNU_CC)" \
+		MUSL_CC="$(ROOTFS_OVERLAY_MUSL_CC)" \
+		USER_TEST_SRC="$(ROOTFS_OVERLAY_TEST_SRC_EFFECTIVE)"
 
 $(VIRTIO_BLK_IMAGE):
 	mkdir -p $(dir $@)
@@ -138,7 +148,7 @@ ifeq ($(FS_TYPE),ext2)
 	$(TAR) --no-same-owner -xzf $(ROOTFS_TARBALL) -C $(ROOTFS_STAGING_DIR)
 ifneq ($(ROOTFS_OVERLAY),none)
 	case "$(ROOTFS_OVERLAY_TARGET)" in /*) ;; *) echo "ROOTFS_OVERLAY_TARGET must be an absolute rootfs path"; exit 1;; esac
-	$(MAKE) $(ROOTFS_OVERLAY_OUTPUT) ROOTFS_OVERLAY_CC="$(ROOTFS_OVERLAY_CC)" ROOTFS_OVERLAY_CFLAGS="$(ROOTFS_OVERLAY_CFLAGS)"
+	$(MAKE) rootfs-overlay
 	mkdir -p $(dir $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET))
 	rm -f $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET)
 	cp $(ROOTFS_OVERLAY_OUTPUT) $(ROOTFS_STAGING_DIR)$(ROOTFS_OVERLAY_TARGET)
