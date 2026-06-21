@@ -28,6 +28,8 @@ mod scheduler_action;
 mod trace;
 #[cfg(checkpoint_handler_uart_irq_chain)]
 mod uart_irq_chain;
+#[cfg(checkpoint_handler_user_boot)]
+mod user_boot;
 #[cfg(checkpoint_handler_virtio_blk)]
 mod virtio_blk;
 #[cfg(checkpoint_handler_virtio_bus)]
@@ -47,7 +49,8 @@ mod virtio_rng;
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
-    checkpoint_handler_virtio_rng
+    checkpoint_handler_virtio_rng,
+    checkpoint_handler_user_boot
 ))]
 use crate::checkpoint::kunit::{KtapSink, Sink};
 use crate::{context::Context, trace::Checkpoint};
@@ -107,7 +110,8 @@ pub struct Handler {
         checkpoint_handler_uart_irq_chain,
         checkpoint_handler_virtio_bus,
         checkpoint_handler_virtio_blk,
-        checkpoint_handler_virtio_rng
+        checkpoint_handler_virtio_rng,
+        checkpoint_handler_user_boot
     ))]
     pub run: HandlerRun,
 }
@@ -137,6 +141,8 @@ const POST_VM_HANDLERS: &[Handler] = &[
     virtio_blk::HANDLER,
     #[cfg(checkpoint_handler_virtio_rng)]
     virtio_rng::HANDLER,
+    #[cfg(checkpoint_handler_user_boot)]
+    user_boot::HANDLER,
 ];
 
 pub const fn has_post_vm_handlers() -> bool {
@@ -154,7 +160,8 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
-    checkpoint_handler_virtio_rng
+    checkpoint_handler_virtio_rng,
+    checkpoint_handler_user_boot
 ))]
 pub const fn kunit_case_count() -> usize {
     let mut count = 0usize;
@@ -202,6 +209,10 @@ pub const fn kunit_case_count() -> usize {
     {
         count += virtio_rng::KUNIT_CASE_COUNT;
     }
+    #[cfg(checkpoint_handler_user_boot)]
+    {
+        count += user_boot::KUNIT_CASE_COUNT;
+    }
     count
 }
 
@@ -217,7 +228,8 @@ pub const fn kunit_case_count() -> usize {
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
-    checkpoint_handler_virtio_rng
+    checkpoint_handler_virtio_rng,
+    checkpoint_handler_user_boot
 ))]
 pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     let mut current_priority = next_priority(checkpoint, None);
@@ -256,7 +268,8 @@ pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
     checkpoint_handler_virtio_blk,
-    checkpoint_handler_virtio_rng
+    checkpoint_handler_virtio_rng,
+    checkpoint_handler_user_boot
 )))]
 pub fn dispatch(_checkpoint: Checkpoint, _ctx: &Context) -> CheckpointOutcome {
     CheckpointOutcome::Continue

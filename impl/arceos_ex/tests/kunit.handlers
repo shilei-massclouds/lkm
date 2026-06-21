@@ -9,3 +9,4 @@ uart-irq-chain
 virtio-bus
 virtio-blk
 virtio-rng
+user-boot

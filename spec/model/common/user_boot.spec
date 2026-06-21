@@ -4,10 +4,11 @@
  * This slice models the shortest Linux-like path from PayloadPhase to the
  * first user-mode program. The selected payload variant is UserBootPayload.
  * It reads an init candidate such as /init from the current VFS root, treats
- * the result as an ElfObject, maps PT_LOAD segments into a UserAddressSpace,
- * prepares a UserStack and UserTrapFrame, then enters U-mode. Syscalls remain
- * under the existing SyscallException branch of ExceptionStream; this file only
- * adds the minimal dispatcher/table objects consumed by that branch.
+ * the result as an ElfObject, builds a PT_LOAD mapping plan, maps that plan
+ * into a UserAddressSpace, prepares a UserStack and UserTrapFrame, then enters
+ * U-mode. Syscalls remain under the existing SyscallException branch of
+ * ExceptionStream; this file only adds the minimal dispatcher/table objects
+ * consumed by that branch.
  *
  * The current root disk image is a whole-disk ext2 filesystem. PartitionTable
  * and BlockPartition objects are intentionally deferred until the disk image
@@ -33,6 +34,8 @@ predicate user_boot_payload_no_partition_dependency<T>(payload: T) -> bool;
 predicate user_boot_payload_partition_objects_deferred<T>(payload: T) -> bool;
 predicate user_boot_payload_try_candidate_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_selected_path_bound<T>(payload: T) -> bool;
+predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) -> bool;
+predicate user_boot_payload_try_candidate_elf_ready<T, E>(payload: T, elf: E) -> bool;
 predicate user_boot_payload_enters_user_mode<T>(payload: T) -> bool;
 predicate user_boot_payload_no_return_handoff<T>(payload: T) -> bool;
 
@@ -47,6 +50,10 @@ predicate elf_object_static_executable<T>(elf: T) -> bool;
 predicate elf_object_program_headers_parsed<T>(elf: T) -> bool;
 predicate elf_object_pt_load_segments_bound<T>(elf: T) -> bool;
 predicate elf_object_segment_permissions_bound<T>(elf: T) -> bool;
+predicate elf_object_load_plan_bound<T>(elf: T) -> bool;
+predicate elf_object_entry_in_executable_segment<T>(elf: T) -> bool;
+predicate elf_object_init_content_observed<T>(elf: T) -> bool;
+predicate elf_object_bss_zero_plan_bound<T>(elf: T) -> bool;
 predicate elf_object_bss_zeroed<T>(elf: T) -> bool;
 predicate elf_object_entry_bound<T>(elf: T) -> bool;
 predicate elf_object_mapped_to_user_address_space<T, A>(elf: T, space: A) -> bool;
@@ -137,6 +144,8 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_user_pages_u_enabled(self);
                     user_address_space_elf_segments_mapped(self, ElfObject);
                     user_address_space_stack_mapped(self, UserStack);
+                    elf_object_mapped_to_user_address_space(ElfObject, self);
+                    elf_object_bss_zeroed(ElfObject);
                 }
             }
         }
@@ -151,6 +160,8 @@ object UserAddressSpace: ResourceObject {
             user_address_space_user_pages_u_enabled(self);
             user_address_space_elf_segments_mapped(self, ElfObject);
             user_address_space_stack_mapped(self, UserStack);
+            elf_object_mapped_to_user_address_space(ElfObject, self);
+            elf_object_bss_zeroed(ElfObject);
         }
 
         events {
@@ -249,18 +260,15 @@ object ElfObject: ResourceObject {
 
         events {
             on Event::Setup -> State::Ready {
-                depends_on {
-                    UserAddressSpace.state == State::Prepared;
-                    UserStack.state == State::Ready;
-                }
-
                 ensures {
                     elf_object_program_headers_parsed(self);
                     elf_object_pt_load_segments_bound(self);
                     elf_object_segment_permissions_bound(self);
-                    elf_object_bss_zeroed(self);
+                    elf_object_load_plan_bound(self);
+                    elf_object_entry_in_executable_segment(self);
+                    elf_object_init_content_observed(self);
+                    elf_object_bss_zero_plan_bound(self);
                     elf_object_entry_bound(self);
-                    elf_object_mapped_to_user_address_space(self, UserAddressSpace);
                     elf_object_load_merged_into_setup(self);
                 }
             }
@@ -272,9 +280,11 @@ object ElfObject: ResourceObject {
             elf_object_program_headers_parsed(self);
             elf_object_pt_load_segments_bound(self);
             elf_object_segment_permissions_bound(self);
-            elf_object_bss_zeroed(self);
+            elf_object_load_plan_bound(self);
+            elf_object_entry_in_executable_segment(self);
+            elf_object_init_content_observed(self);
+            elf_object_bss_zero_plan_bound(self);
             elf_object_entry_bound(self);
-            elf_object_mapped_to_user_address_space(self, UserAddressSpace);
             elf_object_load_merged_into_setup(self);
             elf_object_no_separate_loader(self);
         }
@@ -493,6 +503,22 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_try_candidate_bound(self);
         }
 
+        actions {
+            on Action::TryCandidate(path: UserInitPathRef) {
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    ElfObject.state == State::Ready;
+                }
+
+                ensures {
+                    user_boot_payload_try_candidate_read_init(self, VfsCore);
+                    user_boot_payload_try_candidate_elf_ready(self, ElfObject);
+                    user_boot_payload_selected_path_bound(self);
+                }
+            }
+        }
+
         events {
             on Event::Enable -> State::Online {
                 depends_on {
@@ -511,6 +537,7 @@ object UserBootPayload: ResourceObject {
                     UserStack.Event::Setup;
                     ElfObject.Event::Preset;
                     ElfObject.Event::Setup;
+                    UserBootPayload.Action::TryCandidate(UserInitPathRef::DefaultInit);
                     UserTrapFrame.Event::Setup;
                     UserAddressSpace.Event::Setup;
                     ElfObject.Event::Enable;

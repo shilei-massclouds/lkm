@@ -762,10 +762,11 @@ KernelInitTask 的执行线从 `SmpRuntimePhase` 入口开始：`rest_init()` �
 `UserBootPayload` 是 Linux-like 用户态首进程路径的 selected payload 变种。代码生成或手写实现必须保持以下边界：
 
 - syscall 入口沿用 `ExceptionStream -> SyscallException`，不得为了用户态 hello 新增独立根 `Syscall` 对象或绕过异常分发。
-- 用户可执行文件对象命名为 `ElfObject`，不得生成单独的 `ElfLoader` 资源对象。`ElfObject.Preset` 只检查 ELF 类型支持；`ElfObject.Setup` 解析 ELF header / program headers，并完成 `PT_LOAD` 到 `UserAddressSpace` 的映射和 `.bss` 清零；`ElfObject.Enable` 只确认 entry、用户栈和 trap frame 已可用于进入用户态。
+- 用户可执行文件对象命名为 `ElfObject`，不得生成单独的 `ElfLoader` 资源对象。`ElfObject.Preset` 只检查 ELF 类型支持；`ElfObject.Setup` 解析 ELF header / program headers，并形成 `PT_LOAD` 映射计划、段权限、entry 和 `.bss` 清零计划；真实映射到 `UserAddressSpace` 与 `.bss` 清零事实归 `UserAddressSpace.Setup`。`ElfObject.Enable` 只确认 entry、用户栈和 trap frame 已可用于进入用户态。
 - `UserAddressSpace` 是多实例用户地址空间对象，低地址用户区独立；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续是内核共享地址空间实例，不应被改造成普通多实例用户地址空间类型。
 - 当前 rootfs 输入是 whole-disk ext2；`UserBootPayload` 不应要求 `PartitionTable` / `BlockPartition`。若未来磁盘镜像切换为带分区表，再补分区对象建模。
 - 首轮 `SyscallDispatcher` / `SyscallTable` 只覆盖 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。`write` 通过受限 `UserCopy` 转发到现有 printk/serial console，不等价于完整 fd table、`/dev/console` 或 TTY/N_TTY。
+- 针对当前临时 `/init` ELF 的 smoke/KUnit 验证只能读取 `ElfObject` 正常模型事实，例如 entry、`PT_LOAD` 数量、段权限、entry 是否落在可执行段、以及 fixture 内容字节是否位于 loadable 文件内容中；不得为了测试给普通对象增加 `test_only_*` 或等价专用 API。
 
 ## Pre-VM lifecycle 代码生成约束
 

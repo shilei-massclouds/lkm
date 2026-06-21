@@ -36,6 +36,7 @@ pub mod scheduler_schedule;
 pub mod slub;
 pub mod smp_bringup;
 pub mod task_creation_core;
+pub mod user_boot;
 pub mod virtio_mmio;
 pub mod virtio_ring;
 pub mod virtio_rng;

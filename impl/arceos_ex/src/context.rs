@@ -90,6 +90,7 @@ use crate::objects::{
     softirq::Softirq,
     static_branch::StaticBranch,
     static_objects::StaticObjects,
+    user_boot::{ElfObject, UserBootPayload},
     vfs::{FsStruct, RamFsType, VfsCore},
     virtio::VirtioBus,
     virtio_blk::VirtioBlkRuntime,
@@ -274,6 +275,8 @@ pub struct Context {
     pub rcu_boot_end: RcuBootEnd,
     pub sysctl_args_deferred: SysctlArgsDeferred,
     pub finalize_boundary: FinalizeBoundary,
+    pub user_boot_payload: UserBootPayload,
+    pub elf_object: ElfObject,
 }
 
 impl Context {
@@ -444,6 +447,8 @@ impl Context {
             rcu_boot_end: RcuBootEnd::new(),
             sysctl_args_deferred: SysctlArgsDeferred::new(),
             finalize_boundary: FinalizeBoundary::new(),
+            user_boot_payload: UserBootPayload::new(),
+            elf_object: ElfObject::new(),
         }
     }
 

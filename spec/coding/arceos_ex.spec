@@ -691,12 +691,24 @@ type ArceosExStartupPhaseCodingMust {
          *
          * The user executable model object is ElfObject. Code generation must
          * not create a separate ElfLoader resource object for this slice.
-         * Loading PT_LOAD segments into UserAddressSpace belongs to
-         * ElfObject.Setup; ElfObject.Enable only confirms user-entry
+         * ElfObject.Setup parses ELF header/program headers and builds the
+         * PT_LOAD mapping plan; the actual user-address-space mapping belongs
+         * to UserAddressSpace.Setup. ElfObject.Enable only confirms user-entry
          * preconditions and hands them to UserBootPayload.
          */
         arceos_ex_must_not_generate_elf_loader_object();
         arceos_ex_must_elf_object_setup_map_pt_load_segments();
+
+        /*
+         * User init ELF validation boundary:
+         *
+         * Smoke/KUnit may verify the temporary /init ELF's normal metadata and
+         * content facts through ElfObject state, such as entry, PT_LOAD segment
+         * count, permissions and expected embedded bytes. Implementations MUST
+         * NOT add test-only methods or APIs to ordinary objects for this
+         * validation.
+         */
+        arceos_ex_must_validate_user_init_elf_without_test_only_object_api();
 
         /*
          * User address-space boundary:
