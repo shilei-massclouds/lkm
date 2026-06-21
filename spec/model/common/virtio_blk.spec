@@ -127,9 +127,8 @@ object VirtioBlkDevice: DeviceObject {
             virtio_blk_reset_remove_deferred(self);
         }
 
-        processes {
-            Action::SetupRealTransport {
-                state_effect: StateEffect::None;
+        events {
+            on Event::Enable -> State::Online {
                 depends_on {
                     VirtioDevice.state == State::Ready;
                     VirtioMmioTransportDevice.state == State::Ready;
@@ -162,7 +161,26 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_device_ready(self);
                 }
             }
+        }
+    }
 
+    state State::Online {
+        invariant {
+            virtio_blk_device_allocated(self);
+            virtio_blk_device_bound_to_virtio_device(self, VirtioDevice);
+            virtio_blk_device_single_request_queue(self, VirtQueue);
+            virtio_blk_block_device_embedded(self, BlockDevice);
+            virtio_blk_device_capacity_read(self);
+            virtio_blk_device_capacity_nonzero(self);
+            virtio_blk_device_queue_setup_done(self);
+            virtio_blk_device_driver_ok(self);
+            virtio_blk_device_ready(self);
+            virtio_blk_filesystem_parse_deferred(self);
+            virtio_blk_multi_queue_deferred(self);
+            virtio_blk_reset_remove_deferred(self);
+        }
+
+        processes {
             Action::SubmitReadRequest {
                 state_effect: StateEffect::None;
                 depends_on {
@@ -205,27 +223,6 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_complete_status_ok(self);
                     virtio_blk_completion_count_incremented(self);
                     virtio_blk_read_request_done(self);
-                }
-            }
-
-            Action::RegisterBlockDevice {
-                state_effect: StateEffect::None;
-                depends_on {
-                    virtio_blk_device_ready(self);
-                    virtio_blk_device_capacity_nonzero(self);
-                    BlockDeviceRegistry.state == State::Ready;
-                    BlockDevice.state == State::Ready;
-                }
-                drives {
-                    BlockDeviceRegistry.Action::Register(BlockDevice);
-                }
-                ensures {
-                    virtio_blk_registers_block_device(self, BlockDevice);
-                    block_device_provider_is_virtio_blk(BlockDevice, self);
-                    block_device_registered(BlockDevice, BlockDeviceRegistry);
-                    block_device_default(BlockDevice, BlockDeviceRegistry);
-                    block_core_major_minor_lookup_returns(BlockDeviceRegistry, BlockDevice);
-                    virtio_blk_block_device_registered(self, BlockDevice, BlockDeviceRegistry);
                 }
             }
 

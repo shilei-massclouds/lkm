@@ -709,9 +709,9 @@ object InitcallPhase: PhaseObject {
                     VirtioMmioPlatformDriver.Event::Setup;
                     VirtioBlkDriver.Event::Setup;
                     VirtioBlkDevice.Event::Setup;
-                    VirtioBlkDevice.Action::SetupRealTransport;
+                    VirtioBlkDevice.Event::Enable;
                     BlockDevice.Event::Setup;
-                    VirtioBlkDevice.Action::RegisterBlockDevice;
+                    BlockDevice.Event::Enable;
                     DevFs.Event::Setup;
                     UartExternalIrqEnable.Event::Setup;
                     UartInterruptChainProbe.Event::Setup;
@@ -889,8 +889,8 @@ object InitcallPhase: PhaseObject {
             PlatformBus.state == State::Ready;
             VirtioBus.state == State::Ready;
             VirtioBlkDriver.state == State::Ready;
-            VirtioBlkDevice.state == State::Ready;
-            BlockDevice.state == State::Ready;
+            VirtioBlkDevice.state == State::Online;
+            BlockDevice.state == State::Online;
             HwRngCore.state == State::Ready;
             BlockDeviceRegistry.state == State::Ready;
             DevFs.state == State::Ready;

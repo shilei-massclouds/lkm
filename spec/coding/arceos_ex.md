@@ -486,6 +486,13 @@ freeze/restore 和完整 reset/remove 资源回收必须显式 deferred。
 `/dev/hwrng` 的完整 miscdevice/file operation 仍保持 deferred；但 devfs 可以在 hwrng core 已有 current rng
 之后创建只用于命名空间可发现性的 `hwrng` 设备节点。该节点不得绕过 `HwRngCore::read_current()` 引入新的读取后门。
 
+`VirtioBlkDevice` 的生命周期必须分两层：`Setup` 只建立 matched/probed virtio-blk device、single `VirtQueue`
+和 embedded `BlockDevice` shell；`Enable` 才表示真实 transport/config/feature/queue/DRIVER_OK 已完成，并提交
+capacity read/nonzero、queue ready 和 driver-ok 事实。`BlockDevice` 也必须分两层：`Setup` 只建立 block device shell、
+name/capacity/read callback/provider 绑定；`Enable` 才表示经 `BlockDeviceRegistry::register()` / add-disk 形状发布
+到 block core，形成 major/minor、default device 和 registry lookup 可用事实。`Bio`、`BufferHead`、Ext2 和 rootfs 只能依赖
+已经 `Online` 的 `BlockDevice`，不得消费仅 `Ready` 的未发布 block shell。
+
 `Bio` / `submit_bio_wait()` / `BufferHead` 是 read-only ext2 前的下一层块 I/O 边界。当前实现必须先建立
 Linux-like `Bio`、最小同步 `submit_bio_wait()` / `blk_mq_submit_bio()` 壳，以及 `BufferHead` /
 `sb_bread()` / `__bread_gfp()` 路径；不得用 `BlockReadRequest` 或 `BlockIoBuffer` 代替这些 Linux 对应主对象。

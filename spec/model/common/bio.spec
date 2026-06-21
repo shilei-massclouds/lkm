@@ -63,7 +63,7 @@ object Bio: ResourceObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
-                    BlockDevice.state == State::Ready;
+                    BlockDevice.state == State::Online;
                     block_device_registered(BlockDevice, BlockDeviceRegistry);
                     block_device_read_callback_bound(BlockDevice);
                 }
@@ -144,7 +144,7 @@ object BufferHead: ResourceObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
-                    BlockDevice.state == State::Ready;
+                    BlockDevice.state == State::Online;
                     block_device_registered(BlockDevice, BlockDeviceRegistry);
                     Bio.state == State::Ready;
                     KernelGlobalAllocator.state == State::Ready;

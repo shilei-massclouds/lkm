@@ -121,7 +121,7 @@ object BlockDeviceRegistry: ResourceObject {
                 state_effect: StateEffect::None;
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
-                    BlockDevice.state == State::Ready;
+                    BlockDevice.state == State::Online;
                     block_device_default(BlockDevice, BlockDeviceRegistry);
                     block_device_registered(BlockDevice, BlockDeviceRegistry);
                     block_device_read_callback_bound(BlockDevice);
@@ -141,7 +141,7 @@ object BlockDeviceRegistry: ResourceObject {
                 state_effect: StateEffect::None;
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
-                    BlockDevice.state == State::Ready;
+                    BlockDevice.state == State::Online;
                     block_core_major_minor_lookup_returns(BlockDeviceRegistry, BlockDevice);
                     block_device_registered(BlockDevice, BlockDeviceRegistry);
                     block_device_read_callback_bound(BlockDevice);
@@ -167,8 +167,7 @@ object BlockDevice: DeviceObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    VirtioBlkDevice.state == State::Ready;
-                    virtio_blk_device_capacity_nonzero(VirtioBlkDevice);
+                    VirtioBlkDevice.state == State::Online;
                 }
 
                 ensures {
@@ -191,12 +190,58 @@ object BlockDevice: DeviceObject {
             block_device_capacity_bound(BlockDevice);
         }
 
+        events {
+            on Event::Enable -> State::Online {
+                depends_on {
+                    BlockDeviceRegistry.state == State::Ready;
+                    BlockDevice.state == State::Ready;
+                    block_device_provider_is_virtio_blk(BlockDevice, VirtioBlkDevice);
+                    block_device_read_callback_bound(BlockDevice);
+                    block_device_capacity_bound(BlockDevice);
+                    block_device_name_bound(BlockDevice);
+                }
+                drives {
+                    BlockDeviceRegistry.Action::Register(BlockDevice);
+                }
+                ensures {
+                    block_core_register_blkdev_called(BlockDeviceRegistry);
+                    block_core_register_blkdev_returned_major(BlockDeviceRegistry);
+                    block_core_device_add_disk_called(BlockDeviceRegistry, BlockDevice);
+                    block_core_device_add_disk_return_zero(BlockDeviceRegistry, BlockDevice);
+                    block_device_major_minor_bound(BlockDevice);
+                    block_device_registered(BlockDevice, BlockDeviceRegistry);
+                    block_core_gendisk_list_contains(BlockDeviceRegistry, BlockDevice);
+                    block_core_major_minor_lookup_ready(BlockDeviceRegistry);
+                    block_core_major_minor_lookup_returns(BlockDeviceRegistry, BlockDevice);
+                    block_core_default_device_set(BlockDeviceRegistry, BlockDevice);
+                    block_device_default(BlockDevice, BlockDeviceRegistry);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            block_device_allocated(BlockDevice);
+            block_device_name_bound(BlockDevice);
+            block_device_provider_is_virtio_blk(BlockDevice, VirtioBlkDevice);
+            block_device_read_callback_bound(BlockDevice);
+            block_device_capacity_bound(BlockDevice);
+            block_device_major_minor_bound(BlockDevice);
+            block_device_registered(BlockDevice, BlockDeviceRegistry);
+            block_core_gendisk_list_contains(BlockDeviceRegistry, BlockDevice);
+            block_core_major_minor_lookup_ready(BlockDeviceRegistry);
+            block_core_major_minor_lookup_returns(BlockDeviceRegistry, BlockDevice);
+            block_core_default_device_set(BlockDeviceRegistry, BlockDevice);
+            block_device_default(BlockDevice, BlockDeviceRegistry);
+        }
+
         actions {
             Action::Read {
                 state_effect: StateEffect::None;
                 depends_on {
-                    BlockDevice.state == State::Ready;
-                    VirtioBlkDevice.state == State::Ready;
+                    BlockDevice.state == State::Online;
+                    VirtioBlkDevice.state == State::Online;
                     block_device_provider_is_virtio_blk(BlockDevice, VirtioBlkDevice);
                     block_device_read_callback_bound(BlockDevice);
                 }
