@@ -240,7 +240,7 @@ pub fn write_str(message: &str) {
     write_bytes(message.as_bytes());
 }
 
-fn write_bytes(bytes: &[u8]) {
+pub fn write_bytes(bytes: &[u8]) {
     unsafe {
         (&raw mut PRINTK_BUFFER)
             .as_mut()

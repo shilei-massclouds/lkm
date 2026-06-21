@@ -361,6 +361,9 @@ pub enum Checkpoint {
     SysctlArgsDeferredReady,
     FinalizeBoundaryReady,
     BreakpointExceptionHandled,
+    UserModeEntry,
+    UserSyscallWrite,
+    UserSyscallExit,
     PayloadPhaseReady,
     PayloadPhaseOnline,
 }
@@ -737,6 +740,9 @@ impl Checkpoint {
             Self::SysctlArgsDeferredReady => "SysctlArgs.DeferredReady",
             Self::FinalizeBoundaryReady => "FinalizeBoundary.Ready",
             Self::BreakpointExceptionHandled => "BreakpointException.Handled",
+            Self::UserModeEntry => "UserMode.Entry",
+            Self::UserSyscallWrite => "UserSyscall.Write",
+            Self::UserSyscallExit => "UserSyscall.Exit",
             Self::PayloadPhaseReady => "PayloadPhase.Ready",
             Self::PayloadPhaseOnline => "PayloadPhase.Online",
         }

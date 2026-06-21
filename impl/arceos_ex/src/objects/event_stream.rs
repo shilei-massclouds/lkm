@@ -23,15 +23,23 @@ early_event_entry:
 
     .globl formal_event_entry
 formal_event_entry:
+    csrrw   sp, sscratch, sp
+    bnez    sp, 1f
+    csrrw   sp, sscratch, sp
+1:
     addi    sp, sp, -288
     sd      zero, 0(sp)
     sd      ra, 8(sp)
     sd      gp, 24(sp)
     sd      tp, 32(sp)
     sd      t0, 40(sp)
-    addi    t0, sp, 288
-    sd      t0, 16(sp)
     sd      t1, 48(sp)
+    csrr    t0, sscratch
+    bnez    t0, 2f
+    addi    t0, sp, 288
+2:
+    sd      t0, 16(sp)
+    csrw    sscratch, zero
     sd      t2, 56(sp)
     sd      s0, 64(sp)
     sd      s1, 72(sp)
@@ -73,6 +81,14 @@ formal_event_entry:
     csrw    sepc, t0
     ld      t0, 256(sp)
     csrw    sstatus, t0
+    andi    t1, t0, {sstatus_spp}
+    bnez    t1, 3f
+    addi    t0, sp, 288
+    csrw    sscratch, t0
+    j       4f
+3:
+    csrw    sscratch, zero
+4:
 
     ld      ra, 8(sp)
     ld      gp, 24(sp)
@@ -112,7 +128,8 @@ formal_event_entry:
     .globl bss_anchor
 bss_anchor:
     .space 8
-"#
+"#,
+    sstatus_spp = const csr::SSTATUS_SPP,
 );
 
 unsafe extern "C" {
@@ -133,6 +150,22 @@ pub struct TrapFrame {
     pub sepc: usize,
     pub scause: usize,
     pub stval: usize,
+}
+
+impl TrapFrame {
+    pub fn reg(&self, index: usize) -> usize {
+        if index < self.regs.len() {
+            self.regs[index]
+        } else {
+            0
+        }
+    }
+
+    pub fn set_reg(&mut self, index: usize, value: usize) {
+        if index != 0 && index < self.regs.len() {
+            self.regs[index] = value;
+        }
+    }
 }
 
 #[unsafe(no_mangle)]

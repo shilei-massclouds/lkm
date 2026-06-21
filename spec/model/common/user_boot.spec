@@ -115,6 +115,10 @@ predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
 predicate user_trap_return_ready() -> bool;
+predicate user_trap_return_switches_satp() -> bool;
+predicate user_trap_entry_uses_kernel_stack<T>(frame: T) -> bool;
+predicate user_syscall_write_observed<T>(dispatcher: T) -> bool;
+predicate user_syscall_exit_observed<T>(dispatcher: T) -> bool;
 predicate user_mode_entry_observed<T>(frame: T) -> bool;
 
 predicate user_init_process_online<T>(process: T) -> bool;
@@ -519,11 +523,16 @@ object UserInitProcess: ResourceObject {
                 depends_on {
                     UserTrapFrame.state == State::Ready;
                     SyscallDispatcher.state == State::Ready;
+                    SyscallException.state == State::Online;
                 }
 
                 ensures {
                     user_init_process_online(self);
                     user_mode_entry_observed(UserTrapFrame);
+                    user_trap_return_switches_satp();
+                    user_trap_entry_uses_kernel_stack(UserTrapFrame);
+                    user_syscall_write_observed(SyscallDispatcher);
+                    user_syscall_exit_observed(SyscallDispatcher);
                 }
             }
         }
@@ -534,6 +543,9 @@ object UserInitProcess: ResourceObject {
             user_init_process_online(self);
             user_init_process_reuses_kernel_init_task(self, KernelInitTask);
             user_init_process_address_space_bound(self, UserAddressSpace);
+            user_mode_entry_observed(UserTrapFrame);
+            user_syscall_write_observed(SyscallDispatcher);
+            user_syscall_exit_observed(SyscallDispatcher);
         }
     }
 }

@@ -22,6 +22,7 @@ const HANDLER_PAGE_FAULT: u8 = 1;
 const HANDLER_SYSCALL_DISABLED: u8 = 2;
 const HANDLER_BREAKPOINT: u8 = 3;
 const HANDLER_UNEXPECTED: u8 = 4;
+const HANDLER_SYSCALL: u8 = 5;
 
 const PAGE_FAULT_CAUSES: [usize; 3] = [
     EXC_INSTRUCTION_PAGE_FAULT,
@@ -43,6 +44,12 @@ const PAGE_FAULT_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_PAGE_FAULT);
 const SYSCALL_DISABLED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
 const BREAKPOINT_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_BREAKPOINT);
 const UNEXPECTED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_UNEXPECTED);
+#[cfg(app_user_hello)]
+const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
+const SYSCALL_WRITE: usize = 64;
+const SYSCALL_EXIT: usize = 93;
+const SYSCALL_EXIT_GROUP: usize = 94;
+const USER_COPY_MAX: usize = 256;
 
 pub struct ExceptionStream {
     lifecycle: Lifecycle,
@@ -147,6 +154,20 @@ impl ExceptionStream {
         )
     }
 
+    #[cfg(app_user_hello)]
+    pub fn syscall_setup(&mut self) -> EventResult {
+        self.syscall.setup(
+            self.lifecycle.state(),
+            ExceptionHandlerBinding::Causes(&SYSCALL_CAUSES),
+            SYSCALL_POLICY,
+        )
+    }
+
+    #[cfg(app_user_hello)]
+    pub fn syscall_enable(&mut self) -> EventResult {
+        self.syscall.enable(self.lifecycle.state())
+    }
+
     pub fn page_fault_state(&self) -> State {
         self.page_fault.state()
     }
@@ -196,7 +217,9 @@ impl ExceptionKind {
         binding: ExceptionHandlerBinding,
         policy: ExceptionPolicy,
     ) -> EventResult {
-        if exception_stream_state != State::Prepared || self.lifecycle.state() != State::Prepared {
+        if !matches!(exception_stream_state, State::Prepared | State::Ready)
+            || self.lifecycle.state() != State::Prepared
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -208,6 +231,21 @@ impl ExceptionKind {
         bind_exception_policy(binding, policy);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
+    }
+
+    #[cfg(app_user_hello)]
+    fn enable(&mut self, exception_stream_state: State) -> EventResult {
+        if exception_stream_state != State::Ready || self.lifecycle.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
     }
 
     fn state(&self) -> State {
@@ -278,6 +316,7 @@ fn dispatch_handler_frame(handler: u8, frame: &mut TrapFrame) {
         HANDLER_BREAKPOINT => breakpoint_exception_handler(frame),
         HANDLER_PAGE_FAULT => page_fault_exception_handler(frame),
         HANDLER_SYSCALL_DISABLED => syscall_disabled_exception_handler(frame),
+        HANDLER_SYSCALL => syscall_exception_handler(frame),
         HANDLER_UNEXPECTED => unexpected_exception_handler(frame),
         _ => default_exception_handler(frame),
     }
@@ -293,6 +332,67 @@ fn page_fault_exception_handler(frame: &TrapFrame) -> ! {
 
 fn syscall_disabled_exception_handler(frame: &TrapFrame) -> ! {
     panic_dispatch_frame("syscall exception not enabled", frame)
+}
+
+fn syscall_exception_handler(frame: &mut TrapFrame) {
+    match frame.reg(17) {
+        SYSCALL_WRITE => syscall_write(frame),
+        SYSCALL_EXIT | SYSCALL_EXIT_GROUP => syscall_exit(frame),
+        _ => {
+            frame.set_reg(10, usize::MAX);
+            frame.sepc = frame.sepc.wrapping_add(4);
+        }
+    }
+}
+
+fn syscall_write(frame: &mut TrapFrame) {
+    let fd = frame.reg(10);
+    let user_ptr = frame.reg(11);
+    let len = frame.reg(12);
+    if !(fd == 1 || fd == 2) || len > USER_COPY_MAX {
+        frame.set_reg(10, usize::MAX);
+        frame.sepc = frame.sepc.wrapping_add(4);
+        return;
+    }
+
+    let mut buffer = [0u8; USER_COPY_MAX];
+    if !copy_from_user(user_ptr, &mut buffer[..len]) {
+        frame.set_reg(10, usize::MAX);
+        frame.sepc = frame.sepc.wrapping_add(4);
+        return;
+    }
+
+    crate::trace::checkpoint(Checkpoint::UserSyscallWrite);
+    crate::objects::printk::write_bytes(&buffer[..len]);
+    frame.set_reg(10, len);
+    frame.sepc = frame.sepc.wrapping_add(4);
+}
+
+fn syscall_exit(frame: &mut TrapFrame) -> ! {
+    crate::trace::checkpoint(Checkpoint::UserSyscallExit);
+    let status = frame.reg(10);
+    crate::arch::riscv64::sbi::putstr("user exit status=");
+    print_decimal(status);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+    crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn copy_from_user(user_ptr: usize, dst: &mut [u8]) -> bool {
+    if dst.is_empty() {
+        return true;
+    }
+    if user_ptr == 0 || user_ptr.checked_add(dst.len()).is_none() {
+        return false;
+    }
+
+    let saved = crate::arch::riscv64::csr::save_and_enable_user_memory_access();
+    let mut index = 0usize;
+    while index < dst.len() {
+        dst[index] = unsafe { core::ptr::read_volatile((user_ptr + index) as *const u8) };
+        index += 1;
+    }
+    crate::arch::riscv64::csr::restore_user_memory_access(saved);
+    true
 }
 
 fn breakpoint_exception_handler(frame: &mut TrapFrame) {
@@ -391,5 +491,23 @@ fn print_hex(value: usize) {
     while shift != 0 {
         shift -= 4;
         crate::arch::riscv64::sbi::putchar(HEX[(value >> shift) & 0xf]);
+    }
+}
+
+fn print_decimal(mut value: usize) {
+    let mut digits = [0u8; 20];
+    let mut len = 0usize;
+    if value == 0 {
+        crate::arch::riscv64::sbi::putchar(b'0');
+        return;
+    }
+    while value != 0 {
+        digits[len] = b'0' + (value % 10) as u8;
+        value /= 10;
+        len += 1;
+    }
+    while len != 0 {
+        len -= 1;
+        crate::arch::riscv64::sbi::putchar(digits[len]);
     }
 }

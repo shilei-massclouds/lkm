@@ -78,6 +78,11 @@ predicate arceos_ex_must_user_address_space_enable_build_real_page_table() -> bo
 predicate arceos_ex_must_user_address_space_enable_prepare_satp_without_switch() -> bool;
 predicate arceos_ex_must_user_address_space_round_not_enter_user_mode() -> bool;
 predicate arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret() -> bool;
+predicate arceos_ex_must_user_mode_entry_use_existing_trap_return_path() -> bool;
+predicate arceos_ex_must_user_trap_entry_switch_to_kernel_stack() -> bool;
+predicate arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch() -> bool;
+predicate arceos_ex_must_user_syscall_write_copy_from_user_address_space() -> bool;
+predicate arceos_ex_must_user_syscall_exit_stop_first_user_process() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
 predicate arceos_ex_must_user_boot_not_require_partition_objects_for_whole_disk_ext2() -> bool;
@@ -749,6 +754,24 @@ type ArceosExStartupPhaseCodingMust {
          * fact, and MUST NOT write satp, perform the address-space switching
          * sfence.vma, execute sret, or set up syscall/UserInitProcess state
          * before the explicit trap/syscall round is modeled.
+         *
+         * The explicit trap/syscall round must consume the prepared
+         * UserTrapFrame through the existing EventStream trap-return shape.
+         * The first user entry may write satp, execute the required sfence.vma
+         * boundary and sret to U-mode. The corresponding trap entry must not
+         * trust the user stack as a kernel trap frame stack: it must switch to
+         * a kernel-owned trap stack, for example through sscratch, before
+         * saving the full trap frame.
+         *
+         * User ecall must enter the existing ExceptionStream ->
+         * SyscallException branch and install a concrete syscall policy there.
+         * Code generation MUST NOT create a new root Syscall object or bypass
+         * ExceptionStream dispatch. The first dispatcher only handles
+         * write(1/2, user_buf, len) by copying bytes from the current
+         * UserAddressSpace and routing them to the existing console path, plus
+         * exit/exit_group(status) by recording/stopping the first user process
+         * boundary. It does not implement a full fd table, devfs console file,
+         * TTY line discipline, fork/wait or signal semantics.
          */
         arceos_ex_must_user_boot_payload_bind_kernel_init_task();
         arceos_ex_must_first_user_address_space_bind_kernel_init_task();
@@ -758,6 +781,11 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_user_address_space_enable_prepare_satp_without_switch();
         arceos_ex_must_user_address_space_round_not_enter_user_mode();
         arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret();
+        arceos_ex_must_user_mode_entry_use_existing_trap_return_path();
+        arceos_ex_must_user_trap_entry_switch_to_kernel_stack();
+        arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch();
+        arceos_ex_must_user_syscall_write_copy_from_user_address_space();
+        arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
         arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();
 

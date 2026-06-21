@@ -3,7 +3,9 @@ use core::arch::global_asm;
 use super::{SUPERVISOR_EXTERNAL_IRQ, SUPERVISOR_TIMER_IRQ};
 
 #[allow(dead_code)]
-const SSTATUS_SIE: usize = 1 << 1;
+pub const SSTATUS_SIE: usize = 1 << 1;
+pub const SSTATUS_SPP: usize = 1 << 8;
+pub const SSTATUS_SUM: usize = 1 << 18;
 const SIE_STIE: usize = 1 << SUPERVISOR_TIMER_IRQ;
 const SIE_SEIE: usize = 1 << SUPERVISOR_EXTERNAL_IRQ;
 const SSTATUS_VS: usize = 0b11 << 9;
@@ -41,6 +43,25 @@ arceos_ex_switch_to_early_vm:
     csrw    satp, a1
     sfence.vma
     jr      a4
+
+    .section .text.user_entry, "ax"
+    .align 2
+    .globl arceos_ex_enter_user_mode
+arceos_ex_enter_user_mode:
+    /*
+     * a0 = user satp
+     * a1 = user entry
+     * a2 = user stack pointer
+     * a3 = user sstatus
+     * a4 = kernel trap stack top for sscratch
+     */
+    csrw    sscratch, a4
+    csrw    sepc, a1
+    csrw    sstatus, a3
+    csrw    satp, a0
+    sfence.vma
+    mv      sp, a2
+    sret
 "#
 );
 
@@ -52,6 +73,14 @@ unsafe extern "C" {
         gp_virt: usize,
         continuation_virt: usize,
         kernel_virt_offset: usize,
+    ) -> !;
+    #[cfg(app_user_hello)]
+    fn arceos_ex_enter_user_mode(
+        user_satp: usize,
+        user_entry: usize,
+        user_sp: usize,
+        user_sstatus: usize,
+        kernel_trap_stack_top: usize,
     ) -> !;
 }
 
@@ -150,6 +179,20 @@ pub fn restore_supervisor_interrupts(saved_sstatus: usize) {
     }
 }
 
+pub fn save_and_enable_user_memory_access() -> usize {
+    let saved = read_sstatus();
+    set_sstatus_bits(SSTATUS_SUM);
+    saved
+}
+
+pub fn restore_user_memory_access(saved_sstatus: usize) {
+    if saved_sstatus & SSTATUS_SUM != 0 {
+        set_sstatus_bits(SSTATUS_SUM);
+    } else {
+        clear_sstatus_bits(SSTATUS_SUM);
+    }
+}
+
 pub fn supervisor_external_interrupt_enabled() -> bool {
     read_sie() & SIE_SEIE != 0
 }
@@ -214,6 +257,25 @@ pub unsafe fn switch_to_early_vm(
             gp_virt,
             continuation_virt,
             kernel_virt_offset,
+        )
+    }
+}
+
+#[cfg(app_user_hello)]
+pub unsafe fn enter_user_mode(
+    user_satp: usize,
+    user_entry: usize,
+    user_sp: usize,
+    user_sstatus: usize,
+    kernel_trap_stack_top: usize,
+) -> ! {
+    unsafe {
+        arceos_ex_enter_user_mode(
+            user_satp,
+            user_entry,
+            user_sp,
+            user_sstatus,
+            kernel_trap_stack_top,
         )
     }
 }

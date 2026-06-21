@@ -1,5 +1,13 @@
 use crate::arch::riscv64::csr;
 
+#[cfg(app_user_hello)]
+use super::{
+    block_device::BlockDeviceRegistry,
+    exception_stream::ExceptionStream,
+    ext2::{Ext2FileSystem, EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS},
+    vfs::{FsStruct, VfsCore},
+    virtio_blk,
+};
 use super::{
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
@@ -17,9 +25,13 @@ pub const USER_INIT_PATH: &[u8] = b"/init";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
 
 pub const ELF_HEADER_LEN: usize = 64;
+#[cfg(app_user_hello)]
+pub const USER_BOOT_READ_MAX: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
 pub const USER_STACK_SIZE: usize = 16 * 1024;
 pub const USER_STACK_TOP: usize = 0x4000_0000;
 pub const USER_PAGE_SIZE: usize = 4096;
+#[cfg(app_user_hello)]
+pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
 const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 const ELF_CLASS_64: u8 = 2;
 const ELF_DATA_LSB: u8 = 1;
@@ -1128,6 +1140,19 @@ fn total_mapping_page_count(mappings: &[UserMapping; MAX_USER_MAPPINGS], count: 
 pub const SSTATUS_SPP_USER_CLEAR: usize = 0;
 pub const SSTATUS_SPIE_SET: usize = 1 << 5;
 
+#[cfg(app_user_hello)]
+#[repr(align(16))]
+struct UserKernelTrapStack {
+    bytes: [u8; USER_KERNEL_TRAP_STACK_SIZE],
+}
+
+#[cfg(app_user_hello)]
+static mut USER_KERNEL_TRAP_STACK: UserKernelTrapStack = UserKernelTrapStack {
+    bytes: [0; USER_KERNEL_TRAP_STACK_SIZE],
+};
+#[cfg(app_user_hello)]
+static mut USER_BOOT_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
+
 pub struct UserTrapFrame {
     lifecycle: Lifecycle,
     entry: usize,
@@ -1266,6 +1291,7 @@ pub struct ElfObject {
     bss_zero_plan_bound: bool,
     entry_bound: bool,
     load_merged_into_setup: bool,
+    user_entry_ready: bool,
 }
 
 #[allow(dead_code)]
@@ -1296,6 +1322,7 @@ impl ElfObject {
             bss_zero_plan_bound: false,
             entry_bound: false,
             load_merged_into_setup: false,
+            user_entry_ready: false,
         }
     }
 
@@ -1399,6 +1426,10 @@ impl ElfObject {
         self.load_merged_into_setup
     }
 
+    pub const fn user_entry_ready(&self) -> bool {
+        self.user_entry_ready
+    }
+
     pub fn preset_from_vfs(&mut self, input: &[u8]) -> Result<(), ElfError> {
         if self.lifecycle.state() != State::Base {
             return Err(ElfError::InvalidState);
@@ -1462,6 +1493,30 @@ impl ElfObject {
     pub fn load_segments_fit_direct_read(&self, max_size: usize) -> bool {
         self.input_len <= max_size
     }
+
+    pub fn enable(
+        &mut self,
+        address_space: &UserAddressSpace,
+        stack: &UserStack,
+        trap_frame: &UserTrapFrame,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || address_space.state() != State::Ready
+            || stack.state() != State::Ready
+            || trap_frame.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.user_entry_ready = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+    }
 }
 
 pub struct UserBootPayload {
@@ -1476,6 +1531,8 @@ pub struct UserBootPayload {
     try_candidate_bound: bool,
     selected_path_bound: bool,
     reads_init_from_vfs: bool,
+    enters_user_mode: bool,
+    no_return_handoff: bool,
 }
 
 #[allow(dead_code)]
@@ -1493,6 +1550,8 @@ impl UserBootPayload {
             try_candidate_bound: false,
             selected_path_bound: false,
             reads_init_from_vfs: false,
+            enters_user_mode: false,
+            no_return_handoff: false,
         }
     }
 
@@ -1540,6 +1599,14 @@ impl UserBootPayload {
         self.reads_init_from_vfs
     }
 
+    pub const fn enters_user_mode(&self) -> bool {
+        self.enters_user_mode
+    }
+
+    pub const fn no_return_handoff(&self) -> bool {
+        self.no_return_handoff
+    }
+
     pub fn setup(&mut self, kernel_init_task: &KernelInitTask) -> EventResult {
         if self.lifecycle.state() != State::Base || kernel_init_task.state() != State::Online {
             return failed_condition(
@@ -1576,6 +1643,178 @@ impl UserBootPayload {
         self.reads_init_from_vfs = true;
         Ok(())
     }
+
+    #[cfg(app_user_hello)]
+    pub fn enable_for_user_entry(
+        &mut self,
+        elf: &ElfObject,
+        address_space: &UserAddressSpace,
+        trap_frame: &UserTrapFrame,
+        exception_stream: &ExceptionStream,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || elf.state() != State::Online
+            || address_space.state() != State::Online
+            || trap_frame.state() != State::Ready
+            || exception_stream.syscall_state() != State::Online
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        }
+
+        self.enters_user_mode = true;
+        self.no_return_handoff = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Enable, State::Ready, State::Online)
+    }
+}
+
+#[cfg(app_user_hello)]
+#[allow(clippy::too_many_arguments)]
+pub fn run_first_user_init(
+    payload: &mut UserBootPayload,
+    elf: &mut ElfObject,
+    address_space: &mut UserAddressSpace,
+    stack: &mut UserStack,
+    trap_frame: &mut UserTrapFrame,
+    vfs_core: &mut VfsCore,
+    fs_struct: &FsStruct,
+    ext2_filesystem: &mut Ext2FileSystem,
+    block_device_registry: &mut BlockDeviceRegistry,
+    kernel_init_task: &KernelInitTask,
+    swapper_vm: &SwapperVm,
+    kernel_image: &KernelImage,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+    kernel_global_allocator: &KernelGlobalAllocator,
+    exception_stream: &mut ExceptionStream,
+) -> ! {
+    if payload.setup(kernel_init_task).is_err() {
+        user_boot_panic("user payload setup failed\n");
+    }
+
+    let image = read_user_init_image(
+        vfs_core,
+        fs_struct,
+        ext2_filesystem,
+        block_device_registry,
+        kernel_image,
+    );
+    if elf.preset_from_vfs(image).is_err() || elf.setup(image).is_err() {
+        user_boot_panic("user init ELF setup failed\n");
+    }
+    if payload.try_candidate(elf).is_err() {
+        user_boot_panic("user init candidate failed\n");
+    }
+    if address_space
+        .preset(
+            swapper_vm,
+            page_allocator,
+            kernel_global_allocator,
+            kernel_init_task,
+        )
+        .is_err()
+    {
+        user_boot_panic("user address space preset failed\n");
+    }
+    if stack
+        .setup(address_space, page_allocator, page_metadata_map)
+        .is_err()
+    {
+        user_boot_panic("user stack setup failed\n");
+    }
+    if address_space
+        .setup(elf, stack, image, page_allocator, page_metadata_map)
+        .is_err()
+    {
+        user_boot_panic("user address space setup failed\n");
+    }
+    if trap_frame.setup(address_space, elf, stack).is_err() {
+        user_boot_panic("user trap frame setup failed\n");
+    }
+    if elf.enable(address_space, stack, trap_frame).is_err() {
+        user_boot_panic("user ELF enable failed\n");
+    }
+    if address_space
+        .enable(
+            trap_frame,
+            swapper_vm,
+            kernel_image,
+            page_allocator,
+            page_metadata_map,
+        )
+        .is_err()
+    {
+        user_boot_panic("user address space enable failed\n");
+    }
+    if exception_stream.syscall_setup().is_err() {
+        user_boot_panic("user syscall setup failed\n");
+    }
+    if exception_stream.syscall_enable().is_err() {
+        user_boot_panic("user syscall enable failed\n");
+    }
+    if payload
+        .enable_for_user_entry(elf, address_space, trap_frame, exception_stream)
+        .is_err()
+    {
+        user_boot_panic("user payload enable failed\n");
+    }
+
+    crate::trace::checkpoint(crate::trace::Checkpoint::UserModeEntry);
+    unsafe {
+        crate::arch::riscv64::csr::enter_user_mode(
+            address_space.satp_token(),
+            trap_frame.entry(),
+            trap_frame.sp(),
+            trap_frame.sstatus(),
+            user_kernel_trap_stack_top(),
+        )
+    }
+}
+
+#[cfg(app_user_hello)]
+fn read_user_init_image(
+    vfs_core: &mut VfsCore,
+    fs_struct: &FsStruct,
+    ext2_filesystem: &mut Ext2FileSystem,
+    block_device_registry: &mut BlockDeviceRegistry,
+    kernel_image: &KernelImage,
+) -> &'static [u8] {
+    let mut provider = virtio_blk::live_provider(kernel_image);
+    let buffer = unsafe {
+        let ptr = core::ptr::addr_of_mut!(USER_BOOT_READ_BUFFER);
+        &mut *ptr
+    };
+    buffer.fill(0);
+    let Ok(len) = vfs_core.read_path(
+        fs_struct,
+        ext2_filesystem,
+        block_device_registry,
+        &mut provider,
+        USER_INIT_PATH,
+        buffer,
+    ) else {
+        user_boot_panic("read /init failed\n");
+    };
+    &buffer[..len]
+}
+
+#[cfg(app_user_hello)]
+fn user_kernel_trap_stack_top() -> usize {
+    unsafe {
+        let base = core::ptr::addr_of!(USER_KERNEL_TRAP_STACK.bytes) as usize;
+        base + USER_KERNEL_TRAP_STACK_SIZE
+    }
+}
+
+#[cfg(app_user_hello)]
+fn user_boot_panic(message: &str) -> ! {
+    crate::arch::riscv64::sbi::putstr(message);
+    crate::arch::riscv64::sbi::system_shutdown()
 }
 
 #[derive(Clone, Copy)]
