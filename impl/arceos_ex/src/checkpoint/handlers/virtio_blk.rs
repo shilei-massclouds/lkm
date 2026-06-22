@@ -15,9 +15,14 @@ use crate::{
     trace::Checkpoint,
 };
 
-const SCOPE: &[Checkpoint] = &[Checkpoint::VirtioBlkReady, Checkpoint::VirtioBlkReadReady];
+const SCOPE: &[Checkpoint] = &[
+    Checkpoint::VirtioBlkReady,
+    Checkpoint::VirtioBlkReadReady,
+    Checkpoint::VirtioBlkLiveReadSubmitted,
+    Checkpoint::VirtioBlkLiveReadCompleted,
+];
 const VIRTIO_BLK_FIRST_READ_MAX_USED_LEN: u32 = 4097;
-pub const KUNIT_CASE_COUNT: usize = 2;
+pub const KUNIT_CASE_COUNT: usize = 4;
 
 pub const HANDLER: Handler = Handler {
     name: "virtio_blk.discovery_config",
@@ -31,7 +36,10 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
     if checkpoint == Checkpoint::VirtioBlkReady {
         return run_discovery_config(checkpoint, ctx, sink, total);
     }
-    run_read_completion(checkpoint, ctx, sink, total)
+    if checkpoint == Checkpoint::VirtioBlkReadReady {
+        return run_read_completion(checkpoint, ctx, sink, total);
+    }
+    run_live_read_trace(checkpoint, ctx, sink, total)
 }
 
 fn run_discovery_config(
@@ -73,6 +81,7 @@ fn run_discovery_config(
     );
     sink.diag_usize("virtio_blk_queue_ready", device.queue_setup_done() as usize);
     sink.diag_usize("virtio_blk_driver_ok", device.driver_ok() as usize);
+    emit_queue_diag(device, sink);
     if let Some(transport) = virtio_device.mmio_transport() {
         sink.diag_usize(
             "virtio_blk_irq_source_gate_open",
@@ -116,6 +125,7 @@ fn run_read_completion(
     sink.diag_usize("virtio_blk_last_status", device.last_status() as usize);
     sink.diag_usize("virtio_blk_last_used_len", device.last_used_len() as usize);
     sink.diag_usize("virtio_blk_last_sector", device.last_sector() as usize);
+    emit_queue_diag(device, sink);
     sink.diag_usize(
         "virtio_blk_ext2_magic",
         device.complete_ext2_magic_observed() as usize,
@@ -138,6 +148,82 @@ fn run_read_completion(
     );
     sink.pass(total, "", read_name);
     CheckpointOutcome::Continue
+}
+
+fn run_live_read_trace(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) -> CheckpointOutcome {
+    let name = if checkpoint == Checkpoint::VirtioBlkLiveReadSubmitted {
+        "virtio_blk.live_read_submitted"
+    } else {
+        "virtio_blk.live_read_completed"
+    };
+    sink.start_case(total, "", name, checkpoint);
+
+    let Some(device) = ctx.virtio_blk_runtime.device() else {
+        sink.fail(total, "", name, "virtio blk device missing");
+        return CheckpointOutcome::FailAndShutdown;
+    };
+    sink.diag_usize("virtio_blk_requests", device.request_count());
+    sink.diag_usize("virtio_blk_notifies", device.notify_count());
+    sink.diag_usize("virtio_blk_completions", device.completion_count());
+    sink.diag_usize("virtio_blk_pending", device.read_request_pending() as usize);
+    sink.diag_usize(
+        "virtio_blk_pending_sector",
+        device.pending_sector() as usize,
+    );
+    sink.diag_usize("virtio_blk_pending_len", device.pending_data_len() as usize);
+    sink.diag_usize("virtio_blk_last_sector", device.last_sector() as usize);
+    sink.diag_usize("virtio_blk_last_used_len", device.last_used_len() as usize);
+    sink.diag_usize(
+        "virtio_blk_live_submitted_checkpoints",
+        virtio_blk::live_read_submitted_checkpoints(),
+    );
+    sink.diag_usize(
+        "virtio_blk_live_completed_checkpoints",
+        virtio_blk::live_read_completed_checkpoints(),
+    );
+    emit_queue_diag(device, sink);
+    sink.pass(total, "", name);
+    CheckpointOutcome::Continue
+}
+
+fn emit_queue_diag(device: &crate::objects::virtio_blk::VirtioBlkDevice, sink: &mut dyn Sink) {
+    let queue = device.queue();
+    let layout = queue.real_layout();
+    sink.diag_usize("virtq_submitted_count", queue.submitted_count());
+    sink.diag_usize("virtq_kick_count", queue.kick_count());
+    sink.diag_usize("virtq_completion_count", queue.completion_count());
+    sink.diag_usize("virtq_get_buf_count", queue.get_buf_count());
+    sink.diag_usize("virtq_avail_idx", queue.ring_avail_idx() as usize);
+    sink.diag_usize("virtq_used_idx", queue.ring_used_idx() as usize);
+    sink.diag_usize("virtq_last_used_idx", queue.ring_last_used_idx() as usize);
+    sink.diag_usize(
+        "virtq_raw_avail_idx",
+        queue.raw_avail_idx().unwrap_or(usize::MAX as u16) as usize,
+    );
+    sink.diag_usize(
+        "virtq_raw_used_idx",
+        queue.raw_used_idx().unwrap_or(usize::MAX as u16) as usize,
+    );
+    sink.diag_hex_pair(
+        "virtq_desc_virt_phys",
+        layout.desc_virt(),
+        layout.desc_phys(),
+    );
+    sink.diag_hex_pair(
+        "virtq_avail_virt_phys",
+        layout.avail_virt(),
+        layout.avail_phys(),
+    );
+    sink.diag_hex_pair(
+        "virtq_used_virt_phys",
+        layout.used_virt(),
+        layout.used_phys(),
+    );
 }
 
 fn blk_facts_valid(ctx: &Context) -> bool {

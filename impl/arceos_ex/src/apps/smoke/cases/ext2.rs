@@ -249,6 +249,14 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             "file direct block",
             ctx.ext2_filesystem.lookup_file_inode().direct_blocks()[0] != 0,
         );
+        assertions.assert(
+            "file single indirect supported",
+            ctx.ext2_filesystem
+                .lookup_file_inode()
+                .single_indirect_block()
+                != 0
+                || file_inode_size_within_direct_blocks(ctx.ext2_filesystem.lookup_file_inode()),
+        );
         assertions.assert("vfs lookup fact", ctx.vfs_core.ext2_lookup_dispatched());
         assertions.assert(
             "absolute path walk supported",
@@ -368,6 +376,10 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
+}
+
+fn file_inode_size_within_direct_blocks(inode: &crate::objects::ext2::Ext2InodeRecord) -> bool {
+    inode.size() as usize <= EXT2_MAX_BLOCK_SIZE * crate::objects::ext2::EXT2_NDIR_BLOCKS
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {

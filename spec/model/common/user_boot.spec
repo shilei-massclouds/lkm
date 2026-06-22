@@ -20,6 +20,11 @@ enum UserInitPathRef {
     DefaultInit,
 }
 
+enum ElfObjectRole {
+    MainExecutable,
+    Interpreter,
+}
+
 predicate user_boot_payload_selected<T>(payload: T) -> bool;
 predicate user_boot_payload_candidates_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_default_init_path_bound<T>(payload: T) -> bool;
@@ -43,6 +48,14 @@ predicate elf_object_little_endian<T>(elf: T) -> bool;
 predicate elf_object_machine_riscv<T>(elf: T) -> bool;
 predicate elf_object_type_supported<T>(elf: T) -> bool;
 predicate elf_object_static_executable<T>(elf: T) -> bool;
+predicate elf_object_role_bound<T, R>(elf: T, role: R) -> bool;
+predicate elf_object_dynamic_executable<T>(elf: T) -> bool;
+predicate elf_object_interpreter_required<T>(elf: T) -> bool;
+predicate elf_object_interpreter_path_bound<T>(elf: T) -> bool;
+predicate elf_object_interpreter_elf_bound<T, I>(elf: T, interpreter: I) -> bool;
+predicate elf_object_et_dyn_interpreter_supported<T>(elf: T) -> bool;
+predicate elf_object_runtime_entry_bound<T>(elf: T) -> bool;
+predicate elf_object_auxv_exec_fields_bound<T>(elf: T) -> bool;
 predicate elf_object_program_headers_parsed<T>(elf: T) -> bool;
 predicate elf_object_pt_load_segments_bound<T>(elf: T) -> bool;
 predicate elf_object_segment_permissions_bound<T>(elf: T) -> bool;
@@ -66,8 +79,11 @@ predicate user_address_space_high_half_shares_swapper<T, S>(space: T, swapper: S
 predicate user_address_space_kernel_pages_u_disabled<T>(space: T) -> bool;
 predicate user_address_space_user_pages_u_enabled<T>(space: T) -> bool;
 predicate user_address_space_elf_segments_mapped<T, E>(space: T, elf: E) -> bool;
+predicate user_address_space_interpreter_segments_mapped<T, E>(space: T, interpreter: E) -> bool;
 predicate user_address_space_stack_mapped<T, S>(space: T, stack: S) -> bool;
+predicate user_address_space_heap_arena_mapped<T>(space: T) -> bool;
 predicate user_address_space_elf_load_plan_consumed<T, E>(space: T, elf: E) -> bool;
+predicate user_address_space_interpreter_load_plan_consumed<T, E>(space: T, interpreter: E) -> bool;
 predicate user_address_space_segment_mappings_bound<T>(space: T) -> bool;
 predicate user_address_space_entry_mapping_executable<T>(space: T) -> bool;
 predicate user_address_space_bss_zero_plan_consumed<T, E>(space: T, elf: E) -> bool;
@@ -81,6 +97,10 @@ predicate user_address_space_high_half_root_entries_shared<T, S>(space: T, swapp
 predicate user_address_space_satp_token_ready<T>(space: T) -> bool;
 predicate user_address_space_prepared_but_not_current<T>(space: T) -> bool;
 predicate user_address_space_runtime_ready<T>(space: T) -> bool;
+predicate user_address_space_brk_window_bound<T>(space: T) -> bool;
+predicate user_address_space_mmap_anonymous_window_bound<T>(space: T) -> bool;
+predicate user_address_space_mprotect_accepts_mapped_user_range<T>(space: T) -> bool;
+predicate user_address_space_munmap_accepts_mapped_user_range<T>(space: T) -> bool;
 predicate swapper_vm_remains_kernel_shared_instance<T>(swapper: T) -> bool;
 
 predicate user_stack_allocated<T>(stack: T) -> bool;
@@ -90,9 +110,13 @@ predicate user_stack_backing_pages_allocated<T>(stack: T) -> bool;
 predicate user_stack_zeroed<T>(stack: T) -> bool;
 predicate user_stack_initial_sp_bound<T>(stack: T) -> bool;
 predicate user_stack_minimal_arg_env_bound<T>(stack: T) -> bool;
+predicate user_stack_initial_argc_argv_envp_auxv_bound<T>(stack: T) -> bool;
+predicate user_stack_static_libc_entry_supported<T>(stack: T) -> bool;
+predicate user_stack_dynamic_auxv_fields_bound<T, E, I>(stack: T, elf: E, interpreter: I) -> bool;
 
 predicate user_trap_frame_allocated<T>(frame: T) -> bool;
 predicate user_trap_frame_entry_bound<T, E>(frame: T, elf: E) -> bool;
+predicate user_trap_frame_entry_uses_interpreter_when_present<T, E, I>(frame: T, elf: E, interpreter: I) -> bool;
 predicate user_trap_frame_sp_bound<T, S>(frame: T, stack: S) -> bool;
 predicate user_trap_frame_sstatus_user_mode<T>(frame: T) -> bool;
 predicate user_trap_frame_sret_ready<T>(frame: T) -> bool;
@@ -102,21 +126,34 @@ predicate user_trap_frame_prepared_but_not_entered<T>(frame: T) -> bool;
 predicate syscall_table_ready<T>(table: T) -> bool;
 predicate syscall_table_bound_to_exception<T, E>(table: T, exception: E) -> bool;
 predicate syscall_table_write_supported<T>(table: T) -> bool;
+predicate syscall_table_writev_supported<T>(table: T) -> bool;
 predicate syscall_table_openat_supported<T>(table: T) -> bool;
 predicate syscall_table_read_supported<T>(table: T) -> bool;
 predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
+predicate syscall_table_brk_supported<T>(table: T) -> bool;
+predicate syscall_table_mmap_supported<T>(table: T) -> bool;
+predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
+predicate syscall_table_munmap_supported<T>(table: T) -> bool;
+predicate syscall_table_set_tid_address_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_group_supported<T>(table: T) -> bool;
 predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_writev_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_read_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_path_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
+predicate syscall_writev_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_brk_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
+predicate syscall_mmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
+predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
+predicate syscall_munmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
+predicate syscall_set_tid_address_routes_to_user_init_process<T, P>(table: T, process: P) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
 predicate syscall_exception_dispatches_via_table<T, S>(exception: T, table: S) -> bool;
 predicate syscall_exception_extracts_arguments<T>(exception: T) -> bool;
@@ -124,10 +161,12 @@ predicate user_trap_return_ready() -> bool;
 predicate user_trap_return_switches_satp() -> bool;
 predicate user_trap_entry_uses_kernel_stack<T>(frame: T) -> bool;
 predicate syscall_table_write_observed<T>(table: T) -> bool;
+predicate syscall_table_writev_observed<T>(table: T) -> bool;
 predicate syscall_table_openat_observed<T>(table: T) -> bool;
 predicate syscall_table_read_observed<T>(table: T) -> bool;
 predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
+predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
 
@@ -143,6 +182,7 @@ predicate user_init_process_fs_struct_inherited<T, F>(process: T, fs: F) -> bool
 predicate user_init_process_files_struct_inherited<T, F>(process: T, files: F) -> bool;
 predicate user_init_process_trap_frame_bound<T, R>(process: T, frame: R) -> bool;
 predicate user_init_process_syscall_context_bound<T, E, S>(process: T, exception: E, table: S) -> bool;
+predicate user_init_process_clear_child_tid_bound<T>(process: T) -> bool;
 predicate user_init_process_user_entry_ready<T>(process: T) -> bool;
 predicate user_init_process_trap_return_bound<T, R>(process: T, frame: R) -> bool;
 predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> bool;
@@ -208,6 +248,7 @@ object UserAddressSpace: ResourceObject {
                     user_address_space_page_table_view_ready(self);
                     user_address_space_elf_segments_mapped(self, ElfObject);
                     user_address_space_stack_mapped(self, UserStack);
+                    user_address_space_heap_arena_mapped(self);
                     elf_object_mapped_to_user_address_space(ElfObject, self);
                     elf_object_bss_zeroed(ElfObject);
                 }
@@ -235,6 +276,7 @@ object UserAddressSpace: ResourceObject {
             user_address_space_page_table_view_ready(self);
             user_address_space_elf_segments_mapped(self, ElfObject);
             user_address_space_stack_mapped(self, UserStack);
+            user_address_space_heap_arena_mapped(self);
             elf_object_mapped_to_user_address_space(ElfObject, self);
             elf_object_bss_zeroed(ElfObject);
         }
@@ -271,6 +313,35 @@ object UserAddressSpace: ResourceObject {
             user_address_space_first_instance(self);
             user_address_space_bound_to_kernel_init_task(self, KernelInitTask);
             kernel_init_task_first_user_address_space_bound(KernelInitTask, self);
+            user_address_space_heap_arena_mapped(self);
+        }
+
+        actions {
+            on Action::Brk {
+                ensures {
+                    user_address_space_heap_arena_mapped(self);
+                    user_address_space_brk_window_bound(self);
+                }
+            }
+
+            on Action::Mmap {
+                ensures {
+                    user_address_space_heap_arena_mapped(self);
+                    user_address_space_mmap_anonymous_window_bound(self);
+                }
+            }
+
+            on Action::Mprotect {
+                ensures {
+                    user_address_space_mprotect_accepts_mapped_user_range(self);
+                }
+            }
+
+            on Action::Munmap {
+                ensures {
+                    user_address_space_munmap_accepts_mapped_user_range(self);
+                }
+            }
         }
     }
 }
@@ -337,8 +408,7 @@ object ElfObject: ResourceObject {
                     elf_object_little_endian(self);
                     elf_object_machine_riscv(self);
                     elf_object_type_supported(self);
-                    elf_object_static_executable(self);
-                    elf_object_no_separate_loader(self);
+                    elf_object_role_bound(self, ElfObjectRole::MainExecutable);
                 }
             }
         }
@@ -353,8 +423,7 @@ object ElfObject: ResourceObject {
             elf_object_little_endian(self);
             elf_object_machine_riscv(self);
             elf_object_type_supported(self);
-            elf_object_static_executable(self);
-            elf_object_no_separate_loader(self);
+            elf_object_role_bound(self, ElfObjectRole::MainExecutable);
         }
 
         events {
@@ -365,10 +434,21 @@ object ElfObject: ResourceObject {
                     elf_object_segment_permissions_bound(self);
                     elf_object_load_plan_bound(self);
                     elf_object_entry_in_executable_segment(self);
+                    elf_object_runtime_entry_bound(self);
+                    elf_object_auxv_exec_fields_bound(self);
                     elf_object_init_content_observed(self);
                     elf_object_bss_zero_plan_bound(self);
                     elf_object_entry_bound(self);
                     elf_object_load_merged_into_setup(self);
+                    /*
+                     * Static executables keep elf_object_no_separate_loader.
+                     * Dynamically linked executables instead bind PT_INTERP to
+                     * a second ElfObject role, Interpreter. The interpreter is
+                     * not an ElfLoader resource object and load remains merged
+                     * into ElfObject.Setup / UserAddressSpace.Setup.
+                     */
+                    elf_object_static_executable(self) || elf_object_dynamic_executable(self);
+                    elf_object_no_separate_loader(self) || elf_object_interpreter_required(self);
                 }
             }
         }
@@ -385,7 +465,9 @@ object ElfObject: ResourceObject {
             elf_object_bss_zero_plan_bound(self);
             elf_object_entry_bound(self);
             elf_object_load_merged_into_setup(self);
-            elf_object_no_separate_loader(self);
+            elf_object_runtime_entry_bound(self);
+            elf_object_static_executable(self) || elf_object_dynamic_executable(self);
+            elf_object_no_separate_loader(self) || elf_object_interpreter_required(self);
         }
 
         events {
@@ -466,13 +548,20 @@ object SyscallTable: ResourceObject {
                     syscall_table_ready(self);
                     syscall_table_bound_to_exception(self, SyscallException);
                     syscall_table_write_supported(self);
+                    syscall_table_writev_supported(self);
                     syscall_table_openat_supported(self);
                     syscall_table_read_supported(self);
                     syscall_table_close_supported(self);
                     syscall_table_newfstatat_supported(self);
+                    syscall_table_brk_supported(self);
+                    syscall_table_mmap_supported(self);
+                    syscall_table_mprotect_supported(self);
+                    syscall_table_munmap_supported(self);
+                    syscall_table_set_tid_address_supported(self);
                     syscall_table_exit_supported(self);
                     syscall_table_exit_group_supported(self);
                     syscall_write_usercopy_ready(self);
+                    syscall_writev_usercopy_ready(self);
                     syscall_read_usercopy_ready(self);
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
@@ -488,13 +577,20 @@ object SyscallTable: ResourceObject {
             syscall_table_ready(self);
             syscall_table_bound_to_exception(self, SyscallException);
             syscall_table_write_supported(self);
+            syscall_table_writev_supported(self);
             syscall_table_openat_supported(self);
             syscall_table_read_supported(self);
             syscall_table_close_supported(self);
             syscall_table_newfstatat_supported(self);
+            syscall_table_brk_supported(self);
+            syscall_table_mmap_supported(self);
+            syscall_table_mprotect_supported(self);
+            syscall_table_munmap_supported(self);
+            syscall_table_set_tid_address_supported(self);
             syscall_table_exit_supported(self);
             syscall_table_exit_group_supported(self);
             syscall_write_usercopy_ready(self);
+            syscall_writev_usercopy_ready(self);
             syscall_read_usercopy_ready(self);
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
@@ -524,6 +620,30 @@ object SyscallTable: ResourceObject {
                     open_file_description_write_dispatches_backend(OpenFileDescription, FileBackend);
                     file_backend_write_to_console(FileBackend);
                     syscall_table_write_observed(self);
+                }
+            }
+
+            on Action::Writev {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    syscall_writev_usercopy_ready(self);
+                }
+
+                drives {
+                    FilesStruct.Action::LookupFd(FdRef::Stderr);
+                    FileDescriptorTable.Action::Lookup(FdRef::Stderr);
+                    OpenFileDescription.Action::Write;
+                    FileBackend.Action::WriteCharDevice;
+                }
+
+                ensures {
+                    syscall_writev_routes_to_files_struct(self, FilesStruct);
+                    files_struct_fd_lookup_routes_to_table(FilesStruct, FileDescriptorTable);
+                    open_file_description_write_dispatches_backend(OpenFileDescription, FileBackend);
+                    file_backend_write_to_console(FileBackend);
+                    syscall_table_writev_observed(self);
                 }
             }
 
@@ -614,6 +734,87 @@ object SyscallTable: ResourceObject {
                     files_struct_regular_file_stat_observed(FilesStruct);
                     file_backend_regular_file_stat_returns_metadata(FileBackend);
                     syscall_table_newfstatat_observed(self);
+                }
+            }
+
+            on Action::Brk {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserAddressSpace.state == State::Online;
+                }
+
+                drives {
+                    UserAddressSpace.Action::Brk;
+                }
+
+                ensures {
+                    syscall_table_brk_supported(self);
+                    syscall_brk_routes_to_user_address_space(self, UserAddressSpace);
+                }
+            }
+
+            on Action::Mmap {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserAddressSpace.state == State::Online;
+                }
+
+                drives {
+                    UserAddressSpace.Action::Mmap;
+                }
+
+                ensures {
+                    syscall_table_mmap_supported(self);
+                    syscall_mmap_routes_to_user_address_space(self, UserAddressSpace);
+                }
+            }
+
+            on Action::Mprotect {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserAddressSpace.state == State::Online;
+                }
+
+                drives {
+                    UserAddressSpace.Action::Mprotect;
+                }
+
+                ensures {
+                    syscall_table_mprotect_supported(self);
+                    syscall_mprotect_routes_to_user_address_space(self, UserAddressSpace);
+                }
+            }
+
+            on Action::Munmap {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserAddressSpace.state == State::Online;
+                }
+
+                drives {
+                    UserAddressSpace.Action::Munmap;
+                }
+
+                ensures {
+                    syscall_table_munmap_supported(self);
+                    syscall_munmap_routes_to_user_address_space(self, UserAddressSpace);
+                }
+            }
+
+            on Action::SetTidAddress {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::SetClearChildTid;
+                }
+
+                ensures {
+                    syscall_set_tid_address_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_clear_child_tid_bound(UserInitProcess);
+                    syscall_table_set_tid_address_observed(self);
                 }
             }
 
@@ -757,6 +958,17 @@ object UserInitProcess: ResourceObject {
                     user_init_process_enter_user_mode_observed(self, UserTrapFrame);
                     user_trap_return_switches_satp();
                     user_trap_entry_uses_kernel_stack(UserTrapFrame);
+                }
+            }
+
+            on Action::SetClearChildTid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_clear_child_tid_bound(self);
                 }
             }
 

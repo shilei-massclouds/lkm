@@ -69,6 +69,12 @@ predicate arceos_ex_must_user_boot_payload_be_selected_payload_variant() -> bool
 predicate arceos_ex_must_user_boot_use_existing_syscall_exception() -> bool;
 predicate arceos_ex_must_not_generate_elf_loader_object() -> bool;
 predicate arceos_ex_must_elf_object_setup_build_pt_load_mapping_plan() -> bool;
+predicate arceos_ex_must_elf_object_support_pt_interp_without_elf_loader_object() -> bool;
+predicate arceos_ex_must_user_address_space_map_main_and_interpreter_elfs() -> bool;
+predicate arceos_ex_must_user_address_space_provide_dynamic_linker_heap_arena() -> bool;
+predicate arceos_ex_must_user_stack_setup_initial_argc_argv_envp_auxv() -> bool;
+predicate arceos_ex_must_user_stack_provide_dynamic_linker_auxv_fields() -> bool;
+predicate arceos_ex_must_user_trap_frame_enter_interpreter_when_present() -> bool;
 predicate arceos_ex_must_validate_user_init_elf_without_test_only_object_api() -> bool;
 predicate arceos_ex_must_user_boot_payload_bind_kernel_init_task() -> bool;
 predicate arceos_ex_must_first_user_address_space_bind_kernel_init_task() -> bool;
@@ -84,6 +90,7 @@ predicate arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch() -> 
 predicate arceos_ex_must_not_generate_syscall_dispatcher_object() -> bool;
 predicate arceos_ex_must_syscall_table_hold_concrete_syscall_actions() -> bool;
 predicate arceos_ex_must_user_syscall_write_copy_from_user_address_space() -> bool;
+predicate arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions() -> bool;
 predicate arceos_ex_must_user_syscall_exit_stop_first_user_process() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
@@ -157,6 +164,7 @@ predicate arceos_ex_must_ext2_first_slice_read_only_and_buffer_head_based() -> b
 predicate arceos_ex_must_ext2_support_4k_buffer_and_block_sizes() -> bool;
 predicate arceos_ex_must_ext2_model_driver_volume_filesystem_lifecycle() -> bool;
 predicate arceos_ex_must_ext2_read_path_support_multi_direct_blocks() -> bool;
+predicate arceos_ex_must_ext2_read_path_support_single_indirect_blocks() -> bool;
 predicate arceos_ex_must_ext2_smoke_use_stable_alpine_rootfs_files() -> bool;
 predicate arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build() -> bool;
 predicate arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides() -> bool;
@@ -718,9 +726,16 @@ type ArceosExStartupPhaseCodingMust {
          * PT_LOAD mapping plan; the actual user-address-space mapping belongs
          * to UserAddressSpace.Setup. ElfObject.Enable only confirms user-entry
          * preconditions and hands them to UserBootPayload.
+         *
+         * Dynamic libc support still uses ElfObject. PT_INTERP on the main
+         * executable binds an interpreter-path fact and causes UserBootPayload
+         * to read the interpreter as another ElfObject role. That interpreter
+         * may be ET_DYN, but it is not an ElfLoader resource object and it does
+         * not introduce a separate Load lifecycle stage.
          */
         arceos_ex_must_not_generate_elf_loader_object();
         arceos_ex_must_elf_object_setup_build_pt_load_mapping_plan();
+        arceos_ex_must_elf_object_support_pt_interp_without_elf_loader_object();
 
         /*
          * User init ELF validation boundary:
@@ -752,8 +767,16 @@ type ArceosExStartupPhaseCodingMust {
          *
          * UserAddressSpace.Setup consumes ElfObject's PT_LOAD mapping plan and
          * records segment/stack mapping facts, user-page U permission facts and
-         * kernel-page U=0 facts. It may allocate backing pages, copy ELF file
-         * bytes, zero .bss/stack bytes and build a page-table-shaped view.
+         * kernel-page U=0 facts. For PT_INTERP executables it must consume both
+         * the main executable ElfObject and the interpreter ElfObject mapping
+         * plans into the same user address space. It must also provide a
+         * minimal user heap/anonymous mapping arena for the dynamic loader's
+         * early brk/mmap-style allocations. It may allocate backing pages,
+         * copy ELF file bytes, zero .bss/stack/heap bytes and build a
+         * page-table-shaped view. ELF segment backing and low-half user leaf
+         * PTEs are page-granular over align_down(p_vaddr)..align_up(p_vaddr +
+         * p_memsz); mprotect/munmap mapped-range checks must use that same
+         * page range so GNU_RELRO whole-page protection requests are accepted.
          *
          * UserAddressSpace.Enable is the real pre-switch satp-ready boundary.
          * It may allocate real Sv39 user page-table pages, install low-half
@@ -779,28 +802,36 @@ type ArceosExStartupPhaseCodingMust {
          * SyscallDispatcher object: SyscallException owns syscall entry,
          * source validation, argument extraction and dispatch selection.
          * SyscallTable is the independent table object and concrete syscalls
-         * are SyscallTable actions. The first table only handles write(1/2,
-         * user_buf, len) by copying bytes from the current UserAddressSpace
-         * and routing them to the existing console path, plus
-         * exit/exit_group(status) by recording/stopping the first user process
-         * boundary. It does not implement a full fd table, devfs console file,
-         * TTY line discipline, fork/wait or signal semantics.
+         * are SyscallTable actions. The current table handles the first user
+         * program's console/file syscalls, vector console writes through
+         * writev, the dynamic loader memory actions brk, mmap, mprotect and
+         * munmap by routing them to UserAddressSpace, and set_tid_address by
+         * recording the current PID1 UserInitProcess clear_child_tid pointer.
+         * This is a formal runtime boundary, not a test-only API. It does not
+         * implement a full VMA tree, fd table, devfs console file, TTY line
+         * discipline, futex/clone/thread-group semantics, fork/wait or signal
+         * semantics.
          */
         arceos_ex_must_user_boot_payload_bind_kernel_init_task();
         arceos_ex_must_first_user_address_space_bind_kernel_init_task();
         arceos_ex_must_user_address_space_setup_consume_elf_load_plan();
+        arceos_ex_must_user_address_space_map_main_and_interpreter_elfs();
+        arceos_ex_must_user_address_space_provide_dynamic_linker_heap_arena();
         arceos_ex_must_user_address_space_setup_materialize_pre_switch_backing();
         arceos_ex_must_user_address_space_enable_build_real_page_table();
         arceos_ex_must_user_address_space_enable_prepare_satp_without_switch();
         arceos_ex_must_user_address_space_round_not_enter_user_mode();
         arceos_ex_must_user_stack_setup_initial_argc_argv_envp_auxv();
+        arceos_ex_must_user_stack_provide_dynamic_linker_auxv_fields();
         arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret();
+        arceos_ex_must_user_trap_frame_enter_interpreter_when_present();
         arceos_ex_must_user_mode_entry_use_existing_trap_return_path();
         arceos_ex_must_user_trap_entry_switch_to_kernel_stack();
         arceos_ex_must_user_syscall_dispatch_use_exception_stream_branch();
         arceos_ex_must_not_generate_syscall_dispatcher_object();
         arceos_ex_must_syscall_table_hold_concrete_syscall_actions();
         arceos_ex_must_user_syscall_write_copy_from_user_address_space();
+        arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions();
         arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
         arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();
@@ -1502,10 +1533,13 @@ type ArceosExBlockIoCodingMust {
          * current ext2 directory inode until a matching dirent is found or the
          * direct range is exhausted. Ext2FileSystem file read must read a
          * regular file across multiple direct blocks up to inode size, reject
-         * too-small caller buffers with ShortBuffer, and keep indirect blocks
-         * explicit deferred scope.
+         * too-small caller buffers with ShortBuffer, and support the first
+         * single-indirect block for read-only regular files. Double/triple
+         * indirect blocks, allocation and writes remain explicit deferred
+         * scope.
          */
         arceos_ex_must_ext2_read_path_support_multi_direct_blocks();
+        arceos_ex_must_ext2_read_path_support_single_indirect_blocks();
 
         /*
          * Stable Alpine smoke targets:

@@ -7,10 +7,7 @@ use crate::{
     objects::{
         files::{FdRef, FileBackendKind},
         state::State,
-        user_boot::{
-            ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame,
-            USER_INIT_EXPECTED_MESSAGE,
-        },
+        user_boot::{ElfError, ElfObject, USER_INIT_EXPECTED_MESSAGE},
     },
     trace::Checkpoint,
 };
@@ -18,7 +15,17 @@ use crate::{
 const SCOPE: &[Checkpoint] = &[
     Checkpoint::PayloadPhaseOnline,
     #[cfg(app_user_boot)]
+    Checkpoint::UserBootMainElfReady,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserBootInterpreterReady,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserBootAddressSpaceSetupStart,
+    #[cfg(app_user_boot)]
+    Checkpoint::UserAddressSpaceReady,
+    #[cfg(app_user_boot)]
     Checkpoint::UserModeEntry,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableSetTidAddress,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableOpenAt,
     #[cfg(app_user_boot)]
@@ -33,7 +40,7 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 15;
+pub const KUNIT_CASE_COUNT: usize = 19;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 6;
 
@@ -53,11 +60,24 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             run_wrong_machine(checkpoint, sink, total);
             run_invalid_segment(checkpoint, sink, total);
             run_bss_plan(checkpoint, sink, total);
-            run_trap_frame_rejects_unready_inputs(checkpoint, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserBootMainElfReady
+        | Checkpoint::UserBootInterpreterReady
+        | Checkpoint::UserBootAddressSpaceSetupStart => {
+            run_user_boot_phase_trace(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::UserAddressSpaceReady => {
+            run_user_address_space_ready(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
         Checkpoint::UserModeEntry => {
             run_user_mode_entry(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableSetTidAddress => {
+            run_syscall_table_set_tid_address(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableOpenAt => {
@@ -88,6 +108,208 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         _ => {}
     }
     CheckpointOutcome::Continue
+}
+
+#[cfg(app_user_boot)]
+fn run_user_boot_phase_trace(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = match checkpoint {
+        Checkpoint::UserBootMainElfReady => "user_boot.main_elf_ready",
+        Checkpoint::UserBootInterpreterReady => "user_boot.interpreter_ready",
+        Checkpoint::UserBootAddressSpaceSetupStart => "user_boot.address_space_setup_start",
+        _ => "user_boot.phase_trace",
+    };
+    sink.start_case(total, "", name, checkpoint);
+    emit_user_boot_phase_diag(ctx, sink);
+    sink.pass(total, "", name);
+}
+
+#[cfg(app_user_boot)]
+fn emit_user_boot_phase_diag(ctx: &Context, sink: &mut dyn Sink) {
+    let elf = &ctx.elf_object;
+    let interpreter = &ctx.elf_interpreter_object;
+    sink.diag_usize("main_elf_state", elf.state() as usize);
+    sink.diag_usize("main_elf_input_len", elf.input_len());
+    sink.diag_usize("main_elf_segments", elf.load_segment_count());
+    sink.diag_usize(
+        "main_elf_interpreter_required",
+        elf.interpreter_required() as usize,
+    );
+    sink.diag_usize("main_elf_runtime_entry", elf.runtime_entry());
+    sink.diag_usize("interpreter_state", interpreter.state() as usize);
+    sink.diag_usize("interpreter_input_len", interpreter.input_len());
+    sink.diag_usize("interpreter_segments", interpreter.load_segment_count());
+    sink.diag_usize("interpreter_entry", interpreter.entry());
+    emit_queue_diag(
+        "blk",
+        ctx.virtio_blk_runtime.device().map(|device| device.queue()),
+        sink,
+    );
+    emit_queue_diag(
+        "rng",
+        ctx.virtio_rng_runtime.device().map(|device| device.queue()),
+        sink,
+    );
+}
+
+#[cfg(app_user_boot)]
+fn emit_queue_diag(
+    prefix: &str,
+    queue: Option<&crate::objects::virtio_ring::VirtQueue>,
+    sink: &mut dyn Sink,
+) {
+    let Some(queue) = queue else {
+        diag_queue_usize(sink, prefix, "queue_present", 0);
+        return;
+    };
+    let layout = queue.real_layout();
+    diag_queue_usize(sink, prefix, "queue_present", 1);
+    diag_queue_usize(sink, prefix, "submitted_count", queue.submitted_count());
+    diag_queue_usize(sink, prefix, "kick_count", queue.kick_count());
+    diag_queue_usize(sink, prefix, "completion_count", queue.completion_count());
+    diag_queue_usize(sink, prefix, "get_buf_count", queue.get_buf_count());
+    diag_queue_usize(
+        sink,
+        prefix,
+        "ring_avail_idx",
+        queue.ring_avail_idx() as usize,
+    );
+    diag_queue_usize(
+        sink,
+        prefix,
+        "ring_used_idx",
+        queue.ring_used_idx() as usize,
+    );
+    diag_queue_usize(
+        sink,
+        prefix,
+        "ring_last_used_idx",
+        queue.ring_last_used_idx() as usize,
+    );
+    diag_queue_usize(
+        sink,
+        prefix,
+        "raw_avail_idx",
+        queue.raw_avail_idx().unwrap_or(u16::MAX) as usize,
+    );
+    diag_queue_usize(
+        sink,
+        prefix,
+        "raw_used_idx",
+        queue.raw_used_idx().unwrap_or(u16::MAX) as usize,
+    );
+    diag_queue_hex_pair(
+        sink,
+        prefix,
+        "used_virt_phys",
+        layout.used_virt(),
+        layout.used_phys(),
+    );
+}
+
+#[cfg(app_user_boot)]
+fn diag_queue_usize(sink: &mut dyn Sink, prefix: &str, field: &str, value: usize) {
+    match (prefix, field) {
+        ("blk", "queue_present") => sink.diag_usize("blk_queue_present", value),
+        ("blk", "submitted_count") => sink.diag_usize("blk_submitted_count", value),
+        ("blk", "kick_count") => sink.diag_usize("blk_kick_count", value),
+        ("blk", "completion_count") => sink.diag_usize("blk_completion_count", value),
+        ("blk", "get_buf_count") => sink.diag_usize("blk_get_buf_count", value),
+        ("blk", "ring_avail_idx") => sink.diag_usize("blk_ring_avail_idx", value),
+        ("blk", "ring_used_idx") => sink.diag_usize("blk_ring_used_idx", value),
+        ("blk", "ring_last_used_idx") => sink.diag_usize("blk_ring_last_used_idx", value),
+        ("blk", "raw_avail_idx") => sink.diag_usize("blk_raw_avail_idx", value),
+        ("blk", "raw_used_idx") => sink.diag_usize("blk_raw_used_idx", value),
+        ("rng", "queue_present") => sink.diag_usize("rng_queue_present", value),
+        ("rng", "submitted_count") => sink.diag_usize("rng_submitted_count", value),
+        ("rng", "kick_count") => sink.diag_usize("rng_kick_count", value),
+        ("rng", "completion_count") => sink.diag_usize("rng_completion_count", value),
+        ("rng", "get_buf_count") => sink.diag_usize("rng_get_buf_count", value),
+        ("rng", "ring_avail_idx") => sink.diag_usize("rng_ring_avail_idx", value),
+        ("rng", "ring_used_idx") => sink.diag_usize("rng_ring_used_idx", value),
+        ("rng", "ring_last_used_idx") => sink.diag_usize("rng_ring_last_used_idx", value),
+        ("rng", "raw_avail_idx") => sink.diag_usize("rng_raw_avail_idx", value),
+        ("rng", "raw_used_idx") => sink.diag_usize("rng_raw_used_idx", value),
+        _ => {}
+    }
+}
+
+#[cfg(app_user_boot)]
+fn diag_queue_hex_pair(
+    sink: &mut dyn Sink,
+    prefix: &str,
+    field: &str,
+    first: usize,
+    second: usize,
+) {
+    match (prefix, field) {
+        ("blk", "used_virt_phys") => sink.diag_hex_pair("blk_used_virt_phys", first, second),
+        ("rng", "used_virt_phys") => sink.diag_hex_pair("rng_used_virt_phys", first, second),
+        _ => {}
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_user_address_space_ready(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.user_address_space.ready";
+    sink.start_case(total, "", name, checkpoint);
+
+    let space = &ctx.user_address_space;
+    let mut valid = space.state() == State::Ready
+        && space.page_table_view_ready()
+        && space.elf_segments_mapped()
+        && space.stack_mapped()
+        && space.heap_mapped();
+
+    sink.diag_usize("user_mapping_count", space.mapping_count());
+    sink.diag_usize("user_segment_mapping_count", space.segment_mapping_count());
+    sink.diag_usize("user_heap_mapped", space.heap_mapped() as usize);
+    sink.diag_usize("user_heap_base", space.heap_base());
+    sink.diag_usize("user_heap_size", space.heap_size());
+    if let Some(device) = ctx.virtio_blk_runtime.device() {
+        let layout = device.queue().real_layout();
+        let desc_overlap = user_space_contains_phys_page(space, ctx, layout.desc_phys());
+        let avail_overlap = user_space_contains_phys_page(space, ctx, layout.avail_phys());
+        let used_overlap = user_space_contains_phys_page(space, ctx, layout.used_phys());
+        sink.diag_hex_pair(
+            "virtq_desc_virt_phys",
+            layout.desc_virt(),
+            layout.desc_phys(),
+        );
+        sink.diag_hex_pair(
+            "virtq_avail_virt_phys",
+            layout.avail_virt(),
+            layout.avail_phys(),
+        );
+        sink.diag_hex_pair(
+            "virtq_used_virt_phys",
+            layout.used_virt(),
+            layout.used_phys(),
+        );
+        sink.diag_usize("virtq_desc_user_overlap", desc_overlap as usize);
+        sink.diag_usize("virtq_avail_user_overlap", avail_overlap as usize);
+        sink.diag_usize("virtq_used_user_overlap", used_overlap as usize);
+        sink.diag_usize(
+            "virtq_raw_used_idx",
+            device.queue().raw_used_idx().unwrap_or(u16::MAX) as usize,
+        );
+        valid &= !desc_overlap && !avail_overlap && !used_overlap;
+    }
+
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "user address space ready facts invalid");
+    }
 }
 
 #[cfg(app_user_boot)]
@@ -130,6 +352,78 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "user mode entry facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn user_space_contains_phys_page(
+    space: &crate::objects::user_boot::UserAddressSpace,
+    ctx: &Context,
+    phys: usize,
+) -> bool {
+    if phys == 0 {
+        return false;
+    }
+    let target = phys & !(crate::objects::user_boot::USER_PAGE_SIZE - 1);
+    let mut mapping_index = 0usize;
+    while mapping_index < space.mapping_count() {
+        if let Some(mapping) = space.mapping(mapping_index) {
+            let mut page_index = 0usize;
+            while page_index < mapping.backing_page_count() {
+                if let Some(page) = mapping.backing_page(page_index) {
+                    if ctx
+                        .page_metadata_map
+                        .page_to_phys(page)
+                        .is_some_and(|page_phys| page_phys.value() == target)
+                    {
+                        return true;
+                    }
+                }
+                page_index += 1;
+            }
+        }
+        mapping_index += 1;
+    }
+    false
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_set_tid_address(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.set_tid_address";
+    sink.start_case(total, "", name, checkpoint);
+
+    let process = &ctx.user_init_process;
+    let table = &ctx.syscall_table;
+    let valid = process.state() == State::Online
+        && process.runtime_entered()
+        && process.syscall_context_bound()
+        && table.state() == State::Ready
+        && table.bound_to_exception()
+        && table.set_tid_address_supported()
+        && table.set_tid_address_observed()
+        && process.clear_child_tid_bound()
+        && process.clear_child_tid() != 0
+        && ctx.exception_stream.syscall_state() == State::Online;
+
+    sink.diag_usize(
+        "syscall_table_set_tid_address_observed",
+        table.set_tid_address_observed() as usize,
+    );
+    sink.diag_usize("user_init_clear_child_tid", process.clear_child_tid());
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(
+            total,
+            "",
+            name,
+            "syscall table set_tid_address facts invalid",
+        );
     }
 }
 
@@ -573,35 +867,6 @@ fn run_bss_plan(checkpoint: Checkpoint, sink: &mut dyn Sink, total: usize) {
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "bss plan facts invalid");
-    }
-}
-
-fn run_trap_frame_rejects_unready_inputs(
-    checkpoint: Checkpoint,
-    sink: &mut dyn Sink,
-    total: usize,
-) {
-    let name = "user_boot.trap_frame.rejects_unready_inputs";
-    sink.start_case(total, "", name, checkpoint);
-
-    let mut image = FixtureElf::new();
-    image.write_supported_header();
-    image.write_load_segment(0, 0, 0x10000, image.len(), image.len(), 5, 0x1000);
-    image.write_message(0x80);
-
-    let mut elf = ElfObject::new();
-    if elf.preset_from_vfs(image.as_slice()).is_err() || elf.setup(image.as_slice()).is_err() {
-        sink.fail(total, "", name, "fixture ELF did not parse");
-        return;
-    }
-
-    let address_space = UserAddressSpace::new();
-    let stack = UserStack::new();
-    let mut frame = UserTrapFrame::new();
-    if frame.setup(&address_space, &elf, &stack).is_err() {
-        sink.pass(total, "", name);
-    } else {
-        sink.fail(total, "", name, "unready inputs accepted");
     }
 }
 

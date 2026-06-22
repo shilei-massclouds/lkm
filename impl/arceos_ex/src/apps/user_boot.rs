@@ -7,6 +7,7 @@ pub fn run() -> ! {
     user_boot::run_first_user_init(
         &mut ctx.user_boot_payload,
         &mut ctx.elf_object,
+        &mut ctx.elf_interpreter_object,
         &mut ctx.user_address_space,
         &mut ctx.user_stack,
         &mut ctx.user_trap_frame,

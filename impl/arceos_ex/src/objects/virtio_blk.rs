@@ -48,6 +48,8 @@ static VIRTIO_BLK_LAST_IRQ_STATUS: AtomicU32 = AtomicU32::new(0);
 static VIRTIO_BLK_IRQ_COMPLETION_CALLS: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_BLK_READ_READY_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_BLK_LIVE_PTR: AtomicUsize = AtomicUsize::new(0);
+static VIRTIO_BLK_LIVE_READ_SUBMITTED_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
+static VIRTIO_BLK_LIVE_READ_COMPLETED_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VirtioBlkError {
@@ -378,6 +380,14 @@ impl VirtioBlkDevice {
 
     pub const fn last_sector(&self) -> u64 {
         self.last_sector
+    }
+
+    pub const fn pending_sector(&self) -> u64 {
+        self.pending_sector
+    }
+
+    pub const fn pending_data_len(&self) -> u32 {
+        self.pending_data_len
     }
 
     pub const fn request_queue_deferred(&self) -> bool {
@@ -748,6 +758,16 @@ pub fn read_ready_checkpoints() -> usize {
 }
 
 #[allow(dead_code)]
+pub fn live_read_submitted_checkpoints() -> usize {
+    VIRTIO_BLK_LIVE_READ_SUBMITTED_CHECKPOINTS.load(Ordering::Acquire)
+}
+
+#[allow(dead_code)]
+pub fn live_read_completed_checkpoints() -> usize {
+    VIRTIO_BLK_LIVE_READ_COMPLETED_CHECKPOINTS.load(Ordering::Acquire)
+}
+
+#[allow(dead_code)]
 pub fn read_buffer_nonzero() -> bool {
     read_request_data_nonzero()
 }
@@ -847,7 +867,17 @@ fn read_live_block(
             .map_err(block_error_from_virtio)?;
         start_completion_count
     };
+    VIRTIO_BLK_LIVE_READ_SUBMITTED_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
+    crate::checkpoint::dispatch(
+        crate::trace::Checkpoint::VirtioBlkLiveReadSubmitted,
+        crate::context::context_ref(),
+    );
     wait_for_completion_after(start_completion_count)?;
+    VIRTIO_BLK_LIVE_READ_COMPLETED_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
+    crate::checkpoint::dispatch(
+        crate::trace::Checkpoint::VirtioBlkLiveReadCompleted,
+        crate::context::context_ref(),
+    );
 
     let data_len = last_read_data_len().ok_or(BlockDeviceError::ProviderUnavailable)?;
     let len = copy_read_request_data(buffer, data_len);

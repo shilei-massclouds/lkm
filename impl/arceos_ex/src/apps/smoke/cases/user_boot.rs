@@ -5,19 +5,20 @@ use crate::{
     },
     context::context,
     objects::{
-        ext2::{EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS},
         files::{FdRef, FileBackendKind},
         state::State,
         user_boot::{
-            UserMappingKind, USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE,
-            USER_STACK_SIZE, USER_STACK_TOP,
+            ElfObjectRole, UserMappingKind, USER_BOOT_READ_MAX, USER_HEAP_BASE, USER_HEAP_SIZE,
+            USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE, USER_STACK_SIZE,
+            USER_STACK_TOP,
         },
+        vfs::VfsError,
         virtio_blk,
     },
 };
 
-static mut USER_INIT_READ_BUFFER: [u8; USER_INIT_MAX_READ] = [0; USER_INIT_MAX_READ];
-const USER_INIT_MAX_READ: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
+static mut USER_INIT_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
+static mut USER_INTERPRETER_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -77,6 +78,48 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert("elf preset", ctx.elf_object.preset_from_vfs(image).is_ok());
         assertions.assert("elf setup", ctx.elf_object.setup(image).is_ok());
+        let interpreter_image = if let Some(path) = ctx.elf_object.interpreter_path() {
+            let interpreter_buffer = unsafe {
+                let ptr = core::ptr::addr_of_mut!(USER_INTERPRETER_READ_BUFFER);
+                &mut *ptr
+            };
+            interpreter_buffer.fill(0);
+            let len = match ctx.vfs_core.read_path(
+                &ctx.fs_struct,
+                &mut ctx.ext2_filesystem,
+                &mut ctx.block_device_registry,
+                &mut provider,
+                path,
+                interpreter_buffer,
+            ) {
+                Ok(len) => len,
+                Err(error) => {
+                    assertions.assert(read_interpreter_error_label(error), false);
+                    return;
+                }
+            };
+            let image = &interpreter_buffer[..len];
+            assertions.assert(
+                "interpreter preset",
+                ctx.elf_interpreter_object
+                    .preset_interpreter_from_vfs(image)
+                    .is_ok(),
+            );
+            assertions.assert(
+                "interpreter setup",
+                ctx.elf_interpreter_object.setup(image).is_ok(),
+            );
+            assertions.assert(
+                "runtime interpreter",
+                ctx.elf_object
+                    .bind_runtime_interpreter(&ctx.elf_interpreter_object)
+                    .is_ok(),
+            );
+            Some(image)
+        } else {
+            None
+        };
+        let interpreter_ref = interpreter_image.map(|_| &ctx.elf_interpreter_object);
         assertions.assert(
             "payload try candidate",
             ctx.user_boot_payload.try_candidate(&ctx.elf_object).is_ok(),
@@ -97,6 +140,8 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.user_stack
                 .setup(
                     &ctx.user_address_space,
+                    &ctx.elf_object,
+                    interpreter_ref,
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                 )
@@ -107,8 +152,10 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.user_address_space
                 .setup(
                     &ctx.elf_object,
+                    interpreter_ref,
                     &ctx.user_stack,
                     image,
+                    interpreter_image,
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                 )
@@ -153,9 +200,16 @@ impl SmokeScenario for UserBootElfScenario {
                 && elf.little_endian()
                 && elf.machine_riscv()
                 && elf.type_supported()
-                && elf.static_executable(),
+                && (elf.static_executable() || elf.dynamic_executable()),
         );
-        assertions.assert("elf no loader", elf.no_separate_loader());
+        assertions.assert("elf main role", elf.role() == ElfObjectRole::MainExecutable);
+        assertions.assert(
+            "elf loader mode",
+            elf.no_separate_loader()
+                || (elf.interpreter_required()
+                    && elf.interpreter_path_bound()
+                    && interpreter_ref.is_some()),
+        );
         assertions.assert("elf phdr parsed", elf.program_headers_parsed());
         assertions.assert("elf load segments", elf.load_segment_count() >= 1);
         assertions.assert(
@@ -165,13 +219,34 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert("elf load plan", elf.load_plan_bound());
         assertions.assert("elf segment perms", elf.segment_permissions_bound());
         assertions.assert("elf entry bound", elf.entry_bound() && elf.entry() != 0);
+        assertions.assert(
+            "elf runtime entry",
+            elf.runtime_entry_bound()
+                && elf.runtime_entry() != 0
+                && if let Some(interpreter) = interpreter_ref {
+                    elf.runtime_entry() == interpreter.entry()
+                } else {
+                    elf.runtime_entry() == elf.entry()
+                },
+        );
+        if let Some(interpreter) = interpreter_ref {
+            assertions.assert(
+                "interpreter facts",
+                interpreter.role() == ElfObjectRole::Interpreter
+                    && interpreter.state() == State::Ready
+                    && interpreter.et_dyn_interpreter_supported()
+                    && interpreter.load_bias() != 0
+                    && interpreter.entry() >= interpreter.load_bias()
+                    && interpreter.load_segment_count() >= 1,
+            );
+        }
         assertions.assert("elf entry executable", elf.entry_in_executable_segment());
         assertions.assert("elf init content", elf.init_content_observed());
         assertions.assert("elf bss plan", elf.bss_zero_plan_bound());
         assertions.assert("elf setup owns load", elf.load_merged_into_setup());
         assertions.assert(
             "elf direct read fit",
-            elf.load_segments_fit_direct_read(USER_INIT_MAX_READ),
+            elf.load_segments_fit_direct_read(USER_BOOT_READ_MAX),
         );
         assertions.assert(
             "raw content",
@@ -243,6 +318,7 @@ impl SmokeScenario for UserBootElfScenario {
                 && space.segment_mappings_bound()
                 && space.elf_segments_mapped()
                 && space.stack_mapped()
+                && space.heap_mapped()
                 && space.elf_mapped(),
         );
         assertions.assert(
@@ -273,8 +349,12 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert(
             "address space mapping count",
-            space.segment_mapping_count() == elf.load_segment_count()
-                && space.mapping_count() == elf.load_segment_count() + 1,
+            space.segment_mapping_count()
+                == elf.load_segment_count() + interpreter_ref.map_or(0, |i| i.load_segment_count())
+                && space.mapping_count()
+                    == elf.load_segment_count()
+                        + interpreter_ref.map_or(0, |i| i.load_segment_count())
+                        + 2,
         );
 
         let Some(first_mapping) = space.mapping(0) else {
@@ -362,6 +442,24 @@ impl SmokeScenario for UserBootElfScenario {
                 && !stack_mapping.executable()
                 && stack_mapping.user_accessible(),
         );
+        let Some(heap_mapping) = space.mapping(space.segment_mapping_count() + 1) else {
+            assertions.assert("heap mapping", false);
+            return;
+        };
+        assertions.assert(
+            "heap mapping facts",
+            heap_mapping.kind() == UserMappingKind::Heap
+                && heap_mapping.vaddr() == USER_HEAP_BASE
+                && heap_mapping.memsz() == USER_HEAP_SIZE
+                && heap_mapping.filesz() == 0
+                && heap_mapping.readable()
+                && heap_mapping.writable()
+                && !heap_mapping.executable()
+                && heap_mapping.user_accessible()
+                && space.heap_base() == USER_HEAP_BASE
+                && space.heap_size() == USER_HEAP_SIZE
+                && space.heap_brk() == USER_HEAP_BASE,
+        );
 
         let trap = &ctx.user_trap_frame;
         assertions.assert("trap frame ready", trap.state() == State::Ready);
@@ -377,7 +475,7 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert(
             "trap frame registers",
-            trap.entry() == elf.entry()
+            trap.entry() == elf.runtime_entry()
                 && trap.sp() == stack.initial_sp()
                 && trap.sstatus() == crate::objects::user_boot::SSTATUS_SPIE_SET,
         );
@@ -392,6 +490,13 @@ impl SmokeScenario for UserBootElfScenario {
             ctx.exception_stream
                 .syscall_enable(&ctx.syscall_table)
                 .is_ok(),
+        );
+        assertions.assert(
+            "dynamic memory syscalls",
+            ctx.syscall_table.brk_supported()
+                && ctx.syscall_table.mmap_supported()
+                && ctx.syscall_table.mprotect_supported()
+                && ctx.syscall_table.munmap_supported(),
         );
         assertions.assert(
             "files struct setup",
@@ -592,7 +697,7 @@ impl SmokeScenario for UserBootElfScenario {
 }
 
 fn mapping_contains(
-    mapping: crate::objects::user_boot::UserMapping,
+    mapping: &crate::objects::user_boot::UserMapping,
     page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
     needle: &[u8],
 ) -> bool {
@@ -622,7 +727,7 @@ fn mapping_contains(
 }
 
 fn mapping_byte_at(
-    mapping: crate::objects::user_boot::UserMapping,
+    mapping: &crate::objects::user_boot::UserMapping,
     page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
     file_offset: usize,
 ) -> Option<u8> {
@@ -691,4 +796,27 @@ fn stack_contains_at(
         index += 1;
     }
     true
+}
+
+fn read_interpreter_error_label(error: VfsError) -> &'static str {
+    match error {
+        VfsError::CoreNotReady => "read interpreter core not ready",
+        VfsError::FsTypeNotReady => "read interpreter fs type not ready",
+        VfsError::FsTypeAlreadyRegistered => "read interpreter fs type duplicate",
+        VfsError::FsTypeMissing => "read interpreter fs type missing",
+        VfsError::MountMissing => "read interpreter mount missing",
+        VfsError::AlreadyMounted => "read interpreter already mounted",
+        VfsError::InvalidRef => "read interpreter invalid ref",
+        VfsError::InvalidName => "read interpreter invalid name",
+        VfsError::NameTooLong => "read interpreter name too long",
+        VfsError::NotDirectory => "read interpreter not directory",
+        VfsError::NotFile => "read interpreter not file",
+        VfsError::AlreadyExists => "read interpreter already exists",
+        VfsError::NotFound => "read interpreter not found",
+        VfsError::DirectoryNotEmpty => "read interpreter dir not empty",
+        VfsError::ReadOnly => "read interpreter read only",
+        VfsError::ShortBuffer => "read interpreter short buffer",
+        VfsError::Backend => "read interpreter backend",
+        VfsError::UnsupportedPath => "read interpreter unsupported path",
+    }
 }

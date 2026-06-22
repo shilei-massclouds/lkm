@@ -3,12 +3,7 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use crate::arch::riscv64::csr;
 
 #[cfg(app_user_boot)]
-use super::{
-    block_device::BlockDeviceRegistry,
-    ext2::{Ext2FileSystem, EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS},
-    vfs::VfsCore,
-    virtio_blk,
-};
+use super::{block_device::BlockDeviceRegistry, ext2::Ext2FileSystem, vfs::VfsCore, virtio_blk};
 use super::{
     exception_stream::{ExceptionStream, SyscallTable},
     files::FilesStruct,
@@ -29,37 +24,60 @@ pub const USER_INIT_PATH: &[u8] = b"/sbin/init";
 pub const USER_INIT_EXPECTED_MESSAGE: &[u8] = b"user hello\n";
 
 pub const ELF_HEADER_LEN: usize = 64;
-#[cfg(app_user_boot)]
-pub const USER_BOOT_READ_MAX: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
+pub const USER_BOOT_READ_MAX: usize = super::ext2::EXT2_SINGLE_INDIRECT_READ_MAX;
 pub const USER_STACK_SIZE: usize = 16 * 1024;
 pub const USER_STACK_TOP: usize = 0x4000_0000;
+pub const USER_HEAP_BASE: usize = 0x3000_0000;
+pub const USER_HEAP_SIZE: usize = 2 * 1024 * 1024;
 pub const USER_PAGE_SIZE: usize = 4096;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
+pub const USER_INTERPRETER_LOAD_BIAS: usize = 0x2000_0000;
 const USER_INIT_ARG0: &[u8] = b"/sbin/init\0";
-const USER_INITIAL_STACK_WORDS: usize = 8;
+const USER_INITIAL_STACK_WORDS: usize = 18;
 const AT_NULL: usize = 0;
+const AT_PHDR: usize = 3;
+const AT_PHENT: usize = 4;
+const AT_PHNUM: usize = 5;
 const AT_PAGESZ: usize = 6;
+const AT_BASE: usize = 7;
+const AT_ENTRY: usize = 9;
 const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 const ELF_CLASS_64: u8 = 2;
 const ELF_DATA_LSB: u8 = 1;
 const ELF_VERSION_CURRENT: u8 = 1;
 const ELF_TYPE_EXEC: u16 = 2;
+const ELF_TYPE_DYN: u16 = 3;
 const ELF_MACHINE_RISCV: u16 = 243;
 const ELF_PHDR_TYPE_LOAD: u32 = 1;
+const ELF_PHDR_TYPE_INTERP: u32 = 3;
+const ELF_PHDR_TYPE_PHDR: u32 = 6;
 const ELF_PF_X: u32 = 1;
 const ELF_PF_W: u32 = 2;
 const ELF_PF_R: u32 = 4;
 const ELF64_PHDR_SIZE: usize = 56;
+const ELF_INTERP_PATH_MAX: usize = 128;
 const MAX_LOAD_SEGMENTS: usize = 8;
-const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS + 1;
-const MAX_MAPPING_BACKING_PAGES: usize = 32;
 const MAX_STACK_PAGES: usize = USER_STACK_SIZE / USER_PAGE_SIZE;
-const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 1;
+const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS * 2 + 2;
+const MAX_MAPPING_BACKING_PAGES: usize = 512;
+const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 2;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum UserInitPathRef {
     DefaultInit,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum ElfObjectRole {
+    MainExecutable,
+    Interpreter,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ElfType {
+    Exec,
+    Dyn,
 }
 
 static USER_INIT_RUNTIME_ENTERED: AtomicU8 = AtomicU8::new(0);
@@ -167,9 +185,9 @@ pub enum UserMappingKind {
     Empty,
     ElfSegment,
     Stack,
+    Heap,
 }
 
-#[derive(Clone, Copy)]
 pub struct UserMapping {
     kind: UserMappingKind,
     vaddr: usize,
@@ -211,53 +229,77 @@ impl UserMapping {
         }
     }
 
-    fn from_segment(segment: ElfLoadSegment) -> Self {
-        Self {
-            kind: UserMappingKind::ElfSegment,
-            vaddr: segment.vaddr,
-            memsz: segment.memsz,
-            page_offset: segment.vaddr % USER_PAGE_SIZE,
-            file_offset: segment.offset,
-            filesz: segment.filesz,
-            readable: segment.readable(),
-            writable: segment.writable(),
-            executable: segment.executable(),
-            user_accessible: true,
-            bss_zero_bytes: segment.memsz - segment.filesz,
-            backing_pages: [None; MAX_MAPPING_BACKING_PAGES],
-            backing_page_count: 0,
-            file_bytes_copied: 0,
-            bss_bytes_zeroed: 0,
-            page_table_entry_bound: false,
+    fn reset_empty(&mut self) {
+        self.kind = UserMappingKind::Empty;
+        self.vaddr = 0;
+        self.memsz = 0;
+        self.page_offset = 0;
+        self.file_offset = 0;
+        self.filesz = 0;
+        self.readable = false;
+        self.writable = false;
+        self.executable = false;
+        self.user_accessible = false;
+        self.bss_zero_bytes = 0;
+        self.clear_backing_pages();
+        self.backing_page_count = 0;
+        self.file_bytes_copied = 0;
+        self.bss_bytes_zeroed = 0;
+        self.page_table_entry_bound = false;
+    }
+
+    fn clear_backing_pages(&mut self) {
+        let mut index = 0usize;
+        while index < MAX_MAPPING_BACKING_PAGES {
+            self.backing_pages[index] = None;
+            index += 1;
         }
     }
 
-    fn from_stack(stack: &UserStack) -> Self {
-        let mut mapping = Self {
-            kind: UserMappingKind::Stack,
-            vaddr: stack.base,
-            memsz: stack.size,
-            page_offset: 0,
-            file_offset: 0,
-            filesz: 0,
-            readable: true,
-            writable: true,
-            executable: false,
-            user_accessible: true,
-            bss_zero_bytes: stack.size,
-            backing_pages: [None; MAX_MAPPING_BACKING_PAGES],
-            backing_page_count: 0,
-            file_bytes_copied: 0,
-            bss_bytes_zeroed: stack.size,
-            page_table_entry_bound: stack.backing_pages_allocated,
-        };
+    fn init_segment(&mut self, segment: ElfLoadSegment) {
+        self.reset_empty();
+        self.kind = UserMappingKind::ElfSegment;
+        self.vaddr = segment.vaddr;
+        self.memsz = segment.memsz;
+        self.page_offset = segment.vaddr % USER_PAGE_SIZE;
+        self.file_offset = segment.offset;
+        self.filesz = segment.filesz;
+        self.readable = segment.readable();
+        self.writable = segment.writable();
+        self.executable = segment.executable();
+        self.user_accessible = true;
+        self.bss_zero_bytes = segment.memsz - segment.filesz;
+    }
+
+    fn init_stack(&mut self, stack: &UserStack) {
+        self.reset_empty();
+        self.kind = UserMappingKind::Stack;
+        self.vaddr = stack.base;
+        self.memsz = stack.size;
+        self.readable = true;
+        self.writable = true;
+        self.user_accessible = true;
+        self.bss_zero_bytes = stack.size;
+        self.bss_bytes_zeroed = stack.size;
+        self.page_table_entry_bound = stack.backing_pages_allocated;
         let mut index = 0usize;
         while index < stack.backing_page_count && index < MAX_MAPPING_BACKING_PAGES {
-            mapping.backing_pages[index] = stack.backing_pages[index];
+            self.backing_pages[index] = stack.backing_pages[index];
             index += 1;
         }
-        mapping.backing_page_count = stack.backing_page_count;
-        mapping
+        self.backing_page_count = stack.backing_page_count;
+    }
+
+    fn init_heap(&mut self) {
+        self.reset_empty();
+        self.kind = UserMappingKind::Heap;
+        self.vaddr = USER_HEAP_BASE;
+        self.memsz = USER_HEAP_SIZE;
+        self.readable = true;
+        self.writable = true;
+        self.user_accessible = true;
+        self.bss_zero_bytes = USER_HEAP_SIZE;
+        self.bss_bytes_zeroed = USER_HEAP_SIZE;
     }
 
     pub const fn kind(&self) -> UserMappingKind {
@@ -444,12 +486,16 @@ impl UserStack {
     pub fn setup(
         &mut self,
         address_space: &UserAddressSpace,
+        elf: &ElfObject,
+        interpreter: Option<&ElfObject>,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || address_space.state() != State::Prepared
             || page_allocator.state() != State::Ready
+            || elf.state() != State::Ready
+            || interpreter.is_some_and(|interp| interp.state() != State::Ready)
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -497,7 +543,8 @@ impl UserStack {
             self.backing_page_count += 1;
             index += 1;
         }
-        let Some(initial_sp) = self.write_initial_arg_env(page_metadata_map) else {
+        let Some(initial_sp) = self.write_initial_arg_env(elf, interpreter, page_metadata_map)
+        else {
             while self.backing_page_count > 0 {
                 self.backing_page_count -= 1;
                 if let Some(allocated) = self.backing_pages[self.backing_page_count] {
@@ -523,7 +570,12 @@ impl UserStack {
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
 
-    fn write_initial_arg_env(&mut self, page_metadata_map: &PageMetadataMap) -> Option<usize> {
+    fn write_initial_arg_env(
+        &mut self,
+        elf: &ElfObject,
+        interpreter: Option<&ElfObject>,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Option<usize> {
         let arg0_ptr = align_down(self.top.checked_sub(USER_INIT_ARG0.len())?, 8);
         write_stack_bytes(self, page_metadata_map, arg0_ptr, USER_INIT_ARG0)?;
 
@@ -556,24 +608,84 @@ impl UserStack {
             self,
             page_metadata_map,
             initial_sp + 4 * core::mem::size_of::<usize>(),
-            AT_PAGESZ,
+            AT_PHDR,
         )?;
         write_stack_usize(
             self,
             page_metadata_map,
             initial_sp + 5 * core::mem::size_of::<usize>(),
-            USER_PAGE_SIZE,
+            elf.phdr_vaddr(),
         )?;
         write_stack_usize(
             self,
             page_metadata_map,
             initial_sp + 6 * core::mem::size_of::<usize>(),
-            AT_NULL,
+            AT_PHENT,
         )?;
         write_stack_usize(
             self,
             page_metadata_map,
             initial_sp + 7 * core::mem::size_of::<usize>(),
+            elf.phentsize(),
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 8 * core::mem::size_of::<usize>(),
+            AT_PHNUM,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 9 * core::mem::size_of::<usize>(),
+            elf.program_header_count(),
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 10 * core::mem::size_of::<usize>(),
+            AT_ENTRY,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 11 * core::mem::size_of::<usize>(),
+            elf.entry(),
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 12 * core::mem::size_of::<usize>(),
+            AT_BASE,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 13 * core::mem::size_of::<usize>(),
+            interpreter.map_or(0, ElfObject::load_bias),
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 14 * core::mem::size_of::<usize>(),
+            AT_PAGESZ,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 15 * core::mem::size_of::<usize>(),
+            USER_PAGE_SIZE,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 16 * core::mem::size_of::<usize>(),
+            AT_NULL,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 17 * core::mem::size_of::<usize>(),
             0,
         )?;
 
@@ -584,6 +696,10 @@ impl UserStack {
 
 fn align_down(value: usize, align: usize) -> usize {
     value & !(align - 1)
+}
+
+fn align_up(value: usize, align: usize) -> usize {
+    (value + align - 1) & !(align - 1)
 }
 
 fn write_stack_usize(
@@ -649,6 +765,7 @@ pub struct UserAddressSpace {
     page_table_view_ready: bool,
     elf_segments_mapped: bool,
     stack_mapped: bool,
+    heap_mapped: bool,
     elf_mapped: bool,
     elf_bss_zeroed: bool,
     runtime_ready: bool,
@@ -667,6 +784,11 @@ pub struct UserAddressSpace {
     mapping_count: usize,
     segment_mapping_count: usize,
     stack_mapping_index: usize,
+    heap_mapping_index: usize,
+    heap_base: usize,
+    heap_size: usize,
+    heap_brk: usize,
+    mmap_next: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -706,6 +828,7 @@ impl UserAddressSpace {
             page_table_view_ready: false,
             elf_segments_mapped: false,
             stack_mapped: false,
+            heap_mapped: false,
             elf_mapped: false,
             elf_bss_zeroed: false,
             runtime_ready: false,
@@ -720,10 +843,15 @@ impl UserAddressSpace {
             page_table_l1: None,
             page_table_l0s: [UserL0TableSlot::empty(); MAX_USER_L0_TABLES],
             page_table_l0_count: 0,
-            mappings: [UserMapping::empty(); MAX_USER_MAPPINGS],
+            mappings: [const { UserMapping::empty() }; MAX_USER_MAPPINGS],
             mapping_count: 0,
             segment_mapping_count: 0,
             stack_mapping_index: 0,
+            heap_mapping_index: 0,
+            heap_base: 0,
+            heap_size: 0,
+            heap_brk: 0,
+            mmap_next: 0,
         }
     }
 
@@ -799,6 +927,10 @@ impl UserAddressSpace {
         self.stack_mapped
     }
 
+    pub const fn heap_mapped(&self) -> bool {
+        self.heap_mapped
+    }
+
     pub const fn elf_mapped(&self) -> bool {
         self.elf_mapped
     }
@@ -851,20 +983,32 @@ impl UserAddressSpace {
         self.segment_mapping_count
     }
 
-    pub const fn mapping(&self, index: usize) -> Option<UserMapping> {
+    pub const fn mapping(&self, index: usize) -> Option<&UserMapping> {
         if index < self.mapping_count {
-            Some(self.mappings[index])
+            Some(&self.mappings[index])
         } else {
             None
         }
     }
 
-    pub const fn stack_mapping(&self) -> Option<UserMapping> {
+    pub const fn stack_mapping(&self) -> Option<&UserMapping> {
         if self.stack_mapped && self.stack_mapping_index < self.mapping_count {
-            Some(self.mappings[self.stack_mapping_index])
+            Some(&self.mappings[self.stack_mapping_index])
         } else {
             None
         }
+    }
+
+    pub const fn heap_base(&self) -> usize {
+        self.heap_base
+    }
+
+    pub const fn heap_size(&self) -> usize {
+        self.heap_size
+    }
+
+    pub const fn heap_brk(&self) -> usize {
+        self.heap_brk
     }
 
     pub fn preset(
@@ -901,47 +1045,52 @@ impl UserAddressSpace {
     pub fn setup(
         &mut self,
         elf: &ElfObject,
+        interpreter: Option<&ElfObject>,
         stack: &UserStack,
         image: &[u8],
+        interpreter_image: Option<&[u8]>,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> Result<(), ElfError> {
         if self.lifecycle.state() != State::Prepared
             || elf.state() != State::Ready
             || stack.state() != State::Ready
+            || interpreter.is_some_and(|interp| interp.state() != State::Ready)
         {
+            return Err(ElfError::InvalidState);
+        }
+        if interpreter.is_some() && interpreter_image.is_none() {
             return Err(ElfError::InvalidState);
         }
         if !stack.mapped_into_address_space() || stack.size() == 0 {
             return Err(ElfError::InvalidStack);
         }
 
-        self.mappings = [UserMapping::empty(); MAX_USER_MAPPINGS];
+        self.reset_mappings();
         self.mapping_count = 0;
         self.segment_mapping_count = 0;
 
-        let mut index = 0usize;
-        while index < elf.load_segment_count() {
-            if self.mapping_count >= MAX_USER_MAPPINGS {
-                return Err(ElfError::TooManyMappings);
-            }
-            let Some(segment) = elf.load_segment(index) else {
-                return Err(ElfError::InvalidProgramHeader);
+        if let Err(error) = self.map_elf_segments(elf, image, page_allocator, page_metadata_map) {
+            release_mappings(
+                &mut self.mappings,
+                self.mapping_count,
+                page_allocator,
+                page_metadata_map,
+            );
+            self.mapping_count = 0;
+            self.segment_mapping_count = 0;
+            return Err(error);
+        }
+        if let Some(interpreter) = interpreter {
+            let Some(interpreter_image) = interpreter_image else {
+                return Err(ElfError::InvalidState);
             };
-            let mut mapping = UserMapping::from_segment(segment);
-            if mapping.memsz() == 0
-                || !mapping.user_accessible()
-                || mapping
-                    .file_offset()
-                    .checked_add(mapping.filesz())
-                    .is_none()
-                || mapping.vaddr().checked_add(mapping.memsz()).is_none()
-            {
-                return Err(ElfError::InvalidProgramHeader);
-            }
-            if let Err(error) =
-                materialize_mapping(&mut mapping, image, page_allocator, page_metadata_map)
-            {
+            if let Err(error) = self.map_elf_segments(
+                interpreter,
+                interpreter_image,
+                page_allocator,
+                page_metadata_map,
+            ) {
                 release_mappings(
                     &mut self.mappings,
                     self.mapping_count,
@@ -952,13 +1101,9 @@ impl UserAddressSpace {
                 self.segment_mapping_count = 0;
                 return Err(error);
             }
-            self.mappings[self.mapping_count] = mapping;
-            self.mapping_count += 1;
-            self.segment_mapping_count += 1;
-            index += 1;
         }
 
-        if !entry_mapping_is_executable(&self.mappings, self.mapping_count, elf.entry()) {
+        if !entry_mapping_is_executable(&self.mappings, self.mapping_count, elf.runtime_entry()) {
             return Err(ElfError::MissingExecutableEntryMapping);
         }
 
@@ -966,14 +1111,38 @@ impl UserAddressSpace {
             return Err(ElfError::TooManyMappings);
         }
         self.stack_mapping_index = self.mapping_count;
-        self.mappings[self.mapping_count] = UserMapping::from_stack(stack);
+        self.mappings[self.mapping_count].init_stack(stack);
+        self.mapping_count += 1;
+        if self.mapping_count >= MAX_USER_MAPPINGS {
+            return Err(ElfError::TooManyMappings);
+        }
+        self.heap_mapping_index = self.mapping_count;
+        self.mappings[self.heap_mapping_index].init_heap();
+        if let Err(error) = materialize_zero_mapping(
+            &mut self.mappings[self.heap_mapping_index],
+            page_allocator,
+            page_metadata_map,
+        ) {
+            self.mappings[self.heap_mapping_index].reset_empty();
+            release_mappings(
+                &mut self.mappings,
+                self.mapping_count,
+                page_allocator,
+                page_metadata_map,
+            );
+            self.mapping_count = 0;
+            self.segment_mapping_count = 0;
+            return Err(error);
+        }
         self.mapping_count += 1;
 
         self.user_pages_u_enabled = true;
         self.elf_load_plan_consumed = true;
-        self.segment_mappings_bound = self.segment_mapping_count == elf.load_segment_count();
+        self.segment_mappings_bound = self.segment_mapping_count
+            == elf.load_segment_count() + interpreter.map_or(0, ElfObject::load_segment_count);
         self.entry_mapping_executable = true;
-        self.bss_zero_plan_consumed = elf.bss_zero_plan_bound();
+        self.bss_zero_plan_consumed =
+            elf.bss_zero_plan_bound() && interpreter.is_none_or(ElfObject::bss_zero_plan_bound);
         self.backing_pages_allocated =
             mappings_have_backing_pages(&self.mappings, self.mapping_count);
         self.elf_file_bytes_copied =
@@ -983,11 +1152,165 @@ impl UserAddressSpace {
             mappings_have_page_table_entries(&self.mappings, self.mapping_count);
         self.elf_segments_mapped = true;
         self.stack_mapped = true;
+        self.heap_mapped = true;
+        self.heap_base = USER_HEAP_BASE;
+        self.heap_size = USER_HEAP_SIZE;
+        self.heap_brk = USER_HEAP_BASE;
+        self.mmap_next = align_up(USER_HEAP_BASE + USER_HEAP_SIZE / 2, USER_PAGE_SIZE);
         self.elf_mapped = true;
         self.elf_bss_zeroed = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
             .map_err(|_| ElfError::InvalidState)
+    }
+
+    fn reset_mappings(&mut self) {
+        let mut index = 0usize;
+        while index < MAX_USER_MAPPINGS {
+            self.mappings[index].reset_empty();
+            index += 1;
+        }
+    }
+
+    fn map_elf_segments(
+        &mut self,
+        elf: &ElfObject,
+        image: &[u8],
+        page_allocator: &mut PageAllocator,
+        page_metadata_map: &PageMetadataMap,
+    ) -> Result<(), ElfError> {
+        let mut index = 0usize;
+        while index < elf.load_segment_count() {
+            if self.mapping_count >= MAX_USER_MAPPINGS {
+                return Err(ElfError::TooManyMappings);
+            }
+            let Some(segment) = elf.load_segment(index) else {
+                return Err(ElfError::InvalidProgramHeader);
+            };
+            let mapping_index = self.mapping_count;
+            self.mappings[mapping_index].init_segment(segment);
+            if self.mappings[mapping_index].memsz() == 0
+                || !self.mappings[mapping_index].user_accessible()
+                || self.mappings[mapping_index]
+                    .file_offset()
+                    .checked_add(self.mappings[mapping_index].filesz())
+                    .is_none()
+                || self.mappings[mapping_index]
+                    .vaddr()
+                    .checked_add(self.mappings[mapping_index].memsz())
+                    .is_none()
+            {
+                self.mappings[mapping_index].reset_empty();
+                return Err(ElfError::InvalidProgramHeader);
+            }
+            if let Err(error) = materialize_mapping(
+                &mut self.mappings[mapping_index],
+                image,
+                page_allocator,
+                page_metadata_map,
+            ) {
+                self.mappings[mapping_index].reset_empty();
+                return Err(error);
+            }
+            self.mapping_count += 1;
+            self.segment_mapping_count += 1;
+            index += 1;
+        }
+        Ok(())
+    }
+
+    pub fn user_brk(&mut self, requested: usize) -> usize {
+        if self.lifecycle.state() != State::Online || !self.heap_mapped {
+            return 0;
+        }
+        let heap_end = self.heap_base + self.heap_size / 2;
+        if requested == 0 {
+            return self.heap_brk;
+        }
+        let requested = align_up(requested, USER_PAGE_SIZE);
+        if requested < self.heap_base || requested > heap_end {
+            return self.heap_brk;
+        }
+        self.heap_brk = requested;
+        self.heap_brk
+    }
+
+    pub fn user_mmap(
+        &mut self,
+        addr: usize,
+        len: usize,
+        flags: usize,
+        fd: usize,
+        offset: usize,
+    ) -> Option<usize> {
+        if self.lifecycle.state() != State::Online || !self.heap_mapped || len == 0 {
+            return None;
+        }
+        const MAP_PRIVATE: usize = 0x02;
+        const MAP_ANONYMOUS: usize = 0x20;
+        if flags & MAP_ANONYMOUS == 0 || flags & MAP_PRIVATE == 0 {
+            return None;
+        }
+        if fd != usize::MAX || offset != 0 {
+            return None;
+        }
+        let len = align_up(len, USER_PAGE_SIZE);
+        let mmap_start = self.heap_base + self.heap_size / 2;
+        let mmap_end = self.heap_base + self.heap_size;
+        let base = if addr != 0 {
+            align_down(addr, USER_PAGE_SIZE)
+        } else {
+            self.mmap_next
+        };
+        let end = base.checked_add(len)?;
+        if base < mmap_start || end > mmap_end {
+            return None;
+        }
+        if addr == 0 {
+            self.mmap_next = end;
+        }
+        Some(base)
+    }
+
+    pub fn user_mprotect(&self, addr: usize, len: usize) -> bool {
+        self.user_range_mapped(addr, len)
+    }
+
+    pub fn user_munmap(&self, addr: usize, len: usize) -> bool {
+        self.user_range_mapped(addr, len)
+    }
+
+    fn user_range_mapped(&self, addr: usize, len: usize) -> bool {
+        if self.lifecycle.state() != State::Online || len == 0 {
+            return false;
+        }
+        let Some(end) = addr.checked_add(len) else {
+            return false;
+        };
+        let mut index = 0usize;
+        while index < self.mapping_count {
+            let mapping = &self.mappings[index];
+            let Some(mapping_start) = mapping.vaddr().checked_sub(mapping.page_offset()) else {
+                index += 1;
+                continue;
+            };
+            let Some(mapping_len) = mapping.backing_page_count().checked_mul(USER_PAGE_SIZE) else {
+                index += 1;
+                continue;
+            };
+            let Some(mapping_end) = mapping_start.checked_add(mapping_len) else {
+                index += 1;
+                continue;
+            };
+            if mapping.kind() != UserMappingKind::Empty
+                && addr >= mapping_start
+                && end <= mapping_end
+            {
+                return true;
+            }
+            index += 1;
+        }
+        false
     }
 
     pub fn enable(
@@ -1088,8 +1411,7 @@ impl UserAddressSpace {
     ) -> bool {
         let mut index = 0usize;
         while index < self.mapping_count {
-            let mapping = self.mappings[index];
-            if !self.install_mapping_ptes(mapping, page_allocator, page_metadata_map) {
+            if !self.install_mapping_ptes(index, page_allocator, page_metadata_map) {
                 return false;
             }
             index += 1;
@@ -1102,30 +1424,41 @@ impl UserAddressSpace {
 
     fn install_mapping_ptes(
         &mut self,
-        mapping: UserMapping,
+        mapping_index: usize,
         page_allocator: &mut PageAllocator,
         page_metadata_map: &PageMetadataMap,
     ) -> bool {
-        if mapping.kind() == UserMappingKind::Empty
-            || !mapping.user_accessible()
-            || mapping.backing_page_count() == 0
-            || mapping.vaddr().checked_sub(mapping.page_offset()).is_none()
-        {
+        if mapping_index >= self.mapping_count {
+            return false;
+        }
+        let kind = self.mappings[mapping_index].kind();
+        let user_accessible = self.mappings[mapping_index].user_accessible();
+        let backing_page_count = self.mappings[mapping_index].backing_page_count();
+        let page_offset = self.mappings[mapping_index].page_offset();
+        let Some(mut virt) = self.mappings[mapping_index]
+            .vaddr()
+            .checked_sub(page_offset)
+        else {
+            return false;
+        };
+        if kind == UserMappingKind::Empty || !user_accessible || backing_page_count == 0 {
             return false;
         }
 
-        let mut virt = mapping.vaddr() - mapping.page_offset();
+        let readable = self.mappings[mapping_index].readable();
+        let writable = self.mappings[mapping_index].writable();
+        let executable = self.mappings[mapping_index].executable();
         let mut page_index = 0usize;
-        while page_index < mapping.backing_page_count() {
-            let Some(page) = mapping.backing_page(page_index) else {
+        while page_index < backing_page_count {
+            let Some(page) = self.mappings[mapping_index].backing_page(page_index) else {
                 return false;
             };
             if !self.install_user_leaf_pte(
                 virt,
                 page.phys().value(),
-                mapping.readable(),
-                mapping.writable(),
-                mapping.executable(),
+                readable,
+                writable,
+                executable,
                 page_allocator,
                 page_metadata_map,
             ) {
@@ -1298,6 +1631,8 @@ static mut USER_KERNEL_TRAP_STACK: UserKernelTrapStack = UserKernelTrapStack {
 };
 #[cfg(app_user_boot)]
 static mut USER_BOOT_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
+#[cfg(app_user_boot)]
+static mut USER_BOOT_INTERPRETER_READ_BUFFER: [u8; USER_BOOT_READ_MAX] = [0; USER_BOOT_READ_MAX];
 
 pub struct UserTrapFrame {
     lifecycle: Lifecycle,
@@ -1397,7 +1732,7 @@ impl UserTrapFrame {
             );
         }
 
-        self.entry = elf.entry();
+        self.entry = elf.runtime_entry();
         self.sp = stack.initial_sp();
         self.sstatus = SSTATUS_SPIE_SET | SSTATUS_SPP_USER_CLEAR;
         self.allocated = true;
@@ -1414,11 +1749,19 @@ impl UserTrapFrame {
 
 pub struct ElfObject {
     lifecycle: Lifecycle,
+    role: ElfObjectRole,
+    elf_type: ElfType,
     input_len: usize,
     entry: usize,
+    runtime_entry: usize,
+    load_bias: usize,
+    phdr_vaddr: usize,
+    phentsize: usize,
     program_header_count: usize,
     load_segment_count: usize,
     load_segments: [ElfLoadSegment; MAX_LOAD_SEGMENTS],
+    interpreter_path: [u8; ELF_INTERP_PATH_MAX],
+    interpreter_path_len: usize,
     input_bound: bool,
     input_from_vfs: bool,
     magic_valid: bool,
@@ -1427,6 +1770,12 @@ pub struct ElfObject {
     machine_riscv: bool,
     type_supported: bool,
     static_executable: bool,
+    dynamic_executable: bool,
+    interpreter_required: bool,
+    interpreter_path_bound: bool,
+    et_dyn_interpreter_supported: bool,
+    runtime_entry_bound: bool,
+    auxv_exec_fields_bound: bool,
     no_separate_loader: bool,
     program_headers_parsed: bool,
     pt_load_segments_bound: bool,
@@ -1445,11 +1794,19 @@ impl ElfObject {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            role: ElfObjectRole::MainExecutable,
+            elf_type: ElfType::Exec,
             input_len: 0,
             entry: 0,
+            runtime_entry: 0,
+            load_bias: 0,
+            phdr_vaddr: 0,
+            phentsize: 0,
             program_header_count: 0,
             load_segment_count: 0,
             load_segments: [ElfLoadSegment::empty(); MAX_LOAD_SEGMENTS],
+            interpreter_path: [0; ELF_INTERP_PATH_MAX],
+            interpreter_path_len: 0,
             input_bound: false,
             input_from_vfs: false,
             magic_valid: false,
@@ -1458,6 +1815,12 @@ impl ElfObject {
             machine_riscv: false,
             type_supported: false,
             static_executable: false,
+            dynamic_executable: false,
+            interpreter_required: false,
+            interpreter_path_bound: false,
+            et_dyn_interpreter_supported: false,
+            runtime_entry_bound: false,
+            auxv_exec_fields_bound: false,
             no_separate_loader: false,
             program_headers_parsed: false,
             pt_load_segments_bound: false,
@@ -1480,8 +1843,28 @@ impl ElfObject {
         self.input_len
     }
 
+    pub const fn role(&self) -> ElfObjectRole {
+        self.role
+    }
+
     pub const fn entry(&self) -> usize {
         self.entry
+    }
+
+    pub const fn runtime_entry(&self) -> usize {
+        self.runtime_entry
+    }
+
+    pub const fn load_bias(&self) -> usize {
+        self.load_bias
+    }
+
+    pub const fn phdr_vaddr(&self) -> usize {
+        self.phdr_vaddr
+    }
+
+    pub const fn phentsize(&self) -> usize {
+        self.phentsize
     }
 
     pub const fn program_header_count(&self) -> usize {
@@ -1532,6 +1915,38 @@ impl ElfObject {
         self.static_executable
     }
 
+    pub const fn dynamic_executable(&self) -> bool {
+        self.dynamic_executable
+    }
+
+    pub const fn interpreter_required(&self) -> bool {
+        self.interpreter_required
+    }
+
+    pub fn interpreter_path(&self) -> Option<&[u8]> {
+        if self.interpreter_path_bound {
+            Some(&self.interpreter_path[..self.interpreter_path_len])
+        } else {
+            None
+        }
+    }
+
+    pub const fn interpreter_path_bound(&self) -> bool {
+        self.interpreter_path_bound
+    }
+
+    pub const fn et_dyn_interpreter_supported(&self) -> bool {
+        self.et_dyn_interpreter_supported
+    }
+
+    pub const fn runtime_entry_bound(&self) -> bool {
+        self.runtime_entry_bound
+    }
+
+    pub const fn auxv_exec_fields_bound(&self) -> bool {
+        self.auxv_exec_fields_bound
+    }
+
     pub const fn no_separate_loader(&self) -> bool {
         self.no_separate_loader
     }
@@ -1577,11 +1992,34 @@ impl ElfObject {
     }
 
     pub fn preset_from_vfs(&mut self, input: &[u8]) -> Result<(), ElfError> {
+        self.preset_with_role(input, ElfObjectRole::MainExecutable, 0)
+    }
+
+    pub fn preset_interpreter_from_vfs(&mut self, input: &[u8]) -> Result<(), ElfError> {
+        self.preset_with_role(
+            input,
+            ElfObjectRole::Interpreter,
+            USER_INTERPRETER_LOAD_BIAS,
+        )
+    }
+
+    fn preset_with_role(
+        &mut self,
+        input: &[u8],
+        role: ElfObjectRole,
+        load_bias: usize,
+    ) -> Result<(), ElfError> {
         if self.lifecycle.state() != State::Base {
             return Err(ElfError::InvalidState);
         }
-        validate_header(input)?;
+        let header = parse_header(input)?;
+        if !elf_type_allowed_for_role(header.elf_type, role) {
+            return Err(ElfError::UnsupportedType);
+        }
 
+        self.role = role;
+        self.elf_type = header.elf_type;
+        self.load_bias = load_bias;
         self.input_len = input.len();
         self.input_bound = true;
         self.input_from_vfs = true;
@@ -1590,8 +2028,17 @@ impl ElfObject {
         self.little_endian = true;
         self.machine_riscv = true;
         self.type_supported = true;
-        self.static_executable = true;
-        self.no_separate_loader = true;
+        self.static_executable = role == ElfObjectRole::MainExecutable
+            && header.elf_type == ElfType::Exec
+            && !header.interpreter_required;
+        self.dynamic_executable = role == ElfObjectRole::MainExecutable
+            && header.elf_type == ElfType::Exec
+            && header.interpreter_required;
+        self.interpreter_required =
+            role == ElfObjectRole::MainExecutable && header.interpreter_required;
+        self.et_dyn_interpreter_supported =
+            role == ElfObjectRole::Interpreter && header.elf_type == ElfType::Dyn;
+        self.no_separate_loader = !self.interpreter_required;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
             .map_err(|_| ElfError::InvalidState)
@@ -1603,22 +2050,33 @@ impl ElfObject {
         }
 
         let header = parse_header(input)?;
-        let parsed = parse_load_segments(input, &header)?;
+        if !elf_type_allowed_for_role(header.elf_type, self.role) {
+            return Err(ElfError::UnsupportedType);
+        }
+        let parsed = parse_load_segments(input, &header, self.load_bias)?;
         if parsed.load_segment_count == 0 {
             return Err(ElfError::MissingLoadSegment);
         }
-        if !entry_in_executable_segment(
-            header.entry,
-            &parsed.load_segments,
-            parsed.load_segment_count,
-        ) {
+        let entry = self
+            .load_bias
+            .checked_add(header.entry)
+            .ok_or(ElfError::InvalidHeader)?;
+        if !entry_in_executable_segment(entry, &parsed.load_segments, parsed.load_segment_count) {
             return Err(ElfError::EntryOutsideExecutableSegment);
         }
-        if !loadable_content_contains(input, &parsed, USER_INIT_EXPECTED_MESSAGE) {
+        if self.role == ElfObjectRole::MainExecutable
+            && !loadable_content_contains(input, &parsed, USER_INIT_EXPECTED_MESSAGE)
+        {
             return Err(ElfError::MissingExpectedContent);
         }
+        if self.role == ElfObjectRole::MainExecutable && header.interpreter_required {
+            self.bind_interpreter_path(input, &header)?;
+        }
 
-        self.entry = header.entry;
+        self.entry = entry;
+        self.runtime_entry = entry;
+        self.phdr_vaddr = phdr_vaddr(&header, &parsed, self.load_bias)?;
+        self.phentsize = header.phentsize;
         self.program_header_count = header.phnum;
         self.load_segment_count = parsed.load_segment_count;
         self.load_segments = parsed.load_segments;
@@ -1627,13 +2085,51 @@ impl ElfObject {
         self.segment_permissions_bound = parsed.segment_permissions_bound;
         self.load_plan_bound = true;
         self.entry_in_executable_segment = true;
-        self.init_content_observed = true;
+        self.init_content_observed = self.role != ElfObjectRole::MainExecutable
+            || loadable_content_contains(input, &parsed, USER_INIT_EXPECTED_MESSAGE);
         self.bss_zero_plan_bound = true;
         self.entry_bound = true;
+        self.runtime_entry_bound = true;
+        self.auxv_exec_fields_bound = self.role == ElfObjectRole::MainExecutable;
         self.load_merged_into_setup = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
             .map_err(|_| ElfError::InvalidState)
+    }
+
+    fn bind_interpreter_path(&mut self, input: &[u8], header: &ElfHeader) -> Result<(), ElfError> {
+        let Some((offset, len)) = header.interpreter else {
+            return Err(ElfError::InvalidProgramHeader);
+        };
+        if len == 0 || len > ELF_INTERP_PATH_MAX {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+        let path = input
+            .get(offset..offset + len)
+            .ok_or(ElfError::InvalidProgramHeader)?;
+        let path_len = if path[len - 1] == 0 { len - 1 } else { len };
+        if path_len == 0 || path_len > ELF_INTERP_PATH_MAX {
+            return Err(ElfError::InvalidProgramHeader);
+        }
+        self.interpreter_path = [0; ELF_INTERP_PATH_MAX];
+        self.interpreter_path[..path_len].copy_from_slice(&path[..path_len]);
+        self.interpreter_path_len = path_len;
+        self.interpreter_path_bound = true;
+        Ok(())
+    }
+
+    pub fn bind_runtime_interpreter(&mut self, interpreter: &ElfObject) -> Result<(), ElfError> {
+        if self.lifecycle.state() != State::Ready
+            || self.role != ElfObjectRole::MainExecutable
+            || !self.interpreter_required
+            || interpreter.state() != State::Ready
+            || interpreter.role() != ElfObjectRole::Interpreter
+        {
+            return Err(ElfError::InvalidState);
+        }
+        self.runtime_entry = interpreter.entry();
+        self.runtime_entry_bound = true;
+        Ok(())
     }
 
     pub fn load_segments_fit_direct_read(&self, max_size: usize) -> bool {
@@ -1688,6 +2184,8 @@ pub struct UserInitProcess {
     syscall_dispatch_bound: bool,
     syscall_arguments_extracted: bool,
     runtime_entered: bool,
+    clear_child_tid_bound: bool,
+    clear_child_tid: usize,
 }
 
 #[allow(dead_code)]
@@ -1716,6 +2214,8 @@ impl UserInitProcess {
             syscall_dispatch_bound: false,
             syscall_arguments_extracted: false,
             runtime_entered: false,
+            clear_child_tid_bound: false,
+            clear_child_tid: 0,
         }
     }
 
@@ -1805,6 +2305,14 @@ impl UserInitProcess {
 
     pub const fn runtime_entered(&self) -> bool {
         self.runtime_entered
+    }
+
+    pub const fn clear_child_tid_bound(&self) -> bool {
+        self.clear_child_tid_bound
+    }
+
+    pub const fn clear_child_tid(&self) -> usize {
+        self.clear_child_tid
     }
 
     pub fn setup(
@@ -1903,6 +2411,15 @@ impl UserInitProcess {
 
     pub fn refresh_runtime_observations(&mut self) {
         self.runtime_entered |= USER_INIT_RUNTIME_ENTERED.load(Ordering::Acquire) != 0;
+    }
+
+    pub fn set_clear_child_tid(&mut self, tidptr: usize) -> usize {
+        if self.lifecycle.state() != State::Online {
+            return 0;
+        }
+        self.clear_child_tid = tidptr;
+        self.clear_child_tid_bound = true;
+        super::rest_init::KERNEL_INIT_PID
     }
 }
 
@@ -2067,6 +2584,7 @@ impl UserBootPayload {
 pub fn run_first_user_init(
     payload: &mut UserBootPayload,
     elf: &mut ElfObject,
+    interpreter: &mut ElfObject,
     address_space: &mut UserAddressSpace,
     stack: &mut UserStack,
     trap_frame: &mut UserTrapFrame,
@@ -2099,6 +2617,35 @@ pub fn run_first_user_init(
     if elf.preset_from_vfs(image).is_err() || elf.setup(image).is_err() {
         user_boot_panic("user init ELF setup failed\n");
     }
+    crate::checkpoint::dispatch(
+        crate::trace::Checkpoint::UserBootMainElfReady,
+        crate::context::context_ref(),
+    );
+    let interpreter_image = if let Some(path) = elf.interpreter_path() {
+        let image = read_user_path_image(
+            vfs_core,
+            fs_struct,
+            ext2_filesystem,
+            block_device_registry,
+            kernel_image,
+            path,
+            true,
+        );
+        if interpreter.preset_interpreter_from_vfs(image).is_err()
+            || interpreter.setup(image).is_err()
+            || elf.bind_runtime_interpreter(interpreter).is_err()
+        {
+            user_boot_panic("user interp ELF setup failed\n");
+        }
+        crate::checkpoint::dispatch(
+            crate::trace::Checkpoint::UserBootInterpreterReady,
+            crate::context::context_ref(),
+        );
+        Some(image)
+    } else {
+        None
+    };
+    let interpreter_ref = interpreter_image.map(|_| &*interpreter);
     if payload.try_candidate(elf).is_err() {
         user_boot_panic("user init candidate failed\n");
     }
@@ -2114,17 +2661,39 @@ pub fn run_first_user_init(
         user_boot_panic("user address space preset failed\n");
     }
     if stack
-        .setup(address_space, page_allocator, page_metadata_map)
+        .setup(
+            address_space,
+            elf,
+            interpreter_ref,
+            page_allocator,
+            page_metadata_map,
+        )
         .is_err()
     {
         user_boot_panic("user stack setup failed\n");
     }
+    crate::checkpoint::dispatch(
+        crate::trace::Checkpoint::UserBootAddressSpaceSetupStart,
+        crate::context::context_ref(),
+    );
     if address_space
-        .setup(elf, stack, image, page_allocator, page_metadata_map)
+        .setup(
+            elf,
+            interpreter_ref,
+            stack,
+            image,
+            interpreter_image,
+            page_allocator,
+            page_metadata_map,
+        )
         .is_err()
     {
         user_boot_panic("user address space setup failed\n");
     }
+    crate::checkpoint::dispatch(
+        crate::trace::Checkpoint::UserAddressSpaceReady,
+        crate::context::context_ref(),
+    );
     if trap_frame.setup(address_space, elf, stack).is_err() {
         user_boot_panic("user trap frame setup failed\n");
     }
@@ -2210,10 +2779,36 @@ fn read_user_init_image(
     block_device_registry: &mut BlockDeviceRegistry,
     kernel_image: &KernelImage,
 ) -> &'static [u8] {
+    read_user_path_image(
+        vfs_core,
+        fs_struct,
+        ext2_filesystem,
+        block_device_registry,
+        kernel_image,
+        USER_INIT_PATH,
+        false,
+    )
+}
+
+#[cfg(app_user_boot)]
+fn read_user_path_image(
+    vfs_core: &mut VfsCore,
+    fs_struct: &FsStruct,
+    ext2_filesystem: &mut Ext2FileSystem,
+    block_device_registry: &mut BlockDeviceRegistry,
+    kernel_image: &KernelImage,
+    path: &[u8],
+    use_interpreter_buffer: bool,
+) -> &'static [u8] {
     let mut provider = virtio_blk::live_provider(kernel_image);
     let buffer = unsafe {
-        let ptr = core::ptr::addr_of_mut!(USER_BOOT_READ_BUFFER);
-        &mut *ptr
+        if use_interpreter_buffer {
+            let ptr = core::ptr::addr_of_mut!(USER_BOOT_INTERPRETER_READ_BUFFER);
+            &mut *ptr
+        } else {
+            let ptr = core::ptr::addr_of_mut!(USER_BOOT_READ_BUFFER);
+            &mut *ptr
+        }
     };
     buffer.fill(0);
     let Ok(len) = vfs_core.read_path(
@@ -2221,10 +2816,10 @@ fn read_user_init_image(
         ext2_filesystem,
         block_device_registry,
         &mut provider,
-        USER_INIT_PATH,
+        path,
         buffer,
     ) else {
-        user_boot_panic("read /sbin/init failed\n");
+        user_boot_panic("read user ELF failed\n");
     };
     &buffer[..len]
 }
@@ -2245,21 +2840,20 @@ fn user_boot_panic(message: &str) -> ! {
 
 #[derive(Clone, Copy)]
 struct ElfHeader {
+    elf_type: ElfType,
     entry: usize,
     phoff: usize,
     phentsize: usize,
     phnum: usize,
+    phdr_vaddr: usize,
+    interpreter: Option<(usize, usize)>,
+    interpreter_required: bool,
 }
 
 struct ParsedLoadSegments {
     load_segments: [ElfLoadSegment; MAX_LOAD_SEGMENTS],
     load_segment_count: usize,
     segment_permissions_bound: bool,
-}
-
-fn validate_header(input: &[u8]) -> Result<(), ElfError> {
-    let _ = parse_header(input)?;
-    Ok(())
 }
 
 fn parse_header(input: &[u8]) -> Result<ElfHeader, ElfError> {
@@ -2278,9 +2872,11 @@ fn parse_header(input: &[u8]) -> Result<ElfHeader, ElfError> {
     if input[6] != ELF_VERSION_CURRENT {
         return Err(ElfError::UnsupportedVersion);
     }
-    if read_u16(input, 16)? != ELF_TYPE_EXEC {
-        return Err(ElfError::UnsupportedType);
-    }
+    let elf_type = match read_u16(input, 16)? {
+        ELF_TYPE_EXEC => ElfType::Exec,
+        ELF_TYPE_DYN => ElfType::Dyn,
+        _ => return Err(ElfError::UnsupportedType),
+    };
     if read_u16(input, 18)? != ELF_MACHINE_RISCV {
         return Err(ElfError::UnsupportedMachine);
     }
@@ -2308,15 +2904,53 @@ fn parse_header(input: &[u8]) -> Result<ElfHeader, ElfError> {
         return Err(ElfError::InvalidHeader);
     }
 
+    let mut phdr_vaddr = 0usize;
+    let mut interpreter = None;
+    let mut index = 0usize;
+    while index < phnum {
+        let phdr = phoff + index * phentsize;
+        let p_type = read_u32(input, phdr)?;
+        if p_type == ELF_PHDR_TYPE_PHDR {
+            phdr_vaddr = checked_usize(read_u64(input, phdr + 16)?)?;
+        } else if p_type == ELF_PHDR_TYPE_INTERP {
+            let offset = checked_usize(read_u64(input, phdr + 8)?)?;
+            let filesz = checked_usize(read_u64(input, phdr + 32)?)?;
+            if offset
+                .checked_add(filesz)
+                .filter(|end| *end <= input.len())
+                .is_none()
+            {
+                return Err(ElfError::InvalidProgramHeader);
+            }
+            interpreter = Some((offset, filesz));
+        }
+        index += 1;
+    }
+
     Ok(ElfHeader {
+        elf_type,
         entry,
         phoff,
         phentsize,
         phnum,
+        phdr_vaddr,
+        interpreter_required: interpreter.is_some(),
+        interpreter,
     })
 }
 
-fn parse_load_segments(input: &[u8], header: &ElfHeader) -> Result<ParsedLoadSegments, ElfError> {
+fn elf_type_allowed_for_role(elf_type: ElfType, role: ElfObjectRole) -> bool {
+    match role {
+        ElfObjectRole::MainExecutable => elf_type == ElfType::Exec,
+        ElfObjectRole::Interpreter => elf_type == ElfType::Dyn,
+    }
+}
+
+fn parse_load_segments(
+    input: &[u8],
+    header: &ElfHeader,
+    load_bias: usize,
+) -> Result<ParsedLoadSegments, ElfError> {
     let mut segments = [ElfLoadSegment::empty(); MAX_LOAD_SEGMENTS];
     let mut count = 0usize;
     let mut permissions_bound = true;
@@ -2330,7 +2964,10 @@ fn parse_load_segments(input: &[u8], header: &ElfHeader) -> Result<ParsedLoadSeg
             }
             let flags = read_u32(input, phdr + 4)?;
             let offset = checked_usize(read_u64(input, phdr + 8)?)?;
-            let vaddr = checked_usize(read_u64(input, phdr + 16)?)?;
+            let raw_vaddr = checked_usize(read_u64(input, phdr + 16)?)?;
+            let vaddr = load_bias
+                .checked_add(raw_vaddr)
+                .ok_or(ElfError::InvalidProgramHeader)?;
             let filesz = checked_usize(read_u64(input, phdr + 32)?)?;
             let memsz = checked_usize(read_u64(input, phdr + 40)?)?;
             let align = checked_usize(read_u64(input, phdr + 48)?)?;
@@ -2367,6 +3004,39 @@ fn parse_load_segments(input: &[u8], header: &ElfHeader) -> Result<ParsedLoadSeg
     })
 }
 
+fn phdr_vaddr(
+    header: &ElfHeader,
+    parsed: &ParsedLoadSegments,
+    load_bias: usize,
+) -> Result<usize, ElfError> {
+    if header.phdr_vaddr != 0 {
+        return header
+            .phdr_vaddr
+            .checked_add(load_bias)
+            .ok_or(ElfError::InvalidHeader);
+    }
+    let phdr_size = header
+        .phentsize
+        .checked_mul(header.phnum)
+        .ok_or(ElfError::InvalidHeader)?;
+    let phdr_end = header
+        .phoff
+        .checked_add(phdr_size)
+        .ok_or(ElfError::InvalidHeader)?;
+    let mut index = 0usize;
+    while index < parsed.load_segment_count {
+        let segment = parsed.load_segments[index];
+        if header.phoff >= segment.offset() && phdr_end <= segment.file_end() {
+            return segment
+                .vaddr()
+                .checked_add(header.phoff - segment.offset())
+                .ok_or(ElfError::InvalidHeader);
+        }
+        index += 1;
+    }
+    Err(ElfError::InvalidHeader)
+}
+
 fn entry_in_executable_segment(
     entry: usize,
     segments: &[ElfLoadSegment; MAX_LOAD_SEGMENTS],
@@ -2390,7 +3060,7 @@ fn entry_mapping_is_executable(
 ) -> bool {
     let mut index = 0usize;
     while index < count {
-        let mapping = mappings[index];
+        let mapping = &mappings[index];
         if mapping.kind() == UserMappingKind::ElfSegment
             && mapping.executable()
             && mapping.contains_vaddr(entry)
@@ -2460,6 +3130,12 @@ fn release_mapping_pages(
     page_allocator: &mut PageAllocator,
     page_metadata_map: &PageMetadataMap,
 ) {
+    if mapping.kind() == UserMappingKind::Stack {
+        mapping.clear_backing_pages();
+        mapping.backing_page_count = 0;
+        mapping.page_table_entry_bound = false;
+        return;
+    }
     while mapping.backing_page_count > 0 {
         mapping.backing_page_count -= 1;
         if let Some(page) = mapping.backing_pages[mapping.backing_page_count] {
@@ -2478,7 +3154,7 @@ fn release_mappings(
     let mut index = 0usize;
     while index < count {
         release_mapping_pages(&mut mappings[index], page_allocator, page_metadata_map);
-        mappings[index] = UserMapping::empty();
+        mappings[index].reset_empty();
         index += 1;
     }
 }
@@ -2526,6 +3202,37 @@ fn copy_mapping_bytes(
         copied += chunk;
         remaining -= chunk;
     }
+    Ok(())
+}
+
+fn materialize_zero_mapping(
+    mapping: &mut UserMapping,
+    page_allocator: &mut PageAllocator,
+    page_metadata_map: &PageMetadataMap,
+) -> Result<(), ElfError> {
+    let page_count = pages_for_range(mapping.page_offset, mapping.memsz)?;
+    if page_count > MAX_MAPPING_BACKING_PAGES {
+        return Err(ElfError::TooManyMappingPages);
+    }
+    let mut index = 0usize;
+    while index < page_count {
+        let Some(page) = page_allocator.alloc_page(GfpFlags::kernel(), page_metadata_map) else {
+            release_mapping_pages(mapping, page_allocator, page_metadata_map);
+            return Err(ElfError::BackingAllocationFailed);
+        };
+        let Some(linear) = page_metadata_map.page_address(page) else {
+            let _ = page_allocator.free_pages(page, 0, page_metadata_map);
+            release_mapping_pages(mapping, page_allocator, page_metadata_map);
+            return Err(ElfError::BackingAllocationFailed);
+        };
+        unsafe { core::ptr::write_bytes(linear as *mut u8, 0, USER_PAGE_SIZE) };
+        mapping.backing_pages[index] = Some(page);
+        mapping.backing_page_count += 1;
+        index += 1;
+    }
+    mapping.file_bytes_copied = 0;
+    mapping.bss_bytes_zeroed = mapping.bss_zero_bytes();
+    mapping.page_table_entry_bound = true;
     Ok(())
 }
 

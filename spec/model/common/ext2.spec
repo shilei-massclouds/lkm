@@ -72,6 +72,7 @@ predicate ext2_inode_number_bound<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_mode_bound<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_size_bound<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_direct_blocks_bound<T, I>(fs: T, inode: I) -> bool;
+predicate ext2_inode_single_indirect_block_bound<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_is_root_dir<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_is_regular_file<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_indirect_blocks_deferred<T, I>(fs: T, inode: I) -> bool;
@@ -89,6 +90,8 @@ predicate ext2_root_lookup_returns_inode<T, D, I>(fs: T, dirent: D, inode: I) ->
 predicate ext2_file_read_uses_direct_block<T, R, I>(fs: T, read: R, file: I) -> bool;
 predicate ext2_file_read_scans_direct_blocks<T, R, I>(fs: T, read: R, file: I) -> bool;
 predicate ext2_file_read_multi_direct_block_supported<T, R>(fs: T, read: R) -> bool;
+predicate ext2_file_read_single_indirect_supported<T, R>(fs: T, read: R) -> bool;
+predicate ext2_file_read_scans_single_indirect_block<T, R, I>(fs: T, read: R, file: I) -> bool;
 predicate ext2_file_read_uses_buffer_head<T, R, B>(fs: T, read: R, bh: B) -> bool;
 predicate ext2_file_read_copies_to_caller<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_len_matches_inode_size<T, R, I>(fs: T, read: R, file: I) -> bool;
@@ -307,6 +310,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_inode_mode_bound(self, Ext2InodeRef::LookupFile);
                     ext2_inode_size_bound(self, Ext2InodeRef::LookupFile);
                     ext2_inode_direct_blocks_bound(self, Ext2InodeRef::LookupFile);
+                    ext2_inode_single_indirect_block_bound(self, Ext2InodeRef::LookupFile);
                     ext2_inode_is_regular_file(self, Ext2InodeRef::LookupFile);
                     ext2_inode_indirect_blocks_deferred(self, Ext2InodeRef::LookupFile);
                     ext2_root_lookup_returns_inode(self, Ext2DirEntryRef::RootLookup, Ext2InodeRef::LookupFile);
@@ -327,6 +331,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_file_read_uses_direct_block(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_scans_direct_blocks(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_multi_direct_block_supported(self, Ext2FileReadRef::LookupFile);
+                    ext2_file_read_single_indirect_supported(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_uses_buffer_head(self, Ext2FileReadRef::LookupFile, BufferHead);
                     ext2_file_read_copies_to_caller(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_len_matches_inode_size(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
@@ -350,6 +355,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_file_read_uses_direct_block(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_scans_direct_blocks(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_multi_direct_block_supported(self, Ext2FileReadRef::LookupFile);
+                    ext2_file_read_single_indirect_supported(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_uses_buffer_head(self, Ext2FileReadRef::LookupFile, BufferHead);
                     ext2_file_read_copies_to_caller(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_len_matches_inode_size(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);

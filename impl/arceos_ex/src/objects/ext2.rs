@@ -14,11 +14,14 @@ pub const EXT2_SUPERBLOCK_OFFSET: usize = 1024;
 const EXT2_SUPERBLOCK_PROBE_BLOCK: u64 = (EXT2_SUPERBLOCK_OFFSET / EXT2_MIN_BLOCK_SIZE) as u64;
 pub const EXT2_N_BLOCKS: usize = 15;
 pub const EXT2_NDIR_BLOCKS: usize = 12;
+pub const EXT2_SINGLE_INDIRECT_INDEX: usize = EXT2_NDIR_BLOCKS;
 pub const EXT2_ALPINE_RELEASE_PATH: &[u8] = b"/etc/alpine-release";
 pub const EXT2_ALPINE_RELEASE_FILE_NAME: &[u8] = b"alpine-release";
 pub const EXT2_ALPINE_RELEASE_FILE_CONTENT: &[u8] = b"3.24.1\n";
 pub const EXT2_ALPINE_INSTALLED_DB_PATH: &[u8] = b"/lib/apk/db/installed";
 pub const EXT2_ALPINE_INSTALLED_DB_FILE_NAME: &[u8] = b"installed";
+pub const EXT2_SINGLE_INDIRECT_READ_MAX: usize =
+    EXT2_MAX_BLOCK_SIZE * (EXT2_NDIR_BLOCKS + EXT2_MAX_BLOCK_SIZE / core::mem::size_of::<u32>());
 pub const EXT2_ALPINE_INSTALLED_DB_MAX_SIZE: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
 
 const EXT2_NAME_MAX: usize = 32;
@@ -271,6 +274,7 @@ pub struct Ext2InodeRecord {
     mode: u16,
     size: u32,
     direct_blocks: [u32; EXT2_NDIR_BLOCKS],
+    single_indirect_block: u32,
     indirect_blocks_deferred: bool,
 }
 
@@ -282,6 +286,7 @@ impl Ext2InodeRecord {
             mode: 0,
             size: 0,
             direct_blocks: [0; EXT2_NDIR_BLOCKS],
+            single_indirect_block: 0,
             indirect_blocks_deferred: false,
         }
     }
@@ -300,6 +305,10 @@ impl Ext2InodeRecord {
 
     pub const fn direct_blocks(&self) -> &[u32; EXT2_NDIR_BLOCKS] {
         &self.direct_blocks
+    }
+
+    pub const fn single_indirect_block(&self) -> u32 {
+        self.single_indirect_block
     }
 
     pub const fn is_root_dir(&self) -> bool {
@@ -861,6 +870,33 @@ impl Ext2FileSystem {
             self.file_read_uses_buffer_head = true;
             self.file_read_uses_direct_block = true;
         }
+        if copied < file_size && inode.single_indirect_block() != 0 {
+            let indirect_bh = read_fs_block(
+                registry,
+                provider,
+                devt,
+                inode.single_indirect_block(),
+                self.block_size,
+            )?;
+            self.file_read_uses_buffer_head = true;
+            let pointer_count = indirect_bh.data().len() / core::mem::size_of::<u32>();
+            let mut pointer_index = 0usize;
+            while copied < file_size && pointer_index < pointer_count {
+                let block = le_u32(
+                    indirect_bh.data(),
+                    pointer_index * core::mem::size_of::<u32>(),
+                )?;
+                if block == 0 {
+                    break;
+                }
+                let bh = read_fs_block(registry, provider, devt, block, self.block_size)?;
+                let to_copy = min(file_size - copied, bh.data().len());
+                buffer[copied..copied + to_copy].copy_from_slice(&bh.data()[..to_copy]);
+                copied += to_copy;
+                self.file_read_uses_buffer_head = true;
+                pointer_index += 1;
+            }
+        }
         if copied != file_size {
             return Err(Ext2Error::IndirectBlocksUnsupported);
         }
@@ -1056,7 +1092,10 @@ fn parse_inode(ino: u32, data: &[u8], offset: usize) -> Result<Ext2InodeRecord, 
     for (index, block) in blocks.iter_mut().enumerate() {
         *block = le_u32(data, offset + 0x28 + index * 4)?;
     }
-    if blocks[EXT2_NDIR_BLOCKS..].iter().any(|block| *block != 0) {
+    if blocks[EXT2_SINGLE_INDIRECT_INDEX + 1..]
+        .iter()
+        .any(|block| *block != 0)
+    {
         return Err(Ext2Error::IndirectBlocksUnsupported);
     }
     let mut direct_blocks = [0u32; EXT2_NDIR_BLOCKS];
@@ -1066,6 +1105,7 @@ fn parse_inode(ino: u32, data: &[u8], offset: usize) -> Result<Ext2InodeRecord, 
         mode,
         size,
         direct_blocks,
+        single_indirect_block: blocks[EXT2_SINGLE_INDIRECT_INDEX],
         indirect_blocks_deferred: true,
     })
 }

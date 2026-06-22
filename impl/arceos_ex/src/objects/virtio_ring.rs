@@ -210,6 +210,21 @@ impl VirtioSplitRingLayout {
         self.queue_size
     }
 
+    #[allow(dead_code)]
+    pub const fn desc_virt(self) -> usize {
+        self.desc_virt
+    }
+
+    #[allow(dead_code)]
+    pub const fn avail_virt(self) -> usize {
+        self.avail_virt
+    }
+
+    #[allow(dead_code)]
+    pub const fn used_virt(self) -> usize {
+        self.used_virt
+    }
+
     pub const fn desc_phys(self) -> usize {
         self.desc_phys
     }
@@ -939,6 +954,44 @@ impl VirtQueue {
 
     pub const fn get_buf_count(&self) -> usize {
         self.get_buf_count
+    }
+
+    #[allow(dead_code)]
+    pub const fn real_layout(&self) -> VirtioSplitRingLayout {
+        self.ring.real_layout
+    }
+
+    #[allow(dead_code)]
+    pub const fn ring_avail_idx(&self) -> u16 {
+        self.ring.avail_idx()
+    }
+
+    #[allow(dead_code)]
+    pub const fn ring_used_idx(&self) -> u16 {
+        self.ring.used_idx()
+    }
+
+    #[allow(dead_code)]
+    pub const fn ring_last_used_idx(&self) -> u16 {
+        self.ring.last_used_idx()
+    }
+
+    #[allow(dead_code)]
+    pub fn raw_used_idx(&self) -> Option<u16> {
+        if self.lifecycle.state() != State::Ready || !self.real_backing_ready {
+            return None;
+        }
+        let ptr = self.ring.raw_used_idx_ptr()?;
+        Some(unsafe { ptr::read_volatile(ptr) })
+    }
+
+    #[allow(dead_code)]
+    pub fn raw_avail_idx(&self) -> Option<u16> {
+        if self.lifecycle.state() != State::Ready || !self.real_backing_ready {
+            return None;
+        }
+        let ptr = self.ring.raw_avail_idx_ptr()?;
+        Some(unsafe { ptr::read_volatile(ptr) })
     }
 
     pub fn setup(&mut self) -> EventResult {

@@ -143,6 +143,32 @@ fn emit_diag(ctx: &Context, sink: &mut dyn Sink) {
         device.queue().last_used_len() as usize,
     );
     sink.diag_usize(
+        "virtio_rng_queue_avail_idx",
+        device.queue().ring_avail_idx() as usize,
+    );
+    sink.diag_usize(
+        "virtio_rng_queue_used_idx",
+        device.queue().ring_used_idx() as usize,
+    );
+    sink.diag_usize(
+        "virtio_rng_queue_last_used_idx",
+        device.queue().ring_last_used_idx() as usize,
+    );
+    sink.diag_usize(
+        "virtio_rng_raw_avail_idx",
+        device.queue().raw_avail_idx().unwrap_or(u16::MAX) as usize,
+    );
+    sink.diag_usize(
+        "virtio_rng_raw_used_idx",
+        device.queue().raw_used_idx().unwrap_or(u16::MAX) as usize,
+    );
+    let layout = device.queue().real_layout();
+    sink.diag_hex_pair(
+        "virtio_rng_used_virt_phys",
+        layout.used_virt(),
+        layout.used_phys(),
+    );
+    sink.diag_usize(
         "virtio_rng_queue_real_used",
         if device.queue().real_used_completion_observed() {
             1
