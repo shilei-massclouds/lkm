@@ -49,13 +49,19 @@ object RootStream: FlowObject {
 }
 
 /*
- * BootInitTask 表示入口前导期的根任务对象。它使用 StaticObjects.init_task 作为底层静态存储，并承载根流的任务身份。
+ * BootInitTask 表示入口前导期的根任务对象。它在 Preset 中绑定 Linux 静态 init_task
+ * 存储，并承载根流的任务身份。
  */
 object BootInitTask: TaskObject {
     initial_state: State::Base;
+    source: static::linux_6_12_37;
 
     attrs {
-        storage: ObjectRef<StaticObjects.init_task>;
+        storage: ObjectStorage<BootInitTask>;
+    }
+
+    reference linux_6_12_37 {
+        storage = symbol("init_task");
     }
 
     /*
@@ -68,8 +74,7 @@ object BootInitTask: TaskObject {
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    StaticObjects.state == State::Online;
-                    valid_task_storage(StaticObjects.init_task);
+                    Riscv64.state == State::Online;
                 }
 
                 may_change {
@@ -77,7 +82,10 @@ object BootInitTask: TaskObject {
                 }
 
                 ensures {
-                    Riscv64.tp == phys_addr(StaticObjects.init_task);
+                    attrs_accessible(self);
+                    valid_object_storage(storage);
+                    valid_task_storage(storage);
+                    Riscv64.tp == phys_addr(BootInitTask.storage);
                 }
             }
         }
@@ -88,7 +96,10 @@ object BootInitTask: TaskObject {
      */
     state State::Prepared {
         invariant {
-            Riscv64.tp == phys_addr(StaticObjects.init_task);
+            attrs_accessible(self);
+            valid_object_storage(storage);
+            valid_task_storage(storage);
+            Riscv64.tp == phys_addr(BootInitTask.storage);
             valid_task_ref(Riscv64.tp);
         }
 
@@ -106,7 +117,10 @@ object BootInitTask: TaskObject {
                 }
 
                 ensures {
-                    Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap);
+                    attrs_accessible(self);
+                    valid_object_storage(storage);
+                    valid_task_storage(storage);
+                    Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap);
                 }
             }
         }
@@ -117,7 +131,10 @@ object BootInitTask: TaskObject {
      */
     state State::Online {
         invariant {
-            Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap);
+            attrs_accessible(self);
+            valid_object_storage(storage);
+            valid_task_storage(storage);
+            Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap);
             valid_task_ref(Riscv64.tp);
         }
     }
@@ -240,6 +257,17 @@ object BootInitStack: StackObject {
  */
 object EventStream: FlowObject {
     initial_state: State::Base;
+    source: static::linux_6_12_37;
+
+    attrs {
+        early_event_entry: FunctionSymbol<EventEntryPrototype>;
+        formal_event_entry: FunctionSymbol<EventEntryPrototype>;
+    }
+
+    reference linux_6_12_37 {
+        early_event_entry = symbol(".Lsecondary_park");
+        formal_event_entry = symbol("handle_exception");
+    }
 
     /*
      * Base 表示事件入口尚未被设置。
@@ -253,7 +281,7 @@ object EventStream: FlowObject {
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    StaticObjects.state == State::Online;
+                    Riscv64.state == State::Online;
                 }
 
                 may_change {
@@ -261,9 +289,11 @@ object EventStream: FlowObject {
                 }
 
                 ensures {
-                    Riscv64.stvec == phys_addr(StaticObjects.early_event_entry);
-                    early_event_entry_phys_safe(StaticObjects.early_event_entry);
-                    event_stream_early_entry_available(EventStream, StaticObjects.early_event_entry);
+                    attrs_accessible(self);
+                    valid_function_symbol(early_event_entry);
+                    Riscv64.stvec == phys_addr(EventStream.early_event_entry);
+                    early_event_entry_phys_safe(EventStream.early_event_entry);
+                    event_stream_early_entry_available(EventStream, EventStream.early_event_entry);
                     cpu_event_stream_ready(BootCPU, EventStream);
                 }
             }
@@ -276,8 +306,10 @@ object EventStream: FlowObject {
      */
     state State::Prepared {
         invariant {
-            early_event_entry_phys_safe(StaticObjects.early_event_entry);
-            event_stream_early_entry_available(EventStream, StaticObjects.early_event_entry);
+            attrs_accessible(self);
+            valid_function_symbol(early_event_entry);
+            early_event_entry_phys_safe(EventStream.early_event_entry);
+            event_stream_early_entry_available(EventStream, EventStream.early_event_entry);
             cpu_event_stream_ready(BootCPU, EventStream);
         }
 
@@ -288,7 +320,6 @@ object EventStream: FlowObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     Vm.state == State::Ready;
-                    StaticObjects.state == State::Online;
                     ExceptionStream.state == State::Prepared;
                     InterruptStream.state == State::Prepared;
                 }
@@ -299,7 +330,9 @@ object EventStream: FlowObject {
                 }
 
                 ensures {
-                    Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
+                    attrs_accessible(self);
+                    valid_function_symbol(formal_event_entry);
+                    Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap);
                     Riscv64.sscratch == 0;
                     event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
                     cpu_event_stream_ready(BootCPU, EventStream);
@@ -315,7 +348,9 @@ object EventStream: FlowObject {
      */
     state State::Ready {
         invariant {
-            Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap);
+            attrs_accessible(self);
+            valid_function_symbol(formal_event_entry);
+            Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap);
             Riscv64.sscratch == 0;
             event_stream_dispatch_ready(EventStream, ExceptionStream, InterruptStream);
             cpu_event_stream_ready(BootCPU, EventStream);
@@ -1170,8 +1205,8 @@ object Vm: AddressSpaceObject {
                 }
 
                 may_change {
-                    StaticObjects.trampoline_pg_dir;
-                    StaticObjects.early_pg_dir;
+                    TrampolineVm.pg_dir;
+                    EarlyVm.pg_dir;
                 }
             }
         }
@@ -1210,7 +1245,7 @@ object Vm: AddressSpaceObject {
                 }
 
                 ensures {
-                    Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
+                    Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
                     vm_transition_stvec_released_to_event_stream(Riscv64.stvec, EventStream);
                 }
             }
@@ -1225,7 +1260,7 @@ object Vm: AddressSpaceObject {
             TrampolineVm.state == State::Destroyed;
             EarlyVm.state == State::Online;
             KernelImage.state == State::Online;
-            Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
+            Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
         }
 
         events {
@@ -1241,11 +1276,11 @@ object Vm: AddressSpaceObject {
 
                 may_change {
                     Riscv64.satp;
-                    StaticObjects.swapper_pg_dir;
+                    SwapperVm.pg_dir;
                 }
 
                 ensures {
-                    Riscv64.satp == satp_of(StaticObjects.swapper_pg_dir, Config.satp_mode);
+                    Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
                 }
             }
         }
@@ -1258,7 +1293,7 @@ object Vm: AddressSpaceObject {
         invariant {
             SwapperVm.state == State::Online;
             EarlyVm.state == State::Destroyed;
-            Riscv64.satp == satp_of(StaticObjects.swapper_pg_dir, Config.satp_mode);
+            Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
         }
     }
 }
@@ -1269,6 +1304,15 @@ object Vm: AddressSpaceObject {
 object TrampolineVm: AddressSpaceObject {
     initial_state: State::Base;
     parent: Vm;
+    source: static::linux_6_12_37;
+
+    attrs {
+        pg_dir: PageTableStorage;
+    }
+
+    reference linux_6_12_37 {
+        pg_dir = symbol("trampoline_pg_dir");
+    }
 
     /*
      * Base 表示跳板页表尚未建立。
@@ -1280,7 +1324,6 @@ object TrampolineVm: AddressSpaceObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    StaticObjects.state == State::Online;
                     Config.state == State::Online;
                     Lds.state == State::Online;
                     KernelImage.state == State::Ready;
@@ -1288,11 +1331,13 @@ object TrampolineVm: AddressSpaceObject {
                 }
 
                 may_change {
-                    StaticObjects.trampoline_pg_dir;
+                    TrampolineVm.pg_dir;
                 }
 
                 ensures {
-                    trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap);
+                    attrs_accessible(self);
+                    valid_page_table_storage(pg_dir);
+                    trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap);
                 }
             }
         }
@@ -1303,7 +1348,9 @@ object TrampolineVm: AddressSpaceObject {
      */
     state State::Ready {
         invariant {
-            trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap);
+            attrs_accessible(self);
+            valid_page_table_storage(pg_dir);
+            trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap);
         }
 
         events {
@@ -1326,7 +1373,9 @@ object TrampolineVm: AddressSpaceObject {
                 }
 
                 ensures {
-                    phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap);
+                    attrs_accessible(self);
+                    valid_page_table_storage(pg_dir);
+                    phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap);
                     Riscv64.stvec == virt_addr(VmSwitchContinuation, TrampolineVm, TrampolineMap);
                     event_stream_stvec_temporarily_borrowed(EventStream, Vm);
                 }
@@ -1339,14 +1388,16 @@ object TrampolineVm: AddressSpaceObject {
      */
     state State::Online {
         invariant {
-            phys_to_virt_transition_completed(StaticObjects.trampoline_pg_dir, TrampolineMap);
-            trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap);
+            attrs_accessible(self);
+            valid_page_table_storage(pg_dir);
+            phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap);
+            trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap);
         }
 
         events {
             /*
              * Cleanup 在 EarlyVm 接管后让跳板虚拟内存空间退出服务。
-             * Destroyed 不表示 StaticObjects.trampoline_pg_dir 这块静态页表存储被释放。
+             * Destroyed 不表示 TrampolineVm.pg_dir 这块静态页表存储被释放。
              */
             on Event::Cleanup -> State::Destroyed {
                 depends_on {
@@ -1357,11 +1408,10 @@ object TrampolineVm: AddressSpaceObject {
     }
 
     /*
-     * Destroyed 表示跳板虚拟内存空间退出服务，但其静态页表存储仍由 StaticObjects 约束。
+     * Destroyed 表示跳板虚拟内存空间退出服务，但其静态页表存储仍作为对象绑定保留。
      */
     state State::Destroyed {
         invariant {
-            StaticObjects.state == State::Online;
             no_service(TrampolineVm);
         }
     }
@@ -1373,6 +1423,15 @@ object TrampolineVm: AddressSpaceObject {
 object EarlyVm: AddressSpaceObject {
     initial_state: State::Base;
     parent: Vm;
+    source: static::linux_6_12_37;
+
+    attrs {
+        pg_dir: PageTableStorage;
+    }
+
+    reference linux_6_12_37 {
+        pg_dir = symbol("early_pg_dir");
+    }
 
     /*
      * Base 表示早期虚拟内存空间尚未发现 RawDtb，也尚未准备 FDT fixmap 槽位。
@@ -1419,7 +1478,6 @@ object EarlyVm: AddressSpaceObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    StaticObjects.state == State::Online;
                     Config.state == State::Online;
                     KernelImage.state == State::Ready;
                     RawDtb.state == State::Ready;
@@ -1429,12 +1487,14 @@ object EarlyVm: AddressSpaceObject {
                 }
 
                 may_change {
-                    StaticObjects.early_pg_dir;
+                    EarlyVm.pg_dir;
                 }
 
                 ensures {
-                    kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap);
-                    fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot);
+                    attrs_accessible(self);
+                    valid_page_table_storage(pg_dir);
+                    kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImageMap);
+                    fixmap_slot_mapping_ready(EarlyVm.pg_dir, FixMap.fdt_slot);
                     kernel_image_mapped_for_plain_data(KernelImage, KernelImageMap);
                 }
             }
@@ -1446,8 +1506,10 @@ object EarlyVm: AddressSpaceObject {
      */
     state State::Ready {
         invariant {
-            kernel_image_mapping_ready(StaticObjects.early_pg_dir, KernelImage, KernelImageMap);
-            fixmap_slot_mapping_ready(StaticObjects.early_pg_dir, FixMap.fdt_slot);
+            attrs_accessible(self);
+            valid_page_table_storage(pg_dir);
+            kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImageMap);
+            fixmap_slot_mapping_ready(EarlyVm.pg_dir, FixMap.fdt_slot);
             kernel_image_mapped_for_plain_data(KernelImage, KernelImageMap);
             LinearMap.state == State::Destroyed;
         }
@@ -1469,7 +1531,9 @@ object EarlyVm: AddressSpaceObject {
                 }
 
                 ensures {
-                    Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
+                    attrs_accessible(self);
+                    valid_page_table_storage(pg_dir);
+                    Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
                     kernel_image_accessible(KernelImage, KernelImageMap);
                     fixmap_slot_accessible(FixMap.fdt_slot);
                 }
@@ -1482,7 +1546,9 @@ object EarlyVm: AddressSpaceObject {
      */
     state State::Online {
         invariant {
-            Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode);
+            attrs_accessible(self);
+            valid_page_table_storage(pg_dir);
+            Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
             kernel_image_accessible(KernelImage, KernelImageMap);
             fixmap_slot_accessible(FixMap.fdt_slot);
         }
@@ -1490,7 +1556,7 @@ object EarlyVm: AddressSpaceObject {
         events {
             /*
              * Cleanup 在 SwapperVm 接管后让早期虚拟内存空间退出服务。
-             * Destroyed 不表示 StaticObjects.early_pg_dir 这块静态页表存储被释放。
+             * Destroyed 不表示 EarlyVm.pg_dir 这块静态页表存储被释放。
              */
             on Event::Cleanup -> State::Destroyed {
                 depends_on {
@@ -1505,7 +1571,6 @@ object EarlyVm: AddressSpaceObject {
      */
     state State::Destroyed {
         invariant {
-            StaticObjects.state == State::Online;
             no_service(EarlyVm);
         }
     }
@@ -1517,6 +1582,15 @@ object EarlyVm: AddressSpaceObject {
 object SwapperVm: AddressSpaceObject {
     initial_state: State::Base;
     parent: Vm;
+    source: static::linux_6_12_37;
+
+    attrs {
+        pg_dir: PageTableStorage;
+    }
+
+    reference linux_6_12_37 {
+        pg_dir = symbol("swapper_pg_dir");
+    }
 
     /*
      * Base 表示完整内核页表尚未建立。
@@ -1528,16 +1602,17 @@ object SwapperVm: AddressSpaceObject {
              */
             on Event::Setup -> State::Ready {
                 depends_on {
-                    StaticObjects.state == State::Online;
                     Config.state == State::Online;
                     MemBlock.state == State::Ready;
                 }
 
                 may_change {
-                    StaticObjects.swapper_pg_dir;
+                    SwapperVm.pg_dir;
                 }
 
                 ensures {
+                    attrs_accessible(self);
+                    valid_page_table_storage(pg_dir);
                     swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap);
                     temporary_fixmap_page_table_slots_clean(SwapperVm);
                 }
@@ -1550,6 +1625,8 @@ object SwapperVm: AddressSpaceObject {
      */
     state State::Ready {
         invariant {
+            attrs_accessible(self);
+            valid_page_table_storage(pg_dir);
             swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap);
             temporary_fixmap_page_table_slots_clean(SwapperVm);
         }
@@ -1564,7 +1641,9 @@ object SwapperVm: AddressSpaceObject {
                 }
 
                 ensures {
-                    Riscv64.satp == satp_of(StaticObjects.swapper_pg_dir, Config.satp_mode);
+                    attrs_accessible(self);
+                    valid_page_table_storage(pg_dir);
+                    Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
                     swapper_vm_current(SwapperVm);
                 }
             }
@@ -1576,7 +1655,9 @@ object SwapperVm: AddressSpaceObject {
      */
     state State::Online {
         invariant {
-            Riscv64.satp == satp_of(StaticObjects.swapper_pg_dir, Config.satp_mode);
+            attrs_accessible(self);
+            valid_page_table_storage(pg_dir);
+            Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
             swapper_vm_current(SwapperVm);
         }
     }
@@ -1997,7 +2078,6 @@ object EntryPreludePhase: PhaseObject {
                     SbiSpec.state == State::Online;
                     OpenSbiFirmware.state == State::Online;
                     Lds.state == State::Online;
-                    StaticObjects.state == State::Online;
                     Config.state == State::Online;
                 }
 

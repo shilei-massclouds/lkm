@@ -69,9 +69,13 @@ class ModelToolTests(unittest.TestCase):
             )
             self.assertEqual(setup["source_state"], "Base")
             self.assertEqual(setup["target_state"], "Ready")
-            self.assertEqual(
-                event_preset["ensures"][0]["entries"][0]["text"],
-                "Riscv64.stvec == phys_addr(StaticObjects.early_event_entry)",
+            self.assertIn(
+                "Riscv64.stvec == phys_addr(EventStream.early_event_entry)",
+                [
+                    entry["text"]
+                    for block in event_preset["ensures"]
+                    for entry in block["entries"]
+                ],
             )
             self.assertEqual(
                 objects["PhysicalMemory"]["properties"]["access"],

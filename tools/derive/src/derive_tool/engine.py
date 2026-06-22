@@ -85,7 +85,11 @@ _ATTRS_ACCESSIBLE_PROOFS = {
     "BootArgs": ("boot_arguments", "boot_protocol_candidate"),
     "PhysicalMemory": ("platform_memory_layout", "fdt_candidate"),
     "Riscv64": ("architecture_register_file", "riscv_isa_spec_candidate"),
-    "StaticObjects": ("static_object_layout", "linker_symbol_candidate"),
+    "BootInitTask": ("static_object_binding", "linker_symbol_candidate"),
+    "EventStream": ("static_entry_symbol_binding", "linker_symbol_candidate"),
+    "TrampolineVm": ("static_page_table_binding", "linker_symbol_candidate"),
+    "EarlyVm": ("static_page_table_binding", "linker_symbol_candidate"),
+    "SwapperVm": ("static_page_table_binding", "linker_symbol_candidate"),
 }
 _BOOT_PROTOCOL_PROOFS = {
     "attrs_accessible(self)": ("boot_arguments", "riscv_boot_protocol"),
@@ -187,32 +191,65 @@ _LINEAR_MAP_LAYOUT_PROOFS = {
         "config_address_layout",
     ),
 }
-_STATIC_OBJECT_PROOFS = {
-    "attrs_accessible(self)": ("static_object_layout", "linux_static_objects"),
-    "valid_object_storage(init_task)": (
-        "object_storage",
-        "linux_static_objects",
-    ),
-    "valid_function_symbol(early_event_entry)": (
-        "linker_symbol",
-        "linux_static_objects",
-    ),
-    "valid_function_symbol(formal_event_entry)": (
-        "linker_symbol",
-        "linux_static_objects",
-    ),
-    "valid_page_table_storage(trampoline_pg_dir)": (
-        "object_storage",
-        "linux_static_objects",
-    ),
-    "valid_page_table_storage(early_pg_dir)": (
-        "object_storage",
-        "linux_static_objects",
-    ),
-    "valid_page_table_storage(swapper_pg_dir)": (
-        "object_storage",
-        "linux_static_objects",
-    ),
+_STATIC_SOURCE_PROOFS = {
+    "BootInitTask": {
+        "attrs_accessible(self)": (
+            "static_object_binding",
+            "linux_static_object_binding",
+        ),
+        "valid_object_storage(storage)": (
+            "object_storage",
+            "linux_static_object_binding",
+        ),
+        "valid_task_storage(storage)": (
+            "object_storage",
+            "linux_static_object_binding",
+        ),
+    },
+    "EventStream": {
+        "attrs_accessible(self)": (
+            "static_entry_symbol_binding",
+            "linux_static_object_binding",
+        ),
+        "valid_function_symbol(early_event_entry)": (
+            "linker_symbol",
+            "linux_static_object_binding",
+        ),
+        "valid_function_symbol(formal_event_entry)": (
+            "linker_symbol",
+            "linux_static_object_binding",
+        ),
+    },
+    "TrampolineVm": {
+        "attrs_accessible(self)": (
+            "static_page_table_binding",
+            "linux_static_object_binding",
+        ),
+        "valid_page_table_storage(pg_dir)": (
+            "object_storage",
+            "linux_static_object_binding",
+        ),
+    },
+    "EarlyVm": {
+        "attrs_accessible(self)": (
+            "static_page_table_binding",
+            "linux_static_object_binding",
+        ),
+        "valid_page_table_storage(pg_dir)": (
+            "object_storage",
+            "linux_static_object_binding",
+        ),
+    },
+    "SwapperVm": {
+        "attrs_accessible(self)": (
+            "static_page_table_binding",
+            "linux_static_object_binding",
+        ),
+        "valid_page_table_storage(pg_dir)": (
+            "object_storage",
+            "linux_static_object_binding",
+        ),
+    },
 }
 _PHYSICAL_MEMORY_PROOFS = {
     "attrs_accessible(self)": ("platform_memory_layout", "fdt_memory_layout"),
@@ -233,8 +270,9 @@ _EXTERNAL_SOURCE_PROOFS = {
         for expression, proof in _LDS_LINKER_PROOFS.items()
     },
     **{
-        ("StaticObjects", "static::linux_6_12_37", expression): proof
-        for expression, proof in _STATIC_OBJECT_PROOFS.items()
+        (object_name, "static::linux_6_12_37", expression): proof
+        for object_name, proofs in _STATIC_SOURCE_PROOFS.items()
+        for expression, proof in proofs.items()
     },
     **{
         ("PhysicalMemory", "fdt::memory", expression): proof
@@ -611,11 +649,11 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.stvec == phys_addr(StaticObjects.early_event_entry)": (
+    "Riscv64.stvec == phys_addr(EventStream.early_event_entry)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap)": (
+    "Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -623,11 +661,11 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.tp == phys_addr(StaticObjects.init_task)": (
+    "Riscv64.tp == phys_addr(BootInitTask.storage)": (
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap)": (
+    "Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -647,7 +685,11 @@ _RELATION_PROOFS = {
         "register_effect",
         "prior_derivation_facts",
     ),
-    "Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode)": (
+    "Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)": (
+        "register_effect",
+        "prior_derivation_facts",
+    ),
+    "Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode)": (
         "register_effect",
         "prior_derivation_facts",
     ),
@@ -3909,23 +3951,23 @@ _PRIOR_FACT_PROOFS = {
             "slot_contains(FixMap.fdt_slot, RawDtb)",
         },
     ),
-    "trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap)": (
+    "trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)": (
         "address_mapping",
         {
-            "trampoline_mapping_ready(StaticObjects.trampoline_pg_dir, TrampolineMap)",
+            "trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)",
         },
     ),
     "valid_task_ref(Riscv64.tp)": (
         "object_storage",
         {
-            "Riscv64.tp == phys_addr(StaticObjects.init_task)",
-            "Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap)",
+            "Riscv64.tp == phys_addr(BootInitTask.storage)",
+            "Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap)",
         },
     ),
-    "valid_task_storage(StaticObjects.init_task)": (
+    "valid_task_storage(BootInitTask.storage)": (
         "object_storage",
         {
-            "valid_object_storage(init_task)",
+            "valid_object_storage(storage)",
         },
     ),
     "valid_stack_pointer(Riscv64.sp)": (

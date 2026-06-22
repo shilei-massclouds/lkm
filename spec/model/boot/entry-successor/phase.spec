@@ -25,7 +25,6 @@ object InitMM: AddressSpaceObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     BootInitTask.state == State::Online;
-                    StaticObjects.state == State::Online;
                     Lds.state == State::Online;
                 }
 
@@ -437,7 +436,6 @@ object Params: KernelObject {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     CommandLine.state == State::Prepared;
-                    StaticObjects.state == State::Online;
                     SBI.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
                 }
@@ -520,7 +518,6 @@ object EarlyParam: KernelObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     CommandLine.state == State::Prepared;
-                    StaticObjects.state == State::Online;
                     SBI.state == State::Ready;
                     PrintkBuffer.state == State::Prepared;
                 }
@@ -568,11 +565,8 @@ object PrintkBuffer: BufferObject {
              * 不依赖应用侧 axstd::println!，也不作为生命周期事件的后置状态。
              */
             on Event::Preset -> State::Prepared {
-                depends_on {
-                    StaticObjects.state == State::Online;
-                }
-
                 ensures {
+                    printk_buffer_static_storage_ready(PrintkBuffer);
                     printk_buffer_ready(PrintkBuffer);
                 }
             }
@@ -584,6 +578,7 @@ object PrintkBuffer: BufferObject {
      */
     state State::Prepared {
         invariant {
+            printk_buffer_static_storage_ready(PrintkBuffer);
             printk_buffer_ready(PrintkBuffer);
         }
 
@@ -599,6 +594,7 @@ object PrintkBuffer: BufferObject {
                 }
 
                 ensures {
+                    printk_buffer_static_storage_ready(PrintkBuffer);
                     printk_buffer_ready(PrintkBuffer);
                     printk_buffer_runtime_ready(PrintkBuffer);
                     printk_buffer_records_preserved(PrintkBuffer);
@@ -612,6 +608,7 @@ object PrintkBuffer: BufferObject {
      */
     state State::Ready {
         invariant {
+            printk_buffer_static_storage_ready(PrintkBuffer);
             printk_buffer_ready(PrintkBuffer);
             printk_buffer_runtime_ready(PrintkBuffer);
             printk_buffer_records_preserved(PrintkBuffer);

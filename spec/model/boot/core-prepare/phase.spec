@@ -502,14 +502,13 @@ object PerCpuStaticImage: MemoryObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     Lds.state == State::Online;
-                    StaticObjects.state == State::Online;
                 }
 
                 ensures {
-                    per_cpu_static_image_ready(PerCpuStaticImage, Lds, StaticObjects);
+                    per_cpu_static_image_ready(PerCpuStaticImage, Lds);
                     per_cpu_static_image_size_from_lds(PerCpuStaticImage, Lds);
                     per_cpu_static_image_load_source_ready(PerCpuStaticImage, Lds);
-                    static_per_cpu_objects_in_static_image(StaticObjects, PerCpuStaticImage);
+                    static_per_cpu_objects_in_static_image(PerCpuStaticImage);
                 }
             }
         }
@@ -517,10 +516,10 @@ object PerCpuStaticImage: MemoryObject {
 
     state State::Ready {
         invariant {
-            per_cpu_static_image_ready(PerCpuStaticImage, Lds, StaticObjects);
+            per_cpu_static_image_ready(PerCpuStaticImage, Lds);
             per_cpu_static_image_size_from_lds(PerCpuStaticImage, Lds);
             per_cpu_static_image_load_source_ready(PerCpuStaticImage, Lds);
-            static_per_cpu_objects_in_static_image(StaticObjects, PerCpuStaticImage);
+            static_per_cpu_objects_in_static_image(PerCpuStaticImage);
         }
     }
 }
@@ -637,7 +636,6 @@ object PerCpuStorage: MemoryObject {
                     MemBlock.state == State::Online;
                     SwapperVm.state == State::Online;
                     Lds.state == State::Online;
-                    StaticObjects.state == State::Online;
                     CpuGroup.state == State::Ready;
                     CpuIdMap.state == State::Ready;
                 }

@@ -414,7 +414,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "Riscv64.stvec == virt_addr(StaticObjects.formal_event_entry, EarlyVm, KernelImageMap)"
+                    == "Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "event_ensures"
                     for record in proved
@@ -422,7 +422,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "Riscv64.tp == virt_addr(StaticObjects.init_task, EarlyVm, KernelImageMap)"
+                    record["expression"] == "Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "event_ensures"
                     for record in proved
@@ -438,7 +438,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "Riscv64.satp == satp_of(StaticObjects.early_pg_dir, Config.satp_mode)"
+                    record["expression"] == "Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)"
                     and record["proof_class"] == "register_effect"
                     and record["proof_provider"] == "event_ensures"
                     for record in proved
@@ -810,7 +810,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_object_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "linux_static_objects"
+                    and record["proof_provider"] == "event_ensures"
                     for record in proved
                 )
             )
@@ -818,7 +818,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_function_symbol"
                     and record["proof_class"] == "linker_symbol"
-                    and record["proof_provider"] == "linux_static_objects"
+                    and record["proof_provider"] == "event_ensures"
                     for record in proved
                 )
             )
@@ -826,7 +826,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_page_table_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "linux_static_objects"
+                    and record["proof_provider"] == "event_ensures"
                     for record in proved
                 )
             )
@@ -848,7 +848,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_task_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "prior_derivation_facts"
+                    and record["proof_provider"] == "event_ensures"
                     for record in proved
                 )
             )
@@ -1019,13 +1019,13 @@ class DeriveToolTests(unittest.TestCase):
                     for record in proved
                 )
             )
-            self.assertNotIn("StaticObjects", attrs_providers)
+            self.assertNotIn("BootInitTask", attrs_providers)
             self.assertTrue(
                 any(
-                    record["object"] == "StaticObjects"
+                    record["object"] == "BootInitTask"
                     and record["predicate"] == "attrs_accessible"
-                    and record["proof_class"] == "static_object_layout"
-                    and record["proof_provider"] == "linux_static_objects"
+                    and record["proof_class"] == "static_object_binding"
+                    and record["proof_provider"] == "event_ensures"
                     for record in proved
                 )
             )

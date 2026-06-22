@@ -86,11 +86,11 @@ object PlatformBusRootDevice: DeviceType {
             on Event::Setup -> State::Ready {
                 depends_on {
                     DriverCoreBase.state == State::Ready;
-                    StaticObjects.state == State::Online;
                 }
 
                 ensures {
                     early_platform_cleanup_deferred();
+                    platform_bus_static_device_storage_ready(PlatformBusRootDevice);
                     platform_bus_static_device_registered(PlatformBusRootDevice);
                     platform_bus_device_name_bound(PlatformBusRootDevice);
                     platform_bus_device_register_return_zero(PlatformBusRootDevice);
@@ -102,6 +102,7 @@ object PlatformBusRootDevice: DeviceType {
     state State::Ready {
         invariant {
             early_platform_cleanup_deferred();
+            platform_bus_static_device_storage_ready(PlatformBusRootDevice);
             platform_bus_static_device_registered(PlatformBusRootDevice);
             platform_bus_device_name_bound(PlatformBusRootDevice);
             platform_bus_device_register_return_zero(PlatformBusRootDevice);
@@ -225,10 +226,6 @@ object PlatformBus: PlatformBusType {
     state State::Base {
         events {
             on Event::Preset -> State::Prepared {
-                depends_on {
-                    StaticObjects.state == State::Online;
-                }
-
                 drives {
                     InitcallTable.Action::Register(
                         level: InitcallLevel::ArchSync,
@@ -237,6 +234,7 @@ object PlatformBus: PlatformBusType {
                 }
 
                 ensures {
+                    platform_bus_static_type_storage_ready(PlatformBus);
                     bus_type_descriptor_bound(PlatformBus);
                     bus_type_name_bound(PlatformBus);
                     bus_type_ops_bound(PlatformBus);
@@ -257,6 +255,7 @@ object PlatformBus: PlatformBusType {
 
     state State::Prepared {
         invariant {
+            platform_bus_static_type_storage_ready(PlatformBus);
             bus_type_descriptor_bound(PlatformBus);
             bus_type_name_bound(PlatformBus);
             bus_type_ops_bound(PlatformBus);
@@ -408,18 +407,17 @@ object IrqProcViewDeferred: KernelObject {
  */
 object CtorTable: KernelObject {
     initial_state: State::Base;
-    parent: StaticObjects;
 
     state State::Base {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
                     IrqProcViewDeferred.state == State::Ready;
-                    StaticObjects.state == State::Online;
+                    Lds.state == State::Online;
                 }
 
                 ensures {
-                    ctor_table_position_preserved(CtorTable, StaticObjects);
+                    ctor_table_position_preserved(CtorTable, Lds);
                     constructors_trimmed_or_empty(CtorTable);
                 }
             }
@@ -428,7 +426,7 @@ object CtorTable: KernelObject {
 
     state State::Ready {
         invariant {
-            ctor_table_position_preserved(CtorTable, StaticObjects);
+            ctor_table_position_preserved(CtorTable, Lds);
             constructors_trimmed_or_empty(CtorTable);
         }
     }
@@ -443,21 +441,20 @@ object CtorTable: KernelObject {
  */
 object InitcallTable: InitcallTableType {
     initial_state: State::Base;
-    parent: StaticObjects;
 
     state State::Base {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     CtorTable.state == State::Ready;
-                    StaticObjects.state == State::Online;
+                    Lds.state == State::Online;
                     PlatformBus.state == State::Ready;
                     Ns16550aPlatformDriver.state == State::Prepared;
                     VirtioMmioPlatformDriver.state == State::Prepared;
                 }
 
                 ensures {
-                    initcall_table_static_ranges_ready(InitcallTable, StaticObjects);
+                    initcall_table_static_ranges_ready(InitcallTable, Lds);
                     initcall_table_level_count_ready(InitcallTable);
                     initcall_table_entries_recorded_as_properties(InitcallTable);
                     initcall_table_registered_entries_collected(InitcallTable);
@@ -474,7 +471,7 @@ object InitcallTable: InitcallTableType {
 
     state State::Prepared {
         invariant {
-            initcall_table_static_ranges_ready(InitcallTable, StaticObjects);
+            initcall_table_static_ranges_ready(InitcallTable, Lds);
             initcall_table_level_count_ready(InitcallTable);
             initcall_table_entries_recorded_as_properties(InitcallTable);
             initcall_table_registered_entries_collected(InitcallTable);
@@ -495,7 +492,7 @@ object InitcallTable: InitcallTableType {
                 }
 
                 ensures {
-                    initcall_table_static_ranges_ready(InitcallTable, StaticObjects);
+                    initcall_table_static_ranges_ready(InitcallTable, Lds);
                     initcall_table_level_count_ready(InitcallTable);
                     initcall_table_entries_recorded_as_properties(InitcallTable);
                     initcall_table_registered_entries_collected(InitcallTable);
@@ -562,7 +559,7 @@ object InitcallTable: InitcallTableType {
 
     state State::Ready {
         invariant {
-            initcall_table_static_ranges_ready(InitcallTable, StaticObjects);
+            initcall_table_static_ranges_ready(InitcallTable, Lds);
             initcall_table_level_count_ready(InitcallTable);
             initcall_table_entries_recorded_as_properties(InitcallTable);
             initcall_table_registered_entries_collected(InitcallTable);
@@ -682,7 +679,7 @@ object InitcallPhase: PhaseObject {
                     RuntimeCorePhase.state == State::Ready;
                     RuntimeCoreBoundary.state == State::Ready;
                     KernelInitTask.state == State::Online;
-                    StaticObjects.state == State::Online;
+                    Lds.state == State::Online;
                     SavedCommandLine.state == State::Ready;
                     IrqDispatchTree.state == State::Ready;
                 }

@@ -250,7 +250,6 @@ object VirtioMmioPlatformDriver: PlatformDriverType {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    StaticObjects.state == State::Online;
                     VirtioMmioPlatformDriverStorage.state == State::Ready;
                 }
 

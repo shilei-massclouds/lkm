@@ -14,11 +14,8 @@ object Ns16550aPlatformDriverStorage: DeviceDriverStorage {
     state State::Base {
         events {
             on Event::Setup -> State::Ready {
-                depends_on {
-                    StaticObjects.state == State::Online;
-                }
-
                 ensures {
+                    device_driver_static_storage_ready(Ns16550aPlatformDriverStorage);
                     device_driver_storage_ready(Ns16550aPlatformDriverStorage);
                     device_driver_storage_pinned(Ns16550aPlatformDriverStorage);
                     device_driver_storage_contains_ref(Ns16550aPlatformDriverStorage, DeviceDriverRef::Ns16550aPlatformDriver);
@@ -29,6 +26,7 @@ object Ns16550aPlatformDriverStorage: DeviceDriverStorage {
 
     state State::Ready {
         invariant {
+            device_driver_static_storage_ready(Ns16550aPlatformDriverStorage);
             device_driver_storage_ready(Ns16550aPlatformDriverStorage);
             device_driver_storage_pinned(Ns16550aPlatformDriverStorage);
             device_driver_storage_contains_ref(Ns16550aPlatformDriverStorage, DeviceDriverRef::Ns16550aPlatformDriver);
@@ -131,7 +129,6 @@ object Ns16550aPlatformDriver: PlatformDriverType {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    StaticObjects.state == State::Online;
                     Ns16550aPlatformDriverStorage.state == State::Ready;
                 }
 

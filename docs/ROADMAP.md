@@ -17,6 +17,19 @@
 5. `virtio-rng` 与 virtio 基础对象首轮闭环已完成：`virtio-mmio` platform driver、`VirtioBus` / `VirtioDevice`、split `VirtQueue`、真实 QEMU `virtio-rng-device` completion、Linux-like `HwRngCore` / `HwRngDevice` 和 `virtrng_scan` / read 边界均已验证。`virtio-blk` 已推进到真实 QEMU `virtio-blk-device` 发现/config/单队列 setup/DRIVER_OK、最小 read request、Linux-like `BlockDeviceRegistry` / major-minor 可发现对象、经 `Bio` / `submit_bio_wait` / `BufferHead` / `sb_bread` 完成真实块读，以及 read-only ext2 显式 mount/root lookup/direct-block file read；4K Buffer / 4K ext2 block 支持和 Ext2 多 direct-block read path 泛化已完成。
 6. 用户态 `helloworld` 已推进到 dynamic musl libc `/sbin/init`：当前能从 Alpine ext2 rootfs 读取构造期 overlay 的 `init_fileio.c` 动态链接产物，识别 `PT_INTERP=/lib/ld-musl-riscv64.so.1`，读取并映射 musl interpreter，构造动态链接器所需 auxv，经 `KernelInitTask`/`PayloadPhase` 建立 `UserAddressSpace` / `UserTrapFrame`，写入 `satp` 并 `sret` 进入 U-mode。真实路径已支持 `set_tid_address`、`brk/mmap/mprotect/munmap`、`writev` 错误输出路径、read-only `openat/read/close/newfstatat` 和 `write/exit`，并按页粒度接受 GNU_RELRO `mprotect`；默认 overlay 已切到 `init_fileio musl dynamic`，运行输出 `user hello` 和 `user exit status=0`。page cache、完整 TTY/N_TTY、Ext2 写路径、double/triple indirect、完整 VMA tree 和发行版 init/sh 仍是后续项。
 
+## 当前审计计划：impl 与 Linux 6.12.37 对照
+
+后续回顾检查以当前项目 `impl/` 下由规格驱动生成的代码为对象，以 `~/gitStudy/linux-6.12.37/` 为 Linux 参考源码。审计顺序按 formal model 的阶段树推进，先从 `StartupTimeline` 下的 `BootPhase` 开始，再进入后续阶段。
+
+审计发现问题时，默认先归类并修订规格，而不是直接修改 `impl/` 代码：
+
+1. `model` 规格缺口：Linux 路径中的对象、阶段、状态、事件、依赖、事实或显式 deferred 在 `spec/model` 中缺失或边界不清。
+2. `coding` 规格缺口：模型语义已有，但对象到 Rust 实现、目录落点、函数边界、checkpoint/KUnit/smoke 观测或 Linux-like 数据结构约束在 `spec/coding` 中不足。
+3. 刻意偏离但未记录：当前实现有意简化或偏离 Linux，但未在 model/coding/roadmap 中记录差异分类、理由和 deferred 边界。
+4. 实现偏离已有规格：规格已经明确，`impl/` 代码未遵守；此类问题先记录为生成约束或实现缺口，后续再按规格修正代码。
+
+每个审计项应尽量形成可追踪的 cross-reference：Linux 源码路径、当前 `impl/` 路径、对应 `spec/model` 条目、对应 `spec/coding` 条目、差异分类，以及是否需要新增/修订 checkpoint、KUnit 或 smoke 观测。除非用户明确要求修实现，审计阶段的修改优先落到 `spec/model/**`、`spec/coding/**`、必要说明文档和本 roadmap。
+
 ## 下一阶段计划：Linux 6.12.37 PLIC 二进制复用
 
 本节是当前 P0 的执行清单。每完成一项即更新本节状态并做一次提交；实现变更仍遵循先规格/约束、再代码、再验证的顺序。

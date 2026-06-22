@@ -195,49 +195,6 @@ object Lds: PrepareObject {
 }
 
 /*
- * StaticObjects 表示构建和静态初始化阶段已经分配好的静态对象集合。
- * 入口前导期只引用这些底层存储或函数符号，不动态创建它们。
- */
-object StaticObjects: PrepareObject {
-    initial_state: State::Online;
-    source: static::linux_6_12_37;
-
-    attrs {
-        init_task: ObjectStorage<BootInitTask>;
-        early_event_entry: FunctionSymbol<EventEntryPrototype>;
-        formal_event_entry: FunctionSymbol<EventEntryPrototype>;
-        trampoline_pg_dir: PageTableStorage;
-        early_pg_dir: PageTableStorage;
-        swapper_pg_dir: PageTableStorage;
-    }
-
-    /*
-     * Online 表示静态对象集合在推导起点已经可引用。
-     * 本状态检查静态任务存储、事件入口符号和页表存储的基本有效性。
-     */
-    state State::Online {
-        invariant {
-            attrs_accessible(self);
-            valid_object_storage(init_task);
-            valid_function_symbol(early_event_entry);
-            valid_function_symbol(formal_event_entry);
-            valid_page_table_storage(trampoline_pg_dir);
-            valid_page_table_storage(early_pg_dir);
-            valid_page_table_storage(swapper_pg_dir);
-        }
-    }
-
-    reference linux_6_12_37 {
-        init_task = symbol("init_task");
-        early_event_entry = symbol(".Lsecondary_park");
-        formal_event_entry = symbol("handle_exception");
-        trampoline_pg_dir = symbol("trampoline_pg_dir");
-        early_pg_dir = symbol("early_pg_dir");
-        swapper_pg_dir = symbol("swapper_pg_dir");
-    }
-}
-
-/*
  * Config 表示入口前导期可见的构建配置和静态参数。
  * 它约束页大小、内核虚拟区域、地址转换模式和 fixmap 布局。
  */
@@ -422,8 +379,9 @@ object PlatformCpuInfo: PrepareObject {
 
 /*
  * PreparePhase 表示准备期阶段对象。
- * 当前模型不展开准备期内部过程，只验证入口前导期依赖的启动 ABI、固件、链接布局、
- * 静态对象和配置输入均已在线且满足各自不变量。
+ * 当前模型不展开准备期内部过程，只验证入口前导期依赖的启动 ABI、固件、链接布局
+ * 和配置输入均已在线且满足各自不变量。静态全局对象、页表存储和入口符号由各自
+ * 所属对象的 Preset/Setup 事件绑定，不作为 PreparePhase 的统一集合。
  */
 object PreparePhase: PhaseObject {
     initial_state: State::Base;
@@ -443,7 +401,6 @@ object PreparePhase: PhaseObject {
                     SbiSpec.state == State::Online;
                     OpenSbiFirmware.state == State::Online;
                     Lds.state == State::Online;
-                    StaticObjects.state == State::Online;
                     Config.state == State::Online;
                 }
             }
@@ -459,7 +416,6 @@ object PreparePhase: PhaseObject {
             SbiSpec.state == State::Online;
             OpenSbiFirmware.state == State::Online;
             Lds.state == State::Online;
-            StaticObjects.state == State::Online;
             Config.state == State::Online;
         }
 
@@ -482,7 +438,6 @@ object PreparePhase: PhaseObject {
             SbiSpec.state == State::Online;
             OpenSbiFirmware.state == State::Online;
             Lds.state == State::Online;
-            StaticObjects.state == State::Online;
             Config.state == State::Online;
         }
     }

@@ -20,7 +20,6 @@ object Console: ConsoleObject {
                 depends_on {
                     PrintkBuffer.state == State::Ready;
                     EarlyCon.state == State::Online;
-                    StaticObjects.state == State::Online;
                 }
 
                 drives {
@@ -30,7 +29,7 @@ object Console: ConsoleObject {
 
                 ensures {
                     console_prepared(Console, PrintkBuffer);
-                    console_initcall_table_scanned(Console, StaticObjects);
+                    console_initcall_table_scanned(Console, Lds);
                     console_real_device_probe_deferred(Console);
                     console_earlycon_handoff_conditional(Console, EarlyCon);
                 }
@@ -43,7 +42,7 @@ object Console: ConsoleObject {
             TtyLineDisciplineRegistry.state == State::Prepared;
             ConsoleDriverSet.state == State::Prepared;
             console_prepared(Console, PrintkBuffer);
-            console_initcall_table_scanned(Console, StaticObjects);
+            console_initcall_table_scanned(Console, Lds);
             console_real_device_probe_deferred(Console);
             console_earlycon_handoff_conditional(Console, EarlyCon);
         }
@@ -89,10 +88,11 @@ object ConsoleDriverSet: ConsoleObject {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    StaticObjects.state == State::Online;
+                    Lds.state == State::Online;
                 }
 
                 ensures {
+                    console_driver_set_static_entries_ready(ConsoleDriverSet, Lds);
                     console_driver_set_early_registered(ConsoleDriverSet);
                     serial_console_probe_deferred(ConsoleDriverSet);
                     boot_console_unregister_deferred(ConsoleDriverSet);
@@ -103,6 +103,7 @@ object ConsoleDriverSet: ConsoleObject {
 
     state State::Prepared {
         invariant {
+            console_driver_set_static_entries_ready(ConsoleDriverSet, Lds);
             console_driver_set_early_registered(ConsoleDriverSet);
             serial_console_probe_deferred(ConsoleDriverSet);
             boot_console_unregister_deferred(ConsoleDriverSet);
