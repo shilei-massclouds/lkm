@@ -793,6 +793,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_user_address_space_enable_build_real_page_table();
         arceos_ex_must_user_address_space_enable_prepare_satp_without_switch();
         arceos_ex_must_user_address_space_round_not_enter_user_mode();
+        arceos_ex_must_user_stack_setup_initial_argc_argv_envp_auxv();
         arceos_ex_must_user_trap_frame_setup_prepare_but_not_sret();
         arceos_ex_must_user_mode_entry_use_existing_trap_return_path();
         arceos_ex_must_user_trap_entry_switch_to_kernel_stack();

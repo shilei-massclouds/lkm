@@ -14,10 +14,13 @@ MUSL_CC ?= riscv64-linux-musl-gcc
 
 USER_TEST_MARCH ?= rv64imac
 USER_TEST_MABI ?= lp64
+USER_TEST_LIBC_MARCH ?= rv64gc
+USER_TEST_LIBC_MABI ?= lp64d
 USER_TEST_ENTRY ?= _start
 USER_TEST_TEXT ?= 0x10000
 
 COMMON_CFLAGS ?= -march=$(USER_TEST_MARCH) -mabi=$(USER_TEST_MABI)
+LIBC_COMMON_CFLAGS ?= -march=$(USER_TEST_LIBC_MARCH) -mabi=$(USER_TEST_LIBC_MABI)
 STATIC_LDFLAGS ?= -static
 DYNAMIC_LDFLAGS ?=
 
@@ -37,7 +40,7 @@ else
 $(error unknown USER_TEST_LINK: $(USER_TEST_LINK))
 endif
 
-USER_TEST_CFLAGS ?= \
+NO_LIBC_CFLAGS ?= \
 	-nostdlib \
 	$(COMMON_CFLAGS) \
 	-Wl,-e,$(USER_TEST_ENTRY) \
@@ -45,8 +48,26 @@ USER_TEST_CFLAGS ?= \
 	-Wl,--build-id=none \
 	$(USER_TEST_LINK_FLAGS)
 
+LIBC_CFLAGS ?= \
+	$(LIBC_COMMON_CFLAGS) \
+	-Os \
+	-fno-stack-protector \
+	-ffunction-sections \
+	-fdata-sections \
+	-no-pie \
+	-Wl,--gc-sections \
+	-Wl,--build-id=none \
+	$(USER_TEST_LINK_FLAGS)
+
+USER_TEST_NOLIBC := $(filter %.S %_nolibc.c,$(USER_TEST_SRC))
+
+ifeq ($(USER_TEST_NOLIBC),)
+USER_TEST_CFLAGS ?= $(LIBC_CFLAGS)
+else
+USER_TEST_CFLAGS ?= $(NO_LIBC_CFLAGS)
 ifeq ($(suffix $(USER_TEST_SRC)),.c)
 USER_TEST_CFLAGS += -ffreestanding -fno-stack-protector -no-pie
+endif
 endif
 
 .PHONY: build clean

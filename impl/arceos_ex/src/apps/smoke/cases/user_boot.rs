@@ -320,7 +320,11 @@ impl SmokeScenario for UserBootElfScenario {
             "user stack bounds",
             stack.size() == USER_STACK_SIZE
                 && stack.top() == USER_STACK_TOP
-                && stack.initial_sp() == USER_STACK_TOP
+                && stack.initial_sp() >= stack.base()
+                && stack.initial_sp() < stack.top()
+                && stack.initial_sp() % 16 == 0
+                && stack.arg0_ptr() > stack.initial_sp()
+                && stack.arg0_ptr() < stack.top()
                 && stack.base() + stack.size() == USER_STACK_TOP
                 && stack.base() % USER_PAGE_SIZE == 0
                 && stack.top() % USER_PAGE_SIZE == 0,
@@ -333,6 +337,15 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "user stack zeroed",
             stack_first_page_zeroed(stack, &ctx.page_metadata_map),
+        );
+        assertions.assert(
+            "user stack arg0",
+            stack_contains_at(
+                stack,
+                &ctx.page_metadata_map,
+                stack.arg0_ptr(),
+                b"/sbin/init\0",
+            ),
         );
         let Some(stack_mapping) = space.stack_mapping() else {
             assertions.assert("stack mapping", false);
@@ -638,6 +651,41 @@ fn stack_first_page_zeroed(
     while index < USER_PAGE_SIZE {
         let byte = unsafe { *((linear + index) as *const u8) };
         if byte != 0 {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+fn stack_contains_at(
+    stack: &crate::objects::user_boot::UserStack,
+    page_metadata_map: &crate::objects::mm_core::PageMetadataMap,
+    user_addr: usize,
+    expected: &[u8],
+) -> bool {
+    if user_addr < stack.base()
+        || user_addr
+            .checked_add(expected.len())
+            .filter(|end| *end <= stack.top())
+            .is_none()
+    {
+        return false;
+    }
+
+    let mut index = 0usize;
+    while index < expected.len() {
+        let stack_offset = user_addr - stack.base() + index;
+        let page_index = stack_offset / USER_PAGE_SIZE;
+        let page_offset = stack_offset % USER_PAGE_SIZE;
+        let Some(page) = stack.backing_page(page_index) else {
+            return false;
+        };
+        let Some(linear) = page_metadata_map.page_address(page) else {
+            return false;
+        };
+        let byte = unsafe { *((linear + page_offset) as *const u8) };
+        if byte != expected[index] {
             return false;
         }
         index += 1;

@@ -36,6 +36,10 @@ pub const USER_STACK_TOP: usize = 0x4000_0000;
 pub const USER_PAGE_SIZE: usize = 4096;
 #[cfg(app_user_boot)]
 pub const USER_KERNEL_TRAP_STACK_SIZE: usize = 4096;
+const USER_INIT_ARG0: &[u8] = b"/sbin/init\0";
+const USER_INITIAL_STACK_WORDS: usize = 8;
+const AT_NULL: usize = 0;
+const AT_PAGESZ: usize = 6;
 const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 const ELF_CLASS_64: u8 = 2;
 const ELF_DATA_LSB: u8 = 1;
@@ -337,6 +341,8 @@ pub struct UserStack {
     lifecycle: Lifecycle,
     base: usize,
     top: usize,
+    initial_sp: usize,
+    arg0_ptr: usize,
     size: usize,
     backing_pages: [Option<PageRef>; MAX_STACK_PAGES],
     backing_page_count: usize,
@@ -356,6 +362,8 @@ impl UserStack {
             lifecycle: Lifecycle::new(State::Base),
             base: 0,
             top: 0,
+            initial_sp: 0,
+            arg0_ptr: 0,
             size: 0,
             backing_pages: [None; MAX_STACK_PAGES],
             backing_page_count: 0,
@@ -386,7 +394,11 @@ impl UserStack {
     }
 
     pub const fn initial_sp(&self) -> usize {
-        self.top
+        self.initial_sp
+    }
+
+    pub const fn arg0_ptr(&self) -> usize {
+        self.arg0_ptr
     }
 
     pub const fn allocated(&self) -> bool {
@@ -450,6 +462,8 @@ impl UserStack {
         self.size = USER_STACK_SIZE;
         self.top = USER_STACK_TOP;
         self.base = USER_STACK_TOP - USER_STACK_SIZE;
+        self.initial_sp = 0;
+        self.arg0_ptr = 0;
         self.backing_pages = [None; MAX_STACK_PAGES];
         self.backing_page_count = 0;
         let mut index = 0usize;
@@ -483,6 +497,21 @@ impl UserStack {
             self.backing_page_count += 1;
             index += 1;
         }
+        let Some(initial_sp) = self.write_initial_arg_env(page_metadata_map) else {
+            while self.backing_page_count > 0 {
+                self.backing_page_count -= 1;
+                if let Some(allocated) = self.backing_pages[self.backing_page_count] {
+                    let _ = page_allocator.free_pages(allocated, 0, page_metadata_map);
+                }
+            }
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        self.initial_sp = initial_sp;
         self.allocated = true;
         self.fixed_size_bound = true;
         self.mapped_into_address_space = true;
@@ -493,6 +522,112 @@ impl UserStack {
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
+
+    fn write_initial_arg_env(&mut self, page_metadata_map: &PageMetadataMap) -> Option<usize> {
+        let arg0_ptr = align_down(self.top.checked_sub(USER_INIT_ARG0.len())?, 8);
+        write_stack_bytes(self, page_metadata_map, arg0_ptr, USER_INIT_ARG0)?;
+
+        let words_size = USER_INITIAL_STACK_WORDS.checked_mul(core::mem::size_of::<usize>())?;
+        let initial_sp = align_down(arg0_ptr.checked_sub(words_size)?, 16);
+        if initial_sp < self.base {
+            return None;
+        }
+
+        write_stack_usize(self, page_metadata_map, initial_sp, 1)?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + core::mem::size_of::<usize>(),
+            arg0_ptr,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 2 * core::mem::size_of::<usize>(),
+            0,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 3 * core::mem::size_of::<usize>(),
+            0,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 4 * core::mem::size_of::<usize>(),
+            AT_PAGESZ,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 5 * core::mem::size_of::<usize>(),
+            USER_PAGE_SIZE,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 6 * core::mem::size_of::<usize>(),
+            AT_NULL,
+        )?;
+        write_stack_usize(
+            self,
+            page_metadata_map,
+            initial_sp + 7 * core::mem::size_of::<usize>(),
+            0,
+        )?;
+
+        self.arg0_ptr = arg0_ptr;
+        Some(initial_sp)
+    }
+}
+
+fn align_down(value: usize, align: usize) -> usize {
+    value & !(align - 1)
+}
+
+fn write_stack_usize(
+    stack: &UserStack,
+    page_metadata_map: &PageMetadataMap,
+    user_addr: usize,
+    value: usize,
+) -> Option<()> {
+    write_stack_bytes(stack, page_metadata_map, user_addr, &value.to_ne_bytes())
+}
+
+fn write_stack_bytes(
+    stack: &UserStack,
+    page_metadata_map: &PageMetadataMap,
+    user_addr: usize,
+    bytes: &[u8],
+) -> Option<()> {
+    if user_addr < stack.base
+        || user_addr
+            .checked_add(bytes.len())
+            .filter(|end| *end <= stack.top)
+            .is_none()
+    {
+        return None;
+    }
+
+    let mut written = 0usize;
+    while written < bytes.len() {
+        let stack_offset = user_addr - stack.base + written;
+        let page_index = stack_offset / USER_PAGE_SIZE;
+        let page_offset = stack_offset % USER_PAGE_SIZE;
+        let chunk = min_usize(bytes.len() - written, USER_PAGE_SIZE - page_offset);
+        let page = stack.backing_page(page_index)?;
+        let linear = page_metadata_map.page_address(page)?;
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                bytes.as_ptr().add(written),
+                (linear + page_offset) as *mut u8,
+                chunk,
+            );
+        }
+        written += chunk;
+    }
+    Some(())
 }
 
 pub struct UserAddressSpace {

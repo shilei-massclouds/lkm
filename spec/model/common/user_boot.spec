@@ -294,6 +294,8 @@ object UserStack: ResourceObject {
                     user_stack_zeroed(self);
                     user_stack_initial_sp_bound(self);
                     user_stack_minimal_arg_env_bound(self);
+                    user_stack_initial_argc_argv_envp_auxv_bound(self);
+                    user_stack_static_libc_entry_supported(self);
                 }
             }
         }
@@ -308,6 +310,8 @@ object UserStack: ResourceObject {
             user_stack_zeroed(self);
             user_stack_initial_sp_bound(self);
             user_stack_minimal_arg_env_bound(self);
+            user_stack_initial_argc_argv_envp_auxv_bound(self);
+            user_stack_static_libc_entry_supported(self);
         }
     }
 }

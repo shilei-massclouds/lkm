@@ -59,6 +59,8 @@ const SYSCALL_EXIT_GROUP: usize = 94;
 const USER_COPY_MAX: usize = 256;
 const USER_PATH_MAX: usize = crate::objects::files::FILE_PATH_MAX;
 const AT_FDCWD: usize = usize::MAX - 99;
+const O_ACCMODE: usize = 0o3;
+const O_LARGEFILE: usize = 0o100000;
 const STAT_SIZE: usize = 128;
 const EFAULT: usize = 14;
 const EINVAL: usize = 22;
@@ -723,7 +725,7 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let dirfd = frame.reg(10);
     let path_ptr = frame.reg(11);
     let flags = frame.reg(12);
-    if dirfd != AT_FDCWD || flags != 0 {
+    if dirfd != AT_FDCWD || flags & !O_LARGEFILE != 0 || flags & O_ACCMODE != 0 {
         complete_error_syscall(frame, EINVAL);
         return;
     }
