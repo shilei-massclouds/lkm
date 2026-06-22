@@ -1,4 +1,8 @@
 ARCH ?= riscv64
+# Fixture naming:
+# - *.S is pure assembly.
+# - *_nolibc.c is freestanding/no-libc C.
+# - unsuffixed .c names are reserved for libc-linked tests.
 USER_TEST ?= init_hello
 USER_TEST_SRC ?= $(firstword $(wildcard $(USER_TEST).c) $(wildcard $(USER_TEST).S) $(USER_TEST).S)
 USER_TEST_TOOLCHAIN ?= gnu

@@ -522,10 +522,12 @@ rootfs 中稳定存在的普通文件，至少覆盖一个跨 ext2 block 的 reg
 只负责读取 overlay 映射文件、选择默认工具链/链接方式、指定输出目录和执行 rootfs 拷贝，不直接承载用户态编译细节。
 默认 `ROOTFS_OVERLAY_MAP` 为 `tests/user/rootfs-overlay.map`；`ROOTFS_OVERLAY=none` 时必须跳过映射文件，
 否则逐行读取该 map。每个非注释行声明 rootfs 目标路径、用户态测试程序名，以及可选的 toolchain/link mode；未写 toolchain
-或 link mode 时分别使用 `ROOTFS_OVERLAY_TOOLCHAIN` 和 `ROOTFS_OVERLAY_LINK`。默认 map 把 `tests/user/init_hello.S`
-的产物放到 `/sbin/init`，但配置必须允许后续用户态测试程序覆盖 `/sbin/init` 或其它 rootfs 内可执行路径。用户态测试
-Makefile 必须预留 GNU GCC / musl GCC 和 static / dynamic 四种组合的选择入口；当前首轮默认仍可只使用 GNU static
-汇编测试。`make disk` 默认只在磁盘文件不存在时创建；已有磁盘不得因为 overlay 配置变化而被隐式重建，强制重建必须由
+或 link mode 时分别使用 `ROOTFS_OVERLAY_TOOLCHAIN` 和 `ROOTFS_OVERLAY_LINK`。用户态测试命名必须体现 libc
+约定：`.S` 后缀表示纯汇编 fixture；`*_nolibc.c` 表示 freestanding/no-libc C fixture；省略 `nolibc` 的 `.c`
+名称保留给后续 libc-linked 测试。默认 map 当前把 `tests/user/init_fileio_nolibc.c` 的 musl static 产物放到
+`/sbin/init`，但配置必须允许后续用户态测试程序覆盖 `/sbin/init` 或其它 rootfs 内可执行路径。用户态测试
+Makefile 必须预留 GNU GCC / musl GCC 和 static / dynamic 四种组合的选择入口；当前首轮默认仍可只使用 no-libc
+fixture。`make disk` 默认只在磁盘文件不存在时创建；已有磁盘不得因为 overlay 配置变化而被隐式重建，强制重建必须由
 `make disk FORCE=1` 或 `make disk-clean` 后再 `make disk` 明确触发。
 Ext2 对象生命周期划分为 `Ext2Driver`、`Ext2Volume` 和 `Ext2FileSystem`：`Ext2Driver` 取代旧的
 `Ext2Type`，承载 Linux `file_system_type` 以及当前建模的 super/inode/file operation set；

@@ -1,2 +1,2 @@
-# target      test        toolchain  link
-/sbin/init    init_fileio musl       static
+# target      test                 toolchain  link
+/sbin/init    init_fileio_nolibc   musl       static
