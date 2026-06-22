@@ -125,6 +125,7 @@ predicate user_init_process_kernel_init_not_destroyed<T, K>(process: T, task: K)
 predicate user_init_process_path_bound<T, P>(process: T, path: P) -> bool;
 predicate user_init_process_address_space_bound<T, A>(process: T, space: A) -> bool;
 predicate user_init_process_fs_struct_inherited<T, F>(process: T, fs: F) -> bool;
+predicate user_init_process_files_struct_inherited<T, F>(process: T, files: F) -> bool;
 predicate user_init_process_trap_frame_bound<T, R>(process: T, frame: R) -> bool;
 predicate user_init_process_syscall_context_bound<T, E, S>(process: T, exception: E, table: S) -> bool;
 predicate user_init_process_user_entry_ready<T>(process: T) -> bool;
@@ -472,11 +473,23 @@ object SyscallTable: ResourceObject {
             on Action::Write {
                 depends_on {
                     SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                }
+
+                drives {
+                    FilesStruct.Action::LookupFd(FdRef::Stdout);
+                    FileDescriptorTable.Action::Lookup(FdRef::Stdout);
+                    OpenFileDescription.Action::Write;
+                    FileBackend.Action::WriteCharDevice;
                 }
 
                 ensures {
                     syscall_write_usercopy_ready(self);
-                    syscall_write_routes_to_console(self);
+                    files_struct_fd_lookup_routes_to_table(FilesStruct, FileDescriptorTable);
+                    fd_table_lookup_returns(FileDescriptorTable, FdRef::Stdout, OpenFileDescription);
+                    open_file_description_write_dispatches_backend(OpenFileDescription, FileBackend);
+                    file_backend_write_to_console(FileBackend);
                     syscall_table_write_observed(self);
                 }
             }
@@ -518,6 +531,7 @@ object UserInitProcess: ResourceObject {
                     ElfObject.state == State::Online;
                     UserTrapFrame.state == State::Ready;
                     FsStruct.state == State::Ready;
+                    FilesStruct.state == State::Ready;
                 }
 
                 ensures {
@@ -529,6 +543,7 @@ object UserInitProcess: ResourceObject {
                     user_init_process_path_bound(self, UserInitPathRef::DefaultInit);
                     user_init_process_address_space_bound(self, UserAddressSpace);
                     user_init_process_fs_struct_inherited(self, FsStruct);
+                    user_init_process_files_struct_inherited(self, FilesStruct);
                     user_init_process_trap_frame_bound(self, UserTrapFrame);
                     kernel_init_task_execve_to_user_init(KernelInitTask, self);
                     kernel_init_task_pid1_identity_preserved(KernelInitTask);
@@ -549,6 +564,7 @@ object UserInitProcess: ResourceObject {
             user_init_process_path_bound(self, UserInitPathRef::DefaultInit);
             user_init_process_address_space_bound(self, UserAddressSpace);
             user_init_process_fs_struct_inherited(self, FsStruct);
+            user_init_process_files_struct_inherited(self, FilesStruct);
             user_init_process_trap_frame_bound(self, UserTrapFrame);
             kernel_init_task_execve_to_user_init(KernelInitTask, self);
             kernel_init_task_pid1_identity_preserved(KernelInitTask);
@@ -594,6 +610,7 @@ object UserInitProcess: ResourceObject {
             user_init_process_kernel_init_not_destroyed(self, KernelInitTask);
             user_init_process_address_space_bound(self, UserAddressSpace);
             user_init_process_fs_struct_inherited(self, FsStruct);
+            user_init_process_files_struct_inherited(self, FilesStruct);
             user_init_process_trap_frame_bound(self, UserTrapFrame);
             user_init_process_syscall_context_bound(self, SyscallException, SyscallTable);
             kernel_init_task_execve_to_user_init(KernelInitTask, self);
@@ -706,6 +723,7 @@ object UserBootPayload: ResourceObject {
                     SyscallException.Event::Setup;
                     SyscallTable.Event::Setup;
                     SyscallException.Event::Enable;
+                    FilesStruct.Event::Setup;
                     UserInitProcess.Event::Setup;
                     UserInitProcess.Event::Enable;
                     UserInitProcess.Action::EnterUserMode;

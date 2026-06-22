@@ -6,6 +6,7 @@ use crate::{
     context::context,
     objects::{
         ext2::{EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS},
+        files::{FdRef, FileBackendKind},
         state::State,
         user_boot::{
             UserMappingKind, USER_INIT_EXPECTED_MESSAGE, USER_INIT_PATH, USER_PAGE_SIZE,
@@ -384,6 +385,68 @@ impl SmokeScenario for UserBootElfScenario {
                 .is_ok(),
         );
         assertions.assert(
+            "files struct setup",
+            ctx.files_struct.setup(&ctx.kernel_init_task).is_ok(),
+        );
+        assertions.assert(
+            "files struct ready",
+            ctx.files_struct.state() == State::Ready
+                && ctx.files_struct.allocated()
+                && ctx.files_struct.owned_by_kernel_init_task()
+                && ctx.files_struct.fd_table_bound()
+                && ctx.files_struct.stdio_bound()
+                && ctx.files_struct.next_fd_ready()
+                && ctx.files_struct.close_on_exec_ready()
+                && ctx.files_struct.shared_deferred(),
+        );
+        assertions.assert(
+            "fd table stdio",
+            ctx.files_struct.fd_table().state() == State::Ready
+                && ctx.files_struct.fd_table().allocated()
+                && ctx.files_struct.fd_table().capacity_bound()
+                && ctx.files_struct.fd_table().stdio_fds_bound()
+                && ctx.files_struct.fd_bound(FdRef::Stdin)
+                && ctx.files_struct.fd_bound(FdRef::Stdout)
+                && ctx.files_struct.fd_bound(FdRef::Stderr),
+        );
+        assertions.assert(
+            "stdio open file descriptions",
+            ctx.files_struct.stdin().state() == State::Ready
+                && ctx.files_struct.stdout().state() == State::Ready
+                && ctx.files_struct.stderr().state() == State::Ready
+                && ctx.files_struct.stdin().backend_bound()
+                && ctx.files_struct.stdout().backend_bound()
+                && ctx.files_struct.stderr().backend_bound()
+                && !ctx.files_struct.stdin().writable()
+                && ctx.files_struct.stdout().writable()
+                && ctx.files_struct.stderr().writable()
+                && ctx.files_struct.stdout().offset_ready()
+                && ctx.files_struct.stderr().offset_ready(),
+        );
+        assertions.assert(
+            "stdio char device backends",
+            ctx.files_struct.stdout_backend().state() == State::Ready
+                && ctx.files_struct.stderr_backend().state() == State::Ready
+                && ctx.files_struct.stdout_backend().kind() == FileBackendKind::CharDevice
+                && ctx.files_struct.stderr_backend().kind() == FileBackendKind::CharDevice
+                && ctx
+                    .files_struct
+                    .stdout_backend()
+                    .char_device_console_bound()
+                && ctx
+                    .files_struct
+                    .stderr_backend()
+                    .char_device_console_bound()
+                && ctx
+                    .files_struct
+                    .stdout_backend()
+                    .char_device_write_supported()
+                && ctx
+                    .files_struct
+                    .stderr_backend()
+                    .char_device_write_supported(),
+        );
+        assertions.assert(
             "user init process setup",
             ctx.user_init_process
                 .setup(
@@ -392,6 +455,7 @@ impl SmokeScenario for UserBootElfScenario {
                     &ctx.elf_object,
                     &ctx.user_trap_frame,
                     &ctx.fs_struct,
+                    &ctx.files_struct,
                 )
                 .is_ok(),
         );
@@ -421,6 +485,7 @@ impl SmokeScenario for UserBootElfScenario {
                 && process.path() == crate::objects::user_boot::UserInitPathRef::DefaultInit
                 && process.address_space_bound()
                 && process.fs_struct_inherited()
+                && process.files_struct_inherited()
                 && process.trap_frame_bound(),
         );
         assertions.assert(

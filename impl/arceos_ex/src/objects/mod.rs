@@ -29,6 +29,7 @@ pub mod fdt;
 pub mod fdt_facts;
 pub mod fdt_parser;
 pub mod fdt_reader;
+pub mod files;
 pub mod finalize;
 pub mod fix_map;
 pub mod hwrng;

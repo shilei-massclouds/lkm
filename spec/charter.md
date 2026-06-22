@@ -2882,7 +2882,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 - `RootfsConsole` / `console_on_rootfs()` 保留时序位置；当前轮次标记为 deferred，不作为 `PayloadPhase` 的强 `Ready` 前置条件
 - `PayloadParam.state == Ready`
 - Linux-like 路径下，`RootFS` 已完成当前支持的 `prepare_namespace()` 路径，真实 ext2 root staging mount 曾建立在 `/root`，`MS_MOVE` 和 `chroot(".")` 已完成，任务可见 root/pwd 指向 ext2 root
-- Linux-like 路径下，VFS、`ElfObject`、`UserAddressSpace`、`UserStack`、`UserTrapFrame` 和 `SyscallException` 相关对象已经准备到可执行第一个用户态程序的最低状态
+- Linux-like 路径下，VFS、`ElfObject`、`UserAddressSpace`、`UserStack`、`UserTrapFrame`、`FilesStruct` 和 `SyscallException` 相关对象已经准备到可执行第一个用户态程序的最低状态
 - 当前磁盘 rootfs 仍是 whole-disk ext2；`PartitionTable` / `BlockPartition` 暂不建模，等磁盘镜像切换为带分区表时再引入
 
 当前先将 `PayloadPhase` 的对象和边界记录如下：
@@ -2896,9 +2896,10 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 7. `用户地址空间对象`（暂名 `UserAddressSpace`）：表示每个用户态进程独立的低地址用户区映射。它是多实例对象；高地址内核映射共享或引用 `SwapperVm`。`SwapperVm` 继续表示内核共享地址空间实例，不改成普通多实例用户地址空间。首轮仅要求最小用户页表、用户页 `U` 权限、内核页 `U=0`、ELF 段映射和用户栈映射；完整 VMA 树、`mmap`、COW 和 page fault recovery 后续再展开。
 8. `用户栈对象`（暂名 `UserStack`）：表示第一个用户程序的初始用户栈。首轮可以只建立固定大小栈和最小 argv/envp 布局；完整 auxv、随机化、guard page 和动态栈扩展后续再展开。
 9. `用户 trap frame 对象`（暂名 `UserTrapFrame`）：表示进入 U-mode 前的寄存器现场，至少绑定 `sepc=ElfObject.entry`、用户 `sp`、`sstatus.SPP=U` 和 `SPIE=1`。它是 `UserInitProcess.Action::EnterUserMode` 执行最终 trap-return handoff 的输入。
-10. `系统调用入口与表对象`（`SyscallException` / `SyscallTable`）：`SyscallException` 是 `ExceptionStream` 下已有的 ecall/syscall 异常对象，负责用户态 syscall 入口、来源检查、参数提取和分发选择；不再单独建立 `SyscallDispatcher` 对象。`SyscallTable` 是独立分发表对象，承载当前支持的 syscall action 集合；具体 syscall 不是资源对象，而是 `SyscallTable.Action::Write`、`SyscallTable.Action::Exit`、`SyscallTable.Action::ExitGroup` 等 action。首轮只要求 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`。
-11. `用户态 init 进程对象`（暂名 `UserInitProcess`）：表示 PID 1 在进入用户态 ELF 成功后的用户态身份。它是本阶段 Linux-like 路径的核心结果对象，不是新建 task，而是 `KernelInitTask` 在 exec 成功后发生身份转换和不可逆交接的结果。`KernelInitTask.exec_to(UserInitProcess, path, argv, envp)` 是 identity transition action，不作为 `KernelInitTask` 的标准生命周期 slot；成功后 `UserInitProcess.state == Online`。`UserInitProcess.Action::EnterUserMode` 消费已就绪的 `UserAddressSpace` 和 `UserTrapFrame`，负责写入 `satp`、执行必要 `sfence.vma` 并通过 `sret` 进入 U-mode；它不负责制造 trap frame，也不是独立对象。
-12. `payload 失败终端`（暂名 `PayloadPanic`）：覆盖 Linux-like 路径中 `init=` 指定 init 失败或所有候选 init 均失败后的 panic。它是失败终端，不是正常生命周期对象。
+10. `系统调用入口与表对象`（`SyscallException` / `SyscallTable`）：`SyscallException` 是 `ExceptionStream` 下已有的 ecall/syscall 异常对象，负责用户态 syscall 入口、来源检查、参数提取和分发选择；不再单独建立 `SyscallDispatcher` 对象。`SyscallTable` 是独立分发表对象，承载当前支持的 syscall action 集合；具体 syscall 不是资源对象，而是 `SyscallTable.Action::Write`、`SyscallTable.Action::Exit`、`SyscallTable.Action::ExitGroup` 等 action。首轮只要求 `write(1/2, user_buf, len)` 和 `exit/exit_group(status)`；其中 `write` 不再直接按 fd 特判转发到 console，而是经 `FilesStruct -> FileDescriptorTable -> OpenFileDescription -> FileBackend` 解析到标准输出/标准错误对应的字符设备后端。
+11. `打开文件上下文对象`（`FilesStruct` / `FileDescriptorTable` / `OpenFileDescription` / `FileBackend`）：`FilesStruct` 是任务拥有的打开文件上下文，和表示 root/pwd 的 `FsStruct` 并列，不是 `FsStruct` 的下级类型。`FileDescriptorTable` 是 `FilesStruct` 内部的 fd table，负责把 fd 映射到 `OpenFileDescription`；`OpenFileDescription` 表示一次打开后的文件实例，承载 flags、offset 和后端引用；`FileBackend` 表示具体后端类型，当前首轮只把 fd 0/1/2 预安装为 console-like `CharDevice` 后端，普通文件、块设备、完整 `/dev/console`、TTY 和 fd 分配/关闭语义后续展开。
+12. `用户态 init 进程对象`（暂名 `UserInitProcess`）：表示 PID 1 在进入用户态 ELF 成功后的用户态身份。它是本阶段 Linux-like 路径的核心结果对象，不是新建 task，而是 `KernelInitTask` 在 exec 成功后发生身份转换和不可逆交接的结果。`KernelInitTask.exec_to(UserInitProcess, path, argv, envp)` 是 identity transition action，不作为 `KernelInitTask` 的标准生命周期 slot；成功后 `UserInitProcess.state == Online`。`UserInitProcess` 继承同一任务线上已经建立的 `FsStruct` 和 `FilesStruct`，其中 `FsStruct` 提供 root/pwd 视图，`FilesStruct` 提供 stdio fd 与后续 open/read/write syscall 的入口。`UserInitProcess.Action::EnterUserMode` 消费已就绪的 `UserAddressSpace` 和 `UserTrapFrame`，负责写入 `satp`、执行必要 `sfence.vma` 并通过 `sret` 进入 U-mode；它不负责制造 trap frame，也不是独立对象。
+13. `payload 失败终端`（暂名 `PayloadPanic`）：覆盖 Linux-like 路径中 `init=` 指定 init 失败或所有候选 init 均失败后的 panic。它是失败终端，不是正常生命周期对象。
 
 <p align="center">
   <img src="pic/payload-objects.svg" alt="Payload 交接期对象分类与相互关系" width="900">

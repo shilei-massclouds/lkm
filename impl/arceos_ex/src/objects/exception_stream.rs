@@ -513,7 +513,7 @@ fn syscall_table_write(table: &SyscallTable, frame: &mut TrapFrame) {
     let fd = frame.reg(10);
     let user_ptr = frame.reg(11);
     let len = frame.reg(12);
-    if !(fd == 1 || fd == 2) || len > USER_COPY_MAX {
+    if len > USER_COPY_MAX {
         complete_unsupported_syscall(frame);
         return;
     }
@@ -524,10 +524,17 @@ fn syscall_table_write(table: &SyscallTable, frame: &mut TrapFrame) {
         return;
     }
 
+    let Ok(written) = crate::context::context_ref()
+        .files_struct
+        .write_fd(fd, &buffer[..len])
+    else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
     table.write_observed.store(1, Ordering::Release);
     crate::checkpoint::dispatch(Checkpoint::SyscallTableWrite, crate::context::context_ref());
-    crate::objects::printk::write_bytes(&buffer[..len]);
-    frame.set_reg(10, len);
+    frame.set_reg(10, written);
     frame.sepc = frame.sepc.wrapping_add(4);
 }
 

@@ -5,6 +5,7 @@ use crate::{
     },
     context::Context,
     objects::{
+        files::{FdRef, FileBackendKind},
         state::State,
         user_boot::{
             ElfError, ElfObject, UserAddressSpace, UserStack, UserTrapFrame,
@@ -24,7 +25,7 @@ const SCOPE: &[Checkpoint] = &[
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 9;
+pub const KUNIT_CASE_COUNT: usize = 10;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 6;
 
@@ -53,6 +54,7 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableWrite => {
             run_syscall_table_write(checkpoint, ctx, sink, total);
+            run_files_struct_write_path(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableExit => {
@@ -75,6 +77,7 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && process.exec_identity_handoff()
         && process.address_space_bound()
         && process.fs_struct_inherited()
+        && process.files_struct_inherited()
         && process.trap_frame_bound()
         && process.syscall_context_bound()
         && process.trap_return_bound()
@@ -83,7 +86,11 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && ctx.user_address_space.state() == State::Online
         && ctx.user_address_space.runtime_ready()
         && ctx.user_trap_frame.state() == State::Ready
-        && ctx.user_trap_frame.sret_ready();
+        && ctx.user_trap_frame.sret_ready()
+        && ctx.files_struct.state() == State::Ready
+        && ctx.files_struct.stdio_bound()
+        && ctx.files_struct.fd_bound(FdRef::Stdout)
+        && ctx.files_struct.fd_bound(FdRef::Stderr);
 
     sink.diag_usize(
         "user_init_runtime_entered",
@@ -138,6 +145,42 @@ fn run_syscall_table_write(
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "syscall table write facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_files_struct_write_path(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.files_struct.write_path";
+    sink.start_case(total, "", name, checkpoint);
+
+    let files = &ctx.files_struct;
+    let valid = files.state() == State::Ready
+        && files.fd_lookup_routes_to_table()
+        && files.fd_table().lookup_returns()
+        && files.stdout().write_dispatches_backend()
+        && files.stdout().write_observed()
+        && files.stdout_backend().kind() == FileBackendKind::CharDevice
+        && files.stdout_backend().write_to_console()
+        && files.stdout().last_write_len() == USER_INIT_EXPECTED_MESSAGE.len()
+        && files.stdout_backend().last_write_len() == USER_INIT_EXPECTED_MESSAGE.len();
+
+    sink.diag_usize(
+        "files_struct_fd_lookup_routes_to_table",
+        files.fd_lookup_routes_to_table() as usize,
+    );
+    sink.diag_usize(
+        "stdout_backend_last_write_len",
+        files.stdout_backend().last_write_len(),
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "files struct write path facts invalid");
     }
 }
 

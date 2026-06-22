@@ -91,6 +91,7 @@ include "ext2.spec";
 include "hwrng.spec";
 include "virtio_rng.spec";
 include "vfs.spec";
+include "files.spec";
 include "devfs.spec";
 include "allocator.spec";
 include "user_boot.spec";

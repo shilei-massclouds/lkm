@@ -27,6 +27,7 @@ use crate::objects::{
     exception_stream::{ExceptionStream, SyscallTable},
     exception_table::ExceptionTable,
     ext2::{Ext2Driver, Ext2FileSystem, Ext2Volume},
+    files::FilesStruct,
     finalize::{
         AsyncFullSyncDeferred, FinalizeBoundary, InitMemoryCleanupDeferred,
         KernelMappingProtectionDeferred, PtiFinalizeTrimmed, RcuBootEnd, SysctlArgsDeferred,
@@ -226,6 +227,7 @@ pub struct Context {
     pub security_core: SecurityCore,
     pub vfs_core: VfsCore,
     pub fs_struct: FsStruct,
+    pub files_struct: FilesStruct,
     pub ramfs_type: RamFsType,
 
     pub kernel_init_task: KernelInitTask,
@@ -404,6 +406,7 @@ impl Context {
             security_core: SecurityCore::new(),
             vfs_core: VfsCore::new(),
             fs_struct: FsStruct::new(),
+            files_struct: FilesStruct::new(),
             ramfs_type: RamFsType::new(),
             kernel_init_task: KernelInitTask::new(),
             kernel_init_task_pi_lock: RawSpinLock::new(),

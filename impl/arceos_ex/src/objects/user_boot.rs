@@ -11,6 +11,7 @@ use super::{
 };
 use super::{
     exception_stream::{ExceptionStream, SyscallTable},
+    files::FilesStruct,
     kernel_image::KernelImage,
     mm_core::{GfpFlags, KernelGlobalAllocator, PageAllocator, PageMetadataMap, PageRef},
     page_table::{
@@ -1540,6 +1541,7 @@ pub struct UserInitProcess {
     path_bound: bool,
     address_space_bound: bool,
     fs_struct_inherited: bool,
+    files_struct_inherited: bool,
     trap_frame_bound: bool,
     syscall_context_bound: bool,
     kernel_init_execve_to_user_init: bool,
@@ -1567,6 +1569,7 @@ impl UserInitProcess {
             path_bound: false,
             address_space_bound: false,
             fs_struct_inherited: false,
+            files_struct_inherited: false,
             trap_frame_bound: false,
             syscall_context_bound: false,
             kernel_init_execve_to_user_init: false,
@@ -1621,6 +1624,10 @@ impl UserInitProcess {
         self.fs_struct_inherited
     }
 
+    pub const fn files_struct_inherited(&self) -> bool {
+        self.files_struct_inherited
+    }
+
     pub const fn trap_frame_bound(&self) -> bool {
         self.trap_frame_bound
     }
@@ -1672,6 +1679,7 @@ impl UserInitProcess {
         elf: &ElfObject,
         trap_frame: &UserTrapFrame,
         fs_struct: &FsStruct,
+        files_struct: &FilesStruct,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || kernel_init_task.state() != State::Online
@@ -1680,6 +1688,7 @@ impl UserInitProcess {
             || elf.state() != State::Online
             || trap_frame.state() != State::Ready
             || fs_struct.state() != State::Ready
+            || files_struct.state() != State::Ready
             || !address_space.bound_to_kernel_init_task()
             || !trap_frame.address_space_bound()
         {
@@ -1700,6 +1709,7 @@ impl UserInitProcess {
         self.path_bound = true;
         self.address_space_bound = true;
         self.fs_struct_inherited = true;
+        self.files_struct_inherited = true;
         self.trap_frame_bound = true;
         self.kernel_init_execve_to_user_init = true;
         self.kernel_init_pid1_identity_preserved = true;
@@ -1928,6 +1938,7 @@ pub fn run_first_user_init(
     user_init_process: &mut UserInitProcess,
     vfs_core: &mut VfsCore,
     fs_struct: &FsStruct,
+    files_struct: &mut FilesStruct,
     ext2_filesystem: &mut Ext2FileSystem,
     block_device_registry: &mut BlockDeviceRegistry,
     kernel_init_task: &KernelInitTask,
@@ -2003,8 +2014,18 @@ pub fn run_first_user_init(
     if exception_stream.syscall_enable(syscall_table).is_err() {
         user_boot_panic("user syscall enable failed\n");
     }
+    if files_struct.setup(kernel_init_task).is_err() {
+        user_boot_panic("user files struct setup failed\n");
+    }
     if user_init_process
-        .setup(kernel_init_task, address_space, elf, trap_frame, fs_struct)
+        .setup(
+            kernel_init_task,
+            address_space,
+            elf,
+            trap_frame,
+            fs_struct,
+            files_struct,
+        )
         .is_err()
     {
         user_boot_panic("user init process setup failed\n");

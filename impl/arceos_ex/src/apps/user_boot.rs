@@ -13,6 +13,7 @@ pub fn run() -> ! {
         &mut ctx.user_init_process,
         &mut ctx.vfs_core,
         &ctx.fs_struct,
+        &mut ctx.files_struct,
         &mut ctx.ext2_filesystem,
         &mut ctx.block_device_registry,
         &ctx.kernel_init_task,
