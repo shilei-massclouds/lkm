@@ -18,7 +18,6 @@ use crate::{
 
 static mut USER_INIT_READ_BUFFER: [u8; USER_INIT_MAX_READ] = [0; USER_INIT_MAX_READ];
 const USER_INIT_MAX_READ: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
-const TEMP_USER_INIT_ENTRY: usize = 0x10000;
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -165,10 +164,7 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert("elf load plan", elf.load_plan_bound());
         assertions.assert("elf segment perms", elf.segment_permissions_bound());
-        assertions.assert(
-            "elf entry bound",
-            elf.entry_bound() && elf.entry() == TEMP_USER_INIT_ENTRY,
-        );
+        assertions.assert("elf entry bound", elf.entry_bound() && elf.entry() != 0);
         assertions.assert("elf entry executable", elf.entry_in_executable_segment());
         assertions.assert("elf init content", elf.init_content_observed());
         assertions.assert("elf bss plan", elf.bss_zero_plan_bound());
@@ -397,7 +393,8 @@ impl SmokeScenario for UserBootElfScenario {
                 && ctx.files_struct.stdio_bound()
                 && ctx.files_struct.next_fd_ready()
                 && ctx.files_struct.close_on_exec_ready()
-                && ctx.files_struct.shared_deferred(),
+                && ctx.files_struct.shared_deferred()
+                && ctx.files_struct.regular_file_slot_ready(),
         );
         assertions.assert(
             "fd table stdio",
@@ -445,6 +442,73 @@ impl SmokeScenario for UserBootElfScenario {
                     .files_struct
                     .stderr_backend()
                     .char_device_write_supported(),
+        );
+        let fd = match ctx.files_struct.open_regular_path(
+            &ctx.fs_struct,
+            &mut ctx.vfs_core,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            b"/etc/alpine-release",
+        ) {
+            Ok(fd) => fd,
+            Err(_) => {
+                assertions.assert("regular open path", false);
+                return;
+            }
+        };
+        let mut regular_buffer = [0u8; 32];
+        let read_len = match ctx.files_struct.read_fd(fd, &mut regular_buffer) {
+            Ok(len) => len,
+            Err(_) => {
+                assertions.assert("regular read fd", false);
+                return;
+            }
+        };
+        assertions.assert(
+            "regular read content",
+            read_len != 0 && regular_buffer[..read_len].starts_with(b"3."),
+        );
+        let stat = match ctx.files_struct.stat_regular_path(
+            &ctx.fs_struct,
+            &mut ctx.vfs_core,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            b"/etc/alpine-release",
+        ) {
+            Ok(stat) => stat,
+            Err(_) => {
+                assertions.assert("regular stat path", false);
+                return;
+            }
+        };
+        assertions.assert(
+            "regular stat metadata",
+            stat.size() >= read_len && stat.mode() != 0,
+        );
+        assertions.assert("regular close fd", ctx.files_struct.close_fd(fd).is_ok());
+        assertions.assert(
+            "regular files facts",
+            ctx.files_struct.open_path_routes_to_vfs()
+                && ctx.files_struct.read_fd_routes_to_table()
+                && ctx.files_struct.close_fd_routes_to_table()
+                && ctx.files_struct.stat_path_routes_to_vfs()
+                && ctx.files_struct.regular_fd_installed()
+                && ctx.files_struct.regular_file_read_observed()
+                && ctx.files_struct.regular_file_closed()
+                && ctx.files_struct.regular_file_stat_observed()
+                && ctx.files_struct.fd_table().fd_installed()
+                && ctx.files_struct.fd_table().fd_closed()
+                && ctx.files_struct.regular0().read_observed()
+                && ctx
+                    .files_struct
+                    .regular0_backend()
+                    .regular_file_read_returns_data()
+                && ctx
+                    .files_struct
+                    .regular0_backend()
+                    .regular_file_stat_returns_metadata(),
         );
         assertions.assert(
             "user init process setup",

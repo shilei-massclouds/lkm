@@ -143,8 +143,7 @@ rootfs-overlay:
 			USER_TEST_TOOLCHAIN="$$toolchain" \
 			USER_TEST_LINK="$$link" \
 			GNU_CC="$(ROOTFS_OVERLAY_GNU_CC)" \
-			MUSL_CC="$(ROOTFS_OVERLAY_MUSL_CC)" \
-			USER_TEST_SRC="$$test.S"; \
+			MUSL_CC="$(ROOTFS_OVERLAY_MUSL_CC)"; \
 		mkdir -p "$(ROOTFS_STAGING_DIR)$$(dirname "$$target")"; \
 		rm -f "$(ROOTFS_STAGING_DIR)$$target"; \
 		cp "$$output" "$(ROOTFS_STAGING_DIR)$$target"; \

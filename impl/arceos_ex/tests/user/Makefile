@@ -1,6 +1,6 @@
 ARCH ?= riscv64
 USER_TEST ?= init_hello
-USER_TEST_SRC ?= $(USER_TEST).S
+USER_TEST_SRC ?= $(firstword $(wildcard $(USER_TEST).c) $(wildcard $(USER_TEST).S) $(USER_TEST).S)
 USER_TEST_TOOLCHAIN ?= gnu
 USER_TEST_LINK ?= static
 USER_TEST_OUT ?= ../../build/rootfs-user-tests/$(USER_TEST)-$(USER_TEST_TOOLCHAIN)-$(USER_TEST_LINK)
@@ -40,6 +40,10 @@ USER_TEST_CFLAGS ?= \
 	-Wl,-Ttext=$(USER_TEST_TEXT) \
 	-Wl,--build-id=none \
 	$(USER_TEST_LINK_FLAGS)
+
+ifeq ($(suffix $(USER_TEST_SRC)),.c)
+USER_TEST_CFLAGS += -ffreestanding -fno-stack-protector -no-pie
+endif
 
 .PHONY: build clean
 

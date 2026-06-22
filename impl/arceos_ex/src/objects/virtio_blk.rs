@@ -182,6 +182,8 @@ pub struct VirtioBlkDevice {
     read_request_notified: bool,
     mmio_irq_acknowledged: bool,
     irq_callback_invoked: bool,
+    completion_observed_by_irq: bool,
+    completion_observed_by_sync_poll: bool,
     complete_gets_used_buffer: bool,
     complete_status_ok: bool,
     complete_data_nonzero: bool,
@@ -227,6 +229,8 @@ impl VirtioBlkDevice {
             read_request_notified: false,
             mmio_irq_acknowledged: false,
             irq_callback_invoked: false,
+            completion_observed_by_irq: false,
+            completion_observed_by_sync_poll: false,
             complete_gets_used_buffer: false,
             complete_status_ok: false,
             complete_data_nonzero: false,
@@ -318,6 +322,14 @@ impl VirtioBlkDevice {
 
     pub const fn irq_callback_invoked(&self) -> bool {
         self.irq_callback_invoked
+    }
+
+    pub const fn completion_observed_by_irq(&self) -> bool {
+        self.completion_observed_by_irq
+    }
+
+    pub const fn completion_observed_by_sync_poll(&self) -> bool {
+        self.completion_observed_by_sync_poll
     }
 
     pub const fn complete_gets_used_buffer(&self) -> bool {
@@ -502,11 +514,24 @@ impl VirtioBlkDevice {
         if self.lifecycle.state() != State::Ready || !self.driver_ok {
             return Err(VirtioBlkError::DeviceNotReady);
         }
+        self.irq_callback_invoked = true;
+        self.completion_observed_by_irq = true;
+        self.complete_read_request()
+    }
+
+    pub fn poll_read_completion(&mut self) -> Result<(), VirtioBlkError> {
+        if self.lifecycle.state() != State::Ready || !self.driver_ok {
+            return Err(VirtioBlkError::DeviceNotReady);
+        }
+        self.completion_observed_by_sync_poll = true;
+        self.complete_read_request()
+    }
+
+    fn complete_read_request(&mut self) -> Result<(), VirtioBlkError> {
         if !self.read_request_pending {
             return Err(VirtioBlkError::NoRequestPending);
         }
 
-        self.irq_callback_invoked = true;
         let used = self.queue.get_buf_from_device()?;
         self.complete_gets_used_buffer = true;
         self.last_used_len = used.len();
@@ -937,14 +962,23 @@ fn wait_for_no_pending_read() -> Result<(), BlockDeviceError> {
 fn wait_for_completion_after(start_completion_count: usize) -> Result<(), BlockDeviceError> {
     let mut remaining = VIRTIO_BLK_READ_WAIT_SPINS;
     while remaining != 0 {
-        let Some(runtime) = live_runtime() else {
-            return Err(BlockDeviceError::ProviderUnavailable);
-        };
-        let Some(device) = runtime.device() else {
-            return Err(BlockDeviceError::ProviderUnavailable);
-        };
-        if !device.read_request_pending() && device.completion_count() > start_completion_count {
-            return Ok(());
+        {
+            let Some(runtime) = live_runtime_mut() else {
+                return Err(BlockDeviceError::ProviderUnavailable);
+            };
+            let Some(device) = runtime.device.as_mut() else {
+                return Err(BlockDeviceError::ProviderUnavailable);
+            };
+            if !device.read_request_pending() && device.completion_count() > start_completion_count
+            {
+                return Ok(());
+            }
+            match device.poll_read_completion() {
+                Ok(()) => return Ok(()),
+                Err(VirtioBlkError::Queue(VirtqueueError::NoUsedBuffer)) => {}
+                Err(VirtioBlkError::NoRequestPending) => {}
+                Err(_) => return Err(BlockDeviceError::ProviderUnavailable),
+            }
         }
         core::hint::spin_loop();
         remaining -= 1;

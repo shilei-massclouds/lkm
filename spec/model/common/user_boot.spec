@@ -102,10 +102,21 @@ predicate user_trap_frame_prepared_but_not_entered<T>(frame: T) -> bool;
 predicate syscall_table_ready<T>(table: T) -> bool;
 predicate syscall_table_bound_to_exception<T, E>(table: T, exception: E) -> bool;
 predicate syscall_table_write_supported<T>(table: T) -> bool;
+predicate syscall_table_openat_supported<T>(table: T) -> bool;
+predicate syscall_table_read_supported<T>(table: T) -> bool;
+predicate syscall_table_close_supported<T>(table: T) -> bool;
+predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_supported<T>(table: T) -> bool;
 predicate syscall_table_exit_group_supported<T>(table: T) -> bool;
 predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_read_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_path_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
+predicate syscall_openat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_exit_records_status<T>(table: T) -> bool;
 predicate syscall_exception_dispatches_via_table<T, S>(exception: T, table: S) -> bool;
 predicate syscall_exception_extracts_arguments<T>(exception: T) -> bool;
@@ -113,6 +124,10 @@ predicate user_trap_return_ready() -> bool;
 predicate user_trap_return_switches_satp() -> bool;
 predicate user_trap_entry_uses_kernel_stack<T>(frame: T) -> bool;
 predicate syscall_table_write_observed<T>(table: T) -> bool;
+predicate syscall_table_openat_observed<T>(table: T) -> bool;
+predicate syscall_table_read_observed<T>(table: T) -> bool;
+predicate syscall_table_close_observed<T>(table: T) -> bool;
+predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
 
@@ -447,9 +462,16 @@ object SyscallTable: ResourceObject {
                     syscall_table_ready(self);
                     syscall_table_bound_to_exception(self, SyscallException);
                     syscall_table_write_supported(self);
+                    syscall_table_openat_supported(self);
+                    syscall_table_read_supported(self);
+                    syscall_table_close_supported(self);
+                    syscall_table_newfstatat_supported(self);
                     syscall_table_exit_supported(self);
                     syscall_table_exit_group_supported(self);
                     syscall_write_usercopy_ready(self);
+                    syscall_read_usercopy_ready(self);
+                    syscall_path_usercopy_ready(self);
+                    syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
                     syscall_exit_records_status(self);
                 }
@@ -462,9 +484,16 @@ object SyscallTable: ResourceObject {
             syscall_table_ready(self);
             syscall_table_bound_to_exception(self, SyscallException);
             syscall_table_write_supported(self);
+            syscall_table_openat_supported(self);
+            syscall_table_read_supported(self);
+            syscall_table_close_supported(self);
+            syscall_table_newfstatat_supported(self);
             syscall_table_exit_supported(self);
             syscall_table_exit_group_supported(self);
             syscall_write_usercopy_ready(self);
+            syscall_read_usercopy_ready(self);
+            syscall_path_usercopy_ready(self);
+            syscall_stat_usercopy_ready(self);
             syscall_write_routes_to_console(self);
             syscall_exit_records_status(self);
         }
@@ -491,6 +520,96 @@ object SyscallTable: ResourceObject {
                     open_file_description_write_dispatches_backend(OpenFileDescription, FileBackend);
                     file_backend_write_to_console(FileBackend);
                     syscall_table_write_observed(self);
+                }
+            }
+
+            on Action::OpenAt {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    syscall_path_usercopy_ready(self);
+                }
+
+                drives {
+                    FilesStruct.Action::OpenPath;
+                    FileDescriptorTable.Action::Install(FdRef::Regular0);
+                }
+
+                ensures {
+                    syscall_openat_routes_to_files_struct(self, FilesStruct);
+                    files_struct_open_path_routes_to_vfs(FilesStruct, VfsCore);
+                    files_struct_regular_fd_installed(FilesStruct);
+                    fd_table_fd_installed(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
+                    syscall_table_openat_observed(self);
+                }
+            }
+
+            on Action::Read {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
+                    syscall_read_usercopy_ready(self);
+                }
+
+                drives {
+                    FilesStruct.Action::ReadFd(FdRef::Regular0);
+                }
+
+                ensures {
+                    syscall_read_routes_to_files_struct(self, FilesStruct);
+                    files_struct_regular_file_read_observed(FilesStruct);
+                    open_file_description_read_observed(OpenFileDescription);
+                    file_backend_regular_file_read_returns_data(FileBackend);
+                    syscall_table_read_observed(self);
+                }
+            }
+
+            on Action::Close {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FileDescriptorTable.state == State::Ready;
+                    fd_table_fd_bound(FileDescriptorTable, FdRef::Regular0, OpenFileDescription);
+                }
+
+                drives {
+                    FilesStruct.Action::CloseFd(FdRef::Regular0);
+                }
+
+                ensures {
+                    syscall_close_routes_to_files_struct(self, FilesStruct);
+                    files_struct_regular_file_closed(FilesStruct);
+                    fd_table_fd_closed(FileDescriptorTable, FdRef::Regular0);
+                    syscall_table_close_observed(self);
+                }
+            }
+
+            on Action::NewFstatAt {
+                depends_on {
+                    SyscallException.state == State::Online;
+                    FilesStruct.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                    syscall_path_usercopy_ready(self);
+                    syscall_stat_usercopy_ready(self);
+                }
+
+                drives {
+                    FilesStruct.Action::StatPath;
+                    FileBackend.Action::StatRegularFile;
+                }
+
+                ensures {
+                    syscall_newfstatat_routes_to_files_struct(self, FilesStruct);
+                    files_struct_stat_path_routes_to_vfs(FilesStruct, VfsCore);
+                    files_struct_regular_file_stat_observed(FilesStruct);
+                    file_backend_regular_file_stat_returns_metadata(FileBackend);
+                    syscall_table_newfstatat_observed(self);
                 }
             }
 

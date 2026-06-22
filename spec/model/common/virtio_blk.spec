@@ -40,6 +40,8 @@ predicate virtio_blk_read_request_notifies_mmio<T, Q>(device: T, queue: Q) -> bo
 predicate virtio_blk_read_request_pending<T>(device: T) -> bool;
 predicate virtio_blk_mmio_irq_acknowledged<T>(device: T) -> bool;
 predicate virtio_blk_irq_callback_invoked<T>(device: T) -> bool;
+predicate virtio_blk_completion_observed_by_irq<T>(device: T) -> bool;
+predicate virtio_blk_completion_observed_by_sync_poll<T>(device: T) -> bool;
 predicate virtio_blk_complete_gets_used_buffer<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_blk_complete_status_ok<T>(device: T) -> bool;
 predicate virtio_blk_complete_data_nonzero<T>(device: T) -> bool;
@@ -219,6 +221,25 @@ object VirtioBlkDevice: DeviceObject {
                 ensures {
                     virtio_blk_mmio_irq_acknowledged(self);
                     virtio_blk_irq_callback_invoked(self);
+                    virtio_blk_completion_observed_by_irq(self);
+                    virtio_blk_complete_gets_used_buffer(self, VirtQueue);
+                    virtio_blk_complete_status_ok(self);
+                    virtio_blk_completion_count_incremented(self);
+                    virtio_blk_read_request_done(self);
+                }
+            }
+
+            Action::PollReadCompletion {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_blk_read_request_pending(self);
+                    VirtQueue.state == State::Ready;
+                }
+                drives {
+                    VirtQueue.Action::GetBuf;
+                }
+                ensures {
+                    virtio_blk_completion_observed_by_sync_poll(self);
                     virtio_blk_complete_gets_used_buffer(self, VirtQueue);
                     virtio_blk_complete_status_ok(self);
                     virtio_blk_completion_count_incremented(self);
@@ -236,7 +257,7 @@ object VirtioBlkDevice: DeviceObject {
                 }
                 drives {
                     self.Action::SubmitReadRequest;
-                    self.Action::CompleteReadRequest;
+                    self.Action::CompleteReadRequest || self.Action::PollReadCompletion;
                 }
                 ensures {
                     virtio_blk_serves_block_read(self, BlockDevice);

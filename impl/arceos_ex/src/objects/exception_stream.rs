@@ -4,6 +4,7 @@ use crate::trace::{self, Checkpoint};
 
 use super::{
     event_stream::{EventStream, TrapFrame},
+    files::FileError,
     init_stack::InitStack,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
@@ -48,10 +49,23 @@ const UNEXPECTED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_UNEXPECTED);
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
 #[cfg(not(app_user_boot))]
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
+const SYSCALL_OPENAT: usize = 56;
+const SYSCALL_CLOSE: usize = 57;
+const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
+const SYSCALL_NEWFSTATAT: usize = 79;
 const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
 const USER_COPY_MAX: usize = 256;
+const USER_PATH_MAX: usize = crate::objects::files::FILE_PATH_MAX;
+const AT_FDCWD: usize = usize::MAX - 99;
+const STAT_SIZE: usize = 128;
+const EFAULT: usize = 14;
+const EINVAL: usize = 22;
+const EIO: usize = 5;
+const ENOENT: usize = 2;
+const EOVERFLOW: usize = 75;
+const EREMOTEIO: usize = 121;
 
 static SYSCALL_TABLE_READY: AtomicU8 = AtomicU8::new(0);
 
@@ -60,12 +74,27 @@ pub struct SyscallTable {
     #[allow(dead_code)]
     bound_to_exception: bool,
     write_supported: bool,
+    openat_supported: bool,
+    read_supported: bool,
+    close_supported: bool,
+    newfstatat_supported: bool,
     exit_supported: bool,
     exit_group_supported: bool,
     write_usercopy_ready: bool,
+    read_usercopy_ready: bool,
+    path_usercopy_ready: bool,
+    stat_usercopy_ready: bool,
     write_routes_to_console: bool,
+    openat_routes_to_files_struct: bool,
+    read_routes_to_files_struct: bool,
+    close_routes_to_files_struct: bool,
+    newfstatat_routes_to_files_struct: bool,
     exit_records_status: bool,
     write_observed: AtomicU8,
+    openat_observed: AtomicU8,
+    read_observed: AtomicU8,
+    close_observed: AtomicU8,
+    newfstatat_observed: AtomicU8,
     exit_observed: AtomicU8,
 }
 
@@ -75,12 +104,27 @@ impl SyscallTable {
             lifecycle: Lifecycle::new(State::Base),
             bound_to_exception: false,
             write_supported: false,
+            openat_supported: false,
+            read_supported: false,
+            close_supported: false,
+            newfstatat_supported: false,
             exit_supported: false,
             exit_group_supported: false,
             write_usercopy_ready: false,
+            read_usercopy_ready: false,
+            path_usercopy_ready: false,
+            stat_usercopy_ready: false,
             write_routes_to_console: false,
+            openat_routes_to_files_struct: false,
+            read_routes_to_files_struct: false,
+            close_routes_to_files_struct: false,
+            newfstatat_routes_to_files_struct: false,
             exit_records_status: false,
             write_observed: AtomicU8::new(0),
+            openat_observed: AtomicU8::new(0),
+            read_observed: AtomicU8::new(0),
+            close_observed: AtomicU8::new(0),
+            newfstatat_observed: AtomicU8::new(0),
             exit_observed: AtomicU8::new(0),
         }
     }
@@ -101,6 +145,26 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn openat_supported(&self) -> bool {
+        self.openat_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn read_supported(&self) -> bool {
+        self.read_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn close_supported(&self) -> bool {
+        self.close_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn newfstatat_supported(&self) -> bool {
+        self.newfstatat_supported
+    }
+
+    #[allow(dead_code)]
     pub const fn exit_supported(&self) -> bool {
         self.exit_supported
     }
@@ -116,8 +180,43 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn read_usercopy_ready(&self) -> bool {
+        self.read_usercopy_ready
+    }
+
+    #[allow(dead_code)]
+    pub const fn path_usercopy_ready(&self) -> bool {
+        self.path_usercopy_ready
+    }
+
+    #[allow(dead_code)]
+    pub const fn stat_usercopy_ready(&self) -> bool {
+        self.stat_usercopy_ready
+    }
+
+    #[allow(dead_code)]
     pub const fn write_routes_to_console(&self) -> bool {
         self.write_routes_to_console
+    }
+
+    #[allow(dead_code)]
+    pub const fn openat_routes_to_files_struct(&self) -> bool {
+        self.openat_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn read_routes_to_files_struct(&self) -> bool {
+        self.read_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn close_routes_to_files_struct(&self) -> bool {
+        self.close_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn newfstatat_routes_to_files_struct(&self) -> bool {
+        self.newfstatat_routes_to_files_struct
     }
 
     #[allow(dead_code)]
@@ -128,6 +227,26 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub fn write_observed(&self) -> bool {
         self.write_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn openat_observed(&self) -> bool {
+        self.openat_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn read_observed(&self) -> bool {
+        self.read_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn close_observed(&self) -> bool {
+        self.close_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn newfstatat_observed(&self) -> bool {
+        self.newfstatat_observed.load(Ordering::Acquire) != 0
     }
 
     #[allow(dead_code)]
@@ -148,14 +267,77 @@ impl SyscallTable {
 
         self.bound_to_exception = true;
         self.write_supported = true;
+        self.openat_supported = true;
+        self.read_supported = true;
+        self.close_supported = true;
+        self.newfstatat_supported = true;
         self.exit_supported = true;
         self.exit_group_supported = true;
         self.write_usercopy_ready = true;
+        self.read_usercopy_ready = true;
+        self.path_usercopy_ready = true;
+        self.stat_usercopy_ready = true;
         self.write_routes_to_console = true;
+        self.openat_routes_to_files_struct = true;
+        self.read_routes_to_files_struct = true;
+        self.close_routes_to_files_struct = true;
+        self.newfstatat_routes_to_files_struct = true;
         self.exit_records_status = true;
         SYSCALL_TABLE_READY.store(1, Ordering::Relaxed);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    pub fn openat(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.openat_supported
+            || !self.path_usercopy_ready
+            || !self.openat_routes_to_files_struct
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_openat(self, frame);
+    }
+
+    pub fn read(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.read_supported
+            || !self.read_usercopy_ready
+            || !self.read_routes_to_files_struct
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_read(self, frame);
+    }
+
+    pub fn close(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.close_supported
+            || !self.close_routes_to_files_struct
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_close(self, frame);
+    }
+
+    pub fn newfstatat(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.newfstatat_supported
+            || !self.path_usercopy_ready
+            || !self.stat_usercopy_ready
+            || !self.newfstatat_routes_to_files_struct
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_newfstatat(self, frame);
     }
 
     pub fn write(&self, frame: &mut TrapFrame) {
@@ -497,7 +679,11 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
     };
 
     match frame.reg(17) {
+        SYSCALL_OPENAT => table.openat(frame),
+        SYSCALL_CLOSE => table.close(frame),
+        SYSCALL_READ => table.read(frame),
         SYSCALL_WRITE => table.write(frame),
+        SYSCALL_NEWFSTATAT => table.newfstatat(frame),
         SYSCALL_EXIT => table.exit(frame),
         SYSCALL_EXIT_GROUP => table.exit_group(frame),
         _ => complete_unsupported_syscall(frame),
@@ -507,6 +693,155 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
 fn complete_unsupported_syscall(frame: &mut TrapFrame) {
     frame.set_reg(10, usize::MAX);
     frame.sepc = frame.sepc.wrapping_add(4);
+}
+
+fn complete_successful_syscall(frame: &mut TrapFrame, value: usize) {
+    frame.set_reg(10, value);
+    frame.sepc = frame.sepc.wrapping_add(4);
+}
+
+fn complete_error_syscall(frame: &mut TrapFrame, errno: usize) {
+    complete_successful_syscall(frame, 0usize.wrapping_sub(errno));
+}
+
+fn file_error_to_errno(error: FileError) -> usize {
+    match error {
+        FileError::BadFd => 9,
+        FileError::AlreadyOpen => 24,
+        FileError::PathUnavailable => ENOENT,
+        FileError::BufferTooSmall => EOVERFLOW,
+        FileError::VfsBackendUnavailable => EREMOTEIO,
+        FileError::NotReady
+        | FileError::NotReadable
+        | FileError::NotWritable
+        | FileError::BackendUnavailable
+        | FileError::Unsupported => EIO,
+    }
+}
+
+fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
+    let dirfd = frame.reg(10);
+    let path_ptr = frame.reg(11);
+    let flags = frame.reg(12);
+    if dirfd != AT_FDCWD || flags != 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    let Some(path_len) = copy_cstr_from_user(path_ptr, &mut path) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+
+    let ctx = crate::context::context();
+    let fd = match ctx.files_struct.open_regular_path(
+        &ctx.fs_struct,
+        &mut ctx.vfs_core,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &ctx.kernel_image,
+        &path[..path_len],
+    ) {
+        Ok(fd) => fd,
+        Err(error) => {
+            complete_error_syscall(frame, file_error_to_errno(error));
+            return;
+        }
+    };
+
+    table.openat_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(
+        Checkpoint::SyscallTableOpenAt,
+        crate::context::context_ref(),
+    );
+    complete_successful_syscall(frame, fd);
+}
+
+fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {
+    let fd = frame.reg(10);
+    let user_ptr = frame.reg(11);
+    let requested = frame.reg(12);
+    let len = core::cmp::min(requested, USER_COPY_MAX);
+    if len == 0 {
+        complete_successful_syscall(frame, 0);
+        return;
+    }
+
+    let mut buffer = [0u8; USER_COPY_MAX];
+    let ctx = crate::context::context();
+    let Ok(read) = ctx.files_struct.read_fd(fd, &mut buffer[..len]) else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    if !copy_to_user(user_ptr, &buffer[..read]) {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    table.read_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(Checkpoint::SyscallTableRead, crate::context::context_ref());
+    complete_successful_syscall(frame, read);
+}
+
+fn syscall_table_close(table: &SyscallTable, frame: &mut TrapFrame) {
+    let fd = frame.reg(10);
+    let ctx = crate::context::context();
+    if ctx.files_struct.close_fd(fd).is_err() {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    table.close_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(Checkpoint::SyscallTableClose, crate::context::context_ref());
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_newfstatat(table: &SyscallTable, frame: &mut TrapFrame) {
+    let dirfd = frame.reg(10);
+    let path_ptr = frame.reg(11);
+    let stat_ptr = frame.reg(12);
+    let flags = frame.reg(13);
+    if dirfd != AT_FDCWD || flags != 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    let Some(path_len) = copy_cstr_from_user(path_ptr, &mut path) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+
+    let ctx = crate::context::context();
+    let stat = match ctx.files_struct.stat_regular_path(
+        &ctx.fs_struct,
+        &mut ctx.vfs_core,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &ctx.kernel_image,
+        &path[..path_len],
+    ) {
+        Ok(stat) => stat,
+        Err(error) => {
+            complete_error_syscall(frame, file_error_to_errno(error));
+            return;
+        }
+    };
+
+    let mut stat_buffer = [0u8; STAT_SIZE];
+    write_linux_stat(&mut stat_buffer, stat.size(), stat.mode());
+    if !copy_to_user(stat_ptr, &stat_buffer) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.newfstatat_observed.store(1, Ordering::Release);
+    crate::checkpoint::dispatch(
+        Checkpoint::SyscallTableNewFstatAt,
+        crate::context::context_ref(),
+    );
+    complete_successful_syscall(frame, 0);
 }
 
 fn syscall_table_write(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -534,8 +869,7 @@ fn syscall_table_write(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.write_observed.store(1, Ordering::Release);
     crate::checkpoint::dispatch(Checkpoint::SyscallTableWrite, crate::context::context_ref());
-    frame.set_reg(10, written);
-    frame.sepc = frame.sepc.wrapping_add(4);
+    complete_successful_syscall(frame, written);
 }
 
 fn syscall_table_exit(table: &SyscallTable, frame: &mut TrapFrame) -> ! {
@@ -564,6 +898,62 @@ fn copy_from_user(user_ptr: usize, dst: &mut [u8]) -> bool {
     }
     crate::arch::riscv64::csr::restore_user_memory_access(saved);
     true
+}
+
+fn copy_to_user(user_ptr: usize, src: &[u8]) -> bool {
+    if src.is_empty() {
+        return true;
+    }
+    if user_ptr == 0 || user_ptr.checked_add(src.len()).is_none() {
+        return false;
+    }
+
+    let saved = crate::arch::riscv64::csr::save_and_enable_user_memory_access();
+    let mut index = 0usize;
+    while index < src.len() {
+        unsafe { core::ptr::write_volatile((user_ptr + index) as *mut u8, src[index]) };
+        index += 1;
+    }
+    crate::arch::riscv64::csr::restore_user_memory_access(saved);
+    true
+}
+
+fn copy_cstr_from_user(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
+    if dst.is_empty() || user_ptr == 0 {
+        return None;
+    }
+
+    let saved = crate::arch::riscv64::csr::save_and_enable_user_memory_access();
+    let mut index = 0usize;
+    while index < dst.len() {
+        let byte = unsafe { core::ptr::read_volatile((user_ptr + index) as *const u8) };
+        if byte == 0 {
+            crate::arch::riscv64::csr::restore_user_memory_access(saved);
+            return (index != 0).then_some(index);
+        }
+        dst[index] = byte;
+        index += 1;
+    }
+    crate::arch::riscv64::csr::restore_user_memory_access(saved);
+    None
+}
+
+fn write_linux_stat(buffer: &mut [u8; STAT_SIZE], size: usize, mode: u32) {
+    write_u64(buffer, 0, 1);
+    write_u64(buffer, 8, 1);
+    write_u32(buffer, 16, mode);
+    write_u32(buffer, 20, 1);
+    write_u64(buffer, 48, size as u64);
+    write_u32(buffer, 56, 4096);
+    write_u64(buffer, 64, size.div_ceil(512) as u64);
+}
+
+fn write_u32(buffer: &mut [u8], offset: usize, value: u32) {
+    buffer[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+}
+
+fn write_u64(buffer: &mut [u8], offset: usize, value: u64) {
+    buffer[offset..offset + 8].copy_from_slice(&value.to_ne_bytes());
 }
 
 fn breakpoint_exception_handler(frame: &mut TrapFrame) {

@@ -20,12 +20,20 @@ const SCOPE: &[Checkpoint] = &[
     #[cfg(app_user_boot)]
     Checkpoint::UserModeEntry,
     #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableOpenAt,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableRead,
+    #[cfg(app_user_boot)]
     Checkpoint::SyscallTableWrite,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableClose,
+    #[cfg(app_user_boot)]
+    Checkpoint::SyscallTableNewFstatAt,
     #[cfg(app_user_boot)]
     Checkpoint::SyscallTableExit,
 ];
 #[cfg(app_user_boot)]
-pub const KUNIT_CASE_COUNT: usize = 10;
+pub const KUNIT_CASE_COUNT: usize = 15;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 6;
 
@@ -52,9 +60,26 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
             run_user_mode_entry(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableOpenAt => {
+            run_syscall_table_openat(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableRead => {
+            run_syscall_table_read(checkpoint, ctx, sink, total);
+            run_files_struct_readonly_path(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
         Checkpoint::SyscallTableWrite => {
             run_syscall_table_write(checkpoint, ctx, sink, total);
             run_files_struct_write_path(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableClose => {
+            run_syscall_table_close(checkpoint, ctx, sink, total);
+        }
+        #[cfg(app_user_boot)]
+        Checkpoint::SyscallTableNewFstatAt => {
+            run_syscall_table_newfstatat(checkpoint, ctx, sink, total);
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableExit => {
@@ -105,6 +130,112 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "user mode entry facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_openat(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.openat";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let files = &ctx.files_struct;
+    let valid = ctx.user_init_process.state() == State::Online
+        && table.state() == State::Ready
+        && table.bound_to_exception()
+        && table.openat_supported()
+        && table.path_usercopy_ready()
+        && table.openat_routes_to_files_struct()
+        && table.openat_observed()
+        && files.open_path_routes_to_vfs()
+        && files.regular_fd_installed()
+        && files.fd_bound(FdRef::Regular0);
+
+    sink.diag_usize(
+        "syscall_table_openat_observed",
+        table.openat_observed() as usize,
+    );
+    sink.diag_usize("regular0_len", files.regular0_len());
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "syscall table openat facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_read(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.read";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let valid = table.state() == State::Ready
+        && table.read_supported()
+        && table.read_usercopy_ready()
+        && table.read_routes_to_files_struct()
+        && table.openat_observed()
+        && table.read_observed()
+        && ctx.exception_stream.syscall_state() == State::Online;
+
+    sink.diag_usize(
+        "syscall_table_read_observed",
+        table.read_observed() as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "syscall table read facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_files_struct_readonly_path(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.files_struct.readonly_path";
+    sink.start_case(total, "", name, checkpoint);
+
+    let files = &ctx.files_struct;
+    let valid = files.state() == State::Ready
+        && files.regular_file_slot_ready()
+        && files.fd_bound(FdRef::Regular0)
+        && files.fd_table().fd_installed()
+        && files.read_fd_routes_to_table()
+        && files.regular_file_read_observed()
+        && files.regular0().readable()
+        && files.regular0().read_dispatches_backend()
+        && files.regular0().read_observed()
+        && files.regular0_backend().kind() == FileBackendKind::RegularFile
+        && files.regular0_backend().regular_file_bound()
+        && files.regular0_backend().regular_file_read_supported()
+        && files.regular0_backend().regular_file_read_returns_data()
+        && files.regular0_backend().last_read_len() != 0;
+
+    sink.diag_usize(
+        "regular_file_read_observed",
+        files.regular_file_read_observed() as usize,
+    );
+    sink.diag_usize(
+        "regular0_last_read_len",
+        files.regular0_backend().last_read_len(),
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "files struct readonly path facts invalid");
     }
 }
 
@@ -181,6 +312,78 @@ fn run_files_struct_write_path(
         sink.pass(total, "", name);
     } else {
         sink.fail(total, "", name, "files struct write path facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_close(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.close";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let files = &ctx.files_struct;
+    let valid = table.state() == State::Ready
+        && table.close_supported()
+        && table.close_routes_to_files_struct()
+        && table.close_observed()
+        && files.close_fd_routes_to_table()
+        && files.regular_file_closed()
+        && files.fd_table().fd_closed();
+
+    sink.diag_usize(
+        "syscall_table_close_observed",
+        table.close_observed() as usize,
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "syscall table close facts invalid");
+    }
+}
+
+#[cfg(app_user_boot)]
+fn run_syscall_table_newfstatat(
+    checkpoint: Checkpoint,
+    ctx: &Context,
+    sink: &mut dyn Sink,
+    total: usize,
+) {
+    let name = "user_boot.syscall_table.newfstatat";
+    sink.start_case(total, "", name, checkpoint);
+
+    let table = &ctx.syscall_table;
+    let files = &ctx.files_struct;
+    let valid = table.state() == State::Ready
+        && table.newfstatat_supported()
+        && table.path_usercopy_ready()
+        && table.stat_usercopy_ready()
+        && table.newfstatat_routes_to_files_struct()
+        && table.newfstatat_observed()
+        && files.stat_path_routes_to_vfs()
+        && files.regular_file_stat_observed()
+        && files.regular0_backend().regular_file_stat_supported()
+        && files
+            .regular0_backend()
+            .regular_file_stat_returns_metadata()
+        && files.regular0_backend().last_stat_size() != 0;
+
+    sink.diag_usize(
+        "syscall_table_newfstatat_observed",
+        table.newfstatat_observed() as usize,
+    );
+    sink.diag_usize(
+        "regular0_last_stat_size",
+        files.regular0_backend().last_stat_size(),
+    );
+    if valid {
+        sink.pass(total, "", name);
+    } else {
+        sink.fail(total, "", name, "syscall table newfstatat facts invalid");
     }
 }
 
