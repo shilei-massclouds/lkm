@@ -1196,7 +1196,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 ##### 入口前导期正式建模规格说明
 
-本小节用于说明入口前导期形式化对象模型的定位、用途和维护方式。具体可被验证器解析、建模和验证的模型条目，已经抽取到 `spec/model` 目录；正式入口是 [`model/main.spec`](model/main.spec)。旧的 [`entry-prelude-object-model.spec`](entry-prelude-object-model.spec) 只作为兼容入口保留。
+本小节用于说明入口前导期形式化对象模型的定位、用途和维护方式。具体可被验证器解析、建模和验证的模型条目，已经抽取到 `spec/model` 目录；正式入口是 [`../model/main.spec`](../model/main.spec)。
 
 `spec/model/main.spec` 是当前模型推导验证的规范输入源，覆盖以下内容：
 
@@ -1254,7 +1254,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 `CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCPU` 承载启动 CPU 身份，入口后继期由 `CpuIdMap.preset()` 建立 `logical CPU 0 -> BootCPU` 的基础映射并进入 `Prepared`。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实，由 `CpuIdMap.setup()` 使当前阶段的逻辑 ID 映射边界进入 `Ready`。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和逻辑映射表两类职责。
 
-形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`，它通过 include 串接 `StartupTimeline`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`CorePreparePhase` 与 `MmCoreInitPhase` 等分层规格；旧的 `spec/entry-prelude-object-model.spec` 保留为兼容入口。子阶段 4 的正式模型位于 `spec/model/boot/mm-core-init/`。
+形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`，它通过 include 串接 `StartupTimeline`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`CorePreparePhase` 与 `MmCoreInitPhase` 等分层规格。子阶段 4 的正式模型位于 `spec/model/boot/mm-core-init/`。
 
 本子阶段的结束状态应至少包含：
 

@@ -16,8 +16,8 @@ from pyveri.view import (
 
 
 class ModelBuilderTests(unittest.TestCase):
-    def test_build_current_entry_prelude_model(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+    def test_build_current_model(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
 
         result = build_model(parse_file(spec))
 
@@ -47,7 +47,7 @@ class ModelBuilderTests(unittest.TestCase):
         )
 
     def test_builds_object_view(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+        spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
 
         result = build_model(parse_file(spec))
         view = build_object_view(result.model)
@@ -61,7 +61,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertNotIn("drives", dot)
 
     def test_builds_drives_view(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+        spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
 
         result = build_model(parse_file(spec))
         view = build_drives_view(result.model)
@@ -80,7 +80,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertIn('"StartupTimeline.Setup" -> "PreparePhase.Setup"', dot)
 
     def test_builds_timeline_view(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+        spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
 
         result = build_model(parse_file(spec))
         view = build_timeline_view(result.model)

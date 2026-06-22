@@ -64,8 +64,6 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --graph timeli
 PYTHONPATH=tools/pyveri/src python -m unittest discover -s tools/pyveri/tests
 ```
 
-旧入口 `spec/entry-prelude-object-model.spec` 仍可直接运行，但只作为兼容 shim；新命令应使用 `spec/model/main.spec`。
-
 当前 `pyveri` 已作为 driver 调度独立阶段工具，CLI 保留 `parse`、`model`、`derive`、`check`、`view` 和 `render` 子命令以及旧参数形式兼容。driver 默认使用临时目录保存中间文件；传入 `--work-dir tools/build` 时会保留本次流水线生成的 AST、model、derive、check、view 和 render 中间文件。
 
 独立工具链已经提供 `common` 公共库骨架、`parse`、`model`、`derive`、`check`、`view` 和 `render` 阶段工具。源码方式运行：

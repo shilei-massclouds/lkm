@@ -397,8 +397,8 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
-    def test_current_entry_prelude_derivation_reaches_target(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+    def test_current_model_derivation_reaches_target(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
         result = build_model(parse_file(spec))
 
         derivation = derive(result.model)

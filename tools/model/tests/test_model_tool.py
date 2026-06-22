@@ -17,13 +17,14 @@ class ModelToolTests(unittest.TestCase):
         self.spec = (
             Path(__file__).resolve().parents[3]
             / "spec"
-            / "entry-prelude-object-model.spec"
+            / "model"
+            / "main.spec"
         )
 
     def test_model_writes_model_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            ast = Path(tmp) / "entry-prelude-object-model.ast.json"
-            model = Path(tmp) / "entry-prelude-object-model.model.json"
+            ast = Path(tmp) / "model-main.ast.json"
+            model = Path(tmp) / "model-main.model.json"
 
             self.assertEqual(parse_main([str(self.spec), "-o", str(ast)]), 0)
             stdout = io.StringIO()
@@ -42,8 +43,8 @@ class ModelToolTests(unittest.TestCase):
 
     def test_model_json_contains_indexed_children_and_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            ast = Path(tmp) / "entry-prelude-object-model.ast.json"
-            model = Path(tmp) / "entry-prelude-object-model.model.json"
+            ast = Path(tmp) / "model-main.ast.json"
+            model = Path(tmp) / "model-main.model.json"
 
             self.assertEqual(parse_main([str(self.spec), "-o", str(ast)]), 0)
             self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
@@ -103,8 +104,8 @@ class ModelToolTests(unittest.TestCase):
 
     def test_model_json_preserves_entry_spans(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            ast = Path(tmp) / "entry-prelude-object-model.ast.json"
-            model = Path(tmp) / "entry-prelude-object-model.model.json"
+            ast = Path(tmp) / "model-main.ast.json"
+            model = Path(tmp) / "model-main.model.json"
 
             self.assertEqual(parse_main([str(self.spec), "-o", str(ast)]), 0)
             self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)

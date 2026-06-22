@@ -326,8 +326,6 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T --trace-annotations state,event
 tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 ```
 
-旧入口 `spec/entry-prelude-object-model.spec` 继续可用；正式模型入口是 `spec/model/main.spec`。
-
 默认目标：
 
 ```text

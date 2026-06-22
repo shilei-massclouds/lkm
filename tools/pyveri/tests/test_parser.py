@@ -312,8 +312,8 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(event.within[0].entered_by, [])
         self.assertEqual(event.within[0].exited_by, [])
 
-    def test_parse_current_entry_prelude_spec(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+    def test_parse_current_model_spec(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
 
         document = parse_file(spec)
 
@@ -324,8 +324,8 @@ class ParserTests(unittest.TestCase):
         self.assertIn("EntryPreludePhase", object_names)
         self.assertGreaterEqual(len(document.objects), 19)
 
-    def test_current_entry_prelude_entry_spans_use_expanded_lines(self) -> None:
-        spec = Path(__file__).resolve().parents[3] / "spec" / "entry-prelude-object-model.spec"
+    def test_current_model_entry_spans_use_expanded_lines(self) -> None:
+        spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
 
         document = parse_file(spec)
         kernel_image = next(obj for obj in document.objects if obj.name == "KernelImage")

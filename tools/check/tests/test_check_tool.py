@@ -18,13 +18,14 @@ class CheckToolTests(unittest.TestCase):
         self.spec = (
             Path(__file__).resolve().parents[3]
             / "spec"
-            / "entry-prelude-object-model.spec"
+            / "model"
+            / "main.spec"
         )
 
     def _build_derive_json(self, tmp: str) -> Path:
-        ast = Path(tmp) / "entry-prelude-object-model.ast.json"
-        model = Path(tmp) / "entry-prelude-object-model.model.json"
-        derive = Path(tmp) / "entry-prelude-object-model.derive.json"
+        ast = Path(tmp) / "model-main.ast.json"
+        model = Path(tmp) / "model-main.model.json"
+        derive = Path(tmp) / "model-main.derive.json"
         self.assertEqual(parse_main([str(self.spec), "-o", str(ast)]), 0)
         self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
         self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
@@ -33,7 +34,7 @@ class CheckToolTests(unittest.TestCase):
     def test_check_writes_check_json_for_passing_derivation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             derive = self._build_derive_json(tmp)
-            check = Path(tmp) / "entry-prelude-object-model.check.json"
+            check = Path(tmp) / "model-main.check.json"
 
             stdout = io.StringIO()
             stderr = io.StringIO()

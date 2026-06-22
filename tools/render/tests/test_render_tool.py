@@ -36,18 +36,19 @@ class RenderToolTests(unittest.TestCase):
         self.spec = (
             Path(__file__).resolve().parents[3]
             / "spec"
-            / "entry-prelude-object-model.spec"
+            / "model"
+            / "main.spec"
         )
 
     def _build_view_json(self, tmp: str, view_name: str) -> Path:
-        ast = Path(tmp) / "entry-prelude-object-model.ast.json"
-        model = Path(tmp) / "entry-prelude-object-model.model.json"
-        view = Path(tmp) / f"entry-prelude-object-model.{view_name}.view.json"
+        ast = Path(tmp) / "model-main.ast.json"
+        model = Path(tmp) / "model-main.model.json"
+        view = Path(tmp) / f"model-main.{view_name}.view.json"
         self.assertEqual(parse_main([str(self.spec), "-o", str(ast)]), 0)
         self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
         view_input = model
         if view_name == "trace":
-            derive = Path(tmp) / "entry-prelude-object-model.derive.json"
+            derive = Path(tmp) / "model-main.derive.json"
             self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
             view_input = derive
         self.assertEqual(view_main([str(view_input), view_name, "-o", str(view)]), 0)

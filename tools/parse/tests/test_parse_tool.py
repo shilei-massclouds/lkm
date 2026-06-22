@@ -16,12 +16,13 @@ class ParseToolTests(unittest.TestCase):
         self.spec = (
             Path(__file__).resolve().parents[3]
             / "spec"
-            / "entry-prelude-object-model.spec"
+            / "model"
+            / "main.spec"
         )
 
     def test_parse_writes_ast_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "entry-prelude-object-model.ast.json"
+            output = Path(tmp) / "model-main.ast.json"
 
             stdout = io.StringIO()
             stderr = io.StringIO()
@@ -41,7 +42,7 @@ class ParseToolTests(unittest.TestCase):
 
     def test_entry_spans_are_serialized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "entry-prelude-object-model.ast.json"
+            output = Path(tmp) / "model-main.ast.json"
             exit_code = main([str(self.spec), "-o", str(output)])
 
             self.assertEqual(exit_code, 0)
@@ -60,7 +61,7 @@ class ParseToolTests(unittest.TestCase):
 
     def test_output_parent_directory_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "nested" / "entry-prelude-object-model.ast.json"
+            output = Path(tmp) / "nested" / "model-main.ast.json"
             exit_code = main([str(self.spec), "-o", str(output)])
 
             self.assertEqual(exit_code, 0)

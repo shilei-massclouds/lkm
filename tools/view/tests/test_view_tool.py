@@ -25,19 +25,20 @@ class ViewToolTests(unittest.TestCase):
         self.spec = (
             Path(__file__).resolve().parents[3]
             / "spec"
-            / "entry-prelude-object-model.spec"
+            / "model"
+            / "main.spec"
         )
 
     def _build_model_json(self, tmp: str) -> Path:
-        ast = Path(tmp) / "entry-prelude-object-model.ast.json"
-        model = Path(tmp) / "entry-prelude-object-model.model.json"
+        ast = Path(tmp) / "model-main.ast.json"
+        model = Path(tmp) / "model-main.model.json"
         self.assertEqual(parse_main([str(self.spec), "-o", str(ast)]), 0)
         self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
         return model
 
     def _build_derive_json(self, tmp: str) -> Path:
         model = self._build_model_json(tmp)
-        derive = Path(tmp) / "entry-prelude-object-model.derive.json"
+        derive = Path(tmp) / "model-main.derive.json"
         self.assertEqual(derive_main([str(model), "-o", str(derive)]), 0)
         return derive
 
