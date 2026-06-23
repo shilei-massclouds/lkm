@@ -1064,7 +1064,7 @@ def _check_action_references(
     *,
     context: ExclusiveContextDef | None = None,
 ) -> None:
-    allowed = set(context.obj_refs) if context is not None else None
+    allowed = _context_allowed_object_refs(context)
     for object_name, action_name in _OBJECT_ACTION_RE.findall(block.body):
         if object_name not in model.objects:
             diagnostics.append(
@@ -1084,6 +1084,12 @@ def _check_action_references(
                     block.span,
                 )
             )
+
+
+def _context_allowed_object_refs(context: ExclusiveContextDef | None) -> set[str] | None:
+    if context is None or not context.obj_refs:
+        return None
+    return set(context.obj_refs)
 
 
 def _check_drive_references(
@@ -1156,7 +1162,12 @@ def _check_drive_references(
                 )
             continue
         if _check_drive_event_entry(
-            model, entry, entry_span, diagnostics, bindings=bindings
+            model,
+            entry,
+            entry_span,
+            diagnostics,
+            context=context,
+            bindings=bindings,
         ):
             continue
         if _check_drive_action_entry(
@@ -1178,6 +1189,7 @@ def _check_drive_event_entry(
     span: SourceSpan,
     diagnostics: list[Diagnostic],
     *,
+    context: ExclusiveContextDef | None = None,
     bindings: dict[str, str],
 ) -> bool:
     ref_event = _REF_EVENT_EXPR_RE.match(entry)
@@ -1220,6 +1232,7 @@ def _check_drive_event_entry(
     if match is None:
         return False
     object_name, event_name, args = match.group(1, 2, 3)
+    allowed = _context_allowed_object_refs(context)
     obj = model.objects.get(object_name)
     if obj is None:
         if _is_supported_ref_event(object_name, event_name):
@@ -1232,6 +1245,15 @@ def _check_drive_event_entry(
             )
         )
         return True
+    if allowed is not None and object_name not in allowed:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                "event reference outside exclusive_context obj_refs: "
+                f"{object_name}.Event::{event_name} not in {context.name}",
+                span,
+            )
+        )
     if not any(event_name in state.events for state in obj.states.values()) and not (
         obj.kind in model.types and _type_declares_event(model.types[obj.kind], event_name)
     ):
@@ -1352,7 +1374,7 @@ def _check_action_reference(
     *,
     context: ExclusiveContextDef | None = None,
 ) -> None:
-    allowed = set(context.obj_refs) if context is not None else None
+    allowed = _context_allowed_object_refs(context)
     if object_name not in model.objects:
         diagnostics.append(
             Diagnostic(

@@ -790,6 +790,66 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
 
+    def test_plain_context_without_obj_refs_allows_drives(self) -> None:
+        source = """
+            context BootPhaseContext: Context {
+                guard: PhaseBoundaryGuard {
+                    holds {
+                        cpu_concurrency: single_cpu;
+                        task_concurrency: single_task;
+                        local_interrupts: disabled;
+                        preemption: disabled;
+                    }
+                }
+            }
+
+            object Child: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+
+            object Parent: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within BootPhaseContext {
+                                drives {
+                                    Child.Event::Setup;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "plain-context-drives.spec"
+            ast = Path(tmp) / "plain-context-drives.ast.json"
+            model = Path(tmp) / "plain-context-drives.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+
     def test_guard_holds_rejects_weaker_nested_context(self) -> None:
         source = """
             context OuterContext: Context {

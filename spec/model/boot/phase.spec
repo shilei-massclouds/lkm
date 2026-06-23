@@ -11,6 +11,23 @@ include "core-prepare/main.spec";
 include "mm-core-init/main.spec";
 include "sched-init/main.spec";
 
+context BootPhaseContext: Context {
+    /*
+     * BootPhaseContext captures the natural boot execution context before
+     * secondary CPUs and ordinary task concurrency are opened. The phase
+     * boundary itself provides the proof; it does not lower to runtime guard
+     * code.
+     */
+    guard: PhaseBoundaryGuard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+}
+
 /*
  * BootPhase 表示引导期阶段对象。它负责推进当前模型已经展开的引导期子阶段。
  */
@@ -29,12 +46,14 @@ object BootPhase: PhaseObject {
              * BootPhase 不直接依赖 PreparePhase；二者作为平级阶段由上级阶段对象编排衔接。
              */
             on Event::Setup -> State::Ready {
-                drives {
-                    EntryPreludePhase.Event::Setup;
-                    EntrySuccessorPhase.Event::Setup;
-                    CorePreparePhase.Event::Setup;
-                    MmCoreInitPhase.Event::Setup;
-                    SchedInitPhase.Event::Setup;
+                within BootPhaseContext {
+                    drives {
+                        EntryPreludePhase.Event::Setup;
+                        EntrySuccessorPhase.Event::Setup;
+                        CorePreparePhase.Event::Setup;
+                        MmCoreInitPhase.Event::Setup;
+                        SchedInitPhase.Event::Setup;
+                    }
                 }
             }
         }
