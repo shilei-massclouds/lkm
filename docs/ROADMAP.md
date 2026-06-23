@@ -64,6 +64,14 @@
 5. **P0 已完成首轮：同步 coding 与 `arceos_ex` 实现映射**。`spec/coding/arceos_ex.spec` 已说明 `PerCpuRwSemaphore` / `CpuHotplugLock` guard lowering 规则；实现侧新增 `CpuHotplugLock` 对象，包含 `RcuSync` 子结构和 read/write 行为。`StaticBranch.setup()` 保留 `CpuHotplugReadContext` 源码边界；在 `BootPhaseContext` 证明单执行流时，该调用点把 `CpuHotplugLock.ReadLock/ReadUnlock` 降为 proof-only/elided 事实，但通用 `PerCpuRwSemaphore` 提供真实 read/write 行为。
 6. **P0 已完成首轮：验证与提交**。已运行 `make verify`、`make test`、`make run`、`make run APP=user-boot`；补充 smoke 覆盖 `PerCpuRwSemaphore` 静态初始化、read lock/unlock、writer block/drain、reader fast/slow path 和两任务竞争场景。
 
+### 当前执行计划：RwLock 与 ResourceLock
+
+1. **P0 当前：建立通用 `RwLock` 类型规格**。对照 Linux `rwlock_t` / `DEFINE_RWLOCK` / `read_lock()` / `write_lock()`，在 `spec/model/common/main.spec` 中新增 `RwLockExtState::{Unlocked, ReadHeld, WriteHeld}`、`RwLockInitKind::{StaticInitializer, RuntimeInit}` 和通用 `RwLock` 类型。首轮只要求静态/运行时初始化、Ready/unlocked 状态、read-side 可共享抽象、write-side 排他、trylock outcome 和 unlock 条件；lockdep/debug owner、PREEMPT_RT `rwbase_rt`、irqsave/bh/nested variants 和精确 reader count 保留为 internal/deferred。
+2. **P0 当前：定义具体 `ResourceLock` 静态实例**。`ResourceLock` 对应 Linux `kernel/resource.c` 中的 `static DEFINE_RWLOCK(resource_lock)`，类型边界是公开语义层的 `RwLock`，不是 `RawRwLock`。该实例由 CorePrepare 在 `ResourceTree.Event::Setup` 前执行 `Preset` / `Setup`，Ready 后才可作为 `ResourceTree.setup()` 的 write guard。
+3. **P0 当前：修订 `ResourceTree.setup()` 写锁上下文**。把 Linux `insert_resource_conflict()` / `insert_resource()` 的 `write_lock(&resource_lock)` / `write_unlock(&resource_lock)` 表达为 `within ResourceTreeWriteContext { ... }`，由 `ResourceLock.Event::WriteLock(BootInitTaskRef)` / `WriteUnlock(BootInitTaskRef)` 定界，并新增 `resource_tree_resource_lock_write_guard_used(ResourceTree, ResourceLock)` 事实。
+4. **P0 后续：同步 coding 与 `arceos_ex` 实现映射**。在 coding 中说明 `ResourceLock` 是独立 `Context` 对象；实现侧新增独立 `resource_lock` 对象，并让 `ResourceTree.setup()` 消费该对象。BootPhaseContext 可把该调用点降为 proof-only/elided guard，但通用 `RwLock` 必须提供真实 read/write 行为和 smoke 覆盖。
+5. **P0 后续：验证与提交**。当前规格步骤先运行 `make verify`；实现步骤完成后再运行 `make test`、`make run`、`make run APP=user-boot`，并补充 `RwLock` smoke。
+
 ### 暂缓讨论：event/action 上下文需求声明
 
 - **P2 待讨论：为对象 event/action 定义上下文需求或能力声明机制**。该项暂不作为当前启动阶段审计的前置任务；它与 `within Context { ... }` 的边界还需要继续讨论，避免形成两套重复或不协调的上下文语义。近期仍以 `within Context` 和 guard 明确表达上下文来源；待 Mutex、RwLock、RCU、LocalInterruptControl 等 guard 规格实践稳定后，再回看是否需要 `requires_guard` / `requires_context` / `requires_capability` 等正式形态，用于表达 event/action 对当前 Effective Context 的只读检查需求。

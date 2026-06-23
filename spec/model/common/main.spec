@@ -68,6 +68,17 @@ enum MutexInitKind {
     RuntimeInit,
 }
 
+enum RwLockExtState {
+    Unlocked,
+    ReadHeld,
+    WriteHeld,
+}
+
+enum RwLockInitKind {
+    StaticInitializer,
+    RuntimeInit,
+}
+
 enum RcuSyncExtState {
     Idle,
     WriterActive,
@@ -1350,6 +1361,172 @@ type Mutex {
                 mutex_waiter_enqueued(self, current_task);
                 mutex_waiter_finished(self, current_task);
                 mutex_contention_may_sleep(self);
+            }
+        }
+    }
+}
+
+/*
+ * RwLock corresponds to Linux rwlock_t: a spin-based reader/writer lock.
+ * Readers may share the lock with other readers, writers exclude both readers
+ * and writers, and ordinary read_lock()/write_lock() do not save/restore IRQ
+ * flags. Linux also has lockdep/debug owner state, PREEMPT_RT rwbase_rt
+ * variants, irqsave/bh/nested APIs and architecture-specific raw_lock details;
+ * this first model slice keeps those as internal/deferred unless an instance
+ * needs a specific variant.
+ */
+type RwLock {
+    init_kind: RwLockInitKind;
+    ext_state: RwLockExtState;
+
+    lifecycle {
+        Event::Preset {
+            state_effect: StateEffect::Always;
+            ensures {
+                rwlock_storage_bound(self);
+                rwlock_init_kind_recorded(self);
+                rwlock_preset_respects_init_kind(self);
+                rwlock_arch_raw_lock_internal(self);
+                rwlock_debug_lockdep_internal_deferred(self);
+            }
+        }
+
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            ensures {
+                rwlock_initialized(self);
+                rwlock_ready(self);
+                rwlock_unlocked(self);
+                rwlock_no_readers(self);
+                rwlock_no_writer(self);
+                rwlock_readers_may_share(self);
+                rwlock_write_side_exclusive(self);
+                rwlock_ordinary_lock_does_not_save_irq_flags(self);
+            }
+        }
+    }
+
+    processes {
+        Event::ReadLock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            transitions {
+                RwLockExtState::Unlocked -> RwLockExtState::ReadHeld;
+                RwLockExtState::ReadHeld -> RwLockExtState::ReadHeld;
+                RwLockExtState::WriteHeld -> RwLockExtState::WriteHeld;
+            }
+            ensures {
+                rwlock_read_lock_entered(self, current_task);
+                rwlock_reader_acquired(self, current_task);
+                rwlock_read_acquire_barrier_observed(self);
+            }
+            result {
+                Unlocked: Success(read_acquired);
+                ReadHeld: Success(read_shared);
+                WriteHeld: Blocked(contended_on_writer);
+            }
+        }
+
+        Event::ReadUnlock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+                rwlock_reader_held(self, current_task);
+            }
+            transitions {
+                RwLockExtState::ReadHeld -> RwLockExtState::Unlocked;
+            }
+            ensures {
+                rwlock_read_unlock_exited(self, current_task);
+                rwlock_reader_released(self, current_task);
+                rwlock_read_release_barrier_observed(self);
+            }
+        }
+
+        Event::WriteLock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            transitions {
+                RwLockExtState::Unlocked -> RwLockExtState::WriteHeld;
+                RwLockExtState::ReadHeld -> RwLockExtState::ReadHeld;
+                RwLockExtState::WriteHeld -> RwLockExtState::WriteHeld;
+            }
+            ensures {
+                rwlock_write_lock_entered(self, current_task);
+                rwlock_writer_acquired(self, current_task);
+                rwlock_write_acquire_barrier_observed(self);
+            }
+            result {
+                Unlocked: Success(write_acquired);
+                ReadHeld: Blocked(contended_on_readers);
+                WriteHeld: Blocked(contended_on_writer);
+            }
+        }
+
+        Event::WriteUnlock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+                rwlock_writer_held(self, current_task);
+            }
+            transitions {
+                RwLockExtState::WriteHeld -> RwLockExtState::Unlocked;
+            }
+            ensures {
+                rwlock_write_unlock_exited(self, current_task);
+                rwlock_writer_released(self, current_task);
+                rwlock_unlocked(self);
+                rwlock_write_release_barrier_observed(self);
+            }
+        }
+
+        Event::ReadTryLock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            transitions {
+                RwLockExtState::Unlocked -> RwLockExtState::ReadHeld;
+                RwLockExtState::ReadHeld -> RwLockExtState::ReadHeld;
+                RwLockExtState::WriteHeld -> RwLockExtState::WriteHeld;
+            }
+            ensures {
+                rwlock_read_trylock_attempted(self, current_task);
+            }
+            result {
+                Unlocked: Success(read_acquired);
+                ReadHeld: Success(read_shared);
+                WriteHeld: Blocked(read_trylock_failed);
+            }
+        }
+
+        Event::WriteTryLock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            transitions {
+                RwLockExtState::Unlocked -> RwLockExtState::WriteHeld;
+                RwLockExtState::ReadHeld -> RwLockExtState::ReadHeld;
+                RwLockExtState::WriteHeld -> RwLockExtState::WriteHeld;
+            }
+            ensures {
+                rwlock_write_trylock_attempted(self, current_task);
+            }
+            result {
+                Unlocked: Success(write_acquired);
+                ReadHeld: Blocked(write_trylock_failed);
+                WriteHeld: Blocked(write_trylock_failed);
             }
         }
     }

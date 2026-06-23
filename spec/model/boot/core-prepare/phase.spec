@@ -170,6 +170,83 @@ object Zones: MemoryObject {
 }
 
 /*
+ * ResourceLock 表示 Linux kernel/resource.c 中的
+ * static DEFINE_RWLOCK(resource_lock)。它保护 resource tree 的读写遍历和
+ * 插入/删除路径；CorePrepare 中的 ResourceTree.setup() 只使用写侧 guard。
+ */
+object ResourceLock: RwLock {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Preset -> State::Prepared {
+                ensures {
+                    resource_lock_static_initializer(ResourceLock);
+                    rwlock_storage_bound(ResourceLock);
+                    rwlock_init_kind_recorded(ResourceLock);
+                    rwlock_preset_respects_init_kind(ResourceLock);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            resource_lock_static_initializer(ResourceLock);
+            rwlock_storage_bound(ResourceLock);
+            rwlock_init_kind_recorded(ResourceLock);
+        }
+
+        events {
+            on Event::Setup -> State::Ready {
+                ensures {
+                    resource_lock_ready(ResourceLock);
+                    rwlock_ready(ResourceLock);
+                    rwlock_unlocked(ResourceLock);
+                    rwlock_no_readers(ResourceLock);
+                    rwlock_no_writer(ResourceLock);
+                    rwlock_write_side_exclusive(ResourceLock);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            resource_lock_ready(ResourceLock);
+            rwlock_ready(ResourceLock);
+            rwlock_unlocked(ResourceLock);
+            rwlock_no_readers(ResourceLock);
+            rwlock_no_writer(ResourceLock);
+        }
+    }
+}
+
+context ResourceTreeWriteContext: ResourceExclusiveContext {
+    /*
+     * This context corresponds to Linux write_lock(&resource_lock) /
+     * write_unlock(&resource_lock) around insert_resource_conflict() and
+     * insert_resource() mutations during init_resources().
+     */
+    guard {
+        lock_ref: ResourceLock;
+
+        entered_by {
+            ResourceLock.Event::WriteLock(BootInitTaskRef);
+        }
+
+        exited_by {
+            ResourceLock.Event::WriteUnlock(BootInitTaskRef);
+        }
+    }
+
+    obj_refs {
+        ResourceTree;
+        ResourceLock;
+    }
+}
+
+/*
  * ResourceTree 表示系统资源树。它把 MemBlock 中的 memory/reserved 区段和内核镜像段
  * 登记为可查询、可嵌套的 Resource 关系。
  */
@@ -189,16 +266,21 @@ object ResourceTree: ResourceObject {
                     MemBlock.state == State::Online;
                     KernelImage.state == State::Online;
                     Lds.state == State::Online;
+                    ResourceLock.state == State::Ready;
+                    task_ref_ready(BootInitTaskRef);
                 }
 
-                ensures {
-                    resource_tree_ready(ResourceTree, MemBlock);
-                    system_ram_resources_ready(ResourceTree, MemBlock);
-                    reserved_resources_ready(ResourceTree, MemBlock);
-                    kernel_image_resources_ready(ResourceTree, KernelImage, Lds);
-                    resource_tree_write_lock_guard_used(ResourceTree);
-                    resource_parent_child_ranges_valid(ResourceTree);
-                    resource_overlap_policy_valid(ResourceTree);
+                within ResourceTreeWriteContext {
+                    ensures {
+                        resource_tree_ready(ResourceTree, MemBlock);
+                        system_ram_resources_ready(ResourceTree, MemBlock);
+                        reserved_resources_ready(ResourceTree, MemBlock);
+                        kernel_image_resources_ready(ResourceTree, KernelImage, Lds);
+                        resource_tree_write_lock_guard_used(ResourceTree);
+                        resource_tree_resource_lock_write_guard_used(ResourceTree, ResourceLock);
+                        resource_parent_child_ranges_valid(ResourceTree);
+                        resource_overlap_policy_valid(ResourceTree);
+                    }
                 }
             }
         }
@@ -214,6 +296,7 @@ object ResourceTree: ResourceObject {
             reserved_resources_ready(ResourceTree, MemBlock);
             kernel_image_resources_ready(ResourceTree, KernelImage, Lds);
             resource_tree_write_lock_guard_used(ResourceTree);
+            resource_tree_resource_lock_write_guard_used(ResourceTree, ResourceLock);
             resource_parent_child_ranges_valid(ResourceTree);
             resource_overlap_policy_valid(ResourceTree);
         }
@@ -1235,6 +1318,8 @@ object CorePreparePhase: PhaseObject {
                 drives {
                     DeviceTree.Event::Setup;
                     Zones.Event::Setup;
+                    ResourceLock.Event::Preset;
+                    ResourceLock.Event::Setup;
                     ResourceTree.Event::Setup;
                     CpuGroup.Event::Setup;
                     CpuIdMap.Event::Setup;
@@ -1304,6 +1389,7 @@ object CorePreparePhase: PhaseObject {
             EntrySuccessorPhase.state == State::Ready;
             DeviceTree.state == State::Ready;
             Zones.state == State::Ready;
+            ResourceLock.state == State::Ready;
             ResourceTree.state == State::Ready;
             CpuGroup.state == State::Ready;
             CpuIdMap.state == State::Ready;
