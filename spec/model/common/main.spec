@@ -58,6 +58,16 @@ enum RawSpinLockExtState {
     Locked,
 }
 
+enum MutexExtState {
+    Unlocked,
+    Locked,
+}
+
+enum MutexInitKind {
+    StaticInitializer,
+    RuntimeInit,
+}
+
 enum TaskRuntimeState {
     New,
     Running,
@@ -145,6 +155,26 @@ predicate static_branch_text_patch_sync_deferred<T>(static_branch: T) -> bool;
 predicate cpu_hotplug_ap_sync_state_online<T, U>(hotplug_state: T, cpu: U) -> bool;
 predicate resource_tree_write_lock_guard_used<T>(resource_tree: T) -> bool;
 predicate printk_buffer_setup_local_irq_save_restore_used<T>(buffer: T) -> bool;
+predicate mutex_storage_bound<T>(mutex: T) -> bool;
+predicate mutex_init_kind_recorded<T>(mutex: T) -> bool;
+predicate mutex_preset_respects_init_kind<T>(mutex: T) -> bool;
+predicate mutex_owns_wait_queue<T>(mutex: T) -> bool;
+predicate mutex_initialized<T>(mutex: T) -> bool;
+predicate mutex_ready<T>(mutex: T) -> bool;
+predicate mutex_unlocked<T>(mutex: T) -> bool;
+predicate mutex_locked<T>(mutex: T) -> bool;
+predicate mutex_wait_queue_ready<T>(mutex: T) -> bool;
+predicate mutex_wait_lock_internal_deferred<T>(mutex: T) -> bool;
+predicate mutex_lock_success_sets_owner<T, U>(mutex: T, task_ref: U) -> bool;
+predicate mutex_owner_matches_unlocker<T, U>(mutex: T, task_ref: U) -> bool;
+predicate mutex_lock_acquired<T, U>(mutex: T, task_ref: U) -> bool;
+predicate mutex_unlock_released<T, U>(mutex: T, task_ref: U) -> bool;
+predicate mutex_waiter_enqueued<T, U>(mutex: T, task_ref: U) -> bool;
+predicate mutex_waiter_finished<T, U>(mutex: T, task_ref: U) -> bool;
+predicate mutex_wakes_one_waiter<T>(mutex: T) -> bool;
+predicate mutex_contention_may_sleep<T>(mutex: T) -> bool;
+predicate mutex_recursive_locking_forbidden<T>(mutex: T) -> bool;
+predicate mutex_unlock_requires_owner<T>(mutex: T) -> bool;
 predicate completion_storage_bound<T>(completion: T) -> bool;
 predicate completion_ready<T>(completion: T) -> bool;
 predicate completion_pending<T>(completion: T) -> bool;
@@ -1192,6 +1222,111 @@ type RawSpinLock {
             ensures {
                 raw_spinlock_irqrestore_exited(self, current_cpu);
                 raw_spinlock_released(self);
+            }
+        }
+    }
+}
+
+/*
+ * Mutex corresponds to Linux struct mutex. It is a blocking mutual-exclusion
+ * primitive: one task owns it while locked, contending tasks may sleep on the
+ * internal wait queue, recursive locking is forbidden, and unlock must be done
+ * by the owning task. Linux also carries wait_lock, optional optimistic
+ * spinning, handoff flags, ww_mutex and lockdep/debug fields; the first model
+ * slice keeps those as internal/deferred details unless an instance later
+ * needs them explicitly.
+ */
+type Mutex {
+    init_kind: MutexInitKind;
+    ext_state: MutexExtState;
+
+    owned {
+        wait_queue: SimpleWaitQueue;
+    }
+
+    lifecycle {
+        Event::Preset {
+            state_effect: StateEffect::Always;
+            ensures {
+                mutex_storage_bound(self);
+                mutex_init_kind_recorded(self);
+                mutex_preset_respects_init_kind(self);
+                mutex_owns_wait_queue(self);
+                mutex_wait_lock_internal_deferred(self);
+            }
+        }
+
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            drives {
+                self.wait_queue.Event::Setup;
+            }
+            ensures {
+                mutex_initialized(self);
+                mutex_ready(self);
+                mutex_unlocked(self);
+                mutex_wait_queue_ready(self);
+                mutex_recursive_locking_forbidden(self);
+                mutex_unlock_requires_owner(self);
+            }
+        }
+    }
+
+    processes {
+        Event::Lock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            transitions {
+                MutexExtState::Unlocked -> MutexExtState::Locked;
+                MutexExtState::Locked -> MutexExtState::Locked;
+            }
+            ensures {
+                mutex_lock_success_sets_owner(self, current_task);
+                mutex_lock_acquired(self, current_task);
+            }
+            result {
+                Unlocked: Success(acquired);
+                Locked: Blocked(contended_or_sleeping);
+            }
+        }
+
+        Event::Unlock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+                mutex_owner_matches_unlocker(self, current_task);
+            }
+            drives {
+                self.wait_queue.Action::WakeOne;
+            }
+            transitions {
+                MutexExtState::Locked -> MutexExtState::Unlocked;
+            }
+            ensures {
+                mutex_unlock_released(self, current_task);
+                mutex_unlocked(self);
+                mutex_wakes_one_waiter(self);
+            }
+        }
+
+        Event::Wait(current_task: TaskRef) {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            drives {
+                self.wait_queue.Action::PrepareWait;
+                self.wait_queue.Action::FinishWait;
+            }
+            ensures {
+                mutex_waiter_enqueued(self, current_task);
+                mutex_waiter_finished(self, current_task);
+                mutex_contention_may_sleep(self);
             }
         }
     }
