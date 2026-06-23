@@ -89,6 +89,8 @@ object BootInitTask: TaskObject {
                     task_preemption_control_ready(BootInitTask);
                     task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
                     task_preemption_disabled(BootInitTask);
+                    task_ref_targets(BootInitTaskRef, BootInitTask);
+                    task_ref_ready(BootInitTaskRef);
                 }
             }
         }
@@ -109,6 +111,8 @@ object BootInitTask: TaskObject {
             task_preemption_control_ready(BootInitTask);
             task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
             task_preemption_disabled(BootInitTask);
+            task_ref_targets(BootInitTaskRef, BootInitTask);
+            task_ref_ready(BootInitTaskRef);
         }
 
         events {
@@ -132,6 +136,8 @@ object BootInitTask: TaskObject {
                     task_preemption_control_ready(BootInitTask);
                     task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
                     task_preemption_disabled(BootInitTask);
+                    task_ref_targets(BootInitTaskRef, BootInitTask);
+                    task_ref_ready(BootInitTaskRef);
                 }
             }
         }
@@ -151,6 +157,8 @@ object BootInitTask: TaskObject {
             task_preemption_control_ready(BootInitTask);
             task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
             task_preemption_disabled(BootInitTask);
+            task_ref_targets(BootInitTaskRef, BootInitTask);
+            task_ref_ready(BootInitTaskRef);
         }
     }
 }

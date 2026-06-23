@@ -464,6 +464,29 @@ object JumpLabelMutex: Mutex {
     }
 }
 
+context StaticBranchJumpLabelContext: ResourceExclusiveContext {
+    /*
+     * This context corresponds to Linux jump_label_lock() /
+     * jump_label_unlock() around jump_label_init(). The current task is the
+     * early boot init_task represented by BootInitTaskRef.
+     */
+    guard {
+        lock_ref: JumpLabelMutex;
+
+        entered_by {
+            JumpLabelMutex.Event::Lock(BootInitTaskRef);
+        }
+
+        exited_by {
+            JumpLabelMutex.Event::Unlock(BootInitTaskRef);
+        }
+    }
+
+    obj_refs {
+        StaticBranch;
+    }
+}
+
 /*
  * StaticBranch 表示 static key / static branch 的启动期基础设施。
  * 本阶段只建立 registry 与分支项关系，后续 set(key, value) 是状态内 action，
@@ -489,16 +512,20 @@ object StaticBranch: KernelObject {
                 depends_on {
                     KernelImage.state == State::Online;
                     SwapperVm.state == State::Online;
+                    JumpLabelMutex.state == State::Ready;
+                    task_ref_ready(BootInitTaskRef);
                 }
 
-                ensures {
-                    static_branch_registry_ready(StaticBranch, KernelImage);
-                    static_branch_entries_sorted(StaticBranch);
-                    static_key_to_branch_sites_ready(StaticBranch);
-                    static_branch_cpu_hotplug_read_guard_used(StaticBranch);
-                    static_branch_jump_label_mutex_guard_used(StaticBranch);
-                    static_branch_text_patch_sync_deferred(StaticBranch);
-                    static_branch_set_action_ready(StaticBranch);
+                within StaticBranchJumpLabelContext {
+                    ensures {
+                        static_branch_registry_ready(StaticBranch, KernelImage);
+                        static_branch_entries_sorted(StaticBranch);
+                        static_key_to_branch_sites_ready(StaticBranch);
+                        static_branch_cpu_hotplug_read_guard_used(StaticBranch);
+                        static_branch_jump_label_mutex_guard_used(StaticBranch);
+                        static_branch_text_patch_sync_deferred(StaticBranch);
+                        static_branch_set_action_ready(StaticBranch);
+                    }
                 }
             }
         }

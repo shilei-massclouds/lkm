@@ -232,14 +232,6 @@ def _build_exclusive_contexts(
                     decl.span,
                 )
             )
-        elif decl.lock_ref is not None and decl.lock_ref not in locks:
-            diagnostics.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    f"unknown lock_ref on exclusive_context {decl.name}: {decl.lock_ref}",
-                    decl.span,
-                )
-            )
         if decl.kind == "ResourceExclusiveContext" and not decl.obj_refs:
             diagnostics.append(
                 Diagnostic(

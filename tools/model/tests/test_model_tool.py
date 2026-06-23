@@ -608,6 +608,76 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
 
+    def test_resource_context_lock_ref_can_target_object(self) -> None:
+        source = """
+            type Mutex {
+                processes {
+                    Event::Lock(current_task: TaskRef) {
+                    }
+
+                    Event::Unlock(current_task: TaskRef) {
+                    }
+                }
+            }
+
+            type TaskRef {
+            }
+
+            object JumpLabelMutex: Mutex {
+                initial_state: State::Base;
+
+                state State::Base {
+                }
+            }
+
+            context StaticBranchJumpLabelContext: ResourceExclusiveContext {
+                guard {
+                    lock_ref: JumpLabelMutex;
+
+                    entered_by {
+                        JumpLabelMutex.Event::Lock(BootInitTaskRef);
+                    }
+
+                    exited_by {
+                        JumpLabelMutex.Event::Unlock(BootInitTaskRef);
+                    }
+                }
+
+                obj_refs {
+                    StaticBranch;
+                }
+            }
+
+            object StaticBranch: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within StaticBranchJumpLabelContext {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "object-lock-ref-context.spec"
+            ast = Path(tmp) / "object-lock-ref-context.ast.json"
+            model = Path(tmp) / "object-lock-ref-context.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+
     def test_context_nesting_rejects_weaker_inner_holds(self) -> None:
         source = """
             type RawSpinLock {
