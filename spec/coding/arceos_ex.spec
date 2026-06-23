@@ -506,7 +506,7 @@ type ArceosExCorePrepareCodingMust {
          * a Prepared -> Ready lifecycle transition, so arceos_ex may lower this
          * call-site guard to proof-only/elided code. That elision remains valid
          * only because the protected section is single-commit on this path; a
-         * reusable or looped within block will need an explicit `once` marker or
+         * reusable or looped within block will need an explicit `only-once` marker or
          * equivalent proof before applying the same optimization.
          */
         arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore();
@@ -581,9 +581,9 @@ type ArceosExEffectiveContextCodingMust {
          * exactly that saved state on exit by default. It must not be reduced
          * to an unconditional disable/enable pair. A call site may elide the
          * runtime irqsave/irqrestore only when the source model/coding marks
-         * that guard as proof-only under an outer Effective Context, the guarded
-         * section is proven single-execution (`once` or an equivalent lifecycle
-         * single-commit proof), no saved-flags token escapes, and no later object
+         * that guard as proof-only under an outer Effective Context, the lexical
+         * guarded section has model-verified `only-once`, no saved-flags token
+         * escapes, and no later object
          * consumes a real save/restore count or debug side effect from that
          * guard. A guard that intentionally models unconditional local IRQ
          * disable/enable must still be represented as a distinct explicitly
@@ -616,8 +616,8 @@ type ArceosExEffectiveContextCodingMust {
          * assertions, wakeups or other resource protocol effects. Such guards
          * remain real code even when an outer context already provides the same
          * high-level attribute, unless the call site has an explicit proof-only
-         * lowering rule plus `once` or equivalent single-execution proof and no
-         * consumer of the runtime protocol effects.
+         * lowering rule plus model-verified `only-once` and no consumer of the
+         * runtime protocol effects.
          */
         arceos_ex_must_effective_context_not_elide_protocol_guards();
 

@@ -339,6 +339,9 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
 - 同一时刻至多一个执行流可以成功进入同一个 resource exclusive context。
 - `within ContextName { ... }` 是唯一标准形态；`within` 不声明、不接收、不转发、不重命名实参。
+- `within ContextName only-once { ... }` 表示该具体 lexical `within` 块声明自己在
+  `StartupTimeline.Event::Setup` 可达调用图中只被进入一次。该标记必须由 model
+  工具计数验证，验证失败即为规格错误；它不由 coding 或 impl 重新证明。
 - 外层 `drives` 中由 action result binding 产生的局部值按词法作用域对后续语句和嵌套 `within` 可见；需要别名时应在 `drives` 或上下文内部另建显式绑定，不得写成 `within ContextName(arg: value)`。
 - `within` 块内只能直接驱动 `obj_refs` 中对象的 action/event，除非规格显式声明允许外部对象。
 - context 成功退出后释放独占执行权；失败或 `Blocked` 时，外层 event 不得提交生命周期迁移。
@@ -400,6 +403,14 @@ state State::Ready {
 ```
 
 `within` 的语义是：先通过指定 context 的 guard 进入或确认该 context；进入成功后，在该作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，随后按 guard 退出或离开词法范围，外层 event/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移；它的标准形态始终是 `within ContextName { ... }`。外层 `drives` 中由 action result binding 产生的局部值在嵌套 `within` 中保持词法可见，因此 `selected_rq` 不需要也不允许作为 `EnqueueSelectedRunQueueContext` 的实参重复传入。当前 UP 路径通过 `runqueue_ref_targets(selected_rq, BootRunQueue)` 证明该 ref 指向 `BootRunQueue`，所以 context guard 暂时绑定 `BootRunQueueLock`；后续泛化时应从 `RunQueueRef` 解析目标 runqueue 及其 lock。
+
+`only-once` 是 `within` 使用点上的可验证断言，不是 `Context` 类型属性。同一个
+context 可以在一个地方被 `only-once` 使用，在另一个地方作为普通可复用上下文使用。
+工具验证时从 `StartupTimeline.Event::Setup` 出发，沿 `drives` 调用图统计每个标记
+`only-once` 的 lexical block 的可达进入次数；计数不是 1 时必须报错。该标记只是
+guard proof-only lowering 的必要条件。代码生成仍必须同时确认外层 Effective Context
+覆盖该 guard 的高层语义、该 guard/call-site 允许 proof-only lowering，且没有运行时
+协议副作用被后续消费者依赖。
 
 ## SEM-CONTEXT-NESTING-001: Effective Context Composes Monotonically
 

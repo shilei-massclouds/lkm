@@ -59,6 +59,39 @@ class ParseToolTests(unittest.TestCase):
             line = expanded[entry["span"]["start_line"] - 1]
             self.assertIn("EarlyVm.state == State::Online", line)
 
+    def test_within_only_once_is_serialized(self) -> None:
+        source = """
+            context GuardedContext: Context {
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within GuardedContext only-once {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "only-once.spec"
+            output = Path(tmp) / "only-once.ast.json"
+            spec.write_text(source, encoding="utf-8")
+
+            exit_code = main([str(spec), "-o", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            data = read_json(output)
+            event = data["document"]["objects"][0]["states"][0]["events"][0]
+            self.assertTrue(event["within"][0]["only_once"])
+
     def test_output_parent_directory_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "nested" / "model-main.ast.json"

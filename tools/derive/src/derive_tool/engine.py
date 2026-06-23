@@ -3330,7 +3330,10 @@ def _process_withins(
 def _top_level_withins(body: str) -> list[WithinDecl]:
     withins: list[WithinDecl] = []
     index = 0
-    pattern = re.compile(r"\bwithin\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*\([^{}]*\))?)\s*\{", re.S)
+    pattern = re.compile(
+        r"\bwithin\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*\([^{}]*\))?(?:\s+only-once)?)\s*\{",
+        re.S,
+    )
     while index < len(body):
         match = pattern.search(body, index)
         if match is None:
@@ -3343,7 +3346,7 @@ def _top_level_withins(body: str) -> list[WithinDecl]:
         if block_end is None:
             break
         header = match.group(1).strip()
-        context, parameters = _parse_within_header(header)
+        context, parameters, only_once = _parse_within_header(header)
         body_start_line = 1 + body.count("\n", 0, block_start)
         span = SourceSpan(
             1 + body.count("\n", 0, match.start()),
@@ -3355,6 +3358,7 @@ def _top_level_withins(body: str) -> list[WithinDecl]:
                 body[block_start:block_end],
                 span,
                 parameters=parameters,
+                only_once=only_once,
                 body_start_line=body_start_line,
             )
         )
@@ -3368,6 +3372,7 @@ def _within_from_body(
     span: SourceSpan,
     *,
     parameters: dict[str, str],
+    only_once: bool,
     body_start_line: int,
 ) -> WithinDecl:
     entered_by: list[Block] = []
@@ -3397,13 +3402,14 @@ def _within_from_body(
         elif kind == "drives":
             drives.append(block)
         elif kind == "within":
-            child_context, child_parameters = _parse_within_header(header)
+            child_context, child_parameters, child_only_once = _parse_within_header(header)
             nested_withins.append(
                 _within_from_body(
                     child_context,
                     child_body,
                     child_span,
                     parameters=child_parameters,
+                    only_once=child_only_once,
                     body_start_line=child_body_start_line,
                 )
             )
@@ -3421,6 +3427,7 @@ def _within_from_body(
     return WithinDecl(
         context=context,
         span=span,
+        only_once=only_once,
         parameters=parameters,
         entered_by=entered_by,
         depends_on=depends_on,
@@ -3473,9 +3480,14 @@ def _is_top_level_at(text: str, offset: int) -> bool:
     return depth == 0
 
 
-def _parse_within_header(header: str) -> tuple[str, dict[str, str]]:
+def _parse_within_header(header: str) -> tuple[str, dict[str, str], bool]:
+    only_once = False
+    marker = " only-once"
+    if header.endswith(marker):
+        only_once = True
+        header = header[: -len(marker)].rstrip()
     if "(" not in header:
-        return header.strip(), {}
+        return header.strip(), {}, only_once
     context, args = header.split("(", 1)
     args = args.rsplit(")", 1)[0].strip()
     parameters: dict[str, str] = {}
@@ -3485,7 +3497,7 @@ def _parse_within_header(header: str) -> tuple[str, dict[str, str]]:
             continue
         name, value = arg.split(":", 1)
         parameters[name.strip()] = value.strip()
-    return context.strip(), parameters
+    return context.strip(), parameters, only_once
 
 
 def _substitute_within_bindings(
@@ -3494,6 +3506,7 @@ def _substitute_within_bindings(
     return WithinDecl(
         context=within.context,
         span=within.span,
+        only_once=within.only_once,
         parameters={
             name: _substitute_process_bindings(value, replacements)
             for name, value in within.parameters.items()

@@ -539,6 +539,118 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
 
+    def test_only_once_within_passes_when_reachable_once(self) -> None:
+        source = """
+            context GuardedContext: Context {
+            }
+
+            object StartupTimeline: TimelineObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                A.Event::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within GuardedContext only-once {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "only-once-ok.spec"
+            ast = Path(tmp) / "only-once-ok.ast.json"
+            model = Path(tmp) / "only-once-ok.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+            data = read_json(model)
+            setup = data["model"]["objects"]["A"]["states"]["Base"]["events"]["Setup"]
+            self.assertTrue(setup["within"][0]["only_once"])
+
+    def test_only_once_within_fails_when_event_reachable_twice(self) -> None:
+        source = """
+            context GuardedContext: Context {
+            }
+
+            object StartupTimeline: TimelineObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                A.Event::Setup;
+                                A.Event::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within GuardedContext only-once {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "only-once-bad.spec"
+            ast = Path(tmp) / "only-once-bad.ast.json"
+            model = Path(tmp) / "only-once-bad.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "within only-once proof failed: GuardedContext is reachable 2 times",
+                stderr.getvalue(),
+            )
+
     def test_legacy_context_effects_remain_compatible(self) -> None:
         source = """
             type RawSpinLock {

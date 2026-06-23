@@ -611,6 +611,59 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertTrue(result.ok, [diag.message for diag in result.errors])
 
+    def test_rejects_only_once_when_event_reachable_twice(self) -> None:
+        document = parse_text(
+            """
+            context GuardedContext: Context {
+            }
+
+            object StartupTimeline: TimelineObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                A.Event::Setup;
+                                A.Event::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within GuardedContext only-once {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "within only-once proof failed: GuardedContext is reachable 2 times"
+                in diag.message
+                for diag in result.errors
+            )
+        )
+
     def test_rejects_lifecycle_transitions_outside_controlled_table(self) -> None:
         document = parse_text(
             """

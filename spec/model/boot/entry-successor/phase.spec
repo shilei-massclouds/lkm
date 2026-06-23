@@ -563,10 +563,10 @@ context PrintkBufferSetupLocalInterruptContext: Context {
      * Setup into an ordered action sequence.
      *
      * Because PrintkBuffer.Event::Setup is a Prepared -> Ready lifecycle event,
-     * this guarded section is single-commit on the successful boot path. Future
-     * reusable guard elision should require an explicit `once` marker or an
-     * equivalent single-execution proof before relying on outer Effective
-     * Context to erase guard code.
+     * this guarded section is single-commit on the successful boot path. Guard
+     * elision requires this lexical block to carry an explicit `only-once`
+     * marker and pass model-tool reachability proof before relying on outer
+     * Effective Context to erase guard code.
      */
     guard {
         entered_by {
@@ -631,7 +631,7 @@ object PrintkBuffer: BufferObject {
                     cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
                 }
 
-                within PrintkBufferSetupLocalInterruptContext {
+                within PrintkBufferSetupLocalInterruptContext only-once {
                     ensures {
                         printk_buffer_records_preserved(PrintkBuffer);
                         printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);

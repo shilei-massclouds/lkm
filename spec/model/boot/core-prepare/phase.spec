@@ -270,7 +270,7 @@ object ResourceTree: ResourceObject {
                     task_ref_ready(BootInitTaskRef);
                 }
 
-                within ResourceTreeWriteContext {
+                within ResourceTreeWriteContext only-once {
                     ensures {
                         resource_tree_ready(ResourceTree, MemBlock);
                         system_ram_resources_ready(ResourceTree, MemBlock);
@@ -716,8 +716,8 @@ object StaticBranch: KernelObject {
                     task_ref_ready(BootInitTaskRef);
                 }
 
-                within CpuHotplugReadContext {
-                    within StaticBranchJumpLabelContext {
+                within CpuHotplugReadContext only-once {
+                    within StaticBranchJumpLabelContext only-once {
                         ensures {
                             static_branch_registry_ready(StaticBranch, KernelImage);
                             static_branch_entries_sorted(StaticBranch);

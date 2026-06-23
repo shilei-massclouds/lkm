@@ -161,6 +161,7 @@ def build_model(document: SpecDocument) -> BuildResult:
     _check_lock_references(model, diagnostics)
     _check_exclusive_context_references(model, diagnostics)
     _check_references(model, diagnostics)
+    _check_only_once_withins(model, diagnostics)
 
     return BuildResult(model=model, diagnostics=diagnostics)
 
@@ -851,6 +852,97 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
                     )
                 for within in event.decl.within:
                     _check_within_references(model, within, diagnostics)
+
+
+def _check_only_once_withins(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
+    event_counts = _reachable_event_call_counts(model)
+    for obj in model.objects.values():
+        for state in obj.states.values():
+            for event in state.events.values():
+                event_key = (obj.name, event.name)
+                event_count = event_counts.get(event_key, 0)
+                for within, local_count in _within_local_entries(event.decl.within):
+                    if not within.only_once:
+                        continue
+                    total_count = event_count * local_count
+                    if total_count != 1:
+                        diagnostics.append(
+                            Diagnostic(
+                                Severity.ERROR,
+                                "within only-once proof failed: "
+                                f"{within.context} is reachable {total_count} times",
+                                within.span,
+                            )
+                        )
+
+
+def _reachable_event_call_counts(model: ObjectModel) -> dict[tuple[str, str], int]:
+    root = ("StartupTimeline", "Setup")
+    if _event_def(model, *root) is None:
+        return {}
+    counts: dict[tuple[str, str], int] = {}
+    visiting: set[tuple[str, str]] = set()
+
+    def visit(event_key: tuple[str, str]) -> None:
+        counts[event_key] = counts.get(event_key, 0) + 1
+        if event_key in visiting:
+            return
+        event = _event_def(model, *event_key)
+        if event is None:
+            return
+        visiting.add(event_key)
+        for callee in _driven_events(event.decl):
+            visit(callee)
+        visiting.remove(event_key)
+
+    visit(root)
+    return counts
+
+
+def _event_def(model: ObjectModel, object_name: str, event_name: str) -> EventDef | None:
+    obj = model.objects.get(object_name)
+    if obj is None:
+        return None
+    for state in obj.states.values():
+        event = state.events.get(event_name)
+        if event is not None:
+            return event
+    return None
+
+
+def _driven_events(event: EventDecl) -> list[tuple[str, str]]:
+    events: list[tuple[str, str]] = []
+    for block in event.drives:
+        events.extend(_driven_events_from_block(block))
+    for within in event.within:
+        events.extend(_driven_events_from_within(within))
+    return events
+
+
+def _driven_events_from_within(within) -> list[tuple[str, str]]:
+    events: list[tuple[str, str]] = []
+    for block in within.drives:
+        events.extend(_driven_events_from_block(block))
+    for child in within.within:
+        events.extend(_driven_events_from_within(child))
+    return events
+
+
+def _driven_events_from_block(block: Block) -> list[tuple[str, str]]:
+    events: list[tuple[str, str]] = []
+    for entry, _span in block.entry_spans:
+        match = _OBJECT_EVENT_EXPR_RE.match(entry)
+        if match is not None:
+            events.append((match.group(1), match.group(2)))
+    return events
+
+
+def _within_local_entries(withins) -> list[tuple[object, int]]:
+    entries: list[tuple[object, int]] = []
+    for within in withins:
+        entries.append((within, 1))
+        entries.extend(_within_local_entries(within.within))
+    return entries
 
 
 

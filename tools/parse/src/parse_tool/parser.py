@@ -587,7 +587,7 @@ def _parse_event(segment: _Segment) -> EventDecl:
 
 def _parse_within(block: Block) -> WithinDecl:
     context_header = block.header.strip()
-    context, parameters = _parse_within_header(context_header)
+    context, parameters, only_once = _parse_within_header(context_header)
     if not context:
         raise ParseError(f"line {block.span.start_line}: within block is missing context")
 
@@ -630,6 +630,7 @@ def _parse_within(block: Block) -> WithinDecl:
     return WithinDecl(
         context=context,
         span=block.span,
+        only_once=only_once,
         parameters=parameters,
         entered_by=entered_by,
         depends_on=depends_on,
@@ -643,9 +644,14 @@ def _parse_within(block: Block) -> WithinDecl:
     )
 
 
-def _parse_within_header(header: str) -> tuple[str, dict[str, str]]:
+def _parse_within_header(header: str) -> tuple[str, dict[str, str], bool]:
+    only_once = False
+    marker = " only-once"
+    if header.endswith(marker):
+        only_once = True
+        header = header[: -len(marker)].rstrip()
     if "(" not in header:
-        return header, {}
+        return header, {}, only_once
     if not header.endswith(")"):
         raise ParseError(f"invalid within header: {_preview(header)}")
     context, args = header.split("(", 1)
@@ -653,7 +659,7 @@ def _parse_within_header(header: str) -> tuple[str, dict[str, str]]:
     args = args[:-1].strip()
     parameters: dict[str, str] = {}
     if not args:
-        return context, parameters
+        return context, parameters, only_once
     for raw_arg in args.split(","):
         arg = raw_arg.strip()
         if not arg:
@@ -666,7 +672,7 @@ def _parse_within_header(header: str) -> tuple[str, dict[str, str]]:
         if not name or not value:
             raise ParseError(f"invalid within parameter: {_preview(arg)}")
         parameters[name] = value
-    return context, parameters
+    return context, parameters, only_once
 
 
 def _parse_named_blocks(body: str, start_line: int) -> list[Block]:

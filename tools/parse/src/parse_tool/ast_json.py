@@ -161,6 +161,7 @@ def _event_to_json(item: EventDecl) -> dict[str, Any]:
 def _within_to_json(item: WithinDecl) -> dict[str, Any]:
     return {
         "context": item.context,
+        "only_once": item.only_once,
         "parameters": item.parameters,
         "span": _span_to_json(item.span),
         "entered_by": [_block_to_json(block) for block in item.entered_by],

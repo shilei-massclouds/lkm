@@ -214,6 +214,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(context.obj_refs, ["A", "B"])
         event = document.objects[0].states[0].events[0]
         self.assertEqual(event.within[0].context, "WakeContext")
+        self.assertFalse(event.within[0].only_once)
         self.assertEqual(
             event.within[0].entered_by[0].entries,
             ["TaskPiLock.Event::LockIrqSave"],
@@ -229,6 +230,33 @@ class ParserTests(unittest.TestCase):
             event.within[0].exited_by[0].entries,
             ["TaskPiLock.Event::UnlockIrqRestore"],
         )
+
+    def test_parse_within_only_once(self) -> None:
+        document = parse_text(
+            """
+            context BootContext: Context {
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within BootContext only-once {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        event = document.objects[0].states[0].events[0]
+        self.assertTrue(event.within[0].only_once)
 
     def test_parse_resource_context_guard_and_effects(self) -> None:
         document = parse_text(
