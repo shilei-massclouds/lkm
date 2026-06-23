@@ -233,7 +233,7 @@
 
 `guard` 可以声明 `holds` 块，用于描述在该 guard 作用域内始终成立的属性。例如，启动早期的阶段边界 guard 可以声明单核、单任务、本地中断关闭、抢占关闭等属性。`holds` 只应写入该 guard 能够明确保证的事实；如果某一维度不由当前 guard 改变或保证，就不应写成 `true` 或其它肯定值。缺省表示该 guard 对该维度不作保证，在上下文叠加时保持中性，不改变外层已经存在的约束，也不能凭空生成新的证明能力。
 
-因此，`effects` 不应作为源规格中必须手工重复维护的块。更合适的规则是：`guard.kind`、`guard.holds`、`obj_refs` 以及上下文类型共同决定该上下文对 `Effective Context` 的贡献；这个贡献可以在工具内部归一化为 effects，用于检查、渲染或调试，但源规格应优先表达“上下文为何成立”和“该 guard 确定保持什么”。若后续正式规格确实暴露 `effects`，也应把它视为从 guard 推导出的结果，而不是与 guard 并列、需要人工保持一致的第二套事实。
+因此，`effects` 不应作为源规格中必须手工重复维护的块。更合适的规则是：`guard` 的 `lock_ref`、`entered_by` / `exited_by`、`holds`、`obj_refs` 以及上下文类型共同决定该上下文对 `Effective Context` 的贡献；这个贡献可以在工具内部归一化为 effects，用于检查、渲染或调试，但源规格应优先表达“上下文为何成立”和“该 guard 确定保持什么”。若后续正式规格确实暴露 `effects`，也应把它视为从 guard 推导出的结果，而不是与 guard 并列、需要人工保持一致的第二套事实。
 
 上下文叠加应遵循单调加强原则。内层上下文可以进一步增加约束，例如关闭中断、关闭抢占、取得资源独占访问权或提升可用句柄层级；但不能削弱外层已经成立的约束。未被内层 guard 提及的维度，应从外层 `Effective Context` 继承，而不是被解释为允许或禁止。由此可以避免把“未约束”误写成“允许”，也避免把某个 guard 不能证明的属性错误地归入该上下文。
 
@@ -241,7 +241,7 @@
 
 ```spec
 context BootPhaseContext: Context {
-    guard: PhaseBoundaryGuard {
+    guard {
         holds {
             cpu_concurrency: single_cpu;
             task_concurrency: single_task;
@@ -252,7 +252,7 @@ context BootPhaseContext: Context {
 }
 ```
 
-随后 `BootPhase` 可用 `within BootPhaseContext { ... }` 包围其阶段驱动序列。这里 `PhaseBoundaryGuard` 没有额外的运行时进入动作；它表达的是该阶段词法范围内由启动事实和阶段边界共同保证的上下文属性。后续若在该范围内再进入自旋锁、RCU 读侧或关中断上下文，新的 guard 只贡献自己能够明确保证的属性，最终执行点的约束由这些贡献与外层约束叠加形成。
+随后 `BootPhase` 可用 `within BootPhaseContext { ... }` 包围其阶段驱动序列。这里的 `guard` 没有额外的运行时进入动作；它表达的是该阶段词法范围内由启动事实和阶段边界共同保证的上下文属性。后续若在该范围内再进入自旋锁、RCU 读侧或关中断上下文，新的 guard 只贡献自己能够明确保证的属性，最终执行点的约束由这些贡献与外层约束叠加形成。
 
 `Effective Context` 对后续规格推导和代码生成至少有三类作用。
 

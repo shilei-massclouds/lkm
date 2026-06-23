@@ -405,51 +405,54 @@ type ArceosExCorePrepareCodingMust {
 type ArceosExEffectiveContextCodingMust {
     invariant {
         /*
-         * PhaseBoundaryGuard:
+         * Natural phase-boundary guard:
          *
-         * A PhaseBoundaryGuard records the Effective Context contribution of
+         * A natural phase-boundary guard records the Effective Context contribution of
          * the surrounding execution window, such as boot-time single CPU/task
          * execution with local interrupts and preemption already disabled. It
          * must lower to no runtime enter/exit code by itself. Its contribution
          * still participates in nested Effective Context and may influence
          * lowering decisions for inner context or guard constructs; generated
          * code must not emit dummy lock, irq or preemption operations for the
-         * PhaseBoundaryGuard itself.
+         * phase-boundary guard itself.
          */
         arceos_ex_must_phase_boundary_guard_lower_to_context_contribution_only();
 
         /*
-         * PreemptionGuard:
+         * PreemptionControl guard boundary:
          *
-         * A PreemptionGuard is a protocol guard, not a pure boolean proof. It
+         * A guard whose entered_by/exited_by use PreemptionControl is a protocol
+         * guard, not a pure boolean proof. It
          * must lower to the target's counted preemption-disable enter and
          * matching exit operation, or an equivalent RAII guard that performs
          * those operations exactly once. Even if an outer Effective Context
-         * already proves preemption: disabled, the nested PreemptionGuard must
+         * already proves preemption: disabled, the nested preemption-control guard must
          * still preserve its own count/owner/debug protocol. Avoiding those
          * operations is valid only when the model does not introduce a nested
-         * PreemptionGuard and instead relies solely on an outer context
+         * preemption-control guard and instead relies solely on an outer context
          * contribution.
          */
         arceos_ex_must_preemption_guard_lower_to_counted_enter_exit();
 
         /*
-         * LocalInterruptGuard:
+         * LocalInterruptControl guard boundary:
          *
-         * A LocalInterruptGuard that models irqsave/irqrestore must lower to
+         * A guard whose entered_by/exited_by use LocalInterruptControl
+         * irqsave/irqrestore must lower to
          * operations that save the incoming local interrupt state and restore
          * exactly that saved state on exit. It must not be reduced to an
          * unconditional disable/enable pair. A guard that intentionally models
          * unconditional local IRQ disable/enable must be represented as a
-         * distinct guard kind or explicitly documented action, not inferred
+         * distinct explicitly documented action, not inferred
          * from the irqsave form.
          */
         arceos_ex_must_local_interrupt_guard_preserve_saved_flags();
 
         /*
-         * RawSpinLockIrqSaveGuard:
+         * RawSpinLock irq-save guard boundary:
          *
-         * A RawSpinLockIrqSaveGuard must lower to the lock irqsave protocol:
+         * A guard whose entered_by/exited_by use RawSpinLock LockIrqSave /
+         * UnlockIrqRestore must lower to the lock irqsave protocol:
          * save local interrupt state, disable local interrupts as required by
          * the target primitive, acquire the raw spin lock, and on exit release
          * the same lock before restoring the saved interrupt state. Its

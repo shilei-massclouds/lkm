@@ -24,7 +24,7 @@ lock KthreaddTaskPiLock: RawSpinLock;
 lock BootRunQueueLock: RawSpinLock;
 
 context WakeUpNewTaskContext: ResourceExclusiveContext {
-    guard: RawSpinLockIrqSaveGuard {
+    guard {
         lock_ref: KernelInitTaskPiLock;
 
         entered_by {
@@ -44,7 +44,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 }
 
 context WakeUpKthreaddTaskContext: ResourceExclusiveContext {
-    guard: RawSpinLockIrqSaveGuard {
+    guard {
         lock_ref: KthreaddTaskPiLock;
 
         entered_by {
@@ -75,7 +75,7 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
      * lock, obj_refs and cpu_of(selected_rq) from the selected RunQueueRef
      * instead of this BootRunQueue specialization.
      */
-    guard: RawSpinLockIrqSaveGuard {
+    guard {
         lock_ref: BootRunQueueLock;
 
         entered_by {
@@ -100,7 +100,7 @@ context SchedulePreemptionContext: Context {
      * preempt-disabled context, so this context is the schedule-owned
      * preemption boundary rather than the caller's inherited guard.
      */
-    guard: PreemptionGuard {
+    guard {
         entered_by {
             BootIdlePreemption.Event::Disable;
         }
@@ -126,7 +126,7 @@ context ScheduleLocalInterruptContext: Context {
      * preemption-disabled and voluntary-switching-disabled facts are inherited
      * from the outer SchedulePreemptionContext.
      */
-    guard: LocalInterruptGuard {
+    guard {
         entered_by {
             BootCpuLocalInterrupt.Event::SaveAndDisable;
         }
@@ -147,12 +147,13 @@ context ScheduleLocalInterruptContext: Context {
 context ScheduleRunQueueContext: ResourceExclusiveContext {
     /*
      * This context models the rq_lock() region inside __schedule(). Current
-     * tooling reuses RawSpinLockIrqSaveGuard for the BootRunQueueLock boundary;
+     * tooling infers the irq-save spinlock contribution from the BootRunQueueLock
+     * LockIrqSave/UnlockIrqRestore boundary;
      * the Linux path has local interrupts already disabled before rq_lock().
      * A narrower runqueue-lock guard can replace this once rq_lock/raw rq lock
      * is modeled separately from irq-save spinlock.
      */
-    guard: RawSpinLockIrqSaveGuard {
+    guard {
         lock_ref: BootRunQueueLock;
 
         entered_by {
@@ -185,7 +186,7 @@ context BootIdleStartupContext: Context {
      * idle task 不通过普通抢占被动切出；它只在本 CPU idle loop 观察到
      * need_resched 后，主动进入 schedule_idle()/scheduler 调度边界。
      */
-    guard: PreemptionGuard {
+    guard {
         entered_by {
             BootIdlePreemption.Event::Disable;
         }

@@ -472,7 +472,7 @@ class ModelToolTests(unittest.TestCase):
             lock InnerLock: RawSpinLock;
 
             context OuterContext: ResourceExclusiveContext {
-                guard: RawSpinLockIrqSaveGuard {
+                guard {
                     lock_ref: OuterLock;
 
                     entered_by {
@@ -490,7 +490,7 @@ class ModelToolTests(unittest.TestCase):
             }
 
             context InnerContext: ResourceExclusiveContext {
-                guard: RawSpinLockIrqSaveGuard {
+                guard {
                     lock_ref: InnerLock;
 
                     entered_by {
@@ -554,7 +554,7 @@ class ModelToolTests(unittest.TestCase):
             lock ALock: RawSpinLock;
 
             context AContext: ResourceExclusiveContext {
-                guard: RawSpinLockIrqSaveGuard {
+                guard {
                     lock_ref: ALock;
 
                     entered_by {
@@ -633,7 +633,7 @@ class ModelToolTests(unittest.TestCase):
             lock OuterLock: RawSpinLock;
 
             context OuterContext: ResourceExclusiveContext {
-                guard: RawSpinLockIrqSaveGuard {
+                guard {
                     lock_ref: OuterLock;
 
                     entered_by {
@@ -651,7 +651,7 @@ class ModelToolTests(unittest.TestCase):
             }
 
             context InnerPreemptContext: Context {
-                guard: PreemptionGuard {
+                guard {
                     entered_by {
                         TaskPreemption.Event::Disable;
                     }
@@ -727,7 +727,7 @@ class ModelToolTests(unittest.TestCase):
             }
 
             context LocalIrqContext: Context {
-                guard: LocalInterruptGuard {
+                guard {
                     entered_by {
                         BootCpuLocalInterrupt.Event::SaveAndDisable;
                     }
@@ -783,7 +783,7 @@ class ModelToolTests(unittest.TestCase):
     def test_phase_boundary_guard_without_effects_is_valid(self) -> None:
         source = """
             context BootPhaseContext: Context {
-                guard: PhaseBoundaryGuard {
+                guard {
                     holds {
                         cpu_concurrency: single_cpu;
                         task_concurrency: single_task;
@@ -827,7 +827,7 @@ class ModelToolTests(unittest.TestCase):
     def test_plain_context_without_obj_refs_allows_drives(self) -> None:
         source = """
             context BootPhaseContext: Context {
-                guard: PhaseBoundaryGuard {
+                guard {
                     holds {
                         cpu_concurrency: single_cpu;
                         task_concurrency: single_task;
@@ -887,7 +887,7 @@ class ModelToolTests(unittest.TestCase):
     def test_guard_holds_rejects_weaker_nested_context(self) -> None:
         source = """
             context OuterContext: Context {
-                guard: PhaseBoundaryGuard {
+                guard {
                     holds {
                         voluntary_switching: disabled;
                     }
@@ -895,7 +895,7 @@ class ModelToolTests(unittest.TestCase):
             }
 
             context InnerContext: Context {
-                guard: PhaseBoundaryGuard {
+                guard {
                     holds {
                         voluntary_switching: enabled;
                     }

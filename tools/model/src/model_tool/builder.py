@@ -97,14 +97,6 @@ _ALLOWED_TRANSITIONS = frozenset(
     }
 )
 _LEGACY_CONTEXT_BOOLEAN_EFFECTS = ("interruptible", "preemptible", "sleepable")
-_CONTEXT_GUARD_KINDS = (
-    "RawSpinLockIrqSaveGuard",
-    "PreemptionGuard",
-    "LocalInterruptGuard",
-    "PhaseBoundaryGuard",
-)
-_GUARD_EVENT_ONLY_KINDS = ("PreemptionGuard", "LocalInterruptGuard")
-_GUARD_PHASE_BOUNDARY_KINDS = ("PhaseBoundaryGuard",)
 _CONTRIBUTION_KEYS = (
     "local_interrupts",
     "preemption",
@@ -536,7 +528,7 @@ def _check_exclusive_context_references(
             )
         if context.guard is not None:
             _check_context_guard_references(model, context, diagnostics)
-        contribution = _derive_context_contribution(context, diagnostics)
+        contribution = _derive_context_contribution(model, context, diagnostics)
         legacy_effects = _parse_legacy_context_effects(context, diagnostics)
         if legacy_effects is not None:
             _check_legacy_effects_compatible(
@@ -561,62 +553,10 @@ def _check_context_guard_references(
     guard = context.guard
     if guard is None:
         return
-    if guard.kind not in _CONTEXT_GUARD_KINDS:
-        diagnostics.append(
-            Diagnostic(
-                Severity.ERROR,
-                f"unsupported guard kind on context {context.name}: {guard.kind}",
-                guard.span,
-            )
-        )
-        return
-    if guard.kind in _GUARD_EVENT_ONLY_KINDS:
-        if guard.lock_ref is not None:
-            diagnostics.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    f"{guard.kind} on context {context.name} must not declare lock_ref",
-                    guard.span,
-                )
-            )
+    if guard.lock_ref is None:
         _check_event_blocks(model, guard.entered_by, diagnostics)
         _check_event_blocks(model, guard.exited_by, diagnostics)
         return
-    if guard.kind in _GUARD_PHASE_BOUNDARY_KINDS:
-        if guard.lock_ref is not None:
-            diagnostics.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    f"{guard.kind} on context {context.name} must not declare lock_ref",
-                    guard.span,
-                )
-            )
-        if guard.entered_by:
-            diagnostics.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    f"{guard.kind} on context {context.name} must not declare entered_by",
-                    guard.entered_by[0].span,
-                )
-            )
-        if guard.exited_by:
-            diagnostics.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    f"{guard.kind} on context {context.name} must not declare exited_by",
-                    guard.exited_by[0].span,
-                )
-            )
-        return
-
-    if guard.lock_ref is None:
-        diagnostics.append(
-            Diagnostic(
-                Severity.ERROR,
-                f"context guard on {context.name} is missing lock_ref",
-                guard.span,
-            )
-        )
     elif guard.lock_ref != context.lock_ref:
         diagnostics.append(
             Diagnostic(
@@ -625,17 +565,30 @@ def _check_context_guard_references(
                 guard.span,
             )
         )
-    if guard.kind == "RawSpinLockIrqSaveGuard" and guard.lock_ref is not None:
-        lock = model.locks.get(guard.lock_ref)
-        if lock is not None and lock.kind != "RawSpinLock":
-            diagnostics.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    "RawSpinLockIrqSaveGuard requires RawSpinLock lock_ref: "
-                    f"{guard.lock_ref}",
-                    guard.span,
-                )
+    if guard.lock_ref not in model.locks and guard.lock_ref not in model.objects:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"unknown guard lock_ref on context {context.name}: {guard.lock_ref}",
+                guard.span,
             )
+        )
+    if not guard.entered_by:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"context guard on {context.name} is missing entered_by",
+                guard.span,
+            )
+        )
+    if not guard.exited_by:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"context guard on {context.name} is missing exited_by",
+                guard.span,
+            )
+        )
     _check_lock_event_blocks(model, guard.entered_by, diagnostics, context=context)
     _check_lock_event_blocks(model, guard.exited_by, diagnostics, context=context)
 
@@ -648,9 +601,9 @@ def _check_event_blocks(
 
 
 def _derive_context_contribution(
-    context: ExclusiveContextDef, diagnostics: list[Diagnostic]
+    model: ObjectModel, context: ExclusiveContextDef, diagnostics: list[Diagnostic]
 ) -> _ContextContribution:
-    contribution = _schema_context_contribution(context)
+    contribution = _schema_context_contribution(model, context)
     hold_entries = _context_guard_holds(context)
     for key, raw in hold_entries.items():
         normalized = _normalize_hold_value(raw)
@@ -678,7 +631,9 @@ def _derive_context_contribution(
     return contribution
 
 
-def _schema_context_contribution(context: ExclusiveContextDef) -> _ContextContribution:
+def _schema_context_contribution(
+    model: ObjectModel, context: ExclusiveContextDef
+) -> _ContextContribution:
     guard = context.guard
     exclusive_refs = (
         frozenset(context.obj_refs)
@@ -687,22 +642,50 @@ def _schema_context_contribution(context: ExclusiveContextDef) -> _ContextContri
     )
     if guard is None:
         return _ContextContribution(exclusive_refs=exclusive_refs)
-    if guard.kind == "RawSpinLockIrqSaveGuard":
-        return _ContextContribution(
+    contribution = _ContextContribution(exclusive_refs=exclusive_refs)
+    boundary_events = _guard_boundary_events(model, guard.entered_by)
+    if any(receiver_kind == "RawSpinLock" and event_name == "LockIrqSave"
+           for receiver_kind, event_name in boundary_events):
+        contribution = _replace_context_contribution(
+            contribution,
             local_interrupts=False,
             preemption=False,
             voluntary_switching=False,
-            exclusive_refs=exclusive_refs,
         )
-    if guard.kind == "PreemptionGuard":
-        return _ContextContribution(
+    if any(receiver_kind == "PreemptionControl" and event_name == "Disable"
+           for receiver_kind, event_name in boundary_events):
+        contribution = _replace_context_contribution(
+            contribution,
             preemption=False,
             voluntary_switching=False,
-            exclusive_refs=exclusive_refs,
         )
-    if guard.kind == "LocalInterruptGuard":
-        return _ContextContribution(local_interrupts=False, exclusive_refs=exclusive_refs)
-    return _ContextContribution(exclusive_refs=exclusive_refs)
+    if any(receiver_kind == "LocalInterruptControl" and event_name in {"Disable", "SaveAndDisable"}
+           for receiver_kind, event_name in boundary_events):
+        contribution = _replace_context_contribution(
+            contribution,
+            local_interrupts=False,
+        )
+    return contribution
+
+
+def _guard_boundary_events(model: ObjectModel, blocks: list[Block]) -> list[tuple[str, str]]:
+    events: list[tuple[str, str]] = []
+    for block in blocks:
+        for receiver_name, event_name in _LOCK_EVENT_RE.findall(block.body):
+            receiver_kind = _guard_receiver_kind(model, receiver_name)
+            if receiver_kind is not None:
+                events.append((receiver_kind, event_name))
+    return events
+
+
+def _guard_receiver_kind(model: ObjectModel, receiver_name: str) -> str | None:
+    lock = model.locks.get(receiver_name)
+    if lock is not None:
+        return lock.kind
+    obj = model.objects.get(receiver_name)
+    if obj is not None:
+        return obj.kind
+    return None
 
 
 def _context_guard_holds(context: ExclusiveContextDef) -> dict[str, str]:
@@ -898,7 +881,7 @@ def _check_within_references(
             )
         )
         return
-    contribution = _derive_context_contribution(context, diagnostics)
+    contribution = _derive_context_contribution(model, context, diagnostics)
     if inherited_context is not None:
         _check_context_nesting_contribution(
             parent_context=inherited_context,
@@ -1032,16 +1015,17 @@ def _check_lock_event_references(
             )
             continue
         lock = model.locks.get(lock_name)
-        if lock is None:
+        obj = model.objects.get(lock_name)
+        if lock is None and obj is None:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown lock in event reference: {lock_name}.Event::{event_name}",
+                    f"unknown lock_ref in event reference: {lock_name}.Event::{event_name}",
                     block.span,
                 )
             )
             continue
-        if lock.kind is None:
+        if lock is not None and lock.kind is None:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -1050,14 +1034,27 @@ def _check_lock_event_references(
                 )
             )
             continue
-        lock_type = model.types.get(lock.kind)
-        if lock_type is None:
+        if lock is not None:
+            lock_type = model.types.get(lock.kind)
+            if lock_type is None:
+                continue
+            if not _type_declares_event(lock_type, event_name):
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"unknown lock type event reference: {lock_name}.Event::{event_name}",
+                        block.span,
+                    )
+                )
             continue
-        if not _type_declares_event(lock_type, event_name):
+        assert obj is not None
+        if not any(event_name in state.events for state in obj.states.values()) and not (
+            obj.kind in model.types and _type_declares_event(model.types[obj.kind], event_name)
+        ):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown lock type event reference: {lock_name}.Event::{event_name}",
+                    f"unknown lock object event reference: {lock_name}.Event::{event_name}",
                     block.span,
                 )
             )

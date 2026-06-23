@@ -281,7 +281,7 @@ class DerivationTests(unittest.TestCase):
                 lock TaskPiLock: RawSpinLock;
 
                 context WakeContext: ResourceExclusiveContext {
-                    guard: RawSpinLockIrqSaveGuard {
+                    guard {
                         lock_ref: TaskPiLock;
 
                         entered_by {

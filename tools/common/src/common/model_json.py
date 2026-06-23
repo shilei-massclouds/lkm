@@ -137,7 +137,6 @@ def _context_guard_from_json(item: Any) -> ContextGuardDecl:
     if not isinstance(properties, dict):
         raise ValueError("context_guard.properties must be an object")
     return ContextGuardDecl(
-        kind=_string(data, "kind"),
         span=_span_from_json(data["span"]),
         lock_ref=lock_ref,
         entered_by=[_block_from_json(block) for block in _list(data, "entered_by")],

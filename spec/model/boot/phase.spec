@@ -18,7 +18,7 @@ context BootPhaseContext: Context {
      * boundary itself provides the proof; it does not lower to runtime guard
      * code.
      */
-    guard: PhaseBoundaryGuard {
+    guard {
         holds {
             cpu_concurrency: single_cpu;
             task_concurrency: single_task;

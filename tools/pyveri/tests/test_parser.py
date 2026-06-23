@@ -236,7 +236,7 @@ class ParserTests(unittest.TestCase):
             lock TaskPiLock: RawSpinLock;
 
             context WakeContext: ResourceExclusiveContext {
-                guard: RawSpinLockIrqSaveGuard {
+                guard {
                     lock_ref: TaskPiLock;
 
                     entered_by {
@@ -295,7 +295,6 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(context.kind, "ResourceExclusiveContext")
         self.assertIsNotNone(context.guard)
         assert context.guard is not None
-        self.assertEqual(context.guard.kind, "RawSpinLockIrqSaveGuard")
         self.assertEqual(context.guard.lock_ref, "TaskPiLock")
         self.assertEqual(context.lock_ref, "TaskPiLock")
         self.assertEqual(context.guard.entered_by[0].entries, ["TaskPiLock.Event::LockIrqSave"])
@@ -316,7 +315,7 @@ class ParserTests(unittest.TestCase):
         document = parse_text(
             """
             context BootPhaseContext: Context {
-                guard: PhaseBoundaryGuard {
+                guard {
                     holds {
                         cpu_concurrency: single_cpu;
                         task_concurrency: single_task;
@@ -332,7 +331,6 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(context.name, "BootPhaseContext")
         self.assertIsNotNone(context.guard)
         assert context.guard is not None
-        self.assertEqual(context.guard.kind, "PhaseBoundaryGuard")
         self.assertEqual(context.guard.entered_by, [])
         self.assertEqual(context.guard.exited_by, [])
         self.assertEqual(context.guard.holds[0].entries, [

@@ -170,7 +170,6 @@ def _context_guard_to_json(item: ContextGuardDecl | None) -> dict[str, Any] | No
     if item is None:
         return None
     return {
-        "kind": item.kind,
         "span": _span_to_json(item.span),
         "lock_ref": item.lock_ref,
         "entered_by": [_block_to_json(block) for block in item.entered_by],

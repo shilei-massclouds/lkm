@@ -363,11 +363,9 @@ def _parse_context_body(
 
 
 def _parse_context_guard(block: Block) -> ContextGuardDecl:
-    kind = block.header.strip()
-    if kind.startswith(":"):
-        kind = kind[1:].strip()
-    if not kind:
-        raise ParseError(f"line {block.span.start_line}: guard block is missing kind")
+    header = block.header.strip()
+    if header:
+        raise ParseError(f"line {block.span.start_line}: guard block must not declare kind")
 
     lock_ref: str | None = None
     entered_by: list[Block] = []
@@ -403,7 +401,6 @@ def _parse_context_guard(block: Block) -> ContextGuardDecl:
             lock_ref = value
 
     return ContextGuardDecl(
-        kind=kind,
         span=block.span,
         lock_ref=lock_ref,
         entered_by=entered_by,

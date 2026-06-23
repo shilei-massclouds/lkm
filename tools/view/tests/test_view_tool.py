@@ -237,7 +237,6 @@ class ViewToolTests(unittest.TestCase):
                         "WakeUpNewTaskContext": {
                             "lock_ref": "KernelInitTaskPiLock",
                             "guard": {
-                                "kind": "RawSpinLockIrqSaveGuard",
                                 "lock_ref": "KernelInitTaskPiLock",
                                 "entered_by": [
                                     {"body": "KernelInitTaskPiLock.Event::LockIrqSave;"}
@@ -252,7 +251,6 @@ class ViewToolTests(unittest.TestCase):
                         "EnqueueSelectedRunQueueContext": {
                             "lock_ref": "BootRunQueueLock",
                             "guard": {
-                                "kind": "RawSpinLockIrqSaveGuard",
                                 "lock_ref": "BootRunQueueLock",
                                 "entered_by": [
                                     {"body": "BootRunQueueLock.Event::LockIrqSave;"}
@@ -356,7 +354,6 @@ class ViewToolTests(unittest.TestCase):
         )
         self.assertIn("WakeUpNewTaskContext", context_cell.label)
         self.assertIn("lock=KernelInitTaskPiLock", context_cell.label)
-        self.assertIn("guard=RawSpinLockIrqSaveGuard", context_cell.label)
         self.assertIn(
             "enter=KernelInitTaskPiLock.Event::LockIrqSave", context_cell.label
         )
@@ -437,7 +434,6 @@ class ViewToolTests(unittest.TestCase):
                         "ScheduleRunQueueContext": {
                             "lock_ref": "BootRunQueueLock",
                             "guard": {
-                                "kind": "RawSpinLockIrqSaveGuard",
                                 "lock_ref": "BootRunQueueLock",
                                 "entered_by": [
                                     {"body": "BootRunQueueLock.Event::LockIrqSave;"}

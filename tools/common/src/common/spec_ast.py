@@ -147,7 +147,6 @@ class LockDecl:
 class ContextGuardDecl:
     """A guard that establishes context entry and exit boundaries."""
 
-    kind: str
     span: SourceSpan
     lock_ref: str | None = None
     entered_by: list[Block] = field(default_factory=list)

@@ -202,7 +202,6 @@ class RenderToolTests(unittest.TestCase):
                         label=(
                             "WakeUpNewTaskContext"
                             "|lock=KernelInitTaskPiLock"
-                            "|guard=RawSpinLockIrqSaveGuard"
                             "|enter=KernelInitTaskPiLock.Event::LockIrqSave"
                             "|exit=KernelInitTaskPiLock.Event::UnlockIrqRestore"
                         ),
@@ -273,7 +272,7 @@ class RenderToolTests(unittest.TestCase):
         self.assertIn("context-order", text)
         self.assertIn("WakeUpNewTaskContext", text)
         self.assertIn("lock: KernelInitTaskPiLock", text)
-        self.assertNotIn("guard: RawSpinLockIrqSaveGuard", text)
+        self.assertNotIn("guard:", text)
         self.assertNotIn("enter: KernelInitTaskPiLock.LockIrqSave", text)
         self.assertNotIn("exit: KernelInitTaskPiLock.UnlockIrqRestore", text)
         self.assertIn("SetRuntimeState", text)

@@ -243,8 +243,8 @@ Ref receiver 的正式分发规则是：若 `R` 是 `XXXRef` 类型的引用值�
 先退出调用方继承的 preempt-disabled guard，再调用
 `Scheduler.Action::Schedule`，最后进入新的 boot-idle preempt-disabled
 上下文。`Schedule` 自身内部则建模 `schedule()`/`__schedule()` 的最小边界：
-先由 `PreemptionGuard` 建立 schedule-owned 不可抢占上下文，再由
-`LocalInterruptGuard` 关闭本 CPU 本地中断，然后在 runqueue lock context 中
+先由 `PreemptionControl.Disable` 边界建立 schedule-owned 不可抢占上下文，再由
+`LocalInterruptControl.SaveAndDisable` 边界关闭本 CPU 本地中断，然后在 runqueue lock context 中
 先从本 CPU current-task 视图得到 `CurrentTaskRef`，再执行
 `let next: TaskRef <- CurrentRunQueueRef.Action::PickNextTask(CurrentTaskRef)`，
 最后进入 `SchedulerObject.Action::SwitchTo(CurrentTaskRef, next)`。
@@ -276,17 +276,18 @@ worker sleep/running hook、RCU context switch 和 scheduler class pick 细节�
 例如锁、RCU 读侧、关抢占或关中断；也可以是阶段边界或启动早期事实这类
 天然成立的边界。Context 的正式建模机制是统一的：
 `within ContextName { ... }` 进入由 guard 定义的上下文，执行块内行为，再按
-guard 定义退出。对于没有独立运行时 enter/exit 动作的 guard，例如
-`PhaseBoundaryGuard`，`within` 的词法范围本身就是进入和退出边界。
+guard 定义退出。对于没有独立运行时 enter/exit 动作的天然 guard，
+`within` 的词法范围本身就是进入和退出边界。
 临界区上下文、原子上下文、RCU 读侧上下文等分类主要是规格语义描述上的分类；
-在 formal 结构上不需要拆成不同的 context 语法类别。差异来自 guard 类型、
-guard 明确保持的属性以及上下文引用集合：RawSpinLock guard 产生资源互斥效果，
+在 formal 结构上不需要拆成不同的 context 语法类别，也不需要在源语法中给
+guard 再命名一个 kind。差异来自 guard 引用的对象、进入/退出边界事件、
+guard 明确保持的属性以及上下文引用集合：RawSpinLock 边界产生资源互斥效果，
 PreemptionControl guard 产生不可被普通抢占打断的原子上下文效果，
 LocalInterruptControl guard 产生本 CPU 本地中断关闭效果。嵌套检查和上下文强度
 叠加也应基于 guard 推导出的上下文贡献，而不是基于 context 名称。
 
-对于当前 wake-up 试验对象，guard 是 `RawSpinLockIrqSaveGuard`：它引用一个
-`RawSpinLock` 实例，并通过该锁实例的 `LockIrqSave`/`UnlockIrqRestore` 事件
+对于当前 wake-up 试验对象，guard 引用一个 `RawSpinLock` 实例，并通过该锁实例的
+`LockIrqSave`/`UnlockIrqRestore` 事件
 建立进入和退出边界。guard 本身不是锁实例；锁实例仍由 `lock Name: RawSpinLock`
 定义。
 
@@ -294,7 +295,7 @@ LocalInterruptControl guard 产生本 CPU 本地中断关闭效果。嵌套检�
 
 ```text
 context WakeUpNewTaskContext: ResourceExclusiveContext {
-    guard: RawSpinLockIrqSaveGuard {
+    guard {
         lock_ref: KernelInitTaskPiLock;
 
         entered_by {
@@ -322,8 +323,8 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 
 规则：
 
-- `guard.lock_ref` 必须引用一个 `Lock` 实例；对于 `RawSpinLockIrqSaveGuard`，该锁实例必须由 `RawSpinLock` 类型定义。
-- `guard.entered_by` 和 `guard.exited_by` 声明进入和退出上下文边界的锁事件。
+- `guard.lock_ref` 可以引用一个 `lock` 声明或可作为同步实例的对象；具体同步语义由该引用目标的类型和边界事件推导。
+- `guard.entered_by` 和 `guard.exited_by` 声明进入和退出上下文边界事件。
 - 对非锁 guard，`entered_by`/`exited_by` 声明对应控制对象的边界事件；这些边界事件是 guard 行为，不写入 `within` 内部的 `drives`。
 - 对阶段边界或天然上下文 guard，`entered_by`/`exited_by` 可以不存在；`within` 的词法范围提供边界。
 - `guard.holds` 声明该 guard 在作用域内明确保持的属性；未声明的维度表示该 guard 不作保证，在 Effective Context 叠加时保持中性。
@@ -333,7 +334,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
   `local_interrupts: enabled|disabled`、`preemption: enabled|disabled`、
   `voluntary_switching: enabled|disabled`、`cpu_concurrency: single|multi`、
   `task_concurrency: single|multi`。旧 `true|false` 只作为迁移期兼容输入。
-- 首轮 guard schema 固定推导如下：`RawSpinLockIrqSaveGuard` 推导本地中断关闭、抢占关闭、主动切换关闭；`PreemptionGuard` 推导抢占关闭和主动切换关闭；`LocalInterruptGuard` 只推导本地中断关闭；`PhaseBoundaryGuard` 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
+- 首轮 guard contribution 推导如下：`RawSpinLock.LockIrqSave` 边界推导本地中断关闭、抢占关闭、主动切换关闭；`PreemptionControl.Disable` 边界推导抢占关闭和主动切换关闭；`LocalInterruptControl.SaveAndDisable` / `Disable` 边界只推导本地中断关闭；没有进入/退出事件的天然 guard 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
 - 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
 - 同一时刻至多一个执行流可以成功进入同一个 resource exclusive context。
@@ -413,7 +414,7 @@ guard 推导出的 context contribution 叠加为新的 Effective Context。
 Effective Context 决定当前流能访问哪些对象、能获得哪些层级的对象句柄，
 以及能否主动切换、能否被抢占、本地中断入口是否关闭等运行约束。
 
-源规格应优先声明 `guard`、`guard.holds` 和 `obj_refs`，由 guard schema
+源规格应优先声明 `guard`、`guard.holds` 和 `obj_refs`，由 guard 边界和引用目标类型
 推导该 context 对 Effective Context 的贡献。`effects` 是工具内部可用于检查、
 渲染或调试的归一化结果，不是 formal source 中必须人工重复维护的第二套事实。
 当前需要表达和推导的最小维度包括：
