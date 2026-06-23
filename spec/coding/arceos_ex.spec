@@ -101,6 +101,12 @@ predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() 
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
 predicate arceos_ex_must_user_boot_not_require_partition_objects_for_whole_disk_ext2() -> bool;
 predicate arceos_ex_must_action_lowering_use_context_ref_and_typed_packet() -> bool;
+predicate arceos_ex_must_phase_boundary_guard_lower_to_context_contribution_only() -> bool;
+predicate arceos_ex_must_preemption_guard_lower_to_counted_enter_exit() -> bool;
+predicate arceos_ex_must_local_interrupt_guard_preserve_saved_flags() -> bool;
+predicate arceos_ex_must_raw_spin_lock_irqsave_guard_lock_and_restore() -> bool;
+predicate arceos_ex_must_effective_context_not_elide_protocol_guards() -> bool;
+predicate arceos_ex_must_defer_mutex_rwlock_rcu_lowering_until_primitives_exist() -> bool;
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
@@ -393,6 +399,91 @@ type ArceosExCorePrepareCodingMust {
          * record the local IRQ save/restore guard before reporting Ready.
          */
         arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore();
+    }
+}
+
+type ArceosExEffectiveContextCodingMust {
+    invariant {
+        /*
+         * PhaseBoundaryGuard:
+         *
+         * A PhaseBoundaryGuard records the Effective Context contribution of
+         * the surrounding execution window, such as boot-time single CPU/task
+         * execution with local interrupts and preemption already disabled. It
+         * must lower to no runtime enter/exit code by itself. Its contribution
+         * still participates in nested Effective Context and may influence
+         * lowering decisions for inner context or guard constructs; generated
+         * code must not emit dummy lock, irq or preemption operations for the
+         * PhaseBoundaryGuard itself.
+         */
+        arceos_ex_must_phase_boundary_guard_lower_to_context_contribution_only();
+
+        /*
+         * PreemptionGuard:
+         *
+         * A PreemptionGuard is a protocol guard, not a pure boolean proof. It
+         * must lower to the target's counted preemption-disable enter and
+         * matching exit operation, or an equivalent RAII guard that performs
+         * those operations exactly once. Even if an outer Effective Context
+         * already proves preemption: disabled, the nested PreemptionGuard must
+         * still preserve its own count/owner/debug protocol. Avoiding those
+         * operations is valid only when the model does not introduce a nested
+         * PreemptionGuard and instead relies solely on an outer context
+         * contribution.
+         */
+        arceos_ex_must_preemption_guard_lower_to_counted_enter_exit();
+
+        /*
+         * LocalInterruptGuard:
+         *
+         * A LocalInterruptGuard that models irqsave/irqrestore must lower to
+         * operations that save the incoming local interrupt state and restore
+         * exactly that saved state on exit. It must not be reduced to an
+         * unconditional disable/enable pair. A guard that intentionally models
+         * unconditional local IRQ disable/enable must be represented as a
+         * distinct guard kind or explicitly documented action, not inferred
+         * from the irqsave form.
+         */
+        arceos_ex_must_local_interrupt_guard_preserve_saved_flags();
+
+        /*
+         * RawSpinLockIrqSaveGuard:
+         *
+         * A RawSpinLockIrqSaveGuard must lower to the lock irqsave protocol:
+         * save local interrupt state, disable local interrupts as required by
+         * the target primitive, acquire the raw spin lock, and on exit release
+         * the same lock before restoring the saved interrupt state. Its
+         * Effective Context contribution includes the held lock, local
+         * interrupts disabled, preemption disabled and voluntary switching
+         * disabled while the guard is active, but those derived attributes do
+         * not replace the lock/unlock protocol itself.
+         */
+        arceos_ex_must_raw_spin_lock_irqsave_guard_lock_and_restore();
+
+        /*
+         * Effective Context is not a license to erase protocol guards:
+         *
+         * Effective Context may influence lowering of runtime-code-free context
+         * sources and avoid duplicate attribute-only scaffolding. It must not
+         * by itself erase a guard whose implementation owns state, nesting
+         * counts, saved flags, lock ownership, memory ordering, debug
+         * assertions, wakeups or other resource protocol effects. Such guards
+         * remain real code even when an outer context already provides the same
+         * high-level attribute.
+         */
+        arceos_ex_must_effective_context_not_elide_protocol_guards();
+
+        /*
+         * Deferred primitives:
+         *
+         * Mutex, RwLock and RCU read-side guards belong to the same guard
+         * lowering family, but arceos_ex must not invent final lowering rules
+         * for them before the corresponding model primitives and implementation
+         * mappings exist. Until then, coding may name them only as deferred
+         * guard categories and must keep concrete lowering decisions local to
+         * the later primitive-specific specifications.
+         */
+        arceos_ex_must_defer_mutex_rwlock_rcu_lowering_until_primitives_exist();
     }
 }
 
