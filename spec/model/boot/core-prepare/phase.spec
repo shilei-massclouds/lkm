@@ -381,6 +381,90 @@ object DmaCachePolicy: HardwareObject {
 }
 
 /*
+ * JumpLabelMutex 表示 Linux kernel/jump_label.c 中的静态
+ * DEFINE_MUTEX(jump_label_mutex)。它是通用 Mutex 类型的具名实例，保护
+ * jump_label table 的 coming/going 和 jump_label_init() 期间的 registry
+ * 构造边界。当前步骤只建立该静态 mutex 实例本身；StaticBranch.setup()
+ * 对 Lock/Unlock 的正式驱动在下一步接入。
+ */
+object JumpLabelMutex: Mutex {
+    initial_state: State::Base;
+
+    /*
+     * Base 表示 jump_label_mutex 的静态定义尚未纳入模型事实。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 对应 static DEFINE_MUTEX(jump_label_mutex) 提供的
+             * 静态存储和 __MUTEX_INITIALIZER 初值。
+             */
+            on Event::Preset -> State::Prepared {
+                ensures {
+                    jump_label_mutex_static_initializer(JumpLabelMutex);
+                    jump_label_mutex_storage_bound(JumpLabelMutex);
+                    jump_label_mutex_init_kind_static(JumpLabelMutex);
+                    mutex_storage_bound(JumpLabelMutex);
+                    mutex_init_kind_recorded(JumpLabelMutex);
+                    mutex_preset_respects_init_kind(JumpLabelMutex);
+                    mutex_owns_wait_queue(JumpLabelMutex);
+                    mutex_wait_lock_internal_deferred(JumpLabelMutex);
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示静态 initializer 已确认，但尚未作为 CorePrepare 中的
+     * early mutex 实例发布给 StaticBranch.setup() 使用。
+     */
+    state State::Prepared {
+        invariant {
+            jump_label_mutex_static_initializer(JumpLabelMutex);
+            jump_label_mutex_storage_bound(JumpLabelMutex);
+            jump_label_mutex_init_kind_static(JumpLabelMutex);
+        }
+
+        events {
+            /*
+             * Setup 让 jump_label_mutex 进入 unlocked/ready 状态，并建立
+             * 其 wait queue 抽象；Linux wait_lock、handoff 和 lockdep 细节
+             * 仍保持为通用 Mutex 的 deferred/internal 边界。
+             */
+            on Event::Setup -> State::Ready {
+                ensures {
+                    jump_label_mutex_ready(JumpLabelMutex);
+                    jump_label_mutex_unlocked(JumpLabelMutex);
+                    jump_label_mutex_wait_queue_ready(JumpLabelMutex);
+                    jump_label_mutex_wait_lock_internal_deferred(JumpLabelMutex);
+                    mutex_initialized(JumpLabelMutex);
+                    mutex_ready(JumpLabelMutex);
+                    mutex_unlocked(JumpLabelMutex);
+                    mutex_wait_queue_ready(JumpLabelMutex);
+                    mutex_recursive_locking_forbidden(JumpLabelMutex);
+                    mutex_unlock_requires_owner(JumpLabelMutex);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 jump_label_mutex 已可作为 StaticBranch.setup() 的同步实例。
+     */
+    state State::Ready {
+        invariant {
+            jump_label_mutex_ready(JumpLabelMutex);
+            jump_label_mutex_unlocked(JumpLabelMutex);
+            jump_label_mutex_wait_queue_ready(JumpLabelMutex);
+            jump_label_mutex_wait_lock_internal_deferred(JumpLabelMutex);
+            mutex_ready(JumpLabelMutex);
+            mutex_unlocked(JumpLabelMutex);
+            mutex_wait_queue_ready(JumpLabelMutex);
+        }
+    }
+}
+
+/*
  * StaticBranch 表示 static key / static branch 的启动期基础设施。
  * 本阶段只建立 registry 与分支项关系，后续 set(key, value) 是状态内 action，
  * 不推进 StaticBranch 生命周期。
@@ -975,6 +1059,8 @@ object CorePreparePhase: PhaseObject {
                     CacheBlockInfo.Event::Setup;
                     CpuCapabilities.Event::Setup;
                     DmaCachePolicy.Event::Setup;
+                    JumpLabelMutex.Event::Preset;
+                    JumpLabelMutex.Event::Setup;
                     StaticBranch.Event::Setup;
                     CommandLine.Event::Setup;
                     PerCpuStorage.Event::Setup;
@@ -1039,6 +1125,7 @@ object CorePreparePhase: PhaseObject {
             CacheBlockInfo.state == State::Ready;
             CpuCapabilities.state == State::Ready;
             DmaCachePolicy.state == State::Ready;
+            JumpLabelMutex.state == State::Ready;
             StaticBranch.state == State::Ready;
             CommandLine.state == State::Ready;
             SavedCommandLine.state == State::Ready;
