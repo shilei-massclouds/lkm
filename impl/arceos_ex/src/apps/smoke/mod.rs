@@ -139,6 +139,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::raw_spinlock::run,
     },
     SmokeCase {
+        name: "mutex",
+        run: cases::mutex::run,
+    },
+    SmokeCase {
         name: "rest_init",
         run: cases::rest_init::run,
     },

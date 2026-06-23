@@ -14,6 +14,14 @@ pub enum MutexInitKind {
 pub enum MutexOwner {
     None,
     BootInitTask,
+    KernelInitTask,
+    SmokeMutexTask,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum MutexLockOutcome {
+    Acquired,
+    Blocked,
 }
 
 pub struct Mutex {
@@ -26,6 +34,8 @@ pub struct Mutex {
     owner: MutexOwner,
     lock_entered_count: usize,
     unlock_exited_count: usize,
+    contended_count: usize,
+    wake_count: usize,
 }
 
 #[allow(dead_code)]
@@ -41,6 +51,8 @@ impl Mutex {
             owner: MutexOwner::None,
             lock_entered_count: 0,
             unlock_exited_count: 0,
+            contended_count: 0,
+            wake_count: 0,
         }
     }
 
@@ -84,6 +96,14 @@ impl Mutex {
         self.unlock_exited_count
     }
 
+    pub const fn contended_count(&self) -> usize {
+        self.contended_count
+    }
+
+    pub const fn wake_count(&self) -> usize {
+        self.wake_count
+    }
+
     pub fn ready(&self) -> bool {
         self.lifecycle.state() == State::Ready
             && self.storage_bound
@@ -97,6 +117,10 @@ impl Mutex {
         self.ready()
             && self.lock_entered_count > 0
             && self.unlock_exited_count == self.lock_entered_count
+    }
+
+    pub fn boot_phase_guard_elided(&self) -> bool {
+        self.ready() && self.lock_entered_count == 0 && self.unlock_exited_count == 0
     }
 
     pub fn preset_static(&mut self) -> EventResult {
@@ -135,10 +159,7 @@ impl Mutex {
     }
 
     pub fn lock_boot_init_task(&mut self, init_task: &InitTask) -> EventResult {
-        if self.lifecycle.state() != State::Ready
-            || init_task.state() != State::Online
-            || self.locked
-        {
+        if self.lifecycle.state() != State::Ready || init_task.state() != State::Online {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -147,18 +168,57 @@ impl Mutex {
             );
         }
 
-        self.locked = true;
-        self.owner = MutexOwner::BootInitTask;
-        self.lock_entered_count = self.lock_entered_count.wrapping_add(1);
-        Ok(())
+        match self.lock_owner(MutexOwner::BootInitTask)? {
+            MutexLockOutcome::Acquired => Ok(()),
+            MutexLockOutcome::Blocked => failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            ),
+        }
     }
 
     pub fn unlock_boot_init_task(&mut self, init_task: &InitTask) -> EventResult {
-        if self.lifecycle.state() != State::Ready
-            || init_task.state() != State::Online
-            || !self.locked
-            || self.owner != MutexOwner::BootInitTask
-        {
+        if self.lifecycle.state() != State::Ready || init_task.state() != State::Online {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.unlock_owner(MutexOwner::BootInitTask)
+    }
+
+    pub fn lock_owner(
+        &mut self,
+        owner: MutexOwner,
+    ) -> Result<MutexLockOutcome, super::state::EventError> {
+        if self.lifecycle.state() != State::Ready || matches!(owner, MutexOwner::None) {
+            return Err(super::state::EventError::failed(
+                super::state::EventErrorCode::ConditionFailed,
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            ));
+        }
+
+        if self.locked {
+            self.contended_count = self.contended_count.wrapping_add(1);
+            return Ok(MutexLockOutcome::Blocked);
+        }
+
+        self.locked = true;
+        self.owner = owner;
+        self.lock_entered_count = self.lock_entered_count.wrapping_add(1);
+        Ok(MutexLockOutcome::Acquired)
+    }
+
+    pub fn unlock_owner(&mut self, owner: MutexOwner) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.locked || self.owner != owner {
             return failed_condition(
                 LifecycleEvent::Disable,
                 self.lifecycle.state(),
@@ -170,6 +230,9 @@ impl Mutex {
         self.locked = false;
         self.owner = MutexOwner::None;
         self.unlock_exited_count = self.unlock_exited_count.wrapping_add(1);
+        if self.wake_count < self.contended_count {
+            self.wake_count = self.wake_count.wrapping_add(1);
+        }
         Ok(())
     }
 }

@@ -480,6 +480,18 @@ impl Context {
         self.scheduler.enqueue_smoke_scheduler_task()
     }
 
+    pub fn setup_smoke_mutex_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
+        self.scheduler.setup_smoke_mutex_task(entry)
+    }
+
+    pub fn enqueue_smoke_mutex_task(&mut self) -> EventResult {
+        self.scheduler.enqueue_smoke_mutex_task()
+    }
+
+    pub fn dequeue_smoke_mutex_task(&mut self) -> EventResult {
+        self.scheduler.dequeue_smoke_mutex_task()
+    }
+
     pub fn schedule_current(&mut self) -> EventResult {
         self.scheduler.schedule(
             &mut self.boot_cpu_local_interrupt,
@@ -495,6 +507,14 @@ impl Context {
         self.scheduler
             .smoke_scheduler_task_mut()
             .mark_yielded_back()
+    }
+
+    pub fn mark_smoke_mutex_entry_ran(&mut self) -> EventResult {
+        self.scheduler.smoke_mutex_task_mut().mark_entry_ran()
+    }
+
+    pub fn mark_smoke_mutex_yielded_back(&mut self) -> EventResult {
+        self.scheduler.smoke_mutex_task_mut().mark_yielded_back()
     }
 
     pub fn platform_driver_register(&mut self, driver: DeviceDriverRef) -> InitcallReturn {

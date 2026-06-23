@@ -18,6 +18,7 @@ pub mod initcall;
 pub mod irq_open_prepare;
 pub mod irq_time;
 pub mod memblock;
+pub mod mutex;
 pub mod page_allocator;
 pub mod params;
 pub mod per_cpu;

@@ -172,7 +172,7 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.dma_cache_policy.state() == State::Ready
         && ctx.jump_label_mutex.state() == State::Ready
         && ctx.jump_label_mutex.ready()
-        && ctx.jump_label_mutex.boot_init_task_guard_completed()
+        && ctx.jump_label_mutex.boot_phase_guard_elided()
         && ctx.static_branch.state() == State::Ready
         && ctx.static_branch.cpu_hotplug_read_guard_used()
         && ctx

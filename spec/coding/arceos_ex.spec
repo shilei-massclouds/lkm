@@ -386,12 +386,14 @@ type ArceosExCorePrepareCodingMust {
         /*
          * StaticBranch jump-label mutex guard lowering:
          *
-         * StaticBranch.setup() must enter and exit its StaticBranchJumpLabelContext
-         * through the JumpLabelMutex object: lock with the early BootInitTask /
-         * init_task task reference, perform the registry setup while the mutex
-         * is held, then unlock the same owner before reporting StaticBranch
-         * Ready. The CorePrepare ready check must observe the JumpLabelMutex
-         * lock/unlock facts in addition to any StaticBranch-local summary fact.
+         * StaticBranch.setup() must preserve the StaticBranchJumpLabelContext
+         * source boundary, but BootPhaseContext proves that the current path is
+         * single-CPU, single-task, local-IRQ-disabled and preemption-disabled.
+         * Therefore arceos_ex may lower JumpLabelMutex.Lock/Unlock to an
+         * elided/proof-only guard with visible comments and summary facts,
+         * rather than executing the mutex lock/unlock protocol. The CorePrepare
+         * ready check must observe the independent JumpLabelMutex ready object
+         * and the elided/proof-only guard fact.
          */
         arceos_ex_must_static_branch_setup_drive_jump_label_mutex_guard();
 

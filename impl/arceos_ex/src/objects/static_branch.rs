@@ -74,7 +74,7 @@ impl StaticBranch {
     }
 
     pub fn jump_label_mutex_guard_used(&self, jump_label_mutex: &Mutex) -> bool {
-        self.lifecycle.state() == State::Ready && jump_label_mutex.boot_init_task_guard_completed()
+        self.lifecycle.state() == State::Ready && jump_label_mutex.boot_phase_guard_elided()
     }
 
     pub const fn text_patch_sync_deferred(&self) -> bool {
@@ -98,7 +98,12 @@ impl StaticBranch {
             return self.failed_setup();
         }
 
-        jump_label_mutex.lock_boot_init_task(init_task)?;
+        /*
+         * StaticBranchJumpLabelContext:
+         * JumpLabelMutex.Lock(BootInitTaskRef) is elided because the outer
+         * BootPhaseContext proves a single CPU, single task, local IRQ
+         * disabled, preemption disabled execution path.
+         */
         self.entries = [
             StaticKeyEntry::new(StaticKey::InitOnAlloc),
             StaticKeyEntry::new(StaticKey::InitOnFree),
@@ -112,7 +117,11 @@ impl StaticBranch {
         self.count = 5;
         self.cpu_hotplug_read_guard_used = true;
         self.text_patch_sync_deferred = true;
-        jump_label_mutex.unlock_boot_init_task(init_task)?;
+        /*
+         * StaticBranchJumpLabelContext:
+         * JumpLabelMutex.Unlock(BootInitTaskRef) is elided for the same
+         * BootPhaseContext effective-context proof.
+         */
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

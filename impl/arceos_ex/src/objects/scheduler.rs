@@ -16,6 +16,7 @@ use crate::arch::riscv64::task_switch::{self, TaskSwitchContext};
 use crate::trace::Checkpoint;
 
 const SMOKE_SCHEDULER_TASK_ID: usize = 1001;
+const SMOKE_MUTEX_TASK_ID: usize = 1002;
 const SMOKE_SCHEDULER_STACK_WORDS: usize = 512;
 
 pub struct Scheduler {
@@ -61,6 +62,7 @@ pub struct Scheduler {
     schedule_exit_count: usize,
     kernel_init_switch_context: TaskSwitchContext,
     smoke_scheduler_task: SmokeSchedulerTask,
+    smoke_mutex_task: SmokeSchedulerTask,
 }
 
 impl Scheduler {
@@ -107,7 +109,8 @@ impl Scheduler {
             schedule_exit_restored_interrupt_count: 0,
             schedule_exit_count: 0,
             kernel_init_switch_context: TaskSwitchContext::new(),
-            smoke_scheduler_task: SmokeSchedulerTask::new(),
+            smoke_scheduler_task: SmokeSchedulerTask::new(SMOKE_SCHEDULER_TASK_ID),
+            smoke_mutex_task: SmokeSchedulerTask::new(SMOKE_MUTEX_TASK_ID),
         }
     }
 
@@ -298,6 +301,14 @@ impl Scheduler {
         &mut self.smoke_scheduler_task
     }
 
+    pub const fn smoke_mutex_task(&self) -> &SmokeSchedulerTask {
+        &self.smoke_mutex_task
+    }
+
+    pub fn smoke_mutex_task_mut(&mut self) -> &mut SmokeSchedulerTask {
+        &mut self.smoke_mutex_task
+    }
+
     pub fn preset(
         &mut self,
         cpu_group: &CpuGroup,
@@ -401,6 +412,7 @@ impl Scheduler {
                 CurrentTaskRef::BootIdle
                     | CurrentTaskRef::KernelInit
                     | CurrentTaskRef::SmokeScheduler
+                    | CurrentTaskRef::SmokeMutex
             )
         {
             return failed_condition(
@@ -459,7 +471,10 @@ impl Scheduler {
     ) -> Result<CurrentRunQueueRef, EventError> {
         if !matches!(
             current_task_ref,
-            CurrentTaskRef::BootIdle | CurrentTaskRef::KernelInit | CurrentTaskRef::SmokeScheduler
+            CurrentTaskRef::BootIdle
+                | CurrentTaskRef::KernelInit
+                | CurrentTaskRef::SmokeScheduler
+                | CurrentTaskRef::SmokeMutex
         ) || self.boot_idle_task.cpu_id() != self.boot_runqueue.cpu_id()
         {
             return Err(self.failed_schedule_condition());
@@ -480,6 +495,7 @@ impl Scheduler {
                 CurrentTaskRef::BootIdle
                     | CurrentTaskRef::KernelInit
                     | CurrentTaskRef::SmokeScheduler
+                    | CurrentTaskRef::SmokeMutex
             )
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.task_count() == 0
@@ -518,13 +534,17 @@ impl Scheduler {
     ) -> EventResult {
         if !matches!(
             prev_ref,
-            CurrentTaskRef::BootIdle | CurrentTaskRef::KernelInit | CurrentTaskRef::SmokeScheduler
+            CurrentTaskRef::BootIdle
+                | CurrentTaskRef::KernelInit
+                | CurrentTaskRef::SmokeScheduler
+                | CurrentTaskRef::SmokeMutex
         ) || !matches!(
             next_ref,
             CurrentTaskRef::BootIdle
                 | CurrentTaskRef::KernelInit
                 | CurrentTaskRef::Kthreadd
                 | CurrentTaskRef::SmokeScheduler
+                | CurrentTaskRef::SmokeMutex
         ) || self.boot_runqueue.curr_task_id() != self.boot_idle_task.task_id()
             || self.boot_runqueue.idle_task_id() != self.boot_idle_task.task_id()
             || current_task_slot.state() != State::Ready
@@ -567,8 +587,14 @@ impl Scheduler {
         if prev_ref == CurrentTaskRef::SmokeScheduler {
             self.smoke_scheduler_task.save_core_context()?;
         }
+        if prev_ref == CurrentTaskRef::SmokeMutex {
+            self.smoke_mutex_task.save_core_context()?;
+        }
         if next_ref == CurrentTaskRef::SmokeScheduler {
             self.smoke_scheduler_task.restore_core_context()?;
+        }
+        if next_ref == CurrentTaskRef::SmokeMutex {
+            self.smoke_mutex_task.restore_core_context()?;
         }
         Ok(())
     }
@@ -593,6 +619,23 @@ impl Scheduler {
             (CurrentTaskRef::SmokeScheduler, CurrentTaskRef::KernelInit) => unsafe {
                 task_switch::switch(
                     self.smoke_scheduler_task.switch_context_mut(),
+                    &self.kernel_init_switch_context,
+                );
+            },
+            (CurrentTaskRef::KernelInit, CurrentTaskRef::SmokeMutex) => {
+                if !self.smoke_mutex_task.switch_context().initialized() {
+                    return self.failed_switch_to();
+                }
+                unsafe {
+                    task_switch::switch(
+                        &mut self.kernel_init_switch_context,
+                        self.smoke_mutex_task.switch_context(),
+                    );
+                }
+            }
+            (CurrentTaskRef::SmokeMutex, CurrentTaskRef::KernelInit) => unsafe {
+                task_switch::switch(
+                    self.smoke_mutex_task.switch_context_mut(),
                     &self.kernel_init_switch_context,
                 );
             },
@@ -628,6 +671,49 @@ impl Scheduler {
             CurrentTaskRef::SmokeScheduler,
         )?;
         self.smoke_scheduler_task.mark_enqueued();
+        Ok(())
+    }
+
+    pub fn setup_smoke_mutex_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.scheduler_running
+            || self.boot_runqueue.state() != State::Ready
+            || !self
+                .smoke_mutex_task
+                .setup(entry, self.boot_runqueue.cpu_id())
+        {
+            return Err(self.failed_schedule_condition());
+        }
+        Ok(())
+    }
+
+    pub fn enqueue_smoke_mutex_task(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.scheduler_running
+            || self.smoke_mutex_task.state() != State::Ready
+            || self.smoke_mutex_task.enqueued()
+        {
+            return Err(self.failed_schedule_condition());
+        }
+
+        self.boot_runqueue
+            .enqueue_task_ref(CurrentRunQueueRef::BootRunQueue, CurrentTaskRef::SmokeMutex)?;
+        self.smoke_mutex_task.mark_enqueued();
+        Ok(())
+    }
+
+    pub fn dequeue_smoke_mutex_task(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.scheduler_running
+            || self.smoke_mutex_task.state() != State::Ready
+            || !self.smoke_mutex_task.enqueued()
+        {
+            return Err(self.failed_schedule_condition());
+        }
+
+        self.boot_runqueue
+            .dequeue_task_ref(CurrentRunQueueRef::BootRunQueue, CurrentTaskRef::SmokeMutex)?;
+        self.smoke_mutex_task.mark_dequeued();
         Ok(())
     }
 
@@ -784,6 +870,7 @@ fn task_id_for_current_task_ref(task_ref: CurrentTaskRef) -> Option<usize> {
         CurrentTaskRef::KernelInit => Some(crate::objects::rest_init::KERNEL_INIT_PID),
         CurrentTaskRef::Kthreadd => Some(crate::objects::rest_init::KTHREADD_PID),
         CurrentTaskRef::SmokeScheduler => Some(SMOKE_SCHEDULER_TASK_ID),
+        CurrentTaskRef::SmokeMutex => Some(SMOKE_MUTEX_TASK_ID),
         CurrentTaskRef::None | CurrentTaskRef::BootIdle => None,
     }
 }
@@ -801,10 +888,10 @@ pub struct SmokeSchedulerTask {
 }
 
 impl SmokeSchedulerTask {
-    const fn new() -> Self {
+    const fn new(task_id: usize) -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            task_id: SMOKE_SCHEDULER_TASK_ID,
+            task_id,
             cpu: TaskCpuState::new(),
             thread_context: TaskThreadContext::new(),
             switch_context: TaskSwitchContext::new(),
@@ -861,6 +948,10 @@ impl SmokeSchedulerTask {
 
     fn mark_enqueued(&mut self) {
         self.enqueued = true;
+    }
+
+    fn mark_dequeued(&mut self) {
+        self.enqueued = false;
     }
 
     pub fn mark_entry_ran(&mut self) -> EventResult {
@@ -1032,6 +1123,7 @@ pub struct BootRunQueue {
     kernel_init_task_enqueued: bool,
     kthreadd_task_enqueued: bool,
     smoke_scheduler_task_enqueued: bool,
+    smoke_mutex_task_enqueued: bool,
 }
 
 impl BootRunQueue {
@@ -1051,6 +1143,7 @@ impl BootRunQueue {
             kernel_init_task_enqueued: false,
             kthreadd_task_enqueued: false,
             smoke_scheduler_task_enqueued: false,
+            smoke_mutex_task_enqueued: false,
         }
     }
 
@@ -1090,16 +1183,20 @@ impl BootRunQueue {
         (self.kernel_init_task_enqueued && task_id == crate::objects::rest_init::KERNEL_INIT_PID)
             || (self.kthreadd_task_enqueued && task_id == crate::objects::rest_init::KTHREADD_PID)
             || (self.smoke_scheduler_task_enqueued && task_id == SMOKE_SCHEDULER_TASK_ID)
+            || (self.smoke_mutex_task_enqueued && task_id == SMOKE_MUTEX_TASK_ID)
     }
 
     pub const fn task_count(&self) -> usize {
         self.kernel_init_task_enqueued as usize
             + self.kthreadd_task_enqueued as usize
             + self.smoke_scheduler_task_enqueued as usize
+            + self.smoke_mutex_task_enqueued as usize
     }
 
     pub const fn first_runnable_task_ref(&self) -> CurrentTaskRef {
-        if self.smoke_scheduler_task_enqueued {
+        if self.smoke_mutex_task_enqueued {
+            CurrentTaskRef::SmokeMutex
+        } else if self.smoke_scheduler_task_enqueued {
             CurrentTaskRef::SmokeScheduler
         } else if self.kernel_init_task_enqueued {
             CurrentTaskRef::KernelInit
@@ -1179,6 +1276,7 @@ impl BootRunQueue {
                 CurrentTaskRef::BootIdle
                     | CurrentTaskRef::KernelInit
                     | CurrentTaskRef::SmokeScheduler
+                    | CurrentTaskRef::SmokeMutex
             )
             || self.task_count() == 0
         {
@@ -1186,7 +1284,7 @@ impl BootRunQueue {
         }
 
         let next_ref = match prev_ref {
-            CurrentTaskRef::SmokeScheduler => {
+            CurrentTaskRef::SmokeScheduler | CurrentTaskRef::SmokeMutex => {
                 if self.kernel_init_task_enqueued {
                     CurrentTaskRef::KernelInit
                 } else {
@@ -1194,7 +1292,9 @@ impl BootRunQueue {
                 }
             }
             CurrentTaskRef::KernelInit => {
-                if self.smoke_scheduler_task_enqueued {
+                if self.smoke_mutex_task_enqueued {
+                    CurrentTaskRef::SmokeMutex
+                } else if self.smoke_scheduler_task_enqueued {
                     CurrentTaskRef::SmokeScheduler
                 } else {
                     self.first_runnable_task_ref()
@@ -1215,7 +1315,8 @@ impl BootRunQueue {
             || self.contains_task(task_id)
             || (task_id != crate::objects::rest_init::KERNEL_INIT_PID
                 && task_id != crate::objects::rest_init::KTHREADD_PID
-                && task_id != SMOKE_SCHEDULER_TASK_ID)
+                && task_id != SMOKE_SCHEDULER_TASK_ID
+                && task_id != SMOKE_MUTEX_TASK_ID)
         {
             return self.failed_setup();
         }
@@ -1230,6 +1331,45 @@ impl BootRunQueue {
         if task_id == SMOKE_SCHEDULER_TASK_ID {
             self.smoke_scheduler_task_enqueued = true;
         }
+        if task_id == SMOKE_MUTEX_TASK_ID {
+            self.smoke_mutex_task_enqueued = true;
+        }
+        Ok(())
+    }
+
+    pub fn dequeue_task_ref(
+        &mut self,
+        runqueue_ref: CurrentRunQueueRef,
+        task_ref: CurrentTaskRef,
+    ) -> EventResult {
+        if !matches!(runqueue_ref, CurrentRunQueueRef::BootRunQueue) {
+            return self.failed_setup();
+        }
+
+        let Some(task_id) = task_id_for_current_task_ref(task_ref) else {
+            return self.failed_setup();
+        };
+        self.dequeue_task(task_id)
+    }
+
+    fn dequeue_task(&mut self, task_id: usize) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.contains_task(task_id) {
+            return self.failed_setup();
+        }
+
+        if task_id == crate::objects::rest_init::KERNEL_INIT_PID {
+            self.kernel_init_task_enqueued = false;
+        }
+        if task_id == crate::objects::rest_init::KTHREADD_PID {
+            self.kthreadd_task_enqueued = false;
+        }
+        if task_id == SMOKE_SCHEDULER_TASK_ID {
+            self.smoke_scheduler_task_enqueued = false;
+        }
+        if task_id == SMOKE_MUTEX_TASK_ID {
+            self.smoke_mutex_task_enqueued = false;
+        }
+        self.enqueued_task_id = usize::MAX;
         Ok(())
     }
 
