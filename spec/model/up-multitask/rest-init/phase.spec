@@ -41,13 +41,6 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
         Scheduler;
         BootRunQueue;
     }
-
-    effects {
-        interruptible: false;
-        preemptible: false;
-        sleepable: false;
-        exclusive_refs: obj_refs;
-    }
 }
 
 context WakeUpKthreaddTaskContext: ResourceExclusiveContext {
@@ -67,13 +60,6 @@ context WakeUpKthreaddTaskContext: ResourceExclusiveContext {
         KthreaddTask;
         Scheduler;
         BootRunQueue;
-    }
-
-    effects {
-        interruptible: false;
-        preemptible: false;
-        sleepable: false;
-        exclusive_refs: obj_refs;
     }
 }
 
@@ -104,13 +90,6 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
     obj_refs {
         BootRunQueue;
     }
-
-    effects {
-        interruptible: false;
-        preemptible: false;
-        sleepable: false;
-        exclusive_refs: obj_refs;
-    }
 }
 
 context SchedulePreemptionContext: Context {
@@ -137,20 +116,15 @@ context SchedulePreemptionContext: Context {
         BootRunQueue;
         BootCpuLocalInterrupt;
     }
-
-    effects {
-        interruptible: true;
-        preemptible: false;
-        sleepable: false;
-        exclusive_refs: none;
-    }
 }
 
 context ScheduleLocalInterruptContext: Context {
     /*
      * This context models __schedule() disabling local interrupts before
      * taking rq->lock. The guard is backed by BootCpuLocalInterrupt, not by a
-     * lock; it establishes a CPU-local interrupt-disabled boundary.
+     * lock; it establishes only a CPU-local interrupt-disabled boundary. The
+     * preemption-disabled and non-sleepable facts are inherited from the
+     * outer SchedulePreemptionContext.
      */
     guard: LocalInterruptGuard {
         entered_by {
@@ -167,13 +141,6 @@ context ScheduleLocalInterruptContext: Context {
         Scheduler;
         BootRunQueue;
         BootCpuLocalInterrupt;
-    }
-
-    effects {
-        interruptible: false;
-        preemptible: false;
-        sleepable: false;
-        exclusive_refs: none;
     }
 }
 
@@ -201,13 +168,6 @@ context ScheduleRunQueueContext: ResourceExclusiveContext {
         BootIdleTask;
         Scheduler;
         BootRunQueue;
-    }
-
-    effects {
-        interruptible: false;
-        preemptible: false;
-        sleepable: false;
-        exclusive_refs: obj_refs;
     }
 }
 
@@ -239,13 +199,6 @@ context BootIdleStartupContext: Context {
         BootIdleTask;
         BootIdleRuntime;
         Scheduler;
-    }
-
-    effects {
-        interruptible: true;
-        preemptible: false;
-        sleepable: false;
-        exclusive_refs: none;
     }
 }
 

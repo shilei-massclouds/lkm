@@ -487,13 +487,6 @@ class ModelToolTests(unittest.TestCase):
                 obj_refs {
                     A;
                 }
-
-                effects {
-                    interruptible: false;
-                    preemptible: false;
-                    sleepable: false;
-                    exclusive_refs: obj_refs;
-                }
             }
 
             context InnerContext: ResourceExclusiveContext {
@@ -511,13 +504,6 @@ class ModelToolTests(unittest.TestCase):
 
                 obj_refs {
                     A;
-                }
-
-                effects {
-                    interruptible: false;
-                    preemptible: false;
-                    sleepable: false;
-                    exclusive_refs: obj_refs;
                 }
             }
 
@@ -544,6 +530,75 @@ class ModelToolTests(unittest.TestCase):
             spec = Path(tmp) / "context-nesting-ok.spec"
             ast = Path(tmp) / "context-nesting-ok.ast.json"
             model = Path(tmp) / "context-nesting-ok.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+
+    def test_legacy_context_effects_remain_compatible(self) -> None:
+        source = """
+            type RawSpinLock {
+                processes {
+                    Event::LockIrqSave {
+                    }
+
+                    Event::UnlockIrqRestore {
+                    }
+                }
+            }
+
+            lock ALock: RawSpinLock;
+
+            context AContext: ResourceExclusiveContext {
+                guard: RawSpinLockIrqSaveGuard {
+                    lock_ref: ALock;
+
+                    entered_by {
+                        ALock.Event::LockIrqSave;
+                    }
+
+                    exited_by {
+                        ALock.Event::UnlockIrqRestore;
+                    }
+                }
+
+                obj_refs {
+                    A;
+                }
+
+                effects {
+                    interruptible: false;
+                    preemptible: false;
+                    sleepable: false;
+                    exclusive_refs: obj_refs;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within AContext {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "legacy-effects-ok.spec"
+            ast = Path(tmp) / "legacy-effects-ok.ast.json"
+            model = Path(tmp) / "legacy-effects-ok.model.json"
             spec.write_text(source, encoding="utf-8")
 
             self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
@@ -593,13 +648,6 @@ class ModelToolTests(unittest.TestCase):
                 obj_refs {
                     A;
                 }
-
-                effects {
-                    interruptible: false;
-                    preemptible: false;
-                    sleepable: false;
-                    exclusive_refs: obj_refs;
-                }
             }
 
             context InnerPreemptContext: Context {
@@ -619,13 +667,6 @@ class ModelToolTests(unittest.TestCase):
 
                 obj_refs {
                     TaskPreemption;
-                }
-
-                effects {
-                    interruptible: true;
-                    preemptible: false;
-                    sleepable: false;
-                    exclusive_refs: none;
                 }
             }
 
@@ -699,13 +740,6 @@ class ModelToolTests(unittest.TestCase):
                 obj_refs {
                     BootCpuLocalInterrupt;
                     A;
-                }
-
-                effects {
-                    interruptible: false;
-                    preemptible: false;
-                    sleepable: false;
-                    exclusive_refs: none;
                 }
             }
 

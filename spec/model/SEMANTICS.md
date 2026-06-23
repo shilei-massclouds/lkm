@@ -327,7 +327,9 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 - 对非锁 guard，`entered_by`/`exited_by` 声明对应控制对象的边界事件；这些边界事件是 guard 行为，不写入 `within` 内部的 `drives`。
 - 对阶段边界或天然上下文 guard，`entered_by`/`exited_by` 可以不存在；`within` 的词法范围提供边界。
 - `guard.holds` 声明该 guard 在作用域内明确保持的属性；未声明的维度表示该 guard 不作保证，在 Effective Context 叠加时保持中性。
-- `obj_refs` 是对象引用集合，至少包含一个对象；上下文不拥有这些对象。
+- `ResourceExclusiveContext.obj_refs` 是受保护对象引用集合，至少包含一个对象；
+  普通 `Context` 可以省略 `obj_refs`，省略时不作为对象驱动白名单。上下文不拥有这些对象。
+- 首轮 guard schema 固定推导如下：`RawSpinLockIrqSaveGuard` 推导本地中断关闭、抢占关闭、不可睡眠；`PreemptionGuard` 推导抢占关闭和不可睡眠；`LocalInterruptGuard` 只推导本地中断关闭；`PhaseBoundaryGuard` 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
 - 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
 - 同一时刻至多一个执行流可以成功进入同一个 resource exclusive context。
@@ -435,10 +437,10 @@ Mutex guard，应被判定为上下文嵌套违例。原因是内层 guard contr
 
 多种上下文和上下文嵌套的正式规格化，是主规格中“组件化内核在不同上下文可以访问对象不同层级句柄”的具体化：guard contribution 栈给出当前流的访问能力，句柄层级由 Effective Context 推导，而不是由对象所有权或普通参数传递隐式决定。
 
-迁移期工具仍可能要求现有 `.spec` 手写 `effects` 块。该要求只是当前
-checker 的过渡实现，不是最终源规格语义。后续工具应改为从 guard schema 推导
-context contribution；若迁移期同时存在手写 `effects`，工具必须检查它不得弱于、
-偏离或重复矛盾于 guard 推导结果。
+迁移期工具仍兼容旧 `.spec` 手写 `effects` 块。该兼容只是过渡输入形式，
+不是最终源规格语义；工具应从 guard schema 推导 context contribution。
+若迁移期同时存在手写 `effects`，工具必须检查它不得弱于、偏离或重复矛盾于
+guard 推导结果。
 
 句柄层级推导、对象 event/action 的上下文需求声明、系统天然独占上下文的来源证明、
 RCU 读侧上下文等更丰富的 guard/effect 语义仍在后续扩展范围内。

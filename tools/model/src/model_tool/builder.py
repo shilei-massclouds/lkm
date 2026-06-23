@@ -695,7 +695,11 @@ def _schema_context_contribution(context: ExclusiveContextDef) -> _ContextContri
             exclusive_refs=exclusive_refs,
         )
     if guard.kind == "PreemptionGuard":
-        return _ContextContribution(preemption=False, exclusive_refs=exclusive_refs)
+        return _ContextContribution(
+            preemption=False,
+            sleepable=False,
+            exclusive_refs=exclusive_refs,
+        )
     if guard.kind == "LocalInterruptGuard":
         return _ContextContribution(local_interrupts=False, exclusive_refs=exclusive_refs)
     return _ContextContribution(exclusive_refs=exclusive_refs)
