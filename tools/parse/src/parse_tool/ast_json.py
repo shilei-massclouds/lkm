@@ -112,6 +112,7 @@ def _context_guard_to_json(item: ContextGuardDecl | None) -> dict[str, Any] | No
         "lock_ref": item.lock_ref,
         "entered_by": [_block_to_json(block) for block in item.entered_by],
         "exited_by": [_block_to_json(block) for block in item.exited_by],
+        "holds": [_block_to_json(block) for block in item.holds],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
         "properties": item.properties,
     }

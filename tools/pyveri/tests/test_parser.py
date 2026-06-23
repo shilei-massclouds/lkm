@@ -312,6 +312,36 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(event.within[0].entered_by, [])
         self.assertEqual(event.within[0].exited_by, [])
 
+    def test_parse_context_guard_holds(self) -> None:
+        document = parse_text(
+            """
+            context BootPhaseContext: Context {
+                guard: PhaseBoundaryGuard {
+                    holds {
+                        cpu_concurrency: single_cpu;
+                        task_concurrency: single_task;
+                        local_interrupts: disabled;
+                        preemption: disabled;
+                    }
+                }
+            }
+            """
+        )
+
+        context = document.exclusive_contexts[0]
+        self.assertEqual(context.name, "BootPhaseContext")
+        self.assertIsNotNone(context.guard)
+        assert context.guard is not None
+        self.assertEqual(context.guard.kind, "PhaseBoundaryGuard")
+        self.assertEqual(context.guard.entered_by, [])
+        self.assertEqual(context.guard.exited_by, [])
+        self.assertEqual(context.guard.holds[0].entries, [
+            "cpu_concurrency: single_cpu",
+            "task_concurrency: single_task",
+            "local_interrupts: disabled",
+            "preemption: disabled",
+        ])
+
     def test_parse_current_model_spec(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
 

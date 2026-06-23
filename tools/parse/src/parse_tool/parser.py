@@ -372,6 +372,7 @@ def _parse_context_guard(block: Block) -> ContextGuardDecl:
     lock_ref: str | None = None
     entered_by: list[Block] = []
     exited_by: list[Block] = []
+    holds: list[Block] = []
     other_blocks: list[Block] = []
     properties: dict[str, str] = {}
 
@@ -384,6 +385,8 @@ def _parse_context_guard(block: Block) -> ContextGuardDecl:
                 entered_by.append(child)
             elif child.kind == "exited_by":
                 exited_by.append(child)
+            elif child.kind == "holds":
+                holds.append(child)
             else:
                 other_blocks.append(child)
             continue
@@ -405,6 +408,7 @@ def _parse_context_guard(block: Block) -> ContextGuardDecl:
         lock_ref=lock_ref,
         entered_by=entered_by,
         exited_by=exited_by,
+        holds=holds,
         other_blocks=other_blocks,
         properties=properties,
     )

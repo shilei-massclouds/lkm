@@ -96,15 +96,39 @@ _ALLOWED_TRANSITIONS = frozenset(
         ("Offline", "Cleanup", "Destroyed"),
     }
 )
-_CONTEXT_BOOLEAN_EFFECTS = ("interruptible", "preemptible", "sleepable")
+_LEGACY_CONTEXT_BOOLEAN_EFFECTS = ("interruptible", "preemptible", "sleepable")
+_CONTEXT_GUARD_KINDS = (
+    "RawSpinLockIrqSaveGuard",
+    "PreemptionGuard",
+    "LocalInterruptGuard",
+    "PhaseBoundaryGuard",
+)
+_GUARD_EVENT_ONLY_KINDS = ("PreemptionGuard", "LocalInterruptGuard")
+_GUARD_PHASE_BOUNDARY_KINDS = ("PhaseBoundaryGuard",)
+_CONTRIBUTION_KEYS = (
+    "local_interrupts",
+    "preemption",
+    "sleepable",
+    "cpu_concurrency",
+    "task_concurrency",
+)
+_LEGACY_EFFECT_KEY_MAP = {
+    "interruptible": "local_interrupts",
+    "preemptible": "preemption",
+    "sleepable": "sleepable",
+}
+_FALSE_HOLD_VALUES = frozenset({"false", "disabled", "closed", "single", "single_cpu", "single_task"})
+_TRUE_HOLD_VALUES = frozenset({"true", "enabled", "open", "multi", "smp", "multi_cpu", "multi_task"})
 
 
 @dataclass(frozen=True)
-class _ContextEffects:
-    interruptible: bool
-    preemptible: bool
-    sleepable: bool
-    exclusive_refs: frozenset[str]
+class _ContextContribution:
+    local_interrupts: bool | None = None
+    preemption: bool | None = None
+    sleepable: bool | None = None
+    cpu_concurrency: bool | None = None
+    task_concurrency: bool | None = None
+    exclusive_refs: frozenset[str] = frozenset()
 
 
 def build_model(document: SpecDocument) -> BuildResult:
@@ -224,7 +248,7 @@ def _build_exclusive_contexts(
                     decl.span,
                 )
             )
-        if not decl.obj_refs:
+        if decl.kind == "ResourceExclusiveContext" and not decl.obj_refs:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
@@ -510,22 +534,14 @@ def _check_exclusive_context_references(
                     context.decl.span,
                 )
             )
-        if (
-            context.kind in ("ResourceExclusiveContext", "Context")
-            and not context.decl.effects
-        ):
-            diagnostics.append(
-                Diagnostic(
-                    Severity.ERROR,
-                    f"context {context.name} is missing effects",
-                    context.decl.span,
-                )
-            )
-        effects = _parse_context_effects(context, diagnostics)
-        if context.kind == "ResourceExclusiveContext" and effects is not None:
-            _check_resource_exclusive_context_effects(context, effects, diagnostics)
         if context.guard is not None:
             _check_context_guard_references(model, context, diagnostics)
+        contribution = _derive_context_contribution(context, diagnostics)
+        legacy_effects = _parse_legacy_context_effects(context, diagnostics)
+        if legacy_effects is not None:
+            _check_legacy_effects_compatible(
+                context, derived=contribution, legacy=legacy_effects, diagnostics=diagnostics
+            )
         for object_name in context.obj_refs:
             if object_name not in model.objects:
                 diagnostics.append(
@@ -545,11 +561,7 @@ def _check_context_guard_references(
     guard = context.guard
     if guard is None:
         return
-    if guard.kind not in (
-        "RawSpinLockIrqSaveGuard",
-        "PreemptionGuard",
-        "LocalInterruptGuard",
-    ):
+    if guard.kind not in _CONTEXT_GUARD_KINDS:
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
@@ -557,7 +569,8 @@ def _check_context_guard_references(
                 guard.span,
             )
         )
-    if guard.kind in ("PreemptionGuard", "LocalInterruptGuard"):
+        return
+    if guard.kind in _GUARD_EVENT_ONLY_KINDS:
         if guard.lock_ref is not None:
             diagnostics.append(
                 Diagnostic(
@@ -568,6 +581,32 @@ def _check_context_guard_references(
             )
         _check_event_blocks(model, guard.entered_by, diagnostics)
         _check_event_blocks(model, guard.exited_by, diagnostics)
+        return
+    if guard.kind in _GUARD_PHASE_BOUNDARY_KINDS:
+        if guard.lock_ref is not None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"{guard.kind} on context {context.name} must not declare lock_ref",
+                    guard.span,
+                )
+            )
+        if guard.entered_by:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"{guard.kind} on context {context.name} must not declare entered_by",
+                    guard.entered_by[0].span,
+                )
+            )
+        if guard.exited_by:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"{guard.kind} on context {context.name} must not declare exited_by",
+                    guard.exited_by[0].span,
+                )
+            )
         return
 
     if guard.lock_ref is None:
@@ -608,9 +647,124 @@ def _check_event_blocks(
         _check_event_references(model, block, diagnostics)
 
 
-def _parse_context_effects(
+def _derive_context_contribution(
     context: ExclusiveContextDef, diagnostics: list[Diagnostic]
-) -> _ContextEffects | None:
+) -> _ContextContribution:
+    contribution = _schema_context_contribution(context)
+    hold_entries = _context_guard_holds(context)
+    for key, raw in hold_entries.items():
+        normalized = _normalize_hold_value(raw)
+        if normalized is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"context guard hold has unsupported value on {context.name}: {key}: {raw}",
+                    context.guard.span if context.guard is not None else context.decl.span,
+                )
+            )
+            continue
+        if key not in _CONTRIBUTION_KEYS:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unsupported context guard hold on {context.name}: {key}",
+                    context.guard.span if context.guard is not None else context.decl.span,
+                )
+            )
+            continue
+        contribution = _set_context_contribution_value(
+            contribution, key, normalized, context=context, diagnostics=diagnostics
+        )
+    return contribution
+
+
+def _schema_context_contribution(context: ExclusiveContextDef) -> _ContextContribution:
+    guard = context.guard
+    exclusive_refs = (
+        frozenset(context.obj_refs)
+        if context.kind == "ResourceExclusiveContext"
+        else frozenset()
+    )
+    if guard is None:
+        return _ContextContribution(exclusive_refs=exclusive_refs)
+    if guard.kind == "RawSpinLockIrqSaveGuard":
+        return _ContextContribution(
+            local_interrupts=False,
+            preemption=False,
+            sleepable=False,
+            exclusive_refs=exclusive_refs,
+        )
+    if guard.kind == "PreemptionGuard":
+        return _ContextContribution(preemption=False, exclusive_refs=exclusive_refs)
+    if guard.kind == "LocalInterruptGuard":
+        return _ContextContribution(local_interrupts=False, exclusive_refs=exclusive_refs)
+    return _ContextContribution(exclusive_refs=exclusive_refs)
+
+
+def _context_guard_holds(context: ExclusiveContextDef) -> dict[str, str]:
+    guard = context.guard
+    if guard is None:
+        return {}
+    entries: dict[str, str] = {}
+    for block in guard.holds:
+        for entry, _span in block.entry_spans:
+            match = _ATTR_RE.match(entry)
+            if match is not None:
+                entries[match.group(1)] = match.group(2).strip()
+    return entries
+
+
+def _normalize_hold_value(raw: str) -> bool | None:
+    normalized = raw.strip()
+    if normalized.startswith("State::"):
+        normalized = normalized.removeprefix("State::")
+    normalized = normalized.lower()
+    if normalized in _FALSE_HOLD_VALUES:
+        return False
+    if normalized in _TRUE_HOLD_VALUES:
+        return True
+    return None
+
+
+def _set_context_contribution_value(
+    contribution: _ContextContribution,
+    key: str,
+    value: bool,
+    *,
+    context: ExclusiveContextDef,
+    diagnostics: list[Diagnostic],
+) -> _ContextContribution:
+    existing = getattr(contribution, key)
+    if existing is not None and existing is not value:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"context guard hold conflicts with guard schema on {context.name}: {key}",
+                context.guard.span if context.guard is not None else context.decl.span,
+            )
+        )
+        return contribution
+    return _replace_context_contribution(contribution, **{key: value})
+
+
+def _replace_context_contribution(
+    contribution: _ContextContribution, **changes: bool | frozenset[str] | None
+) -> _ContextContribution:
+    values = {
+        "local_interrupts": contribution.local_interrupts,
+        "preemption": contribution.preemption,
+        "sleepable": contribution.sleepable,
+        "cpu_concurrency": contribution.cpu_concurrency,
+        "task_concurrency": contribution.task_concurrency,
+        "exclusive_refs": contribution.exclusive_refs,
+    }
+    values.update(changes)
+    return _ContextContribution(**values)
+
+
+def _parse_legacy_context_effects(
+    context: ExclusiveContextDef, diagnostics: list[Diagnostic]
+) -> _ContextContribution | None:
     entries: dict[str, str] = {}
     for block in context.decl.effects:
         for entry, _span in block.entry_spans:
@@ -620,8 +774,8 @@ def _parse_context_effects(
     if not entries:
         return None
 
-    bools: dict[str, bool] = {}
-    for key in _CONTEXT_BOOLEAN_EFFECTS:
+    values: dict[str, bool | None] = {}
+    for key in _LEGACY_CONTEXT_BOOLEAN_EFFECTS:
         raw = entries.get(key)
         if raw not in ("true", "false"):
             diagnostics.append(
@@ -632,7 +786,8 @@ def _parse_context_effects(
                 )
             )
             return None
-        bools[key] = raw == "true"
+        # Legacy true means "not constrained by this context" during migration.
+        values[_LEGACY_EFFECT_KEY_MAP[key]] = False if raw == "false" else None
 
     raw_exclusive_refs = entries.get("exclusive_refs")
     if raw_exclusive_refs == "obj_refs":
@@ -650,39 +805,39 @@ def _parse_context_effects(
         )
         return None
 
-    return _ContextEffects(
-        interruptible=bools["interruptible"],
-        preemptible=bools["preemptible"],
-        sleepable=bools["sleepable"],
+    return _ContextContribution(
+        local_interrupts=values["local_interrupts"],
+        preemption=values["preemption"],
+        sleepable=values["sleepable"],
         exclusive_refs=exclusive_refs,
     )
 
 
-def _check_resource_exclusive_context_effects(
+def _check_legacy_effects_compatible(
     context: ExclusiveContextDef,
-    effects: _ContextEffects,
+    *,
+    derived: _ContextContribution,
+    legacy: _ContextContribution,
     diagnostics: list[Diagnostic],
 ) -> None:
-    required = {
-        "interruptible": False,
-        "preemptible": False,
-        "sleepable": False,
-    }
-    for key, value in required.items():
-        if getattr(effects, key) != value:
+    for key in _CONTRIBUTION_KEYS:
+        derived_value = getattr(derived, key)
+        legacy_value = getattr(legacy, key)
+        if derived_value is not None and legacy_value is not None and derived_value is not legacy_value:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    "ResourceExclusiveContext effect must declare "
-                    f"{key}: {str(value).lower()}",
+                    "context legacy effects conflict with guard-derived contribution "
+                    f"on {context.name}: {key}",
                     context.decl.span,
                 )
             )
-    if effects.exclusive_refs != frozenset(context.obj_refs):
+    if legacy.exclusive_refs != derived.exclusive_refs:
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
-                "ResourceExclusiveContext effect must declare exclusive_refs: obj_refs",
+                "context legacy effects conflict with guard-derived exclusive_refs "
+                f"on {context.name}",
                 context.decl.span,
             )
         )
@@ -727,7 +882,7 @@ def _check_within_references(
     diagnostics: list[Diagnostic],
     *,
     inherited_bindings: dict[str, str] | None = None,
-    inherited_effects: _ContextEffects | None = None,
+    inherited_context: _ContextContribution | None = None,
 ) -> None:
     context = model.exclusive_contexts.get(within.context)
     if context is None:
@@ -739,20 +894,18 @@ def _check_within_references(
             )
         )
         return
-    context_effects = _parse_context_effects(context, diagnostics)
-    cumulative_effects = inherited_effects
-    if context_effects is not None:
-        if inherited_effects is not None:
-            _check_context_nesting_effects(
-                parent_effects=inherited_effects,
-                child_effects=context_effects,
-                child_context=context,
-                span=within.span,
-                diagnostics=diagnostics,
-            )
-        cumulative_effects = _compose_context_effects(
-            inherited_effects, context_effects
+    contribution = _derive_context_contribution(context, diagnostics)
+    if inherited_context is not None:
+        _check_context_nesting_contribution(
+            parent_context=inherited_context,
+            child_contribution=contribution,
+            child_context=context,
+            span=within.span,
+            diagnostics=diagnostics,
         )
+    cumulative_context = _compose_context_contribution(
+        inherited_context, contribution
+    )
 
     if context.guard is not None and within.entered_by:
         diagnostics.append(
@@ -793,42 +946,54 @@ def _check_within_references(
             child_within,
             diagnostics,
             inherited_bindings=bindings,
-            inherited_effects=cumulative_effects,
+            inherited_context=cumulative_context,
         )
     _check_lock_event_blocks(model, within.exited_by, diagnostics, context=context)
 
 
-def _check_context_nesting_effects(
+def _check_context_nesting_contribution(
     *,
-    parent_effects: _ContextEffects,
-    child_effects: _ContextEffects,
+    parent_context: _ContextContribution,
+    child_contribution: _ContextContribution,
     child_context: ExclusiveContextDef,
     span: SourceSpan,
     diagnostics: list[Diagnostic],
 ) -> None:
-    for key in _CONTEXT_BOOLEAN_EFFECTS:
-        if getattr(parent_effects, key) is False and getattr(child_effects, key) is True:
+    for key in _CONTRIBUTION_KEYS:
+        parent_value = getattr(parent_context, key)
+        child_value = getattr(child_contribution, key)
+        if parent_value is False and child_value is True:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
                     "invalid context nesting: inner context "
-                    f"{child_context.name} weakens {key} from false to true",
+                    f"{child_context.name} weakens {key} from constrained to open",
                     span,
                 )
             )
 
 
-def _compose_context_effects(
-    parent: _ContextEffects | None, child: _ContextEffects
-) -> _ContextEffects:
+def _compose_context_contribution(
+    parent: _ContextContribution | None, child: _ContextContribution
+) -> _ContextContribution:
     if parent is None:
         return child
-    return _ContextEffects(
-        interruptible=parent.interruptible and child.interruptible,
-        preemptible=parent.preemptible and child.preemptible,
-        sleepable=parent.sleepable and child.sleepable,
+    return _ContextContribution(
+        local_interrupts=_compose_constraint(parent.local_interrupts, child.local_interrupts),
+        preemption=_compose_constraint(parent.preemption, child.preemption),
+        sleepable=_compose_constraint(parent.sleepable, child.sleepable),
+        cpu_concurrency=_compose_constraint(parent.cpu_concurrency, child.cpu_concurrency),
+        task_concurrency=_compose_constraint(parent.task_concurrency, child.task_concurrency),
         exclusive_refs=parent.exclusive_refs | child.exclusive_refs,
     )
+
+
+def _compose_constraint(parent: bool | None, child: bool | None) -> bool | None:
+    if parent is False or child is False:
+        return False
+    if parent is True or child is True:
+        return True
+    return None
 
 
 def _check_lock_event_blocks(

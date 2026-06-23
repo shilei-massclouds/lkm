@@ -553,7 +553,7 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
 
-    def test_context_nesting_rejects_weaker_inner_effects(self) -> None:
+    def test_context_nesting_rejects_weaker_inner_holds(self) -> None:
         source = """
             type RawSpinLock {
                 processes {
@@ -611,6 +611,10 @@ class ModelToolTests(unittest.TestCase):
                     exited_by {
                         TaskPreemption.Event::Enable;
                     }
+
+                    holds {
+                        local_interrupts: enabled;
+                    }
                 }
 
                 obj_refs {
@@ -665,7 +669,7 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             self.assertIn(
                 "invalid context nesting: inner context "
-                "InnerPreemptContext weakens interruptible from false to true",
+                "InnerPreemptContext weakens local_interrupts from constrained to open",
                 stderr.getvalue(),
             )
 
@@ -741,6 +745,105 @@ class ModelToolTests(unittest.TestCase):
                 exit_code = model_main([str(ast), "-o", str(model)])
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
+
+    def test_phase_boundary_guard_without_effects_is_valid(self) -> None:
+        source = """
+            context BootPhaseContext: Context {
+                guard: PhaseBoundaryGuard {
+                    holds {
+                        cpu_concurrency: single_cpu;
+                        task_concurrency: single_task;
+                        local_interrupts: disabled;
+                        preemption: disabled;
+                        sleepable: false;
+                    }
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within BootPhaseContext {
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "phase-boundary-context.spec"
+            ast = Path(tmp) / "phase-boundary-context.ast.json"
+            model = Path(tmp) / "phase-boundary-context.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+
+    def test_guard_holds_rejects_weaker_nested_context(self) -> None:
+        source = """
+            context OuterContext: Context {
+                guard: PhaseBoundaryGuard {
+                    holds {
+                        sleepable: false;
+                    }
+                }
+            }
+
+            context InnerContext: Context {
+                guard: PhaseBoundaryGuard {
+                    holds {
+                        sleepable: true;
+                    }
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            within OuterContext {
+                                within InnerContext {
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "phase-boundary-context-bad.spec"
+            ast = Path(tmp) / "phase-boundary-context-bad.ast.json"
+            model = Path(tmp) / "phase-boundary-context-bad.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "invalid context nesting: inner context "
+                "InnerContext weakens sleepable from constrained to open",
+                stderr.getvalue(),
+            )
 
     def test_model_tool_does_not_import_pyveri(self) -> None:
         source_root = Path(__file__).resolve().parents[1] / "src" / "model_tool"

@@ -152,6 +152,7 @@ class ContextGuardDecl:
     lock_ref: str | None = None
     entered_by: list[Block] = field(default_factory=list)
     exited_by: list[Block] = field(default_factory=list)
+    holds: list[Block] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
     properties: dict[str, str] = field(default_factory=dict)
 

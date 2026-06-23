@@ -142,6 +142,7 @@ def _context_guard_from_json(item: Any) -> ContextGuardDecl:
         lock_ref=lock_ref,
         entered_by=[_block_from_json(block) for block in _list(data, "entered_by")],
         exited_by=[_block_from_json(block) for block in _list(data, "exited_by")],
+        holds=[_block_from_json(block) for block in data.get("holds", [])],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
         properties={str(key): str(value) for key, value in properties.items()},
     )
