@@ -202,6 +202,7 @@ predicate kthreadd_entry_reaches_schedule_loop<T, U>(task: T, scheduler: U) -> b
 predicate kthreadd_schedule_loop_ready<T, U>(task: T, scheduler: U) -> bool;
 predicate kthreadd_schedule_loop_schedule_boundary_deferred<T, U>(task: T, scheduler: U) -> bool;
 predicate task_preemption_control_ready<T>(task: T) -> bool;
+predicate task_preempt_count_initialized_to_init_preempt_count<T>(task: T) -> bool;
 predicate task_preemption_disabled<T>(task: T) -> bool;
 predicate task_preemption_enabled<T>(task: T) -> bool;
 predicate task_preemption_enabled_no_resched<T>(task: T) -> bool;

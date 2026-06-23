@@ -86,6 +86,9 @@ object BootInitTask: TaskObject {
                     valid_object_storage(storage);
                     valid_task_storage(storage);
                     Riscv64.tp == phys_addr(BootInitTask.storage);
+                    task_preemption_control_ready(BootInitTask);
+                    task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
+                    task_preemption_disabled(BootInitTask);
                 }
             }
         }
@@ -93,6 +96,8 @@ object BootInitTask: TaskObject {
 
     /*
      * Prepared 表示 tp 已经指向 init_task 的物理地址，可支撑物理地址阶段继续执行。
+     * init_task.thread_info.preempt_count 仍保持 INIT_PREEMPT_COUNT，使调度器运行前
+     * 内核抢占关闭。
      */
     state State::Prepared {
         invariant {
@@ -101,6 +106,9 @@ object BootInitTask: TaskObject {
             valid_task_storage(storage);
             Riscv64.tp == phys_addr(BootInitTask.storage);
             valid_task_ref(Riscv64.tp);
+            task_preemption_control_ready(BootInitTask);
+            task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
+            task_preemption_disabled(BootInitTask);
         }
 
         events {
@@ -121,13 +129,17 @@ object BootInitTask: TaskObject {
                     valid_object_storage(storage);
                     valid_task_storage(storage);
                     Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap);
+                    task_preemption_control_ready(BootInitTask);
+                    task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
+                    task_preemption_disabled(BootInitTask);
                 }
             }
         }
     }
 
     /*
-     * Online 表示根任务指针已经使用 EarlyVm 中的内核映像虚拟区域地址。
+     * Online 表示根任务指针已经使用 EarlyVm 中的内核映像虚拟区域地址，且调度器运行前的
+     * 初始抢占关闭状态仍被保留。
      */
     state State::Online {
         invariant {
@@ -136,6 +148,9 @@ object BootInitTask: TaskObject {
             valid_task_storage(storage);
             Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap);
             valid_task_ref(Riscv64.tp);
+            task_preemption_control_ready(BootInitTask);
+            task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
+            task_preemption_disabled(BootInitTask);
         }
     }
 }
@@ -1880,6 +1895,7 @@ object BootCpuLocalInterrupt: LocalInterruptControl {
     state State::Ready {
         invariant {
             cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
+            cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
         }
     }
 }
