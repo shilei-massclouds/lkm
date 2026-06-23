@@ -464,6 +464,122 @@ object JumpLabelMutex: Mutex {
     }
 }
 
+/*
+ * CpuHotplugLock 表示 Linux kernel/cpu.c 中的
+ * DEFINE_STATIC_PERCPU_RWSEM(cpu_hotplug_lock)。它是通用
+ * PerCpuRwSemaphore 类型的具名静态实例，cpus_read_lock() /
+ * cpus_read_unlock() 通过它排斥 CPU hotplug writer。
+ */
+object CpuHotplugLock: PerCpuRwSemaphore {
+    initial_state: State::Base;
+
+    /*
+     * Base 表示 cpu_hotplug_lock 静态定义尚未纳入模型事实。
+     */
+    state State::Base {
+        events {
+            /*
+             * Preset 对应 DEFINE_STATIC_PERCPU_RWSEM(cpu_hotplug_lock) 提供的
+             * 静态 struct、per-cpu read_count 和 RcuSync/waiter/block 初值。
+             * 该实例只要求 PerCpuStorage.Prepared，表示 boot CPU 早期
+             * per-cpu 静态区已经可访问；通用类型不绑定这个依赖。
+             */
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    PerCpuStorage.state == State::Prepared;
+                }
+
+                ensures {
+                    cpu_hotplug_lock_static_initializer(CpuHotplugLock);
+                    cpu_hotplug_lock_storage_bound(CpuHotplugLock);
+                    cpu_hotplug_lock_percpu_read_counter_bound(CpuHotplugLock, PerCpuStorage);
+                    percpu_rwsem_storage_bound(CpuHotplugLock);
+                    percpu_rwsem_init_kind_recorded(CpuHotplugLock);
+                    percpu_rwsem_percpu_read_counter_bound(CpuHotplugLock);
+                    percpu_rwsem_block_flag_clear(CpuHotplugLock);
+                    percpu_rwsem_writer_wait_ready(CpuHotplugLock);
+                    percpu_rwsem_wait_queue_storage_bound(CpuHotplugLock);
+                    percpu_rwsem_rcu_sync_bound(CpuHotplugLock);
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示静态 initializer 和 boot CPU early per-cpu counter 已确认，
+     * 但尚未作为 CorePrepare 中的 CPU hotplug read guard 实例发布。
+     */
+    state State::Prepared {
+        invariant {
+            cpu_hotplug_lock_static_initializer(CpuHotplugLock);
+            cpu_hotplug_lock_storage_bound(CpuHotplugLock);
+            cpu_hotplug_lock_percpu_read_counter_bound(CpuHotplugLock, PerCpuStorage);
+        }
+
+        events {
+            /*
+             * Setup 发布 boot CPU early read-lock 可用状态。完整多 CPU
+             * counter scope 由后续 Enable/Online 表达，不是 CorePrepare 前置。
+             */
+            on Event::Setup -> State::Ready {
+                ensures {
+                    cpu_hotplug_lock_ready(CpuHotplugLock);
+                    cpu_hotplug_lock_boot_cpu_read_available(CpuHotplugLock);
+                    percpu_rwsem_ready(CpuHotplugLock);
+                    percpu_rwsem_readers_fast(CpuHotplugLock);
+                    percpu_rwsem_percpu_read_count_zero(CpuHotplugLock);
+                    percpu_rwsem_wait_queue_ready(CpuHotplugLock);
+                    percpu_rwsem_writer_inactive(CpuHotplugLock);
+                    percpu_rwsem_reader_fast_path_available(CpuHotplugLock);
+                    rcu_sync_ready(CpuHotplugLock);
+                    rcu_sync_idle(CpuHotplugLock);
+                    rcu_sync_reader_fast_path_available(CpuHotplugLock);
+                }
+            }
+        }
+    }
+
+    /*
+     * Ready 表示 cpu_hotplug_lock 已可作为 StaticBranch.setup() 的
+     * cpus_read_lock()/cpus_read_unlock() 同步实例。
+     */
+    state State::Ready {
+        invariant {
+            cpu_hotplug_lock_ready(CpuHotplugLock);
+            cpu_hotplug_lock_boot_cpu_read_available(CpuHotplugLock);
+            percpu_rwsem_ready(CpuHotplugLock);
+            percpu_rwsem_readers_fast(CpuHotplugLock);
+            percpu_rwsem_percpu_read_count_zero(CpuHotplugLock);
+            percpu_rwsem_reader_fast_path_available(CpuHotplugLock);
+        }
+    }
+}
+
+context CpuHotplugReadContext: ResourceExclusiveContext {
+    /*
+     * This context corresponds to Linux cpus_read_lock() /
+     * cpus_read_unlock() around jump_label_init(). In arceos_ex boot code the
+     * outer BootPhaseContext may lower this guard to proof-only, but the
+     * source model still records the real Linux guard boundary.
+     */
+    guard {
+        lock_ref: CpuHotplugLock;
+
+        entered_by {
+            CpuHotplugLock.Event::ReadLock(BootInitTaskRef);
+        }
+
+        exited_by {
+            CpuHotplugLock.Event::ReadUnlock(BootInitTaskRef);
+        }
+    }
+
+    obj_refs {
+        StaticBranch;
+        CpuHotplugLock;
+    }
+}
+
 context StaticBranchJumpLabelContext: ResourceExclusiveContext {
     /*
      * This context corresponds to Linux jump_label_lock() /
@@ -512,19 +628,22 @@ object StaticBranch: KernelObject {
                 depends_on {
                     KernelImage.state == State::Online;
                     SwapperVm.state == State::Online;
+                    CpuHotplugLock.state == State::Ready;
                     JumpLabelMutex.state == State::Ready;
                     task_ref_ready(BootInitTaskRef);
                 }
 
-                within StaticBranchJumpLabelContext {
-                    ensures {
-                        static_branch_registry_ready(StaticBranch, KernelImage);
-                        static_branch_entries_sorted(StaticBranch);
-                        static_key_to_branch_sites_ready(StaticBranch);
-                        static_branch_cpu_hotplug_read_guard_used(StaticBranch);
-                        static_branch_jump_label_mutex_guard_used(StaticBranch);
-                        static_branch_text_patch_sync_deferred(StaticBranch);
-                        static_branch_set_action_ready(StaticBranch);
+                within CpuHotplugReadContext {
+                    within StaticBranchJumpLabelContext {
+                        ensures {
+                            static_branch_registry_ready(StaticBranch, KernelImage);
+                            static_branch_entries_sorted(StaticBranch);
+                            static_key_to_branch_sites_ready(StaticBranch);
+                            static_branch_cpu_hotplug_read_guard_used(StaticBranch);
+                            static_branch_jump_label_mutex_guard_used(StaticBranch);
+                            static_branch_text_patch_sync_deferred(StaticBranch);
+                            static_branch_set_action_ready(StaticBranch);
+                        }
                     }
                 }
             }
@@ -741,31 +860,67 @@ object PerCpuOffsetTable: MemoryObject {
 
 /*
  * PerCpuStorage 表示 per-cpu 存储的顶层抽象。它聚合静态 percpu 模板、
- * first chunk 和 offset table。静态 percpu 变量访问是状态内 action，
- * 由 Ready 状态下的寻址事实支撑；完整动态 percpu allocator 后续再展开。
+ * first chunk 和 offset table。Prepared 表示静态定义和 boot CPU 早期
+ * per-cpu 可用性已经建立；Ready 表示完整 possible CPU first chunk 和
+ * offset table 可用。完整动态 percpu allocator 后续再展开。
  */
 object PerCpuStorage: MemoryObject {
     initial_state: State::Base;
 
     /*
-     * Base 表示 per-cpu 存储尚未建立。
+     * Base 表示 per-cpu 静态模板尚未纳入模型事实。
      */
     state State::Base {
         events {
             /*
-             * Setup 对应 setup_per_cpu_areas()。
+             * Preset 对应静态 .data..percpu 模板和 boot CPU 早期访问事实。
+             * 这一步足以支撑 DEFINE_STATIC_PERCPU_RWSEM(cpu_hotplug_lock)
+             * 的 read_count 存储绑定，但不表示完整 per-cpu allocator 在线。
+             */
+            on Event::Preset -> State::Prepared {
+                depends_on {
+                    Lds.state == State::Online;
+                }
+
+                drives {
+                    PerCpuStaticImage.Event::Setup;
+                }
+
+                ensures {
+                    PerCpuStaticImage.state == State::Ready;
+                    per_cpu_storage_static_template_ready(PerCpuStorage, PerCpuStaticImage);
+                    per_cpu_storage_boot_cpu_early_access_ready(PerCpuStorage, PerCpuStaticImage);
+                }
+            }
+        }
+    }
+
+    /*
+     * Prepared 表示静态 percpu 模板和 boot CPU 早期 per-cpu 静态实例可用，
+     * 但 first chunk 和 offset table 尚未完成。
+     */
+    state State::Prepared {
+        invariant {
+            PerCpuStaticImage.state == State::Ready;
+            per_cpu_storage_static_template_ready(PerCpuStorage, PerCpuStaticImage);
+            per_cpu_storage_boot_cpu_early_access_ready(PerCpuStorage, PerCpuStaticImage);
+        }
+
+        events {
+            /*
+             * Setup 对应 setup_per_cpu_areas() 的完整 possible CPU first chunk
+             * 和 offset table 建立。
              */
             on Event::Setup -> State::Ready {
                 depends_on {
+                    PerCpuStaticImage.state == State::Ready;
                     MemBlock.state == State::Online;
                     SwapperVm.state == State::Online;
-                    Lds.state == State::Online;
                     CpuGroup.state == State::Ready;
                     CpuIdMap.state == State::Ready;
                 }
 
                 drives {
-                    PerCpuStaticImage.Event::Setup;
                     PerCpuFirstChunk.Event::Setup;
                     PerCpuOffsetTable.Event::Setup;
                 }
@@ -1086,6 +1241,9 @@ object CorePreparePhase: PhaseObject {
                     CacheBlockInfo.Event::Setup;
                     CpuCapabilities.Event::Setup;
                     DmaCachePolicy.Event::Setup;
+                    PerCpuStorage.Event::Preset;
+                    CpuHotplugLock.Event::Preset;
+                    CpuHotplugLock.Event::Setup;
                     JumpLabelMutex.Event::Preset;
                     JumpLabelMutex.Event::Setup;
                     StaticBranch.Event::Setup;
@@ -1152,6 +1310,7 @@ object CorePreparePhase: PhaseObject {
             CacheBlockInfo.state == State::Ready;
             CpuCapabilities.state == State::Ready;
             DmaCachePolicy.state == State::Ready;
+            CpuHotplugLock.state == State::Ready;
             JumpLabelMutex.state == State::Ready;
             StaticBranch.state == State::Ready;
             CommandLine.state == State::Ready;

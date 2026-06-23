@@ -57,6 +57,7 @@ pub mod page_table;
 pub mod params;
 pub mod payload_param;
 pub mod per_cpu_storage;
+pub mod percpu_rw_semaphore;
 pub mod physical_memory;
 pub mod platform_cpu_info;
 pub mod plic_provider;

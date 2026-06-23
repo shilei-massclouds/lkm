@@ -2,6 +2,7 @@ use super::{
     init_task::InitTask,
     kernel_image::KernelImage,
     mutex::Mutex,
+    percpu_rw_semaphore::PerCpuRwSemaphore,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
 };
@@ -73,6 +74,10 @@ impl StaticBranch {
         self.cpu_hotplug_read_guard_used
     }
 
+    pub fn cpu_hotplug_read_guard_used_by(&self, cpu_hotplug_lock: &PerCpuRwSemaphore) -> bool {
+        self.lifecycle.state() == State::Ready && cpu_hotplug_lock.boot_phase_read_guard_elided()
+    }
+
     pub fn jump_label_mutex_guard_used(&self, jump_label_mutex: &Mutex) -> bool {
         self.lifecycle.state() == State::Ready && jump_label_mutex.boot_phase_guard_elided()
     }
@@ -85,6 +90,7 @@ impl StaticBranch {
         &mut self,
         kernel_image: &KernelImage,
         vm: &Vm,
+        cpu_hotplug_lock: &mut PerCpuRwSemaphore,
         jump_label_mutex: &mut Mutex,
         init_task: &InitTask,
     ) -> EventResult {
@@ -92,11 +98,20 @@ impl StaticBranch {
             || kernel_image.state() != State::Online
             || vm.state() != State::Online
             || !vm.entry_successor_ready()
+            || !cpu_hotplug_lock.ready()
             || !jump_label_mutex.ready()
             || init_task.state() != State::Online
         {
             return self.failed_setup();
         }
+
+        /*
+         * CpuHotplugReadContext:
+         * CpuHotplugLock.ReadLock(BootInitTaskRef) is elided because the outer
+         * BootPhaseContext proves a single CPU, single task, local IRQ
+         * disabled, preemption disabled execution path.
+         */
+        cpu_hotplug_lock.mark_boot_phase_read_guard_elided()?;
 
         /*
          * StaticBranchJumpLabelContext:
@@ -120,6 +135,11 @@ impl StaticBranch {
         /*
          * StaticBranchJumpLabelContext:
          * JumpLabelMutex.Unlock(BootInitTaskRef) is elided for the same
+         * BootPhaseContext effective-context proof.
+         */
+        /*
+         * CpuHotplugReadContext:
+         * CpuHotplugLock.ReadUnlock(BootInitTaskRef) is elided for the same
          * BootPhaseContext effective-context proof.
          */
 

@@ -64,6 +64,7 @@ use crate::objects::{
     params::Params,
     payload_param::PayloadParam,
     per_cpu_storage::PerCpuStorage,
+    percpu_rw_semaphore::PerCpuRwSemaphore,
     physical_memory::PhysicalMemory,
     platform_cpu_info::PlatformCpuInfo,
     pre_smp_init::{PreSmpInitBoundary, PreSmpInitcallTable, VmstatCore},
@@ -145,6 +146,7 @@ pub struct Context {
     pub cpu_capabilities: CpuCapabilities,
     pub dma_cache_policy: DmaCachePolicy,
     pub jump_label_mutex: Mutex,
+    pub cpu_hotplug_lock: PerCpuRwSemaphore,
     pub static_branch: StaticBranch,
     pub saved_command_line: SavedCommandLine,
     pub static_command_line: StaticCommandLine,
@@ -331,6 +333,7 @@ impl Context {
             cpu_capabilities: CpuCapabilities::new(),
             dma_cache_policy: DmaCachePolicy::new(),
             jump_label_mutex: Mutex::new_static(),
+            cpu_hotplug_lock: PerCpuRwSemaphore::new_static(),
             static_branch: StaticBranch::new(),
             saved_command_line: SavedCommandLine::new(),
             static_command_line: StaticCommandLine::new(),
@@ -492,6 +495,18 @@ impl Context {
         self.scheduler.dequeue_smoke_mutex_task()
     }
 
+    pub fn setup_smoke_rwsem_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
+        self.scheduler.setup_smoke_rwsem_task(entry)
+    }
+
+    pub fn enqueue_smoke_rwsem_task(&mut self) -> EventResult {
+        self.scheduler.enqueue_smoke_rwsem_task()
+    }
+
+    pub fn dequeue_smoke_rwsem_task(&mut self) -> EventResult {
+        self.scheduler.dequeue_smoke_rwsem_task()
+    }
+
     pub fn schedule_current(&mut self) -> EventResult {
         self.scheduler.schedule(
             &mut self.boot_cpu_local_interrupt,
@@ -515,6 +530,14 @@ impl Context {
 
     pub fn mark_smoke_mutex_yielded_back(&mut self) -> EventResult {
         self.scheduler.smoke_mutex_task_mut().mark_yielded_back()
+    }
+
+    pub fn mark_smoke_rwsem_entry_ran(&mut self) -> EventResult {
+        self.scheduler.smoke_rwsem_task_mut().mark_entry_ran()
+    }
+
+    pub fn mark_smoke_rwsem_yielded_back(&mut self) -> EventResult {
+        self.scheduler.smoke_rwsem_task_mut().mark_yielded_back()
     }
 
     pub fn platform_driver_register(&mut self, driver: DeviceDriverRef) -> InitcallReturn {

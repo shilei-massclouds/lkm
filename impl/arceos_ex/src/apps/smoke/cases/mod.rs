@@ -22,6 +22,7 @@ pub mod mutex;
 pub mod page_allocator;
 pub mod params;
 pub mod per_cpu;
+pub mod percpu_rw_semaphore;
 pub mod platform_bus_actions;
 pub mod pre_smp_init;
 pub mod print;

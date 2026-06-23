@@ -18,6 +18,7 @@ pub enum CurrentTaskRef {
     Kthreadd,
     SmokeScheduler,
     SmokeMutex,
+    SmokeRwsem,
 }
 
 #[allow(dead_code)]
@@ -30,6 +31,7 @@ impl CurrentTaskRef {
             Self::Kthreadd => "KthreaddTask",
             Self::SmokeScheduler => "SmokeSchedulerTask",
             Self::SmokeMutex => "SmokeMutexTask",
+            Self::SmokeRwsem => "SmokeRwsemTask",
         }
     }
 }

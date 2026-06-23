@@ -68,6 +68,22 @@ enum MutexInitKind {
     RuntimeInit,
 }
 
+enum RcuSyncExtState {
+    Idle,
+    WriterActive,
+}
+
+enum PerCpuRwSemaphoreExtState {
+    ReadersFast,
+    WriterBlocked,
+    WriterActive,
+}
+
+enum PerCpuRwSemaphoreInitKind {
+    StaticInitializer,
+    RuntimeInit,
+}
+
 enum TaskRuntimeState {
     New,
     Running,
@@ -1334,6 +1350,240 @@ type Mutex {
                 mutex_waiter_enqueued(self, current_task);
                 mutex_waiter_finished(self, current_task);
                 mutex_contention_may_sleep(self);
+            }
+        }
+    }
+}
+
+/*
+ * RcuSync models Linux struct rcu_sync as a local support object. It is not
+ * the global RcuCore; it only controls whether a containing primitive may use
+ * a reader fast path or must route readers through the synchronized slow path.
+ */
+type RcuSync {
+    ext_state: RcuSyncExtState;
+
+    lifecycle {
+        Event::Preset {
+            state_effect: StateEffect::Always;
+            ensures {
+                rcu_sync_static_or_runtime_initialized(self);
+                rcu_sync_idle(self);
+                rcu_sync_reader_fast_path_available(self);
+            }
+        }
+
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            ensures {
+                rcu_sync_ready(self);
+                rcu_sync_idle(self);
+                rcu_sync_reader_fast_path_available(self);
+            }
+        }
+    }
+
+    processes {
+        Event::Enter {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                RcuSyncExtState::Idle -> RcuSyncExtState::WriterActive;
+            }
+            ensures {
+                rcu_sync_entered(self);
+                rcu_sync_reader_fast_path_blocked(self);
+            }
+        }
+
+        Event::Exit {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                RcuSyncExtState::WriterActive -> RcuSyncExtState::Idle;
+            }
+            ensures {
+                rcu_sync_exited(self);
+                rcu_sync_grace_period_completed(self);
+                rcu_sync_reader_fast_path_available(self);
+            }
+        }
+    }
+}
+
+/*
+ * PerCpuRwSemaphore corresponds to Linux struct percpu_rw_semaphore. It uses
+ * per-CPU reader counters for cheap read-side critical sections, an atomic
+ * writer block flag to stop new readers, RcuSync to force readers through a
+ * synchronized slow path while a writer is active, rcuwait for writer drain,
+ * and a wait queue for contended readers/writers. Lockdep, tracing and exact
+ * scheduler wait mechanics are internal/deferred; the observable read/write
+ * protocol and counter/drain facts are part of this type.
+ */
+type PerCpuRwSemaphore {
+    init_kind: PerCpuRwSemaphoreInitKind;
+    ext_state: PerCpuRwSemaphoreExtState;
+
+    owned {
+        rcu_sync: RcuSync;
+        wait_queue: SimpleWaitQueue;
+    }
+
+    lifecycle {
+        Event::Preset {
+            state_effect: StateEffect::Always;
+            drives {
+                self.rcu_sync.Event::Preset;
+            }
+            ensures {
+                percpu_rwsem_storage_bound(self);
+                percpu_rwsem_init_kind_recorded(self);
+                percpu_rwsem_percpu_read_counter_bound(self);
+                percpu_rwsem_block_flag_clear(self);
+                percpu_rwsem_writer_wait_ready(self);
+                percpu_rwsem_wait_queue_storage_bound(self);
+                percpu_rwsem_rcu_sync_bound(self);
+            }
+        }
+
+        Event::Setup {
+            state_effect: StateEffect::Always;
+            drives {
+                self.rcu_sync.Event::Setup;
+                self.wait_queue.Event::Setup;
+            }
+            ensures {
+                percpu_rwsem_ready(self);
+                percpu_rwsem_readers_fast(self);
+                percpu_rwsem_percpu_read_count_zero(self);
+                percpu_rwsem_wait_queue_ready(self);
+                percpu_rwsem_writer_inactive(self);
+                percpu_rwsem_reader_fast_path_available(self);
+            }
+        }
+
+        Event::Enable {
+            state_effect: StateEffect::Always;
+            ensures {
+                percpu_rwsem_online(self);
+                percpu_rwsem_all_possible_cpu_counters_addressable(self);
+            }
+        }
+    }
+
+    processes {
+        Event::ReadLock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            transitions {
+                PerCpuRwSemaphoreExtState::ReadersFast -> PerCpuRwSemaphoreExtState::ReadersFast;
+                PerCpuRwSemaphoreExtState::WriterBlocked -> PerCpuRwSemaphoreExtState::WriterBlocked;
+                PerCpuRwSemaphoreExtState::WriterActive -> PerCpuRwSemaphoreExtState::WriterActive;
+            }
+            ensures {
+                percpu_rwsem_read_lock_entered(self, current_task);
+                percpu_rwsem_preemption_disabled_for_counter_update(self);
+                percpu_rwsem_current_cpu_read_count_incremented(self);
+                percpu_rwsem_read_acquire_barrier_observed(self);
+            }
+            result {
+                ReadersFast: Success(read_acquired_fast);
+                WriterBlocked: Blocked(read_waiting_for_writer);
+                WriterActive: Blocked(read_waiting_for_writer);
+            }
+        }
+
+        Event::ReadTryLock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            transitions {
+                PerCpuRwSemaphoreExtState::ReadersFast -> PerCpuRwSemaphoreExtState::ReadersFast;
+                PerCpuRwSemaphoreExtState::WriterBlocked -> PerCpuRwSemaphoreExtState::WriterBlocked;
+                PerCpuRwSemaphoreExtState::WriterActive -> PerCpuRwSemaphoreExtState::WriterActive;
+            }
+            ensures {
+                percpu_rwsem_read_trylock_attempted(self, current_task);
+                percpu_rwsem_read_trylock_has_unconditional_barrier(self);
+            }
+            result {
+                ReadersFast: Success(read_acquired_fast);
+                WriterBlocked: Blocked(read_trylock_failed);
+                WriterActive: Blocked(read_trylock_failed);
+            }
+        }
+
+        Event::ReadUnlock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+                percpu_rwsem_reader_held_on_current_cpu(self, current_task);
+            }
+            transitions {
+                PerCpuRwSemaphoreExtState::ReadersFast -> PerCpuRwSemaphoreExtState::ReadersFast;
+                PerCpuRwSemaphoreExtState::WriterBlocked -> PerCpuRwSemaphoreExtState::WriterBlocked;
+                PerCpuRwSemaphoreExtState::WriterActive -> PerCpuRwSemaphoreExtState::WriterActive;
+            }
+            ensures {
+                percpu_rwsem_read_unlock_exited(self, current_task);
+                percpu_rwsem_current_cpu_read_count_decremented(self);
+                percpu_rwsem_read_release_barrier_observed(self);
+                percpu_rwsem_writer_wake_may_be_signaled(self);
+            }
+        }
+
+        Event::WriteLock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+            }
+            drives {
+                self.rcu_sync.Event::Enter;
+            }
+            transitions {
+                PerCpuRwSemaphoreExtState::ReadersFast -> PerCpuRwSemaphoreExtState::WriterActive;
+                PerCpuRwSemaphoreExtState::WriterBlocked -> PerCpuRwSemaphoreExtState::WriterBlocked;
+                PerCpuRwSemaphoreExtState::WriterActive -> PerCpuRwSemaphoreExtState::WriterActive;
+            }
+            ensures {
+                percpu_rwsem_write_lock_entered(self, current_task);
+                percpu_rwsem_block_flag_set(self);
+                percpu_rwsem_new_readers_blocked(self);
+                percpu_rwsem_existing_readers_drained(self);
+                percpu_rwsem_write_acquire_barrier_observed(self);
+            }
+            result {
+                ReadersFast: Success(write_acquired);
+                WriterBlocked: Blocked(write_waiting);
+                WriterActive: Blocked(write_waiting);
+            }
+        }
+
+        Event::WriteUnlock(current_task: TaskRef) {
+            state_effect: StateEffect::Conditional;
+            depends_on {
+                self.state == State::Ready;
+                task_ref_ready(current_task);
+                percpu_rwsem_writer_held(self, current_task);
+            }
+            drives {
+                self.wait_queue.Action::WakeOne;
+                self.rcu_sync.Event::Exit;
+            }
+            transitions {
+                PerCpuRwSemaphoreExtState::WriterActive -> PerCpuRwSemaphoreExtState::ReadersFast;
+            }
+            ensures {
+                percpu_rwsem_write_unlock_exited(self, current_task);
+                percpu_rwsem_block_flag_clear(self);
+                percpu_rwsem_waiters_woken(self);
+                percpu_rwsem_reader_fast_path_available(self);
+                percpu_rwsem_write_release_barrier_observed(self);
             }
         }
     }

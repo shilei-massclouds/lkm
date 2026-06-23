@@ -143,6 +143,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::mutex::run,
     },
     SmokeCase {
+        name: "percpu_rw_semaphore",
+        run: cases::percpu_rw_semaphore::run,
+    },
+    SmokeCase {
         name: "rest_init",
         run: cases::rest_init::run,
     },

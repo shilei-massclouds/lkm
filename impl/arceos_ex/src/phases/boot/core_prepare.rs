@@ -36,11 +36,16 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
     ctx.dma_cache_policy
         .setup(&ctx.cpu_capabilities, &ctx.cache_block_info)?;
+    ctx.per_cpu_storage.preset(&ctx.lds, &ctx.static_objects)?;
+    ctx.cpu_hotplug_lock
+        .preset_static_with_per_cpu_storage(&ctx.per_cpu_storage)?;
+    ctx.cpu_hotplug_lock.setup()?;
     ctx.jump_label_mutex.preset_static()?;
     ctx.jump_label_mutex.setup()?;
     ctx.static_branch.setup(
         &ctx.kernel_image,
         &ctx.vm,
+        &mut ctx.cpu_hotplug_lock,
         &mut ctx.jump_label_mutex,
         &ctx.init_task,
     )?;
@@ -52,8 +57,6 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     checkpoint_setup_nr_cpu_ids(&ctx.cpu_id_map, &ctx.cpu_group)?;
     ctx.per_cpu_storage.setup(
-        &ctx.lds,
-        &ctx.static_objects,
         &mut ctx.memblock,
         &ctx.vm,
         &ctx.config,
@@ -170,11 +173,17 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.cache_block_info.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
         && ctx.dma_cache_policy.state() == State::Ready
+        && ctx.cpu_hotplug_lock.state() == State::Ready
+        && ctx.cpu_hotplug_lock.ready()
+        && ctx.cpu_hotplug_lock.boot_phase_read_guard_elided()
         && ctx.jump_label_mutex.state() == State::Ready
         && ctx.jump_label_mutex.ready()
         && ctx.jump_label_mutex.boot_phase_guard_elided()
         && ctx.static_branch.state() == State::Ready
         && ctx.static_branch.cpu_hotplug_read_guard_used()
+        && ctx
+            .static_branch
+            .cpu_hotplug_read_guard_used_by(&ctx.cpu_hotplug_lock)
         && ctx
             .static_branch
             .jump_label_mutex_guard_used(&ctx.jump_label_mutex)

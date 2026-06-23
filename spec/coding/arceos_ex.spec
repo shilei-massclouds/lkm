@@ -384,6 +384,19 @@ type ArceosExCorePrepareCodingMust {
         arceos_ex_must_jump_label_mutex_be_independent_context_object();
 
         /*
+         * CpuHotplugLock object mapping:
+         *
+         * The Linux cpu_hotplug_lock used by cpus_read_lock() must be
+         * represented as an independent Context object of type
+         * PerCpuRwSemaphore. The object may depend on PerCpuStorage.Prepared
+         * for early boot-CPU static per-cpu storage, but PerCpuRwSemaphore as a
+         * generic type must not be globally tied to PerCpuStorage. CorePrepare
+         * setup must drive PerCpuStorage.Preset, CpuHotplugLock.Preset and
+         * CpuHotplugLock.Setup before StaticBranch.setup() consumes it.
+         */
+        arceos_ex_must_cpu_hotplug_lock_be_independent_percpu_rwsem_object();
+
+        /*
          * StaticBranch jump-label mutex guard lowering:
          *
          * StaticBranch.setup() must preserve the StaticBranchJumpLabelContext
@@ -396,6 +409,33 @@ type ArceosExCorePrepareCodingMust {
          * and the elided/proof-only guard fact.
          */
         arceos_ex_must_static_branch_setup_drive_jump_label_mutex_guard();
+
+        /*
+         * StaticBranch CPU hotplug read guard lowering:
+         *
+         * StaticBranch.setup() must preserve the CpuHotplugReadContext source
+         * boundary for cpus_read_lock()/cpus_read_unlock(). Because the outer
+         * BootPhaseContext proves single-CPU, single-task, local-IRQ-disabled
+         * and preemption-disabled execution, arceos_ex may lower the
+         * CpuHotplugLock.ReadLock/ReadUnlock pair at this call site to an
+         * elided/proof-only guard with visible comments and summary facts. The
+         * generic PerCpuRwSemaphore implementation must still provide real
+         * read/write behavior for non-proof-only call sites and smoke tests.
+         */
+        arceos_ex_must_static_branch_setup_drive_cpu_hotplug_read_guard();
+
+        /*
+         * PerCpuRwSemaphore observable behavior:
+         *
+         * PerCpuRwSemaphore must model static/runtime initialization, ready
+         * setup, read-side fast path, writer block flag, reader drain, reader
+         * slow-path/blocked observations, write unlock wakeup, and the local
+         * RcuSync child object. Lockdep, tracing, exact scheduler waitqueue
+         * mechanics and a true asynchronous RCU grace-period service may be
+         * internal or deferred, but the visible counters and outcomes must be
+         * testable from the implementation.
+         */
+        arceos_ex_must_percpu_rwsem_expose_reader_writer_protocol();
 
         /*
          * Text patch synchronization boundary:

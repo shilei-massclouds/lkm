@@ -112,19 +112,29 @@ impl PerCpuStorage {
         Some(())
     }
 
+    pub fn preset(&mut self, lds: &Lds, static_objects: &StaticObjects) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || lds.state() != State::Online
+            || static_objects.state() != State::Online
+        {
+            return self.failed_preset();
+        }
+
+        self.static_image.setup(lds, static_objects)?;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
+    }
+
     pub fn setup(
         &mut self,
-        lds: &Lds,
-        static_objects: &StaticObjects,
         memblock: &mut MemBlock,
         vm: &Vm,
         config: &Config,
         cpu_group: &CpuGroup,
         cpu_id_map: &CpuIdMap,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || lds.state() != State::Online
-            || static_objects.state() != State::Online
+        if self.lifecycle.state() != State::Prepared
+            || self.static_image.state() != State::Ready
             || memblock.state() != State::Online
             || vm.state() != State::Online
             || !vm.entry_successor_ready()
@@ -135,7 +145,6 @@ impl PerCpuStorage {
             return self.failed_setup();
         }
 
-        self.static_image.setup(lds, static_objects)?;
         self.first_chunk.setup(
             &self.static_image,
             memblock,
@@ -153,9 +162,18 @@ impl PerCpuStorage {
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,
-            State::Base,
+            State::Prepared,
             State::Ready,
             Checkpoint::PerCpuStorageReady,
+        )
+    }
+
+    fn failed_preset(&self) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Preset,
+            self.lifecycle.state(),
+            State::Base,
+            State::Prepared,
         )
     }
 
@@ -163,7 +181,7 @@ impl PerCpuStorage {
         failed_condition(
             LifecycleEvent::Setup,
             self.lifecycle.state(),
-            State::Base,
+            State::Prepared,
             State::Ready,
         )
     }
