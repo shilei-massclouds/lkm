@@ -73,6 +73,7 @@ pub mod rest_init;
 pub mod root_stream;
 pub mod rootfs;
 pub mod runtime_core;
+pub mod rwlock;
 pub mod sbi;
 pub mod scheduler;
 pub mod smp_bringup;

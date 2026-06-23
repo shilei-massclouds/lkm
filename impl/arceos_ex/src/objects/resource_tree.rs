@@ -3,6 +3,7 @@ use super::{
     lds::Lds,
     memblock::MemBlock,
     raw_dtb::PhysRange,
+    rwlock::RwLock,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -42,6 +43,7 @@ pub struct ResourceTree {
     records: [ResourceRecord; MAX_RESOURCES],
     count: usize,
     write_lock_guard_used: bool,
+    resource_lock_write_guard_used: bool,
 }
 
 impl ResourceTree {
@@ -51,6 +53,7 @@ impl ResourceTree {
             records: [ResourceRecord::empty(); MAX_RESOURCES],
             count: 0,
             write_lock_guard_used: false,
+            resource_lock_write_guard_used: false,
         }
     }
 
@@ -64,6 +67,12 @@ impl ResourceTree {
 
     pub const fn write_lock_guard_used(&self) -> bool {
         self.write_lock_guard_used
+    }
+
+    pub fn resource_lock_write_guard_used_by(&self, resource_lock: &RwLock) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.resource_lock_write_guard_used
+            && resource_lock.boot_phase_write_guard_elided()
     }
 
     pub fn root(&self) -> Option<ResourceRef<'_>> {
@@ -88,15 +97,25 @@ impl ResourceTree {
         memblock: &MemBlock,
         kernel_image: &KernelImage,
         lds: &Lds,
+        resource_lock: &mut RwLock,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || memblock.state() != State::Online
             || kernel_image.state() != State::Online
             || lds.state() != State::Online
+            || !resource_lock.ready()
             || lds.kernel_end() <= lds.kernel_start()
         {
             return self.failed_setup();
         }
+
+        /*
+         * ResourceTreeWriteContext:
+         * ResourceLock.WriteLock(BootInitTaskRef) is elided because the outer
+         * BootPhaseContext proves a single CPU, single task, local IRQ
+         * disabled, preemption disabled execution path.
+         */
+        resource_lock.mark_boot_phase_write_guard_elided()?;
 
         let root_range = PhysRange::new(0, usize::MAX);
         self.clear();
@@ -112,6 +131,12 @@ impl ResourceTree {
             return self.failed_setup();
         }
         self.write_lock_guard_used = true;
+        self.resource_lock_write_guard_used = true;
+        /*
+         * ResourceTreeWriteContext:
+         * ResourceLock.WriteUnlock(BootInitTaskRef) is elided for the same
+         * BootPhaseContext effective-context proof.
+         */
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -125,6 +150,7 @@ impl ResourceTree {
         self.records = [ResourceRecord::empty(); MAX_RESOURCES];
         self.count = 0;
         self.write_lock_guard_used = false;
+        self.resource_lock_write_guard_used = false;
     }
 
     fn add_system_ram_resources(&mut self, memblock: &MemBlock) -> bool {

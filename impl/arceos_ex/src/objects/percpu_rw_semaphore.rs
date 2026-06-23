@@ -564,6 +564,7 @@ const fn owner_from_task_ref(task_ref: CurrentTaskRef) -> PerCpuRwSemaphoreOwner
         | CurrentTaskRef::BootIdle
         | CurrentTaskRef::Kthreadd
         | CurrentTaskRef::SmokeScheduler
-        | CurrentTaskRef::SmokeMutex => PerCpuRwSemaphoreOwner::None,
+        | CurrentTaskRef::SmokeMutex
+        | CurrentTaskRef::SmokeRwLock => PerCpuRwSemaphoreOwner::None,
     }
 }

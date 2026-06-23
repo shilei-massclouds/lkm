@@ -84,6 +84,7 @@ use crate::objects::{
         RootfsConsoleDeferred,
     },
     runtime_core::{AsyncCoreDeferred, PadataCoreDeferred, RuntimeCoreBoundary},
+    rwlock::RwLock,
     sbi::Sbi,
     scheduler::Scheduler,
     smp_bringup::{
@@ -141,6 +142,7 @@ pub struct Context {
 
     pub device_tree: DeviceTree,
     pub zones: Zones,
+    pub resource_lock: RwLock,
     pub resource_tree: ResourceTree,
     pub cache_block_info: CacheBlockInfo,
     pub cpu_capabilities: CpuCapabilities,
@@ -328,6 +330,7 @@ impl Context {
             memblock: MemBlock::new(),
             device_tree: DeviceTree::new(),
             zones: Zones::new(),
+            resource_lock: RwLock::new_static(),
             resource_tree: ResourceTree::new(),
             cache_block_info: CacheBlockInfo::new(),
             cpu_capabilities: CpuCapabilities::new(),
@@ -507,6 +510,18 @@ impl Context {
         self.scheduler.dequeue_smoke_rwsem_task()
     }
 
+    pub fn setup_smoke_rwlock_task(&mut self, entry: extern "C" fn() -> !) -> EventResult {
+        self.scheduler.setup_smoke_rwlock_task(entry)
+    }
+
+    pub fn enqueue_smoke_rwlock_task(&mut self) -> EventResult {
+        self.scheduler.enqueue_smoke_rwlock_task()
+    }
+
+    pub fn dequeue_smoke_rwlock_task(&mut self) -> EventResult {
+        self.scheduler.dequeue_smoke_rwlock_task()
+    }
+
     pub fn schedule_current(&mut self) -> EventResult {
         self.scheduler.schedule(
             &mut self.boot_cpu_local_interrupt,
@@ -538,6 +553,14 @@ impl Context {
 
     pub fn mark_smoke_rwsem_yielded_back(&mut self) -> EventResult {
         self.scheduler.smoke_rwsem_task_mut().mark_yielded_back()
+    }
+
+    pub fn mark_smoke_rwlock_entry_ran(&mut self) -> EventResult {
+        self.scheduler.smoke_rwlock_task_mut().mark_entry_ran()
+    }
+
+    pub fn mark_smoke_rwlock_yielded_back(&mut self) -> EventResult {
+        self.scheduler.smoke_rwlock_task_mut().mark_yielded_back()
     }
 
     pub fn platform_driver_register(&mut self, driver: DeviceDriverRef) -> InitcallReturn {

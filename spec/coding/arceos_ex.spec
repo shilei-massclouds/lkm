@@ -65,6 +65,8 @@ predicate arceos_ex_must_jump_label_mutex_be_independent_context_object() -> boo
 predicate arceos_ex_must_static_branch_setup_drive_jump_label_mutex_guard() -> bool;
 predicate arceos_ex_must_static_branch_text_patch_sync_remain_deferred() -> bool;
 predicate arceos_ex_must_resource_tree_setup_record_resource_lock_write_guard() -> bool;
+predicate arceos_ex_must_resource_tree_setup_drive_resource_lock_write_guard() -> bool;
+predicate arceos_ex_must_rwlock_expose_reader_writer_protocol() -> bool;
 predicate arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
 predicate arceos_ex_must_startup_drive_boot_then_interrupt_then_payload() -> bool;
@@ -108,7 +110,7 @@ predicate arceos_ex_must_preemption_guard_lower_to_counted_enter_exit() -> bool;
 predicate arceos_ex_must_local_interrupt_guard_preserve_saved_flags() -> bool;
 predicate arceos_ex_must_raw_spin_lock_irqsave_guard_lock_and_restore() -> bool;
 predicate arceos_ex_must_effective_context_not_elide_protocol_guards() -> bool;
-predicate arceos_ex_must_defer_rwlock_rcu_lowering_until_primitives_exist() -> bool;
+predicate arceos_ex_must_defer_rcu_lowering_until_primitive_exists() -> bool;
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
@@ -452,11 +454,39 @@ type ArceosExCorePrepareCodingMust {
          *
          * Linux init_resources() inserts resources through insert_resource(),
          * whose kernel/resource.c path takes resource_lock with write_lock().
-         * ResourceTree.setup() must expose the equivalent write-lock guard
-         * fact instead of treating the resource tree mutation as an unguarded
-         * list update.
+         * ResourceLock must be represented as an independent Context object of
+         * type RwLock, not as a bool hidden inside ResourceTree. CorePrepare
+         * setup must drive ResourceLock.Preset and ResourceLock.Setup before
+         * ResourceTree.setup() consumes it.
          */
         arceos_ex_must_resource_tree_setup_record_resource_lock_write_guard();
+
+        /*
+         * ResourceTree resource_lock guard lowering:
+         *
+         * ResourceTree.setup() must preserve the ResourceTreeWriteContext
+         * source boundary, but BootPhaseContext proves that the current path is
+         * single-CPU, single-task, local-IRQ-disabled and preemption-disabled.
+         * Therefore arceos_ex may lower ResourceLock.WriteLock/WriteUnlock at
+         * this call site to an elided/proof-only guard with visible comments
+         * and summary facts. The generic RwLock implementation must still
+         * provide real read/write behavior for non-proof-only call sites and
+         * smoke tests.
+         */
+        arceos_ex_must_resource_tree_setup_drive_resource_lock_write_guard();
+
+        /*
+         * RwLock observable behavior:
+         *
+         * RwLock must model static/runtime initialization, Ready/unlocked
+         * setup, read-side sharing, write-side exclusion, trylock outcomes,
+         * read/write unlock conditions and the ordinary read_lock()/write_lock()
+         * boundary that does not save IRQ flags. Lockdep/debug owner,
+         * PREEMPT_RT rwbase_rt, exact architecture raw lock details, exact
+         * reader count internals and irqsave/bh/nested API variants may remain
+         * internal or deferred until a concrete object needs them.
+         */
+        arceos_ex_must_rwlock_expose_reader_writer_protocol();
 
         /*
          * PrintkBuffer setup IRQ guard:
@@ -546,15 +576,15 @@ type ArceosExEffectiveContextCodingMust {
         /*
          * Deferred primitives:
          *
-         * RwLock and RCU read-side guards belong to the same guard lowering
-         * family, but arceos_ex must not invent final lowering rules for them
-         * before the corresponding model primitives and implementation
-         * mappings exist. Mutex lowering is no longer wholly deferred because
-         * JumpLabelMutex has a concrete first-round mapping; broader mutex
+         * RCU read-side guards belong to the same guard lowering family, but
+         * arceos_ex must not invent final lowering rules for them before the
+         * corresponding model primitive and implementation mappings exist.
+         * RwLock and Mutex are no longer wholly deferred because ResourceLock
+         * and JumpLabelMutex have concrete first-round mappings; broader
          * variants still require their own primitive-specific rules before
          * being generated.
          */
-        arceos_ex_must_defer_rwlock_rcu_lowering_until_primitives_exist();
+        arceos_ex_must_defer_rcu_lowering_until_primitive_exists();
     }
 }
 

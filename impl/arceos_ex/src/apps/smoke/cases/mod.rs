@@ -33,6 +33,7 @@ pub mod resource_tree;
 pub mod rest_init;
 pub mod rootfs;
 pub mod runtime_core;
+pub mod rwlock;
 pub mod scheduler;
 pub mod scheduler_schedule;
 pub mod slub;

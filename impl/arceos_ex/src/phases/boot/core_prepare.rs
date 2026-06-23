@@ -25,8 +25,14 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.device_tree
         .setup(&ctx.raw_dtb, &ctx.vm, &mut ctx.memblock, &ctx.config)?;
     ctx.zones.setup(&ctx.memblock, &ctx.vm)?;
-    ctx.resource_tree
-        .setup(&ctx.memblock, &ctx.kernel_image, &ctx.lds)?;
+    ctx.resource_lock.preset_static()?;
+    ctx.resource_lock.setup()?;
+    ctx.resource_tree.setup(
+        &ctx.memblock,
+        &ctx.kernel_image,
+        &ctx.lds,
+        &mut ctx.resource_lock,
+    )?;
     ctx.cpu_group
         .setup_smp(&ctx.device_tree, &ctx.cpu_id_map, &ctx.sbi)?;
     ctx.cpu_id_map.setup(&ctx.cpu_group)?;
@@ -165,8 +171,14 @@ pub fn is_ready() -> bool {
 fn core_prepare_phase_ready(ctx: &Context) -> bool {
     ctx.device_tree.state() == State::Ready
         && ctx.zones.state() == State::Ready
+        && ctx.resource_lock.state() == State::Ready
+        && ctx.resource_lock.ready()
+        && ctx.resource_lock.boot_phase_write_guard_elided()
         && ctx.resource_tree.state() == State::Ready
         && ctx.resource_tree.write_lock_guard_used()
+        && ctx
+            .resource_tree
+            .resource_lock_write_guard_used_by(&ctx.resource_lock)
         && ctx.cpu_group.state() == State::Ready
         && !ctx.cpu_group.smp_concurrency_open()
         && ctx.cpu_id_map.state() == State::Ready

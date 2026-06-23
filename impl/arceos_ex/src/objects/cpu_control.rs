@@ -19,6 +19,7 @@ pub enum CurrentTaskRef {
     SmokeScheduler,
     SmokeMutex,
     SmokeRwsem,
+    SmokeRwLock,
 }
 
 #[allow(dead_code)]
@@ -32,6 +33,7 @@ impl CurrentTaskRef {
             Self::SmokeScheduler => "SmokeSchedulerTask",
             Self::SmokeMutex => "SmokeMutexTask",
             Self::SmokeRwsem => "SmokeRwsemTask",
+            Self::SmokeRwLock => "SmokeRwLockTask",
         }
     }
 }
