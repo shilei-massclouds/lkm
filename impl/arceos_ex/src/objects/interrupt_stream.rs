@@ -34,6 +34,7 @@ pub struct InterruptStream {
     supervisor_external_input_enable_deferred: bool,
     supervisor_external_input_gate_open: bool,
     boot_cpu_local_interrupts_enabled: bool,
+    early_boot_irqs_disabled: bool,
 }
 
 impl InterruptStream {
@@ -47,6 +48,7 @@ impl InterruptStream {
             supervisor_external_input_enable_deferred: false,
             supervisor_external_input_gate_open: false,
             boot_cpu_local_interrupts_enabled: false,
+            early_boot_irqs_disabled: false,
         }
     }
 
@@ -98,6 +100,10 @@ impl InterruptStream {
         self.boot_cpu_local_interrupts_enabled
     }
 
+    pub const fn early_boot_irqs_disabled(&self) -> bool {
+        self.early_boot_irqs_disabled
+    }
+
     pub fn setup(&mut self, local_interrupt: &mut LocalInterruptControl) -> EventResult {
         if self.lifecycle.state() != State::Prepared || local_interrupt.state() != State::Ready {
             return failed_condition(
@@ -110,6 +116,7 @@ impl InterruptStream {
 
         local_interrupt.disable()?;
         self.boot_cpu_local_interrupts_enabled = false;
+        self.early_boot_irqs_disabled = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Prepared,
@@ -205,6 +212,7 @@ impl InterruptStream {
         }
 
         self.boot_cpu_local_interrupts_enabled = local_interrupt.enabled();
+        self.early_boot_irqs_disabled = false;
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,

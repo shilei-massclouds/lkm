@@ -215,12 +215,16 @@ impl Vm {
     }
 
     pub fn entry_prelude_ready(&self) -> bool {
-        self.trampoline_vm.state() == State::Destroyed && self.early_vm.state() == State::Online
+        self.trampoline_vm.state() == State::Destroyed
+            && self.trampoline_vm.translation_sync_ready_before_satp()
+            && self.early_vm.state() == State::Online
+            && self.early_vm.translation_sync_complete()
     }
 
     pub fn entry_successor_ready(&self) -> bool {
         self.lifecycle.state() == State::Online
             && self.swapper_vm.state() == State::Online
+            && self.swapper_vm.translation_sync_complete()
             && self.early_vm.state() == State::Destroyed
     }
 

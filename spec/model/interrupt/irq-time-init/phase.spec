@@ -1605,6 +1605,7 @@ object IrqTimeInitPhase: PhaseObject {
                     interrupt_concurrency_open_for_boot_cpu();
                     task_concurrency_closed();
                     smp_concurrency_closed();
+                    early_boot_irqs_disabled_false();
                     time_read_smoke_available(RiscvTimerProvider);
                     clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
                 }
@@ -1649,6 +1650,7 @@ object IrqTimeInitPhase: PhaseObject {
             interrupt_concurrency_open_for_boot_cpu();
             task_concurrency_closed();
             smp_concurrency_closed();
+            early_boot_irqs_disabled_false();
             time_read_smoke_available(RiscvTimerProvider);
             clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
         }

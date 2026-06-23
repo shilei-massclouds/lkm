@@ -10,18 +10,24 @@ use super::{
 
 pub struct TrampolineVm {
     lifecycle: Lifecycle,
+    translation_sync_ready_before_satp: bool,
 }
 
 impl TrampolineVm {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            translation_sync_ready_before_satp: false,
         }
     }
 
     #[allow(dead_code)]
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn translation_sync_ready_before_satp(&self) -> bool {
+        self.translation_sync_ready_before_satp
     }
 
     pub fn enable(&mut self, kernel_image: &KernelImage) -> EventResult {
@@ -34,6 +40,7 @@ impl TrampolineVm {
             );
         }
 
+        self.translation_sync_ready_before_satp = true;
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,

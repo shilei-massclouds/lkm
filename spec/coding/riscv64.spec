@@ -10,6 +10,12 @@ predicate riscv64_must_linker_script_ignore_fixed_kernel_phys_addr() -> bool;
 predicate riscv64_must_linker_script_use_config_kernel_link_addr() -> bool;
 predicate riscv64_must_kernel_phys_start_from_kernel_image() -> bool;
 predicate riscv64_must_address_translation_use_kernel_image_offset() -> bool;
+predicate riscv64_must_swapper_vm_enable_flush_tlb_after_satp() -> bool;
+predicate riscv64_must_swapper_vm_enable_commit_sync_fact_after_tlb_flush() -> bool;
+predicate riscv64_must_trampoline_vm_enable_flush_tlb_before_satp() -> bool;
+predicate riscv64_must_trampoline_vm_enable_commit_sync_fact_after_tlb_flush() -> bool;
+predicate riscv64_must_early_vm_enable_flush_tlb_after_satp() -> bool;
+predicate riscv64_must_early_vm_enable_commit_sync_fact_after_tlb_flush() -> bool;
 predicate riscv64_should_current_task_ref_follow_linux_tp() -> bool;
 
 type Riscv64LinkerScriptMust {
@@ -51,6 +57,66 @@ type Riscv64LinkerScriptMust {
          * must not use a fixed Config.kernel_phys_addr-style constant.
          */
         riscv64_must_address_translation_use_kernel_image_offset();
+    }
+}
+
+type Riscv64AddressTranslationMust {
+    invariant {
+        /*
+         * Trampoline page table handoff:
+         *
+         * Code generated for TrampolineVm.Enable must flush or otherwise
+         * invalidate the local address-translation cache after building the
+         * trampoline page table and before writing the trampoline SATP value.
+         * This maps Linux/RISC-V relocate_enable_mmu()'s sfence.vma before
+         * loading trampoline_pg_dir into SATP.
+         *
+         * The minimum acceptable implementation order is:
+         * 1. compute or load the trampoline SATP value,
+         * 2. execute sfence.vma or an equivalent local TLB flush,
+         * 3. only then write SATP to the trampoline value,
+         * 4. only then commit the implementation fact corresponding to
+         *    trampoline_vm_translation_sync_ready_before_satp(TrampolineVm).
+         */
+        riscv64_must_trampoline_vm_enable_flush_tlb_before_satp();
+        riscv64_must_trampoline_vm_enable_commit_sync_fact_after_tlb_flush();
+
+        /*
+         * Early page table handoff:
+         *
+         * Code generated for EarlyVm.Enable must flush or otherwise
+         * invalidate the local address-translation cache after writing the
+         * early SATP value. This maps Linux/RISC-V relocate_enable_mmu()'s
+         * sfence.vma after switching from trampoline_pg_dir to early_pg_dir.
+         *
+         * The minimum acceptable implementation order is:
+         * 1. compute or load the early SATP value,
+         * 2. write SATP,
+         * 3. execute sfence.vma or an equivalent local TLB flush,
+         * 4. only then commit the implementation fact corresponding to
+         *    early_vm_translation_sync_complete(EarlyVm).
+         */
+        riscv64_must_early_vm_enable_flush_tlb_after_satp();
+        riscv64_must_early_vm_enable_commit_sync_fact_after_tlb_flush();
+
+        /*
+         * Swapper page table handoff:
+         *
+         * Code generated for SwapperVm.Enable must flush or otherwise
+         * invalidate the local address-translation cache after writing the
+         * swapper SATP value, and must expose that completion as the model
+         * fact swapper_vm_translation_sync_complete(SwapperVm). This maps
+         * Linux/RISC-V setup_vm_final()'s local_flush_tlb_all() boundary.
+         *
+         * The minimum acceptable implementation order is:
+         * 1. compute or load the swapper SATP value,
+         * 2. write SATP,
+         * 3. execute sfence.vma or an equivalent local TLB flush,
+         * 4. only then commit the implementation fact corresponding to
+         *    swapper_vm_translation_sync_complete(SwapperVm).
+         */
+        riscv64_must_swapper_vm_enable_flush_tlb_after_satp();
+        riscv64_must_swapper_vm_enable_commit_sync_fact_after_tlb_flush();
     }
 }
 

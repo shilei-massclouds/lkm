@@ -948,6 +948,10 @@ object EntrySuccessorPhase: PhaseObject {
                     EarlyDtb.Event::Cleanup;
                 }
 
+                ensures {
+                    early_boot_irqs_disabled_true();
+                }
+
                 deferred {
                     "efi_init() 后续在支持 EFI 启动路径时抽象为 FirmwareInterface/EFI 对象。"
                 }
@@ -963,6 +967,7 @@ object EntrySuccessorPhase: PhaseObject {
             interrupt_concurrency_closed();
             task_concurrency_closed();
             context_is(SystemExclusive);
+            early_boot_irqs_disabled_true();
             EntryPreludePhase.state == State::Destroyed;
             BootInitStack.state == State::Online;
             BootCPU.state == State::Online;

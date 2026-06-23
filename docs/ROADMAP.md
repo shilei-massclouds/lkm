@@ -30,6 +30,8 @@
 
 每个审计项应尽量形成可追踪的 cross-reference：Linux 源码路径、当前 `impl/` 路径、对应 `spec/model` 条目、对应 `spec/coding` 条目、差异分类，以及是否需要新增/修订 checkpoint、KUnit 或 smoke 观测。除非用户明确要求修实现，审计阶段的修改优先落到 `spec/model/**`、`spec/coding/**`、必要说明文档和本 roadmap。
 
+启动阶段逐项审计时，并发/同步控制必须作为固定检查面覆盖：本地中断开关、抢占开关、自旋锁、Mutex、读写锁、RCU、CPU bring-up 同步量、内存/地址转换同步和 TLB/cache flush 边界都要明确判断是否已由 `spec/model` 表达；若 model 已表达但实现映射不清，再修订 `spec/coding` 或生成约束。`impl/` 只作为生成结果和 Linux 对照样本，发现偏差时默认先修规格。
+
 ## 下一阶段计划：Linux 6.12.37 PLIC 二进制复用
 
 本节是当前 P0 的执行清单。每完成一项即更新本节状态并做一次提交；实现变更仍遵循先规格/约束、再代码、再验证的顺序。

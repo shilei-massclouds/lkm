@@ -11,17 +11,23 @@ use super::{
 
 pub struct SwapperVm {
     lifecycle: Lifecycle,
+    translation_sync_complete: bool,
 }
 
 impl SwapperVm {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            translation_sync_complete: false,
         }
     }
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn translation_sync_complete(&self) -> bool {
+        self.translation_sync_complete
     }
 
     pub fn setup(
@@ -95,6 +101,7 @@ impl SwapperVm {
         };
         csr::write_satp(satp);
         csr::sfence_vma();
+        self.translation_sync_complete = true;
 
         self.lifecycle.transition(
             LifecycleEvent::Enable,

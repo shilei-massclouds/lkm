@@ -30,6 +30,9 @@ arceos_ex_switch_to_early_vm:
      * This follows the Linux/RISC-V relocation idea: after writing the
      * trampoline satp, the next physical PC is not mapped, so the CPU traps
      * to the virtual stvec label that is covered by the trampoline mapping.
+     * The sfence.vma before writing trampoline satp and the sfence.vma after
+     * writing early satp are the implementation facts required by
+     * TrampolineVm.Enable and EarlyVm.Enable.
      */
     la      t0, 1f
     add     t0, t0, a5

@@ -133,6 +133,8 @@ predicate fdt_reserved_memory_ranges_ready<T, U>(early_dtb: T, raw_dtb: U) -> bo
 predicate memblock_fdt_reserved_ranges_applied<T, U>(memblock: T, early_dtb: U) -> bool;
 predicate interrupt_concurrency_closed() -> bool;
 predicate task_concurrency_closed() -> bool;
+predicate early_boot_irqs_disabled_true() -> bool;
+predicate early_boot_irqs_disabled_false() -> bool;
 predicate selected_payload_ready() -> bool;
 predicate selected_payload_no_return_handoff() -> bool;
 predicate completion_storage_bound<T>(completion: T) -> bool;
@@ -422,6 +424,10 @@ predicate valid_trampoline_map<T: VirtualAddressArea>(map: T) -> bool {
     page_aligned(map.virt_start);
     map.size >= page_size_min();
 }
+
+predicate swapper_vm_translation_sync_complete<T>(swapper_vm: T) -> bool;
+predicate trampoline_vm_translation_sync_ready_before_satp<T>(trampoline_vm: T) -> bool;
+predicate early_vm_translation_sync_complete<T>(early_vm: T) -> bool;
 
 type ObjectStorage<T> {
     invariant {

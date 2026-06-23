@@ -1276,6 +1276,7 @@ object Vm: AddressSpaceObject {
             EarlyVm.state == State::Online;
             KernelImage.state == State::Online;
             Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
+            early_vm_translation_sync_complete(EarlyVm);
         }
 
         events {
@@ -1309,6 +1310,7 @@ object Vm: AddressSpaceObject {
             SwapperVm.state == State::Online;
             EarlyVm.state == State::Destroyed;
             Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
+            swapper_vm_translation_sync_complete(SwapperVm);
         }
     }
 }
@@ -1390,6 +1392,7 @@ object TrampolineVm: AddressSpaceObject {
                 ensures {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
+                    trampoline_vm_translation_sync_ready_before_satp(TrampolineVm);
                     phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap);
                     Riscv64.stvec == virt_addr(VmSwitchContinuation, TrampolineVm, TrampolineMap);
                     event_stream_stvec_temporarily_borrowed(EventStream, Vm);
@@ -1405,6 +1408,7 @@ object TrampolineVm: AddressSpaceObject {
         invariant {
             attrs_accessible(self);
             valid_page_table_storage(pg_dir);
+            trampoline_vm_translation_sync_ready_before_satp(TrampolineVm);
             phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap);
             trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap);
         }
@@ -1549,6 +1553,7 @@ object EarlyVm: AddressSpaceObject {
                     attrs_accessible(self);
                     valid_page_table_storage(pg_dir);
                     Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
+                    early_vm_translation_sync_complete(EarlyVm);
                     kernel_image_accessible(KernelImage, KernelImageMap);
                     fixmap_slot_accessible(FixMap.fdt_slot);
                 }
@@ -1564,6 +1569,7 @@ object EarlyVm: AddressSpaceObject {
             attrs_accessible(self);
             valid_page_table_storage(pg_dir);
             Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
+            early_vm_translation_sync_complete(EarlyVm);
             kernel_image_accessible(KernelImage, KernelImageMap);
             fixmap_slot_accessible(FixMap.fdt_slot);
         }
@@ -1648,7 +1654,9 @@ object SwapperVm: AddressSpaceObject {
 
         events {
             /*
-             * Enable 切换到完整内核页表。
+             * Enable 切换到完整内核页表。Linux/RISC-V 的 setup_vm_final()
+             * 在写入 swapper_pg_dir 对应 SATP 后执行 local_flush_tlb_all()；
+             * 规格层把该边界收敛为完整内核地址空间切换后的翻译同步事实。
              */
             on Event::Enable -> State::Online {
                 may_change {
@@ -1660,6 +1668,7 @@ object SwapperVm: AddressSpaceObject {
                     valid_page_table_storage(pg_dir);
                     Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
                     swapper_vm_current(SwapperVm);
+                    swapper_vm_translation_sync_complete(SwapperVm);
                 }
             }
         }
@@ -1674,6 +1683,7 @@ object SwapperVm: AddressSpaceObject {
             valid_page_table_storage(pg_dir);
             Riscv64.satp == satp_of(SwapperVm.pg_dir, Config.satp_mode);
             swapper_vm_current(SwapperVm);
+            swapper_vm_translation_sync_complete(SwapperVm);
         }
     }
 }

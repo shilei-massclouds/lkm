@@ -107,6 +107,7 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.boot_cpu_local_interrupt.state() == State::Ready
         && ctx.boot_cpu_local_interrupt.disabled()
         && ctx.interrupt_stream.state() == State::Ready
+        && ctx.interrupt_stream.early_boot_irqs_disabled()
         && ctx.vm.state() == State::Online
         && ctx.vm.entry_successor_ready()
         && ctx.cpu_id_map.state() == State::Prepared

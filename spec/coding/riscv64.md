@@ -53,6 +53,7 @@ RISC-V64 入口前导期实现必须按地址空间阶段区分可执行代码�
 - CSR 访问应集中封装，调用点表达具体语义，例如关闭中断、设置 `stvec`、切换 `satp`。
 - 写入 `stvec` 的入口地址必须满足 RISC-V64 `stvec` 对齐和模式编码要求。直接模式下入口 base 至少 4 字节对齐，低位不得被误用为 mode；trampoline 或 early trap 入口标签必须在汇编或链接布局中显式保证对齐，并按当前地址空间阶段写入物理地址或虚拟地址。
 - 页表切换相关代码必须显式处理 `sfence.vma` 要求。模型规格可以不逐条展开该细节，但实现规格要求保留该边界。
+- `SwapperVm.Enable` 对应 Linux/RISC-V `setup_vm_final()` 中写入 `swapper_pg_dir` SATP 后的 `local_flush_tlb_all()` 边界。实现必须在写入 swapper SATP 后执行本地 TLB/地址转换同步，并把完成结果暴露为 `swapper_vm_translation_sync_complete(SwapperVm)` 对应的可检查事实；不得只把屏障指令散落在代码中而不纳入对象状态或阶段 ready 检查。
 - 早期入口对中断 pending/enable 状态的防御性清理应对应 `InterruptStream.Preset` 或 `InterruptStream.Setup` 的实现边界。
 
 ## 当前任务引用
@@ -68,6 +69,7 @@ per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不�
 - `TrampolineVm`、`EarlyVm`、`SwapperVm` 应在代码中保持可区分的实现边界。
 - 第一轮应真实拆分入口前导期和入口后继期页表推进过程，而不是只把现有 boot page table 代码改名为多个模型事件。
 - `EarlyVm` 的实现必须覆盖规格要求的 `KernelImage` 和 `RawDtb` 映射前提。
+- `SwapperVm` 的实现必须在 `Enable` 成功后能被只读检查确认 `swapper_vm_translation_sync_complete(SwapperVm)`，该事实至少应覆盖写入 swapper SATP 之后执行过本地 TLB flush 或等价地址转换同步。
 - `FixMap` 槽位布局应由配置或架构常量统一定义，不应在多个对象实现中分散硬编码。
 - 第一轮 `Config.fixmap.fdt` 的 FDT 槽位容量按 2MiB 配置，用于覆盖 Linux RISC-V64 `FIX_FDT`/`FIX_FDT_SIZE` 级别的早期 FDT 映射窗口；`FixMap` 只能消费该配置并执行容量检查，不应自行定义槽位大小。
 - 完整内核页表启用后，`EarlyVm` 退出服务应有明确的代码边界，对应 `EarlyVm.Cleanup`。
