@@ -14,6 +14,7 @@ from common.model_types import (
     StateDef,
 )
 from common.spec_ast import (
+    BodyMember,
     Block,
     ContextGuardDecl,
     EnumDecl,
@@ -141,6 +142,7 @@ def _event_to_json(item: EventDef) -> dict[str, Any]:
         "ensures": [_block_to_json(block) for block in decl.ensures],
         "deferred": [_block_to_json(block) for block in decl.deferred],
         "other_blocks": [_block_to_json(block) for block in decl.other_blocks],
+        "body_members": [_body_member_to_json(member) for member in decl.body_members],
     }
 
 
@@ -230,6 +232,16 @@ def _within_to_json(item: WithinDecl) -> dict[str, Any]:
         "ensures": [_block_to_json(block) for block in item.ensures],
         "deferred": [_block_to_json(block) for block in item.deferred],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
+        "body_members": [_body_member_to_json(member) for member in item.body_members],
+    }
+
+
+def _body_member_to_json(item: BodyMember) -> dict[str, Any]:
+    return {
+        "kind": item.kind,
+        "span": _span_to_json(item.span),
+        "block": _block_to_json(item.block) if item.block is not None else None,
+        "within": _within_to_json(item.within) if item.within is not None else None,
     }
 
 

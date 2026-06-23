@@ -92,6 +92,57 @@ class ParseToolTests(unittest.TestCase):
             event = data["document"]["objects"][0]["states"][0]["events"][0]
             self.assertTrue(event["within"][0]["only_once"])
 
+    def test_event_body_members_preserve_source_order(self) -> None:
+        source = """
+            context GuardedContext: Context {
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                B.Event::Setup;
+                            }
+
+                            within GuardedContext {
+                                drives {
+                                    C.Event::Setup;
+                                }
+                            }
+
+                            drives {
+                                D.Event::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "ordered-body.spec"
+            output = Path(tmp) / "ordered-body.ast.json"
+            spec.write_text(source, encoding="utf-8")
+
+            exit_code = main([str(spec), "-o", str(output)])
+
+            self.assertEqual(exit_code, 0)
+            data = read_json(output)
+            event = data["document"]["objects"][0]["states"][0]["events"][0]
+            self.assertEqual(
+                [member["kind"] for member in event["body_members"]],
+                ["drives", "within", "drives"],
+            )
+            self.assertEqual(
+                event["body_members"][1]["within"]["drives"][0]["entries"][0]["text"],
+                "C.Event::Setup",
+            )
+
     def test_output_parent_directory_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "nested" / "model-main.ast.json"

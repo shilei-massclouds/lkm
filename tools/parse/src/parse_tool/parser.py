@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from common.spec_ast import (
+    BodyMember,
     Block,
     ContextGuardDecl,
     EnumDecl,
@@ -546,6 +547,7 @@ def _parse_event(segment: _Segment) -> EventDecl:
     ensures: list[Block] = []
     deferred: list[Block] = []
     other_blocks: list[Block] = []
+    body_members: list[BodyMember] = []
 
     for part in parts:
         block_match = _BLOCK_RE.match(part.text.strip())
@@ -556,18 +558,26 @@ def _parse_event(segment: _Segment) -> EventDecl:
         block = _to_block(part, block_match.group(1))
         if block.kind == "depends_on":
             depends_on.append(block)
+            body_members.append(_block_body_member(block))
         elif block.kind == "drives":
             drives.append(block)
+            body_members.append(_block_body_member(block))
         elif block.kind == "within":
-            within.append(_parse_within(block))
+            child = _parse_within(block)
+            within.append(child)
+            body_members.append(_within_body_member(child))
         elif block.kind == "may_change":
             may_change.append(block)
+            body_members.append(_block_body_member(block))
         elif block.kind == "ensures":
             ensures.append(block)
+            body_members.append(_block_body_member(block))
         elif block.kind == "deferred":
             deferred.append(block)
+            body_members.append(_block_body_member(block))
         else:
             other_blocks.append(block)
+            body_members.append(_block_body_member(block))
 
     return EventDecl(
         name=match.group(1),
@@ -580,6 +590,7 @@ def _parse_event(segment: _Segment) -> EventDecl:
         ensures=ensures,
         deferred=deferred,
         other_blocks=other_blocks,
+        body_members=body_members,
     )
 
 
@@ -600,6 +611,7 @@ def _parse_within(block: Block) -> WithinDecl:
     ensures: list[Block] = []
     deferred: list[Block] = []
     other_blocks: list[Block] = []
+    body_members: list[BodyMember] = []
 
     for part in _split_members(block.body, block.body_start_line or block.span.start_line):
         block_match = _BLOCK_RE.match(part.text.strip())
@@ -610,22 +622,32 @@ def _parse_within(block: Block) -> WithinDecl:
         child = _to_block(part, block_match.group(1))
         if child.kind == "entered_by":
             entered_by.append(child)
+            body_members.append(_block_body_member(child))
         elif child.kind == "depends_on":
             depends_on.append(child)
+            body_members.append(_block_body_member(child))
         elif child.kind == "drives":
             drives.append(child)
+            body_members.append(_block_body_member(child))
         elif child.kind == "within":
-            within.append(_parse_within(child))
+            nested = _parse_within(child)
+            within.append(nested)
+            body_members.append(_within_body_member(nested))
         elif child.kind == "exited_by":
             exited_by.append(child)
+            body_members.append(_block_body_member(child))
         elif child.kind == "may_change":
             may_change.append(child)
+            body_members.append(_block_body_member(child))
         elif child.kind == "ensures":
             ensures.append(child)
+            body_members.append(_block_body_member(child))
         elif child.kind == "deferred":
             deferred.append(child)
+            body_members.append(_block_body_member(child))
         else:
             other_blocks.append(child)
+            body_members.append(_block_body_member(child))
 
     return WithinDecl(
         context=context,
@@ -641,6 +663,7 @@ def _parse_within(block: Block) -> WithinDecl:
         ensures=ensures,
         deferred=deferred,
         other_blocks=other_blocks,
+        body_members=body_members,
     )
 
 
@@ -673,6 +696,14 @@ def _parse_within_header(header: str) -> tuple[str, dict[str, str], bool]:
             raise ParseError(f"invalid within parameter: {_preview(arg)}")
         parameters[name] = value
     return context, parameters, only_once
+
+
+def _block_body_member(block: Block) -> BodyMember:
+    return BodyMember(kind=block.kind, span=block.span, block=block)
+
+
+def _within_body_member(within: WithinDecl) -> BodyMember:
+    return BodyMember(kind="within", span=within.span, within=within)
 
 
 def _parse_named_blocks(body: str, start_line: int) -> list[Block]:

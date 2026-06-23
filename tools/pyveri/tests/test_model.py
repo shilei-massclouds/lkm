@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from pyveri.derive import derive
 from pyveri.model import Severity, build_model
 from pyveri.parser import parse_file, parse_text
 from pyveri.view import (
@@ -662,6 +663,96 @@ class ModelBuilderTests(unittest.TestCase):
                 in diag.message
                 for diag in result.errors
             )
+        )
+
+    def test_derive_executes_ordered_body_members(self) -> None:
+        document = parse_text(
+            """
+            context GuardedContext: Context {
+            }
+
+            object StartupTimeline: TimelineObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                A.Event::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                B.Event::Setup;
+                            }
+
+                            within GuardedContext {
+                                drives {
+                                    C.Event::Setup;
+                                }
+                            }
+
+                            drives {
+                                D.Event::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+
+            object B: T {
+                initial_state: State::Base;
+                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Ready {}
+            }
+
+            object C: T {
+                initial_state: State::Base;
+                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Ready {}
+            }
+
+            object D: T {
+                initial_state: State::Base;
+                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Ready {}
+            }
+            """
+        )
+        model_result = build_model(document)
+        self.assertTrue(model_result.ok, [diag.message for diag in model_result.errors])
+
+        derive_result = derive(model_result.model)
+
+        self.assertTrue(derive_result.ok)
+        order = [
+            (transition.object_name, transition.event_name)
+            for transition in derive_result.transitions
+        ]
+        self.assertEqual(
+            order,
+            [
+                ("B", "Setup"),
+                ("C", "Setup"),
+                ("D", "Setup"),
+                ("A", "Setup"),
+                ("StartupTimeline", "Setup"),
+            ],
         )
 
     def test_rejects_lifecycle_transitions_outside_controlled_table(self) -> None:

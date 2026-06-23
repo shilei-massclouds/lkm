@@ -50,6 +50,7 @@ class WithinDecl:
     ensures: list[Block] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
+    body_members: list["BodyMember"] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,17 @@ class EventDecl:
     ensures: list[Block] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
+    body_members: list["BodyMember"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class BodyMember:
+    """A source-ordered event/within body member."""
+
+    kind: str
+    span: SourceSpan
+    block: Block | None = None
+    within: WithinDecl | None = None
 
 
 @dataclass(frozen=True)

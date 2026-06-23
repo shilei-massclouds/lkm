@@ -184,6 +184,46 @@ on Action::CopyProcess<Src: TaskObject, New: TaskObject>(
 }
 ```
 
+## SEM-EVENT-BODY-001: Event And Within Body Members Are Ordered
+
+`event` 和 `within` 的 body 是 source-ordered member 序列。`depends_on`、`drives`、
+`within`、`ensures`、`deferred` 等块在源码中的相对顺序必须由 parser/AST/JSON
+保留；工具可以继续维护按 kind 分类的兼容字段，但不得用分类字段替代正式顺序语义。
+
+执行语义：
+
+- `depends_on` 仍表示进入所属 event/within 成功路径前必须满足的前提。
+- `drives` 按 source order 执行；同一个 event/within 中多个 `drives` 块不得被合并到
+  `within` 前或 `within` 后。
+- `within Context { ... }` 只保护自己的词法 body；它前后的 `drives`、`ensures`
+  或其它块不属于该 context。
+- 嵌套 `within` 按 body member 顺序进入和退出；外层 context 的有效上下文覆盖其
+  词法 body，内层 context 在该范围内继续叠加。
+- `ensures` 仍表示所属 event/within 成功退出后成立的事实；它可以承接前面按顺序
+  执行的 action/type-process ensures，但不得被当成提前成立的前置事实。
+
+这个规则用于表达 Linux 中常见的局部保护区，例如：
+
+```text
+drives {
+    Object.Action::Prepare;
+}
+
+within SomeContext {
+    drives {
+        Object.Action::ProtectedCommit;
+    }
+}
+
+drives {
+    Object.Action::Finalize;
+}
+```
+
+上述形式表示 `Prepare` 和 `Finalize` 都在 `SomeContext` 之外，只有
+`ProtectedCommit` 在 `SomeContext` 之内。代码生成或 lowering 不得把这三个动作
+重排为“全部先执行 drives，再进入 within”，也不得把 context 扩大到整个 event body。
+
 ## SEM-TYPE-PROCESS-001: Type Processes Define Reusable Runtime Semantics
 
 `type` 定义可复用对象类型的共同属性、owned 子对象、标准生命周期 process、运行期 process、扩展状态和约束。`object X: SomeType` 表示 `X` 是 `SomeType` 的一个具名实例；实例绑定并继承 `SomeType` 上定义的 Type process。也就是说，`X.Event::Setup`、`X.Event::Enable` 或 `X.Action::Done` 若来自 Type 定义，语义上是“对实例 X 执行 Type process”，不是实例重新定义了一套同名过程。

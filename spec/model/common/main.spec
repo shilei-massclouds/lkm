@@ -184,6 +184,9 @@ predicate resource_tree_write_lock_guard_used<T>(resource_tree: T) -> bool;
 predicate printk_buffer_setup_local_irq_save_restore_used<T>(buffer: T) -> bool;
 predicate printk_buffer_setup_local_irq_guard_used<T, U>(buffer: T, control: U) -> bool;
 predicate printk_buffer_setup_local_irq_guard_proof_only<T, U>(buffer: T, control: U) -> bool;
+predicate printk_buffer_setup_prepared_dynamic_buffer<T>(buffer: T) -> bool;
+predicate printk_buffer_setup_switched_active_buffer<T>(buffer: T) -> bool;
+predicate printk_buffer_setup_copied_remaining_records<T>(buffer: T) -> bool;
 predicate jump_label_mutex_static_initializer<T>(mutex: T) -> bool;
 predicate jump_label_mutex_storage_bound<T>(mutex: T) -> bool;
 predicate jump_label_mutex_init_kind_static<T>(mutex: T) -> bool;
@@ -586,6 +589,33 @@ type TaskRefSet {
 }
 
 type RegisterValue {
+}
+
+type BufferObject {
+    processes {
+        Action::PrepareDynamicLogBuffer {
+            state_effect: StateEffect::None;
+            ensures {
+                printk_buffer_setup_prepared_dynamic_buffer(self);
+            }
+        }
+
+        Action::SwitchActiveBufferAndCopyExistingRecords {
+            state_effect: StateEffect::None;
+            ensures {
+                printk_buffer_setup_switched_active_buffer(self);
+                printk_buffer_records_preserved(self);
+                printk_buffer_setup_local_irq_save_restore_used(self);
+            }
+        }
+
+        Action::CopyRemainingRecords {
+            state_effect: StateEffect::None;
+            ensures {
+                printk_buffer_setup_copied_remaining_records(self);
+            }
+        }
+    }
 }
 
 /*

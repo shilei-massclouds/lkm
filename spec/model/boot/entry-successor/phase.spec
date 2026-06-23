@@ -558,9 +558,8 @@ context PrintkBufferSetupLocalInterruptContext: Context {
      * printk ring-buffer switch and the first copy of existing records. The
      * allocation and dynamic ring-buffer initialization before the switch, and
      * the remaining-record copy after the switch, are outside this protected
-     * section. Current tooling does not yet preserve ordered event body
-     * members, so this context records the protected facts without splitting
-     * Setup into an ordered action sequence.
+     * section. Ordered event body members let PrintkBuffer.Event::Setup express
+     * that local guarded section directly.
      *
      * Because PrintkBuffer.Event::Setup is a Prepared -> Ready lifecycle event,
      * this guarded section is single-commit on the successful boot path. Guard
@@ -619,8 +618,8 @@ object PrintkBuffer: BufferObject {
             /*
              * Setup 对应 setup_log_buf()，在 per-cpu 和启动参数准备后完成正式日志缓冲准备。
              * Linux 只在 active buffer switch 和既有 records 初次复制的局部临界区
-             * 使用 local_irq_save()/local_irq_restore()；当前规格用
-             * PrintkBufferSetupLocalInterruptContext 承载这部分受保护事实。
+             * 使用 local_irq_save()/local_irq_restore()；前置动态缓冲准备和后续
+             * remaining-record copy 均在该局部临界区之外。
              */
             on Event::Setup -> State::Ready {
                 depends_on {
@@ -631,18 +630,31 @@ object PrintkBuffer: BufferObject {
                     cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
                 }
 
+                drives {
+                    PrintkBuffer.Action::PrepareDynamicLogBuffer;
+                }
+
                 within PrintkBufferSetupLocalInterruptContext only-once {
+                    drives {
+                        PrintkBuffer.Action::SwitchActiveBufferAndCopyExistingRecords;
+                    }
+
                     ensures {
-                        printk_buffer_records_preserved(PrintkBuffer);
-                        printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);
                         printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
                     }
+                }
+
+                drives {
+                    PrintkBuffer.Action::CopyRemainingRecords;
                 }
 
                 ensures {
                     printk_buffer_static_storage_ready(PrintkBuffer);
                     printk_buffer_ready(PrintkBuffer);
                     printk_buffer_runtime_ready(PrintkBuffer);
+                    printk_buffer_setup_prepared_dynamic_buffer(PrintkBuffer);
+                    printk_buffer_setup_switched_active_buffer(PrintkBuffer);
+                    printk_buffer_setup_copied_remaining_records(PrintkBuffer);
                 }
             }
         }
@@ -659,6 +671,9 @@ object PrintkBuffer: BufferObject {
             printk_buffer_records_preserved(PrintkBuffer);
             printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);
             printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+            printk_buffer_setup_prepared_dynamic_buffer(PrintkBuffer);
+            printk_buffer_setup_switched_active_buffer(PrintkBuffer);
+            printk_buffer_setup_copied_remaining_records(PrintkBuffer);
         }
     }
 }

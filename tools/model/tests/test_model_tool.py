@@ -594,6 +594,97 @@ class ModelToolTests(unittest.TestCase):
             setup = data["model"]["objects"]["A"]["states"]["Base"]["events"]["Setup"]
             self.assertTrue(setup["within"][0]["only_once"])
 
+    def test_model_json_preserves_ordered_event_body_members(self) -> None:
+        source = """
+            context GuardedContext: Context {
+            }
+
+            object StartupTimeline: TimelineObject {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                A.Event::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+
+            object A: T {
+                initial_state: State::Base;
+
+                state State::Base {
+                    events {
+                        on Event::Setup -> State::Ready {
+                            drives {
+                                B.Event::Setup;
+                            }
+
+                            within GuardedContext {
+                                drives {
+                                    C.Event::Setup;
+                                }
+                            }
+
+                            drives {
+                                D.Event::Setup;
+                            }
+                        }
+                    }
+                }
+
+                state State::Ready {
+                }
+            }
+
+            object B: T {
+                initial_state: State::Base;
+                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Ready {}
+            }
+
+            object C: T {
+                initial_state: State::Base;
+                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Ready {}
+            }
+
+            object D: T {
+                initial_state: State::Base;
+                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Ready {}
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "ordered-body.spec"
+            ast = Path(tmp) / "ordered-body.ast.json"
+            model = Path(tmp) / "ordered-body.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 0, stderr.getvalue())
+            data = read_json(model)
+            setup = data["model"]["objects"]["A"]["states"]["Base"]["events"]["Setup"]
+            self.assertEqual(
+                [member["kind"] for member in setup["body_members"]],
+                ["drives", "within", "drives"],
+            )
+            self.assertEqual(
+                setup["body_members"][1]["within"]["drives"][0]["entries"][0]["text"],
+                "C.Event::Setup",
+            )
+
     def test_only_once_within_fails_when_event_reachable_twice(self) -> None:
         source = """
             context GuardedContext: Context {

@@ -13,7 +13,7 @@ from common.derive_types import (
     EventTransition,
 )
 from common.model_types import EventDef, ObjectDef, ObjectModel, StateDef
-from common.spec_ast import Block, SourceSpan, WithinDecl
+from common.spec_ast import BodyMember, Block, SourceSpan, WithinDecl
 
 
 _TARGET_RE = re.compile(
@@ -386,6 +386,9 @@ _EXTERNAL_PREDICATES = {
     "phys_to_virt_transition_completed": "architecture_state",
     "printk_buffer_flushed_to_earlycon": "console",
     "printk_buffer_setup_local_irq_save_restore_used": "local_irq_guard",
+    "printk_buffer_setup_prepared_dynamic_buffer": "console",
+    "printk_buffer_setup_switched_active_buffer": "console",
+    "printk_buffer_setup_copied_remaining_records": "console",
     "printk_buffer_ready": "console",
     "primary_hart_only_at_kernel_entry": "firmware_entry_state",
     "primary_hart_sie_clear_at_kernel_entry": "firmware_entry_state",
@@ -466,6 +469,9 @@ _DERIVED_PROVIDERS = {
     "memblock_resize_allowed": "boot_code_candidate",
     "printk_buffer_flushed_to_earlycon": "boot_code_candidate",
     "printk_buffer_setup_local_irq_save_restore_used": "event_ensures",
+    "printk_buffer_setup_prepared_dynamic_buffer": "boot_code_candidate",
+    "printk_buffer_setup_switched_active_buffer": "boot_code_candidate",
+    "printk_buffer_setup_copied_remaining_records": "boot_code_candidate",
     "printk_buffer_ready": "boot_code_candidate",
     "gp_relative_access_ready": "prior_derivation_facts",
     "memory_zeroed": "boot_code_candidate",
@@ -914,24 +920,14 @@ class _Deriver:
 
             bindings: dict[str, dict[str, str]] = {}
             event_result_hints = _block_entries(event.decl.ensures)
-            if not self._drive_blocks(
-                event.decl.drives,
+            if not self._execute_body_members(
+                _ordered_body_members(event.decl),
                 event,
                 bindings=bindings,
                 result_hints=event_result_hints,
             ):
-                exit_message = "drives blocked"
+                exit_message = "event body blocked"
                 return False
-
-            for within in event.decl.within:
-                if not self._execute_within(
-                    within,
-                    event,
-                    bindings=bindings,
-                    result_hints=event_result_hints,
-                ):
-                    exit_message = f"within blocked: {within.context}"
-                    return False
 
             if self.states.get(object_name) != event.source_state:
                 self._record(
@@ -1892,8 +1888,8 @@ class _Deriver:
             bindings=bindings,
         ):
             return False
-        if not self._drive_blocks(
-            within.drives,
+        if not self._execute_body_members(
+            _ordered_body_members(within),
             event,
             action_provider="within_context",
             bindings=bindings,
@@ -1901,15 +1897,6 @@ class _Deriver:
             result_hints=local_result_hints,
         ):
             return False
-        for child_within in within.within:
-            if not self._execute_within(
-                child_within,
-                event,
-                bindings=bindings,
-                process_parent=process_parent,
-                result_hints=local_result_hints,
-            ):
-                return False
         if not self._prove_blocks(
             within.ensures,
             "within ensures",
@@ -1937,6 +1924,43 @@ class _Deriver:
             proof_provider="guard",
             process_parent=process_parent,
         )
+        return True
+
+    def _execute_body_members(
+        self,
+        members: list[BodyMember],
+        event: EventDef,
+        *,
+        action_provider: str = "action_drive",
+        bindings: dict[str, dict[str, str]],
+        process_parent: str | None = None,
+        result_hints: tuple[str, ...] = (),
+    ) -> bool:
+        for member in members:
+            if member.block is not None:
+                if member.kind != "drives":
+                    continue
+                if not self._drive_blocks(
+                    [member.block],
+                    event,
+                    action_provider=action_provider,
+                    bindings=bindings,
+                    process_parent=process_parent,
+                    result_hints=result_hints,
+                ):
+                    return False
+                continue
+
+            if member.within is None:
+                continue
+            if not self._execute_within(
+                member.within,
+                event,
+                bindings=bindings,
+                process_parent=process_parent,
+                result_hints=result_hints,
+            ):
+                return False
         return True
 
     def _commit_within_boundary(
@@ -3384,6 +3408,7 @@ def _within_from_body(
     ensures: list[Block] = []
     deferred: list[Block] = []
     other_blocks: list[Block] = []
+    body_members: list[BodyMember] = []
 
     for kind, header, child_body, child_span, child_body_start_line in _top_level_blocks(
         body, body_start_line
@@ -3397,32 +3422,40 @@ def _within_from_body(
         )
         if kind == "entered_by":
             entered_by.append(block)
+            body_members.append(_block_body_member(block))
         elif kind == "depends_on":
             depends_on.append(block)
+            body_members.append(_block_body_member(block))
         elif kind == "drives":
             drives.append(block)
+            body_members.append(_block_body_member(block))
         elif kind == "within":
             child_context, child_parameters, child_only_once = _parse_within_header(header)
-            nested_withins.append(
-                _within_from_body(
-                    child_context,
-                    child_body,
-                    child_span,
-                    parameters=child_parameters,
-                    only_once=child_only_once,
-                    body_start_line=child_body_start_line,
-                )
+            child_within = _within_from_body(
+                child_context,
+                child_body,
+                child_span,
+                parameters=child_parameters,
+                only_once=child_only_once,
+                body_start_line=child_body_start_line,
             )
+            nested_withins.append(child_within)
+            body_members.append(_within_body_member(child_within))
         elif kind == "exited_by":
             exited_by.append(block)
+            body_members.append(_block_body_member(block))
         elif kind == "may_change":
             may_change.append(block)
+            body_members.append(_block_body_member(block))
         elif kind == "ensures":
             ensures.append(block)
+            body_members.append(_block_body_member(block))
         elif kind == "deferred":
             deferred.append(block)
+            body_members.append(_block_body_member(block))
         else:
             other_blocks.append(block)
+            body_members.append(_block_body_member(block))
 
     return WithinDecl(
         context=context,
@@ -3438,6 +3471,7 @@ def _within_from_body(
         ensures=ensures,
         deferred=deferred,
         other_blocks=other_blocks,
+        body_members=body_members,
     )
 
 
@@ -3523,7 +3557,63 @@ def _substitute_within_bindings(
         ensures=_substitute_blocks(within.ensures, replacements),
         deferred=_substitute_blocks(within.deferred, replacements),
         other_blocks=_substitute_blocks(within.other_blocks, replacements),
+        body_members=[
+            _substitute_body_member_bindings(member, replacements)
+            for member in _ordered_body_members(within)
+        ],
     )
+
+
+def _substitute_body_member_bindings(
+    member: BodyMember, replacements: dict[str, str]
+) -> BodyMember:
+    block = (
+        _substitute_blocks([member.block], replacements)[0]
+        if member.block is not None
+        else None
+    )
+    within = (
+        _substitute_within_bindings(member.within, replacements)
+        if member.within is not None
+        else None
+    )
+    return BodyMember(
+        kind=member.kind,
+        span=member.span,
+        block=block,
+        within=within,
+    )
+
+
+def _ordered_body_members(decl) -> list[BodyMember]:
+    if decl.body_members:
+        return list(decl.body_members)
+    members: list[BodyMember] = []
+    for block in decl.depends_on:
+        members.append(_block_body_member(block))
+    for block in decl.drives:
+        members.append(_block_body_member(block))
+    for within in decl.within:
+        members.append(_within_body_member(within))
+    for block in getattr(decl, "exited_by", []):
+        members.append(_block_body_member(block))
+    for block in decl.may_change:
+        members.append(_block_body_member(block))
+    for block in decl.ensures:
+        members.append(_block_body_member(block))
+    for block in decl.deferred:
+        members.append(_block_body_member(block))
+    for block in decl.other_blocks:
+        members.append(_block_body_member(block))
+    return members
+
+
+def _block_body_member(block: Block) -> BodyMember:
+    return BodyMember(kind=block.kind, span=block.span, block=block)
+
+
+def _within_body_member(within: WithinDecl) -> BodyMember:
+    return BodyMember(kind="within", span=within.span, within=within)
 
 
 def _substitute_blocks(blocks: list[Block], replacements: dict[str, str]) -> list[Block]:

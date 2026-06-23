@@ -15,6 +15,7 @@ from common.model_types import (
     StateDef,
 )
 from common.spec_ast import (
+    BodyMember,
     Block,
     ExclusiveContextDecl,
     EnumDecl,
@@ -843,15 +844,13 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
             for block in state.decl.invariants:
                 _check_state_references(model, block, diagnostics)
             for event in state.events.values():
-                for block in event.decl.depends_on:
-                    _check_state_references(model, block, diagnostics)
                 bindings: dict[str, str] = {}
-                for block in event.decl.drives:
-                    _check_drive_references(
-                        model, block, diagnostics, bindings=bindings
-                    )
-                for within in event.decl.within:
-                    _check_within_references(model, within, diagnostics)
+                _check_body_member_references(
+                    model,
+                    _ordered_body_members(event.decl),
+                    diagnostics,
+                    bindings=bindings,
+                )
 
 
 def _check_only_once_withins(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
@@ -911,21 +910,21 @@ def _event_def(model: ObjectModel, object_name: str, event_name: str) -> EventDe
 
 
 def _driven_events(event: EventDecl) -> list[tuple[str, str]]:
+    return _driven_events_from_body_members(_ordered_body_members(event))
+
+
+def _driven_events_from_body_members(members) -> list[tuple[str, str]]:
     events: list[tuple[str, str]] = []
-    for block in event.drives:
-        events.extend(_driven_events_from_block(block))
-    for within in event.within:
-        events.extend(_driven_events_from_within(within))
+    for member in members:
+        if member.block is not None and member.kind == "drives":
+            events.extend(_driven_events_from_block(member.block))
+        elif member.within is not None:
+            events.extend(_driven_events_from_within(member.within))
     return events
 
 
 def _driven_events_from_within(within) -> list[tuple[str, str]]:
-    events: list[tuple[str, str]] = []
-    for block in within.drives:
-        events.extend(_driven_events_from_block(block))
-    for child in within.within:
-        events.extend(_driven_events_from_within(child))
-    return events
+    return _driven_events_from_body_members(_ordered_body_members(within))
 
 
 def _driven_events_from_block(block: Block) -> list[tuple[str, str]]:
@@ -941,8 +940,43 @@ def _within_local_entries(withins) -> list[tuple[object, int]]:
     entries: list[tuple[object, int]] = []
     for within in withins:
         entries.append((within, 1))
-        entries.extend(_within_local_entries(within.within))
+        entries.extend(_within_local_entries(_ordered_child_withins(within)))
     return entries
+
+
+def _ordered_body_members(decl):
+    if decl.body_members:
+        return decl.body_members
+    members = []
+    for block in decl.depends_on:
+        members.append(_block_body_member(block))
+    for block in decl.drives:
+        members.append(_block_body_member(block))
+    for within in decl.within:
+        members.append(_within_body_member(within))
+    for block in getattr(decl, "exited_by", []):
+        members.append(_block_body_member(block))
+    for block in decl.may_change:
+        members.append(_block_body_member(block))
+    for block in decl.ensures:
+        members.append(_block_body_member(block))
+    for block in decl.deferred:
+        members.append(_block_body_member(block))
+    for block in decl.other_blocks:
+        members.append(_block_body_member(block))
+    return members
+
+
+def _ordered_child_withins(decl) -> list[object]:
+    return [member.within for member in _ordered_body_members(decl) if member.within is not None]
+
+
+def _block_body_member(block: Block):
+    return BodyMember(kind=block.kind, span=block.span, block=block)
+
+
+def _within_body_member(within):
+    return BodyMember(kind="within", span=within.span, within=within)
 
 
 
@@ -996,13 +1030,45 @@ def _check_within_references(
         )
 
     _check_lock_event_blocks(model, within.entered_by, diagnostics, context=context)
-    for block in within.depends_on:
-        _check_state_references(model, block, diagnostics)
     bindings: dict[str, str] = dict(inherited_bindings or {})
     bindings.update(_within_parameter_bindings(within.parameters, bindings))
-    for block in within.drives:
-        _check_drive_references(model, block, diagnostics, context=context, bindings=bindings)
-    for child_within in within.within:
+    _check_body_member_references(
+        model,
+        _ordered_body_members(within),
+        diagnostics,
+        context=context,
+        bindings=bindings,
+        inherited_context=cumulative_context,
+    )
+    _check_lock_event_blocks(model, within.exited_by, diagnostics, context=context)
+
+
+def _check_body_member_references(
+    model: ObjectModel,
+    members,
+    diagnostics: list[Diagnostic],
+    *,
+    context: ExclusiveContextDef | None = None,
+    bindings: dict[str, str],
+    inherited_context: _ContextContribution | None = None,
+) -> None:
+    for member in members:
+        if member.block is not None:
+            if member.kind == "depends_on":
+                _check_state_references(model, member.block, diagnostics)
+            elif member.kind == "drives":
+                _check_drive_references(
+                    model,
+                    member.block,
+                    diagnostics,
+                    context=context,
+                    bindings=bindings,
+                )
+            continue
+
+        child_within = member.within
+        if child_within is None:
+            continue
         for name, value in child_within.parameters.items():
             if value not in bindings and not _is_known_ref_value(value):
                 diagnostics.append(
@@ -1017,9 +1083,8 @@ def _check_within_references(
             child_within,
             diagnostics,
             inherited_bindings=bindings,
-            inherited_context=cumulative_context,
+            inherited_context=inherited_context,
         )
-    _check_lock_event_blocks(model, within.exited_by, diagnostics, context=context)
 
 
 def _check_context_nesting_contribution(

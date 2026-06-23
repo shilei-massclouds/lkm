@@ -13,6 +13,7 @@ from common.model_types import (
     StateDef,
 )
 from common.spec_ast import (
+    BodyMember,
     Block,
     ContextGuardDecl,
     EnumDecl,
@@ -204,17 +205,37 @@ def _state_def_from_json(item: Any) -> StateDef:
 
 def _event_def_from_json(item: Any) -> EventDef:
     data = _as_object(item, "event")
+    depends_on = [_block_from_json(block) for block in _list(data, "depends_on")]
+    drives = [_block_from_json(block) for block in _list(data, "drives")]
+    within = [_within_from_json(block) for block in _list(data, "within")]
+    may_change = [_block_from_json(block) for block in _list(data, "may_change")]
+    ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    deferred = [_block_from_json(block) for block in _list(data, "deferred")]
+    other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
+    body_members = _body_members_from_json(
+        data,
+        fallback=[
+            *(_block_body_member(block) for block in depends_on),
+            *(_block_body_member(block) for block in drives),
+            *(_within_body_member(block) for block in within),
+            *(_block_body_member(block) for block in may_change),
+            *(_block_body_member(block) for block in ensures),
+            *(_block_body_member(block) for block in deferred),
+            *(_block_body_member(block) for block in other_blocks),
+        ],
+    )
     decl = EventDecl(
         name=_string(data, "name"),
         target_state=_string(data, "target_state"),
         span=_span_from_json(data["span"]),
-        depends_on=[_block_from_json(block) for block in _list(data, "depends_on")],
-        drives=[_block_from_json(block) for block in _list(data, "drives")],
-        within=[_within_from_json(block) for block in _list(data, "within")],
-        may_change=[_block_from_json(block) for block in _list(data, "may_change")],
-        ensures=[_block_from_json(block) for block in _list(data, "ensures")],
-        deferred=[_block_from_json(block) for block in _list(data, "deferred")],
-        other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
+        depends_on=depends_on,
+        drives=drives,
+        within=within,
+        may_change=may_change,
+        ensures=ensures,
+        deferred=deferred,
+        other_blocks=other_blocks,
+        body_members=body_members,
     )
     return EventDef(
         name=decl.name,
@@ -269,21 +290,73 @@ def _type_from_json(item: Any) -> TypeDecl:
 
 def _within_from_json(item: Any) -> WithinDecl:
     data = _as_object(item, "within")
+    entered_by = [_block_from_json(block) for block in _list(data, "entered_by")]
+    depends_on = [_block_from_json(block) for block in _list(data, "depends_on")]
+    drives = [_block_from_json(block) for block in _list(data, "drives")]
+    within = [_within_from_json(block) for block in _list(data, "within")]
+    exited_by = [_block_from_json(block) for block in _list(data, "exited_by")]
+    may_change = [_block_from_json(block) for block in _list(data, "may_change")]
+    ensures = [_block_from_json(block) for block in _list(data, "ensures")]
+    deferred = [_block_from_json(block) for block in _list(data, "deferred")]
+    other_blocks = [_block_from_json(block) for block in _list(data, "other_blocks")]
+    body_members = _body_members_from_json(
+        data,
+        fallback=[
+            *(_block_body_member(block) for block in entered_by),
+            *(_block_body_member(block) for block in depends_on),
+            *(_block_body_member(block) for block in drives),
+            *(_within_body_member(block) for block in within),
+            *(_block_body_member(block) for block in exited_by),
+            *(_block_body_member(block) for block in may_change),
+            *(_block_body_member(block) for block in ensures),
+            *(_block_body_member(block) for block in deferred),
+            *(_block_body_member(block) for block in other_blocks),
+        ],
+    )
     return WithinDecl(
         context=_string(data, "context"),
         span=_span_from_json(data["span"]),
         only_once=_bool(data.get("only_once", False), "within.only_once"),
         parameters=_string_map(data.get("parameters", {}), "within.parameters"),
-        entered_by=[_block_from_json(block) for block in _list(data, "entered_by")],
-        depends_on=[_block_from_json(block) for block in _list(data, "depends_on")],
-        drives=[_block_from_json(block) for block in _list(data, "drives")],
-        within=[_within_from_json(block) for block in _list(data, "within")],
-        exited_by=[_block_from_json(block) for block in _list(data, "exited_by")],
-        may_change=[_block_from_json(block) for block in _list(data, "may_change")],
-        ensures=[_block_from_json(block) for block in _list(data, "ensures")],
-        deferred=[_block_from_json(block) for block in _list(data, "deferred")],
-        other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
+        entered_by=entered_by,
+        depends_on=depends_on,
+        drives=drives,
+        within=within,
+        exited_by=exited_by,
+        may_change=may_change,
+        ensures=ensures,
+        deferred=deferred,
+        other_blocks=other_blocks,
+        body_members=body_members,
     )
+
+
+def _body_members_from_json(
+    data: dict[str, Any], *, fallback: list[BodyMember]
+) -> list[BodyMember]:
+    if "body_members" not in data:
+        return fallback
+    return [_body_member_from_json(member) for member in _list(data, "body_members")]
+
+
+def _body_member_from_json(item: Any) -> BodyMember:
+    data = _as_object(item, "body_member")
+    block = data.get("block")
+    within = data.get("within")
+    return BodyMember(
+        kind=_string(data, "kind"),
+        span=_span_from_json(data["span"]),
+        block=_block_from_json(block) if block is not None else None,
+        within=_within_from_json(within) if within is not None else None,
+    )
+
+
+def _block_body_member(block: Block) -> BodyMember:
+    return BodyMember(kind=block.kind, span=block.span, block=block)
+
+
+def _within_body_member(within: WithinDecl) -> BodyMember:
+    return BodyMember(kind="within", span=within.span, within=within)
 
 
 def _block_from_json(item: Any) -> Block:
