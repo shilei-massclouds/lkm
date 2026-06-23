@@ -68,6 +68,7 @@ predicate arceos_ex_must_resource_tree_setup_record_resource_lock_write_guard() 
 predicate arceos_ex_must_resource_tree_setup_drive_resource_lock_write_guard() -> bool;
 predicate arceos_ex_must_rwlock_expose_reader_writer_protocol() -> bool;
 predicate arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore() -> bool;
+predicate arceos_ex_must_printk_buffer_setup_bind_local_irq_guard_to_boot_cpu_control() -> bool;
 predicate arceos_ex_must_randomness_preset_not_unconditionally_lock_input_pool() -> bool;
 predicate arceos_ex_must_randomness_conditional_reseed_use_base_crng_irqsave_lock() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
@@ -495,9 +496,21 @@ type ArceosExCorePrepareCodingMust {
          *
          * Linux setup_log_buf() switches the active printk ring buffer under
          * local_irq_save()/local_irq_restore(). PrintkBuffer.setup() must
-         * record the local IRQ save/restore guard before reporting Ready.
+         * record the local IRQ save/restore guard before reporting Ready, and
+         * must bind that guard to the existing BootCpuLocalInterrupt
+         * LocalInterruptControl object rather than hiding it as a PrintkBuffer
+         * internal bool.
+         *
+         * In the current BootPhaseContext the path is single-CPU, single-task,
+         * local-IRQ-disabled and preemption-disabled, and PrintkBuffer.Setup is
+         * a Prepared -> Ready lifecycle transition, so arceos_ex may lower this
+         * call-site guard to proof-only/elided code. That elision remains valid
+         * only because the protected section is single-commit on this path; a
+         * reusable or looped within block will need an explicit `once` marker or
+         * equivalent proof before applying the same optimization.
          */
         arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore();
+        arceos_ex_must_printk_buffer_setup_bind_local_irq_guard_to_boot_cpu_control();
 
         /*
          * Randomness preset conditional lock boundary:
@@ -565,11 +578,16 @@ type ArceosExEffectiveContextCodingMust {
          * A guard whose entered_by/exited_by use LocalInterruptControl
          * irqsave/irqrestore must lower to
          * operations that save the incoming local interrupt state and restore
-         * exactly that saved state on exit. It must not be reduced to an
-         * unconditional disable/enable pair. A guard that intentionally models
-         * unconditional local IRQ disable/enable must be represented as a
-         * distinct explicitly documented action, not inferred
-         * from the irqsave form.
+         * exactly that saved state on exit by default. It must not be reduced
+         * to an unconditional disable/enable pair. A call site may elide the
+         * runtime irqsave/irqrestore only when the source model/coding marks
+         * that guard as proof-only under an outer Effective Context, the guarded
+         * section is proven single-execution (`once` or an equivalent lifecycle
+         * single-commit proof), no saved-flags token escapes, and no later object
+         * consumes a real save/restore count or debug side effect from that
+         * guard. A guard that intentionally models unconditional local IRQ
+         * disable/enable must still be represented as a distinct explicitly
+         * documented action, not inferred from the irqsave form.
          */
         arceos_ex_must_local_interrupt_guard_preserve_saved_flags();
 
@@ -597,7 +615,9 @@ type ArceosExEffectiveContextCodingMust {
          * counts, saved flags, lock ownership, memory ordering, debug
          * assertions, wakeups or other resource protocol effects. Such guards
          * remain real code even when an outer context already provides the same
-         * high-level attribute.
+         * high-level attribute, unless the call site has an explicit proof-only
+         * lowering rule plus `once` or equivalent single-execution proof and no
+         * consumer of the runtime protocol effects.
          */
         arceos_ex_must_effective_context_not_elide_protocol_guards();
 

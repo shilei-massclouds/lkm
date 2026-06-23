@@ -551,6 +551,39 @@ object EarlyParam: KernelObject {
 /*
  * PrintkBuffer 表示 printk 的中间日志缓冲机制。
  */
+context PrintkBufferSetupLocalInterruptContext: Context {
+    /*
+     * This context corresponds to Linux setup_log_buf() using
+     * local_irq_save(flags) / local_irq_restore(flags) around the active
+     * printk ring-buffer switch and the first copy of existing records. The
+     * allocation and dynamic ring-buffer initialization before the switch, and
+     * the remaining-record copy after the switch, are outside this protected
+     * section. Current tooling does not yet preserve ordered event body
+     * members, so this context records the protected facts without splitting
+     * Setup into an ordered action sequence.
+     *
+     * Because PrintkBuffer.Event::Setup is a Prepared -> Ready lifecycle event,
+     * this guarded section is single-commit on the successful boot path. Future
+     * reusable guard elision should require an explicit `once` marker or an
+     * equivalent single-execution proof before relying on outer Effective
+     * Context to erase guard code.
+     */
+    guard {
+        entered_by {
+            BootCpuLocalInterrupt.Event::SaveAndDisable;
+        }
+
+        exited_by {
+            BootCpuLocalInterrupt.Event::Restore;
+        }
+    }
+
+    obj_refs {
+        PrintkBuffer;
+        BootCpuLocalInterrupt;
+    }
+}
+
 object PrintkBuffer: BufferObject {
     initial_state: State::Base;
 
@@ -585,20 +618,31 @@ object PrintkBuffer: BufferObject {
         events {
             /*
              * Setup 对应 setup_log_buf()，在 per-cpu 和启动参数准备后完成正式日志缓冲准备。
+             * Linux 只在 active buffer switch 和既有 records 初次复制的局部临界区
+             * 使用 local_irq_save()/local_irq_restore()；当前规格用
+             * PrintkBufferSetupLocalInterruptContext 承载这部分受保护事实。
              */
             on Event::Setup -> State::Ready {
                 depends_on {
                     MemBlock.state == State::Online;
                     PerCpuStorage.state == State::Ready;
                     BootParam.state == State::Ready;
+                    BootCpuLocalInterrupt.state == State::Ready;
+                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                }
+
+                within PrintkBufferSetupLocalInterruptContext {
+                    ensures {
+                        printk_buffer_records_preserved(PrintkBuffer);
+                        printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);
+                        printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
+                    }
                 }
 
                 ensures {
                     printk_buffer_static_storage_ready(PrintkBuffer);
                     printk_buffer_ready(PrintkBuffer);
                     printk_buffer_runtime_ready(PrintkBuffer);
-                    printk_buffer_records_preserved(PrintkBuffer);
-                    printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);
                 }
             }
         }
@@ -614,6 +658,7 @@ object PrintkBuffer: BufferObject {
             printk_buffer_runtime_ready(PrintkBuffer);
             printk_buffer_records_preserved(PrintkBuffer);
             printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);
+            printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
         }
     }
 }

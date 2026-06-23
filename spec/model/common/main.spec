@@ -182,6 +182,8 @@ predicate static_branch_text_patch_sync_deferred<T>(static_branch: T) -> bool;
 predicate cpu_hotplug_ap_sync_state_online<T, U>(hotplug_state: T, cpu: U) -> bool;
 predicate resource_tree_write_lock_guard_used<T>(resource_tree: T) -> bool;
 predicate printk_buffer_setup_local_irq_save_restore_used<T>(buffer: T) -> bool;
+predicate printk_buffer_setup_local_irq_guard_used<T, U>(buffer: T, control: U) -> bool;
+predicate printk_buffer_setup_local_irq_guard_proof_only<T, U>(buffer: T, control: U) -> bool;
 predicate jump_label_mutex_static_initializer<T>(mutex: T) -> bool;
 predicate jump_label_mutex_storage_bound<T>(mutex: T) -> bool;
 predicate jump_label_mutex_init_kind_static<T>(mutex: T) -> bool;

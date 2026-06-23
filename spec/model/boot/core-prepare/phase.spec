@@ -1321,6 +1321,7 @@ object CorePreparePhase: PhaseObject {
                     EarlyParam.state == State::Ready;
                     CommandLine.state == State::Prepared;
                     BootCPU.state == State::Online;
+                    BootCpuLocalInterrupt.state == State::Ready;
                     CpuIdMap.state == State::Prepared;
                     PrintkBuffer.state == State::Prepared;
                     ExceptionStream.state == State::Prepared;
@@ -1423,6 +1424,7 @@ object CorePreparePhase: PhaseObject {
             PayloadParam.state == State::Ready;
             Randomness.state == State::Prepared;
             PrintkBuffer.state == State::Ready;
+            printk_buffer_setup_local_irq_guard_used(PrintkBuffer, BootCpuLocalInterrupt);
             ExceptionTable.state == State::Ready;
             ExceptionStream.state == State::Ready;
             PageFaultException.state == State::Ready;

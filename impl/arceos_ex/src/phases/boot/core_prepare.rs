@@ -80,7 +80,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         checkpoint_print_unknown_bootoptions,
     )?;
     ctx.randomness.preset(&ctx.static_command_line)?;
-    printk::setup(&ctx.memblock, &ctx.per_cpu_storage, &ctx.boot_param)?;
+    printk::setup(
+        &ctx.memblock,
+        &ctx.per_cpu_storage,
+        &ctx.boot_param,
+        &ctx.boot_cpu_local_interrupt,
+    )?;
     crate::checkpoint::dispatch(Checkpoint::PrintkBufferReady, ctx);
     ctx.exception_table.setup(&ctx.kernel_image, &ctx.vm)?;
     ctx.exception_stream.setup(&ctx.event_stream)
@@ -215,6 +220,8 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.randomness.state() == State::Prepared
         && printk::is_ready()
         && printk::setup_local_irq_save_restore_used()
+        && printk::setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)
+        && printk::setup_local_irq_guard_proof_only()
         && ctx.exception_table.state() == State::Ready
         && ctx.exception_stream.state() == State::Ready
         && ctx.exception_stream.page_fault_state() == State::Ready
