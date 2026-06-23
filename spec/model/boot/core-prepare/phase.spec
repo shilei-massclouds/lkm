@@ -1180,7 +1180,12 @@ object Randomness: KernelObject {
     state State::Base {
         events {
             /*
-             * Preset 对应 random_init_early(command_line)。
+             * Preset 对应 random_init_early(command_line)。Linux 主线直接
+             * 使用内部 _mix_pool_bytes() 混入早期材料，不经过带
+             * input_pool.lock 的 mix_pool_bytes()；末尾 crng_ready() /
+             * trust_cpu 条件路径可能进入 crng_reseed() 或 _credit_init_bits()
+             * 并使用 base_crng.lock 的 irqsave 自旋锁，当前最小路径只记录为
+             * deferred。
              */
             on Event::Preset -> State::Prepared {
                 depends_on {
@@ -1192,6 +1197,9 @@ object Randomness: KernelObject {
                     randomness_early_seed_material_ready(Randomness);
                     static_command_line_mixed_into_randomness(Randomness, StaticCommandLine);
                     arch_entropy_accounted(Randomness, Riscv64);
+                    randomness_early_mix_uses_internal_mix_pool_bytes_without_input_pool_lock(Randomness);
+                    randomness_early_conditional_reseed_or_credit_path_deferred(Randomness);
+                    randomness_base_crng_irqsave_lock_required_if_conditional_reseed_enabled(Randomness);
                     randomness_not_fully_ready(Randomness);
                 }
             }
@@ -1206,6 +1214,9 @@ object Randomness: KernelObject {
             randomness_early_seed_material_ready(Randomness);
             static_command_line_mixed_into_randomness(Randomness, StaticCommandLine);
             arch_entropy_accounted(Randomness, Riscv64);
+            randomness_early_mix_uses_internal_mix_pool_bytes_without_input_pool_lock(Randomness);
+            randomness_early_conditional_reseed_or_credit_path_deferred(Randomness);
+            randomness_base_crng_irqsave_lock_required_if_conditional_reseed_enabled(Randomness);
             randomness_not_fully_ready(Randomness);
         }
 

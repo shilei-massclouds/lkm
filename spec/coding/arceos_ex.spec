@@ -68,6 +68,8 @@ predicate arceos_ex_must_resource_tree_setup_record_resource_lock_write_guard() 
 predicate arceos_ex_must_resource_tree_setup_drive_resource_lock_write_guard() -> bool;
 predicate arceos_ex_must_rwlock_expose_reader_writer_protocol() -> bool;
 predicate arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore() -> bool;
+predicate arceos_ex_must_randomness_preset_not_unconditionally_lock_input_pool() -> bool;
+predicate arceos_ex_must_randomness_conditional_reseed_use_base_crng_irqsave_lock() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
 predicate arceos_ex_must_startup_drive_boot_then_interrupt_then_payload() -> bool;
 predicate arceos_ex_must_payload_require_interrupt_phase_ready() -> bool;
@@ -496,6 +498,32 @@ type ArceosExCorePrepareCodingMust {
          * record the local IRQ save/restore guard before reporting Ready.
          */
         arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore();
+
+        /*
+         * Randomness preset conditional lock boundary:
+         *
+         * Randomness.preset() maps to Linux random_init_early(command_line).
+         * The main early-mix path calls the internal _mix_pool_bytes() helper
+         * directly, not mix_pool_bytes(), so it does not take input_pool.lock
+         * and generated code must not add an unconditional input-pool spinlock
+         * guard merely because later random paths use that lock.
+         */
+        arceos_ex_must_randomness_preset_not_unconditionally_lock_input_pool();
+
+        /*
+         * Randomness conditional reseed/credit lock boundary:
+         *
+         * Linux random_init_early() may enter crng_reseed() when crng_ready()
+         * is already true, or _credit_init_bits() when trust_cpu is enabled.
+         * Those conditional paths may update base_crng under
+         * spin_lock_irqsave(&base_crng.lock, flags) /
+         * spin_unlock_irqrestore(&base_crng.lock, flags). The current
+         * arceos_ex minimal path may keep this condition deferred, but if the
+         * path is implemented it must lower through the RawSpinLock irqsave
+         * guard protocol, not through an unguarded update or unconditional
+         * early-mix lock.
+         */
+        arceos_ex_must_randomness_conditional_reseed_use_base_crng_irqsave_lock();
     }
 }
 
