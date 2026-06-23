@@ -133,10 +133,18 @@ predicate fdt_reserved_memory_ranges_ready<T, U>(early_dtb: T, raw_dtb: U) -> bo
 predicate memblock_fdt_reserved_ranges_applied<T, U>(memblock: T, early_dtb: U) -> bool;
 predicate interrupt_concurrency_closed() -> bool;
 predicate task_concurrency_closed() -> bool;
+predicate smp_concurrency_closed() -> bool;
+predicate smp_concurrency_open<T>(cpu_group: T) -> bool;
 predicate early_boot_irqs_disabled_true() -> bool;
 predicate early_boot_irqs_disabled_false() -> bool;
 predicate selected_payload_ready() -> bool;
 predicate selected_payload_no_return_handoff() -> bool;
+predicate static_branch_cpu_hotplug_read_guard_used<T>(static_branch: T) -> bool;
+predicate static_branch_jump_label_mutex_guard_used<T>(static_branch: T) -> bool;
+predicate static_branch_text_patch_sync_deferred<T>(static_branch: T) -> bool;
+predicate cpu_hotplug_ap_sync_state_online<T, U>(hotplug_state: T, cpu: U) -> bool;
+predicate resource_tree_write_lock_guard_used<T>(resource_tree: T) -> bool;
+predicate printk_buffer_setup_local_irq_save_restore_used<T>(buffer: T) -> bool;
 predicate completion_storage_bound<T>(completion: T) -> bool;
 predicate completion_ready<T>(completion: T) -> bool;
 predicate completion_pending<T>(completion: T) -> bool;

@@ -41,6 +41,7 @@ pub struct ResourceTree {
     lifecycle: Lifecycle,
     records: [ResourceRecord; MAX_RESOURCES],
     count: usize,
+    write_lock_guard_used: bool,
 }
 
 impl ResourceTree {
@@ -49,6 +50,7 @@ impl ResourceTree {
             lifecycle: Lifecycle::new(State::Base),
             records: [ResourceRecord::empty(); MAX_RESOURCES],
             count: 0,
+            write_lock_guard_used: false,
         }
     }
 
@@ -58,6 +60,10 @@ impl ResourceTree {
 
     pub const fn resource_count(&self) -> usize {
         self.count
+    }
+
+    pub const fn write_lock_guard_used(&self) -> bool {
+        self.write_lock_guard_used
     }
 
     pub fn root(&self) -> Option<ResourceRef<'_>> {
@@ -105,6 +111,7 @@ impl ResourceTree {
             self.clear();
             return self.failed_setup();
         }
+        self.write_lock_guard_used = true;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -117,6 +124,7 @@ impl ResourceTree {
     fn clear(&mut self) {
         self.records = [ResourceRecord::empty(); MAX_RESOURCES];
         self.count = 0;
+        self.write_lock_guard_used = false;
     }
 
     fn add_system_ram_resources(&mut self, memblock: &MemBlock) -> bool {

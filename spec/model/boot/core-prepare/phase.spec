@@ -196,6 +196,7 @@ object ResourceTree: ResourceObject {
                     system_ram_resources_ready(ResourceTree, MemBlock);
                     reserved_resources_ready(ResourceTree, MemBlock);
                     kernel_image_resources_ready(ResourceTree, KernelImage, Lds);
+                    resource_tree_write_lock_guard_used(ResourceTree);
                     resource_parent_child_ranges_valid(ResourceTree);
                     resource_overlap_policy_valid(ResourceTree);
                 }
@@ -212,6 +213,7 @@ object ResourceTree: ResourceObject {
             system_ram_resources_ready(ResourceTree, MemBlock);
             reserved_resources_ready(ResourceTree, MemBlock);
             kernel_image_resources_ready(ResourceTree, KernelImage, Lds);
+            resource_tree_write_lock_guard_used(ResourceTree);
             resource_parent_child_ranges_valid(ResourceTree);
             resource_overlap_policy_valid(ResourceTree);
         }
@@ -382,6 +384,11 @@ object DmaCachePolicy: HardwareObject {
  * StaticBranch 表示 static key / static branch 的启动期基础设施。
  * 本阶段只建立 registry 与分支项关系，后续 set(key, value) 是状态内 action，
  * 不推进 StaticBranch 生命周期。
+ *
+ * Linux jump_label_init() 在建立 registry 时持有 cpus_read_lock() 和
+ * jump_label_mutex。本阶段只记录这两个启动期保护事实。运行期 static key
+ * text patch 需要的 text_mutex、stop_machine 或 icache 同步不由本 Setup
+ * 隐式完成，后续在 StaticBranch.set/action 语义中单独展开。
  */
 object StaticBranch: KernelObject {
     initial_state: State::Base;
@@ -404,6 +411,9 @@ object StaticBranch: KernelObject {
                     static_branch_registry_ready(StaticBranch, KernelImage);
                     static_branch_entries_sorted(StaticBranch);
                     static_key_to_branch_sites_ready(StaticBranch);
+                    static_branch_cpu_hotplug_read_guard_used(StaticBranch);
+                    static_branch_jump_label_mutex_guard_used(StaticBranch);
+                    static_branch_text_patch_sync_deferred(StaticBranch);
                     static_branch_set_action_ready(StaticBranch);
                 }
             }
@@ -418,6 +428,9 @@ object StaticBranch: KernelObject {
             static_branch_registry_ready(StaticBranch, KernelImage);
             static_branch_entries_sorted(StaticBranch);
             static_key_to_branch_sites_ready(StaticBranch);
+            static_branch_cpu_hotplug_read_guard_used(StaticBranch);
+            static_branch_jump_label_mutex_guard_used(StaticBranch);
+            static_branch_text_patch_sync_deferred(StaticBranch);
             static_branch_set_action_ready(StaticBranch);
         }
     }
@@ -702,6 +715,7 @@ object CpuHotplugState: HardwareObject {
                     cpu_hotplug_state_ready(CpuHotplugState, BootCPU);
                     cpu_hotplug_state_current(CpuHotplugState, BootCPU, Online);
                     cpu_hotplug_state_target(CpuHotplugState, BootCPU, Online);
+                    cpu_hotplug_ap_sync_state_online(CpuHotplugState, BootCPU);
                     boot_cpu_recorded_booted_once(CpuHotplugState, BootCPU);
                 }
             }
@@ -716,6 +730,7 @@ object CpuHotplugState: HardwareObject {
             cpu_hotplug_state_ready(CpuHotplugState, BootCPU);
             cpu_hotplug_state_current(CpuHotplugState, BootCPU, Online);
             cpu_hotplug_state_target(CpuHotplugState, BootCPU, Online);
+            cpu_hotplug_ap_sync_state_online(CpuHotplugState, BootCPU);
             boot_cpu_recorded_booted_once(CpuHotplugState, BootCPU);
         }
     }
@@ -974,7 +989,9 @@ object CorePreparePhase: PhaseObject {
                 ensures {
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
+                    smp_concurrency_closed();
                     context_is(SystemExclusive);
+                    early_boot_irqs_disabled_true();
                 }
 
                 deferred {
@@ -1010,7 +1027,9 @@ object CorePreparePhase: PhaseObject {
         invariant {
             interrupt_concurrency_closed();
             task_concurrency_closed();
+            smp_concurrency_closed();
             context_is(SystemExclusive);
+            early_boot_irqs_disabled_true();
             EntrySuccessorPhase.state == State::Ready;
             DeviceTree.state == State::Ready;
             Zones.state == State::Ready;

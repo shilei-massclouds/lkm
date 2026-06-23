@@ -598,6 +598,7 @@ object PrintkBuffer: BufferObject {
                     printk_buffer_ready(PrintkBuffer);
                     printk_buffer_runtime_ready(PrintkBuffer);
                     printk_buffer_records_preserved(PrintkBuffer);
+                    printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);
                 }
             }
         }
@@ -612,6 +613,7 @@ object PrintkBuffer: BufferObject {
             printk_buffer_ready(PrintkBuffer);
             printk_buffer_runtime_ready(PrintkBuffer);
             printk_buffer_records_preserved(PrintkBuffer);
+            printk_buffer_setup_local_irq_save_restore_used(PrintkBuffer);
         }
     }
 }

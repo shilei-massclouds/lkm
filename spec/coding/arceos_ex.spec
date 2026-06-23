@@ -59,6 +59,11 @@ predicate arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external
 predicate arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only() -> bool;
 predicate arceos_ex_must_ioremap_model_mmio_attribute_policy_explicitly() -> bool;
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
+predicate arceos_ex_must_core_prepare_preserve_early_irq_and_smp_closed_facts() -> bool;
+predicate arceos_ex_must_static_branch_setup_record_jump_label_guards() -> bool;
+predicate arceos_ex_must_static_branch_text_patch_sync_remain_deferred() -> bool;
+predicate arceos_ex_must_resource_tree_setup_record_resource_lock_write_guard() -> bool;
+predicate arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore() -> bool;
 predicate arceos_ex_should_keep_mm_core_init_checkpoints_observable() -> bool;
 predicate arceos_ex_must_startup_drive_boot_then_interrupt_then_payload() -> bool;
 predicate arceos_ex_must_payload_require_interrupt_phase_ready() -> bool;
@@ -330,6 +335,64 @@ type ArceosExDeviceTreeCodingMust {
          * path lookup and property query facts have been checked.
          */
         arceos_ex_must_device_tree_checkpoint_after_validation();
+    }
+}
+
+type ArceosExCorePrepareCodingMust {
+    invariant {
+        /*
+         * CorePrepare concurrency boundary:
+         *
+         * CorePreparePhase runs after paging_init() and before trap_init() /
+         * mm_core_init() while Linux still has early_boot_irqs_disabled == true
+         * and secondary CPUs have not been brought online. The implementation
+         * must not open local IRQs, task concurrency, or SMP concurrency in
+         * this phase; its ready check must still observe the model facts
+         * early_boot_irqs_disabled_true(), interrupt_concurrency_closed(),
+         * task_concurrency_closed(), and smp_concurrency_closed().
+         */
+        arceos_ex_must_core_prepare_preserve_early_irq_and_smp_closed_facts();
+
+        /*
+         * StaticBranch.setup guard facts:
+         *
+         * StaticBranch.setup() models Linux jump_label_init(). Even though the
+         * current prototype runs before SMP/task concurrency opens, generated
+         * code must make the Linux guard semantics visible as facts: the CPU
+         * hotplug read guard corresponding to cpus_read_lock() and the
+         * jump_label_mutex guard corresponding to jump_label_lock().
+         */
+        arceos_ex_must_static_branch_setup_record_jump_label_guards();
+
+        /*
+         * Text patch synchronization boundary:
+         *
+         * Runtime static-key code patching uses separate text patch guards and
+         * instruction-cache synchronization on RISC-V. CorePrepare
+         * StaticBranch.setup() must not silently claim those runtime sync
+         * effects; they remain deferred to later StaticBranch action modeling.
+         */
+        arceos_ex_must_static_branch_text_patch_sync_remain_deferred();
+
+        /*
+         * ResourceTree setup guard:
+         *
+         * Linux init_resources() inserts resources through insert_resource(),
+         * whose kernel/resource.c path takes resource_lock with write_lock().
+         * ResourceTree.setup() must expose the equivalent write-lock guard
+         * fact instead of treating the resource tree mutation as an unguarded
+         * list update.
+         */
+        arceos_ex_must_resource_tree_setup_record_resource_lock_write_guard();
+
+        /*
+         * PrintkBuffer setup IRQ guard:
+         *
+         * Linux setup_log_buf() switches the active printk ring buffer under
+         * local_irq_save()/local_irq_restore(). PrintkBuffer.setup() must
+         * record the local IRQ save/restore guard before reporting Ready.
+         */
+        arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore();
     }
 }
 

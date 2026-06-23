@@ -156,12 +156,17 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
     ctx.device_tree.state() == State::Ready
         && ctx.zones.state() == State::Ready
         && ctx.resource_tree.state() == State::Ready
+        && ctx.resource_tree.write_lock_guard_used()
         && ctx.cpu_group.state() == State::Ready
+        && !ctx.cpu_group.smp_concurrency_open()
         && ctx.cpu_id_map.state() == State::Ready
         && ctx.cache_block_info.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
         && ctx.dma_cache_policy.state() == State::Ready
         && ctx.static_branch.state() == State::Ready
+        && ctx.static_branch.cpu_hotplug_read_guard_used()
+        && ctx.static_branch.jump_label_mutex_guard_used()
+        && ctx.static_branch.text_patch_sync_deferred()
         && ctx.command_line.state() == State::Ready
         && ctx.saved_command_line.state() == State::Ready
         && ctx.static_command_line.state() == State::Ready
@@ -170,16 +175,19 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.per_cpu_storage.first_chunk().state() == State::Ready
         && ctx.per_cpu_storage.offset_table().state() == State::Ready
         && ctx.cpu_hotplug_state.state() == State::Ready
+        && ctx.cpu_hotplug_state.sync() == crate::objects::cpu_hotplug::CpuHotplugSyncState::Online
         && ctx.params.state() == State::Ready
         && ctx.boot_param.state() == State::Ready
         && ctx.payload_param.state() == State::Ready
         && ctx.randomness.state() == State::Prepared
         && printk::is_ready()
+        && printk::setup_local_irq_save_restore_used()
         && ctx.exception_table.state() == State::Ready
         && ctx.exception_stream.state() == State::Ready
         && ctx.exception_stream.page_fault_state() == State::Ready
         && ctx.exception_stream.syscall_state() == State::Prepared
         && ctx.exception_stream.breakpoint_state() == State::Ready
         && ctx.exception_stream.unexpected_state() == State::Ready
+        && ctx.interrupt_stream.early_boot_irqs_disabled()
         && (earlycon::is_online() || printk::console_handoff_complete())
 }

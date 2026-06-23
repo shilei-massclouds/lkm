@@ -35,6 +35,9 @@ pub struct StaticBranch {
     lifecycle: Lifecycle,
     entries: [StaticKeyEntry; MAX_STATIC_KEYS],
     count: usize,
+    cpu_hotplug_read_guard_used: bool,
+    jump_label_mutex_guard_used: bool,
+    text_patch_sync_deferred: bool,
 }
 
 impl StaticBranch {
@@ -52,6 +55,9 @@ impl StaticBranch {
                 StaticKeyEntry::new(StaticKey::InitOnAlloc),
             ],
             count: 0,
+            cpu_hotplug_read_guard_used: false,
+            jump_label_mutex_guard_used: false,
+            text_patch_sync_deferred: false,
         }
     }
 
@@ -61,6 +67,18 @@ impl StaticBranch {
 
     pub const fn key_count(&self) -> usize {
         self.count
+    }
+
+    pub const fn cpu_hotplug_read_guard_used(&self) -> bool {
+        self.cpu_hotplug_read_guard_used
+    }
+
+    pub const fn jump_label_mutex_guard_used(&self) -> bool {
+        self.jump_label_mutex_guard_used
+    }
+
+    pub const fn text_patch_sync_deferred(&self) -> bool {
+        self.text_patch_sync_deferred
     }
 
     pub fn setup(&mut self, kernel_image: &KernelImage, vm: &Vm) -> EventResult {
@@ -83,6 +101,9 @@ impl StaticBranch {
             StaticKeyEntry::new(StaticKey::InitOnAlloc),
         ];
         self.count = 5;
+        self.cpu_hotplug_read_guard_used = true;
+        self.jump_label_mutex_guard_used = true;
+        self.text_patch_sync_deferred = true;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

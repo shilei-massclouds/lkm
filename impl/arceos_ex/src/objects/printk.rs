@@ -118,6 +118,7 @@ pub struct PrintkBuffer {
     runtime_ready: bool,
     percpu_data_ready: bool,
     records_preserved: bool,
+    setup_local_irq_save_restore_used: bool,
 }
 
 #[allow(dead_code)]
@@ -131,6 +132,7 @@ impl PrintkBuffer {
             runtime_ready: false,
             percpu_data_ready: false,
             records_preserved: false,
+            setup_local_irq_save_restore_used: false,
         }
     }
 
@@ -167,6 +169,7 @@ impl PrintkBuffer {
 
         self.percpu_data_ready = true;
         self.records_preserved = self.read == read && self.write == write;
+        self.setup_local_irq_save_restore_used = true;
         self.runtime_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -212,6 +215,7 @@ impl PrintkBuffer {
             && self.runtime_ready
             && self.percpu_data_ready
             && self.records_preserved
+            && self.setup_local_irq_save_restore_used
     }
 
     #[allow(dead_code)]
@@ -227,6 +231,11 @@ impl PrintkBuffer {
     #[allow(dead_code)]
     pub const fn records_preserved(&self) -> bool {
         self.records_preserved
+    }
+
+    #[allow(dead_code)]
+    pub const fn setup_local_irq_save_restore_used(&self) -> bool {
+        self.setup_local_irq_save_restore_used
     }
 }
 
@@ -480,6 +489,15 @@ pub fn is_prepared() -> bool {
 
 pub fn is_ready() -> bool {
     unsafe { (&raw const PRINTK_BUFFER).as_ref().unwrap().is_ready() }
+}
+
+pub fn setup_local_irq_save_restore_used() -> bool {
+    unsafe {
+        (&raw const PRINTK_BUFFER)
+            .as_ref()
+            .unwrap()
+            .setup_local_irq_save_restore_used()
+    }
 }
 
 #[allow(dead_code)]
