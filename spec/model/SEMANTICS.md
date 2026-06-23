@@ -272,14 +272,18 @@ worker sleep/running hook、RCU context switch 和 scheduler class pick 细节�
 
 `context ... : ResourceExclusiveContext` 表示通过某个 guard 建立的受保护执行作用域。它不是普通 lifecycle object，不拥有 guard、锁或资源；它只保存引用关系、guard 边界和作用域语义。
 
-`guard` 表示建立和退出上下文边界的机制。Context 的正式建模机制是统一的：
+`guard` 表示某个上下文为何成立。它可以是运行时显式进入/退出的机制，
+例如锁、RCU 读侧、关抢占或关中断；也可以是阶段边界或启动早期事实这类
+天然成立的边界。Context 的正式建模机制是统一的：
 `within ContextName { ... }` 进入由 guard 定义的上下文，执行块内行为，再按
-guard 定义退出。临界区上下文、原子上下文、RCU 读侧上下文等分类主要是
-规格语义描述上的分类；在 formal 结构上不需要拆成不同的 context 语法类别。
-差异来自 guard 的类型和 effects：RawSpinLock guard 产生资源互斥效果，
+guard 定义退出。对于没有独立运行时 enter/exit 动作的 guard，例如
+`PhaseBoundaryGuard`，`within` 的词法范围本身就是进入和退出边界。
+临界区上下文、原子上下文、RCU 读侧上下文等分类主要是规格语义描述上的分类；
+在 formal 结构上不需要拆成不同的 context 语法类别。差异来自 guard 类型、
+guard 明确保持的属性以及上下文引用集合：RawSpinLock guard 产生资源互斥效果，
 PreemptionControl guard 产生不可被普通抢占打断的原子上下文效果，
 LocalInterruptControl guard 产生本 CPU 本地中断关闭效果。嵌套检查和上下文强度
-叠加也应基于 guard effects，而不是基于 context 名称。
+叠加也应基于 guard 推导出的上下文贡献，而不是基于 context 名称。
 
 对于当前 wake-up 试验对象，guard 是 `RawSpinLockIrqSaveGuard`：它引用一个
 `RawSpinLock` 实例，并通过该锁实例的 `LockIrqSave`/`UnlockIrqRestore` 事件
@@ -300,19 +304,18 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
         exited_by {
             KernelInitTaskPiLock.Event::UnlockIrqRestore;
         }
+
+        holds {
+            local_interrupts: disabled;
+            preemption: disabled;
+            sleepable: false;
+        }
     }
 
     obj_refs: {
         KernelInitTask;
         Scheduler;
         BootRunQueue;
-    }
-
-    effects {
-        interruptible: false;
-        preemptible: false;
-        sleepable: false;
-        exclusive_refs: obj_refs;
     }
 }
 ```
@@ -322,6 +325,8 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 - `guard.lock_ref` 必须引用一个 `Lock` 实例；对于 `RawSpinLockIrqSaveGuard`，该锁实例必须由 `RawSpinLock` 类型定义。
 - `guard.entered_by` 和 `guard.exited_by` 声明进入和退出上下文边界的锁事件。
 - 对非锁 guard，`entered_by`/`exited_by` 声明对应控制对象的边界事件；这些边界事件是 guard 行为，不写入 `within` 内部的 `drives`。
+- 对阶段边界或天然上下文 guard，`entered_by`/`exited_by` 可以不存在；`within` 的词法范围提供边界。
+- `guard.holds` 声明该 guard 在作用域内明确保持的属性；未声明的维度表示该 guard 不作保证，在 Effective Context 叠加时保持中性。
 - `obj_refs` 是对象引用集合，至少包含一个对象；上下文不拥有这些对象。
 - 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
@@ -331,7 +336,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 - `within` 块内只能直接驱动 `obj_refs` 中对象的 action/event，除非规格显式声明允许外部对象。
 - context 成功退出后释放独占执行权；失败或 `Blocked` 时，外层 event 不得提交生命周期迁移。
 
-事件或 action 使用无实参 `within` 声明上下文作用域。`within` 块内可以包含 `depends_on`、`drives`、`ensures` 和 `deferred`。进入/退出边界由 context 的 guard 声明，`within` 不再重复声明 `entered_by`/`exited_by`，也不把 guard 的进入/退出事件写入内部 `drives`。
+事件或 action 使用无实参 `within` 声明上下文作用域。`within` 块内可以包含 `depends_on`、`drives`、`ensures` 和 `deferred`。进入/退出边界由 context 的 guard 声明，`within` 不再重复声明 `entered_by`/`exited_by`，也不把 guard 的进入/退出事件写入内部 `drives`。guard 推导出的上下文贡献是工具内部用于检查和渲染的归一化结果；源规格不应把这些结果作为与 guard 并列的第二套事实重复维护。
 
 `KernelInitTask.Enable` 对应 `wake_up_new_task()` 的正式规格形态如下：
 
@@ -387,41 +392,56 @@ state State::Ready {
 }
 ```
 
-`within` 的语义是：先通过指定 context 的 guard 尝试进入该 resource exclusive context；进入成功后，在该独占作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，随后通过 guard 退出上下文，外层 event/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移；它的标准形态始终是 `within ContextName { ... }`。外层 `drives` 中由 action result binding 产生的局部值在嵌套 `within` 中保持词法可见，因此 `selected_rq` 不需要也不允许作为 `EnqueueSelectedRunQueueContext` 的实参重复传入。当前 UP 路径通过 `runqueue_ref_targets(selected_rq, BootRunQueue)` 证明该 ref 指向 `BootRunQueue`，所以 context guard 暂时绑定 `BootRunQueueLock`；后续泛化时应从 `RunQueueRef` 解析目标 runqueue 及其 lock。
+`within` 的语义是：先通过指定 context 的 guard 进入或确认该 context；进入成功后，在该作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，随后按 guard 退出或离开词法范围，外层 event/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移；它的标准形态始终是 `within ContextName { ... }`。外层 `drives` 中由 action result binding 产生的局部值在嵌套 `within` 中保持词法可见，因此 `selected_rq` 不需要也不允许作为 `EnqueueSelectedRunQueueContext` 的实参重复传入。当前 UP 路径通过 `runqueue_ref_targets(selected_rq, BootRunQueue)` 证明该 ref 指向 `BootRunQueue`，所以 context guard 暂时绑定 `BootRunQueueLock`；后续泛化时应从 `RunQueueRef` 解析目标 runqueue 及其 lock。
 
-## SEM-CONTEXT-NESTING-001: Context Effects Compose Monotonically
+## SEM-CONTEXT-NESTING-001: Effective Context Composes Monotonically
 
-上下文将来会扩展为多种类型。当前已经落地的是“通过锁人工定义边界”的资源独占上下文；后续还需要正式规格化系统独占上下文，例如启动早期天然只有单执行流可达的系统上下文，或者通过关闭中断、关闭抢占等机制建立的系统上下文。
+上下文可以嵌套。当前执行流真正受到的运行约束不是某一个单独
+`Context` 的名称，而是所有外层与内层上下文叠加后的结果。该结果称为
+`Effective Context`。当前已经落地的是“通过锁人工定义边界”的资源独占上下文；
+后续还需要正式规格化系统独占上下文，例如启动早期天然只有单执行流可达的
+系统上下文，或者通过关闭中断、关闭抢占等机制建立的系统上下文。
 
-上下文之间允许嵌套。嵌套的语义不是替换外层上下文，而是把外层和内层的效果叠加为一个累计上下文。累计上下文决定当前流能访问哪些对象、能获得哪些层级的对象句柄，以及能否睡眠、能否被抢占、能否被中断等运行约束。
+嵌套的语义不是替换外层上下文，而是把外层 Effective Context 与内层
+guard 推导出的 context contribution 叠加为新的 Effective Context。
+Effective Context 决定当前流能访问哪些对象、能获得哪些层级的对象句柄，
+以及能否睡眠、能否被抢占、本地中断入口是否关闭等运行约束。
 
-每类 context 必须声明自己的 effect 向量。当前工具已经检查的最小 effect
-维度包括：
+源规格应优先声明 `guard`、`guard.holds` 和 `obj_refs`，由 guard schema
+推导该 context 对 Effective Context 的贡献。`effects` 是工具内部可用于检查、
+渲染或调试的归一化结果，不是 formal source 中必须人工重复维护的第二套事实。
+当前需要表达和推导的最小维度包括：
 
-- `interruptible`：当前作用域是否允许被中断。
-- `preemptible`：当前作用域是否允许被抢占。
+- `local_interrupts`：本 CPU 本地中断入口是否关闭。
+- `preemption`：当前执行流是否允许被普通抢占。
 - `sleepable`：当前作用域是否允许睡眠或阻塞等待。
 - `exclusive_refs`：当前作用域独占或受保护访问的对象引用集合。
+- `cpu_concurrency`：是否存在多 CPU 并发执行风险。
+- `task_concurrency`：是否存在普通任务并发或调度切换风险。
 
 `handle_level` 是后续要加入的 effect 维度，用于表达当前作用域对对象可见的
 句柄层级或 capability；首轮工具实现先不推导句柄层级。
 
-嵌套检查必须满足单调加强规则：从外到内可以越来越强，但不能反向削弱外层已经建立的约束。也就是说，内层上下文可以进一步关闭中断、关闭抢占、扩大受保护对象集合或提升对象句柄层级；但不能在外层已经要求不可中断、不可抢占或不可睡眠时，引入语义上允许中断、允许抢占或允许睡眠的上下文。
+`guard.holds` 只应声明该 guard 明确保证的事实。某个维度如果不由当前
+guard 改变或保证，就保持缺省；缺省不是 `true` 或 `false`，而是
+neutral/inherited，表示该 context contribution 对该维度不作保证，叠加时
+不改变外层已经存在的约束，也不能凭空生成新的证明能力。
 
-例如，在一个要求不可中断的自旋锁上下文中，嵌套一个语义上允许中断的关抢占上下文或睡眠锁上下文，应被判定为上下文嵌套违例。原因是内层上下文的 effect 与外层累计 effect 冲突，不能形成合法的叠加效果。
+嵌套检查必须满足单调加强规则：从外到内可以越来越强，但不能反向削弱外层已经建立的约束。也就是说，内层上下文可以进一步关闭中断、关闭抢占、扩大受保护对象集合或提升对象句柄层级；但不能在外层已经要求本地中断关闭、不可抢占或不可睡眠时，引入语义上要求本地中断开启、可抢占或可睡眠的上下文。
 
-多种上下文和上下文嵌套的正式规格化，是主规格中“组件化内核在不同上下文可以访问对象不同层级句柄”的具体化：上下文 effect 栈给出当前流的访问能力，句柄层级由累计上下文推导，而不是由对象所有权或普通参数传递隐式决定。
+例如，在一个要求不可睡眠的自旋锁上下文中，嵌套一个需要阻塞等待的
+Mutex guard，应被判定为上下文嵌套违例。原因是内层 guard contribution
+与外层 Effective Context 冲突，不能形成合法的叠加结果。
 
-当前工具检查以下首轮规则：
+多种上下文和上下文嵌套的正式规格化，是主规格中“组件化内核在不同上下文可以访问对象不同层级句柄”的具体化：guard contribution 栈给出当前流的访问能力，句柄层级由 Effective Context 推导，而不是由对象所有权或普通参数传递隐式决定。
 
-- `ResourceExclusiveContext` 与通用 `Context` 都必须声明 `effects`。
-- `interruptible`、`preemptible` 和 `sleepable` 必须为 `true` 或 `false`。
-- `exclusive_refs` 当前支持 `obj_refs` 或 `none`。
-- `ResourceExclusiveContext` 必须声明为 `interruptible: false`、`preemptible: false`、`sleepable: false`、`exclusive_refs: obj_refs`。
-- 嵌套 `within` 会把外层累计 effect 与内层 effect 叠加；布尔约束按单调加强检查，外层累计为 `false` 时，内层不得声明同一维度为 `true`。
-- `exclusive_refs` 通过集合并集叠加，内层声明 `none` 不释放外层已经建立的独占引用。
+迁移期工具仍可能要求现有 `.spec` 手写 `effects` 块。该要求只是当前
+checker 的过渡实现，不是最终源规格语义。后续工具应改为从 guard schema 推导
+context contribution；若迁移期同时存在手写 `effects`，工具必须检查它不得弱于、
+偏离或重复矛盾于 guard 推导结果。
 
-句柄层级推导、系统天然独占上下文的来源证明、RCU 读侧上下文等更丰富的 guard/effect 语义仍在后续扩展范围内。
+句柄层级推导、对象 event/action 的上下文需求声明、系统天然独占上下文的来源证明、
+RCU 读侧上下文等更丰富的 guard/effect 语义仍在后续扩展范围内。
 
 ## SEM-CPU-VIEW-MODEL-001: CPU View Is The Base Modeling View
 
