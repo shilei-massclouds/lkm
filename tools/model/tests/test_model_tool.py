@@ -789,7 +789,7 @@ class ModelToolTests(unittest.TestCase):
                         task_concurrency: single_task;
                         local_interrupts: disabled;
                         preemption: disabled;
-                        sleepable: false;
+                        voluntary_switching: disabled;
                     }
                 }
             }
@@ -889,7 +889,7 @@ class ModelToolTests(unittest.TestCase):
             context OuterContext: Context {
                 guard: PhaseBoundaryGuard {
                     holds {
-                        sleepable: false;
+                        voluntary_switching: disabled;
                     }
                 }
             }
@@ -897,7 +897,7 @@ class ModelToolTests(unittest.TestCase):
             context InnerContext: Context {
                 guard: PhaseBoundaryGuard {
                     holds {
-                        sleepable: true;
+                        voluntary_switching: enabled;
                     }
                 }
             }
@@ -935,7 +935,7 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             self.assertIn(
                 "invalid context nesting: inner context "
-                "InnerContext weakens sleepable from constrained to open",
+                "InnerContext weakens voluntary_switching from constrained to open",
                 stderr.getvalue(),
             )
 

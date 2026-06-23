@@ -123,8 +123,8 @@ context ScheduleLocalInterruptContext: Context {
      * This context models __schedule() disabling local interrupts before
      * taking rq->lock. The guard is backed by BootCpuLocalInterrupt, not by a
      * lock; it establishes only a CPU-local interrupt-disabled boundary. The
-     * preemption-disabled and non-sleepable facts are inherited from the
-     * outer SchedulePreemptionContext.
+     * preemption-disabled and voluntary-switching-disabled facts are inherited
+     * from the outer SchedulePreemptionContext.
      */
     guard: LocalInterruptGuard {
         entered_by {

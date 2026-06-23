@@ -308,7 +308,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
         holds {
             local_interrupts: disabled;
             preemption: disabled;
-            sleepable: false;
+            voluntary_switching: disabled;
         }
     }
 
@@ -329,7 +329,11 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 - `guard.holds` 声明该 guard 在作用域内明确保持的属性；未声明的维度表示该 guard 不作保证，在 Effective Context 叠加时保持中性。
 - `ResourceExclusiveContext.obj_refs` 是受保护对象引用集合，至少包含一个对象；
   普通 `Context` 可以省略 `obj_refs`，省略时不作为对象驱动白名单。上下文不拥有这些对象。
-- 首轮 guard schema 固定推导如下：`RawSpinLockIrqSaveGuard` 推导本地中断关闭、抢占关闭、不可睡眠；`PreemptionGuard` 推导抢占关闭和不可睡眠；`LocalInterruptGuard` 只推导本地中断关闭；`PhaseBoundaryGuard` 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
+- `guard.holds` 的正式写法是“名词或名词短语 key + 状态形容词 value”：
+  `local_interrupts: enabled|disabled`、`preemption: enabled|disabled`、
+  `voluntary_switching: enabled|disabled`、`cpu_concurrency: single|multi`、
+  `task_concurrency: single|multi`。旧 `true|false` 只作为迁移期兼容输入。
+- 首轮 guard schema 固定推导如下：`RawSpinLockIrqSaveGuard` 推导本地中断关闭、抢占关闭、主动切换关闭；`PreemptionGuard` 推导抢占关闭和主动切换关闭；`LocalInterruptGuard` 只推导本地中断关闭；`PhaseBoundaryGuard` 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
 - 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
 - 同一时刻至多一个执行流可以成功进入同一个 resource exclusive context。
@@ -407,7 +411,7 @@ state State::Ready {
 嵌套的语义不是替换外层上下文，而是把外层 Effective Context 与内层
 guard 推导出的 context contribution 叠加为新的 Effective Context。
 Effective Context 决定当前流能访问哪些对象、能获得哪些层级的对象句柄，
-以及能否睡眠、能否被抢占、本地中断入口是否关闭等运行约束。
+以及能否主动切换、能否被抢占、本地中断入口是否关闭等运行约束。
 
 源规格应优先声明 `guard`、`guard.holds` 和 `obj_refs`，由 guard schema
 推导该 context 对 Effective Context 的贡献。`effects` 是工具内部可用于检查、
@@ -416,7 +420,8 @@ Effective Context 决定当前流能访问哪些对象、能获得哪些层级�
 
 - `local_interrupts`：本 CPU 本地中断入口是否关闭。
 - `preemption`：当前执行流是否允许被普通抢占。
-- `sleepable`：当前作用域是否允许睡眠或阻塞等待。
+- `voluntary_switching`：当前执行流是否允许主动进入可能导致任务切换的普通
+  `schedule()`、`cond_resched()`、`might_sleep()`、阻塞等待或 mutex 慢路径。
 - `exclusive_refs`：当前作用域独占或受保护访问的对象引用集合。
 - `cpu_concurrency`：是否存在多 CPU 并发执行风险。
 - `task_concurrency`：是否存在普通任务并发或调度切换风险。

@@ -108,14 +108,14 @@ _GUARD_PHASE_BOUNDARY_KINDS = ("PhaseBoundaryGuard",)
 _CONTRIBUTION_KEYS = (
     "local_interrupts",
     "preemption",
-    "sleepable",
+    "voluntary_switching",
     "cpu_concurrency",
     "task_concurrency",
 )
 _LEGACY_EFFECT_KEY_MAP = {
     "interruptible": "local_interrupts",
     "preemptible": "preemption",
-    "sleepable": "sleepable",
+    "sleepable": "voluntary_switching",
 }
 _FALSE_HOLD_VALUES = frozenset({"false", "disabled", "closed", "single", "single_cpu", "single_task"})
 _TRUE_HOLD_VALUES = frozenset({"true", "enabled", "open", "multi", "smp", "multi_cpu", "multi_task"})
@@ -125,7 +125,7 @@ _TRUE_HOLD_VALUES = frozenset({"true", "enabled", "open", "multi", "smp", "multi
 class _ContextContribution:
     local_interrupts: bool | None = None
     preemption: bool | None = None
-    sleepable: bool | None = None
+    voluntary_switching: bool | None = None
     cpu_concurrency: bool | None = None
     task_concurrency: bool | None = None
     exclusive_refs: frozenset[str] = frozenset()
@@ -691,13 +691,13 @@ def _schema_context_contribution(context: ExclusiveContextDef) -> _ContextContri
         return _ContextContribution(
             local_interrupts=False,
             preemption=False,
-            sleepable=False,
+            voluntary_switching=False,
             exclusive_refs=exclusive_refs,
         )
     if guard.kind == "PreemptionGuard":
         return _ContextContribution(
             preemption=False,
-            sleepable=False,
+            voluntary_switching=False,
             exclusive_refs=exclusive_refs,
         )
     if guard.kind == "LocalInterruptGuard":
@@ -757,7 +757,7 @@ def _replace_context_contribution(
     values = {
         "local_interrupts": contribution.local_interrupts,
         "preemption": contribution.preemption,
-        "sleepable": contribution.sleepable,
+        "voluntary_switching": contribution.voluntary_switching,
         "cpu_concurrency": contribution.cpu_concurrency,
         "task_concurrency": contribution.task_concurrency,
         "exclusive_refs": contribution.exclusive_refs,
@@ -812,7 +812,7 @@ def _parse_legacy_context_effects(
     return _ContextContribution(
         local_interrupts=values["local_interrupts"],
         preemption=values["preemption"],
-        sleepable=values["sleepable"],
+        voluntary_switching=values["voluntary_switching"],
         exclusive_refs=exclusive_refs,
     )
 
@@ -985,7 +985,9 @@ def _compose_context_contribution(
     return _ContextContribution(
         local_interrupts=_compose_constraint(parent.local_interrupts, child.local_interrupts),
         preemption=_compose_constraint(parent.preemption, child.preemption),
-        sleepable=_compose_constraint(parent.sleepable, child.sleepable),
+        voluntary_switching=_compose_constraint(
+            parent.voluntary_switching, child.voluntary_switching
+        ),
         cpu_concurrency=_compose_constraint(parent.cpu_concurrency, child.cpu_concurrency),
         task_concurrency=_compose_constraint(parent.task_concurrency, child.task_concurrency),
         exclusive_refs=parent.exclusive_refs | child.exclusive_refs,
