@@ -61,6 +61,8 @@ predicate arceos_ex_must_ioremap_model_mmio_attribute_policy_explicitly() -> boo
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
 predicate arceos_ex_must_core_prepare_preserve_early_irq_and_smp_closed_facts() -> bool;
 predicate arceos_ex_must_static_branch_setup_record_jump_label_guards() -> bool;
+predicate arceos_ex_must_jump_label_mutex_be_independent_context_object() -> bool;
+predicate arceos_ex_must_static_branch_setup_drive_jump_label_mutex_guard() -> bool;
 predicate arceos_ex_must_static_branch_text_patch_sync_remain_deferred() -> bool;
 predicate arceos_ex_must_resource_tree_setup_record_resource_lock_write_guard() -> bool;
 predicate arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore() -> bool;
@@ -106,7 +108,7 @@ predicate arceos_ex_must_preemption_guard_lower_to_counted_enter_exit() -> bool;
 predicate arceos_ex_must_local_interrupt_guard_preserve_saved_flags() -> bool;
 predicate arceos_ex_must_raw_spin_lock_irqsave_guard_lock_and_restore() -> bool;
 predicate arceos_ex_must_effective_context_not_elide_protocol_guards() -> bool;
-predicate arceos_ex_must_defer_mutex_rwlock_rcu_lowering_until_primitives_exist() -> bool;
+predicate arceos_ex_must_defer_rwlock_rcu_lowering_until_primitives_exist() -> bool;
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
@@ -371,6 +373,29 @@ type ArceosExCorePrepareCodingMust {
         arceos_ex_must_static_branch_setup_record_jump_label_guards();
 
         /*
+         * JumpLabelMutex object mapping:
+         *
+         * The Linux jump_label_mutex used by jump_label_lock() must be
+         * represented as an independent Context object, not as a private bool
+         * hidden inside StaticBranch. CorePrepare setup must drive its static
+         * initializer/Preset and Ready setup before StaticBranch.setup()
+         * consumes it.
+         */
+        arceos_ex_must_jump_label_mutex_be_independent_context_object();
+
+        /*
+         * StaticBranch jump-label mutex guard lowering:
+         *
+         * StaticBranch.setup() must enter and exit its StaticBranchJumpLabelContext
+         * through the JumpLabelMutex object: lock with the early BootInitTask /
+         * init_task task reference, perform the registry setup while the mutex
+         * is held, then unlock the same owner before reporting StaticBranch
+         * Ready. The CorePrepare ready check must observe the JumpLabelMutex
+         * lock/unlock facts in addition to any StaticBranch-local summary fact.
+         */
+        arceos_ex_must_static_branch_setup_drive_jump_label_mutex_guard();
+
+        /*
          * Text patch synchronization boundary:
          *
          * Runtime static-key code patching uses separate text patch guards and
@@ -479,14 +504,15 @@ type ArceosExEffectiveContextCodingMust {
         /*
          * Deferred primitives:
          *
-         * Mutex, RwLock and RCU read-side guards belong to the same guard
-         * lowering family, but arceos_ex must not invent final lowering rules
-         * for them before the corresponding model primitives and implementation
-         * mappings exist. Until then, coding may name them only as deferred
-         * guard categories and must keep concrete lowering decisions local to
-         * the later primitive-specific specifications.
+         * RwLock and RCU read-side guards belong to the same guard lowering
+         * family, but arceos_ex must not invent final lowering rules for them
+         * before the corresponding model primitives and implementation
+         * mappings exist. Mutex lowering is no longer wholly deferred because
+         * JumpLabelMutex has a concrete first-round mapping; broader mutex
+         * variants still require their own primitive-specific rules before
+         * being generated.
          */
-        arceos_ex_must_defer_mutex_rwlock_rcu_lowering_until_primitives_exist();
+        arceos_ex_must_defer_rwlock_rcu_lowering_until_primitives_exist();
     }
 }
 

@@ -1,5 +1,7 @@
 use super::{
+    init_task::InitTask,
     kernel_image::KernelImage,
+    mutex::Mutex,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
 };
@@ -36,7 +38,6 @@ pub struct StaticBranch {
     entries: [StaticKeyEntry; MAX_STATIC_KEYS],
     count: usize,
     cpu_hotplug_read_guard_used: bool,
-    jump_label_mutex_guard_used: bool,
     text_patch_sync_deferred: bool,
 }
 
@@ -56,7 +57,6 @@ impl StaticBranch {
             ],
             count: 0,
             cpu_hotplug_read_guard_used: false,
-            jump_label_mutex_guard_used: false,
             text_patch_sync_deferred: false,
         }
     }
@@ -73,23 +73,32 @@ impl StaticBranch {
         self.cpu_hotplug_read_guard_used
     }
 
-    pub const fn jump_label_mutex_guard_used(&self) -> bool {
-        self.jump_label_mutex_guard_used
+    pub fn jump_label_mutex_guard_used(&self, jump_label_mutex: &Mutex) -> bool {
+        self.lifecycle.state() == State::Ready && jump_label_mutex.boot_init_task_guard_completed()
     }
 
     pub const fn text_patch_sync_deferred(&self) -> bool {
         self.text_patch_sync_deferred
     }
 
-    pub fn setup(&mut self, kernel_image: &KernelImage, vm: &Vm) -> EventResult {
+    pub fn setup(
+        &mut self,
+        kernel_image: &KernelImage,
+        vm: &Vm,
+        jump_label_mutex: &mut Mutex,
+        init_task: &InitTask,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || kernel_image.state() != State::Online
             || vm.state() != State::Online
             || !vm.entry_successor_ready()
+            || !jump_label_mutex.ready()
+            || init_task.state() != State::Online
         {
             return self.failed_setup();
         }
 
+        jump_label_mutex.lock_boot_init_task(init_task)?;
         self.entries = [
             StaticKeyEntry::new(StaticKey::InitOnAlloc),
             StaticKeyEntry::new(StaticKey::InitOnFree),
@@ -102,8 +111,8 @@ impl StaticBranch {
         ];
         self.count = 5;
         self.cpu_hotplug_read_guard_used = true;
-        self.jump_label_mutex_guard_used = true;
         self.text_patch_sync_deferred = true;
+        jump_label_mutex.unlock_boot_init_task(init_task)?;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

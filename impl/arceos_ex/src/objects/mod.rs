@@ -51,6 +51,7 @@ pub mod linux_plic_shim;
 pub mod maple_tree;
 pub mod memblock;
 pub mod mm_core;
+pub mod mutex;
 pub mod ns16550a;
 pub mod page_table;
 pub mod params;

@@ -36,7 +36,14 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.device_tree, &ctx.cpu_group, &ctx.cache_block_info)?;
     ctx.dma_cache_policy
         .setup(&ctx.cpu_capabilities, &ctx.cache_block_info)?;
-    ctx.static_branch.setup(&ctx.kernel_image, &ctx.vm)?;
+    ctx.jump_label_mutex.preset_static()?;
+    ctx.jump_label_mutex.setup()?;
+    ctx.static_branch.setup(
+        &ctx.kernel_image,
+        &ctx.vm,
+        &mut ctx.jump_label_mutex,
+        &ctx.init_task,
+    )?;
     ctx.command_line.setup(
         &ctx.kernel_cmdline,
         &mut ctx.saved_command_line,
@@ -163,9 +170,14 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.cache_block_info.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
         && ctx.dma_cache_policy.state() == State::Ready
+        && ctx.jump_label_mutex.state() == State::Ready
+        && ctx.jump_label_mutex.ready()
+        && ctx.jump_label_mutex.boot_init_task_guard_completed()
         && ctx.static_branch.state() == State::Ready
         && ctx.static_branch.cpu_hotplug_read_guard_used()
-        && ctx.static_branch.jump_label_mutex_guard_used()
+        && ctx
+            .static_branch
+            .jump_label_mutex_guard_used(&ctx.jump_label_mutex)
         && ctx.static_branch.text_patch_sync_deferred()
         && ctx.command_line.state() == State::Ready
         && ctx.saved_command_line.state() == State::Ready
