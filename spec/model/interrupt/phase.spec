@@ -25,21 +25,21 @@ object InterruptPhase: PhaseObject {
      * Base 表示中断期阶段对象已经进入模型空间，但尚未推进其子阶段。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 顺序推进当前已经正式规格化的中断期子阶段。
              * InterruptPhase 不直接依赖 PreparePhase；它从 BootPhase.Ready 接续。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BootPhase.state == State::Ready;
                     SchedInitPhase.state == State::Ready;
                 }
 
                 drives {
-                    IrqTimeInitPhase.Event::Setup;
-                    IrqOpenPreparePhase.Event::Setup;
-                    ProcessPreparePhase.Event::Setup;
+                    IrqTimeInitPhase.Transition::Setup;
+                    IrqOpenPreparePhase.Transition::Setup;
+                    ProcessPreparePhase.Transition::Setup;
                 }
             }
         }

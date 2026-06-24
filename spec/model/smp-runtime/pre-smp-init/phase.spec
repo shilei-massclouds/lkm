@@ -17,8 +17,8 @@ object PageAllocatorFullGfpMask: MemoryObject {
     parent: PageAllocator;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -50,8 +50,8 @@ object PreSmpCpuTopology: HardwareObject {
     parent: CpuGroup;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -88,8 +88,8 @@ object VmstatCore: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Workqueue.state == State::Ready;
                     PageAllocator.state == State::Ready;
@@ -126,8 +126,8 @@ object PreSmpInitcallTable: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -168,8 +168,8 @@ object PreSmpInitBoundary: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -208,8 +208,8 @@ object PreSmpInitPhase: PhaseObject {
     parent: SmpRuntimePhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
@@ -228,13 +228,13 @@ object PreSmpInitPhase: PhaseObject {
                 }
 
                 drives {
-                    PageAllocatorFullGfpMask.Event::Setup;
-                    PreSmpCpuTopology.Event::Setup;
-                    Workqueue.Event::Setup;
-                    VmstatCore.Event::Preset;
-                    TasksRcu.Event::Setup;
-                    PreSmpInitcallTable.Event::Setup;
-                    PreSmpInitBoundary.Event::Setup;
+                    PageAllocatorFullGfpMask.Transition::Setup;
+                    PreSmpCpuTopology.Transition::Setup;
+                    Workqueue.Transition::Setup;
+                    VmstatCore.Transition::Preset;
+                    TasksRcu.Transition::Setup;
+                    PreSmpInitcallTable.Transition::Setup;
+                    PreSmpInitBoundary.Transition::Setup;
                 }
 
                 ensures {

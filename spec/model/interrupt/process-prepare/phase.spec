@@ -14,8 +14,8 @@ object RootPidNamespace: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuGroup.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
@@ -50,8 +50,8 @@ object AnonVmaCore: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
@@ -84,8 +84,8 @@ object CredentialCore: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
@@ -119,8 +119,8 @@ object VectorContext: HardwareObject {
     parent: TaskCreationCore;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     CpuCapabilities.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
@@ -151,8 +151,8 @@ object UprobeCore: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ExceptionStream.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
@@ -187,8 +187,8 @@ object TaskCreationCore: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
@@ -211,8 +211,8 @@ object TaskCreationCore: TaskObject {
             vmap_stack_path_selected(TaskCreationCore);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RootPidNamespace.state == State::Ready;
                     CredentialCore.state == State::Prepared;
@@ -223,8 +223,8 @@ object TaskCreationCore: TaskObject {
                 }
 
                 drives {
-                    VectorContext.Event::Preset;
-                    UprobeCore.Event::Setup;
+                    VectorContext.Transition::Preset;
+                    UprobeCore.Transition::Setup;
                 }
 
                 ensures {
@@ -317,8 +317,8 @@ object SignalCore: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
@@ -351,8 +351,8 @@ object TaskFileContext: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
@@ -385,8 +385,8 @@ object VmaCore: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     MmStructCache.state == State::Ready;
                     AnonVmaCore.state == State::Ready;
@@ -423,8 +423,8 @@ object NsProxy: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
@@ -455,8 +455,8 @@ object UtsNamespace: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     NsProxy.state == State::Prepared;
                     SlubSubsystem.state == State::Ready;
@@ -488,8 +488,8 @@ object KeyringCore: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CredentialCore.state == State::Prepared;
                     SlubSubsystem.state == State::Ready;
@@ -525,8 +525,8 @@ object SecurityCore: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CredentialCore.state == State::Prepared;
                     KeyringCore.state == State::Ready;
@@ -568,8 +568,8 @@ object ProcessPreparePhase: PhaseObject {
     parent: InterruptPhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     IrqOpenPreparePhase.state == State::Ready;
                     InterruptStream.state == State::Online;
@@ -590,23 +590,23 @@ object ProcessPreparePhase: PhaseObject {
                 }
 
                 drives {
-                    RootPidNamespace.Event::Setup;
-                    AnonVmaCore.Event::Setup;
-                    TaskCreationCore.Event::Preset;
-                    CredentialCore.Event::Preset;
-                    TaskCreationCore.Event::Setup;
-                    SignalCore.Event::Preset;
-                    TaskFileContext.Event::Preset;
-                    VmaCore.Event::Preset;
-                    NsProxy.Event::Preset;
-                    UtsNamespace.Event::Preset;
-                    KeyringCore.Event::Setup;
-                    SecurityCore.Event::Setup;
-                    VfsCore.Event::Setup;
-                    RamFsType.Event::Setup;
+                    RootPidNamespace.Transition::Setup;
+                    AnonVmaCore.Transition::Setup;
+                    TaskCreationCore.Transition::Preset;
+                    CredentialCore.Transition::Preset;
+                    TaskCreationCore.Transition::Setup;
+                    SignalCore.Transition::Preset;
+                    TaskFileContext.Transition::Preset;
+                    VmaCore.Transition::Preset;
+                    NsProxy.Transition::Preset;
+                    UtsNamespace.Transition::Preset;
+                    KeyringCore.Transition::Setup;
+                    SecurityCore.Transition::Setup;
+                    VfsCore.Transition::Setup;
+                    RamFsType.Transition::Setup;
                     VfsCore.Action::RegisterRamFsType(RamFsType);
                     VfsCore.Action::MountInitialRamFsRoot;
-                    FsStruct.Event::Setup;
+                    FsStruct.Transition::Setup;
                 }
 
                 ensures {

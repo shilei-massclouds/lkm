@@ -16,8 +16,8 @@ object SecondaryIdleTaskSet: TaskObject {
     parent: CpuGroup;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PreSmpInitPhase.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -52,8 +52,8 @@ object CpuHotplugSyncSet: KernelObject {
     parent: CpuGroup;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PreSmpInitPhase.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -94,8 +94,8 @@ object CpuStartProvider: HardwareObject {
     parent: CpuGroup;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuGroup.state == State::Ready;
                     SecondaryIdleTaskSet.state == State::Prepared;
@@ -130,8 +130,8 @@ object SecondaryCpuStartupAck: HardwareObject {
     parent: CpuGroup;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuStartProvider.state == State::Ready;
                     CpuHotplugSyncSet.state == State::Prepared;
@@ -164,8 +164,8 @@ object SecondaryCpuOnlineAck: HardwareObject {
     parent: CpuGroup;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SecondaryCpuStartupAck.state == State::Ready;
                     CpuHotplugSyncSet.state == State::Prepared;
@@ -202,8 +202,8 @@ object SmpBringupBoundary: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SecondaryCpuOnlineAck.state == State::Ready;
                 }
@@ -235,8 +235,8 @@ object SmpBringupPhase: PhaseObject {
     parent: SmpRuntimePhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PreSmpInitPhase.state == State::Ready;
                     KernelInitTask.state == State::Online;
@@ -251,12 +251,12 @@ object SmpBringupPhase: PhaseObject {
                 }
 
                 drives {
-                    SecondaryIdleTaskSet.Event::Preset;
-                    CpuHotplugSyncSet.Event::Preset;
-                    CpuStartProvider.Event::Setup;
-                    SecondaryCpuStartupAck.Event::Setup;
-                    SecondaryCpuOnlineAck.Event::Setup;
-                    SmpBringupBoundary.Event::Setup;
+                    SecondaryIdleTaskSet.Transition::Preset;
+                    CpuHotplugSyncSet.Transition::Preset;
+                    CpuStartProvider.Transition::Setup;
+                    SecondaryCpuStartupAck.Transition::Setup;
+                    SecondaryCpuOnlineAck.Transition::Setup;
+                    SmpBringupBoundary.Transition::Setup;
                 }
 
                 ensures {

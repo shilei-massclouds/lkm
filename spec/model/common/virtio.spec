@@ -57,8 +57,8 @@ object VirtioBus: BusType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PlatformBus.state == State::Ready;
                 }
@@ -103,8 +103,8 @@ object VirtioDevice: Device {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioBus.state == State::Ready;
                     VirtioMmioTransportDevice.state == State::Ready;

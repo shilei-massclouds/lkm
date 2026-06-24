@@ -8,7 +8,7 @@ from enum import Enum
 from common.spec_ast import (
     ContextGuardDecl,
     EnumDecl,
-    EventDecl,
+    TransitionDecl,
     ExclusiveContextDecl,
     FunctionDecl,
     LockDecl,
@@ -43,14 +43,14 @@ class Diagnostic:
 
 
 @dataclass(frozen=True)
-class EventDef:
-    """Indexed event definition."""
+class TransitionDef:
+    """Indexed transition definition."""
 
     name: str
     object_name: str
     source_state: str
     target_state: str
-    decl: EventDecl
+    decl: TransitionDecl
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,7 @@ class StateDef:
     name: str
     object_name: str
     decl: StateDecl
-    events: dict[str, EventDef] = field(default_factory=dict)
+    transitions: dict[str, TransitionDef] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -107,8 +107,8 @@ class ObjectModel:
         return sum(len(obj.states) for obj in self.objects.values())
 
     @property
-    def event_count(self) -> int:
-        return sum(len(state.events) for obj in self.objects.values() for state in obj.states.values())
+    def transition_count(self) -> int:
+        return sum(len(state.transitions) for obj in self.objects.values() for state in obj.states.values())
 
 
 @dataclass(frozen=True)

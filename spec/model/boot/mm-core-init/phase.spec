@@ -17,16 +17,16 @@ object MemoryTopology: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Zones.state == State::Ready;
                     CpuGroup.state == State::Ready;
                 }
 
                 drives {
-                    MemoryNode.Event::Setup;
-                    ZoneSet.Event::Setup;
+                    MemoryNode.Transition::Setup;
+                    ZoneSet.Transition::Setup;
                 }
 
                 ensures {
@@ -57,8 +57,8 @@ object MemoryNode: MemoryObject {
     parent: MemoryTopology;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Zones.state == State::Ready;
                 }
@@ -87,8 +87,8 @@ object ZoneSet: MemoryObject {
     parent: MemoryNode;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Zones.state == State::Ready;
                 }
@@ -121,8 +121,8 @@ object ZonelistSet: MemoryObject {
     parent: MemoryNode;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MemoryNode.state == State::Ready;
                     ZoneSet.state == State::Ready;
@@ -181,11 +181,11 @@ context ZonelistPrintkDeferredContext: Context {
      */
     guard {
         entered_by {
-            ZonelistPrintkDeferredSection.Event::Enter;
+            ZonelistPrintkDeferredSection.Transition::Enter;
         }
 
         exited_by {
-            ZonelistPrintkDeferredSection.Event::Exit;
+            ZonelistPrintkDeferredSection.Transition::Exit;
         }
     }
 
@@ -205,11 +205,11 @@ context ZonelistUpdateSeqWriteContext: Context {
      */
     guard {
         entered_by {
-            ZonelistUpdateSeq.Event::WriteSeqLockIrqSave(BootCpuLocalInterrupt);
+            ZonelistUpdateSeq.Transition::WriteSeqLockIrqSave(BootCpuLocalInterrupt);
         }
 
         exited_by {
-            ZonelistUpdateSeq.Event::WriteSeqUnlockIrqRestore(BootCpuLocalInterrupt);
+            ZonelistUpdateSeq.Transition::WriteSeqUnlockIrqRestore(BootCpuLocalInterrupt);
         }
     }
 
@@ -230,8 +230,8 @@ object PageAllocatorBuddyFreePageSets: BuddyFreePageSetType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MemBlock.state == State::Online;
                     Zones.state == State::Ready;
@@ -284,8 +284,8 @@ object PageAllocator: PageAllocatorType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     MemoryTopology.state == State::Ready;
                     ZoneSet.state == State::Ready;
@@ -298,7 +298,7 @@ object PageAllocator: PageAllocatorType {
                 within ZonelistPrintkDeferredContext {
                     within ZonelistUpdateSeqWriteContext {
                         drives {
-                            ZonelistSet.Event::Setup;
+                            ZonelistSet.Transition::Setup;
                         }
                     }
                 }
@@ -356,8 +356,8 @@ object PageAllocator: PageAllocatorType {
             page_allocator_page_metadata_map_bound(PageAllocator, PageMetadataMap);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MemBlock.state == State::Online;
                     Zones.state == State::Ready;
@@ -367,8 +367,8 @@ object PageAllocator: PageAllocatorType {
                 }
 
                 drives {
-                    PageAllocatorBuddyFreePageSets.Event::Setup;
-                    MemBlock.Event::Disable;
+                    PageAllocatorBuddyFreePageSets.Transition::Setup;
+                    MemBlock.Transition::Disable;
                 }
 
                 ensures {
@@ -464,8 +464,8 @@ object Swiotlb: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DmaCachePolicy.state == State::Ready;
                     MemBlock.state == State::Online;
@@ -501,8 +501,8 @@ object MemoryDebugHardening: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     StaticBranch.state == State::Ready;
                     EarlyParam.state == State::Ready;
@@ -558,8 +558,8 @@ object MmCoreTrimmedPaths: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Config.state == State::Online;
                     MemoryDebugHardening.state == State::Ready;
@@ -617,8 +617,8 @@ object StackDepot: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Config.state == State::Online;
                     MemBlock.state == State::Online;
@@ -659,8 +659,8 @@ object SlubCacheRegistry: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Prepared;
                 }
@@ -695,8 +695,8 @@ object KmallocCaches: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Prepared;
                     SlubCacheRegistry.state == State::Ready;
@@ -738,8 +738,8 @@ object SlubSubsystem: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PageAllocator.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
@@ -767,16 +767,16 @@ object SlubSubsystem: MemoryObject {
             slub_subsystem_slab_mutex_not_required_before_full(SlubSubsystem);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PageAllocator.state == State::Ready;
                     StackDepot.state == State::Ready;
                 }
 
                 drives {
-                    SlubCacheRegistry.Event::Setup;
-                    KmallocCaches.Event::Setup;
+                    SlubCacheRegistry.Transition::Setup;
+                    KmallocCaches.Transition::Setup;
                 }
 
                 ensures {
@@ -898,8 +898,8 @@ object KernelGlobalAllocator: KernelGlobalAllocatorType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
@@ -946,8 +946,8 @@ object DynamicContainerRuntime: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelGlobalAllocator.state == State::Ready;
                 }
@@ -991,8 +991,8 @@ object PageTableLockCache: MemoryObject {
     parent: PageTableCaches;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     SlubCacheRegistry.state == State::Ready;
@@ -1029,8 +1029,8 @@ object PageTableCaches: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     PageAllocator.state == State::Ready;
@@ -1041,7 +1041,7 @@ object PageTableCaches: MemoryObject {
                 }
 
                 drives {
-                    PageTableLockCache.Event::Setup;
+                    PageTableLockCache.Transition::Setup;
                 }
 
                 ensures {
@@ -1077,8 +1077,8 @@ object VmapAreaCache: MemoryObject {
     parent: VmallocAllocator;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     SlubCacheRegistry.state == State::Ready;
@@ -1111,8 +1111,8 @@ object VmapAddressSpace: AddressSpaceObject {
     parent: VmallocAllocator;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VmapAreaCache.state == State::Ready;
                     PageTableCaches.state == State::Ready;
@@ -1144,8 +1144,8 @@ object VmapNodeSet: MemoryObject {
     parent: VmallocAllocator;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VmapAddressSpace.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
@@ -1181,8 +1181,8 @@ object VmapBlockQueues: MemoryObject {
     parent: VmallocAllocator;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VmapNodeSet.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
@@ -1214,8 +1214,8 @@ object VfreeDeferredSet: MemoryObject {
     parent: VmallocAllocator;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PerCpuStorage.state == State::Ready;
                 }
@@ -1248,8 +1248,8 @@ object VmallocAllocator: VmallocAllocatorType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     PageTableCaches.state == State::Ready;
@@ -1257,11 +1257,11 @@ object VmallocAllocator: VmallocAllocatorType {
                 }
 
                 drives {
-                    VmapAreaCache.Event::Setup;
-                    VmapAddressSpace.Event::Setup;
-                    VmapNodeSet.Event::Setup;
-                    VmapBlockQueues.Event::Setup;
-                    VfreeDeferredSet.Event::Setup;
+                    VmapAreaCache.Transition::Setup;
+                    VmapAddressSpace.Transition::Setup;
+                    VmapNodeSet.Transition::Setup;
+                    VmapBlockQueues.Transition::Setup;
+                    VfreeDeferredSet.Transition::Setup;
                 }
 
                 ensures {
@@ -1344,8 +1344,8 @@ object Ioremap: AddressSpaceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SwapperVm.state == State::Online;
                     VmallocAllocator.state == State::Ready;
@@ -1527,8 +1527,8 @@ object MmStructCache: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     SlubCacheRegistry.state == State::Ready;
@@ -1572,8 +1572,8 @@ object MmCoreInitPhase: PhaseObject {
     parent: BootPhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CorePreparePhase.state == State::Ready;
                     ExceptionStream.state == State::Ready;
@@ -1591,21 +1591,21 @@ object MmCoreInitPhase: PhaseObject {
                 }
 
                 drives {
-                    MemoryTopology.Event::Setup;
-                    PageAllocator.Event::Preset;
-                    MemoryDebugHardening.Event::Setup;
-                    StackDepot.Event::Setup;
-                    Swiotlb.Event::Setup;
-                    PageAllocator.Event::Setup;
-                    SlubSubsystem.Event::Preset;
-                    SlubSubsystem.Event::Setup;
-                    KernelGlobalAllocator.Event::Setup;
-                    DynamicContainerRuntime.Event::Setup;
-                    PageTableCaches.Event::Setup;
-                    VmallocAllocator.Event::Setup;
-                    Ioremap.Event::Setup;
-                    MmStructCache.Event::Setup;
-                    MmCoreTrimmedPaths.Event::Setup;
+                    MemoryTopology.Transition::Setup;
+                    PageAllocator.Transition::Preset;
+                    MemoryDebugHardening.Transition::Setup;
+                    StackDepot.Transition::Setup;
+                    Swiotlb.Transition::Setup;
+                    PageAllocator.Transition::Setup;
+                    SlubSubsystem.Transition::Preset;
+                    SlubSubsystem.Transition::Setup;
+                    KernelGlobalAllocator.Transition::Setup;
+                    DynamicContainerRuntime.Transition::Setup;
+                    PageTableCaches.Transition::Setup;
+                    VmallocAllocator.Transition::Setup;
+                    Ioremap.Transition::Setup;
+                    MmStructCache.Transition::Setup;
+                    MmCoreTrimmedPaths.Transition::Setup;
                 }
 
                 ensures {

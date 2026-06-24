@@ -13,8 +13,8 @@ object CpusetSmpTrimmed: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RuntimeCorePhase.state == State::Ready;
                 }
@@ -44,8 +44,8 @@ object DriverCoreBase: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpusetSmpTrimmed.state == State::Ready;
                     PageAllocator.state == State::Ready;
@@ -82,8 +82,8 @@ object PlatformBusRootDevice: DeviceType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DriverCoreBase.state == State::Ready;
                 }
@@ -119,8 +119,8 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PlatformBus.state == State::Prepared;
                 }
@@ -143,8 +143,8 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
             bus_subsys_autoprobe_enabled(PlatformBusSubsysPrivate);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     bus_subsys_kobject_named(PlatformBusSubsysPrivate);
                     bus_subsys_kobject_attached_to_bus_kset(PlatformBusSubsysPrivate);
@@ -167,8 +167,8 @@ object PlatformBusSubsysPrivate: BusSubsysPrivate {
             bus_subsys_uevent_file_ready(PlatformBusSubsysPrivate);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 ensures {
                     bus_subsys_devices_kset_ready(PlatformBusSubsysPrivate);
                     bus_subsys_drivers_kset_ready(PlatformBusSubsysPrivate);
@@ -224,8 +224,8 @@ object PlatformBus: PlatformBusType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 drives {
                     InitcallTable.Action::Register(
                         level: InitcallLevel::ArchSync,
@@ -271,17 +271,17 @@ object PlatformBus: PlatformBusType {
             initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DriverCoreBase.state == State::Ready;
                     PlatformBusRootDevice.state == State::Ready;
                 }
 
                 drives {
-                    PlatformBusSubsysPrivate.Event::Preset;
-                    PlatformBusSubsysPrivate.Event::Setup;
-                    PlatformBusSubsysPrivate.Event::Enable;
+                    PlatformBusSubsysPrivate.Transition::Preset;
+                    PlatformBusSubsysPrivate.Transition::Setup;
+                    PlatformBusSubsysPrivate.Transition::Enable;
                 }
 
                 ensures {
@@ -344,8 +344,8 @@ object DriverCoreDeferred: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PlatformBus.state == State::Ready;
                 }
@@ -374,8 +374,8 @@ object IrqProcViewDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DriverCoreBase.state == State::Ready;
                     PlatformBusRootDevice.state == State::Ready;
@@ -409,8 +409,8 @@ object CtorTable: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     IrqProcViewDeferred.state == State::Ready;
                     Lds.state == State::Online;
@@ -443,8 +443,8 @@ object InitcallTable: InitcallTableType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     CtorTable.state == State::Ready;
                     Lds.state == State::Online;
@@ -483,8 +483,8 @@ object InitcallTable: InitcallTableType {
             initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::VirtioMmioPlatformDriver);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SavedCommandLine.state == State::Ready;
                     KernelInitTask.state == State::Online;
@@ -632,8 +632,8 @@ object InitcallBoundary: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpusetSmpTrimmed.state == State::Ready;
                     DriverCoreBase.state == State::Ready;
@@ -673,8 +673,8 @@ object InitcallPhase: PhaseObject {
     parent: SmpRuntimePhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RuntimeCorePhase.state == State::Ready;
                     RuntimeCoreBoundary.state == State::Ready;
@@ -685,42 +685,42 @@ object InitcallPhase: PhaseObject {
                 }
 
                 drives {
-                    CpusetSmpTrimmed.Event::Setup;
-                    DriverCoreBase.Event::Setup;
-                    PlatformBusRootDevice.Event::Setup;
-                    PlatformBus.Event::Preset;
-                    PlatformBus.Event::Setup;
-                    VirtioBus.Event::Setup;
-                    HwRngCore.Event::Setup;
-                    BlockDeviceRegistry.Event::Setup;
-                    DriverCoreDeferred.Event::Setup;
-                    IrqProcViewDeferred.Event::Setup;
-                    Ns16550aPlatformDriverStorage.Event::Setup;
-                    Ns16550aPlatformDriver.Event::Preset;
-                    VirtioMmioPlatformDriverStorage.Event::Setup;
-                    VirtioMmioPlatformDriver.Event::Preset;
-                    CtorTable.Event::Setup;
-                    InitcallTable.Event::Preset;
-                    InitcallTable.Event::Setup;
-                    Ns16550aPlatformDriver.Event::Setup;
-                    VirtioMmioPlatformDriver.Event::Setup;
-                    VirtioBlkDriver.Event::Setup;
-                    VirtioBlkDevice.Event::Setup;
-                    VirtioBlkDevice.Event::Enable;
-                    BlockDevice.Event::Setup;
-                    BlockDevice.Event::Enable;
-                    DevFs.Event::Setup;
-                    UartExternalIrqEnable.Event::Setup;
-                    UartInterruptChainProbe.Event::Setup;
-                    Serial8250Console.Event::Enable;
-                    TtyPort.Event::Setup;
-                    Serial8250RuntimePort.Event::Setup;
-                    TtyPort.Event::Enable;
-                    Serial8250RuntimePort.Event::Enable;
-                    Serial8250RxLoopbackProbe.Event::Setup;
-                    Serial8250RxBatchLoopbackProbe.Event::Setup;
-                    TtyXmitFifoProbe.Event::Setup;
-                    InitcallBoundary.Event::Setup;
+                    CpusetSmpTrimmed.Transition::Setup;
+                    DriverCoreBase.Transition::Setup;
+                    PlatformBusRootDevice.Transition::Setup;
+                    PlatformBus.Transition::Preset;
+                    PlatformBus.Transition::Setup;
+                    VirtioBus.Transition::Setup;
+                    HwRngCore.Transition::Setup;
+                    BlockDeviceRegistry.Transition::Setup;
+                    DriverCoreDeferred.Transition::Setup;
+                    IrqProcViewDeferred.Transition::Setup;
+                    Ns16550aPlatformDriverStorage.Transition::Setup;
+                    Ns16550aPlatformDriver.Transition::Preset;
+                    VirtioMmioPlatformDriverStorage.Transition::Setup;
+                    VirtioMmioPlatformDriver.Transition::Preset;
+                    CtorTable.Transition::Setup;
+                    InitcallTable.Transition::Preset;
+                    InitcallTable.Transition::Setup;
+                    Ns16550aPlatformDriver.Transition::Setup;
+                    VirtioMmioPlatformDriver.Transition::Setup;
+                    VirtioBlkDriver.Transition::Setup;
+                    VirtioBlkDevice.Transition::Setup;
+                    VirtioBlkDevice.Transition::Enable;
+                    BlockDevice.Transition::Setup;
+                    BlockDevice.Transition::Enable;
+                    DevFs.Transition::Setup;
+                    UartExternalIrqEnable.Transition::Setup;
+                    UartInterruptChainProbe.Transition::Setup;
+                    Serial8250Console.Transition::Enable;
+                    TtyPort.Transition::Setup;
+                    Serial8250RuntimePort.Transition::Setup;
+                    TtyPort.Transition::Enable;
+                    Serial8250RuntimePort.Transition::Enable;
+                    Serial8250RxLoopbackProbe.Transition::Setup;
+                    Serial8250RxBatchLoopbackProbe.Transition::Setup;
+                    TtyXmitFifoProbe.Transition::Setup;
+                    InitcallBoundary.Transition::Setup;
                 }
 
                 ensures {

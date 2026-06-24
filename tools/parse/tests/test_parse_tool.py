@@ -51,7 +51,7 @@ class ParseToolTests(unittest.TestCase):
                 item for item in data["document"]["objects"] if item["name"] == "KernelImage"
             )
             ready = next(state for state in kernel_image["states"] if state["name"] == "Ready")
-            enable = next(event for event in ready["events"] if event["name"] == "Enable")
+            enable = next(transition for transition in ready["transitions"] if transition["name"] == "Enable")
             entry = enable["depends_on"][0]["entries"][0]
 
             self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
@@ -68,8 +68,8 @@ class ParseToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within GuardedContext only-once {
                             }
                         }
@@ -89,8 +89,8 @@ class ParseToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             data = read_json(output)
-            event = data["document"]["objects"][0]["states"][0]["events"][0]
-            self.assertTrue(event["within"][0]["only_once"])
+            transition = data["document"]["objects"][0]["states"][0]["transitions"][0]
+            self.assertTrue(transition["within"][0]["only_once"])
 
     def test_event_body_members_preserve_source_order(self) -> None:
         source = """
@@ -101,20 +101,20 @@ class ParseToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                B.Event::Setup;
+                                B.Transition::Setup;
                             }
 
                             within GuardedContext {
                                 drives {
-                                    C.Event::Setup;
+                                    C.Transition::Setup;
                                 }
                             }
 
                             drives {
-                                D.Event::Setup;
+                                D.Transition::Setup;
                             }
                         }
                     }
@@ -133,14 +133,14 @@ class ParseToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             data = read_json(output)
-            event = data["document"]["objects"][0]["states"][0]["events"][0]
+            transition = data["document"]["objects"][0]["states"][0]["transitions"][0]
             self.assertEqual(
-                [member["kind"] for member in event["body_members"]],
+                [member["kind"] for member in transition["body_members"]],
                 ["drives", "within", "drives"],
             )
             self.assertEqual(
-                event["body_members"][1]["within"]["drives"][0]["entries"][0]["text"],
-                "C.Event::Setup",
+                transition["body_members"][1]["within"]["drives"][0]["entries"][0]["text"],
+                "C.Transition::Setup",
             )
 
     def test_output_parent_directory_is_created(self) -> None:

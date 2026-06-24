@@ -18,11 +18,11 @@ object InitMM: AddressSpaceObject {
      * Base 表示 init_mm 元数据尚未填入内核映像边界。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 setup_initial_init_mm()，记录内核代码段、数据段和 brk 边界。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BootInitTask.state == State::Online;
                     Lds.state == State::Online;
@@ -64,11 +64,11 @@ object MemBlock: MemoryObject {
      * Base 表示尚未从早期 DTB 收集候选物理内存区段。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 由 EarlyDtb.Setup 触发，基于已发布的 PhysicalMemory 收集候选 RAM 区段和粗略边界。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     EarlyDtb.state == State::Prepared;
                     PhysicalMemory.state == State::Online;
@@ -90,11 +90,11 @@ object MemBlock: MemoryObject {
             memblock_candidate_ranges_ready(MemBlock, PhysicalMemory, RawDtb);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 setup_bootmem()，施加保留区、对齐、memory limit 和可映射范围约束。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     EarlyDtb.state == State::Ready;
                     MemBlock.state == State::Prepared;
@@ -125,11 +125,11 @@ object MemBlock: MemoryObject {
             memblock_allocator_ready(MemBlock);
         }
 
-        events {
+        transitions {
             /*
              * Enable 对应 memblock_allow_resize()，在完整线性映射可用后允许元数据扩展。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     MemBlock.state == State::Ready;
                     Vm.state == State::Online;
@@ -153,13 +153,13 @@ object MemBlock: MemoryObject {
             memblock_resize_allowed(MemBlock);
         }
 
-        events {
+        transitions {
             /*
              * Disable 对应 mm_core_init()/mem_init() 中 memblock_free_all() 完成后
              * 早期页分配服务退出普通运行路径。MemBlock 元数据仍保留，后续
              * page_alloc_init_late()/memblock_discard() 再推进 Cleanup。
              */
-            on Event::Disable -> State::Offline {
+            on Transition::Disable -> State::Offline {
                 depends_on {
                     PageAllocator.state == State::Prepared;
                     Swiotlb.state == State::Ready;
@@ -198,21 +198,21 @@ object EarlyDtb: ResourceObject {
      * Base 表示尚未把 RawDtb 解析为本子阶段需要的基础平台事实。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 提取最小平台事实：/cpus 发布 PlatformCpuInfo，/memory 发布 PhysicalMemory。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     RawDtb.state == State::Ready;
                     EarlyVm.state == State::Online;
                 }
 
                 drives {
-                    PlatformCpuInfo.Event::Preset;
-                    PlatformCpuInfo.Event::Enable;
-                    PhysicalMemory.Event::Preset;
-                    PhysicalMemory.Event::Enable;
+                    PlatformCpuInfo.Transition::Preset;
+                    PlatformCpuInfo.Transition::Enable;
+                    PhysicalMemory.Transition::Preset;
+                    PhysicalMemory.Transition::Enable;
                 }
 
                 ensures {
@@ -232,20 +232,20 @@ object EarlyDtb: ResourceObject {
             PhysicalMemory.state == State::Online;
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 parse_dtb() 的后续用途，提取 kernel command line、FDT reserved ranges
              * 并触发 MemBlock 候选区段建立。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PhysicalMemory.state == State::Online;
                     PlatformCpuInfo.state == State::Online;
                 }
 
                 drives {
-                    MemBlock.Event::Preset;
-                    CommandLine.Event::Preset;
+                    MemBlock.Transition::Preset;
+                    CommandLine.Transition::Preset;
                 }
 
                 ensures {
@@ -269,11 +269,11 @@ object EarlyDtb: ResourceObject {
             CommandLine.state == State::Prepared;
         }
 
-        events {
+        transitions {
             /*
              * Cleanup 在本子阶段末尾退出早期 DTB 解析服务。
              */
-            on Event::Cleanup -> State::Destroyed {
+            on Transition::Cleanup -> State::Destroyed {
                 depends_on {
                     MemBlock.state == State::Online;
                     EarlyParam.state == State::Ready;
@@ -307,17 +307,17 @@ object CommandLine: ResourceObject {
      * Base 表示尚未建立任何命令行视图。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 建立可供 EarlyParam 解析的 raw command line。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     RawDtb.state == State::Ready;
                 }
 
                 drives {
-                    KernelCmdline.Event::Preset;
+                    KernelCmdline.Transition::Preset;
                 }
 
                 ensures {
@@ -337,20 +337,20 @@ object CommandLine: ResourceObject {
             KernelCmdline.state == State::Ready;
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 setup_command_line() 中建立 saved/static 两个命令行副本的部分。
              * 参数解析仍由 EarlyParam/BootParam/PayloadParam 各自按原时序完成。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MemBlock.state == State::Online;
                     KernelCmdline.state == State::Ready;
                 }
 
                 drives {
-                    SavedCommandLine.Event::Setup;
-                    StaticCommandLine.Event::Setup;
+                    SavedCommandLine.Transition::Setup;
+                    StaticCommandLine.Transition::Setup;
                 }
 
                 ensures {
@@ -390,11 +390,11 @@ object KernelCmdline: ResourceObject {
      * Base 表示 raw command line 尚未从 EarlyDtb 中抽取。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 建立可供 EarlyParam 解析的原始命令行文本。
              */
-            on Event::Preset -> State::Ready {
+            on Transition::Preset -> State::Ready {
                 depends_on {
                     RawDtb.state == State::Ready;
                 }
@@ -429,11 +429,11 @@ object Params: KernelObject {
      * Base 表示任何参数解析对象尚未进入完成状态。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 对应入口后继期第一次 parse_early_param() 路径。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     CommandLine.state == State::Prepared;
                     SBI.state == State::Ready;
@@ -441,7 +441,7 @@ object Params: KernelObject {
                 }
 
                 drives {
-                    EarlyParam.Event::Setup;
+                    EarlyParam.Transition::Setup;
                 }
 
                 ensures {
@@ -460,20 +460,20 @@ object Params: KernelObject {
             EarlyParam.state == State::Ready;
         }
 
-        events {
+        transitions {
             /*
              * Setup 在核心准备期继续推进普通 boot 参数和最终 payload 参数解析。
              * 该事件不重新推进 EarlyParam；第二次 parse_early_param() 只作为实现 checkpoint 保留。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     EarlyParam.state == State::Ready;
                     StaticCommandLine.state == State::Ready;
                 }
 
                 drives {
-                    BootParam.Event::Setup;
-                    PayloadParam.Event::Setup;
+                    BootParam.Transition::Setup;
+                    PayloadParam.Transition::Setup;
                 }
 
                 ensures {
@@ -511,11 +511,11 @@ object EarlyParam: KernelObject {
      * Base 表示早期参数尚未解析。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 parse_early_param()，当前要求处理 earlycon=sbi 并驱动 EarlyCon。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CommandLine.state == State::Prepared;
                     SBI.state == State::Ready;
@@ -523,9 +523,9 @@ object EarlyParam: KernelObject {
                 }
 
                 drives {
-                    EarlyCon.Event::Preset;
-                    EarlyCon.Event::Setup;
-                    EarlyCon.Event::Enable;
+                    EarlyCon.Transition::Preset;
+                    EarlyCon.Transition::Setup;
+                    EarlyCon.Transition::Enable;
                 }
 
                 ensures {
@@ -558,7 +558,7 @@ context PrintkBufferSetupLocalInterruptContext: Context {
      * printk ring-buffer switch and the first copy of existing records. The
      * allocation and dynamic ring-buffer initialization before the switch, and
      * the remaining-record copy after the switch, are outside this protected
-     * section. Ordered event body members let PrintkBuffer.Event::Setup express
+     * section. Ordered event body members let PrintkBuffer.Transition::Setup express
      * that local guarded section directly.
      *
      * This source model records the real irqsave/irqrestore guard boundary.
@@ -567,11 +567,11 @@ context PrintkBufferSetupLocalInterruptContext: Context {
      */
     guard {
         entered_by {
-            BootCpuLocalInterrupt.Event::SaveAndDisable;
+            BootCpuLocalInterrupt.Transition::SaveAndDisable;
         }
 
         exited_by {
-            BootCpuLocalInterrupt.Event::Restore;
+            BootCpuLocalInterrupt.Transition::Restore;
         }
     }
 
@@ -588,13 +588,13 @@ object PrintkBuffer: BufferObject {
      * Base 表示早期 printk 缓冲机制尚未准备。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 建立静态日志缓冲。arceos_ex 启动 banner 这类早期输出通过
              * 启动期内部输出前端或 PrintkBuffer.write(...) action 写入缓冲区，
-             * 不依赖应用侧 axstd::println!，也不作为生命周期事件的后置状态。
+             * 不依赖应用侧 axstd::println!，也不作为生命周期 transition的后置状态。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     printk_buffer_static_storage_ready(PrintkBuffer);
                     printk_buffer_ready(PrintkBuffer);
@@ -612,14 +612,14 @@ object PrintkBuffer: BufferObject {
             printk_buffer_ready(PrintkBuffer);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 setup_log_buf()，在 per-cpu 和启动参数准备后完成正式日志缓冲准备。
              * Linux 只在 active buffer switch 和既有 records 初次复制的局部临界区
              * 使用 local_irq_save()/local_irq_restore()；前置动态缓冲准备和后续
              * remaining-record copy 均在该局部临界区之外。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MemBlock.state == State::Online;
                     PerCpuStorage.state == State::Ready;
@@ -688,11 +688,11 @@ object EarlyCon: ConsoleObject {
      * Base 表示尚未从 earlycon 参数记录后端配置。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 记录 earlycon=sbi 参数配置。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     CommandLine.state == State::Prepared;
                 }
@@ -714,11 +714,11 @@ object EarlyCon: ConsoleObject {
             earlycon_config_uses_raw_command_line(EarlyCon, CommandLine);
         }
 
-        events {
+        transitions {
             /*
              * Setup 基于 SBI 能力视图建立 early console 输出后端。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SBI.state == State::Ready;
                 }
@@ -738,19 +738,19 @@ object EarlyCon: ConsoleObject {
             earlycon_sbi_backend_ready(EarlyCon, SBI);
         }
 
-        events {
+        transitions {
             /*
              * Enable 注册并启用后端，同时 replay/flush PrintkBuffer 中的历史输出。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     PrintkBuffer.state == State::Prepared;
                 }
 
                 drives {
-                    BootConsole.Event::Setup;
-                    BootConsole.Event::Enable;
-                    ConsoleRegistry.Event::Preset;
+                    BootConsole.Transition::Setup;
+                    BootConsole.Transition::Enable;
+                    ConsoleRegistry.Transition::Preset;
                 }
 
                 ensures {
@@ -772,12 +772,12 @@ object EarlyCon: ConsoleObject {
             printk_buffer_flushed_to_earlycon(PrintkBuffer, EarlyCon);
         }
 
-        events {
+        transitions {
             /*
              * Disable is driven by real console handoff. After this point
              * earlycon is no longer a valid printk backend for payload code.
              */
-            on Event::Disable -> State::Offline {
+            on Transition::Disable -> State::Offline {
                 depends_on {
                     ConsoleRegistry.state == State::Ready;
                     console_registry_printk_route_real_console(ConsoleRegistry, Serial8250Console);
@@ -811,11 +811,11 @@ object EarlyIoremap: AddressSpaceObject {
      * Base 表示早期临时映射服务元数据尚未初始化。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 early_ioremap_setup()，初始化 boot-time mapping slot 元数据。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     FixMap.state == State::Ready;
                 }
@@ -847,11 +847,11 @@ object SBI: PlatformServiceObject {
      * Base 表示尚未探测 SBI 规范版本、固件标识和扩展能力。
      */
     state State::Base {
-        events {
+        transitions {
             /*
-             * Setup 对应 sbi_init()，只记录能力事实，不把具体 SBI 调用建模为生命周期事件。
+             * Setup 对应 sbi_init()，只记录能力事实，不把具体 SBI 调用建模为生命周期 transition。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SbiSpec.state == State::Online;
                     OpenSbiFirmware.state == State::Online;
@@ -888,11 +888,11 @@ object CpuIdMap: HardwareObject {
      * Base 表示逻辑 ID 映射尚未建立。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 建立 logical CPU 0 -> BootCPU 的基础映射。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootCPU.state == State::Prepared;
                 }
@@ -914,12 +914,12 @@ object CpuIdMap: HardwareObject {
             cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
         }
 
-        events {
+        transitions {
             /*
              * Setup 在 CpuGroup.setup_smp() 建立拓扑事实后，确认当前阶段可用的
              * CPU logical id 映射边界。它不启动 secondary CPU，也不占用 Enable。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuGroup.state == State::Ready;
                 }
@@ -971,11 +971,11 @@ object EntrySuccessorPhase: PhaseObject {
             context_is(SystemExclusive);
         }
 
-        events {
+        transitions {
             /*
              * Setup 按 start_kernel/setup_arch 到 paging_init() 的最小核心路径编排对象推进。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     EntryPreludePhase.state == State::Ready;
                     Vm.state == State::Ready;
@@ -989,23 +989,23 @@ object EntrySuccessorPhase: PhaseObject {
                 }
 
                 drives {
-                    EntryPreludePhase.Event::Cleanup;
-                    BootInitStack.Event::Enable;
-                    EarlyDtb.Event::Preset;
-                    CpuIdMap.Event::Preset;
-                    InterruptStream.Event::Setup;
-                    BootCPU.Event::Setup;
-                    BootCPU.Event::Enable;
-                    PrintkBuffer.Event::Preset;
-                    EarlyDtb.Event::Setup;
-                    InitMM.Event::Setup;
-                    EarlyIoremap.Event::Setup;
-                    SBI.Event::Setup;
-                    Params.Event::Preset;
-                    MemBlock.Event::Setup;
-                    Vm.Event::Enable;
-                    MemBlock.Event::Enable;
-                    EarlyDtb.Event::Cleanup;
+                    EntryPreludePhase.Transition::Cleanup;
+                    BootInitStack.Transition::Enable;
+                    EarlyDtb.Transition::Preset;
+                    CpuIdMap.Transition::Preset;
+                    InterruptStream.Transition::Setup;
+                    BootCPU.Transition::Setup;
+                    BootCPU.Transition::Enable;
+                    PrintkBuffer.Transition::Preset;
+                    EarlyDtb.Transition::Setup;
+                    InitMM.Transition::Setup;
+                    EarlyIoremap.Transition::Setup;
+                    SBI.Transition::Setup;
+                    Params.Transition::Preset;
+                    MemBlock.Transition::Setup;
+                    Vm.Transition::Enable;
+                    MemBlock.Transition::Enable;
+                    EarlyDtb.Transition::Cleanup;
                 }
 
                 ensures {

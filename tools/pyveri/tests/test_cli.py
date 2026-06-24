@@ -48,8 +48,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("derive: ok", text)
         self.assertIn("obligation: 0", text)
         self.assertIn("deferred: 45", text)
-        self.assertIn("MmCoreInitPhase.Event::Setup", text)
-        self.assertIn("InterruptPhase.Event::Setup", text)
+        self.assertIn("MmCoreInitPhase.Transition::Setup", text)
+        self.assertIn("InterruptPhase.Transition::Setup", text)
 
     def test_default_command_runs_full_verification(self) -> None:
         stdout = io.StringIO()
@@ -90,8 +90,8 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("derive: ok", text)
         self.assertIn("trace:", text)
-        self.assertIn("> StartupTimeline.Event::Setup State::Base", text)
-        self.assertIn("< StartupTimeline.Event::Setup State::Ready", text)
+        self.assertIn("> StartupTimeline.Transition::Setup State::Base", text)
+        self.assertIn("< StartupTimeline.Transition::Setup State::Ready", text)
 
     def test_check_command_uses_strict_derivation_exit_code(self) -> None:
         stdout = io.StringIO()
@@ -121,7 +121,7 @@ class CliTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("trace view:", text)
         self.assertIn("columns:", text)
-        self.assertIn("StartupTimeline.Event::Setup", text)
+        self.assertIn("StartupTimeline.Transition::Setup", text)
 
     def test_view_trace_command_accepts_action_depth_option(self) -> None:
         stdout = io.StringIO()
@@ -213,7 +213,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             annotations = Path(tmp) / "notes.json"
             annotations.write_text(
-                '{"events": {"Vm.Event::Setup": "build early mappings"}}\n',
+                '{"transitions": {"Vm.Transition::Setup": "build early mappings"}}\n',
                 encoding="utf-8",
             )
             output = Path(tmp) / "trace.svg"
@@ -246,7 +246,7 @@ class CliTests(unittest.TestCase):
                         "--trace-svg",
                         str(output),
                         "--trace-annotations",
-                        "state,event",
+                        "state,transition",
                     ]
                 )
 
@@ -290,7 +290,7 @@ class CliTests(unittest.TestCase):
                         "--trace-svg",
                         str(output),
                         "--trace-annotations",
-                        "event",
+                        "transition",
                     ]
                 )
 
@@ -328,7 +328,7 @@ class CliTests(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                exit_code = main([str(self.spec), "-T", str(output), "-a", "event"])
+                exit_code = main([str(self.spec), "-T", str(output), "-a", "transition"])
 
             self.assertEqual(exit_code, 0)
             text = output.read_text(encoding="utf-8")

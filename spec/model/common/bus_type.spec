@@ -126,7 +126,7 @@ type BusSubsysPrivate {
     }
 
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             ensures {
                 bus_subsys_private_allocated(self);
@@ -136,7 +136,7 @@ type BusSubsysPrivate {
             }
         }
 
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             ensures {
                 bus_subsys_kobject_named(self);
@@ -146,7 +146,7 @@ type BusSubsysPrivate {
             }
         }
 
-        Event::Enable {
+        Transition::Enable {
             state_effect: StateEffect::Always;
             ensures {
                 bus_subsys_devices_kset_ready(self);
@@ -172,7 +172,7 @@ type BusType {
     }
 
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             ensures {
                 bus_type_descriptor_bound(self);
@@ -181,12 +181,12 @@ type BusType {
             }
         }
 
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             drives {
-                self.subsys.Event::Preset;
-                self.subsys.Event::Setup;
-                self.subsys.Event::Enable;
+                self.subsys.Transition::Preset;
+                self.subsys.Transition::Setup;
+                self.subsys.Transition::Enable;
             }
             ensures {
                 bus_type_subsys_private_ready(self, self.subsys);
@@ -292,7 +292,7 @@ type BusType {
 /*
  * PlatformBusType extends the generic BusType with platform-specific
  * initcall behavior. Instances still carry the BusType lifecycle through
- * object wrapper events while this type defines reusable platform actions.
+ * object wrapper transitions while this type defines reusable platform actions.
  */
 type PlatformBusType: BusType {
     owned {
@@ -514,7 +514,7 @@ type PlatformBusType: BusType {
  */
 type PlatformProbeContext {
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             depends_on {
                 DeviceTree.state == State::Ready;

@@ -18,7 +18,7 @@ for source in (
 from common.model_types import (
     BuildResult,
     Diagnostic,
-    EventDef,
+    TransitionDef,
     ExclusiveContextDef,
     ObjectDef,
     ObjectModel,
@@ -30,7 +30,7 @@ from model_tool.builder import build_model, summarize_model
 __all__ = [
     "BuildResult",
     "Diagnostic",
-    "EventDef",
+    "TransitionDef",
     "ExclusiveContextDef",
     "ObjectDef",
     "ObjectModel",

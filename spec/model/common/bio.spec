@@ -59,8 +59,8 @@ object Bio: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
                     BlockDevice.state == State::Online;
@@ -140,8 +140,8 @@ object BufferHead: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
                     BlockDevice.state == State::Online;

@@ -261,11 +261,11 @@ object PhysicalMemory: PrepareObject {
      * Base 表示物理内存事实尚未从 RawDtb 的 /memory 描述中抽取。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 由 EarlyDtb.Preset 触发，解析 /memory 并形成平台物理内存布局事实。
              */
-            on Event::Preset -> State::Ready {
+            on Transition::Preset -> State::Ready {
                 depends_on {
                     RawDtb.state == State::Ready;
                 }
@@ -290,11 +290,11 @@ object PhysicalMemory: PrepareObject {
             physical_memory_ranges_ready(PhysicalMemory, RawDtb);
         }
 
-        events {
+        transitions {
             /*
              * Enable 将已解析的物理内存布局发布为后续 MemBlock 可依赖的事实。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 ensures {
                     physical_memory_ranges_published(PhysicalMemory);
                 }
@@ -330,11 +330,11 @@ object PlatformCpuInfo: PrepareObject {
      * Base 表示平台 CPU 事实尚未从 RawDtb 的 /cpus 描述中抽取。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 由 EarlyDtb.Preset 触发，解析 /cpus 并确认启动 hart 属于平台有效集合。
              */
-            on Event::Preset -> State::Ready {
+            on Transition::Preset -> State::Ready {
                 depends_on {
                     BootArgs.state == State::Online;
                     RawDtb.state == State::Ready;
@@ -357,11 +357,11 @@ object PlatformCpuInfo: PrepareObject {
             platform_hart_id_valid(BootArgs.boot_hartid);
         }
 
-        events {
+        transitions {
             /*
              * Enable 将平台 CPU 事实发布为 BootCPU 后续推进可依赖的输入。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 ensures {
                     platform_cpu_info_published(PlatformCpuInfo);
                 }
@@ -391,11 +391,11 @@ object PreparePhase: PhaseObject {
      * Base 表示准备期阶段对象已经进入模型空间，但尚未形成当前规格所需的准备期完成边界。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 汇总并验证入口前导期所需的准备期输入对象，形成准备期完成边界。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
@@ -419,12 +419,12 @@ object PreparePhase: PhaseObject {
             Config.state == State::Online;
         }
 
-        events {
+        transitions {
             /*
              * Enable 将准备期完成边界发布为后续引导期可依赖的输入边界。
              * 当前不执行额外动作，只保留阶段生命周期中的显式边界。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
             }
         }
     }

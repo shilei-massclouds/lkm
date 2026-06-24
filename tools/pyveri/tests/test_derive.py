@@ -17,10 +17,10 @@ class DerivationTests(unittest.TestCase):
                     initial_state: State::Base;
 
                     state State::Base {
-                        events {
-                            on Event::Setup -> State::Ready {
+                        transitions {
+                            on Transition::Setup -> State::Ready {
                                 drives {
-                                    B.Event::Setup;
+                                    B.Transition::Setup;
                                 }
                             }
                         }
@@ -38,8 +38,8 @@ class DerivationTests(unittest.TestCase):
                     parent: A;
 
                     state State::Base {
-                        events {
-                            on Event::Setup -> State::Ready {
+                        transitions {
+                            on Transition::Setup -> State::Ready {
                                 depends_on {
                                     C.state == State::Online;
                                     non_computable_predicate();
@@ -62,7 +62,7 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
-        derivation = derive(result.model, "A.Event::Setup")
+        derivation = derive(result.model, "A.Transition::Setup")
 
         self.assertTrue(derivation.ok)
         self.assertEqual(derivation.states["A"], "Ready")
@@ -90,8 +90,8 @@ class DerivationTests(unittest.TestCase):
                     initial_state: State::Base;
 
                     state State::Base {
-                        events {
-                            on Event::Setup -> State::Ready {
+                        transitions {
+                            on Transition::Setup -> State::Ready {
                                 depends_on {
                                     B.state == State::Ready;
                                 }
@@ -116,7 +116,7 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
-        derivation = derive(result.model, "A.Event::Setup")
+        derivation = derive(result.model, "A.Transition::Setup")
 
         self.assertFalse(derivation.ok)
         self.assertEqual(derivation.states["A"], "Base")
@@ -131,7 +131,7 @@ class DerivationTests(unittest.TestCase):
         )
 
 
-    def test_event_ensures_match_multiline_invariant_predicates(self) -> None:
+    def test_transition_ensures_match_multiline_invariant_predicates(self) -> None:
         result = build_model(
             parse_text(
                 """
@@ -139,8 +139,8 @@ class DerivationTests(unittest.TestCase):
                     initial_state: State::Base;
 
                     state State::Base {
-                        events {
-                            on Event::Setup -> State::Ready {
+                        transitions {
+                            on Transition::Setup -> State::Ready {
                                 ensures {
                                     object_ref_targets(DeviceRef::VirtioMmioPlatformDevice, VirtioMmioTransportDevice);
                                 }
@@ -161,7 +161,7 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
-        derivation = derive(result.model, "A.Event::Setup")
+        derivation = derive(result.model, "A.Transition::Setup")
 
         self.assertTrue(derivation.ok)
         self.assertFalse(
@@ -170,7 +170,7 @@ class DerivationTests(unittest.TestCase):
         self.assertTrue(
             any(
                 record.status is DerivationStatus.PROVED
-                and record.proof_provider == "event_ensures"
+                and record.proof_provider == "transition_ensures"
                 and record.predicate == "object_ref_targets"
                 and "object_ref_targets(\n" in (record.expression or "")
                 for record in derivation.records
@@ -227,8 +227,8 @@ class DerivationTests(unittest.TestCase):
                     initial_state: State::Base;
 
                     state State::Base {
-                        events {
-                            on Event::Setup -> State::Ready {
+                        transitions {
+                            on Transition::Setup -> State::Ready {
                                 drives {
                                     A.Action::Schedule;
                                 }
@@ -243,7 +243,7 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
-        derivation = derive(result.model, "A.Event::Setup")
+        derivation = derive(result.model, "A.Transition::Setup")
 
         self.assertTrue(derivation.ok)
         self.assertTrue(
@@ -270,10 +270,10 @@ class DerivationTests(unittest.TestCase):
                 """
                 type RawSpinLock {
                     processes {
-                        Event::LockIrqSave {
+                        Transition::LockIrqSave {
                         }
 
-                        Event::UnlockIrqRestore {
+                        Transition::UnlockIrqRestore {
                         }
                     }
                 }
@@ -285,11 +285,11 @@ class DerivationTests(unittest.TestCase):
                         lock_ref: TaskPiLock;
 
                         entered_by {
-                            TaskPiLock.Event::LockIrqSave;
+                            TaskPiLock.Transition::LockIrqSave;
                         }
 
                         exited_by {
-                            TaskPiLock.Event::UnlockIrqRestore;
+                            TaskPiLock.Transition::UnlockIrqRestore;
                         }
                     }
 
@@ -314,8 +314,8 @@ class DerivationTests(unittest.TestCase):
                             task_state_new(A);
                         }
 
-                        events {
-                            on Event::Enable -> State::Online {
+                        transitions {
+                            on Transition::Enable -> State::Online {
                                 within WakeContext {
                                     depends_on {
                                         task_state_new(A);
@@ -358,7 +358,7 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
-        derivation = derive(result.model, "A.Event::Enable")
+        derivation = derive(result.model, "A.Transition::Enable")
 
         self.assertTrue(derivation.ok)
         self.assertTrue(
@@ -381,18 +381,18 @@ class DerivationTests(unittest.TestCase):
         self.assertTrue(
             any(
                 record.status is DerivationStatus.PROVED
-                and record.proof_class == "context_guard_event"
+                and record.proof_class == "context_guard_transition"
                 and record.source_kind == "within_entered_by"
-                and record.expression == "TaskPiLock.Event::LockIrqSave"
+                and record.expression == "TaskPiLock.Transition::LockIrqSave"
                 for record in derivation.records
             )
         )
         self.assertTrue(
             any(
                 record.status is DerivationStatus.PROVED
-                and record.proof_class == "context_guard_event"
+                and record.proof_class == "context_guard_transition"
                 and record.source_kind == "within_exited_by"
-                and record.expression == "TaskPiLock.Event::UnlockIrqRestore"
+                and record.expression == "TaskPiLock.Transition::UnlockIrqRestore"
                 for record in derivation.records
             )
         )
@@ -415,14 +415,14 @@ class DerivationTests(unittest.TestCase):
         self.assertTrue(
             any(
                 record.status is DerivationStatus.PROVED
-                and record.proof_provider == "event_ensures"
+                and record.proof_provider == "transition_ensures"
                 and record.proof_class == "register_effect"
                 for record in derivation.records
             )
         )
-        self.assertIn("> StartupTimeline.Event::Setup State::Base", text)
-        self.assertIn("  > PreparePhase.Event::Setup State::Base", text)
-        self.assertIn("< StartupTimeline.Event::Setup State::Ready", text)
+        self.assertIn("> StartupTimeline.Transition::Setup State::Base", text)
+        self.assertIn("  > PreparePhase.Transition::Setup State::Base", text)
+        self.assertIn("< StartupTimeline.Transition::Setup State::Ready", text)
         self.assertEqual(derivation.states["StartupTimeline"], "Ready")
         self.assertEqual(derivation.states["EntrySuccessorPhase"], "Ready")
         self.assertEqual(derivation.states["CorePreparePhase"], "Ready")

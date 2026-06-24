@@ -24,8 +24,8 @@ object SmpRuntimePhase: PhaseObject {
     parent: StartupTimeline;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     UpMultitaskPhase.state == State::Ready;
                     KernelInitTask.state == State::Online;
@@ -38,12 +38,12 @@ object SmpRuntimePhase: PhaseObject {
                 }
 
                 drives {
-                    PreSmpInitPhase.Event::Setup;
-                    SmpBringupPhase.Event::Setup;
-                    RuntimeCorePhase.Event::Setup;
-                    InitcallPhase.Event::Setup;
-                    RootfsPhase.Event::Setup;
-                    FinalizePhase.Event::Setup;
+                    PreSmpInitPhase.Transition::Setup;
+                    SmpBringupPhase.Transition::Setup;
+                    RuntimeCorePhase.Transition::Setup;
+                    InitcallPhase.Transition::Setup;
+                    RootfsPhase.Transition::Setup;
+                    FinalizePhase.Transition::Setup;
                 }
 
                 ensures {

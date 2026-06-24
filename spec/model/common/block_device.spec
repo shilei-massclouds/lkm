@@ -58,8 +58,8 @@ object BlockDeviceRegistry: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DriverCoreBase.state == State::Ready;
                 }
@@ -164,8 +164,8 @@ object BlockDevice: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioBlkDevice.state == State::Online;
                 }
@@ -190,8 +190,8 @@ object BlockDevice: DeviceObject {
             block_device_capacity_bound(BlockDevice);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
                     BlockDevice.state == State::Ready;

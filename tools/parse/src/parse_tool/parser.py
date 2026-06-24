@@ -11,7 +11,7 @@ from common.spec_ast import (
     Block,
     ContextGuardDecl,
     EnumDecl,
-    EventDecl,
+    TransitionDecl,
     ExclusiveContextDecl,
     FunctionDecl,
     LockDecl,
@@ -51,7 +51,7 @@ _OBJECT_RE = re.compile(rf"\Aobject\s+({_IDENT})\s*:\s*({_IDENT})\s*\{{", re.S)
 _FUNCTION_RE = re.compile(rf"\Afunction\s+({_IDENT})(?P<sig>.*);?\Z", re.S)
 _PREDICATE_RE = re.compile(rf"\Apredicate\s+({_IDENT})(?P<rest>.*)\Z", re.S)
 _STATE_RE = re.compile(rf"\Astate\s+State::({_IDENT})\s*\{{", re.S)
-_EVENT_RE = re.compile(rf"\Aon\s+Event::({_IDENT})\s*->\s*State::({_IDENT})\s*\{{", re.S)
+_TRANSITION_RE = re.compile(rf"\Aon\s+Transition::({_IDENT})\s*->\s*State::({_IDENT})\s*\{{", re.S)
 _BLOCK_RE = re.compile(rf"\A({_IDENT})(?P<header>[^\{{]*)\{{", re.S)
 _PROP_RE = re.compile(rf"\A({_IDENT})\s*:\s*(.+?)\s*;\Z", re.S)
 _INCLUDE_LINE_RE = re.compile(r'\A\s*include\s+"([^"]+)"\s*;\s*\Z')
@@ -488,16 +488,16 @@ def _parse_state(segment: _Segment) -> StateDecl:
 
     invariants: list[Block] = []
     deferred: list[Block] = []
-    events: list[EventDecl] = []
+    transitions: list[TransitionDecl] = []
     other_blocks: list[Block] = []
 
     for part in parts:
         stripped = part.text.strip()
-        event_match = _EVENT_RE.match(stripped)
+        event_match = _TRANSITION_RE.match(stripped)
         block_match = _BLOCK_RE.match(stripped)
 
         if event_match:
-            events.append(_parse_event(part))
+            transitions.append(_parse_event(part))
             continue
 
         if not block_match:
@@ -510,30 +510,30 @@ def _parse_state(segment: _Segment) -> StateDecl:
             invariants.append(block)
         elif block.kind == "deferred":
             deferred.append(block)
-        elif block.kind == "events":
-            events.extend(_parse_events_block(block))
+        elif block.kind == "transitions":
+            transitions.extend(_parse_events_block(block))
         else:
             other_blocks.append(block)
 
-    return StateDecl(match.group(1), segment.span, invariants, deferred, events, other_blocks)
+    return StateDecl(match.group(1), segment.span, invariants, deferred, transitions, other_blocks)
 
 
-def _parse_events_block(block: Block) -> list[EventDecl]:
+def _parse_events_block(block: Block) -> list[TransitionDecl]:
     parts = _split_members(block.body, block.body_start_line or block.span.start_line)
-    events: list[EventDecl] = []
+    transitions: list[TransitionDecl] = []
     for part in parts:
-        if not _EVENT_RE.match(part.text.strip()):
+        if not _TRANSITION_RE.match(part.text.strip()):
             raise ParseError(
-                f"line {part.start_line}: invalid events member: {_preview(part.text)}"
+                f"line {part.start_line}: invalid transitions member: {_preview(part.text)}"
             )
-        events.append(_parse_event(part))
-    return events
+        transitions.append(_parse_event(part))
+    return transitions
 
 
-def _parse_event(segment: _Segment) -> EventDecl:
-    match = _EVENT_RE.match(segment.text)
+def _parse_event(segment: _Segment) -> TransitionDecl:
+    match = _TRANSITION_RE.match(segment.text)
     if not match:
-        raise ParseError(f"line {segment.start_line}: invalid event declaration")
+        raise ParseError(f"line {segment.start_line}: invalid transition declaration")
 
     body, body_start_line = _body_segment_from_braced_decl(
         segment.text, match.end() - 1, segment.start_line
@@ -553,7 +553,7 @@ def _parse_event(segment: _Segment) -> EventDecl:
         block_match = _BLOCK_RE.match(part.text.strip())
         if not block_match:
             raise ParseError(
-                f"line {part.start_line}: invalid event member: {_preview(part.text)}"
+                f"line {part.start_line}: invalid transition member: {_preview(part.text)}"
             )
         block = _to_block(part, block_match.group(1))
         if block.kind == "depends_on":
@@ -579,7 +579,7 @@ def _parse_event(segment: _Segment) -> EventDecl:
             other_blocks.append(block)
             body_members.append(_block_body_member(block))
 
-    return EventDecl(
+    return TransitionDecl(
         name=match.group(1),
         target_state=match.group(2),
         span=segment.span,
@@ -892,7 +892,7 @@ def summarize(document: SpecDocument) -> str:
     """Return a small human-readable parse summary."""
 
     state_count = sum(len(obj.states) for obj in document.objects)
-    event_count = sum(len(state.events) for obj in document.objects for state in obj.states)
+    transition_count = sum(len(state.transitions) for obj in document.objects for state in obj.states)
     lines = [
         "parse: ok",
         f"enums: {len(document.enums)}",
@@ -903,7 +903,7 @@ def summarize(document: SpecDocument) -> str:
         f"exclusive_contexts: {len(document.exclusive_contexts)}",
         f"objects: {len(document.objects)}",
         f"states: {state_count}",
-        f"events: {event_count}",
+        f"transitions: {transition_count}",
     ]
     return "\n".join(lines)
 

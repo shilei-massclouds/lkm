@@ -60,8 +60,8 @@ object VirtioSplitRing: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioDevice.state == State::Ready;
                 }
@@ -112,8 +112,8 @@ object VirtQueue: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioSplitRing.state == State::Ready;
                 }

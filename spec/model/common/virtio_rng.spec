@@ -68,8 +68,8 @@ object VirtioRngDriver: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioBus.state == State::Ready;
                 }
@@ -126,8 +126,8 @@ object VirtioRngDevice: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioRngDriver.state == State::Ready;
                     VirtioDevice.state == State::Ready;
@@ -135,9 +135,9 @@ object VirtioRngDevice: DeviceObject {
                 }
 
                 drives {
-                    VirtioSplitRing.Event::Setup;
-                    VirtQueue.Event::Setup;
-                    HwRngDevice.Event::Setup;
+                    VirtioSplitRing.Transition::Setup;
+                    VirtQueue.Transition::Setup;
+                    HwRngDevice.Transition::Setup;
                 }
 
                 ensures {
@@ -169,8 +169,8 @@ object VirtioRngDevice: DeviceObject {
             virtio_rng_dev_hwrng_plumbing_deferred(self);
         }
 
-        events {
-            on Event::Cleanup -> State::Destroyed {
+        transitions {
+            on Transition::Cleanup -> State::Destroyed {
                 ensures {
                     virtio_rng_device_removed(self);
                     virtio_rng_removed_rejects_io(self);

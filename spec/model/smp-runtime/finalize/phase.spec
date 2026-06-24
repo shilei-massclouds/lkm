@@ -14,8 +14,8 @@ object AsyncFullSyncDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RootfsBoundary.state == State::Ready;
                     AsyncCoreDeferred.state == State::Ready;
@@ -46,8 +46,8 @@ object InitMemoryCleanupDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     AsyncFullSyncDeferred.state == State::Ready;
                     SystemState.state == State::Ready;
@@ -85,8 +85,8 @@ object KernelMappingProtectionDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     InitMemoryCleanupDeferred.state == State::Ready;
                 }
@@ -117,8 +117,8 @@ object PtiFinalizeTrimmed: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelMappingProtectionDeferred.state == State::Ready;
                 }
@@ -146,8 +146,8 @@ object RcuBootEnd: KernelObject {
     parent: RcuCore;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PtiFinalizeTrimmed.state == State::Ready;
                     SystemState.state == State::Online;
@@ -178,8 +178,8 @@ object SysctlArgsDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RcuBootEnd.state == State::Ready;
                     SavedCommandLine.state == State::Ready;
@@ -209,8 +209,8 @@ object FinalizeBoundary: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     AsyncFullSyncDeferred.state == State::Ready;
                     InitMemoryCleanupDeferred.state == State::Ready;
@@ -245,8 +245,8 @@ object FinalizePhase: PhaseObject {
     parent: SmpRuntimePhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RootfsPhase.state == State::Ready;
                     RootfsBoundary.state == State::Ready;
@@ -257,14 +257,14 @@ object FinalizePhase: PhaseObject {
                 }
 
                 drives {
-                    AsyncFullSyncDeferred.Event::Setup;
-                    InitMemoryCleanupDeferred.Event::Setup;
-                    KernelMappingProtectionDeferred.Event::Setup;
-                    PtiFinalizeTrimmed.Event::Setup;
-                    SystemState.Event::Enable;
-                    RcuBootEnd.Event::Setup;
-                    SysctlArgsDeferred.Event::Setup;
-                    FinalizeBoundary.Event::Setup;
+                    AsyncFullSyncDeferred.Transition::Setup;
+                    InitMemoryCleanupDeferred.Transition::Setup;
+                    KernelMappingProtectionDeferred.Transition::Setup;
+                    PtiFinalizeTrimmed.Transition::Setup;
+                    SystemState.Transition::Enable;
+                    RcuBootEnd.Transition::Setup;
+                    SysctlArgsDeferred.Transition::Setup;
+                    FinalizeBoundary.Transition::Setup;
                 }
 
                 ensures {

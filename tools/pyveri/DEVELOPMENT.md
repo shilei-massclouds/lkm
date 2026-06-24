@@ -20,7 +20,7 @@
 当前推导入口是：
 
 ```text
-StartupTimeline.Event::Setup
+StartupTimeline.Transition::Setup
 ```
 
 当前推导目标是：
@@ -131,29 +131,29 @@ view.json -> text/DOT/SVG/animated SVG
 
 长期看，`render` 可以演进为 renderer host：自身负责读取 `view.json`、根据 `--format` 选择 renderer、传递数据、处理输出路径和错误码；不同格式由独立 renderer 模块或插件处理，例如 text renderer、DOT renderer、SVG renderer、animated SVG renderer。
 
-动画输出遵循简单直观、开源免费、面向工程人员理解使用的原则。优先采用基于开放标准和浏览器原生能力的 `animated SVG`，第一阶段不引入外部动画框架。动画只用于表达推导顺序、状态推进、事件进入/退出、对象出现和 blocked 位置，不做装饰性特效。
+动画输出遵循简单直观、开源免费、面向工程人员理解使用的原则。优先采用基于开放标准和浏览器原生能力的 `animated SVG`，第一阶段不引入外部动画框架。动画只用于表达推导顺序、状态推进、transition 进入/退出、对象出现和 blocked 位置，不做装饰性特效。
 
-当前 `trace` SVG 已作为推导过程展示模板开始实现：空阶段事件会被隐藏，阶段事件显示为紧凑的粗竖箭头，普通对象事件显示在自身状态推进箭头中部，`drives` 短箭头对准目标事件框，准备期 `depends_on` 结果显示为 verified 状态。后续仍需继续改进：
+当前 `trace` SVG 已作为推导过程展示模板开始实现：空阶段 transition会被隐藏，阶段 transition显示为紧凑的粗竖箭头，普通对象 transition显示在自身状态推进箭头中部，`drives` 短箭头对准目标 transition 框，准备期 `depends_on` 结果显示为 verified 状态。后续仍需继续改进：
 
 - 预览输出文件不要散落在仓库根目录。`-T/--trace` 不带路径时默认写入 `tools/out/trace/<spec>.trace.svg`；显式给出路径时仍按命令指定路径输出。
 - 主 trace 图默认只展开嵌套 action 到深度 3，使 `Scheduler.Action::ScheduleIdle` 这类边界可见，但不继续展开 `Scheduler.Action::Schedule` 的内部细节；`--trace-action-depth all` 保留完整展开能力。后续应增加专门的 action 展开图，用于单独查看深层 action/process 内部。
 - 阶段箭头的紧凑 lane 当前主要在 SVG 渲染层实现；长期应在 `view` 的 trace 布局模型中正式区分 `phase_lane` 和 `object_lane`。
 - `depends_on` 虚线仍然较长，后续需要讨论是否也改为靠近目标端的短线，或采用更清楚的 verified 依赖表示。
 - 完整 trace 图仍然很高，后续可考虑按阶段分段、折叠同类短事件、分页输出或提供局部 trace。
-- 标签显示仍偏工程化，后续可讨论对象名/事件名的简化、分行、对齐和可读性规则。
+- 标签显示仍偏工程化，后续可讨论对象名/transition 名的简化、分行、对齐和可读性规则。
 - 阶段 lane 间距、`drives` 最大长度、单元宽度、行高等布局参数仍是代码常量，后续可暴露为 render 参数或配置。
 
-`trace` SVG 支持可选 overlay 注释层。base trace 默认不显示注释，启用注释时也不改变底图布局。注释只针对普通对象的 state 和 event，不针对阶段对象。顶层 `pyveri` 从 `.spec` 中紧邻 state/event 声明的块注释生成注释数据；`--trace-annotations` 的取值为 `state`、`event` 或 `state,event`；底层 `render --annotations notes.json` 作为调试和覆盖接口保留。
+`trace` SVG 支持可选 overlay 注释层。base trace 默认不显示注释，启用注释时也不改变底图布局。注释只针对普通对象的 state 和 transition，不针对阶段对象。顶层 `pyveri` 从 `.spec` 中紧邻 state/transition 声明的块注释生成注释数据；`--trace-annotations` 的取值为 `state`、`event` 或 `state,transition`；底层 `render --annotations notes.json` 作为调试和覆盖接口保留。
 
-注释统一渲染为外部注释块，通过短 leader line 指向目标 state/event 框。放置策略采用半自动插空：程序根据目标框生成右侧、下侧、左侧、上侧等候选位置，检查是否与 state/event 框和已有注释块重叠，选择第一个可用位置；若都不可用，则放到右侧 annotation column。第一版不移动底图元素，不为注释重新排版基础 trace，不做复杂绕线或全局最优布局。后续可将注释数据正式下沉到 parse/model/view 中间文件，并按需要增加更完整的 annotation layout。
+注释统一渲染为外部注释块，通过短 leader line 指向目标 state/transition 框。放置策略采用半自动插空：程序根据目标框生成右侧、下侧、左侧、上侧等候选位置，检查是否与 state/transition 框和已有注释块重叠，选择第一个可用位置；若都不可用，则放到右侧 annotation column。第一版不移动底图元素，不为注释重新排版基础 trace，不做复杂绕线或全局最优布局。后续可将注释数据正式下沉到 parse/model/view 中间文件，并按需要增加更完整的 annotation layout。
 
 示例命令：
 
 ```bash
 tools/pyveri/bin/pyveri spec/model/main.spec
 tools/pyveri/bin/pyveri spec/model/main.spec -T
-tools/pyveri/bin/pyveri spec/model/main.spec -T --trace-annotations state,event
-tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
+tools/pyveri/bin/pyveri spec/model/main.spec -T --trace-annotations state,transition
+tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transition
 ```
 
 ## 规格语义
@@ -163,7 +163,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 - `parent` 建立对象之间的静态父子层级。
 - `initial_state` 给出对象进入推导模型时的初始状态。
 - `state` 定义对象可处于的状态。
-- `on Event::X -> State::Y` 定义状态迁移规则。
+- `on Transition::X -> State::Y` 定义状态迁移规则。
 - `depends_on` 是事件执行前必须满足的前提。
 - `drives` 是事件触发的子推导队列，必须按声明顺序处理。
 - `invariant` 是对象进入某状态后必须验证的状态约束。
@@ -182,7 +182,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 - 解析 `enum`、`function`、`predicate`、`type`。
 - 解析 `object`、`initial_state`、`parent`、`attrs`。
 - 解析 `state`。
-- 解析 `events` 和 `on Event::... -> State::...`。
+- 解析 `transitions` 和 `on Transition::... -> State::...`。
 - 解析 `depends_on`、`drives`、`may_change`、`invariant`、`deferred`。
 
 第一版可以把复杂表达式保留为原始字符串，不急于完整求值。
@@ -208,7 +208,7 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 
 - 对象名重复。
 - 状态名重复。
-- 事件名重复。
+- transition 名重复。
 - `parent` 指向的对象存在。
 - 事件目标状态存在。
 - `Object.Event` 引用存在。
@@ -222,8 +222,8 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 - 已检查重复声明、未知父对象、未知事件目标状态、未知事件引用和未知状态引用。
 - 已提供对象视图、驱动关系视图和时间轴视图。
 - 图形输出中，`object` 和 `drives` 仍使用 Graphviz DOT；`timeline` 直接生成 SVG。
-- 已加入最小推导器，可从 `StartupTimeline.Event::Setup` 按事件源状态、`depends_on`、`drives` 顺序和目标状态执行静态推导，并收集 `proved`、`assumed`、`obligation`、`deferred`、`blocked` 和 `contradiction` 结果。
-- 已修正当前真实规格中的严格推导阻塞点：`KernelImage.Event::Enable` 不再依赖聚合完成态 `Vm.state == State::Ready`，而是依赖更局部的 `EarlyVm.state == State::Online`。当前 `StartupTimeline.Event::Setup` 可严格推出 `StartupTimeline.state == State::Ready`，复杂谓词仍作为 `obligation` 保留。
+- 已加入最小推导器，可从 `StartupTimeline.Transition::Setup` 按事件源状态、`depends_on`、`drives` 顺序和目标状态执行静态推导，并收集 `proved`、`assumed`、`obligation`、`deferred`、`blocked` 和 `contradiction` 结果。
+- 已修正当前真实规格中的严格推导阻塞点：`KernelImage.Transition::Enable` 不再依赖聚合完成态 `Vm.state == State::Ready`，而是依赖更局部的 `EarlyVm.state == State::Online`。当前 `StartupTimeline.Transition::Setup` 可严格推出 `StartupTimeline.state == State::Ready`，复杂谓词仍作为 `obligation` 保留。
 
 ### 2.1 Timeline View
 
@@ -322,20 +322,20 @@ tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
 ```bash
 tools/pyveri/bin/pyveri spec/model/main.spec
 tools/pyveri/bin/pyveri spec/model/main.spec -T
-tools/pyveri/bin/pyveri spec/model/main.spec -T --trace-annotations state,event
-tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,event
+tools/pyveri/bin/pyveri spec/model/main.spec -T --trace-annotations state,transition
+tools/pyveri/bin/pyveri spec/model/main.spec -T custom-trace.svg -a state,transition
 ```
 
 默认目标：
 
 ```text
-StartupTimeline.Event::Setup
+StartupTimeline.Transition::Setup
 ```
 
 后续可以增加参数：
 
 ```text
---target StartupTimeline.Event::Setup
+--target StartupTimeline.Transition::Setup
 --format text|json
 --strict
 ```
@@ -352,7 +352,7 @@ trace SVG 输出通过 driver 参数启用：
 
 - `-T` / `--trace`：在完整推导验证通过后输出基础 trace SVG，默认写入 `tools/out/trace/<spec>.trace.svg`。
 - `-T <path>` / `--trace <path>` / `--trace-svg <path>`：把 trace SVG 写入指定路径；`--trace-svg` 作为兼容别名保留。
-- `-a state|event|state,event` / `--trace-annotations state|event|state,event`：在基础 trace SVG 上叠加来自 `.spec` 注释的 state/event 注释层。该参数必须与 `-T/--trace/--trace-svg` 一起使用。
+- `-a state|transition|state,transition` / `--trace-annotations state|transition|state,transition`：在基础 trace SVG 上叠加来自 `.spec` 注释的 state/transition 注释层。该参数必须与 `-T/--trace/--trace-svg` 一起使用。
 
 后续 CLI 改进：
 
@@ -371,14 +371,14 @@ trace SVG 输出通过 driver 参数启用：
 已完成。此前严格推导阻塞在：
 
 ```text
-Vm.Event::Setup
-  drives KernelImage.Event::Enable
+Vm.Transition::Setup
+  drives KernelImage.Transition::Enable
 
-KernelImage.Event::Enable
+KernelImage.Transition::Enable
   depends_on Vm.state == State::Ready
 ```
 
-但 `Vm.Event::Setup` 自身完成前，`Vm.state` 仍是 `State::Prepared`。因此这是规格模型中的阶段依赖自锁，不是工具运行错误。当前修正为让 `KernelImage.Event::Enable` 依赖 `EarlyVm.state == State::Online`，表达其真实局部需求：EarlyVm 对应的早期虚拟地址空间已经可用。
+但 `Vm.Transition::Setup` 自身完成前，`Vm.state` 仍是 `State::Prepared`。因此这是规格模型中的阶段依赖自锁，不是工具运行错误。当前修正为让 `KernelImage.Transition::Enable` 依赖 `EarlyVm.state == State::Online`，表达其真实局部需求：EarlyVm 对应的早期虚拟地址空间已经可用。
 
 完成标准：
 
@@ -392,7 +392,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive --str
 
 已完成。`tools/pyveri/tests/test_derive.py` 已从“报告 blocked”改为“目标可达”：
 
-- 目标为 `StartupTimeline.Event::Setup`。
+- 目标为 `StartupTimeline.Transition::Setup`。
 - 期望最终 `StartupTimeline.state == State::Ready`。
 - 复杂谓词仍允许作为 `obligation` 保留。
 
@@ -440,7 +440,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - 当前完整推导报告过于平铺，信息噪音较大。后续应重新设计输出层次，默认只显示摘要、目标状态、根因 blocked、deferred 和 obligation 统计；详细 transitions 和全部 obligation 应通过 verbose/detail 参数打开。
 - 将默认推导过程显示为进入/退出式 trace，而不是平铺的 `transitions` 列表。每个事件输出成对记录：进入行使用 `>`，退出行使用 `<`；被 `drives` 的子事件缩进两格嵌套在中间。成功退出行不额外标注 `ok`，失败退出行标注 `blocked:` 或 `contradiction:` 并附带原因。
 - trace 图形输出应先建立单元格布局，再填充内容：横向先划分对象/嵌套列，列与列之间的空隙也作为占位单元格；列内部再按时间顺序分段，状态框、事件区间和内部空隙都占据明确单元格。虚线只作为布局辅助线或 debug 层，最终 SVG 默认不必显示。
-- 当前先以 `StartupTimeline.Event::Setup` 从 `State::Base` 到 `State::Ready` 的推导作为模板实现结构化 trace；未来完整入口再扩展为 `StartupTimeline` 顺序执行 `Preset`、`Setup`、`Enable` 并推进到 `State::Online`。
+- 当前先以 `StartupTimeline.Transition::Setup` 从 `State::Base` 到 `State::Ready` 的推导作为模板实现结构化 trace；未来完整入口再扩展为 `StartupTimeline` 顺序执行 `Preset`、`Setup`、`Enable` 并推进到 `State::Online`。
 - 按 `blocked`、`deferred`、`obligation` 分组时进一步按对象/事件/状态分组。
 - 对 `blocked` 输出根因链，而不是只输出逐层传播的 blocked。
 - 在摘要中区分“目标已达但存在 obligation”和“目标未达”。
@@ -470,15 +470,15 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `BootCPU.hartid` 不是可选值，而是 `BootCPU.Prepared` 后生效的属性；规格中使用 `HartId`，不使用 `Option<HartId>`、`Some(...)` 或 `unwrap()`。`CpuGroup` 不再长期保存 `boot_cpu_hartid`，只负责组织和驱动 `BootCPU`、`CpuIdMap` 等处理器管理子对象。
 - `BootArgs.Online` 的三条入口启动参数事实已经由窄规则收口：`attrs_accessible(self)`、`boot_hartid == Riscv64.a0`、`dtb_pa == Riscv64.a1` 均归入 `boot_arguments / riscv_boot_protocol` 并直接证明。依据是本地 Linux `~/gitStudy/linux-6.12.37/Documentation/arch/riscv/boot.rst` 的 RISC-V boot requirements：入口 `$a0` 保存当前 hartid，`$a1` 保存内存中 devicetree 地址。该规则只作用于 `BootArgs.State::Online`，不把其它对象的 `attrs_accessible(self)` 泛化为自动证明。
 - `OpenSbiFirmware.Online` 增加 `firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)`，表示当前 OpenSBI 固件交接给内核的 DTB blob 位于物理 RAM 中。Linux RISC-V boot protocol 只解释 `$a1` 是内存中的 devicetree 地址；OpenSBI firmware handoff 负责把 previous `a1` 或 `FW_JUMP_FDT_ADDR` 作为 next `arg1/a1` 传给下一阶段。DTB blob 的 RAM containment 因此归入 `firmware_entry_state / opensbi_firmware`，不归入泛化的 `SbiSpec`，也不由 `PhysicalMemory.source=fdt::memory` 自证。
-- `CpuGroup.Preset` 已改为驱动 `BootCPU.Preset`，由 `BootCPU` 依赖 `BootArgs.boot_hartid` 并用 `ensures { boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid); }` 表达事件完成后记录启动 hart 标识。这样 `BootArgs` 成为入口启动参数的统一抽象；启动 hart 是否属于平台有效 hart 集合由 `PlatformCpuInfo` 的 FDT CPU 描述事实证明，后续逻辑 CPU 映射由 `CpuIdMap.Preset` 建立。
-- `Riscv64.attrs_accessible(self)` 已从启动协议候选中移出，归入 `architecture_register_file / riscv_isa_spec` 并由对象声明 `source: external_spec::riscv_isa` 窄规则证明。该事实只表示模型声明的寄存器/CSR 属性来自 RISC-V ISA 寄存器文件且可被规格引用；具体寄存器值仍分别由启动协议、入口代码或事件后置事实证明。
-- `RootStream.Preset` 已用事件后置条件证明 `kernel_fpu_disabled(Riscv64.sstatus)` 和 `kernel_vector_disabled(Riscv64.sstatus)`。依据是 RISC-V ISA 定义 `sstatus` 中的 `SR_FS/SR_VS` 状态位，Linux `arch/riscv/kernel/head.S` 入口路径执行 `li t0, SR_FS_VS; csrc CSR_STATUS, t0` 清除这些位；该事实表达入口前导期禁止内核态直接使用 FPU/VECTOR。
+- `CpuGroup.Preset` 已改为驱动 `BootCPU.Preset`，由 `BootCPU` 依赖 `BootArgs.boot_hartid` 并用 `ensures { boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid); }` 表达transition 完成后记录启动 hart 标识。这样 `BootArgs` 成为入口启动参数的统一抽象；启动 hart 是否属于平台有效 hart 集合由 `PlatformCpuInfo` 的 FDT CPU 描述事实证明，后续逻辑 CPU 映射由 `CpuIdMap.Preset` 建立。
+- `Riscv64.attrs_accessible(self)` 已从启动协议候选中移出，归入 `architecture_register_file / riscv_isa_spec` 并由对象声明 `source: external_spec::riscv_isa` 窄规则证明。该事实只表示模型声明的寄存器/CSR 属性来自 RISC-V ISA 寄存器文件且可被规格引用；具体寄存器值仍分别由启动协议、入口代码或transition 后置事实证明。
+- `RootStream.Preset` 已用transition 后置条件证明 `kernel_fpu_disabled(Riscv64.sstatus)` 和 `kernel_vector_disabled(Riscv64.sstatus)`。依据是 RISC-V ISA 定义 `sstatus` 中的 `SR_FS/SR_VS` 状态位，Linux `arch/riscv/kernel/head.S` 入口路径执行 `li t0, SR_FS_VS; csrc CSR_STATUS, t0` 清除这些位；该事实表达入口前导期禁止内核态直接使用 FPU/VECTOR。
 
 后续规格结构清理：
 
 - 已引入 `BootArgs` 对象作为内核启动参数抽象。当前 RISC-V64 语境下，`BootArgs.boot_hartid == Riscv64.a0`，`BootArgs.dtb_pa == Riscv64.a1`。`Riscv64` 继续描述入口寄存器事实，`BootArgs` 描述启动 ABI/boot protocol 对寄存器的语义解释；`RawDtb` 已改为依赖 `BootArgs.dtb_pa`，`CpuGroup` 已改为依赖 `BootArgs.boot_hartid`，避免裸寄存器名散落在规格中。
 - `RawDtb` 的规格按三层表达：`BootArgs.dtb_pa` 是 dtb 起始物理地址，`header_range` 覆盖读取 `DtbHeader` 所需范围，`range` 覆盖根据 `header.total_size` 得到的完整 dtb 范围。规格统一使用 `contains(container, value)` 表达包含关系，不再引入 `addr_in_ram` 或 `range_in_ram` 这类薄包装谓词；`contains(PhysicalMemory.ram, header_range)` 表示头部读取范围有效，`contains(PhysicalMemory.ram, range)` 表示启动代码读取 total_size 后的完整范围检查。
-- `RawDtb.Preset` 已用事件后置条件证明 `header_range` 由 `BootArgs.dtb_pa` 和 `size_of::<DtbHeader>()` 派生，并证明头部 magic 有效；`RawDtb.Setup` 已用事件后置条件证明完整 `range` 由 `BootArgs.dtb_pa` 和 `header.total_size` 派生，并证明完整 header 有效。`contains(PhysicalMemory.ram, header_range)` 与 `contains(PhysicalMemory.ram, range)` 不用事件后置条件硬消，而是由 `firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)` 加上 RawDtb 自身的边界派生事实证明。
+- `RawDtb.Preset` 已用transition 后置条件证明 `header_range` 由 `BootArgs.dtb_pa` 和 `size_of::<DtbHeader>()` 派生，并证明头部 magic 有效；`RawDtb.Setup` 已用transition 后置条件证明完整 `range` 由 `BootArgs.dtb_pa` 和 `header.total_size` 派生，并证明完整 header 有效。`contains(PhysicalMemory.ram, header_range)` 与 `contains(PhysicalMemory.ram, range)` 不用transition 后置条件硬消，而是由 `firmware_dtb_blob_in_ram_at_kernel_entry(BootArgs.dtb_pa)` 加上 RawDtb 自身的边界派生事实证明。
 - `RawDtb.Preset/Setup` 当前属于规格前置证明边界，不表示 Linux 6.12.37 的 RISC-V `setup_vm()` 在同一源码位置逐项验证 DTB。Linux 实现侧主要在 `setup_vm()` 中根据 `dtb_pa` 建立 FDT fixmap 映射并设置 `dtb_early_va/dtb_early_pa`，后续 `parse_dtb()` 调用 `early_init_dt_scan()`，再由 `early_init_dt_verify()` 执行 `fdt_check_header()` 并扫描 `/chosen`、`/memory` 等节点。本规格把这些后续隐含依赖提前收口，是为了让 `EarlyVm` 的 FDT 映射前提可推导、可检查。
 - `fits_in_fixmap_slot(range, slot, page_size)` 只表达 RawDtb 物理范围有资格放入 FDT fixmap 槽位范围的页覆盖数约束，不表示映射已经建立，也不要求 RawDtb 原始前后边界页对齐。fixmap 的基本单位是页，FDT slot 可覆盖连续多个页；因此 `FixMapSlotRange<T>` 表示连续页槽位范围，容量比较已改为 `page_cover_count(range, page_size) <= slot_page_count(slot)`。该约束已由 `riscv_fixmap_layout` 收口：Linux/RISC-V 定义 `FIX_FDT = FIX_FDT_END + FIX_FDT_SIZE / PAGE_SIZE - 1`，64 位下 `MAX_FDT_SIZE = PMD_SIZE` 且 `FIX_FDT_SIZE = MAX_FDT_SIZE + SZ_2M`，`create_fdt_early_page_table()` 用两个 PMD 映射覆盖未对齐 DTB 所在范围。
 - 已引入最小 `FixMap` 对象，先只建模 FDT 槽位。`RawDtb` 负责物理 DTB 有效性，`FixMap.Preset` 负责检查 FDT slot 存在且能够容纳 RawDtb，并记录 `slot_contains(FixMap.fdt_slot, RawDtb)`；`EarlyVm` 后续只依赖 FixMap 已就绪和槽位内容，再建立页表映射。
@@ -490,27 +490,27 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 - `valid_virt_addr(kernel_link_addr)` 已上移到 `Config.Online`，表示内核链接地址有效性属于配置/地址布局事实，`TrampolineVm.Setup` 不再重复声明该检查。`trampoline_mapping_ready(...)` 归入 `boot_code_candidate`，`phys_to_virt_transition_completed()` 归入 `prior_derivation_facts`。
 - 已引入 `TrampolineMap` 表示第一次物理到虚拟地址过渡所需的最小跳板映射区域，其物理起点来自 `Lds.kernel_start`，虚拟起点来自 `Config.kernel_link_addr`，大小来自 `Config.pmd_size`。`TrampolineVm` 现在使用 `trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)`，不再把物理起点和虚拟起点散落在谓词参数里。
 - `phys_to_virt_transition_completed(...)` 已参数化为 `phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap)`，表示第一次地址空间过渡完成应由跳板页表、跳板映射和 `TrampolineVm.Enable` 的 satp 切换共同推出。
-- `KernelImage` 自身的剩余义务按来源细化：`valid_segment_set(segments)` 来自链接脚本段布局，`memory_zeroed(segments.bss.range)` 已由 `KernelImage.Setup` 的事件后置事实证明，对应 Linux `head.S` 中 `__bss_start` 到 `__bss_stop` 的清零循环；`gp_relative_access_ready()` 由 `KernelImage.Enable` 重置 gp、`KernelImageMap` 可访问等前序事实推出。
+- `KernelImage` 自身的剩余义务按来源细化：`valid_segment_set(segments)` 来自链接脚本段布局，`memory_zeroed(segments.bss.range)` 已由 `KernelImage.Setup` 的transition 后置事实证明，对应 Linux `head.S` 中 `__bss_start` 到 `__bss_stop` 的清零循环；`gp_relative_access_ready()` 由 `KernelImage.Enable` 重置 gp、`KernelImageMap` 可访问等前序事实推出。
 - `TrampolineVm.pg_dir`、`EarlyVm.pg_dir` 和 `SwapperVm.pg_dir` 各自承担静态页表存储的存在性、稳定性、静态分配、页对齐和最小容量约束。`TrampolineVm.Setup`、`EarlyVm.Setup` 和 `SwapperVm.Setup` 不再重复声明裸 `page_aligned(...)`；各 VM 阶段在自身 `Setup` 中绑定静态页表存储并声明映射语义。
 - `EventStream.early_event_entry` 和 `EventStream.formal_event_entry` 各自承担事件入口符号的存在性与稳定性约束。`EventStream.Preset` 和 `EventStream.Setup` 在绑定符号后设置对应入口，不再依赖准备期的统一静态对象集合。
 - `TrampolineMap` 增加 `valid_trampoline_map(...)` 约束，把跳板映射的物理起点、虚拟起点和映射大小约束集中到映射对象自身。`TrampolineVm.Setup` 不再直接声明 `aligned(Lds.kernel_start, Config.pmd_size)`，也不再重复声明 `valid_satp_mode(Config.satp_mode)`；`valid_trampoline_map(...)` 已由 `Lds` 链接布局和 `Config` 地址配置共同证明，对应 Linux `setup_vm()` 中从 `_start`、`KERNEL_LINK_ADDR/kernel_map.virt_addr` 和 `PMD_SIZE` 建立 trampoline 映射。
 - `BootInitTask`、`EventStream`、`TrampolineVm`、`EarlyVm` 和 `SwapperVm` 已分别标注 `source: static::linux_6_12_37`。`BootInitTask.storage` 来自 `init/init_task.c` 中的静态 `init_task` 定义，事件入口符号来自 RISC-V 汇编入口符号，页表存储来自 `arch/riscv/mm/init.c` 中的静态页表数组定义；这些事实由对象自身 Preset/Setup 后置条件收口，并按 `linux_static_object_binding` 归类。
 - `PhysicalMemory` 已标注 `source: fdt::memory`。`attrs_accessible(self)`、`valid_phys_range_set(ram)`、`valid_phys_range_set(iomap)` 和 `disjoint(ram, iomap)` 归入 `fdt_memory_layout` 直接证明，表示平台内存布局来自 FDT/platform memory description。具体 DTB 地址/范围落入 RAM 不由该来源自动证明，避免用 DTB 自身的 `/memory` 描述证明 DTB 自身位置；当前由 OpenSBI 固件交接事实与 RawDtb 边界派生共同收口。
-- 剩余泛化 provider 已继续细化：`valid_task_ref(...)` 与 `valid_stack_pointer(...)` 由前序寄存器设置事实推出，`Soc.Preset` 用事件后置条件证明 `soc_early_platform_ready()`；对应 Linux `head.S` 在进入 `start_kernel` 前调用 `soc_early_init()`，而 `soc.c` 根据 `dtb_early_va` 的 compatible 匹配执行 SoC 早期函数。
+- 剩余泛化 provider 已继续细化：`valid_task_ref(...)` 与 `valid_stack_pointer(...)` 由前序寄存器设置事实推出，`Soc.Preset` 用transition 后置条件证明 `soc_early_platform_ready()`；对应 Linux `head.S` 在进入 `start_kernel` 前调用 `soc_early_init()`，而 `soc.c` 根据 `dtb_early_va` 的 compatible 匹配执行 SoC 早期函数。
 - 若裸关系表达式实际承载模型语义，也需要按表达式来源细化，而不是一律归入 `builtin_candidate`。当前已细化：`BootArgs` 的 `a0/a1` 绑定来自启动协议，`RawDtb` 的 header/range 边界来自启动代码读取与派生，`FixMap.fdt_slot == Config.fixmap.fdt` 来自配置源。
 - 事件写寄存器后的状态关系已归入 `register_effect/prior_derivation_facts`，包括 `sie/sip/stvec/tp/sp/gp/satp/sscratch` 的物理地址阶段、EarlyVm 阶段和地址空间切换结果。这类关系不再视为普通 builtin 关系，而是由对应事件的 `may_change` 与前序推导事实支持。
 - `source` 表示可替换的证明来源标识，不应把模型永久固定到某一个 Linux 版本或某一个链接脚本实现；当前用具体来源先收口 RISCV64/Linux 6.12.37 这条验证路径，后续可增加其它来源并保留相同对象语义。
 - `Lds` 已标注 `source: linker::linux_6_12_37`。`Lds.Online` 中的 `_start`、`_end`、`__global_pointer$`、`__bss_start`、`__bss_stop`、`init_thread_union + THREAD_SIZE` 等链接脚本布局事实已由窄规则归入 `linux_linker_script` 直接证明；`KernelImage` 的段集合、BSS 段范围和 BSS 落入内核映像范围也由该链接布局来源收口。
 - `Config` 的数值边界、对齐、satp 模式和 fixmap 配置约束已由 `config_source` 收口。`BootInitStack` 的栈容量约束已由 `Lds` 链接布局和 `Config` 页大小共同证明：Linux 链接脚本用 `init_thread_union + THREAD_SIZE` 定义 init stack 边界，RISC-V `THREAD_SIZE = PAGE_SIZE << THREAD_SIZE_ORDER`，因此可推出 `Lds.init_stack_end - Lds.init_stack_start >= Config.page_size`；sp 落入栈范围约束仍由前序 sp 设置事实推出。
 - `Config` 已标注 `source: config::entry_prelude`。`Config.Online` 中的配置项可访问性、页大小/PMD/栈页表空间/内核链接地址/内核映像窗口/satp 模式/fixmap 配置等配置源事实，已由窄规则归入 `config_source` 直接证明；`FixMap`、`LinearMap` 和各 VM 阶段对配置的使用仍保留为后续推导义务。
-- 已引入事件后置断言块 `ensures { ... }`。`ensures` 表达事件完成后保证成立的关系，不表示在 invariant 中赋值，也不同于 `may_change` 的“允许改变”。推导器现在可用“进入目标状态的事件 `ensures`”证明该目标状态中完全相同的 invariant；第一批用于消化 `register_effect` 相关寄存器状态关系。
+- 已引入transition 后置断言块 `ensures { ... }`。`ensures` 表达transition 完成后保证成立的关系，不表示在 invariant 中赋值，也不同于 `may_change` 的“允许改变”。推导器现在可用“进入目标状态的事件 `ensures`”证明该目标状态中完全相同的 invariant；第一批用于消化 `register_effect` 相关寄存器状态关系。
 - 推导器已开始记录已证明表达式，并用前序事实继续证明一小组派生 invariant：`valid_task_ref(Riscv64.tp)`、`valid_stack_pointer(Riscv64.sp)` 和 `inside(Riscv64.sp, ...)` 可由已证明的 `tp/sp` 后置关系推出。
-- `FixMap.Preset` 已用 `ensures { slot_contains(fdt_slot, RawDtb); }` 表达“RawDtb 已被安排到 FDT fixmap 槽位”的事件后置事实；`EarlyVm.Preset` 作为复合事件，用 `ensures { slot_contains(FixMap.fdt_slot, RawDtb); }` 表达驱动 `RawDtb` 与 `FixMap` 后形成的对外事实。`EarlyVm.Setup` 中重复依赖的同一 `slot_contains(...)` 可由前序已证明事实推出，因此 `fixmap_slot_content/prior_derivation_facts` 这一组当前已收口。
-- `FixMap.Preset` 不再把 `fdt_slot == Config.fixmap.fdt` 当作设置 `fdt_slot` 前的前置条件，而是作为事件完成后的后置事实；`attrs_accessible(self)` 也由该事件设置槽位后保证。`fits_in_fixmap_slot(...)` 已由 FDT fixmap 槽位容量布局证明，不再作为剩余义务保留。
-- `TrampolineVm.Enable` 已用事件后置条件证明 `phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap)`；`KernelImage.Enable` 已用事件后置条件证明 `gp_relative_access_ready()`。这两项目前作为具体事件效果收口，而不是引入泛化自动规则。
-- `TrampolineVm.Setup` 已用事件后置条件证明 `trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)`；`EarlyVm.Setup` 已用事件后置条件证明 `kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImageMap)` 和 `fixmap_slot_mapping_ready(EarlyVm.pg_dir, FixMap.fdt_slot)`。这些事实表达页表构建事件完成后的映射就绪状态，不引入泛化自动映射规则。
+- `FixMap.Preset` 已用 `ensures { slot_contains(fdt_slot, RawDtb); }` 表达“RawDtb 已被安排到 FDT fixmap 槽位”的transition 后置事实；`EarlyVm.Preset` 作为复合事件，用 `ensures { slot_contains(FixMap.fdt_slot, RawDtb); }` 表达驱动 `RawDtb` 与 `FixMap` 后形成的对外事实。`EarlyVm.Setup` 中重复依赖的同一 `slot_contains(...)` 可由前序已证明事实推出，因此 `fixmap_slot_content/prior_derivation_facts` 这一组当前已收口。
+- `FixMap.Preset` 不再把 `fdt_slot == Config.fixmap.fdt` 当作设置 `fdt_slot` 前的前置条件，而是作为transition 完成后的后置事实；`attrs_accessible(self)` 也由该事件设置槽位后保证。`fits_in_fixmap_slot(...)` 已由 FDT fixmap 槽位容量布局证明，不再作为剩余义务保留。
+- `TrampolineVm.Enable` 已用transition 后置条件证明 `phys_to_virt_transition_completed(TrampolineVm.pg_dir, TrampolineMap)`；`KernelImage.Enable` 已用transition 后置条件证明 `gp_relative_access_ready()`。这两项目前作为具体事件效果收口，而不是引入泛化自动规则。
+- `TrampolineVm.Setup` 已用transition 后置条件证明 `trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap)`；`EarlyVm.Setup` 已用transition 后置条件证明 `kernel_image_mapping_ready(EarlyVm.pg_dir, KernelImage, KernelImageMap)` 和 `fixmap_slot_mapping_ready(EarlyVm.pg_dir, FixMap.fdt_slot)`。这些事实表达页表构建transition 完成后的映射就绪状态，不引入泛化自动映射规则。
 - `TrampolineVm.Online` 中重复出现的 `trampoline_mapping_ready(...)` 由 `TrampolineVm.Ready` 已证明的同一映射就绪事实作为前序事实延续，不重新归入 boot code obligation。
-- `EarlyVm.Enable` 已用事件后置条件证明 `kernel_image_accessible(KernelImage, KernelImageMap)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。含义是 `EarlyVm.Ready` 已经具备映射，`Enable` 切换到 `early_pg_dir` 后这些映射进入可访问状态；当前不引入通用映射可访问自动证明规则。
+- `EarlyVm.Enable` 已用transition 后置条件证明 `kernel_image_accessible(KernelImage, KernelImageMap)` 和 `fixmap_slot_accessible(FixMap.fdt_slot)`。含义是 `EarlyVm.Ready` 已经具备映射，`Enable` 切换到 `early_pg_dir` 后这些映射进入可访问状态；当前不引入通用映射可访问自动证明规则。
 
 #### Step C.1: 收口 trace 输出和注释数据流
 
@@ -518,7 +518,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 
 - 下一阶段优先收口 trace/SVG 输出体验，而不是继续扩展证明规则。当前 `obligation: 0` 已经形成阶段性闭环，后续应先让推导验证过程图更适合日常审阅。
 - 预览输出文件不要散落在仓库根目录。`-T/--trace` 不带路径时已默认输出到 `tools/out/trace/`；显式路径仍用于正式导出到 `spec/pic/` 或其它指定目录。
-- 系统检查四种 SVG 输出：基础图、带 state 注释、带 event 注释、同时带 state/event 注释，并把具体视觉问题记录成待办。
+- 系统检查四种 SVG 输出：基础图、带 state 注释、带 transition 注释、同时带 state/transition 注释，并把具体视觉问题记录成待办。
 - 当前 `.spec` 注释由 `pyveri` driver 临时读取并转换成 render 可用的 annotation JSON。长期更合理的数据流是：`parse` 保留注释 span/内容，`model` 或 `view` 按对象状态和事件关联注释，`render` 只消费 `view.json` 或明确的 annotation 输入。
 - trace 注释第一版保持 overlay，不改变底图布局；后续如果注释过密，再讨论更完整的注释布局、标题/正文结构、过滤策略，以及注释块自动避让和遮挡控制。
 - `--trace-svg` / `--trace-annotations` 已增加短形式：`-T/--trace` 和 `-a`。
@@ -587,7 +587,7 @@ tools/out/
 - 状态和事件引用检查。
 - `drives` 顺序保持。
 - `deferred` 收集。
-- 从 `StartupTimeline.Event::Setup` 推导到目标状态的最小路径。
+- 从 `StartupTimeline.Transition::Setup` 推导到目标状态的最小路径。
 
 ## 第一版非目标
 

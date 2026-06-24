@@ -6,8 +6,8 @@
  * gives AI agents and tools stable predicates to consume.
  */
 
-predicate rust_should_use_result_propagation_for_event_chains() -> bool;
-predicate rust_should_centralize_event_boundary_error_handling() -> bool;
+predicate rust_should_use_result_propagation_for_transition_chains() -> bool;
+predicate rust_should_centralize_transition_boundary_error_handling() -> bool;
 predicate rust_should_parameterize_global_asm_operands() -> bool;
 predicate rust_should_use_explicit_abi_for_low_level_boundaries() -> bool;
 predicate rust_should_not_use_extern_c_for_pure_rust_internal_functions() -> bool;
@@ -16,24 +16,24 @@ predicate rust_may_use_naked_functions_for_tiny_asm_boundaries() -> bool;
 type RustCodingShould {
     invariant {
         /*
-         * Event-chain error propagation:
+         * Transition-chain error propagation:
          *
-         * Rust code that drives a sequence of model events should convert
-         * EventResult-like values into Result-like outcomes and use the `?`
+         * Rust code that drives a sequence of model transitions should convert
+         * TransitionResult-like values into Result-like outcomes and use the `?`
          * operator inside ordinary functions. The non-returning phase boundary
          * should handle the final error report and shutdown.
          */
-        rust_should_use_result_propagation_for_event_chains();
+        rust_should_use_result_propagation_for_transition_chains();
 
         /*
          * Boundary error handling:
          *
-         * Event-chain error reporting should be centralized at explicit phase
-         * or startup boundaries. Interior event-driving functions should
+         * Transition-chain error reporting should be centralized at explicit phase
+         * or startup boundaries. Interior transition-driving functions should
          * propagate errors instead of open-coding repeated require-style
-         * checks after each event.
+         * checks after each transition.
          */
-        rust_should_centralize_event_boundary_error_handling();
+        rust_should_centralize_transition_boundary_error_handling();
 
         /*
          * Parameterized global assembly:

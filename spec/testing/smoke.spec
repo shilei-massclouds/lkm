@@ -190,7 +190,7 @@ type SmokeTestGenerationMust {
         /*
          * Normal paths:
          *
-         * Scenarios must include successful event/action paths when all
+         * Scenarios must include successful transition/action paths when all
          * modeled preconditions are satisfied.
          */
         testing_smoke_must_cover_normal_paths();

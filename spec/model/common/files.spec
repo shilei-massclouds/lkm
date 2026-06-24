@@ -25,7 +25,7 @@
  *     -> FilesStruct.Action::OpenPath
  *     -> VfsCore.Action::ReadPath(Path, FsStruct)
  *     -> FileBackend.Action::BindRegularFile
- *     -> OpenFileDescription.Event::Setup
+ *     -> OpenFileDescription.Transition::Setup
  *     -> FileDescriptorTable.Action::Install(FdRef::Regular0)
  *   SyscallTable.Action::Read
  *     -> FilesStruct.Action::ReadFd(FdRef::Regular0)
@@ -105,17 +105,17 @@ object FilesStruct: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
                     ConsoleRegistry.state == State::Ready;
                 }
 
                 drives {
-                    FileDescriptorTable.Event::Setup;
-                    FileBackend.Event::Setup;
-                    OpenFileDescription.Event::Setup;
+                    FileDescriptorTable.Transition::Setup;
+                    FileBackend.Transition::Setup;
+                    OpenFileDescription.Transition::Setup;
                     FileDescriptorTable.Action::InstallStdio;
                 }
 
@@ -175,7 +175,7 @@ object FilesStruct: ResourceObject {
                 drives {
                     VfsCore.Action::ReadPath(Path, FsStruct);
                     FileBackend.Action::BindRegularFile;
-                    OpenFileDescription.Event::Setup;
+                    OpenFileDescription.Transition::Setup;
                     FileDescriptorTable.Action::Install(FdRef::Regular0);
                 }
 
@@ -255,8 +255,8 @@ object FileDescriptorTable: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     fd_table_allocated(self);
                     fd_table_capacity_bound(self);
@@ -332,8 +332,8 @@ object OpenFileDescription: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     FileBackend.state == State::Ready;
                 }
@@ -404,8 +404,8 @@ object FileBackend: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ConsoleRegistry.state == State::Ready;
                 }

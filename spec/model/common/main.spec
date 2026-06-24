@@ -663,7 +663,7 @@ type Task: TaskObject {
     }
 
     processes {
-        Event::SetRuntimeState(state: TaskRuntimeState) {
+        Transition::SetRuntimeState(state: TaskRuntimeState) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 task_runtime_state_transition_allowed(self, state);
@@ -1019,7 +1019,7 @@ type RunQueue: TaskObject {
     task_refs: TaskRefSet;
 
     processes {
-        Event::EnqueueTask(task_ref: TaskRef) {
+        Transition::EnqueueTask(task_ref: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 task_ref_ready(task_ref);
@@ -1072,21 +1072,21 @@ type CurrentCPU {
     }
 
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             ensures {
                 current_cpu_self_identity_ready(self);
             }
         }
 
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             ensures {
                 current_cpu_self_identity_ready(self);
             }
         }
 
-        Event::Enable {
+        Transition::Enable {
             state_effect: StateEffect::Always;
             ensures {
                 current_cpu_registered_in_cpu_group(self, CpuGroup);
@@ -1099,7 +1099,7 @@ type LocalInterruptControl {
     ext_state: LocalInterruptExtState;
 
     processes {
-        Event::Disable {
+        Transition::Disable {
             state_effect: StateEffect::Conditional;
             transitions {
                 LocalInterruptExtState::Enabled -> LocalInterruptExtState::Disabled;
@@ -1114,7 +1114,7 @@ type LocalInterruptControl {
             }
         }
 
-        Event::Enable {
+        Transition::Enable {
             state_effect: StateEffect::Conditional;
             transitions {
                 LocalInterruptExtState::Disabled -> LocalInterruptExtState::Enabled;
@@ -1129,7 +1129,7 @@ type LocalInterruptControl {
             }
         }
 
-        Event::SaveAndDisable {
+        Transition::SaveAndDisable {
             state_effect: StateEffect::Conditional;
             transitions {
                 LocalInterruptExtState::Enabled -> LocalInterruptExtState::Disabled;
@@ -1145,7 +1145,7 @@ type LocalInterruptControl {
             }
         }
 
-        Event::Restore {
+        Transition::Restore {
             state_effect: StateEffect::Conditional;
             transitions {
                 SavedInterruptState::Enabled -> LocalInterruptExtState::Enabled;
@@ -1177,7 +1177,7 @@ type PreemptionControl {
     ext_state: PreemptionExtState;
 
     processes {
-        Event::Disable {
+        Transition::Disable {
             state_effect: StateEffect::Conditional;
             transitions {
                 PreemptionExtState::Enabled -> PreemptionExtState::Disabled;
@@ -1192,7 +1192,7 @@ type PreemptionControl {
             }
         }
 
-        Event::Enable {
+        Transition::Enable {
             state_effect: StateEffect::Conditional;
             transitions {
                 PreemptionExtState::Disabled -> PreemptionExtState::Enabled;
@@ -1207,7 +1207,7 @@ type PreemptionControl {
             }
         }
 
-        Event::EnableNoResched {
+        Transition::EnableNoResched {
             state_effect: StateEffect::Conditional;
             transitions {
                 PreemptionExtState::Disabled -> PreemptionExtState::Enabled;
@@ -1229,7 +1229,7 @@ type RawSpinLock {
     ext_state: RawSpinLockExtState;
 
     lifecycle {
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             ensures {
                 raw_spinlock_storage_bound(self);
@@ -1257,11 +1257,11 @@ type RawSpinLock {
             }
         }
 
-        Event::LockIrqSave {
+        Transition::LockIrqSave {
             state_effect: StateEffect::Conditional;
             drives {
-                current_cpu.cpu.LocalInterruptControl.Event::SaveAndDisable(out flags);
-                current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Event::Disable;
+                current_cpu.cpu.LocalInterruptControl.Transition::SaveAndDisable(out flags);
+                current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Transition::Disable;
                 self.Action::Acquire;
             }
             transitions {
@@ -1278,12 +1278,12 @@ type RawSpinLock {
             }
         }
 
-        Event::UnlockIrqRestore {
+        Transition::UnlockIrqRestore {
             state_effect: StateEffect::Conditional;
             drives {
                 self.Action::Release;
-                current_cpu.cpu.LocalInterruptControl.Event::Restore(flags);
-                current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Event::Enable;
+                current_cpu.cpu.LocalInterruptControl.Transition::Restore(flags);
+                current_cpu.cpu.CurrentTaskSlot.current_task.PreemptionControl.Transition::Enable;
             }
             transitions {
                 RawSpinLockExtState::Locked -> RawSpinLockExtState::Unlocked;
@@ -1314,7 +1314,7 @@ type Mutex {
     }
 
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             ensures {
                 mutex_storage_bound(self);
@@ -1325,10 +1325,10 @@ type Mutex {
             }
         }
 
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             drives {
-                self.wait_queue.Event::Setup;
+                self.wait_queue.Transition::Setup;
             }
             ensures {
                 mutex_initialized(self);
@@ -1342,7 +1342,7 @@ type Mutex {
     }
 
     processes {
-        Event::Lock(current_task: TaskRef) {
+        Transition::Lock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1362,7 +1362,7 @@ type Mutex {
             }
         }
 
-        Event::Unlock(current_task: TaskRef) {
+        Transition::Unlock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1382,7 +1382,7 @@ type Mutex {
             }
         }
 
-        Event::Wait(current_task: TaskRef) {
+        Transition::Wait(current_task: TaskRef) {
             state_effect: StateEffect::None;
             depends_on {
                 self.state == State::Ready;
@@ -1415,7 +1415,7 @@ type RwLock {
     ext_state: RwLockExtState;
 
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             ensures {
                 rwlock_storage_bound(self);
@@ -1426,7 +1426,7 @@ type RwLock {
             }
         }
 
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             ensures {
                 rwlock_initialized(self);
@@ -1442,7 +1442,7 @@ type RwLock {
     }
 
     processes {
-        Event::ReadLock(current_task: TaskRef) {
+        Transition::ReadLock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1465,7 +1465,7 @@ type RwLock {
             }
         }
 
-        Event::ReadUnlock(current_task: TaskRef) {
+        Transition::ReadUnlock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1482,7 +1482,7 @@ type RwLock {
             }
         }
 
-        Event::WriteLock(current_task: TaskRef) {
+        Transition::WriteLock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1505,7 +1505,7 @@ type RwLock {
             }
         }
 
-        Event::WriteUnlock(current_task: TaskRef) {
+        Transition::WriteUnlock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1523,7 +1523,7 @@ type RwLock {
             }
         }
 
-        Event::ReadTryLock(current_task: TaskRef) {
+        Transition::ReadTryLock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1544,7 +1544,7 @@ type RwLock {
             }
         }
 
-        Event::WriteTryLock(current_task: TaskRef) {
+        Transition::WriteTryLock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1576,7 +1576,7 @@ type RcuSync {
     ext_state: RcuSyncExtState;
 
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             ensures {
                 rcu_sync_static_or_runtime_initialized(self);
@@ -1585,7 +1585,7 @@ type RcuSync {
             }
         }
 
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             ensures {
                 rcu_sync_ready(self);
@@ -1596,7 +1596,7 @@ type RcuSync {
     }
 
     processes {
-        Event::Enter {
+        Transition::Enter {
             state_effect: StateEffect::Conditional;
             transitions {
                 RcuSyncExtState::Idle -> RcuSyncExtState::WriterActive;
@@ -1607,7 +1607,7 @@ type RcuSync {
             }
         }
 
-        Event::Exit {
+        Transition::Exit {
             state_effect: StateEffect::Conditional;
             transitions {
                 RcuSyncExtState::WriterActive -> RcuSyncExtState::Idle;
@@ -1640,10 +1640,10 @@ type PerCpuRwSemaphore {
     }
 
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             drives {
-                self.rcu_sync.Event::Preset;
+                self.rcu_sync.Transition::Preset;
             }
             ensures {
                 percpu_rwsem_storage_bound(self);
@@ -1656,11 +1656,11 @@ type PerCpuRwSemaphore {
             }
         }
 
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             drives {
-                self.rcu_sync.Event::Setup;
-                self.wait_queue.Event::Setup;
+                self.rcu_sync.Transition::Setup;
+                self.wait_queue.Transition::Setup;
             }
             ensures {
                 percpu_rwsem_ready(self);
@@ -1672,7 +1672,7 @@ type PerCpuRwSemaphore {
             }
         }
 
-        Event::Enable {
+        Transition::Enable {
             state_effect: StateEffect::Always;
             ensures {
                 percpu_rwsem_online(self);
@@ -1682,7 +1682,7 @@ type PerCpuRwSemaphore {
     }
 
     processes {
-        Event::ReadLock(current_task: TaskRef) {
+        Transition::ReadLock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1706,7 +1706,7 @@ type PerCpuRwSemaphore {
             }
         }
 
-        Event::ReadTryLock(current_task: TaskRef) {
+        Transition::ReadTryLock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1728,7 +1728,7 @@ type PerCpuRwSemaphore {
             }
         }
 
-        Event::ReadUnlock(current_task: TaskRef) {
+        Transition::ReadUnlock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1748,14 +1748,14 @@ type PerCpuRwSemaphore {
             }
         }
 
-        Event::WriteLock(current_task: TaskRef) {
+        Transition::WriteLock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
                 task_ref_ready(current_task);
             }
             drives {
-                self.rcu_sync.Event::Enter;
+                self.rcu_sync.Transition::Enter;
             }
             transitions {
                 PerCpuRwSemaphoreExtState::ReadersFast -> PerCpuRwSemaphoreExtState::WriterActive;
@@ -1776,7 +1776,7 @@ type PerCpuRwSemaphore {
             }
         }
 
-        Event::WriteUnlock(current_task: TaskRef) {
+        Transition::WriteUnlock(current_task: TaskRef) {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Ready;
@@ -1785,7 +1785,7 @@ type PerCpuRwSemaphore {
             }
             drives {
                 self.wait_queue.Action::WakeOne;
-                self.rcu_sync.Event::Exit;
+                self.rcu_sync.Transition::Exit;
             }
             transitions {
                 PerCpuRwSemaphoreExtState::WriterActive -> PerCpuRwSemaphoreExtState::ReadersFast;
@@ -1806,7 +1806,7 @@ type CompletionTokenCount {
 
 type SimpleWaitQueue {
     lifecycle {
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             ensures {
                 wait_queue_ready(self);
@@ -1872,7 +1872,7 @@ type Completion {
     }
 
     lifecycle {
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             ensures {
                 completion_storage_bound(self);
@@ -1880,10 +1880,10 @@ type Completion {
             }
         }
 
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             drives {
-                self.wait_queue.Event::Setup;
+                self.wait_queue.Transition::Setup;
             }
             ensures {
                 completion_ready(self);
@@ -1893,7 +1893,7 @@ type Completion {
             }
         }
 
-        Event::Enable {
+        Transition::Enable {
             state_effect: StateEffect::Always;
             ensures {
                 completion_online(self);
@@ -1901,7 +1901,7 @@ type Completion {
             }
         }
 
-        Event::Disable {
+        Transition::Disable {
             state_effect: StateEffect::Conditional;
             ensures {
                 completion_handle_revoked(self);
@@ -1910,7 +1910,7 @@ type Completion {
     }
 
     processes {
-        Event::Complete {
+        Transition::Complete {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Online;
@@ -1935,7 +1935,7 @@ type Completion {
             }
         }
 
-        Event::CompleteAll {
+        Transition::CompleteAll {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Online;
@@ -1959,7 +1959,7 @@ type Completion {
             }
         }
 
-        Event::Wait {
+        Transition::Wait {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Online;
@@ -1984,7 +1984,7 @@ type Completion {
             }
         }
 
-        Event::TryWait {
+        Transition::TryWait {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Online;
@@ -2001,7 +2001,7 @@ type Completion {
             }
         }
 
-        Event::Reinit {
+        Transition::Reinit {
             state_effect: StateEffect::Conditional;
             depends_on {
                 self.state == State::Online;

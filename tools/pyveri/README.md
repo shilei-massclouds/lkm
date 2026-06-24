@@ -14,7 +14,7 @@
 
 - 解析 `.spec` 文件，忽略 `/* ... */` 和 `// ...` 注释。
 - 建立对象、状态、事件、依赖、不变量和延期义务的模型。
-- 从 `StartupTimeline.Event::Setup` 开始，推导当前启动时间轴是否能达到目标状态。
+- 从 `StartupTimeline.Transition::Setup` 开始，推导当前启动时间轴是否能达到目标状态。
 - 报告已证明、无法证明、矛盾和 `deferred` 条目。
 - 支持 `include "relative/path.spec";`，路径相对当前 `.spec` 文件所在目录解析。
 
@@ -46,7 +46,7 @@ PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec --derive --strict
 PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec -T
-PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec -T -a state,event
+PYTHONPATH=tools/pyveri/src python -m pyveri spec/model/main.spec -T -a state,transition
 PYTHONPATH=tools/pyveri/src python -m pyveri parse spec/model/main.spec
 PYTHONPATH=tools/pyveri/src python -m pyveri model spec/model/main.spec
 PYTHONPATH=tools/pyveri/src python -m pyveri derive spec/model/main.spec --strict
@@ -84,10 +84,10 @@ PYTHONPATH=tools/common/src:tools/parse/src:tools/model/src:tools/view/src:tools
 ```
 
 未使用 `-o` 时，CLI 会先输出解析摘要，再执行静态模型装配和引用检查，并输出默认推导摘要；使用 `--derive` 时输出完整推导报告。默认情况下，推导结果为 `blocked` 仍返回 0，便于查看报告；需要把未达目标作为命令失败时使用 `--strict`。
-使用 `-T` 或 `--trace` 时，CLI 会在完整推导验证通过后输出 trace SVG；不带路径时默认写入 `tools/out/trace/<spec>.trace.svg`，带路径时写入指定文件。`--trace-action-depth N` 控制 trace 中嵌套 action 展开的最大深度，默认 `3`；使用 `--trace-action-depth all` 可完整展开。`-a state|event|state,event` 可叠加来自 `.spec` 注释的 state/event 注释层。
+使用 `-T` 或 `--trace` 时，CLI 会在完整推导验证通过后输出 trace SVG；不带路径时默认写入 `tools/out/trace/<spec>.trace.svg`，带路径时写入指定文件。`--trace-action-depth N` 控制 trace 中嵌套 action 展开的最大深度，默认 `3`；使用 `--trace-action-depth all` 可完整展开。`-a state|transition|state,transition` 可叠加来自 `.spec` 注释的 state/transition 注释层。
 使用 `--graph object -o <file>` 时，图内容直接写入文件。
 `object` 视图只输出对象之间的静态 `parent` 父子关系。
-`drives` 视图输出事件之间的驱动关系。
+`drives` 视图输出 transition 之间的驱动关系。
 `timeline` 文本视图按时间先后输出，图形视图直接输出自底向上的 SVG 时间轴。
 当前主开发环境为 WSL2/Linux，命令示例默认使用 `/` 路径分隔符和 `PYTHONPATH=... command` 形式。
 

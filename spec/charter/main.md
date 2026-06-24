@@ -28,7 +28,7 @@
 1. `Object Coding Phase`：对象级编码阶段。该阶段只考虑模型对象本身如何落到代码中，包括对象状态、对象属性、对象间依赖、事件推进、返回结果、状态检查、checkpoint 以及必要的架构和语言安全边界。
 2. `Composition Phase`：组合封装阶段。该阶段在对象级实现语义已经明确的前提下，决定对象如何被组织进 crate、module、公开接口、构建 profile 和应用接入路径。
 
-这一区分用于避免把“对象是否按规格正确推进”和“对象被封装到哪个组件中”混为一谈。对象级编码阶段不以最终 crate/module 边界为优先目标；代码物理上可以暂时放入某个 crate，但该 crate 只作为当前实现载体，不自动成为最终组件边界。组合封装阶段不应改变对象状态、事件迁移和依赖语义，只决定这些对象级实现如何组合、封装和发布。
+这一区分用于避免把“对象是否按规格正确推进”和“对象被封装到哪个组件中”混为一谈。对象级编码阶段不以最终 crate/module 边界为优先目标；代码物理上可以暂时放入某个 crate，但该 crate 只作为当前实现载体，不自动成为最终组件边界。组合封装阶段不应改变对象状态、transition 迁移和依赖语义，只决定这些对象级实现如何组合、封装和发布。
 
 对 `arceos_ex` 而言，第一轮实现可以为了尽快形成可运行闭环而临时交织对象级代码和 ArceOS 接入代码；但评审、文档解释和后续整理应按 `Object Coding Phase` 与 `Composition Phase` 分开处理。前者优先保证规格对象语义正确，后者才考虑 crate/module 边界、公开接口、adapter、overlay workspace 以及与 ArceOS 组件体系的兼容关系。
 
@@ -47,7 +47,7 @@
 7. 图用于展示对象关系、阶段边界和编排顺序；真正作为验证、构建和测试输入的模型来源，应落到对象条目、过程条目、检查项和状态迁移描述中。
 8. 当某一模型条目对应参考内核中的具体实现位置时，可以记录参考位置；但模型本身不要求与参考内核源码逐行对应，允许按对象边界重新组织。
 
-对象粒度存在层次关系。当前层级中不再继续拆分的最小粒度对象可称为原子对象；由更小粒度对象组合而成的对象可称为复合对象。复合对象的状态通常由自身属性和子对象状态共同支撑，复合对象的状态迁移事件通常由其子对象事件支撑。更高粒度对象往往对应更高抽象层次，因此在规格描述中，若能够使用高粒度对象清晰表达依赖、状态和事件，应优先使用高粒度对象，以便逐级封装实现细节和复杂性。
+对象粒度存在层次关系。当前层级中不再继续拆分的最小粒度对象可称为原子对象；由更小粒度对象组合而成的对象可称为复合对象。复合对象的状态通常由自身属性和子对象状态共同支撑，复合对象的状态迁移 transition通常由其子对象 transition支撑。更高粒度对象往往对应更高抽象层次，因此在规格描述中，若能够使用高粒度对象清晰表达依赖、状态和事件，应优先使用高粒度对象，以便逐级封装实现细节和复杂性。
 
 上述对象粒度原则是建议而非硬规则。现实实现中可能受到历史代码、架构边界、性能路径、语言表达能力、验证工具能力或临时实验目标限制，导致某些对象暂时必须以较低粒度展开，或由多个实现实体共同承载一个高粒度对象。遇到这种情况时，应在说明或 coding 规格中记录取舍原因，而不是把该建议解释为必须通过检查器强制执行的规则。
 
@@ -74,7 +74,7 @@
 | 对象（Object） | 与 Flow 相对应的另一基础术语，指在某一层级中具有身份、边界、状态以及可被识别和操作方式的承载体。 |
 | 实例（Instance） | 某一 Type 的具名对象，具有自己的实例名称、生命周期状态、扩展状态值、属性、所在环境、上下文和句柄引用。本文在不强调类型/实例区别时，仍可把 object 作为 instance 的简称使用。 |
 | 原子对象（Atomic Object） | 在当前建模层级中不再继续拆分的最小粒度对象。它可以仍然具有属性和内部实现细节，但这些细节在当前规格层级不作为独立对象暴露。 |
-| 复合对象（Composite Object） | 由更小粒度对象组合而成的对象。复合对象通过属性和子对象状态支撑自身状态，并通常通过驱动子对象事件来完成自身状态迁移。 |
+| 复合对象（Composite Object） | 由更小粒度对象组合而成的对象。复合对象通过属性和子对象状态支撑自身状态，并通常通过驱动子对象 transition来完成自身状态迁移。 |
 | 扩展状态（Extended State） | Type 自定义的状态域，用于表达标准生命周期状态之外的内部语义状态。扩展状态可由 Type 自定义事件推进，也可被 action 读取或影响属性。 |
 | 过程（Process） | Type 定义的可调用事件或动作。每个 process 应说明它是 event 还是 action，并标注对状态与属性的影响。 |
 | 上下文（Context） | 介于 Flow 与资源之间的运行环境对象。Flow 总是在某个 Context 中访问资源；Context 用于承载和限定这种访问所依赖的环境条件。 |
@@ -211,7 +211,7 @@
 
 因此，系统并不是只有“流”在运动，也不是只有“对象”在静止存在；更准确地说，Flow 通过对象获得状态表述与操作基础，而对象通过 Flow 获得推进、作用与协作关系。
 
-对象并不只有单一粒度。最小粒度对象是原子对象；除此之外的对象都可以视为复合对象，由比自身更小粒度的对象组合而成。复合对象的状态通常不是凭空存在，而是由自身属性和子对象状态共同支撑；复合对象的状态迁移事件也通常通过驱动子对象事件来完成。由此，对象之间不仅有依赖关系，也形成了从低粒度到高粒度、从实现细节到抽象边界的层次关系。
+对象并不只有单一粒度。最小粒度对象是原子对象；除此之外的对象都可以视为复合对象，由比自身更小粒度的对象组合而成。复合对象的状态通常不是凭空存在，而是由自身属性和子对象状态共同支撑；复合对象的状态迁移 transition也通常通过驱动子对象 transition来完成。由此，对象之间不仅有依赖关系，也形成了从低粒度到高粒度、从实现细节到抽象边界的层次关系。
 
 在规格描述中，建议优先选择能够表达当前问题的高粒度对象。这样可以把低层细节封装在子对象中，让上层规格只暴露必要状态、事件和依赖关系，有利于逐级降低复杂性。不过这只是建模和实现的努力方向，不是硬性规则。若某个阶段必须展开较低粒度对象，或者无法立即建立合适的复合对象边界，可以记录原因后继续推进。
 
@@ -321,7 +321,7 @@ context BootPhaseContext: Context {
 | `Completion.preset()` | `always` | 建立实例身份和存储承载 | 使实例从基础存在条件进入 `Prepared`。静态实例表现为符号与静态存储已经存在；动态实例表现为宿主对象字段、栈上对象或分配对象已经获得存储。 |
 | `Completion.setup()` | `always` | 写入 `done = 0`，初始化等待队列和锁 | 使实例进入 `Ready`，并把扩展状态置为 `Pending`。 |
 | `Completion.enable()` | `always` | 发布可用同步点或绑定引用 | 使实例进入 `Online`，允许相关 Flow 通过句柄执行 wait/complete 类过程；它不表示 `done > 0`。对于静态全局同步点，它可以是无独立 Linux 函数的静态发布事实。 |
-| `Completion.disable()` | `always` 或 `conditional` | 撤销同步点引用或退出服务路径 | 当前启动主线通常不需要；正式事件名使用 `disable`，不使用 `handoff` 作为 slot 名。 |
+| `Completion.disable()` | `always` 或 `conditional` | 撤销同步点引用或退出服务路径 | 当前启动主线通常不需要；正式transition 名使用 `disable`，不使用 `handoff` 作为 slot 名。 |
 
 静态定义与动态定义的区别如下：
 
@@ -450,7 +450,7 @@ context BootPhaseContext: Context {
 - `process` 表示某个 Type 定义的可调用过程，是 transition 与 action 的共同上位概念。标准生命周期过程、自定义运行期过程和只读查询过程都应先作为 process 被定义清楚。
 - `transition` 表示可以参与状态迁移规则的 process。当前启动模型中的 `preset/setup/enable/disable` 是标准生命周期 transition；后续运行期对象还可以引入自定义运行期 transition，例如普通非嵌套自旋锁的 `lock/try_lock/unlock`。
 - `action` 表示不推进当前被建模状态的 process。它可以读写属性、触发外部副作用、失败或阻塞，但其 `state_effect` 必须是 `none`。例如控制台对象进入 `online` 后执行 `write`，或者 `EarlyIoremap.Ready` 后执行 `map/unmap`，都可建模为 action。
-- `event` 保留给外部信号、异步事件、硬件事件或 trace event。迁移期 `.spec` 源语法仍使用 `Event::Setup` / `Object.Event::Name` 表达 state-changing process；这只是 legacy spelling，语义上应按 transition 理解，后续新增说明优先使用 `Transition` 术语。
+- `event` 保留给外部信号、异步事件、硬件事件或 trace event。`.spec` 源语法必须使用 `Transition::Setup` / `Object.Transition::Name` 表达 state-changing process；不得再用 event 表示对象 process 或状态转移过程。
 
 仅靠“成功时是否推进状态”不足以描述所有过程，因此每个 process 还应显式标注状态与属性影响：
 
@@ -1269,10 +1269,10 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 5. `早期设备树对象`（`EarlyDtb`）：入口前导期已按规格前置证明验证并映射原始 `RawDtb`；入口后继期短暂建立 `EarlyDtb`。它通过 `preset` 和 `setup` 分担职责：`EarlyDtb.preset()` 先从原始 `dtb` 中提取最小平台事实，解析 `/cpus` 建立 `PlatformCpuInfo` 并检查启动 hartid 合法，解析 `/memory` 建立 `PhysicalMemory`；`EarlyDtb.setup()` 再完成本子阶段对 DTB 的后续使用，提取 kernel command line，解析 FDT header `/memreserve/` 与 `/reserved-memory` 得到固件和平台保留内存范围，并触发 `MemBlock.preset()` 建立候选物理内存区段。Linux 实现中的 FDT header 校验和扫描主要发生在这一后继期路径中；本规格把 `RawDtb` 有效性提前收口，是为了让 `EarlyVm` 的映射前提可证明。本子阶段末尾 `EarlyDtb` 退出服务。后续正式 OF/DeviceTree 对象若建立，应视为基于原始 `dtb` 或早期解析结果重新建立的运行期对象，不是 `EarlyDtb` 的简单延续。
 6. `命令行管理对象`（`CommandLine`）：代表启动命令行的文本视图管理对象。入口后继期的 `CommandLine.preset()` 建立 raw view，即 `KernelCmdline`，它来自 `EarlyDtb` 解析结果，只保存启动参数文本和必要边界事实，不负责解释每个参数的语义。完成 `parse_dtb()` 后，`CommandLine.state == Prepared`，`KernelCmdline.state == Ready`，供后续参数解析对象使用。`SavedCommandLine` 与 `StaticCommandLine` 是同一 `CommandLine` 对象在核心准备期建立的 saved/static 子视图，不作为新的顶级命令行管理对象。
 7. `参数解析管理对象`（`Params` / `EarlyParam` / `BootParam` / `PayloadParam`）：`Params` 是参数解析类对象的顶层管理者，不属于 `CommandLine`，也不合并命令行文本视图管理。入口后继期由 `Params.preset()` 驱动 `EarlyParam.setup()`，完成第一次 `parse_early_param()`；核心准备期由 `Params.setup()` 驱动 `BootParam.setup()` 和 `PayloadParam.setup()`，实现必须在二者之间保留 `print_unknown_bootoptions()` checkpoint。`EarlyParam.setup()` 依赖 `CommandLine` 的 raw view 和静态 `early_param` handler 表；当前规格要求 `earlycon` handler 必须存在，并在处理 `earlycon=sbi` 时连续驱动 `EarlyCon.preset(config=sbi)`、`EarlyCon.setup()` 和 `EarlyCon.enable()`。这意味着 `EarlyParam` 负责识别并分发参数处理过程，而 `EarlyCon` 仍负责自身后端建立与启用，只是这些对象推进发生在同一个参数处理调用链内部。
-8. `启动根栈`（`BootInitStack`）：入口前导期结束时已经进入 `Ready`，即 `sp` 已经切换到早期虚拟地址。入口后继期继续执行 `BootInitStack.enable()`，建立根栈边界和溢出保护事实，使 `BootInitStack` 进入 `Online`。这里的 `guard/保护` 只是 `enable` 的文档别名，不是单独事件名；入口前导期的地址切换事件已经统一为 `setup`。
+8. `启动根栈`（`BootInitStack`）：入口前导期结束时已经进入 `Ready`，即 `sp` 已经切换到早期虚拟地址。入口后继期继续执行 `BootInitStack.enable()`，建立根栈边界和溢出保护事实，使 `BootInitStack` 进入 `Online`。这里的 `guard/保护` 只是 `enable` 的文档别名，不是单独transition 名；入口前导期的地址切换事件已经统一为 `setup`。
 9. `根任务地址空间`（`InitMM`）：`BootInitTask` 的子对象，代表 Linux `init_mm` 对应的根任务地址空间元数据。Linux 中 `init_task.mm == NULL`，但 `init_task.active_mm == &init_mm`；`init_mm.pgd` 静态指向 `swapper_pg_dir`，而 `setup_initial_init_mm(_stext, _etext, _edata, _end)` 会填入内核代码段、数据段与 `brk` 边界。因此，`InitMM` 不是另一个与 `VM`/`SwapperVM` 竞争的页表对象，而是 `BootInitTask` 关联的 `mm_struct` 抽象，用于把启动根任务与后续完整内核地址空间元数据连接起来。
-10. `早期临时映射服务`（`EarlyIoremap`）：代表 `early_ioremap()` / `early_iounmap()` 使用的早期临时映射机制。它依赖 `FixMap` 已经提供 `FIX_BTMAP` 临时映射区，但不是 `FixMap` 的子对象；`FixMap` 是固定虚拟地址槽位布局，`EarlyIoremap` 则是使用这些槽位的服务对象。`EarlyIoremap.setup()` 对应 Linux `early_ioremap_setup()`，负责初始化各个 boot-time mapping slot 的虚拟起点并确认 `prev_map[]` 为空；后续 `early_ioremap()` 与 `early_iounmap()` 应建模为可重复执行的 `map/unmap` action，而不是生命周期事件。
-11. `SBI能力视图`（`SBI`）：代表内核基于固件 SBI 接口建立的平台服务能力视图。`SBI.setup()` 对应 Linux `sbi_init()`，只负责探测并记录能力事实，例如 `spec_version`、固件实现标识、以及 `TIME`、`IPI`、`RFENCE`、`SRST`、`DBCN` 等扩展是否可用；它不把 `set_timer`、`send_ipi`、`rfence`、`debug_console_write` 等具体调用建模为自身生命周期事件。后续对象通过依赖这些能力事实来完成自己的建立，例如 `EarlyCon.setup()` 依赖 `SBI.dbcn_available` 或 legacy console 能力来选择输出后端。
+10. `早期临时映射服务`（`EarlyIoremap`）：代表 `early_ioremap()` / `early_iounmap()` 使用的早期临时映射机制。它依赖 `FixMap` 已经提供 `FIX_BTMAP` 临时映射区，但不是 `FixMap` 的子对象；`FixMap` 是固定虚拟地址槽位布局，`EarlyIoremap` 则是使用这些槽位的服务对象。`EarlyIoremap.setup()` 对应 Linux `early_ioremap_setup()`，负责初始化各个 boot-time mapping slot 的虚拟起点并确认 `prev_map[]` 为空；后续 `early_ioremap()` 与 `early_iounmap()` 应建模为可重复执行的 `map/unmap` action，而不是生命周期 transition。
+11. `SBI能力视图`（`SBI`）：代表内核基于固件 SBI 接口建立的平台服务能力视图。`SBI.setup()` 对应 Linux `sbi_init()`，只负责探测并记录能力事实，例如 `spec_version`、固件实现标识、以及 `TIME`、`IPI`、`RFENCE`、`SRST`、`DBCN` 等扩展是否可用；它不把 `set_timer`、`send_ipi`、`rfence`、`debug_console_write` 等具体调用建模为自身生命周期 transition。后续对象通过依赖这些能力事实来完成自己的建立，例如 `EarlyCon.setup()` 依赖 `SBI.dbcn_available` 或 legacy console 能力来选择输出后端。
 12. `静态分支对象`（`StaticBranch`）：对应 RISC-V `setup_arch()` 早段中的第一次有效 `jump_label_init()`。它代表 static key / static branch 的全局基础设施，不直接照搬 Linux `jump_label` 命名。`StaticBranch.setup()` 建立静态分支表、排序分支项，并建立 static key 到分支点的关联，使对象进入 `Ready`。这里使用 `setup()` 而不是 `preset()`，因为该过程不是简单预置初值，而是实际建立后续 `static_branch_enable/disable` action 所需的查询和更新基础。`StaticBranch.set(key, value)` 是后续对象可调用的 action，用于启用或禁用某个已知 static key，不推进 `StaticBranch.state`。通用 `start_kernel()` 中的第二次 `jump_label_init()` 作为 `StaticBranch.setup()` 幂等 checkpoint，不推进状态。后续 `jump_label_init_ro()` 对应 `StaticBranch.enable()`，在内核只读保护建立前 seal `ro_after_init` static keys，使 `StaticBranch.state` 从 `Ready` 推进到 `Online`。当前 `default_config` 中 `CONFIG_JUMP_LABEL=y` 且 `CONFIG_STRICT_KERNEL_RWX=y`，因此本规格只讨论 jump label 启用和只读 seal 路径；禁用配置不进入当前边界。
 
     编码阶段对 `StaticBranch` 的最低要求是：提供显式 static key registry，能按 key 名或稳定 ID 查询并更新 key 值；`StaticBranch.set(key, value)` 必须要求 `StaticBranch.state == Ready` 或 `Online`，并在重复设置同一值时保持幂等；早期实现可以先用布尔值或计数值承载 key 状态，不要求立即实现指令 patch，但接口边界要保留后续替换为架构 jump-label patch 的空间。`StaticBranch.enable()` 至少要记录 sealed keys 集合，并在启用后禁止修改已 sealed 的 `ro_after_init` key。当前配置固定 `CONFIG_JUMP_LABEL=y`，因此编码规格不要求实现 `CONFIG_JUMP_LABEL=n` 的退化路径。
@@ -1342,7 +1342,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 7. 执行 `EarlyDtb.setup() / parse_dtb()` 的后续解析用途，提取 kernel command line，解析 FDT header `/memreserve/` 与 `/reserved-memory` 形成 FDT reserved ranges，并触发 `MemBlock.preset()` 和 `CommandLine.preset()`，使 raw view `KernelCmdline` 进入 `Ready`，并形成候选可用物理内存区段和初步边界。
 8. 执行 `InitMM.setup() / setup_initial_init_mm()`，初始化 `BootInitTask` 的 `InitMM` 子对象，记录 `_stext`、`_etext`、`_edata` 与 `_end` 对应的代码段、数据段和 `brk` 边界；`InitMM.pgd` 仍指向 `swapper_pg_dir`，后续由 `VM.enable()` 使其对应的完整内核页表成为当前地址空间。
 9. 执行 `EarlyIoremap.setup() / early_ioremap_setup()`，基于 `FixMap.FIX_BTMAP` 初始化早期临时映射服务的 slot 元数据；后续 `early_ioremap()` 与 `early_iounmap()` 是 `map/unmap` action。
-10. 执行 `SBI.setup() / sbi_init()`，探测并记录 SBI 规范版本、固件标识和扩展能力视图。该步骤只产出能力事实，不把具体 SBI 调用建模为 `SBI` 自身的生命周期事件。
+10. 执行 `SBI.setup() / sbi_init()`，探测并记录 SBI 规范版本、固件标识和扩展能力视图。该步骤只产出能力事实，不把具体 SBI 调用建模为 `SBI` 自身的生命周期 transition。
 11. 执行 RISC-V `setup_arch()` 早段中的 `jump_label_init()`，抽象为 `StaticBranch.setup()`，使 `StaticBranch` 进入 `Ready`。该调用发生在 `parse_early_param()` 之前，使早期参数处理路径可以安全使用 static key。通用 `start_kernel()` 在 `setup_arch()` 返回后还会再次调用 `jump_label_init()`；在当前 RISC-V 路径中第二次调用因 `StaticBranch` 已经 `Ready` 而作为幂等 checkpoint 处理，不再推进对象状态。
 12. 执行 `Params.preset() / parse_early_param()`，驱动 `EarlyParam.setup()` 解析 `CommandLine` 的 raw view 并分发早期参数。当前要求 `earlycon` handler 必须存在；处理 `earlycon=sbi` 时，该调用链内部连续触发 `EarlyCon.preset(config=sbi)`、`EarlyCon.setup()` 和 `EarlyCon.enable()`：`preset` 记录参数配置，`setup` 基于 `SBI` 能力事实建立 SBI early console 后端，`enable` 注册并启用后端，同时 drain/replay `PrintkBuffer` 中已经存在的 Banner 等历史输出。
 13. 执行 `efi_init()`，当前暂不建模为正式对象，只作为 `defer` 占位记录。对当前 RISC-V64 最小核心路径而言，`efi_init()` 主要涉及 EFI 引导路径与相关运行时信息的早期探测，不直接改变 `SwapperVM` 建立和切换的核心语义；后续若需要支持 EFI 启动路径，再单独抽象为 `EFI` 或 `FirmwareInterface` 一类对象。
@@ -1365,7 +1365,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 这四类条目的处理原则如下：
 
-- `formal`：已经进入对象模型，需要明确对象状态、生命周期事件、依赖、后置条件和阶段结束状态。
+- `formal`：已经进入对象模型，需要明确对象状态、生命周期 transition、依赖、后置条件和阶段结束状态。
 - `deferred`：属于参考启动路径或相关条件路径，但当前不展开对象语义；必须保留调用位置和延期原因，避免被误解为已覆盖。
 - `implementation checkpoint`：不推进规格状态，只要求对象级实现保留可观测检查点或顺序约束。
 - `不纳入当前规格`：当前目标边界明确排除的路径，不作为 deferred 统计；若未来目标边界改变，应重新讨论并转入 formal 或 deferred。
@@ -1532,7 +1532,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_64BIT=y`、`CONFIG_MMU=y`、`CONFIG_FLATMEM=y`、`CONFIG_SLUB=y`、`CONFIG_SPLIT_PTE_PTLOCKS=y`、`CONFIG_STACKDEPOT=y`、`CONFIG_DEBUG_PAGEALLOC=y`、`CONFIG_DEBUG_VM=y`、`CONFIG_SWIOTLB=y`、`CONFIG_DMA_BOUNCE_UNALIGNED_KMALLOC=y`；同时 `CONFIG_INIT_ON_ALLOC_DEFAULT_ON`、`CONFIG_INIT_ON_FREE_DEFAULT_ON`、`CONFIG_DEBUG_PAGEALLOC_ENABLE_DEFAULT`、`CONFIG_PAGE_POISONING`、`CONFIG_PAGE_EXTENSION`、`CONFIG_KFENCE`、`CONFIG_KMSAN`、`CONFIG_DEBUG_KMEMLEAK`、`CONFIG_DEBUG_OBJECTS`、`CONFIG_KASAN`、`CONFIG_STACKDEPOT_ALWAYS_INIT`、`CONFIG_MODULES`、`CONFIG_BPF_JIT` 和 `CONFIG_KPROBES` 均未启用。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
 
-本小节使用的标准生命周期语义扩展为 `Base -> Prepared -> Ready -> Online -> Offline -> Destroyed`。其中 `Offline` 表示对象的主要服务能力或资源所有权已经退出运行路径，但对象元数据仍可用于诊断、引用收尾或后续销毁；对多数启动对象，`Offline` 可以是空动作或短路边界。`handoff` 只作为 `Offline` 的资源交接别名，`discarded` 只作为 `Destroyed` 的资源丢弃别名，不引入新的状态名。`State::Offline` 与 `Event::Disable` 已进入 `spec/model/SEMANTICS.md` 和 model checker；这里的 `Event::Disable` 是迁移期源语法，语义上属于生命周期 transition。配置裁剪路径继续写为 `trimmed` 或“裁剪路径”，不把它当作对象状态；`Skipped` 只可作为讨论中的自然语言，不进入 formal model、规格清单或 coding 实现。编译期约束、一次性验证、日志输出、策略选择和临时占位初始化若不形成长期对象生命周期，统一写为 `checkpoint`，不引入未定义的 `Checked`、`Decided`、`Emitted`、`Registered` 等状态名。
+本小节使用的标准生命周期语义扩展为 `Base -> Prepared -> Ready -> Online -> Offline -> Destroyed`。其中 `Offline` 表示对象的主要服务能力或资源所有权已经退出运行路径，但对象元数据仍可用于诊断、引用收尾或后续销毁；对多数启动对象，`Offline` 可以是空动作或短路边界。`handoff` 只作为 `Offline` 的资源交接别名，`discarded` 只作为 `Destroyed` 的资源丢弃别名，不引入新的状态名。`State::Offline` 与 `Transition::Disable` 已进入 `spec/model/SEMANTICS.md` 和 model checker；这里的 `Transition::Disable` 是迁移期源语法，语义上属于生命周期 transition。配置裁剪路径继续写为 `trimmed` 或“裁剪路径”，不把它当作对象状态；`Skipped` 只可作为讨论中的自然语言，不进入 formal model、规格清单或 coding 实现。编译期约束、一次性验证、日志输出、策略选择和临时占位初始化若不形成长期对象生命周期，统一写为 `checkpoint`，不引入未定义的 `Checked`、`Decided`、`Emitted`、`Registered` 等状态名。
 
 针对 `build_all_zonelists(NULL)`，本阶段引入一层显式内存拓扑对象，而不是把 zonelist 直接挂在页分配器对象下。顶层对象暂名 `MemoryTopology`，它包含一个或多个 `MemoryNode`。在当前 `default_config` 的 `CONFIG_NUMA=n` 下，系统只有唯一的 `MemoryNode[0]`；后续若支持 NUMA，`MemoryTopology` 可以自然扩展为多个 `MemoryNode`。每个 `MemoryNode` 对应 Linux 的 `pg_data_t`，拥有 `ZoneSet` 和 `ZonelistSet` 两类下级对象：`ZoneSet` 承载本节点实际拥有的 `Zone`，`ZonelistSet` 承载本节点发起分配时可消费的 zone 选择顺序。`Zoneref` 只引用 `Zone`，不拥有 `Zone`；在 NUMA 配置下，一个节点的 `Zonelist` 可以引用其他节点拥有的 `Zone`，而 UMA 配置下当前只引用唯一节点自己的 populated zones。
 
@@ -2713,7 +2713,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 3. `驱动模型核心对象集合`（暂名 `DriverCore`）：覆盖 `driver_init()`。它建立 noop backing device info、devtmpfs、device/bus/class/firmware/hypervisor core、OF core、platform bus、auxiliary bus、memory/node/cpu/container device 等驱动模型基础。由于驱动模型内部对象层次较大，当前初步规格轮次先保留 Linux 时序位置，标记为 `deferred: DriverCore.setup()`。
 4. `IRQ proc 导出对象`（暂名 `IrqProcView`）：覆盖 `init_irq_proc()`。当前 `CONFIG_PROC_FS=y`，它创建 `/proc/irq` 根目录，注册 default affinity proc，并为已有 IRQ descriptor 创建 proc entry；它依赖前序 `IrqDispatchTree.Ready` 与 `Procfs` 可用路径。由于该路径主要服务 IRQ 信息导出和用户态可见配置，不影响中断分发主线，当前轮次标记为 `deferred: IrqProcView.setup()`。
 5. `静态构造函数表`（暂名 `CtorTable`）：覆盖 `do_ctors()`。当前 formal / coding 轮次只保留表位置；如果构造函数表为空或未启用，则记录为 trimmed/empty；如果未来启用，则遍历 `__ctors_start` 到 `__ctors_end` 执行构造函数。
-6. `全量 initcall 表`（暂名 `InitcallTable`）：覆盖 `do_initcalls()`。`InitcallTable` 是由 linker section 形成的静态表对象，`do_initcalls()` 不负责建立表，而是执行该表，因此建模为 `InitcallTable.run_all_levels()` action。它从 level 0 到最后一个 level 遍历 `initcall_levels`，每个 level 复制 `saved_command_line`，解析对应参数，再执行 `do_one_initcall()`。这是表驱动过程，不把所有 initcall 都升级为顶层对象。当前对象级实现先记录固定的最小表摘要和运行事实，后续再把具体 entry 绑定到目标对象 event/action。
+6. `全量 initcall 表`（暂名 `InitcallTable`）：覆盖 `do_initcalls()`。`InitcallTable` 是由 linker section 形成的静态表对象，`do_initcalls()` 不负责建立表，而是执行该表，因此建模为 `InitcallTable.run_all_levels()` action。它从 level 0 到最后一个 level 遍历 `initcall_levels`，每个 level 复制 `saved_command_line`，解析对应参数，再执行 `do_one_initcall()`。这是表驱动过程，不把所有 initcall 都升级为顶层对象。当前对象级实现先记录固定的最小表摘要和运行事实，后续再把具体 entry 绑定到目标对象 transition/action。
 
 ##### InitcallTable 对象框架（初稿）
 

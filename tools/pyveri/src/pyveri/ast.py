@@ -14,7 +14,7 @@ if _COMMON_SRC.is_dir():
 from common.spec_ast import (
     Block,
     EnumDecl,
-    EventDecl,
+    TransitionDecl,
     ExclusiveContextDecl,
     FunctionDecl,
     LockDecl,
@@ -32,7 +32,7 @@ from common.spec_ast import (
 __all__ = [
     "Block",
     "EnumDecl",
-    "EventDecl",
+    "TransitionDecl",
     "ExclusiveContextDecl",
     "FunctionDecl",
     "LockDecl",

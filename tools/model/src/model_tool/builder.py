@@ -7,7 +7,7 @@ import re
 from common.model_types import (
     BuildResult,
     Diagnostic,
-    EventDef,
+    TransitionDef,
     ExclusiveContextDef,
     ObjectDef,
     ObjectModel,
@@ -19,7 +19,7 @@ from common.spec_ast import (
     Block,
     ExclusiveContextDecl,
     EnumDecl,
-    EventDecl,
+    TransitionDecl,
     FunctionDecl,
     ObjectDecl,
     PredicateDecl,
@@ -30,10 +30,10 @@ from common.spec_ast import (
 )
 
 
-_OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
+_OBJECT_TRANSITION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
-_OBJECT_EVENT_EXPR_RE = re.compile(
-    r"\A([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+_OBJECT_TRANSITION_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _OBJECT_ACTION_EXPR_RE = re.compile(
@@ -45,20 +45,20 @@ _ACTION_BIND_RE = re.compile(
     r"([A-Za-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
-_REF_EVENT_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
-_REF_EVENT_EXPR_RE = re.compile(
-    r"\A([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+_REF_TRANSITION_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
+_REF_TRANSITION_EXPR_RE = re.compile(
+    r"\A([a-z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _REF_ACTION_EXPR_RE = re.compile(
     r"\A([a-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
-_LOCK_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
+_LOCK_TRANSITION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
-_TYPE_EVENT_RE_TEMPLATE = r"\bEvent::{}\b"
+_TYPE_TRANSITION_RE_TEMPLATE = r"\bTransition::{}\b"
 _REF_TARGET_PROCESS_TYPES = {
     "RunQueueRef": "RunQueue",
     "TaskRef": "Task",
@@ -74,7 +74,7 @@ _ALLOWED_STATE_NAMES = frozenset(
         "Destroyed",
     }
 )
-_ALLOWED_EVENT_NAMES = frozenset(
+_ALLOWED_TRANSITION_NAMES = frozenset(
     {
         "Preset",
         "Setup",
@@ -177,7 +177,7 @@ def summarize_model(result: BuildResult) -> str:
             f"model: {status}",
             f"objects: {len(model.objects)}",
             f"states: {model.state_count}",
-            f"events: {model.event_count}",
+            f"transitions: {model.transition_count}",
             f"errors: {len(result.errors)}",
             f"warnings: {len(result.warnings)}",
         ]
@@ -307,32 +307,32 @@ def _check_object_lifecycle_names(
                     state_decl.span,
                 )
             )
-        for event_decl in state_decl.events:
-            if event_decl.name not in _ALLOWED_EVENT_NAMES:
+        for transition_decl in state_decl.transitions:
+            if transition_decl.name not in _ALLOWED_TRANSITION_NAMES:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
-                        f"unknown lifecycle event name: {decl.name}.Event::{event_decl.name}",
-                        event_decl.span,
+                        f"unknown lifecycle transition name: {decl.name}.Transition::{transition_decl.name}",
+                        transition_decl.span,
                     )
                 )
-            transition = (state_decl.name, event_decl.name, event_decl.target_state)
+            transition = (state_decl.name, transition_decl.name, transition_decl.target_state)
             if transition not in _ALLOWED_TRANSITIONS:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
                         "invalid lifecycle transition: "
-                        f"{decl.name}.State::{state_decl.name}.Event::{event_decl.name} -> State::{event_decl.target_state}",
-                        event_decl.span,
+                        f"{decl.name}.State::{state_decl.name}.Transition::{transition_decl.name} -> State::{transition_decl.target_state}",
+                        transition_decl.span,
                     )
                 )
-            if event_decl.target_state not in _ALLOWED_STATE_NAMES:
+            if transition_decl.target_state not in _ALLOWED_STATE_NAMES:
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
                         "unknown lifecycle state name: "
-                        f"{decl.name}.Event::{event_decl.name} -> State::{event_decl.target_state}",
-                        event_decl.span,
+                        f"{decl.name}.Transition::{transition_decl.name} -> State::{transition_decl.target_state}",
+                        transition_decl.span,
                     )
                 )
 
@@ -340,21 +340,21 @@ def _check_object_lifecycle_names(
 def _check_object_event_uniqueness(
     decl: ObjectDecl, diagnostics: list[Diagnostic]
 ) -> None:
-    """Enforce SEM-EVENT-001: event identity is object-local."""
+    """Enforce SEM-TRANSITION-001: transition identity is object-local."""
 
-    seen: dict[str, EventDecl] = {}
+    seen: dict[str, TransitionDecl] = {}
     for state_decl in decl.states:
-        for event_decl in state_decl.events:
-            existing = seen.get(event_decl.name)
+        for transition_decl in state_decl.transitions:
+            existing = seen.get(transition_decl.name)
             if existing is None:
-                seen[event_decl.name] = event_decl
+                seen[transition_decl.name] = transition_decl
                 continue
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    "duplicate object event declaration: "
-                    f"{decl.name}.Event::{event_decl.name}",
-                    event_decl.span,
+                    "duplicate object transition declaration: "
+                    f"{decl.name}.Transition::{transition_decl.name}",
+                    transition_decl.span,
                 )
             )
 
@@ -372,12 +372,12 @@ def _build_states(decl: ObjectDecl, diagnostics: list[Diagnostic]) -> dict[str, 
             )
             continue
 
-        events = _build_events(decl.name, state_decl, diagnostics, object_wide=True)
+        transitions = _build_events(decl.name, state_decl, diagnostics, object_wide=True)
         states[state_decl.name] = StateDef(
             name=state_decl.name,
             object_name=decl.name,
             decl=state_decl,
-            events=events,
+            transitions=transitions,
         )
     return states
 
@@ -388,28 +388,28 @@ def _build_events(
     diagnostics: list[Diagnostic],
     *,
     object_wide: bool = False,
-) -> dict[str, EventDef]:
-    events: dict[str, EventDef] = {}
-    for event_decl in state_decl.events:
-        if not object_wide and event_decl.name in events:
+) -> dict[str, TransitionDef]:
+    transitions: dict[str, TransitionDef] = {}
+    for transition_decl in state_decl.transitions:
+        if not object_wide and transition_decl.name in transitions:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    "duplicate event declaration: "
-                    f"{object_name}.State::{state_decl.name}.Event::{event_decl.name}",
-                    event_decl.span,
+                    "duplicate transition declaration: "
+                    f"{object_name}.State::{state_decl.name}.Transition::{transition_decl.name}",
+                    transition_decl.span,
                 )
             )
             continue
 
-        events[event_decl.name] = EventDef(
-            name=event_decl.name,
+        transitions[transition_decl.name] = TransitionDef(
+            name=transition_decl.name,
             object_name=object_name,
             source_state=state_decl.name,
-            target_state=event_decl.target_state,
-            decl=event_decl,
+            target_state=transition_decl.target_state,
+            decl=transition_decl,
         )
-    return events
+    return transitions
 
 
 def _extract_attrs(decl: ObjectDecl, diagnostics: list[Diagnostic]) -> dict[str, str]:
@@ -485,14 +485,14 @@ def _check_initial_states(model: ObjectModel, diagnostics: list[Diagnostic]) -> 
 def _check_event_targets(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
     for obj in model.objects.values():
         for state in obj.states.values():
-            for event in state.events.values():
-                if event.target_state not in obj.states:
+            for transition in state.transitions.values():
+                if transition.target_state not in obj.states:
                     diagnostics.append(
                         Diagnostic(
                             Severity.ERROR,
-                            "unknown event target state: "
-                            f"{obj.name}.Event::{event.name} -> State::{event.target_state}",
-                            event.decl.span,
+                            "unknown transition target state: "
+                            f"{obj.name}.Transition::{transition.name} -> State::{transition.target_state}",
+                            transition.decl.span,
                         )
                     )
 
@@ -638,23 +638,23 @@ def _schema_context_contribution(
         return _ContextContribution(exclusive_refs=exclusive_refs)
     contribution = _ContextContribution(exclusive_refs=exclusive_refs)
     boundary_events = _guard_boundary_events(model, guard.entered_by)
-    if any(receiver_kind == "RawSpinLock" and event_name == "LockIrqSave"
-           for receiver_kind, event_name in boundary_events):
+    if any(receiver_kind == "RawSpinLock" and transition_name == "LockIrqSave"
+           for receiver_kind, transition_name in boundary_events):
         contribution = _replace_context_contribution(
             contribution,
             local_interrupts=False,
             preemption=False,
             voluntary_switching=False,
         )
-    if any(receiver_kind == "PreemptionControl" and event_name == "Disable"
-           for receiver_kind, event_name in boundary_events):
+    if any(receiver_kind == "PreemptionControl" and transition_name == "Disable"
+           for receiver_kind, transition_name in boundary_events):
         contribution = _replace_context_contribution(
             contribution,
             preemption=False,
             voluntary_switching=False,
         )
-    if any(receiver_kind == "LocalInterruptControl" and event_name in {"Disable", "SaveAndDisable"}
-           for receiver_kind, event_name in boundary_events):
+    if any(receiver_kind == "LocalInterruptControl" and transition_name in {"Disable", "SaveAndDisable"}
+           for receiver_kind, transition_name in boundary_events):
         contribution = _replace_context_contribution(
             contribution,
             local_interrupts=False,
@@ -663,13 +663,13 @@ def _schema_context_contribution(
 
 
 def _guard_boundary_events(model: ObjectModel, blocks: list[Block]) -> list[tuple[str, str]]:
-    events: list[tuple[str, str]] = []
+    transitions: list[tuple[str, str]] = []
     for block in blocks:
-        for receiver_name, event_name in _LOCK_EVENT_RE.findall(block.body):
+        for receiver_name, transition_name in _LOCK_TRANSITION_RE.findall(block.body):
             receiver_kind = _guard_receiver_kind(model, receiver_name)
             if receiver_kind is not None:
-                events.append((receiver_kind, event_name))
-    return events
+                transitions.append((receiver_kind, transition_name))
+    return transitions
 
 
 def _guard_receiver_kind(model: ObjectModel, receiver_name: str) -> str | None:
@@ -843,27 +843,27 @@ def _check_references(model: ObjectModel, diagnostics: list[Diagnostic]) -> None
         for state in obj.states.values():
             for block in state.decl.invariants:
                 _check_state_references(model, block, diagnostics)
-            for event in state.events.values():
+            for transition in state.transitions.values():
                 bindings: dict[str, str] = {}
                 _check_body_member_references(
                     model,
-                    _ordered_body_members(event.decl),
+                    _ordered_body_members(transition.decl),
                     diagnostics,
                     bindings=bindings,
                 )
 
 
 def _check_only_once_withins(model: ObjectModel, diagnostics: list[Diagnostic]) -> None:
-    event_counts = _reachable_event_call_counts(model)
+    transition_counts = _reachable_transition_call_counts(model)
     for obj in model.objects.values():
         for state in obj.states.values():
-            for event in state.events.values():
-                event_key = (obj.name, event.name)
-                event_count = event_counts.get(event_key, 0)
-                for within, local_count in _within_local_entries(event.decl.within):
+            for transition in state.transitions.values():
+                transition_key = (obj.name, transition.name)
+                transition_count = transition_counts.get(transition_key, 0)
+                for within, local_count in _within_local_entries(transition.decl.within):
                     if not within.only_once:
                         continue
-                    total_count = event_count * local_count
+                    total_count = transition_count * local_count
                     if total_count != 1:
                         diagnostics.append(
                             Diagnostic(
@@ -875,65 +875,65 @@ def _check_only_once_withins(model: ObjectModel, diagnostics: list[Diagnostic]) 
                         )
 
 
-def _reachable_event_call_counts(model: ObjectModel) -> dict[tuple[str, str], int]:
+def _reachable_transition_call_counts(model: ObjectModel) -> dict[tuple[str, str], int]:
     root = ("StartupTimeline", "Setup")
-    if _event_def(model, *root) is None:
+    if _transition_def(model, *root) is None:
         return {}
     counts: dict[tuple[str, str], int] = {}
     visiting: set[tuple[str, str]] = set()
 
-    def visit(event_key: tuple[str, str]) -> None:
-        counts[event_key] = counts.get(event_key, 0) + 1
-        if event_key in visiting:
+    def visit(transition_key: tuple[str, str]) -> None:
+        counts[transition_key] = counts.get(transition_key, 0) + 1
+        if transition_key in visiting:
             return
-        event = _event_def(model, *event_key)
-        if event is None:
+        transition = _transition_def(model, *transition_key)
+        if transition is None:
             return
-        visiting.add(event_key)
-        for callee in _driven_events(event.decl):
+        visiting.add(transition_key)
+        for callee in _driven_transitions(transition.decl):
             visit(callee)
-        visiting.remove(event_key)
+        visiting.remove(transition_key)
 
     visit(root)
     return counts
 
 
-def _event_def(model: ObjectModel, object_name: str, event_name: str) -> EventDef | None:
+def _transition_def(model: ObjectModel, object_name: str, transition_name: str) -> TransitionDef | None:
     obj = model.objects.get(object_name)
     if obj is None:
         return None
     for state in obj.states.values():
-        event = state.events.get(event_name)
-        if event is not None:
-            return event
+        transition = state.transitions.get(transition_name)
+        if transition is not None:
+            return transition
     return None
 
 
-def _driven_events(event: EventDecl) -> list[tuple[str, str]]:
-    return _driven_events_from_body_members(_ordered_body_members(event))
+def _driven_transitions(transition: TransitionDecl) -> list[tuple[str, str]]:
+    return _driven_transitions_from_body_members(_ordered_body_members(transition))
 
 
-def _driven_events_from_body_members(members) -> list[tuple[str, str]]:
-    events: list[tuple[str, str]] = []
+def _driven_transitions_from_body_members(members) -> list[tuple[str, str]]:
+    transitions: list[tuple[str, str]] = []
     for member in members:
         if member.block is not None and member.kind == "drives":
-            events.extend(_driven_events_from_block(member.block))
+            transitions.extend(_driven_transitions_from_block(member.block))
         elif member.within is not None:
-            events.extend(_driven_events_from_within(member.within))
-    return events
+            transitions.extend(_driven_transitions_from_within(member.within))
+    return transitions
 
 
-def _driven_events_from_within(within) -> list[tuple[str, str]]:
-    return _driven_events_from_body_members(_ordered_body_members(within))
+def _driven_transitions_from_within(within) -> list[tuple[str, str]]:
+    return _driven_transitions_from_body_members(_ordered_body_members(within))
 
 
-def _driven_events_from_block(block: Block) -> list[tuple[str, str]]:
-    events: list[tuple[str, str]] = []
+def _driven_transitions_from_block(block: Block) -> list[tuple[str, str]]:
+    transitions: list[tuple[str, str]] = []
     for entry, _span in block.entry_spans:
-        match = _OBJECT_EVENT_EXPR_RE.match(entry)
+        match = _OBJECT_TRANSITION_EXPR_RE.match(entry)
         if match is not None:
-            events.append((match.group(1), match.group(2)))
-    return events
+            transitions.append((match.group(1), match.group(2)))
+    return transitions
 
 
 def _within_local_entries(withins) -> list[tuple[object, int]]:
@@ -1152,13 +1152,13 @@ def _check_lock_event_references(
     *,
     context: ExclusiveContextDef,
 ) -> None:
-    for lock_name, event_name in _LOCK_EVENT_RE.findall(block.body):
+    for lock_name, transition_name in _LOCK_TRANSITION_RE.findall(block.body):
         if lock_name != context.lock_ref:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    "lock event reference outside exclusive_context lock_ref: "
-                    f"{lock_name}.Event::{event_name} not bound to {context.name}",
+                    "lock transition reference outside exclusive_context lock_ref: "
+                    f"{lock_name}.Transition::{transition_name} not bound to {context.name}",
                     block.span,
                 )
             )
@@ -1169,7 +1169,7 @@ def _check_lock_event_references(
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown lock_ref in event reference: {lock_name}.Event::{event_name}",
+                    f"unknown lock_ref in transition reference: {lock_name}.Transition::{transition_name}",
                     block.span,
                 )
             )
@@ -1178,7 +1178,7 @@ def _check_lock_event_references(
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"lock event reference requires typed lock: {lock_name}.Event::{event_name}",
+                    f"lock transition reference requires typed lock: {lock_name}.Transition::{transition_name}",
                     block.span,
                 )
             )
@@ -1187,23 +1187,23 @@ def _check_lock_event_references(
             lock_type = model.types.get(lock.kind)
             if lock_type is None:
                 continue
-            if not _type_declares_event(lock_type, event_name):
+            if not _type_declares_event(lock_type, transition_name):
                 diagnostics.append(
                     Diagnostic(
                         Severity.ERROR,
-                        f"unknown lock type event reference: {lock_name}.Event::{event_name}",
+                        f"unknown lock type transition reference: {lock_name}.Transition::{transition_name}",
                         block.span,
                     )
                 )
             continue
         assert obj is not None
-        if not any(event_name in state.events for state in obj.states.values()) and not (
-            obj.kind in model.types and _type_declares_event(model.types[obj.kind], event_name)
+        if not any(transition_name in state.transitions for state in obj.states.values()) and not (
+            obj.kind in model.types and _type_declares_event(model.types[obj.kind], transition_name)
         ):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown lock object event reference: {lock_name}.Event::{event_name}",
+                    f"unknown lock object transition reference: {lock_name}.Transition::{transition_name}",
                     block.span,
                 )
             )
@@ -1313,7 +1313,7 @@ def _check_drive_references(
                     entry_span,
                 )
             continue
-        if _check_drive_event_entry(
+        if _check_drive_transition_entry(
             model,
             entry,
             entry_span,
@@ -1335,7 +1335,7 @@ def _check_drive_references(
         _check_action_references(model, block, diagnostics, context=context)
 
 
-def _check_drive_event_entry(
+def _check_drive_transition_entry(
     model: ObjectModel,
     entry: str,
     span: SourceSpan,
@@ -1344,25 +1344,25 @@ def _check_drive_event_entry(
     context: ExclusiveContextDef | None = None,
     bindings: dict[str, str],
 ) -> bool:
-    ref_event = _REF_EVENT_EXPR_RE.match(entry)
-    if ref_event is not None:
-        receiver_name, event_name, args = ref_event.group(1, 2, 3)
+    ref_transition = _REF_TRANSITION_EXPR_RE.match(entry)
+    if ref_transition is not None:
+        receiver_name, transition_name, args = ref_transition.group(1, 2, 3)
         receiver_type = bindings.get(receiver_name)
         if receiver_type is None:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown ref binding in event reference: {receiver_name}.Event::{event_name}",
+                    f"unknown ref binding in transition reference: {receiver_name}.Transition::{transition_name}",
                     span,
                 )
             )
             return True
-        if not _is_supported_ref_type_event(receiver_type, event_name):
+        if not _is_supported_ref_type_transition(receiver_type, transition_name):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    "unsupported ref event reference: "
-                    f"{receiver_name}: {receiver_type}.Event::{event_name}",
+                    "unsupported ref transition reference: "
+                    f"{receiver_name}: {receiver_type}.Transition::{transition_name}",
                     span,
                 )
             )
@@ -1372,27 +1372,27 @@ def _check_drive_event_entry(
             _check_process_arguments(
                 model,
                 process_type,
-                "Event",
-                event_name,
+                "Transition",
+                transition_name,
                 args,
                 diagnostics,
                 span,
             )
         return True
 
-    match = _OBJECT_EVENT_EXPR_RE.match(entry)
+    match = _OBJECT_TRANSITION_EXPR_RE.match(entry)
     if match is None:
         return False
-    object_name, event_name, args = match.group(1, 2, 3)
+    object_name, transition_name, args = match.group(1, 2, 3)
     allowed = _context_allowed_object_refs(context)
     obj = model.objects.get(object_name)
     if obj is None:
-        if _is_supported_ref_event(object_name, event_name):
+        if _is_supported_ref_transition(object_name, transition_name):
             return True
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
-                f"unknown object in event reference: {object_name}.Event::{event_name}",
+                f"unknown object in transition reference: {object_name}.Transition::{transition_name}",
                 span,
             )
         )
@@ -1401,18 +1401,18 @@ def _check_drive_event_entry(
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
-                "event reference outside exclusive_context obj_refs: "
-                f"{object_name}.Event::{event_name} not in {context.name}",
+                "transition reference outside exclusive_context obj_refs: "
+                f"{object_name}.Transition::{transition_name} not in {context.name}",
                 span,
             )
         )
-    if not any(event_name in state.events for state in obj.states.values()) and not (
-        obj.kind in model.types and _type_declares_event(model.types[obj.kind], event_name)
+    if not any(transition_name in state.transitions for state in obj.states.values()) and not (
+        obj.kind in model.types and _type_declares_event(model.types[obj.kind], transition_name)
     ):
         diagnostics.append(
             Diagnostic(
                 Severity.ERROR,
-                f"unknown event reference: {object_name}.Event::{event_name}",
+                f"unknown transition reference: {object_name}.Transition::{transition_name}",
                 span,
             )
         )
@@ -1420,8 +1420,8 @@ def _check_drive_event_entry(
     _check_process_arguments(
         model,
         obj.kind,
-        "Event",
-        event_name,
+        "Transition",
+        transition_name,
         args,
         diagnostics,
         span,
@@ -1555,67 +1555,67 @@ def _check_event_references(
     bindings: dict[str, str] | None = None,
 ) -> None:
     bindings = bindings or {}
-    for receiver_name, event_name in _REF_EVENT_RE.findall(block.body):
+    for receiver_name, transition_name in _REF_TRANSITION_RE.findall(block.body):
         receiver_type = bindings.get(receiver_name)
         if receiver_type is None:
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown ref binding in event reference: {receiver_name}.Event::{event_name}",
+                    f"unknown ref binding in transition reference: {receiver_name}.Transition::{transition_name}",
                     block.span,
                 )
             )
             continue
-        if not _is_supported_ref_type_event(receiver_type, event_name):
+        if not _is_supported_ref_type_transition(receiver_type, transition_name):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    "unsupported ref event reference: "
-                    f"{receiver_name}: {receiver_type}.Event::{event_name}",
+                    "unsupported ref transition reference: "
+                    f"{receiver_name}: {receiver_type}.Transition::{transition_name}",
                     block.span,
                 )
             )
         return
-    for object_name, event_name in _OBJECT_EVENT_RE.findall(block.body):
+    for object_name, transition_name in _OBJECT_TRANSITION_RE.findall(block.body):
         obj = model.objects.get(object_name)
         if obj is None:
-            if _is_supported_ref_event(object_name, event_name):
+            if _is_supported_ref_transition(object_name, transition_name):
                 continue
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown object in event reference: {object_name}.Event::{event_name}",
+                    f"unknown object in transition reference: {object_name}.Transition::{transition_name}",
                     block.span,
                 )
             )
             continue
-        if not any(event_name in state.events for state in obj.states.values()) and not (
+        if not any(transition_name in state.transitions for state in obj.states.values()) and not (
             obj.kind in model.types
-            and _type_declares_event(model.types[obj.kind], event_name)
+            and _type_declares_event(model.types[obj.kind], transition_name)
         ):
             diagnostics.append(
                 Diagnostic(
                     Severity.ERROR,
-                    f"unknown event reference: {object_name}.Event::{event_name}",
+                    f"unknown transition reference: {object_name}.Transition::{transition_name}",
                     block.span,
                 )
             )
 
 
-def _type_declares_event(type_decl: TypeDecl, event_name: str) -> bool:
-    pattern = re.compile(_TYPE_EVENT_RE_TEMPLATE.format(re.escape(event_name)))
+def _type_declares_event(type_decl: TypeDecl, transition_name: str) -> bool:
+    pattern = re.compile(_TYPE_TRANSITION_RE_TEMPLATE.format(re.escape(transition_name)))
     return any(pattern.search(block.body) for block in type_decl.blocks)
 
 
-def _is_supported_ref_event(receiver_name: str, event_name: str) -> bool:
+def _is_supported_ref_transition(receiver_name: str, transition_name: str) -> bool:
     receiver_type = _known_ref_value_type(receiver_name)
-    return receiver_type is not None and _is_supported_ref_type_event(
-        receiver_type, event_name
+    return receiver_type is not None and _is_supported_ref_type_transition(
+        receiver_type, transition_name
     )
 
 
-def _is_supported_ref_type_event(type_name: str, event_name: str) -> bool:
-    return type_name == "RunQueueRef" and event_name == "EnqueueTask"
+def _is_supported_ref_type_transition(type_name: str, transition_name: str) -> bool:
+    return type_name == "RunQueueRef" and transition_name == "EnqueueTask"
 
 
 def _is_supported_ref_type_action(type_name: str, action_name: str) -> bool:
@@ -1819,7 +1819,7 @@ def _check_state_references(
 __all__ = [
     "BuildResult",
     "Diagnostic",
-    "EventDef",
+    "TransitionDef",
     "ObjectDef",
     "ObjectModel",
     "Severity",

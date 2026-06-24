@@ -27,7 +27,7 @@ def check_derivation(data: dict[str, Any], policy: str = "default") -> dict[str,
         reasons.append(
             {
                 "kind": "target_not_reached",
-                "message": f"target not reached: {target.get('event')}",
+                "message": f"target not reached: {target.get('transition')}",
             }
         )
     if blocked:
@@ -46,7 +46,7 @@ def check_derivation(data: dict[str, Any], policy: str = "default") -> dict[str,
             "version": data.get("version"),
         },
         "policy": policy,
-        "target": target.get("event"),
+        "target": target.get("transition"),
         "verdict": verdict,
         "exit_code": exit_code,
         "summary": {
@@ -76,7 +76,7 @@ def _record_reasons(data: dict[str, Any], status: str) -> list[dict[str, Any]]:
                 "message": record_data.get("message"),
                 "span": record_data.get("span"),
                 "object": record_data.get("object"),
-                "event": record_data.get("event"),
+                "transition": record_data.get("transition"),
                 "state": record_data.get("state"),
                 "expression": record_data.get("expression"),
             }

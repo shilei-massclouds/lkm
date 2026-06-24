@@ -8,7 +8,7 @@ from common import MODEL_SCHEMA, MODEL_VERSION
 from common.model_types import (
     BuildResult,
     Diagnostic,
-    EventDef,
+    TransitionDef,
     ExclusiveContextDef,
     ObjectDef,
     StateDef,
@@ -45,7 +45,7 @@ def build_result_to_model_json(
             "ok": result.ok,
             "objects": len(model.objects),
             "states": model.state_count,
-            "events": model.event_count,
+            "transitions": model.transition_count,
             "errors": len(result.errors),
             "warnings": len(result.warnings),
         },
@@ -119,15 +119,15 @@ def _state_to_json(item: StateDef) -> dict[str, Any]:
         "span": _span_to_json(item.decl.span),
         "invariants": [_block_to_json(block) for block in item.decl.invariants],
         "deferred": [_block_to_json(block) for block in item.decl.deferred],
-        "events": {
-            name: _event_to_json(event)
-            for name, event in sorted(item.events.items())
+        "transitions": {
+            name: _event_to_json(transition)
+            for name, transition in sorted(item.transitions.items())
         },
         "other_blocks": [_block_to_json(block) for block in item.decl.other_blocks],
     }
 
 
-def _event_to_json(item: EventDef) -> dict[str, Any]:
+def _event_to_json(item: TransitionDef) -> dict[str, Any]:
     decl = item.decl
     return {
         "name": item.name,

@@ -10,7 +10,7 @@ from common.spec_ast import (
     Block,
     ContextGuardDecl,
     EnumDecl,
-    EventDecl,
+    TransitionDecl,
     ExclusiveContextDecl,
     FunctionDecl,
     LockDecl,
@@ -178,13 +178,13 @@ def _state_from_json(item: Any) -> StateDecl:
         span=_span_from_json(data["span"]),
         invariants=[_block_from_json(block) for block in _list(data, "invariants")],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],
-        events=[_event_from_json(event) for event in _list(data, "events")],
+        transitions=[_event_from_json(transition) for transition in _list(data, "transitions")],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
     )
 
 
-def _event_from_json(item: Any) -> EventDecl:
-    data = _as_object(item, "event")
+def _event_from_json(item: Any) -> TransitionDecl:
+    data = _as_object(item, "transition")
     depends_on = [_block_from_json(block) for block in _list(data, "depends_on")]
     drives = [_block_from_json(block) for block in _list(data, "drives")]
     within = [_within_from_json(block) for block in _list(data, "within")]
@@ -204,7 +204,7 @@ def _event_from_json(item: Any) -> EventDecl:
             *(_block_body_member(block) for block in other_blocks),
         ],
     )
-    return EventDecl(
+    return TransitionDecl(
         name=_string(data, "name"),
         target_state=_string(data, "target_state"),
         span=_span_from_json(data["span"]),

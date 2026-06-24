@@ -86,7 +86,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     derive_parser.add_argument(
         "--target",
         default=DEFAULT_TARGET,
-        help=f"target event, default: {DEFAULT_TARGET}",
+        help=f"target transition, default: {DEFAULT_TARGET}",
     )
     derive_parser.add_argument(
         "--strict",
@@ -101,7 +101,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     check_parser.add_argument(
         "--target",
         default=DEFAULT_TARGET,
-        help=f"target event, default: {DEFAULT_TARGET}",
+        help=f"target transition, default: {DEFAULT_TARGET}",
     )
     _add_work_dir_argument(check_parser)
 
@@ -111,7 +111,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     view_parser.add_argument(
         "--target",
         default=DEFAULT_TARGET,
-        help=f"target event for trace view, default: {DEFAULT_TARGET}",
+        help=f"target transition for trace view, default: {DEFAULT_TARGET}",
     )
     _add_trace_action_depth_argument(view_parser)
     view_parser.add_argument("-o", "--output", type=Path, help="write the view to a file")
@@ -123,7 +123,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
     render_parser.add_argument(
         "--target",
         default=DEFAULT_TARGET,
-        help=f"target event for trace view, default: {DEFAULT_TARGET}",
+        help=f"target transition for trace view, default: {DEFAULT_TARGET}",
     )
     render_parser.add_argument(
         "--format",
@@ -193,7 +193,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--target",
         default=DEFAULT_TARGET,
-        help=f"target event for --derive, default: {DEFAULT_TARGET}",
+        help=f"target transition for --derive, default: {DEFAULT_TARGET}",
     )
     parser.add_argument(
         "--strict",
@@ -216,7 +216,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-a",
         "--trace-annotations",
-        help="trace annotation categories: state, event, or state,event",
+        help="trace annotation categories: state, transition, or state,transition",
     )
     _add_trace_action_depth_argument(parser)
     parser.add_argument("-o", "--output", type=Path, help="write selected output to a file")
@@ -606,8 +606,8 @@ def _pipeline_paths(tmp: Path, spec: Path) -> dict[str, Path]:
 def _parse_summary(data: dict[str, Any]) -> str:
     document = data["document"]
     state_count = sum(len(obj["states"]) for obj in document["objects"])
-    event_count = sum(
-        len(state["events"])
+    transition_count = sum(
+        len(state["transitions"])
         for obj in document["objects"]
         for state in obj["states"]
     )
@@ -620,7 +620,7 @@ def _parse_summary(data: dict[str, Any]) -> str:
             f"types: {len(document['types'])}",
             f"objects: {len(document['objects'])}",
             f"states: {state_count}",
-            f"events: {event_count}",
+            f"transitions: {transition_count}",
         ]
     )
 
@@ -633,7 +633,7 @@ def _model_summary(data: dict[str, Any]) -> str:
             f"model: {status}",
             f"objects: {summary['objects']}",
             f"states: {summary['states']}",
-            f"events: {summary['events']}",
+            f"transitions: {summary['transitions']}",
             f"errors: {summary['errors']}",
             f"warnings: {summary['warnings']}",
         ]
@@ -646,7 +646,7 @@ def _derive_summary(data: dict[str, Any]) -> str:
     return "\n".join(
         [
             f"derive: {status}",
-            f"target: {data['target']['event']}",
+            f"target: {data['target']['transition']}",
             f"target_reached: {'yes' if summary['target_reached'] else 'no'}",
             f"transitions: {summary['transitions']}",
             f"proved: {summary['proved']}",
@@ -797,11 +797,11 @@ def _parse_trace_annotation_categories(
     if value is None:
         return set()
     categories = {part.strip() for part in value.split(",") if part.strip()}
-    allowed = {"state", "event"}
+    allowed = {"state", "transition"}
     invalid = sorted(categories - allowed)
     if invalid or not categories:
         parser.error(
-            "--trace-annotations must be one of: state, event, or state,event"
+            "--trace-annotations must be one of: state, transition, or state,transition"
         )
     return categories
 
@@ -813,8 +813,8 @@ def _spec_trace_annotations(
     annotations: dict[str, dict[str, str]] = {}
     if "state" in categories:
         annotations["states"] = {}
-    if "event" in categories:
-        annotations["events"] = {}
+    if "transition" in categories:
+        annotations["transitions"] = {}
 
     for obj in ast_data["document"]["objects"]:
         object_name = obj["name"]
@@ -825,12 +825,12 @@ def _spec_trace_annotations(
                 note = _doc_comment_before(lines, int(state["span"]["start_line"]))
                 if note:
                     annotations["states"][f"{object_name}.State::{state['name']}"] = note
-        if "event" in categories:
+        if "transition" in categories:
             for state in obj["states"]:
-                for event in state["events"]:
-                    note = _doc_comment_before(lines, int(event["span"]["start_line"]))
+                for transition in state["transitions"]:
+                    note = _doc_comment_before(lines, int(transition["span"]["start_line"]))
                     if note:
-                        annotations["events"][f"{object_name}.Event::{event['name']}"] = note
+                        annotations["transitions"][f"{object_name}.Transition::{transition['name']}"] = note
     return annotations
 
 

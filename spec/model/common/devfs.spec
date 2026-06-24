@@ -24,8 +24,8 @@ object DevFs: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;

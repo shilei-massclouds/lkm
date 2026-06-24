@@ -14,8 +14,8 @@ object Scheduler: SchedulerObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     MmCoreInitPhase.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -25,8 +25,8 @@ object Scheduler: SchedulerObject {
                 }
 
                 drives {
-                    DefaultSchedRootDomain.Event::Setup;
-                    BitWaitQueueTable.Event::Preset;
+                    DefaultSchedRootDomain.Transition::Setup;
+                    BitWaitQueueTable.Transition::Preset;
                 }
 
                 ensures {
@@ -47,8 +47,8 @@ object Scheduler: SchedulerObject {
             scheduler_default_root_domain_ready(Scheduler, DefaultSchedRootDomain);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuGroup.state == State::Ready;
                     CpuIdMap.state == State::Ready;
@@ -58,8 +58,8 @@ object Scheduler: SchedulerObject {
                 }
 
                 drives {
-                    BootRunQueue.Event::Setup;
-                    BootIdleTask.Event::Setup;
+                    BootRunQueue.Transition::Setup;
+                    BootIdleTask.Transition::Setup;
                 }
 
                 ensures {
@@ -99,8 +99,8 @@ object Scheduler: SchedulerObject {
             scheduler_schedule_event_available(Scheduler);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 ensures {
                     scheduler_running_flag_set(Scheduler);
                     scheduler_schedule_event_available(Scheduler);
@@ -134,8 +134,8 @@ object DefaultSchedRootDomain: TaskObject {
     parent: Scheduler;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuGroup.state == State::Ready;
                 }
@@ -163,8 +163,8 @@ object BitWaitQueueTable: TaskObject {
     parent: Scheduler;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     bit_wait_queue_table_ready(BitWaitQueueTable);
                 }
@@ -187,8 +187,8 @@ object BootRunQueue: RunQueue {
     parent: Scheduler;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DefaultSchedRootDomain.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -236,8 +236,8 @@ object BootIdleTask: Task {
     parent: BootRunQueue;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BootRunQueue.state == State::Ready;
                     BootCpuCurrentTask.state == State::Ready;
@@ -246,7 +246,7 @@ object BootIdleTask: Task {
                 }
 
                 drives {
-                    BootIdlePreemption.Event::Setup;
+                    BootIdlePreemption.Transition::Setup;
                     BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
                     BootIdleTask.Action::SetTaskCpu(BootCPURef);
                 }
@@ -308,8 +308,8 @@ object BootIdlePreemption: PreemptionControl {
     parent: BootIdleTask;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     task_preemption_control_ready(BootIdleTask);
                     task_preemption_disabled(BootIdleTask);
@@ -332,8 +332,8 @@ object RadixTree: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     SlubCacheRegistry.state == State::Ready;
@@ -371,8 +371,8 @@ object MapleTree: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
                     SlubCacheRegistry.state == State::Ready;
@@ -409,8 +409,8 @@ object Workqueue: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PageAllocator.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
@@ -435,13 +435,13 @@ object Workqueue: TaskObject {
             workqueue_workers_not_running(Workqueue);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 PreSmpInitPhase 中 workqueue_init()。它创建
              * rescuer 和初始 worker 壳，打开 worker 创建属性，但仍不表示
              * SMP topology 感知和完整 worker 运行期服务已经 online。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -479,8 +479,8 @@ object Softirq: InterruptObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PerCpuStorage.state == State::Ready;
                 }
@@ -502,13 +502,13 @@ object Softirq: InterruptObject {
             softirq_execution_closed(Softirq);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 softirq_init()。TimerWheel/HrtimerCore 已经在本阶段
              * 前半段注册 TIMER_SOFTIRQ/HRTIMER_SOFTIRQ；这里补齐 tasklet 队列
              * 与 TASKLET/HI softirq action。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PerCpuStorage.state == State::Ready;
                     TimerWheel.state == State::Ready;
@@ -547,8 +547,8 @@ object RcuCore: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Scheduler.state == State::Online;
                     Workqueue.state == State::Prepared;
@@ -558,7 +558,7 @@ object RcuCore: TaskObject {
                 }
 
                 drives {
-                    TasksRcu.Event::Preset;
+                    TasksRcu.Transition::Preset;
                 }
 
                 ensures {
@@ -592,8 +592,8 @@ object TasksRcu: TaskObject {
     parent: RcuCore;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PerCpuStorage.state == State::Ready;
                 }
@@ -613,11 +613,11 @@ object TasksRcu: TaskObject {
             tasks_rcu_enabled_flavors_recorded(TasksRcu);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 PreSmpInitPhase 中 rcu_init_tasks_generic()。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -649,8 +649,8 @@ object SchedInitPhase: PhaseObject {
     parent: BootPhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MmCoreInitPhase.state == State::Ready;
                     PageAllocator.state == State::Ready;
@@ -665,14 +665,14 @@ object SchedInitPhase: PhaseObject {
                 }
 
                 drives {
-                    Scheduler.Event::Preset;
-                    Scheduler.Event::Setup;
-                    Scheduler.Event::Enable;
-                    RadixTree.Event::Setup;
-                    MapleTree.Event::Setup;
-                    Workqueue.Event::Preset;
-                    Softirq.Event::Preset;
-                    RcuCore.Event::Setup;
+                    Scheduler.Transition::Preset;
+                    Scheduler.Transition::Setup;
+                    Scheduler.Transition::Enable;
+                    RadixTree.Transition::Setup;
+                    MapleTree.Transition::Setup;
+                    Workqueue.Transition::Preset;
+                    Softirq.Transition::Preset;
+                    RcuCore.Transition::Setup;
                 }
 
                 ensures {

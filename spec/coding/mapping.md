@@ -28,7 +28,7 @@
 
 ## 对象粒度与层次
 
-对象存在不同粒度。当前建模层级中不再继续拆分的最小粒度对象是原子对象；除此之外，对象通常是由更小粒度对象组合而成的复合对象。复合对象的状态通常由自身属性和子对象状态支撑，复合对象的生命周期事件通常通过驱动子对象事件来完成。
+对象存在不同粒度。当前建模层级中不再继续拆分的最小粒度对象是原子对象；除此之外，对象通常是由更小粒度对象组合而成的复合对象。复合对象的状态通常由自身属性和子对象状态支撑，复合对象的生命周期 transition通常通过驱动子对象 transition来完成。
 
 映射到代码时，高粒度对象通常对应更高抽象层次。若一个高粒度对象足以表达当前规格需要的状态、依赖和事件，应优先以该高粒度对象作为实现边界，再把具体细节封装进子对象、私有字段或内部 helper 中。这样有利于把复杂性逐级收敛到局部实现，减少上层阶段编排直接接触底层细节的机会。
 
@@ -42,11 +42,11 @@
 
 Phase 对象对应主动的过程式代码。各级 Phase 对象应按规格中的包含关系放入 `phases/` 下的相应层次，例如 `BootPhase`、`InterruptPhase`、`EntryPreludePhase`、`EntrySuccessorPhase` 分别形成清晰的过程边界。Phase 源码只生成函数和 module，不生成资源对象式 `struct + impl`，也不生成普通对象式 `Lifecycle` 状态机。
 
-资源对象和其它非 Phase 对象对应面向对象风格的 Rust 代码，默认形态是 `struct + impl methods`。原则上每个规格对象应有一个独立 `.rs` 文件；文件数量增加后，应优先按对象类别建立目录层级，例如 CPU、内存、启动参数、平台、输出、地址空间等，而不是按 Phase 分类。Phase 过程可以持有上下文或对象集合，但这种 context carrier 不等同于规格中的资源对象，不能替代资源对象自身的状态和事件边界。
+资源对象和其它非 Phase 对象对应面向对象风格的 Rust 代码，默认形态是 `struct + impl methods`。原则上每个规格对象应有一个独立 `.rs` 文件；文件数量增加后，应优先按对象类别建立目录层级，例如 CPU、内存、启动参数、平台、输出、地址空间等，而不是按 Phase 分类。Phase 过程可以持有上下文或对象集合，但这种 context carrier 不等同于规格中的资源对象，不能替代资源对象自身的状态和transition 边界。
 
 ## Context 映射
 
-`SHOULD`：对象级实现应维护一个全局 `Context`，用于承载启动过程中需要长期存活的资源对象。Phase 模块通过 `ctx` 或 `context` 参数/局部变量使用该上下文，并按模型顺序驱动资源对象事件。
+`SHOULD`：对象级实现应维护一个全局 `Context`，用于承载启动过程中需要长期存活的资源对象。Phase 模块通过 `ctx` 或 `context` 参数/局部变量使用该上下文，并按模型顺序驱动资源对象 transition。
 
 `SHOULD`：`Context` 的字段应按资源对象类别组织，并逐步与 `objects/` 目录层级一致。按 Phase 聚合资源对象只能作为过渡方案，必须记录原因和未来拆分方向。
 
@@ -62,7 +62,7 @@ Phase 代码生成以模型中的阶段树为输入，默认采用深度优先�
 
 父 Phase 在模型中声明和组织直接子 Phase 的顺序，这一顺序是 coding 生成 `handoff()` 链的依据。父 Phase 本身不应被机械生成成“直接逐个调用子 Phase `setup()`”的串行过程；运行时控制流应由当前 Phase 的 `handoff()` 显式连接到同层下一个 Phase 的 `setup()`。当某个 Phase 是本层级最后一个子 Phase 时，它的 `handoff()` 回到父 Phase 的完成确认过程。
 
-非叶子 Phase 的代码职责主要是边界确认：在所有子 Phase 通过 `handoff()` 链完成后，执行自身 `depends_on`、`ensures`、`invariant` 对应的检查和 checkpoint，并将父 Phase 推进到对应完成边界。叶子 Phase 的代码职责主要是按本 Phase 规格中的 `drives` 顺序推进普通对象事件，并在完成后调用自身 `handoff()`。
+非叶子 Phase 的代码职责主要是边界确认：在所有子 Phase 通过 `handoff()` 链完成后，执行自身 `depends_on`、`ensures`、`invariant` 对应的检查和 checkpoint，并将父 Phase 推进到对应完成边界。叶子 Phase 的代码职责主要是按本 Phase 规格中的 `drives` 顺序推进普通对象 transition，并在完成后调用自身 `handoff()`。
 
 特殊 Phase 可以由 coding 规格或对象规格显式覆盖默认生成方式。覆盖必须说明生效范围、原因和仍需保留的模型边界。例如入口前导期的 `setup()` 可以从架构入口符号开始，并由必要汇编和 Rust 续段共同组成；这种覆盖不改变 Phase 仍需提供 `setup()`、`handoff()`、边界检查和 checkpoint 的要求。
 
@@ -78,7 +78,7 @@ Phase 对象在源码中不得对应资源对象式 Rust `struct`。默认实现
 
 Phase 的 `setup()` 负责本阶段主体推进。除准备期等明确例外外，`setup()` 成功完成本阶段目标后，最后一步必须调用本 Phase 的 `handoff()`。同一层级内，前一个 Phase 的 `handoff()` 调用下一个兄弟 Phase 的 `setup()`；若当前 Phase 是本层级最后一个阶段，则调用父 Phase 的 `setup()` 或父 Phase 的完成确认过程。父 Phase 是子 Phase 顺序的组织者和规格来源，但 coding 中不应简单生成“父 Phase 直接逐个调用子 Phase”的控制流。
 
-Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象的生命周期事件，并在阶段边界调用模型边界检查函数。Phase 自身的 `depends_on`、`ensures` 和 `invariant` 应转化为显式 checkpoint/check 函数；这些函数先检查对应事实，成功后才发出 trace checkpoint。Phase checkpoint 是模型状态边界函数，不只是日志 hook。
+Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象的生命周期 transition，并在阶段边界调用模型边界检查函数。Phase 自身的 `depends_on`、`ensures` 和 `invariant` 应转化为显式 checkpoint/check 函数；这些函数先检查对应事实，成功后才发出 trace checkpoint。Phase checkpoint 是模型状态边界函数，不只是日志 hook。
 
 为了支持阶段 invariant、父阶段完成确认和未来状态差分，可以为每个 Phase 设置轻量的全局状态记录变量。该变量只记录 `Base`、`Ready`、`Online`、`Destroyed` 等模型边界状态，不负责事件合法性推进，也不替代资源对象的 `Lifecycle`。Phase 的事件唯一性和顺序约束由生成出的 `setup()/handoff()` 调用结构、检查器和测试共同保证。
 
@@ -91,7 +91,7 @@ Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象�
 
 `EntryPreludePhase.Ready` 之后应交由 `ax-runtime-ex` 接管。`EntrySuccessorPhase` 是
 `ax-runtime-ex` 引导过程的第一部分，而不是 `ax-hal-ex` 的长期编排职责。`ax-runtime-ex`
-可以调用 `ax-hal-ex`、平台 crate 和其它组件提供的对象事件函数，但阶段编排边界应保留在 runtime 侧。
+可以调用 `ax-hal-ex`、平台 crate 和其它组件提供的对象 transition函数，但阶段编排边界应保留在 runtime 侧。
 
 `ax-runtime-ex` 覆盖从 `EntrySuccessorPhase` 开始到 `PayloadPhase` 为止的大部分内核引导过程。当前正式模型中，`InterruptPhase` 位于
 `BootPhase` 之后、`PayloadPhase` 之前；后续新增的内核初始化阶段、服务初始化或运行形态切换，应默认插入在
@@ -103,7 +103,7 @@ Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象�
 
 除 Phase 对象外，模型对象原则上应对应 Rust `struct`、静态单例或启动上下文中的结构化字段。
 
-资源对象的事件应优先实现为该对象 `impl` 上的方法。若启动早期限制导致对象暂时只能由静态单例、裸指针范围或上下文字段承载，也应保留明确的对象命名和事件函数边界，并记录后续收敛为独立对象文件的计划。
+资源对象的事件应优先实现为该对象 `impl` 上的方法。若启动早期限制导致对象暂时只能由静态单例、裸指针范围或上下文字段承载，也应保留明确的对象命名和transition 函数边界，并记录后续收敛为独立对象文件的计划。
 
 普通对象的代码实体应承载以下信息中的一部分或全部：
 
@@ -116,7 +116,7 @@ Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象�
 
 ## 事件映射
 
-模型事件默认映射为明确命名的 Rust 函数或方法：
+模型 transition默认映射为明确命名的 Rust 函数或方法：
 
 - `Preset` -> `preset`
 - `Setup` -> `setup`
@@ -125,15 +125,15 @@ Phase 过程的主要职责是按规格中的 `drives` 顺序推进普通对象�
 
 Phase 对象的事件默认映射为过程函数，例如 `entry_prelude_phase_setup(...)`。资源对象的事件默认映射为对象方法，例如 `raw_dtb.setup(...)` 或 `early_vm.enable(...)`。
 
-事件函数应尽量只推进一个对象的一次生命周期迁移。若某段底层实现天然覆盖多个模型事件，应在上层显式拆分事件边界，或记录不能拆分的原因。
+transition 函数应尽量只推进一个对象的一次生命周期迁移。若某段底层实现天然覆盖多个模型 transition，应在上层显式拆分transition 边界，或记录不能拆分的原因。
 
-生命周期事件和后续操作事件都应具有显式返回结果。代码实现可以使用适合所在层级的具体类型，但语义上至少应能区分：
+生命周期 transition和后续操作事件都应具有显式返回结果。代码实现可以使用适合所在层级的具体类型，但语义上至少应能区分：
 
-- `Success`：事件成功完成，状态迁移已提交。
+- `Success`：transition 成功完成，状态迁移已提交。
 - `Blocked(reason)`：当前条件暂未满足，状态迁移未提交。
 - `Failed(code)`：事件失败，状态迁移未提交。
 
-对于当前启动路径中的生命周期事件，第一轮可以先用 `bool` 或等价最小结果承载 `Success/Failed`；一旦需要区分等待、重试、错误码或状态差分，应升级为结构化结果类型。无论具体返回类型如何，只有成功返回才能记录目标状态、发出完成 checkpoint 或使对应 `ensures` 对后续推导成立。
+对于当前启动路径中的生命周期 transition，第一轮可以先用 `bool` 或等价最小结果承载 `Success/Failed`；一旦需要区分等待、重试、错误码或状态差分，应升级为结构化结果类型。无论具体返回类型如何，只有成功返回才能记录目标状态、发出完成 checkpoint 或使对应 `ensures` 对后续推导成立。
 
 ## Action 映射
 
@@ -176,7 +176,7 @@ checkpoint trace 是独立观测路径，不属于 `EarlyCon` 或正式 `Console
 
 `depends_on` 应映射为函数前置检查、类型约束、构建期检查或启动断言。
 
-`ensures` 和 `invariant` 应映射为后置状态记录、防御性检查、断言、测试断言或可观测 trace 点。invariant 检查不得只停留在注释层面；在可执行路径中应至少有一种对应机制，例如事件前置检查、事件后置检查、`assert!`、`debug_assert!`、构建期检查或单元测试。若 invariant 失败，事件不得提交目标状态。
+`ensures` 和 `invariant` 应映射为后置状态记录、防御性检查、断言、测试断言或可观测 trace 点。invariant 检查不得只停留在注释层面；在可执行路径中应至少有一种对应机制，例如transition 前置检查、transition 后置检查、`assert!`、`debug_assert!`、构建期检查或单元测试。若 invariant 失败，事件不得提交目标状态。
 
 对于暂时无法自动验证的事实，不得静默跳过。应选择以下处理之一：
 
@@ -193,7 +193,7 @@ checkpoint trace 是独立观测路径，不属于 `EarlyCon` 或正式 `Console
 - 执行必须在 Rust 入口前完成的极小 CSR 或地址控制操作。
 - 跳转到 Rust 入口。
 
-对象推进、状态记录、DTB 检查、页表构造、SBI 能力视图建立和阶段编排应尽量进入 Rust 代码。若必须留在汇编中，应在对应对象事件中记录该实现边界。
+对象推进、状态记录、DTB 检查、页表构造、SBI 能力视图建立和阶段编排应尽量进入 Rust 代码。若必须留在汇编中，应在对应对象 transition中记录该实现边界。
 
 ## 未来差分
 

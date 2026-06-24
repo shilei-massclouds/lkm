@@ -61,8 +61,8 @@ object VirtioBlkDriver: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioBus.state == State::Ready;
                 }
@@ -89,8 +89,8 @@ object VirtioBlkDevice: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioBlkDriver.state == State::Ready;
                     VirtioDevice.state == State::Ready;
@@ -98,8 +98,8 @@ object VirtioBlkDevice: DeviceObject {
                 }
 
                 drives {
-                    VirtioSplitRing.Event::Setup;
-                    VirtQueue.Event::Setup;
+                    VirtioSplitRing.Transition::Setup;
+                    VirtQueue.Transition::Setup;
                 }
 
                 ensures {
@@ -129,8 +129,8 @@ object VirtioBlkDevice: DeviceObject {
             virtio_blk_reset_remove_deferred(self);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     VirtioDevice.state == State::Ready;
                     VirtioMmioTransportDevice.state == State::Ready;

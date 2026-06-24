@@ -16,8 +16,8 @@ object SchedulerSmpRuntime: KernelObject {
     parent: Scheduler;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SmpBringupPhase.state == State::Ready;
                     Scheduler.state == State::Online;
@@ -63,8 +63,8 @@ object WorkqueueTopology: KernelObject {
     parent: Workqueue;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Workqueue.state == State::Ready;
                     SchedulerSmpRuntime.state == State::Ready;
@@ -103,8 +103,8 @@ object AsyncCoreDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     WorkqueueTopology.state == State::Ready;
                 }
@@ -133,8 +133,8 @@ object PadataCoreDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     AsyncCoreDeferred.state == State::Ready;
                     CpuHotplugState.state == State::Ready;
@@ -169,8 +169,8 @@ object PageAllocatorLate: KernelObject {
     parent: PageAllocator;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PageAllocator.state == State::Ready;
                     PadataCoreDeferred.state == State::Ready;
@@ -217,8 +217,8 @@ object RuntimeCoreBoundary: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SchedulerSmpRuntime.state == State::Ready;
                     WorkqueueTopology.state == State::Ready;
@@ -253,8 +253,8 @@ object RuntimeCorePhase: PhaseObject {
     parent: SmpRuntimePhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SmpBringupPhase.state == State::Ready;
                     KernelInitTask.state == State::Online;
@@ -267,12 +267,12 @@ object RuntimeCorePhase: PhaseObject {
                 }
 
                 drives {
-                    SchedulerSmpRuntime.Event::Setup;
-                    WorkqueueTopology.Event::Setup;
-                    AsyncCoreDeferred.Event::Setup;
-                    PadataCoreDeferred.Event::Setup;
-                    PageAllocatorLate.Event::Setup;
-                    RuntimeCoreBoundary.Event::Setup;
+                    SchedulerSmpRuntime.Transition::Setup;
+                    WorkqueueTopology.Transition::Setup;
+                    AsyncCoreDeferred.Transition::Setup;
+                    PadataCoreDeferred.Transition::Setup;
+                    PageAllocatorLate.Transition::Setup;
+                    RuntimeCoreBoundary.Transition::Setup;
                 }
 
                 ensures {

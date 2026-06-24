@@ -10,7 +10,7 @@ from common.derive_types import (
     DerivationResult,
     DerivationStatus,
     DerivationTraceNode,
-    EventTransition,
+    TransitionCommit,
 )
 from common.spec_ast import SourceSpan
 
@@ -31,9 +31,9 @@ def derivation_to_json(
             "version": model_data.get("version"),
         },
         "target": {
-            "event": result.target,
+            "transition": result.target,
             "object": result.target_object,
-            "name": result.target_event,
+            "name": result.target_transition,
             "state": result.target_state,
             "reached": result.target_reached,
         },
@@ -77,7 +77,7 @@ def _record_to_json(record: DerivationRecord) -> dict[str, Any]:
         "message": record.message,
         "span": _optional_span_to_json(record.span),
         "object": record.object_name,
-        "event": record.event_name,
+        "transition": record.transition_name,
         "state": record.state_name,
         "expression": record.expression,
         "display_expression": record.display_expression,
@@ -102,10 +102,10 @@ def _obligation_category_counts(
     return dict(sorted(counts.items()))
 
 
-def _transition_to_json(transition: EventTransition) -> dict[str, str]:
+def _transition_to_json(transition: TransitionCommit) -> dict[str, str]:
     return {
         "object": transition.object_name,
-        "event": transition.event_name,
+        "transition": transition.transition_name,
         "source_state": transition.source_state,
         "target_state": transition.target_state,
         "label": transition.label,
@@ -115,7 +115,7 @@ def _transition_to_json(transition: EventTransition) -> dict[str, str]:
 def _trace_to_json(node: DerivationTraceNode) -> dict[str, Any]:
     return {
         "object": node.object_name,
-        "event": node.event_name,
+        "transition": node.transition_name,
         "source_state": node.source_state,
         "target_state": node.target_state,
         "status": node.status.value,

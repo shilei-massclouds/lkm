@@ -11,7 +11,7 @@ from common.spec_ast import (
     Block,
     ContextGuardDecl,
     EnumDecl,
-    EventDecl,
+    TransitionDecl,
     ExclusiveContextDecl,
     FunctionDecl,
     LockDecl,
@@ -139,12 +139,12 @@ def _state_to_json(item: StateDecl) -> dict[str, Any]:
         "span": _span_to_json(item.span),
         "invariants": [_block_to_json(block) for block in item.invariants],
         "deferred": [_block_to_json(block) for block in item.deferred],
-        "events": [_event_to_json(event) for event in item.events],
+        "transitions": [_event_to_json(transition) for transition in item.transitions],
         "other_blocks": [_block_to_json(block) for block in item.other_blocks],
     }
 
 
-def _event_to_json(item: EventDecl) -> dict[str, Any]:
+def _event_to_json(item: TransitionDecl) -> dict[str, Any]:
     return {
         "name": item.name,
         "target_state": item.target_state,

@@ -28,11 +28,11 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
         lock_ref: KernelInitTaskPiLock;
 
         entered_by {
-            KernelInitTaskPiLock.Event::LockIrqSave;
+            KernelInitTaskPiLock.Transition::LockIrqSave;
         }
 
         exited_by {
-            KernelInitTaskPiLock.Event::UnlockIrqRestore;
+            KernelInitTaskPiLock.Transition::UnlockIrqRestore;
         }
     }
 
@@ -48,11 +48,11 @@ context WakeUpKthreaddTaskContext: ResourceExclusiveContext {
         lock_ref: KthreaddTaskPiLock;
 
         entered_by {
-            KthreaddTaskPiLock.Event::LockIrqSave;
+            KthreaddTaskPiLock.Transition::LockIrqSave;
         }
 
         exited_by {
-            KthreaddTaskPiLock.Event::UnlockIrqRestore;
+            KthreaddTaskPiLock.Transition::UnlockIrqRestore;
         }
     }
 
@@ -79,11 +79,11 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
         lock_ref: BootRunQueueLock;
 
         entered_by {
-            BootRunQueueLock.Event::LockIrqSave;
+            BootRunQueueLock.Transition::LockIrqSave;
         }
 
         exited_by {
-            BootRunQueueLock.Event::UnlockIrqRestore;
+            BootRunQueueLock.Transition::UnlockIrqRestore;
         }
     }
 
@@ -102,11 +102,11 @@ context SchedulePreemptionContext: Context {
      */
     guard {
         entered_by {
-            BootIdlePreemption.Event::Disable;
+            BootIdlePreemption.Transition::Disable;
         }
 
         exited_by {
-            BootIdlePreemption.Event::EnableNoResched;
+            BootIdlePreemption.Transition::EnableNoResched;
         }
     }
 
@@ -128,11 +128,11 @@ context ScheduleLocalInterruptContext: Context {
      */
     guard {
         entered_by {
-            BootCpuLocalInterrupt.Event::SaveAndDisable;
+            BootCpuLocalInterrupt.Transition::SaveAndDisable;
         }
 
         exited_by {
-            BootCpuLocalInterrupt.Event::Restore;
+            BootCpuLocalInterrupt.Transition::Restore;
         }
     }
 
@@ -157,11 +157,11 @@ context ScheduleRunQueueContext: ResourceExclusiveContext {
         lock_ref: BootRunQueueLock;
 
         entered_by {
-            BootRunQueueLock.Event::LockIrqSave;
+            BootRunQueueLock.Transition::LockIrqSave;
         }
 
         exited_by {
-            BootRunQueueLock.Event::UnlockIrqRestore;
+            BootRunQueueLock.Transition::UnlockIrqRestore;
         }
     }
 
@@ -178,7 +178,7 @@ context BootIdleStartupContext: Context {
      * context established by schedule_preempt_disabled() before
      * cpu_startup_entry(CPUHP_ONLINE). The pre-schedule context is inherited
      * from boot/sched_init and is exited explicitly by
-     * BootIdlePreemption.Event::EnableNoResched in RestInitPhase.Preset.
+     * BootIdlePreemption.Transition::EnableNoResched in RestInitPhase.Preset.
      *
      * 参照 Linux 的 idle 设计原理，boot CPU 的整个 idle 入口准备和 idle
      * loop 都运行在抢占关闭上下文中，避免 idle/current task、polling、
@@ -188,11 +188,11 @@ context BootIdleStartupContext: Context {
      */
     guard {
         entered_by {
-            BootIdlePreemption.Event::Disable;
+            BootIdlePreemption.Transition::Disable;
         }
 
         exited_by {
-            BootIdlePreemption.Event::Enable;
+            BootIdlePreemption.Transition::Enable;
         }
     }
 
@@ -229,13 +229,13 @@ context BootIdleStartupContext: Context {
  * 上下文通过 KernelInitTaskPiLock 建立边界，引用 KernelInitTask、
  * Scheduler、BootRunQueue 三个受保护对象。
  * Enable 的 within WakeUpNewTaskContext 块直接驱动
- * Task.Event::SetRuntimeState(Running)，再通过 action result binding 把
+ * Task.Transition::SetRuntimeState(Running)，再通过 action result binding 把
  * Scheduler.Action::SelectRunQueue(KernelInitTaskRef) 返回的
  * runqueue ref 绑定为 selected_rq。随后用标准无实参 within 进入
  * EnqueueSelectedRunQueueContext；selected_rq 作为外层 action result
  * binding 在嵌套 within 中直接可见。当前 UP 路径证明 selected_rq
  * 指向 BootRunQueue，因此该 context 仍由 BootRunQueueLock 建立边界，并驱动
- * RunQueue.Event::EnqueueTask(KernelInitTaskRef)。SelectRunQueue
+ * RunQueue.Transition::EnqueueTask(KernelInitTaskRef)。SelectRunQueue
  * 当前固定返回 BootRunQueueRef；完整选择策略后续 deferred。三者都成功后，
  * Enable 才提交 KernelInitTask Ready -> Online。
  *
@@ -255,11 +255,11 @@ object KernelInitTask: Task {
      * Base 表示 PID 1 的创建规格尚未建立。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 选择 kernel_init 入口并记录 CLONE_FS 创建约束。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
                     RootPidNamespace.state == State::Ready;
@@ -294,11 +294,11 @@ object KernelInitTask: Task {
             kernel_init_clone_fs_flag_set(KernelInitTask);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 user_mode_thread(kernel_init, NULL, CLONE_FS) 创建 PID 1。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
                     RootPidNamespace.state == State::Ready;
@@ -353,11 +353,11 @@ object KernelInitTask: Task {
             kernel_init_waits_for_kthreadd_done(KernelInitTask);
         }
 
-        events {
+        transitions {
             /*
              * Enable 把 kernel_init 放入可调度集合，但仍等待 kthreadd_done 释放。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     Scheduler.state == State::Online;
                     BootRunQueue.state == State::Ready;
@@ -382,7 +382,7 @@ object KernelInitTask: Task {
                     }
 
                     drives {
-                        KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running);
+                        KernelInitTask.Transition::SetRuntimeState(TaskRuntimeState::Running);
                         let selected_rq: RunQueueRef <-
                             Scheduler.Action::SelectRunQueue(KernelInitTaskRef);
                         KernelInitTask.Action::SetTaskCpu(BootCPURef);
@@ -396,7 +396,7 @@ object KernelInitTask: Task {
                         }
 
                         drives {
-                            selected_rq.Event::EnqueueTask(KernelInitTaskRef);
+                            selected_rq.Transition::EnqueueTask(KernelInitTaskRef);
                         }
 
                         ensures {
@@ -483,11 +483,11 @@ object KthreaddTask: Task {
      * Base 表示 kthreadd 的创建规格尚未建立。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 选择 kthreadd 入口并记录 kernel_thread 创建约束。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
                     RootPidNamespace.state == State::Ready;
@@ -529,11 +529,11 @@ object KthreaddTask: Task {
             kthreadd_is_kernel_thread_provider(KthreaddTask);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES)。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     TaskCreationCore.state == State::Ready;
                     RootPidNamespace.state == State::Ready;
@@ -585,11 +585,11 @@ object KthreaddTask: Task {
             task_not_enqueued(KthreaddTask);
         }
 
-        events {
+        transitions {
             /*
              * Enable 把 kthreadd 放入可调度集合。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     Scheduler.state == State::Online;
                     BootRunQueue.state == State::Ready;
@@ -614,7 +614,7 @@ object KthreaddTask: Task {
                     }
 
                     drives {
-                        KthreaddTask.Event::SetRuntimeState(TaskRuntimeState::Running);
+                        KthreaddTask.Transition::SetRuntimeState(TaskRuntimeState::Running);
                         let selected_rq: RunQueueRef <-
                             Scheduler.Action::SelectRunQueue(KthreaddTaskRef);
                         KthreaddTask.Action::SetTaskCpu(BootCPURef);
@@ -628,7 +628,7 @@ object KthreaddTask: Task {
                         }
 
                         drives {
-                            selected_rq.Event::EnqueueTask(KthreaddTaskRef);
+                            selected_rq.Transition::EnqueueTask(KthreaddTaskRef);
                         }
 
                         ensures {
@@ -730,11 +730,11 @@ object SystemState: KernelObject {
      * Base 表示 system_state 尚未在本阶段重新确认启动中状态。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 记录 SYSTEM_BOOTING 仍是当前全局系统状态。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     system_state_booting(SystemState);
                 }
@@ -750,11 +750,11 @@ object SystemState: KernelObject {
             system_state_booting(SystemState);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 rest_init() 中 system_state = SYSTEM_SCHEDULING。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
                     KthreaddTask.state == State::Online;
@@ -779,11 +779,11 @@ object SystemState: KernelObject {
             smp_concurrency_closed();
         }
 
-        events {
+        transitions {
             /*
              * Enable 预留给 FinalizePhase 将 system_state 推进到 SYSTEM_RUNNING。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     InitMemoryCleanupDeferred.state == State::Ready;
                     KernelMappingProtectionDeferred.state == State::Ready;
@@ -817,7 +817,7 @@ object SystemState: KernelObject {
  * Completion Type process 承载，实例不复制这些通用 facts。下面的对象
  * lifecycle event 只是当前工具的实例 wrapper：Setup/Enable 提交
  * kthreadd_done 在 rest_init 场景中的 gate 生命周期状态；真正的
- * complete(&kthreadd_done) 表达为 KthreaddReadyGate.Event::Complete。
+ * complete(&kthreadd_done) 表达为 KthreaddReadyGate.Transition::Complete。
  * Completion 通用结果来自 Type process；释放 PID 1 进入下一子阶段的
  * 场景事实由 RestInitPhase 承载，不额外引入 Linux 中不存在的 action。
  */
@@ -828,11 +828,11 @@ object KthreaddReadyGate: Completion {
      * Base 表示 kthreadd_done completion 尚未建模为 pending 门。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 建立 kthreadd_done pending 门，PID 1 仍被阻塞在等待点。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
                     KthreaddTask.state == State::Online;
@@ -856,11 +856,11 @@ object KthreaddReadyGate: Completion {
             kthreadd_ready_gate_pending(KthreaddReadyGate);
         }
 
-        events {
+        transitions {
             /*
              * Enable 发布 completion handle，使其可被运行期 Complete process 操作。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     SystemState.state == State::Ready;
                     KthreaddTask.state == State::Online;
@@ -901,11 +901,11 @@ object BootIdleRuntime: BootIdleRuntimeObject {
      * Base 表示 boot idle 任务已存在，但尚未进入 cpu_startup_entry() 运行期入口。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 rest_init() 尾部的 cpu_startup_entry(CPUHP_ONLINE) 边界。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Scheduler.state == State::Online;
                     BootIdleTask.state == State::Ready;
@@ -952,8 +952,8 @@ object RestInitPhase: PhaseObject {
     parent: UpMultitaskPhase;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     ProcessPreparePhase.state == State::Ready;
                     TaskCreationCore.state == State::Ready;
@@ -971,21 +971,21 @@ object RestInitPhase: PhaseObject {
                 }
 
                 drives {
-                    KernelInitTask.Event::Preset;
-                    KernelInitTask.Event::Setup;
-                    KernelInitTask.Event::Enable;
+                    KernelInitTask.Transition::Preset;
+                    KernelInitTask.Transition::Setup;
+                    KernelInitTask.Transition::Enable;
                     KernelInitTask.Action::PinToBootCpu(BootCPURef);
-                    KthreaddTask.Event::Preset;
-                    KthreaddTask.Event::Setup;
-                    KthreaddTask.Event::Enable;
+                    KthreaddTask.Transition::Preset;
+                    KthreaddTask.Transition::Setup;
+                    KthreaddTask.Transition::Enable;
                     KthreaddTask.Action::BindGlobalRef;
                     KthreaddTask.Action::RunScheduleLoop;
-                    SystemState.Event::Preset;
-                    SystemState.Event::Setup;
-                    KthreaddReadyGate.Event::Setup;
-                    KthreaddReadyGate.Event::Enable;
-                    KthreaddReadyGate.Event::Complete;
-                    BootIdlePreemption.Event::EnableNoResched;
+                    SystemState.Transition::Preset;
+                    SystemState.Transition::Setup;
+                    KthreaddReadyGate.Transition::Setup;
+                    KthreaddReadyGate.Transition::Enable;
+                    KthreaddReadyGate.Transition::Complete;
+                    BootIdlePreemption.Transition::EnableNoResched;
                     Scheduler.Action::Schedule;
                 }
 
@@ -1059,8 +1059,8 @@ object RestInitPhase: PhaseObject {
             rest_init_boot_idle_tail_pending(BootIdleRuntime);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     scheduler_first_schedule_committed(Scheduler);
@@ -1070,7 +1070,7 @@ object RestInitPhase: PhaseObject {
 
                 within BootIdleStartupContext {
                     drives {
-                        BootIdleRuntime.Event::Setup;
+                        BootIdleRuntime.Transition::Setup;
                         BootIdleRuntime.Action::PrepareIdleEntry;
                         BootIdleRuntime.Action::RunIdleLoop;
                     }

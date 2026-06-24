@@ -6,7 +6,7 @@ from typing import Any
 
 from common.schemas import MODEL_SCHEMA, MODEL_VERSION
 from common.model_types import (
-    EventDef,
+    TransitionDef,
     ExclusiveContextDef,
     ObjectDef,
     ObjectModel,
@@ -17,7 +17,7 @@ from common.spec_ast import (
     Block,
     ContextGuardDecl,
     EnumDecl,
-    EventDecl,
+    TransitionDecl,
     ExclusiveContextDecl,
     FunctionDecl,
     LockDecl,
@@ -183,28 +183,28 @@ def _object_def_from_json(item: Any) -> ObjectDef:
 
 def _state_def_from_json(item: Any) -> StateDef:
     data = _as_object(item, "state")
-    events = {
-        name: _event_def_from_json(event)
-        for name, event in _object(data, "events").items()
+    transitions = {
+        name: _event_def_from_json(transition)
+        for name, transition in _object(data, "transitions").items()
     }
     decl = StateDecl(
         name=_string(data, "name"),
         span=_span_from_json(data["span"]),
         invariants=[_block_from_json(block) for block in _list(data, "invariants")],
         deferred=[_block_from_json(block) for block in _list(data, "deferred")],
-        events=[event.decl for event in events.values()],
+        transitions=[transition.decl for transition in transitions.values()],
         other_blocks=[_block_from_json(block) for block in _list(data, "other_blocks")],
     )
     return StateDef(
         name=decl.name,
         object_name=_string(data, "object_name"),
         decl=decl,
-        events=events,
+        transitions=transitions,
     )
 
 
-def _event_def_from_json(item: Any) -> EventDef:
-    data = _as_object(item, "event")
+def _event_def_from_json(item: Any) -> TransitionDef:
+    data = _as_object(item, "transition")
     depends_on = [_block_from_json(block) for block in _list(data, "depends_on")]
     drives = [_block_from_json(block) for block in _list(data, "drives")]
     within = [_within_from_json(block) for block in _list(data, "within")]
@@ -224,7 +224,7 @@ def _event_def_from_json(item: Any) -> EventDef:
             *(_block_body_member(block) for block in other_blocks),
         ],
     )
-    decl = EventDecl(
+    decl = TransitionDecl(
         name=_string(data, "name"),
         target_state=_string(data, "target_state"),
         span=_span_from_json(data["span"]),
@@ -237,7 +237,7 @@ def _event_def_from_json(item: Any) -> EventDef:
         other_blocks=other_blocks,
         body_members=body_members,
     )
-    return EventDef(
+    return TransitionDef(
         name=decl.name,
         object_name=_string(data, "object_name"),
         source_state=_string(data, "source_state"),

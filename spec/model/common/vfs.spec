@@ -113,8 +113,8 @@ object FileSystemType: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     fs_type_name_bound(FileSystemType);
                     fs_type_mount_callback_bound(FileSystemType);
@@ -135,8 +135,8 @@ object RamFsType: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     fs_type_name_bound(RamFsType);
                     fs_type_mount_callback_bound(RamFsType);
@@ -161,8 +161,8 @@ object VfsCore: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     vfs_core_initialized(VfsCore);
                     vfs_core_fs_type_registry_ready(VfsCore);
@@ -213,12 +213,12 @@ object VfsCore: ResourceObject {
                     ramfs_type_registered(VfsCore, RamFsType);
                 }
                 drives {
-                    SuperBlock.Event::Setup;
-                    Inode.Event::Setup;
+                    SuperBlock.Transition::Setup;
+                    Inode.Transition::Setup;
                     Inode.Action::CreateRootDirectory;
-                    Dentry.Event::Setup;
+                    Dentry.Transition::Setup;
                     Dentry.Action::CreateRoot;
-                    Mount.Event::Setup;
+                    Mount.Transition::Setup;
                 }
                 ensures {
                     mount_allocated(Mount);
@@ -248,12 +248,12 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    SuperBlock.Event::Setup;
-                    Inode.Event::Setup;
+                    SuperBlock.Transition::Setup;
+                    Inode.Transition::Setup;
                     Inode.Action::CreateRootDirectory;
-                    Dentry.Event::Setup;
+                    Dentry.Transition::Setup;
                     Dentry.Action::CreateRoot;
-                    Mount.Event::Setup;
+                    Mount.Transition::Setup;
                 }
                 ensures {
                     mount_allocated(Mount);
@@ -281,12 +281,12 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    SuperBlock.Event::Setup;
-                    Inode.Event::Setup;
+                    SuperBlock.Transition::Setup;
+                    Inode.Transition::Setup;
                     Inode.Action::CreateRootDirectory;
-                    Dentry.Event::Setup;
+                    Dentry.Transition::Setup;
                     Dentry.Action::CreateRoot;
-                    Mount.Event::Setup;
+                    Mount.Transition::Setup;
                 }
                 ensures {
                     mount_allocated(Mount);
@@ -317,12 +317,12 @@ object VfsCore: ResourceObject {
                     ext2_inode_is_root_dir(fs, Ext2InodeRef::Root);
                 }
                 drives {
-                    SuperBlock.Event::Setup;
-                    Inode.Event::Setup;
+                    SuperBlock.Transition::Setup;
+                    Inode.Transition::Setup;
                     Inode.Action::CreateRootDirectory;
-                    Dentry.Event::Setup;
+                    Dentry.Transition::Setup;
                     Dentry.Action::CreateRoot;
-                    Mount.Event::Setup;
+                    Mount.Transition::Setup;
                 }
                 ensures {
                     mount_allocated(Mount);
@@ -378,7 +378,7 @@ object VfsCore: ResourceObject {
                     vfs_absolute_path_walk_supported(VfsCore);
                 }
                 drives {
-                    PathWalk.Event::Setup;
+                    PathWalk.Transition::Setup;
                     VfsCore.Action::Lookup;
                     VfsCore.Action::FollowMount;
                 }
@@ -410,9 +410,9 @@ object VfsCore: ResourceObject {
                 }
                 drives {
                     Ext2FileSystem.Action::LookupRootName;
-                    Inode.Event::Setup;
+                    Inode.Transition::Setup;
                     Inode.Action::CreateFile;
-                    Dentry.Event::Setup;
+                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -432,9 +432,9 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    Inode.Event::Setup;
+                    Inode.Transition::Setup;
                     Inode.Action::CreateDirectory;
-                    Dentry.Event::Setup;
+                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -451,9 +451,9 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    Inode.Event::Setup;
+                    Inode.Transition::Setup;
                     Inode.Action::CreateFile;
-                    Dentry.Event::Setup;
+                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -470,9 +470,9 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::Directory);
                 }
                 drives {
-                    Inode.Event::Setup;
+                    Inode.Transition::Setup;
                     Inode.Action::CreateDeviceNode;
-                    Dentry.Event::Setup;
+                    Dentry.Transition::Setup;
                     Dentry.Action::InsertChild;
                 }
                 ensures {
@@ -489,7 +489,7 @@ object VfsCore: ResourceObject {
                     inode_kind_is(Inode, VfsInodeKind::RegularFile);
                 }
                 drives {
-                    File.Event::Setup;
+                    File.Transition::Setup;
                 }
                 ensures {
                     file_allocated(File);
@@ -510,7 +510,7 @@ object VfsCore: ResourceObject {
                 }
                 drives {
                     VfsCore.Action::WalkPath(path, fs);
-                    File.Event::Setup;
+                    File.Transition::Setup;
                 }
                 ensures {
                     file_allocated(File);
@@ -612,8 +612,8 @@ object FsStruct: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VfsCore.state == State::Ready;
                 }
@@ -671,8 +671,8 @@ object Path: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     vfs_path_absolute(Path);
                     vfs_path_components_bound(Path);
@@ -693,8 +693,8 @@ object PathWalk: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
@@ -721,8 +721,8 @@ object Mount: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SuperBlock.state == State::Ready;
                     Dentry.state == State::Ready;
@@ -749,8 +749,8 @@ object SuperBlock: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     superblock_allocated(SuperBlock);
                 }
@@ -769,8 +769,8 @@ object Inode: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SuperBlock.state == State::Ready;
                 }
@@ -839,8 +839,8 @@ object Dentry: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Inode.state == State::Ready;
                 }
@@ -894,8 +894,8 @@ object File: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Dentry.state == State::Ready;
                     Inode.state == State::Ready;

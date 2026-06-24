@@ -15,8 +15,8 @@ object KUnitRuntimeTrimmed: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     InitcallBoundary.state == State::Ready;
                 }
@@ -45,8 +45,8 @@ object InitramfsSyncDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KUnitRuntimeTrimmed.state == State::Ready;
                     Workqueue.state == State::Ready;
@@ -77,8 +77,8 @@ object RootfsConsoleDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     InitramfsSyncDeferred.state == State::Ready;
                     KernelInitTask.state == State::Online;
@@ -103,7 +103,7 @@ object RootfsConsoleDeferred: KernelObject {
 /*
  * RootFS is the target top-level filesystem view. It is already Ready when
  * this phase starts because ProcessPreparePhase built the initial ramfs-backed
- * rootfs mount via vfs_caches_init()/mnt_init(). RootFS.Event::Enable
+ * rootfs mount via vfs_caches_init()/mnt_init(). RootFS.Transition::Enable
  * represents the prepare_namespace() position in this phase. This slice
  * records that the supported Linux-like path enters prepare_namespace(), that
  * /dev is already mounted, and that the default block device is available as
@@ -128,8 +128,8 @@ object RootFS: KernelObject {
     initial_state: State::Ready;
 
     state State::Ready {
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     RootfsConsoleDeferred.state == State::Ready;
                     SavedCommandLine.state == State::Ready;
@@ -150,7 +150,7 @@ object RootFS: KernelObject {
                 }
 
                 drives {
-                    Ext2FileSystem.Event::Enable;
+                    Ext2FileSystem.Transition::Enable;
                     VfsCore.Action::MountExt2At;
                     VfsCore.Action::MoveMountToRoot;
                     FsStruct.Action::Chdir;
@@ -205,8 +205,8 @@ object IntegrityKeysDeferred: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RootFS.state == State::Online;
                 }
@@ -235,8 +235,8 @@ object RootfsBoundary: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KUnitRuntimeTrimmed.state == State::Ready;
                     InitramfsSyncDeferred.state == State::Ready;
@@ -270,8 +270,8 @@ object RootfsPhase: PhaseObject {
     parent: SmpRuntimePhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     InitcallPhase.state == State::Ready;
                     InitcallBoundary.state == State::Ready;
@@ -281,18 +281,18 @@ object RootfsPhase: PhaseObject {
                 }
 
                 drives {
-                    KUnitRuntimeTrimmed.Event::Setup;
-                    InitramfsSyncDeferred.Event::Setup;
-                    RootfsConsoleDeferred.Event::Setup;
-                    Bio.Event::Setup;
-                    BufferHead.Event::Setup;
-                    Ext2Driver.Event::Setup;
-                    Ext2Volume.Event::Preset;
-                    Ext2FileSystem.Event::Preset;
-                    Ext2FileSystem.Event::Setup;
-                    RootFS.Event::Enable;
-                    IntegrityKeysDeferred.Event::Setup;
-                    RootfsBoundary.Event::Setup;
+                    KUnitRuntimeTrimmed.Transition::Setup;
+                    InitramfsSyncDeferred.Transition::Setup;
+                    RootfsConsoleDeferred.Transition::Setup;
+                    Bio.Transition::Setup;
+                    BufferHead.Transition::Setup;
+                    Ext2Driver.Transition::Setup;
+                    Ext2Volume.Transition::Preset;
+                    Ext2FileSystem.Transition::Preset;
+                    Ext2FileSystem.Transition::Setup;
+                    RootFS.Transition::Enable;
+                    IntegrityKeysDeferred.Transition::Setup;
+                    RootfsBoundary.Transition::Setup;
                 }
 
                 ensures {

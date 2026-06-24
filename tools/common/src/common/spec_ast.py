@@ -35,7 +35,7 @@ class Block:
 
 @dataclass(frozen=True)
 class WithinDecl:
-    """An event/action block executed within an exclusive context."""
+    """A transition/action block executed within an exclusive context."""
 
     context: str
     span: SourceSpan
@@ -54,8 +54,8 @@ class WithinDecl:
 
 
 @dataclass(frozen=True)
-class EventDecl:
-    """A state-local event transition declaration."""
+class TransitionDecl:
+    """A state-local transition declaration."""
 
     name: str
     target_state: str
@@ -72,7 +72,7 @@ class EventDecl:
 
 @dataclass(frozen=True)
 class BodyMember:
-    """A source-ordered event/within body member."""
+    """A source-ordered transition/within body member."""
 
     kind: str
     span: SourceSpan
@@ -88,7 +88,7 @@ class StateDecl:
     span: SourceSpan
     invariants: list[Block] = field(default_factory=list)
     deferred: list[Block] = field(default_factory=list)
-    events: list[EventDecl] = field(default_factory=list)
+    transitions: list[TransitionDecl] = field(default_factory=list)
     other_blocks: list[Block] = field(default_factory=list)
 
 

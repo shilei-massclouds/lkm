@@ -27,7 +27,7 @@ class DerivationRecord:
     message: str
     span: SourceSpan | None = None
     object_name: str | None = None
-    event_name: str | None = None
+    transition_name: str | None = None
     state_name: str | None = None
     expression: str | None = None
     display_expression: str | None = None
@@ -40,28 +40,28 @@ class DerivationRecord:
 
 
 @dataclass(frozen=True)
-class EventTransition:
-    """An event transition completed during derivation."""
+class TransitionCommit:
+    """A transition completed during derivation."""
 
     object_name: str
-    event_name: str
+    transition_name: str
     source_state: str
     target_state: str
 
     @property
     def label(self) -> str:
         return (
-            f"{self.object_name}.Event::{self.event_name}: "
+            f"{self.object_name}.Transition::{self.transition_name}: "
             f"State::{self.source_state} -> State::{self.target_state}"
         )
 
 
 @dataclass(frozen=True)
 class DerivationTraceNode:
-    """One nested event node in the derivation trace."""
+    """One nested transition node in the derivation trace."""
 
     object_name: str
-    event_name: str
+    transition_name: str
     source_state: str
     target_state: str
     status: DerivationStatus
@@ -71,20 +71,20 @@ class DerivationTraceNode:
 
     @property
     def label(self) -> str:
-        return f"{self.object_name}.Event::{self.event_name}"
+        return f"{self.object_name}.Transition::{self.transition_name}"
 
 
 @dataclass(frozen=True)
 class DerivationResult:
-    """Result of deriving a target event from an object model."""
+    """Result of deriving a target transition from an object model."""
 
     target: str
     target_object: str | None
-    target_event: str | None
+    target_transition: str | None
     target_state: str | None
     states: dict[str, str]
     records: tuple[DerivationRecord, ...] = ()
-    transitions: tuple[EventTransition, ...] = ()
+    transitions: tuple[TransitionCommit, ...] = ()
     trace: tuple[DerivationTraceNode, ...] = ()
 
     @property

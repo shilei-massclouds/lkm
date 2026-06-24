@@ -69,14 +69,14 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     transition["object"] == "StartupTimeline"
-                    and transition["event"] == "Setup"
+                    and transition["transition"] == "Setup"
                     for transition in data["transitions"]
                 )
             )
             self.assertTrue(
                 any(
                     transition["object"] == "EntrySuccessorPhase"
-                    and transition["event"] == "Setup"
+                    and transition["transition"] == "Setup"
                     for transition in data["transitions"]
                 )
             )
@@ -91,7 +91,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertEqual(len(data["trace"]), 1)
             root = data["trace"][0]
             self.assertEqual(root["object"], "StartupTimeline")
-            self.assertEqual(root["event"], "Setup")
+            self.assertEqual(root["transition"], "Setup")
             self.assertEqual(root["source_state"], "Base")
             self.assertEqual(root["target_state"], "Ready")
             self.assertEqual(root["status"], "proved")
@@ -164,7 +164,7 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running)"
+                    == "KernelInitTask.Transition::SetRuntimeState(state: TaskRuntimeState::Running)"
                     and record["proof_class"] == "type_process_commit"
                     and record["proof_provider"] == "within_context"
                     for record in proved
@@ -187,9 +187,9 @@ class DeriveToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     record["expression"]
-                    == "selected_rq.Event::EnqueueTask(task_ref: KernelInitTaskRef)"
+                    == "selected_rq.Transition::EnqueueTask(task_ref: KernelInitTaskRef)"
                     and record["display_expression"]
-                    == "selected_rq.Event::EnqueueTask(KernelInitTaskRef)"
+                    == "selected_rq.Transition::EnqueueTask(KernelInitTaskRef)"
                     and record["proof_class"] == "type_process_commit"
                     and record["proof_provider"] == "within_context"
                     for record in proved
@@ -240,8 +240,8 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "BootRunQueueLock.Event::LockIrqSave"
-                    and record["proof_class"] == "context_guard_event"
+                    record["expression"] == "BootRunQueueLock.Transition::LockIrqSave"
+                    and record["proof_class"] == "context_guard_transition"
                     and record["proof_provider"] == "guard"
                     for record in proved
                 )
@@ -335,7 +335,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "kernel_fpu_disabled"
                     and record["proof_class"] == "riscv_status_register"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -343,7 +343,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "kernel_vector_disabled"
                     and record["proof_class"] == "riscv_status_register"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -385,7 +385,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "header_range.start == BootArgs.dtb_pa"
                     and record["proof_class"] == "dtb_header_range"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -393,7 +393,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "range.end == BootArgs.dtb_pa + header.total_size"
                     and record["proof_class"] == "dtb_range"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -407,7 +407,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "fdt_slot == Config.fixmap.fdt"
                     and record["proof_class"] == "fixmap_layout"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -416,7 +416,7 @@ class DeriveToolTests(unittest.TestCase):
                     record["expression"]
                     == "Riscv64.stvec == virt_addr(EventStream.formal_event_entry, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -424,7 +424,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "Riscv64.tp == virt_addr(BootInitTask.storage, EarlyVm, KernelImageMap)"
                     and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -432,7 +432,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "Riscv64.sp == phys_addr(Lds.init_stack_end - Config.pt_size_on_stack)"
                     and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -440,7 +440,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode)"
                     and record["proof_class"] == "register_effect"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -494,7 +494,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid)"
                     and record["proof_class"] == "boot_hart_identity"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -502,7 +502,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_dtb_magic"
                     and record["proof_class"] == "boot_input"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -510,7 +510,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_dtb_header"
                     and record["proof_class"] == "boot_input"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -530,7 +530,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "cpu_id_map_ready(CpuIdMap, CpuGroup)"
                     and record["proof_class"] == "cpu_topology"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -538,7 +538,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "boot_cpu_online(BootCPU)"
                     and record["proof_class"] == "cpu_state"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -660,7 +660,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "slot_contains(fdt_slot, RawDtb)"
                     and record["proof_class"] == "fixmap_slot_content"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -668,7 +668,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["expression"] == "slot_contains(FixMap.fdt_slot, RawDtb)"
                     and record["proof_class"] == "fixmap_slot_content"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -734,7 +734,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "kernel_image_accessible"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -742,7 +742,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "fixmap_slot_accessible"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -764,7 +764,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "trampoline_mapping_ready"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -780,7 +780,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "kernel_image_mapping_ready"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -788,7 +788,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "fixmap_slot_mapping_ready"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -810,7 +810,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_object_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -818,7 +818,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_function_symbol"
                     and record["proof_class"] == "linker_symbol"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -826,7 +826,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_page_table_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -848,7 +848,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "valid_task_storage"
                     and record["proof_class"] == "object_storage"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -887,7 +887,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "soc_early_platform_ready"
                     and record["proof_class"] == "platform"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -912,7 +912,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "memory_zeroed"
                     and record["proof_class"] == "memory_content"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -926,7 +926,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "phys_to_virt_transition_completed"
                     and record["proof_class"] == "architecture_state"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -934,7 +934,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "gp_relative_access_ready"
                     and record["proof_class"] == "architecture_state"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -942,7 +942,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "swapper_vm_mappings_ready"
                     and record["proof_class"] == "address_mapping"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -950,7 +950,7 @@ class DeriveToolTests(unittest.TestCase):
                 any(
                     record["predicate"] == "memblock_allocator_ready"
                     and record["proof_class"] == "physical_memory_management"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -985,7 +985,7 @@ class DeriveToolTests(unittest.TestCase):
                     record["object"] == "FixMap"
                     and record["predicate"] == "attrs_accessible"
                     and record["proof_class"] == "fixmap_layout"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )
@@ -1025,7 +1025,7 @@ class DeriveToolTests(unittest.TestCase):
                     record["object"] == "BootInitTask"
                     and record["predicate"] == "attrs_accessible"
                     and record["proof_class"] == "static_object_binding"
-                    and record["proof_provider"] == "event_ensures"
+                    and record["proof_provider"] == "transition_ensures"
                     for record in proved
                 )
             )

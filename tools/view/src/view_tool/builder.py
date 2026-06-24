@@ -6,7 +6,7 @@ from dataclasses import replace
 import re
 from typing import Any
 
-from common.model_types import EventDef, ObjectModel, StateDef
+from common.model_types import TransitionDef, ObjectModel, StateDef
 from common.view_types import (
     TimelineItem,
     TimelineRow,
@@ -18,7 +18,7 @@ from common.view_types import (
 )
 
 
-_OBJECT_EVENT_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\b")
+_OBJECT_TRANSITION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
@@ -50,25 +50,25 @@ def build_object_view(model: ObjectModel) -> ViewModel:
 
 
 def build_drives_view(model: ObjectModel) -> ViewModel:
-    """Build an event-level view from drives blocks."""
+    """Build an transition-level view from drives blocks."""
 
     nodes: dict[str, ViewNode] = {}
     edges: list[ViewEdge] = []
 
     for obj in model.objects.values():
         for state in obj.states.values():
-            for event in state.events.values():
-                source = _event_node_id(obj.name, event.name)
-                _add_event_node(nodes, source, obj.name, event.name)
+            for transition in state.transitions.values():
+                source = _transition_node_id(obj.name, transition.name)
+                _add_transition_node(nodes, source, obj.name, transition.name)
 
-                for target_obj, target_event in _driven_events(event):
+                for target_obj, target_transition in _driven_transitions(transition):
                     if target_obj not in model.objects:
                         continue
-                    target = _event_node_id(target_obj, target_event)
-                    _add_event_node(nodes, target, target_obj, target_event)
+                    target = _transition_node_id(target_obj, target_transition)
+                    _add_transition_node(nodes, target, target_obj, target_transition)
                     edges.append(ViewEdge(source=source, target=target, kind="drives"))
 
-                for target_obj, target_action in _driven_actions(event):
+                for target_obj, target_action in _driven_actions(transition):
                     if target_obj not in model.objects:
                         continue
                     target = _action_node_id(target_obj, target_action)
@@ -79,7 +79,7 @@ def build_drives_view(model: ObjectModel) -> ViewModel:
 
 
 def build_timeline_view(model: ObjectModel) -> ViewModel:
-    """Build a timeline view from timeline and phase object events."""
+    """Build a timeline view from timeline and phase object transitions."""
 
     nodes: dict[str, ViewNode] = {}
     edges: list[ViewEdge] = []
@@ -99,22 +99,22 @@ def build_timeline_view(model: ObjectModel) -> ViewModel:
     for name in phase_objects:
         obj = model.objects[name]
         for state in obj.states.values():
-            for event in state.events.values():
-                event_id = _event_node_id(name, event.name)
-                _add_event_node(nodes, event_id, name, event.name)
+            for transition in state.transitions.values():
+                event_id = _transition_node_id(name, transition.name)
+                _add_transition_node(nodes, event_id, name, transition.name)
                 edges.append(
                     ViewEdge(
                         source=name,
                         target=event_id,
-                        kind="has_event",
+                        kind="has_transition",
                     )
                 )
 
-                for target_obj, target_event in _driven_events(event):
+                for target_obj, target_transition in _driven_transitions(transition):
                     if target_obj not in phase_objects:
                         continue
-                    target = _event_node_id(target_obj, target_event)
-                    _add_event_node(nodes, target, target_obj, target_event)
+                    target = _transition_node_id(target_obj, target_transition)
+                    _add_transition_node(nodes, target, target_obj, target_transition)
                     edges.append(
                         ViewEdge(
                             source=event_id,
@@ -147,10 +147,10 @@ def build_trace_view(
     roots = derive_data.get("trace", [])
     builder.build(
         roots,
-        _verified_states_by_event(derive_data, roots),
-        _context_records_by_event(derive_data),
-        _ordinary_action_records_by_event(derive_data),
-        _transition_record_order_by_event(derive_data),
+        _verified_states_by_transition(derive_data, roots),
+        _context_records_by_transition(derive_data),
+        _ordinary_action_records_by_transition(derive_data),
+        _transition_record_order_by_transition(derive_data),
         max_action_depth=max_action_depth,
     )
     return ViewModel(
@@ -165,7 +165,7 @@ def build_trace_view(
     )
 
 
-def _ordinary_action_records_by_event(
+def _ordinary_action_records_by_transition(
     derive_data: dict[str, Any]
 ) -> dict[tuple[str, str], list[dict[str, object]]]:
     actions: dict[tuple[str, str], list[dict[str, object]]] = {}
@@ -179,8 +179,8 @@ def _ordinary_action_records_by_event(
         if record.get("status") != "proved":
             continue
         object_name = record.get("object")
-        event_name = record.get("event")
-        if not isinstance(object_name, str) or not isinstance(event_name, str):
+        transition_name = record.get("transition")
+        if not isinstance(object_name, str) or not isinstance(transition_name, str):
             continue
         proof_class = record.get("proof_class")
         if proof_class not in {
@@ -199,7 +199,7 @@ def _ordinary_action_records_by_event(
         display_expression = record.get("display_expression")
         if not isinstance(display_expression, str) or not display_expression:
             display_expression = expression
-        actions.setdefault((object_name, event_name), []).append(
+        actions.setdefault((object_name, transition_name), []).append(
             {
                 "action": display_expression,
                 "expression": expression,
@@ -209,7 +209,7 @@ def _ordinary_action_records_by_event(
     return actions
 
 
-def _transition_record_order_by_event(derive_data: dict[str, Any]) -> dict[tuple[str, str], int]:
+def _transition_record_order_by_transition(derive_data: dict[str, Any]) -> dict[tuple[str, str], int]:
     orders: dict[tuple[str, str], int] = {}
     records = derive_data.get("records", [])
     if not isinstance(records, list):
@@ -224,14 +224,14 @@ def _transition_record_order_by_event(derive_data: dict[str, Any]) -> dict[tuple
         if not isinstance(message, str) or not message.startswith("transition: "):
             continue
         object_name = record.get("object")
-        event_name = record.get("event")
-        if not isinstance(object_name, str) or not isinstance(event_name, str):
+        transition_name = record.get("transition")
+        if not isinstance(object_name, str) or not isinstance(transition_name, str):
             continue
-        orders.setdefault((object_name, event_name), order)
+        orders.setdefault((object_name, transition_name), order)
     return orders
 
 
-def _context_records_by_event(
+def _context_records_by_transition(
     derive_data: dict[str, Any]
 ) -> dict[tuple[str, str], list[dict[str, object]]]:
     contexts: dict[tuple[str, str], list[dict[str, object]]] = {}
@@ -245,10 +245,10 @@ def _context_records_by_event(
         if not isinstance(record, dict):
             continue
         object_name = record.get("object")
-        event_name = record.get("event")
-        if not isinstance(object_name, str) or not isinstance(event_name, str):
+        transition_name = record.get("transition")
+        if not isinstance(object_name, str) or not isinstance(transition_name, str):
             continue
-        key = (object_name, event_name)
+        key = (object_name, transition_name)
         source_kind = record.get("source_kind")
         proof_class = record.get("proof_class")
         proof_provider = record.get("proof_provider")
@@ -741,7 +741,7 @@ def _process_identity_keys(*values: object) -> set[str]:
 
 def _process_call_identity(value: str) -> str:
     match = re.match(
-        r"\A([A-Za-z_][A-Za-z0-9_.]*\.(?:Event|Action)::[A-Za-z_][A-Za-z0-9_]*)\((.*)\)\Z",
+        r"\A([A-Za-z_][A-Za-z0-9_.]*\.(?:Transition|Action)::[A-Za-z_][A-Za-z0-9_]*)\((.*)\)\Z",
         value,
     )
     if match is None:
@@ -773,22 +773,22 @@ def _split_process_args(args: str) -> list[str]:
     return parts
 
 
-def _event_node_id(object_name: str, event_name: str) -> str:
-    return f"{object_name}.{event_name}"
+def _transition_node_id(object_name: str, transition_name: str) -> str:
+    return f"{object_name}.{transition_name}"
 
 
 def _action_node_id(object_name: str, action_name: str) -> str:
     return f"{object_name}.Action.{action_name}"
 
 
-def _add_event_node(
-    nodes: dict[str, ViewNode], node_id: str, object_name: str, event_name: str
+def _add_transition_node(
+    nodes: dict[str, ViewNode], node_id: str, object_name: str, transition_name: str
 ) -> None:
     if node_id not in nodes:
         nodes[node_id] = ViewNode(
             id=node_id,
-            label=f"{object_name}.{event_name}",
-            kind="Event",
+            label=f"{object_name}.{transition_name}",
+            kind="Transition",
         )
 
 
@@ -823,9 +823,9 @@ def _build_timeline_rows(
         rows_by_phase_state[row_key] = []
         row_order.append(row_key)
 
-    def process_event(
+    def process_transition(
         object_name: str,
-        event_name: str,
+        transition_name: str,
         current_phase: str,
         current_phase_state: str | None,
     ) -> None:
@@ -833,50 +833,50 @@ def _build_timeline_rows(
         if obj is None:
             return
 
-        event = _find_event(obj, event_name, states.get(object_name))
-        if event is None:
+        transition = _find_transition(obj, transition_name, states.get(object_name))
+        if transition is None:
             return
 
-        key = (object_name, event_name)
+        key = (object_name, transition_name)
         if key in processed_events:
             return
         processed_events.add(key)
 
         if object_name in phase_objects:
             next_phase = object_name
-            next_phase_state = event.target_state
+            next_phase_state = transition.target_state
         else:
             next_phase = current_phase
             next_phase_state = current_phase_state
 
-        for target_obj, target_event in _driven_events(event):
-            process_event(target_obj, target_event, next_phase, next_phase_state)
+        for target_obj, target_transition in _driven_transitions(transition):
+            process_transition(target_obj, target_transition, next_phase, next_phase_state)
 
-        states[object_name] = event.target_state
+        states[object_name] = transition.target_state
 
         if object_name in phase_objects:
-            ensure_row(object_name, event.target_state)
+            ensure_row(object_name, transition.target_state)
         elif current_phase_state is not None:
             sequence.append(
                 (
                     current_phase,
                     current_phase_state,
                     object_name,
-                    event.target_state,
-                    event.name,
+                    transition.target_state,
+                    transition.name,
                 )
             )
 
-    process_event("StartupTimeline", "Setup", "StartupTimeline", None)
+    process_transition("StartupTimeline", "Setup", "StartupTimeline", None)
 
     final_by_object: dict[str, tuple[str, str, str, str]] = {}
-    for phase, phase_state, object_name, target_state, event_name in sequence:
-        final_by_object[object_name] = (phase, phase_state, target_state, event_name)
+    for phase, phase_state, object_name, target_state, transition_name in sequence:
+        final_by_object[object_name] = (phase, phase_state, target_state, transition_name)
 
     placed_objects: set[str] = set()
-    for phase, phase_state, object_name, _target_state, _event_name in sequence:
+    for phase, phase_state, object_name, _target_state, _transition_name in sequence:
         final = final_by_object[object_name]
-        if (phase, phase_state, _target_state, _event_name) != final:
+        if (phase, phase_state, _target_state, _transition_name) != final:
             continue
         if object_name in placed_objects:
             continue
@@ -963,34 +963,34 @@ def _parent_timeline_phase(phase: str) -> str:
     return phase
 
 
-def _find_event(obj, event_name: str, current_state: str | None) -> EventDef | None:
+def _find_transition(obj, transition_name: str, current_state: str | None) -> TransitionDef | None:
     if current_state is not None:
         state = obj.states.get(current_state)
-        if state is not None and event_name in state.events:
-            return state.events[event_name]
+        if state is not None and transition_name in state.transitions:
+            return state.transitions[transition_name]
 
     for state in obj.states.values():
-        event = state.events.get(event_name)
-        if event is not None:
-            return event
+        transition = state.transitions.get(transition_name)
+        if transition is not None:
+            return transition
     return None
 
 
-def _driven_events(event: EventDef) -> list[tuple[str, str]]:
+def _driven_transitions(transition: TransitionDef) -> list[tuple[str, str]]:
     driven: list[tuple[str, str]] = []
-    for block in event.decl.drives:
-        driven.extend(_OBJECT_EVENT_RE.findall(block.body))
-    for within in event.decl.within:
+    for block in transition.decl.drives:
+        driven.extend(_OBJECT_TRANSITION_RE.findall(block.body))
+    for within in transition.decl.within:
         for block in within.drives:
-            driven.extend(_OBJECT_EVENT_RE.findall(block.body))
+            driven.extend(_OBJECT_TRANSITION_RE.findall(block.body))
     return driven
 
 
-def _driven_actions(event: EventDef) -> list[tuple[str, str]]:
+def _driven_actions(transition: TransitionDef) -> list[tuple[str, str]]:
     driven: list[tuple[str, str]] = []
-    for block in event.decl.drives:
+    for block in transition.decl.drives:
         driven.extend(_OBJECT_ACTION_RE.findall(block.body))
-    for within in event.decl.within:
+    for within in transition.decl.within:
         for block in within.drives:
             driven.extend(_OBJECT_ACTION_RE.findall(block.body))
     return driven
@@ -1054,7 +1054,7 @@ class _TraceLayoutBuilder:
         index = self._event_index
         self._event_index += 1
         label = _trace_label(data)
-        event_id = f"event-{index}"
+        event_id = f"transition-{index}"
         enter_id = f"{event_id}-source"
         exit_id = f"{event_id}-target"
         span_id = f"{event_id}-span"
@@ -1122,7 +1122,7 @@ class _TraceLayoutBuilder:
         )
 
         verified_states = verified_states_by_event.get(
-            (str(data["object"]), str(data["event"])), []
+            (str(data["object"]), str(data["transition"])), []
         )
         verified_lane = object_lane if is_phase else object_lane + 1
         child_object_lane = object_lane if is_phase else object_lane + (
@@ -1164,7 +1164,7 @@ class _TraceLayoutBuilder:
             child_data = _trace_node_object(child)
             child_key = (
                 str(child_data.get("object")),
-                str(child_data.get("event")),
+                str(child_data.get("transition")),
             )
             body_items.append(
                 {
@@ -1173,7 +1173,7 @@ class _TraceLayoutBuilder:
                     "child": child,
                 }
             )
-        event_key = (str(data["object"]), str(data["event"]))
+        event_key = (str(data["object"]), str(data["transition"]))
         context_items = context_records.get(event_key, [])
         context_forest = _build_context_forest(context_items, max_action_depth)
         if context_forest:
@@ -1469,7 +1469,7 @@ class _TraceLayoutBuilder:
             child = item.get("child")
             if child is None:
                 continue
-            child_event_id = f"event-{self._event_index}"
+            child_event_id = f"transition-{self._event_index}"
             self.arrows.append(
                 TraceArrow(source=span_id, target=f"{child_event_id}-span", kind="drives")
             )
@@ -1541,7 +1541,7 @@ class _TraceLayoutBuilder:
         self.cells.append(
             TraceCell(
                 id=span_id,
-                kind="event_span",
+                kind="transition_span",
                 row=event_body_start,
                 column=column,
                 label=label,
@@ -1687,7 +1687,7 @@ def _trace_label(node: dict[str, Any]) -> str:
     label = node.get("label")
     if isinstance(label, str):
         return label
-    return f"{node.get('object')}.Event::{node.get('event')}"
+    return f"{node.get('object')}.Transition::{node.get('transition')}"
 
 
 def _should_skip_trace_node(
@@ -1695,14 +1695,14 @@ def _should_skip_trace_node(
 ) -> bool:
     data = _trace_node_object(node)
     object_name = data.get("object")
-    event_name = data.get("event")
-    if not isinstance(object_name, str) or not isinstance(event_name, str):
+    transition_name = data.get("transition")
+    if not isinstance(object_name, str) or not isinstance(transition_name, str):
         return False
     if not _is_trace_phase_object(object_name):
         return False
     if _trace_children(data):
         return False
-    return not verified_states_by_event.get((object_name, event_name))
+    return not verified_states_by_event.get((object_name, transition_name))
 
 
 def _is_trace_phase_object(object_name: str) -> bool:
@@ -1738,7 +1738,7 @@ def _max_trace_phase_lane(
     return max_lane
 
 
-def _verified_states_by_event(
+def _verified_states_by_transition(
     derive_data: dict[str, Any], roots: list[Any]
 ) -> dict[tuple[str, str], list[tuple[str, str]]]:
     transitioned_objects = _trace_transitioned_objects(roots)
@@ -1766,12 +1766,12 @@ def _verified_states_by_event(
         if state_key in seen_states:
             continue
         event_object = record.get("object")
-        event_name = record.get("event")
-        if not isinstance(event_object, str) or not isinstance(event_name, str):
+        transition_name = record.get("transition")
+        if not isinstance(event_object, str) or not isinstance(transition_name, str):
             continue
 
         seen_states.add(state_key)
-        verified.setdefault((event_object, event_name), []).append(state_key)
+        verified.setdefault((event_object, transition_name), []).append(state_key)
     return verified
 
 

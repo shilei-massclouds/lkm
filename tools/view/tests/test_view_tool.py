@@ -120,8 +120,8 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(any(row["kind"] == "gap" for row in metadata["trace_rows"]))
             self.assertTrue(
                 any(
-                    cell["kind"] == "event_span"
-                    and cell["label"] == "StartupTimeline.Event::Setup"
+                    cell["kind"] == "transition_span"
+                    and cell["label"] == "StartupTimeline.Transition::Setup"
                     for cell in metadata["trace_cells"]
                 )
             )
@@ -150,8 +150,8 @@ class ViewToolTests(unittest.TestCase):
             prepare_setup_cell = next(
                 cell
                 for cell in metadata["trace_cells"]
-                if cell["kind"] == "event_span"
-                and cell["label"] == "PreparePhase.Event::Setup"
+                if cell["kind"] == "transition_span"
+                and cell["label"] == "PreparePhase.Transition::Setup"
             )
             self.assertGreater(riscv64_cell["column"], prepare_setup_cell["column"])
             root_stream_cell = next(
@@ -163,22 +163,22 @@ class ViewToolTests(unittest.TestCase):
             self.assertEqual(riscv64_cell["column"], root_stream_cell["column"])
             self.assertFalse(
                 any(
-                    cell["kind"] == "event_span"
-                    and cell["label"] == "PreparePhase.Event::Enable"
+                    cell["kind"] == "transition_span"
+                    and cell["label"] == "PreparePhase.Transition::Enable"
                     for cell in metadata["trace_cells"]
                 )
             )
             boot_setup_cell = next(
                 cell
                 for cell in metadata["trace_cells"]
-                if cell["kind"] == "event_span"
-                and cell["label"] == "BootPhase.Event::Setup"
+                if cell["kind"] == "transition_span"
+                and cell["label"] == "BootPhase.Transition::Setup"
             )
             entry_prelude_setup_cell = next(
                 cell
                 for cell in metadata["trace_cells"]
-                if cell["kind"] == "event_span"
-                and cell["label"] == "EntryPreludePhase.Event::Setup"
+                if cell["kind"] == "transition_span"
+                and cell["label"] == "EntryPreludePhase.Transition::Setup"
             )
             self.assertEqual(boot_setup_cell["column"], prepare_setup_cell["column"])
             self.assertEqual(
@@ -187,7 +187,7 @@ class ViewToolTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     row.get("group_role") == "body_start"
-                    and row.get("label") == "RootStream.Event::Preset.body.start"
+                    and row.get("label") == "RootStream.Transition::Preset.body.start"
                     for row in metadata["trace_rows"]
                 )
             )
@@ -226,7 +226,7 @@ class ViewToolTests(unittest.TestCase):
                 "trace": [
                     {
                         "object": "KernelInitTask",
-                        "event": "Enable",
+                        "transition": "Enable",
                         "source_state": "Created",
                         "target_state": "Runnable",
                         "children": [],
@@ -239,11 +239,11 @@ class ViewToolTests(unittest.TestCase):
                             "guard": {
                                 "lock_ref": "KernelInitTaskPiLock",
                                 "entered_by": [
-                                    {"body": "KernelInitTaskPiLock.Event::LockIrqSave;"}
+                                    {"body": "KernelInitTaskPiLock.Transition::LockIrqSave;"}
                                 ],
                                 "exited_by": [
                                     {
-                                        "body": "KernelInitTaskPiLock.Event::UnlockIrqRestore;"
+                                        "body": "KernelInitTaskPiLock.Transition::UnlockIrqRestore;"
                                     }
                                 ],
                             },
@@ -253,10 +253,10 @@ class ViewToolTests(unittest.TestCase):
                             "guard": {
                                 "lock_ref": "BootRunQueueLock",
                                 "entered_by": [
-                                    {"body": "BootRunQueueLock.Event::LockIrqSave;"}
+                                    {"body": "BootRunQueueLock.Transition::LockIrqSave;"}
                                 ],
                                 "exited_by": [
-                                    {"body": "BootRunQueueLock.Event::UnlockIrqRestore;"}
+                                    {"body": "BootRunQueueLock.Transition::UnlockIrqRestore;"}
                                 ],
                             },
                         },
@@ -265,22 +265,22 @@ class ViewToolTests(unittest.TestCase):
                 "records": [
                     {
                         "object": "KernelInitTask",
-                        "event": "Enable",
+                        "transition": "Enable",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
                         "expression": "within WakeUpNewTaskContext",
                     },
                     {
                         "object": "KernelInitTask",
-                        "event": "Enable",
+                        "transition": "Enable",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "KernelInitTask.Event::SetRuntimeState(state: TaskRuntimeState::Running)",
-                        "display_expression": "KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running)",
+                        "expression": "KernelInitTask.Transition::SetRuntimeState(state: TaskRuntimeState::Running)",
+                        "display_expression": "KernelInitTask.Transition::SetRuntimeState(TaskRuntimeState::Running)",
                     },
                     {
                         "object": "KernelInitTask",
-                        "event": "Enable",
+                        "transition": "Enable",
                         "proof_class": "action_result_binding",
                         "proof_provider": "within_context",
                         "expression": "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(task_ref: KernelInitTaskRef)",
@@ -288,29 +288,29 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "object": "KernelInitTask",
-                        "event": "Enable",
+                        "transition": "Enable",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
                         "expression": "within EnqueueSelectedRunQueueContext",
                     },
                     {
                         "object": "KernelInitTask",
-                        "event": "Enable",
+                        "transition": "Enable",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
-                        "expression": "selected_rq.Event::EnqueueTask(task_ref: KernelInitTaskRef)",
-                        "display_expression": "selected_rq.Event::EnqueueTask(KernelInitTaskRef)",
+                        "expression": "selected_rq.Transition::EnqueueTask(task_ref: KernelInitTaskRef)",
+                        "display_expression": "selected_rq.Transition::EnqueueTask(KernelInitTaskRef)",
                     },
                     {
                         "object": "KernelInitTask",
-                        "event": "Enable",
+                        "transition": "Enable",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
                         "expression": "within EnqueueSelectedRunQueueContext exited",
                     },
                     {
                         "object": "KernelInitTask",
-                        "event": "Enable",
+                        "transition": "Enable",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
                         "expression": "within WakeUpNewTaskContext exited",
@@ -328,7 +328,7 @@ class ViewToolTests(unittest.TestCase):
         }
         rows = metadata["trace_rows"]
         arrows = metadata["trace_arrows"]
-        event_cell = next(cell for cell in cells if cell.kind == "event_span")
+        event_cell = next(cell for cell in cells if cell.kind == "transition_span")
         context_cell = next(
             cell
             for cell in cells
@@ -355,10 +355,10 @@ class ViewToolTests(unittest.TestCase):
         self.assertIn("WakeUpNewTaskContext", context_cell.label)
         self.assertIn("lock=KernelInitTaskPiLock", context_cell.label)
         self.assertIn(
-            "enter=KernelInitTaskPiLock.Event::LockIrqSave", context_cell.label
+            "enter=KernelInitTaskPiLock.Transition::LockIrqSave", context_cell.label
         )
         self.assertIn(
-            "exit=KernelInitTaskPiLock.Event::UnlockIrqRestore", context_cell.label
+            "exit=KernelInitTaskPiLock.Transition::UnlockIrqRestore", context_cell.label
         )
         self.assertIn("lock=BootRunQueueLock", enqueue_context_cell.label)
         action_cells = [
@@ -388,13 +388,13 @@ class ViewToolTests(unittest.TestCase):
         self.assertEqual(
             [cell.label for cell in sorted(action_cells, key=lambda cell: cell.row)],
             [
-                "KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running)",
+                "KernelInitTask.Transition::SetRuntimeState(TaskRuntimeState::Running)",
                 "let selected_rq: RunQueueRef <- Scheduler.Action::SelectRunQueue(KernelInitTaskRef)",
             ],
         )
         self.assertEqual(
             [cell.label for cell in enqueue_action_cells],
-            ["selected_rq.Event::EnqueueTask(KernelInitTaskRef)"],
+            ["selected_rq.Transition::EnqueueTask(KernelInitTaskRef)"],
         )
         self.assertTrue(
             all(
@@ -415,13 +415,13 @@ class ViewToolTests(unittest.TestCase):
                 "trace": [
                     {
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "source_state": "Ready",
                         "target_state": "Prepared",
                         "children": [
                             {
                                 "object": "BootIdleTask",
-                                "event": "Enable",
+                                "transition": "Enable",
                                 "source_state": "Prepared",
                                 "target_state": "Online",
                                 "children": [],
@@ -436,10 +436,10 @@ class ViewToolTests(unittest.TestCase):
                             "guard": {
                                 "lock_ref": "BootRunQueueLock",
                                 "entered_by": [
-                                    {"body": "BootRunQueueLock.Event::LockIrqSave;"}
+                                    {"body": "BootRunQueueLock.Transition::LockIrqSave;"}
                                 ],
                                 "exited_by": [
-                                    {"body": "BootRunQueueLock.Event::UnlockIrqRestore;"}
+                                    {"body": "BootRunQueueLock.Transition::UnlockIrqRestore;"}
                                 ],
                             },
                         },
@@ -449,7 +449,7 @@ class ViewToolTests(unittest.TestCase):
                     {
                         "status": "proved",
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "source_kind": "drives",
                         "proof_class": "action_commit",
                         "proof_provider": "action_drive",
@@ -457,7 +457,7 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
                         "expression": "within ScheduleRunQueueContext",
@@ -465,7 +465,7 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "source_kind": "drives",
                         "proof_class": "action_result_binding",
                         "proof_provider": "within_context",
@@ -475,7 +475,7 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "proof_class": "action_commit",
                         "proof_provider": "within_context",
                         "expression": "Scheduler.Action::SwitchTo(CurrentTaskRef, next)",
@@ -483,7 +483,7 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
                         "expression": "CurrentTaskRef.Action::SaveCoreContext",
@@ -491,7 +491,7 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "proof_class": "type_process_commit",
                         "proof_provider": "within_context",
                         "expression": "next.Action::RestoreCoreContext",
@@ -499,7 +499,7 @@ class ViewToolTests(unittest.TestCase):
                     },
                     {
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
                         "expression": "within ScheduleRunQueueContext exited",
@@ -514,8 +514,8 @@ class ViewToolTests(unittest.TestCase):
         rest_init_cell = next(
             cell
             for cell in cells
-            if cell.kind == "event_span"
-            and cell.label == "RestInitPhase.Event::Preset"
+            if cell.kind == "transition_span"
+            and cell.label == "RestInitPhase.Transition::Preset"
         )
         context_cell = next(
             cell
@@ -647,7 +647,7 @@ class ViewToolTests(unittest.TestCase):
             "trace": [
                 {
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_state": "Ready",
                     "target_state": "Online",
                     "children": [],
@@ -658,7 +658,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "within",
                     "proof_class": "exclusive_context",
                     "expression": "within BootIdleStartupContext",
@@ -666,7 +666,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "drives",
                     "proof_class": "action_commit",
                     "proof_provider": "within_context",
@@ -675,7 +675,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "drives",
                     "proof_class": "action_commit",
                     "proof_provider": "within_context",
@@ -685,7 +685,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "drives",
                     "proof_class": "action_commit",
                     "proof_provider": "within_context",
@@ -695,7 +695,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "drives",
                     "proof_class": "action_commit",
                     "proof_provider": "within_context",
@@ -705,7 +705,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "drives",
                     "proof_class": "action_commit",
                     "proof_provider": "within_context",
@@ -715,7 +715,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "within",
                     "proof_class": "exclusive_context",
                     "expression": "within ScheduleRunQueueContext",
@@ -724,7 +724,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "drives",
                     "proof_class": "action_result_binding",
                     "proof_provider": "within_context",
@@ -735,7 +735,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "within",
                     "proof_class": "exclusive_context",
                     "expression": "within ScheduleRunQueueContext exited",
@@ -744,7 +744,7 @@ class ViewToolTests(unittest.TestCase):
                 {
                     "status": "proved",
                     "object": "BootIdleRuntime",
-                    "event": "Enable",
+                    "transition": "Enable",
                     "source_kind": "within",
                     "proof_class": "exclusive_context",
                     "expression": "within BootIdleStartupContext exited",
@@ -804,20 +804,20 @@ class ViewToolTests(unittest.TestCase):
                 "trace": [
                     {
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "source_state": "Ready",
                         "target_state": "Prepared",
                         "children": [
                             {
                                 "object": "KernelInitTask",
-                                "event": "Enable",
+                                "transition": "Enable",
                                 "source_state": "Ready",
                                 "target_state": "Online",
                                 "children": [],
                             },
                             {
                                 "object": "KthreaddTask",
-                                "event": "Preset",
+                                "transition": "Preset",
                                 "source_state": "Base",
                                 "target_state": "Prepared",
                                 "children": [],
@@ -830,13 +830,13 @@ class ViewToolTests(unittest.TestCase):
                     {
                         "status": "proved",
                         "object": "KernelInitTask",
-                        "event": "Enable",
-                        "message": "transition: KernelInitTask.Event::Enable State::Ready -> State::Online",
+                        "transition": "Enable",
+                        "message": "transition: KernelInitTask.Transition::Enable State::Ready -> State::Online",
                     },
                     {
                         "status": "proved",
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "source_kind": "drives",
                         "proof_class": "action_commit",
                         "proof_provider": "action_drive",
@@ -846,7 +846,7 @@ class ViewToolTests(unittest.TestCase):
                     {
                         "status": "proved",
                         "object": "RestInitPhase",
-                        "event": "Preset",
+                        "transition": "Preset",
                         "source_kind": "drives",
                         "proof_class": "action_commit",
                         "proof_provider": "within_context",
@@ -855,8 +855,8 @@ class ViewToolTests(unittest.TestCase):
                     {
                         "status": "proved",
                         "object": "KthreaddTask",
-                        "event": "Preset",
-                        "message": "transition: KthreaddTask.Event::Preset State::Base -> State::Prepared",
+                        "transition": "Preset",
+                        "message": "transition: KthreaddTask.Transition::Preset State::Base -> State::Prepared",
                     },
                 ],
             }
@@ -875,20 +875,20 @@ class ViewToolTests(unittest.TestCase):
         rest_init_cell = next(
             cell
             for cell in cells
-            if cell.kind == "event_span"
-            and cell.label == "RestInitPhase.Event::Preset"
+            if cell.kind == "transition_span"
+            and cell.label == "RestInitPhase.Transition::Preset"
         )
         kernel_enable_cell = next(
             cell
             for cell in cells
-            if cell.kind == "event_span"
-            and cell.label == "KernelInitTask.Event::Enable"
+            if cell.kind == "transition_span"
+            and cell.label == "KernelInitTask.Transition::Enable"
         )
         kthreadd_preset_cell = next(
             cell
             for cell in cells
-            if cell.kind == "event_span"
-            and cell.label == "KthreaddTask.Event::Preset"
+            if cell.kind == "transition_span"
+            and cell.label == "KthreaddTask.Transition::Preset"
         )
         self.assertGreater(
             action_cell.row,

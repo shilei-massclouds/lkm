@@ -103,8 +103,8 @@ object Ext2Driver: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
                     Bio.state == State::Ready;
@@ -139,8 +139,8 @@ object Ext2Volume: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Ready {
+        transitions {
+            on Transition::Preset -> State::Ready {
                 depends_on {
                     BlockDeviceRegistry.state == State::Ready;
                     block_device_default(BlockDevice, BlockDeviceRegistry);
@@ -178,8 +178,8 @@ object Ext2FileSystem: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Ext2Driver.state == State::Ready;
                     Ext2Volume.state == State::Ready;
@@ -200,8 +200,8 @@ object Ext2FileSystem: ResourceObject {
             ext2_filesystem_volume_bound(self, Ext2Volume);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Ext2Driver.state == State::Ready;
                     Ext2Volume.state == State::Ready;
@@ -252,8 +252,8 @@ object Ext2FileSystem: ResourceObject {
             ext2_filesystem_write_paths_deferred(self);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     VfsCore.state == State::Ready;
                     Ext2FileSystem.state == State::Ready;

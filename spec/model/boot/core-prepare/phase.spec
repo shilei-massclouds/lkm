@@ -23,11 +23,11 @@ object DeviceTree: ResourceObject {
      * Base 表示正式 DeviceTree 尚未从 RawDtb 展开。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 unflatten_device_tree() / unflatten_and_copy_device_tree()。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RawDtb.state == State::Ready;
                     Vm.state == State::Online;
@@ -113,11 +113,11 @@ object Zones: MemoryObject {
      * Base 表示 zone 层级尚未由 memblock 事实计算出来。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 misc_mem_init() 中的 zone_sizes_init()。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MemBlock.state == State::Online;
                     Vm.state == State::Online;
@@ -181,8 +181,8 @@ object PageMetadataMap: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MemBlock.state == State::Online;
                     Zones.state == State::Ready;
@@ -220,8 +220,8 @@ object ResourceLock: RwLock {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     resource_lock_static_initializer(ResourceLock);
                     rwlock_storage_bound(ResourceLock);
@@ -239,8 +239,8 @@ object ResourceLock: RwLock {
             rwlock_init_kind_recorded(ResourceLock);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     resource_lock_ready(ResourceLock);
                     rwlock_ready(ResourceLock);
@@ -274,11 +274,11 @@ context ResourceTreeWriteContext: ResourceExclusiveContext {
         lock_ref: ResourceLock;
 
         entered_by {
-            ResourceLock.Event::WriteLock(BootInitTaskRef);
+            ResourceLock.Transition::WriteLock(BootInitTaskRef);
         }
 
         exited_by {
-            ResourceLock.Event::WriteUnlock(BootInitTaskRef);
+            ResourceLock.Transition::WriteUnlock(BootInitTaskRef);
         }
     }
 
@@ -299,11 +299,11 @@ object ResourceTree: ResourceObject {
      * Base 表示系统资源树尚未建立。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 init_resources()。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     MemBlock.state == State::Online;
                     KernelImage.state == State::Online;
@@ -358,11 +358,11 @@ object CacheBlockInfo: HardwareObject {
      * Base 表示 CBOM/CBOZ block size 尚未从平台描述中确认。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 riscv_init_cbo_blocksizes()。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
                     DeviceTree.state == State::Ready;
@@ -412,11 +412,11 @@ object CpuCapabilities: HardwareObject {
      * Base 表示 CPU 能力事实尚未汇总。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 riscv_fill_hwcap()。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
                     DeviceTree.state == State::Ready;
@@ -471,12 +471,12 @@ object DmaCachePolicy: HardwareObject {
      * Base 表示 DMA/cache 策略事实尚未从 CPU 能力中收敛。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 riscv_noncoherent_supported() 与
              * riscv_set_dma_cache_alignment() 的抽象结果。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuCapabilities.state == State::Ready;
                     CacheBlockInfo.state == State::Ready;
@@ -519,12 +519,12 @@ object JumpLabelMutex: Mutex {
      * Base 表示 jump_label_mutex 的静态定义尚未纳入模型事实。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 对应 static DEFINE_MUTEX(jump_label_mutex) 提供的
              * 静态存储和 __MUTEX_INITIALIZER 初值。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     jump_label_mutex_static_initializer(JumpLabelMutex);
                     jump_label_mutex_storage_bound(JumpLabelMutex);
@@ -550,13 +550,13 @@ object JumpLabelMutex: Mutex {
             jump_label_mutex_init_kind_static(JumpLabelMutex);
         }
 
-        events {
+        transitions {
             /*
              * Setup 让 jump_label_mutex 进入 unlocked/ready 状态，并建立
              * 其 wait queue 抽象；Linux wait_lock、handoff 和 lockdep 细节
              * 仍保持为通用 Mutex 的 deferred/internal 边界。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     jump_label_mutex_ready(JumpLabelMutex);
                     jump_label_mutex_unlocked(JumpLabelMutex);
@@ -602,14 +602,14 @@ object CpuHotplugLock: PerCpuRwSemaphore {
      * Base 表示 cpu_hotplug_lock 静态定义尚未纳入模型事实。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 对应 DEFINE_STATIC_PERCPU_RWSEM(cpu_hotplug_lock) 提供的
              * 静态 struct、per-cpu read_count 和 RcuSync/waiter/block 初值。
              * 该实例只要求 PerCpuStorage.Prepared，表示 boot CPU 早期
              * per-cpu 静态区已经可访问；通用类型不绑定这个依赖。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PerCpuStorage.state == State::Prepared;
                 }
@@ -641,12 +641,12 @@ object CpuHotplugLock: PerCpuRwSemaphore {
             cpu_hotplug_lock_percpu_read_counter_bound(CpuHotplugLock, PerCpuStorage);
         }
 
-        events {
+        transitions {
             /*
              * Setup 发布 boot CPU early read-lock 可用状态。完整多 CPU
              * counter scope 由后续 Enable/Online 表达，不是 CorePrepare 前置。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     cpu_hotplug_lock_ready(CpuHotplugLock);
                     cpu_hotplug_lock_boot_cpu_read_available(CpuHotplugLock);
@@ -691,11 +691,11 @@ context CpuHotplugReadContext: ResourceExclusiveContext {
         lock_ref: CpuHotplugLock;
 
         entered_by {
-            CpuHotplugLock.Event::ReadLock(BootInitTaskRef);
+            CpuHotplugLock.Transition::ReadLock(BootInitTaskRef);
         }
 
         exited_by {
-            CpuHotplugLock.Event::ReadUnlock(BootInitTaskRef);
+            CpuHotplugLock.Transition::ReadUnlock(BootInitTaskRef);
         }
     }
 
@@ -715,11 +715,11 @@ context StaticBranchJumpLabelContext: ResourceExclusiveContext {
         lock_ref: JumpLabelMutex;
 
         entered_by {
-            JumpLabelMutex.Event::Lock(BootInitTaskRef);
+            JumpLabelMutex.Transition::Lock(BootInitTaskRef);
         }
 
         exited_by {
-            JumpLabelMutex.Event::Unlock(BootInitTaskRef);
+            JumpLabelMutex.Transition::Unlock(BootInitTaskRef);
         }
     }
 
@@ -745,11 +745,11 @@ object StaticBranch: KernelObject {
      * Base 表示 static branch registry 尚未建立。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 RISC-V setup_arch() 中的 jump_label_init()。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelImage.state == State::Online;
                     SwapperVm.state == State::Online;
@@ -800,8 +800,8 @@ object SavedCommandLine: ResourceObject {
     parent: CommandLine;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CommandLine.state == State::Prepared;
                     KernelCmdline.state == State::Ready;
@@ -831,8 +831,8 @@ object StaticCommandLine: ResourceObject {
     parent: CommandLine;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     CommandLine.state == State::Prepared;
                     KernelCmdline.state == State::Ready;
@@ -866,8 +866,8 @@ object PerCpuStaticImage: MemoryObject {
     parent: PerCpuStorage;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Lds.state == State::Online;
                 }
@@ -903,8 +903,8 @@ object PerCpuFirstChunk: MemoryObject {
     parent: PerCpuStorage;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PerCpuStaticImage.state == State::Ready;
                     MemBlock.state == State::Online;
@@ -955,8 +955,8 @@ object PerCpuOffsetTable: MemoryObject {
     parent: PerCpuStorage;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PerCpuFirstChunk.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -996,19 +996,19 @@ object PerCpuStorage: MemoryObject {
      * Base 表示 per-cpu 静态模板尚未纳入模型事实。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 对应静态 .data..percpu 模板和 boot CPU 早期访问事实。
              * 这一步足以支撑 DEFINE_STATIC_PERCPU_RWSEM(cpu_hotplug_lock)
              * 的 read_count 存储绑定，但不表示完整 per-cpu allocator 在线。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Lds.state == State::Online;
                 }
 
                 drives {
-                    PerCpuStaticImage.Event::Setup;
+                    PerCpuStaticImage.Transition::Setup;
                 }
 
                 ensures {
@@ -1031,12 +1031,12 @@ object PerCpuStorage: MemoryObject {
             per_cpu_storage_boot_cpu_early_access_ready(PerCpuStorage, PerCpuStaticImage);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 setup_per_cpu_areas() 的完整 possible CPU first chunk
              * 和 offset table 建立。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PerCpuStaticImage.state == State::Ready;
                     MemBlock.state == State::Online;
@@ -1046,8 +1046,8 @@ object PerCpuStorage: MemoryObject {
                 }
 
                 drives {
-                    PerCpuFirstChunk.Event::Setup;
-                    PerCpuOffsetTable.Event::Setup;
+                    PerCpuFirstChunk.Transition::Setup;
+                    PerCpuOffsetTable.Transition::Setup;
                 }
 
                 ensures {
@@ -1092,11 +1092,11 @@ object CpuHotplugState: HardwareObject {
      * Base 表示 boot CPU 的 hotplug 状态尚未初始化。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 boot_cpu_hotplug_init()。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BootCPU.state == State::Online;
                     PerCpuStorage.state == State::Ready;
@@ -1138,11 +1138,11 @@ object BootParam: KernelObject {
      * Base 表示普通启动参数尚未解析。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 parse_args("Booting kernel", ...)。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     EarlyParam.state == State::Ready;
                     StaticCommandLine.state == State::Ready;
@@ -1181,11 +1181,11 @@ object PayloadParam: KernelObject {
      * Base 表示 payload 参数尚未从 BootParam 边界中建立。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 parse_args("Setting init args", after_dashes, ...)。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BootParam.state == State::Ready;
                 }
@@ -1220,7 +1220,7 @@ object Randomness: KernelObject {
      * Base 表示随机性对象尚未吸收早期熵源。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 对应 random_init_early(command_line)。Linux 主线直接
              * 使用内部 _mix_pool_bytes() 混入早期材料，不经过带
@@ -1229,7 +1229,7 @@ object Randomness: KernelObject {
              * 并使用 base_crng.lock 的 irqsave 自旋锁，当前最小路径只记录为
              * deferred。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
                     StaticCommandLine.state == State::Ready;
@@ -1262,12 +1262,12 @@ object Randomness: KernelObject {
             randomness_not_fully_ready(Randomness);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 random_init()。它在中断打开前补齐完整 RNG 基础，
              * 但不要求熵池已经达到运行期强随机可用状态。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Timekeeper.state == State::Ready;
                     StaticCommandLine.state == State::Ready;
@@ -1306,11 +1306,11 @@ object ExceptionTable: ResourceObject {
      * Base 表示异常表尚未完成启动期整理。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 对应 sort_main_extable()，整理并排序内核主异常表。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelImage.state == State::Online;
                     Vm.state == State::Online;
@@ -1349,11 +1349,11 @@ object CorePreparePhase: PhaseObject {
      * Base 表示核心准备期尚未开始，仍处于系统独占上下文。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 按 paging_init() 后到 trap_init() 的核心路径编排对象推进。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     EntrySuccessorPhase.state == State::Ready;
                     Vm.state == State::Online;
@@ -1370,31 +1370,31 @@ object CorePreparePhase: PhaseObject {
                 }
 
                 drives {
-                    DeviceTree.Event::Setup;
-                    Zones.Event::Setup;
-                    PageMetadataMap.Event::Setup;
-                    ResourceLock.Event::Preset;
-                    ResourceLock.Event::Setup;
-                    ResourceTree.Event::Setup;
-                    CpuGroup.Event::Setup;
-                    CpuIdMap.Event::Setup;
-                    CacheBlockInfo.Event::Setup;
-                    CpuCapabilities.Event::Setup;
-                    DmaCachePolicy.Event::Setup;
-                    PerCpuStorage.Event::Preset;
-                    CpuHotplugLock.Event::Preset;
-                    CpuHotplugLock.Event::Setup;
-                    JumpLabelMutex.Event::Preset;
-                    JumpLabelMutex.Event::Setup;
-                    StaticBranch.Event::Setup;
-                    CommandLine.Event::Setup;
-                    PerCpuStorage.Event::Setup;
-                    CpuHotplugState.Event::Setup;
-                    Params.Event::Setup;
-                    Randomness.Event::Preset;
-                    PrintkBuffer.Event::Setup;
-                    ExceptionTable.Event::Setup;
-                    ExceptionStream.Event::Setup;
+                    DeviceTree.Transition::Setup;
+                    Zones.Transition::Setup;
+                    PageMetadataMap.Transition::Setup;
+                    ResourceLock.Transition::Preset;
+                    ResourceLock.Transition::Setup;
+                    ResourceTree.Transition::Setup;
+                    CpuGroup.Transition::Setup;
+                    CpuIdMap.Transition::Setup;
+                    CacheBlockInfo.Transition::Setup;
+                    CpuCapabilities.Transition::Setup;
+                    DmaCachePolicy.Transition::Setup;
+                    PerCpuStorage.Transition::Preset;
+                    CpuHotplugLock.Transition::Preset;
+                    CpuHotplugLock.Transition::Setup;
+                    JumpLabelMutex.Transition::Preset;
+                    JumpLabelMutex.Transition::Setup;
+                    StaticBranch.Transition::Setup;
+                    CommandLine.Transition::Setup;
+                    PerCpuStorage.Transition::Setup;
+                    CpuHotplugState.Transition::Setup;
+                    Params.Transition::Setup;
+                    Randomness.Transition::Preset;
+                    PrintkBuffer.Transition::Setup;
+                    ExceptionTable.Transition::Setup;
+                    ExceptionStream.Transition::Setup;
                 }
 
                 ensures {

@@ -67,7 +67,7 @@ per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不�
 ## 地址空间与页表
 
 - `TrampolineVm`、`EarlyVm`、`SwapperVm` 应在代码中保持可区分的实现边界。
-- 第一轮应真实拆分入口前导期和入口后继期页表推进过程，而不是只把现有 boot page table 代码改名为多个模型事件。
+- 第一轮应真实拆分入口前导期和入口后继期页表推进过程，而不是只把现有 boot page table 代码改名为多个模型 transition。
 - `EarlyVm` 的实现必须覆盖规格要求的 `KernelImage` 和 `RawDtb` 映射前提。
 - `SwapperVm` 的实现必须在 `Enable` 成功后能被只读检查确认 `swapper_vm_translation_sync_complete(SwapperVm)`，该事实至少应覆盖写入 swapper SATP 之后执行过本地 TLB flush 或等价地址转换同步。
 - `FixMap` 槽位布局应由配置或架构常量统一定义，不应在多个对象实现中分散硬编码。
@@ -92,7 +92,7 @@ per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不�
 ## SBI
 
 - SBI 能力探测应集中形成 `SBI` 能力视图。
-- `SBI` 对象负责记录能力事实，不把每一次具体 SBI 调用都建模为自身生命周期事件。
+- `SBI` 对象负责记录能力事实，不把每一次具体 SBI 调用都建模为自身生命周期 transition。
 - Early console、timer、IPI、rfence 等对象应依赖 SBI 能力事实，而不是各自重复探测固件能力。
 - 第一轮 `EarlyCon` 使用 SBI early console 后端，不继承 ArceOS RISC-V64 QEMU virt 当前的 NS16550 UART console 路径。
 

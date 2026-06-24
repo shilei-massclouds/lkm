@@ -23,11 +23,11 @@ class ParserTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                PreparePhase.Event::Setup;
-                                BootPhase.Event::Setup;
+                                PreparePhase.Transition::Setup;
+                                BootPhase.Transition::Setup;
                             }
 
                             ensures {
@@ -51,18 +51,18 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(obj.kind, "TimelineObject")
         self.assertEqual(obj.initial_state, "Base")
         self.assertEqual([state.name for state in obj.states], ["Base", "Ready"])
-        event = obj.states[0].events[0]
-        self.assertEqual(event.name, "Setup")
-        self.assertEqual(event.target_state, "Ready")
+        transition = obj.states[0].transitions[0]
+        self.assertEqual(transition.name, "Setup")
+        self.assertEqual(transition.target_state, "Ready")
         self.assertEqual(
-            event.drives[0].entries,
+            transition.drives[0].entries,
             [
-                "PreparePhase.Event::Setup",
-                "BootPhase.Event::Setup",
+                "PreparePhase.Transition::Setup",
+                "BootPhase.Transition::Setup",
             ],
         )
         self.assertEqual(
-            event.ensures[0].entries,
+            transition.ensures[0].entries,
             ["BootPhase.state == State::Ready"],
         )
 
@@ -74,7 +74,7 @@ class ParserTests(unittest.TestCase):
                 done: CompletionTokenCount;
 
                 processes {
-                    Event::Complete {
+                    Transition::Complete {
                         state_effect: StateEffect::Conditional;
                     }
                 }
@@ -165,11 +165,11 @@ class ParserTests(unittest.TestCase):
                 initial_state: State::Ready;
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                             within WakeContext {
                                 entered_by {
-                                    TaskPiLock.Event::LockIrqSave;
+                                    TaskPiLock.Transition::LockIrqSave;
                                 }
 
                                 depends_on {
@@ -182,7 +182,7 @@ class ParserTests(unittest.TestCase):
                                 }
 
                                 exited_by {
-                                    TaskPiLock.Event::UnlockIrqRestore;
+                                    TaskPiLock.Transition::UnlockIrqRestore;
                                 }
 
                                 ensures {
@@ -212,23 +212,23 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(context.name, "WakeContext")
         self.assertEqual(context.lock_ref, "TaskPiLock")
         self.assertEqual(context.obj_refs, ["A", "B"])
-        event = document.objects[0].states[0].events[0]
-        self.assertEqual(event.within[0].context, "WakeContext")
-        self.assertFalse(event.within[0].only_once)
+        transition = document.objects[0].states[0].transitions[0]
+        self.assertEqual(transition.within[0].context, "WakeContext")
+        self.assertFalse(transition.within[0].only_once)
         self.assertEqual(
-            event.within[0].entered_by[0].entries,
-            ["TaskPiLock.Event::LockIrqSave"],
+            transition.within[0].entered_by[0].entries,
+            ["TaskPiLock.Transition::LockIrqSave"],
         )
         self.assertEqual(
-            event.within[0].drives[0].entries,
+            transition.within[0].drives[0].entries,
             [
                 "A.Action::SetTaskState(TaskRuntimeState::Running)",
                 "B.Action::Touch(task: A)",
             ],
         )
         self.assertEqual(
-            event.within[0].exited_by[0].entries,
-            ["TaskPiLock.Event::UnlockIrqRestore"],
+            transition.within[0].exited_by[0].entries,
+            ["TaskPiLock.Transition::UnlockIrqRestore"],
         )
 
     def test_parse_within_only_once(self) -> None:
@@ -241,8 +241,8 @@ class ParserTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within BootContext only-once {
                             }
                         }
@@ -255,8 +255,8 @@ class ParserTests(unittest.TestCase):
             """
         )
 
-        event = document.objects[0].states[0].events[0]
-        self.assertTrue(event.within[0].only_once)
+        transition = document.objects[0].states[0].transitions[0]
+        self.assertTrue(transition.within[0].only_once)
 
     def test_parse_resource_context_guard_and_effects(self) -> None:
         document = parse_text(
@@ -268,11 +268,11 @@ class ParserTests(unittest.TestCase):
                     lock_ref: TaskPiLock;
 
                     entered_by {
-                        TaskPiLock.Event::LockIrqSave;
+                        TaskPiLock.Transition::LockIrqSave;
                     }
 
                     exited_by {
-                        TaskPiLock.Event::UnlockIrqRestore;
+                        TaskPiLock.Transition::UnlockIrqRestore;
                     }
                 }
 
@@ -293,8 +293,8 @@ class ParserTests(unittest.TestCase):
                 initial_state: State::Ready;
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                             within WakeContext {
                                 drives {
                                     A.Action::SetTaskState(TaskRuntimeState::Running);
@@ -325,8 +325,8 @@ class ParserTests(unittest.TestCase):
         assert context.guard is not None
         self.assertEqual(context.guard.lock_ref, "TaskPiLock")
         self.assertEqual(context.lock_ref, "TaskPiLock")
-        self.assertEqual(context.guard.entered_by[0].entries, ["TaskPiLock.Event::LockIrqSave"])
-        self.assertEqual(context.guard.exited_by[0].entries, ["TaskPiLock.Event::UnlockIrqRestore"])
+        self.assertEqual(context.guard.entered_by[0].entries, ["TaskPiLock.Transition::LockIrqSave"])
+        self.assertEqual(context.guard.exited_by[0].entries, ["TaskPiLock.Transition::UnlockIrqRestore"])
         self.assertEqual(context.obj_refs, ["A", "B"])
         self.assertEqual(context.effects[0].entries, [
             "interruptible: false",
@@ -334,10 +334,10 @@ class ParserTests(unittest.TestCase):
             "sleepable: false",
             "exclusive_refs: obj_refs",
         ])
-        event = document.objects[0].states[0].events[0]
-        self.assertEqual(event.within[0].context, "WakeContext")
-        self.assertEqual(event.within[0].entered_by, [])
-        self.assertEqual(event.within[0].exited_by, [])
+        transition = document.objects[0].states[0].transitions[0]
+        self.assertEqual(transition.within[0].context, "WakeContext")
+        self.assertEqual(transition.within[0].entered_by, [])
+        self.assertEqual(transition.within[0].exited_by, [])
 
     def test_parse_context_guard_holds(self) -> None:
         document = parse_text(
@@ -386,7 +386,7 @@ class ParserTests(unittest.TestCase):
         document = parse_file(spec)
         kernel_image = next(obj for obj in document.objects if obj.name == "KernelImage")
         ready = next(state for state in kernel_image.states if state.name == "Ready")
-        enable = next(event for event in ready.events if event.name == "Enable")
+        enable = next(transition for transition in ready.transitions if transition.name == "Enable")
         entry, span = enable.depends_on[0].entry_spans[0]
 
         self.assertEqual(entry, "EarlyVm.state == State::Online")

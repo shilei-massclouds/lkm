@@ -44,14 +44,14 @@ object HwRngCore: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup represents the hwrng core being available for built-in
              * drivers. Linux registers the misc device from hwrng_modinit();
              * this first slice models only the in-kernel registry and current
              * hwrng selection surface used by virtio-rng.
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DriverCoreBase.state == State::Ready;
                 }
@@ -143,8 +143,8 @@ object HwRngDevice: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     VirtioRngDevice.state == State::Ready;
                 }

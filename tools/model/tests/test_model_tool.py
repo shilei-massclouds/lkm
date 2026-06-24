@@ -51,9 +51,9 @@ class ModelToolTests(unittest.TestCase):
             data = read_json(model)
             objects = data["model"]["objects"]
             startup = objects["StartupTimeline"]
-            setup = startup["states"]["Base"]["events"]["Setup"]
+            setup = startup["states"]["Base"]["transitions"]["Setup"]
             event_stream = objects["EventStream"]
-            event_preset = event_stream["states"]["Base"]["events"]["Preset"]
+            event_preset = event_stream["states"]["Base"]["transitions"]["Preset"]
             completion_type = data["model"]["types"]["Completion"]
 
             self.assertEqual(
@@ -95,14 +95,14 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(
                 [entry["text"] for entry in setup["drives"][0]["entries"]],
                 [
-                    "PreparePhase.Event::Setup",
-                    "PreparePhase.Event::Enable",
-                    "BootPhase.Event::Setup",
-                    "InterruptPhase.Event::Setup",
-                    "UpMultitaskPhase.Event::Setup",
-                    "SmpRuntimePhase.Event::Setup",
-                    "PayloadPhase.Event::Setup",
-                    "PayloadPhase.Event::Enable",
+                    "PreparePhase.Transition::Setup",
+                    "PreparePhase.Transition::Enable",
+                    "BootPhase.Transition::Setup",
+                    "InterruptPhase.Transition::Setup",
+                    "UpMultitaskPhase.Transition::Setup",
+                    "SmpRuntimePhase.Transition::Setup",
+                    "PayloadPhase.Transition::Setup",
+                    "PayloadPhase.Transition::Enable",
                 ],
             )
 
@@ -115,7 +115,7 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(model_main([str(ast), "-o", str(model)]), 0)
             data = read_json(model)
             kernel_image = data["model"]["objects"]["KernelImage"]
-            enable = kernel_image["states"]["Ready"]["events"]["Enable"]
+            enable = kernel_image["states"]["Ready"]["transitions"]["Enable"]
             entry = enable["depends_on"][0]["entries"][0]
 
             self.assertEqual(entry["text"], "EarlyVm.state == State::Online")
@@ -137,21 +137,21 @@ class ModelToolTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertIn("error: invalid AST JSON", stderr.getvalue())
 
-    def test_duplicate_object_event_names_fail_model_stage(self) -> None:
+    def test_duplicate_object_transition_names_fail_model_stage(self) -> None:
         source = """
             object A: T {
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Enable -> State::Ready {
+                    transitions {
+                        on Transition::Enable -> State::Ready {
                         }
                     }
                 }
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                         }
                     }
                 }
@@ -162,9 +162,9 @@ class ModelToolTests(unittest.TestCase):
         """
 
         with tempfile.TemporaryDirectory() as tmp:
-            spec = Path(tmp) / "duplicate-event.spec"
-            ast = Path(tmp) / "duplicate-event.ast.json"
-            model = Path(tmp) / "duplicate-event.model.json"
+            spec = Path(tmp) / "duplicate-transition.spec"
+            ast = Path(tmp) / "duplicate-transition.ast.json"
+            model = Path(tmp) / "duplicate-transition.model.json"
             spec.write_text(source, encoding="utf-8")
 
             self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
@@ -174,7 +174,7 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 1)
             self.assertIn(
-                "duplicate object event declaration: A.Event::Enable",
+                "duplicate object transition declaration: A.Transition::Enable",
                 stderr.getvalue(),
             )
 
@@ -184,8 +184,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Reserved;
 
                 state State::Reserved {
-                    events {
-                        on Event::Activate -> State::Done {
+                    transitions {
+                        on Transition::Activate -> State::Done {
                         }
                     }
                 }
@@ -210,8 +210,8 @@ class ModelToolTests(unittest.TestCase):
             errors = stderr.getvalue()
             self.assertIn("A.initial_state State::Reserved", errors)
             self.assertIn("A.State::Reserved", errors)
-            self.assertIn("A.Event::Activate", errors)
-            self.assertIn("A.Event::Activate -> State::Done", errors)
+            self.assertIn("A.Transition::Activate", errors)
+            self.assertIn("A.Transition::Activate -> State::Done", errors)
 
     def test_disable_and_offline_lifecycle_names_and_transitions_are_allowed(self) -> None:
         source = """
@@ -219,29 +219,29 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                         }
                     }
                 }
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                         }
                     }
                 }
 
                 state State::Online {
-                    events {
-                        on Event::Disable -> State::Offline {
+                    transitions {
+                        on Transition::Disable -> State::Offline {
                         }
                     }
                 }
 
                 state State::Offline {
-                    events {
-                        on Event::Cleanup -> State::Destroyed {
+                    transitions {
+                        on Transition::Cleanup -> State::Destroyed {
                         }
                     }
                 }
@@ -270,8 +270,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                         }
                     }
                 }
@@ -294,7 +294,7 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 1)
             self.assertIn(
-                "invalid lifecycle transition: A.State::Base.Event::Enable -> State::Online",
+                "invalid lifecycle transition: A.State::Base.Transition::Enable -> State::Online",
                 stderr.getvalue(),
             )
 
@@ -304,8 +304,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Disable -> State::Offline {
+                    transitions {
+                        on Transition::Disable -> State::Offline {
                         }
                     }
                 }
@@ -328,7 +328,7 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 1)
             self.assertIn(
-                "invalid lifecycle transition: A.State::Base.Event::Disable -> State::Offline",
+                "invalid lifecycle transition: A.State::Base.Transition::Disable -> State::Offline",
                 stderr.getvalue(),
             )
 
@@ -336,7 +336,7 @@ class ModelToolTests(unittest.TestCase):
         source = """
             type T {
                 processes {
-                    Event::Touch(value: TouchValue) {
+                    Transition::Touch(value: TouchValue) {
                     }
                 }
             }
@@ -345,10 +345,10 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                A.Event::Touch(TouchValue::Ready);
+                                A.Transition::Touch(TouchValue::Ready);
                             }
                         }
                     }
@@ -385,8 +385,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
                                 A.Action::Copy(SourceTaskRef, TargetTaskRef);
                             }
@@ -425,8 +425,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
                                 A.Action::Copy(SourceTaskRef);
                             }
@@ -460,10 +460,10 @@ class ModelToolTests(unittest.TestCase):
         source = """
             type RawSpinLock {
                 processes {
-                    Event::LockIrqSave {
+                    Transition::LockIrqSave {
                     }
 
-                    Event::UnlockIrqRestore {
+                    Transition::UnlockIrqRestore {
                     }
                 }
             }
@@ -476,11 +476,11 @@ class ModelToolTests(unittest.TestCase):
                     lock_ref: OuterLock;
 
                     entered_by {
-                        OuterLock.Event::LockIrqSave;
+                        OuterLock.Transition::LockIrqSave;
                     }
 
                     exited_by {
-                        OuterLock.Event::UnlockIrqRestore;
+                        OuterLock.Transition::UnlockIrqRestore;
                     }
                 }
 
@@ -494,11 +494,11 @@ class ModelToolTests(unittest.TestCase):
                     lock_ref: InnerLock;
 
                     entered_by {
-                        InnerLock.Event::LockIrqSave;
+                        InnerLock.Transition::LockIrqSave;
                     }
 
                     exited_by {
-                        InnerLock.Event::UnlockIrqRestore;
+                        InnerLock.Transition::UnlockIrqRestore;
                     }
                 }
 
@@ -511,8 +511,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within OuterContext {
                                 within InnerContext {
                                 }
@@ -548,10 +548,10 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                A.Event::Setup;
+                                A.Transition::Setup;
                             }
                         }
                     }
@@ -565,8 +565,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within GuardedContext only-once {
                             }
                         }
@@ -591,7 +591,7 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
             data = read_json(model)
-            setup = data["model"]["objects"]["A"]["states"]["Base"]["events"]["Setup"]
+            setup = data["model"]["objects"]["A"]["states"]["Base"]["transitions"]["Setup"]
             self.assertTrue(setup["within"][0]["only_once"])
 
     def test_model_json_preserves_ordered_event_body_members(self) -> None:
@@ -603,10 +603,10 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                A.Event::Setup;
+                                A.Transition::Setup;
                             }
                         }
                     }
@@ -620,20 +620,20 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                B.Event::Setup;
+                                B.Transition::Setup;
                             }
 
                             within GuardedContext {
                                 drives {
-                                    C.Event::Setup;
+                                    C.Transition::Setup;
                                 }
                             }
 
                             drives {
-                                D.Event::Setup;
+                                D.Transition::Setup;
                             }
                         }
                     }
@@ -645,19 +645,19 @@ class ModelToolTests(unittest.TestCase):
 
             object B: T {
                 initial_state: State::Base;
-                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Base { transitions { on Transition::Setup -> State::Ready {} } }
                 state State::Ready {}
             }
 
             object C: T {
                 initial_state: State::Base;
-                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Base { transitions { on Transition::Setup -> State::Ready {} } }
                 state State::Ready {}
             }
 
             object D: T {
                 initial_state: State::Base;
-                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Base { transitions { on Transition::Setup -> State::Ready {} } }
                 state State::Ready {}
             }
         """
@@ -675,14 +675,14 @@ class ModelToolTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
             data = read_json(model)
-            setup = data["model"]["objects"]["A"]["states"]["Base"]["events"]["Setup"]
+            setup = data["model"]["objects"]["A"]["states"]["Base"]["transitions"]["Setup"]
             self.assertEqual(
                 [member["kind"] for member in setup["body_members"]],
                 ["drives", "within", "drives"],
             )
             self.assertEqual(
                 setup["body_members"][1]["within"]["drives"][0]["entries"][0]["text"],
-                "C.Event::Setup",
+                "C.Transition::Setup",
             )
 
     def test_only_once_within_fails_when_event_reachable_twice(self) -> None:
@@ -694,11 +694,11 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                A.Event::Setup;
-                                A.Event::Setup;
+                                A.Transition::Setup;
+                                A.Transition::Setup;
                             }
                         }
                     }
@@ -712,8 +712,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within GuardedContext only-once {
                             }
                         }
@@ -746,10 +746,10 @@ class ModelToolTests(unittest.TestCase):
         source = """
             type RawSpinLock {
                 processes {
-                    Event::LockIrqSave {
+                    Transition::LockIrqSave {
                     }
 
-                    Event::UnlockIrqRestore {
+                    Transition::UnlockIrqRestore {
                     }
                 }
             }
@@ -761,11 +761,11 @@ class ModelToolTests(unittest.TestCase):
                     lock_ref: ALock;
 
                     entered_by {
-                        ALock.Event::LockIrqSave;
+                        ALock.Transition::LockIrqSave;
                     }
 
                     exited_by {
-                        ALock.Event::UnlockIrqRestore;
+                        ALock.Transition::UnlockIrqRestore;
                     }
                 }
 
@@ -785,8 +785,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within AContext {
                             }
                         }
@@ -815,10 +815,10 @@ class ModelToolTests(unittest.TestCase):
         source = """
             type Mutex {
                 processes {
-                    Event::Lock(current_task: TaskRef) {
+                    Transition::Lock(current_task: TaskRef) {
                     }
 
-                    Event::Unlock(current_task: TaskRef) {
+                    Transition::Unlock(current_task: TaskRef) {
                     }
                 }
             }
@@ -838,11 +838,11 @@ class ModelToolTests(unittest.TestCase):
                     lock_ref: JumpLabelMutex;
 
                     entered_by {
-                        JumpLabelMutex.Event::Lock(BootInitTaskRef);
+                        JumpLabelMutex.Transition::Lock(BootInitTaskRef);
                     }
 
                     exited_by {
-                        JumpLabelMutex.Event::Unlock(BootInitTaskRef);
+                        JumpLabelMutex.Transition::Unlock(BootInitTaskRef);
                     }
                 }
 
@@ -855,8 +855,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within StaticBranchJumpLabelContext {
                             }
                         }
@@ -885,20 +885,20 @@ class ModelToolTests(unittest.TestCase):
         source = """
             type RawSpinLock {
                 processes {
-                    Event::LockIrqSave {
+                    Transition::LockIrqSave {
                     }
 
-                    Event::UnlockIrqRestore {
+                    Transition::UnlockIrqRestore {
                     }
                 }
             }
 
             type PreemptionControl {
                 processes {
-                    Event::Disable {
+                    Transition::Disable {
                     }
 
-                    Event::Enable {
+                    Transition::Enable {
                     }
                 }
             }
@@ -910,11 +910,11 @@ class ModelToolTests(unittest.TestCase):
                     lock_ref: OuterLock;
 
                     entered_by {
-                        OuterLock.Event::LockIrqSave;
+                        OuterLock.Transition::LockIrqSave;
                     }
 
                     exited_by {
-                        OuterLock.Event::UnlockIrqRestore;
+                        OuterLock.Transition::UnlockIrqRestore;
                     }
                 }
 
@@ -926,11 +926,11 @@ class ModelToolTests(unittest.TestCase):
             context InnerPreemptContext: Context {
                 guard {
                     entered_by {
-                        TaskPreemption.Event::Disable;
+                        TaskPreemption.Transition::Disable;
                     }
 
                     exited_by {
-                        TaskPreemption.Event::Enable;
+                        TaskPreemption.Transition::Enable;
                     }
 
                     holds {
@@ -947,8 +947,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within OuterContext {
                                 within InnerPreemptContext {
                                 }
@@ -991,10 +991,10 @@ class ModelToolTests(unittest.TestCase):
         source = """
             type LocalInterruptControl {
                 processes {
-                    Event::SaveAndDisable {
+                    Transition::SaveAndDisable {
                     }
 
-                    Event::Restore {
+                    Transition::Restore {
                     }
                 }
             }
@@ -1002,11 +1002,11 @@ class ModelToolTests(unittest.TestCase):
             context LocalIrqContext: Context {
                 guard {
                     entered_by {
-                        BootCpuLocalInterrupt.Event::SaveAndDisable;
+                        BootCpuLocalInterrupt.Transition::SaveAndDisable;
                     }
 
                     exited_by {
-                        BootCpuLocalInterrupt.Event::Restore;
+                        BootCpuLocalInterrupt.Transition::Restore;
                     }
                 }
 
@@ -1027,8 +1027,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within LocalIrqContext {
                             }
                         }
@@ -1071,8 +1071,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within BootPhaseContext {
                             }
                         }
@@ -1114,8 +1114,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                         }
                     }
                 }
@@ -1128,11 +1128,11 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within BootPhaseContext {
                                 drives {
-                                    Child.Event::Setup;
+                                    Child.Transition::Setup;
                                 }
                             }
                         }
@@ -1179,8 +1179,8 @@ class ModelToolTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within OuterContext {
                                 within InnerContext {
                                 }

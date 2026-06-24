@@ -18,8 +18,8 @@ from common.view_types import (
 _TRACE_DRIVE_ARROW_MAX_LENGTH = 81
 _TRACE_STATE_BOX_HEIGHT = 34
 _TRACE_LABEL_LINE_HEIGHT = 12
-_TRACE_EVENT_LABEL_PAD_X = 8
-_TRACE_EVENT_LABEL_HEIGHT = 34
+_TRACE_TRANSITION_LABEL_PAD_X = 8
+_TRACE_TRANSITION_LABEL_HEIGHT = 34
 _TRACE_ANNOTATION_WIDTH = 160
 _TRACE_ANNOTATION_WRAP_UNITS = 26
 _TRACE_ANNOTATION_LINE_HEIGHT = 13
@@ -247,16 +247,16 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
     phase_span_ids = {
         cell.id
         for cell in cells
-        if cell.kind == "event_span" and _is_trace_phase_event(cell.label)
+        if cell.kind == "transition_span" and _is_trace_phase_transition(cell.label)
     }
     phase_state_ids = {
         arrow.source
         for arrow in arrows
-        if arrow.kind == "state" and _trace_event_id(arrow.source) in phase_span_ids
+        if arrow.kind == "state" and _trace_transition_id(arrow.source) in phase_span_ids
     } | {
         arrow.target
         for arrow in arrows
-        if arrow.kind == "state" and _trace_event_id(arrow.source) in phase_span_ids
+        if arrow.kind == "state" and _trace_transition_id(arrow.source) in phase_span_ids
     }
     def cell_box(cell: TraceCell) -> tuple[float, float, float, float]:
         x = left_margin + sum(
@@ -295,7 +295,7 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         "<style>",
         "text { font-family: Arial, sans-serif; fill: #1f2937; }",
         ".state { fill: #ffffff; stroke: #334155; stroke-width: 1.1; }",
-        ".event-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
+        ".transition-label { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
         ".action { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
         ".action-arrow { stroke: #64748b; stroke-width: 1.1; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".verified-state { fill: #f8fafc; stroke: #64748b; stroke-width: 1.1; }",
@@ -338,9 +338,9 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
             )
 
     for cell in cells:
-        if cell.kind == "event_span" and cell.id in phase_span_ids:
+        if cell.kind == "transition_span" and cell.id in phase_span_ids:
             _append_trace_phase_event(lines, cell, cell_box(cell))
-        elif cell.kind == "event_span":
+        elif cell.kind == "transition_span":
             _append_trace_event_label(lines, cell, cell_box(cell))
         elif cell.kind == "action":
             _append_trace_action(lines, cell, cell_box(cell))
@@ -353,7 +353,7 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         if source is None or target is None:
             continue
         if arrow.kind == "state":
-            if _trace_event_id(arrow.source) in phase_span_ids:
+            if _trace_transition_id(arrow.source) in phase_span_ids:
                 continue
             _append_trace_state_arrow(lines, cell_box(source), cell_box(target))
         elif arrow.kind == "drives":
@@ -457,10 +457,10 @@ def _render_timeline_text(view: ViewModel) -> str:
 
     for phase in phase_nodes:
         lines.append(f"{phase.id}: {phase.kind}")
-        for event in _timeline_events_for_phase(view, phase.id):
-            lines.append(f"  {event.id}")
+        for transition in _timeline_events_for_phase(view, phase.id):
+            lines.append(f"  {transition.id}")
             for edge in view.edges:
-                if edge.kind == "drives" and edge.source == event.id:
+                if edge.kind == "drives" and edge.source == transition.id:
                     lines.append(f"    -> {edge.target}")
 
     return "\n".join(lines)
@@ -522,7 +522,7 @@ def _timeline_events_for_phase(view: ViewModel, phase_id: str) -> list[ViewNode]
     return [
         node
         for node in view.nodes.values()
-        if node.kind == "Event" and node.id.startswith(prefix)
+        if node.kind == "Transition" and node.id.startswith(prefix)
     ]
 
 
@@ -640,19 +640,19 @@ def _append_trace_event_label(
     lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
 ) -> None:
     x, y, width, height = box
-    label_width = max(10, width - _TRACE_EVENT_LABEL_PAD_X * 2)
-    label_x = x + _TRACE_EVENT_LABEL_PAD_X
-    label_y = y + (height - _TRACE_EVENT_LABEL_HEIGHT) / 2
+    label_width = max(10, width - _TRACE_TRANSITION_LABEL_PAD_X * 2)
+    label_x = x + _TRACE_TRANSITION_LABEL_PAD_X
+    label_y = y + (height - _TRACE_TRANSITION_LABEL_HEIGHT) / 2
     lines.extend(
         [
-            f'<rect class="event-label" x="{label_x:.1f}" y="{label_y:.1f}" width="{label_width:.1f}" height="{_TRACE_EVENT_LABEL_HEIGHT:.1f}" rx="4" />',
+            f'<rect class="transition-label" x="{label_x:.1f}" y="{label_y:.1f}" width="{label_width:.1f}" height="{_TRACE_TRANSITION_LABEL_HEIGHT:.1f}" rx="4" />',
         ]
     )
     _append_trace_centered_text(
         lines,
-        _trace_label_lines(_shorten_trace_event(cell.label)),
+        _trace_label_lines(_shorten_trace_transition(cell.label)),
         label_x + label_width / 2,
-        label_y + _TRACE_EVENT_LABEL_HEIGHT / 2,
+        label_y + _TRACE_TRANSITION_LABEL_HEIGHT / 2,
         css_class="muted",
         font_size=10,
         baseline_offset=3.5,
@@ -677,7 +677,7 @@ def _append_trace_phase_event(
     label_x = arrow_x - 16
     label_y = y + height / 2
     lines.append(
-        f'<text class="phase-label" x="{label_x:.1f}" y="{label_y:.1f}" font-size="11" text-anchor="middle" transform="rotate(-90 {label_x:.1f} {label_y:.1f})">{_xml_escape(_shorten_trace_event(cell.label))}</text>'
+        f'<text class="phase-label" x="{label_x:.1f}" y="{label_y:.1f}" font-size="11" text-anchor="middle" transform="rotate(-90 {label_x:.1f} {label_y:.1f})">{_xml_escape(_shorten_trace_transition(cell.label))}</text>'
     )
 
 
@@ -806,9 +806,9 @@ def _trace_step_rect(
     box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
     x, y, width, height = box
-    pad_x = _TRACE_EVENT_LABEL_PAD_X
+    pad_x = _TRACE_TRANSITION_LABEL_PAD_X
     box_width = max(20, width - pad_x * 2)
-    box_height = _TRACE_EVENT_LABEL_HEIGHT
+    box_height = _TRACE_TRANSITION_LABEL_HEIGHT
     box_x = x + pad_x
     box_y = y + (height - box_height) / 2
     return box_x, box_y, box_width, box_height
@@ -909,13 +909,13 @@ def _append_trace_directed_arrow(
 def _trace_event_anchor_box(
     cell: TraceCell, box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
-    if cell.kind != "event_span" or _is_trace_phase_event(cell.label):
+    if cell.kind != "transition_span" or _is_trace_phase_transition(cell.label):
         return box
     x, y, width, height = box
-    label_width = max(10, width - _TRACE_EVENT_LABEL_PAD_X * 2)
-    label_x = x + _TRACE_EVENT_LABEL_PAD_X
-    label_y = y + (height - _TRACE_EVENT_LABEL_HEIGHT) / 2
-    return label_x, label_y, label_width, _TRACE_EVENT_LABEL_HEIGHT
+    label_width = max(10, width - _TRACE_TRANSITION_LABEL_PAD_X * 2)
+    label_x = x + _TRACE_TRANSITION_LABEL_PAD_X
+    label_y = y + (height - _TRACE_TRANSITION_LABEL_HEIGHT) / 2
+    return label_x, label_y, label_width, _TRACE_TRANSITION_LABEL_HEIGHT
 
 
 def _trace_semantic_anchor_box(
@@ -932,7 +932,7 @@ def _trace_annotation_items(
     if annotations is None:
         return []
     items: list[tuple[str, str, str]] = []
-    for section, kind in (("states", "state"), ("events", "event")):
+    for section, kind in (("states", "state"), ("transitions", "transition")):
         values = annotations.get(section)
         if not isinstance(values, dict):
             continue
@@ -944,7 +944,7 @@ def _trace_annotation_items(
                 normalized_label = (
                     _shorten_trace_label(label)
                     if kind == "state"
-                    else _shorten_trace_event(label)
+                    else _shorten_trace_transition(label)
                 )
                 items.append((kind, normalized_label, note_text))
     return items
@@ -1031,8 +1031,8 @@ def _trace_annotation_targets(
             targets[("state", _shorten_trace_label(cell.label))] = _trace_state_anchor_box(
                 cell_box(cell)
             )
-        elif cell.kind == "event_span" and cell.id not in phase_span_ids:
-            targets[("event", _shorten_trace_event(cell.label))] = _trace_event_anchor_box(
+        elif cell.kind == "transition_span" and cell.id not in phase_span_ids:
+            targets[("transition", _shorten_trace_transition(cell.label))] = _trace_event_anchor_box(
                 cell, cell_box(cell)
             )
     return targets
@@ -1050,7 +1050,7 @@ def _trace_annotation_occupied_boxes(
             continue
         if cell.kind in {"state", "verified_state"} and not _is_trace_phase_label(cell.label):
             boxes.append(_trace_state_anchor_box(cell_box(cell)))
-        elif cell.kind == "event_span" and cell.id not in phase_span_ids:
+        elif cell.kind == "transition_span" and cell.id not in phase_span_ids:
             boxes.append(_trace_event_anchor_box(cell, cell_box(cell)))
         elif cell.kind == "context_span":
             boxes.append(_trace_context_box_rect(cell_box(cell)))
@@ -1305,15 +1305,15 @@ def _shorten_trace_label(label: str) -> str:
     return label.replace(".State::", ".")
 
 
-def _shorten_trace_event(label: str) -> str:
-    return label.replace(".Event::", ".")
+def _shorten_trace_transition(label: str) -> str:
+    return label.replace(".Transition::", ".")
 
 
 def _trace_label_lines(label: str) -> tuple[str, ...]:
     if "." not in label:
         return (label,)
-    object_name, state_or_event = label.split(".", 1)
-    return (object_name, state_or_event)
+    object_name, state_or_transition = label.split(".", 1)
+    return (object_name, state_or_transition)
 
 
 def _trace_action_label_lines(label: str) -> tuple[str, ...]:
@@ -1325,7 +1325,7 @@ def _trace_action_label_lines(label: str) -> tuple[str, ...]:
         action_lines = _trace_action_label_lines(action.strip())
         return (f"{binding} <-", ".".join(action_lines))
     compact = label.replace(".Action::", ".")
-    compact = compact.replace(".Event::", ".")
+    compact = compact.replace(".Transition::", ".")
     compact = compact.split("(", 1)[0]
     if "." not in compact:
         return (compact,)
@@ -1348,12 +1348,12 @@ def _shorten_context_detail(label: str) -> str:
     if "=" not in label:
         return label
     key, value = label.split("=", 1)
-    compact = value.replace(".Event::", ".")
+    compact = value.replace(".Transition::", ".")
     return f"{key}: {compact}"
 
 
-def _is_trace_phase_event(label: str) -> bool:
-    object_name = label.split(".Event::", 1)[0]
+def _is_trace_phase_transition(label: str) -> bool:
+    object_name = label.split(".Transition::", 1)[0]
     return object_name == "StartupTimeline" or object_name.endswith("Phase")
 
 
@@ -1370,16 +1370,16 @@ def _is_trace_phase_row(label: str) -> bool:
 
 
 def _is_phase_to_phase_arrow(source: TraceCell, target: TraceCell) -> bool:
-    if source.kind != "event_span" or target.kind != "event_span":
+    if source.kind != "transition_span" or target.kind != "transition_span":
         return False
-    return _is_trace_phase_event(source.label) and _is_trace_phase_event(target.label)
+    return _is_trace_phase_transition(source.label) and _is_trace_phase_transition(target.label)
 
 
-def _trace_event_id(cell_id: str) -> str:
+def _trace_transition_id(cell_id: str) -> str:
     if "-" not in cell_id:
         return cell_id
     parts = cell_id.split("-")
-    if len(parts) >= 2 and parts[0] == "event":
+    if len(parts) >= 2 and parts[0] == "transition":
         return f"{parts[0]}-{parts[1]}-span"
     return cell_id
 

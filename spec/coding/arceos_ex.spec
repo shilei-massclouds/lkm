@@ -3,7 +3,7 @@
  *
  * This file records target-specific object-coding constraints for the current
  * arceos_ex prototype. It does not redefine model semantics; it constrains how
- * code must realize selected model events in this implementation target.
+ * code must realize selected model transitions in this implementation target.
  */
 
 predicate arceos_ex_must_device_tree_setup_allocates_from_memblock() -> bool;
@@ -3018,7 +3018,7 @@ type ArceosExRootfsCodingMust {
         /*
          * RootFS enable:
          *
-         * prepare_namespace() must be represented by RootFS.Event::Enable in
+         * prepare_namespace() must be represented by RootFS.Transition::Enable in
          * this round, not by a separate enable-position object. It must use the
          * already mounted DevFs and the
          * BlockDeviceRegistry default device as the root device candidate,
@@ -3034,7 +3034,7 @@ type ArceosExRootfsCodingMust {
          * Root switch:
          *
          * After the Linux-like temporary /root ext2 staging mount,
-         * RootFS.Event::Enable must drive VfsCore.Action::MoveMountToRoot and
+         * RootFS.Transition::Enable must drive VfsCore.Action::MoveMountToRoot and
          * FsStruct.Action::ChrootDot as separate model actions. FsStruct owns
          * the task-visible root/pwd dentry refs; VfsCore must not keep a
          * parallel current-root singleton. Smoke must observe current root as

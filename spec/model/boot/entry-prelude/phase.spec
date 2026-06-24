@@ -16,11 +16,11 @@ object RootStream: FlowObject {
      * Base 表示根流只进入模型空间，尚未完成入口前导期的执行约束预置。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 禁止内核态使用 FPU 和 VECTOR，建立根流的早期安全执行条件。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
                 }
@@ -68,11 +68,11 @@ object BootInitTask: TaskObject {
      * Base 表示根任务对象尚未绑定到当前执行 hart 的任务指针。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 建立物理地址阶段的根任务指针。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
                 }
@@ -115,11 +115,11 @@ object BootInitTask: TaskObject {
             task_ref_ready(BootInitTaskRef);
         }
 
-        events {
+        transitions {
             /*
              * Enable 在早期虚拟地址空间可用后，将根任务指针切换为虚拟地址。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     Vm.state == State::Ready;
                 }
@@ -178,12 +178,12 @@ object BootInitStack: StackObject {
      * Base 表示根栈范围已可由链接布局描述，但 sp 尚未指向该栈。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 建立物理地址阶段的根栈指针，并预留 pt_regs 区域。
              * 该动作分两步：先让 sp 指向静态根栈高端，再减去 Config.pt_size_on_stack。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Lds.state == State::Online;
                     Config.state == State::Online;
@@ -211,11 +211,11 @@ object BootInitStack: StackObject {
             inside(Riscv64.sp, Lds.init_stack_end, Lds.init_stack_start, Lds.init_stack_end);
         }
 
-        events {
+        transitions {
             /*
              * Setup 在早期虚拟地址空间可用后，将根栈指针切换为虚拟地址。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Vm.state == State::Ready;
                 }
@@ -243,11 +243,11 @@ object BootInitStack: StackObject {
             inside(Riscv64.sp, virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_start, EarlyVm, KernelImageMap), virt_addr(Lds.init_stack_end, EarlyVm, KernelImageMap));
         }
 
-        events {
+        transitions {
             /*
              * Enable 在 start_kernel() 早期建立根栈边界和溢出保护状态。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     Vm.state == State::Ready;
                 }
@@ -296,13 +296,13 @@ object EventStream: FlowObject {
      * Base 表示事件入口尚未被设置。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 设置物理地址阶段的 early 总入口。
              * early_event_entry 必须只依赖物理地址阶段可访问的代码和静态只读数据；
              * 不得依赖分页、动态内存、percpu、正式 printk 或已展开设备树。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
                 }
@@ -336,11 +336,11 @@ object EventStream: FlowObject {
             cpu_event_stream_ready(BootCPU, EventStream);
         }
 
-        events {
+        transitions {
             /*
              * Setup 设置 EarlyVm 中的 formal 总入口，并清零 sscratch。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Vm.state == State::Ready;
                     ExceptionStream.state == State::Prepared;
@@ -390,7 +390,7 @@ object EventStream: FlowObject {
  *
  * 职责分层：InterruptStream 直接管理 RISC-V sie/sip 这类 source enable / pending 分开关；
  * boot CPU 本地中断总开关 sstatus.SIE 由 BootCpuLocalInterrupt 直接管理。InterruptStream
- * 可以在生命周期事件中驱动 BootCpuLocalInterrupt，但不得绕过它直接改变总开关。
+ * 可以在生命周期 transition中驱动 BootCpuLocalInterrupt，但不得绕过它直接改变总开关。
  *
  * 当前具名 InterruptStream 是 boot CPU 的中断流实例，并通过 parent EventStream
  * 间接关联到 BootCPU。
@@ -403,12 +403,12 @@ object InterruptStream: FlowObject {
      * Base 表示中断控制对象尚未完成入口前导期的屏蔽动作。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 清零 sie/sip source enable / pending 分开关，避免入口前导期被异步中断打断。
              * 这不表示直接操作 sstatus.SIE 总开关；总开关由 BootCpuLocalInterrupt 管理。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Riscv64.state == State::Online;
                 }
@@ -439,19 +439,19 @@ object InterruptStream: FlowObject {
             interrupt_handler_bindings_default_panic(InterruptStream);
         }
 
-        events {
+        transitions {
             /*
              * Setup 在 start_kernel() 早期再次防御式关闭中断总开关，但只通过
              * BootCpuLocalInterrupt 完成，不直接改变 sstatus.SIE。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
                     BootCpuLocalInterrupt.state == State::Ready;
                 }
 
                 drives {
-                    BootCpuLocalInterrupt.Event::Disable;
+                    BootCpuLocalInterrupt.Transition::Disable;
                 }
 
                 ensures {
@@ -475,12 +475,12 @@ object InterruptStream: FlowObject {
             interrupt_dispatch_ready(InterruptStream);
         }
 
-        events {
+        transitions {
             /*
              * Enable 对应 boot CPU 的 local_irq_enable() 边界。当前模型把这一步
              * 收入中断时间准备期末尾，使 IRQ/timer smoke 可以在该阶段之后运行。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     IrqController.state == State::Ready;
                     RiscvTimerProvider.state == State::Ready;
@@ -489,7 +489,7 @@ object InterruptStream: FlowObject {
                 }
 
                 drives {
-                    BootCpuLocalInterrupt.Event::Enable;
+                    BootCpuLocalInterrupt.Transition::Enable;
                 }
 
                 ensures {
@@ -527,22 +527,22 @@ object ExceptionStream: FlowObject {
      * Base 表示异常流尚未纳入早期受控处理路径。
      */
     state State::Base {
-        events {
+        transitions {
             /*
-             * Preset 在物理地址阶段事件入口就绪后建立全异常兜底策略。
+             * Preset 在物理地址阶段 transition入口就绪后建立全异常兜底策略。
              * 当前兜底策略是 panic/halt，保证后续建页表和切换地址空间时误入异常仍受控。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     EventStream.state == State::Prepared;
                     BootInitStack.state == State::Prepared;
                 }
 
                 drives {
-                    PageFaultException.Event::Preset;
-                    SyscallException.Event::Preset;
-                    BreakpointException.Event::Preset;
-                    UnexpectedException.Event::Preset;
+                    PageFaultException.Transition::Preset;
+                    SyscallException.Transition::Preset;
+                    BreakpointException.Transition::Preset;
+                    UnexpectedException.Transition::Preset;
                 }
 
                 ensures {
@@ -568,20 +568,20 @@ object ExceptionStream: FlowObject {
             UnexpectedException.state == State::Prepared;
         }
 
-        events {
+        transitions {
             /*
              * Setup 对齐后续 trap_init()：建立正式异常分类、分发和 handler 注册框架。
              * 该事件不属于当前入口前导期。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     EventStream.state == State::Ready;
                 }
 
                 drives {
-                    PageFaultException.Event::Setup;
-                    BreakpointException.Event::Setup;
-                    UnexpectedException.Event::Setup;
+                    PageFaultException.Transition::Setup;
+                    BreakpointException.Transition::Setup;
+                    UnexpectedException.Transition::Setup;
                 }
 
                 ensures {
@@ -605,11 +605,11 @@ object ExceptionStream: FlowObject {
             exception_handler_bindings_ready(ExceptionStream);
         }
 
-        events {
+        transitions {
             /*
              * Enable 表示当前配置要求的异常机制均已可用；例如 syscall 需要等用户态执行路径准备好。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     exception_mechanisms_ready(ExceptionStream);
                 }
@@ -640,8 +640,8 @@ object PageFaultException: FlowObject {
     parent: ExceptionStream;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     ExceptionStream.state == State::Base;
                     EventStream.state == State::Prepared;
@@ -659,8 +659,8 @@ object PageFaultException: FlowObject {
             exception_fallback_panic_ready(PageFaultException);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ExceptionStream.state == State::Prepared;
                 }
@@ -682,8 +682,8 @@ object PageFaultException: FlowObject {
             page_fault_exception_handler_ready(PageFaultException);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     vm_fault_recovery_ready();
                 }
@@ -711,8 +711,8 @@ object SyscallException: FlowObject {
     parent: ExceptionStream;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     ExceptionStream.state == State::Base;
                     EventStream.state == State::Prepared;
@@ -730,8 +730,8 @@ object SyscallException: FlowObject {
             exception_fallback_panic_ready(SyscallException);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ExceptionStream.state == State::Ready;
                 }
@@ -753,8 +753,8 @@ object SyscallException: FlowObject {
             syscall_exception_handler_ready(SyscallException);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     user_trap_return_ready();
                     SyscallTable.state == State::Ready;
@@ -783,8 +783,8 @@ object BreakpointException: FlowObject {
     parent: ExceptionStream;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     ExceptionStream.state == State::Base;
                     EventStream.state == State::Prepared;
@@ -802,8 +802,8 @@ object BreakpointException: FlowObject {
             exception_fallback_panic_ready(BreakpointException);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ExceptionStream.state == State::Prepared;
                 }
@@ -825,8 +825,8 @@ object BreakpointException: FlowObject {
             breakpoint_hook_dispatch_ready(BreakpointException);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     debug_exception_mechanism_ready();
                 }
@@ -854,8 +854,8 @@ object UnexpectedException: FlowObject {
     parent: ExceptionStream;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     ExceptionStream.state == State::Base;
                     EventStream.state == State::Prepared;
@@ -873,8 +873,8 @@ object UnexpectedException: FlowObject {
             exception_fallback_panic_ready(UnexpectedException);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ExceptionStream.state == State::Prepared;
                 }
@@ -892,8 +892,8 @@ object UnexpectedException: FlowObject {
             unexpected_exception_handler_ready(UnexpectedException);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 ensures {
                     unexpected_exception_panic_policy_online(UnexpectedException);
                 }
@@ -925,11 +925,11 @@ object KernelImage: ImageObject {
      * Base 表示内核映像已进入模型空间，但 gp 和 BSS 状态尚未被本阶段处理。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 使用 global_pointer 符号建立物理地址阶段的 gp。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Lds.state == State::Online;
                     Riscv64.state == State::Online;
@@ -959,11 +959,11 @@ object KernelImage: ImageObject {
             Riscv64.gp == phys_addr(Lds.global_pointer);
         }
 
-        events {
+        transitions {
             /*
              * Setup 清零 BSS 段，使内核映像进入早期可运行状态。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Lds.state == State::Online;
                 }
@@ -992,12 +992,12 @@ object KernelImage: ImageObject {
             memory_zeroed(segments.bss.range);
         }
 
-        events {
+        transitions {
             /*
              * Enable 在 EarlyVm 可用后重置 gp-relative 寻址。
              * 该事件通常由 VM.setup() 内部触发。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     EarlyVm.state == State::Online;
                 }
@@ -1050,12 +1050,12 @@ object RawDtb: ResourceObject {
      * Base 表示只知道启动参数中给出了 dtb 物理地址，尚未验证头部。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 读取并验证原始 dtb 头部 magic。
              * 该验证表达规格要求，不表示 Linux setup_vm() 在此处逐项执行。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootArgs.state == State::Online;
                     OpenSbiFirmware.state == State::Online;
@@ -1088,12 +1088,12 @@ object RawDtb: ResourceObject {
             valid_dtb_magic(header);
         }
 
-        events {
+        transitions {
             /*
              * Setup 读取 total_size 并确定原始 dtb 的完整物理范围。
              * 该范围证明用于后续 FDT fixmap 容量检查和映射安全性。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     OpenSbiFirmware.state == State::Online;
                     firmware_dtb_blob_complete_at_kernel_entry(BootArgs.dtb_pa);
@@ -1144,12 +1144,12 @@ object FixMap: PrepareObject {
      * Base 表示 fixmap 槽位布局来自配置，但尚未把 RawDtb 安排到 FDT 槽位。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 检查 FDT 槽位存在且能容纳 RawDtb，并把 RawDtb 安排到该槽位。
              * 该检查把 Linux 隐含在 fixmap 布局常量中的容量前提显式化。
              */
-            on Event::Preset -> State::Ready {
+            on Transition::Preset -> State::Ready {
                 depends_on {
                     Config.state == State::Online;
                     RawDtb.state == State::Ready;
@@ -1211,20 +1211,20 @@ object Vm: AddressSpaceObject {
      * Base 表示页表子对象尚未完成入口前导期所需的准备。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 编排跳板页表和早期页表的建立。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     TrampolineVm.state == State::Base;
                     EarlyVm.state == State::Base;
                 }
 
                 drives {
-                    TrampolineVm.Event::Setup;
-                    EarlyVm.Event::Preset;
-                    EarlyVm.Event::Setup;
+                    TrampolineVm.Transition::Setup;
+                    EarlyVm.Transition::Preset;
+                    EarlyVm.Transition::Setup;
                 }
 
                 may_change {
@@ -1244,21 +1244,21 @@ object Vm: AddressSpaceObject {
             EarlyVm.state == State::Ready;
         }
 
-        events {
+        transitions {
             /*
              * Setup 启用跳板页表和早期页表，并完成进入早期虚拟地址阶段的切换。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     TrampolineVm.state == State::Ready;
                     EarlyVm.state == State::Ready;
                 }
 
                 drives {
-                    TrampolineVm.Event::Enable;
-                    EarlyVm.Event::Enable;
-                    TrampolineVm.Event::Cleanup;
-                    KernelImage.Event::Enable;
+                    TrampolineVm.Transition::Enable;
+                    EarlyVm.Transition::Enable;
+                    TrampolineVm.Transition::Cleanup;
+                    KernelImage.Transition::Enable;
                 }
 
                 may_change {
@@ -1287,15 +1287,15 @@ object Vm: AddressSpaceObject {
             early_vm_translation_sync_complete(EarlyVm);
         }
 
-        events {
+        transitions {
             /*
              * Enable 建立完整内核虚拟内存空间；该事件由入口后继期触发。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 drives {
-                    SwapperVm.Event::Setup;
-                    SwapperVm.Event::Enable;
-                    EarlyVm.Event::Cleanup;
+                    SwapperVm.Transition::Setup;
+                    SwapperVm.Transition::Enable;
+                    EarlyVm.Transition::Cleanup;
                 }
 
                 may_change {
@@ -1343,11 +1343,11 @@ object TrampolineVm: AddressSpaceObject {
      * Base 表示跳板页表尚未建立。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 初始化跳板页表并建立第一次地址空间切换所需映射。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Config.state == State::Online;
                     Lds.state == State::Online;
@@ -1378,7 +1378,7 @@ object TrampolineVm: AddressSpaceObject {
             trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap);
         }
 
-        events {
+        transitions {
             /*
              * Enable 切换到跳板页表，完成从物理地址阶段进入虚拟地址阶段的第一次过渡。
              * Linux/RISC-V 实现中，在写入 trampoline satp 前执行 sfence.vma，
@@ -1387,7 +1387,7 @@ object TrampolineVm: AddressSpaceObject {
              * 物理 PC 到虚拟 PC 的重定位；这不是正式异常/中断分发。
              * 规格层只保留地址转换同步要求，不把 sfence.vma 展开为独立事件。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     KernelImage.state == State::Ready;
                 }
@@ -1421,12 +1421,12 @@ object TrampolineVm: AddressSpaceObject {
             trampoline_mapping_ready(TrampolineVm.pg_dir, TrampolineMap);
         }
 
-        events {
+        transitions {
             /*
              * Cleanup 在 EarlyVm 接管后让跳板虚拟内存空间退出服务。
              * Destroyed 不表示 TrampolineVm.pg_dir 这块静态页表存储被释放。
              */
-            on Event::Cleanup -> State::Destroyed {
+            on Transition::Cleanup -> State::Destroyed {
                 depends_on {
                     EarlyVm.state == State::Online;
                 }
@@ -1464,12 +1464,12 @@ object EarlyVm: AddressSpaceObject {
      * Base 表示早期虚拟内存空间尚未发现 RawDtb，也尚未准备 FDT fixmap 槽位。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 发现并验证原始 dtb，并把 RawDtb 安排到 FDT fixmap 槽位。
              * 这是规格前置证明边界，强于 Linux setup_vm() 的直接实现顺序。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Config.state == State::Online;
                     RawDtb.state == State::Base;
@@ -1477,9 +1477,9 @@ object EarlyVm: AddressSpaceObject {
                 }
 
                 drives {
-                    RawDtb.Event::Preset;
-                    RawDtb.Event::Setup;
-                    FixMap.Event::Preset;
+                    RawDtb.Transition::Preset;
+                    RawDtb.Transition::Setup;
+                    FixMap.Transition::Preset;
                 }
 
                 ensures {
@@ -1499,11 +1499,11 @@ object EarlyVm: AddressSpaceObject {
             slot_contains(FixMap.fdt_slot, RawDtb);
         }
 
-        events {
+        transitions {
             /*
              * Setup 初始化 early_pg_dir，建立内核映像映射和原始 dtb 的 fixmap 映射。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Config.state == State::Online;
                     KernelImage.state == State::Ready;
@@ -1541,14 +1541,14 @@ object EarlyVm: AddressSpaceObject {
             LinearMap.state == State::Destroyed;
         }
 
-        events {
+        transitions {
             /*
              * Enable 切换到 early_pg_dir，使早期虚拟地址空间进入服务状态。
              * Linux/RISC-V 实现中，在写入 early/kernel satp 后执行 sfence.vma，
              * 避免继续使用只覆盖首个 superpage 的 trampoline translations。
              * 规格层只保留地址转换同步要求，不把 sfence.vma 展开为独立事件。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     TrampolineVm.state == State::Online;
                 }
@@ -1582,12 +1582,12 @@ object EarlyVm: AddressSpaceObject {
             fixmap_slot_accessible(FixMap.fdt_slot);
         }
 
-        events {
+        transitions {
             /*
              * Cleanup 在 SwapperVm 接管后让早期虚拟内存空间退出服务。
              * Destroyed 不表示 EarlyVm.pg_dir 这块静态页表存储被释放。
              */
-            on Event::Cleanup -> State::Destroyed {
+            on Transition::Cleanup -> State::Destroyed {
                 depends_on {
                     SwapperVm.state == State::Online;
                 }
@@ -1625,11 +1625,11 @@ object SwapperVm: AddressSpaceObject {
      * Base 表示完整内核页表尚未建立。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 建立完整内核页表。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Config.state == State::Online;
                     MemBlock.state == State::Ready;
@@ -1660,13 +1660,13 @@ object SwapperVm: AddressSpaceObject {
             temporary_fixmap_page_table_slots_clean(SwapperVm);
         }
 
-        events {
+        transitions {
             /*
              * Enable 切换到完整内核页表。Linux/RISC-V 的 setup_vm_final()
              * 在写入 swapper_pg_dir 对应 SATP 后执行 local_flush_tlb_all()；
              * 规格层把该边界收敛为完整内核地址空间切换后的翻译同步事实。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 may_change {
                     Riscv64.satp;
                 }
@@ -1705,20 +1705,20 @@ object BootCurrentCPU: CurrentCPU {
     initial_state: State::Base;
 
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 记录 BP 的自我身份入口和入口 hartid 来源。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootArgs.state == State::Online;
                     BootCPU.state == State::Base;
                 }
 
                 drives {
-                    BootCPU.Event::Preset;
-                    BootCpuLocalInterrupt.Event::Setup;
-                    BootCpuCurrentTask.Event::Setup;
+                    BootCPU.Transition::Preset;
+                    BootCpuLocalInterrupt.Transition::Setup;
+                    BootCpuCurrentTask.Transition::Setup;
                 }
 
                 ensures {
@@ -1741,11 +1741,11 @@ object BootCurrentCPU: CurrentCPU {
             current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
         }
 
-        events {
+        transitions {
             /*
              * Setup 确认 BP 的 logical CPU id。当前启动闭环固定为 0。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     current_cpu_logical_id_ready(BootCurrentCPU, 0);
                     current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
@@ -1762,12 +1762,12 @@ object BootCurrentCPU: CurrentCPU {
             current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
         }
 
-        events {
+        transitions {
             /*
              * Enable 在 CpuGroup 建立后，把 CurrentCPU 拥有的 CPU 对象注册到
              * CpuGroup 的引用集合。CpuGroup 不拥有 CPU 本体。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     CpuGroup.state == State::Prepared;
                 }
@@ -1807,11 +1807,11 @@ object BootCPU: CPUObject {
      * Base 表示启动 CPU 对象尚未记录入口参数中的物理 hartid。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 记录 BootCPU.hartid 来自启动 ABI。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootArgs.state == State::Online;
                 }
@@ -1831,11 +1831,11 @@ object BootCPU: CPUObject {
             boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 boot_cpu_init() 中 present/active 边界。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PlatformCpuInfo.state == State::Online;
                 }
@@ -1860,11 +1860,11 @@ object BootCPU: CPUObject {
             boot_cpu_active(BootCPU);
         }
 
-        events {
+        transitions {
             /*
              * Enable 对应 boot_cpu_init() 最终 online 边界。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 ensures {
                     boot_cpu_online(BootCPU);
                     cpu_ref_targets(BootCPURef, BootCPU);
@@ -1900,8 +1900,8 @@ object BootCpuLocalInterrupt: LocalInterruptControl {
     parent: BootCPU;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
                     cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
@@ -1927,8 +1927,8 @@ object BootCpuCurrentTask: CurrentTaskSlot {
     parent: BootCPU;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     current_task_slot_ready(BootCpuCurrentTask, BootCPU);
                 }
@@ -1957,12 +1957,12 @@ object CpuGroup: HardwareObject {
      * Base 表示处理器管理对象尚未记录启动 CPU 引用。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 注册 BootCurrentCPU 拥有的 BootCPU 引用。CpuGroup 不拥有
              * BootCPU，只维护该引用和后续 topology/index 关系。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootCurrentCPU.state == State::Ready;
                     BootCPU.state == State::Prepared;
@@ -1985,12 +1985,12 @@ object CpuGroup: HardwareObject {
             boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
         }
 
-        events {
+        transitions {
             /*
              * Setup 对应 setup_smp()，建立 CPU 拓扑事实和 secondary CPU 候选集合。
              * 它不启动 secondary CPU，也不开放多 hart 并发。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BootCPU.state == State::Online;
                     DeviceTree.state == State::Ready;
@@ -2050,11 +2050,11 @@ object Soc: HardwareObject {
      * Base 表示 SoC 平台早期预置尚未执行。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Preset 执行 SoC 平台相关的早期预置。
              */
-            on Event::Preset -> State::Prepared {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     CpuGroup.state == State::Prepared;
                 }
@@ -2102,11 +2102,11 @@ object EntryPreludePhase: PhaseObject {
             context_is(SystemExclusive);
         }
 
-        events {
+        transitions {
             /*
              * Setup 按入口前导期构建时序驱动各对象状态迁移。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Riscv64.state == State::Online;
                     SbiSpec.state == State::Online;
@@ -2116,24 +2116,24 @@ object EntryPreludePhase: PhaseObject {
                 }
 
                 drives {
-                    InterruptStream.Event::Preset;
-                    KernelImage.Event::Preset;
-                    RootStream.Event::Preset;
-                    KernelImage.Event::Setup;
-                    BootCurrentCPU.Event::Preset;
-                    BootCurrentCPU.Event::Setup;
-                    CpuGroup.Event::Preset;
-                    BootCurrentCPU.Event::Enable;
-                    BootInitTask.Event::Preset;
-                    BootInitStack.Event::Preset;
-                    EventStream.Event::Preset;
-                    ExceptionStream.Event::Preset;
-                    Vm.Event::Preset;
-                    Vm.Event::Setup;
-                    EventStream.Event::Setup;
-                    BootInitTask.Event::Enable;
-                    BootInitStack.Event::Setup;
-                    Soc.Event::Preset;
+                    InterruptStream.Transition::Preset;
+                    KernelImage.Transition::Preset;
+                    RootStream.Transition::Preset;
+                    KernelImage.Transition::Setup;
+                    BootCurrentCPU.Transition::Preset;
+                    BootCurrentCPU.Transition::Setup;
+                    CpuGroup.Transition::Preset;
+                    BootCurrentCPU.Transition::Enable;
+                    BootInitTask.Transition::Preset;
+                    BootInitStack.Transition::Preset;
+                    EventStream.Transition::Preset;
+                    ExceptionStream.Transition::Preset;
+                    Vm.Transition::Preset;
+                    Vm.Transition::Setup;
+                    EventStream.Transition::Setup;
+                    BootInitTask.Transition::Enable;
+                    BootInitStack.Transition::Setup;
+                    Soc.Transition::Preset;
                 }
             }
         }
@@ -2168,11 +2168,11 @@ object EntryPreludePhase: PhaseObject {
             Soc.state == State::Prepared;
         }
 
-        events {
+        transitions {
             /*
              * Cleanup 在后继阶段开始后退出入口前导期对象。
              */
-            on Event::Cleanup -> State::Destroyed {
+            on Transition::Cleanup -> State::Destroyed {
                 depends_on {
                     EntrySuccessorPhase.state == State::Base;
                 }

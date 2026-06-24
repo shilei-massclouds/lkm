@@ -18,9 +18,9 @@ predicate coding_must_preserve_object_ownership() -> bool;
 predicate coding_must_phase_path_matches_tree() -> bool;
 predicate coding_must_phase_dfs_generation() -> bool;
 predicate coding_must_phase_not_resource_lifecycle() -> bool;
-predicate coding_must_keep_event_boundaries() -> bool;
+predicate coding_must_keep_transition_boundaries() -> bool;
 predicate coding_must_check_before_checkpoint() -> bool;
-predicate coding_must_checkpoint_owner_matches_event() -> bool;
+predicate coding_must_checkpoint_owner_matches_transition() -> bool;
 predicate coding_must_linker_script_driven_by_model_lds() -> bool;
 predicate coding_must_record_exceptions() -> bool;
 predicate coding_must_run_verification_gates() -> bool;
@@ -72,7 +72,7 @@ type CodingMappingMust {
         /*
          * Model priority:
          *
-         * Implementation must strictly follow objects, states, events,
+         * Implementation must strictly follow objects, states, transitions,
          * dependencies, drive order, phase boundaries and proof obligations
          * derived from spec/model. Implementation convenience, directory habit,
          * reused code, early Rust entry, reduced assembly or build-tool limits
@@ -126,14 +126,14 @@ type CodingMappingMust {
         coding_must_phase_not_resource_lifecycle();
 
         /*
-         * Event boundaries:
+         * Transition boundaries:
          *
-         * Each model event must keep a locatable code boundary. If low-level
-         * code must complete adjacent events without a hardware-visible gap, the
-         * mapped source must still preserve event functions, state adoption,
+         * Each model transition must keep a locatable code boundary. If low-level
+         * code must complete adjacent transitions without a hardware-visible gap, the
+         * mapped source must still preserve transition functions, state adoption,
          * checks and checkpoint boundaries.
          */
-        coding_must_keep_event_boundaries();
+        coding_must_keep_transition_boundaries();
 
         /*
          * Checks before checkpoints:
@@ -154,7 +154,7 @@ type CodingMappingMust {
          * preparation phases or other objects merely to make the runtime trace
          * visually match the derived trace.
          */
-        coding_must_checkpoint_owner_matches_event();
+        coding_must_checkpoint_owner_matches_transition();
 
         /*
          * Linker script mapping:
@@ -197,7 +197,7 @@ type CodingMappingShould {
          * Object Coding Phase should maintain long-lived resource objects in a
          * single implementation Context rather than in phase-local object
          * carriers. Phase modules should borrow this Context and use it to
-         * drive resource-object events.
+         * drive resource-object transitions.
          */
         coding_should_use_global_context();
 

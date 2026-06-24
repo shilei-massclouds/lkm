@@ -65,8 +65,8 @@ object VirtioMmioPlatformDriverStorage: DeviceDriverStorage {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     virtio_mmio_driver_storage_ready(VirtioMmioPlatformDriverStorage);
                     virtio_mmio_driver_storage_pinned(VirtioMmioPlatformDriverStorage);
@@ -90,8 +90,8 @@ object VirtioMmioTransportDevice: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PlatformBus.state == State::Ready;
                     Ioremap.state == State::Ready;
@@ -247,8 +247,8 @@ object VirtioMmioPlatformDriver: PlatformDriverType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     VirtioMmioPlatformDriverStorage.state == State::Ready;
                 }
@@ -314,8 +314,8 @@ object VirtioMmioPlatformDriver: PlatformDriverType {
             initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::VirtioMmioPlatformDriver);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     InitcallTable.state == State::Ready;
                     PlatformBus.state == State::Ready;
@@ -328,8 +328,8 @@ object VirtioMmioPlatformDriver: PlatformDriverType {
                         device: DeviceRef::VirtioMmioPlatformDevice,
                         mapping: IoMemoryMappingRef::VirtioMmio
                     );
-                    VirtioMmioTransportDevice.Event::Setup;
-                    VirtioDevice.Event::Setup;
+                    VirtioMmioTransportDevice.Transition::Setup;
+                    VirtioDevice.Transition::Setup;
                 }
 
                 ensures {

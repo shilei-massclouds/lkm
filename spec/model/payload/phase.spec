@@ -26,12 +26,12 @@ object PayloadPhase: PhaseObject {
      * 及其运行前置条件。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 确认 selected payload 可进入。当前规格只抽象 payload 选择和
              * 前置条件；Linux-like 用户态首进程路径由 UserBootPayload 承载。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PreparePhase.state == State::Online;
                     BootPhase.state == State::Ready;
@@ -49,7 +49,7 @@ object PayloadPhase: PhaseObject {
                 }
 
                 drives {
-                    UserBootPayload.Event::Setup;
+                    UserBootPayload.Transition::Setup;
                 }
 
                 ensures {
@@ -80,14 +80,14 @@ object PayloadPhase: PhaseObject {
             selected_payload_ready();
         }
 
-        events {
+        transitions {
             /*
              * Enable 表示启动编排链不可逆地移交给 selected payload。该 handoff
              * 的运行期语义是不返回：payload 要么进入服务循环，要么最终停机。
              */
-            on Event::Enable -> State::Online {
+            on Transition::Enable -> State::Online {
                 drives {
-                    UserBootPayload.Event::Enable;
+                    UserBootPayload.Transition::Enable;
                 }
 
                 ensures {

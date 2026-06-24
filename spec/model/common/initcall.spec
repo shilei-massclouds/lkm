@@ -105,7 +105,7 @@ type InitcallTableType: KernelObject {
          * source may be LDS sections, generated static data, or a dynamic
          * registry; model semantics only require the registration relation.
          */
-        Event::Preset {
+        Transition::Preset {
             state_effect: StateEffect::Always;
             ensures {
                 initcall_table_registered_entries_collected(self);
@@ -122,7 +122,7 @@ type InitcallTableType: KernelObject {
          * boot this is do_initcalls(); early initcalls are driven separately by
          * do_pre_smp_initcalls().
          */
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             ensures {
                 initcall_table_all_levels_ran(self);
@@ -137,7 +137,7 @@ type InitcallTableType: KernelObject {
     processes {
         /*
          * Register is an abstract model action. It is intentionally not tied
-         * to a runtime call site; object Preset events use it to declare the
+         * to a runtime call site; object Preset transitions use it to declare the
          * entry they contribute to this table. Linux-like coding maps it to
          * macros such as arch_initcall_sync!() or device_initcall!().
          */

@@ -15,16 +15,16 @@ object Console: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     PrintkBuffer.state == State::Ready;
                     EarlyCon.state == State::Online;
                 }
 
                 drives {
-                    TtyLineDisciplineRegistry.Event::Preset;
-                    ConsoleDriverSet.Event::Preset;
+                    TtyLineDisciplineRegistry.Transition::Preset;
+                    ConsoleDriverSet.Transition::Preset;
                 }
 
                 ensures {
@@ -58,8 +58,8 @@ object TtyLineDisciplineRegistry: ConsoleObject {
     parent: Console;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     tty_line_discipline_registry_prepared(TtyLineDisciplineRegistry);
                     n_tty_line_discipline_registered(TtyLineDisciplineRegistry);
@@ -85,8 +85,8 @@ object ConsoleDriverSet: ConsoleObject {
     parent: Console;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Lds.state == State::Online;
                 }
@@ -119,8 +119,8 @@ object SchedClock: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     HrtimerCore.state == State::Ready;
                     Timekeeper.state == State::Ready;
@@ -156,8 +156,8 @@ object DelayLoop: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RiscvTimerProvider.state == State::Ready;
                     BootCPU.state == State::Online;
@@ -195,8 +195,8 @@ object IrqOpenPreparePhase: PhaseObject {
     parent: InterruptPhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     IrqTimeInitPhase.state == State::Ready;
                     InterruptStream.state == State::Online;
@@ -218,9 +218,9 @@ object IrqOpenPreparePhase: PhaseObject {
                 }
 
                 drives {
-                    Console.Event::Preset;
-                    SchedClock.Event::Setup;
-                    DelayLoop.Event::Setup;
+                    Console.Transition::Preset;
+                    SchedClock.Transition::Setup;
+                    DelayLoop.Transition::Setup;
                 }
 
                 ensures {

@@ -106,7 +106,7 @@ class RenderToolTests(unittest.TestCase):
             text = stdout.getvalue()
             self.assertIn("trace view:", text)
             self.assertIn("columns:", text)
-            self.assertIn("StartupTimeline.Event::Setup", text)
+            self.assertIn("StartupTimeline.Transition::Setup", text)
             self.assertIn("[drives]", text)
 
     def test_render_svg_from_trace_view(self) -> None:
@@ -187,11 +187,11 @@ class RenderToolTests(unittest.TestCase):
                         label="KernelInitTask.State::Runnable",
                     ),
                     TraceCell(
-                        id="event",
-                        kind="event_span",
+                        id="transition",
+                        kind="transition_span",
                         row=1,
                         column=0,
-                        label="KernelInitTask.Event::Enable",
+                        label="KernelInitTask.Transition::Enable",
                         row_span=5,
                     ),
                     TraceCell(
@@ -202,8 +202,8 @@ class RenderToolTests(unittest.TestCase):
                         label=(
                             "WakeUpNewTaskContext"
                             "|lock=KernelInitTaskPiLock"
-                            "|enter=KernelInitTaskPiLock.Event::LockIrqSave"
-                            "|exit=KernelInitTaskPiLock.Event::UnlockIrqRestore"
+                            "|enter=KernelInitTaskPiLock.Transition::LockIrqSave"
+                            "|exit=KernelInitTaskPiLock.Transition::UnlockIrqRestore"
                         ),
                         row_span=4,
                         column_span=2,
@@ -222,7 +222,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_action",
                         row=2,
                         column=1,
-                        label="KernelInitTask.Event::SetRuntimeState(TaskRuntimeState::Running)",
+                        label="KernelInitTask.Transition::SetRuntimeState(TaskRuntimeState::Running)",
                         column_span=2,
                     ),
                     TraceCell(
@@ -238,13 +238,13 @@ class RenderToolTests(unittest.TestCase):
                         kind="context_action",
                         row=4,
                         column=1,
-                        label="selected_rq.Event::EnqueueTask(KernelInitTaskRef)",
+                        label="selected_rq.Transition::EnqueueTask(KernelInitTaskRef)",
                         column_span=2,
                     ),
                 ),
                 "trace_arrows": (
                     TraceArrow(source="source", target="target", kind="state"),
-                    TraceArrow(source="event", target="context", kind="within"),
+                    TraceArrow(source="transition", target="context", kind="within"),
                     TraceArrow(
                         source="action-0", target="action-1", kind="context_order"
                     ),
@@ -298,11 +298,11 @@ class RenderToolTests(unittest.TestCase):
                 ],
                 "trace_cells": (
                     TraceCell(
-                        id="event",
-                        kind="event_span",
+                        id="transition",
+                        kind="transition_span",
                         row=0,
                         column=0,
-                        label="RestInitPhase.Event::Preset",
+                        label="RestInitPhase.Transition::Preset",
                         row_span=3,
                     ),
                     TraceCell(
@@ -315,7 +315,7 @@ class RenderToolTests(unittest.TestCase):
                     ),
                 ),
                 "trace_arrows": (
-                    TraceArrow(source="event", target="action", kind="action"),
+                    TraceArrow(source="transition", target="action", kind="action"),
                 ),
             },
         )
@@ -348,11 +348,11 @@ class RenderToolTests(unittest.TestCase):
                 ],
                 "trace_cells": (
                     TraceCell(
-                        id="event",
-                        kind="event_span",
+                        id="transition",
+                        kind="transition_span",
                         row=0,
                         column=0,
-                        label="RestInitPhase.Event::Preset",
+                        label="RestInitPhase.Transition::Preset",
                         row_span=4,
                     ),
                     TraceCell(
@@ -365,7 +365,7 @@ class RenderToolTests(unittest.TestCase):
                     ),
                 ),
                 "trace_arrows": (
-                    TraceArrow(source="event", target="action", kind="action"),
+                    TraceArrow(source="transition", target="action", kind="action"),
                 ),
             },
         )
@@ -487,10 +487,10 @@ class RenderToolTests(unittest.TestCase):
 
     def test_render_svg_from_trace_view_does_not_overlap_phase_actions(self) -> None:
         rows = [
-            {"index": 0, "kind": "gap", "label": "RestInitPhase.Event::Preset.body.start"},
-            {"index": 1, "kind": "action", "label": "RestInitPhase.Event::Preset.action.1"},
-            {"index": 2, "kind": "action", "label": "RestInitPhase.Event::Preset.action.2"},
-            {"index": 3, "kind": "gap", "label": "RestInitPhase.Event::Preset.body.end"},
+            {"index": 0, "kind": "gap", "label": "RestInitPhase.Transition::Preset.body.start"},
+            {"index": 1, "kind": "action", "label": "RestInitPhase.Transition::Preset.action.1"},
+            {"index": 2, "kind": "action", "label": "RestInitPhase.Transition::Preset.action.2"},
+            {"index": 3, "kind": "gap", "label": "RestInitPhase.Transition::Preset.body.end"},
         ]
         view = ViewModel(
             name="trace",
@@ -506,11 +506,11 @@ class RenderToolTests(unittest.TestCase):
                 "trace_rows": rows,
                 "trace_cells": (
                     TraceCell(
-                        id="event",
-                        kind="event_span",
+                        id="transition",
+                        kind="transition_span",
                         row=0,
                         column=0,
-                        label="RestInitPhase.Event::Preset",
+                        label="RestInitPhase.Transition::Preset",
                         row_span=4,
                     ),
                     TraceCell(
@@ -518,7 +518,7 @@ class RenderToolTests(unittest.TestCase):
                         kind="action",
                         row=1,
                         column=3,
-                        label="KthreaddReadyGate.Event::Complete",
+                        label="KthreaddReadyGate.Transition::Complete",
                         column_span=2,
                     ),
                     TraceCell(
@@ -531,8 +531,8 @@ class RenderToolTests(unittest.TestCase):
                     ),
                 ),
                 "trace_arrows": (
-                    TraceArrow(source="event", target="action-1", kind="action"),
-                    TraceArrow(source="event", target="action-2", kind="action"),
+                    TraceArrow(source="transition", target="action-1", kind="action"),
+                    TraceArrow(source="transition", target="action-2", kind="action"),
                 ),
             },
         )
@@ -563,8 +563,8 @@ class RenderToolTests(unittest.TestCase):
   "states": {
     "Vm.State::Ready": "early virtual address space available"
   },
-  "events": {
-    "Vm.Event::Setup": "build early mappings"
+  "transitions": {
+    "Vm.Transition::Setup": "build early mappings"
   }
 }
 """.strip()
@@ -601,8 +601,8 @@ class RenderToolTests(unittest.TestCase):
             annotations.write_text(
                 """
 {
-  "events": {
-    "Vm.Event::Setup": "建立早期虚拟地址空间并完成跳板页表切换后的连续中文说明"
+  "transitions": {
+    "Vm.Transition::Setup": "建立早期虚拟地址空间并完成跳板页表切换后的连续中文说明"
   }
 }
 """.strip()

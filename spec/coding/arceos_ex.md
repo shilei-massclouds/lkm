@@ -621,7 +621,7 @@ queue empty、THRI stopped、bounded idle 期间无新增 PLIC claim、IRQ dispa
 ordinary `TtyXmitFifo` mutation；若要改变 queue full、reentrant printk 或 irq-disabled/hardirq 上下文下的行为，必须先补
 明确规格和独立 probe，不得借现有 smoke/KUnit 隐式改变这条基线。
 
-下一轮 serial8250 runtime RX/TTY/FIFO 建模必须先固定对象职责和协作关系，再定义 event/action。对象边界如下：
+下一轮 serial8250 runtime RX/TTY/FIFO 建模必须先固定对象职责和协作关系，再定义 transition/action。对象边界如下：
 `Uart8250Port` 继续只表示 platform probe 得到的 8250 资源实例，拥有 MMIO resource、`mapbase/membase`、
 `reg_shift/reg_io_width`、clock、line 和 logical IRQ 绑定；它不得承担 console handoff、TTY buffering、PLIC
 claim/complete 或用户态 TTY 语义。`Serial8250RuntimePort` 表示覆盖在 `Uart8250Port` 之上的 8250 运行期行为层，
@@ -639,16 +639,16 @@ TX queue 区分开；普通 TTY write 接入可以后置。
 `printk -> ConsoleRegistry -> Serial8250Console -> Serial8250RuntimePort.StartTx -> UART THRI interrupt ->
 IrqAction -> Serial8250RuntimePort.HandleInterrupt -> TransmitChars`。RX 输入协作链是
 `UART RX byte -> PLIC source -> root INTC -> PLIC claim -> IrqAction.Dispatch -> Serial8250RuntimePort.HandleInterrupt ->
-ReceiveChars -> TtyFlipBuffer.Insert/Push`。下一步定义 event/action 时必须以这些边界为前提；测试对象只能观察这些
+ReceiveChars -> TtyFlipBuffer.Insert/Push`。下一步定义 transition/action 时必须以这些边界为前提；测试对象只能观察这些
 生产链路的结果，不能代替链路中的 IRQ、handler 或 backend 调用。
 
-serial8250 runtime RX/TTY/FIFO 的 event/action 边界应按以下接口收敛。`TtyPort.Event::Setup` 建立最小
-`uart_state/tty_port` 容器，驱动 `TtyFlipBuffer.Event::Setup` 和 `TtyXmitFifo.Event::Setup`，并依赖
+serial8250 runtime RX/TTY/FIFO 的 transition/action 边界应按以下接口收敛。`TtyPort.Transition::Setup` 建立最小
+`uart_state/tty_port` 容器，驱动 `TtyFlipBuffer.Transition::Setup` 和 `TtyXmitFifo.Transition::Setup`，并依赖
 `TtyLineDisciplineRegistry.Prepared`，但不访问 UART MMIO、不注册 IRQ handler、不改变 console route。
-`TtyPort.Event::Enable` 对应最小 `uart_startup()` 边界，只把 TTY port 标记 initialized，并允许后续
-`Serial8250RuntimePort.Event::Enable` 打开 RX runtime；完整 open/close、termios、hangup 和用户态 file 语义后续展开。
-`Serial8250RuntimePort.Event::Setup` 依赖 `Uart8250Port.Ready`、`IrqAction.Ready` 和 `TtyPort.Ready`，只建立
-IER/IIR/LSR、port lock/irqsave、TTY buffer 绑定和 handler shape；`Serial8250RuntimePort.Event::Enable` 依赖
+`TtyPort.Transition::Enable` 对应最小 `uart_startup()` 边界，只把 TTY port 标记 initialized，并允许后续
+`Serial8250RuntimePort.Transition::Enable` 打开 RX runtime；完整 open/close、termios、hangup 和用户态 file 语义后续展开。
+`Serial8250RuntimePort.Transition::Setup` 依赖 `Uart8250Port.Ready`、`IrqAction.Ready` 和 `TtyPort.Ready`，只建立
+IER/IIR/LSR、port lock/irqsave、TTY buffer 绑定和 handler shape；`Serial8250RuntimePort.Transition::Enable` 依赖
 `UartExternalIrqEnable.Ready` 和 `TtyPort.Online`，打开 RDI/RLSI，并保持 THRI 为 demand-driven。
 
 运行期 action 只能经生产链路调用。`Serial8250RuntimePort.Action::HandleInterrupt(cause)` 必须要求 hardirq
@@ -697,7 +697,7 @@ pending/enable 状态。smoke 可以作为生产侧 stimulus，但也不能直�
 为避免 handoff 后重复输出，`ConsoleRegistry` 必须区分 printk 记录保存和 legacy boot-console drain cursor。
 注册 preferred serial8250 console 时，应先把 boot console pending records 按 boot console 路径 flush 并推进 cursor；
 serial8250 route 成功写出的记录必须标记为已交付，不得再被 `earlycon::drain_printk()` 经 SBI 重放。默认
-handoff 完成后，EarlyCon 后端必须进入 offline/disabled 状态；后续直接推进 earlycon event/action 或调用
+handoff 完成后，EarlyCon 后端必须进入 offline/disabled 状态；后续直接推进 earlycon transition/action 或调用
 `earlycon::drain_printk()` 属于非法 backend 访问，必须触发 panic 或等价 contract violation，不能静默 no-op。
 EarlyCon 下线应输出 `EarlyCon.Offline` 或等价 trace，和 `Serial8250Console.Online`、`BootConsole.Offline`
 一起展示完整交接。
@@ -726,7 +726,7 @@ checkpoint KUnit/action-level 测试，app-level smoke 保留对公开 printk �
 
 初始 rootfs mount 不属于本阶段首次创建：它已经在 `ProcessPreparePhase` 的 `VfsCore.Setup` /
 `RamFsType.Setup` / `VfsCore.MountInitialRamFsRoot` 中对应 Linux `vfs_caches_init()->mnt_init()->init_mount_tree()` 完成。
-本阶段的 `RootFS.Event::Enable` 表示 `prepare_namespace()` 中从初始 ramfs/rootfs backing 走向真实 root device 的
+本阶段的 `RootFS.Transition::Enable` 表示 `prepare_namespace()` 中从初始 ramfs/rootfs backing 走向真实 root device 的
 enable 位置；`RootFS` 是顶层根文件系统视图对象，不得把 enable 位置再建成独立对象。本轮必须记录
 prepare_namespace 的输入条件：初始 ramfs rootfs 已存在，`FsStruct.root/pwd` 仍指向初始 root，`DevFs` 已挂载，
 `BlockDeviceRegistry` 已有默认块设备作为 root device candidate；随后基于该默认块设备建立
@@ -741,7 +741,7 @@ trimmed/no-op，不得单独升格为 `KUnitPhase`。
 
 `InitramfsSyncDeferred`、`RootfsConsoleDeferred` 和 `IntegrityKeysDeferred` 在本轮仍只保留
 deferred/position-preserved 语义。其中 `init_eaccess(ramdisk_execute_command)` 是 required checkpoint，必须记录当前
-Linux-like 路径要求进入 `prepare_namespace()` 分支。`RootFS.Event::Enable` 必须真实更新 VFS mount 与 `FsStruct.root/pwd`
+Linux-like 路径要求进入 `prepare_namespace()` 分支。`RootFS.Transition::Enable` 必须真实更新 VFS mount 与 `FsStruct.root/pwd`
 事实，不得用单独测试 API 或 summary 伪造 `MS_MOVE` / `chroot(".")` 已完成；
 root device candidate 只能来自已有 `BlockDeviceRegistry.default_device`，`/dev` 条件只能来自已有 `DevFs`，不得为了
 rootfs smoke 新增测试专用设备 API。当前不把 `DevFs` 偷偷 remount 到新的 ext2 root 下；相关行为留给后续 mount
@@ -827,7 +827,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 
 ## `make verify` obligation 分类
 
-`80966ec` 曾暴露 `13 obligation / 2 deferred`。这些条目不能作为实现可忽略的提示；处理原则是：实现某个对象事件前，必须先通过“推导义务门禁”。能由模型、推导工具、链接脚本、ISA、固件规范或已证明前序事实推出的，应优先补齐推导证明；只能由外部交付保证支撑的，应明确作为 source assumption，并在后续对象事件中尽快转化为运行期检查；无法归类的应作为规格缺口或显式 deferred。
+`80966ec` 曾暴露 `13 obligation / 2 deferred`。这些条目不能作为实现可忽略的提示；处理原则是：实现某个对象 transition前，必须先通过“推导义务门禁”。能由模型、推导工具、链接脚本、ISA、固件规范或已证明前序事实推出的，应优先补齐推导证明；只能由外部交付保证支撑的，应明确作为 source assumption，并在后续对象 transition中尽快转化为运行期检查；无法归类的应作为规格缺口或显式 deferred。
 
 当前已补齐 Lds、OpenSBI DTB handoff 和 BootCPU 前序事实的推导规则，`make verify` 报告为 `0 obligation / 3 deferred`。后续若再次出现 obligation，应先回到本节分类处理，不得直接继续实现。
 
@@ -889,7 +889,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 
 smoke payload 用于覆盖 QEMU 运行期可观察行为，以及规格推导不能单独替代的实现效果，例如控制台输出、格式化输出、内存分配动作、FDT/DeviceTree 公开查询接口、资源摘要和 payload 关机路径。若某个性质仅仅是在重复对象状态、生命周期顺序、内部副本一致性或谓词不变量，并且已经能由 `make verify` 的规格推导闭合，则不应为它新增 smoke 用例。
 
-实现也不应为了 smoke 暴露原本不需要公开的内部状态查询接口。若某个对象同时有可验证的不变量和用户可观察行为，smoke 应测试后者；前者保留在模型谓词、推导验证和对象事件推进检查中。例如 `CommandLine` 的 raw/saved/static 文本视图一致性属于规格和实现状态推进约束，不需要单独增加只读取内部状态的 smoke case。
+实现也不应为了 smoke 暴露原本不需要公开的内部状态查询接口。若某个对象同时有可验证的不变量和用户可观察行为，smoke 应测试后者；前者保留在模型谓词、推导验证和对象 transition推进检查中。例如 `CommandLine` 的 raw/saved/static 文本视图一致性属于规格和实现状态推进约束，不需要单独增加只读取内部状态的 smoke case。
 
 `TaskCreationCore.copy_process()` 与 `CurrentRunQueueRef`/`RunQueue.EnqueueTask`/`RunQueue.PickNextTask` 属于 `ObjectApiBehavior` smoke：它们验证正式对象 API/action 契约，可以构造局部 subject 对象，并只读 live context 满足依赖前置条件。这类用例默认只注册到 app smoke，不加入 checkpoint KUnit smoke 列表。实现不得为它们增加 `test_*` 被测入口；若缺少可测边界，应补正式对象 API，并让生产路径与 smoke 路径共享同一入口。
 
@@ -1038,7 +1038,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - `KernelInitTask.Enable` 是否通过 `WakeUpNewTaskContext.guard` 绑定的 `RawSpinLock.LockIrqSave/UnlockIrqRestore` 进入和退出资源独占上下文，并只在该 guard 保护区内驱动受保护资源对象的 action/event。
 - checkpoint、trace 注释、smoke case 和 KUnit case 是否仍引用旧的 `BootCPU` 或裸 `boot_cpu_current_is_idle_task(...)` 事实。
 
-若上述检查表明正式对象、event/action、trace checkpoint 或上下文边界发生变化，应只重新生成受影响部分，不得全局重排无关实现。预计受影响的实现范围包括 CPU/current 相关对象、CPU-local interrupt 控制对象、task preemption 控制对象、raw spinlock wrapper、`rest_init` 中 `KernelInitTask.Enable` 路径、trace 输出以及 smoke/KUnit 测试注册。
+若上述检查表明正式对象、transition/action、trace checkpoint 或上下文边界发生变化，应只重新生成受影响部分，不得全局重排无关实现。预计受影响的实现范围包括 CPU/current 相关对象、CPU-local interrupt 控制对象、task preemption 控制对象、raw spinlock wrapper、`rest_init` 中 `KernelInitTask.Enable` 路径、trace 输出以及 smoke/KUnit 测试注册。
 
 有实现变化时，验证至少覆盖：
 
@@ -1106,7 +1106,7 @@ make verify
 - `MemBlock`
 - `InitMM`
 - `EarlyIoremap`
-- `CorePreparePhase` 编排的最小对象骨架：`DeviceTree`、`Zones`、`ResourceTree`、`CacheBlockInfo`、`CpuCapabilities`、`CommandLine`、`PerCpuStorage`、`CpuHotplugState`、`Params`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`。这些对象不是 `CorePreparePhase` 的下级对象；phase 只驱动其生命周期事件。`SavedCommandLine` / `StaticCommandLine` 是 `CommandLine` 的子视图对象，不是独立顶级对象；`EarlyParam` / `BootParam` / `PayloadParam` 是 `Params` 的子对象。`PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable` 是 `PerCpuStorage` 的子对象；first chunk 的 unit 个数和 offset table 边界必须基于 `CpuGroup` 的 possible CPU 集合，而不是 online CPU 集合。
+- `CorePreparePhase` 编排的最小对象骨架：`DeviceTree`、`Zones`、`ResourceTree`、`CacheBlockInfo`、`CpuCapabilities`、`CommandLine`、`PerCpuStorage`、`CpuHotplugState`、`Params`、`BootParam`、`PayloadParam`、`Randomness`、`ExceptionTable`。这些对象不是 `CorePreparePhase` 的下级对象；phase 只驱动其生命周期 transition。`SavedCommandLine` / `StaticCommandLine` 是 `CommandLine` 的子视图对象，不是独立顶级对象；`EarlyParam` / `BootParam` / `PayloadParam` 是 `Params` 的子对象。`PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable` 是 `PerCpuStorage` 的子对象；first chunk 的 unit 个数和 offset table 边界必须基于 `CpuGroup` 的 possible CPU 集合，而不是 online CPU 集合。
 
 `Randomness.preset()` 对应 `random_init_early(command_line)` 的早期语义。实现应建立 early seed material，并至少混入 `StaticCommandLine`；具体 mix/hash 算法不由 coding 规格限定。Linux 主线直接调用内部 `_mix_pool_bytes()`，不经过带 `input_pool.lock` 的 `mix_pool_bytes()`，因此实现不得为 `Randomness.preset()` 无条件生成 input-pool spinlock guard。当前 RISC-V64 最小实现允许记录 arch entropy 为 0，且 `Randomness.Prepared` 不得暴露正式随机数接口或表示完整 RNG ready。`crng_ready()` / `trust_cpu` 条件路径可能进入 `crng_reseed()` 或 `_credit_init_bits()`，并使用 `base_crng.lock` 的 `spin_lock_irqsave()` / `spin_unlock_irqrestore()`；当前最小实现可保持该条件路径 deferred，若后续实现则必须通过既有 `RawSpinLock` irqsave guard 协议表达。
 
@@ -1639,16 +1639,16 @@ smoke 可覆盖两个用户可观察 action：`SchedClock.read()` 至少能返�
 - `EarlyVm`
 - `SwapperVm`
 
-第一轮不得把现有 boot page table 代码简单改名为多个模型事件。每次页表切换必须显式处理 RISC-V64 所需的 `sfence.vma` 边界。
+第一轮不得把现有 boot page table 代码简单改名为多个模型 transition。每次页表切换必须显式处理 RISC-V64 所需的 `sfence.vma` 边界。
 
 ## checkpoint
 
-checkpoint 是对象事件和 Phase 边界的可配置观测/探针分发点，不是普通日志函数，也不是状态机推进的一部分。第一轮预留 checkpoint hook 接口，但不要求实现完整状态差分输出。默认 hook 必须为空实现；trace、test、probe、verify、stop-at-checkpoint 或状态差分采集等具体 handler，都必须通过编译期配置启用，不得依赖运行期动态注册来改变 checkpoint 语义。
+checkpoint 是对象 transition和 Phase 边界的可配置观测/探针分发点，不是普通日志函数，也不是状态机推进的一部分。第一轮预留 checkpoint hook 接口，但不要求实现完整状态差分输出。默认 hook 必须为空实现；trace、test、probe、verify、stop-at-checkpoint 或状态差分采集等具体 handler，都必须通过编译期配置启用，不得依赖运行期动态注册来改变 checkpoint 语义。
 
 checkpoint handler 必须遵守以下约束：
 
 - 不得推进对象或 Phase 状态，不得调用 `Lifecycle::transition`、`Lifecycle::adopt_transition`、`phases::state::mark` 或 `phases::state::adopt`。
-- 不得把自身行为作为模型事件成功的前置条件；对象事件的 `ensures` 只能来自对象事件实现本身，不能来自可选 handler 的副作用。
+- 不得把自身行为作为模型 transition成功的前置条件；对象 transition的 `ensures` 只能来自对象 transition实现本身，不能来自可选 handler 的副作用。
 - 默认只能观察只读上下文。handler 输入应优先是 `Checkpoint` 加 `&Context` 或更窄的只读 `CheckpointContext<'_>`；不得默认暴露 `&mut Context`。
 - 若某个 checkpoint probe 必须调用会改变对象内部数据的功能 API，例如在 `MemBlock.Online` 后、`MemBlock.Disable` 前测试 `alloc_phys()`，必须通过该 checkpoint 专属的显式 probe capability 授权。该 capability 只能覆盖被测试 API 的最小能力，仍不得推进 lifecycle 或 Phase 状态。
 - handler 可以失败并停机，也可以主动停机。建议 outcome 至少区分 `Continue`、`FailAndShutdown` 和 `StopAndShutdown`：前者继续启动，第二类表示 probe/verify 失败，第三类表示达到逐级构建或逐级验证目标后主动结束。

@@ -122,10 +122,10 @@ class ModelBuilderTests(unittest.TestCase):
             """
             type RawSpinLock {
                 processes {
-                    Event::LockIrqSave {
+                    Transition::LockIrqSave {
                     }
 
-                    Event::UnlockIrqRestore {
+                    Transition::UnlockIrqRestore {
                     }
                 }
             }
@@ -145,11 +145,11 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Ready;
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                             within WakeContext {
                                 entered_by {
-                                    TaskPiLock.Event::LockIrqSave;
+                                    TaskPiLock.Transition::LockIrqSave;
                                 }
 
                                 drives {
@@ -158,7 +158,7 @@ class ModelBuilderTests(unittest.TestCase):
                                 }
 
                                 exited_by {
-                                    TaskPiLock.Event::UnlockIrqRestore;
+                                    TaskPiLock.Transition::UnlockIrqRestore;
                                 }
                             }
                         }
@@ -189,10 +189,10 @@ class ModelBuilderTests(unittest.TestCase):
             """
             type RawSpinLock {
                 processes {
-                    Event::LockIrqSave {
+                    Transition::LockIrqSave {
                     }
 
-                    Event::UnlockIrqRestore {
+                    Transition::UnlockIrqRestore {
                     }
                 }
             }
@@ -204,11 +204,11 @@ class ModelBuilderTests(unittest.TestCase):
                     lock_ref: TaskPiLock;
 
                     entered_by {
-                        TaskPiLock.Event::LockIrqSave;
+                        TaskPiLock.Transition::LockIrqSave;
                     }
 
                     exited_by {
-                        TaskPiLock.Event::UnlockIrqRestore;
+                        TaskPiLock.Transition::UnlockIrqRestore;
                     }
                 }
 
@@ -229,8 +229,8 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Ready;
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                             within WakeContext {
                                 drives {
                                     A.Action::SetTaskState(TaskRuntimeState::Running);
@@ -268,7 +268,7 @@ class ModelBuilderTests(unittest.TestCase):
             """
             type RawSpinLock {
                 processes {
-                    Event::LockIrqSave {
+                    Transition::LockIrqSave {
                     }
                 }
             }
@@ -280,7 +280,7 @@ class ModelBuilderTests(unittest.TestCase):
                     lock_ref: TaskPiLock;
 
                     entered_by {
-                        TaskPiLock.Event::LockIrqSave;
+                        TaskPiLock.Transition::LockIrqSave;
                     }
                 }
 
@@ -293,11 +293,11 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Ready;
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                             within WakeContext {
                                 entered_by {
-                                    TaskPiLock.Event::LockIrqSave;
+                                    TaskPiLock.Transition::LockIrqSave;
                                 }
                             }
                         }
@@ -326,7 +326,7 @@ class ModelBuilderTests(unittest.TestCase):
             """
             type RawSpinLock {
                 processes {
-                    Event::LockIrqSave {
+                    Transition::LockIrqSave {
                     }
                 }
             }
@@ -346,11 +346,11 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Ready;
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                             within WakeContext {
                                 entered_by {
-                                    OtherLock.Event::LockIrqSave;
+                                    OtherLock.Transition::LockIrqSave;
                                 }
                             }
                         }
@@ -368,7 +368,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(
             any(
-                "lock event reference outside exclusive_context lock_ref" in diag.message
+                "lock transition reference outside exclusive_context lock_ref" in diag.message
                 and diag.severity is Severity.ERROR
                 for diag in result.errors
             )
@@ -391,8 +391,8 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Ready;
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                             within WakeContext {
                                 drives {
                                     B.Action::Touch(task: A);
@@ -433,10 +433,10 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                B.Event::Missing;
+                                B.Transition::Missing;
                             }
                         }
                     }
@@ -459,7 +459,7 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertTrue(
-            any("unknown event reference: B.Event::Missing" in diag.message for diag in result.errors)
+            any("unknown transition reference: B.Transition::Missing" in diag.message for diag in result.errors)
         )
 
     def test_reports_unknown_state_reference(self) -> None:
@@ -495,22 +495,22 @@ class ModelBuilderTests(unittest.TestCase):
             )
         )
 
-    def test_rejects_duplicate_object_event_names_across_states(self) -> None:
+    def test_rejects_duplicate_object_transition_names_across_states(self) -> None:
         document = parse_text(
             """
             object A: T {
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Enable -> State::Ready {
+                    transitions {
+                        on Transition::Enable -> State::Ready {
                         }
                     }
                 }
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                         }
                     }
                 }
@@ -526,7 +526,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(
             any(
-                "duplicate object event declaration: A.Event::Enable" in diag.message
+                "duplicate object transition declaration: A.Transition::Enable" in diag.message
                 and diag.severity is Severity.ERROR
                 for diag in result.errors
             )
@@ -539,8 +539,8 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Reserved;
 
                 state State::Reserved {
-                    events {
-                        on Event::Activate -> State::Done {
+                    transitions {
+                        on Transition::Activate -> State::Done {
                         }
                     }
                 }
@@ -562,10 +562,10 @@ class ModelBuilderTests(unittest.TestCase):
             any("A.State::Reserved" in message for message in messages)
         )
         self.assertTrue(
-            any("A.Event::Activate" in message for message in messages)
+            any("A.Transition::Activate" in message for message in messages)
         )
         self.assertTrue(
-            any("A.Event::Activate -> State::Done" in message for message in messages)
+            any("A.Transition::Activate -> State::Done" in message for message in messages)
         )
 
     def test_accepts_disable_and_offline_lifecycle_names_and_transitions(self) -> None:
@@ -575,29 +575,29 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                         }
                     }
                 }
 
                 state State::Ready {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                         }
                     }
                 }
 
                 state State::Online {
-                    events {
-                        on Event::Disable -> State::Offline {
+                    transitions {
+                        on Transition::Disable -> State::Offline {
                         }
                     }
                 }
 
                 state State::Offline {
-                    events {
-                        on Event::Cleanup -> State::Destroyed {
+                    transitions {
+                        on Transition::Cleanup -> State::Destroyed {
                         }
                     }
                 }
@@ -622,11 +622,11 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                A.Event::Setup;
-                                A.Event::Setup;
+                                A.Transition::Setup;
+                                A.Transition::Setup;
                             }
                         }
                     }
@@ -640,8 +640,8 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             within GuardedContext only-once {
                             }
                         }
@@ -675,10 +675,10 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                A.Event::Setup;
+                                A.Transition::Setup;
                             }
                         }
                     }
@@ -692,20 +692,20 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Setup -> State::Ready {
+                    transitions {
+                        on Transition::Setup -> State::Ready {
                             drives {
-                                B.Event::Setup;
+                                B.Transition::Setup;
                             }
 
                             within GuardedContext {
                                 drives {
-                                    C.Event::Setup;
+                                    C.Transition::Setup;
                                 }
                             }
 
                             drives {
-                                D.Event::Setup;
+                                D.Transition::Setup;
                             }
                         }
                     }
@@ -717,19 +717,19 @@ class ModelBuilderTests(unittest.TestCase):
 
             object B: T {
                 initial_state: State::Base;
-                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Base { transitions { on Transition::Setup -> State::Ready {} } }
                 state State::Ready {}
             }
 
             object C: T {
                 initial_state: State::Base;
-                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Base { transitions { on Transition::Setup -> State::Ready {} } }
                 state State::Ready {}
             }
 
             object D: T {
                 initial_state: State::Base;
-                state State::Base { events { on Event::Setup -> State::Ready {} } }
+                state State::Base { transitions { on Transition::Setup -> State::Ready {} } }
                 state State::Ready {}
             }
             """
@@ -741,7 +741,7 @@ class ModelBuilderTests(unittest.TestCase):
 
         self.assertTrue(derive_result.ok)
         order = [
-            (transition.object_name, transition.event_name)
+            (transition.object_name, transition.transition_name)
             for transition in derive_result.transitions
         ]
         self.assertEqual(
@@ -762,8 +762,8 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Enable -> State::Online {
+                    transitions {
+                        on Transition::Enable -> State::Online {
                         }
                     }
                 }
@@ -779,7 +779,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(
             any(
-                "invalid lifecycle transition: A.State::Base.Event::Enable -> State::Online"
+                "invalid lifecycle transition: A.State::Base.Transition::Enable -> State::Online"
                 in diag.message
                 and diag.severity is Severity.ERROR
                 for diag in result.errors
@@ -793,8 +793,8 @@ class ModelBuilderTests(unittest.TestCase):
                 initial_state: State::Base;
 
                 state State::Base {
-                    events {
-                        on Event::Disable -> State::Offline {
+                    transitions {
+                        on Transition::Disable -> State::Offline {
                         }
                     }
                 }
@@ -810,7 +810,7 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertTrue(
             any(
-                "invalid lifecycle transition: A.State::Base.Event::Disable -> State::Offline"
+                "invalid lifecycle transition: A.State::Base.Transition::Disable -> State::Offline"
                 in diag.message
                 and diag.severity is Severity.ERROR
                 for diag in result.errors

@@ -24,21 +24,21 @@ object StartupTimeline: TimelineObject {
      * Base 表示顶层启动阶段对象已经进入模型空间，但尚未推进其子阶段。
      */
     state State::Base {
-        events {
+        transitions {
             /*
              * Setup 先推进准备期边界，再推进当前已经展开的引导期、中断期、单核多任务期和多核运行期阶段，最后
              * 进入 selected payload 的不返回交接边界。
              */
-            on Event::Setup -> State::Ready {
+            on Transition::Setup -> State::Ready {
                 drives {
-                    PreparePhase.Event::Setup;
-                    PreparePhase.Event::Enable;
-                    BootPhase.Event::Setup;
-                    InterruptPhase.Event::Setup;
-                    UpMultitaskPhase.Event::Setup;
-                    SmpRuntimePhase.Event::Setup;
-                    PayloadPhase.Event::Setup;
-                    PayloadPhase.Event::Enable;
+                    PreparePhase.Transition::Setup;
+                    PreparePhase.Transition::Enable;
+                    BootPhase.Transition::Setup;
+                    InterruptPhase.Transition::Setup;
+                    UpMultitaskPhase.Transition::Setup;
+                    SmpRuntimePhase.Transition::Setup;
+                    PayloadPhase.Transition::Setup;
+                    PayloadPhase.Transition::Enable;
                 }
             }
         }

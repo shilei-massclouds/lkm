@@ -23,16 +23,16 @@ object UpMultitaskPhase: PhaseObject {
     parent: StartupTimeline;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     InterruptPhase.state == State::Ready;
                     ProcessPreparePhase.state == State::Ready;
                 }
 
                 drives {
-                    RestInitPhase.Event::Preset;
-                    RestInitPhase.Event::Setup;
+                    RestInitPhase.Transition::Preset;
+                    RestInitPhase.Transition::Setup;
                 }
             }
         }

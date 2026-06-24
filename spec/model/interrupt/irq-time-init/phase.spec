@@ -16,8 +16,8 @@ object IrqController: InterruptObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DeviceTree.state == State::Ready;
                     PageAllocator.state == State::Ready;
@@ -54,8 +54,8 @@ object IrqChipInitTable: InterruptObject {
     parent: IrqController;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     IrqController.state == State::Ready;
                     DeviceTree.state == State::Ready;
@@ -81,8 +81,8 @@ object IrqChipInitTable: InterruptObject {
             of_irq_init_parent_first_order_ready(IrqChipInitTable, DeviceTree);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PlicDriver.state == State::Prepared;
                     RiscvIntc.state == State::Ready;
@@ -95,7 +95,7 @@ object IrqChipInitTable: InterruptObject {
                 }
 
                 drives {
-                    Plic.Event::Preset;
+                    Plic.Transition::Preset;
                 }
 
                 ensures {
@@ -157,8 +157,8 @@ object RiscvIntc: InterruptObject {
     }
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     IrqController.state == State::Ready;
                     DeviceTree.state == State::Ready;
@@ -221,8 +221,8 @@ object IrqDispatchTree: InterruptObject {
     parent: IrqController;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     IrqController.state == State::Ready;
                     RiscvIntc.state == State::Ready;
@@ -542,8 +542,8 @@ object IrqHandlerRegistry: InterruptObject {
     }
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     IrqController.state == State::Ready;
                     PlicIrqDomain.state == State::Ready;
@@ -591,8 +591,8 @@ object IrqAction: InterruptObject {
     parent: IrqHandlerRegistry;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     IrqHandlerRegistry.state == State::Ready;
                     PlicIrqMapping.state == State::Ready;
@@ -646,8 +646,8 @@ object UartIrqChainKunitObserver: InterruptObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Plic.state == State::Ready;
                     PlicIrqDomain.state == State::Ready;
@@ -720,8 +720,8 @@ object UartExternalIrqEnable: InterruptObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Plic.state == State::Ready;
                     RiscvIntc.state == State::Ready;
@@ -786,8 +786,8 @@ object UartInterruptChainProbe: InterruptObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     UartExternalIrqEnable.state == State::Ready;
                     Plic.state == State::Ready;
@@ -863,8 +863,8 @@ object PlicIrqDomain: IrqDomain {
     parent: Plic;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Plic.state == State::Ready;
                     IrqController.state == State::Ready;
@@ -886,8 +886,8 @@ object PlicIrqDomain: IrqDomain {
             plic_irq_domain_translate_ops_ready(PlicIrqDomain);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Plic.state == State::Ready;
                     IrqController.state == State::Ready;
@@ -941,8 +941,8 @@ object PlicIrqMapping: InterruptObject {
     parent: PlicIrqDomain;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PlicIrqDomain.state == State::Ready;
                     Plic.state == State::Ready;
@@ -1000,15 +1000,15 @@ object Tick: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                 }
 
                 drives {
-                    TickBroadcast.Event::Preset;
+                    TickBroadcast.Transition::Preset;
                 }
 
                 ensures {
@@ -1027,14 +1027,14 @@ object Tick: KernelObject {
             tick_broadcast_prepared(TickBroadcast);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     RiscvTimerProvider.state == State::Ready;
                 }
 
                 drives {
-                    TickBroadcast.Event::Setup;
+                    TickBroadcast.Transition::Setup;
                 }
 
                 ensures {
@@ -1059,8 +1059,8 @@ object TickBroadcast: KernelObject {
     parent: Tick;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     tick_broadcast_masks_ready(TickBroadcast);
                 }
@@ -1073,8 +1073,8 @@ object TickBroadcast: KernelObject {
             tick_broadcast_masks_ready(TickBroadcast);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     HrtimerCore.state == State::Ready;
                     RiscvTimerProvider.state == State::Ready;
@@ -1103,8 +1103,8 @@ object TimerWheel: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PerCpuStorage.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -1139,8 +1139,8 @@ object HrtimerCore: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PerCpuStorage.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -1172,16 +1172,16 @@ object Timekeeper: KernelObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Tick.state == State::Prepared;
                     StaticBranch.state == State::Ready;
                 }
 
                 drives {
-                    ClocksourceCore.Event::Preset;
-                    JiffiesClocksource.Event::Preset;
+                    ClocksourceCore.Transition::Preset;
+                    JiffiesClocksource.Transition::Preset;
                 }
 
                 ensures {
@@ -1213,8 +1213,8 @@ object ClocksourceCore: KernelObject {
     parent: Timekeeper;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     clocksource_core_registry_ready(ClocksourceCore);
                     clocksource_watchdog_deferred(ClocksourceCore);
@@ -1236,8 +1236,8 @@ object JiffiesClocksource: KernelObject {
     parent: Timekeeper;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 ensures {
                     jiffies_clocksource_available(JiffiesClocksource);
                 }
@@ -1259,8 +1259,8 @@ object RiscvTimerProvider: HardwareObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DeviceTree.state == State::Ready;
                     IrqController.state == State::Ready;
@@ -1307,8 +1307,8 @@ object SbiIpi: HardwareObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SBI.state == State::Ready;
                     RiscvIntc.state == State::Ready;
@@ -1344,8 +1344,8 @@ object IpiMux: InterruptObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SbiIpi.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
@@ -1384,8 +1384,8 @@ object PlicDriver: InterruptObject {
     parent: IrqChipInitTable;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     IrqChipInitTable.state == State::Prepared;
                     DeviceTree.state == State::Ready;
@@ -1436,8 +1436,8 @@ object Plic: InterruptObject {
     parent: RiscvIntc;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Ready {
+        transitions {
+            on Transition::Preset -> State::Ready {
                 depends_on {
                     RiscvIntc.state == State::Ready;
                     IrqChipInitTable.state == State::Prepared;
@@ -1527,8 +1527,8 @@ object SmpCallFunction: TaskObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     IpiMux.state == State::Ready;
                     CpuGroup.state == State::Ready;
@@ -1564,8 +1564,8 @@ object IrqTimeInitPhase: PhaseObject {
     parent: InterruptPhase;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     SchedInitPhase.state == State::Ready;
                     Scheduler.state == State::Online;
@@ -1577,27 +1577,27 @@ object IrqTimeInitPhase: PhaseObject {
                 }
 
                 drives {
-                    IrqController.Event::Setup;
-                    RiscvIntc.Event::Setup;
-                    IrqChipInitTable.Event::Preset;
-                    PlicDriver.Event::Preset;
-                    IrqChipInitTable.Event::Setup;
-                    PlicIrqDomain.Event::Preset;
-                    PlicIrqDomain.Event::Setup;
-                    IrqHandlerRegistry.Event::Setup;
-                    IrqDispatchTree.Event::Setup;
-                    Tick.Event::Preset;
-                    TimerWheel.Event::Setup;
-                    HrtimerCore.Event::Setup;
-                    Timekeeper.Event::Setup;
-                    RiscvTimerProvider.Event::Setup;
-                    Tick.Event::Setup;
-                    Softirq.Event::Setup;
-                    Randomness.Event::Setup;
-                    SbiIpi.Event::Setup;
-                    IpiMux.Event::Setup;
-                    SmpCallFunction.Event::Setup;
-                    InterruptStream.Event::Enable;
+                    IrqController.Transition::Setup;
+                    RiscvIntc.Transition::Setup;
+                    IrqChipInitTable.Transition::Preset;
+                    PlicDriver.Transition::Preset;
+                    IrqChipInitTable.Transition::Setup;
+                    PlicIrqDomain.Transition::Preset;
+                    PlicIrqDomain.Transition::Setup;
+                    IrqHandlerRegistry.Transition::Setup;
+                    IrqDispatchTree.Transition::Setup;
+                    Tick.Transition::Preset;
+                    TimerWheel.Transition::Setup;
+                    HrtimerCore.Transition::Setup;
+                    Timekeeper.Transition::Setup;
+                    RiscvTimerProvider.Transition::Setup;
+                    Tick.Transition::Setup;
+                    Softirq.Transition::Setup;
+                    Randomness.Transition::Setup;
+                    SbiIpi.Transition::Setup;
+                    IpiMux.Transition::Setup;
+                    SmpCallFunction.Transition::Setup;
+                    InterruptStream.Transition::Enable;
                 }
 
                 ensures {

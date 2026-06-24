@@ -63,7 +63,7 @@ type BuddyFreePageSetType {
          * pageblock-aligned buddy blocks and linked through the block head's
          * PageMetadata.
          */
-        Event::Setup {
+        Transition::Setup {
             state_effect: StateEffect::Always;
             depends_on {
                 MemBlock.state == State::Online;
@@ -310,10 +310,10 @@ predicate dynamic_container_runtime_sync_inherits_global_allocator_contract<T, A
 
 type ZonelistUpdateSeqType: MemoryObject {
     processes {
-        Event::WriteSeqLockIrqSave(local_interrupt: LocalInterruptControl) {
+        Transition::WriteSeqLockIrqSave(local_interrupt: LocalInterruptControl) {
             state_effect: StateEffect::Conditional;
             drives {
-                local_interrupt.Event::SaveAndDisable;
+                local_interrupt.Transition::SaveAndDisable;
             }
             ensures {
                 zonelist_update_seq_write_irqsave_entered(self, local_interrupt);
@@ -322,10 +322,10 @@ type ZonelistUpdateSeqType: MemoryObject {
             }
         }
 
-        Event::WriteSeqUnlockIrqRestore(local_interrupt: LocalInterruptControl) {
+        Transition::WriteSeqUnlockIrqRestore(local_interrupt: LocalInterruptControl) {
             state_effect: StateEffect::Conditional;
             drives {
-                local_interrupt.Event::Restore;
+                local_interrupt.Transition::Restore;
             }
             ensures {
                 zonelist_update_seq_write_irqrestore_exited(self, local_interrupt);
@@ -337,14 +337,14 @@ type ZonelistUpdateSeqType: MemoryObject {
 
 type PrintkDeferredSectionType: MemoryObject {
     processes {
-        Event::Enter {
+        Transition::Enter {
             state_effect: StateEffect::Conditional;
             ensures {
                 printk_deferred_section_entered(self);
             }
         }
 
-        Event::Exit {
+        Transition::Exit {
             state_effect: StateEffect::Conditional;
             ensures {
                 printk_deferred_section_exited(self);

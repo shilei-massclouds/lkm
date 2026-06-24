@@ -12,8 +12,8 @@ object Ns16550aPlatformDriverStorage: DeviceDriverStorage {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     device_driver_static_storage_ready(Ns16550aPlatformDriverStorage);
                     device_driver_storage_ready(Ns16550aPlatformDriverStorage);
@@ -44,8 +44,8 @@ object PlatformIrqResource: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     DeviceTree.state == State::Ready;
                     PlicIrqDomain.state == State::Ready;
@@ -71,8 +71,8 @@ object PlatformIrqResource: ResourceObject {
             platform_irq_resource_specifier_cells_ready(PlatformIrqResource);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PlicIrqDomain.state == State::Ready;
                     PlatformIrqResource.state == State::Prepared;
@@ -81,7 +81,7 @@ object PlatformIrqResource: ResourceObject {
                 drives {
                     PlicIrqDomain.Action::TranslateIrqSpecifier(PlatformIrqResourceRef::Ns16550aSerial);
                     PlicIrqDomain.Action::MapHwirq(HwirqRef::PlicUart0, PlicIrqMappingRef::Uart0);
-                    PlicIrqMapping.Event::Setup;
+                    PlicIrqMapping.Transition::Setup;
                 }
 
                 ensures {
@@ -126,8 +126,8 @@ object Ns16550aPlatformDriver: PlatformDriverType {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     Ns16550aPlatformDriverStorage.state == State::Ready;
                 }
@@ -187,8 +187,8 @@ object Ns16550aPlatformDriver: PlatformDriverType {
             initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::Ns16550aPlatformDriver);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     InitcallTable.state == State::Ready;
                     PlatformBus.state == State::Ready;
@@ -202,13 +202,13 @@ object Ns16550aPlatformDriver: PlatformDriverType {
                         device: DeviceRef::Ns16550aSerial,
                         mapping: IoMemoryMappingRef::Ns16550aSerial
                     );
-                    PlatformIrqResource.Event::Preset;
-                    PlatformIrqResource.Event::Setup;
-                    IrqAction.Event::Setup;
-                    Uart8250Port.Event::Setup;
-                    Serial8250Console.Event::Setup;
-                    ConsoleRegistry.Event::Setup;
-                    ConsoleHandoff.Event::Setup;
+                    PlatformIrqResource.Transition::Preset;
+                    PlatformIrqResource.Transition::Setup;
+                    IrqAction.Transition::Setup;
+                    Uart8250Port.Transition::Setup;
+                    Serial8250Console.Transition::Setup;
+                    ConsoleRegistry.Transition::Setup;
+                    ConsoleHandoff.Transition::Setup;
                 }
 
                 ensures {

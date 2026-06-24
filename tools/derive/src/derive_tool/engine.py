@@ -10,28 +10,28 @@ from common.derive_types import (
     DerivationResult,
     DerivationStatus,
     DerivationTraceNode,
-    EventTransition,
+    TransitionCommit,
 )
-from common.model_types import EventDef, ObjectDef, ObjectModel, StateDef
+from common.model_types import TransitionDef, ObjectDef, ObjectModel, StateDef
 from common.spec_ast import BodyMember, Block, SourceSpan, WithinDecl
 
 
 _TARGET_RE = re.compile(
-    r"\A([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)\Z"
+    r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\Z"
 )
 _STATE_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\Z"
 )
-_EVENT_EXPR_RE = re.compile(
-    r"\A([A-Z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+_TRANSITION_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _ACTION_EXPR_RE = re.compile(
     r"\A([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
-_CHILD_EVENT_EXPR_RE = re.compile(
-    r"\A([A-Z][A-Za-z0-9_]*)\.([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+_CHILD_TRANSITION_EXPR_RE = re.compile(
+    r"\A([A-Z][A-Za-z0-9_]*)\.([a-z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _CHILD_ACTION_EXPR_RE = re.compile(
@@ -43,15 +43,15 @@ _ACTION_BIND_RE = re.compile(
     r"([A-Za-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
-_REF_EVENT_EXPR_RE = re.compile(
-    r"\A([a-z][A-Za-z0-9_]*)\.Event::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
+_REF_TRANSITION_EXPR_RE = re.compile(
+    r"\A([a-z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
 _REF_ACTION_EXPR_RE = re.compile(
     r"\A([a-z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)(?:\s*\((.*)\))?\Z",
     re.S,
 )
-_TYPE_EVENT_RE_TEMPLATE = r"\bEvent::{}\b"
+_TYPE_TRANSITION_RE_TEMPLATE = r"\bTransition::{}\b"
 _REF_TARGET_PROCESS_TYPES = {
     "RunQueueRef": "RunQueue",
     "TaskRef": "Task",
@@ -436,7 +436,7 @@ _DERIVED_PROVIDERS = {
     "disjoint": "fdt_candidate",
     "kernel_fpu_disabled": "isa_spec_and_boot_code",
     "kernel_vector_disabled": "isa_spec_and_boot_code",
-    "early_vm_translation_sync_complete": "event_ensures",
+    "early_vm_translation_sync_complete": "transition_ensures",
     "fixmap_adjacent_to_linear_map": "config_source_candidate",
     "fixmap_slot_accessible": "prior_derivation_facts",
     "fixmap_slot_mapping_ready": "boot_code_candidate",
@@ -446,12 +446,12 @@ _DERIVED_PROVIDERS = {
     "firmware_dtb_blob_complete_at_kernel_entry": "opensbi_firmware",
     "firmware_dtb_blob_accessible_at_kernel_entry": "opensbi_firmware",
     "interrupt_concurrency_closed": "prior_derivation_facts",
-    "cpu_hotplug_ap_sync_state_online": "event_ensures",
+    "cpu_hotplug_ap_sync_state_online": "transition_ensures",
     "kernel_image_accessible": "prior_derivation_facts",
     "kernel_image_mapping_ready": "boot_code_candidate",
     "kernel_cmdline_ready": "fdt_candidate",
-    "early_boot_irqs_disabled_false": "event_ensures",
-    "early_boot_irqs_disabled_true": "event_ensures",
+    "early_boot_irqs_disabled_false": "transition_ensures",
+    "early_boot_irqs_disabled_true": "transition_ensures",
     "early_dtb_parse_ready": "fdt_candidate",
     "early_ioremap_slots_ready": "boot_code_candidate",
     "early_params_dispatched": "boot_code_candidate",
@@ -468,7 +468,7 @@ _DERIVED_PROVIDERS = {
     "memblock_reserved_ranges_ready": "boot_code_candidate",
     "memblock_resize_allowed": "boot_code_candidate",
     "printk_buffer_flushed_to_earlycon": "boot_code_candidate",
-    "printk_buffer_setup_local_irq_save_restore_used": "event_ensures",
+    "printk_buffer_setup_local_irq_save_restore_used": "transition_ensures",
     "printk_buffer_setup_prepared_dynamic_buffer": "boot_code_candidate",
     "printk_buffer_setup_switched_active_buffer": "boot_code_candidate",
     "printk_buffer_setup_copied_remaining_records": "boot_code_candidate",
@@ -478,22 +478,22 @@ _DERIVED_PROVIDERS = {
     "phys_to_virt_transition_completed": "prior_derivation_facts",
     "primary_hart_only_at_kernel_entry": "opensbi_firmware",
     "primary_hart_sie_clear_at_kernel_entry": "opensbi_firmware",
-    "resource_tree_write_lock_guard_used": "event_ensures",
+    "resource_tree_write_lock_guard_used": "transition_ensures",
     "slot_contains": "prior_derivation_facts",
     "sbi_hsm_available": "riscv_sbi_spec",
     "sbi_capability_view_ready": "riscv_sbi_and_firmware",
     "supervisor_interrupts_disabled": "isa_spec_and_boot_code",
-    "smp_concurrency_closed": "event_ensures",
-    "smp_concurrency_open": "event_ensures",
-    "static_branch_cpu_hotplug_read_guard_used": "event_ensures",
-    "static_branch_jump_label_mutex_guard_used": "event_ensures",
-    "static_branch_text_patch_sync_deferred": "event_ensures",
+    "smp_concurrency_closed": "transition_ensures",
+    "smp_concurrency_open": "transition_ensures",
+    "static_branch_cpu_hotplug_read_guard_used": "transition_ensures",
+    "static_branch_jump_label_mutex_guard_used": "transition_ensures",
+    "static_branch_text_patch_sync_deferred": "transition_ensures",
     "swapper_vm_current": "prior_derivation_facts",
     "swapper_vm_mappings_ready": "boot_code_candidate",
-    "swapper_vm_translation_sync_complete": "event_ensures",
+    "swapper_vm_translation_sync_complete": "transition_ensures",
     "task_concurrency_closed": "prior_derivation_facts",
     "temporary_fixmap_page_table_slots_clean": "boot_code_candidate",
-    "trampoline_vm_translation_sync_ready_before_satp": "event_ensures",
+    "trampoline_vm_translation_sync_ready_before_satp": "transition_ensures",
     "ordered_booting_enabled": "opensbi_firmware",
     "platform_hart_id_valid": "fdt_cpu_description",
     "trampoline_mapping_ready": "boot_code_candidate",
@@ -729,7 +729,7 @@ _RELATION_PROOFS = {
 
 
 def derive(model: ObjectModel, target: str = DEFAULT_TARGET) -> DerivationResult:
-    """Derive a target event from the model's declared initial states."""
+    """Derive a target transition from the model's declared initial states."""
 
     return _Deriver(model, target).run()
 
@@ -807,27 +807,27 @@ class _Deriver:
         self.target = target
         self.states: dict[str, str] = {}
         self.records: list[DerivationRecord] = []
-        self.transitions: list[EventTransition] = []
+        self.transitions: list[TransitionCommit] = []
         self.trace: list[DerivationTraceNode] = []
         self.trace_stack: list[_TraceFrame] = []
         self.stack: list[tuple[str, str]] = []
         self.process_stack: list[tuple[str, str, str, str]] = []
-        self.state_validation_events: dict[tuple[str, str], EventDef] = {}
+        self.state_validation_transitions: dict[tuple[str, str], TransitionDef] = {}
         self.validated_states: set[tuple[str, str]] = set()
         self.proved_expressions: set[str] = set()
 
     def run(self) -> DerivationResult:
-        target_object, target_event = self._parse_target()
-        target_state = self._target_state(target_object, target_event)
+        target_object, target_transition = self._parse_target()
+        target_state = self._target_state(target_object, target_transition)
         self._initialize_states()
 
-        if target_object is not None and target_event is not None:
-            self._derive_event(target_object, target_event)
+        if target_object is not None and target_transition is not None:
+            self._derive_transition(target_object, target_transition)
 
         return DerivationResult(
             target=self.target,
             target_object=target_object,
-            target_event=target_event,
+            target_transition=target_transition,
             target_state=target_state,
             states=dict(self.states),
             records=tuple(self.records),
@@ -840,7 +840,7 @@ class _Deriver:
         if match is None:
             self._record(
                 DerivationStatus.CONTRADICTION,
-                f"invalid target event: {self.target}",
+                f"invalid target transition: {self.target}",
             )
             return None, None
         return match.group(1), match.group(2)
@@ -863,26 +863,26 @@ class _Deriver:
                 self._validate_state(obj.name, obj.initial_state)
 
     def _target_state(
-        self, object_name: str | None, event_name: str | None
+        self, object_name: str | None, transition_name: str | None
     ) -> str | None:
-        if object_name is None or event_name is None:
+        if object_name is None or transition_name is None:
             return None
         obj = self.model.objects.get(object_name)
         if obj is None:
             return None
-        event = _find_event(obj, event_name)
-        if event is None:
+        transition = _find_transition(obj, transition_name)
+        if transition is None:
             return None
-        return event.target_state
+        return transition.target_state
 
-    def _derive_event(self, object_name: str, event_name: str) -> bool:
-        key = (object_name, event_name)
+    def _derive_transition(self, object_name: str, transition_name: str) -> bool:
+        key = (object_name, transition_name)
         if key in self.stack:
             self._record(
                 DerivationStatus.BLOCKED,
-                f"recursive event cycle: {_event_label(object_name, event_name)}",
+                f"recursive transition cycle: {_transition_label(object_name, transition_name)}",
                 object_name=object_name,
-                event_name=event_name,
+                transition_name=transition_name,
             )
             return False
 
@@ -890,54 +890,54 @@ class _Deriver:
         if obj is None:
             self._record(
                 DerivationStatus.CONTRADICTION,
-                f"unknown object in target event: {object_name}",
+                f"unknown object in target transition: {object_name}",
                 object_name=object_name,
-                event_name=event_name,
+                transition_name=transition_name,
             )
             return False
 
         current_state = self.states.get(object_name)
-        event = self._event_from_current_state(obj, event_name, current_state)
-        if event is None:
+        transition = self._transition_from_current_state(obj, transition_name, current_state)
+        if transition is None:
             return False
 
         trace_frame = _TraceFrame(
             object_name=object_name,
-            event_name=event_name,
-            source_state=event.source_state,
-            target_state=event.target_state,
-            span=event.decl.span,
+            transition_name=transition_name,
+            source_state=transition.source_state,
+            target_state=transition.target_state,
+            span=transition.decl.span,
         )
         self.trace_stack.append(trace_frame)
         self.stack.append(key)
         exit_status = DerivationStatus.BLOCKED
         exit_message: str | None = None
         try:
-            self._collect_deferred(event.decl.deferred, event, "event")
-            if not self._verify_blocks(event.decl.depends_on, "depends_on", event=event):
+            self._collect_deferred(transition.decl.deferred, transition, "transition")
+            if not self._verify_blocks(transition.decl.depends_on, "depends_on", transition=transition):
                 exit_message = "depends_on blocked"
                 return False
 
             bindings: dict[str, dict[str, str]] = {}
-            event_result_hints = _block_entries(event.decl.ensures)
+            transition_result_hints = _block_entries(transition.decl.ensures)
             if not self._execute_body_members(
-                _ordered_body_members(event.decl),
-                event,
+                _ordered_body_members(transition.decl),
+                transition,
                 bindings=bindings,
-                result_hints=event_result_hints,
+                result_hints=transition_result_hints,
             ):
-                exit_message = "event body blocked"
+                exit_message = "transition body blocked"
                 return False
 
-            if self.states.get(object_name) != event.source_state:
+            if self.states.get(object_name) != transition.source_state:
                 self._record(
                     DerivationStatus.CONTRADICTION,
-                    "event source state changed during drives: "
+                    "transition source state changed during drives: "
                     f"{object_name}.state is State::{self.states.get(object_name)}, "
-                    f"expected State::{event.source_state}",
-                    event.decl.span,
+                    f"expected State::{transition.source_state}",
+                    transition.decl.span,
                     object_name=object_name,
-                    event_name=event_name,
+                    transition_name=transition_name,
                 )
                 exit_status = DerivationStatus.CONTRADICTION
                 exit_message = (
@@ -945,25 +945,25 @@ class _Deriver:
                 )
                 return False
 
-            self.states[object_name] = event.target_state
+            self.states[object_name] = transition.target_state
             self.transitions.append(
-                EventTransition(
+                TransitionCommit(
                     object_name=object_name,
-                    event_name=event_name,
-                    source_state=event.source_state,
-                    target_state=event.target_state,
+                    transition_name=transition_name,
+                    source_state=transition.source_state,
+                    target_state=transition.target_state,
                 )
             )
             self._record(
                 DerivationStatus.PROVED,
-                f"transition: {_event_label(object_name, event_name)} "
-                f"State::{event.source_state} -> State::{event.target_state}",
-                event.decl.span,
+                f"transition: {_transition_label(object_name, transition_name)} "
+                f"State::{transition.source_state} -> State::{transition.target_state}",
+                transition.decl.span,
                 object_name=object_name,
-                event_name=event_name,
-                state_name=event.target_state,
+                transition_name=transition_name,
+                state_name=transition.target_state,
             )
-            if self._validate_state(object_name, event.target_state, entered_by=event):
+            if self._validate_state(object_name, transition.target_state, entered_by=transition):
                 exit_status = DerivationStatus.PROVED
                 return True
             exit_message = "target state invariant blocked"
@@ -977,7 +977,7 @@ class _Deriver:
     def _drive_blocks(
         self,
         blocks: list[Block],
-        event: EventDef,
+        transition: TransitionDef,
         *,
         action_provider: str = "action_drive",
         bindings: dict[str, dict[str, str]] | None = None,
@@ -990,7 +990,7 @@ class _Deriver:
                 if not self._drive_entry(
                     entry,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                     process_parent=process_parent,
@@ -1003,7 +1003,7 @@ class _Deriver:
         self,
         entry: str,
         entry_span: SourceSpan,
-        event: EventDef,
+        transition: TransitionDef,
         *,
         action_provider: str,
         bindings: dict[str, dict[str, str]],
@@ -1065,8 +1065,8 @@ class _Deriver:
                 DerivationStatus.PROVED,
                 f"action result bound: {name}: {type_name} <- {object_name}.Action::{action_name}",
                 entry_span,
-                object_name=event.object_name,
-                event_name=event.name,
+                object_name=transition.object_name,
+                transition_name=transition.name,
                 expression=expression,
                 display_expression=display_expression if expression != display_expression else None,
                 source_kind="drives",
@@ -1088,7 +1088,7 @@ class _Deriver:
                     action_name,
                     canonical_args if args is not None else args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
@@ -1102,7 +1102,7 @@ class _Deriver:
                     action_name,
                     canonical_args if args is not None else args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                 )
@@ -1114,7 +1114,7 @@ class _Deriver:
                     action_name,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
@@ -1128,19 +1128,19 @@ class _Deriver:
                     action_name,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                 )
             return True
 
-        ref_event = _REF_EVENT_EXPR_RE.match(entry)
-        if ref_event is not None:
-            receiver_name, driven_event, args = ref_event.group(1, 2, 3)
+        ref_transition = _REF_TRANSITION_EXPR_RE.match(entry)
+        if ref_transition is not None:
+            receiver_name, driven_transition, args = ref_transition.group(1, 2, 3)
             receiver = bindings.get(receiver_name)
             receiver_type = receiver.get("type") if receiver is not None else None
             process_type = _ref_process_type(
-                self.model, receiver_type, "Event", driven_event
+                self.model, receiver_type, "Transition", driven_transition
             )
             if process_type is not None:
                 target_object = _ref_process_self_name(
@@ -1150,20 +1150,20 @@ class _Deriver:
                     self.model,
                     receiver_name,
                     receiver_type,
-                    "Event",
-                    driven_event,
+                    "Transition",
+                    driven_transition,
                     args,
                     entry,
                 )
                 display_expression = _process_call_expression(
-                    f"{receiver_name}.Event::{driven_event}", args
+                    f"{receiver_name}.Transition::{driven_transition}", args
                 )
                 self._record(
                     DerivationStatus.PROVED,
-                    f"ref type process committed: {receiver_name}.Event::{driven_event}",
+                    f"ref type process committed: {receiver_name}.Transition::{driven_transition}",
                     entry_span,
-                    object_name=event.object_name,
-                    event_name=event.name,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
                     expression=expression,
                     display_expression=display_expression if expression != display_expression else None,
                     source_kind="drives",
@@ -1178,11 +1178,11 @@ class _Deriver:
                 if not self._execute_type_process_drives(
                     process_type,
                     target_object or receiver_name,
-                    "Event",
-                    driven_event,
+                    "Transition",
+                    driven_transition,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
@@ -1192,28 +1192,28 @@ class _Deriver:
                 self._record_type_process_ensures(
                     process_type,
                     target_object or receiver_name,
-                    "Event",
-                    driven_event,
+                    "Transition",
+                    driven_transition,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                 )
                 return True
 
-        child_event = _CHILD_EVENT_EXPR_RE.match(entry)
-        if child_event is not None:
-            parent_name, child_name, driven_event, args = child_event.group(1, 2, 3, 4)
+        child_transition = _CHILD_TRANSITION_EXPR_RE.match(entry)
+        if child_transition is not None:
+            parent_name, child_name, driven_transition, args = child_transition.group(1, 2, 3, 4)
             child_type = _owned_child_type(self.model, parent_name, child_name)
             if child_type is None:
                 self._record(
                     DerivationStatus.BLOCKED,
-                    "unknown child event receiver: "
-                    f"{parent_name}.{child_name}.Event::{driven_event}",
+                    "unknown child transition receiver: "
+                    f"{parent_name}.{child_name}.Transition::{driven_transition}",
                     entry_span,
-                    object_name=event.object_name,
-                    event_name=event.name,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
                     expression=entry,
                 )
                 return False
@@ -1222,21 +1222,21 @@ class _Deriver:
             expression = _normalize_process_call(
                 self.model,
                 child_type,
-                f"{receiver}.Event::{driven_event}",
-                "Event",
-                driven_event,
+                f"{receiver}.Transition::{driven_transition}",
+                "Transition",
+                driven_transition,
                 args,
                 entry,
             )
             display_expression = _process_call_expression(
-                f"{receiver}.Event::{driven_event}", args
+                f"{receiver}.Transition::{driven_transition}", args
             )
             self._record(
                 DerivationStatus.PROVED,
-                f"child type process committed: {receiver}.Event::{driven_event}",
+                f"child type process committed: {receiver}.Transition::{driven_transition}",
                 entry_span,
-                object_name=event.object_name,
-                event_name=event.name,
+                object_name=transition.object_name,
+                transition_name=transition.name,
                 expression=expression,
                 display_expression=display_expression if expression != display_expression else None,
                 source_kind="drives",
@@ -1249,11 +1249,11 @@ class _Deriver:
             if not self._execute_type_process_drives(
                 child_type,
                 receiver,
-                "Event",
-                driven_event,
+                "Transition",
+                driven_transition,
                 args,
                 entry_span,
-                event,
+                transition,
                 action_provider=action_provider,
                 process_parent=parent_expression,
                 bindings=bindings,
@@ -1263,24 +1263,24 @@ class _Deriver:
             self._record_type_process_ensures(
                 child_type,
                 receiver,
-                "Event",
-                driven_event,
+                "Transition",
+                driven_transition,
                 args,
                 entry_span,
-                event,
+                transition,
                 action_provider=action_provider,
                 bindings=bindings,
             )
             return True
 
-        match = _EVENT_EXPR_RE.match(entry)
+        match = _TRANSITION_EXPR_RE.match(entry)
         if match is not None:
-            driven_object, driven_event, args = match.group(1, 2, 3)
+            driven_object, driven_transition, args = match.group(1, 2, 3)
             obj = self.model.objects.get(driven_object)
             receiver = _binding_or_ref_value(driven_object, bindings)
             receiver_type = receiver.get("type") if receiver is not None else None
             process_type = _ref_process_type(
-                self.model, receiver_type, "Event", driven_event
+                self.model, receiver_type, "Transition", driven_transition
             )
             if obj is None and process_type is not None:
                 target_object = _ref_process_self_name(
@@ -1290,20 +1290,20 @@ class _Deriver:
                     self.model,
                     driven_object,
                     receiver_type or "",
-                    "Event",
-                    driven_event,
+                    "Transition",
+                    driven_transition,
                     args,
                     entry,
                 )
                 display_expression = _process_call_expression(
-                    f"{driven_object}.Event::{driven_event}", args
+                    f"{driven_object}.Transition::{driven_transition}", args
                 )
                 self._record(
                     DerivationStatus.PROVED,
-                    f"ref type process committed: {driven_object}.Event::{driven_event}",
+                    f"ref type process committed: {driven_object}.Transition::{driven_transition}",
                     entry_span,
-                    object_name=event.object_name,
-                    event_name=event.name,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
                     expression=expression,
                     display_expression=display_expression if expression != display_expression else None,
                     source_kind="drives",
@@ -1318,11 +1318,11 @@ class _Deriver:
                 if not self._execute_type_process_drives(
                     process_type,
                     target_object or driven_object,
-                    "Event",
-                    driven_event,
+                    "Transition",
+                    driven_transition,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
@@ -1332,34 +1332,34 @@ class _Deriver:
                 self._record_type_process_ensures(
                     process_type,
                     target_object or driven_object,
-                    "Event",
-                    driven_event,
+                    "Transition",
+                    driven_transition,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                 )
                 return True
-            if obj is not None and _find_event(obj, driven_event) is None:
-                if _type_declares_event(self.model, obj, driven_event):
+            if obj is not None and _find_transition(obj, driven_transition) is None:
+                if _type_declares_transition(self.model, obj, driven_transition):
                     expression = _normalize_process_expression(
                         self.model,
                         driven_object,
-                        "Event",
-                        driven_event,
+                        "Transition",
+                        driven_transition,
                         args,
                         entry,
                     )
                     display_expression = _process_call_expression(
-                        f"{driven_object}.Event::{driven_event}", args
+                        f"{driven_object}.Transition::{driven_transition}", args
                     )
                     self._record(
                         DerivationStatus.PROVED,
-                        f"type process committed: {driven_object}.Event::{driven_event}",
+                        f"type process committed: {driven_object}.Transition::{driven_transition}",
                         entry_span,
-                        object_name=event.object_name,
-                        event_name=event.name,
+                        object_name=transition.object_name,
+                        transition_name=transition.name,
                         expression=expression,
                         display_expression=display_expression if expression != display_expression else None,
                         source_kind="drives",
@@ -1374,11 +1374,11 @@ class _Deriver:
                     if not self._execute_type_process_drives(
                         obj.kind,
                         driven_object,
-                        "Event",
-                        driven_event,
+                        "Transition",
+                        driven_transition,
                         args,
                         entry_span,
-                        event,
+                        transition,
                         action_provider=action_provider,
                         process_parent=parent_expression,
                         bindings=bindings,
@@ -1388,25 +1388,25 @@ class _Deriver:
                     self._record_type_process_ensures(
                         obj.kind,
                         driven_object,
-                        "Event",
-                        driven_event,
+                        "Transition",
+                        driven_transition,
                         args,
                         entry_span,
-                        event,
+                        transition,
                         action_provider=action_provider,
                         bindings=bindings,
                     )
                     return True
             else:
-                if self._derive_event(driven_object, driven_event):
+                if self._derive_transition(driven_object, driven_transition):
                     return True
             self._record(
                 DerivationStatus.BLOCKED,
-                "driven event blocked: "
-                f"{_event_label(driven_object, driven_event)}",
+                "driven transition blocked: "
+                f"{_transition_label(driven_object, driven_transition)}",
                 entry_span,
-                object_name=event.object_name,
-                event_name=event.name,
+                object_name=transition.object_name,
+                transition_name=transition.name,
                 expression=entry,
             )
             return False
@@ -1450,8 +1450,8 @@ class _Deriver:
                     DerivationStatus.PROVED,
                     f"ref action committed: {receiver_name}.Action::{action_name}",
                     entry_span,
-                    object_name=event.object_name,
-                    event_name=event.name,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
                     expression=expression,
                     display_expression=display_expression if expression != display_expression else None,
                     source_kind="drives",
@@ -1470,7 +1470,7 @@ class _Deriver:
                     action_name,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
@@ -1484,7 +1484,7 @@ class _Deriver:
                     action_name,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                 )
@@ -1500,8 +1500,8 @@ class _Deriver:
                     "unknown child action receiver: "
                     f"{parent_name}.{child_name}.Action::{action_name}",
                     entry_span,
-                    object_name=event.object_name,
-                    event_name=event.name,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
                     expression=entry,
                 )
                 return False
@@ -1523,8 +1523,8 @@ class _Deriver:
                 DerivationStatus.PROVED,
                 f"child action committed: {receiver}.Action::{action_name}",
                 entry_span,
-                object_name=event.object_name,
-                event_name=event.name,
+                object_name=transition.object_name,
+                transition_name=transition.name,
                 expression=expression,
                 display_expression=display_expression if expression != display_expression else None,
                 source_kind="drives",
@@ -1541,7 +1541,7 @@ class _Deriver:
                 action_name,
                 args,
                 entry_span,
-                event,
+                transition,
                 action_provider=action_provider,
                 process_parent=parent_expression,
                 bindings=bindings,
@@ -1555,7 +1555,7 @@ class _Deriver:
                 action_name,
                 args,
                 entry_span,
-                event,
+                transition,
                 action_provider=action_provider,
                 bindings=bindings,
             )
@@ -1600,8 +1600,8 @@ class _Deriver:
                     DerivationStatus.PROVED,
                     f"ref action committed: {object_name}.Action::{action_name}",
                     entry_span,
-                    object_name=event.object_name,
-                    event_name=event.name,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
                     expression=expression,
                     display_expression=display_expression if expression != display_expression else None,
                     source_kind="drives",
@@ -1620,7 +1620,7 @@ class _Deriver:
                     action_name,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
@@ -1634,7 +1634,7 @@ class _Deriver:
                     action_name,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                 )
@@ -1654,8 +1654,8 @@ class _Deriver:
                 DerivationStatus.PROVED,
                 f"action committed: {object_name}.Action::{action_name}",
                 entry_span,
-                object_name=event.object_name,
-                event_name=event.name,
+                object_name=transition.object_name,
+                transition_name=transition.name,
                 expression=expression,
                 display_expression=display_expression if expression != display_expression else None,
                 source_kind="drives",
@@ -1674,7 +1674,7 @@ class _Deriver:
                     action_name,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     process_parent=parent_expression,
                     bindings=bindings,
@@ -1688,7 +1688,7 @@ class _Deriver:
                     action_name,
                     args,
                     entry_span,
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                 )
@@ -1698,8 +1698,8 @@ class _Deriver:
             DerivationStatus.BLOCKED,
             f"cannot parse drives entry: {entry}",
             entry_span,
-            object_name=event.object_name,
-            event_name=event.name,
+            object_name=transition.object_name,
+            transition_name=transition.name,
             expression=entry,
         )
         return False
@@ -1712,7 +1712,7 @@ class _Deriver:
         process_name: str,
         args: str | None,
         span: SourceSpan,
-        event: EventDef,
+        transition: TransitionDef,
         *,
         action_provider: str,
         process_parent: str | None = None,
@@ -1726,8 +1726,8 @@ class _Deriver:
                 "recursive type process drives: "
                 f"{type_name}.{process_kind}::{process_name}",
                 span,
-                object_name=event.object_name,
-                event_name=event.name,
+                object_name=transition.object_name,
+                transition_name=transition.name,
             )
             return False
 
@@ -1807,7 +1807,7 @@ class _Deriver:
                             body_start_line=block.body_start_line,
                         ),
                     ),
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=drive_bindings,
                     process_parent=process_parent,
@@ -1818,7 +1818,7 @@ class _Deriver:
                 substituted_within = _substitute_within_bindings(within, replacements)
                 if not self._execute_within(
                     substituted_within,
-                    event,
+                    transition,
                     bindings=drive_bindings,
                     process_parent=process_parent,
                     result_hints=local_result_hints,
@@ -1831,7 +1831,7 @@ class _Deriver:
     def _execute_within(
         self,
         within,
-        event: EventDef,
+        transition: TransitionDef,
         *,
         bindings: dict[str, dict[str, str]] | None = None,
         process_parent: str | None = None,
@@ -1846,8 +1846,8 @@ class _Deriver:
                 DerivationStatus.CONTRADICTION,
                 f"unknown exclusive_context: {within.context}",
                 within.span,
-                object_name=event.object_name,
-                event_name=event.name,
+                object_name=transition.object_name,
+                transition_name=transition.name,
             )
             return False
 
@@ -1855,8 +1855,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"within entered: {within.context}",
             within.span,
-            object_name=event.object_name,
-            event_name=event.name,
+            object_name=transition.object_name,
+            transition_name=transition.name,
             expression=f"within {within.context}",
             source_kind="within",
             proof_class="exclusive_context",
@@ -1876,21 +1876,21 @@ class _Deriver:
 
         if not self._commit_within_boundary(
             entered_by,
-            event,
+            transition,
             source_kind="within_entered_by",
         ):
             return False
-        self._collect_deferred(within.deferred, event, "within")
+        self._collect_deferred(within.deferred, transition, "within")
         if not self._verify_blocks(
             within.depends_on,
             "within depends_on",
-            event=event,
+            transition=transition,
             bindings=bindings,
         ):
             return False
         if not self._execute_body_members(
             _ordered_body_members(within),
-            event,
+            transition,
             action_provider="within_context",
             bindings=bindings,
             process_parent=process_parent,
@@ -1900,7 +1900,7 @@ class _Deriver:
         if not self._prove_blocks(
             within.ensures,
             "within ensures",
-            event=event,
+            transition=transition,
             proof_class="exclusive_context_fact",
             proof_provider="within_ensures",
             bindings=bindings,
@@ -1908,7 +1908,7 @@ class _Deriver:
             return False
         if not self._commit_within_boundary(
             exited_by,
-            event,
+            transition,
             source_kind="within_exited_by",
         ):
             return False
@@ -1916,8 +1916,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"within exited: {within.context}",
             within.span,
-            object_name=event.object_name,
-            event_name=event.name,
+            object_name=transition.object_name,
+            transition_name=transition.name,
             expression=f"within {within.context} exited",
             source_kind="within",
             proof_class="exclusive_context",
@@ -1929,7 +1929,7 @@ class _Deriver:
     def _execute_body_members(
         self,
         members: list[BodyMember],
-        event: EventDef,
+        transition: TransitionDef,
         *,
         action_provider: str = "action_drive",
         bindings: dict[str, dict[str, str]],
@@ -1942,7 +1942,7 @@ class _Deriver:
                     continue
                 if not self._drive_blocks(
                     [member.block],
-                    event,
+                    transition,
                     action_provider=action_provider,
                     bindings=bindings,
                     process_parent=process_parent,
@@ -1955,7 +1955,7 @@ class _Deriver:
                 continue
             if not self._execute_within(
                 member.within,
-                event,
+                transition,
                 bindings=bindings,
                 process_parent=process_parent,
                 result_hints=result_hints,
@@ -1964,32 +1964,32 @@ class _Deriver:
         return True
 
     def _commit_within_boundary(
-        self, blocks: list[Block], event: EventDef, *, source_kind: str
+        self, blocks: list[Block], transition: TransitionDef, *, source_kind: str
     ) -> bool:
         for block in blocks:
             for entry, entry_span in block.entry_spans:
-                match = _EVENT_EXPR_RE.match(entry)
+                match = _TRANSITION_EXPR_RE.match(entry)
                 if match is None:
                     self._record(
                         DerivationStatus.BLOCKED,
                         f"cannot parse within boundary entry: {entry}",
                         entry_span,
-                        object_name=event.object_name,
-                        event_name=event.name,
+                        object_name=transition.object_name,
+                        transition_name=transition.name,
                         expression=entry,
                     )
                     return False
-                object_name, event_name = match.group(1), match.group(2)
+                object_name, transition_name = match.group(1), match.group(2)
                 self._record(
                     DerivationStatus.PROVED,
-                    f"within boundary committed: {object_name}.Event::{event_name}",
+                    f"within boundary committed: {object_name}.Transition::{transition_name}",
                     entry_span,
-                    object_name=event.object_name,
-                    event_name=event.name,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
                     expression=entry,
                     source_kind=source_kind,
                     predicate=None,
-                    proof_class="context_guard_event",
+                    proof_class="context_guard_transition",
                     proof_provider="guard",
                 )
         return True
@@ -1999,7 +1999,7 @@ class _Deriver:
         blocks: list[Block],
         kind: str,
         *,
-        event: EventDef,
+        transition: TransitionDef,
         proof_class: str,
         proof_provider: str,
         bindings: dict[str, dict[str, str]] | None = None,
@@ -2009,14 +2009,14 @@ class _Deriver:
             for entry, entry_span in block.entry_spans:
                 canonical_entry = _canonicalize_ref_aliases(entry, bindings)
                 classification = _classify_obligation(
-                    canonical_entry, kind, event.object_name
+                    canonical_entry, kind, transition.object_name
                 )
                 self._record(
                     DerivationStatus.PROVED,
                     f"{kind}: {entry}",
                     entry_span,
-                    object_name=event.object_name,
-                    event_name=event.name,
+                    object_name=transition.object_name,
+                    transition_name=transition.name,
                     expression=entry,
                     source_kind=kind,
                     predicate=classification["predicate"],
@@ -2033,7 +2033,7 @@ class _Deriver:
         process_name: str,
         args: str | None,
         span: SourceSpan,
-        event: EventDef,
+        transition: TransitionDef,
         *,
         action_provider: str,
         bindings: dict[str, dict[str, str]] | None = None,
@@ -2070,14 +2070,14 @@ class _Deriver:
         ):
             expression = _substitute_process_bindings(ensure, replacements)
             classification = _classify_obligation(
-                expression, "type process ensures", event.object_name
+                expression, "type process ensures", transition.object_name
             )
             self._record(
                 DerivationStatus.PROVED,
                 f"type process ensures: {expression}",
                 span,
-                object_name=event.object_name,
-                event_name=event.name,
+                object_name=transition.object_name,
+                transition_name=transition.name,
                 expression=expression,
                 source_kind="type_process_ensures",
                 predicate=classification["predicate"],
@@ -2086,16 +2086,16 @@ class _Deriver:
             )
 
 
-    def _event_from_current_state(
-        self, obj: ObjectDef, event_name: str, current_state: str | None
-    ) -> EventDef | None:
+    def _transition_from_current_state(
+        self, obj: ObjectDef, transition_name: str, current_state: str | None
+    ) -> TransitionDef | None:
         if current_state is None:
             self._record(
                 DerivationStatus.CONTRADICTION,
                 f"object has no current state: {obj.name}",
                 obj.decl.span,
                 object_name=obj.name,
-                event_name=event_name,
+                transition_name=transition_name,
             )
             return None
 
@@ -2106,42 +2106,42 @@ class _Deriver:
                 f"unknown current state: {obj.name}.State::{current_state}",
                 obj.decl.span,
                 object_name=obj.name,
-                event_name=event_name,
+                transition_name=transition_name,
                 state_name=current_state,
             )
             return None
 
-        event = state.events.get(event_name)
-        if event is not None:
-            return event
+        transition = state.transitions.get(transition_name)
+        if transition is not None:
+            return transition
 
-        other = _find_event(obj, event_name)
+        other = _find_transition(obj, transition_name)
         if other is None:
             self._record(
                 DerivationStatus.CONTRADICTION,
-                f"unknown event: {_event_label(obj.name, event_name)}",
+                f"unknown transition: {_transition_label(obj.name, transition_name)}",
                 obj.decl.span,
                 object_name=obj.name,
-                event_name=event_name,
+                transition_name=transition_name,
             )
         else:
             self._record(
                 DerivationStatus.BLOCKED,
-                f"event not enabled from State::{current_state}: "
-                f"{_event_label(obj.name, event_name)} requires State::{other.source_state}",
+                f"transition not enabled from State::{current_state}: "
+                f"{_transition_label(obj.name, transition_name)} requires State::{other.source_state}",
                 other.decl.span,
                 object_name=obj.name,
-                event_name=event_name,
+                transition_name=transition_name,
                 state_name=current_state,
             )
         return None
 
     def _validate_state(
-        self, object_name: str, state_name: str, entered_by: EventDef | None = None
+        self, object_name: str, state_name: str, entered_by: TransitionDef | None = None
     ) -> bool:
         key = (object_name, state_name)
         if entered_by is not None:
-            self.state_validation_events[key] = entered_by
+            self.state_validation_transitions[key] = entered_by
         if key in self.validated_states:
             return True
         self.validated_states.add(key)
@@ -2172,7 +2172,7 @@ class _Deriver:
             state.decl.invariants,
             "invariant",
             state=state,
-            entered_by=self.state_validation_events.get(key),
+            entered_by=self.state_validation_transitions.get(key),
         )
 
     def _verify_blocks(
@@ -2180,9 +2180,9 @@ class _Deriver:
         blocks: list[Block],
         kind: str,
         *,
-        event: EventDef | None = None,
+        transition: TransitionDef | None = None,
         state: StateDef | None = None,
-        entered_by: EventDef | None = None,
+        entered_by: TransitionDef | None = None,
         bindings: dict[str, dict[str, str]] | None = None,
     ) -> bool:
         bindings = bindings or {}
@@ -2193,84 +2193,84 @@ class _Deriver:
                 if _STATE_EXPR_RE.match(entry):
                     ok = (
                         self._verify_state_expression(
-                            entry, entry_span, kind, event, state
+                            entry, entry_span, kind, transition, state
                         )
                         and ok
                     )
-                elif self._try_prove_event_ensures(
+                elif self._try_prove_transition_ensures(
                     entry, entry_span, kind, state, entered_by
                 ):
                     continue
                 elif self._try_prove_boot_protocol_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_external_source_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_kernel_image_linker_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_platform_cpu_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_linear_map_layout_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_trampoline_map_layout_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_kernel_image_map_layout_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_fixmap_slot_layout_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_raw_dtb_memory_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_stack_layout_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_prior_fact(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif canonical_entry != entry and self._try_prove_prior_fact(
                     canonical_entry,
                     entry_span,
                     kind,
-                    event,
+                    transition,
                     state,
                     recorded_expression=entry,
                 ):
                     continue
                 elif self._try_prove_phase_context(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 elif self._try_prove_builtin_predicate(
-                    entry, entry_span, kind, event, state
+                    entry, entry_span, kind, transition, state
                 ):
                     continue
                 else:
-                    context_object = _context_object(event, state)
+                    context_object = _context_object(transition, state)
                     classification = _classify_obligation(entry, kind, context_object)
                     self._record(
                         DerivationStatus.OBLIGATION,
                         f"unresolved {kind}: {entry}",
                         entry_span,
                         object_name=context_object,
-                        event_name=event.name if event is not None else None,
+                        transition_name=transition.name if transition is not None else None,
                         state_name=state.name if state is not None else None,
                         expression=entry,
                         source_kind=kind,
@@ -2286,7 +2286,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         match = _STATE_EXPR_RE.match(expression)
@@ -2300,8 +2300,8 @@ class _Deriver:
                 DerivationStatus.PROVED,
                 f"{kind}: {expression}",
                 span,
-                object_name=_context_object(event, state),
-                event_name=event.name if event is not None else None,
+                object_name=_context_object(transition, state),
+                transition_name=transition.name if transition is not None else None,
                 state_name=state.name if state is not None else None,
                 expression=expression,
             )
@@ -2311,8 +2311,8 @@ class _Deriver:
             DerivationStatus.BLOCKED,
             f"{kind} requires {expression}, got State::{actual_state}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name if state is not None else None,
             expression=expression,
         )
@@ -2323,7 +2323,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         stripped = expression.strip()
@@ -2334,7 +2334,7 @@ class _Deriver:
                     expression,
                     span,
                     kind,
-                    event,
+                    transition,
                     state,
                     proof_class="object_attribute",
                     proof_provider="builtin",
@@ -2349,7 +2349,7 @@ class _Deriver:
                     expression,
                     span,
                     kind,
-                    event,
+                    transition,
                     state,
                     proof_class="config_structure",
                     proof_provider="builtin",
@@ -2364,7 +2364,7 @@ class _Deriver:
                     expression,
                     span,
                     kind,
-                    event,
+                    transition,
                     state,
                     proof_class="state_alias",
                     proof_provider="builtin",
@@ -2373,13 +2373,13 @@ class _Deriver:
 
         return False
 
-    def _try_prove_event_ensures(
+    def _try_prove_transition_ensures(
         self,
         expression: str,
         span: SourceSpan,
         kind: str,
         state: StateDef | None,
-        entered_by: EventDef | None,
+        entered_by: TransitionDef | None,
     ) -> bool:
         if kind != "invariant" or state is None or entered_by is None:
             return False
@@ -2399,13 +2399,13 @@ class _Deriver:
                 f"{kind}: {expression}",
                 span,
                 object_name=state.object_name,
-                event_name=entered_by.name,
+                transition_name=entered_by.name,
                 state_name=state.name,
                 expression=expression,
                 source_kind=kind,
                 predicate=classification["predicate"],
                 proof_class=classification["proof_class"],
-                proof_provider="event_ensures",
+                proof_provider="transition_ensures",
             )
             return True
         return False
@@ -2415,7 +2415,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if (
@@ -2434,8 +2434,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name,
             expression=expression,
             source_kind=kind,
@@ -2450,7 +2450,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if kind != "invariant" or state is None:
@@ -2469,8 +2469,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name,
             expression=expression,
             source_kind=kind,
@@ -2485,7 +2485,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if kind != "invariant" or state is None:
@@ -2503,8 +2503,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name,
             expression=expression,
             source_kind=kind,
@@ -2519,7 +2519,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if expression.strip() != "platform_hart_id_valid(BootArgs.boot_hartid)":
@@ -2532,8 +2532,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name if state is not None else None,
             expression=expression,
             source_kind=kind,
@@ -2548,7 +2548,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if kind != "invariant" or state is None:
@@ -2567,8 +2567,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name,
             expression=expression,
             source_kind=kind,
@@ -2583,7 +2583,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if kind != "invariant" or state is None:
@@ -2614,8 +2614,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name,
             expression=expression,
             source_kind=kind,
@@ -2630,7 +2630,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if expression.strip() != "valid_trampoline_map(TrampolineMap)":
@@ -2645,8 +2645,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name if state is not None else None,
             expression=expression,
             source_kind=kind,
@@ -2661,7 +2661,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if expression.strip() != "fits_in_kernel_image_map(KernelImage, KernelImageMap)":
@@ -2677,8 +2677,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name if state is not None else None,
             expression=expression,
             source_kind=kind,
@@ -2693,7 +2693,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if (
@@ -2711,8 +2711,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name if state is not None else None,
             expression=expression,
             source_kind=kind,
@@ -2727,7 +2727,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         stripped = expression.strip()
@@ -2770,8 +2770,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name if state is not None else None,
             expression=expression,
             source_kind=kind,
@@ -2786,7 +2786,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
         *,
         recorded_expression: str | None = None,
@@ -2799,8 +2799,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {recorded_expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name if state is not None else None,
             expression=recorded_expression,
             source_kind=kind,
@@ -2815,7 +2815,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
     ) -> bool:
         if (
@@ -2855,8 +2855,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name,
             expression=expression,
             source_kind=kind,
@@ -2871,7 +2871,7 @@ class _Deriver:
         expression: str,
         span: SourceSpan,
         kind: str,
-        event: EventDef | None,
+        transition: TransitionDef | None,
         state: StateDef | None,
         *,
         proof_class: str,
@@ -2881,8 +2881,8 @@ class _Deriver:
             DerivationStatus.PROVED,
             f"{kind}: {expression}",
             span,
-            object_name=_context_object(event, state),
-            event_name=event.name if event is not None else None,
+            object_name=_context_object(transition, state),
+            transition_name=transition.name if transition is not None else None,
             state_name=state.name if state is not None else None,
             expression=expression,
             source_kind=kind,
@@ -2908,7 +2908,7 @@ class _Deriver:
     def _collect_deferred(
         self,
         blocks: list[Block],
-        owner: EventDef | StateDef,
+        owner: TransitionDef | StateDef,
         kind: str,
     ) -> None:
         for block in blocks:
@@ -2923,7 +2923,7 @@ class _Deriver:
                     f"{kind} deferred: {_strip_quotes(entry)}",
                     entry_span,
                     object_name=owner.object_name,
-                    event_name=owner.name if isinstance(owner, EventDef) else None,
+                    transition_name=owner.name if isinstance(owner, TransitionDef) else None,
                     state_name=owner.name if isinstance(owner, StateDef) else None,
                     expression=entry,
                 )
@@ -2935,7 +2935,7 @@ class _Deriver:
         span: SourceSpan | None = None,
         *,
         object_name: str | None = None,
-        event_name: str | None = None,
+        transition_name: str | None = None,
         state_name: str | None = None,
         expression: str | None = None,
         source_kind: str | None = None,
@@ -2954,7 +2954,7 @@ class _Deriver:
                 message=message,
                 span=span,
                 object_name=object_name,
-                event_name=event_name,
+                transition_name=transition_name,
                 state_name=state_name,
                 expression=expression,
                 display_expression=display_expression,
@@ -2976,7 +2976,7 @@ class _Deriver:
                         message=f"derived alias: {alias}",
                         span=span,
                         object_name=object_name,
-                        event_name=event_name,
+                        transition_name=transition_name,
                         state_name=state_name,
                         expression=alias,
                         source_kind="derived_alias",
@@ -2994,7 +2994,7 @@ class _Deriver:
     ) -> None:
         node = DerivationTraceNode(
             object_name=frame.object_name,
-            event_name=frame.event_name,
+            transition_name=frame.transition_name,
             source_state=frame.source_state,
             target_state=frame.target_state,
             status=status,
@@ -3013,32 +3013,32 @@ class _TraceFrame:
         self,
         *,
         object_name: str,
-        event_name: str,
+        transition_name: str,
         source_state: str,
         target_state: str,
         span: SourceSpan,
     ) -> None:
         self.object_name = object_name
-        self.event_name = event_name
+        self.transition_name = transition_name
         self.source_state = source_state
         self.target_state = target_state
         self.span = span
         self.children: list[DerivationTraceNode] = []
 
 
-def _find_event(obj: ObjectDef, event_name: str) -> EventDef | None:
+def _find_transition(obj: ObjectDef, transition_name: str) -> TransitionDef | None:
     for state in obj.states.values():
-        event = state.events.get(event_name)
-        if event is not None:
-            return event
+        transition = state.transitions.get(transition_name)
+        if transition is not None:
+            return transition
     return None
 
 
-def _type_declares_event(model: ObjectModel, obj: ObjectDef, event_name: str) -> bool:
+def _type_declares_transition(model: ObjectModel, obj: ObjectDef, transition_name: str) -> bool:
     type_decl = model.types.get(obj.kind)
     if type_decl is None:
         return False
-    pattern = re.compile(_TYPE_EVENT_RE_TEMPLATE.format(re.escape(event_name)))
+    pattern = re.compile(_TYPE_TRANSITION_RE_TEMPLATE.format(re.escape(transition_name)))
     return any(pattern.search(block.body) for block in type_decl.blocks)
 
 
@@ -3978,16 +3978,16 @@ def _block_entries(blocks: list[Block]) -> tuple[str, ...]:
     return tuple(entry for block in blocks for entry in block.entries)
 
 
-def _context_object(event: EventDef | None, state: StateDef | None) -> str | None:
-    if event is not None:
-        return event.object_name
+def _context_object(transition: TransitionDef | None, state: StateDef | None) -> str | None:
+    if transition is not None:
+        return transition.object_name
     if state is not None:
         return state.object_name
     return None
 
 
-def _event_label(object_name: str, event_name: str) -> str:
-    return f"{object_name}.Event::{event_name}"
+def _transition_label(object_name: str, transition_name: str) -> str:
+    return f"{object_name}.Transition::{transition_name}"
 
 
 def _derived_alias(expression: str) -> str | None:
@@ -4294,7 +4294,7 @@ __all__ = [
     "DerivationResult",
     "DerivationStatus",
     "DerivationTraceNode",
-    "EventTransition",
+    "TransitionCommit",
     "derive",
     "render_derivation_text",
     "summarize_derivation",

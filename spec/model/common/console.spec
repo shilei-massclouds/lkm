@@ -429,8 +429,8 @@ object NonStdoutConsoleCandidate: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DeviceTree.state == State::Ready;
                 }
@@ -460,8 +460,8 @@ object BootConsole: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PrintkBuffer.state == State::Prepared;
                 }
@@ -480,8 +480,8 @@ object BootConsole: ConsoleObject {
             boot_console_printbuffer_flag_set(BootConsole);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     PrintkBuffer.state == State::Prepared;
                 }
@@ -504,8 +504,8 @@ object BootConsole: ConsoleObject {
             boot_console_write_routes_to_earlycon(BootConsole, EarlyCon);
         }
 
-        events {
-            on Event::Disable -> State::Offline {
+        transitions {
+            on Transition::Disable -> State::Offline {
                 depends_on {
                     ConsoleRegistry.state == State::Ready;
                     Serial8250Console.state == State::Ready;
@@ -534,8 +534,8 @@ object Uart8250Port: DeviceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     DeviceTree.state == State::Ready;
                     Ioremap.state == State::Ready;
@@ -673,8 +673,8 @@ object Serial8250RuntimePort: DeviceObject {
     }
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Uart8250Port.state == State::Ready;
                     IrqAction.state == State::Ready;
@@ -711,8 +711,8 @@ object Serial8250RuntimePort: DeviceObject {
             serial8250_runtime_port_handle_interrupt_requires_hardirq(Serial8250RuntimePort);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     Serial8250RuntimePort.state == State::Ready;
                     UartExternalIrqEnable.state == State::Ready;
@@ -753,16 +753,16 @@ object TtyPort: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Uart8250Port.state == State::Ready;
                     TtyLineDisciplineRegistry.state == State::Prepared;
                 }
 
                 drives {
-                    TtyFlipBuffer.Event::Setup;
-                    TtyXmitFifo.Event::Setup;
+                    TtyFlipBuffer.Transition::Setup;
+                    TtyXmitFifo.Transition::Setup;
                 }
 
                 ensures {
@@ -793,8 +793,8 @@ object TtyPort: ConsoleObject {
             tty_port_ready(TtyPort, Uart8250Port, TtyFlipBuffer, TtyXmitFifo);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     TtyPort.state == State::Ready;
                     TtyFlipBuffer.state == State::Ready;
@@ -855,8 +855,8 @@ object TtyFlipBuffer: ConsoleObject {
     }
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Uart8250Port.state == State::Ready;
                     TtyLineDisciplineRegistry.state == State::Prepared;
@@ -916,8 +916,8 @@ object TtyXmitFifo: ConsoleObject {
     }
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Uart8250Port.state == State::Ready;
                 }
@@ -952,8 +952,8 @@ object TtyXmitFifoProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     TtyPort.state == State::Online;
                     TtyXmitFifo.state == State::Ready;
@@ -1016,8 +1016,8 @@ object TtyWriteRuntimeTxProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     TtyXmitFifoProbe.state == State::Ready;
                     TtyPort.state == State::Online;
@@ -1109,8 +1109,8 @@ object TtyWriteBatchRuntimeTxProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     TtyWriteRuntimeTxProbe.state == State::Ready;
                     TtyPort.state == State::Online;
@@ -1233,8 +1233,8 @@ object Serial8250RxLoopbackProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Serial8250RuntimePort.state == State::Online;
                     UartExternalIrqEnable.state == State::Ready;
@@ -1308,8 +1308,8 @@ object Serial8250RxBatchLoopbackProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Serial8250RxLoopbackProbe.state == State::Ready;
                     Serial8250RuntimePort.state == State::Online;
@@ -1401,8 +1401,8 @@ object Serial8250RxKunitObserver: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Serial8250RxLoopbackProbe.state == State::Ready;
                     TtyFlipBuffer.state == State::Ready;
@@ -1453,8 +1453,8 @@ object Serial8250Console: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Uart8250Port.state == State::Ready;
                     Console.state == State::Prepared;
@@ -1496,8 +1496,8 @@ object Serial8250Console: ConsoleObject {
             serial8250_console_delivered_records_not_replayed_by_earlycon(Serial8250Console);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     UartInterruptChainProbe.state == State::Ready;
                 }
@@ -1535,8 +1535,8 @@ object Serial8250ConsoleBurstIrqTxProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Serial8250Console.state == State::Online;
                     UartExternalIrqEnable.state == State::Ready;
@@ -1644,8 +1644,8 @@ object Serial8250ConsoleLongIrqTxProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Serial8250ConsoleBurstIrqTxProbe.state == State::Ready;
                     Serial8250Console.state == State::Online;
@@ -1779,8 +1779,8 @@ object Serial8250ConsoleLongBurstIrqTxProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Serial8250ConsoleLongIrqTxProbe.state == State::Ready;
                     Serial8250Console.state == State::Online;
@@ -1919,8 +1919,8 @@ object Serial8250ConsoleTxQuiesceProbe: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     Serial8250ConsoleLongBurstIrqTxProbe.state == State::Ready;
                     Serial8250Console.state == State::Online;
@@ -1989,8 +1989,8 @@ object ConsoleRegistry: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootConsole.state == State::Online;
                     PrintkBuffer.state == State::Prepared;
@@ -2014,8 +2014,8 @@ object ConsoleRegistry: ConsoleObject {
             console_registry_printk_route_boot_console(ConsoleRegistry, BootConsole);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BootConsole.state == State::Online;
                     Serial8250Console.state == State::Ready;
@@ -2106,8 +2106,8 @@ object KeepBootconConsoleRegistry: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootConsole.state == State::Online;
                     PrintkBuffer.state == State::Prepared;
@@ -2131,8 +2131,8 @@ object KeepBootconConsoleRegistry: ConsoleObject {
             console_registry_printk_route_boot_console(KeepBootconConsoleRegistry, BootConsole);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     BootConsole.state == State::Online;
                     Serial8250Console.state == State::Ready;
@@ -2183,8 +2183,8 @@ object ConsoleHandoff: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ConsoleRegistry.state == State::Ready;
                     BootConsole.state == State::Online;
@@ -2193,8 +2193,8 @@ object ConsoleHandoff: ConsoleObject {
                 }
 
                 drives {
-                    BootConsole.Event::Disable;
-                    EarlyCon.Event::Disable;
+                    BootConsole.Transition::Disable;
+                    EarlyCon.Transition::Disable;
                 }
 
                 ensures {
@@ -2237,8 +2237,8 @@ object KeepBootconConsoleHandoff: ConsoleObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KeepBootconConsoleRegistry.state == State::Ready;
                     BootConsole.state == State::Online;

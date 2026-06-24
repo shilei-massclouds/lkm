@@ -194,8 +194,8 @@ object UserAddressSpace: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     SwapperVm.state == State::Online;
                     PageAllocator.state == State::Ready;
@@ -229,8 +229,8 @@ object UserAddressSpace: ResourceObject {
             swapper_vm_remains_kernel_shared_instance(SwapperVm);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ElfObject.state == State::Ready;
                     UserStack.state == State::Ready;
@@ -281,8 +281,8 @@ object UserAddressSpace: ResourceObject {
             elf_object_bss_zeroed(ElfObject);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     UserTrapFrame.state == State::Ready;
                     SwapperVm.state == State::Online;
@@ -350,8 +350,8 @@ object UserStack: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     UserAddressSpace.state == State::Prepared;
                     PageAllocator.state == State::Ready;
@@ -391,8 +391,8 @@ object ElfObject: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Preset -> State::Prepared {
+        transitions {
+            on Transition::Preset -> State::Prepared {
                 depends_on {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
@@ -426,8 +426,8 @@ object ElfObject: ResourceObject {
             elf_object_role_bound(self, ElfObjectRole::MainExecutable);
         }
 
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 ensures {
                     elf_object_program_headers_parsed(self);
                     elf_object_pt_load_segments_bound(self);
@@ -470,8 +470,8 @@ object ElfObject: ResourceObject {
             elf_object_no_separate_loader(self) || elf_object_interpreter_required(self);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     UserAddressSpace.state == State::Ready;
                     UserStack.state == State::Ready;
@@ -496,8 +496,8 @@ object UserTrapFrame: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     UserAddressSpace.state == State::Ready;
                     ElfObject.state == State::Ready;
@@ -537,8 +537,8 @@ object SyscallTable: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ConsoleRegistry.state == State::Ready;
                     SyscallException.state == State::Ready;
@@ -847,8 +847,8 @@ object UserInitProcess: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     KernelInitTask.state == State::Online;
                     UserAddressSpace.state == State::Online;
@@ -896,8 +896,8 @@ object UserInitProcess: ResourceObject {
             kernel_init_task_user_trap_frame_attached(KernelInitTask, UserTrapFrame);
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     UserTrapFrame.state == State::Ready;
                     SyscallTable.state == State::Ready;
@@ -980,8 +980,8 @@ object UserBootPayload: ResourceObject {
     initial_state: State::Base;
 
     state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
+        transitions {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     PayloadParam.state == State::Ready;
                     RootFS.state == State::Online;
@@ -1032,8 +1032,8 @@ object UserBootPayload: ResourceObject {
             }
         }
 
-        events {
-            on Event::Enable -> State::Online {
+        transitions {
+            on Transition::Enable -> State::Online {
                 depends_on {
                     PayloadParam.state == State::Ready;
                     RootFS.state == State::Online;
@@ -1046,21 +1046,21 @@ object UserBootPayload: ResourceObject {
 
                 drives {
                     VfsCore.Action::ReadPath(Path, FsStruct);
-                    ElfObject.Event::Preset;
-                    ElfObject.Event::Setup;
+                    ElfObject.Transition::Preset;
+                    ElfObject.Transition::Setup;
                     UserBootPayload.Action::TryCandidate(UserInitPathRef::DefaultInit);
-                    UserAddressSpace.Event::Preset;
-                    UserStack.Event::Setup;
-                    UserAddressSpace.Event::Setup;
-                    UserTrapFrame.Event::Setup;
-                    ElfObject.Event::Enable;
-                    UserAddressSpace.Event::Enable;
-                    SyscallException.Event::Setup;
-                    SyscallTable.Event::Setup;
-                    SyscallException.Event::Enable;
-                    FilesStruct.Event::Setup;
-                    UserInitProcess.Event::Setup;
-                    UserInitProcess.Event::Enable;
+                    UserAddressSpace.Transition::Preset;
+                    UserStack.Transition::Setup;
+                    UserAddressSpace.Transition::Setup;
+                    UserTrapFrame.Transition::Setup;
+                    ElfObject.Transition::Enable;
+                    UserAddressSpace.Transition::Enable;
+                    SyscallException.Transition::Setup;
+                    SyscallTable.Transition::Setup;
+                    SyscallException.Transition::Enable;
+                    FilesStruct.Transition::Setup;
+                    UserInitProcess.Transition::Setup;
+                    UserInitProcess.Transition::Enable;
                     UserInitProcess.Action::EnterUserMode;
                 }
 
