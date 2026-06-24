@@ -3,7 +3,7 @@ use super::{
     cpu_group::CpuGroup,
     exception_stream::ExceptionStream,
     init_task::InitTask,
-    mm_core::{KmallocCaches, MmStructCache, SlubAllocator},
+    mm_core::{KmallocCaches, MmStructCache, SlubSubsystem},
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
     state::{failed_condition, EventError, EventResult, Lifecycle, LifecycleEvent, State},
@@ -72,12 +72,12 @@ impl RootPidNamespace {
     pub fn setup(
         &mut self,
         cpu_group: &CpuGroup,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         kmalloc_caches: &KmallocCaches,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpu_group.state() != State::Ready
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || kmalloc_caches.state() != State::Ready
             || cpu_group.possible_cpu_count() == 0
             || PID_MAX_LIMIT >= PIDNS_ADDING
@@ -143,11 +143,11 @@ impl AnonVmaCore {
 
     pub fn setup(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         kmalloc_caches: &KmallocCaches,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || kmalloc_caches.state() != State::Ready
         {
             return self.failed_setup();
@@ -209,11 +209,11 @@ impl CredentialCore {
 
     pub fn preset(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         kmalloc_caches: &KmallocCaches,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || kmalloc_caches.state() != State::Ready
         {
             return self.failed_preset();
@@ -276,11 +276,11 @@ impl VectorContext {
     fn preset(
         &mut self,
         cpu_capabilities: &CpuCapabilities,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpu_capabilities.state() != State::Ready
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -332,11 +332,11 @@ impl UprobeCore {
     fn setup(
         &mut self,
         exception_stream: &ExceptionStream,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || exception_stream.state() != State::Ready
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -470,12 +470,12 @@ impl TaskCreationCore {
 
     pub fn preset(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         kmalloc_caches: &KmallocCaches,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || kmalloc_caches.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
         {
@@ -499,7 +499,7 @@ impl TaskCreationCore {
             || inputs.credential_core.state() != State::Prepared
             || inputs.cpu_group.state() != State::Ready
             || inputs.cpu_capabilities.state() != State::Ready
-            || inputs.slub_allocator.state() != State::Ready
+            || inputs.slub_subsystem.state() != State::Ready
             || inputs.init_task.state() != State::Online
             || inputs.exception_stream.state() != State::Ready
         {
@@ -507,9 +507,9 @@ impl TaskCreationCore {
         }
 
         self.vector_context
-            .preset(inputs.cpu_capabilities, inputs.slub_allocator)?;
+            .preset(inputs.cpu_capabilities, inputs.slub_subsystem)?;
         self.uprobe_core
-            .setup(inputs.exception_stream, inputs.slub_allocator)?;
+            .setup(inputs.exception_stream, inputs.slub_subsystem)?;
 
         self.task_struct_cache_ready = true;
         self.task_struct_cache_bytes = TASK_STRUCT_CACHE_BYTES;
@@ -661,7 +661,7 @@ pub struct TaskCreationSetup<'a> {
     pub credential_core: &'a CredentialCore,
     pub cpu_group: &'a CpuGroup,
     pub cpu_capabilities: &'a CpuCapabilities,
-    pub slub_allocator: &'a SlubAllocator,
+    pub slub_subsystem: &'a SlubSubsystem,
     pub init_task: &'a InitTask,
     pub exception_stream: &'a ExceptionStream,
 }
@@ -701,11 +701,11 @@ impl SignalCore {
 
     pub fn preset(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         kmalloc_caches: &KmallocCaches,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || kmalloc_caches.state() != State::Ready
         {
             return self.failed_preset();
@@ -767,11 +767,11 @@ impl TaskFileContext {
 
     pub fn preset(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         kmalloc_caches: &KmallocCaches,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || kmalloc_caches.state() != State::Ready
         {
             return self.failed_preset();
@@ -841,13 +841,13 @@ impl VmaCore {
         &mut self,
         mm_struct_cache: &MmStructCache,
         anon_vma_core: &AnonVmaCore,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || mm_struct_cache.state() != State::Ready
             || anon_vma_core.state() != State::Ready
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
         {
             return self.failed_preset();
@@ -904,11 +904,11 @@ impl NsProxy {
 
     pub fn preset(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         kmalloc_caches: &KmallocCaches,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || kmalloc_caches.state() != State::Ready
         {
             return self.failed_preset();
@@ -967,10 +967,10 @@ impl UtsNamespace {
         self.runtime_ops_deferred
     }
 
-    pub fn preset(&mut self, ns_proxy: &NsProxy, slub_allocator: &SlubAllocator) -> EventResult {
+    pub fn preset(&mut self, ns_proxy: &NsProxy, slub_subsystem: &SlubSubsystem) -> EventResult {
         if self.lifecycle.state() != State::Base
             || ns_proxy.state() != State::Prepared
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
         {
             return self.failed_preset();
         }
@@ -1038,11 +1038,11 @@ impl KeyringCore {
     pub fn setup(
         &mut self,
         credential_core: &CredentialCore,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || credential_core.state() != State::Prepared
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
         {
             return self.failed_setup();
         }
@@ -1118,13 +1118,13 @@ impl SecurityCore {
         &mut self,
         credential_core: &CredentialCore,
         keyring_core: &KeyringCore,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         static_branch: &StaticBranch,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || credential_core.state() != State::Prepared
             || keyring_core.state() != State::Ready
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || static_branch.state() != State::Ready
         {
             return self.failed_setup();

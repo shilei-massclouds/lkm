@@ -1,6 +1,6 @@
 use super::{
     cpu_group::CpuGroup,
-    mm_core::{PageAllocator, SlubAllocator},
+    mm_core::{PageAllocator, SlubSubsystem},
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -115,13 +115,13 @@ impl Workqueue {
     pub fn preset(
         &mut self,
         page_allocator: &PageAllocator,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         cpu_group: &CpuGroup,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || page_allocator.state() != State::Ready
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || cpu_group.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
         {

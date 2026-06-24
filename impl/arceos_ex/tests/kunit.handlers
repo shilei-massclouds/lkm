@@ -4,6 +4,7 @@ of-platform
 earlycon
 kernel-init-task
 scheduler-action
+slub
 console-handoff
 uart-irq-chain
 virtio-bus

@@ -2,7 +2,7 @@ use super::{
     cpu_group::CpuGroup,
     earlycon,
     irq_time::{HrtimerCore, RiscvTimerProvider, Timekeeper},
-    mm_core::{KmallocCaches, SlubAllocator},
+    mm_core::{KmallocCaches, SlubSubsystem},
     printk,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::StaticBranch,
@@ -420,10 +420,10 @@ impl DelayLoop {
 }
 
 pub fn slub_flush_workqueue_ready(
-    slub_allocator: &SlubAllocator,
+    slub_subsystem: &SlubSubsystem,
     kmalloc_caches: &KmallocCaches,
 ) -> bool {
-    slub_allocator.state() == State::Ready
-        && slub_allocator.flush_workqueue_ready()
+    slub_subsystem.state() == State::Ready
+        && slub_subsystem.flush_workqueue_ready()
         && kmalloc_caches.state() == State::Ready
 }

@@ -36,8 +36,8 @@ impl TaskCreationCoreFixture {
         assertions.assert_ok(
             "preset",
             self.core.preset(
-                &ctx.slub_allocator,
-                ctx.slub_allocator.kmalloc_caches(),
+                &ctx.slub_subsystem,
+                ctx.slub_subsystem.kmalloc_caches(),
                 &ctx.per_cpu_storage,
             ),
         );
@@ -52,7 +52,7 @@ impl TaskCreationCoreFixture {
                 credential_core: &ctx.credential_core,
                 cpu_group: &ctx.cpu_group,
                 cpu_capabilities: &ctx.cpu_capabilities,
-                slub_allocator: &ctx.slub_allocator,
+                slub_subsystem: &ctx.slub_subsystem,
                 init_task: &ctx.init_task,
                 exception_stream: &ctx.exception_stream,
             }),

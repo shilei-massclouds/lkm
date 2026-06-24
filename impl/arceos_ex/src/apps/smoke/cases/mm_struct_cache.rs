@@ -11,7 +11,7 @@ use crate::{
 pub fn run() -> SmokeResult {
     let ctx = context();
     let mm_cache = &ctx.mm_struct_cache;
-    let slub = &ctx.slub_allocator;
+    let slub = &ctx.slub_subsystem;
     let registry = slub.cache_registry();
 
     if slub.state() != State::Ready

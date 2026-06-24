@@ -40,11 +40,11 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.scheduler.enable()?;
     checkpoint_irqs_disabled()?;
     ctx.radix_tree
-        .setup(&ctx.slub_allocator, &ctx.cpu_hotplug_state)?;
-    ctx.maple_tree.setup(&ctx.slub_allocator)?;
+        .setup(&ctx.slub_subsystem, &ctx.cpu_hotplug_state)?;
+    ctx.maple_tree.setup(&ctx.slub_subsystem)?;
     ctx.workqueue.preset(
         &ctx.page_allocator,
-        &ctx.slub_allocator,
+        &ctx.slub_subsystem,
         &ctx.cpu_group,
         &ctx.per_cpu_storage,
     )?;

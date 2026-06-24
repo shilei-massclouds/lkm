@@ -11,7 +11,7 @@ const ITEM_COUNT: usize = 96;
 pub fn run() -> SmokeResult {
     let ctx = context();
     if ctx.kernel_global_allocator.state() != State::Ready
-        || !ctx.kernel_global_allocator.uses_slub_allocator()
+        || !ctx.kernel_global_allocator.uses_slub_subsystem()
         || !ctx.kernel_global_allocator.alloc_api_ready()
         || !ctx.kernel_global_allocator.alloc_zeroed_api_ready()
         || !ctx.kernel_global_allocator.dealloc_api_ready()
@@ -27,7 +27,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    let initial_free = ctx.slub_allocator.kmalloc_caches().free_object_count(1024);
+    let initial_free = ctx.slub_subsystem.kmalloc_caches().free_object_count(1024);
     let mut values = Vec::new();
     let mut growths = 0usize;
     let mut last_capacity = values.capacity();
@@ -57,7 +57,7 @@ pub fn run() -> SmokeResult {
     }
     let final_capacity = values.capacity();
     drop(values);
-    let final_free = ctx.slub_allocator.kmalloc_caches().free_object_count(1024);
+    let final_free = ctx.slub_subsystem.kmalloc_caches().free_object_count(1024);
 
     printk::write_fmt(format_args!(
         "global_alloc vec_len={} capacity={} growths={} free1024_before={} free1024_after={} checksum={}\n",

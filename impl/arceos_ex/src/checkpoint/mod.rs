@@ -6,6 +6,7 @@ pub mod handlers;
     checkpoint_handler_kernel_init_task,
     checkpoint_handler_linux_plic,
     checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,

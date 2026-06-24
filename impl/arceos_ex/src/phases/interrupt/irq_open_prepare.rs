@@ -23,7 +23,7 @@ pub fn setup(ctx: &mut Context) -> ! {
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
-    ctx.slub_allocator.setup_flush_workqueue(&ctx.workqueue)?;
+    ctx.slub_subsystem.setup_flush_workqueue(&ctx.workqueue)?;
     ctx.console.preset(&ctx.static_objects)?;
     checkpoint_panic_later_clear()?;
     checkpoint_lockdep_noop()?;
@@ -91,11 +91,11 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.smp_call_function.state() == State::Ready
         && ctx.workqueue.state() == State::Prepared
         && !ctx.workqueue.workers_running()
-        && ctx.slub_allocator.state() == State::Ready
-        && ctx.slub_allocator.kmalloc_caches().state() == State::Ready
+        && ctx.slub_subsystem.state() == State::Ready
+        && ctx.slub_subsystem.kmalloc_caches().state() == State::Ready
         && irq_open::slub_flush_workqueue_ready(
-            &ctx.slub_allocator,
-            ctx.slub_allocator.kmalloc_caches(),
+            &ctx.slub_subsystem,
+            ctx.slub_subsystem.kmalloc_caches(),
         )
         && ctx.page_allocator.state() == State::Ready
         && ctx.per_cpu_storage.state() == State::Ready

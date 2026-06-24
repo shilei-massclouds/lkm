@@ -11,7 +11,7 @@ use super::{
     fdt_reader::{read_be_u32, read_cells},
     interrupt_stream::InterruptStream,
     ioremap::Ioremap,
-    mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, SlubAllocator, VmallocAllocator},
+    mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, SlubSubsystem, VmallocAllocator},
     per_cpu_storage::PerCpuStorage,
     sbi::Sbi,
     softirq::Softirq,
@@ -249,14 +249,14 @@ impl IrqController {
         &mut self,
         device_tree: &DeviceTree,
         page_allocator: &PageAllocator,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         per_cpu_storage: &PerCpuStorage,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || device_tree.state() != State::Ready
             || page_allocator.state() != State::Ready
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
             || cpu_group.state() != State::Ready
         {

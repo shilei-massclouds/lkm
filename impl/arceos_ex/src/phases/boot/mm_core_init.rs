@@ -48,19 +48,20 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.swiotlb,
     )?;
     crate::checkpoint::dispatch(Checkpoint::PageAllocatorMemBlockHandoffReady, ctx);
-    ctx.slub_allocator
+    ctx.slub_subsystem
         .preset(&ctx.page_allocator, &ctx.per_cpu_storage)?;
-    ctx.slub_allocator.setup(
+    ctx.slub_subsystem.setup(
         &ctx.page_allocator,
         &ctx.stack_depot,
         &ctx.per_cpu_storage,
         &ctx.cpu_hotplug_state,
     )?;
-    ctx.kernel_global_allocator.setup(&ctx.slub_allocator)?;
+    crate::checkpoint::dispatch(Checkpoint::SlubSubsystemReady, ctx);
+    ctx.kernel_global_allocator.setup(&ctx.slub_subsystem)?;
     ctx.dynamic_container_runtime
         .setup(&ctx.kernel_global_allocator)?;
     ctx.page_table_caches.setup(
-        &ctx.slub_allocator,
+        &ctx.slub_subsystem,
         &ctx.page_allocator,
         &ctx.page_metadata_map,
         &ctx.config,
@@ -69,7 +70,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.kernel_image,
     )?;
     ctx.vmalloc_allocator.setup(
-        &ctx.slub_allocator,
+        &ctx.slub_subsystem,
         &ctx.page_table_caches,
         &ctx.per_cpu_storage,
     )?;
@@ -81,7 +82,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.config,
     )?;
     ctx.mm_struct_cache
-        .setup(&mut ctx.slub_allocator, &ctx.cpu_group)
+        .setup(&mut ctx.slub_subsystem, &ctx.cpu_group)
 }
 
 fn handoff() -> ! {
@@ -171,15 +172,15 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
                 && ctx.swiotlb.static_pool_area_count() != 0
                 && ctx.swiotlb.static_pool_lock_count() == ctx.swiotlb.static_pool_area_count()))
         && ctx.swiotlb.dynamic_growth_trimmed()
-        && ctx.slub_allocator.state() == State::Ready
-        && ctx.slub_allocator.cache_registry().state() == State::Ready
+        && ctx.slub_subsystem.state() == State::Ready
+        && ctx.slub_subsystem.cache_registry().state() == State::Ready
         && ctx
-            .slub_allocator
+            .slub_subsystem
             .cache_registry()
             .has_named_cache(NamedSlubCacheKind::MmStruct)
-        && ctx.slub_allocator.kmalloc_caches().state() == State::Ready
+        && ctx.slub_subsystem.kmalloc_caches().state() == State::Ready
         && ctx.kernel_global_allocator.state() == State::Ready
-        && ctx.kernel_global_allocator.uses_slub_allocator()
+        && ctx.kernel_global_allocator.uses_slub_subsystem()
         && ctx.kernel_global_allocator.alloc_api_ready()
         && ctx.kernel_global_allocator.alloc_zeroed_api_ready()
         && ctx.kernel_global_allocator.dealloc_api_ready()
@@ -250,7 +251,7 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.mm_struct_cache.registered_in_slub_registry()
         && ctx.mm_struct_cache.object_size() != 0
         && ctx
-            .slub_allocator
+            .slub_subsystem
             .cache_registry()
             .named_cache(NamedSlubCacheKind::MmStruct)
             .map(|cache| {

@@ -26,7 +26,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.irq_controller.setup(
         &ctx.device_tree,
         &ctx.page_allocator,
-        &ctx.slub_allocator,
+        &ctx.slub_subsystem,
         &ctx.per_cpu_storage,
         &ctx.cpu_group,
     )?;

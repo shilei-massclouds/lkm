@@ -1,5 +1,5 @@
 use super::{
-    mm_core::SlubAllocator,
+    mm_core::SlubSubsystem,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -31,8 +31,8 @@ impl MapleTree {
         self.node_api_ready
     }
 
-    pub fn setup(&mut self, slub_allocator: &SlubAllocator) -> EventResult {
-        if self.lifecycle.state() != State::Base || slub_allocator.state() != State::Ready {
+    pub fn setup(&mut self, slub_subsystem: &SlubSubsystem) -> EventResult {
+        if self.lifecycle.state() != State::Base || slub_subsystem.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),

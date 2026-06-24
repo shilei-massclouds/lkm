@@ -1887,16 +1887,24 @@ impl KmallocSlab {
 }
 
 #[derive(Clone, Copy)]
-struct KmallocCache {
+pub struct SlubCache {
     object_size: usize,
     free_head: usize,
     slab_count: usize,
 }
 
-impl KmallocCache {
+impl SlubCache {
     const fn empty() -> Self {
         Self {
             object_size: 0,
+            free_head: KMALLOC_NULL,
+            slab_count: 0,
+        }
+    }
+
+    const fn new_kmalloc(object_size: usize) -> Self {
+        Self {
+            object_size,
             free_head: KMALLOC_NULL,
             slab_count: 0,
         }
@@ -2177,7 +2185,7 @@ pub enum SlubState {
     Up,
 }
 
-pub struct SlubAllocator {
+pub struct SlubSubsystem {
     lifecycle: Lifecycle,
     slab_state: SlubState,
     boot_kmem_cache_node_ready: bool,
@@ -2189,7 +2197,7 @@ pub struct SlubAllocator {
     kmalloc_caches: KmallocCaches,
 }
 
-impl SlubAllocator {
+impl SlubSubsystem {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -2264,8 +2272,14 @@ impl SlubAllocator {
         if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
             return None;
         }
-        self.kmalloc_caches
-            .kmalloc(size, gfp, page_allocator, page_metadata_map, false)
+        self.kmalloc_caches.kmalloc(
+            &mut self.cache_registry,
+            size,
+            gfp,
+            page_allocator,
+            page_metadata_map,
+            false,
+        )
     }
 
     pub fn kzalloc(
@@ -2278,22 +2292,30 @@ impl SlubAllocator {
         if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
             return None;
         }
-        self.kmalloc_caches
-            .kmalloc(size, gfp, page_allocator, page_metadata_map, true)
+        self.kmalloc_caches.kmalloc(
+            &mut self.cache_registry,
+            size,
+            gfp,
+            page_allocator,
+            page_metadata_map,
+            true,
+        )
     }
 
     pub fn kfree(&mut self, alloc_ref: KmallocAllocRef) -> bool {
         if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
             return false;
         }
-        self.kmalloc_caches.kfree(alloc_ref)
+        self.kmalloc_caches
+            .kfree(&mut self.cache_registry, alloc_ref)
     }
 
     pub fn kfree_addr(&mut self, addr: usize, size: usize) -> bool {
         if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
             return false;
         }
-        self.kmalloc_caches.kfree_addr(addr, size)
+        self.kmalloc_caches
+            .kfree_addr(&mut self.cache_registry, addr, size)
     }
 
     pub fn preset(
@@ -2319,7 +2341,7 @@ impl SlubAllocator {
             LifecycleEvent::Preset,
             State::Base,
             State::Prepared,
-            Checkpoint::SlubAllocatorPrepared,
+            Checkpoint::SlubSubsystemPrepared,
         )
     }
 
@@ -2346,7 +2368,7 @@ impl SlubAllocator {
 
         self.cache_registry.setup(self.lifecycle.state())?;
         self.kmalloc_caches
-            .setup(self.lifecycle.state(), &self.cache_registry)?;
+            .setup(self.lifecycle.state(), &mut self.cache_registry)?;
         self.bootstrap_completed = true;
         self.cpu_cache_ready = true;
         self.cpuhp_step_registered = SLUB_CPUHP_STEP != 0;
@@ -2356,7 +2378,7 @@ impl SlubAllocator {
             LifecycleEvent::Setup,
             State::Prepared,
             State::Ready,
-            Checkpoint::SlubAllocatorReady,
+            Checkpoint::SlubSubsystemReady,
         )
     }
 
@@ -2395,7 +2417,7 @@ unsafe impl GlobalAlloc for KernelGlobalAllocAdapter {
             return;
         }
         let ctx = crate::context::context();
-        if !ctx.slub_allocator.kfree_addr(ptr as usize, layout.size()) {
+        if !ctx.slub_subsystem.kfree_addr(ptr as usize, layout.size()) {
             crate::arch::riscv64::sbi::putstr("arceos_ex global dealloc failed\n");
             crate::arch::riscv64::sbi::system_shutdown();
         }
@@ -2408,14 +2430,14 @@ fn global_alloc(layout: Layout, zeroed: bool) -> *mut u8 {
     }
     let ctx = crate::context::context();
     let allocation = if zeroed {
-        ctx.slub_allocator.kzalloc(
+        ctx.slub_subsystem.kzalloc(
             layout.size(),
             GfpFlags::kernel(),
             &mut ctx.page_allocator,
             &ctx.page_metadata_map,
         )
     } else {
-        ctx.slub_allocator.kmalloc(
+        ctx.slub_subsystem.kmalloc(
             layout.size(),
             GfpFlags::kernel(),
             &mut ctx.page_allocator,
@@ -2428,7 +2450,7 @@ fn global_alloc(layout: Layout, zeroed: bool) -> *mut u8 {
     if alloc_ref.addr().is_multiple_of(layout.align()) {
         alloc_ref.addr() as *mut u8
     } else {
-        let _ = ctx.slub_allocator.kfree(alloc_ref);
+        let _ = ctx.slub_subsystem.kfree(alloc_ref);
         null_mut()
     }
 }
@@ -2473,7 +2495,7 @@ pub struct KernelGlobalAllocator {
     alloc_api_ready: bool,
     alloc_zeroed_api_ready: bool,
     dealloc_api_ready: bool,
-    uses_slub_allocator: bool,
+    uses_slub_subsystem: bool,
 }
 
 impl KernelGlobalAllocator {
@@ -2483,7 +2505,7 @@ impl KernelGlobalAllocator {
             alloc_api_ready: false,
             alloc_zeroed_api_ready: false,
             dealloc_api_ready: false,
-            uses_slub_allocator: false,
+            uses_slub_subsystem: false,
         }
     }
 
@@ -2503,14 +2525,14 @@ impl KernelGlobalAllocator {
         self.dealloc_api_ready
     }
 
-    pub const fn uses_slub_allocator(&self) -> bool {
-        self.uses_slub_allocator
+    pub const fn uses_slub_subsystem(&self) -> bool {
+        self.uses_slub_subsystem
     }
 
-    pub fn setup(&mut self, slub_allocator: &SlubAllocator) -> EventResult {
+    pub fn setup(&mut self, slub_subsystem: &SlubSubsystem) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
-            || slub_allocator.kmalloc_caches().state() != State::Ready
+            || slub_subsystem.state() != State::Ready
+            || slub_subsystem.kmalloc_caches().state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -2523,7 +2545,7 @@ impl KernelGlobalAllocator {
         self.alloc_api_ready = true;
         self.alloc_zeroed_api_ready = true;
         self.dealloc_api_ready = true;
-        self.uses_slub_allocator = true;
+        self.uses_slub_subsystem = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -2640,6 +2662,8 @@ pub struct SlubCacheRegistry {
     boot_caches_registered: bool,
     global_list_ready: bool,
     cache_count: usize,
+    kmalloc_caches: [SlubCache; MAX_KMALLOC_CACHES],
+    kmalloc_cache_count: usize,
     named_caches: [NamedSlubCache; MAX_NAMED_SLUB_CACHES],
     named_cache_count: usize,
 }
@@ -2651,6 +2675,8 @@ impl SlubCacheRegistry {
             boot_caches_registered: false,
             global_list_ready: false,
             cache_count: 0,
+            kmalloc_caches: [SlubCache::empty(); MAX_KMALLOC_CACHES],
+            kmalloc_cache_count: 0,
             named_caches: [NamedSlubCache::empty(); MAX_NAMED_SLUB_CACHES],
             named_cache_count: 0,
         }
@@ -2674,6 +2700,45 @@ impl SlubCacheRegistry {
 
     pub const fn named_cache_count(&self) -> usize {
         self.named_cache_count
+    }
+
+    pub const fn kmalloc_cache_count(&self) -> usize {
+        self.kmalloc_cache_count
+    }
+
+    pub fn kmalloc_cache(&self, cache_index: usize) -> Option<&SlubCache> {
+        if self.lifecycle.state() != State::Ready || cache_index >= self.kmalloc_cache_count {
+            return None;
+        }
+        Some(&self.kmalloc_caches[cache_index])
+    }
+
+    fn kmalloc_cache_mut(&mut self, cache_index: usize) -> Option<&mut SlubCache> {
+        if self.lifecycle.state() != State::Ready || cache_index >= self.kmalloc_cache_count {
+            return None;
+        }
+        Some(&mut self.kmalloc_caches[cache_index])
+    }
+
+    fn register_kmalloc_cache(&mut self, object_size: usize) -> Option<usize> {
+        if self.lifecycle.state() != State::Ready || object_size == 0 {
+            return None;
+        }
+        let mut index = 0usize;
+        while index < self.kmalloc_cache_count {
+            if self.kmalloc_caches[index].object_size == object_size {
+                return Some(index);
+            }
+            index += 1;
+        }
+        if self.kmalloc_cache_count >= MAX_KMALLOC_CACHES {
+            return None;
+        }
+        let cache_index = self.kmalloc_cache_count;
+        self.kmalloc_caches[cache_index] = SlubCache::new_kmalloc(object_size);
+        self.kmalloc_cache_count += 1;
+        self.cache_count += 1;
+        Some(cache_index)
     }
 
     pub fn named_cache(&self, kind: NamedSlubCacheKind) -> Option<NamedSlubCache> {
@@ -2752,7 +2817,7 @@ pub struct KmallocCaches {
     random_caches_trimmed: bool,
     memcg_caches_trimmed: bool,
     sizes: [usize; MAX_KMALLOC_CACHES],
-    caches: [KmallocCache; MAX_KMALLOC_CACHES],
+    cache_refs: [usize; MAX_KMALLOC_CACHES],
     slabs: [KmallocSlab; MAX_KMALLOC_SLABS],
     slab_count: usize,
     count: usize,
@@ -2767,7 +2832,7 @@ impl KmallocCaches {
             random_caches_trimmed: false,
             memcg_caches_trimmed: false,
             sizes: [0; MAX_KMALLOC_CACHES],
-            caches: [KmallocCache::empty(); MAX_KMALLOC_CACHES],
+            cache_refs: [usize::MAX; MAX_KMALLOC_CACHES],
             slabs: [KmallocSlab::empty(); MAX_KMALLOC_SLABS],
             slab_count: 0,
             count: 0,
@@ -2815,8 +2880,8 @@ impl KmallocCaches {
     }
 
     pub fn kmalloc_size(&self, size: usize) -> Option<usize> {
-        let index = self.cache_index_for_size(size)?;
-        Some(self.caches[index].object_size)
+        self.cache_index_for_size(size)
+            .map(|index| self.sizes[index])
     }
 
     pub fn free_object_count(&self, size: usize) -> usize {
@@ -2847,6 +2912,7 @@ impl KmallocCaches {
 
     fn kmalloc(
         &mut self,
+        registry: &mut SlubCacheRegistry,
         size: usize,
         gfp: GfpFlags,
         page_allocator: &mut PageAllocator,
@@ -2857,18 +2923,27 @@ impl KmallocCaches {
             return None;
         }
         let cache_index = self.cache_index_for_size(size)?;
-        if self.caches[cache_index].free_head == KMALLOC_NULL
-            && !self.grow_cache(cache_index, gfp, page_allocator, page_metadata_map)
+        let registry_cache_index = self.cache_refs[cache_index];
+        let free_head = registry.kmalloc_cache(registry_cache_index)?.free_head;
+        if free_head == KMALLOC_NULL
+            && !self.grow_cache(
+                registry,
+                cache_index,
+                gfp,
+                page_allocator,
+                page_metadata_map,
+            )
         {
             return None;
         }
 
-        let addr = self.caches[cache_index].free_head;
+        let cache = registry.kmalloc_cache_mut(registry_cache_index)?;
+        let addr = cache.free_head;
         if addr == KMALLOC_NULL {
             return None;
         }
         let next = read_freelist_next(addr);
-        self.caches[cache_index].free_head = next;
+        cache.free_head = next;
         let Some(slab_index) = self.slab_index_for_addr(addr) else {
             return None;
         };
@@ -2886,17 +2961,23 @@ impl KmallocCaches {
         Some(KmallocAllocRef {
             addr,
             requested_size: size,
-            cache_size: self.caches[cache_index].object_size,
+            cache_size: cache.object_size,
             cache_index,
         })
     }
 
-    fn kfree(&mut self, alloc_ref: KmallocAllocRef) -> bool {
+    fn kfree(&mut self, registry: &mut SlubCacheRegistry, alloc_ref: KmallocAllocRef) -> bool {
         if self.lifecycle.state() != State::Ready
             || alloc_ref.addr() == KMALLOC_NULL
             || alloc_ref.cache_index() >= self.count
-            || self.caches[alloc_ref.cache_index()].object_size != alloc_ref.cache_size()
         {
+            return false;
+        }
+        let registry_cache_index = self.cache_refs[alloc_ref.cache_index()];
+        let Some(cache) = registry.kmalloc_cache(registry_cache_index) else {
+            return false;
+        };
+        if cache.object_size != alloc_ref.cache_size() {
             return false;
         }
         let Some(slab_index) = self.slab_index_for_addr(alloc_ref.addr()) else {
@@ -2905,19 +2986,21 @@ impl KmallocCaches {
         if self.slabs[slab_index].cache_index != alloc_ref.cache_index()
             || !self.slabs[slab_index].contains(alloc_ref.addr())
             || self.slabs[slab_index].free_count >= self.slabs[slab_index].object_count
-            || self.freelist_contains(alloc_ref.cache_index(), alloc_ref.addr())
+            || self.freelist_contains(registry, alloc_ref.cache_index(), alloc_ref.addr())
         {
             return false;
         }
 
-        let cache_index = alloc_ref.cache_index();
-        write_freelist_next(alloc_ref.addr(), self.caches[cache_index].free_head);
-        self.caches[cache_index].free_head = alloc_ref.addr();
+        let Some(cache) = registry.kmalloc_cache_mut(registry_cache_index) else {
+            return false;
+        };
+        write_freelist_next(alloc_ref.addr(), cache.free_head);
+        cache.free_head = alloc_ref.addr();
         self.slabs[slab_index].free_count += 1;
         true
     }
 
-    fn kfree_addr(&mut self, addr: usize, size: usize) -> bool {
+    fn kfree_addr(&mut self, registry: &mut SlubCacheRegistry, addr: usize, size: usize) -> bool {
         if self.lifecycle.state() != State::Ready || addr == KMALLOC_NULL || size == 0 {
             return false;
         }
@@ -2925,19 +3008,26 @@ impl KmallocCaches {
             return false;
         };
         let cache_index = self.slabs[slab_index].cache_index;
-        if cache_index >= self.count || size > self.caches[cache_index].object_size {
+        if cache_index >= self.count {
+            return false;
+        }
+        let registry_cache_index = self.cache_refs[cache_index];
+        let Some(cache) = registry.kmalloc_cache(registry_cache_index) else {
+            return false;
+        };
+        if size > cache.object_size {
             return false;
         }
         let alloc_ref = KmallocAllocRef {
             addr,
             requested_size: size,
-            cache_size: self.caches[cache_index].object_size,
+            cache_size: cache.object_size,
             cache_index,
         };
-        self.kfree(alloc_ref)
+        self.kfree(registry, alloc_ref)
     }
 
-    fn setup(&mut self, slub_state: State, registry: &SlubCacheRegistry) -> EventResult {
+    fn setup(&mut self, slub_state: State, registry: &mut SlubCacheRegistry) -> EventResult {
         if self.lifecycle.state() != State::Base
             || slub_state != State::Prepared
             || registry.state() != State::Ready
@@ -2954,11 +3044,15 @@ impl KmallocCaches {
         self.count = MAX_KMALLOC_CACHES;
         let mut index = 0usize;
         while index < self.count {
-            self.caches[index] = KmallocCache {
-                object_size: self.sizes[index],
-                free_head: KMALLOC_NULL,
-                slab_count: 0,
+            let Some(cache_ref) = registry.register_kmalloc_cache(self.sizes[index]) else {
+                return failed_condition(
+                    LifecycleEvent::Setup,
+                    self.lifecycle.state(),
+                    State::Base,
+                    State::Ready,
+                );
             };
+            self.cache_refs[index] = cache_ref;
             index += 1;
         }
         self.size_index_ready = true;
@@ -2979,7 +3073,7 @@ impl KmallocCaches {
         }
         let mut index = 0usize;
         while index < self.count {
-            if size <= self.caches[index].object_size {
+            if size <= self.sizes[index] {
                 return Some(index);
             }
             index += 1;
@@ -2989,6 +3083,7 @@ impl KmallocCaches {
 
     fn grow_cache(
         &mut self,
+        registry: &mut SlubCacheRegistry,
         cache_index: usize,
         gfp: GfpFlags,
         page_allocator: &mut PageAllocator,
@@ -2997,7 +3092,13 @@ impl KmallocCaches {
         if cache_index >= self.count || self.slab_count >= MAX_KMALLOC_SLABS {
             return false;
         }
-        let object_size = self.caches[cache_index].object_size;
+        let registry_cache_index = self.cache_refs[cache_index];
+        let Some(object_size) = registry
+            .kmalloc_cache(registry_cache_index)
+            .map(|cache| cache.object_size)
+        else {
+            return false;
+        };
         let Some(order) = kmalloc_cache_order(object_size, page_metadata_map.page_size()) else {
             return false;
         };
@@ -3041,8 +3142,11 @@ impl KmallocCaches {
             cache_index,
         };
         self.slab_count += 1;
-        self.caches[cache_index].free_head = head;
-        self.caches[cache_index].slab_count += 1;
+        let Some(cache) = registry.kmalloc_cache_mut(registry_cache_index) else {
+            return false;
+        };
+        cache.free_head = head;
+        cache.slab_count += 1;
         true
     }
 
@@ -3057,11 +3161,19 @@ impl KmallocCaches {
         None
     }
 
-    fn freelist_contains(&self, cache_index: usize, addr: usize) -> bool {
+    fn freelist_contains(
+        &self,
+        registry: &SlubCacheRegistry,
+        cache_index: usize,
+        addr: usize,
+    ) -> bool {
         if cache_index >= self.count {
             return false;
         }
-        let mut current = self.caches[cache_index].free_head;
+        let Some(cache) = registry.kmalloc_cache(self.cache_refs[cache_index]) else {
+            return false;
+        };
+        let mut current = cache.free_head;
         let mut scanned = 0usize;
         while current != KMALLOC_NULL && scanned < MAX_KMALLOC_SLABS * 512 {
             if current == addr {
@@ -3129,7 +3241,7 @@ impl PageTableCaches {
 
     pub fn setup(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         page_allocator: &PageAllocator,
         page_metadata_map: &PageMetadataMap,
         config: &Config,
@@ -3138,7 +3250,7 @@ impl PageTableCaches {
         kernel_image: &KernelImage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || page_allocator.state() != State::Ready
             || page_metadata_map.state() != State::Ready
             || config.state() != State::Online
@@ -3163,7 +3275,7 @@ impl PageTableCaches {
         ) else {
             return self.failed_setup();
         };
-        self.lock_cache.setup(slub_allocator)?;
+        self.lock_cache.setup(slub_subsystem)?;
         self.vmalloc_install_range = vmalloc_install_range;
         self.vmalloc_pgtable_preallocated = true;
         self.vmalloc_pgtable_dynamic_allocator_ready = true;
@@ -3328,8 +3440,8 @@ impl PageTableLockCache {
         self.page_ptl_cache_created
     }
 
-    fn setup(&mut self, slub_allocator: &SlubAllocator) -> EventResult {
-        if self.lifecycle.state() != State::Base || slub_allocator.state() != State::Ready {
+    fn setup(&mut self, slub_subsystem: &SlubSubsystem) -> EventResult {
+        if self.lifecycle.state() != State::Base || slub_subsystem.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -3757,19 +3869,19 @@ impl VmallocAllocator {
 
     pub fn setup(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         page_table_caches: &PageTableCaches,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || page_table_caches.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
         {
             return self.failed_setup();
         }
 
-        self.area_cache.setup(slub_allocator)?;
+        self.area_cache.setup(slub_subsystem)?;
         self.address_space
             .setup(&self.area_cache, page_table_caches)?;
         self.node_set.setup(&self.address_space, per_cpu_storage)?;
@@ -4036,8 +4148,8 @@ impl VmapAreaCache {
         self.lifecycle.state()
     }
 
-    fn setup(&mut self, slub_allocator: &SlubAllocator) -> EventResult {
-        if self.lifecycle.state() != State::Base || slub_allocator.state() != State::Ready {
+    fn setup(&mut self, slub_subsystem: &SlubSubsystem) -> EventResult {
+        if self.lifecycle.state() != State::Base || slub_subsystem.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -4347,11 +4459,11 @@ impl MmStructCache {
 
     pub fn setup(
         &mut self,
-        slub_allocator: &mut SlubAllocator,
+        slub_subsystem: &mut SlubSubsystem,
         cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || cpu_group.state() != State::Ready
             || cpu_group.possible_cpu_count() == 0
         {
@@ -4365,7 +4477,7 @@ impl MmStructCache {
         let object_size = core::mem::size_of::<usize>() * 16 + mask_bytes;
         let usercopy_offset = core::mem::size_of::<usize>() * 8;
         let usercopy_size = core::mem::size_of::<usize>() * 2;
-        let Some(cache) = slub_allocator.register_named_cache(
+        let Some(cache) = slub_subsystem.register_named_cache(
             NamedSlubCacheKind::MmStruct,
             object_size,
             usercopy_offset,

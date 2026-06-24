@@ -26,50 +26,50 @@ pub fn setup(ctx: &mut Context) -> ! {
 fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.root_pid_namespace.setup(
         &ctx.cpu_group,
-        &ctx.slub_allocator,
-        ctx.slub_allocator.kmalloc_caches(),
+        &ctx.slub_subsystem,
+        ctx.slub_subsystem.kmalloc_caches(),
     )?;
     ctx.anon_vma_core
-        .setup(&ctx.slub_allocator, ctx.slub_allocator.kmalloc_caches())?;
+        .setup(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
     checkpoint_x86_efi_runtime_switch_trimmed()?;
     ctx.task_creation_core.preset(
-        &ctx.slub_allocator,
-        ctx.slub_allocator.kmalloc_caches(),
+        &ctx.slub_subsystem,
+        ctx.slub_subsystem.kmalloc_caches(),
         &ctx.per_cpu_storage,
     )?;
     ctx.credential_core
-        .preset(&ctx.slub_allocator, ctx.slub_allocator.kmalloc_caches())?;
+        .preset(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
     ctx.task_creation_core.setup(TaskCreationSetup {
         root_pid_namespace: &ctx.root_pid_namespace,
         credential_core: &ctx.credential_core,
         cpu_group: &ctx.cpu_group,
         cpu_capabilities: &ctx.cpu_capabilities,
-        slub_allocator: &ctx.slub_allocator,
+        slub_subsystem: &ctx.slub_subsystem,
         init_task: &ctx.init_task,
         exception_stream: &ctx.exception_stream,
     })?;
     checkpoint_shadow_call_stack_noop()?;
     checkpoint_lockdep_init_task_noop()?;
     ctx.signal_core
-        .preset(&ctx.slub_allocator, ctx.slub_allocator.kmalloc_caches())?;
+        .preset(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
     ctx.task_file_context
-        .preset(&ctx.slub_allocator, ctx.slub_allocator.kmalloc_caches())?;
+        .preset(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
     ctx.vma_core.preset(
         &ctx.mm_struct_cache,
         &ctx.anon_vma_core,
-        &ctx.slub_allocator,
+        &ctx.slub_subsystem,
         &ctx.per_cpu_storage,
     )?;
     ctx.ns_proxy
-        .preset(&ctx.slub_allocator, ctx.slub_allocator.kmalloc_caches())?;
+        .preset(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
     ctx.uts_namespace
-        .preset(&ctx.ns_proxy, &ctx.slub_allocator)?;
+        .preset(&ctx.ns_proxy, &ctx.slub_subsystem)?;
     ctx.keyring_core
-        .setup(&ctx.credential_core, &ctx.slub_allocator)?;
+        .setup(&ctx.credential_core, &ctx.slub_subsystem)?;
     ctx.security_core.setup(
         &ctx.credential_core,
         &ctx.keyring_core,
-        &ctx.slub_allocator,
+        &ctx.slub_subsystem,
         &ctx.static_branch,
     )?;
     setup_vfs_rootfs(ctx)?;
@@ -158,8 +158,8 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
         && !ctx.softirq.execution_open()
         && ctx.rcu_core.state() == State::Ready
         && ctx.rcu_core.gp_threads_deferred()
-        && ctx.slub_allocator.state() == State::Ready
-        && ctx.slub_allocator.kmalloc_caches().state() == State::Ready
+        && ctx.slub_subsystem.state() == State::Ready
+        && ctx.slub_subsystem.kmalloc_caches().state() == State::Ready
         && ctx.mm_struct_cache.state() == State::Ready
         && ctx.per_cpu_storage.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready

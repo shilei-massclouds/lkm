@@ -1,6 +1,6 @@
 use super::{
     cpu_hotplug::CpuHotplugState,
-    mm_core::SlubAllocator,
+    mm_core::SlubSubsystem,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -42,11 +42,11 @@ impl RadixTree {
 
     pub fn setup(
         &mut self,
-        slub_allocator: &SlubAllocator,
+        slub_subsystem: &SlubSubsystem,
         cpu_hotplug_state: &CpuHotplugState,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || slub_allocator.state() != State::Ready
+            || slub_subsystem.state() != State::Ready
             || cpu_hotplug_state.state() != State::Ready
         {
             return failed_condition(

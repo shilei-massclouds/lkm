@@ -24,12 +24,13 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     };
 
-    let slub = &ctx.slub_allocator;
+    let slub = &ctx.slub_subsystem;
     let registry = slub.cache_registry();
     let kmalloc = slub.kmalloc_caches();
     printk::write_fmt(format_args!(
-        "registry_caches={} kmalloc_caches={} slabs={} backing_pages={} reuse={:#x} zeroed={} cache64={}\n",
+        "registry_caches={} registry_kmalloc_caches={} kmalloc_refs={} slabs={} backing_pages={} reuse={:#x} zeroed={} cache64={}\n",
         registry.cache_count(),
+        registry.kmalloc_cache_count(),
         kmalloc.count(),
         kmalloc.slab_count(),
         kmalloc.backing_page_count(),
@@ -47,11 +48,11 @@ struct SlubSmokeDiag {
 }
 
 fn check_slub_facts(ctx: &Context) -> Option<()> {
-    let slub = &ctx.slub_allocator;
+    let slub = &ctx.slub_subsystem;
     let registry = slub.cache_registry();
     let kmalloc = slub.kmalloc_caches();
     if slub.state() != State::Ready || slub.slab_state() != SlubState::Up {
-        printk::write_str("slub allocator is not up\n");
+        printk::write_str("slub subsystem is not up\n");
         return None;
     }
     if !slub.boot_kmem_cache_node_ready()
@@ -82,6 +83,14 @@ fn check_slub_facts(ctx: &Context) -> Option<()> {
         printk::write_str("kmalloc cache facts invalid\n");
         return None;
     }
+    let minimum_registered_caches =
+        2 + registry.kmalloc_cache_count() + registry.named_cache_count();
+    if registry.kmalloc_cache_count() != kmalloc.count()
+        || registry.cache_count() < minimum_registered_caches
+    {
+        printk::write_str("kmalloc cache registry/reference facts invalid\n");
+        return None;
+    }
     Some(())
 }
 
@@ -90,15 +99,15 @@ fn run_kmalloc_api_smoke(ctx: &mut Context) -> Option<SlubSmokeDiag> {
     let alloc64 = kmalloc_write_read(ctx, 64, KMALLOC_WORD_64)?;
     let alloc1024 = kmalloc_write_read(ctx, 1024, KMALLOC_WORD_1024)?;
 
-    if !ctx.slub_allocator.kfree(alloc8)
-        || !ctx.slub_allocator.kfree(alloc64)
-        || !ctx.slub_allocator.kfree(alloc1024)
+    if !ctx.slub_subsystem.kfree(alloc8)
+        || !ctx.slub_subsystem.kfree(alloc64)
+        || !ctx.slub_subsystem.kfree(alloc1024)
     {
         printk::write_str("kfree basic allocations failed\n");
         return None;
     }
 
-    let zeroed = ctx.slub_allocator.kzalloc(
+    let zeroed = ctx.slub_subsystem.kzalloc(
         64,
         GfpFlags::kernel(),
         &mut ctx.page_allocator,
@@ -108,18 +117,18 @@ fn run_kmalloc_api_smoke(ctx: &mut Context) -> Option<SlubSmokeDiag> {
         printk::write_str("kzalloc did not return zeroed storage\n");
         return None;
     }
-    if !ctx.slub_allocator.kfree(zeroed) {
+    if !ctx.slub_subsystem.kfree(zeroed) {
         printk::write_str("kfree kzalloc allocation failed\n");
         return None;
     }
 
-    let first = ctx.slub_allocator.kmalloc(
+    let first = ctx.slub_subsystem.kmalloc(
         64,
         GfpFlags::kernel(),
         &mut ctx.page_allocator,
         &ctx.page_metadata_map,
     )?;
-    let second = ctx.slub_allocator.kmalloc(
+    let second = ctx.slub_subsystem.kmalloc(
         64,
         GfpFlags::kernel(),
         &mut ctx.page_allocator,
@@ -138,11 +147,11 @@ fn run_kmalloc_api_smoke(ctx: &mut Context) -> Option<SlubSmokeDiag> {
         return None;
     }
     let reuse_addr = second.addr();
-    if !ctx.slub_allocator.kfree(second) {
+    if !ctx.slub_subsystem.kfree(second) {
         printk::write_str("kfree second allocation failed\n");
         return None;
     }
-    let reused = ctx.slub_allocator.kmalloc(
+    let reused = ctx.slub_subsystem.kmalloc(
         64,
         GfpFlags::kernel(),
         &mut ctx.page_allocator,
@@ -152,7 +161,7 @@ fn run_kmalloc_api_smoke(ctx: &mut Context) -> Option<SlubSmokeDiag> {
         printk::write_str("kmalloc freelist did not reuse recently freed object\n");
         return None;
     }
-    if !ctx.slub_allocator.kfree(reused) || !ctx.slub_allocator.kfree(first) {
+    if !ctx.slub_subsystem.kfree(reused) || !ctx.slub_subsystem.kfree(first) {
         printk::write_str("kfree reused allocations failed\n");
         return None;
     }
@@ -160,12 +169,12 @@ fn run_kmalloc_api_smoke(ctx: &mut Context) -> Option<SlubSmokeDiag> {
     Some(SlubSmokeDiag {
         reused_addr: reuse_addr,
         zeroed_bytes: 64,
-        cache64_size: ctx.slub_allocator.kmalloc_caches().kmalloc_size(64)?,
+        cache64_size: ctx.slub_subsystem.kmalloc_caches().kmalloc_size(64)?,
     })
 }
 
 fn kmalloc_write_read(ctx: &mut Context, size: usize, value: usize) -> Option<KmallocAllocRef> {
-    let alloc_ref = ctx.slub_allocator.kmalloc(
+    let alloc_ref = ctx.slub_subsystem.kmalloc(
         size,
         GfpFlags::kernel(),
         &mut ctx.page_allocator,

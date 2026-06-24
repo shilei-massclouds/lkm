@@ -24,6 +24,8 @@ mod of_platform;
 mod page_allocator;
 #[cfg(checkpoint_handler_scheduler_action)]
 mod scheduler_action;
+#[cfg(checkpoint_handler_slub)]
+mod slub;
 #[cfg(checkpoint_sbi_char)]
 mod trace;
 #[cfg(checkpoint_handler_uart_irq_chain)]
@@ -45,6 +47,7 @@ mod virtio_rng;
     checkpoint_handler_linux_plic,
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
@@ -82,6 +85,7 @@ pub enum HandlerScope {
     checkpoint_handler_linux_plic,
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
@@ -107,6 +111,7 @@ pub struct Handler {
         checkpoint_handler_linux_plic,
         checkpoint_handler_of_platform,
         checkpoint_handler_scheduler_action,
+        checkpoint_handler_slub,
         checkpoint_handler_console_handoff,
         checkpoint_handler_uart_irq_chain,
         checkpoint_handler_virtio_bus,
@@ -132,6 +137,8 @@ const POST_VM_HANDLERS: &[Handler] = &[
     linux_plic::HANDLER,
     #[cfg(checkpoint_handler_scheduler_action)]
     scheduler_action::HANDLER,
+    #[cfg(checkpoint_handler_slub)]
+    slub::HANDLER,
     #[cfg(checkpoint_handler_console_handoff)]
     console_handoff::HANDLER,
     #[cfg(checkpoint_handler_uart_irq_chain)]
@@ -157,6 +164,7 @@ pub const fn has_post_vm_handlers() -> bool {
     checkpoint_handler_linux_plic,
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
@@ -189,6 +197,10 @@ pub const fn kunit_case_count() -> usize {
     #[cfg(checkpoint_handler_scheduler_action)]
     {
         count += scheduler_action::KUNIT_CASE_COUNT;
+    }
+    #[cfg(checkpoint_handler_slub)]
+    {
+        count += slub::KUNIT_CASE_COUNT;
     }
     #[cfg(checkpoint_handler_console_handoff)]
     {
@@ -225,6 +237,7 @@ pub const fn kunit_case_count() -> usize {
     checkpoint_handler_linux_plic,
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
@@ -265,6 +278,7 @@ pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
     checkpoint_handler_linux_plic,
     checkpoint_handler_of_platform,
     checkpoint_handler_scheduler_action,
+    checkpoint_handler_slub,
     checkpoint_handler_console_handoff,
     checkpoint_handler_uart_irq_chain,
     checkpoint_handler_virtio_bus,
