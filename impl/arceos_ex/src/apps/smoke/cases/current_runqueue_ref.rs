@@ -86,6 +86,13 @@ impl SmokeScenario for EmptyQueueScenario {
         assertions.assert("ready", self.fixture.runqueue.state() == State::Ready);
         assertions.assert("boot cpu", self.fixture.runqueue.cpu_ref().is_boot_cpu());
         assertions.assert(
+            "root domain covers runqueue cpu",
+            context_ref()
+                .scheduler
+                .default_root_domain()
+                .covers_cpu_ref(self.fixture.runqueue.cpu_ref()),
+        );
+        assertions.assert(
             "current is idle",
             self.fixture.runqueue.curr_task_id() == self.fixture.runqueue.idle_task_id(),
         );

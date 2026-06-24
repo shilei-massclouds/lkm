@@ -2,6 +2,7 @@ use super::{
     cpu_control::{CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
     cpu_group::{CpuGroup, CpuRef},
     cpu_id_map::CpuIdMap,
+    default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,
     init_task::InitTask,
     per_cpu_storage::PerCpuStorage,
@@ -1004,6 +1005,12 @@ impl Scheduler {
                 .boot_cpu()
                 .map(|cpu| self.boot_runqueue.cpu_ref() == cpu.cpu_ref())
                 .unwrap_or(false)
+            && self
+                .default_root_domain
+                .covers_cpu_group_possible(cpu_group)
+            && self
+                .default_root_domain
+                .covers_cpu_ref(self.boot_runqueue.cpu_ref())
             && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()
             && self.boot_runqueue.idle_task_id() == self.boot_idle_task.task_id()
     }
@@ -1192,54 +1199,6 @@ impl SmokeSchedulerTask {
     }
 }
 
-pub struct DefaultSchedRootDomain {
-    lifecycle: Lifecycle,
-    possible_cpu_count: usize,
-    smp_topology_deferred: bool,
-}
-
-impl DefaultSchedRootDomain {
-    const fn new() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            possible_cpu_count: 0,
-            smp_topology_deferred: false,
-        }
-    }
-
-    pub const fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    pub const fn possible_cpu_count(&self) -> usize {
-        self.possible_cpu_count
-    }
-
-    pub const fn smp_topology_deferred(&self) -> bool {
-        self.smp_topology_deferred
-    }
-
-    fn setup(&mut self, cpu_group: &CpuGroup) -> EventResult {
-        if self.lifecycle.state() != State::Base || cpu_group.state() != State::Ready {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Base,
-                State::Ready,
-            );
-        }
-
-        self.possible_cpu_count = cpu_group.possible_cpu_count();
-        self.smp_topology_deferred = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            Checkpoint::DefaultSchedRootDomainReady,
-        )
-    }
-}
-
 pub struct BitWaitQueueTable {
     lifecycle: Lifecycle,
     bucket_count: usize,
@@ -1419,6 +1378,8 @@ impl BootRunQueue {
         if boot_cpu.cpu_ref().logical_id() != boot_entry.logical_id()
             || boot_cpu.hartid() != boot_entry.hartid()
             || !boot_cpu.cpu_ref().is_boot_cpu()
+            || !cpu_group.possible_contains(boot_cpu.cpu_ref())
+            || !root_domain.covers_cpu_ref(boot_cpu.cpu_ref())
         {
             return self.failed_setup();
         }

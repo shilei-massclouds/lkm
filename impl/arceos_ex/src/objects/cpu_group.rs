@@ -9,7 +9,7 @@ use super::{
 };
 use crate::trace::Checkpoint;
 
-const MAX_CPUS: usize = 16;
+pub(crate) const MAX_CPUS: usize = 16;
 const BOOT_CPU_LOGICAL_ID: usize = 0;
 
 unsafe extern "C" {
@@ -359,6 +359,15 @@ impl CpuGroup {
 
     pub fn cpu_ref_at(&self, logical_id: usize) -> Option<CpuRef> {
         self.cpu(logical_id).map(|cpu| cpu.cpu_ref())
+    }
+
+    pub fn possible_cpu_ref_at(&self, logical_id: usize) -> Option<CpuRef> {
+        let cpu = self.cpu(logical_id)?;
+        if cpu.is_possible() {
+            Some(cpu.cpu_ref())
+        } else {
+            None
+        }
     }
 
     pub fn cpu(&self, logical_id: usize) -> Option<CpuView> {

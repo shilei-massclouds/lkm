@@ -43,6 +43,17 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.boot_runqueue().curr_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || ctx.scheduler.boot_runqueue().idle_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || ctx.scheduler.boot_idle_task().cpu_ref() != ctx.scheduler.boot_runqueue().cpu_ref()
+        || ctx.scheduler.default_root_domain().covered_cpu_count()
+            != ctx.cpu_group.possible_cpu_count()
+        || ctx.scheduler.default_root_domain().covered_cpu_ref(0) != ctx.cpu_group.boot_cpu_ref()
+        || !ctx
+            .scheduler
+            .default_root_domain()
+            .covers_cpu_group_possible(&ctx.cpu_group)
+        || !ctx
+            .scheduler
+            .default_root_domain()
+            .covers_cpu_ref(ctx.scheduler.boot_runqueue().cpu_ref())
         || !ctx
             .scheduler
             .boot_idle_task()

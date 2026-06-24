@@ -97,6 +97,13 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.default_root_domain().state() == State::Ready
         && ctx.scheduler.default_root_domain().possible_cpu_count()
             == ctx.cpu_group.possible_cpu_count()
+        && ctx.scheduler.default_root_domain().covered_cpu_count()
+            == ctx.cpu_group.possible_cpu_count()
+        && ctx.scheduler.default_root_domain().covered_cpu_ref(0) == ctx.cpu_group.boot_cpu_ref()
+        && ctx
+            .scheduler
+            .default_root_domain()
+            .covers_cpu_group_possible(&ctx.cpu_group)
         && ctx.scheduler.default_root_domain().smp_topology_deferred()
         && ctx.scheduler.bit_wait_queue_table().state() == State::Prepared
         && ctx.scheduler.bit_wait_queue_table().bucket_count() != 0
@@ -107,6 +114,10 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
             .unwrap_or(false)
         && ctx.scheduler.boot_runqueue().class_queues_ready()
         && ctx.scheduler.boot_runqueue().attached_to_root_domain()
+        && ctx
+            .scheduler
+            .default_root_domain()
+            .covers_cpu_ref(ctx.scheduler.boot_runqueue().cpu_ref())
         && !ctx.scheduler.boot_runqueue().balance_push_enabled()
         && ctx.scheduler.boot_idle_task().state() == State::Ready
         && ctx.scheduler.boot_idle_task().cpu_ref() == ctx.scheduler.boot_runqueue().cpu_ref()
