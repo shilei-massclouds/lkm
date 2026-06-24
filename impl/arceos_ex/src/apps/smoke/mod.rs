@@ -47,6 +47,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::cpu_capabilities::run,
     },
     SmokeCase {
+        name: "cpu_group",
+        run: cases::cpu_group::run,
+    },
+    SmokeCase {
         name: "memblock",
         run: cases::memblock::run,
     },

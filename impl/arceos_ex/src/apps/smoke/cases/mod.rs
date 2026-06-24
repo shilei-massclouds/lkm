@@ -4,6 +4,7 @@ pub mod breakpoint;
 pub mod cache_block_info;
 pub mod completion;
 pub mod cpu_capabilities;
+pub mod cpu_group;
 pub mod current_runqueue_ref;
 pub mod delay_loop;
 pub mod devfs;
