@@ -1372,16 +1372,19 @@ write-combine、normal memory alias 先记录为 deferred/unsupported，不得�
 `DefaultSchedRootDomain.covered_cpus == CpuGroup.possible_cpus`。当前 `sched_init()` 仍不建立完整 SMP 调度拓扑，
 RT/DL/EAS/load-balance 等共享调度状态可以保留字段或 deferred fact，但不能削弱 root domain 对 possible CPU 引用集合的覆盖约束。
 
-`Scheduler.setup()` 建立 possible CPU 的 runqueue 元数据，并把 boot CPU 的当前 `InitTask/current` 建模为
-`BootIdleTask`。它不得分配新的 boot idle task，不得创建第二个 runnable task，也不得把完整 SMP 调度拓扑提前塞进本阶段。
-`BootRunQueue.curr`、`BootRunQueue.idle`、`BootCPU.idle_thread_ref` 和 per-cpu idle task 引用必须收敛到同一个
-`BootIdleTask` 事实。
+`Scheduler.setup()` 编排 possible CPU 的 CPU-owned runqueue 元数据，并把 boot CPU 的当前 `InitTask/current`
+建模为 `BootCPU.IdleTask`。它不得拥有每个 CPU 的 runqueue/idle task 本体，不得分配新的 boot idle task，不得创建第二个
+runnable task，也不得把完整 SMP 调度拓扑提前塞进本阶段。`BootCPU.RunQueue.curr`、`BootCPU.RunQueue.idle`、
+`BootCPU.idle_thread_ref` 和 per-cpu idle task 引用必须收敛到同一个 `BootCPU.IdleTask` / `BootIdleTask` 事实。
+若当前 Rust lowering 仍把 `BootRunQueue`、`BootIdleTask` 存放在 `Scheduler` 字段中，代码注释、公开 API 和 smoke
+必须把它们解释为 `BootCPU.RunQueue` 与 `BootCPU.IdleTask` 的物化视图，而不是 Scheduler 拥有的子对象。
 
 每个 possible CPU 的 runqueue setup 必须以 `DefaultSchedRootDomain` 作为 attach target。当前实现可只完整物化
-`BootRunQueue`，但聚合事实必须表达 Linux `for_each_possible_cpu()` 已为 possible CPU 建立 runqueue 元数据；
-`BootRunQueue` 必须保存或可解析自己的 `CpuRef == BootCPURef`，并在 attach 时验证该 CPU 引用属于
+`BootCPU.RunQueue` / `BootRunQueue`，但聚合事实必须表达 Linux `for_each_possible_cpu()` 已为 possible CPU 建立
+runqueue 元数据；`BootRunQueue` 必须保存或可解析自己的 `CpuRef == BootCPURef`，并在 attach 时验证该 CPU 引用属于
 `DefaultSchedRootDomain.covered_cpus`。secondary CPU 在 online 前可以拥有准备好的 runqueue 元数据和 root-domain
-覆盖事实，但这不表示 AP 已有 live `CurrentCPU`、current-task slot 或可执行任务流。
+覆盖事实；secondary CPU 的 idle task 身份跟随 idle thread / SMP bringup 路径推进，这不表示 AP 已有 live
+`CurrentCPU`、current-task slot 或可执行任务流。
 
 `Scheduler.enable()` 只表示 boot CPU 调度基础和主动调度入口可用，并设置 `scheduler_running` 等价事实。它不表示 timer tick、
 中断调度、kthread 调度、secondary CPU 调度或 SMP domain 已经可用。

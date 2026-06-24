@@ -36,10 +36,11 @@ context BootIdlePiLockContext: ResourceExclusiveContext {
 }
 
 /*
- * Scheduler 表示启动期调度器基础对象。本阶段只要求 boot CPU 的 runqueue、
- * idle task 关联和主动调度入口可用；同时记录 Linux for_each_possible_cpu()
- * 已基于 CpuGroup possible 集合初始化 runqueue 元数据，并把这些 runqueue
- * attach 到 DefaultSchedRootDomain。完整 SMP 调度拓扑留给后续阶段。
+ * Scheduler 表示启动期调度器基础编排对象。本阶段只要求 boot CPU 的
+ * CPU-owned runqueue、CPU-owned idle task 关联和主动调度入口可用；同时记录
+ * Linux for_each_possible_cpu() 已基于 CpuGroup possible 集合初始化 runqueue
+ * 元数据，并把这些 runqueue attach 到 DefaultSchedRootDomain。完整 SMP 调度
+ * 拓扑留给后续阶段。
  */
 object Scheduler: SchedulerObject {
     initial_state: State::Base;
@@ -102,6 +103,14 @@ object Scheduler: SchedulerObject {
                 ensures {
                     scheduler_runqueues_ready(Scheduler, CpuGroup);
                     scheduler_possible_cpu_runqueues_ready(Scheduler, CpuGroup);
+                    scheduler_orchestrates_cpu_owned_runqueues(Scheduler, CpuGroup);
+                    cpu_owns_runqueue(BootCPU, BootRunQueue);
+                    cpu_owns_idle_task(BootCPU, BootIdleTask);
+                    cpu_runqueue_idle_is_cpu_idle_task(
+                        BootCPU,
+                        BootRunQueue,
+                        BootIdleTask
+                    );
                     boot_runqueue_ready(BootRunQueue, BootCPU);
                     runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(BootRunQueueRef);
@@ -132,6 +141,10 @@ object Scheduler: SchedulerObject {
             BootIdleTask.state == State::Ready;
             scheduler_runqueues_ready(Scheduler, CpuGroup);
             scheduler_possible_cpu_runqueues_ready(Scheduler, CpuGroup);
+            scheduler_orchestrates_cpu_owned_runqueues(Scheduler, CpuGroup);
+            cpu_owns_runqueue(BootCPU, BootRunQueue);
+            cpu_owns_idle_task(BootCPU, BootIdleTask);
+            cpu_runqueue_idle_is_cpu_idle_task(BootCPU, BootRunQueue, BootIdleTask);
             scheduler_possible_cpu_runqueues_attached_to_default_root_domain(
                 Scheduler,
                 CpuGroup,
@@ -165,6 +178,10 @@ object Scheduler: SchedulerObject {
             scheduler_running_flag_set(Scheduler);
             BootRunQueue.state == State::Ready;
             BootIdleTask.state == State::Ready;
+            scheduler_orchestrates_cpu_owned_runqueues(Scheduler, CpuGroup);
+            cpu_owns_runqueue(BootCPU, BootRunQueue);
+            cpu_owns_idle_task(BootCPU, BootIdleTask);
+            cpu_runqueue_idle_is_cpu_idle_task(BootCPU, BootRunQueue, BootIdleTask);
             runqueue_ref_ready(BootRunQueueRef);
             runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
@@ -264,14 +281,15 @@ object BitWaitQueueTable: TaskObject {
 }
 
 /*
- * BootRunQueue 表示 boot CPU 的 runqueue 元数据。Linux 同时在
+ * BootRunQueue 表示 BootCPU.RunQueue 的物化实例。Linux 同时在
  * for_each_possible_cpu() 中初始化所有 possible CPU 的 rq；当前模型用
  * Scheduler/CpuGroup 上的聚合事实表达全 possible 集合，用 BootRunQueue
- * 继续承载 boot CPU 的可直接观测 rq。
+ * 继续承载 boot CPU 的可直接观测 rq。Scheduler 只编排 setup，不拥有
+ * 该 runqueue 本体。
  */
 object BootRunQueue: RunQueue {
     initial_state: State::Base;
-    parent: Scheduler;
+    parent: BootCPU;
 
     state State::Base {
         transitions {
@@ -283,6 +301,7 @@ object BootRunQueue: RunQueue {
                 }
 
                 ensures {
+                    cpu_owns_runqueue(BootCPU, BootRunQueue);
                     boot_runqueue_ready(BootRunQueue, BootCPU);
                     raw_spinlock_initialized(BootRunQueueLock);
                     raw_spinlock_ready(BootRunQueueLock);
@@ -316,6 +335,7 @@ object BootRunQueue: RunQueue {
 
     state State::Ready {
         invariant {
+            cpu_owns_runqueue(BootCPU, BootRunQueue);
             boot_runqueue_ready(BootRunQueue, BootCPU);
             raw_spinlock_ready(BootRunQueueLock);
             boot_runqueue_lock_ready(BootRunQueue, BootRunQueueLock);
@@ -340,12 +360,13 @@ object BootRunQueue: RunQueue {
 }
 
 /*
- * BootIdleTask 表示启动线程在 sched_init() 中转换出的 boot CPU idle task
- * 规格身份。它不创建新 task，而是复用当前 BootInitTask/current。
+ * BootIdleTask 表示 BootCPU.IdleTask 的物化实例，也就是启动线程在
+ * sched_init() 中转换出的 boot CPU idle task 规格身份。它不创建新 task，
+ * 而是复用当前 BootInitTask/current；BootCPU.RunQueue.idle 指向它。
  */
 object BootIdleTask: Task {
     initial_state: State::Base;
-    parent: BootRunQueue;
+    parent: BootCPU;
 
     state State::Base {
         transitions {
@@ -391,6 +412,12 @@ object BootIdleTask: Task {
                 }
 
                 ensures {
+                    cpu_owns_idle_task(BootCPU, BootIdleTask);
+                    cpu_runqueue_idle_is_cpu_idle_task(
+                        BootCPU,
+                        BootRunQueue,
+                        BootIdleTask
+                    );
                     boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
                     boot_idle_task_reuses_current_init_task(BootIdleTask, BootInitTask);
                     boot_idle_task_uses_init_mm_lazy_tlb(BootIdleTask, InitMM);
@@ -423,6 +450,8 @@ object BootIdleTask: Task {
 
     state State::Ready {
         invariant {
+            cpu_owns_idle_task(BootCPU, BootIdleTask);
+            cpu_runqueue_idle_is_cpu_idle_task(BootCPU, BootRunQueue, BootIdleTask);
             boot_idle_task_ready(BootIdleTask, BootInitTask, BootRunQueue);
             boot_idle_task_reuses_current_init_task(BootIdleTask, BootInitTask);
             task_ref_targets(BootIdleTaskRef, BootIdleTask);

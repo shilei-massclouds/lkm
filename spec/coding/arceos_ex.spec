@@ -2323,6 +2323,19 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_attach_possible_cpu_runqueues_to_default_root_domain();
 
         /*
+         * CPU-owned RunQueue/IdleTask:
+         *
+         * Generated model and code comments must present RunQueue and IdleTask
+         * as objects owned by the corresponding CPU instance:
+         * CpuGroup.Cpu[id].RunQueue and CpuGroup.Cpu[id].IdleTask. Scheduler
+         * may orchestrate setup and policy, but must not be treated as owning
+         * every CPU's runqueue or idle task body. Current Rust lowering may
+         * temporarily store BootRunQueue/BootIdleTask inside Scheduler fields
+         * only if public facts and smoke checks expose them as BootCPU views.
+         */
+        arceos_ex_must_model_runqueue_and_idle_task_as_cpu_owned();
+
+        /*
          * Transitional lowering:
          *
          * The current Rust storage may temporarily keep boot_cpu and

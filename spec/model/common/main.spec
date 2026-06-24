@@ -377,6 +377,17 @@ predicate boot_runqueue_cpu_ref_covered_by_root_domain<T, U, V>(
 predicate boot_runqueue_attached_to_root_domain<T, U>(runqueue: T, root_domain: U) -> bool;
 predicate boot_runqueue_class_queues_ready<T>(runqueue: T) -> bool;
 predicate boot_runqueue_balance_push_disabled<T>(runqueue: T) -> bool;
+predicate cpu_owns_runqueue<T, U>(cpu: T, runqueue: U) -> bool;
+predicate cpu_owns_idle_task<T, U>(cpu: T, task: U) -> bool;
+predicate cpu_runqueue_idle_is_cpu_idle_task<T, U, V>(
+    cpu: T,
+    runqueue: U,
+    task: V
+) -> bool;
+predicate scheduler_orchestrates_cpu_owned_runqueues<T, U>(
+    scheduler: T,
+    cpu_group: U
+) -> bool;
 predicate bit_wait_queue_table_ready<T>(table: T) -> bool;
 predicate default_sched_root_domain_ready<T, U>(root_domain: T, cpu_group: U) -> bool;
 predicate default_sched_root_domain_covers_cpu_group_possible<T, U>(
@@ -1063,10 +1074,12 @@ type BootIdleRuntimeObject: TaskObject {
 }
 
 /*
- * RunQueue is a top-level scheduler runqueue abstraction. The current model
- * stores task_refs as a temporary aggregate view; future CFS/RT/DL scheduler
- * class queues should own concrete membership, with RunQueue.task_refs derived
- * from those queues. EnqueueTask commits the local membership fact
+ * RunQueue is the CPU-owned scheduler runqueue abstraction. A concrete
+ * instance is reached through CpuGroup.Cpu[id].RunQueue, while Scheduler
+ * orchestrates setup and selection policy rather than owning every runqueue.
+ * The current model stores task_refs as a temporary aggregate view; future
+ * CFS/RT/DL scheduler class queues should own concrete membership, with
+ * RunQueue.task_refs derived from those queues. EnqueueTask commits the local membership fact
  * runqueue_contains_task(self, task_ref); phase-level sequencing may derive
  * task_enqueued_on_runqueue(task_ref, runqueue_ref) after selection and enqueue
  * both succeed. PickNextTask is a pure selection action corresponding to the

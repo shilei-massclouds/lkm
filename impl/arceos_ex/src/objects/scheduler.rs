@@ -1305,6 +1305,16 @@ impl BootRunQueue {
         self.attached_to_root_domain
     }
 
+    pub fn is_boot_cpu_runqueue_view(&self, cpu_group: &CpuGroup) -> bool {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return false;
+        };
+        self.lifecycle.state() == State::Ready
+            && self.cpu_ref == boot_cpu.cpu_ref()
+            && self.cpu_hartid == boot_cpu.hartid()
+            && self.cpu_ref.is_boot_cpu()
+    }
+
     pub const fn balance_push_enabled(&self) -> bool {
         self.balance_push_enabled
     }
@@ -1611,6 +1621,23 @@ impl BootIdleTask {
 
     pub const fn thread_context(&self) -> &TaskThreadContext {
         &self.thread_context
+    }
+
+    pub fn is_boot_cpu_idle_task_view(
+        &self,
+        cpu_group: &CpuGroup,
+        boot_runqueue: &BootRunQueue,
+    ) -> bool {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return false;
+        };
+        self.lifecycle.state() == State::Ready
+            && boot_runqueue.is_boot_cpu_runqueue_view(cpu_group)
+            && self.cpu_ref == boot_cpu.cpu_ref()
+            && self.cpu_ref == boot_runqueue.cpu_ref()
+            && self.cpu_id() == boot_runqueue.cpu_id()
+            && self.task_id == boot_runqueue.idle_task_id()
+            && boot_runqueue.curr_task_id() == self.task_id
     }
 
     fn setup(
