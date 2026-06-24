@@ -32,7 +32,16 @@
 
 启动阶段逐项审计时，并发/同步控制必须作为固定检查面覆盖：本地中断开关、抢占开关、自旋锁、Mutex、读写锁、RCU、CPU bring-up 同步量、内存/地址转换同步和 TLB/cache flush 边界都要明确判断是否已由 `spec/model` 表达；若 model 已表达但实现映射不清，再修订 `spec/coding` 或生成约束。`impl/` 只作为生成结果和 Linux 对照样本，发现偏差时默认先修规格。
 
-### 最高优先级：Effective Context 与 CorePrepare 同步原语缺口
+### 最高优先级：状态机术语与 guard lowering 策略收敛
+
+进入 `SchedInitPhase` 审计前，先收敛两个全局语义问题，避免后续阶段继续沿用容易混淆的旧术语和过早的 guard 优化假设。
+
+1. **P0 待执行：规范化状态机概念和术语**。当前 `Event::Setup` / `Event::Enable` 等实际表示对象生命周期状态转移过程，而不是“触发状态变化的外部信号”。应在 `spec/charter/main.md`、`spec/model/SEMANTICS.md`、model/coding 语义说明和关键规格定义中把核心术语收敛为：`State` 表示生命周期状态，`Transition` 表示改变生命周期状态的转移过程，`Action` 表示不改变主生命周期但执行对象行为的操作，`Event` 保留给真实外部事件、异步事件、硬件事件或 trace event。迁移期可让现有 `Event` 作为 legacy lifecycle transition alias 存在，但新增说明和后续审计应优先使用 `Transition` 语义。
+2. **P0 待执行：暂缓基于 Effective Context 的 guard 优化省略**。`BootPhaseContext` / Effective Context 只能提供当前调用点的上下文事实，不再作为默认省略 protocol guard 的依据。短期实现策略调整为“规格清楚、guard 明确、实现保守”：保留 parser/model 对 `within ... only-once` 的支持能力，但暂时从正式规格使用点移除 `only-once` 标记；guard lowering 先按非优化路径实现，除非某个 guard 本身就是无运行时代码的纯上下文事实。
+3. **P0 待执行：同步 model/coding 规则和现有说明**。修订 `spec/coding/arceos_ex.spec` 中关于 proof-only/elided guard 的表述，明确现阶段不依赖 `only-once` 做 guard 省略；把现有 “event/action 上下文需求” 讨论中的术语同步到 `Transition` / `Action` / `Event` 的新边界。
+4. **P0 待执行：验证并提交后再恢复启动阶段审计**。完成上述语义收敛后运行 `make verify` 和 `git diff --check`；若只改文档和规格语义说明，不要求运行完整实现测试。提交后再继续 `/tmp/sched_init_audit_steps.md` 中的 `SchedInitPhase` 第 1 步。
+
+### 已完成专题：Effective Context 与 CorePrepare 同步原语缺口
 
 以下各项作为当前启动阶段审计的最高优先级。`Effective Context` 已先在 `spec/charter/main.md` 形成首轮概念结论，下一步必须落到 `spec/model`、`spec/coding` 正式规格中，作为 Mutex、RwLock、RawSpinLock、LocalInterruptControl、RCU 等 guard 建模和代码生成约束的共同前提。修复顺序仍遵循先规格、再 coding 映射、最后确认 `impl/` 生成/实现结果的原则。
 
@@ -83,7 +92,7 @@
 
 1. **P0 已完成首轮：补齐 `PrintkBuffer.setup()` 的 `LocalInterruptControl` wiring**。对照 Linux `setup_log_buf(0)` 的 `local_irq_save(flags)` / `local_irq_restore(flags)`，已修订 model/coding，使 `PrintkBuffer.Event::Setup` 中切换 active printk buffer 和复制既有 records 的局部临界区在正式 local-interrupt context 内执行，并依赖已有 `BootCpuLocalInterrupt: LocalInterruptControl` 的 ready/disabled 状态。实现侧在当前 `BootPhaseContext` 下把该 guard 降为 proof-only/elided，但保留 source context、绑定 `BootCpuLocalInterrupt` 的可观测事实和 ready-check 约束，不再只观察 `PrintkBuffer` 内部 summary bool。
 2. **P0 已完成首轮：补齐 event/action body 有序语义工具计划**。正式规格允许 `within Context { ... }` 只包住需要保护的局部操作，前后可以有 `drives { ... }` 或其它块；parser/AST/JSON/model 现在保留 source-ordered body member 序列，derive/check 按该序列处理 `drives` 与嵌套 `within`，并保持旧的分类字段兼容。`PrintkBuffer.Event::Setup` 已用正式有序 body 表达 `setup_log_buf()` 的“前置动态缓冲准备 -> guarded active-buffer switch/copy -> 后续 remaining-record copy”路径，不再依赖注释说明局部保护范围。
-3. **P0 已完成首轮：补齐 context guard lowering 的 `only-once` 单次调用证明**。上下文叠加带来的 proof-only/elided guard 优化必须以该具体 lexical `within` 块在启动规格调用图中只被调用一次为前提；DSL 使用 `within ContextName only-once { ... }` 标记该断言，并由 model 工具从 `StartupTimeline.Event::Setup` 的 `drives` 图出发计数验证，证明失败即报错。当前已给四个 proof-only guard lowering 用例加上 `only-once`：`ResourceTreeWriteContext`、`CpuHotplugReadContext`、`StaticBranchJumpLabelContext` 和 `PrintkBufferSetupLocalInterruptContext`。只有具备 model-verified `only-once` 时，代码生成才可进一步结合 Effective Context 和 guard-specific lowering 规则省略内部 guard 的运行时代码；否则即使外层属性看似覆盖，也不得默认省略可能多次进入的 guard 协议。
+3. **P0 已完成工具能力，后续按新策略暂缓使用：`only-once` 单次调用证明**。DSL 和 model 工具已支持 `within ContextName only-once { ... }`，并能从 `StartupTimeline.Event::Setup` 的 `drives` 图出发计数验证，证明失败即报错。由于基于 Effective Context 的 guard 省略会增加当前启动阶段审计难度，新的 P0 策略会先从正式规格使用点移除 `only-once` 标记，保留工具能力和测试，不再把它作为近期 guard lowering 前置。当前需要记录以备未来恢复的四个使用点是：`spec/model/boot/core-prepare/phase.spec` 中的 `ResourceTreeWriteContext`、`CpuHotplugReadContext`、`StaticBranchJumpLabelContext`，以及 `spec/model/boot/entry-successor/phase.spec` 中的 `PrintkBufferSetupLocalInterruptContext`。
 4. **P0 已完成首轮：复核 CorePrepare 剩余同步/并发面是否收口**。已完成 CorePrepare 已审计对象中的本地中断、抢占、自旋锁、Mutex、读写锁、RCU、per-cpu 同步、TLB/cache flush、CPU bring-up 同步量首轮复核；当前未保留未分类 P0 缺口。
 5. **P0 后续：进入下一个启动子阶段**。CorePrepare 收口后切换到下一个 boot 子阶段，继续按“先 Linux 边界、再 model/coding、最后 impl 验证”的顺序审计。
 
@@ -105,6 +114,7 @@
 ### 暂缓讨论：event/action 上下文需求声明
 
 - **P2 待讨论：为对象 event/action 定义上下文需求或能力声明机制**。该项暂不作为当前启动阶段审计的前置任务；它与 `within Context { ... }` 的边界还需要继续讨论，避免形成两套重复或不协调的上下文语义。近期仍以 `within Context` 和 guard 明确表达上下文来源；待 Mutex、RwLock、RCU、LocalInterruptControl 等 guard 规格实践稳定后，再回看是否需要 `requires_guard` / `requires_context` / `requires_capability` 等正式形态，用于表达 event/action 对当前 Effective Context 的只读检查需求。
+- **P2 长期：基于 Effective Context 的 guard 优化**。短期从正式规格使用点移除 `only-once` 并采用保守 guard lowering；长期可在基础规格稳定后恢复该优化。优化分两类：编译时优化可由 model 工具证明某个 lexical guarded block 单次可达、外层 Effective Context 已提供等价属性、且无 saved flags/token/owner/debug/memory-ordering 等协议副作用消费者时，生成 proof-only/elided guard；运行时优化可在保留 guard 对象和协议边界的前提下，根据实际 flags、嵌套计数、owner、CPU/task 状态或 target feature 做轻量 fast path。当前移除前需记录并保留的 `only-once` 恢复点为：`spec/model/boot/core-prepare/phase.spec` 中 `ResourceTreeWriteContext`、`CpuHotplugReadContext`、`StaticBranchJumpLabelContext`，以及 `spec/model/boot/entry-successor/phase.spec` 中 `PrintkBufferSetupLocalInterruptContext`。恢复该项前还应重新审查 `spec/model/SEMANTICS.md`、`spec/coding/arceos_ex.spec` 和工具测试，确保优化不改变规格语义，只影响可证明等价的 lowering。
 
 ## 下一阶段计划：Linux 6.12.37 PLIC 二进制复用
 
