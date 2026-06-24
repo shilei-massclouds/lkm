@@ -66,6 +66,14 @@ impl CpuHotplugState {
     }
 
     pub fn setup(&mut self, cpu_group: &CpuGroup, per_cpu_storage: &PerCpuStorage) -> EventResult {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
         if self.lifecycle.state() != State::Base
             || cpu_group.boot_cpu_state() != State::Online
             || per_cpu_storage.state() != State::Ready
@@ -78,7 +86,7 @@ impl CpuHotplugState {
             );
         }
 
-        self.hartid = cpu_group.boot_hartid();
+        self.hartid = boot_cpu.hartid();
         self.current = CpuHotplugLifecycleState::Online;
         self.target = CpuHotplugLifecycleState::Online;
         self.sync = CpuHotplugSyncState::Online;
@@ -102,7 +110,11 @@ impl CpuHotplugState {
     }
 
     fn ready_facts_hold(&self, cpu_group: &CpuGroup) -> bool {
-        self.hartid == cpu_group.boot_hartid()
+        self.hartid
+            == cpu_group
+                .boot_cpu()
+                .map(|cpu| cpu.hartid())
+                .unwrap_or(usize::MAX)
             && self.current == CpuHotplugLifecycleState::Online
             && self.target == CpuHotplugLifecycleState::Online
             && self.sync == CpuHotplugSyncState::Online

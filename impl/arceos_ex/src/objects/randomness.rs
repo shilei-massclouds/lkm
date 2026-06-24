@@ -64,6 +64,14 @@ impl Randomness {
     }
 
     pub fn setup(&mut self, cpu_group: &CpuGroup, time_seed: u64) -> EventResult {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        };
         if self.lifecycle.state() != State::Prepared || cpu_group.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -74,7 +82,7 @@ impl Randomness {
         }
 
         self.early_mix = mix_bytes(self.early_mix, &time_seed.to_le_bytes());
-        self.early_mix = mix_bytes(self.early_mix, &cpu_group.boot_hartid().to_le_bytes());
+        self.early_mix = mix_bytes(self.early_mix, &boot_cpu.hartid().to_le_bytes());
         self.fully_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,

@@ -1000,7 +1000,10 @@ impl Scheduler {
             && self.boot_idle_preemption.state() == State::Ready
             && self.boot_idle_preemption.disabled()
             && self.boot_runqueue.cpu_id() == 0
-            && self.boot_runqueue.boot_hartid() == cpu_group.boot_hartid()
+            && cpu_group
+                .boot_cpu()
+                .map(|cpu| self.boot_runqueue.boot_hartid() == cpu.hartid())
+                .unwrap_or(false)
             && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()
             && self.boot_runqueue.idle_task_id() == self.boot_idle_task.task_id()
     }
@@ -1410,7 +1413,7 @@ impl BootRunQueue {
         let Some(boot_entry) = cpu_id_map.entry(0) else {
             return self.failed_setup();
         };
-        if boot_entry.hartid() != cpu_group.boot_hartid() {
+        if cpu_group.boot_cpu().map(|cpu| cpu.hartid()) != Some(boot_entry.hartid()) {
             return self.failed_setup();
         }
 
@@ -1660,7 +1663,10 @@ impl BootIdleTask {
             || init_task.state() != State::Online
             || init_mm.state() != State::Ready
             || boot_runqueue.state() != State::Ready
-            || boot_runqueue.boot_hartid() != cpu_group.boot_hartid()
+            || cpu_group
+                .boot_cpu()
+                .map(|cpu| boot_runqueue.boot_hartid() != cpu.hartid())
+                .unwrap_or(true)
         {
             return failed_condition(
                 LifecycleEvent::Setup,

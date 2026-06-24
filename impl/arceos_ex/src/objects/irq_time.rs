@@ -2967,7 +2967,7 @@ fn plic_context_parent_has_external_input(node: DeviceNodeRef<'_>, cpu_group: &C
 }
 
 fn plic_external_context_index(node: DeviceNodeRef<'_>, cpu_group: &CpuGroup) -> Option<usize> {
-    let boot_intc_phandle = boot_hart_intc_phandle(node, cpu_group.boot_hartid())?;
+    let boot_intc_phandle = boot_hart_intc_phandle(node, cpu_group.boot_cpu()?.hartid())?;
     let Some(property) = node.property(b"interrupts-extended") else {
         return None;
     };

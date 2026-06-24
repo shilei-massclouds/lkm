@@ -2,7 +2,11 @@ use crate::{apps::smoke::SmokeResult, context::context, objects::printk};
 
 pub fn run() -> SmokeResult {
     let ctx = context();
-    let boot_hartid = ctx.cpu_group.boot_hartid();
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        printk::write_str("boot CPU missing\n");
+        return SmokeResult::Failed;
+    };
+    let boot_hartid = boot_cpu.hartid();
     let memory_ranges = ctx.early_dtb.memory_range_count();
 
     if !ctx.early_dtb.has_boot_hart(boot_hartid) {

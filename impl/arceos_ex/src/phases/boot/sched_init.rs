@@ -90,6 +90,7 @@ pub fn is_ready() -> bool {
 }
 
 fn sched_init_phase_ready(ctx: &Context) -> bool {
+    let boot_cpu = ctx.cpu_group.boot_cpu();
     crate::phases::boot::mm_core_init::is_ready()
         && ctx.scheduler.state() == State::Online
         && ctx.scheduler.scheduler_running()
@@ -101,7 +102,9 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.bit_wait_queue_table().bucket_count() != 0
         && ctx.scheduler.boot_runqueue().state() == State::Ready
         && ctx.scheduler.boot_runqueue().cpu_id() == 0
-        && ctx.scheduler.boot_runqueue().boot_hartid() == ctx.cpu_group.boot_hartid()
+        && boot_cpu
+            .map(|cpu| ctx.scheduler.boot_runqueue().boot_hartid() == cpu.hartid())
+            .unwrap_or(false)
         && ctx.scheduler.boot_runqueue().class_queues_ready()
         && ctx.scheduler.boot_runqueue().attached_to_root_domain()
         && !ctx.scheduler.boot_runqueue().balance_push_enabled()

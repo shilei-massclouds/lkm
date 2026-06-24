@@ -120,9 +120,10 @@ impl BootCurrentCpu {
     }
 
     pub fn enable(&mut self, cpu_group: &CpuGroup) -> EventResult {
+        let boot_cpu = cpu_group.boot_cpu();
         if self.lifecycle.state() != State::Ready
             || cpu_group.state() != State::Prepared
-            || cpu_group.boot_hartid() != self.hartid
+            || boot_cpu.map(|cpu| cpu.hartid()) != Some(self.hartid)
         {
             return failed_condition(
                 LifecycleEvent::Enable,

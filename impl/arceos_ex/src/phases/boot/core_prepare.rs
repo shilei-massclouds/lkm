@@ -98,11 +98,12 @@ fn checkpoint_setup_nr_cpu_ids(
     cpu_group: &crate::objects::cpu_group::CpuGroup,
 ) -> EventResult {
     let boot_entry = cpu_id_map.entry(0);
+    let boot_cpu = cpu_group.boot_cpu();
     if cpu_id_map.state() != State::Ready
         || cpu_group.state() != State::Ready
         || cpu_group.boot_cpu_state() != State::Online
         || cpu_id_map.count() == 0
-        || boot_entry.map(|entry| entry.hartid()) != Some(cpu_group.boot_hartid())
+        || boot_entry.map(|entry| entry.hartid()) != boot_cpu.map(|cpu| cpu.hartid())
         || boot_entry.map(|entry| entry.logical_id()) != Some(0)
         || boot_entry.map(|entry| entry.kind())
             != Some(crate::objects::cpu_id_map::CpuIdMapEntryKind::BootCpu)
