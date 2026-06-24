@@ -1,11 +1,9 @@
 use super::{
-    cpu::{CpuRole, CpuView},
+    cpu::{CpuRef, CpuRole, CpuView, MAX_CPUS},
     cpu_group::CpuGroup,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
-
-const MAX_CPUS: usize = 16;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CpuIdMapEntryKind {
@@ -15,6 +13,7 @@ pub enum CpuIdMapEntryKind {
 
 #[derive(Clone, Copy)]
 pub struct CpuIdMapEntry {
+    cpu_ref: CpuRef,
     logical_id: usize,
     hartid: usize,
     kind: CpuIdMapEntryKind,
@@ -23,10 +22,15 @@ pub struct CpuIdMapEntry {
 impl CpuIdMapEntry {
     const fn empty() -> Self {
         Self {
+            cpu_ref: CpuRef::invalid(),
             logical_id: usize::MAX,
             hartid: usize::MAX,
             kind: CpuIdMapEntryKind::BootCpu,
         }
+    }
+
+    pub const fn cpu_ref(self) -> CpuRef {
+        self.cpu_ref
     }
 
     pub const fn logical_id(self) -> usize {
@@ -70,6 +74,7 @@ impl CpuIdMap {
             || boot_cpu.role() != CpuRole::Boot
             || boot_cpu.logical_id() != 0
             || boot_cpu.hartid() == usize::MAX
+            || cpu_group.cpu_ref_at(0) != Some(boot_cpu.cpu_ref())
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -80,7 +85,7 @@ impl CpuIdMap {
         }
 
         self.entries = [CpuIdMapEntry::empty(); MAX_CPUS];
-        self.entries[0] = entry_from_cpu(boot_cpu);
+        self.entries[0] = entry_from_cpu_ref(boot_cpu.cpu_ref(), boot_cpu);
         self.count = 1;
 
         self.lifecycle.transition(
@@ -96,7 +101,7 @@ impl CpuIdMap {
             || cpu_group.state() != State::Ready
             || !cpu_group.logical_id_index_ready()
             || !cpu_group.boot_cpu_index_zero()
-            || self.entry(0).map(|entry| entry.hartid()) != cpu_group.cpu(0).map(|cpu| cpu.hartid())
+            || self.entry(0).map(|entry| entry.cpu_ref()) != cpu_group.cpu_ref_at(0)
             || self.entry(0).map(|entry| entry.kind()) != Some(CpuIdMapEntryKind::BootCpu)
         {
             return failed_condition(
@@ -108,18 +113,24 @@ impl CpuIdMap {
         }
 
         let mut entries = [CpuIdMapEntry::empty(); MAX_CPUS];
-        entries[0] = self.entries[0];
-        let mut count = 1usize;
+        let mut count = 0usize;
 
-        let mut logical_id = 1usize;
+        let mut logical_id = 0usize;
         while logical_id < cpu_group.possible_cpu_count() {
+            let Some(cpu_ref) = cpu_group.possible_cpu_ref_at(logical_id) else {
+                return self.failed_setup();
+            };
             let Some(cpu) = cpu_group.cpu(logical_id) else {
                 return self.failed_setup();
             };
-            if count >= MAX_CPUS || contains_hartid(&entries, count, cpu.hartid()) {
+            if cpu.cpu_ref() != cpu_ref
+                || count >= MAX_CPUS
+                || contains_cpu_ref(&entries, count, cpu_ref)
+                || contains_hartid(&entries, count, cpu.hartid())
+            {
                 return self.failed_setup();
             }
-            entries[count] = entry_from_cpu(cpu);
+            entries[count] = entry_from_cpu_ref(cpu_ref, cpu);
             count += 1;
             logical_id += 1;
         }
@@ -144,7 +155,10 @@ impl CpuIdMap {
     }
 
     pub fn entry(&self, logical_id: usize) -> Option<CpuIdMapEntry> {
-        if logical_id < self.count && self.entries[logical_id].logical_id == logical_id {
+        if logical_id < self.count
+            && self.entries[logical_id].logical_id == logical_id
+            && self.entries[logical_id].cpu_ref.logical_id() == logical_id
+        {
             Some(self.entries[logical_id])
         } else {
             None
@@ -161,8 +175,9 @@ impl CpuIdMap {
     }
 }
 
-fn entry_from_cpu(cpu: CpuView) -> CpuIdMapEntry {
+fn entry_from_cpu_ref(cpu_ref: CpuRef, cpu: CpuView) -> CpuIdMapEntry {
     CpuIdMapEntry {
+        cpu_ref,
         logical_id: cpu.logical_id(),
         hartid: cpu.hartid(),
         kind: match cpu.role() {
@@ -170,6 +185,17 @@ fn entry_from_cpu(cpu: CpuView) -> CpuIdMapEntry {
             CpuRole::Secondary => CpuIdMapEntryKind::SecondaryCpu,
         },
     }
+}
+
+fn contains_cpu_ref(entries: &[CpuIdMapEntry; MAX_CPUS], count: usize, cpu_ref: CpuRef) -> bool {
+    let mut index = 0usize;
+    while index < count {
+        if entries[index].cpu_ref == cpu_ref {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }
 
 fn contains_hartid(entries: &[CpuIdMapEntry; MAX_CPUS], count: usize, hartid: usize) -> bool {

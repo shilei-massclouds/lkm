@@ -30,6 +30,7 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     };
     if boot_entry.logical_id() != 0
+        || boot_entry.cpu_ref() != boot_cpu.cpu_ref()
         || boot_entry.kind() != CpuIdMapEntryKind::BootCpu
         || boot_entry.hartid() != boot_cpu.hartid()
         || owner_boot_cpu.cpu_ref() != boot_cpu.cpu_ref()
@@ -73,7 +74,13 @@ pub fn run() -> SmokeResult {
             printk::write_str("secondary CPU map entry missing\n");
             return SmokeResult::Failed;
         };
+        let Some(possible_cpu_ref) = ctx.cpu_group.possible_cpu_ref_at(logical_id) else {
+            printk::write_str("secondary possible CPU ref missing\n");
+            return SmokeResult::Failed;
+        };
         if entry.logical_id() != logical_id
+            || entry.cpu_ref() != cpu.cpu_ref()
+            || entry.cpu_ref() != possible_cpu_ref
             || entry.kind() != CpuIdMapEntryKind::SecondaryCpu
             || entry.hartid() != cpu.hartid()
         {
@@ -81,6 +88,13 @@ pub fn run() -> SmokeResult {
             return SmokeResult::Failed;
         }
         logical_id += 1;
+    }
+    if cpu_id_map
+        .entry(ctx.cpu_group.possible_cpu_count())
+        .is_some()
+    {
+        printk::write_str("CpuIdMap exposes entry outside CpuGroup possible set\n");
+        return SmokeResult::Failed;
     }
     if !ctx.secondary_cpus.all_match_cpu_group_views(&ctx.cpu_group) {
         printk::write_str("SecondaryCpuStore and CpuGroup views diverged\n");

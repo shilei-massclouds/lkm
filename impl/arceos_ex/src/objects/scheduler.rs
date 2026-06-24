@@ -1376,7 +1376,7 @@ impl BootRunQueue {
         let Some(boot_cpu) = cpu_group.boot_cpu() else {
             return self.failed_setup();
         };
-        if boot_cpu.cpu_ref().logical_id() != boot_entry.logical_id()
+        if boot_cpu.cpu_ref() != boot_entry.cpu_ref()
             || boot_cpu.hartid() != boot_entry.hartid()
             || !boot_cpu.cpu_ref().is_boot_cpu()
             || !cpu_group.possible_contains(boot_cpu.cpu_ref())
