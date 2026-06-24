@@ -61,6 +61,7 @@ predicate ioremap_unmapping_guard_contract_ready<T, A>(ioremap: T, allocator: A)
 predicate ioremap_mapping_sync_contract_ready<T, A>(ioremap: T, allocator: A) -> bool;
 predicate ioremap_unmapping_flush_contract_ready<T, A>(ioremap: T, allocator: A) -> bool;
 predicate ioremap_failure_rollback_contract_ready<T, A>(ioremap: T, allocator: A) -> bool;
+predicate ioremap_runtime_sync_inherits_vmalloc_contract<T, A>(ioremap: T, allocator: A) -> bool;
 
 predicate ioremap_mapping_created<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_owner_bound<T, M, D>(ioremap: T, mapping: M, device: D) -> bool;

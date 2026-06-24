@@ -52,10 +52,15 @@ predicate vmalloc_allocator_unmapping_guard_contract_ready<T>(allocator: T) -> b
 predicate vmalloc_allocator_mapping_sync_contract_ready<T, S>(allocator: T, swapper_vm: S) -> bool;
 predicate vmalloc_allocator_unmapping_flush_contract_ready<T, S>(allocator: T, swapper_vm: S) -> bool;
 predicate vmalloc_allocator_failure_rollback_contract_ready<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_setup_runtime_locking_spec_required<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_setup_boot_lowering_proof_only<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_runtime_vmap_locking_contract_deferred<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_cross_cpu_vmalloc_flush_deferred<T>(allocator: T) -> bool;
 predicate vmap_node_guard_contract_ready<T>(node_set: T) -> bool;
+predicate vmap_node_runtime_spinlock_contract_deferred<T>(node_set: T) -> bool;
 predicate vfree_deferred_guard_contract_ready<T>(deferred_set: T) -> bool;
 predicate vfree_rcu_runtime_path_deferred<T>(deferred_set: T) -> bool;
+predicate vmap_block_queue_runtime_lock_contract_deferred<T>(queues: T) -> bool;
 
 predicate vmap_area_ref_ready<T>(area: T) -> bool;
 predicate vmap_area_allocated<T, A>(area: T, allocator: A) -> bool;

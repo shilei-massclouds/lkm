@@ -1180,6 +1180,8 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 `MmCoreInitPhase` 已正式落到 `spec/model/boot/mm-core-init/`。实现侧必须保持与模型一致的阶段边界：入口是 `CorePreparePhase.Ready`、`ExceptionStream.Ready`、`MemBlock.Online`、`PageMetadataMap.Ready`、`DmaCachePolicy.Ready`、`StaticBranch.Ready` 和 `SystemExclusive`；出口是 `PageAllocator.Ready`、`MemBlock.Offline`、`SlubSubsystem.Ready`、`PageTableCaches.Ready`、`VmallocAllocator.Ready`、`MmStructCache.Ready`。本阶段只能消费已经建立的 `PageMetadataMap`；`mem_init()` 开头的 `BUG_ON(!mem_map)` 对应 checkpoint，不在 `mm_core_init()` 内推进 `PageMetadataMap.setup()`。
 
+`SystemExclusive` / `BootPhaseContext` 只影响实现 lowering：某些 Linux guard 在当前单 CPU、单任务、本地中断关闭、抢占关闭的 setup 调用点可以降为 proof-only fact。它不能作为规格省略锁、irqsave、preempt、RCU、per-cpu 或 TLB/cache 同步语义的理由。`mm_core_init()` 中每个对象/API 都必须明确属于三类之一：本阶段实际执行同步协议、当前 boot 调用点 proof-only lowering、或后续 runtime consumer 触发时再展开。凡是 `Ready` 后暴露 runtime API 的对象，若完整并发协议尚未展开，必须保留显式 deferred contract，而不是用顶层 context 抵消。
+
 `MemoryTopology.setup()` 只把 CorePrepare 已经 `Ready` 的 `Zones` 投影为 allocator-visible 的 `MemoryNode`/`ZoneSet` 视图；它不得重新划分 zone、不得从 `MemBlock` 分配或创建 `mem_map`/page metadata，也不得把 `ZoneSet` 表达为对真实 Linux `node_zones` 的新所有权。`PageAllocator.preset()` 只做 `build_all_zonelists(NULL)` 和 `page_alloc_init_cpuhp()` 对应的拓扑与 hook 建立：`ZonelistSet.Ready`、fallback zoneref 顺序、NULL sentinel、`CPUHP_PAGE_ALLOC` step 注册。Linux boot path 中 `__build_all_zonelists(NULL)` 在 `zonelist_update_seq` 的 `write_seqlock_irqsave()` 区间内执行，并包在 `printk_deferred_enter()` / `printk_deferred_exit()` 之间；当前实现处于 `SystemExclusive` boot 阶段，可把这两项记录为 ready facts，而不提前引入完整 runtime seqlock reader/retry 机制。`build_all_zonelists_init()` 随后为 possible CPU 初始化 boot pageset；实现必须把该 checkpoint 绑定到已 `Ready` 的 `PerCpuStorage` first chunk CPU 数。它不得释放 MemBlock 页，也不得把自身推进到 `Ready`。
 
 `MemoryDebugHardening.setup()` 对应 `mem_debugging_and_hardening_init()` 的默认策略收敛。它必须依赖并记录已扫描的 `EarlyParam.Ready`，并使用既有 `StaticBranch` registry 写入 `InitOnAlloc`、`InitOnFree`、`DebugPageAlloc`、`DebugGuardPage` 和 `CheckPages` static keys；当前实现暂不支持 Linux `init_on_alloc`、`init_on_free`、page poisoning、`debug_pagealloc`、guard page 等 early-param 开关，必须把这些策略记录为 trimmed/default-policy facts，而不得让规格暗示已经完整消费参数语义。
@@ -1205,6 +1207,7 @@ free-list 必须采用 intrusive list：`BuddyFreeArea` 只持有 list head 和 
 与 `PageAllocatorType.Action::FreePages(page_ref, order)`；coding 层可按 Rust 需要调整参数顺序或封装形式，但必须保留
 order、GFP 约束、返回 `PageRef`、caller-owned 语义和释放时 order 必须匹配的契约。返回的 `PageRef` 表示 2^order 个连续
 buddy pages，并且必须可通过已经建立的线性映射进行受限读写；它不得暴露 buddy free list 或 zone 内部结构。
+完整 Linux runtime buddy 并发协议仍未在本阶段展开：zone lock、PCP lock、irqsave、preempt 规则和 reclaim/compaction 相关同步必须保留为 runtime deferred contract。当前 `alloc_pages/free_pages` smoke 只能证明正式 API 的最小对象语义，不证明通用多 CPU/中断/抢占环境下的完整锁模型。
 
 `PageRef` 的实现语义应对齐 Linux `struct page *`：它引用 `PageMetadataMap` 中的具体 page metadata 项，而不是直接等同
 物理地址或线性映射虚拟地址。`PageMetadataMap` 对应 Linux `mem_map` 或 RISC-V `SPARSEMEM_VMEMMAP` 下的 `vmemmap` 视图，
@@ -1233,6 +1236,7 @@ radix tree node cache 和 maple node cache 注册为 `SlubCacheRegistry` 中的 
 `Base`、`Prepared`、`Ready`、`Online` 映射。当前 `mm_core_init()` 只能推进到 `Up/Ready`；
 `kmem_cache_init_late()` 只能通过 `SlubSubsystem.setup_flush_workqueue()` 记录 flush workqueue 事实，不得写入 `Full`；
 `SlubSubsystem.enable()` / `Full/Online` 留给后续 `slab_sysfs_init()` 类 late initcall。
+Linux `kmem_cache_init()` 在 bootstrap 阶段明确尚不需要 `slab_mutex`，因此当前实现不得伪造 slab_mutex lock/unlock；但这不表示 SLUB 没有锁模型。SLUB runtime 的 per-cpu/node/global locks、slab list mutation、slab mutex、sysfs/FULL 生命周期、CPU hotplug callback 和 debug/freelist hardening 同步都必须作为显式 deferred contract 保留，直到具体 runtime consumer 需要展开。
 
 当前第一轮 `arceos_ex` SLUB/kmalloc 实现只要求 Linux-like page-backed slab：`KmallocCaches` 使用固定默认 size classes
 `8/16/32/64/128/256/512/1024/2048/4096/8192`，请求 size 通过向上取整选择 size class；当某个 cache 没有空闲对象时，必须通过
@@ -1261,6 +1265,7 @@ alignment fallback 均 deferred。
 内的动态容器能力：`Vec` 增长导致的单次 `Layout` 若超过 `KernelGlobalAllocator` 第一轮 `size <= 8192` 边界，应以
 allocation failure 处理，而不能被解释为 `Vec` 语义本身可用性失效。涉及 initcall 批量对象创建的 smoke 应覆盖这种边界，
 避免普通 `push` 触发 `alloc_error_handler` 后只留下不可定位的关机日志。
+`KernelGlobalAllocator` 和 `DynamicContainerRuntime` 的 runtime 同步能力继承自 SLUB/kmalloc；它们本身不消除底层 SLUB runtime 锁模型的 deferred 状态。
 
 `VmallocAllocator` 的边界是 vmalloc/vmap 虚拟地址区间管理和 vmap 映射执行，不是物理资源策略层，也不是
 MMIO 属性策略层。`PageTableCaches.setup()` 承担 RISC-V 当前主线的 `VMALLOC_START..VMALLOC_END`
@@ -1298,6 +1303,7 @@ ready/failure fact 暴露；超出 `VMALLOC_END` 的 area 必须被拒绝。`Vma
 `free_vm_area()` 明确回滚该 area。当前实现使用同步 `sfence.vma` 表示本轮本地 kernel mapping
 可见性边界；Linux RISC-V `new_vmalloc[]` 式跨 CPU lazy fault 修正、完整远端 shootdown batching、lazy
 purge 和 RCU/free ordering 仍记录为 deferred，不得在本轮假装已完整覆盖。
+`vmalloc_init()` 建立的 per-cpu `vmap_block_queue`、`vfree_deferred`、vmap node busy/lazy/pool locks 和 reclaim hook 都属于正式同步面。当前 setup 可在 `SystemExclusive` 下发布这些结构和 guard contracts；但 runtime vmap locks、per-cpu queue locks、vfree lazy purge、RCU/free ordering 以及跨 CPU vmalloc shootdown 不能因 boot context 省略，必须继续作为 deferred contract 或后续 consumer gap 处理。
 
 `VmallocAllocator.unmap_page_range()` / `free_vm_area()` 必须保持 Linux-like teardown 顺序：先清除
 对应 `VmapMapping` 的页表映射并记录 removed fact，再释放 `VmapArea` 的 busy/`vm_struct`/`vmap_area`
@@ -1317,6 +1323,7 @@ metadata。重复 unmap、重复 free、未 unmap 就 free 都必须失败。当
 如果 `get_vm_area()` 已经成功但后续 `map_page_range()`、membase 计算或 ioremap mapping facts 校验失败，
 `Ioremap` 必须通过 `VmallocAllocator.free_vm_area()` 或 `unmap_page_range()+free_vm_area()` 回滚；
 不能把 `VM_IOREMAP` area 泄漏成 busy，也不能留下已安装但没有 `IoMemoryMapping` owner 的页表映射。
+`Ioremap` 的 mapping/unmapping 同步继承 `VmallocAllocator` 的 guard、mapping sync 和 flush contract。当前 RISC-V plain-device path 可用本地 `sfence.vma` 证明本轮映射可见性；WC/NC/normal alias policy、远端 shootdown 和完整 teardown 仍不得标成已完成。
 
 MMIO 属性必须显式建模，不能把“能通过 PTE 访问”偷换成“属性完整正确”。参照 Linux RISC-V
 `_PAGE_IOREMAP`/`PAGE_KERNEL_IO`、`pgprot_noncached()` 和 `pgprot_writecombine()` 的分工，

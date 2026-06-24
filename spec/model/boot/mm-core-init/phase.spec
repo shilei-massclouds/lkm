@@ -228,7 +228,10 @@ object PageAllocator: PageAllocatorType {
                 ensures {
                     page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
                     page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
+                    page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
+                    page_allocator_zonelist_update_seq_irqsave_guard_boot_lowering_proof_only(PageAllocator);
                     page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
+                    page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
                     page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
                     page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
                     page_allocator_boot_pagesets_initialized_for_possible_cpus(
@@ -246,7 +249,10 @@ object PageAllocator: PageAllocatorType {
             ZonelistSet.state == State::Ready;
             page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
             page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
+            page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
+            page_allocator_zonelist_update_seq_irqsave_guard_boot_lowering_proof_only(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
+            page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
             page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
             page_allocator_boot_pagesets_initialized_for_possible_cpus(
@@ -294,6 +300,8 @@ object PageAllocator: PageAllocatorType {
                     page_allocator_alloc_pages_api_ready(PageAllocator);
                     page_allocator_free_pages_api_ready(PageAllocator);
                     page_allocator_page_ref_conversion_api_ready(PageAllocator);
+                    page_allocator_runtime_zone_locking_contract_deferred(PageAllocator);
+                    page_allocator_runtime_pcp_locking_contract_deferred(PageAllocator);
                 }
             }
         }
@@ -305,7 +313,10 @@ object PageAllocator: PageAllocatorType {
             ZonelistSet.state == State::Ready;
             page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
             page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
+            page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
+            page_allocator_zonelist_update_seq_irqsave_guard_boot_lowering_proof_only(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
+            page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
             page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
             page_allocator_boot_pagesets_initialized_for_possible_cpus(
@@ -336,6 +347,8 @@ object PageAllocator: PageAllocatorType {
             page_allocator_alloc_pages_api_ready(PageAllocator);
             page_allocator_free_pages_api_ready(PageAllocator);
             page_allocator_page_ref_conversion_api_ready(PageAllocator);
+            page_allocator_runtime_zone_locking_contract_deferred(PageAllocator);
+            page_allocator_runtime_pcp_locking_contract_deferred(PageAllocator);
         }
 
     }
@@ -636,6 +649,7 @@ object SlubSubsystem: MemoryObject {
                     boot_kmem_cache_node_ready(SlubSubsystem);
                     boot_kmem_cache_node_is_slub_cache_instance(SlubSubsystem);
                     slub_state_partial(SlubSubsystem);
+                    slub_subsystem_slab_mutex_not_required_before_full(SlubSubsystem);
                 }
             }
         }
@@ -648,6 +662,7 @@ object SlubSubsystem: MemoryObject {
             boot_kmem_cache_node_ready(SlubSubsystem);
             boot_kmem_cache_node_is_slub_cache_instance(SlubSubsystem);
             slub_state_partial(SlubSubsystem);
+            slub_subsystem_slab_mutex_not_required_before_full(SlubSubsystem);
         }
 
         events {
@@ -674,6 +689,8 @@ object SlubSubsystem: MemoryObject {
                     slub_subsystem_kmalloc_api_ready(SlubSubsystem);
                     slub_subsystem_kzalloc_api_ready(SlubSubsystem);
                     slub_subsystem_kfree_api_ready(SlubSubsystem);
+                    slub_subsystem_runtime_locking_contract_deferred(SlubSubsystem);
+                    slub_subsystem_slab_mutex_not_required_before_full(SlubSubsystem);
                 }
             }
         }
@@ -694,6 +711,8 @@ object SlubSubsystem: MemoryObject {
             slub_subsystem_kmalloc_api_ready(SlubSubsystem);
             slub_subsystem_kzalloc_api_ready(SlubSubsystem);
             slub_subsystem_kfree_api_ready(SlubSubsystem);
+            slub_subsystem_runtime_locking_contract_deferred(SlubSubsystem);
+            slub_subsystem_slab_mutex_not_required_before_full(SlubSubsystem);
         }
 
         processes {
@@ -790,6 +809,10 @@ object KernelGlobalAllocator: KernelGlobalAllocatorType {
                     kernel_global_allocator_alloc_api_ready(KernelGlobalAllocator);
                     kernel_global_allocator_alloc_zeroed_api_ready(KernelGlobalAllocator);
                     kernel_global_allocator_dealloc_api_ready(KernelGlobalAllocator);
+                    kernel_global_allocator_runtime_sync_inherits_slub_contract(
+                        KernelGlobalAllocator,
+                        SlubSubsystem
+                    );
                 }
             }
         }
@@ -804,6 +827,10 @@ object KernelGlobalAllocator: KernelGlobalAllocatorType {
             kernel_global_allocator_alloc_api_ready(KernelGlobalAllocator);
             kernel_global_allocator_alloc_zeroed_api_ready(KernelGlobalAllocator);
             kernel_global_allocator_dealloc_api_ready(KernelGlobalAllocator);
+            kernel_global_allocator_runtime_sync_inherits_slub_contract(
+                KernelGlobalAllocator,
+                SlubSubsystem
+            );
         }
     }
 }
@@ -829,6 +856,10 @@ object DynamicContainerRuntime: MemoryObject {
                     dynamic_container_vec_api_ready(DynamicContainerRuntime);
                     dynamic_container_list_api_ready(DynamicContainerRuntime);
                     dynamic_container_set_api_ready(DynamicContainerRuntime);
+                    dynamic_container_runtime_sync_inherits_global_allocator_contract(
+                        DynamicContainerRuntime,
+                        KernelGlobalAllocator
+                    );
                 }
             }
         }
@@ -842,6 +873,10 @@ object DynamicContainerRuntime: MemoryObject {
             dynamic_container_vec_api_ready(DynamicContainerRuntime);
             dynamic_container_list_api_ready(DynamicContainerRuntime);
             dynamic_container_set_api_ready(DynamicContainerRuntime);
+            dynamic_container_runtime_sync_inherits_global_allocator_contract(
+                DynamicContainerRuntime,
+                KernelGlobalAllocator
+            );
         }
     }
 }
@@ -1019,6 +1054,7 @@ object VmapNodeSet: MemoryObject {
                     vmap_node_partitions_address_space(VmapNodeSet, VmapAddressSpace);
                     vmap_addr_to_node_route_ready(VmapNodeSet);
                     vmap_node_guard_contract_ready(VmapNodeSet);
+                    vmap_node_runtime_spinlock_contract_deferred(VmapNodeSet);
                 }
             }
         }
@@ -1030,6 +1066,7 @@ object VmapNodeSet: MemoryObject {
             vmap_node_partitions_address_space(VmapNodeSet, VmapAddressSpace);
             vmap_addr_to_node_route_ready(VmapNodeSet);
             vmap_node_guard_contract_ready(VmapNodeSet);
+            vmap_node_runtime_spinlock_contract_deferred(VmapNodeSet);
         }
     }
 }
@@ -1052,6 +1089,7 @@ object VmapBlockQueues: MemoryObject {
                 ensures {
                     vmap_block_queues_ready(VmapBlockQueues, PerCpuStorage);
                     vmap_block_fast_path_metadata_ready(VmapBlockQueues);
+                    vmap_block_queue_runtime_lock_contract_deferred(VmapBlockQueues);
                 }
             }
         }
@@ -1061,6 +1099,7 @@ object VmapBlockQueues: MemoryObject {
         invariant {
             vmap_block_queues_ready(VmapBlockQueues, PerCpuStorage);
             vmap_block_fast_path_metadata_ready(VmapBlockQueues);
+            vmap_block_queue_runtime_lock_contract_deferred(VmapBlockQueues);
         }
     }
 }
@@ -1147,6 +1186,9 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_mapping_sync_contract_ready(VmallocAllocator, SwapperVm);
                     vmalloc_allocator_unmapping_flush_contract_ready(VmallocAllocator, SwapperVm);
                     vmalloc_allocator_failure_rollback_contract_ready(VmallocAllocator);
+                    vmalloc_allocator_setup_runtime_locking_spec_required(VmallocAllocator);
+                    vmalloc_allocator_setup_boot_lowering_proof_only(VmallocAllocator);
+                    vmalloc_allocator_runtime_vmap_locking_contract_deferred(VmallocAllocator);
                     vmalloc_allocator_cross_cpu_vmalloc_flush_deferred(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
@@ -1184,6 +1226,9 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_mapping_sync_contract_ready(VmallocAllocator, SwapperVm);
             vmalloc_allocator_unmapping_flush_contract_ready(VmallocAllocator, SwapperVm);
             vmalloc_allocator_failure_rollback_contract_ready(VmallocAllocator);
+            vmalloc_allocator_setup_runtime_locking_spec_required(VmallocAllocator);
+            vmalloc_allocator_setup_boot_lowering_proof_only(VmallocAllocator);
+            vmalloc_allocator_runtime_vmap_locking_contract_deferred(VmallocAllocator);
             vmalloc_allocator_cross_cpu_vmalloc_flush_deferred(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
         }
@@ -1230,6 +1275,7 @@ object Ioremap: AddressSpaceObject {
                     ioremap_mapping_sync_contract_ready(Ioremap, VmallocAllocator);
                     ioremap_unmapping_flush_contract_ready(Ioremap, VmallocAllocator);
                     ioremap_failure_rollback_contract_ready(Ioremap, VmallocAllocator);
+                    ioremap_runtime_sync_inherits_vmalloc_contract(Ioremap, VmallocAllocator);
                 }
             }
         }
@@ -1257,6 +1303,7 @@ object Ioremap: AddressSpaceObject {
             ioremap_mapping_sync_contract_ready(Ioremap, VmallocAllocator);
             ioremap_unmapping_flush_contract_ready(Ioremap, VmallocAllocator);
             ioremap_failure_rollback_contract_ready(Ioremap, VmallocAllocator);
+            ioremap_runtime_sync_inherits_vmalloc_contract(Ioremap, VmallocAllocator);
         }
 
         actions {

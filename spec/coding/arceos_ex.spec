@@ -28,6 +28,9 @@ predicate arceos_ex_must_page_allocator_expose_linux_like_alloc_pages_api() -> b
 predicate arceos_ex_must_page_allocator_alloc_pages_return_owned_linear_mapped_pageref() -> bool;
 predicate arceos_ex_must_page_allocator_free_pages_match_alloc_order() -> bool;
 predicate arceos_ex_must_page_allocator_smoke_cover_page_alloc_free_read_write() -> bool;
+predicate arceos_ex_must_mm_core_init_model_sync_even_when_boot_lowering_elides_code() -> bool;
+predicate arceos_ex_must_page_allocator_preset_record_zonelist_irqsave_protocol() -> bool;
+predicate arceos_ex_must_page_allocator_runtime_locking_remain_explicit_deferred() -> bool;
 predicate arceos_ex_must_memblock_disable_reaches_offline_not_destroyed() -> bool;
 predicate arceos_ex_must_swiotlb_setup_before_memblock_disable() -> bool;
 predicate arceos_ex_must_memory_debug_hardening_use_static_branch_registry() -> bool;
@@ -43,6 +46,8 @@ predicate arceos_ex_must_slub_kmalloc_use_slab_slot_freelist() -> bool;
 predicate arceos_ex_must_slub_kzalloc_zero_returned_object() -> bool;
 predicate arceos_ex_must_slub_kfree_recycle_object_to_cache() -> bool;
 predicate arceos_ex_must_slub_first_round_defer_complex_linux_paths() -> bool;
+predicate arceos_ex_must_slub_bootstrap_record_slab_mutex_boundary() -> bool;
+predicate arceos_ex_must_slub_runtime_locking_remain_explicit_deferred() -> bool;
 predicate arceos_ex_must_slub_smoke_cover_kmalloc_kzalloc_kfree() -> bool;
 predicate arceos_ex_must_global_allocator_setup_after_slub_ready() -> bool;
 predicate arceos_ex_must_global_allocator_implement_core_alloc_globalalloc() -> bool;
@@ -60,6 +65,7 @@ predicate arceos_ex_must_vmalloc_map_page_range_record_each_mapping_action() -> 
 predicate arceos_ex_must_vmalloc_support_preallocated_windows_and_reject_duplicate_mapping() -> bool;
 predicate arceos_ex_must_vmalloc_allocate_l0_windows_on_demand() -> bool;
 predicate arceos_ex_must_vmalloc_unmap_before_free_vmap_area() -> bool;
+predicate arceos_ex_must_vmalloc_sync_and_locking_contracts_remain_visible() -> bool;
 predicate arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external_to_vmalloc() -> bool;
 predicate arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only() -> bool;
 predicate arceos_ex_must_ioremap_model_mmio_attribute_policy_explicitly() -> bool;
@@ -748,6 +754,43 @@ type ArceosExMmCoreInitCodingMust {
         arceos_ex_must_page_allocator_free_pages_match_alloc_order();
 
         /*
+         * mm_core_init synchronization surface:
+         *
+         * BootPhaseContext only justifies proof-only lowering for selected
+         * boot-time call sites. It must not make Linux lock, irq, preempt,
+         * RCU, per-cpu, or TLB/cache requirements disappear from the formal
+         * model. For every mm_core_init object that publishes a later runtime
+         * API, the model/coding surface must say whether the sync protocol is
+         * executed in setup, boot-elided as proof-only, or explicitly deferred
+         * to the runtime consumer.
+         */
+        arceos_ex_must_mm_core_init_model_sync_even_when_boot_lowering_elides_code();
+
+        /*
+         * Zonelist update protocol:
+         *
+         * Linux __build_all_zonelists(NULL) runs inside
+         * write_seqlock_irqsave(&zonelist_update_seq, flags) and
+         * printk_deferred_enter()/exit(). The current target may lower that
+         * boot call site to proof-only facts under SystemExclusive, but it
+         * must still record that the irqsave seqlock and printk-deferred
+         * sections are required by the Linux semantics. Full seqlock
+         * reader/retry behavior remains a later runtime refinement.
+         */
+        arceos_ex_must_page_allocator_preset_record_zonelist_irqsave_protocol();
+
+        /*
+         * Page allocator runtime locking:
+         *
+         * PageAllocator.Ready means alloc_pages/free_pages are callable, not
+         * that the complete Linux zone lock, PCP lock, irqsave and preempt
+         * protocol has already been implemented. Until a consumer requires
+         * those paths outside boot-exclusive context, the runtime locking
+         * requirements must remain explicit deferred facts.
+         */
+        arceos_ex_must_page_allocator_runtime_locking_remain_explicit_deferred();
+
+        /*
          * Page allocator smoke:
          *
          * The first allocator smoke coverage must allocate pages through the
@@ -828,6 +871,20 @@ type ArceosExMmCoreInitCodingMust {
         arceos_ex_must_slub_kzalloc_zero_returned_object();
         arceos_ex_must_slub_kfree_recycle_object_to_cache();
         arceos_ex_must_slub_first_round_defer_complex_linux_paths();
+
+        /*
+         * SLUB bootstrap synchronization:
+         *
+         * Linux kmem_cache_init() explicitly runs before slab_mutex is needed
+         * for the early bootstrap caches, but SLUB runtime allocation/free,
+         * per-cpu/node partial lists, global list mutation, slab sysfs, and
+         * FULL state still have synchronization semantics. The target must
+         * record the pre-FULL slab_mutex boundary and keep the runtime SLUB
+         * locking model as an explicit deferred contract instead of treating
+         * BootPhaseContext as a proof that no SLUB locks exist.
+         */
+        arceos_ex_must_slub_bootstrap_record_slab_mutex_boundary();
+        arceos_ex_must_slub_runtime_locking_remain_explicit_deferred();
 
         /*
          * SLUB/kmalloc smoke:
@@ -918,6 +975,19 @@ type ArceosExMmCoreInitCodingMust {
          */
         arceos_ex_must_vmalloc_support_preallocated_windows_and_reject_duplicate_mapping();
         arceos_ex_must_vmalloc_allocate_l0_windows_on_demand();
+
+        /*
+         * Vmalloc synchronization contracts:
+         *
+         * vmalloc_init() initializes per-cpu vmap block queues, deferred vfree
+         * work, vmap nodes and their locks. The current setup path can publish
+         * those structures under SystemExclusive, but runtime get/map/unmap/
+         * free actions must keep their guard, RCU/lazy purge and TLB/cache
+         * contracts visible. Local RISC-V sfence.vma lowering may satisfy the
+         * current single-CPU mapping visibility boundary; remote shootdown,
+         * lazy purge and RCU freeing remain explicit deferred facts.
+         */
+        arceos_ex_must_vmalloc_sync_and_locking_contracts_remain_visible();
 
         /*
          * Unmap/free boundary:

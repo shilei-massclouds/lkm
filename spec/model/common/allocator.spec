@@ -184,11 +184,18 @@ predicate buddy_free_page_sets_exclude_reserved_ranges<T, M>(sets: T, memblock: 
 predicate buddy_free_page_sets_split_free_ranges_to_aligned_blocks<T>(sets: T) -> bool;
 predicate page_allocator_page_metadata_map_bound<T, M>(allocator: T, metadata_map: M) -> bool;
 predicate page_allocator_zonelist_update_seq_irqsave_guard_ready<T>(allocator: T) -> bool;
+predicate page_allocator_zonelist_update_seq_irqsave_guard_spec_required<T>(allocator: T) -> bool;
+predicate page_allocator_zonelist_update_seq_irqsave_guard_boot_lowering_proof_only<T>(
+    allocator: T
+) -> bool;
 predicate page_allocator_zonelist_printk_deferred_section_ready<T>(allocator: T) -> bool;
+predicate page_allocator_zonelist_printk_deferred_section_spec_required<T>(allocator: T) -> bool;
 predicate page_allocator_boot_pagesets_initialized_for_possible_cpus<T, P>(
     allocator: T,
     per_cpu_storage: P
 ) -> bool;
+predicate page_allocator_runtime_zone_locking_contract_deferred<T>(allocator: T) -> bool;
+predicate page_allocator_runtime_pcp_locking_contract_deferred<T>(allocator: T) -> bool;
 predicate page_allocator_buddy_free_page_sets_bound<T, S>(allocator: T, sets: S) -> bool;
 predicate page_allocator_free_pages_account_matches_buddy<T, S>(allocator: T, sets: S) -> bool;
 predicate page_allocator_alloc_pages_api_ready<T>(allocator: T) -> bool;
@@ -246,6 +253,8 @@ predicate slub_subsystem_kmalloc_api_ready<T>(allocator: T) -> bool;
 predicate slub_subsystem_kzalloc_api_ready<T>(allocator: T) -> bool;
 predicate slub_subsystem_kfree_api_ready<T>(allocator: T) -> bool;
 predicate slub_subsystem_uses_page_allocator<T, P>(allocator: T, page_allocator: P) -> bool;
+predicate slub_subsystem_runtime_locking_contract_deferred<T>(allocator: T) -> bool;
+predicate slub_subsystem_slab_mutex_not_required_before_full<T>(allocator: T) -> bool;
 predicate slub_subsystem_kmalloc_called<T, S, G>(allocator: T, size: S, gfp: G) -> bool;
 predicate slub_subsystem_kzalloc_called<T, S, G>(allocator: T, size: S, gfp: G) -> bool;
 predicate slub_subsystem_kfree_called<T, R>(allocator: T, alloc_ref: R) -> bool;
@@ -264,6 +273,10 @@ predicate kernel_global_allocator_uses_slub_subsystem<T, S>(allocator: T, slub_s
 predicate kernel_global_allocator_alloc_api_ready<T>(allocator: T) -> bool;
 predicate kernel_global_allocator_alloc_zeroed_api_ready<T>(allocator: T) -> bool;
 predicate kernel_global_allocator_dealloc_api_ready<T>(allocator: T) -> bool;
+predicate kernel_global_allocator_runtime_sync_inherits_slub_contract<T, S>(
+    allocator: T,
+    slub_subsystem: S
+) -> bool;
 predicate kernel_global_allocator_layout_supported<T, L>(allocator: T, layout: L) -> bool;
 predicate alloc_layout_size_nonzero<T>(layout: T) -> bool;
 predicate alloc_layout_size_bound<T, S>(layout: T, size: S) -> bool;
@@ -284,6 +297,10 @@ predicate dynamic_container_vec_api_ready<T>(runtime: T) -> bool;
 predicate dynamic_container_list_api_ready<T>(runtime: T) -> bool;
 predicate dynamic_container_set_api_ready<T>(runtime: T) -> bool;
 predicate dynamic_container_storage_backed_by_heap_alloc_ref<T, R>(runtime: T, alloc_ref: R) -> bool;
+predicate dynamic_container_runtime_sync_inherits_global_allocator_contract<T, A>(
+    runtime: T,
+    allocator: A
+) -> bool;
 
 type PageAllocatorType: MemoryObject {
     processes {
