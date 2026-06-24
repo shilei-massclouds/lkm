@@ -1548,15 +1548,15 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 9. `内存调试与硬化对象`（暂名 `MemoryDebugHardening`）：覆盖 `mem_debugging_and_hardening_init()` 与 `report_meminit()`。它依赖 `StaticBranch.Ready`，消费前序 `EarlyParam` 已经解析出的内存调试/硬化参数事实，汇总 `init_on_alloc`、`init_on_free`、page poisoning、debug pagealloc、debug guardpage、check_pages 等配置和启动参数结果，并通过 `StaticBranch.set(key, value)` action 收敛相关 static key；其中 `report_meminit()` 主要作为状态报告或 checkpoint，不单独推进对象生命周期。
 10. `内存检测辅助对象`（暂名 `MemorySanitizers`）：覆盖 `kfence_alloc_pool_and_metadata()`、`kmsan_init_shadow()` 和 `kmsan_init_runtime()`。当前默认配置未启用 `KFENCE` 和 `KMSAN`，因此不进入主线 formal。
 11. `StackDepot`：覆盖 `stack_depot_early_init()`，为 page owner、kmemleak 等后续调试路径提供调用栈存储基础。
-12. `SLUB 分配器对象`（暂名 `SlubAllocator`）：覆盖 `kmem_cache_init()`。当前默认配置选择 `CONFIG_SLUB=y`，因此本对象按 SLUB 自举路径建模。Linux 内部 `slab_state` 与规格生命周期的映射为：`DOWN -> Base`、`PARTIAL -> Prepared`、`UP -> Ready`、`FULL -> Online`。本子阶段只推进到 `UP/Ready`；`kmem_cache_init_late()` 作为后续 action 处理 flush workqueue，`slab_sysfs_init()` 才会把 Linux 内部状态推进到 `FULL/Online`。
-13. `SLUB cache registry`（暂名 `SlubCacheRegistry`）：对应 Linux 全局 `slab_caches` 列表及其互斥/注册边界。它是独立对象，不并入 `SlubAllocator`。`kmem_cache_init()` 期间，boot cache 和 bootstrap 后的正式 cache 都必须进入该 registry；后续创建普通 cache 时也通过它维护全局可枚举关系。
-14. `SLUB cache 对象`（暂名 `SlubCache`）：对应单个 `struct kmem_cache`。每个 `SlubCache` 拥有自己的 `SlubNodeSet` 与 `SlubCpuCacheSet`：前者描述 per-node partial/full slab 视图，后者描述 per-CPU 当前 slab、partial slab 和统计缓存。当前不把 `SlubNodeSet`、`SlubCpuCacheSet` 提升为顶层对象。
-15. `kmalloc cache 集合对象`（暂名 `KmallocCaches`）：对应 `kmalloc_caches[][]` 与 `kmalloc_size_index[]`。它由 `SlubAllocator` 驱动建立，但作为独立对象表达 size-class 到 `SlubCache` 的映射关系；当前 `CONFIG_RANDOM_KMALLOC_CACHES=n` 且 `CONFIG_MEMCG=n`，只建模默认 kmalloc cache 集。
+12. `SLUB 子系统对象`（正式命名为 `SlubSubsystem`）：覆盖 `kmem_cache_init()` 的全局 SLUB lifecycle、`slab_state`、CPU hotplug hook、late flush workqueue 和 `kmalloc`/`kzalloc`/`kfree` facade。当前默认配置选择 `CONFIG_SLUB=y`，因此本对象按 SLUB 自举路径建模。Linux 内部 `slab_state` 与规格生命周期的映射为：`DOWN -> Base`、`PARTIAL -> Prepared`、`UP -> Ready`、`FULL -> Online`。本子阶段只推进到 `UP/Ready`；`kmem_cache_init_late()` 作为后续 action 处理 flush workqueue，`slab_sysfs_init()` 才会把 Linux 内部状态推进到 `FULL/Online`。后续 model/coding 应将现有 `SlubAllocator` 命名收敛到 `SlubSubsystem`，并避免把它解释成某个 cache 实例。
+13. `SLUB cache registry`（正式命名为 `SlubCacheRegistry`）：对应 Linux 全局 `slab_caches` 列表及其互斥/注册边界。它由 `SlubSubsystem` 拥有，是所有 `SlubCache` 实例的注册、查找和枚举集合；`SlubSubsystem` 不再直接拥有所有 cache 实例，避免与 registry 形成双重所有权。`kmem_cache_init()` 期间，boot cache、bootstrap 后的正式 cache、kmalloc size-class cache 和后续普通具名 cache 都必须进入该 registry；后续创建普通 cache 时也通过它维护全局可枚举关系。
+14. `SLUB cache 类型`（正式类型名为 `SlubCache`，不使用 `SlubCacheType`）：对应单个 Linux `struct kmem_cache` 实例的共同类型。选择 `SlubCache` 而不是 `SlubCacheType`，是因为规格中对象类型名应直接表达内核领域概念；不同实例通过名称、对象大小、对齐、flags、usercopy range、slab order、node/cpu cache 视图和 alloc/free 行为参数化，而不是为每种 cache 再引入独立类型。每个 `SlubCache` 拥有自己的 `SlubNodeSet` 与 `SlubCpuCacheSet`：前者描述 per-node partial/full slab 视图，后者描述 per-CPU 当前 slab、partial slab 和统计缓存。当前不把 `SlubNodeSet`、`SlubCpuCacheSet` 提升为顶层对象。
+15. `kmalloc cache 集合对象`（正式命名为 `KmallocCaches`）：对应 `kmalloc_caches[][]` 与 `kmalloc_size_index[]`。它是 `SlubCacheRegistry` 内的一组按 size class 索引的 `SlubCache` 实例集合，而不是与 registry 并列的第二套所有权体系；`SlubSubsystem` 通过该集合暴露 `kmalloc`/`kzalloc`/`kfree` facade。当前 `CONFIG_RANDOM_KMALLOC_CACHES=n` 且 `CONFIG_MEMCG=n`，只建模默认 kmalloc cache 集。
 16. `Kmemleak`：覆盖 `kmemleak_init()`。当前默认配置 `CONFIG_DEBUG_KMEMLEAK=n`，因此不进入主线 formal。
-17. `PageTableCaches`：覆盖 `ptlock_cache_init()` 与 `pgtable_cache_init()`。它的中心功能是为后续页表操作准备页表锁 cache，并补齐当前架构需要预先建立的 kernel page table 范围。`PageTableLockCache` 作为下级对象对应 `page_ptl_cachep`，依赖 `SlubAllocator.Ready` 创建 `"page->ptl"` cache，后续服务 `ptlock_alloc()` / `ptlock_free()`。RISC-V `pgtable_cache_init()` 对应 `PageTableCaches.setup()` 内的 `KernelPgtablePreallocation` action/fact，不作为顶层对象；当前 `default_config` 下主线只预分配 `VMALLOC_START..VMALLOC_END`，`MODULES=n` 跳过 modules/BPF 区，`CONFIG_MEMORY_HOTPLUG` 未启用，因此 vmemmap/direct map/KASAN 相关分支不进入主线。
+17. `PageTableCaches`：覆盖 `ptlock_cache_init()` 与 `pgtable_cache_init()`。它的中心功能是为后续页表操作准备页表锁 cache，并补齐当前架构需要预先建立的 kernel page table 范围。`PageTableLockCache` 作为下级对象对应 `page_ptl_cachep`，依赖 `SlubSubsystem.Ready` 创建 `"page->ptl"` `SlubCache` 实例，后续服务 `ptlock_alloc()` / `ptlock_free()`。RISC-V `pgtable_cache_init()` 对应 `PageTableCaches.setup()` 内的 `KernelPgtablePreallocation` action/fact，不作为顶层对象；当前 `default_config` 下主线只预分配 `VMALLOC_START..VMALLOC_END`，`MODULES=n` 跳过 modules/BPF 区，`CONFIG_MEMORY_HOTPLUG` 未启用，因此 vmemmap/direct map/KASAN 相关分支不进入主线。
 18. `DebugObjectsMemory`：覆盖 `debug_objects_mem_init()`。当前默认配置 `CONFIG_DEBUG_OBJECTS=n`，因此不进入主线 formal。
 19. `VmallocAllocator`：覆盖 `vmalloc_init()`。它是管理 vmalloc/vmap 虚拟地址空间的 allocator，不是页表映射器，也不等同于所有 vmalloc API 行为。它拥有 `VmapAddressSpace`、`VmapNodeSet`、`VmapAreaCache`、`VmapBlockQueues` 和 `VfreeDeferredSet`：`VmapAddressSpace` 是资源本体，拥有 `VmapArea` 区间集合；`VmapNodeSet` 是管理索引/分片组织，indexes/partitions `VmapAddressSpace`，但不拥有虚拟地址资源本身。`vmalloc_init()` 建立 `vmap_area` cache、per-CPU vmap block 队列、per-CPU deferred free 队列、vmap node，导入已有 `vmlist` 为 busy areas，建立 free vmap space，并把 `vmap_initialized` 置为 true；`vmap-node` shrinker 注册作为后续 reclaim hook action/checkpoint。
-20. `MmStructCache`：覆盖 `mm_cache_init()`，只建立 `"mm_struct"` cache。它依赖 `SlubAllocator.Ready` 和 CPU mask size 相关事实，计算 `sizeof(struct mm_struct) + cpumask_size() + mm_cid_size()`，并创建带 `saved_auxv` usercopy range 的 `mm_struct` SLUB cache。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()`，不并入本子阶段。
+20. `MmStructCache`：覆盖 `mm_cache_init()`，只建立 `"mm_struct"` cache。它依赖 `SlubSubsystem.Ready` 和 CPU mask size 相关事实，计算 `sizeof(struct mm_struct) + cpumask_size() + mm_cid_size()`，并在 `SlubCacheRegistry` 中注册带 `saved_auxv` usercopy range 的 `SlubCache("mm_struct")` 实例。`MmStructCache` 是该实例的阶段对象/命名 owner，不是新的 allocator 类型。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()`，不并入本子阶段。
 21. `ExecMemory`：覆盖 `execmem_init()`。它建立后续模块、BPF JIT、kprobes 或类似可执行内存分配策略所需的范围信息。当前默认配置未启用 `MODULES`、`BPF_JIT` 和 `KPROBES`，`CONFIG_EXECMEM` 未被选中，因此本路径视为裁剪 no-op。
 22. `Espfix` 与 `Pti`：覆盖 `init_espfix_bsp()` 与 `pti_init()`。在 RISC-V64 当前实现中它们为空 inline 或非目标架构路径，规格上不进入当前 formal model，只在过程清单中作为不适用项保留。
 
@@ -1602,11 +1602,11 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 这一段对应 `kmem_cache_init()`，中心功能是建立可供后续内核对象使用的 SLUB/kmalloc 分配器。当前 `default_config` 选择 `CONFIG_SLUB=y`、`CONFIG_SLUB_TINY=n`、`CONFIG_SLUB_CPU_PARTIAL=y`、`CONFIG_SLUB_DEBUG=y`、`CONFIG_SLUB_DEBUG_ON=n`，并且 `CONFIG_SLAB_FREELIST_RANDOM=n`、`CONFIG_SLAB_FREELIST_HARDENED=n`、`CONFIG_RANDOM_KMALLOC_CACHES=n`、`CONFIG_MEMCG=n`。因此，本阶段按普通 SLUB 自举路径建模，不展开 memcg kmalloc、random kmalloc caches、freelist random/hardened 或 sysfs slab 管理路径。
 
-规格层把 Linux 内部 `slab_state` 映射为 `SlubAllocator` 生命周期：`DOWN -> Base`、`PARTIAL -> Prepared`、`UP -> Ready`、`FULL -> Online`。`SlubAllocator.preset()` 建立 boot `kmem_cache_node`，并在 `slab_state = PARTIAL` 后进入 `Prepared`。由于 cache 管理结构本身也需要通过 SLUB 分配，Linux 使用静态 `boot_kmem_cache_node` 打开 per-node 元数据自举循环；当前 `CONFIG_MEMORY_HOTPLUG=n`，`hotplug_memory_notifier(...)` 不形成主线对象状态，只保留为条件路径位置。
+规格层把 Linux 内部 `slab_state` 映射为 `SlubSubsystem` 生命周期：`DOWN -> Base`、`PARTIAL -> Prepared`、`UP -> Ready`、`FULL -> Online`。`SlubSubsystem.preset()` 建立最早的 `SlubCache("boot_kmem_cache_node")` 实例，并在 `slab_state = PARTIAL` 后进入 `Prepared`。由于 cache 管理结构本身也需要通过 SLUB 分配，Linux 使用静态 `boot_kmem_cache_node` 打开 per-node 元数据自举循环；当前 `CONFIG_MEMORY_HOTPLUG=n`，`hotplug_memory_notifier(...)` 不形成主线对象状态，只保留为条件路径位置。
 
-`SlubAllocator.setup()` 继续建立 boot `kmem_cache`，随后执行 bootstrap：用已经可工作的 `kmem_cache` 为 `kmem_cache` 和 `kmem_cache_node` 两个静态 boot cache 分配正式 cache 对象，刷新当前 CPU slab 指针，并把已有 partial/full slab 的 `slab_cache` 指回正式 cache。这个动作的后置条件是 `SlubCache("kmem_cache")` 与 `SlubCache("kmem_cache_node")` 不再只是静态占位，而是进入 `SlubCacheRegistry` 维护的正常 cache 集合；每个 `SlubCache` 同时拥有自己的 `SlubNodeSet` 与 `SlubCpuCacheSet`。
+`SlubSubsystem.setup()` 继续建立 `SlubCache("boot_kmem_cache")`，随后执行 bootstrap：用已经可工作的 `kmem_cache` 为 `kmem_cache` 和 `kmem_cache_node` 两个静态 boot cache 分配正式 cache 对象，刷新当前 CPU slab 指针，并把已有 partial/full slab 的 `slab_cache` 指回正式 cache。这个动作的后置条件是 `SlubCache("kmem_cache")` 与 `SlubCache("kmem_cache_node")` 不再只是静态占位，而是进入 `SlubCacheRegistry` 维护的正常 cache 集合；每个 `SlubCache` 同时拥有自己的 `SlubNodeSet` 与 `SlubCpuCacheSet`。`boot_kmem_cache` 与 `boot_kmem_cache_node` 是最初负责自举的两个 `SlubCache` 实例，不是 `SlubSubsystem` 本身。
 
-随后 `setup_kmalloc_cache_index_table()` 建立小尺寸 kmalloc index 映射，`create_kmalloc_caches()` 建立 `KmallocCaches`；Linux 内部 `slab_state = UP` 表示 kmalloc 数组已经可用，对应 `SlubAllocator.state == Ready`、`SlubCacheRegistry.state == Ready` 和 `KmallocCaches.state == Ready`。`init_freelist_randomization()` 在当前配置下为空，不推进对象状态；`cpuhp_setup_state_nocalls(CPUHP_SLUB_DEAD, "slub:dead", NULL, slub_cpu_dead)` 只向既有 `CpuHotplugStepRegistry` 登记 SLUB dead 回调，不推进任一 `CpuHotplugState.state`，也不触发 CPU offline 回调。末尾 `pr_info("SLUB: ...")` 是 checkpoint。`kmem_cache_init_late()` 建立 flush workqueue，先作为 `SlubAllocator` 的后续 action 保留；`slab_sysfs_init()` 通过 `late_initcall` 使 Linux 内部 `slab_state = FULL`，对应后续 `SlubAllocator.enable()`，二者都在 `mm_core_init()` 之后，当前不进入子阶段 4。
+随后 `setup_kmalloc_cache_index_table()` 建立小尺寸 kmalloc index 映射，`create_kmalloc_caches()` 建立 `KmallocCaches`；Linux 内部 `slab_state = UP` 表示 kmalloc 数组已经可用，对应 `SlubSubsystem.state == Ready`、`SlubCacheRegistry.state == Ready` 和 `KmallocCaches.state == Ready`。`init_freelist_randomization()` 在当前配置下为空，不推进对象状态；`cpuhp_setup_state_nocalls(CPUHP_SLUB_DEAD, "slub:dead", NULL, slub_cpu_dead)` 只向既有 `CpuHotplugStepRegistry` 登记 SLUB dead 回调，不推进任一 `CpuHotplugState.state`，也不触发 CPU offline 回调。末尾 `pr_info("SLUB: ...")` 是 checkpoint。`kmem_cache_init_late()` 建立 flush workqueue，先作为 `SlubSubsystem` 的后续 action 保留；`slab_sysfs_init()` 通过 `late_initcall` 使 Linux 内部 `slab_state = FULL`，对应后续 `SlubSubsystem.enable()`，二者都在 `mm_core_init()` 之后，当前不进入子阶段 4。
 
 ##### 第五段：页表缓存与 vmalloc 地址空间准备（初稿）
 
@@ -1618,7 +1618,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 ##### 第六段：mm_struct cache 与裁剪收尾（初稿）
 
-这一段覆盖 `mm_cache_init()` 和当前配置下的 `execmem_init()` 收尾。`MmStructCache.setup()` 只建立 `"mm_struct"` cache，不包含 `vm_area_struct` cache、`vma_lock_cachep` 或 `mmap_init()`；后三者属于后续 `proc_caches_init()`。`mm_cache_init()` 依赖 `SlubAllocator.Ready` 和 CPU mask size 相关事实，按 `sizeof(struct mm_struct) + cpumask_size() + mm_cid_size()` 计算对象大小，并创建带 `saved_auxv` usercopy range 的 SLUB cache；完成后 `MmStructCache.state == Ready`，后续进程/地址空间对象创建才消费该 cache。
+这一段覆盖 `mm_cache_init()` 和当前配置下的 `execmem_init()` 收尾。`MmStructCache.setup()` 只建立 `"mm_struct"` cache，不包含 `vm_area_struct` cache、`vma_lock_cachep` 或 `mmap_init()`；后三者属于后续 `proc_caches_init()`。`mm_cache_init()` 依赖 `SlubSubsystem.Ready` 和 CPU mask size 相关事实，按 `sizeof(struct mm_struct) + cpumask_size() + mm_cid_size()` 计算对象大小，并在 `SlubCacheRegistry` 中注册带 `saved_auxv` usercopy range 的 `SlubCache("mm_struct")` 实例；完成后 `MmStructCache.state == Ready`，后续进程/地址空间对象创建才消费该 cache。
 
 `execmem_init()` 按当前 `default_config` 原则只记录为裁剪/no-op：`MODULES=n`、`BPF_JIT=n`、`KPROBES=n`，因此未选择 `CONFIG_EXECMEM`。本阶段不建立 `ExecMemory` 正式对象，也不讨论启用后的 arch range、default range 或 kprobes range。`page_ext_init_flatmem_late()`、`kmemleak_init()`、`debug_objects_mem_init()`、`page_ext_init()` 和 `kmsan_init_runtime()` 同样只保留当前配置下的调用位置和裁剪原因；`init_espfix_bsp()`、`pti_init()` 是 RISC-V64 当前不纳入路径。
 
@@ -1636,7 +1636,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 | `kmsan_init_shadow()` | trimmed | `CONFIG_KMSAN=n`。 |
 | `stack_depot_early_init()` | formal: `StackDepot.setup()` | `CONFIG_STACKDEPOT=y`，为 page owner、kmemleak 等调试路径提供栈存储基础。 |
 | `mem_init()` | formal: `Swiotlb.setup()` + `PageAllocator.setup()` + `MemBlock.offline()` | RISC-V 路径先 checkpoint `BUG_ON(!mem_map)`，消费核心准备期已经 Ready 的 `PageMetadataMap`；随后基于 `DmaCachePolicy`、`dma32_phys_limit` 和 `max_pfn` 决定并初始化 early SWIOTLB 池，再由 `memblock_free_all()` 把 memblock free ranges 释放到 buddy/page allocator；`print_vm_layout()` 是 checkpoint。 |
-| `kmem_cache_init()` | formal: `SlubAllocator.preset/setup()` + `SlubCacheRegistry.setup()` + `KmallocCaches.setup()` | `CONFIG_SLUB=y`，建立 boot `kmem_cache_node`/`kmem_cache`，bootstrap 为正式 SLUB cache，创建 kmalloc caches，并登记 `CPUHP_SLUB_DEAD` 回调；freelist random 当前为空路径，`kmem_cache_init_late()` 不在本阶段。 |
+| `kmem_cache_init()` | formal target: `SlubSubsystem.preset/setup()` + `SlubCacheRegistry.setup()` + `KmallocCaches.setup()` | `CONFIG_SLUB=y`，建立 `SlubCache("boot_kmem_cache_node")`/`SlubCache("boot_kmem_cache")`，bootstrap 为正式 `SlubCache("kmem_cache_node")`/`SlubCache("kmem_cache")`，创建 kmalloc size-class caches，并登记 `CPUHP_SLUB_DEAD` 回调；freelist random 当前为空路径，`kmem_cache_init_late()` 不在本阶段。 |
 | `page_ext_init_flatmem_late()` | trimmed | `CONFIG_PAGE_EXTENSION=n`。 |
 | `kmemleak_init()` | trimmed | `CONFIG_DEBUG_KMEMLEAK=n`。 |
 | `ptlock_cache_init()` | formal: `PageTableCaches.setup()` / `PageTableLockCache.setup()` | `CONFIG_SPLIT_PTE_PTLOCKS=y`，建立 `"page->ptl"` split page-table lock cache。 |
@@ -1673,9 +1673,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `MemoryDebugHardening.state == Ready`，表示内存调试/硬化 static keys 已按当前配置和早期参数事实完成收敛
 - `Swiotlb.state == Ready` 或记录为当前启动不需要 early SWIOTLB pool
 - `StackDepot.state == Ready`
-- `SlubAllocator.state == Ready`，表示 SLUB/kmalloc caches 可用于后续内核对象分配
-- `SlubCacheRegistry.state == Ready`，表示 `kmem_cache`、`kmem_cache_node` 和 kmalloc caches 已进入全局 cache registry
-- `KmallocCaches.state == Ready`，表示 size-class 到 `SlubCache` 的映射已经建立
+- `SlubSubsystem.state == Ready`，表示 SLUB 全局 lifecycle、`slab_state=UP` 和 kmalloc facade 已就绪
+- `SlubCacheRegistry.state == Ready`，表示 `kmem_cache`、`kmem_cache_node`、kmalloc caches 和专用 named caches 通过全局 cache registry 统一注册、查找和枚举
+- `KmallocCaches.state == Ready`，表示 size-class 到 `SlubCache` 实例的映射已经建立
 - `PageTableCaches.state == Ready`
 - `PageTableLockCache.state == Ready`
 - `VmallocAllocator.state == Ready`
@@ -1701,7 +1701,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 - `MmCoreInitPhase.state == Ready`
 - `PageAllocator.state == Ready`
-- `SlubAllocator.state == Ready`
+- `SlubSubsystem.state == Ready`
 - `KmallocCaches.state == Ready`
 - `CpuGroup.state == Ready`
 - `CpuIdMap.state == Ready`
@@ -2003,7 +2003,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `RiscvTimerProvider.state == Ready`
 - `SmpCallFunction.state == Ready`
 - `Workqueue.state == Prepared`
-- `SlubAllocator.state == Ready`
+- `SlubSubsystem.state == Ready`
 - `PageAllocator.state == Ready`
 - `PerCpuStorage.state == Ready`
 - `PrintkBuffer.state == Ready`
@@ -2017,7 +2017,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 当前先将 `InterruptPhase` 子阶段 2 的对象和边界记录如下：
 
 1. `中断开放后准备期对象`（暂名 `IrqOpenPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第二个子阶段对象。它从 `IrqTimeInitPhase.Ready` 接续，即 boot CPU 本地中断总入口已经开放；随后按 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 调用点完成的有效顺序编排对象推进，并以“下一步进入进程准备期”为完成边界。
-2. `SLUB flush workqueue 资源`：覆盖 `kmem_cache_init_late()`。它不是独立生命周期对象，而是 `SlubAllocator` 的内部 workqueue 资源事实：依赖 `SlubAllocator.Ready`、`KmallocCaches.Ready` 和 `Workqueue.Prepared`，通过 `alloc_workqueue("slub_flushwq", WQ_MEM_RECLAIM, 0)` 建立后续 flush CPU slab 使用的 workqueue 句柄，并记录 `SlubAllocator.flush_workqueue_ready == true`。它不把 `SlubAllocator` 推进到 `Online`；Linux 内部 `slab_state = FULL` 仍留给后续 `slab_sysfs_init()` / `SlubAllocator.enable()`。
+2. `SLUB flush workqueue 资源`：覆盖 `kmem_cache_init_late()`。它不是独立生命周期对象，而是 `SlubSubsystem` 的内部 workqueue 资源事实：依赖 `SlubSubsystem.Ready`、`KmallocCaches.Ready` 和 `Workqueue.Prepared`，通过 `alloc_workqueue("slub_flushwq", WQ_MEM_RECLAIM, 0)` 建立后续 flush CPU slab 使用的 workqueue 句柄，并记录 `SlubSubsystem.flush_workqueue_ready == true`。它不把 `SlubSubsystem` 推进到 `Online`；Linux 内部 `slab_state = FULL` 仍留给后续 `slab_sysfs_init()` / `SlubSubsystem.enable()`。
 3. `Console 对象`：覆盖 `console_init()`。这是正式 `Console` 对象的首次构造点，因此当前建模为 `Console.preset()`，使对象进入 `Prepared`。它承接已经可用的 `PrintkBuffer` 和早期 console 输出条件，先驱动 `TtyLineDisciplineRegistry.preset()`，把静态 `NTtyLineDiscipline`（Linux `n_tty_ops`）注册到 `N_TTY` slot；随后读取 `Lds` 提供的 `__con_initcall_start..__con_initcall_end` console initcall 表边界，驱动当前配置下的 `ConsoleDriver` 对象执行 early register。该过程可能注册可用的 real console，并在 real console 成为 `CON_CONSDEV` 时触发 early/boot console handoff；但由于此时仍早于很多 bus/device probe，设备树上的真实串口 console 不保证已经完整 probe，复杂设备 probe、boot console 注销和完整 console handoff 都不能作为本阶段必然后置条件。
 4. `panic_later checkpoint`：覆盖 `console_init()` 之后的 `if (panic_later) panic(...)`。这是对过多 boot 参数等早期异常的延迟失败处理，只作为阶段内 checkpoint 或 fail boundary，不建立对象。
 5. `Lockdep / LockingSelftest 路径`：覆盖 `lockdep_init()` 和 `locking_selftest()`。当前 `CONFIG_LOCKDEP=n` 且 `CONFIG_DEBUG_LOCKING_API_SELFTESTS=n`，二者均为空实现或裁剪路径。未来启用后，可恢复为 `Lockdep.setup()` 与 `LockingSelftest.run()`；其中 selftest 必须放在中断已经打开后，因为它要测试 hard/soft IRQ 开关组合下的锁依赖场景。
@@ -2044,7 +2044,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 | Linux 6.12.37 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
-| `kmem_cache_init_late()` | action: `SlubAllocator.setup_flush_workqueue()` | 在 `Workqueue.Prepared` 基础上创建 `"slub_flushwq"`，记录 `SlubAllocator.flush_workqueue_ready == true`，服务后续 SLUB flush；不建立独立 `SlubFlushWq` 生命周期对象，`SlubAllocator.enable()` 仍留给后续 `slab_sysfs_init()`。 |
+| `kmem_cache_init_late()` | action: `SlubSubsystem.setup_flush_workqueue()` | 在 `Workqueue.Prepared` 基础上创建 `"slub_flushwq"`，记录 `SlubSubsystem.flush_workqueue_ready == true`，服务后续 SLUB flush；不建立独立 `SlubFlushWq` 生命周期对象，`SlubSubsystem.enable()` 仍留给后续 `slab_sysfs_init()`。 |
 | `console_init()` | formal candidate: `Console.preset()` | 首次构造正式 `Console`：注册 `NTtyLineDiscipline` 到 `TtyLineDisciplineRegistry`，遍历 `Lds` 提供的 console initcall 表边界，驱动 console drivers early register；real console 注册和 early/boot console handoff 是条件结果，不作为必然后置条件。 |
 | `if (panic_later) panic(...)` | checkpoint/fail boundary | 延迟处理早期 boot 参数异常；不建立对象。 |
 | `lockdep_init()` | trimmed/no-op | 当前 `CONFIG_LOCKDEP=n`，为空实现；未来启用后恢复为 `Lockdep.setup()`。 |
@@ -2080,7 +2080,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `RiscvTimerProvider.state == Ready`，`RiscvTimerProvider.enable()` 尚未执行
 - `Softirq.state == Ready`，`Softirq.enable()` 和实际异步执行边界后续讨论
 - `SmpCallFunction.state == Ready`，跨 CPU callback 的真实运行仍等 secondary CPU bringup 和 IPI 使用边界
-- `SlubAllocator.flush_workqueue_ready == true`
+- `SlubSubsystem.flush_workqueue_ready == true`
 - `Console.state == Prepared`
 - `TtyLineDisciplineRegistry.state == Prepared`，且 `NTtyLineDiscipline.registered == true`
 - `ConsoleDriverSet.early_registered == true`，但不要求所有 console device 已完成 probe
