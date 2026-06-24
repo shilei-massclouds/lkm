@@ -32,7 +32,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.platform_cpu_info,
         &mut ctx.physical_memory,
     )?;
-    ctx.cpu_id_map.preset(boot_hartid)?;
+    ctx.cpu_id_map.preset(&ctx.cpu_group)?;
     ctx.interrupt_stream
         .setup(&mut ctx.boot_cpu_local_interrupt)?;
     ctx.cpu_group

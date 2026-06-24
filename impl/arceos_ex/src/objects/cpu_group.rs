@@ -10,6 +10,7 @@ use super::{
 use crate::trace::Checkpoint;
 
 const MAX_CPUS: usize = 16;
+const BOOT_CPU_LOGICAL_ID: usize = 0;
 
 unsafe extern "C" {
     static head_boot_hartid: usize;
@@ -76,6 +77,76 @@ impl BootCpu {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum CpuRole {
+    Boot,
+    Secondary,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct CpuRef {
+    logical_id: usize,
+}
+
+impl CpuRef {
+    pub const fn new(logical_id: usize) -> Self {
+        Self { logical_id }
+    }
+
+    pub const fn logical_id(self) -> usize {
+        self.logical_id
+    }
+
+    pub const fn is_boot_cpu(self) -> bool {
+        self.logical_id == BOOT_CPU_LOGICAL_ID
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CpuView {
+    cpu_ref: CpuRef,
+    hartid: usize,
+    role: CpuRole,
+    possible: bool,
+    present: bool,
+    active: bool,
+    online: bool,
+}
+
+impl CpuView {
+    pub const fn cpu_ref(self) -> CpuRef {
+        self.cpu_ref
+    }
+
+    pub const fn logical_id(self) -> usize {
+        self.cpu_ref.logical_id()
+    }
+
+    pub const fn hartid(self) -> usize {
+        self.hartid
+    }
+
+    pub const fn role(self) -> CpuRole {
+        self.role
+    }
+
+    pub const fn is_possible(self) -> bool {
+        self.possible
+    }
+
+    pub const fn is_present(self) -> bool {
+        self.present
+    }
+
+    pub const fn is_active(self) -> bool {
+        self.active
+    }
+
+    pub const fn is_online(self) -> bool {
+        self.online
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct SecondaryCpu {
     hartid: usize,
@@ -122,6 +193,12 @@ impl SecondaryCpu {
 
 pub struct CpuGroup {
     lifecycle: Lifecycle,
+    /*
+     * Transitional lowering: the formal model is one CPU instance per logical
+     * id. Until the internal storage is flattened, boot_cpu and secondary_cpus
+     * are exposed through CpuRef/CpuView below as the formal CpuGroup.Cpu[id]
+     * indexed view.
+     */
     boot_cpu: BootCpu,
     secondary_cpus: [SecondaryCpu; MAX_CPUS - 1],
     secondary_count: usize,
@@ -210,6 +287,60 @@ impl CpuGroup {
 
     pub fn boot_hartid(&self) -> usize {
         self.boot_cpu.hartid
+    }
+
+    pub fn boot_cpu_ref(&self) -> Option<CpuRef> {
+        self.cpu_ref_at(BOOT_CPU_LOGICAL_ID)
+    }
+
+    pub fn cpu_ref_at(&self, logical_id: usize) -> Option<CpuRef> {
+        self.cpu(logical_id).map(|cpu| cpu.cpu_ref())
+    }
+
+    pub fn cpu(&self, logical_id: usize) -> Option<CpuView> {
+        if logical_id == BOOT_CPU_LOGICAL_ID {
+            return self.boot_cpu_view();
+        }
+
+        let secondary_index = logical_id.checked_sub(1)?;
+        let cpu = self.secondary_cpu(secondary_index)?;
+        Some(CpuView {
+            cpu_ref: CpuRef::new(logical_id),
+            hartid: cpu.hartid(),
+            role: CpuRole::Secondary,
+            possible: cpu.is_possible(),
+            present: cpu.is_present(),
+            active: cpu.is_online(),
+            online: cpu.is_online(),
+        })
+    }
+
+    pub fn possible_contains(&self, cpu_ref: CpuRef) -> bool {
+        self.cpu(cpu_ref.logical_id())
+            .map(|cpu| cpu.is_possible())
+            .unwrap_or(false)
+    }
+
+    pub fn present_contains(&self, cpu_ref: CpuRef) -> bool {
+        self.cpu(cpu_ref.logical_id())
+            .map(|cpu| cpu.is_present())
+            .unwrap_or(false)
+    }
+
+    pub fn online_contains(&self, cpu_ref: CpuRef) -> bool {
+        self.cpu(cpu_ref.logical_id())
+            .map(|cpu| cpu.is_online())
+            .unwrap_or(false)
+    }
+
+    pub fn logical_id_index_ready(&self) -> bool {
+        self.boot_cpu_ref().is_some()
+    }
+
+    pub fn boot_cpu_index_zero(&self) -> bool {
+        self.cpu(BOOT_CPU_LOGICAL_ID)
+            .map(|cpu| cpu.role() == CpuRole::Boot && cpu.logical_id() == BOOT_CPU_LOGICAL_ID)
+            .unwrap_or(false)
     }
 
     pub const fn secondary_count(&self) -> usize {
@@ -333,6 +464,24 @@ impl CpuGroup {
 
     pub fn boot_cpu_state(&self) -> State {
         self.boot_cpu.state()
+    }
+
+    fn boot_cpu_view(&self) -> Option<CpuView> {
+        if self.boot_cpu.hartid == usize::MAX {
+            return None;
+        }
+
+        let state = self.boot_cpu.state();
+        let active = state == State::Ready || state == State::Online;
+        Some(CpuView {
+            cpu_ref: CpuRef::new(BOOT_CPU_LOGICAL_ID),
+            hartid: self.boot_cpu.hartid,
+            role: CpuRole::Boot,
+            possible: active,
+            present: active,
+            active,
+            online: state == State::Online,
+        })
     }
 
     fn failed_setup(&self) -> EventResult {

@@ -1,5 +1,5 @@
 use super::{
-    cpu_group::CpuGroup,
+    cpu_group::{CpuGroup, CpuRole, CpuView},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -56,8 +56,20 @@ impl CpuIdMap {
         }
     }
 
-    pub fn preset(&mut self, boot_hartid: usize) -> EventResult {
-        if self.lifecycle.state() != State::Base || boot_hartid == usize::MAX {
+    pub fn preset(&mut self, cpu_group: &CpuGroup) -> EventResult {
+        let Some(boot_cpu) = cpu_group.cpu(0) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        };
+        if self.lifecycle.state() != State::Base
+            || boot_cpu.role() != CpuRole::Boot
+            || boot_cpu.logical_id() != 0
+            || boot_cpu.hartid() == usize::MAX
+        {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
@@ -67,11 +79,7 @@ impl CpuIdMap {
         }
 
         self.entries = [CpuIdMapEntry::empty(); MAX_CPUS];
-        self.entries[0] = CpuIdMapEntry {
-            logical_id: 0,
-            hartid: boot_hartid,
-            kind: CpuIdMapEntryKind::BootCpu,
-        };
+        self.entries[0] = entry_from_cpu(boot_cpu);
         self.count = 1;
 
         self.lifecycle.transition(
@@ -85,7 +93,9 @@ impl CpuIdMap {
     pub fn setup(&mut self, cpu_group: &CpuGroup) -> EventResult {
         if self.lifecycle.state() != State::Prepared
             || cpu_group.state() != State::Ready
-            || self.entry(0).map(|entry| entry.hartid()) != Some(cpu_group.boot_hartid())
+            || !cpu_group.logical_id_index_ready()
+            || !cpu_group.boot_cpu_index_zero()
+            || self.entry(0).map(|entry| entry.hartid()) != cpu_group.cpu(0).map(|cpu| cpu.hartid())
             || self.entry(0).map(|entry| entry.kind()) != Some(CpuIdMapEntryKind::BootCpu)
         {
             return failed_condition(
@@ -100,21 +110,17 @@ impl CpuIdMap {
         entries[0] = self.entries[0];
         let mut count = 1usize;
 
-        let mut index = 0usize;
-        while index < cpu_group.secondary_count() {
-            let Some(cpu) = cpu_group.secondary_cpu(index) else {
+        let mut logical_id = 1usize;
+        while logical_id < cpu_group.possible_cpu_count() {
+            let Some(cpu) = cpu_group.cpu(logical_id) else {
                 return self.failed_setup();
             };
             if count >= MAX_CPUS || contains_hartid(&entries, count, cpu.hartid()) {
                 return self.failed_setup();
             }
-            entries[count] = CpuIdMapEntry {
-                logical_id: count,
-                hartid: cpu.hartid(),
-                kind: CpuIdMapEntryKind::SecondaryCpu,
-            };
+            entries[count] = entry_from_cpu(cpu);
             count += 1;
-            index += 1;
+            logical_id += 1;
         }
 
         self.entries = entries;
@@ -151,6 +157,17 @@ impl CpuIdMap {
             State::Prepared,
             State::Ready,
         )
+    }
+}
+
+fn entry_from_cpu(cpu: CpuView) -> CpuIdMapEntry {
+    CpuIdMapEntry {
+        logical_id: cpu.logical_id(),
+        hartid: cpu.hartid(),
+        kind: match cpu.role() {
+            CpuRole::Boot => CpuIdMapEntryKind::BootCpu,
+            CpuRole::Secondary => CpuIdMapEntryKind::SecondaryCpu,
+        },
     }
 }
 
