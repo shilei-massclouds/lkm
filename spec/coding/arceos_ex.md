@@ -1184,6 +1184,8 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 `MemoryDebugHardening.setup()` 对应 `mem_debugging_and_hardening_init()` 的默认策略收敛。它必须依赖并记录已扫描的 `EarlyParam.Ready`，并使用既有 `StaticBranch` registry 写入 `InitOnAlloc`、`InitOnFree`、`DebugPageAlloc`、`DebugGuardPage` 和 `CheckPages` static keys；当前实现暂不支持 Linux `init_on_alloc`、`init_on_free`、page poisoning、`debug_pagealloc`、guard page 等 early-param 开关，必须把这些策略记录为 trimmed/default-policy facts，而不得让规格暗示已经完整消费参数语义。
 
+`StackDepot.setup()` 对应 `stack_depot_early_init()` 的 `mm_init()` 调用点。当前参照配置中 `CONFIG_STACKDEPOT=y`，但 `CONFIG_STACKDEPOT_ALWAYS_INIT` 未选中，且 `PAGE_OWNER`、`DEBUG_KMEMLEAK`、`KASAN`、`KFENCE` 等 early 消费者未启用；在没有 `stack_depot_request_early_init()` 的条件下，Linux 该调用只记录 early init passed 并返回，不通过 memblock 分配 hash table。实现必须结构化记录 `config_enabled`、`early_init_passed`、`early_init_requested=false`、`early_table_allocated=false` 和 `late_init_deferred` 等事实；不得把 `StackDepot.Ready` 解释为 stack trace save/fetch API 已经 Online，也不得通过 smoke 暗示已有完整 stack depot storage。
+
 `Swiotlb.setup()` 对应释放 MemBlock 前的 early SWIOTLB 决策和 static pool 结构初始化。若当前 policy 需要 early pool，必须记录 static pool area 已建立，且每个 area 的 lock 初始化完成；当前最小实现可把 early pool 抽象为单个 static area 和单个 lock。dynamic SWIOTLB 的 RCU/list/spinlock 路径、runtime bounce slot 分配、DMA map/unmap 和 sync 行为仍为 trimmed/deferred，不得通过 smoke 暗示已有完整 SWIOTLB API。
 
 `PageAllocator.setup()` 才对应 `memblock_free_all()`。该事件必须先要求 `Swiotlb.Ready` 和 `MemoryDebugHardening.Ready`，再把 MemBlock free ranges 交给 buddy/free page sets，并通过 `MemBlock.Disable` 使 `MemBlock.state == Offline`。本阶段不得执行 `memblock_discard()`，不得把 `MemBlock` 推进到 `Destroyed`。

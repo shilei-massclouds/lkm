@@ -41,6 +41,7 @@ pub mod scheduler;
 pub mod scheduler_schedule;
 pub mod slub;
 pub mod smp_bringup;
+pub mod stack_depot;
 pub mod swiotlb;
 pub mod task_creation_core;
 pub mod user_boot;

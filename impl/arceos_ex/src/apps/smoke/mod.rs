@@ -75,6 +75,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::memory_debug_hardening::run,
     },
     SmokeCase {
+        name: "stack_depot",
+        run: cases::stack_depot::run,
+    },
+    SmokeCase {
         name: "swiotlb",
         run: cases::swiotlb::run,
     },

@@ -492,7 +492,11 @@ object MmCoreTrimmedPaths: MemoryObject {
 }
 
 /*
- * StackDepot 表示 stack_depot_early_init() 建立的调用栈存储基础。
+ * StackDepot 表示 stack_depot_early_init() 的 mm_init 调用点。当前参照
+ * .config 中 CONFIG_STACKDEPOT=y，但未选择 CONFIG_STACKDEPOT_ALWAYS_INIT，
+ * 且 page_owner/kmemleak/kasan/kfence 等早期消费者未请求 early init。因此
+ * Ready 表示该调用点已经执行并建立了后续 init/save 路径的合法边界，不表示
+ * early hash table 一定已经通过 memblock 分配。
  */
 object StackDepot: MemoryObject {
     initial_state: State::Base;
@@ -501,13 +505,19 @@ object StackDepot: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
+                    Config.state == State::Online;
                     MemBlock.state == State::Online;
                     MemoryDebugHardening.state == State::Ready;
                 }
 
                 ensures {
                     stack_depot_ready(StackDepot, MemBlock);
-                    stack_depot_early_storage_ready(StackDepot);
+                    stack_depot_config_enabled(StackDepot);
+                    stack_depot_early_init_passed(StackDepot);
+                    stack_depot_early_init_request_absent(StackDepot);
+                    stack_depot_early_table_allocation_not_required(StackDepot);
+                    stack_depot_early_table_not_allocated(StackDepot);
+                    stack_depot_late_init_deferred(StackDepot);
                 }
             }
         }
@@ -516,7 +526,12 @@ object StackDepot: MemoryObject {
     state State::Ready {
         invariant {
             stack_depot_ready(StackDepot, MemBlock);
-            stack_depot_early_storage_ready(StackDepot);
+            stack_depot_config_enabled(StackDepot);
+            stack_depot_early_init_passed(StackDepot);
+            stack_depot_early_init_request_absent(StackDepot);
+            stack_depot_early_table_allocation_not_required(StackDepot);
+            stack_depot_early_table_not_allocated(StackDepot);
+            stack_depot_late_init_deferred(StackDepot);
         }
     }
 }

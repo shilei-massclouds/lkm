@@ -45,6 +45,14 @@ impl Config {
         self.kernel_link_addr
     }
 
+    pub const fn stack_depot_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn stack_depot_always_init(&self) -> bool {
+        false
+    }
+
     pub const fn linear_map_virt_start(&self) -> usize {
         LINEAR_MAP_VIRT_START
     }

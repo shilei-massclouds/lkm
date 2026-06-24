@@ -1529,7 +1529,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 本子阶段的输出目标是把“早期内存描述和 memblock 分配能力”推进为“核心内存管理基础可用”。这里的“核心内存管理基础可用”至少包含：zonelist 已建立，页分配器 hotplug/pcp 基础钩子已登记，架构 `mem_init()` 已把 memblock 管理的可用页交接给页分配器并完成 RISC-V 所需的 `swiotlb`/内存布局收尾，SLUB/kmalloc 分配器可用，内存调试/硬化状态完成当前配置下的初始化，页表相关缓存可用，vmalloc/vmap 基础可用，`mm_struct` 等基础 cache 可用。`ExecMemory` 在当前默认配置下因未选择 `CONFIG_EXECMEM` 视为裁剪/no-op 路径；后续若启用相关功能，再作为正式对象展开。
 
-当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_64BIT=y`、`CONFIG_MMU=y`、`CONFIG_FLATMEM=y`、`CONFIG_SLUB=y`、`CONFIG_SPLIT_PTE_PTLOCKS=y`、`CONFIG_STACKDEPOT=y`、`CONFIG_DEBUG_PAGEALLOC=y`、`CONFIG_DEBUG_VM=y`、`CONFIG_SWIOTLB=y`、`CONFIG_DMA_BOUNCE_UNALIGNED_KMALLOC=y`；同时 `CONFIG_INIT_ON_ALLOC_DEFAULT_ON`、`CONFIG_INIT_ON_FREE_DEFAULT_ON`、`CONFIG_DEBUG_PAGEALLOC_ENABLE_DEFAULT`、`CONFIG_PAGE_POISONING`、`CONFIG_PAGE_EXTENSION`、`CONFIG_KFENCE`、`CONFIG_KMSAN`、`CONFIG_DEBUG_KMEMLEAK`、`CONFIG_DEBUG_OBJECTS`、`CONFIG_KASAN`、`CONFIG_MODULES`、`CONFIG_BPF_JIT` 和 `CONFIG_KPROBES` 均未启用。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
+当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_64BIT=y`、`CONFIG_MMU=y`、`CONFIG_FLATMEM=y`、`CONFIG_SLUB=y`、`CONFIG_SPLIT_PTE_PTLOCKS=y`、`CONFIG_STACKDEPOT=y`、`CONFIG_DEBUG_PAGEALLOC=y`、`CONFIG_DEBUG_VM=y`、`CONFIG_SWIOTLB=y`、`CONFIG_DMA_BOUNCE_UNALIGNED_KMALLOC=y`；同时 `CONFIG_INIT_ON_ALLOC_DEFAULT_ON`、`CONFIG_INIT_ON_FREE_DEFAULT_ON`、`CONFIG_DEBUG_PAGEALLOC_ENABLE_DEFAULT`、`CONFIG_PAGE_POISONING`、`CONFIG_PAGE_EXTENSION`、`CONFIG_KFENCE`、`CONFIG_KMSAN`、`CONFIG_DEBUG_KMEMLEAK`、`CONFIG_DEBUG_OBJECTS`、`CONFIG_KASAN`、`CONFIG_STACKDEPOT_ALWAYS_INIT`、`CONFIG_MODULES`、`CONFIG_BPF_JIT` 和 `CONFIG_KPROBES` 均未启用。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
 
 本小节使用的标准生命周期语义扩展为 `Base -> Prepared -> Ready -> Online -> Offline -> Destroyed`。其中 `Offline` 表示对象的主要服务能力或资源所有权已经退出运行路径，但对象元数据仍可用于诊断、引用收尾或后续销毁；对多数启动对象，`Offline` 可以是空动作或短路边界。`handoff` 只作为 `Offline` 的资源交接别名，`discarded` 只作为 `Destroyed` 的资源丢弃别名，不引入新的状态名。`State::Offline` 与 `Event::Disable` 已进入 `spec/model/SEMANTICS.md` 和 model checker；配置裁剪路径继续写为 `trimmed` 或“裁剪路径”，不把它当作对象状态；`Skipped` 只可作为讨论中的自然语言，不进入 formal model、规格清单或 coding 实现。编译期约束、一次性验证、日志输出、策略选择和临时占位初始化若不形成长期对象生命周期，统一写为 `checkpoint`，不引入未定义的 `Checked`、`Decided`、`Emitted`、`Registered` 等状态名。
 
@@ -1547,7 +1547,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 8. `页扩展对象`（暂名 `PageExt`）：覆盖 `page_ext_init_flatmem()`、`page_ext_init_flatmem_late()` 和条件执行的 `page_ext_init()`。当前默认配置 `CONFIG_PAGE_EXTENSION=n`，因此本对象不进入主线 formal，只在过程清单中保留裁剪位置。
 9. `内存调试与硬化对象`（暂名 `MemoryDebugHardening`）：覆盖 `mem_debugging_and_hardening_init()` 与 `report_meminit()`。它依赖 `StaticBranch.Ready`，消费前序 `EarlyParam` 已经解析出的内存调试/硬化参数事实，汇总 `init_on_alloc`、`init_on_free`、page poisoning、debug pagealloc、debug guardpage、check_pages 等配置和启动参数结果，并通过 `StaticBranch.set(key, value)` action 收敛相关 static key；其中 `report_meminit()` 主要作为状态报告或 checkpoint，不单独推进对象生命周期。
 10. `内存检测辅助对象`（暂名 `MemorySanitizers`）：覆盖 `kfence_alloc_pool_and_metadata()`、`kmsan_init_shadow()` 和 `kmsan_init_runtime()`。当前默认配置未启用 `KFENCE` 和 `KMSAN`，因此不进入主线 formal。
-11. `StackDepot`：覆盖 `stack_depot_early_init()`，为 page owner、kmemleak 等后续调试路径提供调用栈存储基础。
+11. `StackDepot`：覆盖 `stack_depot_early_init()` 的 `mm_init()` 调用点。当前 `CONFIG_STACKDEPOT=y`，但 `CONFIG_STACKDEPOT_ALWAYS_INIT=n`，且 page owner、kmemleak、KASAN、KFENCE 等 early 消费者未启用，因此本阶段记录 early init passed、early request absent 和 early table 未分配；后续若真实消费者需要 `stack_depot_save/fetch`，再通过 late `stack_depot_init()` 或启用 early request 展开存储细节。
 12. `SLUB 子系统对象`（正式命名为 `SlubSubsystem`）：覆盖 `kmem_cache_init()` 的全局 SLUB lifecycle、`slab_state`、CPU hotplug hook、late flush workqueue 和 `kmalloc`/`kzalloc`/`kfree` facade。当前默认配置选择 `CONFIG_SLUB=y`，因此本对象按 SLUB 自举路径建模。Linux 内部 `slab_state` 与规格生命周期的映射为：`DOWN -> Base`、`PARTIAL -> Prepared`、`UP -> Ready`、`FULL -> Online`。本子阶段只推进到 `UP/Ready`；`kmem_cache_init_late()` 作为后续 action 处理 flush workqueue，`slab_sysfs_init()` 才会把 Linux 内部状态推进到 `FULL/Online`。model、coding 和当前实现均以 `SlubSubsystem` 作为唯一 SLUB facade 命名，并避免把它解释成某个 cache 实例。
 13. `SLUB cache registry`（正式命名为 `SlubCacheRegistry`）：对应 Linux 全局 `slab_caches` 列表及其互斥/注册边界。它由 `SlubSubsystem` 拥有，并拥有且可枚举所有 `SlubCache` 实例；`SlubSubsystem` 不再直接拥有所有 cache 实例，避免与 registry 形成双重所有权。`kmem_cache_init()` 期间，boot cache、bootstrap 后的正式 cache、kmalloc size-class cache 和后续普通具名 cache 都必须进入该 registry；后续创建普通 cache 时也通过它维护全局可枚举关系。
 14. `SLUB cache 类型`（正式类型名为 `SlubCache`，不使用 `SlubCacheType`）：对应单个 Linux `struct kmem_cache` 实例的共同类型。选择 `SlubCache` 而不是 `SlubCacheType`，是因为规格中对象类型名应直接表达内核领域概念；不同实例通过名称、对象大小、对齐、flags、usercopy range、slab order、node/cpu cache 视图和 alloc/free 行为参数化，而不是为每种 cache 再引入独立类型。每个 `SlubCache` 拥有自己的 `SlubNodeSet` 与 `SlubCpuCacheSet`：前者描述 per-node partial/full slab 视图，后者描述 per-CPU 当前 slab、partial slab 和统计缓存。当前不把 `SlubNodeSet`、`SlubCpuCacheSet` 提升为顶层对象。
@@ -1580,7 +1580,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 ##### 第二段：页释放前的调试/硬化策略收敛（初稿）
 
-这一段覆盖 `page_ext_init_flatmem()`、`mem_debugging_and_hardening_init()`、`kfence_alloc_pool_and_metadata()`、`report_meminit()`、`kmsan_init_shadow()` 和 `stack_depot_early_init()`，中心功能是把页分配器正式释放 memblock 页之前需要确定的调试、硬化和诊断策略收敛下来。其中 `PageExt`、`KFENCE` 和 `KMSAN` 在当前 `default_config` 下均为裁剪路径，保留调用位置但不形成主线对象状态；`StackDepot` 进入主线 formal，但它的中心语义是建立后续调试对象可复用的调用栈存储基础，后续单独展开。
+这一段覆盖 `page_ext_init_flatmem()`、`mem_debugging_and_hardening_init()`、`kfence_alloc_pool_and_metadata()`、`report_meminit()`、`kmsan_init_shadow()` 和 `stack_depot_early_init()`，中心功能是把页分配器正式释放 memblock 页之前需要确定的调试、硬化和诊断策略收敛下来。其中 `PageExt`、`KFENCE` 和 `KMSAN` 在当前 `default_config` 下均为裁剪路径，保留调用位置但不形成主线对象状态；`StackDepot` 进入主线 formal，但在当前配置下它的中心语义是记录 early init 调用点已通过、未收到 early request、未分配 early hash table，并为后续 late init 或真实调试消费者保留边界。
 
 `mem_debugging_and_hardening_init()` 是本段的中心转换。它不是分配器启用动作，而是读取 Kconfig 默认值和 `EarlyParam` 已经发布的早期参数事实，先处理 page poisoning 对 init-on-alloc/free 的优先级，再为 fast path 使用的 static keys 确定最终值。规格层不为 `init_on_alloc`、`init_on_free`、`_debug_pagealloc_enabled`、`_debug_guardpage_enabled` 和 `check_pages_enabled` 分别建立顶层对象；它们先作为 `MemoryDebugHardening` 的属性和 `StaticBranch` registry 中的 key 来表达。`MemoryDebugHardening.setup()` 必须要求 `StaticBranch.state == Ready`，并通过 `StaticBranch.set(key, value)` 更新需要显式启停的 key；该过程完成后，`MemoryDebugHardening.state == Ready`。
 
@@ -1634,7 +1634,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 | `kfence_alloc_pool_and_metadata()` | trimmed | `CONFIG_KFENCE=n`。 |
 | `report_meminit()` | checkpoint | 输出内存自动初始化状态；当前基线下 heap alloc/free auto-init 均为 off，不单独推进对象生命周期。 |
 | `kmsan_init_shadow()` | trimmed | `CONFIG_KMSAN=n`。 |
-| `stack_depot_early_init()` | formal: `StackDepot.setup()` | `CONFIG_STACKDEPOT=y`，为 page owner、kmemleak 等调试路径提供栈存储基础。 |
+| `stack_depot_early_init()` | formal: `StackDepot.setup()` | `CONFIG_STACKDEPOT=y` 但 `CONFIG_STACKDEPOT_ALWAYS_INIT=n`，且当前 early 消费者未请求初始化；本调用记录 passed/no early table allocation，完整 storage 留给 late init 或未来消费者。 |
 | `mem_init()` | formal: `Swiotlb.setup()` + `PageAllocator.setup()` + `MemBlock.offline()` | RISC-V 路径先 checkpoint `BUG_ON(!mem_map)`，消费核心准备期已经 Ready 的 `PageMetadataMap`；随后基于 `DmaCachePolicy`、`dma32_phys_limit` 和 `max_pfn` 决定并初始化 early SWIOTLB 池，再由 `memblock_free_all()` 把 memblock free ranges 释放到 buddy/page allocator；`print_vm_layout()` 是 checkpoint。 |
 | `kmem_cache_init()` | formal target: `SlubSubsystem.preset/setup()` + `SlubCacheRegistry.setup()` + `KmallocCaches.setup()` | `CONFIG_SLUB=y`，建立 `SlubCache("boot_kmem_cache_node")`/`SlubCache("boot_kmem_cache")`，bootstrap 为正式 `SlubCache("kmem_cache_node")`/`SlubCache("kmem_cache")`，创建 kmalloc size-class caches，并登记 `CPUHP_SLUB_DEAD` 回调；freelist random 当前为空路径，`kmem_cache_init_late()` 不在本阶段。 |
 | `page_ext_init_flatmem_late()` | trimmed | `CONFIG_PAGE_EXTENSION=n`。 |
@@ -1672,7 +1672,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `PageExt` 明确记录为当前配置不需要
 - `MemoryDebugHardening.state == Ready`，表示内存调试/硬化 static keys 已按当前配置和早期参数事实完成收敛
 - `Swiotlb.state == Ready` 或记录为当前启动不需要 early SWIOTLB pool
-- `StackDepot.state == Ready`
+- `StackDepot.state == Ready`，表示 `stack_depot_early_init()` 调用点已经通过；当前配置下未发生 early request，也未通过 memblock 分配 early hash table
 - `SlubSubsystem.state == Ready`，表示 SLUB 全局 lifecycle、`slab_state=UP` 和 kmalloc facade 已就绪
 - `SlubCacheRegistry.state == Ready`，表示 `kmem_cache`、`kmem_cache_node`、kmalloc caches 和专用 named caches 通过全局 cache registry 统一注册、查找和枚举
 - `KmallocCaches.state == Ready`，表示 size-class 到 `SlubCache` 实例的映射已经建立

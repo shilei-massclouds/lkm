@@ -2031,14 +2031,22 @@ impl MemoryDebugHardening {
 
 pub struct StackDepot {
     lifecycle: Lifecycle,
-    early_storage_ready: bool,
+    config_enabled: bool,
+    early_init_passed: bool,
+    early_init_requested: bool,
+    early_table_allocated: bool,
+    late_init_deferred: bool,
 }
 
 impl StackDepot {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            early_storage_ready: false,
+            config_enabled: false,
+            early_init_passed: false,
+            early_init_requested: false,
+            early_table_allocated: false,
+            late_init_deferred: false,
         }
     }
 
@@ -2046,23 +2054,49 @@ impl StackDepot {
         self.lifecycle.state()
     }
 
-    pub const fn early_storage_ready(&self) -> bool {
-        self.early_storage_ready
+    pub const fn config_enabled(&self) -> bool {
+        self.config_enabled
+    }
+
+    pub const fn early_init_passed(&self) -> bool {
+        self.early_init_passed
+    }
+
+    pub const fn early_init_requested(&self) -> bool {
+        self.early_init_requested
+    }
+
+    pub const fn early_table_allocated(&self) -> bool {
+        self.early_table_allocated
+    }
+
+    pub const fn early_table_allocation_not_required(&self) -> bool {
+        self.config_enabled && !self.early_init_requested && !self.early_table_allocated
+    }
+
+    pub const fn late_init_deferred(&self) -> bool {
+        self.late_init_deferred
     }
 
     pub fn setup(
         &mut self,
+        config: &Config,
         memblock: &MemBlock,
         memory_debug_hardening: &MemoryDebugHardening,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
+            || config.state() != State::Online
             || memblock.state() != State::Online
             || memory_debug_hardening.state() != State::Ready
         {
             return self.failed_setup();
         }
 
-        self.early_storage_ready = true;
+        self.config_enabled = config.stack_depot_enabled();
+        self.early_init_requested = config.stack_depot_always_init();
+        self.early_init_passed = self.config_enabled;
+        self.early_table_allocated = self.early_init_requested;
+        self.late_init_deferred = self.config_enabled && !self.early_table_allocated;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,

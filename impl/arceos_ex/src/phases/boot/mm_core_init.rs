@@ -36,7 +36,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.memory_debug_hardening
         .setup(&mut ctx.static_branch, &ctx.early_param, &ctx.config)?;
     ctx.stack_depot
-        .setup(&ctx.memblock, &ctx.memory_debug_hardening)?;
+        .setup(&ctx.config, &ctx.memblock, &ctx.memory_debug_hardening)?;
     ctx.swiotlb
         .setup(&ctx.dma_cache_policy, &ctx.memblock, &ctx.zones)?;
     ctx.page_allocator.setup(
@@ -167,7 +167,12 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.static_branch.enabled(StaticKey::DebugPageAlloc) == Some(false)
         && ctx.static_branch.enabled(StaticKey::DebugGuardPage) == Some(false)
         && ctx.stack_depot.state() == State::Ready
-        && ctx.stack_depot.early_storage_ready()
+        && ctx.stack_depot.config_enabled()
+        && ctx.stack_depot.early_init_passed()
+        && !ctx.stack_depot.early_init_requested()
+        && ctx.stack_depot.early_table_allocation_not_required()
+        && !ctx.stack_depot.early_table_allocated()
+        && ctx.stack_depot.late_init_deferred()
         && ctx.swiotlb.state() == State::Ready
         && ctx.swiotlb.early_pool_ready()
         && ctx.swiotlb.pool_required()
