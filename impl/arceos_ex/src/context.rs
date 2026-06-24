@@ -11,6 +11,7 @@ use crate::objects::{
     cache_block_info::CacheBlockInfo,
     command_line::{CommandLine, SavedCommandLine, StaticCommandLine},
     config::Config,
+    cpu::SecondaryCpuStore,
     cpu_capabilities::CpuCapabilities,
     cpu_control::{BootCurrentCpu, CurrentTaskSlot, LocalInterruptControl, RawSpinLock},
     cpu_group::CpuGroup,
@@ -113,6 +114,7 @@ pub struct Context {
 
     pub interrupt_stream: InterruptStream,
     pub boot_current_cpu: BootCurrentCpu,
+    pub secondary_cpus: SecondaryCpuStore,
     pub boot_cpu_local_interrupt: LocalInterruptControl,
     pub boot_cpu_current_task: CurrentTaskSlot,
     pub kernel_image: KernelImage,
@@ -304,6 +306,7 @@ impl Context {
             lds: Lds::new(),
             interrupt_stream: InterruptStream::new(),
             boot_current_cpu: BootCurrentCpu::new(),
+            secondary_cpus: SecondaryCpuStore::new(),
             boot_cpu_local_interrupt: LocalInterruptControl::new(),
             boot_cpu_current_task: CurrentTaskSlot::new(),
             kernel_image: KernelImage::new(),

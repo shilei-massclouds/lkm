@@ -1,5 +1,6 @@
 use super::{
     boot_args::BootArgs,
+    cpu::{Cpu, CpuView},
     cpu_group::CpuGroup,
     init_task::InitTask,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
@@ -40,6 +41,7 @@ impl CurrentTaskRef {
 
 pub struct BootCurrentCpu {
     lifecycle: Lifecycle,
+    boot_cpu: Cpu,
     hartid: usize,
     logical_id: usize,
     owns_boot_cpu: bool,
@@ -51,6 +53,7 @@ impl BootCurrentCpu {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            boot_cpu: Cpu::boot(),
             hartid: usize::MAX,
             logical_id: usize::MAX,
             owns_boot_cpu: false,
@@ -75,6 +78,10 @@ impl BootCurrentCpu {
         self.owns_boot_cpu
     }
 
+    pub fn boot_cpu(&self) -> Option<CpuView> {
+        self.boot_cpu.view()
+    }
+
     pub const fn bootstrap_role_ready(&self) -> bool {
         self.bootstrap_role_ready
     }
@@ -93,6 +100,7 @@ impl BootCurrentCpu {
             );
         }
 
+        self.boot_cpu.adopt_head_preset(boot_args)?;
         self.hartid = boot_args.boot_hartid();
         self.owns_boot_cpu = true;
         self.bootstrap_role_ready = true;
@@ -117,6 +125,14 @@ impl BootCurrentCpu {
             State::Ready,
             crate::trace::Checkpoint::BootCurrentCpuReady,
         )
+    }
+
+    pub fn setup_boot_cpu(&mut self, boot_hartid_valid: bool) -> EventResult {
+        self.boot_cpu.setup_boot(boot_hartid_valid)
+    }
+
+    pub fn enable_boot_cpu(&mut self) -> EventResult {
+        self.boot_cpu.enable_boot()
     }
 
     pub fn enable(&mut self, cpu_group: &CpuGroup) -> EventResult {

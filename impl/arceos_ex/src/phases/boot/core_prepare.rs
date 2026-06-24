@@ -35,8 +35,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.lds,
         &mut ctx.resource_lock,
     )?;
-    ctx.cpu_group
-        .setup_smp(&ctx.device_tree, &ctx.cpu_id_map, &ctx.sbi)?;
+    ctx.cpu_group.setup_smp(
+        &ctx.device_tree,
+        &ctx.cpu_id_map,
+        &ctx.sbi,
+        &mut ctx.secondary_cpus,
+    )?;
     ctx.cpu_id_map.setup(&ctx.cpu_group)?;
     ctx.cache_block_info
         .setup(&ctx.device_tree, &ctx.cpu_group)?;

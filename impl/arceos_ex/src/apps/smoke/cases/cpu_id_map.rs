@@ -1,7 +1,7 @@
 use crate::{
     apps::smoke::SmokeResult,
     context::context,
-    objects::{cpu_group::CpuRole, cpu_id_map::CpuIdMapEntryKind, printk, state::State},
+    objects::{cpu::CpuRole, cpu_id_map::CpuIdMapEntryKind, printk, state::State},
 };
 
 pub fn run() -> SmokeResult {

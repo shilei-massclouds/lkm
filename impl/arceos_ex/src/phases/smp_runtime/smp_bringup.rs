@@ -52,6 +52,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.secondary_cpu_startup_ack,
         &mut ctx.cpu_hotplug_sync,
         &mut ctx.cpu_group,
+        &mut ctx.secondary_cpus,
         &ctx.sbi_ipi,
     )?;
     ctx.smp_bringup_boundary

@@ -266,7 +266,6 @@ fn adopt_head_prefix(ctx: &mut Context, boot_args: &BootArgs) -> EventResult {
     ctx.root_stream.adopt_head_preset()?;
     ctx.kernel_image.adopt_head_setup(&ctx.lds)?;
     ctx.boot_current_cpu.adopt_head_preset(boot_args)?;
-    ctx.cpu_group.adopt_boot_cpu_preset(boot_args)?;
     ctx.boot_cpu_local_interrupt.setup()?;
     ctx.boot_cpu_current_task.setup()?;
     ctx.boot_current_cpu.setup()?;

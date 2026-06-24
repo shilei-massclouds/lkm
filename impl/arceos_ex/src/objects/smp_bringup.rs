@@ -1,4 +1,5 @@
 use super::{
+    cpu::SecondaryCpuStore,
     cpu_group::CpuGroup,
     irq_time::SbiIpi,
     per_cpu_storage::PerCpuStorage,
@@ -366,6 +367,7 @@ impl SecondaryCpuOnlineAck {
         startup_ack: &SecondaryCpuStartupAck,
         sync: &mut CpuHotplugSyncSet,
         cpu_group: &mut CpuGroup,
+        secondary_cpus: &mut SecondaryCpuStore,
         sbi_ipi: &SbiIpi,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
@@ -378,7 +380,7 @@ impl SecondaryCpuOnlineAck {
         }
 
         sync.observe_done_up()?;
-        cpu_group.mark_secondary_cpus_online()?;
+        cpu_group.mark_secondary_cpus_online(secondary_cpus)?;
         self.acknowledged = true;
         self.ap_idle_detail_deferred = true;
         self.lifecycle.transition(

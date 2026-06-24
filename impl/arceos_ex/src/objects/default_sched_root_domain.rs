@@ -1,5 +1,6 @@
 use super::{
-    cpu_group::{CpuGroup, CpuRef, MAX_CPUS},
+    cpu::{CpuRef, MAX_CPUS},
+    cpu_group::CpuGroup,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;

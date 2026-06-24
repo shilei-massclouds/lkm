@@ -35,9 +35,11 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.cpu_id_map.preset(&ctx.cpu_group)?;
     ctx.interrupt_stream
         .setup(&mut ctx.boot_cpu_local_interrupt)?;
-    ctx.cpu_group
-        .boot_cpu_setup(ctx.platform_cpu_info.contains(boot_hartid))?;
-    ctx.cpu_group.boot_cpu_enable()?;
+    ctx.boot_current_cpu
+        .setup_boot_cpu(ctx.platform_cpu_info.contains(boot_hartid))?;
+    ctx.cpu_group.register_boot_cpu(&ctx.boot_current_cpu)?;
+    ctx.boot_current_cpu.enable_boot_cpu()?;
+    ctx.cpu_group.register_boot_cpu(&ctx.boot_current_cpu)?;
     printk::preset()?;
     printk::write_str("arceos_ex object kernel\n");
 

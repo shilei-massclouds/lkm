@@ -1,6 +1,7 @@
 use super::{
+    cpu::CpuRef,
     cpu_control::{CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
-    cpu_group::{CpuGroup, CpuRef},
+    cpu_group::CpuGroup,
     cpu_id_map::CpuIdMap,
     default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,

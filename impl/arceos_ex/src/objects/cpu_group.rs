@@ -1,5 +1,5 @@
 use super::{
-    boot_args::BootArgs,
+    cpu::{CpuRef, CpuRole, CpuView, SecondaryCpuStore, BOOT_CPU_LOGICAL_ID, MAX_CPUS},
     cpu_control::BootCurrentCpu,
     cpu_id_map::CpuIdMap,
     device_tree::DeviceTree,
@@ -9,254 +9,9 @@ use super::{
 };
 use crate::trace::Checkpoint;
 
-pub(crate) const MAX_CPUS: usize = 16;
-const BOOT_CPU_LOGICAL_ID: usize = 0;
-
-unsafe extern "C" {
-    static head_boot_hartid: usize;
-}
-
-pub struct Cpu {
-    lifecycle: Lifecycle,
-    logical_id: usize,
-    hartid: usize,
-    role: CpuRole,
-    possible: bool,
-    present: bool,
-    active: bool,
-    online: bool,
-}
-
-impl Cpu {
-    const fn empty() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            logical_id: usize::MAX,
-            hartid: usize::MAX,
-            role: CpuRole::Secondary,
-            possible: false,
-            present: false,
-            active: false,
-            online: false,
-        }
-    }
-
-    const fn boot() -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Base),
-            logical_id: BOOT_CPU_LOGICAL_ID,
-            hartid: usize::MAX,
-            role: CpuRole::Boot,
-            possible: false,
-            present: false,
-            active: false,
-            online: false,
-        }
-    }
-
-    const fn secondary(logical_id: usize, hartid: usize) -> Self {
-        Self {
-            lifecycle: Lifecycle::new(State::Ready),
-            logical_id,
-            hartid,
-            role: CpuRole::Secondary,
-            possible: true,
-            present: true,
-            active: false,
-            online: false,
-        }
-    }
-
-    fn adopt_head_preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        if self.role != CpuRole::Boot || self.logical_id != BOOT_CPU_LOGICAL_ID {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.lifecycle.state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-        let head_hartid = unsafe { core::ptr::addr_of!(head_boot_hartid).read_volatile() };
-        if head_hartid != boot_args.boot_hartid() {
-            return failed_condition(
-                LifecycleEvent::Preset,
-                self.lifecycle.state(),
-                State::Base,
-                State::Prepared,
-            );
-        }
-
-        self.hartid = head_hartid;
-        self.lifecycle
-            .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
-    }
-
-    fn setup(&mut self, boot_hartid_valid: bool) -> EventResult {
-        if self.lifecycle.state() != State::Prepared || !boot_hartid_valid {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Prepared,
-                State::Ready,
-            );
-        }
-
-        self.possible = true;
-        self.present = true;
-        self.active = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Prepared,
-            State::Ready,
-            Checkpoint::BootCpuReady,
-        )
-    }
-
-    fn enable(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready
-            || self.role != CpuRole::Boot
-            || !self.possible
-            || !self.present
-            || !self.active
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Online,
-            );
-        }
-
-        self.online = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Enable,
-            State::Ready,
-            State::Online,
-            Checkpoint::BootCpuOnline,
-        )
-    }
-
-    fn state(&self) -> State {
-        self.lifecycle.state()
-    }
-
-    const fn cpu_ref(&self) -> CpuRef {
-        CpuRef::new(self.logical_id)
-    }
-
-    const fn hartid(&self) -> usize {
-        self.hartid
-    }
-
-    const fn role(&self) -> CpuRole {
-        self.role
-    }
-
-    const fn is_online(&self) -> bool {
-        self.online
-    }
-
-    fn mark_online(&mut self) {
-        self.active = true;
-        self.online = true;
-    }
-
-    fn view(&self) -> Option<CpuView> {
-        if self.logical_id == usize::MAX || self.hartid == usize::MAX {
-            return None;
-        }
-
-        Some(CpuView {
-            cpu_ref: self.cpu_ref(),
-            hartid: self.hartid,
-            role: self.role,
-            possible: self.possible,
-            present: self.present,
-            active: self.active,
-            online: self.online,
-        })
-    }
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub enum CpuRole {
-    Boot,
-    Secondary,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct CpuRef {
-    logical_id: usize,
-}
-
-impl CpuRef {
-    pub const fn invalid() -> Self {
-        Self {
-            logical_id: usize::MAX,
-        }
-    }
-
-    pub const fn new(logical_id: usize) -> Self {
-        Self { logical_id }
-    }
-
-    pub const fn logical_id(self) -> usize {
-        self.logical_id
-    }
-
-    pub const fn is_boot_cpu(self) -> bool {
-        self.logical_id == BOOT_CPU_LOGICAL_ID
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct CpuView {
-    cpu_ref: CpuRef,
-    hartid: usize,
-    role: CpuRole,
-    possible: bool,
-    present: bool,
-    active: bool,
-    online: bool,
-}
-
-impl CpuView {
-    pub const fn cpu_ref(self) -> CpuRef {
-        self.cpu_ref
-    }
-
-    pub const fn logical_id(self) -> usize {
-        self.cpu_ref.logical_id()
-    }
-
-    pub const fn hartid(self) -> usize {
-        self.hartid
-    }
-
-    pub const fn role(self) -> CpuRole {
-        self.role
-    }
-
-    pub const fn is_possible(self) -> bool {
-        self.possible
-    }
-
-    pub const fn is_present(self) -> bool {
-        self.present
-    }
-
-    pub const fn is_active(self) -> bool {
-        self.active
-    }
-
-    pub const fn is_online(self) -> bool {
-        self.online
-    }
-}
-
 pub struct CpuGroup {
     lifecycle: Lifecycle,
-    cpu_storage: [Cpu; MAX_CPUS],
+    cpu_views: [CpuView; MAX_CPUS],
     cpu_refs: [CpuRef; MAX_CPUS],
     cpu_ref_count: usize,
     possible_refs: [CpuRef; MAX_CPUS],
@@ -274,17 +29,9 @@ impl CpuGroup {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            cpu_storage: {
-                let mut cpus = [const { Cpu::empty() }; MAX_CPUS];
-                cpus[BOOT_CPU_LOGICAL_ID] = Cpu::boot();
-                cpus
-            },
-            cpu_refs: {
-                let mut refs = [CpuRef::invalid(); MAX_CPUS];
-                refs[BOOT_CPU_LOGICAL_ID] = CpuRef::new(BOOT_CPU_LOGICAL_ID);
-                refs
-            },
-            cpu_ref_count: 1,
+            cpu_views: [CpuView::invalid(); MAX_CPUS],
+            cpu_refs: [CpuRef::invalid(); MAX_CPUS],
+            cpu_ref_count: 0,
             possible_refs: [CpuRef::invalid(); MAX_CPUS],
             possible_count: 0,
             present_refs: [CpuRef::invalid(); MAX_CPUS],
@@ -297,12 +44,15 @@ impl CpuGroup {
         }
     }
 
-    pub fn adopt_boot_cpu_preset(&mut self, boot_args: &BootArgs) -> EventResult {
-        self.cpu_storage[BOOT_CPU_LOGICAL_ID].adopt_head_preset(boot_args)
-    }
-
     pub fn preset(&mut self, current_cpu: &BootCurrentCpu) -> EventResult {
-        let boot_cpu = &self.cpu_storage[BOOT_CPU_LOGICAL_ID];
+        let Some(boot_cpu) = current_cpu.boot_cpu() else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        };
         if self.lifecycle.state() != State::Base
             || boot_cpu.state() != State::Prepared
             || current_cpu.state() != State::Ready
@@ -317,24 +67,23 @@ impl CpuGroup {
             );
         }
 
+        self.register_cpu_view(boot_cpu)?;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
     }
 
-    pub fn boot_cpu_setup(&mut self, boot_hartid_valid: bool) -> EventResult {
-        let result = self.cpu_storage[BOOT_CPU_LOGICAL_ID].setup(boot_hartid_valid);
-        if result.is_ok() {
-            self.refresh_cpu_set_views();
+    pub fn register_boot_cpu(&mut self, current_cpu: &BootCurrentCpu) -> EventResult {
+        let Some(boot_cpu) = current_cpu.boot_cpu() else {
+            return self.failed_setup();
+        };
+        if !boot_cpu.cpu_ref().is_boot_cpu()
+            || boot_cpu.hartid() != current_cpu.hartid()
+            || !current_cpu.owns_boot_cpu()
+        {
+            return self.failed_setup();
         }
-        result
-    }
 
-    pub fn boot_cpu_enable(&mut self) -> EventResult {
-        let result = self.cpu_storage[BOOT_CPU_LOGICAL_ID].enable();
-        if result.is_ok() {
-            self.refresh_cpu_set_views();
-        }
-        result
+        self.register_cpu_view(boot_cpu)
     }
 
     pub fn setup_smp(
@@ -342,8 +91,11 @@ impl CpuGroup {
         device_tree: &DeviceTree,
         cpu_id_map: &CpuIdMap,
         sbi: &Sbi,
+        secondary_cpus: &mut SecondaryCpuStore,
     ) -> EventResult {
-        let boot_cpu = &self.cpu_storage[BOOT_CPU_LOGICAL_ID];
+        let Some(boot_cpu) = self.boot_cpu() else {
+            return self.failed_setup();
+        };
         if self.lifecycle.state() != State::Prepared
             || boot_cpu.state() != State::Online
             || device_tree.state() != State::Ready
@@ -361,7 +113,10 @@ impl CpuGroup {
         let Some(secondary_harts) = collect_secondary_harts(device_tree, boot_cpu.hartid()) else {
             return self.failed_setup();
         };
-        self.reset_secondary_cpus(secondary_harts);
+        if !secondary_cpus.reset_from_harts(&secondary_harts.hartids, secondary_harts.count) {
+            return self.failed_setup();
+        }
+        self.register_secondary_cpu_views(secondary_cpus)?;
         self.refresh_cpu_set_views();
 
         self.lifecycle.transition(
@@ -398,7 +153,7 @@ impl CpuGroup {
     }
 
     pub fn cpu(&self, logical_id: usize) -> Option<CpuView> {
-        self.cpu_instance(logical_id).and_then(|cpu| cpu.view())
+        self.cpu_view(logical_id)
     }
 
     pub fn possible_contains(&self, cpu_ref: CpuRef) -> bool {
@@ -430,7 +185,7 @@ impl CpuGroup {
     pub fn has_hartid(&self, hartid: usize) -> bool {
         let mut logical_id = 0usize;
         while logical_id < self.cpu_ref_count {
-            if self.cpu_storage[logical_id].hartid() == hartid {
+            if self.cpu_views[logical_id].hartid() == hartid {
                 return true;
             }
             logical_id += 1;
@@ -456,7 +211,9 @@ impl CpuGroup {
             let Some(cpu_ref) = self.cpu_ref_at(logical_id) else {
                 return false;
             };
-            let cpu = &self.cpu_storage[logical_id];
+            let Some(cpu) = self.cpu_view(logical_id) else {
+                return false;
+            };
             if cpu.role() != CpuRole::Secondary
                 || !self.present_contains(cpu_ref)
                 || self.online_contains(cpu_ref)
@@ -475,7 +232,9 @@ impl CpuGroup {
             let Some(cpu_ref) = self.cpu_ref_at(logical_id) else {
                 return false;
             };
-            let cpu = &self.cpu_storage[logical_id];
+            let Some(cpu) = self.cpu_view(logical_id) else {
+                return false;
+            };
             if cpu.role() != CpuRole::Secondary
                 || !self.present_contains(cpu_ref)
                 || !self.online_contains(cpu_ref)
@@ -493,9 +252,7 @@ impl CpuGroup {
     }
 
     pub fn prepare_pre_smp(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready
-            || self.cpu_storage[BOOT_CPU_LOGICAL_ID].state() != State::Online
-        {
+        if self.lifecycle.state() != State::Ready || self.boot_cpu_state() != State::Online {
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -518,7 +275,10 @@ impl CpuGroup {
         Ok(())
     }
 
-    pub fn mark_secondary_cpus_online(&mut self) -> EventResult {
+    pub fn mark_secondary_cpus_online(
+        &mut self,
+        secondary_cpus: &mut SecondaryCpuStore,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || !self.pre_smp_topology_ready
             || !self.boot_cpu_topology_recorded
@@ -532,11 +292,8 @@ impl CpuGroup {
             );
         }
 
-        let mut logical_id = 1usize;
-        while logical_id < self.cpu_ref_count {
-            self.cpu_storage[logical_id].mark_online();
-            logical_id += 1;
-        }
+        secondary_cpus.mark_all_online();
+        self.register_secondary_cpu_views(secondary_cpus)?;
         self.refresh_cpu_set_views();
         self.smp_concurrency_open = true;
         crate::trace::checkpoint(Checkpoint::SecondaryCpusOnline);
@@ -548,36 +305,70 @@ impl CpuGroup {
     }
 
     pub fn boot_cpu_state(&self) -> State {
-        self.cpu_storage[BOOT_CPU_LOGICAL_ID].state()
+        self.boot_cpu()
+            .map(|cpu| cpu.state())
+            .unwrap_or(State::Base)
     }
 
-    fn cpu_instance(&self, logical_id: usize) -> Option<&Cpu> {
+    fn cpu_view(&self, logical_id: usize) -> Option<CpuView> {
         if logical_id >= self.cpu_ref_count || logical_id >= MAX_CPUS {
             return None;
         }
         if self.cpu_refs[logical_id].logical_id() != logical_id {
             return None;
         }
-        Some(&self.cpu_storage[logical_id])
+        let cpu = self.cpu_views[logical_id];
+        if cpu.logical_id() == logical_id {
+            Some(cpu)
+        } else {
+            None
+        }
     }
 
-    fn reset_secondary_cpus(&mut self, secondary_harts: SecondaryHartSet) {
+    fn register_secondary_cpu_views(&mut self, secondary_cpus: &SecondaryCpuStore) -> EventResult {
+        let boot_cpu = self.boot_cpu();
+        self.cpu_views = [CpuView::invalid(); MAX_CPUS];
+        self.cpu_refs = [CpuRef::invalid(); MAX_CPUS];
+        self.cpu_ref_count = 0;
+
+        let Some(boot_cpu) = boot_cpu else {
+            return self.failed_setup();
+        };
+        self.register_cpu_view(boot_cpu)?;
+
         let mut logical_id = 1usize;
-        while logical_id < MAX_CPUS {
-            self.cpu_storage[logical_id] = Cpu::empty();
-            self.cpu_refs[logical_id] = CpuRef::invalid();
+        while logical_id <= secondary_cpus.count() {
+            let Some(cpu) = secondary_cpus.cpu(logical_id) else {
+                return self.failed_setup();
+            };
+            self.register_cpu_view(cpu)?;
             logical_id += 1;
         }
+        Ok(())
+    }
 
-        let mut index = 0usize;
-        while index < secondary_harts.count {
-            let logical_id = index + 1;
-            self.cpu_storage[logical_id] =
-                Cpu::secondary(logical_id, secondary_harts.hartids[index]);
-            self.cpu_refs[logical_id] = CpuRef::new(logical_id);
-            index += 1;
+    fn register_cpu_view(&mut self, cpu: CpuView) -> EventResult {
+        let logical_id = cpu.logical_id();
+        if logical_id >= MAX_CPUS || cpu.cpu_ref().logical_id() != logical_id {
+            return self.failed_setup();
         }
-        self.cpu_ref_count = 1 + secondary_harts.count;
+        if logical_id < self.cpu_ref_count {
+            if self.cpu_refs[logical_id] != cpu.cpu_ref() {
+                return self.failed_setup();
+            }
+            self.cpu_views[logical_id] = cpu;
+            self.refresh_cpu_set_views();
+            return Ok(());
+        }
+        if logical_id != self.cpu_ref_count {
+            return self.failed_setup();
+        }
+
+        self.cpu_views[logical_id] = cpu;
+        self.cpu_refs[logical_id] = cpu.cpu_ref();
+        self.cpu_ref_count += 1;
+        self.refresh_cpu_set_views();
+        Ok(())
     }
 
     fn refresh_cpu_set_views(&mut self) {
@@ -591,17 +382,17 @@ impl CpuGroup {
         let mut logical_id = 0usize;
         while logical_id < self.cpu_ref_count {
             let cpu_ref = self.cpu_refs[logical_id];
-            let cpu = &self.cpu_storage[logical_id];
-            if cpu_ref.logical_id() == logical_id && cpu.logical_id == logical_id {
-                if cpu.possible {
+            let cpu = self.cpu_views[logical_id];
+            if cpu_ref.logical_id() == logical_id && cpu.logical_id() == logical_id {
+                if cpu.is_possible() {
                     self.possible_refs[self.possible_count] = cpu_ref;
                     self.possible_count += 1;
                 }
-                if cpu.present {
+                if cpu.is_present() {
                     self.present_refs[self.present_count] = cpu_ref;
                     self.present_count += 1;
                 }
-                if cpu.online {
+                if cpu.is_online() {
                     self.online_refs[self.online_count] = cpu_ref;
                     self.online_count += 1;
                 }
