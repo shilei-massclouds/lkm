@@ -91,6 +91,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::mm_struct_cache::run,
     },
     SmokeCase {
+        name: "mm_core_trimmed_paths",
+        run: cases::mm_core_trimmed_paths::run,
+    },
+    SmokeCase {
         name: "global_alloc",
         run: cases::global_alloc::run,
     },

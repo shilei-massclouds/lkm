@@ -1527,7 +1527,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `SwapperVM.state == Online`
 - 当前仍保持 `System Exclusive`
 
-本子阶段的输出目标是把“早期内存描述和 memblock 分配能力”推进为“核心内存管理基础可用”。这里的“核心内存管理基础可用”至少包含：zonelist 已建立，页分配器 hotplug/pcp 基础钩子已登记，架构 `mem_init()` 已把 memblock 管理的可用页交接给页分配器并完成 RISC-V 所需的 `swiotlb`/内存布局收尾，SLUB/kmalloc 分配器可用，内存调试/硬化状态完成当前配置下的初始化，页表相关缓存可用，vmalloc/vmap 基础可用，`mm_struct` 等基础 cache 可用。`ExecMemory` 在当前默认配置下未被 `MODULES`、`BPF_JIT` 或 `KPROBES` 选中，视为裁剪路径；后续若启用相关功能，再作为正式对象展开。
+本子阶段的输出目标是把“早期内存描述和 memblock 分配能力”推进为“核心内存管理基础可用”。这里的“核心内存管理基础可用”至少包含：zonelist 已建立，页分配器 hotplug/pcp 基础钩子已登记，架构 `mem_init()` 已把 memblock 管理的可用页交接给页分配器并完成 RISC-V 所需的 `swiotlb`/内存布局收尾，SLUB/kmalloc 分配器可用，内存调试/硬化状态完成当前配置下的初始化，页表相关缓存可用，vmalloc/vmap 基础可用，`mm_struct` 等基础 cache 可用。`ExecMemory` 在当前默认配置下因未选择 `CONFIG_EXECMEM` 视为裁剪/no-op 路径；后续若启用相关功能，再作为正式对象展开。
 
 当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_64BIT=y`、`CONFIG_MMU=y`、`CONFIG_FLATMEM=y`、`CONFIG_SLUB=y`、`CONFIG_SPLIT_PTE_PTLOCKS=y`、`CONFIG_STACKDEPOT=y`、`CONFIG_DEBUG_PAGEALLOC=y`、`CONFIG_DEBUG_VM=y`、`CONFIG_SWIOTLB=y`、`CONFIG_DMA_BOUNCE_UNALIGNED_KMALLOC=y`；同时 `CONFIG_INIT_ON_ALLOC_DEFAULT_ON`、`CONFIG_INIT_ON_FREE_DEFAULT_ON`、`CONFIG_DEBUG_PAGEALLOC_ENABLE_DEFAULT`、`CONFIG_PAGE_POISONING`、`CONFIG_PAGE_EXTENSION`、`CONFIG_KFENCE`、`CONFIG_KMSAN`、`CONFIG_DEBUG_KMEMLEAK`、`CONFIG_DEBUG_OBJECTS`、`CONFIG_KASAN`、`CONFIG_MODULES`、`CONFIG_BPF_JIT` 和 `CONFIG_KPROBES` 均未启用。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
 
@@ -1557,7 +1557,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 18. `DebugObjectsMemory`：覆盖 `debug_objects_mem_init()`。当前默认配置 `CONFIG_DEBUG_OBJECTS=n`，因此不进入主线 formal。
 19. `VmallocAllocator`：覆盖 `vmalloc_init()`。它是管理 vmalloc/vmap 虚拟地址空间的 allocator，不是页表映射器，也不等同于所有 vmalloc API 行为。它拥有 `VmapAddressSpace`、`VmapNodeSet`、`VmapAreaCache`、`VmapBlockQueues` 和 `VfreeDeferredSet`：`VmapAddressSpace` 是资源本体，拥有 `VmapArea` 区间集合；`VmapNodeSet` 是管理索引/分片组织，indexes/partitions `VmapAddressSpace`，但不拥有虚拟地址资源本身。`vmalloc_init()` 建立 `vmap_area` cache、per-CPU vmap block 队列、per-CPU deferred free 队列、vmap node，导入已有 `vmlist` 为 busy areas，建立 free vmap space，并把 `vmap_initialized` 置为 true；`vmap-node` shrinker 注册作为后续 reclaim hook action/checkpoint。
 20. `MmStructCache`：覆盖 `mm_cache_init()`，只建立 `"mm_struct"` cache。它依赖 `SlubSubsystem.Ready` 和 CPU mask size 相关事实，计算 `sizeof(struct mm_struct) + cpumask_size() + mm_cid_size()`，并在 `SlubCacheRegistry` 中注册带 `saved_auxv` usercopy range 的 `SlubCache("mm_struct")` 实例。`MmStructCache` 是该实例的阶段对象/命名 owner，不是新的 allocator 类型。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()`，不并入本子阶段。
-21. `ExecMemory`：覆盖 `execmem_init()`。它建立后续模块、BPF JIT、kprobes 或类似可执行内存分配策略所需的范围信息。当前默认配置未启用 `MODULES`、`BPF_JIT` 和 `KPROBES`，`CONFIG_EXECMEM` 未被选中，因此本路径视为裁剪 no-op。
+21. `ExecMemory`：覆盖 `execmem_init()`。它建立后续模块、BPF JIT、kprobes 或类似可执行内存分配策略所需的范围信息。当前默认配置未选中 `CONFIG_EXECMEM`，因此 `execmem_init()` 使用 `include/linux/execmem.h` 中的 inline no-op；`MODULES=n`、`BPF_JIT=n` 和 `KPROBES=n` 是未选择可执行内存消费者的背景事实，不是判断该函数是否有主体的直接条件。
 22. `Espfix` 与 `Pti`：覆盖 `init_espfix_bsp()` 与 `pti_init()`。在 RISC-V64 当前实现中它们为空 inline 或非目标架构路径，规格上不进入当前 formal model，只在过程清单中作为不适用项保留。
 
 <p align="center">
@@ -1620,7 +1620,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 这一段覆盖 `mm_cache_init()` 和当前配置下的 `execmem_init()` 收尾。`MmStructCache.setup()` 只建立 `"mm_struct"` cache，不包含 `vm_area_struct` cache、`vma_lock_cachep` 或 `mmap_init()`；后三者属于后续 `proc_caches_init()`。`mm_cache_init()` 依赖 `SlubSubsystem.Ready` 和 CPU mask size 相关事实，按 `sizeof(struct mm_struct) + cpumask_size() + mm_cid_size()` 计算对象大小，并在 `SlubCacheRegistry` 中注册带 `saved_auxv` usercopy range 的 `SlubCache("mm_struct")` 实例；完成后 `MmStructCache.state == Ready`，后续进程/地址空间对象创建才消费该 cache。
 
-`execmem_init()` 按当前 `default_config` 原则只记录为裁剪/no-op：`MODULES=n`、`BPF_JIT=n`、`KPROBES=n`，因此未选择 `CONFIG_EXECMEM`。本阶段不建立 `ExecMemory` 正式对象，也不讨论启用后的 arch range、default range 或 kprobes range。`page_ext_init_flatmem_late()`、`kmemleak_init()`、`debug_objects_mem_init()`、`page_ext_init()` 和 `kmsan_init_runtime()` 同样只保留当前配置下的调用位置和裁剪原因；`init_espfix_bsp()`、`pti_init()` 是 RISC-V64 当前不纳入路径。
+`execmem_init()` 按当前 `default_config` 原则只记录为裁剪/no-op：当前未选择 `CONFIG_EXECMEM`，所以该调用落到 `include/linux/execmem.h` 的 inline no-op。本阶段不建立 `ExecMemory` 正式对象，也不讨论启用后的 arch range、default range 或 kprobes range。`page_ext_init_flatmem_late()`、`kmemleak_init()`、`debug_objects_mem_init()`、`page_ext_init()` 和 `kmsan_init_runtime()` 同样只保留当前配置下的调用位置和裁剪原因；`init_espfix_bsp()`、`pti_init()` 是 RISC-V64 当前不纳入路径。
 
 ##### 子阶段 4 过程处理清单（初稿）
 
@@ -1648,7 +1648,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 | `pti_init()` | 不纳入当前规格 | x86 PTI 路径，RISC-V64 当前为空。 |
 | `kmsan_init_runtime()` | trimmed | `CONFIG_KMSAN=n`。 |
 | `mm_cache_init()` | formal: `MmStructCache.setup()` | 只建立 `"mm_struct"` cache；对象大小包含动态 `cpumask_size()` 与 `mm_cid_size()`，`vm_area_struct` cache 和 `mmap_init()` 属于后续 `proc_caches_init()`。 |
-| `execmem_init()` | trimmed/no-op | `MODULES=n`、`BPF_JIT=n`、`KPROBES=n`，当前未选择 `CONFIG_EXECMEM`。 |
+| `execmem_init()` | trimmed/no-op | 当前未选择 `CONFIG_EXECMEM`，走 `include/linux/execmem.h` 的 inline no-op；`MODULES=n`、`BPF_JIT=n`、`KPROBES=n` 只是无消费者背景事实。 |
 
 <p align="center">
   <img src="pic/mm-core-init-sequence.svg" alt="内存核心初始化期对象构建时序" width="900">

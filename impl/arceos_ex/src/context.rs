@@ -57,8 +57,8 @@ use crate::objects::{
     memblock::MemBlock,
     mm_core::{
         DynamicContainerRuntime, KernelGlobalAllocator, MemoryDebugHardening, MemoryTopology,
-        MmStructCache, PageAllocator, PageMetadataMap, PageTableCaches, SlubSubsystem, StackDepot,
-        Swiotlb, VmallocAllocator,
+        MmCoreTrimmedPaths, MmStructCache, PageAllocator, PageMetadataMap, PageTableCaches,
+        SlubSubsystem, StackDepot, Swiotlb, VmallocAllocator,
     },
     mutex::Mutex,
     params::Params,
@@ -172,6 +172,7 @@ pub struct Context {
     pub vmalloc_allocator: VmallocAllocator,
     pub ioremap: Ioremap,
     pub mm_struct_cache: MmStructCache,
+    pub mm_core_trimmed_paths: MmCoreTrimmedPaths,
 
     pub scheduler: Scheduler,
     pub radix_tree: RadixTree,
@@ -359,6 +360,7 @@ impl Context {
             vmalloc_allocator: VmallocAllocator::new(),
             ioremap: Ioremap::new(),
             mm_struct_cache: MmStructCache::new(),
+            mm_core_trimmed_paths: MmCoreTrimmedPaths::new(),
             scheduler: Scheduler::new(),
             radix_tree: RadixTree::new(),
             maple_tree: MapleTree::new(),

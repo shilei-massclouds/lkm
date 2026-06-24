@@ -435,6 +435,63 @@ object MemoryDebugHardening: MemoryObject {
 }
 
 /*
+ * MmCoreTrimmedPaths 保留当前 Linux .config 下仍出现在 mm_core_init()
+ * 调用序列中的裁剪/no-op 位置。它不是 PageExt/KFENCE/KMSAN 等正式
+ * 子系统对象，只提供可观测的配置依据和调用位置事实。
+ */
+object MmCoreTrimmedPaths: MemoryObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    Config.state == State::Online;
+                    MemoryDebugHardening.state == State::Ready;
+                    StackDepot.state == State::Ready;
+                    Ioremap.state == State::Ready;
+                    MmStructCache.state == State::Ready;
+                }
+
+                ensures {
+                    mm_core_page_ext_flatmem_trimmed(MmCoreTrimmedPaths);
+                    mm_core_kfence_pool_trimmed(MmCoreTrimmedPaths);
+                    mm_core_kmsan_shadow_trimmed(MmCoreTrimmedPaths);
+                    mm_core_page_ext_flatmem_late_trimmed(MmCoreTrimmedPaths);
+                    mm_core_kmemleak_init_trimmed(MmCoreTrimmedPaths);
+                    mm_core_debug_objects_mem_trimmed(MmCoreTrimmedPaths);
+                    mm_core_page_ext_final_trimmed(MmCoreTrimmedPaths);
+                    mm_core_x86_espfix_not_applicable(MmCoreTrimmedPaths);
+                    mm_core_x86_pti_not_applicable(MmCoreTrimmedPaths);
+                    mm_core_kmsan_runtime_trimmed(MmCoreTrimmedPaths);
+                    mm_core_execmem_init_trimmed_noop(MmCoreTrimmedPaths);
+                    mm_core_execmem_trimmed_because_config_execmem_disabled(MmCoreTrimmedPaths);
+                    mm_core_trimmed_paths_position_preserved(MmCoreTrimmedPaths);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            mm_core_page_ext_flatmem_trimmed(MmCoreTrimmedPaths);
+            mm_core_kfence_pool_trimmed(MmCoreTrimmedPaths);
+            mm_core_kmsan_shadow_trimmed(MmCoreTrimmedPaths);
+            mm_core_page_ext_flatmem_late_trimmed(MmCoreTrimmedPaths);
+            mm_core_kmemleak_init_trimmed(MmCoreTrimmedPaths);
+            mm_core_debug_objects_mem_trimmed(MmCoreTrimmedPaths);
+            mm_core_page_ext_final_trimmed(MmCoreTrimmedPaths);
+            mm_core_x86_espfix_not_applicable(MmCoreTrimmedPaths);
+            mm_core_x86_pti_not_applicable(MmCoreTrimmedPaths);
+            mm_core_kmsan_runtime_trimmed(MmCoreTrimmedPaths);
+            mm_core_execmem_init_trimmed_noop(MmCoreTrimmedPaths);
+            mm_core_execmem_trimmed_because_config_execmem_disabled(MmCoreTrimmedPaths);
+            mm_core_trimmed_paths_position_preserved(MmCoreTrimmedPaths);
+        }
+    }
+}
+
+/*
  * StackDepot 表示 stack_depot_early_init() 建立的调用栈存储基础。
  */
 object StackDepot: MemoryObject {
@@ -1386,6 +1443,7 @@ object MmCoreInitPhase: PhaseObject {
                     VmallocAllocator.Event::Setup;
                     Ioremap.Event::Setup;
                     MmStructCache.Event::Setup;
+                    MmCoreTrimmedPaths.Event::Setup;
                 }
 
                 ensures {
@@ -1401,7 +1459,7 @@ object MmCoreInitPhase: PhaseObject {
                     "KMSAN 裁剪路径：CONFIG_KMSAN=n，kmsan_init_shadow()/kmsan_init_runtime() 当前不进入 formal。";
                     "Kmemleak 裁剪路径：CONFIG_DEBUG_KMEMLEAK=n，kmemleak_init() 当前不进入 formal。";
                     "DebugObjectsMemory 裁剪路径：CONFIG_DEBUG_OBJECTS=n，debug_objects_mem_init() 当前不进入 formal。";
-                    "ExecMemory 裁剪路径：MODULES=n、BPF_JIT=n、KPROBES=n，execmem_init() 当前为 no-op。";
+                    "ExecMemory 裁剪路径：CONFIG_EXECMEM 未选中，execmem_init() 当前为 include/linux/execmem.h 中的 inline no-op。";
                     "init_espfix_bsp() 不纳入 RISC-V64 当前路径：x86 特定路径。";
                     "pti_init() 不纳入 RISC-V64 当前路径：x86 PTI 路径。";
                 }
@@ -1441,6 +1499,7 @@ object MmCoreInitPhase: PhaseObject {
             VfreeDeferredSet.state == State::Ready;
             Ioremap.state == State::Ready;
             MmStructCache.state == State::Ready;
+            MmCoreTrimmedPaths.state == State::Ready;
         }
     }
 }

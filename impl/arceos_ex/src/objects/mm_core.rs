@@ -4598,6 +4598,149 @@ impl MmStructCache {
     }
 }
 
+pub struct MmCoreTrimmedPaths {
+    lifecycle: Lifecycle,
+    page_ext_flatmem_trimmed: bool,
+    kfence_pool_trimmed: bool,
+    kmsan_shadow_trimmed: bool,
+    page_ext_flatmem_late_trimmed: bool,
+    kmemleak_init_trimmed: bool,
+    debug_objects_mem_trimmed: bool,
+    page_ext_final_trimmed: bool,
+    x86_espfix_not_applicable: bool,
+    x86_pti_not_applicable: bool,
+    kmsan_runtime_trimmed: bool,
+    execmem_init_trimmed_noop: bool,
+    execmem_trimmed_because_config_execmem_disabled: bool,
+    position_preserved: bool,
+}
+
+impl MmCoreTrimmedPaths {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            page_ext_flatmem_trimmed: false,
+            kfence_pool_trimmed: false,
+            kmsan_shadow_trimmed: false,
+            page_ext_flatmem_late_trimmed: false,
+            kmemleak_init_trimmed: false,
+            debug_objects_mem_trimmed: false,
+            page_ext_final_trimmed: false,
+            x86_espfix_not_applicable: false,
+            x86_pti_not_applicable: false,
+            kmsan_runtime_trimmed: false,
+            execmem_init_trimmed_noop: false,
+            execmem_trimmed_because_config_execmem_disabled: false,
+            position_preserved: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn page_ext_flatmem_trimmed(&self) -> bool {
+        self.page_ext_flatmem_trimmed
+    }
+
+    pub const fn kfence_pool_trimmed(&self) -> bool {
+        self.kfence_pool_trimmed
+    }
+
+    pub const fn kmsan_shadow_trimmed(&self) -> bool {
+        self.kmsan_shadow_trimmed
+    }
+
+    pub const fn page_ext_flatmem_late_trimmed(&self) -> bool {
+        self.page_ext_flatmem_late_trimmed
+    }
+
+    pub const fn kmemleak_init_trimmed(&self) -> bool {
+        self.kmemleak_init_trimmed
+    }
+
+    pub const fn debug_objects_mem_trimmed(&self) -> bool {
+        self.debug_objects_mem_trimmed
+    }
+
+    pub const fn page_ext_final_trimmed(&self) -> bool {
+        self.page_ext_final_trimmed
+    }
+
+    pub const fn x86_espfix_not_applicable(&self) -> bool {
+        self.x86_espfix_not_applicable
+    }
+
+    pub const fn x86_pti_not_applicable(&self) -> bool {
+        self.x86_pti_not_applicable
+    }
+
+    pub const fn kmsan_runtime_trimmed(&self) -> bool {
+        self.kmsan_runtime_trimmed
+    }
+
+    pub const fn execmem_init_trimmed_noop(&self) -> bool {
+        self.execmem_init_trimmed_noop
+    }
+
+    pub const fn execmem_trimmed_because_config_execmem_disabled(&self) -> bool {
+        self.execmem_trimmed_because_config_execmem_disabled
+    }
+
+    pub const fn position_preserved(&self) -> bool {
+        self.position_preserved
+    }
+
+    pub fn setup(
+        &mut self,
+        config: &Config,
+        memory_debug_hardening: &MemoryDebugHardening,
+        stack_depot: &StackDepot,
+        ioremap: &crate::objects::ioremap::Ioremap,
+        mm_struct_cache: &MmStructCache,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || config.state() != State::Online
+            || memory_debug_hardening.state() != State::Ready
+            || stack_depot.state() != State::Ready
+            || ioremap.state() != State::Ready
+            || mm_struct_cache.state() != State::Ready
+        {
+            return self.failed_setup();
+        }
+
+        self.page_ext_flatmem_trimmed = true;
+        self.kfence_pool_trimmed = true;
+        self.kmsan_shadow_trimmed = true;
+        self.page_ext_flatmem_late_trimmed = true;
+        self.kmemleak_init_trimmed = true;
+        self.debug_objects_mem_trimmed = true;
+        self.page_ext_final_trimmed = true;
+        self.x86_espfix_not_applicable = true;
+        self.x86_pti_not_applicable = true;
+        self.kmsan_runtime_trimmed = true;
+        self.execmem_init_trimmed_noop = true;
+        self.execmem_trimmed_because_config_execmem_disabled = true;
+        self.position_preserved = true;
+
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::MmCoreTrimmedPathsReady,
+        )
+    }
+
+    fn failed_setup(&self) -> EventResult {
+        failed_condition(
+            LifecycleEvent::Setup,
+            self.lifecycle.state(),
+            State::Base,
+            State::Ready,
+        )
+    }
+}
+
 struct ZoneFacts {
     facts: [ZoneRef; MAX_ZONE_SET_ZONES],
     count: usize,

@@ -82,7 +82,14 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.config,
     )?;
     ctx.mm_struct_cache
-        .setup(&mut ctx.slub_subsystem, &ctx.cpu_group)
+        .setup(&mut ctx.slub_subsystem, &ctx.cpu_group)?;
+    ctx.mm_core_trimmed_paths.setup(
+        &ctx.config,
+        &ctx.memory_debug_hardening,
+        &ctx.stack_depot,
+        &ctx.ioremap,
+        &ctx.mm_struct_cache,
+    )
 }
 
 fn handoff() -> ! {
@@ -292,6 +299,22 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
             == Some(true)
         && ctx.mm_struct_cache.saved_auxv_usercopy_ready()
         && ctx.mm_struct_cache.vma_caches_deferred()
+        && ctx.mm_core_trimmed_paths.state() == State::Ready
+        && ctx.mm_core_trimmed_paths.page_ext_flatmem_trimmed()
+        && ctx.mm_core_trimmed_paths.kfence_pool_trimmed()
+        && ctx.mm_core_trimmed_paths.kmsan_shadow_trimmed()
+        && ctx.mm_core_trimmed_paths.page_ext_flatmem_late_trimmed()
+        && ctx.mm_core_trimmed_paths.kmemleak_init_trimmed()
+        && ctx.mm_core_trimmed_paths.debug_objects_mem_trimmed()
+        && ctx.mm_core_trimmed_paths.page_ext_final_trimmed()
+        && ctx.mm_core_trimmed_paths.x86_espfix_not_applicable()
+        && ctx.mm_core_trimmed_paths.x86_pti_not_applicable()
+        && ctx.mm_core_trimmed_paths.kmsan_runtime_trimmed()
+        && ctx.mm_core_trimmed_paths.execmem_init_trimmed_noop()
+        && ctx
+            .mm_core_trimmed_paths
+            .execmem_trimmed_because_config_execmem_disabled()
+        && ctx.mm_core_trimmed_paths.position_preserved()
         && printk::is_ready()
         && (earlycon::is_online() || printk::console_handoff_complete())
 }
