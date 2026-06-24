@@ -111,6 +111,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::vmalloc::run,
     },
     SmokeCase {
+        name: "default_sched_root_domain",
+        run: cases::default_sched_root_domain::run,
+    },
+    SmokeCase {
         name: "scheduler",
         run: cases::scheduler::run,
     },

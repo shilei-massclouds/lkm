@@ -60,6 +60,7 @@ impl DefaultSchedRootDomain {
     pub fn covers_cpu_group_possible(&self, cpu_group: &CpuGroup) -> bool {
         if self.lifecycle.state() != State::Ready
             || cpu_group.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
             || self.covered_cpu_count != cpu_group.possible_cpu_count()
         {
             return false;
@@ -83,7 +84,10 @@ impl DefaultSchedRootDomain {
     }
 
     pub(crate) fn setup(&mut self, cpu_group: &CpuGroup) -> EventResult {
-        if self.lifecycle.state() != State::Base || cpu_group.state() != State::Ready {
+        if self.lifecycle.state() != State::Base
+            || cpu_group.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
+        {
             return self.failed_setup();
         }
 
@@ -129,6 +133,7 @@ impl DefaultSchedRootDomain {
 
     fn covers_cpu_group_possible_before_ready(&self, cpu_group: &CpuGroup) -> bool {
         if cpu_group.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
             || self.covered_cpu_count != cpu_group.possible_cpu_count()
         {
             return false;
