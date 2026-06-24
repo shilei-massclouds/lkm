@@ -331,10 +331,18 @@ predicate runqueue_pick_next_task_returns<T, U, V>(runqueue_ref: T, prev_ref: U,
 predicate scheduler_select_runqueue_returns<T, U, V>(scheduler: T, task_ref: U, runqueue_ref: V) -> bool;
 predicate scheduler_schedule_event_available<T>(scheduler: T) -> bool;
 predicate scheduler_schedule_smoke_ready<T>(scheduler: T) -> bool;
+predicate scheduler_preset_ready<T>(scheduler: T) -> bool;
+predicate scheduler_default_root_domain_ready<T, U>(scheduler: T, root_domain: U) -> bool;
+predicate sched_class_skeletons_deferred<T>(scheduler: T) -> bool;
 predicate scheduler_schedule_local_interrupts_closed<T, U>(scheduler: T, local_interrupt: U) -> bool;
 predicate scheduler_schedule_exit_restores_local_interrupts<T, U>(scheduler: T, local_interrupt: U) -> bool;
 predicate scheduler_runqueue_lock_held_for_schedule<T, U>(scheduler: T, runqueue: U) -> bool;
 predicate scheduler_possible_cpu_runqueues_ready<T, U>(scheduler: T, cpu_group: U) -> bool;
+predicate scheduler_possible_cpu_runqueues_attached_to_default_root_domain<T, U, V>(
+    scheduler: T,
+    cpu_group: U,
+    root_domain: V
+) -> bool;
 predicate scheduler_pick_next_task_identity<T, U, V>(scheduler: T, runqueue: U, task: V) -> bool;
 predicate scheduler_pick_next_task_selects_runnable<T, U, V>(scheduler: T, runqueue: U, task_ref: V) -> bool;
 predicate scheduler_no_task_switch_on_single_task_path<T, U>(scheduler: T, task: U) -> bool;
@@ -359,7 +367,32 @@ predicate runqueue_task_refs_empty<T>(runqueue: T) -> bool;
 predicate runqueue_task_refs_some<T>(runqueue: T) -> bool;
 predicate runqueue_contains_task<T, U>(runqueue: T, task_ref: U) -> bool;
 predicate boot_runqueue_lock_ready<T, U>(runqueue: T, lock: U) -> bool;
+predicate boot_runqueue_ready<T, U>(runqueue: T, cpu: U) -> bool;
 predicate boot_runqueue_possible_cpu_set_covered_by_cpu_group<T, U>(runqueue: T, cpu_group: U) -> bool;
+predicate boot_runqueue_cpu_ref_covered_by_root_domain<T, U, V>(
+    runqueue: T,
+    root_domain: U,
+    cpu_ref: V
+) -> bool;
+predicate boot_runqueue_attached_to_root_domain<T, U>(runqueue: T, root_domain: U) -> bool;
+predicate boot_runqueue_class_queues_ready<T>(runqueue: T) -> bool;
+predicate boot_runqueue_balance_push_disabled<T>(runqueue: T) -> bool;
+predicate bit_wait_queue_table_ready<T>(table: T) -> bool;
+predicate default_sched_root_domain_ready<T, U>(root_domain: T, cpu_group: U) -> bool;
+predicate default_sched_root_domain_covers_cpu_group_possible<T, U>(
+    root_domain: T,
+    cpu_group: U
+) -> bool;
+predicate default_sched_root_domain_covered_cpus_are_cpu_refs<T, U>(
+    root_domain: T,
+    cpu_group: U
+) -> bool;
+predicate default_sched_root_domain_does_not_own_cpu_bodies<T>(root_domain: T) -> bool;
+predicate default_sched_root_domain_covers_cpu_ref<T, U>(
+    root_domain: T,
+    cpu_ref: U
+) -> bool;
+predicate sched_smp_topology_deferred<T>(root_domain: T) -> bool;
 predicate boot_idle_pi_lock_ready<T, U>(task: T, lock: U) -> bool;
 predicate boot_idle_init_held_pi_lock<T, U>(task: T, lock: U) -> bool;
 predicate boot_idle_init_held_runqueue_lock<T, U>(runqueue: T, lock: U) -> bool;

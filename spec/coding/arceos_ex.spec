@@ -2301,6 +2301,29 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_not_generate_live_ap_current_cpu_before_entry();
 
         /*
+         * DefaultSchedRootDomain coverage:
+         *
+         * DefaultSchedRootDomain must be generated as the scheduler's default
+         * root-domain coverage view. It must derive covered_cpus from
+         * CpuGroup.possible_cpus, store/resolve entries as CpuRef values, and
+         * must not own CPU bodies or define a separate CPU identity table.
+         * Naked possible CPU counts are insufficient as the formal model fact.
+         */
+        arceos_ex_must_default_root_domain_cover_cpu_group_possible_refs();
+
+        /*
+         * RunQueue root-domain attach:
+         *
+         * RunQueue setup for each possible CPU must attach to
+         * DefaultSchedRootDomain only after the runqueue CPU reference is known
+         * to be covered by DefaultSchedRootDomain.covered_cpus. The boot
+         * runqueue must expose or resolve BootCPURef as its CPU reference.
+         * Secondary runqueue metadata may be prepared before AP online, but
+         * that must not create a live AP CurrentCPU or runnable AP flow.
+         */
+        arceos_ex_must_attach_possible_cpu_runqueues_to_default_root_domain();
+
+        /*
          * Transitional lowering:
          *
          * The current Rust storage may temporarily keep boot_cpu and

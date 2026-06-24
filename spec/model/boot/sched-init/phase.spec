@@ -38,8 +38,8 @@ context BootIdlePiLockContext: ResourceExclusiveContext {
 /*
  * Scheduler 表示启动期调度器基础对象。本阶段只要求 boot CPU 的 runqueue、
  * idle task 关联和主动调度入口可用；同时记录 Linux for_each_possible_cpu()
- * 已基于 CpuGroup possible 集合初始化 runqueue 元数据。完整 SMP 调度拓扑
- * 留给后续阶段。
+ * 已基于 CpuGroup possible 集合初始化 runqueue 元数据，并把这些 runqueue
+ * attach 到 DefaultSchedRootDomain。完整 SMP 调度拓扑留给后续阶段。
  */
 object Scheduler: SchedulerObject {
     initial_state: State::Base;
@@ -64,6 +64,10 @@ object Scheduler: SchedulerObject {
                     scheduler_preset_ready(Scheduler);
                     sched_class_skeletons_deferred(Scheduler);
                     scheduler_default_root_domain_ready(Scheduler, DefaultSchedRootDomain);
+                    default_sched_root_domain_covers_cpu_group_possible(
+                        DefaultSchedRootDomain,
+                        CpuGroup
+                    );
                     bit_wait_queue_table_ready(BitWaitQueueTable);
                 }
             }
@@ -76,6 +80,10 @@ object Scheduler: SchedulerObject {
             BitWaitQueueTable.state == State::Prepared;
             scheduler_preset_ready(Scheduler);
             scheduler_default_root_domain_ready(Scheduler, DefaultSchedRootDomain);
+            default_sched_root_domain_covers_cpu_group_possible(
+                DefaultSchedRootDomain,
+                CpuGroup
+            );
         }
 
         transitions {
@@ -99,6 +107,7 @@ object Scheduler: SchedulerObject {
                     boot_runqueue_ready(BootRunQueue, BootCPU);
                     runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(BootRunQueueRef);
+                    runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
                     runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(CurrentRunQueueRef);
                     runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
@@ -108,6 +117,11 @@ object Scheduler: SchedulerObject {
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
                     task_cpu_ref_is(BootIdleTask, BootCPURef);
+                    scheduler_possible_cpu_runqueues_attached_to_default_root_domain(
+                        Scheduler,
+                        CpuGroup,
+                        DefaultSchedRootDomain
+                    );
                     scheduler_schedule_event_available(Scheduler);
                 }
             }
@@ -120,7 +134,13 @@ object Scheduler: SchedulerObject {
             BootIdleTask.state == State::Ready;
             scheduler_runqueues_ready(Scheduler, CpuGroup);
             scheduler_possible_cpu_runqueues_ready(Scheduler, CpuGroup);
+            scheduler_possible_cpu_runqueues_attached_to_default_root_domain(
+                Scheduler,
+                CpuGroup,
+                DefaultSchedRootDomain
+            );
             runqueue_ref_ready(BootRunQueueRef);
+            runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
             runqueue_ref_ready(CurrentRunQueueRef);
             runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
@@ -148,6 +168,7 @@ object Scheduler: SchedulerObject {
             BootRunQueue.state == State::Ready;
             BootIdleTask.state == State::Ready;
             runqueue_ref_ready(BootRunQueueRef);
+            runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
             runqueue_ref_ready(CurrentRunQueueRef);
             runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
@@ -160,7 +181,9 @@ object Scheduler: SchedulerObject {
 }
 
 /*
- * DefaultSchedRootDomain 表示 sched_init() 中建立的默认 root domain。
+ * DefaultSchedRootDomain 表示 sched_init() 中建立的默认 root domain。它是
+ * Scheduler 的调度覆盖视图，不拥有 CPU 本体；其 covered_cpus 由
+ * CpuGroup.possible_cpus 的 CpuRef 集合建立。
  */
 object DefaultSchedRootDomain: TaskObject {
     initial_state: State::Base;
@@ -175,6 +198,22 @@ object DefaultSchedRootDomain: TaskObject {
 
                 ensures {
                     default_sched_root_domain_ready(DefaultSchedRootDomain, CpuGroup);
+                    default_sched_root_domain_covers_cpu_group_possible(
+                        DefaultSchedRootDomain,
+                        CpuGroup
+                    );
+                    default_sched_root_domain_covered_cpus_are_cpu_refs(
+                        DefaultSchedRootDomain,
+                        CpuGroup
+                    );
+                    default_sched_root_domain_does_not_own_cpu_bodies(
+                        DefaultSchedRootDomain
+                    );
+                    cpu_group_possible_contains(CpuGroup, BootCPURef);
+                    default_sched_root_domain_covers_cpu_ref(
+                        DefaultSchedRootDomain,
+                        BootCPURef
+                    );
                     sched_smp_topology_deferred(DefaultSchedRootDomain);
                 }
             }
@@ -184,6 +223,20 @@ object DefaultSchedRootDomain: TaskObject {
     state State::Ready {
         invariant {
             default_sched_root_domain_ready(DefaultSchedRootDomain, CpuGroup);
+            default_sched_root_domain_covers_cpu_group_possible(
+                DefaultSchedRootDomain,
+                CpuGroup
+            );
+            default_sched_root_domain_covered_cpus_are_cpu_refs(
+                DefaultSchedRootDomain,
+                CpuGroup
+            );
+            default_sched_root_domain_does_not_own_cpu_bodies(DefaultSchedRootDomain);
+            default_sched_root_domain_covers_cpu_ref(
+                DefaultSchedRootDomain,
+                BootCPURef
+            );
+            sched_smp_topology_deferred(DefaultSchedRootDomain);
         }
     }
 }
@@ -238,10 +291,21 @@ object BootRunQueue: RunQueue {
                     raw_spinlock_ready(BootRunQueueLock);
                     boot_runqueue_lock_ready(BootRunQueue, BootRunQueueLock);
                     boot_runqueue_possible_cpu_set_covered_by_cpu_group(BootRunQueue, CpuGroup);
+                    cpu_group_possible_contains(CpuGroup, BootCPURef);
+                    default_sched_root_domain_covers_cpu_ref(
+                        DefaultSchedRootDomain,
+                        BootCPURef
+                    );
+                    boot_runqueue_cpu_ref_covered_by_root_domain(
+                        BootRunQueue,
+                        DefaultSchedRootDomain,
+                        BootCPURef
+                    );
                     runqueue_runtime_state_is(BootRunQueue, RunQueueRuntimeState::None);
                     runqueue_task_refs_empty(BootRunQueue);
                     runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(BootRunQueueRef);
+                    runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
                     runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(CurrentRunQueueRef);
                     runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
@@ -259,8 +323,16 @@ object BootRunQueue: RunQueue {
             raw_spinlock_ready(BootRunQueueLock);
             boot_runqueue_lock_ready(BootRunQueue, BootRunQueueLock);
             boot_runqueue_possible_cpu_set_covered_by_cpu_group(BootRunQueue, CpuGroup);
+            cpu_group_possible_contains(CpuGroup, BootCPURef);
+            default_sched_root_domain_covers_cpu_ref(DefaultSchedRootDomain, BootCPURef);
+            boot_runqueue_cpu_ref_covered_by_root_domain(
+                BootRunQueue,
+                DefaultSchedRootDomain,
+                BootCPURef
+            );
             runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
             runqueue_ref_ready(BootRunQueueRef);
+            runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
             runqueue_ref_ready(CurrentRunQueueRef);
             runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);

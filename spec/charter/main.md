@@ -1749,6 +1749,18 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 图 16 用于说明子阶段 5 的对象分类和依赖关系。左侧是阶段边界、中断检查、`initcall_debug_enable()` checkpoint 和当前配置下 trimmed/no-op 的 `context_tracking_init()`；中间是 `sched_init()` 及其后的 `RadixTree`、`MapleTree` 基础缓存；右侧是 deferred/no-op 的 housekeeping、单一 `Workqueue` 的 early 框架、`Softirq.Prepared` action table 和 `RcuCore`。灰色虚线框记录未来可能恢复的 `LinuxTracing` 候选对象。图中对象仍是初步分类，后续可以按讨论结果继续拆分、合并或降级为 checkpoint。
 
+`DefaultSchedRootDomain` 是 `Scheduler` 在 `sched_init()` 中建立的默认调度根域，对应 Linux 默认 `root_domain` 的规格抽象。它不承担 CPU 枚举、logical-id 分配或 CPU 本体状态维护；这些身份事实仍由 `CpuGroup` 负责。`DefaultSchedRootDomain` 从调度视角维护一组 CPU 实例引用，作为后续 `RunQueue` attach、RT/DL 共享状态、负载均衡和调度拓扑边界的默认覆盖域。当前 `sched_init()` 阶段只建立默认 root domain 的最小覆盖事实：`DefaultSchedRootDomain.covered_cpus == CpuGroup.possible_cpus`，集合元素是 `CpuRef` 或等价 CPU 引用，不是新的 CPU 本体对象。
+
+因此，`CpuGroup` 与 `DefaultSchedRootDomain` 的关系不是拥有关系，而是“身份索引源”和“调度覆盖视图”的关系。`CpuGroup.Cpu[logical_id]` 提供从 logical id 到 CPU 实例引用的稳定索引，`CpuGroup.possible_cpus` 提供当前可被调度子系统准备的 CPU 引用集合；`DefaultSchedRootDomain.setup(CpuGroup)` 读取该 possible 集合并建立自身的 `covered_cpus` 视图。后续每个 possible CPU 的 `CpuGroup.Cpu[id].RunQueue.setup(DefaultSchedRootDomain)` 必须满足该 runqueue 的 `cpu_ref` 属于 `DefaultSchedRootDomain.covered_cpus`，并记录 runqueue attached 到这个 root domain。boot CPU 只是其中 logical id 为 `0` 的 CPU 实例；secondary CPU 在真正 online 前也可以作为 possible CPU 引用被 root domain 覆盖，但这不表示 AP 已经拥有 live `CurrentCPU` 或可运行任务流。
+
+<p align="center">
+  <img src="pic/scheduler-root-domain-cpu-group.svg" alt="DefaultSchedRootDomain 与 CpuGroup 的引用关系" width="900">
+</p>
+
+<p align="center">
+  图 16a DefaultSchedRootDomain 与 CpuGroup 的引用关系
+</p>
+
 ##### 子阶段 5 过程处理清单（初稿）
 
 | Linux 6.12.37 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |

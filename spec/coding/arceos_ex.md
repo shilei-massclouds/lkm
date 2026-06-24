@@ -1364,10 +1364,23 @@ write-combine、normal memory alias 先记录为 deferred/unsupported，不得�
 `Scheduler.preset()` 对应 `sched_init()` 的全局前置准备：默认 root domain、bit wait queue table 和调度类壳。当前
 `SchedClass` 细分仍 deferred，调度类顺序检查只作为实现一致性检查或 checkpoint，不作为独立生命周期对象。
 
+`DefaultSchedRootDomain` 必须按调度覆盖视图实现，而不是新的 CPU 身份表。它的 CPU 覆盖集合必须来自
+`CpuGroup.possible_cpus`，并且集合元素必须是 `CpuRef` 或等价 CPU 引用；实现不得在 root domain 内重新拥有 CPU 本体，
+也不得把 `possible_cpu_count` 这类裸计数当作完整规格事实。若实现使用 mask、数组或 compact table 承载覆盖集合，
+必须能从每个 covered entry 解析回 `CpuGroup.Cpu[logical_id]` 的 CPU 引用，并满足
+`DefaultSchedRootDomain.covered_cpus == CpuGroup.possible_cpus`。当前 `sched_init()` 仍不建立完整 SMP 调度拓扑，
+RT/DL/EAS/load-balance 等共享调度状态可以保留字段或 deferred fact，但不能削弱 root domain 对 possible CPU 引用集合的覆盖约束。
+
 `Scheduler.setup()` 建立 possible CPU 的 runqueue 元数据，并把 boot CPU 的当前 `InitTask/current` 建模为
 `BootIdleTask`。它不得分配新的 boot idle task，不得创建第二个 runnable task，也不得把完整 SMP 调度拓扑提前塞进本阶段。
 `BootRunQueue.curr`、`BootRunQueue.idle`、`BootCPU.idle_thread_ref` 和 per-cpu idle task 引用必须收敛到同一个
 `BootIdleTask` 事实。
+
+每个 possible CPU 的 runqueue setup 必须以 `DefaultSchedRootDomain` 作为 attach target。当前实现可只完整物化
+`BootRunQueue`，但聚合事实必须表达 Linux `for_each_possible_cpu()` 已为 possible CPU 建立 runqueue 元数据；
+`BootRunQueue` 必须保存或可解析自己的 `CpuRef == BootCPURef`，并在 attach 时验证该 CPU 引用属于
+`DefaultSchedRootDomain.covered_cpus`。secondary CPU 在 online 前可以拥有准备好的 runqueue 元数据和 root-domain
+覆盖事实，但这不表示 AP 已有 live `CurrentCPU`、current-task slot 或可执行任务流。
 
 `Scheduler.enable()` 只表示 boot CPU 调度基础和主动调度入口可用，并设置 `scheduler_running` 等价事实。它不表示 timer tick、
 中断调度、kthread 调度、secondary CPU 调度或 SMP domain 已经可用。
