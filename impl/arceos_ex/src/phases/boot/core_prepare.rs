@@ -25,6 +25,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.device_tree
         .setup(&ctx.raw_dtb, &ctx.vm, &mut ctx.memblock, &ctx.config)?;
     ctx.zones.setup(&ctx.memblock, &ctx.vm)?;
+    ctx.page_metadata_map
+        .setup(&mut ctx.memblock, &ctx.zones, &ctx.vm, &ctx.config)?;
     ctx.resource_lock.preset_static()?;
     ctx.resource_lock.setup()?;
     ctx.resource_tree.setup(
@@ -176,6 +178,10 @@ pub fn is_ready() -> bool {
 fn core_prepare_phase_ready(ctx: &Context) -> bool {
     ctx.device_tree.state() == State::Ready
         && ctx.zones.state() == State::Ready
+        && ctx.page_metadata_map.state() == State::Ready
+        && ctx.page_metadata_map.metadata_count() != 0
+        && ctx.page_metadata_map.metadata_bytes() != 0
+        && ctx.page_metadata_map.metadata_storage_size() >= ctx.page_metadata_map.metadata_bytes()
         && ctx.resource_lock.state() == State::Ready
         && ctx.resource_lock.ready()
         && ctx.resource_lock.boot_phase_write_guard_elided()

@@ -145,45 +145,6 @@ object BootZonelistSet: MemoryObject {
 }
 
 /*
- * PageMetadataMap 表示 Linux struct page metadata 视图：FLATMEM 下的
- * mem_map 或 SPARSEMEM_VMEMMAP 下的 vmemmap。PageRef 指向这里的具体
- * PageMetadata 项，再通过 PFN/物理地址/线性映射地址进行转换。
- */
-object PageMetadataMap: MemoryObject {
-    initial_state: State::Base;
-
-    state State::Base {
-        events {
-            on Event::Setup -> State::Ready {
-                depends_on {
-                    MemBlock.state == State::Online;
-                    Zones.state == State::Ready;
-                    SwapperVm.state == State::Online;
-                }
-
-                ensures {
-                    page_metadata_map_ready(PageMetadataMap, Zones);
-                    page_metadata_map_covers_managed_pfns(PageMetadataMap, Zones);
-                    page_metadata_map_uses_mem_map_or_vmemmap(PageMetadataMap);
-                    page_metadata_map_storage_allocated_from_memblock(PageMetadataMap, MemBlock);
-                    page_metadata_map_indexed_by_pfn(PageMetadataMap);
-                }
-            }
-        }
-    }
-
-    state State::Ready {
-        invariant {
-            page_metadata_map_ready(PageMetadataMap, Zones);
-            page_metadata_map_covers_managed_pfns(PageMetadataMap, Zones);
-            page_metadata_map_uses_mem_map_or_vmemmap(PageMetadataMap);
-            page_metadata_map_storage_allocated_from_memblock(PageMetadataMap, MemBlock);
-            page_metadata_map_indexed_by_pfn(PageMetadataMap);
-        }
-    }
-}
-
-/*
  * PageAllocatorBuddyFreePageSets 是 PageAllocator 内部的 buddy free_area
  * 集合在模型中的具名视图。coding 层仍要求它落在 PageAllocator 内部，
  * 不作为外部 heap 容器或独立 allocator。
@@ -1205,6 +1166,7 @@ object MmCoreInitPhase: PhaseObject {
                     ExceptionStream.state == State::Ready;
                     MemBlock.state == State::Online;
                     Zones.state == State::Ready;
+                    PageMetadataMap.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     CpuIdMap.state == State::Ready;
                     DmaCachePolicy.state == State::Ready;
@@ -1217,7 +1179,6 @@ object MmCoreInitPhase: PhaseObject {
 
                 drives {
                     MemoryTopology.Event::Setup;
-                    PageMetadataMap.Event::Setup;
                     PageAllocator.Event::Preset;
                     MemoryDebugHardening.Event::Setup;
                     StackDepot.Event::Setup;

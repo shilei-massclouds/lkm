@@ -25,8 +25,6 @@ pub fn setup(ctx: &mut Context) -> ! {
 fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.memory_topology
         .setup(&ctx.zones, &ctx.cpu_group, &ctx.config)?;
-    ctx.page_metadata_map
-        .setup(&mut ctx.memblock, &ctx.zones, &ctx.vm, &ctx.config)?;
     ctx.page_allocator.preset(
         &ctx.memory_topology,
         &ctx.page_metadata_map,

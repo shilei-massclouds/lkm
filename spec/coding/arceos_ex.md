@@ -1163,9 +1163,22 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 `DeviceTree.Ready` checkpoint 只能在第二遍完成，并且 root 唯一、非 root 节点 parent 唯一、parent/children 一致、路径查询和 property 查询均可用之后发出。涉及裸指针写入 `MemBlock` 分配存储的代码应封装在小的内部 unsafe 边界内，对外优先暴露安全的状态推进和查询接口。
 
+## `PageMetadataMap` 编码约束
+
+`PageMetadataMap.setup()` 属于 `CorePreparePhase`，必须在 `Zones.Ready` 之后、`trap_init()` 边界之前完成。当前参考配置为
+`CONFIG_FLATMEM=y`、`CONFIG_SPARSEMEM=n`，因此它对应 Linux/RISC-V
+`misc_mem_init() -> zone_sizes_init() -> free_area_init()` 中的 `alloc_node_mem_map()` 和 `memmap_init()`；
+`sparse_init()` 在该配置下为空操作，不能作为本对象建立的主线证据。
+
+当前 `arceos_ex` 实现采用 flat `mem_map` 形式：`PageMetadataMap.setup()` 在 `MemBlock.Online`、`Zones.Ready` 且
+`SwapperVm.Online` 后，通过 `memblock.alloc_phys()` 分配一段页对齐的连续 metadata storage，并把它表示为以 PFN
+为索引的 `PageMetadata` 数组。`PageRef` 必须绑定到 `mem_map[pfn - start_pfn]` 对应 slot；PFN、物理页地址和 direct-map
+线性地址只是从该 slot 的 PFN 关系派生出的转换结果。将来若切换到 sparse/vmemmap，只能替换 metadata storage 布局，
+不得改变 `PageRef` 指向 page metadata 项这一契约。
+
 ## `mm_core_init()` 编码约束
 
-`MmCoreInitPhase` 已正式落到 `spec/model/boot/mm-core-init/`。实现侧必须保持与模型一致的阶段边界：入口是 `CorePreparePhase.Ready`、`ExceptionStream.Ready`、`MemBlock.Online`、`DmaCachePolicy.Ready`、`StaticBranch.Ready` 和 `SystemExclusive`；出口是 `PageAllocator.Ready`、`MemBlock.Offline`、`SlubAllocator.Ready`、`PageTableCaches.Ready`、`VmallocAllocator.Ready`、`MmStructCache.Ready`。
+`MmCoreInitPhase` 已正式落到 `spec/model/boot/mm-core-init/`。实现侧必须保持与模型一致的阶段边界：入口是 `CorePreparePhase.Ready`、`ExceptionStream.Ready`、`MemBlock.Online`、`PageMetadataMap.Ready`、`DmaCachePolicy.Ready`、`StaticBranch.Ready` 和 `SystemExclusive`；出口是 `PageAllocator.Ready`、`MemBlock.Offline`、`SlubAllocator.Ready`、`PageTableCaches.Ready`、`VmallocAllocator.Ready`、`MmStructCache.Ready`。本阶段只能消费已经建立的 `PageMetadataMap`；`mem_init()` 开头的 `BUG_ON(!mem_map)` 对应 checkpoint，不在 `mm_core_init()` 内推进 `PageMetadataMap.setup()`。
 
 `PageAllocator.preset()` 只做 `build_all_zonelists(NULL)` 和 `page_alloc_init_cpuhp()` 对应的拓扑与 hook 建立：`BootZonelistSet.Ready`、fallback zoneref 顺序、NULL sentinel、`CPUHP_PAGE_ALLOC` step 注册。它不得释放 MemBlock 页，也不得把自身推进到 `Ready`。
 
@@ -1193,12 +1206,6 @@ buddy pages，并且必须可通过已经建立的线性映射进行受限读写
 `page_to_pfn(page_ref)`、`phys_to_page(phys)`、`page_to_phys(page_ref)`、`virt_to_page(linear_addr)` 和
 `page_to_virt(page_ref)`/`page_address(page_ref)`。这些转换必须检查或依赖 PFN 有效、地址页对齐、地址属于已建立 direct map
 或 vmemmap 覆盖范围；不得把任意整数地址直接伪造成 `PageRef`。
-
-当前 `arceos_ex` 实现采用 flat `mem_map` 形式：`PageMetadataMap.setup()` 在 `MemBlock.Online` 且
-`SwapperVm.Online` 后，通过 `memblock.alloc_phys()` 分配一段页对齐的连续 metadata storage，并把它表示为以 PFN
-为索引的 `PageMetadata` 数组。`PageRef` 必须绑定到 `mem_map[pfn - start_pfn]` 对应 slot；PFN、物理页地址和 direct-map
-线性地址只是从该 slot 的 PFN 关系派生出的转换结果。将来若切换到 sparse/vmemmap，只能替换 metadata storage 布局，
-不得改变 `PageRef` 指向 page metadata 项这一契约。
 
 `SlubAllocator.Ready` 之后必须暴露正式的 Linux-like kmalloc API：`kmalloc(size, gfp)`、`kzalloc(size, gfp)` 和
 `kfree(alloc_ref)`。model 层对应 `SlubAllocatorType.Action::Kmalloc(size, gfp) -> KmallocAllocRef`、

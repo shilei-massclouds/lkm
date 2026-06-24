@@ -170,6 +170,48 @@ object Zones: MemoryObject {
 }
 
 /*
+ * PageMetadataMap 表示 Linux struct page metadata 视图。当前 default_config
+ * 选择 CONFIG_FLATMEM=y，因此它对应 misc_mem_init() 中
+ * zone_sizes_init() -> free_area_init() -> alloc_node_mem_map()/memmap_init()
+ * 建立的 mem_map；SPARSEMEM/VMEMMAP 路径在当前配置下被裁剪。
+ * PageRef 指向这里的具体 PageMetadata 项，再通过 PFN/物理地址/线性映射地址
+ * 进行转换。
+ */
+object PageMetadataMap: MemoryObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        events {
+            on Event::Setup -> State::Ready {
+                depends_on {
+                    MemBlock.state == State::Online;
+                    Zones.state == State::Ready;
+                    SwapperVm.state == State::Online;
+                }
+
+                ensures {
+                    page_metadata_map_ready(PageMetadataMap, Zones);
+                    page_metadata_map_covers_managed_pfns(PageMetadataMap, Zones);
+                    page_metadata_map_uses_mem_map_or_vmemmap(PageMetadataMap);
+                    page_metadata_map_storage_allocated_from_memblock(PageMetadataMap, MemBlock);
+                    page_metadata_map_indexed_by_pfn(PageMetadataMap);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            page_metadata_map_ready(PageMetadataMap, Zones);
+            page_metadata_map_covers_managed_pfns(PageMetadataMap, Zones);
+            page_metadata_map_uses_mem_map_or_vmemmap(PageMetadataMap);
+            page_metadata_map_storage_allocated_from_memblock(PageMetadataMap, MemBlock);
+            page_metadata_map_indexed_by_pfn(PageMetadataMap);
+        }
+    }
+}
+
+/*
  * ResourceLock 表示 Linux kernel/resource.c 中的
  * static DEFINE_RWLOCK(resource_lock)。它保护 resource tree 的读写遍历和
  * 插入/删除路径；CorePrepare 中的 ResourceTree.setup() 只使用写侧 guard。
@@ -1330,6 +1372,7 @@ object CorePreparePhase: PhaseObject {
                 drives {
                     DeviceTree.Event::Setup;
                     Zones.Event::Setup;
+                    PageMetadataMap.Event::Setup;
                     ResourceLock.Event::Preset;
                     ResourceLock.Event::Setup;
                     ResourceTree.Event::Setup;
@@ -1365,7 +1408,7 @@ object CorePreparePhase: PhaseObject {
                 deferred {
                     "acpi_boot_table_init() 暂缓：当前最小路径以 FDT/SBI 为主，ACPI 引导路径后续单独建模。"
                     "early_memtest() 暂缓：属于可选内存测试路径，不改变当前最小启动语义。"
-                    "sparse_init() 暂缓：SPARSEMEM 元数据初始化后续随完整内存模型展开。"
+                    "sparse_init() 裁剪路径：当前 default_config 为 CONFIG_FLATMEM=y、CONFIG_SPARSEMEM=n，该调用展开为空操作。"
                     "local_flush_tlb_kernel_range(VMEMMAP_START, VMEMMAP_END) 暂缓：SPARSEMEM_VMEMMAP 条件路径。"
                     "arch_reserve_crashkernel() 暂缓：crashkernel 资源保留路径后续展开。"
                     "kasan_init() 暂缓：CONFIG_KASAN 条件路径。"
@@ -1401,6 +1444,7 @@ object CorePreparePhase: PhaseObject {
             EntrySuccessorPhase.state == State::Ready;
             DeviceTree.state == State::Ready;
             Zones.state == State::Ready;
+            PageMetadataMap.state == State::Ready;
             ResourceLock.state == State::Ready;
             ResourceTree.state == State::Ready;
             CpuGroup.state == State::Ready;
