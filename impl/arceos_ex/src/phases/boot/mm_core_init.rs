@@ -32,6 +32,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.page_metadata_map,
         &ctx.cpu_hotplug_state,
         &ctx.per_cpu_storage,
+        &mut ctx.boot_cpu_local_interrupt,
     )?;
     ctx.memory_debug_hardening
         .setup(&mut ctx.static_branch, &ctx.early_param, &ctx.config)?;
@@ -137,7 +138,34 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.page_allocator.zonelist_set().state() == State::Ready
         && ctx.page_allocator.page_metadata_map_bound()
         && ctx.page_allocator.zonelist_update_seq_irqsave_guard_ready()
+        && ctx.page_allocator.zonelist_update_seq().entered_count() == 1
+        && ctx.page_allocator.zonelist_update_seq().exited_count() == 1
+        && ctx
+            .page_allocator
+            .zonelist_update_seq()
+            .irqsave_entered_count()
+            == 1
+        && ctx
+            .page_allocator
+            .zonelist_update_seq()
+            .irqrestore_exited_count()
+            == 1
         && ctx.page_allocator.zonelist_printk_deferred_section_ready()
+        && ctx
+            .page_allocator
+            .zonelist_printk_deferred_section()
+            .entered_count()
+            == 1
+        && ctx
+            .page_allocator
+            .zonelist_printk_deferred_section()
+            .exited_count()
+            == 1
+        && !ctx.page_allocator.zonelist_update_seq().writer_active()
+        && !ctx
+            .page_allocator
+            .zonelist_printk_deferred_section()
+            .active()
         && ctx.page_allocator.cpuhp_step_registered()
         && ctx.page_allocator.boot_pageset_checkpoint_ready()
         && ctx

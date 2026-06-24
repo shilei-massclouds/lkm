@@ -149,6 +149,79 @@ object ZonelistSet: MemoryObject {
 }
 
 /*
+ * ZonelistUpdateSeq 表示 Linux zonelist_update_seq seqlock 的 boot-time
+ * writer section。当前只要求 build_all_zonelists(NULL) 写侧 irqsave
+ * enter/exit 可观察；完整 reader retry 运行期语义后续再展开。
+ */
+object ZonelistUpdateSeq: ZonelistUpdateSeqType {
+    initial_state: State::Ready;
+
+    state State::Ready {
+    }
+}
+
+/*
+ * ZonelistPrintkDeferredSection 表示 build_all_zonelists(NULL) 外层的
+ * printk_deferred_enter()/exit() section。它不拥有 printk ring buffer，
+ * 只记录本调用点的 deferred printk protocol 边界。
+ */
+object ZonelistPrintkDeferredSection: PrintkDeferredSectionType {
+    initial_state: State::Ready;
+
+    state State::Ready {
+    }
+}
+
+context ZonelistPrintkDeferredContext: Context {
+    /*
+     * This context corresponds to Linux printk_deferred_enter() /
+     * printk_deferred_exit() around build_all_zonelists(NULL). It records the
+     * scoped printk-deferred protocol boundary; it does not own or mutate the
+     * printk ring buffer itself.
+     */
+    guard {
+        entered_by {
+            ZonelistPrintkDeferredSection.Event::Enter;
+        }
+
+        exited_by {
+            ZonelistPrintkDeferredSection.Event::Exit;
+        }
+    }
+
+    obj_refs {
+        PageAllocator;
+        ZonelistPrintkDeferredSection;
+    }
+}
+
+context ZonelistUpdateSeqWriteContext: Context {
+    /*
+     * This context corresponds to Linux
+     * write_seqlock_irqsave(&zonelist_update_seq, flags) /
+     * write_sequnlock_irqrestore(&zonelist_update_seq, flags) around
+     * __build_all_zonelists(NULL). Current modeling covers the boot-time writer
+     * section; full reader retry semantics remain a later seqlock refinement.
+     */
+    guard {
+        entered_by {
+            ZonelistUpdateSeq.Event::WriteSeqLockIrqSave(BootCpuLocalInterrupt);
+        }
+
+        exited_by {
+            ZonelistUpdateSeq.Event::WriteSeqUnlockIrqRestore(BootCpuLocalInterrupt);
+        }
+    }
+
+    obj_refs {
+        PageAllocator;
+        ZonelistUpdateSeq;
+        BootCpuLocalInterrupt;
+        ZonelistSet;
+    }
+}
+
+/*
  * PageAllocatorBuddyFreePageSets 是 PageAllocator 内部的 buddy free_area
  * 集合在模型中的具名视图。coding 层仍要求它落在 PageAllocator 内部，
  * 不作为外部 heap 容器或独立 allocator。
@@ -219,18 +292,32 @@ object PageAllocator: PageAllocatorType {
                     PageMetadataMap.state == State::Ready;
                     CpuHotplugState.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
+                    BootCpuLocalInterrupt.state == State::Ready;
                 }
 
-                drives {
-                    ZonelistSet.Event::Setup;
+                within ZonelistPrintkDeferredContext {
+                    within ZonelistUpdateSeqWriteContext {
+                        drives {
+                            ZonelistSet.Event::Setup;
+                        }
+                    }
                 }
 
                 ensures {
                     page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
                     page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
                     page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
+                    page_allocator_zonelist_update_seq_guard_used(
+                        PageAllocator,
+                        ZonelistUpdateSeq,
+                        BootCpuLocalInterrupt
+                    );
                     page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
                     page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
+                    page_allocator_zonelist_printk_deferred_section_used(
+                        PageAllocator,
+                        ZonelistPrintkDeferredSection
+                    );
                     page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
                     page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
                     page_allocator_boot_pagesets_initialized_for_possible_cpus(
@@ -249,8 +336,17 @@ object PageAllocator: PageAllocatorType {
             page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
             page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
             page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
+            page_allocator_zonelist_update_seq_guard_used(
+                PageAllocator,
+                ZonelistUpdateSeq,
+                BootCpuLocalInterrupt
+            );
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
+            page_allocator_zonelist_printk_deferred_section_used(
+                PageAllocator,
+                ZonelistPrintkDeferredSection
+            );
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
             page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
             page_allocator_boot_pagesets_initialized_for_possible_cpus(
@@ -312,8 +408,17 @@ object PageAllocator: PageAllocatorType {
             page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
             page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
             page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
+            page_allocator_zonelist_update_seq_guard_used(
+                PageAllocator,
+                ZonelistUpdateSeq,
+                BootCpuLocalInterrupt
+            );
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
+            page_allocator_zonelist_printk_deferred_section_used(
+                PageAllocator,
+                ZonelistPrintkDeferredSection
+            );
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
             page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
             page_allocator_boot_pagesets_initialized_for_possible_cpus(
@@ -1536,6 +1641,8 @@ object MmCoreInitPhase: PhaseObject {
             MemoryNode.state == State::Ready;
             ZoneSet.state == State::Ready;
             ZonelistSet.state == State::Ready;
+            ZonelistUpdateSeq.state == State::Ready;
+            ZonelistPrintkDeferredSection.state == State::Ready;
             PageMetadataMap.state == State::Ready;
             PageAllocatorBuddyFreePageSets.state == State::Ready;
             PageAllocator.state == State::Ready;

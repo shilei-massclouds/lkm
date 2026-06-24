@@ -185,8 +185,17 @@ predicate buddy_free_page_sets_split_free_ranges_to_aligned_blocks<T>(sets: T) -
 predicate page_allocator_page_metadata_map_bound<T, M>(allocator: T, metadata_map: M) -> bool;
 predicate page_allocator_zonelist_update_seq_irqsave_guard_ready<T>(allocator: T) -> bool;
 predicate page_allocator_zonelist_update_seq_irqsave_guard_spec_required<T>(allocator: T) -> bool;
+predicate page_allocator_zonelist_update_seq_guard_used<T, S, I>(
+    allocator: T,
+    update_seq: S,
+    local_interrupt: I
+) -> bool;
 predicate page_allocator_zonelist_printk_deferred_section_ready<T>(allocator: T) -> bool;
 predicate page_allocator_zonelist_printk_deferred_section_spec_required<T>(allocator: T) -> bool;
+predicate page_allocator_zonelist_printk_deferred_section_used<T, S>(
+    allocator: T,
+    section: S
+) -> bool;
 predicate page_allocator_boot_pagesets_initialized_for_possible_cpus<T, P>(
     allocator: T,
     per_cpu_storage: P
@@ -298,6 +307,51 @@ predicate dynamic_container_runtime_sync_inherits_global_allocator_contract<T, A
     runtime: T,
     allocator: A
 ) -> bool;
+
+type ZonelistUpdateSeqType: MemoryObject {
+    processes {
+        Event::WriteSeqLockIrqSave(local_interrupt: LocalInterruptControl) {
+            state_effect: StateEffect::Conditional;
+            drives {
+                local_interrupt.Event::SaveAndDisable;
+            }
+            ensures {
+                zonelist_update_seq_write_irqsave_entered(self, local_interrupt);
+                cpu_local_interrupts_saved_and_disabled(local_interrupt);
+                cpu_local_interrupts_disabled(local_interrupt);
+            }
+        }
+
+        Event::WriteSeqUnlockIrqRestore(local_interrupt: LocalInterruptControl) {
+            state_effect: StateEffect::Conditional;
+            drives {
+                local_interrupt.Event::Restore;
+            }
+            ensures {
+                zonelist_update_seq_write_irqrestore_exited(self, local_interrupt);
+                cpu_local_interrupts_restored(local_interrupt);
+            }
+        }
+    }
+}
+
+type PrintkDeferredSectionType: MemoryObject {
+    processes {
+        Event::Enter {
+            state_effect: StateEffect::Conditional;
+            ensures {
+                printk_deferred_section_entered(self);
+            }
+        }
+
+        Event::Exit {
+            state_effect: StateEffect::Conditional;
+            ensures {
+                printk_deferred_section_exited(self);
+            }
+        }
+    }
+}
 
 type PageAllocatorType: MemoryObject {
     processes {

@@ -766,8 +766,8 @@ type ArceosExMmCoreInitCodingMust {
          * Linux __build_all_zonelists(NULL) runs inside
          * write_seqlock_irqsave(&zonelist_update_seq, flags) and
          * printk_deferred_enter()/exit(). The current target must still
-         * record that the irqsave seqlock and printk-deferred sections are
-         * required by the Linux semantics. Full seqlock reader/retry behavior
+         * execute and observe a balanced setup-time irqsave seqlock section
+         * and printk-deferred section. Full seqlock reader/retry behavior
          * remains a later runtime refinement.
          */
         arceos_ex_must_page_allocator_preset_record_zonelist_irqsave_protocol();

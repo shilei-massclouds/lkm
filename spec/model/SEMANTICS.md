@@ -381,6 +381,11 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
 - 同一时刻至多一个执行流可以成功进入同一个 resource exclusive context。
 - `within ContextName { ... }` 是唯一标准形态；`within` 不声明、不接收、不转发、不重命名实参。
+- 规格编写时应强烈优先使用 `within ContextName { ... }` 表达 guard 作用域。只要被保护的词法 body
+  可以用 `within` 准确表示，就不应把 `Guard.Enter -> protected drives -> Guard.Exit`
+  平铺为同一个 `drives` 序列。例外情况可以存在，例如 guard 边界跨越无法用单个词法
+  body 表达的控制流、进入/退出并不形成作用域，或当前工具尚不能表达必要的动态绑定；
+  这些情况应在规格中说明原因。
 - `within ContextName only-once { ... }` 表示该具体 lexical `within` 块声明自己在
   `StartupTimeline.Event::Setup` 可达调用图中只被进入一次。该标记必须由 model
   工具计数验证，验证失败即为规格错误；它不由 coding 或 impl 重新证明。当前

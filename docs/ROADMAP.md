@@ -109,7 +109,9 @@
 1. 只在具体消费路径需要时展开 buddy allocator、SLUB、vmalloc/vfree、ioremap 等 runtime API 的锁、irqsave、preempt、RCU 和 TLB/cache flush 细节。
 2. 若后续启用 page owner、kmemleak、KASAN、KFENCE、SLUB store-user 或 ref tracker，再回到 `StackDepot`，决定走 early request/hash table 建立，还是 late `stack_depot_init()`。
 3. 进入下一个 boot 子阶段 `SchedInitPhase` 审计，继续按 Linux 调用边界、model/coding 规格、impl/smoke 观测的顺序推进。
-4. 并发原语不单独泛化扩张；只有当 `SchedInitPhase` 或后续消费路径实际依赖 Mutex/RwLock/RawSpinLock/RCU/LocalInterruptControl 的更细语义时，再作为对应 gap 处理。
+4. 建立完整 `SeqLock` 规格建模与实现。当前 `ZonelistUpdateSeq` 只覆盖 `build_all_zonelists(NULL)` 的 boot-time writer guard；后续应抽象通用 `SeqLock` 类型，补齐 sequence counter、reader `read_seqbegin/read_seqretry`、writer enter/exit、irqsave variant 和必要内存顺序语义，并新增独立 smoke：用 `SeqLock` 定义一个新的测试实例，而不是复用 `ZonelistUpdateSeq`，覆盖 reader/writer/API 语义。
+5. 为 `PrintkDeferredSection` / `printk_deferred_enter()/exit()` guard 增加独立 smoke。当前 `ZonelistPrintkDeferredSection` 只作为 `PageAllocator.Preset` 的调用点实例记录 enter/exit 配对；后续应使用同一 guard 类型定义一个新的测试实例，覆盖 enter/exit、重复 enter 拒绝、未 enter 直接 exit 拒绝和 active/ready 计数事实，避免只靠 zonelist 路径间接验证。
+6. 除上述已由当前 gap 明确触发的 guard 原语外，并发原语不单独泛化扩张；只有当 `SchedInitPhase` 或后续消费路径实际依赖 Mutex/RwLock/RawSpinLock/RCU/LocalInterruptControl 的更细语义时，再作为对应 gap 处理。
 
 ### 暂缓讨论：transition/action 上下文需求声明
 

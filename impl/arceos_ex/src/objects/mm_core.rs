@@ -1,5 +1,6 @@
 use super::{
     config::Config,
+    cpu_control::LocalInterruptControl,
     cpu_group::CpuGroup,
     cpu_hotplug::CpuHotplugState,
     dma_cache_policy::DmaCachePolicy,
@@ -1367,10 +1368,161 @@ impl BuddyFreePageSets {
     }
 }
 
+pub struct ZonelistUpdateSeq {
+    writer_active: bool,
+    entered_count: usize,
+    exited_count: usize,
+    irqsave_entered_count: usize,
+    irqrestore_exited_count: usize,
+}
+
+impl ZonelistUpdateSeq {
+    pub const fn new() -> Self {
+        Self {
+            writer_active: false,
+            entered_count: 0,
+            exited_count: 0,
+            irqsave_entered_count: 0,
+            irqrestore_exited_count: 0,
+        }
+    }
+
+    pub const fn writer_active(&self) -> bool {
+        self.writer_active
+    }
+
+    pub const fn entered_count(&self) -> usize {
+        self.entered_count
+    }
+
+    pub const fn exited_count(&self) -> usize {
+        self.exited_count
+    }
+
+    pub const fn irqsave_entered_count(&self) -> usize {
+        self.irqsave_entered_count
+    }
+
+    pub const fn irqrestore_exited_count(&self) -> usize {
+        self.irqrestore_exited_count
+    }
+
+    pub fn write_seqlock_irqsave(
+        &mut self,
+        local_interrupt: &mut LocalInterruptControl,
+    ) -> EventResult {
+        if self.writer_active || local_interrupt.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                State::Ready,
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        local_interrupt.save_and_disable()?;
+        self.writer_active = true;
+        self.entered_count = self.entered_count.wrapping_add(1);
+        self.irqsave_entered_count = self.irqsave_entered_count.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn write_sequnlock_irqrestore(
+        &mut self,
+        local_interrupt: &mut LocalInterruptControl,
+    ) -> EventResult {
+        if !self.writer_active || local_interrupt.state() != State::Ready {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                State::Ready,
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.writer_active = false;
+        self.exited_count = self.exited_count.wrapping_add(1);
+        self.irqrestore_exited_count = self.irqrestore_exited_count.wrapping_add(1);
+        local_interrupt.restore()
+    }
+
+    pub const fn ready(&self) -> bool {
+        !self.writer_active
+            && self.entered_count != 0
+            && self.entered_count == self.exited_count
+            && self.irqsave_entered_count == self.entered_count
+            && self.irqrestore_exited_count == self.exited_count
+    }
+}
+
+pub struct PrintkDeferredSection {
+    active: bool,
+    entered_count: usize,
+    exited_count: usize,
+}
+
+impl PrintkDeferredSection {
+    pub const fn new() -> Self {
+        Self {
+            active: false,
+            entered_count: 0,
+            exited_count: 0,
+        }
+    }
+
+    pub const fn active(&self) -> bool {
+        self.active
+    }
+
+    pub const fn entered_count(&self) -> usize {
+        self.entered_count
+    }
+
+    pub const fn exited_count(&self) -> usize {
+        self.exited_count
+    }
+
+    pub fn enter(&mut self) -> EventResult {
+        if self.active {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                State::Ready,
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.active = true;
+        self.entered_count = self.entered_count.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn exit(&mut self) -> EventResult {
+        if !self.active {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                State::Ready,
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.active = false;
+        self.exited_count = self.exited_count.wrapping_add(1);
+        Ok(())
+    }
+
+    pub const fn ready(&self) -> bool {
+        !self.active && self.entered_count != 0 && self.entered_count == self.exited_count
+    }
+}
+
 pub struct PageAllocator {
     lifecycle: Lifecycle,
     zonelist_set: ZonelistSet,
     buddy_free_page_sets: BuddyFreePageSets,
+    zonelist_update_seq: ZonelistUpdateSeq,
+    zonelist_printk_deferred_section: PrintkDeferredSection,
     page_metadata_map_bound: bool,
     zonelist_update_seq_irqsave_guard_ready: bool,
     zonelist_printk_deferred_section_ready: bool,
@@ -1400,6 +1552,8 @@ impl PageAllocator {
             lifecycle: Lifecycle::new(State::Base),
             zonelist_set: ZonelistSet::new(),
             buddy_free_page_sets: BuddyFreePageSets::new(),
+            zonelist_update_seq: ZonelistUpdateSeq::new(),
+            zonelist_printk_deferred_section: PrintkDeferredSection::new(),
             page_metadata_map_bound: false,
             zonelist_update_seq_irqsave_guard_ready: false,
             zonelist_printk_deferred_section_ready: false,
@@ -1432,6 +1586,14 @@ impl PageAllocator {
         &self.zonelist_set
     }
 
+    pub const fn zonelist_update_seq(&self) -> &ZonelistUpdateSeq {
+        &self.zonelist_update_seq
+    }
+
+    pub const fn zonelist_printk_deferred_section(&self) -> &PrintkDeferredSection {
+        &self.zonelist_printk_deferred_section
+    }
+
     pub const fn buddy_free_page_sets_ready(&self) -> bool {
         self.buddy_free_page_sets.ready()
     }
@@ -1449,11 +1611,11 @@ impl PageAllocator {
     }
 
     pub const fn zonelist_update_seq_irqsave_guard_ready(&self) -> bool {
-        self.zonelist_update_seq_irqsave_guard_ready
+        self.zonelist_update_seq_irqsave_guard_ready && self.zonelist_update_seq.ready()
     }
 
     pub const fn zonelist_printk_deferred_section_ready(&self) -> bool {
-        self.zonelist_printk_deferred_section_ready
+        self.zonelist_printk_deferred_section_ready && self.zonelist_printk_deferred_section.ready()
     }
 
     pub const fn cpuhp_step_registered(&self) -> bool {
@@ -1625,6 +1787,7 @@ impl PageAllocator {
         page_metadata_map: &PageMetadataMap,
         cpu_hotplug_state: &CpuHotplugState,
         per_cpu_storage: &PerCpuStorage,
+        boot_cpu_local_interrupt: &mut LocalInterruptControl,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || topology.state() != State::Ready
@@ -1633,6 +1796,7 @@ impl PageAllocator {
             || page_metadata_map.metadata_count() == 0
             || cpu_hotplug_state.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
+            || boot_cpu_local_interrupt.state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -1642,10 +1806,10 @@ impl PageAllocator {
             );
         }
 
-        self.zonelist_set.setup(topology)?;
+        self.build_zonelists_with_boot_guards(topology, boot_cpu_local_interrupt)?;
         self.page_metadata_map_bound = true;
-        self.zonelist_update_seq_irqsave_guard_ready = true;
-        self.zonelist_printk_deferred_section_ready = true;
+        self.zonelist_update_seq_irqsave_guard_ready = self.zonelist_update_seq.ready();
+        self.zonelist_printk_deferred_section_ready = self.zonelist_printk_deferred_section.ready();
         self.cpuhp_step_registered = PAGE_ALLOC_CPUHP_STEP != 0;
         self.boot_pageset_checkpoint_ready = true;
         self.boot_pageset_possible_cpu_count = per_cpu_storage.first_chunk().unit_count();
@@ -1658,6 +1822,37 @@ impl PageAllocator {
             State::Prepared,
             Checkpoint::PageAllocatorPrepared,
         )
+    }
+
+    fn build_zonelists_with_boot_guards(
+        &mut self,
+        topology: &MemoryTopology,
+        boot_cpu_local_interrupt: &mut LocalInterruptControl,
+    ) -> EventResult {
+        self.zonelist_printk_deferred_section.enter()?;
+        let result = self.build_zonelists_with_irqsave(topology, boot_cpu_local_interrupt);
+        let exit_result = self.zonelist_printk_deferred_section.exit();
+        match (result, exit_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(err), _) | (_, Err(err)) => Err(err),
+        }
+    }
+
+    fn build_zonelists_with_irqsave(
+        &mut self,
+        topology: &MemoryTopology,
+        boot_cpu_local_interrupt: &mut LocalInterruptControl,
+    ) -> EventResult {
+        self.zonelist_update_seq
+            .write_seqlock_irqsave(boot_cpu_local_interrupt)?;
+        let result = self.zonelist_set.setup(topology);
+        let unlock_result = self
+            .zonelist_update_seq
+            .write_sequnlock_irqrestore(boot_cpu_local_interrupt);
+        match (result, unlock_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(err), _) | (_, Err(err)) => Err(err),
+        }
     }
 
     pub fn setup(

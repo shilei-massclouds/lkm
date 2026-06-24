@@ -1577,6 +1577,8 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 规格层把 `build_all_zonelists(NULL)` 与 `page_alloc_init_cpuhp()` 合并为 `PageAllocator.preset()`，因为二者在 `mm_core_init()` 中相邻，且都只建立页分配器后续可用前的组织事实：前者使 `MemoryNode[*].ZonelistSet.state == Ready`，后者向既有 `CpuHotplugStepRegistry` 登记 `CPUHP_PAGE_ALLOC` 的 page allocator online/dead 回调。`page_alloc_init_cpuhp()` 不推进任一 `CpuHotplugState.state`，也不在本阶段启动 secondary CPU；Linux 的 `CPUHP_PAGE_ALLOC` 属于 hotplug step 域，不混入生命周期状态。
 
+`build_all_zonelists(NULL)` 的 boot 写侧同步语义不得被 `SystemExclusive` 静默擦除：规格中以 `ZonelistUpdateSeq` 表示 `zonelist_update_seq` 的 setup-time write seqlock section，并以 `ZonelistPrintkDeferredSection` 表示外层 `printk_deferred_enter()/exit()`。`PageAllocator.preset()` 必须驱动 `PrintkDeferredSection.Enter -> ZonelistUpdateSeq.WriteSeqLockIrqSave -> ZonelistSet.Setup -> ZonelistUpdateSeq.WriteSeqUnlockIrqRestore -> PrintkDeferredSection.Exit` 的配平序列；完整 reader retry 和运行期 zonelist 更新并发语义后续再展开。
+
 当前 `CONFIG_NUMA=n` 时，该转换可以简化理解为：唯一 `MemoryNode[0]` 的 `ZoneSet` 已包含若干 `populated_zone(zone)`；`build_zonelists(pgdat)` 按 zone type 从高到低把这些 zone 写入 `MemoryNode[0].ZonelistSet[ZONELIST_FALLBACK].zoneref[]`，并追加 `zone == NULL` 的哨兵项。`ZonelistSet.Ready` 之后，后续页分配路径可以通过 `first_zones_zonelist()`、`next_zones_zonelist()` 和 `for_each_zone_zonelist*()` 消费同一套选择拓扑。
 
 ##### 第二段：页释放前的调试/硬化策略收敛（初稿）

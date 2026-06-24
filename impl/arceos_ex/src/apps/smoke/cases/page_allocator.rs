@@ -97,6 +97,23 @@ fn check_handoff_and_conversions(ctx: &Context) -> Option<PageAllocatorDiag> {
         || !page_allocator.boot_pageset_checkpoint_ready()
         || !page_allocator.zonelist_update_seq_irqsave_guard_ready()
         || !page_allocator.zonelist_printk_deferred_section_ready()
+        || page_allocator.zonelist_update_seq().entered_count() != 1
+        || page_allocator.zonelist_update_seq().exited_count() != 1
+        || page_allocator.zonelist_update_seq().irqsave_entered_count() != 1
+        || page_allocator
+            .zonelist_update_seq()
+            .irqrestore_exited_count()
+            != 1
+        || page_allocator.zonelist_update_seq().writer_active()
+        || page_allocator
+            .zonelist_printk_deferred_section()
+            .entered_count()
+            != 1
+        || page_allocator
+            .zonelist_printk_deferred_section()
+            .exited_count()
+            != 1
+        || page_allocator.zonelist_printk_deferred_section().active()
         || !page_allocator.boot_pagesets_initialized_for_possible_cpus()
         || page_allocator.boot_pageset_possible_cpu_count() == 0
         || page_allocator.boot_pageset_possible_cpu_count()
