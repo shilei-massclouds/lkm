@@ -210,7 +210,7 @@ object IrqOpenPreparePhase: PhaseObject {
                     RiscvTimerProvider.state == State::Ready;
                     SmpCallFunction.state == State::Ready;
                     Workqueue.state == State::Prepared;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                     PageAllocator.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
@@ -230,7 +230,7 @@ object IrqOpenPreparePhase: PhaseObject {
                     smp_concurrency_closed();
                     boot_cpu_local_irq_enabled();
                     early_boot_irqs_disabled_false();
-                    slub_flush_workqueue_ready(SlubAllocator, Workqueue);
+                    slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
                     page_allocator_per_cpu_pagesets_deferred(PageAllocator);
                     lockdep_path_trimmed();
                     locking_selftest_path_trimmed();
@@ -245,7 +245,7 @@ object IrqOpenPreparePhase: PhaseObject {
                 deferred {
                     "setup_per_cpu_pageset() 作为 PageAllocator.setup() 的 per-CPU pageset 快速路径细项暂缓，不引入新 lifecycle slot。";
                     "完整 console device probe、boot console 注销和 real console handoff 属于条件结果或后续设备初始化，不作为本阶段固定后置条件。";
-                    "SlubAllocator.enable()/Linux slab_state=FULL 留给 slab_sysfs_init() 等后续 late initcall，不在本阶段推进。";
+                    "SlubSubsystem.enable()/Linux slab_state=FULL 留给 slab_sysfs_init() 等后续 late initcall，不在本阶段推进。";
                     "Lockdep、locking selftest、initrd bounds、NUMA policy、ACPI early、late_time_init hook 和 arch_cpu_finalize_init 在当前 RISC-V default_config 下为 trimmed/no-op。";
                 }
             }
@@ -256,7 +256,7 @@ object IrqOpenPreparePhase: PhaseObject {
         invariant {
             IrqTimeInitPhase.state == State::Ready;
             InterruptStream.state == State::Online;
-            SlubAllocator.state == State::Ready;
+            SlubSubsystem.state == State::Ready;
             KmallocCaches.state == State::Ready;
             Workqueue.state == State::Prepared;
             Console.state == State::Prepared;
@@ -270,7 +270,7 @@ object IrqOpenPreparePhase: PhaseObject {
             smp_concurrency_closed();
             boot_cpu_local_irq_enabled();
             early_boot_irqs_disabled_false();
-            slub_flush_workqueue_ready(SlubAllocator, Workqueue);
+            slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
         }
     }
 }

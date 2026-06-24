@@ -21,7 +21,7 @@ object IrqController: InterruptObject {
                 depends_on {
                     DeviceTree.state == State::Ready;
                     PageAllocator.state == State::Ready;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     CpuGroup.state == State::Ready;
                 }
@@ -29,7 +29,7 @@ object IrqController: InterruptObject {
                 ensures {
                     irq_descriptors_ready(IrqController);
                     irq_domain_ready(IrqController, DeviceTree);
-                    irq_allocator_minimal_ready(IrqController, PageAllocator, SlubAllocator);
+                    irq_allocator_minimal_ready(IrqController, PageAllocator, SlubSubsystem);
                 }
             }
         }
@@ -39,7 +39,7 @@ object IrqController: InterruptObject {
         invariant {
             irq_descriptors_ready(IrqController);
             irq_domain_ready(IrqController, DeviceTree);
-            irq_allocator_minimal_ready(IrqController, PageAllocator, SlubAllocator);
+            irq_allocator_minimal_ready(IrqController, PageAllocator, SlubSubsystem);
         }
     }
 }

@@ -18,14 +18,14 @@ object RootPidNamespace: TaskObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     CpuGroup.state == State::Ready;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                 }
 
                 ensures {
                     root_pid_namespace_ready(RootPidNamespace);
                     init_pid_ns_idr_ready(RootPidNamespace);
-                    pid_cache_level0_ready(RootPidNamespace, SlubAllocator);
+                    pid_cache_level0_ready(RootPidNamespace, SlubSubsystem);
                     pid_allocator_limits_configured(RootPidNamespace, CpuGroup);
                     pid_max_limit_compiletime_checked();
                 }
@@ -37,7 +37,7 @@ object RootPidNamespace: TaskObject {
         invariant {
             root_pid_namespace_ready(RootPidNamespace);
             init_pid_ns_idr_ready(RootPidNamespace);
-            pid_cache_level0_ready(RootPidNamespace, SlubAllocator);
+            pid_cache_level0_ready(RootPidNamespace, SlubSubsystem);
             pid_allocator_limits_configured(RootPidNamespace, CpuGroup);
         }
     }
@@ -53,14 +53,14 @@ object AnonVmaCore: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                 }
 
                 ensures {
                     anon_vma_core_ready(AnonVmaCore);
-                    anon_vma_cache_ready(AnonVmaCore, SlubAllocator);
-                    anon_vma_chain_cache_ready(AnonVmaCore, SlubAllocator);
+                    anon_vma_cache_ready(AnonVmaCore, SlubSubsystem);
+                    anon_vma_chain_cache_ready(AnonVmaCore, SlubSubsystem);
                     anon_vma_runtime_graph_deferred(AnonVmaCore);
                 }
             }
@@ -70,8 +70,8 @@ object AnonVmaCore: MemoryObject {
     state State::Ready {
         invariant {
             anon_vma_core_ready(AnonVmaCore);
-            anon_vma_cache_ready(AnonVmaCore, SlubAllocator);
-            anon_vma_chain_cache_ready(AnonVmaCore, SlubAllocator);
+            anon_vma_cache_ready(AnonVmaCore, SlubSubsystem);
+            anon_vma_chain_cache_ready(AnonVmaCore, SlubSubsystem);
             anon_vma_runtime_graph_deferred(AnonVmaCore);
         }
     }
@@ -87,13 +87,13 @@ object CredentialCore: TaskObject {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                 }
 
                 ensures {
                     credential_core_prepared(CredentialCore);
-                    cred_cache_ready(CredentialCore, SlubAllocator);
+                    cred_cache_ready(CredentialCore, SlubSubsystem);
                     init_cred_static_root_not_created_here(CredentialCore);
                     credential_runtime_relations_deferred(CredentialCore);
                 }
@@ -104,7 +104,7 @@ object CredentialCore: TaskObject {
     state State::Prepared {
         invariant {
             credential_core_prepared(CredentialCore);
-            cred_cache_ready(CredentialCore, SlubAllocator);
+            cred_cache_ready(CredentialCore, SlubSubsystem);
             credential_runtime_relations_deferred(CredentialCore);
         }
     }
@@ -123,7 +123,7 @@ object VectorContext: HardwareObject {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     CpuCapabilities.state == State::Ready;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                 }
 
                 ensures {
@@ -155,7 +155,7 @@ object UprobeCore: KernelObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     ExceptionStream.state == State::Ready;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                 }
 
                 ensures {
@@ -190,14 +190,14 @@ object TaskCreationCore: TaskObject {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                 }
 
                 ensures {
                     task_creation_core_prepared(TaskCreationCore);
-                    thread_stack_cache_ready(TaskCreationCore, SlubAllocator);
+                    thread_stack_cache_ready(TaskCreationCore, SlubSubsystem);
                     vmap_stack_path_selected(TaskCreationCore);
                 }
             }
@@ -207,7 +207,7 @@ object TaskCreationCore: TaskObject {
     state State::Prepared {
         invariant {
             task_creation_core_prepared(TaskCreationCore);
-            thread_stack_cache_ready(TaskCreationCore, SlubAllocator);
+            thread_stack_cache_ready(TaskCreationCore, SlubSubsystem);
             vmap_stack_path_selected(TaskCreationCore);
         }
 
@@ -218,7 +218,7 @@ object TaskCreationCore: TaskObject {
                     CredentialCore.state == State::Prepared;
                     CpuGroup.state == State::Ready;
                     CpuCapabilities.state == State::Ready;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     BootInitTask.state == State::Online;
                 }
 
@@ -229,7 +229,7 @@ object TaskCreationCore: TaskObject {
 
                 ensures {
                     task_creation_core_ready(TaskCreationCore);
-                    task_struct_cache_ready(TaskCreationCore, SlubAllocator);
+                    task_struct_cache_ready(TaskCreationCore, SlubSubsystem);
                     max_threads_configured(TaskCreationCore, CpuGroup);
                     init_task_rlimits_ready(TaskCreationCore, BootInitTask);
                     init_user_namespace_ucounts_ready(TaskCreationCore);
@@ -246,7 +246,7 @@ object TaskCreationCore: TaskObject {
             VectorContext.state == State::Prepared;
             UprobeCore.state == State::Ready;
             task_creation_core_ready(TaskCreationCore);
-            task_struct_cache_ready(TaskCreationCore, SlubAllocator);
+            task_struct_cache_ready(TaskCreationCore, SlubSubsystem);
             max_threads_configured(TaskCreationCore, CpuGroup);
             init_task_rlimits_ready(TaskCreationCore, BootInitTask);
             init_user_namespace_ucounts_ready(TaskCreationCore);
@@ -320,14 +320,14 @@ object SignalCore: TaskObject {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                 }
 
                 ensures {
                     signal_core_prepared(SignalCore);
-                    sighand_cache_ready(SignalCore, SlubAllocator);
-                    signal_struct_cache_ready(SignalCore, SlubAllocator);
+                    sighand_cache_ready(SignalCore, SlubSubsystem);
+                    signal_struct_cache_ready(SignalCore, SlubSubsystem);
                     sigqueue_cache_deferred(SignalCore);
                 }
             }
@@ -337,8 +337,8 @@ object SignalCore: TaskObject {
     state State::Prepared {
         invariant {
             signal_core_prepared(SignalCore);
-            sighand_cache_ready(SignalCore, SlubAllocator);
-            signal_struct_cache_ready(SignalCore, SlubAllocator);
+            sighand_cache_ready(SignalCore, SlubSubsystem);
+            signal_struct_cache_ready(SignalCore, SlubSubsystem);
             sigqueue_cache_deferred(SignalCore);
         }
     }
@@ -354,14 +354,14 @@ object TaskFileContext: TaskObject {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                 }
 
                 ensures {
                     task_file_context_prepared(TaskFileContext);
-                    files_struct_cache_ready(TaskFileContext, SlubAllocator);
-                    fs_struct_cache_ready(TaskFileContext, SlubAllocator);
+                    files_struct_cache_ready(TaskFileContext, SlubSubsystem);
+                    fs_struct_cache_ready(TaskFileContext, SlubSubsystem);
                     vfs_runtime_dependency_deferred(TaskFileContext);
                 }
             }
@@ -371,8 +371,8 @@ object TaskFileContext: TaskObject {
     state State::Prepared {
         invariant {
             task_file_context_prepared(TaskFileContext);
-            files_struct_cache_ready(TaskFileContext, SlubAllocator);
-            fs_struct_cache_ready(TaskFileContext, SlubAllocator);
+            files_struct_cache_ready(TaskFileContext, SlubSubsystem);
+            fs_struct_cache_ready(TaskFileContext, SlubSubsystem);
             vfs_runtime_dependency_deferred(TaskFileContext);
         }
     }
@@ -390,14 +390,14 @@ object VmaCore: MemoryObject {
                 depends_on {
                     MmStructCache.state == State::Ready;
                     AnonVmaCore.state == State::Ready;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                 }
 
                 ensures {
                     vma_core_prepared(VmaCore);
-                    vm_area_struct_cache_ready(VmaCore, SlubAllocator);
-                    per_vma_lock_cache_ready(VmaCore, SlubAllocator);
+                    vm_area_struct_cache_ready(VmaCore, SlubSubsystem);
+                    per_vma_lock_cache_ready(VmaCore, SlubSubsystem);
                     vm_committed_as_counter_ready(VmaCore, PerCpuStorage);
                     vma_runtime_mapping_deferred(VmaCore);
                 }
@@ -408,8 +408,8 @@ object VmaCore: MemoryObject {
     state State::Prepared {
         invariant {
             vma_core_prepared(VmaCore);
-            vm_area_struct_cache_ready(VmaCore, SlubAllocator);
-            per_vma_lock_cache_ready(VmaCore, SlubAllocator);
+            vm_area_struct_cache_ready(VmaCore, SlubSubsystem);
+            per_vma_lock_cache_ready(VmaCore, SlubSubsystem);
             vm_committed_as_counter_ready(VmaCore, PerCpuStorage);
             vma_runtime_mapping_deferred(VmaCore);
         }
@@ -426,13 +426,13 @@ object NsProxy: TaskObject {
         events {
             on Event::Preset -> State::Prepared {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                 }
 
                 ensures {
                     ns_proxy_prepared(NsProxy);
-                    nsproxy_cache_ready(NsProxy, SlubAllocator);
+                    nsproxy_cache_ready(NsProxy, SlubSubsystem);
                     namespace_runtime_refs_deferred(NsProxy);
                 }
             }
@@ -442,7 +442,7 @@ object NsProxy: TaskObject {
     state State::Prepared {
         invariant {
             ns_proxy_prepared(NsProxy);
-            nsproxy_cache_ready(NsProxy, SlubAllocator);
+            nsproxy_cache_ready(NsProxy, SlubSubsystem);
             namespace_runtime_refs_deferred(NsProxy);
         }
     }
@@ -459,12 +459,12 @@ object UtsNamespace: TaskObject {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     NsProxy.state == State::Prepared;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                 }
 
                 ensures {
                     uts_namespace_prepared(UtsNamespace);
-                    uts_namespace_cache_ready(UtsNamespace, SlubAllocator);
+                    uts_namespace_cache_ready(UtsNamespace, SlubSubsystem);
                     init_uts_namespace_static_root_not_created_here(UtsNamespace);
                     uts_namespace_runtime_ops_deferred(UtsNamespace);
                 }
@@ -475,7 +475,7 @@ object UtsNamespace: TaskObject {
     state State::Prepared {
         invariant {
             uts_namespace_prepared(UtsNamespace);
-            uts_namespace_cache_ready(UtsNamespace, SlubAllocator);
+            uts_namespace_cache_ready(UtsNamespace, SlubSubsystem);
             uts_namespace_runtime_ops_deferred(UtsNamespace);
         }
     }
@@ -492,12 +492,12 @@ object KeyringCore: KernelObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     CredentialCore.state == State::Prepared;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                 }
 
                 ensures {
                     keyring_core_ready(KeyringCore);
-                    key_cache_ready(KeyringCore, SlubAllocator);
+                    key_cache_ready(KeyringCore, SlubSubsystem);
                     builtin_key_types_registered(KeyringCore);
                     root_key_user_tracking_ready(KeyringCore);
                     persistent_keyrings_trimmed(KeyringCore);
@@ -509,7 +509,7 @@ object KeyringCore: KernelObject {
     state State::Ready {
         invariant {
             keyring_core_ready(KeyringCore);
-            key_cache_ready(KeyringCore, SlubAllocator);
+            key_cache_ready(KeyringCore, SlubSubsystem);
             builtin_key_types_registered(KeyringCore);
             root_key_user_tracking_ready(KeyringCore);
             persistent_keyrings_trimmed(KeyringCore);
@@ -530,7 +530,7 @@ object SecurityCore: KernelObject {
                 depends_on {
                     CredentialCore.state == State::Prepared;
                     KeyringCore.state == State::Ready;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     StaticBranch.state == State::Ready;
                 }
 
@@ -580,7 +580,7 @@ object ProcessPreparePhase: PhaseObject {
                     Workqueue.state == State::Prepared;
                     Softirq.state == State::Ready;
                     RcuCore.state == State::Ready;
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                     MmStructCache.state == State::Ready;
                     PerCpuStorage.state == State::Ready;

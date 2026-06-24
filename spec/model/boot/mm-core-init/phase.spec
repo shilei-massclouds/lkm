@@ -465,7 +465,8 @@ object StackDepot: MemoryObject {
 }
 
 /*
- * SlubCacheRegistry 表示 Linux slab_caches registry。
+ * SlubCacheRegistry 表示 Linux slab_caches registry。SlubSubsystem
+ * 拥有 registry，registry 统一拥有和枚举所有 SlubCache 实例。
  */
 object SlubCacheRegistry: MemoryObject {
     initial_state: State::Base;
@@ -474,11 +475,13 @@ object SlubCacheRegistry: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Prepared;
+                    SlubSubsystem.state == State::Prepared;
                 }
 
                 ensures {
                     slub_cache_registry_ready(SlubCacheRegistry);
+                    slub_cache_registry_owned_by_subsystem(SlubCacheRegistry, SlubSubsystem);
+                    slub_cache_registry_owns_all_slub_cache_instances(SlubCacheRegistry);
                     boot_slub_caches_registered(SlubCacheRegistry);
                     slub_cache_registry_global_list_ready(SlubCacheRegistry);
                 }
@@ -489,6 +492,8 @@ object SlubCacheRegistry: MemoryObject {
     state State::Ready {
         invariant {
             slub_cache_registry_ready(SlubCacheRegistry);
+            slub_cache_registry_owned_by_subsystem(SlubCacheRegistry, SlubSubsystem);
+            slub_cache_registry_owns_all_slub_cache_instances(SlubCacheRegistry);
             boot_slub_caches_registered(SlubCacheRegistry);
             slub_cache_registry_global_list_ready(SlubCacheRegistry);
         }
@@ -505,12 +510,13 @@ object KmallocCaches: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Prepared;
+                    SlubSubsystem.state == State::Prepared;
                     SlubCacheRegistry.state == State::Ready;
                 }
 
                 ensures {
                     kmalloc_caches_ready(KmallocCaches, SlubCacheRegistry);
+                    kmalloc_caches_are_registry_slub_cache_instances(KmallocCaches, SlubCacheRegistry);
                     kmalloc_size_index_ready(KmallocCaches);
                     kmalloc_caches_default_size_classes_ready(KmallocCaches);
                     default_kmalloc_cache_set_ready(KmallocCaches);
@@ -524,6 +530,7 @@ object KmallocCaches: MemoryObject {
     state State::Ready {
         invariant {
             kmalloc_caches_ready(KmallocCaches, SlubCacheRegistry);
+            kmalloc_caches_are_registry_slub_cache_instances(KmallocCaches, SlubCacheRegistry);
             kmalloc_size_index_ready(KmallocCaches);
             kmalloc_caches_default_size_classes_ready(KmallocCaches);
             default_kmalloc_cache_set_ready(KmallocCaches);
@@ -534,10 +541,12 @@ object KmallocCaches: MemoryObject {
 }
 
 /*
- * SlubAllocator 表示 CONFIG_SLUB=y 下的 kmem_cache_init() 自举路径。
+ * SlubSubsystem 表示 CONFIG_SLUB=y 下的 kmem_cache_init() 自举路径和
+ * 唯一 SLUB facade。SlubCache 是单个 struct kmem_cache 实例的正式类型名；
+ * 不再引入 SlubCacheType。
  * 本子阶段只推进到 Linux slab_state=UP 对应的 Ready。
  */
-object SlubAllocator: SlubAllocatorType {
+object SlubSubsystem: MemoryObject {
     initial_state: State::Base;
 
     state State::Base {
@@ -549,9 +558,11 @@ object SlubAllocator: SlubAllocatorType {
                 }
 
                 ensures {
-                    slub_allocator_partial_ready(SlubAllocator);
-                    boot_kmem_cache_node_ready(SlubAllocator);
-                    slub_state_partial(SlubAllocator);
+                    slub_subsystem_partial_ready(SlubSubsystem);
+                    slub_cache_type_name_is_slub_cache(SlubSubsystem);
+                    boot_kmem_cache_node_ready(SlubSubsystem);
+                    boot_kmem_cache_node_is_slub_cache_instance(SlubSubsystem);
+                    slub_state_partial(SlubSubsystem);
                 }
             }
         }
@@ -559,9 +570,11 @@ object SlubAllocator: SlubAllocatorType {
 
     state State::Prepared {
         invariant {
-            slub_allocator_partial_ready(SlubAllocator);
-            boot_kmem_cache_node_ready(SlubAllocator);
-            slub_state_partial(SlubAllocator);
+            slub_subsystem_partial_ready(SlubSubsystem);
+            slub_cache_type_name_is_slub_cache(SlubSubsystem);
+            boot_kmem_cache_node_ready(SlubSubsystem);
+            boot_kmem_cache_node_is_slub_cache_instance(SlubSubsystem);
+            slub_state_partial(SlubSubsystem);
         }
 
         events {
@@ -577,15 +590,17 @@ object SlubAllocator: SlubAllocatorType {
                 }
 
                 ensures {
-                    slub_allocator_ready(SlubAllocator, SlubCacheRegistry, KmallocCaches);
-                    boot_kmem_cache_bootstrap_completed(SlubAllocator, SlubCacheRegistry);
-                    slub_cpu_cache_state_ready(SlubAllocator, PerCpuStorage);
-                    slub_cpuhp_step_registered(SlubAllocator, CpuHotplugState);
-                    slub_state_up(SlubAllocator);
-                    slub_allocator_uses_page_allocator(SlubAllocator, PageAllocator);
-                    slub_allocator_kmalloc_api_ready(SlubAllocator);
-                    slub_allocator_kzalloc_api_ready(SlubAllocator);
-                    slub_allocator_kfree_api_ready(SlubAllocator);
+                    slub_subsystem_ready(SlubSubsystem, SlubCacheRegistry, KmallocCaches);
+                    boot_kmem_cache_bootstrap_completed(SlubSubsystem, SlubCacheRegistry);
+                    boot_kmem_cache_is_slub_cache_instance(SlubSubsystem, SlubCacheRegistry);
+                    kmem_cache_and_node_registered_as_slub_cache_instances(SlubCacheRegistry);
+                    slub_cpu_cache_state_ready(SlubSubsystem, PerCpuStorage);
+                    slub_cpuhp_step_registered(SlubSubsystem, CpuHotplugState);
+                    slub_state_up(SlubSubsystem);
+                    slub_subsystem_uses_page_allocator(SlubSubsystem, PageAllocator);
+                    slub_subsystem_kmalloc_api_ready(SlubSubsystem);
+                    slub_subsystem_kzalloc_api_ready(SlubSubsystem);
+                    slub_subsystem_kfree_api_ready(SlubSubsystem);
                 }
             }
         }
@@ -595,15 +610,88 @@ object SlubAllocator: SlubAllocatorType {
         invariant {
             SlubCacheRegistry.state == State::Ready;
             KmallocCaches.state == State::Ready;
-            slub_allocator_ready(SlubAllocator, SlubCacheRegistry, KmallocCaches);
-            boot_kmem_cache_bootstrap_completed(SlubAllocator, SlubCacheRegistry);
-            slub_cpu_cache_state_ready(SlubAllocator, PerCpuStorage);
-            slub_cpuhp_step_registered(SlubAllocator, CpuHotplugState);
-            slub_state_up(SlubAllocator);
-            slub_allocator_uses_page_allocator(SlubAllocator, PageAllocator);
-            slub_allocator_kmalloc_api_ready(SlubAllocator);
-            slub_allocator_kzalloc_api_ready(SlubAllocator);
-            slub_allocator_kfree_api_ready(SlubAllocator);
+            slub_subsystem_ready(SlubSubsystem, SlubCacheRegistry, KmallocCaches);
+            boot_kmem_cache_bootstrap_completed(SlubSubsystem, SlubCacheRegistry);
+            boot_kmem_cache_is_slub_cache_instance(SlubSubsystem, SlubCacheRegistry);
+            kmem_cache_and_node_registered_as_slub_cache_instances(SlubCacheRegistry);
+            slub_cpu_cache_state_ready(SlubSubsystem, PerCpuStorage);
+            slub_cpuhp_step_registered(SlubSubsystem, CpuHotplugState);
+            slub_state_up(SlubSubsystem);
+            slub_subsystem_uses_page_allocator(SlubSubsystem, PageAllocator);
+            slub_subsystem_kmalloc_api_ready(SlubSubsystem);
+            slub_subsystem_kzalloc_api_ready(SlubSubsystem);
+            slub_subsystem_kfree_api_ready(SlubSubsystem);
+        }
+
+        processes {
+            /*
+             * Kmalloc corresponds to Linux kmalloc(size, gfp). The returned
+             * allocation reference is caller-owned storage from a kmalloc
+             * size-class SlubCache backed by PageAllocator pages.
+             */
+            Action::Kmalloc(size: KmallocSize, gfp: GfpFlags) -> KmallocAllocRef {
+                state_effect: StateEffect::None;
+                depends_on {
+                    self.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                    PageAllocator.state == State::Ready;
+                    slub_subsystem_kmalloc_api_ready(self);
+                    slub_subsystem_kfree_api_ready(self);
+                    slub_subsystem_uses_page_allocator(self, PageAllocator);
+                    kmalloc_caches_ready_for_size(KmallocCaches, size);
+                    page_allocator_gfp_allowed(PageAllocator, gfp);
+                }
+                ensures {
+                    slub_subsystem_kmalloc_called(self, size, gfp);
+                    kmalloc_cache_size_class_selected(KmallocCaches, size);
+                }
+                result {
+                    Available: Success(kmalloc_alloc_ref_returned);
+                    NoMemory: Failed(no_slab_objects_available);
+                }
+                deferred {
+                    "当前 Kmalloc 规格只展开成功返回分配引用的常规路径；GFP reclaim、NUMA、memcg、debug redzone、freelist random/hardened 后续随完整 SLUB 模型展开。";
+                }
+            }
+
+            /*
+             * Kzalloc is kmalloc plus zeroing before the reference is returned.
+             */
+            Action::Kzalloc(size: KmallocSize, gfp: GfpFlags) -> KmallocAllocRef {
+                state_effect: StateEffect::None;
+                depends_on {
+                    self.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
+                    PageAllocator.state == State::Ready;
+                    slub_subsystem_kzalloc_api_ready(self);
+                    slub_subsystem_kfree_api_ready(self);
+                    slub_subsystem_uses_page_allocator(self, PageAllocator);
+                    kmalloc_caches_ready_for_size(KmallocCaches, size);
+                    page_allocator_gfp_allowed(PageAllocator, gfp);
+                }
+                ensures {
+                    slub_subsystem_kzalloc_called(self, size, gfp);
+                    kmalloc_cache_size_class_selected(KmallocCaches, size);
+                }
+                result {
+                    Available: Success(kmalloc_alloc_ref_returned);
+                    NoMemory: Failed(no_slab_objects_available);
+                }
+            }
+
+            Action::Kfree(alloc_ref: KmallocAllocRef) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    self.state == State::Ready;
+                    slub_subsystem_kfree_api_ready(self);
+                    kmalloc_alloc_ref_ready(alloc_ref);
+                    kmalloc_alloc_ref_exclusively_owned_by_caller(alloc_ref);
+                }
+                ensures {
+                    slub_subsystem_kfree_called(self, alloc_ref);
+                    kmalloc_alloc_ref_released_to_slub(alloc_ref, self);
+                }
+            }
         }
     }
 }
@@ -619,13 +707,13 @@ object KernelGlobalAllocator: KernelGlobalAllocatorType {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                 }
 
                 ensures {
-                    kernel_global_allocator_ready(KernelGlobalAllocator, SlubAllocator);
-                    kernel_global_allocator_uses_slub_allocator(KernelGlobalAllocator, SlubAllocator);
+                    kernel_global_allocator_ready(KernelGlobalAllocator, SlubSubsystem);
+                    kernel_global_allocator_uses_slub_subsystem(KernelGlobalAllocator, SlubSubsystem);
                     kernel_global_allocator_alloc_api_ready(KernelGlobalAllocator);
                     kernel_global_allocator_alloc_zeroed_api_ready(KernelGlobalAllocator);
                     kernel_global_allocator_dealloc_api_ready(KernelGlobalAllocator);
@@ -636,10 +724,10 @@ object KernelGlobalAllocator: KernelGlobalAllocatorType {
 
     state State::Ready {
         invariant {
-            SlubAllocator.state == State::Ready;
+            SlubSubsystem.state == State::Ready;
             KmallocCaches.state == State::Ready;
-            kernel_global_allocator_ready(KernelGlobalAllocator, SlubAllocator);
-            kernel_global_allocator_uses_slub_allocator(KernelGlobalAllocator, SlubAllocator);
+            kernel_global_allocator_ready(KernelGlobalAllocator, SlubSubsystem);
+            kernel_global_allocator_uses_slub_subsystem(KernelGlobalAllocator, SlubSubsystem);
             kernel_global_allocator_alloc_api_ready(KernelGlobalAllocator);
             kernel_global_allocator_alloc_zeroed_api_ready(KernelGlobalAllocator);
             kernel_global_allocator_dealloc_api_ready(KernelGlobalAllocator);
@@ -696,11 +784,11 @@ object PageTableLockCache: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                 }
 
                 ensures {
-                    page_table_lock_cache_ready(PageTableLockCache, SlubAllocator);
+                    page_table_lock_cache_ready(PageTableLockCache, SlubSubsystem);
                     page_ptl_cache_created(PageTableLockCache);
                 }
             }
@@ -709,7 +797,7 @@ object PageTableLockCache: MemoryObject {
 
     state State::Ready {
         invariant {
-            page_table_lock_cache_ready(PageTableLockCache, SlubAllocator);
+            page_table_lock_cache_ready(PageTableLockCache, SlubSubsystem);
             page_ptl_cache_created(PageTableLockCache);
         }
     }
@@ -725,7 +813,7 @@ object PageTableCaches: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     PageAllocator.state == State::Ready;
                     PageMetadataMap.state == State::Ready;
                     Config.state == State::Online;
@@ -773,11 +861,11 @@ object VmapAreaCache: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                 }
 
                 ensures {
-                    vmap_area_cache_ready(VmapAreaCache, SlubAllocator);
+                    vmap_area_cache_ready(VmapAreaCache, SlubSubsystem);
                 }
             }
         }
@@ -785,7 +873,7 @@ object VmapAreaCache: MemoryObject {
 
     state State::Ready {
         invariant {
-            vmap_area_cache_ready(VmapAreaCache, SlubAllocator);
+            vmap_area_cache_ready(VmapAreaCache, SlubSubsystem);
         }
     }
 }
@@ -934,7 +1022,7 @@ object VmallocAllocator: VmallocAllocatorType {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     PageTableCaches.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                 }
@@ -1207,17 +1295,18 @@ object MmStructCache: MemoryObject {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    SlubAllocator.state == State::Ready;
+                    SlubSubsystem.state == State::Ready;
                     SlubCacheRegistry.state == State::Ready;
                     CpuGroup.state == State::Ready;
                 }
 
                 ensures {
-                    mm_struct_cache_ready(MmStructCache, SlubAllocator);
+                    mm_struct_cache_ready(MmStructCache, SlubSubsystem);
                     mm_struct_cache_registered_in_slub_registry(
                         MmStructCache,
                         SlubCacheRegistry
                     );
+                    mm_struct_cache_is_slub_cache_instance(MmStructCache);
                     mm_struct_cache_named_mm_struct(MmStructCache);
                     mm_struct_cache_object_size_resolved(MmStructCache, CpuGroup);
                     mm_struct_cache_saved_auxv_usercopy_range_ready(MmStructCache);
@@ -1229,8 +1318,9 @@ object MmStructCache: MemoryObject {
 
     state State::Ready {
         invariant {
-            mm_struct_cache_ready(MmStructCache, SlubAllocator);
+            mm_struct_cache_ready(MmStructCache, SlubSubsystem);
             mm_struct_cache_registered_in_slub_registry(MmStructCache, SlubCacheRegistry);
+            mm_struct_cache_is_slub_cache_instance(MmStructCache);
             mm_struct_cache_named_mm_struct(MmStructCache);
             mm_struct_cache_object_size_resolved(MmStructCache, CpuGroup);
             mm_struct_cache_saved_auxv_usercopy_range_ready(MmStructCache);
@@ -1272,8 +1362,8 @@ object MmCoreInitPhase: PhaseObject {
                     StackDepot.Event::Setup;
                     Swiotlb.Event::Setup;
                     PageAllocator.Event::Setup;
-                    SlubAllocator.Event::Preset;
-                    SlubAllocator.Event::Setup;
+                    SlubSubsystem.Event::Preset;
+                    SlubSubsystem.Event::Setup;
                     KernelGlobalAllocator.Event::Setup;
                     DynamicContainerRuntime.Event::Setup;
                     PageTableCaches.Event::Setup;
@@ -1322,7 +1412,7 @@ object MmCoreInitPhase: PhaseObject {
             MemoryDebugHardening.state == State::Ready;
             Swiotlb.state == State::Ready;
             StackDepot.state == State::Ready;
-            SlubAllocator.state == State::Ready;
+            SlubSubsystem.state == State::Ready;
             SlubCacheRegistry.state == State::Ready;
             KmallocCaches.state == State::Ready;
             PageTableCaches.state == State::Ready;

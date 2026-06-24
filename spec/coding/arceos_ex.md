@@ -105,7 +105,7 @@ make clean
 `SmpRuntimePhase` 的后续阶段，不是其最后一个子阶段；它直接衔接 `FinalizePhase.Ready` /
 `FinalizeBoundary.Ready`。
 当前 `MmCoreInitPhase`、`SchedInitPhase` 和 `IrqTimeInitPhase` 都保持最小对象级语义：`PageAllocator`、
-`SlubAllocator`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
+`SlubSubsystem`、`VmallocAllocator`、`Scheduler`、`Workqueue`、`Softirq`、`RcuCore`、`RiscvTimerProvider` 和
 `SmpCallFunction` 只发布状态与必要事实，不提供完整运行期服务。
 
 ## ProcessPreparePhase 编码约束
@@ -1178,7 +1178,7 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 ## `mm_core_init()` 编码约束
 
-`MmCoreInitPhase` 已正式落到 `spec/model/boot/mm-core-init/`。实现侧必须保持与模型一致的阶段边界：入口是 `CorePreparePhase.Ready`、`ExceptionStream.Ready`、`MemBlock.Online`、`PageMetadataMap.Ready`、`DmaCachePolicy.Ready`、`StaticBranch.Ready` 和 `SystemExclusive`；出口是 `PageAllocator.Ready`、`MemBlock.Offline`、`SlubAllocator.Ready`、`PageTableCaches.Ready`、`VmallocAllocator.Ready`、`MmStructCache.Ready`。本阶段只能消费已经建立的 `PageMetadataMap`；`mem_init()` 开头的 `BUG_ON(!mem_map)` 对应 checkpoint，不在 `mm_core_init()` 内推进 `PageMetadataMap.setup()`。
+`MmCoreInitPhase` 已正式落到 `spec/model/boot/mm-core-init/`。实现侧必须保持与模型一致的阶段边界：入口是 `CorePreparePhase.Ready`、`ExceptionStream.Ready`、`MemBlock.Online`、`PageMetadataMap.Ready`、`DmaCachePolicy.Ready`、`StaticBranch.Ready` 和 `SystemExclusive`；出口是 `PageAllocator.Ready`、`MemBlock.Offline`、`SlubSubsystem.Ready`、`PageTableCaches.Ready`、`VmallocAllocator.Ready`、`MmStructCache.Ready`。本阶段只能消费已经建立的 `PageMetadataMap`；`mem_init()` 开头的 `BUG_ON(!mem_map)` 对应 checkpoint，不在 `mm_core_init()` 内推进 `PageMetadataMap.setup()`。
 
 `MemoryTopology.setup()` 只把 CorePrepare 已经 `Ready` 的 `Zones` 投影为 allocator-visible 的 `MemoryNode`/`ZoneSet` 视图；它不得重新划分 zone、不得从 `MemBlock` 分配或创建 `mem_map`/page metadata，也不得把 `ZoneSet` 表达为对真实 Linux `node_zones` 的新所有权。`PageAllocator.preset()` 只做 `build_all_zonelists(NULL)` 和 `page_alloc_init_cpuhp()` 对应的拓扑与 hook 建立：`ZonelistSet.Ready`、fallback zoneref 顺序、NULL sentinel、`CPUHP_PAGE_ALLOC` step 注册。Linux boot path 中 `__build_all_zonelists(NULL)` 在 `zonelist_update_seq` 的 `write_seqlock_irqsave()` 区间内执行，并包在 `printk_deferred_enter()` / `printk_deferred_exit()` 之间；当前实现处于 `SystemExclusive` boot 阶段，可把这两项记录为 ready facts，而不提前引入完整 runtime seqlock reader/retry 机制。`build_all_zonelists_init()` 随后为 possible CPU 初始化 boot pageset；实现必须把该 checkpoint 绑定到已 `Ready` 的 `PerCpuStorage` first chunk CPU 数。它不得释放 MemBlock 页，也不得把自身推进到 `Ready`。
 
@@ -1211,11 +1211,16 @@ buddy pages，并且必须可通过已经建立的线性映射进行受限读写
 `page_to_virt(page_ref)`/`page_address(page_ref)`。这些转换必须检查或依赖 PFN 有效、地址页对齐、地址属于已建立 direct map
 或 vmemmap 覆盖范围；不得把任意整数地址直接伪造成 `PageRef`。
 
-`SlubAllocator.Ready` 之后必须暴露正式的 Linux-like kmalloc API：`kmalloc(size, gfp)`、`kzalloc(size, gfp)` 和
-`kfree(alloc_ref)`。model 层对应 `SlubAllocatorType.Action::Kmalloc(size, gfp) -> KmallocAllocRef`、
-`SlubAllocatorType.Action::Kzalloc(size, gfp) -> KmallocAllocRef` 与
-`SlubAllocatorType.Action::Kfree(alloc_ref)`；coding 层可按 Rust 需要调整参数和返回封装，但必须保留 size、GFP、
+`SlubSubsystem.Ready` 之后必须暴露正式的 Linux-like kmalloc API：`kmalloc(size, gfp)`、`kzalloc(size, gfp)` 和
+`kfree(alloc_ref)`。model 层对应唯一对象 `SlubSubsystem.Action::Kmalloc(size, gfp) -> KmallocAllocRef`、
+`SlubSubsystem.Action::Kzalloc(size, gfp) -> KmallocAllocRef` 与
+`SlubSubsystem.Action::Kfree(alloc_ref)`；coding 层可按 Rust 需要调整参数和返回封装，但必须保留 size、GFP、
 caller-owned allocation reference、线性映射读写、kzalloc 返回前清零，以及 kfree 释放后对象回到所属 kmalloc cache 的契约。
+`SlubSubsystem` 是 SLUB 子系统 facade，不是某个 cache 实例；规格不再引入 `SlubSubsystemType` 作为可复用类型。
+单个 Linux `struct kmem_cache` 实例的正式类型名是 `SlubCache`，不是 `SlubCacheType`。
+`SlubCacheRegistry` 是所有 `SlubCache` 实例的注册、查找和枚举集合；`SlubSubsystem` 通过 registry 间接管理
+`boot_kmem_cache_node`、`boot_kmem_cache`、正式 `kmem_cache_node`/`kmem_cache`、kmalloc size-class caches
+和后续 named caches，不能再建立与 registry 并列的第二套 cache 所有权。
 
 当前第一轮 `arceos_ex` SLUB/kmalloc 实现只要求 Linux-like page-backed slab：`KmallocCaches` 使用固定默认 size classes
 `8/16/32/64/128/256/512/1024/2048/4096/8192`，请求 size 通过向上取整选择 size class；当某个 cache 没有空闲对象时，必须通过
@@ -1227,7 +1232,7 @@ caller-owned allocation reference、线性映射读写、kzalloc 返回前清零
 `kfree` 必须拒绝不属于任一 kmalloc cache/slab 的引用，并把有效对象放回所属 cache 的 freelist。NUMA、per-CPU partial、
 slab debug redzone/poison、freelist random/hardened、memcg kmalloc、reclaim/compaction 和 slab sysfs/FULL 状态均 deferred。
 
-`KernelGlobalAllocator.Setup` 必须发生在 `SlubAllocator.Ready` 之后，它表示 Rust `core::alloc::GlobalAlloc` 边界已经可用，
+`KernelGlobalAllocator.Setup` 必须发生在 `SlubSubsystem.Ready` 之后，它表示 Rust `core::alloc::GlobalAlloc` 边界已经可用，
 而不是新的底层分配器。`GlobalAlloc::alloc(Layout)` 必须通过 SLUB `kmalloc` 获得 storage；
 `GlobalAlloc::alloc_zeroed(Layout)` 必须通过 `kzalloc` 或等价的 alloc 后清零实现；`GlobalAlloc::dealloc(ptr, Layout)`
 必须能从裸指针和 layout 找回所属 kmalloc slab/cache，再把对象交回 SLUB。实现不得在这一层直接调用 MemBlock、直接操作 buddy
@@ -1313,14 +1318,14 @@ write-combine、normal memory alias 先记录为 deferred/unsupported，不得�
 记录的 mapping 必须引用该 area/mapping，且 `membase != mapbase`、page-aligned、使用 IO protection。
 属性测试必须覆盖 plain device 成功、WC/NC/normal 策略不被误标为已支持。
 
-`MmStructCache.setup()` 只建立 `"mm_struct"` cache，并且该 cache 必须作为 `SlubAllocator`/`SlubCacheRegistry` 管理下的具名 SLUB cache 实例注册；`MmStructCache` 本身不得成为新的 allocator 类型。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
+`MmStructCache.setup()` 只建立 `"mm_struct"` cache，并且该 cache 必须作为 `SlubSubsystem`/`SlubCacheRegistry` 管理下的具名 SLUB cache 实例注册；`MmStructCache` 本身不得成为新的 allocator 类型。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
 
 `PageExt`、`KFENCE`、`KMSAN`、`Kmemleak`、`DebugObjectsMemory` 和 `ExecMemory` 当前按 `linux-6.12.37/default_config` 记录为 model `deferred`/trimmed 路径。实现若遇到这些调用位置，应输出 checkpoint 或保留 no-op 分支说明，不得散落 TODO 来替代正式规格记录。
 
 ## `SchedInitPhase` 编码约束
 
 `SchedInitPhase` 已正式落到 `spec/model/boot/sched-init/`。实现侧必须保持与模型一致的阶段边界：入口是
-`MmCoreInitPhase.Ready`、`PageAllocator.Ready`、`SlubAllocator.Ready`、`KmallocCaches.Ready`、`CpuGroup.Ready`、
+`MmCoreInitPhase.Ready`、`PageAllocator.Ready`、`SlubSubsystem.Ready`、`KmallocCaches.Ready`、`CpuGroup.Ready`、
 `CpuIdMap.Ready`、`PerCpuStorage.Ready`、`CpuHotplugState.Ready`、`StaticBranch.Ready`、`PrintkBuffer.Ready` 和
 `SystemExclusive`；出口是 `Scheduler.Online`、`RadixTree.Ready`、`MapleTree.Ready`、`Workqueue.Prepared`、
 `Softirq.Prepared`、`RcuCore.Ready` 和 `TasksRcu.Prepared`。
@@ -1554,9 +1559,9 @@ checkpoint 或 no-op 条件，不得以零散 TODO 代替正式 deferred。
 目录、文件和对象命名必须跟阶段树一致：实现文件位于
 `impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs` 等 `interrupt` 阶段子树下，不得落回 `boot` 阶段子树。
 
-`kmem_cache_init_late()` 当前只实现为 `SlubAllocator.setup_flush_workqueue()` 内部资源事实：依赖
-`SlubAllocator.Ready`、`KmallocCaches.Ready` 和 `Workqueue.Prepared`，记录 `flush_workqueue_ready == true`。
-它不得把 `SlubAllocator` 推进到 `Online`，Linux `slab_state = FULL` / `SlubAllocator.enable()` 仍留给后续
+`kmem_cache_init_late()` 当前只实现为 `SlubSubsystem.setup_flush_workqueue()` 内部资源事实：依赖
+`SlubSubsystem.Ready`、`KmallocCaches.Ready` 和 `Workqueue.Prepared`，记录 `flush_workqueue_ready == true`。
+它不得把 `SlubSubsystem` 推进到 `Online`，Linux `slab_state = FULL` / `SlubSubsystem.enable()` 仍留给后续
 `slab_sysfs_init()` 类 late initcall。
 
 `console_init()` 当前只要求 `Console.Prepared`、`TtyLineDisciplineRegistry.Prepared` 和 `ConsoleDriverSet.Prepared`。

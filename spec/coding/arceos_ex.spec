@@ -31,6 +31,9 @@ predicate arceos_ex_must_page_allocator_smoke_cover_page_alloc_free_read_write()
 predicate arceos_ex_must_memblock_disable_reaches_offline_not_destroyed() -> bool;
 predicate arceos_ex_must_swiotlb_setup_before_memblock_disable() -> bool;
 predicate arceos_ex_must_memory_debug_hardening_use_static_branch_registry() -> bool;
+predicate arceos_ex_must_slub_subsystem_be_single_facade_not_cache_instance() -> bool;
+predicate arceos_ex_must_slub_cache_type_name_be_slub_cache() -> bool;
+predicate arceos_ex_must_slub_cache_registry_own_all_cache_instances() -> bool;
 predicate arceos_ex_must_slub_bootstrap_before_kmalloc_caches_ready() -> bool;
 predicate arceos_ex_must_slub_expose_kmalloc_kzalloc_kfree_api() -> bool;
 predicate arceos_ex_must_slub_kmalloc_use_page_allocator_backing_pages() -> bool;
@@ -781,9 +784,23 @@ type ArceosExMmCoreInitCodingMust {
         arceos_ex_must_memory_debug_hardening_use_static_branch_registry();
 
         /*
+         * SLUB object hierarchy:
+         *
+         * SlubSubsystem is the single SLUB facade object, not a cache
+         * instance and not a reusable SlubSubsystemType. The formal cache type
+         * name is SlubCache, not SlubCacheType. SlubCacheRegistry must be the
+         * single registry/ownership collection for boot caches, formal
+         * kmem_cache/kmem_cache_node, kmalloc size-class caches, and later
+         * named caches.
+         */
+        arceos_ex_must_slub_subsystem_be_single_facade_not_cache_instance();
+        arceos_ex_must_slub_cache_type_name_be_slub_cache();
+        arceos_ex_must_slub_cache_registry_own_all_cache_instances();
+
+        /*
          * SLUB bootstrap:
          *
-         * SlubAllocator.setup() must bootstrap kmem_cache/kmem_cache_node
+         * SlubSubsystem.setup() must bootstrap kmem_cache/kmem_cache_node
          * before KmallocCaches is considered Ready.
          */
         arceos_ex_must_slub_bootstrap_before_kmalloc_caches_ready();
@@ -791,7 +808,7 @@ type ArceosExMmCoreInitCodingMust {
         /*
          * Linux-like kmalloc API:
          *
-         * Once SlubAllocator reaches Ready it must expose production
+         * Once SlubSubsystem reaches Ready it must expose production
          * kmalloc(size, gfp), kzalloc(size, gfp), and kfree(ref) APIs. The
          * first round may use a minimal page-backed slab implementation, but
          * it must allocate backing pages through PageAllocator rather than
@@ -817,7 +834,7 @@ type ArceosExMmCoreInitCodingMust {
         /*
          * Global allocator:
          *
-         * KernelGlobalAllocator.setup() must run after SlubAllocator.Ready and
+         * KernelGlobalAllocator.setup() must run after SlubSubsystem.Ready and
          * expose the Rust GlobalAlloc boundary through SLUB/kmalloc. Ordinary
          * dynamic containers must depend on this boundary rather than using
          * MemBlock, PageAllocator internals, or SLUB private structures.
@@ -941,7 +958,7 @@ type ArceosExMmCoreInitCodingMust {
          * mm_struct only:
          *
          * MmStructCache.setup() must only establish the "mm_struct" cache as
-         * a named cache instance registered under SlubAllocator/
+         * a named cache instance registered under SlubSubsystem/
          * SlubCacheRegistry. MmStructCache must not become a separate
          * allocator type. vm_area_struct, vma lock cache, and mmap_init()
          * remain later proc_caches_init()/process-memory work.
@@ -1593,8 +1610,8 @@ type ArceosExIrqOpenPrepareCodingMust {
          * SLUB late boundary:
          *
          * kmem_cache_init_late() must be represented as the internal
-         * SlubAllocator flush workqueue fact. It must not advance
-         * SlubAllocator to Online/FULL; that belongs to later slab_sysfs_init()
+         * SlubSubsystem flush workqueue fact. It must not advance
+         * SlubSubsystem to Online/FULL; that belongs to later slab_sysfs_init()
          * style work.
          */
         arceos_ex_must_irq_open_prepare_keep_slub_ready_not_online();
