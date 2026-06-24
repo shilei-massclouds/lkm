@@ -51,6 +51,7 @@ pub fn run() -> SmokeResult {
             .scheduler
             .boot_idle_task()
             .is_boot_cpu_idle_task_view(&ctx.cpu_group, ctx.scheduler.boot_runqueue())
+        || !scheduler_possible_runqueues_match_cpu_group()
         || ctx.scheduler.default_root_domain().covered_cpu_count()
             != ctx.cpu_group.possible_cpu_count()
         || ctx.scheduler.default_root_domain().covered_cpu_ref(0) != ctx.cpu_group.boot_cpu_ref()
@@ -117,4 +118,57 @@ fn default_root_domain_entries_match_cpu_group() -> bool {
         logical_id += 1;
     }
     true
+}
+
+fn scheduler_possible_runqueues_match_cpu_group() -> bool {
+    let ctx = context();
+    if ctx.scheduler.cpu_runqueue_count() != ctx.cpu_group.possible_cpu_count()
+        || !ctx.scheduler.possible_cpu_runqueues_ready(&ctx.cpu_group)
+        || !ctx.scheduler.boot_runqueue_matches_metadata()
+    {
+        return false;
+    }
+
+    let mut logical_id = 0usize;
+    while logical_id < ctx.cpu_group.possible_cpu_count() {
+        let Some(runqueue) = ctx.scheduler.cpu_runqueue(logical_id) else {
+            return false;
+        };
+        let Some(cpu) = ctx.cpu_group.cpu(logical_id) else {
+            return false;
+        };
+        let Some(cpu_ref) = ctx.cpu_group.possible_cpu_ref_at(logical_id) else {
+            return false;
+        };
+        if runqueue.state() != State::Ready
+            || runqueue.cpu_ref() != cpu_ref
+            || runqueue.cpu_ref() != cpu.cpu_ref()
+            || runqueue.cpu_id() != logical_id
+            || runqueue.cpu_hartid() != cpu.hartid()
+            || !runqueue.class_queues_ready()
+            || !runqueue.attached_to_root_domain()
+            || runqueue.balance_push_enabled()
+            || !ctx
+                .scheduler
+                .default_root_domain()
+                .covers_cpu_ref(runqueue.cpu_ref())
+        {
+            return false;
+        }
+        if logical_id == 0 {
+            if !runqueue.is_boot_backed()
+                || runqueue.cpu_ref() != ctx.scheduler.boot_runqueue().cpu_ref()
+                || runqueue.cpu_hartid() != ctx.scheduler.boot_runqueue().cpu_hartid()
+            {
+                return false;
+            }
+        } else if runqueue.is_boot_backed() {
+            return false;
+        }
+        logical_id += 1;
+    }
+
+    ctx.scheduler
+        .cpu_runqueue(ctx.cpu_group.possible_cpu_count())
+        .is_none()
 }

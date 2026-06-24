@@ -1,5 +1,5 @@
 use super::{
-    cpu::CpuRef,
+    cpu::{CpuRef, MAX_CPUS},
     cpu_control::{CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
     cpu_group::CpuGroup,
     default_sched_root_domain::DefaultSchedRootDomain,
@@ -29,6 +29,8 @@ pub struct Scheduler {
     boot_runqueue: BootRunQueue,
     boot_idle_task: BootIdleTask,
     boot_idle_preemption: PreemptionControl,
+    cpu_runqueues: [CpuRunQueueMetadata; MAX_CPUS],
+    cpu_runqueue_count: usize,
     scheduler_running: bool,
     selected_runqueue_task_id: usize,
     schedule_passes: usize,
@@ -79,6 +81,8 @@ impl Scheduler {
             boot_runqueue: BootRunQueue::new(),
             boot_idle_task: BootIdleTask::new(),
             boot_idle_preemption: PreemptionControl::new(),
+            cpu_runqueues: [const { CpuRunQueueMetadata::invalid() }; MAX_CPUS],
+            cpu_runqueue_count: 0,
             scheduler_running: false,
             selected_runqueue_task_id: usize::MAX,
             schedule_passes: 0,
@@ -143,6 +147,70 @@ impl Scheduler {
 
     pub const fn boot_idle_preemption(&self) -> &PreemptionControl {
         &self.boot_idle_preemption
+    }
+
+    pub const fn cpu_runqueue_count(&self) -> usize {
+        self.cpu_runqueue_count
+    }
+
+    pub fn cpu_runqueue(&self, logical_id: usize) -> Option<CpuRunQueueView> {
+        if logical_id < self.cpu_runqueue_count {
+            self.cpu_runqueues[logical_id].view()
+        } else {
+            None
+        }
+    }
+
+    pub fn possible_cpu_runqueues_ready(&self, cpu_group: &CpuGroup) -> bool {
+        if cpu_group.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
+            || !self
+                .default_root_domain
+                .covers_cpu_group_possible(cpu_group)
+            || self.cpu_runqueue_count == 0
+            || self.cpu_runqueue_count != cpu_group.possible_cpu_count()
+        {
+            return false;
+        }
+
+        let mut logical_id = 0usize;
+        while logical_id < self.cpu_runqueue_count {
+            let Some(runqueue) = self.cpu_runqueue(logical_id) else {
+                return false;
+            };
+            let Some(cpu_ref) = cpu_group.possible_cpu_ref_at(logical_id) else {
+                return false;
+            };
+            if runqueue.state() != State::Ready
+                || runqueue.cpu_ref() != cpu_ref
+                || runqueue.cpu_id() != logical_id
+                || !runqueue.class_queues_ready()
+                || !runqueue.attached_to_root_domain()
+                || runqueue.balance_push_enabled()
+                || !self.default_root_domain.covers_cpu_ref(cpu_ref)
+            {
+                return false;
+            }
+            if logical_id == 0 && !self.boot_runqueue_matches_metadata() {
+                return false;
+            }
+            logical_id += 1;
+        }
+
+        self.cpu_runqueue(self.cpu_runqueue_count).is_none()
+    }
+
+    pub fn boot_runqueue_matches_metadata(&self) -> bool {
+        let Some(runqueue) = self.cpu_runqueue(0) else {
+            return false;
+        };
+        self.boot_runqueue.state() == State::Ready
+            && runqueue.is_boot_backed()
+            && runqueue.cpu_ref() == self.boot_runqueue.cpu_ref()
+            && runqueue.cpu_hartid() == self.boot_runqueue.cpu_hartid()
+            && runqueue.class_queues_ready() == self.boot_runqueue.class_queues_ready()
+            && runqueue.attached_to_root_domain() == self.boot_runqueue.attached_to_root_domain()
+            && runqueue.balance_push_enabled() == self.boot_runqueue.balance_push_enabled()
     }
 
     pub fn boot_idle_preemption_mut(&mut self) -> &mut PreemptionControl {
@@ -379,6 +447,7 @@ impl Scheduler {
 
         self.boot_runqueue
             .setup(cpu_group, per_cpu_storage, &self.default_root_domain)?;
+        self.setup_cpu_runqueue_metadata(cpu_group)?;
         self.boot_idle_task
             .setup(init_task, init_mm, &self.boot_runqueue, cpu_group)?;
         self.boot_idle_preemption.setup_disabled(init_task)?;
@@ -994,6 +1063,8 @@ impl Scheduler {
             && self.boot_idle_task.state() == State::Ready
             && self.boot_idle_preemption.state() == State::Ready
             && self.boot_idle_preemption.disabled()
+            && self.possible_cpu_runqueues_ready(cpu_group)
+            && self.boot_runqueue_matches_metadata()
             && self.boot_runqueue.cpu_ref().is_boot_cpu()
             && cpu_group
                 .boot_cpu()
@@ -1007,6 +1078,44 @@ impl Scheduler {
                 .covers_cpu_ref(self.boot_runqueue.cpu_ref())
             && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()
             && self.boot_runqueue.idle_task_id() == self.boot_idle_task.task_id()
+    }
+
+    fn setup_cpu_runqueue_metadata(&mut self, cpu_group: &CpuGroup) -> EventResult {
+        if cpu_group.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
+            || !self
+                .default_root_domain
+                .covers_cpu_group_possible(cpu_group)
+            || self.boot_runqueue.state() != State::Ready
+        {
+            return self.failed_setup();
+        }
+
+        self.cpu_runqueues = [const { CpuRunQueueMetadata::invalid() }; MAX_CPUS];
+        self.cpu_runqueue_count = 0;
+
+        let mut logical_id = 0usize;
+        while logical_id < cpu_group.possible_cpu_count() {
+            let Some(cpu) = cpu_group.cpu(logical_id) else {
+                return self.failed_setup();
+            };
+            let Some(cpu_ref) = cpu_group.possible_cpu_ref_at(logical_id) else {
+                return self.failed_setup();
+            };
+            if cpu.cpu_ref() != cpu_ref || !self.default_root_domain.covers_cpu_ref(cpu_ref) {
+                return self.failed_setup();
+            }
+
+            self.cpu_runqueues[logical_id] =
+                CpuRunQueueMetadata::ready(cpu_ref, cpu.hartid(), cpu_ref.is_boot_cpu());
+            self.cpu_runqueue_count += 1;
+            logical_id += 1;
+        }
+
+        if !self.possible_cpu_runqueues_ready(cpu_group) {
+            return self.failed_setup();
+        }
+        Ok(())
     }
 }
 
@@ -1035,6 +1144,104 @@ fn trace_switch_to(
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CurrentRunQueueRef {
     BootRunQueue,
+}
+
+#[derive(Clone, Copy)]
+struct CpuRunQueueMetadata {
+    state: State,
+    cpu_ref: CpuRef,
+    cpu_hartid: usize,
+    class_queues_ready: bool,
+    attached_to_root_domain: bool,
+    balance_push_enabled: bool,
+    boot_backed: bool,
+}
+
+impl CpuRunQueueMetadata {
+    const fn invalid() -> Self {
+        Self {
+            state: State::Base,
+            cpu_ref: CpuRef::invalid(),
+            cpu_hartid: usize::MAX,
+            class_queues_ready: false,
+            attached_to_root_domain: false,
+            balance_push_enabled: true,
+            boot_backed: false,
+        }
+    }
+
+    const fn ready(cpu_ref: CpuRef, cpu_hartid: usize, boot_backed: bool) -> Self {
+        Self {
+            state: State::Ready,
+            cpu_ref,
+            cpu_hartid,
+            class_queues_ready: true,
+            attached_to_root_domain: true,
+            balance_push_enabled: false,
+            boot_backed,
+        }
+    }
+
+    fn view(self) -> Option<CpuRunQueueView> {
+        if self.state == State::Ready {
+            Some(CpuRunQueueView {
+                state: self.state,
+                cpu_ref: self.cpu_ref,
+                cpu_hartid: self.cpu_hartid,
+                class_queues_ready: self.class_queues_ready,
+                attached_to_root_domain: self.attached_to_root_domain,
+                balance_push_enabled: self.balance_push_enabled,
+                boot_backed: self.boot_backed,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CpuRunQueueView {
+    state: State,
+    cpu_ref: CpuRef,
+    cpu_hartid: usize,
+    class_queues_ready: bool,
+    attached_to_root_domain: bool,
+    balance_push_enabled: bool,
+    boot_backed: bool,
+}
+
+impl CpuRunQueueView {
+    pub const fn state(self) -> State {
+        self.state
+    }
+
+    pub const fn cpu_ref(self) -> CpuRef {
+        self.cpu_ref
+    }
+
+    pub const fn cpu_id(self) -> usize {
+        self.cpu_ref.logical_id()
+    }
+
+    pub const fn cpu_hartid(self) -> usize {
+        self.cpu_hartid
+    }
+
+    pub const fn class_queues_ready(self) -> bool {
+        self.class_queues_ready
+    }
+
+    pub const fn attached_to_root_domain(self) -> bool {
+        self.attached_to_root_domain
+    }
+
+    pub const fn balance_push_enabled(self) -> bool {
+        self.balance_push_enabled
+    }
+
+    pub const fn is_boot_backed(self) -> bool {
+        self.boot_backed
+    }
 }
 
 fn task_id_for_current_task_ref(task_ref: CurrentTaskRef) -> Option<usize> {
@@ -1287,6 +1494,10 @@ impl BootRunQueue {
 
     pub const fn cpu_ref(&self) -> CpuRef {
         self.cpu_ref
+    }
+
+    pub const fn cpu_hartid(&self) -> usize {
+        self.cpu_hartid
     }
 
     pub const fn curr_task_id(&self) -> usize {
