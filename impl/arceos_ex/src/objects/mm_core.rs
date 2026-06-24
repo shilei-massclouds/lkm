@@ -36,6 +36,7 @@ const KMALLOC_NULL: usize = 0;
 const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
 const MAX_NAMED_SLUB_CACHES: usize = 8;
+const PAGE_TABLE_LOCK_CACHE_OBJECT_SIZE: usize = core::mem::size_of::<usize>();
 pub const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
 const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
 const VMALLOC_RUNTIME_PAGE_SIZE: usize = 4096;
@@ -2183,6 +2184,10 @@ pub enum SlubState {
     Down,
     Partial,
     Up,
+    // Reserved for slab_sysfs_init()/SlubSubsystem.enable(); mm_core_init()
+    // and kmem_cache_init_late() must not advance to this boundary.
+    #[allow(dead_code)]
+    Full,
 }
 
 pub struct SlubSubsystem {
@@ -2619,7 +2624,11 @@ impl DynamicContainerRuntime {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum NamedSlubCacheKind {
+    PageTableLock,
+    VmapArea,
     MmStruct,
+    RadixTreeNode,
+    MapleNode,
 }
 
 #[derive(Clone, Copy)]
@@ -3241,7 +3250,7 @@ impl PageTableCaches {
 
     pub fn setup(
         &mut self,
-        slub_subsystem: &SlubSubsystem,
+        slub_subsystem: &mut SlubSubsystem,
         page_allocator: &PageAllocator,
         page_metadata_map: &PageMetadataMap,
         config: &Config,
@@ -3421,6 +3430,8 @@ impl PageTableCaches {
 
 pub struct PageTableLockCache {
     lifecycle: Lifecycle,
+    registered_in_slub_registry: bool,
+    object_size: usize,
     page_ptl_cache_created: bool,
 }
 
@@ -3428,6 +3439,8 @@ impl PageTableLockCache {
     const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            registered_in_slub_registry: false,
+            object_size: 0,
             page_ptl_cache_created: false,
         }
     }
@@ -3440,7 +3453,15 @@ impl PageTableLockCache {
         self.page_ptl_cache_created
     }
 
-    fn setup(&mut self, slub_subsystem: &SlubSubsystem) -> EventResult {
+    pub const fn registered_in_slub_registry(&self) -> bool {
+        self.registered_in_slub_registry
+    }
+
+    pub const fn object_size(&self) -> usize {
+        self.object_size
+    }
+
+    fn setup(&mut self, slub_subsystem: &mut SlubSubsystem) -> EventResult {
         if self.lifecycle.state() != State::Base || slub_subsystem.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -3450,6 +3471,32 @@ impl PageTableLockCache {
             );
         }
 
+        let Some(cache) = slub_subsystem.register_named_cache(
+            NamedSlubCacheKind::PageTableLock,
+            PAGE_TABLE_LOCK_CACHE_OBJECT_SIZE,
+            0,
+            0,
+        ) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        if cache.kind() != NamedSlubCacheKind::PageTableLock
+            || cache.object_size() != PAGE_TABLE_LOCK_CACHE_OBJECT_SIZE
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.registered_in_slub_registry = true;
+        self.object_size = PAGE_TABLE_LOCK_CACHE_OBJECT_SIZE;
         self.page_ptl_cache_created = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -3869,7 +3916,7 @@ impl VmallocAllocator {
 
     pub fn setup(
         &mut self,
-        slub_subsystem: &SlubSubsystem,
+        slub_subsystem: &mut SlubSubsystem,
         page_table_caches: &PageTableCaches,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
@@ -4135,12 +4182,16 @@ impl VmallocAllocator {
 
 pub struct VmapAreaCache {
     lifecycle: Lifecycle,
+    registered_in_slub_registry: bool,
+    object_size: usize,
 }
 
 impl VmapAreaCache {
     const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            registered_in_slub_registry: false,
+            object_size: 0,
         }
     }
 
@@ -4148,7 +4199,15 @@ impl VmapAreaCache {
         self.lifecycle.state()
     }
 
-    fn setup(&mut self, slub_subsystem: &SlubSubsystem) -> EventResult {
+    pub const fn registered_in_slub_registry(&self) -> bool {
+        self.registered_in_slub_registry
+    }
+
+    pub const fn object_size(&self) -> usize {
+        self.object_size
+    }
+
+    fn setup(&mut self, slub_subsystem: &mut SlubSubsystem) -> EventResult {
         if self.lifecycle.state() != State::Base || slub_subsystem.state() != State::Ready {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -4158,6 +4217,28 @@ impl VmapAreaCache {
             );
         }
 
+        let object_size = core::mem::size_of::<VmapArea>();
+        let Some(cache) =
+            slub_subsystem.register_named_cache(NamedSlubCacheKind::VmapArea, object_size, 0, 0)
+        else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        if cache.kind() != NamedSlubCacheKind::VmapArea || cache.object_size() != object_size {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.registered_in_slub_registry = true;
+        self.object_size = object_size;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,

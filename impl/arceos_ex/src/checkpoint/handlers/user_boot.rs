@@ -4,12 +4,14 @@ use crate::{
         kunit::Sink,
     },
     context::Context,
-    objects::{
-        files::{FdRef, FileBackendKind},
-        state::State,
-        user_boot::{ElfError, ElfObject, USER_INIT_EXPECTED_MESSAGE},
-    },
+    objects::user_boot::{ElfError, ElfObject, USER_INIT_EXPECTED_MESSAGE},
     trace::Checkpoint,
+};
+
+#[cfg(app_user_boot)]
+use crate::objects::{
+    files::{FdRef, FileBackendKind},
+    state::State,
 };
 
 const SCOPE: &[Checkpoint] = &[
@@ -42,7 +44,7 @@ const SCOPE: &[Checkpoint] = &[
 #[cfg(app_user_boot)]
 pub const KUNIT_CASE_COUNT: usize = 19;
 #[cfg(not(app_user_boot))]
-pub const KUNIT_CASE_COUNT: usize = 6;
+pub const KUNIT_CASE_COUNT: usize = 5;
 
 pub const HANDLER: Handler = Handler {
     name: "user_boot.elf_parser",
@@ -52,6 +54,9 @@ pub const HANDLER: Handler = Handler {
 };
 
 fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> CheckpointOutcome {
+    #[cfg(not(app_user_boot))]
+    let _ = ctx;
+
     let total = super::kunit_case_count();
     match checkpoint {
         Checkpoint::PayloadPhaseOnline => {

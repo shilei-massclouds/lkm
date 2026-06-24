@@ -113,7 +113,7 @@
   <g transform="translate(0 1148)">
     <circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">11</text>
     <rect x="292" y="204" width="876" height="88" rx="10" class="box formal"/>
-    <text x="320" y="234" class="line1">SlubAllocator.setup(): kmem_cache_init()</text>
+    <text x="320" y="234" class="line1">SlubSubsystem.setup(): kmem_cache_init()</text>
     <text x="320" y="264" class="line2">建立 SlubCacheRegistry、KmallocCaches 和 SLUB CPU hotplug step</text>
   </g>
 

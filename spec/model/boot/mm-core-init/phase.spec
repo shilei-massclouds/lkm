@@ -786,10 +786,15 @@ object PageTableLockCache: MemoryObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
+                    SlubCacheRegistry.state == State::Ready;
                 }
 
                 ensures {
                     page_table_lock_cache_ready(PageTableLockCache, SlubSubsystem);
+                    page_table_lock_cache_registered_in_slub_registry(
+                        PageTableLockCache,
+                        SlubCacheRegistry
+                    );
                     page_ptl_cache_created(PageTableLockCache);
                 }
             }
@@ -799,6 +804,10 @@ object PageTableLockCache: MemoryObject {
     state State::Ready {
         invariant {
             page_table_lock_cache_ready(PageTableLockCache, SlubSubsystem);
+            page_table_lock_cache_registered_in_slub_registry(
+                PageTableLockCache,
+                SlubCacheRegistry
+            );
             page_ptl_cache_created(PageTableLockCache);
         }
     }
@@ -863,10 +872,15 @@ object VmapAreaCache: MemoryObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
+                    SlubCacheRegistry.state == State::Ready;
                 }
 
                 ensures {
                     vmap_area_cache_ready(VmapAreaCache, SlubSubsystem);
+                    vmap_area_cache_registered_in_slub_registry(
+                        VmapAreaCache,
+                        SlubCacheRegistry
+                    );
                 }
             }
         }
@@ -875,6 +889,7 @@ object VmapAreaCache: MemoryObject {
     state State::Ready {
         invariant {
             vmap_area_cache_ready(VmapAreaCache, SlubSubsystem);
+            vmap_area_cache_registered_in_slub_registry(VmapAreaCache, SlubCacheRegistry);
         }
     }
 }

@@ -47,9 +47,14 @@ run_with_log "$tmpdir/kunit.log" "$make_cmd" -C "$kernel_dir" run APP="$kunit_ap
 kunit_rc=$?
 kunit_total=$(sed -n 's/.*1\.\.\([0-9][0-9]*\).*/\1/p' "$tmpdir/kunit.log" | awk 'BEGIN { max = 0 } { if ($1 > max) max = $1 } END { print max }')
 kunit_fail=$(sed -n 's/.*not ok [0-9][0-9]* .*/x/p' "$tmpdir/kunit.log" | wc -l)
+kunit_cases=$(awk '/^  (not )?ok [0-9]+ / { count++ } END { print count + 0 }' "$tmpdir/kunit.log")
 if [ "$kunit_rc" -ne 0 ] && [ "$kunit_total" -eq 0 ]; then
     kunit_total=1
     kunit_fail=1
+fi
+if [ "$kunit_rc" -eq 0 ] && [ "$kunit_total" -ne 0 ] && [ "$kunit_cases" -ne "$kunit_total" ]; then
+    printf 'KUnit plan mismatch: plan=%s cases=%s\n' "$kunit_total" "$kunit_cases"
+    kunit_fail=$((kunit_fail + 1))
 fi
 kunit_pass=$((kunit_total - kunit_fail))
 if [ "$kunit_pass" -lt 0 ]; then

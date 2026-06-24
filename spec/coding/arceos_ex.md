@@ -1223,6 +1223,14 @@ caller-owned allocation reference、线性映射读写、kzalloc 返回前清零
 和后续 named caches，不能再建立与 registry 并列的第二套 cache 所有权。
 `KmallocCaches` 只能实现为 size/size-class 到已注册 kmalloc `SlubCache` 实例的引用或索引视图，不得拥有这些 cache
 实例，也不得维护一套与 `SlubCacheRegistry` 并列的实例生命周期。
+凡是规格中命名为某个 Linux `kmem_cache` 的阶段对象，都只能作为该 named `SlubCache` 实例的阶段 owner/引用持有者；
+实例所有权仍归 `SlubCacheRegistry`。当前实现必须至少把 `"page->ptl"`、`"vmap_area"`、`"mm_struct"`、
+radix tree node cache 和 maple node cache 注册为 `SlubCacheRegistry` 中的 named cache，并在各自阶段 ready invariant
+中确认 registry 可枚举该 kind。
+实现中的 `SlubState` 必须保留 `Down`、`Partial`、`Up`、`Full` 四个边界，分别对应 Linux `slab_state` 到规格生命周期的
+`Base`、`Prepared`、`Ready`、`Online` 映射。当前 `mm_core_init()` 只能推进到 `Up/Ready`；
+`kmem_cache_init_late()` 只能通过 `SlubSubsystem.setup_flush_workqueue()` 记录 flush workqueue 事实，不得写入 `Full`；
+`SlubSubsystem.enable()` / `Full/Online` 留给后续 `slab_sysfs_init()` 类 late initcall。
 
 当前第一轮 `arceos_ex` SLUB/kmalloc 实现只要求 Linux-like page-backed slab：`KmallocCaches` 使用固定默认 size classes
 `8/16/32/64/128/256/512/1024/2048/4096/8192`，请求 size 通过向上取整选择 size class；当某个 cache 没有空闲对象时，必须通过
@@ -1392,7 +1400,8 @@ save/restore 计数配平。
 boot runqueue，但代码和注释必须把该绑定标成 UP 临时特化；未来 SMP 泛化时应替换为基于 selected/current runqueue ref 的
 `cpu_of(...)` 解析。
 
-`RadixTree.setup()` 和 `MapleTree.setup()` 只建立 node cache 与全局分配基础。具体 radix tree、IDR、XArray、maple tree
+`RadixTree.setup()` 和 `MapleTree.setup()` 只建立 node cache 与全局分配基础；这两个 node cache 必须作为
+`SlubCacheRegistry` 拥有的 named `SlubCache` 实例注册。具体 radix tree、IDR、XArray、maple tree
 实例由后续使用者对象拥有，不在本阶段创建。
 
 `Workqueue.preset()` 只覆盖 `workqueue_init_early()`：system workqueue、worker pool 壳、unbound cpumask、BH pool 和属性缓存。

@@ -794,7 +794,10 @@ type ArceosExMmCoreInitCodingMust {
          * kmem_cache/kmem_cache_node, kmalloc size-class caches, and later
          * named caches. KmallocCaches is only a size-class reference/index
          * view over registered SlubCache instances; it must not own a second
-         * set of cache instances.
+         * set of cache instances. Named phase objects such as page->ptl,
+         * vmap_area, mm_struct, radix tree node, and maple node caches must
+         * register their underlying SlubCache instance in SlubCacheRegistry
+         * instead of keeping only private ready flags.
          */
         arceos_ex_must_slub_subsystem_be_single_facade_not_cache_instance();
         arceos_ex_must_slub_cache_type_name_be_slub_cache();

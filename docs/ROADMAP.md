@@ -87,6 +87,14 @@
 4. **P0 已完成首轮：复核 CorePrepare 剩余同步/并发面是否收口**。已完成 CorePrepare 已审计对象中的本地中断、抢占、自旋锁、Mutex、读写锁、RCU、per-cpu 同步、TLB/cache flush、CPU bring-up 同步量首轮复核；当前未保留未分类 P0 缺口。
 5. **P0 后续：进入下一个启动子阶段**。CorePrepare 收口后切换到下一个 boot 子阶段，继续按“先 Linux 边界、再 model/coding、最后 impl 验证”的顺序审计。
 
+### 当前执行计划：SLUB 收口后续计划
+
+1. **P0 已完成：清理 trace、静态 SVG 和文档中的旧 SLUB facade 命名**。已把旧 facade 命名统一收敛为 `SlubSubsystem`，并用 `make verify REPORT=graph` 重新生成带 `state,event` 注释的 `tools/out/trace/main.trace.svg`。`main.trace.svg` 已包含 annotation layer，且 `spec/pic/**`、`spec/charter/**`、`docs/ROADMAP.md` 中的 SLUB facade 均使用 `SlubSubsystem`。
+2. **P0 已完成复核：明确 `SlubSubsystem` 生命周期映射**。`preset/setup/enable` 分别对应 Linux `slab_state` 的 `DOWN -> PARTIAL -> UP -> FULL` 边界；当前 `mm_core_init()` 只推进到 `Ready/UP`，`kmem_cache_init_late()` 只建立 flush workqueue 事实，不推进 `Online/FULL`。实现中的 `SlubState` 已保留 `Full` 边界但不写入，`slab_sysfs_init()` / `SlubSubsystem.enable()` 保持后续项。
+3. **P0 已完成首轮：收敛 named `SlubCache` 实例归属**。已以 `MmStructCache` 为参照，把 `PageTableLockCache("page->ptl")`、`VmapAreaCache("vmap_area")`、`RadixTree` node cache 和 `MapleTree` node cache 都改为通过 `SlubSubsystem.register_named_cache()` 注册到 `SlubCacheRegistry`，阶段对象只保存自身 kind/object-size 绑定和 ready fact；formal model、coding 约束、phase ready invariant 与 smoke 检查已同步。`process_prepare` 中尚未展开为具体阶段对象的 `vm_area_struct`、`vma_lock_cachep` 等专用 cache 继续保留在后续 proc/process-memory 计划，不在本轮提前塞入 `MmStructCache`。
+4. **P1 已完成：收敛 KUnit KTAP 总数与动态 checkpoint 输出**。已修正默认 `APP=hello` KUnit 下 `user_boot` handler 的 fixture case count，限制 `virtio_blk` live-read submitted/completed 只把第一组动态 checkpoint 输出为 KTAP case，并让 `tools/test_summary.sh` 检测 subtest plan 与实际 case 数不一致。当前 `make test-kunit` 输出 `1..23` 且结束于 `ok 23`，`make test` summary 为 `KUnit checkpoints total=23 pass=23 fail=0`、overall `74/74`。
+5. **P1 待办：继续下一个 `mm_core_init()` gap 审计**。优先处理仍影响对象归属、生命周期边界或 Linux 对齐事实的缺口；并发原语细节只有在具体对象消费路径需要时再展开。
+
 ### 暂缓讨论：event/action 上下文需求声明
 
 - **P2 待讨论：为对象 event/action 定义上下文需求或能力声明机制**。该项暂不作为当前启动阶段审计的前置任务；它与 `within Context { ... }` 的边界还需要继续讨论，避免形成两套重复或不协调的上下文语义。近期仍以 `within Context` 和 guard 明确表达上下文来源；待 Mutex、RwLock、RCU、LocalInterruptControl 等 guard 规格实践稳定后，再回看是否需要 `requires_guard` / `requires_context` / `requires_capability` 等正式形态，用于表达 event/action 对当前 Effective Context 的只读检查需求。
@@ -342,7 +350,7 @@ PLIC 收尾后的后续策略：
 | arceos_ex | `EntryPreludePhase` 最小闭环 | 已覆盖 head prefix、BootArgs、RootStream、KernelImage、BootCPU/CpuGroup、InitTask/InitStack、RawDtb、FixMap、TrampolineVm、EarlyVm 和 VM 切换。 |
 | arceos_ex | `EntrySuccessorPhase` 最小闭环 | 已覆盖 EarlyDtb、PlatformCpuInfo、PhysicalMemory、CpuIdMap、InterruptStream、BootCPU setup/enable、PrintkBuffer、CommandLine/KernelCmdline、EarlyParam、SBI、EarlyCon、MemBlock、InitMM、EarlyIoremap 和 SwapperVm。 |
 | arceos_ex | `CorePreparePhase` 最小骨架 | 已按规格插入 PayloadPhase 前，覆盖 DeviceTree、Zones、ResourceTree、CpuGroup.setup_smp、CacheBlockInfo、CpuCapabilities、CommandLine saved/static 视图、PerCpuStorage、CpuHotplugState、Params、BootParam、PayloadParam、Randomness、PrintkBuffer.setup、ExceptionTable 和 ExceptionStream.setup。 |
-| arceos_ex | `MmCoreInitPhase` 最小闭环 | 已覆盖 MemoryTopology、BootMemoryNode/BootZoneSet/BootZonelistSet、PageAllocator、MemoryDebugHardening、StackDepot、Swiotlb、SlubAllocator、KernelGlobalAllocator、DynamicContainerRuntime、PageTableCaches、VmallocAllocator 和 MmStructCache。 |
+| arceos_ex | `MmCoreInitPhase` 最小闭环 | 已覆盖 MemoryTopology、MemoryNode/ZoneSet/ZonelistSet、PageAllocator、MemoryDebugHardening、StackDepot、Swiotlb、SlubSubsystem、KernelGlobalAllocator、DynamicContainerRuntime、PageTableCaches、VmallocAllocator 和 MmStructCache。 |
 | arceos_ex | `SchedInitPhase` 最小闭环 | 已正式落到 `spec/model/boot/sched-init/` 和 `impl/arceos_ex/src/phases/boot/sched_init.rs`，覆盖 Scheduler、BootRunQueue、BootIdleTask、RadixTree、MapleTree、Workqueue.Prepared、Softirq.Prepared、RcuCore 和 `Scheduler.schedule_preempt_disabled()` smoke。 |
 | arceos_ex | `IrqTimeInitPhase` 最小闭环 | 已正式落到 `spec/model/interrupt/irq-time-init/` 和 `impl/arceos_ex/src/phases/interrupt/irq_time_init.rs`，覆盖 IrqController、IrqDispatchTree、Tick/TimerWheel/HrtimerCore、Timekeeper、RiscvTimerProvider、Softirq.Ready、Randomness.Ready、SbiIpi、SmpCallFunction，并在阶段末尾打开 boot CPU 本地中断，新增 timer interrupt smoke。 |
 | arceos_ex | `IrqOpenPreparePhase` 最小闭环 | 已正式落到 `spec/model/interrupt/irq-open-prepare/` 和 `impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs`，覆盖 SLUB late flush workqueue、Console.Prepared、SchedClock.Ready、DelayLoop.Ready 和中断打开后的 trimmed/deferred 路径。 |

@@ -336,12 +336,17 @@ object RadixTree: MemoryObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
+                    SlubCacheRegistry.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                     CpuHotplugState.state == State::Ready;
                 }
 
                 ensures {
                     radix_tree_node_cache_ready(RadixTree, SlubSubsystem);
+                    radix_tree_node_cache_registered_in_slub_registry(
+                        RadixTree,
+                        SlubCacheRegistry
+                    );
                     radix_tree_cpuhp_dead_step_registered(RadixTree, CpuHotplugState);
                     radix_tree_node_api_ready(RadixTree);
                 }
@@ -352,6 +357,7 @@ object RadixTree: MemoryObject {
     state State::Ready {
         invariant {
             radix_tree_node_cache_ready(RadixTree, SlubSubsystem);
+            radix_tree_node_cache_registered_in_slub_registry(RadixTree, SlubCacheRegistry);
             radix_tree_cpuhp_dead_step_registered(RadixTree, CpuHotplugState);
             radix_tree_node_api_ready(RadixTree);
         }
@@ -369,11 +375,16 @@ object MapleTree: MemoryObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     SlubSubsystem.state == State::Ready;
+                    SlubCacheRegistry.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                 }
 
                 ensures {
                     maple_tree_node_cache_ready(MapleTree, SlubSubsystem);
+                    maple_tree_node_cache_registered_in_slub_registry(
+                        MapleTree,
+                        SlubCacheRegistry
+                    );
                     maple_tree_node_api_ready(MapleTree);
                 }
             }
@@ -383,6 +394,7 @@ object MapleTree: MemoryObject {
     state State::Ready {
         invariant {
             maple_tree_node_cache_ready(MapleTree, SlubSubsystem);
+            maple_tree_node_cache_registered_in_slub_registry(MapleTree, SlubCacheRegistry);
             maple_tree_node_api_ready(MapleTree);
         }
     }

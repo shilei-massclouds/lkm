@@ -2,7 +2,7 @@ use crate::{
     apps::smoke::SmokeResult,
     context::{context, Context},
     objects::{
-        mm_core::{GfpFlags, KmallocAllocRef, SlubState},
+        mm_core::{GfpFlags, KmallocAllocRef, NamedSlubCacheKind, SlubState},
         printk,
         state::State,
     },
@@ -67,8 +67,18 @@ fn check_slub_facts(ctx: &Context) -> Option<()> {
         || !registry.boot_caches_registered()
         || !registry.global_list_ready()
         || registry.cache_count() < 2
+        || registry.named_cache_count() < 5
     {
         printk::write_str("slub cache registry invalid\n");
+        return None;
+    }
+    if !registry.has_named_cache(NamedSlubCacheKind::PageTableLock)
+        || !registry.has_named_cache(NamedSlubCacheKind::VmapArea)
+        || !registry.has_named_cache(NamedSlubCacheKind::MmStruct)
+        || !registry.has_named_cache(NamedSlubCacheKind::RadixTreeNode)
+        || !registry.has_named_cache(NamedSlubCacheKind::MapleNode)
+    {
+        printk::write_str("named slub cache registry entries missing\n");
         return None;
     }
     if kmalloc.state() != State::Ready

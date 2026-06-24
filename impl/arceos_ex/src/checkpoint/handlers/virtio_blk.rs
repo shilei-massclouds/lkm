@@ -156,6 +156,17 @@ fn run_live_read_trace(
     sink: &mut dyn Sink,
     total: usize,
 ) -> CheckpointOutcome {
+    if checkpoint == Checkpoint::VirtioBlkLiveReadSubmitted
+        && virtio_blk::live_read_submitted_checkpoints() != 1
+    {
+        return CheckpointOutcome::Continue;
+    }
+    if checkpoint == Checkpoint::VirtioBlkLiveReadCompleted
+        && virtio_blk::live_read_completed_checkpoints() != 1
+    {
+        return CheckpointOutcome::Continue;
+    }
+
     let name = if checkpoint == Checkpoint::VirtioBlkLiveReadSubmitted {
         "virtio_blk.live_read_submitted"
     } else {

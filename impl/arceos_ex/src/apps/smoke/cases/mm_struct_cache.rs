@@ -34,6 +34,14 @@ pub fn run() -> SmokeResult {
         printk::write_str("mm_struct named slub cache missing\n");
         return SmokeResult::Failed;
     };
+    if !registry.has_named_cache(NamedSlubCacheKind::PageTableLock)
+        || !registry.has_named_cache(NamedSlubCacheKind::VmapArea)
+        || !registry.has_named_cache(NamedSlubCacheKind::RadixTreeNode)
+        || !registry.has_named_cache(NamedSlubCacheKind::MapleNode)
+    {
+        printk::write_str("companion named slub caches missing\n");
+        return SmokeResult::Failed;
+    }
     if named_cache.kind() != NamedSlubCacheKind::MmStruct
         || named_cache.object_size() != mm_cache.object_size()
         || named_cache.usercopy_offset() != mm_cache.usercopy_offset()

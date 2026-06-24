@@ -1,7 +1,9 @@
 use crate::{
     context::Context,
     objects::{
-        earlycon, printk,
+        earlycon,
+        mm_core::NamedSlubCacheKind,
+        printk,
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
@@ -40,8 +42,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.scheduler.enable()?;
     checkpoint_irqs_disabled()?;
     ctx.radix_tree
-        .setup(&ctx.slub_subsystem, &ctx.cpu_hotplug_state)?;
-    ctx.maple_tree.setup(&ctx.slub_subsystem)?;
+        .setup(&mut ctx.slub_subsystem, &ctx.cpu_hotplug_state)?;
+    ctx.maple_tree.setup(&mut ctx.slub_subsystem)?;
     ctx.workqueue.preset(
         &ctx.page_allocator,
         &ctx.slub_subsystem,
@@ -115,10 +117,26 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.boot_cpu_current_task.current_is_boot_idle()
         && ctx.radix_tree.state() == State::Ready
         && ctx.radix_tree.node_cache_ready()
+        && ctx.radix_tree.registered_in_slub_registry()
+        && ctx.radix_tree.node_cache_object_size() != 0
+        && ctx
+            .slub_subsystem
+            .cache_registry()
+            .named_cache(NamedSlubCacheKind::RadixTreeNode)
+            .map(|cache| cache.object_size() == ctx.radix_tree.node_cache_object_size())
+            == Some(true)
         && ctx.radix_tree.cpuhp_step() != 0
         && ctx.radix_tree.node_api_ready()
         && ctx.maple_tree.state() == State::Ready
         && ctx.maple_tree.node_cache_ready()
+        && ctx.maple_tree.registered_in_slub_registry()
+        && ctx.maple_tree.node_cache_object_size() != 0
+        && ctx
+            .slub_subsystem
+            .cache_registry()
+            .named_cache(NamedSlubCacheKind::MapleNode)
+            .map(|cache| cache.object_size() == ctx.maple_tree.node_cache_object_size())
+            == Some(true)
         && ctx.maple_tree.node_api_ready()
         && ctx.workqueue.state() == State::Prepared
         && ctx.workqueue.system_queues_ready()

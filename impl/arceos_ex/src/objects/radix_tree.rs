@@ -1,15 +1,18 @@
 use super::{
     cpu_hotplug::CpuHotplugState,
-    mm_core::SlubSubsystem,
+    mm_core::{NamedSlubCacheKind, SlubSubsystem},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
 
 const RADIX_TREE_CPUHP_STEP: usize = 0x300;
+const RADIX_TREE_NODE_CACHE_OBJECT_SIZE: usize = core::mem::size_of::<usize>() * 8;
 
 pub struct RadixTree {
     lifecycle: Lifecycle,
     node_cache_ready: bool,
+    registered_in_slub_registry: bool,
+    node_cache_object_size: usize,
     cpuhp_step: usize,
     node_api_ready: bool,
 }
@@ -19,6 +22,8 @@ impl RadixTree {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             node_cache_ready: false,
+            registered_in_slub_registry: false,
+            node_cache_object_size: 0,
             cpuhp_step: 0,
             node_api_ready: false,
         }
@@ -32,6 +37,14 @@ impl RadixTree {
         self.node_cache_ready
     }
 
+    pub const fn registered_in_slub_registry(&self) -> bool {
+        self.registered_in_slub_registry
+    }
+
+    pub const fn node_cache_object_size(&self) -> usize {
+        self.node_cache_object_size
+    }
+
     pub const fn cpuhp_step(&self) -> usize {
         self.cpuhp_step
     }
@@ -42,7 +55,7 @@ impl RadixTree {
 
     pub fn setup(
         &mut self,
-        slub_subsystem: &SlubSubsystem,
+        slub_subsystem: &mut SlubSubsystem,
         cpu_hotplug_state: &CpuHotplugState,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
@@ -57,7 +70,33 @@ impl RadixTree {
             );
         }
 
+        let Some(cache) = slub_subsystem.register_named_cache(
+            NamedSlubCacheKind::RadixTreeNode,
+            RADIX_TREE_NODE_CACHE_OBJECT_SIZE,
+            0,
+            0,
+        ) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+        if cache.kind() != NamedSlubCacheKind::RadixTreeNode
+            || cache.object_size() != RADIX_TREE_NODE_CACHE_OBJECT_SIZE
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
         self.node_cache_ready = true;
+        self.registered_in_slub_registry = true;
+        self.node_cache_object_size = RADIX_TREE_NODE_CACHE_OBJECT_SIZE;
         self.cpuhp_step = RADIX_TREE_CPUHP_STEP;
         self.node_api_ready = true;
         self.lifecycle.transition(

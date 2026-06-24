@@ -61,7 +61,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.dynamic_container_runtime
         .setup(&ctx.kernel_global_allocator)?;
     ctx.page_table_caches.setup(
-        &ctx.slub_subsystem,
+        &mut ctx.slub_subsystem,
         &ctx.page_allocator,
         &ctx.page_metadata_map,
         &ctx.config,
@@ -70,7 +70,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.kernel_image,
     )?;
     ctx.vmalloc_allocator.setup(
-        &ctx.slub_subsystem,
+        &mut ctx.slub_subsystem,
         &ctx.page_table_caches,
         &ctx.per_cpu_storage,
     )?;
@@ -177,6 +177,14 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx
             .slub_subsystem
             .cache_registry()
+            .has_named_cache(NamedSlubCacheKind::PageTableLock)
+        && ctx
+            .slub_subsystem
+            .cache_registry()
+            .has_named_cache(NamedSlubCacheKind::VmapArea)
+        && ctx
+            .slub_subsystem
+            .cache_registry()
             .has_named_cache(NamedSlubCacheKind::MmStruct)
         && ctx.slub_subsystem.kmalloc_caches().state() == State::Ready
         && ctx.kernel_global_allocator.state() == State::Ready
@@ -199,8 +207,18 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
             .vmalloc_pgtable_dynamic_metadata_ready()
         && ctx.page_table_caches.lock_cache().state() == State::Ready
         && ctx.page_table_caches.lock_cache().page_ptl_cache_created()
+        && ctx
+            .page_table_caches
+            .lock_cache()
+            .registered_in_slub_registry()
+        && ctx.page_table_caches.lock_cache().object_size() != 0
         && ctx.vmalloc_allocator.state() == State::Ready
         && ctx.vmalloc_allocator.area_cache().state() == State::Ready
+        && ctx
+            .vmalloc_allocator
+            .area_cache()
+            .registered_in_slub_registry()
+        && ctx.vmalloc_allocator.area_cache().object_size() != 0
         && ctx.vmalloc_allocator.address_space().state() == State::Ready
         && ctx.vmalloc_allocator.node_set().state() == State::Ready
         && ctx.vmalloc_allocator.block_queues().state() == State::Ready
@@ -259,6 +277,18 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
                     && cache.usercopy_offset() == ctx.mm_struct_cache.usercopy_offset()
                     && cache.usercopy_size() == ctx.mm_struct_cache.usercopy_size()
             })
+            == Some(true)
+        && ctx
+            .slub_subsystem
+            .cache_registry()
+            .named_cache(NamedSlubCacheKind::PageTableLock)
+            .map(|cache| cache.object_size() == ctx.page_table_caches.lock_cache().object_size())
+            == Some(true)
+        && ctx
+            .slub_subsystem
+            .cache_registry()
+            .named_cache(NamedSlubCacheKind::VmapArea)
+            .map(|cache| cache.object_size() == ctx.vmalloc_allocator.area_cache().object_size())
             == Some(true)
         && ctx.mm_struct_cache.saved_auxv_usercopy_ready()
         && ctx.mm_struct_cache.vma_caches_deferred()
