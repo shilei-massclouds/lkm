@@ -188,6 +188,11 @@ pub struct Ioremap {
     noncached_attribute_deferred: bool,
     writecombine_attribute_deferred: bool,
     normal_memory_attribute_deferred: bool,
+    mapping_guard_contract_ready: bool,
+    unmapping_guard_contract_ready: bool,
+    mapping_sync_contract_ready: bool,
+    unmapping_flush_contract_ready: bool,
+    failure_rollback_contract_ready: bool,
 }
 
 impl Ioremap {
@@ -210,6 +215,11 @@ impl Ioremap {
             noncached_attribute_deferred: false,
             writecombine_attribute_deferred: false,
             normal_memory_attribute_deferred: false,
+            mapping_guard_contract_ready: false,
+            unmapping_guard_contract_ready: false,
+            mapping_sync_contract_ready: false,
+            unmapping_flush_contract_ready: false,
+            failure_rollback_contract_ready: false,
         }
     }
 
@@ -253,6 +263,26 @@ impl Ioremap {
         self.io_page_protection_ready
     }
 
+    pub const fn mapping_guard_contract_ready(&self) -> bool {
+        self.mapping_guard_contract_ready
+    }
+
+    pub const fn unmapping_guard_contract_ready(&self) -> bool {
+        self.unmapping_guard_contract_ready
+    }
+
+    pub const fn mapping_sync_contract_ready(&self) -> bool {
+        self.mapping_sync_contract_ready
+    }
+
+    pub const fn unmapping_flush_contract_ready(&self) -> bool {
+        self.unmapping_flush_contract_ready
+    }
+
+    pub const fn failure_rollback_contract_ready(&self) -> bool {
+        self.failure_rollback_contract_ready
+    }
+
     pub fn runtime_ready(&self) -> bool {
         self.lifecycle.state() == State::Ready && self.foundation_ready()
     }
@@ -273,6 +303,11 @@ impl Ioremap {
             && self.noncached_attribute_deferred
             && self.writecombine_attribute_deferred
             && self.normal_memory_attribute_deferred
+            && self.mapping_guard_contract_ready
+            && self.unmapping_guard_contract_ready
+            && self.mapping_sync_contract_ready
+            && self.unmapping_flush_contract_ready
+            && self.failure_rollback_contract_ready
     }
 
     pub fn setup(
@@ -314,6 +349,11 @@ impl Ioremap {
         self.noncached_attribute_deferred = true;
         self.writecombine_attribute_deferred = true;
         self.normal_memory_attribute_deferred = true;
+        self.mapping_guard_contract_ready = vmalloc_allocator.mapping_guard_contract_ready();
+        self.unmapping_guard_contract_ready = vmalloc_allocator.unmapping_guard_contract_ready();
+        self.mapping_sync_contract_ready = vmalloc_allocator.mapping_sync_contract_ready();
+        self.unmapping_flush_contract_ready = vmalloc_allocator.unmapping_flush_contract_ready();
+        self.failure_rollback_contract_ready = vmalloc_allocator.failure_rollback_contract_ready();
 
         if !self.foundation_ready() {
             return self.failed_setup();
@@ -430,7 +470,7 @@ impl Ioremap {
         let covered_size = size.checked_add(offset)?;
         let mapped_size = align_up(covered_size, page_size)?;
         let vmap_area = vmalloc_allocator.get_vm_area(mapped_size, VmapAreaFlags::VmIoremap)?;
-        let vmap_mapping = vmalloc_allocator.map_page_range(
+        let Some(vmap_mapping) = vmalloc_allocator.map_page_range(
             page_table_caches,
             page_allocator,
             page_metadata_map,
@@ -439,9 +479,16 @@ impl Ioremap {
             page_phys_base,
             mapped_size,
             PageProtection::IoMemory,
-        )?;
+        ) else {
+            let _ = vmalloc_allocator.free_vm_area(vmap_area);
+            return None;
+        };
         let virt_base = vmap_area.virt_base();
-        let membase = virt_base.checked_add(offset)?;
+        let Some(membase) = virt_base.checked_add(offset) else {
+            let _ = vmalloc_allocator.unmap_page_range(vmap_mapping);
+            let _ = vmalloc_allocator.free_vm_area(vmap_area);
+            return None;
+        };
         let mapping = IoMemoryMapping {
             owner,
             phys_base,
@@ -464,6 +511,8 @@ impl Ioremap {
             || !mapping.membase_cookie_ready()
             || !mapping.not_linear_direct_map()
         {
+            let _ = vmalloc_allocator.unmap_page_range(vmap_mapping);
+            let _ = vmalloc_allocator.free_vm_area(vmap_area);
             return None;
         }
 

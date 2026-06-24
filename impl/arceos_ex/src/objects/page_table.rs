@@ -432,6 +432,9 @@ pub fn map_page_range_runtime(
     let Some(covered) = round_up(mapped_bytes, page_size) else {
         return false;
     };
+    if phys_base.checked_add(covered).is_none() {
+        return false;
+    }
     if !range_within_install_range(tables, virt_start, covered) {
         return false;
     }

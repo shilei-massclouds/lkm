@@ -799,6 +799,7 @@ object VmapNodeSet: MemoryObject {
                     vmap_node_set_ready(VmapNodeSet, VmapAddressSpace);
                     vmap_node_partitions_address_space(VmapNodeSet, VmapAddressSpace);
                     vmap_addr_to_node_route_ready(VmapNodeSet);
+                    vmap_node_guard_contract_ready(VmapNodeSet);
                 }
             }
         }
@@ -809,6 +810,7 @@ object VmapNodeSet: MemoryObject {
             vmap_node_set_ready(VmapNodeSet, VmapAddressSpace);
             vmap_node_partitions_address_space(VmapNodeSet, VmapAddressSpace);
             vmap_addr_to_node_route_ready(VmapNodeSet);
+            vmap_node_guard_contract_ready(VmapNodeSet);
         }
     }
 }
@@ -861,6 +863,8 @@ object VfreeDeferredSet: MemoryObject {
                 ensures {
                     vfree_deferred_set_ready(VfreeDeferredSet, PerCpuStorage);
                     vfree_deferred_work_ready(VfreeDeferredSet);
+                    vfree_deferred_guard_contract_ready(VfreeDeferredSet);
+                    vfree_rcu_runtime_path_deferred(VfreeDeferredSet);
                 }
             }
         }
@@ -870,6 +874,8 @@ object VfreeDeferredSet: MemoryObject {
         invariant {
             vfree_deferred_set_ready(VfreeDeferredSet, PerCpuStorage);
             vfree_deferred_work_ready(VfreeDeferredSet);
+            vfree_deferred_guard_contract_ready(VfreeDeferredSet);
+            vfree_rcu_runtime_path_deferred(VfreeDeferredSet);
         }
     }
 }
@@ -917,6 +923,12 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_full_vmalloc_range_metadata_supported(VmallocAllocator, PageTableCaches);
                     vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
                     vmalloc_allocator_dynamic_record_storage_ready(VmallocAllocator);
+                    vmalloc_allocator_mapping_guard_contract_ready(VmallocAllocator);
+                    vmalloc_allocator_unmapping_guard_contract_ready(VmallocAllocator);
+                    vmalloc_allocator_mapping_sync_contract_ready(VmallocAllocator, SwapperVm);
+                    vmalloc_allocator_unmapping_flush_contract_ready(VmallocAllocator, SwapperVm);
+                    vmalloc_allocator_failure_rollback_contract_ready(VmallocAllocator);
+                    vmalloc_allocator_cross_cpu_vmalloc_flush_deferred(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
                 }
             }
@@ -948,6 +960,12 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_full_vmalloc_range_metadata_supported(VmallocAllocator, PageTableCaches);
             vmalloc_allocator_rejects_duplicate_area_mapping(VmallocAllocator);
             vmalloc_allocator_dynamic_record_storage_ready(VmallocAllocator);
+            vmalloc_allocator_mapping_guard_contract_ready(VmallocAllocator);
+            vmalloc_allocator_unmapping_guard_contract_ready(VmallocAllocator);
+            vmalloc_allocator_mapping_sync_contract_ready(VmallocAllocator, SwapperVm);
+            vmalloc_allocator_unmapping_flush_contract_ready(VmallocAllocator, SwapperVm);
+            vmalloc_allocator_failure_rollback_contract_ready(VmallocAllocator);
+            vmalloc_allocator_cross_cpu_vmalloc_flush_deferred(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
         }
     }
@@ -988,6 +1006,11 @@ object Ioremap: AddressSpaceObject {
                     ioremap_noncached_attribute_deferred(Ioremap);
                     ioremap_writecombine_attribute_deferred(Ioremap);
                     ioremap_normal_memory_attribute_deferred(Ioremap);
+                    ioremap_mapping_guard_contract_ready(Ioremap, VmallocAllocator);
+                    ioremap_unmapping_guard_contract_ready(Ioremap, VmallocAllocator);
+                    ioremap_mapping_sync_contract_ready(Ioremap, VmallocAllocator);
+                    ioremap_unmapping_flush_contract_ready(Ioremap, VmallocAllocator);
+                    ioremap_failure_rollback_contract_ready(Ioremap, VmallocAllocator);
                 }
             }
         }
@@ -1010,6 +1033,11 @@ object Ioremap: AddressSpaceObject {
             ioremap_noncached_attribute_deferred(Ioremap);
             ioremap_writecombine_attribute_deferred(Ioremap);
             ioremap_normal_memory_attribute_deferred(Ioremap);
+            ioremap_mapping_guard_contract_ready(Ioremap, VmallocAllocator);
+            ioremap_unmapping_guard_contract_ready(Ioremap, VmallocAllocator);
+            ioremap_mapping_sync_contract_ready(Ioremap, VmallocAllocator);
+            ioremap_unmapping_flush_contract_ready(Ioremap, VmallocAllocator);
+            ioremap_failure_rollback_contract_ready(Ioremap, VmallocAllocator);
         }
 
         actions {
@@ -1026,6 +1054,9 @@ object Ioremap: AddressSpaceObject {
                     ioremap_io_page_protection_ready(Ioremap);
                     ioremap_mmio_attribute_policy_ready(Ioremap);
                     ioremap_plain_device_attribute_supported(Ioremap, ArchMmioPageAttrRef::RiscvPageIoremap);
+                    ioremap_mapping_guard_contract_ready(Ioremap, VmallocAllocator);
+                    ioremap_mapping_sync_contract_ready(Ioremap, VmallocAllocator);
+                    ioremap_failure_rollback_contract_ready(Ioremap, VmallocAllocator);
                     vmap_flags_vm_ioremap(VmapAreaFlags::VmIoremap);
                     page_protection_io_memory(PageProtectionRef::IoMemory);
                     page_protection_kind_io_memory(VmapPageProtectionKind::IoMemory);
@@ -1061,6 +1092,7 @@ object Ioremap: AddressSpaceObject {
                     ioremap_mapping_page_aligned(Ioremap, mapping);
                     ioremap_mapping_membase_cookie_ready(Ioremap, mapping);
                     ioremap_mapping_not_linear_direct_map(Ioremap, mapping);
+                    ioremap_mapping_sync_observed(Ioremap, mapping);
                     vmap_area_ref_ready(VmapAreaRef::IoremapDeviceMmio);
                     vmap_area_allocated(VmapAreaRef::IoremapDeviceMmio, VmallocAllocator);
                     vmap_area_address_space_bound(VmapAreaRef::IoremapDeviceMmio, VmapAddressSpace);
@@ -1073,6 +1105,7 @@ object Ioremap: AddressSpaceObject {
                     vmap_area_has_no_existing_mapping(VmapAreaRef::IoremapDeviceMmio, VmallocAllocator);
                     vmap_mapping_phys_range_bound(VmapMappingRef::IoremapDeviceMmio);
                     vmap_mapping_page_range_installed(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
+                    vmap_mapping_kernel_mapping_synced(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
                     vmap_mapping_protection_bound(VmapMappingRef::IoremapDeviceMmio, PageProtectionRef::IoMemory);
                     vmap_mapping_protection_kind_bound(VmapMappingRef::IoremapDeviceMmio, VmapPageProtectionKind::IoMemory);
                     vmap_mapping_page_aligned(VmapMappingRef::IoremapDeviceMmio);
@@ -1085,6 +1118,8 @@ object Ioremap: AddressSpaceObject {
                 depends_on {
                     Ioremap.state == State::Ready;
                     VmallocAllocator.state == State::Ready;
+                    ioremap_unmapping_guard_contract_ready(Ioremap, VmallocAllocator);
+                    ioremap_unmapping_flush_contract_ready(Ioremap, VmallocAllocator);
                     ioremap_mapping_created(Ioremap, mapping);
                     ioremap_mapping_vmap_area_bound(Ioremap, mapping, VmapAreaRef::IoremapDeviceMmio);
                     ioremap_mapping_vmalloc_mapping_bound(Ioremap, mapping, VmapMappingRef::IoremapDeviceMmio);
@@ -1110,6 +1145,8 @@ object Ioremap: AddressSpaceObject {
                     ioremap_mapping_unmapped(Ioremap, mapping);
                     ioremap_mapping_membase_cookie_retired(Ioremap, mapping);
                     vmap_mapping_page_range_removed(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
+                    vmap_mapping_kernel_tlb_flushed(VmapMappingRef::IoremapDeviceMmio, SwapperVm);
+                    ioremap_unmapping_flush_observed(Ioremap, mapping);
                     vmap_area_released(VmapAreaRef::IoremapDeviceMmio, VmallocAllocator);
                 }
             }

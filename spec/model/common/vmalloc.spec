@@ -9,6 +9,10 @@
  * - The vmalloc layer owns virtual address area management and mapping
  *   execution. Callers still own the physical resource source and the mapping
  *   attribute policy.
+ * - Successful map/unmap actions must publish architecture-visible ordering:
+ *   page-table installation/removal is guarded, followed by the required
+ *   kernel mapping sync/cache/TLB boundary. Full Linux lazy purge, RCU, and
+ *   remote shootdown detail remains a later refinement.
  */
 
 type VmapAreaRef {
@@ -43,6 +47,15 @@ predicate vmalloc_pgtable_full_range_metadata_ready<P>(page_table_caches: P) -> 
 predicate vmalloc_allocator_full_vmalloc_range_metadata_supported<T, P>(allocator: T, page_table_caches: P) -> bool;
 predicate vmalloc_allocator_dynamic_record_storage_ready<T>(allocator: T) -> bool;
 predicate vmalloc_allocator_rejects_duplicate_area_mapping<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_mapping_guard_contract_ready<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_unmapping_guard_contract_ready<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_mapping_sync_contract_ready<T, S>(allocator: T, swapper_vm: S) -> bool;
+predicate vmalloc_allocator_unmapping_flush_contract_ready<T, S>(allocator: T, swapper_vm: S) -> bool;
+predicate vmalloc_allocator_failure_rollback_contract_ready<T>(allocator: T) -> bool;
+predicate vmalloc_allocator_cross_cpu_vmalloc_flush_deferred<T>(allocator: T) -> bool;
+predicate vmap_node_guard_contract_ready<T>(node_set: T) -> bool;
+predicate vfree_deferred_guard_contract_ready<T>(deferred_set: T) -> bool;
+predicate vfree_rcu_runtime_path_deferred<T>(deferred_set: T) -> bool;
 
 predicate vmap_area_ref_ready<T>(area: T) -> bool;
 predicate vmap_area_allocated<T, A>(area: T, allocator: A) -> bool;
@@ -60,6 +73,8 @@ predicate vmap_mapping_area_bound<T, A>(mapping: T, area: A) -> bool;
 predicate vmap_mapping_phys_range_bound<T>(mapping: T) -> bool;
 predicate vmap_mapping_page_range_installed<T, S>(mapping: T, swapper_vm: S) -> bool;
 predicate vmap_mapping_page_range_removed<T, S>(mapping: T, swapper_vm: S) -> bool;
+predicate vmap_mapping_kernel_mapping_synced<T, S>(mapping: T, swapper_vm: S) -> bool;
+predicate vmap_mapping_kernel_tlb_flushed<T, S>(mapping: T, swapper_vm: S) -> bool;
 predicate vmap_mapping_protection_bound<T, P>(mapping: T, protection: P) -> bool;
 predicate vmap_mapping_protection_kind_bound<T, K>(mapping: T, kind: K) -> bool;
 predicate vmap_mapping_page_aligned<T>(mapping: T) -> bool;
@@ -125,6 +140,9 @@ type VmallocAllocatorType: MemoryObject {
                 vmalloc_allocator_dynamic_l0_window_allocation_supported(self, PageTableCaches);
                 vmalloc_allocator_full_vmalloc_range_metadata_supported(self, PageTableCaches);
                 vmalloc_allocator_dynamic_record_storage_ready(self);
+                vmalloc_allocator_mapping_guard_contract_ready(self);
+                vmalloc_allocator_mapping_sync_contract_ready(self, SwapperVm);
+                vmalloc_allocator_failure_rollback_contract_ready(self);
                 vmap_area_ref_ready(area);
                 vmap_area_allocated(area, self);
                 vmap_area_address_space_bound(area, VmapAddressSpace);
@@ -137,12 +155,13 @@ type VmallocAllocatorType: MemoryObject {
                 vmap_area_range_complete_for_mapping(area, mapping);
                 vmap_mapping_phys_range_bound(mapping);
                 vmap_mapping_page_range_installed(mapping, SwapperVm);
+                vmap_mapping_kernel_mapping_synced(mapping, SwapperVm);
                 vmap_mapping_protection_bound(mapping, protection);
                 vmap_mapping_page_aligned(mapping);
                 vmap_mapping_within_runtime_mapping_window(mapping);
             }
             deferred {
-                "Full Linux vm_struct/vmap_area metadata behavior such as reusable holes, augmented-tree search, lazy purge batching, and concurrency/RCU details remains deferred.";
+                "Full Linux vm_struct/vmap_area metadata behavior such as reusable holes, augmented-tree search, lazy purge batching, RCU, and cross-CPU lazy vmalloc fault handling remains deferred.";
             }
         }
 
@@ -160,6 +179,8 @@ type VmallocAllocatorType: MemoryObject {
                 vmalloc_allocator_page_range_mapping_api_ready(self);
                 vmalloc_allocator_executes_page_table_mappings(self, SwapperVm);
                 vmalloc_allocator_runtime_page_table_mapping_ready(self, PageTableCaches);
+                vmalloc_allocator_unmapping_guard_contract_ready(self);
+                vmalloc_allocator_unmapping_flush_contract_ready(self, SwapperVm);
                 vmap_area_ref_ready(area);
                 vmap_area_allocated(area, self);
                 vmap_mapping_ref_ready(mapping);
@@ -168,9 +189,10 @@ type VmallocAllocatorType: MemoryObject {
             }
             ensures {
                 vmap_mapping_page_range_removed(mapping, SwapperVm);
+                vmap_mapping_kernel_tlb_flushed(mapping, SwapperVm);
             }
             deferred {
-                "Full vunmap/vfree cache/TLB batching, lazy purge, and per-cpu deferred free ordering are deferred to later vmalloc teardown modeling.";
+                "Full vunmap/vfree cache/TLB batching, lazy purge, RCU, and per-cpu deferred free ordering are deferred to later vmalloc teardown modeling.";
             }
         }
 
@@ -183,6 +205,7 @@ type VmallocAllocatorType: MemoryObject {
             depends_on {
                 self.state == State::Ready;
                 vmalloc_allocator_vmap_area_api_ready(self);
+                vmalloc_allocator_unmapping_guard_contract_ready(self);
                 vmap_area_ref_ready(area);
                 vmap_area_allocated(area, self);
             }

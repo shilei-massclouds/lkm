@@ -18,6 +18,9 @@
  * - iounmap() retires the ioremap cookie by asking vmalloc/vmap to tear down
  *   the bound mapping and release the vmap area; it does not directly clear
  *   PTEs or maintain vmap free-space metadata itself.
+ * - Error paths after vmap area reservation must unwind through the same
+ *   vmalloc-owned records; a failed ioremap must not leak a live VM_IOREMAP
+ *   area or installed mapping.
  * - This object is runtime ioremap, not EarlyIoremap/FixMap boot-time slots.
  */
 
@@ -53,6 +56,11 @@ predicate ioremap_plain_device_attribute_supported<T, A>(ioremap: T, attr: A) ->
 predicate ioremap_noncached_attribute_deferred<T>(ioremap: T) -> bool;
 predicate ioremap_writecombine_attribute_deferred<T>(ioremap: T) -> bool;
 predicate ioremap_normal_memory_attribute_deferred<T>(ioremap: T) -> bool;
+predicate ioremap_mapping_guard_contract_ready<T, A>(ioremap: T, allocator: A) -> bool;
+predicate ioremap_unmapping_guard_contract_ready<T, A>(ioremap: T, allocator: A) -> bool;
+predicate ioremap_mapping_sync_contract_ready<T, A>(ioremap: T, allocator: A) -> bool;
+predicate ioremap_unmapping_flush_contract_ready<T, A>(ioremap: T, allocator: A) -> bool;
+predicate ioremap_failure_rollback_contract_ready<T, A>(ioremap: T, allocator: A) -> bool;
 
 predicate ioremap_mapping_created<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_owner_bound<T, M, D>(ioremap: T, mapping: M, device: D) -> bool;
@@ -80,5 +88,7 @@ predicate ioremap_mapping_does_not_claim_normal_memory<T, M>(ioremap: T, mapping
 predicate ioremap_mapping_page_aligned<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_membase_cookie_ready<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_not_linear_direct_map<T, M>(ioremap: T, mapping: M) -> bool;
+predicate ioremap_mapping_sync_observed<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_unmapped<T, M>(ioremap: T, mapping: M) -> bool;
 predicate ioremap_mapping_membase_cookie_retired<T, M>(ioremap: T, mapping: M) -> bool;
+predicate ioremap_unmapping_flush_observed<T, M>(ioremap: T, mapping: M) -> bool;

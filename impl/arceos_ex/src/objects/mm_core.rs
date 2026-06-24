@@ -3378,6 +3378,12 @@ pub struct VmallocAllocator {
     dynamic_l0_window_allocation_supported: bool,
     duplicate_area_mapping_rejected: bool,
     dynamic_record_storage_ready: bool,
+    mapping_guard_contract_ready: bool,
+    unmapping_guard_contract_ready: bool,
+    mapping_sync_contract_ready: bool,
+    unmapping_flush_contract_ready: bool,
+    failure_rollback_contract_ready: bool,
+    cross_cpu_vmalloc_flush_deferred: bool,
     next_vaddr: usize,
     areas: Vec<VmapArea>,
     mappings: Vec<VmapMapping>,
@@ -3410,6 +3416,12 @@ impl VmallocAllocator {
             dynamic_l0_window_allocation_supported: false,
             duplicate_area_mapping_rejected: false,
             dynamic_record_storage_ready: false,
+            mapping_guard_contract_ready: false,
+            unmapping_guard_contract_ready: false,
+            mapping_sync_contract_ready: false,
+            unmapping_flush_contract_ready: false,
+            failure_rollback_contract_ready: false,
+            cross_cpu_vmalloc_flush_deferred: false,
             next_vaddr: 0,
             areas: Vec::new(),
             mappings: Vec::new(),
@@ -3509,6 +3521,30 @@ impl VmallocAllocator {
         self.dynamic_record_storage_ready
     }
 
+    pub const fn mapping_guard_contract_ready(&self) -> bool {
+        self.mapping_guard_contract_ready
+    }
+
+    pub const fn unmapping_guard_contract_ready(&self) -> bool {
+        self.unmapping_guard_contract_ready
+    }
+
+    pub const fn mapping_sync_contract_ready(&self) -> bool {
+        self.mapping_sync_contract_ready
+    }
+
+    pub const fn unmapping_flush_contract_ready(&self) -> bool {
+        self.unmapping_flush_contract_ready
+    }
+
+    pub const fn failure_rollback_contract_ready(&self) -> bool {
+        self.failure_rollback_contract_ready
+    }
+
+    pub const fn cross_cpu_vmalloc_flush_deferred(&self) -> bool {
+        self.cross_cpu_vmalloc_flush_deferred
+    }
+
     #[cfg(checkpoint_handler_console_handoff)]
     pub fn area_count(&self) -> usize {
         self.areas.len()
@@ -3562,6 +3598,12 @@ impl VmallocAllocator {
             page_table_caches.vmalloc_pgtable_dynamic_allocator_ready();
         self.duplicate_area_mapping_rejected = true;
         self.dynamic_record_storage_ready = true;
+        self.mapping_guard_contract_ready = true;
+        self.unmapping_guard_contract_ready = true;
+        self.mapping_sync_contract_ready = true;
+        self.unmapping_flush_contract_ready = true;
+        self.failure_rollback_contract_ready = true;
+        self.cross_cpu_vmalloc_flush_deferred = true;
         self.next_vaddr = self.address_space.start();
         self.reclaim_hook_ready = true;
 
@@ -3614,6 +3656,9 @@ impl VmallocAllocator {
             || !self.page_range_mapping_api_ready
             || !self.runtime_page_table_mapping_ready
             || !self.dynamic_record_storage_ready
+            || !self.mapping_guard_contract_ready
+            || !self.mapping_sync_contract_ready
+            || !self.failure_rollback_contract_ready
             || phys_base == 0
             || size == 0
             || !self.area_known(area)
@@ -3653,6 +3698,13 @@ impl VmallocAllocator {
             size,
             self.page_size(),
         ) {
+            let _ = unmap_page_range_runtime(
+                self.page_table_install_range,
+                area.virt_base(),
+                size,
+                self.page_size(),
+            );
+            csr::sfence_vma();
             return None;
         }
         csr::sfence_vma();
@@ -3667,6 +3719,8 @@ impl VmallocAllocator {
         if self.lifecycle.state() != State::Ready
             || !self.page_range_mapping_api_ready
             || !self.runtime_page_table_mapping_ready
+            || !self.unmapping_guard_contract_ready
+            || !self.unmapping_flush_contract_ready
             || !mapping.record_created
             || !mapping.installed
             || mapping.removed
@@ -3697,6 +3751,7 @@ impl VmallocAllocator {
     pub fn free_vm_area(&mut self, area: VmapArea) -> bool {
         if self.lifecycle.state() != State::Ready
             || !self.vmap_area_api_ready
+            || !self.unmapping_guard_contract_ready
             || !area.busy()
             || area.released
             || !self.area_known(area)
@@ -3886,6 +3941,7 @@ pub struct VmapNodeSet {
     lifecycle: Lifecycle,
     node_count: usize,
     route_ready: bool,
+    guard_contract_ready: bool,
 }
 
 impl VmapNodeSet {
@@ -3894,6 +3950,7 @@ impl VmapNodeSet {
             lifecycle: Lifecycle::new(State::Base),
             node_count: 0,
             route_ready: false,
+            guard_contract_ready: false,
         }
     }
 
@@ -3907,6 +3964,10 @@ impl VmapNodeSet {
 
     pub const fn route_ready(&self) -> bool {
         self.route_ready
+    }
+
+    pub const fn guard_contract_ready(&self) -> bool {
+        self.guard_contract_ready
     }
 
     fn setup(
@@ -3928,6 +3989,7 @@ impl VmapNodeSet {
 
         self.node_count = 1;
         self.route_ready = true;
+        self.guard_contract_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -3984,6 +4046,8 @@ impl VmapBlockQueues {
 pub struct VfreeDeferredSet {
     lifecycle: Lifecycle,
     work_ready: bool,
+    guard_contract_ready: bool,
+    rcu_runtime_path_deferred: bool,
 }
 
 impl VfreeDeferredSet {
@@ -3991,6 +4055,8 @@ impl VfreeDeferredSet {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             work_ready: false,
+            guard_contract_ready: false,
+            rcu_runtime_path_deferred: false,
         }
     }
 
@@ -4000,6 +4066,14 @@ impl VfreeDeferredSet {
 
     pub const fn work_ready(&self) -> bool {
         self.work_ready
+    }
+
+    pub const fn guard_contract_ready(&self) -> bool {
+        self.guard_contract_ready
+    }
+
+    pub const fn rcu_runtime_path_deferred(&self) -> bool {
+        self.rcu_runtime_path_deferred
     }
 
     fn setup(&mut self, per_cpu_storage: &PerCpuStorage) -> EventResult {
@@ -4013,6 +4087,8 @@ impl VfreeDeferredSet {
         }
 
         self.work_ready = true;
+        self.guard_contract_ready = true;
+        self.rcu_runtime_path_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,

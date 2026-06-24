@@ -1270,6 +1270,13 @@ ready/failure fact 暴露；超出 `VMALLOC_END` 的 area 必须被拒绝。`Vma
 `VmapArea` 完全落在 runtime mapping window 能力内，必要时先扩展该能力。落到 `VMALLOC_END` 之外的 area
 当前必须失败并记录为 range boundary，不能复用错误的 L0 表安装。同时，同一个 busy `VmapArea` 已经存在 installed
 `VmapMapping` 时，第二次 `map_page_range()` 必须失败，避免一个 area 产生多个并存页表映射记录。
+`VmallocAllocator.Ready` 不只表示 setup 数据结构完成，还表示后续 `get_vm_area()`、`map_page_range()`、
+`unmap_page_range()` 和 `free_vm_area()` 的最小运行期契约已经发布：调用者进入这些 API 时必须满足 guard
+条件；成功安装 PTE 后必须执行 RISC-V 当前实现可见的 kernel mapping sync/TLB 边界；失败路径不得留下 active
+`VmapMapping`。若调用方已经保留了临时 `VmapArea`，则必须通过 `unmap_page_range()+free_vm_area()` 或
+`free_vm_area()` 明确回滚该 area。当前实现使用同步 `sfence.vma` 表示本轮本地 kernel mapping
+可见性边界；Linux RISC-V `new_vmalloc[]` 式跨 CPU lazy fault 修正、完整远端 shootdown batching、lazy
+purge 和 RCU/free ordering 仍记录为 deferred，不得在本轮假装已完整覆盖。
 
 `VmallocAllocator.unmap_page_range()` / `free_vm_area()` 必须保持 Linux-like teardown 顺序：先清除
 对应 `VmapMapping` 的页表映射并记录 removed fact，再释放 `VmapArea` 的 busy/`vm_struct`/`vmap_area`
@@ -1286,6 +1293,9 @@ metadata。重复 unmap、重复 free、未 unmap 就 free 都必须失败。当
 `VmallocAllocator` 安装 vmap page range。`Ioremap.map_device_mmio()` 必须驱动
 `VmallocAllocator.get_vm_area(...)` 和 `VmallocAllocator.map_page_range(...)`，然后只把返回的
 `VmapArea`/`VmapMapping` 绑定进 `IoMemoryMapping`。
+如果 `get_vm_area()` 已经成功但后续 `map_page_range()`、membase 计算或 ioremap mapping facts 校验失败，
+`Ioremap` 必须通过 `VmallocAllocator.free_vm_area()` 或 `unmap_page_range()+free_vm_area()` 回滚；
+不能把 `VM_IOREMAP` area 泄漏成 busy，也不能留下已安装但没有 `IoMemoryMapping` owner 的页表映射。
 
 MMIO 属性必须显式建模，不能把“能通过 PTE 访问”偷换成“属性完整正确”。参照 Linux RISC-V
 `_PAGE_IOREMAP`/`PAGE_KERNEL_IO`、`pgprot_noncached()` 和 `pgprot_writecombine()` 的分工，

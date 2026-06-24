@@ -190,6 +190,18 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
             .dynamic_l0_window_allocation_supported()
         && ctx.vmalloc_allocator.duplicate_area_mapping_rejected()
         && ctx.vmalloc_allocator.dynamic_record_storage_ready()
+        && ctx.vmalloc_allocator.mapping_guard_contract_ready()
+        && ctx.vmalloc_allocator.unmapping_guard_contract_ready()
+        && ctx.vmalloc_allocator.mapping_sync_contract_ready()
+        && ctx.vmalloc_allocator.unmapping_flush_contract_ready()
+        && ctx.vmalloc_allocator.failure_rollback_contract_ready()
+        && ctx.vmalloc_allocator.cross_cpu_vmalloc_flush_deferred()
+        && ctx.vmalloc_allocator.node_set().guard_contract_ready()
+        && ctx.vmalloc_allocator.deferred_set().guard_contract_ready()
+        && ctx
+            .vmalloc_allocator
+            .deferred_set()
+            .rcu_runtime_path_deferred()
         && ctx.ioremap.state() == State::Ready
         && ctx.ioremap.runtime_ready()
         && ctx.ioremap.uses_vmalloc_area_management()
@@ -200,6 +212,11 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.ioremap.physical_resource_policy_ready()
         && ctx.ioremap.vm_ioremap_flags_ready()
         && ctx.ioremap.io_page_protection_ready()
+        && ctx.ioremap.mapping_guard_contract_ready()
+        && ctx.ioremap.unmapping_guard_contract_ready()
+        && ctx.ioremap.mapping_sync_contract_ready()
+        && ctx.ioremap.unmapping_flush_contract_ready()
+        && ctx.ioremap.failure_rollback_contract_ready()
         && ctx.mm_struct_cache.state() == State::Ready
         && ctx.mm_struct_cache.object_size() != 0
         && ctx.mm_struct_cache.saved_auxv_usercopy_ready()
