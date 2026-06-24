@@ -929,9 +929,11 @@ type ArceosExMmCoreInitCodingMust {
         /*
          * mm_struct only:
          *
-         * MmStructCache.setup() must only establish the "mm_struct" cache.
-         * vm_area_struct, vma lock cache, and mmap_init() remain later
-         * proc_caches_init()/process-memory work.
+         * MmStructCache.setup() must only establish the "mm_struct" cache as
+         * a named cache instance registered under SlubAllocator/
+         * SlubCacheRegistry. MmStructCache must not become a separate
+         * allocator type. vm_area_struct, vma lock cache, and mmap_init()
+         * remain later proc_caches_init()/process-memory work.
          */
         arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache();
     }

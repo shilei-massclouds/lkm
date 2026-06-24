@@ -35,6 +35,7 @@ const PAGE_METADATA_FLAG_BUDDY_ALLOCATED: usize = 1 << 1;
 const KMALLOC_NULL: usize = 0;
 const PAGE_ALLOC_CPUHP_STEP: usize = 0x200;
 const SLUB_CPUHP_STEP: usize = 0x201;
+const MAX_NAMED_SLUB_CACHES: usize = 8;
 pub const VMALLOC_START: usize = 0xffff_ffc8_0000_0000;
 const VMALLOC_END: usize = 0xffff_ffd0_0000_0000;
 const VMALLOC_RUNTIME_PAGE_SIZE: usize = 4096;
@@ -2241,6 +2242,20 @@ impl SlubAllocator {
         &self.kmalloc_caches
     }
 
+    pub fn register_named_cache(
+        &mut self,
+        kind: NamedSlubCacheKind,
+        object_size: usize,
+        usercopy_offset: usize,
+        usercopy_size: usize,
+    ) -> Option<NamedSlubCache> {
+        if self.lifecycle.state() != State::Ready || self.slab_state != SlubState::Up {
+            return None;
+        }
+        self.cache_registry
+            .register_named_cache(kind, object_size, usercopy_offset, usercopy_size)
+    }
+
     pub fn kmalloc(
         &mut self,
         size: usize,
@@ -2582,11 +2597,53 @@ impl DynamicContainerRuntime {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum NamedSlubCacheKind {
+    MmStruct,
+}
+
+#[derive(Clone, Copy)]
+pub struct NamedSlubCache {
+    kind: NamedSlubCacheKind,
+    object_size: usize,
+    usercopy_offset: usize,
+    usercopy_size: usize,
+}
+
+impl NamedSlubCache {
+    const fn empty() -> Self {
+        Self {
+            kind: NamedSlubCacheKind::MmStruct,
+            object_size: 0,
+            usercopy_offset: 0,
+            usercopy_size: 0,
+        }
+    }
+
+    pub const fn kind(&self) -> NamedSlubCacheKind {
+        self.kind
+    }
+
+    pub const fn object_size(&self) -> usize {
+        self.object_size
+    }
+
+    pub const fn usercopy_offset(&self) -> usize {
+        self.usercopy_offset
+    }
+
+    pub const fn usercopy_size(&self) -> usize {
+        self.usercopy_size
+    }
+}
+
 pub struct SlubCacheRegistry {
     lifecycle: Lifecycle,
     boot_caches_registered: bool,
     global_list_ready: bool,
     cache_count: usize,
+    named_caches: [NamedSlubCache; MAX_NAMED_SLUB_CACHES],
+    named_cache_count: usize,
 }
 
 impl SlubCacheRegistry {
@@ -2596,6 +2653,8 @@ impl SlubCacheRegistry {
             boot_caches_registered: false,
             global_list_ready: false,
             cache_count: 0,
+            named_caches: [NamedSlubCache::empty(); MAX_NAMED_SLUB_CACHES],
+            named_cache_count: 0,
         }
     }
 
@@ -2613,6 +2672,57 @@ impl SlubCacheRegistry {
 
     pub const fn cache_count(&self) -> usize {
         self.cache_count
+    }
+
+    pub const fn named_cache_count(&self) -> usize {
+        self.named_cache_count
+    }
+
+    pub fn named_cache(&self, kind: NamedSlubCacheKind) -> Option<NamedSlubCache> {
+        let mut index = 0usize;
+        while index < self.named_cache_count {
+            if self.named_caches[index].kind == kind {
+                return Some(self.named_caches[index]);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    pub fn has_named_cache(&self, kind: NamedSlubCacheKind) -> bool {
+        self.named_cache(kind).is_some()
+    }
+
+    fn register_named_cache(
+        &mut self,
+        kind: NamedSlubCacheKind,
+        object_size: usize,
+        usercopy_offset: usize,
+        usercopy_size: usize,
+    ) -> Option<NamedSlubCache> {
+        if self.lifecycle.state() != State::Ready
+            || object_size == 0
+            || usercopy_offset.checked_add(usercopy_size)? > object_size
+        {
+            return None;
+        }
+        if let Some(cache) = self.named_cache(kind) {
+            return Some(cache);
+        }
+        if self.named_cache_count >= MAX_NAMED_SLUB_CACHES {
+            return None;
+        }
+
+        let cache = NamedSlubCache {
+            kind,
+            object_size,
+            usercopy_offset,
+            usercopy_size,
+        };
+        self.named_caches[self.named_cache_count] = cache;
+        self.named_cache_count += 1;
+        self.cache_count += 1;
+        Some(cache)
     }
 
     fn setup(&mut self, slub_state: State) -> EventResult {
@@ -4188,7 +4298,10 @@ impl VfreeDeferredSet {
 
 pub struct MmStructCache {
     lifecycle: Lifecycle,
+    registered_in_slub_registry: bool,
     object_size: usize,
+    usercopy_offset: usize,
+    usercopy_size: usize,
     saved_auxv_usercopy_ready: bool,
     vma_caches_deferred: bool,
 }
@@ -4197,7 +4310,10 @@ impl MmStructCache {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            registered_in_slub_registry: false,
             object_size: 0,
+            usercopy_offset: 0,
+            usercopy_size: 0,
             saved_auxv_usercopy_ready: false,
             vma_caches_deferred: false,
         }
@@ -4211,6 +4327,18 @@ impl MmStructCache {
         self.object_size
     }
 
+    pub const fn registered_in_slub_registry(&self) -> bool {
+        self.registered_in_slub_registry
+    }
+
+    pub const fn usercopy_offset(&self) -> usize {
+        self.usercopy_offset
+    }
+
+    pub const fn usercopy_size(&self) -> usize {
+        self.usercopy_size
+    }
+
     pub const fn saved_auxv_usercopy_ready(&self) -> bool {
         self.saved_auxv_usercopy_ready
     }
@@ -4219,7 +4347,11 @@ impl MmStructCache {
         self.vma_caches_deferred
     }
 
-    pub fn setup(&mut self, slub_allocator: &SlubAllocator, cpu_group: &CpuGroup) -> EventResult {
+    pub fn setup(
+        &mut self,
+        slub_allocator: &mut SlubAllocator,
+        cpu_group: &CpuGroup,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || slub_allocator.state() != State::Ready
             || cpu_group.state() != State::Ready
@@ -4232,7 +4364,29 @@ impl MmStructCache {
         else {
             return self.failed_setup();
         };
-        self.object_size = core::mem::size_of::<usize>() * 16 + mask_bytes;
+        let object_size = core::mem::size_of::<usize>() * 16 + mask_bytes;
+        let usercopy_offset = core::mem::size_of::<usize>() * 8;
+        let usercopy_size = core::mem::size_of::<usize>() * 2;
+        let Some(cache) = slub_allocator.register_named_cache(
+            NamedSlubCacheKind::MmStruct,
+            object_size,
+            usercopy_offset,
+            usercopy_size,
+        ) else {
+            return self.failed_setup();
+        };
+        if cache.kind() != NamedSlubCacheKind::MmStruct
+            || cache.object_size() != object_size
+            || cache.usercopy_offset() != usercopy_offset
+            || cache.usercopy_size() != usercopy_size
+        {
+            return self.failed_setup();
+        }
+
+        self.registered_in_slub_registry = true;
+        self.object_size = object_size;
+        self.usercopy_offset = usercopy_offset;
+        self.usercopy_size = usercopy_size;
         self.saved_auxv_usercopy_ready = true;
         self.vma_caches_deferred = true;
         self.lifecycle.transition(

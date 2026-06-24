@@ -1204,11 +1204,17 @@ object MmStructCache: MemoryObject {
             on Event::Setup -> State::Ready {
                 depends_on {
                     SlubAllocator.state == State::Ready;
+                    SlubCacheRegistry.state == State::Ready;
                     CpuGroup.state == State::Ready;
                 }
 
                 ensures {
                     mm_struct_cache_ready(MmStructCache, SlubAllocator);
+                    mm_struct_cache_registered_in_slub_registry(
+                        MmStructCache,
+                        SlubCacheRegistry
+                    );
+                    mm_struct_cache_named_mm_struct(MmStructCache);
                     mm_struct_cache_object_size_resolved(MmStructCache, CpuGroup);
                     mm_struct_cache_saved_auxv_usercopy_range_ready(MmStructCache);
                     vma_caches_deferred_to_proc_caches_init(MmStructCache);
@@ -1220,6 +1226,8 @@ object MmStructCache: MemoryObject {
     state State::Ready {
         invariant {
             mm_struct_cache_ready(MmStructCache, SlubAllocator);
+            mm_struct_cache_registered_in_slub_registry(MmStructCache, SlubCacheRegistry);
+            mm_struct_cache_named_mm_struct(MmStructCache);
             mm_struct_cache_object_size_resolved(MmStructCache, CpuGroup);
             mm_struct_cache_saved_auxv_usercopy_range_ready(MmStructCache);
             vma_caches_deferred_to_proc_caches_init(MmStructCache);

@@ -1,7 +1,9 @@
 use crate::{
     context::Context,
     objects::{
-        earlycon, printk,
+        earlycon,
+        mm_core::NamedSlubCacheKind,
+        printk,
         state::{failed_condition, EventResult, LifecycleEvent, State},
         static_branch::StaticKey,
     },
@@ -79,7 +81,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.config,
     )?;
     ctx.mm_struct_cache
-        .setup(&ctx.slub_allocator, &ctx.cpu_group)
+        .setup(&mut ctx.slub_allocator, &ctx.cpu_group)
 }
 
 fn handoff() -> ! {
@@ -171,6 +173,10 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.swiotlb.dynamic_growth_trimmed()
         && ctx.slub_allocator.state() == State::Ready
         && ctx.slub_allocator.cache_registry().state() == State::Ready
+        && ctx
+            .slub_allocator
+            .cache_registry()
+            .has_named_cache(NamedSlubCacheKind::MmStruct)
         && ctx.slub_allocator.kmalloc_caches().state() == State::Ready
         && ctx.kernel_global_allocator.state() == State::Ready
         && ctx.kernel_global_allocator.uses_slub_allocator()
@@ -241,7 +247,18 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.ioremap.unmapping_flush_contract_ready()
         && ctx.ioremap.failure_rollback_contract_ready()
         && ctx.mm_struct_cache.state() == State::Ready
+        && ctx.mm_struct_cache.registered_in_slub_registry()
         && ctx.mm_struct_cache.object_size() != 0
+        && ctx
+            .slub_allocator
+            .cache_registry()
+            .named_cache(NamedSlubCacheKind::MmStruct)
+            .map(|cache| {
+                cache.object_size() == ctx.mm_struct_cache.object_size()
+                    && cache.usercopy_offset() == ctx.mm_struct_cache.usercopy_offset()
+                    && cache.usercopy_size() == ctx.mm_struct_cache.usercopy_size()
+            })
+            == Some(true)
         && ctx.mm_struct_cache.saved_auxv_usercopy_ready()
         && ctx.mm_struct_cache.vma_caches_deferred()
         && printk::is_ready()

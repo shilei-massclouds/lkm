@@ -1313,7 +1313,7 @@ write-combine、normal memory alias 先记录为 deferred/unsupported，不得�
 记录的 mapping 必须引用该 area/mapping，且 `membase != mapbase`、page-aligned、使用 IO protection。
 属性测试必须覆盖 plain device 成功、WC/NC/normal 策略不被误标为已支持。
 
-`MmStructCache.setup()` 只建立 `"mm_struct"` cache。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
+`MmStructCache.setup()` 只建立 `"mm_struct"` cache，并且该 cache 必须作为 `SlubAllocator`/`SlubCacheRegistry` 管理下的具名 SLUB cache 实例注册；`MmStructCache` 本身不得成为新的 allocator 类型。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
 
 `PageExt`、`KFENCE`、`KMSAN`、`Kmemleak`、`DebugObjectsMemory` 和 `ExecMemory` 当前按 `linux-6.12.37/default_config` 记录为 model `deferred`/trimmed 路径。实现若遇到这些调用位置，应输出 checkpoint 或保留 no-op 分支说明，不得散落 TODO 来替代正式规格记录。
 
