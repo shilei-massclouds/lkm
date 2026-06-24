@@ -293,6 +293,35 @@ impl SecondaryCpuStore {
         self.cpus[logical_id].view()
     }
 
+    pub fn all_match_cpu_group_views(&self, cpu_group: &super::cpu_group::CpuGroup) -> bool {
+        if self.count != cpu_group.secondary_count() {
+            return false;
+        }
+
+        let mut logical_id = 1usize;
+        while logical_id <= self.count {
+            let Some(stored_cpu) = self.cpu(logical_id) else {
+                return false;
+            };
+            let Some(group_cpu) = cpu_group.cpu(logical_id) else {
+                return false;
+            };
+            if stored_cpu.cpu_ref() != group_cpu.cpu_ref()
+                || stored_cpu.hartid() != group_cpu.hartid()
+                || stored_cpu.role() != group_cpu.role()
+                || stored_cpu.is_possible() != group_cpu.is_possible()
+                || stored_cpu.is_present() != group_cpu.is_present()
+                || stored_cpu.is_active() != group_cpu.is_active()
+                || stored_cpu.is_online() != group_cpu.is_online()
+                || stored_cpu.state() != group_cpu.state()
+            {
+                return false;
+            }
+            logical_id += 1;
+        }
+        true
+    }
+
     pub fn mark_all_online(&mut self) {
         let mut logical_id = 1usize;
         while logical_id <= self.count {

@@ -1032,6 +1032,7 @@ CPU/CpuGroup 相关代码生成必须先服从统一 CPU 实例模型：
 - `hartid`、`logical_id`、`possible`、`present`、`active` 和 `online` 属于 CPU 实例事实；`CpuGroup` 只维护 `CpuGroup.Cpu[id] -> CpuRef -> CPU` 索引和 possible/present/online 集合视图。
 - 不生成拥有 CPU 本体的 `PossibleCpu`、`PossibleRunQueue` 或独立 possible 集合对象。若实现需要 mask/table/storage，必须标注为 `CpuGroup` 的索引/集合视图承载。
 - 当前 `impl/arceos_ex` 可以暂时保留 `boot_cpu` 与 `secondary_cpus` 分开的存储结构，但这只是 lowering 细节。对外 checkpoint、trace、测试和后续生成注释都应呈现为统一 CPU 实例和 logical-id 索引模型。
+- `SecondaryCpuStore` 只允许作为 `impl/arceos_ex` 的 secondary CPU 实例承载，用来保存 AP 真正 online 前已经发现的 CPU 本体事实；它不是 formal 顶级对象，也不是新的 CPU group。所有对外可见的 CPU 成员关系仍必须通过 `CpuGroup.Cpu[logical_id] -> CpuRef -> CPU instance`、`CpuGroup.possible_cpus`、`CpuGroup.present_cpus` 和 `CpuGroup.online_cpus` 表达。`CpuGroup` 可以从 `SecondaryCpuStore` 刷新 `CpuView`，但不得把 store 暴露为调度、per-cpu、hotplug 或 root-domain 的身份来源。
 - AP 真实进入 secondary entry 前，不得为 possible secondary CPU 生成 live AP `CurrentCPU`、`LocalInterruptControl`、`CurrentTaskSlot` 或 `PreemptionControl` 链。
 
 重点检查范围：

@@ -46,6 +46,7 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.default_root_domain().covered_cpu_count()
             != ctx.cpu_group.possible_cpu_count()
         || ctx.scheduler.default_root_domain().covered_cpu_ref(0) != ctx.cpu_group.boot_cpu_ref()
+        || !default_root_domain_entries_match_cpu_group()
         || !ctx
             .scheduler
             .default_root_domain()
@@ -94,4 +95,18 @@ pub fn run() -> SmokeResult {
         ctx.scheduler.boot_idle_task().task_id()
     ));
     SmokeResult::Passed
+}
+
+fn default_root_domain_entries_match_cpu_group() -> bool {
+    let ctx = context();
+    let root_domain = ctx.scheduler.default_root_domain();
+    let mut logical_id = 0usize;
+    while logical_id < ctx.cpu_group.possible_cpu_count() {
+        if root_domain.covered_cpu_ref(logical_id) != ctx.cpu_group.possible_cpu_ref_at(logical_id)
+        {
+            return false;
+        }
+        logical_id += 1;
+    }
+    true
 }

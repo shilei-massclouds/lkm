@@ -25,9 +25,16 @@ pub fn run() -> SmokeResult {
         printk::write_str("CpuGroup logical CPU 0 missing\n");
         return SmokeResult::Failed;
     };
+    let Some(owner_boot_cpu) = ctx.boot_current_cpu.boot_cpu() else {
+        printk::write_str("BootCurrentCpu boot CPU owner view missing\n");
+        return SmokeResult::Failed;
+    };
     if boot_entry.logical_id() != 0
         || boot_entry.kind() != CpuIdMapEntryKind::BootCpu
         || boot_entry.hartid() != boot_cpu.hartid()
+        || owner_boot_cpu.cpu_ref() != boot_cpu.cpu_ref()
+        || owner_boot_cpu.hartid() != boot_cpu.hartid()
+        || owner_boot_cpu.state() != boot_cpu.state()
         || boot_cpu.role() != CpuRole::Boot
         || !boot_cpu.cpu_ref().is_boot_cpu()
         || !boot_cpu.is_possible()
@@ -74,6 +81,10 @@ pub fn run() -> SmokeResult {
             return SmokeResult::Failed;
         }
         logical_id += 1;
+    }
+    if !ctx.secondary_cpus.all_match_cpu_group_views(&ctx.cpu_group) {
+        printk::write_str("SecondaryCpuStore and CpuGroup views diverged\n");
+        return SmokeResult::Failed;
     }
 
     printk::write_fmt(format_args!(
