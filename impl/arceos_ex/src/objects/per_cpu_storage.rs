@@ -1,7 +1,6 @@
 use super::{
     config::Config,
     cpu_group::CpuGroup,
-    cpu_id_map::CpuIdMap,
     lds::Lds,
     memblock::MemBlock,
     raw_dtb::PhysRange,
@@ -131,7 +130,6 @@ impl PerCpuStorage {
         vm: &Vm,
         config: &Config,
         cpu_group: &CpuGroup,
-        cpu_id_map: &CpuIdMap,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
             || self.static_image.state() != State::Ready
@@ -140,21 +138,15 @@ impl PerCpuStorage {
             || !vm.entry_successor_ready()
             || config.state() != State::Online
             || cpu_group.state() != State::Ready
-            || cpu_id_map.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
         {
             return self.failed_setup();
         }
 
-        self.first_chunk.setup(
-            &self.static_image,
-            memblock,
-            vm,
-            config,
-            cpu_group,
-            cpu_id_map,
-        )?;
+        self.first_chunk
+            .setup(&self.static_image, memblock, vm, config, cpu_group)?;
         self.offset_table
-            .setup(&self.static_image, &self.first_chunk, cpu_group, cpu_id_map)?;
+            .setup(&self.static_image, &self.first_chunk, cpu_group)?;
 
         if !self.ready_facts_hold(cpu_group) {
             return self.failed_setup();
@@ -366,7 +358,6 @@ impl PerCpuFirstChunk {
         vm: &Vm,
         config: &Config,
         cpu_group: &CpuGroup,
-        cpu_id_map: &CpuIdMap,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || static_image.state() != State::Ready
@@ -375,10 +366,8 @@ impl PerCpuFirstChunk {
             || !vm.entry_successor_ready()
             || config.state() != State::Online
             || cpu_group.state() != State::Ready
-            || cpu_id_map.state() != State::Ready
-            || cpu_id_map.count() == 0
-            || cpu_id_map.count() != cpu_group.possible_cpu_count()
-            || cpu_id_map.count() > MAX_PER_CPU_UNITS
+            || !cpu_group.possible_cpu_boundary_ready()
+            || cpu_group.possible_cpu_count() > MAX_PER_CPU_UNITS
         {
             return self.failed_setup();
         }
@@ -392,7 +381,8 @@ impl PerCpuFirstChunk {
         let Some(unit_size) = round_up(unit_payload_size, config.page_size()) else {
             return self.failed_setup();
         };
-        let Some(total_size) = unit_size.checked_mul(cpu_id_map.count()) else {
+        let possible_cpu_count = cpu_group.possible_cpu_count();
+        let Some(total_size) = unit_size.checked_mul(possible_cpu_count) else {
             return self.failed_setup();
         };
         let Some(range) = memblock.alloc_phys(total_size, config.page_size()) else {
@@ -407,8 +397,8 @@ impl PerCpuFirstChunk {
 
         let mut units = [PerCpuUnit::empty(); MAX_PER_CPU_UNITS];
         let mut logical_id = 0usize;
-        while logical_id < cpu_id_map.count() {
-            let Some(entry) = cpu_id_map.entry(logical_id) else {
+        while logical_id < possible_cpu_count {
+            let Some(cpu) = cpu_group.cpu(logical_id) else {
                 return self.failed_setup();
             };
             let Some(unit_offset) = unit_size.checked_mul(logical_id) else {
@@ -438,7 +428,7 @@ impl PerCpuFirstChunk {
 
             units[logical_id] = PerCpuUnit {
                 logical_id,
-                hartid: entry.hartid(),
+                hartid: cpu.hartid(),
                 base: unit_base,
                 static_start: unit_base,
                 dynamic_start,
@@ -453,10 +443,10 @@ impl PerCpuFirstChunk {
         self.static_size = static_image.size();
         self.reserved_size = RESERVED_SIZE;
         self.dynamic_size = DYNAMIC_RESERVE_SIZE;
-        self.unit_count = cpu_id_map.count();
+        self.unit_count = possible_cpu_count;
         self.units = units;
 
-        if !self.ready_facts_hold(static_image, cpu_id_map) {
+        if !self.ready_facts_hold(static_image, cpu_group) {
             return self.failed_setup();
         }
 
@@ -477,10 +467,10 @@ impl PerCpuFirstChunk {
         )
     }
 
-    fn ready_facts_hold(&self, static_image: &PerCpuStaticImage, cpu_id_map: &CpuIdMap) -> bool {
+    fn ready_facts_hold(&self, static_image: &PerCpuStaticImage, cpu_group: &CpuGroup) -> bool {
         if self.range.start() >= self.range.end()
             || self.range.size() != self.unit_size * self.unit_count
-            || self.unit_count != cpu_id_map.count()
+            || self.unit_count != cpu_group.possible_cpu_count()
             || self.static_size != static_image.size()
             || self.dynamic_size == 0
         {
@@ -489,7 +479,7 @@ impl PerCpuFirstChunk {
 
         let mut logical_id = 0usize;
         while logical_id < self.unit_count {
-            let Some(entry) = cpu_id_map.entry(logical_id) else {
+            let Some(cpu) = cpu_group.cpu(logical_id) else {
                 return false;
             };
             let unit = self.units[logical_id];
@@ -506,7 +496,7 @@ impl PerCpuFirstChunk {
                 return false;
             };
             if unit.logical_id != logical_id
-                || unit.hartid != entry.hartid()
+                || unit.hartid != cpu.hartid()
                 || unit.base != expected_base
                 || unit.static_start != unit.base
                 || unit.dynamic_start < reserved_end
@@ -610,22 +600,20 @@ impl PerCpuOffsetTable {
         static_image: &PerCpuStaticImage,
         first_chunk: &PerCpuFirstChunk,
         cpu_group: &CpuGroup,
-        cpu_id_map: &CpuIdMap,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || static_image.state() != State::Ready
             || first_chunk.state() != State::Ready
             || cpu_group.state() != State::Ready
-            || cpu_id_map.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
             || first_chunk.unit_count() != cpu_group.possible_cpu_count()
-            || first_chunk.unit_count() != cpu_id_map.count()
         {
             return self.failed_setup();
         }
 
         let mut offsets = [0usize; MAX_PER_CPU_UNITS];
         let mut logical_id = 0usize;
-        while logical_id < cpu_id_map.count() {
+        while logical_id < cpu_group.possible_cpu_count() {
             let Some(unit) = first_chunk.unit(logical_id) else {
                 return self.failed_setup();
             };
@@ -634,7 +622,7 @@ impl PerCpuOffsetTable {
         }
 
         self.offsets = offsets;
-        self.count = cpu_id_map.count();
+        self.count = cpu_group.possible_cpu_count();
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

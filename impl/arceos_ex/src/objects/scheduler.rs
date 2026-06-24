@@ -2,7 +2,6 @@ use super::{
     cpu::CpuRef,
     cpu_control::{CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
     cpu_group::CpuGroup,
-    cpu_id_map::CpuIdMap,
     default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,
     init_task::InitTask,
@@ -336,13 +335,12 @@ impl Scheduler {
     pub fn preset(
         &mut self,
         cpu_group: &CpuGroup,
-        cpu_id_map: &CpuIdMap,
         per_cpu_storage: &PerCpuStorage,
         static_branch: &StaticBranch,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpu_group.state() != State::Ready
-            || cpu_id_map.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
             || per_cpu_storage.state() != State::Ready
             || static_branch.state() != State::Ready
         {
@@ -362,7 +360,6 @@ impl Scheduler {
     pub fn setup(
         &mut self,
         cpu_group: &CpuGroup,
-        cpu_id_map: &CpuIdMap,
         per_cpu_storage: &PerCpuStorage,
         init_task: &InitTask,
         init_mm: &InitMm,
@@ -372,7 +369,7 @@ impl Scheduler {
             || self.default_root_domain.state() != State::Ready
             || self.bit_wait_queue_table.state() != State::Prepared
             || cpu_group.state() != State::Ready
-            || cpu_id_map.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
             || per_cpu_storage.state() != State::Ready
             || init_task.state() != State::Online
             || init_mm.state() != State::Ready
@@ -380,12 +377,8 @@ impl Scheduler {
             return self.failed_setup();
         }
 
-        self.boot_runqueue.setup(
-            cpu_group,
-            cpu_id_map,
-            per_cpu_storage,
-            &self.default_root_domain,
-        )?;
+        self.boot_runqueue
+            .setup(cpu_group, per_cpu_storage, &self.default_root_domain)?;
         self.boot_idle_task
             .setup(init_task, init_mm, &self.boot_runqueue, cpu_group)?;
         self.boot_idle_preemption.setup_disabled(init_task)?;
@@ -1358,27 +1351,21 @@ impl BootRunQueue {
     pub fn setup(
         &mut self,
         cpu_group: &CpuGroup,
-        cpu_id_map: &CpuIdMap,
         _per_cpu_storage: &PerCpuStorage,
         root_domain: &DefaultSchedRootDomain,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpu_group.state() != State::Ready
-            || cpu_id_map.state() != State::Ready
+            || !cpu_group.possible_cpu_boundary_ready()
             || root_domain.state() != State::Ready
         {
             return self.failed_setup();
         }
 
-        let Some(boot_entry) = cpu_id_map.entry(0) else {
-            return self.failed_setup();
-        };
         let Some(boot_cpu) = cpu_group.boot_cpu() else {
             return self.failed_setup();
         };
-        if boot_cpu.cpu_ref() != boot_entry.cpu_ref()
-            || boot_cpu.hartid() != boot_entry.hartid()
-            || !boot_cpu.cpu_ref().is_boot_cpu()
+        if !boot_cpu.cpu_ref().is_boot_cpu()
             || !cpu_group.possible_contains(boot_cpu.cpu_ref())
             || !root_domain.covers_cpu_ref(boot_cpu.cpu_ref())
         {

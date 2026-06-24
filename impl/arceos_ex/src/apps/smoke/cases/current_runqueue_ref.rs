@@ -39,7 +39,6 @@ impl CurrentRunQueueFixture {
             "setup",
             self.runqueue.setup(
                 &ctx.cpu_group,
-                &ctx.cpu_id_map,
                 &ctx.per_cpu_storage,
                 ctx.scheduler.default_root_domain(),
             ),

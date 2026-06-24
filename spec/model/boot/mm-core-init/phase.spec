@@ -1581,7 +1581,6 @@ object MmCoreInitPhase: PhaseObject {
                     Zones.state == State::Ready;
                     PageMetadataMap.state == State::Ready;
                     CpuGroup.state == State::Ready;
-                    CpuIdMap.state == State::Ready;
                     DmaCachePolicy.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     PrintkBuffer.state == State::Ready;

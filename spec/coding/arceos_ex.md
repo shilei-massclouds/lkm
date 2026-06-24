@@ -1033,7 +1033,7 @@ CPU/CpuGroup 相关代码生成必须先服从统一 CPU 实例模型：
 - 不生成拥有 CPU 本体的 `PossibleCpu`、`PossibleRunQueue` 或独立 possible 集合对象。若实现需要 mask/table/storage，必须标注为 `CpuGroup` 的索引/集合视图承载。
 - 当前 `impl/arceos_ex` 可以暂时保留 `boot_cpu` 与 `secondary_cpus` 分开的存储结构，但这只是 lowering 细节。对外 checkpoint、trace、测试和后续生成注释都应呈现为统一 CPU 实例和 logical-id 索引模型。
 - `SecondaryCpuStore` 只允许作为 `impl/arceos_ex` 的 secondary CPU 实例承载，用来保存 AP 真正 online 前已经发现的 CPU 本体事实；它不是 formal 顶级对象，也不是新的 CPU group。所有对外可见的 CPU 成员关系仍必须通过 `CpuGroup.Cpu[logical_id] -> CpuRef -> CPU instance`、`CpuGroup.possible_cpus`、`CpuGroup.present_cpus` 和 `CpuGroup.online_cpus` 表达。`CpuGroup` 可以从 `SecondaryCpuStore` 刷新 `CpuView`，但不得把 store 暴露为调度、per-cpu、hotplug 或 root-domain 的身份来源。
-- `CpuIdMap` 是迁移期 logical-id 检查/投影视图，不是第二套 CPU 身份表，也不得成为 CPU identity、hartid 或 possible 集合的来源。实现若保留 compact `entries` 表，表项必须保存 `CpuRef`，并从 `CpuGroup.cpu_ref_at()` / `CpuGroup.possible_cpu_ref_at()` 与对应 `CpuView` 派生 `logical_id`、`hartid` 和 boot/secondary kind；任何超出 `CpuGroup.possible_cpus` 的 entry 都应不可见。
+- 不生成或保留独立 `CpuIdMap` 对象。logical-id 检查、hartid 唯一性、possible 集合边界和 `CpuGroup.Cpu[logical_id] -> CpuRef -> CPU instance` 解析都必须由 `CpuGroup` 的索引/集合视图直接承载。
 - AP 真实进入 secondary entry 前，不得为 possible secondary CPU 生成 live AP `CurrentCPU`、`LocalInterruptControl`、`CurrentTaskSlot` 或 `PreemptionControl` 链。
 
 重点检查范围：
@@ -1093,7 +1093,6 @@ make verify
 
 - `BootArgs`
 - `BootCPU`
-- `CpuIdMap`
 - `RootStream`
 - `InterruptStream`
 - `KernelImage`
@@ -1355,7 +1354,7 @@ write-combine、normal memory alias 先记录为 deferred/unsupported，不得�
 
 `SchedInitPhase` 已正式落到 `spec/model/boot/sched-init/`。实现侧必须保持与模型一致的阶段边界：入口是
 `MmCoreInitPhase.Ready`、`PageAllocator.Ready`、`SlubSubsystem.Ready`、`KmallocCaches.Ready`、`CpuGroup.Ready`、
-`CpuIdMap.Ready`、`PerCpuStorage.Ready`、`CpuHotplugState.Ready`、`StaticBranch.Ready`、`PrintkBuffer.Ready` 和
+`PerCpuStorage.Ready`、`CpuHotplugState.Ready`、`StaticBranch.Ready`、`PrintkBuffer.Ready` 和
 `SystemExclusive`；出口是 `Scheduler.Online`、`RadixTree.Ready`、`MapleTree.Ready`、`Workqueue.Prepared`、
 `Softirq.Prepared`、`RcuCore.Ready` 和 `TasksRcu.Prepared`。
 

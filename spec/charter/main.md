@@ -318,7 +318,7 @@ context BootPhaseContext: Context {
 
 `CpuGroup` 是 `SoC` 下的 CPU 组织对象，但它不拥有 CPU 本体，也不通过结构类型区分 boot CPU 与 secondary CPU。它维护的是 CPU 实例引用、`CpuGroup.Cpu[logical_id]` 索引视图，以及 possible/present/online 等集合视图。集合元素应是 CPU 引用或等价句柄，而不是新的 CPU 本体。当前不引入独立拥有生命周期的 `PossibleCpuSet` 或 `PossibleCpu` 对象；若后续为了实现或验证需要集合对象，必须明确它只是 `CpuGroup` 的视图/索引承载，不是 CPU 实例的拥有者。
 
-因此，规格中的访问关系应写成：`CpuGroup.Cpu[id] -> CpuRef -> CPUObject instance`。`CpuIdMap` 在当前模型中可作为 logical-id 索引视图或检查对象保留，但正式语义仍是 `CpuGroup` 维护按 logical id 编址的 CPU 引用数组。AP 在真实进入 secondary entry 之前，`CpuGroup` 可以知道其 possible/present 描述和 CPU 引用，但不得假定该 AP 的 live `CurrentCPU`、本地中断控制、current task slot 或抢占控制链已经存在。
+因此，规格中的访问关系应写成：`CpuGroup.Cpu[id] -> CpuRef -> CPUObject instance`。logical-id 索引视图和 possible/present/online 集合边界都由 `CpuGroup` 直接维护，不再通过独立 `CpuIdMap` 对象中转。AP 在真实进入 secondary entry 之前，`CpuGroup` 可以知道其 possible/present 描述和 CPU 引用，但不得假定该 AP 的 live `CurrentCPU`、本地中断控制、current task slot 或抢占控制链已经存在。
 
 ### Completion 类型
 
@@ -1167,7 +1167,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 9. `处理器管理`（`CPUGroup`）
 
-   描述：`片上系统` 的下级子对象，负责组织所有 CPU 实例引用、logical-id 索引和 possible/present/online 集合视图。当前入口前导期由 `BootCurrentCPU` 拥有启动 CPU 实例 `BootCPU`；`CPUGroup` 只注册和组织该引用，不拥有启动 CPU 本体。逻辑 `ID` 到 CPU 引用的索引视图由 `CpuGroup.Cpu[id]` 表达，当前 `CpuIdMap` 可作为迁移期检查对象保留。
+   描述：`片上系统` 的下级子对象，负责组织所有 CPU 实例引用、logical-id 索引和 possible/present/online 集合视图。当前入口前导期由 `BootCurrentCPU` 拥有启动 CPU 实例 `BootCPU`；`CPUGroup` 只注册和组织该引用，不拥有启动 CPU 本体。逻辑 `ID` 到 CPU 引用的索引视图由 `CpuGroup.Cpu[id]` 表达，不再引入独立 `CpuIdMap` 对象。
 
    * `preset` - 注册启动 CPU 引用
 
@@ -1288,7 +1288,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
     编码阶段对 `StaticBranch` 的最低要求是：提供显式 static key registry，能按 key 名或稳定 ID 查询并更新 key 值；`StaticBranch.set(key, value)` 必须要求 `StaticBranch.state == Ready` 或 `Online`，并在重复设置同一值时保持幂等；早期实现可以先用布尔值或计数值承载 key 状态，不要求立即实现指令 patch，但接口边界要保留后续替换为架构 jump-label patch 的空间。`StaticBranch.enable()` 至少要记录 sealed keys 集合，并在启用后禁止修改已 sealed 的 `ro_after_init` key。当前配置固定 `CONFIG_JUMP_LABEL=y`，因此编码规格不要求实现 `CONFIG_JUMP_LABEL=n` 的退化路径。
 13. `打印缓冲区`（`PrintkBuffer`）：代表 printk 的中间日志缓冲机制。参考 Linux 在 `setup_arch()` 前打印 banner 的时机，`arceos_ex` 也应在早期输出路径中写入自身启动 banner；该输出首先进入 printk 的静态 ring buffer，而不是立即写到后端设备。启动 banner 不应依赖面向 Unikernel 应用的 `axstd::println!`，而应通过内核启动期内部的 `printk`/`println-like` 前端，或直接通过 `PrintkBuffer.write()` action 写入。因此本子阶段应把 `PrintkBuffer.preset()` 放在 `EarlyCon.setup()` 之前，并把启动 banner 输出建模为状态内 `action`。
 14. `早期控制台`（`EarlyCon`）：代表正式 console 建立前的临时输出后端。对于当前 RISC-V64 路径，`EarlyCon.preset/setup/enable` 由 `EarlyParam.setup()` 处理 `earlycon=sbi` 时连续触发；其中 `setup` 基于 SBI DBCN 或 SBI v0.1 console 能力事实建立 SBI 输出后端，`enable` 注册并启用早期控制台，同时把 `PrintkBuffer` 中已经存在的历史输出 replay/flush 到后端。`EarlyCon.handoff/cleanup` 应留给后续正式 `Console` 注册阶段，不属于本子阶段到 `paging_init()` 完成前的核心边界。
-15. `处理器管理`（`CPUGroup`）：当前形式化模型把 `BootCPU` 视为统一 `CPU` Type 的一个实例，由 `BootCurrentCPU` 拥有；`CPUGroup` 维护对该实例和后续 secondary CPU 实例的引用、logical-id 索引和 possible/present/online 集合视图。`BootCPU.preset()` 在入口前导期生效，并记录启动 CPU 的物理 `hartid` 来自 `BootArgs.boot_hartid`；`BootCPU.logical_id == 0`，其它 logical id 对应 secondary CPU 实例。这样 `CPUGroup` 本身不再长期保存 `boot_cpu_hartid`，也不通过结构字段区分 boot/secondary CPU。入口后继期先由 `EarlyDtb.preset()` 建立 `PlatformCpuInfo`，再由 `CpuIdMap.preset()` 建立 `logical CPU 0 -> BootCPU` 的基础索引检查，使 `CpuIdMap` 进入 `Prepared`，并由 `BootCPU.setup/enable` 完成启动 CPU 的 active/online 语义推进；核心准备期中 `CpuGroup.setup()` 建立 CPU 拓扑事实和 possible/present 集合视图，随后 `CpuIdMap.setup()` 确认当前阶段可用的 logical CPU 映射边界并进入 `Ready`。`CpuIdMap.enable()` 保留给未来多 CPU 运行期或动态拓扑正式启用时使用。
+15. `处理器管理`（`CPUGroup`）：当前形式化模型把 `BootCPU` 视为统一 `CPU` Type 的一个实例，由 `BootCurrentCPU` 拥有；`CPUGroup` 维护对该实例和后续 secondary CPU 实例的引用、logical-id 索引和 possible/present/online 集合视图。`BootCPU.preset()` 在入口前导期生效，并记录启动 CPU 的物理 `hartid` 来自 `BootArgs.boot_hartid`；`BootCPU.logical_id == 0`，其它 logical id 对应 secondary CPU 实例。这样 `CPUGroup` 本身不再长期保存 `boot_cpu_hartid`，也不通过结构字段区分 boot/secondary CPU。入口后继期由 `EarlyDtb.preset()` 建立 `PlatformCpuInfo`，随后 `BootCPU.setup/enable` 完成启动 CPU 的 active/online 语义推进；核心准备期中 `CpuGroup.setup()` 建立 CPU 拓扑事实、`CpuGroup.Cpu[logical_id]` 索引视图和 possible/present/online 集合边界。
 
 对 `BootCPU` 而言，Linux `boot_cpu_init()` 会把启动 CPU 同时标记到 `possible`、`present`、`active` 与 `online` 四类 CPU 位图中。规格层不必照搬四个位图实现，但应保留这些语义层次：入口前导期 `BootCPU.preset()` 只记录启动 CPU 的物理 `hartid`；入口后继期 `EarlyDtb.preset()` 建立并发布 `PlatformCpuInfo`，确认该 hartid 属于平台有效集合；随后 `BootCPU.setup()` 对应 present/active 边界，`BootCPU.enable()` 对应 online 边界。
 
@@ -1300,9 +1300,9 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
   图 10 入口后继期对象分类与相互关系
 </p>
 
-图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `入口前导期对象`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径：启动期内部 `printk`/`println-like` 前端和应用侧 `axstd::println!` 是不同入口，但二者都应首先通过 `PrintkBuffer.write(...)` action 写入统一缓冲区，随后由 `EarlyCon` 或正式 `Console` drain/replay；后续正式 `Console` 建立时，`EarlyCon` 再退出或移交输出后端，而 `PrintkBuffer` 继续作为日志缓冲对象存在。`BootInitTask`、`InterruptStream` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootInitTask` 下显式列出 `BootInitStack` 与 `InitMM` 两个子对象，分别继续建立根栈保护状态和初始化根任务地址空间元数据；`InterruptStream` 继续防御式关闭中断总开关；`BootCPU` 是 `BootCurrentCPU` 拥有的启动 CPU 实例，`CPUGroup` 只维护 `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的索引/引用视图；`CpuIdMap` 作为当前 logical-id 映射检查对象保留。
+图 10 用于说明入口后继期涉及对象的分类与相互关系。`入口后继期对象` 作为阶段对象接续 `入口前导期对象`，并在 `start_kernel()` 之后编排本子阶段核心对象推进。`EarlyDtb` 基于入口前导期已经验证过的 `RawDtb` 先建立基础平台事实：`PlatformCpuInfo` 与 `PhysicalMemory`；随后它建立早期解析结果，驱动 `CommandLine.preset()` 产出 raw view `KernelCmdline`，同时触发 `MemBlock.preset()` 收集候选可用物理内存区段。`MemBlock.setup()` 再施加保留、裁剪和对齐等约束，形成可安全用于早期分配的物理内存管理状态。`Params.preset()` 再驱动 `EarlyParam` 基于 `CommandLine` 的 raw view 和静态 `early_param` handler 表解析早期参数，当前首先要求识别 `earlycon=sbi`，并在参数处理调用链内部连续驱动 `EarlyCon.preset/setup/enable`。`SwapperVM` 基于 `MemBlock` 和静态页表存储建立完整内核页表，并替换 `EarlyVM` 成为当前地址空间。`EarlyIoremap` 依赖 `FixMap.FIX_BTMAP` 临时映射区，提供 `early_ioremap()` / `early_iounmap()` 这类早期临时映射服务，但它不是 `FixMap` 的子对象。`SBI` 记录固件平台服务能力事实，供后续对象依赖；例如 `EarlyCon.setup()` 只负责使用 `SBI.dbcn_available` 或 legacy console 能力选择输出后端，而不重新探测这些能力。`PrintkBuffer` 与 `EarlyCon` 共同描述早期输出路径：启动期内部 `printk`/`println-like` 前端和应用侧 `axstd::println!` 是不同入口，但二者都应首先通过 `PrintkBuffer.write(...)` action 写入统一缓冲区，随后由 `EarlyCon` 或正式 `Console` drain/replay；后续正式 `Console` 建立时，`EarlyCon` 再退出或移交输出后端，而 `PrintkBuffer` 继续作为日志缓冲对象存在。`BootInitTask`、`InterruptStream` 与 `CPUGroup` 作为入口前导期承接对象出现在本图中：`BootInitTask` 下显式列出 `BootInitStack` 与 `InitMM` 两个子对象，分别继续建立根栈保护状态和初始化根任务地址空间元数据；`InterruptStream` 继续防御式关闭中断总开关；`BootCPU` 是 `BootCurrentCPU` 拥有的启动 CPU 实例，`CPUGroup` 维护 `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的索引/引用视图，并在核心准备期继续建立 secondary CPU 的索引和 possible/present/online 集合边界。
 
-`CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCurrentCPU` 拥有 `BootCPU` 并记录启动 CPU 身份，入口后继期由 `CpuIdMap.preset()` 建立 `logical CPU 0 -> BootCPU` 的基础索引检查并进入 `Prepared`。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实和 possible/present/online 集合视图，由 `CpuIdMap.setup()` 使当前阶段的 logical-id 映射边界进入 `Ready`。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和 CPU 本体状态两类职责。
+`CPUGroup` 的形式化迁移边界已经落地：入口前导期由 `BootCurrentCPU` 拥有 `BootCPU` 并记录启动 CPU 身份，`CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 作为基础索引事实随 `CpuGroup.preset()` 建立。核心准备期再由 `CpuGroup.setup()` 建立 CPU 拓扑事实、secondary CPU 索引和 possible/present/online 集合视图。这样可以避免 `BootArgs.boot_hartid` 在后续阶段被长期依赖，也避免 `CPUGroup` 同时承担 CPU 对象身份和 CPU 本体状态两类职责。
 
 形式化模型已经按阶段目录组织：正式入口为 `spec/model/main.spec`，它通过 include 串接 `StartupTimeline`、`BootPhase`、`EntryPreludePhase`、`EntrySuccessorPhase`、`CorePreparePhase` 与 `MmCoreInitPhase` 等分层规格。子阶段 4 的正式模型位于 `spec/model/boot/mm-core-init/`。
 
@@ -1313,7 +1313,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `BootInitStack.state == Online`，表示根栈保护状态已经建立
 - `InterruptStream.state == Ready`，表示中断子开关和总开关都已经封闭
 - `BootCPU.state == Online`，表示启动 CPU 已记录物理 `hartid`，并基于 `PlatformCpuInfo` 完成 present/active/online 的语义推进
-- `CpuIdMap.state == Prepared`，表示已建立 `logical CPU 0 -> BootCPU.hartid` 的基础映射，完整核心准备期 CPU 映射边界留待 `CpuIdMap.setup()`
+- `CpuGroup.Cpu[0] -> BootCPURef -> BootCPU` 的基础索引事实成立，完整 secondary CPU 索引和 possible/present/online 集合边界留待 `CpuGroup.setup()`
 - `MemBlock.state == Online`，表示候选物理内存区段已经经过保留、裁剪和对齐等约束处理，且完整线性映射可用后已经允许 `MemBlock` 元数据扩展
 - `InitMM.state == Ready`，表示 `init_mm` 已记录内核代码段、数据段和 `brk` 边界，并与 `BootInitTask.active_mm` 关系一致
 - `EarlyIoremap.state == Ready`，表示 `FIX_BTMAP` 临时映射槽位的服务端元数据已经初始化，后续可执行 `map/unmap` action
@@ -1327,7 +1327,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - 早期虚拟地址空间 `EarlyVM` 不再作为当前执行地址空间使用
 - 后续 `setup_arch()` 中 `paging_init()` 之后的初始化过程可以在完整内核虚拟地址空间下继续推进
 
-当前入口后继期的最小形式化对象模型已经围绕 `BootInitStack`、`InitMM`、`InterruptStream`、`BootCPU`、`CpuIdMap`、`EarlyIoremap`、`SBI`、`CommandLine` raw view、`EarlyParam`、`PrintkBuffer`、`EarlyCon`、`MemBlock`、`EarlyDtb`、`SwapperVM` 和 `VM.enable()` 落地。`jump_label_init()` 在 RISC-V `setup_arch()` 的早段抽象为 `StaticBranch.setup()`；`efi_init()` 暂仍作为当前最小核心路径之外的 deferred 对象。
+当前入口后继期的最小形式化对象模型已经围绕 `BootInitStack`、`InitMM`、`InterruptStream`、`BootCPU`、`EarlyIoremap`、`SBI`、`CommandLine` raw view、`EarlyParam`、`PrintkBuffer`、`EarlyCon`、`MemBlock`、`EarlyDtb`、`SwapperVM` 和 `VM.enable()` 落地。`jump_label_init()` 在 RISC-V `setup_arch()` 的早段抽象为 `StaticBranch.setup()`；`efi_init()` 暂仍作为当前最小核心路径之外的 deferred 对象。
 
 ##### 入口后继期对象构建时序
 
@@ -1345,21 +1345,20 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 1. 执行 `BootInitStack.enable()`，在入口前导期已经可用的根栈基础上建立栈溢出保护状态，使 `BootInitStack` 从 `Ready` 推进到 `Online`。
 2. 执行 `EarlyDtb.preset()`，从 `RawDtb` 中提取基础平台事实：解析 `/cpus` 建立并发布 `PlatformCpuInfo`，确认启动 hartid 合法；解析 `/memory` 建立并发布 `PhysicalMemory`。
-3. 执行 `CpuIdMap.preset()`，建立 `logical CPU 0 -> BootCPU` 的基础映射，使 `CpuIdMap` 进入 `Prepared`。该步骤对应 Linux 中 `smp_setup_processor_id()` 对启动处理器逻辑 ID 的早期确认；CPU 对象自己维护 hartid 和 possible/present/online 等状态事实。
-4. 执行 `InterruptStream.setup()`，对应 Linux 中 `local_irq_disable()` 的防御式关中断动作，清除 `sstatus.SIE`，使 `InterruptStream` 从 `Prepared` 推进到 `Ready`。
-5. 执行 `BootCPU.boot_cpu_init()`（规格中对应入口后继期的 `BootCPU.setup/enable`），基于 `PlatformCpuInfo` 已确认的启动 hartid，使 `BootCPU` 完成 present/active/online 的语义推进。
-6. 执行 `PrintkBuffer.preset()`，建立 printk 静态缓冲机制；随后 `arceos_ex` 启动 banner 可通过启动期内部输出前端或直接通过 `PrintkBuffer.write()` 写入统一 ring buffer。该写入是 `action`，不推进 `PrintkBuffer` 的生命周期状态，也不依赖应用侧 `axstd::println!`。
-7. 执行 `EarlyDtb.setup() / parse_dtb()` 的后续解析用途，提取 kernel command line，解析 FDT header `/memreserve/` 与 `/reserved-memory` 形成 FDT reserved ranges，并触发 `MemBlock.preset()` 和 `CommandLine.preset()`，使 raw view `KernelCmdline` 进入 `Ready`，并形成候选可用物理内存区段和初步边界。
-8. 执行 `InitMM.setup() / setup_initial_init_mm()`，初始化 `BootInitTask` 的 `InitMM` 子对象，记录 `_stext`、`_etext`、`_edata` 与 `_end` 对应的代码段、数据段和 `brk` 边界；`InitMM.pgd` 仍指向 `swapper_pg_dir`，后续由 `VM.enable()` 使其对应的完整内核页表成为当前地址空间。
-9. 执行 `EarlyIoremap.setup() / early_ioremap_setup()`，基于 `FixMap.FIX_BTMAP` 初始化早期临时映射服务的 slot 元数据；后续 `early_ioremap()` 与 `early_iounmap()` 是 `map/unmap` action。
-10. 执行 `SBI.setup() / sbi_init()`，探测并记录 SBI 规范版本、固件标识和扩展能力视图。该步骤只产出能力事实，不把具体 SBI 调用建模为 `SBI` 自身的生命周期 transition。
-11. 执行 RISC-V `setup_arch()` 早段中的 `jump_label_init()`，抽象为 `StaticBranch.setup()`，使 `StaticBranch` 进入 `Ready`。该调用发生在 `parse_early_param()` 之前，使早期参数处理路径可以安全使用 static key。通用 `start_kernel()` 在 `setup_arch()` 返回后还会再次调用 `jump_label_init()`；在当前 RISC-V 路径中第二次调用因 `StaticBranch` 已经 `Ready` 而作为幂等 checkpoint 处理，不再推进对象状态。
-12. 执行 `Params.preset() / parse_early_param()`，驱动 `EarlyParam.setup()` 解析 `CommandLine` 的 raw view 并分发早期参数。当前要求 `earlycon` handler 必须存在；处理 `earlycon=sbi` 时，该调用链内部连续触发 `EarlyCon.preset(config=sbi)`、`EarlyCon.setup()` 和 `EarlyCon.enable()`：`preset` 记录参数配置，`setup` 基于 `SBI` 能力事实建立 SBI early console 后端，`enable` 注册并启用后端，同时 drain/replay `PrintkBuffer` 中已经存在的 Banner 等历史输出。
-13. 执行 `efi_init()`，当前暂不建模为正式对象，只作为 `defer` 占位记录。对当前 RISC-V64 最小核心路径而言，`efi_init()` 主要涉及 EFI 引导路径与相关运行时信息的早期探测，不直接改变 `SwapperVM` 建立和切换的核心语义；后续若需要支持 EFI 启动路径，再单独抽象为 `EFI` 或 `FirmwareInterface` 一类对象。
-14. 执行 `MemBlock.setup()`，对应 `setup_bootmem()`。它在 `MemBlock.preset()` 收集到的候选物理内存区段基础上，排除内核自身、FDT header `/memreserve/`、`/reserved-memory`、RawDtb、InitRD 等不可分配范围，并应用 memory limit、对齐和可映射范围等控制约束，形成可安全用于早期分配的物理内存管理状态。
-15. 执行 `VM.enable()`，对应 Linux `setup_vm_final()` 的抽象实施流程。内部依次推进 `SwapperVM.setup()`、`SwapperVM.enable()` 和 `EarlyVM.cleanup()`：`SwapperVM.setup()` 依赖 `MemBlock.Ready` 建立完整内核页表，并使用和清理临时页表构建 fixmap slots；`SwapperVM.enable()` 使完整内核页表成为当前地址空间；`EarlyVM.cleanup()` 使 `EarlyVM` 退出当前地址空间服务。
-16. 执行 `MemBlock.enable() / memblock_allow_resize()`，在完整线性映射可用后允许 `MemBlock` 元数据扩展，使 `MemBlock` 从 `Ready` 推进到 `Online`。
-17. 执行 `EarlyDtb.cleanup()`，使早期 DTB 解析对象退出服务。这里的 `Destroyed` 不表示 `RawDtb` 物理内容消失，而表示早期解析对象的阶段性使命完成；后续正式 OF/DeviceTree 对象应视为重新建立的运行期对象。
+3. 执行 `InterruptStream.setup()`，对应 Linux 中 `local_irq_disable()` 的防御式关中断动作，清除 `sstatus.SIE`，使 `InterruptStream` 从 `Prepared` 推进到 `Ready`。
+4. 执行 `BootCPU.boot_cpu_init()`（规格中对应入口后继期的 `BootCPU.setup/enable`），基于 `PlatformCpuInfo` 已确认的启动 hartid，使 `BootCPU` 完成 present/active/online 的语义推进。
+5. 执行 `PrintkBuffer.preset()`，建立 printk 静态缓冲机制；随后 `arceos_ex` 启动 banner 可通过启动期内部输出前端或直接通过 `PrintkBuffer.write()` 写入统一 ring buffer。该写入是 `action`，不推进 `PrintkBuffer` 的生命周期状态，也不依赖应用侧 `axstd::println!`。
+6. 执行 `EarlyDtb.setup() / parse_dtb()` 的后续解析用途，提取 kernel command line，解析 FDT header `/memreserve/` 与 `/reserved-memory` 形成 FDT reserved ranges，并触发 `MemBlock.preset()` 和 `CommandLine.preset()`，使 raw view `KernelCmdline` 进入 `Ready`，并形成候选可用物理内存区段和初步边界。
+7. 执行 `InitMM.setup() / setup_initial_init_mm()`，初始化 `BootInitTask` 的 `InitMM` 子对象，记录 `_stext`、`_etext`、`_edata` 与 `_end` 对应的代码段、数据段和 `brk` 边界；`InitMM.pgd` 仍指向 `swapper_pg_dir`，后续由 `VM.enable()` 使其对应的完整内核页表成为当前地址空间。
+8. 执行 `EarlyIoremap.setup() / early_ioremap_setup()`，基于 `FixMap.FIX_BTMAP` 初始化早期临时映射服务的 slot 元数据；后续 `early_ioremap()` 与 `early_iounmap()` 是 `map/unmap` action。
+9. 执行 `SBI.setup() / sbi_init()`，探测并记录 SBI 规范版本、固件标识和扩展能力视图。该步骤只产出能力事实，不把具体 SBI 调用建模为 `SBI` 自身的生命周期 transition。
+10. 执行 RISC-V `setup_arch()` 早段中的 `jump_label_init()`，抽象为 `StaticBranch.setup()`，使 `StaticBranch` 进入 `Ready`。该调用发生在 `parse_early_param()` 之前，使早期参数处理路径可以安全使用 static key。通用 `start_kernel()` 在 `setup_arch()` 返回后还会再次调用 `jump_label_init()`；在当前 RISC-V 路径中第二次调用因 `StaticBranch` 已经 `Ready` 而作为幂等 checkpoint 处理，不再推进对象状态。
+11. 执行 `Params.preset() / parse_early_param()`，驱动 `EarlyParam.setup()` 解析 `CommandLine` 的 raw view 并分发早期参数。当前要求 `earlycon` handler 必须存在；处理 `earlycon=sbi` 时，该调用链内部连续触发 `EarlyCon.preset(config=sbi)`、`EarlyCon.setup()` 和 `EarlyCon.enable()`：`preset` 记录参数配置，`setup` 基于 `SBI` 能力事实建立 SBI early console 后端，`enable` 注册并启用后端，同时 drain/replay `PrintkBuffer` 中已经存在的 Banner 等历史输出。
+12. 执行 `efi_init()`，当前暂不建模为正式对象，只作为 `defer` 占位记录。对当前 RISC-V64 最小核心路径而言，`efi_init()` 主要涉及 EFI 引导路径与相关运行时信息的早期探测，不直接改变 `SwapperVM` 建立和切换的核心语义；后续若需要支持 EFI 启动路径，再单独抽象为 `EFI` 或 `FirmwareInterface` 一类对象。
+13. 执行 `MemBlock.setup()`，对应 `setup_bootmem()`。它在 `MemBlock.preset()` 收集到的候选物理内存区段基础上，排除内核自身、FDT header `/memreserve/`、`/reserved-memory`、RawDtb、InitRD 等不可分配范围，并应用 memory limit、对齐和可映射范围等控制约束，形成可安全用于早期分配的物理内存管理状态。
+14. 执行 `VM.enable()`，对应 Linux `setup_vm_final()` 的抽象实施流程。内部依次推进 `SwapperVM.setup()`、`SwapperVM.enable()` 和 `EarlyVM.cleanup()`：`SwapperVM.setup()` 依赖 `MemBlock.Ready` 建立完整内核页表，并使用和清理临时页表构建 fixmap slots；`SwapperVM.enable()` 使完整内核页表成为当前地址空间；`EarlyVM.cleanup()` 使 `EarlyVM` 退出当前地址空间服务。
+15. 执行 `MemBlock.enable() / memblock_allow_resize()`，在完整线性映射可用后允许 `MemBlock` 元数据扩展，使 `MemBlock` 从 `Ready` 推进到 `Online`。
+16. 执行 `EarlyDtb.cleanup()`，使早期 DTB 解析对象退出服务。这里的 `Destroyed` 不表示 `RawDtb` 物理内容消失，而表示早期解析对象的阶段性使命完成；后续正式 OF/DeviceTree 对象应视为重新建立的运行期对象。
 
 当前入口后继期的最小形式化对象模型已经落地；它的完成边界就是核心准备期的起点。后续围绕 `paging_init()` 之后到 `trap_init()` 之前的讨论，应先落入下面的核心准备期规格，再视稳定程度同步到形式化模型和对象级实现。
 
@@ -1385,12 +1384,12 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 3. `分区对象`（`Zones`）：`Zones` 对应 `misc_mem_init()` 中的 `zone_sizes_init()`，按 `Zones -> Zone -> OrderClass -> MigrationType -> FreePageSet` 五层抽象描述 zone、buddy order、迁移类型和空闲页集合边界。当前先固定三类 `ZoneKind`：`DMA32`、`NORMAL` 和 `MOVABLE`，分别代表 32-bit DMA 可寻址区、普通可管理内存区和可迁移内存策略区；三者作为逻辑 zone 总是存在，但允许某类 zone 的物理范围为空。参考 Linux/RISC-V，`DMA32` 边界来自 `CONFIG_ZONE_DMA32` 和 `dma32_phys_limit`，`NORMAL` 覆盖普通 managed memory，`MOVABLE` 先作为策略预留区，后续再由 `movablecore`、memory hotplug 或类似策略切出实际范围。这里必须区分 `ZoneKind::MOVABLE` 和 `MigrationType::MOVABLE`：前者是 zone 层的物理区段类型，后者是每个 zone 下 buddy/pageblock 层的迁移类型。完整页分配器初始化属于后续 `mm_core_init()` 阶段，不在当前核心准备期中以独立对象建模。
 4. `页元数据映射对象`（`PageMetadataMap`）：对应当前 `CONFIG_FLATMEM=y` 路径下 `misc_mem_init() -> zone_sizes_init() -> free_area_init()` 中的 `alloc_node_mem_map()` 和 `memmap_init()`。它建立 Linux `struct page` metadata 视图，使 PFN/PageRef 转换在后续 `mem_init()` 之前已经有效；当前 `CONFIG_SPARSEMEM=n`，`sparse_init()` 展开为空操作，SPARSEMEM/VMEMMAP 元数据路径不进入主线 formal。
 5. `资源树`（`ResourceTree`）：对应 `init_resources()`，根据 `MemBlock` 中的 memory/reserved 区段建立系统资源树，并登记 system RAM、reserved resources、kernel image/code/rodata/data/bss 等资源，同时约束子资源必须落在父资源范围内，重叠关系必须合法。
-6. `CPU 管理对象`（`CpuGroup` / `CpuIdMap` / `BootCPU` / secondary CPU instances）：`CpuGroup` 是所有 CPU 实例的引用组织者；正式索引形态是 `CpuGroup.Cpu[logical_id]`，其中 logical id `0` 总是引用 `BootCPU`，后续 logical id 引用 secondary CPU 实例。`CpuGroup` 不拥有 CPU 本体，也不通过结构类型区分 boot CPU 与 secondary CPU；每个 CPU 对象自己维护 hartid、logical id 和 possible/present/online 等状态事实。`CpuGroup` 同时维护 possible/present/online 集合视图，集合元素是 CPU 引用。`CpuIdMap` 是当前 logical-id 索引检查对象，后续可收敛为 `CpuGroup.Cpu[id]` 的正式视图；当前不引入额外拥有生命周期的 `CPUSetObject` 或 `PossibleCpu` 中间类型。`CpuGroup.setup()` 对应 `setup_smp()`，只建立拓扑事实和 secondary CPU 候选集合，不启动 secondary CPU，也不开放多 hart 并发；`CpuIdMap.setup()` 在其后确认当前阶段的 logical CPU 映射边界，`CpuIdMap.enable()` 保留给未来运行期正式启用。
+6. `CPU 管理对象`（`CpuGroup` / `BootCPU` / secondary CPU instances）：`CpuGroup` 是所有 CPU 实例的引用组织者；正式索引形态是 `CpuGroup.Cpu[logical_id]`，其中 logical id `0` 总是引用 `BootCPU`，后续 logical id 引用 secondary CPU 实例。`CpuGroup` 不拥有 CPU 本体，也不通过结构类型区分 boot CPU 与 secondary CPU；每个 CPU 对象自己维护 hartid、logical id 和 possible/present/online 等状态事实。`CpuGroup` 同时维护 possible/present/online 集合视图，集合元素是 CPU 引用。当前不引入额外拥有生命周期的 `CPUSetObject`、`PossibleCpu` 或 `CpuIdMap` 中间类型。`CpuGroup.setup()` 对应 `setup_smp()`，只建立拓扑事实、secondary CPU 候选集合和 logical CPU 映射边界，不启动 secondary CPU，也不开放多 hart 并发。
 7. `RISC-V 缓存块信息`（`CacheBlockInfo`）：对应 Linux 6.12.37 的 `riscv_init_cbo_blocksizes()`，它是独立的平台级事实对象，不是 `CorePreparePhase` 的下级对象。当前模型从正式 `DeviceTree` 的 CPU nodes 收集 `riscv,cbom-block-size` 和 `riscv,cboz-block-size`，结合 `CpuGroup` 限定当前拓扑中的 hart，并收敛为系统级 `CBOM`/`CBOZ` block size 事实。缺失属性表示 unavailable；多个 hart 值不一致只形成诊断事实，不阻止对象进入 `Ready`。`CBOP` 虽然存在 DeviceTree binding，但 Linux 6.12.37 的该初始化点不发布它，暂缓建模。
 8. `CPU 能力对象`（`CpuCapabilities`）：对应 `riscv_fill_hwcap()` 的规格抽象，汇总 CPU 集合的 ISA/hwcap 能力事实，供后续 alternatives、DMA/cache policy、上下文管理和用户态 ISA 暴露路径依赖。它是独立事实对象，不是 `CorePreparePhase` 的下级对象；当前从正式 `DeviceTree` 的 CPU nodes 收集 per-hart ISA facts，结合 `CpuGroup` 形成 all-harts common capability facts，并用 `CacheBlockInfo` 校验 Zicbom/Zicboz。FPU/VECTOR 的支持事实属于本对象；入口期禁用 FPU/VECTOR 的执行状态属于 CPU execution context，不由本对象推进。
 9. `DMA/cache 策略事实对象`（暂名 `DmaCachePolicy`）：对应 `riscv_noncoherent_supported()` 与 `riscv_set_dma_cache_alignment()`。它消费 `CpuCapabilities.Ready` 与 `CacheBlockInfo.Ready`，收敛当前平台是否支持 non-coherent DMA、是否需要显式 cache maintenance、以及 `dma_cache_alignment` 的最终事实。当前 `default_config` 中 `CONFIG_RISCV_DMA_NONCOHERENT=y` 且 `CONFIG_RISCV_ISA_ZICBOM=y`；若当前 CPU 能力事实显示 Zicbom 可用，则 `riscv_noncoherent_supported()` 记录 non-coherent DMA 支持事实，否则 `riscv_set_dma_cache_alignment()` 会把 `dma_cache_alignment` 降为 1。该对象不是 DMA API 本体，也不分配 DMA bounce buffer；它只为后续 `mem_init()` 中的 SWIOTLB/bounce 决策提供前置事实。
 10. `命令行管理对象`（`CommandLine`）：对应启动命令行文本视图管理。`KernelCmdline` 是 raw view，入口后继期由 `CommandLine.preset()` 建立；`SavedCommandLine` 是 saved view，`StaticCommandLine` 是 static/work view，核心准备期由 `CommandLine.setup()` 驱动建立，对应 `setup_command_line()` 中建立命令行副本的部分。`EarlyParam`、`BootParam` 和 `PayloadParam` 属于 `Params` 管理的参数解析类对象，不并入 `CommandLine.setup()`，也不改变它们在 `PerCpuStorage` / `CpuHotplugState` 之后的原有时序。
-11. `per-cpu 存储对象`（`PerCpuStorage`）：对应 `setup_per_cpu_areas()`。它是顶层管理对象，聚合 `PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable`。`PerCpuStaticImage` 来自 `Lds` 中的 `__per_cpu_start`、`__per_cpu_end` 和 `__per_cpu_load`：前二者定义静态 percpu 模板的运行地址范围和大小，`__per_cpu_load` 定义 first chunk 初始化时复制初始内容的加载地址。`PerCpuFirstChunk` 由 `MemBlock` 分配并在线性映射下可访问，每个 possible CPU 对应一个 unit；unit 内部布局为 `static | [reserved] | dynamic | unused tail`。static 区从 `PerCpuStaticImage.load` 复制初始化，reserved 区当前只作为可为零的布局事实保留，后续模块或 reserved percpu allocation 路径再展开；dynamic 区当前表示 first chunk 中的早期动态预留。`PerCpuOffsetTable` 基于 `CpuIdMap.Ready` 建立 logical CPU 到 unit/base offset 的映射，其表项边界和 first chunk unit 个数都基于 `CpuGroup` 中的 possible CPU 集合，而不是 online CPU 集合。当前阶段要求静态 percpu symbol 可以仿照 Linux `per_cpu_ptr()` 风格按 logical CPU 计算对应实例地址；完整动态 percpu allocator 和额外 dynamic chunks 后续再展开。
+11. `per-cpu 存储对象`（`PerCpuStorage`）：对应 `setup_per_cpu_areas()`。它是顶层管理对象，聚合 `PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable`。`PerCpuStaticImage` 来自 `Lds` 中的 `__per_cpu_start`、`__per_cpu_end` 和 `__per_cpu_load`：前二者定义静态 percpu 模板的运行地址范围和大小，`__per_cpu_load` 定义 first chunk 初始化时复制初始内容的加载地址。`PerCpuFirstChunk` 由 `MemBlock` 分配并在线性映射下可访问，每个 possible CPU 对应一个 unit；unit 内部布局为 `static | [reserved] | dynamic | unused tail`。static 区从 `PerCpuStaticImage.load` 复制初始化，reserved 区当前只作为可为零的布局事实保留，后续模块或 reserved percpu allocation 路径再展开；dynamic 区当前表示 first chunk 中的早期动态预留。`PerCpuOffsetTable` 基于 `CpuGroup.Cpu[logical_id]` 和 `CpuGroup.possible_cpus` 建立 logical CPU 到 unit/base offset 的映射，其表项边界和 first chunk unit 个数都基于 `CpuGroup` 中的 possible CPU 集合，而不是 online CPU 集合。当前阶段要求静态 percpu symbol 可以仿照 Linux `per_cpu_ptr()` 风格按 logical CPU 计算对应实例地址；完整动态 percpu allocator 和额外 dynamic chunks 后续再展开。
 12. `CPU hotplug 状态对象`（`CpuHotplugState`）：对应 `boot_cpu_hotplug_init()`。它是每个 `CPUObject` 的通用子对象，正式路径写作 `CpuGroup.Cpu[cpu].CpuHotplugState`，适用于 `BootCPU` 和后续 secondary CPU。`CpuHotplugState.state` 只表示对象生命周期，例如 `Prepared`、`Ready` 和后续可能的 `Online`；Linux 的 `CPUHP_*` 枚举属于独立的 hotplug step 域，不与对象生命周期状态混合。当前核心准备期只建立 BootCPU 实例，要求 `BootCPU.CpuHotplugState.state == Ready`，并将 `BootCPU.CpuHotplugState.current_step` 与 `target_step` 初始化为 `CPUHP_ONLINE`，同时记录 booted-once 事实。secondary CPU 的实例创建、step 推进和 hooks 触发留给后续 bringup/teardown 路径建模。
 13. `参数解析管理对象`（`Params`）：`Params` 在入口后继期已经由 `preset` 推进到 `Prepared`，表示早期参数解析完成；核心准备期由 `Params.setup()` 驱动 `BootParam.setup()` 和 `PayloadParam.setup()`，并要求实现把 `print_unknown_bootoptions()` checkpoint 保留在二者之间。
 14. `普通启动参数对象`（`BootParam`）：对应 `parse_args("Booting kernel", ...)`。它不同于入口后继期的 `EarlyParam`，用于普通 `__param` 解析、未知选项收集以及 `--` 边界记录。
@@ -1497,7 +1496,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 | `early_security_init()` | deferred | 当前配置无 early LSM 主线；若后续启用 early LSM，可映射为 `SecurityCore.preset()`，本阶段暂不推进安全对象状态。 |
 | `setup_boot_config()` | deferred | bootconfig/XBC/initrd 派生参数后续作为参数来源展开。 |
 | `setup_command_line()` | formal: `CommandLine.setup()` | 建立 saved/static 命令行视图；只处理命令行副本，不合并后续 Param 解析时序。 |
-| `setup_nr_cpu_ids()` | implementation checkpoint | Linux 中是 cpumask/per-cpu 数组上界；规格模型不需要 `CpuIdMap.nr_ids`。实现只检查 `CpuIdMap[0] == BootCPU` 和 possible CPU 映射边界，不推进状态。 |
+| `setup_nr_cpu_ids()` | implementation checkpoint | Linux 中是 cpumask/per-cpu 数组上界；规格模型不需要单独 `nr_ids` 或 `CpuIdMap`。实现只检查 `CpuGroup.Cpu[0] == BootCPU` 和 possible CPU 映射边界，不推进状态。 |
 | `setup_per_cpu_areas()` | formal: `PerCpuStorage.setup()` | 建立 `PerCpuStaticImage`、`PerCpuFirstChunk` 和 `PerCpuOffsetTable`，完整动态 allocator 后续展开。 |
 | `smp_prepare_boot_cpu()` | deferred | RISC-V64 当前弱实现为空，不建立额外对象。 |
 | `early_numa_node_init()` | 不纳入当前规格 | 当前规格限定 SMP over UMA，不支持 NUMA；该项不是 deferred。 |
@@ -1529,7 +1528,6 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `Zones.state == Ready`
 - `PageMetadataMap.state == Ready`
 - `CpuGroup.state == Ready`
-- `CpuIdMap.state == Ready`
 - `DmaCachePolicy.state == Ready`
 - `PerCpuStorage.state == Ready`
 - `PrintkBuffer.state == Ready`
@@ -1717,7 +1715,6 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `SlubSubsystem.state == Ready`
 - `KmallocCaches.state == Ready`
 - `CpuGroup.state == Ready`
-- `CpuIdMap.state == Ready`
 - `PerCpuStorage.state == Ready`
 - `BootCPU.CpuHotplugState.state == Ready`
 - `StaticBranch.state == Ready`

@@ -25,15 +25,10 @@ pub fn setup(ctx: &mut Context) -> ! {
 fn setup_objects(ctx: &mut Context) -> EventResult {
     checkpoint_poking_init_noop()?;
     checkpoint_ftrace_init_noop()?;
-    ctx.scheduler.preset(
-        &ctx.cpu_group,
-        &ctx.cpu_id_map,
-        &ctx.per_cpu_storage,
-        &ctx.static_branch,
-    )?;
+    ctx.scheduler
+        .preset(&ctx.cpu_group, &ctx.per_cpu_storage, &ctx.static_branch)?;
     ctx.scheduler.setup(
         &ctx.cpu_group,
-        &ctx.cpu_id_map,
         &ctx.per_cpu_storage,
         &ctx.init_task,
         &ctx.init_mm,

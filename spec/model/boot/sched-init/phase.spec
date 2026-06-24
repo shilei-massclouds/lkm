@@ -50,7 +50,6 @@ object Scheduler: SchedulerObject {
                 depends_on {
                     MmCoreInitPhase.state == State::Ready;
                     CpuGroup.state == State::Ready;
-                    CpuIdMap.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     StaticBranch.state == State::Ready;
                 }
@@ -90,7 +89,6 @@ object Scheduler: SchedulerObject {
             on Transition::Setup -> State::Ready {
                 depends_on {
                     CpuGroup.state == State::Ready;
-                    CpuIdMap.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     BootInitTask.state == State::Online;
                     InitMM.state == State::Ready;
@@ -281,7 +279,6 @@ object BootRunQueue: RunQueue {
                 depends_on {
                     DefaultSchedRootDomain.state == State::Ready;
                     CpuGroup.state == State::Ready;
-                    CpuIdMap.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                 }
 
@@ -812,7 +809,6 @@ object SchedInitPhase: PhaseObject {
                     SlubSubsystem.state == State::Ready;
                     KmallocCaches.state == State::Ready;
                     CpuGroup.state == State::Ready;
-                    CpuIdMap.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                     CpuHotplugState.state == State::Ready;
                     StaticBranch.state == State::Ready;

@@ -418,7 +418,7 @@ _EXTERNAL_PREDICATES = {
     "boot_cpu_hartid_ready": "boot_hart_identity",
     "boot_cpu_online": "cpu_state",
     "boot_cpu_present": "cpu_state",
-    "cpu_id_map_ready": "cpu_topology",
+    "cpu_group_possible_cpu_boundary_ready": "cpu_topology",
     "valid_object_storage": "object_storage",
     "valid_page_table_storage": "object_storage",
     "valid_phys_range_set": "platform",

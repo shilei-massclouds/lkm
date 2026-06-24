@@ -1979,8 +1979,7 @@ object BootCpuCurrentTask: CurrentTaskSlot {
 /*
  * CpuGroup 表示 SoC 下的处理器管理对象。它维护 CPU 对象引用、索引和拓扑
  * 组织关系，不拥有 CPU 本体；启动 CPU 本体由 BootCurrentCPU 拥有。
- * 核心准备期再基于正式 DeviceTree 和 CpuIdMap.Prepared 完成 setup_smp()
- * 对应的拓扑准备。
+ * 核心准备期再基于正式 DeviceTree 完成 setup_smp() 对应的拓扑准备。
  */
 object CpuGroup: HardwareObject {
     initial_state: State::Base;
@@ -2031,7 +2030,6 @@ object CpuGroup: HardwareObject {
                 depends_on {
                     BootCPU.state == State::Online;
                     DeviceTree.state == State::Ready;
-                    CpuIdMap.state == State::Prepared;
                     SBI.state == State::Ready;
                 }
 
@@ -2056,8 +2054,10 @@ object CpuGroup: HardwareObject {
                     secondary_cpus_possible(CpuGroup);
                     secondary_cpus_present(CpuGroup);
                     secondary_cpus_not_online(CpuGroup);
-                    cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
-                    cpu_id_map_entry(CpuIdMap, 0, BootCPU);
+                    cpu_group_secondary_cpu_entries_ready(CpuGroup);
+                    cpu_group_cpu_refs_have_unique_logical_ids(CpuGroup);
+                    cpu_group_cpu_refs_have_unique_hartids(CpuGroup);
+                    cpu_group_possible_cpu_boundary_ready(CpuGroup);
                     cpu_group_concurrency_closed(CpuGroup);
                 }
             }
@@ -2089,8 +2089,10 @@ object CpuGroup: HardwareObject {
             secondary_cpus_possible(CpuGroup);
             secondary_cpus_present(CpuGroup);
             secondary_cpus_not_online(CpuGroup);
-            cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
-            cpu_id_map_entry(CpuIdMap, 0, BootCPU);
+            cpu_group_secondary_cpu_entries_ready(CpuGroup);
+            cpu_group_cpu_refs_have_unique_logical_ids(CpuGroup);
+            cpu_group_cpu_refs_have_unique_hartids(CpuGroup);
+            cpu_group_possible_cpu_boundary_ready(CpuGroup);
             cpu_group_concurrency_closed(CpuGroup);
         }
 

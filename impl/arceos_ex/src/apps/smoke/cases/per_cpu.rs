@@ -18,7 +18,7 @@ pub fn run() -> SmokeResult {
     }
 
     let symbol = PerCpuSymbol::new(&SMOKE_PER_CPU_COUNTER);
-    let count = ctx.cpu_id_map.count();
+    let count = ctx.cpu_group.possible_cpu_count();
     if count == 0 || count != ctx.cpu_group.possible_cpu_count() {
         printk::write_str("per-cpu logical CPU count invalid\n");
         return SmokeResult::Failed;

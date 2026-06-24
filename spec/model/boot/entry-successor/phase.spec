@@ -875,96 +875,6 @@ object SBI: PlatformServiceObject {
 }
 
 /*
- * CpuIdMap 表示 CpuGroup.Cpu[logical_id] 索引视图的当前检查承载。入口后继期
- * 只建立 logical CPU 0 -> BootCPU 的基础索引检查；核心准备期在
- * CpuGroup.setup_smp() 之后再完成当前阶段的 CPU 映射边界整理。Enable 保留给
- * 未来多 CPU 运行期或动态拓扑正式启用时使用。
- */
-object CpuIdMap: HardwareObject {
-    initial_state: State::Base;
-    parent: CpuGroup;
-
-    /*
-     * Base 表示逻辑 ID 映射尚未建立。
-     */
-    state State::Base {
-        transitions {
-            /*
-             * Preset 建立 logical CPU 0 -> BootCPU 的基础映射。
-             */
-            on Transition::Preset -> State::Prepared {
-                depends_on {
-                    BootCPU.state == State::Prepared;
-                    CpuGroup.state == State::Prepared;
-                }
-
-                ensures {
-                    cpu_logical_id_ready(BootCPU, 0);
-                    cpu_group_uses_logical_id_index(CpuGroup);
-                    cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
-                    cpu_id_map_entry(CpuIdMap, 0, BootCPU);
-                    cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
-                }
-            }
-        }
-    }
-
-    /*
-     * Prepared 表示 boot CPU 基础映射已建立，但尚未完成核心准备期 CPU 映射整理。
-     */
-    state State::Prepared {
-        invariant {
-            cpu_logical_id_ready(BootCPU, 0);
-            cpu_group_uses_logical_id_index(CpuGroup);
-            cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
-            cpu_id_map_entry(CpuIdMap, 0, BootCPU);
-            cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
-        }
-
-        transitions {
-            /*
-             * Setup 在 CpuGroup.setup_smp() 建立拓扑事实后，确认当前阶段可用的
-             * CPU logical id 映射边界。它不启动 secondary CPU，也不占用 Enable。
-             */
-            on Transition::Setup -> State::Ready {
-                depends_on {
-                    CpuGroup.state == State::Ready;
-                }
-
-                ensures {
-                    cpu_id_map_ready(CpuIdMap, CpuGroup);
-                    cpu_group_cpu_ref_at(CpuGroup, 0, BootCPURef);
-                    cpu_group_cpu_ref_targets(CpuGroup, BootCPURef, BootCPU);
-                    cpu_id_map_entry(CpuIdMap, 0, BootCPU);
-                    cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
-                    cpu_id_map_secondary_cpu_entries_ready(CpuIdMap, CpuGroup);
-                    cpu_id_map_entries_have_unique_logical_ids(CpuIdMap);
-                    cpu_id_map_entries_have_unique_hartids(CpuIdMap);
-                    cpu_id_map_possible_cpu_boundary_ready(CpuIdMap, CpuGroup);
-                }
-            }
-        }
-    }
-
-    /*
-     * Ready 表示核心准备期需要的逻辑 ID 映射边界已建立。
-     */
-    state State::Ready {
-        invariant {
-            cpu_id_map_ready(CpuIdMap, CpuGroup);
-            cpu_group_cpu_ref_at(CpuGroup, 0, BootCPURef);
-            cpu_group_cpu_ref_targets(CpuGroup, BootCPURef, BootCPU);
-            cpu_id_map_entry(CpuIdMap, 0, BootCPU);
-            cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
-            cpu_id_map_secondary_cpu_entries_ready(CpuIdMap, CpuGroup);
-            cpu_id_map_entries_have_unique_logical_ids(CpuIdMap);
-            cpu_id_map_entries_have_unique_hartids(CpuIdMap);
-            cpu_id_map_possible_cpu_boundary_ready(CpuIdMap, CpuGroup);
-        }
-    }
-}
-
-/*
  * EntrySuccessorPhase 表示入口后继子阶段对象。它承接入口前导期完成边界，
  * 并推进到 SwapperVm.Online 与 MemBlock.Online。
  */
@@ -1003,7 +913,6 @@ object EntrySuccessorPhase: PhaseObject {
                     EntryPreludePhase.Transition::Cleanup;
                     BootInitStack.Transition::Enable;
                     EarlyDtb.Transition::Preset;
-                    CpuIdMap.Transition::Preset;
                     InterruptStream.Transition::Setup;
                     BootCPU.Transition::Setup;
                     BootCPU.Transition::Enable;
@@ -1042,7 +951,6 @@ object EntrySuccessorPhase: PhaseObject {
             EntryPreludePhase.state == State::Destroyed;
             BootInitStack.state == State::Online;
             BootCPU.state == State::Online;
-            CpuIdMap.state == State::Prepared;
             InterruptStream.state == State::Ready;
             PrintkBuffer.state == State::Prepared;
             EarlyDtb.state == State::Destroyed;

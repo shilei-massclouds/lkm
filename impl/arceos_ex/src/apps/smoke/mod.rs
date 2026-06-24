@@ -39,10 +39,6 @@ const CASES: &[SmokeCase] = &[
         run: cases::resource_tree::run,
     },
     SmokeCase {
-        name: "cpu_id_map",
-        run: cases::cpu_id_map::run,
-    },
-    SmokeCase {
         name: "cache_block_info",
         run: cases::cache_block_info::run,
     },

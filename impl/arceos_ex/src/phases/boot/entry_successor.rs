@@ -32,7 +32,6 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.platform_cpu_info,
         &mut ctx.physical_memory,
     )?;
-    ctx.cpu_id_map.preset(&ctx.cpu_group)?;
     ctx.interrupt_stream
         .setup(&mut ctx.boot_cpu_local_interrupt)?;
     ctx.boot_current_cpu
@@ -112,7 +111,6 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.interrupt_stream.early_boot_irqs_disabled()
         && ctx.vm.state() == State::Online
         && ctx.vm.entry_successor_ready()
-        && ctx.cpu_id_map.state() == State::Prepared
         && printk::is_prepared()
         && ctx.early_dtb.state() == State::Destroyed
         && ctx.command_line.state() == State::Prepared

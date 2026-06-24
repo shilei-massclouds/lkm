@@ -1,7 +1,6 @@
 use super::{
     cpu::{CpuRef, CpuRole, CpuView, SecondaryCpuStore, BOOT_CPU_LOGICAL_ID, MAX_CPUS},
     cpu_control::BootCurrentCpu,
-    cpu_id_map::CpuIdMap,
     device_tree::DeviceTree,
     fdt_reader::read_cells,
     sbi::Sbi,
@@ -89,7 +88,6 @@ impl CpuGroup {
     pub fn setup_smp(
         &mut self,
         device_tree: &DeviceTree,
-        cpu_id_map: &CpuIdMap,
         sbi: &Sbi,
         secondary_cpus: &mut SecondaryCpuStore,
     ) -> EventResult {
@@ -99,7 +97,6 @@ impl CpuGroup {
         if self.lifecycle.state() != State::Prepared
             || boot_cpu.state() != State::Online
             || device_tree.state() != State::Ready
-            || cpu_id_map.state() != State::Prepared
             || sbi.state() != State::Ready
         {
             return failed_condition(
@@ -166,10 +163,6 @@ impl CpuGroup {
 
     pub fn online_contains(&self, cpu_ref: CpuRef) -> bool {
         contains_cpu_ref(&self.online_refs, self.online_count, cpu_ref)
-    }
-
-    pub fn logical_id_index_ready(&self) -> bool {
-        self.boot_cpu_ref().is_some()
     }
 
     pub fn boot_cpu_index_zero(&self) -> bool {
@@ -347,6 +340,48 @@ impl CpuGroup {
         Ok(())
     }
 
+    pub fn possible_cpu_boundary_ready(&self) -> bool {
+        if self.lifecycle.state() != State::Ready
+            || self.possible_count == 0
+            || self.possible_count > MAX_CPUS
+            || self.boot_cpu_ref().is_none()
+            || !self.boot_cpu_index_zero()
+        {
+            return false;
+        }
+
+        let mut logical_id = 0usize;
+        while logical_id < self.possible_count {
+            let Some(cpu_ref) = self.possible_cpu_ref_at(logical_id) else {
+                return false;
+            };
+            let Some(cpu) = self.cpu(logical_id) else {
+                return false;
+            };
+            if cpu.cpu_ref() != cpu_ref
+                || cpu_ref.logical_id() != logical_id
+                || cpu.logical_id() != logical_id
+                || !cpu.is_possible()
+                || self.present_contains(cpu_ref) != cpu.is_present()
+                || self.online_contains(cpu_ref) != cpu.is_online()
+                || contains_hartid_before(&self.cpu_views, logical_id, cpu.hartid())
+            {
+                return false;
+            }
+            if logical_id == BOOT_CPU_LOGICAL_ID {
+                if cpu.role() != CpuRole::Boot || !cpu.is_online() {
+                    return false;
+                }
+            } else if cpu.role() != CpuRole::Secondary {
+                return false;
+            }
+            logical_id += 1;
+        }
+
+        self.cpu_ref_at(self.possible_count).is_none()
+            && self.possible_cpu_ref_at(self.possible_count).is_none()
+    }
+
     fn register_cpu_view(&mut self, cpu: CpuView) -> EventResult {
         let logical_id = cpu.logical_id();
         if logical_id >= MAX_CPUS || cpu.cpu_ref().logical_id() != logical_id {
@@ -409,6 +444,17 @@ impl CpuGroup {
             State::Ready,
         )
     }
+}
+
+fn contains_hartid_before(cpu_views: &[CpuView; MAX_CPUS], end: usize, hartid: usize) -> bool {
+    let mut index = 0usize;
+    while index < end {
+        if cpu_views[index].hartid() == hartid {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }
 
 struct SecondaryHartSet {

@@ -2265,9 +2265,8 @@ type ArceosExRestInitCodingMust {
          *
          * CpuGroup must expose a logical-id indexed CPU reference view:
          * CpuGroup.Cpu[0] targets BootCPU and later entries target secondary
-         * CPU instances. CpuIdMap may remain as a migration/check object, but
-         * generated code must treat it as validating that CpuGroup index view,
-         * not as a second owner of CPU bodies.
+         * CPU instances. Generated code must not create a separate CpuIdMap
+         * object; CpuGroup itself carries the index and possible CPU boundary.
          */
         arceos_ex_must_cpu_group_index_cpu_refs_by_logical_id();
 

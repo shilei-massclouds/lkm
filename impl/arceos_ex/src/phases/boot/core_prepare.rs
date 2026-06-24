@@ -35,13 +35,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.lds,
         &mut ctx.resource_lock,
     )?;
-    ctx.cpu_group.setup_smp(
-        &ctx.device_tree,
-        &ctx.cpu_id_map,
-        &ctx.sbi,
-        &mut ctx.secondary_cpus,
-    )?;
-    ctx.cpu_id_map.setup(&ctx.cpu_group)?;
+    ctx.cpu_group
+        .setup_smp(&ctx.device_tree, &ctx.sbi, &mut ctx.secondary_cpus)?;
     ctx.cache_block_info
         .setup(&ctx.device_tree, &ctx.cpu_group)?;
     ctx.cpu_capabilities
@@ -67,14 +62,9 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &mut ctx.static_command_line,
         &ctx.memblock,
     )?;
-    checkpoint_setup_nr_cpu_ids(&ctx.cpu_id_map, &ctx.cpu_group)?;
-    ctx.per_cpu_storage.setup(
-        &mut ctx.memblock,
-        &ctx.vm,
-        &ctx.config,
-        &ctx.cpu_group,
-        &ctx.cpu_id_map,
-    )?;
+    checkpoint_setup_nr_cpu_ids(&ctx.cpu_group)?;
+    ctx.per_cpu_storage
+        .setup(&mut ctx.memblock, &ctx.vm, &ctx.config, &ctx.cpu_group)?;
     ctx.cpu_hotplug_state
         .setup(&ctx.cpu_group, &ctx.per_cpu_storage)?;
     checkpoint_second_parse_early_param(&ctx.early_param)?;
@@ -97,20 +87,15 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.exception_stream.setup(&ctx.event_stream)
 }
 
-fn checkpoint_setup_nr_cpu_ids(
-    cpu_id_map: &crate::objects::cpu_id_map::CpuIdMap,
-    cpu_group: &crate::objects::cpu_group::CpuGroup,
-) -> EventResult {
-    let boot_entry = cpu_id_map.entry(0);
+fn checkpoint_setup_nr_cpu_ids(cpu_group: &crate::objects::cpu_group::CpuGroup) -> EventResult {
     let boot_cpu = cpu_group.boot_cpu();
-    if cpu_id_map.state() != State::Ready
-        || cpu_group.state() != State::Ready
+    if cpu_group.state() != State::Ready
         || cpu_group.boot_cpu_state() != State::Online
-        || cpu_id_map.count() == 0
-        || boot_entry.map(|entry| entry.cpu_ref()) != cpu_group.boot_cpu_ref()
-        || boot_entry.map(|entry| entry.hartid()) != boot_cpu.map(|cpu| cpu.hartid())
-        || boot_entry.map(|entry| entry.kind())
-            != Some(crate::objects::cpu_id_map::CpuIdMapEntryKind::BootCpu)
+        || !cpu_group.possible_cpu_boundary_ready()
+        || boot_cpu.map(|cpu| cpu.cpu_ref()) != cpu_group.boot_cpu_ref()
+        || !boot_cpu
+            .map(|cpu| cpu.cpu_ref().is_boot_cpu() && cpu.logical_id() == 0)
+            .unwrap_or(false)
     {
         return failed_condition(
             LifecycleEvent::Setup,
@@ -197,7 +182,6 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
             .resource_lock_write_guard_used_by(&ctx.resource_lock)
         && ctx.cpu_group.state() == State::Ready
         && !ctx.cpu_group.smp_concurrency_open()
-        && ctx.cpu_id_map.state() == State::Ready
         && ctx.cache_block_info.state() == State::Ready
         && ctx.cpu_capabilities.state() == State::Ready
         && ctx.dma_cache_policy.state() == State::Ready

@@ -910,7 +910,6 @@ object PerCpuFirstChunk: MemoryObject {
                     MemBlock.state == State::Online;
                     SwapperVm.state == State::Online;
                     CpuGroup.state == State::Ready;
-                    CpuIdMap.state == State::Ready;
                 }
 
                 ensures {
@@ -918,7 +917,7 @@ object PerCpuFirstChunk: MemoryObject {
                     per_cpu_first_chunk_allocated_from_memblock(PerCpuFirstChunk, MemBlock);
                     per_cpu_first_chunk_linearly_mapped(PerCpuFirstChunk, SwapperVm);
                     per_cpu_first_chunk_unit_count_matches_possible_cpus(PerCpuFirstChunk, CpuGroup);
-                    per_cpu_first_chunk_units_follow_cpu_id_map(PerCpuFirstChunk, CpuIdMap);
+                    per_cpu_first_chunk_units_follow_cpu_group_possible(PerCpuFirstChunk, CpuGroup);
                     per_cpu_unit_static_area_initialized_from_load(PerCpuFirstChunk, PerCpuStaticImage);
                     per_cpu_unit_layout_ready(PerCpuFirstChunk);
                     per_cpu_reserved_area_layout_ready(PerCpuFirstChunk);
@@ -934,7 +933,7 @@ object PerCpuFirstChunk: MemoryObject {
             per_cpu_first_chunk_allocated_from_memblock(PerCpuFirstChunk, MemBlock);
             per_cpu_first_chunk_linearly_mapped(PerCpuFirstChunk, SwapperVm);
             per_cpu_first_chunk_unit_count_matches_possible_cpus(PerCpuFirstChunk, CpuGroup);
-            per_cpu_first_chunk_units_follow_cpu_id_map(PerCpuFirstChunk, CpuIdMap);
+            per_cpu_first_chunk_units_follow_cpu_group_possible(PerCpuFirstChunk, CpuGroup);
             per_cpu_unit_static_area_initialized_from_load(PerCpuFirstChunk, PerCpuStaticImage);
             per_cpu_unit_layout_ready(PerCpuFirstChunk);
             per_cpu_reserved_area_layout_ready(PerCpuFirstChunk);
@@ -960,13 +959,12 @@ object PerCpuOffsetTable: MemoryObject {
                 depends_on {
                     PerCpuFirstChunk.state == State::Ready;
                     CpuGroup.state == State::Ready;
-                    CpuIdMap.state == State::Ready;
                 }
 
                 ensures {
-                    per_cpu_offset_table_ready(PerCpuOffsetTable, PerCpuFirstChunk, CpuIdMap);
+                    per_cpu_offset_table_ready(PerCpuOffsetTable, PerCpuFirstChunk, CpuGroup);
                     per_cpu_offset_entries_match_possible_cpus(PerCpuOffsetTable, CpuGroup);
-                    per_cpu_offset_entries_follow_cpu_id_map(PerCpuOffsetTable, CpuIdMap);
+                    per_cpu_offset_entries_follow_cpu_group_possible(PerCpuOffsetTable, CpuGroup);
                     per_cpu_addressing_ready(PerCpuOffsetTable);
                 }
             }
@@ -975,9 +973,9 @@ object PerCpuOffsetTable: MemoryObject {
 
     state State::Ready {
         invariant {
-            per_cpu_offset_table_ready(PerCpuOffsetTable, PerCpuFirstChunk, CpuIdMap);
+            per_cpu_offset_table_ready(PerCpuOffsetTable, PerCpuFirstChunk, CpuGroup);
             per_cpu_offset_entries_match_possible_cpus(PerCpuOffsetTable, CpuGroup);
-            per_cpu_offset_entries_follow_cpu_id_map(PerCpuOffsetTable, CpuIdMap);
+            per_cpu_offset_entries_follow_cpu_group_possible(PerCpuOffsetTable, CpuGroup);
             per_cpu_addressing_ready(PerCpuOffsetTable);
         }
     }
@@ -1042,7 +1040,6 @@ object PerCpuStorage: MemoryObject {
                     MemBlock.state == State::Online;
                     SwapperVm.state == State::Online;
                     CpuGroup.state == State::Ready;
-                    CpuIdMap.state == State::Ready;
                 }
 
                 drives {
@@ -1364,7 +1361,6 @@ object CorePreparePhase: PhaseObject {
                     CommandLine.state == State::Prepared;
                     BootCPU.state == State::Online;
                     BootCpuLocalInterrupt.state == State::Ready;
-                    CpuIdMap.state == State::Prepared;
                     PrintkBuffer.state == State::Prepared;
                     ExceptionStream.state == State::Prepared;
                 }
@@ -1377,7 +1373,6 @@ object CorePreparePhase: PhaseObject {
                     ResourceLock.Transition::Setup;
                     ResourceTree.Transition::Setup;
                     CpuGroup.Transition::Setup;
-                    CpuIdMap.Transition::Setup;
                     CacheBlockInfo.Transition::Setup;
                     CpuCapabilities.Transition::Setup;
                     DmaCachePolicy.Transition::Setup;
@@ -1420,7 +1415,7 @@ object CorePreparePhase: PhaseObject {
                     "static_call_init() 暂缓：静态调用是调用目标代码补丁设施，当前不进入核心模型。"
                     "early_security_init() 暂缓：LSM/security 框架依赖后续任务、凭据和安全对象。"
                     "setup_boot_config() 暂缓：bootconfig/XBC/initrd 派生参数后续作为参数来源展开。"
-                    "setup_nr_cpu_ids() 作为实现 checkpoint：只验证 CpuIdMap[0] == BootCPU 和 possible CPU 映射边界，不推进 CpuIdMap 状态。"
+                    "setup_nr_cpu_ids() 作为实现 checkpoint：只验证 CpuGroup.Cpu[0] == BootCPU 和 possible CPU 映射边界，不推进对象状态。"
                     "smp_prepare_boot_cpu() 暂缓：RISC-V64 当前弱实现为空，不建立额外对象。"
                     "parse_early_param() 第二次调用作为实现 checkpoint：不得重新推进 EarlyParam 或 EarlyCon。"
                     "print_unknown_bootoptions() 作为实现 checkpoint：只输出 BootParam 收集到的未知选项，不改变 BootParam 状态。"
@@ -1448,7 +1443,6 @@ object CorePreparePhase: PhaseObject {
             ResourceLock.state == State::Ready;
             ResourceTree.state == State::Ready;
             CpuGroup.state == State::Ready;
-            CpuIdMap.state == State::Ready;
             CacheBlockInfo.state == State::Ready;
             CpuCapabilities.state == State::Ready;
             DmaCachePolicy.state == State::Ready;

@@ -528,7 +528,7 @@ class DeriveToolTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    record["expression"] == "cpu_id_map_ready(CpuIdMap, CpuGroup)"
+                    record["expression"] == "cpu_group_possible_cpu_boundary_ready(CpuGroup)"
                     and record["proof_class"] == "cpu_topology"
                     and record["proof_provider"] == "transition_ensures"
                     for record in proved
