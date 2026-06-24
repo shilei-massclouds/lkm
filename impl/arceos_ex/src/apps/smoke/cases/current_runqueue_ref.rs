@@ -84,7 +84,7 @@ impl SmokeScenario for EmptyQueueScenario {
 
     fn run(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert("ready", self.fixture.runqueue.state() == State::Ready);
-        assertions.assert("boot cpu", self.fixture.runqueue.cpu_id() == 0);
+        assertions.assert("boot cpu", self.fixture.runqueue.cpu_ref().is_boot_cpu());
         assertions.assert(
             "current is idle",
             self.fixture.runqueue.curr_task_id() == self.fixture.runqueue.idle_task_id(),

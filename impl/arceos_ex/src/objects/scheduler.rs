@@ -1,6 +1,6 @@
 use super::{
     cpu_control::{CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
-    cpu_group::CpuGroup,
+    cpu_group::{CpuGroup, CpuRef},
     cpu_id_map::CpuIdMap,
     init_mm::InitMm,
     init_task::InitTask,
@@ -999,10 +999,10 @@ impl Scheduler {
             && self.boot_idle_task.state() == State::Ready
             && self.boot_idle_preemption.state() == State::Ready
             && self.boot_idle_preemption.disabled()
-            && self.boot_runqueue.cpu_id() == 0
+            && self.boot_runqueue.cpu_ref().is_boot_cpu()
             && cpu_group
                 .boot_cpu()
-                .map(|cpu| self.boot_runqueue.boot_hartid() == cpu.hartid())
+                .map(|cpu| self.boot_runqueue.cpu_ref() == cpu.cpu_ref())
                 .unwrap_or(false)
             && self.boot_runqueue.curr_task_id() == self.boot_idle_task.task_id()
             && self.boot_runqueue.idle_task_id() == self.boot_idle_task.task_id()
@@ -1283,8 +1283,8 @@ impl BitWaitQueueTable {
 
 pub struct BootRunQueue {
     lifecycle: Lifecycle,
-    cpu_id: usize,
-    boot_hartid: usize,
+    cpu_ref: CpuRef,
+    cpu_hartid: usize,
     curr_task_id: usize,
     idle_task_id: usize,
     cfs_ready: bool,
@@ -1305,8 +1305,8 @@ impl BootRunQueue {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            cpu_id: usize::MAX,
-            boot_hartid: usize::MAX,
+            cpu_ref: CpuRef::invalid(),
+            cpu_hartid: usize::MAX,
             curr_task_id: usize::MAX,
             idle_task_id: usize::MAX,
             cfs_ready: false,
@@ -1329,11 +1329,11 @@ impl BootRunQueue {
     }
 
     pub const fn cpu_id(&self) -> usize {
-        self.cpu_id
+        self.cpu_ref.logical_id()
     }
 
-    pub const fn boot_hartid(&self) -> usize {
-        self.boot_hartid
+    pub const fn cpu_ref(&self) -> CpuRef {
+        self.cpu_ref
     }
 
     pub const fn curr_task_id(&self) -> usize {
@@ -1413,12 +1413,18 @@ impl BootRunQueue {
         let Some(boot_entry) = cpu_id_map.entry(0) else {
             return self.failed_setup();
         };
-        if cpu_group.boot_cpu().map(|cpu| cpu.hartid()) != Some(boot_entry.hartid()) {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return self.failed_setup();
+        };
+        if boot_cpu.cpu_ref().logical_id() != boot_entry.logical_id()
+            || boot_cpu.hartid() != boot_entry.hartid()
+            || !boot_cpu.cpu_ref().is_boot_cpu()
+        {
             return self.failed_setup();
         }
 
-        self.cpu_id = boot_entry.logical_id();
-        self.boot_hartid = boot_entry.hartid();
+        self.cpu_ref = boot_cpu.cpu_ref();
+        self.cpu_hartid = boot_cpu.hartid();
         self.curr_task_id = 0;
         self.idle_task_id = 0;
         self.cfs_ready = true;
@@ -1605,6 +1611,7 @@ pub struct BootIdleTask {
     lifecycle: Lifecycle,
     task_id: usize,
     cpu: TaskCpuState,
+    cpu_ref: CpuRef,
     thread_context: TaskThreadContext,
     uses_current_init_task: bool,
     lazy_tlb_mm_ready: bool,
@@ -1617,6 +1624,7 @@ impl BootIdleTask {
             lifecycle: Lifecycle::new(State::Base),
             task_id: usize::MAX,
             cpu: TaskCpuState::new(),
+            cpu_ref: CpuRef::invalid(),
             thread_context: TaskThreadContext::new(),
             uses_current_init_task: false,
             lazy_tlb_mm_ready: false,
@@ -1634,6 +1642,10 @@ impl BootIdleTask {
 
     pub const fn cpu_id(&self) -> usize {
         self.cpu.cpu_id()
+    }
+
+    pub const fn cpu_ref(&self) -> CpuRef {
+        self.cpu_ref
     }
 
     pub const fn uses_current_init_task(&self) -> bool {
@@ -1665,7 +1677,7 @@ impl BootIdleTask {
             || boot_runqueue.state() != State::Ready
             || cpu_group
                 .boot_cpu()
-                .map(|cpu| boot_runqueue.boot_hartid() != cpu.hartid())
+                .map(|cpu| boot_runqueue.cpu_ref() != cpu.cpu_ref())
                 .unwrap_or(true)
         {
             return failed_condition(
@@ -1685,6 +1697,7 @@ impl BootIdleTask {
                 State::Ready,
             );
         }
+        self.cpu_ref = boot_runqueue.cpu_ref();
         self.thread_context.setup_boot_idle();
         self.uses_current_init_task = true;
         self.lazy_tlb_mm_ready = true;

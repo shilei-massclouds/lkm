@@ -194,6 +194,12 @@ pub struct CpuRef {
 }
 
 impl CpuRef {
+    pub const fn invalid() -> Self {
+        Self {
+            logical_id: usize::MAX,
+        }
+    }
+
     pub const fn new(logical_id: usize) -> Self {
         Self { logical_id }
     }

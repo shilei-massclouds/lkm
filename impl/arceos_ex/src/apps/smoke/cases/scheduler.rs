@@ -42,7 +42,7 @@ pub fn run() -> SmokeResult {
         || ctx.boot_cpu_current_task.current() != CurrentTaskRef::KernelInit
         || ctx.scheduler.boot_runqueue().curr_task_id() != ctx.scheduler.boot_idle_task().task_id()
         || ctx.scheduler.boot_runqueue().idle_task_id() != ctx.scheduler.boot_idle_task().task_id()
-        || ctx.scheduler.boot_idle_task().cpu_id() != ctx.scheduler.boot_runqueue().cpu_id()
+        || ctx.scheduler.boot_idle_task().cpu_ref() != ctx.scheduler.boot_runqueue().cpu_ref()
         || !ctx
             .scheduler
             .boot_idle_task()

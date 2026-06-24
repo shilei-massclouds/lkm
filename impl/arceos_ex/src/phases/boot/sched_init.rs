@@ -101,15 +101,15 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.bit_wait_queue_table().state() == State::Prepared
         && ctx.scheduler.bit_wait_queue_table().bucket_count() != 0
         && ctx.scheduler.boot_runqueue().state() == State::Ready
-        && ctx.scheduler.boot_runqueue().cpu_id() == 0
+        && ctx.scheduler.boot_runqueue().cpu_ref().is_boot_cpu()
         && boot_cpu
-            .map(|cpu| ctx.scheduler.boot_runqueue().boot_hartid() == cpu.hartid())
+            .map(|cpu| ctx.scheduler.boot_runqueue().cpu_ref() == cpu.cpu_ref())
             .unwrap_or(false)
         && ctx.scheduler.boot_runqueue().class_queues_ready()
         && ctx.scheduler.boot_runqueue().attached_to_root_domain()
         && !ctx.scheduler.boot_runqueue().balance_push_enabled()
         && ctx.scheduler.boot_idle_task().state() == State::Ready
-        && ctx.scheduler.boot_idle_task().cpu_id() == ctx.scheduler.boot_runqueue().cpu_id()
+        && ctx.scheduler.boot_idle_task().cpu_ref() == ctx.scheduler.boot_runqueue().cpu_ref()
         && ctx.scheduler.boot_idle_task().task_id() == ctx.scheduler.boot_runqueue().curr_task_id()
         && ctx.scheduler.boot_idle_task().uses_current_init_task()
         && ctx.scheduler.boot_idle_task().lazy_tlb_mm_ready()
