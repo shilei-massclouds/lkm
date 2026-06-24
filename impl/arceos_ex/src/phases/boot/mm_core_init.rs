@@ -139,6 +139,12 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.page_allocator.buddy_total_free_pages() != 0
         && ctx.page_allocator.buddy_free_block_count() != 0
         && ctx.memory_debug_hardening.state() == State::Ready
+        && ctx.memory_debug_hardening.early_params_scanned()
+        && ctx.memory_debug_hardening.early_param_policy_trimmed()
+        && ctx.memory_debug_hardening.default_policy_selected()
+        && ctx
+            .memory_debug_hardening
+            .static_keys_resolved_from_default_policy()
         && !ctx.memory_debug_hardening.init_on_alloc()
         && !ctx.memory_debug_hardening.init_on_free()
         && !ctx.memory_debug_hardening.debug_pagealloc()
@@ -147,6 +153,9 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.static_branch.key_count() >= 5
         && ctx.static_branch.enabled(StaticKey::CheckPages) == Some(true)
         && ctx.static_branch.enabled(StaticKey::InitOnAlloc) == Some(false)
+        && ctx.static_branch.enabled(StaticKey::InitOnFree) == Some(false)
+        && ctx.static_branch.enabled(StaticKey::DebugPageAlloc) == Some(false)
+        && ctx.static_branch.enabled(StaticKey::DebugGuardPage) == Some(false)
         && ctx.stack_depot.state() == State::Ready
         && ctx.stack_depot.early_storage_ready()
         && ctx.swiotlb.state() == State::Ready

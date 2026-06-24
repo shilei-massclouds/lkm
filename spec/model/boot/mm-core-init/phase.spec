@@ -390,12 +390,19 @@ object MemoryDebugHardening: MemoryObject {
 
                 ensures {
                     memory_debug_hardening_ready(MemoryDebugHardening, StaticBranch, EarlyParam);
+                    memory_debug_early_params_scanned(MemoryDebugHardening, EarlyParam);
+                    memory_debug_early_param_policy_trimmed(MemoryDebugHardening);
                     init_on_alloc_policy_resolved(MemoryDebugHardening);
                     init_on_free_policy_resolved(MemoryDebugHardening);
                     debug_pagealloc_policy_resolved(MemoryDebugHardening);
                     debug_guardpage_policy_resolved(MemoryDebugHardening);
                     check_pages_policy_resolved(MemoryDebugHardening);
+                    memory_debug_default_policy_selected(MemoryDebugHardening);
                     memory_debug_static_keys_resolved(MemoryDebugHardening, StaticBranch);
+                    memory_debug_static_keys_resolved_from_default_policy(
+                        MemoryDebugHardening,
+                        StaticBranch
+                    );
                 }
             }
         }
@@ -404,12 +411,19 @@ object MemoryDebugHardening: MemoryObject {
     state State::Ready {
         invariant {
             memory_debug_hardening_ready(MemoryDebugHardening, StaticBranch, EarlyParam);
+            memory_debug_early_params_scanned(MemoryDebugHardening, EarlyParam);
+            memory_debug_early_param_policy_trimmed(MemoryDebugHardening);
             init_on_alloc_policy_resolved(MemoryDebugHardening);
             init_on_free_policy_resolved(MemoryDebugHardening);
             debug_pagealloc_policy_resolved(MemoryDebugHardening);
             debug_guardpage_policy_resolved(MemoryDebugHardening);
             check_pages_policy_resolved(MemoryDebugHardening);
+            memory_debug_default_policy_selected(MemoryDebugHardening);
             memory_debug_static_keys_resolved(MemoryDebugHardening, StaticBranch);
+            memory_debug_static_keys_resolved_from_default_policy(
+                MemoryDebugHardening,
+                StaticBranch
+            );
         }
     }
 }

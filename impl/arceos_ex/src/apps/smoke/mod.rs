@@ -71,6 +71,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::zones::run,
     },
     SmokeCase {
+        name: "memory_debug_hardening",
+        run: cases::memory_debug_hardening::run,
+    },
+    SmokeCase {
         name: "page_allocator",
         run: cases::page_allocator::run,
     },

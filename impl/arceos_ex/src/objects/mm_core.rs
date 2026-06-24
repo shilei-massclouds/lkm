@@ -1906,6 +1906,10 @@ impl KmallocCache {
 
 pub struct MemoryDebugHardening {
     lifecycle: Lifecycle,
+    early_params_scanned: bool,
+    early_param_policy_trimmed: bool,
+    default_policy_selected: bool,
+    static_keys_resolved_from_default_policy: bool,
     init_on_alloc: bool,
     init_on_free: bool,
     debug_pagealloc: bool,
@@ -1917,6 +1921,10 @@ impl MemoryDebugHardening {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            early_params_scanned: false,
+            early_param_policy_trimmed: false,
+            default_policy_selected: false,
+            static_keys_resolved_from_default_policy: false,
             init_on_alloc: false,
             init_on_free: false,
             debug_pagealloc: false,
@@ -1927,6 +1935,22 @@ impl MemoryDebugHardening {
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn early_params_scanned(&self) -> bool {
+        self.early_params_scanned
+    }
+
+    pub const fn early_param_policy_trimmed(&self) -> bool {
+        self.early_param_policy_trimmed
+    }
+
+    pub const fn default_policy_selected(&self) -> bool {
+        self.default_policy_selected
+    }
+
+    pub const fn static_keys_resolved_from_default_policy(&self) -> bool {
+        self.static_keys_resolved_from_default_policy
     }
 
     pub const fn init_on_alloc(&self) -> bool {
@@ -1963,6 +1987,9 @@ impl MemoryDebugHardening {
             return self.failed_setup();
         }
 
+        self.early_params_scanned = true;
+        self.early_param_policy_trimmed = true;
+        self.default_policy_selected = true;
         self.init_on_alloc = false;
         self.init_on_free = false;
         self.debug_pagealloc = false;
@@ -1974,6 +2001,7 @@ impl MemoryDebugHardening {
         static_branch.set(StaticKey::DebugPageAlloc, self.debug_pagealloc)?;
         static_branch.set(StaticKey::DebugGuardPage, self.debug_guardpage)?;
         static_branch.set(StaticKey::CheckPages, self.check_pages)?;
+        self.static_keys_resolved_from_default_policy = true;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

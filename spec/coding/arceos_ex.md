@@ -1182,6 +1182,8 @@ breakpoint hit hook 机会，后续可扩展 KGDB、BUG、CFI 等 hook。hook �
 
 `PageAllocator.preset()` 只做 `build_all_zonelists(NULL)` 和 `page_alloc_init_cpuhp()` 对应的拓扑与 hook 建立：`BootZonelistSet.Ready`、fallback zoneref 顺序、NULL sentinel、`CPUHP_PAGE_ALLOC` step 注册。Linux boot path 中 `__build_all_zonelists(NULL)` 在 `zonelist_update_seq` 的 `write_seqlock_irqsave()` 区间内执行，并包在 `printk_deferred_enter()` / `printk_deferred_exit()` 之间；当前实现处于 `SystemExclusive` boot 阶段，可把这两项记录为 ready facts，而不提前引入完整 runtime seqlock reader/retry 机制。`build_all_zonelists_init()` 随后为 possible CPU 初始化 boot pageset；实现必须把该 checkpoint 绑定到已 `Ready` 的 `PerCpuStorage` first chunk CPU 数。它不得释放 MemBlock 页，也不得把自身推进到 `Ready`。
 
+`MemoryDebugHardening.setup()` 对应 `mem_debugging_and_hardening_init()` 的默认策略收敛。它必须依赖并记录已扫描的 `EarlyParam.Ready`，并使用既有 `StaticBranch` registry 写入 `InitOnAlloc`、`InitOnFree`、`DebugPageAlloc`、`DebugGuardPage` 和 `CheckPages` static keys；当前实现暂不支持 Linux `init_on_alloc`、`init_on_free`、page poisoning、`debug_pagealloc`、guard page 等 early-param 开关，必须把这些策略记录为 trimmed/default-policy facts，而不得让规格暗示已经完整消费参数语义。
+
 `PageAllocator.setup()` 才对应 `memblock_free_all()`。该事件必须先要求 `Swiotlb.Ready` 和 `MemoryDebugHardening.Ready`，再把 MemBlock free ranges 交给 buddy/free page sets，并通过 `MemBlock.Disable` 使 `MemBlock.state == Offline`。本阶段不得执行 `memblock_discard()`，不得把 `MemBlock` 推进到 `Destroyed`。
 
 当前 minimal buddy 实现必须把 buddy free lists 建在 `PageAllocator` 内部，而不是作为依赖 heap 的外部容器。结构按

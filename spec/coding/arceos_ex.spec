@@ -761,9 +761,11 @@ type ArceosExMmCoreInitCodingMust {
         /*
          * Static branch policy:
          *
-         * MemoryDebugHardening.setup() must consume the existing StaticBranch
-         * registry and early parameter facts; it must not initialize a private
-         * static-key mechanism.
+         * MemoryDebugHardening.setup() must bind to the existing StaticBranch
+         * registry and scanned EarlyParam boundary. Current mm hardening
+         * early-param policy is trimmed to the default policy; it must not
+         * initialize a private static-key mechanism or imply full parameter
+         * support.
          */
         arceos_ex_must_memory_debug_hardening_use_static_branch_registry();
 
