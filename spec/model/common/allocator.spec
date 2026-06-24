@@ -236,7 +236,7 @@ predicate slub_cache_registry_owns_all_slub_cache_instances<T>(registry: T) -> b
 predicate boot_kmem_cache_node_is_slub_cache_instance<T>(subsystem: T) -> bool;
 predicate boot_kmem_cache_is_slub_cache_instance<T, R>(subsystem: T, registry: R) -> bool;
 predicate kmem_cache_and_node_registered_as_slub_cache_instances<T>(registry: T) -> bool;
-predicate kmalloc_caches_are_registry_slub_cache_instances<T, R>(caches: T, registry: R) -> bool;
+predicate kmalloc_caches_refer_to_registered_slub_caches<T, R>(caches: T, registry: R) -> bool;
 predicate mm_struct_cache_is_slub_cache_instance<T>(cache: T) -> bool;
 predicate slub_subsystem_kmalloc_api_ready<T>(allocator: T) -> bool;
 predicate slub_subsystem_kzalloc_api_ready<T>(allocator: T) -> bool;

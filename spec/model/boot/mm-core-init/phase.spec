@@ -501,7 +501,8 @@ object SlubCacheRegistry: MemoryObject {
 }
 
 /*
- * KmallocCaches 表示 kmalloc_caches[][] 与 kmalloc_size_index[]。
+ * KmallocCaches 表示 kmalloc_caches[][] 与 kmalloc_size_index[]。它只维护
+ * size class 到已注册 SlubCache 实例的引用/索引，不拥有这些实例。
  */
 object KmallocCaches: MemoryObject {
     initial_state: State::Base;
@@ -516,7 +517,7 @@ object KmallocCaches: MemoryObject {
 
                 ensures {
                     kmalloc_caches_ready(KmallocCaches, SlubCacheRegistry);
-                    kmalloc_caches_are_registry_slub_cache_instances(KmallocCaches, SlubCacheRegistry);
+                    kmalloc_caches_refer_to_registered_slub_caches(KmallocCaches, SlubCacheRegistry);
                     kmalloc_size_index_ready(KmallocCaches);
                     kmalloc_caches_default_size_classes_ready(KmallocCaches);
                     default_kmalloc_cache_set_ready(KmallocCaches);
@@ -530,7 +531,7 @@ object KmallocCaches: MemoryObject {
     state State::Ready {
         invariant {
             kmalloc_caches_ready(KmallocCaches, SlubCacheRegistry);
-            kmalloc_caches_are_registry_slub_cache_instances(KmallocCaches, SlubCacheRegistry);
+            kmalloc_caches_refer_to_registered_slub_caches(KmallocCaches, SlubCacheRegistry);
             kmalloc_size_index_ready(KmallocCaches);
             kmalloc_caches_default_size_classes_ready(KmallocCaches);
             default_kmalloc_cache_set_ready(KmallocCaches);

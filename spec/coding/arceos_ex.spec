@@ -34,6 +34,7 @@ predicate arceos_ex_must_memory_debug_hardening_use_static_branch_registry() -> 
 predicate arceos_ex_must_slub_subsystem_be_single_facade_not_cache_instance() -> bool;
 predicate arceos_ex_must_slub_cache_type_name_be_slub_cache() -> bool;
 predicate arceos_ex_must_slub_cache_registry_own_all_cache_instances() -> bool;
+predicate arceos_ex_must_kmalloc_caches_reference_registered_slub_caches() -> bool;
 predicate arceos_ex_must_slub_bootstrap_before_kmalloc_caches_ready() -> bool;
 predicate arceos_ex_must_slub_expose_kmalloc_kzalloc_kfree_api() -> bool;
 predicate arceos_ex_must_slub_kmalloc_use_page_allocator_backing_pages() -> bool;
@@ -791,11 +792,14 @@ type ArceosExMmCoreInitCodingMust {
          * name is SlubCache, not SlubCacheType. SlubCacheRegistry must be the
          * single registry/ownership collection for boot caches, formal
          * kmem_cache/kmem_cache_node, kmalloc size-class caches, and later
-         * named caches.
+         * named caches. KmallocCaches is only a size-class reference/index
+         * view over registered SlubCache instances; it must not own a second
+         * set of cache instances.
          */
         arceos_ex_must_slub_subsystem_be_single_facade_not_cache_instance();
         arceos_ex_must_slub_cache_type_name_be_slub_cache();
         arceos_ex_must_slub_cache_registry_own_all_cache_instances();
+        arceos_ex_must_kmalloc_caches_reference_registered_slub_caches();
 
         /*
          * SLUB bootstrap:

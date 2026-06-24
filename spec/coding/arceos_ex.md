@@ -1221,6 +1221,8 @@ caller-owned allocation reference、线性映射读写、kzalloc 返回前清零
 `SlubCacheRegistry` 是所有 `SlubCache` 实例的注册、查找和枚举集合；`SlubSubsystem` 通过 registry 间接管理
 `boot_kmem_cache_node`、`boot_kmem_cache`、正式 `kmem_cache_node`/`kmem_cache`、kmalloc size-class caches
 和后续 named caches，不能再建立与 registry 并列的第二套 cache 所有权。
+`KmallocCaches` 只能实现为 size/size-class 到已注册 kmalloc `SlubCache` 实例的引用或索引视图，不得拥有这些 cache
+实例，也不得维护一套与 `SlubCacheRegistry` 并列的实例生命周期。
 
 当前第一轮 `arceos_ex` SLUB/kmalloc 实现只要求 Linux-like page-backed slab：`KmallocCaches` 使用固定默认 size classes
 `8/16/32/64/128/256/512/1024/2048/4096/8192`，请求 size 通过向上取整选择 size class；当某个 cache 没有空闲对象时，必须通过
