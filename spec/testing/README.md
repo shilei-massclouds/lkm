@@ -41,6 +41,8 @@ smoke 测试生成时必须先判定测试目标类别，再决定是否依赖�
 
 `KernelEnvironmentBound` 用于 `MemBlock`、`CpuGroup`、`Scheduler` 这类启动路径中的真实对象或事实集合。它们通常只出现一次，或脱离内核环境后测试意义不足。生成的 smoke case 可以直接读取 `Context` 中的生产对象，并验证阶段事实、对象事实和关键派生行为。
 
+`CpuGroup` 相关 smoke 必须归类为 `KernelEnvironmentBound`。测试目标是启动路径建立的真实 CPU 拓扑事实，而不是本地构造一个假的 CPU 组。生成测试应直接观察 `Context` 中的生产 `CpuGroup`、CPU 实例事实和 checkpoint facts，并至少断言：logical id `0` 通过 `BootCPURef` 指向 `BootCPU`；boot CPU 处于 possible/present/online；secondary CPU 在 bringup 前处于 possible/present/not-online；logical id 与 hartid 唯一；possible/present/online 集合元素是 CPU 引用而不是额外 CPU 本体对象。测试不得为了这些断言增加 `test_*` CPU API。
+
 ## 场景三段体
 
 每个生成的测试场景必须使用三段体：

@@ -875,10 +875,10 @@ object SBI: PlatformServiceObject {
 }
 
 /*
- * CpuIdMap 表示逻辑 CPU ID 到 CPUObject 的映射表。入口后继期只建立
- * logical CPU 0 -> BootCPU 的基础映射；核心准备期在 CpuGroup.setup_smp()
- * 之后再完成当前阶段的 CPU 映射边界整理。Enable 保留给未来多 CPU 运行期
- * 或动态拓扑正式启用时使用。
+ * CpuIdMap 表示 CpuGroup.Cpu[logical_id] 索引视图的当前检查承载。入口后继期
+ * 只建立 logical CPU 0 -> BootCPU 的基础索引检查；核心准备期在
+ * CpuGroup.setup_smp() 之后再完成当前阶段的 CPU 映射边界整理。Enable 保留给
+ * 未来多 CPU 运行期或动态拓扑正式启用时使用。
  */
 object CpuIdMap: HardwareObject {
     initial_state: State::Base;
@@ -895,9 +895,13 @@ object CpuIdMap: HardwareObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     BootCPU.state == State::Prepared;
+                    CpuGroup.state == State::Prepared;
                 }
 
                 ensures {
+                    cpu_logical_id_ready(BootCPU, 0);
+                    cpu_group_uses_logical_id_index(CpuGroup);
+                    cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
                     cpu_id_map_entry(CpuIdMap, 0, BootCPU);
                     cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
                 }
@@ -910,6 +914,9 @@ object CpuIdMap: HardwareObject {
      */
     state State::Prepared {
         invariant {
+            cpu_logical_id_ready(BootCPU, 0);
+            cpu_group_uses_logical_id_index(CpuGroup);
+            cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
             cpu_id_map_entry(CpuIdMap, 0, BootCPU);
             cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
         }
@@ -926,6 +933,8 @@ object CpuIdMap: HardwareObject {
 
                 ensures {
                     cpu_id_map_ready(CpuIdMap, CpuGroup);
+                    cpu_group_cpu_ref_at(CpuGroup, 0, BootCPURef);
+                    cpu_group_cpu_ref_targets(CpuGroup, BootCPURef, BootCPU);
                     cpu_id_map_entry(CpuIdMap, 0, BootCPU);
                     cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
                     cpu_id_map_secondary_cpu_entries_ready(CpuIdMap, CpuGroup);
@@ -943,6 +952,8 @@ object CpuIdMap: HardwareObject {
     state State::Ready {
         invariant {
             cpu_id_map_ready(CpuIdMap, CpuGroup);
+            cpu_group_cpu_ref_at(CpuGroup, 0, BootCPURef);
+            cpu_group_cpu_ref_targets(CpuGroup, BootCPURef, BootCPU);
             cpu_id_map_entry(CpuIdMap, 0, BootCPU);
             cpu_id_map_boot_cpu_stable(CpuIdMap, BootCPU);
             cpu_id_map_secondary_cpu_entries_ready(CpuIdMap, CpuGroup);

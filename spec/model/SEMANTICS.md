@@ -533,14 +533,17 @@ CPU 的 live 寄存器组也是 `CPU视角` 的私有对象，包括通用寄存
 
 - 每个 CPU 启动时自动产生一个与自身唯一对应的 `CurrentCPU` 实例。
 - `CurrentCPU` 独立于 `CpuGroup`，不挂在 `CpuGroup` 对象树下；BP 侧的 `CurrentCPU` 早于几乎所有内核对象存在。
-- `CurrentCPU` 拥有与自身对应的 CPU 对象；`CpuGroup` 后续维护对这些 CPU 对象的引用、索引和拓扑组织关系，而不是天然拥有 CPU 本体。
+- `CurrentCPU` 拥有与自身对应的统一 `CPUObject` 实例；`BootCPU` 是 logical id 为 `0`、带有 bootstrap role 的 CPU 实例，不是独立 CPU 类型。
+- 每个 `CPUObject` 实例持有或发布自己的 `hartid`、`logical_id`、`possible`、`present`、`active` 和 `online` 事实。`hartid` 属于 CPU 实例属性，不应长期保存在 `CpuGroup` 普通字段中。
+- `CpuGroup` 后续维护对这些 CPU 对象的引用、`CpuGroup.Cpu[logical_id]` 索引和拓扑组织关系，而不是天然拥有 CPU 本体。
+- `CpuGroup` 可以维护 possible/present/online 集合视图；集合元素是 `CpuRef` 或等价 CPU 引用，目标仍是统一 `CPUObject` 实例，不引入拥有 CPU 本体的 `PossibleCpu` / `PossibleRunQueue` 之类中间对象。
 - 内核启动最早期，当前执行 CPU 只通过自己的 `CurrentCPU` 认识自身和访问自己拥有的 CPU 对象；此时规格层尚不应假定已经存在 `BootCPU`。
 - `CurrentCPU.Preset` 记录入口或固件交付的 hartid。
-- `CurrentCPU.Setup` 记录或确认 logical CPU id。
-- `CurrentCPU.Enable` 在 `CpuGroup` 建立后，把自身拥有的 CPU 对象注册/绑定到 `CpuGroup.Cpu[id]` 引用集合。
+- `CurrentCPU.Setup` 记录或确认 logical CPU id，并把该事实发布到自身拥有的 CPU 对象。
+- `CurrentCPU.Enable` 在 `CpuGroup` 建立后，把自身拥有的 CPU 对象注册/绑定到 `CpuGroup.Cpu[id]` 引用索引和对应集合视图。
 - `BootCPU` 后续应从早期身份对象逐步退化为 `CurrentCPU.cpu` 所指 CPU 的 bootstrap role、alias 或描述性 fact；现有 `BootCPU` 对象可在迁移期保留，以避免一次性大范围重写。
 
-secondary CPU 的边界必须单独区分。`CpuGroup` 可以先从 `PlatformCpuInfo`、DeviceTree 或 topology 事实中知道 possible secondary CPU，并可维护 `CpuCandidate`、`PossibleCpuDescriptor` 或等价描述；但在某个 AP 真实进入 secondary entry 之前，不应假定该 AP 的 live `CurrentCPU` 已经存在，也不应认为该 AP 已经拥有可操作的 CPU-local interrupt、current task slot 或 task preemption 控制链。BP 侧如果提前为 AP 准备 idle task、hotplug state、runqueue 元数据或同步 completion，这些对象应标记为 BP 侧为 future CPU 准备的描述/资源，不等同于 AP 自己的 `CurrentCPU` 已建立。AP 进入后，才由该 AP 自动产生自己的 `CurrentCPU`，拥有对应 CPU 对象，并把该 CPU 对象注册/绑定回 `CpuGroup.Cpu[id]` 引用集合。
+secondary CPU 的边界必须单独区分。`CpuGroup` 可以先从 `PlatformCpuInfo`、DeviceTree 或 topology 事实中知道 possible secondary CPU，并维护对应 `CPUObject` 实例引用、logical-id 索引和 possible/present 集合视图；但在某个 AP 真实进入 secondary entry 之前，不应假定该 AP 的 live `CurrentCPU` 已经存在，也不应认为该 AP 已经拥有可操作的 CPU-local interrupt、current task slot 或 task preemption 控制链。BP 侧如果提前为 AP 准备 idle task、hotplug state、runqueue 元数据或同步 completion，这些对象应标记为 BP 侧为 future CPU 准备的描述/资源，不等同于 AP 自己的 `CurrentCPU` 已建立。AP 进入后，才由该 AP 自动产生自己的 `CurrentCPU`，拥有或接管对应 CPU 对象，并把该 CPU 对象注册/绑定回 `CpuGroup.Cpu[id]` 引用索引和集合视图。
 
 完成上述绑定后，与当前锁建模相关的访问链应为：
 
@@ -555,7 +558,8 @@ CurrentCPU
     -> PreemptionControl
 
 CpuGroup
-    -> CpuRef[id] -> CurrentCPU.cpu
+    -> CpuRef[logical_id] -> CPUObject instance
+    -> possible/present/online set views
 ```
 
 其中 `EventStream` 属于具体 CPU，并在该 CPU 的 trap entry 中把异常和中断分流到自己的 `ExceptionStream` 与 `InterruptStream`；`LocalInterruptControl` 属于具体 CPU，`CurrentTaskSlot` 也属于具体 CPU 并保存当前任务引用；`PreemptionControl` 属于当前 task/thread_info。`preempt_disable()` 和 `preempt_enable()` 不应直接作用于被唤醒或被创建的任务，而应通过 `CurrentCPU -> cpu -> CurrentTaskSlot.current_task` 找到当前正在执行的任务后再驱动该任务的抢占控制事件。

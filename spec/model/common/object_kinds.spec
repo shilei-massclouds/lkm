@@ -30,3 +30,6 @@ type MemoryObject {
 
 type ResourceObject {
 }
+
+type CPUObject {
+}

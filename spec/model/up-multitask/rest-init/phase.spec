@@ -21,7 +21,6 @@
 
 lock KernelInitTaskPiLock: RawSpinLock;
 lock KthreaddTaskPiLock: RawSpinLock;
-lock BootRunQueueLock: RawSpinLock;
 
 context WakeUpNewTaskContext: ResourceExclusiveContext {
     guard {

@@ -6,9 +6,40 @@
  * foundation and early asynchronous support while interrupts are still closed.
  */
 
+lock BootRunQueueLock: RawSpinLock;
+lock BootIdlePiLock: RawSpinLock;
+
+context BootIdlePiLockContext: ResourceExclusiveContext {
+    /*
+     * init_idle() first takes idle->pi_lock with raw_spin_lock_irqsave().
+     * The guard records the real irq-save protocol; the outer boot phase
+     * context alone is not enough to erase this lock boundary.
+     */
+    guard {
+        lock_ref: BootIdlePiLock;
+
+        entered_by {
+            BootIdlePiLock.Transition::LockIrqSave;
+        }
+
+        exited_by {
+            BootIdlePiLock.Transition::UnlockIrqRestore;
+        }
+    }
+
+    obj_refs {
+        BootIdleTask;
+        BootRunQueue;
+        BootCpuCurrentTask;
+        Scheduler;
+    }
+}
+
 /*
  * Scheduler 表示启动期调度器基础对象。本阶段只要求 boot CPU 的 runqueue、
- * idle task 关联和主动调度入口可用；完整 SMP 调度拓扑留给后续阶段。
+ * idle task 关联和主动调度入口可用；同时记录 Linux for_each_possible_cpu()
+ * 已基于 CpuGroup possible 集合初始化 runqueue 元数据。完整 SMP 调度拓扑
+ * 留给后续阶段。
  */
 object Scheduler: SchedulerObject {
     initial_state: State::Base;
@@ -64,6 +95,7 @@ object Scheduler: SchedulerObject {
 
                 ensures {
                     scheduler_runqueues_ready(Scheduler, CpuGroup);
+                    scheduler_possible_cpu_runqueues_ready(Scheduler, CpuGroup);
                     boot_runqueue_ready(BootRunQueue, BootCPU);
                     runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(BootRunQueueRef);
@@ -87,6 +119,7 @@ object Scheduler: SchedulerObject {
             BootRunQueue.state == State::Ready;
             BootIdleTask.state == State::Ready;
             scheduler_runqueues_ready(Scheduler, CpuGroup);
+            scheduler_possible_cpu_runqueues_ready(Scheduler, CpuGroup);
             runqueue_ref_ready(BootRunQueueRef);
             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
             runqueue_ref_ready(CurrentRunQueueRef);
@@ -180,7 +213,10 @@ object BitWaitQueueTable: TaskObject {
 }
 
 /*
- * BootRunQueue 表示 boot CPU 的 runqueue 元数据。
+ * BootRunQueue 表示 boot CPU 的 runqueue 元数据。Linux 同时在
+ * for_each_possible_cpu() 中初始化所有 possible CPU 的 rq；当前模型用
+ * Scheduler/CpuGroup 上的聚合事实表达全 possible 集合，用 BootRunQueue
+ * 继续承载 boot CPU 的可直接观测 rq。
  */
 object BootRunQueue: RunQueue {
     initial_state: State::Base;
@@ -198,6 +234,10 @@ object BootRunQueue: RunQueue {
 
                 ensures {
                     boot_runqueue_ready(BootRunQueue, BootCPU);
+                    raw_spinlock_initialized(BootRunQueueLock);
+                    raw_spinlock_ready(BootRunQueueLock);
+                    boot_runqueue_lock_ready(BootRunQueue, BootRunQueueLock);
+                    boot_runqueue_possible_cpu_set_covered_by_cpu_group(BootRunQueue, CpuGroup);
                     runqueue_runtime_state_is(BootRunQueue, RunQueueRuntimeState::None);
                     runqueue_task_refs_empty(BootRunQueue);
                     runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
@@ -216,6 +256,9 @@ object BootRunQueue: RunQueue {
     state State::Ready {
         invariant {
             boot_runqueue_ready(BootRunQueue, BootCPU);
+            raw_spinlock_ready(BootRunQueueLock);
+            boot_runqueue_lock_ready(BootRunQueue, BootRunQueueLock);
+            boot_runqueue_possible_cpu_set_covered_by_cpu_group(BootRunQueue, CpuGroup);
             runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
             runqueue_ref_ready(BootRunQueueRef);
             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
@@ -243,12 +286,39 @@ object BootIdleTask: Task {
                     BootCpuCurrentTask.state == State::Ready;
                     BootInitTask.state == State::Online;
                     InitMM.state == State::Ready;
+                    raw_spinlock_ready(BootRunQueueLock);
                 }
 
                 drives {
                     BootIdlePreemption.Transition::Setup;
-                    BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
-                    BootIdleTask.Action::SetTaskCpu(BootCPURef);
+                }
+
+                within BootIdlePiLockContext {
+                    depends_on {
+                        BootRunQueue.state == State::Ready;
+                        raw_spinlock_ready(BootRunQueueLock);
+                    }
+
+                    drives {
+                        BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
+                        BootIdleTask.Action::SetTaskCpu(BootCPURef);
+                    }
+
+                    ensures {
+                        raw_spinlock_irqsave_entered(BootIdlePiLock, BootCurrentCPU);
+                        raw_spinlock_irqrestore_exited(BootIdlePiLock, BootCurrentCPU);
+                        raw_spinlock_initialized(BootIdlePiLock);
+                        raw_spinlock_ready(BootIdlePiLock);
+                        boot_idle_pi_lock_ready(BootIdleTask, BootIdlePiLock);
+                        boot_idle_init_held_pi_lock(BootIdleTask, BootIdlePiLock);
+                        boot_idle_init_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
+                        boot_idle_task_cpu_set_under_rcu_read(BootIdleTask, BootCPURef);
+                        boot_runqueue_current_published_with_rcu(BootRunQueue, BootIdleTask);
+                    }
+
+                    deferred {
+                        "init_idle() takes BootRunQueueLock with raw_spin_rq_lock() while BootIdlePiLock has already saved and disabled local interrupts. Current context tooling only supports irq-save RawSpinLock guards, so the narrower ordinary raw rq lock boundary is recorded as boot_idle_init_held_runqueue_lock(...) until ordinary RawSpinLock lock/unlock contexts are added.";
+                    }
                 }
 
                 ensures {
@@ -267,6 +337,13 @@ object BootIdleTask: Task {
                     task_thread_context_owned(BootIdleTask, BootIdleTask.thread_context);
                     task_thread_context_core_register_set(BootIdleTask.thread_context);
                     task_preemption_control_ready(BootIdleTask);
+                    raw_spinlock_initialized(BootIdlePiLock);
+                    raw_spinlock_ready(BootIdlePiLock);
+                    boot_idle_pi_lock_ready(BootIdleTask, BootIdlePiLock);
+                    boot_idle_init_held_pi_lock(BootIdleTask, BootIdlePiLock);
+                    boot_idle_init_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
+                    boot_idle_task_cpu_set_under_rcu_read(BootIdleTask, BootCPURef);
+                    boot_runqueue_current_published_with_rcu(BootRunQueue, BootIdleTask);
                     current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
                     boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
                     task_cpu_ref_is(BootIdleTask, BootCPURef);
@@ -291,6 +368,10 @@ object BootIdleTask: Task {
             task_thread_context_owned(BootIdleTask, BootIdleTask.thread_context);
             task_thread_context_core_register_set(BootIdleTask.thread_context);
             task_preemption_control_ready(BootIdleTask);
+            raw_spinlock_ready(BootIdlePiLock);
+            boot_idle_pi_lock_ready(BootIdleTask, BootIdlePiLock);
+            boot_idle_task_cpu_set_under_rcu_read(BootIdleTask, BootCPURef);
+            boot_runqueue_current_published_with_rcu(BootRunQueue, BootIdleTask);
             current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
             task_cpu_ref_is(BootIdleTask, BootCPURef);
@@ -312,6 +393,7 @@ object BootIdlePreemption: PreemptionControl {
             on Transition::Setup -> State::Ready {
                 ensures {
                     task_preemption_control_ready(BootIdleTask);
+                    task_preempt_count_initialized_to_init_preempt_count(BootIdleTask);
                     task_preemption_disabled(BootIdleTask);
                 }
             }
@@ -321,6 +403,7 @@ object BootIdlePreemption: PreemptionControl {
     state State::Ready {
         invariant {
             task_preemption_control_ready(BootIdleTask);
+            task_preempt_count_initialized_to_init_preempt_count(BootIdleTask);
         }
     }
 }

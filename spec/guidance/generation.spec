@@ -14,6 +14,11 @@ predicate guidance_agent_must_check_generated_result_against_concrete_requiremen
 predicate guidance_user_boot_codegen_must_read_user_boot_specs_first() -> bool;
 predicate guidance_user_boot_codegen_must_use_consensus_object_names() -> bool;
 predicate guidance_user_boot_codegen_must_not_create_test_only_or_transitional_objects() -> bool;
+predicate guidance_cpu_group_codegen_must_read_cpu_model_specs_first() -> bool;
+predicate guidance_cpu_group_codegen_must_generate_unified_cpu_instances() -> bool;
+predicate guidance_cpu_group_codegen_must_preserve_logical_id_index_view() -> bool;
+predicate guidance_cpu_group_codegen_must_not_create_live_ap_current_cpu_early() -> bool;
+predicate guidance_cpu_group_codegen_must_generate_index_and_set_tests() -> bool;
 
 type GenerationAgentWorkflow {
     invariant {
@@ -75,5 +80,47 @@ type UserBootGenerationWorkflow {
          * transitional loader objects that are absent from the model.
          */
         guidance_user_boot_codegen_must_not_create_test_only_or_transitional_objects();
+    }
+}
+
+type CpuGroupGenerationWorkflow {
+    invariant {
+        /*
+         * Before generating CPU/CpuGroup implementation or tests, the
+         * generator must read the charter CPU/CpuGroup type note,
+         * SEM-CURRENT-CPU-MODEL-001, the entry-prelude/entry-successor model
+         * facts, and the arceos_ex coding constraints for unified CPU
+         * instances and logical-id indexing.
+         */
+        guidance_cpu_group_codegen_must_read_cpu_model_specs_first();
+
+        /*
+         * Generated code must model one reusable CPU type with one instance
+         * per logical CPU. BootCPU is logical-id 0 with a bootstrap role; it
+         * is not a separate CPU type.
+         */
+        guidance_cpu_group_codegen_must_generate_unified_cpu_instances();
+
+        /*
+         * Generated CpuGroup code must expose CpuGroup.Cpu[logical_id] as the
+         * stable CPU reference view, and possible/present/online membership as
+         * set views over those references.
+         */
+        guidance_cpu_group_codegen_must_preserve_logical_id_index_view();
+
+        /*
+         * Possible/present secondary CPU facts do not imply a live AP
+         * CurrentCPU. Generated code must not instantiate AP CurrentCPU or
+         * CPU-local control chains until the AP secondary entry path is
+         * generated.
+         */
+        guidance_cpu_group_codegen_must_not_create_live_ap_current_cpu_early();
+
+        /*
+         * The generated validation surface must include checks for boot CPU
+         * index 0, CpuRef target binding, possible/present/online set facts,
+         * secondary not-online facts and unique logical-id/hartid boundaries.
+         */
+        guidance_cpu_group_codegen_must_generate_index_and_set_tests();
     }
 }

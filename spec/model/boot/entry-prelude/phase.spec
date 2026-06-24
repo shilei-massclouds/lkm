@@ -1726,6 +1726,8 @@ object BootCurrentCPU: CurrentCPU {
                     current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
                     current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
                     current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
+                    cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+                    cpu_bootstrap_role(BootCPU);
                     cpu_local_interrupt_control_ready(BootCpuLocalInterrupt, BootCPU);
                     current_task_slot_ready(BootCpuCurrentTask, BootCPU);
                 }
@@ -1739,6 +1741,8 @@ object BootCurrentCPU: CurrentCPU {
             current_cpu_hartid_ready(BootCurrentCPU, BootArgs.boot_hartid);
             current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
             current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
+            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_bootstrap_role(BootCPU);
         }
 
         transitions {
@@ -1749,6 +1753,8 @@ object BootCurrentCPU: CurrentCPU {
                 ensures {
                     current_cpu_logical_id_ready(BootCurrentCPU, 0);
                     current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
+                    cpu_logical_id_ready(BootCPU, 0);
+                    cpu_bootstrap_role(BootCPU);
                 }
             }
         }
@@ -1760,6 +1766,9 @@ object BootCurrentCPU: CurrentCPU {
             current_cpu_logical_id_ready(BootCurrentCPU, 0);
             current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
             current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
+            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_logical_id_ready(BootCPU, 0);
+            cpu_bootstrap_role(BootCPU);
         }
 
         transitions {
@@ -1775,6 +1784,8 @@ object BootCurrentCPU: CurrentCPU {
                 ensures {
                     current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
                     boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+                    cpu_group_uses_logical_id_index(CpuGroup);
+                    cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
                 }
             }
         }
@@ -1787,6 +1798,9 @@ object BootCurrentCPU: CurrentCPU {
             current_cpu_owns_cpu(BootCurrentCPU, BootCPU);
             current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
             current_cpu_bootstrap_role_ready(BootCurrentCPU, BootCPU);
+            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_logical_id_ready(BootCPU, 0);
+            cpu_bootstrap_role(BootCPU);
         }
     }
 }
@@ -1818,6 +1832,8 @@ object BootCPU: CPUObject {
 
                 ensures {
                     boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+                    cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+                    cpu_bootstrap_role(BootCPU);
                 }
             }
         }
@@ -1829,6 +1845,8 @@ object BootCPU: CPUObject {
     state State::Prepared {
         invariant {
             boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_bootstrap_role(BootCPU);
         }
 
         transitions {
@@ -1842,6 +1860,9 @@ object BootCPU: CPUObject {
 
                 ensures {
                     platform_hart_id_valid(BootArgs.boot_hartid);
+                    cpu_possible(BootCPU);
+                    cpu_present(BootCPU);
+                    cpu_active(BootCPU);
                     boot_cpu_present(BootCPU);
                     boot_cpu_active(BootCPU);
                 }
@@ -1855,7 +1876,12 @@ object BootCPU: CPUObject {
     state State::Ready {
         invariant {
             boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_bootstrap_role(BootCPU);
             platform_hart_id_valid(BootArgs.boot_hartid);
+            cpu_possible(BootCPU);
+            cpu_present(BootCPU);
+            cpu_active(BootCPU);
             boot_cpu_present(BootCPU);
             boot_cpu_active(BootCPU);
         }
@@ -1866,6 +1892,7 @@ object BootCPU: CPUObject {
              */
             on Transition::Enable -> State::Online {
                 ensures {
+                    cpu_online(BootCPU);
                     boot_cpu_online(BootCPU);
                     cpu_ref_targets(BootCPURef, BootCPU);
                     cpu_ref_ready(BootCPURef);
@@ -1880,7 +1907,13 @@ object BootCPU: CPUObject {
     state State::Online {
         invariant {
             boot_cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_hartid_ready(BootCPU, BootArgs.boot_hartid);
+            cpu_bootstrap_role(BootCPU);
             platform_hart_id_valid(BootArgs.boot_hartid);
+            cpu_possible(BootCPU);
+            cpu_present(BootCPU);
+            cpu_active(BootCPU);
+            cpu_online(BootCPU);
             boot_cpu_present(BootCPU);
             boot_cpu_active(BootCPU);
             boot_cpu_online(BootCPU);
@@ -1971,6 +2004,8 @@ object CpuGroup: HardwareObject {
                 ensures {
                     current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
                     boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+                    cpu_group_uses_logical_id_index(CpuGroup);
+                    cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
                 }
             }
         }
@@ -1983,6 +2018,8 @@ object CpuGroup: HardwareObject {
         invariant {
             current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
             boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
+            cpu_group_uses_logical_id_index(CpuGroup);
+            cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
         }
 
         transitions {
@@ -2001,6 +2038,16 @@ object CpuGroup: HardwareObject {
                 ensures {
                     boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
                     current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
+                    cpu_group_uses_logical_id_index(CpuGroup);
+                    cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
+                    cpu_group_cpu_ref_at(CpuGroup, 0, BootCPURef);
+                    cpu_group_cpu_ref_targets(CpuGroup, BootCPURef, BootCPU);
+                    cpu_group_possible_set_ready(CpuGroup);
+                    cpu_group_present_set_ready(CpuGroup);
+                    cpu_group_online_set_ready(CpuGroup);
+                    cpu_group_possible_contains(CpuGroup, BootCPURef);
+                    cpu_group_present_contains(CpuGroup, BootCPURef);
+                    cpu_group_online_contains(CpuGroup, BootCPURef);
                     cpu_group_topology_ready(CpuGroup, DeviceTree);
                     cpu_group_boot_cpu_present(CpuGroup, BootCPU);
                     secondary_cpus_discovered(CpuGroup, DeviceTree);
@@ -2024,6 +2071,16 @@ object CpuGroup: HardwareObject {
         invariant {
             boot_cpu_managed_by_cpu_group(CpuGroup, BootCPU);
             current_cpu_registered_in_cpu_group(BootCurrentCPU, CpuGroup);
+            cpu_group_uses_logical_id_index(CpuGroup);
+            cpu_group_boot_cpu_index_zero(CpuGroup, BootCPU);
+            cpu_group_cpu_ref_at(CpuGroup, 0, BootCPURef);
+            cpu_group_cpu_ref_targets(CpuGroup, BootCPURef, BootCPU);
+            cpu_group_possible_set_ready(CpuGroup);
+            cpu_group_present_set_ready(CpuGroup);
+            cpu_group_online_set_ready(CpuGroup);
+            cpu_group_possible_contains(CpuGroup, BootCPURef);
+            cpu_group_present_contains(CpuGroup, BootCPURef);
+            cpu_group_online_contains(CpuGroup, BootCPURef);
             cpu_group_topology_ready(CpuGroup, DeviceTree);
             cpu_group_boot_cpu_present(CpuGroup, BootCPU);
             secondary_cpus_discovered(CpuGroup, DeviceTree);

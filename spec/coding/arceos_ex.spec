@@ -221,6 +221,13 @@ predicate arceos_ex_must_boot_idle_runtime_model_representative_need_resched_cyc
 predicate arceos_ex_must_bind_boot_idle_schedule_if_need_resched_to_schedule_idle() -> bool;
 predicate arceos_ex_must_rest_init_setup_show_boot_idle_tail_chain() -> bool;
 predicate arceos_ex_must_rest_init_smoke_cover_idle_schedule_relations() -> bool;
+predicate arceos_ex_must_model_cpu_instances_with_unified_cpu_type() -> bool;
+predicate arceos_ex_must_cpu_group_index_cpu_refs_by_logical_id() -> bool;
+predicate arceos_ex_must_cpu_group_not_own_cpu_bodies() -> bool;
+predicate arceos_ex_must_cpu_state_be_instance_facts_and_group_set_views() -> bool;
+predicate arceos_ex_must_not_generate_live_ap_current_cpu_before_entry() -> bool;
+predicate arceos_ex_must_cpu_group_lowering_mark_boot_secondary_split_transitional() -> bool;
+predicate arceos_ex_must_cpu_group_smoke_cover_index_and_sets() -> bool;
 predicate arceos_ex_must_current_task_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_be_cpu_view_private() -> bool;
 predicate arceos_ex_must_current_runqueue_ref_api_smoke_use_formal_runqueue_actions() -> bool;
@@ -2243,6 +2250,75 @@ type ArceosExRestInitCodingMust {
          * present.
          */
         arceos_ex_must_rest_init_smoke_cover_idle_schedule_relations();
+
+        /*
+         * CPU instance model:
+         *
+         * The implementation must realize the model as one reusable CPU object
+         * type with one instance per logical CPU. BootCPU is the logical-id-0
+         * CPU instance with a bootstrap role, not a separate CPU type.
+         */
+        arceos_ex_must_model_cpu_instances_with_unified_cpu_type();
+
+        /*
+         * CpuGroup indexing:
+         *
+         * CpuGroup must expose a logical-id indexed CPU reference view:
+         * CpuGroup.Cpu[0] targets BootCPU and later entries target secondary
+         * CPU instances. CpuIdMap may remain as a migration/check object, but
+         * generated code must treat it as validating that CpuGroup index view,
+         * not as a second owner of CPU bodies.
+         */
+        arceos_ex_must_cpu_group_index_cpu_refs_by_logical_id();
+
+        /*
+         * CpuGroup ownership:
+         *
+         * CpuGroup organizes CpuRef indexes, topology and possible/present/
+         * online set views. It must not own CPU bodies, and generated code
+         * must not model PossibleCpu/PossibleRunQueue as separate owning CPU
+         * objects. A set element is a CPU reference.
+         */
+        arceos_ex_must_cpu_group_not_own_cpu_bodies();
+
+        /*
+         * CPU state facts:
+         *
+         * hartid, logical_id, possible, present, active and online belong to
+         * the CPU instance. CpuGroup maintains set views over CPU references
+         * for possible/present/online membership.
+         */
+        arceos_ex_must_cpu_state_be_instance_facts_and_group_set_views();
+
+        /*
+         * AP CurrentCPU boundary:
+         *
+         * A secondary CPU may be present in CpuGroup's possible/present views
+         * before bringup, but generated code must not create a live AP
+         * CurrentCPU, LocalInterruptControl, CurrentTaskSlot or
+         * PreemptionControl chain before that AP enters secondary entry.
+         */
+        arceos_ex_must_not_generate_live_ap_current_cpu_before_entry();
+
+        /*
+         * Transitional lowering:
+         *
+         * The current Rust storage may temporarily keep boot_cpu and
+         * secondary_cpus fields for implementation convenience, but such a
+         * split is a lowering detail. Public object facts, checkpoints and
+         * code-generation comments must present the unified CPU instance model
+         * and logical-id indexed CpuGroup view.
+         */
+        arceos_ex_must_cpu_group_lowering_mark_boot_secondary_split_transitional();
+
+        /*
+         * CPU/CpuGroup coverage:
+         *
+         * Smoke/checkpoint coverage must observe CpuGroup.Cpu[0] -> BootCPU,
+         * boot CPU possible/present/online facts, secondary possible/present
+         * but not-online facts, and unique logical-id/hartid boundaries.
+         */
+        arceos_ex_must_cpu_group_smoke_cover_index_and_sets();
 
         /*
          * CurrentTaskRef scope:

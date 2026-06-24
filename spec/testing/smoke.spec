@@ -45,6 +45,12 @@ predicate testing_smoke_must_keep_kernel_environment_bound_explicit() -> bool;
 predicate testing_smoke_must_not_register_type_behavior_as_kunit_by_default() -> bool;
 predicate testing_smoke_must_not_register_object_api_behavior_as_kunit_by_default() -> bool;
 predicate testing_smoke_must_record_kunit_exceptions() -> bool;
+predicate testing_cpu_group_smoke_must_be_kernel_environment_bound() -> bool;
+predicate testing_cpu_group_smoke_must_cover_boot_cpu_index_zero() -> bool;
+predicate testing_cpu_group_smoke_must_cover_cpu_ref_targets() -> bool;
+predicate testing_cpu_group_smoke_must_cover_possible_present_online_sets() -> bool;
+predicate testing_cpu_group_smoke_must_cover_secondary_not_online_before_bringup() -> bool;
+predicate testing_cpu_group_smoke_must_cover_unique_logical_ids_and_hartids() -> bool;
 
 type TestImplementationPrinciples {
     invariant {
@@ -359,6 +365,44 @@ type SmokeTestGenerationMust {
          * production object, checkpoint fact or startup-stage fact.
          */
         testing_smoke_must_keep_kernel_environment_bound_explicit();
+
+        /*
+         * CPU/CpuGroup classification:
+         *
+         * CpuGroup smoke coverage is KernelEnvironmentBound. It observes the
+         * live startup CpuGroup, CPU facts and checkpoint facts; it must not
+         * create a fake production CpuGroup or add test-only CPU APIs.
+         */
+        testing_cpu_group_smoke_must_be_kernel_environment_bound();
+
+        /*
+         * CPU index and reference facts:
+         *
+         * CpuGroup smoke coverage must assert that logical id 0 is the boot
+         * CPU entry, that CpuGroup.Cpu[0] resolves through BootCPURef, and that
+         * the reference targets BootCPU.
+         */
+        testing_cpu_group_smoke_must_cover_boot_cpu_index_zero();
+        testing_cpu_group_smoke_must_cover_cpu_ref_targets();
+
+        /*
+         * CPU set views:
+         *
+         * CpuGroup smoke coverage must assert possible/present/online set
+         * views over CPU references. BootCPU must be possible, present and
+         * online; secondary CPUs discovered before bringup must be possible
+         * and present but not online.
+         */
+        testing_cpu_group_smoke_must_cover_possible_present_online_sets();
+        testing_cpu_group_smoke_must_cover_secondary_not_online_before_bringup();
+
+        /*
+         * CPU identity uniqueness:
+         *
+         * CpuGroup smoke coverage must assert unique logical CPU ids and
+         * unique hartids for entries discovered from topology.
+         */
+        testing_cpu_group_smoke_must_cover_unique_logical_ids_and_hartids();
 
         /*
          * KUnit default:
