@@ -126,6 +126,15 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.page_allocator.state() == State::Ready
         && ctx.page_allocator.boot_zonelist_set().state() == State::Ready
         && ctx.page_allocator.page_metadata_map_bound()
+        && ctx.page_allocator.zonelist_update_seq_irqsave_guard_ready()
+        && ctx.page_allocator.zonelist_printk_deferred_section_ready()
+        && ctx.page_allocator.cpuhp_step_registered()
+        && ctx.page_allocator.boot_pageset_checkpoint_ready()
+        && ctx
+            .page_allocator
+            .boot_pagesets_initialized_for_possible_cpus()
+        && ctx.page_allocator.boot_pageset_possible_cpu_count()
+            == ctx.per_cpu_storage.first_chunk().unit_count()
         && ctx.page_allocator.buddy_free_page_sets_ready()
         && ctx.page_allocator.buddy_total_free_pages() != 0
         && ctx.page_allocator.buddy_free_block_count() != 0

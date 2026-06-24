@@ -176,6 +176,12 @@ predicate buddy_free_page_sets_populated_from_memblock<T, M, Z>(sets: T, membloc
 predicate buddy_free_page_sets_exclude_reserved_ranges<T, M>(sets: T, memblock: M) -> bool;
 predicate buddy_free_page_sets_split_free_ranges_to_aligned_blocks<T>(sets: T) -> bool;
 predicate page_allocator_page_metadata_map_bound<T, M>(allocator: T, metadata_map: M) -> bool;
+predicate page_allocator_zonelist_update_seq_irqsave_guard_ready<T>(allocator: T) -> bool;
+predicate page_allocator_zonelist_printk_deferred_section_ready<T>(allocator: T) -> bool;
+predicate page_allocator_boot_pagesets_initialized_for_possible_cpus<T, P>(
+    allocator: T,
+    per_cpu_storage: P
+) -> bool;
 predicate page_allocator_buddy_free_page_sets_bound<T, S>(allocator: T, sets: S) -> bool;
 predicate page_allocator_free_pages_account_matches_buddy<T, S>(allocator: T, sets: S) -> bool;
 predicate page_allocator_alloc_pages_api_ready<T>(allocator: T) -> bool;

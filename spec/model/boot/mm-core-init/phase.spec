@@ -223,8 +223,14 @@ object PageAllocator: PageAllocatorType {
 
                 ensures {
                     page_allocator_zonelists_ready(PageAllocator, BootZonelistSet);
+                    page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
+                    page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
                     page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
                     page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
+                    page_allocator_boot_pagesets_initialized_for_possible_cpus(
+                        PageAllocator,
+                        PerCpuStorage
+                    );
                     page_allocator_page_metadata_map_bound(PageAllocator, PageMetadataMap);
                 }
             }
@@ -235,8 +241,14 @@ object PageAllocator: PageAllocatorType {
         invariant {
             BootZonelistSet.state == State::Ready;
             page_allocator_zonelists_ready(PageAllocator, BootZonelistSet);
+            page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
+            page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
             page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
+            page_allocator_boot_pagesets_initialized_for_possible_cpus(
+                PageAllocator,
+                PerCpuStorage
+            );
             page_allocator_page_metadata_map_bound(PageAllocator, PageMetadataMap);
         }
 
@@ -286,6 +298,17 @@ object PageAllocator: PageAllocatorType {
     state State::Ready {
         invariant {
             MemBlock.state == State::Offline;
+            BootZonelistSet.state == State::Ready;
+            page_allocator_zonelists_ready(PageAllocator, BootZonelistSet);
+            page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
+            page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
+            page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
+            page_allocator_boot_pageset_checkpoint_ready(PageAllocator);
+            page_allocator_boot_pagesets_initialized_for_possible_cpus(
+                PageAllocator,
+                PerCpuStorage
+            );
+            page_allocator_page_metadata_map_bound(PageAllocator, PageMetadataMap);
             page_allocator_ready(PageAllocator, Zones);
             memblock_free_ranges_handed_to_page_allocator(MemBlock, PageAllocator);
             zone_managed_pages_accounted(Zones, PageAllocator);

@@ -1370,8 +1370,12 @@ pub struct PageAllocator {
     boot_zonelist_set: BootZonelistSet,
     buddy_free_page_sets: BuddyFreePageSets,
     page_metadata_map_bound: bool,
+    zonelist_update_seq_irqsave_guard_ready: bool,
+    zonelist_printk_deferred_section_ready: bool,
     cpuhp_step_registered: bool,
     boot_pageset_checkpoint_ready: bool,
+    boot_pagesets_initialized_for_possible_cpus: bool,
+    boot_pageset_possible_cpu_count: usize,
     handoff_complete: bool,
     full_gfp_mask_open: bool,
     late_ready: bool,
@@ -1395,8 +1399,12 @@ impl PageAllocator {
             boot_zonelist_set: BootZonelistSet::new(),
             buddy_free_page_sets: BuddyFreePageSets::new(),
             page_metadata_map_bound: false,
+            zonelist_update_seq_irqsave_guard_ready: false,
+            zonelist_printk_deferred_section_ready: false,
             cpuhp_step_registered: false,
             boot_pageset_checkpoint_ready: false,
+            boot_pagesets_initialized_for_possible_cpus: false,
+            boot_pageset_possible_cpu_count: 0,
             handoff_complete: false,
             full_gfp_mask_open: false,
             late_ready: false,
@@ -1438,12 +1446,28 @@ impl PageAllocator {
         self.page_metadata_map_bound
     }
 
+    pub const fn zonelist_update_seq_irqsave_guard_ready(&self) -> bool {
+        self.zonelist_update_seq_irqsave_guard_ready
+    }
+
+    pub const fn zonelist_printk_deferred_section_ready(&self) -> bool {
+        self.zonelist_printk_deferred_section_ready
+    }
+
     pub const fn cpuhp_step_registered(&self) -> bool {
         self.cpuhp_step_registered
     }
 
     pub const fn boot_pageset_checkpoint_ready(&self) -> bool {
         self.boot_pageset_checkpoint_ready
+    }
+
+    pub const fn boot_pagesets_initialized_for_possible_cpus(&self) -> bool {
+        self.boot_pagesets_initialized_for_possible_cpus
+    }
+
+    pub const fn boot_pageset_possible_cpu_count(&self) -> usize {
+        self.boot_pageset_possible_cpu_count
     }
 
     pub const fn handoff_complete(&self) -> bool {
@@ -1620,8 +1644,13 @@ impl PageAllocator {
 
         self.boot_zonelist_set.setup(topology)?;
         self.page_metadata_map_bound = true;
+        self.zonelist_update_seq_irqsave_guard_ready = true;
+        self.zonelist_printk_deferred_section_ready = true;
         self.cpuhp_step_registered = PAGE_ALLOC_CPUHP_STEP != 0;
         self.boot_pageset_checkpoint_ready = true;
+        self.boot_pageset_possible_cpu_count = per_cpu_storage.first_chunk().unit_count();
+        self.boot_pagesets_initialized_for_possible_cpus =
+            self.boot_pageset_possible_cpu_count != 0;
 
         self.lifecycle.transition(
             LifecycleEvent::Preset,

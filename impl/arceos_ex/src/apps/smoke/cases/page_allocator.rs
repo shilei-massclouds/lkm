@@ -28,15 +28,17 @@ pub fn run() -> SmokeResult {
     let page_allocator = &ctx.page_allocator;
     let page_metadata_map = &ctx.page_metadata_map;
     let zonelist = page_allocator.boot_zonelist_set();
+    let boot_pageset_possible_cpus = page_allocator.boot_pageset_possible_cpu_count();
 
     printk::write_fmt(format_args!(
-        "fallback={} totalram_pages={} buddy_free={} buddy_blocks={} first_block_pages={} zone_facts={} first_zone={:#x}..{:#x} mem_map={} bytes={} first_page={:#x} metadata={:#x} alloc_page={:#x} alloc_phys={:#x} max_order={} gfp={:#x}\n",
+        "fallback={} totalram_pages={} buddy_free={} buddy_blocks={} first_block_pages={} zone_facts={} boot_pageset_cpus={} first_zone={:#x}..{:#x} mem_map={} bytes={} first_page={:#x} metadata={:#x} alloc_page={:#x} alloc_phys={:#x} max_order={} gfp={:#x}\n",
         zonelist.fallback_count(),
         page_allocator.totalram_pages(),
         page_allocator.buddy_total_free_pages(),
         page_allocator.buddy_free_block_count(),
         diag.first_buddy_block_pages,
         page_allocator.zone_fact_count(),
+        boot_pageset_possible_cpus,
         diag.first_zone_start,
         diag.first_zone_end,
         page_metadata_map.metadata_count(),
@@ -93,6 +95,12 @@ fn check_handoff_and_conversions(ctx: &Context) -> Option<PageAllocatorDiag> {
     }
     if !page_allocator.cpuhp_step_registered()
         || !page_allocator.boot_pageset_checkpoint_ready()
+        || !page_allocator.zonelist_update_seq_irqsave_guard_ready()
+        || !page_allocator.zonelist_printk_deferred_section_ready()
+        || !page_allocator.boot_pagesets_initialized_for_possible_cpus()
+        || page_allocator.boot_pageset_possible_cpu_count() == 0
+        || page_allocator.boot_pageset_possible_cpu_count()
+            != ctx.per_cpu_storage.first_chunk().unit_count()
         || !page_allocator.handoff_complete()
         || !page_allocator.buddy_free_page_sets_ready()
         || page_allocator.buddy_total_free_pages() == 0
