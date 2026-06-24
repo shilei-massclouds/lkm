@@ -2077,6 +2077,9 @@ pub struct Swiotlb {
     lifecycle: Lifecycle,
     pool_required: bool,
     early_pool_ready: bool,
+    static_pool_area_locks_ready: bool,
+    static_pool_area_count: usize,
+    static_pool_lock_count: usize,
     dynamic_growth_trimmed: bool,
 }
 
@@ -2086,6 +2089,9 @@ impl Swiotlb {
             lifecycle: Lifecycle::new(State::Base),
             pool_required: false,
             early_pool_ready: false,
+            static_pool_area_locks_ready: false,
+            static_pool_area_count: 0,
+            static_pool_lock_count: 0,
             dynamic_growth_trimmed: false,
         }
     }
@@ -2100,6 +2106,22 @@ impl Swiotlb {
 
     pub const fn early_pool_ready(&self) -> bool {
         self.early_pool_ready
+    }
+
+    pub const fn static_pool_area_locks_ready(&self) -> bool {
+        self.static_pool_area_locks_ready
+    }
+
+    pub const fn static_pool_area_count(&self) -> usize {
+        self.static_pool_area_count
+    }
+
+    pub const fn static_pool_lock_count(&self) -> usize {
+        self.static_pool_lock_count
+    }
+
+    pub const fn dynamic_growth_trimmed(&self) -> bool {
+        self.dynamic_growth_trimmed
     }
 
     pub fn setup(
@@ -2120,6 +2142,15 @@ impl Swiotlb {
             && dma_cache_policy.cache_alignment() > 1
             && zone_present_pages(zones, 4096).unwrap_or(0) != 0;
         self.early_pool_ready = true;
+        if self.pool_required {
+            self.static_pool_area_count = 1;
+            self.static_pool_lock_count = 1;
+            self.static_pool_area_locks_ready = true;
+        } else {
+            self.static_pool_area_count = 0;
+            self.static_pool_lock_count = 0;
+            self.static_pool_area_locks_ready = false;
+        }
         self.dynamic_growth_trimmed = true;
 
         self.lifecycle.transition(

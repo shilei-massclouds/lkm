@@ -357,6 +357,7 @@ object Swiotlb: MemoryObject {
                     swiotlb_policy_resolved(Swiotlb, DmaCachePolicy, Zones);
                     early_swiotlb_pool_decision_ready(Swiotlb);
                     early_swiotlb_memblock_reservation_ready_if_required(Swiotlb, MemBlock);
+                    swiotlb_static_pool_area_locks_ready_if_required(Swiotlb);
                     swiotlb_dynamic_growth_trimmed(Swiotlb);
                 }
             }
@@ -368,6 +369,7 @@ object Swiotlb: MemoryObject {
             swiotlb_policy_resolved(Swiotlb, DmaCachePolicy, Zones);
             early_swiotlb_pool_decision_ready(Swiotlb);
             early_swiotlb_memblock_reservation_ready_if_required(Swiotlb, MemBlock);
+            swiotlb_static_pool_area_locks_ready_if_required(Swiotlb);
             swiotlb_dynamic_growth_trimmed(Swiotlb);
         }
     }

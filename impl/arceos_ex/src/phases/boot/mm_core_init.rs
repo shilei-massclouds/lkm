@@ -164,6 +164,11 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
             == (ctx.dma_cache_policy.noncoherent_supported()
                 && ctx.dma_cache_policy.cache_alignment() > 1
                 && ctx.page_allocator.totalram_pages() != 0)
+        && (!ctx.swiotlb.pool_required()
+            || (ctx.swiotlb.static_pool_area_locks_ready()
+                && ctx.swiotlb.static_pool_area_count() != 0
+                && ctx.swiotlb.static_pool_lock_count() == ctx.swiotlb.static_pool_area_count()))
+        && ctx.swiotlb.dynamic_growth_trimmed()
         && ctx.slub_allocator.state() == State::Ready
         && ctx.slub_allocator.cache_registry().state() == State::Ready
         && ctx.slub_allocator.kmalloc_caches().state() == State::Ready

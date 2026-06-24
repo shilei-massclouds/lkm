@@ -75,6 +75,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::memory_debug_hardening::run,
     },
     SmokeCase {
+        name: "swiotlb",
+        run: cases::swiotlb::run,
+    },
+    SmokeCase {
         name: "page_allocator",
         run: cases::page_allocator::run,
     },
