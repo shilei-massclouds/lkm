@@ -25,7 +25,7 @@ use alloc::{boxed::Box, vec::Vec};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
 
-const MAX_BOOT_ZONES: usize = 3;
+const MAX_ZONE_SET_ZONES: usize = 3;
 const MAX_KMALLOC_CACHES: usize = 11;
 const MAX_KMALLOC_SLABS: usize = 32;
 const BUDDY_ORDER_COUNT: usize = 11;
@@ -78,8 +78,8 @@ impl ZoneRef {
 
 pub struct MemoryTopology {
     lifecycle: Lifecycle,
-    boot_memory_node: BootMemoryNode,
-    boot_zone_set: BootZoneSet,
+    memory_node: MemoryNode,
+    zone_set: ZoneSet,
     node_count: usize,
 }
 
@@ -87,8 +87,8 @@ impl MemoryTopology {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            boot_memory_node: BootMemoryNode::new(),
-            boot_zone_set: BootZoneSet::new(),
+            memory_node: MemoryNode::new(),
+            zone_set: ZoneSet::new(),
             node_count: 0,
         }
     }
@@ -101,12 +101,12 @@ impl MemoryTopology {
         self.node_count
     }
 
-    pub const fn boot_memory_node(&self) -> &BootMemoryNode {
-        &self.boot_memory_node
+    pub const fn memory_node(&self) -> &MemoryNode {
+        &self.memory_node
     }
 
-    pub const fn boot_zone_set(&self) -> &BootZoneSet {
-        &self.boot_zone_set
+    pub const fn zone_set(&self) -> &ZoneSet {
+        &self.zone_set
     }
 
     pub fn setup(&mut self, zones: &Zones, cpu_group: &CpuGroup, config: &Config) -> EventResult {
@@ -118,13 +118,13 @@ impl MemoryTopology {
             return self.failed_setup();
         }
 
-        self.boot_memory_node.setup(zones)?;
-        self.boot_zone_set.setup(zones, config)?;
+        self.memory_node.setup(zones)?;
+        self.zone_set.setup(zones, config)?;
         self.node_count = 1;
 
-        if self.boot_memory_node.state() != State::Ready
-            || self.boot_zone_set.state() != State::Ready
-            || self.boot_zone_set.populated_count() == 0
+        if self.memory_node.state() != State::Ready
+            || self.zone_set.state() != State::Ready
+            || self.zone_set.populated_count() == 0
         {
             return self.failed_setup();
         }
@@ -147,13 +147,13 @@ impl MemoryTopology {
     }
 }
 
-pub struct BootMemoryNode {
+pub struct MemoryNode {
     lifecycle: Lifecycle,
     node_id: usize,
     present_pages: usize,
 }
 
-impl BootMemoryNode {
+impl MemoryNode {
     const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
@@ -198,22 +198,22 @@ impl BootMemoryNode {
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
-            Checkpoint::BootMemoryNodeReady,
+            Checkpoint::MemoryNodeReady,
         )
     }
 }
 
-pub struct BootZoneSet {
+pub struct ZoneSet {
     lifecycle: Lifecycle,
-    zones: [ZoneRef; MAX_BOOT_ZONES],
+    zones: [ZoneRef; MAX_ZONE_SET_ZONES],
     populated_count: usize,
 }
 
-impl BootZoneSet {
+impl ZoneSet {
     const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            zones: [ZoneRef::empty(); MAX_BOOT_ZONES],
+            zones: [ZoneRef::empty(); MAX_ZONE_SET_ZONES],
             populated_count: 0,
         }
     }
@@ -242,7 +242,7 @@ impl BootZoneSet {
             return self.failed_setup();
         }
 
-        self.zones = [ZoneRef::empty(); MAX_BOOT_ZONES];
+        self.zones = [ZoneRef::empty(); MAX_ZONE_SET_ZONES];
         self.populated_count = 0;
 
         for kind in [ZoneKind::Dma32, ZoneKind::Normal, ZoneKind::Movable] {
@@ -252,7 +252,7 @@ impl BootZoneSet {
             if zone.is_empty() {
                 continue;
             }
-            if self.populated_count >= MAX_BOOT_ZONES {
+            if self.populated_count >= MAX_ZONE_SET_ZONES {
                 return self.failed_setup();
             }
             let Some(pages) = bytes_to_pages(zone.present_bytes(), config.page_size()) else {
@@ -277,7 +277,7 @@ impl BootZoneSet {
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
-            Checkpoint::BootZoneSetReady,
+            Checkpoint::ZoneSetReady,
         )
     }
 
@@ -291,18 +291,18 @@ impl BootZoneSet {
     }
 }
 
-pub struct BootZonelistSet {
+pub struct ZonelistSet {
     lifecycle: Lifecycle,
-    fallback: [Option<ZoneKind>; MAX_BOOT_ZONES + 1],
+    fallback: [Option<ZoneKind>; MAX_ZONE_SET_ZONES + 1],
     fallback_count: usize,
     null_sentinel_ready: bool,
 }
 
-impl BootZonelistSet {
+impl ZonelistSet {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            fallback: [None; MAX_BOOT_ZONES + 1],
+            fallback: [None; MAX_ZONE_SET_ZONES + 1],
             fallback_count: 0,
             null_sentinel_ready: false,
         }
@@ -330,15 +330,15 @@ impl BootZonelistSet {
 
     fn setup(&mut self, topology: &MemoryTopology) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || topology.boot_memory_node().state() != State::Ready
-            || topology.boot_zone_set().state() != State::Ready
+            || topology.memory_node().state() != State::Ready
+            || topology.zone_set().state() != State::Ready
         {
             return self.failed_setup();
         }
 
-        self.fallback = [None; MAX_BOOT_ZONES + 1];
+        self.fallback = [None; MAX_ZONE_SET_ZONES + 1];
         self.fallback_count = 0;
-        let zone_set = topology.boot_zone_set();
+        let zone_set = topology.zone_set();
         let mut index = zone_set.populated_count();
         while index != 0 {
             index -= 1;
@@ -359,7 +359,7 @@ impl BootZonelistSet {
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
-            Checkpoint::BootZonelistSetReady,
+            Checkpoint::ZonelistSetReady,
         )
     }
 
@@ -895,9 +895,9 @@ impl BuddyFreeArea {
 #[derive(Clone, Copy)]
 struct BuddyFreePageSets {
     ready: bool,
-    zone_kinds: [Option<ZoneKind>; MAX_BOOT_ZONES],
+    zone_kinds: [Option<ZoneKind>; MAX_ZONE_SET_ZONES],
     zone_count: usize,
-    areas: [[BuddyFreeArea; BUDDY_ORDER_COUNT]; MAX_BOOT_ZONES],
+    areas: [[BuddyFreeArea; BUDDY_ORDER_COUNT]; MAX_ZONE_SET_ZONES],
     total_free_pages: usize,
     free_block_count: usize,
 }
@@ -906,9 +906,9 @@ impl BuddyFreePageSets {
     const fn new() -> Self {
         Self {
             ready: false,
-            zone_kinds: [None; MAX_BOOT_ZONES],
+            zone_kinds: [None; MAX_ZONE_SET_ZONES],
             zone_count: 0,
-            areas: [[BuddyFreeArea::empty(); BUDDY_ORDER_COUNT]; MAX_BOOT_ZONES],
+            areas: [[BuddyFreeArea::empty(); BUDDY_ORDER_COUNT]; MAX_ZONE_SET_ZONES],
             total_free_pages: 0,
             free_block_count: 0,
         }
@@ -929,7 +929,7 @@ impl BuddyFreePageSets {
     fn setup(
         &mut self,
         memblock: &MemBlock,
-        zone_facts: &[ZoneRef; MAX_BOOT_ZONES],
+        zone_facts: &[ZoneRef; MAX_ZONE_SET_ZONES],
         zone_fact_count: usize,
         page_metadata_map: &PageMetadataMap,
         page_size: usize,
@@ -1008,7 +1008,7 @@ impl BuddyFreePageSets {
 
     fn alloc_pages(
         &mut self,
-        zonelist: &BootZonelistSet,
+        zonelist: &ZonelistSet,
         order: usize,
         page_metadata_map: &PageMetadataMap,
     ) -> Option<PageRef> {
@@ -1368,7 +1368,7 @@ impl BuddyFreePageSets {
 
 pub struct PageAllocator {
     lifecycle: Lifecycle,
-    boot_zonelist_set: BootZonelistSet,
+    zonelist_set: ZonelistSet,
     buddy_free_page_sets: BuddyFreePageSets,
     page_metadata_map_bound: bool,
     zonelist_update_seq_irqsave_guard_ready: bool,
@@ -1389,7 +1389,7 @@ pub struct PageAllocator {
     page_extension_late_trimmed: bool,
     shuffle_late_trimmed: bool,
     totalram_pages: usize,
-    zone_facts: [ZoneRef; MAX_BOOT_ZONES],
+    zone_facts: [ZoneRef; MAX_ZONE_SET_ZONES],
     zone_fact_count: usize,
 }
 
@@ -1397,7 +1397,7 @@ impl PageAllocator {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
-            boot_zonelist_set: BootZonelistSet::new(),
+            zonelist_set: ZonelistSet::new(),
             buddy_free_page_sets: BuddyFreePageSets::new(),
             page_metadata_map_bound: false,
             zonelist_update_seq_irqsave_guard_ready: false,
@@ -1418,7 +1418,7 @@ impl PageAllocator {
             page_extension_late_trimmed: false,
             shuffle_late_trimmed: false,
             totalram_pages: 0,
-            zone_facts: [ZoneRef::empty(); MAX_BOOT_ZONES],
+            zone_facts: [ZoneRef::empty(); MAX_ZONE_SET_ZONES],
             zone_fact_count: 0,
         }
     }
@@ -1427,8 +1427,8 @@ impl PageAllocator {
         self.lifecycle.state()
     }
 
-    pub const fn boot_zonelist_set(&self) -> &BootZonelistSet {
-        &self.boot_zonelist_set
+    pub const fn zonelist_set(&self) -> &ZonelistSet {
+        &self.zonelist_set
     }
 
     pub const fn buddy_free_page_sets_ready(&self) -> bool {
@@ -1570,11 +1570,9 @@ impl PageAllocator {
             return None;
         }
 
-        let page = self.buddy_free_page_sets.alloc_pages(
-            &self.boot_zonelist_set,
-            order,
-            page_metadata_map,
-        )?;
+        let page =
+            self.buddy_free_page_sets
+                .alloc_pages(&self.zonelist_set, order, page_metadata_map)?;
         if !self.sync_zone_free_pages() {
             return None;
         }
@@ -1629,7 +1627,7 @@ impl PageAllocator {
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || topology.state() != State::Ready
-            || topology.boot_zone_set().state() != State::Ready
+            || topology.zone_set().state() != State::Ready
             || page_metadata_map.state() != State::Ready
             || page_metadata_map.metadata_count() == 0
             || cpu_hotplug_state.state() != State::Ready
@@ -1643,7 +1641,7 @@ impl PageAllocator {
             );
         }
 
-        self.boot_zonelist_set.setup(topology)?;
+        self.zonelist_set.setup(topology)?;
         self.page_metadata_map_bound = true;
         self.zonelist_update_seq_irqsave_guard_ready = true;
         self.zonelist_printk_deferred_section_ready = true;
@@ -1674,7 +1672,7 @@ impl PageAllocator {
             || memblock.state() != State::Online
             || zones.state() != State::Ready
             || page_metadata_map.state() != State::Ready
-            || self.boot_zonelist_set.state() != State::Ready
+            || self.zonelist_set.state() != State::Ready
             || memory_debug_hardening.state() != State::Ready
             || swiotlb.state() != State::Ready
         {
@@ -4408,13 +4406,13 @@ impl MmStructCache {
 }
 
 struct ZoneFacts {
-    facts: [ZoneRef; MAX_BOOT_ZONES],
+    facts: [ZoneRef; MAX_ZONE_SET_ZONES],
     count: usize,
     total_pages: usize,
 }
 
 fn build_zone_facts(zones: &Zones, config: &Config) -> Option<ZoneFacts> {
-    let mut facts = [ZoneRef::empty(); MAX_BOOT_ZONES];
+    let mut facts = [ZoneRef::empty(); MAX_ZONE_SET_ZONES];
     let mut count = 0usize;
     let mut total_pages = 0usize;
 
@@ -4424,7 +4422,7 @@ fn build_zone_facts(zones: &Zones, config: &Config) -> Option<ZoneFacts> {
             continue;
         }
         let pages = bytes_to_pages(zone.present_bytes(), config.page_size())?;
-        if count >= MAX_BOOT_ZONES {
+        if count >= MAX_ZONE_SET_ZONES {
             return None;
         }
         facts[count] = ZoneRef {

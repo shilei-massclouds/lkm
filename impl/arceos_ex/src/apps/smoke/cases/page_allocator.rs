@@ -27,7 +27,7 @@ pub fn run() -> SmokeResult {
 
     let page_allocator = &ctx.page_allocator;
     let page_metadata_map = &ctx.page_metadata_map;
-    let zonelist = page_allocator.boot_zonelist_set();
+    let zonelist = page_allocator.zonelist_set();
     let boot_pageset_possible_cpus = page_allocator.boot_pageset_possible_cpu_count();
 
     printk::write_fmt(format_args!(
@@ -64,7 +64,7 @@ struct PageAllocatorDiag {
 fn check_handoff_and_conversions(ctx: &Context) -> Option<PageAllocatorDiag> {
     let page_allocator = &ctx.page_allocator;
     let page_metadata_map = &ctx.page_metadata_map;
-    let zonelist = page_allocator.boot_zonelist_set();
+    let zonelist = page_allocator.zonelist_set();
 
     if page_metadata_map.state() != State::Ready
         || page_metadata_map.metadata_count() == 0

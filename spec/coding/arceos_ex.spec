@@ -12,6 +12,7 @@ predicate arceos_ex_must_device_tree_storage_uses_established_linear_mapping() -
 predicate arceos_ex_must_device_tree_avoid_heap_and_fixed_static_storage() -> bool;
 predicate arceos_ex_must_device_tree_checkpoint_after_validation() -> bool;
 predicate arceos_ex_should_encapsulate_device_tree_unflatten_unsafe() -> bool;
+predicate arceos_ex_must_memory_topology_project_existing_zones_only() -> bool;
 predicate arceos_ex_must_page_allocator_preset_only_builds_topology_and_hooks() -> bool;
 predicate arceos_ex_must_page_allocator_setup_hands_memblock_pages_to_buddy() -> bool;
 predicate arceos_ex_must_page_allocator_buddy_lists_live_inside_page_allocator() -> bool;
@@ -651,6 +652,16 @@ type ArceosExDeviceTreeCodingShould {
 
 type ArceosExMmCoreInitCodingMust {
     invariant {
+        /*
+         * Memory topology view:
+         *
+         * MemoryTopology.setup() must only project already Ready Zones into
+         * allocator-visible MemoryNode/ZoneSet views. It must not repartition
+         * zones, allocate mem_map/page metadata, or claim new ownership of
+         * Linux node_zones.
+         */
+        arceos_ex_must_memory_topology_project_existing_zones_only();
+
         /*
          * PageAllocator preset/setup split:
          *

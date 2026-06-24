@@ -117,16 +117,16 @@ fn mm_core_init_phase_ready(ctx: &Context) -> bool {
         && ctx.memblock.state() == State::Offline
         && ctx.memory_topology.state() == State::Ready
         && ctx.memory_topology.node_count() == 1
-        && ctx.memory_topology.boot_memory_node().state() == State::Ready
-        && ctx.memory_topology.boot_memory_node().node_id() == 0
-        && ctx.memory_topology.boot_memory_node().present_pages() != 0
-        && ctx.memory_topology.boot_zone_set().state() == State::Ready
+        && ctx.memory_topology.memory_node().state() == State::Ready
+        && ctx.memory_topology.memory_node().node_id() == 0
+        && ctx.memory_topology.memory_node().present_pages() != 0
+        && ctx.memory_topology.zone_set().state() == State::Ready
         && ctx.page_metadata_map.state() == State::Ready
         && ctx.page_metadata_map.metadata_count() != 0
         && ctx.page_metadata_map.metadata_bytes() != 0
         && ctx.page_metadata_map.metadata_storage_size() >= ctx.page_metadata_map.metadata_bytes()
         && ctx.page_allocator.state() == State::Ready
-        && ctx.page_allocator.boot_zonelist_set().state() == State::Ready
+        && ctx.page_allocator.zonelist_set().state() == State::Ready
         && ctx.page_allocator.page_metadata_map_bound()
         && ctx.page_allocator.zonelist_update_seq_irqsave_guard_ready()
         && ctx.page_allocator.zonelist_printk_deferred_section_ready()

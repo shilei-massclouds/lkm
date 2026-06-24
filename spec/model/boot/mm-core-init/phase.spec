@@ -8,8 +8,10 @@
  */
 
 /*
- * MemoryTopology 表示页分配器可见的内存节点拓扑。当前 default_config 为 UMA，
- * 因此只要求唯一 BootMemoryNode；NUMA 扩展后可增加更多 MemoryNode 实例。
+ * MemoryTopology 表示页分配器可见的内存节点拓扑视图。当前 default_config
+ * 为 UMA，因此只要求唯一 MemoryNode；NUMA 扩展后可增加更多 MemoryNode
+ * 实例。本对象消费 CorePrepare 已建立的 Zones，不重新创建 pg_data_t、
+ * node_zones 或 mem_map 本体。
  */
 object MemoryTopology: MemoryObject {
     initial_state: State::Base;
@@ -23,14 +25,14 @@ object MemoryTopology: MemoryObject {
                 }
 
                 drives {
-                    BootMemoryNode.Event::Setup;
-                    BootZoneSet.Event::Setup;
+                    MemoryNode.Event::Setup;
+                    ZoneSet.Event::Setup;
                 }
 
                 ensures {
                     memory_topology_ready(MemoryTopology, Zones, CpuGroup);
-                    memory_topology_uma_single_node(MemoryTopology, BootMemoryNode);
-                    memory_node_zone_set_ready(BootMemoryNode, BootZoneSet);
+                    memory_topology_uma_single_node(MemoryTopology, MemoryNode);
+                    memory_node_zone_set_ready(MemoryNode, ZoneSet);
                 }
             }
         }
@@ -38,19 +40,19 @@ object MemoryTopology: MemoryObject {
 
     state State::Ready {
         invariant {
-            BootMemoryNode.state == State::Ready;
-            BootZoneSet.state == State::Ready;
+            MemoryNode.state == State::Ready;
+            ZoneSet.state == State::Ready;
             memory_topology_ready(MemoryTopology, Zones, CpuGroup);
-            memory_topology_uma_single_node(MemoryTopology, BootMemoryNode);
-            memory_node_zone_set_ready(BootMemoryNode, BootZoneSet);
+            memory_topology_uma_single_node(MemoryTopology, MemoryNode);
+            memory_node_zone_set_ready(MemoryNode, ZoneSet);
         }
     }
 }
 
 /*
- * BootMemoryNode 对应当前 UMA 配置下唯一的 pg_data_t。
+ * MemoryNode 对应当前 UMA 配置下唯一的节点视图，引用已有 Zones 信息。
  */
-object BootMemoryNode: MemoryObject {
+object MemoryNode: MemoryObject {
     initial_state: State::Base;
     parent: MemoryTopology;
 
@@ -62,8 +64,8 @@ object BootMemoryNode: MemoryObject {
                 }
 
                 ensures {
-                    boot_memory_node_ready(BootMemoryNode, Zones);
-                    boot_memory_node_owns_zone_set(BootMemoryNode, BootZoneSet);
+                    memory_node_ready(MemoryNode, Zones);
+                    memory_node_references_zone_set(MemoryNode, ZoneSet);
                 }
             }
         }
@@ -71,18 +73,18 @@ object BootMemoryNode: MemoryObject {
 
     state State::Ready {
         invariant {
-            boot_memory_node_ready(BootMemoryNode, Zones);
-            boot_memory_node_owns_zone_set(BootMemoryNode, BootZoneSet);
+            memory_node_ready(MemoryNode, Zones);
+            memory_node_references_zone_set(MemoryNode, ZoneSet);
         }
     }
 }
 
 /*
- * BootZoneSet 表示唯一 memory node 拥有的 populated zones。
+ * ZoneSet 表示唯一 memory node 可见的 populated zone 引用集合。
  */
-object BootZoneSet: MemoryObject {
+object ZoneSet: MemoryObject {
     initial_state: State::Base;
-    parent: BootMemoryNode;
+    parent: MemoryNode;
 
     state State::Base {
         events {
@@ -92,8 +94,9 @@ object BootZoneSet: MemoryObject {
                 }
 
                 ensures {
-                    boot_zone_set_ready(BootZoneSet, Zones);
-                    boot_zone_set_contains_populated_zones(BootZoneSet, Zones);
+                    zone_set_ready(ZoneSet, Zones);
+                    zone_set_references_populated_zones(ZoneSet, Zones);
+                    zone_set_does_not_repartition_zones(ZoneSet, Zones);
                     zone_order_migration_free_page_hierarchy_ready(Zones);
                 }
             }
@@ -102,33 +105,34 @@ object BootZoneSet: MemoryObject {
 
     state State::Ready {
         invariant {
-            boot_zone_set_ready(BootZoneSet, Zones);
-            boot_zone_set_contains_populated_zones(BootZoneSet, Zones);
+            zone_set_ready(ZoneSet, Zones);
+            zone_set_references_populated_zones(ZoneSet, Zones);
+            zone_set_does_not_repartition_zones(ZoneSet, Zones);
             zone_order_migration_free_page_hierarchy_ready(Zones);
         }
     }
 }
 
 /*
- * BootZonelistSet 表示 build_all_zonelists(NULL) 后的 fallback zonelist 视图。
+ * ZonelistSet 表示 build_all_zonelists(NULL) 后的 fallback zonelist 视图。
  */
-object BootZonelistSet: MemoryObject {
+object ZonelistSet: MemoryObject {
     initial_state: State::Base;
-    parent: BootMemoryNode;
+    parent: MemoryNode;
 
     state State::Base {
         events {
             on Event::Setup -> State::Ready {
                 depends_on {
-                    BootMemoryNode.state == State::Ready;
-                    BootZoneSet.state == State::Ready;
+                    MemoryNode.state == State::Ready;
+                    ZoneSet.state == State::Ready;
                 }
 
                 ensures {
-                    boot_zonelist_set_ready(BootZonelistSet, BootZoneSet);
-                    zonelist_fallback_order_ready(BootZonelistSet);
-                    zonelist_zonerefs_reference_zones_without_owning(BootZonelistSet, BootZoneSet);
-                    zonelist_null_sentinel_ready(BootZonelistSet);
+                    zonelist_set_ready(ZonelistSet, ZoneSet);
+                    zonelist_fallback_order_ready(ZonelistSet);
+                    zonelist_zonerefs_reference_zones_without_owning(ZonelistSet, ZoneSet);
+                    zonelist_null_sentinel_ready(ZonelistSet);
                 }
             }
         }
@@ -136,10 +140,10 @@ object BootZonelistSet: MemoryObject {
 
     state State::Ready {
         invariant {
-            boot_zonelist_set_ready(BootZonelistSet, BootZoneSet);
-            zonelist_fallback_order_ready(BootZonelistSet);
-            zonelist_zonerefs_reference_zones_without_owning(BootZonelistSet, BootZoneSet);
-            zonelist_null_sentinel_ready(BootZonelistSet);
+            zonelist_set_ready(ZonelistSet, ZoneSet);
+            zonelist_fallback_order_ready(ZonelistSet);
+            zonelist_zonerefs_reference_zones_without_owning(ZonelistSet, ZoneSet);
+            zonelist_null_sentinel_ready(ZonelistSet);
         }
     }
 }
@@ -211,18 +215,18 @@ object PageAllocator: PageAllocatorType {
             on Event::Preset -> State::Prepared {
                 depends_on {
                     MemoryTopology.state == State::Ready;
-                    BootZoneSet.state == State::Ready;
+                    ZoneSet.state == State::Ready;
                     PageMetadataMap.state == State::Ready;
                     CpuHotplugState.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
                 }
 
                 drives {
-                    BootZonelistSet.Event::Setup;
+                    ZonelistSet.Event::Setup;
                 }
 
                 ensures {
-                    page_allocator_zonelists_ready(PageAllocator, BootZonelistSet);
+                    page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
                     page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
                     page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
                     page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
@@ -239,8 +243,8 @@ object PageAllocator: PageAllocatorType {
 
     state State::Prepared {
         invariant {
-            BootZonelistSet.state == State::Ready;
-            page_allocator_zonelists_ready(PageAllocator, BootZonelistSet);
+            ZonelistSet.state == State::Ready;
+            page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
             page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
@@ -257,7 +261,7 @@ object PageAllocator: PageAllocatorType {
                 depends_on {
                     MemBlock.state == State::Online;
                     Zones.state == State::Ready;
-                    BootZonelistSet.state == State::Ready;
+                    ZonelistSet.state == State::Ready;
                     MemoryDebugHardening.state == State::Ready;
                     Swiotlb.state == State::Ready;
                 }
@@ -298,8 +302,8 @@ object PageAllocator: PageAllocatorType {
     state State::Ready {
         invariant {
             MemBlock.state == State::Offline;
-            BootZonelistSet.state == State::Ready;
-            page_allocator_zonelists_ready(PageAllocator, BootZonelistSet);
+            ZonelistSet.state == State::Ready;
+            page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
             page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
@@ -1308,9 +1312,9 @@ object MmCoreInitPhase: PhaseObject {
             CorePreparePhase.state == State::Ready;
             ExceptionStream.state == State::Ready;
             MemoryTopology.state == State::Ready;
-            BootMemoryNode.state == State::Ready;
-            BootZoneSet.state == State::Ready;
-            BootZonelistSet.state == State::Ready;
+            MemoryNode.state == State::Ready;
+            ZoneSet.state == State::Ready;
+            ZonelistSet.state == State::Ready;
             PageMetadataMap.state == State::Ready;
             PageAllocatorBuddyFreePageSets.state == State::Ready;
             PageAllocator.state == State::Ready;
