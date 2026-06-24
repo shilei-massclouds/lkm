@@ -86,7 +86,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.memblock,
         &ctx.per_cpu_storage,
         &ctx.boot_param,
-        &ctx.boot_cpu_local_interrupt,
+        &mut ctx.boot_cpu_local_interrupt,
     )?;
     crate::checkpoint::dispatch(Checkpoint::PrintkBufferReady, ctx);
     ctx.exception_table.setup(&ctx.kernel_image, &ctx.vm)?;
@@ -184,7 +184,7 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.page_metadata_map.metadata_storage_size() >= ctx.page_metadata_map.metadata_bytes()
         && ctx.resource_lock.state() == State::Ready
         && ctx.resource_lock.ready()
-        && ctx.resource_lock.boot_phase_write_guard_elided()
+        && ctx.resource_lock.boot_init_task_write_guard_completed()
         && ctx.resource_tree.state() == State::Ready
         && ctx.resource_tree.write_lock_guard_used()
         && ctx
@@ -198,10 +198,10 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.dma_cache_policy.state() == State::Ready
         && ctx.cpu_hotplug_lock.state() == State::Ready
         && ctx.cpu_hotplug_lock.ready()
-        && ctx.cpu_hotplug_lock.boot_phase_read_guard_elided()
+        && ctx.cpu_hotplug_lock.boot_init_task_read_guard_completed()
         && ctx.jump_label_mutex.state() == State::Ready
         && ctx.jump_label_mutex.ready()
-        && ctx.jump_label_mutex.boot_phase_guard_elided()
+        && ctx.jump_label_mutex.boot_init_task_guard_completed()
         && ctx.static_branch.state() == State::Ready
         && ctx.static_branch.cpu_hotplug_read_guard_used()
         && ctx
@@ -227,7 +227,6 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && printk::is_ready()
         && printk::setup_local_irq_save_restore_used()
         && printk::setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)
-        && printk::setup_local_irq_guard_proof_only()
         && ctx.exception_table.state() == State::Ready
         && ctx.exception_stream.state() == State::Ready
         && ctx.exception_stream.page_fault_state() == State::Ready

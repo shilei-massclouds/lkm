@@ -3,7 +3,7 @@ use super::{
     lds::Lds,
     memblock::MemBlock,
     raw_dtb::PhysRange,
-    rwlock::RwLock,
+    rwlock::{RwLock, RwLockWriteOutcome},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -72,7 +72,7 @@ impl ResourceTree {
     pub fn resource_lock_write_guard_used_by(&self, resource_lock: &RwLock) -> bool {
         self.lifecycle.state() == State::Ready
             && self.resource_lock_write_guard_used
-            && resource_lock.boot_phase_write_guard_elided()
+            && resource_lock.boot_init_task_write_guard_completed()
     }
 
     pub fn root(&self) -> Option<ResourceRef<'_>> {
@@ -111,32 +111,38 @@ impl ResourceTree {
 
         /*
          * ResourceTreeWriteContext:
-         * ResourceLock.WriteLock(BootInitTaskRef) is elided because the outer
-         * BootPhaseContext proves a single CPU, single task, local IRQ
-         * disabled, preemption disabled execution path.
+         * ResourceLock.WriteLock(BootInitTaskRef) preserves the ordinary
+         * write_lock() boundary even though the surrounding BootPhaseContext
+         * already contributes single CPU/task facts.
          */
-        resource_lock.mark_boot_phase_write_guard_elided()?;
+        if resource_lock.write_lock_owner(super::rwlock::RwLockOwner::BootInitTask)?
+            != RwLockWriteOutcome::Acquired
+        {
+            return self.failed_setup();
+        }
 
         let root_range = PhysRange::new(0, usize::MAX);
         self.clear();
-        if self
+        let records_ready = self
             .add_record(ResourceKind::Root, root_range, NO_RESOURCE)
-            .is_none()
-            || !self.add_system_ram_resources(memblock)
-            || !self.add_reserved_resources(memblock)
-            || !self.add_kernel_resources(kernel_image, lds)
-            || !self.resources_ready()
-        {
+            .is_some()
+            && self.add_system_ram_resources(memblock)
+            && self.add_reserved_resources(memblock)
+            && self.add_kernel_resources(kernel_image, lds)
+            && self.resources_ready();
+        if !records_ready {
             self.clear();
+            resource_lock.write_unlock_owner(super::rwlock::RwLockOwner::BootInitTask)?;
             return self.failed_setup();
         }
         self.write_lock_guard_used = true;
         self.resource_lock_write_guard_used = true;
         /*
          * ResourceTreeWriteContext:
-         * ResourceLock.WriteUnlock(BootInitTaskRef) is elided for the same
-         * BootPhaseContext effective-context proof.
+         * ResourceLock.WriteUnlock(BootInitTaskRef) exits the same modeled
+         * write_lock() boundary.
          */
+        resource_lock.write_unlock_owner(super::rwlock::RwLockOwner::BootInitTask)?;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

@@ -175,7 +175,6 @@ pub struct PerCpuRwSemaphore {
     writer_blocked_count: usize,
     reader_drain_count: usize,
     wake_count: usize,
-    boot_phase_read_guard_elided_count: usize,
 }
 
 #[allow(dead_code)]
@@ -206,7 +205,6 @@ impl PerCpuRwSemaphore {
             writer_blocked_count: 0,
             reader_drain_count: 0,
             wake_count: 0,
-            boot_phase_read_guard_elided_count: 0,
         }
     }
 
@@ -298,10 +296,6 @@ impl PerCpuRwSemaphore {
         self.wake_count
     }
 
-    pub const fn boot_phase_read_guard_elided_count(&self) -> usize {
-        self.boot_phase_read_guard_elided_count
-    }
-
     pub fn ready(&self) -> bool {
         self.lifecycle.state() == State::Ready
             && self.storage_bound
@@ -325,8 +319,12 @@ impl PerCpuRwSemaphore {
             && self.rcu_sync.idle()
     }
 
-    pub fn boot_phase_read_guard_elided(&self) -> bool {
-        self.lifecycle.state() == State::Ready && self.boot_phase_read_guard_elided_count > 0
+    pub fn boot_init_task_read_guard_completed(&self) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.read_lock_count > 0
+            && self.read_unlock_count == self.read_lock_count
+            && self.active_readers == 0
+            && self.readers_fast()
     }
 
     pub fn preset_static(&mut self) -> EventResult {
@@ -373,16 +371,6 @@ impl PerCpuRwSemaphore {
         self.pending_writer = PerCpuRwSemaphoreOwner::None;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
-    }
-
-    pub fn mark_boot_phase_read_guard_elided(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.boot_cpu_read_available {
-            return self.failed_transition(LifecycleEvent::Enable, State::Ready, State::Ready);
-        }
-
-        self.boot_phase_read_guard_elided_count =
-            self.boot_phase_read_guard_elided_count.wrapping_add(1);
-        Ok(())
     }
 
     pub fn read_lock_owner(

@@ -312,7 +312,7 @@ object ResourceTree: ResourceObject {
                     task_ref_ready(BootInitTaskRef);
                 }
 
-                within ResourceTreeWriteContext only-once {
+                within ResourceTreeWriteContext {
                     ensures {
                         resource_tree_ready(ResourceTree, MemBlock);
                         system_ram_resources_ready(ResourceTree, MemBlock);
@@ -684,8 +684,8 @@ context CpuHotplugReadContext: ResourceExclusiveContext {
     /*
      * This context corresponds to Linux cpus_read_lock() /
      * cpus_read_unlock() around jump_label_init(). In arceos_ex boot code the
-     * outer BootPhaseContext may lower this guard to proof-only, but the
-     * source model still records the real Linux guard boundary.
+     * source model records the real Linux guard boundary even when the outer
+     * BootPhaseContext already contributes single-CPU/single-task facts.
      */
     guard {
         lock_ref: CpuHotplugLock;
@@ -758,8 +758,8 @@ object StaticBranch: KernelObject {
                     task_ref_ready(BootInitTaskRef);
                 }
 
-                within CpuHotplugReadContext only-once {
-                    within StaticBranchJumpLabelContext only-once {
+                within CpuHotplugReadContext {
+                    within StaticBranchJumpLabelContext {
                         ensures {
                             static_branch_registry_ready(StaticBranch, KernelImage);
                             static_branch_entries_sorted(StaticBranch);

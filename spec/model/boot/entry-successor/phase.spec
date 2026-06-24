@@ -561,11 +561,9 @@ context PrintkBufferSetupLocalInterruptContext: Context {
      * section. Ordered event body members let PrintkBuffer.Event::Setup express
      * that local guarded section directly.
      *
-     * Because PrintkBuffer.Event::Setup is a Prepared -> Ready lifecycle event,
-     * this guarded section is single-commit on the successful boot path. Guard
-     * elision requires this lexical block to carry an explicit `only-once`
-     * marker and pass model-tool reachability proof before relying on outer
-     * Effective Context to erase guard code.
+     * This source model records the real irqsave/irqrestore guard boundary.
+     * Effective Context facts from the surrounding boot path are not, by
+     * themselves, a reason to erase the guard protocol.
      */
     guard {
         entered_by {
@@ -634,7 +632,7 @@ object PrintkBuffer: BufferObject {
                     PrintkBuffer.Action::PrepareDynamicLogBuffer;
                 }
 
-                within PrintkBufferSetupLocalInterruptContext only-once {
+                within PrintkBufferSetupLocalInterruptContext {
                     drives {
                         PrintkBuffer.Action::SwitchActiveBufferAndCopyExistingRecords;
                     }

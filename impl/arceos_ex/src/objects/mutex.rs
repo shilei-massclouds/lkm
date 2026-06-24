@@ -119,10 +119,6 @@ impl Mutex {
             && self.unlock_exited_count == self.lock_entered_count
     }
 
-    pub fn boot_phase_guard_elided(&self) -> bool {
-        self.ready() && self.lock_entered_count == 0 && self.unlock_exited_count == 0
-    }
-
     pub fn preset_static(&mut self) -> EventResult {
         if self.lifecycle.state() != State::Base
             || self.init_kind != MutexInitKind::StaticInitializer

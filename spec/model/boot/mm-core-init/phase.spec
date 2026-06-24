@@ -229,7 +229,6 @@ object PageAllocator: PageAllocatorType {
                     page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
                     page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
                     page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
-                    page_allocator_zonelist_update_seq_irqsave_guard_boot_lowering_proof_only(PageAllocator);
                     page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
                     page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
                     page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
@@ -250,7 +249,6 @@ object PageAllocator: PageAllocatorType {
             page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
             page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
             page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
-            page_allocator_zonelist_update_seq_irqsave_guard_boot_lowering_proof_only(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
@@ -314,7 +312,6 @@ object PageAllocator: PageAllocatorType {
             page_allocator_zonelists_ready(PageAllocator, ZonelistSet);
             page_allocator_zonelist_update_seq_irqsave_guard_ready(PageAllocator);
             page_allocator_zonelist_update_seq_irqsave_guard_spec_required(PageAllocator);
-            page_allocator_zonelist_update_seq_irqsave_guard_boot_lowering_proof_only(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_ready(PageAllocator);
             page_allocator_zonelist_printk_deferred_section_spec_required(PageAllocator);
             page_allocator_cpuhp_step_registered(PageAllocator, CpuHotplugState);
@@ -1187,7 +1184,6 @@ object VmallocAllocator: VmallocAllocatorType {
                     vmalloc_allocator_unmapping_flush_contract_ready(VmallocAllocator, SwapperVm);
                     vmalloc_allocator_failure_rollback_contract_ready(VmallocAllocator);
                     vmalloc_allocator_setup_runtime_locking_spec_required(VmallocAllocator);
-                    vmalloc_allocator_setup_boot_lowering_proof_only(VmallocAllocator);
                     vmalloc_allocator_runtime_vmap_locking_contract_deferred(VmallocAllocator);
                     vmalloc_allocator_cross_cpu_vmalloc_flush_deferred(VmallocAllocator);
                     vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);
@@ -1227,7 +1223,6 @@ object VmallocAllocator: VmallocAllocatorType {
             vmalloc_allocator_unmapping_flush_contract_ready(VmallocAllocator, SwapperVm);
             vmalloc_allocator_failure_rollback_contract_ready(VmallocAllocator);
             vmalloc_allocator_setup_runtime_locking_spec_required(VmallocAllocator);
-            vmalloc_allocator_setup_boot_lowering_proof_only(VmallocAllocator);
             vmalloc_allocator_runtime_vmap_locking_contract_deferred(VmallocAllocator);
             vmalloc_allocator_cross_cpu_vmalloc_flush_deferred(VmallocAllocator);
             vmap_reclaim_hook_checkpoint_ready(VmallocAllocator);

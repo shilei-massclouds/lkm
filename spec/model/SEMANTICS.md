@@ -2,11 +2,13 @@
 
 本文档记录 `.spec` 模型语言的硬语义规则。修改规格、模型构建器、推导器、检查器、视图或渲染工具前，应先阅读本文档；工具实现不得用后续阶段的“消歧”或展示逻辑绕过这些规则。
 
-## SEM-NAME-001: Lifecycle State And Event Names Are Controlled
+## SEM-NAME-001: Lifecycle State And Transition Names Are Controlled
 
-生命周期状态名和生命周期事件名必须来自受控集合。规格不得临时发明新的生命周期名称来表达局部语义；如果确实需要新增名称，必须先修改本文档、`model` 阶段检查器和对应测试。
+生命周期状态名和生命周期转移名必须来自受控集合。规格不得临时发明新的生命周期名称来表达局部语义；如果确实需要新增名称，必须先修改本文档、`model` 阶段检查器和对应测试。
 
-当前 `object` 状态机语法只用受控生命周期状态和生命周期事件表达启动期对象推进。运行期 Type process、扩展状态、action 引用和独占上下文由本文档后续规则单独约束；它们不得借用或发明新的生命周期状态名来规避本节规则。
+术语边界如下：`State` 表示对象生命周期状态；`Transition` 表示成功提交时会改变生命周期状态或扩展状态的转移过程；`Action` 表示不改变当前被建模状态的对象行为；`Event` 保留给外部信号、异步事件、硬件事件、trace event 等触发源或可观测事件。迁移期 `.spec` 源语法仍写作 `Event::Setup` / `Object.Event::Name`，但这些名字在模型语义中是 legacy spelling，表示 `Transition::Setup` / state-changing process，而不是“外部事件”本身。
+
+当前 `object` 状态机语法只用受控生命周期状态和生命周期 transition 表达启动期对象推进。运行期 Type process、扩展状态、action 引用和独占上下文由本文档后续规则单独约束；它们不得借用或发明新的生命周期状态名来规避本节规则。
 
 允许的状态名：
 
@@ -17,7 +19,7 @@
 - `Offline`
 - `Destroyed`
 
-允许的生命周期事件名：
+允许的生命周期 transition 名：
 
 - `Preset`
 - `Setup`
@@ -35,19 +37,19 @@
 - `Destroyed` 的别名包括：已销毁、已退出服务、已清理、已预留、`reserved`。`Reserved` 不是正式状态名。
 - `Preset` 表示建立进入主要构建流程前的早期前置条件，通常推进到 `Prepared` 或 `Ready`。
 - `Setup` 表示完成对象的主要构建，使对象进入 `Ready`。
-- `Enable` 表示让已经构建完成的对象进入服务状态，通常推进到 `Online`。别名包括：启用、上线、进入服务、保护、`guard`。当语义是建立栈边界保护或 guard 这类运行约束时，仍使用 `Enable` 作为正式事件名；单纯刷新对象属性的动作不因此升级为生命周期事件。
+- `Enable` 表示让已经构建完成的对象进入服务状态，通常推进到 `Online`。别名包括：启用、上线、进入服务、保护、`guard`。当语义是建立栈边界保护或 guard 这类运行约束时，仍使用 `Enable` 作为正式 transition 名；单纯刷新对象属性的动作不因此升级为生命周期 transition。
 - `Disable` 表示对象退出主要服务路径或完成资源所有权交接，但对象元数据仍保留给诊断、引用收尾或后续销毁。
 - `Cleanup` 表示对象退出服务或释放阶段性抽象，通常推进到 `Destroyed`。
 
 检查点：
 
-- `model` 阶段必须检查对象 `initial_state`、状态声明名、事件声明名和事件目标状态名。
+- `model` 阶段必须检查对象 `initial_state`、状态声明名、transition 声明名和 transition 目标状态名。
 - 任何不在受控集合内的名称必须报 `error`。
 - `derive`、`view`、`render` 不得通过名称猜测或展示修正来补偿非法名称。
 
 ## SEM-TRANSITION-001: Lifecycle Transitions Are Controlled
 
-当前生命周期模型只能使用预先定义的状态迁移三元组 `(source_state, lifecycle_event, target_state)`。别名不参与迁移定义；`.spec` 中必须使用正式状态名和事件名。
+当前生命周期模型只能使用预先定义的状态迁移三元组 `(source_state, lifecycle_transition, target_state)`。别名不参与迁移定义；`.spec` 中必须使用正式状态名和 transition 名。
 
 允许的迁移：
 
@@ -64,41 +66,41 @@
 
 检查点：
 
-- `model` 阶段必须检查每个事件声明的源状态、事件名和目标状态三元组。
+- `model` 阶段必须检查每个 transition 声明的源状态、transition 名和目标状态三元组。
 - 任何不在允许迁移集合内的三元组必须报 `error`。
 - 新增迁移必须先修改本文档、`model` 阶段检查器和对应测试。
 
-## SEM-UNIQUE-001: Forward-Only Model Forbids Duplicate States And Events
+## SEM-UNIQUE-001: Forward-Only Model Forbids Duplicate States And Transitions
 
-同一个 `object` 内，`Event::X` 只能定义一次。事件定义身份是 `(Object, Event)`，不是 `(Object, SourceState, Event)`。
+同一个 `object` 内，`Event::X` legacy spelling 只能定义一次。transition 定义身份是 `(Object, Transition)`，不是 `(Object, SourceState, Transition)`。
 
 原因：
 
 - `drives` 引用形式是 `Object.Event::X`，不包含源状态。
 - 如果同一对象内允许多个 `Event::X`，引用目标会变得不唯一。
-- 当前状态只决定事件是否可触发，不参与事件命名。
-- 即使将来引入可反复触发的 `Operational Event`，重复触发也不等于重复定义；同一个对象状态机中的同名事件定义仍必须唯一，除非显式引入事件重载或可重入事件定义规则。
+- 当前状态只决定 transition 是否可触发，不参与 transition 命名。
+- 即使将来引入可反复触发的运行期 transition，重复触发也不等于重复定义；同一个对象状态机中的同名 transition 定义仍必须唯一，除非显式引入 transition 重载或可重入定义规则。
 
 检查点：
 
 - `model` 阶段必须扫描同一对象的所有 `state.events`。
 - 发现重复 `Event::X` 时必须报 `error`，并指向重复定义位置。
-- `derive`、`view`、`render` 不得通过 `source_state -> target_state` 为重复事件消歧。
+- `derive`、`view`、`render` 不得通过 `source_state -> target_state` 为重复 transition 消歧。
 
 例外：
 
-- 只有将来显式引入“事件重载/可重入事件定义”的对象类型或事件语义后，才能放宽事件定义唯一性；默认所有对象都禁止重复定义同名事件。
+- 只有将来显式引入“transition 重载/可重入 transition 定义”的对象类型或语义后，才能放宽 transition 定义唯一性；默认所有对象都禁止重复定义同名 transition。
 
-## SEM-EVENT-ACTION-001: Event And Action Are Distinct
+## SEM-TRANSITION-ACTION-001: Transition And Action Are Distinct
 
-`event` 表示一次尝试推进被建模状态的操作；`action` 表示依附于某个既有状态执行的状态内动作。
+`transition` 表示一次尝试推进被建模状态的操作；`action` 表示依附于某个既有状态执行的状态内动作。迁移期语法中的 `Event::Name` 若带 `StateEffect::Always` 或 `StateEffect::Conditional`，语义上属于 transition。
 
 判断规则：
 
-- 操作成功时推进被建模状态，应建模为 `event`。
+- 操作成功时推进被建模状态，应建模为 transition。
 - 操作成功时仍停留在同一被建模状态内，应建模为 `action`。
-- 不得为了表达可重复调用而把应为 `action` 的操作伪造成生命周期事件。
-- 不得为了绕过生命周期事件唯一性而把应为 `Operational Event` 的状态迁移伪造成 `action`。
+- 不得为了表达可重复调用而把应为 `action` 的操作伪造成生命周期 transition。
+- 不得为了绕过 transition 唯一性而把应为运行期 transition 的状态迁移伪造成 `action`。
 
 当前工具已经支持在 `drives` 和 `within` 内引用 `Object.Action::Name(...)`，并把该引用作为成功路径上的 action commit fact；对象内 `state.actions` 的完整定义语法仍处于语义契约阶段，暂未由 parser/model 展开检查。
 
@@ -132,14 +134,14 @@ state State::Ready {
 - action 成功时不得推进 owner 对象生命周期状态；owner 仍停留在 action 所属 state。
 - action 名称在 owner 对象内唯一，引用身份是 `Object.Action::Name` 加实参绑定。
 - action 可以带类型参数和命名形参；形参必须是对象引用或受控值类型。
-- `drives` 可以引用 lifecycle event，也可以引用 action；正式 process 定义必须声明命名形参并通过类型检查。调用点允许单参数 process 使用位置实参简写，例如 `SetRuntimeState(TaskRuntimeState::Running)`，工具按签名规范化为 `SetRuntimeState(state: TaskRuntimeState::Running)`；多参数 process 仍必须使用完整命名实参，避免同类型参数互换后仍通过类型检查。
-- action 的 `depends_on` 是调用成功前提；被 event 驱动的 action 若 `depends_on` 不满足，该 event 不得提交生命周期迁移。
+- `drives` 可以引用 lifecycle transition，也可以引用 action；正式 process 定义必须声明命名形参并通过类型检查。调用点允许单参数 process 使用位置实参简写，例如 `SetRuntimeState(TaskRuntimeState::Running)`，工具按签名规范化为 `SetRuntimeState(state: TaskRuntimeState::Running)`；多参数 process 仍必须使用完整命名实参，避免同类型参数互换后仍通过类型检查。
+- action 的 `depends_on` 是调用成功前提；被 transition 驱动的 action 若 `depends_on` 不满足，该 transition 不得提交生命周期迁移。
 - action 的 `ensures` 在 action 成功后成立，并可作为驱动它的 event 成功路径上的可用事实。
 - action 的 `ensures` 不得直接伪造生命周期提交，例如不得用 action 确保 `SomeObject.state == State::Ready` 来替代 `SomeObject.Event::Setup`。
 - 参数化 action 不得把具体目标对象编码进 action 名；具体对象差异应通过实参和对象自身 facts 表达。
-- event 可以通过 `drives` 调用 action，以复用不推进被建模状态的内部动作；这适合表达 `Setup`/`Enable` 这类 lifecycle event 内部的初始化、发布、入队、唤醒、查询或其它属性动作。
-- event 调用 action 后，外层 event 仍负责提交自己的状态迁移；action 只贡献自己的 `ensures`，不得替代外层 event 的目标状态提交。
-- 如果某个过程会改变已建模生命周期状态或扩展状态，它必须保持为 event，不能为了减少定义而降级成 action。也就是说，复用 action 只能消除无状态迁移的重复动作，不能隐藏真实状态迁移。
+- transition 可以通过 `drives` 调用 action，以复用不推进被建模状态的内部动作；这适合表达 `Setup`/`Enable` 这类 lifecycle transition 内部的初始化、发布、入队、唤醒、查询或其它属性动作。
+- transition 调用 action 后，外层 transition 仍负责提交自己的状态迁移；action 只贡献自己的 `ensures`，不得替代外层 transition 的目标状态提交。
+- 如果某个过程会改变已建模生命周期状态或扩展状态，它必须保持为 transition，不能为了减少定义而降级成 action。也就是说，复用 action 只能消除无状态迁移的重复动作，不能隐藏真实状态迁移。
 
 示例：`copy_process()` 应建模为 `TaskCreationCore` 在 `Ready` 状态内的参数化 action，而不是为每个目标任务建立 `CopyKernelInitProcess` 之类的专名 action：
 
@@ -184,22 +186,22 @@ on Action::CopyProcess<Src: TaskObject, New: TaskObject>(
 }
 ```
 
-## SEM-EVENT-BODY-001: Event And Within Body Members Are Ordered
+## SEM-TRANSITION-BODY-001: Transition And Within Body Members Are Ordered
 
-`event` 和 `within` 的 body 是 source-ordered member 序列。`depends_on`、`drives`、
+state-changing transition 和 `within` 的 body 是 source-ordered member 序列。`depends_on`、`drives`、
 `within`、`ensures`、`deferred` 等块在源码中的相对顺序必须由 parser/AST/JSON
 保留；工具可以继续维护按 kind 分类的兼容字段，但不得用分类字段替代正式顺序语义。
 
 执行语义：
 
-- `depends_on` 仍表示进入所属 event/within 成功路径前必须满足的前提。
-- `drives` 按 source order 执行；同一个 event/within 中多个 `drives` 块不得被合并到
+- `depends_on` 仍表示进入所属 transition/within 成功路径前必须满足的前提。
+- `drives` 按 source order 执行；同一个 transition/within 中多个 `drives` 块不得被合并到
   `within` 前或 `within` 后。
 - `within Context { ... }` 只保护自己的词法 body；它前后的 `drives`、`ensures`
   或其它块不属于该 context。
 - 嵌套 `within` 按 body member 顺序进入和退出；外层 context 的有效上下文覆盖其
   词法 body，内层 context 在该范围内继续叠加。
-- `ensures` 仍表示所属 event/within 成功退出后成立的事实；它可以承接前面按顺序
+- `ensures` 仍表示所属 transition/within 成功退出后成立的事实；它可以承接前面按顺序
   执行的 action/type-process ensures，但不得被当成提前成立的前置事实。
 
 这个规则用于表达 Linux 中常见的局部保护区，例如：
@@ -222,16 +224,16 @@ drives {
 
 上述形式表示 `Prepare` 和 `Finalize` 都在 `SomeContext` 之外，只有
 `ProtectedCommit` 在 `SomeContext` 之内。代码生成或 lowering 不得把这三个动作
-重排为“全部先执行 drives，再进入 within”，也不得把 context 扩大到整个 event body。
+重排为“全部先执行 drives，再进入 within”，也不得把 context 扩大到整个 transition body。
 
 ## SEM-TYPE-PROCESS-001: Type Processes Define Reusable Runtime Semantics
 
-`type` 定义可复用对象类型的共同属性、owned 子对象、标准生命周期 process、运行期 process、扩展状态和约束。`object X: SomeType` 表示 `X` 是 `SomeType` 的一个具名实例；实例绑定并继承 `SomeType` 上定义的 Type process。也就是说，`X.Event::Setup`、`X.Event::Enable` 或 `X.Action::Done` 若来自 Type 定义，语义上是“对实例 X 执行 Type process”，不是实例重新定义了一套同名过程。
+`type` 定义可复用对象类型的共同属性、owned 子对象、标准生命周期 process、运行期 process、扩展状态和约束。`object X: SomeType` 表示 `X` 是 `SomeType` 的一个具名实例；实例绑定并继承 `SomeType` 上定义的 Type process。也就是说，`X.Event::Setup`、`X.Event::Enable` 或 `X.Action::Done` 若来自 Type 定义，语义上是“对实例 X 执行 Type process”；其中 `Event::Setup` / `Event::Enable` 是 lifecycle transition 的迁移期语法，不是外部事件。
 
 Type body 中的 `key: ValueType;` 是 Type 属性声明，必须被 parse/model 工具保留。`owned { field: ChildType; }` 声明 Type 实例拥有的子对象或内嵌资源；owned 子对象随宿主实例建立实例身份，不是外部引用，也不表示普通参数传递。Type body 中的命名块按语义分类：
 
-- `lifecycle { ... }` 定义 Type 实例的标准生命周期 process，名称应使用受控生命周期事件名。
-- `processes { ... }` 定义实例进入可服务状态后的运行期 process；其中 `Event::Name` 是 Operational Event，`Action::Name` 是 action。
+- `lifecycle { ... }` 定义 Type 实例的标准生命周期 transition process，名称应使用受控生命周期 transition 名。
+- `processes { ... }` 定义实例进入可服务状态后的运行期 process；其中 `Event::Name` 是迁移期语法，若 `state_effect` 不是 `None`，语义上是运行期 transition；`Action::Name` 是 action。
 - `owned { ... }` 定义实例拥有的内嵌资源或子对象；Type process 可以通过 `self.field.Event::Name` 或 `self.field.Action::Name` 驱动它们。
 - 其它命名块可用于 invariant、context、handle 或后续扩展，但不得隐式改变生命周期迁移表。
 
@@ -251,17 +253,17 @@ process 的结果使用 `ProcessResult` 语义集合：`Success`、`Blocked(reas
 
 - parser/model 保留 Type 属性和 Type 块，包括 `lifecycle`、`processes`、`transitions` 和 `result` 这类嵌套文本。
 - derive/view/render 尚不推导 Type process 内部迁移；阶段主线若需要使用某个 Type process 的效果，必须暂时通过对象 lifecycle wrapper、显式 action commit 或普通 predicate fact 承载，并在规格中说明该承载不改变 Type process 的正式语义。
-- 当前 derive 已能从 Type process 的 `ensures` 推导被驱动 action/event 的成功事实；对象实例自己声明的 `actions { ... }` 暂时只作为可驱动 action commit 展示，不自动把该 action 内部 `ensures` 推导为后续 `depends_on` 的可用事实。阶段主线若需要消费对象 action 的结果，必须暂时在外层 event/phase `ensures` 中显式承载，后续再扩展对象 action ensures 推导。
+- 当前 derive 已能从 Type process 的 `ensures` 推导被驱动 action/transition 的成功事实；对象实例自己声明的 `actions { ... }` 暂时只作为可驱动 action commit 展示，不自动把该 action 内部 `ensures` 推导为后续 `depends_on` 的可用事实。阶段主线若需要消费对象 action 的结果，必须暂时在外层 transition/phase `ensures` 中显式承载，后续再扩展对象 action ensures 推导。
 
-Type/Instance 的基本原则是：可复用 Type 已定义的行为、状态效果和通用 facts，必须落在 Type 上；实例只负责把该 Type 行为绑定到具体场景，并补充场景级语义。实例不得复制 Type 内部 bookkeeping，例如 `Completion` 实例不应重新手写 token、wait queue 或 wake-one 的通用结果；这些结果应来自被驱动的 `Completion` Type process。若当前工具尚不能自动把 inherited lifecycle event 展开为实例生命周期迁移，可以暂时使用实例 wrapper event 提交实例状态，但 wrapper 的职责只能是驱动或承接 Type process，并提交场景级 facts。
+Type/Instance 的基本原则是：可复用 Type 已定义的行为、状态效果和通用 facts，必须落在 Type 上；实例只负责把该 Type 行为绑定到具体场景，并补充场景级语义。实例不得复制 Type 内部 bookkeeping，例如 `Completion` 实例不应重新手写 token、wait queue 或 wake-one 的通用结果；这些结果应来自被驱动的 `Completion` Type process。若当前工具尚不能自动把 inherited lifecycle transition 展开为实例生命周期迁移，可以暂时使用实例 wrapper transition 提交实例状态，但 wrapper 的职责只能是驱动或承接 Type process，并提交场景级 facts。
 
 没有显式拆分 `type T` 和 `object X: T` 的对象，规格语义上可以视为匿名 singleton type 的唯一实例：对象自身同时承载唯一实例身份和该实例的专属行为定义。该形式只适用于确实只有一个实例且短期没有复用需求的对象；一旦需要多个实例、对象引用泛化、owned 子对象复用或跨实例不变量，必须拆出显式 Type，让实例通过 `object X: T` 绑定。
 
-`Completion` 是当前第一个正式 Type process 示例。Linux `struct completion` 内嵌 `swait_queue_head wait`，因此规格中 `Completion` 拥有 `SimpleWaitQueue`，不是引用外部 wait queue。`Completion.Setup` 驱动 owned wait queue 的 setup；`Complete`/`CompleteAll` 驱动 wait queue 的 wake action；`Wait` 驱动 wait queue 的 prepare/finish wait action；`Reinit` 只重置 completion token 状态并保留 wait queue。`Complete`、`CompleteAll`、`Wait`、`TryWait`、`Reinit` 是 `StateEffect::Conditional` 的运行期事件；`Done` 是 `StateEffect::None` 的只读 action。
+`Completion` 是当前第一个正式 Type process 示例。Linux `struct completion` 内嵌 `swait_queue_head wait`，因此规格中 `Completion` 拥有 `SimpleWaitQueue`，不是引用外部 wait queue。`Completion.Setup` 驱动 owned wait queue 的 setup；`Complete`/`CompleteAll` 驱动 wait queue 的 wake action；`Wait` 驱动 wait queue 的 prepare/finish wait action；`Reinit` 只重置 completion token 状态并保留 wait queue。`Complete`、`CompleteAll`、`Wait`、`TryWait`、`Reinit` 是 `StateEffect::Conditional` 的运行期 transition；`Done` 是 `StateEffect::None` 的只读 action。
 
-Completion 也说明了 event/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。
+Completion 也说明了 transition/action factoring 的边界：`Completion.Setup` 可以调用 `SimpleWaitQueue.Setup`，`Completion.Complete` 可以调用 `SimpleWaitQueue.WakeOne` action，因为这些子动作本身不推进 Completion 的扩展状态；但 `Completion.Complete` 仍不能改成 action，因为它会把 `CompletionExtState::Pending` 推进到 `CompletionExtState::Completed`，或在其它扩展状态下按条件迁移表提交结果。
 
-`Task` 是可复用运行期任务类型。`object KernelInitTask: Task` 表示 PID 1 任务实例继承 `Task` 的运行期 process；`TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Event::SetRuntimeState(state: TaskRuntimeState)` 这样的 Operational Event，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
+`Task` 是可复用运行期任务类型。`object KernelInitTask: Task` 表示 PID 1 任务实例继承 `Task` 的运行期 process；`TaskRuntimeState` 是 `Task` 的扩展运行态，不是对象 lifecycle state。因此，设置任务运行态应建模为 `Task.Event::SetRuntimeState(state: TaskRuntimeState)` 这样的运行期 transition，而不是 `Action::SetTaskState`。当前实现先使用简单的 `StateEffect::Conditional` 和普通 fact 表达运行态提交；后续引入状态机模型后，每次进入特定 `TaskRuntimeState` 时应执行 transition guard、leave-state check 和 enter-state consistency check，例如确认调度实体、runqueue 选择、锁/抢占/中断上下文和跨对象不变量。
 
 `task_state_running(task)` 是 `task_runtime_state_is(task, TaskRuntimeState::Running)` 的派生别名。调用 `Task.Event::SetRuntimeState(TaskRuntimeState::Running)` 后，Type process ensures 先提交运行态事实，再由 derive 自动推出该别名；阶段规格不应在 `Enable.ensures` 中重复手写这个别名。
 
@@ -304,7 +306,7 @@ callee-saved `s0..s11`。这些寄存器不属于 `Scheduler`，而属于每个 
 `prepare_task_switch()`/`finish_task_switch()` 钩子、`sched_submit_work()`、
 worker sleep/running hook、RCU context switch 和 scheduler class pick 细节后续按对象展开。
 
-`RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Event::EnqueueTask(task_ref: TaskRef)` 是 Operational Event，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。该 event 的基础成员事实统一表达为 `runqueue_contains_task(self, task_ref)`；阶段级或跨对象派生事实可以继续使用 `task_enqueued_on_runqueue(task_ref, runqueue_ref)` 表示已经经过 `SelectRunQueue`、`Task.SetTaskCpu` 和入队的整体结果。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，确认或更新 `task_ref` 的 CPU id，再在该 runqueue 的锁建立的资源独占上下文内通过 `selected_rq.Event::EnqueueTask(...)` 提交入队。
+`RunQueue` 使用 `RunQueueRuntimeState::{None, Some}` 表示是否至少存在一个可运行 task ref。`task_refs: TaskRefSet` 是该状态关联的数据视图，`nr_running` 不作为独立源状态，而是 `count(task_refs)` 的派生度量。当前 `RunQueue.task_refs` 是调度类队列尚未展开前的汇总视图；未来引入 CFS/RT/DL 等调度类子队列后，具体成员关系应由这些子队列维护，`RunQueue.task_refs` 退化为派生视图。`RunQueue.Event::EnqueueTask(task_ref: TaskRef)` 是运行期 transition，因为它提交 runqueue 成员关系并推动 `None -> Some` 或 `Some -> Some` 的运行态迁移；重复入队应作为失败结果处理。该 transition 的基础成员事实统一表达为 `runqueue_contains_task(self, task_ref)`；阶段级或跨对象派生事实可以继续使用 `task_enqueued_on_runqueue(task_ref, runqueue_ref)` 表示已经经过 `SelectRunQueue`、`Task.SetTaskCpu` 和入队的整体结果。`EnqueueTask` 不能直接编码为 `BootRunQueue` 专属动作：调用方应先消费 `SelectRunQueue` 返回的 `RunQueueRef`，确认或更新 `task_ref` 的 CPU id，再在该 runqueue 的锁建立的资源独占上下文内通过 `selected_rq.Event::EnqueueTask(...)` 提交入队。
 
 ## SEM-EXCLUSIVE-CONTEXT-001: Guard And Resource Exclusive Context Are Distinct
 
@@ -381,7 +383,9 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 - `within ContextName { ... }` 是唯一标准形态；`within` 不声明、不接收、不转发、不重命名实参。
 - `within ContextName only-once { ... }` 表示该具体 lexical `within` 块声明自己在
   `StartupTimeline.Event::Setup` 可达调用图中只被进入一次。该标记必须由 model
-  工具计数验证，验证失败即为规格错误；它不由 coding 或 impl 重新证明。
+  工具计数验证，验证失败即为规格错误；它不由 coding 或 impl 重新证明。当前
+  formal source 暂不使用该标记驱动 guard 省略；它作为工具能力保留，等待后续
+  guard 优化机制单独恢复。
 - 外层 `drives` 中由 action result binding 产生的局部值按词法作用域对后续语句和嵌套 `within` 可见；需要别名时应在 `drives` 或上下文内部另建显式绑定，不得写成 `within ContextName(arg: value)`。
 - `within` 块内只能直接驱动 `obj_refs` 中对象的 action/event，除非规格显式声明允许外部对象。
 - context 成功退出后释放独占执行权；失败或 `Blocked` 时，外层 event 不得提交生命周期迁移。
@@ -442,15 +446,19 @@ state State::Ready {
 }
 ```
 
-`within` 的语义是：先通过指定 context 的 guard 进入或确认该 context；进入成功后，在该作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，随后按 guard 退出或离开词法范围，外层 event/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移；它的标准形态始终是 `within ContextName { ... }`。外层 `drives` 中由 action result binding 产生的局部值在嵌套 `within` 中保持词法可见，因此 `selected_rq` 不需要也不允许作为 `EnqueueSelectedRunQueueContext` 的实参重复传入。当前 UP 路径通过 `runqueue_ref_targets(selected_rq, BootRunQueue)` 证明该 ref 指向 `BootRunQueue`，所以 context guard 暂时绑定 `BootRunQueueLock`；后续泛化时应从 `RunQueueRef` 解析目标 runqueue 及其 lock。
+`within` 的语义是：先通过指定 context 的 guard 进入或确认该 context；进入成功后，在该作用域内执行块内的 `drives`；块内驱动全部成功后，`within` 的 `ensures` 成立，随后按 guard 退出或离开词法范围，外层 transition/action 才能继续提交自己的 `ensures`。`within` 不是普通参数传递，也不是对象所有权转移；它的标准形态始终是 `within ContextName { ... }`。外层 `drives` 中由 action result binding 产生的局部值在嵌套 `within` 中保持词法可见，因此 `selected_rq` 不需要也不允许作为 `EnqueueSelectedRunQueueContext` 的实参重复传入。当前 UP 路径通过 `runqueue_ref_targets(selected_rq, BootRunQueue)` 证明该 ref 指向 `BootRunQueue`，所以 context guard 暂时绑定 `BootRunQueueLock`；后续泛化时应从 `RunQueueRef` 解析目标 runqueue 及其 lock。
 
 `only-once` 是 `within` 使用点上的可验证断言，不是 `Context` 类型属性。同一个
 context 可以在一个地方被 `only-once` 使用，在另一个地方作为普通可复用上下文使用。
 工具验证时从 `StartupTimeline.Event::Setup` 出发，沿 `drives` 调用图统计每个标记
-`only-once` 的 lexical block 的可达进入次数；计数不是 1 时必须报错。该标记只是
-guard proof-only lowering 的必要条件。代码生成仍必须同时确认外层 Effective Context
-覆盖该 guard 的高层语义、该 guard/call-site 允许 proof-only lowering，且没有运行时
-协议副作用被后续消费者依赖。
+`only-once` 的 lexical block 的可达进入次数；计数不是 1 时必须报错。
+
+当前策略是先建立基本 guard 规格和保守 lowering，不把 Effective Context 自动作为
+省略 protocol guard 的依据。因此 formal source 暂时不应为了 guard 优化添加
+`only-once` 使用点；已实现的 parser/model 支持和测试保留为后续优化基础。未来若
+恢复 proof-only lowering，仍必须同时满足：外层 Effective Context 覆盖该 guard 的
+高层语义、该 guard/call-site 显式允许优化、lexical block 通过 `only-once` 证明，
+且没有 saved flags/token/owner/debug/memory-ordering 等运行时协议副作用消费者。
 
 ## SEM-CONTEXT-NESTING-001: Effective Context Composes Monotonically
 
@@ -499,7 +507,7 @@ Mutex guard，应被判定为上下文嵌套违例。原因是内层 guard contr
 若迁移期同时存在手写 `effects`，工具必须检查它不得弱于、偏离或重复矛盾于
 guard 推导结果。
 
-句柄层级推导、对象 event/action 的上下文需求声明、系统天然独占上下文的来源证明、
+句柄层级推导、对象 transition/action 的上下文需求声明、系统天然独占上下文的来源证明、
 RCU 读侧上下文等更丰富的 guard/effect 语义仍在后续扩展范围内。
 
 ## SEM-CPU-VIEW-MODEL-001: CPU View Is The Base Modeling View
@@ -549,7 +557,7 @@ CpuGroup
 
 当前 boot CPU 规格中，具名 `EventStream`、`InterruptStream` 和 `ExceptionStream` 是 boot CPU 的事件入口流迁移期实例。后续 AP 进入 secondary entry 时，每个 AP 必须建立自己的 live `CurrentCPU -> cpu -> EventStream` 链，再由该 `EventStream` 关联自己的 `InterruptStream`/`ExceptionStream`；BP 侧提前为 future CPU 准备的描述对象或 handler 模板不等同于 AP 自己的 live event stream。
 
-`LocalInterruptControl` 应接管本 CPU local interrupt 总开关状态的直接控制能力，即 RISC-V 上的 `sstatus.SIE`。`InterruptStream` 不应直接修改这个总开关，也不应对外提供普通的 `local_irq_enable/disable` operational event；它只能在自身 lifecycle event 中驱动 `CurrentCPU.cpu.LocalInterruptControl` 完成阶段边界所需的 enable/disable。`LocalInterruptControl` 则只提供可反复调用的 operational events，例如 `Disable`、`Enable`、`SaveAndDisable(out flags)` 和 `Restore(flags)`；本地中断总开关打开/关闭是运行期状态变化，不是 `LocalInterruptControl` 自身 lifecycle event。
+`LocalInterruptControl` 应接管本 CPU local interrupt 总开关状态的直接控制能力，即 RISC-V 上的 `sstatus.SIE`。`InterruptStream` 不应直接修改这个总开关，也不应对外提供普通的 `local_irq_enable/disable` runtime transition；它只能在自身 lifecycle transition 中驱动 `CurrentCPU.cpu.LocalInterruptControl` 完成阶段边界所需的 enable/disable。`LocalInterruptControl` 则只提供可反复调用的 runtime transitions，例如 `Disable`、`Enable`、`SaveAndDisable(out flags)` 和 `Restore(flags)`；本地中断总开关打开/关闭是运行期状态变化，不是 `LocalInterruptControl` 自身 lifecycle transition。
 
 `InterruptStream` 仍负责中断流的 source/pending 层，例如 RISC-V 的 `sie` source enable bits 和 `sip` pending bits，以及 cause 到 handler policy 的分发表。它可以直接在自身事件中清理或维护 `sie/sip` 这类分开关/挂起状态；这不等同于直接操作 `sstatus.SIE` 总开关。正式边界是：`sstatus.SIE` 只能由 `LocalInterruptControl` 直接改变，`InterruptStream` 可以驱动 `LocalInterruptControl`，也可以直接管理 `sie/sip`。
 
@@ -573,7 +581,7 @@ RawSpinLock.Event::UnlockIrqRestore(current_cpu: CurrentCPU, flags: IrqFlags) {
 }
 ```
 
-`KernelInitTask.Enable` 的 `within WakeUpNewTaskContext` 由 `KernelInitTaskPiLock.Event::LockIrqSave(current_cpu: CurrentCPU)` 建立进入边界，并由对应的 `UnlockIrqRestore` 建立退出边界。`within` 块内部只保留受保护资源对象的 action/event，例如设置 task runtime state、选择 runqueue 和入队任务。
+`KernelInitTask.Enable` 的 `within WakeUpNewTaskContext` 由 `KernelInitTaskPiLock.Event::LockIrqSave(current_cpu: CurrentCPU)` 建立进入边界，并由对应的 `UnlockIrqRestore` 建立退出边界。`within` 块内部只保留受保护资源对象的 action/transition，例如设置 task runtime state、选择 runqueue 和入队任务。
 
 首轮落地状态：
 
@@ -590,9 +598,9 @@ RawSpinLock.Event::UnlockIrqRestore(current_cpu: CurrentCPU, flags: IrqFlags) {
 - secondary CPU live `CurrentCPU` 的 AP entry 建立路径。
 - 多种 context kind、effect 偏序、嵌套合法性和句柄层级推导；这些属于 `SEM-CONTEXT-NESTING-001` 的后续任务。
 
-## SEM-EVENT-RESULT-001: Event And Action Results Are Explicit
+## SEM-PROCESS-RESULT-001: Transition And Action Results Are Explicit
 
-`event` 和 `action` 都应具有显式返回结果。正式结果集合由 `ProcessResult` 语义定义，最小包括：
+transition 和 `action` 都应具有显式返回结果。正式结果集合由 `ProcessResult` 语义定义，最小包括：
 
 - `Success`：操作成功完成。
 - `Failed(code)`：操作失败，可携带具体错误码或原因。
@@ -601,7 +609,7 @@ RawSpinLock.Event::UnlockIrqRestore(current_cpu: CurrentCPU, flags: IrqFlags) {
 
 - `Blocked(reason)`：本次操作没有提交成功结果，但不是语义错误。
 
-对 `event` 的结果约束：
+对 transition 的结果约束：
 
 - 只有 `Success` 才提交 `state_effect`，并使目标状态、目标扩展状态及该事件的 `ensures` 成立。
 - `Blocked` 和 `Failed` 都不得使对象进入目标状态或目标扩展状态，也不得假定该事件的 `ensures` 成立。
@@ -612,15 +620,15 @@ RawSpinLock.Event::UnlockIrqRestore(current_cpu: CurrentCPU, flags: IrqFlags) {
 - `Success` 表示动作完成，但对象仍停留在 action 所属的被建模状态内。
 - `Blocked` 和 `Failed` 表示动作未完成或失败，同样不推进被建模状态。
 
-当前推导器把对象 lifecycle event 视为成功路径上的静态推导；失败、阻塞、错误码和 Type process 结果尚未进入推导语法。后续扩展错误路径或运行期 process 推导时，必须保持上述提交语义。
+当前推导器把对象 lifecycle transition 视为成功路径上的静态推导；失败、阻塞、错误码和 Type process 结果尚未进入推导语法。后续扩展错误路径或运行期 process 推导时，必须保持上述提交语义。
 
-## SEM-LIFECYCLE-OPERATIONAL-001: Lifecycle And Operational Events Have Different Trigger Rules
+## SEM-LIFECYCLE-OPERATIONAL-001: Lifecycle And Runtime Transitions Have Different Trigger Rules
 
-生命周期事件用于建立或销毁对象生命周期状态，当前正式集合为 `Preset`、`Setup`、`Enable`、`Cleanup`。在同一对象生命周期轮次中，每个生命周期事件原则上至多成功触发一次。当前启动模型采用 forward-only 推进模式，重复触发生命周期事件应视为规格错误。
+生命周期 transition 用于建立或销毁对象生命周期状态，当前正式集合为 `Preset`、`Setup`、`Enable`、`Disable`、`Cleanup`。在同一对象生命周期轮次中，每个生命周期 transition 原则上至多成功触发一次。当前启动模型采用 forward-only 推进模式，重复触发生命周期 transition 应视为规格错误。
 
-操作事件用于对象进入某个可服务生命周期状态后的运行期状态迁移，例如锁、队列、映射、分配器、调度器和 I/O 对象中的 `lock`、`try_lock`、`unlock`、`enqueue`、`dequeue`、`map`、`unmap`、`alloc`、`free`、`read`、`write` 等。操作事件可以在对象生命周期内反复触发；每次触发都必须符合该对象当前运行状态的迁移规则。
+运行期 transition 用于对象进入某个可服务生命周期状态后的运行期状态迁移，例如锁、队列、映射、分配器、调度器和 I/O 对象中的 `lock`、`try_lock`、`unlock`、`enqueue`、`dequeue`、`map`、`unmap`、`alloc`、`free`、`read`、`write` 等。运行期 transition 可以在对象生命周期内反复触发；每次触发都必须符合该对象当前运行状态的迁移规则。
 
-示例：普通非嵌套自旋锁中，`lock` 和 `try_lock` 都是 `Operational Event`，因为它们成功时都会把锁从 `Unlocked` 推进到 `Locked(owner=current)`。`lock` 在锁被别人持有时可以返回 `Blocked(occupied)`，在已经被自己持有时返回 `Failed(nested_lock)`；`try_lock` 在锁被别人持有时返回 `Failed(busy)`，在已经被自己持有时返回 `Failed(nested_lock)`。二者可以具有相同的成功源状态和目标状态，但它们是两个不同事件。
+示例：普通非嵌套自旋锁中，`lock` 和 `try_lock` 都是运行期 transition，因为它们成功时都会把锁从 `Unlocked` 推进到 `Locked(owner=current)`。`lock` 在锁被别人持有时可以返回 `Blocked(occupied)`，在已经被自己持有时返回 `Failed(nested_lock)`；`try_lock` 在锁被别人持有时返回 `Failed(busy)`，在已经被自己持有时返回 `Failed(nested_lock)`。二者可以具有相同的成功源状态和目标状态，但它们是两个不同 transition。
 
 ## Non-Hard Guidance: Object Granularity Is Hierarchical
 
@@ -628,4 +636,4 @@ RawSpinLock.Event::UnlockIrqRestore(current_cpu: CurrentCPU, flags: IrqFlags) {
 
 对象可以有不同粒度。当前建模层级中不再继续拆分的最小粒度对象可视为原子对象；除此之外的对象通常是复合对象，由更小粒度对象组合而成。复合对象状态通常由自身属性和子对象状态支撑，复合对象事件通常由子对象事件支撑。
 
-在规格描述和对象实现中，建议优先使用足以表达当前语义的高粒度对象，以便逐级封装实现细节和复杂性。该建议不改变生命周期状态名、事件名、迁移三元组和事件唯一性等硬规则；当现实实现受限时，可以展开较低粒度对象或采用临时承载方式，但应在说明或 coding 规格中记录原因。
+在规格描述和对象实现中，建议优先使用足以表达当前语义的高粒度对象，以便逐级封装实现细节和复杂性。该建议不改变生命周期状态名、transition 名、迁移三元组和 transition 唯一性等硬规则；当现实实现受限时，可以展开较低粒度对象或采用临时承载方式，但应在说明或 coding 规格中记录原因。

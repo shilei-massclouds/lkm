@@ -2,7 +2,7 @@ use super::{
     init_task::InitTask,
     kernel_image::KernelImage,
     mutex::Mutex,
-    percpu_rw_semaphore::PerCpuRwSemaphore,
+    percpu_rw_semaphore::{PerCpuRwSemaphore, PerCpuRwSemaphoreReadOutcome},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vm::Vm,
 };
@@ -75,11 +75,12 @@ impl StaticBranch {
     }
 
     pub fn cpu_hotplug_read_guard_used_by(&self, cpu_hotplug_lock: &PerCpuRwSemaphore) -> bool {
-        self.lifecycle.state() == State::Ready && cpu_hotplug_lock.boot_phase_read_guard_elided()
+        self.lifecycle.state() == State::Ready
+            && cpu_hotplug_lock.boot_init_task_read_guard_completed()
     }
 
     pub fn jump_label_mutex_guard_used(&self, jump_label_mutex: &Mutex) -> bool {
-        self.lifecycle.state() == State::Ready && jump_label_mutex.boot_phase_guard_elided()
+        self.lifecycle.state() == State::Ready && jump_label_mutex.boot_init_task_guard_completed()
     }
 
     pub const fn text_patch_sync_deferred(&self) -> bool {
@@ -107,18 +108,24 @@ impl StaticBranch {
 
         /*
          * CpuHotplugReadContext:
-         * CpuHotplugLock.ReadLock(BootInitTaskRef) is elided because the outer
-         * BootPhaseContext proves a single CPU, single task, local IRQ
-         * disabled, preemption disabled execution path.
+         * CpuHotplugLock.ReadLock(BootInitTaskRef) preserves the
+         * cpus_read_lock() boundary even though the surrounding
+         * BootPhaseContext already contributes single CPU/task facts.
          */
-        cpu_hotplug_lock.mark_boot_phase_read_guard_elided()?;
+        if cpu_hotplug_lock.read_lock_owner(
+            super::percpu_rw_semaphore::PerCpuRwSemaphoreOwner::BootInitTask,
+            0,
+        )? != PerCpuRwSemaphoreReadOutcome::AcquiredFast
+        {
+            return self.failed_setup();
+        }
 
         /*
          * StaticBranchJumpLabelContext:
-         * JumpLabelMutex.Lock(BootInitTaskRef) is elided because the outer
-         * BootPhaseContext proves a single CPU, single task, local IRQ
-         * disabled, preemption disabled execution path.
+         * JumpLabelMutex.Lock(BootInitTaskRef) preserves the jump_label_lock()
+         * boundary for setup.
          */
+        jump_label_mutex.lock_boot_init_task(init_task)?;
         self.entries = [
             StaticKeyEntry::new(StaticKey::InitOnAlloc),
             StaticKeyEntry::new(StaticKey::InitOnFree),
@@ -134,14 +141,19 @@ impl StaticBranch {
         self.text_patch_sync_deferred = true;
         /*
          * StaticBranchJumpLabelContext:
-         * JumpLabelMutex.Unlock(BootInitTaskRef) is elided for the same
-         * BootPhaseContext effective-context proof.
+         * JumpLabelMutex.Unlock(BootInitTaskRef) exits the same modeled mutex
+         * boundary.
          */
+        jump_label_mutex.unlock_boot_init_task(init_task)?;
         /*
          * CpuHotplugReadContext:
-         * CpuHotplugLock.ReadUnlock(BootInitTaskRef) is elided for the same
-         * BootPhaseContext effective-context proof.
+         * CpuHotplugLock.ReadUnlock(BootInitTaskRef) exits the same modeled
+         * read-side boundary.
          */
+        cpu_hotplug_lock.read_unlock_owner(
+            super::percpu_rw_semaphore::PerCpuRwSemaphoreOwner::BootInitTask,
+            0,
+        )?;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

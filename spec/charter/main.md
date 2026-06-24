@@ -258,9 +258,9 @@ context BootPhaseContext: Context {
 
 第一，它用于冲突检查。规格推导阶段应检查嵌套后的上下文是否自洽：内层上下文不能要求或声明会削弱外层已经成立的约束，例如在不可睡眠上下文中进入需要阻塞等待的上下文，或在外层已禁止抢占时进入语义上要求可抢占的上下文。
 
-第二，它用于代码优化。若外层 `Effective Context` 已经提供某项等价保障，内层为获得同一保障而准备生成的部分 guard 代码可以省略。例如外层已经保证本地中断关闭时，内层若只需要“本地中断关闭”这一属性，就不必再次生成关中断动作。但若内层 guard 还承担资源协议、owner 状态、嵌套计数、发布顺序或调试检查等额外语义，则不能仅凭外层上下文省略整个 guard。
+第二，它用于后续代码优化。当前先采用保守 guard lowering：若内层 guard 承担资源协议、owner 状态、嵌套计数、saved flags、发布顺序或调试检查等额外语义，则不能仅凭外层上下文省略整个 guard。未来可在独立优化规则中处理纯属性 guard 或经证明等价的轻量路径。
 
-第三，它用于缺失检查。对象的 event/action 规格若声明了所需的上下文能力或 guard 要求，工具即可检查当前 `Effective Context` 是否满足这些要求；若不满足，应生成必要 guard、报告规格缺口或拒绝生成代码。需要注意的是，`Effective Context` 只能判断“当前已经具备什么”和“声明的需求是否被满足”，不能凭空知道某个对象操作本来应该需要哪种同步保护。因此，缺失检查依赖对象规格明确写出上下文需求，例如需要互斥锁、读写锁、RCU 读侧、抢占关闭、中断关闭、可睡眠或不可睡眠等条件。
+第三，它用于缺失检查。对象的 transition/action 规格若声明了所需的上下文能力或 guard 要求，工具即可检查当前 `Effective Context` 是否满足这些要求；若不满足，应生成必要 guard、报告规格缺口或拒绝生成代码。需要注意的是，`Effective Context` 只能判断“当前已经具备什么”和“声明的需求是否被满足”，不能凭空知道某个对象操作本来应该需要哪种同步保护。因此，缺失检查依赖对象规格明确写出上下文需求，例如需要互斥锁、读写锁、RCU 读侧、抢占关闭、中断关闭、可睡眠或不可睡眠等条件。
 
 ## 上下文与资源访问模型
 
@@ -306,7 +306,7 @@ context BootPhaseContext: Context {
 
 - Type 定义标准生命周期、扩展状态集合、process 集合、状态迁移规则、属性语义、依赖对象类型、可暴露句柄和上下文约束。
 - Instance 具有实例名、所属 Type、当前生命周期状态、当前扩展状态值、属性值、所属环境、上下文绑定、句柄链和与其它实例的引用关系。
-- 生命周期事件、扩展事件和 action 的定义主要依附于 Type；对象图和时序图中出现的具名节点通常是 Instance。
+- 生命周期 transition、扩展状态 transition 和 action 的定义主要依附于 Type；对象图和时序图中出现的具名节点通常是 Instance。
 
 后续讨论 Flow、Object、句柄链与 Context 的关系时，应沿用这一分层：Flow 不直接裸访问资源对象，而是在某个 Context 中通过句柄链访问目标 Instance；句柄链负责表达可见性、权限、寻址和转交关系，Context 负责表达该访问发生时依赖的执行环境。
 
@@ -445,11 +445,12 @@ context BootPhaseContext: Context {
 
 对于非常轻量级的对象，不必为了形式完整而强行拆分出复杂的 `discover`、`setup`、`enable` 过程。它们的主要执行动作通常可以集中放在 `setup` 过程中，其余过程或状态可以是空操作，即 `dummy` 或 `no-op`。这类简化不改变对象仍然服从通用状态模型的事实，只是说明该对象在某些状态或迁移上没有实际工作需要完成。
 
-为避免后续运行期对象建模时混淆，本规格进一步区分 Type 层面的 `process`、`event` 与 `action`：
+为避免后续运行期对象建模时混淆，本规格进一步区分 Type 层面的 `process`、`transition`、`action` 与 `event`：
 
-- `process` 表示某个 Type 定义的可调用过程，是 event 与 action 的共同上位概念。标准生命周期过程、自定义操作过程和只读查询过程都应先作为 process 被定义清楚。
-- `event` 表示可以参与状态迁移规则的 process。当前启动模型中的 `preset/setup/enable/disable` 是标准生命周期事件，即 `Lifecycle Event`；后续运行期对象还可以引入自定义事件，即 `Operational Event`，例如普通非嵌套自旋锁的 `lock/try_lock/unlock`。
+- `process` 表示某个 Type 定义的可调用过程，是 transition 与 action 的共同上位概念。标准生命周期过程、自定义运行期过程和只读查询过程都应先作为 process 被定义清楚。
+- `transition` 表示可以参与状态迁移规则的 process。当前启动模型中的 `preset/setup/enable/disable` 是标准生命周期 transition；后续运行期对象还可以引入自定义运行期 transition，例如普通非嵌套自旋锁的 `lock/try_lock/unlock`。
 - `action` 表示不推进当前被建模状态的 process。它可以读写属性、触发外部副作用、失败或阻塞，但其 `state_effect` 必须是 `none`。例如控制台对象进入 `online` 后执行 `write`，或者 `EarlyIoremap.Ready` 后执行 `map/unmap`，都可建模为 action。
+- `event` 保留给外部信号、异步事件、硬件事件或 trace event。迁移期 `.spec` 源语法仍使用 `Event::Setup` / `Object.Event::Name` 表达 state-changing process；这只是 legacy spelling，语义上应按 transition 理解，后续新增说明优先使用 `Transition` 术语。
 
 仅靠“成功时是否推进状态”不足以描述所有过程，因此每个 process 还应显式标注状态与属性影响：
 
@@ -458,19 +459,19 @@ context BootPhaseContext: Context {
 - `state_effect = none`：不引发被建模状态迁移；这类 process 才应归为 action。
 - `property_effect`：说明该 process 是否只读、写入哪些属性，或只产生外部副作用。属性写入不必然等价于离散状态迁移。
 
-因此，`event` 不要求每一次成功调用都改变状态；条件型事件可以在某些输入下保持原扩展状态，但它仍属于该 Type 状态规则的一部分。`action` 则用于表达被建模状态外的读写或服务动作。
+因此，transition 不要求每一次成功调用都改变状态；条件型 transition 可以在某些输入下保持原扩展状态，但它仍属于该 Type 状态规则的一部分。`action` 则用于表达被建模状态外的读写或服务动作。
 
-`event` 与 `action` 都应带返回结果，至少区分成功与失败。更完整的结果集合可包含：
+transition 与 `action` 都应带返回结果，至少区分成功与失败。更完整的结果集合可包含：
 
 - `Success`：操作成功完成。
 - `Blocked(reason)`：当前没有提交成功结果，但也不是语义错误，通常表示条件暂未满足。
 - `Failed(code)`：操作失败，且可携带具体错误码或原因。
 
-对于 `event`，只有 `Success` 才提交状态效果，并使对应后置事实成立；`Blocked` 或 `Failed` 都不得使对象进入目标状态，也不得假定该事件的 `ensures` 已经成立。对于 `state_effect = conditional` 的事件，`Success` 后到底是否发生状态迁移，应以该 Type 的条件迁移表为准。对于 `action`，`Success` 表示动作完成，但对象仍停留在动作所属的被建模状态内。
+对于 transition，只有 `Success` 才提交状态效果，并使对应后置事实成立；`Blocked` 或 `Failed` 都不得使对象进入目标状态，也不得假定该 transition 的 `ensures` 已经成立。对于 `state_effect = conditional` 的 transition，`Success` 后到底是否发生状态迁移，应以该 Type 的条件迁移表为准。对于 `action`，`Success` 表示动作完成，但对象仍停留在动作所属的被建模状态内。
 
-生命周期事件原则上在同一对象生命周期轮次中至多成功触发一次。当前入口启动模型采用先行推进模式，重复触发同一生命周期事件应视为规格错误。操作事件则不同：它们在对象生命周期内可以反复触发，但每次触发都必须符合该对象当前运行状态的迁移规则；反复触发不是重复定义事件。
+生命周期 transition 原则上在同一对象生命周期轮次中至多成功触发一次。当前入口启动模型采用先行推进模式，重复触发同一生命周期 transition 应视为规格错误。运行期 transition 则不同：它们在对象生命周期内可以反复触发，但每次触发都必须符合该对象当前运行状态的迁移规则；反复触发不是重复定义 transition。
 
-以普通非嵌套自旋锁为例，`lock` 与 `try_lock` 都应是操作事件，而不是 action，因为它们成功时都会把锁从 `Unlocked` 推进到 `Locked(owner=current)`。`lock` 在锁被别人持有时可以返回 `Blocked(occupied)`，在已经被自己持有时返回 `Failed(nested_lock)`；`try_lock` 在锁被别人持有时返回 `Failed(busy)`，在已经被自己持有时同样返回 `Failed(nested_lock)`。二者可以具有相同的成功源状态和目标状态，但它们是两个不同事件。
+以普通非嵌套自旋锁为例，`lock` 与 `try_lock` 都应是运行期 transition，而不是 action，因为它们成功时都会把锁从 `Unlocked` 推进到 `Locked(owner=current)`。`lock` 在锁被别人持有时可以返回 `Blocked(occupied)`，在已经被自己持有时返回 `Failed(nested_lock)`；`try_lock` 在锁被别人持有时返回 `Failed(busy)`，在已经被自己持有时同样返回 `Failed(nested_lock)`。二者可以具有相同的成功源状态和目标状态，但它们是两个不同 transition。
 
 后续为具体对象填写某一过程的“初始状态”时，不必重复声明通用状态机已经保证的前置条件。例如，`enable` 必然是 `setup` 的后置过程；只有对象已经到达 `ready`，才允许执行 `enable`。因此，具体对象的 `enable` 初始状态可以只写该对象额外需要检查的条件；如果没有额外条件，也可以写作“无”。
 
@@ -1531,7 +1532,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_64BIT=y`、`CONFIG_MMU=y`、`CONFIG_FLATMEM=y`、`CONFIG_SLUB=y`、`CONFIG_SPLIT_PTE_PTLOCKS=y`、`CONFIG_STACKDEPOT=y`、`CONFIG_DEBUG_PAGEALLOC=y`、`CONFIG_DEBUG_VM=y`、`CONFIG_SWIOTLB=y`、`CONFIG_DMA_BOUNCE_UNALIGNED_KMALLOC=y`；同时 `CONFIG_INIT_ON_ALLOC_DEFAULT_ON`、`CONFIG_INIT_ON_FREE_DEFAULT_ON`、`CONFIG_DEBUG_PAGEALLOC_ENABLE_DEFAULT`、`CONFIG_PAGE_POISONING`、`CONFIG_PAGE_EXTENSION`、`CONFIG_KFENCE`、`CONFIG_KMSAN`、`CONFIG_DEBUG_KMEMLEAK`、`CONFIG_DEBUG_OBJECTS`、`CONFIG_KASAN`、`CONFIG_STACKDEPOT_ALWAYS_INIT`、`CONFIG_MODULES`、`CONFIG_BPF_JIT` 和 `CONFIG_KPROBES` 均未启用。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
 
-本小节使用的标准生命周期语义扩展为 `Base -> Prepared -> Ready -> Online -> Offline -> Destroyed`。其中 `Offline` 表示对象的主要服务能力或资源所有权已经退出运行路径，但对象元数据仍可用于诊断、引用收尾或后续销毁；对多数启动对象，`Offline` 可以是空动作或短路边界。`handoff` 只作为 `Offline` 的资源交接别名，`discarded` 只作为 `Destroyed` 的资源丢弃别名，不引入新的状态名。`State::Offline` 与 `Event::Disable` 已进入 `spec/model/SEMANTICS.md` 和 model checker；配置裁剪路径继续写为 `trimmed` 或“裁剪路径”，不把它当作对象状态；`Skipped` 只可作为讨论中的自然语言，不进入 formal model、规格清单或 coding 实现。编译期约束、一次性验证、日志输出、策略选择和临时占位初始化若不形成长期对象生命周期，统一写为 `checkpoint`，不引入未定义的 `Checked`、`Decided`、`Emitted`、`Registered` 等状态名。
+本小节使用的标准生命周期语义扩展为 `Base -> Prepared -> Ready -> Online -> Offline -> Destroyed`。其中 `Offline` 表示对象的主要服务能力或资源所有权已经退出运行路径，但对象元数据仍可用于诊断、引用收尾或后续销毁；对多数启动对象，`Offline` 可以是空动作或短路边界。`handoff` 只作为 `Offline` 的资源交接别名，`discarded` 只作为 `Destroyed` 的资源丢弃别名，不引入新的状态名。`State::Offline` 与 `Event::Disable` 已进入 `spec/model/SEMANTICS.md` 和 model checker；这里的 `Event::Disable` 是迁移期源语法，语义上属于生命周期 transition。配置裁剪路径继续写为 `trimmed` 或“裁剪路径”，不把它当作对象状态；`Skipped` 只可作为讨论中的自然语言，不进入 formal model、规格清单或 coding 实现。编译期约束、一次性验证、日志输出、策略选择和临时占位初始化若不形成长期对象生命周期，统一写为 `checkpoint`，不引入未定义的 `Checked`、`Decided`、`Emitted`、`Registered` 等状态名。
 
 针对 `build_all_zonelists(NULL)`，本阶段引入一层显式内存拓扑对象，而不是把 zonelist 直接挂在页分配器对象下。顶层对象暂名 `MemoryTopology`，它包含一个或多个 `MemoryNode`。在当前 `default_config` 的 `CONFIG_NUMA=n` 下，系统只有唯一的 `MemoryNode[0]`；后续若支持 NUMA，`MemoryTopology` 可以自然扩展为多个 `MemoryNode`。每个 `MemoryNode` 对应 Linux 的 `pg_data_t`，拥有 `ZoneSet` 和 `ZonelistSet` 两类下级对象：`ZoneSet` 承载本节点实际拥有的 `Zone`，`ZonelistSet` 承载本节点发起分配时可消费的 zone 选择顺序。`Zoneref` 只引用 `Zone`，不拥有 `Zone`；在 NUMA 配置下，一个节点的 `Zonelist` 可以引用其他节点拥有的 `Zone`，而 UMA 配置下当前只引用唯一节点自己的 populated zones。
 

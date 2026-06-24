@@ -121,7 +121,6 @@ pub struct PrintkBuffer {
     records_preserved: bool,
     setup_local_irq_save_restore_used: bool,
     setup_local_irq_guard_bound_to_boot_cpu: bool,
-    setup_local_irq_guard_proof_only: bool,
 }
 
 #[allow(dead_code)]
@@ -137,7 +136,6 @@ impl PrintkBuffer {
             records_preserved: false,
             setup_local_irq_save_restore_used: false,
             setup_local_irq_guard_bound_to_boot_cpu: false,
-            setup_local_irq_guard_proof_only: false,
         }
     }
 
@@ -155,7 +153,7 @@ impl PrintkBuffer {
         memblock: &MemBlock,
         per_cpu_storage: &PerCpuStorage,
         boot_param: &BootParam,
-        boot_cpu_local_interrupt: &LocalInterruptControl,
+        boot_cpu_local_interrupt: &mut LocalInterruptControl,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
             || memblock.state() != State::Online
@@ -178,16 +176,14 @@ impl PrintkBuffer {
         /*
          * PrintkBufferSetupLocalInterruptContext:
          * Linux setup_log_buf() uses local_irq_save()/local_irq_restore()
-         * around the active printk buffer switch and initial record copy. This
-         * boot path is already inside BootPhaseContext and this lifecycle event
-         * can successfully commit only once, so the irqsave/restore guard is a
-         * proof-only boundary here.
+         * around the active printk buffer switch and initial record copy.
          */
+        boot_cpu_local_interrupt.save_and_disable()?;
         self.percpu_data_ready = true;
         self.records_preserved = self.read == read && self.write == write;
         self.setup_local_irq_save_restore_used = true;
         self.setup_local_irq_guard_bound_to_boot_cpu = true;
-        self.setup_local_irq_guard_proof_only = true;
+        boot_cpu_local_interrupt.restore()?;
         self.runtime_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
@@ -235,7 +231,6 @@ impl PrintkBuffer {
             && self.records_preserved
             && self.setup_local_irq_save_restore_used
             && self.setup_local_irq_guard_bound_to_boot_cpu
-            && self.setup_local_irq_guard_proof_only
     }
 
     #[allow(dead_code)]
@@ -265,13 +260,8 @@ impl PrintkBuffer {
         self.lifecycle.state() == State::Ready
             && self.setup_local_irq_save_restore_used
             && self.setup_local_irq_guard_bound_to_boot_cpu
-            && self.setup_local_irq_guard_proof_only
             && boot_cpu_local_interrupt.state() == State::Ready
             && boot_cpu_local_interrupt.disabled()
-    }
-
-    pub const fn setup_local_irq_guard_proof_only(&self) -> bool {
-        self.setup_local_irq_guard_proof_only
     }
 }
 
@@ -500,7 +490,7 @@ pub fn setup(
     memblock: &MemBlock,
     per_cpu_storage: &PerCpuStorage,
     boot_param: &BootParam,
-    boot_cpu_local_interrupt: &LocalInterruptControl,
+    boot_cpu_local_interrupt: &mut LocalInterruptControl,
 ) -> EventResult {
     unsafe {
         (&raw mut PRINTK_BUFFER).as_mut().unwrap().setup(
@@ -545,15 +535,6 @@ pub fn setup_local_irq_guard_used_by(boot_cpu_local_interrupt: &LocalInterruptCo
             .as_ref()
             .unwrap()
             .setup_local_irq_guard_used_by(boot_cpu_local_interrupt)
-    }
-}
-
-pub fn setup_local_irq_guard_proof_only() -> bool {
-    unsafe {
-        (&raw const PRINTK_BUFFER)
-            .as_ref()
-            .unwrap()
-            .setup_local_irq_guard_proof_only()
     }
 }
 

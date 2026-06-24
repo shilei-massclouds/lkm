@@ -416,13 +416,12 @@ type ArceosExCorePrepareCodingMust {
          * StaticBranch jump-label mutex guard lowering:
          *
          * StaticBranch.setup() must preserve the StaticBranchJumpLabelContext
-         * source boundary, but BootPhaseContext proves that the current path is
-         * single-CPU, single-task, local-IRQ-disabled and preemption-disabled.
-         * Therefore arceos_ex may lower JumpLabelMutex.Lock/Unlock to an
-         * elided/proof-only guard with visible comments and summary facts,
-         * rather than executing the mutex lock/unlock protocol. The CorePrepare
-         * ready check must observe the independent JumpLabelMutex ready object
-         * and the elided/proof-only guard fact.
+         * source boundary and execute the modeled JumpLabelMutex.Lock/Unlock
+         * protocol, or an equivalent implementation that preserves owner,
+         * nesting/debug and wakeup-observable effects. BootPhaseContext facts
+         * are not enough to erase the mutex protocol in the current lowering
+         * strategy. The CorePrepare ready check must observe the independent
+         * JumpLabelMutex ready object and a completed lock/unlock guard fact.
          */
         arceos_ex_must_static_branch_setup_drive_jump_label_mutex_guard();
 
@@ -430,13 +429,12 @@ type ArceosExCorePrepareCodingMust {
          * StaticBranch CPU hotplug read guard lowering:
          *
          * StaticBranch.setup() must preserve the CpuHotplugReadContext source
-         * boundary for cpus_read_lock()/cpus_read_unlock(). Because the outer
-         * BootPhaseContext proves single-CPU, single-task, local-IRQ-disabled
-         * and preemption-disabled execution, arceos_ex may lower the
-         * CpuHotplugLock.ReadLock/ReadUnlock pair at this call site to an
-         * elided/proof-only guard with visible comments and summary facts. The
-         * generic PerCpuRwSemaphore implementation must still provide real
-         * read/write behavior for non-proof-only call sites and smoke tests.
+         * boundary for cpus_read_lock()/cpus_read_unlock() and execute the
+         * modeled CpuHotplugLock.ReadLock/ReadUnlock pair. BootPhaseContext
+         * facts are not enough to erase this read-side protocol in the current
+         * lowering strategy. The generic PerCpuRwSemaphore implementation must
+         * still provide real read/write behavior for later call sites and
+         * smoke tests.
          */
         arceos_ex_must_static_branch_setup_drive_cpu_hotplug_read_guard();
 
@@ -479,13 +477,11 @@ type ArceosExCorePrepareCodingMust {
          * ResourceTree resource_lock guard lowering:
          *
          * ResourceTree.setup() must preserve the ResourceTreeWriteContext
-         * source boundary, but BootPhaseContext proves that the current path is
-         * single-CPU, single-task, local-IRQ-disabled and preemption-disabled.
-         * Therefore arceos_ex may lower ResourceLock.WriteLock/WriteUnlock at
-         * this call site to an elided/proof-only guard with visible comments
-         * and summary facts. The generic RwLock implementation must still
-         * provide real read/write behavior for non-proof-only call sites and
-         * smoke tests.
+         * source boundary and execute the modeled
+         * ResourceLock.WriteLock/WriteUnlock pair. BootPhaseContext facts are
+         * not enough to erase this write-side protocol in the current lowering
+         * strategy. The generic RwLock implementation must still provide real
+         * read/write behavior for later call sites and smoke tests.
          */
         arceos_ex_must_resource_tree_setup_drive_resource_lock_write_guard();
 
@@ -512,13 +508,12 @@ type ArceosExCorePrepareCodingMust {
          * LocalInterruptControl object rather than hiding it as a PrintkBuffer
          * internal bool.
          *
-         * In the current BootPhaseContext the path is single-CPU, single-task,
-         * local-IRQ-disabled and preemption-disabled, and PrintkBuffer.Setup is
-         * a Prepared -> Ready lifecycle transition, so arceos_ex may lower this
-         * call-site guard to proof-only/elided code. That elision remains valid
-         * only because the protected section is single-commit on this path; a
-         * reusable or looped within block will need an explicit `only-once` marker or
-         * equivalent proof before applying the same optimization.
+         * In the current lowering strategy arceos_ex must execute or preserve
+         * the save/restore protocol instead of relying on BootPhaseContext to
+         * erase it. A future proof-only optimization may be reintroduced only
+         * after the model marks the lexical guarded block with a verified
+         * single-entry proof and confirms that no saved-flags/debug side
+         * effects are consumed.
          */
         arceos_ex_must_printk_buffer_setup_record_local_irq_save_restore();
         arceos_ex_must_printk_buffer_setup_bind_local_irq_guard_to_boot_cpu_control();
@@ -590,13 +585,12 @@ type ArceosExEffectiveContextCodingMust {
          * irqsave/irqrestore must lower to
          * operations that save the incoming local interrupt state and restore
          * exactly that saved state on exit by default. It must not be reduced
-         * to an unconditional disable/enable pair. A call site may elide the
-         * runtime irqsave/irqrestore only when the source model/coding marks
-         * that guard as proof-only under an outer Effective Context, the lexical
-         * guarded section has model-verified `only-once`, no saved-flags token
-         * escapes, and no later object
-         * consumes a real save/restore count or debug side effect from that
-         * guard. A guard that intentionally models unconditional local IRQ
+         * to an unconditional disable/enable pair. Current arceos_ex lowering
+         * does not use Effective Context plus `only-once` to elide this
+         * protocol. A future proof-only optimization must be introduced as a
+         * separate rule and must prove that no saved-flags token, count, debug
+         * side effect or later consumer depends on the runtime protocol. A
+         * guard that intentionally models unconditional local IRQ
          * disable/enable must still be represented as a distinct explicitly
          * documented action, not inferred from the irqsave form.
          */
@@ -626,9 +620,9 @@ type ArceosExEffectiveContextCodingMust {
          * counts, saved flags, lock ownership, memory ordering, debug
          * assertions, wakeups or other resource protocol effects. Such guards
          * remain real code even when an outer context already provides the same
-         * high-level attribute, unless the call site has an explicit proof-only
-         * lowering rule plus model-verified `only-once` and no consumer of the
-         * runtime protocol effects.
+         * high-level attribute. Future proof-only lowering must be introduced
+         * as an explicit optimization rule with its own model proof and
+         * protocol-side-effect audit.
          */
         arceos_ex_must_effective_context_not_elide_protocol_guards();
 
@@ -756,13 +750,13 @@ type ArceosExMmCoreInitCodingMust {
         /*
          * mm_core_init synchronization surface:
          *
-         * BootPhaseContext only justifies proof-only lowering for selected
-         * boot-time call sites. It must not make Linux lock, irq, preempt,
-         * RCU, per-cpu, or TLB/cache requirements disappear from the formal
-         * model. For every mm_core_init object that publishes a later runtime
-         * API, the model/coding surface must say whether the sync protocol is
-         * executed in setup, boot-elided as proof-only, or explicitly deferred
-         * to the runtime consumer.
+         * BootPhaseContext contributes contextual facts for boot-time call
+         * sites, but it must not make Linux lock, irq, preempt, RCU, per-cpu,
+         * or TLB/cache requirements disappear from the formal model. For every
+         * mm_core_init object that publishes a later runtime API, the
+         * model/coding surface must say whether the sync protocol is executed
+         * in setup, is a pure context fact with no runtime protocol, or is
+         * explicitly deferred to the runtime consumer.
          */
         arceos_ex_must_mm_core_init_model_sync_even_when_boot_lowering_elides_code();
 
@@ -771,11 +765,10 @@ type ArceosExMmCoreInitCodingMust {
          *
          * Linux __build_all_zonelists(NULL) runs inside
          * write_seqlock_irqsave(&zonelist_update_seq, flags) and
-         * printk_deferred_enter()/exit(). The current target may lower that
-         * boot call site to proof-only facts under SystemExclusive, but it
-         * must still record that the irqsave seqlock and printk-deferred
-         * sections are required by the Linux semantics. Full seqlock
-         * reader/retry behavior remains a later runtime refinement.
+         * printk_deferred_enter()/exit(). The current target must still
+         * record that the irqsave seqlock and printk-deferred sections are
+         * required by the Linux semantics. Full seqlock reader/retry behavior
+         * remains a later runtime refinement.
          */
         arceos_ex_must_page_allocator_preset_record_zonelist_irqsave_protocol();
 

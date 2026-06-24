@@ -66,7 +66,6 @@ pub struct RwLock {
     write_blocked_count: usize,
     write_try_count: usize,
     write_try_failed_count: usize,
-    boot_phase_write_guard_elided_count: usize,
 }
 
 #[allow(dead_code)]
@@ -92,7 +91,6 @@ impl RwLock {
             write_blocked_count: 0,
             write_try_count: 0,
             write_try_failed_count: 0,
-            boot_phase_write_guard_elided_count: 0,
         }
     }
 
@@ -168,10 +166,6 @@ impl RwLock {
         self.write_try_failed_count
     }
 
-    pub const fn boot_phase_write_guard_elided_count(&self) -> usize {
-        self.boot_phase_write_guard_elided_count
-    }
-
     pub const fn unlocked(&self) -> bool {
         matches!(self.ext_state, RwLockExtState::Unlocked)
             && self.active_readers == 0
@@ -186,8 +180,11 @@ impl RwLock {
             && self.unlocked()
     }
 
-    pub fn boot_phase_write_guard_elided(&self) -> bool {
-        self.lifecycle.state() == State::Ready && self.boot_phase_write_guard_elided_count > 0
+    pub fn boot_init_task_write_guard_completed(&self) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.write_lock_count > 0
+            && self.write_unlock_count == self.write_lock_count
+            && self.unlocked()
     }
 
     pub fn preset_static(&mut self) -> EventResult {
@@ -215,16 +212,6 @@ impl RwLock {
         self.writer = RwLockOwner::None;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Prepared, State::Ready)
-    }
-
-    pub fn mark_boot_phase_write_guard_elided(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.unlocked() {
-            return self.failed_transition(LifecycleEvent::Enable, State::Ready, State::Ready);
-        }
-
-        self.boot_phase_write_guard_elided_count =
-            self.boot_phase_write_guard_elided_count.wrapping_add(1);
-        Ok(())
     }
 
     pub fn read_lock_owner(&mut self, owner: RwLockOwner) -> Result<RwLockReadOutcome, EventError> {

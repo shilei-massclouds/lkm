@@ -185,9 +185,6 @@ predicate buddy_free_page_sets_split_free_ranges_to_aligned_blocks<T>(sets: T) -
 predicate page_allocator_page_metadata_map_bound<T, M>(allocator: T, metadata_map: M) -> bool;
 predicate page_allocator_zonelist_update_seq_irqsave_guard_ready<T>(allocator: T) -> bool;
 predicate page_allocator_zonelist_update_seq_irqsave_guard_spec_required<T>(allocator: T) -> bool;
-predicate page_allocator_zonelist_update_seq_irqsave_guard_boot_lowering_proof_only<T>(
-    allocator: T
-) -> bool;
 predicate page_allocator_zonelist_printk_deferred_section_ready<T>(allocator: T) -> bool;
 predicate page_allocator_zonelist_printk_deferred_section_spec_required<T>(allocator: T) -> bool;
 predicate page_allocator_boot_pagesets_initialized_for_possible_cpus<T, P>(
