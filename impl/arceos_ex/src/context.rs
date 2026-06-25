@@ -526,6 +526,7 @@ impl Context {
 
     pub fn schedule_current(&mut self) -> EventResult {
         self.scheduler.schedule(
+            &self.cpu_group,
             &mut self.boot_cpu_local_interrupt,
             &mut self.boot_cpu_current_task,
         )

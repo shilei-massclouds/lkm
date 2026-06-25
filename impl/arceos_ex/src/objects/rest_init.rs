@@ -238,21 +238,12 @@ impl KernelInitTask {
             );
         }
 
-        let Some(boot_cpu) = cpu_group.boot_cpu() else {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Online,
-            );
-        };
-
         pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
         let guarded_result = (|| {
             self.running = true;
-            scheduler.select_boot_runqueue_for_task(self.pid)?;
-            self.set_task_cpu(boot_cpu.logical_id())?;
-            scheduler.enqueue_task_on_boot_runqueue(self.pid)?;
+            let selected_rq = scheduler.select_runqueue_for_task(self.pid, cpu_group)?;
+            self.set_task_cpu(selected_rq.cpu_id())?;
+            scheduler.enqueue_task_on_runqueue(self.pid, selected_rq)?;
             self.enqueued = true;
             self.lifecycle.transition(
                 LifecycleEvent::Enable,
@@ -580,21 +571,12 @@ impl KthreaddTask {
             );
         }
 
-        let Some(boot_cpu) = cpu_group.boot_cpu() else {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Ready,
-                State::Online,
-            );
-        };
-
         pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
         let guarded_result = (|| {
             self.running = true;
-            scheduler.select_boot_runqueue_for_task(self.pid)?;
-            self.set_task_cpu(boot_cpu.logical_id())?;
-            scheduler.enqueue_task_on_boot_runqueue(self.pid)?;
+            let selected_rq = scheduler.select_runqueue_for_task(self.pid, cpu_group)?;
+            self.set_task_cpu(selected_rq.cpu_id())?;
+            scheduler.enqueue_task_on_runqueue(self.pid, selected_rq)?;
             self.enqueued = true;
             self.lifecycle.transition(
                 LifecycleEvent::Enable,
@@ -1177,6 +1159,7 @@ impl BootIdleRuntime {
     pub fn run_idle_loop(
         &mut self,
         scheduler: &mut Scheduler,
+        cpu_group: &CpuGroup,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
@@ -1187,7 +1170,7 @@ impl BootIdleRuntime {
             return self.failed_ready_action();
         }
 
-        self.do_idle_cycle(scheduler, local_interrupt, current_task_slot)?;
+        self.do_idle_cycle(scheduler, cpu_group, local_interrupt, current_task_slot)?;
         self.idle_loop_entered = true;
         self.idle_loop_continues = true;
         Ok(())
@@ -1196,6 +1179,7 @@ impl BootIdleRuntime {
     fn do_idle_cycle(
         &mut self,
         scheduler: &mut Scheduler,
+        cpu_group: &CpuGroup,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
@@ -1208,7 +1192,7 @@ impl BootIdleRuntime {
 
         self.wait_while_no_need_resched()?;
         self.observe_need_resched()?;
-        self.schedule_if_need_resched(scheduler, local_interrupt, current_task_slot)?;
+        self.schedule_if_need_resched(scheduler, cpu_group, local_interrupt, current_task_slot)?;
         self.idle_cycle_committed = true;
         self.secondary_cpus_not_started = true;
         self.real_task_switch_deferred = true;
@@ -1249,6 +1233,7 @@ impl BootIdleRuntime {
     fn schedule_if_need_resched(
         &mut self,
         scheduler: &mut Scheduler,
+        cpu_group: &CpuGroup,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
@@ -1265,7 +1250,7 @@ impl BootIdleRuntime {
         }
 
         self.idle_schedule_requested = true;
-        scheduler.schedule_idle(local_interrupt, current_task_slot)?;
+        scheduler.schedule_idle(cpu_group, local_interrupt, current_task_slot)?;
         self.idle_schedule_returned = true;
         self.need_resched_drained = true;
         self.idle_loop_continues = true;

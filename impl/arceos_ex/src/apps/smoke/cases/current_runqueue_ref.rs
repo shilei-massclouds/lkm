@@ -45,17 +45,28 @@ impl CurrentRunQueueFixture {
         );
     }
 
+    fn current_ref(&self) -> CurrentRunQueueRef {
+        CurrentRunQueueRef::boot(self.runqueue.cpu_id())
+    }
+
     fn enqueue(
         &mut self,
         task_ref: CurrentTaskRef,
     ) -> Result<(), crate::objects::state::EventError> {
-        self.runqueue
-            .enqueue_task_ref(CurrentRunQueueRef::BootRunQueue, task_ref)
+        self.runqueue.enqueue_task_ref(self.current_ref(), task_ref)
+    }
+
+    fn enqueue_with_ref(
+        &mut self,
+        runqueue_ref: CurrentRunQueueRef,
+        task_ref: CurrentTaskRef,
+    ) -> Result<(), crate::objects::state::EventError> {
+        self.runqueue.enqueue_task_ref(runqueue_ref, task_ref)
     }
 
     fn pick_next(&self) -> Result<CurrentTaskRef, crate::objects::state::EventError> {
         self.runqueue
-            .pick_next_task(CurrentRunQueueRef::BootRunQueue, CurrentTaskRef::BootIdle)
+            .pick_next_task(self.current_ref(), CurrentTaskRef::BootIdle)
     }
 }
 
@@ -270,6 +281,13 @@ impl SmokeScenario for InvalidTaskRefScenario {
         assertions.assert_fail(
             "enqueue boot idle",
             self.fixture.enqueue(CurrentTaskRef::BootIdle),
+        );
+        assertions.assert_fail(
+            "enqueue wrong cpu ref",
+            self.fixture.enqueue_with_ref(
+                CurrentRunQueueRef::boot(usize::MAX),
+                CurrentTaskRef::KernelInit,
+            ),
         );
         assertions.assert("still empty", self.fixture.runqueue.task_count() == 0);
     }

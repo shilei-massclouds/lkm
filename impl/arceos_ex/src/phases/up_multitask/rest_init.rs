@@ -160,6 +160,7 @@ fn run_boot_idle_loop(ctx: &mut Context) -> EventResult {
     ctx.boot_cpu_current_task.set_current_boot_idle()?;
     let result = ctx.boot_idle_runtime.run_idle_loop(
         &mut ctx.scheduler,
+        &ctx.cpu_group,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
     );
@@ -189,6 +190,7 @@ fn schedule_once_from_preempt_disabled_context(ctx: &mut Context) -> EventResult
     }
 
     let schedule_result = ctx.scheduler.schedule(
+        &ctx.cpu_group,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
     );
