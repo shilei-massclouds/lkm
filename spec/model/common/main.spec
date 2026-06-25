@@ -184,6 +184,8 @@ predicate selected_payload_no_return_handoff() -> bool;
 predicate static_branch_cpu_hotplug_read_guard_used<T>(static_branch: T) -> bool;
 predicate static_branch_jump_label_mutex_guard_used<T>(static_branch: T) -> bool;
 predicate static_branch_text_patch_sync_deferred<T>(static_branch: T) -> bool;
+predicate riscv_early_boot_alternatives_deferred<T>(vm: T) -> bool;
+predicate riscv_early_boot_alternatives_mmu_off_boundary_preserved<T>(vm: T) -> bool;
 predicate cpu_hotplug_ap_sync_state_online<T, U>(hotplug_state: T, cpu: U) -> bool;
 predicate resource_tree_write_lock_guard_used<T>(resource_tree: T) -> bool;
 predicate printk_buffer_setup_local_irq_save_restore_used<T>(buffer: T) -> bool;

@@ -71,6 +71,7 @@ predicate arceos_ex_must_ioremap_keep_physical_resource_and_mmio_policy_external
 predicate arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only() -> bool;
 predicate arceos_ex_must_ioremap_model_mmio_attribute_policy_explicitly() -> bool;
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
+predicate arceos_ex_must_entry_prelude_keep_early_alternatives_deferred() -> bool;
 predicate arceos_ex_must_core_prepare_preserve_early_irq_and_smp_closed_facts() -> bool;
 predicate arceos_ex_must_static_branch_setup_record_jump_label_guards() -> bool;
 predicate arceos_ex_must_jump_label_mutex_be_independent_context_object() -> bool;
@@ -1137,6 +1138,22 @@ type ArceosExLocalIrqEnableCodingMust {
          * concurrency or SMP concurrency.
          */
         arceos_ex_must_local_irq_enable_only_open_boot_cpu_local_gate();
+    }
+}
+
+type ArceosExEntryPreludeCodingMust {
+    invariant {
+        /*
+         * RISC-V early alternatives boundary:
+         *
+         * Linux setup_vm() calls apply_early_boot_alternatives() while the MMU
+         * is still off when CONFIG_RISCV_ALTERNATIVE_EARLY=y. The current
+         * arceos_ex EntryPrelude implementation may defer the actual
+         * alternatives/errata text patch object, but Vm.Preset and the phase
+         * ready check must keep that deferral observable instead of silently
+         * treating the Linux path as absent or implemented.
+         */
+        arceos_ex_must_entry_prelude_keep_early_alternatives_deferred();
     }
 }
 

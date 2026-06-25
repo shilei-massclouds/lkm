@@ -1214,6 +1214,9 @@ object Vm: AddressSpaceObject {
         transitions {
             /*
              * Preset 编排跳板页表和早期页表的建立。
+             * Linux/RISC-V setup_vm() 在 MMU 关闭期间调用
+             * apply_early_boot_alternatives()，当前模型不展开 alternatives/errata
+             * text patch 细节，但必须把该同步边界标成显式 deferred。
              */
             on Transition::Preset -> State::Prepared {
                 depends_on {
@@ -1231,6 +1234,15 @@ object Vm: AddressSpaceObject {
                     TrampolineVm.pg_dir;
                     EarlyVm.pg_dir;
                 }
+
+                ensures {
+                    riscv_early_boot_alternatives_deferred(Vm);
+                    riscv_early_boot_alternatives_mmu_off_boundary_preserved(Vm);
+                }
+
+                deferred {
+                    "apply_early_boot_alternatives() 暂缓：当前 .config 启用 CONFIG_RISCV_ALTERNATIVE_EARLY，Linux 在 setup_vm() 的 MMU-off 区间执行早期 alternatives/errata text patch；本轮只保留该边界，不建 Alternative/Patch 对象，也不把 text patch 同步语义伪装为已实现。"
+                }
             }
         }
     }
@@ -1242,6 +1254,8 @@ object Vm: AddressSpaceObject {
         invariant {
             TrampolineVm.state == State::Ready;
             EarlyVm.state == State::Ready;
+            riscv_early_boot_alternatives_deferred(Vm);
+            riscv_early_boot_alternatives_mmu_off_boundary_preserved(Vm);
         }
 
         transitions {
@@ -1285,6 +1299,8 @@ object Vm: AddressSpaceObject {
             KernelImage.state == State::Online;
             Riscv64.satp == satp_of(EarlyVm.pg_dir, Config.satp_mode);
             early_vm_translation_sync_complete(EarlyVm);
+            riscv_early_boot_alternatives_deferred(Vm);
+            riscv_early_boot_alternatives_mmu_off_boundary_preserved(Vm);
         }
 
         transitions {

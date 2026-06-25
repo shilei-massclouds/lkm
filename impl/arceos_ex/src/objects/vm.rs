@@ -20,6 +20,8 @@ pub struct Vm {
     trampoline_vm: TrampolineVm,
     early_vm: EarlyVm,
     swapper_vm: SwapperVm,
+    early_boot_alternatives_deferred: bool,
+    early_boot_alternatives_mmu_off_boundary_preserved: bool,
 }
 
 impl Vm {
@@ -29,6 +31,8 @@ impl Vm {
             trampoline_vm: TrampolineVm::new(),
             early_vm: EarlyVm::new(),
             swapper_vm: SwapperVm::new(),
+            early_boot_alternatives_deferred: false,
+            early_boot_alternatives_mmu_off_boundary_preserved: false,
         }
     }
 
@@ -77,6 +81,9 @@ impl Vm {
         if result.is_err() {
             return result;
         }
+
+        self.early_boot_alternatives_deferred = true;
+        self.early_boot_alternatives_mmu_off_boundary_preserved = true;
 
         self.lifecycle.transition(
             LifecycleEvent::Preset,
@@ -219,6 +226,8 @@ impl Vm {
             && self.trampoline_vm.translation_sync_ready_before_satp()
             && self.early_vm.state() == State::Online
             && self.early_vm.translation_sync_complete()
+            && self.early_boot_alternatives_deferred
+            && self.early_boot_alternatives_mmu_off_boundary_preserved
     }
 
     pub fn entry_successor_ready(&self) -> bool {

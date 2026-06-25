@@ -877,7 +877,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 | RISC-V Linux boot image header / boot protocol header | RISC-V 入口协议 | `PreparePhase` 或 `Lds` | 当前由 `BootArgs`、`Lds` 前置事实吸收，但 header 本身没有说明不展开。 |
 | EFI stub / PE header 入口细节 | `CONFIG_EFI=y`、`CONFIG_EFI_STUB=y` | `PreparePhase` 或 `Lds` | 现有 deferred 只覆盖 `efi_init()`，未覆盖 EFI stub/header 入口。 |
 | SATP mode 探测与页表层级降级 | `CONFIG_PGTABLE_LEVELS=5` | `Config` 或 `Vm.Preset` | 当前 `Config.satp_mode` 是既定事实，未描述 Linux 的运行时探测/降级过程。 |
-| `apply_early_boot_alternatives()` | `CONFIG_RISCV_ALTERNATIVE_EARLY=y` | `Vm.Preset` 或 `EarlyVm.Setup` | 早期 alternatives/errata patch 尚未作为对象或 deferred 标记。 |
+| `apply_early_boot_alternatives()` | `CONFIG_RISCV_ALTERNATIVE_EARLY=y` | `Vm.Preset` | 已迁移到 `EntryPreludePhase`/`Vm.Preset` 的显式 deferred；早期 alternatives/errata patch 仍未展开为对象。 |
 | `set_task_stack_end_magic()` | `CONFIG_SCHED_STACK_END_CHECK=y` | `BootInitStack` | 可折叠进栈保护语义，但应说明当前不展开 Linux 的具体检查标记。 |
 | `init_vmlinux_build_id()` | `start_kernel()` early generic path | `EntrySuccessorPhase` | 当前未建模 build id 初始化，也未标记 deferred。 |
 | `page_address_init()` | `start_kernel()` before `setup_arch()` | `EntrySuccessorPhase` | 当前没有 page address 元数据对象。 |
