@@ -745,7 +745,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 当前先将内核启动到常规运行划分为以下四个运行阶段：
 
 1. 从引导入口到调度准备完成、IRQ/time 设施开始建立之前，称为 `引导期`，英文名 `Boot Phase`。
-2. 从 IRQ/time 设施准备开始，到多任务启动之前，称为 `中断期`，英文名 `Interrupt Phase`。其中首个子阶段开始时中断总开关仍关闭，并在该子阶段末尾执行 `local_irq_enable()` 打开 boot CPU 本地中断总入口。
+2. 从 IRQ/time 设施准备开始，到多任务启动之前，称为 `中断期`，英文名 `Interrupt Phase`。其中首个子阶段开始时中断总开关仍关闭，只建立 IRQ/time 控制设施；随后由独立的 `LocalIrqEnablePhase` 执行 `local_irq_enable()`，打开 boot CPU 本地中断总入口。
 3. 从多任务启动到多核即 `SMP` 启动之前，称为 `单核多任务期`，英文名 `UP Multitask Phase`。
 4. 多核即 `SMP` 启动之后的常规运行状态，称为 `多核运行期`，英文名 `SMP Runtime Phase`。
 
@@ -777,7 +777,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 #### 第二阶段：中断期（Interrupt Phase）
 
-对于 `中断期` 而言，它的核心目标是建立并开放从 `常规流+` 到 `中断流` 的切换路径。需要注意，`InterruptPhase` 的首个子阶段是边界打开者：它开始时仍处于中断关闭的 `System Exclusive` 上下文，先建立 IRQ/time 控制设施，再在阶段末尾打开 boot CPU 本地中断总入口。自该打开动作完成后，系统中可以交替存在两个流：`常规流+` 和 `中断流`。此时还不存在并行，但由于这种交替具有随机性，因此在资源访问上已经可能出现并发冲突。
+对于 `中断期` 而言，它的核心目标是建立并开放从 `常规流+` 到 `中断流` 的切换路径。需要注意，`InterruptPhase` 的首个子阶段是边界打开前准备期：它开始时仍处于中断关闭的 `System Exclusive` 上下文，先建立 IRQ/time 控制设施；紧随其后的 `LocalIrqEnablePhase` 才打开 boot CPU 本地中断总入口。自该打开动作完成后，系统中可以交替存在两个流：`常规流+` 和 `中断流`。此时还不存在并行，但由于这种交替具有随机性，因此在资源访问上已经可能出现并发冲突。
 
 先看 `中断流`。它的运行级别天然高于 `常规流+`：一旦进入中断流，它会一直执行直至完成，而不会再被当前阶段的 `常规流+` 打断；相反，`常规流+` 却可能随时被中断流打断，也可以说其执行权会被抢占。
 
@@ -1833,13 +1833,13 @@ flowchart LR
 
 ### 中断期对象建立
 
-从这一小节开始，对应顶层 `InterruptPhase`。本阶段从 `early_irq_init()` 开始，到 `rest_init()` 创建 `kernel_init` 与 `kthreadd`、多任务开始运行之前结束。`InterruptPhase` 的首个子阶段开始时仍关闭中断，并在该子阶段末尾执行 `local_irq_enable()`；此后 boot CPU 本地中断总入口开放，常规流仍是单根启动初始化流，但已经可能被中断流打断。`rest_init()` 之后将进入 `UP Multitask Phase`。
+从这一小节开始，对应顶层 `InterruptPhase`。本阶段从 `early_irq_init()` 开始，到 `rest_init()` 创建 `kernel_init` 与 `kthreadd`、多任务开始运行之前结束。`InterruptPhase` 的首个子阶段开始时仍关闭中断，并只建立 IRQ/time 控制设施；随后独立的 `LocalIrqEnablePhase` 执行 `local_irq_enable()`。此后 boot CPU 本地中断总入口开放，常规流仍是单根启动初始化流，但已经可能被中断流打断。`rest_init()` 之后将进入 `UP Multitask Phase`。
 
 #### InterruptPhase 子阶段 1：中断时间准备期（IRQ and Time Init Subphase）
 
-本子阶段对应 Linux 6.12.37 `start_kernel()` 中 `early_irq_init()` 开始，到 `local_irq_enable()` 执行完成的初始化段。它承接调度准备期已经建立的 scheduler、RCU 支撑设施和 workqueue 基础，建立 IRQ 控制器、tick/timer/timekeeping、softirq、完整随机数初始化、perf/profile 和 SMP call function 基础，并在末尾执行 `local_irq_enable()` 打开 boot CPU 本地中断总入口。
+本子阶段对应 Linux 6.12.37 `start_kernel()` 中 `early_irq_init()` 开始，到 `local_irq_enable()` 前的 IRQ/time 初始化段。它承接调度准备期已经建立的 scheduler、RCU 支撑设施和 workqueue 基础，建立 IRQ 控制器、tick/timer/timekeeping、softirq、完整随机数初始化、perf/profile 和 SMP call function 基础，但不打开 boot CPU 本地中断总入口。
 
-本子阶段是 `InterruptPhase` 的边界打开者。它的大部分对象建立过程仍处于 `System Exclusive` 上下文中：中断总开关关闭，secondary hart 仍未启动，普通任务切换尚未进入并发运行。但本阶段建立的是中断开放后会立即被消费的控制结构：timer interrupt、softirq、RCU nohz、RISC-V irq stack、SBI IPI、clockevent/clocksource、完整 RNG 和 call function 都必须在中断开放前处于可解释状态。阶段末尾的 `local_irq_enable()` 改变默认上下文：完成后 boot CPU 常规流进入 `Interruptible Context`。
+本子阶段是 `InterruptPhase` 的边界打开前准备期。对象建立过程仍处于 `System Exclusive` 上下文中：中断总开关关闭，secondary hart 仍未启动，普通任务切换尚未进入并发运行。但本阶段建立的是中断开放后会立即被消费的控制结构：timer interrupt、softirq、RCU nohz、RISC-V irq stack、SBI IPI、clockevent/clocksource、完整 RNG 和 call function 都必须在中断开放前处于可解释状态。实际改变默认上下文的 `local_irq_enable()` 由后续 `LocalIrqEnablePhase` 单独承载。
 
 从边界上看，本子阶段的输入至少包括：
 
@@ -1861,7 +1861,7 @@ flowchart LR
 
 `IRQ` 是 `Interrupt Request` 的缩写，规格语义上不直接表示“中断流”本体，而表示中断请求的编号、映射、路由和分发设施。当前暂名采用 `IrqDispatchTree`，中文名为 `IRQ 分发树对象`。该对象表达的核心结构是由多级 `IrqDomain` 形成的树状分发结构：初始物理中断号先交给顶级 `IrqDomain` 查表或翻译；如果当前 domain 已经是叶子，则得到最终可处理的中断；如果当前 domain 仍连接下级 domain，则把映射产生的下级中断号继续传递给下级 `IrqDomain`，沿树递归形成一条从根到叶子的 dispatch chain。
 
-1. `中断时间准备期对象`（暂名 `IrqTimeInitPhase`）：属于阶段对象，是 `InterruptPhase` 的第一个子阶段对象。它从 `SchedInitPhase.Ready` 接续，按 `early_irq_init()` 到 `local_irq_enable()` 完成的顺序编排对象推进，并以 boot CPU 本地中断总入口已经开放作为完成边界。
+1. `中断时间准备期对象`（暂名 `IrqTimeInitPhase`）：属于阶段对象，是 `InterruptPhase` 的第一个子阶段对象。它从 `SchedInitPhase.Ready` 接续，按 `early_irq_init()` 到 `local_irq_enable()` 前的顺序编排对象推进，并以 IRQ/time 控制设施 Ready、boot CPU 本地中断总入口仍关闭作为完成边界。
 2. `IRQ 分发树对象`（暂名 `IrqDispatchTree`）：`InterruptStream` 的子对象，覆盖 `early_irq_init()` 与 RISC-V64 `init_IRQ()`。`early_irq_init()` 对应 `IrqDispatchTree.preset()`：建立 IRQ 分发所需的全局编号空间、默认 affinity、early IRQ 基础和实现承载槽位，使对象进入 `Prepared`；Linux 中的 `irq_desc` 可作为实现承载，但当前规格不把每个 `irq_desc` 建成独立对象。`init_IRQ()` 对应 `IrqDispatchTree.setup()`：初始化 RISC-V irq stack/SCS，执行 `irqchip_init()` 建立平台 `IrqDomain` 树并关联 `IrqChip`，设置架构 IRQ 入口，并驱动 `SbiIpi.preset()` 与 `SbiIpi.setup()` 使 SBI IPI 结构进入 `Ready`。`SbiIpi.enable()` 保留给后续 IPI 正式启用边界；`init_IRQ()` 完成后并不表示中断已经打开，只表示中断到来时有可分发的控制结构。
 3. `Tick 对象`：覆盖 `tick_init()` 及后续 timer/clockevent 路径对 tick 控制结构的补完。`tick_init()` 对应 `Tick.preset()`：驱动 `TickBroadcast.preset()` 建立 broadcast/oneshot mask 基础，当前 `CONFIG_NO_HZ_FULL=n` 下 `tick_nohz_init()` 为 trimmed/no-op，使 `Tick.state == Prepared`。后续 `RiscvTimerProvider.setup()` 中的 `timer_probe()`、`clockevents_register_device()` 与 `tick_setup_hrtimer_broadcast()` 再补完 boot CPU tick device 和 broadcast clockevent，使 `Tick.state == Ready`；`Tick.enable()` 留到 tick 中断正式可接收/可服务的边界。
 4. `RCU nohz 动作`：覆盖 `rcu_init_nohz()`。当前 `CONFIG_RCU_NOCB_CPU` 未启用且 `CONFIG_NO_HZ_FULL=n`，该调用在头文件中折叠为空实现，按 trimmed/no-op 处理；未来启用 `nohz_full=`、`rcu_nocbs=` 或 `isolcpus=` 后，可恢复为 `RcuCore.configure_nohz()` action，用于配置 RCU callback offload CPU mask，但不重新建立 RCU 核心设施本体。
@@ -1876,7 +1876,7 @@ flowchart LR
 13. `PerfEvent / PerfCore 路径`：覆盖 `perf_event_init()`。当前 `CONFIG_PERF_EVENTS=y`，该调用会初始化 generic perf core、PMU registry、per-CPU perf context、perf 内部 `pmus_srcu`、software/clock/tracepoint/uprobe PMU、reboot notifier 和 `perf_event` cache；但它不是当前最小启动闭环的关键功能，本阶段先标为 deferred。后续需要性能计数、perf trace 或 RISC-V PMU 时，再恢复为 `PerfCore.setup()`；RISC-V 硬件 PMU provider 本来也属于后续 `device_initcall(pmu_sbi_devinit)` 路径，不在当前子阶段完成。
 14. `Profiler 路径`：覆盖 `profile_init()`。当前 `CONFIG_PROFILING=y`，但默认命令行未要求 `profile=` 时 `prof_on == 0`，Linux 直接返回，不分配 `prof_buffer`。本阶段先标为 deferred；后续若支持 `profile=` 参数，再恢复为 `KernelProfiler.setup()`，消费 `BootParam.profile` 并建立 profiling buffer。
 15. `SMP CallFunction 对象`：覆盖 `call_function_init()`。它是独立的 generic SMP callback/call-function 基础设施对象，不是 `SbiIpi` 的子对象或别名。它拥有 per-CPU `CallSingleQueueSet` 与 `CallFunctionDataSet`，并通过 `SbiIpi/IpiMux` 提供的 `IPI_CALL_FUNC` 路由投递跨 CPU callback。secondary CPU 尚未启动，因此本阶段只要求 possible CPU 队列初始化以及 boot CPU 的 call-function data 准备完成。
-16. `中断开放动作`：覆盖 Linux `local_irq_enable()`。当前不建立新的 `IrqEnableGate` 顶层对象，而是把该调用建模为 `InterruptStream.enable()` 在 boot CPU 上的执行边界：`InterruptStream` 从前序 `Ready` 推进到当前启动范围内的 `Online`，并记录 `BootCPU.local_irq_enabled == true`。RISC-V 上该动作的 coding 语义必须明确为设置 `sstatus.SIE` 总开关；`sie/sip` 寄存器仍表示每个具体中断类型的使能和挂起位，不在本 `enable()` 中重新打开或清理。这里的 `Online` 只表示 boot CPU 本地中断总入口已经开放，不表示 secondary CPU 已启动，也不表示所有 IPI、tick、softirq 使用者都已经进入运行期 `Online`。
+16. `中断开放动作`：覆盖 Linux `local_irq_enable()`，但不属于 `IrqTimeInitPhase`。当前不建立新的 `IrqEnableGate` 顶层对象，而是把该调用建模为后续 `LocalIrqEnablePhase` 中的 `InterruptStream.enable()` 在 boot CPU 上的执行边界：`InterruptStream` 从前序 `Ready` 推进到当前启动范围内的 `Online`，并记录 `BootCPU.local_irq_enabled == true`。RISC-V 上该动作的 coding 语义必须明确为设置 `sstatus.SIE` 总开关；`sie/sip` 寄存器仍表示每个具体中断类型的使能和挂起位，不在本 `enable()` 中重新打开或清理。这里的 `Online` 只表示 boot CPU 本地中断总入口已经开放，不表示 secondary CPU 已启动，也不表示所有 IPI、tick、softirq 使用者都已经进入运行期 `Online`。
 
 `IrqDispatchTree` 的内部建模边界暂定如下：
 
@@ -1984,8 +1984,7 @@ flowchart LR
 | `perf_event_init()` | deferred | `CONFIG_PERF_EVENTS=y`，有实质 generic perf core 初始化，但不是当前最小启动闭环关键功能；后续恢复为 `PerfCore.setup()`，RISC-V 硬件 PMU provider 留给 initcall 阶段。 |
 | `profile_init()` | deferred | `CONFIG_PROFILING=y`，但默认未启用 `profile=` 时直接返回；后续支持 kernel profiling 参数时再恢复为 `KernelProfiler.setup()`。 |
 | `call_function_init()` | formal candidate: `SmpCallFunction.setup()` | 建立 `CallSingleQueueSet` 与 boot CPU `CallFunctionData`，并关联 `SbiIpi/IpiMux` 的 `IPI_CALL_FUNC` 路由；不启动 secondary CPU。 |
-| `WARN(!irqs_disabled(), ...)` / `early_boot_irqs_disabled = false` | checkpoint | 合并为中断开放前的出口事实：确认此刻中断仍关闭，并清除 early boot 禁止标记。 |
-| `local_irq_enable()` | formal candidate: `InterruptStream.enable()` | 设置 RISC-V `sstatus.SIE` 中断总开关，打开 boot CPU 本地中断接收路径，记录 `BootCPU.local_irq_enabled == true`；`sie/sip` 仍作为具体中断类型子开关/挂起位处理，不新建 `IrqEnableGate` 对象，也不自动推进 tick/softirq/IPI 使用者到 `Online`。 |
+| `WARN(!irqs_disabled(), ...)` / `early_boot_irqs_disabled = false` / `local_irq_enable()` | next subphase: `LocalIrqEnablePhase` | 由独立子阶段确认中断仍关闭，再执行 `InterruptStream.enable()`：清除 early boot 禁止标记，设置 RISC-V `sstatus.SIE` 中断总开关，打开 boot CPU 本地中断接收路径，记录 `BootCPU.local_irq_enabled == true`；`sie/sip` 仍作为具体中断类型子开关/挂起位处理，不新建 `IrqEnableGate` 对象，也不自动推进 tick/softirq/IPI 使用者到 `Online`。 |
 
 <p align="center">
   <img src="pic/irq-time-init-sequence.svg" alt="中断时间准备期对象构建时序" width="900">
@@ -1995,7 +1994,7 @@ flowchart LR
   图 19 中断时间准备期对象构建时序
 </p>
 
-图 19 按 Linux 6.12.37 `start_kernel()` 中 `early_irq_init()` 到 `local_irq_enable()` 完成的有效调用顺序展示 `InterruptPhase` 子阶段 1 的推进过程；`Softirq.preset()` 已在上一子阶段完成，本图只展示 `softirq_init()` 对应的 `Softirq.setup()`。蓝色节点表示 IRQ/timer/timekeeping 相关主线候选，绿色节点表示其它主线 formal 候选，灰色节点表示 deferred 路径，紫色节点表示 checkpoint。
+图 19 按 Linux 6.12.37 `start_kernel()` 中 `early_irq_init()` 到 `local_irq_enable()` 前的有效调用顺序展示 `InterruptPhase` 子阶段 1 的推进过程；`Softirq.preset()` 已在上一子阶段完成，本图只展示 `softirq_init()` 对应的 `Softirq.setup()`。蓝色节点表示 IRQ/timer/timekeeping 相关主线候选，绿色节点表示其它主线 formal 候选，灰色节点表示 deferred 路径，紫色节点表示 checkpoint。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2013,20 +2012,39 @@ flowchart LR
 - `Randomness.state == Ready`，表示已经从核心准备期的 `Prepared` 经 `random_init()` 推进到启动期可用边界
 - `BootInitTask.stack_canary_refreshed == true`
 - `SmpCallFunction.state == Ready`，表示 per-CPU `CallSingleQueueSet` 已初始化，boot CPU `CallFunctionData` 已准备完成，并已关联 `IPI_CALL_FUNC` 投递路由；`SmpCallFunction.enable()` 尚未执行
-- `early_boot_irqs_disabled == false`
+- `early_boot_irqs_disabled == true`
+- `InterruptStream.state == Ready`，限定为中断入口结构已建立但 boot CPU 本地中断总入口仍关闭
+- `BootCPU.local_irq_enabled == false`
+
+至此，`InterruptPhase` 的 IRQ/time 初始化子阶段结束。boot CPU 本地中断总入口仍关闭；下一子阶段 `LocalIrqEnablePhase` 将执行唯一的本地中断开放边界。
+
+#### InterruptPhase 子阶段 2：本地中断开放期（Local IRQ Enable Subphase）
+
+`InterruptPhase` 的第二个子阶段命名为 `LocalIrqEnablePhase`，中文名为本地中断开放期。它对应 Linux 6.12.37 `start_kernel()` 中 `WARN(!irqs_disabled(), ...)`、`early_boot_irqs_disabled = false` 与 `local_irq_enable()` 这一边界动作。
+
+这个边界承接 `IrqTimeInitPhase` 的出口事实：IRQ/time 控制设施已经进入 `Ready`，boot CPU 本地中断总入口仍关闭，`early_boot_irqs_disabled == true`。本阶段只通过 `InterruptStream.enable()` 打开 boot CPU 的 RISC-V `sstatus.SIE` 总入口，并把 `early_boot_irqs_disabled` 清为 false；PLIC UART source gate、root supervisor external input gate、周期 tick、完整 softirq、IPI runtime、workqueue worker、RCU GP kthread、task concurrency 和 SMP concurrency 仍不得随本阶段隐式进入运行态。
+
+本子阶段的结束状态暂定至少包含：
+
+- `LocalIrqEnablePhase.state == Ready`
+- `IrqTimeInitPhase.state == Ready`
 - `InterruptStream.state == Online`，限定为 boot CPU 本地中断总入口已经通过 `sstatus.SIE` 开放
 - `BootCPU.local_irq_enabled == true`
+- `early_boot_irqs_disabled == false`
+- `task_concurrency` 和 `smp_concurrency` 仍关闭
+- PLIC UART source gate 与 root supervisor external input gate 仍由后续 `UartExternalIrqEnable` 显式打开
 
-至此，`InterruptPhase` 的边界打开子阶段结束。boot CPU 本地中断总入口已经开放，常规流仍是单根启动初始化流，但已经可能被中断流打断。
+至此，`InterruptPhase` 的中断开放边界结束。boot CPU 本地中断总入口已经开放，常规流仍是单根启动初始化流，但已经可能被中断流打断。
 
-#### InterruptPhase 子阶段 2：中断开放后准备期（IRQ-Open Prepare Subphase）
+#### InterruptPhase 子阶段 3：中断开放后准备期（IRQ-Open Prepare Subphase）
 
-`InterruptPhase` 的第二个子阶段暂名 `IrqOpenPreparePhase`，中文名为中断开放后准备期。它对应 Linux 6.12.37 `start_kernel()` 中从 `kmem_cache_init_late()` 开始，到 `arch_cpu_finalize_init()` 完成后、`pid_idr_init()` 执行前的初始化段。
+`InterruptPhase` 的第三个子阶段暂名 `IrqOpenPreparePhase`，中文名为中断开放后准备期。它对应 Linux 6.12.37 `start_kernel()` 中从 `kmem_cache_init_late()` 开始，到 `arch_cpu_finalize_init()` 完成后、`pid_idr_init()` 执行前的初始化段。
 
-这个边界承接 `IrqTimeInitPhase` 的出口事实：`early_boot_irqs_disabled == false` 已经成立，且 boot CPU 本地中断总入口已经开放。此时 secondary hart 仍未启动，普通任务切换和完整并发运行仍未展开；但 timer interrupt、softirq、IPI 路由等前一阶段建立的控制结构，已经需要在“中断可能到来”的语义下被解释。
+这个边界承接 `LocalIrqEnablePhase` 的出口事实：`early_boot_irqs_disabled == false` 已经成立，且 boot CPU 本地中断总入口已经开放。此时 secondary hart 仍未启动，普通任务切换和完整并发运行仍未展开；但 timer interrupt、softirq、IPI 路由等前一阶段建立的控制结构，已经需要在“中断可能到来”的语义下被解释。
 
 从边界上看，本子阶段的输入至少包括：
 
+- `LocalIrqEnablePhase.state == Ready`
 - `IrqTimeInitPhase.state == Ready`
 - `InterruptStream.state == Online`
 - `IrqDispatchTree.state == Ready`
@@ -2046,13 +2064,13 @@ flowchart LR
 - `early_boot_irqs_disabled == false`
 - `BootCPU.local_irq_enabled == true`
 
-选择在 `arch_cpu_finalize_init()` 后结束，是为了把“中断打开后的 late core/platform 准备”与后续“进程准备”分开。`pid_idr_init()` 之后进入的是 PID、VMA、fork、proc、namespace、VFS/security、cgroup 等对象基础设施的连续初始化段，虽然其中包含若干通用内核对象初始化，但主线语义更接近为第一个内核线程、`kthreadd` 和后续用户态 init 建立进程/任务基础，适合作为 `InterruptPhase` 子阶段 3 的自然起点。后续子阶段可暂按 `ProcessPreparePhase`（进程准备期）继续讨论，具体边界和命名仍以后续收敛结果为准。
+选择在 `arch_cpu_finalize_init()` 后结束，是为了把“中断打开后的 late core/platform 准备”与后续“进程准备”分开。`pid_idr_init()` 之后进入的是 PID、VMA、fork、proc、namespace、VFS/security、cgroup 等对象基础设施的连续初始化段，虽然其中包含若干通用内核对象初始化，但主线语义更接近为第一个内核线程、`kthreadd` 和后续用户态 init 建立进程/任务基础，适合作为 `InterruptPhase` 子阶段 4 的自然起点。后续子阶段可暂按 `ProcessPreparePhase`（进程准备期）继续讨论，具体边界和命名仍以后续收敛结果为准。
 
 当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_SLUB=y`、`CONFIG_SLUB_TINY=n`、`CONFIG_PRINTK=y`、`CONFIG_TTY=y`、`CONFIG_VT=y`、`CONFIG_SERIAL_CORE_CONSOLE=y`、`CONFIG_GENERIC_SCHED_CLOCK=y`、`CONFIG_RISCV_TIMER=y`。同时，当前未启用 `CONFIG_LOCKDEP`、`CONFIG_DEBUG_LOCKING_API_SELFTESTS`、`CONFIG_BLK_DEV_INITRD`、`CONFIG_NUMA`、`CONFIG_ACPI` 和 `CONFIG_ARCH_HAS_CPU_FINALIZE_INIT`。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
 
-当前先将 `InterruptPhase` 子阶段 2 的对象和边界记录如下：
+当前先将 `InterruptPhase` 子阶段 3 的对象和边界记录如下：
 
-1. `中断开放后准备期对象`（暂名 `IrqOpenPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第二个子阶段对象。它从 `IrqTimeInitPhase.Ready` 接续，即 boot CPU 本地中断总入口已经开放；随后按 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 调用点完成的有效顺序编排对象推进，并以“下一步进入进程准备期”为完成边界。
+1. `中断开放后准备期对象`（暂名 `IrqOpenPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第三个子阶段对象。它从 `LocalIrqEnablePhase.Ready` 接续，即 boot CPU 本地中断总入口已经开放；随后按 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 调用点完成的有效顺序编排对象推进，并以“下一步进入进程准备期”为完成边界。
 2. `SLUB flush workqueue 资源`：覆盖 `kmem_cache_init_late()`。它不是独立生命周期对象，而是 `SlubSubsystem` 的内部 workqueue 资源事实：依赖 `SlubSubsystem.Ready`、`KmallocCaches.Ready` 和 `Workqueue.Prepared`，通过 `alloc_workqueue("slub_flushwq", WQ_MEM_RECLAIM, 0)` 建立后续 flush CPU slab 使用的 workqueue 句柄，并记录 `SlubSubsystem.flush_workqueue_ready == true`。它不把 `SlubSubsystem` 推进到 `Online`；Linux 内部 `slab_state = FULL` 仍留给后续 `slab_sysfs_init()` / `SlubSubsystem.enable()`。
 3. `Console 对象`：覆盖 `console_init()`。这是正式 `Console` 对象的首次构造点，因此当前建模为 `Console.preset()`，使对象进入 `Prepared`。它承接已经可用的 `PrintkBuffer` 和早期 console 输出条件，先驱动 `TtyLineDisciplineRegistry.preset()`，把静态 `NTtyLineDiscipline`（Linux `n_tty_ops`）注册到 `N_TTY` slot；随后读取 `Lds` 提供的 `__con_initcall_start..__con_initcall_end` console initcall 表边界，驱动当前配置下的 `ConsoleDriver` 对象执行 early register。该过程可能注册可用的 real console，并在 real console 成为 `CON_CONSDEV` 时触发 early/boot console handoff；但由于此时仍早于很多 bus/device probe，设备树上的真实串口 console 不保证已经完整 probe，复杂设备 probe、boot console 注销和完整 console handoff 都不能作为本阶段必然后置条件。
 4. `panic_later checkpoint`：覆盖 `console_init()` 之后的 `if (panic_later) panic(...)`。这是对过多 boot 参数等早期异常的延迟失败处理，只作为阶段内 checkpoint 或 fail boundary，不建立对象。
@@ -2064,7 +2082,7 @@ flowchart LR
 10. `late_time_init hook`：覆盖 `if (late_time_init) late_time_init()`。当前 RISC-V 路径未设置该 hook，按 trimmed/no-op 处理；RISC-V timer provider 已在前一子阶段通过 `time_init()` 完成。未来若某架构设置该 hook，应按具体 provider 建模，而不是新建一个抽象的 `LateTimeInit` 顶层对象。
 11. `SchedClock 对象`：覆盖 `sched_clock_init()`。它是 generic sched clock core，不是 `RiscvTimerProvider` 的子对象。在当前 `CONFIG_GENERIC_SCHED_CLOCK=y` 且未启用 unstable sched clock 路径下，它打开 `sched_clock_running` static key，并在临时关闭本地中断的窗口内执行 `generic_sched_clock_init()`：若此时没有 provider 已注册硬件 reader，则使用 jiffies fallback 作为 sched clock reader，然后初始化并启动维护 epoch/wrap 的 `sched_clock_timer` hrtimer。该过程使调度时间戳读数进入启动期可用状态，但不改变本阶段“中断已开放”的边界事实。
 12. `DelayLoop 对象`：覆盖 `calibrate_delay()`。它是 busy-wait delay API 的基础设施对象，不是 timer provider 或 clocksource。`DelayLoop.setup()` 消费前一子阶段 `RiscvTimerProvider.setup()` 写入的 `lpj_fine = riscv_timebase / HZ`，在当前 RISC-V 路径下通常跳过实际 busy-loop 校准，直接设置 boot CPU `cpu_loops_per_jiffy` 与全局 `loops_per_jiffy`，使对象进入 `Ready`。后续 `DelayLoop.delay_cycles(cycles)`、`DelayLoop.udelay(usec)`、`DelayLoop.ndelay(nsec)` 和 `DelayLoop.mdelay(msec)` 是运行期 API/action，只要求 `DelayLoop.Ready`，不再推进生命周期状态。
-13. `Arch CPU finalize 路径`：覆盖 `arch_cpu_finalize_init()`。当前 RISC-V 未启用 `CONFIG_ARCH_HAS_CPU_FINALIZE_INIT`，该调用为空 inline，只作为本子阶段出口前的 trimmed/no-op 调用点保留；它完成后，下一个 Linux 调用 `pid_idr_init()` 进入 `InterruptPhase` 子阶段 3。
+13. `Arch CPU finalize 路径`：覆盖 `arch_cpu_finalize_init()`。当前 RISC-V 未启用 `CONFIG_ARCH_HAS_CPU_FINALIZE_INIT`，该调用为空 inline，只作为本子阶段出口前的 trimmed/no-op 调用点保留；它完成后，下一个 Linux 调用 `pid_idr_init()` 进入 `InterruptPhase` 子阶段 4。
 
 <p align="center">
   <img src="pic/irq-open-objects.svg" alt="中断开放后准备期对象分类与相互关系" width="900">
@@ -2074,9 +2092,9 @@ flowchart LR
   图 20 中断开放后准备期对象分类与相互关系
 </p>
 
-图 20 用于说明 `InterruptPhase` 子阶段 2 的对象分类和依赖关系。左侧是阶段边界，中间是当前主线 formal 候选对象以及 deferred 候选，右侧是当前配置下的 trimmed/no-op 路径以及 `InterruptPhase` 子阶段 3 的自然入口。图中对象仍是初步分类，后续逐个过程讨论后可以继续拆分、合并或降级为 checkpoint。
+图 20 用于说明 `InterruptPhase` 子阶段 3 的对象分类和依赖关系。左侧是阶段边界，中间是当前主线 formal 候选对象以及 deferred 候选，右侧是当前配置下的 trimmed/no-op 路径以及 `InterruptPhase` 子阶段 4 的自然入口。图中对象仍是初步分类，后续逐个过程讨论后可以继续拆分、合并或降级为 checkpoint。
 
-##### InterruptPhase 子阶段 2 过程处理清单（初稿）
+##### InterruptPhase 子阶段 3 过程处理清单（初稿）
 
 | Linux 6.12.37 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
@@ -2102,10 +2120,11 @@ flowchart LR
   图 21 中断开放后准备期对象构建时序
 </p>
 
-图 21 按 Linux 6.12.37 `start_kernel()` 中 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 2 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示 deferred 候选，紫色节点表示 checkpoint 或 fail boundary，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
+图 21 按 Linux 6.12.37 `start_kernel()` 中 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 3 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示 deferred 候选，紫色节点表示 checkpoint 或 fail boundary，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
 
 本子阶段的结束状态暂定至少包含：
 
+- `LocalIrqEnablePhase.state == Ready`
 - `IrqTimeInitPhase.state == Ready`
 - `InterruptStream.state == Online`，限定为 boot CPU 本地中断总入口已经通过 `sstatus.SIE` 开放
 - `BootCPU.local_irq_enabled == true`
@@ -2126,11 +2145,11 @@ flowchart LR
 - `Lockdep`、`LockingSelftest`、`InitrdBounds`、`NumaPolicy`、`AcpiEarly`、`late_time_init hook` 和 `ArchCpuFinalize` 均按当前配置记录为 trimmed/no-op
 - 下一子阶段的起点是 `pid_idr_init()`，暂按 `ProcessPreparePhase` 继续讨论
 
-`InterruptPhase` 子阶段 2 的逐项讨论已经收敛：当前规格只要求 console 进入正式对象准备边界、SLUB late flush workqueue 资源建立、generic sched clock 与 busy-wait delay API 进入可用边界；per-CPU pageset 快速路径缓存暂记为 `PageAllocator.setup()` 的 deferred 细项，当前配置下的 Lockdep、initrd、NUMA、ACPI、late time hook 和 arch CPU finalize 路径均不进入主线对象状态。后续讨论从 Linux `pid_idr_init()` 开始，进入 `InterruptPhase` 子阶段 3 `ProcessPreparePhase` 的边界和对象划分。
+`InterruptPhase` 子阶段 3 的逐项讨论已经收敛：当前规格只要求 console 进入正式对象准备边界、SLUB late flush workqueue 资源建立、generic sched clock 与 busy-wait delay API 进入可用边界；per-CPU pageset 快速路径缓存暂记为 `PageAllocator.setup()` 的 deferred 细项，当前配置下的 Lockdep、initrd、NUMA、ACPI、late time hook 和 arch CPU finalize 路径均不进入主线对象状态。后续讨论从 Linux `pid_idr_init()` 开始，进入 `InterruptPhase` 子阶段 4 `ProcessPreparePhase` 的边界和对象划分。
 
-#### InterruptPhase 子阶段 3：进程准备期（Process Prepare Subphase）
+#### InterruptPhase 子阶段 4：进程准备期（Process Prepare Subphase）
 
-`InterruptPhase` 的第三个子阶段暂名 `ProcessPreparePhase`，中文名为进程准备期。它对应 Linux 6.12.37 `start_kernel()` 中从 `pid_idr_init()` 开始，到 `kcsan_init()` 完成后、`rest_init()` 执行前的初始化段。
+`InterruptPhase` 的第四个子阶段暂名 `ProcessPreparePhase`，中文名为进程准备期。它对应 Linux 6.12.37 `start_kernel()` 中从 `pid_idr_init()` 开始，到 `kcsan_init()` 完成后、`rest_init()` 执行前的初始化段。
 
 这个边界承接 `IrqOpenPreparePhase` 的出口事实：boot CPU 本地中断总入口已经开放，console、sched clock 和 busy-wait delay API 已经达到启动期可用边界，但系统仍处于单根启动初始化流中，尚未创建 PID 1、`kthreadd` 或进入调度/idle 运行路径。选择在 `rest_init()` 前结束，是因为 `rest_init()` 会创建 `kernel_init` 和 `kthreadd`，设置 `system_state = SYSTEM_SCHEDULING`，并让 boot idle thread 进入 `schedule_preempt_disabled()` / `cpu_startup_entry(CPUHP_ONLINE)`；因此它是从“为第一个任务准备对象基础设施”切换到“任务系统开始运行”的自然边界。
 
@@ -2140,9 +2159,9 @@ flowchart LR
 
 本子阶段后续逐项细化时，若某个 Linux 初始化调用只创建 cache、静态表项或基本承载壳，优先映射到对象的较早 slot，例如 `preset()` 并推进到 `Prepared`，把 `setup()`、`enable()` 等后续 slot 留给更完整的对象关系、运行期语义或正式启用动作。
 
-当前先将 `InterruptPhase` 子阶段 3 的对象和边界记录如下：
+当前先将 `InterruptPhase` 子阶段 4 的对象和边界记录如下：
 
-1. `进程准备期对象`（暂名 `ProcessPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第三个子阶段对象。它从 `IrqOpenPreparePhase.Ready` 接续，按 `pid_idr_init()` 到 `kcsan_init()` 的有效顺序编排对象推进，并以“下一步进入 `rest_init()`，创建 PID 1 和 `kthreadd`”作为完成边界。
+1. `进程准备期对象`（暂名 `ProcessPreparePhase`）：属于阶段对象，是 `InterruptPhase` 的第四个子阶段对象。它从 `IrqOpenPreparePhase.Ready` 接续，按 `pid_idr_init()` 到 `kcsan_init()` 的有效顺序编排对象推进，并以“下一步进入 `rest_init()`，创建 PID 1 和 `kthreadd`”作为完成边界。
 2. `根 PID namespace 对象`（暂名 `RootPidNamespace`）：覆盖 `pid_idr_init()`。当前建模为 `RootPidNamespace.setup()`：`BUILD_BUG_ON(PID_MAX_LIMIT >= PIDNS_ADDING)` 是编译期 checkpoint；`PidAllocator.configure_limits()` 基于 possible CPU 数更新全局 `pid_max/pid_max_min`；随后初始化静态 `init_pid_ns.idr`，并创建 level-0 `"pid"` SLUB cache 绑定到 `init_pid_ns.pid_cachep`，使根 PID namespace 具备为 `rest_init()` 后续任务分配 PID 的基础结构。`PidAllocator` 保留为 `RootPidNamespace` 关联的分配策略/API 面，承载后续 `alloc_pid()`、`free_pid()`、`find_pid_ns()` 等运行期动作，不作为本调用推进到 `Ready` 的顶层对象。
 3. `匿名内存反向映射核心对象`（暂名 `AnonVmaCore`）：覆盖 `anon_vma_init()`。它是匿名内存 rmap graph 的管理核心，用来维护匿名 folio/page 反向定位相关 `Vma` 的关系，而不是普通 VMA cache 的附属品。运行期中，`Vma` 通过 `AnonVmaChain` 连接到 `AnonVma` 节点，匿名 folio/page 再通过 mapping 标记间接指向 `AnonVma`，使 COW、unmap、migration、reclaim、memory failure 和 rmap walk 等路径能够找到所有相关映射。`anon_vma_init()` 当前只创建 `anon_vma` 与 `anon_vma_chain` 两类 cache，使这套图结构的分配基础进入 `Ready`；具体 `AnonVma` 实例和链接关系留给 VMA fault、fork/link 等运行期动作建立。
 4. `任务创建核心对象`（暂名 `TaskCreationCore`）的线程栈准备：覆盖 `thread_stack_cache_init()`。当前 `CONFIG_VMAP_STACK=y`，该调用建模为 `TaskCreationCore.preset()`：创建 `TaskCreationCore.thread_stack_cache` 属性/子资源，为后续 `kernel_init`、`kthreadd` 和普通任务分配内核线程栈提供缓存基础。它不是独立顶层对象，也不是 SLUB 的生命周期推进。
@@ -2168,9 +2187,9 @@ flowchart LR
   图 22 进程准备期对象分类与相互关系
 </p>
 
-图 22 用于说明 `InterruptPhase` 子阶段 3 的对象分类和依赖关系。左侧是阶段边界和 `rest_init()` 前的出口条件，中间保留当前主线 formal 对象和尾段 deferred 候选对象，右侧是当前配置下的 trimmed/no-op 路径。图中对象仍是初步分类，后续逐个过程讨论后可以继续拆分、合并或降级为 checkpoint。
+图 22 用于说明 `InterruptPhase` 子阶段 4 的对象分类和依赖关系。左侧是阶段边界和 `rest_init()` 前的出口条件，中间保留当前主线 formal 对象和尾段 deferred 候选对象，右侧是当前配置下的 trimmed/no-op 路径。图中对象仍是初步分类，后续逐个过程讨论后可以继续拆分、合并或降级为 checkpoint。
 
-##### InterruptPhase 子阶段 3 过程处理清单（初稿）
+##### InterruptPhase 子阶段 4 过程处理清单（初稿）
 
 | Linux 6.12.37 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
@@ -2217,7 +2236,7 @@ flowchart LR
   图 23 进程准备期对象构建时序
 </p>
 
-图 23 按 Linux 6.12.37 `start_kernel()` 中 `pid_idr_init()` 到 `kcsan_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 3 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`rest_init()` 不属于本子阶段，只作为下一阶段 `UP Multitask Phase` 的入口标记。
+图 23 按 Linux 6.12.37 `start_kernel()` 中 `pid_idr_init()` 到 `kcsan_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 4 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`rest_init()` 不属于本子阶段，只作为下一阶段 `UP Multitask Phase` 的入口标记。
 
 本子阶段的结束状态暂定至少包含：
 
