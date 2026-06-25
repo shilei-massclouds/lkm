@@ -69,9 +69,9 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
      * binding produced by Scheduler.Action::SelectRunQueue is visible inside
      * this context. In the current UP path, selected_rq is proven to target
      * BootRunQueue and BootCPURef, so this context is guarded by
-     * BootRunQueueLock and the task CPU update is temporarily driven with
-     * BootCPURef. Future generic runqueue enqueue modeling should resolve the
-     * lock, obj_refs and cpu_of(selected_rq) from the selected RunQueueRef
+     * BootRunQueueLock and the task CPU update consumes that selected_rq CPU
+     * fact as BootCPURef. Future generic runqueue enqueue modeling should
+     * resolve the lock, obj_refs and CPU fact from the selected RunQueueRef
      * instead of this BootRunQueue specialization.
      */
     guard {
@@ -233,8 +233,9 @@ context BootIdleStartupContext: Context {
  * runqueue ref 绑定为 selected_rq。随后用标准无实参 within 进入
  * EnqueueSelectedRunQueueContext；selected_rq 作为外层 action result
  * binding 在嵌套 within 中直接可见。当前 UP 路径证明 selected_rq
- * 指向 BootRunQueue，因此该 context 仍由 BootRunQueueLock 建立边界，并驱动
- * RunQueue.Transition::EnqueueTask(KernelInitTaskRef)。SelectRunQueue
+ * 指向 BootRunQueue 且 CPU 事实为 BootCPURef，因此该 context 仍由
+ * BootRunQueueLock 建立边界，Task.SetTaskCpu 消费 selected_rq 的 CPU 事实，
+ * 并驱动 RunQueue.Transition::EnqueueTask(KernelInitTaskRef)。SelectRunQueue
  * 当前固定返回 BootRunQueueRef；完整选择策略后续 deferred。三者都成功后，
  * Enable 才提交 KernelInitTask Ready -> Online。
  *

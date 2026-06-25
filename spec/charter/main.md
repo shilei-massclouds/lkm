@@ -1752,6 +1752,16 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 参照 Linux 的 per-CPU `struct rq` 和 per-CPU idle thread 关系，规格中把 `RunQueue` 和 `IdleTask` 建模为对应 CPU 实例的子对象，而不是 `Scheduler` 全局对象直接拥有的成员。正式访问路径应写成 `CpuGroup.Cpu[id].RunQueue` 和 `CpuGroup.Cpu[id].IdleTask`；其中 `RunQueue.cpu_ref == CpuGroup.Cpu[id].ref`，`RunQueue.idle == CpuGroup.Cpu[id].IdleTask`，`IdleTask.cpu_ref == CpuGroup.Cpu[id].ref`。`Scheduler` 的职责是编排这些 CPU-owned 对象的 setup/enable/action，并维护全局调度事实、调度类和选择策略；它不拥有每个 CPU 的 runqueue 或 idle task 本体。
 
+运行期解析当前 runqueue 时，也应使用 CPU-owned 关系，而不是从 boot CPU 身份硬编码出发。正式链条是：本 CPU 的 `CurrentTaskRef` 指向正在执行的 `Task`，该 task 记录自己的 CPU logical-id/`cpu_ref`，再通过 `CpuGroup.Cpu[id].RunQueue` 得到当前 runqueue。当前 UP 最小路径仍会解析到 `BootRunQueue`，但原因是 `CurrentTaskRef -> BootIdleTask` 且 `BootIdleTask.cpu == BootCPU`；`CpuGroup.boot_cpu()` 只能作为 boot CPU 事实校验或索引便利，不能作为 current runqueue 的 primary source。
+
+```mermaid
+flowchart LR
+    CurrentTaskRef --> Task["Task.cpu_id / cpu_ref"]
+    Task --> CpuIndex["CpuGroup.Cpu[cpu_id]"]
+    CpuIndex --> RunQueue["Cpu.RunQueue"]
+    CpuIndex --> IdleTask["Cpu.IdleTask"]
+```
+
 当前实现若仍把 boot CPU 的 `BootRunQueue` / `BootIdleTask` 存在 `Scheduler` 结构体字段中，只能视为 Rust lowering 过渡形态；对外规格事实、smoke 检查和后续代码生成指引必须把它解释为 `BootCPU.RunQueue` 与 `BootCPU.IdleTask` 的物化视图。secondary CPU 的 `RunQueue` 元数据可以在 `sched_init()` 的 possible CPU 遍历中准备并 attach 到默认 root domain；secondary CPU 的 `IdleTask` 身份则跟随 `idle_threads_init()` / SMP bringup 路径推进，不能因为 `RunQueue` 已准备就假定 AP 已有 live `CurrentCPU` 或可运行任务流。
 
 <p align="center">

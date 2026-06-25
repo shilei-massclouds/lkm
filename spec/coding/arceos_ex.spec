@@ -2406,15 +2406,19 @@ type ArceosExRestInitCodingMust {
          *
          * Current Rust lowering must carry the resolved CPU id inside
          * CurrentRunQueueRef even while the only concrete target is
-         * BootRunQueue. Scheduler.schedule() and Scheduler.Action::SelectRunQueue
-         * lowering must validate that the selected/ref current runqueue is
-         * derived from CpuGroup.boot_cpu() and Scheduler.cpu_runqueue(logical_id)
-         * metadata, not from a naked Scheduler.boot_runqueue() singleton.
-         * RestInit task enable paths must consume the selected_rq result:
-         * set task CPU from selected_rq.cpu_id() and pass selected_rq into the
-         * enqueue boundary. BootRunQueue may remain the UP selected target, but
-         * BootRunQueue enqueue/pick/dequeue APIs must reject a CurrentRunQueueRef
-         * with a mismatched CPU id.
+         * BootRunQueue. Scheduler.schedule() lowering must derive that CPU id
+         * from the CurrentTaskRef target task's recorded CPU id, then validate
+         * it against CpuGroup.Cpu[id], Scheduler.cpu_runqueue(id) metadata and
+         * DefaultSchedRootDomain coverage. CpuGroup.boot_cpu() may be used only
+         * as a boot CPU consistency check after the current task CPU id is
+         * known; it must not be the primary source for resolving the current
+         * runqueue. Scheduler.Action::SelectRunQueue lowering is a wake-up
+         * selection path: it may currently select the boot runqueue, but
+         * RestInit task enable paths must consume the selected_rq result by
+         * setting task CPU from selected_rq.cpu_id() and passing selected_rq
+         * into the enqueue boundary. BootRunQueue may remain the UP selected
+         * target, but BootRunQueue enqueue/pick/dequeue APIs must reject a
+         * CurrentRunQueueRef with a mismatched CPU id.
          */
         arceos_ex_must_current_runqueue_ref_carry_resolved_cpu_id();
 

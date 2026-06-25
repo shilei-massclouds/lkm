@@ -798,8 +798,9 @@ type Task: TaskObject {
 /*
  * SchedulerObject is the reusable scheduler service type. Schedule models the
  * minimal schedule()/__schedule() path: derive the prev task ref from the
- * current CPU current-task view, resolve that CPU view's CurrentRunQueueRef,
- * ask the current runqueue to pick next, then switch from prev to next.
+ * current CPU current-task view, read that task's recorded CPU ownership, resolve
+ * that CPU view's CurrentRunQueueRef through CpuGroup.Cpu[id].RunQueue, ask the
+ * current runqueue to pick next, then switch from prev to next.
  * ScheduleIdle models Linux schedule_idle(): it is only reachable from the
  * CPU-local idle loop after this CPU's idle task observes need_resched, and it
  * returns to that same idle-loop point after the scheduler drains the resched
@@ -818,9 +819,10 @@ type Task: TaskObject {
  * wake-up selection action: it consumes a TaskRef and returns a RunQueueRef.
  * Linux updates the task's recorded CPU after select_task_rq() and before
  * enqueue; callers therefore drive the target Task.Action::SetTaskCpu(...)
- * between SelectRunQueue and EnqueueTask. The current UP rest_init path fixes
- * selected runqueue CPU resolution to BootCPURef; generic cpu_of(selected_rq)
- * resolution from a RunQueueRef is deferred.
+ * between SelectRunQueue and EnqueueTask. The current UP rest_init path proves
+ * selected_rq's CPU fact as BootCPURef, but schedule's CurrentRunQueueRef must be
+ * derived from CurrentTaskRef -> task_cpu_ref_is(...) -> CpuGroup/runqueue
+ * topology, not from CpuGroup.boot_cpu() as a primary source.
  */
 type SchedulerObject: TaskObject {
     processes {
@@ -840,6 +842,7 @@ type SchedulerObject: TaskObject {
                             current_task_ref_private_to_cpu(CurrentTaskRef, BootCurrentCPU);
                             current_task_ref_targets_cpu_task(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
                             current_task_ref_from_cpu_view(CurrentTaskRef, BootCurrentCPU, BootIdleTask);
+                            task_cpu_ref_is(BootIdleTask, BootCPURef);
                             runqueue_ref_ready(CurrentRunQueueRef);
                             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
                             runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
@@ -946,7 +949,7 @@ type SchedulerObject: TaskObject {
                 runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
             }
             deferred {
-                "当前 SelectRunQueue 固定返回 Boot CPU runqueue，selected_rq 的 CPU 暂时固定为 BootCPURef；未来应由 RunQueueRef 解析 cpu_of(selected_rq)，再驱动 Task.SetTaskCpu。完整 select_task_rq 策略后续展开。";
+                "当前 SelectRunQueue 固定返回 Boot CPU runqueue，并通过 runqueue_ref_cpu_is(selected_rq, BootCPURef) 证明调用方可执行 Task.SetTaskCpu(BootCPURef)；未来 SMP 选择策略仍应由 selected RunQueueRef 的 CPU 事实驱动 Task.SetTaskCpu，而不是由调用方硬编码 boot CPU。完整 select_task_rq 策略后续展开。";
             }
         }
     }

@@ -1160,6 +1160,8 @@ impl BootIdleRuntime {
         &mut self,
         scheduler: &mut Scheduler,
         cpu_group: &CpuGroup,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
@@ -1170,7 +1172,14 @@ impl BootIdleRuntime {
             return self.failed_ready_action();
         }
 
-        self.do_idle_cycle(scheduler, cpu_group, local_interrupt, current_task_slot)?;
+        self.do_idle_cycle(
+            scheduler,
+            cpu_group,
+            kernel_init_task,
+            kthreadd_task,
+            local_interrupt,
+            current_task_slot,
+        )?;
         self.idle_loop_entered = true;
         self.idle_loop_continues = true;
         Ok(())
@@ -1180,6 +1189,8 @@ impl BootIdleRuntime {
         &mut self,
         scheduler: &mut Scheduler,
         cpu_group: &CpuGroup,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
@@ -1192,7 +1203,14 @@ impl BootIdleRuntime {
 
         self.wait_while_no_need_resched()?;
         self.observe_need_resched()?;
-        self.schedule_if_need_resched(scheduler, cpu_group, local_interrupt, current_task_slot)?;
+        self.schedule_if_need_resched(
+            scheduler,
+            cpu_group,
+            kernel_init_task,
+            kthreadd_task,
+            local_interrupt,
+            current_task_slot,
+        )?;
         self.idle_cycle_committed = true;
         self.secondary_cpus_not_started = true;
         self.real_task_switch_deferred = true;
@@ -1234,6 +1252,8 @@ impl BootIdleRuntime {
         &mut self,
         scheduler: &mut Scheduler,
         cpu_group: &CpuGroup,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
@@ -1250,7 +1270,13 @@ impl BootIdleRuntime {
         }
 
         self.idle_schedule_requested = true;
-        scheduler.schedule_idle(cpu_group, local_interrupt, current_task_slot)?;
+        scheduler.schedule_idle(
+            cpu_group,
+            kernel_init_task,
+            kthreadd_task,
+            local_interrupt,
+            current_task_slot,
+        )?;
         self.idle_schedule_returned = true;
         self.need_resched_drained = true;
         self.idle_loop_continues = true;

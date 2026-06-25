@@ -6,7 +6,7 @@ use super::{
     init_mm::InitMm,
     init_task::InitTask,
     per_cpu_storage::PerCpuStorage,
-    rest_init::KernelInitTask,
+    rest_init::{KernelInitTask, KthreaddTask},
     state::{
         failed_condition, EventError, EventErrorCode, EventResult, Lifecycle, LifecycleEvent, State,
     },
@@ -530,6 +530,8 @@ impl Scheduler {
     pub fn schedule(
         &mut self,
         cpu_group: &CpuGroup,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
@@ -542,6 +544,7 @@ impl Scheduler {
                 current_task_slot.current(),
                 CurrentTaskRef::BootIdle
                     | CurrentTaskRef::KernelInit
+                    | CurrentTaskRef::Kthreadd
                     | CurrentTaskRef::SmokeScheduler
                     | CurrentTaskRef::SmokeMutex
                     | CurrentTaskRef::SmokeRwsem
@@ -559,7 +562,12 @@ impl Scheduler {
         let prev_ref = current_task_slot.current();
 
         local_interrupt.save_and_disable()?;
-        let current_rq = self.resolve_current_runqueue_ref(cpu_group, prev_ref)?;
+        let current_rq = self.resolve_current_runqueue_ref(
+            cpu_group,
+            kernel_init_task,
+            kthreadd_task,
+            prev_ref,
+        )?;
         let next_ref = self.pick_next_task(current_rq, prev_ref)?;
         self.switch_to(prev_ref, next_ref, current_task_slot)?;
         self.schedule_passes = self.schedule_passes.wrapping_add(1);
@@ -579,6 +587,8 @@ impl Scheduler {
     pub fn schedule_idle(
         &mut self,
         cpu_group: &CpuGroup,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
@@ -590,7 +600,13 @@ impl Scheduler {
             return Err(self.failed_schedule_condition());
         }
 
-        self.schedule(cpu_group, local_interrupt, current_task_slot)?;
+        self.schedule(
+            cpu_group,
+            kernel_init_task,
+            kthreadd_task,
+            local_interrupt,
+            current_task_slot,
+        )?;
         self.idle_schedule_passes = self.idle_schedule_passes.wrapping_add(1);
         self.idle_schedule_returned_passes = self.idle_schedule_returned_passes.wrapping_add(1);
         if current_task_slot.current_is_boot_idle() {
@@ -602,31 +618,43 @@ impl Scheduler {
     fn resolve_current_runqueue_ref(
         &mut self,
         cpu_group: &CpuGroup,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
         current_task_ref: CurrentTaskRef,
     ) -> Result<CurrentRunQueueRef, EventError> {
-        if !matches!(
-            current_task_ref,
-            CurrentTaskRef::BootIdle
-                | CurrentTaskRef::KernelInit
-                | CurrentTaskRef::SmokeScheduler
-                | CurrentTaskRef::SmokeMutex
-                | CurrentTaskRef::SmokeRwsem
-                | CurrentTaskRef::SmokeRwLock
-        ) {
-            return Err(self.failed_schedule_condition());
-        }
-
-        let Some(runqueue_ref) = self.resolve_boot_runqueue_ref(cpu_group) else {
+        let Some(cpu_id) =
+            self.current_task_cpu_id(current_task_ref, kernel_init_task, kthreadd_task)
+        else {
             return Err(self.failed_schedule_condition());
         };
-        if self.boot_idle_task.cpu_id() != runqueue_ref.cpu_id()
-            || self.boot_runqueue.cpu_id() != runqueue_ref.cpu_id()
-        {
+
+        let Some(runqueue_ref) = self.resolve_runqueue_ref_for_cpu(cpu_group, cpu_id) else {
+            return Err(self.failed_schedule_condition());
+        };
+        if cpu_id != runqueue_ref.cpu_id() {
             return Err(self.failed_schedule_condition());
         }
 
         self.current_runqueue_resolve_passes = self.current_runqueue_resolve_passes.wrapping_add(1);
         Ok(runqueue_ref)
+    }
+
+    fn current_task_cpu_id(
+        &self,
+        current_task_ref: CurrentTaskRef,
+        kernel_init_task: &KernelInitTask,
+        kthreadd_task: &KthreaddTask,
+    ) -> Option<usize> {
+        match current_task_ref {
+            CurrentTaskRef::BootIdle => Some(self.boot_idle_task.cpu_id()),
+            CurrentTaskRef::KernelInit => Some(kernel_init_task.cpu_id()),
+            CurrentTaskRef::Kthreadd => Some(kthreadd_task.cpu_id()),
+            CurrentTaskRef::SmokeScheduler => Some(self.smoke_scheduler_task.cpu_id()),
+            CurrentTaskRef::SmokeMutex => Some(self.smoke_mutex_task.cpu_id()),
+            CurrentTaskRef::SmokeRwsem => Some(self.smoke_rwsem_task.cpu_id()),
+            CurrentTaskRef::SmokeRwLock => Some(self.smoke_rwlock_task.cpu_id()),
+            CurrentTaskRef::None => None,
+        }
     }
 
     fn pick_next_task(
@@ -1034,7 +1062,12 @@ impl Scheduler {
             return Err(self.failed_enable_condition());
         }
 
-        let Some(runqueue_ref) = self.resolve_boot_runqueue_ref(cpu_group) else {
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return Err(self.failed_enable_condition());
+        };
+        let Some(runqueue_ref) =
+            self.resolve_runqueue_ref_for_cpu(cpu_group, boot_cpu.logical_id())
+        else {
             return Err(self.failed_enable_condition());
         };
         self.selected_runqueue_task_id = task_id;
@@ -1073,16 +1106,21 @@ impl Scheduler {
         self.boot_runqueue.enqueue_task_ref(runqueue_ref, task_ref)
     }
 
-    fn resolve_boot_runqueue_ref(&self, cpu_group: &CpuGroup) -> Option<CurrentRunQueueRef> {
-        let boot_cpu = cpu_group.boot_cpu()?;
-        let runqueue = self.cpu_runqueue(boot_cpu.logical_id())?;
+    fn resolve_runqueue_ref_for_cpu(
+        &self,
+        cpu_group: &CpuGroup,
+        cpu_id: usize,
+    ) -> Option<CurrentRunQueueRef> {
+        let cpu = cpu_group.cpu(cpu_id)?;
+        let runqueue = self.cpu_runqueue(cpu_id)?;
         if cpu_group.state() == State::Ready
-            && boot_cpu.cpu_ref().is_boot_cpu()
+            && cpu_group.possible_contains(cpu.cpu_ref())
+            && self.default_root_domain.covers_cpu_ref(cpu.cpu_ref())
             && runqueue.state() == State::Ready
             && runqueue.is_boot_backed()
-            && runqueue.cpu_ref() == boot_cpu.cpu_ref()
-            && runqueue.cpu_id() == boot_cpu.logical_id()
-            && runqueue.cpu_hartid() == boot_cpu.hartid()
+            && runqueue.cpu_ref() == cpu.cpu_ref()
+            && runqueue.cpu_id() == cpu.logical_id()
+            && runqueue.cpu_hartid() == cpu.hartid()
             && self.boot_runqueue_matches_metadata()
         {
             Some(CurrentRunQueueRef::boot(runqueue.cpu_id()))
