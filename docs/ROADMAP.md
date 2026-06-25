@@ -34,7 +34,7 @@
 
 启动阶段逐项审计时，并发/同步控制必须作为固定检查面覆盖：本地中断开关、抢占开关、自旋锁、Mutex、读写锁、RCU、CPU bring-up 同步量、内存/地址转换同步和 TLB/cache flush 边界都要明确判断是否已由 `spec/model` 表达；若 model 已表达但实现映射不清，再修订 `spec/coding` 或生成约束。`impl/` 只作为生成结果和 Linux 对照样本，发现偏差时默认先修规格。
 
-启动子阶段的完成口径统一按 `RestInitPhase` 当前做法执行：先对照 Linux 6.12.37 明确子阶段调用边界和配置裁剪，重点列出锁原语、同步原语、上下文边界、内存顺序和 deferred/trimmed 项；再补齐 `spec/model` 与 `spec/coding`；最后按规格补齐 `impl/arceos_ex`、checkpoint/KUnit/smoke 观测，并执行完整验证。已有完成项保留其当前状态；只有发现某阶段实际只做了最小闭环或局部补强时，才重新标记为待补审核。
+启动子阶段的完成口径统一按 `RestInitPhase` 当前做法执行：先对照 Linux 6.12.37 明确子阶段调用边界和配置裁剪，重点列出锁原语、同步原语、上下文边界、内存顺序和 deferred/trimmed 项；再补齐 `spec/model` 与 `spec/coding`；最后按规格补齐 `impl/arceos_ex`、checkpoint/KUnit/smoke 观测，并执行完整验证。已有完成项保留其当前状态；只有发现某阶段实际只做了最小闭环或局部补强时，才重新标记为待补审核。审核过程中的分组只作为分析结构，不能直接升级为正式 phase/subphase；新增或细分正式子阶段前必须先取得用户确认。
 
 ### 已完成当前轮：RestInitPhase 三个子阶段规格/实现补齐
 
