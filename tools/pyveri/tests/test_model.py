@@ -382,6 +382,103 @@ class ModelBuilderTests(unittest.TestCase):
             )
         )
 
+    def test_rejects_context_guard_unpaired_enter_boundary(self) -> None:
+        document = parse_text(
+            """
+            type LocalInterruptControl {
+                processes {
+                    Transition::Enable {
+                    }
+                }
+            }
+
+            context BadContext: Context {
+                guard {
+                    entered_by {
+                        BootCpuLocalInterrupt.Transition::Enable;
+                    }
+                }
+
+                obj_refs {
+                    BootCpuLocalInterrupt;
+                }
+            }
+
+            object BootCpuLocalInterrupt: LocalInterruptControl {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "context guard on BadContext must pair entered_by with exited_by"
+                in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
+    def test_rejects_context_guard_boundary_and_holds_mix(self) -> None:
+        document = parse_text(
+            """
+            type PreemptionControl {
+                processes {
+                    Transition::Disable {
+                    }
+
+                    Transition::Enable {
+                    }
+                }
+            }
+
+            context BadContext: Context {
+                guard {
+                    entered_by {
+                        BootPreemption.Transition::Disable;
+                    }
+
+                    exited_by {
+                        BootPreemption.Transition::Enable;
+                    }
+
+                    holds {
+                        preemption: disabled;
+                    }
+                }
+
+                obj_refs {
+                    BootPreemption;
+                }
+            }
+
+            object BootPreemption: PreemptionControl {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "context guard on BadContext must not mix entered_by/exited_by with holds"
+                in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
     def test_rejects_within_boundary_for_non_context_lock(self) -> None:
         document = parse_text(
             """

@@ -15,25 +15,6 @@
  * task concurrency and SMP concurrency remain closed or deferred.
  */
 
-context LocalIrqEnableContext: Context {
-    /*
-     * This context is the isolated local_irq_enable() boundary. It does not
-     * cover the preceding IRQ/time init body and opens only the boot CPU local
-     * interrupt gate.
-     */
-    guard {
-        entered_by {
-            InterruptStream.Transition::Enable;
-        }
-    }
-
-    obj_refs {
-        LocalIrqEnablePhase;
-        InterruptStream;
-        BootCpuLocalInterrupt;
-    }
-}
-
 object LocalIrqEnablePhase: PhaseObject {
     initial_state: State::Base;
     parent: InterruptPhase;
@@ -61,21 +42,12 @@ object LocalIrqEnablePhase: PhaseObject {
                     early_boot_irqs_disabled_true();
                 }
 
-                within LocalIrqEnableContext {
-                    drives {
-                        InterruptStream.Transition::Enable;
-                    }
-
-                    ensures {
-                        local_irq_enable_context_used(LocalIrqEnablePhase);
-                        boot_cpu_local_irq_enabled();
-                        early_boot_irqs_disabled_false();
-                    }
+                drives {
+                    InterruptStream.Transition::Enable;
                 }
 
                 ensures {
                     local_irq_enable_phase_ready(LocalIrqEnablePhase);
-                    local_irq_enable_context_used(LocalIrqEnablePhase);
                     interrupt_concurrency_open_for_boot_cpu();
                     boot_cpu_local_irq_enabled();
                     early_boot_irqs_disabled_false();
@@ -99,7 +71,6 @@ object LocalIrqEnablePhase: PhaseObject {
             IrqTimeInitPhase.state == State::Ready;
             InterruptStream.state == State::Online;
             local_irq_enable_phase_ready(LocalIrqEnablePhase);
-            local_irq_enable_context_used(LocalIrqEnablePhase);
             interrupt_concurrency_open_for_boot_cpu();
             boot_cpu_local_irq_enabled();
             early_boot_irqs_disabled_false();

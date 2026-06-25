@@ -347,12 +347,6 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
         exited_by {
             KernelInitTaskPiLock.Transition::UnlockIrqRestore;
         }
-
-        holds {
-            local_interrupts: disabled;
-            preemption: disabled;
-            voluntary_switching: disabled;
-        }
     }
 
     obj_refs: {
@@ -366,13 +360,17 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
 规则：
 
 - `guard.lock_ref` 可以引用一个 `lock` 声明或可作为同步实例的对象；具体同步语义由该引用目标的类型和边界事件推导。
+- `guard` 必须采用两种形态之一：运行时边界形态声明成对的
+  `guard.entered_by` 和 `guard.exited_by`；天然上下文形态只声明
+  `guard.holds`。不得只声明单侧边界，也不得把 `entered_by`/`exited_by`
+  与 `holds` 混写在同一个 guard 中。
 - `guard.entered_by` 和 `guard.exited_by` 声明进入和退出上下文边界事件。
 - 对非锁 guard，`entered_by`/`exited_by` 声明对应控制对象的边界事件；这些边界事件是 guard 行为，不写入 `within` 内部的 `drives`。
 - 对阶段边界或天然上下文 guard，`entered_by`/`exited_by` 可以不存在；`within` 的词法范围提供边界。
-- `guard.holds` 声明该 guard 在作用域内明确保持的属性；未声明的维度表示该 guard 不作保证，在 Effective Context 叠加时保持中性。
+- `guard.holds` 声明天然上下文在作用域内明确保持的属性；未声明的维度表示该 guard 不作保证，在 Effective Context 叠加时保持中性。
 - `ResourceExclusiveContext.obj_refs` 是受保护对象引用集合，至少包含一个对象；
   普通 `Context` 可以省略 `obj_refs`，省略时不作为对象驱动白名单。上下文不拥有这些对象。
-- `guard.holds` 的正式写法是“名词或名词短语 key + 状态形容词 value”：
+- 纯 `guard.holds` 的正式写法是“名词或名词短语 key + 状态形容词 value”：
   `local_interrupts: enabled|disabled`、`preemption: enabled|disabled`、
   `voluntary_switching: enabled|disabled`、`cpu_concurrency: single|multi`、
   `task_concurrency: single|multi`。旧 `true|false` 只作为迁移期兼容输入。
@@ -478,8 +476,10 @@ guard 推导出的 context contribution 叠加为新的 Effective Context。
 Effective Context 决定当前流能访问哪些对象、能获得哪些层级的对象句柄，
 以及能否主动切换、能否被抢占、本地中断入口是否关闭等运行约束。
 
-源规格应优先声明 `guard`、`guard.holds` 和 `obj_refs`，由 guard 边界和引用目标类型
-推导该 context 对 Effective Context 的贡献。`effects` 是工具内部可用于检查、
+源规格应优先声明 `guard` 和 `obj_refs`：运行时 guard 通过成对的
+`entered_by`/`exited_by` 声明边界，由边界事件和引用目标类型推导该 context
+对 Effective Context 的贡献；天然上下文 guard 通过纯 `holds` 声明阶段或词法
+范围内已经成立的事实。`effects` 是工具内部可用于检查、
 渲染或调试的归一化结果，不是 formal source 中必须人工重复维护的第二套事实。
 当前需要表达和推导的最小维度包括：
 
@@ -494,8 +494,8 @@ Effective Context 决定当前流能访问哪些对象、能获得哪些层级�
 `handle_level` 是后续要加入的 effect 维度，用于表达当前作用域对对象可见的
 句柄层级或 capability；首轮工具实现先不推导句柄层级。
 
-`guard.holds` 只应声明该 guard 明确保证的事实。某个维度如果不由当前
-guard 改变或保证，就保持缺省；缺省不是 `true` 或 `false`，而是
+纯 `guard.holds` 只应声明该天然上下文明确保证的事实。某个维度如果不由当前
+guard 保证，就保持缺省；缺省不是 `true` 或 `false`，而是
 neutral/inherited，表示该 context contribution 对该维度不作保证，叠加时
 不改变外层已经存在的约束，也不能凭空生成新的证明能力。
 

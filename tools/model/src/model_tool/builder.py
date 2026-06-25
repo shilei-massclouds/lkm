@@ -548,9 +548,38 @@ def _check_context_guard_references(
     guard = context.guard
     if guard is None:
         return
-    if guard.lock_ref is None:
+    has_entered_by = bool(guard.entered_by)
+    has_exited_by = bool(guard.exited_by)
+    has_holds = bool(guard.holds)
+    if has_entered_by != has_exited_by:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"context guard on {context.name} must pair entered_by with exited_by",
+                guard.span,
+            )
+        )
+    if has_entered_by and has_exited_by and has_holds:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"context guard on {context.name} must not mix entered_by/exited_by with holds",
+                guard.span,
+            )
+        )
+    if not has_entered_by and not has_exited_by and not has_holds:
+        diagnostics.append(
+            Diagnostic(
+                Severity.ERROR,
+                f"context guard on {context.name} must declare paired entered_by/exited_by or holds",
+                guard.span,
+            )
+        )
+    if guard.lock_ref is None and (has_entered_by or has_exited_by):
         _check_event_blocks(model, guard.entered_by, diagnostics)
         _check_event_blocks(model, guard.exited_by, diagnostics)
+        return
+    if guard.lock_ref is None:
         return
     elif guard.lock_ref != context.lock_ref:
         diagnostics.append(

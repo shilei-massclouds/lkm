@@ -893,16 +893,6 @@ class ModelToolTests(unittest.TestCase):
                 }
             }
 
-            type PreemptionControl {
-                processes {
-                    Transition::Disable {
-                    }
-
-                    Transition::Enable {
-                    }
-                }
-            }
-
             lock OuterLock: RawSpinLock;
 
             context OuterContext: ResourceExclusiveContext {
@@ -925,21 +915,9 @@ class ModelToolTests(unittest.TestCase):
 
             context InnerPreemptContext: Context {
                 guard {
-                    entered_by {
-                        TaskPreemption.Transition::Disable;
-                    }
-
-                    exited_by {
-                        TaskPreemption.Transition::Enable;
-                    }
-
                     holds {
                         local_interrupts: enabled;
                     }
-                }
-
-                obj_refs {
-                    TaskPreemption;
                 }
             }
 
@@ -961,12 +939,6 @@ class ModelToolTests(unittest.TestCase):
                 }
             }
 
-            object TaskPreemption: PreemptionControl {
-                initial_state: State::Base;
-
-                state State::Base {
-                }
-            }
         """
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1052,6 +1024,109 @@ class ModelToolTests(unittest.TestCase):
                 exit_code = model_main([str(ast), "-o", str(model)])
 
             self.assertEqual(exit_code, 0, stderr.getvalue())
+
+    def test_context_guard_rejects_unpaired_enter_boundary(self) -> None:
+        source = """
+            type LocalInterruptControl {
+                processes {
+                    Transition::Enable {
+                    }
+                }
+            }
+
+            context BadContext: Context {
+                guard {
+                    entered_by {
+                        BootCpuLocalInterrupt.Transition::Enable;
+                    }
+                }
+
+                obj_refs {
+                    BootCpuLocalInterrupt;
+                }
+            }
+
+            object BootCpuLocalInterrupt: LocalInterruptControl {
+                initial_state: State::Base;
+
+                state State::Base {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "bad-context-enter-only.spec"
+            ast = Path(tmp) / "bad-context-enter-only.ast.json"
+            model = Path(tmp) / "bad-context-enter-only.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "context guard on BadContext must pair entered_by with exited_by",
+                stderr.getvalue(),
+            )
+
+    def test_context_guard_rejects_boundary_and_holds_mix(self) -> None:
+        source = """
+            type PreemptionControl {
+                processes {
+                    Transition::Disable {
+                    }
+
+                    Transition::Enable {
+                    }
+                }
+            }
+
+            context BadContext: Context {
+                guard {
+                    entered_by {
+                        BootPreemption.Transition::Disable;
+                    }
+
+                    exited_by {
+                        BootPreemption.Transition::Enable;
+                    }
+
+                    holds {
+                        preemption: disabled;
+                    }
+                }
+
+                obj_refs {
+                    BootPreemption;
+                }
+            }
+
+            object BootPreemption: PreemptionControl {
+                initial_state: State::Base;
+
+                state State::Base {
+                }
+            }
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = Path(tmp) / "bad-context-boundary-holds.spec"
+            ast = Path(tmp) / "bad-context-boundary-holds.ast.json"
+            model = Path(tmp) / "bad-context-boundary-holds.model.json"
+            spec.write_text(source, encoding="utf-8")
+
+            self.assertEqual(parse_main([str(spec), "-o", str(ast)]), 0)
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                exit_code = model_main([str(ast), "-o", str(model)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn(
+                "context guard on BadContext must not mix entered_by/exited_by with holds",
+                stderr.getvalue(),
+            )
 
     def test_phase_boundary_guard_without_effects_is_valid(self) -> None:
         source = """
