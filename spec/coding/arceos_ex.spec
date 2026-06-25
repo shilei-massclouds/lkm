@@ -2362,10 +2362,16 @@ type ArceosExRestInitCodingMust {
          * must receive enough CpuGroup context to validate the same formal
          * boot CPU-owned scheduler view instead of using BootRunQueue state as
          * an implicit scheduler-ready shortcut.
+         * Smoke tests that assert CPU-owned RunQueue/IdleTask functional facts
+         * must prefer CpuOwnedSchedulerView/CpuIdleTaskView observations. A
+         * smoke test may compare against Scheduler.boot_runqueue() or
+         * Scheduler.boot_idle_task() only when the comparison is explicitly a
+         * transitional storage parity check.
          */
         arceos_ex_must_expose_boot_cpu_owned_scheduler_view();
         arceos_ex_must_observe_rest_init_runqueue_facts_through_cpu_view();
         arceos_ex_must_validate_task_creation_through_cpu_owned_scheduler_view();
+        arceos_ex_must_observe_smoke_scheduler_facts_through_cpu_view();
 
         /*
          * Transitional lowering:

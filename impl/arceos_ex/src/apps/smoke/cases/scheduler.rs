@@ -6,6 +6,12 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
+    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    else {
+        printk::write_str("boot CPU scheduler view missing\n");
+        return SmokeResult::Failed;
+    };
+    let boot_idle_task = boot_scheduler_view.idle_task();
 
     if ctx.scheduler.state() != State::Online || !ctx.scheduler.scheduler_running() {
         printk::write_str("scheduler is not online\n");
@@ -53,24 +59,10 @@ pub fn run() -> SmokeResult {
         || !ctx
             .scheduler
             .default_root_domain()
-            .covers_cpu_ref(ctx.scheduler.boot_runqueue().cpu_ref())
-        || !ctx
-            .scheduler
-            .boot_idle_task()
-            .thread_context()
-            .core_register_set()
-        || ctx
-            .scheduler
-            .boot_idle_task()
-            .thread_context()
-            .core_saved_count()
-            == 0
-        || ctx
-            .scheduler
-            .boot_idle_task()
-            .thread_context()
-            .core_restored_count()
-            == 0
+            .covers_cpu_ref(boot_scheduler_view.runqueue().cpu_ref())
+        || !boot_idle_task.thread_context_core_register_set()
+        || boot_idle_task.thread_context_core_saved_count() == 0
+        || boot_idle_task.thread_context_core_restored_count() == 0
         || ctx.scheduler.idle_schedule_passes() == 0
         || ctx.scheduler.idle_schedule_returned_passes() != ctx.scheduler.idle_schedule_passes()
         || ctx.scheduler.idle_schedule_identity_passes() != 0
@@ -90,8 +82,8 @@ pub fn run() -> SmokeResult {
         ctx.scheduler.schedule_passes(),
         ctx.scheduler.switch_to_passes(),
         ctx.scheduler.idle_schedule_passes(),
-        ctx.scheduler.boot_runqueue().cpu_id(),
-        ctx.scheduler.boot_idle_task().task_id()
+        boot_scheduler_view.runqueue().cpu_id(),
+        boot_idle_task.task_id()
     ));
     SmokeResult::Passed
 }
@@ -147,8 +139,8 @@ fn scheduler_possible_runqueues_match_cpu_group() -> bool {
         }
         if logical_id == 0 {
             if !runqueue.is_boot_backed()
-                || runqueue.cpu_ref() != ctx.scheduler.boot_runqueue().cpu_ref()
-                || runqueue.cpu_hartid() != ctx.scheduler.boot_runqueue().cpu_hartid()
+                || runqueue.cpu_ref() != cpu.cpu_ref()
+                || runqueue.cpu_hartid() != cpu.hartid()
             {
                 return false;
             }

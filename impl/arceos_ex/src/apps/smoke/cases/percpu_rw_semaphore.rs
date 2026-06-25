@@ -400,8 +400,11 @@ impl SmokeScenario for CooperativeWriterScenario {
             "smoke rwsem task dequeued",
             !context()
                 .scheduler
-                .boot_runqueue()
-                .contains_task(context().scheduler.smoke_rwsem_task().task_id()),
+                .boot_cpu_owned_scheduler_view(&context().cpu_group)
+                .map(|view| {
+                    view.runqueue_contains_task_id(context().scheduler.smoke_rwsem_task().task_id())
+                })
+                .unwrap_or(false),
         );
     }
 

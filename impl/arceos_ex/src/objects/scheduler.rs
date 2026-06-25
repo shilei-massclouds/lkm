@@ -141,10 +141,6 @@ impl Scheduler {
         &self.boot_runqueue
     }
 
-    pub const fn boot_idle_task(&self) -> &BootIdleTask {
-        &self.boot_idle_task
-    }
-
     pub const fn boot_idle_preemption(&self) -> &PreemptionControl {
         &self.boot_idle_preemption
     }
@@ -1539,6 +1535,9 @@ pub struct CpuIdleTaskView {
     uses_current_init_task: bool,
     lazy_tlb_mm_ready: bool,
     no_set_affinity: bool,
+    thread_context_core_register_set: bool,
+    thread_context_core_saved_count: usize,
+    thread_context_core_restored_count: usize,
 }
 
 impl CpuIdleTaskView {
@@ -1568,6 +1567,18 @@ impl CpuIdleTaskView {
 
     pub const fn no_set_affinity(self) -> bool {
         self.no_set_affinity
+    }
+
+    pub const fn thread_context_core_register_set(self) -> bool {
+        self.thread_context_core_register_set
+    }
+
+    pub const fn thread_context_core_saved_count(self) -> usize {
+        self.thread_context_core_saved_count
+    }
+
+    pub const fn thread_context_core_restored_count(self) -> usize {
+        self.thread_context_core_restored_count
     }
 }
 
@@ -2142,10 +2153,6 @@ impl BootIdleTask {
         self.cpu.cpu_id()
     }
 
-    pub const fn thread_context(&self) -> &TaskThreadContext {
-        &self.thread_context
-    }
-
     pub fn view(&self) -> Option<CpuIdleTaskView> {
         if self.lifecycle.state() != State::Ready
             || self.task_id == usize::MAX
@@ -2163,6 +2170,9 @@ impl BootIdleTask {
             uses_current_init_task: self.uses_current_init_task,
             lazy_tlb_mm_ready: self.lazy_tlb_mm_ready,
             no_set_affinity: self.no_set_affinity,
+            thread_context_core_register_set: self.thread_context.core_register_set(),
+            thread_context_core_saved_count: self.thread_context.core_saved_count(),
+            thread_context_core_restored_count: self.thread_context.core_restored_count(),
         })
     }
 

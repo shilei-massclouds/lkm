@@ -77,13 +77,21 @@ impl SmokeScenario for CooperativeSwitchScenario {
         );
         assertions.assert(
             "smoke task cpu",
-            ctx.scheduler.smoke_scheduler_task().cpu_id() == ctx.scheduler.boot_runqueue().cpu_id(),
+            ctx.scheduler.smoke_scheduler_task().cpu_id()
+                == ctx
+                    .scheduler
+                    .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+                    .map(|view| view.runqueue().cpu_id())
+                    .unwrap_or(usize::MAX),
         );
         assertions.assert(
             "smoke task enqueued",
             ctx.scheduler
-                .boot_runqueue()
-                .contains_task(ctx.scheduler.smoke_scheduler_task().task_id()),
+                .boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+                .map(|view| {
+                    view.runqueue_contains_task_id(ctx.scheduler.smoke_scheduler_task().task_id())
+                })
+                .unwrap_or(false),
         );
         assertions.assert(
             "smoke task yielded back",

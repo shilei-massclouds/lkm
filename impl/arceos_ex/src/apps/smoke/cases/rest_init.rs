@@ -15,6 +15,12 @@ pub fn run() -> SmokeResult {
         printk::write_str("boot CPU facts missing\n");
         return SmokeResult::Failed;
     };
+    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    else {
+        printk::write_str("boot CPU scheduler view missing\n");
+        return SmokeResult::Failed;
+    };
+    let boot_idle_task = boot_scheduler_view.idle_task();
 
     if !phases::up_multitask::rest_init::is_ready()
         || !phases::up_multitask::rest_init::dispatch_ready()
@@ -44,10 +50,7 @@ pub fn run() -> SmokeResult {
         || !ctx.kernel_init_task.enqueued()
         || ctx.kernel_init_task.cpu_id() != boot_cpu.logical_id()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
-        || !ctx
-            .scheduler
-            .boot_runqueue()
-            .contains_task(ctx.kernel_init_task.pid())
+        || !boot_scheduler_view.runqueue_contains_task_id(ctx.kernel_init_task.pid())
         || ctx.kernel_init_task_pi_lock.state() != State::Ready
         || ctx.kernel_init_task_pi_lock.locked()
         || ctx.kernel_init_task_pi_lock.irqsave_entered_count() == 0
@@ -81,10 +84,7 @@ pub fn run() -> SmokeResult {
         || !ctx.kthreadd_task.enqueued()
         || ctx.kthreadd_task.cpu_id() != boot_cpu.logical_id()
         || ctx.scheduler.selected_runqueue_task_id() != ctx.kthreadd_task.pid()
-        || !ctx
-            .scheduler
-            .boot_runqueue()
-            .contains_task(ctx.kthreadd_task.pid())
+        || !boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         || !ctx.kthreadd_task.global_ref_bound()
         || !ctx.kthreadd_task.provider_ready()
         || !ctx.kthreadd_task.schedule_loop_ready()
@@ -138,23 +138,9 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.identity_switch_passes() != 0
         || ctx.boot_cpu_current_task.switch_committed_count() == 0
         || !ctx.boot_cpu_current_task.current_is_kernel_init()
-        || !ctx
-            .scheduler
-            .boot_idle_task()
-            .thread_context()
-            .core_register_set()
-        || ctx
-            .scheduler
-            .boot_idle_task()
-            .thread_context()
-            .core_saved_count()
-            == 0
-        || ctx
-            .scheduler
-            .boot_idle_task()
-            .thread_context()
-            .core_restored_count()
-            == 0
+        || !boot_idle_task.thread_context_core_register_set()
+        || boot_idle_task.thread_context_core_saved_count() == 0
+        || boot_idle_task.thread_context_core_restored_count() == 0
         || !ctx.kernel_init_task.released_for_pre_smp_init()
     {
         printk::write_str("scheduler dispatch facts invalid\n");
