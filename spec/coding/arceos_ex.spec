@@ -2423,6 +2423,22 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_current_runqueue_ref_carry_resolved_cpu_id();
 
         /*
+         * RunQueueRef / CurrentRunQueueRef type split:
+         *
+         * Generated Rust must keep selected runqueue references separate from
+         * current-CPU runqueue references. Scheduler.Action::SelectRunQueue
+         * lowering must return a RunQueueRef value, not CurrentRunQueueRef.
+         * RestInit enqueue paths and smoke task enqueue/dequeue helpers must
+         * pass RunQueueRef into BootRunQueue enqueue/dequeue APIs. Only the
+         * schedule()/pick-next path may use CurrentRunQueueRef, after deriving
+         * it from CurrentTaskRef -> task CPU id -> CpuGroup.Cpu[id].RunQueue.
+         * Both reference types may currently carry the same boot CPU id in the
+         * UP path, but sharing the enum/type is not allowed because the object
+         * capabilities differ.
+         */
+        arceos_ex_must_split_selected_runqueue_ref_from_current_runqueue_ref();
+
+        /*
          * CurrentRunQueueRef API smoke:
          *
          * CurrentRunQueueRef/RunQueue ObjectApiBehavior smoke must exercise

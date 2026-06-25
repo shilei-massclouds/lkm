@@ -7,7 +7,7 @@ use crate::{
     objects::{
         cpu_control::CurrentTaskRef,
         rest_init::{KERNEL_INIT_PID, KTHREADD_PID},
-        scheduler::{BootRunQueue, CurrentRunQueueRef},
+        scheduler::{BootRunQueue, CurrentRunQueueRef, RunQueueRef},
         state::State,
     },
 };
@@ -49,16 +49,21 @@ impl CurrentRunQueueFixture {
         CurrentRunQueueRef::boot(self.runqueue.cpu_id())
     }
 
+    fn selected_ref(&self) -> RunQueueRef {
+        RunQueueRef::boot(self.runqueue.cpu_id())
+    }
+
     fn enqueue(
         &mut self,
         task_ref: CurrentTaskRef,
     ) -> Result<(), crate::objects::state::EventError> {
-        self.runqueue.enqueue_task_ref(self.current_ref(), task_ref)
+        self.runqueue
+            .enqueue_task_ref(self.selected_ref(), task_ref)
     }
 
     fn enqueue_with_ref(
         &mut self,
-        runqueue_ref: CurrentRunQueueRef,
+        runqueue_ref: RunQueueRef,
         task_ref: CurrentTaskRef,
     ) -> Result<(), crate::objects::state::EventError> {
         self.runqueue.enqueue_task_ref(runqueue_ref, task_ref)
@@ -284,10 +289,8 @@ impl SmokeScenario for InvalidTaskRefScenario {
         );
         assertions.assert_fail(
             "enqueue wrong cpu ref",
-            self.fixture.enqueue_with_ref(
-                CurrentRunQueueRef::boot(usize::MAX),
-                CurrentTaskRef::KernelInit,
-            ),
+            self.fixture
+                .enqueue_with_ref(RunQueueRef::boot(usize::MAX), CurrentTaskRef::KernelInit),
         );
         assertions.assert("still empty", self.fixture.runqueue.task_count() == 0);
     }

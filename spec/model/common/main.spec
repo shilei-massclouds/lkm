@@ -822,7 +822,10 @@ type Task: TaskObject {
  * between SelectRunQueue and EnqueueTask. The current UP rest_init path proves
  * selected_rq's CPU fact as BootCPURef, but schedule's CurrentRunQueueRef must be
  * derived from CurrentTaskRef -> task_cpu_ref_is(...) -> CpuGroup/runqueue
- * topology, not from CpuGroup.boot_cpu() as a primary source.
+ * topology, not from CpuGroup.boot_cpu() as a primary source. RunQueueRef is
+ * the selected/wakeup runqueue reference type; CurrentRunQueueRef remains a
+ * private current-CPU reference and must not be reused as SelectRunQueue's
+ * result or as the generic EnqueueTask receiver.
  */
 type SchedulerObject: TaskObject {
     processes {
