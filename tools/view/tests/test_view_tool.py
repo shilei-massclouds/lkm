@@ -642,6 +642,120 @@ class ViewToolTests(unittest.TestCase):
             )
         )
 
+    def test_trace_view_places_contexts_that_only_wrap_child_transitions(self) -> None:
+        view = build_trace_view(
+            {
+                "trace": [
+                    {
+                        "object": "InterruptPhase",
+                        "transition": "Setup",
+                        "source_state": "Base",
+                        "target_state": "Ready",
+                        "children": [
+                            {
+                                "object": "IrqTimeInitPhase",
+                                "transition": "Setup",
+                                "source_state": "Base",
+                                "target_state": "Ready",
+                                "children": [],
+                            },
+                            {
+                                "object": "LocalIrqEnablePhase",
+                                "transition": "Setup",
+                                "source_state": "Base",
+                                "target_state": "Ready",
+                                "children": [],
+                            },
+                            {
+                                "object": "IrqOpenPreparePhase",
+                                "transition": "Setup",
+                                "source_state": "Base",
+                                "target_state": "Ready",
+                                "children": [],
+                            },
+                            {
+                                "object": "ProcessPreparePhase",
+                                "transition": "Setup",
+                                "source_state": "Base",
+                                "target_state": "Ready",
+                                "children": [],
+                            },
+                        ],
+                    }
+                ],
+                "model": {
+                    "exclusive_contexts": {
+                        "BootPhaseContext": {
+                            "guard": {
+                                "holds": [
+                                    {
+                                        "body": (
+                                            "cpu_concurrency: single_cpu;"
+                                            " local_interrupts: disabled;"
+                                        )
+                                    }
+                                ]
+                            }
+                        },
+                        "BootPhaseLocalIrqEnabledContext": {
+                            "guard": {
+                                "holds": [
+                                    {
+                                        "body": (
+                                            "cpu_concurrency: single_cpu;"
+                                            " local_interrupts: enabled;"
+                                        )
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                },
+                "records": [
+                    {
+                        "object": "InterruptPhase",
+                        "transition": "Setup",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within BootPhaseContext",
+                    },
+                    {
+                        "object": "InterruptPhase",
+                        "transition": "Setup",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within BootPhaseContext exited",
+                    },
+                    {
+                        "object": "InterruptPhase",
+                        "transition": "Setup",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within BootPhaseLocalIrqEnabledContext",
+                    },
+                    {
+                        "object": "InterruptPhase",
+                        "transition": "Setup",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within BootPhaseLocalIrqEnabledContext exited",
+                    },
+                ],
+            }
+        )
+
+        cells = view.metadata["trace_cells"]
+        context_labels = [
+            cell.label for cell in cells if cell.kind == "context_span"
+        ]
+        context_action_labels = [
+            cell.label for cell in cells if cell.kind == "context_action"
+        ]
+
+        self.assertIn("BootPhaseContext", context_labels)
+        self.assertIn("BootPhaseLocalIrqEnabledContext", context_labels)
+        self.assertNotIn("", context_action_labels)
+
     def test_trace_view_limits_nested_context_action_depth(self) -> None:
         derive_data = {
             "trace": [

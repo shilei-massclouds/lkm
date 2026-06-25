@@ -241,6 +241,47 @@ def _context_records_by_transition(
     if not isinstance(records, list):
         return contexts
 
+    def add_context_marker(
+        key: tuple[str, str],
+        order: int,
+        entry: dict[str, object],
+        *,
+        marker: str,
+    ) -> None:
+        context_name = _active_context_name(entry)
+        if context_name is None:
+            return
+        item: dict[str, object] = {
+            "context": context_name,
+            "context_stack": tuple(
+                name
+                for name in (
+                    _active_context_name(active)
+                    for active in active_context.get(key, ())
+                )
+                if name is not None
+            ),
+            "order": order,
+            "marker": marker,
+        }
+        process_parent = entry.get("process_parent")
+        if isinstance(process_parent, str) and process_parent:
+            item["process_parent"] = process_parent
+            item["context_process_parent"] = process_parent
+        context_labels: dict[str, str] = {}
+        for active_name in _context_item_stack(item):
+            active_spec = context_specs.get(active_name)
+            if active_spec is not None:
+                context_labels[active_name] = _context_trace_label(
+                    active_name, active_spec
+                )
+        if context_labels:
+            item["context_labels"] = context_labels
+        context_spec = context_specs.get(context_name)
+        if context_spec is not None:
+            item["context_label"] = _context_trace_label(context_name, context_spec)
+        contexts.setdefault(key, []).append(item)
+
     for order, record in enumerate(records):
         if not isinstance(record, dict):
             continue
@@ -260,12 +301,12 @@ def _context_records_by_transition(
             and expression.startswith("within ")
             and not expression.endswith(" exited")
         ):
-            active_context.setdefault(key, []).append(
-                {
-                    "name": expression.removeprefix("within ").strip(),
-                    "process_parent": record.get("process_parent"),
-                }
-            )
+            entry = {
+                "name": expression.removeprefix("within ").strip(),
+                "process_parent": record.get("process_parent"),
+            }
+            active_context.setdefault(key, []).append(entry)
+            add_context_marker(key, order, entry, marker="enter")
             continue
         if (
             source_kind == "within"
@@ -275,6 +316,8 @@ def _context_records_by_transition(
         ):
             stack = active_context.get(key)
             if stack:
+                entry = stack[-1]
+                add_context_marker(key, order, entry, marker="exit")
                 stack.pop()
             if stack == []:
                 active_context.pop(key, None)
@@ -427,6 +470,7 @@ def _build_context_forest(
         stack = _context_item_stack(item)
         if not stack:
             continue
+        marker = item.get("marker")
 
         common = 0
         max_common = min(len(stack), len(open_nodes))
@@ -456,9 +500,13 @@ def _build_context_forest(
                 forest.append(node)
             open_nodes.append(node)
 
+        if marker == "exit":
+            open_nodes = open_nodes[:-1]
+            continue
+
         children = open_nodes[-1].setdefault("children", [])
-        if isinstance(children, list):
-            action_text = str(item.get("action", ""))
+        action_text = str(item.get("action", ""))
+        if isinstance(children, list) and action_text:
             children.append(
                 {
                     "kind": "action",

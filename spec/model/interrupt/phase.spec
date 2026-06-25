@@ -4,18 +4,33 @@
  * InterruptPhase starts when IRQ/time facilities begin setup. Its currently
  * expanded subphases are IrqTimeInitPhase, LocalIrqEnablePhase,
  * IrqOpenPreparePhase and ProcessPreparePhase. IrqTimeInitPhase keeps the
- * boot CPU interrupt gate closed so its setup body remains under the global
- * exclusive boot context. LocalIrqEnablePhase then covers the
- * local_irq_enable() boundary. IrqOpenPreparePhase covers the interrupt-open
- * late core/platform preparation boundary. ProcessPreparePhase prepares
- * PID/task/cred/VMA and security foundations before rest_init() creates the
- * first tasks.
+ * boot CPU interrupt gate closed inside BootPhaseContext.
+ * LocalIrqEnablePhase then covers the local_irq_enable() boundary without an
+ * outer phase context. IrqOpenPreparePhase and ProcessPreparePhase run in the
+ * corresponding boot-time local-IRQ-enabled context before rest_init()
+ * creates the first tasks.
  */
 
 include "irq-time-init/main.spec";
 include "local-irq-enable/main.spec";
 include "irq-open-prepare/main.spec";
 include "process-prepare/main.spec";
+
+context BootPhaseLocalIrqEnabledContext: Context {
+    /*
+     * This is the boot execution context after LocalIrqEnablePhase. It keeps
+     * BootPhaseContext's single-CPU/single-task/non-preemptible facts, but
+     * changes local_interrupts to enabled for the boot CPU.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: enabled;
+            preemption: disabled;
+        }
+    }
+}
 
 /*
  * InterruptPhase 表示中断期阶段对象。它负责推进当前模型已经展开的中断期子阶段。
@@ -39,11 +54,21 @@ object InterruptPhase: PhaseObject {
                     SchedInitPhase.state == State::Ready;
                 }
 
+                within BootPhaseContext {
+                    drives {
+                        IrqTimeInitPhase.Transition::Setup;
+                    }
+                }
+
                 drives {
-                    IrqTimeInitPhase.Transition::Setup;
                     LocalIrqEnablePhase.Transition::Setup;
-                    IrqOpenPreparePhase.Transition::Setup;
-                    ProcessPreparePhase.Transition::Setup;
+                }
+
+                within BootPhaseLocalIrqEnabledContext {
+                    drives {
+                        IrqOpenPreparePhase.Transition::Setup;
+                        ProcessPreparePhase.Transition::Setup;
+                    }
                 }
             }
         }
