@@ -144,9 +144,11 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
     crate::phases::interrupt::irq_open_prepare::is_ready()
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
+        && !ctx.interrupt_stream.early_boot_irqs_disabled()
         && ctx.boot_cpu_local_interrupt.state() == State::Ready
         && ctx.boot_cpu_local_interrupt.enabled()
         && csr::supervisor_interrupts_enabled()
+        && !ctx.cpu_group.smp_concurrency_open()
         && ctx.console.state() == State::Prepared
         && ctx.sched_clock.state() == State::Ready
         && ctx.delay_loop.state() == State::Ready

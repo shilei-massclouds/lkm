@@ -1814,7 +1814,7 @@ type ArceosExProcessPrepareCodingMust {
         /*
          * Model path:
          *
-         * ProcessPreparePhase is InterruptPhase subphase 3. Its formal model
+         * ProcessPreparePhase is InterruptPhase subphase 4. Its formal model
          * path is spec/model/interrupt/process-prepare/.
          */
         arceos_ex_must_process_prepare_model_path_under_interrupt_phase();

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="3740" viewBox="0 0 1280 3740" role="img" aria-labelledby="title desc">
   <title id="title">进程准备期对象构建时序</title>
-  <desc id="desc">展示 InterruptPhase 子阶段 3 在 Linux 6.12.37 default_config 下 start_kernel() 从 pid_idr_init() 到 kcsan_init() 的有效调用顺序。</desc>
+  <desc id="desc">展示 InterruptPhase 子阶段 4 在 Linux 6.12.37 default_config 下 start_kernel() 从 pid_idr_init() 到 kcsan_init() 的有效调用顺序。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }
@@ -28,7 +28,7 @@
 
   <rect x="0" y="0" width="1280" height="3740" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">进程准备期对象构建时序</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">InterruptPhase 子阶段 3：ProcessPreparePhase.setup() 到 rest_init() 前</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">InterruptPhase 子阶段 4：ProcessPreparePhase.setup() 到 rest_init() 前</text>
   <rect x="48" y="126" width="214" height="3550" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">进程准备期</text>
   <text x="155" y="188" text-anchor="middle" class="obj">ProcessPreparePhase</text>
@@ -55,7 +55,7 @@
   <g transform="translate(0 1556)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">16</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sec"/><text x="320" y="232" class="line1">SecurityCore.setup(): security_init()</text><text x="320" y="260" class="line2">配置 LSM 顺序/blob layout，并初始化 capability hooks</text></g>
   <g transform="translate(0 1656)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">17</text><rect x="292" y="204" width="876" height="84" rx="10" class="box trimmed"/><text x="320" y="232" class="line1">dbg_late_init(): trimmed/no-op</text><text x="320" y="260" class="line2">当前 CONFIG_KGDB=n，宏为空</text></g>
   <g transform="translate(0 1756)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">18</text><rect x="292" y="204" width="876" height="84" rx="10" class="box deferred"/><text x="320" y="232" class="line1">NetNamespace.setup(): net_ns_init() deferred</text><text x="320" y="260" class="line2">当前 NET_NS=y 有实质初始化；尾段批量暂不推进</text></g>
-  <g transform="translate(0 1856)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">19</text><rect x="292" y="204" width="876" height="84" rx="10" class="box deferred"/><text x="320" y="232" class="line1">VfsCore.setup(): vfs_caches_init() deferred</text><text x="320" y="260" class="line2">保留 VFS runtime cache 时序，用户态/VFS 路径后续展开</text></g>
+  <g transform="translate(0 1856)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">19</text><rect x="292" y="204" width="876" height="84" rx="10" class="box fs"/><text x="320" y="232" class="line1">VfsCore.setup(): vfs_caches_init()/mnt_init()</text><text x="320" y="260" class="line2">建立 VFS 最小表结构和 ramfs-backed 初始 rootfs mount</text></g>
   <g transform="translate(0 1956)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">20</text><rect x="292" y="204" width="876" height="84" rx="10" class="box deferred"/><text x="320" y="232" class="line1">PageCache.setup(): pagecache_init() deferred</text><text x="320" y="260" class="line2">保留 page cache 初始化时序，当前不推进到 Ready</text></g>
   <g transform="translate(0 2056)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">21</text><rect x="292" y="204" width="876" height="84" rx="10" class="box deferred"/><text x="320" y="232" class="line1">SignalCore.setup(): signals_init() deferred</text><text x="320" y="260" class="line2">sigqueue cache 后续再建；SignalCore 当前保持 Prepared</text></g>
   <g transform="translate(0 2156)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">22</text><rect x="292" y="204" width="876" height="84" rx="10" class="box deferred"/><text x="320" y="232" class="line1">SeqFileCore.setup(): seq_file_init() deferred</text><text x="320" y="260" class="line2">主要服务 procfs/debugfs 文本导出，当前暂不展开</text></g>
