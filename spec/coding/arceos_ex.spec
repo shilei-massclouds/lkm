@@ -2336,6 +2336,21 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_model_runqueue_and_idle_task_as_cpu_owned();
 
         /*
+         * CPU-owned scheduler view lowering:
+         *
+         * While BootRunQueue and BootIdleTask are still stored inside the
+         * Scheduler object, generated Rust must expose a formal boot CPU view
+         * of that storage. CpuOwnedSchedulerView is the public implementation
+         * surface for CpuGroup.Cpu[0].RunQueue and CpuGroup.Cpu[0].IdleTask;
+         * CpuIdleTaskView is the public idle-task half of that view. These
+         * views must be derived from CpuGroup.Cpu[0], BootRunQueue and
+         * BootIdleTask facts, must confirm BootRunQueue.curr/idle both point
+         * at BootIdleTask, and must reject mismatched CPU refs or hart ids.
+         * They are not test-only wrappers, and smoke must check them directly.
+         */
+        arceos_ex_must_expose_boot_cpu_owned_scheduler_view();
+
+        /*
          * Transitional lowering:
          *
          * The current Rust storage may temporarily keep boot_cpu and
@@ -2352,6 +2367,9 @@ type ArceosExRestInitCodingMust {
          * Smoke/checkpoint coverage must observe CpuGroup.Cpu[0] -> BootCPU,
          * boot CPU possible/present/online facts, secondary possible/present
          * but not-online facts, and unique logical-id/hartid boundaries.
+         * Scheduler smoke must also observe the formal CpuOwnedSchedulerView
+         * and CpuIdleTaskView rather than only comparing private
+         * Scheduler.boot_runqueue()/boot_idle_task() fields.
          */
         arceos_ex_must_cpu_group_smoke_cover_index_and_sets();
 
