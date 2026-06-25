@@ -2347,6 +2347,13 @@ type ArceosExRestInitCodingMust {
          * BootIdleTask facts, must confirm BootRunQueue.curr/idle both point
          * at BootIdleTask, and must reject mismatched CPU refs or hart ids.
          * They are not test-only wrappers, and smoke must check them directly.
+         * Core object implementations that only need the boot CPU-owned
+         * RunQueue/IdleTask facts must consume CpuOwnedSchedulerView instead
+         * of directly treating Scheduler.boot_runqueue() or
+         * Scheduler.boot_idle_task() as the formal ownership source. Direct
+         * accessors may remain as transitional storage/debug observation
+         * surfaces and for BootRunQueue/BootIdleTask-local APIs, but not as the
+         * primary readiness predicate in rest_init task setup/enable paths.
          */
         arceos_ex_must_expose_boot_cpu_owned_scheduler_view();
 

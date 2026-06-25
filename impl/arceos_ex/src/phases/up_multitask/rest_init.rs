@@ -54,6 +54,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.security_core,
         &ctx.init_task,
         &ctx.scheduler,
+        &ctx.cpu_group,
     )?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskReady, ctx);
     ctx.kernel_init_task_pi_lock.setup()?;
@@ -101,6 +102,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         &ctx.security_core,
         &ctx.init_task,
         &ctx.scheduler,
+        &ctx.cpu_group,
     )?;
     ctx.kthreadd_task_pi_lock
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;

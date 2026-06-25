@@ -162,12 +162,13 @@ impl KernelInitTask {
         security_core: &SecurityCore,
         init_task: &InitTask,
         scheduler: &Scheduler,
+        cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
             || task_creation_core.state() != State::Ready
             || root_pid_namespace.state() != State::Ready
             || scheduler.state() != State::Online
-            || scheduler.boot_runqueue().state() != State::Ready
+            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
         {
             return self.failed_setup();
         }
@@ -219,7 +220,7 @@ impl KernelInitTask {
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
-            || scheduler.boot_runqueue().state() != State::Ready
+            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
             || cpu_group.state() != State::Ready
             || current_cpu.state() != State::Online
             || local_interrupt.state() != State::Ready
@@ -496,12 +497,13 @@ impl KthreaddTask {
         security_core: &SecurityCore,
         init_task: &InitTask,
         scheduler: &Scheduler,
+        cpu_group: &CpuGroup,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
             || task_creation_core.state() != State::Ready
             || root_pid_namespace.state() != State::Ready
             || scheduler.state() != State::Online
-            || scheduler.boot_runqueue().state() != State::Ready
+            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
         {
             return self.failed_setup();
         }
@@ -552,7 +554,7 @@ impl KthreaddTask {
     ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
-            || scheduler.boot_runqueue().state() != State::Ready
+            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
             || cpu_group.state() != State::Ready
             || current_cpu.state() != State::Online
             || local_interrupt.state() != State::Ready
@@ -1089,7 +1091,7 @@ impl BootIdleRuntime {
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || scheduler.state() != State::Online
-            || scheduler.boot_idle_task().state() != State::Ready
+            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
             || kernel_init_task.state() != State::Online
             || !kernel_init_task.released_for_pre_smp_init()
             || kthreadd_task.state() != State::Online
@@ -1141,7 +1143,7 @@ impl BootIdleRuntime {
         if self.lifecycle.state() != State::Ready
             || !self.first_schedule_committed
             || scheduler.state() != State::Online
-            || scheduler.boot_idle_task().state() != State::Ready
+            || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
             || cpu_group.state() != State::Ready
             || cpu_group.boot_cpu_state() != State::Online
         {
