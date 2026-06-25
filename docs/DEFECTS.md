@@ -21,6 +21,8 @@
 - 新旧 `/sbin/init` 内容一致：size 为 `7640`，文件 SHA256 为 `7e0fc592f5c05873d853847391c09961e2acf672b230028ccdfa5c57f8dfdacc`。
 - 导出 rootfs 后比较，84 个普通文件 SHA256 一致，334 个 symlink 目标一致。
 - 显式使用旧 disk 运行也不是稳定失败；重新生成的新 disk 连续成功多次后仍出现过普通 `make run APP=user-boot` 失败。
+- 2026-06-25 在提交 `62ce523 use cpu owned runqueue refs` 后重新执行完整基线验证：`make build APP=smoke` 通过，`make test` summary 为 `overall total=77 pass=77 fail=0`，`make verify` 为 `0 obligation`，普通 `make run` 的 smoke 为 `53/53`。
+- 同日连续执行普通 `make run APP=user-boot` 30 次，其中 24 次成功输出 `user exit status=0`，5 次输出 `read user ELF failed`，1 次输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。粗略发生率为：`read user ELF failed` 约 16.7%，任意 user-boot 失败约 20%。本轮日志保存在 `/tmp/lkm-userboot-runs/run-01.log` 到 `/tmp/lkm-userboot-runs/run-30.log`，失败样本为 `run-11.log`、`run-12.log`、`run-13.log`、`run-14.log`、`run-17.log` 和 `run-18.log`。
 
 当前判断：
 
@@ -28,6 +30,7 @@
 - 更可能是普通 `user-boot` 路径中的时序敏感问题，候选方向包括 virtio-blk live read 的 completion polling、VFS/ext2 读路径错误传播不足，或启动后第一次用户态 payload 读取时的设备状态边界。
 - 需要重点保留一种并发/同步假设：该问题可能来自中断上下文与任务上下文之间的协作缺口。virtio-blk completion、virtqueue used ring 更新、IRQ handler、VFS/ext2 同步读路径之间都存在跨上下文状态传递；这类问题通常具有随机性，并且容易被 probe 输出、checkpoint handler 或额外日志改变时序后掩盖。
 - 当前 Linux 对照补缺口尚未完成全部锁和并发原语检查，因此不能只按轮询参数或 disk 生成问题处理。后续推进到 ext2/VFS、virtio-blk、virtio IRQ、block layer 或相关 guard/lock 规格阶段时，必须回顾本缺陷，看新增的并发控制规格和实现是否解释或消除该现象。
+- 2026-06-25 结论：本条暂时只作为测试现象积累，不在当前轮展开深入追踪；待并发机制、锁/guard、IRQ/task context 与内存顺序等回顾检查完善后，再把这些样本作为后续定位参考。
 
 下一步定位建议：
 
