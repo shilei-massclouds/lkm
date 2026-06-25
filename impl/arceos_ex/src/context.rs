@@ -87,6 +87,7 @@ use crate::objects::{
     runtime_core::{AsyncCoreDeferred, PadataCoreDeferred, RuntimeCoreBoundary},
     rwlock::RwLock,
     sbi::Sbi,
+    sched_init_trimmed::SchedInitTrimmedPaths,
     scheduler::Scheduler,
     smp_bringup::{
         CpuHotplugSyncSet, CpuStartProvider, SecondaryCpuOnlineAck, SecondaryCpuStartupAck,
@@ -181,6 +182,7 @@ pub struct Context {
     pub workqueue: Workqueue,
     pub softirq: Softirq,
     pub rcu_core: RcuCore,
+    pub sched_init_trimmed_paths: SchedInitTrimmedPaths,
 
     pub irq_controller: IrqController,
     pub riscv_intc: RiscvIntc,
@@ -373,6 +375,7 @@ impl Context {
             workqueue: Workqueue::new(),
             softirq: Softirq::new(),
             rcu_core: RcuCore::new(),
+            sched_init_trimmed_paths: SchedInitTrimmedPaths::new(),
             irq_controller: IrqController::new(),
             riscv_intc: RiscvIntc::new(),
             irqchip_init_table: IrqChipInitTable::new(),

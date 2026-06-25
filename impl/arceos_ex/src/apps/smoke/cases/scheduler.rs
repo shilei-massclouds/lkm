@@ -54,6 +54,24 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    if ctx.sched_init_trimmed_paths.state() != State::Ready
+        || !ctx.sched_init_trimmed_paths.poking_init_trimmed_noop()
+        || !ctx.sched_init_trimmed_paths.ftrace_init_trimmed_noop()
+        || !ctx
+            .sched_init_trimmed_paths
+            .ftrace_trimmed_because_mcount_record_disabled()
+        || !ctx
+            .sched_init_trimmed_paths
+            .context_tracking_init_trimmed_noop()
+        || !ctx
+            .sched_init_trimmed_paths
+            .context_tracking_trimmed_because_user_force_disabled()
+        || !ctx.sched_init_trimmed_paths.position_preserved()
+    {
+        printk::write_str("sched init trimmed path facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.schedule_passes() == 0
         || ctx.scheduler.current_runqueue_resolve_passes() == 0

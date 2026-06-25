@@ -23,6 +23,7 @@
 - 显式使用旧 disk 运行也不是稳定失败；重新生成的新 disk 连续成功多次后仍出现过普通 `make run APP=user-boot` 失败。
 - 2026-06-25 在提交 `62ce523 use cpu owned runqueue refs` 后重新执行完整基线验证：`make build APP=smoke` 通过，`make test` summary 为 `overall total=77 pass=77 fail=0`，`make verify` 为 `0 obligation`，普通 `make run` 的 smoke 为 `53/53`。
 - 同日连续执行普通 `make run APP=user-boot` 30 次，其中 24 次成功输出 `user exit status=0`，5 次输出 `read user ELF failed`，1 次输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。粗略发生率为：`read user ELF failed` 约 16.7%，任意 user-boot 失败约 20%。本轮日志保存在 `/tmp/lkm-userboot-runs/run-01.log` 到 `/tmp/lkm-userboot-runs/run-30.log`，失败样本为 `run-11.log`、`run-12.log`、`run-13.log`、`run-14.log`、`run-17.log` 和 `run-18.log`。
+- 同日推进 `SchedInitPhase` trimmed/no-op 边界时，完整验收中的普通 `make run APP=user-boot` 连续两次输出 `read user ELF failed`，第三次在同一构建和同一 disk 下成功输出 `user hello` / `user exit status=0`。同轮 `make verify`、`make verify REPORT=graph`、`make -C impl/arceos_ex build APP=smoke`、`make -C impl/arceos_ex run APP=smoke` 和普通 `make run` 均通过。
 
 当前判断：
 

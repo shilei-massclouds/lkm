@@ -1380,6 +1380,58 @@ object RcuCore: TaskObject {
 }
 
 /*
+ * SchedInitTrimmedPaths 保留当前 RISC-V64/default_config 下仍出现在
+ * mm_core_init() 后、early_irq_init() 前调用序列中的裁剪调用点。它只记录
+ * 当前配置确认为 no-op 的路径；Linux tracing 和 housekeeping 的非空责任
+ * 仍保留为 SchedInitPhase 的 deferred 边界。
+ */
+object SchedInitTrimmedPaths: KernelObject {
+    initial_state: State::Base;
+    parent: SchedInitPhase;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    Scheduler.state == State::Online;
+                    RcuCore.state == State::Ready;
+                }
+
+                ensures {
+                    sched_init_trimmed_paths_ready(SchedInitTrimmedPaths);
+                    sched_init_poking_init_trimmed_noop(SchedInitTrimmedPaths);
+                    sched_init_ftrace_init_trimmed_noop(SchedInitTrimmedPaths);
+                    sched_init_ftrace_trimmed_because_mcount_record_disabled(
+                        SchedInitTrimmedPaths
+                    );
+                    sched_init_context_tracking_init_trimmed_noop(SchedInitTrimmedPaths);
+                    sched_init_context_tracking_trimmed_because_user_force_disabled(
+                        SchedInitTrimmedPaths
+                    );
+                    sched_init_trimmed_paths_position_preserved(SchedInitTrimmedPaths);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            sched_init_trimmed_paths_ready(SchedInitTrimmedPaths);
+            sched_init_poking_init_trimmed_noop(SchedInitTrimmedPaths);
+            sched_init_ftrace_init_trimmed_noop(SchedInitTrimmedPaths);
+            sched_init_ftrace_trimmed_because_mcount_record_disabled(
+                SchedInitTrimmedPaths
+            );
+            sched_init_context_tracking_init_trimmed_noop(SchedInitTrimmedPaths);
+            sched_init_context_tracking_trimmed_because_user_force_disabled(
+                SchedInitTrimmedPaths
+            );
+            sched_init_trimmed_paths_position_preserved(SchedInitTrimmedPaths);
+        }
+    }
+}
+
+/*
  * TasksRcu 表示 rcu_init() 内 tasks_cblist_init_generic() 建立的 Tasks
  * RCU callback-list 壳。GP kthread 创建留给后续 rcu_init_tasks_generic()。
  */
@@ -1478,24 +1530,25 @@ object SchedInitPhase: PhaseObject {
                     Workqueue.Transition::Preset;
                     Softirq.Transition::Preset;
                     RcuCore.Transition::Setup;
+                    SchedInitTrimmedPaths.Transition::Setup;
                 }
 
                 ensures {
                     sched_init_ready(SchedInitPhase);
                     scheduler_schedule_smoke_ready(Scheduler);
+                    sched_init_trimmed_paths_ready(SchedInitTrimmedPaths);
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     context_is(SystemExclusive);
                 }
 
                 deferred {
-                    "ftrace_init()/early_trace_init()/trace_init() 暂缓：当前 .config 启用 FTRACE/TRACING，Linux tracing core 与项目 checkpoint trace 的关系后续单独收敛。";
+                    "early_trace_init()/trace_init() 暂缓：当前 .config 启用 FTRACE/TRACING，Linux tracing core 与项目 checkpoint trace 的关系后续单独收敛；ftrace_init() 当前因 CONFIG_FTRACE_MCOUNT_RECORD=n 已由 SchedInitTrimmedPaths 记录为 trimmed/no-op。";
                     "housekeeping_init() 暂缓：当前 .config 启用 CPU_ISOLATION，但 nohz_full 未启用；housekeeping/domain/cmdline mask 语义后续单独 formal。";
                     "SchedClass 细分暂缓：当前只保留调度类壳和 boot CPU runqueue 语义。";
                     "Workqueue.setup()/enable() 暂缓：worker kthread 创建和执行边界属于后续多任务/SMP 路径。";
                     "TasksRcu.setup() 暂缓：GP kthread 创建留给后续 rcu_init_tasks_generic()。";
-                    "context_tracking_init() 暂缓：当前 .config 启用 CONTEXT_TRACKING/CONTEXT_TRACKING_IDLE，但 USER_FORCE 未启用；idle/user/EQS 细节后续随 RCU/context tracking 展开。";
-                    "poking_init() 当前 RISC-V 路径未建立额外对象，保留为 checkpoint/no-op。";
+                    "context tracking idle/user/EQS 运行期细节后续随 RCU/context tracking 展开；本调用点的 context_tracking_init() 当前因 CONFIG_CONTEXT_TRACKING_USER_FORCE=n 已由 SchedInitTrimmedPaths 记录为 trimmed/no-op。";
                 }
             }
         }
@@ -1513,6 +1566,8 @@ object SchedInitPhase: PhaseObject {
             Softirq.state == State::Prepared;
             RcuCore.state == State::Ready;
             TasksRcu.state == State::Prepared;
+            SchedInitTrimmedPaths.state == State::Ready;
+            sched_init_trimmed_paths_ready(SchedInitTrimmedPaths);
             interrupt_concurrency_closed();
             task_concurrency_closed();
             context_is(SystemExclusive);

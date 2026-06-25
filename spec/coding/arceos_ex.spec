@@ -139,7 +139,7 @@ predicate arceos_ex_must_sched_init_workqueue_keep_worker_runtime_deferred() -> 
 predicate arceos_ex_must_sched_init_softirq_prepare_shell_only() -> bool;
 predicate arceos_ex_must_sched_init_rcu_register_rcu_softirq_explicitly() -> bool;
 predicate arceos_ex_must_sched_init_rcu_expose_tree_and_tasks_init_facts() -> bool;
-predicate arceos_ex_must_sched_init_trace_housekeeping_context_tracking_deferred_not_noop() -> bool;
+predicate arceos_ex_must_sched_init_trace_housekeeping_context_tracking_classify_by_config() -> bool;
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
@@ -2484,16 +2484,20 @@ type ArceosExRestInitCodingMust {
          * tasks_cblist_init_generic() per-flavor/per-CPU callback-list,
          * lock, work, and barrier-head facts. RCU GP kthreads, callback
          * execution and full RCU read-side/context-tracking semantics remain
-         * deferred. Since the active .config enables FTRACE/TRACING,
-         * CPU_ISOLATION and CONTEXT_TRACKING/CONTEXT_TRACKING_IDLE, the
-         * sched-init lowering must classify ftrace_init()/early_trace_init()/
-         * trace_init(), housekeeping_init() and context_tracking_init() as
-         * explicit deferred boundaries, not as no-op checkpoints.
+         * deferred. The active .config enables FTRACE/TRACING, CPU_ISOLATION
+         * and CONTEXT_TRACKING/CONTEXT_TRACKING_IDLE, but not
+         * CONFIG_FTRACE_MCOUNT_RECORD or CONFIG_CONTEXT_TRACKING_USER_FORCE.
+         * Therefore ftrace_init() and context_tracking_init() are
+         * trimmed/no-op call points for the current RISC-V64 target, while
+         * early_trace_init()/trace_init() and housekeeping_init() remain
+         * explicit deferred boundaries whose Linux responsibilities must not
+         * be collapsed into the project checkpoint trace or ignored as
+         * permanently absent.
          */
         arceos_ex_must_sched_init_softirq_prepare_shell_only();
         arceos_ex_must_sched_init_rcu_register_rcu_softirq_explicitly();
         arceos_ex_must_sched_init_rcu_expose_tree_and_tasks_init_facts();
-        arceos_ex_must_sched_init_trace_housekeeping_context_tracking_deferred_not_noop();
+        arceos_ex_must_sched_init_trace_housekeeping_context_tracking_classify_by_config();
 
         /*
          * CPU-owned RunQueue/IdleTask:

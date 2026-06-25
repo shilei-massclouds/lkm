@@ -2,6 +2,7 @@ use crate::{
     apps::smoke::SmokeResult,
     context::context,
     objects::{
+        block_device::BlockDeviceProvider,
         ext2::{
             EXT2_ALPINE_RELEASE_FILE_CONTENT, EXT2_ALPINE_RELEASE_FILE_NAME,
             EXT2_ALPINE_RELEASE_PATH, EXT2_MAX_BLOCK_SIZE, EXT2_NDIR_BLOCKS,
@@ -227,8 +228,7 @@ pub fn run() -> SmokeResult {
     ) {
         Ok(len)
             if len == EXT2_ALPINE_RELEASE_FILE_CONTENT.len()
-                && &buffer[..len] == EXT2_ALPINE_RELEASE_FILE_CONTENT
-                && ctx.ext2_filesystem.lookup_dirent().name() == EXT2_ALPINE_RELEASE_FILE_NAME => {}
+                && &buffer[..len] == EXT2_ALPINE_RELEASE_FILE_CONTENT => {}
         _ => {
             printk::write_str("rootfs direct ext2 read failed\n");
             return SmokeResult::Failed;
@@ -236,6 +236,14 @@ pub fn run() -> SmokeResult {
     }
     if ctx.vfs_core.path_walk_crossed_mount() {
         printk::write_str("rootfs direct read unexpectedly crossed mount\n");
+        return SmokeResult::Failed;
+    }
+    if !path_resolves_regular_file(
+        EXT2_ALPINE_RELEASE_PATH,
+        EXT2_ALPINE_RELEASE_FILE_NAME,
+        &mut provider,
+    ) {
+        printk::write_str("rootfs alpine-release path facts invalid\n");
         return SmokeResult::Failed;
     }
 
@@ -252,14 +260,15 @@ pub fn run() -> SmokeResult {
         TEMP_USER_INIT_PATH,
         init_buffer,
     ) {
-        Ok(len)
-            if len >= ELF_HEADER_LEN
-                && is_temp_user_init_elf(&init_buffer[..len])
-                && ctx.ext2_filesystem.lookup_dirent().name() == TEMP_USER_INIT_FILE_NAME => {}
+        Ok(len) if len >= ELF_HEADER_LEN && is_temp_user_init_elf(&init_buffer[..len]) => {}
         _ => {
             printk::write_str("rootfs temporary /sbin/init ELF read failed\n");
             return SmokeResult::Failed;
         }
+    }
+    if !path_resolves_regular_file(TEMP_USER_INIT_PATH, TEMP_USER_INIT_FILE_NAME, &mut provider) {
+        printk::write_str("rootfs temporary init path facts invalid\n");
+        return SmokeResult::Failed;
     }
 
     if ctx.integrity_keys_deferred.state() != State::Ready
@@ -279,6 +288,30 @@ pub fn run() -> SmokeResult {
 
     printk::write_str("rootfs next=finalize current_root=ext2 read=/etc/alpine-release init=elf\n");
     SmokeResult::Passed
+}
+
+fn path_resolves_regular_file<P: BlockDeviceProvider>(
+    path: &[u8],
+    file_name: &[u8],
+    provider: &mut P,
+) -> bool {
+    let ctx = context();
+    let Ok(dentry_ref) = ctx.vfs_core.walk_path(
+        &ctx.fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        provider,
+        path,
+    ) else {
+        return false;
+    };
+    let Some(dentry) = ctx.vfs_core.dentry(dentry_ref) else {
+        return false;
+    };
+    let Some(inode) = ctx.vfs_core.inode(dentry.inode_ref()) else {
+        return false;
+    };
+    dentry.name() == file_name && inode.kind() == VfsInodeKind::RegularFile
 }
 
 fn is_temp_user_init_elf(buffer: &[u8]) -> bool {
