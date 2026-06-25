@@ -280,6 +280,109 @@ class RenderToolTests(unittest.TestCase):
         self.assertIn("Scheduler.SelectRunQueue", text)
         self.assertIn("EnqueueTask", text)
 
+    def test_render_svg_from_trace_view_hides_top_level_contexts(self) -> None:
+        view = ViewModel(
+            name="trace",
+            graph_format="svg",
+            metadata={
+                "trace_columns": [
+                    {"index": 0, "kind": "object", "depth": 0},
+                    {"index": 1, "kind": "gap", "depth": 0},
+                    {"index": 2, "kind": "object", "depth": 1},
+                ],
+                "trace_rows": [
+                    {"index": 0, "kind": "gap", "label": "body.start"},
+                    {
+                        "index": 1,
+                        "kind": "context_action",
+                        "label": "within.0",
+                        "group_role": "context_action",
+                    },
+                    {
+                        "index": 2,
+                        "kind": "context_fact",
+                        "label": "within.fact",
+                        "group_role": "context_action",
+                    },
+                    {"index": 3, "kind": "gap", "label": "body.end"},
+                ],
+                "trace_cells": (
+                    TraceCell(
+                        id="transition",
+                        kind="transition_span",
+                        row=0,
+                        column=0,
+                        label="KernelInitTask.Transition::Enable",
+                        row_span=4,
+                    ),
+                    TraceCell(
+                        id="single-task-context",
+                        kind="context_span",
+                        row=1,
+                        column=1,
+                        label="SingleTaskContext",
+                        row_span=2,
+                        column_span=2,
+                    ),
+                    TraceCell(
+                        id="interrupt-stream-context",
+                        kind="context_span",
+                        row=1,
+                        column=1,
+                        label="SingleTaskInterruptStreamContext",
+                        row_span=2,
+                        column_span=2,
+                    ),
+                    TraceCell(
+                        id="lock-context",
+                        kind="context_span",
+                        row=1,
+                        column=1,
+                        label="ResourceLockContext|lock=BootRunQueueLock",
+                        row_span=2,
+                        column_span=2,
+                    ),
+                    TraceCell(
+                        id="context-action",
+                        kind="context_action",
+                        row=1,
+                        column=1,
+                        label="BootRunQueueLock.Transition::LockIrqSave",
+                        column_span=2,
+                    ),
+                    TraceCell(
+                        id="context-fact",
+                        kind="context_fact",
+                        row=2,
+                        column=1,
+                        label="local_interrupts = enabled",
+                        column_span=2,
+                    ),
+                ),
+                "trace_arrows": (
+                    TraceArrow(
+                        source="transition", target="single-task-context", kind="within"
+                    ),
+                    TraceArrow(
+                        source="transition",
+                        target="interrupt-stream-context",
+                        kind="within",
+                    ),
+                    TraceArrow(source="transition", target="lock-context", kind="within"),
+                ),
+            },
+        )
+
+        text = render_svg(view)
+
+        self.assertNotIn("SingleTaskContext", text)
+        self.assertNotIn("SingleTaskInterruptStreamContext", text)
+        self.assertIn("ResourceLockContext", text)
+        self.assertIn("BootRunQueueLock.Transition::LockIrqSave", text)
+        self.assertIn("local_interrupts = enabled", text)
+        self.assertEqual(text.count('class="context-box"'), 1)
+        self.assertEqual(text.count('class="within-arrow"'), 1)
+
     def test_render_svg_from_trace_view_draws_ordinary_action(self) -> None:
         view = ViewModel(
             name="trace",

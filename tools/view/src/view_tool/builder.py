@@ -323,6 +323,51 @@ def _context_records_by_transition(
                 active_context.pop(key, None)
             continue
         if (
+            source_kind == "within ensures"
+            and proof_class == "exclusive_context_fact"
+            and proof_provider == "within_ensures"
+            and isinstance(expression, str)
+        ):
+            stack = active_context.get(key)
+            context_entry = stack[-1] if stack else None
+            context_name = _active_context_name(context_entry)
+            if context_name is None:
+                continue
+            display_expression = record.get("display_expression")
+            if not isinstance(display_expression, str) or not display_expression:
+                display_expression = " ".join(expression.split())
+            context_stack = tuple(
+                name
+                for name in (_active_context_name(entry) for entry in stack)
+                if name is not None
+            )
+            item: dict[str, object] = {
+                "context": context_name,
+                "context_stack": context_stack,
+                "expression": expression,
+                "fact": display_expression,
+                "order": order,
+            }
+            context_parent = _active_context_process_parent(context_entry)
+            if isinstance(context_parent, str) and context_parent:
+                item["context_process_parent"] = context_parent
+            context_labels: dict[str, str] = {}
+            for active_name in context_stack:
+                active_spec = context_specs.get(active_name)
+                if active_spec is not None:
+                    context_labels[active_name] = _context_trace_label(
+                        active_name, active_spec
+                    )
+            if context_labels:
+                item["context_labels"] = context_labels
+            context_spec = context_specs.get(context_name)
+            if context_spec is not None:
+                item["context_label"] = _context_trace_label(
+                    context_name, context_spec
+                )
+            contexts.setdefault(key, []).append(item)
+            continue
+        if (
             proof_class
             not in {"action_commit", "action_result_binding", "type_process_commit"}
             or proof_provider != "within_context"
@@ -488,6 +533,9 @@ def _build_context_forest(
                 "label": _context_item_label(item, context_name),
                 "children": [],
             }
+            order = item.get("order")
+            if isinstance(order, int):
+                node["start_order"] = order
             context_parent = item.get("context_process_parent")
             if isinstance(context_parent, str) and context_parent:
                 node["process_parent"] = context_parent
@@ -501,6 +549,9 @@ def _build_context_forest(
             open_nodes.append(node)
 
         if marker == "exit":
+            order = item.get("order")
+            if open_nodes and isinstance(order, int):
+                open_nodes[-1]["end_order"] = order
             open_nodes = open_nodes[:-1]
             continue
 
@@ -514,6 +565,17 @@ def _build_context_forest(
                     "keys": _process_identity_keys(action_text, item.get("expression")),
                     "parent": item.get("process_parent"),
                     "parent_keys": _process_identity_keys(item.get("process_parent")),
+                    "children": [],
+                }
+            )
+            continue
+        fact_text = str(item.get("fact", ""))
+        if isinstance(children, list) and fact_text:
+            children.append(
+                {
+                    "kind": "fact",
+                    "fact": fact_text,
+                    "keys": _process_identity_keys(fact_text, item.get("expression")),
                     "children": [],
                 }
             )
@@ -1273,6 +1335,36 @@ class _TraceLayoutBuilder:
         previous_context_action_id: str | None = None
         process_cell_by_key: dict[str, str] = {}
         process_row_by_key: dict[str, int] = {}
+        body_item_ranges: list[dict[str, int]] = []
+        pending_context_spans: list[dict[str, object]] = []
+
+        def register_body_item_range(
+            order: object, start_row: int, end_row: int
+        ) -> None:
+            if not isinstance(order, int) or end_row <= start_row:
+                return
+            for content_range in content_ranges_for_rows(start_row, end_row):
+                content_range["order"] = order
+                body_item_ranges.append(content_range)
+
+        def content_ranges_for_rows(start_row: int, end_row: int) -> list[dict[str, int]]:
+            ranges: list[dict[str, int]] = []
+            for cell in self.cells:
+                if cell.kind == "gap":
+                    continue
+                cell_start = cell.row
+                cell_end = cell.row + cell.row_span
+                if cell_end <= start_row or cell_start >= end_row:
+                    continue
+                ranges.append(
+                    {
+                        "start_row": max(start_row, cell_start),
+                        "end_row": min(end_row, cell_end),
+                        "start_column": cell.column,
+                        "end_column": cell.column + cell.column_span,
+                    }
+                )
+            return ranges
 
         def register_process_cell(cell_id: str, row: int, *values: object) -> None:
             for key in _process_identity_keys(*values):
@@ -1297,16 +1389,14 @@ class _TraceLayoutBuilder:
                     return row
             return None
 
-        def place_context_node(node: dict[str, object], depth: int) -> None:
+        def place_context_node(
+            node: dict[str, object], depth: int
+        ) -> list[dict[str, int]]:
             nonlocal context_index, previous_context_action_id
             current_context_index = context_index
             context_index += 1
             context_id = f"{event_id}-context-{current_context_index}"
             context_parent_row = external_process_row(node.get("parent_keys"))
-            context_start_row = (
-                context_parent_row if context_parent_row is not None else len(self.rows)
-            )
-            cell_insert_index = len(self.cells)
             action_index = 0
             context_label = str(node.get("label", node.get("name", "")))
             context_start_depth = _context_span_start_depth(node)
@@ -1314,15 +1404,33 @@ class _TraceLayoutBuilder:
             children = node.get("children")
             if not isinstance(children, list):
                 children = []
+            context_ranges: list[dict[str, int]] = []
+            context_column_start = max(0, context_column + context_start_depth * 2)
+            context_column_end = context_column_start + context_span_columns
 
-            padding_row = len(self.rows)
-            self._add_row(
-                "context_padding",
-                padding_row,
-                f"{label}.within.{current_context_index}.padding.bottom",
-                group_id=event_id,
-                group_role="context_padding",
-            )
+            def add_context_range(row: int) -> None:
+                context_ranges.append(
+                    {
+                        "start_row": row,
+                        "end_row": row + 1,
+                        "start_column": context_column_start,
+                        "end_column": context_column_end,
+                    }
+                )
+
+            if context_parent_row is not None:
+                add_context_range(context_parent_row)
+
+            if children:
+                padding_row = len(self.rows)
+                self._add_row(
+                    "context_padding",
+                    padding_row,
+                    f"{label}.within.{current_context_index}.padding.bottom",
+                    group_id=event_id,
+                    group_role="context_padding",
+                )
+                add_context_range(padding_row)
 
             def place_context_action(
                 action_node: dict[str, object],
@@ -1365,6 +1473,14 @@ class _TraceLayoutBuilder:
                         label=str(action_node.get("action", "")),
                         column_span=2,
                     )
+                )
+                context_ranges.append(
+                    {
+                        "start_row": action_row,
+                        "end_row": action_row + 1,
+                        "start_column": context_column + effective_action_depth * 2,
+                        "end_column": context_column + effective_action_depth * 2 + 2,
+                    }
                 )
                 register_process_cell(
                     action_id,
@@ -1417,15 +1533,48 @@ class _TraceLayoutBuilder:
                             )
                 return action_id
 
+            def place_context_fact(fact_node: dict[str, object]) -> None:
+                nonlocal action_index
+                fact_row = len(self.rows)
+                self._add_row(
+                    "context_fact",
+                    fact_row,
+                    f"{label}.within.{current_context_index}.fact.{action_index}",
+                    group_id=event_id,
+                    group_role="context_action",
+                )
+                fact_id = f"{context_id}-fact-{action_index}"
+                self.cells.append(
+                    TraceCell(
+                        id=fact_id,
+                        kind="context_fact",
+                        row=fact_row,
+                        column=context_column,
+                        label=str(fact_node.get("fact", "")),
+                        column_span=2,
+                    )
+                )
+                context_ranges.append(
+                    {
+                        "start_row": fact_row,
+                        "end_row": fact_row + 1,
+                        "start_column": context_column,
+                        "end_column": context_column + 2,
+                    }
+                )
+                action_index += 1
+
             for child in children:
                 if not isinstance(child, dict):
                     continue
                 if child.get("kind") == "context":
-                    place_context_node(child, depth + 1)
+                    context_ranges.extend(place_context_node(child, depth + 1))
                     continue
-                if child.get("kind") != "action":
+                if child.get("kind") == "action":
+                    place_context_action(child, action_depth=0, parent_action_id=None)
                     continue
-                place_context_action(child, action_depth=0, parent_action_id=None)
+                if child.get("kind") == "fact":
+                    place_context_fact(child)
 
             if "|" in context_label:
                 guard_row = len(self.rows)
@@ -1436,40 +1585,71 @@ class _TraceLayoutBuilder:
                     group_id=event_id,
                     group_role="context_guard",
                 )
-            padding_row = len(self.rows)
-            self._add_row(
-                "context_padding",
-                padding_row,
-                f"{label}.within.{current_context_index}.padding.top",
-                group_id=event_id,
-                group_role="context_padding",
-            )
-            span_row = _context_span_row(
-                context_start_row,
-                len(self.rows),
-                event_body_start,
-                context_parent_row=context_parent_row,
-            )
-            self.cells.insert(
-                cell_insert_index,
-                TraceCell(
-                    id=context_id,
-                    kind="context_span",
-                    row=span_row,
-                    column=max(0, context_column + context_start_depth * 2),
-                    label=context_label,
-                    row_span=max(1, len(self.rows) - span_row),
-                    column_span=context_span_columns,
+                add_context_range(guard_row)
+            if children:
+                padding_row = len(self.rows)
+                self._add_row(
+                    "context_padding",
+                    padding_row,
+                    f"{label}.within.{current_context_index}.padding.top",
+                    group_id=event_id,
+                    group_role="context_padding",
                 )
+                add_context_range(padding_row)
+
+            pending_context_spans.append(
+                {
+                    "id": context_id,
+                    "label": context_label,
+                    "ranges": context_ranges,
+                    "start_order": node.get("start_order"),
+                    "end_order": node.get("end_order"),
+                    "source_id": external_process_cell(node.get("parent_keys"))
+                    or span_id,
+                }
             )
-            context_parent_id = external_process_cell(node.get("parent_keys"))
-            self.arrows.append(
-                TraceArrow(
-                    source=context_parent_id or span_id,
-                    target=context_id,
-                    kind="within",
+            return context_ranges
+
+        def finalize_context_spans() -> None:
+            for pending in pending_context_spans:
+                ranges = list(pending.get("ranges") or ())
+                start_order = pending.get("start_order")
+                end_order = pending.get("end_order")
+                if isinstance(start_order, int) and isinstance(end_order, int):
+                    for item_range in body_item_ranges:
+                        order = item_range["order"]
+                        if start_order < order < end_order:
+                            ranges.append(item_range)
+                if not ranges:
+                    continue
+                span_row = max(
+                    event_body_start,
+                    min(item["start_row"] for item in ranges),
                 )
-            )
+                span_end = max(item["end_row"] for item in ranges)
+                if span_end <= span_row:
+                    continue
+                span_column = min(item["start_column"] for item in ranges)
+                span_column_end = max(item["end_column"] for item in ranges)
+                context_id = str(pending["id"])
+                self.cells.append(
+                    TraceCell(
+                        id=context_id,
+                        kind="context_span",
+                        row=span_row,
+                        column=span_column,
+                        label=str(pending["label"]),
+                        row_span=span_end - span_row,
+                        column_span=max(1, span_column_end - span_column),
+                    )
+                )
+                self.arrows.append(
+                    TraceArrow(
+                        source=str(pending["source_id"]),
+                        target=context_id,
+                        kind="within",
+                    )
+                )
 
         for item in body_items:
             if item.get("kind") == "context":
@@ -1512,6 +1692,7 @@ class _TraceLayoutBuilder:
                 self.arrows.append(
                     TraceArrow(source=span_id, target=action_id, kind="action")
                 )
+                register_body_item_range(item.get("order"), action_row, action_row + 1)
                 continue
 
             child = item.get("child")
@@ -1523,6 +1704,7 @@ class _TraceLayoutBuilder:
             )
             child_data = _trace_node_object(child)
             child_is_phase = _is_trace_phase_object(str(child_data.get("object")))
+            child_start_row = len(self.rows)
             self._place_node(
                 child,
                 phase_lane=phase_lane + 1 if child_is_phase else phase_lane,
@@ -1534,6 +1716,9 @@ class _TraceLayoutBuilder:
                 verified_states_by_event=verified_states_by_event,
                 max_action_depth=max_action_depth,
             )
+            register_body_item_range(item.get("order"), child_start_row, len(self.rows))
+
+        finalize_context_spans()
 
         event_exit_gap_row = len(self.rows)
         self._add_row(

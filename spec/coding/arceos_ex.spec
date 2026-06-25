@@ -444,7 +444,7 @@ type ArceosExCorePrepareCodingMust {
          * StaticBranch.setup() must preserve the StaticBranchJumpLabelContext
          * source boundary and execute the modeled JumpLabelMutex.Lock/Unlock
          * protocol, or an equivalent implementation that preserves owner,
-         * nesting/debug and wakeup-observable effects. BootPhaseContext facts
+         * nesting/debug and wakeup-observable effects. SingleTaskContext facts
          * are not enough to erase the mutex protocol in the current lowering
          * strategy. The CorePrepare ready check must observe the independent
          * JumpLabelMutex ready object and a completed lock/unlock guard fact.
@@ -456,7 +456,7 @@ type ArceosExCorePrepareCodingMust {
          *
          * StaticBranch.setup() must preserve the CpuHotplugReadContext source
          * boundary for cpus_read_lock()/cpus_read_unlock() and execute the
-         * modeled CpuHotplugLock.ReadLock/ReadUnlock pair. BootPhaseContext
+         * modeled CpuHotplugLock.ReadLock/ReadUnlock pair. SingleTaskContext
          * facts are not enough to erase this read-side protocol in the current
          * lowering strategy. The generic PerCpuRwSemaphore implementation must
          * still provide real read/write behavior for later call sites and
@@ -504,7 +504,7 @@ type ArceosExCorePrepareCodingMust {
          *
          * ResourceTree.setup() must preserve the ResourceTreeWriteContext
          * source boundary and execute the modeled
-         * ResourceLock.WriteLock/WriteUnlock pair. BootPhaseContext facts are
+         * ResourceLock.WriteLock/WriteUnlock pair. SingleTaskContext facts are
          * not enough to erase this write-side protocol in the current lowering
          * strategy. The generic RwLock implementation must still provide real
          * read/write behavior for later call sites and smoke tests.
@@ -535,7 +535,7 @@ type ArceosExCorePrepareCodingMust {
          * internal bool.
          *
          * In the current lowering strategy arceos_ex must execute or preserve
-         * the save/restore protocol instead of relying on BootPhaseContext to
+         * the save/restore protocol instead of relying on SingleTaskContext to
          * erase it. A future proof-only optimization may be reintroduced only
          * after the model marks the lexical guarded block with a verified
          * single-entry proof and confirms that no saved-flags/debug side
@@ -794,7 +794,7 @@ type ArceosExMmCoreInitCodingMust {
         /*
          * mm_core_init synchronization surface:
          *
-         * BootPhaseContext contributes contextual facts for boot-time call
+         * SingleTaskContext contributes contextual facts for boot-time call
          * sites, but it must not make Linux lock, irq, preempt, RCU, per-cpu,
          * or TLB/cache requirements disappear from the formal model. For every
          * mm_core_init object that publishes a later runtime API, the
@@ -922,7 +922,7 @@ type ArceosExMmCoreInitCodingMust {
          * FULL state still have synchronization semantics. The target must
          * record the pre-FULL slab_mutex boundary and keep the runtime SLUB
          * locking model as an explicit deferred contract instead of treating
-         * BootPhaseContext as a proof that no SLUB locks exist.
+         * SingleTaskContext as a proof that no SLUB locks exist.
          */
         arceos_ex_must_slub_bootstrap_record_slab_mutex_boundary();
         arceos_ex_must_slub_runtime_locking_remain_explicit_deferred();

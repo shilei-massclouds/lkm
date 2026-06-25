@@ -110,7 +110,7 @@ impl StaticBranch {
          * CpuHotplugReadContext:
          * CpuHotplugLock.ReadLock(BootInitTaskRef) preserves the
          * cpus_read_lock() boundary even though the surrounding
-         * BootPhaseContext already contributes single CPU/task facts.
+         * SingleTaskContext already contributes single CPU/task facts.
          */
         if cpu_hotplug_lock.read_lock_owner(
             super::percpu_rw_semaphore::PerCpuRwSemaphoreOwner::BootInitTask,

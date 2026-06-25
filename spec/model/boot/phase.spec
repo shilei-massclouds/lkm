@@ -11,9 +11,9 @@ include "core-prepare/main.spec";
 include "mm-core-init/main.spec";
 include "sched-init/main.spec";
 
-context BootPhaseContext: Context {
+context SingleTaskContext: Context {
     /*
-     * BootPhaseContext captures the natural boot execution context before
+     * SingleTaskContext captures the natural boot execution context before
      * secondary CPUs and ordinary task concurrency are opened. The phase
      * boundary itself provides the proof; it does not lower to runtime guard
      * code.
@@ -46,7 +46,7 @@ object BootPhase: PhaseObject {
              * BootPhase 不直接依赖 PreparePhase；二者作为平级阶段由上级阶段对象编排衔接。
              */
             on Transition::Setup -> State::Ready {
-                within BootPhaseContext {
+                within SingleTaskContext {
                     drives {
                         EntryPreludePhase.Transition::Setup;
                         EntrySuccessorPhase.Transition::Setup;

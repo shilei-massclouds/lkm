@@ -342,7 +342,7 @@ class ParserTests(unittest.TestCase):
     def test_parse_context_guard_holds(self) -> None:
         document = parse_text(
             """
-            context BootPhaseContext: Context {
+            context SingleTaskContext: Context {
                 guard {
                     holds {
                         cpu_concurrency: single_cpu;
@@ -356,7 +356,7 @@ class ParserTests(unittest.TestCase):
         )
 
         context = document.exclusive_contexts[0]
-        self.assertEqual(context.name, "BootPhaseContext")
+        self.assertEqual(context.name, "SingleTaskContext")
         self.assertIsNotNone(context.guard)
         assert context.guard is not None
         self.assertEqual(context.guard.entered_by, [])

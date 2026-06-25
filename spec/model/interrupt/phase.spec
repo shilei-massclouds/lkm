@@ -4,10 +4,10 @@
  * InterruptPhase starts when IRQ/time facilities begin setup. Its currently
  * expanded subphases are IrqTimeInitPhase, LocalIrqEnablePhase,
  * IrqOpenPreparePhase and ProcessPreparePhase. IrqTimeInitPhase keeps the
- * boot CPU interrupt gate closed inside BootPhaseContext.
+ * boot CPU interrupt gate closed inside SingleTaskContext.
  * LocalIrqEnablePhase then covers the local_irq_enable() boundary without an
  * outer phase context. IrqOpenPreparePhase and ProcessPreparePhase run in the
- * corresponding boot-time local-IRQ-enabled context before rest_init()
+ * corresponding single-task interrupt-stream context before rest_init()
  * creates the first tasks.
  */
 
@@ -16,11 +16,11 @@ include "local-irq-enable/main.spec";
 include "irq-open-prepare/main.spec";
 include "process-prepare/main.spec";
 
-context BootPhaseLocalIrqEnabledContext: Context {
+context SingleTaskInterruptStreamContext: Context {
     /*
      * This is the boot execution context after LocalIrqEnablePhase. It keeps
-     * BootPhaseContext's single-CPU/single-task/non-preemptible facts, but
-     * changes local_interrupts to enabled for the boot CPU.
+     * single-CPU/single-task/non-preemptible facts, but changes
+     * local_interrupts to enabled for the boot CPU.
      */
     guard {
         holds {
@@ -54,7 +54,7 @@ object InterruptPhase: PhaseObject {
                     SchedInitPhase.state == State::Ready;
                 }
 
-                within BootPhaseContext {
+                within SingleTaskContext {
                     drives {
                         IrqTimeInitPhase.Transition::Setup;
                     }
@@ -64,7 +64,7 @@ object InterruptPhase: PhaseObject {
                     LocalIrqEnablePhase.Transition::Setup;
                 }
 
-                within BootPhaseLocalIrqEnabledContext {
+                within SingleTaskInterruptStreamContext {
                     drives {
                         IrqOpenPreparePhase.Transition::Setup;
                         ProcessPreparePhase.Transition::Setup;

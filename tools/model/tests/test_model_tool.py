@@ -1055,7 +1055,7 @@ class ModelToolTests(unittest.TestCase):
 
     def test_phase_boundary_guard_without_effects_is_valid(self) -> None:
         source = """
-            context BootPhaseContext: Context {
+            context SingleTaskContext: Context {
                 guard {
                     holds {
                         cpu_concurrency: single_cpu;
@@ -1073,7 +1073,7 @@ class ModelToolTests(unittest.TestCase):
                 state State::Base {
                     transitions {
                         on Transition::Setup -> State::Ready {
-                            within BootPhaseContext {
+                            within SingleTaskContext {
                             }
                         }
                     }
@@ -1099,7 +1099,7 @@ class ModelToolTests(unittest.TestCase):
 
     def test_plain_context_without_obj_refs_allows_drives(self) -> None:
         source = """
-            context BootPhaseContext: Context {
+            context SingleTaskContext: Context {
                 guard {
                     holds {
                         cpu_concurrency: single_cpu;
@@ -1130,7 +1130,7 @@ class ModelToolTests(unittest.TestCase):
                 state State::Base {
                     transitions {
                         on Transition::Setup -> State::Ready {
-                            within BootPhaseContext {
+                            within SingleTaskContext {
                                 drives {
                                     Child.Transition::Setup;
                                 }

@@ -657,35 +657,67 @@ class ViewToolTests(unittest.TestCase):
                                 "transition": "Setup",
                                 "source_state": "Base",
                                 "target_state": "Ready",
-                                "children": [],
+                                "children": [
+                                    {
+                                        "object": "IrqController",
+                                        "transition": "Setup",
+                                        "source_state": "Prepared",
+                                        "target_state": "Ready",
+                                        "children": [],
+                                    }
+                                ],
                             },
                             {
                                 "object": "LocalIrqEnablePhase",
                                 "transition": "Setup",
                                 "source_state": "Base",
                                 "target_state": "Ready",
-                                "children": [],
+                                "children": [
+                                    {
+                                        "object": "InterruptStream",
+                                        "transition": "Enable",
+                                        "source_state": "Ready",
+                                        "target_state": "Online",
+                                        "children": [],
+                                    }
+                                ],
                             },
                             {
                                 "object": "IrqOpenPreparePhase",
                                 "transition": "Setup",
                                 "source_state": "Base",
                                 "target_state": "Ready",
-                                "children": [],
+                                "children": [
+                                    {
+                                        "object": "SchedClock",
+                                        "transition": "Setup",
+                                        "source_state": "Prepared",
+                                        "target_state": "Ready",
+                                        "children": [],
+                                    }
+                                ],
                             },
                             {
                                 "object": "ProcessPreparePhase",
                                 "transition": "Setup",
                                 "source_state": "Base",
                                 "target_state": "Ready",
-                                "children": [],
+                                "children": [
+                                    {
+                                        "object": "RootPidNamespace",
+                                        "transition": "Setup",
+                                        "source_state": "Prepared",
+                                        "target_state": "Ready",
+                                        "children": [],
+                                    }
+                                ],
                             },
                         ],
                     }
                 ],
                 "model": {
                     "exclusive_contexts": {
-                        "BootPhaseContext": {
+                        "SingleTaskContext": {
                             "guard": {
                                 "holds": [
                                     {
@@ -697,7 +729,7 @@ class ViewToolTests(unittest.TestCase):
                                 ]
                             }
                         },
-                        "BootPhaseLocalIrqEnabledContext": {
+                        "SingleTaskInterruptStreamContext": {
                             "guard": {
                                 "holds": [
                                     {
@@ -717,28 +749,64 @@ class ViewToolTests(unittest.TestCase):
                         "transition": "Setup",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
-                        "expression": "within BootPhaseContext",
+                        "expression": "within SingleTaskContext",
+                    },
+                    {
+                        "status": "proved",
+                        "object": "IrqTimeInitPhase",
+                        "transition": "Setup",
+                        "message": (
+                            "transition: IrqTimeInitPhase.Transition::Setup "
+                            "State::Base -> State::Ready"
+                        ),
                     },
                     {
                         "object": "InterruptPhase",
                         "transition": "Setup",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
-                        "expression": "within BootPhaseContext exited",
+                        "expression": "within SingleTaskContext exited",
+                    },
+                    {
+                        "status": "proved",
+                        "object": "LocalIrqEnablePhase",
+                        "transition": "Setup",
+                        "message": (
+                            "transition: LocalIrqEnablePhase.Transition::Setup "
+                            "State::Base -> State::Ready"
+                        ),
                     },
                     {
                         "object": "InterruptPhase",
                         "transition": "Setup",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
-                        "expression": "within BootPhaseLocalIrqEnabledContext",
+                        "expression": "within SingleTaskInterruptStreamContext",
+                    },
+                    {
+                        "status": "proved",
+                        "object": "IrqOpenPreparePhase",
+                        "transition": "Setup",
+                        "message": (
+                            "transition: IrqOpenPreparePhase.Transition::Setup "
+                            "State::Base -> State::Ready"
+                        ),
+                    },
+                    {
+                        "status": "proved",
+                        "object": "ProcessPreparePhase",
+                        "transition": "Setup",
+                        "message": (
+                            "transition: ProcessPreparePhase.Transition::Setup "
+                            "State::Base -> State::Ready"
+                        ),
                     },
                     {
                         "object": "InterruptPhase",
                         "transition": "Setup",
                         "source_kind": "within",
                         "proof_class": "exclusive_context",
-                        "expression": "within BootPhaseLocalIrqEnabledContext exited",
+                        "expression": "within SingleTaskInterruptStreamContext exited",
                     },
                 ],
             }
@@ -751,10 +819,138 @@ class ViewToolTests(unittest.TestCase):
         context_action_labels = [
             cell.label for cell in cells if cell.kind == "context_action"
         ]
+        single_task_context = next(
+            cell
+            for cell in cells
+            if cell.kind == "context_span" and cell.label == "SingleTaskContext"
+        )
+        interrupt_context = next(
+            cell
+            for cell in cells
+            if cell.kind == "context_span"
+            and cell.label == "SingleTaskInterruptStreamContext"
+        )
+        irq_time_phase = next(
+            cell
+            for cell in cells
+            if cell.kind == "transition_span"
+            and cell.label == "IrqTimeInitPhase.Transition::Setup"
+        )
+        local_irq_enable_phase = next(
+            cell
+            for cell in cells
+            if cell.kind == "transition_span"
+            and cell.label == "LocalIrqEnablePhase.Transition::Setup"
+        )
+        irq_open_phase = next(
+            cell
+            for cell in cells
+            if cell.kind == "transition_span"
+            and cell.label == "IrqOpenPreparePhase.Transition::Setup"
+        )
+        process_prepare_phase = next(
+            cell
+            for cell in cells
+            if cell.kind == "transition_span"
+            and cell.label == "ProcessPreparePhase.Transition::Setup"
+        )
 
-        self.assertIn("BootPhaseContext", context_labels)
-        self.assertIn("BootPhaseLocalIrqEnabledContext", context_labels)
+        self.assertIn("SingleTaskContext", context_labels)
+        self.assertIn("SingleTaskInterruptStreamContext", context_labels)
         self.assertNotIn("", context_action_labels)
+        self.assertLessEqual(single_task_context.row, irq_time_phase.row)
+        self.assertGreaterEqual(
+            single_task_context.row + single_task_context.row_span,
+            irq_time_phase.row + irq_time_phase.row_span,
+        )
+        self.assertFalse(
+            single_task_context.row
+            <= local_irq_enable_phase.row
+            < single_task_context.row + single_task_context.row_span
+        )
+        self.assertLessEqual(interrupt_context.row, irq_open_phase.row)
+        self.assertGreaterEqual(
+            interrupt_context.row + interrupt_context.row_span,
+            process_prepare_phase.row + process_prepare_phase.row_span,
+        )
+
+    def test_trace_view_places_within_ensures_as_context_facts(self) -> None:
+        view = build_trace_view(
+            {
+                "trace": [
+                    {
+                        "object": "ResourceTree",
+                        "transition": "Setup",
+                        "source_state": "Base",
+                        "target_state": "Ready",
+                        "children": [],
+                    }
+                ],
+                "model": {
+                    "exclusive_contexts": {
+                        "ResourceTreeWriteContext": {
+                            "lock_ref": "ResourceLock",
+                            "guard": {
+                                "lock_ref": "ResourceLock",
+                                "entered_by": [
+                                    {
+                                        "body": (
+                                            "ResourceLock.Transition::WriteLock"
+                                            "(BootInitTaskRef);"
+                                        )
+                                    }
+                                ],
+                                "exited_by": [
+                                    {
+                                        "body": (
+                                            "ResourceLock.Transition::WriteUnlock"
+                                            "(BootInitTaskRef);"
+                                        )
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                },
+                "records": [
+                    {
+                        "object": "ResourceTree",
+                        "transition": "Setup",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within ResourceTreeWriteContext",
+                    },
+                    {
+                        "status": "proved",
+                        "object": "ResourceTree",
+                        "transition": "Setup",
+                        "source_kind": "within ensures",
+                        "proof_class": "exclusive_context_fact",
+                        "proof_provider": "within_ensures",
+                        "expression": "resource_tree_ready(ResourceTree, MemBlock)",
+                    },
+                    {
+                        "object": "ResourceTree",
+                        "transition": "Setup",
+                        "source_kind": "within",
+                        "proof_class": "exclusive_context",
+                        "expression": "within ResourceTreeWriteContext exited",
+                    },
+                ],
+            }
+        )
+
+        cells = view.metadata["trace_cells"]
+        context = next(cell for cell in cells if cell.kind == "context_span")
+        fact = next(cell for cell in cells if cell.kind == "context_fact")
+
+        self.assertIn("ResourceTreeWriteContext", context.label)
+        self.assertEqual(fact.label, "resource_tree_ready(ResourceTree, MemBlock)")
+        self.assertLessEqual(context.row, fact.row)
+        self.assertGreaterEqual(
+            context.row + context.row_span,
+            fact.row + fact.row_span,
+        )
 
     def test_trace_view_limits_nested_context_action_depth(self) -> None:
         derive_data = {
@@ -872,7 +1068,10 @@ class ViewToolTests(unittest.TestCase):
             cell.label for cell in limited_cells if cell.kind == "context_action"
         ]
         limited_context = next(
-            cell for cell in limited_cells if cell.kind == "context_span"
+            cell
+            for cell in limited_cells
+            if cell.kind == "context_span"
+            and "BootIdleStartupContext" in cell.label
         )
 
         self.assertIn("BootIdleRuntime.Action::RunIdleLoop", limited_labels)
@@ -896,7 +1095,12 @@ class ViewToolTests(unittest.TestCase):
         full = build_trace_view(derive_data, max_action_depth=None)
         full_cells = full.metadata["trace_cells"]
         full_labels = [cell.label for cell in full_cells if cell.kind == "context_action"]
-        full_context = next(cell for cell in full_cells if cell.kind == "context_span")
+        full_context = next(
+            cell
+            for cell in full_cells
+            if cell.kind == "context_span"
+            and "BootIdleStartupContext" in cell.label
+        )
 
         self.assertIn("Scheduler.Action::Schedule", full_labels)
         self.assertIn(

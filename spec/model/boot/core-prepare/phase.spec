@@ -685,7 +685,7 @@ context CpuHotplugReadContext: ResourceExclusiveContext {
      * This context corresponds to Linux cpus_read_lock() /
      * cpus_read_unlock() around jump_label_init(). In arceos_ex boot code the
      * source model records the real Linux guard boundary even when the outer
-     * BootPhaseContext already contributes single-CPU/single-task facts.
+     * SingleTaskContext already contributes single-CPU/single-task facts.
      */
     guard {
         lock_ref: CpuHotplugLock;

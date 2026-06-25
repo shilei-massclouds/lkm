@@ -29,6 +29,12 @@ _TRACE_ANNOTATION_GAP = 10
 _TRACE_ANNOTATION_MARGIN = 18
 _TRACE_ANNOTATION_CLEARANCE = 6
 _TRACE_ANNOTATION_FALLBACK_SCAN_STEPS = 80
+_TRACE_HIDDEN_CONTEXT_TITLES = frozenset(
+    {
+        "SingleTaskContext",
+        "SingleTaskInterruptStreamContext",
+    }
+)
 
 
 def render_view(
@@ -236,8 +242,12 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         + sum(metric[1] for metric in column_metrics.values())
     )
     height = int(top_margin + bottom_margin + sum(metric[1] for metric in row_metrics.values()))
+    hidden_context_ids = {
+        cell.id for cell in cells if _trace_context_is_hidden_in_svg(cell)
+    }
+    rendered_cells = tuple(cell for cell in cells if cell.id not in hidden_context_ids)
     cell_by_id = {cell.id: cell for cell in cells}
-    context_cells = [cell for cell in cells if cell.kind == "context_span"]
+    context_cells = [cell for cell in rendered_cells if cell.kind == "context_span"]
     nested_context_ids = {
         inner.id
         for inner in context_cells
@@ -307,6 +317,7 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         ".within-arrow { stroke: #0f766e; stroke-width: 1.1; stroke-dasharray: 5 4; fill: none; marker-start: url(#dot); marker-end: url(#arrow); }",
         ".context-box { fill: #f0fdfa; stroke: #0f766e; stroke-width: 1.2; stroke-dasharray: 6 4; }",
         ".context-action { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }",
+        ".context-fact { fill: #ecfdf5; stroke: #5eead4; stroke-width: 1; }",
         ".context-order { stroke: #0f766e; stroke-width: 1; fill: none; marker-end: url(#arrow); }",
         ".context-title { fill: #0f766e; font-weight: 600; }",
         ".context-guard { fill: #115e59; }",
@@ -322,13 +333,13 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         )
     lines.extend(["</style>"])
 
-    for cell in cells:
+    for cell in rendered_cells:
         if cell.id in phase_state_ids:
             continue
         if cell.kind in {"state", "verified_state"}:
             _append_trace_state_cell(lines, cell, cell_box(cell))
 
-    for cell in cells:
+    for cell in rendered_cells:
         if cell.kind == "context_span":
             _append_trace_context_box(
                 lines,
@@ -337,7 +348,7 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
                 nested=cell.id in nested_context_ids,
             )
 
-    for cell in cells:
+    for cell in rendered_cells:
         if cell.kind == "transition_span" and cell.id in phase_span_ids:
             _append_trace_phase_event(lines, cell, cell_box(cell))
         elif cell.kind == "transition_span":
@@ -346,8 +357,12 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
             _append_trace_action(lines, cell, cell_box(cell))
         elif cell.kind == "context_action":
             _append_trace_context_action(lines, cell, cell_box(cell))
+        elif cell.kind == "context_fact":
+            _append_trace_context_fact(lines, cell, cell_box(cell))
 
     for arrow in arrows:
+        if arrow.source in hidden_context_ids or arrow.target in hidden_context_ids:
+            continue
         source = cell_by_id.get(arrow.source)
         target = cell_by_id.get(arrow.target)
         if source is None or target is None:
@@ -407,7 +422,7 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
     if annotation_items:
         _append_trace_annotations(
             lines,
-            cells,
+            rendered_cells,
             cell_box,
             phase_span_ids,
             phase_state_ids,
@@ -590,7 +605,10 @@ def _trace_row_metrics(rows: list[dict[str, object]]) -> dict[int, tuple[str, in
             height = 48
         elif group_role == "context_padding":
             height = 22
-        elif group_role == "context_action" or kind == "context_action":
+        elif group_role == "context_action" or kind in {
+            "context_action",
+            "context_fact",
+        }:
             height = 56
         elif group_role == "context_guard":
             height = 28
@@ -726,6 +744,28 @@ def _append_trace_context_action(
     )
 
 
+def _append_trace_context_fact(
+    lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
+) -> None:
+    box_x, box_y, box_width, box_height = _trace_step_rect(box)
+    center_x = box_x + box_width / 2
+    center_y = box_y + box_height / 2
+    lines.extend(
+        [
+            f'<title>{_xml_escape(cell.label)}</title>',
+            f'<rect class="context-fact" x="{box_x:.1f}" y="{box_y:.1f}" width="{box_width:.1f}" height="{box_height:.1f}" rx="4" />',
+        ]
+    )
+    _append_trace_centered_text(
+        lines,
+        _trace_action_label_lines(cell.label),
+        center_x,
+        center_y,
+        font_size=8,
+        baseline_offset=3,
+    )
+
+
 def _append_trace_action(
     lines: list[str], cell: TraceCell, box: tuple[float, float, float, float]
 ) -> None:
@@ -821,6 +861,13 @@ def _trace_cell_contains(outer: TraceCell, inner: TraceCell) -> bool:
         and outer.column <= inner.column
         and inner.column + inner.column_span <= outer.column + outer.column_span
     )
+
+
+def _trace_context_is_hidden_in_svg(cell: TraceCell) -> bool:
+    if cell.kind != "context_span":
+        return False
+    title, _details = _trace_context_label_lines(cell.label)
+    return title in _TRACE_HIDDEN_CONTEXT_TITLES
 
 
 def _append_trace_state_arrow(
@@ -921,7 +968,7 @@ def _trace_event_anchor_box(
 def _trace_semantic_anchor_box(
     cell: TraceCell, box: tuple[float, float, float, float]
 ) -> tuple[float, float, float, float]:
-    if cell.kind in {"action", "context_action"}:
+    if cell.kind in {"action", "context_action", "context_fact"}:
         return _trace_step_rect(box)
     return _trace_event_anchor_box(cell, box)
 
@@ -1056,7 +1103,7 @@ def _trace_annotation_occupied_boxes(
             boxes.append(_trace_context_box_rect(cell_box(cell)))
         elif cell.kind == "action":
             boxes.append(_trace_action_rect(cell_box(cell)))
-        elif cell.kind == "context_action":
+        elif cell.kind in {"context_action", "context_fact"}:
             boxes.append(_trace_context_action_rect(cell_box(cell)))
     return boxes
 

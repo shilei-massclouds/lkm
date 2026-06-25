@@ -240,7 +240,7 @@
 例如，引导期可以定义一个阶段边界上下文：
 
 ```spec
-context BootPhaseContext: Context {
+context SingleTaskContext: Context {
     guard {
         holds {
             cpu_concurrency: single_cpu;
@@ -252,7 +252,7 @@ context BootPhaseContext: Context {
 }
 ```
 
-随后 `BootPhase` 可用 `within BootPhaseContext { ... }` 包围其阶段驱动序列。这里的 `guard` 没有额外的运行时进入动作；它表达的是该阶段词法范围内由启动事实和阶段边界共同保证的上下文属性。后续若在该范围内再进入自旋锁、RCU 读侧或关中断上下文，新的 guard 只贡献自己能够明确保证的属性，最终执行点的约束由这些贡献与外层约束叠加形成。
+随后 `BootPhase` 可用 `within SingleTaskContext { ... }` 包围其阶段驱动序列。这里的 `guard` 没有额外的运行时进入动作；它表达的是该阶段词法范围内由启动事实和阶段边界共同保证的上下文属性。后续若在该范围内再进入自旋锁、RCU 读侧或关中断上下文，新的 guard 只贡献自己能够明确保证的属性，最终执行点的约束由这些贡献与外层约束叠加形成。
 
 `Effective Context` 对后续规格推导和代码生成至少有三类作用。
 
