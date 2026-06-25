@@ -46,11 +46,11 @@ impl CurrentRunQueueFixture {
     }
 
     fn current_ref(&self) -> CurrentRunQueueRef {
-        CurrentRunQueueRef::boot(self.runqueue.cpu_id())
+        CurrentRunQueueRef::cpu_owned(self.runqueue.cpu_id())
     }
 
     fn selected_ref(&self) -> RunQueueRef {
-        RunQueueRef::boot(self.runqueue.cpu_id())
+        RunQueueRef::cpu_owned(self.runqueue.cpu_id())
     }
 
     fn enqueue(
@@ -289,8 +289,10 @@ impl SmokeScenario for InvalidTaskRefScenario {
         );
         assertions.assert_fail(
             "enqueue wrong cpu ref",
-            self.fixture
-                .enqueue_with_ref(RunQueueRef::boot(usize::MAX), CurrentTaskRef::KernelInit),
+            self.fixture.enqueue_with_ref(
+                RunQueueRef::cpu_owned(usize::MAX),
+                CurrentTaskRef::KernelInit,
+            ),
         );
         assertions.assert("still empty", self.fixture.runqueue.task_count() == 0);
     }

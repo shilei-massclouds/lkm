@@ -677,7 +677,7 @@ impl Scheduler {
         current_rq: CurrentRunQueueRef,
         prev_ref: CurrentTaskRef,
     ) -> Result<CurrentTaskRef, EventError> {
-        if !current_rq.targets_boot_runqueue()
+        if !current_rq.matches_cpu_owned_runqueue(self.boot_runqueue.cpu_id())
             || !matches!(
                 prev_ref,
                 CurrentTaskRef::BootIdle
@@ -907,7 +907,7 @@ impl Scheduler {
         }
 
         self.boot_runqueue.enqueue_task_ref(
-            RunQueueRef::boot(self.boot_runqueue.cpu_id()),
+            RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             CurrentTaskRef::SmokeScheduler,
         )?;
         self.smoke_scheduler_task.mark_enqueued();
@@ -937,7 +937,7 @@ impl Scheduler {
         }
 
         self.boot_runqueue.enqueue_task_ref(
-            RunQueueRef::boot(self.boot_runqueue.cpu_id()),
+            RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             CurrentTaskRef::SmokeMutex,
         )?;
         self.smoke_mutex_task.mark_enqueued();
@@ -954,7 +954,7 @@ impl Scheduler {
         }
 
         self.boot_runqueue.dequeue_task_ref(
-            RunQueueRef::boot(self.boot_runqueue.cpu_id()),
+            RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             CurrentTaskRef::SmokeMutex,
         )?;
         self.smoke_mutex_task.mark_dequeued();
@@ -984,7 +984,7 @@ impl Scheduler {
         }
 
         self.boot_runqueue.enqueue_task_ref(
-            RunQueueRef::boot(self.boot_runqueue.cpu_id()),
+            RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             CurrentTaskRef::SmokeRwsem,
         )?;
         self.smoke_rwsem_task.mark_enqueued();
@@ -1001,7 +1001,7 @@ impl Scheduler {
         }
 
         self.boot_runqueue.dequeue_task_ref(
-            RunQueueRef::boot(self.boot_runqueue.cpu_id()),
+            RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             CurrentTaskRef::SmokeRwsem,
         )?;
         self.smoke_rwsem_task.mark_dequeued();
@@ -1031,7 +1031,7 @@ impl Scheduler {
         }
 
         self.boot_runqueue.enqueue_task_ref(
-            RunQueueRef::boot(self.boot_runqueue.cpu_id()),
+            RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             CurrentTaskRef::SmokeRwLock,
         )?;
         self.smoke_rwlock_task.mark_enqueued();
@@ -1048,7 +1048,7 @@ impl Scheduler {
         }
 
         self.boot_runqueue.dequeue_task_ref(
-            RunQueueRef::boot(self.boot_runqueue.cpu_id()),
+            RunQueueRef::cpu_owned(self.boot_runqueue.cpu_id()),
             CurrentTaskRef::SmokeRwLock,
         )?;
         self.smoke_rwlock_task.mark_dequeued();
@@ -1095,8 +1095,7 @@ impl Scheduler {
         runqueue_ref: RunQueueRef,
     ) -> EventResult {
         if self.selected_runqueue_task_id != task_id
-            || !runqueue_ref.targets_boot_runqueue()
-            || runqueue_ref.cpu_id() != self.boot_runqueue.cpu_id()
+            || !runqueue_ref.matches_cpu_owned_runqueue(self.boot_runqueue.cpu_id())
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -1138,7 +1137,7 @@ impl Scheduler {
             && runqueue.cpu_hartid() == cpu.hartid()
             && self.boot_runqueue_matches_metadata()
         {
-            Some(CurrentRunQueueRef::boot(runqueue.cpu_id()))
+            Some(CurrentRunQueueRef::cpu_owned(runqueue.cpu_id()))
         } else {
             None
         }
@@ -1161,7 +1160,7 @@ impl Scheduler {
             && runqueue.cpu_hartid() == cpu.hartid()
             && self.boot_runqueue_matches_metadata()
         {
-            Some(RunQueueRef::boot(runqueue.cpu_id()))
+            Some(RunQueueRef::cpu_owned(runqueue.cpu_id()))
         } else {
             None
         }
@@ -1323,7 +1322,7 @@ pub enum CurrentRunQueueRef {
 }
 
 impl CurrentRunQueueRef {
-    pub const fn boot(cpu_id: usize) -> Self {
+    pub const fn cpu_owned(cpu_id: usize) -> Self {
         Self::BootRunQueue { cpu_id }
     }
 
@@ -1333,8 +1332,10 @@ impl CurrentRunQueueRef {
         }
     }
 
-    pub const fn targets_boot_runqueue(self) -> bool {
-        matches!(self, Self::BootRunQueue { .. })
+    pub const fn matches_cpu_owned_runqueue(self, cpu_id: usize) -> bool {
+        match self {
+            Self::BootRunQueue { cpu_id: ref_cpu_id } => ref_cpu_id == cpu_id,
+        }
     }
 }
 
@@ -1344,7 +1345,7 @@ pub enum RunQueueRef {
 }
 
 impl RunQueueRef {
-    pub const fn boot(cpu_id: usize) -> Self {
+    pub const fn cpu_owned(cpu_id: usize) -> Self {
         Self::BootRunQueue { cpu_id }
     }
 
@@ -1354,8 +1355,10 @@ impl RunQueueRef {
         }
     }
 
-    pub const fn targets_boot_runqueue(self) -> bool {
-        matches!(self, Self::BootRunQueue { .. })
+    pub const fn matches_cpu_owned_runqueue(self, cpu_id: usize) -> bool {
+        match self {
+            Self::BootRunQueue { cpu_id: ref_cpu_id } => ref_cpu_id == cpu_id,
+        }
     }
 }
 
@@ -1953,7 +1956,7 @@ impl BootRunQueue {
         runqueue_ref: RunQueueRef,
         task_ref: CurrentTaskRef,
     ) -> EventResult {
-        if !runqueue_ref.targets_boot_runqueue() || runqueue_ref.cpu_id() != self.cpu_id() {
+        if !runqueue_ref.matches_cpu_owned_runqueue(self.cpu_id()) {
             return self.failed_setup();
         }
 
@@ -1968,8 +1971,7 @@ impl BootRunQueue {
         runqueue_ref: CurrentRunQueueRef,
         prev_ref: CurrentTaskRef,
     ) -> Result<CurrentTaskRef, EventError> {
-        if !runqueue_ref.targets_boot_runqueue()
-            || runqueue_ref.cpu_id() != self.cpu_id()
+        if !runqueue_ref.matches_cpu_owned_runqueue(self.cpu_id())
             || self.lifecycle.state() != State::Ready
             || !matches!(
                 prev_ref,
@@ -2059,7 +2061,7 @@ impl BootRunQueue {
         runqueue_ref: RunQueueRef,
         task_ref: CurrentTaskRef,
     ) -> EventResult {
-        if !runqueue_ref.targets_boot_runqueue() || runqueue_ref.cpu_id() != self.cpu_id() {
+        if !runqueue_ref.matches_cpu_owned_runqueue(self.cpu_id()) {
             return self.failed_setup();
         }
 

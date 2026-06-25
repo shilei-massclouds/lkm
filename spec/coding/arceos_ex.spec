@@ -2462,6 +2462,22 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_split_selected_runqueue_ref_from_current_runqueue_ref();
 
         /*
+         * BootRunQueueRef transitional lowering:
+         *
+         * The model may still name BootRunQueueRef as the current UP
+         * SelectRunQueue result, but Rust reference checks must present the
+         * capability as a CPU-owned runqueue match: the ref's CPU id must match
+         * the target CpuGroup.Cpu[id].RunQueue / BootRunQueue metadata. Public
+         * implementation constructors and predicates should not expose
+         * `targets_boot_runqueue` or `boot(...)` as the formal semantic API
+         * for selected or current runqueue refs; use neutral CPU-owned
+         * constructors and matching helpers instead. The boot-backed enum
+         * variant may remain as a storage/lowering detail until SMP runqueue
+         * variants exist.
+         */
+        arceos_ex_must_treat_boot_runqueue_ref_as_up_transitional_lowering();
+
+        /*
          * CurrentRunQueueRef API smoke:
          *
          * CurrentRunQueueRef/RunQueue ObjectApiBehavior smoke must exercise
