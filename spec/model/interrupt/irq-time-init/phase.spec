@@ -2,11 +2,270 @@
  * IRQ and Time Init Phase Specification
  *
  * This is InterruptPhase subphase 1. It starts after
- * sched_init/context_tracking_init and ends after the boot CPU
- * local_irq_enable() boundary. Moving the interrupt-open action here lets this
- * phase expose a real IRQ/timer acceptance test while task and SMP concurrency
- * remain closed.
+ * sched_init/context_tracking_init and ends with IRQ/time infrastructure ready
+ * while the boot CPU local interrupt gate remains closed. The following
+ * LocalIrqEnablePhase owns the local_irq_enable() boundary, so this phase can
+ * remain covered by the global exclusive boot context.
  */
+
+context IrqTimeInitGlobalExclusiveContext: Context {
+    /*
+     * This context captures the start_kernel() section before
+     * local_irq_enable(): one boot CPU, one boot task, local interrupts still
+     * disabled, and preemption disabled. The following LocalIrqEnablePhase is
+     * intentionally outside this context.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        IrqTimeInitPhase;
+        IrqController;
+        RiscvIntc;
+        IrqChipInitTable;
+        PlicDriver;
+        PlicIrqDomain;
+        IrqHandlerRegistry;
+        IrqDispatchTree;
+        Tick;
+        TimerWheel;
+        SrcuCore;
+        HrtimerCore;
+        Timekeeper;
+        RiscvTimerProvider;
+        Softirq;
+        Randomness;
+        BootStackCanary;
+        PerfEventCore;
+        ProfileCore;
+        SbiIpi;
+        IpiMux;
+        SmpCallFunction;
+        InterruptStream;
+        BootCpuLocalInterrupt;
+    }
+}
+
+context IrqControllerDescInitContext: Context {
+    /*
+     * early_irq_init()/init_IRQ() initializes irq_desc and the generic IRQ
+     * domain shell while the boot context is still globally exclusive.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        IrqController;
+    }
+}
+
+context PlicIrqDomainMappingContext: Context {
+    /*
+     * PLIC irqdomain setup/mapping owns the logical IRQ allocator and mapping
+     * table publication boundary. It defines source gates but does not enable
+     * them.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        PlicIrqDomain;
+        PlicIrqMapping;
+    }
+}
+
+context TimerBaseInitContext: Context {
+    /*
+     * init_timers() initializes per-CPU timer bases, base locks, pending maps
+     * and empty wheel vectors before TIMER_SOFTIRQ can run.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        TimerWheel;
+        Softirq;
+        PerCpuStorage;
+    }
+}
+
+context HrtimerBaseInitContext: Context {
+    /*
+     * hrtimers_init() initializes hrtimer cpu bases, clock bases, base locks
+     * and empty active queues before HRTIMER_SOFTIRQ can run.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        HrtimerCore;
+        Softirq;
+        PerCpuStorage;
+    }
+}
+
+type TimekeeperSeqWriteSectionType: KernelObject {
+    processes {
+        Transition::Enter {
+            state_effect: StateEffect::Conditional;
+            ensures {
+                timekeeper_seqwrite_entered(TimekeeperSeqWriteSection);
+            }
+        }
+
+        Transition::Exit {
+            state_effect: StateEffect::Conditional;
+            ensures {
+                timekeeper_seqwrite_exited(TimekeeperSeqWriteSection);
+            }
+        }
+    }
+}
+
+object TimekeeperSeqWriteSection: TimekeeperSeqWriteSectionType {
+    initial_state: State::Ready;
+
+    state State::Ready {
+    }
+}
+
+context TimekeeperSeqWriteContext: Context {
+    /*
+     * timekeeping_init() writes tk_core under the timekeeper seqcount writer
+     * protocol. Reader retry semantics remain a later runtime refinement.
+     */
+    guard {
+        entered_by {
+            TimekeeperSeqWriteSection.Transition::Enter;
+        }
+
+        exited_by {
+            TimekeeperSeqWriteSection.Transition::Exit;
+        }
+    }
+
+    obj_refs {
+        Timekeeper;
+        ClocksourceCore;
+        JiffiesClocksource;
+    }
+}
+
+context SrcuBootListDrainContext: Context {
+    /*
+     * srcu_init() flips srcu_init_done and drains the boot SRCU list while
+     * timer/workqueue infrastructure needed for delayed SRCU callbacks exists.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        SrcuCore;
+        RcuCore;
+        TimerWheel;
+        Workqueue;
+    }
+}
+
+context BootStackCanaryInitContext: Context {
+    /*
+     * boot_init_stack_canary() depends on random_init() and seeds the current
+     * boot task/per-task canary while ordinary task concurrency is still closed.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        BootStackCanary;
+        Randomness;
+        BootInitStack;
+    }
+}
+
+context PerfPmusSrcuInitContext: Context {
+    /*
+     * perf_event_init() initializes PMU registry state and pmus_srcu before
+     * runtime PMU registration or event allocation is opened.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        PerfEventCore;
+        SrcuCore;
+        CpuGroup;
+    }
+}
+
+context SmpCallFunctionInitContext: Context {
+    /*
+     * call_function_init() initializes per-CPU call_single queues and locks.
+     * Runtime IPI delivery remains deferred until interrupt/SMP concurrency is
+     * explicitly opened.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        SmpCallFunction;
+        IpiMux;
+        PerCpuStorage;
+    }
+}
 
 /*
  * IrqController 表示 early_irq_init()/init_IRQ() 建立的 IRQ descriptor、
@@ -26,10 +285,22 @@ object IrqController: InterruptObject {
                     CpuGroup.state == State::Ready;
                 }
 
+                within IrqControllerDescInitContext {
+                    ensures {
+                        irq_controller_desc_init_context_used(IrqController);
+                        irq_desc_locks_ready(IrqController);
+                        sparse_irq_tree_lock_deferred(IrqController);
+                        irq_domain_mutex_deferred(IrqController);
+                    }
+                }
+
                 ensures {
                     irq_descriptors_ready(IrqController);
                     irq_domain_ready(IrqController, DeviceTree);
                     irq_allocator_minimal_ready(IrqController, PageAllocator, SlubSubsystem);
+                    irq_desc_locks_ready(IrqController);
+                    sparse_irq_tree_lock_deferred(IrqController);
+                    irq_domain_mutex_deferred(IrqController);
                 }
             }
         }
@@ -40,6 +311,9 @@ object IrqController: InterruptObject {
             irq_descriptors_ready(IrqController);
             irq_domain_ready(IrqController, DeviceTree);
             irq_allocator_minimal_ready(IrqController, PageAllocator, SlubSubsystem);
+            irq_desc_locks_ready(IrqController);
+            sparse_irq_tree_lock_deferred(IrqController);
+            irq_domain_mutex_deferred(IrqController);
         }
     }
 }
@@ -893,6 +1167,15 @@ object PlicIrqDomain: IrqDomain {
                     IrqController.state == State::Ready;
                 }
 
+                within PlicIrqDomainMappingContext {
+                    ensures {
+                        plic_irq_domain_mapping_context_used(PlicIrqDomain);
+                        plic_irq_domain_mapping_table_ready(PlicIrqDomain);
+                        plic_irq_domain_logical_allocator_ready(PlicIrqDomain);
+                        plic_irq_domain_enable_deferred(PlicIrqDomain);
+                    }
+                }
+
                 ensures {
                     irq_domain_hwirq_valid_range_ready(PlicIrqDomain);
                     irq_domain_logical_irq_allocator_ready(PlicIrqDomain);
@@ -946,6 +1229,15 @@ object PlicIrqMapping: InterruptObject {
                 depends_on {
                     PlicIrqDomain.state == State::Ready;
                     Plic.state == State::Ready;
+                }
+
+                within PlicIrqDomainMappingContext {
+                    ensures {
+                        plic_irq_domain_mapping_context_used(PlicIrqMapping);
+                        plic_irq_mapping_source_gate_defined(PlicIrqMapping, IrqGateRef::PlicUartSource, HwirqRef::PlicUart0);
+                        plic_irq_mapping_source_gate_closed(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                        plic_irq_mapping_source_enable_deferred(PlicIrqMapping, IrqGateRef::PlicUartSource);
+                    }
                 }
 
                 ensures {
@@ -1112,9 +1404,21 @@ object TimerWheel: KernelObject {
                     BootInitTask.state == State::Online;
                 }
 
+                within TimerBaseInitContext {
+                    ensures {
+                        timer_base_init_context_used(TimerWheel);
+                        timer_base_locks_ready(TimerWheel);
+                        timer_base_pending_maps_ready(TimerWheel);
+                        timer_base_vectors_empty(TimerWheel);
+                    }
+                }
+
                 ensures {
                     timer_wheel_ready(TimerWheel, CpuGroup);
                     cpu_timer_bases_ready(TimerWheel, PerCpuStorage);
+                    timer_base_locks_ready(TimerWheel);
+                    timer_base_pending_maps_ready(TimerWheel);
+                    timer_base_vectors_empty(TimerWheel);
                     boot_init_task_posix_cpu_timer_work_ready(BootInitTask);
                     timer_softirq_registered(Softirq, TimerWheel);
                 }
@@ -1126,8 +1430,58 @@ object TimerWheel: KernelObject {
         invariant {
             timer_wheel_ready(TimerWheel, CpuGroup);
             cpu_timer_bases_ready(TimerWheel, PerCpuStorage);
+            timer_base_locks_ready(TimerWheel);
+            timer_base_pending_maps_ready(TimerWheel);
+            timer_base_vectors_empty(TimerWheel);
             boot_init_task_posix_cpu_timer_work_ready(BootInitTask);
             timer_softirq_registered(Softirq, TimerWheel);
+        }
+    }
+}
+
+/*
+ * SrcuCore 表示 srcu_init() 建立的 TREE_SRCU boot-time 基础。它依赖
+ * RCU、timer wheel 和 early workqueue 壳，用于让后续 perf/PMU SRCU
+ * 初始化有明确基础；每个 srcu_struct 的具体锁仍按对象使用点延后。
+ */
+object SrcuCore: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    RcuCore.state == State::Ready;
+                    TimerWheel.state == State::Ready;
+                    Workqueue.state == State::Prepared;
+                }
+
+                within SrcuBootListDrainContext {
+                    ensures {
+                        srcu_boot_list_drain_context_used(SrcuCore);
+                        srcu_boot_list_drained(SrcuCore);
+                        srcu_delayed_work_queueing_ready(SrcuCore, TimerWheel, Workqueue);
+                    }
+                }
+
+                ensures {
+                    tree_srcu_enabled(SrcuCore);
+                    srcu_init_done(SrcuCore);
+                    srcu_boot_list_drained(SrcuCore);
+                    srcu_per_struct_locks_deferred(SrcuCore);
+                    srcu_delayed_work_queueing_ready(SrcuCore, TimerWheel, Workqueue);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            tree_srcu_enabled(SrcuCore);
+            srcu_init_done(SrcuCore);
+            srcu_boot_list_drained(SrcuCore);
+            srcu_per_struct_locks_deferred(SrcuCore);
+            srcu_delayed_work_queueing_ready(SrcuCore, TimerWheel, Workqueue);
         }
     }
 }
@@ -1147,9 +1501,21 @@ object HrtimerCore: KernelObject {
                     Softirq.state == State::Prepared;
                 }
 
+                within HrtimerBaseInitContext {
+                    ensures {
+                        hrtimer_base_init_context_used(HrtimerCore);
+                        hrtimer_base_locks_ready(HrtimerCore);
+                        hrtimer_clock_bases_ready(HrtimerCore);
+                        hrtimer_active_queues_empty(HrtimerCore);
+                    }
+                }
+
                 ensures {
                     hrtimer_core_ready(HrtimerCore, CpuGroup);
                     boot_cpu_hrtimer_base_ready(HrtimerCore);
+                    hrtimer_base_locks_ready(HrtimerCore);
+                    hrtimer_clock_bases_ready(HrtimerCore);
+                    hrtimer_active_queues_empty(HrtimerCore);
                     hrtimer_softirq_registered(Softirq, HrtimerCore);
                 }
             }
@@ -1160,6 +1526,9 @@ object HrtimerCore: KernelObject {
         invariant {
             hrtimer_core_ready(HrtimerCore, CpuGroup);
             boot_cpu_hrtimer_base_ready(HrtimerCore);
+            hrtimer_base_locks_ready(HrtimerCore);
+            hrtimer_clock_bases_ready(HrtimerCore);
+            hrtimer_active_queues_empty(HrtimerCore);
             hrtimer_softirq_registered(Softirq, HrtimerCore);
         }
     }
@@ -1179,9 +1548,19 @@ object Timekeeper: KernelObject {
                     StaticBranch.state == State::Ready;
                 }
 
-                drives {
-                    ClocksourceCore.Transition::Preset;
-                    JiffiesClocksource.Transition::Preset;
+                within TimekeeperSeqWriteContext {
+                    drives {
+                        ClocksourceCore.Transition::Preset;
+                        JiffiesClocksource.Transition::Preset;
+                    }
+
+                    ensures {
+                        timekeeper_seqwrite_context_used(Timekeeper);
+                        timekeeper_tk_core_seqcount_ready(Timekeeper);
+                        timekeeper_tk_core_write_seqcount_used(Timekeeper);
+                        timekeeper_lock_ready(Timekeeper);
+                        timekeeper_shadow_timekeeper_ready(Timekeeper);
+                    }
                 }
 
                 ensures {
@@ -1189,6 +1568,10 @@ object Timekeeper: KernelObject {
                     wall_time_basis_ready(Timekeeper);
                     monotonic_time_basis_ready(Timekeeper);
                     raw_time_basis_ready(Timekeeper);
+                    timekeeper_tk_core_seqcount_ready(Timekeeper);
+                    timekeeper_tk_core_write_seqcount_used(Timekeeper);
+                    timekeeper_lock_ready(Timekeeper);
+                    timekeeper_shadow_timekeeper_ready(Timekeeper);
                     current_clocksource_is_jiffies(Timekeeper, JiffiesClocksource);
                 }
             }
@@ -1203,6 +1586,10 @@ object Timekeeper: KernelObject {
             wall_time_basis_ready(Timekeeper);
             monotonic_time_basis_ready(Timekeeper);
             raw_time_basis_ready(Timekeeper);
+            timekeeper_tk_core_seqcount_ready(Timekeeper);
+            timekeeper_tk_core_write_seqcount_used(Timekeeper);
+            timekeeper_lock_ready(Timekeeper);
+            timekeeper_shadow_timekeeper_ready(Timekeeper);
             current_clocksource_is_jiffies(Timekeeper, JiffiesClocksource);
         }
     }
@@ -1375,6 +1762,138 @@ object IpiMux: InterruptObject {
 }
 
 /*
+ * BootStackCanary 表示 boot_init_stack_canary()。当前配置启用
+ * STACKPROTECTOR_PER_TASK，因此这里要求 random_init() 已完成并将 boot
+ * init task/per-task canary seed 物化；完整 per-task fork 传播留给后续任务模型。
+ */
+object BootStackCanary: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    Randomness.state == State::Ready;
+                    BootInitStack.state == State::Online;
+                }
+
+                within BootStackCanaryInitContext {
+                    ensures {
+                        boot_stack_canary_init_context_used(BootStackCanary);
+                        boot_stack_canary_uses_randomness(BootStackCanary, Randomness);
+                        boot_init_task_canary_seeded(BootStackCanary);
+                    }
+                }
+
+                ensures {
+                    stackprotector_enabled(BootStackCanary);
+                    per_task_stack_canary_ready(BootStackCanary);
+                    boot_stack_canary_uses_randomness(BootStackCanary, Randomness);
+                    boot_init_task_canary_seeded(BootStackCanary);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            stackprotector_enabled(BootStackCanary);
+            per_task_stack_canary_ready(BootStackCanary);
+            boot_stack_canary_uses_randomness(BootStackCanary, Randomness);
+            boot_init_task_canary_seeded(BootStackCanary);
+        }
+    }
+}
+
+/*
+ * PerfEventCore 表示 perf_event_init() 的启动期 PMU registry/SRCU 基础。
+ * 运行期 event cache 分配和硬件 breakpoint 细节后续展开。
+ */
+object PerfEventCore: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    SrcuCore.state == State::Ready;
+                    CpuGroup.state == State::Ready;
+                }
+
+                within PerfPmusSrcuInitContext {
+                    ensures {
+                        perf_pmus_srcu_init_context_used(PerfEventCore);
+                        perf_pmus_srcu_ready(PerfEventCore, SrcuCore);
+                        perf_cpu_context_locks_ready(PerfEventCore, CpuGroup);
+                    }
+                }
+
+                ensures {
+                    perf_events_enabled_by_config(PerfEventCore);
+                    perf_pmu_idr_ready(PerfEventCore);
+                    perf_pmus_srcu_ready(PerfEventCore, SrcuCore);
+                    perf_pmu_registry_ready(PerfEventCore);
+                    perf_cpu_context_locks_ready(PerfEventCore, CpuGroup);
+                    perf_swevent_pmus_registered(PerfEventCore);
+                    perf_reboot_notifier_registered(PerfEventCore);
+                    perf_event_cache_deferred(PerfEventCore);
+                    perf_hw_breakpoint_deferred(PerfEventCore);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            perf_events_enabled_by_config(PerfEventCore);
+            perf_pmu_idr_ready(PerfEventCore);
+            perf_pmus_srcu_ready(PerfEventCore, SrcuCore);
+            perf_pmu_registry_ready(PerfEventCore);
+            perf_cpu_context_locks_ready(PerfEventCore, CpuGroup);
+            perf_swevent_pmus_registered(PerfEventCore);
+            perf_reboot_notifier_registered(PerfEventCore);
+            perf_event_cache_deferred(PerfEventCore);
+            perf_hw_breakpoint_deferred(PerfEventCore);
+        }
+    }
+}
+
+/*
+ * ProfileCore 表示 profile_init()。当前默认无 profile= 参数，因此
+ * CONFIG_PROFILING 路径被记录为参数缺省、buffer 分配裁剪和 proc export 延后。
+ */
+object ProfileCore: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    Randomness.state == State::Ready;
+                    PerfEventCore.state == State::Ready;
+                }
+
+                ensures {
+                    profile_enabled_by_config(ProfileCore);
+                    profile_param_absent(ProfileCore);
+                    profile_buffer_allocation_trimmed(ProfileCore);
+                    profile_proc_export_deferred(ProfileCore);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            profile_enabled_by_config(ProfileCore);
+            profile_param_absent(ProfileCore);
+            profile_buffer_allocation_trimmed(ProfileCore);
+            profile_proc_export_deferred(ProfileCore);
+        }
+    }
+}
+
+/*
  * PlicDriver 表示 Linux-like IRQCHIP_DECLARE()/irqchip init entry 层。
  * 它不是普通 PlatformBus driver；其 init callback 由 irqchip_init()
  * 经 of_irq_init() 遍历 LDS section 并根据 DeviceTree compatible 匹配后调度。
@@ -1535,11 +2054,21 @@ object SmpCallFunction: TaskObject {
                     PerCpuStorage.state == State::Ready;
                 }
 
+                within SmpCallFunctionInitContext {
+                    ensures {
+                        smp_call_function_init_context_used(SmpCallFunction);
+                        call_single_queue_locks_ready(SmpCallFunction, PerCpuStorage);
+                        smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
+                    }
+                }
+
                 ensures {
                     smp_call_function_ready(SmpCallFunction, CpuGroup);
                     call_single_queue_ready(SmpCallFunction, PerCpuStorage);
+                    call_single_queue_locks_ready(SmpCallFunction, PerCpuStorage);
                     smp_call_function_ipi_route_ready(SmpCallFunction, IpiMux);
                     smp_call_function_ipi_mux_ready(SmpCallFunction, IpiMux);
+                    smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
                 }
             }
         }
@@ -1549,15 +2078,19 @@ object SmpCallFunction: TaskObject {
         invariant {
             smp_call_function_ready(SmpCallFunction, CpuGroup);
             call_single_queue_ready(SmpCallFunction, PerCpuStorage);
+            call_single_queue_locks_ready(SmpCallFunction, PerCpuStorage);
             smp_call_function_ipi_route_ready(SmpCallFunction, IpiMux);
             smp_call_function_ipi_mux_ready(SmpCallFunction, IpiMux);
+            smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
         }
     }
 }
 
 /*
- * IrqTimeInitPhase 表示 InterruptPhase 的第一个子阶段。它在阶段末尾打开
- * boot CPU 本地中断总入口，使后续 smoke 可以真实验收 timer interrupt。
+ * IrqTimeInitPhase 表示 InterruptPhase 的第一个子阶段。它建立
+ * early_irq_init()/init_IRQ()/timer/timekeeping/random/IPI/call-function
+ * 基础，但不打开 boot CPU 本地中断总入口；local_irq_enable() 独立由
+ * LocalIrqEnablePhase 承载。
  */
 object IrqTimeInitPhase: PhaseObject {
     initial_state: State::Base;
@@ -1576,44 +2109,56 @@ object IrqTimeInitPhase: PhaseObject {
                     InterruptStream.state == State::Ready;
                 }
 
-                drives {
-                    IrqController.Transition::Setup;
-                    RiscvIntc.Transition::Setup;
-                    IrqChipInitTable.Transition::Preset;
-                    PlicDriver.Transition::Preset;
-                    IrqChipInitTable.Transition::Setup;
-                    PlicIrqDomain.Transition::Preset;
-                    PlicIrqDomain.Transition::Setup;
-                    IrqHandlerRegistry.Transition::Setup;
-                    IrqDispatchTree.Transition::Setup;
-                    Tick.Transition::Preset;
-                    TimerWheel.Transition::Setup;
-                    HrtimerCore.Transition::Setup;
-                    Timekeeper.Transition::Setup;
-                    RiscvTimerProvider.Transition::Setup;
-                    Tick.Transition::Setup;
-                    Softirq.Transition::Setup;
-                    Randomness.Transition::Setup;
-                    SbiIpi.Transition::Setup;
-                    IpiMux.Transition::Setup;
-                    SmpCallFunction.Transition::Setup;
-                    InterruptStream.Transition::Enable;
+                within IrqTimeInitGlobalExclusiveContext {
+                    drives {
+                        IrqController.Transition::Setup;
+                        RiscvIntc.Transition::Setup;
+                        IrqChipInitTable.Transition::Preset;
+                        PlicDriver.Transition::Preset;
+                        IrqChipInitTable.Transition::Setup;
+                        PlicIrqDomain.Transition::Preset;
+                        PlicIrqDomain.Transition::Setup;
+                        IrqHandlerRegistry.Transition::Setup;
+                        IrqDispatchTree.Transition::Setup;
+                        Tick.Transition::Preset;
+                        TimerWheel.Transition::Setup;
+                        SrcuCore.Transition::Setup;
+                        HrtimerCore.Transition::Setup;
+                        Timekeeper.Transition::Setup;
+                        RiscvTimerProvider.Transition::Setup;
+                        Tick.Transition::Setup;
+                        Softirq.Transition::Setup;
+                        Randomness.Transition::Setup;
+                        BootStackCanary.Transition::Setup;
+                        PerfEventCore.Transition::Setup;
+                        ProfileCore.Transition::Setup;
+                        SbiIpi.Transition::Setup;
+                        IpiMux.Transition::Setup;
+                        SmpCallFunction.Transition::Setup;
+                    }
+
+                    ensures {
+                        irq_time_init_global_exclusive_context_used(IrqTimeInitPhase);
+                        cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+                        interrupt_concurrency_closed();
+                        early_boot_irqs_disabled_true();
+                    }
                 }
 
                 ensures {
                     irq_time_init_ready(IrqTimeInitPhase);
-                    interrupt_concurrency_open_for_boot_cpu();
+                    irq_time_init_global_exclusive_context_used(IrqTimeInitPhase);
+                    interrupt_concurrency_closed();
                     task_concurrency_closed();
                     smp_concurrency_closed();
-                    early_boot_irqs_disabled_false();
+                    early_boot_irqs_disabled_true();
                     time_read_smoke_available(RiscvTimerProvider);
-                    clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
                 }
 
                 deferred {
                     "early_irq_init() 的完整 irq_desc allocator 细节暂缓；当前只要求 descriptor/domain 壳和 timer IRQ mapping。";
-                    "perf_event_init() 暂缓：perf core 和 PMU registry 不属于当前最小 IRQ/timer 验收闭环。";
-                    "profile_init() 暂缓：profile buffer 和 proc export 后续再建模。";
+                    "perf_event_init() 的 event cache 分配、硬件 breakpoint 细节和运行期 PMU event 生命周期暂缓；当前只要求 PMU registry、pmus_srcu 和 CPU context locks 基础。";
+                    "profile_init() 的 profile buffer 分配和 proc export 暂缓；当前默认无 profile= 参数，只记录裁剪边界。";
                     "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
                     "更完整 UART RX、ordinary TTY runtime/FIFO 策略和复杂并发策略暂缓；当前 IRQ-time/initcall 路径已建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，并在 InitcallPhase 后续边界由 Serial8250Console.Enable/Serial8250ConsoleIrqTxProbe 完成 interrupt-driven TX 首轮。";
@@ -1636,6 +2181,7 @@ object IrqTimeInitPhase: PhaseObject {
             Tick.state == State::Ready;
             TickBroadcast.state == State::Ready;
             TimerWheel.state == State::Ready;
+            SrcuCore.state == State::Ready;
             HrtimerCore.state == State::Ready;
             Timekeeper.state == State::Ready;
             ClocksourceCore.state == State::Prepared;
@@ -1643,16 +2189,20 @@ object IrqTimeInitPhase: PhaseObject {
             RiscvTimerProvider.state == State::Ready;
             Softirq.state == State::Ready;
             Randomness.state == State::Ready;
+            BootStackCanary.state == State::Ready;
+            PerfEventCore.state == State::Ready;
+            ProfileCore.state == State::Ready;
             IpiMux.state == State::Ready;
             SbiIpi.state == State::Ready;
             SmpCallFunction.state == State::Ready;
-            InterruptStream.state == State::Online;
-            interrupt_concurrency_open_for_boot_cpu();
+            InterruptStream.state == State::Ready;
+            cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
+            irq_time_init_global_exclusive_context_used(IrqTimeInitPhase);
+            interrupt_concurrency_closed();
             task_concurrency_closed();
             smp_concurrency_closed();
-            early_boot_irqs_disabled_false();
+            early_boot_irqs_disabled_true();
             time_read_smoke_available(RiscvTimerProvider);
-            clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
         }
     }
 }

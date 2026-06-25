@@ -1,6 +1,7 @@
 use super::{
     command_line::StaticCommandLine,
     cpu_group::CpuGroup,
+    irq_time::Timekeeper,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
@@ -10,6 +11,11 @@ pub struct Randomness {
     early_mix: u64,
     arch_entropy_bits: u16,
     fully_ready: bool,
+    timekeeping_required: bool,
+    cycle_entropy_mixed: bool,
+    input_pool_lock_deferred: bool,
+    base_crng_lock_deferred: bool,
+    pm_notifier_deferred: bool,
 }
 
 impl Randomness {
@@ -19,6 +25,11 @@ impl Randomness {
             early_mix: 0,
             arch_entropy_bits: 0,
             fully_ready: false,
+            timekeeping_required: false,
+            cycle_entropy_mixed: false,
+            input_pool_lock_deferred: false,
+            base_crng_lock_deferred: false,
+            pm_notifier_deferred: false,
         }
     }
 
@@ -39,6 +50,26 @@ impl Randomness {
     #[allow(dead_code)]
     pub const fn is_fully_ready(&self) -> bool {
         self.fully_ready
+    }
+
+    pub const fn timekeeping_required(&self) -> bool {
+        self.timekeeping_required
+    }
+
+    pub const fn cycle_entropy_mixed(&self) -> bool {
+        self.cycle_entropy_mixed
+    }
+
+    pub const fn input_pool_lock_deferred(&self) -> bool {
+        self.input_pool_lock_deferred
+    }
+
+    pub const fn base_crng_lock_deferred(&self) -> bool {
+        self.base_crng_lock_deferred
+    }
+
+    pub const fn pm_notifier_deferred(&self) -> bool {
+        self.pm_notifier_deferred
     }
 
     pub fn preset(&mut self, static_command_line: &StaticCommandLine) -> EventResult {
@@ -63,7 +94,12 @@ impl Randomness {
         )
     }
 
-    pub fn setup(&mut self, cpu_group: &CpuGroup, time_seed: u64) -> EventResult {
+    pub fn setup(
+        &mut self,
+        cpu_group: &CpuGroup,
+        timekeeper: &Timekeeper,
+        time_seed: u64,
+    ) -> EventResult {
         let Some(boot_cpu) = cpu_group.boot_cpu() else {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -72,7 +108,10 @@ impl Randomness {
                 State::Ready,
             );
         };
-        if self.lifecycle.state() != State::Prepared || cpu_group.state() != State::Ready {
+        if self.lifecycle.state() != State::Prepared
+            || cpu_group.state() != State::Ready
+            || timekeeper.state() != State::Ready
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -83,6 +122,11 @@ impl Randomness {
 
         self.early_mix = mix_bytes(self.early_mix, &time_seed.to_le_bytes());
         self.early_mix = mix_bytes(self.early_mix, &boot_cpu.hartid().to_le_bytes());
+        self.timekeeping_required = true;
+        self.cycle_entropy_mixed = true;
+        self.input_pool_lock_deferred = true;
+        self.base_crng_lock_deferred = true;
+        self.pm_notifier_deferred = true;
         self.fully_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,

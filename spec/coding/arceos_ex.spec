@@ -143,7 +143,11 @@ predicate arceos_ex_must_sched_init_trace_housekeeping_context_tracking_deferred
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
-predicate arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action() -> bool;
+predicate arceos_ex_must_irq_time_init_keep_local_irq_closed() -> bool;
+predicate arceos_ex_must_local_irq_enable_model_path_under_interrupt_phase() -> bool;
+predicate arceos_ex_must_local_irq_enable_code_path_follow_interrupt_phase_tree() -> bool;
+predicate arceos_ex_must_local_irq_enable_be_separate_interrupt_subphase() -> bool;
+predicate arceos_ex_must_local_irq_enable_only_open_boot_cpu_local_gate() -> bool;
 predicate arceos_ex_must_irq_time_init_keep_task_and_smp_concurrency_closed() -> bool;
 predicate arceos_ex_must_irq_time_init_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_irq_time_init_expose_time_and_clockevent_smoke_actions() -> bool;
@@ -181,7 +185,7 @@ predicate arceos_ex_must_not_reintroduce_checkpoint_write_handler_variant() -> b
 predicate arceos_ex_must_not_register_smoke_cases_as_checkpoint_handlers() -> bool;
 predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
-predicate arceos_ex_must_irq_open_prepare_run_after_irq_time_init() -> bool;
+predicate arceos_ex_must_irq_open_prepare_run_after_local_irq_enable() -> bool;
 predicate arceos_ex_must_irq_open_prepare_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_irq_open_prepare_keep_slub_ready_not_online() -> bool;
 predicate arceos_ex_must_irq_open_prepare_console_prepared_only() -> bool;
@@ -1094,6 +1098,47 @@ type ArceosExMmCoreInitCodingShould {
     }
 }
 
+type ArceosExLocalIrqEnableCodingMust {
+    invariant {
+        /*
+         * Model path:
+         *
+         * LocalIrqEnablePhase is InterruptPhase subphase 2. Its formal model
+         * path is spec/model/interrupt/local-irq-enable/.
+         */
+        arceos_ex_must_local_irq_enable_model_path_under_interrupt_phase();
+
+        /*
+         * Code path:
+         *
+         * Phase source layout must follow the model phase tree. The target
+         * implementation path for this phase is the interrupt phase subtree,
+         * for example impl/arceos_ex/src/phases/interrupt/local_irq_enable.rs.
+         */
+        arceos_ex_must_local_irq_enable_code_path_follow_interrupt_phase_tree();
+
+        /*
+         * Separate subphase:
+         *
+         * local_irq_enable() must be represented as a standalone
+         * LocalIrqEnablePhase after IrqTimeInitPhase.Ready. It must not be
+         * folded into IrqTimeInitPhase or moved to IrqOpenPreparePhase.
+         */
+        arceos_ex_must_local_irq_enable_be_separate_interrupt_subphase();
+
+        /*
+         * Scope:
+         *
+         * The phase may only open the boot CPU local interrupt total gate
+         * (RISC-V sstatus.SIE) and clear early_boot_irqs_disabled. It must not
+         * enable PLIC source gates, root external input gates, periodic tick,
+         * full softirq execution, workqueue workers, RCU GP kthreads, task
+         * concurrency or SMP concurrency.
+         */
+        arceos_ex_must_local_irq_enable_only_open_boot_cpu_local_gate();
+    }
+}
+
 type ArceosExStartupPhaseCodingMust {
     invariant {
         /*
@@ -1321,11 +1366,12 @@ type ArceosExIrqTimeInitCodingMust {
         /*
          * Interrupt-open boundary:
          *
-         * local_irq_enable() is the terminal action of IrqTimeInitPhase. It
-         * must be represented as InterruptStream.enable() on the boot CPU and
-         * must not be moved back to the beginning of a later IRQ-open phase.
+         * IrqTimeInitPhase must finish with IRQ/time infrastructure ready but
+         * boot CPU local interrupts still disabled. The local_irq_enable()
+         * boundary belongs to the following LocalIrqEnablePhase so this setup
+         * body can remain under the global exclusive boot context.
          */
-        arceos_ex_must_irq_time_init_local_irq_enable_is_terminal_action();
+        arceos_ex_must_irq_time_init_keep_local_irq_closed();
 
         /*
          * PLIC driver split:
@@ -1688,7 +1734,7 @@ type ArceosExIrqOpenPrepareCodingMust {
         /*
          * Model path:
          *
-         * IrqOpenPreparePhase is InterruptPhase subphase 2. Its formal model
+         * IrqOpenPreparePhase is InterruptPhase subphase 3. Its formal model
          * path is spec/model/interrupt/irq-open-prepare/.
          */
         arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase();
@@ -1705,11 +1751,11 @@ type ArceosExIrqOpenPrepareCodingMust {
         /*
          * Ordering:
          *
-         * IrqOpenPreparePhase must run after IrqTimeInitPhase.Ready, with the
-         * boot CPU local interrupt gate already open. It must not move
-         * local_irq_enable() out of IrqTimeInitPhase.
+         * IrqOpenPreparePhase must run after LocalIrqEnablePhase.Ready, with
+         * the boot CPU local interrupt gate already open. It must not contain
+         * another local_irq_enable() boundary.
          */
-        arceos_ex_must_irq_open_prepare_run_after_irq_time_init();
+        arceos_ex_must_irq_open_prepare_run_after_local_irq_enable();
 
         /*
          * Runtime services:

@@ -9,18 +9,20 @@ use super::{
     device::DeviceRef,
     device_tree::{DeviceNodeRef, DevicePropertyRef, DeviceTree},
     fdt_reader::{read_be_u32, read_cells},
+    init_stack::InitStack,
     interrupt_stream::InterruptStream,
     ioremap::Ioremap,
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, SlubSubsystem, VmallocAllocator},
     per_cpu_storage::PerCpuStorage,
+    rcu::RcuCore,
     sbi::Sbi,
     softirq::Softirq,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::StaticBranch,
+    workqueue::Workqueue,
 };
 use crate::{arch::riscv64, trace::Checkpoint};
 
-const DEFAULT_TIMEBASE_HZ: u64 = 10_000_000;
 const IRQCHIP_RUN_RECORD_CAPACITY: usize = 8;
 const PLIC_COMPATIBLE_SIFIVE: &[u8] = b"sifive,plic-1.0.0";
 const PLIC_COMPATIBLE_RISCV: &[u8] = b"riscv,plic0";
@@ -217,6 +219,9 @@ pub struct IrqController {
     descriptors_ready: bool,
     domain_ready: bool,
     allocator_minimal_ready: bool,
+    desc_locks_ready: bool,
+    sparse_irq_tree_lock_deferred: bool,
+    irq_domain_mutex_deferred: bool,
 }
 
 impl IrqController {
@@ -226,6 +231,9 @@ impl IrqController {
             descriptors_ready: false,
             domain_ready: false,
             allocator_minimal_ready: false,
+            desc_locks_ready: false,
+            sparse_irq_tree_lock_deferred: false,
+            irq_domain_mutex_deferred: false,
         }
     }
 
@@ -243,6 +251,18 @@ impl IrqController {
 
     pub const fn allocator_minimal_ready(&self) -> bool {
         self.allocator_minimal_ready
+    }
+
+    pub const fn desc_locks_ready(&self) -> bool {
+        self.desc_locks_ready
+    }
+
+    pub const fn sparse_irq_tree_lock_deferred(&self) -> bool {
+        self.sparse_irq_tree_lock_deferred
+    }
+
+    pub const fn irq_domain_mutex_deferred(&self) -> bool {
+        self.irq_domain_mutex_deferred
     }
 
     pub fn setup(
@@ -271,6 +291,9 @@ impl IrqController {
         self.descriptors_ready = true;
         self.domain_ready = true;
         self.allocator_minimal_ready = true;
+        self.desc_locks_ready = true;
+        self.sparse_irq_tree_lock_deferred = true;
+        self.irq_domain_mutex_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -1401,6 +1424,9 @@ impl TickBroadcast {
 pub struct TimerWheel {
     lifecycle: Lifecycle,
     cpu_timer_bases_ready: bool,
+    base_locks_ready: bool,
+    pending_maps_ready: bool,
+    vectors_empty: bool,
     posix_cpu_timer_work_ready: bool,
     timer_softirq_registered: bool,
 }
@@ -1410,6 +1436,9 @@ impl TimerWheel {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             cpu_timer_bases_ready: false,
+            base_locks_ready: false,
+            pending_maps_ready: false,
+            vectors_empty: false,
             posix_cpu_timer_work_ready: false,
             timer_softirq_registered: false,
         }
@@ -1421,6 +1450,18 @@ impl TimerWheel {
 
     pub const fn cpu_timer_bases_ready(&self) -> bool {
         self.cpu_timer_bases_ready
+    }
+
+    pub const fn base_locks_ready(&self) -> bool {
+        self.base_locks_ready
+    }
+
+    pub const fn pending_maps_ready(&self) -> bool {
+        self.pending_maps_ready
+    }
+
+    pub const fn vectors_empty(&self) -> bool {
+        self.vectors_empty
     }
 
     pub const fn posix_cpu_timer_work_ready(&self) -> bool {
@@ -1452,6 +1493,9 @@ impl TimerWheel {
 
         softirq.register_timer_action()?;
         self.cpu_timer_bases_ready = true;
+        self.base_locks_ready = true;
+        self.pending_maps_ready = true;
+        self.vectors_empty = true;
         self.posix_cpu_timer_work_ready = true;
         self.timer_softirq_registered = true;
         self.lifecycle.transition(
@@ -1466,6 +1510,9 @@ impl TimerWheel {
 pub struct HrtimerCore {
     lifecycle: Lifecycle,
     boot_cpu_base_ready: bool,
+    base_locks_ready: bool,
+    clock_bases_ready: bool,
+    active_queues_empty: bool,
     hrtimer_softirq_registered: bool,
 }
 
@@ -1474,6 +1521,9 @@ impl HrtimerCore {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             boot_cpu_base_ready: false,
+            base_locks_ready: false,
+            clock_bases_ready: false,
+            active_queues_empty: false,
             hrtimer_softirq_registered: false,
         }
     }
@@ -1484,6 +1534,18 @@ impl HrtimerCore {
 
     pub const fn boot_cpu_base_ready(&self) -> bool {
         self.boot_cpu_base_ready
+    }
+
+    pub const fn base_locks_ready(&self) -> bool {
+        self.base_locks_ready
+    }
+
+    pub const fn clock_bases_ready(&self) -> bool {
+        self.clock_bases_ready
+    }
+
+    pub const fn active_queues_empty(&self) -> bool {
+        self.active_queues_empty
     }
 
     pub const fn hrtimer_softirq_registered(&self) -> bool {
@@ -1511,12 +1573,93 @@ impl HrtimerCore {
 
         softirq.register_hrtimer_action()?;
         self.boot_cpu_base_ready = true;
+        self.base_locks_ready = true;
+        self.clock_bases_ready = true;
+        self.active_queues_empty = true;
         self.hrtimer_softirq_registered = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
             Checkpoint::HrtimerCoreReady,
+        )
+    }
+}
+
+pub struct SrcuCore {
+    lifecycle: Lifecycle,
+    tree_srcu_enabled: bool,
+    init_done: bool,
+    boot_list_drained: bool,
+    per_struct_locks_deferred: bool,
+    delayed_work_queueing_ready: bool,
+}
+
+impl SrcuCore {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            tree_srcu_enabled: false,
+            init_done: false,
+            boot_list_drained: false,
+            per_struct_locks_deferred: false,
+            delayed_work_queueing_ready: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn tree_srcu_enabled(&self) -> bool {
+        self.tree_srcu_enabled
+    }
+
+    pub const fn init_done(&self) -> bool {
+        self.init_done
+    }
+
+    pub const fn boot_list_drained(&self) -> bool {
+        self.boot_list_drained
+    }
+
+    pub const fn per_struct_locks_deferred(&self) -> bool {
+        self.per_struct_locks_deferred
+    }
+
+    pub const fn delayed_work_queueing_ready(&self) -> bool {
+        self.delayed_work_queueing_ready
+    }
+
+    pub fn setup(
+        &mut self,
+        rcu_core: &RcuCore,
+        timer_wheel: &TimerWheel,
+        workqueue: &Workqueue,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || rcu_core.state() != State::Ready
+            || timer_wheel.state() != State::Ready
+            || workqueue.state() != State::Prepared
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.tree_srcu_enabled = true;
+        self.init_done = true;
+        self.boot_list_drained = true;
+        self.per_struct_locks_deferred = true;
+        self.delayed_work_queueing_ready = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::SrcuCoreReady,
         )
     }
 }
@@ -1528,6 +1671,10 @@ pub struct Timekeeper {
     wall_time_ready: bool,
     monotonic_time_ready: bool,
     raw_time_ready: bool,
+    tk_core_seqcount_ready: bool,
+    tk_core_write_seqcount_used: bool,
+    timekeeper_lock_ready: bool,
+    shadow_timekeeper_ready: bool,
 }
 
 impl Timekeeper {
@@ -1539,6 +1686,10 @@ impl Timekeeper {
             wall_time_ready: false,
             monotonic_time_ready: false,
             raw_time_ready: false,
+            tk_core_seqcount_ready: false,
+            tk_core_write_seqcount_used: false,
+            timekeeper_lock_ready: false,
+            shadow_timekeeper_ready: false,
         }
     }
 
@@ -1566,6 +1717,22 @@ impl Timekeeper {
         self.raw_time_ready
     }
 
+    pub const fn tk_core_seqcount_ready(&self) -> bool {
+        self.tk_core_seqcount_ready
+    }
+
+    pub const fn tk_core_write_seqcount_used(&self) -> bool {
+        self.tk_core_write_seqcount_used
+    }
+
+    pub const fn timekeeper_lock_ready(&self) -> bool {
+        self.timekeeper_lock_ready
+    }
+
+    pub const fn shadow_timekeeper_ready(&self) -> bool {
+        self.shadow_timekeeper_ready
+    }
+
     pub fn setup(&mut self, tick: &Tick, static_branch: &StaticBranch) -> EventResult {
         if self.lifecycle.state() != State::Base
             || tick.state() != State::Prepared
@@ -1584,6 +1751,10 @@ impl Timekeeper {
         self.wall_time_ready = true;
         self.monotonic_time_ready = true;
         self.raw_time_ready = true;
+        self.tk_core_seqcount_ready = true;
+        self.tk_core_write_seqcount_used = true;
+        self.timekeeper_lock_ready = true;
+        self.shadow_timekeeper_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -1739,14 +1910,23 @@ impl RiscvTimerProvider {
             );
         }
 
-        self.timebase_hz = read_timebase_frequency(device_tree).unwrap_or(DEFAULT_TIMEBASE_HZ);
+        let Some(timebase_hz) = read_timebase_frequency(device_tree).filter(|hz| *hz != 0) else {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        };
+
+        self.timebase_hz = timebase_hz;
         timekeeper.clocksource_core.register_riscv_clocksource();
         self.clocksource_registered = true;
         self.clockevent_registered = true;
         self.irq_mapping_ready =
             riscv_intc.boot_cpu_timer_irq_ready() && irq_dispatch_tree.timer_route_ready();
         self.sbi_programming_ready = true;
-        if self.timebase_hz == 0 || !self.irq_mapping_ready {
+        if !self.irq_mapping_ready {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -6143,8 +6323,10 @@ fn find_plic_interrupt_controller_node_from(node: DeviceNodeRef<'_>) -> Option<D
 pub struct SmpCallFunction {
     lifecycle: Lifecycle,
     call_single_queue_ready: bool,
+    call_single_queue_locks_ready: bool,
     ipi_route_ready: bool,
     ipi_mux_ready: bool,
+    runtime_ipi_delivery_deferred: bool,
     possible_cpu_count: usize,
 }
 
@@ -6153,8 +6335,10 @@ impl SmpCallFunction {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             call_single_queue_ready: false,
+            call_single_queue_locks_ready: false,
             ipi_route_ready: false,
             ipi_mux_ready: false,
+            runtime_ipi_delivery_deferred: false,
             possible_cpu_count: 0,
         }
     }
@@ -6167,12 +6351,20 @@ impl SmpCallFunction {
         self.call_single_queue_ready
     }
 
+    pub const fn call_single_queue_locks_ready(&self) -> bool {
+        self.call_single_queue_locks_ready
+    }
+
     pub const fn ipi_route_ready(&self) -> bool {
         self.ipi_route_ready
     }
 
     pub const fn ipi_mux_ready(&self) -> bool {
         self.ipi_mux_ready
+    }
+
+    pub const fn runtime_ipi_delivery_deferred(&self) -> bool {
+        self.runtime_ipi_delivery_deferred
     }
 
     pub const fn possible_cpu_count(&self) -> usize {
@@ -6200,14 +6392,272 @@ impl SmpCallFunction {
         }
 
         self.call_single_queue_ready = true;
+        self.call_single_queue_locks_ready = true;
         self.ipi_route_ready = true;
         self.ipi_mux_ready = true;
+        self.runtime_ipi_delivery_deferred = true;
         self.possible_cpu_count = cpu_group.possible_cpu_count();
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
             Checkpoint::SmpCallFunctionReady,
+        )
+    }
+}
+
+pub struct BootStackCanary {
+    lifecycle: Lifecycle,
+    stackprotector_enabled: bool,
+    per_task_canary_ready: bool,
+    randomness_dependency_used: bool,
+    boot_init_task_canary_seeded: bool,
+}
+
+impl BootStackCanary {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            stackprotector_enabled: false,
+            per_task_canary_ready: false,
+            randomness_dependency_used: false,
+            boot_init_task_canary_seeded: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn stackprotector_enabled(&self) -> bool {
+        self.stackprotector_enabled
+    }
+
+    pub const fn per_task_canary_ready(&self) -> bool {
+        self.per_task_canary_ready
+    }
+
+    pub const fn randomness_dependency_used(&self) -> bool {
+        self.randomness_dependency_used
+    }
+
+    pub const fn boot_init_task_canary_seeded(&self) -> bool {
+        self.boot_init_task_canary_seeded
+    }
+
+    pub fn setup(
+        &mut self,
+        randomness: &super::randomness::Randomness,
+        init_stack: &InitStack,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || randomness.state() != State::Ready
+            || init_stack.state() != State::Online
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.stackprotector_enabled = true;
+        self.per_task_canary_ready = true;
+        self.randomness_dependency_used = randomness.is_fully_ready();
+        self.boot_init_task_canary_seeded = true;
+        if !self.randomness_dependency_used {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::BootStackCanaryReady,
+        )
+    }
+}
+
+pub struct PerfEventCore {
+    lifecycle: Lifecycle,
+    enabled_by_config: bool,
+    pmu_idr_ready: bool,
+    pmus_srcu_ready: bool,
+    pmu_registry_ready: bool,
+    cpu_context_locks_ready: bool,
+    swevent_pmus_registered: bool,
+    reboot_notifier_registered: bool,
+    event_cache_deferred: bool,
+    hw_breakpoint_deferred: bool,
+}
+
+impl PerfEventCore {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            enabled_by_config: false,
+            pmu_idr_ready: false,
+            pmus_srcu_ready: false,
+            pmu_registry_ready: false,
+            cpu_context_locks_ready: false,
+            swevent_pmus_registered: false,
+            reboot_notifier_registered: false,
+            event_cache_deferred: false,
+            hw_breakpoint_deferred: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn enabled_by_config(&self) -> bool {
+        self.enabled_by_config
+    }
+
+    pub const fn pmu_idr_ready(&self) -> bool {
+        self.pmu_idr_ready
+    }
+
+    pub const fn pmus_srcu_ready(&self) -> bool {
+        self.pmus_srcu_ready
+    }
+
+    pub const fn pmu_registry_ready(&self) -> bool {
+        self.pmu_registry_ready
+    }
+
+    pub const fn cpu_context_locks_ready(&self) -> bool {
+        self.cpu_context_locks_ready
+    }
+
+    pub const fn swevent_pmus_registered(&self) -> bool {
+        self.swevent_pmus_registered
+    }
+
+    pub const fn reboot_notifier_registered(&self) -> bool {
+        self.reboot_notifier_registered
+    }
+
+    pub const fn event_cache_deferred(&self) -> bool {
+        self.event_cache_deferred
+    }
+
+    pub const fn hw_breakpoint_deferred(&self) -> bool {
+        self.hw_breakpoint_deferred
+    }
+
+    pub fn setup(&mut self, srcu_core: &SrcuCore, cpu_group: &CpuGroup) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || srcu_core.state() != State::Ready
+            || cpu_group.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.enabled_by_config = true;
+        self.pmu_idr_ready = true;
+        self.pmus_srcu_ready = srcu_core.init_done();
+        self.pmu_registry_ready = true;
+        self.cpu_context_locks_ready = cpu_group.possible_cpu_count() != 0;
+        self.swevent_pmus_registered = true;
+        self.reboot_notifier_registered = true;
+        self.event_cache_deferred = true;
+        self.hw_breakpoint_deferred = true;
+        if !self.pmus_srcu_ready || !self.cpu_context_locks_ready {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::PerfEventCoreReady,
+        )
+    }
+}
+
+pub struct ProfileCore {
+    lifecycle: Lifecycle,
+    profiling_enabled_by_config: bool,
+    profile_param_absent: bool,
+    buffer_allocation_trimmed: bool,
+    proc_export_deferred: bool,
+}
+
+impl ProfileCore {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            profiling_enabled_by_config: false,
+            profile_param_absent: false,
+            buffer_allocation_trimmed: false,
+            proc_export_deferred: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn profiling_enabled_by_config(&self) -> bool {
+        self.profiling_enabled_by_config
+    }
+
+    pub const fn profile_param_absent(&self) -> bool {
+        self.profile_param_absent
+    }
+
+    pub const fn buffer_allocation_trimmed(&self) -> bool {
+        self.buffer_allocation_trimmed
+    }
+
+    pub const fn proc_export_deferred(&self) -> bool {
+        self.proc_export_deferred
+    }
+
+    pub fn setup(
+        &mut self,
+        randomness: &super::randomness::Randomness,
+        perf_event_core: &PerfEventCore,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || randomness.state() != State::Ready
+            || perf_event_core.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.profiling_enabled_by_config = true;
+        self.profile_param_absent = true;
+        self.buffer_allocation_trimmed = true;
+        self.proc_export_deferred = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::ProfileCoreReady,
         )
     }
 }

@@ -1,5 +1,4 @@
 use crate::{
-    arch::riscv64::csr,
     context::Context,
     objects::{
         earlycon, printk,
@@ -65,6 +64,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.tick.preset(&ctx.cpu_group, &ctx.per_cpu_storage)?;
     ctx.timer_wheel
         .setup(&ctx.per_cpu_storage, &ctx.cpu_group, &mut ctx.softirq)?;
+    ctx.srcu_core
+        .setup(&ctx.rcu_core, &ctx.timer_wheel, &ctx.workqueue)?;
     ctx.hrtimer_core
         .setup(&ctx.per_cpu_storage, &ctx.cpu_group, &mut ctx.softirq)?;
     ctx.timekeeper.setup(&ctx.tick, &ctx.static_branch)?;
@@ -81,19 +82,23 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.hrtimer_core, &ctx.riscv_timer_provider)?;
     ctx.softirq.setup(&ctx.per_cpu_storage)?;
     let time_seed = crate::arch::riscv64::sbi::read_time();
-    ctx.randomness.setup(&ctx.cpu_group, time_seed)?;
+    ctx.randomness
+        .setup(&ctx.cpu_group, &ctx.timekeeper, time_seed)?;
+    ctx.boot_stack_canary
+        .setup(&ctx.randomness, &ctx.init_stack)?;
+    ctx.perf_event_core.setup(&ctx.srcu_core, &ctx.cpu_group)?;
+    ctx.profile_core
+        .setup(&ctx.randomness, &ctx.perf_event_core)?;
     ctx.sbi_ipi
         .setup(&ctx.sbi, &ctx.riscv_intc, &ctx.cpu_group)?;
     ctx.ipi_mux
         .setup(&ctx.sbi_ipi, &ctx.per_cpu_storage, &ctx.cpu_group)?;
     ctx.smp_call_function
-        .setup(&ctx.ipi_mux, &ctx.cpu_group, &ctx.per_cpu_storage)?;
-    ctx.interrupt_stream
-        .enable(&mut ctx.boot_cpu_local_interrupt)
+        .setup(&ctx.ipi_mux, &ctx.cpu_group, &ctx.per_cpu_storage)
 }
 
 fn handoff() -> ! {
-    crate::phases::interrupt::irq_open_prepare::setup(crate::context::context())
+    crate::phases::interrupt::local_irq_enable::setup(crate::context::context())
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {
@@ -125,6 +130,9 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.irq_controller.descriptors_ready()
         && ctx.irq_controller.domain_ready()
         && ctx.irq_controller.allocator_minimal_ready()
+        && ctx.irq_controller.desc_locks_ready()
+        && ctx.irq_controller.sparse_irq_tree_lock_deferred()
+        && ctx.irq_controller.irq_domain_mutex_deferred()
         && ctx.riscv_intc.state() == State::Ready
         && ctx.riscv_intc.domain_ready()
         && ctx.riscv_intc.boot_cpu_local_causes_ready()
@@ -225,10 +233,22 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.tick.broadcast().clockevent_ready()
         && ctx.timer_wheel.state() == State::Ready
         && ctx.timer_wheel.cpu_timer_bases_ready()
+        && ctx.timer_wheel.base_locks_ready()
+        && ctx.timer_wheel.pending_maps_ready()
+        && ctx.timer_wheel.vectors_empty()
         && ctx.timer_wheel.posix_cpu_timer_work_ready()
         && ctx.timer_wheel.timer_softirq_registered()
+        && ctx.srcu_core.state() == State::Ready
+        && ctx.srcu_core.tree_srcu_enabled()
+        && ctx.srcu_core.init_done()
+        && ctx.srcu_core.boot_list_drained()
+        && ctx.srcu_core.per_struct_locks_deferred()
+        && ctx.srcu_core.delayed_work_queueing_ready()
         && ctx.hrtimer_core.state() == State::Ready
         && ctx.hrtimer_core.boot_cpu_base_ready()
+        && ctx.hrtimer_core.base_locks_ready()
+        && ctx.hrtimer_core.clock_bases_ready()
+        && ctx.hrtimer_core.active_queues_empty()
         && ctx.hrtimer_core.hrtimer_softirq_registered()
         && ctx.timekeeper.state() == State::Ready
         && ctx.timekeeper.clocksource_core().state() == State::Prepared
@@ -242,6 +262,10 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.timekeeper.wall_time_ready()
         && ctx.timekeeper.monotonic_time_ready()
         && ctx.timekeeper.raw_time_ready()
+        && ctx.timekeeper.tk_core_seqcount_ready()
+        && ctx.timekeeper.tk_core_write_seqcount_used()
+        && ctx.timekeeper.timekeeper_lock_ready()
+        && ctx.timekeeper.shadow_timekeeper_ready()
         && ctx.riscv_timer_provider.state() == State::Ready
         && ctx.riscv_timer_provider.timebase_hz() != 0
         && ctx.riscv_timer_provider.clocksource_registered()
@@ -260,6 +284,7 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.softirq.state() == State::Ready
         && ctx.softirq.action_table_ready()
         && ctx.softirq.pending_set_ready()
+        && ctx.softirq.rcu_action_registered()
         && ctx.softirq.timer_action_registered()
         && ctx.softirq.hrtimer_action_registered()
         && ctx.softirq.tasklet_queues_ready()
@@ -267,6 +292,31 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && !ctx.softirq.execution_open()
         && ctx.randomness.state() == State::Ready
         && ctx.randomness.is_fully_ready()
+        && ctx.randomness.timekeeping_required()
+        && ctx.randomness.cycle_entropy_mixed()
+        && ctx.randomness.input_pool_lock_deferred()
+        && ctx.randomness.base_crng_lock_deferred()
+        && ctx.randomness.pm_notifier_deferred()
+        && ctx.boot_stack_canary.state() == State::Ready
+        && ctx.boot_stack_canary.stackprotector_enabled()
+        && ctx.boot_stack_canary.per_task_canary_ready()
+        && ctx.boot_stack_canary.randomness_dependency_used()
+        && ctx.boot_stack_canary.boot_init_task_canary_seeded()
+        && ctx.perf_event_core.state() == State::Ready
+        && ctx.perf_event_core.enabled_by_config()
+        && ctx.perf_event_core.pmu_idr_ready()
+        && ctx.perf_event_core.pmus_srcu_ready()
+        && ctx.perf_event_core.pmu_registry_ready()
+        && ctx.perf_event_core.cpu_context_locks_ready()
+        && ctx.perf_event_core.swevent_pmus_registered()
+        && ctx.perf_event_core.reboot_notifier_registered()
+        && ctx.perf_event_core.event_cache_deferred()
+        && ctx.perf_event_core.hw_breakpoint_deferred()
+        && ctx.profile_core.state() == State::Ready
+        && ctx.profile_core.profiling_enabled_by_config()
+        && ctx.profile_core.profile_param_absent()
+        && ctx.profile_core.buffer_allocation_trimmed()
+        && ctx.profile_core.proc_export_deferred()
         && ctx.ipi_mux.state() == State::Ready
         && ctx.ipi_mux.domain_ready()
         && ctx.ipi_mux.per_cpu_bits_ready()
@@ -279,15 +329,17 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.sbi_ipi.enable_deferred()
         && ctx.smp_call_function.state() == State::Ready
         && ctx.smp_call_function.call_single_queue_ready()
+        && ctx.smp_call_function.call_single_queue_locks_ready()
         && ctx.smp_call_function.ipi_route_ready()
         && ctx.smp_call_function.ipi_mux_ready()
+        && ctx.smp_call_function.runtime_ipi_delivery_deferred()
         && ctx.smp_call_function.possible_cpu_count() == ctx.cpu_group.possible_cpu_count()
-        && ctx.interrupt_stream.state() == State::Online
-        && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
-        && !ctx.interrupt_stream.early_boot_irqs_disabled()
+        && ctx.interrupt_stream.state() == State::Ready
+        && !ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
+        && ctx.interrupt_stream.early_boot_irqs_disabled()
         && ctx.boot_cpu_local_interrupt.state() == State::Ready
-        && ctx.boot_cpu_local_interrupt.enabled()
-        && csr::supervisor_interrupts_enabled()
+        && ctx.boot_cpu_local_interrupt.disabled()
+        && !crate::arch::riscv64::csr::supervisor_interrupts_enabled()
         && printk::is_ready()
         && (earlycon::is_online() || printk::console_handoff_complete())
 }

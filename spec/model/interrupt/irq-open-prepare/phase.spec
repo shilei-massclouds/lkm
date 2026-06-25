@@ -1,7 +1,7 @@
 /*
  * IRQ-Open Prepare Phase Specification
  *
- * This is InterruptPhase subphase 2. It starts after IrqTimeInitPhase has
+ * This is InterruptPhase subphase 3. It starts after LocalIrqEnablePhase has
  * opened the boot CPU local interrupt gate and covers the Linux start_kernel()
  * segment from kmem_cache_init_late() through arch_cpu_finalize_init().
  */
@@ -186,7 +186,7 @@ object DelayLoop: KernelObject {
 }
 
 /*
- * IrqOpenPreparePhase 表示 InterruptPhase 的第二个子阶段。它承接已开放
+ * IrqOpenPreparePhase 表示 InterruptPhase 的第三个子阶段。它承接已开放
  * boot CPU 本地中断总入口的事实，建立中断开放后到进程准备期前的 late
  * core/platform 准备边界。
  */
@@ -198,7 +198,7 @@ object IrqOpenPreparePhase: PhaseObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    IrqTimeInitPhase.state == State::Ready;
+                    LocalIrqEnablePhase.state == State::Ready;
                     InterruptStream.state == State::Online;
                     IrqDispatchTree.state == State::Ready;
                     SbiIpi.state == State::Ready;
@@ -255,6 +255,7 @@ object IrqOpenPreparePhase: PhaseObject {
     state State::Ready {
         invariant {
             IrqTimeInitPhase.state == State::Ready;
+            LocalIrqEnablePhase.state == State::Ready;
             InterruptStream.state == State::Online;
             SlubSubsystem.state == State::Ready;
             KmallocCaches.state == State::Ready;

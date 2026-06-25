@@ -1275,6 +1275,10 @@ object Randomness: KernelObject {
                     randomness_ready(Randomness);
                     randomness_time_seed_material_ready(Randomness, Timekeeper);
                     randomness_boot_cpu_mix_ready(Randomness, CpuGroup);
+                    randomness_cycle_entropy_mixed(Randomness);
+                    randomness_input_pool_lock_deferred(Randomness);
+                    randomness_base_crng_irqsave_lock_deferred(Randomness);
+                    randomness_pm_notifier_deferred(Randomness);
                 }
             }
         }
@@ -1289,6 +1293,10 @@ object Randomness: KernelObject {
             randomness_ready(Randomness);
             randomness_time_seed_material_ready(Randomness, Timekeeper);
             randomness_boot_cpu_mix_ready(Randomness, CpuGroup);
+            randomness_cycle_entropy_mixed(Randomness);
+            randomness_input_pool_lock_deferred(Randomness);
+            randomness_base_crng_irqsave_lock_deferred(Randomness);
+            randomness_pm_notifier_deferred(Randomness);
         }
     }
 }

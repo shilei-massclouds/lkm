@@ -21,6 +21,7 @@
 - `SchedInitPhase.Ready`
 - `InterruptPhase.Ready`
 - `IrqTimeInitPhase.Ready`
+- `LocalIrqEnablePhase.Ready`
 - `IrqOpenPreparePhase.Ready`
 - `ProcessPreparePhase.Ready`
 - `UpMultitaskPhase.Ready`
@@ -97,8 +98,8 @@ make clean
 
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
-`InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`IrqOpenPreparePhase.Ready` 和
-`ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready`），
+`InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`LocalIrqEnablePhase.Ready`、
+`IrqOpenPreparePhase.Ready` 和 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready`），
 随后完成 `SmpRuntimePhase.Ready`（当前展开 `PreSmpInitPhase.Ready`、`SmpBringupPhase.Ready`、
 `RuntimeCorePhase.Ready`、`InitcallPhase.Ready`、`RootfsPhase.Ready` 与 `FinalizePhase.Ready`），再通过
 后续的 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。`PayloadPhase` 是
@@ -110,7 +111,7 @@ make clean
 
 ## ProcessPreparePhase 编码约束
 
-`ProcessPreparePhase` 是 `InterruptPhase` 的第三个子阶段，formal model 路径为
+`ProcessPreparePhase` 是 `InterruptPhase` 的第四个子阶段，formal model 路径为
 `spec/model/interrupt/process-prepare/`，目标实现路径为
 `impl/arceos_ex/src/phases/interrupt/process_prepare.rs`。该阶段必须在 `IrqOpenPreparePhase.Ready`
 之后运行，复用已打开的 boot CPU local IRQ、`Console.Prepared`、`SchedClock.Ready` 和 `DelayLoop.Ready`
@@ -1451,10 +1452,12 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 ## `IrqTimeInitPhase` 编码约束
 
 `IrqTimeInitPhase` 已正式落到 `spec/model/interrupt/irq-time-init/`，属于 `InterruptPhase` 的第一个子阶段。实现侧边界和早期设计草案不同：`local_irq_enable()`
-不再属于后续中断开放期的开头，而是本阶段的结尾。阶段出口必须满足 `InterruptStream.Online`、boot CPU
-`sstatus.SIE` 已打开、`IrqController.Ready`、`RiscvIntc.Ready`、`IrqDispatchTree.Ready`、`Plic.Ready`、`Tick.Ready`、
-`TimerWheel.Ready`、`HrtimerCore.Ready`、`Timekeeper.Ready`、`RiscvTimerProvider.Ready`、`Softirq.Ready`、`Randomness.Ready`、
-`SbiIpi.Ready`、`IpiMux.Ready` 和 `SmpCallFunction.Ready`。
+不属于本阶段，而是独立的 `LocalIrqEnablePhase`。阶段出口必须满足 `InterruptStream.Ready`、boot CPU
+`sstatus.SIE` 仍关闭、`early_boot_irqs_disabled == true`、`IrqController.Ready`、`RiscvIntc.Ready`、
+`IrqDispatchTree.Ready`、`Plic.Ready`、`Tick.Ready`、`TimerWheel.Ready`、`SrcuCore.Ready`、
+`HrtimerCore.Ready`、`Timekeeper.Ready`、`RiscvTimerProvider.Ready`、`Softirq.Ready`、`Randomness.Ready`、
+`BootStackCanary.Ready`、`PerfEventCore.Ready`、`ProfileCore.Ready`、`SbiIpi.Ready`、`IpiMux.Ready` 和
+`SmpCallFunction.Ready`。
 
 目录、文件和对象命名必须跟阶段树一致：模型目录为 `spec/model/interrupt/irq-time-init/`，实现文件位于
 `impl/arceos_ex/src/phases/interrupt/irq_time_init.rs` 等 `interrupt` 阶段子树下；旧
@@ -1587,6 +1590,14 @@ KUnit 只能断言这些步骤前后的可观测事实。
 本阶段打开的只是 boot CPU 本地中断总入口。普通任务并发、secondary CPU 并发、周期 tick 服务、workqueue worker
 kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提前解释为 Online。
 
+## `LocalIrqEnablePhase` 编码约束
+
+`LocalIrqEnablePhase` 已正式落到 `spec/model/interrupt/local-irq-enable/`，属于 `InterruptPhase` 的第二个子阶段。它必须接在
+`IrqTimeInitPhase.Ready` 之后运行，且只能执行 boot CPU 的 `local_irq_enable()` 边界：通过
+`InterruptStream.enable()` 打开 RISC-V `sstatus.SIE` 本地中断总入口，并把 `early_boot_irqs_disabled` 清为 false。
+本阶段不得打开 PLIC UART source gate、root INTC supervisor external input gate、周期 tick、完整 softirq、IPI runtime、
+workqueue worker、RCU GP kthread、task concurrency 或 SMP concurrency。
+
 `RiscvTimerProvider.setup()` 可以提供两个最小 action：`read_time()` 和 `schedule_oneshot(delta, callback) -> Option<deadline>`。smoke 必须分开验收
 时间功能和时钟中断功能：前者确认 time source 可读且单调推进；后者注册一次性 clockevent callback，使用 SBI timer 在 deadline
 到来时触发 supervisor timer interrupt，并确认 handler 返回前调用关联函数。该 smoke 不表示完整周期 tick 或 clockevent 运行期已经启动。
@@ -1597,9 +1608,9 @@ checkpoint 或 no-op 条件，不得以零散 TODO 代替正式 deferred。
 
 ## `IrqOpenPreparePhase` 编码约束
 
-`IrqOpenPreparePhase` 已正式落到 `spec/model/interrupt/irq-open-prepare/`，属于 `InterruptPhase` 的第二个子阶段。它必须接在
-`IrqTimeInitPhase.Ready` 之后运行，此时 boot CPU 本地中断总入口已经开放；不得把 `local_irq_enable()` 从
-`IrqTimeInitPhase` 末尾移到本阶段开头。
+`IrqOpenPreparePhase` 已正式落到 `spec/model/interrupt/irq-open-prepare/`，属于 `InterruptPhase` 的第三个子阶段。它必须接在
+`LocalIrqEnablePhase.Ready` 之后运行，此时 boot CPU 本地中断总入口已经开放；本阶段不得再执行
+`local_irq_enable()`。
 
 目录、文件和对象命名必须跟阶段树一致：实现文件位于
 `impl/arceos_ex/src/phases/interrupt/irq_open_prepare.rs` 等 `interrupt` 阶段子树下，不得落回 `boot` 阶段子树。

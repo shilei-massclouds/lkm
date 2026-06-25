@@ -1,16 +1,19 @@
 /*
  * Interrupt Phase Specification
  *
- * InterruptPhase starts when IRQ/time facilities begin setup. Its first
- * currently expanded subphases are IrqTimeInitPhase, IrqOpenPreparePhase and
- * ProcessPreparePhase. IrqTimeInitPhase starts with the boot CPU interrupt
- * gate still closed and ends after local_irq_enable() opens that gate.
- * IrqOpenPreparePhase then covers the interrupt-open late core/platform
- * preparation boundary. ProcessPreparePhase prepares PID/task/cred/VMA and
- * security foundations before rest_init() creates the first tasks.
+ * InterruptPhase starts when IRQ/time facilities begin setup. Its currently
+ * expanded subphases are IrqTimeInitPhase, LocalIrqEnablePhase,
+ * IrqOpenPreparePhase and ProcessPreparePhase. IrqTimeInitPhase keeps the
+ * boot CPU interrupt gate closed so its setup body remains under the global
+ * exclusive boot context. LocalIrqEnablePhase then covers the
+ * local_irq_enable() boundary. IrqOpenPreparePhase covers the interrupt-open
+ * late core/platform preparation boundary. ProcessPreparePhase prepares
+ * PID/task/cred/VMA and security foundations before rest_init() creates the
+ * first tasks.
  */
 
 include "irq-time-init/main.spec";
+include "local-irq-enable/main.spec";
 include "irq-open-prepare/main.spec";
 include "process-prepare/main.spec";
 
@@ -38,6 +41,7 @@ object InterruptPhase: PhaseObject {
 
                 drives {
                     IrqTimeInitPhase.Transition::Setup;
+                    LocalIrqEnablePhase.Transition::Setup;
                     IrqOpenPreparePhase.Transition::Setup;
                     ProcessPreparePhase.Transition::Setup;
                 }
@@ -53,6 +57,7 @@ object InterruptPhase: PhaseObject {
             BootPhase.state == State::Ready;
             SchedInitPhase.state == State::Ready;
             IrqTimeInitPhase.state == State::Ready;
+            LocalIrqEnablePhase.state == State::Ready;
             IrqOpenPreparePhase.state == State::Ready;
             ProcessPreparePhase.state == State::Ready;
         }

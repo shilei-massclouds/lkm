@@ -72,7 +72,7 @@ pub fn is_ready() -> bool {
 }
 
 fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
-    crate::phases::interrupt::irq_time_init::is_ready()
+    crate::phases::interrupt::local_irq_enable::is_ready()
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
         && !ctx.interrupt_stream.early_boot_irqs_disabled()
