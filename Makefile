@@ -33,7 +33,7 @@ endif
 
 verify:
 ifeq ($(REPORT),graph)
-	$(PYVERI) $(SPEC) -T --trace-annotations state,event
+	$(PYVERI) $(SPEC) -T --trace-annotations state,transition
 else
 	$(PYVERI) $(SPEC) --derive --strict
 endif
