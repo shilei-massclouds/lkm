@@ -373,8 +373,17 @@ class RenderToolTests(unittest.TestCase):
             },
         )
 
-        text = render_svg(view)
+        unfiltered = render_svg(view)
+        text = render_svg(
+            view,
+            trace_hidden_contexts=(
+                "SingleTaskContext",
+                "SingleTaskInterruptStreamContext",
+            ),
+        )
 
+        self.assertIn("SingleTaskContext", unfiltered)
+        self.assertIn("SingleTaskInterruptStreamContext", unfiltered)
         self.assertNotIn("SingleTaskContext", text)
         self.assertNotIn("SingleTaskInterruptStreamContext", text)
         self.assertIn("ResourceLockContext", text)

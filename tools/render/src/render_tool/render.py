@@ -29,16 +29,13 @@ _TRACE_ANNOTATION_GAP = 10
 _TRACE_ANNOTATION_MARGIN = 18
 _TRACE_ANNOTATION_CLEARANCE = 6
 _TRACE_ANNOTATION_FALLBACK_SCAN_STEPS = 80
-_TRACE_HIDDEN_CONTEXT_TITLES = frozenset(
-    {
-        "SingleTaskContext",
-        "SingleTaskInterruptStreamContext",
-    }
-)
 
 
 def render_view(
-    view: ViewModel, fmt: str, annotations: dict[str, object] | None = None
+    view: ViewModel,
+    fmt: str,
+    annotations: dict[str, object] | None = None,
+    trace_hidden_contexts: tuple[str, ...] = (),
 ) -> str:
     """Render a view model with the requested output format."""
 
@@ -47,7 +44,7 @@ def render_view(
     if fmt == "dot":
         return render_dot(view)
     if fmt == "svg":
-        return render_svg(view, annotations)
+        return render_svg(view, annotations, trace_hidden_contexts)
     raise ValueError(f"unknown render format: {fmt}")
 
 
@@ -98,11 +95,15 @@ def render_dot(view: ViewModel) -> str:
     return "\n".join(lines)
 
 
-def render_svg(view: ViewModel, annotations: dict[str, object] | None = None) -> str:
+def render_svg(
+    view: ViewModel,
+    annotations: dict[str, object] | None = None,
+    trace_hidden_contexts: tuple[str, ...] = (),
+) -> str:
     """Render a startup timeline SVG."""
 
     if view.name == "trace":
-        return _render_trace_svg(view, annotations)
+        return _render_trace_svg(view, annotations, trace_hidden_contexts)
     if view.name != "timeline":
         raise ValueError("SVG rendering is currently only supported for timeline and trace views")
 
@@ -215,7 +216,11 @@ def render_svg(view: ViewModel, annotations: dict[str, object] | None = None) ->
     return "\n".join(lines)
 
 
-def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) -> str:
+def _render_trace_svg(
+    view: ViewModel,
+    annotations: dict[str, object] | None,
+    trace_hidden_contexts: tuple[str, ...],
+) -> str:
     columns = _trace_columns(view)
     rows = _trace_rows(view)
     cells = _trace_cells(view)
@@ -242,8 +247,11 @@ def _render_trace_svg(view: ViewModel, annotations: dict[str, object] | None) ->
         + sum(metric[1] for metric in column_metrics.values())
     )
     height = int(top_margin + bottom_margin + sum(metric[1] for metric in row_metrics.values()))
+    hidden_context_titles = frozenset(trace_hidden_contexts)
     hidden_context_ids = {
-        cell.id for cell in cells if _trace_context_is_hidden_in_svg(cell)
+        cell.id
+        for cell in cells
+        if _trace_context_is_hidden_in_svg(cell, hidden_context_titles)
     }
     rendered_cells = tuple(cell for cell in cells if cell.id not in hidden_context_ids)
     cell_by_id = {cell.id: cell for cell in cells}
@@ -863,11 +871,13 @@ def _trace_cell_contains(outer: TraceCell, inner: TraceCell) -> bool:
     )
 
 
-def _trace_context_is_hidden_in_svg(cell: TraceCell) -> bool:
+def _trace_context_is_hidden_in_svg(
+    cell: TraceCell, hidden_context_titles: frozenset[str]
+) -> bool:
     if cell.kind != "context_span":
         return False
     title, _details = _trace_context_label_lines(cell.label)
-    return title in _TRACE_HIDDEN_CONTEXT_TITLES
+    return title in hidden_context_titles
 
 
 def _append_trace_state_arrow(

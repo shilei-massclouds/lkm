@@ -12,6 +12,10 @@ from common.view_json import view_json_to_view_model
 from .render import render_view
 
 
+def _trace_context_titles(value: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render view JSON to text, DOT, or SVG.")
     parser.add_argument("view", type=Path, help="path to view.json")
@@ -25,6 +29,13 @@ def main(argv: list[str] | None = None) -> int:
         "--annotations",
         type=Path,
         help="optional trace SVG annotation JSON",
+    )
+    parser.add_argument(
+        "--trace-hide-contexts",
+        type=_trace_context_titles,
+        default=(),
+        metavar="NAMES",
+        help="comma-separated context titles hidden only when rendering trace SVG",
     )
     parser.add_argument("-o", "--output", type=Path, help="write output to a file")
     args = parser.parse_args(argv)
@@ -43,7 +54,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         view = view_json_to_view_model(view_data)
-        output = render_view(view, args.format, annotations)
+        output = render_view(
+            view,
+            args.format,
+            annotations,
+            trace_hidden_contexts=args.trace_hide_contexts,
+        )
     except ValueError as exc:
         print(f"error: cannot render view JSON: {exc}", file=sys.stderr)
         return 2

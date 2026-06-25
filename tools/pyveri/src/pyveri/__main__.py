@@ -137,6 +137,7 @@ def _build_command_parser() -> argparse.ArgumentParser:
         help="optional trace SVG annotation JSON",
     )
     _add_trace_action_depth_argument(render_parser)
+    _add_trace_hide_contexts_argument(render_parser)
     render_parser.add_argument("-o", "--output", type=Path, help="write the rendering to a file")
     _add_work_dir_argument(render_parser)
 
@@ -164,6 +165,16 @@ def _add_trace_action_depth_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_trace_hide_contexts_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--trace-hide-contexts",
+        type=_trace_context_titles,
+        default=(),
+        metavar="NAMES",
+        help="comma-separated context titles hidden only when rendering trace SVG",
+    )
+
+
 def _trace_action_depth(value: str) -> int | None:
     if value == "all":
         return None
@@ -174,6 +185,10 @@ def _trace_action_depth(value: str) -> int | None:
     if depth < 0:
         raise argparse.ArgumentTypeError("expected a non-negative integer or 'all'")
     return depth
+
+
+def _trace_context_titles(value: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in value.split(",") if part.strip())
 
 
 def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
@@ -219,6 +234,7 @@ def _add_legacy_arguments(parser: argparse.ArgumentParser) -> None:
         help="trace annotation categories: state, transition, or state,transition",
     )
     _add_trace_action_depth_argument(parser)
+    _add_trace_hide_contexts_argument(parser)
     parser.add_argument("-o", "--output", type=Path, help="write selected output to a file")
     _add_work_dir_argument(parser)
 
@@ -309,6 +325,7 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                     work,
                     args.spec,
                     trace_action_depth=args.trace_action_depth,
+                    trace_hidden_contexts=args.trace_hide_contexts,
                 )
             )
         if args.trace_svg:
@@ -332,6 +349,7 @@ def _run_legacy(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 args.spec,
                 annotations=annotations,
                 trace_action_depth=args.trace_action_depth,
+                trace_hidden_contexts=args.trace_hide_contexts,
             )
             _write_output(trace_svg_path, trace_svg, ascii_only=False)
             if args.trace_svg == DEFAULT_TRACE_SVG_MARKER:
@@ -465,6 +483,7 @@ def _run_render(args: argparse.Namespace) -> int:
             args.spec,
             annotations=args.annotations,
             trace_action_depth=args.trace_action_depth,
+            trace_hidden_contexts=args.trace_hide_contexts,
         )
         if args.output is not None:
             _write_output(args.output, output, ascii_only=args.format == "dot")
@@ -504,11 +523,17 @@ def _run_view_stage(
 
 
 def _run_render_stage(
-    view: Path, fmt: str, output: Path, annotations: Path | None = None
+    view: Path,
+    fmt: str,
+    output: Path,
+    annotations: Path | None = None,
+    trace_hidden_contexts: tuple[str, ...] = (),
 ) -> int:
     args = ["-m", "render_tool", str(view), "--format", fmt, "-o", str(output)]
     if annotations is not None:
         args.extend(["--annotations", str(annotations.resolve())])
+    if trace_hidden_contexts:
+        args.extend(["--trace-hide-contexts", ",".join(trace_hidden_contexts)])
     return _run_stage(args)
 
 
@@ -566,6 +591,7 @@ def _render_view_output(
     spec: Path,
     annotations: Path | None = None,
     trace_action_depth: int | None = DEFAULT_TRACE_ACTION_DEPTH,
+    trace_hidden_contexts: tuple[str, ...] = (),
 ) -> str:
     stem = spec.stem
     suffix = "gv" if fmt == "dot" else fmt
@@ -580,7 +606,13 @@ def _render_view_output(
     )
     if view_code != 0:
         raise SystemExit(view_code)
-    render_code = _run_render_stage(view_path, fmt, output, annotations)
+    render_code = _run_render_stage(
+        view_path,
+        fmt,
+        output,
+        annotations,
+        trace_hidden_contexts=trace_hidden_contexts,
+    )
     if render_code != 0:
         raise SystemExit(render_code)
     encoding = "ascii" if fmt == "dot" else "utf-8"

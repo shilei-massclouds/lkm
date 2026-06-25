@@ -2,6 +2,7 @@ KERNEL ?= arceos_ex
 LOG ?= info
 REPORT ?= text
 SPEC ?= spec/model/main.spec
+TRACE_HIDE_CONTEXTS ?= SingleTaskContext,SingleTaskInterruptStreamContext
 APP ?= hello
 PROBE ?=
 PROBE_FILE ?=
@@ -33,7 +34,7 @@ endif
 
 verify:
 ifeq ($(REPORT),graph)
-	$(PYVERI) $(SPEC) -T --trace-annotations state,transition
+	$(PYVERI) $(SPEC) -T --trace-annotations state,transition --trace-hide-contexts "$(TRACE_HIDE_CONTEXTS)"
 else
 	$(PYVERI) $(SPEC) --derive --strict
 endif

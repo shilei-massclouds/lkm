@@ -43,3 +43,29 @@
   - ext2/VFS 层测试应持续通过 path read/open/read 路径读取 `/sbin/init`、interpreter、跨 block 文件和多级目录文件，观察 lookup、inode、direct/indirect block read、buffer copy 和错误传播。
   - 这些压力测试既用于提高间歇性问题复现概率，也必须作为修复后的回归测试保留。
 - 后续修复完成前，完整验证必须包含普通 `make run APP=user-boot`，不能只用 `PROBE=user-boot` 或 `PROBE=virtio-blk` 代替。
+
+### DF-0002: `make run APP=smoke` 间歇性 `InitcallPhase` ready 失败
+
+- 状态：待查，暂缓深入定位。
+- 首次记录日期：2026-06-25。
+- 关联范围：`impl/arceos_ex` initcall 边界、UART/TTY initcall 路径、checkpoint/probe 时序。
+- 表现：普通 `timeout 90s make run APP=smoke` 曾返回 0，但启动日志输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。失败点在 `InitcallPhase` 标记 ready 时，说明 `initcall_phase_ready(...)` 在 `INITCALL_PHASE_STATE` 从 Base 推进到 Ready 前返回 false。
+
+已完成检查：
+
+- 同轮 `make verify`、`make verify REPORT=graph` 和 focused tool tests 均通过，说明规格/图生成本身未暴露确定性失败。
+- 使用 `PROBE=uart-irq-chain` 的 smoke run 完整通过 `53/53`，并能输出 UART/TTY 相关诊断计数，例如 `tty_xmit_fifo_probe_ready=1`。
+- 后续普通 `make run APP=smoke` 也曾完整通过 `53/53`，因此当前不是稳定可复现失败。
+- 对比失败和成功日志时观察到 `.initcall.device` 中 `virtio_mmio` 与 `ns16550a` 的打印顺序不同：失败样本中 `virtio_mmio` 早于 `ns16550a`，成功样本中 `ns16550a` 早于 `virtio_mmio`。这只记录为相关现象，不作为根因结论。
+
+当前判断：
+
+- 不应把问题直接归因于 `ns16550a` 与 `virtio_mmio` 的顺序。两者同属 `.initcall.device`，`of_platform` 设备枚举已经完成，后续 driver registration 会扫描现有设备；它们绑定的是不同设备，顺序通常只应改变 probe/log 时序，不应单独破坏后续显式 UART/TTY probe。
+- 更可疑的结构性缺口是：`InitcallBoundary.setup()` 接受的条件可能比 `initcall_phase_ready(...)` 更宽，导致 boundary/setup 流程已经推进，但顶层 ready 谓词仍有某个额外条件为 false。当前还未隔离出具体 false predicate。
+- 与 DF-0001 类似，该现象可能受 probe、checkpoint handler 或额外日志影响；在完成整个启动流程的并发、锁/guard、IRQ/task context 与内存顺序回顾前，暂不做重型定位。
+
+下一步定位建议：
+
+- 增加仅在 debug/probe 下启用的 predicate-level 诊断，或让 `EventError` 携带失败谓词名，避免只看到 `actual=B expected=B target=R`。
+- 复核 `InitcallBoundary` 与 `initcall_phase_ready(...)` 的条件是否应保持完全一致；若有意不同，需要在规格和实现中显式说明边界。
+- 后续回顾 UART/TTY、IRQ、task context 和 initcall 并发关系时，把本缺陷作为固定样本回归验证。
