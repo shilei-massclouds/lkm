@@ -40,17 +40,6 @@ pub fn run() -> SmokeResult {
         || ctx.boot_cpu_current_task.switch_committed_count() == 0
         || !ctx.boot_cpu_current_task.current_is_kernel_init()
         || ctx.boot_cpu_current_task.current() != CurrentTaskRef::KernelInit
-        || ctx.scheduler.boot_runqueue().curr_task_id() != ctx.scheduler.boot_idle_task().task_id()
-        || ctx.scheduler.boot_runqueue().idle_task_id() != ctx.scheduler.boot_idle_task().task_id()
-        || ctx.scheduler.boot_idle_task().cpu_ref() != ctx.scheduler.boot_runqueue().cpu_ref()
-        || !ctx
-            .scheduler
-            .boot_runqueue()
-            .is_boot_cpu_runqueue_view(&ctx.cpu_group)
-        || !ctx
-            .scheduler
-            .boot_idle_task()
-            .is_boot_cpu_idle_task_view(&ctx.cpu_group, ctx.scheduler.boot_runqueue())
         || !boot_cpu_owned_scheduler_view_matches()
         || !scheduler_possible_runqueues_match_cpu_group()
         || ctx.scheduler.default_root_domain().covered_cpu_count()
@@ -200,7 +189,6 @@ fn boot_cpu_owned_scheduler_view_matches() -> bool {
         && runqueue.is_boot_backed()
         && idle_task.cpu_ref() == boot_cpu.cpu_ref()
         && idle_task.cpu_id() == boot_cpu.logical_id()
-        && idle_task.task_id() == ctx.scheduler.boot_idle_task().task_id()
         && view.runqueue_current_task_id() == idle_task.task_id()
         && view.runqueue_idle_task_id() == idle_task.task_id()
         && view.runqueue_idle_task_matches()

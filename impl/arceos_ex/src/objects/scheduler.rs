@@ -1947,22 +1947,6 @@ impl BootIdleTask {
         self.cpu.cpu_id()
     }
 
-    pub const fn cpu_ref(&self) -> CpuRef {
-        self.cpu_ref
-    }
-
-    pub const fn uses_current_init_task(&self) -> bool {
-        self.uses_current_init_task
-    }
-
-    pub const fn lazy_tlb_mm_ready(&self) -> bool {
-        self.lazy_tlb_mm_ready
-    }
-
-    pub const fn no_set_affinity(&self) -> bool {
-        self.no_set_affinity
-    }
-
     pub const fn thread_context(&self) -> &TaskThreadContext {
         &self.thread_context
     }

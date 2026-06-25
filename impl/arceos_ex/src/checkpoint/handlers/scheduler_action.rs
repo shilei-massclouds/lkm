@@ -50,8 +50,9 @@ fn check_pick_next_task_exit(
         || ctx.scheduler.pick_next_task_passes() != 1
         || ctx.scheduler.pick_next_task_exit_prev_ref() != CurrentTaskRef::BootIdle
         || !next_is_first_boot_task
-        || ctx.scheduler.boot_runqueue().curr_task_id() != ctx.scheduler.boot_idle_task().task_id()
-        || ctx.scheduler.boot_runqueue().idle_task_id() != ctx.scheduler.boot_idle_task().task_id()
+        || !ctx
+            .scheduler
+            .boot_cpu_owned_scheduler_view_ready(&ctx.cpu_group)
     {
         sink.fail(total, "", name, "PickNextTask exit facts invalid");
         return CheckpointOutcome::FailAndShutdown;
