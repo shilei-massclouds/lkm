@@ -34,6 +34,8 @@
 
 启动阶段逐项审计时，并发/同步控制必须作为固定检查面覆盖：本地中断开关、抢占开关、自旋锁、Mutex、读写锁、RCU、CPU bring-up 同步量、内存/地址转换同步和 TLB/cache flush 边界都要明确判断是否已由 `spec/model` 表达；若 model 已表达但实现映射不清，再修订 `spec/coding` 或生成约束。`impl/` 只作为生成结果和 Linux 对照样本，发现偏差时默认先修规格。
 
+启动子阶段的完成口径统一按 `RestInitPhase` 当前做法执行：先对照 Linux 6.12.37 明确子阶段调用边界和配置裁剪，重点列出锁原语、同步原语、上下文边界、内存顺序和 deferred/trimmed 项；再补齐 `spec/model` 与 `spec/coding`；最后按规格补齐 `impl/arceos_ex`、checkpoint/KUnit/smoke 观测，并执行完整验证。已有完成项保留其当前状态；只有发现某阶段实际只做了最小闭环或局部补强时，才重新标记为待补审核。
+
 ### 已完成当前轮：RestInitPhase 三个子阶段规格/实现补齐
 
 `RestInitPhase` 已拆为 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和 `BootIdleStartupPhase` 三个子阶段，规格侧已补齐 `within` 形式的上下文边界。本轮已把三个子阶段的 `impl/arceos_ex` 实现与已确认规格对齐，并补 smoke 观测。
@@ -45,7 +47,7 @@
 
 ### 最高优先级：状态机术语与 guard lowering 策略收敛
 
-全局语义收敛已经完成，当前恢复 `SchedInitPhase` 审计。
+全局语义收敛已经完成，当前恢复 `SchedInitPhase` 审计。注意：`SchedInitPhase` 已有最小闭环和若干局部补强，但还没有完整按 `RestInitPhase` 的“Linux 对照子阶段审核 -> 先规格 -> 后实现补齐 -> 完整验证”口径收尾；下面第 6-10 项只能视为已完成首轮材料，不等同于完整子阶段审核完成。
 
 1. **P0 已完成：完成 `.spec` 与工具链向 `Transition` 的硬迁移**。对象 process 语法中的旧事件命名已删除，不再保留兼容入口：对象状态转移块统一写作 `transitions`，状态推进统一写作 `Transition`，对象驱动引用统一写作 `Object.Transition::Name`；`Action::X` 保持不变，真正外部事件、硬件事件和 trace event 的自然语言用法可保留但不得再表示对象 process。已更新 parser/AST/model JSON/derive/view/render 内部 schema、默认 target、`spec/**/*.spec`、工具测试 fixture、文档和 trace/render 期望，并删除旧 parser 兼容。
 2. **P0 已完成：规范化状态机概念和术语**。`spec/charter/main.md` 与 `spec/model/SEMANTICS.md` 已把核心术语收敛为：`State` 表示生命周期状态，`Transition` 表示改变生命周期状态或扩展状态的转移过程，`Action` 表示不改变当前被建模状态的操作，`Event` 保留给真实外部事件、异步事件、硬件事件或 trace event。当前 P0 将完成 `.spec` 源语法和工具 schema 的硬迁移。
@@ -57,7 +59,8 @@
 8. **P0 已完成首轮：建立 possible CPU runqueue 元数据视图**。提交 `fe05d3a` 已让 `Scheduler` 按 logical-id 暴露 possible CPU runqueue metadata：logical-id 0 与 `BootRunQueue` 对齐，其它 possible CPU 只建立 runqueue 元数据和 root-domain attach 事实，不创建 AP CurrentCPU 或 runnable AP flow。smoke 已覆盖 `CpuGroup`、`DefaultSchedRootDomain` 和 runqueue 元数据的一致性。
 9. **P0 已完成首轮：落实 CPU-owned RunQueue/IdleTask lowering**。Boot CPU 的 `CpuGroup.Cpu[0].RunQueue` / `CpuGroup.Cpu[0].IdleTask` 正式 view 已落地，`sched_init` ready、scheduler checkpoint 和 smoke 已通过 `CpuOwnedSchedulerView` 观察 boot CPU-owned 关系。rest_init 中 `KernelInitTask` / `KthreaddTask` 的 CPU 归属来源已收敛到 selected runqueue ref 的 `cpu_id()`，不再从 `Scheduler.boot_runqueue()` 反推 task CPU；`CurrentRunQueueRef` 解析已按规格收敛为 `CurrentTaskRef -> Task.cpu_id -> CpuGroup.Cpu[id].RunQueue`，`CpuGroup.boot_cpu()` 只作为 boot 选择/一致性校验使用。`Scheduler.Action::SelectRunQueue` lowering 返回独立 `RunQueueRef`，调用侧再从 selected_rq 设置 task CPU 并入队；`CurrentRunQueueRef` 只保留给 schedule/pick-next 的当前 CPU 私有路径。rest_init phase/checkpoint 对 boot runqueue membership/count 的观察已改为通过 `CpuOwnedSchedulerView` 投影事实完成，`TaskCreationCore.copy_process()` 的 scheduler/runqueue 前置条件也已通过传入 `CpuGroup` 后验证 CPU-owned scheduler view。scheduler/rest_init/sync primitive smoke 对 CPU-owned runqueue membership 和 idle task thread-context facts 的观察已转向 `CpuOwnedSchedulerView`/`CpuIdleTaskView`；仅保留明确的 transitional storage parity 对照。`BootRunQueueRef` 已收敛为 boot-backed UP storage/lowering detail，公开构造与检查使用 CPU-owned runqueue 语义；secondary idle task 仍留给 SMP bringup，不在本步提前迁移。
 10. **P0 已完成首轮：结构化记录 `SchedInitPhase` trace / housekeeping / context tracking 裁剪边界**。coding/model 已修正为按配置区分：`ftrace_init()` 和 `context_tracking_init()` 是当前 RISC-V64/default_config 的 trimmed/no-op call point，并由 `SchedInitTrimmedPaths` 对象记录 `CONFIG_FTRACE_MCOUNT_RECORD=n`、`CONFIG_CONTEXT_TRACKING_USER_FORCE=n` 和调用位置保留事实；`early_trace_init()`、`trace_init()` 和 `housekeeping_init()` 仍是显式 deferred 边界。实现侧已补对应对象和 scheduler smoke 观察。
-11. **P0 下一步：拆分 Linux tracing 与 housekeeping 后续边界**。继续本项时，应先确定 Linux tracing core 与项目 checkpoint trace 的关系，再 formal `housekeeping_init()` 的 flags/cmdline mask/domain 边界，避免把启用配置下的真实责任误归为永久 no-op。
+11. **P0 当前：按 `RestInitPhase` 口径补做 `SchedInitPhase` 完整子阶段审核**。先把 `SchedInitPhase` 按 Linux `start_kernel()` 中 `mm_core_init()` 返回后到 `early_irq_init()` 前的真实调用序列拆成可审核子阶段；每个子阶段都必须列出 Linux 源码路径、当前配置结果、涉及的锁/同步/上下文/内存顺序边界、已有 model/coding/impl 覆盖和缺口。修复顺序固定为：先 `spec/model` 与 `spec/coding`，再 `impl/arceos_ex` 与 smoke/KUnit/checkpoint 观测，最后完整验证。
+12. **P0 后续：拆分 Linux tracing 与 housekeeping 后续边界**。继续本项时，应先确定 Linux tracing core 与项目 checkpoint trace 的关系，再 formal `housekeeping_init()` 的 flags/cmdline mask/domain 边界，避免把启用配置下的真实责任误归为永久 no-op。
 
 ### 已完成专题：Effective Context 与 CorePrepare 同步原语缺口
 
