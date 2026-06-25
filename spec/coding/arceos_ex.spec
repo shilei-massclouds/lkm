@@ -136,6 +136,10 @@ predicate arceos_ex_must_sched_init_radix_maple_rcu_free_callbacks_deferred() ->
 predicate arceos_ex_must_sched_init_workqueue_register_pool_workqueue_cache() -> bool;
 predicate arceos_ex_must_sched_init_workqueue_use_within_mutex_contexts() -> bool;
 predicate arceos_ex_must_sched_init_workqueue_keep_worker_runtime_deferred() -> bool;
+predicate arceos_ex_must_sched_init_softirq_prepare_shell_only() -> bool;
+predicate arceos_ex_must_sched_init_rcu_register_rcu_softirq_explicitly() -> bool;
+predicate arceos_ex_must_sched_init_rcu_expose_tree_and_tasks_init_facts() -> bool;
+predicate arceos_ex_must_sched_init_trace_housekeeping_context_tracking_deferred_not_noop() -> bool;
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
@@ -2390,6 +2394,32 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_sched_init_workqueue_register_pool_workqueue_cache();
         arceos_ex_must_sched_init_workqueue_use_within_mutex_contexts();
         arceos_ex_must_sched_init_workqueue_keep_worker_runtime_deferred();
+
+        /*
+         * sched_init softirq/RCU/tracing boundaries:
+         *
+         * Softirq.Preset in SchedInitPhase must only create the action-table
+         * and per-CPU pending-bit shell needed by rcu_init(); Linux
+         * softirq_init(), tasklet queues, TIMER_SOFTIRQ and HRTIMER_SOFTIRQ
+         * registration occur after early_irq_init() and are driven by
+         * IrqTimeInitPhase. RcuCore.setup() must explicitly register
+         * RCU_SOFTIRQ against Softirq instead of treating action_table_ready
+         * as sufficient. It must expose rcu_init()'s TREE_RCU node tree
+         * locks/waitqueues/work, per-CPU rcu_data binding, kfree_rcu batch
+         * workqueue/shrinker setup, PM notifier registration, and
+         * tasks_cblist_init_generic() per-flavor/per-CPU callback-list,
+         * lock, work, and barrier-head facts. RCU GP kthreads, callback
+         * execution and full RCU read-side/context-tracking semantics remain
+         * deferred. Since the active .config enables FTRACE/TRACING,
+         * CPU_ISOLATION and CONTEXT_TRACKING/CONTEXT_TRACKING_IDLE, the
+         * sched-init lowering must classify ftrace_init()/early_trace_init()/
+         * trace_init(), housekeeping_init() and context_tracking_init() as
+         * explicit deferred boundaries, not as no-op checkpoints.
+         */
+        arceos_ex_must_sched_init_softirq_prepare_shell_only();
+        arceos_ex_must_sched_init_rcu_register_rcu_softirq_explicitly();
+        arceos_ex_must_sched_init_rcu_expose_tree_and_tasks_init_facts();
+        arceos_ex_must_sched_init_trace_housekeeping_context_tracking_deferred_not_noop();
 
         /*
          * CPU-owned RunQueue/IdleTask:

@@ -34,6 +34,26 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    if !ctx.softirq.rcu_action_registered()
+        || !ctx.rcu_core.softirq_registered()
+        || !ctx.rcu_core.node_tree_ready()
+        || !ctx.rcu_core.node_locks_ready()
+        || !ctx.rcu_core.node_waitqueues_ready()
+        || !ctx.rcu_core.node_poll_work_ready()
+        || !ctx.rcu_core.percpu_data_ready()
+        || !ctx.rcu_core.kfree_batch_ready()
+        || !ctx.rcu_core.kfree_shrinker_registered()
+        || !ctx.rcu_core.pm_notifier_registered()
+        || !ctx.rcu_core.runtime_read_side_full_semantics_deferred()
+        || !ctx.rcu_core.tasks_rcu().percpu_arrays_ready()
+        || !ctx.rcu_core.tasks_rcu().percpu_locks_ready()
+        || !ctx.rcu_core.tasks_rcu().percpu_work_ready()
+        || !ctx.rcu_core.tasks_rcu().barrier_heads_ready()
+    {
+        printk::write_str("sched init RCU or softirq facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     if ctx.scheduler.state() != State::Online
         || ctx.scheduler.schedule_passes() == 0
         || ctx.scheduler.current_runqueue_resolve_passes() == 0

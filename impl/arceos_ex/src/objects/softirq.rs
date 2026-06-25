@@ -11,6 +11,7 @@ pub struct Softirq {
     action_table_ready: bool,
     slot_count: usize,
     pending_set_ready: bool,
+    rcu_action_registered: bool,
     timer_action_registered: bool,
     hrtimer_action_registered: bool,
     tasklet_queues_ready: bool,
@@ -25,6 +26,7 @@ impl Softirq {
             action_table_ready: false,
             slot_count: 0,
             pending_set_ready: false,
+            rcu_action_registered: false,
             timer_action_registered: false,
             hrtimer_action_registered: false,
             tasklet_queues_ready: false,
@@ -47,6 +49,10 @@ impl Softirq {
 
     pub const fn pending_set_ready(&self) -> bool {
         self.pending_set_ready
+    }
+
+    pub const fn rcu_action_registered(&self) -> bool {
+        self.rcu_action_registered
     }
 
     pub const fn timer_action_registered(&self) -> bool {
@@ -102,6 +108,20 @@ impl Softirq {
         }
 
         self.timer_action_registered = true;
+        Ok(())
+    }
+
+    pub fn register_rcu_action(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || !self.action_table_ready {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Prepared,
+            );
+        }
+
+        self.rcu_action_registered = true;
         Ok(())
     }
 

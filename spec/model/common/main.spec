@@ -446,6 +446,42 @@ predicate boot_idle_init_held_pi_lock<T, U>(task: T, lock: U) -> bool;
 predicate boot_idle_init_held_runqueue_lock<T, U>(runqueue: T, lock: U) -> bool;
 predicate boot_idle_task_cpu_set_under_rcu_read<T, U>(task: T, cpu_ref: U) -> bool;
 predicate boot_runqueue_current_published_with_rcu<T, U>(runqueue: T, task: U) -> bool;
+predicate softirq_action_table_ready<T>(softirq: T) -> bool;
+predicate softirq_slots_ready<T>(softirq: T) -> bool;
+predicate softirq_pending_set_ready<T, U>(softirq: T, per_cpu_storage: U) -> bool;
+predicate softirq_execution_closed<T>(softirq: T) -> bool;
+predicate softirq_rcu_action_registered<T, U>(softirq: T, rcu_core: U) -> bool;
+predicate softirq_tasklet_queues_ready<T, U>(softirq: T, per_cpu_storage: U) -> bool;
+predicate softirq_tasklet_actions_registered<T>(softirq: T) -> bool;
+predicate softirq_timer_actions_registered<T, U, V>(
+    softirq: T,
+    timer_wheel: U,
+    hrtimer_core: V
+) -> bool;
+predicate rcu_core_ready<T, U>(rcu_core: T, cpu_group: U) -> bool;
+predicate rcu_boot_cpu_online_ready<T, U>(rcu_core: T, boot_cpu: U) -> bool;
+predicate rcu_softirq_registered<T, U>(rcu_core: T, softirq: U) -> bool;
+predicate rcu_workqueues_ready<T, U>(rcu_core: T, workqueue: U) -> bool;
+predicate rcu_node_tree_ready<T, U>(rcu_core: T, cpu_group: U) -> bool;
+predicate rcu_node_locks_ready<T>(rcu_core: T) -> bool;
+predicate rcu_node_waitqueues_ready<T>(rcu_core: T) -> bool;
+predicate rcu_node_poll_work_ready<T>(rcu_core: T) -> bool;
+predicate rcu_percpu_data_ready<T, U>(rcu_core: T, per_cpu_storage: U) -> bool;
+predicate rcu_kfree_batch_ready<T, U>(rcu_core: T, workqueue: U) -> bool;
+predicate rcu_kfree_shrinker_registered<T>(rcu_core: T) -> bool;
+predicate rcu_pm_notifier_registered<T>(rcu_core: T) -> bool;
+predicate rcu_gp_threads_deferred<T>(rcu_core: T) -> bool;
+predicate rcu_runtime_read_side_full_semantics_deferred<T>(rcu_core: T) -> bool;
+predicate tasks_rcu_prepared<T>(tasks_rcu: T) -> bool;
+predicate tasks_rcu_callback_lists_ready<T, U>(tasks_rcu: T, per_cpu_storage: U) -> bool;
+predicate tasks_rcu_enabled_flavors_recorded<T>(tasks_rcu: T) -> bool;
+predicate tasks_rcu_percpu_arrays_ready<T, U>(tasks_rcu: T, per_cpu_storage: U) -> bool;
+predicate tasks_rcu_percpu_locks_ready<T>(tasks_rcu: T) -> bool;
+predicate tasks_rcu_percpu_work_ready<T, U>(tasks_rcu: T, workqueue: U) -> bool;
+predicate tasks_rcu_barrier_heads_ready<T>(tasks_rcu: T) -> bool;
+predicate tasks_rcu_gp_threads_deferred<T>(tasks_rcu: T) -> bool;
+predicate tasks_rcu_ready<T>(tasks_rcu: T) -> bool;
+predicate tasks_rcu_gp_threads_created<T, U>(tasks_rcu: T, kthreadd_task: U) -> bool;
 predicate rcu_read_side_ready<T>(read_side: T) -> bool;
 predicate rcu_read_side_entered<T, U>(read_side: T, current_cpu: U) -> bool;
 predicate rcu_read_side_exited<T, U>(read_side: T, current_cpu: U) -> bool;

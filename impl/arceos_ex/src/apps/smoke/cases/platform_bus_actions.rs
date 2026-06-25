@@ -72,7 +72,7 @@ struct ProbeSupport {
 }
 
 impl ProbeSupport {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             page_table_caches: PageTableCaches::new(),
             page_allocator: PageAllocator::new(),
@@ -98,6 +98,15 @@ impl ProbeSupport {
             &mut self.virtio_bus,
         )
     }
+}
+
+static mut PROBE_SUPPORT: ProbeSupport = ProbeSupport::new();
+
+fn probe_support() -> &'static mut ProbeSupport {
+    // The probe support objects are larger than the boot stack.  Keep the
+    // smoke-only fixture in static storage; the mock driver used here never
+    // matches, so the mutable resources are not consumed by a real probe.
+    unsafe { &mut *core::ptr::addr_of_mut!(PROBE_SUPPORT) }
 }
 
 struct AddDeviceProbeDriverScenario {
@@ -160,7 +169,7 @@ impl SmokeScenario for AddDeviceProbeDriverScenario {
         );
         assertions.assert_ok("probe driver deferred", {
             let ctx = context_ref();
-            let mut support = ProbeSupport::new();
+            let support = probe_support();
             let mut resources = support.resources(ctx);
             self.fixture
                 .bus
@@ -237,7 +246,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
     fn setup(&mut self, assertions: &mut SmokeAssertions) {
         assertions.assert_fail("probe device before setup", {
             let ctx = context_ref();
-            let mut support = ProbeSupport::new();
+            let support = probe_support();
             let mut resources = support.resources(ctx);
             self.fixture
                 .bus
@@ -276,7 +285,7 @@ impl SmokeScenario for AddDriverProbeDeviceScenario {
         );
         assertions.assert_ok("probe device deferred", {
             let ctx = context_ref();
-            let mut support = ProbeSupport::new();
+            let support = probe_support();
             let mut resources = support.resources(ctx);
             self.fixture.bus.probe_device(device_ref, &mut resources)
         });

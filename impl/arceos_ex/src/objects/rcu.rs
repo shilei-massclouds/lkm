@@ -14,7 +14,16 @@ pub struct RcuCore {
     boot_cpu_online_ready: bool,
     softirq_registered: bool,
     workqueues_ready: bool,
+    node_tree_ready: bool,
+    node_locks_ready: bool,
+    node_waitqueues_ready: bool,
+    node_poll_work_ready: bool,
+    percpu_data_ready: bool,
+    kfree_batch_ready: bool,
+    kfree_shrinker_registered: bool,
+    pm_notifier_registered: bool,
     gp_threads_deferred: bool,
+    runtime_read_side_full_semantics_deferred: bool,
     scheduler_starting_ready: bool,
     scheduler_active_init: bool,
     scheduler_start_single_online_cpu: bool,
@@ -30,7 +39,16 @@ impl RcuCore {
             boot_cpu_online_ready: false,
             softirq_registered: false,
             workqueues_ready: false,
+            node_tree_ready: false,
+            node_locks_ready: false,
+            node_waitqueues_ready: false,
+            node_poll_work_ready: false,
+            percpu_data_ready: false,
+            kfree_batch_ready: false,
+            kfree_shrinker_registered: false,
+            pm_notifier_registered: false,
             gp_threads_deferred: true,
+            runtime_read_side_full_semantics_deferred: true,
             scheduler_starting_ready: false,
             scheduler_active_init: false,
             scheduler_start_single_online_cpu: false,
@@ -63,8 +81,44 @@ impl RcuCore {
         self.workqueues_ready
     }
 
+    pub const fn node_tree_ready(&self) -> bool {
+        self.node_tree_ready
+    }
+
+    pub const fn node_locks_ready(&self) -> bool {
+        self.node_locks_ready
+    }
+
+    pub const fn node_waitqueues_ready(&self) -> bool {
+        self.node_waitqueues_ready
+    }
+
+    pub const fn node_poll_work_ready(&self) -> bool {
+        self.node_poll_work_ready
+    }
+
+    pub const fn percpu_data_ready(&self) -> bool {
+        self.percpu_data_ready
+    }
+
+    pub const fn kfree_batch_ready(&self) -> bool {
+        self.kfree_batch_ready
+    }
+
+    pub const fn kfree_shrinker_registered(&self) -> bool {
+        self.kfree_shrinker_registered
+    }
+
+    pub const fn pm_notifier_registered(&self) -> bool {
+        self.pm_notifier_registered
+    }
+
     pub const fn gp_threads_deferred(&self) -> bool {
         self.gp_threads_deferred
+    }
+
+    pub const fn runtime_read_side_full_semantics_deferred(&self) -> bool {
+        self.runtime_read_side_full_semantics_deferred
     }
 
     pub const fn scheduler_starting_ready(&self) -> bool {
@@ -91,7 +145,7 @@ impl RcuCore {
         &mut self,
         scheduler: &Scheduler,
         workqueue: &Workqueue,
-        softirq: &Softirq,
+        softirq: &mut Softirq,
         cpu_group: &CpuGroup,
         per_cpu_storage: &PerCpuStorage,
     ) -> EventResult {
@@ -105,17 +159,39 @@ impl RcuCore {
             return self.failed_setup();
         }
 
-        self.tasks_rcu.preset(per_cpu_storage)?;
+        softirq.register_rcu_action()?;
+        self.tasks_rcu.preset(per_cpu_storage, workqueue)?;
         self.boot_cpu_online_ready = cpu_group.boot_cpu_state() == State::Online;
-        self.softirq_registered = softirq.action_table_ready();
+        self.softirq_registered = softirq.rcu_action_registered();
         self.workqueues_ready = workqueue.system_queues_ready();
+        self.node_tree_ready = cpu_group.possible_cpu_count() != 0;
+        self.node_locks_ready = true;
+        self.node_waitqueues_ready = true;
+        self.node_poll_work_ready = true;
+        self.percpu_data_ready = per_cpu_storage.state() == State::Ready;
+        self.kfree_batch_ready = workqueue.system_queues_ready();
+        self.kfree_shrinker_registered = true;
+        self.pm_notifier_registered = true;
         self.gp_threads_deferred = true;
+        self.runtime_read_side_full_semantics_deferred = true;
         self.scheduler_starting_ready = false;
         self.scheduler_active_init = false;
         self.scheduler_start_single_online_cpu = false;
         self.gp_seq_baseline_synced = false;
         self.inkernel_boot_ended = false;
-        if !self.boot_cpu_online_ready || !self.softirq_registered || !self.workqueues_ready {
+        if !self.boot_cpu_online_ready
+            || !self.softirq_registered
+            || !self.workqueues_ready
+            || !self.node_tree_ready
+            || !self.node_locks_ready
+            || !self.node_waitqueues_ready
+            || !self.node_poll_work_ready
+            || !self.percpu_data_ready
+            || !self.kfree_batch_ready
+            || !self.kfree_shrinker_registered
+            || !self.pm_notifier_registered
+            || !self.runtime_read_side_full_semantics_deferred
+        {
             return self.failed_setup();
         }
 
@@ -181,6 +257,10 @@ pub struct TasksRcu {
     lifecycle: Lifecycle,
     callback_lists_ready: bool,
     enabled_flavor_count: usize,
+    percpu_arrays_ready: bool,
+    percpu_locks_ready: bool,
+    percpu_work_ready: bool,
+    barrier_heads_ready: bool,
     gp_threads_deferred: bool,
     gp_threads_ready: bool,
 }
@@ -191,6 +271,10 @@ impl TasksRcu {
             lifecycle: Lifecycle::new(State::Base),
             callback_lists_ready: false,
             enabled_flavor_count: 0,
+            percpu_arrays_ready: false,
+            percpu_locks_ready: false,
+            percpu_work_ready: false,
+            barrier_heads_ready: false,
             gp_threads_deferred: true,
             gp_threads_ready: false,
         }
@@ -208,6 +292,22 @@ impl TasksRcu {
         self.enabled_flavor_count
     }
 
+    pub const fn percpu_arrays_ready(&self) -> bool {
+        self.percpu_arrays_ready
+    }
+
+    pub const fn percpu_locks_ready(&self) -> bool {
+        self.percpu_locks_ready
+    }
+
+    pub const fn percpu_work_ready(&self) -> bool {
+        self.percpu_work_ready
+    }
+
+    pub const fn barrier_heads_ready(&self) -> bool {
+        self.barrier_heads_ready
+    }
+
     pub const fn gp_threads_deferred(&self) -> bool {
         self.gp_threads_deferred
     }
@@ -216,8 +316,11 @@ impl TasksRcu {
         self.gp_threads_ready
     }
 
-    fn preset(&mut self, per_cpu_storage: &PerCpuStorage) -> EventResult {
-        if self.lifecycle.state() != State::Base || per_cpu_storage.state() != State::Ready {
+    fn preset(&mut self, per_cpu_storage: &PerCpuStorage, workqueue: &Workqueue) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || per_cpu_storage.state() != State::Ready
+            || workqueue.state() != State::Prepared
+        {
             return failed_condition(
                 LifecycleEvent::Preset,
                 self.lifecycle.state(),
@@ -228,6 +331,10 @@ impl TasksRcu {
 
         self.callback_lists_ready = true;
         self.enabled_flavor_count = 2;
+        self.percpu_arrays_ready = true;
+        self.percpu_locks_ready = true;
+        self.percpu_work_ready = workqueue.system_queues_ready();
+        self.barrier_heads_ready = true;
         self.gp_threads_deferred = true;
         self.gp_threads_ready = false;
         self.lifecycle.transition(

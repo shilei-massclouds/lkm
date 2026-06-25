@@ -24,7 +24,7 @@ pub fn setup(ctx: &mut Context) -> ! {
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
     checkpoint_poking_init_noop()?;
-    checkpoint_ftrace_init_noop()?;
+    checkpoint_ftrace_init_deferred()?;
     ctx.scheduler
         .preset(&ctx.cpu_group, &ctx.per_cpu_storage, &ctx.static_branch)?;
     ctx.scheduler.setup(
@@ -51,12 +51,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.rcu_core.setup(
         &ctx.scheduler,
         &ctx.workqueue,
-        &ctx.softirq,
+        &mut ctx.softirq,
         &ctx.cpu_group,
         &ctx.per_cpu_storage,
     )?;
     checkpoint_trace_init_deferred()?;
-    checkpoint_context_tracking_noop()
+    checkpoint_context_tracking_deferred()
 }
 
 fn handoff() -> ! {
@@ -231,15 +231,29 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.softirq.action_table_ready()
         && ctx.softirq.slot_count() != 0
         && ctx.softirq.pending_set_ready()
+        && ctx.softirq.rcu_action_registered()
         && !ctx.softirq.execution_open()
         && ctx.rcu_core.state() == State::Ready
         && ctx.rcu_core.tasks_rcu().state() == State::Prepared
         && ctx.rcu_core.boot_cpu_online_ready()
         && ctx.rcu_core.softirq_registered()
         && ctx.rcu_core.workqueues_ready()
+        && ctx.rcu_core.node_tree_ready()
+        && ctx.rcu_core.node_locks_ready()
+        && ctx.rcu_core.node_waitqueues_ready()
+        && ctx.rcu_core.node_poll_work_ready()
+        && ctx.rcu_core.percpu_data_ready()
+        && ctx.rcu_core.kfree_batch_ready()
+        && ctx.rcu_core.kfree_shrinker_registered()
+        && ctx.rcu_core.pm_notifier_registered()
         && ctx.rcu_core.gp_threads_deferred()
+        && ctx.rcu_core.runtime_read_side_full_semantics_deferred()
         && ctx.rcu_core.tasks_rcu().callback_lists_ready()
         && ctx.rcu_core.tasks_rcu().enabled_flavor_count() != 0
+        && ctx.rcu_core.tasks_rcu().percpu_arrays_ready()
+        && ctx.rcu_core.tasks_rcu().percpu_locks_ready()
+        && ctx.rcu_core.tasks_rcu().percpu_work_ready()
+        && ctx.rcu_core.tasks_rcu().barrier_heads_ready()
         && ctx.rcu_core.tasks_rcu().gp_threads_deferred()
         && printk::is_ready()
         && (earlycon::is_online() || printk::console_handoff_complete())
@@ -251,8 +265,8 @@ fn checkpoint_poking_init_noop() -> EventResult {
     Ok(())
 }
 
-fn checkpoint_ftrace_init_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::FtraceInitNoop);
+fn checkpoint_ftrace_init_deferred() -> EventResult {
+    crate::trace::checkpoint(Checkpoint::FtraceInitDeferred);
     Ok(())
 }
 
@@ -275,7 +289,7 @@ fn checkpoint_trace_init_deferred() -> EventResult {
     Ok(())
 }
 
-fn checkpoint_context_tracking_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::ContextTrackingInitNoop);
+fn checkpoint_context_tracking_deferred() -> EventResult {
+    crate::trace::checkpoint(Checkpoint::ContextTrackingInitDeferred);
     Ok(())
 }

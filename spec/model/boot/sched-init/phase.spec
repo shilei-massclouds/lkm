@@ -1212,9 +1212,10 @@ object Softirq: InterruptObject {
 
         transitions {
             /*
-             * Setup 对应 softirq_init()。TimerWheel/HrtimerCore 已经在本阶段
-             * 前半段注册 TIMER_SOFTIRQ/HRTIMER_SOFTIRQ；这里补齐 tasklet 队列
-             * 与 TASKLET/HI softirq action。
+             * Setup 对应 early_irq_init() 后的 softirq_init()。它由
+             * IrqTimeInitPhase 在 TimerWheel/HrtimerCore 注册 TIMER_SOFTIRQ
+             * 和 HRTIMER_SOFTIRQ 后驱动；这里补齐 tasklet 队列与
+             * TASKLET/HI softirq action。
              */
             on Transition::Setup -> State::Ready {
                 depends_on {
@@ -1273,7 +1274,18 @@ object RcuCore: TaskObject {
                     rcu_core_ready(RcuCore, CpuGroup);
                     rcu_boot_cpu_online_ready(RcuCore, BootCPU);
                     rcu_softirq_registered(RcuCore, Softirq);
+                    softirq_rcu_action_registered(Softirq, RcuCore);
                     rcu_workqueues_ready(RcuCore, Workqueue);
+                    rcu_node_tree_ready(RcuCore, CpuGroup);
+                    rcu_node_locks_ready(RcuCore);
+                    rcu_node_waitqueues_ready(RcuCore);
+                    rcu_node_poll_work_ready(RcuCore);
+                    rcu_percpu_data_ready(RcuCore, PerCpuStorage);
+                    rcu_kfree_batch_ready(RcuCore, Workqueue);
+                    rcu_kfree_shrinker_registered(RcuCore);
+                    rcu_pm_notifier_registered(RcuCore);
+                    rcu_gp_threads_deferred(RcuCore);
+                    rcu_runtime_read_side_full_semantics_deferred(RcuCore);
                     tasks_rcu_prepared(TasksRcu);
                 }
             }
@@ -1286,7 +1298,18 @@ object RcuCore: TaskObject {
             rcu_core_ready(RcuCore, CpuGroup);
             rcu_boot_cpu_online_ready(RcuCore, BootCPU);
             rcu_softirq_registered(RcuCore, Softirq);
+            softirq_rcu_action_registered(Softirq, RcuCore);
             rcu_workqueues_ready(RcuCore, Workqueue);
+            rcu_node_tree_ready(RcuCore, CpuGroup);
+            rcu_node_locks_ready(RcuCore);
+            rcu_node_waitqueues_ready(RcuCore);
+            rcu_node_poll_work_ready(RcuCore);
+            rcu_percpu_data_ready(RcuCore, PerCpuStorage);
+            rcu_kfree_batch_ready(RcuCore, Workqueue);
+            rcu_kfree_shrinker_registered(RcuCore);
+            rcu_pm_notifier_registered(RcuCore);
+            rcu_gp_threads_deferred(RcuCore);
+            rcu_runtime_read_side_full_semantics_deferred(RcuCore);
         }
     }
 }
@@ -1304,11 +1327,16 @@ object TasksRcu: TaskObject {
             on Transition::Preset -> State::Prepared {
                 depends_on {
                     PerCpuStorage.state == State::Ready;
+                    Workqueue.state == State::Prepared;
                 }
 
                 ensures {
                     tasks_rcu_callback_lists_ready(TasksRcu, PerCpuStorage);
                     tasks_rcu_enabled_flavors_recorded(TasksRcu);
+                    tasks_rcu_percpu_arrays_ready(TasksRcu, PerCpuStorage);
+                    tasks_rcu_percpu_locks_ready(TasksRcu);
+                    tasks_rcu_percpu_work_ready(TasksRcu, Workqueue);
+                    tasks_rcu_barrier_heads_ready(TasksRcu);
                     tasks_rcu_gp_threads_deferred(TasksRcu);
                 }
             }
@@ -1319,6 +1347,11 @@ object TasksRcu: TaskObject {
         invariant {
             tasks_rcu_callback_lists_ready(TasksRcu, PerCpuStorage);
             tasks_rcu_enabled_flavors_recorded(TasksRcu);
+            tasks_rcu_percpu_arrays_ready(TasksRcu, PerCpuStorage);
+            tasks_rcu_percpu_locks_ready(TasksRcu);
+            tasks_rcu_percpu_work_ready(TasksRcu, Workqueue);
+            tasks_rcu_barrier_heads_ready(TasksRcu);
+            tasks_rcu_gp_threads_deferred(TasksRcu);
         }
 
         transitions {
@@ -1391,13 +1424,13 @@ object SchedInitPhase: PhaseObject {
                 }
 
                 deferred {
-                    "early_trace_init()/trace_init() 暂缓：Linux tracing core 与项目 checkpoint trace 的关系后续单独收敛。";
-                    "housekeeping_init() 暂缓：nohz_full/isolcpus/CPU isolation 参数路径尚未进入当前 formal。";
+                    "ftrace_init()/early_trace_init()/trace_init() 暂缓：当前 .config 启用 FTRACE/TRACING，Linux tracing core 与项目 checkpoint trace 的关系后续单独收敛。";
+                    "housekeeping_init() 暂缓：当前 .config 启用 CPU_ISOLATION，但 nohz_full 未启用；housekeeping/domain/cmdline mask 语义后续单独 formal。";
                     "SchedClass 细分暂缓：当前只保留调度类壳和 boot CPU runqueue 语义。";
                     "Workqueue.setup()/enable() 暂缓：worker kthread 创建和执行边界属于后续多任务/SMP 路径。";
                     "TasksRcu.setup() 暂缓：GP kthread 创建留给后续 rcu_init_tasks_generic()。";
-                    "context_tracking_init() 当前 CONFIG_CONTEXT_TRACKING_USER_FORCE=n，为 trimmed/no-op。";
-                    "poking_init()/ftrace_init() 当前 RISC-V/default_config 下为 trimmed/no-op。";
+                    "context_tracking_init() 暂缓：当前 .config 启用 CONTEXT_TRACKING/CONTEXT_TRACKING_IDLE，但 USER_FORCE 未启用；idle/user/EQS 细节后续随 RCU/context tracking 展开。";
+                    "poking_init() 当前 RISC-V 路径未建立额外对象，保留为 checkpoint/no-op。";
                 }
             }
         }
