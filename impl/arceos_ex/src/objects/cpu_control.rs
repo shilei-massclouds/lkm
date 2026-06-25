@@ -429,14 +429,35 @@ impl PreemptionControl {
     }
 
     pub fn setup(&mut self, init_task: &InitTask) -> EventResult {
-        self.setup_with_depth(init_task, 0)
+        self.setup_with_depth(
+            init_task,
+            0,
+            crate::trace::Checkpoint::BootIdlePreemptionReady,
+        )
     }
 
     pub fn setup_disabled(&mut self, init_task: &InitTask) -> EventResult {
-        self.setup_with_depth(init_task, 1)
+        self.setup_with_depth(
+            init_task,
+            1,
+            crate::trace::Checkpoint::BootIdlePreemptionReady,
+        )
     }
 
-    fn setup_with_depth(&mut self, init_task: &InitTask, disable_depth: usize) -> EventResult {
+    pub fn setup_disabled_with_checkpoint(
+        &mut self,
+        init_task: &InitTask,
+        checkpoint: Checkpoint,
+    ) -> EventResult {
+        self.setup_with_depth(init_task, 1, checkpoint)
+    }
+
+    fn setup_with_depth(
+        &mut self,
+        init_task: &InitTask,
+        disable_depth: usize,
+        checkpoint: Checkpoint,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Base || init_task.state() != State::Online {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -447,12 +468,8 @@ impl PreemptionControl {
         }
 
         self.disable_depth = disable_depth;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            crate::trace::Checkpoint::BootIdlePreemptionReady,
-        )
+        self.lifecycle
+            .transition(LifecycleEvent::Setup, State::Base, State::Ready, checkpoint)
     }
 
     pub fn disable(&mut self) -> EventResult {
@@ -631,6 +648,105 @@ impl RawSpinLock {
             && preemption.disabled();
         preemption.enable()?;
         self.irqrestore_exited_count = self.irqrestore_exited_count.wrapping_add(1);
+        Ok(())
+    }
+}
+
+pub struct RcuReadSide {
+    lifecycle: Lifecycle,
+    held_depth: usize,
+    read_lock_count: usize,
+    read_unlock_count: usize,
+    incomplete_first_slice: bool,
+    full_semantics_deferred: bool,
+}
+
+impl RcuReadSide {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            held_depth: 0,
+            read_lock_count: 0,
+            read_unlock_count: 0,
+            incomplete_first_slice: false,
+            full_semantics_deferred: true,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn read_lock_count(&self) -> usize {
+        self.read_lock_count
+    }
+
+    pub const fn read_unlock_count(&self) -> usize {
+        self.read_unlock_count
+    }
+
+    pub const fn incomplete_first_slice(&self) -> bool {
+        self.incomplete_first_slice
+    }
+
+    pub const fn full_semantics_deferred(&self) -> bool {
+        self.full_semantics_deferred
+    }
+
+    pub const fn balanced(&self) -> bool {
+        self.held_depth == 0 && self.read_lock_count == self.read_unlock_count
+    }
+
+    pub fn preset_incomplete_first_slice(&mut self, checkpoint: Checkpoint) -> EventResult {
+        if self.lifecycle.state() != State::Base {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.held_depth = 0;
+        self.read_lock_count = 0;
+        self.read_unlock_count = 0;
+        self.incomplete_first_slice = true;
+        self.full_semantics_deferred = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            checkpoint,
+        )
+    }
+
+    pub fn read_lock(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || !self.incomplete_first_slice {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Prepared,
+            );
+        }
+
+        self.held_depth = self.held_depth.wrapping_add(1);
+        self.read_lock_count = self.read_lock_count.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn read_unlock(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Prepared || self.held_depth == 0 {
+            return failed_condition(
+                LifecycleEvent::Disable,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Prepared,
+            );
+        }
+
+        self.held_depth -= 1;
+        self.read_unlock_count = self.read_unlock_count.wrapping_add(1);
         Ok(())
     }
 }

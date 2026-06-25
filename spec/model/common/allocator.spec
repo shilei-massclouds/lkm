@@ -253,8 +253,16 @@ predicate kmalloc_caches_refer_to_registered_slub_caches<T, R>(caches: T, regist
 predicate page_table_lock_cache_registered_in_slub_registry<T, R>(cache: T, registry: R) -> bool;
 predicate vmap_area_cache_registered_in_slub_registry<T, R>(cache: T, registry: R) -> bool;
 predicate mm_struct_cache_is_slub_cache_instance<T>(cache: T) -> bool;
+predicate radix_tree_node_cache_ready<T, S>(tree: T, subsystem: S) -> bool;
 predicate radix_tree_node_cache_registered_in_slub_registry<T, R>(tree: T, registry: R) -> bool;
+predicate radix_tree_cpuhp_dead_step_registered<T, C>(tree: T, hotplug_state: C) -> bool;
+predicate radix_tree_node_api_ready<T>(tree: T) -> bool;
+predicate radix_tree_node_rcu_free_callback_deferred<T>(tree: T) -> bool;
+predicate maple_tree_node_cache_ready<T, S>(tree: T, subsystem: S) -> bool;
 predicate maple_tree_node_cache_registered_in_slub_registry<T, R>(tree: T, registry: R) -> bool;
+predicate maple_tree_node_api_ready<T>(tree: T) -> bool;
+predicate maple_tree_node_rcu_free_callback_deferred<T>(tree: T) -> bool;
+predicate pool_workqueue_cache_registered_in_slub_registry<T, R>(workqueue: T, registry: R) -> bool;
 predicate slub_subsystem_kmalloc_api_ready<T>(allocator: T) -> bool;
 predicate slub_subsystem_kzalloc_api_ready<T>(allocator: T) -> bool;
 predicate slub_subsystem_kfree_api_ready<T>(allocator: T) -> bool;

@@ -38,6 +38,7 @@ pub fn run() -> SmokeResult {
         || !registry.has_named_cache(NamedSlubCacheKind::VmapArea)
         || !registry.has_named_cache(NamedSlubCacheKind::RadixTreeNode)
         || !registry.has_named_cache(NamedSlubCacheKind::MapleNode)
+        || !registry.has_named_cache(NamedSlubCacheKind::PoolWorkqueue)
     {
         printk::write_str("companion named slub caches missing\n");
         return SmokeResult::Failed;

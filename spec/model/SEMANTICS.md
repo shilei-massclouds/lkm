@@ -512,8 +512,12 @@ Mutex guard，应被判定为上下文嵌套违例。原因是内层 guard contr
 若迁移期同时存在手写 `effects`，工具必须检查它不得弱于、偏离或重复矛盾于
 guard 推导结果。
 
-句柄层级推导、对象 transition/action 的上下文需求声明、系统天然独占上下文的来源证明、
-RCU 读侧上下文等更丰富的 guard/effect 语义仍在后续扩展范围内。
+句柄层级推导、对象 transition/action 的上下文需求声明、系统天然独占上下文的来源证明等更丰富的
+guard/effect 语义仍在后续扩展范围内。RCU 读侧上下文目前只有
+`SchedInitPhase` 的 `BootIdleRcuReadSide` first slice：它记录 `init_idle()` 中
+`__set_task_cpu()` 外层的 balanced `rcu_read_lock()`/`rcu_read_unlock()` guard，不表示完整
+RCU reader nesting、preemptible-RCU accounting、quiescent-state 或 scheduler/RCU context-switch
+语义。
 
 ## SEM-CPU-VIEW-MODEL-001: CPU View Is The Base Modeling View
 

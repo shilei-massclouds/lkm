@@ -9,6 +9,31 @@
 lock BootRunQueueLock: RawSpinLock;
 lock BootIdlePiLock: RawSpinLock;
 
+context RunQueueRootAttachContext: ResourceExclusiveContext {
+    /*
+     * rq_attach_root() attaches a runqueue to def_root_domain while holding
+     * rq->__lock through rq_lock_irqsave()/rq_unlock_irqrestore().
+     */
+    guard {
+        lock_ref: BootRunQueueLock;
+
+        entered_by {
+            BootRunQueueLock.Transition::LockIrqSave;
+        }
+
+        exited_by {
+            BootRunQueueLock.Transition::UnlockIrqRestore;
+        }
+    }
+
+    obj_refs {
+        BootRunQueue;
+        BootInitPreemption;
+        DefaultSchedRootDomain;
+        Scheduler;
+    }
+}
+
 context BootIdlePiLockContext: ResourceExclusiveContext {
     /*
      * init_idle() first takes idle->pi_lock with raw_spin_lock_irqsave().
@@ -63,6 +88,143 @@ context BootRunQueueLockContext: ResourceExclusiveContext {
     }
 }
 
+context BootIdleRcuReadSideContext: Context {
+    /*
+     * init_idle() deliberately wraps __set_task_cpu(idle, cpu) in
+     * rcu_read_lock()/rcu_read_unlock() to satisfy Linux's PROVE_RCU checks
+     * while rq->__lock is held and idle->cpu is not yet published.
+     *
+     * This is the first, incomplete RCU read-side slice: it records the
+     * lexical read-side guard required by init_idle(), but it is not the full
+     * RCU read-side subsystem semantics.
+     */
+    guard {
+        lock_ref: BootIdleRcuReadSide;
+
+        entered_by {
+            BootIdleRcuReadSide.Transition::ReadLock;
+        }
+
+        exited_by {
+            BootIdleRcuReadSide.Transition::ReadUnlock;
+        }
+    }
+
+    obj_refs {
+        BootIdleTask;
+        BootRunQueue;
+        BootCpuCurrentTask;
+        Scheduler;
+    }
+}
+
+context BitWaitQueueTableInitContext: Context {
+    /*
+     * wait_bit_init() runs as a boot-time initialization loop before
+     * ordinary task, interrupt, or SMP concurrency is opened. The protected
+     * lexical body corresponds to initializing every bit_wait_table bucket as
+     * a wait_queue_head_t: init_waitqueue_head() initializes the bucket's
+     * internal spinlock and empty list head. This context records that
+     * synchronization-object initialization scope; it does not model runtime
+     * waitqueue enqueue/wakeup locking.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        BitWaitQueueTable;
+        Scheduler;
+    }
+}
+
+context WorkqueuePoolMutexContext: ResourceExclusiveContext {
+    /*
+     * workqueue_init_early() reaches alloc_workqueue(), which takes
+     * wq_pool_mutex while allocating/linking PWQs and adding each system
+     * workqueue to the global workqueues list. The guard is still modeled even
+     * though boot concurrency is otherwise closed, because this mutex owns the
+     * Linux workqueue/pool publication protocol.
+     */
+    guard {
+        lock_ref: WorkqueuePoolMutex;
+
+        entered_by {
+            WorkqueuePoolMutex.Transition::Lock(BootInitTaskRef);
+        }
+
+        exited_by {
+            WorkqueuePoolMutex.Transition::Unlock(BootInitTaskRef);
+        }
+    }
+
+    obj_refs {
+        Workqueue;
+        WorkqueuePoolMutex;
+    }
+}
+
+context WorkqueueStructMutexContext: ResourceExclusiveContext {
+    /*
+     * alloc_workqueue() initializes each workqueue_struct mutex and takes it
+     * while linking pool_workqueue entries and adjusting max_active. The
+     * current model aggregates the system workqueue set behind one
+     * WorkqueueStructMutex fact rather than naming every system queue mutex.
+     */
+    guard {
+        lock_ref: WorkqueueStructMutex;
+
+        entered_by {
+            WorkqueueStructMutex.Transition::Lock(BootInitTaskRef);
+        }
+
+        exited_by {
+            WorkqueueStructMutex.Transition::Unlock(BootInitTaskRef);
+        }
+    }
+
+    obj_refs {
+        Workqueue;
+        WorkqueueStructMutex;
+    }
+}
+
+/*
+ * BootInitPreemption 表示 rq_attach_root() 调用点仍在 BootInitTask/current
+ * 身份下执行时的 preemption control 视图。它只用于
+ * RunQueueRootAttachContext 的 rq_lock_irqsave() 协议；不能与
+ * init_idle_preempt_count() 建立的 BootIdlePreemption 混用。
+ */
+object BootInitPreemption: PreemptionControl {
+    initial_state: State::Base;
+    parent: BootInitTask;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    task_preemption_control_ready(BootInitTask);
+                    task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
+                    task_preemption_disabled(BootInitTask);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            task_preemption_control_ready(BootInitTask);
+            task_preempt_count_initialized_to_init_preempt_count(BootInitTask);
+            task_preemption_disabled(BootInitTask);
+        }
+    }
+}
+
 /*
  * Scheduler 表示启动期调度器基础编排对象。本阶段只要求 boot CPU 的
  * CPU-owned runqueue、CPU-owned idle task 关联和主动调度入口可用；同时记录
@@ -86,6 +248,7 @@ object Scheduler: SchedulerObject {
                 drives {
                     DefaultSchedRootDomain.Transition::Setup;
                     BitWaitQueueTable.Transition::Preset;
+                    BootIdleRcuReadSide.Transition::Preset;
                 }
 
                 ensures {
@@ -97,6 +260,15 @@ object Scheduler: SchedulerObject {
                         CpuGroup
                     );
                     bit_wait_queue_table_ready(BitWaitQueueTable);
+                    bit_wait_queue_table_bucket_count_matches_wait_table_size(
+                        BitWaitQueueTable
+                    );
+                    bit_wait_queue_table_bucket_waitqueues_ready(BitWaitQueueTable);
+                    bit_wait_queue_table_bucket_locks_ready(BitWaitQueueTable);
+                    bit_wait_queue_table_bucket_lists_empty(BitWaitQueueTable);
+                    rcu_read_side_ready(BootIdleRcuReadSide);
+                    rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
+                    rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
                 }
             }
         }
@@ -106,8 +278,16 @@ object Scheduler: SchedulerObject {
         invariant {
             DefaultSchedRootDomain.state == State::Ready;
             BitWaitQueueTable.state == State::Prepared;
+            BootIdleRcuReadSide.state == State::Prepared;
             scheduler_preset_ready(Scheduler);
             scheduler_default_root_domain_ready(Scheduler, DefaultSchedRootDomain);
+            bit_wait_queue_table_ready(BitWaitQueueTable);
+            bit_wait_queue_table_bucket_count_matches_wait_table_size(
+                BitWaitQueueTable
+            );
+            bit_wait_queue_table_bucket_waitqueues_ready(BitWaitQueueTable);
+            bit_wait_queue_table_bucket_locks_ready(BitWaitQueueTable);
+            bit_wait_queue_table_bucket_lists_empty(BitWaitQueueTable);
             default_sched_root_domain_covers_cpu_group_possible(
                 DefaultSchedRootDomain,
                 CpuGroup
@@ -121,6 +301,7 @@ object Scheduler: SchedulerObject {
                     PerCpuStorage.state == State::Ready;
                     BootInitTask.state == State::Online;
                     InitMM.state == State::Ready;
+                    BootIdleRcuReadSide.state == State::Prepared;
                 }
 
                 drives {
@@ -139,6 +320,8 @@ object Scheduler: SchedulerObject {
                         BootRunQueue,
                         BootIdleTask
                     );
+                    task_preemption_control_ready(BootInitTask);
+                    task_preemption_disabled(BootInitTask);
                     boot_runqueue_ready(BootRunQueue, BootCPU);
                     runqueue_ref_targets(BootRunQueueRef, BootRunQueue);
                     runqueue_ref_ready(BootRunQueueRef);
@@ -158,6 +341,9 @@ object Scheduler: SchedulerObject {
                         DefaultSchedRootDomain
                     );
                     scheduler_schedule_event_available(Scheduler);
+                    rcu_read_side_ready(BootIdleRcuReadSide);
+                    rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
+                    rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
                 }
             }
         }
@@ -166,6 +352,7 @@ object Scheduler: SchedulerObject {
     state State::Ready {
         invariant {
             BootRunQueue.state == State::Ready;
+            BootInitPreemption.state == State::Ready;
             BootIdleTask.state == State::Ready;
             scheduler_runqueues_ready(Scheduler, CpuGroup);
             scheduler_possible_cpu_runqueues_ready(Scheduler, CpuGroup);
@@ -173,6 +360,8 @@ object Scheduler: SchedulerObject {
             cpu_owns_runqueue(BootCPU, BootRunQueue);
             cpu_owns_idle_task(BootCPU, BootIdleTask);
             cpu_runqueue_idle_is_cpu_idle_task(BootCPU, BootRunQueue, BootIdleTask);
+            task_preemption_control_ready(BootInitTask);
+            task_preemption_disabled(BootInitTask);
             scheduler_possible_cpu_runqueues_attached_to_default_root_domain(
                 Scheduler,
                 CpuGroup,
@@ -189,6 +378,9 @@ object Scheduler: SchedulerObject {
             boot_cpu_current_is_idle_task(BootCPU, BootIdleTask);
             task_cpu_ref_is(BootIdleTask, BootCPURef);
             scheduler_schedule_event_available(Scheduler);
+            rcu_read_side_ready(BootIdleRcuReadSide);
+            rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
+            rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
         }
 
         transitions {
@@ -205,11 +397,14 @@ object Scheduler: SchedulerObject {
         invariant {
             scheduler_running_flag_set(Scheduler);
             BootRunQueue.state == State::Ready;
+            BootInitPreemption.state == State::Ready;
             BootIdleTask.state == State::Ready;
             scheduler_orchestrates_cpu_owned_runqueues(Scheduler, CpuGroup);
             cpu_owns_runqueue(BootCPU, BootRunQueue);
             cpu_owns_idle_task(BootCPU, BootIdleTask);
             cpu_runqueue_idle_is_cpu_idle_task(BootCPU, BootRunQueue, BootIdleTask);
+            task_preemption_control_ready(BootInitTask);
+            task_preemption_disabled(BootInitTask);
             runqueue_ref_ready(BootRunQueueRef);
             runqueue_ref_cpu_is(BootRunQueueRef, BootCPURef);
             runqueue_ref_targets(CurrentRunQueueRef, BootRunQueue);
@@ -219,6 +414,9 @@ object Scheduler: SchedulerObject {
             current_runqueue_ref_from_current_task(CurrentRunQueueRef, BootCurrentCPU, CurrentTaskRef, BootIdleTask, BootCPURef);
             task_cpu_ref_is(BootIdleTask, BootCPURef);
             scheduler_schedule_event_available(Scheduler);
+            rcu_read_side_ready(BootIdleRcuReadSide);
+            rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
+            rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
         }
     }
 }
@@ -286,6 +484,9 @@ object DefaultSchedRootDomain: TaskObject {
 
 /*
  * BitWaitQueueTable 表示 wait_bit_init() 建立的 bit wait 全局 bucket 表。
+ * 每个 bucket 是 wait_queue_head_t；wait_bit_init() 对所有 bucket 调用
+ * init_waitqueue_head()，因此本阶段必须记录每个 bucket 的内部 spinlock
+ * 已初始化、wait list 为空，以及 bucket 数量匹配 Linux WAIT_TABLE_SIZE。
  */
 object BitWaitQueueTable: TaskObject {
     initial_state: State::Base;
@@ -294,8 +495,25 @@ object BitWaitQueueTable: TaskObject {
     state State::Base {
         transitions {
             on Transition::Preset -> State::Prepared {
+                within BitWaitQueueTableInitContext {
+                    ensures {
+                        bit_wait_queue_table_bucket_count_matches_wait_table_size(
+                            BitWaitQueueTable
+                        );
+                        bit_wait_queue_table_bucket_waitqueues_ready(BitWaitQueueTable);
+                        bit_wait_queue_table_bucket_locks_ready(BitWaitQueueTable);
+                        bit_wait_queue_table_bucket_lists_empty(BitWaitQueueTable);
+                    }
+                }
+
                 ensures {
                     bit_wait_queue_table_ready(BitWaitQueueTable);
+                    bit_wait_queue_table_bucket_count_matches_wait_table_size(
+                        BitWaitQueueTable
+                    );
+                    bit_wait_queue_table_bucket_waitqueues_ready(BitWaitQueueTable);
+                    bit_wait_queue_table_bucket_locks_ready(BitWaitQueueTable);
+                    bit_wait_queue_table_bucket_lists_empty(BitWaitQueueTable);
                 }
             }
         }
@@ -304,6 +522,45 @@ object BitWaitQueueTable: TaskObject {
     state State::Prepared {
         invariant {
             bit_wait_queue_table_ready(BitWaitQueueTable);
+            bit_wait_queue_table_bucket_count_matches_wait_table_size(
+                BitWaitQueueTable
+            );
+            bit_wait_queue_table_bucket_waitqueues_ready(BitWaitQueueTable);
+            bit_wait_queue_table_bucket_locks_ready(BitWaitQueueTable);
+            bit_wait_queue_table_bucket_lists_empty(BitWaitQueueTable);
+        }
+    }
+}
+
+/*
+ * BootIdleRcuReadSide is the named SchedInitPhase instance of the common
+ * RcuReadSide type. It is intentionally incomplete: this object only models
+ * the rcu_read_lock()/rcu_read_unlock() guard around init_idle()'s
+ * __set_task_cpu() call. Full RCU reader nesting, preemptible-RCU accounting,
+ * quiescent-state reporting, lockdep/debug checks, and scheduler/RCU context
+ * switch integration remain deferred to the RcuCore/runtime RCU model.
+ */
+object BootIdleRcuReadSide: RcuReadSide {
+    initial_state: State::Base;
+    parent: Scheduler;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                ensures {
+                    rcu_read_side_ready(BootIdleRcuReadSide);
+                    rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
+                    rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            rcu_read_side_ready(BootIdleRcuReadSide);
+            rcu_read_side_incomplete_first_slice(BootIdleRcuReadSide);
+            rcu_read_side_full_semantics_deferred(BootIdleRcuReadSide);
         }
     }
 }
@@ -326,6 +583,26 @@ object BootRunQueue: RunQueue {
                     DefaultSchedRootDomain.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
+                    BootInitTask.state == State::Online;
+                }
+
+                drives {
+                    BootInitPreemption.Transition::Setup;
+                }
+
+                within RunQueueRootAttachContext {
+                    ensures {
+                        raw_spinlock_irqsave_entered(BootRunQueueLock, BootCurrentCPU);
+                        raw_spinlock_irqrestore_exited(BootRunQueueLock, BootCurrentCPU);
+                        boot_runqueue_attached_to_root_domain(
+                            BootRunQueue,
+                            DefaultSchedRootDomain
+                        );
+                        boot_runqueue_root_attach_held_runqueue_lock(
+                            BootRunQueue,
+                            BootRunQueueLock
+                        );
+                    }
                 }
 
                 ensures {
@@ -354,6 +631,10 @@ object BootRunQueue: RunQueue {
                     runqueue_ref_ready(CurrentRunQueueRef);
                     runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
                     boot_runqueue_attached_to_root_domain(BootRunQueue, DefaultSchedRootDomain);
+                    boot_runqueue_root_attach_held_runqueue_lock(
+                        BootRunQueue,
+                        BootRunQueueLock
+                    );
                     boot_runqueue_class_queues_ready(BootRunQueue);
                     boot_runqueue_balance_push_disabled(BootRunQueue);
                 }
@@ -382,6 +663,7 @@ object BootRunQueue: RunQueue {
             runqueue_ref_ready(CurrentRunQueueRef);
             runqueue_ref_cpu_is(CurrentRunQueueRef, BootCPURef);
             boot_runqueue_attached_to_root_domain(BootRunQueue, DefaultSchedRootDomain);
+            boot_runqueue_root_attach_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
             boot_runqueue_class_queues_ready(BootRunQueue);
         }
     }
@@ -420,7 +702,21 @@ object BootIdleTask: Task {
 
                         drives {
                             BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
-                            BootIdleTask.Action::SetTaskCpu(BootCPURef);
+                        }
+
+                        within BootIdleRcuReadSideContext {
+                            drives {
+                                BootIdleTask.Action::SetTaskCpu(BootCPURef);
+                            }
+
+                            ensures {
+                                rcu_read_side_entered(BootIdleRcuReadSide, BootCurrentCPU);
+                                rcu_read_side_exited(BootIdleRcuReadSide, BootCurrentCPU);
+                                boot_idle_task_cpu_set_under_rcu_read(
+                                    BootIdleTask,
+                                    BootCPURef
+                                );
+                            }
                         }
 
                         ensures {
@@ -433,6 +729,8 @@ object BootIdleTask: Task {
                             raw_spinlock_acquired(BootRunQueueLock);
                             raw_spinlock_released(BootRunQueueLock);
                             boot_idle_init_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
+                            rcu_read_side_entered(BootIdleRcuReadSide, BootCurrentCPU);
+                            rcu_read_side_exited(BootIdleRcuReadSide, BootCurrentCPU);
                             boot_idle_task_cpu_set_under_rcu_read(BootIdleTask, BootCPURef);
                             boot_runqueue_current_published_with_rcu(BootRunQueue, BootIdleTask);
                         }
@@ -558,6 +856,7 @@ object RadixTree: MemoryObject {
                     );
                     radix_tree_cpuhp_dead_step_registered(RadixTree, CpuHotplugState);
                     radix_tree_node_api_ready(RadixTree);
+                    radix_tree_node_rcu_free_callback_deferred(RadixTree);
                 }
             }
         }
@@ -569,6 +868,7 @@ object RadixTree: MemoryObject {
             radix_tree_node_cache_registered_in_slub_registry(RadixTree, SlubCacheRegistry);
             radix_tree_cpuhp_dead_step_registered(RadixTree, CpuHotplugState);
             radix_tree_node_api_ready(RadixTree);
+            radix_tree_node_rcu_free_callback_deferred(RadixTree);
         }
     }
 }
@@ -595,6 +895,7 @@ object MapleTree: MemoryObject {
                         SlubCacheRegistry
                     );
                     maple_tree_node_api_ready(MapleTree);
+                    maple_tree_node_rcu_free_callback_deferred(MapleTree);
                 }
             }
         }
@@ -605,6 +906,102 @@ object MapleTree: MemoryObject {
             maple_tree_node_cache_ready(MapleTree, SlubSubsystem);
             maple_tree_node_cache_registered_in_slub_registry(MapleTree, SlubCacheRegistry);
             maple_tree_node_api_ready(MapleTree);
+            maple_tree_node_rcu_free_callback_deferred(MapleTree);
+        }
+    }
+}
+
+/*
+ * WorkqueuePoolMutex 表示 Linux workqueue.c 的静态 wq_pool_mutex。
+ * workqueue_init_early() 通过 alloc_workqueue() 持有它来保护 worker
+ * pools、PWQ 分配和全局 workqueues list 发布。
+ */
+object WorkqueuePoolMutex: Mutex {
+    initial_state: State::Base;
+    parent: Workqueue;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                ensures {
+                    mutex_storage_bound(WorkqueuePoolMutex);
+                    mutex_init_kind_recorded(WorkqueuePoolMutex);
+                    mutex_preset_respects_init_kind(WorkqueuePoolMutex);
+                    mutex_owns_wait_queue(WorkqueuePoolMutex);
+                    mutex_wait_lock_internal_deferred(WorkqueuePoolMutex);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    mutex_initialized(WorkqueuePoolMutex);
+                    mutex_ready(WorkqueuePoolMutex);
+                    mutex_unlocked(WorkqueuePoolMutex);
+                    mutex_wait_queue_ready(WorkqueuePoolMutex);
+                    mutex_recursive_locking_forbidden(WorkqueuePoolMutex);
+                    mutex_unlock_requires_owner(WorkqueuePoolMutex);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            mutex_ready(WorkqueuePoolMutex);
+            mutex_unlocked(WorkqueuePoolMutex);
+            mutex_wait_queue_ready(WorkqueuePoolMutex);
+        }
+    }
+}
+
+/*
+ * WorkqueueStructMutex aggregates the per-workqueue workqueue_struct->mutex
+ * instances used while linking PWQs and adjusting max_active during
+ * alloc_workqueue(). The current model treats the early system workqueue set
+ * as one aggregate object; it does not yet name each system queue separately.
+ */
+object WorkqueueStructMutex: Mutex {
+    initial_state: State::Base;
+    parent: Workqueue;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                ensures {
+                    mutex_storage_bound(WorkqueueStructMutex);
+                    mutex_init_kind_recorded(WorkqueueStructMutex);
+                    mutex_preset_respects_init_kind(WorkqueueStructMutex);
+                    mutex_owns_wait_queue(WorkqueueStructMutex);
+                    mutex_wait_lock_internal_deferred(WorkqueueStructMutex);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    mutex_initialized(WorkqueueStructMutex);
+                    mutex_ready(WorkqueueStructMutex);
+                    mutex_unlocked(WorkqueueStructMutex);
+                    mutex_wait_queue_ready(WorkqueueStructMutex);
+                    mutex_recursive_locking_forbidden(WorkqueueStructMutex);
+                    mutex_unlock_requires_owner(WorkqueueStructMutex);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            mutex_ready(WorkqueueStructMutex);
+            mutex_unlocked(WorkqueueStructMutex);
+            mutex_wait_queue_ready(WorkqueueStructMutex);
         }
     }
 }
@@ -623,15 +1020,97 @@ object Workqueue: TaskObject {
                 depends_on {
                     PageAllocator.state == State::Ready;
                     SlubSubsystem.state == State::Ready;
+                    SlubCacheRegistry.state == State::Ready;
+                    KmallocCaches.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     PerCpuStorage.state == State::Ready;
+                    BootInitTask.state == State::Online;
+                    task_ref_ready(BootInitTaskRef);
+                }
+
+                drives {
+                    WorkqueuePoolMutex.Transition::Preset;
+                    WorkqueuePoolMutex.Transition::Setup;
+                    WorkqueueStructMutex.Transition::Preset;
+                    WorkqueueStructMutex.Transition::Setup;
+                }
+
+                within WorkqueuePoolMutexContext {
+                    ensures {
+                        workqueue_pool_mutex_guard_used(
+                            Workqueue,
+                            WorkqueuePoolMutex
+                        );
+                        workqueue_system_queue_count_matches_linux_early(Workqueue);
+                        workqueue_pool_workqueue_cache_ready(Workqueue);
+                        pool_workqueue_cache_registered_in_slub_registry(
+                            Workqueue,
+                            SlubCacheRegistry
+                        );
+                        workqueue_cpu_worker_pools_ready(Workqueue);
+                        workqueue_bh_pools_ready(Workqueue);
+                        workqueue_attrs_ready(Workqueue);
+                        workqueue_system_affinity_pods_ready(Workqueue);
+                    }
+
+                    within WorkqueueStructMutexContext {
+                        ensures {
+                            workqueue_struct_mutex_guard_used(
+                                Workqueue,
+                                WorkqueueStructMutex
+                            );
+                            workqueue_system_queues_ready(Workqueue);
+                            workqueue_worker_pools_prepared(Workqueue);
+                        }
+                    }
                 }
 
                 ensures {
+                    mutex_storage_bound(WorkqueuePoolMutex);
+                    mutex_init_kind_recorded(WorkqueuePoolMutex);
+                    mutex_preset_respects_init_kind(WorkqueuePoolMutex);
+                    mutex_owns_wait_queue(WorkqueuePoolMutex);
+                    mutex_wait_lock_internal_deferred(WorkqueuePoolMutex);
+                    mutex_initialized(WorkqueuePoolMutex);
+                    mutex_ready(WorkqueuePoolMutex);
+                    mutex_unlocked(WorkqueuePoolMutex);
+                    mutex_wait_queue_ready(WorkqueuePoolMutex);
+                    mutex_storage_bound(WorkqueueStructMutex);
+                    mutex_init_kind_recorded(WorkqueueStructMutex);
+                    mutex_preset_respects_init_kind(WorkqueueStructMutex);
+                    mutex_owns_wait_queue(WorkqueueStructMutex);
+                    mutex_wait_lock_internal_deferred(WorkqueueStructMutex);
+                    mutex_initialized(WorkqueueStructMutex);
+                    mutex_ready(WorkqueueStructMutex);
+                    mutex_unlocked(WorkqueueStructMutex);
+                    mutex_wait_queue_ready(WorkqueueStructMutex);
+                    workqueue_pool_mutex_ready(Workqueue, WorkqueuePoolMutex);
+                    workqueue_struct_mutex_ready(Workqueue, WorkqueueStructMutex);
+                    workqueue_pool_mutex_guard_used(
+                        Workqueue,
+                        WorkqueuePoolMutex
+                    );
+                    workqueue_struct_mutex_guard_used(
+                        Workqueue,
+                        WorkqueueStructMutex
+                    );
                     workqueue_early_framework_ready(Workqueue, CpuGroup);
                     workqueue_system_queues_ready(Workqueue);
+                    workqueue_system_queue_count_matches_linux_early(Workqueue);
                     workqueue_worker_pools_prepared(Workqueue);
+                    workqueue_cpu_worker_pools_ready(Workqueue);
+                    workqueue_bh_pools_ready(Workqueue);
+                    workqueue_pool_workqueue_cache_ready(Workqueue);
+                    pool_workqueue_cache_registered_in_slub_registry(
+                        Workqueue,
+                        SlubCacheRegistry
+                    );
                     workqueue_unbound_cpumask_ready(Workqueue);
+                    workqueue_attrs_ready(Workqueue);
+                    workqueue_system_affinity_pods_ready(Workqueue);
+                    workqueue_pool_attach_mutex_deferred(Workqueue);
+                    workqueue_mayday_lock_deferred(Workqueue);
+                    workqueue_manager_wait_deferred(Workqueue);
                     workqueue_workers_not_running(Workqueue);
                 }
             }
@@ -641,6 +1120,26 @@ object Workqueue: TaskObject {
     state State::Prepared {
         invariant {
             workqueue_early_framework_ready(Workqueue, CpuGroup);
+            workqueue_system_queues_ready(Workqueue);
+            workqueue_system_queue_count_matches_linux_early(Workqueue);
+            workqueue_worker_pools_prepared(Workqueue);
+            workqueue_cpu_worker_pools_ready(Workqueue);
+            workqueue_bh_pools_ready(Workqueue);
+            workqueue_pool_workqueue_cache_ready(Workqueue);
+            pool_workqueue_cache_registered_in_slub_registry(
+                Workqueue,
+                SlubCacheRegistry
+            );
+            workqueue_unbound_cpumask_ready(Workqueue);
+            workqueue_attrs_ready(Workqueue);
+            workqueue_system_affinity_pods_ready(Workqueue);
+            workqueue_pool_mutex_ready(Workqueue, WorkqueuePoolMutex);
+            workqueue_struct_mutex_ready(Workqueue, WorkqueueStructMutex);
+            workqueue_pool_mutex_guard_used(Workqueue, WorkqueuePoolMutex);
+            workqueue_struct_mutex_guard_used(Workqueue, WorkqueueStructMutex);
+            workqueue_pool_attach_mutex_deferred(Workqueue);
+            workqueue_mayday_lock_deferred(Workqueue);
+            workqueue_manager_wait_deferred(Workqueue);
             workqueue_workers_not_running(Workqueue);
         }
 

@@ -15,6 +15,7 @@ pub struct RadixTree {
     node_cache_object_size: usize,
     cpuhp_step: usize,
     node_api_ready: bool,
+    node_rcu_free_callback_deferred: bool,
 }
 
 impl RadixTree {
@@ -26,6 +27,7 @@ impl RadixTree {
             node_cache_object_size: 0,
             cpuhp_step: 0,
             node_api_ready: false,
+            node_rcu_free_callback_deferred: false,
         }
     }
 
@@ -51,6 +53,10 @@ impl RadixTree {
 
     pub const fn node_api_ready(&self) -> bool {
         self.node_api_ready
+    }
+
+    pub const fn node_rcu_free_callback_deferred(&self) -> bool {
+        self.node_rcu_free_callback_deferred
     }
 
     pub fn setup(
@@ -99,6 +105,7 @@ impl RadixTree {
         self.node_cache_object_size = RADIX_TREE_NODE_CACHE_OBJECT_SIZE;
         self.cpuhp_step = RADIX_TREE_CPUHP_STEP;
         self.node_api_ready = true;
+        self.node_rcu_free_callback_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,

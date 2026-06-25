@@ -38,6 +38,7 @@ predicate arceos_ex_must_slub_subsystem_be_single_facade_not_cache_instance() ->
 predicate arceos_ex_must_slub_cache_type_name_be_slub_cache() -> bool;
 predicate arceos_ex_must_slub_cache_registry_own_all_cache_instances() -> bool;
 predicate arceos_ex_must_kmalloc_caches_reference_registered_slub_caches() -> bool;
+predicate arceos_ex_must_kmem_cache_sites_register_named_slub_caches_or_defer() -> bool;
 predicate arceos_ex_must_slub_bootstrap_before_kmalloc_caches_ready() -> bool;
 predicate arceos_ex_must_slub_expose_kmalloc_kzalloc_kfree_api() -> bool;
 predicate arceos_ex_must_slub_kmalloc_use_page_allocator_backing_pages() -> bool;
@@ -127,6 +128,14 @@ predicate arceos_ex_must_raw_spin_lock_guard_use_plain_lock_unlock() -> bool;
 predicate arceos_ex_must_bind_boot_scheduler_locks_to_owned_objects() -> bool;
 predicate arceos_ex_must_effective_context_not_elide_protocol_guards() -> bool;
 predicate arceos_ex_must_defer_rcu_lowering_until_primitive_exists() -> bool;
+predicate arceos_ex_must_rcu_read_side_first_slice_remain_marked_incomplete() -> bool;
+predicate arceos_ex_must_defer_full_rcu_read_side_lowering() -> bool;
+predicate arceos_ex_must_sched_init_bit_wait_table_expose_bucket_waitqueue_heads() -> bool;
+predicate arceos_ex_must_sched_init_bit_wait_table_use_within_context() -> bool;
+predicate arceos_ex_must_sched_init_radix_maple_rcu_free_callbacks_deferred() -> bool;
+predicate arceos_ex_must_sched_init_workqueue_register_pool_workqueue_cache() -> bool;
+predicate arceos_ex_must_sched_init_workqueue_use_within_mutex_contexts() -> bool;
+predicate arceos_ex_must_sched_init_workqueue_keep_worker_runtime_deferred() -> bool;
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
@@ -651,17 +660,20 @@ type ArceosExEffectiveContextCodingMust {
         arceos_ex_must_effective_context_not_elide_protocol_guards();
 
         /*
-         * Deferred primitives:
+         * RCU read-side first slice:
          *
-         * RCU read-side guards belong to the same guard lowering family, but
-         * arceos_ex must not invent final lowering rules for them before the
-         * corresponding model primitive and implementation mappings exist.
-         * RwLock and Mutex are no longer wholly deferred because ResourceLock
-         * and JumpLabelMutex have concrete first-round mappings; broader
-         * variants still require their own primitive-specific rules before
-         * being generated.
+         * RCU read-side guards belong to the same guard lowering family. The
+         * current SchedInitPhase mapping may implement BootIdleRcuReadSide
+         * only as the incomplete first slice required by init_idle():
+         * balanced rcu_read_lock()/rcu_read_unlock() accounting around
+         * __set_task_cpu(). It must keep explicit incomplete/deferred facts
+         * and must not claim full RCU reader nesting, preemptible-RCU
+         * accounting, quiescent-state reporting, lockdep/debug checks, or
+         * scheduler/RCU context-switch integration. Broader RCU read-side
+         * lowering requires a later complete primitive-specific rule.
          */
-        arceos_ex_must_defer_rcu_lowering_until_primitive_exists();
+        arceos_ex_must_rcu_read_side_first_slice_remain_marked_incomplete();
+        arceos_ex_must_defer_full_rcu_read_side_lowering();
     }
 }
 
@@ -854,15 +866,19 @@ type ArceosExMmCoreInitCodingMust {
          * kmem_cache/kmem_cache_node, kmalloc size-class caches, and later
          * named caches. KmallocCaches is only a size-class reference/index
          * view over registered SlubCache instances; it must not own a second
-         * set of cache instances. Named phase objects such as page->ptl,
-         * vmap_area, mm_struct, radix tree node, and maple node caches must
+         * set of cache instances. Named phase objects and Linux
+         * KMEM_CACHE(...) sites such as page->ptl, vmap_area, mm_struct,
+         * radix tree node, maple node, and pool_workqueue caches must
          * register their underlying SlubCache instance in SlubCacheRegistry
-         * instead of keeping only private ready flags.
+         * instead of keeping only private ready flags. A KMEM_CACHE(...) site
+         * may only remain outside the registry if it has an explicit deferred
+         * classification with a later owner.
          */
         arceos_ex_must_slub_subsystem_be_single_facade_not_cache_instance();
         arceos_ex_must_slub_cache_type_name_be_slub_cache();
         arceos_ex_must_slub_cache_registry_own_all_cache_instances();
         arceos_ex_must_kmalloc_caches_reference_registered_slub_caches();
+        arceos_ex_must_kmem_cache_sites_register_named_slub_caches_or_defer();
 
         /*
          * SLUB bootstrap:
@@ -2338,6 +2354,42 @@ type ArceosExRestInitCodingMust {
          * that must not create a live AP CurrentCPU or runnable AP flow.
          */
         arceos_ex_must_attach_possible_cpu_runqueues_to_default_root_domain();
+
+        /*
+         * sched_init wait-bit/radix/maple synchronization facts:
+         *
+         * BitWaitQueueTable lowering must expose wait_bit_init() as a scoped
+         * boot initialization of every bit_wait_table bucket's wait_queue_head:
+         * the bucket count matches WAIT_TABLE_SIZE, bucket wait queues are
+         * ready, their internal spinlocks are initialized, and their lists are
+         * empty. These facts must be guarded in the model with a
+         * within BitWaitQueueTableInitContext block rather than represented as
+         * loose, unscoped ensures. RadixTree and MapleTree setup must keep
+         * their runtime call_rcu() node-free callbacks explicitly deferred;
+         * node_api_ready must not be read as meaning those callbacks executed
+         * during radix_tree_init()/maple_tree_init().
+         */
+        arceos_ex_must_sched_init_bit_wait_table_expose_bucket_waitqueue_heads();
+        arceos_ex_must_sched_init_bit_wait_table_use_within_context();
+        arceos_ex_must_sched_init_radix_maple_rcu_free_callbacks_deferred();
+
+        /*
+         * sched_init workqueue early synchronization facts:
+         *
+         * workqueue_init_early() must be represented as the first workqueue
+         * stage only: system workqueues and queue/cancel data structures are
+         * prepared, but workers do not run. The lowering must register
+         * KMEM_CACHE(pool_workqueue, SLAB_PANIC) as a PoolWorkqueue named
+         * cache in SlubCacheRegistry. It must model wq_pool_mutex and
+         * workqueue_struct->mutex as explicit guard scopes using
+         * within WorkqueuePoolMutexContext { ... } and nested
+         * within WorkqueueStructMutexContext { ... }. Worker attach/detach,
+         * mayday/rescuer locking and manager_wait behavior remain deferred to
+         * the later worker-runtime phases.
+         */
+        arceos_ex_must_sched_init_workqueue_register_pool_workqueue_cache();
+        arceos_ex_must_sched_init_workqueue_use_within_mutex_contexts();
+        arceos_ex_must_sched_init_workqueue_keep_worker_runtime_deferred();
 
         /*
          * CPU-owned RunQueue/IdleTask:

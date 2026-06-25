@@ -67,7 +67,7 @@ fn check_slub_facts(ctx: &Context) -> Option<()> {
         || !registry.boot_caches_registered()
         || !registry.global_list_ready()
         || registry.cache_count() < 2
-        || registry.named_cache_count() < 5
+        || registry.named_cache_count() < 6
     {
         printk::write_str("slub cache registry invalid\n");
         return None;
@@ -77,6 +77,7 @@ fn check_slub_facts(ctx: &Context) -> Option<()> {
         || !registry.has_named_cache(NamedSlubCacheKind::MmStruct)
         || !registry.has_named_cache(NamedSlubCacheKind::RadixTreeNode)
         || !registry.has_named_cache(NamedSlubCacheKind::MapleNode)
+        || !registry.has_named_cache(NamedSlubCacheKind::PoolWorkqueue)
     {
         printk::write_str("named slub cache registry entries missing\n");
         return None;

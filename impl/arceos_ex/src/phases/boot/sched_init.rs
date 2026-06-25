@@ -42,9 +42,10 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.maple_tree.setup(&mut ctx.slub_subsystem)?;
     ctx.workqueue.preset(
         &ctx.page_allocator,
-        &ctx.slub_subsystem,
+        &mut ctx.slub_subsystem,
         &ctx.cpu_group,
         &ctx.per_cpu_storage,
+        &ctx.init_task,
     )?;
     ctx.softirq.preset(&ctx.per_cpu_storage)?;
     ctx.rcu_core.setup(
@@ -91,7 +92,7 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
     else {
         return false;
     };
-    let boot_runqueue = boot_scheduler_view.runqueue();
+    let boot_runqueue = ctx.scheduler.boot_runqueue();
     let boot_idle_task = boot_scheduler_view.idle_task();
 
     crate::phases::boot::mm_core_init::is_ready()
@@ -110,6 +111,16 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.default_root_domain().smp_topology_deferred()
         && ctx.scheduler.bit_wait_queue_table().state() == State::Prepared
         && ctx.scheduler.bit_wait_queue_table().bucket_count() != 0
+        && ctx
+            .scheduler
+            .bit_wait_queue_table()
+            .bucket_count_matches_wait_table_size()
+        && ctx
+            .scheduler
+            .bit_wait_queue_table()
+            .bucket_waitqueues_ready()
+        && ctx.scheduler.bit_wait_queue_table().bucket_locks_ready()
+        && ctx.scheduler.bit_wait_queue_table().bucket_lists_empty()
         && boot_runqueue.state() == State::Ready
         && boot_runqueue.cpu_ref().is_boot_cpu()
         && boot_cpu
@@ -117,10 +128,15 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
             .unwrap_or(false)
         && boot_runqueue.class_queues_ready()
         && boot_runqueue.attached_to_root_domain()
+        && boot_runqueue.root_attach_held_runqueue_lock()
         && ctx.scheduler.boot_runqueue_lock().state() == State::Ready
         && !ctx.scheduler.boot_runqueue_lock().locked()
         && ctx.scheduler.boot_runqueue_lock().acquired_count() != 0
         && ctx.scheduler.boot_runqueue_lock().released_count() != 0
+        && ctx.scheduler.boot_runqueue_lock().irqsave_entered_count() != 0
+        && ctx.scheduler.boot_runqueue_lock().irqrestore_exited_count() != 0
+        && ctx.scheduler.boot_init_preemption().state() == State::Ready
+        && ctx.scheduler.boot_init_preemption().disabled()
         && ctx
             .scheduler
             .default_root_domain()
@@ -138,6 +154,18 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && !ctx.scheduler.boot_idle_pi_lock().locked()
         && ctx.scheduler.boot_idle_pi_lock().irqsave_entered_count() != 0
         && ctx.scheduler.boot_idle_pi_lock().irqrestore_exited_count() != 0
+        && ctx.scheduler.boot_idle_rcu_read_side().state() == State::Prepared
+        && ctx
+            .scheduler
+            .boot_idle_rcu_read_side()
+            .incomplete_first_slice()
+        && ctx
+            .scheduler
+            .boot_idle_rcu_read_side()
+            .full_semantics_deferred()
+        && ctx.scheduler.boot_idle_rcu_read_side().read_lock_count() != 0
+        && ctx.scheduler.boot_idle_rcu_read_side().read_unlock_count() != 0
+        && ctx.scheduler.boot_idle_rcu_read_side().balanced()
         && ctx.scheduler.boot_idle_preemption().state() == State::Ready
         && ctx.scheduler.boot_idle_preemption().disabled()
         && ctx.boot_cpu_current_task.state() == State::Ready
@@ -154,6 +182,7 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
             == Some(true)
         && ctx.radix_tree.cpuhp_step() != 0
         && ctx.radix_tree.node_api_ready()
+        && ctx.radix_tree.node_rcu_free_callback_deferred()
         && ctx.maple_tree.state() == State::Ready
         && ctx.maple_tree.node_cache_ready()
         && ctx.maple_tree.registered_in_slub_registry()
@@ -165,11 +194,37 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
             .map(|cache| cache.object_size() == ctx.maple_tree.node_cache_object_size())
             == Some(true)
         && ctx.maple_tree.node_api_ready()
+        && ctx.maple_tree.node_rcu_free_callback_deferred()
         && ctx.workqueue.state() == State::Prepared
         && ctx.workqueue.system_queues_ready()
+        && ctx.workqueue.system_queue_count_matches_linux_early()
         && ctx.workqueue.worker_pools_prepared()
+        && ctx.workqueue.cpu_worker_pools_ready()
         && ctx.workqueue.unbound_cpumask_ready()
         && ctx.workqueue.bh_pools_ready()
+        && ctx.workqueue.pool_workqueue_cache_ready()
+        && ctx.workqueue.registered_in_slub_registry()
+        && ctx.workqueue.pool_workqueue_cache_object_size() != 0
+        && ctx
+            .slub_subsystem
+            .cache_registry()
+            .named_cache(NamedSlubCacheKind::PoolWorkqueue)
+            .map(|cache| cache.object_size() == ctx.workqueue.pool_workqueue_cache_object_size())
+            == Some(true)
+        && ctx.workqueue.attrs_ready()
+        && ctx.workqueue.system_affinity_pods_ready()
+        && ctx.workqueue.pool_mutex().ready()
+        && ctx.workqueue.pool_mutex().boot_init_task_guard_completed()
+        && ctx.workqueue.struct_mutex().ready()
+        && ctx
+            .workqueue
+            .struct_mutex()
+            .boot_init_task_guard_completed()
+        && ctx.workqueue.pool_mutex_guard_used()
+        && ctx.workqueue.struct_mutex_guard_used()
+        && ctx.workqueue.pool_attach_mutex_deferred()
+        && ctx.workqueue.mayday_lock_deferred()
+        && ctx.workqueue.manager_wait_deferred()
         && !ctx.workqueue.workers_running()
         && ctx.workqueue.possible_cpu_count() == ctx.cpu_group.possible_cpu_count()
         && ctx.softirq.state() == State::Prepared

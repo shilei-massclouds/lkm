@@ -2858,6 +2858,7 @@ pub enum NamedSlubCacheKind {
     MmStruct,
     RadixTreeNode,
     MapleNode,
+    PoolWorkqueue,
 }
 
 #[derive(Clone, Copy)]

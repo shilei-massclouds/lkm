@@ -37,7 +37,7 @@ impl CurrentRunQueueFixture {
         let ctx = context_ref();
         assertions.assert_ok(
             "setup",
-            self.runqueue.setup(
+            self.runqueue.setup_for_local_subject(
                 &ctx.cpu_group,
                 &ctx.per_cpu_storage,
                 ctx.scheduler.default_root_domain(),

@@ -12,6 +12,7 @@ pub struct MapleTree {
     registered_in_slub_registry: bool,
     node_cache_object_size: usize,
     node_api_ready: bool,
+    node_rcu_free_callback_deferred: bool,
 }
 
 impl MapleTree {
@@ -22,6 +23,7 @@ impl MapleTree {
             registered_in_slub_registry: false,
             node_cache_object_size: 0,
             node_api_ready: false,
+            node_rcu_free_callback_deferred: false,
         }
     }
 
@@ -43,6 +45,10 @@ impl MapleTree {
 
     pub const fn node_api_ready(&self) -> bool {
         self.node_api_ready
+    }
+
+    pub const fn node_rcu_free_callback_deferred(&self) -> bool {
+        self.node_rcu_free_callback_deferred
     }
 
     pub fn setup(&mut self, slub_subsystem: &mut SlubSubsystem) -> EventResult {
@@ -83,6 +89,7 @@ impl MapleTree {
         self.registered_in_slub_registry = true;
         self.node_cache_object_size = MAPLE_NODE_CACHE_OBJECT_SIZE;
         self.node_api_ready = true;
+        self.node_rcu_free_callback_deferred = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,

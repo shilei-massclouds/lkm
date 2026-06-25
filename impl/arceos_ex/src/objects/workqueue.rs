@@ -1,18 +1,37 @@
 use super::{
     cpu_group::CpuGroup,
-    mm_core::{PageAllocator, SlubSubsystem},
+    init_task::InitTask,
+    mm_core::{NamedSlubCacheKind, PageAllocator, SlubSubsystem},
+    mutex::Mutex,
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use crate::trace::Checkpoint;
 
+const EARLY_SYSTEM_WORKQUEUE_COUNT: usize = 9;
+const POOL_WORKQUEUE_CACHE_OBJECT_SIZE: usize = core::mem::size_of::<usize>() * 12;
+
 pub struct Workqueue {
     lifecycle: Lifecycle,
+    pool_mutex: Mutex,
+    struct_mutex: Mutex,
     system_queues_ready: bool,
+    system_queue_count: usize,
     worker_pools_prepared: bool,
+    cpu_worker_pools_ready: bool,
     unbound_cpumask_ready: bool,
     bh_pools_ready: bool,
+    pool_workqueue_cache_ready: bool,
+    pool_workqueue_cache_object_size: usize,
+    registered_in_slub_registry: bool,
+    attrs_ready: bool,
+    system_affinity_pods_ready: bool,
+    pool_attach_mutex_deferred: bool,
+    mayday_lock_deferred: bool,
+    manager_wait_deferred: bool,
+    pool_mutex_guard_used: bool,
+    struct_mutex_guard_used: bool,
     workers_running: bool,
     worker_creation_open: bool,
     rescuers_ready: bool,
@@ -30,10 +49,24 @@ impl Workqueue {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            pool_mutex: Mutex::new_static(),
+            struct_mutex: Mutex::new_static(),
             system_queues_ready: false,
+            system_queue_count: 0,
             worker_pools_prepared: false,
+            cpu_worker_pools_ready: false,
             unbound_cpumask_ready: false,
             bh_pools_ready: false,
+            pool_workqueue_cache_ready: false,
+            pool_workqueue_cache_object_size: 0,
+            registered_in_slub_registry: false,
+            attrs_ready: false,
+            system_affinity_pods_ready: false,
+            pool_attach_mutex_deferred: false,
+            mayday_lock_deferred: false,
+            manager_wait_deferred: false,
+            pool_mutex_guard_used: false,
+            struct_mutex_guard_used: false,
             workers_running: false,
             worker_creation_open: false,
             rescuers_ready: false,
@@ -52,12 +85,28 @@ impl Workqueue {
         self.lifecycle.state()
     }
 
+    pub const fn pool_mutex(&self) -> &Mutex {
+        &self.pool_mutex
+    }
+
+    pub const fn struct_mutex(&self) -> &Mutex {
+        &self.struct_mutex
+    }
+
     pub const fn system_queues_ready(&self) -> bool {
         self.system_queues_ready
     }
 
+    pub const fn system_queue_count_matches_linux_early(&self) -> bool {
+        self.system_queue_count == EARLY_SYSTEM_WORKQUEUE_COUNT
+    }
+
     pub const fn worker_pools_prepared(&self) -> bool {
         self.worker_pools_prepared
+    }
+
+    pub const fn cpu_worker_pools_ready(&self) -> bool {
+        self.cpu_worker_pools_ready
     }
 
     pub const fn unbound_cpumask_ready(&self) -> bool {
@@ -66,6 +115,46 @@ impl Workqueue {
 
     pub const fn bh_pools_ready(&self) -> bool {
         self.bh_pools_ready
+    }
+
+    pub const fn pool_workqueue_cache_ready(&self) -> bool {
+        self.pool_workqueue_cache_ready
+    }
+
+    pub const fn pool_workqueue_cache_object_size(&self) -> usize {
+        self.pool_workqueue_cache_object_size
+    }
+
+    pub const fn registered_in_slub_registry(&self) -> bool {
+        self.registered_in_slub_registry
+    }
+
+    pub const fn attrs_ready(&self) -> bool {
+        self.attrs_ready
+    }
+
+    pub const fn system_affinity_pods_ready(&self) -> bool {
+        self.system_affinity_pods_ready
+    }
+
+    pub const fn pool_attach_mutex_deferred(&self) -> bool {
+        self.pool_attach_mutex_deferred
+    }
+
+    pub const fn mayday_lock_deferred(&self) -> bool {
+        self.mayday_lock_deferred
+    }
+
+    pub const fn manager_wait_deferred(&self) -> bool {
+        self.manager_wait_deferred
+    }
+
+    pub const fn pool_mutex_guard_used(&self) -> bool {
+        self.pool_mutex_guard_used
+    }
+
+    pub const fn struct_mutex_guard_used(&self) -> bool {
+        self.struct_mutex_guard_used
     }
 
     pub const fn workers_running(&self) -> bool {
@@ -115,15 +204,17 @@ impl Workqueue {
     pub fn preset(
         &mut self,
         page_allocator: &PageAllocator,
-        slub_subsystem: &SlubSubsystem,
+        slub_subsystem: &mut SlubSubsystem,
         cpu_group: &CpuGroup,
         per_cpu_storage: &PerCpuStorage,
+        init_task: &InitTask,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || page_allocator.state() != State::Ready
             || slub_subsystem.state() != State::Ready
             || cpu_group.state() != State::Ready
             || per_cpu_storage.state() != State::Ready
+            || init_task.state() != State::Online
         {
             return failed_condition(
                 LifecycleEvent::Preset,
@@ -133,11 +224,56 @@ impl Workqueue {
             );
         }
 
+        self.pool_mutex.preset_static()?;
+        self.pool_mutex.setup()?;
+        self.struct_mutex.preset_static()?;
+        self.struct_mutex.setup()?;
+        let Some(cache) = slub_subsystem.register_named_cache(
+            NamedSlubCacheKind::PoolWorkqueue,
+            POOL_WORKQUEUE_CACHE_OBJECT_SIZE,
+            0,
+            0,
+        ) else {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        };
+        if cache.kind() != NamedSlubCacheKind::PoolWorkqueue
+            || cache.object_size() != POOL_WORKQUEUE_CACHE_OBJECT_SIZE
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.pool_mutex.lock_boot_init_task(init_task)?;
+        self.pool_mutex_guard_used = true;
+        self.struct_mutex.lock_boot_init_task(init_task)?;
+        self.struct_mutex_guard_used = true;
+        self.struct_mutex.unlock_boot_init_task(init_task)?;
+        self.pool_mutex.unlock_boot_init_task(init_task)?;
+
         self.possible_cpu_count = cpu_group.possible_cpu_count();
         self.system_queues_ready = true;
+        self.system_queue_count = EARLY_SYSTEM_WORKQUEUE_COUNT;
         self.worker_pools_prepared = true;
+        self.cpu_worker_pools_ready = true;
         self.unbound_cpumask_ready = true;
         self.bh_pools_ready = true;
+        self.pool_workqueue_cache_ready = true;
+        self.pool_workqueue_cache_object_size = POOL_WORKQUEUE_CACHE_OBJECT_SIZE;
+        self.registered_in_slub_registry = true;
+        self.attrs_ready = true;
+        self.system_affinity_pods_ready = true;
+        self.pool_attach_mutex_deferred = true;
+        self.mayday_lock_deferred = true;
+        self.manager_wait_deferred = true;
         self.workers_running = false;
         self.worker_creation_open = false;
         self.rescuers_ready = false;

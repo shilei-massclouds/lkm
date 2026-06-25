@@ -58,6 +58,11 @@ enum RawSpinLockExtState {
     Locked,
 }
 
+enum RcuReadSideExtState {
+    Quiescent,
+    ReadHeld,
+}
+
 enum MutexExtState {
     Unlocked,
     Locked,
@@ -375,6 +380,10 @@ predicate boot_runqueue_cpu_ref_covered_by_root_domain<T, U, V>(
     cpu_ref: V
 ) -> bool;
 predicate boot_runqueue_attached_to_root_domain<T, U>(runqueue: T, root_domain: U) -> bool;
+predicate boot_runqueue_root_attach_held_runqueue_lock<T, U>(
+    runqueue: T,
+    lock: U
+) -> bool;
 predicate boot_runqueue_class_queues_ready<T>(runqueue: T) -> bool;
 predicate boot_runqueue_balance_push_disabled<T>(runqueue: T) -> bool;
 predicate cpu_owns_runqueue<T, U>(cpu: T, runqueue: U) -> bool;
@@ -389,6 +398,34 @@ predicate scheduler_orchestrates_cpu_owned_runqueues<T, U>(
     cpu_group: U
 ) -> bool;
 predicate bit_wait_queue_table_ready<T>(table: T) -> bool;
+predicate bit_wait_queue_table_bucket_count_matches_wait_table_size<T>(table: T) -> bool;
+predicate bit_wait_queue_table_bucket_waitqueues_ready<T>(table: T) -> bool;
+predicate bit_wait_queue_table_bucket_locks_ready<T>(table: T) -> bool;
+predicate bit_wait_queue_table_bucket_lists_empty<T>(table: T) -> bool;
+predicate workqueue_early_framework_ready<T, U>(workqueue: T, cpu_group: U) -> bool;
+predicate workqueue_system_queues_ready<T>(workqueue: T) -> bool;
+predicate workqueue_system_queue_count_matches_linux_early<T>(workqueue: T) -> bool;
+predicate workqueue_worker_pools_prepared<T>(workqueue: T) -> bool;
+predicate workqueue_cpu_worker_pools_ready<T>(workqueue: T) -> bool;
+predicate workqueue_bh_pools_ready<T>(workqueue: T) -> bool;
+predicate workqueue_pool_workqueue_cache_ready<T>(workqueue: T) -> bool;
+predicate workqueue_unbound_cpumask_ready<T>(workqueue: T) -> bool;
+predicate workqueue_attrs_ready<T>(workqueue: T) -> bool;
+predicate workqueue_system_affinity_pods_ready<T>(workqueue: T) -> bool;
+predicate workqueue_pool_mutex_ready<T, U>(workqueue: T, mutex: U) -> bool;
+predicate workqueue_struct_mutex_ready<T, U>(workqueue: T, mutex: U) -> bool;
+predicate workqueue_pool_mutex_guard_used<T, U>(workqueue: T, mutex: U) -> bool;
+predicate workqueue_struct_mutex_guard_used<T, U>(workqueue: T, mutex: U) -> bool;
+predicate workqueue_pool_attach_mutex_deferred<T>(workqueue: T) -> bool;
+predicate workqueue_mayday_lock_deferred<T>(workqueue: T) -> bool;
+predicate workqueue_manager_wait_deferred<T>(workqueue: T) -> bool;
+predicate workqueue_workers_not_running<T>(workqueue: T) -> bool;
+predicate workqueue_ready_before_smp<T>(workqueue: T) -> bool;
+predicate workqueue_rescuers_ready<T, U>(workqueue: T, task: U) -> bool;
+predicate workqueue_initial_workers_created<T, U>(workqueue: T, cpu_group: U) -> bool;
+predicate workqueue_worker_creation_open<T>(workqueue: T) -> bool;
+predicate workqueue_watchdog_ready<T>(workqueue: T) -> bool;
+predicate workqueue_smp_topology_deferred<T>(workqueue: T) -> bool;
 predicate default_sched_root_domain_ready<T, U>(root_domain: T, cpu_group: U) -> bool;
 predicate default_sched_root_domain_covers_cpu_group_possible<T, U>(
     root_domain: T,
@@ -409,6 +446,11 @@ predicate boot_idle_init_held_pi_lock<T, U>(task: T, lock: U) -> bool;
 predicate boot_idle_init_held_runqueue_lock<T, U>(runqueue: T, lock: U) -> bool;
 predicate boot_idle_task_cpu_set_under_rcu_read<T, U>(task: T, cpu_ref: U) -> bool;
 predicate boot_runqueue_current_published_with_rcu<T, U>(runqueue: T, task: U) -> bool;
+predicate rcu_read_side_ready<T>(read_side: T) -> bool;
+predicate rcu_read_side_entered<T, U>(read_side: T, current_cpu: U) -> bool;
+predicate rcu_read_side_exited<T, U>(read_side: T, current_cpu: U) -> bool;
+predicate rcu_read_side_incomplete_first_slice<T>(read_side: T) -> bool;
+predicate rcu_read_side_full_semantics_deferred<T>(read_side: T) -> bool;
 predicate boot_idle_entry_prepared<T, U>(runtime: T, task: U) -> bool;
 predicate boot_idle_arch_cpu_idle_prepare_done<T, U>(runtime: T, cpu: U) -> bool;
 predicate boot_idle_cpuhp_online_state_confirmed<T, U>(runtime: T, cpu: U) -> bool;
@@ -1368,6 +1410,44 @@ type RawSpinLock {
             ensures {
                 raw_spinlock_irqrestore_exited(self, current_cpu);
                 raw_spinlock_released(self);
+            }
+        }
+    }
+}
+
+/*
+ * RcuReadSide models a CPU-local RCU read-side critical section. It is a
+ * synchronization/context primitive, not a mutual-exclusion lock. The first
+ * model slice records balanced enter/exit and the fact that protected pointer
+ * publication or lookup happened under RCU read-side coverage; grace-period
+ * accounting and quiescent-state machinery remain in RcuCore and later phases.
+ */
+type RcuReadSide {
+    ext_state: RcuReadSideExtState;
+
+    processes {
+        Transition::ReadLock {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                RcuReadSideExtState::Quiescent -> RcuReadSideExtState::ReadHeld;
+                RcuReadSideExtState::ReadHeld -> RcuReadSideExtState::ReadHeld;
+            }
+            ensures {
+                rcu_read_side_entered(self, current_cpu);
+            }
+            result {
+                Quiescent: Success(read_held);
+                ReadHeld: Success(nested_read_held);
+            }
+        }
+
+        Transition::ReadUnlock {
+            state_effect: StateEffect::Conditional;
+            transitions {
+                RcuReadSideExtState::ReadHeld -> RcuReadSideExtState::Quiescent;
+            }
+            ensures {
+                rcu_read_side_exited(self, current_cpu);
             }
         }
     }
