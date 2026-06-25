@@ -123,6 +123,8 @@ predicate arceos_ex_must_phase_boundary_guard_lower_to_context_contribution_only
 predicate arceos_ex_must_preemption_guard_lower_to_counted_enter_exit() -> bool;
 predicate arceos_ex_must_local_interrupt_guard_preserve_saved_flags() -> bool;
 predicate arceos_ex_must_raw_spin_lock_irqsave_guard_lock_and_restore() -> bool;
+predicate arceos_ex_must_raw_spin_lock_guard_use_plain_lock_unlock() -> bool;
+predicate arceos_ex_must_bind_boot_scheduler_locks_to_owned_objects() -> bool;
 predicate arceos_ex_must_effective_context_not_elide_protocol_guards() -> bool;
 predicate arceos_ex_must_defer_rcu_lowering_until_primitive_exists() -> bool;
 predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit() -> bool;
@@ -617,6 +619,21 @@ type ArceosExEffectiveContextCodingMust {
          * not replace the lock/unlock protocol itself.
          */
         arceos_ex_must_raw_spin_lock_irqsave_guard_lock_and_restore();
+
+        /*
+         * RawSpinLock ordinary guard boundary:
+         *
+         * A guard whose entered_by/exited_by use RawSpinLock Action::Acquire /
+         * Action::Release represents plain raw_spin_lock/raw_spin_unlock. It
+         * must lower to acquiring and releasing the same raw spin lock and
+         * must not be silently dropped merely because an outer context already
+         * disables local interrupts or preemption. It also must not be
+         * rewritten into a second irqsave/irqrestore pair; irq/preemption
+         * effects must come only from the explicit outer guard that models
+         * them. init_idle() uses this shape for BootRunQueueLock inside the
+         * outer BootIdlePiLock irqsave context.
+         */
+        arceos_ex_must_raw_spin_lock_guard_use_plain_lock_unlock();
 
         /*
          * Effective Context is not a license to erase protocol guards:
@@ -2334,6 +2351,19 @@ type ArceosExRestInitCodingMust {
          * only if public facts and smoke checks expose them as BootCPU views.
          */
         arceos_ex_must_model_runqueue_and_idle_task_as_cpu_owned();
+
+        /*
+         * Boot scheduler lock ownership:
+         *
+         * BootRunQueueLock must be lowered as the lock owned by the
+         * BootCPU-owned BootRunQueue object, and BootIdlePiLock must be
+         * lowered as the pi_lock owned by the BootCPU-owned BootIdleTask
+         * object. Scheduler.setup() may orchestrate init_idle() ordering, but
+         * must not become the semantic owner of those locks. Public readiness
+         * checks may expose transitional Scheduler accessors only as
+         * projections back to BootRunQueue.lock and BootIdleTask.pi_lock.
+         */
+        arceos_ex_must_bind_boot_scheduler_locks_to_owned_objects();
 
         /*
          * CPU-owned scheduler view lowering:

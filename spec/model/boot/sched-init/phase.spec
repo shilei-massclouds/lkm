@@ -35,6 +35,34 @@ context BootIdlePiLockContext: ResourceExclusiveContext {
     }
 }
 
+context BootRunQueueLockContext: ResourceExclusiveContext {
+    /*
+     * init_idle() takes rq->__lock with raw_spin_rq_lock() while the outer
+     * BootIdlePiLockContext already holds idle->pi_lock and has saved and
+     * disabled local interrupts. This guard models the ordinary raw rq lock
+     * boundary; it contributes the held runqueue lock and protected object
+     * scope without pretending to run a second irq-save protocol.
+     */
+    guard {
+        lock_ref: BootRunQueueLock;
+
+        entered_by {
+            BootRunQueueLock.Action::Acquire;
+        }
+
+        exited_by {
+            BootRunQueueLock.Action::Release;
+        }
+    }
+
+    obj_refs {
+        BootRunQueue;
+        BootIdleTask;
+        BootCpuCurrentTask;
+        Scheduler;
+    }
+}
+
 /*
  * Scheduler 表示启动期调度器基础编排对象。本阶段只要求 boot CPU 的
  * CPU-owned runqueue、CPU-owned idle task 关联和主动调度入口可用；同时记录
@@ -384,30 +412,30 @@ object BootIdleTask: Task {
                 }
 
                 within BootIdlePiLockContext {
-                    depends_on {
-                        BootRunQueue.state == State::Ready;
-                        raw_spinlock_ready(BootRunQueueLock);
-                    }
+                    within BootRunQueueLockContext {
+                        depends_on {
+                            BootRunQueue.state == State::Ready;
+                            raw_spinlock_ready(BootRunQueueLock);
+                        }
 
-                    drives {
-                        BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
-                        BootIdleTask.Action::SetTaskCpu(BootCPURef);
-                    }
+                        drives {
+                            BootCpuCurrentTask.Action::SetCurrent(task: BootIdleTask);
+                            BootIdleTask.Action::SetTaskCpu(BootCPURef);
+                        }
 
-                    ensures {
-                        raw_spinlock_irqsave_entered(BootIdlePiLock, BootCurrentCPU);
-                        raw_spinlock_irqrestore_exited(BootIdlePiLock, BootCurrentCPU);
-                        raw_spinlock_initialized(BootIdlePiLock);
-                        raw_spinlock_ready(BootIdlePiLock);
-                        boot_idle_pi_lock_ready(BootIdleTask, BootIdlePiLock);
-                        boot_idle_init_held_pi_lock(BootIdleTask, BootIdlePiLock);
-                        boot_idle_init_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
-                        boot_idle_task_cpu_set_under_rcu_read(BootIdleTask, BootCPURef);
-                        boot_runqueue_current_published_with_rcu(BootRunQueue, BootIdleTask);
-                    }
-
-                    deferred {
-                        "init_idle() takes BootRunQueueLock with raw_spin_rq_lock() while BootIdlePiLock has already saved and disabled local interrupts. Current context tooling only supports irq-save RawSpinLock guards, so the narrower ordinary raw rq lock boundary is recorded as boot_idle_init_held_runqueue_lock(...) until ordinary RawSpinLock lock/unlock contexts are added.";
+                        ensures {
+                            raw_spinlock_irqsave_entered(BootIdlePiLock, BootCurrentCPU);
+                            raw_spinlock_irqrestore_exited(BootIdlePiLock, BootCurrentCPU);
+                            raw_spinlock_initialized(BootIdlePiLock);
+                            raw_spinlock_ready(BootIdlePiLock);
+                            boot_idle_pi_lock_ready(BootIdleTask, BootIdlePiLock);
+                            boot_idle_init_held_pi_lock(BootIdleTask, BootIdlePiLock);
+                            raw_spinlock_acquired(BootRunQueueLock);
+                            raw_spinlock_released(BootRunQueueLock);
+                            boot_idle_init_held_runqueue_lock(BootRunQueue, BootRunQueueLock);
+                            boot_idle_task_cpu_set_under_rcu_read(BootIdleTask, BootCPURef);
+                            boot_runqueue_current_published_with_rcu(BootRunQueue, BootIdleTask);
+                        }
                     }
                 }
 

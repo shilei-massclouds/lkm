@@ -397,6 +397,84 @@ class DerivationTests(unittest.TestCase):
             )
         )
 
+    def test_within_action_guard_boundary_records(self) -> None:
+        result = build_model(
+            parse_text(
+                """
+                type RawSpinLock {
+                    processes {
+                        Action::Acquire {
+                        }
+
+                        Action::Release {
+                        }
+                    }
+                }
+
+                lock TaskRqLock: RawSpinLock;
+
+                context RqLockContext: ResourceExclusiveContext {
+                    guard {
+                        lock_ref: TaskRqLock;
+
+                        entered_by {
+                            TaskRqLock.Action::Acquire;
+                        }
+
+                        exited_by {
+                            TaskRqLock.Action::Release;
+                        }
+                    }
+
+                    obj_refs {
+                        A;
+                    }
+                }
+
+                object A: T {
+                    initial_state: State::Ready;
+
+                    state State::Ready {
+                        transitions {
+                            on Transition::Enable -> State::Online {
+                                within RqLockContext {
+                                    drives {
+                                        A.Action::Touch;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    state State::Online {
+                    }
+                }
+                """
+            )
+        )
+
+        derivation = derive(result.model, "A.Transition::Enable")
+
+        self.assertTrue(derivation.ok)
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_class == "context_guard_action"
+                and record.source_kind == "within_entered_by"
+                and record.expression == "TaskRqLock.Action::Acquire"
+                for record in derivation.records
+            )
+        )
+        self.assertTrue(
+            any(
+                record.status is DerivationStatus.PROVED
+                and record.proof_class == "context_guard_action"
+                and record.source_kind == "within_exited_by"
+                and record.expression == "TaskRqLock.Action::Release"
+                for record in derivation.records
+            )
+        )
+
     def test_current_model_derivation_reaches_target(self) -> None:
         spec = Path(__file__).resolve().parents[3] / "spec" / "model" / "main.spec"
         result = build_model(parse_file(spec))

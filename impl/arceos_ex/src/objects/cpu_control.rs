@@ -491,6 +491,8 @@ impl PreemptionControl {
 pub struct RawSpinLock {
     lifecycle: Lifecycle,
     locked: bool,
+    acquired_count: usize,
+    released_count: usize,
     irqsave_entered_count: usize,
     irqrestore_exited_count: usize,
     irqrestore_restored_before_preemption_enabled: bool,
@@ -501,6 +503,8 @@ impl RawSpinLock {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             locked: false,
+            acquired_count: 0,
+            released_count: 0,
             irqsave_entered_count: 0,
             irqrestore_exited_count: 0,
             irqrestore_restored_before_preemption_enabled: false,
@@ -513,6 +517,14 @@ impl RawSpinLock {
 
     pub const fn locked(&self) -> bool {
         self.locked
+    }
+
+    pub const fn acquired_count(&self) -> usize {
+        self.acquired_count
+    }
+
+    pub const fn released_count(&self) -> usize {
+        self.released_count
     }
 
     pub const fn irqsave_entered_count(&self) -> usize {
@@ -546,6 +558,36 @@ impl RawSpinLock {
             .transition(LifecycleEvent::Setup, State::Base, State::Ready, checkpoint)
     }
 
+    pub fn acquire(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || self.locked {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.locked = true;
+        self.acquired_count = self.acquired_count.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn release(&mut self) -> EventResult {
+        if self.lifecycle.state() != State::Ready || !self.locked {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
+        self.locked = false;
+        self.released_count = self.released_count.wrapping_add(1);
+        Ok(())
+    }
+
     pub fn lock_irqsave(
         &mut self,
         local_interrupt: &mut LocalInterruptControl,
@@ -562,7 +604,7 @@ impl RawSpinLock {
 
         local_interrupt.save_and_disable()?;
         preemption.disable()?;
-        self.locked = true;
+        self.acquire()?;
         self.irqsave_entered_count = self.irqsave_entered_count.wrapping_add(1);
         Ok(())
     }
@@ -581,7 +623,7 @@ impl RawSpinLock {
             );
         }
 
-        self.locked = false;
+        self.release()?;
         let restored_before = local_interrupt.restored_count();
         local_interrupt.restore()?;
         self.irqrestore_restored_before_preemption_enabled = local_interrupt.restored_count()

@@ -17,6 +17,7 @@ pub fn run() -> SmokeResult {
     // path with local dependency objects.
     let mut suite = SmokeSuite::new();
     suite.scenario(&mut SetupReadyScenario::new());
+    suite.scenario(&mut PlainAcquireReleaseScenario::new());
     suite.scenario(&mut IrqSaveRestoreScenario::new(true));
     suite.scenario(&mut IrqSaveRestoreScenario::new(false));
     suite.scenario(&mut UnpreparedOperationsScenario::new());
@@ -64,11 +65,17 @@ impl RawSpinLockFixture {
 
     fn release_if_held(&mut self, assertions: &mut SmokeAssertions) {
         if self.lock.locked() {
-            assertions.assert_ok(
-                "teardown unlock irqrestore",
-                self.lock
-                    .unlock_irqrestore(&mut self.local_interrupt, &mut self.preemption),
-            );
+            if self.local_interrupt.saved_and_disabled_count()
+                != self.local_interrupt.restored_count()
+            {
+                assertions.assert_ok(
+                    "teardown unlock irqrestore",
+                    self.lock
+                        .unlock_irqrestore(&mut self.local_interrupt, &mut self.preemption),
+                );
+            } else {
+                assertions.assert_ok("teardown release", self.lock.release());
+            }
         }
     }
 
@@ -123,6 +130,65 @@ impl SmokeScenario for SetupReadyScenario {
         );
         assertions.assert(
             "preemption initially enabled",
+            self.fixture.preemption.enabled(),
+        );
+    }
+
+    fn teardown(&mut self, assertions: &mut SmokeAssertions) {
+        self.fixture.release_if_held(assertions);
+        self.fixture.restore_external_irq(assertions);
+    }
+}
+
+struct PlainAcquireReleaseScenario {
+    fixture: RawSpinLockFixture,
+}
+
+impl PlainAcquireReleaseScenario {
+    fn new() -> Self {
+        Self {
+            fixture: RawSpinLockFixture::new(false),
+        }
+    }
+}
+
+impl SmokeScenario for PlainAcquireReleaseScenario {
+    fn name(&self) -> &'static str {
+        "raw_spinlock.plain_acquire_release"
+    }
+
+    fn setup(&mut self, assertions: &mut SmokeAssertions) {
+        self.fixture.setup_ready(assertions);
+    }
+
+    fn run(&mut self, assertions: &mut SmokeAssertions) {
+        assertions.assert_ok("plain acquire", self.fixture.lock.acquire());
+        assertions.assert("plain lock held", self.fixture.lock.locked());
+        assertions.assert(
+            "plain acquire count",
+            self.fixture.lock.acquired_count() == 1,
+        );
+        assertions.assert(
+            "plain acquire keeps irq state",
+            self.fixture.local_interrupt.disabled(),
+        );
+        assertions.assert(
+            "plain acquire keeps preemption state",
+            self.fixture.preemption.enabled(),
+        );
+
+        assertions.assert_ok("plain release", self.fixture.lock.release());
+        assertions.assert("plain lock released", !self.fixture.lock.locked());
+        assertions.assert(
+            "plain release count",
+            self.fixture.lock.released_count() == 1,
+        );
+        assertions.assert(
+            "plain release keeps irq state",
+            self.fixture.local_interrupt.disabled(),
+        );
+        assertions.assert(
+            "plain release keeps preemption state",
             self.fixture.preemption.enabled(),
         );
     }

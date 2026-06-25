@@ -55,6 +55,7 @@ _REF_ACTION_EXPR_RE = re.compile(
     re.S,
 )
 _LOCK_TRANSITION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Transition::([A-Za-z_][A-Za-z0-9_]*)\b")
+_LOCK_ACTION_RE = re.compile(r"\b([A-Z][A-Za-z0-9_]*)\.Action::([A-Za-z_][A-Za-z0-9_]*)\b")
 _OBJECT_STATE_RE = re.compile(
     r"\b([A-Z][A-Za-z0-9_]*)\.state\s*==\s*State::([A-Za-z_][A-Za-z0-9_]*)\b"
 )
@@ -638,23 +639,23 @@ def _schema_context_contribution(
         return _ContextContribution(exclusive_refs=exclusive_refs)
     contribution = _ContextContribution(exclusive_refs=exclusive_refs)
     boundary_events = _guard_boundary_events(model, guard.entered_by)
-    if any(receiver_kind == "RawSpinLock" and transition_name == "LockIrqSave"
-           for receiver_kind, transition_name in boundary_events):
+    if any(receiver_kind == "RawSpinLock" and process_kind == "Transition" and process_name == "LockIrqSave"
+           for receiver_kind, process_kind, process_name in boundary_events):
         contribution = _replace_context_contribution(
             contribution,
             local_interrupts=False,
             preemption=False,
             voluntary_switching=False,
         )
-    if any(receiver_kind == "PreemptionControl" and transition_name == "Disable"
-           for receiver_kind, transition_name in boundary_events):
+    if any(receiver_kind == "PreemptionControl" and process_kind == "Transition" and process_name == "Disable"
+           for receiver_kind, process_kind, process_name in boundary_events):
         contribution = _replace_context_contribution(
             contribution,
             preemption=False,
             voluntary_switching=False,
         )
-    if any(receiver_kind == "LocalInterruptControl" and transition_name in {"Disable", "SaveAndDisable"}
-           for receiver_kind, transition_name in boundary_events):
+    if any(receiver_kind == "LocalInterruptControl" and process_kind == "Transition" and process_name in {"Disable", "SaveAndDisable"}
+           for receiver_kind, process_kind, process_name in boundary_events):
         contribution = _replace_context_contribution(
             contribution,
             local_interrupts=False,
@@ -662,13 +663,17 @@ def _schema_context_contribution(
     return contribution
 
 
-def _guard_boundary_events(model: ObjectModel, blocks: list[Block]) -> list[tuple[str, str]]:
-    transitions: list[tuple[str, str]] = []
+def _guard_boundary_events(model: ObjectModel, blocks: list[Block]) -> list[tuple[str, str, str]]:
+    transitions: list[tuple[str, str, str]] = []
     for block in blocks:
         for receiver_name, transition_name in _LOCK_TRANSITION_RE.findall(block.body):
             receiver_kind = _guard_receiver_kind(model, receiver_name)
             if receiver_kind is not None:
-                transitions.append((receiver_kind, transition_name))
+                transitions.append((receiver_kind, "Transition", transition_name))
+        for receiver_name, action_name in _LOCK_ACTION_RE.findall(block.body):
+            receiver_kind = _guard_receiver_kind(model, receiver_name)
+            if receiver_kind is not None:
+                transitions.append((receiver_kind, "Action", action_name))
     return transitions
 
 
@@ -1207,6 +1212,61 @@ def _check_lock_event_references(
                     block.span,
                 )
             )
+    for lock_name, action_name in _LOCK_ACTION_RE.findall(block.body):
+        if lock_name != context.lock_ref:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    "lock action reference outside exclusive_context lock_ref: "
+                    f"{lock_name}.Action::{action_name} not bound to {context.name}",
+                    block.span,
+                )
+            )
+            continue
+        lock = model.locks.get(lock_name)
+        obj = model.objects.get(lock_name)
+        if lock is None and obj is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown lock_ref in action reference: {lock_name}.Action::{action_name}",
+                    block.span,
+                )
+            )
+            continue
+        if lock is not None and lock.kind is None:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"lock action reference requires typed lock: {lock_name}.Action::{action_name}",
+                    block.span,
+                )
+            )
+            continue
+        if lock is not None:
+            lock_type = model.types.get(lock.kind)
+            if lock_type is None:
+                continue
+            if not _type_declares_action(lock_type, action_name):
+                diagnostics.append(
+                    Diagnostic(
+                        Severity.ERROR,
+                        f"unknown lock type action reference: {lock_name}.Action::{action_name}",
+                        block.span,
+                    )
+                )
+            continue
+        assert obj is not None
+        if not (
+            obj.kind in model.types and _type_declares_action(model.types[obj.kind], action_name)
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    Severity.ERROR,
+                    f"unknown lock object action reference: {lock_name}.Action::{action_name}",
+                    block.span,
+                )
+            )
 
 
 def _check_action_references(
@@ -1604,6 +1664,11 @@ def _check_event_references(
 
 def _type_declares_event(type_decl: TypeDecl, transition_name: str) -> bool:
     pattern = re.compile(_TYPE_TRANSITION_RE_TEMPLATE.format(re.escape(transition_name)))
+    return any(pattern.search(block.body) for block in type_decl.blocks)
+
+
+def _type_declares_action(type_decl: TypeDecl, action_name: str) -> bool:
+    pattern = re.compile(r"\bAction::{}\b".format(re.escape(action_name)))
     return any(pattern.search(block.body) for block in type_decl.blocks)
 
 

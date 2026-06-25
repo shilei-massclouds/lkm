@@ -32,6 +32,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.per_cpu_storage,
         &ctx.init_task,
         &ctx.init_mm,
+        &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.boot_cpu_current_task,
     )?;
     ctx.scheduler.enable()?;
@@ -116,6 +117,10 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
             .unwrap_or(false)
         && boot_runqueue.class_queues_ready()
         && boot_runqueue.attached_to_root_domain()
+        && ctx.scheduler.boot_runqueue_lock().state() == State::Ready
+        && !ctx.scheduler.boot_runqueue_lock().locked()
+        && ctx.scheduler.boot_runqueue_lock().acquired_count() != 0
+        && ctx.scheduler.boot_runqueue_lock().released_count() != 0
         && ctx
             .scheduler
             .default_root_domain()
@@ -129,6 +134,10 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && boot_idle_task.uses_current_init_task()
         && boot_idle_task.lazy_tlb_mm_ready()
         && boot_idle_task.no_set_affinity()
+        && ctx.scheduler.boot_idle_pi_lock().state() == State::Ready
+        && !ctx.scheduler.boot_idle_pi_lock().locked()
+        && ctx.scheduler.boot_idle_pi_lock().irqsave_entered_count() != 0
+        && ctx.scheduler.boot_idle_pi_lock().irqrestore_exited_count() != 0
         && ctx.scheduler.boot_idle_preemption().state() == State::Ready
         && ctx.scheduler.boot_idle_preemption().disabled()
         && ctx.boot_cpu_current_task.state() == State::Ready

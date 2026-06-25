@@ -1969,27 +1969,35 @@ class _Deriver:
         for block in blocks:
             for entry, entry_span in block.entry_spans:
                 match = _TRANSITION_EXPR_RE.match(entry)
-                if match is None:
-                    self._record(
-                        DerivationStatus.BLOCKED,
-                        f"cannot parse within boundary entry: {entry}",
-                        entry_span,
-                        object_name=transition.object_name,
-                        transition_name=transition.name,
-                        expression=entry,
-                    )
-                    return False
-                object_name, transition_name = match.group(1), match.group(2)
+                if match is not None:
+                    object_name, process_name = match.group(1), match.group(2)
+                    process_kind = "Transition"
+                    proof_class = "context_guard_transition"
+                else:
+                    match = _ACTION_EXPR_RE.match(entry)
+                    if match is None:
+                        self._record(
+                            DerivationStatus.BLOCKED,
+                            f"cannot parse within boundary entry: {entry}",
+                            entry_span,
+                            object_name=transition.object_name,
+                            transition_name=transition.name,
+                            expression=entry,
+                        )
+                        return False
+                    object_name, process_name = match.group(1), match.group(2)
+                    process_kind = "Action"
+                    proof_class = "context_guard_action"
                 self._record(
                     DerivationStatus.PROVED,
-                    f"within boundary committed: {object_name}.Transition::{transition_name}",
+                    f"within boundary committed: {object_name}.{process_kind}::{process_name}",
                     entry_span,
                     object_name=transition.object_name,
                     transition_name=transition.name,
                     expression=entry,
                     source_kind=source_kind,
                     predicate=None,
-                    proof_class="context_guard_transition",
+                    proof_class=proof_class,
                     proof_provider="guard",
                 )
         return True

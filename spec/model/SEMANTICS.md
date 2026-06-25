@@ -376,7 +376,7 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
   `local_interrupts: enabled|disabled`、`preemption: enabled|disabled`、
   `voluntary_switching: enabled|disabled`、`cpu_concurrency: single|multi`、
   `task_concurrency: single|multi`。旧 `true|false` 只作为迁移期兼容输入。
-- 首轮 guard contribution 推导如下：`RawSpinLock.LockIrqSave` 边界推导本地中断关闭、抢占关闭、主动切换关闭；`PreemptionControl.Disable` 边界推导抢占关闭和主动切换关闭；`LocalInterruptControl.SaveAndDisable` / `Disable` 边界只推导本地中断关闭；没有进入/退出事件的天然 guard 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
+- 首轮 guard contribution 推导如下：`RawSpinLock.LockIrqSave` 边界推导本地中断关闭、抢占关闭、主动切换关闭；`RawSpinLock.Action::Acquire` / `Release` 可作为普通 raw spin lock 的 guard 边界，只贡献该 `ResourceExclusiveContext` 的锁保护和 `obj_refs` 独占范围，不额外推导 irqsave、抢占关闭或主动切换关闭；`PreemptionControl.Disable` 边界推导抢占关闭和主动切换关闭；`LocalInterruptControl.SaveAndDisable` / `Disable` 边界只推导本地中断关闭；没有进入/退出事件的天然 guard 不自带运行时 effect，只由 `holds` 明确声明阶段边界保证的事实。
 - 同一把锁可以被多个 resource exclusive context 的 guard 引用，用于建立不同受保护作用域。
 - resource exclusive context 不需要 lifecycle state；进入上下文是一次由 guard 保护的独占执行尝试。
 - 同一时刻至多一个执行流可以成功进入同一个 resource exclusive context。
@@ -589,6 +589,8 @@ RawSpinLock.Transition::UnlockIrqRestore(current_cpu: CurrentCPU, flags: IrqFlag
     }
 }
 ```
+
+普通 `raw_spin_lock()` / `raw_spin_unlock()` 对应 `RawSpinLock.Action::Acquire` / `Release`。如果调用点已经位于外层 irqsave 或其它上下文中，内层普通 raw spin lock 应建模为单独的 `ResourceExclusiveContext`，其 guard 使用 `Action::Acquire` / `Release`，而不是伪装成第二个 irqsave guard，也不能把该锁边界降级为普通 predicate。
 
 `KernelInitTask.Enable` 的 `within WakeUpNewTaskContext` 由 `KernelInitTaskPiLock.Transition::LockIrqSave(current_cpu: CurrentCPU)` 建立进入边界，并由对应的 `UnlockIrqRestore` 建立退出边界。`within` 块内部只保留受保护资源对象的 action/transition，例如设置 task runtime state、选择 runqueue 和入队任务。
 

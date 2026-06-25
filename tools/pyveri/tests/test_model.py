@@ -263,6 +263,67 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertEqual(context.lock_ref, "TaskPiLock")
         self.assertEqual(result.model.locks["TaskPiLock"].kind, "RawSpinLock")
 
+    def test_accepts_resource_context_guard_lock_action_refs(self) -> None:
+        document = parse_text(
+            """
+            type RawSpinLock {
+                processes {
+                    Action::Acquire {
+                    }
+
+                    Action::Release {
+                    }
+                }
+            }
+
+            lock TaskRqLock: RawSpinLock;
+
+            context RqLockContext: ResourceExclusiveContext {
+                guard {
+                    lock_ref: TaskRqLock;
+
+                    entered_by {
+                        TaskRqLock.Action::Acquire;
+                    }
+
+                    exited_by {
+                        TaskRqLock.Action::Release;
+                    }
+                }
+
+                obj_refs {
+                    A;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    transitions {
+                        on Transition::Enable -> State::Online {
+                            within RqLockContext {
+                                drives {
+                                    A.Action::Touch;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertTrue(result.ok, [diag.message for diag in result.errors])
+        context = result.model.exclusive_contexts["RqLockContext"]
+        self.assertEqual(context.lock_ref, "TaskRqLock")
+        self.assertEqual(result.model.locks["TaskRqLock"].kind, "RawSpinLock")
+
     def test_rejects_within_boundary_override_for_context_guard(self) -> None:
         document = parse_text(
             """
@@ -369,6 +430,69 @@ class ModelBuilderTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "lock transition reference outside exclusive_context lock_ref" in diag.message
+                and diag.severity is Severity.ERROR
+                for diag in result.errors
+            )
+        )
+
+    def test_rejects_guard_action_for_non_context_lock(self) -> None:
+        document = parse_text(
+            """
+            type RawSpinLock {
+                processes {
+                    Action::Acquire {
+                    }
+
+                    Action::Release {
+                    }
+                }
+            }
+
+            lock TaskRqLock: RawSpinLock;
+            lock OtherLock: RawSpinLock;
+
+            context RqLockContext: ResourceExclusiveContext {
+                guard {
+                    lock_ref: TaskRqLock;
+
+                    entered_by {
+                        OtherLock.Action::Acquire;
+                    }
+
+                    exited_by {
+                        OtherLock.Action::Release;
+                    }
+                }
+
+                obj_refs {
+                    A;
+                }
+            }
+
+            object A: T {
+                initial_state: State::Ready;
+
+                state State::Ready {
+                    transitions {
+                        on Transition::Enable -> State::Online {
+                            within RqLockContext {
+                            }
+                        }
+                    }
+                }
+
+                state State::Online {
+                }
+            }
+            """
+        )
+
+        result = build_model(document)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(
+            any(
+                "lock action reference outside exclusive_context lock_ref" in diag.message
                 and diag.severity is Severity.ERROR
                 for diag in result.errors
             )

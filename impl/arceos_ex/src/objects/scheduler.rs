@@ -1,6 +1,8 @@
 use super::{
     cpu::{CpuRef, MAX_CPUS},
-    cpu_control::{CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl},
+    cpu_control::{
+        CurrentTaskRef, CurrentTaskSlot, LocalInterruptControl, PreemptionControl, RawSpinLock,
+    },
     cpu_group::CpuGroup,
     default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,
@@ -139,6 +141,14 @@ impl Scheduler {
 
     pub const fn boot_runqueue(&self) -> &BootRunQueue {
         &self.boot_runqueue
+    }
+
+    pub const fn boot_runqueue_lock(&self) -> &RawSpinLock {
+        self.boot_runqueue.lock()
+    }
+
+    pub const fn boot_idle_pi_lock(&self) -> &RawSpinLock {
+        self.boot_idle_task.pi_lock()
     }
 
     pub const fn boot_idle_preemption(&self) -> &PreemptionControl {
@@ -490,6 +500,7 @@ impl Scheduler {
         per_cpu_storage: &PerCpuStorage,
         init_task: &InitTask,
         init_mm: &InitMm,
+        local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
@@ -500,6 +511,8 @@ impl Scheduler {
             || per_cpu_storage.state() != State::Ready
             || init_task.state() != State::Online
             || init_mm.state() != State::Ready
+            || local_interrupt.state() != State::Ready
+            || current_task_slot.state() != State::Ready
         {
             return self.failed_setup();
         }
@@ -507,10 +520,15 @@ impl Scheduler {
         self.boot_runqueue
             .setup(cpu_group, per_cpu_storage, &self.default_root_domain)?;
         self.setup_cpu_runqueue_metadata(cpu_group)?;
-        self.boot_idle_task
-            .setup(init_task, init_mm, &self.boot_runqueue, cpu_group)?;
-        self.boot_idle_preemption.setup_disabled(init_task)?;
-        current_task_slot.set_current_boot_idle()?;
+        self.boot_idle_task.setup(
+            init_task,
+            init_mm,
+            &mut self.boot_runqueue,
+            cpu_group,
+            local_interrupt,
+            &mut self.boot_idle_preemption,
+            current_task_slot,
+        )?;
         if !self.setup_facts_hold(cpu_group) {
             return self.failed_setup();
         }
@@ -1234,7 +1252,19 @@ impl Scheduler {
 
     fn setup_facts_hold(&self, cpu_group: &CpuGroup) -> bool {
         self.boot_runqueue.state() == State::Ready
+            && self.boot_runqueue.lock().state() == State::Ready
+            && !self.boot_runqueue.lock().locked()
+            && self.boot_runqueue.lock().acquired_count() != 0
+            && self.boot_runqueue.lock().released_count() != 0
             && self.boot_idle_task.state() == State::Ready
+            && self.boot_idle_task.pi_lock().state() == State::Ready
+            && !self.boot_idle_task.pi_lock().locked()
+            && self.boot_idle_task.pi_lock().irqsave_entered_count() != 0
+            && self.boot_idle_task.pi_lock().irqrestore_exited_count() != 0
+            && self.boot_idle_task.init_held_pi_lock()
+            && self.boot_idle_task.init_held_runqueue_lock()
+            && self.boot_idle_task.cpu_set_under_rcu_read()
+            && self.boot_idle_task.runqueue_current_published_with_rcu()
             && self.boot_idle_preemption.state() == State::Ready
             && self.boot_idle_preemption.disabled()
             && self.possible_cpu_runqueues_ready(cpu_group)
@@ -1784,6 +1814,7 @@ impl BitWaitQueueTable {
 
 pub struct BootRunQueue {
     lifecycle: Lifecycle,
+    lock: RawSpinLock,
     cpu_ref: CpuRef,
     cpu_hartid: usize,
     curr_task_id: usize,
@@ -1806,6 +1837,7 @@ impl BootRunQueue {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            lock: RawSpinLock::new(),
             cpu_ref: CpuRef::invalid(),
             cpu_hartid: usize::MAX,
             curr_task_id: usize::MAX,
@@ -1827,6 +1859,10 @@ impl BootRunQueue {
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn lock(&self) -> &RawSpinLock {
+        &self.lock
     }
 
     pub const fn cpu_id(&self) -> usize {
@@ -1917,6 +1953,7 @@ impl BootRunQueue {
         root_domain: &DefaultSchedRootDomain,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
+            || self.lock.state() != State::Base
             || cpu_group.state() != State::Ready
             || !cpu_group.possible_cpu_boundary_ready()
             || root_domain.state() != State::Ready
@@ -1934,6 +1971,8 @@ impl BootRunQueue {
             return self.failed_setup();
         }
 
+        self.lock
+            .setup_with_checkpoint(Checkpoint::BootRunQueueLockReady)?;
         self.cpu_ref = boot_cpu.cpu_ref();
         self.cpu_hartid = boot_cpu.hartid();
         self.curr_task_id = 0;
@@ -2120,6 +2159,7 @@ impl BootRunQueue {
 
 pub struct BootIdleTask {
     lifecycle: Lifecycle,
+    pi_lock: RawSpinLock,
     task_id: usize,
     cpu: TaskCpuState,
     cpu_ref: CpuRef,
@@ -2127,12 +2167,17 @@ pub struct BootIdleTask {
     uses_current_init_task: bool,
     lazy_tlb_mm_ready: bool,
     no_set_affinity: bool,
+    init_held_pi_lock: bool,
+    init_held_runqueue_lock: bool,
+    cpu_set_under_rcu_read: bool,
+    runqueue_current_published_with_rcu: bool,
 }
 
 impl BootIdleTask {
     const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            pi_lock: RawSpinLock::new(),
             task_id: usize::MAX,
             cpu: TaskCpuState::new(),
             cpu_ref: CpuRef::invalid(),
@@ -2140,11 +2185,19 @@ impl BootIdleTask {
             uses_current_init_task: false,
             lazy_tlb_mm_ready: false,
             no_set_affinity: false,
+            init_held_pi_lock: false,
+            init_held_runqueue_lock: false,
+            cpu_set_under_rcu_read: false,
+            runqueue_current_published_with_rcu: false,
         }
     }
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn pi_lock(&self) -> &RawSpinLock {
+        &self.pi_lock
     }
 
     pub const fn task_id(&self) -> usize {
@@ -2153,6 +2206,22 @@ impl BootIdleTask {
 
     pub const fn cpu_id(&self) -> usize {
         self.cpu.cpu_id()
+    }
+
+    pub const fn init_held_pi_lock(&self) -> bool {
+        self.init_held_pi_lock
+    }
+
+    pub const fn init_held_runqueue_lock(&self) -> bool {
+        self.init_held_runqueue_lock
+    }
+
+    pub const fn cpu_set_under_rcu_read(&self) -> bool {
+        self.cpu_set_under_rcu_read
+    }
+
+    pub const fn runqueue_current_published_with_rcu(&self) -> bool {
+        self.runqueue_current_published_with_rcu
     }
 
     pub fn view(&self) -> Option<CpuIdleTaskView> {
@@ -2199,13 +2268,21 @@ impl BootIdleTask {
         &mut self,
         init_task: &InitTask,
         init_mm: &InitMm,
-        boot_runqueue: &BootRunQueue,
+        boot_runqueue: &mut BootRunQueue,
         cpu_group: &CpuGroup,
+        local_interrupt: &mut LocalInterruptControl,
+        boot_idle_preemption: &mut PreemptionControl,
+        current_task_slot: &mut CurrentTaskSlot,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
+            || self.pi_lock.state() != State::Base
             || init_task.state() != State::Online
             || init_mm.state() != State::Ready
             || boot_runqueue.state() != State::Ready
+            || boot_runqueue.lock().state() != State::Ready
+            || local_interrupt.state() != State::Ready
+            || boot_idle_preemption.state() != State::Base
+            || current_task_slot.state() != State::Ready
             || cpu_group
                 .boot_cpu()
                 .map(|cpu| boot_runqueue.cpu_ref() != cpu.cpu_ref())
@@ -2219,26 +2296,47 @@ impl BootIdleTask {
             );
         }
 
-        self.task_id = boot_runqueue.idle_task_id();
-        if !self.cpu.set_task_cpu(boot_runqueue.cpu_id()) {
-            return failed_condition(
-                LifecycleEvent::Setup,
-                self.lifecycle.state(),
-                State::Base,
-                State::Ready,
-            );
-        }
-        self.cpu_ref = boot_runqueue.cpu_ref();
-        self.thread_context.setup_boot_idle();
-        self.uses_current_init_task = true;
-        self.lazy_tlb_mm_ready = true;
-        self.no_set_affinity = true;
-        self.lifecycle.transition(
-            LifecycleEvent::Setup,
-            State::Base,
-            State::Ready,
-            Checkpoint::BootIdleTaskReady,
-        )
+        self.pi_lock
+            .setup_with_checkpoint(Checkpoint::BootIdlePiLockReady)?;
+        boot_idle_preemption.setup_disabled(init_task)?;
+        self.pi_lock
+            .lock_irqsave(local_interrupt, boot_idle_preemption)?;
+        let guarded_result = (|| {
+            self.init_held_pi_lock = true;
+            boot_runqueue.lock.acquire()?;
+            let runqueue_guarded_result = (|| {
+                self.init_held_runqueue_lock = true;
+                self.task_id = boot_runqueue.idle_task_id();
+                if !self.cpu.set_task_cpu(boot_runqueue.cpu_id()) {
+                    return failed_condition(
+                        LifecycleEvent::Setup,
+                        self.lifecycle.state(),
+                        State::Base,
+                        State::Ready,
+                    );
+                }
+                self.cpu_set_under_rcu_read = true;
+                self.cpu_ref = boot_runqueue.cpu_ref();
+                self.thread_context.setup_boot_idle();
+                self.uses_current_init_task = true;
+                self.lazy_tlb_mm_ready = true;
+                self.no_set_affinity = true;
+                current_task_slot.set_current_boot_idle()?;
+                self.runqueue_current_published_with_rcu = true;
+                self.lifecycle.transition(
+                    LifecycleEvent::Setup,
+                    State::Base,
+                    State::Ready,
+                    Checkpoint::BootIdleTaskReady,
+                )
+            })();
+            let release_result = boot_runqueue.lock.release();
+            runqueue_guarded_result.and(release_result)
+        })();
+        let unlock_result = self
+            .pi_lock
+            .unlock_irqrestore(local_interrupt, boot_idle_preemption);
+        guarded_result.and(unlock_result)
     }
 
     fn save_core_context(&mut self) -> EventResult {
