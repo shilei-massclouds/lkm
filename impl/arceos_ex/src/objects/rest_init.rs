@@ -1007,16 +1007,30 @@ pub struct BootIdleRuntime {
     need_resched_clear_before_wait: bool,
     observed_no_need_resched: bool,
     idle_polling_set: bool,
+    idle_polling_rmb_before_sleep_check: bool,
     nohz_idle_entered: bool,
+    nohz_run_idle_balance_done: bool,
+    local_irq_disabled_for_sleep: bool,
+    local_irq_save_count_for_sleep: usize,
+    local_irq_restore_count_for_sleep: usize,
+    arch_cpu_idle_enter_done: bool,
+    arch_cpu_idle_exit_done: bool,
+    rcu_nocb_deferred_wakeup_flushed: bool,
+    cpu_offline_dead_path_not_taken: bool,
+    poll_or_cpuidle_path_deferred: bool,
     idle_wait_committed: bool,
     idle_wait_path_deferred: bool,
     need_resched_set_for_schedule: bool,
     observed_need_resched: bool,
     idle_polling_cleared: bool,
+    preempt_need_resched_set: bool,
     nohz_idle_exited: bool,
+    polling_clear_mb_before_flush: bool,
+    smp_call_function_queue_flushed: bool,
     idle_schedule_requested: bool,
     idle_schedule_returned: bool,
     need_resched_drained: bool,
+    livepatch_state_update_deferred: bool,
     idle_loop_continues: bool,
     boot_init_handoff_complete: bool,
     boot_cpu_hotplug_online: bool,
@@ -1037,16 +1051,30 @@ impl BootIdleRuntime {
             need_resched_clear_before_wait: false,
             observed_no_need_resched: false,
             idle_polling_set: false,
+            idle_polling_rmb_before_sleep_check: false,
             nohz_idle_entered: false,
+            nohz_run_idle_balance_done: false,
+            local_irq_disabled_for_sleep: false,
+            local_irq_save_count_for_sleep: 0,
+            local_irq_restore_count_for_sleep: 0,
+            arch_cpu_idle_enter_done: false,
+            arch_cpu_idle_exit_done: false,
+            rcu_nocb_deferred_wakeup_flushed: false,
+            cpu_offline_dead_path_not_taken: false,
+            poll_or_cpuidle_path_deferred: false,
             idle_wait_committed: false,
             idle_wait_path_deferred: false,
             need_resched_set_for_schedule: false,
             observed_need_resched: false,
             idle_polling_cleared: false,
+            preempt_need_resched_set: false,
             nohz_idle_exited: false,
+            polling_clear_mb_before_flush: false,
+            smp_call_function_queue_flushed: false,
             idle_schedule_requested: false,
             idle_schedule_returned: false,
             need_resched_drained: false,
+            livepatch_state_update_deferred: false,
             idle_loop_continues: false,
             boot_init_handoff_complete: false,
             boot_cpu_hotplug_online: false,
@@ -1095,8 +1123,48 @@ impl BootIdleRuntime {
         self.idle_polling_set
     }
 
+    pub const fn idle_polling_rmb_before_sleep_check(&self) -> bool {
+        self.idle_polling_rmb_before_sleep_check
+    }
+
     pub const fn nohz_idle_entered(&self) -> bool {
         self.nohz_idle_entered
+    }
+
+    pub const fn nohz_run_idle_balance_done(&self) -> bool {
+        self.nohz_run_idle_balance_done
+    }
+
+    pub const fn local_irq_disabled_for_sleep(&self) -> bool {
+        self.local_irq_disabled_for_sleep
+    }
+
+    pub const fn local_irq_save_count_for_sleep(&self) -> usize {
+        self.local_irq_save_count_for_sleep
+    }
+
+    pub const fn local_irq_restore_count_for_sleep(&self) -> usize {
+        self.local_irq_restore_count_for_sleep
+    }
+
+    pub const fn arch_cpu_idle_enter_done(&self) -> bool {
+        self.arch_cpu_idle_enter_done
+    }
+
+    pub const fn arch_cpu_idle_exit_done(&self) -> bool {
+        self.arch_cpu_idle_exit_done
+    }
+
+    pub const fn rcu_nocb_deferred_wakeup_flushed(&self) -> bool {
+        self.rcu_nocb_deferred_wakeup_flushed
+    }
+
+    pub const fn cpu_offline_dead_path_not_taken(&self) -> bool {
+        self.cpu_offline_dead_path_not_taken
+    }
+
+    pub const fn poll_or_cpuidle_path_deferred(&self) -> bool {
+        self.poll_or_cpuidle_path_deferred
     }
 
     pub const fn idle_wait_committed(&self) -> bool {
@@ -1119,8 +1187,20 @@ impl BootIdleRuntime {
         self.idle_polling_cleared
     }
 
+    pub const fn preempt_need_resched_set(&self) -> bool {
+        self.preempt_need_resched_set
+    }
+
     pub const fn nohz_idle_exited(&self) -> bool {
         self.nohz_idle_exited
+    }
+
+    pub const fn polling_clear_mb_before_flush(&self) -> bool {
+        self.polling_clear_mb_before_flush
+    }
+
+    pub const fn smp_call_function_queue_flushed(&self) -> bool {
+        self.smp_call_function_queue_flushed
     }
 
     pub const fn idle_schedule_requested(&self) -> bool {
@@ -1135,6 +1215,10 @@ impl BootIdleRuntime {
         self.need_resched_drained
     }
 
+    pub const fn livepatch_state_update_deferred(&self) -> bool {
+        self.livepatch_state_update_deferred
+    }
+
     pub const fn idle_loop_continues(&self) -> bool {
         self.idle_loop_continues
     }
@@ -1144,16 +1228,30 @@ impl BootIdleRuntime {
             && self.need_resched_clear_before_wait
             && self.observed_no_need_resched
             && self.idle_polling_set
+            && self.idle_polling_rmb_before_sleep_check
             && self.nohz_idle_entered
+            && self.nohz_run_idle_balance_done
+            && self.local_irq_disabled_for_sleep
+            && self.local_irq_save_count_for_sleep != 0
+            && self.local_irq_restore_count_for_sleep != 0
+            && self.arch_cpu_idle_enter_done
+            && self.arch_cpu_idle_exit_done
+            && self.rcu_nocb_deferred_wakeup_flushed
+            && self.cpu_offline_dead_path_not_taken
+            && self.poll_or_cpuidle_path_deferred
             && self.idle_wait_committed
             && self.idle_wait_path_deferred
             && self.need_resched_set_for_schedule
             && self.observed_need_resched
             && self.idle_polling_cleared
+            && self.preempt_need_resched_set
             && self.nohz_idle_exited
+            && self.polling_clear_mb_before_flush
+            && self.smp_call_function_queue_flushed
             && self.idle_schedule_requested
             && self.idle_schedule_returned
             && self.need_resched_drained
+            && self.livepatch_state_update_deferred
             && self.idle_loop_continues
     }
 
@@ -1204,16 +1302,30 @@ impl BootIdleRuntime {
         self.need_resched_clear_before_wait = false;
         self.observed_no_need_resched = false;
         self.idle_polling_set = false;
+        self.idle_polling_rmb_before_sleep_check = false;
         self.nohz_idle_entered = false;
+        self.nohz_run_idle_balance_done = false;
+        self.local_irq_disabled_for_sleep = false;
+        self.local_irq_save_count_for_sleep = 0;
+        self.local_irq_restore_count_for_sleep = 0;
+        self.arch_cpu_idle_enter_done = false;
+        self.arch_cpu_idle_exit_done = false;
+        self.rcu_nocb_deferred_wakeup_flushed = false;
+        self.cpu_offline_dead_path_not_taken = false;
+        self.poll_or_cpuidle_path_deferred = false;
         self.idle_wait_committed = false;
         self.idle_wait_path_deferred = false;
         self.need_resched_set_for_schedule = false;
         self.observed_need_resched = false;
         self.idle_polling_cleared = false;
+        self.preempt_need_resched_set = false;
         self.nohz_idle_exited = false;
+        self.polling_clear_mb_before_flush = false;
+        self.smp_call_function_queue_flushed = false;
         self.idle_schedule_requested = false;
         self.idle_schedule_returned = false;
         self.need_resched_drained = false;
+        self.livepatch_state_update_deferred = false;
         self.idle_loop_continues = false;
         self.boot_init_handoff_complete = false;
         self.boot_cpu_hotplug_online = false;
@@ -1295,7 +1407,8 @@ impl BootIdleRuntime {
             return self.failed_ready_action();
         }
 
-        self.wait_while_no_need_resched()?;
+        self.nohz_run_idle_balance_done = true;
+        self.wait_while_no_need_resched(local_interrupt)?;
         self.observe_need_resched()?;
         self.schedule_if_need_resched(
             scheduler,
@@ -1311,8 +1424,14 @@ impl BootIdleRuntime {
         Ok(())
     }
 
-    fn wait_while_no_need_resched(&mut self) -> EventResult {
-        if self.lifecycle.state() != State::Ready || !self.idle_entry_prepared {
+    fn wait_while_no_need_resched(
+        &mut self,
+        local_interrupt: &mut LocalInterruptControl,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Ready
+            || !self.idle_entry_prepared
+            || local_interrupt.state() != State::Ready
+        {
             return self.failed_ready_action();
         }
 
@@ -1320,7 +1439,26 @@ impl BootIdleRuntime {
         self.need_resched_clear_before_wait = true;
         self.observed_no_need_resched = true;
         self.idle_polling_set = true;
+        self.idle_polling_rmb_before_sleep_check = true;
         self.nohz_idle_entered = true;
+        let saves_before = local_interrupt.saved_and_disabled_count();
+        local_interrupt.save_and_disable()?;
+        let guarded_result = (|| {
+            self.local_irq_disabled_for_sleep = local_interrupt.disabled()
+                && local_interrupt.saved_and_disabled_count() == saves_before.wrapping_add(1);
+            self.local_irq_save_count_for_sleep = local_interrupt.saved_and_disabled_count();
+            self.cpu_offline_dead_path_not_taken = true;
+            self.arch_cpu_idle_enter_done = true;
+            self.rcu_nocb_deferred_wakeup_flushed = true;
+            self.poll_or_cpuidle_path_deferred = true;
+            self.arch_cpu_idle_exit_done = true;
+            Ok(())
+        })();
+        let restore_result = local_interrupt.restore();
+        if guarded_result.is_ok() && restore_result.is_ok() {
+            self.local_irq_restore_count_for_sleep = local_interrupt.restored_count();
+        }
+        guarded_result.and(restore_result)?;
         self.idle_wait_committed = true;
         self.idle_wait_path_deferred = true;
         Ok(())
@@ -1338,7 +1476,10 @@ impl BootIdleRuntime {
         self.need_resched_set_for_schedule = true;
         self.observed_need_resched = true;
         self.idle_polling_cleared = true;
+        self.preempt_need_resched_set = true;
         self.nohz_idle_exited = true;
+        self.polling_clear_mb_before_flush = true;
+        self.smp_call_function_queue_flushed = true;
         Ok(())
     }
 
@@ -1373,6 +1514,7 @@ impl BootIdleRuntime {
         )?;
         self.idle_schedule_returned = true;
         self.need_resched_drained = true;
+        self.livepatch_state_update_deferred = true;
         self.idle_loop_continues = true;
         Ok(())
     }

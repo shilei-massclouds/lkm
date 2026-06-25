@@ -455,6 +455,11 @@ fn boot_idle_entry_phase_ready(ctx: &Context) -> bool {
         && ctx
             .boot_idle_runtime
             .representative_need_resched_cycle_committed()
+        && ctx.boot_idle_runtime.nohz_run_idle_balance_done()
+        && ctx.boot_idle_runtime.local_irq_disabled_for_sleep()
+        && ctx.boot_idle_runtime.arch_cpu_idle_enter_done()
+        && ctx.boot_idle_runtime.arch_cpu_idle_exit_done()
+        && ctx.boot_idle_runtime.smp_call_function_queue_flushed()
         && ctx.scheduler.idle_schedule_passes() != 0
         && ctx.scheduler.idle_schedule_returned_passes() != 0
         && ctx.boot_idle_runtime.boot_init_handoff_complete()

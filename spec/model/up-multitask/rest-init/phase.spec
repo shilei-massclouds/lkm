@@ -295,6 +295,31 @@ context BootIdleStartupContext: Context {
     }
 }
 
+context BootIdleWaitLocalInterruptContext: Context {
+    /*
+     * do_idle() sets polling and enters tick_nohz_idle_enter(), then each
+     * representative !need_resched wait iteration disables local interrupts
+     * before arch_cpu_idle_enter()/cpuidle path and keeps that closed until
+     * the idle handler returns. This context captures that CPU-local IRQ
+     * disabled window; full cpuidle/poll/WFI details remain deferred.
+     */
+    guard {
+        entered_by {
+            BootCpuLocalInterrupt.Transition::SaveAndDisable;
+        }
+
+        exited_by {
+            BootCpuLocalInterrupt.Transition::Restore;
+        }
+    }
+
+    obj_refs {
+        BootIdleTask;
+        BootIdleRuntime;
+        BootCpuLocalInterrupt;
+    }
+}
+
 /*
  * KernelInitTask 表示 user_mode_thread(kernel_init, NULL, CLONE_FS) 创建的
  * PID 1。它在本阶段变为 Online，但其 kernel_init_freeable() 执行属于下一子阶段。
@@ -1378,6 +1403,20 @@ object BootIdleEntryPhase: PhaseObject {
                         boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
                         boot_idle_task_pf_idle(BootIdleTask);
                         boot_idle_runtime_loop_entered(BootIdleRuntime, BootIdleTask);
+                        boot_idle_nohz_run_idle_balance_done(BootIdleRuntime, BootCPU);
+                        boot_idle_polling_rmb_before_sleep_check(BootIdleTask);
+                        boot_idle_local_irq_disabled_for_sleep(
+                            BootIdleRuntime,
+                            BootCpuLocalInterrupt
+                        );
+                        boot_idle_arch_cpu_idle_enter_done(BootIdleRuntime, BootCPU);
+                        boot_idle_rcu_nocb_deferred_wakeup_flushed(BootIdleRuntime);
+                        boot_idle_cpu_offline_dead_path_not_taken(BootIdleRuntime, BootCPU);
+                        boot_idle_poll_or_cpuidle_path_deferred(BootIdleRuntime);
+                        boot_idle_arch_cpu_idle_exit_done(BootIdleRuntime, BootCPU);
+                        boot_idle_preempt_need_resched_set(BootIdleTask);
+                        boot_idle_polling_clear_mb_before_flush(BootIdleTask);
+                        boot_idle_smp_call_function_queue_flushed(BootIdleRuntime);
                         boot_idle_loop_cycle_committed(BootIdleRuntime);
                         boot_idle_loop_continues(BootIdleRuntime);
                     }
@@ -1391,6 +1430,20 @@ object BootIdleEntryPhase: PhaseObject {
                     boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
                     boot_idle_task_pf_idle(BootIdleTask);
                     boot_idle_runtime_loop_entered(BootIdleRuntime, BootIdleTask);
+                    boot_idle_nohz_run_idle_balance_done(BootIdleRuntime, BootCPU);
+                    boot_idle_polling_rmb_before_sleep_check(BootIdleTask);
+                    boot_idle_local_irq_disabled_for_sleep(
+                        BootIdleRuntime,
+                        BootCpuLocalInterrupt
+                    );
+                    boot_idle_arch_cpu_idle_enter_done(BootIdleRuntime, BootCPU);
+                    boot_idle_rcu_nocb_deferred_wakeup_flushed(BootIdleRuntime);
+                    boot_idle_cpu_offline_dead_path_not_taken(BootIdleRuntime, BootCPU);
+                    boot_idle_poll_or_cpuidle_path_deferred(BootIdleRuntime);
+                    boot_idle_arch_cpu_idle_exit_done(BootIdleRuntime, BootCPU);
+                    boot_idle_preempt_need_resched_set(BootIdleTask);
+                    boot_idle_polling_clear_mb_before_flush(BootIdleTask);
+                    boot_idle_smp_call_function_queue_flushed(BootIdleRuntime);
                     boot_idle_loop_cycle_committed(BootIdleRuntime);
                     boot_idle_loop_continues(BootIdleRuntime);
                     boot_init_task_runtime_handoff_complete(BootInitTask, BootIdleTask);
@@ -1417,6 +1470,10 @@ object BootIdleEntryPhase: PhaseObject {
             boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
             boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
             boot_idle_runtime_loop_entered(BootIdleRuntime, BootIdleTask);
+            boot_idle_nohz_run_idle_balance_done(BootIdleRuntime, BootCPU);
+            boot_idle_local_irq_disabled_for_sleep(BootIdleRuntime, BootCpuLocalInterrupt);
+            boot_idle_preempt_need_resched_set(BootIdleTask);
+            boot_idle_smp_call_function_queue_flushed(BootIdleRuntime);
             boot_idle_loop_continues(BootIdleRuntime);
             task_concurrency_open();
             smp_concurrency_closed();

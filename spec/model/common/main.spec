@@ -538,8 +538,23 @@ predicate boot_idle_need_resched_set_for_schedule<T>(task: T) -> bool;
 predicate boot_idle_need_resched_drained_after_schedule<T>(task: T) -> bool;
 predicate boot_idle_polling_set<T>(task: T) -> bool;
 predicate boot_idle_polling_cleared<T>(task: T) -> bool;
+predicate boot_idle_polling_rmb_before_sleep_check<T>(task: T) -> bool;
+predicate boot_idle_polling_clear_mb_before_flush<T>(task: T) -> bool;
 predicate boot_idle_nohz_entered<T>(runtime: T) -> bool;
 predicate boot_idle_nohz_exited<T>(runtime: T) -> bool;
+predicate boot_idle_nohz_run_idle_balance_done<T, U>(runtime: T, cpu: U) -> bool;
+predicate boot_idle_local_irq_disabled_for_sleep<T, U>(
+    runtime: T,
+    local_interrupt: U
+) -> bool;
+predicate boot_idle_arch_cpu_idle_enter_done<T, U>(runtime: T, cpu: U) -> bool;
+predicate boot_idle_arch_cpu_idle_exit_done<T, U>(runtime: T, cpu: U) -> bool;
+predicate boot_idle_rcu_nocb_deferred_wakeup_flushed<T>(runtime: T) -> bool;
+predicate boot_idle_cpu_offline_dead_path_not_taken<T, U>(runtime: T, cpu: U) -> bool;
+predicate boot_idle_poll_or_cpuidle_path_deferred<T>(runtime: T) -> bool;
+predicate boot_idle_preempt_need_resched_set<T>(task: T) -> bool;
+predicate boot_idle_smp_call_function_queue_flushed<T>(runtime: T) -> bool;
+predicate boot_idle_livepatch_state_update_deferred<T>(runtime: T) -> bool;
 predicate boot_idle_wait_path_deferred<T>(runtime: T) -> bool;
 predicate boot_idle_schedule_requested<T, U>(runtime: T, scheduler: U) -> bool;
 predicate boot_idle_schedule_returned<T, U>(runtime: T, scheduler: U) -> bool;
@@ -1173,6 +1188,7 @@ type BootIdleRuntimeObject: TaskObject {
             }
             ensures {
                 boot_idle_runtime_cycle_started(self, BootIdleTask);
+                boot_idle_nohz_run_idle_balance_done(self, BootCPU);
                 boot_idle_loop_cycle_committed(self);
                 boot_idle_loop_continues(self);
             }
@@ -1186,17 +1202,34 @@ type BootIdleRuntimeObject: TaskObject {
             depends_on {
                 boot_idle_entry_prepared(self, BootIdleTask);
             }
+            within BootIdleWaitLocalInterruptContext {
+                ensures {
+                    boot_idle_local_irq_disabled_for_sleep(self, BootCpuLocalInterrupt);
+                    boot_idle_arch_cpu_idle_enter_done(self, BootCPU);
+                    boot_idle_rcu_nocb_deferred_wakeup_flushed(self);
+                    boot_idle_cpu_offline_dead_path_not_taken(self, BootCPU);
+                    boot_idle_poll_or_cpuidle_path_deferred(self);
+                    boot_idle_arch_cpu_idle_exit_done(self, BootCPU);
+                }
+            }
             ensures {
                 boot_idle_runtime_cycle_started(self, BootIdleTask);
                 boot_idle_need_resched_clear_before_wait(BootIdleTask);
                 boot_idle_runtime_observed_no_need_resched(self, BootIdleTask);
                 boot_idle_polling_set(BootIdleTask);
+                boot_idle_polling_rmb_before_sleep_check(BootIdleTask);
                 boot_idle_nohz_entered(self);
+                boot_idle_local_irq_disabled_for_sleep(self, BootCpuLocalInterrupt);
+                boot_idle_arch_cpu_idle_enter_done(self, BootCPU);
+                boot_idle_rcu_nocb_deferred_wakeup_flushed(self);
+                boot_idle_cpu_offline_dead_path_not_taken(self, BootCPU);
+                boot_idle_poll_or_cpuidle_path_deferred(self);
+                boot_idle_arch_cpu_idle_exit_done(self, BootCPU);
                 boot_idle_runtime_waiting(self, BootIdleTask);
                 boot_idle_wait_path_deferred(self);
             }
             deferred {
-                "WaitWhileNoNeedResched 抽象 Linux do_idle() 中 while (!need_resched()) 的 idle wait 段；tick_nohz_idle_enter、cpu_idle_poll、cpuidle_idle_call、arch_cpu_idle_enter/exit、WFI 和 RCU nocb 细节后续展开。";
+                "WaitWhileNoNeedResched 抽象 Linux do_idle() 中 while (!need_resched()) 的 idle wait 段；当前显式记录 polling rmb、本地中断关闭、arch_cpu_idle_enter/exit、RCU nocb deferred wakeup flush、offline-dead path 未进入和 poll/cpuidle 分支 deferred。cpu_idle_poll、cpuidle_idle_call、WFI、tick broadcast 和完整 context-tracking 细节后续展开。";
             }
         }
 
@@ -1209,7 +1242,10 @@ type BootIdleRuntimeObject: TaskObject {
                 boot_idle_need_resched_set_for_schedule(BootIdleTask);
                 boot_idle_runtime_observed_need_resched(self, BootIdleTask);
                 boot_idle_polling_cleared(BootIdleTask);
+                boot_idle_preempt_need_resched_set(BootIdleTask);
                 boot_idle_nohz_exited(self);
+                boot_idle_polling_clear_mb_before_flush(BootIdleTask);
+                boot_idle_smp_call_function_queue_flushed(self);
             }
             deferred {
                 "need_resched 由本 CPU 可观察环境设置，通常来自唤醒、定时器或跨 CPU 调度请求；当前模型只把该环境结果作为 idle loop 的条件分界事实。";
@@ -1232,6 +1268,7 @@ type BootIdleRuntimeObject: TaskObject {
                 scheduler_idle_schedule_returned_to_idle(Scheduler, CurrentTaskRef);
                 boot_idle_need_resched_drained_after_schedule(BootIdleTask);
                 boot_idle_loop_continues(self);
+                boot_idle_livepatch_state_update_deferred(self);
                 task_ref_targets(CurrentTaskRef, BootIdleTask);
             }
         }
