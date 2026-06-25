@@ -2358,9 +2358,14 @@ type ArceosExRestInitCodingMust {
          * boot CPU runqueue membership or task count must consume read-only
          * membership/count facts projected by CpuOwnedSchedulerView, not
          * re-read Scheduler.boot_runqueue() as the formal observation source.
+         * RestInit task-creation helpers, including TaskCreationCore.copy_process(),
+         * must receive enough CpuGroup context to validate the same formal
+         * boot CPU-owned scheduler view instead of using BootRunQueue state as
+         * an implicit scheduler-ready shortcut.
          */
         arceos_ex_must_expose_boot_cpu_owned_scheduler_view();
         arceos_ex_must_observe_rest_init_runqueue_facts_through_cpu_view();
+        arceos_ex_must_validate_task_creation_through_cpu_owned_scheduler_view();
 
         /*
          * Transitional lowering:

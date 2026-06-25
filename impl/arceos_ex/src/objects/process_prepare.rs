@@ -564,7 +564,10 @@ impl TaskCreationCore {
             || inputs.task_file_context.state() != State::Prepared
             || inputs.security_core.state() != State::Ready
             || inputs.scheduler.state() != State::Online
-            || inputs.scheduler.boot_runqueue().state() != State::Ready
+            || inputs
+                .scheduler
+                .boot_cpu_owned_scheduler_view(inputs.cpu_group)
+                .is_none()
         {
             return Err(EventError::failed(
                 super::state::EventErrorCode::ConditionFailed,
@@ -618,6 +621,7 @@ pub struct TaskCopyProcessInputs<'a> {
     pub task_file_context: &'a TaskFileContext,
     pub security_core: &'a SecurityCore,
     pub scheduler: &'a Scheduler,
+    pub cpu_group: &'a CpuGroup,
     pub entry: TaskEntry,
 }
 
