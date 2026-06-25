@@ -355,6 +355,12 @@ predicate sched_class_skeletons_deferred<T>(scheduler: T) -> bool;
 predicate scheduler_schedule_local_interrupts_closed<T, U>(scheduler: T, local_interrupt: U) -> bool;
 predicate scheduler_schedule_exit_restores_local_interrupts<T, U>(scheduler: T, local_interrupt: U) -> bool;
 predicate scheduler_runqueue_lock_held_for_schedule<T, U>(scheduler: T, runqueue: U) -> bool;
+predicate scheduler_rcu_context_switch_noted<T, U, V>(scheduler: T, prev_ref: U, next_ref: V) -> bool;
+predicate scheduler_rq_lock_mb_after_spinlock<T, U>(scheduler: T, runqueue: U) -> bool;
+predicate scheduler_rq_clock_updated_for_schedule<T, U>(scheduler: T, runqueue: U) -> bool;
+predicate scheduler_need_resched_cleared<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_rq_curr_published_rcu<T, U, V>(scheduler: T, runqueue: U, next_ref: V) -> bool;
+predicate scheduler_trace_sched_switch_emitted<T, U, V>(scheduler: T, prev_ref: U, next_ref: V) -> bool;
 predicate scheduler_possible_cpu_runqueues_ready<T, U>(scheduler: T, cpu_group: U) -> bool;
 predicate scheduler_possible_cpu_runqueues_attached_to_default_root_domain<T, U, V>(
     scheduler: T,
@@ -369,6 +375,12 @@ predicate scheduler_switch_to_committed<T, U, V>(scheduler: T, prev_ref: U, next
 predicate scheduler_switch_to_identity_path<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_switch_to_core_context_saved<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_switch_to_core_context_restored<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_prepare_task_switch_done<T, U, V, W>(scheduler: T, runqueue: U, prev_ref: V, next_ref: W) -> bool;
+predicate scheduler_finish_task_switch_done<T, U, V>(scheduler: T, runqueue: U, prev_ref: V) -> bool;
+predicate scheduler_finish_task_switch_releases_rq_lock<T, U>(scheduler: T, runqueue: U) -> bool;
+predicate scheduler_finish_task_switch_restores_preempt_count<T, U>(scheduler: T, task_ref: U) -> bool;
+predicate scheduler_switch_mm_or_lazy_tlb_deferred<T>(scheduler: T) -> bool;
+predicate scheduler_membarrier_switch_barrier_deferred<T>(scheduler: T) -> bool;
 predicate scheduler_idle_mode_used<T>(scheduler: T) -> bool;
 predicate scheduler_idle_schedule_committed<T, U>(scheduler: T, task_ref: U) -> bool;
 predicate scheduler_idle_schedule_returned_to_idle<T, U>(scheduler: T, task_ref: U) -> bool;
@@ -963,11 +975,33 @@ type SchedulerObject: TaskObject {
                         ensures {
                             scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
                             scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
+                            scheduler_rcu_context_switch_noted(self, CurrentTaskRef, KernelInitTaskRef);
+                            scheduler_rq_lock_mb_after_spinlock(self, BootRunQueue);
+                            scheduler_rq_clock_updated_for_schedule(self, BootRunQueue);
                             scheduler_pick_next_task_selects_runnable(self, BootRunQueue, KernelInitTaskRef);
                             runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, KernelInitTaskRef);
+                            scheduler_need_resched_cleared(self, CurrentTaskRef);
+                            scheduler_rq_curr_published_rcu(self, BootRunQueue, KernelInitTaskRef);
+                            scheduler_trace_sched_switch_emitted(self, CurrentTaskRef, KernelInitTaskRef);
                             scheduler_switch_to_committed(self, CurrentTaskRef, KernelInitTaskRef);
                             scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
                             scheduler_switch_to_core_context_restored(self, KernelInitTaskRef);
+                            scheduler_prepare_task_switch_done(
+                                self,
+                                BootRunQueue,
+                                CurrentTaskRef,
+                                KernelInitTaskRef
+                            );
+                            scheduler_finish_task_switch_done(
+                                self,
+                                BootRunQueue,
+                                CurrentTaskRef
+                            );
+                            scheduler_finish_task_switch_releases_rq_lock(self, BootRunQueue);
+                            scheduler_finish_task_switch_restores_preempt_count(
+                                self,
+                                KernelInitTaskRef
+                            );
                             task_ref_targets(KernelInitTaskRef, KernelInitTask);
                             task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
                             current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
@@ -980,11 +1014,28 @@ type SchedulerObject: TaskObject {
                 scheduler_schedule_local_interrupts_closed(self, BootCpuLocalInterrupt);
                 scheduler_runqueue_lock_held_for_schedule(self, BootRunQueue);
                 scheduler_schedule_exit_restores_local_interrupts(self, BootCpuLocalInterrupt);
+                scheduler_rcu_context_switch_noted(self, CurrentTaskRef, KernelInitTaskRef);
+                scheduler_rq_lock_mb_after_spinlock(self, BootRunQueue);
+                scheduler_rq_clock_updated_for_schedule(self, BootRunQueue);
                 scheduler_pick_next_task_selects_runnable(self, BootRunQueue, KernelInitTaskRef);
                 runqueue_pick_next_task_returns(CurrentRunQueueRef, CurrentTaskRef, KernelInitTaskRef);
+                scheduler_need_resched_cleared(self, CurrentTaskRef);
+                scheduler_rq_curr_published_rcu(self, BootRunQueue, KernelInitTaskRef);
+                scheduler_trace_sched_switch_emitted(self, CurrentTaskRef, KernelInitTaskRef);
                 scheduler_switch_to_committed(self, CurrentTaskRef, KernelInitTaskRef);
                 scheduler_switch_to_core_context_saved(self, CurrentTaskRef);
                 scheduler_switch_to_core_context_restored(self, KernelInitTaskRef);
+                scheduler_prepare_task_switch_done(
+                    self,
+                    BootRunQueue,
+                    CurrentTaskRef,
+                    KernelInitTaskRef
+                );
+                scheduler_finish_task_switch_done(self, BootRunQueue, CurrentTaskRef);
+                scheduler_finish_task_switch_releases_rq_lock(self, BootRunQueue);
+                scheduler_finish_task_switch_restores_preempt_count(self, KernelInitTaskRef);
+                scheduler_switch_mm_or_lazy_tlb_deferred(self);
+                scheduler_membarrier_switch_barrier_deferred(self);
                 task_ref_targets(KernelInitTaskRef, KernelInitTask);
                 task_ref_loaded_into_current_cpu(KernelInitTaskRef, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
@@ -1032,14 +1083,20 @@ type SchedulerObject: TaskObject {
                 CurrentTaskRef.Action::SetCurrent(task: next_ref);
             }
             ensures {
+                scheduler_prepare_task_switch_done(self, BootRunQueue, prev_ref, next_ref);
                 scheduler_switch_to_committed(self, prev_ref, next_ref);
                 scheduler_switch_to_core_context_saved(self, prev_ref);
                 scheduler_switch_to_core_context_restored(self, next_ref);
+                scheduler_finish_task_switch_done(self, BootRunQueue, prev_ref);
+                scheduler_finish_task_switch_releases_rq_lock(self, BootRunQueue);
+                scheduler_finish_task_switch_restores_preempt_count(self, next_ref);
+                scheduler_switch_mm_or_lazy_tlb_deferred(self);
+                scheduler_membarrier_switch_barrier_deferred(self);
                 task_ref_loaded_into_current_cpu(next_ref, BootCurrentCPU);
                 current_task_ref_updated_by_switch(BootCurrentCPU, prev_ref, next_ref);
             }
             deferred {
-                "当前 SwitchTo 只建立 RISC-V __switch_to 核心寄存器保存/恢复框架和 CurrentTaskRef commit；真实栈切换、next task 上下文恢复、last 返回值、FPU/vector、MM 切换、finish_task_switch 钩子和长期任务 continuation 后续展开。";
+                "当前 SwitchTo 只建立 RISC-V __switch_to 核心寄存器保存/恢复框架、prepare_task_switch/finish_task_switch 边界和 CurrentTaskRef commit；真实栈切换、next task 上下文恢复、last 返回值、FPU/vector、MM/lazy-TLB/membarrier 细节、finish_task_switch 具体钩子和长期任务 continuation 后续展开。";
             }
         }
 

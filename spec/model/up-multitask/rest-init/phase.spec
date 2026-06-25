@@ -1278,6 +1278,26 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                 ensures {
                     boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
                     scheduler_first_schedule_committed(Scheduler);
+                    scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
+                    scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
+                    scheduler_rq_clock_updated_for_schedule(Scheduler, BootRunQueue);
+                    scheduler_need_resched_cleared(Scheduler, CurrentTaskRef);
+                    scheduler_rq_curr_published_rcu(Scheduler, BootRunQueue, KernelInitTaskRef);
+                    scheduler_trace_sched_switch_emitted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
+                    scheduler_prepare_task_switch_done(
+                        Scheduler,
+                        BootRunQueue,
+                        CurrentTaskRef,
+                        KernelInitTaskRef
+                    );
+                    scheduler_finish_task_switch_done(Scheduler, BootRunQueue, CurrentTaskRef);
+                    scheduler_finish_task_switch_releases_rq_lock(Scheduler, BootRunQueue);
+                    scheduler_finish_task_switch_restores_preempt_count(
+                        Scheduler,
+                        KernelInitTaskRef
+                    );
+                    scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
+                    scheduler_membarrier_switch_barrier_deferred(Scheduler);
                     kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
                     current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
                     task_concurrency_open();
@@ -1298,6 +1318,23 @@ object BootInitScheduleHandoffPhase: PhaseObject {
             BootInitRestInitPhase.state == State::Ready;
             boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
             scheduler_first_schedule_committed(Scheduler);
+            scheduler_rcu_context_switch_noted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
+            scheduler_rq_lock_mb_after_spinlock(Scheduler, BootRunQueue);
+            scheduler_rq_clock_updated_for_schedule(Scheduler, BootRunQueue);
+            scheduler_need_resched_cleared(Scheduler, CurrentTaskRef);
+            scheduler_rq_curr_published_rcu(Scheduler, BootRunQueue, KernelInitTaskRef);
+            scheduler_trace_sched_switch_emitted(Scheduler, CurrentTaskRef, KernelInitTaskRef);
+            scheduler_prepare_task_switch_done(
+                Scheduler,
+                BootRunQueue,
+                CurrentTaskRef,
+                KernelInitTaskRef
+            );
+            scheduler_finish_task_switch_done(Scheduler, BootRunQueue, CurrentTaskRef);
+            scheduler_finish_task_switch_releases_rq_lock(Scheduler, BootRunQueue);
+            scheduler_finish_task_switch_restores_preempt_count(Scheduler, KernelInitTaskRef);
+            scheduler_switch_mm_or_lazy_tlb_deferred(Scheduler);
+            scheduler_membarrier_switch_barrier_deferred(Scheduler);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             task_concurrency_open();
             smp_concurrency_closed();
