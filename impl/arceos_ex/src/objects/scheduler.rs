@@ -213,6 +213,50 @@ impl Scheduler {
             && runqueue.balance_push_enabled() == self.boot_runqueue.balance_push_enabled()
     }
 
+    pub fn boot_cpu_owned_scheduler_view(
+        &self,
+        cpu_group: &CpuGroup,
+    ) -> Option<CpuOwnedSchedulerView> {
+        let boot_cpu = cpu_group.boot_cpu()?;
+        let runqueue = self.cpu_runqueue(boot_cpu.logical_id())?;
+        let idle_task = self.boot_idle_task.view()?;
+        if cpu_group.state() != State::Ready
+            || !boot_cpu.cpu_ref().is_boot_cpu()
+            || !self.boot_runqueue_matches_metadata()
+            || !self
+                .boot_idle_task
+                .is_boot_cpu_idle_task_view(cpu_group, &self.boot_runqueue)
+            || runqueue.cpu_ref() != boot_cpu.cpu_ref()
+            || runqueue.cpu_hartid() != boot_cpu.hartid()
+            || idle_task.cpu_ref() != boot_cpu.cpu_ref()
+            || idle_task.cpu_id() != boot_cpu.logical_id()
+        {
+            return None;
+        }
+
+        Some(CpuOwnedSchedulerView {
+            cpu_ref: boot_cpu.cpu_ref(),
+            cpu_hartid: boot_cpu.hartid(),
+            runqueue,
+            idle_task,
+            runqueue_current_task_id: self.boot_runqueue.curr_task_id(),
+            runqueue_idle_task_id: self.boot_runqueue.idle_task_id(),
+        })
+    }
+
+    pub fn boot_cpu_owned_scheduler_view_ready(&self, cpu_group: &CpuGroup) -> bool {
+        let Some(view) = self.boot_cpu_owned_scheduler_view(cpu_group) else {
+            return false;
+        };
+        view.runqueue().state() == State::Ready
+            && view.runqueue().is_boot_backed()
+            && view.idle_task().state() == State::Ready
+            && view.runqueue_idle_task_matches()
+            && view.idle_task().uses_current_init_task()
+            && view.idle_task().lazy_tlb_mm_ready()
+            && view.idle_task().no_set_affinity()
+    }
+
     pub fn boot_idle_preemption_mut(&mut self) -> &mut PreemptionControl {
         &mut self.boot_idle_preemption
     }
@@ -1065,6 +1109,7 @@ impl Scheduler {
             && self.boot_idle_preemption.disabled()
             && self.possible_cpu_runqueues_ready(cpu_group)
             && self.boot_runqueue_matches_metadata()
+            && self.boot_cpu_owned_scheduler_view_ready(cpu_group)
             && self.boot_runqueue.cpu_ref().is_boot_cpu()
             && cpu_group
                 .boot_cpu()
@@ -1241,6 +1286,94 @@ impl CpuRunQueueView {
 
     pub const fn is_boot_backed(self) -> bool {
         self.boot_backed
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CpuOwnedSchedulerView {
+    cpu_ref: CpuRef,
+    cpu_hartid: usize,
+    runqueue: CpuRunQueueView,
+    idle_task: CpuIdleTaskView,
+    runqueue_current_task_id: usize,
+    runqueue_idle_task_id: usize,
+}
+
+impl CpuOwnedSchedulerView {
+    pub const fn cpu_ref(self) -> CpuRef {
+        self.cpu_ref
+    }
+
+    pub const fn cpu_id(self) -> usize {
+        self.cpu_ref.logical_id()
+    }
+
+    pub const fn cpu_hartid(self) -> usize {
+        self.cpu_hartid
+    }
+
+    pub const fn runqueue(self) -> CpuRunQueueView {
+        self.runqueue
+    }
+
+    pub const fn idle_task(self) -> CpuIdleTaskView {
+        self.idle_task
+    }
+
+    pub const fn runqueue_current_task_id(self) -> usize {
+        self.runqueue_current_task_id
+    }
+
+    pub const fn runqueue_idle_task_id(self) -> usize {
+        self.runqueue_idle_task_id
+    }
+
+    pub const fn runqueue_idle_task_matches(self) -> bool {
+        self.runqueue.cpu_ref().logical_id() == self.idle_task.cpu_id()
+            && self.runqueue.cpu_ref().logical_id() == self.cpu_ref.logical_id()
+            && self.runqueue_idle_task_id == self.idle_task.task_id()
+            && self.runqueue_current_task_id == self.idle_task.task_id()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CpuIdleTaskView {
+    state: State,
+    task_id: usize,
+    cpu_ref: CpuRef,
+    cpu_id: usize,
+    uses_current_init_task: bool,
+    lazy_tlb_mm_ready: bool,
+    no_set_affinity: bool,
+}
+
+impl CpuIdleTaskView {
+    pub const fn state(self) -> State {
+        self.state
+    }
+
+    pub const fn task_id(self) -> usize {
+        self.task_id
+    }
+
+    pub const fn cpu_ref(self) -> CpuRef {
+        self.cpu_ref
+    }
+
+    pub const fn cpu_id(self) -> usize {
+        self.cpu_id
+    }
+
+    pub const fn uses_current_init_task(self) -> bool {
+        self.uses_current_init_task
+    }
+
+    pub const fn lazy_tlb_mm_ready(self) -> bool {
+        self.lazy_tlb_mm_ready
+    }
+
+    pub const fn no_set_affinity(self) -> bool {
+        self.no_set_affinity
     }
 }
 
@@ -1832,6 +1965,26 @@ impl BootIdleTask {
 
     pub const fn thread_context(&self) -> &TaskThreadContext {
         &self.thread_context
+    }
+
+    pub fn view(&self) -> Option<CpuIdleTaskView> {
+        if self.lifecycle.state() != State::Ready
+            || self.task_id == usize::MAX
+            || self.cpu_ref == CpuRef::invalid()
+            || self.cpu.cpu_id() == usize::MAX
+        {
+            return None;
+        }
+
+        Some(CpuIdleTaskView {
+            state: self.lifecycle.state(),
+            task_id: self.task_id,
+            cpu_ref: self.cpu_ref,
+            cpu_id: self.cpu.cpu_id(),
+            uses_current_init_task: self.uses_current_init_task,
+            lazy_tlb_mm_ready: self.lazy_tlb_mm_ready,
+            no_set_affinity: self.no_set_affinity,
+        })
     }
 
     pub fn is_boot_cpu_idle_task_view(

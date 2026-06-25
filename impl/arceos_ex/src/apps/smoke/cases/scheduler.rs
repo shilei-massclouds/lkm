@@ -51,6 +51,7 @@ pub fn run() -> SmokeResult {
             .scheduler
             .boot_idle_task()
             .is_boot_cpu_idle_task_view(&ctx.cpu_group, ctx.scheduler.boot_runqueue())
+        || !boot_cpu_owned_scheduler_view_matches()
         || !scheduler_possible_runqueues_match_cpu_group()
         || ctx.scheduler.default_root_domain().covered_cpu_count()
             != ctx.cpu_group.possible_cpu_count()
@@ -171,4 +172,39 @@ fn scheduler_possible_runqueues_match_cpu_group() -> bool {
     ctx.scheduler
         .cpu_runqueue(ctx.cpu_group.possible_cpu_count())
         .is_none()
+}
+
+fn boot_cpu_owned_scheduler_view_matches() -> bool {
+    let ctx = context();
+    if !ctx
+        .scheduler
+        .boot_cpu_owned_scheduler_view_ready(&ctx.cpu_group)
+    {
+        return false;
+    }
+
+    let Some(view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group) else {
+        return false;
+    };
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        return false;
+    };
+    let runqueue = view.runqueue();
+    let idle_task = view.idle_task();
+
+    view.cpu_ref() == boot_cpu.cpu_ref()
+        && view.cpu_id() == boot_cpu.logical_id()
+        && view.cpu_hartid() == boot_cpu.hartid()
+        && runqueue.cpu_ref() == boot_cpu.cpu_ref()
+        && runqueue.cpu_hartid() == boot_cpu.hartid()
+        && runqueue.is_boot_backed()
+        && idle_task.cpu_ref() == boot_cpu.cpu_ref()
+        && idle_task.cpu_id() == boot_cpu.logical_id()
+        && idle_task.task_id() == ctx.scheduler.boot_idle_task().task_id()
+        && view.runqueue_current_task_id() == idle_task.task_id()
+        && view.runqueue_idle_task_id() == idle_task.task_id()
+        && view.runqueue_idle_task_matches()
+        && idle_task.uses_current_init_task()
+        && idle_task.lazy_tlb_mm_ready()
+        && idle_task.no_set_affinity()
 }

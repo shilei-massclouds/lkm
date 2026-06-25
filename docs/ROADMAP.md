@@ -36,13 +36,17 @@
 
 ### 最高优先级：状态机术语与 guard lowering 策略收敛
 
-进入 `SchedInitPhase` 审计前，先收敛两个全局语义问题，避免后续阶段继续沿用容易混淆的旧术语和过早的 guard 优化假设。
+全局语义收敛已经完成，当前恢复 `SchedInitPhase` 审计。
 
-1. **P0 当前：完成 `.spec` 与工具链向 `Transition` 的硬迁移**。目标是删除对象 process 语法中的旧事件命名，不再保留兼容入口：对象状态转移块统一写作 `transitions`，状态推进统一写作 `Transition`，对象驱动引用统一写作 `Object.Transition::Name`；`Action::X` 保持不变，真正外部事件、硬件事件和 trace event 的自然语言用法可保留但不得再表示对象 process。执行顺序：先更新 parser/AST/model JSON/derive/view/render 内部 schema 和默认 target，再一次性迁移 `spec/**/*.spec`、工具测试 fixture、文档和 trace/render 期望；随后删除旧 parser 兼容并加入负向测试，确保旧对象过程语法在正式规格中不再通过。验收必须包括工具单测、`make verify`、`make test`、`make run` 和普通 `make run APP=user-boot`；不得用 `PROBE=user-boot` 或 `PROBE=virtio-blk` 替代普通 user-boot 验证。
+1. **P0 已完成：完成 `.spec` 与工具链向 `Transition` 的硬迁移**。对象 process 语法中的旧事件命名已删除，不再保留兼容入口：对象状态转移块统一写作 `transitions`，状态推进统一写作 `Transition`，对象驱动引用统一写作 `Object.Transition::Name`；`Action::X` 保持不变，真正外部事件、硬件事件和 trace event 的自然语言用法可保留但不得再表示对象 process。已更新 parser/AST/model JSON/derive/view/render 内部 schema、默认 target、`spec/**/*.spec`、工具测试 fixture、文档和 trace/render 期望，并删除旧 parser 兼容。
 2. **P0 已完成：规范化状态机概念和术语**。`spec/charter/main.md` 与 `spec/model/SEMANTICS.md` 已把核心术语收敛为：`State` 表示生命周期状态，`Transition` 表示改变生命周期状态或扩展状态的转移过程，`Action` 表示不改变当前被建模状态的操作，`Event` 保留给真实外部事件、异步事件、硬件事件或 trace event。当前 P0 将完成 `.spec` 源语法和工具 schema 的硬迁移。
 3. **P0 已完成：暂缓基于 Effective Context 的 guard 优化省略**。`BootPhaseContext` / Effective Context 只提供当前调用点的上下文事实，不再作为默认省略 protocol guard 的依据。已保留 parser/model 对 `within ... only-once` 的支持能力，但从正式规格使用点移除了 `only-once` 标记；当前 guard lowering 按非优化路径执行，除非某个 guard 本身就是无运行时代码的纯上下文事实。
 4. **P0 已完成：同步 model/coding 规则和现有说明**。`spec/coding/arceos_ex.spec` 已明确现阶段不依赖 `only-once` 做 guard 省略；CorePrepare 中 `ResourceLock`、`CpuHotplugLock`、`JumpLabelMutex` 和 `PrintkBuffer` 的实现映射已切换为保守执行/保留协议边界，正式模型中的 proof-only predicate 残留已移除。
-5. **P0 已完成：验证并提交后再恢复启动阶段审计**。本轮已运行 `make verify`、`make -C impl/arceos_ex build APP=smoke`、`make -C impl/arceos_ex run APP=smoke` 和 `git diff --check`。提交后继续 `/tmp/sched_init_audit_steps.md` 中的 `SchedInitPhase` 第 1 步。
+5. **P0 已完成：验证并提交后再恢复启动阶段审计**。Transition 硬迁移已运行工具单测、`make verify`、`make test`、`make run`、普通 `make run APP=user-boot` 和 `git diff --check`，提交为 `c86a5d2`。本轮继续 `/tmp/sched_init_audit_steps.md` 中的 `SchedInitPhase` 第 1 步。
+6. **P0 已完成首轮：确认 `SchedInitPhase` Linux 边界与 `default_config` 分类**。已固定 `start_kernel()` 中 `mm_core_init()` 返回后到 `context_tracking_init()` 后的调用边界，并明确 `early_irq_init()` 是下一阶段入口；`poking_init()`、`ftrace_init()`、`early_trace_init()`、`sched_init()`、IRQ-disabled check、`radix_tree_init()`、`maple_tree_init()`、`housekeeping_init()`、`workqueue_init_early()`、`rcu_init()`、`trace_init()`、`initcall_debug_enable()` 和 `context_tracking_init()` 已按当前 `linux-6.12.37/default_config` 分类为 formal、checkpoint、trimmed/no-op 或 deferred，初审结论记录在 `/tmp/sched_init_audit_steps.md`。
+7. **P0 已完成首轮：收敛 `CpuGroup` 与 `DefaultSchedRootDomain` 规格/实现**。已在 charter、model 和 coding 中明确：每个 logical CPU 对应统一 `Cpu` 类型实例，`CpuGroup` 维护 logical-id 到 `CpuRef` 的索引以及 possible/present/online set 视图；`DefaultSchedRootDomain` 是 Scheduler 的调度覆盖视图，覆盖 `CpuGroup.possible_cpus` 的 `CpuRef` 集合，不拥有 CPU 本体。实现侧已移除独立 `CpuIdMap`，并新增 `DefaultSchedRootDomain` 代码文件和 smoke 覆盖。
+8. **P0 已完成首轮：建立 possible CPU runqueue 元数据视图**。提交 `fe05d3a` 已让 `Scheduler` 按 logical-id 暴露 possible CPU runqueue metadata：logical-id 0 与 `BootRunQueue` 对齐，其它 possible CPU 只建立 runqueue 元数据和 root-domain attach 事实，不创建 AP CurrentCPU 或 runnable AP flow。smoke 已覆盖 `CpuGroup`、`DefaultSchedRootDomain` 和 runqueue 元数据的一致性。
+9. **P0 当前：继续落实 CPU-owned RunQueue/IdleTask lowering**。在既有规格约束下，下一步先为 boot CPU 暴露 `CpuGroup.Cpu[0].RunQueue` / `CpuGroup.Cpu[0].IdleTask` 的正式可查询视图，并用 smoke 固定 runqueue idle 指针与 `BootIdleTask` 的关系；secondary idle task 仍留给 SMP bringup，不在本步提前迁移。
 
 ### 已完成专题：Effective Context 与 CorePrepare 同步原语缺口
 
