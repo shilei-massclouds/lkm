@@ -118,6 +118,29 @@ context BootIdleRcuReadSideContext: Context {
     }
 }
 
+context RcuSchedulerStartingLocalIrqContext: Context {
+    /*
+     * rest_init() calls rcu_scheduler_starting() with local IRQs saved while
+     * it updates the scheduler-active state and synchronizes the RCU GP
+     * sequence baseline for the single boot CPU that is online at this point.
+     */
+    guard {
+        entered_by {
+            BootCpuLocalInterrupt.Transition::SaveAndDisable;
+        }
+
+        exited_by {
+            BootCpuLocalInterrupt.Transition::Restore;
+        }
+    }
+
+    obj_refs {
+        RcuCore;
+        BootCpuLocalInterrupt;
+        CpuGroup;
+    }
+}
+
 context BitWaitQueueTableInitContext: Context {
     /*
      * wait_bit_init() runs as a boot-time initialization loop before
@@ -1310,6 +1333,48 @@ object RcuCore: TaskObject {
             rcu_pm_notifier_registered(RcuCore);
             rcu_gp_threads_deferred(RcuCore);
             rcu_runtime_read_side_full_semantics_deferred(RcuCore);
+        }
+    }
+
+    actions {
+        /*
+         * SchedulerStarting 对应 rest_init() 开头的
+         * rcu_scheduler_starting()。它是 RcuCore.Ready 内的运行期 action，
+         * 不推进 RcuCore lifecycle；Linux 在 local_irq_save/restore 区内
+         * 设置 RCU_SCHEDULER_INIT 并同步 GP 序号基线。
+         */
+        Action::SchedulerStarting {
+            state_effect: StateEffect::None;
+            depends_on {
+                self.state == State::Ready;
+                BootCpuLocalInterrupt.state == State::Ready;
+                CpuGroup.state == State::Ready;
+                rcu_core_ready(self, CpuGroup);
+                rcu_boot_cpu_online_ready(self, BootCPU);
+            }
+
+            within RcuSchedulerStartingLocalIrqContext {
+                ensures {
+                    cpu_local_interrupts_saved_and_disabled(BootCpuLocalInterrupt);
+                    cpu_local_interrupts_restored(BootCpuLocalInterrupt);
+                    rcu_scheduler_starting_local_irq_guard_used(self, BootCpuLocalInterrupt);
+                    rcu_scheduler_starting_gp_seq_update_guarded(self);
+                    rcu_scheduler_starting_ready(self);
+                    rcu_scheduler_active_level_init(self);
+                    rcu_single_online_cpu_at_scheduler_start(self, CpuGroup);
+                    rcu_gp_seq_baseline_synced(self);
+                }
+            }
+
+            ensures {
+                rcu_scheduler_starting_ready(self);
+                rcu_scheduler_active_level_init(self);
+                rcu_single_online_cpu_at_scheduler_start(self, CpuGroup);
+                rcu_gp_seq_baseline_synced(self);
+                rcu_scheduler_starting_local_irq_guard_used(self, BootCpuLocalInterrupt);
+                rcu_scheduler_starting_gp_seq_update_guarded(self);
+                rcu_gp_threads_deferred(self);
+            }
         }
     }
 }

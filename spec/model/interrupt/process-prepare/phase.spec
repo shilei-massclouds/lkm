@@ -292,6 +292,10 @@ object TaskCreationCore: TaskObject {
                     task_creation_copy_process_committed(TaskCreationCore, src_task, dst_task);
                     task_creation_used_clone_args(TaskCreationCore, dst_task);
                     task_creation_bound_entry(TaskCreationCore, dst_task, entry);
+                    task_creation_copy_process_sighand_siglock_deferred(TaskCreationCore);
+                    task_creation_copy_process_tasklist_lock_deferred(TaskCreationCore);
+                    task_creation_copy_process_pidmap_lock_deferred(TaskCreationCore);
+                    task_creation_copy_process_sched_fork_locks_deferred(TaskCreationCore);
                     task_struct_allocated(dst_task);
                     task_duplicated_from(dst_task, src_task);
                     task_pid_allocated(dst_task, pid_ns);
@@ -303,6 +307,10 @@ object TaskCreationCore: TaskObject {
                     task_sched_entity_initialized(dst_task, scheduler);
                     task_state_new(dst_task);
                     task_not_enqueued(dst_task);
+                }
+
+                deferred {
+                    "copy_process() 内部的 current->sighand->siglock、tasklist_lock、PID allocator/pidmap 锁、cgroup/cred/file/fs/mm 引用同步和 sched_fork()/PI 初始化锁属于 TaskCreationCore 的共享创建协议，后续在 TaskCreationCore 内展开；rest_init 子阶段只消费 CopyProcess 的成功提交结果。";
                 }
             }
         }

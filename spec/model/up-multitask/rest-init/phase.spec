@@ -17,6 +17,7 @@
 
 lock KernelInitTaskPiLock: RawSpinLock;
 lock KthreaddTaskPiLock: RawSpinLock;
+lock KthreaddReadyGateWaitLock: RawSpinLock;
 
 context WakeUpNewTaskContext: ResourceExclusiveContext {
     guard {
@@ -84,6 +85,80 @@ context EnqueueSelectedRunQueueContext: ResourceExclusiveContext {
 
     obj_refs {
         BootRunQueue;
+    }
+}
+
+context KernelInitPidLookupRcuReadSideContext: Context {
+    /*
+     * rest_init() re-finds PID 1 with find_task_by_pid_ns() while holding an
+     * RCU read-side critical section before setting PF_NO_SETAFFINITY and the
+     * temporary boot-CPU affinity mask.
+     */
+    guard {
+        lock_ref: BootIdleRcuReadSide;
+
+        entered_by {
+            BootIdleRcuReadSide.Transition::ReadLock;
+        }
+
+        exited_by {
+            BootIdleRcuReadSide.Transition::ReadUnlock;
+        }
+    }
+
+    obj_refs {
+        KernelInitTask;
+        RootPidNamespace;
+        BootIdleRcuReadSide;
+    }
+}
+
+context KthreaddPidLookupRcuReadSideContext: Context {
+    /*
+     * rest_init() publishes kthreadd_task after a second
+     * find_task_by_pid_ns() lookup protected by rcu_read_lock()/unlock().
+     */
+    guard {
+        lock_ref: BootIdleRcuReadSide;
+
+        entered_by {
+            BootIdleRcuReadSide.Transition::ReadLock;
+        }
+
+        exited_by {
+            BootIdleRcuReadSide.Transition::ReadUnlock;
+        }
+    }
+
+    obj_refs {
+        KthreaddTask;
+        RootPidNamespace;
+        BootIdleRcuReadSide;
+    }
+}
+
+context KthreaddReadyGateWaitLockContext: ResourceExclusiveContext {
+    /*
+     * complete(&kthreadd_done) takes the completion wait queue lock with
+     * irqsave, increments done, wakes one waiter and then unlocks/restores.
+     * The generic Completion Type records token and wake-one semantics; this
+     * rest_init instance supplies the concrete wait.lock guard.
+     */
+    guard {
+        lock_ref: KthreaddReadyGateWaitLock;
+
+        entered_by {
+            KthreaddReadyGateWaitLock.Transition::LockIrqSave;
+        }
+
+        exited_by {
+            KthreaddReadyGateWaitLock.Transition::UnlockIrqRestore;
+        }
+    }
+
+    obj_refs {
+        KthreaddReadyGate;
+        KernelInitTask;
     }
 }
 
@@ -180,8 +255,11 @@ context ScheduleRunQueueContext: ResourceExclusiveContext {
  * 本文件中的 rest_init 相关同步边界均应保持为 within 或通用 Type process：
  * wake_up_new_task() 路径用 WakeUpNewTaskContext / WakeUpKthreaddTaskContext
  * 包住 p->pi_lock irqsave 区，并在其中嵌套 EnqueueSelectedRunQueueContext
- * 表达 BootRunQueueLock irqsave 区；kthreadd_done 使用 Completion Type 的
- * Complete process；BootIdleStartupContext 覆盖整个 BootIdleEntryPhase。
+ * 表达 BootRunQueueLock irqsave 区；PID lookup 使用
+ * KernelInitPidLookupRcuReadSideContext / KthreaddPidLookupRcuReadSideContext
+ * 表达 rcu_read_lock()/unlock() 读侧边界；kthreadd_done 使用
+ * KthreaddReadyGateWaitLockContext 包住 Completion Type 的 Complete process；
+ * BootIdleStartupContext 覆盖整个 BootIdleEntryPhase。
  */
 
 context BootIdleStartupContext: Context {
@@ -259,9 +337,8 @@ context BootIdleStartupContext: Context {
  * lifecycle object，而是 KernelInitTask 的属性 action；源码中的
  * find_task_by_pid_ns(pid, &init_pid_ns) 只是用 pid 重新取回 task 指针，
  * 规格层已经通过 KernelInitTask receiver 持有目标 task。该 action 当前
- * 直接提交 flags 和 cpumask 属性。Linux 路径处在 rcu_read_lock()/unlock()
- * 定界的读侧上下文中；该上下文是否归入资源独占上下文，还是应建模为
- * 单独的 RCU/读侧上下文，后续讨论。
+ * 直接提交 flags 和 cpumask 属性，并用 KernelInitPidLookupRcuReadSideContext
+ * 表达 Linux rcu_read_lock()/unlock() 定界的读侧上下文。
  */
 object KernelInitTask: Task {
     initial_state: State::Base;
@@ -394,6 +471,7 @@ object KernelInitTask: Task {
                         task_state_new(KernelInitTask);
                         task_not_enqueued(KernelInitTask);
                         current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                        BootRunQueue.state == State::Ready;
                     }
 
                     drives {
@@ -428,6 +506,11 @@ object KernelInitTask: Task {
                         task_runqueue_selected(Scheduler, KernelInitTaskRef, BootRunQueueRef);
                         task_cpu_ref_is(KernelInitTask, BootCPURef);
                         task_enqueued_on_runqueue(KernelInitTaskRef, BootRunQueueRef);
+                        task_wakeup_new_rq_clock_updated(KernelInitTask, BootRunQueue);
+                        task_wakeup_new_initial_util_avg_posted(KernelInitTask, BootRunQueue);
+                        task_wakeup_new_trace_emitted(KernelInitTask);
+                        task_wakeup_new_preempt_check_done(KernelInitTask, BootRunQueue);
+                        task_wakeup_new_task_woken_hook_deferred(KernelInitTask);
                     }
                 }
 
@@ -466,15 +549,40 @@ object KernelInitTask: Task {
             state_effect: StateEffect::None;
             depends_on {
                 cpu_ref_ready(cpu_ref);
+                RootPidNamespace.state == State::Ready;
+                BootIdleRcuReadSide.state == State::Prepared;
             }
+
+            within KernelInitPidLookupRcuReadSideContext {
+                ensures {
+                    rcu_read_side_entered(BootIdleRcuReadSide, BootCurrentCPU);
+                    rcu_read_side_exited(BootIdleRcuReadSide, BootCurrentCPU);
+                    task_pid_lookup_under_rcu_read(
+                        KernelInitTask,
+                        RootPidNamespace,
+                        BootIdleRcuReadSide
+                    );
+                    task_pid_lookup_rcu_guard_used(KernelInitTask, BootIdleRcuReadSide);
+                    task_flag_no_setaffinity(KernelInitTask);
+                    task_cpumask_is(KernelInitTask, cpu_ref);
+                    kernel_init_pf_no_setaffinity(KernelInitTask);
+                    kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
+                }
+            }
+
             ensures {
+                rcu_read_side_entered(BootIdleRcuReadSide, BootCurrentCPU);
+                rcu_read_side_exited(BootIdleRcuReadSide, BootCurrentCPU);
+                task_pid_lookup_under_rcu_read(
+                    KernelInitTask,
+                    RootPidNamespace,
+                    BootIdleRcuReadSide
+                );
+                task_pid_lookup_rcu_guard_used(KernelInitTask, BootIdleRcuReadSide);
                 task_flag_no_setaffinity(KernelInitTask);
                 task_cpumask_is(KernelInitTask, cpu_ref);
                 kernel_init_pf_no_setaffinity(KernelInitTask);
                 kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
-            }
-            deferred {
-                "PinToBootCpu 当前未建模 rcu_read_lock()/unlock() 定界的读侧上下文；它是否属于资源独占上下文，还是应作为 RCU/读侧上下文单独建模，后续讨论。";
             }
         }
     }
@@ -626,6 +734,7 @@ object KthreaddTask: Task {
                         task_state_new(KthreaddTask);
                         task_not_enqueued(KthreaddTask);
                         current_task_slot_current(BootCpuCurrentTask, BootIdleTask);
+                        BootRunQueue.state == State::Ready;
                     }
 
                     drives {
@@ -660,6 +769,11 @@ object KthreaddTask: Task {
                         task_runqueue_selected(Scheduler, KthreaddTaskRef, BootRunQueueRef);
                         task_cpu_ref_is(KthreaddTask, BootCPURef);
                         task_enqueued_on_runqueue(KthreaddTaskRef, BootRunQueueRef);
+                        task_wakeup_new_rq_clock_updated(KthreaddTask, BootRunQueue);
+                        task_wakeup_new_initial_util_avg_posted(KthreaddTask, BootRunQueue);
+                        task_wakeup_new_trace_emitted(KthreaddTask);
+                        task_wakeup_new_preempt_check_done(KthreaddTask, BootRunQueue);
+                        task_wakeup_new_task_woken_hook_deferred(KthreaddTask);
                     }
                 }
 
@@ -699,8 +813,34 @@ object KthreaddTask: Task {
                 task_state_running(KthreaddTask);
                 task_enqueued_on_runqueue(KthreaddTaskRef, BootRunQueueRef);
                 RootPidNamespace.state == State::Ready;
+                BootIdleRcuReadSide.state == State::Prepared;
             }
+
+            within KthreaddPidLookupRcuReadSideContext {
+                ensures {
+                    rcu_read_side_entered(BootIdleRcuReadSide, BootCurrentCPU);
+                    rcu_read_side_exited(BootIdleRcuReadSide, BootCurrentCPU);
+                    task_pid_lookup_under_rcu_read(
+                        KthreaddTask,
+                        RootPidNamespace,
+                        BootIdleRcuReadSide
+                    );
+                    task_pid_lookup_rcu_guard_used(KthreaddTask, BootIdleRcuReadSide);
+                    kthreadd_global_ref_bound(KthreaddTask);
+                    kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
+                    kthreadd_provider_ready(KthreaddTask);
+                }
+            }
+
             ensures {
+                rcu_read_side_entered(BootIdleRcuReadSide, BootCurrentCPU);
+                rcu_read_side_exited(BootIdleRcuReadSide, BootCurrentCPU);
+                task_pid_lookup_under_rcu_read(
+                    KthreaddTask,
+                    RootPidNamespace,
+                    BootIdleRcuReadSide
+                );
+                task_pid_lookup_rcu_guard_used(KthreaddTask, BootIdleRcuReadSide);
                 kthreadd_global_ref_bound(KthreaddTask);
                 kthreadd_provider_ref_targets(KthreaddTaskRef, KthreaddTask);
                 kthreadd_provider_ready(KthreaddTask);
@@ -835,6 +975,8 @@ object SystemState: KernelObject {
  * complete(&kthreadd_done) 表达为 KthreaddReadyGate.Transition::Complete。
  * Completion 通用结果来自 Type process；释放 PID 1 进入下一执行线的
  * 场景事实由 BootInitRestInitPhase 承载，不额外引入 Linux 中不存在的 action。
+ * 该实例的 wait.lock irqsave 边界由 KthreaddReadyGateWaitLockContext
+ * 包住 Complete process，避免把 completion 内部锁误表达为生命周期。
  */
 object KthreaddReadyGate: Completion {
     initial_state: State::Base;
@@ -989,6 +1131,7 @@ object BootInitRestInitPhase: PhaseObject {
                 }
 
                 drives {
+                    RcuCore.Action::SchedulerStarting;
                     KernelInitTask.Transition::Preset;
                     KernelInitTask.Transition::Setup;
                     KernelInitTask.Transition::Enable;
@@ -1001,7 +1144,25 @@ object BootInitRestInitPhase: PhaseObject {
                     SystemState.Transition::Setup;
                     KthreaddReadyGate.Transition::Setup;
                     KthreaddReadyGate.Transition::Enable;
-                    KthreaddReadyGate.Transition::Complete;
+                }
+
+                within KthreaddReadyGateWaitLockContext {
+                    drives {
+                        KthreaddReadyGate.Transition::Complete;
+                    }
+
+                    ensures {
+                        raw_spinlock_irqsave_entered(KthreaddReadyGateWaitLock, BootCurrentCPU);
+                        raw_spinlock_irqrestore_exited(KthreaddReadyGateWaitLock, BootCurrentCPU);
+                        completion_wait_lock_irqsave_entered(KthreaddReadyGate, BootCurrentCPU);
+                        completion_wait_lock_irqrestore_exited(KthreaddReadyGate, BootCurrentCPU);
+                        completion_done_increment_guarded_by_wait_lock(KthreaddReadyGate);
+                        completion_wake_guarded_by_wait_lock(KthreaddReadyGate);
+                        completion_wait_lock_guard_used(
+                            KthreaddReadyGate,
+                            KthreaddReadyGateWaitLock
+                        );
+                    }
                 }
 
                 ensures {
@@ -1009,6 +1170,8 @@ object BootInitRestInitPhase: PhaseObject {
                     rcu_scheduler_active_level_init(RcuCore);
                     rcu_single_online_cpu_at_scheduler_start(RcuCore, CpuGroup);
                     rcu_gp_seq_baseline_synced(RcuCore);
+                    rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
+                    rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
                     boot_init_rest_init_ready(BootInitRestInitPhase);
                     rest_init_dispatch_ready(BootInitRestInitPhase);
                     kernel_init_task_created(KernelInitTask);
@@ -1017,14 +1180,22 @@ object BootInitRestInitPhase: PhaseObject {
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
+                    task_pid_lookup_rcu_guard_used(KernelInitTask, BootIdleRcuReadSide);
                     kthreadd_task_created(KthreaddTask);
                     task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
                     kthreadd_schedule_loop_schedule_boundary_deferred(KthreaddTask, Scheduler);
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
+                    task_pid_lookup_rcu_guard_used(KthreaddTask, BootIdleRcuReadSide);
                     system_state_scheduling(SystemState);
                     kthreadd_ready_gate_completed(KthreaddReadyGate);
                     kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+                    completion_wait_lock_guard_used(
+                        KthreaddReadyGate,
+                        KthreaddReadyGateWaitLock
+                    );
+                    completion_done_increment_guarded_by_wait_lock(KthreaddReadyGate);
+                    completion_wake_guarded_by_wait_lock(KthreaddReadyGate);
                     kernel_init_released_for_pre_smp_init(KernelInitTask);
                     smp_concurrency_closed();
                     workqueue_workers_still_deferred();
@@ -1034,7 +1205,6 @@ object BootInitRestInitPhase: PhaseObject {
 
                 deferred {
                     "KthreaddTask 入口循环属于 KthreaddTask 自己的执行线；本阶段只发布 entry/provider facts，不驱动 kthreadd 服务循环子阶段。";
-                    "KernelInitTask.PinToBootCpu 当前保留 rcu_read_lock()/unlock() 读侧上下文建模问题：它是否属于资源独占上下文，还是应作为 RCU/读侧上下文单独建模，后续讨论。";
                 }
             }
         }
@@ -1046,6 +1216,8 @@ object BootInitRestInitPhase: PhaseObject {
             rcu_scheduler_starting_ready(RcuCore);
             rcu_scheduler_active_level_init(RcuCore);
             rcu_gp_seq_baseline_synced(RcuCore);
+            rcu_scheduler_starting_local_irq_guard_used(RcuCore, BootCpuLocalInterrupt);
+            rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
             KernelInitTask.state == State::Online;
             task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
@@ -1061,6 +1233,9 @@ object BootInitRestInitPhase: PhaseObject {
             KthreaddReadyGate.state == State::Online;
             kthreadd_ready_gate_completed(KthreaddReadyGate);
             kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+            completion_wait_lock_guard_used(KthreaddReadyGate, KthreaddReadyGateWaitLock);
+            completion_done_increment_guarded_by_wait_lock(KthreaddReadyGate);
+            completion_wake_guarded_by_wait_lock(KthreaddReadyGate);
             kernel_init_released_for_pre_smp_init(KernelInitTask);
             boot_init_rest_init_ready(BootInitRestInitPhase);
             rest_init_dispatch_ready(BootInitRestInitPhase);
