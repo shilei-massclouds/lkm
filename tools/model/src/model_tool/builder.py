@@ -621,7 +621,16 @@ def _check_event_blocks(
     model: ObjectModel, blocks: list[Block], diagnostics: list[Diagnostic]
 ) -> None:
     for block in blocks:
+        if _is_never_guard_block(block):
+            continue
         _check_event_references(model, block, diagnostics)
+
+
+def _is_never_guard_block(block: Block) -> bool:
+    entries = [entry.strip() for entry, _span in block.entry_spans]
+    if entries:
+        return entries == ["Never"]
+    return block.body.strip().rstrip(";").strip() == "Never"
 
 
 def _derive_context_contribution(
@@ -695,6 +704,8 @@ def _schema_context_contribution(
 def _guard_boundary_events(model: ObjectModel, blocks: list[Block]) -> list[tuple[str, str, str]]:
     transitions: list[tuple[str, str, str]] = []
     for block in blocks:
+        if _is_never_guard_block(block):
+            continue
         for receiver_name, transition_name in _LOCK_TRANSITION_RE.findall(block.body):
             receiver_kind = _guard_receiver_kind(model, receiver_name)
             if receiver_kind is not None:
@@ -1186,6 +1197,8 @@ def _check_lock_event_references(
     *,
     context: ExclusiveContextDef,
 ) -> None:
+    if _is_never_guard_block(block):
+        return
     for lock_name, transition_name in _LOCK_TRANSITION_RE.findall(block.body):
         if lock_name != context.lock_ref:
             diagnostics.append(

@@ -24,7 +24,7 @@ pub fn run() -> SmokeResult {
         || !ctx.boot_cpu_current_task.current_is_kernel_init()
         || ctx.boot_cpu_current_task.current() != CurrentTaskRef::KernelInit
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
-        || !ctx.scheduler.boot_idle_preemption().enabled()
+        || !ctx.scheduler.boot_idle_preemption().disabled()
     {
         printk::write_str("current CPU or idle task control facts invalid\n");
         return SmokeResult::Failed;

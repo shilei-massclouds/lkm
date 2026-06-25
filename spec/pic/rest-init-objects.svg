@@ -31,7 +31,7 @@
 
   <rect x="0" y="0" width="1280" height="940" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">rest_init 期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">UP Multitask Phase 子阶段 1：rest_init() 创建 PID 1、kthreadd，并把 BootInitTask 转入 boot idle</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">UP Multitask Phase：rest_init() 按 BootInitTask handoff 与 BootIdleTask 入口拆分</text>
 
   <rect x="44" y="116" width="250" height="760" rx="14" class="group"/>
   <text x="169" y="150" text-anchor="middle" class="group-title">阶段边界</text>
@@ -39,14 +39,14 @@
   <text x="169" y="212" text-anchor="middle" class="label">ProcessPrepare</text>
   <text x="169" y="236" text-anchor="middle" class="small">Ready 输入</text>
   <rect x="75" y="304" width="188" height="82" rx="8" class="box phase"/>
-  <text x="169" y="332" text-anchor="middle" class="label">rest_init 期</text>
-  <text x="169" y="356" text-anchor="middle" class="small">RestInitPhase</text>
+  <text x="169" y="332" text-anchor="middle" class="label">BootInitRestInit</text>
+  <text x="169" y="356" text-anchor="middle" class="small">创建 / release</text>
   <rect x="75" y="436" width="188" height="82" rx="8" class="box sched"/>
   <text x="169" y="464" text-anchor="middle" class="label">SYSTEM</text>
   <text x="169" y="488" text-anchor="middle" class="small">SCHEDULING</text>
   <rect x="75" y="568" width="188" height="82" rx="8" class="box flow"/>
-  <text x="169" y="596" text-anchor="middle" class="label">单核多任务</text>
-  <text x="169" y="620" text-anchor="middle" class="small">三类任务运行语义成立</text>
+  <text x="169" y="596" text-anchor="middle" class="label">BootIdleEntry</text>
+  <text x="169" y="620" text-anchor="middle" class="small">idle 入口</text>
   <rect x="75" y="700" width="188" height="82" rx="8" class="box phase"/>
   <text x="169" y="728" text-anchor="middle" class="label">PreSmpInit</text>
   <text x="169" y="752" text-anchor="middle" class="small">KernelInitTask 继续</text>

@@ -25,10 +25,10 @@
 
   <rect x="0" y="0" width="1280" height="1520" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">rest_init 期对象构建时序</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">RestInitPhase.setup(): rcu_scheduler_starting() 到 cpu_startup_entry(CPUHP_ONLINE)</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">BootInitRestInitPhase -> BootInitScheduleHandoffPhase -> BootIdleEntryPhase</text>
   <rect x="48" y="126" width="214" height="1320" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">rest_init 期</text>
-  <text x="155" y="188" text-anchor="middle" class="obj">RestInitPhase</text>
+  <text x="155" y="188" text-anchor="middle" class="obj">三子阶段</text>
   <line x1="155" y1="224" x2="155" y2="1410" class="timeline"/>
   <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
   <text x="320" y="142" class="boundary">起点：ProcessPreparePhase 已 Ready；尚未创建 PID 1 与 kthreadd；system_state 尚未调度化</text>
@@ -42,8 +42,8 @@
   <g transform="translate(0 606)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">6</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">KthreaddTask.setup() property: kthreadd_task provider</text><text x="320" y="260" class="line2">全局引用记录为 setup 产物，不单独建立生命周期 action</text></g>
   <g transform="translate(0 716)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">7</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sync"/><text x="320" y="232" class="line1">SystemState.setup(): value = SYSTEM_SCHEDULING</text><text x="320" y="260" class="line2">全局进入调度运行语义；不代表 SMP 或 workqueue 已经启用</text></g>
   <g transform="translate(0 826)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">8</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sync"/><text x="320" y="232" class="line1">KthreaddReadyGate.complete(): complete(&amp;kthreadd_done)</text><text x="320" y="260" class="line2">扩展状态 Pending -> Completed，释放 KernelInitTask</text></g>
-  <g transform="translate(0 936)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sched"/><text x="320" y="232" class="line1">Scheduler.schedule_preempt_disabled(): schedule_preempt_disabled()</text><text x="320" y="260" class="line2">禁抢占条件下执行第一次实际调度交接，新任务获得运行机会</text></g>
-  <g transform="translate(0 1046)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">BootInitTask.disable() + BootIdleTask.enable()</text><text x="320" y="260" class="line2">cpu_startup_entry(CPUHP_ONLINE): 同一 task 启用 boot CPU idle 身份</text></g>
+  <g transform="translate(0 936)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">9</text><rect x="292" y="204" width="876" height="84" rx="10" class="box sched"/><text x="320" y="232" class="line1">BootInitScheduleHandoffPhase: schedule_preempt_disabled()</text><text x="320" y="260" class="line2">BootInitTask 视角提交第一次调度交接，不展开其它任务执行</text></g>
+  <g transform="translate(0 1046)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">10</text><rect x="292" y="204" width="876" height="84" rx="10" class="box flow"/><text x="320" y="232" class="line1">BootIdleEntryPhase: cpu_startup_entry(CPUHP_ONLINE)</text><text x="320" y="260" class="line2">BootIdleTask continuation 进入 idle 入口与代表性 idle cycle</text></g>
   </g>
 
   <rect x="292" y="1360" width="876" height="52" rx="10" class="stage"/>

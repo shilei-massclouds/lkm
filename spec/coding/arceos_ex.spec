@@ -2141,8 +2141,11 @@ type ArceosExRestInitCodingMust {
         /*
          * Model path:
          *
-         * RestInitPhase is UpMultitaskPhase subphase 1. Its formal model path
-         * is spec/model/up-multitask/rest-init/.
+         * The rest_init path is split into BootInitRestInitPhase,
+         * BootInitScheduleHandoffPhase and BootIdleEntryPhase under
+         * spec/model/up-multitask/rest-init/. RestInitPhase is only a
+         * compatibility wrapper over those three concrete owner-scoped
+         * subphases.
          */
         arceos_ex_must_rest_init_model_path_under_up_multitask_phase();
 
@@ -2158,9 +2161,11 @@ type ArceosExRestInitCodingMust {
         /*
          * Ordering:
          *
-         * RestInitPhase must run after ProcessPreparePhase.Ready and before
-         * PayloadPhase. It consumes the prepared PID/task/cred/scheduler facts
-         * and opens the single-CPU multitask boundary.
+         * BootInitRestInitPhase must run after ProcessPreparePhase.Ready;
+         * BootInitScheduleHandoffPhase then opens task-concurrency through the
+         * first scheduler handoff; BootIdleEntryPhase records the boot idle
+         * continuation. The wrapper RestInitPhase may only report that all
+         * three subphases are ready.
          */
         arceos_ex_must_rest_init_run_after_process_prepare();
 
@@ -2187,11 +2192,10 @@ type ArceosExRestInitCodingMust {
         /*
          * Kthreadd entry loop:
          *
-         * The current BP implementation must at least expose a named
-         * KthreaddTask entry-loop boundary that represents kthreadd() waiting
-         * for work and calling schedule() when no work is runnable. Full
-         * kthread request consumption and non-idle-current scheduler switching
-         * remain deferred.
+         * BootInitRestInitPhase must publish KthreaddTask entry/provider facts
+         * but must not drive the kthreadd service-loop subphase. The current
+         * BP records kthreadd schedule-loop execution as deferred until a
+         * KthreaddTask-owned runtime phase exists.
          */
         arceos_ex_must_kthreadd_entry_model_minimal_schedule_loop();
 
@@ -2215,13 +2219,14 @@ type ArceosExRestInitCodingMust {
         /*
          * Scheduler dispatch facts:
          *
-         * schedule_preempt_disabled() must be expanded into preemption guard
-         * exit, Scheduler.schedule(), and post-schedule boot idle context
-         * entry. It must not be implemented as a single Scheduler action and
-         * must not introduce a KernelInitDispatchGate lifecycle object; the
-         * branch point is the combination of Scheduler first-schedule and
-         * KernelInitTask dispatch facts while BootInitTask continues the
-         * cpu_startup_entry() tail. Scheduler.schedule() must derive the
+         * schedule_preempt_disabled() must be split across the owner boundary:
+         * BootInitScheduleHandoffPhase performs BootIdlePreemption
+         * enable_no_resched() and Scheduler.schedule(); BootIdleEntryPhase
+         * enters the post-schedule BootIdleStartupContext. It must not be
+         * implemented as a single Scheduler action and must not introduce a
+         * KernelInitDispatchGate lifecycle object; the branch point is the
+         * combination of Scheduler first-schedule and KernelInitTask dispatch
+         * facts. Scheduler.schedule() must derive the
          * current task reference from the current CPU current-task view,
          * pick next from CurrentRunQueueRef, then switch through TaskRef-based core
          * context save/restore and publish the updated CPU-local current task
@@ -2320,14 +2325,14 @@ type ArceosExRestInitCodingMust {
         arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_schedule_exit();
 
         /*
-         * RestInitPhase.Setup boot-idle chain:
+         * BootIdleEntryPhase boot-idle chain:
          *
-         * RestInitPhase.setup() must present the boot-idle tail chain directly
-         * in phase order: BootIdleRuntime.setup(), then
-         * BootIdleRuntime.prepare_idle_entry(), then
-         * BootIdleRuntime.run_idle_loop(), then the RestInitPhase.Ready
-         * checkpoint. It may use one small helper for each named action, but it
-         * must not hide the whole chain behind a single setup_boot_idle_tail()
+         * The phase implementation must present the boot-idle tail chain
+         * directly in phase order: enter BootIdleStartupContext, then
+         * BootIdleRuntime.setup(), BootIdleRuntime.prepare_idle_entry(),
+         * BootIdleRuntime.run_idle_loop(), and the BootIdleEntryPhase.Ready
+         * checkpoint. It may use one small helper for each named action, but
+         * it must not hide the whole chain behind a single setup_boot_idle_tail()
          * helper or collapse the model action order into one opaque phase call.
          */
         arceos_ex_must_rest_init_setup_show_boot_idle_tail_chain();
@@ -2708,8 +2713,9 @@ type ArceosExRestInitCodingMust {
          * Fork dependency:
          *
          * PreSmpInitPhase must depend on the KernelInitTask release/dispatch
-         * facts and Scheduler first-schedule fact, not on RestInitPhase.Ready.
-         * RestInitPhase.Ready still records the boot idle tail completion.
+         * facts and Scheduler first-schedule fact, not on RestInitPhase.Ready
+         * or BootIdleEntryPhase.Ready. RestInitPhase.Ready is only a wrapper
+         * fact after the three UP multitask subphases are ready.
          */
         arceos_ex_must_rest_init_not_make_pre_smp_depend_on_rest_init_ready();
 
@@ -2754,7 +2760,8 @@ type ArceosExPreSmpInitCodingMust {
          * Entry facts:
          *
          * This phase must run from the KernelInitTask release/dispatch facts
-         * and Scheduler first-schedule fact, not from RestInitPhase.Ready.
+         * and Scheduler first-schedule fact, not from RestInitPhase.Ready or
+         * BootIdleEntryPhase.Ready.
          */
         arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts();
 

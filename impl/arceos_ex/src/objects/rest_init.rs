@@ -359,8 +359,6 @@ pub struct KthreaddTask {
     sched_entity_ready: bool,
     global_ref_bound: bool,
     provider_ready: bool,
-    schedule_loop_ready: bool,
-    schedule_loop_requests_schedule: bool,
     schedule_loop_deferred: bool,
     enqueued: bool,
     cpu: TaskCpuState,
@@ -383,8 +381,6 @@ impl KthreaddTask {
             sched_entity_ready: false,
             global_ref_bound: false,
             provider_ready: false,
-            schedule_loop_ready: false,
-            schedule_loop_requests_schedule: false,
             schedule_loop_deferred: true,
             enqueued: false,
             cpu: TaskCpuState::new(),
@@ -442,14 +438,6 @@ impl KthreaddTask {
 
     pub const fn provider_ready(&self) -> bool {
         self.provider_ready
-    }
-
-    pub const fn schedule_loop_ready(&self) -> bool {
-        self.schedule_loop_ready
-    }
-
-    pub const fn schedule_loop_requests_schedule(&self) -> bool {
-        self.schedule_loop_requests_schedule
     }
 
     pub const fn schedule_loop_deferred(&self) -> bool {
@@ -633,28 +621,6 @@ impl KthreaddTask {
         self.provider_ready = true;
         crate::trace::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
         true
-    }
-
-    pub fn run_schedule_loop(&mut self, scheduler: &Scheduler) -> EventResult {
-        if self.lifecycle.state() != State::Online
-            || self.entry != TaskEntry::Kthreadd
-            || !self.running
-            || !self.provider_ready
-            || scheduler.state() != State::Online
-        {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-
-        self.schedule_loop_ready = true;
-        self.schedule_loop_requests_schedule = true;
-        self.schedule_loop_deferred = true;
-        crate::trace::checkpoint(Checkpoint::KthreaddTaskScheduleLoopReady);
-        Ok(())
     }
 
     fn failed_preset(&self) -> EventResult {

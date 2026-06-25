@@ -38,8 +38,8 @@
   <rect x="44" y="116" width="250" height="804" rx="14" class="group"/>
   <text x="169" y="150" text-anchor="middle" class="group-title">阶段边界</text>
   <rect x="75" y="184" width="188" height="72" rx="8" class="box ready"/>
-  <text x="169" y="212" text-anchor="middle" class="label">RestInitPhase</text>
-  <text x="169" y="236" text-anchor="middle" class="small">Ready 输入</text>
+  <text x="169" y="212" text-anchor="middle" class="label">Scheduler handoff</text>
+  <text x="169" y="236" text-anchor="middle" class="small">PID 1 dispatched</text>
   <rect x="75" y="304" width="188" height="82" rx="8" class="box flow"/>
   <text x="169" y="332" text-anchor="middle" class="label">KernelInitTask</text>
   <text x="169" y="356" text-anchor="middle" class="small">主执行任务 / PID 1</text>

@@ -34,7 +34,7 @@
   <text x="155" y="188" text-anchor="middle" class="obj">PreSmpInitPhase</text>
   <line x1="155" y1="224" x2="155" y2="1610" class="timeline"/>
   <rect x="292" y="116" width="876" height="52" rx="10" class="stage"/>
-  <text x="320" y="142" class="boundary">起点：RestInitPhase 已 Ready；PID 1 解除 kthreadd_done；secondary CPU 尚未启动</text>
+  <text x="320" y="142" class="boundary">起点：PID 1 released/dispatched；Scheduler 首次 handoff 已提交；secondary CPU 尚未启动</text>
 
   <g transform="translate(0 -48)">
   <g transform="translate(0 56)"><circle cx="155" cy="248" r="15" class="dot"/><text x="155" y="248" class="num">1</text><rect x="292" y="204" width="876" height="84" rx="10" class="box mm"/><text x="320" y="232" class="line1">PageAllocator.open_full_gfp_mask(): gfp_allowed_mask = __GFP_BITS_MASK</text><text x="320" y="260" class="line2">打开 PageAllocator 全局 GFP mask，后续初始化可使用阻塞分配</text></g>

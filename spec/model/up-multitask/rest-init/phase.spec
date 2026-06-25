@@ -1,16 +1,12 @@
 /*
  * Rest Init Phase Specification
  *
- * This is UP Multitask Phase subphase 1. It covers Linux rest_init(): RCU
- * scheduler start, creation of PID 1 and kthreadd, publication of
- * SYSTEM_SCHEDULING, completion of kthreadd_done, and boot idle runtime entry.
- * schedule_preempt_disabled() is expanded into three formal steps: the boot
- * idle preemption guard exits with EnableNoResched, Scheduler.Action::Schedule
- * commits the first scheduling boundary, and BootIdleStartupContext enters the
- * boot-idle atomic context for cpu_startup_entry(). The boot-idle tail is
- * modeled as an abstract idle loop: the boot CPU waits while need_resched is
- * clear, observes need_resched when the environment requests scheduling, drives
- * Scheduler.Action::ScheduleIdle, and then returns to the same idle-loop point.
+ * The UP Multitask rest_init path is split by execution owner:
+ * BootInitRestInitPhase creates and releases PID 1/kthreadd,
+ * BootInitScheduleHandoffPhase commits the first schedule handoff, and
+ * BootIdleEntryPhase enters the BootIdleTask cpu_startup_entry()/idle-loop
+ * continuation. RestInitPhase remains only as a compatibility wrapper over
+ * those three subphases.
  */
 
 /*
@@ -177,7 +173,9 @@ context BootIdleStartupContext: Context {
      * context established by schedule_preempt_disabled() before
      * cpu_startup_entry(CPUHP_ONLINE). The pre-schedule context is inherited
      * from boot/sched_init and is exited explicitly by
-     * BootIdlePreemption.Transition::EnableNoResched in RestInitPhase.Preset.
+     * BootIdlePreemption.Transition::EnableNoResched in
+     * BootInitScheduleHandoffPhase. The normal startup path never exits this
+     * post-schedule context; exited_by uses Never.
      *
      * 参照 Linux 的 idle 设计原理，boot CPU 的整个 idle 入口准备和 idle
      * loop 都运行在抢占关闭上下文中，避免 idle/current task、polling、
@@ -191,7 +189,7 @@ context BootIdleStartupContext: Context {
         }
 
         exited_by {
-            BootIdlePreemption.Transition::Enable;
+            Never;
         }
     }
 
@@ -818,8 +816,8 @@ object SystemState: KernelObject {
  * lifecycle event 只是当前工具的实例 wrapper：Setup/Enable 提交
  * kthreadd_done 在 rest_init 场景中的 gate 生命周期状态；真正的
  * complete(&kthreadd_done) 表达为 KthreaddReadyGate.Transition::Complete。
- * Completion 通用结果来自 Type process；释放 PID 1 进入下一子阶段的
- * 场景事实由 RestInitPhase 承载，不额外引入 Linux 中不存在的 action。
+ * Completion 通用结果来自 Type process；释放 PID 1 进入下一执行线的
+ * 场景事实由 BootInitRestInitPhase 承载，不额外引入 Linux 中不存在的 action。
  */
 object KthreaddReadyGate: Completion {
     initial_state: State::Base;
@@ -944,18 +942,21 @@ object BootIdleRuntime: BootIdleRuntimeObject {
 }
 
 /*
- * RestInitPhase 表示 UP MultitaskPhase 的第一个子阶段。它创建 PID 1 和
- * kthreadd，发布 SYSTEM_SCHEDULING，并完成 boot idle runtime 入口。
+ * BootInitRestInitPhase 是 BootInitTask 视角下 rest_init() 的前半段。
+ * 它创建并唤醒 PID 1 和 kthreadd，发布 SYSTEM_SCHEDULING，完成
+ * kthreadd_done，从而释放 PID 1。它不提交首次 scheduler handoff，也不
+ * 执行 kthreadd 或 boot idle 自己的子阶段。
  */
-object RestInitPhase: PhaseObject {
+object BootInitRestInitPhase: PhaseObject {
     initial_state: State::Base;
     parent: UpMultitaskPhase;
 
     state State::Base {
         transitions {
-            on Transition::Preset -> State::Prepared {
+            on Transition::Setup -> State::Ready {
                 depends_on {
                     ProcessPreparePhase.state == State::Ready;
+                    InterruptStream.state == State::Online;
                     TaskCreationCore.state == State::Ready;
                     RootPidNamespace.state == State::Ready;
                     CredentialCore.state == State::Prepared;
@@ -967,7 +968,7 @@ object RestInitPhase: PhaseObject {
                     BootIdleTask.state == State::Ready;
                     RcuCore.state == State::Ready;
                     CpuGroup.state == State::Ready;
-                    InterruptStream.state == State::Online;
+                    smp_concurrency_closed();
                 }
 
                 drives {
@@ -979,14 +980,11 @@ object RestInitPhase: PhaseObject {
                     KthreaddTask.Transition::Setup;
                     KthreaddTask.Transition::Enable;
                     KthreaddTask.Action::BindGlobalRef;
-                    KthreaddTask.Action::RunScheduleLoop;
                     SystemState.Transition::Preset;
                     SystemState.Transition::Setup;
                     KthreaddReadyGate.Transition::Setup;
                     KthreaddReadyGate.Transition::Enable;
                     KthreaddReadyGate.Transition::Complete;
-                    BootIdlePreemption.Transition::EnableNoResched;
-                    Scheduler.Action::Schedule;
                 }
 
                 ensures {
@@ -994,7 +992,8 @@ object RestInitPhase: PhaseObject {
                     rcu_scheduler_active_level_init(RcuCore);
                     rcu_single_online_cpu_at_scheduler_start(RcuCore, CpuGroup);
                     rcu_gp_seq_baseline_synced(RcuCore);
-                    rest_init_dispatch_ready(RestInitPhase);
+                    boot_init_rest_init_ready(BootInitRestInitPhase);
+                    rest_init_dispatch_ready(BootInitRestInitPhase);
                     kernel_init_task_created(KernelInitTask);
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
                     task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
@@ -1003,18 +1002,13 @@ object RestInitPhase: PhaseObject {
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     kthreadd_task_created(KthreaddTask);
                     task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
-                    kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
-                    kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
+                    kthreadd_schedule_loop_schedule_boundary_deferred(KthreaddTask, Scheduler);
                     kthreadd_global_ref_bound(KthreaddTask);
                     kthreadd_provider_ready(KthreaddTask);
                     system_state_scheduling(SystemState);
                     kthreadd_ready_gate_completed(KthreaddReadyGate);
                     kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
                     kernel_init_released_for_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    rest_init_boot_idle_tail_pending(BootIdleRuntime);
-                    task_concurrency_open();
                     smp_concurrency_closed();
                     workqueue_workers_still_deferred();
                     rcu_gp_threads_still_deferred(RcuCore);
@@ -1022,15 +1016,14 @@ object RestInitPhase: PhaseObject {
                 }
 
                 deferred {
-                    "KthreaddTask 入口循环当前只建立 schedule 请求边界；消费 kthread_create_list 和后续 kthread 创建服务留给运行期模型。";
-                    "真实抢占、上下文切换和任务栈切换不在当前对象级实现中执行，只发布调度分叉事实。";
+                    "KthreaddTask 入口循环属于 KthreaddTask 自己的执行线；本阶段只发布 entry/provider facts，不驱动 kthreadd 服务循环子阶段。";
                     "KernelInitTask.PinToBootCpu 当前保留 rcu_read_lock()/unlock() 读侧上下文建模问题：它是否属于资源独占上下文，还是应作为 RCU/读侧上下文单独建模，后续讨论。";
                 }
             }
         }
     }
 
-    state State::Prepared {
+    state State::Ready {
         invariant {
             ProcessPreparePhase.state == State::Ready;
             rcu_scheduler_starting_ready(RcuCore);
@@ -1044,8 +1037,7 @@ object RestInitPhase: PhaseObject {
             kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             KthreaddTask.state == State::Online;
             task_entry_bound(KthreaddTask, TaskEntry::Kthreadd);
-            kthreadd_entry_reaches_schedule_loop(KthreaddTask, Scheduler);
-            kthreadd_schedule_loop_ready(KthreaddTask, Scheduler);
+            kthreadd_schedule_loop_schedule_boundary_deferred(KthreaddTask, Scheduler);
             kthreadd_global_ref_bound(KthreaddTask);
             kthreadd_provider_ready(KthreaddTask);
             SystemState.state == State::Ready;
@@ -1053,19 +1045,93 @@ object RestInitPhase: PhaseObject {
             kthreadd_ready_gate_completed(KthreaddReadyGate);
             kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
             kernel_init_released_for_pre_smp_init(KernelInitTask);
-            scheduler_first_schedule_committed(Scheduler);
-            rest_init_dispatch_ready(RestInitPhase);
-            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-            rest_init_boot_idle_tail_pending(BootIdleRuntime);
+            boot_init_rest_init_ready(BootInitRestInitPhase);
+            rest_init_dispatch_ready(BootInitRestInitPhase);
+            smp_concurrency_closed();
         }
+    }
+}
 
+/*
+ * BootInitScheduleHandoffPhase 仍由 BootInitTask 执行。它只表示
+ * schedule_preempt_disabled() 中退出 inherited preempt-disabled guard 并发起
+ * 首次 scheduler handoff 的点；handoff 之后其它任务执行多久不在本阶段展开。
+ */
+object BootInitScheduleHandoffPhase: PhaseObject {
+    initial_state: State::Base;
+    parent: UpMultitaskPhase;
+
+    state State::Base {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
-                    CpuGroup.state == State::Ready;
+                    BootInitRestInitPhase.state == State::Ready;
+                    KernelInitTask.state == State::Online;
+                    KthreaddTask.state == State::Online;
+                    SystemState.state == State::Ready;
+                    system_state_scheduling(SystemState);
+                    KthreaddReadyGate.state == State::Online;
+                    kthreadd_ready_gate_completed(KthreaddReadyGate);
+                    kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+                    kernel_init_released_for_pre_smp_init(KernelInitTask);
+                    Scheduler.state == State::Online;
                     BootIdleTask.state == State::Ready;
+                }
+
+                drives {
+                    BootIdlePreemption.Transition::EnableNoResched;
+                    Scheduler.Action::Schedule;
+                }
+
+                ensures {
+                    boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
+                    scheduler_first_schedule_committed(Scheduler);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    current_task_ref_updated_by_switch(BootCurrentCPU, CurrentTaskRef, KernelInitTaskRef);
+                    task_concurrency_open();
+                    smp_concurrency_closed();
+                    real_task_switch_deferred();
+                    secondary_cpus_not_started(CpuGroup);
+                }
+
+                deferred {
+                    "真实任务栈切换和完整 scheduler class 策略后续展开；本阶段只提交首次 handoff 可观察事实。";
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            BootInitRestInitPhase.state == State::Ready;
+            boot_init_schedule_handoff_ready(BootInitScheduleHandoffPhase);
+            scheduler_first_schedule_committed(Scheduler);
+            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+            task_concurrency_open();
+            smp_concurrency_closed();
+        }
+    }
+}
+
+/*
+ * BootIdleEntryPhase 由首次调度交接之后的 BootIdleTask continuation 执行。
+ * 整个子阶段处于 BootIdleStartupContext 中；该 context 在正常启动路径中
+ * 通过 Never 标记无普通退出事件，within 结束不代表抢占 guard 退出。
+ */
+object BootIdleEntryPhase: PhaseObject {
+    initial_state: State::Base;
+    parent: UpMultitaskPhase;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    BootInitScheduleHandoffPhase.state == State::Ready;
+                    scheduler_first_schedule_committed(Scheduler);
+                    BootIdleTask.state == State::Ready;
+                    BootIdleRuntime.state == State::Base;
+                    CpuGroup.state == State::Ready;
+                    task_concurrency_open();
                 }
 
                 within BootIdleStartupContext {
@@ -1078,6 +1144,7 @@ object RestInitPhase: PhaseObject {
                     ensures {
                         task_preemption_disabled(BootIdleTask);
                         boot_idle_runtime_ready(BootIdleRuntime, BootIdleTask);
+                        boot_idle_cpu_startup_entry_ready(BootIdleRuntime, BootCPU);
                         boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
                         boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
                         boot_idle_task_pf_idle(BootIdleTask);
@@ -1088,25 +1155,19 @@ object RestInitPhase: PhaseObject {
                 }
 
                 ensures {
-                    rest_init_ready(RestInitPhase);
-                    up_multitask_runtime_ready(RestInitPhase, KernelInitTask, KthreaddTask, BootIdleRuntime);
-                    boot_cpu_idle_runtime_entered(BootIdleRuntime);
-                    boot_init_task_runtime_handoff_complete(BootInitTask, BootIdleTask);
+                    boot_idle_entry_phase_ready(BootIdleEntryPhase);
+                    boot_idle_runtime_ready(BootIdleRuntime, BootIdleTask);
+                    boot_idle_cpu_startup_entry_ready(BootIdleRuntime, BootCPU);
                     boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
                     boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
                     boot_idle_task_pf_idle(BootIdleTask);
                     boot_idle_runtime_loop_entered(BootIdleRuntime, BootIdleTask);
+                    boot_idle_loop_cycle_committed(BootIdleRuntime);
                     boot_idle_loop_continues(BootIdleRuntime);
-                    rcu_scheduler_starting_ready(RcuCore);
-                    rcu_scheduler_active_level_init(RcuCore);
-                    rcu_gp_seq_baseline_synced(RcuCore);
-                    system_state_scheduling(SystemState);
-                    kthreadd_ready_gate_completed(KthreaddReadyGate);
-                    kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
-                    kernel_init_released_for_pre_smp_init(KernelInitTask);
-                    scheduler_first_schedule_committed(Scheduler);
-                    task_concurrency_open();
-                    smp_concurrency_closed();
+                    boot_init_task_runtime_handoff_complete(BootInitTask, BootIdleTask);
+                    boot_cpu_idle_runtime_entered(BootIdleRuntime);
+                    secondary_cpus_not_started(CpuGroup);
+                    real_task_switch_deferred();
                 }
 
                 deferred {
@@ -1119,26 +1180,57 @@ object RestInitPhase: PhaseObject {
 
     state State::Ready {
         invariant {
-            ProcessPreparePhase.state == State::Ready;
-            rcu_scheduler_starting_ready(RcuCore);
-            rcu_scheduler_active_level_init(RcuCore);
-            rcu_gp_seq_baseline_synced(RcuCore);
-            KernelInitTask.state == State::Online;
-            KthreaddTask.state == State::Online;
-            SystemState.state == State::Ready;
-            KthreaddReadyGate.state == State::Online;
+            BootInitScheduleHandoffPhase.state == State::Ready;
             BootIdleRuntime.state == State::Ready;
-            rest_init_ready(RestInitPhase);
-            system_state_scheduling(SystemState);
-            kernel_init_pf_no_setaffinity(KernelInitTask);
-            kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
-            kthreadd_ready_gate_completed(KthreaddReadyGate);
-            kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
-            kernel_init_released_for_pre_smp_init(KernelInitTask);
-            scheduler_first_schedule_committed(Scheduler);
-            kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+            boot_idle_entry_phase_ready(BootIdleEntryPhase);
+            boot_idle_runtime_ready(BootIdleRuntime, BootIdleTask);
+            boot_idle_cpu_startup_entry_ready(BootIdleRuntime, BootCPU);
+            boot_idle_entry_prepared(BootIdleRuntime, BootIdleTask);
+            boot_idle_task_identity_entered(BootInitTask, BootIdleTask);
+            boot_idle_runtime_loop_entered(BootIdleRuntime, BootIdleTask);
+            boot_idle_loop_continues(BootIdleRuntime);
             task_concurrency_open();
             smp_concurrency_closed();
+        }
+    }
+}
+
+/*
+ * RestInitPhase 是历史兼容 wrapper，表示三个最小子阶段都已 Ready。
+ * 它不再作为 UP MultitaskPhase 的最小子阶段，也不驱动跨 owner 行为。
+ */
+object RestInitPhase: PhaseObject {
+    initial_state: State::Base;
+    parent: UpMultitaskPhase;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    BootInitRestInitPhase.state == State::Ready;
+                    BootInitScheduleHandoffPhase.state == State::Ready;
+                    BootIdleEntryPhase.state == State::Ready;
+                }
+
+                ensures {
+                    rest_init_ready(RestInitPhase);
+                    up_multitask_runtime_ready(
+                        RestInitPhase,
+                        KernelInitTask,
+                        KthreaddTask,
+                        BootIdleRuntime
+                    );
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            BootInitRestInitPhase.state == State::Ready;
+            BootInitScheduleHandoffPhase.state == State::Ready;
+            BootIdleEntryPhase.state == State::Ready;
+            rest_init_ready(RestInitPhase);
         }
     }
 }

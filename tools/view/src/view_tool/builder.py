@@ -1127,10 +1127,20 @@ class _TraceLayoutBuilder:
         *,
         max_action_depth: int | None,
     ) -> None:
-        self._max_phase_lane = _max_trace_phase_lane(roots, verified_states_by_event)
+        self._max_phase_lane = _max_trace_phase_lane(
+            roots,
+            verified_states_by_event,
+            ordinary_actions,
+            context_records,
+        )
         self._object_column_base = self._max_phase_lane + 2
         for node in roots:
-            if _should_skip_trace_node(node, verified_states_by_event):
+            if _should_skip_trace_node(
+                node,
+                verified_states_by_event,
+                ordinary_actions,
+                context_records,
+            ):
                 continue
             self._place_node(
                 node,
@@ -1269,7 +1279,12 @@ class _TraceLayoutBuilder:
 
         body_items: list[dict[str, object]] = []
         for child_index, child in enumerate(_trace_children(data)):
-            if _should_skip_trace_node(child, verified_states_by_event):
+            if _should_skip_trace_node(
+                child,
+                verified_states_by_event,
+                ordinary_actions,
+                context_records,
+            ):
                 continue
             child_data = _trace_node_object(child)
             child_key = (
@@ -1924,7 +1939,10 @@ def _trace_label(node: dict[str, Any]) -> str:
 
 
 def _should_skip_trace_node(
-    node: Any, verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]]
+    node: Any,
+    verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
+    ordinary_actions: dict[tuple[str, str], list[dict[str, object]]] | None = None,
+    context_records: dict[tuple[str, str], list[dict[str, object]]] | None = None,
 ) -> bool:
     data = _trace_node_object(node)
     object_name = data.get("object")
@@ -1935,7 +1953,14 @@ def _should_skip_trace_node(
         return False
     if _trace_children(data):
         return False
-    return not verified_states_by_event.get((object_name, transition_name))
+    key = (object_name, transition_name)
+    if verified_states_by_event.get(key):
+        return False
+    if ordinary_actions is not None and ordinary_actions.get(key):
+        return False
+    if context_records is not None and context_records.get(key):
+        return False
+    return True
 
 
 def _is_trace_phase_object(object_name: str) -> bool:
@@ -1945,12 +1970,19 @@ def _is_trace_phase_object(object_name: str) -> bool:
 def _max_trace_phase_lane(
     roots: list[Any],
     verified_states_by_event: dict[tuple[str, str], list[tuple[str, str]]],
+    ordinary_actions: dict[tuple[str, str], list[dict[str, object]]],
+    context_records: dict[tuple[str, str], list[dict[str, object]]],
 ) -> int:
     max_lane = 0
 
     def visit(node: Any, phase_lane: int) -> None:
         nonlocal max_lane
-        if _should_skip_trace_node(node, verified_states_by_event):
+        if _should_skip_trace_node(
+            node,
+            verified_states_by_event,
+            ordinary_actions,
+            context_records,
+        ):
             return
         data = _trace_node_object(node)
         is_phase = _is_trace_phase_object(str(data.get("object")))

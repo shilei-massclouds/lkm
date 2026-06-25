@@ -23,7 +23,9 @@ pub fn run() -> SmokeResult {
     let boot_idle_task = boot_scheduler_view.idle_task();
 
     if !phases::up_multitask::rest_init::is_ready()
-        || !phases::up_multitask::rest_init::dispatch_ready()
+        || !phases::up_multitask::rest_init::boot_init_rest_init_ready()
+        || !phases::up_multitask::rest_init::boot_init_schedule_handoff_ready()
+        || !phases::up_multitask::rest_init::boot_idle_entry_ready()
         || !phases::up_multitask::is_ready()
     {
         printk::write_str("rest init phase is not ready\n");
@@ -87,8 +89,6 @@ pub fn run() -> SmokeResult {
         || !boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         || !ctx.kthreadd_task.global_ref_bound()
         || !ctx.kthreadd_task.provider_ready()
-        || !ctx.kthreadd_task.schedule_loop_ready()
-        || !ctx.kthreadd_task.schedule_loop_requests_schedule()
         || !ctx.kthreadd_task.schedule_loop_deferred()
         || ctx.kthreadd_task_pi_lock.state() != State::Ready
         || ctx.kthreadd_task_pi_lock.locked()
@@ -136,6 +136,8 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.pick_next_task_passes() == 0
         || ctx.scheduler.switch_to_passes() == 0
         || ctx.scheduler.identity_switch_passes() != 0
+        || ctx.scheduler.boot_idle_preemption().state() != State::Ready
+        || !ctx.scheduler.boot_idle_preemption().disabled()
         || ctx.boot_cpu_current_task.switch_committed_count() == 0
         || !ctx.boot_cpu_current_task.current_is_kernel_init()
         || !boot_idle_task.thread_context_core_register_set()

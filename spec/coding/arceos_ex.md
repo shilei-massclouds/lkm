@@ -25,6 +25,9 @@
 - `IrqOpenPreparePhase.Ready`
 - `ProcessPreparePhase.Ready`
 - `UpMultitaskPhase.Ready`
+- `BootInitRestInitPhase.Ready`
+- `BootInitScheduleHandoffPhase.Ready`
+- `BootIdleEntryPhase.Ready`
 - `RestInitPhase.Ready`
 - `PreSmpInitPhase.Ready`
 - `SmpRuntimePhase.Ready`
@@ -99,7 +102,9 @@ make clean
 当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`LocalIrqEnablePhase.Ready`、
-`IrqOpenPreparePhase.Ready` 和 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开 `RestInitPhase.Ready`），
+`IrqOpenPreparePhase.Ready` 和 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开
+`BootInitRestInitPhase.Ready`、`BootInitScheduleHandoffPhase.Ready`、`BootIdleEntryPhase.Ready` 和兼容
+wrapper `RestInitPhase.Ready`），
 随后完成 `SmpRuntimePhase.Ready`（当前展开 `PreSmpInitPhase.Ready`、`SmpBringupPhase.Ready`、
 `RuntimeCorePhase.Ready`、`InitcallPhase.Ready`、`RootfsPhase.Ready` 与 `FinalizePhase.Ready`），再通过
 后续的 `PayloadPhase` 进入默认 `smoke` payload，执行 smoke 用例后通过 SBI 关机。`PayloadPhase` 是
@@ -150,28 +155,30 @@ completion handle；`complete()`、`complete_all()`、`wait()`、`try_wait()` �
 实例必须包装并驱动该通用对象，而不是把 pending/completed/wake bookkeeping 复制成私有布尔字段。
 实例 wrapper 只能承载场景事实：例如 `KthreaddReadyGate.enable()` 发布 completion handle 后，
 `KthreaddReadyGate.complete()` 必须驱动通用 `Completion.complete()`；释放 PID 1 的场景结果由
-`RestInitPhase` 事实承载，不引入 Linux 中不存在的额外 action。
+`BootInitRestInitPhase` 事实承载，不引入 Linux 中不存在的额外 action。
 
 smoke 测试必须覆盖两类路径：一是独立 `Completion` 实例的 setup/enable/complete/token consume/reinit 流程，二是
 `rest_init()` 中的 live `kthreadd_done` 实例，验证 `KthreaddReadyGate` 已驱动 `Completion.complete()` 并唤醒 PID 1。
 
 ## RestInitPhase 编码约束
 
-`RestInitPhase` 是 `UpMultitaskPhase` 的第一个子阶段，formal model 路径为
-`spec/model/up-multitask/rest-init/`，目标实现路径为
-`impl/arceos_ex/src/phases/up_multitask/rest_init.rs`。该阶段必须在 `ProcessPreparePhase.Ready` 之后运行，并在
-`PayloadPhase` 之前完成；它覆盖 Linux `rest_init()` 的最小对象级边界。
+`rest_init()` 路径在 formal model 中拆成三个 owner-scoped 子阶段：
+`BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和
+`BootIdleEntryPhase`，路径为 `spec/model/up-multitask/rest-init/`，目标实现路径为
+`impl/arceos_ex/src/phases/up_multitask/rest_init.rs`。`RestInitPhase` 只保留为
+三个子阶段都 Ready 后的兼容 wrapper，不再作为跨 owner 的最小子阶段。
 
 本阶段的主线对象是 `KernelInitTask`、`KthreaddTask`、`SystemState`、`KthreaddReadyGate`
 和 `BootIdleRuntime`。实现必须发布 PID 1 已创建并入队、`kthreadd`
 provider 已创建并绑定全局引用、`system_state == SYSTEM_SCHEDULING`、`kthreadd_done` 已 complete、
-`schedule_preempt_disabled()` 已按 preemption guard 退出、`Scheduler.schedule()` 调度分界、
-post-schedule boot idle context 进入三段体提交首次调度交接，boot idle runtime 入口已确认等事实。
+`schedule_preempt_disabled()` 已按 `BootInitTask` 视角拆为首次 scheduler handoff，
+以及 post-schedule `BootIdleTask` 视角的 boot idle runtime 入口等事实。
 这些事实当前仍是对象级模拟边界，不得实现真实任务栈切换、真实调度上下文切换或 idle loop。
 
 PID 1 和 kthreadd 的创建必须通过 `TaskCreationCore` 的 entry contract 表达：`KernelInitTask` 使用
 `TaskEntry::KernelInit`，其第一执行线指向 `SmpRuntimePhase`；`KthreaddTask` 使用
-`TaskEntry::Kthreadd`，其第一执行线指向 kthreadd 服务循环边界。当前 BP 最小实现只需要把 kthreadd 入口循环建模为“等待工作、无工作时请求 `schedule()` 切出”的 named boundary；真实 kthread 请求消费、park/stop/wait 细节，以及非 idle current 下的完整 scheduler 切换留给后续模型。
+`TaskEntry::Kthreadd`，其第一执行线指向 kthreadd 服务循环边界。`BootInitRestInitPhase`
+只能发布 kthreadd entry/provider facts，不得驱动 `KthreaddTask` 自己的服务循环子阶段；真实 kthread 请求消费、park/stop/wait 细节，以及非 idle current 下的完整 scheduler 切换留给后续模型。
 
 PID 1 的临时 boot CPU 亲和约束不得实现为独立 `KernelInitAffinity` 对象；它必须作为
 `KernelInitTask` 的 `pin_to_boot_cpu()` action 承载。该 action 只提交两类 task 属性：设置
@@ -188,21 +195,21 @@ boot CPU。
 
 `schedule_preempt_disabled()` 是 `BootInitTask -> BootIdleTask` 尾部和
 `KernelInitTask -> SmpRuntimePhase` 执行线的分叉点。它不得实现为独立对象或单个
-`Scheduler` action，而应展开为 `BootIdlePreemption.enable_no_resched()`、
-`Scheduler.schedule()` 和 post-schedule boot idle context。不得引入
+`Scheduler` action，而应由 `BootInitScheduleHandoffPhase` 展开
+`BootIdlePreemption.enable_no_resched()` 和 `Scheduler.schedule()`，再由
+`BootIdleEntryPhase` 进入 post-schedule boot idle context。不得引入
 `KernelInitDispatchGate` 生命周期对象。`SmpRuntimePhase` 首个子阶段 `PreSmpInitPhase` 依赖
 `KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact，不能硬依赖 `RestInitPhase.Ready`。
-`RestInitPhase.Ready` 仍必须覆盖
-`cpu_startup_entry(CPUHP_ONLINE)` 对应的 boot idle 尾部完成事实。
+`RestInitPhase.Ready` 只表示三个 UP multitask 子阶段已 Ready。
 
 `BootIdleRuntime` 的代码结构必须和 model action 边界对齐：`setup()` 只建立
 `BootIdleRuntime.Ready` 壳并确认首次调度交接已存在，不得一次性写入全部 idle 尾部事实；
 phase 代码必须随后显式调用 `prepare_idle_entry()` 和 `run_idle_loop()`。`prepare_idle_entry()` 承载
 `current->flags |= PF_IDLE`、`arch_cpu_idle_prepare()` 和 `cpuhp_online_idle(CPUHP_ONLINE)` 的当前抽象事实；
 `run_idle_loop()` 只提交进入 idle loop，并驱动一轮代表性的 `do_idle_cycle()`。
-`RestInitPhase.setup()` 主线必须直接呈现
+`BootIdleEntryPhase` 主线必须直接呈现进入 `BootIdleStartupContext` ->
 `BootIdleRuntime.setup()` -> `BootIdleRuntime.prepare_idle_entry()` -> `BootIdleRuntime.run_idle_loop()` ->
-`RestInitPhase.Ready` checkpoint 的顺序。代码可以为每个 named action 保留小 helper，但不得再用单个
+`BootIdleEntryPhase.Ready` checkpoint 的顺序。代码可以为每个 named action 保留小 helper，但不得再用单个
 `setup_boot_idle_tail()` 把整条链隐藏起来。
 
 `do_idle_cycle()` 必须进一步暴露 `wait_while_no_need_resched()`、`observe_need_resched()` 和
@@ -226,9 +233,9 @@ schedule/switch/current-task switch counters 包含这一次 idle pass。当前�
 idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没有更合适 runnable task 的未来
 策略分支中才可能成立。
 
-本阶段可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
+`BootInitScheduleHandoffPhase` 可以打开“单核多任务”语义，但仍不得启动 secondary CPU；也不得把完整 workqueue/SMP 拓扑、
 真实 Tasks RCU GP kthread 运行、后续 kthread request 消费提前实现。`KernelInitTask` 的下一执行线是
-`SmpRuntimePhase`，其首个子阶段是 `PreSmpInitPhase`；该事实来自 `TaskEntry::KernelInit` 的创建入口绑定。`KthreaddTask` 当前只实现入口循环和 schedule 请求边界，完整运行期服务能力留给后续模型。
+`SmpRuntimePhase`，其首个子阶段是 `PreSmpInitPhase`；该事实来自 `TaskEntry::KernelInit` 的创建入口绑定。`KthreaddTask` 当前只发布 entry/provider 和 deferred facts，不执行 kthreadd 服务循环；完整运行期服务能力留给后续模型。
 
 ## PreSmpInitPhase 编码约束
 
@@ -248,7 +255,7 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 测试应覆盖 full GFP mask 已打开、secondary CPU 只处于 present/not-online、Workqueue Ready 但 SMP topology
 仍 deferred、VmstatCore Prepared、TasksRcu Ready、pre-SMP initcall 已运行、`smp_init()` 未执行，以及
 `PreSmpInitPhase` 的入口来自 `KernelInitTask` entry/release/dispatch 和 Scheduler 首次调度 facts，而非
-`RestInitPhase.Ready`。
+`RestInitPhase.Ready` 或 `BootIdleEntryPhase.Ready`。
 
 ## SmpBringupPhase 编码约束
 

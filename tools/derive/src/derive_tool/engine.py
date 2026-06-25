@@ -1968,6 +1968,8 @@ class _Deriver:
     ) -> bool:
         for block in blocks:
             for entry, entry_span in block.entry_spans:
+                if entry.strip() == "Never":
+                    continue
                 match = _TRANSITION_EXPR_RE.match(entry)
                 if match is not None:
                     object_name, process_name = match.group(1), match.group(2)

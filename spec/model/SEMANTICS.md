@@ -366,6 +366,12 @@ context WakeUpNewTaskContext: ResourceExclusiveContext {
   与 `holds` 混写在同一个 guard 中。
 - `guard.entered_by` 和 `guard.exited_by` 声明进入和退出上下文边界事件。
 - 对非锁 guard，`entered_by`/`exited_by` 声明对应控制对象的边界事件；这些边界事件是 guard 行为，不写入 `within` 内部的 `drives`。
+- `guard.exited_by { Never; }` 是唯一允许的显式无正常退出标记。它必须和
+  `entered_by` 成对出现，表示该 context 在当前正常控制流中进入后没有对应
+  runtime 退出事件；`within` 词法结束不代表 guard 退出，外层 phase/action
+  仍可在 context 持续成立时提交 ready facts。后续 shutdown、panic、CPU
+  offline 或其它非正常路径若需要退出语义，必须另建 terminal/context 路径，
+  不得把 `Never` 偷换成普通 enable/restore 事件。
 - 对阶段边界或天然上下文 guard，`entered_by`/`exited_by` 可以不存在；`within` 的词法范围提供边界。
 - `guard.holds` 声明天然上下文在作用域内明确保持的属性；未声明的维度表示该 guard 不作保证，在 Effective Context 叠加时保持中性。
 - `ResourceExclusiveContext.obj_refs` 是受保护对象引用集合，至少包含一个对象；

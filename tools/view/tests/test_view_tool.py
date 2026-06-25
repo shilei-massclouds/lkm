@@ -220,6 +220,57 @@ class ViewToolTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, 2)
             self.assertIn("non-negative integer", stderr.getvalue())
 
+    def test_trace_view_keeps_phase_with_ordinary_action(self) -> None:
+        view = build_trace_view(
+            {
+                "trace": [
+                    {
+                        "object": "UpMultitaskPhase",
+                        "transition": "Setup",
+                        "source_state": "Base",
+                        "target_state": "Ready",
+                        "children": [
+                            {
+                                "object": "BootInitScheduleHandoffPhase",
+                                "transition": "Setup",
+                                "source_state": "Base",
+                                "target_state": "Ready",
+                                "children": [],
+                            }
+                        ],
+                    }
+                ],
+                "records": [
+                    {
+                        "status": "proved",
+                        "object": "BootInitScheduleHandoffPhase",
+                        "transition": "Setup",
+                        "source_kind": "drives",
+                        "proof_class": "action_commit",
+                        "proof_provider": "action_drive",
+                        "expression": "Scheduler.Action::Schedule",
+                    }
+                ],
+            }
+        )
+
+        cells = view.metadata["trace_cells"]
+        self.assertTrue(
+            any(
+                cell.kind == "transition_span"
+                and cell.label
+                == "BootInitScheduleHandoffPhase.Transition::Setup"
+                for cell in cells
+            )
+        )
+        self.assertTrue(
+            any(
+                cell.kind == "action"
+                and cell.label == "Scheduler.Action::Schedule"
+                for cell in cells
+            )
+        )
+
     def test_trace_view_places_within_context_actions(self) -> None:
         view = build_trace_view(
             {
