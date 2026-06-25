@@ -202,6 +202,22 @@ boot CPU。
 `KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact，不能硬依赖 `RestInitPhase.Ready`。
 `RestInitPhase.Ready` 只表示三个 UP multitask 子阶段已 Ready。
 
+`Scheduler` 的生命周期不属于 rest_init 三子阶段。实现必须复用
+`SchedInitPhase` 已建立的 `Scheduler.Online` 对象；`BootInitScheduleHandoffPhase`
+只驱动 `Scheduler.schedule()` action 作为首次 handoff 边界，不得新增 scheduler
+Preset/Setup/Ready/Online 迁移，也不得用新的 scheduler lifecycle object 表示 dispatch。
+该 action 的同步结构必须对应 formal 的
+`SchedulePreemptionContext` -> `ScheduleLocalInterruptContext` ->
+`ScheduleRunQueueContext` 三层 `within`：分别表达 schedule-owned
+preempt-disabled guard、local-irq-disabled guard 和 rq lock 独占区。
+
+rest_init 路径涉及的锁/同步原语必须保持显式边界：PID 1 和 kthreadd 的
+`wake_up_new_task()` 用各自 task pi lock 的 `WakeUp*TaskContext`，并在其中嵌套
+`EnqueueSelectedRunQueueContext` 表达 `BootRunQueueLock`；`kthreadd_done` 通过
+`Completion` Type process 完成；`BootIdleEntryPhase` 整体由
+`BootIdleStartupContext` 覆盖，且该 context 以 `Never` 退出。不得把这些协议改成
+裸 `ensures` fact 或只靠外层阶段顺序证明。
+
 `BootIdleRuntime` 的代码结构必须和 model action 边界对齐：`setup()` 只建立
 `BootIdleRuntime.Ready` 壳并确认首次调度交接已存在，不得一次性写入全部 idle 尾部事实；
 phase 代码必须随后显式调用 `prepare_idle_entry()` 和 `run_idle_loop()`。`prepare_idle_entry()` 承载

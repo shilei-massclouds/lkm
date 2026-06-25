@@ -2233,6 +2233,17 @@ type ArceosExRestInitCodingMust {
          * fact. The implementation boundary must pass through the current
          * CPU's CurrentTaskSlot; it must not infer or publish the current task
          * only from Scheduler counters or BootRunQueue.curr.
+         *
+         * Scheduler lifecycle belongs to SchedInitPhase. RestInit must consume
+         * Scheduler.Online and drive Scheduler.Action::Schedule only; it must
+         * not create a new Scheduler lifecycle boundary for dispatch. The
+         * schedule action must remain covered by the nested within sequence
+         * SchedulePreemptionContext -> ScheduleLocalInterruptContext ->
+         * ScheduleRunQueueContext, and the wake-up path must keep task pi lock
+         * and runqueue lock coverage in WakeUp*TaskContext /
+         * EnqueueSelectedRunQueueContext. kthreadd_done remains a Completion
+         * Type process, and BootIdleEntryPhase remains covered by
+         * BootIdleStartupContext.
          */
         arceos_ex_must_rest_init_publish_scheduler_dispatch_facts();
 

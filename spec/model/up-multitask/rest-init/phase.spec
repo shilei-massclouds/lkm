@@ -167,6 +167,23 @@ context ScheduleRunQueueContext: ResourceExclusiveContext {
     }
 }
 
+/*
+ * Scheduler 的生命周期由 boot/sched-init/phase.spec 中的 Scheduler object
+ * 建立：Preset/Setup/Enable 使其进入 Online。rest_init 三子阶段不再推进
+ * Scheduler 生命周期，只消费 Scheduler.state == Online，并在
+ * BootInitScheduleHandoffPhase 中驱动 Scheduler.Action::Schedule 作为首次
+ * handoff 点。该 action 自身通过嵌套 within 进入
+ * SchedulePreemptionContext -> ScheduleLocalInterruptContext ->
+ * ScheduleRunQueueContext，分别覆盖 schedule-owned preempt-disabled guard、
+ * __schedule() local-irq-disabled guard 和 rq->lock 独占区。
+ *
+ * 本文件中的 rest_init 相关同步边界均应保持为 within 或通用 Type process：
+ * wake_up_new_task() 路径用 WakeUpNewTaskContext / WakeUpKthreaddTaskContext
+ * 包住 p->pi_lock irqsave 区，并在其中嵌套 EnqueueSelectedRunQueueContext
+ * 表达 BootRunQueueLock irqsave 区；kthreadd_done 使用 Completion Type 的
+ * Complete process；BootIdleStartupContext 覆盖整个 BootIdleEntryPhase。
+ */
+
 context BootIdleStartupContext: Context {
     /*
      * This context corresponds to the post-schedule preempt-disabled atomic
