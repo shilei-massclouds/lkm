@@ -52,6 +52,20 @@ pub struct Scheduler {
     idle_schedule_passes: usize,
     idle_schedule_returned_passes: usize,
     idle_schedule_identity_passes: usize,
+    schedule_preemption_disable_count: usize,
+    schedule_preemption_enable_no_resched_count: usize,
+    scheduler_rcu_context_switch_count: usize,
+    scheduler_rq_lock_mb_after_spinlock_count: usize,
+    scheduler_rq_clock_update_count: usize,
+    scheduler_need_resched_clear_count: usize,
+    scheduler_rq_curr_publish_rcu_count: usize,
+    scheduler_trace_sched_switch_count: usize,
+    scheduler_prepare_task_switch_count: usize,
+    scheduler_finish_task_switch_count: usize,
+    scheduler_finish_released_rq_lock_count: usize,
+    scheduler_finish_preempt_count_restore_count: usize,
+    scheduler_switch_mm_or_lazy_tlb_deferred: bool,
+    scheduler_membarrier_switch_barrier_deferred: bool,
     pick_next_task_exit_prev_ref: CurrentTaskRef,
     pick_next_task_exit_next_ref: CurrentTaskRef,
     pick_next_task_exit_count: usize,
@@ -106,6 +120,20 @@ impl Scheduler {
             idle_schedule_passes: 0,
             idle_schedule_returned_passes: 0,
             idle_schedule_identity_passes: 0,
+            schedule_preemption_disable_count: 0,
+            schedule_preemption_enable_no_resched_count: 0,
+            scheduler_rcu_context_switch_count: 0,
+            scheduler_rq_lock_mb_after_spinlock_count: 0,
+            scheduler_rq_clock_update_count: 0,
+            scheduler_need_resched_clear_count: 0,
+            scheduler_rq_curr_publish_rcu_count: 0,
+            scheduler_trace_sched_switch_count: 0,
+            scheduler_prepare_task_switch_count: 0,
+            scheduler_finish_task_switch_count: 0,
+            scheduler_finish_released_rq_lock_count: 0,
+            scheduler_finish_preempt_count_restore_count: 0,
+            scheduler_switch_mm_or_lazy_tlb_deferred: true,
+            scheduler_membarrier_switch_barrier_deferred: true,
             pick_next_task_exit_prev_ref: CurrentTaskRef::None,
             pick_next_task_exit_next_ref: CurrentTaskRef::None,
             pick_next_task_exit_count: 0,
@@ -147,6 +175,10 @@ impl Scheduler {
 
     pub const fn boot_idle_rcu_read_side(&self) -> &RcuReadSide {
         &self.boot_idle_rcu_read_side
+    }
+
+    pub fn boot_idle_rcu_read_side_mut(&mut self) -> &mut RcuReadSide {
+        &mut self.boot_idle_rcu_read_side
     }
 
     pub const fn boot_runqueue(&self) -> &BootRunQueue {
@@ -358,6 +390,62 @@ impl Scheduler {
 
     pub const fn idle_schedule_identity_passes(&self) -> usize {
         self.idle_schedule_identity_passes
+    }
+
+    pub const fn schedule_preemption_disable_count(&self) -> usize {
+        self.schedule_preemption_disable_count
+    }
+
+    pub const fn schedule_preemption_enable_no_resched_count(&self) -> usize {
+        self.schedule_preemption_enable_no_resched_count
+    }
+
+    pub const fn scheduler_rcu_context_switch_count(&self) -> usize {
+        self.scheduler_rcu_context_switch_count
+    }
+
+    pub const fn scheduler_rq_lock_mb_after_spinlock_count(&self) -> usize {
+        self.scheduler_rq_lock_mb_after_spinlock_count
+    }
+
+    pub const fn scheduler_rq_clock_update_count(&self) -> usize {
+        self.scheduler_rq_clock_update_count
+    }
+
+    pub const fn scheduler_need_resched_clear_count(&self) -> usize {
+        self.scheduler_need_resched_clear_count
+    }
+
+    pub const fn scheduler_rq_curr_publish_rcu_count(&self) -> usize {
+        self.scheduler_rq_curr_publish_rcu_count
+    }
+
+    pub const fn scheduler_trace_sched_switch_count(&self) -> usize {
+        self.scheduler_trace_sched_switch_count
+    }
+
+    pub const fn scheduler_prepare_task_switch_count(&self) -> usize {
+        self.scheduler_prepare_task_switch_count
+    }
+
+    pub const fn scheduler_finish_task_switch_count(&self) -> usize {
+        self.scheduler_finish_task_switch_count
+    }
+
+    pub const fn scheduler_finish_released_rq_lock_count(&self) -> usize {
+        self.scheduler_finish_released_rq_lock_count
+    }
+
+    pub const fn scheduler_finish_preempt_count_restore_count(&self) -> usize {
+        self.scheduler_finish_preempt_count_restore_count
+    }
+
+    pub const fn scheduler_switch_mm_or_lazy_tlb_deferred(&self) -> bool {
+        self.scheduler_switch_mm_or_lazy_tlb_deferred
+    }
+
+    pub const fn scheduler_membarrier_switch_barrier_deferred(&self) -> bool {
+        self.scheduler_membarrier_switch_barrier_deferred
     }
 
     pub const fn pick_next_task_exit_prev_ref(&self) -> CurrentTaskRef {
@@ -617,19 +705,63 @@ impl Scheduler {
         }
 
         let prev_ref = current_task_slot.current();
+        let mut next_ref = CurrentTaskRef::None;
 
+        self.boot_idle_preemption.disable()?;
+        self.schedule_preemption_disable_count =
+            self.schedule_preemption_disable_count.wrapping_add(1);
         local_interrupt.save_and_disable()?;
-        let current_rq = self.resolve_current_runqueue_ref(
-            cpu_group,
-            kernel_init_task,
-            kthreadd_task,
-            prev_ref,
-        )?;
-        let next_ref = self.pick_next_task(current_rq, prev_ref)?;
-        self.switch_to(prev_ref, next_ref, current_task_slot)?;
-        self.schedule_passes = self.schedule_passes.wrapping_add(1);
-        crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
-        local_interrupt.restore()?;
+        let guarded_result = (|| {
+            self.scheduler_rcu_context_switch_count =
+                self.scheduler_rcu_context_switch_count.wrapping_add(1);
+            let current_rq = self.resolve_current_runqueue_ref(
+                cpu_group,
+                kernel_init_task,
+                kthreadd_task,
+                prev_ref,
+            )?;
+            self.boot_runqueue
+                .lock
+                .lock_irqsave(local_interrupt, &mut self.boot_idle_preemption)?;
+            let runqueue_result = (|| {
+                self.scheduler_rq_lock_mb_after_spinlock_count = self
+                    .scheduler_rq_lock_mb_after_spinlock_count
+                    .wrapping_add(1);
+                self.scheduler_rq_clock_update_count =
+                    self.scheduler_rq_clock_update_count.wrapping_add(1);
+                next_ref = self.pick_next_task(current_rq, prev_ref)?;
+                self.scheduler_need_resched_clear_count =
+                    self.scheduler_need_resched_clear_count.wrapping_add(1);
+                self.scheduler_rq_curr_publish_rcu_count =
+                    self.scheduler_rq_curr_publish_rcu_count.wrapping_add(1);
+                self.scheduler_trace_sched_switch_count =
+                    self.scheduler_trace_sched_switch_count.wrapping_add(1);
+                self.switch_to(prev_ref, next_ref, current_task_slot)?;
+                self.schedule_passes = self.schedule_passes.wrapping_add(1);
+                crate::trace::checkpoint(Checkpoint::SchedulerSchedule);
+                Ok(())
+            })();
+            let unlock_result = self
+                .boot_runqueue
+                .lock
+                .unlock_irqrestore(local_interrupt, &mut self.boot_idle_preemption);
+            if runqueue_result.is_ok() && unlock_result.is_ok() {
+                self.scheduler_finish_released_rq_lock_count =
+                    self.scheduler_finish_released_rq_lock_count.wrapping_add(1);
+            }
+            runqueue_result.and(unlock_result)
+        })();
+        let restore_result = local_interrupt.restore();
+        let enable_result = self.boot_idle_preemption.enable_no_resched();
+        if guarded_result.is_ok() && restore_result.is_ok() && enable_result.is_ok() {
+            self.schedule_preemption_enable_no_resched_count = self
+                .schedule_preemption_enable_no_resched_count
+                .wrapping_add(1);
+            self.scheduler_finish_preempt_count_restore_count = self
+                .scheduler_finish_preempt_count_restore_count
+                .wrapping_add(1);
+        }
+        guarded_result.and(restore_result).and(enable_result)?;
         self.schedule_exit_prev_ref = prev_ref;
         self.schedule_exit_next_ref = next_ref;
         self.schedule_exit_current_ref = current_task_slot.current();
@@ -794,6 +926,8 @@ impl Scheduler {
         self.switch_to_entry_current_ref = current_task_slot.current();
         self.switch_to_entry_committed_count = current_task_slot.switch_committed_count();
         self.switch_to_entry_count = self.switch_to_entry_count.wrapping_add(1);
+        self.scheduler_prepare_task_switch_count =
+            self.scheduler_prepare_task_switch_count.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerSwitchToEntry);
         self.record_core_context_switch(prev_ref, next_ref)?;
         current_task_slot.commit_switch_to(next_ref)?;
@@ -807,6 +941,8 @@ impl Scheduler {
         self.switch_to_exit_current_ref = current_task_slot.current();
         self.switch_to_exit_committed_count = current_task_slot.switch_committed_count();
         self.switch_to_exit_count = self.switch_to_exit_count.wrapping_add(1);
+        self.scheduler_finish_task_switch_count =
+            self.scheduler_finish_task_switch_count.wrapping_add(1);
         crate::trace::checkpoint(Checkpoint::SchedulerSwitchToExit);
         Ok(())
     }

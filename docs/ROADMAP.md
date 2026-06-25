@@ -34,6 +34,14 @@
 
 启动阶段逐项审计时，并发/同步控制必须作为固定检查面覆盖：本地中断开关、抢占开关、自旋锁、Mutex、读写锁、RCU、CPU bring-up 同步量、内存/地址转换同步和 TLB/cache flush 边界都要明确判断是否已由 `spec/model` 表达；若 model 已表达但实现映射不清，再修订 `spec/coding` 或生成约束。`impl/` 只作为生成结果和 Linux 对照样本，发现偏差时默认先修规格。
 
+### 已完成当前轮：RestInitPhase 前两个子阶段源码补齐
+
+`RestInitPhase` 已拆为 `BootInitRestInitPhase`、`BootInitScheduleHandoffPhase` 和 `BootIdleStartupPhase` 三个子阶段，规格侧已补齐 `within` 形式的上下文边界。本轮已把前两个子阶段的 `impl/arceos_ex` 实现与已确认规格对齐，并补 smoke 观测；第 3 子阶段仍留作后续单独复核。
+
+1. **第 1 子阶段：`BootInitRestInitPhase` 实现补齐完成**。`RcuCore.scheduler_start()` 已显式消费 `BootCpuLocalInterrupt` 的 save/restore guard，记录 scheduler-starting local IRQ 事实；`KernelInitTask.PinToBootCpu` 和 `KthreaddTask.BindGlobalRef` 已在 `BootIdleRcuReadSide` 读侧上下文内完成 PID lookup / global ref 事实；`KthreaddReadyGate.Complete` 已以独立 `KthreaddReadyGateWaitLock` 承载 `complete()` 的 wait.lock 临界区，并由 rest_init smoke 验证这些新增同步事实。
+2. **第 2 子阶段：`BootInitScheduleHandoffPhase` 实现补齐完成**。`Scheduler.schedule()` / `switch_to()` 已补齐当前规格中的 schedule handoff 事实：schedule 自身的抢占上下文、runqueue lock guard、`smp_mb__after_spinlock()` 对应事实、rq clock update、`need_resched` clear、`rq->curr` RCU publish、`trace_sched_switch`、`prepare_task_switch()` / `finish_task_switch()`、finish 阶段释放 rq lock 和恢复 preempt count 的观测；scheduler/rest_init smoke 已覆盖这些事实。
+3. **验收完成**。已覆盖 `make verify`、`make verify REPORT=graph`、`make -C impl/arceos_ex build APP=smoke`、`make -C impl/arceos_ex run APP=smoke`、普通 `make run` 和普通 `make run APP=user-boot`。`APP=user-boot` 首次复跑因旧 `build/virtio-blk.raw` 未应用 rootfs overlay 输出 `read user ELF failed`；执行 `make -C impl/arceos_ex disk FORCE=1` 重建磁盘后，普通 `make run APP=user-boot` 输出 `user hello` / `user exit status=0`。
+
 ### 最高优先级：状态机术语与 guard lowering 策略收敛
 
 全局语义收敛已经完成，当前恢复 `SchedInitPhase` 审计。

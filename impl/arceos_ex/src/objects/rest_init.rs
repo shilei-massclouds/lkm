@@ -1,6 +1,8 @@
 use super::{
     completion::Completion,
-    cpu_control::{BootCurrentCpu, CurrentTaskSlot, LocalInterruptControl, RawSpinLock},
+    cpu_control::{
+        BootCurrentCpu, CurrentTaskSlot, LocalInterruptControl, RawSpinLock, RcuReadSide,
+    },
     cpu_group::CpuGroup,
     finalize::{InitMemoryCleanupDeferred, KernelMappingProtectionDeferred, PtiFinalizeTrimmed},
     init_task::InitTask,
@@ -50,6 +52,8 @@ pub struct KernelInitTask {
     released_for_pre_smp_init: bool,
     pinned_to_boot_cpu: bool,
     pf_no_setaffinity: bool,
+    pid_lookup_under_rcu_read: bool,
+    pid_lookup_rcu_guard_balanced: bool,
     cpu: TaskCpuState,
     running: bool,
 }
@@ -70,6 +74,8 @@ impl KernelInitTask {
             released_for_pre_smp_init: false,
             pinned_to_boot_cpu: false,
             pf_no_setaffinity: false,
+            pid_lookup_under_rcu_read: false,
+            pid_lookup_rcu_guard_balanced: false,
             cpu: TaskCpuState::new(),
             running: false,
         }
@@ -125,6 +131,14 @@ impl KernelInitTask {
 
     pub const fn pf_no_setaffinity(&self) -> bool {
         self.pf_no_setaffinity
+    }
+
+    pub const fn pid_lookup_under_rcu_read(&self) -> bool {
+        self.pid_lookup_under_rcu_read
+    }
+
+    pub const fn pid_lookup_rcu_guard_balanced(&self) -> bool {
+        self.pid_lookup_rcu_guard_balanced
     }
 
     pub const fn cpu_id(&self) -> usize {
@@ -259,19 +273,40 @@ impl KernelInitTask {
         guarded_result.and(unlock_result)
     }
 
-    pub fn pin_to_boot_cpu(&mut self, cpu_id: usize) -> bool {
+    pub fn pin_to_boot_cpu(
+        &mut self,
+        cpu_id: usize,
+        root_pid_namespace: &RootPidNamespace,
+        boot_idle_rcu_read_side: &mut RcuReadSide,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || self.pid != KERNEL_INIT_PID
             || self.cpu_id() != cpu_id
+            || root_pid_namespace.state() != State::Ready
+            || boot_idle_rcu_read_side.state() != State::Prepared
         {
-            return false;
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
         }
 
-        // Linux reaches this through an RCU read-side pid lookup. The formal
-        // model keeps that RCU context as a deferred context-kind question.
-        self.pinned_to_boot_cpu = true;
-        self.pf_no_setaffinity = true;
-        true
+        let locks_before = boot_idle_rcu_read_side.read_lock_count();
+        boot_idle_rcu_read_side.read_lock()?;
+        let guarded_result = (|| {
+            self.pid_lookup_under_rcu_read =
+                boot_idle_rcu_read_side.read_lock_count() == locks_before.wrapping_add(1);
+            self.pinned_to_boot_cpu = true;
+            self.pf_no_setaffinity = true;
+            Ok(())
+        })();
+        let unlock_result = boot_idle_rcu_read_side.read_unlock();
+        if guarded_result.is_ok() && unlock_result.is_ok() {
+            self.pid_lookup_rcu_guard_balanced = boot_idle_rcu_read_side.balanced();
+        }
+        guarded_result.and(unlock_result)
     }
 
     fn set_task_cpu(&mut self, cpu_id: usize) -> EventResult {
@@ -359,6 +394,8 @@ pub struct KthreaddTask {
     sched_entity_ready: bool,
     global_ref_bound: bool,
     provider_ready: bool,
+    pid_lookup_under_rcu_read: bool,
+    pid_lookup_rcu_guard_balanced: bool,
     schedule_loop_deferred: bool,
     enqueued: bool,
     cpu: TaskCpuState,
@@ -381,6 +418,8 @@ impl KthreaddTask {
             sched_entity_ready: false,
             global_ref_bound: false,
             provider_ready: false,
+            pid_lookup_under_rcu_read: false,
+            pid_lookup_rcu_guard_balanced: false,
             schedule_loop_deferred: true,
             enqueued: false,
             cpu: TaskCpuState::new(),
@@ -438,6 +477,14 @@ impl KthreaddTask {
 
     pub const fn provider_ready(&self) -> bool {
         self.provider_ready
+    }
+
+    pub const fn pid_lookup_under_rcu_read(&self) -> bool {
+        self.pid_lookup_under_rcu_read
+    }
+
+    pub const fn pid_lookup_rcu_guard_balanced(&self) -> bool {
+        self.pid_lookup_rcu_guard_balanced
     }
 
     pub const fn schedule_loop_deferred(&self) -> bool {
@@ -607,20 +654,41 @@ impl KthreaddTask {
         }
     }
 
-    pub fn bind_global_ref(&mut self, root_pid_namespace: &RootPidNamespace) -> bool {
+    pub fn bind_global_ref(
+        &mut self,
+        root_pid_namespace: &RootPidNamespace,
+        boot_idle_rcu_read_side: &mut RcuReadSide,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || self.pid != KTHREADD_PID
             || !self.running
             || !self.enqueued
             || root_pid_namespace.state() != State::Ready
+            || boot_idle_rcu_read_side.state() != State::Prepared
         {
-            return false;
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
         }
 
-        self.global_ref_bound = true;
-        self.provider_ready = true;
-        crate::trace::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
-        true
+        let locks_before = boot_idle_rcu_read_side.read_lock_count();
+        boot_idle_rcu_read_side.read_lock()?;
+        let guarded_result = (|| {
+            self.pid_lookup_under_rcu_read =
+                boot_idle_rcu_read_side.read_lock_count() == locks_before.wrapping_add(1);
+            self.global_ref_bound = true;
+            self.provider_ready = true;
+            crate::trace::checkpoint(Checkpoint::KthreaddTaskGlobalRefBound);
+            Ok(())
+        })();
+        let unlock_result = boot_idle_rcu_read_side.read_unlock();
+        if guarded_result.is_ok() && unlock_result.is_ok() {
+            self.pid_lookup_rcu_guard_balanced = boot_idle_rcu_read_side.balanced();
+        }
+        guarded_result.and(unlock_result)
     }
 
     fn failed_preset(&self) -> EventResult {
@@ -747,6 +815,11 @@ pub struct KthreaddReadyGate {
     lifecycle: Lifecycle,
     completion: Completion,
     release_committed: bool,
+    complete_wait_lock_guard_used: bool,
+    complete_wait_lock_irqsave_count: usize,
+    complete_wait_lock_irqrestore_count: usize,
+    complete_done_increment_guarded: bool,
+    complete_wake_guarded: bool,
 }
 
 impl KthreaddReadyGate {
@@ -755,6 +828,11 @@ impl KthreaddReadyGate {
             lifecycle: Lifecycle::new(State::Base),
             completion: Completion::new(),
             release_committed: false,
+            complete_wait_lock_guard_used: false,
+            complete_wait_lock_irqsave_count: 0,
+            complete_wait_lock_irqrestore_count: 0,
+            complete_done_increment_guarded: false,
+            complete_wake_guarded: false,
         }
     }
 
@@ -778,6 +856,26 @@ impl KthreaddReadyGate {
         self.release_committed
     }
 
+    pub const fn complete_wait_lock_guard_used(&self) -> bool {
+        self.complete_wait_lock_guard_used
+    }
+
+    pub const fn complete_wait_lock_irqsave_count(&self) -> usize {
+        self.complete_wait_lock_irqsave_count
+    }
+
+    pub const fn complete_wait_lock_irqrestore_count(&self) -> usize {
+        self.complete_wait_lock_irqrestore_count
+    }
+
+    pub const fn complete_done_increment_guarded(&self) -> bool {
+        self.complete_done_increment_guarded
+    }
+
+    pub const fn complete_wake_guarded(&self) -> bool {
+        self.complete_wake_guarded
+    }
+
     pub fn setup(
         &mut self,
         kernel_init_task: &KernelInitTask,
@@ -793,6 +891,11 @@ impl KthreaddReadyGate {
 
         self.completion.setup()?;
         self.release_committed = false;
+        self.complete_wait_lock_guard_used = false;
+        self.complete_wait_lock_irqsave_count = 0;
+        self.complete_wait_lock_irqrestore_count = 0;
+        self.complete_done_increment_guarded = false;
+        self.complete_wake_guarded = false;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -833,6 +936,9 @@ impl KthreaddReadyGate {
         system_state: &SystemState,
         kthreadd_task: &KthreaddTask,
         kernel_init_task: &mut KernelInitTask,
+        wait_lock: &mut RawSpinLock,
+        local_interrupt: &mut LocalInterruptControl,
+        scheduler: &mut Scheduler,
     ) -> EventResult {
         if self.lifecycle.state() != State::Online
             || system_state.state() != State::Ready
@@ -840,6 +946,9 @@ impl KthreaddReadyGate {
             || kthreadd_task.state() != State::Online
             || kernel_init_task.state() != State::Online
             || !kernel_init_task.waiting_for_kthreadd_done()
+            || wait_lock.state() != State::Ready
+            || local_interrupt.state() != State::Ready
+            || scheduler.boot_idle_preemption().state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Enable,
@@ -849,7 +958,22 @@ impl KthreaddReadyGate {
             );
         }
 
-        self.completion.complete()?;
+        wait_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
+        let guarded_result = (|| {
+            self.complete_wait_lock_guard_used = wait_lock.locked();
+            self.complete_wait_lock_irqsave_count = wait_lock.irqsave_entered_count();
+            self.completion.complete()?;
+            self.complete_done_increment_guarded =
+                wait_lock.locked() && self.completion.completed();
+            self.complete_wake_guarded = wait_lock.locked() && self.completion.wakes_one_waiter();
+            Ok(())
+        })();
+        let unlock_result =
+            wait_lock.unlock_irqrestore(local_interrupt, scheduler.boot_idle_preemption_mut());
+        if guarded_result.is_ok() && unlock_result.is_ok() {
+            self.complete_wait_lock_irqrestore_count = wait_lock.irqrestore_exited_count();
+        }
+        guarded_result.and(unlock_result)?;
         if !kernel_init_task.release_for_pre_smp_init() {
             return failed_condition(
                 LifecycleEvent::Enable,

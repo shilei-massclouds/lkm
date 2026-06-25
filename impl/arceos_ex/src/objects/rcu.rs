@@ -1,4 +1,5 @@
 use super::{
+    cpu_control::LocalInterruptControl,
     cpu_group::CpuGroup,
     per_cpu_storage::PerCpuStorage,
     scheduler::Scheduler,
@@ -27,6 +28,9 @@ pub struct RcuCore {
     scheduler_starting_ready: bool,
     scheduler_active_init: bool,
     scheduler_start_single_online_cpu: bool,
+    scheduler_start_local_irq_guarded: bool,
+    scheduler_start_local_irq_save_count: usize,
+    scheduler_start_local_irq_restore_count: usize,
     gp_seq_baseline_synced: bool,
     inkernel_boot_ended: bool,
 }
@@ -52,6 +56,9 @@ impl RcuCore {
             scheduler_starting_ready: false,
             scheduler_active_init: false,
             scheduler_start_single_online_cpu: false,
+            scheduler_start_local_irq_guarded: false,
+            scheduler_start_local_irq_save_count: 0,
+            scheduler_start_local_irq_restore_count: 0,
             gp_seq_baseline_synced: false,
             inkernel_boot_ended: false,
         }
@@ -133,6 +140,18 @@ impl RcuCore {
         self.scheduler_start_single_online_cpu
     }
 
+    pub const fn scheduler_start_local_irq_guarded(&self) -> bool {
+        self.scheduler_start_local_irq_guarded
+    }
+
+    pub const fn scheduler_start_local_irq_save_count(&self) -> usize {
+        self.scheduler_start_local_irq_save_count
+    }
+
+    pub const fn scheduler_start_local_irq_restore_count(&self) -> usize {
+        self.scheduler_start_local_irq_restore_count
+    }
+
     pub const fn gp_seq_baseline_synced(&self) -> bool {
         self.gp_seq_baseline_synced
     }
@@ -177,6 +196,9 @@ impl RcuCore {
         self.scheduler_starting_ready = false;
         self.scheduler_active_init = false;
         self.scheduler_start_single_online_cpu = false;
+        self.scheduler_start_local_irq_guarded = false;
+        self.scheduler_start_local_irq_save_count = 0;
+        self.scheduler_start_local_irq_restore_count = 0;
         self.gp_seq_baseline_synced = false;
         self.inkernel_boot_ended = false;
         if !self.boot_cpu_online_ready
@@ -203,10 +225,16 @@ impl RcuCore {
         )
     }
 
-    pub fn scheduler_start(&mut self, scheduler: &Scheduler, cpu_group: &CpuGroup) -> EventResult {
+    pub fn scheduler_start(
+        &mut self,
+        scheduler: &Scheduler,
+        cpu_group: &CpuGroup,
+        local_interrupt: &mut LocalInterruptControl,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
             || cpu_group.state() != State::Ready
+            || local_interrupt.state() != State::Ready
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -226,11 +254,25 @@ impl RcuCore {
             );
         }
 
-        self.scheduler_starting_ready = true;
-        self.scheduler_active_init = true;
-        self.gp_seq_baseline_synced = true;
-        crate::trace::checkpoint(Checkpoint::RcuSchedulerStartingReady);
-        Ok(())
+        let saved_before = local_interrupt.saved_and_disabled_count();
+        local_interrupt.save_and_disable()?;
+        let guarded_result = (|| {
+            self.scheduler_starting_ready = true;
+            self.scheduler_active_init = true;
+            self.gp_seq_baseline_synced = true;
+            self.scheduler_start_local_irq_guarded = local_interrupt.disabled();
+            self.scheduler_start_local_irq_save_count = local_interrupt.saved_and_disabled_count();
+            crate::trace::checkpoint(Checkpoint::RcuSchedulerStartingReady);
+            Ok(())
+        })();
+        let restore_result = local_interrupt.restore();
+        if guarded_result.is_ok() && restore_result.is_ok() {
+            self.scheduler_start_local_irq_restore_count = local_interrupt.restored_count();
+            self.scheduler_start_local_irq_guarded &= self.scheduler_start_local_irq_save_count
+                == saved_before.wrapping_add(1)
+                && self.scheduler_start_local_irq_restore_count != 0;
+        }
+        guarded_result.and(restore_result)
     }
 
     pub fn end_inkernel_boot(&mut self) -> bool {

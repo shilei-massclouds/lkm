@@ -35,6 +35,9 @@ pub fn run() -> SmokeResult {
     if !ctx.rcu_core.scheduler_starting_ready()
         || !ctx.rcu_core.scheduler_active_init()
         || !ctx.rcu_core.scheduler_start_single_online_cpu()
+        || !ctx.rcu_core.scheduler_start_local_irq_guarded()
+        || ctx.rcu_core.scheduler_start_local_irq_save_count() == 0
+        || ctx.rcu_core.scheduler_start_local_irq_restore_count() == 0
         || !ctx.rcu_core.gp_seq_baseline_synced()
         || !ctx.rcu_core.gp_threads_deferred()
     {
@@ -51,6 +54,8 @@ pub fn run() -> SmokeResult {
         || !ctx.kernel_init_task.running()
         || !ctx.kernel_init_task.enqueued()
         || ctx.kernel_init_task.cpu_id() != boot_cpu.logical_id()
+        || !ctx.kernel_init_task.pid_lookup_under_rcu_read()
+        || !ctx.kernel_init_task.pid_lookup_rcu_guard_balanced()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
         || !boot_scheduler_view.runqueue_contains_task_id(ctx.kernel_init_task.pid())
         || ctx.kernel_init_task_pi_lock.state() != State::Ready
@@ -89,6 +94,8 @@ pub fn run() -> SmokeResult {
         || !boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         || !ctx.kthreadd_task.global_ref_bound()
         || !ctx.kthreadd_task.provider_ready()
+        || !ctx.kthreadd_task.pid_lookup_under_rcu_read()
+        || !ctx.kthreadd_task.pid_lookup_rcu_guard_balanced()
         || !ctx.kthreadd_task.schedule_loop_deferred()
         || ctx.kthreadd_task_pi_lock.state() != State::Ready
         || ctx.kthreadd_task_pi_lock.locked()
@@ -111,6 +118,21 @@ pub fn run() -> SmokeResult {
         || ctx.kthreadd_ready_gate.state() != State::Online
         || !ctx.kthreadd_ready_gate.completed()
         || !ctx.kthreadd_ready_gate.release_committed()
+        || !ctx.kthreadd_ready_gate.complete_wait_lock_guard_used()
+        || ctx.kthreadd_ready_gate.complete_wait_lock_irqsave_count() == 0
+        || ctx
+            .kthreadd_ready_gate
+            .complete_wait_lock_irqrestore_count()
+            == 0
+        || !ctx.kthreadd_ready_gate.complete_done_increment_guarded()
+        || !ctx.kthreadd_ready_gate.complete_wake_guarded()
+        || ctx.kthreadd_ready_gate_wait_lock.state() != State::Ready
+        || ctx.kthreadd_ready_gate_wait_lock.locked()
+        || ctx.kthreadd_ready_gate_wait_lock.irqsave_entered_count() == 0
+        || ctx.kthreadd_ready_gate_wait_lock.irqrestore_exited_count() == 0
+        || !ctx
+            .kthreadd_ready_gate_wait_lock
+            .irqrestore_restored_before_preemption_enabled()
         || ctx.kthreadd_ready_gate.pending()
     {
         printk::write_str("system state or kthreadd gate facts invalid\n");
@@ -135,6 +157,20 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.current_runqueue_resolve_passes() == 0
         || ctx.scheduler.pick_next_task_passes() == 0
         || ctx.scheduler.switch_to_passes() == 0
+        || ctx.scheduler.schedule_preemption_disable_count() == 0
+        || ctx.scheduler.schedule_preemption_enable_no_resched_count() == 0
+        || ctx.scheduler.scheduler_rcu_context_switch_count() == 0
+        || ctx.scheduler.scheduler_rq_lock_mb_after_spinlock_count() == 0
+        || ctx.scheduler.scheduler_rq_clock_update_count() == 0
+        || ctx.scheduler.scheduler_need_resched_clear_count() == 0
+        || ctx.scheduler.scheduler_rq_curr_publish_rcu_count() == 0
+        || ctx.scheduler.scheduler_trace_sched_switch_count() == 0
+        || ctx.scheduler.scheduler_prepare_task_switch_count() == 0
+        || ctx.scheduler.scheduler_finish_task_switch_count() == 0
+        || ctx.scheduler.scheduler_finish_released_rq_lock_count() == 0
+        || ctx.scheduler.scheduler_finish_preempt_count_restore_count() == 0
+        || !ctx.scheduler.scheduler_switch_mm_or_lazy_tlb_deferred()
+        || !ctx.scheduler.scheduler_membarrier_switch_barrier_deferred()
         || ctx.scheduler.identity_switch_passes() != 0
         || ctx.scheduler.boot_idle_preemption().state() != State::Ready
         || !ctx.scheduler.boot_idle_preemption().disabled()

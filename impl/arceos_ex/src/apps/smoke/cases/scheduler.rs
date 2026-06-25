@@ -61,6 +61,22 @@ pub fn run() -> SmokeResult {
         || ctx.scheduler.switch_to_passes() == 0
         || ctx.scheduler.pick_next_task_exit_count() == 0
         || ctx.scheduler.switch_to_entry_count() == 0
+        || ctx.scheduler.schedule_preemption_disable_count() == 0
+        || ctx.scheduler.schedule_preemption_enable_no_resched_count() == 0
+        || ctx.scheduler.scheduler_rcu_context_switch_count() == 0
+        || ctx.scheduler.scheduler_rq_lock_mb_after_spinlock_count() == 0
+        || ctx.scheduler.scheduler_rq_clock_update_count() == 0
+        || ctx.scheduler.scheduler_need_resched_clear_count() == 0
+        || ctx.scheduler.scheduler_rq_curr_publish_rcu_count() == 0
+        || ctx.scheduler.scheduler_trace_sched_switch_count() == 0
+        || ctx.scheduler.scheduler_prepare_task_switch_count() == 0
+        || ctx.scheduler.scheduler_finish_task_switch_count() == 0
+        || ctx.scheduler.scheduler_finish_released_rq_lock_count() == 0
+        || ctx.scheduler.scheduler_finish_preempt_count_restore_count() == 0
+        || !ctx.scheduler.scheduler_switch_mm_or_lazy_tlb_deferred()
+        || !ctx.scheduler.scheduler_membarrier_switch_barrier_deferred()
+        || ctx.scheduler.boot_runqueue_lock().irqsave_entered_count() == 0
+        || ctx.scheduler.boot_runqueue_lock().irqrestore_exited_count() == 0
         || ctx.scheduler.pick_next_task_exit_prev_ref() != CurrentTaskRef::BootIdle
         || ctx.scheduler.pick_next_task_exit_next_ref() != CurrentTaskRef::KernelInit
         || ctx.boot_cpu_current_task.switch_committed_count() == 0

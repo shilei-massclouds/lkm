@@ -47,8 +47,11 @@ pub fn setup(ctx: &mut Context) -> ! {
 }
 
 fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
-    ctx.rcu_core
-        .scheduler_start(&ctx.scheduler, &ctx.cpu_group)?;
+    ctx.rcu_core.scheduler_start(
+        &ctx.scheduler,
+        &ctx.cpu_group,
+        &mut ctx.boot_cpu_local_interrupt,
+    )?;
     ctx.kernel_init_task.preset(TaskSpawnInputs {
         task_creation_core: &ctx.task_creation_core,
         root_pid_namespace: &ctx.root_pid_namespace,
@@ -88,14 +91,11 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
             State::Ready,
         );
     };
-    if !ctx.kernel_init_task.pin_to_boot_cpu(boot_cpu.logical_id()) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE),
-            State::Base,
-            State::Ready,
-        );
-    }
+    ctx.kernel_init_task.pin_to_boot_cpu(
+        boot_cpu.logical_id(),
+        &ctx.root_pid_namespace,
+        ctx.scheduler.boot_idle_rcu_read_side_mut(),
+    )?;
     checkpoint_numa_default_policy_noop()?;
     ctx.kthreadd_task.preset(TaskSpawnInputs {
         task_creation_core: &ctx.task_creation_core,
@@ -127,25 +127,26 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.boot_cpu_current_task,
         &mut ctx.kthreadd_task_pi_lock,
     )?;
-    if !ctx.kthreadd_task.bind_global_ref(&ctx.root_pid_namespace) {
-        return failed_condition(
-            LifecycleEvent::Setup,
-            crate::phases::state::load(&BOOT_INIT_REST_INIT_PHASE_STATE),
-            State::Base,
-            State::Ready,
-        );
-    }
+    ctx.kthreadd_task.bind_global_ref(
+        &ctx.root_pid_namespace,
+        ctx.scheduler.boot_idle_rcu_read_side_mut(),
+    )?;
     ctx.system_state.preset()?;
     ctx.system_state
         .setup(&ctx.kernel_init_task, &ctx.kthreadd_task)?;
     ctx.kthreadd_ready_gate
         .setup(&ctx.kernel_init_task, &ctx.kthreadd_task)?;
+    ctx.kthreadd_ready_gate_wait_lock
+        .setup_with_checkpoint(Checkpoint::KthreaddReadyGateWaitLockReady)?;
     ctx.kthreadd_ready_gate
         .enable(&ctx.system_state, &ctx.kthreadd_task)?;
     ctx.kthreadd_ready_gate.complete(
         &ctx.system_state,
         &ctx.kthreadd_task,
         &mut ctx.kernel_init_task,
+        &mut ctx.kthreadd_ready_gate_wait_lock,
+        &mut ctx.boot_cpu_local_interrupt,
+        &mut ctx.scheduler,
     )
 }
 
