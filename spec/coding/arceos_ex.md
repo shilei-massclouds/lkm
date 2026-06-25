@@ -1624,8 +1624,10 @@ checkpoint 或 no-op 条件，不得以零散 TODO 代替正式 deferred。
 正式 console 进入准备边界后，真实 console device probe、boot console unregister 和完整 early/boot console handoff
 仍是条件事实或后续设备初始化结果，不作为本阶段固定结束条件。
 
-`sched_clock_init()` 对应 `SchedClock.setup()`，只发布 generic sched clock core 的启动期读数可用事实，不改变
-`RiscvTimerProvider` 或 `Timekeeper` 的生命周期状态。`calibrate_delay()` 对应 `DelayLoop.setup()`，消费
+`sched_clock_init()` 对应 `SchedClock.setup()`，发布 generic sched clock core 的启动期读数可用事实，不改变
+`RiscvTimerProvider` 或 `Timekeeper` 的生命周期状态。Linux 在 `generic_sched_clock_init()` 周围使用
+`local_irq_save()`/`local_irq_restore()`；当前实现必须通过既有 `BootCpuLocalInterrupt` / `LocalInterruptControl`
+记录这个临时本地中断 guard，不能因为外层阶段语义已经是中断开放后单任务上下文而省略该协议事实。`calibrate_delay()` 对应 `DelayLoop.setup()`，消费
 `RiscvTimerProvider` 的 timebase/lpj fact，建立 `udelay`/`ndelay`/`mdelay` 等 Ready 后 action 的参数基础。
 
 本阶段仍不得打开普通任务并发或 secondary CPU 并发；周期 tick 服务、完整 softirq 执行、IPI enable、workqueue worker

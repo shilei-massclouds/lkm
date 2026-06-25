@@ -188,6 +188,8 @@ predicate cpu_hotplug_ap_sync_state_online<T, U>(hotplug_state: T, cpu: U) -> bo
 predicate resource_tree_write_lock_guard_used<T>(resource_tree: T) -> bool;
 predicate printk_buffer_setup_local_irq_save_restore_used<T>(buffer: T) -> bool;
 predicate printk_buffer_setup_local_irq_guard_used<T, U>(buffer: T, control: U) -> bool;
+predicate sched_clock_setup_local_irq_save_restore_used<T>(clock: T) -> bool;
+predicate sched_clock_setup_local_irq_guard_used<T, U>(clock: T, control: U) -> bool;
 predicate printk_buffer_setup_prepared_dynamic_buffer<T>(buffer: T) -> bool;
 predicate printk_buffer_setup_switched_active_buffer<T>(buffer: T) -> bool;
 predicate printk_buffer_setup_copied_remaining_records<T>(buffer: T) -> bool;

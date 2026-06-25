@@ -43,6 +43,15 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    if !ctx.sched_clock.setup_local_irq_save_restore_used()
+        || !ctx
+            .sched_clock
+            .setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)
+    {
+        printk::write_str("sched clock local irq guard facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     let Some(first_sched_clock) = ctx.sched_clock.read(&ctx.riscv_timer_provider) else {
         printk::write_str("sched clock read unavailable\n");
         return SmokeResult::Failed;

@@ -38,6 +38,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.timekeeper,
         &ctx.riscv_timer_provider,
         &ctx.static_branch,
+        &mut ctx.boot_cpu_local_interrupt,
     )?;
     ctx.delay_loop
         .setup(&ctx.riscv_timer_provider, &ctx.cpu_group)?;
@@ -81,6 +82,7 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && csr::supervisor_interrupts_enabled()
         && ctx.irq_dispatch_tree.state() == State::Ready
         && ctx.sbi_ipi.state() == State::Ready
+        && ctx.sbi_ipi.enable_deferred()
         && ctx.tick.state() == State::Ready
         && ctx.timer_wheel.state() == State::Ready
         && ctx.hrtimer_core.state() == State::Ready
@@ -89,6 +91,7 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.timekeeper.state() == State::Ready
         && ctx.riscv_timer_provider.state() == State::Ready
         && ctx.smp_call_function.state() == State::Ready
+        && ctx.smp_call_function.runtime_ipi_delivery_deferred()
         && ctx.workqueue.state() == State::Prepared
         && !ctx.workqueue.workers_running()
         && ctx.slub_subsystem.state() == State::Ready
@@ -117,6 +120,10 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.sched_clock.reader_ready()
         && ctx.sched_clock.timer_ready()
         && ctx.sched_clock.timer_period() != 0
+        && ctx.sched_clock.setup_local_irq_save_restore_used()
+        && ctx
+            .sched_clock
+            .setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)
         && ctx.delay_loop.state() == State::Ready
         && ctx.delay_loop.lpj_fine() != 0
         && ctx.delay_loop.boot_cpu_loops_per_jiffy() == ctx.delay_loop.lpj_fine()

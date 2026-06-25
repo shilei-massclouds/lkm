@@ -1,4 +1,5 @@
 use super::{
+    cpu_control::LocalInterruptControl,
     cpu_group::CpuGroup,
     earlycon,
     irq_time::{HrtimerCore, RiscvTimerProvider, Timekeeper},
@@ -255,6 +256,8 @@ pub struct SchedClock {
     reader_ready: bool,
     timer_ready: bool,
     timer_period: u64,
+    setup_local_irq_save_restore_used: bool,
+    setup_local_irq_guard_bound_to_boot_cpu: bool,
 }
 
 impl SchedClock {
@@ -265,6 +268,8 @@ impl SchedClock {
             reader_ready: false,
             timer_ready: false,
             timer_period: 0,
+            setup_local_irq_save_restore_used: false,
+            setup_local_irq_guard_bound_to_boot_cpu: false,
         }
     }
 
@@ -288,12 +293,28 @@ impl SchedClock {
         self.timer_period
     }
 
+    pub const fn setup_local_irq_save_restore_used(&self) -> bool {
+        self.setup_local_irq_save_restore_used
+    }
+
+    pub fn setup_local_irq_guard_used_by(
+        &self,
+        boot_cpu_local_interrupt: &LocalInterruptControl,
+    ) -> bool {
+        self.lifecycle.state() == State::Ready
+            && self.setup_local_irq_save_restore_used
+            && self.setup_local_irq_guard_bound_to_boot_cpu
+            && boot_cpu_local_interrupt.state() == State::Ready
+            && boot_cpu_local_interrupt.enabled()
+    }
+
     pub fn setup(
         &mut self,
         hrtimer_core: &HrtimerCore,
         timekeeper: &Timekeeper,
         timer_provider: &RiscvTimerProvider,
         static_branch: &StaticBranch,
+        boot_cpu_local_interrupt: &mut LocalInterruptControl,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || hrtimer_core.state() != State::Ready
@@ -301,6 +322,8 @@ impl SchedClock {
             || timer_provider.state() != State::Ready
             || timer_provider.timebase_hz() == 0
             || static_branch.state() != State::Ready
+            || boot_cpu_local_interrupt.state() != State::Ready
+            || !boot_cpu_local_interrupt.enabled()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -310,10 +333,19 @@ impl SchedClock {
             );
         }
 
+        /*
+         * SchedClockLocalInterruptContext:
+         * Linux sched_clock_init() wraps generic_sched_clock_init() with
+         * local_irq_save()/local_irq_restore().
+         */
+        boot_cpu_local_interrupt.save_and_disable()?;
         self.running_key_enabled = true;
         self.reader_ready = true;
         self.timer_ready = true;
         self.timer_period = SCHED_CLOCK_TIMER_PERIOD;
+        self.setup_local_irq_save_restore_used = true;
+        self.setup_local_irq_guard_bound_to_boot_cpu = true;
+        boot_cpu_local_interrupt.restore()?;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,

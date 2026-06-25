@@ -115,6 +115,28 @@ object ConsoleDriverSet: ConsoleObject {
  * SchedClock 表示 sched_clock_init() 后 generic sched clock core 进入
  * 启动期可用边界。它不改变 RiscvTimerProvider 的生命周期状态。
  */
+context SchedClockLocalInterruptContext: Context {
+    /*
+     * Linux sched_clock_init() temporarily disables local interrupts around
+     * generic_sched_clock_init(). The outer phase has local interrupts enabled,
+     * so this records the local irqsave/restore window explicitly.
+     */
+    guard {
+        entered_by {
+            BootCpuLocalInterrupt.Transition::SaveAndDisable;
+        }
+
+        exited_by {
+            BootCpuLocalInterrupt.Transition::Restore;
+        }
+    }
+
+    obj_refs {
+        SchedClock;
+        BootCpuLocalInterrupt;
+    }
+}
+
 object SchedClock: KernelObject {
     initial_state: State::Base;
 
@@ -126,6 +148,14 @@ object SchedClock: KernelObject {
                     Timekeeper.state == State::Ready;
                     RiscvTimerProvider.state == State::Ready;
                     StaticBranch.state == State::Ready;
+                    BootCpuLocalInterrupt.state == State::Ready;
+                    boot_cpu_local_irq_enabled();
+                }
+
+                within SchedClockLocalInterruptContext {
+                    ensures {
+                        sched_clock_setup_local_irq_guard_used(SchedClock, BootCpuLocalInterrupt);
+                    }
                 }
 
                 ensures {
@@ -133,6 +163,7 @@ object SchedClock: KernelObject {
                     sched_clock_running_key_enabled(SchedClock, StaticBranch);
                     sched_clock_reader_ready(SchedClock);
                     sched_clock_timer_ready(SchedClock, HrtimerCore);
+                    sched_clock_setup_local_irq_save_restore_used(SchedClock);
                 }
             }
         }
@@ -144,6 +175,8 @@ object SchedClock: KernelObject {
             sched_clock_running_key_enabled(SchedClock, StaticBranch);
             sched_clock_reader_ready(SchedClock);
             sched_clock_timer_ready(SchedClock, HrtimerCore);
+            sched_clock_setup_local_irq_save_restore_used(SchedClock);
+            sched_clock_setup_local_irq_guard_used(SchedClock, BootCpuLocalInterrupt);
         }
     }
 }
@@ -230,6 +263,10 @@ object IrqOpenPreparePhase: PhaseObject {
                     smp_concurrency_closed();
                     boot_cpu_local_irq_enabled();
                     early_boot_irqs_disabled_false();
+                    softirq_execution_closed(Softirq);
+                    workqueue_workers_not_running(Workqueue);
+                    sbi_ipi_enable_deferred(SbiIpi);
+                    smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
                     slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
                     page_allocator_per_cpu_pagesets_deferred(PageAllocator);
                     lockdep_path_trimmed();
@@ -257,6 +294,9 @@ object IrqOpenPreparePhase: PhaseObject {
             IrqTimeInitPhase.state == State::Ready;
             LocalIrqEnablePhase.state == State::Ready;
             InterruptStream.state == State::Online;
+            SbiIpi.state == State::Ready;
+            Softirq.state == State::Ready;
+            SmpCallFunction.state == State::Ready;
             SlubSubsystem.state == State::Ready;
             KmallocCaches.state == State::Ready;
             Workqueue.state == State::Prepared;
@@ -271,6 +311,10 @@ object IrqOpenPreparePhase: PhaseObject {
             smp_concurrency_closed();
             boot_cpu_local_irq_enabled();
             early_boot_irqs_disabled_false();
+            softirq_execution_closed(Softirq);
+            workqueue_workers_not_running(Workqueue);
+            sbi_ipi_enable_deferred(SbiIpi);
+            smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
             slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
         }
     }

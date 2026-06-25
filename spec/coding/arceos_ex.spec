@@ -189,6 +189,7 @@ predicate arceos_ex_must_irq_open_prepare_run_after_local_irq_enable() -> bool;
 predicate arceos_ex_must_irq_open_prepare_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_irq_open_prepare_keep_slub_ready_not_online() -> bool;
 predicate arceos_ex_must_irq_open_prepare_console_prepared_only() -> bool;
+predicate arceos_ex_must_irq_open_prepare_sched_clock_record_local_irq_guard() -> bool;
 predicate arceos_ex_must_irq_open_prepare_expose_sched_clock_and_delay_smoke_actions() -> bool;
 predicate arceos_ex_must_process_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_process_prepare_code_path_follow_interrupt_phase_tree() -> bool;
@@ -1785,6 +1786,17 @@ type ArceosExIrqOpenPrepareCodingMust {
          * or deferred facts.
          */
         arceos_ex_must_irq_open_prepare_console_prepared_only();
+
+        /*
+         * Sched clock local IRQ guard:
+         *
+         * sched_clock_init() must record the local_irq_save()/local_irq_restore()
+         * window around generic_sched_clock_init() through the existing
+         * BootCpuLocalInterrupt LocalInterruptControl. The surrounding phase
+         * context has local interrupts enabled, so this temporary guard must
+         * remain an explicit protocol fact.
+         */
+        arceos_ex_must_irq_open_prepare_sched_clock_record_local_irq_guard();
 
         /*
          * Smoke actions:
