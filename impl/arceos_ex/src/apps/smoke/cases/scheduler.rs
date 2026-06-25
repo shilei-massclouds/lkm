@@ -191,6 +191,7 @@ fn boot_cpu_owned_scheduler_view_matches() -> bool {
         && idle_task.cpu_id() == boot_cpu.logical_id()
         && view.runqueue_current_task_id() == idle_task.task_id()
         && view.runqueue_idle_task_id() == idle_task.task_id()
+        && view.runqueue_task_count() == ctx.scheduler.boot_runqueue().task_count()
         && view.runqueue_idle_task_matches()
         && idle_task.uses_current_init_task()
         && idle_task.lazy_tlb_mm_ready()

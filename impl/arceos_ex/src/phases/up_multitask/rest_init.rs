@@ -304,6 +304,10 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
     let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
         return false;
     };
+    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    else {
+        return false;
+    };
 
     crate::phases::interrupt::process_prepare::is_ready()
         && ctx.rcu_core.scheduler_starting_ready()
@@ -327,10 +331,7 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.kernel_init_task.sched_entity_ready()
         && ctx.kernel_init_task.running()
         && ctx.kernel_init_task.enqueued()
-        && ctx
-            .scheduler
-            .boot_runqueue()
-            .contains_task(ctx.kernel_init_task.pid())
+        && boot_scheduler_view.runqueue_contains_task_id(ctx.kernel_init_task.pid())
         && ctx.kernel_init_task_pi_lock.state() == State::Ready
         && !ctx.kernel_init_task_pi_lock.locked()
         && ctx.kernel_init_task_pi_lock.irqsave_entered_count() != 0
@@ -354,10 +355,7 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.kthreadd_task.running()
         && ctx.kthreadd_task.cpu_id() == boot_cpu.logical_id()
         && ctx.scheduler.selected_runqueue_task_id() == ctx.kthreadd_task.pid()
-        && ctx
-            .scheduler
-            .boot_runqueue()
-            .contains_task(ctx.kthreadd_task.pid())
+        && boot_scheduler_view.runqueue_contains_task_id(ctx.kthreadd_task.pid())
         && ctx.kthreadd_task_pi_lock.state() == State::Ready
         && !ctx.kthreadd_task_pi_lock.locked()
         && ctx.kthreadd_task_pi_lock.irqsave_entered_count() != 0

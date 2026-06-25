@@ -2354,8 +2354,13 @@ type ArceosExRestInitCodingMust {
          * accessors may remain as transitional storage/debug observation
          * surfaces and for BootRunQueue/BootIdleTask-local APIs, but not as the
          * primary readiness predicate in rest_init task setup/enable paths.
+         * RestInit phase predicates and checkpoint/KUnit handlers that verify
+         * boot CPU runqueue membership or task count must consume read-only
+         * membership/count facts projected by CpuOwnedSchedulerView, not
+         * re-read Scheduler.boot_runqueue() as the formal observation source.
          */
         arceos_ex_must_expose_boot_cpu_owned_scheduler_view();
+        arceos_ex_must_observe_rest_init_runqueue_facts_through_cpu_view();
 
         /*
          * Transitional lowering:

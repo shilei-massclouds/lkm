@@ -241,6 +241,25 @@ impl Scheduler {
             idle_task,
             runqueue_current_task_id: self.boot_runqueue.curr_task_id(),
             runqueue_idle_task_id: self.boot_runqueue.idle_task_id(),
+            runqueue_task_count: self.boot_runqueue.task_count(),
+            runqueue_kernel_init_task_enqueued: self
+                .boot_runqueue
+                .contains_task(crate::objects::rest_init::KERNEL_INIT_PID),
+            runqueue_kthreadd_task_enqueued: self
+                .boot_runqueue
+                .contains_task(crate::objects::rest_init::KTHREADD_PID),
+            runqueue_smoke_scheduler_task_enqueued: self
+                .boot_runqueue
+                .contains_task(SMOKE_SCHEDULER_TASK_ID),
+            runqueue_smoke_mutex_task_enqueued: self
+                .boot_runqueue
+                .contains_task(SMOKE_MUTEX_TASK_ID),
+            runqueue_smoke_rwsem_task_enqueued: self
+                .boot_runqueue
+                .contains_task(SMOKE_RWSEM_TASK_ID),
+            runqueue_smoke_rwlock_task_enqueued: self
+                .boot_runqueue
+                .contains_task(SMOKE_RWLOCK_TASK_ID),
         })
     }
 
@@ -1450,6 +1469,13 @@ pub struct CpuOwnedSchedulerView {
     idle_task: CpuIdleTaskView,
     runqueue_current_task_id: usize,
     runqueue_idle_task_id: usize,
+    runqueue_task_count: usize,
+    runqueue_kernel_init_task_enqueued: bool,
+    runqueue_kthreadd_task_enqueued: bool,
+    runqueue_smoke_scheduler_task_enqueued: bool,
+    runqueue_smoke_mutex_task_enqueued: bool,
+    runqueue_smoke_rwsem_task_enqueued: bool,
+    runqueue_smoke_rwlock_task_enqueued: bool,
 }
 
 impl CpuOwnedSchedulerView {
@@ -1479,6 +1505,21 @@ impl CpuOwnedSchedulerView {
 
     pub const fn runqueue_idle_task_id(self) -> usize {
         self.runqueue_idle_task_id
+    }
+
+    pub const fn runqueue_task_count(self) -> usize {
+        self.runqueue_task_count
+    }
+
+    pub const fn runqueue_contains_task_id(self, task_id: usize) -> bool {
+        (self.runqueue_kernel_init_task_enqueued
+            && task_id == crate::objects::rest_init::KERNEL_INIT_PID)
+            || (self.runqueue_kthreadd_task_enqueued
+                && task_id == crate::objects::rest_init::KTHREADD_PID)
+            || (self.runqueue_smoke_scheduler_task_enqueued && task_id == SMOKE_SCHEDULER_TASK_ID)
+            || (self.runqueue_smoke_mutex_task_enqueued && task_id == SMOKE_MUTEX_TASK_ID)
+            || (self.runqueue_smoke_rwsem_task_enqueued && task_id == SMOKE_RWSEM_TASK_ID)
+            || (self.runqueue_smoke_rwlock_task_enqueued && task_id == SMOKE_RWLOCK_TASK_ID)
     }
 
     pub const fn runqueue_idle_task_matches(self) -> bool {

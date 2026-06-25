@@ -36,6 +36,16 @@ fn check_ready(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Ch
     let total = super::kunit_case_count();
     let name = "kernel_init_task.ready";
     sink.start_case(total, "", name, checkpoint);
+    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    else {
+        sink.fail(
+            total,
+            "",
+            name,
+            "KernelInitTask Ready CPU scheduler view missing",
+        );
+        return CheckpointOutcome::FailAndShutdown;
+    };
 
     if ctx.kernel_init_task.state() != State::Ready
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
@@ -49,11 +59,8 @@ fn check_ready(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Ch
         || ctx.kernel_init_task.running()
         || ctx.kernel_init_task.enqueued()
         || !ctx.task_creation_core.kernel_init_created()
-        || ctx
-            .scheduler
-            .boot_runqueue()
-            .contains_task(ctx.kernel_init_task.pid())
-        || ctx.scheduler.boot_runqueue().task_count() != 0
+        || boot_scheduler_view.runqueue_contains_task_id(ctx.kernel_init_task.pid())
+        || boot_scheduler_view.runqueue_task_count() != 0
     {
         sink.fail(total, "", name, "KernelInitTask Ready facts invalid");
         return CheckpointOutcome::FailAndShutdown;
@@ -71,6 +78,16 @@ fn check_online(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> C
         sink.fail(total, "", name, "KernelInitTask Online boot CPU missing");
         return CheckpointOutcome::FailAndShutdown;
     };
+    let Some(boot_scheduler_view) = ctx.scheduler.boot_cpu_owned_scheduler_view(&ctx.cpu_group)
+    else {
+        sink.fail(
+            total,
+            "",
+            name,
+            "KernelInitTask Online CPU scheduler view missing",
+        );
+        return CheckpointOutcome::FailAndShutdown;
+    };
 
     if ctx.kernel_init_task.state() != State::Online
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
@@ -78,11 +95,8 @@ fn check_online(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> C
         || !ctx.kernel_init_task.running()
         || !ctx.kernel_init_task.enqueued()
         || ctx.kernel_init_task.cpu_id() != boot_cpu.logical_id()
-        || !ctx
-            .scheduler
-            .boot_runqueue()
-            .contains_task(ctx.kernel_init_task.pid())
-        || ctx.scheduler.boot_runqueue().task_count() != 1
+        || !boot_scheduler_view.runqueue_contains_task_id(ctx.kernel_init_task.pid())
+        || boot_scheduler_view.runqueue_task_count() != 1
     {
         sink.fail(total, "", name, "KernelInitTask Online facts invalid");
         return CheckpointOutcome::FailAndShutdown;
