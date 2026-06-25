@@ -54,21 +54,33 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if ctx.sched_init_trimmed_paths.state() != State::Ready
-        || !ctx.sched_init_trimmed_paths.poking_init_trimmed_noop()
-        || !ctx.sched_init_trimmed_paths.ftrace_init_trimmed_noop()
+    if ctx.sched_init_prelude_trimmed_paths.state() != State::Ready
         || !ctx
-            .sched_init_trimmed_paths
+            .sched_init_prelude_trimmed_paths
+            .poking_init_trimmed_noop()
+        || !ctx
+            .sched_init_prelude_trimmed_paths
+            .ftrace_init_trimmed_noop()
+        || !ctx
+            .sched_init_prelude_trimmed_paths
             .ftrace_trimmed_because_mcount_record_disabled()
         || !ctx
-            .sched_init_trimmed_paths
+            .sched_init_prelude_trimmed_paths
+            .early_trace_init_deferred()
+        || !ctx.sched_init_prelude_trimmed_paths.position_preserved()
+        || ctx.sched_init_trace_context_boundaries.state() != State::Ready
+        || !ctx
+            .sched_init_trace_context_boundaries
+            .trace_init_deferred()
+        || !ctx
+            .sched_init_trace_context_boundaries
             .context_tracking_init_trimmed_noop()
         || !ctx
-            .sched_init_trimmed_paths
+            .sched_init_trace_context_boundaries
             .context_tracking_trimmed_because_user_force_disabled()
-        || !ctx.sched_init_trimmed_paths.position_preserved()
+        || !ctx.sched_init_trace_context_boundaries.position_preserved()
     {
-        printk::write_str("sched init trimmed path facts invalid\n");
+        printk::write_str("sched init boundary facts invalid\n");
         return SmokeResult::Failed;
     }
 

@@ -23,8 +23,7 @@ pub fn setup(ctx: &mut Context) -> ! {
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
-    checkpoint_poking_init_noop()?;
-    checkpoint_ftrace_init_trimmed_noop()?;
+    ctx.sched_init_prelude_trimmed_paths.setup()?;
     ctx.scheduler
         .preset(&ctx.cpu_group, &ctx.per_cpu_storage, &ctx.static_branch)?;
     ctx.scheduler.setup(
@@ -55,10 +54,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.cpu_group,
         &ctx.per_cpu_storage,
     )?;
-    ctx.sched_init_trimmed_paths
-        .setup(&ctx.scheduler, &ctx.rcu_core)?;
-    checkpoint_trace_init_deferred()?;
-    checkpoint_context_tracking_trimmed_noop()
+    ctx.sched_init_trace_context_boundaries
+        .setup(&ctx.sched_init_prelude_trimmed_paths, &ctx.rcu_core)
 }
 
 fn handoff() -> ! {
@@ -257,32 +254,34 @@ fn sched_init_phase_ready(ctx: &Context) -> bool {
         && ctx.rcu_core.tasks_rcu().percpu_work_ready()
         && ctx.rcu_core.tasks_rcu().barrier_heads_ready()
         && ctx.rcu_core.tasks_rcu().gp_threads_deferred()
-        && ctx.sched_init_trimmed_paths.state() == State::Ready
-        && ctx.sched_init_trimmed_paths.poking_init_trimmed_noop()
-        && ctx.sched_init_trimmed_paths.ftrace_init_trimmed_noop()
+        && ctx.sched_init_prelude_trimmed_paths.state() == State::Ready
         && ctx
-            .sched_init_trimmed_paths
+            .sched_init_prelude_trimmed_paths
+            .poking_init_trimmed_noop()
+        && ctx
+            .sched_init_prelude_trimmed_paths
+            .ftrace_init_trimmed_noop()
+        && ctx
+            .sched_init_prelude_trimmed_paths
             .ftrace_trimmed_because_mcount_record_disabled()
         && ctx
-            .sched_init_trimmed_paths
+            .sched_init_prelude_trimmed_paths
+            .early_trace_init_deferred()
+        && ctx.sched_init_prelude_trimmed_paths.position_preserved()
+        && ctx.sched_init_trace_context_boundaries.state() == State::Ready
+        && ctx
+            .sched_init_trace_context_boundaries
+            .trace_init_deferred()
+        && ctx
+            .sched_init_trace_context_boundaries
             .context_tracking_init_trimmed_noop()
         && ctx
-            .sched_init_trimmed_paths
+            .sched_init_trace_context_boundaries
             .context_tracking_trimmed_because_user_force_disabled()
-        && ctx.sched_init_trimmed_paths.position_preserved()
+        && ctx.sched_init_trace_context_boundaries.position_preserved()
         && printk::is_ready()
         && (earlycon::is_online() || printk::console_handoff_complete())
         && !crate::arch::riscv64::csr::supervisor_interrupts_enabled()
-}
-
-fn checkpoint_poking_init_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::PokingInitNoop);
-    Ok(())
-}
-
-fn checkpoint_ftrace_init_trimmed_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::FtraceInitTrimmedNoop);
-    Ok(())
 }
 
 fn checkpoint_irqs_disabled() -> EventResult {
@@ -296,15 +295,5 @@ fn checkpoint_irqs_disabled() -> EventResult {
     }
 
     crate::trace::checkpoint(Checkpoint::SchedInitIrqsDisabledCheckpoint);
-    Ok(())
-}
-
-fn checkpoint_trace_init_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::TraceInitDeferred);
-    Ok(())
-}
-
-fn checkpoint_context_tracking_trimmed_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::ContextTrackingInitTrimmedNoop);
     Ok(())
 }

@@ -2492,7 +2492,12 @@ type ArceosExRestInitCodingMust {
          * early_trace_init()/trace_init() and housekeeping_init() remain
          * explicit deferred boundaries whose Linux responsibilities must not
          * be collapsed into the project checkpoint trace or ignored as
-         * permanently absent.
+         * permanently absent. The implementation must preserve the Linux call
+         * order inside the existing SchedInitPhase: poking_init()/ftrace_init()
+         * are recorded before Scheduler setup via SchedInitPreludeTrimmedPaths,
+         * while trace_init()/context_tracking_init() are recorded after
+         * rcu_init() via SchedInitTraceContextBoundaries. These are boundary
+         * objects, not formal subphases.
          */
         arceos_ex_must_sched_init_softirq_prepare_shell_only();
         arceos_ex_must_sched_init_rcu_register_rcu_softirq_explicitly();

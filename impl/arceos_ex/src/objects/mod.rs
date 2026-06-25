@@ -76,7 +76,7 @@ pub mod rootfs;
 pub mod runtime_core;
 pub mod rwlock;
 pub mod sbi;
-pub mod sched_init_trimmed;
+pub mod sched_init_boundaries;
 pub mod scheduler;
 pub mod smp_bringup;
 pub mod soc;
