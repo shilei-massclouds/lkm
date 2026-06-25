@@ -59,16 +59,22 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
     ctx.kernel_init_task_pi_lock.setup()?;
     ctx.kernel_init_task.enable(
         &mut ctx.scheduler,
+        &ctx.cpu_group,
         &ctx.boot_current_cpu,
         &mut ctx.boot_cpu_local_interrupt,
         &ctx.boot_cpu_current_task,
         &mut ctx.kernel_init_task_pi_lock,
     )?;
     crate::checkpoint::dispatch(Checkpoint::KernelInitTaskOnline, ctx);
-    if !ctx
-        .kernel_init_task
-        .pin_to_boot_cpu(ctx.scheduler.boot_runqueue().cpu_id())
-    {
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        return failed_condition(
+            LifecycleEvent::Preset,
+            crate::phases::state::load(&REST_INIT_PHASE_STATE),
+            State::Base,
+            State::Prepared,
+        );
+    };
+    if !ctx.kernel_init_task.pin_to_boot_cpu(boot_cpu.logical_id()) {
         return failed_condition(
             LifecycleEvent::Preset,
             crate::phases::state::load(&REST_INIT_PHASE_STATE),
@@ -100,6 +106,7 @@ fn setup_dispatch_objects(ctx: &mut Context) -> EventResult {
         .setup_with_checkpoint(Checkpoint::KthreaddTaskPiLockReady)?;
     ctx.kthreadd_task.enable(
         &mut ctx.scheduler,
+        &ctx.cpu_group,
         &ctx.boot_current_cpu,
         &mut ctx.boot_cpu_local_interrupt,
         &ctx.boot_cpu_current_task,
@@ -286,6 +293,10 @@ fn rest_init_phase_ready(ctx: &Context) -> bool {
 }
 
 fn rest_init_dispatch_ready(ctx: &Context) -> bool {
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        return false;
+    };
+
     crate::phases::interrupt::process_prepare::is_ready()
         && ctx.rcu_core.scheduler_starting_ready()
         && ctx.rcu_core.scheduler_active_init()
@@ -320,7 +331,7 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.kernel_init_task.released_for_pre_smp_init()
         && ctx.kernel_init_task.pinned_to_boot_cpu()
         && ctx.kernel_init_task.pf_no_setaffinity()
-        && ctx.kernel_init_task.cpu_id() == ctx.scheduler.boot_runqueue().cpu_id()
+        && ctx.kernel_init_task.cpu_id() == boot_cpu.logical_id()
         && ctx.kthreadd_task.state() == State::Online
         && ctx.kthreadd_task.pid() == 2
         && ctx.kthreadd_task.entry() == TaskEntry::Kthreadd
@@ -333,7 +344,7 @@ fn rest_init_dispatch_ready(ctx: &Context) -> bool {
         && ctx.kthreadd_task.thread_context_ready()
         && ctx.kthreadd_task.sched_entity_ready()
         && ctx.kthreadd_task.running()
-        && ctx.kthreadd_task.cpu_id() == ctx.scheduler.boot_runqueue().cpu_id()
+        && ctx.kthreadd_task.cpu_id() == boot_cpu.logical_id()
         && ctx.scheduler.selected_runqueue_task_id() == ctx.kthreadd_task.pid()
         && ctx
             .scheduler

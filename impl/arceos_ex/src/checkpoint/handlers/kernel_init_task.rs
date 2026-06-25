@@ -67,13 +67,17 @@ fn check_online(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> C
     let total = super::kunit_case_count();
     let name = "kernel_init_task.online";
     sink.start_case(total, "", name, checkpoint);
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        sink.fail(total, "", name, "KernelInitTask Online boot CPU missing");
+        return CheckpointOutcome::FailAndShutdown;
+    };
 
     if ctx.kernel_init_task.state() != State::Online
         || ctx.kernel_init_task.pid() != KERNEL_INIT_PID
         || ctx.kernel_init_task.entry() != TaskEntry::KernelInit
         || !ctx.kernel_init_task.running()
         || !ctx.kernel_init_task.enqueued()
-        || ctx.kernel_init_task.cpu_id() != ctx.scheduler.boot_runqueue().cpu_id()
+        || ctx.kernel_init_task.cpu_id() != boot_cpu.logical_id()
         || !ctx
             .scheduler
             .boot_runqueue()

@@ -211,6 +211,7 @@ impl KernelInitTask {
     pub fn enable(
         &mut self,
         scheduler: &mut Scheduler,
+        cpu_group: &CpuGroup,
         current_cpu: &BootCurrentCpu,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &CurrentTaskSlot,
@@ -219,6 +220,7 @@ impl KernelInitTask {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
             || scheduler.boot_runqueue().state() != State::Ready
+            || cpu_group.state() != State::Ready
             || current_cpu.state() != State::Online
             || local_interrupt.state() != State::Ready
             || current_task_slot.state() != State::Ready
@@ -236,11 +238,20 @@ impl KernelInitTask {
             );
         }
 
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        };
+
         pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
         let guarded_result = (|| {
             self.running = true;
             scheduler.select_boot_runqueue_for_task(self.pid)?;
-            self.set_task_cpu(scheduler.boot_runqueue().cpu_id())?;
+            self.set_task_cpu(boot_cpu.logical_id())?;
             scheduler.enqueue_task_on_boot_runqueue(self.pid)?;
             self.enqueued = true;
             self.lifecycle.transition(
@@ -542,6 +553,7 @@ impl KthreaddTask {
     pub fn enable(
         &mut self,
         scheduler: &mut Scheduler,
+        cpu_group: &CpuGroup,
         current_cpu: &BootCurrentCpu,
         local_interrupt: &mut LocalInterruptControl,
         current_task_slot: &CurrentTaskSlot,
@@ -550,6 +562,7 @@ impl KthreaddTask {
         if self.lifecycle.state() != State::Ready
             || scheduler.state() != State::Online
             || scheduler.boot_runqueue().state() != State::Ready
+            || cpu_group.state() != State::Ready
             || current_cpu.state() != State::Online
             || local_interrupt.state() != State::Ready
             || current_task_slot.state() != State::Ready
@@ -567,11 +580,20 @@ impl KthreaddTask {
             );
         }
 
+        let Some(boot_cpu) = cpu_group.boot_cpu() else {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Online,
+            );
+        };
+
         pi_lock.lock_irqsave(local_interrupt, scheduler.boot_idle_preemption_mut())?;
         let guarded_result = (|| {
             self.running = true;
             scheduler.select_boot_runqueue_for_task(self.pid)?;
-            self.set_task_cpu(scheduler.boot_runqueue().cpu_id())?;
+            self.set_task_cpu(boot_cpu.logical_id())?;
             scheduler.enqueue_task_on_boot_runqueue(self.pid)?;
             self.enqueued = true;
             self.lifecycle.transition(

@@ -7,6 +7,10 @@ use crate::{
 
 pub fn run() -> SmokeResult {
     let ctx = context();
+    let Some(boot_cpu) = ctx.cpu_group.boot_cpu() else {
+        printk::write_str("boot CPU facts missing\n");
+        return SmokeResult::Failed;
+    };
 
     if !phases::smp_runtime::runtime_core::is_ready() || !phases::smp_runtime::is_ready() {
         printk::write_str("runtime core phase is not ready\n");
@@ -26,7 +30,7 @@ pub fn run() -> SmokeResult {
 
     if ctx.kernel_init_task.pinned_to_boot_cpu()
         || ctx.kernel_init_task.pf_no_setaffinity()
-        || ctx.kernel_init_task.cpu_id() != ctx.scheduler.boot_runqueue().cpu_id()
+        || ctx.kernel_init_task.cpu_id() != boot_cpu.logical_id()
     {
         printk::write_str("kernel_init affinity release facts invalid\n");
         return SmokeResult::Failed;
