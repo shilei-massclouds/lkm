@@ -5,52 +5,8 @@
  * sched_init/context_tracking_init and ends with IRQ/time infrastructure ready
  * while the boot CPU local interrupt gate remains closed. The following
  * LocalIrqEnablePhase owns the local_irq_enable() boundary, so this phase can
- * remain covered by the global exclusive boot context.
+ * remain covered by the outer SingleTaskContext.
  */
-
-context IrqTimeInitGlobalExclusiveContext: Context {
-    /*
-     * This context captures the start_kernel() section before
-     * local_irq_enable(): one boot CPU, one boot task, local interrupts still
-     * disabled, and preemption disabled. The following LocalIrqEnablePhase is
-     * intentionally outside this context.
-     */
-    guard {
-        holds {
-            cpu_concurrency: single_cpu;
-            task_concurrency: single_task;
-            local_interrupts: disabled;
-            preemption: disabled;
-        }
-    }
-
-    obj_refs {
-        IrqTimeInitPhase;
-        IrqController;
-        RiscvIntc;
-        IrqChipInitTable;
-        PlicDriver;
-        PlicIrqDomain;
-        IrqHandlerRegistry;
-        IrqDispatchTree;
-        Tick;
-        TimerWheel;
-        SrcuCore;
-        HrtimerCore;
-        Timekeeper;
-        RiscvTimerProvider;
-        Softirq;
-        Randomness;
-        BootStackCanary;
-        PerfEventCore;
-        ProfileCore;
-        SbiIpi;
-        IpiMux;
-        SmpCallFunction;
-        InterruptStream;
-        BootCpuLocalInterrupt;
-    }
-}
 
 context IrqControllerDescInitContext: Context {
     /*
@@ -2109,45 +2065,36 @@ object IrqTimeInitPhase: PhaseObject {
                     InterruptStream.state == State::Ready;
                 }
 
-                within IrqTimeInitGlobalExclusiveContext {
-                    drives {
-                        IrqController.Transition::Setup;
-                        RiscvIntc.Transition::Setup;
-                        IrqChipInitTable.Transition::Preset;
-                        PlicDriver.Transition::Preset;
-                        IrqChipInitTable.Transition::Setup;
-                        PlicIrqDomain.Transition::Preset;
-                        PlicIrqDomain.Transition::Setup;
-                        IrqHandlerRegistry.Transition::Setup;
-                        IrqDispatchTree.Transition::Setup;
-                        Tick.Transition::Preset;
-                        TimerWheel.Transition::Setup;
-                        SrcuCore.Transition::Setup;
-                        HrtimerCore.Transition::Setup;
-                        Timekeeper.Transition::Setup;
-                        RiscvTimerProvider.Transition::Setup;
-                        Tick.Transition::Setup;
-                        Softirq.Transition::Setup;
-                        Randomness.Transition::Setup;
-                        BootStackCanary.Transition::Setup;
-                        PerfEventCore.Transition::Setup;
-                        ProfileCore.Transition::Setup;
-                        SbiIpi.Transition::Setup;
-                        IpiMux.Transition::Setup;
-                        SmpCallFunction.Transition::Setup;
-                    }
-
-                    ensures {
-                        irq_time_init_global_exclusive_context_used(IrqTimeInitPhase);
-                        cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
-                        interrupt_concurrency_closed();
-                        early_boot_irqs_disabled_true();
-                    }
+                drives {
+                    IrqController.Transition::Setup;
+                    RiscvIntc.Transition::Setup;
+                    IrqChipInitTable.Transition::Preset;
+                    PlicDriver.Transition::Preset;
+                    IrqChipInitTable.Transition::Setup;
+                    PlicIrqDomain.Transition::Preset;
+                    PlicIrqDomain.Transition::Setup;
+                    IrqHandlerRegistry.Transition::Setup;
+                    IrqDispatchTree.Transition::Setup;
+                    Tick.Transition::Preset;
+                    TimerWheel.Transition::Setup;
+                    SrcuCore.Transition::Setup;
+                    HrtimerCore.Transition::Setup;
+                    Timekeeper.Transition::Setup;
+                    RiscvTimerProvider.Transition::Setup;
+                    Tick.Transition::Setup;
+                    Softirq.Transition::Setup;
+                    Randomness.Transition::Setup;
+                    BootStackCanary.Transition::Setup;
+                    PerfEventCore.Transition::Setup;
+                    ProfileCore.Transition::Setup;
+                    SbiIpi.Transition::Setup;
+                    IpiMux.Transition::Setup;
+                    SmpCallFunction.Transition::Setup;
                 }
 
                 ensures {
                     irq_time_init_ready(IrqTimeInitPhase);
-                    irq_time_init_global_exclusive_context_used(IrqTimeInitPhase);
+                    cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
                     interrupt_concurrency_closed();
                     task_concurrency_closed();
                     smp_concurrency_closed();
@@ -2197,7 +2144,6 @@ object IrqTimeInitPhase: PhaseObject {
             SmpCallFunction.state == State::Ready;
             InterruptStream.state == State::Ready;
             cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
-            irq_time_init_global_exclusive_context_used(IrqTimeInitPhase);
             interrupt_concurrency_closed();
             task_concurrency_closed();
             smp_concurrency_closed();
