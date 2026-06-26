@@ -31,6 +31,10 @@ fn setup() -> EventResult {
         );
     }
 
+    let ctx = crate::context::context();
+    ctx.payload_exec_sync_boundaries
+        .setup(&ctx.kernel_init_task, &ctx.system_state)?;
+
     crate::phases::state::mark(
         &PAYLOAD_PHASE_STATE,
         LifecycleEvent::Setup,

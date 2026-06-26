@@ -333,6 +333,9 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         && process.trap_frame_bound()
         && process.syscall_context_bound()
         && process.trap_return_bound()
+        && process.trap_return_context_used()
+        && process.trap_return_sfence_vma_after_satp()
+        && process.trap_return_sret_handoff()
         && process.user_entry_ready()
         && process.runtime_entered()
         && ctx.user_address_space.state() == State::Online
@@ -349,6 +352,18 @@ fn run_user_mode_entry(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sin
         process.runtime_entered() as usize,
     );
     sink.diag_usize("user_entry_ready", process.user_entry_ready() as usize);
+    sink.diag_usize(
+        "trap_return_context_used",
+        process.trap_return_context_used() as usize,
+    );
+    sink.diag_usize(
+        "trap_return_sfence_vma_after_satp",
+        process.trap_return_sfence_vma_after_satp() as usize,
+    );
+    sink.diag_usize(
+        "trap_return_sret_handoff",
+        process.trap_return_sret_handoff() as usize,
+    );
     sink.diag_usize(
         "user_address_space_runtime_ready",
         ctx.user_address_space.runtime_ready() as usize,

@@ -18,6 +18,7 @@ pub fn run() -> ! {
         &mut ctx.ext2_filesystem,
         &mut ctx.block_device_registry,
         &ctx.kernel_init_task,
+        &ctx.payload_exec_sync_boundaries,
         ctx.vm.swapper_vm(),
         &ctx.kernel_image,
         &mut ctx.page_allocator,

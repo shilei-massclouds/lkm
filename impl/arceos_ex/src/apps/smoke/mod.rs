@@ -231,6 +231,10 @@ const CASES: &[SmokeCase] = &[
         run: cases::finalize::run,
     },
     SmokeCase {
+        name: "payload",
+        run: cases::payload::run,
+    },
+    SmokeCase {
         name: "fdt",
         run: cases::fdt::run,
     },

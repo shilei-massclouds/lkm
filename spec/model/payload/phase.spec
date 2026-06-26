@@ -40,7 +40,9 @@ object PayloadPhase: PhaseObject {
                     SmpRuntimePhase.state == State::Ready;
                     FinalizePhase.state == State::Ready;
                     FinalizeBoundary.state == State::Ready;
+                    SystemState.state == State::Online;
                     KernelInitTask.state == State::Online;
+                    system_state_running(SystemState);
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
                     task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
@@ -49,6 +51,7 @@ object PayloadPhase: PhaseObject {
                 }
 
                 drives {
+                    PayloadExecSyncBoundaries.Transition::Setup;
                     UserBootPayload.Transition::Setup;
                 }
 
@@ -71,13 +74,16 @@ object PayloadPhase: PhaseObject {
             SmpRuntimePhase.state == State::Ready;
             FinalizePhase.state == State::Ready;
             FinalizeBoundary.state == State::Ready;
+            SystemState.state == State::Online;
             KernelInitTask.state == State::Online;
+            system_state_running(SystemState);
             task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
             kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             payload_phase_next_boundary();
             selected_payload_ready();
+            PayloadExecSyncBoundaries.state == State::Ready;
         }
 
         transitions {
@@ -111,13 +117,16 @@ object PayloadPhase: PhaseObject {
             SmpRuntimePhase.state == State::Ready;
             FinalizePhase.state == State::Ready;
             FinalizeBoundary.state == State::Ready;
+            SystemState.state == State::Online;
             KernelInitTask.state == State::Online;
+            system_state_running(SystemState);
             task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
             task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
             kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
             kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
             payload_phase_next_boundary();
             selected_payload_ready();
+            PayloadExecSyncBoundaries.state == State::Ready;
             selected_payload_no_return_handoff();
         }
     }

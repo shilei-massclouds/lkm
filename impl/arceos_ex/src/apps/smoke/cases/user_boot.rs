@@ -74,7 +74,9 @@ impl SmokeScenario for UserBootElfScenario {
 
         assertions.assert(
             "payload setup",
-            ctx.user_boot_payload.setup(&ctx.kernel_init_task).is_ok(),
+            ctx.user_boot_payload
+                .setup(&ctx.kernel_init_task, &ctx.payload_exec_sync_boundaries)
+                .is_ok(),
         );
         assertions.assert("elf preset", ctx.elf_object.preset_from_vfs(image).is_ok());
         assertions.assert("elf setup", ctx.elf_object.setup(image).is_ok());
@@ -267,6 +269,10 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "payload ready",
             ctx.user_boot_payload.state() == State::Ready,
+        );
+        assertions.assert(
+            "payload exec sync deferred",
+            ctx.user_boot_payload.exec_sync_boundaries_ready(),
         );
         assertions.assert("payload selected", ctx.user_boot_payload.selected());
         assertions.assert(
@@ -687,6 +693,9 @@ impl SmokeScenario for UserBootElfScenario {
         assertions.assert(
             "user init runtime not entered by smoke",
             !process.user_entry_ready()
+                && !process.trap_return_context_used()
+                && !process.trap_return_sfence_vma_after_satp()
+                && !process.trap_return_sret_handoff()
                 && !process.runtime_entered()
                 && !ctx.syscall_table.write_observed()
                 && !ctx.syscall_table.exit_observed(),

@@ -40,6 +40,25 @@ predicate user_boot_payload_try_candidate_elf_ready<T, E>(payload: T, elf: E) ->
 predicate user_boot_payload_enters_user_mode<T>(payload: T) -> bool;
 predicate user_boot_payload_no_return_handoff<T>(payload: T) -> bool;
 
+predicate payload_exec_sync_boundaries_ready<T>(boundaries: T) -> bool;
+predicate payload_kernel_execve_linux_window_bound<T>(boundaries: T) -> bool;
+predicate payload_binfmt_lock_deferred<T>(boundaries: T) -> bool;
+predicate payload_cred_guard_mutex_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_update_lock_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_mmap_local_irq_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_task_siglock_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_tasklist_lock_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_fs_lock_rcu_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_mmap_lock_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_membarrier_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_full_binfmt_deferred<T>(boundaries: T) -> bool;
+predicate payload_ramdisk_init_branch_trimmed_noop<T>(boundaries: T) -> bool;
+predicate payload_ramdisk_init_trimmed_because_config_initrd_disabled<T>(boundaries: T) -> bool;
+predicate payload_default_init_branch_trimmed_noop<T>(boundaries: T) -> bool;
+predicate payload_default_init_trimmed_because_config_default_init_empty<T>(boundaries: T) -> bool;
+predicate payload_binfmt_script_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_panic_terminal_bound<T>(boundaries: T) -> bool;
+
 predicate elf_object_input_bound<T>(elf: T) -> bool;
 predicate elf_object_input_from_vfs<T, V>(elf: T, vfs: V) -> bool;
 predicate elf_object_magic_valid<T>(elf: T) -> bool;
@@ -159,6 +178,9 @@ predicate syscall_exception_dispatches_via_table<T, S>(exception: T, table: S) -
 predicate syscall_exception_extracts_arguments<T>(exception: T) -> bool;
 predicate user_trap_return_ready() -> bool;
 predicate user_trap_return_switches_satp() -> bool;
+predicate user_trap_return_sfence_vma_after_satp() -> bool;
+predicate user_trap_return_sret_handoff() -> bool;
+predicate user_trap_return_context_used<T, R>(process: T, frame: R) -> bool;
 predicate user_trap_entry_uses_kernel_stack<T>(frame: T) -> bool;
 predicate syscall_table_write_observed<T>(table: T) -> bool;
 predicate syscall_table_writev_observed<T>(table: T) -> bool;
@@ -189,6 +211,95 @@ predicate kernel_init_task_execve_to_user_init<K, T>(task: K, process: T) -> boo
 predicate kernel_init_task_pid1_identity_preserved<K>(task: K) -> bool;
 predicate kernel_init_task_user_mm_attached<K, A>(task: K, space: A) -> bool;
 predicate kernel_init_task_user_trap_frame_attached<K, R>(task: K, frame: R) -> bool;
+
+context UserModeTrapReturnContext: Context {
+    /*
+     * UserInitProcess.EnterUserMode is the final RISC-V trap-return handoff.
+     * The body writes sscratch/sepc/sstatus/satp, executes sfence.vma after
+     * the satp write, switches to the user stack and executes sret. It has no
+     * normal runtime exit because sret transfers to U-mode.
+     */
+    guard {
+        entered_by {
+            UserInitProcess.Action::EnterUserMode;
+        }
+
+        exited_by {
+            Never;
+        }
+    }
+
+    obj_refs {
+        UserInitProcess;
+        UserAddressSpace;
+        UserTrapFrame;
+    }
+}
+
+object PayloadExecSyncBoundaries: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    PayloadParam.state == State::Ready;
+                    KernelInitTask.state == State::Online;
+                    SystemState.state == State::Online;
+                    system_state_running(SystemState);
+                }
+
+                ensures {
+                    payload_exec_sync_boundaries_ready(self);
+                    payload_kernel_execve_linux_window_bound(self);
+                    payload_binfmt_lock_deferred(self);
+                    payload_cred_guard_mutex_deferred(self);
+                    payload_exec_update_lock_deferred(self);
+                    payload_exec_mmap_local_irq_deferred(self);
+                    payload_exec_task_siglock_deferred(self);
+                    payload_exec_tasklist_lock_deferred(self);
+                    payload_exec_fs_lock_rcu_deferred(self);
+                    payload_exec_mmap_lock_deferred(self);
+                    payload_exec_membarrier_deferred(self);
+                    payload_exec_full_binfmt_deferred(self);
+                    payload_ramdisk_init_branch_trimmed_noop(self);
+                    payload_ramdisk_init_trimmed_because_config_initrd_disabled(self);
+                    payload_default_init_branch_trimmed_noop(self);
+                    payload_default_init_trimmed_because_config_default_init_empty(self);
+                    payload_binfmt_script_deferred(self);
+                    payload_exec_panic_terminal_bound(self);
+                }
+
+                deferred {
+                    "Linux 6.12.37 kernel_execve()/bprm_execve()/exec_binprm()/begin_new_exec() 的完整同步协议保留为 PayloadExecSyncBoundaries：binfmt_lock、cred_guard_mutex、exec_update_lock、exec_mmap() 本地 IRQ 关闭与 mmap_lock、siglock/tasklist_lock、fs->lock+RCU、membarrier、完整 binfmt/script/module retry 和失败后 panic terminal 后续展开；当前 UserBootPayload 只实现最小 VFS/ELF/UserAddressSpace/trap-return handoff。";
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            payload_exec_sync_boundaries_ready(self);
+            payload_kernel_execve_linux_window_bound(self);
+            payload_binfmt_lock_deferred(self);
+            payload_cred_guard_mutex_deferred(self);
+            payload_exec_update_lock_deferred(self);
+            payload_exec_mmap_local_irq_deferred(self);
+            payload_exec_task_siglock_deferred(self);
+            payload_exec_tasklist_lock_deferred(self);
+            payload_exec_fs_lock_rcu_deferred(self);
+            payload_exec_mmap_lock_deferred(self);
+            payload_exec_membarrier_deferred(self);
+            payload_exec_full_binfmt_deferred(self);
+            payload_ramdisk_init_branch_trimmed_noop(self);
+            payload_ramdisk_init_trimmed_because_config_initrd_disabled(self);
+            payload_default_init_branch_trimmed_noop(self);
+            payload_default_init_trimmed_because_config_default_init_empty(self);
+            payload_binfmt_script_deferred(self);
+            payload_exec_panic_terminal_bound(self);
+        }
+    }
+}
 
 object UserAddressSpace: ResourceObject {
     initial_state: State::Base;
@@ -953,11 +1064,16 @@ object UserInitProcess: ResourceObject {
                     UserTrapFrame.state == State::Ready;
                 }
 
-                ensures {
-                    user_init_process_user_entry_ready(self);
-                    user_init_process_enter_user_mode_observed(self, UserTrapFrame);
-                    user_trap_return_switches_satp();
-                    user_trap_entry_uses_kernel_stack(UserTrapFrame);
+                within UserModeTrapReturnContext {
+                    ensures {
+                        user_init_process_user_entry_ready(self);
+                        user_init_process_enter_user_mode_observed(self, UserTrapFrame);
+                        user_trap_return_context_used(self, UserTrapFrame);
+                        user_trap_return_switches_satp();
+                        user_trap_return_sfence_vma_after_satp();
+                        user_trap_return_sret_handoff();
+                        user_trap_entry_uses_kernel_stack(UserTrapFrame);
+                    }
                 }
             }
 
@@ -988,6 +1104,7 @@ object UserBootPayload: ResourceObject {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
                     KernelInitTask.state == State::Online;
+                    PayloadExecSyncBoundaries.state == State::Ready;
                 }
 
                 ensures {
@@ -1014,6 +1131,7 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_partition_objects_deferred(self);
             user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
             user_boot_payload_try_candidate_bound(self);
+            PayloadExecSyncBoundaries.state == State::Ready;
         }
 
         actions {
@@ -1042,6 +1160,7 @@ object UserBootPayload: ResourceObject {
                     KernelInitTask.state == State::Online;
                     ExceptionStream.state == State::Ready;
                     SyscallException.state == State::Prepared;
+                    PayloadExecSyncBoundaries.state == State::Ready;
                 }
 
                 drives {

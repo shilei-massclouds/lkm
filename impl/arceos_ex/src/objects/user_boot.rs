@@ -13,7 +13,7 @@ use super::{
         copy_high_half_root_entries, page_table_storage_ready, sv39_indices, table_pte_from_phys,
         user_leaf_pte_from_phys, PageTablePage,
     },
-    rest_init::KernelInitTask,
+    rest_init::{KernelInitTask, SystemState, SystemStateValue},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_page_tables,
     swapper_vm::SwapperVm,
@@ -62,6 +62,164 @@ const MAX_STACK_PAGES: usize = USER_STACK_SIZE / USER_PAGE_SIZE;
 const MAX_USER_MAPPINGS: usize = MAX_LOAD_SEGMENTS * 2 + 2;
 const MAX_MAPPING_BACKING_PAGES: usize = 512;
 const MAX_USER_L0_TABLES: usize = MAX_USER_MAPPINGS + 2;
+
+pub struct PayloadExecSyncBoundaries {
+    lifecycle: Lifecycle,
+    kernel_execve_linux_window_bound: bool,
+    binfmt_lock_deferred: bool,
+    cred_guard_mutex_deferred: bool,
+    exec_update_lock_deferred: bool,
+    exec_mmap_local_irq_deferred: bool,
+    exec_task_siglock_deferred: bool,
+    exec_tasklist_lock_deferred: bool,
+    exec_fs_lock_rcu_deferred: bool,
+    exec_mmap_lock_deferred: bool,
+    exec_membarrier_deferred: bool,
+    exec_full_binfmt_deferred: bool,
+    ramdisk_init_branch_trimmed_noop: bool,
+    ramdisk_init_trimmed_because_config_initrd_disabled: bool,
+    default_init_branch_trimmed_noop: bool,
+    default_init_trimmed_because_config_default_init_empty: bool,
+    binfmt_script_deferred: bool,
+    exec_panic_terminal_bound: bool,
+}
+
+#[allow(dead_code)]
+impl PayloadExecSyncBoundaries {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            kernel_execve_linux_window_bound: false,
+            binfmt_lock_deferred: false,
+            cred_guard_mutex_deferred: false,
+            exec_update_lock_deferred: false,
+            exec_mmap_local_irq_deferred: false,
+            exec_task_siglock_deferred: false,
+            exec_tasklist_lock_deferred: false,
+            exec_fs_lock_rcu_deferred: false,
+            exec_mmap_lock_deferred: false,
+            exec_membarrier_deferred: false,
+            exec_full_binfmt_deferred: false,
+            ramdisk_init_branch_trimmed_noop: false,
+            ramdisk_init_trimmed_because_config_initrd_disabled: false,
+            default_init_branch_trimmed_noop: false,
+            default_init_trimmed_because_config_default_init_empty: false,
+            binfmt_script_deferred: false,
+            exec_panic_terminal_bound: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn kernel_execve_linux_window_bound(&self) -> bool {
+        self.kernel_execve_linux_window_bound
+    }
+
+    pub const fn binfmt_lock_deferred(&self) -> bool {
+        self.binfmt_lock_deferred
+    }
+
+    pub const fn cred_guard_mutex_deferred(&self) -> bool {
+        self.cred_guard_mutex_deferred
+    }
+
+    pub const fn exec_update_lock_deferred(&self) -> bool {
+        self.exec_update_lock_deferred
+    }
+
+    pub const fn exec_mmap_local_irq_deferred(&self) -> bool {
+        self.exec_mmap_local_irq_deferred
+    }
+
+    pub const fn exec_task_siglock_deferred(&self) -> bool {
+        self.exec_task_siglock_deferred
+    }
+
+    pub const fn exec_tasklist_lock_deferred(&self) -> bool {
+        self.exec_tasklist_lock_deferred
+    }
+
+    pub const fn exec_fs_lock_rcu_deferred(&self) -> bool {
+        self.exec_fs_lock_rcu_deferred
+    }
+
+    pub const fn exec_mmap_lock_deferred(&self) -> bool {
+        self.exec_mmap_lock_deferred
+    }
+
+    pub const fn exec_membarrier_deferred(&self) -> bool {
+        self.exec_membarrier_deferred
+    }
+
+    pub const fn exec_full_binfmt_deferred(&self) -> bool {
+        self.exec_full_binfmt_deferred
+    }
+
+    pub const fn ramdisk_init_branch_trimmed_noop(&self) -> bool {
+        self.ramdisk_init_branch_trimmed_noop
+    }
+
+    pub const fn ramdisk_init_trimmed_because_config_initrd_disabled(&self) -> bool {
+        self.ramdisk_init_trimmed_because_config_initrd_disabled
+    }
+
+    pub const fn default_init_branch_trimmed_noop(&self) -> bool {
+        self.default_init_branch_trimmed_noop
+    }
+
+    pub const fn default_init_trimmed_because_config_default_init_empty(&self) -> bool {
+        self.default_init_trimmed_because_config_default_init_empty
+    }
+
+    pub const fn binfmt_script_deferred(&self) -> bool {
+        self.binfmt_script_deferred
+    }
+
+    pub const fn exec_panic_terminal_bound(&self) -> bool {
+        self.exec_panic_terminal_bound
+    }
+
+    pub fn setup(
+        &mut self,
+        kernel_init_task: &KernelInitTask,
+        system_state: &SystemState,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || kernel_init_task.state() != State::Online
+            || system_state.state() != State::Online
+            || system_state.value() != SystemStateValue::Running
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.kernel_execve_linux_window_bound = true;
+        self.binfmt_lock_deferred = true;
+        self.cred_guard_mutex_deferred = true;
+        self.exec_update_lock_deferred = true;
+        self.exec_mmap_local_irq_deferred = true;
+        self.exec_task_siglock_deferred = true;
+        self.exec_tasklist_lock_deferred = true;
+        self.exec_fs_lock_rcu_deferred = true;
+        self.exec_mmap_lock_deferred = true;
+        self.exec_membarrier_deferred = true;
+        self.exec_full_binfmt_deferred = true;
+        self.ramdisk_init_branch_trimmed_noop = true;
+        self.ramdisk_init_trimmed_because_config_initrd_disabled = true;
+        self.default_init_branch_trimmed_noop = true;
+        self.default_init_trimmed_because_config_default_init_empty = true;
+        self.binfmt_script_deferred = true;
+        self.exec_panic_terminal_bound = true;
+        self.lifecycle
+            .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum UserInitPathRef {
@@ -2181,6 +2339,9 @@ pub struct UserInitProcess {
     kernel_init_user_trap_frame_attached: bool,
     user_entry_ready: bool,
     trap_return_bound: bool,
+    trap_return_context_used: bool,
+    trap_return_sfence_vma_after_satp: bool,
+    trap_return_sret_handoff: bool,
     syscall_dispatch_bound: bool,
     syscall_arguments_extracted: bool,
     runtime_entered: bool,
@@ -2211,6 +2372,9 @@ impl UserInitProcess {
             kernel_init_user_trap_frame_attached: false,
             user_entry_ready: false,
             trap_return_bound: false,
+            trap_return_context_used: false,
+            trap_return_sfence_vma_after_satp: false,
+            trap_return_sret_handoff: false,
             syscall_dispatch_bound: false,
             syscall_arguments_extracted: false,
             runtime_entered: false,
@@ -2293,6 +2457,18 @@ impl UserInitProcess {
 
     pub const fn trap_return_bound(&self) -> bool {
         self.trap_return_bound
+    }
+
+    pub const fn trap_return_context_used(&self) -> bool {
+        self.trap_return_context_used
+    }
+
+    pub const fn trap_return_sfence_vma_after_satp(&self) -> bool {
+        self.trap_return_sfence_vma_after_satp
+    }
+
+    pub const fn trap_return_sret_handoff(&self) -> bool {
+        self.trap_return_sret_handoff
     }
 
     pub const fn syscall_dispatch_bound(&self) -> bool {
@@ -2404,6 +2580,9 @@ impl UserInitProcess {
         }
 
         self.user_entry_ready = true;
+        self.trap_return_context_used = true;
+        self.trap_return_sfence_vma_after_satp = true;
+        self.trap_return_sret_handoff = true;
         self.runtime_entered = true;
         USER_INIT_RUNTIME_ENTERED.store(1, Ordering::Release);
         Ok(())
@@ -2425,6 +2604,7 @@ impl UserInitProcess {
 
 pub struct UserBootPayload {
     lifecycle: Lifecycle,
+    exec_sync_boundaries_ready: bool,
     selected: bool,
     candidates_bound: bool,
     default_init_path_bound: bool,
@@ -2444,6 +2624,7 @@ impl UserBootPayload {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            exec_sync_boundaries_ready: false,
             selected: false,
             candidates_bound: false,
             default_init_path_bound: false,
@@ -2461,6 +2642,10 @@ impl UserBootPayload {
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn exec_sync_boundaries_ready(&self) -> bool {
+        self.exec_sync_boundaries_ready
     }
 
     pub const fn selected(&self) -> bool {
@@ -2511,8 +2696,16 @@ impl UserBootPayload {
         self.no_return_handoff
     }
 
-    pub fn setup(&mut self, kernel_init_task: &KernelInitTask) -> EventResult {
-        if self.lifecycle.state() != State::Base || kernel_init_task.state() != State::Online {
+    pub fn setup(
+        &mut self,
+        kernel_init_task: &KernelInitTask,
+        exec_sync: &PayloadExecSyncBoundaries,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || kernel_init_task.state() != State::Online
+            || exec_sync.state() != State::Ready
+            || !exec_sync.kernel_execve_linux_window_bound()
+        {
             return failed_condition(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
@@ -2521,6 +2714,7 @@ impl UserBootPayload {
             );
         }
 
+        self.exec_sync_boundaries_ready = true;
         self.selected = true;
         self.candidates_bound = true;
         self.default_init_path_bound = true;
@@ -2595,6 +2789,7 @@ pub fn run_first_user_init(
     ext2_filesystem: &mut Ext2FileSystem,
     block_device_registry: &mut BlockDeviceRegistry,
     kernel_init_task: &KernelInitTask,
+    exec_sync: &PayloadExecSyncBoundaries,
     swapper_vm: &SwapperVm,
     kernel_image: &KernelImage,
     page_allocator: &mut PageAllocator,
@@ -2603,7 +2798,7 @@ pub fn run_first_user_init(
     exception_stream: &mut ExceptionStream,
     syscall_table: &mut SyscallTable,
 ) -> ! {
-    if payload.setup(kernel_init_task).is_err() {
+    if payload.setup(kernel_init_task, exec_sync).is_err() {
         user_boot_panic("user payload setup failed\n");
     }
 
