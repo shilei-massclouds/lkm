@@ -29,20 +29,58 @@ pub fn run() -> SmokeResult {
         || !ctx.cpu_hotplug_sync.done_down_ready()
         || !ctx.cpu_hotplug_sync.boot_cpu_hotplug_thread_online()
         || !ctx.cpu_hotplug_sync.secondary_hotplug_threads_deferred()
+        || !ctx.cpu_hotplug_sync.cpus_read_guard_used()
+        || !ctx.cpu_hotplug_sync.smpboot_threads_mutex_guard_used()
+        || !ctx.cpu_hotplug_sync.cpu_running_wait_lock_guard_used()
+        || !ctx.cpu_hotplug_sync.done_up_wait_lock_guard_used()
     {
         printk::write_str("cpu hotplug sync facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
+    if ctx.smpboot_threads_lock.lock_entered_count() == 0
+        || ctx.smpboot_threads_lock.unlock_exited_count()
+            != ctx.smpboot_threads_lock.lock_entered_count()
+        || ctx.cpu_add_remove_lock.lock_entered_count() == 0
+        || ctx.cpu_add_remove_lock.unlock_exited_count()
+            != ctx.cpu_add_remove_lock.lock_entered_count()
+        || ctx.cpu_hotplug_lock.read_lock_count() == 0
+        || ctx.cpu_hotplug_lock.read_unlock_count() != ctx.cpu_hotplug_lock.read_lock_count()
+        || ctx.cpu_hotplug_lock.write_lock_count() == 0
+        || ctx.cpu_hotplug_lock.write_unlock_count() != ctx.cpu_hotplug_lock.write_lock_count()
+        || ctx.cpu_running_wait_lock.irqsave_entered_count() == 0
+        || ctx.cpu_running_wait_lock.irqrestore_exited_count()
+            != ctx.cpu_running_wait_lock.irqsave_entered_count()
+        || ctx.done_up_wait_lock.irqsave_entered_count() == 0
+        || ctx.done_up_wait_lock.irqrestore_exited_count()
+            != ctx.done_up_wait_lock.irqsave_entered_count()
+    {
+        printk::write_str("smp bringup guard counters invalid\n");
         return SmokeResult::Failed;
     }
 
     if ctx.cpu_start_provider.state() != State::Ready
         || !ctx.cpu_start_provider.start_requests_issued()
         || !ctx.cpu_start_provider.ap_entry_detail_deferred()
+        || !ctx.cpu_start_provider.cpu_add_remove_mutex_guard_used()
+        || !ctx.cpu_start_provider.cpu_hotplug_write_guard_used()
+        || !ctx
+            .cpu_start_provider
+            .sbi_boot_data_publish_barriers_observed()
         || ctx.secondary_cpu_startup_ack.state() != State::Ready
         || !ctx.secondary_cpu_startup_ack.acknowledged()
         || !ctx.secondary_cpu_startup_ack.ap_entry_detail_deferred()
         || ctx.secondary_cpu_online_ack.state() != State::Ready
         || !ctx.secondary_cpu_online_ack.acknowledged()
         || !ctx.secondary_cpu_online_ack.ap_idle_detail_deferred()
+        || !ctx.secondary_cpu_online_ack.ap_local_irq_enable_deferred()
+        || !ctx
+            .secondary_cpu_online_ack
+            .ap_cache_tlb_flush_summary_observed()
+        || !ctx.secondary_cpu_online_ack.ap_ipi_enable_observed()
+        || !ctx
+            .secondary_cpu_online_ack
+            .ap_hotplug_thread_mb_pair_deferred()
     {
         printk::write_str("secondary cpu ack facts invalid\n");
         return SmokeResult::Failed;
@@ -61,7 +99,7 @@ pub fn run() -> SmokeResult {
     }
 
     printk::write_fmt(format_args!(
-        "smp_bringup online_cpus={} sync=cpu_running+done_up\n",
+        "smp_bringup online_cpus={} sync=cpu_running+done_up guards=hotplug+completion\n",
         ctx.cpu_group.possible_cpu_count()
     ));
     SmokeResult::Passed

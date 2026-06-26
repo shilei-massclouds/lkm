@@ -299,12 +299,23 @@ AP hotplug callbacks 的内部细节当前保持 deferred；但 AP 对 BP 可见
 `cpu_running` observed、`done_up` observed、`done_down` reserved/deferred、secondary CPU online 和
 `smp_concurrency_open` 事实。
 
+`cpuhp_threads_init()` 的 Linux 路径必须保留 `cpus_read_lock()` 与 `smpboot_threads_lock` mutex guard；
+`bringup_nonboot_cpus()` / `cpu_up()` 必须保留 `cpu_add_remove_lock` 与 `cpus_write_lock()` 的 writer
+guard。RISC-V `__cpu_up()` / AP `smp_callin()` 的 `cpu_running` completion，以及 generic CPUHP
+`done_up` completion，必须保留 wait.lock 的 raw spinlock irqsave/irqrestore 观测。`cpu_ops_sbi.cpu_start()`
+发布 secondary boot data 前后的 `smp_mb()` 顺序必须作为可观察 fact 或等价内存顺序边界保留；AP
+侧 `riscv_ipi_enable()`、`local_flush_icache_all()`、`local_flush_tlb_all()`、`local_irq_enable()` 和
+AP hotplug thread `should_run` memory-barrier 配对当前可作为 summary/deferred fact，但不得默认为
+不存在。
+
 `SmpRuntimePhase` 当前已经继续串联 `RuntimeCorePhase`、`InitcallPhase`、`RootfsPhase` 和
 `FinalizePhase`。各子阶段未展开的完整运行期服务仍保持显式 deferred 边界，不得伪装为已经实现。
 
 测试应覆盖 BP 侧 bringup 主线已经闭合、secondary idle task 已准备、CPU hotplug 同步量已建立并被 AP summary ack
 观察、secondary CPU 从 present/not-online 推进到 online、`smp_concurrency_open` 成立，以及 AP 内部路径仍为
-deferred summary。
+deferred summary。smoke 还应覆盖 hotplug read/write guard、`smpboot_threads_lock` / `cpu_add_remove_lock`
+mutex guard、`cpu_running` / `done_up` completion wait-lock irqsave guard、SBI boot-data publish ordering
+和 AP local sync summary facts。
 
 ## RuntimeCorePhase 编码约束
 

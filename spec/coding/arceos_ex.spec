@@ -282,6 +282,10 @@ predicate arceos_ex_must_smp_bringup_model_path_under_smp_runtime_phase() -> boo
 predicate arceos_ex_must_smp_bringup_code_path_follow_smp_runtime_phase_tree() -> bool;
 predicate arceos_ex_must_smp_bringup_focus_bp_side_flow() -> bool;
 predicate arceos_ex_must_smp_bringup_keep_bp_ap_sync_explicit() -> bool;
+predicate arceos_ex_must_smp_bringup_preserve_hotplug_guards() -> bool;
+predicate arceos_ex_must_smp_bringup_preserve_completion_wait_locks() -> bool;
+predicate arceos_ex_must_smp_bringup_preserve_sbi_boot_data_ordering() -> bool;
+predicate arceos_ex_must_smp_bringup_record_ap_local_sync_summary() -> bool;
 predicate arceos_ex_must_smp_bringup_make_secondary_cpus_online() -> bool;
 predicate arceos_ex_must_smp_bringup_keep_ap_internals_deferred() -> bool;
 predicate arceos_ex_must_smp_runtime_keep_later_subphases_deferred() -> bool;
@@ -3006,7 +3010,7 @@ type ArceosExSmpBringupCodingMust {
         /*
          * Model path:
          *
-         * SmpBringupPhase is SMP Runtime Phase subphase 1. Its formal model
+         * SmpBringupPhase is SMP Runtime Phase subphase 2. Its formal model
          * path is spec/model/smp-runtime/smp-bringup/.
          */
         arceos_ex_must_smp_bringup_model_path_under_smp_runtime_phase();
@@ -3034,6 +3038,44 @@ type ArceosExSmpBringupCodingMust {
          * internals are summarized.
          */
         arceos_ex_must_smp_bringup_keep_bp_ap_sync_explicit();
+
+        /*
+         * CPU hotplug guards:
+         *
+         * cpuhp_threads_init() must preserve the cpus_read_lock() and
+         * smpboot_threads_lock mutex guards. bringup_nonboot_cpus()/cpu_up()
+         * must preserve cpu_add_remove_lock and cpus_write_lock() writer
+         * guards before publishing secondary online facts.
+         */
+        arceos_ex_must_smp_bringup_preserve_hotplug_guards();
+
+        /*
+         * Completion wait locks:
+         *
+         * cpu_running and done_up are completions. Their wait.lock raw
+         * spinlock irqsave/irqrestore guard must stay observable even though
+         * AP internals are summarized.
+         */
+        arceos_ex_must_smp_bringup_preserve_completion_wait_locks();
+
+        /*
+         * SBI boot data ordering:
+         *
+         * RISC-V cpu_ops_sbi.cpu_start() uses smp_mb() before and after
+         * publishing the secondary task/stack boot data. The implementation
+         * must retain an equivalent observable ordering fact.
+         */
+        arceos_ex_must_smp_bringup_preserve_sbi_boot_data_ordering();
+
+        /*
+         * AP local sync summary:
+         *
+         * riscv_ipi_enable(), AP icache/TLB flush, AP local_irq_enable() and
+         * the cpuhp_thread_fun() should_run memory-barrier pair remain
+         * summary/deferred facts in this phase and must not be treated as
+         * absent.
+         */
+        arceos_ex_must_smp_bringup_record_ap_local_sync_summary();
 
         /*
          * Online boundary:

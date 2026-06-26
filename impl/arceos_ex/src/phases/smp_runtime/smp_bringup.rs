@@ -38,22 +38,45 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.scheduler,
         &ctx.per_cpu_storage,
     )?;
-    ctx.cpu_hotplug_sync
-        .preset(&ctx.cpu_group, &ctx.boot_idle_runtime, &ctx.kthreadd_task)?;
+    ctx.smpboot_threads_lock.preset_static()?;
+    ctx.smpboot_threads_lock.setup()?;
+    ctx.cpu_hotplug_sync.preset(
+        &ctx.cpu_group,
+        &ctx.boot_idle_runtime,
+        &ctx.kthreadd_task,
+        &mut ctx.cpu_hotplug_lock,
+        &mut ctx.smpboot_threads_lock,
+    )?;
+    ctx.cpu_add_remove_lock.preset_static()?;
+    ctx.cpu_add_remove_lock.setup()?;
+    ctx.cpu_running_wait_lock
+        .setup_with_checkpoint(Checkpoint::CpuRunningWaitLockReady)?;
+    ctx.done_up_wait_lock
+        .setup_with_checkpoint(Checkpoint::CpuDoneUpWaitLockReady)?;
     ctx.cpu_start_provider.setup(
         &ctx.cpu_group,
         &ctx.secondary_idle_tasks,
         &ctx.cpu_hotplug_sync,
         &ctx.sbi_ipi,
+        &mut ctx.cpu_add_remove_lock,
+        &mut ctx.cpu_hotplug_lock,
     )?;
-    ctx.secondary_cpu_startup_ack
-        .setup(&ctx.cpu_start_provider, &mut ctx.cpu_hotplug_sync)?;
+    ctx.secondary_cpu_startup_ack.setup(
+        &ctx.cpu_start_provider,
+        &mut ctx.cpu_hotplug_sync,
+        &mut ctx.cpu_running_wait_lock,
+        &mut ctx.boot_cpu_local_interrupt,
+        &mut ctx.scheduler,
+    )?;
     ctx.secondary_cpu_online_ack.setup(
         &ctx.secondary_cpu_startup_ack,
         &mut ctx.cpu_hotplug_sync,
         &mut ctx.cpu_group,
         &mut ctx.secondary_cpus,
         &ctx.sbi_ipi,
+        &mut ctx.done_up_wait_lock,
+        &mut ctx.boot_cpu_local_interrupt,
+        &mut ctx.scheduler,
     )?;
     ctx.smp_bringup_boundary
         .setup(&ctx.secondary_cpu_online_ack, &ctx.cpu_group)
@@ -87,7 +110,12 @@ fn smp_bringup_phase_ready(ctx: &Context) -> bool {
         &ctx.kernel_init_task,
         &ctx.cpu_group,
         &ctx.secondary_idle_tasks,
+        &ctx.smpboot_threads_lock,
         &ctx.cpu_hotplug_sync,
+        &ctx.cpu_add_remove_lock,
+        &ctx.cpu_hotplug_lock,
+        &ctx.cpu_running_wait_lock,
+        &ctx.done_up_wait_lock,
         &ctx.cpu_start_provider,
         &ctx.secondary_cpu_startup_ack,
         &ctx.secondary_cpu_online_ack,
