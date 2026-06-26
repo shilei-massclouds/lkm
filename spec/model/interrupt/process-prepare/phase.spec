@@ -567,6 +567,115 @@ object SecurityCore: KernelObject {
 }
 
 /*
+ * ProcessPrepareTrimmedPaths 保留 start_kernel() 中落在本子阶段、但当前
+ * linux-6.12.37/default_config 下为空、不可达或暂缓展开的调用点。
+ * 这些事实必须结构化记录，不能只留在 checkpoint 或 markdown 表格。
+ */
+object ProcessPrepareTrimmedPaths: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    Config.state == State::Online;
+                    TaskCreationCore.state == State::Ready;
+                    VfsCore.state == State::Ready;
+                }
+
+                ensures {
+                    process_prepare_trimmed_paths_prepared(ProcessPrepareTrimmedPaths);
+                    process_prepare_x86_efi_runtime_switch_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_x86_efi_runtime_switch_trimmed_because_arch_riscv(ProcessPrepareTrimmedPaths);
+                    process_prepare_shadow_call_stack_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_shadow_call_stack_trimmed_because_config_shadow_call_stack_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_lockdep_init_task_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_lockdep_init_task_trimmed_because_config_lockdep_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_dbg_late_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_dbg_late_init_trimmed_because_config_kgdb_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_net_namespace_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_net_namespace_deferred_even_if_config_net_ns_enabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_pagecache_deferred(ProcessPrepareTrimmedPaths, VfsCore);
+                    process_prepare_pagecache_waitqueue_table_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_signal_core_setup_deferred(ProcessPrepareTrimmedPaths, SignalCore);
+                    process_prepare_seq_file_core_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_procfs_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_nsfs_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_pidfs_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_vfs_pseudo_filesystems_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_bdev_chrdev_init_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_cpuset_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_cpuset_trimmed_because_config_cpusets_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_cgroup_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_cgroup_trimmed_because_config_cgroups_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_taskstats_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_taskstats_trimmed_because_config_taskstats_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_delayacct_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_delayacct_trimmed_because_config_task_delay_acct_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_acpi_subsystem_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_acpi_trimmed_because_config_acpi_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_arch_post_acpi_subsys_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_kcsan_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_kcsan_trimmed_because_config_kcsan_disabled(ProcessPrepareTrimmedPaths);
+                    process_prepare_rcu_tasks_generic_out_of_scope(ProcessPrepareTrimmedPaths);
+                    process_prepare_rcu_tasks_generic_belongs_to_kernel_init_freeable(ProcessPrepareTrimmedPaths);
+                    process_prepare_trimmed_paths_position_preserved(ProcessPrepareTrimmedPaths);
+                }
+
+                deferred {
+                    "pagecache_init() 在当前模型中不建立 PageCache 生命周期；其 folio waitqueue table 和 writeback 初始化保留为 VfsCore/PageCache deferred 事实。";
+                    "seq_file_init()、proc_root_init()、nsfs_init() 和 pidfs_init() 在当前 CONFIG_PROC_FS/CONFIG_PID_NS 路径下存在，但本阶段只保留为 VFS pseudo filesystem deferred，不声称 proc/nsfs/pidfs 已可用。";
+                    "vfs_caches_init() 中的 bdev_cache_init() 和 chrdev_init() 属于后续 block/char device registry 能力，本阶段只覆盖 VFS cache 与 ramfs-backed 初始 rootfs mount。";
+                    "net_ns_init() 在 CONFIG_NET_NS=y 下存在，但网络 namespace 运行期对象不在本阶段展开。";
+                    "rcu_init_tasks_generic() 不在 start_kernel() 的本区间内；它位于 rest_init() 后 kernel_init_freeable()，对 ProcessPreparePhase 是 out-of-scope。";
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            process_prepare_trimmed_paths_prepared(ProcessPrepareTrimmedPaths);
+            process_prepare_x86_efi_runtime_switch_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_x86_efi_runtime_switch_trimmed_because_arch_riscv(ProcessPrepareTrimmedPaths);
+            process_prepare_shadow_call_stack_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_shadow_call_stack_trimmed_because_config_shadow_call_stack_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_lockdep_init_task_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_lockdep_init_task_trimmed_because_config_lockdep_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_dbg_late_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_dbg_late_init_trimmed_because_config_kgdb_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_net_namespace_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_net_namespace_deferred_even_if_config_net_ns_enabled(ProcessPrepareTrimmedPaths);
+            process_prepare_pagecache_deferred(ProcessPrepareTrimmedPaths, VfsCore);
+            process_prepare_pagecache_waitqueue_table_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_signal_core_setup_deferred(ProcessPrepareTrimmedPaths, SignalCore);
+            process_prepare_seq_file_core_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_procfs_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_nsfs_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_pidfs_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_vfs_pseudo_filesystems_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_bdev_chrdev_init_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_cpuset_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_cpuset_trimmed_because_config_cpusets_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_cgroup_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_cgroup_trimmed_because_config_cgroups_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_taskstats_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_taskstats_trimmed_because_config_taskstats_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_delayacct_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_delayacct_trimmed_because_config_task_delay_acct_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_acpi_subsystem_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_acpi_trimmed_because_config_acpi_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_arch_post_acpi_subsys_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_kcsan_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+            process_prepare_kcsan_trimmed_because_config_kcsan_disabled(ProcessPrepareTrimmedPaths);
+            process_prepare_rcu_tasks_generic_out_of_scope(ProcessPrepareTrimmedPaths);
+            process_prepare_rcu_tasks_generic_belongs_to_kernel_init_freeable(ProcessPrepareTrimmedPaths);
+            process_prepare_trimmed_paths_position_preserved(ProcessPrepareTrimmedPaths);
+        }
+    }
+}
+
+/*
  * ProcessPreparePhase 表示 InterruptPhase 的第四个子阶段。它为
  * rest_init() 创建 kernel_init 和 kthreadd 准备 PID、task、cred、VMA、
  * namespace、key/security 等基础结构，但不创建任务，也不进入调度运行。
@@ -615,6 +724,7 @@ object ProcessPreparePhase: PhaseObject {
                     VfsCore.Action::RegisterRamFsType(RamFsType);
                     VfsCore.Action::MountInitialRamFsRoot;
                     FsStruct.Transition::Setup;
+                    ProcessPrepareTrimmedPaths.Transition::Preset;
                 }
 
                 ensures {
@@ -627,9 +737,10 @@ object ProcessPreparePhase: PhaseObject {
                     kernel_init_task_not_created_yet();
                     kthreadd_task_not_created_yet();
                     system_state_not_scheduling_yet();
-                    x86_efi_runtime_switch_trimmed();
-                    shadow_call_stack_init_trimmed();
-                    lockdep_init_task_trimmed();
+                    process_prepare_trimmed_paths_prepared(ProcessPrepareTrimmedPaths);
+                    process_prepare_x86_efi_runtime_switch_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_shadow_call_stack_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_lockdep_init_task_trimmed_noop(ProcessPrepareTrimmedPaths);
                     vfs_core_initialized(VfsCore);
                     vfs_core_fs_type_registry_ready(VfsCore);
                     vfs_core_mount_table_ready(VfsCore);
@@ -647,14 +758,21 @@ object ProcessPreparePhase: PhaseObject {
                     superblock_root_dentry_bound(SuperBlock, Dentry);
                     superblock_root_inode_bound(SuperBlock, Inode);
                     superblock_root_dentry_inode_matches(SuperBlock, Dentry, Inode);
-                    dbg_late_init_trimmed();
-                    cpuset_init_trimmed();
-                    cgroup_init_trimmed();
-                    taskstats_init_trimmed();
-                    delayacct_init_trimmed();
-                    acpi_subsystem_init_trimmed();
-                    arch_post_acpi_subsys_init_trimmed();
-                    kcsan_init_trimmed();
+                    process_prepare_dbg_late_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_net_namespace_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_pagecache_deferred(ProcessPrepareTrimmedPaths, VfsCore);
+                    process_prepare_signal_core_setup_deferred(ProcessPrepareTrimmedPaths, SignalCore);
+                    process_prepare_seq_file_core_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_procfs_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_nsfs_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_pidfs_deferred(ProcessPrepareTrimmedPaths);
+                    process_prepare_cpuset_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_cgroup_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_taskstats_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_delayacct_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_acpi_subsystem_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_arch_post_acpi_subsys_init_trimmed_noop(ProcessPrepareTrimmedPaths);
+                    process_prepare_kcsan_init_trimmed_noop(ProcessPrepareTrimmedPaths);
                 }
 
                 deferred {
@@ -663,6 +781,8 @@ object ProcessPreparePhase: PhaseObject {
                     "SignalCore.setup()/signals_init() 暂缓；本阶段只要求 sighand/signal cache 进入 Prepared。";
                     "RootPidNamespace 的 alloc_pid/free_pid/find_pid_ns 等运行期 action 留给 rest_init() 和后续任务创建路径。";
                     "TaskCreationCore 不创建 kernel_init 或 kthreadd；rest_init() 才推进这些任务对象和 SYSTEM_SCHEDULING。";
+                    "fork_init() 中 cpuhp_setup_state(\"fork:vm_stack_cache\") 只注册后续 CPU hotplug 回调；AP/BP 同步和 hotplug 状态机执行属于后续 SMP bring-up。";
+                    "key_init() 的 key_types_sem 写侧保护、security_init() 的 LSM hook dispatcher 和 proc/nsfs/pidfs mount 内部锁在本阶段只发布启动期 registry 事实；完整运行期同步协议留给对应对象 action。";
                 }
             }
         }
@@ -684,6 +804,7 @@ object ProcessPreparePhase: PhaseObject {
             UtsNamespace.state == State::Prepared;
             KeyringCore.state == State::Ready;
             SecurityCore.state == State::Ready;
+            ProcessPrepareTrimmedPaths.state == State::Prepared;
             VfsCore.state == State::Ready;
             FsStruct.state == State::Ready;
             RamFsType.state == State::Ready;
@@ -709,6 +830,10 @@ object ProcessPreparePhase: PhaseObject {
             kernel_init_task_not_created_yet();
             kthreadd_task_not_created_yet();
             system_state_not_scheduling_yet();
+            process_prepare_trimmed_paths_prepared(ProcessPrepareTrimmedPaths);
+            process_prepare_pagecache_deferred(ProcessPrepareTrimmedPaths, VfsCore);
+            process_prepare_vfs_pseudo_filesystems_deferred(ProcessPrepareTrimmedPaths);
+            process_prepare_rcu_tasks_generic_out_of_scope(ProcessPrepareTrimmedPaths);
         }
     }
 }

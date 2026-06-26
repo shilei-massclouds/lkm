@@ -73,6 +73,51 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    if ctx.process_prepare_trimmed_paths.state() != State::Prepared
+        || !ctx
+            .process_prepare_trimmed_paths
+            .x86_efi_runtime_switch_trimmed_noop()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .shadow_call_stack_init_trimmed_noop()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .lockdep_init_task_trimmed_noop()
+        || !ctx.process_prepare_trimmed_paths.net_namespace_deferred()
+        || !ctx.process_prepare_trimmed_paths.pagecache_deferred()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .pagecache_waitqueue_table_deferred()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .signal_core_setup_deferred()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .vfs_pseudo_filesystems_deferred()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .bdev_chrdev_init_deferred()
+        || !ctx.process_prepare_trimmed_paths.cpuset_init_trimmed_noop()
+        || !ctx.process_prepare_trimmed_paths.cgroup_init_trimmed_noop()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .taskstats_init_trimmed_noop()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .delayacct_init_trimmed_noop()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .acpi_subsystem_init_trimmed_noop()
+        || !ctx.process_prepare_trimmed_paths.kcsan_init_trimmed_noop()
+        || !ctx
+            .process_prepare_trimmed_paths
+            .rcu_tasks_generic_out_of_scope()
+        || !ctx.process_prepare_trimmed_paths.position_preserved()
+    {
+        printk::write_str("process prepare trimmed/deferred facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     let Some(root_mount_ref) = ctx.vfs_core.initial_root_mount() else {
         printk::write_str("vfs root mount missing\n");
         return SmokeResult::Failed;

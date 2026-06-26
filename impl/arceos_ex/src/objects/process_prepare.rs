@@ -1,4 +1,5 @@
 use super::{
+    config::Config,
     cpu_capabilities::CpuCapabilities,
     cpu_group::CpuGroup,
     exception_stream::ExceptionStream,
@@ -9,6 +10,7 @@ use super::{
     state::{failed_condition, EventError, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::StaticBranch,
     task::TaskEntry,
+    vfs::VfsCore,
 };
 use crate::trace::Checkpoint;
 
@@ -1153,6 +1155,330 @@ impl SecurityCore {
             self.lifecycle.state(),
             State::Base,
             State::Ready,
+        )
+    }
+}
+
+pub struct ProcessPrepareTrimmedPaths {
+    lifecycle: Lifecycle,
+    x86_efi_runtime_switch_trimmed_noop: bool,
+    x86_efi_runtime_switch_trimmed_because_arch_riscv: bool,
+    shadow_call_stack_init_trimmed_noop: bool,
+    shadow_call_stack_trimmed_because_config_shadow_call_stack_disabled: bool,
+    lockdep_init_task_trimmed_noop: bool,
+    lockdep_init_task_trimmed_because_config_lockdep_disabled: bool,
+    dbg_late_init_trimmed_noop: bool,
+    dbg_late_init_trimmed_because_config_kgdb_disabled: bool,
+    net_namespace_deferred: bool,
+    net_namespace_deferred_even_if_config_net_ns_enabled: bool,
+    pagecache_deferred: bool,
+    pagecache_waitqueue_table_deferred: bool,
+    signal_core_setup_deferred: bool,
+    seq_file_core_deferred: bool,
+    procfs_deferred: bool,
+    nsfs_deferred: bool,
+    pidfs_deferred: bool,
+    vfs_pseudo_filesystems_deferred: bool,
+    bdev_chrdev_init_deferred: bool,
+    cpuset_init_trimmed_noop: bool,
+    cpuset_trimmed_because_config_cpusets_disabled: bool,
+    cgroup_init_trimmed_noop: bool,
+    cgroup_trimmed_because_config_cgroups_disabled: bool,
+    taskstats_init_trimmed_noop: bool,
+    taskstats_trimmed_because_config_taskstats_disabled: bool,
+    delayacct_init_trimmed_noop: bool,
+    delayacct_trimmed_because_config_task_delay_acct_disabled: bool,
+    acpi_subsystem_init_trimmed_noop: bool,
+    acpi_trimmed_because_config_acpi_disabled: bool,
+    arch_post_acpi_subsys_init_trimmed_noop: bool,
+    kcsan_init_trimmed_noop: bool,
+    kcsan_trimmed_because_config_kcsan_disabled: bool,
+    rcu_tasks_generic_out_of_scope: bool,
+    rcu_tasks_generic_belongs_to_kernel_init_freeable: bool,
+    position_preserved: bool,
+}
+
+impl ProcessPrepareTrimmedPaths {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            x86_efi_runtime_switch_trimmed_noop: false,
+            x86_efi_runtime_switch_trimmed_because_arch_riscv: false,
+            shadow_call_stack_init_trimmed_noop: false,
+            shadow_call_stack_trimmed_because_config_shadow_call_stack_disabled: false,
+            lockdep_init_task_trimmed_noop: false,
+            lockdep_init_task_trimmed_because_config_lockdep_disabled: false,
+            dbg_late_init_trimmed_noop: false,
+            dbg_late_init_trimmed_because_config_kgdb_disabled: false,
+            net_namespace_deferred: false,
+            net_namespace_deferred_even_if_config_net_ns_enabled: false,
+            pagecache_deferred: false,
+            pagecache_waitqueue_table_deferred: false,
+            signal_core_setup_deferred: false,
+            seq_file_core_deferred: false,
+            procfs_deferred: false,
+            nsfs_deferred: false,
+            pidfs_deferred: false,
+            vfs_pseudo_filesystems_deferred: false,
+            bdev_chrdev_init_deferred: false,
+            cpuset_init_trimmed_noop: false,
+            cpuset_trimmed_because_config_cpusets_disabled: false,
+            cgroup_init_trimmed_noop: false,
+            cgroup_trimmed_because_config_cgroups_disabled: false,
+            taskstats_init_trimmed_noop: false,
+            taskstats_trimmed_because_config_taskstats_disabled: false,
+            delayacct_init_trimmed_noop: false,
+            delayacct_trimmed_because_config_task_delay_acct_disabled: false,
+            acpi_subsystem_init_trimmed_noop: false,
+            acpi_trimmed_because_config_acpi_disabled: false,
+            arch_post_acpi_subsys_init_trimmed_noop: false,
+            kcsan_init_trimmed_noop: false,
+            kcsan_trimmed_because_config_kcsan_disabled: false,
+            rcu_tasks_generic_out_of_scope: false,
+            rcu_tasks_generic_belongs_to_kernel_init_freeable: false,
+            position_preserved: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn x86_efi_runtime_switch_trimmed_noop(&self) -> bool {
+        self.x86_efi_runtime_switch_trimmed_noop
+    }
+
+    pub const fn x86_efi_runtime_switch_trimmed_because_arch_riscv(&self) -> bool {
+        self.x86_efi_runtime_switch_trimmed_because_arch_riscv
+    }
+
+    pub const fn shadow_call_stack_init_trimmed_noop(&self) -> bool {
+        self.shadow_call_stack_init_trimmed_noop
+    }
+
+    pub const fn shadow_call_stack_trimmed_because_config_shadow_call_stack_disabled(
+        &self,
+    ) -> bool {
+        self.shadow_call_stack_trimmed_because_config_shadow_call_stack_disabled
+    }
+
+    pub const fn lockdep_init_task_trimmed_noop(&self) -> bool {
+        self.lockdep_init_task_trimmed_noop
+    }
+
+    pub const fn lockdep_init_task_trimmed_because_config_lockdep_disabled(&self) -> bool {
+        self.lockdep_init_task_trimmed_because_config_lockdep_disabled
+    }
+
+    pub const fn dbg_late_init_trimmed_noop(&self) -> bool {
+        self.dbg_late_init_trimmed_noop
+    }
+
+    pub const fn dbg_late_init_trimmed_because_config_kgdb_disabled(&self) -> bool {
+        self.dbg_late_init_trimmed_because_config_kgdb_disabled
+    }
+
+    pub const fn net_namespace_deferred(&self) -> bool {
+        self.net_namespace_deferred
+    }
+
+    pub const fn net_namespace_deferred_even_if_config_net_ns_enabled(&self) -> bool {
+        self.net_namespace_deferred_even_if_config_net_ns_enabled
+    }
+
+    pub const fn pagecache_deferred(&self) -> bool {
+        self.pagecache_deferred
+    }
+
+    pub const fn pagecache_waitqueue_table_deferred(&self) -> bool {
+        self.pagecache_waitqueue_table_deferred
+    }
+
+    pub const fn signal_core_setup_deferred(&self) -> bool {
+        self.signal_core_setup_deferred
+    }
+
+    pub const fn seq_file_core_deferred(&self) -> bool {
+        self.seq_file_core_deferred
+    }
+
+    pub const fn procfs_deferred(&self) -> bool {
+        self.procfs_deferred
+    }
+
+    pub const fn nsfs_deferred(&self) -> bool {
+        self.nsfs_deferred
+    }
+
+    pub const fn pidfs_deferred(&self) -> bool {
+        self.pidfs_deferred
+    }
+
+    pub const fn vfs_pseudo_filesystems_deferred(&self) -> bool {
+        self.vfs_pseudo_filesystems_deferred
+    }
+
+    pub const fn bdev_chrdev_init_deferred(&self) -> bool {
+        self.bdev_chrdev_init_deferred
+    }
+
+    pub const fn cpuset_init_trimmed_noop(&self) -> bool {
+        self.cpuset_init_trimmed_noop
+    }
+
+    pub const fn cpuset_trimmed_because_config_cpusets_disabled(&self) -> bool {
+        self.cpuset_trimmed_because_config_cpusets_disabled
+    }
+
+    pub const fn cgroup_init_trimmed_noop(&self) -> bool {
+        self.cgroup_init_trimmed_noop
+    }
+
+    pub const fn cgroup_trimmed_because_config_cgroups_disabled(&self) -> bool {
+        self.cgroup_trimmed_because_config_cgroups_disabled
+    }
+
+    pub const fn taskstats_init_trimmed_noop(&self) -> bool {
+        self.taskstats_init_trimmed_noop
+    }
+
+    pub const fn taskstats_trimmed_because_config_taskstats_disabled(&self) -> bool {
+        self.taskstats_trimmed_because_config_taskstats_disabled
+    }
+
+    pub const fn delayacct_init_trimmed_noop(&self) -> bool {
+        self.delayacct_init_trimmed_noop
+    }
+
+    pub const fn delayacct_trimmed_because_config_task_delay_acct_disabled(&self) -> bool {
+        self.delayacct_trimmed_because_config_task_delay_acct_disabled
+    }
+
+    pub const fn acpi_subsystem_init_trimmed_noop(&self) -> bool {
+        self.acpi_subsystem_init_trimmed_noop
+    }
+
+    pub const fn acpi_trimmed_because_config_acpi_disabled(&self) -> bool {
+        self.acpi_trimmed_because_config_acpi_disabled
+    }
+
+    pub const fn arch_post_acpi_subsys_init_trimmed_noop(&self) -> bool {
+        self.arch_post_acpi_subsys_init_trimmed_noop
+    }
+
+    pub const fn kcsan_init_trimmed_noop(&self) -> bool {
+        self.kcsan_init_trimmed_noop
+    }
+
+    pub const fn kcsan_trimmed_because_config_kcsan_disabled(&self) -> bool {
+        self.kcsan_trimmed_because_config_kcsan_disabled
+    }
+
+    pub const fn rcu_tasks_generic_out_of_scope(&self) -> bool {
+        self.rcu_tasks_generic_out_of_scope
+    }
+
+    pub const fn rcu_tasks_generic_belongs_to_kernel_init_freeable(&self) -> bool {
+        self.rcu_tasks_generic_belongs_to_kernel_init_freeable
+    }
+
+    pub const fn position_preserved(&self) -> bool {
+        self.position_preserved
+    }
+
+    pub fn preset(
+        &mut self,
+        config: &Config,
+        task_creation_core: &TaskCreationCore,
+        signal_core: &SignalCore,
+        vfs_core: &VfsCore,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || config.state() != State::Online
+            || config.x86_arch()
+            || config.shadow_call_stack_enabled()
+            || config.lockdep_enabled()
+            || config.kgdb_enabled()
+            || !config.net_ns_enabled()
+            || !config.proc_fs_enabled()
+            || !config.pid_ns_enabled()
+            || config.cpusets_enabled()
+            || config.cgroups_enabled()
+            || config.taskstats_enabled()
+            || config.task_delay_acct_enabled()
+            || config.acpi_enabled()
+            || config.kcsan_enabled()
+            || task_creation_core.state() != State::Ready
+            || signal_core.state() != State::Prepared
+            || vfs_core.state() != State::Ready
+            || !vfs_core.page_cache_deferred()
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.x86_efi_runtime_switch_trimmed_noop = true;
+        self.x86_efi_runtime_switch_trimmed_because_arch_riscv = true;
+        crate::trace::checkpoint(Checkpoint::X86EfiRuntimeSwitchTrimmed);
+        self.shadow_call_stack_init_trimmed_noop = true;
+        self.shadow_call_stack_trimmed_because_config_shadow_call_stack_disabled = true;
+        crate::trace::checkpoint(Checkpoint::ShadowCallStackInitNoop);
+        self.lockdep_init_task_trimmed_noop = true;
+        self.lockdep_init_task_trimmed_because_config_lockdep_disabled = true;
+        crate::trace::checkpoint(Checkpoint::LockdepInitTaskNoop);
+        self.dbg_late_init_trimmed_noop = true;
+        self.dbg_late_init_trimmed_because_config_kgdb_disabled = true;
+        crate::trace::checkpoint(Checkpoint::DbgLateInitNoop);
+        self.net_namespace_deferred = true;
+        self.net_namespace_deferred_even_if_config_net_ns_enabled = true;
+        crate::trace::checkpoint(Checkpoint::NetNamespaceDeferred);
+        self.pagecache_deferred = true;
+        self.pagecache_waitqueue_table_deferred = true;
+        crate::trace::checkpoint(Checkpoint::PageCacheDeferred);
+        self.signal_core_setup_deferred = true;
+        crate::trace::checkpoint(Checkpoint::SignalCoreSetupDeferred);
+        self.seq_file_core_deferred = true;
+        crate::trace::checkpoint(Checkpoint::SeqFileCoreDeferred);
+        self.procfs_deferred = true;
+        crate::trace::checkpoint(Checkpoint::ProcfsDeferred);
+        self.nsfs_deferred = true;
+        crate::trace::checkpoint(Checkpoint::NsfsDeferred);
+        self.pidfs_deferred = true;
+        crate::trace::checkpoint(Checkpoint::PidfsDeferred);
+        self.vfs_pseudo_filesystems_deferred = true;
+        self.bdev_chrdev_init_deferred = true;
+        self.cpuset_init_trimmed_noop = true;
+        self.cpuset_trimmed_because_config_cpusets_disabled = true;
+        crate::trace::checkpoint(Checkpoint::CpusetNoop);
+        self.cgroup_init_trimmed_noop = true;
+        self.cgroup_trimmed_because_config_cgroups_disabled = true;
+        crate::trace::checkpoint(Checkpoint::CgroupNoop);
+        self.taskstats_init_trimmed_noop = true;
+        self.taskstats_trimmed_because_config_taskstats_disabled = true;
+        crate::trace::checkpoint(Checkpoint::TaskstatsNoop);
+        self.delayacct_init_trimmed_noop = true;
+        self.delayacct_trimmed_because_config_task_delay_acct_disabled = true;
+        crate::trace::checkpoint(Checkpoint::DelayAccountingNoop);
+        self.acpi_subsystem_init_trimmed_noop = true;
+        self.acpi_trimmed_because_config_acpi_disabled = true;
+        crate::trace::checkpoint(Checkpoint::AcpiSubsystemNoop);
+        self.arch_post_acpi_subsys_init_trimmed_noop = true;
+        crate::trace::checkpoint(Checkpoint::ArchPostAcpiNoop);
+        self.kcsan_init_trimmed_noop = true;
+        self.kcsan_trimmed_because_config_kcsan_disabled = true;
+        crate::trace::checkpoint(Checkpoint::KcsanNoop);
+        self.rcu_tasks_generic_out_of_scope = true;
+        self.rcu_tasks_generic_belongs_to_kernel_init_freeable = true;
+        self.position_preserved = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::ProcessPrepareTrimmedPathsPrepared,
         )
     }
 }

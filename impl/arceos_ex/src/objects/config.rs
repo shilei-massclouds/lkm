@@ -101,6 +101,50 @@ impl Config {
         false
     }
 
+    pub const fn x86_arch(&self) -> bool {
+        false
+    }
+
+    pub const fn lockdep_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn kgdb_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn net_ns_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn proc_fs_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn pid_ns_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn cpusets_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn cgroups_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn taskstats_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn task_delay_acct_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn kcsan_enabled(&self) -> bool {
+        false
+    }
+
     pub const fn linear_map_virt_start(&self) -> usize {
         LINEAR_MAP_VIRT_START
     }

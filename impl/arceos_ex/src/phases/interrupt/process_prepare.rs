@@ -31,7 +31,6 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.anon_vma_core
         .setup(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
-    checkpoint_x86_efi_runtime_switch_trimmed()?;
     ctx.task_creation_core.preset(
         &ctx.slub_subsystem,
         ctx.slub_subsystem.kmalloc_caches(),
@@ -48,8 +47,6 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         init_task: &ctx.init_task,
         exception_stream: &ctx.exception_stream,
     })?;
-    checkpoint_shadow_call_stack_noop()?;
-    checkpoint_lockdep_init_task_noop()?;
     ctx.signal_core
         .preset(&ctx.slub_subsystem, ctx.slub_subsystem.kmalloc_caches())?;
     ctx.task_file_context
@@ -73,21 +70,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.static_branch,
     )?;
     setup_vfs_rootfs(ctx)?;
-    checkpoint_dbg_late_init_noop()?;
-    checkpoint_net_namespace_deferred()?;
-    checkpoint_page_cache_deferred()?;
-    checkpoint_signal_core_setup_deferred()?;
-    checkpoint_seq_file_core_deferred()?;
-    checkpoint_procfs_deferred()?;
-    checkpoint_nsfs_deferred()?;
-    checkpoint_pidfs_deferred()?;
-    checkpoint_cpuset_noop()?;
-    checkpoint_cgroup_noop()?;
-    checkpoint_taskstats_noop()?;
-    checkpoint_delay_accounting_noop()?;
-    checkpoint_acpi_subsystem_noop()?;
-    checkpoint_arch_post_acpi_noop()?;
-    checkpoint_kcsan_noop()
+    ctx.process_prepare_trimmed_paths.preset(
+        &ctx.config,
+        &ctx.task_creation_core,
+        &ctx.signal_core,
+        &ctx.vfs_core,
+    )
 }
 
 fn handoff() -> ! {
@@ -232,6 +220,7 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.security_core.hook_dispatcher_ready()
         && ctx.security_core.capability_hook_count() != 0
         && ctx.security_core.optional_lsms_deferred()
+        && process_prepare_trimmed_paths_ready(ctx)
         && ctx.vfs_core.state() == State::Ready
         && ctx.vfs_core.fs_type_registry_ready()
         && ctx.vfs_core.mount_table_ready()
@@ -249,6 +238,95 @@ fn process_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.vfs_core.ramfs_registered()
         && ctx.vfs_core.rootfs_mount_created()
         && rootfs_mount_facts_ready(ctx)
+}
+
+fn process_prepare_trimmed_paths_ready(ctx: &Context) -> bool {
+    ctx.process_prepare_trimmed_paths.state() == State::Prepared
+        && ctx
+            .process_prepare_trimmed_paths
+            .x86_efi_runtime_switch_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .x86_efi_runtime_switch_trimmed_because_arch_riscv()
+        && ctx
+            .process_prepare_trimmed_paths
+            .shadow_call_stack_init_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .shadow_call_stack_trimmed_because_config_shadow_call_stack_disabled()
+        && ctx
+            .process_prepare_trimmed_paths
+            .lockdep_init_task_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .lockdep_init_task_trimmed_because_config_lockdep_disabled()
+        && ctx
+            .process_prepare_trimmed_paths
+            .dbg_late_init_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .dbg_late_init_trimmed_because_config_kgdb_disabled()
+        && ctx.process_prepare_trimmed_paths.net_namespace_deferred()
+        && ctx
+            .process_prepare_trimmed_paths
+            .net_namespace_deferred_even_if_config_net_ns_enabled()
+        && ctx.process_prepare_trimmed_paths.pagecache_deferred()
+        && ctx
+            .process_prepare_trimmed_paths
+            .pagecache_waitqueue_table_deferred()
+        && ctx
+            .process_prepare_trimmed_paths
+            .signal_core_setup_deferred()
+        && ctx.process_prepare_trimmed_paths.seq_file_core_deferred()
+        && ctx.process_prepare_trimmed_paths.procfs_deferred()
+        && ctx.process_prepare_trimmed_paths.nsfs_deferred()
+        && ctx.process_prepare_trimmed_paths.pidfs_deferred()
+        && ctx
+            .process_prepare_trimmed_paths
+            .vfs_pseudo_filesystems_deferred()
+        && ctx
+            .process_prepare_trimmed_paths
+            .bdev_chrdev_init_deferred()
+        && ctx.process_prepare_trimmed_paths.cpuset_init_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .cpuset_trimmed_because_config_cpusets_disabled()
+        && ctx.process_prepare_trimmed_paths.cgroup_init_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .cgroup_trimmed_because_config_cgroups_disabled()
+        && ctx
+            .process_prepare_trimmed_paths
+            .taskstats_init_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .taskstats_trimmed_because_config_taskstats_disabled()
+        && ctx
+            .process_prepare_trimmed_paths
+            .delayacct_init_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .delayacct_trimmed_because_config_task_delay_acct_disabled()
+        && ctx
+            .process_prepare_trimmed_paths
+            .acpi_subsystem_init_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .acpi_trimmed_because_config_acpi_disabled()
+        && ctx
+            .process_prepare_trimmed_paths
+            .arch_post_acpi_subsys_init_trimmed_noop()
+        && ctx.process_prepare_trimmed_paths.kcsan_init_trimmed_noop()
+        && ctx
+            .process_prepare_trimmed_paths
+            .kcsan_trimmed_because_config_kcsan_disabled()
+        && ctx
+            .process_prepare_trimmed_paths
+            .rcu_tasks_generic_out_of_scope()
+        && ctx
+            .process_prepare_trimmed_paths
+            .rcu_tasks_generic_belongs_to_kernel_init_freeable()
+        && ctx.process_prepare_trimmed_paths.position_preserved()
 }
 
 fn rootfs_mount_facts_ready(ctx: &Context) -> bool {
@@ -298,94 +376,4 @@ fn rootfs_mount_facts_ready(ctx: &Context) -> bool {
         && root_inode.superblock_ref() == mount.superblock_ref()
         && root_inode.kind() == VfsInodeKind::Directory
         && !root_inode.removed()
-}
-
-fn checkpoint_x86_efi_runtime_switch_trimmed() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::X86EfiRuntimeSwitchTrimmed);
-    Ok(())
-}
-
-fn checkpoint_shadow_call_stack_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::ShadowCallStackInitNoop);
-    Ok(())
-}
-
-fn checkpoint_lockdep_init_task_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::LockdepInitTaskNoop);
-    Ok(())
-}
-
-fn checkpoint_dbg_late_init_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::DbgLateInitNoop);
-    Ok(())
-}
-
-fn checkpoint_net_namespace_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::NetNamespaceDeferred);
-    Ok(())
-}
-
-fn checkpoint_page_cache_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::PageCacheDeferred);
-    Ok(())
-}
-
-fn checkpoint_signal_core_setup_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::SignalCoreSetupDeferred);
-    Ok(())
-}
-
-fn checkpoint_seq_file_core_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::SeqFileCoreDeferred);
-    Ok(())
-}
-
-fn checkpoint_procfs_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::ProcfsDeferred);
-    Ok(())
-}
-
-fn checkpoint_nsfs_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::NsfsDeferred);
-    Ok(())
-}
-
-fn checkpoint_pidfs_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::PidfsDeferred);
-    Ok(())
-}
-
-fn checkpoint_cpuset_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::CpusetNoop);
-    Ok(())
-}
-
-fn checkpoint_cgroup_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::CgroupNoop);
-    Ok(())
-}
-
-fn checkpoint_taskstats_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::TaskstatsNoop);
-    Ok(())
-}
-
-fn checkpoint_delay_accounting_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::DelayAccountingNoop);
-    Ok(())
-}
-
-fn checkpoint_acpi_subsystem_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::AcpiSubsystemNoop);
-    Ok(())
-}
-
-fn checkpoint_arch_post_acpi_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::ArchPostAcpiNoop);
-    Ok(())
-}
-
-fn checkpoint_kcsan_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::KcsanNoop);
-    Ok(())
 }

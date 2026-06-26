@@ -136,6 +136,13 @@ keyring 和 security 对象按 formal trace 后续推进。`VfsCore.Setup` 只�
 page-cache、net namespace、`signals_init()`、真实 mount namespace 切换以及实际任务创建仍保持 deferred 或
 trimmed checkpoint，不应伪装成完整运行期服务。
 
+本阶段必须用结构化对象记录 Linux 调用点分类，而不能只散落为 checkpoint：`ProcessPrepareTrimmedPaths`
+应覆盖当前 RISC-V/default_config 下的 x86 EFI runtime switch、SCS、`lockdep_init_task()`、KGDB late init、
+cpuset/cgroup/taskstats/delayacct/ACPI/KCSAN 裁剪依据；同时也要记录已启用但本轮不展开的 `net_ns_init()`、
+`pagecache_init()`、`seq_file_init()`、`proc_root_init()`、`nsfs_init()`、`pidfs_init()`、以及
+`vfs_caches_init()` 内 block/char device cache 初始化位置。`rcu_init_tasks_generic()` 位于 `rest_init()` 之后的
+`kernel_init_freeable()`，对 `ProcessPreparePhase` 是 out-of-scope，不能提前建模为本阶段已执行。
+
 `devfs` 不属于 `ProcessPreparePhase` 的初始 rootfs mount 行为。它必须在后续已有设备 registry 可用之后挂载到
 初始 rootfs 的 `/dev` 位置；`ProcessPreparePhase` 只提供可被后续挂载消费的 VFS/root dentry/superblock 基础。
 

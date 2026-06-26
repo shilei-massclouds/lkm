@@ -211,6 +211,7 @@ predicate arceos_ex_must_process_prepare_cover_pid_task_cred_memory_namespace_ke
 predicate arceos_ex_must_task_creation_core_bind_task_entry_in_copy_process() -> bool;
 predicate arceos_ex_must_task_creation_core_api_smoke_use_copy_process_contract() -> bool;
 predicate arceos_ex_must_process_prepare_keep_deferred_paths_explicit() -> bool;
+predicate arceos_ex_must_process_prepare_record_trimmed_paths_structurally() -> bool;
 predicate arceos_ex_must_completion_map_to_reusable_object() -> bool;
 predicate arceos_ex_must_completion_own_simple_wait_queue() -> bool;
 predicate arceos_ex_must_completion_processes_keep_state_effects() -> bool;
@@ -2039,6 +2040,20 @@ type ArceosExProcessPrepareCodingMust {
          * silently disappearing from the implementation boundary.
          */
         arceos_ex_must_process_prepare_keep_deferred_paths_explicit();
+
+        /*
+         * Trimmed/deferred path carrier:
+         *
+         * ProcessPreparePhase must use a ProcessPrepareTrimmedPaths-style
+         * object to record config-trimmed calls such as x86 EFI runtime
+         * switch, SCS, lockdep_init_task(), cpuset/cgroup/taskstats/
+         * delayacct/ACPI/KCSAN, and enabled-but-deferred calls such as
+         * net_ns_init(), pagecache_init(), seq_file_init(), proc_root_init(),
+         * nsfs_init() and pidfs_init(). rcu_init_tasks_generic() is not in
+         * this subphase and must be recorded as out-of-scope rather than
+         * silently pulled into ProcessPreparePhase.
+         */
+        arceos_ex_must_process_prepare_record_trimmed_paths_structurally();
     }
 }
 
