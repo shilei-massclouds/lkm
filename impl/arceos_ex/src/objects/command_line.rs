@@ -99,6 +99,18 @@ impl SavedCommandLine {
         self.lifecycle.state()
     }
 
+    pub fn has_token(&self, token: &[u8]) -> bool {
+        cmdline_has_token(self.cmdline.as_bytes(), token)
+    }
+
+    pub fn has_token_prefix(&self, prefix: &[u8]) -> bool {
+        cmdline_has_token_prefix(self.cmdline.as_bytes(), prefix)
+    }
+
+    pub fn root_value_is(&self, value: &[u8]) -> bool {
+        cmdline_token_value_is(self.cmdline.as_bytes(), b"root=", value)
+    }
+
     pub fn setup(&mut self, kernel_cmdline: &KernelCmdline, memblock: &MemBlock) -> EventResult {
         if self.lifecycle.state() != State::Base
             || kernel_cmdline.state() != State::Ready
@@ -120,6 +132,89 @@ impl SavedCommandLine {
             Checkpoint::SavedCommandLineReady,
         )
     }
+}
+
+fn cmdline_has_token(cmdline: &[u8], token: &[u8]) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+
+    let mut cursor = 0usize;
+    while let Some((start, end)) = next_token(cmdline, cursor) {
+        if bytes_eq(&cmdline[start..end], token) {
+            return true;
+        }
+        cursor = end;
+    }
+    false
+}
+
+fn cmdline_has_token_prefix(cmdline: &[u8], prefix: &[u8]) -> bool {
+    if prefix.is_empty() {
+        return false;
+    }
+
+    let mut cursor = 0usize;
+    while let Some((start, end)) = next_token(cmdline, cursor) {
+        if token_starts_with(&cmdline[start..end], prefix) {
+            return true;
+        }
+        cursor = end;
+    }
+    false
+}
+
+fn cmdline_token_value_is(cmdline: &[u8], prefix: &[u8], value: &[u8]) -> bool {
+    if prefix.is_empty() {
+        return false;
+    }
+
+    let mut cursor = 0usize;
+    while let Some((start, end)) = next_token(cmdline, cursor) {
+        let token = &cmdline[start..end];
+        if token_starts_with(token, prefix) && bytes_eq(&token[prefix.len()..], value) {
+            return true;
+        }
+        cursor = end;
+    }
+    false
+}
+
+fn next_token(cmdline: &[u8], mut cursor: usize) -> Option<(usize, usize)> {
+    while cursor < cmdline.len() && cmdline[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if cursor >= cmdline.len() {
+        return None;
+    }
+
+    let start = cursor;
+    while cursor < cmdline.len() && !cmdline[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    Some((start, cursor))
+}
+
+fn token_starts_with(token: &[u8], prefix: &[u8]) -> bool {
+    if token.len() < prefix.len() {
+        return false;
+    }
+    bytes_eq(&token[..prefix.len()], prefix)
+}
+
+fn bytes_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let mut index = 0usize;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 pub struct StaticCommandLine {

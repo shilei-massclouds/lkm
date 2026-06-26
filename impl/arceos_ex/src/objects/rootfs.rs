@@ -1,9 +1,10 @@
 use super::{
     block_device::{BlockDeviceRef, BlockDeviceRegistry, DevT},
     command_line::SavedCommandLine,
+    config::Config,
     devfs::DevFs,
     ext2::{Ext2Driver, Ext2FileSystem, Ext2Volume},
-    initcall::InitcallBoundary,
+    initcall::{DriverCoreBase, InitcallBoundary},
     rest_init::{KernelInitTask, KERNEL_INIT_PID},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     vfs::{DentryRef, FileSystemKind, FsStruct, MountRef, VfsCore},
@@ -174,6 +175,203 @@ impl RootfsConsoleDeferred {
     }
 }
 
+pub struct RootfsPrepareNamespacePaths {
+    lifecycle: Lifecycle,
+    root_delay_trimmed: bool,
+    device_probe_wait_deferred: bool,
+    device_probe_waitqueue_deferred: bool,
+    device_probe_atomic_counter_deferred: bool,
+    deferred_probe_work_flush_deferred: bool,
+    md_run_setup_deferred: bool,
+    saved_root_name_parse_deferred: bool,
+    root_device_parse_deferred: bool,
+    initrd_load_trimmed: bool,
+    root_wait_trimmed: bool,
+    root_wait_polling_deferred: bool,
+    mount_root_block_formal: bool,
+    nfs_root_deferred: bool,
+    cifs_root_trimmed: bool,
+    nodev_root_deferred: bool,
+    ext4_for_ext2_linux_config_recorded: bool,
+    arceos_ext2_driver_substitutes_linux_ext4_for_ext2: bool,
+    devtmpfs_mount_deferred: bool,
+    devfs_not_remounted_after_root_switch: bool,
+}
+
+impl RootfsPrepareNamespacePaths {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            root_delay_trimmed: false,
+            device_probe_wait_deferred: false,
+            device_probe_waitqueue_deferred: false,
+            device_probe_atomic_counter_deferred: false,
+            deferred_probe_work_flush_deferred: false,
+            md_run_setup_deferred: false,
+            saved_root_name_parse_deferred: false,
+            root_device_parse_deferred: false,
+            initrd_load_trimmed: false,
+            root_wait_trimmed: false,
+            root_wait_polling_deferred: false,
+            mount_root_block_formal: false,
+            nfs_root_deferred: false,
+            cifs_root_trimmed: false,
+            nodev_root_deferred: false,
+            ext4_for_ext2_linux_config_recorded: false,
+            arceos_ext2_driver_substitutes_linux_ext4_for_ext2: false,
+            devtmpfs_mount_deferred: false,
+            devfs_not_remounted_after_root_switch: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn root_delay_trimmed(&self) -> bool {
+        self.root_delay_trimmed
+    }
+
+    pub const fn device_probe_wait_deferred(&self) -> bool {
+        self.device_probe_wait_deferred
+    }
+
+    pub const fn device_probe_waitqueue_deferred(&self) -> bool {
+        self.device_probe_waitqueue_deferred
+    }
+
+    pub const fn device_probe_atomic_counter_deferred(&self) -> bool {
+        self.device_probe_atomic_counter_deferred
+    }
+
+    pub const fn deferred_probe_work_flush_deferred(&self) -> bool {
+        self.deferred_probe_work_flush_deferred
+    }
+
+    pub const fn md_run_setup_deferred(&self) -> bool {
+        self.md_run_setup_deferred
+    }
+
+    pub const fn saved_root_name_parse_deferred(&self) -> bool {
+        self.saved_root_name_parse_deferred
+    }
+
+    pub const fn root_device_parse_deferred(&self) -> bool {
+        self.root_device_parse_deferred
+    }
+
+    pub const fn initrd_load_trimmed(&self) -> bool {
+        self.initrd_load_trimmed
+    }
+
+    pub const fn root_wait_trimmed(&self) -> bool {
+        self.root_wait_trimmed
+    }
+
+    pub const fn root_wait_polling_deferred(&self) -> bool {
+        self.root_wait_polling_deferred
+    }
+
+    pub const fn mount_root_block_formal(&self) -> bool {
+        self.mount_root_block_formal
+    }
+
+    pub const fn nfs_root_deferred(&self) -> bool {
+        self.nfs_root_deferred
+    }
+
+    pub const fn cifs_root_trimmed(&self) -> bool {
+        self.cifs_root_trimmed
+    }
+
+    pub const fn nodev_root_deferred(&self) -> bool {
+        self.nodev_root_deferred
+    }
+
+    pub const fn ext4_for_ext2_linux_config_recorded(&self) -> bool {
+        self.ext4_for_ext2_linux_config_recorded
+    }
+
+    pub const fn arceos_ext2_driver_substitutes_linux_ext4_for_ext2(&self) -> bool {
+        self.arceos_ext2_driver_substitutes_linux_ext4_for_ext2
+    }
+
+    pub const fn devtmpfs_mount_deferred(&self) -> bool {
+        self.devtmpfs_mount_deferred
+    }
+
+    pub const fn devfs_not_remounted_after_root_switch(&self) -> bool {
+        self.devfs_not_remounted_after_root_switch
+    }
+
+    pub fn setup(
+        &mut self,
+        rootfs_console: &RootfsConsoleDeferred,
+        saved_command_line: &SavedCommandLine,
+        driver_core: &DriverCoreBase,
+        workqueue: &Workqueue,
+        initcall_boundary: &InitcallBoundary,
+        config: &Config,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || rootfs_console.state() != State::Ready
+            || !rootfs_console.setup_deferred()
+            || saved_command_line.state() != State::Ready
+            || driver_core.state() != State::Ready
+            || workqueue.state() != State::Ready
+            || initcall_boundary.state() != State::Ready
+            || !initcall_boundary.kunit_next_boundary()
+            || config.kunit_enabled()
+            || config.blk_dev_initrd_enabled()
+            || !config.md_enabled()
+            || !config.root_nfs_enabled()
+            || config.cifs_root_enabled()
+            || config.ext2_fs_enabled()
+            || !config.ext4_use_for_ext2_enabled()
+            || !config.devtmpfs_enabled()
+            || !config.devtmpfs_mount_enabled()
+            || saved_command_line.has_token_prefix(b"rootdelay=")
+            || saved_command_line.has_token(b"rootwait")
+            || saved_command_line.has_token_prefix(b"rootwait=")
+            || saved_command_line.root_value_is(b"/dev/nfs")
+            || saved_command_line.root_value_is(b"/dev/cifs")
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.root_delay_trimmed = true;
+        self.device_probe_wait_deferred = true;
+        self.device_probe_waitqueue_deferred = true;
+        self.device_probe_atomic_counter_deferred = true;
+        self.deferred_probe_work_flush_deferred = true;
+        self.md_run_setup_deferred = true;
+        self.saved_root_name_parse_deferred = true;
+        self.root_device_parse_deferred = true;
+        self.initrd_load_trimmed = true;
+        self.root_wait_trimmed = true;
+        self.root_wait_polling_deferred = true;
+        self.mount_root_block_formal = true;
+        self.nfs_root_deferred = true;
+        self.cifs_root_trimmed = true;
+        self.nodev_root_deferred = true;
+        self.ext4_for_ext2_linux_config_recorded = true;
+        self.arceos_ext2_driver_substitutes_linux_ext4_for_ext2 = true;
+        self.devtmpfs_mount_deferred = true;
+        self.devfs_not_remounted_after_root_switch = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::RootfsPrepareNamespacePathsReady,
+        )
+    }
+}
+
 pub struct RootFS {
     lifecycle: Lifecycle,
     ramdisk_eaccess_requires_prepare_namespace: bool,
@@ -300,6 +498,7 @@ impl RootFS {
     pub fn enable(
         &mut self,
         rootfs_console: &RootfsConsoleDeferred,
+        namespace_paths: &RootfsPrepareNamespacePaths,
         saved_command_line: &SavedCommandLine,
         kernel_init_task: &KernelInitTask,
         vfs_core: &mut VfsCore,
@@ -313,6 +512,11 @@ impl RootFS {
         if self.lifecycle.state() != State::Ready
             || rootfs_console.state() != State::Ready
             || !rootfs_console.setup_deferred()
+            || namespace_paths.state() != State::Ready
+            || !namespace_paths.mount_root_block_formal()
+            || !namespace_paths.ext4_for_ext2_linux_config_recorded()
+            || !namespace_paths.arceos_ext2_driver_substitutes_linux_ext4_for_ext2()
+            || !namespace_paths.devfs_not_remounted_after_root_switch()
             || saved_command_line.state() != State::Ready
             || kernel_init_task.state() != State::Online
             || kernel_init_task.pid() != KERNEL_INIT_PID
@@ -484,6 +688,10 @@ pub struct IntegrityKeysDeferred {
     setup_deferred: bool,
     load_keys_position_preserved: bool,
     config_integrity_enabled: bool,
+    ima_load_x509_deferred: bool,
+    ima_load_x509_trimmed_because_config_ima_disabled: bool,
+    evm_load_x509_deferred: bool,
+    evm_load_x509_trimmed_because_config_evm_disabled: bool,
 }
 
 impl IntegrityKeysDeferred {
@@ -493,6 +701,10 @@ impl IntegrityKeysDeferred {
             setup_deferred: false,
             load_keys_position_preserved: false,
             config_integrity_enabled: false,
+            ima_load_x509_deferred: false,
+            ima_load_x509_trimmed_because_config_ima_disabled: false,
+            evm_load_x509_deferred: false,
+            evm_load_x509_trimmed_because_config_evm_disabled: false,
         }
     }
 
@@ -512,12 +724,31 @@ impl IntegrityKeysDeferred {
         self.config_integrity_enabled
     }
 
-    pub fn setup(&mut self, rootfs: &RootFS) -> EventResult {
+    pub const fn ima_load_x509_deferred(&self) -> bool {
+        self.ima_load_x509_deferred
+    }
+
+    pub const fn ima_load_x509_trimmed_because_config_ima_disabled(&self) -> bool {
+        self.ima_load_x509_trimmed_because_config_ima_disabled
+    }
+
+    pub const fn evm_load_x509_deferred(&self) -> bool {
+        self.evm_load_x509_deferred
+    }
+
+    pub const fn evm_load_x509_trimmed_because_config_evm_disabled(&self) -> bool {
+        self.evm_load_x509_trimmed_because_config_evm_disabled
+    }
+
+    pub fn setup(&mut self, rootfs: &RootFS, config: &Config) -> EventResult {
         if self.lifecycle.state() != State::Base
             || rootfs.state() != State::Online
             || !rootfs.prepare_namespace_inputs_ready()
             || !rootfs.real_ext2_mount_created()
             || !rootfs.ms_move_done()
+            || !config.integrity_enabled()
+            || config.ima_enabled()
+            || config.evm_enabled()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -530,6 +761,10 @@ impl IntegrityKeysDeferred {
         self.setup_deferred = true;
         self.load_keys_position_preserved = true;
         self.config_integrity_enabled = true;
+        self.ima_load_x509_deferred = true;
+        self.ima_load_x509_trimmed_because_config_ima_disabled = true;
+        self.evm_load_x509_deferred = true;
+        self.evm_load_x509_trimmed_because_config_evm_disabled = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -565,6 +800,7 @@ impl RootfsBoundary {
         kunit: &KUnitRuntimeTrimmed,
         initramfs_sync: &InitramfsSyncDeferred,
         rootfs_console: &RootfsConsoleDeferred,
+        namespace_paths: &RootfsPrepareNamespacePaths,
         rootfs: &RootFS,
         integrity_keys: &IntegrityKeysDeferred,
     ) -> EventResult {
@@ -575,6 +811,11 @@ impl RootfsBoundary {
             || !initramfs_sync.wait_deferred()
             || rootfs_console.state() != State::Ready
             || !rootfs_console.setup_deferred()
+            || namespace_paths.state() != State::Ready
+            || !namespace_paths.device_probe_wait_deferred()
+            || !namespace_paths.md_run_setup_deferred()
+            || !namespace_paths.initrd_load_trimmed()
+            || !namespace_paths.devtmpfs_mount_deferred()
             || rootfs.state() != State::Online
             || !rootfs.ramdisk_eaccess_requires_prepare_namespace()
             || !rootfs.prepare_namespace_inputs_ready()
@@ -614,6 +855,7 @@ pub fn rootfs_phase_ready(
     kunit: &KUnitRuntimeTrimmed,
     initramfs_sync: &InitramfsSyncDeferred,
     rootfs_console: &RootfsConsoleDeferred,
+    namespace_paths: &RootfsPrepareNamespacePaths,
     rootfs: &RootFS,
     integrity_keys: &IntegrityKeysDeferred,
     boundary: &RootfsBoundary,
@@ -627,6 +869,26 @@ pub fn rootfs_phase_ready(
         && rootfs_console.state() == State::Ready
         && rootfs_console.setup_deferred()
         && rootfs_console.pid1_console_fd_position_preserved()
+        && namespace_paths.state() == State::Ready
+        && namespace_paths.root_delay_trimmed()
+        && namespace_paths.device_probe_wait_deferred()
+        && namespace_paths.device_probe_waitqueue_deferred()
+        && namespace_paths.device_probe_atomic_counter_deferred()
+        && namespace_paths.deferred_probe_work_flush_deferred()
+        && namespace_paths.md_run_setup_deferred()
+        && namespace_paths.saved_root_name_parse_deferred()
+        && namespace_paths.root_device_parse_deferred()
+        && namespace_paths.initrd_load_trimmed()
+        && namespace_paths.root_wait_trimmed()
+        && namespace_paths.root_wait_polling_deferred()
+        && namespace_paths.mount_root_block_formal()
+        && namespace_paths.nfs_root_deferred()
+        && namespace_paths.cifs_root_trimmed()
+        && namespace_paths.nodev_root_deferred()
+        && namespace_paths.ext4_for_ext2_linux_config_recorded()
+        && namespace_paths.arceos_ext2_driver_substitutes_linux_ext4_for_ext2()
+        && namespace_paths.devtmpfs_mount_deferred()
+        && namespace_paths.devfs_not_remounted_after_root_switch()
         && rootfs.state() == State::Online
         && rootfs.ramdisk_eaccess_requires_prepare_namespace()
         && rootfs.prepare_namespace_inputs_ready()
@@ -650,6 +912,10 @@ pub fn rootfs_phase_ready(
         && integrity_keys.setup_deferred()
         && integrity_keys.load_keys_position_preserved()
         && integrity_keys.config_integrity_enabled()
+        && integrity_keys.ima_load_x509_deferred()
+        && integrity_keys.ima_load_x509_trimmed_because_config_ima_disabled()
+        && integrity_keys.evm_load_x509_deferred()
+        && integrity_keys.evm_load_x509_trimmed_because_config_evm_disabled()
         && boundary.state() == State::Ready
         && boundary.finalize_next_boundary()
 }

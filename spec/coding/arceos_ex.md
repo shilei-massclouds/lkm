@@ -837,10 +837,25 @@ root device candidate 只能来自已有 `BlockDeviceRegistry.default_device`，
 rootfs smoke 新增测试专用设备 API。当前不把 `DevFs` 偷偷 remount 到新的 ext2 root 下；相关行为留给后续 mount
 namespace/devtmpfs 轮次。
 
+`prepare_namespace()` 内部非主线必须结构化记录。`wait_for_device_probe()` 在 Linux 中涉及
+`deferred_probe_work`、`probe_count` atomic 和 `probe_waitqueue`，本轮保持 deferred，不能用 “boot-time 单任务”
+吞掉 waitqueue/atomic 责任。当前命令行未启用 `rootdelay=`、`rootwait` 或 `rootwait=`，这些分支记录为
+trimmed/no-op，同时保留 `wait_for_root()` 的轮询/睡眠路径为 deferred。当前 `.config` 下
+`CONFIG_BLK_DEV_INITRD=n`，`initrd_load()` 为 trimmed；`CONFIG_MD=y`，`md_run_setup()` 为 deferred；
+`CONFIG_ROOT_NFS=y` 但当前根不是 `/dev/nfs`，NFS root 为 deferred；`CONFIG_CIFS_ROOT=n`，CIFS root 为
+trimmed；nodev root、`saved_root_name`/`ROOT_DEV` 解析和 `parse_root_device()` 变体仍 deferred。Linux 参考配置为
+`CONFIG_EXT2_FS=n`、`CONFIG_EXT4_USE_FOR_EXT2=y`，因此要显式记录 arceos_ex 当前 `Ext2Driver` 是阶段性替代实现。
+`CONFIG_DEVTMPFS=y` / `CONFIG_DEVTMPFS_MOUNT=y` 下 `devtmpfs_mount()` 是真实 Linux 路径；本轮只记录
+deferred，并明确当前 `DevFs` 不会在 root switch 后重新挂到新的 ext2 root 下。
+
+`IntegrityKeysDeferred` 必须同时记录 `CONFIG_INTEGRITY=y` 的调用位置，以及当前 `CONFIG_IMA=n`、`CONFIG_EVM=n`
+导致 IMA/EVM x509 key loading 不展开的裁剪依据。
+
 测试应覆盖 `RootfsPhase.Ready`、KUnit trimmed、initramfs wait deferred、rootfs console deferred、
 ramdisk eaccess 强制进入 prepare_namespace、prepare_namespace 输入条件已具备、真实 ext2 root staging mount 曾建立于
 `/root`、`MS_MOVE` 挂载移动完成、`FsStruct.ChrootDot` 完成、当前 root 为 ext2、可直接读取 `/etc/alpine-release`、
-integrity keys deferred，以及下一入口仍是 `FinalizePhase`。
+device-probe/rootwait/initrd/md/NFS/CIFS/devtmpfs 路径分类、integrity keys deferred/trimmed 细分事实，以及下一入口仍是
+`FinalizePhase`。
 
 ## FinalizePhase 编码约束
 

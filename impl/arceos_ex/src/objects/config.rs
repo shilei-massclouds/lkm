@@ -85,6 +85,50 @@ impl Config {
         false
     }
 
+    pub const fn kunit_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn md_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn root_nfs_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn cifs_root_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn ext2_fs_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn ext4_use_for_ext2_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn devtmpfs_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn devtmpfs_mount_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn integrity_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn ima_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn evm_enabled(&self) -> bool {
+        false
+    }
+
     pub const fn numa_enabled(&self) -> bool {
         false
     }

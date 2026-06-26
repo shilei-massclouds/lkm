@@ -101,6 +101,98 @@ object RootfsConsoleDeferred: KernelObject {
 }
 
 /*
+ * RootfsPrepareNamespacePaths records the Linux prepare_namespace() branches
+ * that are not expanded by the current RootFS enable path. It does not split
+ * RootfsPhase: RootFS.Transition::Enable remains the formal prepare_namespace
+ * event, while this object preserves the classification and synchronization
+ * obligations of the surrounding Linux calls.
+ */
+object RootfsPrepareNamespacePaths: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    RootfsConsoleDeferred.state == State::Ready;
+                    SavedCommandLine.state == State::Ready;
+                    DriverCoreBase.state == State::Ready;
+                    Workqueue.state == State::Ready;
+                    InitcallBoundary.state == State::Ready;
+                }
+
+                ensures {
+                    rootfs_root_delay_trimmed_noop();
+                    rootfs_root_delay_trimmed_because_cmdline_absent();
+                    rootfs_device_probe_wait_deferred();
+                    rootfs_device_probe_waitqueue_deferred();
+                    rootfs_device_probe_atomic_counter_deferred();
+                    rootfs_deferred_probe_work_flush_deferred();
+                    rootfs_md_run_setup_deferred();
+                    rootfs_md_run_setup_deferred_because_config_md_enabled();
+                    rootfs_saved_root_name_parse_deferred();
+                    rootfs_root_device_parse_deferred();
+                    rootfs_initrd_load_trimmed_noop();
+                    rootfs_initrd_load_trimmed_because_config_blk_dev_initrd_disabled();
+                    rootfs_root_wait_trimmed_noop();
+                    rootfs_root_wait_trimmed_because_cmdline_absent();
+                    rootfs_root_wait_polling_deferred();
+                    rootfs_mount_root_block_formal();
+                    rootfs_nfs_root_deferred();
+                    rootfs_cifs_root_trimmed_noop();
+                    rootfs_nodev_root_deferred();
+                    rootfs_ext4_for_ext2_linux_config_recorded();
+                    rootfs_arceos_ext2_driver_substitutes_linux_ext4_for_ext2();
+                    rootfs_devtmpfs_mount_deferred();
+                    rootfs_devtmpfs_mount_deferred_because_config_devtmpfs_enabled();
+                    rootfs_devfs_currently_not_remounted_after_root_switch();
+                }
+
+                deferred {
+                    "wait_for_device_probe() 暂缓：Linux drivers/base/dd.c 使用 deferred_probe_work、probe_count atomic 和 probe_waitqueue 等待所有 probe 结束；当前依赖 InitcallBoundary 与设备对象 ready fact，不展开 waitqueue/atomic 协议。";
+                    "md_run_setup() 暂缓：当前 CONFIG_MD=y，但 arceos_ex 根设备直接来自 BlockDeviceRegistry.default_device，不展开 md autodetect/assembly。";
+                    "saved_root_name/ROOT_DEV/parse_root_device() 暂缓：当前 RootFS enable 直接绑定默认块设备候选，不解析 root= 下的 mtd/ubi/NFS/CIFS/ram/block 变体。";
+                    "root_wait/wait_for_root() 暂缓：当前命令行不使用 rootwait/rootwait=，轮询 driver_probe_done()+early_lookup_bdev() 的睡眠等待路径不进入 formal 主线。";
+                    "CONFIG_BLK_DEV_INITRD=n，因此 initrd_load() 为 trimmed/no-op；若未来启用 initrd，handle_initrd()/linuxrc 的 mount/chroot/call_usermodehelper 路径必须单独建模。";
+                    "CONFIG_ROOT_NFS=y 但当前根设备不是 /dev/nfs，NFS root 保持 deferred；CONFIG_CIFS_ROOT 未启用，CIFS root 为 trimmed/no-op。";
+                    "CONFIG_EXT2_FS=n 且 CONFIG_EXT4_USE_FOR_EXT2=y；Linux 会经 ext4-for-ext2 挂载 ext2 格式根，当前 arceos_ex 用 Ext2Driver/Ext2FileSystem 作为阶段性替代实现。";
+                    "CONFIG_DEVTMPFS=y/CONFIG_DEVTMPFS_MOUNT=y 下 devtmpfs_mount() 是真实 Linux 路径；当前已有 DevFs 在初始 rootfs 的 /dev 下可用，但 RootFS enable 后不把 /dev remount 到新 ext2 root，相关 devtmpfs 线程/req_lock/completion 仍 deferred。";
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            rootfs_root_delay_trimmed_noop();
+            rootfs_root_delay_trimmed_because_cmdline_absent();
+            rootfs_device_probe_wait_deferred();
+            rootfs_device_probe_waitqueue_deferred();
+            rootfs_device_probe_atomic_counter_deferred();
+            rootfs_deferred_probe_work_flush_deferred();
+            rootfs_md_run_setup_deferred();
+            rootfs_md_run_setup_deferred_because_config_md_enabled();
+            rootfs_saved_root_name_parse_deferred();
+            rootfs_root_device_parse_deferred();
+            rootfs_initrd_load_trimmed_noop();
+            rootfs_initrd_load_trimmed_because_config_blk_dev_initrd_disabled();
+            rootfs_root_wait_trimmed_noop();
+            rootfs_root_wait_trimmed_because_cmdline_absent();
+            rootfs_root_wait_polling_deferred();
+            rootfs_mount_root_block_formal();
+            rootfs_nfs_root_deferred();
+            rootfs_cifs_root_trimmed_noop();
+            rootfs_nodev_root_deferred();
+            rootfs_ext4_for_ext2_linux_config_recorded();
+            rootfs_arceos_ext2_driver_substitutes_linux_ext4_for_ext2();
+            rootfs_devtmpfs_mount_deferred();
+            rootfs_devtmpfs_mount_deferred_because_config_devtmpfs_enabled();
+            rootfs_devfs_currently_not_remounted_after_root_switch();
+        }
+    }
+}
+
+/*
  * RootFS is the target top-level filesystem view. It is already Ready when
  * this phase starts because ProcessPreparePhase built the initial ramfs-backed
  * rootfs mount via vfs_caches_init()/mnt_init(). RootFS.Transition::Enable
@@ -132,6 +224,7 @@ object RootFS: KernelObject {
             on Transition::Enable -> State::Online {
                 depends_on {
                     RootfsConsoleDeferred.state == State::Ready;
+                    RootfsPrepareNamespacePaths.state == State::Ready;
                     SavedCommandLine.state == State::Ready;
                     KernelInitTask.state == State::Online;
                     VfsCore.state == State::Ready;
@@ -147,6 +240,10 @@ object RootFS: KernelObject {
                     Ext2Driver.state == State::Ready;
                     Ext2Volume.state == State::Ready;
                     Ext2FileSystem.state == State::Ready;
+                    rootfs_mount_root_block_formal();
+                    rootfs_ext4_for_ext2_linux_config_recorded();
+                    rootfs_arceos_ext2_driver_substitutes_linux_ext4_for_ext2();
+                    rootfs_devfs_currently_not_remounted_after_root_switch();
                 }
 
                 drives {
@@ -214,6 +311,15 @@ object IntegrityKeysDeferred: KernelObject {
                 ensures {
                     integrity_keys_setup_deferred();
                     integrity_load_keys_position_preserved();
+                    integrity_config_enabled_recorded();
+                    integrity_ima_load_x509_deferred();
+                    integrity_ima_load_x509_trimmed_because_config_ima_disabled();
+                    integrity_evm_load_x509_deferred();
+                    integrity_evm_load_x509_trimmed_because_config_evm_disabled();
+                }
+
+                deferred {
+                    "integrity_load_keys() 在 CONFIG_INTEGRITY=y 下保留调用位置；当前 CONFIG_IMA=n、CONFIG_EVM=n，不展开 IMA/EVM x509 keyring 和证书加载。";
                 }
             }
         }
@@ -223,6 +329,11 @@ object IntegrityKeysDeferred: KernelObject {
         invariant {
             integrity_keys_setup_deferred();
             integrity_load_keys_position_preserved();
+            integrity_config_enabled_recorded();
+            integrity_ima_load_x509_deferred();
+            integrity_ima_load_x509_trimmed_because_config_ima_disabled();
+            integrity_evm_load_x509_deferred();
+            integrity_evm_load_x509_trimmed_because_config_evm_disabled();
         }
     }
 }
@@ -241,6 +352,7 @@ object RootfsBoundary: KernelObject {
                     KUnitRuntimeTrimmed.state == State::Ready;
                     InitramfsSyncDeferred.state == State::Ready;
                     RootfsConsoleDeferred.state == State::Ready;
+                    RootfsPrepareNamespacePaths.state == State::Ready;
                     RootFS.state == State::Online;
                     IntegrityKeysDeferred.state == State::Ready;
                 }
@@ -284,6 +396,7 @@ object RootfsPhase: PhaseObject {
                     KUnitRuntimeTrimmed.Transition::Setup;
                     InitramfsSyncDeferred.Transition::Setup;
                     RootfsConsoleDeferred.Transition::Setup;
+                    RootfsPrepareNamespacePaths.Transition::Setup;
                     Bio.Transition::Setup;
                     BufferHead.Transition::Setup;
                     Ext2Driver.Transition::Setup;
@@ -300,6 +413,10 @@ object RootfsPhase: PhaseObject {
                     kunit_runtime_trimmed_noop();
                     initramfs_sync_wait_deferred();
                     rootfs_console_setup_deferred();
+                    rootfs_device_probe_wait_deferred();
+                    rootfs_md_run_setup_deferred();
+                    rootfs_initrd_load_trimmed_noop();
+                    rootfs_devtmpfs_mount_deferred();
                     ramdisk_execute_command_eaccess_requires_prepare_namespace();
                     rootfs_prepare_namespace_inputs_ready(RootFS);
                     rootfs_devfs_available(RootFS, DevFs);
@@ -321,6 +438,7 @@ object RootfsPhase: PhaseObject {
             KUnitRuntimeTrimmed.state == State::Ready;
             InitramfsSyncDeferred.state == State::Ready;
             RootfsConsoleDeferred.state == State::Ready;
+            RootfsPrepareNamespacePaths.state == State::Ready;
             RootFS.state == State::Online;
             IntegrityKeysDeferred.state == State::Ready;
             RootfsBoundary.state == State::Ready;

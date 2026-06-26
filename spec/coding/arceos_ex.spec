@@ -238,6 +238,7 @@ predicate arceos_ex_must_ext2_lookup_support_path_components_from_directories() 
 predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
 predicate arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read() -> bool;
 predicate arceos_ex_must_rootfs_move_ext2_mount_and_chroot_dot_as_separate_actions() -> bool;
+predicate arceos_ex_must_rootfs_classify_prepare_namespace_paths() -> bool;
 predicate arceos_ex_must_ext2_defer_page_cache_indirect_and_writes() -> bool;
 predicate arceos_ex_must_rest_init_model_path_under_up_multitask_phase() -> bool;
 predicate arceos_ex_must_rest_init_code_path_follow_up_multitask_phase_tree() -> bool;
@@ -3697,7 +3698,10 @@ type ArceosExRootfsCodingMust {
          * Deferred initramfs and console details:
          *
          * wait_for_initramfs() and console_on_rootfs() must preserve their
-         * Linux order but remain deferred in this round.
+         * Linux order but remain deferred in this round. wait_for_initramfs()
+         * must explicitly preserve Linux's async cookie/domain wait boundary;
+         * console_on_rootfs() must preserve the /dev/console and PID 1 fd
+         * duplication position without pretending the file path is implemented.
          */
         arceos_ex_must_rootfs_keep_initramfs_and_console_deferred();
 
@@ -3725,6 +3729,31 @@ type ArceosExRootfsCodingMust {
         arceos_ex_must_rootfs_mount_ext2_at_linux_root_staging_point();
 
         /*
+         * prepare_namespace() path classification:
+         *
+         * RootfsPhase must keep prepare_namespace() as one formal subphase
+         * event, but it must still expose a structured
+         * RootfsPrepareNamespacePaths-style fact set for the Linux calls around
+         * the supported block-root path. The implementation and smoke observer
+         * must distinguish:
+         *
+         * - root_delay/rootwait as cmdline-absent trimmed paths, with the
+         *   root_wait polling protocol deferred rather than erased;
+         * - wait_for_device_probe() as deferred, including probe_count atomic,
+         *   probe_waitqueue, deferred_probe_work flush, and worker interaction;
+         * - md_run_setup() as deferred under CONFIG_MD=y;
+         * - initrd_load() as trimmed under CONFIG_BLK_DEV_INITRD=n;
+         * - NFS root as deferred under CONFIG_ROOT_NFS=y but inactive for the
+         *   current root device, CIFS root as trimmed when CONFIG_CIFS_ROOT=n,
+         *   and nodev root as deferred;
+         * - Linux CONFIG_EXT2_FS=n / CONFIG_EXT4_USE_FOR_EXT2=y versus the
+         *   arceos_ex Ext2Driver substitution;
+         * - devtmpfs_mount() as deferred under CONFIG_DEVTMPFS=y, while the
+         *   current arceos_ex DevFs is not remounted below the new ext2 root.
+         */
+        arceos_ex_must_rootfs_classify_prepare_namespace_paths();
+
+        /*
          * Root switch:
          *
          * After the Linux-like temporary /root ext2 staging mount,
@@ -3741,7 +3770,9 @@ type ArceosExRootfsCodingMust {
          * Integrity keys:
          *
          * integrity_load_keys() must preserve CONFIG_INTEGRITY=y timing but
-         * keep IMA/EVM keyring and certificate loading details deferred.
+         * keep IMA/EVM keyring and certificate loading details deferred. The
+         * current CONFIG_IMA=n and CONFIG_EVM=n trimmed facts must be visible
+         * in model and implementation checks.
          */
         arceos_ex_must_rootfs_keep_integrity_keys_deferred_only();
 

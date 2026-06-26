@@ -378,6 +378,7 @@ pub enum Checkpoint {
     KUnitRuntimeTrimmedReady,
     InitramfsSyncDeferredReady,
     RootfsConsoleDeferredReady,
+    RootfsPrepareNamespacePathsReady,
     RamdiskExecuteCommandEaccessCheckpoint,
     RootFSOnline,
     IntegrityKeysDeferredReady,
@@ -799,6 +800,7 @@ impl Checkpoint {
             Self::KUnitRuntimeTrimmedReady => "KUnitRuntime.TrimmedReady",
             Self::InitramfsSyncDeferredReady => "InitramfsSync.DeferredReady",
             Self::RootfsConsoleDeferredReady => "RootfsConsole.DeferredReady",
+            Self::RootfsPrepareNamespacePathsReady => "RootfsPrepareNamespacePaths.Ready",
             Self::RamdiskExecuteCommandEaccessCheckpoint => {
                 "RamdiskExecuteCommand.EaccessCheckpoint"
             }

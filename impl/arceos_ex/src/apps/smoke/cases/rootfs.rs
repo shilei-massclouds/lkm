@@ -66,6 +66,51 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    if ctx.rootfs_prepare_namespace_paths.state() != State::Ready
+        || !ctx.rootfs_prepare_namespace_paths.root_delay_trimmed()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .device_probe_wait_deferred()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .device_probe_waitqueue_deferred()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .device_probe_atomic_counter_deferred()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .deferred_probe_work_flush_deferred()
+        || !ctx.rootfs_prepare_namespace_paths.md_run_setup_deferred()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .saved_root_name_parse_deferred()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .root_device_parse_deferred()
+        || !ctx.rootfs_prepare_namespace_paths.initrd_load_trimmed()
+        || !ctx.rootfs_prepare_namespace_paths.root_wait_trimmed()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .root_wait_polling_deferred()
+        || !ctx.rootfs_prepare_namespace_paths.mount_root_block_formal()
+        || !ctx.rootfs_prepare_namespace_paths.nfs_root_deferred()
+        || !ctx.rootfs_prepare_namespace_paths.cifs_root_trimmed()
+        || !ctx.rootfs_prepare_namespace_paths.nodev_root_deferred()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .ext4_for_ext2_linux_config_recorded()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .arceos_ext2_driver_substitutes_linux_ext4_for_ext2()
+        || !ctx.rootfs_prepare_namespace_paths.devtmpfs_mount_deferred()
+        || !ctx
+            .rootfs_prepare_namespace_paths
+            .devfs_not_remounted_after_root_switch()
+    {
+        printk::write_str("rootfs prepare_namespace path facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     if ctx.rootfs.state() != State::Online
         || !ctx.rootfs.ramdisk_eaccess_requires_prepare_namespace()
         || !ctx.rootfs.prepare_namespace_position_preserved()
@@ -275,6 +320,14 @@ pub fn run() -> SmokeResult {
         || !ctx.integrity_keys_deferred.setup_deferred()
         || !ctx.integrity_keys_deferred.load_keys_position_preserved()
         || !ctx.integrity_keys_deferred.config_integrity_enabled()
+        || !ctx.integrity_keys_deferred.ima_load_x509_deferred()
+        || !ctx
+            .integrity_keys_deferred
+            .ima_load_x509_trimmed_because_config_ima_disabled()
+        || !ctx.integrity_keys_deferred.evm_load_x509_deferred()
+        || !ctx
+            .integrity_keys_deferred
+            .evm_load_x509_trimmed_because_config_evm_disabled()
     {
         printk::write_str("integrity keys deferred facts invalid\n");
         return SmokeResult::Failed;

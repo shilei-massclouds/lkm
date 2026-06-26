@@ -35,6 +35,14 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .setup(&ctx.kunit_runtime_trimmed, &ctx.workqueue)?;
     ctx.rootfs_console_deferred
         .setup(&ctx.initramfs_sync_deferred, &ctx.kernel_init_task)?;
+    ctx.rootfs_prepare_namespace_paths.setup(
+        &ctx.rootfs_console_deferred,
+        &ctx.saved_command_line,
+        &ctx.driver_core_base,
+        &ctx.workqueue,
+        &ctx.initcall_boundary,
+        &ctx.config,
+    )?;
     let mut provider = crate::objects::virtio_blk::live_provider(&ctx.kernel_image);
     ctx.ext2_driver.setup(&ctx.block_device_registry)?;
     ctx.ext2_volume
@@ -53,6 +61,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         .map_err(|_| rootfs_setup_error())?;
     ctx.rootfs.enable(
         &ctx.rootfs_console_deferred,
+        &ctx.rootfs_prepare_namespace_paths,
         &ctx.saved_command_line,
         &ctx.kernel_init_task,
         &mut ctx.vfs_core,
@@ -63,11 +72,13 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.ext2_volume,
         &mut ctx.ext2_filesystem,
     )?;
-    ctx.integrity_keys_deferred.setup(&ctx.rootfs)?;
+    ctx.integrity_keys_deferred
+        .setup(&ctx.rootfs, &ctx.config)?;
     ctx.rootfs_boundary.setup(
         &ctx.kunit_runtime_trimmed,
         &ctx.initramfs_sync_deferred,
         &ctx.rootfs_console_deferred,
+        &ctx.rootfs_prepare_namespace_paths,
         &ctx.rootfs,
         &ctx.integrity_keys_deferred,
     )
@@ -88,6 +99,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.kunit_runtime_trimmed,
         &ctx.initramfs_sync_deferred,
         &ctx.rootfs_console_deferred,
+        &ctx.rootfs_prepare_namespace_paths,
         &ctx.rootfs,
         &ctx.integrity_keys_deferred,
         &ctx.rootfs_boundary,
