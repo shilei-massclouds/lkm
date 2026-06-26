@@ -247,6 +247,7 @@ predicate arceos_ex_must_rest_init_create_tasks_with_explicit_entries() -> bool;
 predicate arceos_ex_must_kthreadd_entry_model_minimal_schedule_loop() -> bool;
 predicate arceos_ex_must_rest_init_publish_system_scheduling() -> bool;
 predicate arceos_ex_must_rest_init_complete_kthreadd_ready_gate() -> bool;
+predicate arceos_ex_must_kernel_init_wait_observe_kthreadd_ready_gate() -> bool;
 predicate arceos_ex_must_rest_init_publish_scheduler_dispatch_facts() -> bool;
 predicate arceos_ex_must_boot_idle_runtime_split_entry_and_loop_actions() -> bool;
 predicate arceos_ex_must_boot_idle_runtime_model_representative_need_resched_cycle() -> bool;
@@ -275,6 +276,7 @@ predicate arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts() -> boo
 predicate arceos_ex_must_pre_smp_init_consume_kernel_init_entry_contract() -> bool;
 predicate arceos_ex_must_pre_smp_init_open_full_gfp_and_prepare_topology() -> bool;
 predicate arceos_ex_must_pre_smp_init_setup_workqueue_vmstat_tasks_rcu_and_initcalls() -> bool;
+predicate arceos_ex_must_pre_smp_init_workqueue_init_use_pool_mutex_context() -> bool;
 predicate arceos_ex_must_pre_smp_init_stop_before_smp_init() -> bool;
 predicate arceos_ex_must_smp_bringup_model_path_under_smp_runtime_phase() -> bool;
 predicate arceos_ex_must_smp_bringup_code_path_follow_smp_runtime_phase_tree() -> bool;
@@ -2368,8 +2370,9 @@ type ArceosExRestInitCodingMust {
          * Completion:
          *
          * complete(&kthreadd_done) must drive the reusable Completion object
-         * carried by KthreaddReadyGate, publish the visible gate fact, and
-         * release KernelInitTask for the next PreSmpInitPhase.
+         * carried by KthreaddReadyGate and publish the visible gate fact. It
+         * must not directly release KernelInitTask; the release is observed by
+         * KernelInitTask's wait side.
          */
         arceos_ex_must_rest_init_complete_kthreadd_ready_gate();
 
@@ -2943,6 +2946,16 @@ type ArceosExPreSmpInitCodingMust {
         arceos_ex_must_pre_smp_init_run_from_scheduler_dispatch_facts();
 
         /*
+         * kthreadd_done wait side:
+         *
+         * PreSmpInitPhase begins on the KernelInitTask execution line by
+         * observing kthreadd_done through the Completion wait side. The release
+         * fact must be produced by KernelInitTask observing KthreaddReadyGate,
+         * not by BootInitTask's complete side.
+         */
+        arceos_ex_must_kernel_init_wait_observe_kthreadd_ready_gate();
+
+        /*
          * KernelInitTask entry:
          *
          * This phase must also consume the TaskCreationCore entry contract:
@@ -2967,6 +2980,16 @@ type ArceosExPreSmpInitCodingMust {
          * pre-SMP initcall boundary facts.
          */
         arceos_ex_must_pre_smp_init_setup_workqueue_vmstat_tasks_rcu_and_initcalls();
+
+        /*
+         * workqueue_init() synchronization:
+         *
+         * Workqueue.setup() corresponds to Linux workqueue_init(), which takes
+         * wq_pool_mutex while fixing pool node hints and creating rescuers.
+         * The implementation must expose this KernelInitTask-side mutex guard
+         * and the model must use within WorkqueuePoolMutexContext { ... }.
+         */
+        arceos_ex_must_pre_smp_init_workqueue_init_use_pool_mutex_context();
 
         /*
          * Stop before SMP:

@@ -2,7 +2,7 @@
  * Rest Init Phase Specification
  *
  * The UP Multitask rest_init path is split by execution owner:
- * BootInitRestInitPhase creates and releases PID 1/kthreadd,
+ * BootInitRestInitPhase creates PID 1/kthreadd and completes kthreadd_done,
  * BootInitScheduleHandoffPhase commits the first schedule handoff, and
  * BootIdleEntryPhase enters the BootIdleTask cpu_startup_entry()/idle-loop
  * continuation. RestInitPhase remains only as a compatibility wrapper over
@@ -364,6 +364,14 @@ context BootIdleWaitLocalInterruptContext: Context {
  * 规格层已经通过 KernelInitTask receiver 持有目标 task。该 action 当前
  * 直接提交 flags 和 cpumask 属性，并用 KernelInitPidLookupRcuReadSideContext
  * 表达 Linux rcu_read_lock()/unlock() 定界的读侧上下文。
+ *
+ * KernelInitTask.ObserveKthreaddDoneRelease 对应 PID 1 执行线在
+ * kernel_init() 入口处的 wait_for_completion(&kthreadd_done) 返回。
+ * BootInitTask 只通过 KthreaddReadyGate.Complete 发布 completion token/wake
+ * 事实；KernelInitTask 必须自己通过 KthreaddReadyGate.Wait 观察或消费该
+ * completion，才提交 kernel_init_released_for_pre_smp_init() 并进入
+ * PreSmpInitPhase 主体。这样同时覆盖 complete 早于 wait 的 fast observe
+ * 路径和 wait 早于 complete 的阻塞后返回语义；当前线性启动 trace 采用前者。
  */
 object KernelInitTask: Task {
     initial_state: State::Base;
@@ -609,6 +617,116 @@ object KernelInitTask: Task {
                 kernel_init_pf_no_setaffinity(KernelInitTask);
                 kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
             }
+        }
+
+        /*
+         * PID 1 在 kernel_init() 入口观察 kthreadd_done completion 已释放。
+         * release fact 归 wait side，而不是归 BootInitTask 的 complete side。
+         */
+        Action::ObserveKthreaddDoneRelease {
+            state_effect: StateEffect::None;
+            depends_on {
+                KthreaddReadyGate.state == State::Online;
+                completion_complete_committed(KthreaddReadyGate);
+                completion_token_available(KthreaddReadyGate);
+                kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
+            }
+
+            drives {
+                KthreaddReadyGate.Transition::Wait;
+            }
+
+            ensures {
+                completion_waiter_enqueued(KthreaddReadyGate);
+                completion_waiter_finished(KthreaddReadyGate);
+                kernel_init_observed_kthreadd_done_release(KernelInitTask, KthreaddReadyGate);
+                kernel_init_released_for_pre_smp_init(KernelInitTask);
+            }
+        }
+    }
+}
+
+/*
+ * KernelInitKthreaddDoneWait 是 PID 1 执行线上的 kthreadd_done wait 边界。
+ * BootInitTask 只创建 PID 1、发布 KthreaddReadyGate completion token，并把
+ * 该 wait 边界留在 Ready；KernelInitTask 被首次调度后，在 PreSmpInitPhase
+ * 开头通过 Enable 观察 completion 并推进为 Online。这样 complete side 和
+ * wait side 的事实分属两个任务：complete 建立 gate 已释放，wait 观察 gate
+ * 已释放并产生 kernel_init_released_for_pre_smp_init()。
+ */
+object KernelInitKthreaddDoneWait: TaskObject {
+    initial_state: State::Base;
+    parent: KernelInitTask;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    KernelInitTask.state == State::Online;
+                    KthreaddReadyGate.state == State::Online;
+                }
+
+                ensures {
+                    kernel_init_kthreadd_done_wait_ready(
+                        KernelInitKthreaddDoneWait,
+                        KernelInitTask,
+                        KthreaddReadyGate
+                    );
+                    kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            KernelInitTask.state == State::Online;
+            KthreaddReadyGate.state == State::Online;
+            kernel_init_kthreadd_done_wait_ready(
+                KernelInitKthreaddDoneWait,
+                KernelInitTask,
+                KthreaddReadyGate
+            );
+            kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
+        }
+
+        transitions {
+            on Transition::Enable -> State::Online {
+                depends_on {
+                    KthreaddReadyGate.state == State::Online;
+                    completion_complete_committed(KthreaddReadyGate);
+                    completion_token_available(KthreaddReadyGate);
+                    kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
+                    kernel_init_dispatched_to_pre_smp_init(KernelInitTask);
+                    scheduler_first_schedule_committed(Scheduler);
+                }
+
+                drives {
+                    KernelInitTask.Action::ObserveKthreaddDoneRelease;
+                }
+
+                ensures {
+                    kernel_init_kthreadd_done_wait_released(
+                        KernelInitKthreaddDoneWait,
+                        KernelInitTask,
+                        KthreaddReadyGate
+                    );
+                    kernel_init_observed_kthreadd_done_release(KernelInitTask, KthreaddReadyGate);
+                    kernel_init_released_for_pre_smp_init(KernelInitTask);
+                }
+            }
+        }
+    }
+
+    state State::Online {
+        invariant {
+            kernel_init_kthreadd_done_wait_released(
+                KernelInitKthreaddDoneWait,
+                KernelInitTask,
+                KthreaddReadyGate
+            );
+            kernel_init_observed_kthreadd_done_release(KernelInitTask, KthreaddReadyGate);
+            kernel_init_released_for_pre_smp_init(KernelInitTask);
         }
     }
 }
@@ -999,7 +1117,8 @@ object SystemState: KernelObject {
  * kthreadd_done 在 rest_init 场景中的 gate 生命周期状态；真正的
  * complete(&kthreadd_done) 表达为 KthreaddReadyGate.Transition::Complete。
  * Completion 通用结果来自 Type process；释放 PID 1 进入下一执行线的
- * 场景事实由 BootInitRestInitPhase 承载，不额外引入 Linux 中不存在的 action。
+ * 场景事实由 KernelInitTask.Action::ObserveKthreaddDoneRelease 在 wait side
+ * 承载，避免让 BootInitTask 的 complete 动作代替 PID 1 的 wait 返回。
  * 该实例的 wait.lock irqsave 边界由 KthreaddReadyGateWaitLockContext
  * 包住 Complete process，避免把 completion 内部锁误表达为生命周期。
  */
@@ -1128,7 +1247,8 @@ object BootIdleRuntime: BootIdleRuntimeObject {
 /*
  * BootInitRestInitPhase 是 BootInitTask 视角下 rest_init() 的前半段。
  * 它创建并唤醒 PID 1 和 kthreadd，发布 SYSTEM_SCHEDULING，完成
- * kthreadd_done，从而释放 PID 1。它不提交首次 scheduler handoff，也不
+ * kthreadd_done。PID 1 何时通过 wait 观察该 completion 并解除等待，
+ * 属于 KernelInitTask 自己的执行线。它不提交首次 scheduler handoff，也不
  * 执行 kthreadd 或 boot idle 自己的子阶段。
  */
 object BootInitRestInitPhase: PhaseObject {
@@ -1169,6 +1289,7 @@ object BootInitRestInitPhase: PhaseObject {
                     SystemState.Transition::Setup;
                     KthreaddReadyGate.Transition::Setup;
                     KthreaddReadyGate.Transition::Enable;
+                    KernelInitKthreaddDoneWait.Transition::Setup;
                 }
 
                 within KthreaddReadyGateWaitLockContext {
@@ -1199,10 +1320,17 @@ object BootInitRestInitPhase: PhaseObject {
                     rcu_scheduler_starting_gp_seq_update_guarded(RcuCore);
                     boot_init_rest_init_ready(BootInitRestInitPhase);
                     rest_init_dispatch_ready(BootInitRestInitPhase);
+                    KernelInitKthreaddDoneWait.state == State::Ready;
+                    kernel_init_kthreadd_done_wait_ready(
+                        KernelInitKthreaddDoneWait,
+                        KernelInitTask,
+                        KthreaddReadyGate
+                    );
                     kernel_init_task_created(KernelInitTask);
                     task_entry_bound(KernelInitTask, TaskEntry::KernelInit);
                     task_entry_first_phase(KernelInitTask, SmpRuntimePhase);
                     kernel_init_entry_reaches_smp_runtime(KernelInitTask, SmpRuntimePhase);
+                    kernel_init_still_waiting_for_kthreadd_done(KernelInitTask);
                     kernel_init_pf_no_setaffinity(KernelInitTask);
                     kernel_init_pinned_to_boot_cpu(KernelInitTask, BootCPU);
                     task_pid_lookup_rcu_guard_used(KernelInitTask, BootIdleRcuReadSide);
@@ -1214,14 +1342,14 @@ object BootInitRestInitPhase: PhaseObject {
                     task_pid_lookup_rcu_guard_used(KthreaddTask, BootIdleRcuReadSide);
                     system_state_scheduling(SystemState);
                     kthreadd_ready_gate_completed(KthreaddReadyGate);
-                    kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+                    completion_complete_committed(KthreaddReadyGate);
+                    completion_token_available(KthreaddReadyGate);
                     completion_wait_lock_guard_used(
                         KthreaddReadyGate,
                         KthreaddReadyGateWaitLock
                     );
                     completion_done_increment_guarded_by_wait_lock(KthreaddReadyGate);
                     completion_wake_guarded_by_wait_lock(KthreaddReadyGate);
-                    kernel_init_released_for_pre_smp_init(KernelInitTask);
                     smp_concurrency_closed();
                     workqueue_workers_still_deferred();
                     rcu_gp_threads_still_deferred(RcuCore);
@@ -1256,12 +1384,17 @@ object BootInitRestInitPhase: PhaseObject {
             kthreadd_provider_ready(KthreaddTask);
             SystemState.state == State::Ready;
             KthreaddReadyGate.state == State::Online;
+            KernelInitKthreaddDoneWait.state == State::Ready;
+            kernel_init_kthreadd_done_wait_ready(
+                KernelInitKthreaddDoneWait,
+                KernelInitTask,
+                KthreaddReadyGate
+            );
             kthreadd_ready_gate_completed(KthreaddReadyGate);
-            kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
+            completion_complete_committed(KthreaddReadyGate);
             completion_wait_lock_guard_used(KthreaddReadyGate, KthreaddReadyGateWaitLock);
             completion_done_increment_guarded_by_wait_lock(KthreaddReadyGate);
             completion_wake_guarded_by_wait_lock(KthreaddReadyGate);
-            kernel_init_released_for_pre_smp_init(KernelInitTask);
             boot_init_rest_init_ready(BootInitRestInitPhase);
             rest_init_dispatch_ready(BootInitRestInitPhase);
             smp_concurrency_closed();
@@ -1289,8 +1422,7 @@ object BootInitScheduleHandoffPhase: PhaseObject {
                     system_state_scheduling(SystemState);
                     KthreaddReadyGate.state == State::Online;
                     kthreadd_ready_gate_completed(KthreaddReadyGate);
-                    kthreadd_done_release_committed(KthreaddReadyGate, KernelInitTask);
-                    kernel_init_released_for_pre_smp_init(KernelInitTask);
+                    completion_complete_committed(KthreaddReadyGate);
                     Scheduler.state == State::Online;
                     BootIdleTask.state == State::Ready;
                 }

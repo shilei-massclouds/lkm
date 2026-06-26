@@ -171,18 +171,22 @@ context WorkqueuePoolMutexContext: ResourceExclusiveContext {
      * workqueue_init_early() reaches alloc_workqueue(), which takes
      * wq_pool_mutex while allocating/linking PWQs and adding each system
      * workqueue to the global workqueues list. The guard is still modeled even
-     * though boot concurrency is otherwise closed, because this mutex owns the
-     * Linux workqueue/pool publication protocol.
+     * though boot concurrency is otherwise closed. PreSmpInitPhase reuses this
+     * same mutex context for workqueue_init() on the KernelInitTask execution
+     * line while fixing node hints, creating rescuers and publishing initial
+     * workers. This mutex owns the Linux workqueue/pool publication protocol.
      */
     guard {
         lock_ref: WorkqueuePoolMutex;
 
         entered_by {
             WorkqueuePoolMutex.Transition::Lock(BootInitTaskRef);
+            WorkqueuePoolMutex.Transition::Lock(KernelInitTaskRef);
         }
 
         exited_by {
             WorkqueuePoolMutex.Transition::Unlock(BootInitTaskRef);
+            WorkqueuePoolMutex.Transition::Unlock(KernelInitTaskRef);
         }
     }
 
@@ -1181,8 +1185,23 @@ object Workqueue: TaskObject {
                     CpuGroup.state == State::Ready;
                 }
 
+                within WorkqueuePoolMutexContext {
+                    ensures {
+                        workqueue_init_pool_mutex_guard_used(
+                            Workqueue,
+                            WorkqueuePoolMutex
+                        );
+                        workqueue_rescuers_ready(Workqueue, KthreaddTask);
+                        workqueue_initial_workers_created(Workqueue, CpuGroup);
+                    }
+                }
+
                 ensures {
                     workqueue_ready_before_smp(Workqueue);
+                    workqueue_init_pool_mutex_guard_used(
+                        Workqueue,
+                        WorkqueuePoolMutex
+                    );
                     workqueue_rescuers_ready(Workqueue, KthreaddTask);
                     workqueue_initial_workers_created(Workqueue, CpuGroup);
                     workqueue_worker_creation_open(Workqueue);
@@ -1196,6 +1215,7 @@ object Workqueue: TaskObject {
     state State::Ready {
         invariant {
             workqueue_ready_before_smp(Workqueue);
+            workqueue_init_pool_mutex_guard_used(Workqueue, WorkqueuePoolMutex);
             workqueue_worker_creation_open(Workqueue);
             workqueue_smp_topology_deferred(Workqueue);
         }

@@ -2,8 +2,9 @@ use super::{
     cpu_group::CpuGroup,
     init_task::InitTask,
     mm_core::{NamedSlubCacheKind, PageAllocator, SlubSubsystem},
-    mutex::Mutex,
+    mutex::{Mutex, MutexLockOutcome, MutexOwner},
     per_cpu_storage::PerCpuStorage,
+    rest_init::KernelInitTask,
     scheduler::Scheduler,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
@@ -32,6 +33,7 @@ pub struct Workqueue {
     manager_wait_deferred: bool,
     pool_mutex_guard_used: bool,
     struct_mutex_guard_used: bool,
+    pre_smp_pool_mutex_guard_used: bool,
     workers_running: bool,
     worker_creation_open: bool,
     rescuers_ready: bool,
@@ -67,6 +69,7 @@ impl Workqueue {
             manager_wait_deferred: false,
             pool_mutex_guard_used: false,
             struct_mutex_guard_used: false,
+            pre_smp_pool_mutex_guard_used: false,
             workers_running: false,
             worker_creation_open: false,
             rescuers_ready: false,
@@ -155,6 +158,10 @@ impl Workqueue {
 
     pub const fn struct_mutex_guard_used(&self) -> bool {
         self.struct_mutex_guard_used
+    }
+
+    pub const fn pre_smp_pool_mutex_guard_used(&self) -> bool {
+        self.pre_smp_pool_mutex_guard_used
     }
 
     pub const fn workers_running(&self) -> bool {
@@ -275,6 +282,7 @@ impl Workqueue {
         self.mayday_lock_deferred = true;
         self.manager_wait_deferred = true;
         self.workers_running = false;
+        self.pre_smp_pool_mutex_guard_used = false;
         self.worker_creation_open = false;
         self.rescuers_ready = false;
         self.initial_workers_created = false;
@@ -292,12 +300,19 @@ impl Workqueue {
         )
     }
 
-    pub fn setup(&mut self, page_allocator: &PageAllocator, cpu_group: &CpuGroup) -> EventResult {
+    pub fn setup(
+        &mut self,
+        page_allocator: &PageAllocator,
+        cpu_group: &CpuGroup,
+        kernel_init_task: &KernelInitTask,
+    ) -> EventResult {
         if self.lifecycle.state() != State::Prepared
             || page_allocator.state() != State::Ready
             || !page_allocator.full_gfp_mask_open()
             || cpu_group.state() != State::Ready
             || !cpu_group.pre_smp_topology_ready()
+            || kernel_init_task.state() != State::Online
+            || !kernel_init_task.released_for_pre_smp_init()
         {
             return failed_condition(
                 LifecycleEvent::Setup,
@@ -307,8 +322,21 @@ impl Workqueue {
             );
         }
 
+        match self.pool_mutex.lock_owner(MutexOwner::KernelInitTask)? {
+            MutexLockOutcome::Acquired => {}
+            MutexLockOutcome::Blocked => {
+                return failed_condition(
+                    LifecycleEvent::Setup,
+                    self.lifecycle.state(),
+                    State::Prepared,
+                    State::Ready,
+                );
+            }
+        }
         self.rescuers_ready = true;
         self.initial_workers_created = true;
+        self.pool_mutex.unlock_owner(MutexOwner::KernelInitTask)?;
+        self.pre_smp_pool_mutex_guard_used = true;
         self.worker_creation_open = true;
         self.watchdog_ready = true;
         self.workers_running = false;

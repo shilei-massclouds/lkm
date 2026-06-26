@@ -143,7 +143,6 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
     ctx.kthreadd_ready_gate.complete(
         &ctx.system_state,
         &ctx.kthreadd_task,
-        &mut ctx.kernel_init_task,
         &mut ctx.kthreadd_ready_gate_wait_lock,
         &mut ctx.boot_cpu_local_interrupt,
         &mut ctx.scheduler,
@@ -187,12 +186,12 @@ fn setup_boot_init_schedule_handoff(ctx: &mut Context) -> EventResult {
     if ctx.scheduler.state() != State::Online
         || !boot_init_rest_init_phase_ready(ctx)
         || ctx.kernel_init_task.state() != State::Online
-        || !ctx.kernel_init_task.released_for_pre_smp_init()
         || ctx.kthreadd_task.state() != State::Online
         || ctx.system_state.state() != State::Ready
         || ctx.system_state.value() != SystemStateValue::Scheduling
         || ctx.kthreadd_ready_gate.state() != State::Online
-        || !ctx.kthreadd_ready_gate.release_committed()
+        || !ctx.kthreadd_ready_gate.completion().complete_committed()
+        || !ctx.kthreadd_ready_gate.completion().token_available()
     {
         return failed_schedule_handoff_setup();
     }
@@ -388,8 +387,9 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         && !ctx.kernel_init_task_pi_lock.locked()
         && ctx.kernel_init_task_pi_lock.irqsave_entered_count() != 0
         && ctx.kernel_init_task_pi_lock.irqrestore_exited_count() != 0
-        && !ctx.kernel_init_task.waiting_for_kthreadd_done()
-        && ctx.kernel_init_task.released_for_pre_smp_init()
+        && ctx.kernel_init_task.waiting_for_kthreadd_done()
+        && !ctx.kernel_init_task.observed_kthreadd_done_release()
+        && !ctx.kernel_init_task.released_for_pre_smp_init()
         && ctx.kernel_init_task.pinned_to_boot_cpu()
         && ctx.kernel_init_task.pf_no_setaffinity()
         && ctx.kernel_init_task.cpu_id() == boot_cpu.logical_id()
@@ -422,9 +422,8 @@ fn boot_init_rest_init_phase_ready(ctx: &Context) -> bool {
         && ctx.system_state.state() == State::Ready
         && ctx.system_state.value() == SystemStateValue::Scheduling
         && ctx.kthreadd_ready_gate.state() == State::Online
-        && !ctx.kthreadd_ready_gate.pending()
-        && ctx.kthreadd_ready_gate.completed()
-        && ctx.kthreadd_ready_gate.release_committed()
+        && ctx.kthreadd_ready_gate.completion().complete_committed()
+        && ctx.kthreadd_ready_gate.completion().token_available()
         && ctx.scheduler.schedule_passes() == 0
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
@@ -438,7 +437,7 @@ fn boot_init_schedule_handoff_phase_ready(ctx: &Context) -> bool {
         && ctx.scheduler.identity_switch_passes() == 0
         && ctx.boot_cpu_current_task.switch_committed_count() != 0
         && ctx.boot_cpu_current_task.current_is_kernel_init()
-        && ctx.kernel_init_task.released_for_pre_smp_init()
+        && ctx.kthreadd_ready_gate.completion().complete_committed()
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 
@@ -503,8 +502,6 @@ fn boot_init_rest_init_phase_ready_after_handoff(ctx: &Context) -> bool {
         && !ctx.kernel_init_task_pi_lock.locked()
         && ctx.kernel_init_task_pi_lock.irqsave_entered_count() != 0
         && ctx.kernel_init_task_pi_lock.irqrestore_exited_count() != 0
-        && !ctx.kernel_init_task.waiting_for_kthreadd_done()
-        && ctx.kernel_init_task.released_for_pre_smp_init()
         && ctx.kernel_init_task.pinned_to_boot_cpu()
         && ctx.kernel_init_task.pf_no_setaffinity()
         && ctx.kernel_init_task.cpu_id() == boot_cpu.logical_id()
@@ -536,9 +533,7 @@ fn boot_init_rest_init_phase_ready_after_handoff(ctx: &Context) -> bool {
         && ctx.system_state.state() == State::Ready
         && ctx.system_state.value() == SystemStateValue::Scheduling
         && ctx.kthreadd_ready_gate.state() == State::Online
-        && !ctx.kthreadd_ready_gate.pending()
-        && ctx.kthreadd_ready_gate.completed()
-        && ctx.kthreadd_ready_gate.release_committed()
+        && ctx.kthreadd_ready_gate.completion().complete_committed()
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
 }
 

@@ -161,11 +161,12 @@ completion handle；`complete()`、`complete_all()`、`wait()`、`try_wait()` �
 事实，不能重新推进普通生命周期；`done()` 是只读观察 action。`KthreaddReadyGate` 这类 `object X: Completion`
 实例必须包装并驱动该通用对象，而不是把 pending/completed/wake bookkeeping 复制成私有布尔字段。
 实例 wrapper 只能承载场景事实：例如 `KthreaddReadyGate.enable()` 发布 completion handle 后，
-`KthreaddReadyGate.complete()` 必须驱动通用 `Completion.complete()`；释放 PID 1 的场景结果由
-`BootInitRestInitPhase` 事实承载，不引入 Linux 中不存在的额外 action。
+`KthreaddReadyGate.complete()` 必须驱动通用 `Completion.complete()`；释放 PID 1 的场景结果不能由
+BootInitTask 的 complete side 直接写入，必须由 `KernelInitTask` 在 wait side 观察或消费 completion token 后提交。
 
 smoke 测试必须覆盖两类路径：一是独立 `Completion` 实例的 setup/enable/complete/token consume/reinit 流程，二是
-`rest_init()` 中的 live `kthreadd_done` 实例，验证 `KthreaddReadyGate` 已驱动 `Completion.complete()` 并唤醒 PID 1。
+`rest_init()` 中的 live `kthreadd_done` 实例，验证 `KthreaddReadyGate` 已驱动 `Completion.complete()`，且
+`KernelInitTask` 后续通过 wait side 观察该 gate 后进入 `PreSmpInitPhase`。
 
 ## RestInitPhase 编码约束
 
@@ -265,14 +266,18 @@ idle identity counter 递增；`BootIdleTask -> BootIdleTask` identity 只在没
 `PreSmpInitPhase` 是 `SmpRuntimePhase` 的第一个子阶段，formal model 路径为
 `spec/model/smp-runtime/pre-smp-init/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/pre_smp_init.rs`。该阶段由 `KernelInitTask` 在
-`kernel_init_freeable()` 中推进，入口是 `KernelInitTask` 已被 `kthreadd_done` 释放、
-`KernelInitTask` dispatch facts 和 Scheduler 首次调度 fact，出口停在 `smp_init()` 调用前。
+`kernel_init_freeable()` 中推进，入口是 `KernelInitTask` dispatch facts 和 Scheduler 首次调度 fact 已成立；
+该子阶段第一步必须由 `KernelInitTask` 通过 wait side 观察 `kthreadd_done` / `KthreaddReadyGate` 已释放，
+随后才进入 `kernel_init_freeable()` 的 `gfp_allowed_mask = __GFP_BITS_MASK` 起点，出口停在 `smp_init()` 调用前。
 
 本阶段必须覆盖 `PageAllocator.open_full_gfp_mask()`、`CpuGroup`/CPU topology 的 pre-SMP present 边界、
 `Workqueue.setup()`、`VmstatCore.preset()`、`TasksRcu.setup()`、`PreSmpInitcallTable.run_early()` 和
 `PreSmpInitBoundary`。它可以发布阻塞 GFP 分配可用、workqueue worker 创建边界、Tasks RCU GP thread
 创建边界和 early initcall 已运行事实，但不得把 secondary CPU 标记为 online，也不得执行 `smp_init()`。
-本阶段入口除依赖 `KernelInitTask` release/dispatch facts 和 Scheduler 首次调度 fact 外，还必须消费
+`Workqueue.setup()` 对应 Linux `workqueue_init()`，必须在 KernelInitTask 执行线上显式经过
+`wq_pool_mutex` guard；规格侧用 `within WorkqueuePoolMutexContext { ... }` 表达，`impl/arceos_ex`
+必须通过 `WorkqueuePoolMutex` 的 KernelInitTask owner lock/unlock 观测该边界。
+本阶段入口除依赖 `KernelInitTask` wait-side release/dispatch facts 和 Scheduler 首次调度 fact 外，还必须消费
 `TaskCreationCore` 建立的 entry contract：`KernelInitTask` 的 `TaskEntry::KernelInit` 指向 `SmpRuntimePhase`。
 
 测试应覆盖 full GFP mask 已打开、secondary CPU 只处于 present/not-online、Workqueue Ready 但 SMP topology

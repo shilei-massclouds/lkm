@@ -49,6 +49,7 @@ pub struct KernelInitTask {
     sched_entity_ready: bool,
     enqueued: bool,
     waiting_for_kthreadd_done: bool,
+    observed_kthreadd_done_release: bool,
     released_for_pre_smp_init: bool,
     pinned_to_boot_cpu: bool,
     pf_no_setaffinity: bool,
@@ -71,6 +72,7 @@ impl KernelInitTask {
             sched_entity_ready: false,
             enqueued: false,
             waiting_for_kthreadd_done: false,
+            observed_kthreadd_done_release: false,
             released_for_pre_smp_init: false,
             pinned_to_boot_cpu: false,
             pf_no_setaffinity: false,
@@ -119,6 +121,10 @@ impl KernelInitTask {
 
     pub const fn waiting_for_kthreadd_done(&self) -> bool {
         self.waiting_for_kthreadd_done
+    }
+
+    pub const fn observed_kthreadd_done_release(&self) -> bool {
+        self.observed_kthreadd_done_release
     }
 
     pub const fn released_for_pre_smp_init(&self) -> bool {
@@ -334,14 +340,29 @@ impl KernelInitTask {
         }
     }
 
-    fn release_for_pre_smp_init(&mut self) -> bool {
-        if self.lifecycle.state() != State::Online || !self.waiting_for_kthreadd_done {
-            return false;
+    pub fn observe_kthreadd_done_release(
+        &mut self,
+        kthreadd_ready_gate: &mut KthreaddReadyGate,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Online
+            || !self.waiting_for_kthreadd_done
+            || kthreadd_ready_gate.state() != State::Online
+            || !kthreadd_ready_gate.completion().complete_committed()
+            || !kthreadd_ready_gate.completion().token_available()
+        {
+            return failed_condition(
+                LifecycleEvent::Enable,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
         }
 
+        kthreadd_ready_gate.wait()?;
         self.waiting_for_kthreadd_done = false;
+        self.observed_kthreadd_done_release = true;
         self.released_for_pre_smp_init = true;
-        true
+        Ok(())
     }
 
     pub fn release_boot_cpu_affinity(&mut self, cpu_group: &CpuGroup) -> bool {
@@ -814,7 +835,6 @@ impl SystemState {
 pub struct KthreaddReadyGate {
     lifecycle: Lifecycle,
     completion: Completion,
-    release_committed: bool,
     complete_wait_lock_guard_used: bool,
     complete_wait_lock_irqsave_count: usize,
     complete_wait_lock_irqrestore_count: usize,
@@ -827,7 +847,6 @@ impl KthreaddReadyGate {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             completion: Completion::new(),
-            release_committed: false,
             complete_wait_lock_guard_used: false,
             complete_wait_lock_irqsave_count: 0,
             complete_wait_lock_irqrestore_count: 0,
@@ -846,14 +865,6 @@ impl KthreaddReadyGate {
 
     pub fn pending(&self) -> bool {
         self.completion.pending()
-    }
-
-    pub fn completed(&self) -> bool {
-        self.completion.completed()
-    }
-
-    pub const fn release_committed(&self) -> bool {
-        self.release_committed
     }
 
     pub const fn complete_wait_lock_guard_used(&self) -> bool {
@@ -890,7 +901,6 @@ impl KthreaddReadyGate {
         }
 
         self.completion.setup()?;
-        self.release_committed = false;
         self.complete_wait_lock_guard_used = false;
         self.complete_wait_lock_irqsave_count = 0;
         self.complete_wait_lock_irqrestore_count = 0;
@@ -935,7 +945,6 @@ impl KthreaddReadyGate {
         &mut self,
         system_state: &SystemState,
         kthreadd_task: &KthreaddTask,
-        kernel_init_task: &mut KernelInitTask,
         wait_lock: &mut RawSpinLock,
         local_interrupt: &mut LocalInterruptControl,
         scheduler: &mut Scheduler,
@@ -944,8 +953,6 @@ impl KthreaddReadyGate {
             || system_state.state() != State::Ready
             || system_state.value() != SystemStateValue::Scheduling
             || kthreadd_task.state() != State::Online
-            || kernel_init_task.state() != State::Online
-            || !kernel_init_task.waiting_for_kthreadd_done()
             || wait_lock.state() != State::Ready
             || local_interrupt.state() != State::Ready
             || scheduler.boot_idle_preemption().state() != State::Ready
@@ -973,17 +980,11 @@ impl KthreaddReadyGate {
         if guarded_result.is_ok() && unlock_result.is_ok() {
             self.complete_wait_lock_irqrestore_count = wait_lock.irqrestore_exited_count();
         }
-        guarded_result.and(unlock_result)?;
-        if !kernel_init_task.release_for_pre_smp_init() {
-            return failed_condition(
-                LifecycleEvent::Enable,
-                self.lifecycle.state(),
-                State::Online,
-                State::Online,
-            );
-        }
-        self.release_committed = true;
-        Ok(())
+        guarded_result.and(unlock_result)
+    }
+
+    pub fn wait(&mut self) -> EventResult {
+        self.completion.wait()
     }
 
     fn failed_setup(&self) -> EventResult {
@@ -1283,7 +1284,7 @@ impl BootIdleRuntime {
             || scheduler.state() != State::Online
             || scheduler.boot_cpu_owned_scheduler_view(cpu_group).is_none()
             || kernel_init_task.state() != State::Online
-            || !kernel_init_task.released_for_pre_smp_init()
+            || !kernel_init_task.waiting_for_kthreadd_done()
             || kthreadd_task.state() != State::Online
             || kthreadd_ready_gate.state() != State::Online
             || scheduler.schedule_passes() == 0

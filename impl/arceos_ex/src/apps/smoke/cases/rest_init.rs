@@ -56,6 +56,8 @@ pub fn run() -> SmokeResult {
         || ctx.kernel_init_task.cpu_id() != boot_cpu.logical_id()
         || !ctx.kernel_init_task.pid_lookup_under_rcu_read()
         || !ctx.kernel_init_task.pid_lookup_rcu_guard_balanced()
+        || ctx.kernel_init_task.waiting_for_kthreadd_done()
+        || !ctx.kernel_init_task.observed_kthreadd_done_release()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
         || !boot_scheduler_view.runqueue_contains_task_id(ctx.kernel_init_task.pid())
         || ctx.kernel_init_task_pi_lock.state() != State::Ready
@@ -116,8 +118,7 @@ pub fn run() -> SmokeResult {
 
     if !system_state_valid
         || ctx.kthreadd_ready_gate.state() != State::Online
-        || !ctx.kthreadd_ready_gate.completed()
-        || !ctx.kthreadd_ready_gate.release_committed()
+        || !ctx.kthreadd_ready_gate.completion().complete_committed()
         || !ctx.kthreadd_ready_gate.complete_wait_lock_guard_used()
         || ctx.kthreadd_ready_gate.complete_wait_lock_irqsave_count() == 0
         || ctx
@@ -133,21 +134,25 @@ pub fn run() -> SmokeResult {
         || !ctx
             .kthreadd_ready_gate_wait_lock
             .irqrestore_restored_before_preemption_enabled()
-        || ctx.kthreadd_ready_gate.pending()
+        || !ctx.kthreadd_ready_gate.pending()
     {
         printk::write_str("system state or kthreadd gate facts invalid\n");
         return SmokeResult::Failed;
     }
     let kthreadd_completion = ctx.kthreadd_ready_gate.completion();
     if kthreadd_completion.state() != State::Online
-        || kthreadd_completion.done_count() != 1
+        || kthreadd_completion.done_count() != 0
         || !kthreadd_completion.storage_bound()
         || !kthreadd_completion.owns_wait_queue()
         || !kthreadd_completion.handle_published()
         || !kthreadd_completion.complete_committed()
-        || !kthreadd_completion.token_available()
+        || kthreadd_completion.token_available()
         || !kthreadd_completion.wakes_one_waiter()
+        || !kthreadd_completion.waiter_enqueued()
+        || !kthreadd_completion.waiter_finished()
         || kthreadd_completion.wait_queue().state() != State::Ready
+        || !kthreadd_completion.wait_queue().waiter_enqueued()
+        || !kthreadd_completion.wait_queue().waiter_finished()
     {
         printk::write_str("kthreadd completion facts invalid\n");
         return SmokeResult::Failed;

@@ -2304,7 +2304,7 @@ Ready。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开
 `KernelInitTask` 的 `PreSmpInitPhase`、`KthreaddTask` 的服务循环子阶段，以及调度交接后的
 `BootIdleTask` idle 子阶段，都应作为对应执行主体的子阶段处理。
 
-1. `BootInitRestInitPhase`：由上一阶段遗留的 `BootInitTask` 执行 `rcu_scheduler_starting()`，创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，完成 `kthreadd_done` 并释放 PID 1。本阶段不提交 `Scheduler.schedule()`，不执行 kthreadd 服务循环，也不进入 boot idle。
+1. `BootInitRestInitPhase`：由上一阶段遗留的 `BootInitTask` 执行 `rcu_scheduler_starting()`，创建 PID 1 的 `KernelInitTask`，把 init 临时固定在 boot CPU，创建 `KthreaddTask`，设置 `system_state = SYSTEM_SCHEDULING`，并完成 `kthreadd_done`。PID 1 解除等待必须由 `KernelInitTask` 在自己的 wait side 观察该 completion 后提交。本阶段不提交 `Scheduler.schedule()`，不执行 kthreadd 服务循环，也不进入 boot idle。
 2. `BootInitScheduleHandoffPhase`：仍由 `BootInitTask` 执行，只覆盖 `schedule_preempt_disabled()` 中退出 inherited preempt-disabled guard、进入 `Scheduler.schedule()` 并提交首次 handoff facts 的调度分界点。
 3. `BootIdleEntryPhase`：由首次调度交接后的 `BootIdleTask` continuation 执行，进入 `cpu_startup_entry(CPUHP_ONLINE)` 和代表性 idle loop cycle；该子阶段完全受 `BootIdleStartupContext` 覆盖。
 4. `SmpRuntimePhase` 的入口由 `TaskEntry::KernelInit` 启动；其首个子阶段 `PreSmpInitPhase` 覆盖 `kernel_init` 线程中 `kernel_init_freeable()` 从 `gfp_allowed_mask = __GFP_BITS_MASK` 到 `smp_init()` 前的初始化段。它运行在 `KernelInitTask` 上，完成 SMP 启动前仍必须在单核多任务环境中推进的准备动作，例如打开 PageAllocator 完整 GFP mask、记录当前配置下裁剪的内存节点访问路径和 deferred 的 `cad_pid` 绑定位置、执行 `smp_prepare_cpus(setup_max_cpus)`、完成 `workqueue_init()`、`init_mm_internals()`、`rcu_init_tasks_generic()`、`do_pre_smp_initcalls()` 和 `lockup_detector_init()`。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口边界。
@@ -2314,7 +2314,7 @@ Ready。需要注意，`rest_init()` 中的 `schedule_preempt_disabled()` 展开
 `BootInitScheduleHandoffPhase` 和 `PreSmpInitPhase` 的分叉点是 `schedule_preempt_disabled()`
 展开后的 `Scheduler.schedule()` 调度分界，而不是独立生命周期对象或单个
 Scheduler action。该分界提交 `Scheduler.first_schedule_committed` 等调度事实；
-`BootInitRestInitPhase` 已经提交 `KernelInitTask` 被 `kthreadd_done` 释放的事实，
+`BootInitRestInitPhase` 已经提交 `kthreadd_done` completion complete/token 事实，
 `BootInitScheduleHandoffPhase` 再提交 PID 1 dispatch facts。规格不建立 `KernelInitDispatchGate`，因为 Linux
 没有对应的长期对象或明确生命周期，且 `schedule_preempt_disabled()` 是由
 preemption guard 边界和调度分界组成的通用 helper。
@@ -2358,7 +2358,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
    | `KthreaddTask.preset()` | `kernel_thread()` 形成 `kernel_clone_args` | 依赖 `BootInitTask/current` 作为复制模板，依赖 `TaskCreationCore.Ready` 提供统一 task 创建入口，依赖 `RootPidNamespace.Ready` 等作为后续复制所需的全局基础事实 | 形成 `TaskSpawnSpec` / kthread shell：`entry = kthreadd`、`arg = NULL`、`clone_flags = CLONE_VM | CLONE_UNTRACED | CLONE_FS | CLONE_FILES`、`kthread = true`、`name = NULL`。此时只确定“要创建 kthreadd provider task”的规格，不把任务放入调度队列。 |
    | `KthreaddTask.setup()` | `kernel_clone()` 中的 `copy_process()`、RISC-V `copy_thread()` 等复制与初始化路径，以及 `kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns)` 形成的 provider 引用事实 | 依赖 `KthreaddTask.Prepared`，继续依赖 `BootInitTask/current` 的 task/thread/fs/files/cred 等模板属性，并由 `TaskCreationCore.spawn_task(spec)` / `TaskCreationCore.copy_from_current()` 这类创建 action 驱动 task/thread/sched entity 等复制动作；其中 PID 分配依赖并调用 `RootPidNamespace.allocate_pid()`，全局 provider 引用依赖 `RootPidNamespace.lookup(pid)` | 建立 `KthreaddTask` 的实体属性和 kthread provider 属性：入口为 `kthreadd`，共享 `CLONE_FS | CLONE_FILES` 指定的 fs/files 语义，建立返回到 `ret_from_fork` 后调用 `kthreadd` 的线程上下文，并初始化可被调度器接收的 task/sched 属性；同时记录 `KthreaddTask.global_ref == kthreadd_task`，未来可等价归入 `KthreadCreationService.provider == KthreaddTask`。 |
    | `KthreaddTask.enable()` | `wake_up_new_task(p)` | 依赖 `KthreaddTask.Ready`，并由 `Scheduler.wake_new_task()` / `Scheduler.enqueue_task()` action 驱动；该 action 依赖 `Scheduler.Ready` 与 boot CPU runqueue 可接收新 task | 将 `KthreaddTask` 放入调度器可运行集合并推进到 `Online`。它使 kthreadd provider 具备被调度执行并消费 `kthread_create_list` 的机会；后续外部 kthread 创建请求可通过全局 provider 引用唤醒它。 |
-7. `kthreadd 准备同步门`（暂名 `KthreaddReadyGate`）：覆盖静态 completion `kthreadd_done` 和 `complete(&kthreadd_done)`。它是 `Completion` 类型的静态实例；`DECLARE_COMPLETION(kthreadd_done)` 可看作由 `KthreaddReadyGate` 自身的 `preset()` 与 `setup()` 绑定静态存储并确认初始化事实，初始扩展状态为 `Pending`。它把 `KernelInitTask` 和 `KthreaddTask` 解耦：PID 1 可以先创建并阻塞等待，待 `kthreadd_task` 全局引用建立且 `SystemState.value == SYSTEM_SCHEDULING` 后，`complete(&kthreadd_done)` 建模为 `KthreaddReadyGate.complete()` 扩展事件，释放 PID 1 继续执行 `kernel_init_freeable()`。
+7. `kthreadd 准备同步门`（暂名 `KthreaddReadyGate`）：覆盖静态 completion `kthreadd_done` 和 `complete(&kthreadd_done)`。它是 `Completion` 类型的静态实例；`DECLARE_COMPLETION(kthreadd_done)` 可看作由 `KthreaddReadyGate` 自身的 `preset()` 与 `setup()` 绑定静态存储并确认初始化事实，初始扩展状态为 `Pending`。它把 `KernelInitTask` 和 `KthreaddTask` 解耦：PID 1 可以先创建并阻塞等待，待 `kthreadd_task` 全局引用建立且 `SystemState.value == SYSTEM_SCHEDULING` 后，`complete(&kthreadd_done)` 建模为 `KthreaddReadyGate.complete()` 扩展事件，只发布 token/wake 事实；PID 1 继续执行 `kernel_init_freeable()` 的 release fact 由 `KernelInitTask` 的 wait side 观察或消费该 token 后提交。
 8. `系统状态对象`（暂名 `SystemState`）的 setup：覆盖 `system_state = SYSTEM_SCHEDULING`。`SystemState` 是独立全局对象，早期由静态全局数据形成，`SystemState.preset()` 已把对象生命周期推进到 `Prepared`，并在内部属性 `value` 中记录 `SYSTEM_BOOTING`。本处执行 `SystemState.setup()`，把对象生命周期推进到 `Ready`，同时把内部属性 `SystemState.value` 更新为 `SYSTEM_SCHEDULING`。这里的 `value` 是 Linux 的全局阶段枚举，不是对象生命周期状态；该对象不替代 `Scheduler`，也不把 SMP 或 workqueue 直接推进到后续状态。
 9. `boot idle 任务对象`（暂名 `BootIdleTask`）：覆盖 `cpu_startup_entry(CPUHP_ONLINE)`，并承接前一调用 `schedule_preempt_disabled()` 造成的第一次实际调度交接。底层仍是 Linux 静态 `init_task/current`，因此 `BootInitTask` 与 `BootIdleTask` 可理解为同一底层 task 在不同时期的两个规格身份，而不是两个新旧 task 实体。`schedule_preempt_disabled()` 不建模为单个 action，而是展开为 `BootIdlePreemption.enable_no_resched()`、`Scheduler.schedule()` 和 post-schedule boot idle context；规格身份转换放在 `cpu_startup_entry(CPUHP_ONLINE)` 中，建模为 `BootInitTask.disable()` 与 `BootIdleTask.enable()` 的复合提交。这里 `handoff` 只作为 `disable()` 场景下的自然语言资源交接别名，不作为正式 slot 名。
 
@@ -2408,7 +2408,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 - `KthreaddTask.state == Online`
 - `kthreadd_task` 已绑定到 `KthreaddTask`
 - `KthreaddReadyGate.type == Completion`
-- `KthreaddReadyGate.release_committed == true`，表示 `complete(&kthreadd_done)` 已执行并解除 PID 1 的等待；原始 completion 扩展状态可能保持 `Completed`，也可能在 `KernelInitTask.wait()` 消费后回到 `Pending`
+- `KthreaddReadyGate.completion.complete_committed == true`，表示 `complete(&kthreadd_done)` 已执行并发布 token/wake 事实；PID 1 的解除等待由后续 `KernelInitTask.wait()` 观察后记录为 `kernel_init_released_for_pre_smp_init`
 - `SystemState.state == Ready`
 - `SystemState.value == SYSTEM_SCHEDULING`
 - `Scheduler.first_schedule_committed == true`，表示 `schedule_preempt_disabled()` 展开的 `Scheduler.schedule()` 已完成第一次实际调度交接
@@ -2426,7 +2426,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 
 当前先将 `PreSmpInitPhase` 的对象和边界记录如下：
 
-1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第一个子阶段对象。它不从 `RestInitPhase.Ready` 串行接续，而是在 `KernelInitTask` 已被 `kthreadd_done` 释放、Scheduler 首次调度交接已提交并发布 PID 1 dispatch facts 后由 `TaskEntry::KernelInit` 启动的 `SmpRuntimePhase` 进入；此时 `BootIdleTask` 入口可作为另一条执行主体 continuation 推进。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界。
+1. `SMP 前初始化期对象`（暂名 `PreSmpInitPhase`）：属于阶段对象，是 `SMP Runtime Phase` 的第一个子阶段对象。它不从 `RestInitPhase.Ready` 串行接续，而是在 Scheduler 首次调度交接已提交并发布 PID 1 dispatch facts 后，由 `KernelInitTask` 先在 wait side 观察 `kthreadd_done` / `KthreaddReadyGate` 已 complete，再经 `TaskEntry::KernelInit` 启动的 `SmpRuntimePhase` 进入；此时 `BootIdleTask` 入口可作为另一条执行主体 continuation 推进。该子阶段按 `kernel_init_freeable()` 中 `smp_init()` 前的有效顺序推进对象，并以“下一调用为 `smp_init()`”作为完成边界。
 2. `页分配器完整 GFP mask 属性`：覆盖 `gfp_allowed_mask = __GFP_BITS_MASK`。它不是独立对象，也不属于 `KernelInitTask`，而是 `PageAllocator` 的全局分配策略属性。当前建模为 `PageAllocator.open_full_gfp_mask()` action，不推进 `PageAllocator` 标准生命周期，只记录 `PageAllocator.gfp_allowed_mask == __GFP_BITS_MASK`，表示后续初始化可以执行可能阻塞的 `GFP_KERNEL` 分配。
 3. `init 内存节点访问路径`：覆盖 `set_mems_allowed(node_states[N_MEMORY])`。当前 `CONFIG_CPUSETS=n` 且 `CONFIG_NUMA=n`，该调用在头文件中折叠为空实现，按 trimmed/no-op 记录，不在本阶段展开对象建模。
 4. `cad_pid 绑定路径`：覆盖 `cad_pid = get_pid(task_pid(current))`。它属于 reboot/ctrl-alt-del 控制路径的全局引用绑定；当前启动主线不依赖它，先按 deferred 记录，后续讨论系统控制或 reboot/poweroff 路径时再决定归属。

@@ -17,6 +17,8 @@ pub fn run() -> SmokeResult {
     }
 
     if ctx.scheduler.schedule_passes() == 0
+        || ctx.kernel_init_task.waiting_for_kthreadd_done()
+        || !ctx.kernel_init_task.observed_kthreadd_done_release()
         || !ctx.kernel_init_task.released_for_pre_smp_init()
         || ctx.boot_idle_runtime.state() != State::Ready
     {
@@ -42,6 +44,11 @@ pub fn run() -> SmokeResult {
         || !ctx.workqueue.worker_creation_open()
         || !ctx.workqueue.rescuers_ready()
         || !ctx.workqueue.initial_workers_created()
+        || !ctx.workqueue.pre_smp_pool_mutex_guard_used()
+        || !ctx.workqueue.pool_mutex().boot_init_task_guard_completed()
+        || ctx.workqueue.pool_mutex().lock_entered_count() < 2
+        || ctx.workqueue.pool_mutex().unlock_exited_count()
+            != ctx.workqueue.pool_mutex().lock_entered_count()
         || !ctx.workqueue.watchdog_ready()
         || ctx.workqueue.workers_running()
     {

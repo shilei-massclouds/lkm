@@ -31,9 +31,12 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         );
     }
 
+    ctx.kernel_init_task
+        .observe_kthreadd_done_release(&mut ctx.kthreadd_ready_gate)?;
     ctx.page_allocator.open_full_gfp_mask()?;
     ctx.cpu_group.prepare_pre_smp()?;
-    ctx.workqueue.setup(&ctx.page_allocator, &ctx.cpu_group)?;
+    ctx.workqueue
+        .setup(&ctx.page_allocator, &ctx.cpu_group, &ctx.kernel_init_task)?;
     ctx.vmstat_core.preset(
         &ctx.workqueue,
         &ctx.page_allocator,

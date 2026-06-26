@@ -4,7 +4,7 @@
  * This top-level phase starts after InterruptPhase has completed the
  * ProcessPreparePhase boundary and ends in the rest_init() boot idle branch.
  * The expanded path is split by execution owner:
- * BootInitRestInitPhase creates and releases PID 1/kthreadd,
+ * BootInitRestInitPhase creates PID 1/kthreadd and completes kthreadd_done,
  * BootInitScheduleHandoffPhase commits the first scheduler handoff from the
  * BootInitTask perspective, and BootIdleEntryPhase enters the boot idle
  * continuation owned by BootIdleTask.
