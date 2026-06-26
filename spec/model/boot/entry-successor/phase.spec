@@ -109,6 +109,15 @@ object MemBlock: MemoryObject {
                     memblock_reserved_ranges_ready(MemBlock, KernelImage, RawDtb);
                     memblock_fdt_reserved_ranges_applied(MemBlock, EarlyDtb);
                     memblock_allocator_ready(MemBlock);
+                    memblock_phys_ram_base_ready(MemBlock);
+                    memblock_kernel_va_pa_offset_ready(MemBlock, Vm);
+                    memblock_dma32_limit_ready(MemBlock);
+                    memblock_dma32_zone_input_ready(MemBlock);
+                    memblock_hugetlb_early_reserve_deferred(MemBlock);
+                }
+
+                deferred {
+                    "hugetlb_cma_reserve() 暂缓：当前 .config 启用 CONFIG_HUGETLB_PAGE，Linux/RISC-V setup_bootmem() 保留 hugetlb CMA 的调用位置；本轮只记录 MemBlock 阶段边界，不展开 Hugetlb/CMA 对象或 hugetlb_lock 等运行期同步。"
                 }
             }
         }
@@ -123,6 +132,11 @@ object MemBlock: MemoryObject {
             memblock_reserved_ranges_ready(MemBlock, KernelImage, RawDtb);
             memblock_fdt_reserved_ranges_applied(MemBlock, EarlyDtb);
             memblock_allocator_ready(MemBlock);
+            memblock_phys_ram_base_ready(MemBlock);
+            memblock_kernel_va_pa_offset_ready(MemBlock, Vm);
+            memblock_dma32_limit_ready(MemBlock);
+            memblock_dma32_zone_input_ready(MemBlock);
+            memblock_hugetlb_early_reserve_deferred(MemBlock);
         }
 
         transitions {
@@ -930,10 +944,13 @@ object EntrySuccessorPhase: PhaseObject {
 
                 ensures {
                     early_boot_irqs_disabled_true();
+                    vmlinux_build_id_deferred(EntrySuccessorPhase);
+                    page_address_init_deferred(EntrySuccessorPhase);
+                    entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
                 }
 
                 deferred {
-                    "efi_init() 后续在支持 EFI 启动路径时抽象为 FirmwareInterface/EFI 对象。"
+                    "efi_init() 后续在支持 EFI 启动路径时抽象为 FirmwareInterface/EFI 对象；init_vmlinux_build_id() 暂缓：Linux start_kernel() early generic path 在 debug_objects_early_init() 后调用，当前不展开 build-id 元数据对象，但保留调用位置；page_address_init() 暂缓：Linux 在 boot_cpu_init() 后、setup_arch() 前调用，当前没有 page_address freelist/hash 元数据对象，但保留调用位置。"
                 }
             }
         }
@@ -965,6 +982,9 @@ object EntrySuccessorPhase: PhaseObject {
             Vm.state == State::Online;
             SwapperVm.state == State::Online;
             EarlyVm.state == State::Destroyed;
+            vmlinux_build_id_deferred(EntrySuccessorPhase);
+            page_address_init_deferred(EntrySuccessorPhase);
+            entry_successor_start_kernel_position_preserved(EntrySuccessorPhase);
         }
     }
 }

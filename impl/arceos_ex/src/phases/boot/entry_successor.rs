@@ -11,6 +11,12 @@ use core::sync::atomic::AtomicU8;
 #[unsafe(link_section = ".data.phase")]
 static ENTRY_SUCCESSOR_PHASE_STATE: AtomicU8 =
     AtomicU8::new(crate::phases::state::encode(State::Base));
+#[unsafe(link_section = ".data.phase")]
+static ENTRY_SUCCESSOR_DEFERRED_FACTS: AtomicU8 = AtomicU8::new(0);
+
+const DEFERRED_VMLINUX_BUILD_ID: u8 = 1 << 0;
+const DEFERRED_PAGE_ADDRESS_INIT: u8 = 1 << 1;
+const DEFERRED_START_KERNEL_POSITION: u8 = 1 << 2;
 
 pub fn setup(ctx: &mut Context) -> ! {
     crate::trace::checkpoint(Checkpoint::EntrySuccessorPhaseStarted);
@@ -22,6 +28,7 @@ pub fn setup(ctx: &mut Context) -> ! {
 }
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
+    record_start_kernel_deferred_facts();
     ctx.init_stack.enable()?;
 
     let boot_hartid = ctx.boot_current_cpu.hartid();
@@ -122,4 +129,18 @@ fn entry_successor_phase_ready(ctx: &Context) -> bool {
         && ctx.early_param.state() == State::Ready
         && earlycon::is_online()
         && ctx.memblock.state() == State::Online
+        && ctx.memblock.entry_successor_setup_facts_ready()
+        && start_kernel_deferred_facts_ready()
+}
+
+fn record_start_kernel_deferred_facts() {
+    ENTRY_SUCCESSOR_DEFERRED_FACTS.store(
+        DEFERRED_VMLINUX_BUILD_ID | DEFERRED_PAGE_ADDRESS_INIT | DEFERRED_START_KERNEL_POSITION,
+        core::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+fn start_kernel_deferred_facts_ready() -> bool {
+    ENTRY_SUCCESSOR_DEFERRED_FACTS.load(core::sync::atomic::Ordering::Relaxed)
+        == (DEFERRED_VMLINUX_BUILD_ID | DEFERRED_PAGE_ADDRESS_INIT | DEFERRED_START_KERNEL_POSITION)
 }

@@ -10,6 +10,8 @@ pub struct Randomness {
     lifecycle: Lifecycle,
     early_mix: u64,
     arch_entropy_bits: u16,
+    early_mix_without_input_pool_lock: bool,
+    early_conditional_reseed_deferred: bool,
     fully_ready: bool,
     timekeeping_required: bool,
     cycle_entropy_mixed: bool,
@@ -24,6 +26,8 @@ impl Randomness {
             lifecycle: Lifecycle::new(State::Base),
             early_mix: 0,
             arch_entropy_bits: 0,
+            early_mix_without_input_pool_lock: false,
+            early_conditional_reseed_deferred: false,
             fully_ready: false,
             timekeeping_required: false,
             cycle_entropy_mixed: false,
@@ -45,6 +49,14 @@ impl Randomness {
     #[allow(dead_code)]
     pub const fn arch_entropy_bits(&self) -> u16 {
         self.arch_entropy_bits
+    }
+
+    pub const fn early_mix_without_input_pool_lock(&self) -> bool {
+        self.early_mix_without_input_pool_lock
+    }
+
+    pub const fn early_conditional_reseed_deferred(&self) -> bool {
+        self.early_conditional_reseed_deferred
     }
 
     #[allow(dead_code)]
@@ -85,6 +97,9 @@ impl Randomness {
         self.arch_entropy_bits = arch_entropy_bits();
         self.early_mix =
             mix_early_seed_material(static_command_line.as_bytes(), self.arch_entropy_bits);
+        self.early_mix_without_input_pool_lock = true;
+        self.early_conditional_reseed_deferred = true;
+        self.base_crng_lock_deferred = true;
         self.fully_ready = false;
         self.lifecycle.transition(
             LifecycleEvent::Preset,

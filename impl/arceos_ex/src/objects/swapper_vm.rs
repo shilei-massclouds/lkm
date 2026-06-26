@@ -12,6 +12,8 @@ use super::{
 pub struct SwapperVm {
     lifecycle: Lifecycle,
     translation_sync_complete: bool,
+    strict_kernel_rwx_boundary_deferred: bool,
+    final_permissions_not_split_yet: bool,
 }
 
 impl SwapperVm {
@@ -19,6 +21,8 @@ impl SwapperVm {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             translation_sync_complete: false,
+            strict_kernel_rwx_boundary_deferred: false,
+            final_permissions_not_split_yet: false,
         }
     }
 
@@ -28,6 +32,14 @@ impl SwapperVm {
 
     pub const fn translation_sync_complete(&self) -> bool {
         self.translation_sync_complete
+    }
+
+    pub const fn strict_kernel_rwx_boundary_deferred(&self) -> bool {
+        self.strict_kernel_rwx_boundary_deferred
+    }
+
+    pub const fn final_permissions_not_split_yet(&self) -> bool {
+        self.final_permissions_not_split_yet
     }
 
     pub fn setup(
@@ -68,6 +80,8 @@ impl SwapperVm {
                 State::Ready,
             );
         }
+        self.strict_kernel_rwx_boundary_deferred = true;
+        self.final_permissions_not_split_yet = true;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

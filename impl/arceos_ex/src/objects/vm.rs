@@ -234,6 +234,8 @@ impl Vm {
         self.lifecycle.state() == State::Online
             && self.swapper_vm.state() == State::Online
             && self.swapper_vm.translation_sync_complete()
+            && self.swapper_vm.strict_kernel_rwx_boundary_deferred()
+            && self.swapper_vm.final_permissions_not_split_yet()
             && self.early_vm.state() == State::Destroyed
     }
 

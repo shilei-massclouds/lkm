@@ -72,6 +72,9 @@ predicate arceos_ex_must_ioremap_iounmap_request_vmalloc_teardown_only() -> bool
 predicate arceos_ex_must_ioremap_model_mmio_attribute_policy_explicitly() -> bool;
 predicate arceos_ex_must_mm_struct_cache_only_create_mm_struct_cache() -> bool;
 predicate arceos_ex_must_entry_prelude_keep_early_alternatives_deferred() -> bool;
+predicate arceos_ex_must_entry_successor_keep_start_kernel_deferred_facts() -> bool;
+predicate arceos_ex_must_entry_successor_memblock_record_riscv_setup_bootmem_facts() -> bool;
+predicate arceos_ex_must_entry_successor_keep_swapper_rwx_boundary_deferred() -> bool;
 predicate arceos_ex_must_core_prepare_preserve_early_irq_and_smp_closed_facts() -> bool;
 predicate arceos_ex_must_static_branch_setup_record_jump_label_guards() -> bool;
 predicate arceos_ex_must_jump_label_mutex_be_independent_context_object() -> bool;
@@ -1154,6 +1157,43 @@ type ArceosExEntryPreludeCodingMust {
          * treating the Linux path as absent or implemented.
          */
         arceos_ex_must_entry_prelude_keep_early_alternatives_deferred();
+    }
+}
+
+type ArceosExEntrySuccessorCodingMust {
+    invariant {
+        /*
+         * start_kernel() deferred calls:
+         *
+         * Linux start_kernel() calls init_vmlinux_build_id() before disabling
+         * local IRQs, then page_address_init() after boot_cpu_init() and
+         * before setup_arch(). EntrySuccessorPhase may defer both objects, but
+         * the phase ready check and implementation-visible facts must preserve
+         * those call positions instead of treating them as absent.
+         */
+        arceos_ex_must_entry_successor_keep_start_kernel_deferred_facts();
+
+        /*
+         * RISC-V setup_bootmem() facts:
+         *
+         * MemBlock.setup() must record the RISC-V setup_bootmem() facts needed
+         * by later boot objects: phys_ram_base, kernel va-pa offset, DMA32
+         * limit/zone input and the hugetlb CMA reserve call position. The
+         * current implementation may defer hugetlb/CMA details, but the
+         * deferral must remain observable.
+         */
+        arceos_ex_must_entry_successor_memblock_record_riscv_setup_bootmem_facts();
+
+        /*
+         * SwapperVm permission boundary:
+         *
+         * SwapperVm.setup()/enable() must keep the setup_vm_final() SATP/TLB
+         * synchronization fact while recording that CONFIG_STRICT_KERNEL_RWX
+         * final text/rodata/data permission splitting is still deferred. It
+         * must not claim the final RW/RO/NX protection split merely because
+         * the complete kernel address space is online.
+         */
+        arceos_ex_must_entry_successor_keep_swapper_rwx_boundary_deferred();
     }
 }
 

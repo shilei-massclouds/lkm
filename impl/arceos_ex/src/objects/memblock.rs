@@ -14,6 +14,11 @@ pub struct MemBlock {
     lifecycle: Lifecycle,
     usable: PhysRangeSet,
     reserved: PhysRangeSet,
+    phys_ram_base_ready: bool,
+    kernel_va_pa_offset_ready: bool,
+    dma32_limit_ready: bool,
+    dma32_zone_input_ready: bool,
+    hugetlb_early_reserve_deferred: bool,
     #[allow(dead_code)]
     alloc_cursor: usize,
 }
@@ -24,6 +29,11 @@ impl MemBlock {
             lifecycle: Lifecycle::new(State::Base),
             usable: PhysRangeSet::empty(),
             reserved: PhysRangeSet::empty(),
+            phys_ram_base_ready: false,
+            kernel_va_pa_offset_ready: false,
+            dma32_limit_ready: false,
+            dma32_zone_input_ready: false,
+            hugetlb_early_reserve_deferred: false,
             alloc_cursor: 0,
         }
     }
@@ -38,6 +48,14 @@ impl MemBlock {
 
     pub const fn reserved_ranges(&self) -> &PhysRangeSet {
         &self.reserved
+    }
+
+    pub const fn entry_successor_setup_facts_ready(&self) -> bool {
+        self.phys_ram_base_ready
+            && self.kernel_va_pa_offset_ready
+            && self.dma32_limit_ready
+            && self.dma32_zone_input_ready
+            && self.hugetlb_early_reserve_deferred
     }
 
     #[allow(dead_code)]
@@ -138,6 +156,11 @@ impl MemBlock {
         {
             return self.failed_setup();
         }
+        self.phys_ram_base_ready = self.usable.count() != 0;
+        self.kernel_va_pa_offset_ready = kernel_image.virt_offset() != 0;
+        self.dma32_limit_ready = true;
+        self.dma32_zone_input_ready = true;
+        self.hugetlb_early_reserve_deferred = true;
 
         self.lifecycle.transition(
             LifecycleEvent::Setup,

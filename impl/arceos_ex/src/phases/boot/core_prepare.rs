@@ -213,6 +213,9 @@ fn core_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.boot_param.state() == State::Ready
         && ctx.payload_param.state() == State::Ready
         && ctx.randomness.state() == State::Prepared
+        && ctx.randomness.early_mix_without_input_pool_lock()
+        && ctx.randomness.early_conditional_reseed_deferred()
+        && ctx.randomness.base_crng_lock_deferred()
         && printk::is_ready()
         && printk::setup_local_irq_save_restore_used()
         && printk::setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)

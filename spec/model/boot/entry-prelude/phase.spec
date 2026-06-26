@@ -1660,6 +1660,12 @@ object SwapperVm: AddressSpaceObject {
                     valid_page_table_storage(pg_dir);
                     swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap);
                     temporary_fixmap_page_table_slots_clean(SwapperVm);
+                    swapper_vm_strict_kernel_rwx_boundary_deferred(SwapperVm);
+                    swapper_vm_final_permissions_not_split_yet(SwapperVm);
+                }
+
+                deferred {
+                    "CONFIG_STRICT_KERNEL_RWX 下的最终 text/rodata/data RW/RO/NX 权限细分暂缓：setup_vm_final() 的完整线性映射和 SATP/TLB 同步已建模，最终 mark_rodata_ro()/细粒度权限域留给后续 mapping-protection 对象。"
                 }
             }
         }
@@ -1674,6 +1680,8 @@ object SwapperVm: AddressSpaceObject {
             valid_page_table_storage(pg_dir);
             swapper_vm_mappings_ready(SwapperVm, MemBlock, KernelImage, LinearMap, FixMap);
             temporary_fixmap_page_table_slots_clean(SwapperVm);
+            swapper_vm_strict_kernel_rwx_boundary_deferred(SwapperVm);
+            swapper_vm_final_permissions_not_split_yet(SwapperVm);
         }
 
         transitions {
