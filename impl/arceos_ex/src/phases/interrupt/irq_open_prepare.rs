@@ -25,14 +25,8 @@ pub fn setup(ctx: &mut Context) -> ! {
 fn setup_objects(ctx: &mut Context) -> EventResult {
     ctx.slub_subsystem.setup_flush_workqueue(&ctx.workqueue)?;
     ctx.console.preset(&ctx.static_objects)?;
-    checkpoint_panic_later_clear()?;
-    checkpoint_lockdep_noop()?;
-    checkpoint_locking_selftest_noop()?;
-    checkpoint_initrd_bounds_trimmed()?;
-    checkpoint_page_allocator_percpu_pagesets_deferred()?;
-    checkpoint_numa_policy_noop()?;
-    checkpoint_acpi_early_noop()?;
-    checkpoint_late_time_init_noop()?;
+    ctx.irq_open_prepare_trimmed_paths
+        .preset(&ctx.config, &ctx.console, &ctx.page_allocator)?;
     ctx.sched_clock.setup(
         &ctx.hrtimer_core,
         &ctx.timekeeper,
@@ -42,7 +36,8 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.delay_loop
         .setup(&ctx.riscv_timer_provider, &ctx.cpu_group)?;
-    checkpoint_arch_cpu_finalize_noop()
+    ctx.irq_open_prepare_trimmed_paths
+        .setup(&ctx.config, &ctx.sched_clock, &ctx.delay_loop)
 }
 
 fn handoff() -> ! {
@@ -115,12 +110,59 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.console.initcall_table_scanned()
         && ctx.console.real_device_probe_deferred()
         && ctx.console.earlycon_handoff_conditional()
+        && ctx.irq_open_prepare_trimmed_paths.state() == State::Ready
+        && ctx.irq_open_prepare_trimmed_paths.panic_later_clear()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .lockdep_init_trimmed_noop()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .lockdep_trimmed_because_config_debug_lock_alloc_disabled()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .locking_selftest_trimmed_noop()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled()
+        && ctx.irq_open_prepare_trimmed_paths.initrd_bounds_trimmed()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .initrd_trimmed_because_config_blk_dev_initrd_disabled()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .page_allocator_per_cpu_pagesets_deferred()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .page_allocator_deferred_bound()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .numa_policy_trimmed_noop()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .numa_policy_trimmed_because_config_numa_disabled()
+        && ctx.irq_open_prepare_trimmed_paths.acpi_early_trimmed_noop()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .acpi_early_trimmed_because_config_acpi_disabled()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .late_time_init_hook_trimmed_noop()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .late_time_init_hook_unset_on_riscv()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .arch_cpu_finalize_init_trimmed_noop()
+        && ctx
+            .irq_open_prepare_trimmed_paths
+            .arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled()
+        && ctx.irq_open_prepare_trimmed_paths.position_preserved()
         && ctx.sched_clock.state() == State::Ready
         && ctx.sched_clock.running_key_enabled()
         && ctx.sched_clock.reader_ready()
         && ctx.sched_clock.timer_ready()
         && ctx.sched_clock.timer_period() != 0
-        && ctx.sched_clock.setup_local_irq_save_restore_used()
+        && ctx.sched_clock.setup_local_irq_disable_enable_used()
         && ctx
             .sched_clock
             .setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)
@@ -129,49 +171,4 @@ fn irq_open_prepare_phase_ready(ctx: &Context) -> bool {
         && ctx.delay_loop.boot_cpu_loops_per_jiffy() == ctx.delay_loop.lpj_fine()
         && ctx.delay_loop.global_loops_per_jiffy() == ctx.delay_loop.lpj_fine()
         && ctx.delay_loop.delay_actions_ready()
-}
-
-fn checkpoint_panic_later_clear() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::PanicLaterClearCheckpoint);
-    Ok(())
-}
-
-fn checkpoint_lockdep_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::LockdepInitNoop);
-    Ok(())
-}
-
-fn checkpoint_locking_selftest_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::LockingSelftestNoop);
-    Ok(())
-}
-
-fn checkpoint_initrd_bounds_trimmed() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::InitrdBoundsTrimmed);
-    Ok(())
-}
-
-fn checkpoint_page_allocator_percpu_pagesets_deferred() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::PageAllocatorPerCpuPagesetsDeferred);
-    Ok(())
-}
-
-fn checkpoint_numa_policy_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::NumaPolicyNoop);
-    Ok(())
-}
-
-fn checkpoint_acpi_early_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::AcpiEarlyNoop);
-    Ok(())
-}
-
-fn checkpoint_late_time_init_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::LateTimeInitNoop);
-    Ok(())
-}
-
-fn checkpoint_arch_cpu_finalize_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::ArchCpuFinalizeNoop);
-    Ok(())
 }

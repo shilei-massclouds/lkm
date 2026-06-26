@@ -43,7 +43,7 @@ use crate::objects::{
     },
     interrupt_stream::InterruptStream,
     ioremap::Ioremap,
-    irq_open::{Console, DelayLoop, SchedClock},
+    irq_open::{Console, DelayLoop, IrqOpenPrepareTrimmedPaths, SchedClock},
     irq_time::{
         BootStackCanary, HrtimerCore, IpiMux, IrqChipInitTable, IrqController, IrqDispatchTree,
         IrqHandlerRegistry, IrqTimeTrimmedPaths, PerfEventCore, Plic, PlicDriver, PlicIrqDomain,
@@ -228,6 +228,7 @@ pub struct Context {
     pub profile_core: ProfileCore,
 
     pub console: Console,
+    pub irq_open_prepare_trimmed_paths: IrqOpenPrepareTrimmedPaths,
     pub sched_clock: SchedClock,
     pub delay_loop: DelayLoop,
 
@@ -422,6 +423,7 @@ impl Context {
             perf_event_core: PerfEventCore::new(),
             profile_core: ProfileCore::new(),
             console: Console::new(),
+            irq_open_prepare_trimmed_paths: IrqOpenPrepareTrimmedPaths::new(),
             sched_clock: SchedClock::new(),
             delay_loop: DelayLoop::new(),
             root_pid_namespace: RootPidNamespace::new(),

@@ -119,15 +119,15 @@ context SchedClockLocalInterruptContext: Context {
     /*
      * Linux sched_clock_init() temporarily disables local interrupts around
      * generic_sched_clock_init(). The outer phase has local interrupts enabled,
-     * so this records the local irqsave/restore window explicitly.
+     * so this records the local irq disable/enable window explicitly.
      */
     guard {
         entered_by {
-            BootCpuLocalInterrupt.Transition::SaveAndDisable;
+            BootCpuLocalInterrupt.Transition::Disable;
         }
 
         exited_by {
-            BootCpuLocalInterrupt.Transition::Restore;
+            BootCpuLocalInterrupt.Transition::Enable;
         }
     }
 
@@ -163,7 +163,7 @@ object SchedClock: KernelObject {
                     sched_clock_running_key_enabled(SchedClock, StaticBranch);
                     sched_clock_reader_ready(SchedClock);
                     sched_clock_timer_ready(SchedClock, HrtimerCore);
-                    sched_clock_setup_local_irq_save_restore_used(SchedClock);
+                    sched_clock_setup_local_irq_disable_enable_used(SchedClock);
                 }
             }
         }
@@ -175,7 +175,7 @@ object SchedClock: KernelObject {
             sched_clock_running_key_enabled(SchedClock, StaticBranch);
             sched_clock_reader_ready(SchedClock);
             sched_clock_timer_ready(SchedClock, HrtimerCore);
-            sched_clock_setup_local_irq_save_restore_used(SchedClock);
+            sched_clock_setup_local_irq_disable_enable_used(SchedClock);
             sched_clock_setup_local_irq_guard_used(SchedClock, BootCpuLocalInterrupt);
         }
     }
@@ -219,6 +219,105 @@ object DelayLoop: KernelObject {
 }
 
 /*
+ * IrqOpenPrepareTrimmedPaths 保留 start_kernel() 中落在本子阶段、但当前
+ * linux-6.12.37/default_config 下为空、不可达或暂缓展开的调用点。
+ * 这些事实必须结构化记录，不能只留在 checkpoint 或 markdown 表格。
+ */
+object IrqOpenPrepareTrimmedPaths: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    Config.state == State::Online;
+                    Console.state == State::Prepared;
+                    PageAllocator.state == State::Ready;
+                }
+
+                ensures {
+                    irq_open_prepare_trimmed_paths_ready(IrqOpenPrepareTrimmedPaths);
+                    irq_open_panic_later_clear(IrqOpenPrepareTrimmedPaths);
+                    irq_open_lockdep_init_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+                    irq_open_lockdep_trimmed_because_config_debug_lock_alloc_disabled(IrqOpenPrepareTrimmedPaths);
+                    irq_open_locking_selftest_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+                    irq_open_locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled(IrqOpenPrepareTrimmedPaths);
+                    irq_open_initrd_bounds_trimmed(IrqOpenPrepareTrimmedPaths);
+                    irq_open_initrd_trimmed_because_config_blk_dev_initrd_disabled(IrqOpenPrepareTrimmedPaths);
+                    irq_open_page_allocator_per_cpu_pagesets_deferred(IrqOpenPrepareTrimmedPaths, PageAllocator);
+                    irq_open_numa_policy_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+                    irq_open_numa_policy_trimmed_because_config_numa_disabled(IrqOpenPrepareTrimmedPaths);
+                    irq_open_acpi_early_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+                    irq_open_acpi_early_trimmed_because_config_acpi_disabled(IrqOpenPrepareTrimmedPaths);
+                    irq_open_late_time_init_hook_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+                    irq_open_late_time_init_hook_unset_on_riscv(IrqOpenPrepareTrimmedPaths);
+                    irq_open_trimmed_paths_position_preserved(IrqOpenPrepareTrimmedPaths);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            irq_open_prepare_trimmed_paths_ready(IrqOpenPrepareTrimmedPaths);
+            irq_open_panic_later_clear(IrqOpenPrepareTrimmedPaths);
+            irq_open_lockdep_init_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_lockdep_trimmed_because_config_debug_lock_alloc_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_locking_selftest_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_initrd_bounds_trimmed(IrqOpenPrepareTrimmedPaths);
+            irq_open_initrd_trimmed_because_config_blk_dev_initrd_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_page_allocator_per_cpu_pagesets_deferred(IrqOpenPrepareTrimmedPaths, PageAllocator);
+            irq_open_numa_policy_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_numa_policy_trimmed_because_config_numa_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_acpi_early_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_acpi_early_trimmed_because_config_acpi_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_late_time_init_hook_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_late_time_init_hook_unset_on_riscv(IrqOpenPrepareTrimmedPaths);
+            irq_open_trimmed_paths_position_preserved(IrqOpenPrepareTrimmedPaths);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    Config.state == State::Online;
+                    SchedClock.state == State::Ready;
+                    DelayLoop.state == State::Ready;
+                }
+
+                ensures {
+                    irq_open_arch_cpu_finalize_init_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+                    irq_open_arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled(IrqOpenPrepareTrimmedPaths);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            irq_open_prepare_trimmed_paths_ready(IrqOpenPrepareTrimmedPaths);
+            irq_open_panic_later_clear(IrqOpenPrepareTrimmedPaths);
+            irq_open_lockdep_init_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_lockdep_trimmed_because_config_debug_lock_alloc_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_locking_selftest_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_initrd_bounds_trimmed(IrqOpenPrepareTrimmedPaths);
+            irq_open_initrd_trimmed_because_config_blk_dev_initrd_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_page_allocator_per_cpu_pagesets_deferred(IrqOpenPrepareTrimmedPaths, PageAllocator);
+            irq_open_numa_policy_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_numa_policy_trimmed_because_config_numa_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_acpi_early_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_acpi_early_trimmed_because_config_acpi_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_late_time_init_hook_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_late_time_init_hook_unset_on_riscv(IrqOpenPrepareTrimmedPaths);
+            irq_open_arch_cpu_finalize_init_trimmed_noop(IrqOpenPrepareTrimmedPaths);
+            irq_open_arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled(IrqOpenPrepareTrimmedPaths);
+            irq_open_trimmed_paths_position_preserved(IrqOpenPrepareTrimmedPaths);
+        }
+    }
+}
+
+/*
  * IrqOpenPreparePhase 表示 InterruptPhase 的第三个子阶段。它承接已开放
  * boot CPU 本地中断总入口的事实，建立中断开放后到进程准备期前的 late
  * core/platform 准备边界。
@@ -252,8 +351,10 @@ object IrqOpenPreparePhase: PhaseObject {
 
                 drives {
                     Console.Transition::Preset;
+                    IrqOpenPrepareTrimmedPaths.Transition::Preset;
                     SchedClock.Transition::Setup;
                     DelayLoop.Transition::Setup;
+                    IrqOpenPrepareTrimmedPaths.Transition::Setup;
                 }
 
                 ensures {
@@ -268,14 +369,8 @@ object IrqOpenPreparePhase: PhaseObject {
                     sbi_ipi_enable_deferred(SbiIpi);
                     smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
                     slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
-                    page_allocator_per_cpu_pagesets_deferred(PageAllocator);
-                    lockdep_path_trimmed();
-                    locking_selftest_path_trimmed();
-                    initrd_bounds_path_trimmed();
-                    numa_policy_path_trimmed();
-                    acpi_early_path_trimmed();
-                    late_time_init_hook_trimmed();
-                    arch_cpu_finalize_init_trimmed();
+                    irq_open_prepare_trimmed_paths_ready(IrqOpenPrepareTrimmedPaths);
+                    irq_open_page_allocator_per_cpu_pagesets_deferred(IrqOpenPrepareTrimmedPaths, PageAllocator);
                     next_interrupt_subphase_is_process_prepare();
                 }
 
@@ -283,7 +378,7 @@ object IrqOpenPreparePhase: PhaseObject {
                     "setup_per_cpu_pageset() 作为 PageAllocator.setup() 的 per-CPU pageset 快速路径细项暂缓，不引入新 lifecycle slot。";
                     "完整 console device probe、boot console 注销和 real console handoff 属于条件结果或后续设备初始化，不作为本阶段固定后置条件。";
                     "SlubSubsystem.enable()/Linux slab_state=FULL 留给 slab_sysfs_init() 等后续 late initcall，不在本阶段推进。";
-                    "Lockdep、locking selftest、initrd bounds、NUMA policy、ACPI early、late_time_init hook 和 arch_cpu_finalize_init 在当前 RISC-V default_config 下为 trimmed/no-op。";
+                    "Lockdep、locking selftest、initrd bounds、NUMA policy、ACPI early、late_time_init hook 和 arch_cpu_finalize_init 在当前 RISC-V default_config 下由 IrqOpenPrepareTrimmedPaths 记录为 trimmed/no-op。";
                 }
             }
         }
@@ -303,6 +398,7 @@ object IrqOpenPreparePhase: PhaseObject {
             Console.state == State::Prepared;
             TtyLineDisciplineRegistry.state == State::Prepared;
             ConsoleDriverSet.state == State::Prepared;
+            IrqOpenPrepareTrimmedPaths.state == State::Ready;
             SchedClock.state == State::Ready;
             DelayLoop.state == State::Ready;
             irq_open_prepare_ready(IrqOpenPreparePhase);
@@ -316,6 +412,7 @@ object IrqOpenPreparePhase: PhaseObject {
             sbi_ipi_enable_deferred(SbiIpi);
             smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
             slub_flush_workqueue_ready(SlubSubsystem, Workqueue);
+            irq_open_page_allocator_per_cpu_pagesets_deferred(IrqOpenPrepareTrimmedPaths, PageAllocator);
         }
     }
 }

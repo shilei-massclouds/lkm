@@ -73,6 +73,34 @@ impl Config {
         false
     }
 
+    pub const fn debug_lock_alloc_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn debug_locking_api_selftests_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn blk_dev_initrd_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn numa_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn acpi_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn riscv_late_time_init_hook_set(&self) -> bool {
+        false
+    }
+
+    pub const fn arch_has_cpu_finalize_init(&self) -> bool {
+        false
+    }
+
     pub const fn linear_map_virt_start(&self) -> usize {
         LINEAR_MAP_VIRT_START
     }

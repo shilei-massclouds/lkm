@@ -43,7 +43,59 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
-    if !ctx.sched_clock.setup_local_irq_save_restore_used()
+    if ctx.irq_open_prepare_trimmed_paths.state() != State::Ready
+        || !ctx.irq_open_prepare_trimmed_paths.panic_later_clear()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .lockdep_init_trimmed_noop()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .lockdep_trimmed_because_config_debug_lock_alloc_disabled()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .locking_selftest_trimmed_noop()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled()
+        || !ctx.irq_open_prepare_trimmed_paths.initrd_bounds_trimmed()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .initrd_trimmed_because_config_blk_dev_initrd_disabled()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .page_allocator_per_cpu_pagesets_deferred()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .page_allocator_deferred_bound()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .numa_policy_trimmed_noop()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .numa_policy_trimmed_because_config_numa_disabled()
+        || !ctx.irq_open_prepare_trimmed_paths.acpi_early_trimmed_noop()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .acpi_early_trimmed_because_config_acpi_disabled()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .late_time_init_hook_trimmed_noop()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .late_time_init_hook_unset_on_riscv()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .arch_cpu_finalize_init_trimmed_noop()
+        || !ctx
+            .irq_open_prepare_trimmed_paths
+            .arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled()
+        || !ctx.irq_open_prepare_trimmed_paths.position_preserved()
+    {
+        printk::write_str("irq open trimmed/deferred path facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
+    if !ctx.sched_clock.setup_local_irq_disable_enable_used()
         || !ctx
             .sched_clock
             .setup_local_irq_guard_used_by(&ctx.boot_cpu_local_interrupt)

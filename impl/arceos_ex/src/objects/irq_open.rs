@@ -1,9 +1,10 @@
 use super::{
+    config::Config,
     cpu_control::LocalInterruptControl,
     cpu_group::CpuGroup,
     earlycon,
     irq_time::{HrtimerCore, RiscvTimerProvider, Timekeeper},
-    mm_core::{KmallocCaches, SlubSubsystem},
+    mm_core::{KmallocCaches, PageAllocator, SlubSubsystem},
     printk,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
     static_branch::StaticBranch,
@@ -256,7 +257,7 @@ pub struct SchedClock {
     reader_ready: bool,
     timer_ready: bool,
     timer_period: u64,
-    setup_local_irq_save_restore_used: bool,
+    setup_local_irq_disable_enable_used: bool,
     setup_local_irq_guard_bound_to_boot_cpu: bool,
 }
 
@@ -268,7 +269,7 @@ impl SchedClock {
             reader_ready: false,
             timer_ready: false,
             timer_period: 0,
-            setup_local_irq_save_restore_used: false,
+            setup_local_irq_disable_enable_used: false,
             setup_local_irq_guard_bound_to_boot_cpu: false,
         }
     }
@@ -293,8 +294,8 @@ impl SchedClock {
         self.timer_period
     }
 
-    pub const fn setup_local_irq_save_restore_used(&self) -> bool {
-        self.setup_local_irq_save_restore_used
+    pub const fn setup_local_irq_disable_enable_used(&self) -> bool {
+        self.setup_local_irq_disable_enable_used
     }
 
     pub fn setup_local_irq_guard_used_by(
@@ -302,7 +303,7 @@ impl SchedClock {
         boot_cpu_local_interrupt: &LocalInterruptControl,
     ) -> bool {
         self.lifecycle.state() == State::Ready
-            && self.setup_local_irq_save_restore_used
+            && self.setup_local_irq_disable_enable_used
             && self.setup_local_irq_guard_bound_to_boot_cpu
             && boot_cpu_local_interrupt.state() == State::Ready
             && boot_cpu_local_interrupt.enabled()
@@ -336,16 +337,16 @@ impl SchedClock {
         /*
          * SchedClockLocalInterruptContext:
          * Linux sched_clock_init() wraps generic_sched_clock_init() with
-         * local_irq_save()/local_irq_restore().
+         * local_irq_disable()/local_irq_enable().
          */
-        boot_cpu_local_interrupt.save_and_disable()?;
+        boot_cpu_local_interrupt.disable()?;
         self.running_key_enabled = true;
         self.reader_ready = true;
         self.timer_ready = true;
         self.timer_period = SCHED_CLOCK_TIMER_PERIOD;
-        self.setup_local_irq_save_restore_used = true;
+        self.setup_local_irq_disable_enable_used = true;
         self.setup_local_irq_guard_bound_to_boot_cpu = true;
-        boot_cpu_local_interrupt.restore()?;
+        boot_cpu_local_interrupt.enable()?;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -448,6 +449,223 @@ impl DelayLoop {
             }
             core::hint::spin_loop();
         }
+    }
+}
+
+pub struct IrqOpenPrepareTrimmedPaths {
+    lifecycle: Lifecycle,
+    panic_later_clear: bool,
+    lockdep_init_trimmed_noop: bool,
+    lockdep_trimmed_because_config_debug_lock_alloc_disabled: bool,
+    locking_selftest_trimmed_noop: bool,
+    locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled: bool,
+    initrd_bounds_trimmed: bool,
+    initrd_trimmed_because_config_blk_dev_initrd_disabled: bool,
+    page_allocator_per_cpu_pagesets_deferred: bool,
+    page_allocator_deferred_bound: bool,
+    numa_policy_trimmed_noop: bool,
+    numa_policy_trimmed_because_config_numa_disabled: bool,
+    acpi_early_trimmed_noop: bool,
+    acpi_early_trimmed_because_config_acpi_disabled: bool,
+    late_time_init_hook_trimmed_noop: bool,
+    late_time_init_hook_unset_on_riscv: bool,
+    arch_cpu_finalize_init_trimmed_noop: bool,
+    arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled: bool,
+    position_preserved: bool,
+}
+
+impl IrqOpenPrepareTrimmedPaths {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            panic_later_clear: false,
+            lockdep_init_trimmed_noop: false,
+            lockdep_trimmed_because_config_debug_lock_alloc_disabled: false,
+            locking_selftest_trimmed_noop: false,
+            locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled: false,
+            initrd_bounds_trimmed: false,
+            initrd_trimmed_because_config_blk_dev_initrd_disabled: false,
+            page_allocator_per_cpu_pagesets_deferred: false,
+            page_allocator_deferred_bound: false,
+            numa_policy_trimmed_noop: false,
+            numa_policy_trimmed_because_config_numa_disabled: false,
+            acpi_early_trimmed_noop: false,
+            acpi_early_trimmed_because_config_acpi_disabled: false,
+            late_time_init_hook_trimmed_noop: false,
+            late_time_init_hook_unset_on_riscv: false,
+            arch_cpu_finalize_init_trimmed_noop: false,
+            arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled: false,
+            position_preserved: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn panic_later_clear(&self) -> bool {
+        self.panic_later_clear
+    }
+
+    pub const fn lockdep_init_trimmed_noop(&self) -> bool {
+        self.lockdep_init_trimmed_noop
+    }
+
+    pub const fn lockdep_trimmed_because_config_debug_lock_alloc_disabled(&self) -> bool {
+        self.lockdep_trimmed_because_config_debug_lock_alloc_disabled
+    }
+
+    pub const fn locking_selftest_trimmed_noop(&self) -> bool {
+        self.locking_selftest_trimmed_noop
+    }
+
+    pub const fn locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled(
+        &self,
+    ) -> bool {
+        self.locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled
+    }
+
+    pub const fn initrd_bounds_trimmed(&self) -> bool {
+        self.initrd_bounds_trimmed
+    }
+
+    pub const fn initrd_trimmed_because_config_blk_dev_initrd_disabled(&self) -> bool {
+        self.initrd_trimmed_because_config_blk_dev_initrd_disabled
+    }
+
+    pub const fn page_allocator_per_cpu_pagesets_deferred(&self) -> bool {
+        self.page_allocator_per_cpu_pagesets_deferred
+    }
+
+    pub const fn page_allocator_deferred_bound(&self) -> bool {
+        self.page_allocator_deferred_bound
+    }
+
+    pub const fn numa_policy_trimmed_noop(&self) -> bool {
+        self.numa_policy_trimmed_noop
+    }
+
+    pub const fn numa_policy_trimmed_because_config_numa_disabled(&self) -> bool {
+        self.numa_policy_trimmed_because_config_numa_disabled
+    }
+
+    pub const fn acpi_early_trimmed_noop(&self) -> bool {
+        self.acpi_early_trimmed_noop
+    }
+
+    pub const fn acpi_early_trimmed_because_config_acpi_disabled(&self) -> bool {
+        self.acpi_early_trimmed_because_config_acpi_disabled
+    }
+
+    pub const fn late_time_init_hook_trimmed_noop(&self) -> bool {
+        self.late_time_init_hook_trimmed_noop
+    }
+
+    pub const fn late_time_init_hook_unset_on_riscv(&self) -> bool {
+        self.late_time_init_hook_unset_on_riscv
+    }
+
+    pub const fn arch_cpu_finalize_init_trimmed_noop(&self) -> bool {
+        self.arch_cpu_finalize_init_trimmed_noop
+    }
+
+    pub const fn arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled(
+        &self,
+    ) -> bool {
+        self.arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled
+    }
+
+    pub const fn position_preserved(&self) -> bool {
+        self.position_preserved
+    }
+
+    pub fn preset(
+        &mut self,
+        config: &Config,
+        console: &Console,
+        page_allocator: &PageAllocator,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || config.state() != State::Online
+            || config.debug_lock_alloc_enabled()
+            || config.debug_locking_api_selftests_enabled()
+            || config.blk_dev_initrd_enabled()
+            || config.numa_enabled()
+            || config.acpi_enabled()
+            || config.riscv_late_time_init_hook_set()
+            || config.arch_has_cpu_finalize_init()
+            || console.state() != State::Prepared
+            || page_allocator.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.panic_later_clear = true;
+        crate::trace::checkpoint(Checkpoint::PanicLaterClearCheckpoint);
+        self.lockdep_init_trimmed_noop = true;
+        self.lockdep_trimmed_because_config_debug_lock_alloc_disabled = true;
+        crate::trace::checkpoint(Checkpoint::LockdepInitNoop);
+        self.locking_selftest_trimmed_noop = true;
+        self.locking_selftest_trimmed_because_config_debug_locking_api_selftests_disabled = true;
+        crate::trace::checkpoint(Checkpoint::LockingSelftestNoop);
+        self.initrd_bounds_trimmed = true;
+        self.initrd_trimmed_because_config_blk_dev_initrd_disabled = true;
+        crate::trace::checkpoint(Checkpoint::InitrdBoundsTrimmed);
+        self.page_allocator_per_cpu_pagesets_deferred = true;
+        self.page_allocator_deferred_bound = true;
+        crate::trace::checkpoint(Checkpoint::PageAllocatorPerCpuPagesetsDeferred);
+        self.numa_policy_trimmed_noop = true;
+        self.numa_policy_trimmed_because_config_numa_disabled = true;
+        crate::trace::checkpoint(Checkpoint::NumaPolicyNoop);
+        self.acpi_early_trimmed_noop = true;
+        self.acpi_early_trimmed_because_config_acpi_disabled = true;
+        crate::trace::checkpoint(Checkpoint::AcpiEarlyNoop);
+        self.late_time_init_hook_trimmed_noop = true;
+        self.late_time_init_hook_unset_on_riscv = true;
+        crate::trace::checkpoint(Checkpoint::LateTimeInitNoop);
+        self.position_preserved = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::IrqOpenPrepareTrimmedPathsPrepared,
+        )
+    }
+
+    pub fn setup(
+        &mut self,
+        config: &Config,
+        sched_clock: &SchedClock,
+        delay_loop: &DelayLoop,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || config.state() != State::Online
+            || config.arch_has_cpu_finalize_init()
+            || sched_clock.state() != State::Ready
+            || delay_loop.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.arch_cpu_finalize_init_trimmed_noop = true;
+        self.arch_cpu_finalize_trimmed_because_config_arch_has_cpu_finalize_init_disabled = true;
+        crate::trace::checkpoint(Checkpoint::ArchCpuFinalizeNoop);
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::IrqOpenPrepareTrimmedPathsReady,
+        )
     }
 }
 

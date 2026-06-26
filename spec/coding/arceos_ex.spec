@@ -196,6 +196,7 @@ predicate arceos_ex_must_irq_open_prepare_run_after_local_irq_enable() -> bool;
 predicate arceos_ex_must_irq_open_prepare_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_irq_open_prepare_keep_slub_ready_not_online() -> bool;
 predicate arceos_ex_must_irq_open_prepare_console_prepared_only() -> bool;
+predicate arceos_ex_must_irq_open_prepare_record_trimmed_paths_structurally() -> bool;
 predicate arceos_ex_must_irq_open_prepare_sched_clock_record_local_irq_guard() -> bool;
 predicate arceos_ex_must_irq_open_prepare_expose_sched_clock_and_delay_smoke_actions() -> bool;
 predicate arceos_ex_must_process_prepare_model_path_under_interrupt_phase() -> bool;
@@ -1884,10 +1885,23 @@ type ArceosExIrqOpenPrepareCodingMust {
         arceos_ex_must_irq_open_prepare_console_prepared_only();
 
         /*
+         * Trimmed/deferred paths:
+         *
+         * The panic_later checkpoint, lockdep_init(), locking_selftest(),
+         * initrd bounds check, setup_per_cpu_pageset(), numa_policy_init(),
+         * acpi_early_init(), late_time_init hook and arch_cpu_finalize_init()
+         * positions must be represented by a structured
+         * IrqOpenPrepareTrimmedPaths-style object. setup_per_cpu_pageset()
+         * remains an explicit PageAllocator deferred fact; the others record
+         * their current config/no-op reasons.
+         */
+        arceos_ex_must_irq_open_prepare_record_trimmed_paths_structurally();
+
+        /*
          * Sched clock local IRQ guard:
          *
-         * sched_clock_init() must record the local_irq_save()/local_irq_restore()
-         * window around generic_sched_clock_init() through the existing
+         * sched_clock_init() must record the local_irq_disable()/
+         * local_irq_enable() window around generic_sched_clock_init() through the existing
          * BootCpuLocalInterrupt LocalInterruptControl. The surrounding phase
          * context has local interrupts enabled, so this temporary guard must
          * remain an explicit protocol fact.
