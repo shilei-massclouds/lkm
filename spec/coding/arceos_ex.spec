@@ -155,6 +155,9 @@ predicate arceos_ex_must_local_irq_enable_model_path_under_interrupt_phase() -> 
 predicate arceos_ex_must_local_irq_enable_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_local_irq_enable_be_separate_interrupt_subphase() -> bool;
 predicate arceos_ex_must_local_irq_enable_only_open_boot_cpu_local_gate() -> bool;
+predicate arceos_ex_must_local_irq_enable_clear_early_flag_before_enabling_sie() -> bool;
+predicate arceos_ex_must_local_irq_enable_have_no_within_context() -> bool;
+predicate arceos_ex_must_local_irq_enable_keep_runtime_gates_deferred() -> bool;
 predicate arceos_ex_must_irq_time_init_keep_task_and_smp_concurrency_closed() -> bool;
 predicate arceos_ex_must_irq_time_init_keep_runtime_services_deferred() -> bool;
 predicate arceos_ex_must_irq_time_init_expose_time_and_clockevent_smoke_actions() -> bool;
@@ -1145,6 +1148,35 @@ type ArceosExLocalIrqEnableCodingMust {
          * concurrency or SMP concurrency.
          */
         arceos_ex_must_local_irq_enable_only_open_boot_cpu_local_gate();
+
+        /*
+         * Linux ordering:
+         *
+         * start_kernel() clears early_boot_irqs_disabled before executing
+         * local_irq_enable(). The implementation must preserve that ordering
+         * so there is no window where SIE is open while the early flag still
+         * claims IRQs are disabled.
+         */
+        arceos_ex_must_local_irq_enable_clear_early_flag_before_enabling_sie();
+
+        /*
+         * Context:
+         *
+         * LocalIrqEnablePhase must not be wrapped in a within context. It is
+         * the standalone boundary that changes the boot CPU local interrupt
+         * context from disabled to enabled.
+         */
+        arceos_ex_must_local_irq_enable_have_no_within_context();
+
+        /*
+         * Deferred runtime gates:
+         *
+         * The ready check must keep the negative facts observable: root
+         * supervisor external input, PLIC UART source enable, full softirq
+         * execution, IPI runtime, workqueue workers, RCU GP threads, task
+         * concurrency and SMP concurrency remain closed or deferred.
+         */
+        arceos_ex_must_local_irq_enable_keep_runtime_gates_deferred();
     }
 }
 

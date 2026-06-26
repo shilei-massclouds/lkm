@@ -1635,9 +1635,18 @@ kthread、RCU GP kthread、IPI enable 和完整 softirq 执行路径仍不得提
 
 `LocalIrqEnablePhase` 已正式落到 `spec/model/interrupt/local-irq-enable/`，属于 `InterruptPhase` 的第二个子阶段。它必须接在
 `IrqTimeInitPhase.Ready` 之后运行，且只能执行 boot CPU 的 `local_irq_enable()` 边界：通过
-`InterruptStream.enable()` 打开 RISC-V `sstatus.SIE` 本地中断总入口，并把 `early_boot_irqs_disabled` 清为 false。
+`InterruptStream.enable()` 先把 `early_boot_irqs_disabled` 清为 false，再打开 RISC-V `sstatus.SIE` 本地中断总入口；该顺序必须匹配
+Linux `start_kernel()` 中 `early_boot_irqs_disabled = false; local_irq_enable();`，不得留下 SIE 已开但 early flag 仍为 true 的窗口。
 本阶段不得打开 PLIC UART source gate、root INTC supervisor external input gate、周期 tick、完整 softirq、IPI runtime、
 workqueue worker、RCU GP kthread、task concurrency 或 SMP concurrency。
+
+`LocalIrqEnablePhase` 不得包在 `within` 上下文中。它本身就是 boot CPU local interrupt context 从 disabled 切到 enabled
+的独立边界，因此不存在能覆盖整个 transition 的词法 local-interrupt context；`IrqOpenPreparePhase` 之后才进入
+`SingleTaskInterruptStreamContext`。
+
+阶段 ready check 必须保留上述负向事实的可观察性：root supervisor external input gate 仍 closed/deferred，PLIC UART
+source enable 仍 deferred，softirq execution 仍 closed，IPI runtime 仍 deferred，workqueue workers 和 RCU GP kthreads
+仍未运行，task/SMP concurrency 仍 closed。
 
 `RiscvTimerProvider.setup()` 可以提供两个最小 action：`read_time()` 和 `schedule_oneshot(delta, callback) -> Option<deadline>`。smoke 必须分开验收
 时间功能和时钟中断功能：前者确认 time source 可读且单调推进；后者注册一次性 clockevent callback，使用 SBI timer 在 deadline

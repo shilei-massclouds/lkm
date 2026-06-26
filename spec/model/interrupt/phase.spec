@@ -6,9 +6,11 @@
  * IrqOpenPreparePhase and ProcessPreparePhase. IrqTimeInitPhase keeps the
  * boot CPU interrupt gate closed inside SingleTaskContext.
  * LocalIrqEnablePhase then covers the local_irq_enable() boundary without an
- * outer phase context. IrqOpenPreparePhase and ProcessPreparePhase run in the
- * corresponding single-task interrupt-stream context before rest_init()
- * creates the first tasks.
+ * outer phase context: it is an independent operation whose transition itself
+ * changes the boot CPU local interrupt context from disabled to enabled.
+ * IrqOpenPreparePhase and ProcessPreparePhase run in the corresponding
+ * single-task interrupt-stream context before rest_init() creates the first
+ * tasks.
  */
 
 include "irq-time-init/main.spec";

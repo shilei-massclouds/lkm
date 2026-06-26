@@ -201,8 +201,13 @@ impl InterruptStream {
             );
         }
 
-        local_interrupt.enable()?;
+        self.early_boot_irqs_disabled = false;
+        if let Err(err) = local_interrupt.enable() {
+            self.early_boot_irqs_disabled = true;
+            return Err(err);
+        }
         if !local_interrupt.enabled() || !csr::supervisor_interrupts_enabled() {
+            self.early_boot_irqs_disabled = true;
             return failed_condition(
                 LifecycleEvent::Enable,
                 self.lifecycle.state(),
@@ -212,7 +217,6 @@ impl InterruptStream {
         }
 
         self.boot_cpu_local_interrupts_enabled = local_interrupt.enabled();
-        self.early_boot_irqs_disabled = false;
         self.lifecycle.transition(
             LifecycleEvent::Enable,
             State::Ready,

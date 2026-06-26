@@ -13,6 +13,11 @@
  * interrupt total gate (sstatus.SIE); individual source gates, periodic tick,
  * full softirq execution, IPI runtime, workqueue workers, RCU GP kthreads,
  * task concurrency and SMP concurrency remain closed or deferred.
+ *
+ * This phase deliberately has no outer `within` context. The operation itself
+ * is the boundary that changes the boot CPU local interrupt context from
+ * disabled to enabled, so no lexical context can truthfully hold for the whole
+ * transition.
  */
 
 object LocalIrqEnablePhase: PhaseObject {
@@ -27,10 +32,15 @@ object LocalIrqEnablePhase: PhaseObject {
                     IrqController.state == State::Ready;
                     RiscvIntc.state == State::Ready;
                     IrqDispatchTree.state == State::Ready;
+                    PlicIrqDomain.state == State::Ready;
+                    IrqHandlerRegistry.state == State::Ready;
                     Tick.state == State::Ready;
                     TimerWheel.state == State::Ready;
                     HrtimerCore.state == State::Ready;
                     Softirq.state == State::Ready;
+                    Workqueue.state == State::Prepared;
+                    RcuCore.state == State::Ready;
+                    TasksRcu.state == State::Prepared;
                     Timekeeper.state == State::Ready;
                     RiscvTimerProvider.state == State::Ready;
                     Randomness.state == State::Ready;
@@ -40,6 +50,9 @@ object LocalIrqEnablePhase: PhaseObject {
                     InterruptStream.state == State::Ready;
                     cpu_local_interrupts_disabled(BootCpuLocalInterrupt);
                     early_boot_irqs_disabled_true();
+                    irq_gate_closed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    plic_irq_domain_enable_deferred(PlicIrqDomain);
+                    irq_handler_registry_source_enable_deferred(IrqHandlerRegistry);
                 }
 
                 drives {
@@ -48,11 +61,23 @@ object LocalIrqEnablePhase: PhaseObject {
 
                 ensures {
                     local_irq_enable_phase_ready(LocalIrqEnablePhase);
+                    local_irq_enable_phase_has_no_within_context(LocalIrqEnablePhase);
+                    early_boot_irqs_disabled_cleared_before_local_irq_enable(LocalIrqEnablePhase);
                     interrupt_concurrency_open_for_boot_cpu();
                     boot_cpu_local_irq_enabled();
                     early_boot_irqs_disabled_false();
                     task_concurrency_closed();
                     smp_concurrency_closed();
+                    irq_gate_closed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+                    riscv_intc_external_input_enable_deferred(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
+                    plic_irq_domain_enable_deferred(PlicIrqDomain);
+                    irq_handler_registry_source_enable_deferred(IrqHandlerRegistry);
+                    softirq_execution_closed(Softirq);
+                    workqueue_workers_not_running(Workqueue);
+                    rcu_gp_threads_deferred(RcuCore);
+                    tasks_rcu_gp_threads_deferred(TasksRcu);
+                    sbi_ipi_enable_deferred(SbiIpi);
+                    smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
                     time_read_smoke_available(RiscvTimerProvider);
                     clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
                 }
@@ -70,12 +95,33 @@ object LocalIrqEnablePhase: PhaseObject {
             LocalIrqEnablePhase.state == State::Ready;
             IrqTimeInitPhase.state == State::Ready;
             InterruptStream.state == State::Online;
+            PlicIrqDomain.state == State::Ready;
+            IrqHandlerRegistry.state == State::Ready;
+            Softirq.state == State::Ready;
+            Workqueue.state == State::Prepared;
+            RcuCore.state == State::Ready;
+            TasksRcu.state == State::Prepared;
+            SbiIpi.state == State::Ready;
+            IpiMux.state == State::Ready;
+            SmpCallFunction.state == State::Ready;
             local_irq_enable_phase_ready(LocalIrqEnablePhase);
+            local_irq_enable_phase_has_no_within_context(LocalIrqEnablePhase);
+            early_boot_irqs_disabled_cleared_before_local_irq_enable(LocalIrqEnablePhase);
             interrupt_concurrency_open_for_boot_cpu();
             boot_cpu_local_irq_enabled();
             early_boot_irqs_disabled_false();
             task_concurrency_closed();
             smp_concurrency_closed();
+            irq_gate_closed(RiscvIntc, IrqGateRef::RootSupervisorExternalInput);
+            riscv_intc_external_input_enable_deferred(RiscvIntc, IrqGateRef::RootSupervisorExternalInput, InterruptCauseRef::SupervisorExternalIrq);
+            plic_irq_domain_enable_deferred(PlicIrqDomain);
+            irq_handler_registry_source_enable_deferred(IrqHandlerRegistry);
+            softirq_execution_closed(Softirq);
+            workqueue_workers_not_running(Workqueue);
+            rcu_gp_threads_deferred(RcuCore);
+            tasks_rcu_gp_threads_deferred(TasksRcu);
+            sbi_ipi_enable_deferred(SbiIpi);
+            smp_call_function_runtime_ipi_delivery_deferred(SmpCallFunction);
             time_read_smoke_available(RiscvTimerProvider);
             clockevent_callback_smoke_available(RiscvTimerProvider, IrqDispatchTree);
         }

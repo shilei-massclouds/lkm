@@ -68,16 +68,35 @@ fn local_irq_enable_phase_ready(ctx: &Context) -> bool {
         && ctx.riscv_timer_provider.state() == State::Ready
         && ctx.randomness.state() == State::Ready
         && ctx.sbi_ipi.state() == State::Ready
+        && ctx.sbi_ipi.enable_deferred()
         && ctx.ipi_mux.state() == State::Ready
+        && ctx.ipi_mux.secondary_enable_deferred()
         && ctx.smp_call_function.state() == State::Ready
+        && ctx.smp_call_function.runtime_ipi_delivery_deferred()
         && ctx.interrupt_stream.state() == State::Online
         && ctx.interrupt_stream.timer_handler_ready()
         && ctx.interrupt_stream.external_handler_ready()
+        && ctx
+            .interrupt_stream
+            .supervisor_external_input_gate_defined()
+        && ctx.interrupt_stream.supervisor_external_input_gate_closed()
+        && ctx
+            .interrupt_stream
+            .supervisor_external_input_enable_deferred()
         && ctx.interrupt_stream.boot_cpu_local_interrupts_enabled()
         && !ctx.interrupt_stream.early_boot_irqs_disabled()
         && ctx.boot_cpu_local_interrupt.state() == State::Ready
         && ctx.boot_cpu_local_interrupt.enabled()
         && csr::supervisor_interrupts_enabled()
+        && ctx.plic_irq_domain.state() == State::Ready
+        && ctx.plic_irq_domain.enable_deferred()
+        && ctx.irq_handler_registry.state() == State::Ready
+        && ctx.irq_handler_registry.source_enable_deferred()
+        && ctx.workqueue.state() == State::Prepared
+        && !ctx.workqueue.workers_running()
+        && ctx.rcu_core.state() == State::Ready
+        && ctx.rcu_core.gp_threads_deferred()
+        && ctx.rcu_core.tasks_rcu().gp_threads_deferred()
         && printk::is_ready()
         && (earlycon::is_online() || printk::console_handoff_complete())
 }
