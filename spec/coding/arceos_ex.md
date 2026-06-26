@@ -1484,6 +1484,22 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 `BootStackCanary.Ready`、`PerfEventCore.Ready`、`ProfileCore.Ready`、`SbiIpi.Ready`、`IpiMux.Ready` 和
 `SmpCallFunction.Ready`。
 
+`init_IRQ()` 的 RISC-V arch 边界必须显式保留。当前 `linux-6.12.37/default_config` 为
+`CONFIG_IRQ_STACKS=y`、`CONFIG_VMAP_STACK=y`、`CONFIG_SHADOW_CALL_STACK=n`，因此实现必须用
+`RiscvIrqStackSet` 或等价对象记录 `init_irq_stacks()` 为每个 possible CPU 建立 IRQ stack pointer 的事实，并记录
+`init_irq_scs()` 因 shadow call stack 未启用而 trimmed/no-op。真实 hardirq entry 的 `call_on_irq_stack()` 栈切换仍属于运行期
+中断入口语义，本阶段只能记录 deferred contract，不能声明完整 hardirq stack switching 已 Online。
+
+`timekeeping_init()` 的锁协议不能被外层 boot-exclusive context 吞掉。实现必须同时记录 `timekeeper_lock` 的
+`raw_spin_lock_irqsave()`/`raw_spin_unlock_irqrestore()` 事实和 `tk_core.seq` 的 `write_seqcount_begin/end` writer 事实；
+这两类事实都应进入 `Timekeeper.Ready` 或相邻 ready check。reader retry、NTP 运行期更新和完整 clocksource watchdog
+仍按后续运行期语义处理。
+
+`rcu_init_nohz()` 和 `kfence_init()` 是本阶段 Linux 调用序列中的真实调用点。当前配置下 `CONFIG_RCU_NOCB_CPU=n` 使
+`rcu_init_nohz()` 走 `include/linux/rcupdate.h` 的 inline no-op，`CONFIG_KFENCE=n` 使 `kfence_init()` 走
+`include/linux/kfence.h` 的 inline no-op；实现必须通过 `IrqTimeTrimmedPaths` 这类结构化对象记录调用位置和裁剪依据，不能只依赖
+缺省未实现或 markdown 说明。
+
 目录、文件和对象命名必须跟阶段树一致：模型目录为 `spec/model/interrupt/irq-time-init/`，实现文件位于
 `impl/arceos_ex/src/phases/interrupt/irq_time_init.rs` 等 `interrupt` 阶段子树下；旧
 `phases/boot/irq_time_init.rs` 路径不得再作为本阶段实现位置。

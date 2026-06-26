@@ -46,10 +46,10 @@ use crate::objects::{
     irq_open::{Console, DelayLoop, SchedClock},
     irq_time::{
         BootStackCanary, HrtimerCore, IpiMux, IrqChipInitTable, IrqController, IrqDispatchTree,
-        IrqHandlerRegistry, PerfEventCore, Plic, PlicDriver, PlicIrqDomain, ProfileCore, RiscvIntc,
-        RiscvTimerProvider, SbiIpi, Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe,
-        SmpCallFunction, SrcuCore, Tick, Timekeeper, TimerWheel, TtyXmitFifoProbe,
-        UartExternalIrqEnable, UartInterruptChainProbe,
+        IrqHandlerRegistry, IrqTimeTrimmedPaths, PerfEventCore, Plic, PlicDriver, PlicIrqDomain,
+        ProfileCore, RiscvIntc, RiscvIrqStackSet, RiscvTimerProvider, SbiIpi,
+        Serial8250RxBatchLoopbackProbe, Serial8250RxLoopbackProbe, SmpCallFunction, SrcuCore, Tick,
+        Timekeeper, TimerWheel, TtyXmitFifoProbe, UartExternalIrqEnable, UartInterruptChainProbe,
     },
     kernel_cmdline::KernelCmdline,
     kernel_image::KernelImage,
@@ -187,6 +187,7 @@ pub struct Context {
 
     pub irq_controller: IrqController,
     pub riscv_intc: RiscvIntc,
+    pub riscv_irq_stack_set: RiscvIrqStackSet,
     pub irqchip_init_table: IrqChipInitTable,
     pub plic_driver: PlicDriver,
     pub irq_dispatch_tree: IrqDispatchTree,
@@ -213,6 +214,7 @@ pub struct Context {
     #[cfg(checkpoint_handler_uart_irq_chain)]
     pub tty_write_batch_runtime_tx_probe: TtyWriteBatchRuntimeTxProbe,
     pub tick: Tick,
+    pub irq_time_trimmed_paths: IrqTimeTrimmedPaths,
     pub timer_wheel: TimerWheel,
     pub srcu_core: SrcuCore,
     pub hrtimer_core: HrtimerCore,
@@ -380,6 +382,7 @@ impl Context {
             sched_init_trace_context_boundaries: SchedInitTraceContextBoundaries::new(),
             irq_controller: IrqController::new(),
             riscv_intc: RiscvIntc::new(),
+            riscv_irq_stack_set: RiscvIrqStackSet::new(),
             irqchip_init_table: IrqChipInitTable::new(),
             plic_driver: PlicDriver::new(),
             irq_dispatch_tree: IrqDispatchTree::new(),
@@ -406,6 +409,7 @@ impl Context {
             #[cfg(checkpoint_handler_uart_irq_chain)]
             tty_write_batch_runtime_tx_probe: TtyWriteBatchRuntimeTxProbe::new(),
             tick: Tick::new(),
+            irq_time_trimmed_paths: IrqTimeTrimmedPaths::new(),
             timer_wheel: TimerWheel::new(),
             srcu_core: SrcuCore::new(),
             hrtimer_core: HrtimerCore::new(),

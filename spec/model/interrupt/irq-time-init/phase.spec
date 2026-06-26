@@ -117,8 +117,9 @@ object TimekeeperSeqWriteSection: TimekeeperSeqWriteSectionType {
 
 context TimekeeperSeqWriteContext: Context {
     /*
-     * timekeeping_init() writes tk_core under the timekeeper seqcount writer
-     * protocol. Reader retry semantics remain a later runtime refinement.
+     * timekeeping_init() writes tk_core under raw_spin_lock_irqsave()
+     * on timekeeper_lock plus the tk_core seqcount writer protocol.
+     * Reader retry semantics remain a later runtime refinement.
      */
     guard {
         entered_by {
@@ -134,6 +135,28 @@ context TimekeeperSeqWriteContext: Context {
         Timekeeper;
         ClocksourceCore;
         JiffiesClocksource;
+    }
+}
+
+context RiscvIrqStackInitContext: Context {
+    /*
+     * RISC-V init_IRQ() initializes per-CPU IRQ stack pointers before
+     * irqchip_init() can install handle_arch_irq. The later hardirq entry
+     * stack switch contract remains deferred until runtime interrupt entry.
+     */
+    guard {
+        holds {
+            cpu_concurrency: single_cpu;
+            task_concurrency: single_task;
+            local_interrupts: disabled;
+            preemption: disabled;
+        }
+    }
+
+    obj_refs {
+        RiscvIrqStackSet;
+        CpuGroup;
+        VmallocAllocator;
     }
 }
 
@@ -717,6 +740,64 @@ predicate uart_interrupt_chain_probe_observes_plic_complete<T, P>(probe: T, plic
 predicate uart_interrupt_chain_probe_observes_plic_loop_exit<T, P>(probe: T, plic: P) -> bool;
 predicate uart_interrupt_chain_probe_observes_irq_cycle_closure<T, P, R>(probe: T, plic: P, registry: R) -> bool;
 predicate uart_interrupt_chain_probe_preserves_polling_console<T, U>(probe: T, uart: U) -> bool;
+
+/*
+ * RiscvIrqStackSet 表示 RISC-V init_IRQ() 中的 init_irq_scs() 与
+ * init_irq_stacks()。当前 .config 为 CONFIG_IRQ_STACKS=y、
+ * CONFIG_VMAP_STACK=y，因此必须记录每个 possible CPU 的 IRQ stack
+ * 指针集合已经建立；CONFIG_SHADOW_CALL_STACK 未启用，SCS 分支为
+ * trimmed/no-op。真正 hardirq entry 的 call_on_irq_stack() 切换留给
+ * 后续运行期中断入口语义。
+ */
+object RiscvIrqStackSet: InterruptObject {
+    initial_state: State::Base;
+    parent: IrqController;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    Config.state == State::Online;
+                    CpuGroup.state == State::Ready;
+                    VmallocAllocator.state == State::Ready;
+                    PageTableCaches.state == State::Ready;
+                    PageAllocator.state == State::Ready;
+                }
+
+                within RiscvIrqStackInitContext {
+                    ensures {
+                        riscv_irq_stack_init_context_used(RiscvIrqStackSet);
+                        riscv_irq_stack_config_enabled(RiscvIrqStackSet);
+                        riscv_irq_stack_vmap_stack_enabled(RiscvIrqStackSet);
+                        riscv_irq_stack_possible_cpu_stacks_ready(RiscvIrqStackSet, CpuGroup);
+                    }
+                }
+
+                ensures {
+                    riscv_irq_stack_set_ready(RiscvIrqStackSet);
+                    riscv_irq_stack_config_enabled(RiscvIrqStackSet);
+                    riscv_irq_stack_vmap_stack_enabled(RiscvIrqStackSet);
+                    riscv_irq_stack_possible_cpu_stacks_ready(RiscvIrqStackSet, CpuGroup);
+                    riscv_irq_stack_runtime_switch_deferred(RiscvIrqStackSet);
+                    riscv_irq_scs_trimmed_noop(RiscvIrqStackSet);
+                    riscv_irq_scs_trimmed_because_shadow_call_stack_disabled(RiscvIrqStackSet);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            riscv_irq_stack_set_ready(RiscvIrqStackSet);
+            riscv_irq_stack_config_enabled(RiscvIrqStackSet);
+            riscv_irq_stack_vmap_stack_enabled(RiscvIrqStackSet);
+            riscv_irq_stack_possible_cpu_stacks_ready(RiscvIrqStackSet, CpuGroup);
+            riscv_irq_stack_runtime_switch_deferred(RiscvIrqStackSet);
+            riscv_irq_scs_trimmed_noop(RiscvIrqStackSet);
+            riscv_irq_scs_trimmed_because_shadow_call_stack_disabled(RiscvIrqStackSet);
+        }
+    }
+}
 
 /*
  * IrqHandlerRegistry 是 IRQ core 侧的 handler/action registry。它记录
@@ -1345,6 +1426,71 @@ object TickBroadcast: KernelObject {
 }
 
 /*
+ * IrqTimeTrimmedPaths 保留 start_kernel() 中落在本子阶段、但当前
+ * linux-6.12.37/default_config 下为空或不可达的调用点。Preset 对应
+ * tick_init() 后的 rcu_init_nohz()；Setup 对应 random_init() 后的
+ * kfence_init()。二者都必须结构化记录，不能只留在 markdown 表格。
+ */
+object IrqTimeTrimmedPaths: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                depends_on {
+                    Config.state == State::Online;
+                    RcuCore.state == State::Ready;
+                    Tick.state == State::Prepared;
+                }
+
+                ensures {
+                    irq_time_trimmed_paths_prepared(IrqTimeTrimmedPaths);
+                    irq_time_rcu_init_nohz_trimmed_noop(IrqTimeTrimmedPaths);
+                    irq_time_rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled(IrqTimeTrimmedPaths);
+                    irq_time_rcu_nohz_position_preserved(IrqTimeTrimmedPaths);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        invariant {
+            irq_time_trimmed_paths_prepared(IrqTimeTrimmedPaths);
+            irq_time_rcu_init_nohz_trimmed_noop(IrqTimeTrimmedPaths);
+            irq_time_rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled(IrqTimeTrimmedPaths);
+            irq_time_rcu_nohz_position_preserved(IrqTimeTrimmedPaths);
+        }
+
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    Config.state == State::Online;
+                    Randomness.state == State::Ready;
+                }
+
+                ensures {
+                    irq_time_kfence_init_trimmed_noop(IrqTimeTrimmedPaths);
+                    irq_time_kfence_trimmed_because_config_kfence_disabled(IrqTimeTrimmedPaths);
+                    irq_time_kfence_position_preserved(IrqTimeTrimmedPaths);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            irq_time_trimmed_paths_prepared(IrqTimeTrimmedPaths);
+            irq_time_rcu_init_nohz_trimmed_noop(IrqTimeTrimmedPaths);
+            irq_time_rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled(IrqTimeTrimmedPaths);
+            irq_time_rcu_nohz_position_preserved(IrqTimeTrimmedPaths);
+            irq_time_kfence_init_trimmed_noop(IrqTimeTrimmedPaths);
+            irq_time_kfence_trimmed_because_config_kfence_disabled(IrqTimeTrimmedPaths);
+            irq_time_kfence_position_preserved(IrqTimeTrimmedPaths);
+        }
+    }
+}
+
+/*
  * TimerWheel 表示 init_timers() 建立的低精度 timer wheel 基础。
  */
 object TimerWheel: KernelObject {
@@ -1515,6 +1661,8 @@ object Timekeeper: KernelObject {
                         timekeeper_tk_core_seqcount_ready(Timekeeper);
                         timekeeper_tk_core_write_seqcount_used(Timekeeper);
                         timekeeper_lock_ready(Timekeeper);
+                        timekeeper_raw_spinlock_irqsave_used(Timekeeper);
+                        timekeeper_irqsave_flags_restored(Timekeeper);
                         timekeeper_shadow_timekeeper_ready(Timekeeper);
                     }
                 }
@@ -1527,6 +1675,8 @@ object Timekeeper: KernelObject {
                     timekeeper_tk_core_seqcount_ready(Timekeeper);
                     timekeeper_tk_core_write_seqcount_used(Timekeeper);
                     timekeeper_lock_ready(Timekeeper);
+                    timekeeper_raw_spinlock_irqsave_used(Timekeeper);
+                    timekeeper_irqsave_flags_restored(Timekeeper);
                     timekeeper_shadow_timekeeper_ready(Timekeeper);
                     current_clocksource_is_jiffies(Timekeeper, JiffiesClocksource);
                 }
@@ -1545,6 +1695,8 @@ object Timekeeper: KernelObject {
             timekeeper_tk_core_seqcount_ready(Timekeeper);
             timekeeper_tk_core_write_seqcount_used(Timekeeper);
             timekeeper_lock_ready(Timekeeper);
+            timekeeper_raw_spinlock_irqsave_used(Timekeeper);
+            timekeeper_irqsave_flags_restored(Timekeeper);
             timekeeper_shadow_timekeeper_ready(Timekeeper);
             current_clocksource_is_jiffies(Timekeeper, JiffiesClocksource);
         }
@@ -2067,6 +2219,7 @@ object IrqTimeInitPhase: PhaseObject {
 
                 drives {
                     IrqController.Transition::Setup;
+                    RiscvIrqStackSet.Transition::Setup;
                     RiscvIntc.Transition::Setup;
                     IrqChipInitTable.Transition::Preset;
                     PlicDriver.Transition::Preset;
@@ -2075,20 +2228,22 @@ object IrqTimeInitPhase: PhaseObject {
                     PlicIrqDomain.Transition::Setup;
                     IrqHandlerRegistry.Transition::Setup;
                     IrqDispatchTree.Transition::Setup;
+                    SbiIpi.Transition::Setup;
+                    IpiMux.Transition::Setup;
                     Tick.Transition::Preset;
+                    IrqTimeTrimmedPaths.Transition::Preset;
                     TimerWheel.Transition::Setup;
                     SrcuCore.Transition::Setup;
                     HrtimerCore.Transition::Setup;
+                    Softirq.Transition::Setup;
                     Timekeeper.Transition::Setup;
                     RiscvTimerProvider.Transition::Setup;
                     Tick.Transition::Setup;
-                    Softirq.Transition::Setup;
                     Randomness.Transition::Setup;
+                    IrqTimeTrimmedPaths.Transition::Setup;
                     BootStackCanary.Transition::Setup;
                     PerfEventCore.Transition::Setup;
                     ProfileCore.Transition::Setup;
-                    SbiIpi.Transition::Setup;
-                    IpiMux.Transition::Setup;
                     SmpCallFunction.Transition::Setup;
                 }
 
@@ -2107,6 +2262,7 @@ object IrqTimeInitPhase: PhaseObject {
                     "perf_event_init() 的 event cache 分配、硬件 breakpoint 细节和运行期 PMU event 生命周期暂缓；当前只要求 PMU registry、pmus_srcu 和 CPU context locks 基础。";
                     "profile_init() 的 profile buffer 分配和 proc export 暂缓；当前默认无 profile= 参数，只记录裁剪边界。";
                     "late_time_init hook 不在本阶段执行；当前 RISC-V 路径无 hook。";
+                    "RISC-V hardirq entry 的 call_on_irq_stack() 实际切换暂缓；当前只记录 init_IRQ() 中 per-CPU IRQ stack pointer 初始化和 SCS 裁剪事实。";
                     "RiscvTimerProvider.enable() 暂缓：正式周期 tick 服务属于中断打开后的运行期推进。";
                     "更完整 UART RX、ordinary TTY runtime/FIFO 策略和复杂并发策略暂缓；当前 IRQ-time/initcall 路径已建立 root INTC -> PLIC chained handler -> irqdomain -> action 的 dispatch contract，并在 InitcallPhase 后续边界由 Serial8250Console.Enable/Serial8250ConsoleIrqTxProbe 完成 interrupt-driven TX 首轮。";
                 }
@@ -2119,6 +2275,7 @@ object IrqTimeInitPhase: PhaseObject {
             irq_time_init_ready(IrqTimeInitPhase);
             IrqController.state == State::Ready;
             RiscvIntc.state == State::Ready;
+            RiscvIrqStackSet.state == State::Ready;
             IrqDispatchTree.state == State::Ready;
             IrqChipInitTable.state == State::Ready;
             PlicDriver.state == State::Prepared;
@@ -2127,6 +2284,7 @@ object IrqTimeInitPhase: PhaseObject {
             IrqHandlerRegistry.state == State::Ready;
             Tick.state == State::Ready;
             TickBroadcast.state == State::Ready;
+            IrqTimeTrimmedPaths.state == State::Ready;
             TimerWheel.state == State::Ready;
             SrcuCore.state == State::Ready;
             HrtimerCore.state == State::Ready;

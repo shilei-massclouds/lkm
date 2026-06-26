@@ -14,6 +14,7 @@ use super::{
     ioremap::Ioremap,
     mm_core::{PageAllocator, PageMetadataMap, PageTableCaches, SlubSubsystem, VmallocAllocator},
     per_cpu_storage::PerCpuStorage,
+    randomness::Randomness,
     rcu::RcuCore,
     sbi::Sbi,
     softirq::Softirq,
@@ -299,6 +300,106 @@ impl IrqController {
             State::Base,
             State::Ready,
             Checkpoint::IrqControllerReady,
+        )
+    }
+}
+
+pub struct RiscvIrqStackSet {
+    lifecycle: Lifecycle,
+    irq_stacks_enabled: bool,
+    vmap_stack_enabled: bool,
+    possible_cpu_stacks_ready: bool,
+    runtime_switch_deferred: bool,
+    scs_trimmed_noop: bool,
+    scs_trimmed_because_shadow_call_stack_disabled: bool,
+    possible_cpu_count: usize,
+}
+
+impl RiscvIrqStackSet {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            irq_stacks_enabled: false,
+            vmap_stack_enabled: false,
+            possible_cpu_stacks_ready: false,
+            runtime_switch_deferred: false,
+            scs_trimmed_noop: false,
+            scs_trimmed_because_shadow_call_stack_disabled: false,
+            possible_cpu_count: 0,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn irq_stacks_enabled(&self) -> bool {
+        self.irq_stacks_enabled
+    }
+
+    pub const fn vmap_stack_enabled(&self) -> bool {
+        self.vmap_stack_enabled
+    }
+
+    pub const fn possible_cpu_stacks_ready(&self) -> bool {
+        self.possible_cpu_stacks_ready
+    }
+
+    pub const fn runtime_switch_deferred(&self) -> bool {
+        self.runtime_switch_deferred
+    }
+
+    pub const fn scs_trimmed_noop(&self) -> bool {
+        self.scs_trimmed_noop
+    }
+
+    pub const fn scs_trimmed_because_shadow_call_stack_disabled(&self) -> bool {
+        self.scs_trimmed_because_shadow_call_stack_disabled
+    }
+
+    pub const fn possible_cpu_count(&self) -> usize {
+        self.possible_cpu_count
+    }
+
+    pub fn setup(
+        &mut self,
+        config: &Config,
+        cpu_group: &CpuGroup,
+        vmalloc_allocator: &VmallocAllocator,
+        page_table_caches: &PageTableCaches,
+        page_allocator: &PageAllocator,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || config.state() != State::Online
+            || !config.irq_stacks_enabled()
+            || !config.vmap_stack_enabled()
+            || config.shadow_call_stack_enabled()
+            || cpu_group.state() != State::Ready
+            || cpu_group.possible_cpu_count() == 0
+            || vmalloc_allocator.state() != State::Ready
+            || page_table_caches.state() != State::Ready
+            || page_allocator.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.irq_stacks_enabled = true;
+        self.vmap_stack_enabled = true;
+        self.possible_cpu_stacks_ready = true;
+        self.runtime_switch_deferred = true;
+        self.scs_trimmed_noop = true;
+        self.scs_trimmed_because_shadow_call_stack_disabled = true;
+        self.possible_cpu_count = cpu_group.possible_cpu_count();
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::RiscvIrqStackSetReady,
         )
     }
 }
@@ -1421,6 +1522,111 @@ impl TickBroadcast {
     }
 }
 
+pub struct IrqTimeTrimmedPaths {
+    lifecycle: Lifecycle,
+    rcu_init_nohz_trimmed_noop: bool,
+    rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled: bool,
+    rcu_nohz_position_preserved: bool,
+    kfence_init_trimmed_noop: bool,
+    kfence_trimmed_because_config_kfence_disabled: bool,
+    kfence_position_preserved: bool,
+}
+
+impl IrqTimeTrimmedPaths {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            rcu_init_nohz_trimmed_noop: false,
+            rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled: false,
+            rcu_nohz_position_preserved: false,
+            kfence_init_trimmed_noop: false,
+            kfence_trimmed_because_config_kfence_disabled: false,
+            kfence_position_preserved: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn rcu_init_nohz_trimmed_noop(&self) -> bool {
+        self.rcu_init_nohz_trimmed_noop
+    }
+
+    pub const fn rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled(&self) -> bool {
+        self.rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled
+    }
+
+    pub const fn rcu_nohz_position_preserved(&self) -> bool {
+        self.rcu_nohz_position_preserved
+    }
+
+    pub const fn kfence_init_trimmed_noop(&self) -> bool {
+        self.kfence_init_trimmed_noop
+    }
+
+    pub const fn kfence_trimmed_because_config_kfence_disabled(&self) -> bool {
+        self.kfence_trimmed_because_config_kfence_disabled
+    }
+
+    pub const fn kfence_position_preserved(&self) -> bool {
+        self.kfence_position_preserved
+    }
+
+    pub fn preset(&mut self, config: &Config, rcu_core: &RcuCore, tick: &Tick) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || config.state() != State::Online
+            || config.rcu_nocb_cpu_enabled()
+            || rcu_core.state() != State::Ready
+            || tick.state() != State::Prepared
+        {
+            return failed_condition(
+                LifecycleEvent::Preset,
+                self.lifecycle.state(),
+                State::Base,
+                State::Prepared,
+            );
+        }
+
+        self.rcu_init_nohz_trimmed_noop = true;
+        self.rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled = true;
+        self.rcu_nohz_position_preserved = true;
+        crate::trace::checkpoint(Checkpoint::RcuInitNohzTrimmedNoop);
+        self.lifecycle.transition(
+            LifecycleEvent::Preset,
+            State::Base,
+            State::Prepared,
+            Checkpoint::IrqTimeTrimmedPathsPrepared,
+        )
+    }
+
+    pub fn setup(&mut self, config: &Config, randomness: &Randomness) -> EventResult {
+        if self.lifecycle.state() != State::Prepared
+            || config.state() != State::Online
+            || config.kfence_enabled()
+            || randomness.state() != State::Ready
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Prepared,
+                State::Ready,
+            );
+        }
+
+        self.kfence_init_trimmed_noop = true;
+        self.kfence_trimmed_because_config_kfence_disabled = true;
+        self.kfence_position_preserved = true;
+        crate::trace::checkpoint(Checkpoint::KfenceInitTrimmedNoop);
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Prepared,
+            State::Ready,
+            Checkpoint::IrqTimeTrimmedPathsReady,
+        )
+    }
+}
+
 pub struct TimerWheel {
     lifecycle: Lifecycle,
     cpu_timer_bases_ready: bool,
@@ -1674,6 +1880,8 @@ pub struct Timekeeper {
     tk_core_seqcount_ready: bool,
     tk_core_write_seqcount_used: bool,
     timekeeper_lock_ready: bool,
+    raw_spinlock_irqsave_used: bool,
+    irqsave_flags_restored: bool,
     shadow_timekeeper_ready: bool,
 }
 
@@ -1689,6 +1897,8 @@ impl Timekeeper {
             tk_core_seqcount_ready: false,
             tk_core_write_seqcount_used: false,
             timekeeper_lock_ready: false,
+            raw_spinlock_irqsave_used: false,
+            irqsave_flags_restored: false,
             shadow_timekeeper_ready: false,
         }
     }
@@ -1729,6 +1939,14 @@ impl Timekeeper {
         self.timekeeper_lock_ready
     }
 
+    pub const fn raw_spinlock_irqsave_used(&self) -> bool {
+        self.raw_spinlock_irqsave_used
+    }
+
+    pub const fn irqsave_flags_restored(&self) -> bool {
+        self.irqsave_flags_restored
+    }
+
     pub const fn shadow_timekeeper_ready(&self) -> bool {
         self.shadow_timekeeper_ready
     }
@@ -1754,6 +1972,8 @@ impl Timekeeper {
         self.tk_core_seqcount_ready = true;
         self.tk_core_write_seqcount_used = true;
         self.timekeeper_lock_ready = true;
+        self.raw_spinlock_irqsave_used = true;
+        self.irqsave_flags_restored = true;
         self.shadow_timekeeper_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,

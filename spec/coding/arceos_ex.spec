@@ -148,6 +148,9 @@ predicate arceos_ex_must_scheduler_action_checkpoints_cover_pick_switch_and_sche
 predicate arceos_ex_must_irq_time_init_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_time_init_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_time_init_keep_local_irq_closed() -> bool;
+predicate arceos_ex_must_irq_time_init_record_riscv_irq_stack_setup() -> bool;
+predicate arceos_ex_must_irq_time_init_record_timekeeper_irqsave_seqwrite() -> bool;
+predicate arceos_ex_must_irq_time_init_classify_rcu_nohz_and_kfence_by_config() -> bool;
 predicate arceos_ex_must_local_irq_enable_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_local_irq_enable_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_local_irq_enable_be_separate_interrupt_subphase() -> bool;
@@ -1430,6 +1433,42 @@ type ArceosExIrqTimeInitCodingMust {
          * body can remain under the global exclusive boot context.
          */
         arceos_ex_must_irq_time_init_keep_local_irq_closed();
+
+        /*
+         * RISC-V IRQ stack/SCS setup:
+         *
+         * init_IRQ() runs init_irq_scs() and init_irq_stacks() before
+         * irqchip_init(). With the current config CONFIG_IRQ_STACKS=y and
+         * CONFIG_VMAP_STACK=y, the implementation must expose an
+         * RiscvIrqStackSet object/facts for per-CPU IRQ stack pointer setup.
+         * CONFIG_SHADOW_CALL_STACK is disabled, so IRQ SCS allocation must be
+         * recorded as a trimmed/no-op path. Runtime call_on_irq_stack() entry
+         * switching remains deferred and must not be claimed Online here.
+         */
+        arceos_ex_must_irq_time_init_record_riscv_irq_stack_setup();
+
+        /*
+         * Timekeeper lock protocol:
+         *
+         * timekeeping_init() writes tk_core under raw_spin_lock_irqsave()
+         * on timekeeper_lock and write_seqcount_begin/end on tk_core.seq.
+         * The implementation must keep both the irqsave/raw-spinlock fact
+         * and the seqcount-writer fact observable instead of relying only on
+         * the enclosing boot-exclusive context.
+         */
+        arceos_ex_must_irq_time_init_record_timekeeper_irqsave_seqwrite();
+
+        /*
+         * Config-trimmed calls:
+         *
+         * rcu_init_nohz() and kfence_init() are real call points inside the
+         * IrqTimeInitPhase Linux range. For the current config,
+         * CONFIG_RCU_NOCB_CPU=n makes rcu_init_nohz() an inline no-op and
+         * CONFIG_KFENCE=n makes kfence_init() an inline no-op. The
+         * implementation must record both positions as structured trimmed
+         * facts, not as comments or implicit absence.
+         */
+        arceos_ex_must_irq_time_init_classify_rcu_nohz_and_kfence_by_config();
 
         /*
          * PLIC driver split:

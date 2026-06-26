@@ -29,6 +29,13 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.per_cpu_storage,
         &ctx.cpu_group,
     )?;
+    ctx.riscv_irq_stack_set.setup(
+        &ctx.config,
+        &ctx.cpu_group,
+        &ctx.vmalloc_allocator,
+        &ctx.page_table_caches,
+        &ctx.page_allocator,
+    )?;
     ctx.riscv_intc
         .setup(&ctx.device_tree, &ctx.irq_controller, &ctx.cpu_group)?;
     ctx.irqchip_init_table
@@ -61,13 +68,20 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.plic_irq_domain,
         &ctx.irq_handler_registry,
     )?;
+    ctx.sbi_ipi
+        .setup(&ctx.sbi, &ctx.riscv_intc, &ctx.cpu_group)?;
+    ctx.ipi_mux
+        .setup(&ctx.sbi_ipi, &ctx.per_cpu_storage, &ctx.cpu_group)?;
     ctx.tick.preset(&ctx.cpu_group, &ctx.per_cpu_storage)?;
+    ctx.irq_time_trimmed_paths
+        .preset(&ctx.config, &ctx.rcu_core, &ctx.tick)?;
     ctx.timer_wheel
         .setup(&ctx.per_cpu_storage, &ctx.cpu_group, &mut ctx.softirq)?;
     ctx.srcu_core
         .setup(&ctx.rcu_core, &ctx.timer_wheel, &ctx.workqueue)?;
     ctx.hrtimer_core
         .setup(&ctx.per_cpu_storage, &ctx.cpu_group, &mut ctx.softirq)?;
+    ctx.softirq.setup(&ctx.per_cpu_storage)?;
     ctx.timekeeper.setup(&ctx.tick, &ctx.static_branch)?;
     ctx.riscv_timer_provider.setup(
         &ctx.device_tree,
@@ -80,19 +94,16 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
     )?;
     ctx.tick
         .setup(&ctx.hrtimer_core, &ctx.riscv_timer_provider)?;
-    ctx.softirq.setup(&ctx.per_cpu_storage)?;
     let time_seed = crate::arch::riscv64::sbi::read_time();
     ctx.randomness
         .setup(&ctx.cpu_group, &ctx.timekeeper, time_seed)?;
+    ctx.irq_time_trimmed_paths
+        .setup(&ctx.config, &ctx.randomness)?;
     ctx.boot_stack_canary
         .setup(&ctx.randomness, &ctx.init_stack)?;
     ctx.perf_event_core.setup(&ctx.srcu_core, &ctx.cpu_group)?;
     ctx.profile_core
         .setup(&ctx.randomness, &ctx.perf_event_core)?;
-    ctx.sbi_ipi
-        .setup(&ctx.sbi, &ctx.riscv_intc, &ctx.cpu_group)?;
-    ctx.ipi_mux
-        .setup(&ctx.sbi_ipi, &ctx.per_cpu_storage, &ctx.cpu_group)?;
     ctx.smp_call_function
         .setup(&ctx.ipi_mux, &ctx.cpu_group, &ctx.per_cpu_storage)
 }
@@ -142,6 +153,16 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.riscv_intc.boot_cpu_timer_irq_ready()
         && ctx.riscv_intc.boot_cpu_software_irq_ready()
         && ctx.riscv_intc.boot_cpu_external_irq_reserved()
+        && ctx.riscv_irq_stack_set.state() == State::Ready
+        && ctx.riscv_irq_stack_set.irq_stacks_enabled()
+        && ctx.riscv_irq_stack_set.vmap_stack_enabled()
+        && ctx.riscv_irq_stack_set.possible_cpu_stacks_ready()
+        && ctx.riscv_irq_stack_set.runtime_switch_deferred()
+        && ctx.riscv_irq_stack_set.scs_trimmed_noop()
+        && ctx
+            .riscv_irq_stack_set
+            .scs_trimmed_because_shadow_call_stack_disabled()
+        && ctx.riscv_irq_stack_set.possible_cpu_count() == ctx.cpu_group.possible_cpu_count()
         && ctx.irqchip_init_table.state() == State::Ready
         && ctx.irqchip_init_table.static_entries_ready()
         && ctx.irqchip_init_table.lds_section_ready()
@@ -231,6 +252,17 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.tick.broadcast().state() == State::Ready
         && ctx.tick.broadcast().masks_ready()
         && ctx.tick.broadcast().clockevent_ready()
+        && ctx.irq_time_trimmed_paths.state() == State::Ready
+        && ctx.irq_time_trimmed_paths.rcu_init_nohz_trimmed_noop()
+        && ctx
+            .irq_time_trimmed_paths
+            .rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled()
+        && ctx.irq_time_trimmed_paths.rcu_nohz_position_preserved()
+        && ctx.irq_time_trimmed_paths.kfence_init_trimmed_noop()
+        && ctx
+            .irq_time_trimmed_paths
+            .kfence_trimmed_because_config_kfence_disabled()
+        && ctx.irq_time_trimmed_paths.kfence_position_preserved()
         && ctx.timer_wheel.state() == State::Ready
         && ctx.timer_wheel.cpu_timer_bases_ready()
         && ctx.timer_wheel.base_locks_ready()
@@ -265,6 +297,8 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.timekeeper.tk_core_seqcount_ready()
         && ctx.timekeeper.tk_core_write_seqcount_used()
         && ctx.timekeeper.timekeeper_lock_ready()
+        && ctx.timekeeper.raw_spinlock_irqsave_used()
+        && ctx.timekeeper.irqsave_flags_restored()
         && ctx.timekeeper.shadow_timekeeper_ready()
         && ctx.riscv_timer_provider.state() == State::Ready
         && ctx.riscv_timer_provider.timebase_hz() != 0

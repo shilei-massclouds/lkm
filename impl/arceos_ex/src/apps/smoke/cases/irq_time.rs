@@ -30,6 +30,7 @@ pub fn run() -> SmokeResult {
 
     if ctx.irq_controller.state() != State::Ready
         || ctx.riscv_intc.state() != State::Ready
+        || ctx.riscv_irq_stack_set.state() != State::Ready
         || ctx.irqchip_init_table.state() != State::Ready
         || ctx.plic_driver.state() != State::Prepared
         || ctx.irq_dispatch_tree.state() != State::Ready
@@ -37,6 +38,7 @@ pub fn run() -> SmokeResult {
         || ctx.plic_irq_domain.state() != State::Ready
         || ctx.irq_handler_registry.state() != State::Ready
         || ctx.tick.state() != State::Ready
+        || ctx.irq_time_trimmed_paths.state() != State::Ready
         || ctx.timer_wheel.state() != State::Ready
         || ctx.hrtimer_core.state() != State::Ready
         || ctx.timekeeper.state() != State::Ready
@@ -48,6 +50,32 @@ pub fn run() -> SmokeResult {
         || ctx.smp_call_function.state() != State::Ready
     {
         printk::write_str("irq time objects are not ready\n");
+        return SmokeResult::Failed;
+    }
+
+    if !ctx.riscv_irq_stack_set.irq_stacks_enabled()
+        || !ctx.riscv_irq_stack_set.vmap_stack_enabled()
+        || !ctx.riscv_irq_stack_set.possible_cpu_stacks_ready()
+        || !ctx.riscv_irq_stack_set.runtime_switch_deferred()
+        || !ctx.riscv_irq_stack_set.scs_trimmed_noop()
+        || !ctx
+            .riscv_irq_stack_set
+            .scs_trimmed_because_shadow_call_stack_disabled()
+        || ctx.riscv_irq_stack_set.possible_cpu_count() != ctx.cpu_group.possible_cpu_count()
+        || !ctx.irq_time_trimmed_paths.rcu_init_nohz_trimmed_noop()
+        || !ctx
+            .irq_time_trimmed_paths
+            .rcu_nohz_trimmed_because_config_rcu_nocb_cpu_disabled()
+        || !ctx.irq_time_trimmed_paths.rcu_nohz_position_preserved()
+        || !ctx.irq_time_trimmed_paths.kfence_init_trimmed_noop()
+        || !ctx
+            .irq_time_trimmed_paths
+            .kfence_trimmed_because_config_kfence_disabled()
+        || !ctx.irq_time_trimmed_paths.kfence_position_preserved()
+        || !ctx.timekeeper.raw_spinlock_irqsave_used()
+        || !ctx.timekeeper.irqsave_flags_restored()
+    {
+        printk::write_str("irq time arch stack or trimmed path facts invalid\n");
         return SmokeResult::Failed;
     }
 

@@ -53,6 +53,26 @@ impl Config {
         false
     }
 
+    pub const fn irq_stacks_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn vmap_stack_enabled(&self) -> bool {
+        true
+    }
+
+    pub const fn shadow_call_stack_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn rcu_nocb_cpu_enabled(&self) -> bool {
+        false
+    }
+
+    pub const fn kfence_enabled(&self) -> bool {
+        false
+    }
+
     pub const fn linear_map_virt_start(&self) -> usize {
         LINEAR_MAP_VIRT_START
     }
