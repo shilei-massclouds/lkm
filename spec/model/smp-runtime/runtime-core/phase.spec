@@ -1,10 +1,77 @@
 /*
  * Runtime Core Phase Specification
  *
- * This is SMP Runtime Phase subphase 2. It covers the boot processor side of
+ * This is SMP Runtime Phase subphase 3. It covers the boot processor side of
  * kernel_init_freeable() from sched_init_smp() through page_alloc_init_late(),
  * after secondary CPUs have become online and before do_basic_setup().
  */
+
+/*
+ * SchedDomainsMutex 表示 Linux kernel/sched/topology.c 暴露的
+ * sched_domains_mutex。sched_init_smp() 在建立 SMP sched domains 时
+ * 持有它；boot-time CPU masks 当前稳定，但不能省略该 mutex 协议。
+ */
+object SchedDomainsMutex: Mutex {
+    initial_state: State::Base;
+    parent: Scheduler;
+
+    state State::Base {
+        transitions {
+            on Transition::Preset -> State::Prepared {
+                ensures {
+                    mutex_storage_bound(SchedDomainsMutex);
+                    mutex_init_kind_recorded(SchedDomainsMutex);
+                    mutex_preset_respects_init_kind(SchedDomainsMutex);
+                    mutex_owns_wait_queue(SchedDomainsMutex);
+                    mutex_wait_lock_internal_deferred(SchedDomainsMutex);
+                }
+            }
+        }
+    }
+
+    state State::Prepared {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                ensures {
+                    mutex_initialized(SchedDomainsMutex);
+                    mutex_ready(SchedDomainsMutex);
+                    mutex_unlocked(SchedDomainsMutex);
+                    mutex_wait_queue_ready(SchedDomainsMutex);
+                    mutex_recursive_locking_forbidden(SchedDomainsMutex);
+                    mutex_unlock_requires_owner(SchedDomainsMutex);
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            mutex_ready(SchedDomainsMutex);
+            mutex_unlocked(SchedDomainsMutex);
+            mutex_wait_queue_ready(SchedDomainsMutex);
+        }
+    }
+}
+
+context SchedDomainsMutexContext: ResourceExclusiveContext {
+    guard {
+        lock_ref: SchedDomainsMutex;
+
+        entered_by {
+            SchedDomainsMutex.Transition::Lock(KernelInitTaskRef);
+        }
+
+        exited_by {
+            SchedDomainsMutex.Transition::Unlock(KernelInitTaskRef);
+        }
+    }
+
+    obj_refs {
+        SchedulerSmpRuntime;
+        Scheduler;
+        SchedDomainsMutex;
+    }
+}
 
 /*
  * SchedulerSmpRuntime 表示 sched_init_smp() 的对象级 action。Scheduler
@@ -27,9 +94,28 @@ object SchedulerSmpRuntime: KernelObject {
                     SmpBringupBoundary.state == State::Ready;
                 }
 
+                drives {
+                    SchedDomainsMutex.Transition::Preset;
+                    SchedDomainsMutex.Transition::Setup;
+                }
+
+                within SchedDomainsMutexContext {
+                    ensures {
+                        mutex_lock_acquired(SchedDomainsMutex, KernelInitTaskRef);
+                        mutex_unlock_released(SchedDomainsMutex, KernelInitTaskRef);
+                        scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
+                        scheduler_smp_cpu_masks_stable(Scheduler, CpuGroup);
+                    }
+                }
+
                 ensures {
+                    mutex_ready(SchedDomainsMutex);
+                    mutex_unlocked(SchedDomainsMutex);
+                    mutex_wait_queue_ready(SchedDomainsMutex);
                     scheduler_smp_initialized(Scheduler);
                     scheduler_smp_domains_ready(Scheduler, CpuGroup);
+                    scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
+                    scheduler_smp_cpu_masks_stable(Scheduler, CpuGroup);
                     kernel_init_boot_cpu_affinity_released(KernelInitTask);
                     kernel_init_pf_no_setaffinity_cleared(KernelInitTask);
                     scheduler_rt_dl_smp_ready(Scheduler);
@@ -41,8 +127,11 @@ object SchedulerSmpRuntime: KernelObject {
 
     state State::Ready {
         invariant {
+            SchedDomainsMutex.state == State::Ready;
             scheduler_smp_initialized(Scheduler);
             scheduler_smp_domains_ready(Scheduler, CpuGroup);
+            scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
+            scheduler_smp_cpu_masks_stable(Scheduler, CpuGroup);
             kernel_init_boot_cpu_affinity_released(KernelInitTask);
             kernel_init_pf_no_setaffinity_cleared(KernelInitTask);
             scheduler_rt_dl_smp_ready(Scheduler);
@@ -70,6 +159,31 @@ object WorkqueueTopology: KernelObject {
                     SchedulerSmpRuntime.state == State::Ready;
                     CpuGroup.state == State::Ready;
                     SecondaryCpuOnlineAck.state == State::Ready;
+                    WorkqueuePoolMutex.state == State::Ready;
+                    WorkqueueStructMutex.state == State::Ready;
+                    scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
+                }
+
+                within WorkqueuePoolMutexContext {
+                    ensures {
+                        mutex_lock_acquired(WorkqueuePoolMutex, KernelInitTaskRef);
+                        mutex_unlock_released(WorkqueuePoolMutex, KernelInitTaskRef);
+                        workqueue_topology_pool_mutex_guard_used(
+                            Workqueue,
+                            WorkqueuePoolMutex
+                        );
+                    }
+
+                    within WorkqueueStructMutexContext {
+                        ensures {
+                            mutex_lock_acquired(WorkqueueStructMutex, KernelInitTaskRef);
+                            mutex_unlock_released(WorkqueueStructMutex, KernelInitTaskRef);
+                            workqueue_topology_struct_mutex_guard_used(
+                                Workqueue,
+                                WorkqueueStructMutex
+                            );
+                        }
+                    }
                 }
 
                 ensures {
@@ -77,6 +191,14 @@ object WorkqueueTopology: KernelObject {
                     workqueue_pod_types_ready(Workqueue);
                     workqueue_unbound_pools_rebound(Workqueue, CpuGroup);
                     workqueue_max_active_topology_ready(Workqueue);
+                    workqueue_topology_pool_mutex_guard_used(
+                        Workqueue,
+                        WorkqueuePoolMutex
+                    );
+                    workqueue_topology_struct_mutex_guard_used(
+                        Workqueue,
+                        WorkqueueStructMutex
+                    );
                     workqueue_workers_not_running(Workqueue);
                 }
             }
@@ -89,6 +211,8 @@ object WorkqueueTopology: KernelObject {
             workqueue_pod_types_ready(Workqueue);
             workqueue_unbound_pools_rebound(Workqueue, CpuGroup);
             workqueue_max_active_topology_ready(Workqueue);
+            workqueue_topology_pool_mutex_guard_used(Workqueue, WorkqueuePoolMutex);
+            workqueue_topology_struct_mutex_guard_used(Workqueue, WorkqueueStructMutex);
             workqueue_workers_not_running(Workqueue);
         }
     }
@@ -112,6 +236,7 @@ object AsyncCoreDeferred: KernelObject {
                 ensures {
                     async_core_setup_deferred();
                     async_workqueue_creation_deferred();
+                    async_min_active_update_deferred();
                 }
             }
         }
@@ -121,6 +246,7 @@ object AsyncCoreDeferred: KernelObject {
         invariant {
             async_core_setup_deferred();
             async_workqueue_creation_deferred();
+            async_min_active_update_deferred();
         }
     }
 }
@@ -144,7 +270,10 @@ object PadataCoreDeferred: KernelObject {
                 ensures {
                     padata_core_setup_deferred();
                     padata_hotplug_steps_deferred();
+                    padata_hotplug_online_state_deferred();
+                    padata_hotplug_dead_state_deferred();
                     padata_work_array_deferred();
+                    padata_free_work_list_deferred();
                 }
             }
         }
@@ -154,7 +283,10 @@ object PadataCoreDeferred: KernelObject {
         invariant {
             padata_core_setup_deferred();
             padata_hotplug_steps_deferred();
+            padata_hotplug_online_state_deferred();
+            padata_hotplug_dead_state_deferred();
             padata_work_array_deferred();
+            padata_free_work_list_deferred();
         }
     }
 }
@@ -187,8 +319,13 @@ object PageAllocatorLate: KernelObject {
                     zone_contiguous_ready(PageAllocator);
                     page_allocator_sysctl_ready(PageAllocator);
                     deferred_struct_page_init_trimmed();
+                    deferred_struct_page_init_trimmed_because_config_disabled();
+                    deferred_struct_page_completion_trimmed();
+                    deferred_pages_static_key_disable_trimmed();
                     page_extension_late_trimmed();
+                    page_extension_late_trimmed_because_config_disabled();
                     shuffle_page_allocator_late_trimmed();
+                    shuffle_page_allocator_late_trimmed_because_config_disabled();
                 }
             }
         }
@@ -203,8 +340,13 @@ object PageAllocatorLate: KernelObject {
             zone_contiguous_ready(PageAllocator);
             page_allocator_sysctl_ready(PageAllocator);
             deferred_struct_page_init_trimmed();
+            deferred_struct_page_init_trimmed_because_config_disabled();
+            deferred_struct_page_completion_trimmed();
+            deferred_pages_static_key_disable_trimmed();
             page_extension_late_trimmed();
+            page_extension_late_trimmed_because_config_disabled();
             shuffle_page_allocator_late_trimmed();
+            shuffle_page_allocator_late_trimmed_because_config_disabled();
         }
     }
 }
@@ -278,12 +420,29 @@ object RuntimeCorePhase: PhaseObject {
                 ensures {
                     runtime_core_phase_ready(RuntimeCorePhase);
                     scheduler_smp_initialized(Scheduler);
+                    scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
                     kernel_init_boot_cpu_affinity_released(KernelInitTask);
                     workqueue_topology_ready(Workqueue, CpuGroup);
+                    workqueue_topology_pool_mutex_guard_used(
+                        Workqueue,
+                        WorkqueuePoolMutex
+                    );
+                    workqueue_topology_struct_mutex_guard_used(
+                        Workqueue,
+                        WorkqueueStructMutex
+                    );
                     async_core_setup_deferred();
                     padata_core_setup_deferred();
+                    padata_hotplug_online_state_deferred();
+                    padata_hotplug_dead_state_deferred();
                     page_allocator_late_ready(PageAllocator);
                     runtime_core_boundary_ready(RuntimeCoreBoundary);
+                }
+
+                deferred {
+                    "async_init() 的 async_domain、cookie、pending list、wait queue 和 async worker 运行细节继续 deferred；本轮只记录专用 async workqueue 创建与 min_active 更新位置。";
+                    "padata_init() 的 CPU hotplug online/dead state 注册、possible-CPU work array 和 free list 继续作为 RuntimeCorePhase 的 deferred boundary，不展开 padata instance 或具体用户。";
+                    "CONFIG_DEFERRED_STRUCT_PAGE_INIT=n、CONFIG_PAGE_EXTENSION=n、CONFIG_SHUFFLE_PAGE_ALLOCATOR=n 的 late page allocator 分支由 PageAllocatorLate 结构化记录为 trimmed/no-op。";
                 }
             }
         }
@@ -292,6 +451,7 @@ object RuntimeCorePhase: PhaseObject {
     state State::Ready {
         invariant {
             SmpBringupPhase.state == State::Ready;
+            SchedDomainsMutex.state == State::Ready;
             SchedulerSmpRuntime.state == State::Ready;
             WorkqueueTopology.state == State::Ready;
             AsyncCoreDeferred.state == State::Ready;
@@ -299,6 +459,9 @@ object RuntimeCorePhase: PhaseObject {
             PageAllocatorLate.state == State::Ready;
             RuntimeCoreBoundary.state == State::Ready;
             runtime_core_phase_ready(RuntimeCorePhase);
+            scheduler_domains_mutex_guard_used(Scheduler, SchedDomainsMutex);
+            workqueue_topology_pool_mutex_guard_used(Workqueue, WorkqueuePoolMutex);
+            workqueue_topology_struct_mutex_guard_used(Workqueue, WorkqueueStructMutex);
         }
     }
 }

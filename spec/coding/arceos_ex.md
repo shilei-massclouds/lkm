@@ -319,7 +319,7 @@ mutex guard、`cpu_running` / `done_up` completion wait-lock irqsave guard、SBI
 
 ## RuntimeCorePhase 编码约束
 
-`RuntimeCorePhase` 是 `SMP Runtime Phase` 的第二个子阶段，formal model 路径为
+`RuntimeCorePhase` 是 `SMP Runtime Phase` 的第三个子阶段，formal model 路径为
 `spec/model/smp-runtime/runtime-core/`，目标实现路径为
 `impl/arceos_ex/src/phases/smp_runtime/runtime_core.rs`。该阶段必须在 `SmpBringupPhase.Ready` 之后运行，由
 `KernelInitTask` 在 boot CPU 上继续推进 `sched_init_smp()` 到 `page_alloc_init_late()` 的 BP 主线。
@@ -328,15 +328,29 @@ mutex guard、`cpu_running` / `done_up` completion wait-lock irqsave guard、SBI
 `PadataCore` deferred boundary、`PageAllocator` late action 和 `RuntimeCoreBoundary.setup()`。
 `Scheduler.enable_smp()` 必须发布 SMP sched domain ready、PID 1 boot CPU affinity 已解除、
 `PF_NO_SETAFFINITY` 已清除、RT/DL SMP 后置状态 ready 和调度 granularity 已刷新事实。由于 `Scheduler`
-主对象此前已经 `Online`，该动作不得重新推进 `Scheduler` 主生命周期。
+主对象此前已经 `Online`，该动作不得重新推进 `Scheduler` 主生命周期。Linux `sched_init_smp()` 中
+`sched_init_domains(cpu_active_mask)` 必须保留 `sched_domains_mutex` guard；实现侧应有可观察的
+`sched_domains_mutex` ready、guard-used 和 CPU mask stable facts。
 
 `Workqueue` 和 `PageAllocator` 在当前对象级 prototype 中保持其前序 `Ready` 主状态；RuntimeCore 通过
 topology/late action facts 表达 `workqueue_init_topology()` 和 `page_alloc_init_late()` 的完成边界，避免破坏前序
-phase 对 `Workqueue.Ready`、`PageAllocator.Ready` 的历史不变式。`async_init()` 和 `padata_init()` 在本轮保留
-Linux 时序位置，但必须显式记录为 deferred boundary，不能静默假设可用。
+phase 对 `Workqueue.Ready`、`PageAllocator.Ready` 的历史不变式。`workqueue_init_topology()` 必须复用前序
+`WorkqueuePoolMutex` 和聚合 `WorkqueueStructMutex` guard：外层 `wq_pool_mutex` 保护全局 workqueues 遍历和 unbound
+pool rebinding，内层 `wq->mutex` 保护每个 unbound workqueue 的 max_active 更新。
+
+`async_init()` 和 `padata_init()` 在本轮保留 Linux 时序位置，但必须显式记录为 deferred boundary，不能静默假设可用。
+Async deferred facts 应保留专用 `"async"` unbound workqueue 创建和 `min_active` 更新责任；Padata deferred facts
+应保留 `CONFIG_PADATA=y` / `CONFIG_HOTPLUG_CPU=y` 下 online/dead CPU hotplug state 注册、possible-CPU work array
+和 free list 责任。
+
+`page_alloc_init_late()` 当前按 Linux 6.12.37 RISC-V default `.config` 记录裁剪依据：
+`CONFIG_DEFERRED_STRUCT_PAGE_INIT=n`，因此 deferred init kthread、completion wait 和 `deferred_pages`
+static key disable 路径裁剪；`CONFIG_PAGE_EXTENSION=n`，page extension late 裁剪；`CONFIG_SHUFFLE_PAGE_ALLOCATOR=n`，
+shuffle late 路径裁剪。
 
 测试应覆盖 `RuntimeCorePhase.Ready`、`Scheduler.smp_initialized`、PID 1 affinity 释放、Workqueue topology
-facts、Async/Padata deferred facts、PageAllocator late facts，以及下一入口仍是 `do_basic_setup()`。
+facts 与 mutex guard、Async/Padata deferred facts、PageAllocator late facts 和裁剪依据，以及下一入口仍是
+`do_basic_setup()`。
 
 ## InitcallPhase 编码约束
 

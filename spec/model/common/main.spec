@@ -206,6 +206,8 @@ predicate cpu_hotplug_read_guard_used<T, U>(subject: T, lock: U) -> bool;
 predicate cpu_hotplug_write_guard_used<T, U>(subject: T, lock: U) -> bool;
 predicate cpu_add_remove_mutex_guard_used<T, U>(subject: T, mutex: U) -> bool;
 predicate smpboot_threads_mutex_guard_used<T, U>(subject: T, mutex: U) -> bool;
+predicate scheduler_domains_mutex_guard_used<T, U>(scheduler: T, mutex: U) -> bool;
+predicate scheduler_smp_cpu_masks_stable<T, U>(scheduler: T, cpu_group: U) -> bool;
 predicate cpu_running_wait_lock_guard_used<T, U>(subject: T, lock: U) -> bool;
 predicate done_up_wait_lock_guard_used<T, U>(subject: T, lock: U) -> bool;
 predicate sbi_boot_data_publish_barriers_observed<T>(provider: T) -> bool;
@@ -491,6 +493,8 @@ predicate workqueue_struct_mutex_ready<T, U>(workqueue: T, mutex: U) -> bool;
 predicate workqueue_pool_mutex_guard_used<T, U>(workqueue: T, mutex: U) -> bool;
 predicate workqueue_struct_mutex_guard_used<T, U>(workqueue: T, mutex: U) -> bool;
 predicate workqueue_init_pool_mutex_guard_used<T, U>(workqueue: T, mutex: U) -> bool;
+predicate workqueue_topology_pool_mutex_guard_used<T, U>(workqueue: T, mutex: U) -> bool;
+predicate workqueue_topology_struct_mutex_guard_used<T, U>(workqueue: T, mutex: U) -> bool;
 predicate workqueue_pool_attach_mutex_deferred<T>(workqueue: T) -> bool;
 predicate workqueue_mayday_lock_deferred<T>(workqueue: T) -> bool;
 predicate workqueue_manager_wait_deferred<T>(workqueue: T) -> bool;
@@ -501,6 +505,15 @@ predicate workqueue_initial_workers_created<T, U>(workqueue: T, cpu_group: U) ->
 predicate workqueue_worker_creation_open<T>(workqueue: T) -> bool;
 predicate workqueue_watchdog_ready<T>(workqueue: T) -> bool;
 predicate workqueue_smp_topology_deferred<T>(workqueue: T) -> bool;
+predicate async_min_active_update_deferred() -> bool;
+predicate padata_hotplug_online_state_deferred() -> bool;
+predicate padata_hotplug_dead_state_deferred() -> bool;
+predicate padata_free_work_list_deferred() -> bool;
+predicate deferred_struct_page_init_trimmed_because_config_disabled() -> bool;
+predicate deferred_struct_page_completion_trimmed() -> bool;
+predicate deferred_pages_static_key_disable_trimmed() -> bool;
+predicate page_extension_late_trimmed_because_config_disabled() -> bool;
+predicate shuffle_page_allocator_late_trimmed_because_config_disabled() -> bool;
 predicate default_sched_root_domain_ready<T, U>(root_domain: T, cpu_group: U) -> bool;
 predicate default_sched_root_domain_covers_cpu_group_possible<T, U>(
     root_domain: T,

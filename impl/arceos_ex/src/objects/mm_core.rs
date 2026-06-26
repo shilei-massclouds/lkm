@@ -1539,8 +1539,13 @@ pub struct PageAllocator {
     zone_contiguous_ready: bool,
     sysctl_ready: bool,
     deferred_struct_page_init_trimmed: bool,
+    deferred_struct_page_init_config_disabled: bool,
+    deferred_struct_page_completion_trimmed: bool,
+    deferred_pages_static_key_disable_trimmed: bool,
     page_extension_late_trimmed: bool,
+    page_extension_late_config_disabled: bool,
     shuffle_late_trimmed: bool,
+    shuffle_late_config_disabled: bool,
     totalram_pages: usize,
     zone_facts: [ZoneRef; MAX_ZONE_SET_ZONES],
     zone_fact_count: usize,
@@ -1570,8 +1575,13 @@ impl PageAllocator {
             zone_contiguous_ready: false,
             sysctl_ready: false,
             deferred_struct_page_init_trimmed: false,
+            deferred_struct_page_init_config_disabled: false,
+            deferred_struct_page_completion_trimmed: false,
+            deferred_pages_static_key_disable_trimmed: false,
             page_extension_late_trimmed: false,
+            page_extension_late_config_disabled: false,
             shuffle_late_trimmed: false,
+            shuffle_late_config_disabled: false,
             totalram_pages: 0,
             zone_facts: [ZoneRef::empty(); MAX_ZONE_SET_ZONES],
             zone_fact_count: 0,
@@ -1670,12 +1680,32 @@ impl PageAllocator {
         self.deferred_struct_page_init_trimmed
     }
 
+    pub const fn deferred_struct_page_init_config_disabled(&self) -> bool {
+        self.deferred_struct_page_init_config_disabled
+    }
+
+    pub const fn deferred_struct_page_completion_trimmed(&self) -> bool {
+        self.deferred_struct_page_completion_trimmed
+    }
+
+    pub const fn deferred_pages_static_key_disable_trimmed(&self) -> bool {
+        self.deferred_pages_static_key_disable_trimmed
+    }
+
     pub const fn page_extension_late_trimmed(&self) -> bool {
         self.page_extension_late_trimmed
     }
 
+    pub const fn page_extension_late_config_disabled(&self) -> bool {
+        self.page_extension_late_config_disabled
+    }
+
     pub const fn shuffle_late_trimmed(&self) -> bool {
         self.shuffle_late_trimmed
+    }
+
+    pub const fn shuffle_late_config_disabled(&self) -> bool {
+        self.shuffle_late_config_disabled
     }
 
     pub const fn totalram_pages(&self) -> usize {
@@ -1952,8 +1982,13 @@ impl PageAllocator {
         self.zone_contiguous_ready = true;
         self.sysctl_ready = true;
         self.deferred_struct_page_init_trimmed = true;
+        self.deferred_struct_page_init_config_disabled = true;
+        self.deferred_struct_page_completion_trimmed = true;
+        self.deferred_pages_static_key_disable_trimmed = true;
         self.page_extension_late_trimmed = true;
+        self.page_extension_late_config_disabled = true;
         self.shuffle_late_trimmed = true;
+        self.shuffle_late_config_disabled = true;
         crate::trace::checkpoint(Checkpoint::PageAllocatorLateReady);
         Ok(())
     }

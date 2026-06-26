@@ -34,6 +34,8 @@ pub struct Workqueue {
     pool_mutex_guard_used: bool,
     struct_mutex_guard_used: bool,
     pre_smp_pool_mutex_guard_used: bool,
+    topology_pool_mutex_guard_used: bool,
+    topology_struct_mutex_guard_used: bool,
     workers_running: bool,
     worker_creation_open: bool,
     rescuers_ready: bool,
@@ -70,6 +72,8 @@ impl Workqueue {
             pool_mutex_guard_used: false,
             struct_mutex_guard_used: false,
             pre_smp_pool_mutex_guard_used: false,
+            topology_pool_mutex_guard_used: false,
+            topology_struct_mutex_guard_used: false,
             workers_running: false,
             worker_creation_open: false,
             rescuers_ready: false,
@@ -162,6 +166,14 @@ impl Workqueue {
 
     pub const fn pre_smp_pool_mutex_guard_used(&self) -> bool {
         self.pre_smp_pool_mutex_guard_used
+    }
+
+    pub const fn topology_pool_mutex_guard_used(&self) -> bool {
+        self.topology_pool_mutex_guard_used
+    }
+
+    pub const fn topology_struct_mutex_guard_used(&self) -> bool {
+        self.topology_struct_mutex_guard_used
     }
 
     pub const fn workers_running(&self) -> bool {
@@ -283,6 +295,8 @@ impl Workqueue {
         self.manager_wait_deferred = true;
         self.workers_running = false;
         self.pre_smp_pool_mutex_guard_used = false;
+        self.topology_pool_mutex_guard_used = false;
+        self.topology_struct_mutex_guard_used = false;
         self.worker_creation_open = false;
         self.rescuers_ready = false;
         self.initial_workers_created = false;
@@ -337,6 +351,8 @@ impl Workqueue {
         self.initial_workers_created = true;
         self.pool_mutex.unlock_owner(MutexOwner::KernelInitTask)?;
         self.pre_smp_pool_mutex_guard_used = true;
+        self.topology_pool_mutex_guard_used = false;
+        self.topology_struct_mutex_guard_used = false;
         self.worker_creation_open = true;
         self.watchdog_ready = true;
         self.workers_running = false;
@@ -366,12 +382,34 @@ impl Workqueue {
             );
         }
 
+        if self.pool_mutex.lock_owner(MutexOwner::KernelInitTask)? != MutexLockOutcome::Acquired {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+        if self.struct_mutex.lock_owner(MutexOwner::KernelInitTask)? != MutexLockOutcome::Acquired {
+            self.pool_mutex.unlock_owner(MutexOwner::KernelInitTask)?;
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Ready,
+                State::Ready,
+            );
+        }
+
         self.topology_ready = true;
         self.pod_types_ready = true;
         self.unbound_pools_rebound = true;
         self.max_active_topology_ready = true;
         self.smp_topology_deferred = false;
         self.workers_running = false;
+        self.struct_mutex.unlock_owner(MutexOwner::KernelInitTask)?;
+        self.pool_mutex.unlock_owner(MutexOwner::KernelInitTask)?;
+        self.topology_pool_mutex_guard_used = true;
+        self.topology_struct_mutex_guard_used = true;
         crate::trace::checkpoint(Checkpoint::WorkqueueTopologyReady);
         Ok(())
     }

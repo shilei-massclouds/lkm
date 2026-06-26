@@ -20,6 +20,9 @@ pub fn run() -> SmokeResult {
     if ctx.scheduler.state() != State::Online
         || !ctx.scheduler.smp_initialized()
         || !ctx.scheduler.sched_domains_ready()
+        || !ctx.scheduler.sched_domains_mutex().ready()
+        || !ctx.scheduler.sched_domains_mutex_guard_used()
+        || !ctx.scheduler.smp_cpu_masks_stable()
         || !ctx.scheduler.kernel_init_affinity_released()
         || !ctx.scheduler.rt_dl_smp_ready()
         || !ctx.scheduler.granularity_refreshed()
@@ -41,6 +44,8 @@ pub fn run() -> SmokeResult {
         || !ctx.workqueue.pod_types_ready()
         || !ctx.workqueue.unbound_pools_rebound()
         || !ctx.workqueue.max_active_topology_ready()
+        || !ctx.workqueue.topology_pool_mutex_guard_used()
+        || !ctx.workqueue.topology_struct_mutex_guard_used()
         || ctx.workqueue.smp_topology_deferred()
         || ctx.workqueue.workers_running()
     {
@@ -51,10 +56,14 @@ pub fn run() -> SmokeResult {
     if ctx.async_core_deferred.state() != State::Ready
         || !ctx.async_core_deferred.setup_deferred()
         || !ctx.async_core_deferred.workqueue_creation_deferred()
+        || !ctx.async_core_deferred.min_active_update_deferred()
         || ctx.padata_core_deferred.state() != State::Ready
         || !ctx.padata_core_deferred.setup_deferred()
         || !ctx.padata_core_deferred.hotplug_steps_deferred()
+        || !ctx.padata_core_deferred.hotplug_online_state_deferred()
+        || !ctx.padata_core_deferred.hotplug_dead_state_deferred()
         || !ctx.padata_core_deferred.work_array_deferred()
+        || !ctx.padata_core_deferred.free_work_list_deferred()
     {
         printk::write_str("runtime core deferred facts invalid\n");
         return SmokeResult::Failed;
@@ -68,8 +77,17 @@ pub fn run() -> SmokeResult {
         || !ctx.page_allocator.zone_contiguous_ready()
         || !ctx.page_allocator.sysctl_ready()
         || !ctx.page_allocator.deferred_struct_page_init_trimmed()
+        || !ctx
+            .page_allocator
+            .deferred_struct_page_init_config_disabled()
+        || !ctx.page_allocator.deferred_struct_page_completion_trimmed()
+        || !ctx
+            .page_allocator
+            .deferred_pages_static_key_disable_trimmed()
         || !ctx.page_allocator.page_extension_late_trimmed()
+        || !ctx.page_allocator.page_extension_late_config_disabled()
         || !ctx.page_allocator.shuffle_late_trimmed()
+        || !ctx.page_allocator.shuffle_late_config_disabled()
     {
         printk::write_str("page allocator late facts invalid\n");
         return SmokeResult::Failed;

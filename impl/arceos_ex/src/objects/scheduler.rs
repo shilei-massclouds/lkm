@@ -8,6 +8,7 @@ use super::{
     default_sched_root_domain::DefaultSchedRootDomain,
     init_mm::InitMm,
     init_task::InitTask,
+    mutex::{Mutex, MutexLockOutcome, MutexOwner},
     per_cpu_storage::PerCpuStorage,
     rest_init::{KernelInitTask, KthreaddTask},
     state::{
@@ -28,6 +29,7 @@ const BIT_WAIT_TABLE_SIZE: usize = 256;
 
 pub struct Scheduler {
     lifecycle: Lifecycle,
+    sched_domains_mutex: Mutex,
     default_root_domain: DefaultSchedRootDomain,
     bit_wait_queue_table: BitWaitQueueTable,
     boot_idle_rcu_read_side: RcuReadSide,
@@ -44,6 +46,8 @@ pub struct Scheduler {
     pick_next_task_passes: usize,
     smp_initialized: bool,
     sched_domains_ready: bool,
+    sched_domains_mutex_guard_used: bool,
+    smp_cpu_masks_stable: bool,
     kernel_init_affinity_released: bool,
     rt_dl_smp_ready: bool,
     granularity_refreshed: bool,
@@ -96,6 +100,7 @@ impl Scheduler {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            sched_domains_mutex: Mutex::new_static(),
             default_root_domain: DefaultSchedRootDomain::new(),
             bit_wait_queue_table: BitWaitQueueTable::new(),
             boot_idle_rcu_read_side: RcuReadSide::new(),
@@ -112,6 +117,8 @@ impl Scheduler {
             pick_next_task_passes: 0,
             smp_initialized: false,
             sched_domains_ready: false,
+            sched_domains_mutex_guard_used: false,
+            smp_cpu_masks_stable: false,
             kernel_init_affinity_released: false,
             rt_dl_smp_ready: false,
             granularity_refreshed: false,
@@ -163,6 +170,10 @@ impl Scheduler {
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn sched_domains_mutex(&self) -> &Mutex {
+        &self.sched_domains_mutex
     }
 
     pub const fn default_root_domain(&self) -> &DefaultSchedRootDomain {
@@ -358,6 +369,14 @@ impl Scheduler {
 
     pub const fn sched_domains_ready(&self) -> bool {
         self.sched_domains_ready
+    }
+
+    pub const fn sched_domains_mutex_guard_used(&self) -> bool {
+        self.sched_domains_mutex_guard_used
+    }
+
+    pub const fn smp_cpu_masks_stable(&self) -> bool {
+        self.smp_cpu_masks_stable
     }
 
     pub const fn kernel_init_affinity_released(&self) -> bool {
@@ -1373,6 +1392,30 @@ impl Scheduler {
                 State::Online,
             );
         }
+
+        if self.sched_domains_mutex.state() == State::Base {
+            self.sched_domains_mutex.preset_static()?;
+            self.sched_domains_mutex.setup()?;
+        }
+        if self.sched_domains_mutex.state() != State::Ready
+            || self
+                .sched_domains_mutex
+                .lock_owner(MutexOwner::KernelInitTask)?
+                != MutexLockOutcome::Acquired
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Online,
+                State::Online,
+            );
+        }
+        self.sched_domains_mutex_guard_used = true;
+        self.smp_cpu_masks_stable = cpu_group.secondary_cpus_online()
+            && cpu_group.smp_concurrency_open()
+            && cpu_group.possible_cpu_count() > 0;
+        self.sched_domains_mutex
+            .unlock_owner(MutexOwner::KernelInitTask)?;
 
         if !kernel_init_task.release_boot_cpu_affinity(cpu_group) {
             return failed_condition(

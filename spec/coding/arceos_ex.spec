@@ -3110,7 +3110,7 @@ type ArceosExRuntimeCoreCodingMust {
         /*
          * Model path:
          *
-         * RuntimeCorePhase is SMP Runtime Phase subphase 2. Its formal model
+         * RuntimeCorePhase is SMP Runtime Phase subphase 3. Its formal model
          * path is spec/model/smp-runtime/runtime-core/.
          */
         arceos_ex_must_runtime_core_model_path_under_smp_runtime_phase();
@@ -3135,25 +3135,31 @@ type ArceosExRuntimeCoreCodingMust {
          *
          * Scheduler.enable_smp() must publish SMP scheduler domains, release
          * PID 1 boot CPU affinity, clear PF_NO_SETAFFINITY, refresh
-         * granularity and initialize RT/DL SMP post state without re-running
-         * Scheduler lifecycle enable.
+         * granularity and initialize RT/DL SMP post state under the
+         * sched_domains_mutex guard without re-running Scheduler lifecycle
+         * enable.
          */
         arceos_ex_must_runtime_core_enable_scheduler_smp_action();
+        arceos_ex_must_runtime_core_use_sched_domains_mutex_guard();
 
         /*
          * Workqueue topology:
          *
          * RuntimeCorePhase must publish workqueue topology facts for CPU/SMT,
          * cache and NUMA pod types and rebind unbound pools while keeping the
-         * current object-level Workqueue.Ready historical state stable.
+         * current object-level Workqueue.Ready historical state stable. The
+         * topology action must reuse the existing wq_pool_mutex and aggregate
+         * workqueue_struct mutex guards.
          */
         arceos_ex_must_runtime_core_setup_workqueue_topology_action();
+        arceos_ex_must_runtime_core_use_workqueue_topology_mutex_guards();
 
         /*
          * Deferred runtime cores:
          *
          * async_init() and padata_init() must remain explicit deferred
-         * boundaries in this step.
+         * boundaries in this step. The deferred facts must preserve async
+         * workqueue/min_active and padata hotplug/free-list responsibilities.
          */
         arceos_ex_must_runtime_core_keep_async_and_padata_deferred();
 
@@ -3162,9 +3168,12 @@ type ArceosExRuntimeCoreCodingMust {
          *
          * RuntimeCorePhase must publish page_alloc_init_late() facts,
          * including memory stats, buffer init, memblock private discard, zone
-         * contiguous, sysctl and current-config trimmed late paths.
+         * contiguous, sysctl and current-config trimmed late paths. Deferred
+         * struct page completion/static key, page extension and shuffle late
+         * paths must be recorded with config-trimmed reasons.
          */
         arceos_ex_must_runtime_core_setup_page_allocator_late_action();
+        arceos_ex_must_runtime_core_record_page_late_trimmed_reasons();
     }
 }
 

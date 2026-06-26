@@ -174,7 +174,9 @@ context WorkqueuePoolMutexContext: ResourceExclusiveContext {
      * though boot concurrency is otherwise closed. PreSmpInitPhase reuses this
      * same mutex context for workqueue_init() on the KernelInitTask execution
      * line while fixing node hints, creating rescuers and publishing initial
-     * workers. This mutex owns the Linux workqueue/pool publication protocol.
+     * workers. RuntimeCorePhase reuses it for workqueue_init_topology() while
+     * rebinding unbound pool workqueues. This mutex owns the Linux
+     * workqueue/pool publication protocol.
      */
     guard {
         lock_ref: WorkqueuePoolMutex;
@@ -199,19 +201,23 @@ context WorkqueuePoolMutexContext: ResourceExclusiveContext {
 context WorkqueueStructMutexContext: ResourceExclusiveContext {
     /*
      * alloc_workqueue() initializes each workqueue_struct mutex and takes it
-     * while linking pool_workqueue entries and adjusting max_active. The
-     * current model aggregates the system workqueue set behind one
-     * WorkqueueStructMutex fact rather than naming every system queue mutex.
+     * while linking pool_workqueue entries and adjusting max_active. RuntimeCorePhase
+     * reuses the aggregate guard for workqueue_init_topology() when it updates
+     * max_active on existing unbound workqueues. The current model aggregates
+     * the system workqueue set behind one WorkqueueStructMutex fact rather than
+     * naming every system queue mutex.
      */
     guard {
         lock_ref: WorkqueueStructMutex;
 
         entered_by {
             WorkqueueStructMutex.Transition::Lock(BootInitTaskRef);
+            WorkqueueStructMutex.Transition::Lock(KernelInitTaskRef);
         }
 
         exited_by {
             WorkqueueStructMutex.Transition::Unlock(BootInitTaskRef);
+            WorkqueueStructMutex.Transition::Unlock(KernelInitTaskRef);
         }
     }
 
