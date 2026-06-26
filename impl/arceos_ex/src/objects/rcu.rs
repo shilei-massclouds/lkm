@@ -33,6 +33,10 @@ pub struct RcuCore {
     scheduler_start_local_irq_restore_count: usize,
     gp_seq_baseline_synced: bool,
     inkernel_boot_ended: bool,
+    unexpedite_gp_atomic_decrement_recorded: bool,
+    async_relax_config_lazy_trimmed: bool,
+    normal_after_boot_write_once_trimmed_or_recorded: bool,
+    boot_ended_publish_recorded: bool,
 }
 
 impl RcuCore {
@@ -61,6 +65,10 @@ impl RcuCore {
             scheduler_start_local_irq_restore_count: 0,
             gp_seq_baseline_synced: false,
             inkernel_boot_ended: false,
+            unexpedite_gp_atomic_decrement_recorded: false,
+            async_relax_config_lazy_trimmed: false,
+            normal_after_boot_write_once_trimmed_or_recorded: false,
+            boot_ended_publish_recorded: false,
         }
     }
 
@@ -160,6 +168,22 @@ impl RcuCore {
         self.inkernel_boot_ended
     }
 
+    pub const fn unexpedite_gp_atomic_decrement_recorded(&self) -> bool {
+        self.unexpedite_gp_atomic_decrement_recorded
+    }
+
+    pub const fn async_relax_config_lazy_trimmed(&self) -> bool {
+        self.async_relax_config_lazy_trimmed
+    }
+
+    pub const fn normal_after_boot_write_once_trimmed_or_recorded(&self) -> bool {
+        self.normal_after_boot_write_once_trimmed_or_recorded
+    }
+
+    pub const fn boot_ended_publish_recorded(&self) -> bool {
+        self.boot_ended_publish_recorded
+    }
+
     pub fn setup(
         &mut self,
         scheduler: &Scheduler,
@@ -201,6 +225,10 @@ impl RcuCore {
         self.scheduler_start_local_irq_restore_count = 0;
         self.gp_seq_baseline_synced = false;
         self.inkernel_boot_ended = false;
+        self.unexpedite_gp_atomic_decrement_recorded = false;
+        self.async_relax_config_lazy_trimmed = false;
+        self.normal_after_boot_write_once_trimmed_or_recorded = false;
+        self.boot_ended_publish_recorded = false;
         if !self.boot_cpu_online_ready
             || !self.softirq_registered
             || !self.workqueues_ready
@@ -280,6 +308,10 @@ impl RcuCore {
             return false;
         }
 
+        self.unexpedite_gp_atomic_decrement_recorded = true;
+        self.async_relax_config_lazy_trimmed = true;
+        self.normal_after_boot_write_once_trimmed_or_recorded = true;
+        self.boot_ended_publish_recorded = true;
         self.inkernel_boot_ended = true;
         crate::trace::checkpoint(Checkpoint::RcuInkernelBootEnded);
         true

@@ -3815,7 +3815,10 @@ type ArceosExFinalizeCodingMust {
          *
          * async_synchronize_full(), ftrace/free_initmem, mark_readonly() and
          * do_sysctl_args() must preserve Linux order but remain deferred in
-         * this round.
+         * this round. async_synchronize_full() must still expose the
+         * async_done waitqueue, async_lock irqsave spinlock, entry_count
+         * atomic and ASYNC_COOKIE_MAX ordering responsibilities as deferred
+         * facts.
          */
         arceos_ex_must_finalize_keep_cleanup_details_deferred();
 
@@ -3825,6 +3828,8 @@ type ArceosExFinalizeCodingMust {
          * kprobe_free_init_mem(), kgdb_free_init_mem(), exit_boot_config(),
          * pti_finalize() and numa_default_policy() must be recorded as
          * trimmed/no-op under the current RISC-V/default configuration.
+         * The numa_default_policy() checkpoint belongs after SYSTEM_RUNNING
+         * in FinalizePhase, not in RestInitPhase.
          */
         arceos_ex_must_finalize_record_trimmed_config_paths();
 
@@ -3833,6 +3838,10 @@ type ArceosExFinalizeCodingMust {
          *
          * SystemState.enable() must publish the SYSTEM_FREEING_INITMEM window
          * and end with SystemState.state == Online and value == SYSTEM_RUNNING.
+         * RcuCore.end_inkernel_boot() must expose rcu_unexpedite_gp() atomic
+         * decrement, CONFIG_RCU_LAZY related rcu_async_relax() trimming,
+         * rcu_normal_after_boot WRITE_ONCE handling and rcu_boot_ended publish
+         * as observable facts.
          */
         arceos_ex_must_finalize_publish_system_running();
 

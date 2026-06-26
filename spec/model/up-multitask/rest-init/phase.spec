@@ -1353,7 +1353,6 @@ object BootInitRestInitPhase: PhaseObject {
                     smp_concurrency_closed();
                     workqueue_workers_still_deferred();
                     rcu_gp_threads_still_deferred(RcuCore);
-                    numa_default_policy_trimmed();
                 }
 
                 deferred {

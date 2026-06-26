@@ -18,6 +18,12 @@ pub fn run() -> SmokeResult {
         || !ctx
             .async_full_sync_deferred
             .init_work_drain_boundary_preserved()
+        || !ctx.async_full_sync_deferred.waitqueue_deferred()
+        || !ctx.async_full_sync_deferred.async_lock_irqsave_deferred()
+        || !ctx.async_full_sync_deferred.entry_count_atomic_deferred()
+        || !ctx
+            .async_full_sync_deferred
+            .global_cookie_boundary_preserved()
     {
         printk::write_str("async full sync deferred facts invalid\n");
         return SmokeResult::Failed;
@@ -65,9 +71,23 @@ pub fn run() -> SmokeResult {
         return SmokeResult::Failed;
     }
 
+    if ctx.numa_default_policy_trimmed.state() != State::Ready
+        || !ctx.numa_default_policy_trimmed.trimmed_noop()
+        || !ctx.numa_default_policy_trimmed.config_numa_disabled()
+    {
+        printk::write_str("numa default policy facts invalid\n");
+        return SmokeResult::Failed;
+    }
+
     if ctx.rcu_boot_end.state() != State::Ready
         || !ctx.rcu_boot_end.rcu_boot_ended()
         || !ctx.rcu_core.inkernel_boot_ended()
+        || !ctx.rcu_core.unexpedite_gp_atomic_decrement_recorded()
+        || !ctx.rcu_core.async_relax_config_lazy_trimmed()
+        || !ctx
+            .rcu_core
+            .normal_after_boot_write_once_trimmed_or_recorded()
+        || !ctx.rcu_core.boot_ended_publish_recorded()
     {
         printk::write_str("rcu boot end facts invalid\n");
         return SmokeResult::Failed;

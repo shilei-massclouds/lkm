@@ -868,15 +868,25 @@ device-probe/rootwait/initrd/md/NFS/CIFS/devtmpfs 路径分类、integrity keys 
 `mark_readonly()`、`pti_finalize()`、`SYSTEM_RUNNING`、`numa_default_policy()`、`rcu_end_inkernel_boot()` 和
 `do_sysctl_args()` 的时序位置。当前 `AsyncCore`、ftrace/free_initmem、mapping protection 和 sysctl 参数路径
 仍保留 deferred/position-preserved 语义；Kprobes/KGDB/BootConfig/PTI/NUMA 按当前配置记录为 trimmed/no-op。
+`async_synchronize_full()` 不得被写成普通 no-op：Linux 通过
+`wait_event(async_done, lowest_in_progress(NULL) >= ASYNC_COOKIE_MAX)` 等待全局 async work drain，
+`lowest_in_progress()` 使用 `async_lock` 的 `spin_lock_irqsave()`，async worker 完成时更新 `entry_count`
+atomic 并 `wake_up(&async_done)`。当前实现仍不展开 AsyncCore runtime，但必须把 waitqueue、irqsave
+spinlock、atomic 计数和全局 cookie 边界记录为 deferred facts。
 
 `SystemState.enable()` 是本阶段的主要状态动作：它必须从 `SYSTEM_SCHEDULING` 进入
 `SYSTEM_FREEING_INITMEM` 窗口，并最终发布 `SYSTEM_RUNNING`，把 `SystemState.state` 推进到 `Online`。
 `RcuCore.end_inkernel_boot()` 是本阶段的另一个主线 action，必须记录 `rcu_boot_ended == true`，但不得把完整
-RCU GP 服务或 worker 运行伪装成已实现。
+RCU GP 服务或 worker 运行伪装成已实现。实现还必须暴露 Linux `rcu_end_inkernel_boot()` 中
+`rcu_unexpedite_gp()` 的 atomic decrement、`CONFIG_RCU_LAZY` 未启用导致 `rcu_async_relax()` 不改变 lazy
+nesting 的裁剪事实、`CONFIG_PREEMPT_RT=n` 下 `rcu_normal_after_boot` 默认不触发 `WRITE_ONCE(rcu_normal, 1)`
+的事实，以及 `rcu_boot_ended` publish fact。`numa_default_policy()` 的裁剪 checkpoint 必须位于
+`SYSTEM_RUNNING` 之后、`rcu_end_inkernel_boot()` 之前，不能放在 `RestInitPhase`。
 
 测试应覆盖 `FinalizePhase.Ready`、async full sync deferred、init memory cleanup deferred/trimmed 事实、
-mapping protection deferred、PTI trimmed、`SystemState.Online`/`SYSTEM_RUNNING`、RCU in-kernel boot ended、
-sysctl args deferred，以及下一入口仍是 `PayloadPhase`。
+mapping protection deferred、PTI trimmed、`SystemState.Online`/`SYSTEM_RUNNING`、NUMA default policy
+trimmed、RCU in-kernel boot ended 与 atomic/WRITE_ONCE/lazy-trim facts、sysctl args deferred，以及下一入口仍是
+`PayloadPhase`。
 
 ## PayloadPhase 编码约束
 

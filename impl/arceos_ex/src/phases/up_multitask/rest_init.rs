@@ -96,7 +96,6 @@ fn setup_boot_init_rest_init(ctx: &mut Context) -> EventResult {
         &ctx.root_pid_namespace,
         ctx.scheduler.boot_idle_rcu_read_side_mut(),
     )?;
-    checkpoint_numa_default_policy_noop()?;
     ctx.kthreadd_task.preset(TaskSpawnInputs {
         task_creation_core: &ctx.task_creation_core,
         root_pid_namespace: &ctx.root_pid_namespace,
@@ -535,9 +534,4 @@ fn boot_init_rest_init_phase_ready_after_handoff(ctx: &Context) -> bool {
         && ctx.kthreadd_ready_gate.state() == State::Online
         && ctx.kthreadd_ready_gate.completion().complete_committed()
         && runtime_services_still_deferred(&ctx.workqueue, &ctx.rcu_core, &ctx.cpu_group)
-}
-
-fn checkpoint_numa_default_policy_noop() -> EventResult {
-    crate::trace::checkpoint(Checkpoint::NumaDefaultPolicyNoop);
-    Ok(())
 }

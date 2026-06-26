@@ -12,6 +12,10 @@ pub struct AsyncFullSyncDeferred {
     lifecycle: Lifecycle,
     synchronize_full_deferred: bool,
     init_work_drain_boundary_preserved: bool,
+    waitqueue_deferred: bool,
+    async_lock_irqsave_deferred: bool,
+    entry_count_atomic_deferred: bool,
+    global_cookie_boundary_preserved: bool,
 }
 
 impl AsyncFullSyncDeferred {
@@ -20,6 +24,10 @@ impl AsyncFullSyncDeferred {
             lifecycle: Lifecycle::new(State::Base),
             synchronize_full_deferred: false,
             init_work_drain_boundary_preserved: false,
+            waitqueue_deferred: false,
+            async_lock_irqsave_deferred: false,
+            entry_count_atomic_deferred: false,
+            global_cookie_boundary_preserved: false,
         }
     }
 
@@ -33,6 +41,22 @@ impl AsyncFullSyncDeferred {
 
     pub const fn init_work_drain_boundary_preserved(&self) -> bool {
         self.init_work_drain_boundary_preserved
+    }
+
+    pub const fn waitqueue_deferred(&self) -> bool {
+        self.waitqueue_deferred
+    }
+
+    pub const fn async_lock_irqsave_deferred(&self) -> bool {
+        self.async_lock_irqsave_deferred
+    }
+
+    pub const fn entry_count_atomic_deferred(&self) -> bool {
+        self.entry_count_atomic_deferred
+    }
+
+    pub const fn global_cookie_boundary_preserved(&self) -> bool {
+        self.global_cookie_boundary_preserved
     }
 
     pub fn setup(
@@ -56,6 +80,10 @@ impl AsyncFullSyncDeferred {
 
         self.synchronize_full_deferred = true;
         self.init_work_drain_boundary_preserved = true;
+        self.waitqueue_deferred = true;
+        self.async_lock_irqsave_deferred = true;
+        self.entry_count_atomic_deferred = true;
+        self.global_cookie_boundary_preserved = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -252,6 +280,63 @@ impl PtiFinalizeTrimmed {
     }
 }
 
+pub struct NumaDefaultPolicyTrimmed {
+    lifecycle: Lifecycle,
+    trimmed_noop: bool,
+    config_numa_disabled: bool,
+}
+
+impl NumaDefaultPolicyTrimmed {
+    pub const fn new() -> Self {
+        Self {
+            lifecycle: Lifecycle::new(State::Base),
+            trimmed_noop: false,
+            config_numa_disabled: false,
+        }
+    }
+
+    pub const fn state(&self) -> State {
+        self.lifecycle.state()
+    }
+
+    pub const fn trimmed_noop(&self) -> bool {
+        self.trimmed_noop
+    }
+
+    pub const fn config_numa_disabled(&self) -> bool {
+        self.config_numa_disabled
+    }
+
+    pub fn setup(
+        &mut self,
+        pti_finalize: &PtiFinalizeTrimmed,
+        system_state: &SystemState,
+    ) -> EventResult {
+        if self.lifecycle.state() != State::Base
+            || pti_finalize.state() != State::Ready
+            || !pti_finalize.trimmed_noop()
+            || system_state.state() != State::Online
+            || system_state.value() != SystemStateValue::Running
+        {
+            return failed_condition(
+                LifecycleEvent::Setup,
+                self.lifecycle.state(),
+                State::Base,
+                State::Ready,
+            );
+        }
+
+        self.trimmed_noop = true;
+        self.config_numa_disabled = true;
+        self.lifecycle.transition(
+            LifecycleEvent::Setup,
+            State::Base,
+            State::Ready,
+            Checkpoint::NumaDefaultPolicyNoop,
+        )
+    }
+}
+
 pub struct RcuBootEnd {
     lifecycle: Lifecycle,
     rcu_boot_ended: bool,
@@ -275,13 +360,13 @@ impl RcuBootEnd {
 
     pub fn setup(
         &mut self,
-        pti_finalize: &PtiFinalizeTrimmed,
+        numa_default_policy: &NumaDefaultPolicyTrimmed,
         system_state: &SystemState,
         rcu_core: &mut RcuCore,
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
-            || pti_finalize.state() != State::Ready
-            || !pti_finalize.trimmed_noop()
+            || numa_default_policy.state() != State::Ready
+            || !numa_default_policy.trimmed_noop()
             || system_state.state() != State::Online
             || system_state.value() != SystemStateValue::Running
             || rcu_core.state() != State::Ready
@@ -395,6 +480,7 @@ impl FinalizeBoundary {
         init_memory: &InitMemoryCleanupDeferred,
         mapping: &KernelMappingProtectionDeferred,
         pti_finalize: &PtiFinalizeTrimmed,
+        numa_default_policy: &NumaDefaultPolicyTrimmed,
         rcu_boot_end: &RcuBootEnd,
         sysctl_args: &SysctlArgsDeferred,
     ) -> EventResult {
@@ -407,6 +493,8 @@ impl FinalizeBoundary {
             || !mapping.enable_deferred()
             || pti_finalize.state() != State::Ready
             || !pti_finalize.trimmed_noop()
+            || numa_default_policy.state() != State::Ready
+            || !numa_default_policy.trimmed_noop()
             || rcu_boot_end.state() != State::Ready
             || !rcu_boot_end.rcu_boot_ended()
             || sysctl_args.state() != State::Ready
@@ -435,6 +523,7 @@ pub fn finalize_phase_ready(
     init_memory: &InitMemoryCleanupDeferred,
     mapping: &KernelMappingProtectionDeferred,
     pti_finalize: &PtiFinalizeTrimmed,
+    numa_default_policy: &NumaDefaultPolicyTrimmed,
     system_state: &SystemState,
     rcu_core: &RcuCore,
     rcu_boot_end: &RcuBootEnd,
@@ -444,6 +533,10 @@ pub fn finalize_phase_ready(
     async_full_sync.state() == State::Ready
         && async_full_sync.synchronize_full_deferred()
         && async_full_sync.init_work_drain_boundary_preserved()
+        && async_full_sync.waitqueue_deferred()
+        && async_full_sync.async_lock_irqsave_deferred()
+        && async_full_sync.entry_count_atomic_deferred()
+        && async_full_sync.global_cookie_boundary_preserved()
         && init_memory.state() == State::Ready
         && init_memory.system_state_freeing_window_entered()
         && init_memory.kprobe_trimmed_noop()
@@ -457,9 +550,16 @@ pub fn finalize_phase_ready(
         && mapping.rodata_debug_test_trimmed_or_deferred()
         && pti_finalize.state() == State::Ready
         && pti_finalize.trimmed_noop()
+        && numa_default_policy.state() == State::Ready
+        && numa_default_policy.trimmed_noop()
+        && numa_default_policy.config_numa_disabled()
         && system_state.state() == State::Online
         && system_state.value() == SystemStateValue::Running
         && rcu_core.inkernel_boot_ended()
+        && rcu_core.unexpedite_gp_atomic_decrement_recorded()
+        && rcu_core.async_relax_config_lazy_trimmed()
+        && rcu_core.normal_after_boot_write_once_trimmed_or_recorded()
+        && rcu_core.boot_ended_publish_recorded()
         && rcu_boot_end.state() == State::Ready
         && rcu_boot_end.rcu_boot_ended()
         && sysctl_args.state() == State::Ready

@@ -43,8 +43,10 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.kernel_mapping_protection_deferred,
         &ctx.pti_finalize_trimmed,
     )?;
+    ctx.numa_default_policy_trimmed
+        .setup(&ctx.pti_finalize_trimmed, &ctx.system_state)?;
     ctx.rcu_boot_end.setup(
-        &ctx.pti_finalize_trimmed,
+        &ctx.numa_default_policy_trimmed,
         &ctx.system_state,
         &mut ctx.rcu_core,
     )?;
@@ -55,6 +57,7 @@ fn setup_objects(ctx: &mut Context) -> EventResult {
         &ctx.init_memory_cleanup_deferred,
         &ctx.kernel_mapping_protection_deferred,
         &ctx.pti_finalize_trimmed,
+        &ctx.numa_default_policy_trimmed,
         &ctx.rcu_boot_end,
         &ctx.sysctl_args_deferred,
     )
@@ -66,6 +69,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.init_memory_cleanup_deferred,
         &ctx.kernel_mapping_protection_deferred,
         &ctx.pti_finalize_trimmed,
+        &ctx.numa_default_policy_trimmed,
         &ctx.system_state,
         &ctx.rcu_core,
         &ctx.rcu_boot_end,

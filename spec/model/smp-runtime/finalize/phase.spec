@@ -1,14 +1,17 @@
 /*
  * Finalize Phase Specification
  *
- * This is SMP Runtime Phase subphase 5. It covers kernel_init() after
+ * This is SMP Runtime Phase subphase 6. It covers kernel_init() after
  * kernel_init_freeable() returns, from async_synchronize_full() through
  * do_sysctl_args(), before PayloadPhase starts selecting the first payload.
  */
 
 /*
  * AsyncFullSyncDeferred preserves async_synchronize_full(). AsyncCore itself
- * is still deferred in the current object-level prototype.
+ * is still deferred in the current object-level prototype. Linux still
+ * reaches wait_event(async_done, lowest_in_progress(NULL) >= ASYNC_COOKIE_MAX),
+ * where lowest_in_progress() samples async_global_pending under async_lock
+ * with irqsave and async workers wake async_done after dropping the lock.
  */
 object AsyncFullSyncDeferred: KernelObject {
     initial_state: State::Base;
@@ -24,6 +27,14 @@ object AsyncFullSyncDeferred: KernelObject {
                 ensures {
                     async_synchronize_full_deferred();
                     async_init_work_drain_boundary_preserved();
+                    async_full_sync_waitqueue_deferred();
+                    async_full_sync_async_lock_irqsave_deferred();
+                    async_full_sync_entry_count_atomic_deferred();
+                    async_full_sync_global_cookie_boundary_preserved();
+                }
+
+                deferred {
+                    "Linux kernel/async.c::async_synchronize_full() waits through async_synchronize_cookie_domain(ASYNC_COOKIE_MAX, NULL); the async_done waitqueue, async_lock spin_lock_irqsave(), entry_count atomic accounting and worker wake_up() protocol remain AsyncCore runtime deferred in this round.";
                 }
             }
         }
@@ -33,6 +44,10 @@ object AsyncFullSyncDeferred: KernelObject {
         invariant {
             async_synchronize_full_deferred();
             async_init_work_drain_boundary_preserved();
+            async_full_sync_waitqueue_deferred();
+            async_full_sync_async_lock_irqsave_deferred();
+            async_full_sync_entry_count_atomic_deferred();
+            async_full_sync_global_cookie_boundary_preserved();
         }
     }
 }
@@ -138,6 +153,39 @@ object PtiFinalizeTrimmed: KernelObject {
 }
 
 /*
+ * NumaDefaultPolicyTrimmed preserves numa_default_policy(). With CONFIG_NUMA=n
+ * include/linux/mempolicy.h provides an empty inline implementation.
+ */
+object NumaDefaultPolicyTrimmed: KernelObject {
+    initial_state: State::Base;
+
+    state State::Base {
+        transitions {
+            on Transition::Setup -> State::Ready {
+                depends_on {
+                    SystemState.state == State::Online;
+                    PtiFinalizeTrimmed.state == State::Ready;
+                }
+
+                ensures {
+                    system_state_running(SystemState);
+                    numa_default_policy_trimmed();
+                    numa_default_policy_config_numa_disabled();
+                }
+            }
+        }
+    }
+
+    state State::Ready {
+        invariant {
+            system_state_running(SystemState);
+            numa_default_policy_trimmed();
+            numa_default_policy_config_numa_disabled();
+        }
+    }
+}
+
+/*
  * RcuBootEnd records rcu_end_inkernel_boot(). It is an action on RcuCore
  * rather than a new RCU lifecycle state.
  */
@@ -149,7 +197,7 @@ object RcuBootEnd: KernelObject {
         transitions {
             on Transition::Setup -> State::Ready {
                 depends_on {
-                    PtiFinalizeTrimmed.state == State::Ready;
+                    NumaDefaultPolicyTrimmed.state == State::Ready;
                     SystemState.state == State::Online;
                     RcuCore.state == State::Ready;
                 }
@@ -157,6 +205,10 @@ object RcuBootEnd: KernelObject {
                 ensures {
                     system_state_running(SystemState);
                     rcu_inkernel_boot_ended(RcuCore);
+                    rcu_unexpedite_gp_atomic_decrement_recorded(RcuCore);
+                    rcu_async_relax_config_lazy_trimmed(RcuCore);
+                    rcu_normal_after_boot_write_once_trimmed_or_recorded(RcuCore);
+                    rcu_boot_ended_publish_recorded(RcuCore);
                 }
             }
         }
@@ -166,6 +218,10 @@ object RcuBootEnd: KernelObject {
         invariant {
             system_state_running(SystemState);
             rcu_inkernel_boot_ended(RcuCore);
+            rcu_unexpedite_gp_atomic_decrement_recorded(RcuCore);
+            rcu_async_relax_config_lazy_trimmed(RcuCore);
+            rcu_normal_after_boot_write_once_trimmed_or_recorded(RcuCore);
+            rcu_boot_ended_publish_recorded(RcuCore);
         }
     }
 }
@@ -216,6 +272,7 @@ object FinalizeBoundary: KernelObject {
                     InitMemoryCleanupDeferred.state == State::Ready;
                     KernelMappingProtectionDeferred.state == State::Ready;
                     PtiFinalizeTrimmed.state == State::Ready;
+                    NumaDefaultPolicyTrimmed.state == State::Ready;
                     RcuBootEnd.state == State::Ready;
                     SysctlArgsDeferred.state == State::Ready;
                 }
@@ -262,6 +319,7 @@ object FinalizePhase: PhaseObject {
                     KernelMappingProtectionDeferred.Transition::Setup;
                     PtiFinalizeTrimmed.Transition::Setup;
                     SystemState.Transition::Enable;
+                    NumaDefaultPolicyTrimmed.Transition::Setup;
                     RcuBootEnd.Transition::Setup;
                     SysctlArgsDeferred.Transition::Setup;
                     FinalizeBoundary.Transition::Setup;
@@ -274,6 +332,7 @@ object FinalizePhase: PhaseObject {
                     init_memory_free_deferred();
                     kernel_mapping_protection_deferred();
                     pti_finalize_trimmed_noop();
+                    numa_default_policy_trimmed();
                     rcu_inkernel_boot_ended(RcuCore);
                     sysctl_args_apply_deferred();
                     finalize_boundary_ready(FinalizeBoundary);
@@ -290,6 +349,7 @@ object FinalizePhase: PhaseObject {
             KernelMappingProtectionDeferred.state == State::Ready;
             PtiFinalizeTrimmed.state == State::Ready;
             SystemState.state == State::Online;
+            NumaDefaultPolicyTrimmed.state == State::Ready;
             RcuBootEnd.state == State::Ready;
             SysctlArgsDeferred.state == State::Ready;
             FinalizeBoundary.state == State::Ready;
