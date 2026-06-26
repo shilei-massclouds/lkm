@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Unit tests for the stress runner."""
+
+from __future__ import annotations
+
+import unittest
+
+import runner
+
+
+class StressRunnerTests(unittest.TestCase):
+    def test_extracts_user_boot_success_events(self) -> None:
+        events = runner._extract_events("noise\nuser hello\nuser exit status=0\n")
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            ["user_output:UserHello", "user_exit:UserExitStatus:status=0"],
+        )
+
+    def test_extracts_df0001_failure_event(self) -> None:
+        events = runner._extract_events("read user ELF failed\n")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["kind"], "symptom")
+        self.assertEqual(events[0]["name"], "ReadUserElfFailed")
+
+    def test_failure_rules_take_precedence_over_success_rules(self) -> None:
+        rules = [
+            {
+                "id": "df-0001-read-user-elf-failed",
+                "result": "failure",
+                "contains": ["read user ELF failed"],
+            },
+            {
+                "id": "user-boot-success",
+                "result": "success",
+                "contains": ["user exit status=0"],
+            },
+        ]
+        result = runner._classify(
+            "user exit status=0\nread user ELF failed\n",
+            returncode=0,
+            timed_out=False,
+            rules=rules,
+        )
+        self.assertEqual(result["result"], "failure")
+        self.assertEqual(result["id"], "df-0001-read-user-elf-failed")
+
+    def test_records_duplicate_sequence_once(self) -> None:
+        events = runner._extract_events("user hello\nuser exit status=0\n")
+        tokens = [runner._event_token(event) for event in events]
+        run = {
+            "result": "success",
+            "class_id": "user-boot-success",
+            "sequence_hash": runner._sequence_hash(tokens),
+            "run_id": "run-0001",
+            "sequence_tokens": tokens,
+            "events_data": events,
+        }
+        sequences = {}
+        runner._record_sequence(sequences, run)
+        runner._record_sequence(sequences, {**run, "run_id": "run-0002"})
+        self.assertEqual(len(sequences), 1)
+        entry = next(iter(sequences.values()))
+        self.assertEqual(entry["count"], 2)
+        self.assertEqual(entry["first_run"], "run-0001")
+        self.assertEqual(entry["run_ids"], ["run-0001", "run-0002"])
+
+
+if __name__ == "__main__":
+    unittest.main()

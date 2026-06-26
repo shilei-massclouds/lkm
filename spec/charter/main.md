@@ -3544,6 +3544,22 @@ suspend/resume 和真实 edge runtime 都作为明确 deferred 项保留。若�
 
 这两个类别的边界不同：`kunit` 更接近规格对象内部验证，关注局部 API 和状态；`smoke` 更接近产品级启动验证，关注系统最终行为。二者可以共享日志、结果汇总和 Makefile 报告机制，但不应共享同一套生命周期语义。
 
+### Nightly/压力测试与纵向差分
+
+除 `kunit` 和 `smoke` 外，项目还需要一类面向间歇性缺陷和内部可见性验证的 `stress` / `nightly` 测试。该类测试不应被设计成单次 pass/fail 的简单包装，而应被设计成运行证据归档、事件序列聚类和差分诊断系统。第一轮实现位置固定在 `impl/arceos_ex/tests/stress/`，作为压力测试、重复执行配置、分类规则、分析脚本和结果归档的根目录。
+
+`stress` 测试的基本输入是一个可重复执行的 case。每个 case 应至少描述执行命令、重复次数、单轮超时、`APP` / `PROBE` / `LOG` 等参数、输出目录和失败分类规则。针对 `docs/DEFECTS.md` 中记录的间歇性问题，case 必须保留普通执行路径；例如 DF-0001 的 `make run APP=user-boot` 不能只用 `PROBE=user-boot` 或其它改变时序的 probe 路径替代。
+
+每次执行都应产生独立 run 记录，并保留原始日志和结构化事件点观察记录。事件点可以先由当前 stdout、checkpoint、`LOG=trace` 和 EventStream 输出归一化得到，必要字段包括全局序号、事件类型、事件名、原始文本和所属 case/run；CPU、task、IRQ/task context、对象、状态和阶段信息可以作为可选字段逐步补充。第一轮目标是让当前内部可见性真实接受压力测试验证，而不是立即重写成完整 Linux-like trace。
+
+重复执行的结果应先按结果类别划分为 `success` 和 `failure`。`failure` 还应按现象细分，例如 `read user ELF failed`、`InitcallPhase ready failed`、`timeout`、`panic` 和 `unknown failure`。每个类别下不应假设只有一条标准序列：成功结果可能是一组成功序列集合，失败的每个现象类别也可能分别包含多组序列集合。
+
+序列归档应采用去重策略。每个 run 的事件序列经归一化后计算稳定签名；同一类别、同一失败子类下，重复序列只保存第一次出现的代表样本，后续 run 只累加出现次数并记录 run id 列表。这样既保留原始失败样本，又避免大量重复日志淹没真正不同的执行路径。
+
+分析阶段应对每个类别和子类提取特征。首轮特征至少包括：共同前缀、必然出现的事件集合、从不出现的事件集合、关键事件顺序、缺失事件、多出的异常事件、最接近的成功序列，以及与成功集合相比的第一个分叉点。诊断报告的重点不是只统计失败率，而是对每一类失败序列与成功序列集合进行对比，找到差异开始的位置，并把该位置映射回阶段、对象、checkpoint 或需要新增观测的代码路径。
+
+trace 增强应由上述差分结果驱动。如果当前 checkpoint/trace/EventStream 已能定位分叉点，则先用现有机制闭环；如果只能看到外部失败现象而无法解释内部差异，再补充更细粒度的观测点，例如 virtio-blk completion、VFS/ext2 lookup/read、initcall ready predicate、CPU/task 归属、IRQ/task context 或事件序号。Linux-like trace 是内部可见性不足时的补强方向，不是 `stress` 测试落地前的前置条件。
+
 ## 兼容性策略
 
 待补充。

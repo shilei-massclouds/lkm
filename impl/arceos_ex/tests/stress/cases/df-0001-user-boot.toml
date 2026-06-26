@@ -1,0 +1,11 @@
+name = "df-0001-user-boot"
+description = "Repeat the ordinary user-boot path to reproduce DF-0001."
+default_runs = 30
+timeout_seconds = 120
+working_directory = "."
+command = ["make", "run", "APP=user-boot"]
+classifier = "../classifiers/defects.toml"
+
+[metadata]
+defect = "DF-0001"
+ordinary_path_required = true

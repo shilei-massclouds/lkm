@@ -1,0 +1,29 @@
+[[rules]]
+id = "df-0001-read-user-elf-failed"
+result = "failure"
+contains = ["read user ELF failed"]
+description = "DF-0001: user-boot could not read /sbin/init."
+
+[[rules]]
+id = "df-0002-initcall-ready-failed"
+result = "failure"
+contains = ["arceos_ex initcall event failed"]
+description = "DF-0002 style initcall phase ready failure."
+
+[[rules]]
+id = "panic"
+result = "failure"
+contains = ["arceos_ex panic"]
+description = "Kernel panic was printed."
+
+[[rules]]
+id = "allocation-error"
+result = "failure"
+contains = ["arceos_ex allocation error"]
+description = "Kernel allocation error was printed."
+
+[[rules]]
+id = "user-boot-success"
+result = "success"
+contains = ["user exit status=0"]
+description = "User init reached exit status 0."
