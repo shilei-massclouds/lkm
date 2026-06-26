@@ -7,7 +7,8 @@
 
 /*
  * CpusetSmpTrimmed 表示 cpuset_init_smp() 的当前位置。当前配置
- * CONFIG_CGROUPS=n，因此该路径为空实现。
+ * CONFIG_CGROUPS=n，CONFIG_CPUSETS 未选中，因此该路径经
+ * include/linux/cpuset.h 折叠为空实现。
  */
 object CpusetSmpTrimmed: KernelObject {
     initial_state: State::Base;
@@ -21,6 +22,8 @@ object CpusetSmpTrimmed: KernelObject {
 
                 ensures {
                     cpuset_smp_trimmed_noop();
+                    cpuset_smp_trimmed_because_config_cpusets_disabled();
+                    cpuset_smp_trimmed_because_config_cgroups_disabled();
                 }
             }
         }
@@ -29,6 +32,8 @@ object CpusetSmpTrimmed: KernelObject {
     state State::Ready {
         invariant {
             cpuset_smp_trimmed_noop();
+            cpuset_smp_trimmed_because_config_cpusets_disabled();
+            cpuset_smp_trimmed_because_config_cgroups_disabled();
         }
     }
 }
@@ -37,8 +42,9 @@ object CpusetSmpTrimmed: KernelObject {
  * DriverCoreBase 表示 driver_init() 中 platform_bus_init() 的必要前置
  * registry 基础。当前只把 devices_init() 与 buses_init() 升级为 formal
  * 事实：device_register(&platform_bus) 依赖 devices_kset，bus_register()
- * 依赖 bus_kset。bdi/devtmpfs/classes/firmware/hypervisor/of_core 等
- * platform_bus_init() 不直接依赖的前置调用只保留 deferred 位置。
+ * 依赖 bus_kset。classes_init() 与 firmware_init() 的 kset/kobject
+ * 前置也显式记录；bdi/devtmpfs/of_core 等仍保持 deferred，不能解释为
+ * no-op。当前 CONFIG_SYS_HYPERVISOR 未选中，hypervisor_init() 为 trimmed。
  */
 object DriverCoreBase: DeviceObject {
     initial_state: State::Base;
@@ -55,8 +61,24 @@ object DriverCoreBase: DeviceObject {
                 ensures {
                     driver_core_device_registry_ready(DriverCoreBase);
                     driver_core_bus_registry_ready(DriverCoreBase);
+                    driver_core_class_registry_ready(DriverCoreBase);
+                    driver_core_firmware_kobject_ready(DriverCoreBase);
+                    driver_core_backing_dev_info_deferred(DriverCoreBase);
+                    driver_core_device_link_workqueue_deferred(DriverCoreBase);
+                    driver_core_devtmpfs_init_deferred(DriverCoreBase);
+                    driver_core_devtmpfs_sync_primitives_deferred(DriverCoreBase);
+                    driver_core_of_core_init_deferred(DriverCoreBase);
+                    driver_core_of_core_mutex_guard_deferred(DriverCoreBase);
+                    driver_core_hypervisor_trimmed_noop(DriverCoreBase);
+                    driver_core_hypervisor_trimmed_because_config_sys_hypervisor_disabled(DriverCoreBase);
                     driver_core_pre_platform_deferred();
                     driver_core_pre_platform_order_preserved();
+                }
+
+                deferred {
+                    "bdi_init(&noop_backing_dev_info) 暂缓：backing-dev writeback 语义不属于当前 platform bus 前置闭环。";
+                    "devtmpfs_init() 在当前 CONFIG_DEVTMPFS=y/CONFIG_TMPFS=y 下是真实启用路径，包含 req_lock spinlock、setup_done completion 和 kdevtmpfs kthread；本轮只保留 driver_init() 位置，不把它等同于当前 DevFs 对象已完成。";
+                    "of_core_init() 在 CONFIG_OF=y 下是真实启用路径，Linux 使用 of_mutex 保护 OF sysfs/phandle-cache 建立；本轮只记录该 guard/deferred 责任，OF runtime/dynamic devtree_lock 路径不展开。";
                 }
             }
         }
@@ -66,6 +88,16 @@ object DriverCoreBase: DeviceObject {
         invariant {
             driver_core_device_registry_ready(DriverCoreBase);
             driver_core_bus_registry_ready(DriverCoreBase);
+            driver_core_class_registry_ready(DriverCoreBase);
+            driver_core_firmware_kobject_ready(DriverCoreBase);
+            driver_core_backing_dev_info_deferred(DriverCoreBase);
+            driver_core_device_link_workqueue_deferred(DriverCoreBase);
+            driver_core_devtmpfs_init_deferred(DriverCoreBase);
+            driver_core_devtmpfs_sync_primitives_deferred(DriverCoreBase);
+            driver_core_of_core_init_deferred(DriverCoreBase);
+            driver_core_of_core_mutex_guard_deferred(DriverCoreBase);
+            driver_core_hypervisor_trimmed_noop(DriverCoreBase);
+            driver_core_hypervisor_trimmed_because_config_sys_hypervisor_disabled(DriverCoreBase);
             driver_core_pre_platform_deferred();
             driver_core_pre_platform_order_preserved();
         }
@@ -338,7 +370,8 @@ object PlatformBus: PlatformBusType {
  * DriverCoreDeferred 现在只表示 platform_bus_init() 之后仍未展开的
  * driver_init() 尾部：auxiliary_bus_init(), memory_dev_init(),
  * node_dev_init(), cpu_dev_init(), container_dev_init()。这些不是当前
- * platform_bus_init() 完成条件。
+ * platform_bus_init() 完成条件，但在当前 CONFIG_SYSFS=y/SMP=y 路径下
+ * 是真实 driver-core/sysfs 调用点，必须显式 deferred。
  */
 object DriverCoreDeferred: DeviceObject {
     initial_state: State::Base;
@@ -351,8 +384,17 @@ object DriverCoreDeferred: DeviceObject {
                 }
 
                 ensures {
+                    driver_core_auxiliary_bus_deferred(DriverCoreDeferred);
+                    driver_core_memory_dev_deferred(DriverCoreDeferred);
+                    driver_core_node_dev_deferred(DriverCoreDeferred);
+                    driver_core_cpu_dev_deferred(DriverCoreDeferred);
+                    driver_core_container_dev_deferred(DriverCoreDeferred);
                     driver_core_post_platform_deferred();
                     driver_model_entry_position_preserved();
+                }
+
+                deferred {
+                    "driver_init() 的 auxiliary_bus_init()/memory_dev_init()/node_dev_init()/cpu_dev_init()/container_dev_init() 尾部暂缓：这些路径建立后续 system bus、memory/node/cpu/container sysfs 视图和热插拔观测，不作为当前 platform_bus_init() 的完成条件。";
                 }
             }
         }
@@ -360,6 +402,11 @@ object DriverCoreDeferred: DeviceObject {
 
     state State::Ready {
         invariant {
+            driver_core_auxiliary_bus_deferred(DriverCoreDeferred);
+            driver_core_memory_dev_deferred(DriverCoreDeferred);
+            driver_core_node_dev_deferred(DriverCoreDeferred);
+            driver_core_cpu_dev_deferred(DriverCoreDeferred);
+            driver_core_container_dev_deferred(DriverCoreDeferred);
             driver_core_post_platform_deferred();
             driver_model_entry_position_preserved();
         }
@@ -367,8 +414,10 @@ object DriverCoreDeferred: DeviceObject {
 }
 
 /*
- * IrqProcViewDeferred 保留 init_irq_proc() 的位置。该路径服务 procfs
- * 下的 IRQ 观测/配置导出，不改变当前 IRQ dispatch 主线。
+ * IrqProcViewDeferred 保留 init_irq_proc() 的位置。当前 CONFIG_PROC_FS=y、
+ * CONFIG_SMP=y 且 CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK=y，因此该路径
+ * 服务 /proc/irq、default_smp_affinity 和现有 irq_desc 观测/配置导出；
+ * 本轮不把 procfs IRQ 视图接入当前 IRQ dispatch 主线。
  */
 object IrqProcViewDeferred: KernelObject {
     initial_state: State::Base;
@@ -386,8 +435,17 @@ object IrqProcViewDeferred: KernelObject {
                 }
 
                 ensures {
+                    irq_proc_view_procfs_config_enabled(IrqProcViewDeferred);
+                    irq_proc_view_default_smp_affinity_deferred(IrqProcViewDeferred);
+                    irq_proc_view_existing_irq_desc_exports_deferred(IrqProcViewDeferred);
+                    irq_proc_view_effective_affinity_exports_deferred(IrqProcViewDeferred);
                     irq_proc_view_setup_deferred();
                     proc_irq_export_deferred();
+                }
+
+                deferred {
+                    "init_irq_proc() 在当前 CONFIG_PROC_FS=y 下真实创建 /proc/irq，并在 CONFIG_SMP=y 下创建 default_smp_affinity；本轮只保留导出视图，不展开 proc_dir_entry 生命周期或每个 irq_desc 的 proc 文件。";
+                    "CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK=y 的 effective_affinity proc 输出保留为 deferred，不作为当前 IRQ dispatch/PLIC handler 主线的同步依据。";
                 }
             }
         }
@@ -395,6 +453,10 @@ object IrqProcViewDeferred: KernelObject {
 
     state State::Ready {
         invariant {
+            irq_proc_view_procfs_config_enabled(IrqProcViewDeferred);
+            irq_proc_view_default_smp_affinity_deferred(IrqProcViewDeferred);
+            irq_proc_view_existing_irq_desc_exports_deferred(IrqProcViewDeferred);
+            irq_proc_view_effective_affinity_exports_deferred(IrqProcViewDeferred);
             irq_proc_view_setup_deferred();
             proc_irq_export_deferred();
         }
@@ -402,8 +464,9 @@ object IrqProcViewDeferred: KernelObject {
 }
 
 /*
- * CtorTable 表示 do_ctors() 的构造函数表位置。当前对象级实现只保留
- * 表边界；无构造函数条目时记录为 trimmed/empty。
+ * CtorTable 表示 do_ctors() 的构造函数表位置。当前 .config 未选择
+ * CONFIG_CONSTRUCTORS，因此 Linux 条件体不执行；对象级实现保留表边界
+ * 并记录为 trimmed/empty。
  */
 object CtorTable: KernelObject {
     initial_state: State::Base;
@@ -419,6 +482,7 @@ object CtorTable: KernelObject {
                 ensures {
                     ctor_table_position_preserved(CtorTable, Lds);
                     constructors_trimmed_or_empty(CtorTable);
+                    constructors_trimmed_because_config_constructors_disabled(CtorTable);
                 }
             }
         }
@@ -428,6 +492,7 @@ object CtorTable: KernelObject {
         invariant {
             ctor_table_position_preserved(CtorTable, Lds);
             constructors_trimmed_or_empty(CtorTable);
+            constructors_trimmed_because_config_constructors_disabled(CtorTable);
         }
     }
 }
@@ -460,6 +525,10 @@ object InitcallTable: InitcallTableType {
                     initcall_table_registered_entries_collected(InitcallTable);
                     initcall_table_level_mapping_ready(InitcallTable);
                     initcall_table_run_levels_ready(InitcallTable);
+                    initcall_table_level_order_ready(InitcallTable);
+                    initcall_table_same_level_order_unconstrained(InitcallTable);
+                    initcall_table_same_level_permutation_proof_deferred(InitcallTable);
+                    initcall_table_same_level_permutation_nightly_test_deferred(InitcallTable);
                     initcall_table_entry_operation_bindings_ready(InitcallTable);
                     initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
                     initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::Ns16550aPlatformDriver);
@@ -477,6 +546,10 @@ object InitcallTable: InitcallTableType {
             initcall_table_registered_entries_collected(InitcallTable);
             initcall_table_level_mapping_ready(InitcallTable);
             initcall_table_run_levels_ready(InitcallTable);
+            initcall_table_level_order_ready(InitcallTable);
+            initcall_table_same_level_order_unconstrained(InitcallTable);
+            initcall_table_same_level_permutation_proof_deferred(InitcallTable);
+            initcall_table_same_level_permutation_nightly_test_deferred(InitcallTable);
             initcall_table_entry_operation_bindings_ready(InitcallTable);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::Ns16550aPlatformDriver);
@@ -498,17 +571,30 @@ object InitcallTable: InitcallTableType {
                     initcall_table_registered_entries_collected(InitcallTable);
                     initcall_table_level_mapping_ready(InitcallTable);
                     initcall_table_run_levels_ready(InitcallTable);
+                    initcall_table_level_order_ready(InitcallTable);
+                    initcall_table_same_level_order_unconstrained(InitcallTable);
+                    initcall_table_same_level_permutation_proof_deferred(InitcallTable);
+                    initcall_table_same_level_permutation_nightly_test_deferred(InitcallTable);
                     initcall_table_entry_operation_bindings_ready(InitcallTable);
                     initcall_table_all_levels_ran(InitcallTable);
+                    initcall_table_dispatcher_entry_agnostic(InitcallTable);
                     PlatformBus.Action::OfPlatformDefaultPopulateInit;
                     initcall_command_line_scratch_reused_per_level(InitcallTable, SavedCommandLine);
                     initcall_param_parser_applied(InitcallTable);
                     initcall_filter_applied(InitcallTable);
+                    initcall_blacklist_filter_checked(InitcallTable);
+                    initcall_blacklist_no_entries_skipped(InitcallTable);
                     initcall_run_context_checked(InitcallTable);
                     initcall_entry_invoked(InitcallEntry::OfPlatformDefaultPopulate);
                     initcall_entry_return_recorded(InitcallEntry::OfPlatformDefaultPopulate);
                     initcall_entry_skipped_recorded(InitcallEntry::OfPlatformDefaultPopulate);
                     initcall_entry_run_context_checked(InitcallEntry::OfPlatformDefaultPopulate);
+                    initcall_entry_static_descriptor_invoked(InitcallEntry::OfPlatformDefaultPopulate);
+                    initcall_entry_preempt_count_snapshot_recorded(InitcallEntry::OfPlatformDefaultPopulate);
+                    initcall_entry_preempt_imbalance_repaired_or_absent(InitcallEntry::OfPlatformDefaultPopulate);
+                    initcall_entry_irq_disabled_repaired_or_absent(InitcallEntry::OfPlatformDefaultPopulate);
+                    initcall_entry_trace_boundary_recorded(InitcallEntry::OfPlatformDefaultPopulate);
+                    initcall_entry_latent_entropy_accounted(InitcallEntry::OfPlatformDefaultPopulate);
                     of_platform_default_populate_source_tree_ready(PlatformBus, DeviceTree);
                     of_platform_default_populate_root_children_scanned(PlatformBus, DeviceTree);
                     of_platform_default_populate_strict_compatible_required(PlatformBus);
@@ -537,6 +623,12 @@ object InitcallTable: InitcallTableType {
                     initcall_entry_return_recorded(InitcallEntry::Ns16550aPlatformDriver);
                     initcall_entry_skipped_recorded(InitcallEntry::Ns16550aPlatformDriver);
                     initcall_entry_run_context_checked(InitcallEntry::Ns16550aPlatformDriver);
+                    initcall_entry_static_descriptor_invoked(InitcallEntry::Ns16550aPlatformDriver);
+                    initcall_entry_preempt_count_snapshot_recorded(InitcallEntry::Ns16550aPlatformDriver);
+                    initcall_entry_preempt_imbalance_repaired_or_absent(InitcallEntry::Ns16550aPlatformDriver);
+                    initcall_entry_irq_disabled_repaired_or_absent(InitcallEntry::Ns16550aPlatformDriver);
+                    initcall_entry_trace_boundary_recorded(InitcallEntry::Ns16550aPlatformDriver);
+                    initcall_entry_latent_entropy_accounted(InitcallEntry::Ns16550aPlatformDriver);
                     platform_bus_driver_registered(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver);
                     platform_bus_device_discovered(PlatformBus, DeviceRef::Ns16550aSerial);
                     platform_bus_match_attempted(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
@@ -553,6 +645,11 @@ object InitcallTable: InitcallTableType {
                     bus_type_drivers_klist_nonempty(PlatformBus);
                     device_driver_ref_set_nonempty(PlatformBusSubsysPrivate.klist_drivers);
                 }
+
+                deferred {
+                    "同级 initcall 的顺序无关性暂不由当前 derivation 证明；当前模型只固定 Linux level order，同级 entries 作为该 level 的集合效果处理。";
+                    "后续若要证明同级顺序无关，需要为 entry effect 建立 commutativity/observational-equivalence 证明；在证明能力具备前，由 nightly permutation 测试比较 canonical final facts。";
+                }
             }
         }
     }
@@ -565,19 +662,32 @@ object InitcallTable: InitcallTableType {
             initcall_table_registered_entries_collected(InitcallTable);
             initcall_table_level_mapping_ready(InitcallTable);
             initcall_table_run_levels_ready(InitcallTable);
+            initcall_table_level_order_ready(InitcallTable);
+            initcall_table_same_level_order_unconstrained(InitcallTable);
+            initcall_table_same_level_permutation_proof_deferred(InitcallTable);
+            initcall_table_same_level_permutation_nightly_test_deferred(InitcallTable);
             initcall_table_entry_operation_bindings_ready(InitcallTable);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::ArchSync, InitcallEntry::OfPlatformDefaultPopulate);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::Ns16550aPlatformDriver);
             initcall_table_entry_registered(InitcallTable, InitcallLevel::Device, InitcallEntry::VirtioMmioPlatformDriver);
             initcall_table_all_levels_ran(InitcallTable);
+            initcall_table_dispatcher_entry_agnostic(InitcallTable);
             initcall_entry_invoked(InitcallEntry::OfPlatformDefaultPopulate);
             initcall_command_line_scratch_reused_per_level(InitcallTable, SavedCommandLine);
             initcall_param_parser_applied(InitcallTable);
             initcall_filter_applied(InitcallTable);
+            initcall_blacklist_filter_checked(InitcallTable);
+            initcall_blacklist_no_entries_skipped(InitcallTable);
             initcall_run_context_checked(InitcallTable);
             initcall_entry_return_recorded(InitcallEntry::OfPlatformDefaultPopulate);
             initcall_entry_skipped_recorded(InitcallEntry::OfPlatformDefaultPopulate);
             initcall_entry_run_context_checked(InitcallEntry::OfPlatformDefaultPopulate);
+            initcall_entry_static_descriptor_invoked(InitcallEntry::OfPlatformDefaultPopulate);
+            initcall_entry_preempt_count_snapshot_recorded(InitcallEntry::OfPlatformDefaultPopulate);
+            initcall_entry_preempt_imbalance_repaired_or_absent(InitcallEntry::OfPlatformDefaultPopulate);
+            initcall_entry_irq_disabled_repaired_or_absent(InitcallEntry::OfPlatformDefaultPopulate);
+            initcall_entry_trace_boundary_recorded(InitcallEntry::OfPlatformDefaultPopulate);
+            initcall_entry_latent_entropy_accounted(InitcallEntry::OfPlatformDefaultPopulate);
             of_platform_default_populate_source_tree_ready(PlatformBus, DeviceTree);
             of_platform_default_populate_root_children_scanned(PlatformBus, DeviceTree);
             of_platform_default_populate_strict_compatible_required(PlatformBus);
@@ -605,6 +715,12 @@ object InitcallTable: InitcallTableType {
             initcall_entry_return_recorded(InitcallEntry::Ns16550aPlatformDriver);
             initcall_entry_skipped_recorded(InitcallEntry::Ns16550aPlatformDriver);
             initcall_entry_run_context_checked(InitcallEntry::Ns16550aPlatformDriver);
+            initcall_entry_static_descriptor_invoked(InitcallEntry::Ns16550aPlatformDriver);
+            initcall_entry_preempt_count_snapshot_recorded(InitcallEntry::Ns16550aPlatformDriver);
+            initcall_entry_preempt_imbalance_repaired_or_absent(InitcallEntry::Ns16550aPlatformDriver);
+            initcall_entry_irq_disabled_repaired_or_absent(InitcallEntry::Ns16550aPlatformDriver);
+            initcall_entry_trace_boundary_recorded(InitcallEntry::Ns16550aPlatformDriver);
+            initcall_entry_latent_entropy_accounted(InitcallEntry::Ns16550aPlatformDriver);
             platform_bus_driver_registered(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver);
             platform_bus_device_discovered(PlatformBus, DeviceRef::Ns16550aSerial);
             platform_bus_match_attempted(PlatformBus, DeviceDriverRef::Ns16550aPlatformDriver, DeviceRef::Ns16550aSerial);
@@ -726,8 +842,20 @@ object InitcallPhase: PhaseObject {
                 ensures {
                     initcall_phase_ready(InitcallPhase);
                     cpuset_smp_trimmed_noop();
+                    cpuset_smp_trimmed_because_config_cpusets_disabled();
+                    cpuset_smp_trimmed_because_config_cgroups_disabled();
                     driver_core_device_registry_ready(DriverCoreBase);
                     driver_core_bus_registry_ready(DriverCoreBase);
+                    driver_core_class_registry_ready(DriverCoreBase);
+                    driver_core_firmware_kobject_ready(DriverCoreBase);
+                    driver_core_backing_dev_info_deferred(DriverCoreBase);
+                    driver_core_device_link_workqueue_deferred(DriverCoreBase);
+                    driver_core_devtmpfs_init_deferred(DriverCoreBase);
+                    driver_core_devtmpfs_sync_primitives_deferred(DriverCoreBase);
+                    driver_core_of_core_init_deferred(DriverCoreBase);
+                    driver_core_of_core_mutex_guard_deferred(DriverCoreBase);
+                    driver_core_hypervisor_trimmed_noop(DriverCoreBase);
+                    driver_core_hypervisor_trimmed_because_config_sys_hypervisor_disabled(DriverCoreBase);
                     platform_bus_static_device_registered(PlatformBusRootDevice);
                     platform_bus_type_registered(PlatformBus);
                     virtio_bus_registered(VirtioBus);
@@ -774,9 +902,19 @@ object InitcallPhase: PhaseObject {
                     devfs_hwrng_node_listed(DevFs);
                     devfs_block_node_listed(DevFs);
                     devfs_device_file_ops_deferred(DevFs);
+                    driver_core_auxiliary_bus_deferred(DriverCoreDeferred);
+                    driver_core_memory_dev_deferred(DriverCoreDeferred);
+                    driver_core_node_dev_deferred(DriverCoreDeferred);
+                    driver_core_cpu_dev_deferred(DriverCoreDeferred);
+                    driver_core_container_dev_deferred(DriverCoreDeferred);
                     driver_core_post_platform_deferred();
+                    irq_proc_view_procfs_config_enabled(IrqProcViewDeferred);
+                    irq_proc_view_default_smp_affinity_deferred(IrqProcViewDeferred);
+                    irq_proc_view_existing_irq_desc_exports_deferred(IrqProcViewDeferred);
+                    irq_proc_view_effective_affinity_exports_deferred(IrqProcViewDeferred);
                     irq_proc_view_setup_deferred();
                     constructors_trimmed_or_empty(CtorTable);
+                    constructors_trimmed_because_config_constructors_disabled(CtorTable);
                     initcall_table_registered_entries_collected(InitcallTable);
                     initcall_table_all_levels_ran(InitcallTable);
                     of_platform_default_populate_candidates_identified(PlatformBus);
@@ -911,6 +1049,28 @@ object InitcallPhase: PhaseObject {
             InitcallTable.state == State::Ready;
             InitcallBoundary.state == State::Ready;
             initcall_phase_ready(InitcallPhase);
+            cpuset_smp_trimmed_because_config_cpusets_disabled();
+            cpuset_smp_trimmed_because_config_cgroups_disabled();
+            driver_core_class_registry_ready(DriverCoreBase);
+            driver_core_firmware_kobject_ready(DriverCoreBase);
+            driver_core_backing_dev_info_deferred(DriverCoreBase);
+            driver_core_device_link_workqueue_deferred(DriverCoreBase);
+            driver_core_devtmpfs_init_deferred(DriverCoreBase);
+            driver_core_devtmpfs_sync_primitives_deferred(DriverCoreBase);
+            driver_core_of_core_init_deferred(DriverCoreBase);
+            driver_core_of_core_mutex_guard_deferred(DriverCoreBase);
+            driver_core_hypervisor_trimmed_noop(DriverCoreBase);
+            driver_core_hypervisor_trimmed_because_config_sys_hypervisor_disabled(DriverCoreBase);
+            driver_core_auxiliary_bus_deferred(DriverCoreDeferred);
+            driver_core_memory_dev_deferred(DriverCoreDeferred);
+            driver_core_node_dev_deferred(DriverCoreDeferred);
+            driver_core_cpu_dev_deferred(DriverCoreDeferred);
+            driver_core_container_dev_deferred(DriverCoreDeferred);
+            irq_proc_view_procfs_config_enabled(IrqProcViewDeferred);
+            irq_proc_view_default_smp_affinity_deferred(IrqProcViewDeferred);
+            irq_proc_view_existing_irq_desc_exports_deferred(IrqProcViewDeferred);
+            irq_proc_view_effective_affinity_exports_deferred(IrqProcViewDeferred);
+            constructors_trimmed_because_config_constructors_disabled(CtorTable);
         }
     }
 }

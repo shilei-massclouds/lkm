@@ -258,6 +258,11 @@ predicate arceos_ex_must_model_cpu_instances_with_unified_cpu_type() -> bool;
 predicate arceos_ex_must_cpu_group_index_cpu_refs_by_logical_id() -> bool;
 predicate arceos_ex_must_cpu_group_not_own_cpu_bodies() -> bool;
 predicate arceos_ex_must_cpu_state_be_instance_facts_and_group_set_views() -> bool;
+predicate arceos_ex_must_initcall_classify_pre_do_initcalls_by_config() -> bool;
+predicate arceos_ex_must_initcall_record_driver_init_deferred_sync_primitives() -> bool;
+predicate arceos_ex_must_initcall_dispatcher_remain_entry_agnostic() -> bool;
+predicate arceos_ex_must_initcall_record_do_one_initcall_context_repair() -> bool;
+predicate arceos_ex_must_initcall_same_level_order_independence_defer_to_proof_or_nightly() -> bool;
 predicate arceos_ex_must_not_generate_live_ap_current_cpu_before_entry() -> bool;
 predicate arceos_ex_must_cpu_group_lowering_mark_boot_secondary_split_transitional() -> bool;
 predicate arceos_ex_must_cpu_group_smoke_cover_index_and_sets() -> bool;
@@ -3203,6 +3208,29 @@ type ArceosExInitcallCodingMust {
         arceos_ex_must_initcall_run_after_runtime_core();
 
         /*
+         * Pre-do_initcalls classification:
+         *
+         * The cpuset_init_smp(), driver_init(), init_irq_proc() and
+         * do_ctors() slice must be classified against the current
+         * linux-6.12.37 .config before auditing do_initcalls(). Disabled
+         * CONFIG_CPUSETS/CONFIG_CGROUPS and CONFIG_CONSTRUCTORS paths are
+         * trimmed; enabled driver-core/procfs paths must be deferred or
+         * formal explicitly, not treated as no-op.
+         */
+        arceos_ex_must_initcall_classify_pre_do_initcalls_by_config();
+
+        /*
+         * Deferred synchronization:
+         *
+         * driver_init() deferred paths must still record Linux-visible
+         * synchronization responsibilities: devtmpfs req_lock/completion/
+         * kthread, of_core_init() of_mutex, and bus_register()'s subsys
+         * mutex/klist initialization. The boot-only context does not erase
+         * those protocols.
+         */
+        arceos_ex_must_initcall_record_driver_init_deferred_sync_primitives();
+
+        /*
          * Deferred heavy subsystems:
          *
          * DriverCore and IrqProcView must remain explicit deferred
@@ -3274,6 +3302,39 @@ type ArceosExInitcallCodingMust {
          * promoting every entry to a top-level object.
          */
         arceos_ex_must_initcall_run_static_initcall_table_summary();
+
+        /*
+         * Dispatcher shape:
+         *
+         * InitcallTable.setup() must stay Linux-like: the dispatcher iterates
+         * static ranges in level order and invokes function pointers from the
+         * descriptors. It must not branch on entry names, owners or concrete
+         * operation identities; target effects belong to the entry wrappers
+         * and owner objects.
+         */
+        arceos_ex_must_initcall_dispatcher_remain_entry_agnostic();
+
+        /*
+         * do_one_initcall context repair:
+         *
+         * Per-entry records must preserve Linux do_one_initcall() observable
+         * responsibilities: blacklist/filter check, trace start/finish
+         * boundary, return recording, preempt-count snapshot with imbalance
+         * repair-or-absent, disabled-IRQ repair-or-absent, and latent entropy
+         * accounting. A boot-only context may simplify the implementation but
+         * must not erase these facts.
+         */
+        arceos_ex_must_initcall_record_do_one_initcall_context_repair();
+
+        /*
+         * Same-level order:
+         *
+         * The formal model fixes inter-level order only. Same-level order is
+         * not a semantic guarantee unless an entry-effect commutativity proof
+         * exists; until then this target records the proof gap and expects a
+         * nightly permutation test to compare canonical final facts.
+         */
+        arceos_ex_must_initcall_same_level_order_independence_defer_to_proof_or_nightly();
 
         /*
          * Mechanism/effect split:

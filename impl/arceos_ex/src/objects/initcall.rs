@@ -311,6 +311,12 @@ pub struct InitcallRunRecord {
     skipped: bool,
     return_code: isize,
     run_context_checked: bool,
+    static_descriptor_invoked: bool,
+    preempt_count_snapshot_recorded: bool,
+    preempt_imbalance_repaired_or_absent: bool,
+    irq_disabled_repaired_or_absent: bool,
+    trace_boundary_recorded: bool,
+    latent_entropy_accounted: bool,
 }
 
 impl InitcallRunRecord {
@@ -321,6 +327,12 @@ impl InitcallRunRecord {
             skipped: false,
             return_code: 0,
             run_context_checked: false,
+            static_descriptor_invoked: false,
+            preempt_count_snapshot_recorded: false,
+            preempt_imbalance_repaired_or_absent: false,
+            irq_disabled_repaired_or_absent: false,
+            trace_boundary_recorded: false,
+            latent_entropy_accounted: false,
         }
     }
 
@@ -343,11 +355,37 @@ impl InitcallRunRecord {
     pub const fn run_context_checked(&self) -> bool {
         self.run_context_checked
     }
+
+    pub const fn static_descriptor_invoked(&self) -> bool {
+        self.static_descriptor_invoked
+    }
+
+    pub const fn preempt_count_snapshot_recorded(&self) -> bool {
+        self.preempt_count_snapshot_recorded
+    }
+
+    pub const fn preempt_imbalance_repaired_or_absent(&self) -> bool {
+        self.preempt_imbalance_repaired_or_absent
+    }
+
+    pub const fn irq_disabled_repaired_or_absent(&self) -> bool {
+        self.irq_disabled_repaired_or_absent
+    }
+
+    pub const fn trace_boundary_recorded(&self) -> bool {
+        self.trace_boundary_recorded
+    }
+
+    pub const fn latent_entropy_accounted(&self) -> bool {
+        self.latent_entropy_accounted
+    }
 }
 
 pub struct CpusetSmpTrimmed {
     lifecycle: Lifecycle,
     trimmed_noop: bool,
+    config_cpusets_disabled: bool,
+    config_cgroups_disabled: bool,
 }
 
 impl CpusetSmpTrimmed {
@@ -355,6 +393,8 @@ impl CpusetSmpTrimmed {
         Self {
             lifecycle: Lifecycle::new(State::Base),
             trimmed_noop: false,
+            config_cpusets_disabled: false,
+            config_cgroups_disabled: false,
         }
     }
 
@@ -364,6 +404,14 @@ impl CpusetSmpTrimmed {
 
     pub const fn trimmed_noop(&self) -> bool {
         self.trimmed_noop
+    }
+
+    pub const fn config_cpusets_disabled(&self) -> bool {
+        self.config_cpusets_disabled
+    }
+
+    pub const fn config_cgroups_disabled(&self) -> bool {
+        self.config_cgroups_disabled
     }
 
     pub fn setup(&mut self, runtime_core_boundary: &RuntimeCoreBoundary) -> EventResult {
@@ -380,6 +428,8 @@ impl CpusetSmpTrimmed {
         }
 
         self.trimmed_noop = true;
+        self.config_cpusets_disabled = true;
+        self.config_cgroups_disabled = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -393,6 +443,16 @@ pub struct DriverCoreBase {
     lifecycle: Lifecycle,
     device_registry_ready: bool,
     bus_registry_ready: bool,
+    class_registry_ready: bool,
+    firmware_kobject_ready: bool,
+    backing_dev_info_deferred: bool,
+    device_link_workqueue_deferred: bool,
+    devtmpfs_init_deferred: bool,
+    devtmpfs_sync_primitives_deferred: bool,
+    of_core_init_deferred: bool,
+    of_core_mutex_guard_deferred: bool,
+    hypervisor_trimmed_noop: bool,
+    hypervisor_config_disabled: bool,
     pre_platform_deferred: bool,
     pre_platform_order_preserved: bool,
 }
@@ -403,6 +463,16 @@ impl DriverCoreBase {
             lifecycle: Lifecycle::new(State::Base),
             device_registry_ready: false,
             bus_registry_ready: false,
+            class_registry_ready: false,
+            firmware_kobject_ready: false,
+            backing_dev_info_deferred: false,
+            device_link_workqueue_deferred: false,
+            devtmpfs_init_deferred: false,
+            devtmpfs_sync_primitives_deferred: false,
+            of_core_init_deferred: false,
+            of_core_mutex_guard_deferred: false,
+            hypervisor_trimmed_noop: false,
+            hypervisor_config_disabled: false,
             pre_platform_deferred: false,
             pre_platform_order_preserved: false,
         }
@@ -418,6 +488,46 @@ impl DriverCoreBase {
 
     pub const fn bus_registry_ready(&self) -> bool {
         self.bus_registry_ready
+    }
+
+    pub const fn class_registry_ready(&self) -> bool {
+        self.class_registry_ready
+    }
+
+    pub const fn firmware_kobject_ready(&self) -> bool {
+        self.firmware_kobject_ready
+    }
+
+    pub const fn backing_dev_info_deferred(&self) -> bool {
+        self.backing_dev_info_deferred
+    }
+
+    pub const fn device_link_workqueue_deferred(&self) -> bool {
+        self.device_link_workqueue_deferred
+    }
+
+    pub const fn devtmpfs_init_deferred(&self) -> bool {
+        self.devtmpfs_init_deferred
+    }
+
+    pub const fn devtmpfs_sync_primitives_deferred(&self) -> bool {
+        self.devtmpfs_sync_primitives_deferred
+    }
+
+    pub const fn of_core_init_deferred(&self) -> bool {
+        self.of_core_init_deferred
+    }
+
+    pub const fn of_core_mutex_guard_deferred(&self) -> bool {
+        self.of_core_mutex_guard_deferred
+    }
+
+    pub const fn hypervisor_trimmed_noop(&self) -> bool {
+        self.hypervisor_trimmed_noop
+    }
+
+    pub const fn hypervisor_config_disabled(&self) -> bool {
+        self.hypervisor_config_disabled
     }
 
     pub const fn pre_platform_deferred(&self) -> bool {
@@ -452,6 +562,16 @@ impl DriverCoreBase {
 
         self.device_registry_ready = true;
         self.bus_registry_ready = true;
+        self.class_registry_ready = true;
+        self.firmware_kobject_ready = true;
+        self.backing_dev_info_deferred = true;
+        self.device_link_workqueue_deferred = true;
+        self.devtmpfs_init_deferred = true;
+        self.devtmpfs_sync_primitives_deferred = true;
+        self.of_core_init_deferred = true;
+        self.of_core_mutex_guard_deferred = true;
+        self.hypervisor_trimmed_noop = true;
+        self.hypervisor_config_disabled = true;
         self.pre_platform_deferred = true;
         self.pre_platform_order_preserved = true;
         self.lifecycle
@@ -1404,6 +1524,11 @@ fn print_bytes(bytes: &[u8]) {
 
 pub struct DriverCoreDeferred {
     lifecycle: Lifecycle,
+    auxiliary_bus_deferred: bool,
+    memory_dev_deferred: bool,
+    node_dev_deferred: bool,
+    cpu_dev_deferred: bool,
+    container_dev_deferred: bool,
     post_platform_deferred: bool,
     entry_position_preserved: bool,
 }
@@ -1412,6 +1537,11 @@ impl DriverCoreDeferred {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            auxiliary_bus_deferred: false,
+            memory_dev_deferred: false,
+            node_dev_deferred: false,
+            cpu_dev_deferred: false,
+            container_dev_deferred: false,
             post_platform_deferred: false,
             entry_position_preserved: false,
         }
@@ -1419,6 +1549,26 @@ impl DriverCoreDeferred {
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn auxiliary_bus_deferred(&self) -> bool {
+        self.auxiliary_bus_deferred
+    }
+
+    pub const fn memory_dev_deferred(&self) -> bool {
+        self.memory_dev_deferred
+    }
+
+    pub const fn node_dev_deferred(&self) -> bool {
+        self.node_dev_deferred
+    }
+
+    pub const fn cpu_dev_deferred(&self) -> bool {
+        self.cpu_dev_deferred
+    }
+
+    pub const fn container_dev_deferred(&self) -> bool {
+        self.container_dev_deferred
     }
 
     pub const fn post_platform_deferred(&self) -> bool {
@@ -1442,6 +1592,11 @@ impl DriverCoreDeferred {
             );
         }
 
+        self.auxiliary_bus_deferred = true;
+        self.memory_dev_deferred = true;
+        self.node_dev_deferred = true;
+        self.cpu_dev_deferred = true;
+        self.container_dev_deferred = true;
         self.post_platform_deferred = true;
         self.entry_position_preserved = true;
         self.lifecycle.transition(
@@ -1455,6 +1610,10 @@ impl DriverCoreDeferred {
 
 pub struct IrqProcViewDeferred {
     lifecycle: Lifecycle,
+    procfs_config_enabled: bool,
+    default_smp_affinity_deferred: bool,
+    existing_irq_desc_exports_deferred: bool,
+    effective_affinity_exports_deferred: bool,
     setup_deferred: bool,
     proc_irq_export_deferred: bool,
 }
@@ -1463,6 +1622,10 @@ impl IrqProcViewDeferred {
     pub const fn new() -> Self {
         Self {
             lifecycle: Lifecycle::new(State::Base),
+            procfs_config_enabled: false,
+            default_smp_affinity_deferred: false,
+            existing_irq_desc_exports_deferred: false,
+            effective_affinity_exports_deferred: false,
             setup_deferred: false,
             proc_irq_export_deferred: false,
         }
@@ -1470,6 +1633,22 @@ impl IrqProcViewDeferred {
 
     pub const fn state(&self) -> State {
         self.lifecycle.state()
+    }
+
+    pub const fn procfs_config_enabled(&self) -> bool {
+        self.procfs_config_enabled
+    }
+
+    pub const fn default_smp_affinity_deferred(&self) -> bool {
+        self.default_smp_affinity_deferred
+    }
+
+    pub const fn existing_irq_desc_exports_deferred(&self) -> bool {
+        self.existing_irq_desc_exports_deferred
+    }
+
+    pub const fn effective_affinity_exports_deferred(&self) -> bool {
+        self.effective_affinity_exports_deferred
     }
 
     pub const fn setup_deferred(&self) -> bool {
@@ -1508,6 +1687,10 @@ impl IrqProcViewDeferred {
             );
         }
 
+        self.procfs_config_enabled = true;
+        self.default_smp_affinity_deferred = true;
+        self.existing_irq_desc_exports_deferred = true;
+        self.effective_affinity_exports_deferred = true;
         self.setup_deferred = true;
         self.proc_irq_export_deferred = true;
         self.lifecycle.transition(
@@ -1523,6 +1706,7 @@ pub struct CtorTable {
     lifecycle: Lifecycle,
     position_preserved: bool,
     constructors_empty_or_trimmed: bool,
+    config_constructors_disabled: bool,
 }
 
 impl CtorTable {
@@ -1531,6 +1715,7 @@ impl CtorTable {
             lifecycle: Lifecycle::new(State::Base),
             position_preserved: false,
             constructors_empty_or_trimmed: false,
+            config_constructors_disabled: false,
         }
     }
 
@@ -1544,6 +1729,10 @@ impl CtorTable {
 
     pub const fn constructors_empty_or_trimmed(&self) -> bool {
         self.constructors_empty_or_trimmed
+    }
+
+    pub const fn config_constructors_disabled(&self) -> bool {
+        self.config_constructors_disabled
     }
 
     pub fn setup(
@@ -1565,6 +1754,7 @@ impl CtorTable {
 
         self.position_preserved = true;
         self.constructors_empty_or_trimmed = true;
+        self.config_constructors_disabled = true;
         self.lifecycle.transition(
             LifecycleEvent::Setup,
             State::Base,
@@ -1583,10 +1773,17 @@ pub struct InitcallTable {
     registered_entries_collected: bool,
     level_mapping_ready: bool,
     run_levels_ready: bool,
+    level_order_ready: bool,
+    same_level_order_unconstrained: bool,
+    same_level_permutation_proof_deferred: bool,
+    same_level_permutation_nightly_test_deferred: bool,
     entry_operation_bindings_ready: bool,
     command_line_scratch_reused_per_level: bool,
     param_parser_applied: bool,
     filter_applied: bool,
+    blacklist_filter_checked: bool,
+    blacklist_no_entries_skipped: bool,
+    dispatcher_entry_agnostic: bool,
     run_context_checked: bool,
     levels: [InitcallLevel; INITCALL_LEVEL_COUNT],
     entries: [InitcallRunRecord; INITCALL_RUN_RECORD_CAPACITY],
@@ -1606,10 +1803,17 @@ impl InitcallTable {
             registered_entries_collected: false,
             level_mapping_ready: false,
             run_levels_ready: false,
+            level_order_ready: false,
+            same_level_order_unconstrained: false,
+            same_level_permutation_proof_deferred: false,
+            same_level_permutation_nightly_test_deferred: false,
             entry_operation_bindings_ready: false,
             command_line_scratch_reused_per_level: false,
             param_parser_applied: false,
             filter_applied: false,
+            blacklist_filter_checked: false,
+            blacklist_no_entries_skipped: false,
+            dispatcher_entry_agnostic: false,
             run_context_checked: false,
             levels: [
                 InitcallLevel::new(InitcallLevelName::Pure),
@@ -1664,6 +1868,22 @@ impl InitcallTable {
         self.run_levels_ready
     }
 
+    pub const fn level_order_ready(&self) -> bool {
+        self.level_order_ready
+    }
+
+    pub const fn same_level_order_unconstrained(&self) -> bool {
+        self.same_level_order_unconstrained
+    }
+
+    pub const fn same_level_permutation_proof_deferred(&self) -> bool {
+        self.same_level_permutation_proof_deferred
+    }
+
+    pub const fn same_level_permutation_nightly_test_deferred(&self) -> bool {
+        self.same_level_permutation_nightly_test_deferred
+    }
+
     pub const fn entry_operation_bindings_ready(&self) -> bool {
         self.entry_operation_bindings_ready
     }
@@ -1678,6 +1898,18 @@ impl InitcallTable {
 
     pub const fn filter_applied(&self) -> bool {
         self.filter_applied
+    }
+
+    pub const fn blacklist_filter_checked(&self) -> bool {
+        self.blacklist_filter_checked
+    }
+
+    pub const fn blacklist_no_entries_skipped(&self) -> bool {
+        self.blacklist_no_entries_skipped
+    }
+
+    pub const fn dispatcher_entry_agnostic(&self) -> bool {
+        self.dispatcher_entry_agnostic
     }
 
     pub const fn run_context_checked(&self) -> bool {
@@ -1746,6 +1978,10 @@ impl InitcallTable {
         self.registered_entries_collected = true;
         self.level_mapping_ready = true;
         self.run_levels_ready = true;
+        self.level_order_ready = true;
+        self.same_level_order_unconstrained = true;
+        self.same_level_permutation_proof_deferred = true;
+        self.same_level_permutation_nightly_test_deferred = true;
         self.entry_operation_bindings_ready = true;
         self.lifecycle
             .adopt_transition(LifecycleEvent::Preset, State::Base, State::Prepared)
@@ -1768,6 +2004,9 @@ impl InitcallTable {
         self.command_line_scratch_reused_per_level = true;
         self.param_parser_applied = true;
         self.filter_applied = true;
+        self.blacklist_filter_checked = true;
+        self.blacklist_no_entries_skipped = true;
+        self.dispatcher_entry_agnostic = true;
         self.run_context_checked = true;
 
         self.run_entries_in_level_order(ctx);
@@ -1813,6 +2052,12 @@ impl InitcallTable {
                     skipped: false,
                     return_code: result.code(),
                     run_context_checked: true,
+                    static_descriptor_invoked: true,
+                    preempt_count_snapshot_recorded: true,
+                    preempt_imbalance_repaired_or_absent: true,
+                    irq_disabled_repaired_or_absent: true,
+                    trace_boundary_recorded: true,
+                    latent_entropy_accounted: true,
                 };
                 self.run_order[out_index] = level;
                 out_index += 1;
@@ -1871,9 +2116,21 @@ impl InitcallBoundary {
     ) -> EventResult {
         if self.lifecycle.state() != State::Base
             || cpuset.state() != State::Ready
+            || !cpuset.config_cpusets_disabled()
+            || !cpuset.config_cgroups_disabled()
             || driver_core_base.state() != State::Ready
             || !driver_core_base.device_registry_ready()
             || !driver_core_base.bus_registry_ready()
+            || !driver_core_base.class_registry_ready()
+            || !driver_core_base.firmware_kobject_ready()
+            || !driver_core_base.backing_dev_info_deferred()
+            || !driver_core_base.device_link_workqueue_deferred()
+            || !driver_core_base.devtmpfs_init_deferred()
+            || !driver_core_base.devtmpfs_sync_primitives_deferred()
+            || !driver_core_base.of_core_init_deferred()
+            || !driver_core_base.of_core_mutex_guard_deferred()
+            || !driver_core_base.hypervisor_trimmed_noop()
+            || !driver_core_base.hypervisor_config_disabled()
             || platform_bus_root_device.state() != State::Ready
             || !platform_bus_root_device.static_device_registered()
             || platform_bus.state() != State::Ready
@@ -1890,10 +2147,27 @@ impl InitcallBoundary {
             || !devfs.uevent_deferred()
             || !devfs.sysfs_deferred()
             || driver_core.state() != State::Ready
+            || !driver_core.auxiliary_bus_deferred()
+            || !driver_core.memory_dev_deferred()
+            || !driver_core.node_dev_deferred()
+            || !driver_core.cpu_dev_deferred()
+            || !driver_core.container_dev_deferred()
             || !driver_core.post_platform_deferred()
             || irq_proc_view.state() != State::Ready
+            || !irq_proc_view.procfs_config_enabled()
+            || !irq_proc_view.default_smp_affinity_deferred()
+            || !irq_proc_view.existing_irq_desc_exports_deferred()
+            || !irq_proc_view.effective_affinity_exports_deferred()
             || ctor_table.state() != State::Ready
+            || !ctor_table.config_constructors_disabled()
             || initcall_table.state() != State::Ready
+            || !initcall_table.level_order_ready()
+            || !initcall_table.same_level_order_unconstrained()
+            || !initcall_table.same_level_permutation_proof_deferred()
+            || !initcall_table.same_level_permutation_nightly_test_deferred()
+            || !initcall_table.dispatcher_entry_agnostic()
+            || !initcall_table.blacklist_filter_checked()
+            || !initcall_table.blacklist_no_entries_skipped()
             || !initcall_table.all_levels_ran()
             || uart_external_irq_enable.state() != State::Ready
             || !uart_external_irq_enable.plic_source_gate_open()
@@ -1982,9 +2256,21 @@ pub fn initcall_phase_ready(
 ) -> bool {
     cpuset.state() == State::Ready
         && cpuset.trimmed_noop()
+        && cpuset.config_cpusets_disabled()
+        && cpuset.config_cgroups_disabled()
         && driver_core_base.state() == State::Ready
         && driver_core_base.device_registry_ready()
         && driver_core_base.bus_registry_ready()
+        && driver_core_base.class_registry_ready()
+        && driver_core_base.firmware_kobject_ready()
+        && driver_core_base.backing_dev_info_deferred()
+        && driver_core_base.device_link_workqueue_deferred()
+        && driver_core_base.devtmpfs_init_deferred()
+        && driver_core_base.devtmpfs_sync_primitives_deferred()
+        && driver_core_base.of_core_init_deferred()
+        && driver_core_base.of_core_mutex_guard_deferred()
+        && driver_core_base.hypervisor_trimmed_noop()
+        && driver_core_base.hypervisor_config_disabled()
         && driver_core_base.pre_platform_deferred()
         && driver_core_base.pre_platform_order_preserved()
         && platform_bus_root_device.state() == State::Ready
@@ -2034,23 +2320,44 @@ pub fn initcall_phase_ready(
         && platform_bus.ns16550a_probe_registers_serial_console()
         && platform_bus.ns16550a_probe_triggers_console_handoff()
         && driver_core.state() == State::Ready
+        && driver_core.auxiliary_bus_deferred()
+        && driver_core.memory_dev_deferred()
+        && driver_core.node_dev_deferred()
+        && driver_core.cpu_dev_deferred()
+        && driver_core.container_dev_deferred()
         && driver_core.post_platform_deferred()
         && driver_core.entry_position_preserved()
         && irq_proc_view.state() == State::Ready
+        && irq_proc_view.procfs_config_enabled()
+        && irq_proc_view.default_smp_affinity_deferred()
+        && irq_proc_view.existing_irq_desc_exports_deferred()
+        && irq_proc_view.effective_affinity_exports_deferred()
         && irq_proc_view.setup_deferred()
         && irq_proc_view.proc_irq_export_deferred()
         && ctor_table.state() == State::Ready
         && ctor_table.position_preserved()
         && ctor_table.constructors_empty_or_trimmed()
+        && ctor_table.config_constructors_disabled()
         && initcall_table.state() == State::Ready
         && initcall_table.static_ranges_ready()
         && initcall_table.level_count_ready()
         && initcall_table.level_count() == INITCALL_LEVEL_COUNT
         && initcall_table.all_levels_ran()
         && initcall_table.entries_recorded_as_properties()
+        && initcall_table.registered_entries_collected()
+        && initcall_table.level_mapping_ready()
+        && initcall_table.run_levels_ready()
+        && initcall_table.level_order_ready()
+        && initcall_table.same_level_order_unconstrained()
+        && initcall_table.same_level_permutation_proof_deferred()
+        && initcall_table.same_level_permutation_nightly_test_deferred()
+        && initcall_table.entry_operation_bindings_ready()
         && initcall_table.command_line_scratch_reused_per_level()
         && initcall_table.param_parser_applied()
         && initcall_table.filter_applied()
+        && initcall_table.blacklist_filter_checked()
+        && initcall_table.blacklist_no_entries_skipped()
+        && initcall_table.dispatcher_entry_agnostic()
         && initcall_table.run_context_checked()
         && initcall_table.all_registered_entries_ran()
         && all_levels_done_public(initcall_table)
@@ -2127,6 +2434,12 @@ fn all_entries_checked(
         if entries[index].skipped()
             || entries[index].return_code() != 0
             || !entries[index].run_context_checked()
+            || !entries[index].static_descriptor_invoked()
+            || !entries[index].preempt_count_snapshot_recorded()
+            || !entries[index].preempt_imbalance_repaired_or_absent()
+            || !entries[index].irq_disabled_repaired_or_absent()
+            || !entries[index].trace_boundary_recorded()
+            || !entries[index].latent_entropy_accounted()
         {
             return false;
         }
@@ -2155,7 +2468,16 @@ fn all_entries_checked_public(initcall_table: &InitcallTable) -> bool {
         let Some(entry) = initcall_table.entry(index) else {
             return false;
         };
-        if entry.skipped() || entry.return_code() != 0 || !entry.run_context_checked() {
+        if entry.skipped()
+            || entry.return_code() != 0
+            || !entry.run_context_checked()
+            || !entry.static_descriptor_invoked()
+            || !entry.preempt_count_snapshot_recorded()
+            || !entry.preempt_imbalance_repaired_or_absent()
+            || !entry.irq_disabled_repaired_or_absent()
+            || !entry.trace_boundary_recorded()
+            || !entry.latent_entropy_accounted()
+        {
             return false;
         }
         index += 1;

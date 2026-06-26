@@ -61,6 +61,12 @@ predicate initcall_entry_invoked<T>(entry: T) -> bool;
 predicate initcall_entry_return_recorded<T>(entry: T) -> bool;
 predicate initcall_entry_skipped_recorded<T>(entry: T) -> bool;
 predicate initcall_entry_run_context_checked<T>(entry: T) -> bool;
+predicate initcall_entry_static_descriptor_invoked<T>(entry: T) -> bool;
+predicate initcall_entry_preempt_count_snapshot_recorded<T>(entry: T) -> bool;
+predicate initcall_entry_preempt_imbalance_repaired_or_absent<T>(entry: T) -> bool;
+predicate initcall_entry_irq_disabled_repaired_or_absent<T>(entry: T) -> bool;
+predicate initcall_entry_trace_boundary_recorded<T>(entry: T) -> bool;
+predicate initcall_entry_latent_entropy_accounted<T>(entry: T) -> bool;
 
 predicate initcall_table_registration_committed<T, E>(
     table: T,
@@ -80,17 +86,24 @@ predicate initcall_table_entry_registered<T, E>(
 predicate initcall_table_registered_entries_collected<T>(table: T) -> bool;
 predicate initcall_table_level_mapping_ready<T>(table: T) -> bool;
 predicate initcall_table_run_levels_ready<T>(table: T) -> bool;
+predicate initcall_table_level_order_ready<T>(table: T) -> bool;
+predicate initcall_table_same_level_order_unconstrained<T>(table: T) -> bool;
+predicate initcall_table_same_level_permutation_proof_deferred<T>(table: T) -> bool;
+predicate initcall_table_same_level_permutation_nightly_test_deferred<T>(table: T) -> bool;
 predicate initcall_table_entry_operation_bindings_ready<T>(table: T) -> bool;
 predicate initcall_table_static_ranges_ready<T, S>(table: T, static_objects: S) -> bool;
 predicate initcall_table_level_count_ready<T>(table: T) -> bool;
 predicate initcall_table_all_levels_ran<T>(table: T) -> bool;
 predicate initcall_table_entries_recorded_as_properties<T>(table: T) -> bool;
+predicate initcall_table_dispatcher_entry_agnostic<T>(table: T) -> bool;
 predicate initcall_command_line_scratch_reused_per_level<T, C>(
     table: T,
     command_line: C
 ) -> bool;
 predicate initcall_param_parser_applied<T>(table: T) -> bool;
 predicate initcall_filter_applied<T>(table: T) -> bool;
+predicate initcall_blacklist_filter_checked<T>(table: T) -> bool;
+predicate initcall_blacklist_no_entries_skipped<T>(table: T) -> bool;
 predicate initcall_run_context_checked<T>(table: T) -> bool;
 
 /*
@@ -111,6 +124,10 @@ type InitcallTableType: KernelObject {
                 initcall_table_registered_entries_collected(self);
                 initcall_table_level_mapping_ready(self);
                 initcall_table_run_levels_ready(self);
+                initcall_table_level_order_ready(self);
+                initcall_table_same_level_order_unconstrained(self);
+                initcall_table_same_level_permutation_proof_deferred(self);
+                initcall_table_same_level_permutation_nightly_test_deferred(self);
                 initcall_table_entry_operation_bindings_ready(self);
                 initcall_table_level_count_ready(self);
                 initcall_table_entries_recorded_as_properties(self);
@@ -126,9 +143,12 @@ type InitcallTableType: KernelObject {
             state_effect: StateEffect::Always;
             ensures {
                 initcall_table_all_levels_ran(self);
+                initcall_table_dispatcher_entry_agnostic(self);
                 initcall_command_line_scratch_reused_per_level(self, SavedCommandLine);
                 initcall_param_parser_applied(self);
                 initcall_filter_applied(self);
+                initcall_blacklist_filter_checked(self);
+                initcall_blacklist_no_entries_skipped(self);
                 initcall_run_context_checked(self);
             }
         }

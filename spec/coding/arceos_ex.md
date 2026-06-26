@@ -365,6 +365,22 @@ facts 与 mutex guard、Async/Padata deferred facts、PageAllocator late facts �
 导出或每个 initcall entry 的目标对象；
 这些路径必须保留为显式 deferred 或表内属性，而不是静默假设已经可用。
 
+`do_initcalls()` 前的审核边界固定在 `cpuset_init_smp()`、`driver_init()`、`init_irq_proc()` 和
+`do_ctors()`，到 `InitcallTable.preset()` 可观察为止。当前 `linux-6.12.37/.config` 中
+`CONFIG_CGROUPS=n` 且 `CONFIG_CPUSETS` 未选中，所以 `cpuset_init_smp()` 通过
+`include/linux/cpuset.h` 折叠为空实现；`CONFIG_CONSTRUCTORS` 未选中，所以 `do_ctors()` 的条件体不执行。
+这些裁剪依据必须作为对象事实暴露。
+
+同一区间内，`driver_init()` 不能整体写成 no-op。`devices_init()`、`buses_init()`、
+`classes_init()` 和 `firmware_init()` 至少要作为前置 registry/kset/kobject 事实可见；
+`platform_bus_init()` 的 `bus_register()` 必须继续暴露 `subsys_private.mutex`、
+`klist_devices` 和 `klist_drivers` 初始化事实。当前暂不展开的真实启用路径必须显式 deferred：
+`devtmpfs_init()` 在 `CONFIG_DEVTMPFS=y`/`CONFIG_TMPFS=y` 下包含 `req_lock` spinlock、
+`setup_done` completion 和 `kdevtmpfs` kthread；`of_core_init()` 在 `CONFIG_OF=y` 下使用
+`of_mutex` 建立 OF sysfs/phandle-cache 视图；`init_irq_proc()` 在 `CONFIG_PROC_FS=y`、
+`CONFIG_SMP=y`、`CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK=y` 下建立 `/proc/irq` 和 affinity 导出。
+这些 deferred 事实不能由 boot-only/system-exclusive 背景替代。
+
 `InitcallTable` 的机制规格和具体 entry 的目标效果必须分开。model 层的
 `InitcallTable.Action::Register(level, entry)` 是抽象注册接口，不规定必须依赖 LDS；本 target 的 coding
 规格采用 Linux-like LDS/static section 方式实现它。也就是说，owner 对象在自己的 `preset` 中声明某个
@@ -386,6 +402,19 @@ entry-to-operation binding；它可以构建表内 metadata，但不得调用 en
 已执行、每 level 命令行 scratch 复用、参数解析、blacklist/filter 处理和 `do_one_initcall()` 运行上下文检查。
 sync slot 和 rootfs slot 可以作为静态收集 slot 保留其 Linux 排序语义；是否升格为独立模型 phase 由 model
 规格另行决定，coding 机制本身不强制。
+
+`do_initcalls()` 的规格只固定跨 level 的顺序：pure、core、postcore、arch、subsys、fs、device、late。
+同一 level 内的 entry 不应被 model 写成强顺序语义；当前 derivation 不证明同级 entry effect
+可交换，因此必须把同级顺序无关性标为 proof/nightly deferred。实现仍可按 linker section 内实际顺序执行，
+但该顺序只属于本次运行的 descriptor traversal，不是规格承诺。未来验证应通过 nightly permutation 测试扰动
+同级 entry 顺序，并比较 canonical final facts；该测试不应放进普通 smoke。
+
+`InitcallTable.setup()` 的 dispatcher 必须保持 entry-agnostic：它只能知道 level range、entry descriptor
+和函数指针，不得按 entry name、owner 或具体 operation 做分支。具体副作用必须留在 entry wrapper 和 owner
+对象内。每个 entry 的运行记录还必须保留 Linux `do_one_initcall()` 的可见责任：blacklist/filter 已检查、
+trace start/finish 边界、返回码、preempt count 快照与失衡修复或确认不存在、disabled IRQ 修复或确认不存在，
+以及 latent entropy accounting。当前 boot-only 对象级实现可以把这些责任落成显式 fact，但不得把它们当成
+不存在。
 
 测试应覆盖 `InitcallPhase.Ready`、Cpuset trimmed、DriverCore/IrqProcView deferred、CtorTable 表位置、
 `InitcallTable.preset()` 的静态 range 收集事实、level/entry 摘要、entry operation binding、

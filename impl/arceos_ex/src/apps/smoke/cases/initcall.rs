@@ -200,10 +200,19 @@ pub fn run() -> SmokeResult {
         || !ctx.initcall_table.registered_entries_collected()
         || !ctx.initcall_table.level_mapping_ready()
         || !ctx.initcall_table.run_levels_ready()
+        || !ctx.initcall_table.level_order_ready()
+        || !ctx.initcall_table.same_level_order_unconstrained()
+        || !ctx.initcall_table.same_level_permutation_proof_deferred()
+        || !ctx
+            .initcall_table
+            .same_level_permutation_nightly_test_deferred()
         || !ctx.initcall_table.entry_operation_bindings_ready()
         || !ctx.initcall_table.command_line_scratch_reused_per_level()
         || !ctx.initcall_table.param_parser_applied()
         || !ctx.initcall_table.filter_applied()
+        || !ctx.initcall_table.blacklist_filter_checked()
+        || !ctx.initcall_table.blacklist_no_entries_skipped()
+        || !ctx.initcall_table.dispatcher_entry_agnostic()
         || !ctx.initcall_table.run_context_checked()
         || ctx.initcall_table.entry_count() == 0
         || ctx.initcall_table.run_count() != ctx.initcall_table.entry_count()
@@ -290,6 +299,12 @@ fn check_entry_records(table: &InitcallTable) -> bool {
             || entry.skipped()
             || entry.return_code() != 0
             || !entry.run_context_checked()
+            || !entry.static_descriptor_invoked()
+            || !entry.preempt_count_snapshot_recorded()
+            || !entry.preempt_imbalance_repaired_or_absent()
+            || !entry.irq_disabled_repaired_or_absent()
+            || !entry.trace_boundary_recorded()
+            || !entry.latent_entropy_accounted()
         {
             return false;
         }
@@ -323,6 +338,12 @@ fn check_static_section_entries(table: &InitcallTable) -> bool {
             && !entry.skipped()
             && entry.return_code() == 0
             && entry.run_context_checked()
+            && entry.static_descriptor_invoked()
+            && entry.preempt_count_snapshot_recorded()
+            && entry.preempt_imbalance_repaired_or_absent()
+            && entry.irq_disabled_repaired_or_absent()
+            && entry.trace_boundary_recorded()
+            && entry.latent_entropy_accounted()
         {
             expected_index += 1;
         }
@@ -331,6 +352,12 @@ fn check_static_section_entries(table: &InitcallTable) -> bool {
             && !entry.skipped()
             && entry.return_code() == 0
             && entry.run_context_checked()
+            && entry.static_descriptor_invoked()
+            && entry.preempt_count_snapshot_recorded()
+            && entry.preempt_imbalance_repaired_or_absent()
+            && entry.irq_disabled_repaired_or_absent()
+            && entry.trace_boundary_recorded()
+            && entry.latent_entropy_accounted()
         {
             ns16550a_seen = true;
         }
