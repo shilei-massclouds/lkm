@@ -38,6 +38,7 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         "uart_irq_source",
         ns16550a::uart8250_port_irq_source() as usize,
     );
+    let uart_source = ns16550a::uart8250_port_irq_source();
     sink.diag_usize(
         "uart_logical_irq_valid",
         if ns16550a::uart8250_port_logical_irq().is_valid() {
@@ -65,6 +66,18 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
     sink.diag_usize("plic_complete_count", ctx.plic.complete_count());
     sink.diag_usize("plic_dispatch_count", ctx.plic.dispatch_count());
     sink.diag_usize("plic_loop_exit_count", ctx.plic.loop_exit_count());
+    sink.diag_usize(
+        "plic_uart_source_claim_count",
+        ctx.plic.claim_count_for_source(uart_source),
+    );
+    sink.diag_usize(
+        "plic_uart_source_dispatch_count",
+        ctx.plic.dispatch_count_for_source(uart_source),
+    );
+    sink.diag_usize(
+        "plic_uart_source_complete_count",
+        ctx.plic.complete_count_for_source(uart_source),
+    );
     sink.diag_usize(
         "irq_dispatch_calls",
         ctx.irq_handler_registry.dispatch_calls(),

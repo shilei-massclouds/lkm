@@ -834,7 +834,7 @@ present/matches/source gate open、registered handler present、flip buffer empt
 drain limit；刺激事实：enable runtime RX、trigger single loopback byte、trigger bounded loopback batch；等待事实：
 single/batch RX request observed、PLIC claim observed、PLIC IRQ-domain dispatch observed、IRQ handler registry dispatch
 observed、runtime handler observed/RX handled、PLIC complete observed、zero-claim observed、claim-loop exit observed、
-last claimed/completed source matches UART，以及 single/batch RX loopback wait closed；观测事实：stimulus committed、
+source-scoped PLIC claim/dispatch/complete delta，以及 single/batch RX loopback wait closed；观测事实：stimulus committed、
 PLIC claim observed、IRQ dispatch observed、runtime handler received RX、flip buffer pushed、PLIC complete observed、
 zero-claim loop exit observed、IRQ cycle closed、bounded drain observed、batch count matched、last byte matched 和 no
 overflow observed。若等待失败涉及中断链路，diagnostic 必须保留 PLIC/IRQ-domain/IRQ-registry 事实，不得把问题
@@ -1716,6 +1716,14 @@ UART handler。
 
 `UartInterruptChainProbe.setup` 失败时必须通过统一 `failure_diagnostic` payload 细分内部首个失败事实：
 `phase=InitcallPhase step=setup_objects.uart_interrupt_chain_probe.setup object=UartInterruptChainProbe check=uart_interrupt_chain_probe.setup first_failed=<stable-predicate-name>`。
+PLIC provider 必须提供按 source 维度的长期观察计数，至少包括 `claim_count_for_source(source)`、
+`dispatch_count_for_source(source)` 和 `complete_count_for_source(source)`。这些计数是 PLIC/IRQ-domain/IRQ-registry
+通用观察事实，不属于 UART 或 DF-0002 专用日志；native provider 与 Linux-object provider 都必须通过同一薄
+provider contract 暴露。`last_claimed_source` / `last_completed_source` 只能作为辅助诊断线索，不能作为判断某个
+source 是否已经发生 claim/complete 的主判据，因为后续其它 source 可以合法覆盖全局 last source。
+`UartInterruptChainProbe`、serial8250 RX/TX probe 和 KUnit observer 判断一轮 UART source IRQ cycle 时，必须优先比较
+对应 source 的 claim/dispatch/complete delta；只有 source-scoped delta 不足时，才报告
+`plic.source_claim_observed`、`plic.source_dispatch_observed` 或 `plic.source_complete_observed` 等稳定失败事实。
 `first_failed` 必须按实现判定顺序使用长期稳定名称，第一批至少覆盖：
 `uart_interrupt_chain_probe.lifecycle_base`、`uart_external_irq_enable.state_ready`、
 `uart_external_irq_enable.plic_source_gate_open`、`uart_external_irq_enable.root_external_input_gate_open`、

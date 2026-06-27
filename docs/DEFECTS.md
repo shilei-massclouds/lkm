@@ -36,6 +36,7 @@
 - 本轮验证：`make verify` 通过，`make -C impl/arceos_ex build APP=smoke` 通过，普通 `make -C impl/arceos_ex run APP=smoke` 通过 `54/54`，`python3 -m unittest test_runner` 通过 8 项。
 - 2026-06-27 扩展 RX/PLIC 结构化诊断后重新执行 DF-0001 `user-boot` stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、DF-0002 `InitcallPhase` ready 失败 2 次；报告在 `/tmp/lkm-stress-out/20260627T052721Z-df-0001-user-boot/report.md`。本轮没有复现 `read user ELF failed`；两个失败样本分别细化为 `first_failed=uart_interrupt_chain_probe.plic_claim_observed` 和 `first_failed=plic.last_claimed_source_uart`，均发生在 `UartInterruptChainProbe.setup`。
 - 2026-06-27 同轮重新执行 DF-0002 smoke stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、DF-0002 `InitcallPhase` ready 失败 2 次；报告在 `/tmp/lkm-stress-out/20260627T053947Z-df-0002-smoke-initcall/report.md`。两个失败样本均为 `first_failed=plic.last_claimed_source_uart`，分别出现在 `UartInterruptChainProbe.setup` 和新增覆盖的 `Serial8250RxLoopbackProbe.setup`；本轮没有再出现 RX batch 粗粒度失败。
+- 2026-06-27 按“定位靠观察点，不靠猜”的原则补充 PLIC 侧长期通用观察点：规格要求 PLIC provider 暴露按 source 维度的 `claim_count_for_source(source)`、`dispatch_count_for_source(source)` 和 `complete_count_for_source(source)`；native provider 与 Linux-object provider 均通过同一 provider contract 暴露这些计数。现有 UART/RX/TX wait 与 failure diagnostic 已改为优先比较 source-scoped delta，`last_claimed_source` / `last_completed_source` 降级为辅助线索，避免被后续其它合法中断覆盖后造成误判。`PROBE=uart-irq-chain` observer 已能输出 `plic_uart_source_claim_count`、`plic_uart_source_dispatch_count` 和 `plic_uart_source_complete_count`。
 
 当前判断：
 
@@ -46,6 +47,7 @@
 - 2026-06-27 新增 ready-check 诊断后的 200 次 stress 未复现失败，这只能说明本轮没有捕获到 DF-0002 样本；由于上一轮同样规模曾出现 1/200 失败，且本次改动主要是失败路径诊断和聚合谓词同序重构，不构成针对根因的修复证据，暂不应标记已解决。
 - 2026-06-27 进一步细分 diagnostic 并复测后，DF-0001 和 DF-0002 两个 500 次 stress case 仍都能触发 DF-0002 类问题。DF-0001 的原始 `/sbin/init` 读取失败没有复现，仍维持已归档判断；DF-0002 则已经有两个更具体方向：`UartInterruptChainProbe` 的 PLIC claim/IRQ cycle closure，以及 `Serial8250RxBatchLoopbackProbe.setup` 内部粗粒度失败。
 - 2026-06-27 扩展 RX/PLIC 结构化诊断并复测后，失败进一步集中到 PLIC/source 观察面：DF-0001 交叉样本出现 `uart_interrupt_chain_probe.plic_claim_observed` 和 `plic.last_claimed_source_uart`，DF-0002 smoke 样本两次均为 `plic.last_claimed_source_uart`，其中一次已经落在 `Serial8250RxLoopbackProbe.setup` 的 RX wait 路径。当前不应把问题预设为 UART 单侧问题；更合理的根因方向是 PLIC source claim/complete、last source 记录语义、root external interrupt delivery 与 8250 IRQ request 之间的同步或观测边界。
+- 2026-06-27 新增 PLIC source-scoped counters 后，后续样本应优先看 `plic.source_claim_observed`、`plic.source_dispatch_observed`、`plic.source_complete_observed` 和 `plic.source_claim_complete_delta_matched`。如果这些 source-specific facts 成功而旧的全局 last source 被覆盖，则说明之前的 `plic.last_claimed_source_uart` 属于观察模型过粗；如果 source-specific facts 失败，则问题才真正收敛到 UART source 在 PLIC claim/dispatch/complete 链路中的并发或同步边界。
 
 下一步定位建议：
 

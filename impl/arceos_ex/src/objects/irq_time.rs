@@ -41,6 +41,7 @@ const PLIC_CONTEXT_SIZE: usize = 0x1000;
 const PLIC_CONTEXT_THRESHOLD: usize = 0x00;
 const PLIC_CONTEXT_CLAIM: usize = 0x4;
 const PLIC_IRQ_MAPPING_CAPACITY: usize = 32;
+const PLIC_SOURCE_OBSERVATION_CAPACITY: usize = 128;
 const PLIC_LOGICAL_IRQ_BASE: usize = 32;
 const IRQ_ACTION_CAPACITY: usize = 16;
 
@@ -2371,6 +2372,7 @@ pub struct Plic {
     claim_before_dispatch: bool,
     complete_after_handler: bool,
     uart_source_trigger_deferred: bool,
+    source_observation_counters_ready: bool,
     #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     claim_count: AtomicUsize,
     #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
@@ -2385,6 +2387,12 @@ pub struct Plic {
     last_claimed_source: AtomicU32,
     #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
     last_completed_source: AtomicU32,
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
+    source_claim_counts: [AtomicUsize; PLIC_SOURCE_OBSERVATION_CAPACITY],
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
+    source_dispatch_counts: [AtomicUsize; PLIC_SOURCE_OBSERVATION_CAPACITY],
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
+    source_complete_counts: [AtomicUsize; PLIC_SOURCE_OBSERVATION_CAPACITY],
 }
 
 impl Plic {
@@ -2424,6 +2432,7 @@ impl Plic {
             claim_before_dispatch: false,
             complete_after_handler: false,
             uart_source_trigger_deferred: false,
+            source_observation_counters_ready: false,
             claim_count: AtomicUsize::new(0),
             zero_claim_count: AtomicUsize::new(0),
             dispatch_count: AtomicUsize::new(0),
@@ -2431,6 +2440,11 @@ impl Plic {
             loop_exit_count: AtomicUsize::new(0),
             last_claimed_source: AtomicU32::new(0),
             last_completed_source: AtomicU32::new(0),
+            source_claim_counts: [const { AtomicUsize::new(0) }; PLIC_SOURCE_OBSERVATION_CAPACITY],
+            source_dispatch_counts: [const { AtomicUsize::new(0) };
+                PLIC_SOURCE_OBSERVATION_CAPACITY],
+            source_complete_counts: [const { AtomicUsize::new(0) };
+                PLIC_SOURCE_OBSERVATION_CAPACITY],
         }
     }
 
@@ -2574,6 +2588,10 @@ impl Plic {
         self.uart_source_trigger_deferred
     }
 
+    pub const fn source_observation_counters_ready(&self) -> bool {
+        self.source_observation_counters_ready
+    }
+
     #[allow(dead_code)]
     pub fn claim_count(&self) -> usize {
         super::plic_provider::claim_count(self)
@@ -2607,6 +2625,21 @@ impl Plic {
     #[allow(dead_code)]
     pub fn last_completed_source(&self) -> u32 {
         super::plic_provider::last_completed_source(self)
+    }
+
+    #[allow(dead_code)]
+    pub fn claim_count_for_source(&self, source: u32) -> usize {
+        super::plic_provider::claim_count_for_source(self, source)
+    }
+
+    #[allow(dead_code)]
+    pub fn dispatch_count_for_source(&self, source: u32) -> usize {
+        super::plic_provider::dispatch_count_for_source(self, source)
+    }
+
+    #[allow(dead_code)]
+    pub fn complete_count_for_source(&self, source: u32) -> usize {
+        super::plic_provider::complete_count_for_source(self, source)
     }
 
     fn preset_from_irqchip(
@@ -2759,6 +2792,7 @@ impl Plic {
         self.claim_before_dispatch = true;
         self.complete_after_handler = true;
         self.uart_source_trigger_deferred = true;
+        self.source_observation_counters_ready = true;
         self.lifecycle.transition(
             LifecycleEvent::Preset,
             State::Base,
@@ -2803,6 +2837,7 @@ impl Plic {
                 .is_some_and(|logical_irq| registry.dispatch(logical_irq));
             if dispatched {
                 self.dispatch_count.fetch_add(1, Ordering::AcqRel);
+                self.increment_source_dispatch_count(source);
                 any_dispatched = true;
             }
             self.complete(source);
@@ -2855,6 +2890,7 @@ impl Plic {
 
         self.claim_count.fetch_add(1, Ordering::AcqRel);
         self.last_claimed_source.store(source, Ordering::Release);
+        self.increment_source_claim_count(source);
         source
     }
 
@@ -2869,6 +2905,41 @@ impl Plic {
         }
         self.complete_count.fetch_add(1, Ordering::AcqRel);
         self.last_completed_source.store(source, Ordering::Release);
+        self.increment_source_complete_count(source);
+    }
+
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
+    fn source_observation_index(&self, source: u32) -> Option<usize> {
+        if source == 0 || source > self.source_count {
+            return None;
+        }
+
+        let index = source as usize;
+        if index >= PLIC_SOURCE_OBSERVATION_CAPACITY {
+            return None;
+        }
+        Some(index)
+    }
+
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
+    fn increment_source_claim_count(&self, source: u32) {
+        if let Some(index) = self.source_observation_index(source) {
+            self.source_claim_counts[index].fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
+    fn increment_source_dispatch_count(&self, source: u32) {
+        if let Some(index) = self.source_observation_index(source) {
+            self.source_dispatch_counts[index].fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    #[cfg_attr(plic_provider_linux_object, allow(dead_code))]
+    fn increment_source_complete_count(&self, source: u32) {
+        if let Some(index) = self.source_observation_index(source) {
+            self.source_complete_counts[index].fetch_add(1, Ordering::AcqRel);
+        }
     }
 
     #[cfg(not(plic_provider_linux_object))]
@@ -2904,6 +2975,27 @@ impl Plic {
     #[cfg(not(plic_provider_linux_object))]
     pub(crate) fn native_last_completed_source(&self) -> u32 {
         self.last_completed_source.load(Ordering::Acquire)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_claim_count_for_source(&self, source: u32) -> usize {
+        self.source_observation_index(source)
+            .map(|index| self.source_claim_counts[index].load(Ordering::Acquire))
+            .unwrap_or(0)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_dispatch_count_for_source(&self, source: u32) -> usize {
+        self.source_observation_index(source)
+            .map(|index| self.source_dispatch_counts[index].load(Ordering::Acquire))
+            .unwrap_or(0)
+    }
+
+    #[cfg(not(plic_provider_linux_object))]
+    pub(crate) fn native_complete_count_for_source(&self, source: u32) -> usize {
+        self.source_observation_index(source)
+            .map(|index| self.source_complete_counts[index].load(Ordering::Acquire))
+            .unwrap_or(0)
     }
 }
 
@@ -3788,9 +3880,12 @@ struct UartIrqCycleSnapshot {
     requests: usize,
     rx_requests: usize,
     claims: usize,
+    source_claims: usize,
     zero_claims: usize,
     plic_dispatches: usize,
+    source_dispatches: usize,
     completes: usize,
+    source_completes: usize,
     loop_exits: usize,
     irq_dispatches: usize,
     handler_calls: usize,
@@ -3878,7 +3973,7 @@ impl UartInterruptChainProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
 
         if !super::ns16550a::trigger_uart8250_thre_interrupt_once() {
             return failed_condition_with_diagnostic(
@@ -3907,18 +4002,16 @@ impl UartInterruptChainProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         self.uart_trigger_committed = super::ns16550a::uart8250_interrupt_trigger_ready()
             && observed.requests > baseline.requests
             && super::ns16550a::uart8250_thre_interrupt_handled();
-        self.plic_claim_observed =
-            observed.claims > baseline.claims && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+        self.plic_claim_observed = observed.source_claims > baseline.source_claims;
+        self.irq_dispatch_observed = observed.source_dispatches > baseline.source_dispatches
             && observed.irq_dispatches > baseline.irq_dispatches;
         self.uart_handler_observed = observed.handler_calls > baseline.handler_calls
             && observed.thri_disabled > baseline.thri_disabled;
-        self.plic_complete_observed =
-            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.plic_loop_exit_observed = plic.claim_loop_until_zero()
             && plic.zero_claim_stops_dispatch()
             && plic.completes_each_claimed_source()
@@ -3926,8 +4019,7 @@ impl UartInterruptChainProbe {
             && observed.loop_exits > baseline.loop_exits
             && observed.completes.saturating_sub(baseline.completes)
                 == observed.claims.saturating_sub(baseline.claims);
-        self.irq_cycle_closed =
-            uart_irq_cycle_completed_and_closed(plic, observed, baseline, source);
+        self.irq_cycle_closed = uart_irq_cycle_completed_and_closed(observed, baseline);
         self.console_polling_preserved =
             super::ns16550a::uart8250_interrupt_output_still_deferred();
 
@@ -4045,9 +4137,13 @@ fn uart_irq_cycle_wait_diagnostic(
     baseline: UartIrqCycleSnapshot,
     source: u32,
 ) -> &'static str {
-    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
     let claim_delta = current.claims.saturating_sub(baseline.claims);
+    let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
     let complete_delta = current.completes.saturating_sub(baseline.completes);
+    let source_complete_delta = current
+        .source_completes
+        .saturating_sub(baseline.source_completes);
     let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
     let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
 
@@ -4057,8 +4153,14 @@ fn uart_irq_cycle_wait_diagnostic(
     if current.claims <= baseline.claims {
         return "plic.claim_observed";
     }
+    if current.source_claims <= baseline.source_claims {
+        return "plic.source_claim_observed";
+    }
     if current.plic_dispatches <= baseline.plic_dispatches {
         return "plic.irq_domain_dispatch_observed";
+    }
+    if current.source_dispatches <= baseline.source_dispatches {
+        return "plic.source_dispatch_observed";
     }
     if current.irq_dispatches <= baseline.irq_dispatches {
         return "irq_handler_registry.dispatch_observed";
@@ -4075,6 +4177,9 @@ fn uart_irq_cycle_wait_diagnostic(
     if current.completes <= baseline.completes {
         return "plic.complete_observed";
     }
+    if current.source_completes <= baseline.source_completes {
+        return "plic.source_complete_observed";
+    }
     if current.zero_claims <= baseline.zero_claims {
         return "plic.zero_claim_observed";
     }
@@ -4084,14 +4189,11 @@ fn uart_irq_cycle_wait_diagnostic(
     if claim_delta != complete_delta {
         return "plic.claim_complete_delta_matched";
     }
+    if source_claim_delta != source_complete_delta {
+        return "plic.source_claim_complete_delta_matched";
+    }
     if zero_claim_delta != loop_exit_delta {
         return "plic.zero_claim_loop_exit_delta_matched";
-    }
-    if plic.last_claimed_source() != source {
-        return "plic.last_claimed_source_uart";
-    }
-    if plic.last_completed_source() != source {
-        return "plic.last_completed_source_uart";
     }
     "uart_interrupt_chain_probe.irq_cycle_wait_closed"
 }
@@ -4211,7 +4313,7 @@ impl Serial8250ConsoleIrqTxProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let baseline_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
         let baseline_drains = super::ns16550a::serial8250_tx_irq_drain_count();
         let baseline_write_calls =
@@ -4236,7 +4338,7 @@ impl Serial8250ConsoleIrqTxProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         self.interrupt_driven_enabled = super::ns16550a::uart8250_interrupt_driven_ready();
         self.printk_frontend_submitted =
             super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
@@ -4244,10 +4346,8 @@ impl Serial8250ConsoleIrqTxProbe {
         self.tx_queue_kicked = super::ns16550a::serial8250_tx_irq_kick_count() > baseline_kicks;
         self.uart_handler_drained_tx = super::ns16550a::serial8250_tx_irq_drain_count()
             >= baseline_drains.saturating_add(expected_tx_bytes);
-        self.plic_claim_observed =
-            observed.claims > baseline.claims && plic.last_claimed_source() == source;
-        self.plic_complete_observed =
-            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.plic_claim_observed = observed.source_claims > baseline.source_claims;
+        self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
         self.tx_queue_empty_after_irq = super::ns16550a::serial8250_tx_queue_len() == 0
@@ -4407,7 +4507,7 @@ impl Serial8250ConsoleBurstIrqTxProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let baseline_write_calls =
             super::ns16550a::serial8250_write_call_count_available_for_irq_probe();
         let baseline_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
@@ -4438,7 +4538,7 @@ impl Serial8250ConsoleBurstIrqTxProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let write_delta = super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
             .saturating_sub(baseline_write_calls);
         let drain_delta =
@@ -4450,15 +4550,13 @@ impl Serial8250ConsoleBurstIrqTxProbe {
         self.printk_frontend_submitted = write_delta == expected_records;
         self.multiple_records_submitted = expected_records > 1;
         self.tx_queue_kicked = super::ns16550a::serial8250_tx_irq_kick_count() > baseline_kicks;
-        self.plic_claim_observed =
-            observed.claims > baseline.claims && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+        self.plic_claim_observed = observed.source_claims > baseline.source_claims;
+        self.irq_dispatch_observed = observed.source_dispatches > baseline.source_dispatches
             && observed.irq_dispatches > baseline.irq_dispatches;
         self.uart_handler_drained_tx = observed.handler_calls > baseline.handler_calls
             && observed.handled > baseline.handled
             && drain_delta >= expected_tx_bytes;
-        self.plic_complete_observed =
-            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
         self.tx_queue_empty_after_irq = super::ns16550a::serial8250_tx_queue_len() == 0
@@ -4656,7 +4754,7 @@ impl Serial8250ConsoleLongIrqTxProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let baseline_write_calls =
             super::ns16550a::serial8250_write_call_count_available_for_irq_probe();
         let baseline_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
@@ -4687,7 +4785,7 @@ impl Serial8250ConsoleLongIrqTxProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let write_delta = super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
             .saturating_sub(baseline_write_calls);
         let drain_delta =
@@ -4698,8 +4796,15 @@ impl Serial8250ConsoleLongIrqTxProbe {
             .saturating_sub(baseline_tx_bytes);
         let crlf_delta =
             super::ns16550a::serial8250_tx_crlf_insertion_count().saturating_sub(baseline_crlf);
-        let claim_delta = observed.claims.saturating_sub(baseline.claims);
-        let complete_delta = observed.completes.saturating_sub(baseline.completes);
+        let source_claim_delta = observed
+            .source_claims
+            .saturating_sub(baseline.source_claims);
+        let source_complete_delta = observed
+            .source_completes
+            .saturating_sub(baseline.source_completes);
+        let source_dispatch_delta = observed
+            .source_dispatches
+            .saturating_sub(baseline.source_dispatches);
         let handler_delta = observed
             .handler_calls
             .saturating_sub(baseline.handler_calls);
@@ -4709,15 +4814,15 @@ impl Serial8250ConsoleLongIrqTxProbe {
         self.tx_load_size_observed = tx_load_size != 0;
         self.message_exceeds_single_load = expected_tx_bytes > tx_load_size;
         self.tx_queue_kicked = super::ns16550a::serial8250_tx_irq_kick_count() > baseline_kicks;
-        self.plic_claim_observed = claim_delta != 0 && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
-            && observed.irq_dispatches > baseline.irq_dispatches;
+        self.plic_claim_observed = source_claim_delta != 0;
+        self.irq_dispatch_observed =
+            source_dispatch_delta != 0 && observed.irq_dispatches > baseline.irq_dispatches;
         self.uart_handler_drained_tx =
             handler_delta != 0 && handled_delta != 0 && drain_delta >= expected_tx_bytes;
         self.multiple_irq_rounds_observed =
-            handler_delta >= 2 && claim_delta >= 2 && complete_delta >= 2;
+            handler_delta >= 2 && source_claim_delta >= 2 && source_complete_delta >= 2;
         self.tx_load_budget_observed = budget_hit_delta != 0;
-        self.plic_complete_observed = complete_delta != 0 && plic.last_completed_source() == source;
+        self.plic_complete_observed = source_complete_delta != 0;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
         self.tx_queue_empty_after_irq = super::ns16550a::serial8250_tx_queue_len() == 0
@@ -4926,7 +5031,7 @@ impl Serial8250ConsoleLongBurstIrqTxProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let baseline_write_calls =
             super::ns16550a::serial8250_write_call_count_available_for_irq_probe();
         let baseline_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
@@ -4961,7 +5066,7 @@ impl Serial8250ConsoleLongBurstIrqTxProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let write_delta = super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
             .saturating_sub(baseline_write_calls);
         let drain_delta =
@@ -4972,8 +5077,15 @@ impl Serial8250ConsoleLongBurstIrqTxProbe {
             .saturating_sub(baseline_tx_bytes);
         let crlf_delta =
             super::ns16550a::serial8250_tx_crlf_insertion_count().saturating_sub(baseline_crlf);
-        let claim_delta = observed.claims.saturating_sub(baseline.claims);
-        let complete_delta = observed.completes.saturating_sub(baseline.completes);
+        let source_claim_delta = observed
+            .source_claims
+            .saturating_sub(baseline.source_claims);
+        let source_complete_delta = observed
+            .source_completes
+            .saturating_sub(baseline.source_completes);
+        let source_dispatch_delta = observed
+            .source_dispatches
+            .saturating_sub(baseline.source_dispatches);
         let handler_delta = observed
             .handler_calls
             .saturating_sub(baseline.handler_calls);
@@ -4985,12 +5097,8 @@ impl Serial8250ConsoleLongBurstIrqTxProbe {
         self.each_record_exceeds_single_load =
             serial8250_console_long_burst_each_record_exceeds_single_load(tx_load_size);
         self.tx_queue_kicked = super::ns16550a::serial8250_tx_irq_kick_count() > baseline_kicks;
-        self.plic_claim_observed =
-            claim_delta >= expected_rounds && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = observed
-            .plic_dispatches
-            .saturating_sub(baseline.plic_dispatches)
-            >= expected_rounds
+        self.plic_claim_observed = source_claim_delta >= expected_rounds;
+        self.irq_dispatch_observed = source_dispatch_delta >= expected_rounds
             && observed
                 .irq_dispatches
                 .saturating_sub(baseline.irq_dispatches)
@@ -4999,11 +5107,10 @@ impl Serial8250ConsoleLongBurstIrqTxProbe {
             && handled_delta >= expected_rounds
             && drain_delta >= expected_tx_bytes;
         self.multiple_irq_rounds_observed = handler_delta >= expected_rounds
-            && claim_delta >= expected_rounds
-            && complete_delta >= expected_rounds;
+            && source_claim_delta >= expected_rounds
+            && source_complete_delta >= expected_rounds;
         self.tx_load_budget_observed = budget_hit_delta >= expected_budget_hits;
-        self.plic_complete_observed =
-            complete_delta >= expected_rounds && plic.last_completed_source() == source;
+        self.plic_complete_observed = source_complete_delta >= expected_rounds;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
         self.tx_queue_empty_after_irq = super::ns16550a::serial8250_tx_queue_len() == 0
@@ -5149,7 +5256,7 @@ impl Serial8250ConsoleTxQuiesceProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let baseline_write_calls =
             super::ns16550a::serial8250_write_call_count_available_for_irq_probe();
         let baseline_kicks = super::ns16550a::serial8250_tx_irq_kick_count();
@@ -5161,7 +5268,7 @@ impl Serial8250ConsoleTxQuiesceProbe {
 
         wait_serial8250_tx_quiesce_window();
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         self.no_printk_write =
             super::ns16550a::serial8250_write_call_count_available_for_irq_probe()
                 == baseline_write_calls
@@ -5320,7 +5427,7 @@ impl Serial8250RxLoopbackProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         if !super::ns16550a::trigger_serial8250_rx_loopback_once(SERIAL8250_RX_LOOPBACK_BYTE) {
             return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
@@ -5356,23 +5463,20 @@ impl Serial8250RxLoopbackProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         self.loopback_stimulus_committed = observed.rx_requests > baseline.rx_requests;
-        self.plic_claim_observed =
-            observed.claims > baseline.claims && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+        self.plic_claim_observed = observed.source_claims > baseline.source_claims;
+        self.irq_dispatch_observed = observed.source_dispatches > baseline.source_dispatches
             && observed.irq_dispatches > baseline.irq_dispatches;
         self.uart_handler_received_rx = observed.handler_calls > baseline.handler_calls
             && observed.rx_handled > baseline.rx_handled;
         self.flip_buffer_pushed = observed.flip_pushes > baseline.flip_pushes
             && observed.flip_inserted > baseline.flip_inserted
             && super::ns16550a::tty_flip_buffer_pushed();
-        self.plic_complete_observed =
-            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
-        self.irq_cycle_closed =
-            uart_rx_cycle_completed_and_closed(plic, observed, baseline, source);
+        self.irq_cycle_closed = uart_rx_cycle_completed_and_closed(observed, baseline);
         self.last_byte_matched =
             super::ns16550a::serial8250_runtime_rx_last_byte() == SERIAL8250_RX_LOOPBACK_BYTE;
 
@@ -5587,7 +5691,7 @@ impl Serial8250RxBatchLoopbackProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         if !super::ns16550a::trigger_serial8250_rx_loopback_batch(
             SERIAL8250_RX_BATCH_LOOPBACK_BYTES,
         ) {
@@ -5627,26 +5731,23 @@ impl Serial8250RxBatchLoopbackProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let inserted_delta = observed
             .flip_inserted
             .saturating_sub(baseline.flip_inserted);
         self.batch_stimulus_committed = observed.rx_requests > baseline.rx_requests;
-        self.plic_claim_observed =
-            observed.claims > baseline.claims && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+        self.plic_claim_observed = observed.source_claims > baseline.source_claims;
+        self.irq_dispatch_observed = observed.source_dispatches > baseline.source_dispatches
             && observed.irq_dispatches > baseline.irq_dispatches;
         self.uart_handler_received_batch = observed.handler_calls > baseline.handler_calls
             && observed.rx_handled > baseline.rx_handled;
         self.flip_buffer_batch_pushed = observed.flip_pushes > baseline.flip_pushes
             && inserted_delta == expected_len
             && super::ns16550a::tty_flip_buffer_last_pushed_len() == expected_len;
-        self.plic_complete_observed =
-            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
-        self.irq_cycle_closed =
-            uart_rx_cycle_completed_and_closed(plic, observed, baseline, source);
+        self.irq_cycle_closed = uart_rx_cycle_completed_and_closed(observed, baseline);
         self.bounded_drain_observed = expected_len
             <= super::ns16550a::serial8250_runtime_rx_drain_limit()
             && super::ns16550a::tty_flip_buffer_last_pushed_len() == expected_len;
@@ -5802,7 +5903,7 @@ fn serial8250_rx_loopback_wait_diagnostic(
     source: u32,
     expected_byte: u8,
 ) -> &'static str {
-    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
 
     if current.rx_requests <= baseline.rx_requests {
         return "serial8250_rx_loopback_probe.wait.rx_request_observed";
@@ -5810,8 +5911,14 @@ fn serial8250_rx_loopback_wait_diagnostic(
     if current.claims <= baseline.claims {
         return "plic.claim_observed";
     }
+    if current.source_claims <= baseline.source_claims {
+        return "plic.source_claim_observed";
+    }
     if current.plic_dispatches <= baseline.plic_dispatches {
         return "plic.irq_domain_dispatch_observed";
+    }
+    if current.source_dispatches <= baseline.source_dispatches {
+        return "plic.source_dispatch_observed";
     }
     if current.irq_dispatches <= baseline.irq_dispatches {
         return "irq_handler_registry.dispatch_observed";
@@ -5831,6 +5938,9 @@ fn serial8250_rx_loopback_wait_diagnostic(
     if current.completes <= baseline.completes {
         return "plic.complete_observed";
     }
+    if current.source_completes <= baseline.source_completes {
+        return "plic.source_complete_observed";
+    }
     if current.zero_claims <= baseline.zero_claims {
         return "plic.zero_claim_observed";
     }
@@ -5842,12 +5952,6 @@ fn serial8250_rx_loopback_wait_diagnostic(
     }
     if super::ns16550a::serial8250_runtime_rx_last_byte() != expected_byte {
         return "serial8250_runtime_rx.last_byte_matched";
-    }
-    if plic.last_claimed_source() != source {
-        return "plic.last_claimed_source_uart";
-    }
-    if plic.last_completed_source() != source {
-        return "plic.last_completed_source_uart";
     }
     if irq_handler_registry.dispatch_calls() <= baseline.irq_dispatches {
         return "irq_handler_registry.dispatch_observed";
@@ -5863,7 +5967,7 @@ fn serial8250_rx_batch_loopback_wait_diagnostic(
     expected_len: usize,
     expected_last: u8,
 ) -> &'static str {
-    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
     let inserted_delta = current.flip_inserted.saturating_sub(baseline.flip_inserted);
 
     if current.rx_requests <= baseline.rx_requests {
@@ -5872,8 +5976,14 @@ fn serial8250_rx_batch_loopback_wait_diagnostic(
     if current.claims <= baseline.claims {
         return "plic.claim_observed";
     }
+    if current.source_claims <= baseline.source_claims {
+        return "plic.source_claim_observed";
+    }
     if current.plic_dispatches <= baseline.plic_dispatches {
         return "plic.irq_domain_dispatch_observed";
+    }
+    if current.source_dispatches <= baseline.source_dispatches {
+        return "plic.source_dispatch_observed";
     }
     if current.irq_dispatches <= baseline.irq_dispatches {
         return "irq_handler_registry.dispatch_observed";
@@ -5892,6 +6002,9 @@ fn serial8250_rx_batch_loopback_wait_diagnostic(
     }
     if current.completes <= baseline.completes {
         return "plic.complete_observed";
+    }
+    if current.source_completes <= baseline.source_completes {
+        return "plic.source_complete_observed";
     }
     if current.zero_claims <= baseline.zero_claims {
         return "plic.zero_claim_observed";
@@ -5913,12 +6026,6 @@ fn serial8250_rx_batch_loopback_wait_diagnostic(
     }
     if super::ns16550a::tty_flip_buffer_overflowed() {
         return "tty_flip_buffer.no_overflow";
-    }
-    if plic.last_claimed_source() != source {
-        return "plic.last_claimed_source_uart";
-    }
-    if plic.last_completed_source() != source {
-        return "plic.last_completed_source_uart";
     }
     if irq_handler_registry.dispatch_calls() <= baseline.irq_dispatches {
         return "irq_handler_registry.dispatch_observed";
@@ -6168,7 +6275,7 @@ impl TtyWriteRuntimeTxProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let baseline_enqueues = super::ns16550a::tty_xmit_fifo_enqueue_count();
         let baseline_dequeues = super::ns16550a::tty_xmit_fifo_dequeue_count();
         let baseline_kicks = super::ns16550a::tty_xmit_fifo_runtime_tx_kick_count();
@@ -6204,23 +6311,21 @@ impl TtyWriteRuntimeTxProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         self.xmit_fifo_enqueued =
             super::ns16550a::tty_xmit_fifo_enqueue_count() > baseline_enqueues;
         self.start_tx_committed = super::ns16550a::tty_xmit_fifo_runtime_tx_kick_count()
             > baseline_kicks
             && super::ns16550a::tty_xmit_fifo_runtime_tx_integrated();
-        self.plic_claim_observed =
-            observed.claims > baseline.claims && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+        self.plic_claim_observed = observed.source_claims > baseline.source_claims;
+        self.irq_dispatch_observed = observed.source_dispatches > baseline.source_dispatches
             && observed.irq_dispatches > baseline.irq_dispatches;
         self.uart_handler_observed = observed.handler_calls > baseline.handler_calls
             && observed.handled > baseline.handled
             && observed.thri_disabled > baseline.thri_disabled;
         self.xmit_fifo_drained = super::ns16550a::tty_xmit_fifo_dequeue_count() > baseline_dequeues
             && super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count() > baseline_drains;
-        self.plic_complete_observed =
-            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
         self.queue_empty_after_irq = super::ns16550a::tty_xmit_fifo_queue_len() == 0
@@ -6405,7 +6510,7 @@ impl TtyWriteBatchRuntimeTxProbe {
             );
         }
 
-        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let baseline_enqueues = super::ns16550a::tty_xmit_fifo_enqueue_count();
         let baseline_dequeues = super::ns16550a::tty_xmit_fifo_dequeue_count();
         let baseline_kicks = super::ns16550a::tty_xmit_fifo_runtime_tx_kick_count();
@@ -6442,7 +6547,7 @@ impl TtyWriteBatchRuntimeTxProbe {
             );
         }
 
-        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let observed = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         let enqueue_delta =
             super::ns16550a::tty_xmit_fifo_enqueue_count().saturating_sub(baseline_enqueues);
         let dequeue_delta =
@@ -6455,16 +6560,14 @@ impl TtyWriteBatchRuntimeTxProbe {
         self.start_tx_committed = super::ns16550a::tty_xmit_fifo_runtime_tx_kick_count()
             > baseline_kicks
             && super::ns16550a::tty_xmit_fifo_runtime_tx_integrated();
-        self.plic_claim_observed =
-            observed.claims > baseline.claims && plic.last_claimed_source() == source;
-        self.irq_dispatch_observed = observed.plic_dispatches > baseline.plic_dispatches
+        self.plic_claim_observed = observed.source_claims > baseline.source_claims;
+        self.irq_dispatch_observed = observed.source_dispatches > baseline.source_dispatches
             && observed.irq_dispatches > baseline.irq_dispatches;
         self.uart_handler_observed = observed.handler_calls > baseline.handler_calls
             && observed.handled > baseline.handled
             && observed.thri_disabled > baseline.thri_disabled;
         self.xmit_fifo_batch_drained = dequeue_delta == expected_len && drain_delta == expected_len;
-        self.plic_complete_observed =
-            observed.completes > baseline.completes && plic.last_completed_source() == source;
+        self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
         self.queue_empty_after_irq = super::ns16550a::tty_xmit_fifo_queue_len() == 0
@@ -6524,14 +6627,18 @@ impl TtyWriteBatchRuntimeTxProbe {
 fn uart_irq_cycle_snapshot(
     plic: &Plic,
     irq_handler_registry: &IrqHandlerRegistry,
+    source: u32,
 ) -> UartIrqCycleSnapshot {
     UartIrqCycleSnapshot {
         requests: super::ns16550a::uart8250_thre_interrupt_request_count(),
         rx_requests: super::ns16550a::uart8250_rx_interrupt_request_count(),
         claims: plic.claim_count(),
+        source_claims: plic.claim_count_for_source(source),
         zero_claims: plic.zero_claim_count(),
         plic_dispatches: plic.dispatch_count(),
+        source_dispatches: plic.dispatch_count_for_source(source),
         completes: plic.complete_count(),
+        source_completes: plic.complete_count_for_source(source),
         loop_exits: plic.loop_exit_count(),
         irq_dispatches: irq_handler_registry.dispatch_calls(),
         handler_calls: super::ns16550a::uart8250_irq_handler_call_count(),
@@ -6555,22 +6662,20 @@ fn wait_tty_write_runtime_tx_closed(
     let mut spins = 0usize;
 
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
-        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         if current.requests > baseline.requests
-            && current.claims > baseline.claims
-            && current.plic_dispatches > baseline.plic_dispatches
+            && current.source_claims > baseline.source_claims
+            && current.source_dispatches > baseline.source_dispatches
             && current.irq_dispatches > baseline.irq_dispatches
             && current.handler_calls > baseline.handler_calls
             && current.handled > baseline.handled
             && current.thri_disabled > baseline.thri_disabled
-            && current.completes > baseline.completes
+            && current.source_completes > baseline.source_completes
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
             && super::ns16550a::tty_xmit_fifo_runtime_tx_drain_count()
                 >= baseline_drains.saturating_add(expected_drain_delta)
             && super::ns16550a::tty_xmit_fifo_queue_len() == 0
-            && plic.last_claimed_source() == source
-            && plic.last_completed_source() == source
             && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
         {
             return true;
@@ -6717,16 +6822,16 @@ fn wait_serial8250_rx_batch_loopback_closed(
     let mut spins = 0usize;
 
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
-        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         if current.rx_requests > baseline.rx_requests
-            && current.claims > baseline.claims
-            && current.plic_dispatches > baseline.plic_dispatches
+            && current.source_claims > baseline.source_claims
+            && current.source_dispatches > baseline.source_dispatches
             && current.irq_dispatches > baseline.irq_dispatches
             && current.handler_calls > baseline.handler_calls
             && current.rx_handled > baseline.rx_handled
             && current.flip_pushes > baseline.flip_pushes
             && current.flip_inserted.saturating_sub(baseline.flip_inserted) == expected_len
-            && current.completes > baseline.completes
+            && current.source_completes > baseline.source_completes
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
             && super::ns16550a::serial8250_runtime_rx_enabled()
@@ -6734,8 +6839,6 @@ fn wait_serial8250_rx_batch_loopback_closed(
             && super::ns16550a::tty_flip_buffer_last_pushed_len() == expected_len
             && super::ns16550a::serial8250_runtime_rx_last_byte() == expected_last
             && !super::ns16550a::tty_flip_buffer_overflowed()
-            && plic.last_claimed_source() == source
-            && plic.last_completed_source() == source
             && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
         {
             return true;
@@ -6758,22 +6861,20 @@ fn wait_serial8250_rx_loopback_closed(
     let mut spins = 0usize;
 
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
-        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         if current.rx_requests > baseline.rx_requests
-            && current.claims > baseline.claims
-            && current.plic_dispatches > baseline.plic_dispatches
+            && current.source_claims > baseline.source_claims
+            && current.source_dispatches > baseline.source_dispatches
             && current.irq_dispatches > baseline.irq_dispatches
             && current.handler_calls > baseline.handler_calls
             && current.rx_handled > baseline.rx_handled
             && current.flip_pushes > baseline.flip_pushes
             && current.flip_inserted > baseline.flip_inserted
-            && current.completes > baseline.completes
+            && current.source_completes > baseline.source_completes
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
             && super::ns16550a::serial8250_runtime_rx_enabled()
             && super::ns16550a::serial8250_runtime_rx_last_byte() == expected_byte
-            && plic.last_claimed_source() == source
-            && plic.last_completed_source() == source
             && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
         {
             return true;
@@ -6787,31 +6888,32 @@ fn wait_serial8250_rx_loopback_closed(
 }
 
 fn uart_rx_cycle_completed_and_closed(
-    plic: &Plic,
     current: UartIrqCycleSnapshot,
     baseline: UartIrqCycleSnapshot,
-    source: u32,
 ) -> bool {
     let claim_delta = current.claims.saturating_sub(baseline.claims);
+    let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
     let complete_delta = current.completes.saturating_sub(baseline.completes);
+    let source_complete_delta = current
+        .source_completes
+        .saturating_sub(baseline.source_completes);
     let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
     let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
 
     current.rx_requests > baseline.rx_requests
-        && current.claims > baseline.claims
-        && current.plic_dispatches > baseline.plic_dispatches
+        && current.source_claims > baseline.source_claims
+        && current.source_dispatches > baseline.source_dispatches
         && current.irq_dispatches > baseline.irq_dispatches
         && current.handler_calls > baseline.handler_calls
         && current.rx_handled > baseline.rx_handled
         && current.flip_pushes > baseline.flip_pushes
         && current.flip_inserted > baseline.flip_inserted
-        && current.completes > baseline.completes
+        && current.source_completes > baseline.source_completes
         && current.zero_claims > baseline.zero_claims
         && current.loop_exits > baseline.loop_exits
         && claim_delta == complete_delta
+        && source_claim_delta == source_complete_delta
         && zero_claim_delta == loop_exit_delta
-        && plic.last_claimed_source() == source
-        && plic.last_completed_source() == source
 }
 
 fn wait_uart_irq_cycle_closed(
@@ -6823,8 +6925,8 @@ fn wait_uart_irq_cycle_closed(
     let mut spins = 0usize;
 
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
-        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
-        if uart_irq_cycle_completed_and_closed(plic, current, baseline, source) {
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
+        if uart_irq_cycle_completed_and_closed(current, baseline) {
             return true;
         }
 
@@ -6847,22 +6949,20 @@ fn wait_serial8250_irq_tx_closed(
     let mut spins = 0usize;
 
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
-        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
         if current.requests > baseline.requests
-            && current.claims > baseline.claims
-            && current.plic_dispatches > baseline.plic_dispatches
+            && current.source_claims > baseline.source_claims
+            && current.source_dispatches > baseline.source_dispatches
             && current.irq_dispatches > baseline.irq_dispatches
             && current.handler_calls > baseline.handler_calls
             && current.handled > baseline.handled
             && current.thri_disabled > baseline.thri_disabled
-            && current.completes > baseline.completes
+            && current.source_completes > baseline.source_completes
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
             && super::ns16550a::serial8250_tx_irq_drain_count()
                 >= baseline_drains.saturating_add(expected_tx_bytes)
             && super::ns16550a::serial8250_tx_queue_len() == 0
-            && plic.last_claimed_source() == source
-            && plic.last_completed_source() == source
             && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
         {
             return true;
@@ -6888,26 +6988,26 @@ fn wait_serial8250_long_irq_tx_closed(
     let mut spins = 0usize;
 
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
-        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
-        let claim_delta = current.claims.saturating_sub(baseline.claims);
-        let complete_delta = current.completes.saturating_sub(baseline.completes);
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
+        let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
+        let source_complete_delta = current
+            .source_completes
+            .saturating_sub(baseline.source_completes);
         let handler_delta = current.handler_calls.saturating_sub(baseline.handler_calls);
         if current.requests > baseline.requests
-            && claim_delta >= 2
-            && current.plic_dispatches > baseline.plic_dispatches
+            && source_claim_delta >= 2
+            && current.source_dispatches > baseline.source_dispatches
             && current.irq_dispatches > baseline.irq_dispatches
             && handler_delta >= 2
             && current.handled.saturating_sub(baseline.handled) >= 2
             && current.thri_disabled > baseline.thri_disabled
-            && complete_delta >= 2
+            && source_complete_delta >= 2
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
             && super::ns16550a::serial8250_tx_irq_drain_count()
                 >= baseline_drains.saturating_add(expected_tx_bytes)
             && super::ns16550a::serial8250_tx_irq_budget_hit_count() > baseline_budget_hits
             && super::ns16550a::serial8250_tx_queue_len() == 0
-            && plic.last_claimed_source() == source
-            && plic.last_completed_source() == source
             && irq_handler_registry.dispatch_calls() > baseline.irq_dispatches
         {
             return true;
@@ -6935,35 +7035,35 @@ fn wait_serial8250_long_burst_irq_tx_closed(
     let mut spins = 0usize;
 
     while spins < UART_IRQ_CYCLE_SPIN_LIMIT {
-        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
-        let claim_delta = current.claims.saturating_sub(baseline.claims);
-        let plic_dispatch_delta = current
-            .plic_dispatches
-            .saturating_sub(baseline.plic_dispatches);
+        let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
+        let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
+        let source_dispatch_delta = current
+            .source_dispatches
+            .saturating_sub(baseline.source_dispatches);
         let irq_dispatch_delta = current
             .irq_dispatches
             .saturating_sub(baseline.irq_dispatches);
-        let complete_delta = current.completes.saturating_sub(baseline.completes);
+        let source_complete_delta = current
+            .source_completes
+            .saturating_sub(baseline.source_completes);
         let handler_delta = current.handler_calls.saturating_sub(baseline.handler_calls);
         let handled_delta = current.handled.saturating_sub(baseline.handled);
         let budget_hit_delta = super::ns16550a::serial8250_tx_irq_budget_hit_count()
             .saturating_sub(baseline_budget_hits);
         if current.requests > baseline.requests
-            && claim_delta >= expected_rounds
-            && plic_dispatch_delta >= expected_rounds
+            && source_claim_delta >= expected_rounds
+            && source_dispatch_delta >= expected_rounds
             && irq_dispatch_delta >= expected_rounds
             && handler_delta >= expected_rounds
             && handled_delta >= expected_rounds
             && current.thri_disabled > baseline.thri_disabled
-            && complete_delta >= expected_rounds
+            && source_complete_delta >= expected_rounds
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
             && super::ns16550a::serial8250_tx_irq_drain_count()
                 >= baseline_drains.saturating_add(expected_tx_bytes)
             && budget_hit_delta >= expected_budget_hits
             && super::ns16550a::serial8250_tx_queue_len() == 0
-            && plic.last_claimed_source() == source
-            && plic.last_completed_source() == source
             && irq_handler_registry
                 .dispatch_calls()
                 .saturating_sub(baseline.irq_dispatches)
@@ -6980,30 +7080,31 @@ fn wait_serial8250_long_burst_irq_tx_closed(
 }
 
 fn uart_irq_cycle_completed_and_closed(
-    plic: &Plic,
     current: UartIrqCycleSnapshot,
     baseline: UartIrqCycleSnapshot,
-    source: u32,
 ) -> bool {
     let claim_delta = current.claims.saturating_sub(baseline.claims);
+    let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
     let complete_delta = current.completes.saturating_sub(baseline.completes);
+    let source_complete_delta = current
+        .source_completes
+        .saturating_sub(baseline.source_completes);
     let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
     let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
 
     current.requests > baseline.requests
-        && current.claims > baseline.claims
-        && current.plic_dispatches > baseline.plic_dispatches
+        && current.source_claims > baseline.source_claims
+        && current.source_dispatches > baseline.source_dispatches
         && current.irq_dispatches > baseline.irq_dispatches
         && current.handler_calls > baseline.handler_calls
         && current.handled > baseline.handled
         && current.thri_disabled > baseline.thri_disabled
-        && current.completes > baseline.completes
+        && current.source_completes > baseline.source_completes
         && current.zero_claims > baseline.zero_claims
         && current.loop_exits > baseline.loop_exits
         && claim_delta == complete_delta
+        && source_claim_delta == source_complete_delta
         && zero_claim_delta == loop_exit_delta
-        && plic.last_claimed_source() == source
-        && plic.last_completed_source() == source
 }
 
 fn find_plic_interrupt_controller_node(device_tree: &DeviceTree) -> Option<DeviceNodeRef<'_>> {

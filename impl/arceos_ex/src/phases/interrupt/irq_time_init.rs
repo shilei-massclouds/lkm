@@ -224,6 +224,7 @@ fn irq_time_init_phase_ready(ctx: &Context) -> bool {
         && ctx.plic.claim_before_dispatch()
         && ctx.plic.complete_after_handler()
         && ctx.plic.uart_source_trigger_deferred()
+        && ctx.plic.source_observation_counters_ready()
         && ctx.plic_irq_domain.state() == State::Ready
         && ctx.plic_irq_domain.owner_bound()
         && ctx.plic_irq_domain.hwirq_valid_range_ready()

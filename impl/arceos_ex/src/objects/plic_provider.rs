@@ -96,6 +96,30 @@ pub fn last_completed_source(plic: &Plic) -> u32 {
     provider_last_completed_source(plic)
 }
 
+pub fn claim_count_for_source(plic: &Plic, source: u32) -> usize {
+    if source == 0 || source > plic.source_count() {
+        return 0;
+    }
+
+    provider_claim_count_for_source(plic, source)
+}
+
+pub fn dispatch_count_for_source(plic: &Plic, source: u32) -> usize {
+    if source == 0 || source > plic.source_count() {
+        return 0;
+    }
+
+    provider_dispatch_count_for_source(plic, source)
+}
+
+pub fn complete_count_for_source(plic: &Plic, source: u32) -> usize {
+    if source == 0 || source > plic.source_count() {
+        return 0;
+    }
+
+    provider_complete_count_for_source(plic, source)
+}
+
 fn runtime_ready(plic: &Plic, domain: &PlicIrqDomain, registry: &IrqHandlerRegistry) -> bool {
     plic.state() == State::Ready
         && plic.chained_handler_ready()
@@ -324,4 +348,34 @@ fn provider_last_completed_source(plic: &Plic) -> u32 {
 #[cfg(plic_provider_linux_object)]
 fn provider_last_completed_source(_plic: &Plic) -> u32 {
     super::linux_plic_shim::runtime_last_completed_source()
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn provider_claim_count_for_source(plic: &Plic, source: u32) -> usize {
+    plic.native_claim_count_for_source(source)
+}
+
+#[cfg(plic_provider_linux_object)]
+fn provider_claim_count_for_source(_plic: &Plic, source: u32) -> usize {
+    super::linux_plic_shim::runtime_claim_count_for_source(source)
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn provider_dispatch_count_for_source(plic: &Plic, source: u32) -> usize {
+    plic.native_dispatch_count_for_source(source)
+}
+
+#[cfg(plic_provider_linux_object)]
+fn provider_dispatch_count_for_source(_plic: &Plic, source: u32) -> usize {
+    super::linux_plic_shim::runtime_dispatch_count_for_source(source)
+}
+
+#[cfg(not(plic_provider_linux_object))]
+fn provider_complete_count_for_source(plic: &Plic, source: u32) -> usize {
+    plic.native_complete_count_for_source(source)
+}
+
+#[cfg(plic_provider_linux_object)]
+fn provider_complete_count_for_source(_plic: &Plic, source: u32) -> usize {
+    super::linux_plic_shim::runtime_complete_count_for_source(source)
 }

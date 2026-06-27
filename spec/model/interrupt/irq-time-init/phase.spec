@@ -726,6 +726,10 @@ predicate plic_chained_handler_zero_claim_stops_dispatch<T>(plic: T) -> bool;
 predicate plic_chained_handler_completes_each_claimed_source<T>(plic: T) -> bool;
 predicate plic_claim_before_generic_irq_dispatch<T>(plic: T) -> bool;
 predicate plic_complete_after_irq_action_handler<T>(plic: T) -> bool;
+predicate plic_source_observation_counters_ready<T>(plic: T) -> bool;
+predicate plic_source_claim_observable<T, H>(plic: T, source: H) -> bool;
+predicate plic_source_dispatch_observable<T, H>(plic: T, source: H) -> bool;
+predicate plic_source_complete_observable<T, H>(plic: T, source: H) -> bool;
 predicate uart_external_irq_enable_ready<T>(enable: T) -> bool;
 predicate uart_external_irq_enable_opens_plic_source_gate<T, D, G>(enable: T, domain: D, gate: G) -> bool;
 predicate uart_external_irq_enable_opens_root_input_gate<T, R, G>(enable: T, riscv_intc: R, gate: G) -> bool;
@@ -1139,6 +1143,9 @@ object UartInterruptChainProbe: InterruptObject {
                     plic_chained_handler_completes_each_claimed_source(Plic);
                     plic_claim_before_generic_irq_dispatch(Plic);
                     plic_complete_after_irq_action_handler(Plic);
+                    plic_source_claim_observable(Plic, HwirqRef::PlicUart0);
+                    plic_source_dispatch_observable(Plic, HwirqRef::PlicUart0);
+                    plic_source_complete_observable(Plic, HwirqRef::PlicUart0);
                     irq_action_handler_runs_after_plic_claim(IrqAction, Plic);
                     irq_action_handler_runs_before_plic_complete(IrqAction, Plic);
                     uart8250_port_interrupt_output_still_deferred(Uart8250Port);
@@ -1162,6 +1169,9 @@ object UartInterruptChainProbe: InterruptObject {
             plic_chained_handler_claim_loop_until_zero(Plic);
             plic_chained_handler_zero_claim_stops_dispatch(Plic);
             plic_chained_handler_completes_each_claimed_source(Plic);
+            plic_source_claim_observable(Plic, HwirqRef::PlicUart0);
+            plic_source_dispatch_observable(Plic, HwirqRef::PlicUart0);
+            plic_source_complete_observable(Plic, HwirqRef::PlicUart0);
             uart8250_port_interrupt_output_still_deferred(Uart8250Port);
         }
     }
@@ -2110,6 +2120,7 @@ object Plic: InterruptObject {
                     plic_chained_handler_completes_each_claimed_source(Plic);
                     plic_claim_before_generic_irq_dispatch(Plic);
                     plic_complete_after_irq_action_handler(Plic);
+                    plic_source_observation_counters_ready(Plic);
                 }
             }
         }
@@ -2146,6 +2157,7 @@ object Plic: InterruptObject {
             plic_chained_handler_completes_each_claimed_source(Plic);
             plic_claim_before_generic_irq_dispatch(Plic);
             plic_complete_after_irq_action_handler(Plic);
+            plic_source_observation_counters_ready(Plic);
         }
     }
 }

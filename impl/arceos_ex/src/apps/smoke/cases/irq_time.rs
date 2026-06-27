@@ -113,6 +113,7 @@ pub fn run() -> SmokeResult {
         || !ctx.plic.claim_loop_until_zero()
         || !ctx.plic.zero_claim_stops_dispatch()
         || !ctx.plic.completes_each_claimed_source()
+        || !ctx.plic.source_observation_counters_ready()
         || !ctx.plic.claim_before_dispatch()
         || !ctx.plic.complete_after_handler()
         || !ctx.plic_irq_domain.owner_bound()

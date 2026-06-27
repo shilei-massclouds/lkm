@@ -70,6 +70,12 @@ static LINUX_PLIC_RUNTIME_LOOP_EXIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_SAVED_RUST_TP: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE: AtomicU32 = AtomicU32::new(0);
 static LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE: AtomicU32 = AtomicU32::new(0);
+static LINUX_PLIC_RUNTIME_SOURCE_CLAIM_COUNTS: [AtomicUsize; LINUX_PLIC_LEAF_IRQ_CAPACITY] =
+    [const { AtomicUsize::new(0) }; LINUX_PLIC_LEAF_IRQ_CAPACITY];
+static LINUX_PLIC_RUNTIME_SOURCE_DISPATCH_COUNTS: [AtomicUsize; LINUX_PLIC_LEAF_IRQ_CAPACITY] =
+    [const { AtomicUsize::new(0) }; LINUX_PLIC_LEAF_IRQ_CAPACITY];
+static LINUX_PLIC_RUNTIME_SOURCE_COMPLETE_COUNTS: [AtomicUsize; LINUX_PLIC_LEAF_IRQ_CAPACITY] =
+    [const { AtomicUsize::new(0) }; LINUX_PLIC_LEAF_IRQ_CAPACITY];
 static LINUX_PLIC_UNMAPPED_IRQ_FAILURE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static LINUX_PLIC_UNMAPPED_IRQ_LAST_SOURCE: AtomicU32 = AtomicU32::new(0);
 static LINUX_PLIC_UNMAPPED_IRQ_LAST_ERRNO: AtomicUsize = AtomicUsize::new(0);
@@ -573,6 +579,24 @@ pub fn runtime_last_claimed_source() -> u32 {
 
 pub fn runtime_last_completed_source() -> u32 {
     LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.load(Ordering::Acquire)
+}
+
+pub fn runtime_claim_count_for_source(source: u32) -> usize {
+    linux_plic_source_index(source)
+        .map(|index| LINUX_PLIC_RUNTIME_SOURCE_CLAIM_COUNTS[index].load(Ordering::Acquire))
+        .unwrap_or(0)
+}
+
+pub fn runtime_dispatch_count_for_source(source: u32) -> usize {
+    linux_plic_source_index(source)
+        .map(|index| LINUX_PLIC_RUNTIME_SOURCE_DISPATCH_COUNTS[index].load(Ordering::Acquire))
+        .unwrap_or(0)
+}
+
+pub fn runtime_complete_count_for_source(source: u32) -> usize {
+    linux_plic_source_index(source)
+        .map(|index| LINUX_PLIC_RUNTIME_SOURCE_COMPLETE_COUNTS[index].load(Ordering::Acquire))
+        .unwrap_or(0)
 }
 
 pub fn boundary_facts() -> LinuxPlicBoundaryFacts {
@@ -1927,6 +1951,7 @@ fn generic_handle_domain_irq_inner(
     if record_runtime_claim {
         LINUX_PLIC_RUNTIME_CLAIM_COUNT.fetch_add(1, Ordering::AcqRel);
         LINUX_PLIC_RUNTIME_LAST_CLAIMED_SOURCE.store(source, Ordering::Release);
+        increment_runtime_source_claim_count(source);
     }
 
     let linux_tp = crate::arch::riscv64::csr::read_tp();
@@ -2005,10 +2030,42 @@ pub extern "C" fn handle_fasteoi_irq(desc: *mut c_void) {
     if unsafe { call_linux_chip_callback(record, irq_data, LinuxIrqChipCallbackSlot::Eoi) } {
         LINUX_PLIC_RUNTIME_COMPLETE_COUNT.fetch_add(1, Ordering::AcqRel);
         LINUX_PLIC_RUNTIME_LAST_COMPLETED_SOURCE.store(record.hwirq, Ordering::Release);
+        increment_runtime_source_complete_count(record.hwirq);
     }
     if dispatched {
         LINUX_PLIC_LEAF_ACTION_DISPATCH_COUNT.fetch_add(1, Ordering::AcqRel);
         LINUX_PLIC_RUNTIME_DISPATCH_COUNT.fetch_add(1, Ordering::AcqRel);
+        increment_runtime_source_dispatch_count(record.hwirq);
+    }
+}
+
+fn linux_plic_source_index(source: u32) -> Option<usize> {
+    if source == 0 {
+        return None;
+    }
+
+    let index = source as usize;
+    if index >= LINUX_PLIC_LEAF_IRQ_CAPACITY {
+        return None;
+    }
+    Some(index)
+}
+
+fn increment_runtime_source_claim_count(source: u32) {
+    if let Some(index) = linux_plic_source_index(source) {
+        LINUX_PLIC_RUNTIME_SOURCE_CLAIM_COUNTS[index].fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+fn increment_runtime_source_dispatch_count(source: u32) {
+    if let Some(index) = linux_plic_source_index(source) {
+        LINUX_PLIC_RUNTIME_SOURCE_DISPATCH_COUNTS[index].fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+fn increment_runtime_source_complete_count(source: u32) {
+    if let Some(index) = linux_plic_source_index(source) {
+        LINUX_PLIC_RUNTIME_SOURCE_COMPLETE_COUNTS[index].fetch_add(1, Ordering::AcqRel);
     }
 }
 
