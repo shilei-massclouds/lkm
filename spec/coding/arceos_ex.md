@@ -7,7 +7,7 @@
 `impl/arceos_ex/`，使用 `Makefile` 编译和运行；暂时不进入 `tgoskits`、`xtask`、ArceOS crate 兼容和 feature 传递问题。
 
 `tgoskits`/ArceOS 组件兼容属于后续 `Composition Phase`，只有对象级实现闭环后再恢复讨论。此前在
-`tgoskits` 中实现过的 `arceos_ex` 仍具有参考价值，尤其是 RISC-V64 入口、链接脚本、checkpoint 字符输出、SBI/FDT
+`tgoskits` 中实现过的 `arceos_ex` 仍具有参考价值，尤其是 RISC-V64 入口、链接脚本、checkpoint announce 输出、SBI/FDT
 平台细节和 overlay 经验；但当前对象级实现不得直接继承其 ArceOS 组件边界、feature 传递、`axlog` 或 `ax-alloc` 接入。
 
 ## 目标边界
@@ -65,15 +65,17 @@ MUST：普通 checkpoint handler 的 `HandlerRun` 原型只能保留只读 obser
 暴露。app smoke case 不得作为 checkpoint handler 注册；需要改变对象状态的测试应放在 app smoke 或明确建模的
 action-level probe 中。
 
-MUST：当前 checkpoint 机制按“观察点 + consumer”理解。默认构建不得启用重型 consumer；`LOG=trace` 通过
-`checkpoint_sbi_char` 启用 checkpoint trace consumer，`PROBE=...` 通过 `checkpoint_handler_*` 启用特定
-observer/handler。`PROBE=uart-irq-chain` 属于 UART/PLIC/IRQ 链路的 checkpoint observer；压力测试和并发缺陷定位
-可以使用它读取结构化事实，但不得把该 probe 路径等同于普通运行路径的稳定性证明。
+MUST：当前 checkpoint 机制按“观察点 + consumer”理解。默认构建不得启用重型 consumer；`PROBE=announce`
+通过 `checkpoint_handler_announce` 启用 checkpoint 自声明 consumer：早期可以输出稳定单字符，post-VM 后输出
+稳定 checkpoint 名称和可用上下文。`PROBE=...` 通过 `checkpoint_handler_*` 启用其它特定 observer/handler。
+`PROBE=uart-irq-chain` 属于 UART/PLIC/IRQ 链路的 checkpoint observer；压力测试和并发缺陷定位可以使用它读取
+结构化事实，但不得把该 probe 路径等同于普通运行路径的稳定性证明。`LOG=trace` 仅作为兼容入口映射到
+`PROBE=announce`，长期应清理；`trace` 名称留给后续 Linux-like trace 机制。
 
 MUST：观察级别至少区分 default、light、failure-only、probe-heavy 和 stress/nightly。default 级别不启用重型
 checkpoint handler；light 级别只维护长期低开销 observation facts，例如对象状态、计数器、source-scoped counters
-和同步边界事实；failure-only 级别只在失败路径采集结构化 diagnostic；probe-heavy 级别由 `PROBE`、`PROBE_FILE`、
-`LOG=trace` 或后续等价开关显式开启；stress/nightly 级别负责重复执行、事件序列归档、分类和差分分析。
+和同步边界事实；failure-only 级别只在失败路径采集结构化 diagnostic；probe-heavy 级别由 `PROBE`、`PROBE_FILE`
+或后续等价开关显式开启；stress/nightly 级别负责重复执行、事件序列归档、分类和差分分析。
 
 MUST：观察域应按稳定子系统或对象划分，包括 PLIC/IRQ-domain、UART8250/TTY、virtio-blk/block I/O、VFS/ext2、
 scheduler/task、payload 和 phase boundary。对象事实由对应对象或 provider 维护，handler 只能读取和输出；不得为了
@@ -100,7 +102,7 @@ make build APP=hello
 make run
 make run APP=smoke
 make run APP=hello
-make run LOG=trace
+make run PROBE=announce
 make verify
 make verify REPORT=graph
 make test
@@ -110,8 +112,8 @@ make test-smoke
 make clean
 ```
 
-`KERNEL ?= arceos_ex` 选择默认内核，`APP ?= smoke` 选择默认 selected payload。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run LOG=trace`
-启用 checkpoint 字符输出。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
+`KERNEL ?= arceos_ex` 选择默认内核，`APP ?= smoke` 选择默认 selected payload。`build` 负责编译内核镜像；`run` 使用 QEMU/OpenSBI 运行；`run PROBE=announce`
+启用 checkpoint 自声明输出。`LOG=trace` 暂时作为兼容入口等价映射到 `PROBE=announce`，但不应作为新用法继续扩展。`verify` 调用 `pyveri` 对当前启动时间轴规格做推导验证；`verify REPORT=graph`
 生成带注释的 trace SVG 报告。`test` 是默认验证闭环，按顺序执行 `test-verify`、`test-kunit`
 和 `test-smoke`：第一步运行正式规格 strict derive，第二步用 `impl/arceos_ex/tests/kunit.handlers`
 聚合 checkpoint/KUnit handler 在 `APP=hello` 路径下验证局部对象和 action 边界，第三步运行 `APP=smoke`
@@ -121,7 +123,7 @@ make clean
 和 `VirtioBus` checkpoint/KUnit 能观察到真实 `device_id == VIRTIO_ID_RNG` 的 MMIO transport 与 generic
 `VirtioDevice`。需要回到裸 QEMU virt placeholder slot 场景时，可显式传入 `QEMU_DEVICES=`。
 
-当前对象级实现已经能通过 `make run` 和 `make run LOG=trace` 完成 `EntryPreludePhase.Ready`、
+当前对象级实现已经能通过 `make run` 和 `make run PROBE=announce` 完成 `EntryPreludePhase.Ready`、
 `EntrySuccessorPhase.Ready`、`CorePreparePhase.Ready`、`MmCoreInitPhase.Ready`、`SchedInitPhase.Ready` 和
 `InterruptPhase.Ready`（其当前展开子阶段包括 `IrqTimeInitPhase.Ready`、`LocalIrqEnablePhase.Ready`、
 `IrqOpenPreparePhase.Ready` 和 `ProcessPreparePhase.Ready`），再完成 `UpMultitaskPhase.Ready`（当前展开
@@ -1112,7 +1114,7 @@ GlobalAlloc/Vec smoke 是动态容器前置链路的第三个运行期用例：�
 ### 启动与 smoke 输出风格
 
 启动日志和 smoke 用例输出主要服务人工审阅，SHOULD 优先采用接近 Linux 启动日志的清晰文本格式，而不是大量
-`key=value` 调试字段。机器可解析的状态序列应通过 checkpoint trace 或后续结构化报告承载，不应挤进普通启动日志。
+`key=value` 调试字段。机器可解析的状态序列应通过 checkpoint announce、Linux-like trace 或后续结构化报告承载，不应挤进普通启动日志。
 
 建议格式如下：
 
@@ -1202,7 +1204,7 @@ Nightly workflow 用于定时日构建，也支持 `workflow_dispatch` 手动触
 - 推导工具全量测试、系统测试和 fixture 回归。
 - 全规格批量推导验证。
 - trace SVG 全量生成，并作为 artifact 保存。
-- `impl/arceos_ex` 的完整 `make build`、`make run`、`make run LOG=trace`。
+- `impl/arceos_ex` 的完整 `make build`、`make run`、`make run PROBE=announce`。
 - QEMU smoke test，检查 smoke 汇总输出、独立 `APP=hello` 输出或 checkpoint 序列。
 - 生成 unresolved obligations、deferred items、对象覆盖表、QEMU 日志等报告。
 
@@ -1937,7 +1939,7 @@ checkpoint handler 必须遵守以下约束：
 - handler 可以失败并停机，也可以主动停机。建议 outcome 至少区分 `Continue`、`FailAndShutdown` 和 `StopAndShutdown`：前者继续启动，第二类表示 probe/verify 失败，第三类表示达到逐级构建或逐级验证目标后主动结束。
 - handler 内部不得再次调用 checkpoint；实现应通过 guard 或模块边界防止 checkpoint 重入。若发生重入，应视为实现错误并停机或直接忽略内层 checkpoint，但不得递归执行 handler。
 
-checkpoint trace 独立于 `EarlyCon` 和正式 `Console`。极早期地址空间阶段可以使用 RISC-V64 SBI legacy putchar 输出单个字符，用于定位 `EarlyVm` 切换生效前的最小事件；该路径不得依赖 allocator、锁、字符串地址、FixMap 或线性映射状态。`EarlyVm` 切换生效、完整 `KernelImage` 映射可访问后，trace 后端应输出稳定 checkpoint 名称字符串，而不是继续消耗单字符 id。
+checkpoint announce 独立于 `EarlyCon` 和正式 `Console`。极早期地址空间阶段可以使用 RISC-V64 SBI legacy putchar 输出单个字符，用于定位 `EarlyVm` 切换生效前的最小事件；该路径不得依赖 allocator、锁、字符串地址、FixMap 或线性映射状态。`EarlyVm` 切换生效、完整 `KernelImage` 映射可访问后，announce 后端应输出稳定 checkpoint 名称字符串，而不是继续消耗单字符 id。
 
 单字符 checkpoint id 只服务 `EarlyVm` 切换前的最低层观测，必须在该极早期后端中保持一一对应，避免运行期 trace 解码歧义。`EarlyVm` 切换后的 checkpoint 新增时只需提供稳定名称，不应再分配单字符 id。
 

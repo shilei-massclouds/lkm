@@ -176,9 +176,9 @@ checkpoint hook 只定义观察时机。结构化观察内容应来自对象或 
 predicate/check 失败时采集必要对象事实，随错误传播，并在最终输出阶段打印。它不是新增 checkpoint，也不是注册在
 某个失败 checkpoint 上的 handler。成功路径不得因为 failure diagnostic 支持而改变 checkpoint 序列。
 
-checkpoint trace 是独立观测路径，不属于 `EarlyCon` 或正式 `Console`。在入口前导期最早阶段，允许使用极小的 SBI 字符输出后端，只输出稳定 checkpoint id 对应的单个字符。这样可以避免字符串地址、缓冲区地址、allocator、FixMap、线性映射或 console 初始化状态对 trace 的影响。完整名称和语义应由静态映射表维护，例如 `EarlyVm.Ready -> 'D'`；字符仅用于早期烟雾测试和定位。
+checkpoint announce 是独立观测路径，不属于 `EarlyCon` 或正式 `Console`。在入口前导期最早阶段，允许使用极小的 SBI 字符输出后端，只输出稳定 checkpoint id 对应的单个字符。这样可以避免字符串地址、缓冲区地址、allocator、FixMap、线性映射或 console 初始化状态对 announce 的影响。完整名称和语义应由静态映射表维护，例如 `EarlyVm.Ready -> 'D'`；字符仅用于早期烟雾测试和定位。
 
-如果某个 checkpoint 位于页表切换前后，hook 实现必须保证自身代码地址在当前地址空间可执行，且不得读取尚未映射的数据。进入 `EarlyVm` 或更晚阶段后，可以切换到更丰富的 trace 后端，但仍应保持与 early console/console 路径隔离。
+如果某个 checkpoint 位于页表切换前后，hook 实现必须保证自身代码地址在当前地址空间可执行，且不得读取尚未映射的数据。进入 `EarlyVm` 或更晚阶段后，可以切换到更丰富的 announce/observer 后端，但仍应保持与 early console/console 路径隔离。
 
 ## 依赖与后置事实
 

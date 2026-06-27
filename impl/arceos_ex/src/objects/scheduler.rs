@@ -1543,9 +1543,9 @@ fn trace_switch_to(
     next_ref: CurrentTaskRef,
     current_after: CurrentTaskRef,
 ) {
-    #[cfg(checkpoint_sbi_char)]
+    #[cfg(checkpoint_handler_announce)]
     {
-        crate::arch::riscv64::sbi::putstr("trace: Scheduler.SwitchTo prev=");
+        crate::arch::riscv64::sbi::putstr("checkpoint: Scheduler.SwitchTo prev=");
         crate::arch::riscv64::sbi::putstr(prev_ref.name());
         crate::arch::riscv64::sbi::putstr(" next=");
         crate::arch::riscv64::sbi::putstr(next_ref.name());
@@ -1554,7 +1554,7 @@ fn trace_switch_to(
         crate::arch::riscv64::sbi::putchar(b'\n');
     }
 
-    #[cfg(not(checkpoint_sbi_char))]
+    #[cfg(not(checkpoint_handler_announce))]
     {
         let _ = (prev_ref, next_ref, current_after);
     }

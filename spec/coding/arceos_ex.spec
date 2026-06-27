@@ -1819,11 +1819,14 @@ type ArceosExIrqTimeInitCodingMust {
          * Checkpoint consumers:
          *
          * Checkpoints are observation points. Default builds must not enable a
-         * heavy consumer. LOG=trace enables the checkpoint_sbi_char trace
-         * consumer, while PROBE=... enables checkpoint_handler_* observers
-         * such as uart-irq-chain. These consumers may read and emit facts, but
-         * they must remain distinct from ordinary execution and from each
-         * other.
+         * heavy consumer. PROBE=announce enables the
+         * checkpoint_handler_announce consumer, where each checkpoint emits a
+         * minimal self-announcement. LOG=trace is only a compatibility alias
+         * for PROBE=announce and must not be extended as the future
+         * Linux-like trace interface. Other PROBE=... values enable
+         * checkpoint_handler_* observers such as uart-irq-chain. These
+         * consumers may read and emit facts, but they must remain distinct
+         * from ordinary execution and from each other.
          */
         arceos_ex_must_checkpoint_consumers_be_cfg_selected();
         arceos_ex_must_log_trace_and_probe_remain_distinct_consumers();
@@ -2784,7 +2787,7 @@ type ArceosExRestInitCodingMust {
          * trimmed/no-op call points for the current RISC-V64 target, while
          * early_trace_init()/trace_init() and housekeeping_init() remain
          * explicit deferred boundaries whose Linux responsibilities must not
-         * be collapsed into the project checkpoint trace or ignored as
+         * be collapsed into the project checkpoint announce or ignored as
          * permanently absent. The implementation must preserve the Linux call
          * order inside the existing SchedInitPhase: poking_init()/ftrace_init()
          * are recorded before Scheduler setup via SchedInitPreludeTrimmedPaths,

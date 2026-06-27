@@ -1,7 +1,7 @@
+#[cfg(checkpoint_handler_announce)]
+pub mod announce;
 #[cfg(checkpoint_handler_console_handoff)]
 mod console_handoff;
-#[cfg(checkpoint_sbi_char)]
-pub mod early_trace;
 #[cfg(checkpoint_handler_earlycon)]
 mod earlycon;
 #[cfg(checkpoint_handler_kernel_init_task)]
@@ -26,8 +26,6 @@ mod page_allocator;
 mod scheduler_action;
 #[cfg(checkpoint_handler_slub)]
 mod slub;
-#[cfg(checkpoint_sbi_char)]
-mod trace;
 #[cfg(checkpoint_handler_uart_irq_chain)]
 mod uart_irq_chain;
 #[cfg(checkpoint_handler_user_boot)]
@@ -40,7 +38,7 @@ mod virtio_bus;
 mod virtio_rng;
 
 #[cfg(any(
-    checkpoint_sbi_char,
+    checkpoint_handler_announce,
     checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
@@ -78,7 +76,7 @@ pub enum HandlerScope {
 // `&mut Context`, or otherwise let handlers mutate ordinary Context objects.
 // Writable capability is intentionally limited to `Sink`.
 #[cfg(any(
-    checkpoint_sbi_char,
+    checkpoint_handler_announce,
     checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
@@ -104,7 +102,7 @@ pub struct Handler {
     pub priority: i16,
     pub scope: HandlerScope,
     #[cfg(any(
-        checkpoint_sbi_char,
+        checkpoint_handler_announce,
         checkpoint_handler_page_allocator,
         checkpoint_handler_earlycon,
         checkpoint_handler_kernel_init_task,
@@ -123,8 +121,8 @@ pub struct Handler {
 }
 
 const POST_VM_HANDLERS: &[Handler] = &[
-    #[cfg(checkpoint_sbi_char)]
-    trace::HANDLER,
+    #[cfg(checkpoint_handler_announce)]
+    announce::HANDLER,
     #[cfg(checkpoint_handler_page_allocator)]
     page_allocator::HANDLER,
     #[cfg(checkpoint_handler_of_platform)]
@@ -230,7 +228,7 @@ pub const fn kunit_case_count() -> usize {
 }
 
 #[cfg(any(
-    checkpoint_sbi_char,
+    checkpoint_handler_announce,
     checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
@@ -271,7 +269,7 @@ pub fn dispatch(checkpoint: Checkpoint, ctx: &Context) -> CheckpointOutcome {
 }
 
 #[cfg(not(any(
-    checkpoint_sbi_char,
+    checkpoint_handler_announce,
     checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,

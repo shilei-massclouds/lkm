@@ -17,7 +17,7 @@ static ENTRY_PRELUDE_PHASE_STATE: AtomicU8 =
 
 const HEAD_TEXT_ALIGN: usize = 2;
 const SSTATUS_FPU_VECTOR_MASK: usize = (0b11 << 9) | (0b11 << 13);
-#[cfg(checkpoint_sbi_char)]
+#[cfg(checkpoint_handler_announce)]
 const SBI_LEGACY_CONSOLE_PUTCHAR: usize = 1;
 
 const TRACE_ADOPT_BEGIN: usize = b'A' as usize;
@@ -161,7 +161,7 @@ unsafe extern "C" {
     fn arceos_ex_head_trap_entry();
 }
 
-#[cfg(checkpoint_sbi_char)]
+#[cfg(checkpoint_handler_announce)]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn arceos_ex_head_checkpoint() {
@@ -173,7 +173,7 @@ unsafe extern "C" fn arceos_ex_head_checkpoint() {
     )
 }
 
-#[cfg(not(checkpoint_sbi_char))]
+#[cfg(not(checkpoint_handler_announce))]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "C" fn arceos_ex_head_checkpoint() {

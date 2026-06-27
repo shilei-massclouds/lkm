@@ -1,6 +1,6 @@
 pub fn enable_post_vm_checkpoints() {
-    #[cfg(checkpoint_sbi_char)]
-    crate::checkpoint::handlers::early_trace::enable_named_checkpoints();
+    #[cfg(checkpoint_handler_announce)]
+    crate::checkpoint::handlers::announce::enable_named_announcements();
     crate::checkpoint::enable_post_vm_checkpoints();
 }
 

@@ -23,7 +23,9 @@ SCHEMA_VERSION = 1
 DEFAULT_CASE = Path(__file__).resolve().parent / "cases" / "df-0001-user-boot.toml"
 DEFAULT_OUT_ROOT = Path(__file__).resolve().parent / "out"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-TRACE_RE = re.compile(r"^trace: (?P<name>[^ ]+)(?: task=(?P<task>[^ ]+))?")
+CHECKPOINT_RE = re.compile(
+    r"^(?P<prefix>checkpoint|trace): (?P<name>[^ ]+)(?: task=(?P<task>[^ ]+))?"
+)
 PHASE_ERROR_RE = re.compile(
     r"error=(?P<error>\S+) event=(?P<event>\S+) actual=(?P<actual>\S+) "
     r"expected=(?P<expected>\S+) target=(?P<target>\S+)"
@@ -267,11 +269,14 @@ def _normalize_text(text: str) -> str:
 
 
 def _event_from_line(line: str, line_no: int) -> dict[str, Any] | None:
-    if match := TRACE_RE.match(line):
+    if match := CHECKPOINT_RE.match(line):
         event = {
             "line": line_no,
-            "kind": "trace",
+            "kind": "checkpoint",
             "name": match.group("name"),
+            "source": (
+                "announce" if match.group("prefix") == "checkpoint" else "legacy-trace"
+            ),
             "raw": line,
         }
         if match.group("task"):

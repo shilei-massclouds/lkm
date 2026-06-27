@@ -26,11 +26,7 @@ disk-clean:
 	$(MAKE) -C $(KERNEL_DIR) disk-clean
 
 run:
-ifeq ($(LOG),trace)
-	$(MAKE) -C $(KERNEL_DIR) run LOG=trace APP=$(APP) PROBE="$(PROBE)" $(PROBE_FILE_ARG)
-else
-	$(MAKE) -C $(KERNEL_DIR) run APP=$(APP) PROBE="$(PROBE)" $(PROBE_FILE_ARG)
-endif
+	$(MAKE) -C $(KERNEL_DIR) run LOG="$(LOG)" APP=$(APP) PROBE="$(PROBE)" $(PROBE_FILE_ARG)
 
 verify:
 ifeq ($(REPORT),graph)

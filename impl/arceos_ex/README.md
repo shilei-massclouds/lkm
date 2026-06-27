@@ -20,11 +20,14 @@ make build APP=hello
 make run
 make run APP=smoke
 make run APP=hello
-make run LOG=trace
+make run PROBE=announce
 make verify
 make verify REPORT=graph
 make clean
 ```
+
+`LOG=trace` remains as a compatibility alias for `PROBE=announce`. Prefer
+`PROBE=announce` for new checkpoint announcement runs.
 
 From the repository root, `make test` runs the full validation path: strict
 formal derive, checkpoint/KUnit handlers listed in `tests/kunit.handlers`, and

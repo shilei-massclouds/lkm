@@ -37,11 +37,13 @@ make run APP=user-boot
 
 `APP=user-boot` 会走普通用户态 payload 读取与启动路径，是 `docs/DEFECTS.md` 中 DF-0001 的固定复现入口之一。定位这类间歇性问题时，不要只用 probe 路径替代普通路径，因为额外观测可能改变时序。
 
-需要查看 checkpoint/trace 输出时，可以增加 `LOG=trace`：
+需要让 checkpoint 自报基本进度时，可以启用 announce probe：
 
 ```sh
-make run APP=user-boot LOG=trace
+make run APP=user-boot PROBE=announce
 ```
+
+`LOG=trace` 目前仍作为兼容入口保留，等价于启用 `PROBE=announce`；新用法应优先使用 `PROBE=announce`。
 
 ## 压力测试
 

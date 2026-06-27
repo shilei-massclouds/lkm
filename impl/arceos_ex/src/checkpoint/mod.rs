@@ -1,6 +1,6 @@
 pub mod handlers;
 #[cfg(any(
-    checkpoint_sbi_char,
+    checkpoint_handler_announce,
     checkpoint_handler_page_allocator,
     checkpoint_handler_earlycon,
     checkpoint_handler_kernel_init_task,
@@ -30,12 +30,12 @@ pub fn enable_post_vm_checkpoints() {
 }
 
 pub fn dispatch_pre_context(_checkpoint: Checkpoint) {
-    #[cfg(checkpoint_sbi_char)]
+    #[cfg(checkpoint_handler_announce)]
     {
         if POST_VM_CHECKPOINTS_ENABLED.load(Ordering::Acquire) {
-            handlers::early_trace::emit_with_context(_checkpoint, crate::context::context_ref());
+            handlers::announce::emit_with_context(_checkpoint, crate::context::context_ref());
         } else {
-            handlers::early_trace::emit(_checkpoint);
+            handlers::announce::emit(_checkpoint);
         }
     }
 }

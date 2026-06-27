@@ -23,6 +23,23 @@ class StressRunnerTests(unittest.TestCase):
             ["smoke_result:SmokeResult:passed=78:failed=0:total=78"],
         )
 
+    def test_extracts_checkpoint_announce_event(self) -> None:
+        events = runner._extract_events("checkpoint: EarlyVm.Ready task=boot_idle\n")
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            ["checkpoint:EarlyVm.Ready"],
+        )
+        self.assertEqual(events[0]["source"], "announce")
+        self.assertEqual(events[0]["task"], "boot_idle")
+
+    def test_extracts_legacy_trace_checkpoint_event(self) -> None:
+        events = runner._extract_events("trace: EarlyVm.Ready task=boot_idle\n")
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            ["checkpoint:EarlyVm.Ready"],
+        )
+        self.assertEqual(events[0]["source"], "legacy-trace")
+
     def test_extracts_ready_check_failed_event(self) -> None:
         events = runner._extract_events(
             "ready_check_failed phase=InitcallPhase "

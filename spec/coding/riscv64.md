@@ -96,13 +96,13 @@ per-cpu 存储可以作为其它 CPU-local 数据的实现承载方式，但不�
 - Early console、timer、IPI、rfence 等对象应依赖 SBI 能力事实，而不是各自重复探测固件能力。
 - 第一轮 `EarlyCon` 使用 SBI early console 后端，不继承 ArceOS RISC-V64 QEMU virt 当前的 NS16550 UART console 路径。
 
-## Checkpoint Trace
+## Checkpoint Announce
 
 - 状态一致点在实现中应映射为 checkpoint hook，默认实现为空。
-- checkpoint trace 是独立路径，不属于 `EarlyCon` 或正式 `Console`，不得依赖 allocator、锁、字符串缓冲区、FixMap 或线性映射已经可用。
+- checkpoint announce 是独立路径，不属于 `EarlyCon` 或正式 `Console`，不得依赖 allocator、锁、字符串缓冲区、FixMap 或线性映射已经可用。
 - RISC-V64 第一轮可提供 SBI legacy putchar 单字符后端，用于 `EarlyVm` 切换生效前的极早期定位；该后端只输出稳定 checkpoint id 对应的一个字节。
-- `EarlyVm` 切换生效、完整 `KernelImage` 映射可访问后，checkpoint trace 应切换为稳定 checkpoint 名称字符串，不继续扩展单字符 id 空间。
-- 单字符 trace 只用于调试和状态差分采集的最低层观测，不改变对象状态，也不能作为规格事件或状态迁移的组成部分。
+- `EarlyVm` 切换生效、完整 `KernelImage` 映射可访问后，checkpoint announce 应切换为稳定 checkpoint 名称字符串，不继续扩展单字符 id 空间。
+- 单字符 announce 只用于调试和状态差分采集的最低层观测，不改变对象状态，也不能作为规格事件或状态迁移的组成部分。
 - 页表切换前后的 checkpoint hook 必须显式考虑当前代码地址是否已被正在使用的页表覆盖；必要时使用极小的 inline/boot text 实现。
 
 ## RISC-V64 Generic 平台

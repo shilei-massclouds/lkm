@@ -19,8 +19,11 @@ $(error PROBE_FILE not found: $(PROBE_FILE))
 endif
 endif
 PROBE_FILE_LIST := $(if $(PROBE_FILE),$(strip $(shell sed -e 's/#.*//' "$(PROBE_FILE)")),)
-PROBE_LIST := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST))
-KNOWN_PROBES := memblock page-allocator earlycon kernel-init-task of-platform scheduler-action slub console-handoff uart-irq-chain virtio-bus virtio-blk virtio-rng user-boot vmalloc-mapping linux-plic smoke
+LOG_TRACE_PROBE := $(if $(filter trace,$(LOG)),announce,)
+RUN_PROBE := $(strip $(PROBE) $(LOG_TRACE_PROBE))
+PROBE_LIST_RAW := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST) $(LOG_TRACE_PROBE))
+PROBE_LIST := $(strip $(sort $(PROBE_LIST_RAW)))
+KNOWN_PROBES := announce memblock page-allocator earlycon kernel-init-task of-platform scheduler-action slub console-handoff uart-irq-chain virtio-bus virtio-blk virtio-rng user-boot vmalloc-mapping linux-plic smoke
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))
@@ -33,8 +36,7 @@ BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)$(PLIC_PROVIDER_SUFFIX)$(PROBE_BUI
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
 KERNEL_BIN := $(BUILD_DIR)/arceos_ex.bin
 RUN_PROFILE := $(if $(filter trace,$(LOG)),trace,$(PROFILE))
-RUN_TRACE_RUSTFLAGS := $(if $(filter trace,$(LOG)),--cfg checkpoint_sbi_char,)
-RUN_EXTRA_RUSTFLAGS := $(strip $(EXTRA_RUSTFLAGS) $(RUN_TRACE_RUSTFLAGS))
+RUN_EXTRA_RUSTFLAGS := $(strip $(EXTRA_RUSTFLAGS))
 RUN_BUILD_DIR := build/$(TARGET)/$(RUN_PROFILE)/$(APP)$(PLIC_PROVIDER_SUFFIX)$(PROBE_BUILD_SUFFIX)
 RUN_KERNEL_BIN := $(RUN_BUILD_DIR)/arceos_ex.bin
 LINKER := linker/riscv64.lds
@@ -173,7 +175,7 @@ else
 endif
 
 run: disk
-	$(MAKE) build APP=$(APP) PROBE="$(PROBE)" PROBE_FILE="$(PROBE_FILE)" PLIC_PROVIDER=$(PLIC_PROVIDER) PROFILE=$(RUN_PROFILE) EXTRA_RUSTFLAGS="$(RUN_EXTRA_RUSTFLAGS)"
+	$(MAKE) build APP=$(APP) PROBE="$(RUN_PROBE)" PROBE_FILE="$(PROBE_FILE)" PLIC_PROVIDER=$(PLIC_PROVIDER) PROFILE=$(RUN_PROFILE) EXTRA_RUSTFLAGS="$(RUN_EXTRA_RUSTFLAGS)"
 	$(QEMU) -machine virt -cpu rv64 -m 128M -smp $(QEMU_SMP) -nographic -serial mon:stdio $(QEMU_DEVICES) -append "$(QEMU_APPEND)" -kernel $(RUN_KERNEL_BIN)
 
 clean:

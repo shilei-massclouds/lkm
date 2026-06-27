@@ -1727,7 +1727,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的启用配置包括：`CONFIG_SMP=y`、`CONFIG_PREEMPT=y`、`CONFIG_TREE_RCU=y`、`CONFIG_PREEMPT_RCU=y`、`CONFIG_TASKS_RCU=y`、`CONFIG_TASKS_TRACE_RCU=y`、`CONFIG_CONTEXT_TRACKING=y`、`CONFIG_CONTEXT_TRACKING_IDLE=y`、`CONFIG_CPU_ISOLATION=y`。当前 RISC-V 路径没有覆盖 `poking_init()`，因此使用 weak no-op；当前未启用 `CONFIG_FTRACE_MCOUNT_RECORD`，因此 `ftrace_init()` 在 `include/linux/ftrace.h` 中折叠为空调用；当前未启用 `CONFIG_CONTEXT_TRACKING_USER_FORCE`，因此 `context_tracking_init()` 也在头文件中折叠为空调用。`housekeeping_init()` 虽然编译存在，将来需要作为 CPU isolation / nohz_full / isolcpus 相关对象展开，但当前最小启动输入未建模 `nohz_full=` 或 `isolcpus=` 参数，因此未设置 housekeeping flags 时直接返回。本阶段图示保留这类紧邻边界的 trimmed/deferred 调用位置，以避免误判 Linux 原始顺序。
 
-`early_trace_init()` 和 `trace_init()` 对应 Linux tracing core / event tracing 机制。当前项目已经有自己的 checkpoint trace 机制，二者未来应合并为同一机制，还是保持并列并重新命名其边界和意义，暂未确定。由于 Linux tracing 不是本子阶段的核心启动功能，本阶段暂不建立主线 trace 对象；但未来若恢复，更可能是一个 `LinuxTracing` 对象，其中 `early_trace_init()` 对应 `preset()`，`trace_init()` 对应 `setup()`，而不是拆成 `EarlyTrace` 和 `TraceEvents` 两个独立对象。`ftrace_init()` 在当前配置下为空调用；如果后续配置启用 function tracing/mcount record，再考虑纳入同一 `LinuxTracing` 对象或单独作为 function tracing 子对象。为了保留 Linux 原始调用顺序，过程清单和时序图仍记录这些调用，并明确标记为 `trimmed` 或 `deferred`。后续若要恢复，应先明确它与项目内 trace 机制的关系、命名和责任边界，再进入形式化模型或实现。
+`early_trace_init()` 和 `trace_init()` 对应 Linux tracing core / event tracing 机制。当前项目已经有自己的 checkpoint announce/observer 机制，二者未来应合并为同一机制，还是保持并列并重新命名其边界和意义，暂未确定。由于 Linux tracing 不是本子阶段的核心启动功能，本阶段暂不建立主线 trace 对象；但未来若恢复，更可能是一个 `LinuxTracing` 对象，其中 `early_trace_init()` 对应 `preset()`，`trace_init()` 对应 `setup()`，而不是拆成 `EarlyTrace` 和 `TraceEvents` 两个独立对象。`ftrace_init()` 在当前配置下为空调用；如果后续配置启用 function tracing/mcount record，再考虑纳入同一 `LinuxTracing` 对象或单独作为 function tracing 子对象。为了保留 Linux 原始调用顺序，过程清单和时序图仍记录这些调用，并明确标记为 `trimmed` 或 `deferred`。后续若要恢复，应先明确它与项目内 checkpoint announce/observer 机制的关系、命名和责任边界，再进入形式化模型或实现。
 
 当前先将子阶段 5 的对象和边界记录如下：
 
@@ -1782,7 +1782,7 @@ flowchart LR
 |---|---|---|
 | `poking_init()` | trimmed/no-op | RISC-V64 当前未覆盖该 weak hook；x86/powerpc code patching 路径不在当前目标内。 |
 | `ftrace_init()` | trimmed/no-op | 当前未启用 `CONFIG_FTRACE_MCOUNT_RECORD`，`ftrace_init()` 折叠为空实现；function tracing 后续若启用再并入 tracing 对象讨论。 |
-| `early_trace_init()` | deferred | Linux tracing core early buffer/event 基础；与项目 checkpoint trace 的关系未定，暂不建对象。 |
+| `early_trace_init()` | deferred | Linux tracing core early buffer/event 基础；与项目 checkpoint announce/observer 机制的关系未定，暂不建对象。 |
 | `sched_init()` | formal candidate: `Scheduler.preset/setup/enable()` | 本阶段中心动作；建立 boot CPU 调度器基础，并为未来 `SchedClass.preset/setup()` 留出对象边界；完整 SMP 调度拓扑留给后续 `sched_init_smp()`。 |
 | `WARN(!irqs_disabled(), ...)` | checkpoint | 检查中断没有被过早打开。 |
 | `radix_tree_init()` | formal candidate: `RadixTree.setup()` | 创建 `"radix_tree_node"` SLUB cache，并登记 radix tree CPU hotplug dead 回调；对象进入 `Ready`。 |
@@ -1791,7 +1791,7 @@ flowchart LR
 | `workqueue_init_early()` | formal candidate: `Workqueue.preset()` | 建立单一 Workqueue 对象的 early 框架；对象进入 `Prepared`，可创建 workqueue 和排队/取消 work item，但不执行 worker kthread。 |
 | `Softirq.preset()` | formal candidate | 由 `SchedInitPhase.setup()` 驱动的规格显式前置动作；建立 `SoftirqActionTable`、softirq slots 和 per-CPU pending bit 承载壳，使 `rcu_init()` 能按 Linux 顺序注册 `RCU_SOFTIRQ`。 |
 | `rcu_init()` | formal candidate: `RcuCore.setup()` | 建立 RCU 树、boot CPU online、RCU softirq、RCU workqueues 等共同核心设施；其中 `tasks_cblist_init_generic()` 对应 `TasksRcu.preset()`，为按配置启用的 Tasks RCU flavor 建立 callback-list 壳。 |
-| `trace_init()` | deferred | Linux event tracing 后续注册；与项目 checkpoint trace 的关系未定，暂不建对象。 |
+| `trace_init()` | deferred | Linux event tracing 后续注册；与项目 checkpoint announce/observer 机制的关系未定，暂不建对象。 |
 | `initcall_debug_enable()` | checkpoint/deferred | 只在 `initcall_debug` 参数开启时影响后续 initcall 诊断。 |
 | `context_tracking_init()` | trimmed/no-op | 当前 `CONFIG_CONTEXT_TRACKING_USER_FORCE=n`，该调用在 `include/linux/context_tracking.h` 中为空实现；`CONFIG_CONTEXT_TRACKING_IDLE=y` 的运行期状态由其它路径使用。 |
 
@@ -3552,9 +3552,9 @@ suspend/resume 和真实 edge runtime 都作为明确 deferred 项保留。若�
 
 除 `kunit` 和 `smoke` 外，项目还需要一类面向间歇性缺陷和内部可见性验证的 `stress` / `nightly` 测试。该类测试不应被设计成单次 pass/fail 的简单包装，而应被设计成运行证据归档、事件序列聚类和差分诊断系统。第一轮实现位置固定在 `impl/arceos_ex/tests/stress/`，作为压力测试、重复执行配置、分类规则、分析脚本和结果归档的根目录。
 
-`stress` 测试的基本输入是一个可重复执行的 case。每个 case 应至少描述执行命令、重复次数、单轮超时、`APP` / `PROBE` / `LOG` 等参数、输出目录和失败分类规则。针对 `docs/DEFECTS.md` 中记录的间歇性问题，case 必须保留普通执行路径；例如 DF-0001 的 `make run APP=user-boot` 不能只用 `PROBE=user-boot` 或其它改变时序的 probe 路径替代。
+`stress` 测试的基本输入是一个可重复执行的 case。每个 case 应至少描述执行命令、重复次数、单轮超时、`APP` / `PROBE` 等参数、输出目录和失败分类规则。针对 `docs/DEFECTS.md` 中记录的间歇性问题，case 必须保留普通执行路径；例如 DF-0001 的 `make run APP=user-boot` 不能只用 `PROBE=user-boot` 或其它改变时序的 probe 路径替代。
 
-每次执行都应产生独立 run 记录，并保留原始日志和结构化事件点观察记录。事件点可以先由当前 stdout、checkpoint、`LOG=trace` 和 EventStream 输出归一化得到，必要字段包括全局序号、事件类型、事件名、原始文本和所属 case/run；CPU、task、IRQ/task context、对象、状态和阶段信息可以作为可选字段逐步补充。第一轮目标是让当前内部可见性真实接受压力测试验证，而不是立即重写成完整 Linux-like trace。
+每次执行都应产生独立 run 记录，并保留原始日志和结构化事件点观察记录。事件点可以先由当前 stdout、checkpoint announce/observer 和 EventStream 输出归一化得到，必要字段包括全局序号、事件类型、事件名、原始文本和所属 case/run；CPU、task、IRQ/task context、对象、状态和阶段信息可以作为可选字段逐步补充。第一轮目标是让当前内部可见性真实接受压力测试验证，而不是立即重写成完整 Linux-like trace。
 
 重复执行的结果应先按结果类别划分为 `success` 和 `failure`。`failure` 还应按现象细分，例如 `read user ELF failed`、`InitcallPhase ready failed`、`timeout`、`panic` 和 `unknown failure`。每个类别下不应假设只有一条标准序列：成功结果可能是一组成功序列集合，失败的每个现象类别也可能分别包含多组序列集合。
 
@@ -3562,14 +3562,15 @@ suspend/resume 和真实 edge runtime 都作为明确 deferred 项保留。若�
 
 分析阶段应对每个类别和子类提取特征。首轮特征至少包括：共同前缀、必然出现的事件集合、从不出现的事件集合、关键事件顺序、缺失事件、多出的异常事件、最接近的成功序列，以及与成功集合相比的第一个分叉点。诊断报告的重点不是只统计失败率，而是对每一类失败序列与成功序列集合进行对比，找到差异开始的位置，并把该位置映射回阶段、对象、checkpoint 或需要新增观测的代码路径。
 
-trace 增强应由上述差分结果驱动。如果当前 checkpoint/trace/EventStream 已能定位分叉点，则先用现有机制闭环；如果只能看到外部失败现象而无法解释内部差异，再补充更细粒度的观测点，例如 virtio-blk completion、VFS/ext2 lookup/read、initcall ready predicate、CPU/task 归属、IRQ/task context 或事件序号。Linux-like trace 是内部可见性不足时的补强方向，不是 `stress` 测试落地前的前置条件。
+trace 增强应由上述差分结果驱动。如果当前 checkpoint announce/observer 和 EventStream 已能定位分叉点，则先用现有机制闭环；如果只能看到外部失败现象而无法解释内部差异，再补充更细粒度的观测点，例如 virtio-blk completion、VFS/ext2 lookup/read、initcall ready predicate、CPU/task 归属、IRQ/task context 或事件序号。Linux-like trace 是内部可见性不足时的补强方向，不是 `stress` 测试落地前的前置条件。
 
 ### 内部可见性与 checkpoint 规格化
 
 本项目的内部可见性由四类概念共同组成，后续文档和实现必须区分使用。`checkpoint` 是稳定观察时机或语义边界，
 不是普通日志，也不是对象状态推进本身；同一个 checkpoint 可以被不同观察消费者使用。默认情况下 checkpoint
-consumer 可以为空；`LOG=trace` 属于启用 trace 输出 consumer，`PROBE=...` 属于启用特定 checkpoint
-observer/handler。`observation fact` 是对象或 provider 长期维护的结构化事实，例如状态、计数器、最近一次动作、
+consumer 可以为空；`PROBE=announce` 属于 checkpoint 的朴素自声明 consumer，`PROBE=...` 属于启用特定 checkpoint
+observer/handler。`LOG=trace` 只是迁移期兼容入口，等价映射到 `PROBE=announce`，不再作为新观察机制扩展。
+`observation fact` 是对象或 provider 长期维护的结构化事实，例如状态、计数器、最近一次动作、
 source-scoped 计数或同步边界事实；这些事实由对象本身维护，handler 只在需要时读取和输出。`observer/handler`
 是 checkpoint 的消费者，负责读取事实、输出诊断或给出 probe outcome，但不得改变被观察对象的生命周期语义。
 `failure_diagnostic` 是失败路径上的结构化现场快照，作为错误 payload 采集并最终输出；它类似 panic 信息中的
@@ -3578,7 +3579,7 @@ source-scoped 计数或同步边界事实；这些事实由对象本身维护，
 观察能力必须按级别设计。默认运行级别应关闭重型 observer，保留必要生命周期检查和低开销长期事实，不产生大量内部输出。
 轻量观察级别可以长期维护 counters/facts，但这些事实应服务稳定语义边界，而不是一次性 debug。失败诊断级别只在
 predicate/check 失败时采集和输出结构化 `failure_diagnostic`，成功路径不得因此增加新的事件序列。重型观察级别通过
-`PROBE=...`、`PROBE_FILE=...`、`LOG=trace` 或后续等价机制显式开启，允许输出更详细信息，但必须承认它可能改变时序，
+`PROBE=...`、`PROBE_FILE=...` 或后续等价机制显式开启，允许输出更详细信息，但必须承认它可能改变时序，
 不能替代普通路径的稳定性证据。`stress` / `nightly` 级别在上述能力之上做重复执行、序列聚类、纵向差分和必要的
 Linux-like 横向对比。
 
