@@ -3115,6 +3115,10 @@ Ext2 的建模原则应先在本章程中以自然语言确定对象意图，再
 - `RootFS.enable()` 对应 `prepare_namespace()` 中选择真实 root 的过程。当前支持路径是先把 `Ext2FileSystem` staging mount 到 `/root`，再执行 `VfsCore.Action::MoveMountToRoot`，最后由 `FsStruct.Action::ChrootDot` 更新当前任务的 `root` 与 `pwd`。
 - `FsStruct` 是任务从属的文件系统视图对象，至少包含 `root` 和 `pwd` 两个 dentry 引用。路径解析从 `FsStruct.root` 或 `FsStruct.pwd` 出发，而不是从 `Ext2FileSystem` 内部全局变量出发。
 
+文件系统经由 virtio-blk 或其它块设备驱动读取数据时，不应长期建模为只有“提交一个请求并同步等待完成”这一种方式。参照 Linux 6.12.37，`sb_bread()` / `__bread_gfp()` 这类 buffer-head 元数据路径会在 `submit_bh(REQ_OP_READ)` 后 `wait_on_buffer()`，适合 superblock、group descriptor、indirect block、xattr 等必须马上得到结果的启动期或元数据读取；但普通文件数据路径还包括 page cache / `address_space` / folio / readahead 语义，例如 Ext2 的 `read_folio` 可经 `mpage_read_folio()` 提交 bio，`readahead` 可经 `mpage_readahead()` 批量提交 bio，并由 `bio->bi_end_io` 异步完成。块层的 `submit_bio()` 本身也是异步完成模型，`submit_bio_wait()` 只是其同步包装。
+
+因此，当前 `Bio` / `BufferHead` / `sb_bread` 风格同步读只表示首轮 read-only Ext2、rootfs 和 payload 装载路径的收敛方式；后续正式规格应区分“调用者需要同步结果”的语义和“设备驱动只能同步阻塞”的实现策略。长期模型至少应预留三类读路径：启动期或元数据读取的同步等待路径、普通文件页缓存读取的异步 bio completion 路径、以及 readahead/预取路径。即使上层系统调用最终会因缺页或缓存未命中而阻塞当前任务，底层块设备驱动也不应被规格约束为每个请求只能由提交者同步等待；completion 可以来自 IRQ handler、任务侧 polling 或后续更完整的 block layer 调度。
+
 `Ext2FileSystem` 的生命周期当前可按如下方式理解：
 
 1. `Preset`：确认 `Ext2Driver` 已就绪，并确认存在可支持的 `Ext2Volume`。若 volume 不存在或不支持，事件失败但不形成 kernel panic。
