@@ -6,7 +6,7 @@
 
 ### DF-0002: `make run APP=smoke` 间歇性 `InitcallPhase` ready 失败
 
-- 状态：待复现，进入 nightly/stress 回归观察。
+- 状态：已复现，待 predicate-level 诊断。
 - 首次记录日期：2026-06-25。
 - 关联范围：`impl/arceos_ex` initcall 边界、UART/TTY initcall 路径、checkpoint/probe 时序。
 - 表现：普通 `timeout 90s make run APP=smoke` 曾返回 0，但启动日志输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。失败点在 `InitcallPhase` 标记 ready 时，说明 `initcall_phase_ready(...)` 在 `INITCALL_PHASE_STATE` 从 Base 推进到 Ready 前返回 false。
@@ -19,20 +19,22 @@
 - 对比失败和成功日志时观察到 `.initcall.device` 中 `virtio_mmio` 与 `ns16550a` 的打印顺序不同：失败样本中 `virtio_mmio` 早于 `ns16550a`，成功样本中 `ns16550a` 早于 `virtio_mmio`。这只记录为相关现象，不作为根因结论。
 - 2026-06-27 新增普通 smoke 压力测试入口 `impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml`，命令固定为 `make run APP=smoke`，不使用 probe 变体。首轮 30 次运行曾被归类为 30 次 `unknown-failure`，报告在 `/tmp/lkm-stress-out/20260627T014736Z-df-0002-smoke-initcall/report.md`，但代表日志均为 `result: ok. passed=54 failed=0 total=54`；根因是 stress classifier 未在 success/failure 文本匹配前剥离 ANSI 颜色码，属于压力测试工具缺口，不是 DF-0002 复现。
 - 修正 stress classifier 的 ANSI 归一化后，重新执行 DF-0002 stress 30 次，完成 30 次、成功 30 次、失败 0 次，全部归入成功序列 `0353704911c8c2bc`；报告在 `/tmp/lkm-stress-out/20260627T015027Z-df-0002-smoke-initcall/report.md`。
+- 2026-06-27 在提交 `b543f1b` 后追加 DF-0002 stress 200 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml --runs 200 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 200 次、成功 199 次、DF-0002 `InitcallPhase` ready 失败 1 次。失败样本为 `run-0045`，事件序列 `3a657270b6fb3842`，成功序列仍为 `0353704911c8c2bc`；报告在 `/tmp/lkm-stress-out/20260627T020546Z-df-0002-smoke-initcall/report.md`。
+- 本轮 `run-0045` 失败日志在 `late_smoke_initcall` 后输出 `arceos_ex initcall event failed` 和 `error=C event=S actual=B expected=B target=R`；按当前事件提取，失败与成功的 common prefix 长度仍为 0，说明当前 stdout 事件只能看到最终症状，尚不能定位 `initcall_phase_ready(...)` 内部第一个 false predicate。失败样本和代表成功样本中已打印的 initcall 顺序同为 `virtio_mmio_platform_driver_init` 早于 `ns16550a_platform_driver_init`，因此该打印顺序不再能作为本轮差异点。
 
 当前判断：
 
 - 不应把问题直接归因于 `ns16550a` 与 `virtio_mmio` 的顺序。两者同属 `.initcall.device`，`of_platform` 设备枚举已经完成，后续 driver registration 会扫描现有设备；它们绑定的是不同设备，顺序通常只应改变 probe/log 时序，不应单独破坏后续显式 UART/TTY probe。
 - 更可疑的结构性缺口是：`InitcallBoundary.setup()` 接受的条件可能比 `initcall_phase_ready(...)` 更宽，导致 boundary/setup 流程已经推进，但顶层 ready 谓词仍有某个额外条件为 false。当前还未隔离出具体 false predicate。
 - 与 DF-0001 类似，该现象可能受 probe、checkpoint handler 或额外日志影响；在完成整个启动流程的并发、锁/guard、IRQ/task context 与内存顺序回顾前，暂不做重型定位。
-- 2026-06-27 当前 stress 结论：普通 `APP=smoke` 30 次未复现 DF-0002，说明该问题仍是低频间歇样本或已被近期 initcall/driver/block 路径调整间接缓解；但由于历史上确有 `InitcallPhase` ready 失败样本，不能仅凭 30 次成功归档。继续保留为待解决，并进入 nightly/stress 回归观察。
+- 2026-06-27 当前 stress 结论：普通 `APP=smoke` 30 次未复现，但 200 次复现 1 次 DF-0002，因此不能把它标记为已解决，也不能归档为与 DF-0001 同因后已消除。现有证据仍允许二者属于相邻的 initcall/virtio/block 时序敏感问题，但 DF-0002 至少还有未被 DF-0001 修复完全消除的 ready predicate 缺口或观测缺口。
 
 下一步定位建议：
 
 - 增加仅在 debug/probe 下启用的 predicate-level 诊断，或让 `EventError` 携带失败谓词名，避免只看到 `actual=B expected=B target=R`。
 - 复核 `InitcallBoundary` 与 `initcall_phase_ready(...)` 的条件是否应保持完全一致；若有意不同，需要在规格和实现中显式说明边界。
 - 后续回顾 UART/TTY、IRQ、task context 和 initcall 并发关系时，把本缺陷作为固定样本回归验证。
-- 后续 nightly/stress 至少保留普通 `make run APP=smoke` 的 DF-0002 case；若再次失败，第一优先级不是改 initcall 逻辑，而是先记录 `initcall_phase_ready(...)` 内部具体 false predicate，使 failure-vs-success 能对齐到第一个内部差异点。
+- 后续 nightly/stress 至少保留普通 `make run APP=smoke` 的 DF-0002 case。下一步第一优先级不是改 initcall 逻辑，而是先记录 `initcall_phase_ready(...)` 内部具体 false predicate，使 failure-vs-success 能对齐到第一个内部差异点；该诊断应作为长期 checkpoint/debug fact 设计，避免一次性临时日志。
 
 ## 已归档
 
