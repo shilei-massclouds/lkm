@@ -38,10 +38,14 @@ predicate virtio_blk_read_status_buffer_prepared<T>(device: T) -> bool;
 predicate virtio_blk_read_request_submitted<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_blk_read_request_notifies_mmio<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_blk_read_request_pending<T>(device: T) -> bool;
+predicate virtio_blk_no_inherited_pending_before_submit<T>(device: T) -> bool;
+predicate virtio_blk_init_superblock_probe_converged<T>(device: T) -> bool;
 predicate virtio_blk_mmio_irq_acknowledged<T>(device: T) -> bool;
 predicate virtio_blk_irq_callback_invoked<T>(device: T) -> bool;
 predicate virtio_blk_completion_observed_by_irq<T>(device: T) -> bool;
 predicate virtio_blk_completion_observed_by_sync_poll<T>(device: T) -> bool;
+predicate virtio_blk_completion_single_consumer<T>(device: T) -> bool;
+predicate virtio_blk_sync_read_submit_wait_complete<T>(device: T) -> bool;
 predicate virtio_blk_live_read_submitted_checkpoint<T>(device: T) -> bool;
 predicate virtio_blk_live_read_completed_checkpoint<T>(device: T) -> bool;
 predicate virtio_blk_live_read_failed_checkpoint_defined<T>(device: T) -> bool;
@@ -172,6 +176,7 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_live_read_failed_checkpoint_defined(self);
                     block_io_irq_completion_failed_checkpoint_defined(self);
                     block_io_completion_source_contract_ready(self);
+                    virtio_blk_completion_single_consumer(self);
                 }
             }
         }
@@ -194,6 +199,7 @@ object VirtioBlkDevice: DeviceObject {
             virtio_blk_live_read_failed_checkpoint_defined(self);
             block_io_irq_completion_failed_checkpoint_defined(self);
             block_io_completion_source_contract_ready(self);
+            virtio_blk_completion_single_consumer(self);
         }
 
         processes {
@@ -203,6 +209,7 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_device_ready(self);
                     virtio_device_status_driver_ok(VirtioDevice);
                     VirtQueue.state == State::Ready;
+                    virtio_blk_no_inherited_pending_before_submit(self);
                 }
                 drives {
                     VirtQueue.Action::AddDescriptorChain;
@@ -213,7 +220,9 @@ object VirtioBlkDevice: DeviceObject {
                     virtqueue_out_descriptor_added(VirtQueue);
                     virtqueue_in_descriptor_added(VirtQueue);
                     virtqueue_chain_head_published(VirtQueue);
+                    virtqueue_descriptor_avail_publish_release_ordered(VirtQueue);
                     virtio_device_queue_notify_done(VirtioDevice);
+                    virtqueue_notify_after_avail_publish(VirtQueue);
                     virtio_blk_read_header_prepared(self);
                     virtio_blk_read_data_buffer_prepared(self);
                     virtio_blk_read_status_buffer_prepared(self);
@@ -242,6 +251,7 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_complete_status_ok(self);
                     virtio_blk_completion_count_incremented(self);
                     virtio_blk_read_request_done(self);
+                    virtio_blk_completion_single_consumer(self);
                     block_io_irq_completion_end_checkpoint(self);
                 }
             }
@@ -262,6 +272,27 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_complete_status_ok(self);
                     virtio_blk_completion_count_incremented(self);
                     virtio_blk_read_request_done(self);
+                    virtio_blk_completion_single_consumer(self);
+                }
+            }
+
+            Action::InitSuperblockProbeRead {
+                state_effect: StateEffect::None;
+                depends_on {
+                    virtio_blk_device_ready(self);
+                    block_device_registered(BlockDevice, BlockDeviceRegistry);
+                    VirtQueue.state == State::Ready;
+                }
+                drives {
+                    self.Action::SubmitReadRequest;
+                    self.Action::CompleteReadRequest || self.Action::PollReadCompletion;
+                }
+                ensures {
+                    virtio_blk_init_superblock_probe_converged(self);
+                    virtio_blk_read_request_done(self);
+                    virtio_blk_complete_status_ok(self);
+                    virtio_blk_complete_ext2_magic_observed(self);
+                    virtio_blk_completion_single_consumer(self);
                 }
             }
 
@@ -279,6 +310,7 @@ object VirtioBlkDevice: DeviceObject {
                 }
                 ensures {
                     virtio_blk_serves_block_read(self, BlockDevice);
+                    virtio_blk_sync_read_submit_wait_complete(self);
                     virtio_blk_read_request_done(self);
                     virtio_blk_complete_status_ok(self);
                     virtio_blk_live_read_completed_checkpoint(self);

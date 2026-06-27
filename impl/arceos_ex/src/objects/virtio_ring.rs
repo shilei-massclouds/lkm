@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use core::{
     mem::size_of,
     ptr,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{fence, AtomicUsize, Ordering},
 };
 
 const VIRTQ_DESC_F_NEXT: u16 = 1;
@@ -1161,6 +1161,7 @@ impl VirtQueue {
             let Some(raw_avail_idx) = self.ring.raw_avail_idx_ptr() else {
                 return Err(VirtqueueError::RingBackingUnavailable);
             };
+            fence(Ordering::Release);
             unsafe {
                 ptr::write_volatile(raw_avail_idx, self.ring.avail_idx);
             }
@@ -1200,6 +1201,7 @@ impl VirtQueue {
         transport: &mut super::virtio_mmio::VirtioMmioTransportDevice,
     ) -> Result<(), VirtqueueError> {
         self.kick()?;
+        fence(Ordering::Release);
         if !super::virtio_mmio::notify_queue(transport, self.queue_index) {
             return Err(VirtqueueError::TransportUnavailable);
         }
@@ -1261,6 +1263,7 @@ impl VirtQueue {
             };
             ptr::read_volatile(ptr)
         };
+        fence(Ordering::Acquire);
         self.ring.used_idx = used_idx;
         if self.ring.last_used_idx == used_idx {
             self.ring.empty_get_rejected = true;

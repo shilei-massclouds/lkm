@@ -375,6 +375,13 @@ fn blk_read_facts_valid(ctx: &Context) -> bool {
         return false;
     };
     let virtio_device = device.virtio_device();
+    let completion_source_valid = (device.completion_observed_by_irq()
+        && device.mmio_irq_acknowledged()
+        && device.irq_callback_invoked()
+        && device.irq_count() == 1
+        && virtio_blk::last_irq_status() & 1 != 0
+        && virtio_blk::irq_completion_calls() != 0)
+        || device.completion_observed_by_sync_poll();
 
     blk_facts_valid(ctx)
         && device.read_header_prepared()
@@ -383,8 +390,7 @@ fn blk_read_facts_valid(ctx: &Context) -> bool {
         && device.read_request_submitted()
         && device.read_request_notified()
         && !device.read_request_pending()
-        && device.mmio_irq_acknowledged()
-        && device.irq_callback_invoked()
+        && completion_source_valid
         && device.complete_gets_used_buffer()
         && device.complete_status_ok()
         && device.complete_data_nonzero()
@@ -392,7 +398,6 @@ fn blk_read_facts_valid(ctx: &Context) -> bool {
         && device.read_request_done()
         && device.request_count() == 1
         && device.notify_count() == 1
-        && device.irq_count() == 1
         && device.completion_count() == 1
         && device.last_status() == 0
         && device.last_used_len() <= VIRTIO_BLK_FIRST_READ_MAX_USED_LEN
@@ -403,8 +408,6 @@ fn blk_read_facts_valid(ctx: &Context) -> bool {
         && device.queue().descriptor_chain_released()
         && device.queue().buffer_ownership_released()
         && virtio_device.queue_notify_done()
-        && virtio_blk::last_irq_status() & 1 != 0
-        && virtio_blk::irq_completion_calls() != 0
         && virtio_blk::read_ready_checkpoints() != 0
         && virtio_blk::read_buffer_nonzero()
         && virtio_blk::read_buffer_ext2_magic_observed()

@@ -9,7 +9,7 @@ use super::{
     virtio_mmio::{VirtioMmioTransportDevice, VIRTIO_ID_BLOCK, VIRTIO_MMIO_INT_VRING},
     virtio_ring::{VirtQueue, VirtqueueBufferToken, VirtqueueDescriptorSpec, VirtqueueError},
 };
-use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 const VIRTIO_BLK_QUEUE_SIZE: u16 = 8;
 const VIRTIO_BLK_QUEUE_INDEX: u16 = 0;
@@ -50,6 +50,22 @@ static VIRTIO_BLK_READ_READY_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_BLK_LIVE_PTR: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_BLK_LIVE_READ_SUBMITTED_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
 static VIRTIO_BLK_LIVE_READ_COMPLETED_CHECKPOINTS: AtomicUsize = AtomicUsize::new(0);
+static VIRTIO_BLK_SYNC_OWNER: AtomicBool = AtomicBool::new(false);
+
+struct VirtioBlkSyncOwner;
+
+impl Drop for VirtioBlkSyncOwner {
+    fn drop(&mut self) {
+        VIRTIO_BLK_SYNC_OWNER.store(false, Ordering::Release);
+    }
+}
+
+fn claim_sync_owner() -> Result<VirtioBlkSyncOwner, VirtioBlkError> {
+    VIRTIO_BLK_SYNC_OWNER
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map(|_| VirtioBlkSyncOwner)
+        .map_err(|_| VirtioBlkError::RequestPending)
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum VirtioBlkError {
@@ -487,14 +503,25 @@ impl VirtioBlkDevice {
             .map_err(|_| VirtioBlkError::BlockRegistry)
     }
 
-    pub fn submit_ext2_superblock_read(
+    fn submit_ext2_superblock_read(
         &mut self,
         kernel_image: &KernelImage,
     ) -> Result<(), VirtioBlkError> {
         self.submit_read_sector(kernel_image, VIRTIO_BLK_EXT2_SUPERBLOCK_SECTOR)
     }
 
-    pub fn submit_read_sector(
+    pub fn probe_ext2_superblock_read(
+        &mut self,
+        kernel_image: &KernelImage,
+    ) -> Result<(), VirtioBlkError> {
+        let _owner = claim_sync_owner()?;
+        self.converge_pending_read()?;
+        let start_completion_count = self.completion_count();
+        self.submit_ext2_superblock_read(kernel_image)?;
+        self.wait_for_current_read_completion(start_completion_count)
+    }
+
+    fn submit_read_sector(
         &mut self,
         kernel_image: &KernelImage,
         sector: u64,
@@ -526,7 +553,9 @@ impl VirtioBlkDevice {
         }
         self.irq_callback_invoked = true;
         self.completion_observed_by_irq = true;
-        self.complete_read_request()
+        self.complete_read_request()?;
+        self.irq_count = self.irq_count.saturating_add(1);
+        Ok(())
     }
 
     pub fn poll_read_completion(&mut self) -> Result<(), VirtioBlkError> {
@@ -535,6 +564,39 @@ impl VirtioBlkDevice {
         }
         self.completion_observed_by_sync_poll = true;
         self.complete_read_request()
+    }
+
+    fn converge_pending_read(&mut self) -> Result<(), VirtioBlkError> {
+        if !self.read_request_pending {
+            return Ok(());
+        }
+        let start_completion_count = self.completion_count();
+        self.wait_for_current_read_completion(start_completion_count)
+    }
+
+    fn wait_for_current_read_completion(
+        &mut self,
+        start_completion_count: usize,
+    ) -> Result<(), VirtioBlkError> {
+        let mut remaining = VIRTIO_BLK_READ_WAIT_SPINS;
+        while remaining != 0 {
+            if !self.read_request_pending && self.completion_count() > start_completion_count {
+                return Ok(());
+            }
+            match self.poll_read_completion() {
+                Ok(()) => return Ok(()),
+                Err(VirtioBlkError::Queue(VirtqueueError::NoUsedBuffer)) => {}
+                Err(VirtioBlkError::NoRequestPending) => {
+                    if self.completion_count() > start_completion_count {
+                        return Ok(());
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+            core::hint::spin_loop();
+            remaining -= 1;
+        }
+        Err(VirtioBlkError::TransportUnavailable)
     }
 
     fn complete_read_request(&mut self) -> Result<(), VirtioBlkError> {
@@ -573,7 +635,6 @@ impl VirtioBlkDevice {
         self.pending_token = None;
         self.read_request_pending = false;
         self.read_request_done = true;
-        self.irq_count = self.irq_count.saturating_add(1);
         self.completion_count = self.completion_count.saturating_add(1);
         Ok(())
     }
@@ -679,13 +740,14 @@ pub fn setup_live_driver(
         .register_block_device(block_registry)
         .map_err(|_| live_setup_error())?;
     block
-        .submit_ext2_superblock_read(kernel_image)
+        .probe_ext2_superblock_read(kernel_image)
         .map_err(|_| live_setup_error())?;
     runtime.real_probe_succeeded = true;
     crate::checkpoint::dispatch(
         crate::trace::Checkpoint::VirtioBlkReady,
         crate::context::context_ref(),
     );
+    dispatch_first_read_ready();
     Ok(())
 }
 
@@ -711,6 +773,9 @@ pub fn live_mmio_transport() -> Option<VirtioMmioTransportDevice> {
 
 pub fn note_mmio_irq(status: u32) {
     VIRTIO_BLK_LAST_IRQ_STATUS.store(status, Ordering::Release);
+    if VIRTIO_BLK_SYNC_OWNER.load(Ordering::Acquire) {
+        return;
+    }
     let Some(runtime) = live_runtime_mut() else {
         return;
     };
@@ -722,6 +787,9 @@ pub fn note_mmio_irq(status: u32) {
 
 pub fn handle_irq_completion() {
     VIRTIO_BLK_IRQ_COMPLETION_CALLS.fetch_add(1, Ordering::AcqRel);
+    let Ok(_owner) = claim_sync_owner() else {
+        return;
+    };
     let Some(runtime) = live_runtime_mut() else {
         return;
     };
@@ -731,15 +799,7 @@ pub fn handle_irq_completion() {
     if device.complete_read_from_irq().is_err() {
         return;
     }
-    if VIRTIO_BLK_READ_READY_CHECKPOINTS
-        .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-        .is_ok()
-    {
-        crate::checkpoint::dispatch(
-            crate::trace::Checkpoint::VirtioBlkReadReady,
-            crate::context::context_ref(),
-        );
-    }
+    dispatch_first_read_ready();
 }
 
 #[allow(dead_code)]
@@ -849,7 +909,7 @@ fn read_live_block(
         return Err(BlockDeviceError::DeviceNotReady);
     }
 
-    wait_for_no_pending_read()?;
+    let _owner = claim_sync_owner().map_err(block_error_from_virtio)?;
     let start_completion_count = {
         let runtime = live_runtime_mut().ok_or(BlockDeviceError::ProviderUnavailable)?;
         let device = runtime
@@ -860,6 +920,9 @@ fn read_live_block(
         {
             return Err(BlockDeviceError::ProviderUnavailable);
         }
+        device
+            .converge_pending_read()
+            .map_err(block_error_from_virtio)?;
         let start_completion_count = device.completion_count();
         let request_len = core::cmp::min(buffer.len(), VIRTIO_BLK_READ_BUFFER_SIZE);
         device
@@ -872,7 +935,16 @@ fn read_live_block(
         crate::trace::Checkpoint::VirtioBlkLiveReadSubmitted,
         crate::context::context_ref(),
     );
-    wait_for_completion_after(start_completion_count)?;
+    {
+        let runtime = live_runtime_mut().ok_or(BlockDeviceError::ProviderUnavailable)?;
+        let device = runtime
+            .device
+            .as_mut()
+            .ok_or(BlockDeviceError::ProviderUnavailable)?;
+        device
+            .wait_for_current_read_completion(start_completion_count)
+            .map_err(block_error_from_virtio)?;
+    }
     VIRTIO_BLK_LIVE_READ_COMPLETED_CHECKPOINTS.fetch_add(1, Ordering::AcqRel);
     crate::checkpoint::dispatch(
         crate::trace::Checkpoint::VirtioBlkLiveReadCompleted,
@@ -971,51 +1043,6 @@ impl VirtioBlkLiveProvider {
     }
 }
 
-fn wait_for_no_pending_read() -> Result<(), BlockDeviceError> {
-    let mut remaining = VIRTIO_BLK_READ_WAIT_SPINS;
-    while remaining != 0 {
-        let Some(runtime) = live_runtime() else {
-            return Err(BlockDeviceError::ProviderUnavailable);
-        };
-        let Some(device) = runtime.device() else {
-            return Err(BlockDeviceError::ProviderUnavailable);
-        };
-        if !device.read_request_pending() {
-            return Ok(());
-        }
-        core::hint::spin_loop();
-        remaining -= 1;
-    }
-    Err(BlockDeviceError::ProviderUnavailable)
-}
-
-fn wait_for_completion_after(start_completion_count: usize) -> Result<(), BlockDeviceError> {
-    let mut remaining = VIRTIO_BLK_READ_WAIT_SPINS;
-    while remaining != 0 {
-        {
-            let Some(runtime) = live_runtime_mut() else {
-                return Err(BlockDeviceError::ProviderUnavailable);
-            };
-            let Some(device) = runtime.device.as_mut() else {
-                return Err(BlockDeviceError::ProviderUnavailable);
-            };
-            if !device.read_request_pending() && device.completion_count() > start_completion_count
-            {
-                return Ok(());
-            }
-            match device.poll_read_completion() {
-                Ok(()) => return Ok(()),
-                Err(VirtioBlkError::Queue(VirtqueueError::NoUsedBuffer)) => {}
-                Err(VirtioBlkError::NoRequestPending) => {}
-                Err(_) => return Err(BlockDeviceError::ProviderUnavailable),
-            }
-        }
-        core::hint::spin_loop();
-        remaining -= 1;
-    }
-    Err(BlockDeviceError::ProviderUnavailable)
-}
-
 fn last_read_data_len() -> Option<usize> {
     let runtime = live_runtime()?;
     let device = runtime.device()?;
@@ -1074,6 +1101,18 @@ fn read_request_ext2_magic_observed() -> bool {
                     && u16::from_le_bytes([request.data[offset], request.data[offset + 1]])
                         == EXT2_SUPER_MAGIC
             })
+    }
+}
+
+fn dispatch_first_read_ready() {
+    if VIRTIO_BLK_READ_READY_CHECKPOINTS
+        .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+    {
+        crate::checkpoint::dispatch(
+            crate::trace::Checkpoint::VirtioBlkReadReady,
+            crate::context::context_ref(),
+        );
     }
 }
 

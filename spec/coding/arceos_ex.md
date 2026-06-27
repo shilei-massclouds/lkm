@@ -597,6 +597,16 @@ Linux-like `Bio`、最小同步 `submit_bio_wait()` / `blk_mq_submit_bio()` 壳�
 virtio-mmio IRQ handler 后消费 used ring；二是在没有睡眠等待队列/完整调度阻塞语义时，由 bounded wait 轮询
 used ring 并消费当前请求的 completion。后者是同步块读运行时语义，不是 smoke/KUnit completion injection；
 它不得构造 fake used entry，也不得绕过 `VirtQueue.Action::GetBuf`、status byte 校验或 pending token 校验。
+每次 live read 都必须呈现完整的 submit-wait-complete 生命周期：提交一个请求、等待同一个 pending token 完成、
+校验 status byte、释放 descriptor chain，然后才能向 `Bio` / `BufferHead` 返回。若进入同步读时已经存在前一轮
+pending request，代码必须先主动收束该 inherited request 或返回结构化错误，不能只忙等 pending 布尔位自然消失。
+initcall 阶段提交的首个 ext2 superblock probe 也遵守同一规则：它必须在 `VirtioBlkReady` 和后续
+`RootfsPhase` 读路径之前完成收束，避免把首个 used-ring completion 留给 rootfs 或 user payload 阶段继承。
+IRQ handler 和任务侧 polling 都可以作为 completion source，但同一个 pending token 只能有一个 consumer；实现必须保护
+`VirtioBlkDevice`、`VirtQueue` 和静态读缓冲的 completion 临界区，避免 IRQ 流与 `KernelInitTask` 同时消费同一次完成。
+virtqueue 发布顺序也必须保持 Linux-like 约束：descriptor/avail ring 写入在 avail idx 和 MMIO notify 之前 release
+有序；读取 device used idx 后，在读取 used entry、status byte 和数据缓冲前要有 acquire 观察边界。当前 coherent
+static backing 仍可保留 cache maintenance deferred，但不得省略这些顺序边界。
 
 read-only ext2 必须继续走 `BufferHead`。实现边界对应 Linux 6.12.37 `ext2_fill_super()` /
 `ext2_iget()` / `ext2_find_entry()` / direct-block read：读取 superblock、校验 magic/block size、读取 group

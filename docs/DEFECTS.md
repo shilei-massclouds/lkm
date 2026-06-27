@@ -6,7 +6,7 @@
 
 ### DF-0001: `make run APP=user-boot` 间歇性无法读取 `/sbin/init`
 
-- 状态：待查。
+- 状态：修复候选验证中。
 - 首次记录日期：2026-06-24。
 - 关联范围：`impl/arceos_ex` 用户态启动、VFS/ext2 path read、virtio-blk live read completion。
 - 表现：普通 `make run APP=user-boot` 偶发输出 `read user ELF failed` 后关机；同一构建和同一 disk 下也可能成功输出 `user hello` 与 `user exit status=0`。
@@ -28,6 +28,7 @@
 - 同轮压力测试中，DF-0001 失败全部归到同一个事件序列 `deff92e2396ec2f6`，成功全部归到同一个事件序列 `bd43ae22bfcc7354`。当前事件视角下二者共同前缀长度为 0：失败侧第一个可见事件是 `symptom:ReadUserElfFailed`，成功侧第一个可见事件是 `user_output:UserHello`。代表日志显示成功和 DF-0001 失败在 `late_smoke_initcall` 之前基本同形，差异出现在 `arceos_ex user boot start` 之后。
 - 2026-06-27 在提交 `b4e600e` 后重新运行普通 DF-0001 压力测试。第一次执行因 `/mnt/d/gitHome` 与 `/mnt/d/githome` 大小写路径在沙箱内被判为只读，10 次均为构建期 `nonzero-exit`，不是 DF-0001 样本；随后在沙箱外显式输出到 `/tmp/lkm-stress-out`，执行 `--runs 10 --timeout 180` 和追加 `--runs 20 --timeout 180`。有效 30 次样本中，成功 22 次、DF-0001 失败 7 次、rootfs phase unknown failure 1 次；报告在 `/tmp/lkm-stress-out/20260627T004632Z-df-0001-user-boot/report.md` 和 `/tmp/lkm-stress-out/20260627T004752Z-df-0001-user-boot/report.md`。
 - 新样本中 DF-0001 仍全部归到 `deff92e2396ec2f6`，成功仍全部归到 `bd43ae22bfcc7354`。Boot HART 0 上既有失败也有成功，非 0 HART 上也有成功，因此 Boot HART 不是充分原因。失败日志同样在 `late_smoke_initcall` 后、`arceos_ex user boot start` 后折叠为 `read user ELF failed`。
+- 2026-06-27 按 Linux-like 同步请求生命周期补齐规格后实现修复候选：initcall 首个 ext2 superblock read 改为 submit-and-wait 收束，live read 进入同步读前会主动收束 inherited pending request，IRQ 与 task-poll completion 通过单一 owner 避免同时消费同一 pending token，并为 virtqueue avail publish / MMIO notify / used-ring observe 补入 release/acquire 顺序边界。验证结果：`make verify` 通过，`make -C impl/arceos_ex build APP=smoke` 通过，`make -C impl/arceos_ex run APP=user-boot` 输出 `user hello` / `user exit status=0`。随后执行 DF-0001 stress 10 次和追加 20 次，总计 30/30 成功、0 失败；报告在 `/tmp/lkm-stress-out/20260627T011328Z-df-0001-user-boot/report.md` 和 `/tmp/lkm-stress-out/20260627T011357Z-df-0001-user-boot/report.md`。
 
 当前判断：
 
@@ -39,14 +40,14 @@
 - 2026-06-27 压力测试结论：新 stress 框架已经能够稳定复现和归类 DF-0001，但当前普通日志/checkpoint 只能看到折叠后的外部症状，尚不足以定位第一个内部差异点。`read_user_path_image()` 将 `VfsCore::read_path()` 的任意错误统一折叠为 `read user ELF failed`，而实际调用链还会经过 `VfsCore::open_path/walk_path`、`Ext2FileSystem::lookup_child/read_file_inode`、`bio::sb_bread_by_devt_block`、`BlockDeviceRegistry::read_device` 和 `VirtioBlkLiveProvider::read_live_block`。偶发的 rootfs phase unknown failure 也指向相邻的 rootfs/ext2/block 读链路，说明下一步应优先提高这条长期关键路径的内部可见性，而不是只给 `user-boot` 临时打点。
 - 2026-06-27 代码审阅后的当前根因候选收敛到 virtio-blk live read 的 completion 收束。`setup_live_driver()` 在 initcall 中提交 `submit_ext2_superblock_read()` 后没有同步等待完成，只依赖后续 IRQ 及时调用 `handle_irq_completion()` 消费 used ring。之后 rootfs 阶段和 user-boot 阶段都会通过 `VirtioBlkLiveProvider::read_live_block()` 进入同步读；该函数先执行 `wait_for_no_pending_read()`，只忙等 `read_request_pending == false`，不会主动 poll/complete 已遗留的 pending request。因此若 initcall 首个 superblock read 的 IRQ completion 尚未及时收束，后续 rootfs 或 `/sbin/init` 读取会在进入自身请求提交前失败，并被上层折叠为 rootfs phase failure 或 `read user ELF failed`。
 - 同一段代码还存在第二个同步风险：任务侧 `wait_for_completion_after()` 会直接调用 `poll_read_completion()` 消费 used ring，而 IRQ 侧 `handle_irq_completion()` 也会调用 `complete_read_from_irq()` 消费同一个 `VirtioBlkDevice` / `VirtQueue` / 静态读缓冲。两条路径之间没有互斥、pending token 原子状态或明确内存序；virtqueue 发布 descriptor/avail idx 后也未显式建立 notify 前的 fence，读取 used idx 前只有 volatile 读。这些都与“probe/trace 改变时序后问题消失”的现象一致。
+- 2026-06-27 修复候选验证结果支持上述根因判断：在消除 fire-and-forget 首读、inherited pending 等待和双 completion consumer 后，原先 30 次中可出现 7 次 DF-0001 的普通 stress 样本变为 30/30 成功。仍需后续 nightly/stress 继续观察，尤其是更长轮次和 block/ext2/VFS 分层压力测试。
 
 下一步定位建议：
 
 - 按 `spec/charter/main.md` 中“内部可见性与 checkpoint 规格化”的分工，先把 VFS/ext2/block/virtio 读链路的长期观察点写入 `spec/model` 和 coding 规格，再由实现生成结构化 trace/checkpoint。DF-0001 需要的首轮观察重点是：`read_user_path_image()` 或其下层 VFS/block provider 的错误分类，以及 KernelInitTask 发起 block I/O、进入等待、观察 completion 继续执行，与 InterruptStream 开始/结束处理 completion 之间的同步关系。
-- 优先验证并修复 initcall 首个 `submit_ext2_superblock_read()` 的完成收束：提交后应进入与后续同步读一致的 completion wait/poll 流程，或者在 rootfs/user-boot 读前能安全接管并完成遗留 pending request；不能仅等待 pending 自然消失。
-- 为 virtio-blk live read 增加失败分支诊断或独立 debug counter，重点观察 request submitted、notify、used idx、pending 状态、completion count、completion source，以及 `wait_for_no_pending_read()` 超时前的 pending sector。
-- 复核 `wait_for_completion_after()` / `wait_for_no_pending_read()` 的轮询边界、IRQ 与 task poll 双 completion 路径、virtqueue descriptor/avail 发布和 used ring 读取的内存序，确认是否需要最小锁/guard、IRQ 禁用区间、atomic pending token 或 fence。
-- 在补齐 ext2/VFS 与 virtio-blk/IRQ 相关锁、guard、memory ordering、IRQ/task context 约束时，把本缺陷作为固定回归问题重新验证。
+- 已完成首个修复候选：initcall 首读收束、live read inherited pending 主动收束、IRQ/task-poll 单 owner 和 virtqueue release/acquire 顺序边界。下一步不是继续临时打补丁，而是把该路径纳入 nightly/stress 回归。
+- 若后续 stress 再出现失败，应优先补充 virtio-blk live read 的失败分支诊断或独立 debug counter，重点观察 request submitted、notify、used idx、pending 状态、completion count、completion source，以及同步等待超时前的 pending sector。
+- 在继续补齐 ext2/VFS 与 virtio-blk/IRQ 相关锁、guard、memory ordering、IRQ/task context 约束时，把本缺陷作为固定回归问题重新验证。
 - 补充长期压力测试，分别覆盖 virtio-blk/block 设备层和 ext2/VFS 文件系统层：
   - virtio-blk/block 层测试应持续通过 block/bio/buffer-head 公开路径读取固定 sector、跨 sector 范围和重复队列提交场景，观察 completion、pending、used idx、status、读计数和错误返回。
   - ext2/VFS 层测试应持续通过 path read/open/read 路径读取 `/sbin/init`、interpreter、跨 block 文件和多级目录文件，观察 lookup、inode、direct/indirect block read、buffer copy 和错误传播。

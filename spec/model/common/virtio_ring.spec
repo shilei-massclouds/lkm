@@ -41,15 +41,18 @@ predicate virtqueue_descriptor_chain_direct<T>(queue: T) -> bool;
 predicate virtqueue_out_descriptor_added<T>(queue: T) -> bool;
 predicate virtqueue_in_descriptor_added<T>(queue: T) -> bool;
 predicate virtqueue_chain_head_published<T>(queue: T) -> bool;
+predicate virtqueue_descriptor_avail_publish_release_ordered<T>(queue: T) -> bool;
 predicate virtqueue_chain_free_descriptor_count_matched<T>(queue: T) -> bool;
 predicate virtqueue_chain_allocation_atomic<T>(queue: T) -> bool;
 predicate virtqueue_free_descriptors_consumed<T>(queue: T) -> bool;
 predicate virtqueue_avail_index_advanced<T>(queue: T) -> bool;
 predicate virtqueue_kick_recorded<T>(queue: T) -> bool;
+predicate virtqueue_notify_after_avail_publish<T>(queue: T) -> bool;
 predicate virtqueue_mmio_notify_written<T>(queue: T) -> bool;
 predicate virtqueue_descriptor_exhaustion_rejected<T>(queue: T) -> bool;
 predicate virtqueue_fixture_used_entry_ready<T>(queue: T) -> bool;
 predicate virtqueue_real_used_completion_observed<T>(queue: T) -> bool;
+predicate virtqueue_used_observation_acquire_ordered<T>(queue: T) -> bool;
 predicate virtqueue_used_index_advanced<T>(queue: T) -> bool;
 predicate virtqueue_get_buf_returns_len<T>(queue: T) -> bool;
 predicate virtqueue_get_buf_empty_rejected<T>(queue: T) -> bool;
@@ -149,6 +152,7 @@ object VirtQueue: ResourceObject {
                     virtqueue_out_descriptor_added(self);
                     virtqueue_in_descriptor_added(self);
                     virtqueue_chain_head_published(self);
+                    virtqueue_descriptor_avail_publish_release_ordered(self);
                     virtqueue_chain_free_descriptor_count_matched(self);
                     virtqueue_chain_allocation_atomic(self);
                     virtqueue_free_descriptors_consumed(self);
@@ -184,6 +188,7 @@ object VirtQueue: ResourceObject {
                 }
                 ensures {
                     virtqueue_kick_recorded(self);
+                    virtqueue_notify_after_avail_publish(self);
                     virtqueue_mmio_notify_written(self);
                 }
             }
@@ -194,6 +199,7 @@ object VirtQueue: ResourceObject {
                     virtqueue_fixture_used_entry_ready(self) || virtqueue_real_used_completion_observed(self);
                 }
                 ensures {
+                    virtqueue_used_observation_acquire_ordered(self);
                     virtqueue_get_buf_returns_len(self);
                     virtqueue_get_buf_empty_rejected(self);
                     virtqueue_descriptor_chain_released(self);
