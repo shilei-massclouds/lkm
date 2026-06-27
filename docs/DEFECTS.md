@@ -6,7 +6,7 @@
 
 ### DF-0002: `make run APP=smoke` 间歇性 `InitcallPhase` ready 失败
 
-- 状态：已复现，已由结构化 failure diagnostic 定位到 UART/PLIC IRQ cycle 观测失败，并出现后续 `Serial8250RxBatchLoopbackProbe.setup` 粗粒度失败；待继续细分 RX batch probe 并修复。
+- 状态：已复现，已由结构化 failure diagnostic 收敛到 UART/PLIC IRQ cycle 与 PLIC source 观测失败；RX loopback/batch probe 已按长期观察点补充结构化诊断，待继续核对 PLIC source claim/complete 语义并修复。
 - 首次记录日期：2026-06-25。
 - 关联范围：`impl/arceos_ex` initcall 边界、UART/TTY initcall 路径、checkpoint/probe 时序。
 - 表现：普通 `timeout 90s make run APP=smoke` 曾返回 0，但启动日志输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。失败点在 `InitcallPhase` 标记 ready 时，说明 `initcall_phase_ready(...)` 在 `INITCALL_PHASE_STATE` 从 Base 推进到 Ready 前返回 false。
@@ -32,6 +32,10 @@
 - 同轮验证：`make verify` 通过，`make -C impl/arceos_ex build APP=smoke` 通过，普通 `make -C impl/arceos_ex run APP=smoke` 通过 `54/54`，`python3 -m unittest test_runner` 通过 8 项。
 - 2026-06-27 扩展后重新执行 DF-0001 `user-boot` stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 499 次、DF-0002 `InitcallPhase` ready 失败 1 次，失败样本为 `run-0049`；报告在 `/tmp/lkm-stress-out/20260627T044327Z-df-0001-user-boot/report.md`。本轮没有复现 `read user ELF failed`，失败诊断细化为 `first_failed=uart_interrupt_chain_probe.plic_claim_observed`。
 - 2026-06-27 扩展后重新执行 DF-0002 smoke stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、DF-0002 `InitcallPhase` ready 失败 2 次，失败样本为 `run-0396` 和 `run-0423`；报告在 `/tmp/lkm-stress-out/20260627T045614Z-df-0002-smoke-initcall/report.md`。`run-0396` 细化为 `first_failed=uart_interrupt_chain_probe.irq_cycle_wait_closed`，`run-0423` 进入后续 `setup_objects.serial8250_rx_batch_loopback_probe.setup`，但该对象内部仍只有粗粒度 `first_failed=serial8250_rx_batch_loopback_probe.setup`。
+- 2026-06-27 按“通用观察点，而非单个缺陷临时日志”的原则继续扩展规格和实现：`Serial8250RxLoopbackProbe.setup` 与 `Serial8250RxBatchLoopbackProbe.setup` 失败时必须报告统一 `failure_diagnostic` payload，覆盖 RX runtime、PLIC/domain/registry、logical IRQ/source mapping、stimulus、wait、handler、flip buffer、complete/zero-claim 和 source match 等长期事实；同时把 `UartInterruptChainProbe.setup` 的 wait failure 继续细分到 PLIC claim/complete、IRQ-domain dispatch、handler dispatch、THRI 处理和 last claimed/completed source。若失败涉及中断链路，诊断必须保留 PLIC/IRQ-domain/IRQ-registry 事实，不能预先归因到 UART 单侧。
+- 本轮验证：`make verify` 通过，`make -C impl/arceos_ex build APP=smoke` 通过，普通 `make -C impl/arceos_ex run APP=smoke` 通过 `54/54`，`python3 -m unittest test_runner` 通过 8 项。
+- 2026-06-27 扩展 RX/PLIC 结构化诊断后重新执行 DF-0001 `user-boot` stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、DF-0002 `InitcallPhase` ready 失败 2 次；报告在 `/tmp/lkm-stress-out/20260627T052721Z-df-0001-user-boot/report.md`。本轮没有复现 `read user ELF failed`；两个失败样本分别细化为 `first_failed=uart_interrupt_chain_probe.plic_claim_observed` 和 `first_failed=plic.last_claimed_source_uart`，均发生在 `UartInterruptChainProbe.setup`。
+- 2026-06-27 同轮重新执行 DF-0002 smoke stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、DF-0002 `InitcallPhase` ready 失败 2 次；报告在 `/tmp/lkm-stress-out/20260627T053947Z-df-0002-smoke-initcall/report.md`。两个失败样本均为 `first_failed=plic.last_claimed_source_uart`，分别出现在 `UartInterruptChainProbe.setup` 和新增覆盖的 `Serial8250RxLoopbackProbe.setup`；本轮没有再出现 RX batch 粗粒度失败。
 
 当前判断：
 
@@ -41,11 +45,12 @@
 - 2026-06-27 当前 stress 结论：普通 `APP=smoke` 30 次未复现，但 200 次复现 1 次 DF-0002，因此不能把它标记为已解决，也不能归档为与 DF-0001 同因后已消除。现有证据仍允许二者属于相邻的 initcall/virtio/block 时序敏感问题，但 DF-0002 至少还有未被 DF-0001 修复完全消除的 ready predicate 缺口或观测缺口。
 - 2026-06-27 新增 ready-check 诊断后的 200 次 stress 未复现失败，这只能说明本轮没有捕获到 DF-0002 样本；由于上一轮同样规模曾出现 1/200 失败，且本次改动主要是失败路径诊断和聚合谓词同序重构，不构成针对根因的修复证据，暂不应标记已解决。
 - 2026-06-27 进一步细分 diagnostic 并复测后，DF-0001 和 DF-0002 两个 500 次 stress case 仍都能触发 DF-0002 类问题。DF-0001 的原始 `/sbin/init` 读取失败没有复现，仍维持已归档判断；DF-0002 则已经有两个更具体方向：`UartInterruptChainProbe` 的 PLIC claim/IRQ cycle closure，以及 `Serial8250RxBatchLoopbackProbe.setup` 内部粗粒度失败。
+- 2026-06-27 扩展 RX/PLIC 结构化诊断并复测后，失败进一步集中到 PLIC/source 观察面：DF-0001 交叉样本出现 `uart_interrupt_chain_probe.plic_claim_observed` 和 `plic.last_claimed_source_uart`，DF-0002 smoke 样本两次均为 `plic.last_claimed_source_uart`，其中一次已经落在 `Serial8250RxLoopbackProbe.setup` 的 RX wait 路径。当前不应把问题预设为 UART 单侧问题；更合理的根因方向是 PLIC source claim/complete、last source 记录语义、root external interrupt delivery 与 8250 IRQ request 之间的同步或观测边界。
 
 下一步定位建议：
 
-- 下一轮不应再优先增加 checkpoint，而应继续增强现有 failure diagnostic 的详细程度。优先对象是 `Serial8250RxBatchLoopbackProbe.setup`，因为最新 DF-0002 复测已经出现一个后续 probe 粗粒度失败；字段应覆盖 RX loopback stimulus、PLIC claim/dispatch、UART handler RX、flip buffer insert/push、complete/zero-claim loop exit、cycle closure、batch count/last byte/no overflow 等长期事实。
-- 对 `UartInterruptChainProbe` 方向，下一步不是重复拆入口条件，而是分析为什么 `trigger_uart_thre_once` 后会出现 `plic_claim_observed` 或 `irq_cycle_wait_closed` 失败；需要结合 Linux-like 8250/PLIC 流程检查 THRI/LSR/IIR 状态、root external interrupt delivery、PLIC pending/claim/complete、handler 清 THRI 和等待循环边界。
+- 下一轮不应增加缺陷专用 checkpoint；若需要继续提高可见性，也应沿现有 `failure_diagnostic` 增强通用事实。当前第一优先级是分析为什么同一条 UART IRQ/RX wait 链路会出现 `plic_claim_observed` 或 `plic.last_claimed_source_uart` 失败。
+- 对 `UartInterruptChainProbe` 和 RX loopback 方向，下一步不是重复拆入口条件，而是结合 Linux-like 8250/PLIC 流程检查 THRI/RX request、LSR/IIR 状态、root external interrupt delivery、PLIC pending/claim/complete、source claim/complete 记录、handler 清 THRI/RX drain 和等待循环边界。
 - 复核 `UartInterruptChainProbe` 与 `InitcallPhase` ready 约束之间的关系：若该 probe 是进入 ready 的必要长期条件，应在规格中明确；若它只是 smoke/probe 观测辅助，则需要重新定义它失败时是否应阻断 `InitcallPhase`。
 - 后续回顾 UART/TTY、IRQ、task context 和 initcall 并发关系时，把本缺陷作为固定样本回归验证。
 - 后续 nightly/stress 至少保留普通 `make run APP=smoke` 的 DF-0002 case，同时继续保留普通 `make run APP=user-boot` 作为交叉触发入口。下一步第一优先级不是改 initcall 聚合逻辑，而是先规格化并实现 `Serial8250RxBatchLoopbackProbe.setup` 内部具体 false predicate；该诊断应作为长期 failure diagnostic 设计，避免一次性临时日志。

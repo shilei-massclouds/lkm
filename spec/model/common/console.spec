@@ -247,6 +247,7 @@ predicate serial8250_rx_loopback_probe_observes_flip_buffer_push<T, F>(probe: T,
 predicate serial8250_rx_loopback_probe_restores_mcr<T, P>(probe: T, port: P) -> bool;
 predicate serial8250_rx_loopback_probe_single_byte_first_round<T, B>(probe: T, byte: B) -> bool;
 predicate serial8250_rx_loopback_probe_bounded_batch_followup_allowed<T>(probe: T) -> bool;
+predicate serial8250_rx_loopback_probe_setup_failure_reports_structured_diagnostic<T>(probe: T) -> bool;
 
 predicate serial8250_rx_batch_loopback_probe_ready<T>(probe: T) -> bool;
 predicate serial8250_rx_batch_loopback_probe_production_side<T>(probe: T) -> bool;
@@ -260,6 +261,7 @@ predicate serial8250_rx_batch_loopback_probe_observes_flip_buffer_batch_push<T, 
 predicate serial8250_rx_batch_loopback_probe_bounded_drain_observed<T, R>(probe: T, runtime: R) -> bool;
 predicate serial8250_rx_batch_loopback_probe_batch_count_matched<T, F>(probe: T, flip_buffer: F) -> bool;
 predicate serial8250_rx_batch_loopback_probe_no_overflow<T, F>(probe: T, flip_buffer: F) -> bool;
+predicate serial8250_rx_batch_loopback_probe_setup_failure_reports_structured_diagnostic<T>(probe: T) -> bool;
 
 predicate serial8250_rx_kunit_observer_ready<T>(observer: T) -> bool;
 predicate serial8250_rx_kunit_observer_read_only<T>(observer: T) -> bool;
@@ -1280,6 +1282,9 @@ object Serial8250RxLoopbackProbe: ConsoleObject {
                         Serial8250RxByteRef::Uart0RxProbe
                     );
                     serial8250_rx_loopback_probe_bounded_batch_followup_allowed(Serial8250RxLoopbackProbe);
+                    serial8250_rx_loopback_probe_setup_failure_reports_structured_diagnostic(
+                        Serial8250RxLoopbackProbe
+                    );
                     tty_flip_buffer_push_committed(TtyFlipBuffer, TtyFlipBufferRecordRef::Uart0RxProbe);
                 }
             }
@@ -1293,6 +1298,9 @@ object Serial8250RxLoopbackProbe: ConsoleObject {
             serial8250_rx_loopback_probe_uses_smoke_stimulus(Serial8250RxLoopbackProbe);
             serial8250_rx_loopback_probe_kunit_not_stimulus(Serial8250RxLoopbackProbe);
             serial8250_rx_loopback_probe_restores_mcr(Serial8250RxLoopbackProbe, Uart8250Port);
+            serial8250_rx_loopback_probe_setup_failure_reports_structured_diagnostic(
+                Serial8250RxLoopbackProbe
+            );
             tty_flip_buffer_push_committed(TtyFlipBuffer, TtyFlipBufferRecordRef::Uart0RxProbe);
         }
     }
@@ -1368,6 +1376,9 @@ object Serial8250RxBatchLoopbackProbe: ConsoleObject {
                         Serial8250RxBatchLoopbackProbe,
                         TtyFlipBuffer
                     );
+                    serial8250_rx_batch_loopback_probe_setup_failure_reports_structured_diagnostic(
+                        Serial8250RxBatchLoopbackProbe
+                    );
                     tty_flip_buffer_batch_push_committed(
                         TtyFlipBuffer,
                         TtyFlipBufferRecordRef::Uart0RxProbe,
@@ -1387,6 +1398,9 @@ object Serial8250RxBatchLoopbackProbe: ConsoleObject {
             serial8250_rx_batch_loopback_probe_ready(Serial8250RxBatchLoopbackProbe);
             serial8250_rx_batch_loopback_probe_production_side(Serial8250RxBatchLoopbackProbe);
             serial8250_rx_batch_loopback_probe_kunit_not_stimulus(Serial8250RxBatchLoopbackProbe);
+            serial8250_rx_batch_loopback_probe_setup_failure_reports_structured_diagnostic(
+                Serial8250RxBatchLoopbackProbe
+            );
         }
     }
 }

@@ -822,6 +822,23 @@ zero-claim loop exit 闭合。KUnit 在这条路径中只能作为 observer/chec
 受限 sink 输出诊断，但不得写 TX 字符、不得设置 loopback、不得调用 handler、不得 claim/complete PLIC，也不得改
 pending/enable 状态。smoke 可以作为生产侧 stimulus，但也不能直接调用 backend handler；它只能通过公开/受控的
 前端或 runtime probe 入口提交字符。
+`Serial8250RxLoopbackProbe.setup` 和 `Serial8250RxBatchLoopbackProbe.setup` 失败时必须通过统一
+`failure_diagnostic` payload 报告内部首个失败事实。这些字段是长期 RX/PLIC/IRQ/flip-buffer 观察事实，不是为某个
+缺陷临时添加的日志。单字符 probe 的输出形态为
+`phase=InitcallPhase step=setup_objects.serial8250_rx_loopback_probe.setup object=Serial8250RxLoopbackProbe check=serial8250_rx_loopback_probe.setup first_failed=<stable-predicate-name>`；
+批量 probe 的输出形态为
+`phase=InitcallPhase step=setup_objects.serial8250_rx_batch_loopback_probe.setup object=Serial8250RxBatchLoopbackProbe check=serial8250_rx_batch_loopback_probe.setup first_failed=<stable-predicate-name>`。
+`first_failed` 必须按实现判定顺序使用长期稳定名称。第一批至少覆盖通用前置事实：probe lifecycle base、前序 RX
+probe ready、RX runtime enabled/deferred、PLIC/domain/registry ready、logical IRQ valid、UART source mapping
+present/matches/source gate open、registered handler present、flip buffer empty、fixed batch nonempty、batch length within
+drain limit；刺激事实：enable runtime RX、trigger single loopback byte、trigger bounded loopback batch；等待事实：
+single/batch RX request observed、PLIC claim observed、PLIC IRQ-domain dispatch observed、IRQ handler registry dispatch
+observed、runtime handler observed/RX handled、PLIC complete observed、zero-claim observed、claim-loop exit observed、
+last claimed/completed source matches UART，以及 single/batch RX loopback wait closed；观测事实：stimulus committed、
+PLIC claim observed、IRQ dispatch observed、runtime handler received RX、flip buffer pushed、PLIC complete observed、
+zero-claim loop exit observed、IRQ cycle closed、bounded drain observed、batch count matched、last byte matched 和 no
+overflow observed。若等待失败涉及中断链路，diagnostic 必须保留 PLIC/IRQ-domain/IRQ-registry 事实，不得把问题
+预先归因到 UART 侧。
 为避免 handoff 后重复输出，`ConsoleRegistry` 必须区分 printk 记录保存和 legacy boot-console drain cursor。
 注册 preferred serial8250 console 时，应先把 boot console pending records 按 boot console 路径 flush 并推进 cursor；
 serial8250 route 成功写出的记录必须标记为已交付，不得再被 `earlycon::drain_printk()` 经 SBI 重放。默认

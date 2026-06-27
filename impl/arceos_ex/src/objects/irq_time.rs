@@ -3898,9 +3898,12 @@ impl UartInterruptChainProbe {
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
-                uart_interrupt_chain_probe_setup_diagnostic(
-                    "uart_interrupt_chain_probe.irq_cycle_wait_closed",
-                ),
+                uart_interrupt_chain_probe_setup_diagnostic(uart_irq_cycle_wait_diagnostic(
+                    plic,
+                    irq_handler_registry,
+                    baseline,
+                    source,
+                )),
             );
         }
 
@@ -4034,6 +4037,63 @@ fn uart_interrupt_chain_probe_setup_diagnostic(first_failed: &'static str) -> Fa
         "uart_interrupt_chain_probe.setup",
         first_failed,
     )
+}
+
+fn uart_irq_cycle_wait_diagnostic(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+    baseline: UartIrqCycleSnapshot,
+    source: u32,
+) -> &'static str {
+    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+    let claim_delta = current.claims.saturating_sub(baseline.claims);
+    let complete_delta = current.completes.saturating_sub(baseline.completes);
+    let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
+    let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
+
+    if current.requests <= baseline.requests {
+        return "uart_interrupt_chain_probe.wait.rx_or_thre_request_observed";
+    }
+    if current.claims <= baseline.claims {
+        return "plic.claim_observed";
+    }
+    if current.plic_dispatches <= baseline.plic_dispatches {
+        return "plic.irq_domain_dispatch_observed";
+    }
+    if current.irq_dispatches <= baseline.irq_dispatches {
+        return "irq_handler_registry.dispatch_observed";
+    }
+    if current.handler_calls <= baseline.handler_calls {
+        return "serial8250_runtime_handler.observed";
+    }
+    if current.handled <= baseline.handled {
+        return "uart8250_thre_interrupt.handled";
+    }
+    if current.thri_disabled <= baseline.thri_disabled {
+        return "uart8250_thri.disabled_by_handler";
+    }
+    if current.completes <= baseline.completes {
+        return "plic.complete_observed";
+    }
+    if current.zero_claims <= baseline.zero_claims {
+        return "plic.zero_claim_observed";
+    }
+    if current.loop_exits <= baseline.loop_exits {
+        return "plic.claim_loop_exit_observed";
+    }
+    if claim_delta != complete_delta {
+        return "plic.claim_complete_delta_matched";
+    }
+    if zero_claim_delta != loop_exit_delta {
+        return "plic.zero_claim_loop_exit_delta_matched";
+    }
+    if plic.last_claimed_source() != source {
+        return "plic.last_claimed_source_uart";
+    }
+    if plic.last_completed_source() != source {
+        return "plic.last_completed_source_uart";
+    }
+    "uart_interrupt_chain_probe.irq_cycle_wait_closed"
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]
@@ -5219,59 +5279,57 @@ impl Serial8250RxLoopbackProbe {
     ) -> EventResult {
         let source = super::ns16550a::uart8250_port_irq_source();
         let logical_irq = super::ns16550a::uart8250_port_logical_irq();
-        if self.lifecycle.state() != State::Base
-            || uart_external_irq_enable.state() != State::Ready
-            || !uart_external_irq_enable.plic_source_gate_open()
-            || !uart_external_irq_enable.root_external_input_gate_open()
-            || plic.state() != State::Ready
-            || plic_irq_domain.state() != State::Ready
-            || irq_handler_registry.state() != State::Ready
-            || !super::ns16550a::uart8250_interrupt_driven_configured()
-            || !super::ns16550a::serial8250_runtime_port_ready()
-            || !super::ns16550a::serial8250_runtime_console_tx_ready()
-            || !super::ns16550a::serial8250_runtime_rx_deferred()
-            || !super::ns16550a::tty_flip_buffer_empty()
-            || !logical_irq.is_valid()
-            || plic_irq_domain
-                .mapping_for_source(source)
-                .is_none_or(|mapping| {
-                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
-                })
-            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
-        {
-            return failed_condition(
+        if let Some(first_failed) = self.setup_precondition_diagnostic(
+            uart_external_irq_enable,
+            plic,
+            plic_irq_domain,
+            irq_handler_registry,
+            source,
+            logical_irq,
+        ) {
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_loopback_probe_setup_diagnostic(first_failed),
             );
         }
 
         if !super::ns16550a::enable_serial8250_runtime_rx() {
-            return failed_condition(
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_loopback_probe_setup_diagnostic(
+                    "serial8250_rx_loopback_probe.enable_runtime_rx",
+                ),
             );
         }
         self.rx_runtime_enabled = super::ns16550a::serial8250_runtime_rx_enabled();
         if !self.rx_runtime_enabled {
-            return failed_condition(
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_loopback_probe_setup_diagnostic(
+                    "serial8250_rx_loopback_probe.rx_runtime_enabled",
+                ),
             );
         }
 
         let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
         if !super::ns16550a::trigger_serial8250_rx_loopback_once(SERIAL8250_RX_LOOPBACK_BYTE) {
-            return failed_condition(
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_loopback_probe_setup_diagnostic(
+                    "serial8250_rx_loopback_probe.trigger_single_loopback_byte",
+                ),
             );
         }
 
@@ -5282,11 +5340,19 @@ impl Serial8250RxLoopbackProbe {
             source,
             SERIAL8250_RX_LOOPBACK_BYTE,
         ) {
-            return failed_condition(
+            let first_failed = serial8250_rx_loopback_wait_diagnostic(
+                plic,
+                irq_handler_registry,
+                baseline,
+                source,
+                SERIAL8250_RX_LOOPBACK_BYTE,
+            );
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_loopback_probe_setup_diagnostic(first_failed),
             );
         }
 
@@ -5310,27 +5376,114 @@ impl Serial8250RxLoopbackProbe {
         self.last_byte_matched =
             super::ns16550a::serial8250_runtime_rx_last_byte() == SERIAL8250_RX_LOOPBACK_BYTE;
 
-        if !self.loopback_stimulus_committed
-            || !self.plic_claim_observed
-            || !self.irq_dispatch_observed
-            || !self.uart_handler_received_rx
-            || !self.flip_buffer_pushed
-            || !self.plic_complete_observed
-            || !self.zero_claim_loop_exit_observed
-            || !self.irq_cycle_closed
-            || !self.last_byte_matched
-        {
-            return failed_condition(
+        if let Some(first_failed) = self.setup_observation_diagnostic() {
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_loopback_probe_setup_diagnostic(first_failed),
             );
         }
 
         crate::trace::checkpoint(Checkpoint::Serial8250RxLoopbackReady);
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
+    }
+
+    fn setup_precondition_diagnostic(
+        &self,
+        uart_external_irq_enable: &UartExternalIrqEnable,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+        source: u32,
+        logical_irq: LogicalIrq,
+    ) -> Option<&'static str> {
+        if self.lifecycle.state() != State::Base {
+            return Some("serial8250_rx_loopback_probe.lifecycle_base");
+        }
+        if uart_external_irq_enable.state() != State::Ready {
+            return Some("uart_external_irq_enable.state_ready");
+        }
+        if !uart_external_irq_enable.plic_source_gate_open() {
+            return Some("uart_external_irq_enable.plic_source_gate_open");
+        }
+        if !uart_external_irq_enable.root_external_input_gate_open() {
+            return Some("uart_external_irq_enable.root_external_input_gate_open");
+        }
+        if plic.state() != State::Ready {
+            return Some("plic.state_ready");
+        }
+        if plic_irq_domain.state() != State::Ready {
+            return Some("plic_irq_domain.state_ready");
+        }
+        if irq_handler_registry.state() != State::Ready {
+            return Some("irq_handler_registry.state_ready");
+        }
+        if !super::ns16550a::uart8250_interrupt_driven_configured() {
+            return Some("uart8250_port.interrupt_driven_configured");
+        }
+        if !super::ns16550a::serial8250_runtime_port_ready() {
+            return Some("serial8250_runtime_port.ready");
+        }
+        if !super::ns16550a::serial8250_runtime_console_tx_ready() {
+            return Some("serial8250_runtime_console_tx.ready");
+        }
+        if !super::ns16550a::serial8250_runtime_rx_deferred() {
+            return Some("serial8250_runtime_rx.deferred");
+        }
+        if !super::ns16550a::tty_flip_buffer_empty() {
+            return Some("tty_flip_buffer.empty");
+        }
+        if !logical_irq.is_valid() {
+            return Some("uart8250_port.logical_irq_valid");
+        }
+
+        let Some(mapping) = plic_irq_domain.mapping_for_source(source) else {
+            return Some("plic_irq_domain.uart_mapping_present");
+        };
+        if mapping.logical_irq() != logical_irq {
+            return Some("plic_irq_domain.uart_mapping_logical_irq_matches");
+        }
+        if !mapping.source_gate_open() {
+            return Some("plic_irq_domain.uart_source_gate_open");
+        }
+        if !irq_handler_registry.has_handler_for_logical_irq(logical_irq) {
+            return Some("irq_handler_registry.uart_handler_present");
+        }
+        None
+    }
+
+    fn setup_observation_diagnostic(&self) -> Option<&'static str> {
+        if !self.loopback_stimulus_committed {
+            return Some("serial8250_rx_loopback_probe.loopback_stimulus_committed");
+        }
+        if !self.plic_claim_observed {
+            return Some("serial8250_rx_loopback_probe.plic_claim_observed");
+        }
+        if !self.irq_dispatch_observed {
+            return Some("serial8250_rx_loopback_probe.irq_dispatch_observed");
+        }
+        if !self.uart_handler_received_rx {
+            return Some("serial8250_rx_loopback_probe.uart_handler_received_rx");
+        }
+        if !self.flip_buffer_pushed {
+            return Some("serial8250_rx_loopback_probe.flip_buffer_pushed");
+        }
+        if !self.plic_complete_observed {
+            return Some("serial8250_rx_loopback_probe.plic_complete_observed");
+        }
+        if !self.zero_claim_loop_exit_observed {
+            return Some("serial8250_rx_loopback_probe.zero_claim_loop_exit_observed");
+        }
+        if !self.irq_cycle_closed {
+            return Some("serial8250_rx_loopback_probe.irq_cycle_closed");
+        }
+        if !self.last_byte_matched {
+            return Some("serial8250_rx_loopback_probe.last_byte_matched");
+        }
+        None
     }
 }
 
@@ -5416,30 +5569,21 @@ impl Serial8250RxBatchLoopbackProbe {
         let logical_irq = super::ns16550a::uart8250_port_logical_irq();
         let expected_len = SERIAL8250_RX_BATCH_LOOPBACK_BYTES.len();
         let expected_last = SERIAL8250_RX_BATCH_LOOPBACK_BYTES[expected_len - 1];
-        if self.lifecycle.state() != State::Base
-            || rx_loopback_probe.state() != State::Ready
-            || !rx_loopback_probe.rx_runtime_enabled()
-            || !rx_loopback_probe.irq_cycle_closed()
-            || plic.state() != State::Ready
-            || plic_irq_domain.state() != State::Ready
-            || irq_handler_registry.state() != State::Ready
-            || !super::ns16550a::serial8250_runtime_rx_enabled()
-            || !super::ns16550a::serial8250_runtime_rx_fifo_enabled()
-            || expected_len == 0
-            || expected_len > super::ns16550a::serial8250_runtime_rx_drain_limit()
-            || !logical_irq.is_valid()
-            || plic_irq_domain
-                .mapping_for_source(source)
-                .is_none_or(|mapping| {
-                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
-                })
-            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
-        {
-            return failed_condition(
+        if let Some(first_failed) = self.setup_precondition_diagnostic(
+            rx_loopback_probe,
+            plic,
+            plic_irq_domain,
+            irq_handler_registry,
+            source,
+            logical_irq,
+            expected_len,
+        ) {
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_batch_loopback_probe_setup_diagnostic(first_failed),
             );
         }
 
@@ -5447,11 +5591,14 @@ impl Serial8250RxBatchLoopbackProbe {
         if !super::ns16550a::trigger_serial8250_rx_loopback_batch(
             SERIAL8250_RX_BATCH_LOOPBACK_BYTES,
         ) {
-            return failed_condition(
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_batch_loopback_probe_setup_diagnostic(
+                    "serial8250_rx_batch_loopback_probe.trigger_bounded_loopback_batch",
+                ),
             );
         }
 
@@ -5463,11 +5610,20 @@ impl Serial8250RxBatchLoopbackProbe {
             expected_len,
             expected_last,
         ) {
-            return failed_condition(
+            let first_failed = serial8250_rx_batch_loopback_wait_diagnostic(
+                plic,
+                irq_handler_registry,
+                baseline,
+                source,
+                expected_len,
+                expected_last,
+            );
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_batch_loopback_probe_setup_diagnostic(first_failed),
             );
         }
 
@@ -5499,24 +5655,13 @@ impl Serial8250RxBatchLoopbackProbe {
             super::ns16550a::serial8250_runtime_rx_last_byte() == expected_last;
         self.no_overflow_observed = !super::ns16550a::tty_flip_buffer_overflowed();
 
-        if !self.batch_stimulus_committed
-            || !self.plic_claim_observed
-            || !self.irq_dispatch_observed
-            || !self.uart_handler_received_batch
-            || !self.flip_buffer_batch_pushed
-            || !self.plic_complete_observed
-            || !self.zero_claim_loop_exit_observed
-            || !self.irq_cycle_closed
-            || !self.bounded_drain_observed
-            || !self.batch_count_matched
-            || !self.last_byte_matched
-            || !self.no_overflow_observed
-        {
-            return failed_condition(
+        if let Some(first_failed) = self.setup_observation_diagnostic() {
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                serial8250_rx_batch_loopback_probe_setup_diagnostic(first_failed),
             );
         }
 
@@ -5524,6 +5669,261 @@ impl Serial8250RxBatchLoopbackProbe {
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
+
+    fn setup_precondition_diagnostic(
+        &self,
+        rx_loopback_probe: &Serial8250RxLoopbackProbe,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+        source: u32,
+        logical_irq: LogicalIrq,
+        expected_len: usize,
+    ) -> Option<&'static str> {
+        if self.lifecycle.state() != State::Base {
+            return Some("serial8250_rx_batch_loopback_probe.lifecycle_base");
+        }
+        if rx_loopback_probe.state() != State::Ready {
+            return Some("serial8250_rx_loopback_probe.state_ready");
+        }
+        if !rx_loopback_probe.rx_runtime_enabled() {
+            return Some("serial8250_rx_loopback_probe.rx_runtime_enabled");
+        }
+        if !rx_loopback_probe.irq_cycle_closed() {
+            return Some("serial8250_rx_loopback_probe.irq_cycle_closed");
+        }
+        if plic.state() != State::Ready {
+            return Some("plic.state_ready");
+        }
+        if plic_irq_domain.state() != State::Ready {
+            return Some("plic_irq_domain.state_ready");
+        }
+        if irq_handler_registry.state() != State::Ready {
+            return Some("irq_handler_registry.state_ready");
+        }
+        if !super::ns16550a::serial8250_runtime_rx_enabled() {
+            return Some("serial8250_runtime_rx.enabled");
+        }
+        if !super::ns16550a::serial8250_runtime_rx_fifo_enabled() {
+            return Some("serial8250_runtime_rx.fifo_enabled");
+        }
+        if expected_len == 0 {
+            return Some("serial8250_rx_batch_loopback_probe.batch_nonempty");
+        }
+        if expected_len > super::ns16550a::serial8250_runtime_rx_drain_limit() {
+            return Some("serial8250_rx_batch_loopback_probe.batch_within_drain_limit");
+        }
+        if !logical_irq.is_valid() {
+            return Some("uart8250_port.logical_irq_valid");
+        }
+
+        let Some(mapping) = plic_irq_domain.mapping_for_source(source) else {
+            return Some("plic_irq_domain.uart_mapping_present");
+        };
+        if mapping.logical_irq() != logical_irq {
+            return Some("plic_irq_domain.uart_mapping_logical_irq_matches");
+        }
+        if !mapping.source_gate_open() {
+            return Some("plic_irq_domain.uart_source_gate_open");
+        }
+        if !irq_handler_registry.has_handler_for_logical_irq(logical_irq) {
+            return Some("irq_handler_registry.uart_handler_present");
+        }
+        None
+    }
+
+    fn setup_observation_diagnostic(&self) -> Option<&'static str> {
+        if !self.batch_stimulus_committed {
+            return Some("serial8250_rx_batch_loopback_probe.batch_stimulus_committed");
+        }
+        if !self.plic_claim_observed {
+            return Some("serial8250_rx_batch_loopback_probe.plic_claim_observed");
+        }
+        if !self.irq_dispatch_observed {
+            return Some("serial8250_rx_batch_loopback_probe.irq_dispatch_observed");
+        }
+        if !self.uart_handler_received_batch {
+            return Some("serial8250_rx_batch_loopback_probe.uart_handler_received_batch");
+        }
+        if !self.flip_buffer_batch_pushed {
+            return Some("serial8250_rx_batch_loopback_probe.flip_buffer_batch_pushed");
+        }
+        if !self.plic_complete_observed {
+            return Some("serial8250_rx_batch_loopback_probe.plic_complete_observed");
+        }
+        if !self.zero_claim_loop_exit_observed {
+            return Some("serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed");
+        }
+        if !self.irq_cycle_closed {
+            return Some("serial8250_rx_batch_loopback_probe.irq_cycle_closed");
+        }
+        if !self.bounded_drain_observed {
+            return Some("serial8250_rx_batch_loopback_probe.bounded_drain_observed");
+        }
+        if !self.batch_count_matched {
+            return Some("serial8250_rx_batch_loopback_probe.batch_count_matched");
+        }
+        if !self.last_byte_matched {
+            return Some("serial8250_rx_batch_loopback_probe.last_byte_matched");
+        }
+        if !self.no_overflow_observed {
+            return Some("serial8250_rx_batch_loopback_probe.no_overflow_observed");
+        }
+        None
+    }
+}
+
+fn serial8250_rx_loopback_probe_setup_diagnostic(first_failed: &'static str) -> FailureDiagnostic {
+    FailureDiagnostic::new(
+        "InitcallPhase",
+        "setup_objects.serial8250_rx_loopback_probe.setup",
+        "Serial8250RxLoopbackProbe",
+        "serial8250_rx_loopback_probe.setup",
+        first_failed,
+    )
+}
+
+fn serial8250_rx_batch_loopback_probe_setup_diagnostic(
+    first_failed: &'static str,
+) -> FailureDiagnostic {
+    FailureDiagnostic::new(
+        "InitcallPhase",
+        "setup_objects.serial8250_rx_batch_loopback_probe.setup",
+        "Serial8250RxBatchLoopbackProbe",
+        "serial8250_rx_batch_loopback_probe.setup",
+        first_failed,
+    )
+}
+
+fn serial8250_rx_loopback_wait_diagnostic(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+    baseline: UartIrqCycleSnapshot,
+    source: u32,
+    expected_byte: u8,
+) -> &'static str {
+    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+
+    if current.rx_requests <= baseline.rx_requests {
+        return "serial8250_rx_loopback_probe.wait.rx_request_observed";
+    }
+    if current.claims <= baseline.claims {
+        return "plic.claim_observed";
+    }
+    if current.plic_dispatches <= baseline.plic_dispatches {
+        return "plic.irq_domain_dispatch_observed";
+    }
+    if current.irq_dispatches <= baseline.irq_dispatches {
+        return "irq_handler_registry.dispatch_observed";
+    }
+    if current.handler_calls <= baseline.handler_calls {
+        return "serial8250_runtime_handler.observed";
+    }
+    if current.rx_handled <= baseline.rx_handled {
+        return "serial8250_runtime_handler.rx_handled";
+    }
+    if current.flip_pushes <= baseline.flip_pushes {
+        return "tty_flip_buffer.push_observed";
+    }
+    if current.flip_inserted <= baseline.flip_inserted {
+        return "tty_flip_buffer.insert_observed";
+    }
+    if current.completes <= baseline.completes {
+        return "plic.complete_observed";
+    }
+    if current.zero_claims <= baseline.zero_claims {
+        return "plic.zero_claim_observed";
+    }
+    if current.loop_exits <= baseline.loop_exits {
+        return "plic.claim_loop_exit_observed";
+    }
+    if !super::ns16550a::serial8250_runtime_rx_enabled() {
+        return "serial8250_runtime_rx.enabled";
+    }
+    if super::ns16550a::serial8250_runtime_rx_last_byte() != expected_byte {
+        return "serial8250_runtime_rx.last_byte_matched";
+    }
+    if plic.last_claimed_source() != source {
+        return "plic.last_claimed_source_uart";
+    }
+    if plic.last_completed_source() != source {
+        return "plic.last_completed_source_uart";
+    }
+    if irq_handler_registry.dispatch_calls() <= baseline.irq_dispatches {
+        return "irq_handler_registry.dispatch_observed";
+    }
+    "serial8250_rx_loopback_probe.wait_closed"
+}
+
+fn serial8250_rx_batch_loopback_wait_diagnostic(
+    plic: &Plic,
+    irq_handler_registry: &IrqHandlerRegistry,
+    baseline: UartIrqCycleSnapshot,
+    source: u32,
+    expected_len: usize,
+    expected_last: u8,
+) -> &'static str {
+    let current = uart_irq_cycle_snapshot(plic, irq_handler_registry);
+    let inserted_delta = current.flip_inserted.saturating_sub(baseline.flip_inserted);
+
+    if current.rx_requests <= baseline.rx_requests {
+        return "serial8250_rx_batch_loopback_probe.wait.rx_request_observed";
+    }
+    if current.claims <= baseline.claims {
+        return "plic.claim_observed";
+    }
+    if current.plic_dispatches <= baseline.plic_dispatches {
+        return "plic.irq_domain_dispatch_observed";
+    }
+    if current.irq_dispatches <= baseline.irq_dispatches {
+        return "irq_handler_registry.dispatch_observed";
+    }
+    if current.handler_calls <= baseline.handler_calls {
+        return "serial8250_runtime_handler.observed";
+    }
+    if current.rx_handled <= baseline.rx_handled {
+        return "serial8250_runtime_handler.rx_handled";
+    }
+    if current.flip_pushes <= baseline.flip_pushes {
+        return "tty_flip_buffer.push_observed";
+    }
+    if inserted_delta != expected_len {
+        return "tty_flip_buffer.batch_insert_count_matched";
+    }
+    if current.completes <= baseline.completes {
+        return "plic.complete_observed";
+    }
+    if current.zero_claims <= baseline.zero_claims {
+        return "plic.zero_claim_observed";
+    }
+    if current.loop_exits <= baseline.loop_exits {
+        return "plic.claim_loop_exit_observed";
+    }
+    if !super::ns16550a::serial8250_runtime_rx_enabled() {
+        return "serial8250_runtime_rx.enabled";
+    }
+    if !super::ns16550a::serial8250_runtime_rx_fifo_enabled() {
+        return "serial8250_runtime_rx.fifo_enabled";
+    }
+    if super::ns16550a::tty_flip_buffer_last_pushed_len() != expected_len {
+        return "tty_flip_buffer.last_pushed_len_matched";
+    }
+    if super::ns16550a::serial8250_runtime_rx_last_byte() != expected_last {
+        return "serial8250_runtime_rx.last_byte_matched";
+    }
+    if super::ns16550a::tty_flip_buffer_overflowed() {
+        return "tty_flip_buffer.no_overflow";
+    }
+    if plic.last_claimed_source() != source {
+        return "plic.last_claimed_source_uart";
+    }
+    if plic.last_completed_source() != source {
+        return "plic.last_completed_source_uart";
+    }
+    if irq_handler_registry.dispatch_calls() <= baseline.irq_dispatches {
+        return "irq_handler_registry.dispatch_observed";
+    }
+    "serial8250_rx_batch_loopback_probe.wait_closed"
 }
 
 impl TtyXmitFifoProbe {
