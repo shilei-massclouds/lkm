@@ -42,6 +42,14 @@ predicate virtio_blk_mmio_irq_acknowledged<T>(device: T) -> bool;
 predicate virtio_blk_irq_callback_invoked<T>(device: T) -> bool;
 predicate virtio_blk_completion_observed_by_irq<T>(device: T) -> bool;
 predicate virtio_blk_completion_observed_by_sync_poll<T>(device: T) -> bool;
+predicate virtio_blk_live_read_submitted_checkpoint<T>(device: T) -> bool;
+predicate virtio_blk_live_read_completed_checkpoint<T>(device: T) -> bool;
+predicate virtio_blk_live_read_failed_checkpoint_defined<T>(device: T) -> bool;
+predicate block_io_irq_completion_begin_checkpoint<T>(device: T) -> bool;
+predicate block_io_irq_completion_end_checkpoint<T>(device: T) -> bool;
+predicate block_io_irq_completion_failed_checkpoint_defined<T>(device: T) -> bool;
+predicate block_io_task_poll_completion_observed_checkpoint<T>(device: T) -> bool;
+predicate block_io_completion_source_contract_ready<T>(device: T) -> bool;
 predicate virtio_blk_complete_gets_used_buffer<T, Q>(device: T, queue: Q) -> bool;
 predicate virtio_blk_complete_status_ok<T>(device: T) -> bool;
 predicate virtio_blk_complete_data_nonzero<T>(device: T) -> bool;
@@ -161,6 +169,9 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_device_queue_setup_done(self);
                     virtio_blk_device_driver_ok(self);
                     virtio_blk_device_ready(self);
+                    virtio_blk_live_read_failed_checkpoint_defined(self);
+                    block_io_irq_completion_failed_checkpoint_defined(self);
+                    block_io_completion_source_contract_ready(self);
                 }
             }
         }
@@ -180,6 +191,9 @@ object VirtioBlkDevice: DeviceObject {
             virtio_blk_filesystem_parse_deferred(self);
             virtio_blk_multi_queue_deferred(self);
             virtio_blk_reset_remove_deferred(self);
+            virtio_blk_live_read_failed_checkpoint_defined(self);
+            block_io_irq_completion_failed_checkpoint_defined(self);
+            block_io_completion_source_contract_ready(self);
         }
 
         processes {
@@ -204,6 +218,7 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_read_data_buffer_prepared(self);
                     virtio_blk_read_status_buffer_prepared(self);
                     virtio_blk_read_request_submitted(self, VirtQueue);
+                    virtio_blk_live_read_submitted_checkpoint(self);
                     virtio_blk_read_request_notifies_mmio(self, VirtQueue);
                     virtio_blk_read_request_pending(self);
                 }
@@ -219,6 +234,7 @@ object VirtioBlkDevice: DeviceObject {
                     VirtQueue.Action::GetBuf;
                 }
                 ensures {
+                    block_io_irq_completion_begin_checkpoint(self);
                     virtio_blk_mmio_irq_acknowledged(self);
                     virtio_blk_irq_callback_invoked(self);
                     virtio_blk_completion_observed_by_irq(self);
@@ -226,6 +242,7 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_complete_status_ok(self);
                     virtio_blk_completion_count_incremented(self);
                     virtio_blk_read_request_done(self);
+                    block_io_irq_completion_end_checkpoint(self);
                 }
             }
 
@@ -240,6 +257,7 @@ object VirtioBlkDevice: DeviceObject {
                 }
                 ensures {
                     virtio_blk_completion_observed_by_sync_poll(self);
+                    block_io_task_poll_completion_observed_checkpoint(self);
                     virtio_blk_complete_gets_used_buffer(self, VirtQueue);
                     virtio_blk_complete_status_ok(self);
                     virtio_blk_completion_count_incremented(self);
@@ -263,6 +281,7 @@ object VirtioBlkDevice: DeviceObject {
                     virtio_blk_serves_block_read(self, BlockDevice);
                     virtio_blk_read_request_done(self);
                     virtio_blk_complete_status_ok(self);
+                    virtio_blk_live_read_completed_checkpoint(self);
                     virtio_blk_block_read_copies_to_caller(self, BlockDevice);
                 }
             }

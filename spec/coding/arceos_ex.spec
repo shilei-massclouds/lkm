@@ -237,6 +237,12 @@ predicate arceos_ex_must_disk_build_default_not_rebuild_existing_image() -> bool
 predicate arceos_ex_must_ext2_lookup_support_path_components_from_directories() -> bool;
 predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
 predicate arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read() -> bool;
+predicate arceos_ex_must_long_term_checkpoints_follow_model_coding_contracts() -> bool;
+predicate arceos_ex_must_payload_vfs_ext2_read_emit_observation_checkpoints() -> bool;
+predicate arceos_ex_must_block_io_task_wait_checkpoints_cover_submit_wait_and_timeout() -> bool;
+predicate arceos_ex_must_block_io_irq_completion_checkpoints_cover_begin_end_failure() -> bool;
+predicate arceos_ex_must_block_io_completion_source_distinguish_irq_and_task_poll() -> bool;
+predicate arceos_ex_must_read_path_error_classification_checkpoint_be_structured() -> bool;
 predicate arceos_ex_must_rootfs_move_ext2_mount_and_chroot_dot_as_separate_actions() -> bool;
 predicate arceos_ex_must_rootfs_classify_prepare_namespace_paths() -> bool;
 predicate arceos_ex_must_ext2_defer_page_cache_indirect_and_writes() -> bool;
@@ -2293,6 +2299,24 @@ type ArceosExBlockIoCodingMust {
          * symlinks, permissions, fd tables and page cache remain deferred.
          */
         arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read();
+
+        /*
+         * Long-term observation checkpoints:
+         *
+         * Checkpoints used by nightly/stress longitudinal comparison and
+         * Linux-like cross comparison must be specified in model/coding
+         * before implementation. The first batch covers the user payload
+         * image read, VFS path read, ext2 lookup/read, block task-side
+         * submit/wait, and virtio-blk completion source. Failure and timeout
+         * observations must use structured classes instead of temporary log
+         * text so repeated event sequences can be grouped and compared.
+         */
+        arceos_ex_must_long_term_checkpoints_follow_model_coding_contracts();
+        arceos_ex_must_payload_vfs_ext2_read_emit_observation_checkpoints();
+        arceos_ex_must_block_io_task_wait_checkpoints_cover_submit_wait_and_timeout();
+        arceos_ex_must_block_io_irq_completion_checkpoints_cover_begin_end_failure();
+        arceos_ex_must_block_io_completion_source_distinguish_irq_and_task_poll();
+        arceos_ex_must_read_path_error_classification_checkpoint_be_structured();
 
         /*
          * Deferred ext2 scope:

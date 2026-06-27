@@ -3560,6 +3560,20 @@ suspend/resume 和真实 edge runtime 都作为明确 deferred 项保留。若�
 
 trace 增强应由上述差分结果驱动。如果当前 checkpoint/trace/EventStream 已能定位分叉点，则先用现有机制闭环；如果只能看到外部失败现象而无法解释内部差异，再补充更细粒度的观测点，例如 virtio-blk completion、VFS/ext2 lookup/read、initcall ready predicate、CPU/task 归属、IRQ/task context 或事件序号。Linux-like trace 是内部可见性不足时的补强方向，不是 `stress` 测试落地前的前置条件。
 
+### 内部可见性与 checkpoint 规格化
+
+长期 checkpoint 不应由实现侧为了某个缺陷临时散落产生，而应从规格出发。新增点位应先在 `spec/model` 中定义稳定事件名、触发语义、所属阶段/对象和可选字段，再在 coding 规格中定义实现义务，最后由 `impl/arceos_ex` 生成对应 trace/checkpoint。`docs/DEFECTS.md` 只记录问题现象、证据、分析进展和下一步定位需求；checkpoint 的长期原则、分层方式和候选边界应进入 charter，并在落地时进一步细化到 model/coding 规格。
+
+checkpoint 的选择标准是长期内部可见性，而不是一次性 debug 输出。合格点位应对应稳定系统语义边界，能够用于 stress/nightly 的纵向差分，能在 Linux-like 对照中找到概念位置，开销和时序扰动可控，并且不只服务单个缺陷。若某个事件暂时只能携带少量字段，应优先保持事件边界稳定，再逐步补充结构化字段；不得通过不断扩张事件名来编码大量临时状态组合。
+
+对于当前用户态 payload 读取和 rootfs/ext2/block 间歇性问题，首轮观察契约应从粗粒度关键边界开始。文件系统层主要运行在 `KernelInitTask` 任务上下文中，它不直接等同于中断并发点；它的价值在于标明哪个 VFS/ext2 语义操作触发了下层 block I/O，以及失败属于 path walk、lookup、inode/file read、buffer copy 还是错误传播。第一批文件系统语义边界可以包括 `PayloadImageReadStart/Complete/Failed`、`VfsPathReadStart/Resolved/Failed`、`Ext2LookupStart/Found/Failed`、`Ext2FileReadStart/BlockRequest/Complete/Failed`。这些边界应能与下层 block request 关联；字段可逐步包括 path class、component、inode、block、sector、devt、read length 和错误类别。
+
+更关键的并发观察点在 block I/O 的任务流与中断流同步。当前相关并发主要发生在 `KernelInitTask` 发出块设备读请求、进入等待或轮询 completion 的区间，以及 `InterruptStream` 处理 virtio-blk IRQ/used ring 并发布 completion 的区间。第一层 checkpoint 应覆盖 `BlockIoTaskRequestSubmitted`、`BlockIoTaskWaitBegin`、`BlockIoTaskWaitEnd`、`BlockIoTaskWaitTimeout`、`BlockIoIrqCompletionBegin`、`BlockIoIrqCompletionEnd` 和 `BlockIoIrqCompletionFailed`。它们用于判断请求是否发布、任务是否进入等待、中断流是否处理 completion、completion 是否被任务侧观察，以及失败是否发生在任务等待前、IRQ 处理前、completion 发布后但任务不可见，或 completion 已可见但上层仍失败。
+
+第二层 checkpoint 可在第一层无法解释差异时展开到 virtqueue/block 细节，例如 descriptor 发布、queue notify、used ring observed、status read、pending cleared、task-side poll observed 等。第三层再考虑 PLIC claim/complete、MMIO interrupt status 和 memory ordering 边界。分层原则是先用较粗的稳定同步边界定位方向，再按差分结果补充细粒度观测，避免一次性铺开大量会扰动时序的 trace。
+
+model/coding 规格应允许同一 block request 的 completion 来源不同：可能来自 IRQ handler，也可能由任务侧 polling 观察到 used buffer。若事件字段已经支持结构化记录，可使用 `completion_source = irq | task_poll`；若暂时只能表达事件名，则至少应区分 `BlockIoIrqCompletionEnd` 与 `BlockIoTaskPollCompletionObserved`。这些点位应按 read/write block I/O 的通用契约设计，当前实现可以先覆盖 read，但命名和规格不得绑定 DF-0001 或 `/sbin/init`。
+
 ## 兼容性策略
 
 待补充。

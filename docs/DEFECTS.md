@@ -24,6 +24,8 @@
 - 2026-06-25 在提交 `62ce523 use cpu owned runqueue refs` 后重新执行完整基线验证：`make build APP=smoke` 通过，`make test` summary 为 `overall total=77 pass=77 fail=0`，`make verify` 为 `0 obligation`，普通 `make run` 的 smoke 为 `53/53`。
 - 同日连续执行普通 `make run APP=user-boot` 30 次，其中 24 次成功输出 `user exit status=0`，5 次输出 `read user ELF failed`，1 次输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。粗略发生率为：`read user ELF failed` 约 16.7%，任意 user-boot 失败约 20%。本轮日志保存在 `/tmp/lkm-userboot-runs/run-01.log` 到 `/tmp/lkm-userboot-runs/run-30.log`，失败样本为 `run-11.log`、`run-12.log`、`run-13.log`、`run-14.log`、`run-17.log` 和 `run-18.log`。
 - 同日推进 `SchedInitPhase` trimmed/no-op 边界时，完整验收中的普通 `make run APP=user-boot` 连续两次输出 `read user ELF failed`，第三次在同一构建和同一 disk 下成功输出 `user hello` / `user exit status=0`。同轮 `make verify`、`make verify REPORT=graph`、`make -C impl/arceos_ex build APP=smoke`、`make -C impl/arceos_ex run APP=smoke` 和普通 `make run` 均通过。
+- 2026-06-27 使用 `impl/arceos_ex/tests/stress/runner.py` 针对 DF-0001 执行压力测试，先运行 `--runs 10 --timeout 180`，再追加 `--runs 20 --timeout 180`，总计 30 次。第一批结果为成功 6 次、DF-0001 `read user ELF failed` 3 次、DF-0002 initcall ready failure 1 次；第二批结果为成功 13 次、DF-0001 `read user ELF failed` 6 次、rootfs phase unknown failure 1 次。两批合计成功 19 次、DF-0001 失败 9 次、非 DF-0001 失败 2 次。报告分别保存在 `impl/arceos_ex/tests/stress/out/20260626T162257Z-df-0001-user-boot/report.md` 和 `impl/arceos_ex/tests/stress/out/20260626T162352Z-df-0001-user-boot/report.md`。
+- 同轮压力测试中，DF-0001 失败全部归到同一个事件序列 `deff92e2396ec2f6`，成功全部归到同一个事件序列 `bd43ae22bfcc7354`。当前事件视角下二者共同前缀长度为 0：失败侧第一个可见事件是 `symptom:ReadUserElfFailed`，成功侧第一个可见事件是 `user_output:UserHello`。代表日志显示成功和 DF-0001 失败在 `late_smoke_initcall` 之前基本同形，差异出现在 `arceos_ex user boot start` 之后。
 
 当前判断：
 
@@ -32,10 +34,11 @@
 - 需要重点保留一种并发/同步假设：该问题可能来自中断上下文与任务上下文之间的协作缺口。virtio-blk completion、virtqueue used ring 更新、IRQ handler、VFS/ext2 同步读路径之间都存在跨上下文状态传递；这类问题通常具有随机性，并且容易被 probe 输出、checkpoint handler 或额外日志改变时序后掩盖。
 - 当前 Linux 对照补缺口尚未完成全部锁和并发原语检查，因此不能只按轮询参数或 disk 生成问题处理。后续推进到 ext2/VFS、virtio-blk、virtio IRQ、block layer 或相关 guard/lock 规格阶段时，必须回顾本缺陷，看新增的并发控制规格和实现是否解释或消除该现象。
 - 2026-06-25 结论：本条暂时只作为测试现象积累，不在当前轮展开深入追踪；待并发机制、锁/guard、IRQ/task context 与内存顺序等回顾检查完善后，再把这些样本作为后续定位参考。
+- 2026-06-27 压力测试结论：新 stress 框架已经能够稳定复现和归类 DF-0001，但当前普通日志/checkpoint 只能看到折叠后的外部症状，尚不足以定位第一个内部差异点。`read_user_path_image()` 将 `VfsCore::read_path()` 的任意错误统一折叠为 `read user ELF failed`，而实际调用链还会经过 `VfsCore::open_path/walk_path`、`Ext2FileSystem::lookup_child/read_file_inode`、`bio::sb_bread_by_devt_block`、`BlockDeviceRegistry::read_device` 和 `VirtioBlkLiveProvider::read_live_block`。偶发的 rootfs phase unknown failure 也指向相邻的 rootfs/ext2/block 读链路，说明下一步应优先提高这条长期关键路径的内部可见性，而不是只给 `user-boot` 临时打点。
 
 下一步定位建议：
 
-- 在不依赖 probe 时序的前提下，让 `read_user_path_image()` 或其下层 VFS/block provider 暴露具体错误类别，区分 lookup、ext2 block read、provider unavailable、empty read 和 completion timeout。
+- 按 `spec/charter/main.md` 中“内部可见性与 checkpoint 规格化”的分工，先把 VFS/ext2/block/virtio 读链路的长期观察点写入 `spec/model` 和 coding 规格，再由实现生成结构化 trace/checkpoint。DF-0001 需要的首轮观察重点是：`read_user_path_image()` 或其下层 VFS/block provider 的错误分类，以及 KernelInitTask 发起 block I/O、进入等待、观察 completion 继续执行，与 InterruptStream 开始/结束处理 completion 之间的同步关系。
 - 为 virtio-blk live read 增加失败分支诊断或独立 debug counter，重点观察 request submitted、notify、used idx、pending 状态和 completion count。
 - 复核 `wait_for_completion_after()` / `wait_for_no_pending_read()` 的轮询边界，确认是否存在过早超时或 stale pending 状态。
 - 在补齐 ext2/VFS 与 virtio-blk/IRQ 相关锁、guard、memory ordering、IRQ/task context 约束时，把本缺陷作为固定回归问题重新验证。

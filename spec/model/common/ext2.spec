@@ -86,6 +86,9 @@ predicate ext2_root_lookup_not_found_is_nonfatal<T>(fs: T) -> bool;
 predicate ext2_root_lookup_indirect_blocks_deferred<T>(fs: T) -> bool;
 predicate ext2_root_lookup_dirent_valid<T, D>(fs: T, dirent: D) -> bool;
 predicate ext2_root_lookup_returns_inode<T, D, I>(fs: T, dirent: D, inode: I) -> bool;
+predicate ext2_lookup_start_checkpoint<T>(fs: T) -> bool;
+predicate ext2_lookup_found_checkpoint<T, D>(fs: T, dirent: D) -> bool;
+predicate ext2_lookup_failed_checkpoint_defined<T>(fs: T) -> bool;
 
 predicate ext2_file_read_uses_direct_block<T, R, I>(fs: T, read: R, file: I) -> bool;
 predicate ext2_file_read_scans_direct_blocks<T, R, I>(fs: T, read: R, file: I) -> bool;
@@ -98,6 +101,11 @@ predicate ext2_file_read_len_matches_inode_size<T, R, I>(fs: T, read: R, file: I
 predicate ext2_file_read_short_buffer_rejected<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_indirect_blocks_deferred<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_entered_from_vfs<T, R>(fs: T, read: R) -> bool;
+predicate ext2_file_read_start_checkpoint<T, R>(fs: T, read: R) -> bool;
+predicate ext2_file_read_block_request_checkpoint<T, R>(fs: T, read: R) -> bool;
+predicate ext2_file_read_complete_checkpoint<T, R>(fs: T, read: R) -> bool;
+predicate ext2_file_read_failed_checkpoint_defined<T>(fs: T) -> bool;
+predicate ext2_read_error_classification_contract_ready<T>(fs: T) -> bool;
 
 object Ext2Driver: ResourceObject {
     initial_state: State::Base;
@@ -230,6 +238,9 @@ object Ext2FileSystem: ResourceObject {
                     ext2_filesystem_ready(self);
                     ext2_filesystem_page_cache_deferred(self);
                     ext2_filesystem_write_paths_deferred(self);
+                    ext2_lookup_failed_checkpoint_defined(self);
+                    ext2_file_read_failed_checkpoint_defined(self);
+                    ext2_read_error_classification_contract_ready(self);
                 }
             }
         }
@@ -250,6 +261,9 @@ object Ext2FileSystem: ResourceObject {
             ext2_filesystem_ready(self);
             ext2_filesystem_page_cache_deferred(self);
             ext2_filesystem_write_paths_deferred(self);
+            ext2_lookup_failed_checkpoint_defined(self);
+            ext2_file_read_failed_checkpoint_defined(self);
+            ext2_read_error_classification_contract_ready(self);
         }
 
         transitions {
@@ -297,6 +311,7 @@ object Ext2FileSystem: ResourceObject {
                     BufferHead.Action::SbBreadByMajorMinor;
                 }
                 ensures {
+                    ext2_lookup_start_checkpoint(self);
                     ext2_root_lookup_name_bound(self, Ext2DirEntryRef::RootLookup);
                     ext2_root_lookup_reads_root_dir(self, Ext2InodeRef::Root);
                     ext2_root_lookup_scans_direct_blocks(self, Ext2InodeRef::Root);
@@ -314,6 +329,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_inode_is_regular_file(self, Ext2InodeRef::LookupFile);
                     ext2_inode_indirect_blocks_deferred(self, Ext2InodeRef::LookupFile);
                     ext2_root_lookup_returns_inode(self, Ext2DirEntryRef::RootLookup, Ext2InodeRef::LookupFile);
+                    ext2_lookup_found_checkpoint(self, Ext2DirEntryRef::RootLookup);
                 }
             }
 
@@ -328,6 +344,8 @@ object Ext2FileSystem: ResourceObject {
                     BufferHead.Action::SbBreadByMajorMinor;
                 }
                 ensures {
+                    ext2_file_read_start_checkpoint(self, Ext2FileReadRef::LookupFile);
+                    ext2_file_read_block_request_checkpoint(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_uses_direct_block(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_scans_direct_blocks(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_multi_direct_block_supported(self, Ext2FileReadRef::LookupFile);
@@ -336,6 +354,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_file_read_copies_to_caller(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_len_matches_inode_size(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_indirect_blocks_deferred(self, Ext2FileReadRef::LookupFile);
+                    ext2_file_read_complete_checkpoint(self, Ext2FileReadRef::LookupFile);
                 }
             }
 
@@ -351,7 +370,9 @@ object Ext2FileSystem: ResourceObject {
                     BufferHead.Action::SbBreadByMajorMinor;
                 }
                 ensures {
+                    ext2_file_read_start_checkpoint(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_entered_from_vfs(self, Ext2FileReadRef::LookupFile);
+                    ext2_file_read_block_request_checkpoint(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_uses_direct_block(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_scans_direct_blocks(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_multi_direct_block_supported(self, Ext2FileReadRef::LookupFile);
@@ -360,6 +381,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_file_read_copies_to_caller(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_len_matches_inode_size(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_indirect_blocks_deferred(self, Ext2FileReadRef::LookupFile);
+                    ext2_file_read_complete_checkpoint(self, Ext2FileReadRef::LookupFile);
                 }
             }
 

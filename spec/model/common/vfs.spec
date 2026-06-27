@@ -62,6 +62,10 @@ predicate vfs_path_walk_resolves<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_path_walk_crosses_mount<T, M>(core: T, mount: M) -> bool;
 predicate vfs_open_path_allocates_file<T, F>(core: T, file: F) -> bool;
 predicate vfs_read_path_returns_data<T, F>(core: T, file: F) -> bool;
+predicate vfs_path_read_start_checkpoint<T, P>(core: T, path: P) -> bool;
+predicate vfs_path_read_resolved_checkpoint<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_path_read_failed_checkpoint_defined<T>(core: T) -> bool;
+predicate vfs_path_read_error_classification_contract_ready<T>(core: T) -> bool;
 
 predicate fs_struct_allocated<T>(fs: T) -> bool;
 predicate fs_struct_initial_root_bound<T, D>(fs: T, dentry: D) -> bool;
@@ -174,6 +178,8 @@ object VfsCore: ResourceObject {
                     vfs_core_page_cache_deferred(VfsCore);
                     vfs_core_permissions_deferred(VfsCore);
                     vfs_core_mount_namespace_deferred(VfsCore);
+                    vfs_path_read_failed_checkpoint_defined(VfsCore);
+                    vfs_path_read_error_classification_contract_ready(VfsCore);
                 }
             }
         }
@@ -188,6 +194,8 @@ object VfsCore: ResourceObject {
             vfs_core_inode_table_ready(VfsCore);
             vfs_core_file_table_ready(VfsCore);
             vfs_absolute_path_walk_supported(VfsCore);
+            vfs_path_read_failed_checkpoint_defined(VfsCore);
+            vfs_path_read_error_classification_contract_ready(VfsCore);
         }
 
         actions {
@@ -579,7 +587,9 @@ object VfsCore: ResourceObject {
                     VfsCore.Action::ReadExt2File;
                 }
                 ensures {
+                    vfs_path_read_start_checkpoint(VfsCore, path);
                     vfs_read_path_returns_data(VfsCore, File);
+                    vfs_path_read_resolved_checkpoint(VfsCore, Dentry);
                 }
             }
 

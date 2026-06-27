@@ -639,6 +639,18 @@ sector 的映射。`make disk` 默认不应再强制 `mkfs.ext2 -b 1024`；如�
 必须保持 deferred。ext2 smoke 必须通过 VFS path read 读取稳定测试文件，同时仍不得通过 VirtioBlkDevice 私有入口绕过
 `sb_bread()`。
 
+第一批长期观察 checkpoint 必须来自 model/coding 契约，而不是针对单个缺陷临时打印。Payload 读取用户态镜像时必须记录
+`PayloadImageReadStart` / `PayloadImageReadComplete`，并保留结构化的 `PayloadImageReadFailed` 分类；VFS path
+read 必须记录 `VfsPathReadStart` / `VfsPathReadResolved`，并保留 `VfsPathReadFailed` 分类；Ext2 必须记录
+`Ext2LookupStart` / `Ext2LookupFound` / `Ext2LookupFailed` 以及
+`Ext2FileReadStart` / `Ext2FileReadBlockRequest` / `Ext2FileReadComplete` / `Ext2FileReadFailed`。
+块 I/O 任务侧必须记录 `BlockIoTaskRequestSubmitted`、`BlockIoTaskWaitBegin`、`BlockIoTaskWaitEnd` 和
+`BlockIoTaskWaitTimeout`；virtio-blk 完成侧必须记录 `VirtioBlkLiveReadSubmitted`、`VirtioBlkLiveReadCompleted`、
+`VirtioBlkLiveReadFailed`、`BlockIoIrqCompletionBegin`、`BlockIoIrqCompletionEnd`、
+`BlockIoIrqCompletionFailed`，并在同步轮询完成时记录 `BlockIoTaskPollCompletionObserved`。这些事件需要携带足以关联同一次
+block read 的请求身份，并能区分 completion source 是 IRQ 还是 task-side poll，供 nightly/stress 纵向对比和后续
+Linux-like 横向对比使用。
+
 `devfs` 的首轮实现属于 `InitcallPhase` 收敛边界：它必须在 `VfsCore` 初始 rootfs mount 已存在、`HwRngCore`
 和 `BlockDeviceRegistry` 已 Ready、且 virtio-rng/virtio-blk live driver 已完成注册之后挂载 `/dev`，再创建
 当前 hwrng 和默认 block device 对应的设备节点。smoke 验证只能观察 `/dev` 节点、hwrng current 绑定和 block

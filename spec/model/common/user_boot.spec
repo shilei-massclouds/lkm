@@ -39,6 +39,10 @@ predicate user_boot_payload_try_candidate_read_init<T, V>(payload: T, vfs: V) ->
 predicate user_boot_payload_try_candidate_elf_ready<T, E>(payload: T, elf: E) -> bool;
 predicate user_boot_payload_enters_user_mode<T>(payload: T) -> bool;
 predicate user_boot_payload_no_return_handoff<T>(payload: T) -> bool;
+predicate payload_image_read_start_checkpoint<T, P>(payload: T, path: P) -> bool;
+predicate payload_image_read_complete_checkpoint<T, V>(payload: T, vfs: V) -> bool;
+predicate payload_image_read_failed_checkpoint_defined<T>(payload: T) -> bool;
+predicate payload_image_read_error_classification_contract_ready<T>(payload: T) -> bool;
 
 predicate payload_exec_sync_boundaries_ready<T>(boundaries: T) -> bool;
 predicate payload_kernel_execve_linux_window_bound<T>(boundaries: T) -> bool;
@@ -1116,6 +1120,8 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_partition_objects_deferred(self);
                     user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
                     user_boot_payload_try_candidate_bound(self);
+                    payload_image_read_failed_checkpoint_defined(self);
+                    payload_image_read_error_classification_contract_ready(self);
                 }
             }
         }
@@ -1131,6 +1137,8 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_partition_objects_deferred(self);
             user_boot_payload_driven_by_kernel_init_task(self, KernelInitTask);
             user_boot_payload_try_candidate_bound(self);
+            payload_image_read_failed_checkpoint_defined(self);
+            payload_image_read_error_classification_contract_ready(self);
             PayloadExecSyncBoundaries.state == State::Ready;
         }
 
@@ -1143,7 +1151,9 @@ object UserBootPayload: ResourceObject {
                 }
 
                 ensures {
+                    payload_image_read_start_checkpoint(self, path);
                     user_boot_payload_try_candidate_read_init(self, VfsCore);
+                    payload_image_read_complete_checkpoint(self, VfsCore);
                     user_boot_payload_try_candidate_elf_ready(self, ElfObject);
                     user_boot_payload_selected_path_bound(self);
                 }

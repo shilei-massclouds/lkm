@@ -38,6 +38,12 @@ predicate block_device_read_completion_observed<T>(device: T) -> bool;
 predicate block_device_read_copies_to_caller<T>(device: T) -> bool;
 predicate block_device_read_returns_nonzero<T>(device: T) -> bool;
 predicate block_device_read_count_incremented<T>(device: T) -> bool;
+predicate block_io_task_request_submitted_checkpoint<T>(device: T) -> bool;
+predicate block_io_task_wait_begin_checkpoint<T>(device: T) -> bool;
+predicate block_io_task_wait_end_checkpoint<T>(device: T) -> bool;
+predicate block_io_task_wait_timeout_checkpoint_defined<T>(device: T) -> bool;
+predicate block_device_read_failed_checkpoint_defined<T>(device: T) -> bool;
+predicate block_io_request_identity_contract_ready<T>(device: T) -> bool;
 
 predicate block_core_register_blkdev_called<T>(core: T) -> bool;
 predicate block_core_register_blkdev_returned_major<T>(core: T) -> bool;
@@ -176,6 +182,9 @@ object BlockDevice: DeviceObject {
                     block_device_provider_is_virtio_blk(BlockDevice, VirtioBlkDevice);
                     block_device_read_callback_bound(BlockDevice);
                     block_device_capacity_bound(BlockDevice);
+                    block_io_task_wait_timeout_checkpoint_defined(BlockDevice);
+                    block_device_read_failed_checkpoint_defined(BlockDevice);
+                    block_io_request_identity_contract_ready(BlockDevice);
                 }
             }
         }
@@ -188,6 +197,9 @@ object BlockDevice: DeviceObject {
             block_device_provider_is_virtio_blk(BlockDevice, VirtioBlkDevice);
             block_device_read_callback_bound(BlockDevice);
             block_device_capacity_bound(BlockDevice);
+            block_io_task_wait_timeout_checkpoint_defined(BlockDevice);
+            block_device_read_failed_checkpoint_defined(BlockDevice);
+            block_io_request_identity_contract_ready(BlockDevice);
         }
 
         transitions {
@@ -249,8 +261,11 @@ object BlockDevice: DeviceObject {
                     VirtioBlkDevice.Action::ServeBlockRead;
                 }
                 ensures {
+                    block_io_task_request_submitted_checkpoint(BlockDevice);
+                    block_io_task_wait_begin_checkpoint(BlockDevice);
                     block_device_read_submitted(BlockDevice);
                     block_device_read_completion_observed(BlockDevice);
+                    block_io_task_wait_end_checkpoint(BlockDevice);
                     block_device_read_copies_to_caller(BlockDevice);
                     block_device_read_count_incremented(BlockDevice);
                 }
