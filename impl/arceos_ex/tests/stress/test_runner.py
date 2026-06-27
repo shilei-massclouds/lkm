@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import tempfile
 from pathlib import Path
 import unittest
@@ -201,6 +202,54 @@ class StressRunnerTests(unittest.TestCase):
             self.assertTrue((root / "run-0001" / "stdout.first-seen.log").exists())
             self.assertFalse((root / "run-0002" / "events.first-seen.jsonl").exists())
             self.assertFalse((root / "run-0002" / "stdout.first-seen.log").exists())
+
+    def test_summary_reports_total_and_average_time(self) -> None:
+        summary = runner._build_summary(
+            "case",
+            2,
+            [
+                {
+                    "result": "success",
+                    "class_id": "ok",
+                    "duration_seconds": 1.2,
+                },
+                {
+                    "result": "failure",
+                    "class_id": "bad",
+                    "duration_seconds": 1.8,
+                },
+            ],
+            {},
+            dry_run=False,
+            started=datetime(2026, 6, 27, 1, 2, 3, tzinfo=timezone.utc),
+            ended=datetime(2026, 6, 27, 1, 2, 6, tzinfo=timezone.utc),
+            duration_seconds=3.01,
+        )
+
+        self.assertEqual(summary["started_at"], "2026-06-27T01:02:03+00:00")
+        self.assertEqual(summary["ended_at"], "2026-06-27T01:02:06+00:00")
+        self.assertEqual(summary["total_seconds"], 3.01)
+        self.assertEqual(summary["average_run_seconds"], 1.5)
+        self.assertEqual(summary["completed_runs"], 2)
+
+    def test_summary_average_time_is_none_without_runs(self) -> None:
+        summary = runner._build_summary(
+            "case",
+            0,
+            [],
+            {},
+            dry_run=True,
+            started=datetime(2026, 6, 27, 1, 2, 3, tzinfo=timezone.utc),
+            ended=datetime(2026, 6, 27, 1, 2, 3, tzinfo=timezone.utc),
+            duration_seconds=0.0,
+        )
+
+        self.assertIsNone(summary["average_run_seconds"])
+        self.assertEqual(summary["total_seconds"], 0.0)
+
+    def test_report_scalar_formats_none_as_null(self) -> None:
+        self.assertEqual(runner._report_scalar(None), "null")
+        self.assertEqual(runner._report_scalar(1.25), "1.25")
 
 
 if __name__ == "__main__":

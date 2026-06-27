@@ -77,9 +77,22 @@ def main(argv: list[str] | None = None) -> int:
 
     sequences: dict[tuple[str, str, str], dict[str, Any]] = {}
     run_results: list[dict[str, Any]] = []
+    suite_started = datetime.now(timezone.utc)
+    suite_start_monotonic = time.monotonic()
 
     if runs == 0 or args.dry_run:
-        summary = _build_summary(case_name, runs, run_results, sequences, dry_run=True)
+        suite_ended = datetime.now(timezone.utc)
+        suite_duration = time.monotonic() - suite_start_monotonic
+        summary = _build_summary(
+            case_name,
+            runs,
+            run_results,
+            sequences,
+            dry_run=True,
+            started=suite_started,
+            ended=suite_ended,
+            duration_seconds=suite_duration,
+        )
         _write_json(output_dir / "summary.json", summary)
         _write_report(output_dir / "report.md", case_name, summary)
         print(f"stress dry-run wrote {output_dir}")
@@ -109,7 +122,18 @@ def main(argv: list[str] | None = None) -> int:
         run_results.append(_persisted_run_result(run_result))
 
     _write_sequences(output_dir, sequences)
-    summary = _build_summary(case_name, runs, run_results, sequences, dry_run=False)
+    suite_ended = datetime.now(timezone.utc)
+    suite_duration = time.monotonic() - suite_start_monotonic
+    summary = _build_summary(
+        case_name,
+        runs,
+        run_results,
+        sequences,
+        dry_run=False,
+        started=suite_started,
+        ended=suite_ended,
+        duration_seconds=suite_duration,
+    )
     _write_json(output_dir / "summary.json", summary)
     _write_report(output_dir / "report.md", case_name, summary)
     print(f"stress report: {output_dir / 'report.md'}")
@@ -559,18 +583,31 @@ def _build_summary(
     sequences: dict[tuple[str, str, str], dict[str, Any]],
     *,
     dry_run: bool,
+    started: datetime,
+    ended: datetime,
+    duration_seconds: float,
 ) -> dict[str, Any]:
     totals = Counter(str(run["result"]) for run in run_results)
     class_counts = Counter((str(run["result"]), str(run["class_id"])) for run in run_results)
     sequence_counts = Counter((result, class_id) for result, class_id, _ in sequences)
     class_features = _class_features(sequences)
     comparisons = _failure_success_comparisons(sequences)
+    completed_runs = len(run_results)
+    average_run_seconds = (
+        round(sum(float(run["duration_seconds"]) for run in run_results) / completed_runs, 3)
+        if completed_runs
+        else None
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "case": case_name,
         "dry_run": dry_run,
         "requested_runs": requested_runs,
-        "completed_runs": len(run_results),
+        "completed_runs": completed_runs,
+        "started_at": started.isoformat(),
+        "ended_at": ended.isoformat(),
+        "total_seconds": round(duration_seconds, 3),
+        "average_run_seconds": average_run_seconds,
         "totals": {
             "success": totals.get("success", 0),
             "failure": totals.get("failure", 0),
@@ -670,6 +707,10 @@ def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
         f"- dry_run: {summary['dry_run']}",
         f"- requested_runs: {summary['requested_runs']}",
         f"- completed_runs: {summary['completed_runs']}",
+        f"- started_at: {summary['started_at']}",
+        f"- ended_at: {summary['ended_at']}",
+        f"- total_seconds: {summary['total_seconds']}",
+        f"- average_run_seconds: {_report_scalar(summary['average_run_seconds'])}",
         f"- success: {summary['totals']['success']}",
         f"- failure: {summary['totals']['failure']}",
         "",
@@ -702,6 +743,12 @@ def _write_report(path: Path, case_name: str, summary: dict[str, Any]) -> None:
                 f"success={item['success_event_at_divergence']}."
             )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _report_scalar(value: object) -> str:
+    if value is None:
+        return "null"
+    return str(value)
 
 
 def _manifest(

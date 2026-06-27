@@ -3554,6 +3554,8 @@ suspend/resume 和真实 edge runtime 都作为明确 deferred 项保留。若�
 
 `stress` 测试的基本输入是一个可重复执行的 case。每个 case 应至少描述执行命令、重复次数、单轮超时、`APP` / `PROBE` 等参数、输出目录和失败分类规则。针对 `docs/DEFECTS.md` 中记录的间歇性问题，case 必须保留普通执行路径；例如 DF-0001 的 `make run APP=user-boot` 不能只用 `PROBE=user-boot` 或其它改变时序的 probe 路径替代。
 
+每次 stress 执行必须记录整体时间统计，用于比较不同观察模式是否显著扰动复现时序。runner 应在 case 开始和结束时记录 UTC wall-clock 时间，并使用单调时钟计算总耗时；summary/report 至少应包含开始时间、结束时间、总耗时、已完成 run 数和按已完成 run 计算的平均单轮耗时。每个独立 run 仍应记录自身开始时间、结束时间和耗时；整体平均值应从这些 run 记录计算，避免只依赖外部日志或人工估算。比较 `stress-mem` 与普通路径时，应优先在构建已就绪的条件下使用同等 run 数、同一 case 和同一超时配置，避免把首次编译或外部准备工作误判为观察模式本身的开销。
+
 压力复现路径的默认观察方式应优先使用 guest 内存输出序列，而不是持续向 console 或文件输出事件。`stress-mem` 是 console/stdout sink 边界上的统一截获器：启用后，所有原本将写向 `printk` console、SBI console、UART/QEMU stdout 的字节流都应先进入同一个 guest 静态 recorder buffer；截获成功后默认不再向后传递到真实 console/stdout。它不能按 checkpoint、smoke、panic、user stdout 或 failure diagnostic 分散打点，也不能要求各业务模块分别理解压力测试事件格式。被测内核可以在编译期启用这个固定容量 recorder，buffer 不依赖 heap 分配，不写文件；当前 runner 每轮启动一个新的 QEMU 进程，因此 recorder 随 kernel image 初始化自然重新开始。若后续支持同一 guest 内多轮循环，必须在每轮边界显式 reset 并复用同一块内存。容量应由 stress case 或 Makefile 编译参数选择，首轮可只支持少量离散档位；buffer 满时只置 overflow 标记并继续计数，不得动态扩容或阻塞热路径。
 
 每次执行都应产生独立 run 记录，但完整原始日志和完整事件序列不应默认逐轮落盘。每轮结束后，runner 应读取该轮内存序列的摘要或紧凑 dump，计算结果类别、失败子类、稳定序列签名和必要结构化诊断；只有首次出现的 `(result, class_id, sequence_hash)` 才保存完整代表序列和必要原始输出，重复序列只累加计数并记录 run id。第一阶段允许在系统终止点之后通过一条 compact console dump 把 recorder 内容交给 runner，因为该输出发生在本轮关键并发窗口之后；长期目标是引入 QEMU 共享内存、monitor 抽取或等价非 console 通道，使事件取数也不依赖 console。旧的 stdout、checkpoint announce/observer 和 EventStream 文本只能作为兼容事件来源或重型观察级别使用，不能作为压力复现路径的默认数据面。
