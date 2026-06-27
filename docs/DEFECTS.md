@@ -6,7 +6,7 @@
 
 ### DF-0002: `make run APP=smoke` 间歇性 `InitcallPhase` ready 失败
 
-- 状态：已复现，待 predicate-level 诊断。
+- 状态：已复现，待携 ready-check 诊断复测。
 - 首次记录日期：2026-06-25。
 - 关联范围：`impl/arceos_ex` initcall 边界、UART/TTY initcall 路径、checkpoint/probe 时序。
 - 表现：普通 `timeout 90s make run APP=smoke` 曾返回 0，但启动日志输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。失败点在 `InitcallPhase` 标记 ready 时，说明 `initcall_phase_ready(...)` 在 `INITCALL_PHASE_STATE` 从 Base 推进到 Ready 前返回 false。
@@ -21,6 +21,7 @@
 - 修正 stress classifier 的 ANSI 归一化后，重新执行 DF-0002 stress 30 次，完成 30 次、成功 30 次、失败 0 次，全部归入成功序列 `0353704911c8c2bc`；报告在 `/tmp/lkm-stress-out/20260627T015027Z-df-0002-smoke-initcall/report.md`。
 - 2026-06-27 在提交 `b543f1b` 后追加 DF-0002 stress 200 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml --runs 200 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 200 次、成功 199 次、DF-0002 `InitcallPhase` ready 失败 1 次。失败样本为 `run-0045`，事件序列 `3a657270b6fb3842`，成功序列仍为 `0353704911c8c2bc`；报告在 `/tmp/lkm-stress-out/20260627T020546Z-df-0002-smoke-initcall/report.md`。
 - 本轮 `run-0045` 失败日志在 `late_smoke_initcall` 后输出 `arceos_ex initcall event failed` 和 `error=C event=S actual=B expected=B target=R`；按当前事件提取，失败与成功的 common prefix 长度仍为 0，说明当前 stdout 事件只能看到最终症状，尚不能定位 `initcall_phase_ready(...)` 内部第一个 false predicate。失败样本和代表成功样本中已打印的 initcall 顺序同为 `virtio_mmio_platform_driver_init` 早于 `ns16550a_platform_driver_init`，因此该打印顺序不再能作为本轮差异点。
+- 2026-06-27 按“先规格、再实现”的流程补充 predicate-level 诊断约束：`spec/model/smp-runtime/initcall/phase.spec` 要求 `initcall_phase_ready(...)` 失败报告第一个失败 predicate，`spec/coding/arceos_ex.md` 固定结构化输出格式为 `ready_check_failed phase=InitcallPhase check=initcall_phase_ready first_failed=<stable-predicate-name>`。实现侧把原聚合 ready-check 拆为同序诊断函数，并让 stress runner 将 `ready_check_failed` 作为事件点纳入序列 token。下一次 DF-0002 复现时，应优先查看该事件的 `first_failed` 字段，而不是继续只根据 `error=C event=S actual=B expected=B target=R` 推断。
 
 当前判断：
 
@@ -31,7 +32,7 @@
 
 下一步定位建议：
 
-- 增加仅在 debug/probe 下启用的 predicate-level 诊断，或让 `EventError` 携带失败谓词名，避免只看到 `actual=B expected=B target=R`。
+- 重新执行 DF-0002 stress，捕获 `ready_check_failed` 事件中的 `first_failed`；若该字段稳定落在同一 predicate，可再沿该对象路径检查规格和实现边界。
 - 复核 `InitcallBoundary` 与 `initcall_phase_ready(...)` 的条件是否应保持完全一致；若有意不同，需要在规格和实现中显式说明边界。
 - 后续回顾 UART/TTY、IRQ、task context 和 initcall 并发关系时，把本缺陷作为固定样本回归验证。
 - 后续 nightly/stress 至少保留普通 `make run APP=smoke` 的 DF-0002 case。下一步第一优先级不是改 initcall 逻辑，而是先记录 `initcall_phase_ready(...)` 内部具体 false predicate，使 failure-vs-success 能对齐到第一个内部差异点；该诊断应作为长期 checkpoint/debug fact 设计，避免一次性临时日志。

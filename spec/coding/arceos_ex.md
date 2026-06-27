@@ -422,6 +422,13 @@ trace start/finish 边界、返回码、preempt count 快照与失衡修复或�
 `RootfsPhase`。具体 entry 的目标副作用，例如 `of_platform_default_populate_init()` 填充 platform bus，应由
 对应对象规格和后续 smoke 测试覆盖，不混入 initcall 机制本身。
 
+`initcall_phase_ready(...)` 是 `InitcallPhase.Ready` 的聚合 ready-check。实现不得只在该聚合谓词失败时输出
+压缩的 `EventError` 字段；必须同步输出结构化诊断行：
+`ready_check_failed phase=InitcallPhase check=initcall_phase_ready first_failed=<stable-predicate-name>`。
+`first_failed` 必须按 `initcall_phase_ready(...)` 的规范顺序报告第一个 false 条件，并使用长期稳定名称；
+该名称应对应 model/coding 中的对象状态或谓词事实，而不是一次性临时日志文本。压力测试与 nightly 流程应把这类
+ready-check 诊断视为事件点，用于 failure-vs-success 序列对齐和首个差异点定位。
+
 `of_platform_default_populate_init()` 是 `PlatformBus` 的 entry action。它的源对象是正式
 `DeviceTree`，目标对象是 `PlatformBus`；`InitcallTable` 只负责按表执行该 entry，不拥有其目标副作用。
 该 action 必须先完成 Linux-like candidate 识别，然后把每个 candidate node 构造成 `PlatformDeviceType`

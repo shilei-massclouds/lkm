@@ -23,6 +23,20 @@ class StressRunnerTests(unittest.TestCase):
             ["smoke_result:SmokeResult:passed=78:failed=0:total=78"],
         )
 
+    def test_extracts_ready_check_failed_event(self) -> None:
+        events = runner._extract_events(
+            "ready_check_failed phase=InitcallPhase "
+            "check=initcall_phase_ready "
+            "first_failed=platform_bus.ns16550a_probe_called\n"
+        )
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            [
+                "ready_check_failed:ReadyCheckFailed:phase=InitcallPhase:"
+                "check=initcall_phase_ready:first_failed=platform_bus.ns16550a_probe_called"
+            ],
+        )
+
     def test_extracts_df0001_failure_event(self) -> None:
         events = runner._extract_events("read user ELF failed\n")
         self.assertEqual(len(events), 1)

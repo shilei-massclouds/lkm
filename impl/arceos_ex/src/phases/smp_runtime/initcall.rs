@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     objects::{
-        initcall::initcall_phase_ready,
+        initcall::{initcall_phase_ready_diagnostic, InitcallReadyCheckDiagnostic},
         state::{failed_condition, EventResult, LifecycleEvent, State},
     },
     trace::Checkpoint,
@@ -231,7 +231,7 @@ fn run_initcall_table(ctx: &mut Context) -> EventResult {
 }
 
 fn checkpoint_ready(ctx: &Context) -> EventResult {
-    if !initcall_phase_ready(
+    if let Some(diagnostic) = initcall_phase_ready_diagnostic(
         &ctx.cpuset_smp_trimmed,
         &ctx.driver_core_base,
         &ctx.platform_bus_root_device,
@@ -249,6 +249,7 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.tty_xmit_fifo_probe,
         &ctx.initcall_boundary,
     ) {
+        print_ready_check_failed(diagnostic);
         return failed_condition(
             LifecycleEvent::Setup,
             crate::phases::state::load(&INITCALL_PHASE_STATE),
@@ -264,6 +265,14 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         State::Ready,
         Checkpoint::InitcallPhaseReady,
     )
+}
+
+fn print_ready_check_failed(diagnostic: InitcallReadyCheckDiagnostic) {
+    use crate::arch::riscv64::sbi;
+
+    sbi::putstr("ready_check_failed phase=InitcallPhase check=initcall_phase_ready first_failed=");
+    sbi::putstr(diagnostic.first_failed());
+    sbi::putchar(b'\n');
 }
 
 pub fn is_ready() -> bool {
