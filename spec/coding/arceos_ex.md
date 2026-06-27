@@ -1697,6 +1697,22 @@ complete 成对、零 claim 与 loop exit 成对。UART handler 必须清掉 THR
 KUnit/smoke 只能读取该 probe 和计数结果，不能直接调用 trigger、root intc entry、PLIC claim/complete、IRQ dispatch 或
 UART handler。
 
+`UartInterruptChainProbe.setup` 失败时必须通过统一 `failure_diagnostic` payload 细分内部首个失败事实：
+`phase=InitcallPhase step=setup_objects.uart_interrupt_chain_probe.setup object=UartInterruptChainProbe check=uart_interrupt_chain_probe.setup first_failed=<stable-predicate-name>`。
+`first_failed` 必须按实现判定顺序使用长期稳定名称，第一批至少覆盖：
+`uart_interrupt_chain_probe.lifecycle_base`、`uart_external_irq_enable.state_ready`、
+`uart_external_irq_enable.plic_source_gate_open`、`uart_external_irq_enable.root_external_input_gate_open`、
+`plic.state_ready`、`plic_irq_domain.state_ready`、`irq_handler_registry.state_ready`、
+`uart8250_port.logical_irq_ready`、`uart8250_irq_handler.registered`、`uart8250_port.logical_irq_valid`、
+`plic_irq_domain.uart_mapping_present`、`plic_irq_domain.uart_mapping_logical_irq_matches`、
+`plic_irq_domain.uart_source_gate_open`、`irq_handler_registry.uart_handler_present`、
+`uart_interrupt_chain_probe.trigger_uart_thre_once`、`uart_interrupt_chain_probe.irq_cycle_wait_closed`、
+`uart_interrupt_chain_probe.uart_trigger_committed`、`uart_interrupt_chain_probe.plic_claim_observed`、
+`uart_interrupt_chain_probe.irq_dispatch_observed`、`uart_interrupt_chain_probe.uart_handler_observed`、
+`uart_interrupt_chain_probe.plic_complete_observed`、`uart_interrupt_chain_probe.plic_loop_exit_observed`、
+`uart_interrupt_chain_probe.irq_cycle_closed` 和 `uart_interrupt_chain_probe.console_polling_preserved`。
+这类 diagnostic 不是 checkpoint，不得在成功路径输出，也不得替代后续规格化的 UART/PLIC/IRQ 长期对象事实。
+
 `Serial8250ConsoleIrqTxProbe` 必须在 `UartInterruptChainProbe` ready 之后执行。它可以把 serial8250 console 从
 handoff 后的 polling/backend-deferred 状态推进到 runtime interrupt-driven TX 状态，但必须通过公开 `printk` 前端提交
 一条探针输出，由真实 THRI 中断驱动 UART handler drain TX queue，并观察 TX queue kick、UART handler drain、PLIC

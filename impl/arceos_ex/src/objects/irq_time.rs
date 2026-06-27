@@ -18,7 +18,10 @@ use super::{
     rcu::RcuCore,
     sbi::Sbi,
     softirq::Softirq,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{
+        failed_condition, failed_condition_with_diagnostic, EventResult, FailureDiagnostic,
+        Lifecycle, LifecycleEvent, State,
+    },
     static_branch::StaticBranch,
     workqueue::Workqueue,
 };
@@ -3858,48 +3861,46 @@ impl UartInterruptChainProbe {
     ) -> EventResult {
         let source = super::ns16550a::uart8250_port_irq_source();
         let logical_irq = super::ns16550a::uart8250_port_logical_irq();
-        if self.lifecycle.state() != State::Base
-            || uart_external_irq_enable.state() != State::Ready
-            || !uart_external_irq_enable.plic_source_gate_open()
-            || !uart_external_irq_enable.root_external_input_gate_open()
-            || plic.state() != State::Ready
-            || plic_irq_domain.state() != State::Ready
-            || irq_handler_registry.state() != State::Ready
-            || !super::ns16550a::uart8250_port_logical_irq_ready()
-            || !super::ns16550a::uart8250_irq_handler_registered()
-            || !logical_irq.is_valid()
-            || plic_irq_domain
-                .mapping_for_source(source)
-                .is_none_or(|mapping| {
-                    mapping.logical_irq() != logical_irq || !mapping.source_gate_open()
-                })
-            || !irq_handler_registry.has_handler_for_logical_irq(logical_irq)
-        {
-            return failed_condition(
+        if let Some(first_failed) = self.setup_precondition_diagnostic(
+            uart_external_irq_enable,
+            plic,
+            plic_irq_domain,
+            irq_handler_registry,
+            source,
+            logical_irq,
+        ) {
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                uart_interrupt_chain_probe_setup_diagnostic(first_failed),
             );
         }
 
         let baseline = uart_irq_cycle_snapshot(plic, irq_handler_registry);
 
         if !super::ns16550a::trigger_uart8250_thre_interrupt_once() {
-            return failed_condition(
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                uart_interrupt_chain_probe_setup_diagnostic(
+                    "uart_interrupt_chain_probe.trigger_uart_thre_once",
+                ),
             );
         }
 
         if !wait_uart_irq_cycle_closed(plic, irq_handler_registry, baseline, source) {
-            return failed_condition(
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                uart_interrupt_chain_probe_setup_diagnostic(
+                    "uart_interrupt_chain_probe.irq_cycle_wait_closed",
+                ),
             );
         }
 
@@ -3927,26 +3928,112 @@ impl UartInterruptChainProbe {
         self.console_polling_preserved =
             super::ns16550a::uart8250_interrupt_output_still_deferred();
 
-        if !self.uart_trigger_committed
-            || !self.plic_claim_observed
-            || !self.irq_dispatch_observed
-            || !self.uart_handler_observed
-            || !self.plic_complete_observed
-            || !self.plic_loop_exit_observed
-            || !self.irq_cycle_closed
-            || !self.console_polling_preserved
-        {
-            return failed_condition(
+        if let Some(first_failed) = self.setup_observation_diagnostic() {
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                uart_interrupt_chain_probe_setup_diagnostic(first_failed),
             );
         }
 
         self.lifecycle
             .adopt_transition(LifecycleEvent::Setup, State::Base, State::Ready)
     }
+
+    fn setup_precondition_diagnostic(
+        &self,
+        uart_external_irq_enable: &UartExternalIrqEnable,
+        plic: &Plic,
+        plic_irq_domain: &PlicIrqDomain,
+        irq_handler_registry: &IrqHandlerRegistry,
+        source: u32,
+        logical_irq: LogicalIrq,
+    ) -> Option<&'static str> {
+        if self.lifecycle.state() != State::Base {
+            return Some("uart_interrupt_chain_probe.lifecycle_base");
+        }
+        if uart_external_irq_enable.state() != State::Ready {
+            return Some("uart_external_irq_enable.state_ready");
+        }
+        if !uart_external_irq_enable.plic_source_gate_open() {
+            return Some("uart_external_irq_enable.plic_source_gate_open");
+        }
+        if !uart_external_irq_enable.root_external_input_gate_open() {
+            return Some("uart_external_irq_enable.root_external_input_gate_open");
+        }
+        if plic.state() != State::Ready {
+            return Some("plic.state_ready");
+        }
+        if plic_irq_domain.state() != State::Ready {
+            return Some("plic_irq_domain.state_ready");
+        }
+        if irq_handler_registry.state() != State::Ready {
+            return Some("irq_handler_registry.state_ready");
+        }
+        if !super::ns16550a::uart8250_port_logical_irq_ready() {
+            return Some("uart8250_port.logical_irq_ready");
+        }
+        if !super::ns16550a::uart8250_irq_handler_registered() {
+            return Some("uart8250_irq_handler.registered");
+        }
+        if !logical_irq.is_valid() {
+            return Some("uart8250_port.logical_irq_valid");
+        }
+
+        let Some(mapping) = plic_irq_domain.mapping_for_source(source) else {
+            return Some("plic_irq_domain.uart_mapping_present");
+        };
+        if mapping.logical_irq() != logical_irq {
+            return Some("plic_irq_domain.uart_mapping_logical_irq_matches");
+        }
+        if !mapping.source_gate_open() {
+            return Some("plic_irq_domain.uart_source_gate_open");
+        }
+        if !irq_handler_registry.has_handler_for_logical_irq(logical_irq) {
+            return Some("irq_handler_registry.uart_handler_present");
+        }
+        None
+    }
+
+    fn setup_observation_diagnostic(&self) -> Option<&'static str> {
+        if !self.uart_trigger_committed {
+            return Some("uart_interrupt_chain_probe.uart_trigger_committed");
+        }
+        if !self.plic_claim_observed {
+            return Some("uart_interrupt_chain_probe.plic_claim_observed");
+        }
+        if !self.irq_dispatch_observed {
+            return Some("uart_interrupt_chain_probe.irq_dispatch_observed");
+        }
+        if !self.uart_handler_observed {
+            return Some("uart_interrupt_chain_probe.uart_handler_observed");
+        }
+        if !self.plic_complete_observed {
+            return Some("uart_interrupt_chain_probe.plic_complete_observed");
+        }
+        if !self.plic_loop_exit_observed {
+            return Some("uart_interrupt_chain_probe.plic_loop_exit_observed");
+        }
+        if !self.irq_cycle_closed {
+            return Some("uart_interrupt_chain_probe.irq_cycle_closed");
+        }
+        if !self.console_polling_preserved {
+            return Some("uart_interrupt_chain_probe.console_polling_preserved");
+        }
+        None
+    }
+}
+
+fn uart_interrupt_chain_probe_setup_diagnostic(first_failed: &'static str) -> FailureDiagnostic {
+    FailureDiagnostic::new(
+        "InitcallPhase",
+        "setup_objects.uart_interrupt_chain_probe.setup",
+        "UartInterruptChainProbe",
+        "uart_interrupt_chain_probe.setup",
+        first_failed,
+    )
 }
 
 #[cfg(checkpoint_handler_uart_irq_chain)]

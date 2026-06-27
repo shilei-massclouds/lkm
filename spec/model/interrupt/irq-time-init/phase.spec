@@ -740,6 +740,7 @@ predicate uart_interrupt_chain_probe_observes_plic_complete<T, P>(probe: T, plic
 predicate uart_interrupt_chain_probe_observes_plic_loop_exit<T, P>(probe: T, plic: P) -> bool;
 predicate uart_interrupt_chain_probe_observes_irq_cycle_closure<T, P, R>(probe: T, plic: P, registry: R) -> bool;
 predicate uart_interrupt_chain_probe_preserves_polling_console<T, U>(probe: T, uart: U) -> bool;
+predicate uart_interrupt_chain_probe_setup_failure_reports_structured_diagnostic<T>(probe: T) -> bool;
 
 /*
  * RiscvIrqStackSet 表示 RISC-V init_IRQ() 中的 init_irq_scs() 与
@@ -1132,6 +1133,7 @@ object UartInterruptChainProbe: InterruptObject {
                     uart_interrupt_chain_probe_observes_plic_loop_exit(UartInterruptChainProbe, Plic);
                     uart_interrupt_chain_probe_observes_irq_cycle_closure(UartInterruptChainProbe, Plic, IrqHandlerRegistry);
                     uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
+                    uart_interrupt_chain_probe_setup_failure_reports_structured_diagnostic(UartInterruptChainProbe);
                     plic_chained_handler_claim_loop_until_zero(Plic);
                     plic_chained_handler_zero_claim_stops_dispatch(Plic);
                     plic_chained_handler_completes_each_claimed_source(Plic);
@@ -1156,6 +1158,7 @@ object UartInterruptChainProbe: InterruptObject {
             uart_interrupt_chain_probe_observes_plic_loop_exit(UartInterruptChainProbe, Plic);
             uart_interrupt_chain_probe_observes_irq_cycle_closure(UartInterruptChainProbe, Plic, IrqHandlerRegistry);
             uart_interrupt_chain_probe_preserves_polling_console(UartInterruptChainProbe, Uart8250Port);
+            uart_interrupt_chain_probe_setup_failure_reports_structured_diagnostic(UartInterruptChainProbe);
             plic_chained_handler_claim_loop_until_zero(Plic);
             plic_chained_handler_zero_claim_stops_dispatch(Plic);
             plic_chained_handler_completes_each_claimed_source(Plic);

@@ -6,7 +6,7 @@
 
 ### DF-0002: `make run APP=smoke` 间歇性 `InitcallPhase` ready 失败
 
-- 状态：已复现，已由结构化 failure diagnostic 定位到 `UartInterruptChainProbe.setup`，待继续细分对象内部失败条件并修复。
+- 状态：已复现，已由结构化 failure diagnostic 定位到 UART/PLIC IRQ cycle 观测失败，并出现后续 `Serial8250RxBatchLoopbackProbe.setup` 粗粒度失败；待继续细分 RX batch probe 并修复。
 - 首次记录日期：2026-06-25。
 - 关联范围：`impl/arceos_ex` initcall 边界、UART/TTY initcall 路径、checkpoint/probe 时序。
 - 表现：普通 `timeout 90s make run APP=smoke` 曾返回 0，但启动日志输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。失败点在 `InitcallPhase` 标记 ready 时，说明 `initcall_phase_ready(...)` 在 `INITCALL_PHASE_STATE` 从 Base 推进到 Ready 前返回 false。
@@ -28,23 +28,27 @@
 - 2026-06-27 提交 `beaab87` 后，把原 ready-check 局部诊断扩展为 `EventError` 携带的结构化 `failure_diagnostic`，覆盖 `InitcallPhase` 的 `setup_objects()` 后半段、`InitcallBoundary.setup()` 和 `checkpoint_ready()`。该信息不是新的 checkpoint；它只在失败路径输出，并保留原有 `error=C event=S actual=B expected=B target=R` 行用于兼容旧分类。
 - 2026-06-27 在提交 `beaab87` 后重新执行 DF-0001 `user-boot` stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、DF-0002 `InitcallPhase` ready 失败 2 次，失败样本为 `run-0302` 和 `run-0431`；报告在 `/tmp/lkm-stress-out/20260627T035519Z-df-0001-user-boot/report.md`。本轮没有复现 `read user ELF failed`，两次失败均携带同一诊断：`phase=InitcallPhase step=setup_objects.uart_interrupt_chain_probe.setup object=UartInterruptChainProbe check=uart_interrupt_chain_probe.setup first_failed=uart_interrupt_chain_probe.setup`。
 - 2026-06-27 在提交 `beaab87` 后重新执行 DF-0002 smoke stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、DF-0002 `InitcallPhase` ready 失败 2 次，失败样本为 `run-0262` 和 `run-0325`；报告在 `/tmp/lkm-stress-out/20260627T040752Z-df-0002-smoke-initcall/report.md`。两次失败同样携带 `setup_objects.uart_interrupt_chain_probe.setup` / `UartInterruptChainProbe` 诊断，说明 DF-0001 与 DF-0002 两个 stress case 都能触发同一个第一层失败点。
+- 2026-06-27 按“先规格、再实现”的流程把 `UartInterruptChainProbe.setup` 内部 failure diagnostic 写入 `spec/model/interrupt/irq-time-init/phase.spec` 和 `spec/coding/arceos_ex.md`，实现侧按长期稳定名称报告第一失败事实。该扩展仍然是 `EventError` payload，不是新增 checkpoint，也不改变成功路径事件序列。
+- 同轮验证：`make verify` 通过，`make -C impl/arceos_ex build APP=smoke` 通过，普通 `make -C impl/arceos_ex run APP=smoke` 通过 `54/54`，`python3 -m unittest test_runner` 通过 8 项。
+- 2026-06-27 扩展后重新执行 DF-0001 `user-boot` stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 499 次、DF-0002 `InitcallPhase` ready 失败 1 次，失败样本为 `run-0049`；报告在 `/tmp/lkm-stress-out/20260627T044327Z-df-0001-user-boot/report.md`。本轮没有复现 `read user ELF failed`，失败诊断细化为 `first_failed=uart_interrupt_chain_probe.plic_claim_observed`。
+- 2026-06-27 扩展后重新执行 DF-0002 smoke stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、DF-0002 `InitcallPhase` ready 失败 2 次，失败样本为 `run-0396` 和 `run-0423`；报告在 `/tmp/lkm-stress-out/20260627T045614Z-df-0002-smoke-initcall/report.md`。`run-0396` 细化为 `first_failed=uart_interrupt_chain_probe.irq_cycle_wait_closed`，`run-0423` 进入后续 `setup_objects.serial8250_rx_batch_loopback_probe.setup`，但该对象内部仍只有粗粒度 `first_failed=serial8250_rx_batch_loopback_probe.setup`。
 
 当前判断：
 
 - 不应把问题直接归因于 `ns16550a` 与 `virtio_mmio` 的顺序。两者同属 `.initcall.device`，`of_platform` 设备枚举已经完成，后续 driver registration 会扫描现有设备；它们绑定的是不同设备，顺序通常只应改变 probe/log 时序，不应单独破坏后续显式 UART/TTY probe。
-- 当前第一层定位已经从“顶层 ready predicate 失败”收敛到 `setup_objects.uart_interrupt_chain_probe.setup`。这说明最新复现路径不是 `checkpoint_ready()` 的最终 ready-check，也不是 `InitcallBoundary.setup()` 的聚合谓词，而是 `UartInterruptChainProbe.setup` 这一步返回了 `EventError`。
+- 定位已经从“顶层 ready predicate 失败”继续收敛：DF-0001 触发样本显示 `UartInterruptChainProbe` 已触发 UART THRE cycle 但没有观察到 PLIC claim；DF-0002 触发样本显示一类在等待完整 IRQ cycle 闭合时失败，另一类已推进到后续 `Serial8250RxBatchLoopbackProbe.setup`。因此当前问题更像 UART/PLIC/IRQ cycle 观测或后续 RX batch probe 时序敏感问题，而不是 `checkpoint_ready()` 或 `InitcallBoundary.setup()` 聚合谓词不一致。
 - 与 DF-0001 类似，该现象可能受 probe、checkpoint handler 或额外日志影响；在完成整个启动流程的并发、锁/guard、IRQ/task context 与内存顺序回顾前，暂不做重型定位。
 - 2026-06-27 当前 stress 结论：普通 `APP=smoke` 30 次未复现，但 200 次复现 1 次 DF-0002，因此不能把它标记为已解决，也不能归档为与 DF-0001 同因后已消除。现有证据仍允许二者属于相邻的 initcall/virtio/block 时序敏感问题，但 DF-0002 至少还有未被 DF-0001 修复完全消除的 ready predicate 缺口或观测缺口。
 - 2026-06-27 新增 ready-check 诊断后的 200 次 stress 未复现失败，这只能说明本轮没有捕获到 DF-0002 样本；由于上一轮同样规模曾出现 1/200 失败，且本次改动主要是失败路径诊断和聚合谓词同序重构，不构成针对根因的修复证据，暂不应标记已解决。
-- 2026-06-27 结构化 failure diagnostic 复测后，DF-0001 和 DF-0002 两个 500 次 stress case 均复现同一个 `UartInterruptChainProbe.setup` 失败点。DF-0002 因此仍是待解决问题；DF-0001 的原始 `/sbin/init` 读取失败没有复现，仍维持已归档判断，但 user-boot stress 可作为触发 DF-0002 的交叉回归入口。
+- 2026-06-27 进一步细分 diagnostic 并复测后，DF-0001 和 DF-0002 两个 500 次 stress case 仍都能触发 DF-0002 类问题。DF-0001 的原始 `/sbin/init` 读取失败没有复现，仍维持已归档判断；DF-0002 则已经有两个更具体方向：`UartInterruptChainProbe` 的 PLIC claim/IRQ cycle closure，以及 `Serial8250RxBatchLoopbackProbe.setup` 内部粗粒度失败。
 
 下一步定位建议：
 
-- 下一轮不应再优先增加 checkpoint，而应先把 `UartInterruptChainProbe.setup` 内部失败原因细分为长期有意义的结构化 diagnostic 字段，例如 IRQ chain probe 的前置状态、UART probe/TTY probe 对齐状态、绑定对象是否 ready，以及 setup 返回 `EventError` 前第一个失败 predicate。
-- 按当前流程，先把 `UartInterruptChainProbe.setup` 内部 diagnostic 的字段、命名和触发边界写入 `spec/model` 与 `spec/coding`，再调整实现并重新跑 DF-0001/DF-0002 stress。
+- 下一轮不应再优先增加 checkpoint，而应继续增强现有 failure diagnostic 的详细程度。优先对象是 `Serial8250RxBatchLoopbackProbe.setup`，因为最新 DF-0002 复测已经出现一个后续 probe 粗粒度失败；字段应覆盖 RX loopback stimulus、PLIC claim/dispatch、UART handler RX、flip buffer insert/push、complete/zero-claim loop exit、cycle closure、batch count/last byte/no overflow 等长期事实。
+- 对 `UartInterruptChainProbe` 方向，下一步不是重复拆入口条件，而是分析为什么 `trigger_uart_thre_once` 后会出现 `plic_claim_observed` 或 `irq_cycle_wait_closed` 失败；需要结合 Linux-like 8250/PLIC 流程检查 THRI/LSR/IIR 状态、root external interrupt delivery、PLIC pending/claim/complete、handler 清 THRI 和等待循环边界。
 - 复核 `UartInterruptChainProbe` 与 `InitcallPhase` ready 约束之间的关系：若该 probe 是进入 ready 的必要长期条件，应在规格中明确；若它只是 smoke/probe 观测辅助，则需要重新定义它失败时是否应阻断 `InitcallPhase`。
 - 后续回顾 UART/TTY、IRQ、task context 和 initcall 并发关系时，把本缺陷作为固定样本回归验证。
-- 后续 nightly/stress 至少保留普通 `make run APP=smoke` 的 DF-0002 case。下一步第一优先级不是改 initcall 逻辑，而是先记录 `UartInterruptChainProbe.setup` 内部具体 false predicate，使 failure-vs-success 能对齐到第一个内部差异点；该诊断应作为长期 failure diagnostic 设计，避免一次性临时日志。
+- 后续 nightly/stress 至少保留普通 `make run APP=smoke` 的 DF-0002 case，同时继续保留普通 `make run APP=user-boot` 作为交叉触发入口。下一步第一优先级不是改 initcall 聚合逻辑，而是先规格化并实现 `Serial8250RxBatchLoopbackProbe.setup` 内部具体 false predicate；该诊断应作为长期 failure diagnostic 设计，避免一次性临时日志。
 
 ## 已归档
 
@@ -76,6 +80,7 @@
 - 2026-06-27 提交 `1ba2bf8` 后追加普通 DF-0001 stress 200 次：`impl/arceos_ex/tests/stress/runner.py --runs 200 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 200 次、成功 200 次、失败 0 次，全部归入成功序列 `bd43ae22bfcc7354`；报告在 `/tmp/lkm-stress-out/20260627T012229Z-df-0001-user-boot/report.md`。
 - 2026-06-27 提交 `a26af65` 后追加普通 DF-0001 stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 497 次、失败 3 次；报告在 `/tmp/lkm-stress-out/20260627T030109Z-df-0001-user-boot/report.md`。本轮没有复现 `read user ELF failed`，成功样本仍全部归入 `bd43ae22bfcc7354`；3 次失败均归类为 DF-0002 `InitcallPhase` ready failure，序列 `3a657270b6fb3842`，样本为 `run-0049`、`run-0128`、`run-0294`。
 - 2026-06-27 提交 `beaab87` 后追加普通 DF-0001 stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、失败 2 次；报告在 `/tmp/lkm-stress-out/20260627T035519Z-df-0001-user-boot/report.md`。本轮仍没有复现 `read user ELF failed`；2 次失败均归类为 DF-0002 `InitcallPhase` ready failure，并由结构化诊断定位到 `setup_objects.uart_interrupt_chain_probe.setup` / `UartInterruptChainProbe`。
+- 2026-06-27 扩展 `UartInterruptChainProbe.setup` 内部 failure diagnostic 后追加普通 DF-0001 stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 499 次、失败 1 次；报告在 `/tmp/lkm-stress-out/20260627T044327Z-df-0001-user-boot/report.md`。本轮仍没有复现 `read user ELF failed`；1 次失败归类为 DF-0002 `InitcallPhase` ready failure，并细化为 `first_failed=uart_interrupt_chain_probe.plic_claim_observed`。
 
 当前判断：
 
@@ -88,7 +93,7 @@
 - 2026-06-27 代码审阅后的当前根因候选收敛到 virtio-blk live read 的 completion 收束。`setup_live_driver()` 在 initcall 中提交 `submit_ext2_superblock_read()` 后没有同步等待完成，只依赖后续 IRQ 及时调用 `handle_irq_completion()` 消费 used ring。之后 rootfs 阶段和 user-boot 阶段都会通过 `VirtioBlkLiveProvider::read_live_block()` 进入同步读；该函数先执行 `wait_for_no_pending_read()`，只忙等 `read_request_pending == false`，不会主动 poll/complete 已遗留的 pending request。因此若 initcall 首个 superblock read 的 IRQ completion 尚未及时收束，后续 rootfs 或 `/sbin/init` 读取会在进入自身请求提交前失败，并被上层折叠为 rootfs phase failure 或 `read user ELF failed`。
 - 同一段代码还存在第二个同步风险：任务侧 `wait_for_completion_after()` 会直接调用 `poll_read_completion()` 消费 used ring，而 IRQ 侧 `handle_irq_completion()` 也会调用 `complete_read_from_irq()` 消费同一个 `VirtioBlkDevice` / `VirtQueue` / 静态读缓冲。两条路径之间没有互斥、pending token 原子状态或明确内存序；virtqueue 发布 descriptor/avail idx 后也未显式建立 notify 前的 fence，读取 used idx 前只有 volatile 读。这些都与“probe/trace 改变时序后问题消失”的现象一致。
 - 2026-06-27 修复验证结果支持上述根因判断：在消除 fire-and-forget 首读、inherited pending 等待和双 completion consumer 后，原先 30 次中可出现 7 次 DF-0001 的普通 stress 样本变为 30/30 成功；提交 `1ba2bf8` 后追加 200 次普通 stress 继续保持 200/200 成功。因此 DF-0001 按当前证据判定已解决，后续只作为 nightly/stress 回归项保留；若同类现象再次出现，应按回归重新打开。
-- 2026-06-27 两轮 500 次复测进一步增强了“原始 `/sbin/init` 读取失败已消除”的证据：两轮均为 0 次 `read user ELF failed`。同轮出现的 DF-0002 类 initcall ready failure 已由后续结构化诊断定位到 `UartInterruptChainProbe.setup`；该现象归入 DF-0002 继续处理，不改变 DF-0001 当前归档状态。
+- 2026-06-27 多轮 500 次复测进一步增强了“原始 `/sbin/init` 读取失败已消除”的证据：这些复测均为 0 次 `read user ELF failed`。同轮出现的 DF-0002 类 initcall ready failure 已由后续结构化诊断定位到 UART/PLIC IRQ cycle 或后续 serial8250 RX probe；该现象归入 DF-0002 继续处理，不改变 DF-0001 当前归档状态。
 
 后续回归建议：
 
