@@ -4138,14 +4138,10 @@ fn uart_irq_cycle_wait_diagnostic(
     source: u32,
 ) -> &'static str {
     let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
-    let claim_delta = current.claims.saturating_sub(baseline.claims);
     let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
-    let complete_delta = current.completes.saturating_sub(baseline.completes);
     let source_complete_delta = current
         .source_completes
         .saturating_sub(baseline.source_completes);
-    let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
-    let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
 
     if current.requests <= baseline.requests {
         return "uart_interrupt_chain_probe.wait.rx_or_thre_request_observed";
@@ -4186,14 +4182,8 @@ fn uart_irq_cycle_wait_diagnostic(
     if current.loop_exits <= baseline.loop_exits {
         return "plic.claim_loop_exit_observed";
     }
-    if claim_delta != complete_delta {
-        return "plic.claim_complete_delta_matched";
-    }
     if source_claim_delta != source_complete_delta {
         return "plic.source_claim_complete_delta_matched";
-    }
-    if zero_claim_delta != loop_exit_delta {
-        return "plic.zero_claim_loop_exit_delta_matched";
     }
     "uart_interrupt_chain_probe.irq_cycle_wait_closed"
 }
@@ -6891,14 +6881,10 @@ fn uart_rx_cycle_completed_and_closed(
     current: UartIrqCycleSnapshot,
     baseline: UartIrqCycleSnapshot,
 ) -> bool {
-    let claim_delta = current.claims.saturating_sub(baseline.claims);
     let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
-    let complete_delta = current.completes.saturating_sub(baseline.completes);
     let source_complete_delta = current
         .source_completes
         .saturating_sub(baseline.source_completes);
-    let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
-    let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
 
     current.rx_requests > baseline.rx_requests
         && current.source_claims > baseline.source_claims
@@ -6911,9 +6897,7 @@ fn uart_rx_cycle_completed_and_closed(
         && current.source_completes > baseline.source_completes
         && current.zero_claims > baseline.zero_claims
         && current.loop_exits > baseline.loop_exits
-        && claim_delta == complete_delta
         && source_claim_delta == source_complete_delta
-        && zero_claim_delta == loop_exit_delta
 }
 
 fn wait_uart_irq_cycle_closed(
@@ -7083,14 +7067,10 @@ fn uart_irq_cycle_completed_and_closed(
     current: UartIrqCycleSnapshot,
     baseline: UartIrqCycleSnapshot,
 ) -> bool {
-    let claim_delta = current.claims.saturating_sub(baseline.claims);
     let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
-    let complete_delta = current.completes.saturating_sub(baseline.completes);
     let source_complete_delta = current
         .source_completes
         .saturating_sub(baseline.source_completes);
-    let zero_claim_delta = current.zero_claims.saturating_sub(baseline.zero_claims);
-    let loop_exit_delta = current.loop_exits.saturating_sub(baseline.loop_exits);
 
     current.requests > baseline.requests
         && current.source_claims > baseline.source_claims
@@ -7102,9 +7082,7 @@ fn uart_irq_cycle_completed_and_closed(
         && current.source_completes > baseline.source_completes
         && current.zero_claims > baseline.zero_claims
         && current.loop_exits > baseline.loop_exits
-        && claim_delta == complete_delta
         && source_claim_delta == source_complete_delta
-        && zero_claim_delta == loop_exit_delta
 }
 
 fn find_plic_interrupt_controller_node(device_tree: &DeviceTree) -> Option<DeviceNodeRef<'_>> {

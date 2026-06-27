@@ -839,6 +839,8 @@ zero-claim loop exit 闭合。KUnit 在这条路径中只能作为 observer/chec
 受限 sink 输出诊断，但不得写 TX 字符、不得设置 loopback、不得调用 handler、不得 claim/complete PLIC，也不得改
 pending/enable 状态。smoke 可以作为生产侧 stimulus，但也不能直接调用 backend handler；它只能通过公开/受控的
 前端或 runtime probe 入口提交字符。
+这里的 zero-claim loop exit 闭合要求表示同一轮真实 PLIC claim loop 已经观察到 zero claim 和随后 loop exit 两个边界；
+如果实现把 zero claim 与 loop exit 记录为两个独立计数，probe 不得把某个并发采样点上的两个计数不相等直接判定为失败。
 `Serial8250RxLoopbackProbe.setup` 和 `Serial8250RxBatchLoopbackProbe.setup` 失败时必须通过统一
 `failure_diagnostic` payload 报告内部首个失败事实。这些字段是长期 RX/PLIC/IRQ/flip-buffer 观察事实，不是为某个
 缺陷临时添加的日志。单字符 probe 的输出形态为
@@ -1727,7 +1729,11 @@ source、不得注册 handler、不得执行 claim/complete 或 dispatch；建�
 trap/root INTC/PLIC/IRQ core 路径推进到 `PLIC claim -> logical IRQ dispatch -> UART handler -> PLIC complete`。
 该 probe 不得只观察第一次 handler 调用；它必须从触发前 snapshot 观察一轮完整 IRQ cycle：UART THRE request、
 PLIC 非零 claim、IRQ dispatch、UART handler、PLIC complete、零 claim loop exit 都发生，并确认本轮非零 claim 与
-complete 成对、零 claim 与 loop exit 成对。UART handler 必须清掉 THRI，避免中断风暴；该 probe 仍不得把 console 输出切换为 interrupt-driven。
+complete 在当前 UART source 维度成对。全局 claim/complete counter 只能作为辅助观测，不能替代 source-scoped delta，
+也不能因其它 source 或并发采样窗口导致的全局 delta 不相等而判定本轮 UART source cycle 失败。零 claim 与 loop exit
+的闭合要求是二者都在同一轮真实 claim loop 边界内被观察到；若 provider 以独立 counter 记录 zero claim 和 loop exit，
+等待和诊断不得把瞬时 counter 不相等作为失败事实。UART handler 必须清掉 THRI，
+避免中断风暴；该 probe 仍不得把 console 输出切换为 interrupt-driven。
 KUnit/smoke 只能读取该 probe 和计数结果，不能直接调用 trigger、root intc entry、PLIC claim/complete、IRQ dispatch 或
 UART handler。
 

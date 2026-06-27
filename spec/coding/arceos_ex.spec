@@ -1716,7 +1716,15 @@ type ArceosExIrqTimeInitCodingMust {
          * It must observe one complete real IRQ cycle from a pre-trigger
          * snapshot: THRE request, PLIC non-zero claim, IRQ dispatch, UART
          * handler, PLIC complete, zero-claim loop exit, with non-zero claims
-         * paired with completes and zero claims paired with loop exits.
+         * paired with completes on the current UART source. Global
+         * claim/complete counters are auxiliary observations only; a mismatch
+         * caused by another source or a concurrent sampling window must not
+         * fail the current UART source cycle when source-scoped deltas match.
+         * Zero-claim loop exit closure means that both the zero claim and the
+         * following loop exit are observed in the same real claim-loop
+         * boundary; when a provider records them as separate counters,
+         * diagnostics must not fail only because a concurrent sample sees the
+         * two counters temporarily differ.
          */
         arceos_ex_must_uart_interrupt_chain_probe_observe_full_irq_cycle();
 
