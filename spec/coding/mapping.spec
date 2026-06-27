@@ -21,6 +21,9 @@ predicate coding_must_phase_not_resource_lifecycle() -> bool;
 predicate coding_must_keep_transition_boundaries() -> bool;
 predicate coding_must_check_before_checkpoint() -> bool;
 predicate coding_must_checkpoint_owner_matches_transition() -> bool;
+predicate coding_must_checkpoint_hook_be_observation_timing_only() -> bool;
+predicate coding_must_observation_facts_live_on_objects_or_providers() -> bool;
+predicate coding_must_failure_diagnostic_not_be_checkpoint_handler() -> bool;
 predicate coding_must_linker_script_driven_by_model_lds() -> bool;
 predicate coding_must_record_exceptions() -> bool;
 predicate coding_must_run_verification_gates() -> bool;
@@ -155,6 +158,37 @@ type CodingMappingMust {
          * visually match the derived trace.
          */
         coding_must_checkpoint_owner_matches_transition();
+
+        /*
+         * Checkpoint as observation timing:
+         *
+         * A checkpoint is a stable observation timing boundary. It may trigger
+         * trace backends or observer handlers, but it is not ordinary logging,
+         * does not advance object state by itself, and must not become a
+         * dependency of the transition whose boundary it observes.
+         */
+        coding_must_checkpoint_hook_be_observation_timing_only();
+
+        /*
+         * Observation facts:
+         *
+         * Structured observation content must live on the owning object,
+         * provider or explicit context object as long-term facts. Handlers may
+         * read, classify or emit those facts; they must not manufacture model
+         * facts through handler-local debug state.
+         */
+        coding_must_observation_facts_live_on_objects_or_providers();
+
+        /*
+         * Failure diagnostic separation:
+         *
+         * Failure diagnostics are structured error payloads collected on a
+         * failing predicate/check path and emitted when the error is reported.
+         * They are not additional checkpoints and are not checkpoint handlers
+         * registered on a failure point. Supporting them must not change the
+         * successful checkpoint sequence.
+         */
+        coding_must_failure_diagnostic_not_be_checkpoint_handler();
 
         /*
          * Linker script mapping:

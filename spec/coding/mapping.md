@@ -168,6 +168,14 @@ transition 函数应尽量只推进一个对象的一次生命周期迁移。若
 
 checkpoint 在代码中应实现为 hook，而不是普通日志调用。默认 hook 为空实现；具体工程可以通过编译或链接选项插入不同处理机制，例如 SBI 单字符输出、内存 trace buffer、QEMU 调试出口或未来的状态差分采集器。hook 不改变对象状态，不参与事件推进，也不能成为规格依赖。
 
+checkpoint hook 只定义观察时机。结构化观察内容应来自对象或 provider 暴露的长期 observation facts，例如生命周期状态、
+计数器、上下文标志、同步边界事实或最近一次 action snapshot。handler 可以读取这些事实并输出、分类或停机，
+但不得把 handler 的存在作为对象 transition 的前置条件，也不得把 handler 内部临时状态当作模型事实。
+
+失败诊断和 checkpoint handler 是不同机制。`failure_diagnostic` 属于失败路径上的错误 payload：在检测到
+predicate/check 失败时采集必要对象事实，随错误传播，并在最终输出阶段打印。它不是新增 checkpoint，也不是注册在
+某个失败 checkpoint 上的 handler。成功路径不得因为 failure diagnostic 支持而改变 checkpoint 序列。
+
 checkpoint trace 是独立观测路径，不属于 `EarlyCon` 或正式 `Console`。在入口前导期最早阶段，允许使用极小的 SBI 字符输出后端，只输出稳定 checkpoint id 对应的单个字符。这样可以避免字符串地址、缓冲区地址、allocator、FixMap、线性映射或 console 初始化状态对 trace 的影响。完整名称和语义应由静态映射表维护，例如 `EarlyVm.Ready -> 'D'`；字符仅用于早期烟雾测试和定位。
 
 如果某个 checkpoint 位于页表切换前后，hook 实现必须保证自身代码地址在当前地址空间可执行，且不得读取尚未映射的数据。进入 `EarlyVm` 或更晚阶段后，可以切换到更丰富的 trace 后端，但仍应保持与 early console/console 路径隔离。

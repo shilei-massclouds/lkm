@@ -65,12 +65,27 @@ MUST：普通 checkpoint handler 的 `HandlerRun` 原型只能保留只读 obser
 暴露。app smoke case 不得作为 checkpoint handler 注册；需要改变对象状态的测试应放在 app smoke 或明确建模的
 action-level probe 中。
 
+MUST：当前 checkpoint 机制按“观察点 + consumer”理解。默认构建不得启用重型 consumer；`LOG=trace` 通过
+`checkpoint_sbi_char` 启用 checkpoint trace consumer，`PROBE=...` 通过 `checkpoint_handler_*` 启用特定
+observer/handler。`PROBE=uart-irq-chain` 属于 UART/PLIC/IRQ 链路的 checkpoint observer；压力测试和并发缺陷定位
+可以使用它读取结构化事实，但不得把该 probe 路径等同于普通运行路径的稳定性证明。
+
+MUST：观察级别至少区分 default、light、failure-only、probe-heavy 和 stress/nightly。default 级别不启用重型
+checkpoint handler；light 级别只维护长期低开销 observation facts，例如对象状态、计数器、source-scoped counters
+和同步边界事实；failure-only 级别只在失败路径采集结构化 diagnostic；probe-heavy 级别由 `PROBE`、`PROBE_FILE`、
+`LOG=trace` 或后续等价开关显式开启；stress/nightly 级别负责重复执行、事件序列归档、分类和差分分析。
+
+MUST：观察域应按稳定子系统或对象划分，包括 PLIC/IRQ-domain、UART8250/TTY、virtio-blk/block I/O、VFS/ext2、
+scheduler/task、payload 和 phase boundary。对象事实由对应对象或 provider 维护，handler 只能读取和输出；不得为了
+某个缺陷在 handler 内新增只对该缺陷有意义的私有事实。新增域、开关、字段或默认启用策略必须先进入 coding 规格。
+
 结构化 failure diagnostic 是 `EventError` 的可选 payload，不是新增 checkpoint，也不得改变成功路径事件序列。
 统一输出格式为
 `failure_diagnostic phase=<phase> step=<step> object=<object> check=<check> first_failed=<stable-predicate-name>`，
 并且必须保留原有 `error=<code> event=<event> actual=<state> expected=<state> target=<state>` 行以兼容既有 stress
 分类。`phase`、`step`、`object`、`check` 和 `first_failed` 必须使用长期稳定名称，对应 model/coding 中的阶段、
 对象、action 或 predicate；不能使用一次性临时日志文本。默认 `EventError` 可以不带 diagnostic，阶段接入时应按高价值失败路径逐步补齐。
+failure diagnostic 的采集阶段和输出阶段必须保持分离：采集发生在失败 check 发现首个失败事实时，输出发生在错误最终报告时。
 
 ## 入口命令
 

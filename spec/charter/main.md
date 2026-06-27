@@ -3566,6 +3566,27 @@ trace 增强应由上述差分结果驱动。如果当前 checkpoint/trace/Event
 
 ### 内部可见性与 checkpoint 规格化
 
+本项目的内部可见性由四类概念共同组成，后续文档和实现必须区分使用。`checkpoint` 是稳定观察时机或语义边界，
+不是普通日志，也不是对象状态推进本身；同一个 checkpoint 可以被不同观察消费者使用。默认情况下 checkpoint
+consumer 可以为空；`LOG=trace` 属于启用 trace 输出 consumer，`PROBE=...` 属于启用特定 checkpoint
+observer/handler。`observation fact` 是对象或 provider 长期维护的结构化事实，例如状态、计数器、最近一次动作、
+source-scoped 计数或同步边界事实；这些事实由对象本身维护，handler 只在需要时读取和输出。`observer/handler`
+是 checkpoint 的消费者，负责读取事实、输出诊断或给出 probe outcome，但不得改变被观察对象的生命周期语义。
+`failure_diagnostic` 是失败路径上的结构化现场快照，作为错误 payload 采集并最终输出；它类似 panic 信息中的
+现场诊断部分，但不等同于 panic，也不是新增 checkpoint 或 checkpoint handler。
+
+观察能力必须按级别设计。默认运行级别应关闭重型 observer，保留必要生命周期检查和低开销长期事实，不产生大量内部输出。
+轻量观察级别可以长期维护 counters/facts，但这些事实应服务稳定语义边界，而不是一次性 debug。失败诊断级别只在
+predicate/check 失败时采集和输出结构化 `failure_diagnostic`，成功路径不得因此增加新的事件序列。重型观察级别通过
+`PROBE=...`、`PROBE_FILE=...`、`LOG=trace` 或后续等价机制显式开启，允许输出更详细信息，但必须承认它可能改变时序，
+不能替代普通路径的稳定性证据。`stress` / `nightly` 级别在上述能力之上做重复执行、序列聚类、纵向差分和必要的
+Linux-like 横向对比。
+
+观察域应按子系统、对象或稳定同步边界划分，而不是按单个缺陷划分。首批域包括 PLIC/IRQ-domain、UART8250/TTY、
+virtio-blk/block I/O、VFS/ext2、scheduler/task、payload 读取和 phase boundary。每个域可以有独立 observer
+或 probe profile；开启某个域的重型观察不得改变其它域的正式对象语义。长期对象事实的粒度可以细到 source、request、
+inode、block、task 或 IRQ context，但命名和字段必须先服务通用定位，再服务具体缺陷分析。
+
 长期 checkpoint 不应由实现侧为了某个缺陷临时散落产生，而应从规格出发。新增点位应先在 `spec/model` 中定义稳定事件名、触发语义、所属阶段/对象和可选字段，再在 coding 规格中定义实现义务，最后由 `impl/arceos_ex` 生成对应 trace/checkpoint。`docs/DEFECTS.md` 只记录问题现象、证据、分析进展和下一步定位需求；checkpoint 的长期原则、分层方式和候选边界应进入 charter，并在落地时进一步细化到 model/coding 规格。
 
 checkpoint 的选择标准是长期内部可见性，而不是一次性 debug 输出。合格点位应对应稳定系统语义边界，能够用于 stress/nightly 的纵向差分，能在 Linux-like 对照中找到概念位置，开销和时序扰动可控，并且不只服务单个缺陷。若某个事件暂时只能携带少量字段，应优先保持事件边界稳定，再逐步补充结构化字段；不得通过不断扩张事件名来编码大量临时状态组合。

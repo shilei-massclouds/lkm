@@ -193,6 +193,12 @@ predicate arceos_ex_must_checkpoint_handler_run_keep_single_observer_variant() -
 predicate arceos_ex_must_checkpoint_handler_run_not_accept_mut_context() -> bool;
 predicate arceos_ex_must_not_reintroduce_checkpoint_write_handler_variant() -> bool;
 predicate arceos_ex_must_not_register_smoke_cases_as_checkpoint_handlers() -> bool;
+predicate arceos_ex_must_checkpoint_consumers_be_cfg_selected() -> bool;
+predicate arceos_ex_must_log_trace_and_probe_remain_distinct_consumers() -> bool;
+predicate arceos_ex_must_define_observation_levels() -> bool;
+predicate arceos_ex_must_observation_domains_be_subsystem_or_object_scoped() -> bool;
+predicate arceos_ex_must_observation_facts_be_owned_by_objects_or_providers() -> bool;
+predicate arceos_ex_must_failure_diagnostic_collection_and_output_be_separate() -> bool;
 predicate arceos_ex_must_irq_open_prepare_model_path_under_interrupt_phase() -> bool;
 predicate arceos_ex_must_irq_open_prepare_code_path_follow_interrupt_phase_tree() -> bool;
 predicate arceos_ex_must_irq_open_prepare_run_after_local_irq_enable() -> bool;
@@ -1808,6 +1814,43 @@ type ArceosExIrqTimeInitCodingMust {
         arceos_ex_must_checkpoint_handler_run_keep_single_observer_variant();
         arceos_ex_must_checkpoint_handler_run_not_accept_mut_context();
         arceos_ex_must_not_reintroduce_checkpoint_write_handler_variant();
+
+        /*
+         * Checkpoint consumers:
+         *
+         * Checkpoints are observation points. Default builds must not enable a
+         * heavy consumer. LOG=trace enables the checkpoint_sbi_char trace
+         * consumer, while PROBE=... enables checkpoint_handler_* observers
+         * such as uart-irq-chain. These consumers may read and emit facts, but
+         * they must remain distinct from ordinary execution and from each
+         * other.
+         */
+        arceos_ex_must_checkpoint_consumers_be_cfg_selected();
+        arceos_ex_must_log_trace_and_probe_remain_distinct_consumers();
+
+        /*
+         * Observation levels and domains:
+         *
+         * The implementation must distinguish default, light, failure-only,
+         * probe-heavy and stress/nightly observation levels. Observation
+         * domains must be stable subsystem or object scopes such as PLIC,
+         * IRQ-domain, UART8250/TTY, virtio-blk/block, VFS/ext2,
+         * scheduler/task, payload and phase boundaries. Long-term facts
+         * belong to objects/providers; handlers only consume them.
+         */
+        arceos_ex_must_define_observation_levels();
+        arceos_ex_must_observation_domains_be_subsystem_or_object_scoped();
+        arceos_ex_must_observation_facts_be_owned_by_objects_or_providers();
+
+        /*
+         * Failure diagnostic lifecycle:
+         *
+         * failure_diagnostic is collected on a failing predicate/check path,
+         * attached to EventError, propagated, and emitted by the final error
+         * reporter. It is not a checkpoint handler and must not change the
+         * successful checkpoint sequence.
+         */
+        arceos_ex_must_failure_diagnostic_collection_and_output_be_separate();
 
         /*
          * Sink-only writes:
