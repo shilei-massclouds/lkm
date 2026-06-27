@@ -6,7 +6,7 @@
 
 ### DF-0002: `make run APP=smoke` 间歇性 `InitcallPhase` ready 失败
 
-- 状态：已复现，已由结构化 failure diagnostic 收敛到 UART/PLIC IRQ cycle 与 PLIC source 观测失败；RX loopback/batch probe 已按长期观察点补充结构化诊断，待继续核对 PLIC source claim/complete 语义并修复。
+- 状态：已复现，已由结构化 failure diagnostic 收敛到 UART/PLIC IRQ cycle 与 PLIC source 观测失败；近期 `stress-mem` 样本确认 zero-claim/loop-exit 与全局 claim/complete equality 属过强观察约束，规格和实现已改为以 source-scoped claim/complete delta 为主判据，当前转入保留 stress 回归观察。
 - 首次记录日期：2026-06-25。
 - 关联范围：`impl/arceos_ex` initcall 边界、UART/TTY initcall 路径、checkpoint/probe 时序。
 - 表现：普通 `timeout 90s make run APP=smoke` 曾返回 0，但启动日志输出 `arceos_ex initcall event failed` / `error=C event=S actual=B expected=B target=R`。失败点在 `InitcallPhase` 标记 ready 时，说明 `initcall_phase_ready(...)` 在 `INITCALL_PHASE_STATE` 从 Base 推进到 Ready 前返回 false。
@@ -54,6 +54,7 @@
 - 2026-06-27 `stress-mem` 低扰动路径在 DF-0001 交叉入口捕获到一次 `plic.zero_claim_loop_exit_delta_matched`。复核实现后确认 native PLIC 在 `claim()` 中先记录 zero claim，返回上层后才在 claim loop 中记录 loop exit；两个计数之间存在合法并发采样窗口。因此该样本更像观察模型过强，而不是 PLIC claim loop 未退出。规格和实现已改为要求同一轮 claim loop 中 zero claim 与 loop exit 都被观察到，但不再把两个独立 counter 的瞬时不相等作为失败事实。该调整只消除这一类误判，不代表 DF-0002 根因已解决。
 - 2026-06-27 去掉 zero-claim/loop-exit 瞬时 equality 后复跑 `stress-mem`：DF-0001 交叉入口 500/500 成功，报告 `/tmp/lkm-stress-out/20260627T141744Z-df-0001-user-boot-stress-mem/report.md`；DF-0002 smoke 500 次中成功 498 次、失败 2 次，报告 `/tmp/lkm-stress-out/20260627T143020Z-df-0002-smoke-initcall-stress-mem/report.md`。两个失败同属序列 `17bfcba2deb0624a`，`first_failed=plic.claim_complete_delta_matched`。由于该诊断发生在 `source_complete_observed` 之后、`source_claim_complete_delta_matched` 之前，当前证据指向全局 claim/complete counter equality 仍过强；一轮 UART source IRQ cycle 应以 source-scoped claim/complete delta 为闭环主判据，全局 counter 只能作为辅助观测，不能因其它 source 或并发采样窗口扰动阻断当前 source cycle。
 - 2026-06-27 去掉全局 claim/complete equality 后重新验证：`make verify`、`make -C impl/arceos_ex build APP=smoke`、`make -C impl/arceos_ex run APP=smoke` 和 `git diff --check` 均通过。随后复跑 `stress-mem` 两个 500 次入口：DF-0002 smoke 500/500 成功，报告 `/tmp/lkm-stress-out/20260627T144807Z-df-0002-smoke-initcall-stress-mem/report.md`；DF-0001 交叉入口 500/500 成功，报告 `/tmp/lkm-stress-out/20260627T150119Z-df-0001-user-boot-stress-mem/report.md`。本轮没有失败类集合可差分；这支持“全局 counter equality 属过强观察约束”的修复判断，但仍应保留后续 stress 回归，直到 source-scoped failure 也长期不再出现。
+- 2026-06-27/28 继续追加一轮 `stress-mem` 回归采样：DF-0002 smoke 500/500 成功，报告 `/tmp/lkm-stress-out/20260627T154018Z-df-0002-smoke-initcall-stress-mem/report.md`，总耗时 767.253s，平均 1.533s/次；DF-0001 交叉入口 500/500 成功，报告 `/tmp/lkm-stress-out/20260627T161142Z-df-0001-user-boot-stress-mem/report.md`，总耗时 679.55s，平均 1.358s/次。两轮均未发现 `failure_diagnostic`、`ready_check_failed`、`arceos_ex initcall event failed`、`read user ELF failed`、panic 或真实 timeout 记录，只有 manifest 中的 `timeout_seconds=180` 配置项。本轮进一步支持近期失败属于观察机制过强导致的误报，而不是被测功能路径本身的并发缺陷；仍保留 DF-0001/DF-0002 stress 回归入口用于长期确认。
 
 下一步定位建议：
 
@@ -94,6 +95,7 @@
 - 2026-06-27 提交 `a26af65` 后追加普通 DF-0001 stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 497 次、失败 3 次；报告在 `/tmp/lkm-stress-out/20260627T030109Z-df-0001-user-boot/report.md`。本轮没有复现 `read user ELF failed`，成功样本仍全部归入 `bd43ae22bfcc7354`；3 次失败均归类为 DF-0002 `InitcallPhase` ready failure，序列 `3a657270b6fb3842`，样本为 `run-0049`、`run-0128`、`run-0294`。
 - 2026-06-27 提交 `beaab87` 后追加普通 DF-0001 stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 498 次、失败 2 次；报告在 `/tmp/lkm-stress-out/20260627T035519Z-df-0001-user-boot/report.md`。本轮仍没有复现 `read user ELF failed`；2 次失败均归类为 DF-0002 `InitcallPhase` ready failure，并由结构化诊断定位到 `setup_objects.uart_interrupt_chain_probe.setup` / `UartInterruptChainProbe`。
 - 2026-06-27 扩展 `UartInterruptChainProbe.setup` 内部 failure diagnostic 后追加普通 DF-0001 stress 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 499 次、失败 1 次；报告在 `/tmp/lkm-stress-out/20260627T044327Z-df-0001-user-boot/report.md`。本轮仍没有复现 `read user ELF failed`；1 次失败归类为 DF-0002 `InitcallPhase` ready failure，并细化为 `first_failed=uart_interrupt_chain_probe.plic_claim_observed`。
+- 2026-06-28 在 DF-0002 观察约束修正后追加低扰动 DF-0001 `stress-mem` 交叉回归 500 次：`impl/arceos_ex/tests/stress/runner.py impl/arceos_ex/tests/stress/cases/df-0001-user-boot-stress-mem.toml --runs 500 --timeout 180 --out-dir /tmp/lkm-stress-out`，完成 500 次、成功 500 次、失败 0 次；报告在 `/tmp/lkm-stress-out/20260627T161142Z-df-0001-user-boot-stress-mem/report.md`。本轮成功分类为 `user-boot-success`，序列摘要为 `UserHello` 与 `UserExitStatus:status=0`，没有复现 `read user ELF failed`，也没有 DF-0002 类 initcall ready failure。
 
 当前判断：
 
