@@ -43,6 +43,10 @@ SMOKE_RESULT_RE = re.compile(
     r"passed=(?P<passed>\d+) failed=(?P<failed>\d+) total=(?P<total>\d+)"
 )
 USER_EXIT_RE = re.compile(r"user exit status=(?P<status>-?\d+)")
+STRESS_MEM_RE = re.compile(
+    r"^stress_mem: v=1 encoding=hex bytes=(?P<bytes>\d+) total=(?P<total>\d+) "
+    r"overflow=(?P<overflow>[01]) dropped=(?P<dropped>\d+) data=(?P<data>[0-9a-f]*)$"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -100,8 +104,9 @@ def main(argv: list[str] | None = None) -> int:
             env_updates=_string_map(case.get("env", {}), "env"),
             rules=rules,
         )
-        run_results.append(run_result)
         _record_sequence(sequences, run_result)
+        _write_run_metadata(run_dir, run_result, repo_root)
+        run_results.append(_persisted_run_result(run_result))
 
     _write_sequences(output_dir, sequences)
     summary = _build_summary(case_name, runs, run_results, sequences, dry_run=False)
@@ -154,16 +159,11 @@ def _execute_one_run(
     ended = datetime.now(timezone.utc)
     duration = time.monotonic() - start_monotonic
 
-    (run_dir / "stdout.log").write_text(stdout, encoding="utf-8", errors="replace")
-    (run_dir / "stderr.log").write_text(
-        "stderr was merged into stdout.log to preserve event order.\n",
-        encoding="utf-8",
-    )
-
-    events = _extract_events(stdout)
+    observed_text, stress_mem = _observed_text(stdout)
+    events = _extract_events(observed_text)
     sequence_tokens = [_event_token(event) for event in events]
     sequence_hash = _sequence_hash(sequence_tokens)
-    classification = _classify(stdout, returncode, timed_out, rules)
+    classification = _classify(observed_text, returncode, timed_out, rules)
     result = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
@@ -179,13 +179,34 @@ def _execute_one_run(
         "class_description": classification.get("description", ""),
         "sequence_hash": sequence_hash,
         "event_count": len(events),
-        "stdout": str(run_dir / "stdout.log"),
-        "events": str(run_dir / "events.jsonl"),
     }
-    _write_jsonl(run_dir / "events.jsonl", events)
-    _write_json(run_dir / "result.json", result)
-    _write_json(run_dir / "meta.json", {**result, "repo_root": str(repo_root)})
-    return {**result, "events_data": events, "sequence_tokens": sequence_tokens}
+    if stress_mem is None:
+        result["events"] = str(run_dir / "events.jsonl")
+        result["events_saved"] = True
+        (run_dir / "stdout.log").write_text(stdout, encoding="utf-8", errors="replace")
+        (run_dir / "stderr.log").write_text(
+            "stderr was merged into stdout.log to preserve event order.\n",
+            encoding="utf-8",
+        )
+        result["stdout"] = str(run_dir / "stdout.log")
+        result["stdout_saved"] = True
+        _write_jsonl(run_dir / "events.jsonl", events)
+    else:
+        result["events_saved"] = False
+        result["stdout_saved"] = False
+        result["stress_mem"] = stress_mem
+    run = {
+        **result,
+        "events_data": events,
+        "sequence_tokens": sequence_tokens,
+        "_run_dir": str(run_dir),
+    }
+    if stress_mem is not None:
+        run["captured_stdout"] = stdout
+        run["stress_mem_text"] = observed_text
+        run["_stdout_candidate"] = str(run_dir / "stdout.first-seen.log")
+        run["_events_candidate"] = str(run_dir / "events.first-seen.jsonl")
+    return run
 
 
 def _run_setup_command(
@@ -256,6 +277,31 @@ def _extract_events(text: str) -> list[dict[str, Any]]:
     if not events:
         events.append({"i": 0, "line": 0, "kind": "run", "name": "NoObservedEvents"})
     return events
+
+
+def _observed_text(stdout: str) -> tuple[str, dict[str, Any] | None]:
+    parsed = _parse_stress_mem(stdout)
+    if parsed is None:
+        return stdout, None
+    text, metadata = parsed
+    return text, metadata
+
+
+def _parse_stress_mem(stdout: str) -> tuple[str, dict[str, Any]] | None:
+    for raw_line in reversed(stdout.splitlines()):
+        line = _normalize_line(raw_line)
+        match = STRESS_MEM_RE.match(line)
+        if not match:
+            continue
+        data = bytes.fromhex(match.group("data"))
+        text = data.decode("utf-8", errors="replace")
+        return text, {
+            "bytes": int(match.group("bytes")),
+            "total": int(match.group("total")),
+            "overflow": match.group("overflow") == "1",
+            "dropped": int(match.group("dropped")),
+        }
+    return None
 
 
 def _normalize_line(line: str) -> str:
@@ -437,6 +483,7 @@ def _record_sequence(sequences: dict[tuple[str, str, str], dict[str, Any]], run:
     key = (str(run["result"]), str(run["class_id"]), str(run["sequence_hash"]))
     entry = sequences.get(key)
     if entry is None:
+        _write_first_seen_artifacts(run)
         entry = {
             "schema_version": SCHEMA_VERSION,
             "result": run["result"],
@@ -452,6 +499,50 @@ def _record_sequence(sequences: dict[tuple[str, str, str], dict[str, Any]], run:
         sequences[key] = entry
     entry["count"] += 1
     entry["run_ids"].append(run["run_id"])
+
+
+def _write_first_seen_artifacts(run: dict[str, Any]) -> None:
+    events_path = run.get("_events_candidate")
+    events_data = run.get("events_data")
+    if isinstance(events_path, str) and isinstance(events_data, list):
+        _write_jsonl(Path(events_path), events_data)
+        run["events"] = events_path
+        run["events_saved"] = True
+
+    stdout_path = run.get("_stdout_candidate")
+    captured_stdout = run.get("captured_stdout")
+    if isinstance(stdout_path, str) and isinstance(captured_stdout, str):
+        Path(stdout_path).write_text(captured_stdout, encoding="utf-8", errors="replace")
+        run["stdout"] = stdout_path
+        run["stdout_saved"] = True
+    stress_mem_text = run.get("stress_mem_text")
+    if isinstance(stdout_path, str) and isinstance(stress_mem_text, str):
+        decoded_path = Path(stdout_path).with_suffix(".stress-mem.txt")
+        decoded_path.write_text(
+            stress_mem_text,
+            encoding="utf-8",
+            errors="replace",
+        )
+        run["stress_mem_decoded"] = str(decoded_path)
+
+
+def _write_run_metadata(run_dir: Path, run: dict[str, Any], repo_root: Path) -> None:
+    result = _persisted_run_result(run)
+    _write_json(run_dir / "result.json", result)
+    _write_json(run_dir / "meta.json", {**result, "repo_root": str(repo_root)})
+
+
+def _persisted_run_result(run: dict[str, Any]) -> dict[str, Any]:
+    internal_keys = {
+        "events_data",
+        "sequence_tokens",
+        "captured_stdout",
+        "stress_mem_text",
+        "_run_dir",
+        "_stdout_candidate",
+        "_events_candidate",
+    }
+    return {key: value for key, value in run.items() if key not in internal_keys}
 
 
 def _write_sequences(output_dir: Path, sequences: dict[tuple[str, str, str], dict[str, Any]]) -> None:

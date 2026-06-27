@@ -7,6 +7,7 @@ empty :=
 space := $(empty) $(empty)
 PROBE ?=
 PROBE_FILE ?=
+STRESS_MEM_BYTES ?= 65536
 PLIC_PROVIDER ?= native
 KNOWN_PLIC_PROVIDERS := native linux-object
 UNKNOWN_PLIC_PROVIDER := $(filter-out $(KNOWN_PLIC_PROVIDERS),$(PLIC_PROVIDER))
@@ -23,14 +24,22 @@ LOG_TRACE_PROBE := $(if $(filter trace,$(LOG)),announce,)
 RUN_PROBE := $(strip $(PROBE) $(LOG_TRACE_PROBE))
 PROBE_LIST_RAW := $(strip $(subst $(comma),$(space),$(PROBE)) $(PROBE_FILE_LIST) $(LOG_TRACE_PROBE))
 PROBE_LIST := $(strip $(sort $(PROBE_LIST_RAW)))
-KNOWN_PROBES := announce memblock page-allocator earlycon kernel-init-task of-platform scheduler-action slub console-handoff uart-irq-chain virtio-bus virtio-blk virtio-rng user-boot vmalloc-mapping linux-plic smoke
+KNOWN_PROBES := announce memblock page-allocator earlycon kernel-init-task of-platform scheduler-action slub console-handoff uart-irq-chain virtio-bus virtio-blk virtio-rng user-boot vmalloc-mapping linux-plic smoke stress-mem
 UNKNOWN_PROBES := $(filter-out $(KNOWN_PROBES),$(PROBE_LIST))
 ifneq ($(UNKNOWN_PROBES),)
 $(error unknown PROBE handler(s): $(UNKNOWN_PROBES))
 endif
+KNOWN_STRESS_MEM_BYTES := 32768 65536 131072
+UNKNOWN_STRESS_MEM_BYTES := $(filter-out $(KNOWN_STRESS_MEM_BYTES),$(STRESS_MEM_BYTES))
+ifneq ($(filter stress-mem,$(PROBE_LIST)),)
+ifneq ($(UNKNOWN_STRESS_MEM_BYTES),)
+$(error unknown STRESS_MEM_BYTES: $(STRESS_MEM_BYTES))
+endif
+endif
 PROBE_CFGS := $(foreach probe,$(PROBE_LIST),--cfg checkpoint_handler_$(subst -,_,$(probe)))
+STRESS_MEM_CFG := $(if $(filter stress-mem,$(PROBE_LIST)),--cfg stress_mem_bytes_$(STRESS_MEM_BYTES),)
 PROBE_BUILD_LABEL := $(subst $(space),+,$(PROBE_LIST))
-PROBE_BUILD_SUFFIX := $(if $(PROBE_LIST),/probe-$(subst /,_,$(subst .,_,$(PROBE_BUILD_LABEL))))
+PROBE_BUILD_SUFFIX := $(if $(PROBE_LIST),/probe-$(subst /,_,$(subst .,_,$(PROBE_BUILD_LABEL)))$(if $(filter stress-mem,$(PROBE_LIST)),-bytes$(STRESS_MEM_BYTES),))
 PLIC_PROVIDER_SUFFIX := $(if $(filter native,$(PLIC_PROVIDER)),,/plic-$(PLIC_PROVIDER))
 BUILD_DIR := build/$(TARGET)/$(PROFILE)/$(APP)$(PLIC_PROVIDER_SUFFIX)$(PROBE_BUILD_SUFFIX)
 KERNEL_ELF := $(BUILD_DIR)/arceos_ex.elf
@@ -89,6 +98,7 @@ RUSTFLAGS := \
 	--cfg $(APP_CFG) \
 	$(PLIC_PROVIDER_CFG) \
 	$(PROBE_CFGS) \
+	$(STRESS_MEM_CFG) \
 	$(PLIC_PROVIDER_LINK_ARGS) \
 	$(EXTRA_RUSTFLAGS)
 

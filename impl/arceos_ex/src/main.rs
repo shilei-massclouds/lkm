@@ -10,6 +10,8 @@ mod checkpoint;
 mod context;
 mod objects;
 mod phases;
+#[cfg(checkpoint_handler_stress_mem)]
+mod stress_mem;
 mod trace;
 
 use core::panic::PanicInfo;

@@ -1,0 +1,12 @@
+name = "df-0002-smoke-initcall-stress-mem"
+description = "Repeat smoke with unified in-guest memory capture for DF-0002 timing checks."
+default_runs = 30
+timeout_seconds = 120
+working_directory = "."
+command = ["make", "run", "APP=smoke", "PROBE=stress-mem", "STRESS_MEM_BYTES=65536"]
+classifier = "../classifiers/defects.toml"
+
+[metadata]
+defect = "DF-0002"
+ordinary_path_required = false
+observation_mode = "stress-mem"

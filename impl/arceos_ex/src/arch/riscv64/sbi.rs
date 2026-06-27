@@ -20,16 +20,33 @@ pub fn read_time() -> u64 {
 }
 
 pub fn putchar(byte: u8) {
+    #[cfg(checkpoint_handler_stress_mem)]
+    crate::stress_mem::capture_byte(byte);
+    #[cfg(not(checkpoint_handler_stress_mem))]
+    putchar_raw(byte);
+}
+
+pub fn putchar_raw(byte: u8) {
     let _ = sbi_call_1(EID_LEGACY_CONSOLE_PUTCHAR, 0, byte as usize);
 }
 
 pub fn putstr(message: &str) {
+    #[cfg(checkpoint_handler_stress_mem)]
+    crate::stress_mem::capture_bytes(message.as_bytes());
+    #[cfg(not(checkpoint_handler_stress_mem))]
+    putstr_raw(message);
+}
+
+pub fn putstr_raw(message: &str) {
     for byte in message.bytes() {
-        putchar(byte);
+        putchar_raw(byte);
     }
 }
 
 pub fn system_shutdown() -> ! {
+    #[cfg(checkpoint_handler_stress_mem)]
+    crate::stress_mem::finish();
+
     let _ = sbi_call_2(
         EID_SRST,
         FID_SYSTEM_RESET,

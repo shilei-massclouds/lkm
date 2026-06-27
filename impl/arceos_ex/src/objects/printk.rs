@@ -276,6 +276,10 @@ pub fn write_str(message: &str) {
 }
 
 pub fn write_bytes(bytes: &[u8]) {
+    if capture_stress_mem(bytes) {
+        return;
+    }
+
     unsafe {
         (&raw mut PRINTK_BUFFER)
             .as_mut()
@@ -300,6 +304,17 @@ pub fn write_bytes(bytes: &[u8]) {
             }
         }
     }
+}
+
+#[cfg(checkpoint_handler_stress_mem)]
+fn capture_stress_mem(bytes: &[u8]) -> bool {
+    crate::stress_mem::capture_bytes(bytes);
+    true
+}
+
+#[cfg(not(checkpoint_handler_stress_mem))]
+fn capture_stress_mem(_bytes: &[u8]) -> bool {
+    false
 }
 
 pub fn register_boot_console() {

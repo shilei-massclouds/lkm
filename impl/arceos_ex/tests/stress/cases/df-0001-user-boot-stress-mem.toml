@@ -1,0 +1,12 @@
+name = "df-0001-user-boot-stress-mem"
+description = "Repeat user-boot with unified in-guest memory capture for DF-0001 timing checks."
+default_runs = 30
+timeout_seconds = 120
+working_directory = "."
+command = ["make", "run", "APP=user-boot", "PROBE=stress-mem", "STRESS_MEM_BYTES=65536"]
+classifier = "../classifiers/defects.toml"
+
+[metadata]
+defect = "DF-0001"
+ordinary_path_required = false
+observation_mode = "stress-mem"

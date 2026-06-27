@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 import unittest
 
 import runner
@@ -77,6 +79,22 @@ class StressRunnerTests(unittest.TestCase):
         self.assertEqual(events[0]["kind"], "symptom")
         self.assertEqual(events[0]["name"], "ReadUserElfFailed")
 
+    def test_uses_stress_mem_text_when_present(self) -> None:
+        text = "result: \x1b[32mok\x1b[0m. passed=2 failed=0 total=2\n"
+        size = len(text.encode())
+        line = (
+            f"stress_mem: v=1 encoding=hex bytes={size} total={size} "
+            f"overflow=0 dropped=0 data={text.encode().hex()}\n"
+        )
+        observed, stress_mem = runner._observed_text("host noise\n" + line)
+        self.assertEqual(observed, text)
+        self.assertIsNotNone(stress_mem)
+        events = runner._extract_events(observed)
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            ["smoke_result:SmokeResult:passed=2:failed=0:total=2"],
+        )
+
     def test_failure_rules_take_precedence_over_success_rules(self) -> None:
         rules = [
             {
@@ -135,6 +153,54 @@ class StressRunnerTests(unittest.TestCase):
         self.assertEqual(entry["count"], 2)
         self.assertEqual(entry["first_run"], "run-0001")
         self.assertEqual(entry["run_ids"], ["run-0001", "run-0002"])
+
+    def test_duplicate_stress_mem_sequence_saves_first_artifacts_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = runner._extract_events("result: ok. passed=1 failed=0 total=1\n")
+            tokens = [runner._event_token(event) for event in events]
+            sequence_hash = runner._sequence_hash(tokens)
+
+            base = {
+                "result": "success",
+                "class_id": "smoke-success",
+                "sequence_hash": sequence_hash,
+                "sequence_tokens": tokens,
+                "events_data": events,
+                "captured_stdout": "stress_mem: ...\n",
+                "stress_mem_text": "result: ok. passed=1 failed=0 total=1\n",
+            }
+            first = {
+                **base,
+                "run_id": "run-0001",
+                "events_saved": False,
+                "stdout_saved": False,
+                "_events_candidate": str(root / "run-0001" / "events.first-seen.jsonl"),
+                "_stdout_candidate": str(root / "run-0001" / "stdout.first-seen.log"),
+            }
+            second = {
+                **base,
+                "run_id": "run-0002",
+                "events_saved": False,
+                "stdout_saved": False,
+                "_events_candidate": str(root / "run-0002" / "events.first-seen.jsonl"),
+                "_stdout_candidate": str(root / "run-0002" / "stdout.first-seen.log"),
+            }
+            (root / "run-0001").mkdir()
+            (root / "run-0002").mkdir()
+
+            sequences = {}
+            runner._record_sequence(sequences, first)
+            runner._record_sequence(sequences, second)
+
+            self.assertTrue(first["events_saved"])
+            self.assertTrue(first["stdout_saved"])
+            self.assertFalse(second["events_saved"])
+            self.assertFalse(second["stdout_saved"])
+            self.assertTrue((root / "run-0001" / "events.first-seen.jsonl").exists())
+            self.assertTrue((root / "run-0001" / "stdout.first-seen.log").exists())
+            self.assertFalse((root / "run-0002" / "events.first-seen.jsonl").exists())
+            self.assertFalse((root / "run-0002" / "stdout.first-seen.log").exists())
 
 
 if __name__ == "__main__":
