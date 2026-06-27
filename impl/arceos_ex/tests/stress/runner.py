@@ -32,6 +32,11 @@ READY_CHECK_FAILED_RE = re.compile(
     r"^ready_check_failed phase=(?P<phase>\S+) check=(?P<check>\S+) "
     r"first_failed=(?P<first_failed>\S+)"
 )
+FAILURE_DIAGNOSTIC_RE = re.compile(
+    r"^failure_diagnostic phase=(?P<phase>\S+) step=(?P<step>\S+) "
+    r"object=(?P<object>\S+) check=(?P<check>\S+) "
+    r"first_failed=(?P<first_failed>\S+)"
+)
 SMOKE_RESULT_RE = re.compile(
     r"passed=(?P<passed>\d+) failed=(?P<failed>\d+) total=(?P<total>\d+)"
 )
@@ -282,6 +287,18 @@ def _event_from_line(line: str, line_no: int) -> dict[str, Any] | None:
             "first_failed": match.group("first_failed"),
             "raw": line,
         }
+    if match := FAILURE_DIAGNOSTIC_RE.match(line):
+        return {
+            "line": line_no,
+            "kind": "failure_diagnostic",
+            "name": "FailureDiagnostic",
+            "phase": match.group("phase"),
+            "step": match.group("step"),
+            "object": match.group("object"),
+            "check": match.group("check"),
+            "first_failed": match.group("first_failed"),
+            "raw": line,
+        }
     if match := PHASE_ERROR_RE.search(line):
         return {
             "line": line_no,
@@ -345,6 +362,12 @@ def _event_token(event: dict[str, Any]) -> str:
     if kind == "ready_check_failed":
         return (
             f"{kind}:{name}:phase={event.get('phase')}:check={event.get('check')}:"
+            f"first_failed={event.get('first_failed')}"
+        )
+    if kind == "failure_diagnostic":
+        return (
+            f"{kind}:{name}:phase={event.get('phase')}:step={event.get('step')}:"
+            f"object={event.get('object')}:check={event.get('check')}:"
             f"first_failed={event.get('first_failed')}"
         )
     if kind == "phase_error":

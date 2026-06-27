@@ -84,6 +84,35 @@ pub struct EventError {
     pub actual: State,
     pub expected: State,
     pub target: State,
+    pub diagnostic: Option<FailureDiagnostic>,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct FailureDiagnostic {
+    pub phase: &'static str,
+    pub step: &'static str,
+    pub object: &'static str,
+    pub check: &'static str,
+    pub first_failed: &'static str,
+}
+
+impl FailureDiagnostic {
+    pub const fn new(
+        phase: &'static str,
+        step: &'static str,
+        object: &'static str,
+        check: &'static str,
+        first_failed: &'static str,
+    ) -> Self {
+        Self {
+            phase,
+            step,
+            object,
+            check,
+            first_failed,
+        }
+    }
 }
 
 impl EventError {
@@ -102,6 +131,7 @@ impl EventError {
             actual,
             expected,
             target,
+            diagnostic: None,
         }
     }
 
@@ -158,6 +188,22 @@ impl EventError {
     pub const fn target_state_code(self) -> u8 {
         self.target.code()
     }
+
+    pub const fn diagnostic(self) -> Option<FailureDiagnostic> {
+        self.diagnostic
+    }
+
+    pub fn with_diagnostic(mut self, diagnostic: FailureDiagnostic) -> Self {
+        self.diagnostic = Some(diagnostic);
+        self
+    }
+
+    pub fn with_diagnostic_if_absent(mut self, diagnostic: FailureDiagnostic) -> Self {
+        if self.diagnostic.is_none() {
+            self.diagnostic = Some(diagnostic);
+        }
+        self
+    }
 }
 
 impl State {
@@ -188,6 +234,23 @@ pub const fn failed_condition(
         expected,
         target,
     ))
+}
+
+pub fn failed_condition_with_diagnostic(
+    event: LifecycleEvent,
+    actual: State,
+    expected: State,
+    target: State,
+    diagnostic: FailureDiagnostic,
+) -> EventResult {
+    Err(EventError::failed(
+        EventErrorCode::ConditionFailed,
+        event,
+        actual,
+        expected,
+        target,
+    )
+    .with_diagnostic(diagnostic))
 }
 
 pub struct Lifecycle {

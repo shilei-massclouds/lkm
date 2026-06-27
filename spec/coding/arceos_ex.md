@@ -65,6 +65,13 @@ MUST：普通 checkpoint handler 的 `HandlerRun` 原型只能保留只读 obser
 暴露。app smoke case 不得作为 checkpoint handler 注册；需要改变对象状态的测试应放在 app smoke 或明确建模的
 action-level probe 中。
 
+结构化 failure diagnostic 是 `EventError` 的可选 payload，不是新增 checkpoint，也不得改变成功路径事件序列。
+统一输出格式为
+`failure_diagnostic phase=<phase> step=<step> object=<object> check=<check> first_failed=<stable-predicate-name>`，
+并且必须保留原有 `error=<code> event=<event> actual=<state> expected=<state> target=<state>` 行以兼容既有 stress
+分类。`phase`、`step`、`object`、`check` 和 `first_failed` 必须使用长期稳定名称，对应 model/coding 中的阶段、
+对象、action 或 predicate；不能使用一次性临时日志文本。默认 `EventError` 可以不带 diagnostic，阶段接入时应按高价值失败路径逐步补齐。
+
 ## 入口命令
 
 当前入口统一使用仓库顶层 `Makefile`，默认内核为 `arceos_ex`。
@@ -423,11 +430,13 @@ trace start/finish 边界、返回码、preempt count 快照与失衡修复或�
 对应对象规格和后续 smoke 测试覆盖，不混入 initcall 机制本身。
 
 `initcall_phase_ready(...)` 是 `InitcallPhase.Ready` 的聚合 ready-check。实现不得只在该聚合谓词失败时输出
-压缩的 `EventError` 字段；必须同步输出结构化诊断行：
-`ready_check_failed phase=InitcallPhase check=initcall_phase_ready first_failed=<stable-predicate-name>`。
+压缩的 `EventError` 字段；必须通过统一 `failure_diagnostic` payload 报告
+`phase=InitcallPhase step=checkpoint_ready object=InitcallPhase check=<stable-predicate-name>`。
 `first_failed` 必须按 `initcall_phase_ready(...)` 的规范顺序报告第一个 false 条件，并使用长期稳定名称；
-该名称应对应 model/coding 中的对象状态或谓词事实，而不是一次性临时日志文本。压力测试与 nightly 流程应把这类
-ready-check 诊断视为事件点，用于 failure-vs-success 序列对齐和首个差异点定位。
+该名称应对应 model/coding 中的对象状态或谓词事实，而不是一次性临时日志文本。第一批 failure diagnostic 还必须覆盖
+`InitcallPhase.setup_objects()` 后半段的关键 setup/action 调用，以及 `InitcallBoundary.setup()` 内部依赖检查；
+下游对象若已经携带更具体的 diagnostic，外层不得覆盖它。压力测试与 nightly 流程应把这类诊断视为事件点，用于
+failure-vs-success 序列对齐和首个差异点定位。
 
 `of_platform_default_populate_init()` 是 `PlatformBus` 的 entry action。它的源对象是正式
 `DeviceTree`，目标对象是 `PlatformBus`；`InitcallTable` 只负责按表执行该 entry，不拥有其目标副作用。

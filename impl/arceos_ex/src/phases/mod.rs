@@ -19,6 +19,20 @@ pub fn shutdown_on_error(result: EventResult, message: &str) {
 fn print_event_error(error: EventError) {
     use crate::arch::riscv64::sbi;
 
+    if let Some(diagnostic) = error.diagnostic() {
+        sbi::putstr("failure_diagnostic phase=");
+        sbi::putstr(diagnostic.phase);
+        sbi::putstr(" step=");
+        sbi::putstr(diagnostic.step);
+        sbi::putstr(" object=");
+        sbi::putstr(diagnostic.object);
+        sbi::putstr(" check=");
+        sbi::putstr(diagnostic.check);
+        sbi::putstr(" first_failed=");
+        sbi::putstr(diagnostic.first_failed);
+        sbi::putchar(b'\n');
+    }
+
     sbi::putstr("error=");
     sbi::putchar(error.error_code());
     sbi::putstr(" event=");

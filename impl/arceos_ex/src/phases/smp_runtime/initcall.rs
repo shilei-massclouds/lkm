@@ -1,8 +1,11 @@
 use crate::{
     context::Context,
     objects::{
-        initcall::{initcall_phase_ready_diagnostic, InitcallReadyCheckDiagnostic},
-        state::{failed_condition, EventResult, LifecycleEvent, State},
+        initcall::initcall_phase_ready_diagnostic,
+        state::{
+            failed_condition, failed_condition_with_diagnostic, EventResult, FailureDiagnostic,
+            LifecycleEvent, State,
+        },
     },
     trace::Checkpoint,
 };
@@ -22,111 +25,251 @@ pub fn setup(ctx: &mut Context) -> ! {
 
 fn setup_objects(ctx: &mut Context) -> EventResult {
     if !crate::phases::smp_runtime::runtime_core::is_ready() {
-        return failed_condition(
+        return failed_condition_with_diagnostic(
             LifecycleEvent::Setup,
             State::Base,
             State::Ready,
             State::Ready,
+            initcall_failure_diagnostic(
+                "setup_objects.runtime_core_ready",
+                "RuntimeCorePhase",
+                "runtime_core_phase_ready",
+            ),
         );
     }
 
-    ctx.cpuset_smp_trimmed.setup(&ctx.runtime_core_boundary)?;
-    ctx.driver_core_base
-        .setup(&ctx.cpuset_smp_trimmed, &ctx.page_allocator, &ctx.workqueue)?;
-    ctx.platform_bus_root_device
-        .setup(&ctx.driver_core_base, &ctx.static_objects)?;
-    ctx.platform_bus
-        .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device)?;
-    ctx.virtio_bus.setup(&ctx.platform_bus)?;
-    ctx.hwrng_core.setup(&ctx.driver_core_base)?;
-    ctx.block_device_registry.setup(&ctx.driver_core_base)?;
-    ctx.driver_core_deferred.setup(&ctx.platform_bus)?;
-    ctx.irq_proc_view_deferred.setup(
-        &ctx.driver_core_base,
-        &ctx.platform_bus_root_device,
-        &ctx.platform_bus,
-        &ctx.driver_core_deferred,
-        &ctx.irq_dispatch_tree,
+    with_initcall_diagnostic(
+        ctx.cpuset_smp_trimmed.setup(&ctx.runtime_core_boundary),
+        "setup_objects.cpuset_smp_trimmed.setup",
+        "CpusetSmpTrimmed",
+        "cpuset_smp_trimmed.setup",
     )?;
-    ctx.ctor_table
-        .setup(&ctx.irq_proc_view_deferred, &ctx.static_objects)?;
-    ctx.initcall_table
-        .preset(&ctx.ctor_table, &ctx.static_objects)?;
-    run_initcall_table(ctx)?;
-    crate::objects::plic_provider::setup_registered_provider(&ctx.device_tree, &ctx.plic)?;
-    crate::objects::virtio_blk::setup_live_driver(
-        &mut ctx.virtio_blk_runtime,
-        &ctx.virtio_bus,
-        &mut ctx.block_device_registry,
-        &ctx.kernel_image,
-        &ctx.plic,
-        &mut ctx.plic_irq_domain,
+    with_initcall_diagnostic(
+        ctx.driver_core_base
+            .setup(&ctx.cpuset_smp_trimmed, &ctx.page_allocator, &ctx.workqueue),
+        "setup_objects.driver_core_base.setup",
+        "DriverCoreBase",
+        "driver_core_base.setup",
     )?;
-    crate::objects::virtio_rng::setup_live_driver(
-        &mut ctx.virtio_rng_runtime,
-        &ctx.virtio_bus,
-        &mut ctx.hwrng_core,
-        &ctx.kernel_image,
-        &ctx.plic,
-        &mut ctx.plic_irq_domain,
-        &ctx.irq_handler_registry,
+    with_initcall_diagnostic(
+        ctx.platform_bus_root_device
+            .setup(&ctx.driver_core_base, &ctx.static_objects),
+        "setup_objects.platform_bus_root_device.setup",
+        "PlatformBusRootDevice",
+        "platform_bus_root_device.setup",
     )?;
-    ctx.devfs.setup(
-        &mut ctx.vfs_core,
-        &ctx.fs_struct,
-        &ctx.hwrng_core,
-        &ctx.block_device_registry,
+    with_initcall_diagnostic(
+        ctx.platform_bus
+            .setup(&ctx.driver_core_base, &ctx.platform_bus_root_device),
+        "setup_objects.platform_bus.setup",
+        "PlatformBus",
+        "platform_bus.setup",
     )?;
-    ctx.uart_external_irq_enable.setup(
-        &ctx.plic,
-        &mut ctx.plic_irq_domain,
-        &ctx.irq_handler_registry,
-        &mut ctx.interrupt_stream,
+    with_initcall_diagnostic(
+        ctx.virtio_bus.setup(&ctx.platform_bus),
+        "setup_objects.virtio_bus.setup",
+        "VirtioBus",
+        "virtio_bus.setup",
     )?;
-    crate::objects::plic_provider::exercise_uart_leaf_chip_callbacks(
-        crate::objects::ns16550a::uart8250_port_irq_source(),
-        crate::objects::ns16550a::uart8250_port_logical_irq(),
+    with_initcall_diagnostic(
+        ctx.hwrng_core.setup(&ctx.driver_core_base),
+        "setup_objects.hwrng_core.setup",
+        "HwRngCore",
+        "hwrng_core.setup",
     )?;
-    crate::objects::plic_provider::exercise_unmapped_irq_boundary()?;
-    ctx.uart_interrupt_chain_probe.setup(
-        &ctx.uart_external_irq_enable,
-        &ctx.plic,
-        &ctx.plic_irq_domain,
-        &ctx.irq_handler_registry,
+    with_initcall_diagnostic(
+        ctx.block_device_registry.setup(&ctx.driver_core_base),
+        "setup_objects.block_device_registry.setup",
+        "BlockDeviceRegistry",
+        "block_device_registry.setup",
     )?;
-    enable_serial8250_interrupt_driven_console()?;
-    setup_uart_irq_chain_payload_probes(ctx)?;
-    ctx.serial8250_rx_loopback_probe.setup(
-        &ctx.uart_external_irq_enable,
-        &ctx.plic,
-        &ctx.plic_irq_domain,
-        &ctx.irq_handler_registry,
+    with_initcall_diagnostic(
+        ctx.driver_core_deferred.setup(&ctx.platform_bus),
+        "setup_objects.driver_core_deferred.setup",
+        "DriverCoreDeferred",
+        "driver_core_deferred.setup",
     )?;
-    ctx.serial8250_rx_batch_loopback_probe.setup(
-        &ctx.serial8250_rx_loopback_probe,
-        &ctx.plic,
-        &ctx.plic_irq_domain,
-        &ctx.irq_handler_registry,
+    with_initcall_diagnostic(
+        ctx.irq_proc_view_deferred.setup(
+            &ctx.driver_core_base,
+            &ctx.platform_bus_root_device,
+            &ctx.platform_bus,
+            &ctx.driver_core_deferred,
+            &ctx.irq_dispatch_tree,
+        ),
+        "setup_objects.irq_proc_view_deferred.setup",
+        "IrqProcViewDeferred",
+        "irq_proc_view_deferred.setup",
     )?;
-    ctx.tty_xmit_fifo_probe
-        .setup(&ctx.serial8250_rx_batch_loopback_probe)?;
-    setup_tty_runtime_tx_payload_probes(ctx)?;
-    ctx.initcall_boundary.setup(
-        &ctx.cpuset_smp_trimmed,
-        &ctx.driver_core_base,
-        &ctx.platform_bus_root_device,
-        &ctx.platform_bus,
-        &ctx.virtio_bus,
-        &ctx.devfs,
-        &ctx.driver_core_deferred,
-        &ctx.irq_proc_view_deferred,
-        &ctx.ctor_table,
-        &ctx.initcall_table,
-        &ctx.uart_external_irq_enable,
-        &ctx.uart_interrupt_chain_probe,
-        &ctx.serial8250_rx_loopback_probe,
-        &ctx.serial8250_rx_batch_loopback_probe,
-        &ctx.tty_xmit_fifo_probe,
+    with_initcall_diagnostic(
+        ctx.ctor_table
+            .setup(&ctx.irq_proc_view_deferred, &ctx.static_objects),
+        "setup_objects.ctor_table.setup",
+        "CtorTable",
+        "ctor_table.setup",
+    )?;
+    with_initcall_diagnostic(
+        ctx.initcall_table
+            .preset(&ctx.ctor_table, &ctx.static_objects),
+        "setup_objects.initcall_table.preset",
+        "InitcallTable",
+        "initcall_table.preset",
+    )?;
+    with_initcall_diagnostic(
+        run_initcall_table(ctx),
+        "setup_objects.initcall_table.setup",
+        "InitcallTable",
+        "initcall_table.setup",
+    )?;
+    with_initcall_diagnostic(
+        crate::objects::plic_provider::setup_registered_provider(&ctx.device_tree, &ctx.plic),
+        "setup_objects.plic_provider.setup_registered_provider",
+        "PlicProvider",
+        "plic_provider.setup_registered_provider",
+    )?;
+    with_initcall_diagnostic(
+        crate::objects::virtio_blk::setup_live_driver(
+            &mut ctx.virtio_blk_runtime,
+            &ctx.virtio_bus,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            &ctx.plic,
+            &mut ctx.plic_irq_domain,
+        ),
+        "setup_objects.virtio_blk.setup_live_driver",
+        "VirtioBlkDevice",
+        "virtio_blk.setup_live_driver",
+    )?;
+    with_initcall_diagnostic(
+        crate::objects::virtio_rng::setup_live_driver(
+            &mut ctx.virtio_rng_runtime,
+            &ctx.virtio_bus,
+            &mut ctx.hwrng_core,
+            &ctx.kernel_image,
+            &ctx.plic,
+            &mut ctx.plic_irq_domain,
+            &ctx.irq_handler_registry,
+        ),
+        "setup_objects.virtio_rng.setup_live_driver",
+        "VirtioRngDevice",
+        "virtio_rng.setup_live_driver",
+    )?;
+    with_initcall_diagnostic(
+        ctx.devfs.setup(
+            &mut ctx.vfs_core,
+            &ctx.fs_struct,
+            &ctx.hwrng_core,
+            &ctx.block_device_registry,
+        ),
+        "setup_objects.devfs.setup",
+        "DevFs",
+        "devfs.setup",
+    )?;
+    with_initcall_diagnostic(
+        ctx.uart_external_irq_enable.setup(
+            &ctx.plic,
+            &mut ctx.plic_irq_domain,
+            &ctx.irq_handler_registry,
+            &mut ctx.interrupt_stream,
+        ),
+        "setup_objects.uart_external_irq_enable.setup",
+        "UartExternalIrqEnable",
+        "uart_external_irq_enable.setup",
+    )?;
+    with_initcall_diagnostic(
+        crate::objects::plic_provider::exercise_uart_leaf_chip_callbacks(
+            crate::objects::ns16550a::uart8250_port_irq_source(),
+            crate::objects::ns16550a::uart8250_port_logical_irq(),
+        ),
+        "setup_objects.plic_provider.exercise_uart_leaf_chip_callbacks",
+        "PlicProvider",
+        "plic_provider.exercise_uart_leaf_chip_callbacks",
+    )?;
+    with_initcall_diagnostic(
+        crate::objects::plic_provider::exercise_unmapped_irq_boundary(),
+        "setup_objects.plic_provider.exercise_unmapped_irq_boundary",
+        "PlicProvider",
+        "plic_provider.exercise_unmapped_irq_boundary",
+    )?;
+    with_initcall_diagnostic(
+        ctx.uart_interrupt_chain_probe.setup(
+            &ctx.uart_external_irq_enable,
+            &ctx.plic,
+            &ctx.plic_irq_domain,
+            &ctx.irq_handler_registry,
+        ),
+        "setup_objects.uart_interrupt_chain_probe.setup",
+        "UartInterruptChainProbe",
+        "uart_interrupt_chain_probe.setup",
+    )?;
+    with_initcall_diagnostic(
+        enable_serial8250_interrupt_driven_console(),
+        "setup_objects.serial8250_console.enable_interrupt_driven",
+        "Serial8250Console",
+        "serial8250_console.enable_interrupt_driven",
+    )?;
+    with_initcall_diagnostic(
+        setup_uart_irq_chain_payload_probes(ctx),
+        "setup_objects.uart_irq_chain_payload_probes.setup",
+        "UartIrqChainPayloadProbes",
+        "uart_irq_chain_payload_probes.setup",
+    )?;
+    with_initcall_diagnostic(
+        ctx.serial8250_rx_loopback_probe.setup(
+            &ctx.uart_external_irq_enable,
+            &ctx.plic,
+            &ctx.plic_irq_domain,
+            &ctx.irq_handler_registry,
+        ),
+        "setup_objects.serial8250_rx_loopback_probe.setup",
+        "Serial8250RxLoopbackProbe",
+        "serial8250_rx_loopback_probe.setup",
+    )?;
+    with_initcall_diagnostic(
+        ctx.serial8250_rx_batch_loopback_probe.setup(
+            &ctx.serial8250_rx_loopback_probe,
+            &ctx.plic,
+            &ctx.plic_irq_domain,
+            &ctx.irq_handler_registry,
+        ),
+        "setup_objects.serial8250_rx_batch_loopback_probe.setup",
+        "Serial8250RxBatchLoopbackProbe",
+        "serial8250_rx_batch_loopback_probe.setup",
+    )?;
+    with_initcall_diagnostic(
+        ctx.tty_xmit_fifo_probe
+            .setup(&ctx.serial8250_rx_batch_loopback_probe),
+        "setup_objects.tty_xmit_fifo_probe.setup",
+        "TtyXmitFifoProbe",
+        "tty_xmit_fifo_probe.setup",
+    )?;
+    with_initcall_diagnostic(
+        setup_tty_runtime_tx_payload_probes(ctx),
+        "setup_objects.tty_runtime_tx_payload_probes.setup",
+        "TtyRuntimeTxPayloadProbes",
+        "tty_runtime_tx_payload_probes.setup",
+    )?;
+    with_initcall_diagnostic(
+        ctx.initcall_boundary.setup(
+            &ctx.cpuset_smp_trimmed,
+            &ctx.driver_core_base,
+            &ctx.platform_bus_root_device,
+            &ctx.platform_bus,
+            &ctx.virtio_bus,
+            &ctx.devfs,
+            &ctx.driver_core_deferred,
+            &ctx.irq_proc_view_deferred,
+            &ctx.ctor_table,
+            &ctx.initcall_table,
+            &ctx.uart_external_irq_enable,
+            &ctx.uart_interrupt_chain_probe,
+            &ctx.serial8250_rx_loopback_probe,
+            &ctx.serial8250_rx_batch_loopback_probe,
+            &ctx.tty_xmit_fifo_probe,
+        ),
+        "setup_objects.initcall_boundary.setup",
+        "InitcallBoundary",
+        "initcall_boundary.setup",
     )?;
     crate::checkpoint::dispatch(Checkpoint::InitcallBoundaryReady, ctx);
     Ok(())
@@ -249,12 +392,16 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
         &ctx.tty_xmit_fifo_probe,
         &ctx.initcall_boundary,
     ) {
-        print_ready_check_failed(diagnostic);
-        return failed_condition(
+        return failed_condition_with_diagnostic(
             LifecycleEvent::Setup,
             crate::phases::state::load(&INITCALL_PHASE_STATE),
             State::Base,
             State::Ready,
+            initcall_failure_diagnostic(
+                "checkpoint_ready",
+                "InitcallPhase",
+                diagnostic.first_failed(),
+            ),
         );
     }
 
@@ -267,14 +414,25 @@ fn checkpoint_ready(ctx: &Context) -> EventResult {
     )
 }
 
-fn print_ready_check_failed(diagnostic: InitcallReadyCheckDiagnostic) {
-    use crate::arch::riscv64::sbi;
-
-    sbi::putstr("ready_check_failed phase=InitcallPhase check=initcall_phase_ready first_failed=");
-    sbi::putstr(diagnostic.first_failed());
-    sbi::putchar(b'\n');
-}
-
 pub fn is_ready() -> bool {
     crate::phases::state::load(&INITCALL_PHASE_STATE) == State::Ready
+}
+
+fn with_initcall_diagnostic(
+    result: EventResult,
+    step: &'static str,
+    object: &'static str,
+    check: &'static str,
+) -> EventResult {
+    result.map_err(|error| {
+        error.with_diagnostic_if_absent(initcall_failure_diagnostic(step, object, check))
+    })
+}
+
+fn initcall_failure_diagnostic(
+    step: &'static str,
+    object: &'static str,
+    check: &'static str,
+) -> FailureDiagnostic {
+    FailureDiagnostic::new("InitcallPhase", step, object, check, check)
 }

@@ -842,6 +842,7 @@ object InitcallPhase: PhaseObject {
                 ensures {
                     initcall_phase_ready(InitcallPhase);
                     initcall_phase_ready_failure_reports_first_failed_predicate(InitcallPhase);
+                    initcall_phase_setup_failures_report_structured_diagnostic(InitcallPhase);
                     cpuset_smp_trimmed_noop();
                     cpuset_smp_trimmed_because_config_cpusets_disabled();
                     cpuset_smp_trimmed_because_config_cgroups_disabled();
@@ -1051,6 +1052,7 @@ object InitcallPhase: PhaseObject {
             InitcallBoundary.state == State::Ready;
             initcall_phase_ready(InitcallPhase);
             initcall_phase_ready_failure_reports_first_failed_predicate(InitcallPhase);
+            initcall_phase_setup_failures_report_structured_diagnostic(InitcallPhase);
             cpuset_smp_trimmed_because_config_cpusets_disabled();
             cpuset_smp_trimmed_because_config_cgroups_disabled();
             driver_core_class_registry_ready(DriverCoreBase);

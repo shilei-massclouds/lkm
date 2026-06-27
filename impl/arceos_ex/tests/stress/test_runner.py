@@ -37,6 +37,23 @@ class StressRunnerTests(unittest.TestCase):
             ],
         )
 
+    def test_extracts_failure_diagnostic_event(self) -> None:
+        events = runner._extract_events(
+            "failure_diagnostic phase=InitcallPhase "
+            "step=InitcallBoundary.setup object=TtyXmitFifoProbe "
+            "check=tty_xmit_fifo_probe.no_overflow_observed "
+            "first_failed=tty_xmit_fifo_probe.no_overflow_observed\n"
+        )
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            [
+                "failure_diagnostic:FailureDiagnostic:phase=InitcallPhase:"
+                "step=InitcallBoundary.setup:object=TtyXmitFifoProbe:"
+                "check=tty_xmit_fifo_probe.no_overflow_observed:"
+                "first_failed=tty_xmit_fifo_probe.no_overflow_observed"
+            ],
+        )
+
     def test_extracts_df0001_failure_event(self) -> None:
         events = runner._extract_events("read user ELF failed\n")
         self.assertEqual(len(events), 1)

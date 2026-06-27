@@ -10,7 +10,10 @@ use super::{
     mm_core::PageAllocator,
     ns16550a,
     runtime_core::RuntimeCoreBoundary,
-    state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
+    state::{
+        failed_condition, failed_condition_with_diagnostic, EventResult, FailureDiagnostic,
+        Lifecycle, LifecycleEvent, State,
+    },
     static_objects::StaticObjects,
     virtio::VirtioBus,
     workqueue::Workqueue,
@@ -2114,115 +2117,29 @@ impl InitcallBoundary {
         serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
         tty_xmit_fifo_probe: &TtyXmitFifoProbe,
     ) -> EventResult {
-        if self.lifecycle.state() != State::Base
-            || cpuset.state() != State::Ready
-            || !cpuset.config_cpusets_disabled()
-            || !cpuset.config_cgroups_disabled()
-            || driver_core_base.state() != State::Ready
-            || !driver_core_base.device_registry_ready()
-            || !driver_core_base.bus_registry_ready()
-            || !driver_core_base.class_registry_ready()
-            || !driver_core_base.firmware_kobject_ready()
-            || !driver_core_base.backing_dev_info_deferred()
-            || !driver_core_base.device_link_workqueue_deferred()
-            || !driver_core_base.devtmpfs_init_deferred()
-            || !driver_core_base.devtmpfs_sync_primitives_deferred()
-            || !driver_core_base.of_core_init_deferred()
-            || !driver_core_base.of_core_mutex_guard_deferred()
-            || !driver_core_base.hypervisor_trimmed_noop()
-            || !driver_core_base.hypervisor_config_disabled()
-            || platform_bus_root_device.state() != State::Ready
-            || !platform_bus_root_device.static_device_registered()
-            || platform_bus.state() != State::Ready
-            || !platform_bus.registered()
-            || !platform_bus.ns16550a_probe_ioremaps_uart8250_port()
-            || virtio_bus.state() != State::Ready
-            || !virtio_bus.registered()
-            || devfs.state() != State::Ready
-            || !devfs.initialized()
-            || !devfs.mounted()
-            || !devfs.hwrng_node_listed()
-            || !devfs.block_node_listed()
-            || !devfs.device_file_ops_deferred()
-            || !devfs.uevent_deferred()
-            || !devfs.sysfs_deferred()
-            || driver_core.state() != State::Ready
-            || !driver_core.auxiliary_bus_deferred()
-            || !driver_core.memory_dev_deferred()
-            || !driver_core.node_dev_deferred()
-            || !driver_core.cpu_dev_deferred()
-            || !driver_core.container_dev_deferred()
-            || !driver_core.post_platform_deferred()
-            || irq_proc_view.state() != State::Ready
-            || !irq_proc_view.procfs_config_enabled()
-            || !irq_proc_view.default_smp_affinity_deferred()
-            || !irq_proc_view.existing_irq_desc_exports_deferred()
-            || !irq_proc_view.effective_affinity_exports_deferred()
-            || ctor_table.state() != State::Ready
-            || !ctor_table.config_constructors_disabled()
-            || initcall_table.state() != State::Ready
-            || !initcall_table.level_order_ready()
-            || !initcall_table.same_level_order_unconstrained()
-            || !initcall_table.same_level_permutation_proof_deferred()
-            || !initcall_table.same_level_permutation_nightly_test_deferred()
-            || !initcall_table.dispatcher_entry_agnostic()
-            || !initcall_table.blacklist_filter_checked()
-            || !initcall_table.blacklist_no_entries_skipped()
-            || !initcall_table.all_levels_ran()
-            || uart_external_irq_enable.state() != State::Ready
-            || !uart_external_irq_enable.plic_source_gate_open()
-            || !uart_external_irq_enable.root_external_input_gate_open()
-            || !uart_external_irq_enable.uart_interrupt_output_deferred()
-            || uart_interrupt_chain_probe.state() != State::Ready
-            || !uart_interrupt_chain_probe.uart_trigger_committed()
-            || !uart_interrupt_chain_probe.plic_claim_observed()
-            || !uart_interrupt_chain_probe.irq_dispatch_observed()
-            || !uart_interrupt_chain_probe.uart_handler_observed()
-            || !uart_interrupt_chain_probe.plic_complete_observed()
-            || !uart_interrupt_chain_probe.plic_loop_exit_observed()
-            || !uart_interrupt_chain_probe.irq_cycle_closed()
-            || !uart_interrupt_chain_probe.console_polling_preserved()
-            || serial8250_rx_loopback_probe.state() != State::Ready
-            || !serial8250_rx_loopback_probe.rx_runtime_enabled()
-            || !serial8250_rx_loopback_probe.loopback_stimulus_committed()
-            || !serial8250_rx_loopback_probe.plic_claim_observed()
-            || !serial8250_rx_loopback_probe.irq_dispatch_observed()
-            || !serial8250_rx_loopback_probe.uart_handler_received_rx()
-            || !serial8250_rx_loopback_probe.flip_buffer_pushed()
-            || !serial8250_rx_loopback_probe.plic_complete_observed()
-            || !serial8250_rx_loopback_probe.zero_claim_loop_exit_observed()
-            || !serial8250_rx_loopback_probe.irq_cycle_closed()
-            || !serial8250_rx_loopback_probe.last_byte_matched()
-            || serial8250_rx_batch_loopback_probe.state() != State::Ready
-            || !serial8250_rx_batch_loopback_probe.batch_stimulus_committed()
-            || !serial8250_rx_batch_loopback_probe.plic_claim_observed()
-            || !serial8250_rx_batch_loopback_probe.irq_dispatch_observed()
-            || !serial8250_rx_batch_loopback_probe.uart_handler_received_batch()
-            || !serial8250_rx_batch_loopback_probe.flip_buffer_batch_pushed()
-            || !serial8250_rx_batch_loopback_probe.plic_complete_observed()
-            || !serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed()
-            || !serial8250_rx_batch_loopback_probe.irq_cycle_closed()
-            || !serial8250_rx_batch_loopback_probe.bounded_drain_observed()
-            || !serial8250_rx_batch_loopback_probe.batch_count_matched()
-            || !serial8250_rx_batch_loopback_probe.last_byte_matched()
-            || !serial8250_rx_batch_loopback_probe.no_overflow_observed()
-            || tty_xmit_fifo_probe.state() != State::Ready
-            || !tty_xmit_fifo_probe.enqueue_committed()
-            || !tty_xmit_fifo_probe.dequeue_committed()
-            || !tty_xmit_fifo_probe.byte_round_trip()
-            || !tty_xmit_fifo_probe.queue_empty_after_dequeue()
-            || !tty_xmit_fifo_probe.distinct_from_printk_console_tx()
-            || !tty_xmit_fifo_probe.runtime_tx_deferred()
-            || !tty_xmit_fifo_probe.printk_tx_queue_unchanged()
-            || !tty_xmit_fifo_probe.no_uart_thri_kick()
-            || !tty_xmit_fifo_probe.no_overflow_observed()
-            || !tty_xmit_fifo_probe.no_underflow_observed()
-        {
-            return failed_condition(
+        if let Some(diagnostic) = self.setup_diagnostic(
+            cpuset,
+            driver_core_base,
+            platform_bus_root_device,
+            platform_bus,
+            virtio_bus,
+            devfs,
+            driver_core,
+            irq_proc_view,
+            ctor_table,
+            initcall_table,
+            uart_external_irq_enable,
+            uart_interrupt_chain_probe,
+            serial8250_rx_loopback_probe,
+            serial8250_rx_batch_loopback_probe,
+            tty_xmit_fifo_probe,
+        ) {
+            return failed_condition_with_diagnostic(
                 LifecycleEvent::Setup,
                 self.lifecycle.state(),
                 State::Base,
                 State::Ready,
+                diagnostic,
             );
         }
 
@@ -2233,6 +2150,537 @@ impl InitcallBoundary {
             State::Ready,
             Checkpoint::InitcallBoundaryReady,
         )
+    }
+
+    fn setup_diagnostic(
+        &self,
+        cpuset: &CpusetSmpTrimmed,
+        driver_core_base: &DriverCoreBase,
+        platform_bus_root_device: &PlatformBusRootDevice,
+        platform_bus: &PlatformBus,
+        virtio_bus: &VirtioBus,
+        devfs: &DevFs,
+        driver_core: &DriverCoreDeferred,
+        irq_proc_view: &IrqProcViewDeferred,
+        ctor_table: &CtorTable,
+        initcall_table: &InitcallTable,
+        uart_external_irq_enable: &UartExternalIrqEnable,
+        uart_interrupt_chain_probe: &UartInterruptChainProbe,
+        serial8250_rx_loopback_probe: &Serial8250RxLoopbackProbe,
+        serial8250_rx_batch_loopback_probe: &Serial8250RxBatchLoopbackProbe,
+        tty_xmit_fifo_probe: &TtyXmitFifoProbe,
+    ) -> Option<FailureDiagnostic> {
+        macro_rules! check {
+            ($object:literal, $name:literal, $predicate:expr) => {
+                if !$predicate {
+                    return Some(FailureDiagnostic::new(
+                        "InitcallPhase",
+                        "InitcallBoundary.setup",
+                        $object,
+                        $name,
+                        $name,
+                    ));
+                }
+            };
+        }
+
+        check!(
+            "InitcallBoundary",
+            "initcall_boundary.state_base",
+            self.lifecycle.state() == State::Base
+        );
+        check!(
+            "CpusetSmpTrimmed",
+            "cpuset_smp_trimmed.state_ready",
+            cpuset.state() == State::Ready
+        );
+        check!(
+            "CpusetSmpTrimmed",
+            "cpuset_smp_trimmed.config_cpusets_disabled",
+            cpuset.config_cpusets_disabled()
+        );
+        check!(
+            "CpusetSmpTrimmed",
+            "cpuset_smp_trimmed.config_cgroups_disabled",
+            cpuset.config_cgroups_disabled()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.state_ready",
+            driver_core_base.state() == State::Ready
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.device_registry_ready",
+            driver_core_base.device_registry_ready()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.bus_registry_ready",
+            driver_core_base.bus_registry_ready()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.class_registry_ready",
+            driver_core_base.class_registry_ready()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.firmware_kobject_ready",
+            driver_core_base.firmware_kobject_ready()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.backing_dev_info_deferred",
+            driver_core_base.backing_dev_info_deferred()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.device_link_workqueue_deferred",
+            driver_core_base.device_link_workqueue_deferred()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.devtmpfs_init_deferred",
+            driver_core_base.devtmpfs_init_deferred()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.devtmpfs_sync_primitives_deferred",
+            driver_core_base.devtmpfs_sync_primitives_deferred()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.of_core_init_deferred",
+            driver_core_base.of_core_init_deferred()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.of_core_mutex_guard_deferred",
+            driver_core_base.of_core_mutex_guard_deferred()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.hypervisor_trimmed_noop",
+            driver_core_base.hypervisor_trimmed_noop()
+        );
+        check!(
+            "DriverCoreBase",
+            "driver_core_base.hypervisor_config_disabled",
+            driver_core_base.hypervisor_config_disabled()
+        );
+        check!(
+            "PlatformBusRootDevice",
+            "platform_bus_root_device.state_ready",
+            platform_bus_root_device.state() == State::Ready
+        );
+        check!(
+            "PlatformBusRootDevice",
+            "platform_bus_root_device.static_device_registered",
+            platform_bus_root_device.static_device_registered()
+        );
+        check!(
+            "PlatformBus",
+            "platform_bus.state_ready",
+            platform_bus.state() == State::Ready
+        );
+        check!(
+            "PlatformBus",
+            "platform_bus.registered",
+            platform_bus.registered()
+        );
+        check!(
+            "PlatformBus",
+            "platform_bus.ns16550a_probe_ioremaps_uart8250_port",
+            platform_bus.ns16550a_probe_ioremaps_uart8250_port()
+        );
+        check!(
+            "VirtioBus",
+            "virtio_bus.state_ready",
+            virtio_bus.state() == State::Ready
+        );
+        check!(
+            "VirtioBus",
+            "virtio_bus.registered",
+            virtio_bus.registered()
+        );
+        check!("DevFs", "devfs.state_ready", devfs.state() == State::Ready);
+        check!("DevFs", "devfs.initialized", devfs.initialized());
+        check!("DevFs", "devfs.mounted", devfs.mounted());
+        check!(
+            "DevFs",
+            "devfs.hwrng_node_listed",
+            devfs.hwrng_node_listed()
+        );
+        check!(
+            "DevFs",
+            "devfs.block_node_listed",
+            devfs.block_node_listed()
+        );
+        check!(
+            "DevFs",
+            "devfs.device_file_ops_deferred",
+            devfs.device_file_ops_deferred()
+        );
+        check!("DevFs", "devfs.uevent_deferred", devfs.uevent_deferred());
+        check!("DevFs", "devfs.sysfs_deferred", devfs.sysfs_deferred());
+        check!(
+            "DriverCoreDeferred",
+            "driver_core_deferred.state_ready",
+            driver_core.state() == State::Ready
+        );
+        check!(
+            "DriverCoreDeferred",
+            "driver_core_deferred.auxiliary_bus_deferred",
+            driver_core.auxiliary_bus_deferred()
+        );
+        check!(
+            "DriverCoreDeferred",
+            "driver_core_deferred.memory_dev_deferred",
+            driver_core.memory_dev_deferred()
+        );
+        check!(
+            "DriverCoreDeferred",
+            "driver_core_deferred.node_dev_deferred",
+            driver_core.node_dev_deferred()
+        );
+        check!(
+            "DriverCoreDeferred",
+            "driver_core_deferred.cpu_dev_deferred",
+            driver_core.cpu_dev_deferred()
+        );
+        check!(
+            "DriverCoreDeferred",
+            "driver_core_deferred.container_dev_deferred",
+            driver_core.container_dev_deferred()
+        );
+        check!(
+            "DriverCoreDeferred",
+            "driver_core_deferred.post_platform_deferred",
+            driver_core.post_platform_deferred()
+        );
+        check!(
+            "IrqProcViewDeferred",
+            "irq_proc_view.state_ready",
+            irq_proc_view.state() == State::Ready
+        );
+        check!(
+            "IrqProcViewDeferred",
+            "irq_proc_view.procfs_config_enabled",
+            irq_proc_view.procfs_config_enabled()
+        );
+        check!(
+            "IrqProcViewDeferred",
+            "irq_proc_view.default_smp_affinity_deferred",
+            irq_proc_view.default_smp_affinity_deferred()
+        );
+        check!(
+            "IrqProcViewDeferred",
+            "irq_proc_view.existing_irq_desc_exports_deferred",
+            irq_proc_view.existing_irq_desc_exports_deferred()
+        );
+        check!(
+            "IrqProcViewDeferred",
+            "irq_proc_view.effective_affinity_exports_deferred",
+            irq_proc_view.effective_affinity_exports_deferred()
+        );
+        check!(
+            "CtorTable",
+            "ctor_table.state_ready",
+            ctor_table.state() == State::Ready
+        );
+        check!(
+            "CtorTable",
+            "ctor_table.config_constructors_disabled",
+            ctor_table.config_constructors_disabled()
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.state_ready",
+            initcall_table.state() == State::Ready
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.level_order_ready",
+            initcall_table.level_order_ready()
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.same_level_order_unconstrained",
+            initcall_table.same_level_order_unconstrained()
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.same_level_permutation_proof_deferred",
+            initcall_table.same_level_permutation_proof_deferred()
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.same_level_permutation_nightly_test_deferred",
+            initcall_table.same_level_permutation_nightly_test_deferred()
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.dispatcher_entry_agnostic",
+            initcall_table.dispatcher_entry_agnostic()
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.blacklist_filter_checked",
+            initcall_table.blacklist_filter_checked()
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.blacklist_no_entries_skipped",
+            initcall_table.blacklist_no_entries_skipped()
+        );
+        check!(
+            "InitcallTable",
+            "initcall_table.all_levels_ran",
+            initcall_table.all_levels_ran()
+        );
+        check!(
+            "UartExternalIrqEnable",
+            "uart_external_irq_enable.state_ready",
+            uart_external_irq_enable.state() == State::Ready
+        );
+        check!(
+            "UartExternalIrqEnable",
+            "uart_external_irq_enable.plic_source_gate_open",
+            uart_external_irq_enable.plic_source_gate_open()
+        );
+        check!(
+            "UartExternalIrqEnable",
+            "uart_external_irq_enable.root_external_input_gate_open",
+            uart_external_irq_enable.root_external_input_gate_open()
+        );
+        check!(
+            "UartExternalIrqEnable",
+            "uart_external_irq_enable.uart_interrupt_output_deferred",
+            uart_external_irq_enable.uart_interrupt_output_deferred()
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.state_ready",
+            uart_interrupt_chain_probe.state() == State::Ready
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.uart_trigger_committed",
+            uart_interrupt_chain_probe.uart_trigger_committed()
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.plic_claim_observed",
+            uart_interrupt_chain_probe.plic_claim_observed()
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.irq_dispatch_observed",
+            uart_interrupt_chain_probe.irq_dispatch_observed()
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.uart_handler_observed",
+            uart_interrupt_chain_probe.uart_handler_observed()
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.plic_complete_observed",
+            uart_interrupt_chain_probe.plic_complete_observed()
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.plic_loop_exit_observed",
+            uart_interrupt_chain_probe.plic_loop_exit_observed()
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.irq_cycle_closed",
+            uart_interrupt_chain_probe.irq_cycle_closed()
+        );
+        check!(
+            "UartInterruptChainProbe",
+            "uart_interrupt_chain_probe.console_polling_preserved",
+            uart_interrupt_chain_probe.console_polling_preserved()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.state_ready",
+            serial8250_rx_loopback_probe.state() == State::Ready
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.rx_runtime_enabled",
+            serial8250_rx_loopback_probe.rx_runtime_enabled()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.loopback_stimulus_committed",
+            serial8250_rx_loopback_probe.loopback_stimulus_committed()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.plic_claim_observed",
+            serial8250_rx_loopback_probe.plic_claim_observed()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.irq_dispatch_observed",
+            serial8250_rx_loopback_probe.irq_dispatch_observed()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.uart_handler_received_rx",
+            serial8250_rx_loopback_probe.uart_handler_received_rx()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.flip_buffer_pushed",
+            serial8250_rx_loopback_probe.flip_buffer_pushed()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.plic_complete_observed",
+            serial8250_rx_loopback_probe.plic_complete_observed()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.zero_claim_loop_exit_observed",
+            serial8250_rx_loopback_probe.zero_claim_loop_exit_observed()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.irq_cycle_closed",
+            serial8250_rx_loopback_probe.irq_cycle_closed()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.last_byte_matched",
+            serial8250_rx_loopback_probe.last_byte_matched()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.state_ready",
+            serial8250_rx_batch_loopback_probe.state() == State::Ready
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.batch_stimulus_committed",
+            serial8250_rx_batch_loopback_probe.batch_stimulus_committed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.plic_claim_observed",
+            serial8250_rx_batch_loopback_probe.plic_claim_observed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.irq_dispatch_observed",
+            serial8250_rx_batch_loopback_probe.irq_dispatch_observed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.uart_handler_received_batch",
+            serial8250_rx_batch_loopback_probe.uart_handler_received_batch()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.flip_buffer_batch_pushed",
+            serial8250_rx_batch_loopback_probe.flip_buffer_batch_pushed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.plic_complete_observed",
+            serial8250_rx_batch_loopback_probe.plic_complete_observed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed",
+            serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.irq_cycle_closed",
+            serial8250_rx_batch_loopback_probe.irq_cycle_closed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.bounded_drain_observed",
+            serial8250_rx_batch_loopback_probe.bounded_drain_observed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.batch_count_matched",
+            serial8250_rx_batch_loopback_probe.batch_count_matched()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.last_byte_matched",
+            serial8250_rx_batch_loopback_probe.last_byte_matched()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.no_overflow_observed",
+            serial8250_rx_batch_loopback_probe.no_overflow_observed()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.state_ready",
+            tty_xmit_fifo_probe.state() == State::Ready
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.enqueue_committed",
+            tty_xmit_fifo_probe.enqueue_committed()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.dequeue_committed",
+            tty_xmit_fifo_probe.dequeue_committed()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.byte_round_trip",
+            tty_xmit_fifo_probe.byte_round_trip()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.queue_empty_after_dequeue",
+            tty_xmit_fifo_probe.queue_empty_after_dequeue()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.distinct_from_printk_console_tx",
+            tty_xmit_fifo_probe.distinct_from_printk_console_tx()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.runtime_tx_deferred",
+            tty_xmit_fifo_probe.runtime_tx_deferred()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.printk_tx_queue_unchanged",
+            tty_xmit_fifo_probe.printk_tx_queue_unchanged()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.no_uart_thri_kick",
+            tty_xmit_fifo_probe.no_uart_thri_kick()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.no_overflow_observed",
+            tty_xmit_fifo_probe.no_overflow_observed()
+        );
+        check!(
+            "TtyXmitFifoProbe",
+            "tty_xmit_fifo_probe.no_underflow_observed",
+            tty_xmit_fifo_probe.no_underflow_observed()
+        );
+
+        None
     }
 }
 
