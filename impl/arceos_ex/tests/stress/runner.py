@@ -235,7 +235,7 @@ def _kill_process_group(process: subprocess.Popen[str]) -> None:
 def _extract_events(text: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for line_no, raw_line in enumerate(text.splitlines(), 1):
-        line = ANSI_RE.sub("", raw_line).strip()
+        line = _normalize_line(raw_line)
         if not line:
             continue
         event = _event_from_line(line, line_no)
@@ -245,6 +245,16 @@ def _extract_events(text: str) -> list[dict[str, Any]]:
     if not events:
         events.append({"i": 0, "line": 0, "kind": "run", "name": "NoObservedEvents"})
     return events
+
+
+def _normalize_line(line: str) -> str:
+    return ANSI_RE.sub("", line).strip()
+
+
+def _normalize_text(text: str) -> str:
+    return "\n".join(
+        line for raw_line in text.splitlines() if (line := _normalize_line(raw_line))
+    )
 
 
 def _event_from_line(line: str, line_no: int) -> dict[str, Any] | None:
@@ -338,10 +348,11 @@ def _classify(
 ) -> dict[str, str]:
     if timed_out:
         return {"id": "timeout", "result": "failure", "description": "command timed out"}
+    normalized_text = _normalize_text(text)
     for rule in rules:
         if rule["result"] != "failure":
             continue
-        if _rule_matches(rule, text):
+        if _rule_matches(rule, normalized_text):
             return {
                 "id": str(rule["id"]),
                 "result": str(rule["result"]),
@@ -356,7 +367,7 @@ def _classify(
     for rule in rules:
         if rule["result"] != "success":
             continue
-        if _rule_matches(rule, text):
+        if _rule_matches(rule, normalized_text):
             return {
                 "id": str(rule["id"]),
                 "result": str(rule["result"]),

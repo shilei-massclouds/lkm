@@ -26,6 +26,14 @@ impl/arceos_ex/tests/stress/runner.py \
   --runs 30
 ```
 
+DF-0002 uses the ordinary smoke path:
+
+```sh
+impl/arceos_ex/tests/stress/runner.py \
+  impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml \
+  --runs 30
+```
+
 Output defaults to `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` and
 contains:
 
@@ -40,3 +48,5 @@ contains:
 DF-0001 must keep the ordinary `make run APP=user-boot` path. Probe variants
 can be added later as separate cases, but they must not replace the ordinary
 path because probes can change timing.
+
+DF-0002 must keep the ordinary `make run APP=smoke` path for the same reason.

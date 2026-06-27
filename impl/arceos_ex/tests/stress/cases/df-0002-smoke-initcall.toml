@@ -1,0 +1,11 @@
+name = "df-0002-smoke-initcall"
+description = "Repeat the ordinary smoke path to reproduce DF-0002."
+default_runs = 30
+timeout_seconds = 120
+working_directory = "."
+command = ["make", "run", "APP=smoke"]
+classifier = "../classifiers/defects.toml"
+
+[metadata]
+defect = "DF-0002"
+ordinary_path_required = true

@@ -16,6 +16,13 @@ class StressRunnerTests(unittest.TestCase):
             ["user_output:UserHello", "user_exit:UserExitStatus:status=0"],
         )
 
+    def test_extracts_smoke_success_event(self) -> None:
+        events = runner._extract_events("result: \x1b[32mok\x1b[0m. passed=78 failed=0 total=78\n")
+        self.assertEqual(
+            [runner._event_token(event) for event in events],
+            ["smoke_result:SmokeResult:passed=78:failed=0:total=78"],
+        )
+
     def test_extracts_df0001_failure_event(self) -> None:
         events = runner._extract_events("read user ELF failed\n")
         self.assertEqual(len(events), 1)
@@ -43,6 +50,23 @@ class StressRunnerTests(unittest.TestCase):
         )
         self.assertEqual(result["result"], "failure")
         self.assertEqual(result["id"], "df-0001-read-user-elf-failed")
+
+    def test_classify_smoke_success_after_ansi_stripping(self) -> None:
+        rules = [
+            {
+                "id": "smoke-success",
+                "result": "success",
+                "contains": ["result: ok. passed=", " failed=0 total="],
+            },
+        ]
+        result = runner._classify(
+            "result: \x1b[32mok\x1b[0m. passed=54 failed=0 total=54\n",
+            returncode=0,
+            timed_out=False,
+            rules=rules,
+        )
+        self.assertEqual(result["result"], "success")
+        self.assertEqual(result["id"], "smoke-success")
 
     def test_records_duplicate_sequence_once(self) -> None:
         events = runner._extract_events("user hello\nuser exit status=0\n")

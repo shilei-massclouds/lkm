@@ -27,3 +27,9 @@ id = "user-boot-success"
 result = "success"
 contains = ["user exit status=0"]
 description = "User init reached exit status 0."
+
+[[rules]]
+id = "smoke-success"
+result = "success"
+contains = ["result: ok. passed=", " failed=0 total="]
+description = "Smoke app completed with zero failed cases."
