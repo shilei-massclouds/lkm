@@ -202,6 +202,11 @@ struct LinuxIrqDescView {
     bytes: [u8; LINUX_IRQ_DESC_SIZE],
 }
 
+#[repr(C, align(8))]
+struct LinuxPlicHeap {
+    bytes: [u8; LINUX_PLIC_HEAP_SIZE],
+}
+
 #[derive(Clone, Copy)]
 struct LinuxPlicLeafIrqRecord {
     in_use: bool,
@@ -491,7 +496,9 @@ static mut LINUX_PLIC_LEAF_IRQ_DESCS: [LinuxIrqDescView; LINUX_PLIC_LEAF_IRQ_CAP
 static mut LINUX_PLIC_THREAD_INFO: LinuxThreadInfoView = LinuxThreadInfoView {
     bytes: [0; LINUX_THREAD_INFO_SIZE],
 };
-static mut LINUX_PLIC_HEAP: [u8; LINUX_PLIC_HEAP_SIZE] = [0; LINUX_PLIC_HEAP_SIZE];
+static mut LINUX_PLIC_HEAP: LinuxPlicHeap = LinuxPlicHeap {
+    bytes: [0; LINUX_PLIC_HEAP_SIZE],
+};
 static LINUX_PLIC_HEAP_OFFSET: AtomicUsize = AtomicUsize::new(0);
 
 fn trap(symbol: &str) -> ! {
@@ -933,7 +940,11 @@ fn linux_plic_alloc(size: usize, align: usize) -> *mut c_void {
             Ordering::Acquire,
         ) {
             Ok(_) => {
-                let ptr = unsafe { (&raw mut LINUX_PLIC_HEAP).cast::<u8>().add(aligned) };
+                let ptr = unsafe {
+                    core::ptr::addr_of_mut!(LINUX_PLIC_HEAP.bytes)
+                        .cast::<u8>()
+                        .add(aligned)
+                };
                 unsafe { core::ptr::write_bytes(ptr, 0, size) };
                 debug("linux plic shim: alloc leave\n");
                 return ptr.cast::<c_void>();
