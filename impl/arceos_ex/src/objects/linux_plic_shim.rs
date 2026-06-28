@@ -228,6 +228,7 @@ impl LinuxPlicLeafIrqRecord {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct LinuxIrqActionView {
     handler: usize,
     dev_id: usize,
@@ -461,21 +462,24 @@ static mut LINUX_PLIC_IRQ_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_DO
 static mut LINUX_PLIC_INTC_DOMAIN: [u8; LINUX_IRQ_DOMAIN_SIZE] = [0; LINUX_IRQ_DOMAIN_SIZE];
 static mut LINUX_PLIC_PARENT_IRQ_DESC: [u8; LINUX_IRQ_DESC_SIZE] = [0; LINUX_IRQ_DESC_SIZE];
 static mut LINUX_PLIC_PARENT_IRQ_CHIP: [u8; LINUX_IRQ_CHIP_SIZE] = [0; LINUX_IRQ_CHIP_SIZE];
-static mut LINUX_PLIC_IRQ_ACTION_VIEW: LinuxIrqActionView = LinuxIrqActionView {
-    handler: 0,
-    dev_id: 0,
-    percpu_dev_id: 0,
-    next: 0,
-    thread_fn: 0,
-    thread: 0,
-    secondary: 0,
-    irq: 0,
-    flags: 0,
-    thread_flags: 0,
-    thread_mask: 0,
-    name: 0,
-    dir: 0,
+static mut LINUX_PLIC_IRQ_ACTION_VIEWS: [LinuxIrqActionView; LINUX_PLIC_LEAF_IRQ_CAPACITY] = [const {
+    LinuxIrqActionView {
+        handler: 0,
+        dev_id: 0,
+        percpu_dev_id: 0,
+        next: 0,
+        thread_fn: 0,
+        thread: 0,
+        secondary: 0,
+        irq: 0,
+        flags: 0,
+        thread_flags: 0,
+        thread_mask: 0,
+        name: 0,
+        dir: 0,
+    }
 };
+    LINUX_PLIC_LEAF_IRQ_CAPACITY];
 static mut LINUX_PLIC_LEAF_IRQ_RECORDS: [LinuxPlicLeafIrqRecord; LINUX_PLIC_LEAF_IRQ_CAPACITY] =
     [const { LinuxPlicLeafIrqRecord::empty() }; LINUX_PLIC_LEAF_IRQ_CAPACITY];
 static mut LINUX_PLIC_LEAF_IRQ_DESCS: [LinuxIrqDescView; LINUX_PLIC_LEAF_IRQ_CAPACITY] = [const {
@@ -1295,8 +1299,17 @@ pub fn record_irq_action_request(
     LINUX_PLIC_ACTION_REQUEST_LAST_DEVICE.store(device.index(), Ordering::Release);
     LINUX_PLIC_ACTION_REQUEST_LAST_HANDLER_KIND
         .store(linux_irq_handler_kind_code(handler_kind), Ordering::Release);
+    let Ok(irq) = u32::try_from(logical_irq.as_usize()) else {
+        return false;
+    };
+    let Some(action_index) = linux_irq_action_view_slot_for_irq(irq) else {
+        return false;
+    };
+    let Some(action_ptr) = linux_irq_action_view_ptr(action_index) else {
+        return false;
+    };
     unsafe {
-        let action = (&raw mut LINUX_PLIC_IRQ_ACTION_VIEW).as_mut().unwrap();
+        let action = action_ptr.as_mut().unwrap();
         action.handler = linux_irq_handler_kind_code(handler_kind);
         action.dev_id = device.index();
         action.percpu_dev_id = 0;
@@ -1310,14 +1323,14 @@ pub fn record_irq_action_request(
         action.thread_mask = 0;
         action.name = 0;
         action.dir = 0;
-        let action_ptr = action as *mut LinuxIrqActionView as usize;
+        let action_ptr = action_ptr as usize;
         LINUX_PLIC_ACTION_CHAIN_INSTALL_COUNT.fetch_add(1, Ordering::AcqRel);
         LINUX_PLIC_ACTION_CHAIN_LAST_IRQ.store(logical_irq.as_usize(), Ordering::Release);
         LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.store(action_ptr, Ordering::Release);
         LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE.store(device.index(), Ordering::Release);
         LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND
             .store(linux_irq_handler_kind_code(handler_kind), Ordering::Release);
-        linux_write_leaf_desc_action_if_present(logical_irq.as_usize() as u32, action_ptr);
+        linux_write_leaf_desc_action_if_present(irq, action_ptr);
     }
     true
 }
@@ -1342,23 +1355,20 @@ fn note_linux_leaf_action_view(
     if !handler_bound || action.handler_kind() == IrqHandlerKind::None {
         return false;
     }
-    if LINUX_PLIC_ACTION_REQUEST_LAST_IRQ.load(Ordering::Acquire) != record.virq as usize
-        || LINUX_PLIC_ACTION_REQUEST_LAST_DEVICE.load(Ordering::Acquire) != action.device().index()
-        || LINUX_PLIC_ACTION_REQUEST_LAST_HANDLER_KIND.load(Ordering::Acquire)
-            != linux_irq_handler_kind_code(action.handler_kind())
-    {
+    let Some(expected_action) = linux_irq_action_view_for_irq(record.virq) else {
         return false;
-    }
-    if record.action == 0
-        || LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.load(Ordering::Acquire) != record.action
-        || LINUX_PLIC_ACTION_CHAIN_LAST_IRQ.load(Ordering::Acquire) != record.virq as usize
-        || LINUX_PLIC_ACTION_CHAIN_LAST_DEVICE.load(Ordering::Acquire) != action.device().index()
-        || LINUX_PLIC_ACTION_CHAIN_LAST_HANDLER_KIND.load(Ordering::Acquire)
-            != linux_irq_handler_kind_code(action.handler_kind())
-    {
+    };
+    if record.action == 0 || record.action != expected_action {
         return false;
     }
     if desc_action == 0 || desc_action != record.action {
+        return false;
+    }
+    let linux_action = unsafe { &*(record.action as *const LinuxIrqActionView) };
+    if linux_action.irq != record.virq
+        || linux_action.dev_id != action.device().index()
+        || linux_action.handler != linux_irq_handler_kind_code(action.handler_kind())
+    {
         return false;
     }
     if desc_status != record.status || desc_depth as usize != LINUX_IRQ_ACTION_DEPTH_ENABLED {
@@ -1430,7 +1440,7 @@ fn linux_store_leaf_irq_record(
     unsafe {
         let desc = linux_leaf_desc_ptr(index);
         prepare_linux_irq_desc(desc, virq, hwirq as usize, chip, chip_data);
-        let action = LINUX_PLIC_ACTION_CHAIN_LAST_ACTION.load(Ordering::Acquire);
+        let action = linux_irq_action_view_for_irq(virq).unwrap_or(0);
         linux_write_desc_action(desc, virq, action);
         let records = (&raw mut LINUX_PLIC_LEAF_IRQ_RECORDS).cast::<LinuxPlicLeafIrqRecord>();
         core::ptr::write(
@@ -2049,6 +2059,56 @@ fn linux_plic_source_index(source: u32) -> Option<usize> {
         return None;
     }
     Some(index)
+}
+
+fn linux_irq_action_view_ptr(index: usize) -> Option<*mut LinuxIrqActionView> {
+    if index >= LINUX_PLIC_LEAF_IRQ_CAPACITY {
+        return None;
+    }
+    Some(unsafe {
+        (&raw mut LINUX_PLIC_IRQ_ACTION_VIEWS)
+            .cast::<LinuxIrqActionView>()
+            .add(index)
+    })
+}
+
+fn linux_irq_action_view_index_for_irq(irq: u32) -> Option<usize> {
+    if irq == 0 {
+        return None;
+    }
+
+    let actions = (&raw const LINUX_PLIC_IRQ_ACTION_VIEWS).cast::<LinuxIrqActionView>();
+    let mut index = 0usize;
+    while index < LINUX_PLIC_LEAF_IRQ_CAPACITY {
+        let action = unsafe { core::ptr::read(actions.add(index)) };
+        if action.irq == irq {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn linux_irq_action_view_slot_for_irq(irq: u32) -> Option<usize> {
+    if let Some(index) = linux_irq_action_view_index_for_irq(irq) {
+        return Some(index);
+    }
+
+    let actions = (&raw const LINUX_PLIC_IRQ_ACTION_VIEWS).cast::<LinuxIrqActionView>();
+    let mut index = 0usize;
+    while index < LINUX_PLIC_LEAF_IRQ_CAPACITY {
+        let action = unsafe { core::ptr::read(actions.add(index)) };
+        if action.irq == 0 {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+fn linux_irq_action_view_for_irq(irq: u32) -> Option<usize> {
+    let index = linux_irq_action_view_index_for_irq(irq)?;
+    linux_irq_action_view_ptr(index).map(|action| action as usize)
 }
 
 fn increment_runtime_source_claim_count(source: u32) {
