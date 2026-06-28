@@ -75,7 +75,17 @@ pub struct PayloadExecSyncBoundaries {
     exec_fs_lock_rcu_deferred: bool,
     exec_mmap_lock_deferred: bool,
     exec_membarrier_deferred: bool,
+    bprm_mm_init_task_lock_deferred: bool,
+    exec_mmap_task_lock_deferred: bool,
+    exec_sched_mm_cid_deferred: bool,
+    exec_files_unshare_cloexec_deferred: bool,
+    exec_io_uring_cancel_deferred: bool,
+    exec_posix_timer_siglock_deferred: bool,
+    exec_namespace_switch_deferred: bool,
+    exec_success_accounting_hooks_deferred: bool,
     exec_full_binfmt_deferred: bool,
+    binfmt_module_retry_trimmed_noop: bool,
+    binfmt_module_retry_trimmed_because_modules_disabled: bool,
     ramdisk_init_branch_trimmed_noop: bool,
     ramdisk_init_trimmed_because_config_initrd_disabled: bool,
     default_init_branch_trimmed_noop: bool,
@@ -99,7 +109,17 @@ impl PayloadExecSyncBoundaries {
             exec_fs_lock_rcu_deferred: false,
             exec_mmap_lock_deferred: false,
             exec_membarrier_deferred: false,
+            bprm_mm_init_task_lock_deferred: false,
+            exec_mmap_task_lock_deferred: false,
+            exec_sched_mm_cid_deferred: false,
+            exec_files_unshare_cloexec_deferred: false,
+            exec_io_uring_cancel_deferred: false,
+            exec_posix_timer_siglock_deferred: false,
+            exec_namespace_switch_deferred: false,
+            exec_success_accounting_hooks_deferred: false,
             exec_full_binfmt_deferred: false,
+            binfmt_module_retry_trimmed_noop: false,
+            binfmt_module_retry_trimmed_because_modules_disabled: false,
             ramdisk_init_branch_trimmed_noop: false,
             ramdisk_init_trimmed_because_config_initrd_disabled: false,
             default_init_branch_trimmed_noop: false,
@@ -153,8 +173,48 @@ impl PayloadExecSyncBoundaries {
         self.exec_membarrier_deferred
     }
 
+    pub const fn bprm_mm_init_task_lock_deferred(&self) -> bool {
+        self.bprm_mm_init_task_lock_deferred
+    }
+
+    pub const fn exec_mmap_task_lock_deferred(&self) -> bool {
+        self.exec_mmap_task_lock_deferred
+    }
+
+    pub const fn exec_sched_mm_cid_deferred(&self) -> bool {
+        self.exec_sched_mm_cid_deferred
+    }
+
+    pub const fn exec_files_unshare_cloexec_deferred(&self) -> bool {
+        self.exec_files_unshare_cloexec_deferred
+    }
+
+    pub const fn exec_io_uring_cancel_deferred(&self) -> bool {
+        self.exec_io_uring_cancel_deferred
+    }
+
+    pub const fn exec_posix_timer_siglock_deferred(&self) -> bool {
+        self.exec_posix_timer_siglock_deferred
+    }
+
+    pub const fn exec_namespace_switch_deferred(&self) -> bool {
+        self.exec_namespace_switch_deferred
+    }
+
+    pub const fn exec_success_accounting_hooks_deferred(&self) -> bool {
+        self.exec_success_accounting_hooks_deferred
+    }
+
     pub const fn exec_full_binfmt_deferred(&self) -> bool {
         self.exec_full_binfmt_deferred
+    }
+
+    pub const fn binfmt_module_retry_trimmed_noop(&self) -> bool {
+        self.binfmt_module_retry_trimmed_noop
+    }
+
+    pub const fn binfmt_module_retry_trimmed_because_modules_disabled(&self) -> bool {
+        self.binfmt_module_retry_trimmed_because_modules_disabled
     }
 
     pub const fn ramdisk_init_branch_trimmed_noop(&self) -> bool {
@@ -209,7 +269,17 @@ impl PayloadExecSyncBoundaries {
         self.exec_fs_lock_rcu_deferred = true;
         self.exec_mmap_lock_deferred = true;
         self.exec_membarrier_deferred = true;
+        self.bprm_mm_init_task_lock_deferred = true;
+        self.exec_mmap_task_lock_deferred = true;
+        self.exec_sched_mm_cid_deferred = true;
+        self.exec_files_unshare_cloexec_deferred = true;
+        self.exec_io_uring_cancel_deferred = true;
+        self.exec_posix_timer_siglock_deferred = true;
+        self.exec_namespace_switch_deferred = true;
+        self.exec_success_accounting_hooks_deferred = true;
         self.exec_full_binfmt_deferred = true;
+        self.binfmt_module_retry_trimmed_noop = true;
+        self.binfmt_module_retry_trimmed_because_modules_disabled = true;
         self.ramdisk_init_branch_trimmed_noop = true;
         self.ramdisk_init_trimmed_because_config_initrd_disabled = true;
         self.default_init_branch_trimmed_noop = true;

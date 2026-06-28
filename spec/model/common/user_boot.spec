@@ -55,7 +55,17 @@ predicate payload_exec_tasklist_lock_deferred<T>(boundaries: T) -> bool;
 predicate payload_exec_fs_lock_rcu_deferred<T>(boundaries: T) -> bool;
 predicate payload_exec_mmap_lock_deferred<T>(boundaries: T) -> bool;
 predicate payload_exec_membarrier_deferred<T>(boundaries: T) -> bool;
+predicate payload_bprm_mm_init_task_lock_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_mmap_task_lock_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_sched_mm_cid_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_files_unshare_cloexec_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_io_uring_cancel_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_posix_timer_siglock_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_namespace_switch_deferred<T>(boundaries: T) -> bool;
+predicate payload_exec_success_accounting_hooks_deferred<T>(boundaries: T) -> bool;
 predicate payload_exec_full_binfmt_deferred<T>(boundaries: T) -> bool;
+predicate payload_binfmt_module_retry_trimmed_noop<T>(boundaries: T) -> bool;
+predicate payload_binfmt_module_retry_trimmed_because_modules_disabled<T>(boundaries: T) -> bool;
 predicate payload_ramdisk_init_branch_trimmed_noop<T>(boundaries: T) -> bool;
 predicate payload_ramdisk_init_trimmed_because_config_initrd_disabled<T>(boundaries: T) -> bool;
 predicate payload_default_init_branch_trimmed_noop<T>(boundaries: T) -> bool;
@@ -265,7 +275,17 @@ object PayloadExecSyncBoundaries: KernelObject {
                     payload_exec_fs_lock_rcu_deferred(self);
                     payload_exec_mmap_lock_deferred(self);
                     payload_exec_membarrier_deferred(self);
+                    payload_bprm_mm_init_task_lock_deferred(self);
+                    payload_exec_mmap_task_lock_deferred(self);
+                    payload_exec_sched_mm_cid_deferred(self);
+                    payload_exec_files_unshare_cloexec_deferred(self);
+                    payload_exec_io_uring_cancel_deferred(self);
+                    payload_exec_posix_timer_siglock_deferred(self);
+                    payload_exec_namespace_switch_deferred(self);
+                    payload_exec_success_accounting_hooks_deferred(self);
                     payload_exec_full_binfmt_deferred(self);
+                    payload_binfmt_module_retry_trimmed_noop(self);
+                    payload_binfmt_module_retry_trimmed_because_modules_disabled(self);
                     payload_ramdisk_init_branch_trimmed_noop(self);
                     payload_ramdisk_init_trimmed_because_config_initrd_disabled(self);
                     payload_default_init_branch_trimmed_noop(self);
@@ -275,7 +295,7 @@ object PayloadExecSyncBoundaries: KernelObject {
                 }
 
                 deferred {
-                    "Linux 6.12 kernel_execve()/bprm_execve()/exec_binprm()/begin_new_exec() 的完整同步协议保留为 PayloadExecSyncBoundaries：binfmt_lock、cred_guard_mutex、exec_update_lock、exec_mmap() 本地 IRQ 关闭与 mmap_lock、siglock/tasklist_lock、fs->lock+RCU、membarrier、完整 binfmt/script/module retry 和失败后 panic terminal 后续展开；当前 UserBootPayload 只实现最小 VFS/ELF/UserAddressSpace/trap-return handoff。";
+                    "Linux 6.12 kernel_execve()/bprm_execve()/exec_binprm()/begin_new_exec() 的完整同步协议保留为 PayloadExecSyncBoundaries：binfmt_lock、cred_guard_mutex、exec_update_lock、exec_mmap() 本地 IRQ 关闭与 mmap_lock、exec_mmap() task_lock(mm handoff)、siglock/tasklist_lock、fs->lock+RCU、membarrier、sched_mm_cid rq_lock_irqsave+smp_mb、bprm_mm_init/finalize_exec task_lock rlimit 边界、files unshare/CLOEXEC file_lock、io_uring cancel、POSIX timer siglock、namespace switch、exec 成功后的 rseq/perf/audit/accounting hooks、完整 binfmt/script retry 和失败后 panic terminal 后续展开；当前 UserBootPayload 只实现最小 VFS/ELF/UserAddressSpace/trap-return handoff。当前 ../linux-6.12/.config 中 CONFIG_MODULES=n，因此 request_module(\"binfmt-...\") retry 记录为 trimmed/no-op。";
                 }
             }
         }
@@ -294,7 +314,17 @@ object PayloadExecSyncBoundaries: KernelObject {
             payload_exec_fs_lock_rcu_deferred(self);
             payload_exec_mmap_lock_deferred(self);
             payload_exec_membarrier_deferred(self);
+            payload_bprm_mm_init_task_lock_deferred(self);
+            payload_exec_mmap_task_lock_deferred(self);
+            payload_exec_sched_mm_cid_deferred(self);
+            payload_exec_files_unshare_cloexec_deferred(self);
+            payload_exec_io_uring_cancel_deferred(self);
+            payload_exec_posix_timer_siglock_deferred(self);
+            payload_exec_namespace_switch_deferred(self);
+            payload_exec_success_accounting_hooks_deferred(self);
             payload_exec_full_binfmt_deferred(self);
+            payload_binfmt_module_retry_trimmed_noop(self);
+            payload_binfmt_module_retry_trimmed_because_modules_disabled(self);
             payload_ramdisk_init_branch_trimmed_noop(self);
             payload_ramdisk_init_trimmed_because_config_initrd_disabled(self);
             payload_default_init_branch_trimmed_noop(self);
