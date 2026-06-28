@@ -3701,6 +3701,7 @@ pub struct Serial8250RxLoopbackProbe {
     flip_buffer_pushed: bool,
     plic_complete_observed: bool,
     zero_claim_loop_exit_observed: bool,
+    source_claim_complete_delta_matched: bool,
     irq_cycle_closed: bool,
     last_byte_matched: bool,
 }
@@ -3794,6 +3795,7 @@ pub struct Serial8250RxBatchLoopbackProbe {
     flip_buffer_batch_pushed: bool,
     plic_complete_observed: bool,
     zero_claim_loop_exit_observed: bool,
+    source_claim_complete_delta_matched: bool,
     irq_cycle_closed: bool,
     bounded_drain_observed: bool,
     batch_count_matched: bool,
@@ -5318,6 +5320,7 @@ impl Serial8250RxLoopbackProbe {
             flip_buffer_pushed: false,
             plic_complete_observed: false,
             zero_claim_loop_exit_observed: false,
+            source_claim_complete_delta_matched: false,
             irq_cycle_closed: false,
             last_byte_matched: false,
         }
@@ -5357,6 +5360,10 @@ impl Serial8250RxLoopbackProbe {
 
     pub const fn zero_claim_loop_exit_observed(&self) -> bool {
         self.zero_claim_loop_exit_observed
+    }
+
+    pub const fn source_claim_complete_delta_matched(&self) -> bool {
+        self.source_claim_complete_delta_matched
     }
 
     pub const fn irq_cycle_closed(&self) -> bool {
@@ -5466,6 +5473,8 @@ impl Serial8250RxLoopbackProbe {
         self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
+        self.source_claim_complete_delta_matched =
+            uart_source_claim_complete_delta_matched(observed, baseline);
         self.irq_cycle_closed = uart_rx_cycle_completed_and_closed(observed, baseline);
         self.last_byte_matched =
             super::ns16550a::serial8250_runtime_rx_last_byte() == SERIAL8250_RX_LOOPBACK_BYTE;
@@ -5571,6 +5580,9 @@ impl Serial8250RxLoopbackProbe {
         if !self.zero_claim_loop_exit_observed {
             return Some("serial8250_rx_loopback_probe.zero_claim_loop_exit_observed");
         }
+        if !self.source_claim_complete_delta_matched {
+            return Some("plic.source_claim_complete_delta_matched");
+        }
         if !self.irq_cycle_closed {
             return Some("serial8250_rx_loopback_probe.irq_cycle_closed");
         }
@@ -5592,6 +5604,7 @@ impl Serial8250RxBatchLoopbackProbe {
             flip_buffer_batch_pushed: false,
             plic_complete_observed: false,
             zero_claim_loop_exit_observed: false,
+            source_claim_complete_delta_matched: false,
             irq_cycle_closed: false,
             bounded_drain_observed: false,
             batch_count_matched: false,
@@ -5630,6 +5643,10 @@ impl Serial8250RxBatchLoopbackProbe {
 
     pub const fn zero_claim_loop_exit_observed(&self) -> bool {
         self.zero_claim_loop_exit_observed
+    }
+
+    pub const fn source_claim_complete_delta_matched(&self) -> bool {
+        self.source_claim_complete_delta_matched
     }
 
     pub const fn irq_cycle_closed(&self) -> bool {
@@ -5737,6 +5754,8 @@ impl Serial8250RxBatchLoopbackProbe {
         self.plic_complete_observed = observed.source_completes > baseline.source_completes;
         self.zero_claim_loop_exit_observed = observed.zero_claims > baseline.zero_claims
             && observed.loop_exits > baseline.loop_exits;
+        self.source_claim_complete_delta_matched =
+            uart_source_claim_complete_delta_matched(observed, baseline);
         self.irq_cycle_closed = uart_rx_cycle_completed_and_closed(observed, baseline);
         self.bounded_drain_observed = expected_len
             <= super::ns16550a::serial8250_runtime_rx_drain_limit()
@@ -5845,6 +5864,9 @@ impl Serial8250RxBatchLoopbackProbe {
         if !self.zero_claim_loop_exit_observed {
             return Some("serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed");
         }
+        if !self.source_claim_complete_delta_matched {
+            return Some("plic.source_claim_complete_delta_matched");
+        }
         if !self.irq_cycle_closed {
             return Some("serial8250_rx_batch_loopback_probe.irq_cycle_closed");
         }
@@ -5894,6 +5916,8 @@ fn serial8250_rx_loopback_wait_diagnostic(
     expected_byte: u8,
 ) -> &'static str {
     let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
+    let source_claim_complete_delta_matched =
+        uart_source_claim_complete_delta_matched(current, baseline);
 
     if current.rx_requests <= baseline.rx_requests {
         return "serial8250_rx_loopback_probe.wait.rx_request_observed";
@@ -5937,6 +5961,9 @@ fn serial8250_rx_loopback_wait_diagnostic(
     if current.loop_exits <= baseline.loop_exits {
         return "plic.claim_loop_exit_observed";
     }
+    if !source_claim_complete_delta_matched {
+        return "plic.source_claim_complete_delta_matched";
+    }
     if !super::ns16550a::serial8250_runtime_rx_enabled() {
         return "serial8250_runtime_rx.enabled";
     }
@@ -5959,6 +5986,8 @@ fn serial8250_rx_batch_loopback_wait_diagnostic(
 ) -> &'static str {
     let current = uart_irq_cycle_snapshot(plic, irq_handler_registry, source);
     let inserted_delta = current.flip_inserted.saturating_sub(baseline.flip_inserted);
+    let source_claim_complete_delta_matched =
+        uart_source_claim_complete_delta_matched(current, baseline);
 
     if current.rx_requests <= baseline.rx_requests {
         return "serial8250_rx_batch_loopback_probe.wait.rx_request_observed";
@@ -6001,6 +6030,9 @@ fn serial8250_rx_batch_loopback_wait_diagnostic(
     }
     if current.loop_exits <= baseline.loop_exits {
         return "plic.claim_loop_exit_observed";
+    }
+    if !source_claim_complete_delta_matched {
+        return "plic.source_claim_complete_delta_matched";
     }
     if !super::ns16550a::serial8250_runtime_rx_enabled() {
         return "serial8250_runtime_rx.enabled";
@@ -6822,6 +6854,7 @@ fn wait_serial8250_rx_batch_loopback_closed(
             && current.flip_pushes > baseline.flip_pushes
             && current.flip_inserted.saturating_sub(baseline.flip_inserted) == expected_len
             && current.source_completes > baseline.source_completes
+            && uart_source_claim_complete_delta_matched(current, baseline)
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
             && super::ns16550a::serial8250_runtime_rx_enabled()
@@ -6861,6 +6894,7 @@ fn wait_serial8250_rx_loopback_closed(
             && current.flip_pushes > baseline.flip_pushes
             && current.flip_inserted > baseline.flip_inserted
             && current.source_completes > baseline.source_completes
+            && uart_source_claim_complete_delta_matched(current, baseline)
             && current.zero_claims > baseline.zero_claims
             && current.loop_exits > baseline.loop_exits
             && super::ns16550a::serial8250_runtime_rx_enabled()
@@ -6881,11 +6915,6 @@ fn uart_rx_cycle_completed_and_closed(
     current: UartIrqCycleSnapshot,
     baseline: UartIrqCycleSnapshot,
 ) -> bool {
-    let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
-    let source_complete_delta = current
-        .source_completes
-        .saturating_sub(baseline.source_completes);
-
     current.rx_requests > baseline.rx_requests
         && current.source_claims > baseline.source_claims
         && current.source_dispatches > baseline.source_dispatches
@@ -6897,7 +6926,19 @@ fn uart_rx_cycle_completed_and_closed(
         && current.source_completes > baseline.source_completes
         && current.zero_claims > baseline.zero_claims
         && current.loop_exits > baseline.loop_exits
-        && source_claim_delta == source_complete_delta
+        && uart_source_claim_complete_delta_matched(current, baseline)
+}
+
+fn uart_source_claim_complete_delta_matched(
+    current: UartIrqCycleSnapshot,
+    baseline: UartIrqCycleSnapshot,
+) -> bool {
+    let source_claim_delta = current.source_claims.saturating_sub(baseline.source_claims);
+    let source_complete_delta = current
+        .source_completes
+        .saturating_sub(baseline.source_completes);
+
+    source_claim_delta == source_complete_delta
 }
 
 fn wait_uart_irq_cycle_closed(

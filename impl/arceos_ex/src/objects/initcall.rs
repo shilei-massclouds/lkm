@@ -2551,6 +2551,11 @@ impl InitcallBoundary {
         );
         check!(
             "Serial8250RxLoopbackProbe",
+            "serial8250_rx_loopback_probe.source_claim_complete_delta_matched",
+            serial8250_rx_loopback_probe.source_claim_complete_delta_matched()
+        );
+        check!(
+            "Serial8250RxLoopbackProbe",
             "serial8250_rx_loopback_probe.irq_cycle_closed",
             serial8250_rx_loopback_probe.irq_cycle_closed()
         );
@@ -2598,6 +2603,11 @@ impl InitcallBoundary {
             "Serial8250RxBatchLoopbackProbe",
             "serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed",
             serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed()
+        );
+        check!(
+            "Serial8250RxBatchLoopbackProbe",
+            "serial8250_rx_batch_loopback_probe.source_claim_complete_delta_matched",
+            serial8250_rx_batch_loopback_probe.source_claim_complete_delta_matched()
         );
         check!(
             "Serial8250RxBatchLoopbackProbe",
@@ -3245,6 +3255,10 @@ pub fn initcall_phase_ready_diagnostic(
         serial8250_rx_loopback_probe.zero_claim_loop_exit_observed()
     );
     check!(
+        "serial8250_rx_loopback_probe.source_claim_complete_delta_matched",
+        serial8250_rx_loopback_probe.source_claim_complete_delta_matched()
+    );
+    check!(
         "serial8250_rx_loopback_probe.irq_cycle_closed",
         serial8250_rx_loopback_probe.irq_cycle_closed()
     );
@@ -3283,6 +3297,10 @@ pub fn initcall_phase_ready_diagnostic(
     check!(
         "serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed",
         serial8250_rx_batch_loopback_probe.zero_claim_loop_exit_observed()
+    );
+    check!(
+        "serial8250_rx_batch_loopback_probe.source_claim_complete_delta_matched",
+        serial8250_rx_batch_loopback_probe.source_claim_complete_delta_matched()
     );
     check!(
         "serial8250_rx_batch_loopback_probe.irq_cycle_closed",

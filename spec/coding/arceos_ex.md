@@ -855,8 +855,8 @@ single/batch RX request observed、PLIC claim observed、PLIC IRQ-domain dispatc
 observed、runtime handler observed/RX handled、PLIC complete observed、zero-claim observed、claim-loop exit observed、
 source-scoped PLIC claim/dispatch/complete delta，以及 single/batch RX loopback wait closed；观测事实：stimulus committed、
 PLIC claim observed、IRQ dispatch observed、runtime handler received RX、flip buffer pushed、PLIC complete observed、
-zero-claim loop exit observed、IRQ cycle closed、bounded drain observed、batch count matched、last byte matched 和 no
-overflow observed。若等待失败涉及中断链路，diagnostic 必须保留 PLIC/IRQ-domain/IRQ-registry 事实，不得把问题
+zero-claim loop exit observed、source claim/complete delta matched、IRQ cycle closed、bounded drain observed、
+batch count matched、last byte matched 和 no overflow observed。若等待失败涉及中断链路，diagnostic 必须保留 PLIC/IRQ-domain/IRQ-registry 事实，不得把问题
 预先归因到 UART 侧。
 为避免 handoff 后重复输出，`ConsoleRegistry` 必须区分 printk 记录保存和 legacy boot-console drain cursor。
 注册 preferred serial8250 console 时，应先把 boot console pending records 按 boot console 路径 flush 并推进 cursor；
