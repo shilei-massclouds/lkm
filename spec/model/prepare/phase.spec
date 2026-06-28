@@ -106,7 +106,7 @@ object OpenSbiFirmware: PrepareObject {
  */
 object Lds: PrepareObject {
     initial_state: State::Online;
-    source: linker::linux_6_12_37;
+    source: linker::linux_6_12;
 
     attrs {
         global_pointer: SymbolAddr;
@@ -169,7 +169,7 @@ object Lds: PrepareObject {
         }
     }
 
-    reference linux_6_12_37 {
+    reference linux_6_12 {
         global_pointer = symbol("__global_pointer$");
         kernel_start = symbol("_start");
         text_start = symbol("_start");
@@ -237,7 +237,7 @@ object Config: PrepareObject {
         }
     }
 
-    reference linux_6_12_37 {
+    reference linux_6_12 {
         kernel_link_addr = symbol("KERNEL_LINK_ADDR");
         kernel_image_va_window_size = symbol("SZ_2G");
     }

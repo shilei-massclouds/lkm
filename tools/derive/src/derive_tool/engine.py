@@ -266,11 +266,11 @@ _EXTERNAL_SOURCE_PROOFS = {
         for expression, proof in _CONFIG_SOURCE_PROOFS.items()
     },
     **{
-        ("Lds", "linker::linux_6_12_37", expression): proof
+        ("Lds", "linker::linux_6_12", expression): proof
         for expression, proof in _LDS_LINKER_PROOFS.items()
     },
     **{
-        (object_name, "static::linux_6_12_37", expression): proof
+        (object_name, "static::linux_6_12", expression): proof
         for object_name, proofs in _STATIC_SOURCE_PROOFS.items()
         for expression, proof in proofs.items()
     },

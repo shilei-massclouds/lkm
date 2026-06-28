@@ -275,7 +275,7 @@ object PayloadExecSyncBoundaries: KernelObject {
                 }
 
                 deferred {
-                    "Linux 6.12.37 kernel_execve()/bprm_execve()/exec_binprm()/begin_new_exec() 的完整同步协议保留为 PayloadExecSyncBoundaries：binfmt_lock、cred_guard_mutex、exec_update_lock、exec_mmap() 本地 IRQ 关闭与 mmap_lock、siglock/tasklist_lock、fs->lock+RCU、membarrier、完整 binfmt/script/module retry 和失败后 panic terminal 后续展开；当前 UserBootPayload 只实现最小 VFS/ELF/UserAddressSpace/trap-return handoff。";
+                    "Linux 6.12 kernel_execve()/bprm_execve()/exec_binprm()/begin_new_exec() 的完整同步协议保留为 PayloadExecSyncBoundaries：binfmt_lock、cred_guard_mutex、exec_update_lock、exec_mmap() 本地 IRQ 关闭与 mmap_lock、siglock/tasklist_lock、fs->lock+RCU、membarrier、完整 binfmt/script/module retry 和失败后 panic terminal 后续展开；当前 UserBootPayload 只实现最小 VFS/ELF/UserAddressSpace/trap-return handoff。";
                 }
             }
         }

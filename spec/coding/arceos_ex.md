@@ -161,7 +161,7 @@ page-cache、net namespace、`signals_init()`、真实 mount namespace 切换以
 trimmed checkpoint，不应伪装成完整运行期服务。
 
 本阶段必须用结构化对象记录 Linux 调用点分类，而不能只散落为 checkpoint：`ProcessPrepareTrimmedPaths`
-应覆盖当前 RISC-V/default_config 下的 x86 EFI runtime switch、SCS、`lockdep_init_task()`、KGDB late init、
+应覆盖当前 `../linux-6.12/.config` 的 RISC-V 配置下的 x86 EFI runtime switch、SCS、`lockdep_init_task()`、KGDB late init、
 cpuset/cgroup/taskstats/delayacct/ACPI/KCSAN 裁剪依据；同时也要记录已启用但本轮不展开的 `net_ns_init()`、
 `pagecache_init()`、`seq_file_init()`、`proc_root_init()`、`nsfs_init()`、`pidfs_init()`、以及
 `vfs_caches_init()` 内 block/char device cache 初始化位置。`rcu_init_tasks_generic()` 位于 `rest_init()` 之后的
@@ -367,7 +367,7 @@ Async deferred facts 应保留专用 `"async"` unbound workqueue 创建和 `min_
 应保留 `CONFIG_PADATA=y` / `CONFIG_HOTPLUG_CPU=y` 下 online/dead CPU hotplug state 注册、possible-CPU work array
 和 free list 责任。
 
-`page_alloc_init_late()` 当前按 Linux 6.12.37 RISC-V default `.config` 记录裁剪依据：
+`page_alloc_init_late()` 当前按 Linux 6.12 RISC-V default `.config` 记录裁剪依据：
 `CONFIG_DEFERRED_STRUCT_PAGE_INIT=n`，因此 deferred init kthread、completion wait 和 `deferred_pages`
 static key disable 路径裁剪；`CONFIG_PAGE_EXTENSION=n`，page extension late 裁剪；`CONFIG_SHUFFLE_PAGE_ALLOCATOR=n`，
 shuffle late 路径裁剪。
@@ -390,7 +390,7 @@ facts 与 mutex guard、Async/Padata deferred facts、PageAllocator late facts �
 这些路径必须保留为显式 deferred 或表内属性，而不是静默假设已经可用。
 
 `do_initcalls()` 前的审核边界固定在 `cpuset_init_smp()`、`driver_init()`、`init_irq_proc()` 和
-`do_ctors()`，到 `InitcallTable.preset()` 可观察为止。当前 `linux-6.12.37/.config` 中
+`do_ctors()`，到 `InitcallTable.preset()` 可观察为止。当前 `../linux-6.12/.config` 中
 `CONFIG_CGROUPS=n` 且 `CONFIG_CPUSETS` 未选中，所以 `cpuset_init_smp()` 通过
 `include/linux/cpuset.h` 折叠为空实现；`CONFIG_CONSTRUCTORS` 未选中，所以 `do_ctors()` 的条件体不执行。
 这些裁剪依据必须作为对象事实暴露。
@@ -501,7 +501,7 @@ helper 表达，例如 `to_platform_device!()`。
 `Context`，应存稳定 `DeviceNodeId`/node index/path handle，并在访问时通过仍然存在的 `DeviceTree` 解析出
 临时 `DeviceNodeRef<'_>`。
 
-该 action 的遍历规则参考 Linux 6.12.37 `drivers/of/platform.c`：
+该 action 的遍历规则参考 Linux 6.12 `drivers/of/platform.c`：
 `of_platform_default_populate(NULL, ...)` 使用 `of_default_bus_match_table` 调用
 `of_platform_populate()`；`root == NULL` 时 root 解析为 `/`；`of_platform_populate()` 遍历 `/`
 的直接 child，并以 `strict=true` 调用 `of_platform_bus_create()`。因此每个被考虑的节点必须有
@@ -577,7 +577,7 @@ static coherent backing 作为首轮受限实现，并通过 `KernelImage::runti
 对象级 ring backing 应按设备给出的 `queue_size` 建立，真实 static backing 的容量必须由 queue setup 检查
 `QUEUE_NUM_MAX` 后受控选择。
 
-`virtio-mmio` queue setup 必须按 Linux 6.12.37 `drivers/virtio/virtio_mmio.c` 的分支建模：version 1 legacy
+`virtio-mmio` queue setup 必须按 Linux 6.12 `drivers/virtio/virtio_mmio.c` 的分支建模：version 1 legacy
 设备写 `GUEST_PAGE_SIZE`、`QUEUE_SEL`、`QUEUE_NUM`、`QUEUE_ALIGN` 和 `QUEUE_PFN`；version 2 modern 设备写
 `QUEUE_SEL`、`QUEUE_NUM`、`QUEUE_DESC/AVAIL/USED` 低高地址和 `QUEUE_READY`。当前 QEMU `virtio-rng-device`
 可实际走 legacy 或 modern 任一路径，但代码必须从 MMIO `VERSION` 判定，不得硬编码为单一路径。`QueueNotify`
@@ -641,7 +641,7 @@ virtqueue 发布顺序也必须保持 Linux-like 约束：descriptor/avail ring 
 有序；读取 device used idx 后，在读取 used entry、status byte 和数据缓冲前要有 acquire 观察边界。当前 coherent
 static backing 仍可保留 cache maintenance deferred，但不得省略这些顺序边界。
 
-read-only ext2 必须继续走 `BufferHead`。实现边界对应 Linux 6.12.37 `ext2_fill_super()` /
+read-only ext2 必须继续走 `BufferHead`。实现边界对应 Linux 6.12 `ext2_fill_super()` /
 `ext2_iget()` / `ext2_find_entry()` / direct-block read：读取 superblock、校验 magic/block size、读取 group
 descriptor、读取 `EXT2_ROOT_INO`，遍历目录 direct blocks 中的 dirent，lookup 稳定文件，再按
 inode direct blocks 把文件内容拷贝给调用者。当前泛化步骤必须支持目录 direct-block 扫描、regular
@@ -729,7 +729,7 @@ preferred-from-stdout、consdev、write backend ready、printk route 切到 seri
 `keep_bootcon == false` 时，handoff 必须注销 boot console 或至少把 boot console 标为 offline，并记录 boot
 console removed/unregistered 事实；`keep_bootcon == true` 时，boot console 必须保持 registered/online，但
 printk route 仍切到 serial8250，handoff 仍视为完成。
-参考 Linux 6.12.37 `kernel/printk/printk.c::register_console()` 的交接边界，真实 serial console 成为
+参考 Linux 6.12 `kernel/printk/printk.c::register_console()` 的交接边界，真实 serial console 成为
 `CON_CONSDEV` 后应显式输出 `Serial8250Console.Online` 或等价 trace；默认非 `keep_bootcon` 分支注销
 `CON_BOOT` boot console 时，应显式输出 `BootConsole.Offline` 或等价 trace。trace/SVG 必须能展示
 real console 上线和 boot console 下线的顺序；`keep_bootcon` 分支必须展示 serial console online 但 boot console
@@ -1034,7 +1034,7 @@ RISC-V64 实现中，`State` 与 `LifecycleEvent` 必须使用稳定 `#[repr(u8)
 启动流程尚未迁移到模型文件中的显式 `deferred` 块。完成迁移后，模型才是这些 deferred 的事实源；
 `impl/arceos_ex` 是否实现、何时实现，是后续单独的展开任务。
 
-以下条目来自对照 `linux-6.12.37/default_config` 后的规格缺口复查。它们不要求立即实现，但后续应先补入
+以下条目来自对照 `../linux-6.12/.config` 后的规格缺口复查。它们不要求立即实现，但后续应先补入
 `spec/model` 对应对象或 phase 的 `deferred`，避免读者把当前最小模型误解为已经完整覆盖参考 Linux
 启动路径。
 
@@ -1540,7 +1540,7 @@ write-combine、normal memory alias 先记录为 deferred/unsupported，不得�
 
 `MmStructCache.setup()` 只建立 `"mm_struct"` cache，并且该 cache 必须作为 `SlubSubsystem`/`SlubCacheRegistry` 管理下的具名 SLUB cache 实例注册；`MmStructCache` 本身不得成为新的 allocator 类型。`vm_area_struct` cache、`vma_lock_cachep` 和 `mmap_init()` 属于后续 `proc_caches_init()` 或进程地址空间初始化路径，不得为了填满本阶段而提前塞进 `MmStructCache`。
 
-`PageExt`、`KFENCE`、`KMSAN`、`Kmemleak`、`DebugObjectsMemory` 和 `ExecMemory` 当前按 `linux-6.12.37/default_config` 记录为 model trimmed/no-op 路径。实现必须通过 `MmCoreTrimmedPaths` 这类结构化对象记录这些调用位置和裁剪原因，不得只散落 TODO 或只依赖文字 deferred；`execmem_init()` 的 no-op 依据是当前未选择 `CONFIG_EXECMEM`，因此走 `include/linux/execmem.h` 的 inline no-op，而不是把 `MODULES=n`、`BPF_JIT=n`、`KPROBES=n` 单独当作函数体裁剪依据。
+`PageExt`、`KFENCE`、`KMSAN`、`Kmemleak`、`DebugObjectsMemory` 和 `ExecMemory` 当前按 `../linux-6.12/.config` 记录为 model trimmed/no-op 路径。实现必须通过 `MmCoreTrimmedPaths` 这类结构化对象记录这些调用位置和裁剪原因，不得只散落 TODO 或只依赖文字 deferred；`execmem_init()` 的 no-op 依据是当前未选择 `CONFIG_EXECMEM`，因此走 `include/linux/execmem.h` 的 inline no-op，而不是把 `MODULES=n`、`BPF_JIT=n`、`KPROBES=n` 单独当作函数体裁剪依据。
 
 ## `SchedInitPhase` 编码约束
 
@@ -1650,7 +1650,7 @@ Tasks RCU callback-list 壳。`TasksRcu` 在本阶段只允许推进到 `Prepare
 `BootStackCanary.Ready`、`PerfEventCore.Ready`、`ProfileCore.Ready`、`SbiIpi.Ready`、`IpiMux.Ready` 和
 `SmpCallFunction.Ready`。
 
-`init_IRQ()` 的 RISC-V arch 边界必须显式保留。当前 `linux-6.12.37/default_config` 为
+`init_IRQ()` 的 RISC-V arch 边界必须显式保留。当前 `../linux-6.12/.config` 为
 `CONFIG_IRQ_STACKS=y`、`CONFIG_VMAP_STACK=y`、`CONFIG_SHADOW_CALL_STACK=n`，因此实现必须用
 `RiscvIrqStackSet` 或等价对象记录 `init_irq_stacks()` 为每个 possible CPU 建立 IRQ stack pointer 的事实，并记录
 `init_irq_scs()` 因 shadow call stack 未启用而 trimmed/no-op。真实 hardirq entry 的 `call_on_irq_stack()` 栈切换仍属于运行期
@@ -1846,7 +1846,7 @@ source enable 仍 deferred，softirq execution 仍 closed，IPI runtime 仍 defe
 时间功能和时钟中断功能：前者确认 time source 可读且单调推进；后者注册一次性 clockevent callback，使用 SBI timer 在 deadline
 到来时触发 supervisor timer interrupt，并确认 handler 返回前调用关联函数。该 smoke 不表示完整周期 tick 或 clockevent 运行期已经启动。
 
-`poking_init()`、`ftrace_init()` 和 `context_tracking_init()` 当前按 RISC-V64/default_config 记录为 trimmed/no-op。
+`poking_init()`、`ftrace_init()` 和 `context_tracking_init()` 当前按 `../linux-6.12/.config` 的 RISC-V64 配置记录为 trimmed/no-op。
 `early_trace_init()`、`trace_init()` 和 `housekeeping_init()` 当前保留为 model `deferred`。实现若遇到这些调用位置，应按模型记录
 checkpoint 或 no-op 条件，不得以零散 TODO 代替正式 deferred。
 
@@ -1892,7 +1892,7 @@ smoke 可覆盖两个用户可观察 action：`SchedClock.read()` 至少能返�
 
 ## CacheBlockInfo 编码约束
 
-`CacheBlockInfo.setup()` 对应 Linux 6.12.37 的 `riscv_init_cbo_blocksizes()`。当前实现只发布平台级 `CBOM` 和 `CBOZ` block size 事实；`CBOP` 虽然存在 DeviceTree binding，但不在该 Linux 初始化点发布，暂不进入当前对象状态。
+`CacheBlockInfo.setup()` 对应 Linux 6.12 的 `riscv_init_cbo_blocksizes()`。当前实现只发布平台级 `CBOM` 和 `CBOZ` block size 事实；`CBOP` 虽然存在 DeviceTree binding，但不在该 Linux 初始化点发布，暂不进入当前对象状态。
 
 实现必须从正式 `DeviceTree` 的 `/cpus` CPU nodes 读取 `riscv,cbom-block-size` 和 `riscv,cboz-block-size`，并结合 `CpuGroup` 只收集当前拓扑中的 hart。缺失属性表示 unavailable，不应导致启动失败。多个 hart 值不一致时只记录诊断事实，保持 first value wins 的收敛策略，不 panic，也不阻止 `CacheBlockInfo` 进入 `Ready`。
 

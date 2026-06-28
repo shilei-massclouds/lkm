@@ -3347,7 +3347,7 @@ type ArceosExInitcallCodingMust {
          *
          * The cpuset_init_smp(), driver_init(), init_irq_proc() and
          * do_ctors() slice must be classified against the current
-         * linux-6.12.37 .config before auditing do_initcalls(). Disabled
+         * ../linux-6.12/.config before auditing do_initcalls(). Disabled
          * CONFIG_CPUSETS/CONFIG_CGROUPS and CONFIG_CONSTRUCTORS paths are
          * trimmed; enabled driver-core/procfs paths must be deferred or
          * formal explicitly, not treated as no-op.
@@ -3495,7 +3495,7 @@ type ArceosExInitcallCodingMust {
         /*
          * Linux-like traversal:
          *
-         * The initial implementation must follow Linux 6.12.37
+         * The initial implementation must follow Linux 6.12
          * drivers/of/platform.c: of_platform_default_populate(NULL, ...)
          * resolves root to "/", then of_platform_populate() iterates the
          * root's direct children and calls of_platform_bus_create() with

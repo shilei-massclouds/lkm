@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="2040" viewBox="0 0 1280 2040" role="img" aria-labelledby="title desc">
   <title id="title">中断开放后准备期对象构建时序</title>
-  <desc id="desc">展示 Linux 6.12.37 default_config 下 start_kernel() 从 kmem_cache_init_late() 到 arch_cpu_finalize_init() 的有效调用顺序。</desc>
+  <desc id="desc">展示 Linux 6.12 以 `../linux-6.12/.config` 为基线的 start_kernel() 从 kmem_cache_init_late() 到 arch_cpu_finalize_init() 的有效调用顺序。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }

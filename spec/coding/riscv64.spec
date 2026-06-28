@@ -129,8 +129,8 @@ type Riscv64SchedulerCodingShould {
          * following the Linux-style use of the tp register as the current-task
          * view. The object-level CurrentTaskSlot is the implementation
          * boundary; on RISC-V64 its backend should use tp as the carrier or
-         * fast entry for the current task pointer. This follows Linux
-         * 6.12.37's arch/riscv/kernel/entry.S::__switch_to, which moves next
+         * fast entry for the current task pointer. This follows Linux 6.12
+         * arch/riscv/kernel/entry.S::__switch_to, which moves next
          * task_struct from a1 into tp. This is an implementation reference for
          * this target; the model semantics remain CPU-view based and do not
          * require per-cpu storage as the CurrentTaskRef abstraction.

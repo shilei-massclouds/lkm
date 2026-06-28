@@ -568,7 +568,7 @@ object SecurityCore: KernelObject {
 
 /*
  * ProcessPrepareTrimmedPaths 保留 start_kernel() 中落在本子阶段、但当前
- * linux-6.12.37/default_config 下为空、不可达或暂缓展开的调用点。
+ * ../linux-6.12/.config 下为空、不可达或暂缓展开的调用点。
  * 这些事实必须结构化记录，不能只留在 checkpoint 或 markdown 表格。
  */
 object ProcessPrepareTrimmedPaths: KernelObject {

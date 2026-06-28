@@ -8,7 +8,7 @@
  */
 
 /*
- * MemoryTopology 表示页分配器可见的内存节点拓扑视图。当前 default_config
+ * MemoryTopology 表示页分配器可见的内存节点拓扑视图。当前 `../linux-6.12/.config`
  * 为 UMA，因此只要求唯一 MemoryNode；NUMA 扩展后可增加更多 MemoryNode
  * 实例。本对象消费 CorePrepare 已建立的 Zones，不重新创建 pg_data_t、
  * node_zones 或 mem_map 本体。

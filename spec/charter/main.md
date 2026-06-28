@@ -5,7 +5,7 @@
 - 状态：草稿
 - 维护方式：共同迭代
 - 当前体系结构约束：`riscv64`
-- 参考内核：`linux-6.12.37`
+- 参考内核：`../linux-6.12`
 
 ## 定位
 
@@ -117,7 +117,7 @@
 21. 运行时与资源管理
 22. 错误处理
 23. 安全与隔离
-24. Linux 6.12.37 交叉验证
+24. Linux 6.12 交叉验证
 25. 测试与验证
 26. 兼容性策略
 27. 未决问题
@@ -322,7 +322,7 @@ context SingleTaskContext: Context {
 
 ### Completion 类型
 
-`Completion` 是本规格第一个归档的运行期对象 Type，可作为 Type/Instance、扩展状态和条件型事件建模的典型类型。Linux 6.12.37 中它对应 `struct completion`，核心属性包括 `done` 计数和 `wait` 等待队列。`RestInitPhase` 中的 `KthreaddReadyGate` 是该 Type 的典型实例，对应 Linux 静态 completion `kthreadd_done`。
+`Completion` 是本规格第一个归档的运行期对象 Type，可作为 Type/Instance、扩展状态和条件型事件建模的典型类型。Linux 6.12 中它对应 `struct completion`，核心属性包括 `done` 计数和 `wait` 等待队列。`RestInitPhase` 中的 `KthreaddReadyGate` 是该 Type 的典型实例，对应 Linux 静态 completion `kthreadd_done`。
 
 `Completion` 的标准生命周期暂定如下：
 
@@ -361,7 +361,7 @@ context SingleTaskContext: Context {
 
 ### SmpbootThread 类型
 
-`SmpbootThread` 表示由 Linux smpboot 框架管理的 per-CPU 内核线程实例。它不是全局注册表对象，而是挂在具体 CPU 下的对象实例，记作 `CpuGroup.Cpu[cpu].SmpbootThread[name]`。Linux 6.12.37 中它由 `struct smp_hotplug_thread` 模板描述，并最终落实为绑定到某个 CPU 的 `task_struct`，典型实例包括 `ksoftirqd/%u`、`migration/%u`、`rcuc/%u`、`irq_work/%u` 以及 `cpuhp/%u`。其中 `CpuHotplugThread` 是来自 `cpuhp/%u` 模板的特化实例；因为它驱动 CPU hotplug 状态机，规格中允许保留显式名称 `CpuGroup.Cpu[cpu].CpuHotplugThread`。
+`SmpbootThread` 表示由 Linux smpboot 框架管理的 per-CPU 内核线程实例。它不是全局注册表对象，而是挂在具体 CPU 下的对象实例，记作 `CpuGroup.Cpu[cpu].SmpbootThread[name]`。Linux 6.12 中它由 `struct smp_hotplug_thread` 模板描述，并最终落实为绑定到某个 CPU 的 `task_struct`，典型实例包括 `ksoftirqd/%u`、`migration/%u`、`rcuc/%u`、`irq_work/%u` 以及 `cpuhp/%u`。其中 `CpuHotplugThread` 是来自 `cpuhp/%u` 模板的特化实例；因为它驱动 CPU hotplug 状态机，规格中允许保留显式名称 `CpuGroup.Cpu[cpu].CpuHotplugThread`。
 
 模板只作为实例创建的静态描述和依赖，不在当前规格中建立独立的 `SmpbootThreadRegistry` 顶层对象。模板属性至少包括 `thread_comm`、`store`、`thread_should_run`、`thread_fn`、`setup` / `cleanup` / `park` / `unpark` 回调，以及 `selfparking` 标志。`smpboot_register_percpu_thread()` 在规格层记录为相应 `SmpbootThreadTemplate[name].registered == true`，并为当时已 online 的 CPU 创建可用实例；后续 CPU bringup 通过 CPU hotplug 状态机为目标 CPU 创建实例。
 
@@ -1156,7 +1156,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
    描述：`VM` 的页表子对象，维护并使用 `静态对象集合.early_pg_dir`，用于支撑入口前导期后半段的早期内核虚拟地址空间。空间包括两个虚拟地址区域：完整的内核映像和物理内存中的原始 `dtb`。
 
-   对原始 `dtb` 的头部、完整物理范围以及 `FixMap` 槽位容量检查，属于本规格的前置证明边界。它把固件交接、DTB 有效性和 FDT fixmap 布局这些后续步骤隐含依赖的事实提前收口。Linux 6.12.37 的 RISC-V 实现中，`setup_vm()` 主要先根据 `dtb_pa` 建立 FDT fixmap 映射并记录 `dtb_early_va/dtb_early_pa`；真正的 FDT header 校验和内容扫描发生在后续 `parse_dtb()` / `early_init_dt_scan()` 路径中。因此这里的验证边界强于 Linux 当前源码顺序，不表示 Linux 在 `setup_vm()` 中逐项执行这些检查。
+   对原始 `dtb` 的头部、完整物理范围以及 `FixMap` 槽位容量检查，属于本规格的前置证明边界。它把固件交接、DTB 有效性和 FDT fixmap 布局这些后续步骤隐含依赖的事实提前收口。Linux 6.12 的 RISC-V 实现中，`setup_vm()` 主要先根据 `dtb_pa` 建立 FDT fixmap 映射并记录 `dtb_early_va/dtb_early_pa`；真正的 FDT header 校验和内容扫描发生在后续 `parse_dtb()` / `early_init_dt_scan()` 路径中。因此这里的验证边界强于 Linux 当前源码顺序，不表示 Linux 在 `setup_vm()` 中逐项执行这些检查。
 
    * `setup` - 建立早期页表
 
@@ -1389,7 +1389,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 4. `页元数据映射对象`（`PageMetadataMap`）：对应当前 `CONFIG_FLATMEM=y` 路径下 `misc_mem_init() -> zone_sizes_init() -> free_area_init()` 中的 `alloc_node_mem_map()` 和 `memmap_init()`。它建立 Linux `struct page` metadata 视图，使 PFN/PageRef 转换在后续 `mem_init()` 之前已经有效；当前 `CONFIG_SPARSEMEM=n`，`sparse_init()` 展开为空操作，SPARSEMEM/VMEMMAP 元数据路径不进入主线 formal。
 5. `资源树`（`ResourceTree`）：对应 `init_resources()`，根据 `MemBlock` 中的 memory/reserved 区段建立系统资源树，并登记 system RAM、reserved resources、kernel image/code/rodata/data/bss 等资源，同时约束子资源必须落在父资源范围内，重叠关系必须合法。
 6. `CPU 管理对象`（`CpuGroup` / `BootCPU` / secondary CPU instances）：`CpuGroup` 是所有 CPU 实例的引用组织者；正式索引形态是 `CpuGroup.Cpu[logical_id]`，其中 logical id `0` 总是引用 `BootCPU`，后续 logical id 引用 secondary CPU 实例。`CpuGroup` 不拥有 CPU 本体，也不通过结构类型区分 boot CPU 与 secondary CPU；每个 CPU 对象自己维护 hartid、logical id 和 possible/present/online 等状态事实。`CpuGroup` 同时维护 possible/present/online 集合视图，集合元素是 CPU 引用。当前不引入额外拥有生命周期的 `CPUSetObject`、`PossibleCpu` 或 `CpuIdMap` 中间类型。`CpuGroup.setup()` 对应 `setup_smp()`，只建立拓扑事实、secondary CPU 候选集合和 logical CPU 映射边界，不启动 secondary CPU，也不开放多 hart 并发。
-7. `RISC-V 缓存块信息`（`CacheBlockInfo`）：对应 Linux 6.12.37 的 `riscv_init_cbo_blocksizes()`，它是独立的平台级事实对象，不是 `CorePreparePhase` 的下级对象。当前模型从正式 `DeviceTree` 的 CPU nodes 收集 `riscv,cbom-block-size` 和 `riscv,cboz-block-size`，结合 `CpuGroup` 限定当前拓扑中的 hart，并收敛为系统级 `CBOM`/`CBOZ` block size 事实。缺失属性表示 unavailable；多个 hart 值不一致只形成诊断事实，不阻止对象进入 `Ready`。`CBOP` 虽然存在 DeviceTree binding，但 Linux 6.12.37 的该初始化点不发布它，暂缓建模。
+7. `RISC-V 缓存块信息`（`CacheBlockInfo`）：对应 Linux 6.12 的 `riscv_init_cbo_blocksizes()`，它是独立的平台级事实对象，不是 `CorePreparePhase` 的下级对象。当前模型从正式 `DeviceTree` 的 CPU nodes 收集 `riscv,cbom-block-size` 和 `riscv,cboz-block-size`，结合 `CpuGroup` 限定当前拓扑中的 hart，并收敛为系统级 `CBOM`/`CBOZ` block size 事实。缺失属性表示 unavailable；多个 hart 值不一致只形成诊断事实，不阻止对象进入 `Ready`。`CBOP` 虽然存在 DeviceTree binding，但 Linux 6.12 的该初始化点不发布它，暂缓建模。
 8. `CPU 能力对象`（`CpuCapabilities`）：对应 `riscv_fill_hwcap()` 的规格抽象，汇总 CPU 集合的 ISA/hwcap 能力事实，供后续 alternatives、DMA/cache policy、上下文管理和用户态 ISA 暴露路径依赖。它是独立事实对象，不是 `CorePreparePhase` 的下级对象；当前从正式 `DeviceTree` 的 CPU nodes 收集 per-hart ISA facts，结合 `CpuGroup` 形成 all-harts common capability facts，并用 `CacheBlockInfo` 校验 Zicbom/Zicboz。FPU/VECTOR 的支持事实属于本对象；入口期禁用 FPU/VECTOR 的执行状态属于 CPU execution context，不由本对象推进。
 9. `DMA/cache 策略事实对象`（暂名 `DmaCachePolicy`）：对应 `riscv_noncoherent_supported()` 与 `riscv_set_dma_cache_alignment()`。它消费 `CpuCapabilities.Ready` 与 `CacheBlockInfo.Ready`，收敛当前平台是否支持 non-coherent DMA、是否需要显式 cache maintenance、以及 `dma_cache_alignment` 的最终事实。当前 `default_config` 中 `CONFIG_RISCV_DMA_NONCOHERENT=y` 且 `CONFIG_RISCV_ISA_ZICBOM=y`；若当前 CPU 能力事实显示 Zicbom 可用，则 `riscv_noncoherent_supported()` 记录 non-coherent DMA 支持事实，否则 `riscv_set_dma_cache_alignment()` 会把 `dma_cache_alignment` 降为 1。该对象不是 DMA API 本体，也不分配 DMA bounce buffer；它只为后续 `mem_init()` 中的 SWIOTLB/bounce 决策提供前置事实。
 10. `命令行管理对象`（`CommandLine`）：对应启动命令行文本视图管理。`KernelCmdline` 是 raw view，入口后继期由 `CommandLine.preset()` 建立；`SavedCommandLine` 是 saved view，`StaticCommandLine` 是 static/work view，核心准备期由 `CommandLine.setup()` 驱动建立，对应 `setup_command_line()` 中建立命令行副本的部分。`EarlyParam`、`BootParam` 和 `PayloadParam` 属于 `Params` 管理的参数解析类对象，不并入 `CommandLine.setup()`，也不改变它们在 `PerCpuStorage` / `CpuHotplugState` 之后的原有时序。
@@ -1518,7 +1518,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 #### 子阶段 4：内存核心初始化期（MM Core Init Subphase）
 
-第四个子阶段对应 Linux 6.12.37 `start_kernel()` 中 `mm_core_init()` 的内部内容。它从 `trap_init()` 完成后开始，在 `mm_core_init()` 返回时结束；后续的 `sched_init()`、IRQ/time/RCU/workqueue 初始化和 `local_irq_enable()` 都不属于本子阶段。
+第四个子阶段对应 Linux 6.12 `start_kernel()` 中 `mm_core_init()` 的内部内容。它从 `trap_init()` 完成后开始，在 `mm_core_init()` 返回时结束；后续的 `sched_init()`、IRQ/time/RCU/workqueue 初始化和 `local_irq_enable()` 都不属于本子阶段。
 
 本小节作为 `BootPhase` 子阶段 4 的讨论落点。新增讨论应先在这里明确 `mm_core_init()` 内部对象边界、阶段边界、状态推进和检查项；只有当语义已经稳定，才同步进入形式化模型、图示和对象级实现。若正文解释、形式化模型和实现之间出现差异，应优先回到本节确认设计意图，再更新可验证模型和代码。
 
@@ -1542,7 +1542,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 本子阶段的输出目标是把“早期内存描述和 memblock 分配能力”推进为“核心内存管理基础可用”。这里的“核心内存管理基础可用”至少包含：zonelist 已建立，页分配器 hotplug/pcp 基础钩子已登记，架构 `mem_init()` 已把 memblock 管理的可用页交接给页分配器并完成 RISC-V 所需的 `swiotlb`/内存布局收尾，SLUB/kmalloc 分配器可用，内存调试/硬化状态完成当前配置下的初始化，页表相关缓存可用，vmalloc/vmap 基础可用，`mm_struct` 等基础 cache 可用。`ExecMemory` 在当前默认配置下因未选择 `CONFIG_EXECMEM` 视为裁剪/no-op 路径；后续若启用相关功能，再作为正式对象展开。
 
-当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_64BIT=y`、`CONFIG_MMU=y`、`CONFIG_FLATMEM=y`、`CONFIG_SLUB=y`、`CONFIG_SPLIT_PTE_PTLOCKS=y`、`CONFIG_STACKDEPOT=y`、`CONFIG_DEBUG_PAGEALLOC=y`、`CONFIG_DEBUG_VM=y`、`CONFIG_SWIOTLB=y`、`CONFIG_DMA_BOUNCE_UNALIGNED_KMALLOC=y`；同时 `CONFIG_INIT_ON_ALLOC_DEFAULT_ON`、`CONFIG_INIT_ON_FREE_DEFAULT_ON`、`CONFIG_DEBUG_PAGEALLOC_ENABLE_DEFAULT`、`CONFIG_PAGE_POISONING`、`CONFIG_PAGE_EXTENSION`、`CONFIG_KFENCE`、`CONFIG_KMSAN`、`CONFIG_DEBUG_KMEMLEAK`、`CONFIG_DEBUG_OBJECTS`、`CONFIG_KASAN`、`CONFIG_STACKDEPOT_ALWAYS_INIT`、`CONFIG_MODULES`、`CONFIG_BPF_JIT` 和 `CONFIG_KPROBES` 均未启用。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
+当前 Linux 参照配置以 `../linux-6.12/.config` 为准。与本子阶段相关的关键配置包括：`CONFIG_64BIT=y`、`CONFIG_MMU=y`、`CONFIG_FLATMEM=y`、`CONFIG_SLUB=y`、`CONFIG_SPLIT_PTE_PTLOCKS=y`、`CONFIG_STACKDEPOT=y`、`CONFIG_DEBUG_PAGEALLOC=y`、`CONFIG_DEBUG_VM=y`、`CONFIG_SWIOTLB=y`、`CONFIG_DMA_BOUNCE_UNALIGNED_KMALLOC=y`；同时 `CONFIG_INIT_ON_ALLOC_DEFAULT_ON`、`CONFIG_INIT_ON_FREE_DEFAULT_ON`、`CONFIG_DEBUG_PAGEALLOC_ENABLE_DEFAULT`、`CONFIG_PAGE_POISONING`、`CONFIG_PAGE_EXTENSION`、`CONFIG_KFENCE`、`CONFIG_KMSAN`、`CONFIG_DEBUG_KMEMLEAK`、`CONFIG_DEBUG_OBJECTS`、`CONFIG_KASAN`、`CONFIG_STACKDEPOT_ALWAYS_INIT`、`CONFIG_MODULES`、`CONFIG_BPF_JIT` 和 `CONFIG_KPROBES` 均未启用。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
 
 本小节使用的标准生命周期语义扩展为 `Base -> Prepared -> Ready -> Online -> Offline -> Destroyed`。其中 `Offline` 表示对象的主要服务能力或资源所有权已经退出运行路径，但对象元数据仍可用于诊断、引用收尾或后续销毁；对多数启动对象，`Offline` 可以是空动作或短路边界。`handoff` 只作为 `Offline` 的资源交接别名，`discarded` 只作为 `Destroyed` 的资源丢弃别名，不引入新的状态名。`State::Offline` 与 `Transition::Disable` 已进入 `spec/model/SEMANTICS.md` 和 model checker；这里的 `Transition::Disable` 是迁移期源语法，语义上属于生命周期 transition。配置裁剪路径继续写为 `trimmed` 或“裁剪路径”，不把它当作对象状态；`Skipped` 只可作为讨论中的自然语言，不进入 formal model、规格清单或 coding 实现。编译期约束、一次性验证、日志输出、策略选择和临时占位初始化若不形成长期对象生命周期，统一写为 `checkpoint`，不引入未定义的 `Checked`、`Decided`、`Emitted`、`Registered` 等状态名。
 
@@ -1639,7 +1639,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 ##### 子阶段 4 过程处理清单（初稿）
 
-| Linux 6.12.37 `mm_core_init()` 调用 | 规格处理 | 备注 |
+| Linux 6.12 `mm_core_init()` 调用 | 规格处理 | 备注 |
 |---|---|---|
 | `BUILD_BUG_ON(MAX_ZONELISTS > 2)` | checkpoint | 编译期结构约束，不推进运行期对象状态。 |
 | `build_all_zonelists(NULL)` | formal: `PageAllocator.preset()` / `MemoryNode[*].ZonelistSet.setup()` | 基于 `MemoryNode[*].ZoneSet` 建立 fallback zoneref 顺序；boot PCP 初始化、zonelist verify、cpuset mems allowed、mobility grouping 和 `pr_info` 输出均作为 checkpoint。 |
@@ -1673,7 +1673,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
   图 15 内存核心初始化期对象构建时序
 </p>
 
-图 15 按 Linux 6.12.37 `mm_core_init()` 内部调用顺序展示子阶段 4 的推进过程。绿色节点表示当前 `default_config` 下的主线 formal 路径，紫色节点表示 checkpoint，灰色虚线节点表示已裁剪或在 RISC-V64 当前目标中不纳入的路径。
+图 15 按 Linux 6.12 `mm_core_init()` 内部调用顺序展示子阶段 4 的推进过程。绿色节点表示当前 `../linux-6.12/.config` 下的主线 formal 路径，紫色节点表示 checkpoint，灰色虚线节点表示已裁剪或在 RISC-V64 当前目标中不纳入的路径。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -1706,7 +1706,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 
 #### 子阶段 5：调度准备期（Scheduler Init Subphase）
 
-第五个子阶段对应 Linux 6.12.37 `start_kernel()` 中 `mm_core_init()` 返回后，到 `context_tracking_init()` 调用点完成的调度与异步基础准备段。它承接已经就绪的核心内存管理基础，先经过当前 RISC-V/default_config 下裁剪的 `poking_init()` 和 `ftrace_init()` 调用点，再完成 `sched_init()`，建立 radix/maple 基础索引、workqueue early 框架、Softirq action table 壳和 RCU 支撑设施，使系统拥有“中断打开前所需的调度与异步基础”。当前配置下 `context_tracking_init()` 编译为空调用，只作为边界处的 trimmed/no-op 记录；后续 IRQ、timer/timekeeping、`softirq_init()` 和打开中断前收尾不属于本子阶段。
+第五个子阶段对应 Linux 6.12 `start_kernel()` 中 `mm_core_init()` 返回后，到 `context_tracking_init()` 调用点完成的调度与异步基础准备段。它承接已经就绪的核心内存管理基础，先经过当前 `../linux-6.12/.config` 的 RISC-V 配置下裁剪的 `poking_init()` 和 `ftrace_init()` 调用点，再完成 `sched_init()`，建立 radix/maple 基础索引、workqueue early 框架、Softirq action table 壳和 RCU 支撑设施，使系统拥有“中断打开前所需的调度与异步基础”。当前配置下 `context_tracking_init()` 编译为空调用，只作为边界处的 trimmed/no-op 记录；后续 IRQ、timer/timekeeping、`softirq_init()` 和打开中断前收尾不属于本子阶段。
 
 本小节作为 `BootPhase` 子阶段 5 的初步讨论落点。当前只做对象边界、Linux 调用分类、图示和结束状态的第一轮整理；后续逐个对象讨论稳定后，再同步进入形式化模型和 `impl/arceos_ex`。
 
@@ -1725,7 +1725,7 @@ Flow 的实体化并不是孤立发生的。与之同步发生的，还有对象
 - `PrintkBuffer.state == Ready`
 - 当前仍保持 `System Exclusive`，`early_boot_irqs_disabled == true`
 
-当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的启用配置包括：`CONFIG_SMP=y`、`CONFIG_PREEMPT=y`、`CONFIG_TREE_RCU=y`、`CONFIG_PREEMPT_RCU=y`、`CONFIG_TASKS_RCU=y`、`CONFIG_TASKS_TRACE_RCU=y`、`CONFIG_CONTEXT_TRACKING=y`、`CONFIG_CONTEXT_TRACKING_IDLE=y`、`CONFIG_CPU_ISOLATION=y`。当前 RISC-V 路径没有覆盖 `poking_init()`，因此使用 weak no-op；当前未启用 `CONFIG_FTRACE_MCOUNT_RECORD`，因此 `ftrace_init()` 在 `include/linux/ftrace.h` 中折叠为空调用；当前未启用 `CONFIG_CONTEXT_TRACKING_USER_FORCE`，因此 `context_tracking_init()` 也在头文件中折叠为空调用。`housekeeping_init()` 虽然编译存在，将来需要作为 CPU isolation / nohz_full / isolcpus 相关对象展开，但当前最小启动输入未建模 `nohz_full=` 或 `isolcpus=` 参数，因此未设置 housekeeping flags 时直接返回。本阶段图示保留这类紧邻边界的 trimmed/deferred 调用位置，以避免误判 Linux 原始顺序。
+当前 Linux 参照配置以 `../linux-6.12/.config` 为准。与本子阶段相关的启用配置包括：`CONFIG_SMP=y`、`CONFIG_PREEMPT=y`、`CONFIG_TREE_RCU=y`、`CONFIG_PREEMPT_RCU=y`、`CONFIG_TASKS_RCU=y`、`CONFIG_TASKS_TRACE_RCU=y`、`CONFIG_CONTEXT_TRACKING=y`、`CONFIG_CONTEXT_TRACKING_IDLE=y`、`CONFIG_CPU_ISOLATION=y`。当前 RISC-V 路径没有覆盖 `poking_init()`，因此使用 weak no-op；当前未启用 `CONFIG_FTRACE_MCOUNT_RECORD`，因此 `ftrace_init()` 在 `include/linux/ftrace.h` 中折叠为空调用；当前未启用 `CONFIG_CONTEXT_TRACKING_USER_FORCE`，因此 `context_tracking_init()` 也在头文件中折叠为空调用。`housekeeping_init()` 虽然编译存在，将来需要作为 CPU isolation / nohz_full / isolcpus 相关对象展开，但当前最小启动输入未建模 `nohz_full=` 或 `isolcpus=` 参数，因此未设置 housekeeping flags 时直接返回。本阶段图示保留这类紧邻边界的 trimmed/deferred 调用位置，以避免误判 Linux 原始顺序。
 
 `early_trace_init()` 和 `trace_init()` 对应 Linux tracing core / event tracing 机制。当前项目已经有自己的 checkpoint announce/observer 机制，二者未来应合并为同一机制，还是保持并列并重新命名其边界和意义，暂未确定。由于 Linux tracing 不是本子阶段的核心启动功能，本阶段暂不建立主线 trace 对象；但未来若恢复，更可能是一个 `LinuxTracing` 对象，其中 `early_trace_init()` 对应 `preset()`，`trace_init()` 对应 `setup()`，而不是拆成 `EarlyTrace` 和 `TraceEvents` 两个独立对象。`ftrace_init()` 在当前配置下为空调用；如果后续配置启用 function tracing/mcount record，再考虑纳入同一 `LinuxTracing` 对象或单独作为 function tracing 子对象。为了保留 Linux 原始调用顺序，过程清单和时序图仍记录这些调用，并明确标记为 `trimmed` 或 `deferred`。后续若要恢复，应先明确它与项目内 checkpoint announce/observer 机制的关系、命名和责任边界，再进入形式化模型或实现。
 
@@ -1778,7 +1778,7 @@ flowchart LR
 
 ##### 子阶段 5 过程处理清单（初稿）
 
-| Linux 6.12.37 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `poking_init()` | trimmed/no-op | RISC-V64 当前未覆盖该 weak hook；x86/powerpc code patching 路径不在当前目标内。 |
 | `ftrace_init()` | trimmed/no-op | 当前未启用 `CONFIG_FTRACE_MCOUNT_RECORD`，`ftrace_init()` 折叠为空实现；function tracing 后续若启用再并入 tracing 对象讨论。 |
@@ -1820,7 +1820,7 @@ flowchart LR
   图 17 调度准备期对象构建时序
 </p>
 
-图 17 按 Linux 6.12.37 `start_kernel()` 中 `mm_core_init()` 返回后到 `context_tracking_init()` 调用点完成的顺序展示子阶段 5 的推进过程，并在 `sched_init()` 内部展开 `Scheduler.preset/setup/enable()`。绿色节点表示当前主线 formal 候选，紫色节点表示 checkpoint，灰色虚线节点表示当前 deferred，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
+图 17 按 Linux 6.12 `start_kernel()` 中 `mm_core_init()` 返回后到 `context_tracking_init()` 调用点完成的顺序展示子阶段 5 的推进过程，并在 `sched_init()` 内部展开 `Scheduler.preset/setup/enable()`。绿色节点表示当前主线 formal 候选，紫色节点表示 checkpoint，灰色虚线节点表示当前 deferred，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -1841,7 +1841,7 @@ flowchart LR
 
 #### InterruptPhase 子阶段 1：中断时间准备期（IRQ and Time Init Subphase）
 
-本子阶段对应 Linux 6.12.37 `start_kernel()` 中 `early_irq_init()` 开始，到 `local_irq_enable()` 前的 IRQ/time 初始化段。它承接调度准备期已经建立的 scheduler、RCU 支撑设施和 workqueue 基础，建立 IRQ 控制器、tick/timer/timekeeping、softirq、完整随机数初始化、perf/profile 和 SMP call function 基础，但不打开 boot CPU 本地中断总入口。
+本子阶段对应 Linux 6.12 `start_kernel()` 中 `early_irq_init()` 开始，到 `local_irq_enable()` 前的 IRQ/time 初始化段。它承接调度准备期已经建立的 scheduler、RCU 支撑设施和 workqueue 基础，建立 IRQ 控制器、tick/timer/timekeeping、softirq、完整随机数初始化、perf/profile 和 SMP call function 基础，但不打开 boot CPU 本地中断总入口。
 
 本子阶段是 `InterruptPhase` 的边界打开前准备期。对象建立过程仍处于 `System Exclusive` 上下文中：中断总开关关闭，secondary hart 仍未启动，普通任务切换尚未进入并发运行。但本阶段建立的是中断开放后会立即被消费的控制结构：timer interrupt、softirq、RCU nohz、RISC-V irq stack、SBI IPI、clockevent/clocksource、完整 RNG 和 call function 都必须在中断开放前处于可解释状态。实际改变默认上下文的 `local_irq_enable()` 由后续 `LocalIrqEnablePhase` 单独承载。
 
@@ -1857,7 +1857,7 @@ flowchart LR
 - `PerCpuStorage.state == Ready`
 - 当前仍保持 `System Exclusive`，`early_boot_irqs_disabled == true`
 
-当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的启用配置包括：`CONFIG_IRQ_STACKS=y`、`CONFIG_VMAP_STACK=y`、`CONFIG_SOFTIRQ_ON_OWN_STACK=y`、`CONFIG_NO_HZ_IDLE=y`、`CONFIG_HIGH_RES_TIMERS=y`、`CONFIG_GENERIC_CLOCKEVENTS=y`、`CONFIG_RISCV_TIMER=y`、`CONFIG_PERF_EVENTS=y`、`CONFIG_PROFILING=y`、`CONFIG_RANDOMIZE_KSTACK_OFFSET=y`。本阶段只记录当前配置下的有效调用路径，不把未启用配置路径纳入对象、过程清单和图示。
+当前 Linux 参照配置以 `../linux-6.12/.config` 为准。与本子阶段相关的启用配置包括：`CONFIG_IRQ_STACKS=y`、`CONFIG_VMAP_STACK=y`、`CONFIG_SOFTIRQ_ON_OWN_STACK=y`、`CONFIG_NO_HZ_IDLE=y`、`CONFIG_HIGH_RES_TIMERS=y`、`CONFIG_GENERIC_CLOCKEVENTS=y`、`CONFIG_RISCV_TIMER=y`、`CONFIG_PERF_EVENTS=y`、`CONFIG_PROFILING=y`、`CONFIG_RANDOMIZE_KSTACK_OFFSET=y`。本阶段只记录当前配置下的有效调用路径，不把未启用配置路径纳入对象、过程清单和图示。
 
 当前先将 `InterruptPhase` 子阶段 1 的对象和边界记录如下：
 
@@ -1971,7 +1971,7 @@ flowchart LR
 
 ##### InterruptPhase 子阶段 1 过程处理清单（初稿）
 
-| Linux 6.12.37 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `early_irq_init()` | formal candidate: `IrqDispatchTree.preset()` | 建立 IRQ 分发所需的全局编号空间、默认 affinity、early IRQ 基础和实现承载槽位；`irq_desc` 暂作为实现细节。 |
 | `init_IRQ()` | formal candidate: `IrqDispatchTree.setup()` | RISC-V64 初始化 irq stack/SCS，执行 `irqchip_init()` 建立 `IrqDomain` 树并关联 `IrqChip`，设置架构 IRQ 入口，并驱动 `SbiIpi.preset/setup()`；`SbiIpi.enable()` 留给后续 IPI 正式启用边界。 |
@@ -1998,7 +1998,7 @@ flowchart LR
   图 19 中断时间准备期对象构建时序
 </p>
 
-图 19 按 Linux 6.12.37 `start_kernel()` 中 `early_irq_init()` 到 `local_irq_enable()` 前的有效调用顺序展示 `InterruptPhase` 子阶段 1 的推进过程；`Softirq.preset()` 已在上一子阶段完成，本图只展示 `softirq_init()` 对应的 `Softirq.setup()`。蓝色节点表示 IRQ/timer/timekeeping 相关主线候选，绿色节点表示其它主线 formal 候选，灰色节点表示 deferred 路径，紫色节点表示 checkpoint。
+图 19 按 Linux 6.12 `start_kernel()` 中 `early_irq_init()` 到 `local_irq_enable()` 前的有效调用顺序展示 `InterruptPhase` 子阶段 1 的推进过程；`Softirq.preset()` 已在上一子阶段完成，本图只展示 `softirq_init()` 对应的 `Softirq.setup()`。蓝色节点表示 IRQ/timer/timekeeping 相关主线候选，绿色节点表示其它主线 formal 候选，灰色节点表示 deferred 路径，紫色节点表示 checkpoint。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2024,7 +2024,7 @@ flowchart LR
 
 #### InterruptPhase 子阶段 2：本地中断开放期（Local IRQ Enable Subphase）
 
-`InterruptPhase` 的第二个子阶段命名为 `LocalIrqEnablePhase`，中文名为本地中断开放期。它对应 Linux 6.12.37 `start_kernel()` 中 `WARN(!irqs_disabled(), ...)`、`early_boot_irqs_disabled = false` 与 `local_irq_enable()` 这一边界动作。
+`InterruptPhase` 的第二个子阶段命名为 `LocalIrqEnablePhase`，中文名为本地中断开放期。它对应 Linux 6.12 `start_kernel()` 中 `WARN(!irqs_disabled(), ...)`、`early_boot_irqs_disabled = false` 与 `local_irq_enable()` 这一边界动作。
 
 这个边界承接 `IrqTimeInitPhase` 的出口事实：IRQ/time 控制设施已经进入 `Ready`，boot CPU 本地中断总入口仍关闭，`early_boot_irqs_disabled == true`。本阶段只通过 `InterruptStream.enable()` 打开 boot CPU 的 RISC-V `sstatus.SIE` 总入口，并把 `early_boot_irqs_disabled` 清为 false；PLIC UART source gate、root supervisor external input gate、周期 tick、完整 softirq、IPI runtime、workqueue worker、RCU GP kthread、task concurrency 和 SMP concurrency 仍不得随本阶段隐式进入运行态。
 
@@ -2042,7 +2042,7 @@ flowchart LR
 
 #### InterruptPhase 子阶段 3：中断开放后准备期（IRQ-Open Prepare Subphase）
 
-`InterruptPhase` 的第三个子阶段暂名 `IrqOpenPreparePhase`，中文名为中断开放后准备期。它对应 Linux 6.12.37 `start_kernel()` 中从 `kmem_cache_init_late()` 开始，到 `arch_cpu_finalize_init()` 完成后、`pid_idr_init()` 执行前的初始化段。
+`InterruptPhase` 的第三个子阶段暂名 `IrqOpenPreparePhase`，中文名为中断开放后准备期。它对应 Linux 6.12 `start_kernel()` 中从 `kmem_cache_init_late()` 开始，到 `arch_cpu_finalize_init()` 完成后、`pid_idr_init()` 执行前的初始化段。
 
 这个边界承接 `LocalIrqEnablePhase` 的出口事实：`early_boot_irqs_disabled == false` 已经成立，且 boot CPU 本地中断总入口已经开放。此时 secondary hart 仍未启动，普通任务切换和完整并发运行仍未展开；但 timer interrupt、softirq、IPI 路由等前一阶段建立的控制结构，已经需要在“中断可能到来”的语义下被解释。
 
@@ -2070,7 +2070,7 @@ flowchart LR
 
 选择在 `arch_cpu_finalize_init()` 后结束，是为了把“中断打开后的 late core/platform 准备”与后续“进程准备”分开。`pid_idr_init()` 之后进入的是 PID、VMA、fork、proc、namespace、VFS/security、cgroup 等对象基础设施的连续初始化段，虽然其中包含若干通用内核对象初始化，但主线语义更接近为第一个内核线程、`kthreadd` 和后续用户态 init 建立进程/任务基础，适合作为 `InterruptPhase` 子阶段 4 的自然起点。后续子阶段可暂按 `ProcessPreparePhase`（进程准备期）继续讨论，具体边界和命名仍以后续收敛结果为准。
 
-当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_SLUB=y`、`CONFIG_SLUB_TINY=n`、`CONFIG_PRINTK=y`、`CONFIG_TTY=y`、`CONFIG_VT=y`、`CONFIG_SERIAL_CORE_CONSOLE=y`、`CONFIG_GENERIC_SCHED_CLOCK=y`、`CONFIG_RISCV_TIMER=y`。同时，当前未启用 `CONFIG_LOCKDEP`、`CONFIG_DEBUG_LOCKING_API_SELFTESTS`、`CONFIG_BLK_DEV_INITRD`、`CONFIG_NUMA`、`CONFIG_ACPI` 和 `CONFIG_ARCH_HAS_CPU_FINALIZE_INIT`。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
+当前 Linux 参照配置以 `../linux-6.12/.config` 为准。与本子阶段相关的关键配置包括：`CONFIG_SLUB=y`、`CONFIG_SLUB_TINY=n`、`CONFIG_PRINTK=y`、`CONFIG_TTY=y`、`CONFIG_VT=y`、`CONFIG_SERIAL_CORE_CONSOLE=y`、`CONFIG_GENERIC_SCHED_CLOCK=y`、`CONFIG_RISCV_TIMER=y`。同时，当前未启用 `CONFIG_LOCKDEP`、`CONFIG_DEBUG_LOCKING_API_SELFTESTS`、`CONFIG_BLK_DEV_INITRD`、`CONFIG_NUMA`、`CONFIG_ACPI` 和 `CONFIG_ARCH_HAS_CPU_FINALIZE_INIT`。因此，本阶段图示和清单先按该配置区分主线 formal、checkpoint 与裁剪 no-op 路径。
 
 当前先将 `InterruptPhase` 子阶段 3 的对象和边界记录如下：
 
@@ -2100,7 +2100,7 @@ flowchart LR
 
 ##### InterruptPhase 子阶段 3 过程处理清单（初稿）
 
-| Linux 6.12.37 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `kmem_cache_init_late()` | action: `SlubSubsystem.setup_flush_workqueue()` | 在 `Workqueue.Prepared` 基础上创建 `"slub_flushwq"`，记录 `SlubSubsystem.flush_workqueue_ready == true`，服务后续 SLUB flush；不建立独立 `SlubFlushWq` 生命周期对象，`SlubSubsystem.enable()` 仍留给后续 `slab_sysfs_init()`。 |
 | `console_init()` | formal candidate: `Console.preset()` | 首次构造正式 `Console`：注册 `NTtyLineDiscipline` 到 `TtyLineDisciplineRegistry`，遍历 `Lds` 提供的 console initcall 表边界，驱动 console drivers early register；real console 注册和 early/boot console handoff 是条件结果，不作为必然后置条件。 |
@@ -2124,7 +2124,7 @@ flowchart LR
   图 21 中断开放后准备期对象构建时序
 </p>
 
-图 21 按 Linux 6.12.37 `start_kernel()` 中 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 3 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示 deferred 候选，紫色节点表示 checkpoint 或 fail boundary，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
+图 21 按 Linux 6.12 `start_kernel()` 中 `kmem_cache_init_late()` 到 `arch_cpu_finalize_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 3 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示 deferred 候选，紫色节点表示 checkpoint 或 fail boundary，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2153,13 +2153,13 @@ flowchart LR
 
 #### InterruptPhase 子阶段 4：进程准备期（Process Prepare Subphase）
 
-`InterruptPhase` 的第四个子阶段暂名 `ProcessPreparePhase`，中文名为进程准备期。它对应 Linux 6.12.37 `start_kernel()` 中从 `pid_idr_init()` 开始，到 `kcsan_init()` 完成后、`rest_init()` 执行前的初始化段。
+`InterruptPhase` 的第四个子阶段暂名 `ProcessPreparePhase`，中文名为进程准备期。它对应 Linux 6.12 `start_kernel()` 中从 `pid_idr_init()` 开始，到 `kcsan_init()` 完成后、`rest_init()` 执行前的初始化段。
 
 这个边界承接 `IrqOpenPreparePhase` 的出口事实：boot CPU 本地中断总入口已经开放，console、sched clock 和 busy-wait delay API 已经达到启动期可用边界，但系统仍处于单根启动初始化流中，尚未创建 PID 1、`kthreadd` 或进入调度/idle 运行路径。选择在 `rest_init()` 前结束，是因为 `rest_init()` 会创建 `kernel_init` 和 `kthreadd`，设置 `system_state = SYSTEM_SCHEDULING`，并让 boot idle thread 进入 `schedule_preempt_disabled()` / `cpu_startup_entry(CPUHP_ONLINE)`；因此它是从“为第一个任务准备对象基础设施”切换到“任务系统开始运行”的自然边界。
 
 本子阶段的主线语义是为 `rest_init()` 创建第一个用户态初始化线程和内核线程管理者准备最小对象基础设施：PID、fork、thread stack、cred、anon VMA、proc caches、UTS namespace 壳、key/security 等对象在这一段进入可用或准备状态。当前还恢复 `vfs_caches_init()` 中的 `VfsCore.setup()` 与 `mnt_init()->init_mount_tree()` 对应的初始 rootfs mount：Linux 的 `rootfs_fs_type` 默认使用 ramfs backing，初始 mount tree 在此时建立，并设置当前 root/pwd 的起点。从 `dbg_late_init()` 到 `kcsan_init()` 的尾段按批量策略处理：当前配置下为空实现的路径标记为 trimmed/no-op；其它大多服务用户态应用启动后的 namespace、pagecache、proc/ns/pidfs、seq_file 或信号队列能力，当前保留 Linux 时序位置但标记为 deferred，不在本子阶段推进到 `Ready`。
 
-当前 Linux 参照配置以 `~/gitStudy/linux-6.12.37/default_config` 为准。与本子阶段相关的关键配置包括：`CONFIG_THREAD_INFO_IN_TASK=y`、`CONFIG_VMAP_STACK=y`、`CONFIG_PER_VMA_LOCK=y`、`CONFIG_RISCV_ISA_V=y`、`CONFIG_RISCV_ISA_V_PREEMPTIVE=y`、`CONFIG_NAMESPACES=y`、`CONFIG_UTS_NS=y`、`CONFIG_PID_NS=y`、`CONFIG_NET=y`、`CONFIG_NET_NS=y`、`CONFIG_PROC_FS=y`、`CONFIG_KEYS=y`、`CONFIG_SECURITY=y`、`CONFIG_DEBUG_FS=y` 和 `CONFIG_UPROBES=y`。同时，当前未启用 `CONFIG_CGROUPS`、`CONFIG_TASKSTATS`、`CONFIG_TASK_DELAY_ACCT`、`CONFIG_ACPI`、`CONFIG_KCSAN`、`CONFIG_KGDB`、`CONFIG_LOCKDEP` 和 `CONFIG_X86`。因此，本阶段图示和清单先按该配置区分主线 formal、deferred、checkpoint 与裁剪 no-op 路径。
+当前 Linux 参照配置以 `../linux-6.12/.config` 为准。与本子阶段相关的关键配置包括：`CONFIG_THREAD_INFO_IN_TASK=y`、`CONFIG_VMAP_STACK=y`、`CONFIG_PER_VMA_LOCK=y`、`CONFIG_RISCV_ISA_V=y`、`CONFIG_RISCV_ISA_V_PREEMPTIVE=y`、`CONFIG_NAMESPACES=y`、`CONFIG_UTS_NS=y`、`CONFIG_PID_NS=y`、`CONFIG_NET=y`、`CONFIG_NET_NS=y`、`CONFIG_PROC_FS=y`、`CONFIG_KEYS=y`、`CONFIG_SECURITY=y`、`CONFIG_DEBUG_FS=y` 和 `CONFIG_UPROBES=y`。同时，当前未启用 `CONFIG_CGROUPS`、`CONFIG_TASKSTATS`、`CONFIG_TASK_DELAY_ACCT`、`CONFIG_ACPI`、`CONFIG_KCSAN`、`CONFIG_KGDB`、`CONFIG_LOCKDEP` 和 `CONFIG_X86`。因此，本阶段图示和清单先按该配置区分主线 formal、deferred、checkpoint 与裁剪 no-op 路径。
 
 本子阶段后续逐项细化时，若某个 Linux 初始化调用只创建 cache、静态表项或基本承载壳，优先映射到对象的较早 slot，例如 `preset()` 并推进到 `Prepared`，把 `setup()`、`enable()` 等后续 slot 留给更完整的对象关系、运行期语义或正式启用动作。
 
@@ -2181,7 +2181,7 @@ flowchart LR
 14. `VFS 与进程可见文件系统对象集合`：覆盖 `vfs_caches_init()`、`pagecache_init()`、`seq_file_init()`、`proc_root_init()`、`nsfs_init()` 和 `pidfs_init()`。当前 `VfsCore.setup()` 建立 VFS 文件系统类型注册表、mount 表、dentry/inode/file 表等最小承载；`RamFsType.setup()` 表示 rootfs 默认 ramfs backing；随后 `VfsCore.MountInitialRamFsRoot` 对应 Linux `mnt_init()->init_mount_tree()`，建立初始 rootfs mount、superblock、root dentry/root inode 和当前 root 起点。`PageCache`、`SeqFileCore`、`Procfs`、`Nsfs`、`Pidfs` 仍作为候选对象保留 Linux 时序位置，但本轮不推进到 `Ready`。
 15. `信号核心对象`（暂名 `SignalCore`）的正式 setup：覆盖 `signals_init()`。它先执行 `siginfo_buildtime_checks()`，再创建 `sigqueue` cache，使 task signal delivery 和 queued signal 分配路径的基础结构完整；当前按尾段批量策略标记为 deferred，`SignalCore` 保持前序 `Prepared`。
 16. `控制与统计裁剪路径`：覆盖 `cpuset_init()`、`cgroup_init()`、`taskstats_init_early()` 和 `delayacct_init()`。当前 `CONFIG_CGROUPS=n`、`CONFIG_TASKSTATS=n` 且 `CONFIG_TASK_DELAY_ACCT` 未启用，相关调用为空实现或裁剪路径；未来启用后再恢复为 `Cpuset.setup()`、`CgroupCore.setup()`、`Taskstats.setup()` 与 `DelayAccounting.setup()`。
-17. `尾部平台/调试裁剪路径`：覆盖 X86 EFI runtime 切换、`dbg_late_init()`、`acpi_subsystem_init()`、`arch_post_acpi_subsys_init()` 和 `kcsan_init()`。当前 RISC-V/default_config 下分别因 `CONFIG_X86=n`、`CONFIG_KGDB=n`、`CONFIG_ACPI=n` 和 `CONFIG_KCSAN=n` 进入 trimmed/no-op；这些调用保留位置，但不作为本阶段主线结束状态。
+17. `尾部平台/调试裁剪路径`：覆盖 X86 EFI runtime 切换、`dbg_late_init()`、`acpi_subsystem_init()`、`arch_post_acpi_subsys_init()` 和 `kcsan_init()`。当前 `../linux-6.12/.config` 的 RISC-V 配置下分别因 `CONFIG_X86=n`、`CONFIG_KGDB=n`、`CONFIG_ACPI=n` 和 `CONFIG_KCSAN=n` 进入 trimmed/no-op；这些调用保留位置，但不作为本阶段主线结束状态。
 
 <p align="center">
   <img src="pic/process-prepare-objects.svg" alt="进程准备期对象分类与相互关系" width="900">
@@ -2195,7 +2195,7 @@ flowchart LR
 
 ##### InterruptPhase 子阶段 4 过程处理清单（初稿）
 
-| Linux 6.12.37 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 `start_kernel()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `pid_idr_init()` | formal candidate: `RootPidNamespace.setup()` | 初始化静态 `init_pid_ns.idr`，创建 level-0 `"pid"` cache，并通过关联的 `PidAllocator.configure_limits()` 设置 `pid_max/pid_max_min`；新 PID namespace 的创建留给后续运行期。 |
 | `anon_vma_init()` | formal candidate: `AnonVmaCore.setup()` | 创建 `anon_vma` 与 `anon_vma_chain` cache，为匿名内存 rmap graph 准备分配基础；具体节点和链路由后续 fault/fork/link 等动作建立。 |
@@ -2240,7 +2240,7 @@ flowchart LR
   图 23 进程准备期对象构建时序
 </p>
 
-图 23 按 Linux 6.12.37 `start_kernel()` 中 `pid_idr_init()` 到 `kcsan_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 4 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`rest_init()` 不属于本子阶段，只作为下一阶段 `UP Multitask Phase` 的入口标记。
+图 23 按 Linux 6.12 `start_kernel()` 中 `pid_idr_init()` 到 `kcsan_init()` 的有效调用顺序展示 `InterruptPhase` 子阶段 4 的推进过程。绿色节点表示当前主线 formal 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`rest_init()` 不属于本子阶段，只作为下一阶段 `UP Multitask Phase` 的入口标记。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2333,7 +2333,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 #### UP Multitask Phase 子阶段 1-3：rest_init 三段
 
 `UP Multitask Phase` 的 rest_init 路径拆为 `BootInitRestInitPhase`、
-`BootInitScheduleHandoffPhase` 和 `BootIdleEntryPhase`。三者共同覆盖 Linux 6.12.37
+`BootInitScheduleHandoffPhase` 和 `BootIdleEntryPhase`。三者共同覆盖 Linux 6.12
 `rest_init()` 从 `rcu_scheduler_starting()` 到 boot CPU idle 入口的对象级边界，但不再把不同执行主体串成一个最小子阶段。
 
 这个边界的核心不是继续建立静态基础设施，而是把系统从“单根启动任务执行初始化”推进为“boot CPU 上的单核多任务运行环境”：PID 1 的 `KernelInitTask` 被创建并等待 `kthreadd_done`，`KthreaddTask` 被创建并登记为全局线程管理者，系统状态进入 `SYSTEM_SCHEDULING`，`KthreaddReadyGate.complete()` 释放后 PID 1 可以继续执行 `kernel_init_freeable()`，而原启动根任务被调度器接管并转换为 `BootIdleTask`。因此，本子阶段是 `InterruptPhase` 到 `UP Multitask Phase` 的实际运行语义转换点。
@@ -2374,7 +2374,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 
 ##### UP Multitask Phase 子阶段 1 过程处理清单（初稿）
 
-| Linux 6.12.37 `rest_init()` 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 `rest_init()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `rcu_scheduler_starting()` | formal candidate: `RcuCore.setup()` | 退出 RCU early boot 模式，记录 scheduler 开始参与 RCU 语义；此时仍要求单 online CPU 且无普通上下文切换。 |
 | `user_mode_thread(kernel_init, NULL, CLONE_FS)` | formal candidate: `KernelInitTask.preset/setup/enable()` | `preset()` 形成 `TaskSpawnSpec`；`setup()` 通过 `TaskCreationCore` / `copy_process()` 建立 PID 1 task/thread 实体；`enable()` 对应 `wake_up_new_task()`，把该 task 放入调度器可运行集合。该 task 随后等待 `kthreadd_done`，再进入 `PreSmpInitPhase`。 |
@@ -2395,7 +2395,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
   图 25 rest_init 期对象构建时序
 </p>
 
-图 25 按 Linux 6.12.37 `rest_init()` 的有效调用顺序展示 `UP Multitask Phase` rest_init 三段的推进过程。绿色节点表示当前主线 formal/action 候选，紫色节点表示同步门或全局状态 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`kernel_init_freeable()` 不属于这三个子阶段，它在 `KthreaddReadyGate.complete()` 释放并经首次 scheduler handoff dispatch 后由 `KernelInitTask` 启动 `SmpRuntimePhase`，并进入其首个子阶段 `PreSmpInitPhase`。
+图 25 按 Linux 6.12 `rest_init()` 的有效调用顺序展示 `UP Multitask Phase` rest_init 三段的推进过程。绿色节点表示当前主线 formal/action 候选，紫色节点表示同步门或全局状态 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`kernel_init_freeable()` 不属于这三个子阶段，它在 `KthreaddReadyGate.complete()` 释放并经首次 scheduler handoff dispatch 后由 `KernelInitTask` 启动 `SmpRuntimePhase`，并进入其首个子阶段 `PreSmpInitPhase`。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2420,7 +2420,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 
 #### SMP Runtime Phase 子阶段 1：SMP 前初始化期（Pre-SMP Init Subphase）
 
-`SMP Runtime Phase` 的第一个子阶段暂名 `PreSmpInitPhase`，中文名为 SMP 前初始化期。它对应 Linux 6.12.37 `kernel_init_freeable()` 中从 `gfp_allowed_mask = __GFP_BITS_MASK` 开始，到 `smp_init()` 调用前结束的初始化段。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口。
+`SMP Runtime Phase` 的第一个子阶段暂名 `PreSmpInitPhase`，中文名为 SMP 前初始化期。它对应 Linux 6.12 `kernel_init_freeable()` 中从 `gfp_allowed_mask = __GFP_BITS_MASK` 开始，到 `smp_init()` 调用前结束的初始化段。`smp_init()` 本身不属于本子阶段，而是后续 `SmpBringupPhase` 的入口。
 
 这个子阶段运行在上一子阶段创建并被 `KthreaddReadyGate` 释放的 `KernelInitTask` 上。此时 `BootIdleTask` 和 `KthreaddTask` 已经存在，`SystemState.state == Ready` 且内部属性 `SystemState.value == SYSTEM_SCHEDULING`，但只有 boot CPU online，secondary CPU 尚未启动。因此，本阶段可以使用调度、completion、kthread 和阻塞分配能力来完成更接近运行期的准备，但仍不能把任何对象解释为“多核并行已经开始”。
 
@@ -2449,7 +2449,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 
 ##### UP Multitask Phase 子阶段 2 过程处理清单（初稿）
 
-| Linux 6.12.37 `kernel_init_freeable()` 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 `kernel_init_freeable()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `gfp_allowed_mask = __GFP_BITS_MASK` | action: `PageAllocator.open_full_gfp_mask()` | 打开 `PageAllocator.gfp_allowed_mask` 的完整 GFP mask，使后续初始化可以使用可能阻塞的分配；不建立独立 `GfpAllocationPolicy` 对象。 |
 | `set_mems_allowed(node_states[N_MEMORY])` | trimmed/no-op | 当前 `CONFIG_CPUSETS=n` 且 `CONFIG_NUMA=n`，为空实现；裁剪路径不展开对象建模。 |
@@ -2503,7 +2503,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
   图 27 SMP 前初始化期对象构建时序
 </p>
 
-图 27 按 Linux 6.12.37 `kernel_init_freeable()` 中 `smp_init()` 前的有效调用顺序展示 `UP Multitask Phase` 子阶段 2 的推进过程。绿色节点表示当前主线 formal/action 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径，底部的 `smp_init()` 只作为下一顶层阶段入口标记。
+图 27 按 Linux 6.12 `kernel_init_freeable()` 中 `smp_init()` 前的有效调用顺序展示 `UP Multitask Phase` 子阶段 2 的推进过程。绿色节点表示当前主线 formal/action 候选，黄色虚线节点表示保留 Linux 时序但暂不推进对象状态的 deferred 路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径，底部的 `smp_init()` 只作为下一顶层阶段入口标记。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2595,7 +2595,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 
 #### SMP Runtime Phase 子阶段 2：SMP 启动期（SMP Bringup Subphase）
 
-`SMP Runtime Phase` 的第二个子阶段暂名 `SmpBringupPhase`，中文名为 SMP 启动期。它对应 Linux 6.12.37 `smp_init()` 的完整执行段，从 `idle_threads_init()` 开始，到 RISC-V 当前为空实现的 `smp_cpus_done(setup_max_cpus)` 返回为止。
+`SMP Runtime Phase` 的第二个子阶段暂名 `SmpBringupPhase`，中文名为 SMP 启动期。它对应 Linux 6.12 `smp_init()` 的完整执行段，从 `idle_threads_init()` 开始，到 RISC-V 当前为空实现的 `smp_cpus_done(setup_max_cpus)` 返回为止。
 
 这个子阶段由 `KernelInitTask` 在 boot CPU 上发起，但执行结果会启动 secondary CPU 上的运行流。前序 `sched_init()` 已把 `BootIdleTask` 绑定为 `CpuGroup.Cpu[BootCPU.id].IdleTask`；`idle_threads_init()` 只为 possible non-boot CPU 准备 `CpuGroup.Cpu[cpu].IdleTask`，不重新处理 boot CPU。随后 `cpuhp_threads_init()` 初始化各 CPU 的 `CpuHotplugState` 同步门，注册 `CpuHotplugThread` 的 smpboot 模板，并只为当前 online 的 boot CPU 创建/唤醒 `CpuGroup.Cpu[BootCPU.id].CpuHotplugThread`；secondary CPU 的 `CpuHotplugThread` 内部创建/唤醒细节本轮保持 deferred。`bringup_nonboot_cpus(setup_max_cpus)` 再按 CPU hotplug 状态机启动 present CPUs。对 RISC-V 而言，`cpu_ops->cpu_start()` 是 BP/AP 分叉点：boot CPU 释放目标 hart 后继续等待同步 completion；AP 侧真实执行 `secondary_start_sbi`、`smp_callin()` 和 AP idle/hotplug callback，但本轮规格只把它压缩成两个 summary ack：`SecondaryCpuStartupAck` 完成 `cpu_running`，`SecondaryCpuOnlineAck` 完成 `done_up` 并发布 secondary CPU online。`done_down` 作为同一 hotplug 协议的 teardown/rollback 同步量保留位置。这样 BP 侧流程能够闭合，同时 AP 内部对象留给未来单独展开。
 
@@ -2625,7 +2625,7 @@ release/dispatch facts 和 Scheduler first-schedule fact，不作为
 
 ##### SMP Runtime Phase 子阶段 1 过程处理清单（初稿）
 
-| Linux 6.12.37 `smp_init()` 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 `smp_init()` 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `idle_threads_init()` | formal candidate: `CpuGroup.Cpu[cpu].IdleTask.preset()` | 遍历 possible CPU，跳过 boot CPU；为每个 possible non-boot CPU 通过 `fork_idle()` / `init_idle()` 准备 inactive idle task，并写入 per-CPU idle thread 与 runqueue idle 引用。不启动 CPU，不推进 `enable()`。 |
 | `cpuhp_threads_init()` | composite action: `CpuHotplugState.preset_sync_gates()` + `CpuHotplugThread.template.register()` + `BootCPU.CpuHotplugThread.preset/setup/enable()` | 初始化每个 possible CPU 的 hotplug 同步门，注册 `cpuhp/%u` per-CPU thread 模板，只为当前 online 的 boot CPU 创建并 unpark cpuhp thread；secondary CPU 的 `CpuHotplugThread` 留给后续 bringup/hotplug 路径。 |
@@ -2716,7 +2716,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 #### SMP Runtime Phase 子阶段 2：运行核心补全期（Runtime Core Subphase）
 
-`SMP Runtime Phase` 的第二个子阶段暂名 `RuntimeCorePhase`，中文名为运行核心补全期。它对应 Linux 6.12.37 `kernel_init_freeable()` 中从 `sched_init_smp()` 开始，到 `page_alloc_init_late()` 完成后、`do_basic_setup()` 执行前结束的初始化段。
+`SMP Runtime Phase` 的第二个子阶段暂名 `RuntimeCorePhase`，中文名为运行核心补全期。它对应 Linux 6.12 `kernel_init_freeable()` 中从 `sched_init_smp()` 开始，到 `page_alloc_init_late()` 完成后、`do_basic_setup()` 执行前结束的初始化段。
 
 这个子阶段发生在 secondary CPU 已经 online 之后，因此它的主线语义不再是“打开并行”，而是补齐多核运行所需要的核心调度、workqueue 和页分配器 late 能力。`sched_init_smp()` 会建立 SMP 调度域并解除 PID 1 的 boot CPU 绑定；`workqueue_init_topology()` 会把前序 workqueue 的 unbound pool 从默认全系统共享更新为按 CPU pod/topology 组织；`page_alloc_init_late()` 则完成 page allocator late 收尾。`async_init()` 和 `padata_init()` 主要服务后续异步 init/probe 与并行数据处理路径，当前初步规格轮次先标记为 deferred。
 
@@ -2741,7 +2741,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 ##### SMP Runtime Phase 子阶段 2 过程处理清单（初稿）
 
-| Linux 6.12.37 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `sched_init_smp()` | formal action: `Scheduler.enable_smp()` | `Scheduler` 主对象已经可用；本项只是补齐 SMP 调度能力。建立 SMP sched domains，解除 PID 1 的 boot CPU 绑定，清除 `PF_NO_SETAFFINITY`，初始化 granularity、RT/DL SMP 后置状态，并设置 `sched_smp_initialized`。 |
 | `workqueue_init_topology()` | formal action: `WorkqueueTopology.setup()` | 前序已完成 `Workqueue.preset()` 和 `Workqueue.setup()`；本项作为第三阶段初始化，补齐 unbound workqueue 的拓扑感知能力。当前轮次不推进 `Workqueue` 主对象生命周期，以保留前序阶段历史不变式。 |
@@ -2759,7 +2759,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
   图 32 运行核心补全期对象构建时序
 </p>
 
-图 32 按 Linux 6.12.37 `sched_init_smp()` 到 `page_alloc_init_late()` 的有效调用顺序展示 `SMP Runtime Phase` 子阶段 2 的推进过程。绿色节点表示主线 formal/action 候选，蓝色节点表示仍保留 Linux 时序位置但当前轮次 deferred 的路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
+图 32 按 Linux 6.12 `sched_init_smp()` 到 `page_alloc_init_late()` 的有效调用顺序展示 `SMP Runtime Phase` 子阶段 2 的推进过程。绿色节点表示主线 formal/action 候选，蓝色节点表示仍保留 Linux 时序位置但当前轮次 deferred 的路径，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2774,7 +2774,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 #### SMP Runtime Phase 子阶段 3：initcall 期（Initcall Subphase）
 
-`SMP Runtime Phase` 的第三个子阶段暂名 `InitcallPhase`，中文名为 initcall 期。它对应 Linux 6.12.37 `do_basic_setup()` 的完整执行段，从 `cpuset_init_smp()` 开始，到 `do_initcalls()` 完成后、`kunit_run_all_tests()` 执行前结束。
+`SMP Runtime Phase` 的第三个子阶段暂名 `InitcallPhase`，中文名为 initcall 期。它对应 Linux 6.12 `do_basic_setup()` 的完整执行段，从 `cpuset_init_smp()` 开始，到 `do_initcalls()` 完成后、`kunit_run_all_tests()` 执行前结束。
 
 这个子阶段是多核运行后第一个大规模表驱动初始化阶段：驱动模型核心、IRQ proc 可见结构、构造函数和所有 initcall level 在这里被集中执行。规格层当前先把 `do_initcalls()` 建模为 `InitcallTable.run_all_levels()`，不把每个 initcall 都升级为顶层对象；后续逐项讨论时可以按 level 或按关键对象拆分。
 
@@ -2815,7 +2815,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 ##### SMP Runtime Phase 子阶段 3 过程处理清单（初稿）
 
-| Linux 6.12.37 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `cpuset_init_smp()` | trimmed/no-op | 当前 `CONFIG_CGROUPS=n`，为空实现；未来恢复为 `Cpuset.enable_smp()`。 |
 | `driver_init()` | deferred: `DriverCore.setup()` | 建立 devtmpfs、device/bus/class/firmware/hypervisor、OF/platform/auxiliary bus、memory/node/cpu/container device 等基础；当前只保留驱动模型入口位置，后续 DriverCore 规格再展开。 |
@@ -2831,7 +2831,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
   图 34 initcall 期对象构建时序
 </p>
 
-图 34 按 Linux 6.12.37 `do_basic_setup()` 的有效调用顺序展示 `SMP Runtime Phase` 子阶段 3 的推进过程。绿色节点表示主线 formal/action 候选，蓝色或黄色虚线节点表示当前轮次 deferred 或条件/表驱动细项，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
+图 34 按 Linux 6.12 `do_basic_setup()` 的有效调用顺序展示 `SMP Runtime Phase` 子阶段 3 的推进过程。绿色节点表示主线 formal/action 候选，蓝色或黄色虚线节点表示当前轮次 deferred 或条件/表驱动细项，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2848,7 +2848,7 @@ AP 侧深入细节当前暂缓。原因是内核启动主线仍由 BP 占主导�
 
 #### SMP Runtime Phase 子阶段 4：rootfs 准备期（Rootfs Subphase）
 
-`SMP Runtime Phase` 的第四个子阶段暂名 `RootfsPhase`，中文名为 rootfs 准备期。它对应 Linux 6.12.37 `kernel_init_freeable()` 中从 `kunit_run_all_tests()` 开始，到 `integrity_load_keys()` 完成后、`kernel_init_freeable()` 返回前结束的初始化段。
+`SMP Runtime Phase` 的第四个子阶段暂名 `RootfsPhase`，中文名为 rootfs 准备期。它对应 Linux 6.12 `kernel_init_freeable()` 中从 `kunit_run_all_tests()` 开始，到 `integrity_load_keys()` 完成后、`kernel_init_freeable()` 返回前结束的初始化段。
 
 这个子阶段的主线语义是为第一个用户态程序准备可用 rootfs 和安全/完整性相关前置条件。当前 `CONFIG_KUNIT=n`，KUnit 测试路径裁剪；`wait_for_initramfs()` 和 `console_on_rootfs()` 保留 Linux 时序位置但当前轮次不展开；`init_eaccess(ramdisk_execute_command)` 是强约束 checkpoint，当前 Linux-like 规格要求该检查必须进入调用 `prepare_namespace()` 的分支；`prepare_namespace()` 挂载 root、挂载 devtmpfs，并把当前 root 移到 `/`；`integrity_load_keys()` 在当前 `CONFIG_INTEGRITY=y` 下执行完整性 key 加载路径。
 
@@ -2882,7 +2882,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 ##### SMP Runtime Phase 子阶段 4 过程处理清单（初稿）
 
-| Linux 6.12.37 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `kunit_run_all_tests()` | trimmed/no-op | 当前 `CONFIG_KUNIT=n`。 |
 | `wait_for_initramfs()` | deferred: `InitramfsSync.wait()` | 等待 initramfs async cookie 对应 domain；当前不展开 async domain/cookie 细节，无 cookie 时只形成 warning/checkpoint。 |
@@ -2899,7 +2899,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
   图 36 rootfs 准备期对象构建时序
 </p>
 
-图 36 按 Linux 6.12.37 `kunit_run_all_tests()` 到 `integrity_load_keys()` 的有效调用顺序展示 `SMP Runtime Phase` 子阶段 4 的推进过程。绿色节点表示主线 formal/action 候选，蓝色节点表示当前轮次 deferred 路径，紫色节点表示条件分支 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
+图 36 按 Linux 6.12 `kunit_run_all_tests()` 到 `integrity_load_keys()` 的有效调用顺序展示 `SMP Runtime Phase` 子阶段 4 的推进过程。绿色节点表示主线 formal/action 候选，蓝色节点表示当前轮次 deferred 路径，紫色节点表示条件分支 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2912,7 +2912,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 #### SMP Runtime Phase 子阶段 5：收尾期（Finalize Subphase）
 
-`SMP Runtime Phase` 的第六个子阶段暂名 `FinalizePhase`，中文名为收尾期。它对应 Linux 6.12.37 `kernel_init()` 中 `kernel_init_freeable()` 返回之后，从 `async_synchronize_full()` 开始，到 `do_sysctl_args()` 完成后、首次 `run_init_process(...)` 尝试前结束。
+`SMP Runtime Phase` 的第六个子阶段暂名 `FinalizePhase`，中文名为收尾期。它对应 Linux 6.12 `kernel_init()` 中 `kernel_init_freeable()` 返回之后，从 `async_synchronize_full()` 开始，到 `do_sysctl_args()` 完成后、首次 `run_init_process(...)` 尝试前结束。
 
 这个子阶段完成内核侧启动链的最终收尾：等待所有 async init work，进入 `SYSTEM_FREEING_INITMEM`，释放或裁剪 init-only text/data 相关资源，释放 initmem，设置内核 rodata/权限，进入 `SYSTEM_RUNNING`，结束 in-kernel boot RCU 模式，并处理 sysctl 参数。完成后，内核侧启动编排不再继续建立基础对象，而是进入 `PayloadPhase`，选择并执行第一个用户态 init 或等价 selected payload。
 
@@ -2940,7 +2940,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 ##### SMP Runtime Phase 子阶段 5 过程处理清单（初稿）
 
-| Linux 6.12.37 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `async_synchronize_full()` | deferred: `AsyncCore.synchronize_full()` | 等待所有 async init work，确保 init memory 释放前无未完成 async init code；前序 `AsyncCore` 已 deferred。 |
 | `system_state = SYSTEM_FREEING_INITMEM` | internal step in `SystemState.enable()` | 将内部属性 `SystemState.value` 更新为 `SYSTEM_FREEING_INITMEM`，进入释放 init memory 的窗口；不单独占用标准 lifecycle slot。 |
@@ -2964,7 +2964,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
   图 38 收尾期对象构建时序
 </p>
 
-图 38 按 Linux 6.12.37 `kernel_init()` 中 `kernel_init_freeable()` 返回后的有效调用顺序展示 `SMP Runtime Phase` 子阶段 5 的推进过程。绿色节点表示主线 formal/action 候选，蓝色节点表示当前轮次 deferred 路径，紫色节点表示系统状态 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`run_init_process(...)` 不属于本子阶段，只作为后续 `PayloadPhase` 入口边界。
+图 38 按 Linux 6.12 `kernel_init()` 中 `kernel_init_freeable()` 返回后的有效调用顺序展示 `SMP Runtime Phase` 子阶段 5 的推进过程。绿色节点表示主线 formal/action 候选，蓝色节点表示当前轮次 deferred 路径，紫色节点表示系统状态 checkpoint，橙色虚线节点表示当前配置下 trimmed/no-op 的路径。`run_init_process(...)` 不属于本子阶段，只作为后续 `PayloadPhase` 入口边界。
 
 本子阶段的结束状态暂定至少包含：
 
@@ -2980,7 +2980,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 ### Payload 交接期对象建立
 
-从这一小节开始，对应顶层 `PayloadPhase`。本阶段的边界必须明确：对 Linux-like 路径而言，它从 Linux 6.12.37 `kernel_init()` 中 `do_sysctl_args()` 返回后、第一次进入 `run_init_process(...)` 选择链之前开始；它在 selected payload 的不可逆交接完成后结束。如果 Linux-like 路径所有候选 init 都失败，或 `init=` 指定的 init 失败，则进入 panic terminal，不形成 `PayloadPhase.Online`。
+从这一小节开始，对应顶层 `PayloadPhase`。本阶段的边界必须明确：对 Linux-like 路径而言，它从 Linux 6.12 `kernel_init()` 中 `do_sysctl_args()` 返回后、第一次进入 `run_init_process(...)` 选择链之前开始；它在 selected payload 的不可逆交接完成后结束。如果 Linux-like 路径所有候选 init 都失败，或 `init=` 指定的 init 失败，则进入 panic terminal，不形成 `PayloadPhase.Online`。
 
 `PayloadPhase` 不固定 payload 的运行形态。变种选择在当前实现中属于编译期选择，而不是运行期动态分派：根 `Makefile` 的 `APP ?= smoke` 会传递到 `impl/arceos_ex/Makefile`，再映射为 `--cfg app_<name>`；`impl/arceos_ex/src/apps/mod.rs` 根据 `#[cfg(app_smoke)]` / `#[cfg(app_hello)]` 导出唯一的 `run() -> !`，不支持的 `APP` 在编译期 `compile_error!`。因此，规格中的 `PayloadPhase.select_variant()` 表示确认编译期 selected payload 事实。当前已有 `hello` 和 `smoke` 两类 app payload；将来的 `UserBootPayload` 也应作为 `apps` 目录下的一个 payload 变种接入同一套选择机制。
 
@@ -3030,7 +3030,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
 
 ##### Payload Phase 过程处理清单（初稿）
 
-| Linux 6.12.37 调用 / 规格补充动作 | 规格处理 | 备注 |
+| Linux 6.12 调用 / 规格补充动作 | 规格处理 | 备注 |
 |---|---|---|
 | `do_sysctl_args()` 返回后的边界 | phase entry: `PayloadPhase.setup()` | `FinalizePhase` 已完成；下一步进入 selected payload 选择和交接。 |
 | payload 变种选择 | compile-time selection: `PayloadPhase.select_variant()` | 由 `APP` -> `--cfg app_<name>` -> `apps::run()` 在编译期确定唯一 selected payload；当前保留 `hello`/`smoke` 这类 `UnikernelApp` 变种，将来 `UserBootPayload` 也接入 `apps` 目录。 |
@@ -3055,7 +3055,7 @@ Ext2、VFS、RootFS 和 `FsStruct` 的更一般对象关系不放在本 rootfs �
   图 40 Payload 交接期 Linux-like 对象构建时序
 </p>
 
-图 40 按 Linux 6.12.37 `kernel_init()` 中 `do_sysctl_args()` 返回后的有效调用顺序展示 `UserBootPayload` 的 Linux-like 交接路径。绿色节点表示主线 formal/action 候选，蓝色节点表示 VFS/ELF/用户地址空间依赖动作，紫色节点表示成功后的不可逆交接，灰色节点表示 checkpoint，橙色虚线节点表示失败终端或继续尝试分支。
+图 40 按 Linux 6.12 `kernel_init()` 中 `do_sysctl_args()` 返回后的有效调用顺序展示 `UserBootPayload` 的 Linux-like 交接路径。绿色节点表示主线 formal/action 候选，蓝色节点表示 VFS/ELF/用户地址空间依赖动作，紫色节点表示成功后的不可逆交接，灰色节点表示 checkpoint，橙色虚线节点表示失败终端或继续尝试分支。
 
 本阶段的结束状态暂定至少包含：
 
@@ -3115,7 +3115,7 @@ Ext2 的建模原则应先在本章程中以自然语言确定对象意图，再
 - `RootFS.enable()` 对应 `prepare_namespace()` 中选择真实 root 的过程。当前支持路径是先把 `Ext2FileSystem` staging mount 到 `/root`，再执行 `VfsCore.Action::MoveMountToRoot`，最后由 `FsStruct.Action::ChrootDot` 更新当前任务的 `root` 与 `pwd`。
 - `FsStruct` 是任务从属的文件系统视图对象，至少包含 `root` 和 `pwd` 两个 dentry 引用。路径解析从 `FsStruct.root` 或 `FsStruct.pwd` 出发，而不是从 `Ext2FileSystem` 内部全局变量出发。
 
-文件系统经由 virtio-blk 或其它块设备驱动读取数据时，不应长期建模为只有“提交一个请求并同步等待完成”这一种方式。参照 Linux 6.12.37，`sb_bread()` / `__bread_gfp()` 这类 buffer-head 元数据路径会在 `submit_bh(REQ_OP_READ)` 后 `wait_on_buffer()`，适合 superblock、group descriptor、indirect block、xattr 等必须马上得到结果的启动期或元数据读取；但普通文件数据路径还包括 page cache / `address_space` / folio / readahead 语义，例如 Ext2 的 `read_folio` 可经 `mpage_read_folio()` 提交 bio，`readahead` 可经 `mpage_readahead()` 批量提交 bio，并由 `bio->bi_end_io` 异步完成。块层的 `submit_bio()` 本身也是异步完成模型，`submit_bio_wait()` 只是其同步包装。
+文件系统经由 virtio-blk 或其它块设备驱动读取数据时，不应长期建模为只有“提交一个请求并同步等待完成”这一种方式。参照 Linux 6.12，`sb_bread()` / `__bread_gfp()` 这类 buffer-head 元数据路径会在 `submit_bh(REQ_OP_READ)` 后 `wait_on_buffer()`，适合 superblock、group descriptor、indirect block、xattr 等必须马上得到结果的启动期或元数据读取；但普通文件数据路径还包括 page cache / `address_space` / folio / readahead 语义，例如 Ext2 的 `read_folio` 可经 `mpage_read_folio()` 提交 bio，`readahead` 可经 `mpage_readahead()` 批量提交 bio，并由 `bio->bi_end_io` 异步完成。块层的 `submit_bio()` 本身也是异步完成模型，`submit_bio_wait()` 只是其同步包装。
 
 因此，当前 `Bio` / `BufferHead` / `sb_bread` 风格同步读只表示首轮 read-only Ext2、rootfs 和 payload 装载路径的收敛方式；后续正式规格应区分“调用者需要同步结果”的语义和“设备驱动只能同步阻塞”的实现策略。长期模型至少应预留三类读路径：启动期或元数据读取的同步等待路径、普通文件页缓存读取的异步 bio completion 路径、以及 readahead/预取路径。即使上层系统调用最终会因缺页或缓存未命中而阻塞当前任务，底层块设备驱动也不应被规格约束为每个请求只能由提交者同步等待；completion 可以来自 IRQ handler、任务侧 polling 或后续更完整的 block layer 调度。
 
@@ -3169,12 +3169,12 @@ Ext2 的建模原则应先在本章程中以自然语言确定对象意图，再
 
 待补充。
 
-## Linux 6.12.37 交叉验证
+## Linux 6.12 交叉验证
 
-本章用于整理本项目与 Linux 6.12.37 的交叉验证试验。交叉验证的目标不是把 Linux 源码逐行移植到
+本章用于整理本项目与 Linux 6.12 的交叉验证试验。交叉验证的目标不是把 Linux 源码逐行移植到
 `arceos_ex`，而是在受控条件下复用 Linux 已编译出的原生对象，并观察本项目规格对象、实现对象与 Linux
 对象之间的接口差异、状态差异和行为差异。第一轮试验对象选择
-`~/gitStudy/linux-6.12.37/drivers/irqchip/irq-sifive-plic.o`，对应源码
+`../linux-6.12/drivers/irqchip/irq-sifive-plic.o`，对应源码
 `drivers/irqchip/irq-sifive-plic.c`。
 
 当前试验目标是让 `arceos_ex` 在条件编译开关下复用 Linux 的 `irq-sifive-plic.o`，而不是同时启用
@@ -3227,7 +3227,7 @@ Linux 二进制驱动虽然不能修改，但并不是不可分析。`arceos_ex`
 交互，接口边界上会交换可预期的数据。因此，后续调试和排雷应优先采用“源码建立预期、边界 checkpoint 观测、KUnit 固化
 约束、运行踩雷推进、静态分析兜底”的方法。
 
-第一，预期流程主要从 Linux 6.12.37 源码和对应 `.config` 建立，不把反汇编作为常规前置步骤。对于
+第一，预期流程主要从 Linux 6.12 源码和对应 `.config` 建立，不把反汇编作为常规前置步骤。对于
 `irq-sifive-plic.o`，首轮预期流程是 `.initcall6.init -> __platform_driver_register -> platform compatible match ->
 plic_platform_probe -> plic_probe -> OF/resource/context/domain/chained handler`。每个流程点都应记录主动调用方、被调用接口、
 关键输入数据、预期返回值、预期状态变化和对应 Linux 源码位置。
@@ -3266,7 +3266,7 @@ Rust `tp`。Linux `tp` 激活期间如果允许本地中断嵌套，trap entry �
 
 ### `irq-sifive-plic.o` 服务接口
 
-`irq-sifive-plic.o` 的服务接口不是一个普通的公开 C 函数 ABI。以当前 Linux 6.12.37 编译产物为准，
+`irq-sifive-plic.o` 的服务接口不是一个普通的公开 C 函数 ABI。以当前 Linux 6.12 编译产物为准，
 `riscv64-linux-gnu-nm -g --defined-only drivers/irqchip/irq-sifive-plic.o` 没有给出全局定义符号；
 `plic_probe`、`plic_handle_irq`、`plic_irq_enable`、`plic_irq_eoi`、`plic_irqdomain_ops`、`plic_chip`
 等符号均是 local 符号。外部不能稳定地把它当成“调用某个导出函数即可获得 PLIC 服务”的对象来使用。
@@ -3442,7 +3442,7 @@ status 包含 chained handler 声明的 `IRQ_NOREQUEST/IRQ_NOPROBE/IRQ_NOTHREAD`
 `IrqHandlerRegistry::request_irq()` 成功路径接到 provider 边界：native provider 为 no-op，Linux-object provider
 记录 logical IRQ、device ref 和 handler kind 的 action request 事实；runtime leaf action 视图必须与该 request
 事实匹配后才 dispatch。本轮进一步建立 shim 内部的单 action-chain view，并把该 action-chain 指针写入 Linux
-6.12.37 当前配置下的 `struct irq_desc.action` 字段偏移；runtime dispatch 前会从 leaf desc 读回该字段，要求它与
+Linux 6.12 当前配置下的 `struct irq_desc.action` 字段偏移；runtime dispatch 前会从 leaf desc 读回该字段，要求它与
 request action-chain 指针一致。这个对齐仍是最小 request/action 数据面，不表示已经实现完整 Linux `free_irq/threaded`
 生命周期。
 

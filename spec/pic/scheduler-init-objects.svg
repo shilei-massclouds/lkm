@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="700" viewBox="0 0 1280 700" role="img" aria-labelledby="title desc">
   <title id="title">调度准备期对象分类与相互关系</title>
-  <desc id="desc">展示 BootPhase 子阶段 5 在 Linux 6.12.37 default_config 下的对象边界；Linux tracing 与 housekeeping 当前保留为 deferred。</desc>
+  <desc id="desc">展示 BootPhase 子阶段 5 在 Linux 6.12 以 `../linux-6.12/.config` 为基线的的对象边界；Linux tracing 与 housekeeping 当前保留为 deferred。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }

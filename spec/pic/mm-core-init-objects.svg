@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-labelledby="title desc">
   <title id="title">内存核心初始化期对象分类与相互关系</title>
-  <desc id="desc">展示 BootPhase 子阶段 4 对应 Linux 6.12.37 default_config 下 mm_core_init() 的对象边界、主线对象和裁剪路径。</desc>
+  <desc id="desc">展示 BootPhase 子阶段 4 对应 Linux 6.12 以 `../linux-6.12/.config` 为基线的 mm_core_init() 的对象边界、主线对象和裁剪路径。</desc>
   <defs>
     <style>
       text {
@@ -31,7 +31,7 @@
 
   <rect x="0" y="0" width="1280" height="900" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">内存核心初始化期对象分类与相互关系</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase 子阶段 4：trap_init() 完成后到 mm_core_init() 返回；基线配置为 linux-6.12.37/default_config</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">BootPhase 子阶段 4：trap_init() 完成后到 mm_core_init() 返回；基线配置为 ../linux-6.12/.config</text>
 
   <rect x="50" y="116" width="250" height="724" rx="14" class="group"/>
   <text x="175" y="150" text-anchor="middle" class="group-title">阶段边界</text>
@@ -92,7 +92,7 @@
   <text x="618" y="790" text-anchor="middle" class="small">当前裁剪</text>
 
   <rect x="762" y="116" width="468" height="724" rx="14" class="group"/>
-  <text x="996" y="150" text-anchor="middle" class="group-title">default_config 裁剪路径</text>
+  <text x="996" y="150" text-anchor="middle" class="group-title">.config 裁剪路径</text>
   <rect x="794" y="186" width="180" height="66" rx="8" class="box trimmed"/>
   <text x="884" y="212" text-anchor="middle" class="label">PageExt</text>
   <text x="884" y="234" text-anchor="middle" class="small">PAGE_EXTENSION=n</text>

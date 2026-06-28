@@ -54,13 +54,13 @@ object RootStream: FlowObject {
  */
 object BootInitTask: TaskObject {
     initial_state: State::Base;
-    source: static::linux_6_12_37;
+    source: static::linux_6_12;
 
     attrs {
         storage: ObjectStorage<BootInitTask>;
     }
 
-    reference linux_6_12_37 {
+    reference linux_6_12 {
         storage = symbol("init_task");
     }
 
@@ -280,14 +280,14 @@ object BootInitStack: StackObject {
  */
 object EventStream: FlowObject {
     initial_state: State::Base;
-    source: static::linux_6_12_37;
+    source: static::linux_6_12;
 
     attrs {
         early_event_entry: FunctionSymbol<EventEntryPrototype>;
         formal_event_entry: FunctionSymbol<EventEntryPrototype>;
     }
 
-    reference linux_6_12_37 {
+    reference linux_6_12 {
         early_event_entry = symbol(".Lsecondary_park");
         formal_event_entry = symbol("handle_exception");
     }
@@ -1345,13 +1345,13 @@ object Vm: AddressSpaceObject {
 object TrampolineVm: AddressSpaceObject {
     initial_state: State::Base;
     parent: Vm;
-    source: static::linux_6_12_37;
+    source: static::linux_6_12;
 
     attrs {
         pg_dir: PageTableStorage;
     }
 
-    reference linux_6_12_37 {
+    reference linux_6_12 {
         pg_dir = symbol("trampoline_pg_dir");
     }
 
@@ -1466,13 +1466,13 @@ object TrampolineVm: AddressSpaceObject {
 object EarlyVm: AddressSpaceObject {
     initial_state: State::Base;
     parent: Vm;
-    source: static::linux_6_12_37;
+    source: static::linux_6_12;
 
     attrs {
         pg_dir: PageTableStorage;
     }
 
-    reference linux_6_12_37 {
+    reference linux_6_12 {
         pg_dir = symbol("early_pg_dir");
     }
 
@@ -1627,13 +1627,13 @@ object EarlyVm: AddressSpaceObject {
 object SwapperVm: AddressSpaceObject {
     initial_state: State::Base;
     parent: Vm;
-    source: static::linux_6_12_37;
+    source: static::linux_6_12;
 
     attrs {
         pg_dir: PageTableStorage;
     }
 
-    reference linux_6_12_37 {
+    reference linux_6_12 {
         pg_dir = symbol("swapper_pg_dir");
     }
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1920" viewBox="0 0 1280 1920" role="img" aria-labelledby="title desc">
   <title id="title">SMP 启动期 BP 侧时序</title>
-  <desc id="desc">展示 Linux 6.12.37 default_config 下 smp_init() 在 boot CPU/BP 侧的有效调用顺序。</desc>
+  <desc id="desc">展示 Linux 6.12 以 `../linux-6.12/.config` 为基线的 smp_init() 在 boot CPU/BP 侧的有效调用顺序。</desc>
   <defs>
     <style>
       text { font-family: "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif; fill: #0f172a; }

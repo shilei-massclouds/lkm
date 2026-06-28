@@ -170,7 +170,7 @@ object Zones: MemoryObject {
 }
 
 /*
- * PageMetadataMap 表示 Linux struct page metadata 视图。当前 default_config
+ * PageMetadataMap 表示 Linux struct page metadata 视图。当前 `../linux-6.12/.config`
  * 选择 CONFIG_FLATMEM=y，因此它对应 misc_mem_init() 中
  * zone_sizes_init() -> free_area_init() -> alloc_node_mem_map()/memmap_init()
  * 建立的 mem_map；SPARSEMEM/VMEMMAP 路径在当前配置下被裁剪。
@@ -348,7 +348,7 @@ object ResourceTree: ResourceObject {
 /*
  * CacheBlockInfo 表示 RISC-V cache block operation 的平台级块大小事实。
  * 它是独立事实对象；CorePreparePhase 只编排其 Setup，不拥有该对象。
- * 当前最小模型按 Linux 6.12.37 的 riscv_init_cbo_blocksizes() 建模：
+ * 当前最小模型按 Linux 6.12 的 riscv_init_cbo_blocksizes() 建模：
  * 从 DeviceTree CPU nodes 收集 CBOM/CBOZ block size，并发布为系统级事实。
  */
 object CacheBlockInfo: HardwareObject {
@@ -401,7 +401,7 @@ object CacheBlockInfo: HardwareObject {
 /*
  * CpuCapabilities 表示 CPU 集合的能力事实视图。它是独立事实对象；
  * CorePreparePhase 只编排其 Setup，不拥有该对象。
- * 当前最小模型对应 Linux 6.12.37 的 riscv_fill_hwcap()：
+ * 当前最小模型对应 Linux 6.12 的 riscv_fill_hwcap()：
  * 从 DeviceTree CPU nodes 收集 per-hart ISA facts，结合 CpuGroup 形成
  * all-harts common capability facts，并用 CacheBlockInfo 校验 Zicbom/Zicboz。
  */
@@ -1411,12 +1411,12 @@ object CorePreparePhase: PhaseObject {
                 deferred {
                     "acpi_boot_table_init() 暂缓：当前最小路径以 FDT/SBI 为主，ACPI 引导路径后续单独建模。"
                     "early_memtest() 暂缓：属于可选内存测试路径，不改变当前最小启动语义。"
-                    "sparse_init() 裁剪路径：当前 default_config 为 CONFIG_FLATMEM=y、CONFIG_SPARSEMEM=n，该调用展开为空操作。"
+                    "sparse_init() 裁剪路径：当前 ../linux-6.12/.config 为 CONFIG_FLATMEM=y、CONFIG_SPARSEMEM=n，该调用展开为空操作。"
                     "local_flush_tlb_kernel_range(VMEMMAP_START, VMEMMAP_END) 暂缓：SPARSEMEM_VMEMMAP 条件路径。"
                     "arch_reserve_crashkernel() 暂缓：crashkernel 资源保留路径后续展开。"
                     "kasan_init() 暂缓：CONFIG_KASAN 条件路径。"
                     "acpi_init_rintc_map() / acpi_map_cpus_to_nodes() 暂缓：依赖 ACPI CPU 拓扑和 NUMA 模型。"
-                    "CBOP block size 暂缓：DeviceTree binding 定义 riscv,cbop-block-size，但 Linux 6.12.37 的 riscv_init_cbo_blocksizes() 当前只发布 CBOM/CBOZ。"
+                    "CBOP block size 暂缓：DeviceTree binding 定义 riscv,cbop-block-size，但 Linux 6.12 的 riscv_init_cbo_blocksizes() 当前只发布 CBOM/CBOZ。"
                     "apply_boot_alternatives() 暂缓：启动期 alternatives patch 后续抽象为代码补丁设施。"
                     "init_rt_signal_env() 暂缓：用户态信号环境不属于当前最小核心准备路径。"
                     "riscv_user_isa_enable() 暂缓：用户态 ISA 暴露路径后续建模。"

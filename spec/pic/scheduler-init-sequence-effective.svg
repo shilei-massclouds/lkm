@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="3208" viewBox="0 0 1280 3208" role="img" aria-labelledby="title desc">
   <title id="title">调度准备期对象构建时序</title>
-  <desc id="desc">展示 Linux 6.12.37 default_config 下 start_kernel() 从 mm_core_init() 之后到 context_tracking_init() 调用点的子阶段 5 有效调用顺序，并展开 sched_init()。</desc>
+  <desc id="desc">展示 Linux 6.12 以 `../linux-6.12/.config` 为基线的 start_kernel() 从 mm_core_init() 之后到 context_tracking_init() 调用点的子阶段 5 有效调用顺序，并展开 sched_init()。</desc>
   <defs>
     <style>
       text {
@@ -28,7 +28,7 @@
 
   <rect x="0" y="0" width="1280" height="3208" fill="#ffffff"/>
   <text x="640" y="46" text-anchor="middle" class="title">调度准备期对象构建时序</text>
-  <text x="640" y="76" text-anchor="middle" class="subtitle">SchedInitPhase.setup(): Linux 6.12.37 default_config 下 mm_core_init() 后到 context_tracking_init()</text>
+  <text x="640" y="76" text-anchor="middle" class="subtitle">SchedInitPhase.setup(): Linux 6.12 以 `../linux-6.12/.config` 为基线的 mm_core_init() 后到 context_tracking_init()</text>
 
   <rect x="48" y="126" width="214" height="3048" rx="14" class="lane"/>
   <text x="155" y="162" text-anchor="middle" class="obj">调度准备期</text>

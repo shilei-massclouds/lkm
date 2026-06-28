@@ -1440,7 +1440,7 @@ object TickBroadcast: KernelObject {
 
 /*
  * IrqTimeTrimmedPaths 保留 start_kernel() 中落在本子阶段、但当前
- * linux-6.12.37/default_config 下为空或不可达的调用点。Preset 对应
+ * ../linux-6.12/.config 下为空或不可达的调用点。Preset 对应
  * tick_init() 后的 rcu_init_nohz()；Setup 对应 random_init() 后的
  * kfence_init()。二者都必须结构化记录，不能只留在 markdown 表格。
  */

@@ -220,7 +220,7 @@ object DelayLoop: KernelObject {
 
 /*
  * IrqOpenPrepareTrimmedPaths 保留 start_kernel() 中落在本子阶段、但当前
- * linux-6.12.37/default_config 下为空、不可达或暂缓展开的调用点。
+ * ../linux-6.12/.config 下为空、不可达或暂缓展开的调用点。
  * 这些事实必须结构化记录，不能只留在 checkpoint 或 markdown 表格。
  */
 object IrqOpenPrepareTrimmedPaths: KernelObject {
@@ -378,7 +378,7 @@ object IrqOpenPreparePhase: PhaseObject {
                     "setup_per_cpu_pageset() 作为 PageAllocator.setup() 的 per-CPU pageset 快速路径细项暂缓，不引入新 lifecycle slot。";
                     "完整 console device probe、boot console 注销和 real console handoff 属于条件结果或后续设备初始化，不作为本阶段固定后置条件。";
                     "SlubSubsystem.enable()/Linux slab_state=FULL 留给 slab_sysfs_init() 等后续 late initcall，不在本阶段推进。";
-                    "Lockdep、locking selftest、initrd bounds、NUMA policy、ACPI early、late_time_init hook 和 arch_cpu_finalize_init 在当前 RISC-V default_config 下由 IrqOpenPrepareTrimmedPaths 记录为 trimmed/no-op。";
+                    "Lockdep、locking selftest、initrd bounds、NUMA policy、ACPI early、late_time_init hook 和 arch_cpu_finalize_init 在当前 ../linux-6.12/.config 的 RISC-V 配置下由 IrqOpenPrepareTrimmedPaths 记录为 trimmed/no-op。";
                 }
             }
         }

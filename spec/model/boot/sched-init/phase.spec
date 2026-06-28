@@ -1406,7 +1406,7 @@ object RcuCore: TaskObject {
 }
 
 /*
- * SchedInitPreludeTrimmedPaths 保留当前 RISC-V64/default_config 下
+ * SchedInitPreludeTrimmedPaths 保留当前 `../linux-6.12/.config` 的 RISC-V64 配置下
  * mm_core_init() 之后、sched_init() 之前的裁剪调用点。Linux 调用顺序是
  * poking_init(); ftrace_init(); early_trace_init(); sched_init()。其中
  * poking_init() 当前 RISC-V 路径不建立额外对象，ftrace_init() 因
