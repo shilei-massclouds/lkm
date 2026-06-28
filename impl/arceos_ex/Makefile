@@ -2,6 +2,8 @@ TARGET := riscv64imac-unknown-none-elf
 LOG ?= info
 PROFILE ?= release
 APP ?= smoke
+ROOT := ../..
+include $(ROOT)/impl/providers/linux-6.12.mk
 comma := ,
 empty :=
 space := $(empty) $(empty)
@@ -9,10 +11,15 @@ PROBE ?=
 PROBE_FILE ?=
 STRESS_MEM_BYTES ?= 65536
 PLIC_PROVIDER ?= native
-KNOWN_PLIC_PROVIDERS := native linux-object
-UNKNOWN_PLIC_PROVIDER := $(filter-out $(KNOWN_PLIC_PROVIDERS),$(PLIC_PROVIDER))
+PLIC_PROVIDER_CHOICES := native $(strip $(foreach provider,$(PROVIDER_NAMES),$(if $(filter plic,$(PROVIDER_$(provider)_KIND)),$(provider))))
+UNKNOWN_PLIC_PROVIDER := $(filter-out $(PLIC_PROVIDER_CHOICES),$(PLIC_PROVIDER))
 ifneq ($(UNKNOWN_PLIC_PROVIDER),)
-$(error unknown PLIC_PROVIDER: $(PLIC_PROVIDER))
+$(error unknown PLIC_PROVIDER: $(PLIC_PROVIDER) (expected one of: $(PLIC_PROVIDER_CHOICES)))
+endif
+PLIC_PROVIDER_OBJECTS := $(if $(filter native,$(PLIC_PROVIDER)),,$(PROVIDER_$(PLIC_PROVIDER)_OBJECTS))
+MISSING_PLIC_PROVIDER_OBJECTS := $(strip $(foreach obj,$(PLIC_PROVIDER_OBJECTS),$(if $(wildcard $(obj)),,$(obj))))
+ifneq ($(MISSING_PLIC_PROVIDER_OBJECTS),)
+$(error missing object(s) for PLIC_PROVIDER=$(PLIC_PROVIDER): $(MISSING_PLIC_PROVIDER_OBJECTS). Expected sibling Linux tree at $(LINUX_PROVIDER_DIR), or set LINUX_PROVIDER_DIR=/path/to/linux-6.12)
 endif
 ifneq ($(PROBE_FILE),)
 ifeq ($(wildcard $(PROBE_FILE)),)
@@ -50,8 +57,6 @@ RUN_BUILD_DIR := build/$(TARGET)/$(RUN_PROFILE)/$(APP)$(PLIC_PROVIDER_SUFFIX)$(P
 RUN_KERNEL_BIN := $(RUN_BUILD_DIR)/arceos_ex.bin
 LINKER := linker/riscv64.lds
 SOURCES := $(shell find src -name '*.rs')
-ROOT := ../..
-LINUX_PLIC_OBJ := $(ROOT)/impl/third_party/linux/6.12.37/riscv64-lp64/objects/drivers/irqchip/irq-sifive-plic.o
 RUSTC ?= rustc +nightly-2025-05-20
 RUST_OBJCOPY ?= rustup run nightly-2025-05-20 rust-objcopy
 QEMU ?= qemu-system-riscv64
@@ -84,8 +89,8 @@ MODEL_SPECS := $(shell find $(ROOT)/spec/model -name '*.spec')
 CODEGEN_SOURCES := $(shell find $(ROOT)/tools/codegen/src $(ROOT)/tools/common/src -name '*.py')
 EXTRA_RUSTFLAGS ?=
 APP_CFG := app_$(subst -,_,$(APP))
-PLIC_PROVIDER_CFG := --cfg plic_provider_$(subst -,_,$(PLIC_PROVIDER))
-PLIC_PROVIDER_LINK_ARGS := $(if $(filter linux-object,$(PLIC_PROVIDER)),-C link-arg=$(LINUX_PLIC_OBJ),)
+PLIC_PROVIDER_CFG := --cfg $(if $(filter native,$(PLIC_PROVIDER)),plic_provider_native,$(PROVIDER_$(PLIC_PROVIDER)_CFG))
+PLIC_PROVIDER_LINK_ARGS := $(foreach obj,$(PLIC_PROVIDER_OBJECTS),-C link-arg=$(obj))
 
 RUSTFLAGS := \
 	$(if $(filter hello user-boot,$(APP)),-A dead_code,) \
