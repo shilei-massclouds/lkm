@@ -3,13 +3,18 @@
  *
  * This slice models the shortest Linux-like path from PayloadPhase to the
  * first user-mode program. The selected payload variant is UserBootPayload.
- * It reads an init candidate such as /sbin/init from the current VFS root,
- * treats the result as an ElfObject, builds a PT_LOAD mapping plan, maps that
- * plan into a UserAddressSpace, prepares a UserStack and UserTrapFrame, then
- * enters U-mode. Syscalls remain under the existing SyscallException branch of
- * ExceptionStream. SyscallException owns syscall entry validation, argument
- * extraction and dispatch selection; this slice only adds SyscallTable as the
- * minimal action table consumed by that branch.
+ * It follows Linux init/main.c::kernel_init() after do_sysctl_args(): the
+ * ramdisk init and explicit init= branches are handled by their existing
+ * trimmed/deferred boundary facts, CONFIG_DEFAULT_INIT is empty in the current
+ * configuration, and the default fallback list is tried in Linux order:
+ * /sbin/init, /etc/init, /bin/init, then /bin/sh. The first candidate that can
+ * be read from the current VFS root and accepted by the current executable
+ * loader becomes the selected path. The selected file is treated as an
+ * ElfObject, mapped into a UserAddressSpace, paired with a UserStack and
+ * UserTrapFrame, then entered in U-mode. Syscalls remain under the existing
+ * SyscallException branch of ExceptionStream. SyscallException owns syscall
+ * entry validation, argument extraction and dispatch selection; this slice only
+ * adds SyscallTable as the minimal action table consumed by that branch.
  *
  * The current root disk image is a whole-disk ext2 filesystem. PartitionTable
  * and BlockPartition objects are intentionally deferred until the disk image
@@ -17,7 +22,15 @@
  */
 
 enum UserInitPathRef {
+    /*
+     * Historical name for the Linux fallback candidate "/sbin/init"; this is
+     * not CONFIG_DEFAULT_INIT, whose current empty value is recorded by
+     * PayloadExecSyncBoundaries.
+     */
     DefaultInit,
+    EtcInit,
+    BinInit,
+    BinSh,
 }
 
 enum ElfObjectRole {
@@ -28,6 +41,11 @@ enum ElfObjectRole {
 predicate user_boot_payload_selected<T>(payload: T) -> bool;
 predicate user_boot_payload_candidates_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_default_init_path_bound<T>(payload: T) -> bool;
+predicate user_boot_payload_default_init_fallback_order_bound<T>(payload: T) -> bool;
+predicate user_boot_payload_default_init_candidate_bound<T, P>(payload: T, path: P) -> bool;
+predicate user_boot_payload_candidate_failure_nonfatal_for_fallback<T>(payload: T) -> bool;
+predicate user_boot_payload_first_successful_candidate_selected<T>(payload: T) -> bool;
+predicate user_boot_payload_no_working_init_panic_terminal_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_uses_current_fs_struct<T, F>(payload: T, fs: F) -> bool;
 predicate user_boot_payload_reads_init_from_vfs<T, V>(payload: T, vfs: V) -> bool;
 predicate user_boot_payload_no_partition_dependency<T>(payload: T) -> bool;
@@ -1145,6 +1163,13 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_selected(self);
                     user_boot_payload_candidates_bound(self);
                     user_boot_payload_default_init_path_bound(self);
+                    user_boot_payload_default_init_fallback_order_bound(self);
+                    user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::DefaultInit);
+                    user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::EtcInit);
+                    user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinInit);
+                    user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinSh);
+                    user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
+                    user_boot_payload_no_working_init_panic_terminal_bound(self);
                     user_boot_payload_uses_current_fs_struct(self, FsStruct);
                     user_boot_payload_no_partition_dependency(self);
                     user_boot_payload_partition_objects_deferred(self);
@@ -1162,6 +1187,13 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_selected(self);
             user_boot_payload_candidates_bound(self);
             user_boot_payload_default_init_path_bound(self);
+            user_boot_payload_default_init_fallback_order_bound(self);
+            user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::DefaultInit);
+            user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::EtcInit);
+            user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinInit);
+            user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinSh);
+            user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
+            user_boot_payload_no_working_init_panic_terminal_bound(self);
             user_boot_payload_uses_current_fs_struct(self, FsStruct);
             user_boot_payload_no_partition_dependency(self);
             user_boot_payload_partition_objects_deferred(self);
@@ -1188,6 +1220,29 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_selected_path_bound(self);
                 }
             }
+
+            /*
+             * Linux default fallback list selection. This action models the
+             * ordered try_to_run_init_process() chain after CONFIG_DEFAULT_INIT
+             * is skipped because it is empty in the current configuration.
+             * Candidate failures are nonfatal while later candidates remain;
+             * if every candidate fails the terminal behavior is the Linux
+             * "No working init found" panic boundary.
+             */
+            on Action::TryDefaultInitSequence {
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    FsStruct.state == State::Ready;
+                }
+
+                ensures {
+                    user_boot_payload_default_init_fallback_order_bound(self);
+                    user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
+                    user_boot_payload_first_successful_candidate_selected(self);
+                    user_boot_payload_selected_path_bound(self);
+                    user_boot_payload_no_working_init_panic_terminal_bound(self);
+                }
+            }
         }
 
         transitions {
@@ -1207,7 +1262,7 @@ object UserBootPayload: ResourceObject {
                     VfsCore.Action::ReadPath(Path, FsStruct);
                     ElfObject.Transition::Preset;
                     ElfObject.Transition::Setup;
-                    UserBootPayload.Action::TryCandidate(UserInitPathRef::DefaultInit);
+                    UserBootPayload.Action::TryDefaultInitSequence;
                     UserAddressSpace.Transition::Preset;
                     UserStack.Transition::Setup;
                     UserAddressSpace.Transition::Setup;
