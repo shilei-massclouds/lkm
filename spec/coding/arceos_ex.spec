@@ -2361,8 +2361,13 @@ type ArceosExBlockIoCodingMust {
          * static vs dynamic linking. Staged syscall probe subtests such as
          * sh_probe must print an explicit success marker after each syscall
          * path they validate, so guest output distinguishes a loaded fixture
-         * from per-syscall support. The directory-enumeration sh_probe slice
-         * must use the Linux 6.12/RISC-V syscall ABI directly for
+         * from per-syscall support. The user_smoke framework output MUST use
+         * the "user-smoke:" prefix, print begin/end markers for the whole
+         * run and each case, include "status=N" on every end marker, and use
+         * blank lines to separate the run and case boundaries. The host
+         * harness still determines pass/fail from "user exit status=N", not
+         * from these human-readable markers. The directory-enumeration
+         * sh_probe slice must use the Linux 6.12/RISC-V syscall ABI directly for
          * openat(AT_FDCWD, "/", O_RDONLY|O_DIRECTORY) and getdents64(61),
          * validate linux_dirent64 records, and then close the directory fd. A
          * failing probe is diagnostic evidence for the first unsupported
