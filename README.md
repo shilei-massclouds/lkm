@@ -38,6 +38,36 @@ make run APP=user-boot
 
 `APP=user-boot` 会走普通用户态 payload 读取与启动路径，是 `docs/DEFECTS.md` 中 DF-0001 的固定复现入口之一。定位这类间歇性问题时，不要只用 probe 路径替代普通路径，因为额外观测可能改变时序。
 
+### Rootfs Overlay
+
+`APP=user-boot` 默认从 Alpine minirootfs 构造 ext2 rootfs。仓库的 rootfs overlay 是镜像构造期覆盖，不是运行期 overlayfs：构造 disk 时先把 Alpine rootfs 解到 staging 目录，再按 `impl/arceos_ex/tests/user/rootfs-overlay.map` 编译用户态测试程序并复制到 rootfs 内的目标路径。
+
+当前默认 map 把 dynamic musl `user_smoke` 覆盖为 `/sbin/init`：
+
+```text
+/sbin/init    user_smoke  musl  dynamic
+```
+
+因此单独运行当前用户态 smoke 可以用：
+
+```sh
+make run APP=user-boot FORCE=1
+```
+
+`FORCE=1` 会重新生成 disk，确保当前 overlay map 和 `impl/arceos_ex/tests/user/smoke/` 下的源码被重新编译进 rootfs。若不加 `FORCE=1`，`make run APP=user-boot` 会复用已有的 `impl/arceos_ex/build/virtio-blk.raw`。
+
+需要不污染默认 disk 时，可以指定临时 disk：
+
+```sh
+make run APP=user-boot VIRTIO_BLK_IMAGE=/tmp/lkm-user-smoke.raw FORCE=1
+```
+
+禁用构造期 overlay、直接使用 Alpine rootfs 内容时：
+
+```sh
+make run APP=user-boot ROOTFS_OVERLAY=none FORCE=1
+```
+
 需要让 checkpoint 自报基本进度时，可以启用 announce probe：
 
 ```sh

@@ -4,7 +4,13 @@ ARCH ?= riscv64
 # - *_nolibc.c is freestanding/no-libc C.
 # - unsuffixed .c names are reserved for libc-linked tests.
 USER_TEST ?= init_hello
+ifeq ($(USER_TEST),user_smoke)
+USER_TEST_SRC ?= smoke/smoke.c smoke/init_fileio.c smoke/sh_probe.c
+USER_TEST_DEPS ?= smoke/smoke.h
+else
 USER_TEST_SRC ?= $(firstword $(wildcard $(USER_TEST).c) $(wildcard $(USER_TEST).S) $(USER_TEST).S)
+USER_TEST_DEPS ?=
+endif
 USER_TEST_TOOLCHAIN ?= gnu
 USER_TEST_LINK ?= static
 USER_TEST_OUT ?= ../../build/rootfs-user-tests/$(USER_TEST)-$(USER_TEST_TOOLCHAIN)-$(USER_TEST_LINK)
@@ -74,9 +80,9 @@ endif
 
 build: $(USER_TEST_OUT)
 
-$(USER_TEST_OUT): $(USER_TEST_SRC) Makefile
+$(USER_TEST_OUT): $(USER_TEST_SRC) $(USER_TEST_DEPS) Makefile
 	mkdir -p $(dir $@)
-	$(USER_TEST_CC) $(USER_TEST_CFLAGS) -o $@ $<
+	$(USER_TEST_CC) $(USER_TEST_CFLAGS) -o $@ $(USER_TEST_SRC)
 
 clean:
 	rm -rf ../../build/rootfs-user-tests

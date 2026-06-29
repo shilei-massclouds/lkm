@@ -1,2 +1,0 @@
-# target      test        toolchain  link
-/sbin/init    sh_probe    musl       dynamic

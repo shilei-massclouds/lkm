@@ -1,2 +1,2 @@
 # target      test        toolchain  link
-/sbin/init    sh_probe    musl       dynamic
+/sbin/init    user_smoke  musl       dynamic

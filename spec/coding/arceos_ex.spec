@@ -1458,10 +1458,10 @@ type ArceosExStartupPhaseCodingMust {
          * for native and every configured provider. A nonzero status, missing
          * status line, or failed QEMU command is a visible test failure. The
          * guest exit syscall path still owns status printing and shutdown; the
-         * harness only interprets the output. The harness must use case-local
-         * disk images for distinct rootfs overlay maps, so default sh_probe
-         * and explicit init_fileio regression cases cannot pass by reusing a
-         * stale build/virtio-blk.raw from a different overlay.
+         * harness only interprets the output. The default checked-in overlay
+         * map must install the combined user_smoke fixture as /sbin/init, and
+         * the harness must use a case-local disk image so the result cannot
+         * pass by reusing stale build/virtio-blk.raw contents.
          */
         arceos_ex_must_user_boot_payload_bind_kernel_init_task();
         arceos_ex_must_first_user_address_space_bind_kernel_init_task();
@@ -2350,19 +2350,24 @@ type ArceosExBlockIoCodingMust {
          * User-mode overlay test programs MUST live under
          * impl/arceos_ex/tests/user/ and MUST be built through a dedicated
          * user-test Makefile, so the kernel Makefile does not own user-mode
-         * compiler details. That Makefile MUST expose toolchain and link-mode
-         * selection for GNU vs musl GCC and static vs dynamic linking, even if
-         * the current default remains the minimal GNU static assembly test.
-         * Staged syscall probe fixtures such as sh_probe must print an
-         * explicit success marker after each syscall path they validate, so
-         * guest output distinguishes a loaded fixture from per-syscall support.
-         * The directory-enumeration sh_probe slice must remain outside the
-         * default overlay path and must use the Linux 6.12/RISC-V syscall ABI
-         * directly for openat(AT_FDCWD, "/", O_RDONLY|O_DIRECTORY) and
-         * getdents64(61), validate linux_dirent64 records, and then close the
-         * directory fd. A failing probe is diagnostic evidence for the first
-         * unsupported point, not permission to infer the cause without checking
-         * the implementation and Linux reference.
+         * compiler details. The default checked-in map MUST be the only
+         * persistent overlay map and MUST install user_smoke as /sbin/init.
+         * user_smoke lives under impl/arceos_ex/tests/user/smoke/, where
+         * smoke.c owns main() and calls subtests such as init_fileio and
+         * sh_probe. Fallback-specific maps that delete /sbin/init, /etc/init
+         * or /bin/init MUST be generated as temporary harness/manual inputs,
+         * not kept as long-lived checked-in maps. The user-test Makefile MUST
+         * expose toolchain and link-mode selection for GNU vs musl GCC and
+         * static vs dynamic linking. Staged syscall probe subtests such as
+         * sh_probe must print an explicit success marker after each syscall
+         * path they validate, so guest output distinguishes a loaded fixture
+         * from per-syscall support. The directory-enumeration sh_probe slice
+         * must use the Linux 6.12/RISC-V syscall ABI directly for
+         * openat(AT_FDCWD, "/", O_RDONLY|O_DIRECTORY) and getdents64(61),
+         * validate linux_dirent64 records, and then close the directory fd. A
+         * failing probe is diagnostic evidence for the first unsupported
+         * point, not permission to infer the cause without checking the
+         * implementation and Linux reference.
          * Distribution command probes such as /bin/ls must first follow a
          * local static/semi-static analysis flow using existing tools such as
          * file, readelf, objdump, local RISC-V Linux syscall headers, and

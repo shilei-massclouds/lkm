@@ -9,7 +9,6 @@ kunit_handlers=$5
 smoke_app=$6
 test_plic_providers=${7:-}
 default_overlay_map="tests/user/rootfs-overlay.map"
-init_fileio_overlay_map="tests/user/rootfs-overlay-init-fileio.map"
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
@@ -190,8 +189,6 @@ add_summary "$verify_total" "$verify_pass" "$verify_fail"
 run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run
 run_user_boot_overlay_case "run user native" native "$default_overlay_map" \
     "$tmpdir/run-user-native.log" "$tmpdir/user-native-default.raw"
-run_user_boot_overlay_case "run user init_fileio native" native "$init_fileio_overlay_map" \
-    "$tmpdir/run-user-init-fileio-native.log" "$tmpdir/user-native-init-fileio.raw"
 run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
 run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log" "$tmpdir/smoke-native.raw"
 
@@ -199,8 +196,6 @@ for provider in $test_plic_providers; do
     run_command_case "run hello $provider" "$tmpdir/run-hello-$provider.log" "$make_cmd" run PLIC_PROVIDER="$provider"
     run_user_boot_overlay_case "run user $provider" "$provider" "$default_overlay_map" \
         "$tmpdir/run-user-$provider.log" "$tmpdir/user-$provider-default.raw"
-    run_user_boot_overlay_case "run user init_fileio $provider" "$provider" "$init_fileio_overlay_map" \
-        "$tmpdir/run-user-init-fileio-$provider.log" "$tmpdir/user-$provider-init-fileio.raw"
     run_kunit_case "KUnit $provider" "$provider" "$tmpdir/kunit-$provider.log"
     run_smoke_case "app smoke $provider" "$provider" "$tmpdir/smoke-$provider.log" "$tmpdir/smoke-$provider.raw"
 done
