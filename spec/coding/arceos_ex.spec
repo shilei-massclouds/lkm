@@ -239,6 +239,7 @@ predicate arceos_ex_must_rootfs_overlay_read_default_map_unless_disabled() -> bo
 predicate arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode() -> bool;
+predicate arceos_ex_must_user_probe_print_per_syscall_success_marker() -> bool;
 predicate arceos_ex_must_disk_build_default_not_rebuild_existing_image() -> bool;
 predicate arceos_ex_must_ext2_lookup_support_path_components_from_directories() -> bool;
 predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
@@ -2317,6 +2318,9 @@ type ArceosExBlockIoCodingMust {
          * compiler details. That Makefile MUST expose toolchain and link-mode
          * selection for GNU vs musl GCC and static vs dynamic linking, even if
          * the current default remains the minimal GNU static assembly test.
+         * Staged syscall probe fixtures such as sh_probe must print an
+         * explicit success marker after each syscall path they validate, so
+         * guest output distinguishes a loaded fixture from per-syscall support.
          * make disk must only create the disk image when it is missing by
          * default; overlay configuration changes must not silently rebuild an
          * existing disk image. Explicit rebuild remains a command decision
@@ -2328,6 +2332,7 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user();
         arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile();
         arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode();
+        arceos_ex_must_user_probe_print_per_syscall_success_marker();
         arceos_ex_must_disk_build_default_not_rebuild_existing_image();
 
         /*
