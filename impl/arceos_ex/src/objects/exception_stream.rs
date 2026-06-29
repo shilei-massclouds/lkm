@@ -74,6 +74,7 @@ const STAT_SIZE: usize = 128;
 const EFAULT: usize = 14;
 const EINVAL: usize = 22;
 const EIO: usize = 5;
+const ENOSYS: usize = 38;
 const ENOMEM: usize = 12;
 const ENOENT: usize = 2;
 const EOVERFLOW: usize = 75;
@@ -885,8 +886,8 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
 }
 
 fn complete_unsupported_syscall(frame: &mut TrapFrame) {
-    frame.set_reg(10, usize::MAX);
-    frame.sepc = frame.sepc.wrapping_add(4);
+    print_unsupported_syscall_diagnostic(frame);
+    complete_error_syscall(frame, ENOSYS);
 }
 
 fn complete_successful_syscall(frame: &mut TrapFrame, value: usize) {
@@ -1413,18 +1414,62 @@ fn panic_dispatch(message: &str) -> ! {
 
 fn panic_dispatch_frame(message: &str, frame: &TrapFrame) -> ! {
     crate::arch::riscv64::sbi::putstr(message);
+    crate::arch::riscv64::sbi::putstr(" mode=");
+    print_trap_mode(frame);
     crate::arch::riscv64::sbi::putstr(" scause=0x");
     print_hex(frame.scause);
     crate::arch::riscv64::sbi::putstr(" sepc=0x");
     print_hex(frame.sepc);
     crate::arch::riscv64::sbi::putstr(" stval=0x");
     print_hex(frame.stval);
+    crate::arch::riscv64::sbi::putstr(" sstatus=0x");
+    print_hex(frame.sstatus);
+    crate::arch::riscv64::sbi::putstr(" a7=");
+    print_decimal(frame.reg(17));
+    print_syscall_arg_registers(frame);
     crate::arch::riscv64::sbi::putstr(" gp=0x");
     print_hex(crate::arch::riscv64::csr::read_gp());
     crate::arch::riscv64::sbi::putstr(" tp=0x");
     print_hex(crate::arch::riscv64::csr::read_tp());
     crate::arch::riscv64::sbi::putchar(b'\n');
     crate::arch::riscv64::sbi::system_shutdown()
+}
+
+fn print_unsupported_syscall_diagnostic(frame: &TrapFrame) {
+    crate::arch::riscv64::sbi::putstr("unsupported syscall");
+    crate::arch::riscv64::sbi::putstr(" nr=");
+    print_decimal(frame.reg(17));
+    crate::arch::riscv64::sbi::putstr(" mode=");
+    print_trap_mode(frame);
+    print_syscall_arg_registers(frame);
+    crate::arch::riscv64::sbi::putstr(" sepc=0x");
+    print_hex(frame.sepc);
+    crate::arch::riscv64::sbi::putstr(" stval=0x");
+    print_hex(frame.stval);
+    crate::arch::riscv64::sbi::putchar(b'\n');
+}
+
+fn print_trap_mode(frame: &TrapFrame) {
+    if frame.sstatus & crate::arch::riscv64::csr::SSTATUS_SPP == 0 {
+        crate::arch::riscv64::sbi::putstr("user");
+    } else {
+        crate::arch::riscv64::sbi::putstr("supervisor");
+    }
+}
+
+fn print_syscall_arg_registers(frame: &TrapFrame) {
+    crate::arch::riscv64::sbi::putstr(" a0=0x");
+    print_hex(frame.reg(10));
+    crate::arch::riscv64::sbi::putstr(" a1=0x");
+    print_hex(frame.reg(11));
+    crate::arch::riscv64::sbi::putstr(" a2=0x");
+    print_hex(frame.reg(12));
+    crate::arch::riscv64::sbi::putstr(" a3=0x");
+    print_hex(frame.reg(13));
+    crate::arch::riscv64::sbi::putstr(" a4=0x");
+    print_hex(frame.reg(14));
+    crate::arch::riscv64::sbi::putstr(" a5=0x");
+    print_hex(frame.reg(15));
 }
 
 fn print_hex(value: usize) {
