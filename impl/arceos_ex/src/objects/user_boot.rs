@@ -310,6 +310,16 @@ pub enum UserInitPathRef {
 }
 
 impl UserInitPathRef {
+    #[cfg(app_user_boot)]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::DefaultInit => 0,
+            Self::EtcInit => 1,
+            Self::BinInit => 2,
+            Self::BinSh => 3,
+        }
+    }
+
     pub const fn path(self) -> &'static [u8] {
         match self {
             Self::DefaultInit => USER_INIT_PATH,

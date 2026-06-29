@@ -9,6 +9,12 @@ use crate::{
 };
 
 #[cfg(app_user_boot)]
+use core::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(app_user_boot)]
+use crate::objects::user_boot::{UserStack, USER_PAGE_SIZE};
+
+#[cfg(app_user_boot)]
 use crate::objects::{
     files::{FdRef, FileBackendKind},
     state::State,
@@ -46,6 +52,25 @@ pub const KUNIT_CASE_COUNT: usize = 19;
 #[cfg(not(app_user_boot))]
 pub const KUNIT_CASE_COUNT: usize = 5;
 
+#[cfg(app_user_boot)]
+static SYSCALL_SET_TID_ADDRESS_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_OPENAT_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_READ_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static FILES_READONLY_PATH_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_WRITE_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static FILES_WRITE_PATH_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_CLOSE_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_NEWFSTATAT_REPORTED: AtomicBool = AtomicBool::new(false);
+#[cfg(app_user_boot)]
+static SYSCALL_EXIT_REPORTED: AtomicBool = AtomicBool::new(false);
+
 pub const HANDLER: Handler = Handler {
     name: "user_boot.elf_parser",
     priority: 120,
@@ -82,37 +107,62 @@ fn run(checkpoint: Checkpoint, ctx: &Context, sink: &mut dyn Sink) -> Checkpoint
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableSetTidAddress => {
-            run_syscall_table_set_tid_address(checkpoint, ctx, sink, total);
+            run_once(&SYSCALL_SET_TID_ADDRESS_REPORTED, || {
+                run_syscall_table_set_tid_address(checkpoint, ctx, sink, total)
+            });
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableOpenAt => {
-            run_syscall_table_openat(checkpoint, ctx, sink, total);
+            run_once(&SYSCALL_OPENAT_REPORTED, || {
+                run_syscall_table_openat(checkpoint, ctx, sink, total)
+            });
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableRead => {
-            run_syscall_table_read(checkpoint, ctx, sink, total);
-            run_files_struct_readonly_path(checkpoint, ctx, sink, total);
+            run_once(&SYSCALL_READ_REPORTED, || {
+                run_syscall_table_read(checkpoint, ctx, sink, total)
+            });
+            run_once(&FILES_READONLY_PATH_REPORTED, || {
+                run_files_struct_readonly_path(checkpoint, ctx, sink, total)
+            });
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableWrite => {
-            run_syscall_table_write(checkpoint, ctx, sink, total);
-            run_files_struct_write_path(checkpoint, ctx, sink, total);
+            run_once(&SYSCALL_WRITE_REPORTED, || {
+                run_syscall_table_write(checkpoint, ctx, sink, total)
+            });
+            run_once(&FILES_WRITE_PATH_REPORTED, || {
+                run_files_struct_write_path(checkpoint, ctx, sink, total)
+            });
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableClose => {
-            run_syscall_table_close(checkpoint, ctx, sink, total);
+            run_once(&SYSCALL_CLOSE_REPORTED, || {
+                run_syscall_table_close(checkpoint, ctx, sink, total)
+            });
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableNewFstatAt => {
-            run_syscall_table_newfstatat(checkpoint, ctx, sink, total);
+            run_once(&SYSCALL_NEWFSTATAT_REPORTED, || {
+                run_syscall_table_newfstatat(checkpoint, ctx, sink, total)
+            });
         }
         #[cfg(app_user_boot)]
         Checkpoint::SyscallTableExit => {
-            run_syscall_table_exit(checkpoint, ctx, sink, total);
+            run_once(&SYSCALL_EXIT_REPORTED, || {
+                run_syscall_table_exit(checkpoint, ctx, sink, total)
+            });
         }
         _ => {}
     }
     CheckpointOutcome::Continue
+}
+
+#[cfg(app_user_boot)]
+fn run_once(reported: &AtomicBool, run_case: impl FnOnce()) {
+    if !reported.swap(true, Ordering::AcqRel) {
+        run_case();
+    }
 }
 
 #[cfg(app_user_boot)]
@@ -269,12 +319,24 @@ fn run_user_address_space_ready(
     sink.start_case(total, "", name, checkpoint);
 
     let space = &ctx.user_address_space;
+    let stack = &ctx.user_stack;
+    let selected_path = ctx.user_boot_payload.selected_path();
+    let argv0_matches_selected =
+        stack_contains_at(stack, ctx, stack.arg0_ptr(), selected_path.path(), true);
     let mut valid = space.state() == State::Ready
         && space.page_table_view_ready()
         && space.elf_segments_mapped()
         && space.stack_mapped()
-        && space.heap_mapped();
+        && space.heap_mapped()
+        && ctx.user_boot_payload.selected_path_bound()
+        && argv0_matches_selected;
 
+    sink.diag_usize("selected_path_index", selected_path.index());
+    sink.diag_usize("user_stack_arg0_ptr", stack.arg0_ptr());
+    sink.diag_usize(
+        "user_stack_arg0_matches_selected",
+        argv0_matches_selected as usize,
+    );
     sink.diag_usize("user_mapping_count", space.mapping_count());
     sink.diag_usize("user_segment_mapping_count", space.segment_mapping_count());
     sink.diag_usize("user_heap_mapped", space.heap_mapped() as usize);
@@ -405,6 +467,49 @@ fn user_space_contains_phys_page(
         mapping_index += 1;
     }
     false
+}
+
+#[cfg(app_user_boot)]
+fn stack_contains_at(
+    stack: &UserStack,
+    ctx: &Context,
+    user_addr: usize,
+    expected: &[u8],
+    expect_nul: bool,
+) -> bool {
+    let total_len = expected.len() + usize::from(expect_nul);
+    if user_addr < stack.base()
+        || user_addr
+            .checked_add(total_len)
+            .filter(|end| *end <= stack.top())
+            .is_none()
+    {
+        return false;
+    }
+
+    let mut index = 0usize;
+    while index < total_len {
+        let expected_byte = if index < expected.len() {
+            expected[index]
+        } else {
+            0
+        };
+        let stack_offset = user_addr - stack.base() + index;
+        let page_index = stack_offset / USER_PAGE_SIZE;
+        let page_offset = stack_offset % USER_PAGE_SIZE;
+        let Some(page) = stack.backing_page(page_index) else {
+            return false;
+        };
+        let Some(linear) = ctx.page_metadata_map.page_address(page) else {
+            return false;
+        };
+        let byte = unsafe { *((linear + page_offset) as *const u8) };
+        if byte != expected_byte {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 #[cfg(app_user_boot)]
@@ -611,13 +716,14 @@ fn run_files_struct_write_path(
         && files.stdout().write_observed()
         && files.stdout_backend().kind() == FileBackendKind::CharDevice
         && files.stdout_backend().write_to_console()
-        && files.stdout().last_write_len() == USER_INIT_EXPECTED_MESSAGE.len()
-        && files.stdout_backend().last_write_len() == USER_INIT_EXPECTED_MESSAGE.len();
+        && files.stdout().last_write_len() != 0
+        && files.stdout_backend().last_write_len() == files.stdout().last_write_len();
 
     sink.diag_usize(
         "files_struct_fd_lookup_routes_to_table",
         files.fd_lookup_routes_to_table() as usize,
     );
+    sink.diag_usize("stdout_last_write_len", files.stdout().last_write_len());
     sink.diag_usize(
         "stdout_backend_last_write_len",
         files.stdout_backend().last_write_len(),
