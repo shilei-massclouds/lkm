@@ -240,9 +240,11 @@ predicate arceos_ex_must_rootfs_overlay_user_tests_live_under_tests_user() -> bo
 predicate arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile() -> bool;
 predicate arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode() -> bool;
 predicate arceos_ex_must_user_probe_print_per_syscall_success_marker() -> bool;
+predicate arceos_ex_must_user_probe_cover_directory_openat_getdents64() -> bool;
 predicate arceos_ex_must_user_syscall_analysis_use_existing_static_tools() -> bool;
 predicate arceos_ex_must_user_syscall_analysis_stay_out_of_default_build_path() -> bool;
 predicate arceos_ex_must_user_syscall_analysis_mark_busybox_candidates_conservative() -> bool;
+predicate arceos_ex_must_user_syscall_vfs_specs_reference_linux_6_12() -> bool;
 predicate arceos_ex_must_disk_build_default_not_rebuild_existing_image() -> bool;
 predicate arceos_ex_must_ext2_lookup_support_path_components_from_directories() -> bool;
 predicate arceos_ex_must_ext2_support_minimal_vfs_read_only_mount() -> bool;
@@ -2324,6 +2326,13 @@ type ArceosExBlockIoCodingMust {
          * Staged syscall probe fixtures such as sh_probe must print an
          * explicit success marker after each syscall path they validate, so
          * guest output distinguishes a loaded fixture from per-syscall support.
+         * The directory-enumeration sh_probe slice must remain outside the
+         * default overlay path and must use the Linux 6.12/RISC-V syscall ABI
+         * directly for openat(AT_FDCWD, "/", O_RDONLY|O_DIRECTORY) and
+         * getdents64(61), validate linux_dirent64 records, and then close the
+         * directory fd. A failing probe is diagnostic evidence for the first
+         * unsupported point, not permission to infer the cause without checking
+         * the implementation and Linux reference.
          * Distribution command probes such as /bin/ls must first follow a
          * local static/semi-static analysis flow using existing tools such as
          * file, readelf, objdump, local RISC-V Linux syscall headers, and
@@ -2339,6 +2348,13 @@ type ArceosExBlockIoCodingMust {
          * candidates and must be marked as such; the temporary analysis note
          * must not claim them as the applet's complete runtime syscall trace
          * without a later path-sensitive or guest validation step.
+         * Each syscall/VFS item promoted from analysis into model/coding specs
+         * must be checked against the local Linux 6.12 reference tree at
+         * ../linux-6.12, including the RISC-V syscall table/header and the
+         * concrete fs/open.c, fs/readdir.c, fs/stat.c, fs/file.c and fs/namei.c
+         * entry points relevant to the item. Any first-slice omission of Linux
+         * locking, RCU, permission, mount namespace, LSM or errno behavior must
+         * be recorded as trimmed/deferred before implementation.
          * make disk must only create the disk image when it is missing by
          * default; overlay configuration changes must not silently rebuild an
          * existing disk image. Explicit rebuild remains a command decision
@@ -2351,9 +2367,11 @@ type ArceosExBlockIoCodingMust {
         arceos_ex_must_rootfs_overlay_user_tests_build_via_dedicated_makefile();
         arceos_ex_must_rootfs_overlay_user_tests_select_toolchain_and_link_mode();
         arceos_ex_must_user_probe_print_per_syscall_success_marker();
+        arceos_ex_must_user_probe_cover_directory_openat_getdents64();
         arceos_ex_must_user_syscall_analysis_use_existing_static_tools();
         arceos_ex_must_user_syscall_analysis_stay_out_of_default_build_path();
         arceos_ex_must_user_syscall_analysis_mark_busybox_candidates_conservative();
+        arceos_ex_must_user_syscall_vfs_specs_reference_linux_6_12();
         arceos_ex_must_disk_build_default_not_rebuild_existing_image();
 
         /*

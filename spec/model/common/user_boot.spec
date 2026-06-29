@@ -1228,9 +1228,10 @@ object UserBootPayload: ResourceObject {
             }
 
             /*
-             * Linux default fallback list selection. This action models the
-             * ordered try_to_run_init_process() chain after CONFIG_DEFAULT_INIT
-             * is skipped because it is empty in the current configuration.
+             * Linux 6.12 default fallback list selection. This action models
+             * the ordered try_to_run_init_process() chain in init/main.c after
+             * CONFIG_DEFAULT_INIT is skipped because it is empty in the
+             * current configuration.
              * Candidate failures are nonfatal while later candidates remain;
              * a successful kernel_execve()-equivalent result stops the
              * fallback chain even though Linux returns integer 0 to
