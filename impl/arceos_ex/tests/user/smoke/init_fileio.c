@@ -35,6 +35,24 @@ int smoke_init_fileio(void)
 		return 22;
 	}
 
+	if (fcntl(fd, F_GETFL, 0) < 0) {
+		return 28;
+	}
+	if (SAY_LITERAL("syscall fcntl F_GETFL regular ok\n") < 0) {
+		return 29;
+	}
+
+	if (lseek(fd, 0, SEEK_SET) != 0) {
+		return 30;
+	}
+	if (SAY_LITERAL("syscall lseek regular ok\n") < 0) {
+		return 31;
+	}
+	read_len = read(fd, read_buf, 2);
+	if (read_len != 2 || read_buf[0] != '3' || read_buf[1] != '.') {
+		return 32;
+	}
+
 	if (syscall(SYS_fstat, fd, &st) < 0) {
 		return 25;
 	}

@@ -292,7 +292,8 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert(
             "payload fallback facts",
-            ctx.user_boot_payload.candidate_failure_nonfatal_for_fallback()
+            ctx.user_boot_payload
+                .candidate_failure_nonfatal_for_fallback()
                 && ctx.user_boot_payload.first_successful_candidate_selected()
                 && ctx.user_boot_payload.success_stops_fallback_chain()
                 && ctx
@@ -593,6 +594,7 @@ impl SmokeScenario for UserBootElfScenario {
             &mut ctx.block_device_registry,
             &ctx.kernel_image,
             b"/etc/alpine-release",
+            0,
         ) {
             Ok(fd) => fd,
             Err(_) => {

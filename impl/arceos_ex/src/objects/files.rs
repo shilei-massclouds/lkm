@@ -21,6 +21,15 @@ const FILE_FD_COUNT: usize = 4;
 const DT_UNKNOWN: u8 = 0;
 const DT_DIR: u8 = 4;
 const DT_REG: u8 = 8;
+const FILE_O_RDONLY: u32 = 0;
+const FILE_O_WRONLY: u32 = 1;
+const FILE_O_RDWR: u32 = 2;
+const FILE_O_ACCMODE: u32 = 0o3;
+const FILE_O_LARGEFILE: u32 = 0o100000;
+const FILE_O_DIRECTORY: u32 = 0o200000;
+const SEEK_SET: usize = 0;
+const SEEK_CUR: usize = 1;
+const SEEK_END: usize = 2;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -71,6 +80,8 @@ pub enum FileError {
     VfsBackendUnavailable,
     BackendUnavailable,
     Unsupported,
+    InvalidArgument,
+    IllegalSeek,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -96,22 +107,32 @@ struct FileDescriptorEntry {
     ofd: OpenFileDescriptionRef,
     readable: bool,
     writable: bool,
+    flags: u32,
 }
 
 impl FileDescriptorEntry {
     const fn stdio(ofd: OpenFileDescriptionRef, readable: bool, writable: bool) -> Self {
+        let access_mode = if readable && writable {
+            FILE_O_RDWR
+        } else if writable {
+            FILE_O_WRONLY
+        } else {
+            FILE_O_RDONLY
+        };
         Self {
             ofd,
             readable,
             writable,
+            flags: access_mode,
         }
     }
 
-    const fn regular(ofd: OpenFileDescriptionRef) -> Self {
+    const fn regular(ofd: OpenFileDescriptionRef, flags: u32) -> Self {
         Self {
             ofd,
             readable: true,
             writable: false,
+            flags,
         }
     }
 }
@@ -653,7 +674,7 @@ impl FileDescriptorTable {
         Ok(entry)
     }
 
-    fn install_regular(&mut self, ofd: &OpenFileDescription) -> FileResult<usize> {
+    fn install_regular(&mut self, ofd: &OpenFileDescription, flags: u32) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready || ofd.state() != State::Ready || !ofd.readable()
         {
             return Err(FileError::NotReady);
@@ -664,6 +685,7 @@ impl FileDescriptorTable {
 
         self.entries[FdRef::Regular0.index()] = Some(FileDescriptorEntry::regular(
             OpenFileDescriptionRef::Regular0,
+            flags,
         ));
         self.fd_installed.fetch_add(1, Ordering::AcqRel);
         Ok(REGULAR0_FD)
@@ -955,6 +977,7 @@ impl FilesStruct {
         block_device_registry: &mut BlockDeviceRegistry,
         kernel_image: &KernelImage,
         path: &[u8],
+        open_flags: u32,
     ) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready
             || !self.fd_table_bound
@@ -992,7 +1015,9 @@ impl FilesStruct {
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
 
-        let fd = self.fd_table.install_regular(&self.regular0)?;
+        let fd = self
+            .fd_table
+            .install_regular(&self.regular0, persistent_open_flags(open_flags))?;
         self.regular0_len = len;
         self.regular0_offset = 0;
         self.filesystem0_kind = FilesystemFdKind::RegularFile;
@@ -1016,6 +1041,7 @@ impl FilesStruct {
         block_device_registry: &mut BlockDeviceRegistry,
         kernel_image: &KernelImage,
         path: &[u8],
+        open_flags: u32,
     ) -> FileResult<usize> {
         if self.lifecycle.state() != State::Ready
             || !self.fd_table_bound
@@ -1051,7 +1077,10 @@ impl FilesStruct {
                 .map_err(|_| FileError::BackendUnavailable)?;
         }
 
-        let fd = self.fd_table.install_regular(&self.regular0)?;
+        let fd = self.fd_table.install_regular(
+            &self.regular0,
+            persistent_open_flags(open_flags) | FILE_O_DIRECTORY,
+        )?;
         self.regular0_len = 0;
         self.regular0_offset = 0;
         self.filesystem0_kind = FilesystemFdKind::Directory;
@@ -1155,6 +1184,62 @@ impl FilesStruct {
         self.close_fd_routes_to_table.fetch_add(1, Ordering::AcqRel);
         self.regular_file_closed.fetch_add(1, Ordering::AcqRel);
         Ok(())
+    }
+
+    pub fn fcntl_getfl_fd(&self, fd: usize) -> FileResult<u32> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        Ok(entry.flags)
+    }
+
+    pub fn lseek_fd(
+        &mut self,
+        fd: usize,
+        offset: isize,
+        whence: usize,
+        vfs_core: &VfsCore,
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        if entry.ofd != OpenFileDescriptionRef::Regular0 {
+            return Err(FileError::IllegalSeek);
+        }
+
+        let (current, end) = match self.filesystem0_kind {
+            FilesystemFdKind::RegularFile => (self.regular0_offset, self.regular0_len),
+            FilesystemFdKind::Directory => {
+                let file_ref = self.directory0_file_ref.ok_or(FileError::BadFd)?;
+                let stat = vfs_core
+                    .file_stat(file_ref)
+                    .map_err(vfs_error_to_file_error)?;
+                (self.directory0_offset, stat.size())
+            }
+            FilesystemFdKind::None => return Err(FileError::BadFd),
+        };
+        let base = match whence {
+            SEEK_SET => 0i128,
+            SEEK_CUR => current as i128,
+            SEEK_END => end as i128,
+            _ => return Err(FileError::InvalidArgument),
+        };
+        let target = base + offset as i128;
+        if target < 0 || target > usize::MAX as i128 {
+            return Err(FileError::InvalidArgument);
+        }
+
+        let target = target as usize;
+        match self.filesystem0_kind {
+            FilesystemFdKind::RegularFile => self.regular0_offset = target,
+            FilesystemFdKind::Directory => self.directory0_offset = target,
+            FilesystemFdKind::None => return Err(FileError::BadFd),
+        }
+        Ok(target)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1285,6 +1370,10 @@ fn serialize_linux_dirents64<'a>(
         next_offset = entry.next_offset();
     }
     Ok((written, next_offset))
+}
+
+const fn persistent_open_flags(flags: u32) -> u32 {
+    flags & (FILE_O_ACCMODE | FILE_O_LARGEFILE | FILE_O_DIRECTORY)
 }
 
 const fn linux_dirent64_reclen(name_len: usize) -> usize {

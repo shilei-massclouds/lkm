@@ -67,6 +67,14 @@ int smoke_sh_probe(void)
 		return 54;
 	}
 
+	int flags = fcntl(dir_fd, F_GETFL, 0);
+	if (flags < 0 || (flags & O_DIRECTORY) == 0) {
+		return 55;
+	}
+	if (SAY_LITERAL("syscall fcntl F_GETFL directory ok\n") < 0) {
+		return 56;
+	}
+
 	long bytes = syscall(SYS_getdents64, dir_fd, dir_buf, sizeof(dir_buf));
 	if (bytes <= 0) {
 		return 42;
@@ -98,6 +106,18 @@ int smoke_sh_probe(void)
 	if (SAY_LITERAL("syscall getdents64 parse ok\n") < 0) {
 		return 46;
 	}
+
+	if (lseek(dir_fd, 0, SEEK_SET) != 0) {
+		return 57;
+	}
+	if (SAY_LITERAL("syscall lseek directory ok\n") < 0) {
+		return 58;
+	}
+	long bytes_again = syscall(SYS_getdents64, dir_fd, dir_buf, sizeof(dir_buf));
+	if (bytes_again <= 0) {
+		return 59;
+	}
+
 	if (close(dir_fd) < 0) {
 		return 47;
 	}
