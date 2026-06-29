@@ -2307,16 +2307,20 @@ type ArceosExBlockIoCodingMust {
          * default is impl/arceos_ex/tests/user/rootfs-overlay.map. Each
          * non-comment map row declares a rootfs target path, user test name,
          * and optional toolchain/link mode; omitted toolchain/link fields use
-         * ROOTFS_OVERLAY_TOOLCHAIN and ROOTFS_OVERLAY_LINK defaults. User-mode
-         * overlay test programs MUST live under impl/arceos_ex/tests/user/ and
-         * MUST be built through a dedicated user-test Makefile, so the kernel
-         * Makefile does not own user-mode compiler details. That Makefile MUST
-         * expose toolchain and link-mode selection for GNU vs musl GCC and
-         * static vs dynamic linking, even if the current default remains the
-         * minimal GNU static assembly test. make disk must only create the disk
-         * image when it is missing by default; overlay configuration changes
-         * must not silently rebuild an existing disk image. Explicit rebuild
-         * remains a command decision through FORCE=1 or disk-clean.
+         * ROOTFS_OVERLAY_TOOLCHAIN and ROOTFS_OVERLAY_LINK defaults. The
+         * special user-test token __absent__ deletes the target path from the
+         * staging rootfs instead of building or copying a fixture; it is only
+         * for explicit negative/fallback images, not for the default overlay.
+         * User-mode overlay test programs MUST live under
+         * impl/arceos_ex/tests/user/ and MUST be built through a dedicated
+         * user-test Makefile, so the kernel Makefile does not own user-mode
+         * compiler details. That Makefile MUST expose toolchain and link-mode
+         * selection for GNU vs musl GCC and static vs dynamic linking, even if
+         * the current default remains the minimal GNU static assembly test.
+         * make disk must only create the disk image when it is missing by
+         * default; overlay configuration changes must not silently rebuild an
+         * existing disk image. Explicit rebuild remains a command decision
+         * through FORCE=1 or disk-clean.
          */
         arceos_ex_must_rootfs_overlay_copy_fixture_outputs_at_image_build();
         arceos_ex_must_rootfs_overlay_config_allow_none_and_target_overrides();

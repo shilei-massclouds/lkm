@@ -26,6 +26,7 @@ pub const EXT2_ALPINE_INSTALLED_DB_MAX_SIZE: usize = EXT2_MAX_BLOCK_SIZE * EXT2_
 
 const EXT2_NAME_MAX: usize = 32;
 const EXT2_GOOD_OLD_INODE_SIZE: u16 = 128;
+const EXT2_S_IFMT: u16 = 0xf000;
 const EXT2_S_IFDIR: u16 = 0x4000;
 const EXT2_S_IFREG: u16 = 0x8000;
 
@@ -316,11 +317,11 @@ impl Ext2InodeRecord {
     }
 
     pub const fn is_dir(&self) -> bool {
-        self.mode & EXT2_S_IFDIR == EXT2_S_IFDIR
+        self.mode & EXT2_S_IFMT == EXT2_S_IFDIR
     }
 
     pub const fn is_regular_file(&self) -> bool {
-        self.mode & EXT2_S_IFREG == EXT2_S_IFREG
+        self.mode & EXT2_S_IFMT == EXT2_S_IFREG
     }
 
     pub const fn indirect_blocks_deferred(&self) -> bool {

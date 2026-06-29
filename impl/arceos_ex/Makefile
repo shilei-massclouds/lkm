@@ -155,6 +155,11 @@ rootfs-overlay:
 		if [ -n "$$extra" ]; then echo "too many fields in $(ROOTFS_OVERLAY_MAP): $$target $$test $$toolchain $$link $$extra"; exit 1; fi; \
 		case "$$target" in /*) ;; *) echo "overlay target must be absolute: $$target"; exit 1;; esac; \
 		if [ -z "$$test" ]; then echo "overlay test missing for $$target"; exit 1; fi; \
+		if [ "$$test" = "__absent__" ]; then \
+			if [ -n "$$toolchain$$link" ]; then echo "__absent__ overlay row must not set toolchain/link: $$target"; exit 1; fi; \
+			rm -f "$(ROOTFS_STAGING_DIR)$$target"; \
+			continue; \
+		fi; \
 		toolchain="$${toolchain:-$(ROOTFS_OVERLAY_TOOLCHAIN)}"; \
 		link="$${link:-$(ROOTFS_OVERLAY_LINK)}"; \
 		output="$(abspath $(ROOTFS_OVERLAY_OUTPUT_DIR))/$$test-$$toolchain-$$link"; \

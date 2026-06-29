@@ -1,0 +1,5 @@
+# target      test        toolchain  link
+/sbin/init    __absent__
+/etc/init     __absent__
+/bin/init     __absent__
+/bin/sh       sh_probe    musl       dynamic

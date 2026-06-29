@@ -45,6 +45,8 @@ predicate user_boot_payload_default_init_fallback_order_bound<T>(payload: T) -> 
 predicate user_boot_payload_default_init_candidate_bound<T, P>(payload: T, path: P) -> bool;
 predicate user_boot_payload_candidate_failure_nonfatal_for_fallback<T>(payload: T) -> bool;
 predicate user_boot_payload_first_successful_candidate_selected<T>(payload: T) -> bool;
+predicate user_boot_payload_success_stops_fallback_chain<T>(payload: T) -> bool;
+predicate user_boot_payload_success_no_return_to_startup_orchestration<T>(payload: T) -> bool;
 predicate user_boot_payload_no_working_init_panic_terminal_bound<T>(payload: T) -> bool;
 predicate user_boot_payload_uses_current_fs_struct<T, F>(payload: T, fs: F) -> bool;
 predicate user_boot_payload_reads_init_from_vfs<T, V>(payload: T, vfs: V) -> bool;
@@ -1169,6 +1171,8 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinInit);
                     user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinSh);
                     user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
+                    user_boot_payload_success_stops_fallback_chain(self);
+                    user_boot_payload_success_no_return_to_startup_orchestration(self);
                     user_boot_payload_no_working_init_panic_terminal_bound(self);
                     user_boot_payload_uses_current_fs_struct(self, FsStruct);
                     user_boot_payload_no_partition_dependency(self);
@@ -1193,6 +1197,8 @@ object UserBootPayload: ResourceObject {
             user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinInit);
             user_boot_payload_default_init_candidate_bound(self, UserInitPathRef::BinSh);
             user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
+            user_boot_payload_success_stops_fallback_chain(self);
+            user_boot_payload_success_no_return_to_startup_orchestration(self);
             user_boot_payload_no_working_init_panic_terminal_bound(self);
             user_boot_payload_uses_current_fs_struct(self, FsStruct);
             user_boot_payload_no_partition_dependency(self);
@@ -1226,6 +1232,10 @@ object UserBootPayload: ResourceObject {
              * ordered try_to_run_init_process() chain after CONFIG_DEFAULT_INIT
              * is skipped because it is empty in the current configuration.
              * Candidate failures are nonfatal while later candidates remain;
+             * a successful kernel_execve()-equivalent result stops the
+             * fallback chain even though Linux returns integer 0 to
+             * kernel_init(), because the task now represents the new init
+             * image and does not resume the old startup orchestration path.
              * if every candidate fails the terminal behavior is the Linux
              * "No working init found" panic boundary.
              */
@@ -1239,6 +1249,8 @@ object UserBootPayload: ResourceObject {
                     user_boot_payload_default_init_fallback_order_bound(self);
                     user_boot_payload_candidate_failure_nonfatal_for_fallback(self);
                     user_boot_payload_first_successful_candidate_selected(self);
+                    user_boot_payload_success_stops_fallback_chain(self);
+                    user_boot_payload_success_no_return_to_startup_orchestration(self);
                     user_boot_payload_selected_path_bound(self);
                     user_boot_payload_no_working_init_panic_terminal_bound(self);
                 }

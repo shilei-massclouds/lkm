@@ -124,7 +124,12 @@ impl SmokeScenario for UserBootElfScenario {
         let interpreter_ref = interpreter_image.map(|_| &ctx.elf_interpreter_object);
         assertions.assert(
             "payload try candidate",
-            ctx.user_boot_payload.try_candidate(&ctx.elf_object).is_ok(),
+            ctx.user_boot_payload
+                .try_candidate(
+                    crate::objects::user_boot::UserInitPathRef::DefaultInit,
+                    &ctx.elf_object,
+                )
+                .is_ok(),
         );
         assertions.assert(
             "address space preset",
@@ -144,6 +149,7 @@ impl SmokeScenario for UserBootElfScenario {
                     &ctx.user_address_space,
                     &ctx.elf_object,
                     interpreter_ref,
+                    crate::objects::user_boot::UserInitPathRef::DefaultInit,
                     &mut ctx.page_allocator,
                     &ctx.page_metadata_map,
                 )
@@ -281,7 +287,20 @@ impl SmokeScenario for UserBootElfScenario {
         );
         assertions.assert(
             "payload default path",
-            ctx.user_boot_payload.default_init_path_bound(),
+            ctx.user_boot_payload.default_init_path_bound()
+                && ctx.user_boot_payload.default_init_fallback_order_bound(),
+        );
+        assertions.assert(
+            "payload fallback facts",
+            ctx.user_boot_payload.candidate_failure_nonfatal_for_fallback()
+                && ctx.user_boot_payload.first_successful_candidate_selected()
+                && ctx.user_boot_payload.success_stops_fallback_chain()
+                && ctx
+                    .user_boot_payload
+                    .success_no_return_to_startup_orchestration()
+                && ctx.user_boot_payload.no_working_init_panic_terminal_bound()
+                && ctx.user_boot_payload.selected_path()
+                    == crate::objects::user_boot::UserInitPathRef::DefaultInit,
         );
         assertions.assert("payload fs", ctx.user_boot_payload.uses_current_fs_struct());
         assertions.assert(
@@ -644,6 +663,7 @@ impl SmokeScenario for UserBootElfScenario {
                     &ctx.user_trap_frame,
                     &ctx.fs_struct,
                     &ctx.files_struct,
+                    crate::objects::user_boot::UserInitPathRef::DefaultInit,
                 )
                 .is_ok(),
         );
