@@ -76,7 +76,7 @@ int main(int argc, char **argv)
 		return 31;
 	}
 
-	rc = RUN_CASE("init_fileio", smoke_init_fileio);
+	rc = RUN_CASE("fileio", smoke_fileio);
 	if (rc != 0) {
 		(void)SAY_STATUS("user-smoke: end status=", rc, "\n");
 		return rc;

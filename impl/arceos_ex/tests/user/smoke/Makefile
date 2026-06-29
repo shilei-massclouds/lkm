@@ -1,4 +1,4 @@
-SMOKE_SRC := smoke.c init_fileio.c sh_probe.c
+SMOKE_SRC := smoke.c fileio.c sh_probe.c
 SMOKE_DEPS := smoke.h Makefile
 
 .PHONY: build

@@ -130,7 +130,7 @@ static int smoke_directory_fileio(void)
 	return 0;
 }
 
-int smoke_init_fileio(void)
+int smoke_fileio(void)
 {
 	static const char path[] = "/etc/alpine-release";
 	char read_buf[32];

@@ -2353,7 +2353,7 @@ type ArceosExBlockIoCodingMust {
          * compiler details. The default checked-in map MUST be the only
          * persistent overlay map and MUST install user_smoke as /sbin/init.
          * user_smoke lives under impl/arceos_ex/tests/user/smoke/, where
-         * smoke.c owns main() and calls subtests such as init_fileio and
+         * smoke.c owns main() and calls subtests such as fileio and
          * sh_probe. Fallback-specific maps that delete /sbin/init, /etc/init
          * or /bin/init MUST be generated as temporary harness/manual inputs,
          * not kept as long-lived checked-in maps. The user-test Makefile MUST
