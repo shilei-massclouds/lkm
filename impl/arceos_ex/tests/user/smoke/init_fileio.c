@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include "smoke.h"
@@ -18,6 +19,17 @@ int smoke_init_fileio(void)
 	static const char path[] = "/etc/alpine-release";
 	char read_buf[32];
 	struct stat st;
+	struct winsize ws;
+
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) < 0) {
+		return 33;
+	}
+	if (ws.ws_row == 0 || ws.ws_col == 0) {
+		return 34;
+	}
+	if (SAY_LITERAL("syscall ioctl TIOCGWINSZ stdout ok\n") < 0) {
+		return 35;
+	}
 
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) {

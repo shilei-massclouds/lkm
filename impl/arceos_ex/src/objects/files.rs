@@ -30,6 +30,10 @@ const FILE_O_DIRECTORY: u32 = 0o200000;
 const SEEK_SET: usize = 0;
 const SEEK_CUR: usize = 1;
 const SEEK_END: usize = 2;
+pub const TTY_WINSIZE_ROW: u16 = 24;
+pub const TTY_WINSIZE_COL: u16 = 80;
+pub const TTY_WINSIZE_XPIXEL: u16 = 0;
+pub const TTY_WINSIZE_YPIXEL: u16 = 0;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -82,6 +86,7 @@ pub enum FileError {
     Unsupported,
     InvalidArgument,
     IllegalSeek,
+    NotTty,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -1193,6 +1198,39 @@ impl FilesStruct {
 
         let entry = self.fd_table.lookup(fd)?;
         Ok(entry.flags)
+    }
+
+    pub fn ioctl_validate_fd(&self, fd: usize) -> FileResult<()> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        self.fd_table.lookup(fd)?;
+        Ok(())
+    }
+
+    pub fn ioctl_tiocgwinsz_fd(&self, fd: usize) -> FileResult<(u16, u16, u16, u16)> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        let backend = match entry.ofd {
+            OpenFileDescriptionRef::Stdin => &self.stdin_backend,
+            OpenFileDescriptionRef::Stdout => &self.stdout_backend,
+            OpenFileDescriptionRef::Stderr => &self.stderr_backend,
+            OpenFileDescriptionRef::Regular0 => &self.regular0_backend,
+        };
+        if backend.state() != State::Ready || backend.kind() != FileBackendKind::CharDevice {
+            return Err(FileError::NotTty);
+        }
+
+        Ok((
+            TTY_WINSIZE_ROW,
+            TTY_WINSIZE_COL,
+            TTY_WINSIZE_XPIXEL,
+            TTY_WINSIZE_YPIXEL,
+        ))
     }
 
     pub fn lseek_fd(
