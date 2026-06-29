@@ -612,7 +612,7 @@ impl SmokeScenario for UserBootElfScenario {
             "regular read content",
             read_len != 0 && regular_buffer[..read_len].starts_with(b"3."),
         );
-        let stat = match ctx.files_struct.stat_regular_path(
+        let stat = match ctx.files_struct.stat_path(
             &ctx.fs_struct,
             &mut ctx.vfs_core,
             &mut ctx.ext2_filesystem,

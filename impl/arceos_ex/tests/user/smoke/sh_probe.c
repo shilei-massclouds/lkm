@@ -37,6 +37,7 @@ int smoke_sh_probe(void)
 	char dir_buf[512];
 	int saw_dot = 0;
 	int saw_dotdot = 0;
+	struct stat st;
 	int dir_fd = syscall(SYS_openat, AT_FDCWD, "/", O_RDONLY | O_DIRECTORY, 0);
 
 	if (dir_fd < 0) {
@@ -44,6 +45,26 @@ int smoke_sh_probe(void)
 	}
 	if (SAY_LITERAL("syscall openat directory ok\n") < 0) {
 		return 41;
+	}
+
+	if (fstatat(AT_FDCWD, "/", &st, 0) < 0) {
+		return 49;
+	}
+	if (!S_ISDIR(st.st_mode) || st.st_size <= 0) {
+		return 50;
+	}
+	if (SAY_LITERAL("syscall newfstatat directory ok\n") < 0) {
+		return 51;
+	}
+
+	if (syscall(SYS_fstat, dir_fd, &st) < 0) {
+		return 52;
+	}
+	if (!S_ISDIR(st.st_mode) || st.st_size <= 0) {
+		return 53;
+	}
+	if (SAY_LITERAL("syscall fstat directory ok\n") < 0) {
+		return 54;
 	}
 
 	long bytes = syscall(SYS_getdents64, dir_fd, dir_buf, sizeof(dir_buf));

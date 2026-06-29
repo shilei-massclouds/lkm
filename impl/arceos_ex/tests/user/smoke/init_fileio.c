@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <stddef.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include "smoke.h"
@@ -32,6 +33,16 @@ int smoke_init_fileio(void)
 	}
 	if (SAY_LITERAL("syscall read ok\n") < 0) {
 		return 22;
+	}
+
+	if (syscall(SYS_fstat, fd, &st) < 0) {
+		return 25;
+	}
+	if (!S_ISREG(st.st_mode) || st.st_size <= 0) {
+		return 26;
+	}
+	if (SAY_LITERAL("syscall fstat regular ok\n") < 0) {
+		return 27;
 	}
 
 	if (close(fd) < 0) {

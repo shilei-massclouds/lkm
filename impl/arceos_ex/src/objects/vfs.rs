@@ -21,6 +21,26 @@ pub enum VfsInodeKind {
     DeviceNode,
 }
 
+#[derive(Clone, Copy)]
+pub struct VfsNodeStat {
+    size: usize,
+    kind: VfsInodeKind,
+}
+
+impl VfsNodeStat {
+    const fn new(size: usize, kind: VfsInodeKind) -> Self {
+        Self { size, kind }
+    }
+
+    pub const fn size(&self) -> usize {
+        self.size
+    }
+
+    pub const fn kind(&self) -> VfsInodeKind {
+        self.kind
+    }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct MountRef {
     index: usize,
@@ -1446,6 +1466,32 @@ impl VfsCore {
         };
         self.read_path_returns_data = len != 0;
         Ok(len)
+    }
+
+    pub fn stat_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<VfsNodeStat, VfsError> {
+        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
+        let dentry = self.positive_dentry(dentry_ref)?;
+        let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if inode.removed() {
+            return Err(VfsError::NotFound);
+        }
+        Ok(VfsNodeStat::new(inode.size(), inode.kind()))
+    }
+
+    pub fn file_stat(&self, file_ref: FileRef) -> Result<VfsNodeStat, VfsError> {
+        let file = self.file(file_ref).ok_or(VfsError::InvalidRef)?;
+        let inode = self.inode(file.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if inode.removed() {
+            return Err(VfsError::NotFound);
+        }
+        Ok(VfsNodeStat::new(inode.size(), inode.kind()))
     }
 
     pub fn write_file(

@@ -6,7 +6,7 @@ use super::{
     kernel_image::KernelImage,
     rest_init::KernelInitTask,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    vfs::{FileRef, FsStruct, VfsCore, VfsError},
+    vfs::{FileRef, FsStruct, VfsCore, VfsError, VfsInodeKind},
     virtio_blk,
 };
 
@@ -131,10 +131,28 @@ pub struct FileStat {
 }
 
 impl FileStat {
+    const fn new(size: usize, kind: VfsInodeKind) -> Self {
+        match kind {
+            VfsInodeKind::Directory => Self::directory(size),
+            VfsInodeKind::RegularFile => Self::regular(size),
+            VfsInodeKind::DeviceNode => Self {
+                size,
+                mode: 0o020444,
+            },
+        }
+    }
+
     const fn regular(size: usize) -> Self {
         Self {
             size,
             mode: 0o100444,
+        }
+    }
+
+    const fn directory(size: usize) -> Self {
+        Self {
+            size,
+            mode: 0o040555,
         }
     }
 
@@ -1140,7 +1158,7 @@ impl FilesStruct {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn stat_regular_path(
+    pub fn stat_path(
         &mut self,
         fs_struct: &FsStruct,
         vfs_core: &mut VfsCore,
@@ -1157,16 +1175,14 @@ impl FilesStruct {
             return Err(FileError::NotReady);
         }
 
-        let mut scratch = [0u8; REGULAR_FILE_BUFFER_SIZE];
         let mut provider = virtio_blk::live_provider(kernel_image);
-        let len = vfs_core
-            .read_path(
+        let vfs_stat = vfs_core
+            .stat_path(
                 fs_struct,
                 ext2_filesystem,
                 block_device_registry,
                 &mut provider,
                 path,
-                &mut scratch,
             )
             .map_err(vfs_error_to_file_error)?;
 
@@ -1177,11 +1193,49 @@ impl FilesStruct {
         }
         let stat = self
             .regular0_backend
-            .stat_regular_file(FileStat::regular(len))?;
+            .stat_regular_file(FileStat::new(vfs_stat.size(), vfs_stat.kind()))?;
         self.stat_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
-        self.regular_file_stat_observed
-            .fetch_add(1, Ordering::AcqRel);
+        if stat.mode() & 0o170000 == 0o100000 {
+            self.regular_file_stat_observed
+                .fetch_add(1, Ordering::AcqRel);
+        }
         Ok(stat)
+    }
+
+    pub fn fstat_fd(&mut self, fd: usize, vfs_core: &VfsCore) -> FileResult<FileStat> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        self.stat_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
+        match entry.ofd {
+            OpenFileDescriptionRef::Regular0 => {
+                let stat = match self.filesystem0_kind {
+                    FilesystemFdKind::RegularFile => FileStat::regular(self.regular0_len),
+                    FilesystemFdKind::Directory => {
+                        let file_ref = self.directory0_file_ref.ok_or(FileError::BadFd)?;
+                        let vfs_stat = vfs_core
+                            .file_stat(file_ref)
+                            .map_err(vfs_error_to_file_error)?;
+                        FileStat::new(vfs_stat.size(), vfs_stat.kind())
+                    }
+                    FilesystemFdKind::None => return Err(FileError::BadFd),
+                };
+                if self.regular0_backend.state() == State::Base {
+                    self.regular0_backend
+                        .bind_regular_file()
+                        .map_err(|_| FileError::BackendUnavailable)?;
+                }
+                let stat = self.regular0_backend.stat_regular_file(stat)?;
+                if stat.mode() & 0o170000 == 0o100000 {
+                    self.regular_file_stat_observed
+                        .fetch_add(1, Ordering::AcqRel);
+                }
+                Ok(stat)
+            }
+            _ => Err(FileError::Unsupported),
+        }
     }
 
     pub fn write_fd(&self, fd: usize, bytes: &[u8]) -> FileResult<usize> {
@@ -1234,7 +1288,10 @@ fn serialize_linux_dirents64<'a>(
 }
 
 const fn linux_dirent64_reclen(name_len: usize) -> usize {
-    align_up(LINUX_DIRENT64_HEADER_SIZE + name_len + 1, core::mem::size_of::<u64>())
+    align_up(
+        LINUX_DIRENT64_HEADER_SIZE + name_len + 1,
+        core::mem::size_of::<u64>(),
+    )
 }
 
 const fn align_up(value: usize, align: usize) -> usize {
