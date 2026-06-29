@@ -51,6 +51,7 @@ const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
 const SYSCALL_FCNTL: usize = 25;
 const SYSCALL_IOCTL: usize = 29;
+const SYSCALL_FACCESSAT: usize = 48;
 const SYSCALL_OPENAT: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_GETDENTS64: usize = 61;
@@ -71,6 +72,9 @@ const USER_COPY_MAX: usize = 256;
 const USER_IOV_MAX: usize = 4;
 const USER_PATH_MAX: usize = crate::objects::files::FILE_PATH_MAX;
 const AT_FDCWD: usize = usize::MAX - 99;
+const ACCESS_X_OK: usize = 1;
+const ACCESS_W_OK: usize = 2;
+const ACCESS_R_OK: usize = 4;
 const O_ACCMODE: usize = 0o3;
 const O_LARGEFILE: usize = 0o100000;
 const O_DIRECTORY: usize = 0o200000;
@@ -78,6 +82,7 @@ const F_GETFL: usize = 3;
 const TIOCGWINSZ: usize = 0x5413;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
+const EACCES: usize = 13;
 const EFAULT: usize = 14;
 const EINVAL: usize = 22;
 const EIO: usize = 5;
@@ -105,6 +110,7 @@ pub struct SyscallTable {
     fstat_supported: bool,
     fcntl_supported: bool,
     ioctl_supported: bool,
+    faccessat_supported: bool,
     lseek_supported: bool,
     brk_supported: bool,
     mmap_supported: bool,
@@ -130,6 +136,7 @@ pub struct SyscallTable {
     fstat_routes_to_files_struct: bool,
     fcntl_routes_to_files_struct: bool,
     ioctl_routes_to_files_struct: bool,
+    faccessat_routes_to_files_struct: bool,
     lseek_routes_to_files_struct: bool,
     exit_records_status: bool,
     write_observed: AtomicU8,
@@ -142,6 +149,7 @@ pub struct SyscallTable {
     fstat_observed: AtomicU8,
     fcntl_observed: AtomicU8,
     ioctl_observed: AtomicU8,
+    faccessat_observed: AtomicU8,
     lseek_observed: AtomicU8,
     set_tid_address_observed: AtomicU8,
     exit_observed: AtomicU8,
@@ -162,6 +170,7 @@ impl SyscallTable {
             fstat_supported: false,
             fcntl_supported: false,
             ioctl_supported: false,
+            faccessat_supported: false,
             lseek_supported: false,
             brk_supported: false,
             mmap_supported: false,
@@ -187,6 +196,7 @@ impl SyscallTable {
             fstat_routes_to_files_struct: false,
             fcntl_routes_to_files_struct: false,
             ioctl_routes_to_files_struct: false,
+            faccessat_routes_to_files_struct: false,
             lseek_routes_to_files_struct: false,
             exit_records_status: false,
             write_observed: AtomicU8::new(0),
@@ -199,6 +209,7 @@ impl SyscallTable {
             fstat_observed: AtomicU8::new(0),
             fcntl_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
+            faccessat_observed: AtomicU8::new(0),
             lseek_observed: AtomicU8::new(0),
             set_tid_address_observed: AtomicU8::new(0),
             exit_observed: AtomicU8::new(0),
@@ -263,6 +274,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn ioctl_supported(&self) -> bool {
         self.ioctl_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn faccessat_supported(&self) -> bool {
+        self.faccessat_supported
     }
 
     #[allow(dead_code)]
@@ -391,6 +407,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn faccessat_routes_to_files_struct(&self) -> bool {
+        self.faccessat_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
     pub const fn lseek_routes_to_files_struct(&self) -> bool {
         self.lseek_routes_to_files_struct
     }
@@ -451,6 +472,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn faccessat_observed(&self) -> bool {
+        self.faccessat_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn lseek_observed(&self) -> bool {
         self.lseek_observed.load(Ordering::Acquire) != 0
     }
@@ -487,6 +513,7 @@ impl SyscallTable {
         self.fstat_supported = true;
         self.fcntl_supported = true;
         self.ioctl_supported = true;
+        self.faccessat_supported = true;
         self.lseek_supported = true;
         self.brk_supported = true;
         self.mmap_supported = true;
@@ -512,6 +539,7 @@ impl SyscallTable {
         self.fstat_routes_to_files_struct = true;
         self.fcntl_routes_to_files_struct = true;
         self.ioctl_routes_to_files_struct = true;
+        self.faccessat_routes_to_files_struct = true;
         self.lseek_routes_to_files_struct = true;
         self.exit_records_status = true;
         SYSCALL_TABLE_READY.store(1, Ordering::Relaxed);
@@ -651,6 +679,19 @@ impl SyscallTable {
         }
 
         syscall_table_ioctl(self, frame);
+    }
+
+    pub fn faccessat(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.faccessat_supported
+            || !self.path_usercopy_ready
+            || !self.faccessat_routes_to_files_struct
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_faccessat(self, frame);
     }
 
     pub fn lseek(&self, frame: &mut TrapFrame) {
@@ -1028,6 +1069,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
     match frame.reg(17) {
         SYSCALL_FCNTL => table.fcntl(frame),
         SYSCALL_IOCTL => table.ioctl(frame),
+        SYSCALL_FACCESSAT => table.faccessat(frame),
         SYSCALL_OPENAT => table.openat(frame),
         SYSCALL_CLOSE => table.close(frame),
         SYSCALL_GETDENTS64 => table.getdents64(frame),
@@ -1072,6 +1114,7 @@ fn file_error_to_errno(error: FileError) -> usize {
         FileError::InvalidArgument => EINVAL,
         FileError::IllegalSeek => ESPIPE,
         FileError::NotTty => ENOTTY,
+        FileError::PermissionDenied => EACCES,
         FileError::NotReady
         | FileError::NotReadable
         | FileError::NotWritable
@@ -1333,6 +1376,44 @@ fn syscall_table_ioctl(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.ioctl_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_faccessat(table: &SyscallTable, frame: &mut TrapFrame) {
+    let dirfd = frame.reg(10);
+    let path_ptr = frame.reg(11);
+    let mode = frame.reg(12);
+    const ACCESS_MODE_MASK: usize = ACCESS_R_OK | ACCESS_W_OK | ACCESS_X_OK;
+    if mode & !ACCESS_MODE_MASK != 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+    if dirfd != AT_FDCWD {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let mut path = [0u8; USER_PATH_MAX];
+    let Some(path_len) = copy_cstr_from_user(path_ptr, &mut path) else {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    };
+
+    let ctx = crate::context::context();
+    match ctx.files_struct.access_path(
+        &ctx.fs_struct,
+        &mut ctx.vfs_core,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        &ctx.kernel_image,
+        &path[..path_len],
+        mode,
+    ) {
+        Ok(()) => {
+            table.faccessat_observed.store(1, Ordering::Release);
+            complete_successful_syscall(frame, 0);
+        }
+        Err(error) => complete_error_syscall(frame, file_error_to_errno(error)),
+    }
 }
 
 fn syscall_table_lseek(table: &SyscallTable, frame: &mut TrapFrame) {

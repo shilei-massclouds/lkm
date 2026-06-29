@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <errno.h>
 #include <stddef.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -29,6 +30,20 @@ int smoke_init_fileio(void)
 	}
 	if (SAY_LITERAL("syscall ioctl TIOCGWINSZ stdout ok\n") < 0) {
 		return 35;
+	}
+
+	if (faccessat(AT_FDCWD, path, F_OK | R_OK, 0) < 0) {
+		return 36;
+	}
+	if (SAY_LITERAL("syscall faccessat F_OK R_OK regular ok\n") < 0) {
+		return 37;
+	}
+	errno = 0;
+	if (faccessat(AT_FDCWD, path, W_OK, 0) == 0 || errno != EACCES) {
+		return 38;
+	}
+	if (SAY_LITERAL("syscall faccessat W_OK denied ok\n") < 0) {
+		return 39;
 	}
 
 	int fd = open(path, O_RDONLY);

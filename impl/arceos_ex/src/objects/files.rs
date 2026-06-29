@@ -87,6 +87,7 @@ pub enum FileError {
     InvalidArgument,
     IllegalSeek,
     NotTty,
+    PermissionDenied,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -1380,6 +1381,37 @@ impl FilesStruct {
             OpenFileDescriptionRef::Regular0 => Err(FileError::NotWritable),
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn access_path(
+        &mut self,
+        fs_struct: &FsStruct,
+        vfs_core: &mut VfsCore,
+        ext2_filesystem: &mut Ext2FileSystem,
+        block_device_registry: &mut BlockDeviceRegistry,
+        kernel_image: &KernelImage,
+        path: &[u8],
+        mode: usize,
+    ) -> FileResult<()> {
+        let stat = self.stat_path(
+            fs_struct,
+            vfs_core,
+            ext2_filesystem,
+            block_device_registry,
+            kernel_image,
+            path,
+        )?;
+        if file_mode_allows_access(stat.mode(), mode) {
+            Ok(())
+        } else {
+            Err(FileError::PermissionDenied)
+        }
+    }
+}
+
+fn file_mode_allows_access(file_mode: u32, access_mode: usize) -> bool {
+    let permission_bits = (file_mode & 0o777) as usize;
+    access_mode & !permission_bits == 0
 }
 
 fn serialize_linux_dirents64<'a>(
