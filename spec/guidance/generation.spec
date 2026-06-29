@@ -11,6 +11,9 @@ predicate guidance_agent_must_read_concrete_spec_requirements_before_implementat
 predicate guidance_agent_must_implement_only_after_reading_requirements() -> bool;
 predicate guidance_agent_must_check_generated_result_against_principles_after_implementation() -> bool;
 predicate guidance_agent_must_check_generated_result_against_concrete_requirements_after_implementation() -> bool;
+predicate guidance_agent_must_not_guess_fix_without_reproducible_localization() -> bool;
+predicate guidance_agent_must_update_spec_before_behavior_implementation() -> bool;
+predicate guidance_agent_must_run_make_test_after_code_change() -> bool;
 predicate guidance_user_boot_codegen_must_read_user_boot_specs_first() -> bool;
 predicate guidance_user_boot_codegen_must_use_consensus_object_names() -> bool;
 predicate guidance_user_boot_codegen_must_not_create_test_only_or_transitional_objects() -> bool;
@@ -50,6 +53,33 @@ type GenerationAgentWorkflow {
          */
         guidance_agent_must_check_generated_result_against_principles_after_implementation();
         guidance_agent_must_check_generated_result_against_concrete_requirements_after_implementation();
+    }
+}
+
+type RepositoryChangeWorkflow {
+    invariant {
+        /*
+         * Problem fixes must be diagnosis-driven. The agent must not replace
+         * a missing diagnosis with a guessed patch; it must first collect
+         * reproducible observations and narrow the failing boundary until the
+         * proposed change follows from the evidence.
+         */
+        guidance_agent_must_not_guess_fix_without_reproducible_localization();
+
+        /*
+         * Behavior, interface, object-boundary and Linux differential
+         * semantics changes are spec-first work. The applicable model,
+         * coding, testing or guidance specification must be updated before
+         * the implementation is changed.
+         */
+        guidance_agent_must_update_spec_before_behavior_implementation();
+
+        /*
+         * Focused tests are allowed while locating a problem, but every code
+         * change must finish with the repository root make test regression
+         * gate. A focused run is not a substitute for the final regression.
+         */
+        guidance_agent_must_run_make_test_after_code_change();
     }
 }
 
