@@ -12,6 +12,24 @@ import runner
 
 
 class StressRunnerTests(unittest.TestCase):
+    def test_default_selection_uses_standard_suite(self) -> None:
+        selected = runner._selected_case_paths([])
+        self.assertEqual(
+            [path.name for path in selected],
+            ["df-0001-user-boot.toml", "df-0002-smoke-initcall.toml"],
+        )
+
+    def test_explicit_selection_replaces_default_suite(self) -> None:
+        selected = runner._selected_case_paths(
+            [Path("impl/arceos_ex/tests/stress/cases/df-0002-smoke-initcall.toml")]
+        )
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0].name, "df-0002-smoke-initcall.toml")
+
+    def test_case_failed_reads_failure_total(self) -> None:
+        self.assertFalse(runner._case_failed({"summary": {"totals": {"failure": 0}}}))
+        self.assertTrue(runner._case_failed({"summary": {"totals": {"failure": 1}}}))
+
     def test_extracts_user_boot_success_events(self) -> None:
         events = runner._extract_events("noise\nuser hello\nuser exit status=0\n")
         self.assertEqual(

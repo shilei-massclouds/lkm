@@ -118,11 +118,13 @@ make run PLIC_PROVIDER=linux-object LINUX_PROVIDER_DIR=/path/to/linux-6.12
 
 ## 压力测试
 
-压力测试根目录位于 `impl/arceos_ex/tests/stress/`。DF-0001 的默认 case 已绑定普通 `make run APP=user-boot`，可以直接从仓库根目录执行：
+压力测试根目录位于 `impl/arceos_ex/tests/stress/`。不指定 case 时会运行默认压力测试套件，当前覆盖 DF-0001 的普通 `make run APP=user-boot` 入口和 DF-0002 的普通 `make run APP=smoke` 入口：
 
 ```sh
 impl/arceos_ex/tests/stress/runner.py --runs 30
 ```
+
+`--runs N` 会应用到套件里的每个 case。
 
 只检查配置和输出目录生成、不执行 QEMU：
 
@@ -130,7 +132,7 @@ impl/arceos_ex/tests/stress/runner.py --runs 30
 impl/arceos_ex/tests/stress/runner.py --runs 0
 ```
 
-也可以显式指定 case：
+也可以显式指定 case；此时只运行指定 case：
 
 ```sh
 impl/arceos_ex/tests/stress/runner.py \

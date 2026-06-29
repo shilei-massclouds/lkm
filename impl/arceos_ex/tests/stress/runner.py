@@ -20,7 +20,11 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
-DEFAULT_CASE = Path(__file__).resolve().parent / "cases" / "df-0001-user-boot.toml"
+STRESS_DIR = Path(__file__).resolve().parent
+DEFAULT_SUITE = (
+    STRESS_DIR / "cases" / "df-0001-user-boot.toml",
+    STRESS_DIR / "cases" / "df-0002-smoke-initcall.toml",
+)
 DEFAULT_OUT_ROOT = Path(__file__).resolve().parent / "out"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 CHECKPOINT_RE = re.compile(
@@ -53,19 +57,45 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     repo_root = _resolve_repo_root(args.repo_root)
-    case_path = args.case.resolve()
+    case_paths = _selected_case_paths(args.cases)
+    out_root = args.out_dir.resolve() if args.out_dir else DEFAULT_OUT_ROOT
+
+    results = [
+        _run_case(
+            case_path=case_path,
+            repo_root=repo_root,
+            out_root=out_root,
+            runs_override=args.runs,
+            timeout_override=args.timeout,
+            dry_run=args.dry_run,
+        )
+        for case_path in case_paths
+    ]
+    if len(results) > 1:
+        _print_suite_summary(results)
+    return 1 if any(_case_failed(result) for result in results) else 0
+
+
+def _run_case(
+    *,
+    case_path: Path,
+    repo_root: Path,
+    out_root: Path,
+    runs_override: int | None,
+    timeout_override: int | None,
+    dry_run: bool,
+) -> dict[str, Any]:
     case = _load_toml(case_path)
     classifier_path = _resolve_case_path(case_path, _string(case, "classifier"))
     classifier = _load_toml(classifier_path)
-    runs = args.runs if args.runs is not None else _integer(case, "default_runs")
-    timeout = args.timeout if args.timeout is not None else _integer(case, "timeout_seconds")
+    runs = runs_override if runs_override is not None else _integer(case, "default_runs")
+    timeout = timeout_override if timeout_override is not None else _integer(case, "timeout_seconds")
     if runs < 0:
-        parser.error("--runs must be non-negative")
+        raise SystemExit("--runs must be non-negative")
     if timeout <= 0:
-        parser.error("--timeout must be positive")
+        raise SystemExit("--timeout must be positive")
 
     case_name = _string(case, "name")
-    out_root = args.out_dir.resolve() if args.out_dir else DEFAULT_OUT_ROOT
     output_dir = _unique_output_dir(out_root / _run_dir_name(case_name))
     output_dir.mkdir(parents=True, exist_ok=False)
 
@@ -80,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     suite_started = datetime.now(timezone.utc)
     suite_start_monotonic = time.monotonic()
 
-    if runs == 0 or args.dry_run:
+    if runs == 0 or dry_run:
         suite_ended = datetime.now(timezone.utc)
         suite_duration = time.monotonic() - suite_start_monotonic
         summary = _build_summary(
@@ -96,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_json(output_dir / "summary.json", summary)
         _write_report(output_dir / "report.md", case_name, summary)
         print(f"stress dry-run wrote {output_dir}")
-        return 0
+        return _case_result(case_name, case_path, output_dir, summary)
 
     setup_command = _optional_string_list(case, "setup_command")
     if setup_command:
@@ -137,19 +167,16 @@ def main(argv: list[str] | None = None) -> int:
     _write_json(output_dir / "summary.json", summary)
     _write_report(output_dir / "report.md", case_name, summary)
     print(f"stress report: {output_dir / 'report.md'}")
-    if args.fail_on_failure and summary["totals"]["failure"] > 0:
-        return 1
-    return 0
+    return _case_result(case_name, case_path, output_dir, summary)
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run arceos_ex stress cases.")
     parser.add_argument(
-        "case",
-        nargs="?",
+        "cases",
+        nargs="*",
         type=Path,
-        default=DEFAULT_CASE,
-        help=f"stress case TOML, default: {DEFAULT_CASE}",
+        help="stress case TOML(s); default: standard DF-0001 + DF-0002 suite",
     )
     parser.add_argument("--repo-root", type=Path, help="repository root, auto-detected by default")
     parser.add_argument("--runs", type=int, help="override case default_runs")
@@ -159,9 +186,46 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--fail-on-failure",
         action="store_true",
-        help="return non-zero if any run is classified as failure",
+        help="compatibility no-op; failures already return non-zero",
     )
     return parser
+
+
+def _selected_case_paths(cases: list[Path]) -> list[Path]:
+    if cases:
+        return [case.resolve() for case in cases]
+    return [case.resolve() for case in DEFAULT_SUITE]
+
+
+def _case_result(
+    case_name: str, case_path: Path, output_dir: Path, summary: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "case_name": case_name,
+        "case_path": str(case_path),
+        "output_dir": str(output_dir),
+        "report_path": str(output_dir / "report.md"),
+        "summary": summary,
+    }
+
+
+def _case_failed(result: dict[str, Any]) -> bool:
+    summary = result["summary"]
+    return int(summary["totals"]["failure"]) > 0
+
+
+def _print_suite_summary(results: list[dict[str, Any]]) -> None:
+    print("")
+    print("stress suite summary:")
+    for result in results:
+        totals = result["summary"]["totals"]
+        print(
+            "  "
+            f"{result['case_name']}: "
+            f"success={totals['success']} "
+            f"failure={totals['failure']} "
+            f"report={result['report_path']}"
+        )
 
 
 def _execute_one_run(

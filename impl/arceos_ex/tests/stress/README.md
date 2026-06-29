@@ -5,11 +5,19 @@ It is intentionally separate from KUnit and smoke tests: the goal is to
 repeat ordinary commands, archive run evidence, cluster event sequences, and
 compare failure classes against successful runs.
 
-Initial case:
+Default suite:
 
 ```sh
 impl/arceos_ex/tests/stress/runner.py --runs 30
 ```
+
+When no case is specified, the runner executes the standard stress suite. The
+current suite covers:
+
+- `cases/df-0001-user-boot.toml`
+- `cases/df-0002-smoke-initcall.toml`
+
+`--runs N` applies to each case in the suite.
 
 Fast configuration check without executing QEMU:
 
@@ -17,8 +25,8 @@ Fast configuration check without executing QEMU:
 impl/arceos_ex/tests/stress/runner.py --runs 0
 ```
 
-The default case is `cases/df-0001-user-boot.toml`. A case can still be passed
-explicitly:
+A case can still be passed explicitly; in that mode only the requested case
+runs:
 
 ```sh
 impl/arceos_ex/tests/stress/runner.py \
@@ -26,7 +34,7 @@ impl/arceos_ex/tests/stress/runner.py \
   --runs 30
 ```
 
-DF-0002 uses the ordinary smoke path:
+DF-0002 can also be selected directly:
 
 ```sh
 impl/arceos_ex/tests/stress/runner.py \
@@ -34,7 +42,7 @@ impl/arceos_ex/tests/stress/runner.py \
   --runs 30
 ```
 
-Output defaults to `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` and
+Each case output defaults to `impl/arceos_ex/tests/stress/out/<timestamp>-<case>/` and
 contains:
 
 - `manifest.json`: case, command, git metadata, run count, and output paths.
