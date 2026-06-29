@@ -12,15 +12,17 @@
  * read-only ext2 mount whose lookup/read operations dispatch to Ext2FileSystem.
  * FsStruct carries the task-visible root and pwd dentry references. The
  * current path-walk slice supports absolute paths from FsStruct.root, direct
- * child lookup and mount crossing. Page cache, mount namespace, permissions,
- * credentials, relative path walking, symlinks, rename, hardlink, open flags
- * and file descriptor tables stay deferred.
+ * child lookup, mount crossing and Linux-like symlink restart semantics for
+ * the modeled read-only ext2 subset. Page cache, mount namespace, permissions,
+ * credentials, full relative dirfd/cwd walking, rename, hardlink, open flags
+ * and complete file descriptor tables stay deferred.
  */
 
 enum VfsInodeKind {
     Directory,
     RegularFile,
     DeviceNode,
+    Symlink,
 }
 
 predicate vfs_core_initialized<T>(core: T) -> bool;
@@ -60,6 +62,12 @@ predicate vfs_path_absolute<T>(path: T) -> bool;
 predicate vfs_path_components_bound<T>(path: T) -> bool;
 predicate vfs_path_walk_resolves<T, D>(core: T, dentry: D) -> bool;
 predicate vfs_path_walk_crosses_mount<T, M>(core: T, mount: M) -> bool;
+predicate vfs_path_walk_follows_symlink<T, D>(core: T, dentry: D) -> bool;
+predicate vfs_path_walk_symlink_budget_matches_linux_6_12<T>(core: T) -> bool;
+predicate vfs_symlink_absolute_target_restarts_at_root<T>(core: T) -> bool;
+predicate vfs_symlink_relative_target_restarts_at_parent<T>(core: T) -> bool;
+predicate vfs_symlink_remaining_path_preserved<T>(core: T) -> bool;
+predicate vfs_symlink_loop_returns_eloop<T>(core: T) -> bool;
 predicate vfs_open_path_allocates_file<T, F>(core: T, file: F) -> bool;
 predicate vfs_read_path_returns_data<T, F>(core: T, file: F) -> bool;
 predicate vfs_path_read_start_checkpoint<T, P>(core: T, path: P) -> bool;
@@ -89,6 +97,7 @@ predicate inode_superblock_bound<T, S>(inode: T, superblock: S) -> bool;
 predicate inode_kind_is<T>(inode: T, kind: VfsInodeKind) -> bool;
 predicate inode_directory_children_ready<T>(inode: T) -> bool;
 predicate inode_file_data_ready<T>(inode: T) -> bool;
+predicate inode_symlink_target_ready<T>(inode: T) -> bool;
 predicate inode_size_updated<T>(inode: T) -> bool;
 predicate inode_ext2_inode_bound<T, I>(inode: T, ext2_inode: I) -> bool;
 predicate inode_read_only_backed<T>(inode: T) -> bool;
@@ -175,6 +184,7 @@ object VfsCore: ResourceObject {
                     vfs_core_inode_table_ready(VfsCore);
                     vfs_core_file_table_ready(VfsCore);
                     vfs_absolute_path_walk_supported(VfsCore);
+                    vfs_path_walk_symlink_budget_matches_linux_6_12(VfsCore);
                     vfs_core_page_cache_deferred(VfsCore);
                     vfs_core_permissions_deferred(VfsCore);
                     vfs_core_mount_namespace_deferred(VfsCore);
@@ -194,6 +204,7 @@ object VfsCore: ResourceObject {
             vfs_core_inode_table_ready(VfsCore);
             vfs_core_file_table_ready(VfsCore);
             vfs_absolute_path_walk_supported(VfsCore);
+            vfs_path_walk_symlink_budget_matches_linux_6_12(VfsCore);
             vfs_path_read_failed_checkpoint_defined(VfsCore);
             vfs_path_read_error_classification_contract_ready(VfsCore);
         }
@@ -389,9 +400,28 @@ object VfsCore: ResourceObject {
                     PathWalk.Transition::Setup;
                     VfsCore.Action::Lookup;
                     VfsCore.Action::FollowMount;
+                    VfsCore.Action::FollowSymlink;
                 }
                 ensures {
                     vfs_path_walk_resolves(VfsCore, Dentry);
+                }
+            }
+
+            Action::FollowSymlink(link: Dentry) {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    dentry_positive(link);
+                    inode_kind_is(Inode, VfsInodeKind::Symlink);
+                    inode_symlink_target_ready(Inode);
+                    vfs_path_walk_symlink_budget_matches_linux_6_12(VfsCore);
+                }
+                ensures {
+                    vfs_path_walk_follows_symlink(VfsCore, link);
+                    vfs_symlink_absolute_target_restarts_at_root(VfsCore);
+                    vfs_symlink_relative_target_restarts_at_parent(VfsCore);
+                    vfs_symlink_remaining_path_preserved(VfsCore);
+                    vfs_symlink_loop_returns_eloop(VfsCore);
                 }
             }
 
@@ -427,6 +457,33 @@ object VfsCore: ResourceObject {
                     vfs_ext2_lookup_dispatches_backend(VfsCore, Ext2FileSystem);
                     dentry_lookup_returns(VfsCore, Dentry);
                     inode_kind_is(Inode, VfsInodeKind::RegularFile);
+                    inode_ext2_inode_bound(Inode, Ext2InodeRef::LookupFile);
+                    inode_read_only_backed(Inode);
+                    dentry_child_inserted(Dentry, Dentry);
+                }
+            }
+
+            Action::LookupExt2SymlinkReadOnly {
+                state_effect: StateEffect::None;
+                depends_on {
+                    VfsCore.state == State::Ready;
+                    Ext2FileSystem.state == State::Online;
+                    mount_ext2_type_bound(Mount);
+                    dentry_positive(Dentry);
+                    inode_kind_is(Inode, VfsInodeKind::Directory);
+                }
+                drives {
+                    Ext2FileSystem.Action::LookupRootName;
+                    Inode.Transition::Setup;
+                    Inode.Action::CreateSymlink;
+                    Dentry.Transition::Setup;
+                    Dentry.Action::InsertChild;
+                }
+                ensures {
+                    vfs_ext2_lookup_dispatches_backend(VfsCore, Ext2FileSystem);
+                    dentry_lookup_returns(VfsCore, Dentry);
+                    inode_kind_is(Inode, VfsInodeKind::Symlink);
+                    inode_symlink_target_ready(Inode);
                     inode_ext2_inode_bound(Inode, Ext2InodeRef::LookupFile);
                     inode_read_only_backed(Inode);
                     dentry_child_inserted(Dentry, Dentry);
@@ -486,6 +543,25 @@ object VfsCore: ResourceObject {
                 ensures {
                     inode_kind_is(Inode, VfsInodeKind::DeviceNode);
                     dentry_device_node_bound(Dentry);
+                    dentry_child_inserted(Dentry, Dentry);
+                }
+            }
+
+            Action::CreateSymlink {
+                state_effect: StateEffect::None;
+                depends_on {
+                    dentry_positive(Dentry);
+                    inode_kind_is(Inode, VfsInodeKind::Directory);
+                }
+                drives {
+                    Inode.Transition::Setup;
+                    Inode.Action::CreateSymlink;
+                    Dentry.Transition::Setup;
+                    Dentry.Action::InsertChild;
+                }
+                ensures {
+                    inode_kind_is(Inode, VfsInodeKind::Symlink);
+                    inode_symlink_target_ready(Inode);
                     dentry_child_inserted(Dentry, Dentry);
                 }
             }
@@ -832,6 +908,17 @@ object Inode: ResourceObject {
                 }
                 ensures {
                     inode_kind_is(Inode, VfsInodeKind::DeviceNode);
+                }
+            }
+
+            Action::CreateSymlink {
+                state_effect: StateEffect::None;
+                depends_on {
+                    Inode.state == State::Ready;
+                }
+                ensures {
+                    inode_kind_is(Inode, VfsInodeKind::Symlink);
+                    inode_symlink_target_ready(Inode);
                 }
             }
         }

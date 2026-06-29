@@ -6,6 +6,8 @@ use super::{
 use alloc::vec::Vec;
 
 pub const VFS_NAME_MAX: usize = 32;
+const VFS_PATH_MAX: usize = 512;
+const VFS_MAX_SYMLINKS: usize = 40;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum FileSystemKind {
@@ -19,6 +21,7 @@ pub enum VfsInodeKind {
     Directory,
     RegularFile,
     DeviceNode,
+    Symlink,
 }
 
 #[derive(Clone, Copy)]
@@ -136,6 +139,7 @@ pub enum VfsError {
     ShortBuffer,
     Backend,
     UnsupportedPath,
+    SymlinkLoop,
 }
 
 pub struct FsStruct {
@@ -274,6 +278,7 @@ impl From<Ext2Error> for VfsError {
             Ext2Error::NotDirectory => Self::NotDirectory,
             Ext2Error::NotRegularFile => Self::NotFile,
             Ext2Error::ShortBuffer => Self::ShortBuffer,
+            Ext2Error::UnsupportedSymlink => Self::UnsupportedPath,
             _ => Self::Backend,
         }
     }
@@ -574,6 +579,10 @@ impl Inode {
 
     fn is_file(&self) -> bool {
         self.kind == VfsInodeKind::RegularFile
+    }
+
+    fn is_symlink(&self) -> bool {
+        self.kind == VfsInodeKind::Symlink
     }
 
     fn bind_ext2_inode(&mut self, inode: &Ext2InodeRecord) {
@@ -1393,27 +1402,84 @@ impl VfsCore {
         if !path.starts_with(b"/") {
             return Err(VfsError::UnsupportedPath);
         }
-        let mut current = fs_struct.root_dentry().ok_or(VfsError::MountMissing)?;
+        if path.len() > VFS_PATH_MAX {
+            return Err(VfsError::UnsupportedPath);
+        }
+        let root = fs_struct.root_dentry().ok_or(VfsError::MountMissing)?;
+        let mut path_buf = [0u8; VFS_PATH_MAX];
+        path_buf[..path.len()].copy_from_slice(path);
+        let mut path_len = path.len();
         self.path_walk_resolved = false;
         self.path_walk_crossed_mount = false;
-        for component in path.split(|byte| *byte == b'/') {
-            if component.is_empty() {
+
+        let mut followed_symlinks = 0usize;
+        loop {
+            let mut current = root;
+            let mut offset = 0usize;
+            let mut restarted_from_symlink = false;
+            while offset < path_len {
+                while offset < path_len && path_buf[offset] == b'/' {
+                    offset += 1;
+                }
+                if offset >= path_len {
+                    break;
+                }
+                let component_start = offset;
+                while offset < path_len && path_buf[offset] != b'/' {
+                    offset += 1;
+                }
+                let component_end = offset;
+                let before_mount = current;
+                current = self.follow_mount(current)?;
+                if current != before_mount {
+                    self.path_walk_crossed_mount = true;
+                }
+                let parent = current;
+                let next_before_mount = self.lookup_component(
+                    fs,
+                    registry,
+                    provider,
+                    current,
+                    &path_buf[component_start..component_end],
+                )?;
+                let next = self.follow_mount(next_before_mount)?;
+                if next != next_before_mount {
+                    self.path_walk_crossed_mount = true;
+                }
+                if self.dentry_is_symlink(next)? {
+                    if followed_symlinks >= VFS_MAX_SYMLINKS {
+                        return Err(VfsError::SymlinkLoop);
+                    }
+                    followed_symlinks += 1;
+                    let mut target_buf = [0u8; VFS_PATH_MAX];
+                    let target_len =
+                        self.read_symlink_target(fs, registry, provider, next, &mut target_buf)?;
+                    let remaining_len = path_len - offset;
+                    let mut remaining_buf = [0u8; VFS_PATH_MAX];
+                    remaining_buf[..remaining_len].copy_from_slice(&path_buf[offset..path_len]);
+                    let (parent_path, parent_path_len) = self.absolute_path_for_dentry(parent)?;
+                    path_len = rebuild_symlink_path(
+                        &mut path_buf,
+                        &target_buf[..target_len],
+                        &remaining_buf[..remaining_len],
+                        &parent_path[..parent_path_len],
+                    )?;
+                    restarted_from_symlink = true;
+                    break;
+                }
+                current = next;
+            }
+            if restarted_from_symlink {
                 continue;
             }
             let before_mount = current;
-            current = self.follow_mount(current)?;
-            if current != before_mount {
+            let resolved = self.follow_mount(current)?;
+            if resolved != before_mount {
                 self.path_walk_crossed_mount = true;
             }
-            current = self.lookup_component(fs, registry, provider, current, component)?;
+            self.path_walk_resolved = true;
+            return Ok(resolved);
         }
-        let before_mount = current;
-        current = self.follow_mount(current)?;
-        if current != before_mount {
-            self.path_walk_crossed_mount = true;
-        }
-        self.path_walk_resolved = true;
-        Ok(current)
     }
 
     pub fn open_path<P: BlockDeviceProvider>(
@@ -1749,6 +1815,8 @@ impl VfsCore {
             VfsInodeKind::Directory
         } else if inode.is_regular_file() {
             VfsInodeKind::RegularFile
+        } else if inode.is_symlink() {
+            VfsInodeKind::Symlink
         } else {
             return Err(VfsError::UnsupportedPath);
         };
@@ -1796,6 +1864,77 @@ impl VfsCore {
             return self.lookup_ext2_child(fs, registry, provider, parent_ref, name);
         }
         self.lookup_child(parent_ref, name)
+    }
+
+    fn dentry_is_symlink(&self, dentry_ref: DentryRef) -> Result<bool, VfsError> {
+        let dentry = self.positive_dentry(dentry_ref)?;
+        let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        Ok(inode.is_symlink())
+    }
+
+    fn read_symlink_target<P: BlockDeviceProvider>(
+        &mut self,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        dentry_ref: DentryRef,
+        buffer: &mut [u8],
+    ) -> Result<usize, VfsError> {
+        let dentry = self.positive_dentry(dentry_ref)?;
+        let inode = self.inode(dentry.inode_ref()).ok_or(VfsError::InvalidRef)?;
+        if !inode.is_symlink() {
+            return Err(VfsError::UnsupportedPath);
+        }
+        if !inode.read_only_backed() || inode.ext2_binding().is_none() {
+            return Err(VfsError::UnsupportedPath);
+        }
+        let ino = inode.ext2_binding().ok_or(VfsError::FsTypeMissing)?.ino();
+        let len = fs.read_vfs_symlink(registry, provider, ino, buffer)?;
+        Ok(len)
+    }
+
+    fn absolute_path_for_dentry(
+        &self,
+        dentry_ref: DentryRef,
+    ) -> Result<([u8; VFS_PATH_MAX], usize), VfsError> {
+        let mut reversed_components = [[0u8; VFS_NAME_MAX]; 32];
+        let mut component_lens = [0usize; 32];
+        let mut component_count = 0usize;
+        let mut current = dentry_ref;
+        loop {
+            let dentry = self.positive_dentry(current)?;
+            if dentry.parent().is_none() {
+                break;
+            }
+            if component_count >= reversed_components.len() {
+                return Err(VfsError::UnsupportedPath);
+            }
+            let name = dentry.name();
+            reversed_components[component_count][..name.len()].copy_from_slice(name);
+            component_lens[component_count] = name.len();
+            component_count += 1;
+            current = dentry.parent().ok_or(VfsError::InvalidRef)?;
+        }
+        let mut out = [0u8; VFS_PATH_MAX];
+        let mut len = 0usize;
+        out[0] = b'/';
+        len += 1;
+        for index in (0..component_count).rev() {
+            if len != 1 {
+                if len >= out.len() {
+                    return Err(VfsError::UnsupportedPath);
+                }
+                out[len] = b'/';
+                len += 1;
+            }
+            let name_len = component_lens[index];
+            if len + name_len > out.len() {
+                return Err(VfsError::UnsupportedPath);
+            }
+            out[len..len + name_len].copy_from_slice(&reversed_components[index][..name_len]);
+            len += name_len;
+        }
+        Ok((out, len))
     }
 
     fn ensure_mount_point(&self, mount_point_ref: DentryRef) -> Result<(), VfsError> {
@@ -1894,4 +2033,44 @@ fn copy_name(name: &[u8]) -> Result<([u8; VFS_NAME_MAX], usize), VfsError> {
     let mut out = [0u8; VFS_NAME_MAX];
     out[..name.len()].copy_from_slice(name);
     Ok((out, name.len()))
+}
+
+fn rebuild_symlink_path(
+    out: &mut [u8; VFS_PATH_MAX],
+    target: &[u8],
+    remaining: &[u8],
+    parent_path: &[u8],
+) -> Result<usize, VfsError> {
+    if target.is_empty() {
+        return Err(VfsError::UnsupportedPath);
+    }
+
+    let mut len = 0usize;
+    if target.starts_with(b"/") {
+        append_path_bytes(out, &mut len, target)?;
+    } else {
+        append_path_bytes(out, &mut len, parent_path)?;
+        if len == 0 {
+            append_path_bytes(out, &mut len, b"/")?;
+        }
+        if len != 1 {
+            append_path_bytes(out, &mut len, b"/")?;
+        }
+        append_path_bytes(out, &mut len, target)?;
+    }
+    append_path_bytes(out, &mut len, remaining)?;
+    Ok(len)
+}
+
+fn append_path_bytes(
+    out: &mut [u8; VFS_PATH_MAX],
+    len: &mut usize,
+    bytes: &[u8],
+) -> Result<(), VfsError> {
+    if *len + bytes.len() > out.len() {
+        return Err(VfsError::UnsupportedPath);
+    }
+    out[*len..*len + bytes.len()].copy_from_slice(bytes);
+    *len += bytes.len();
+    Ok(())
 }

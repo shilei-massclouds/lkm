@@ -32,6 +32,10 @@ enum Ext2FileReadRef {
     LookupFile,
 }
 
+enum Ext2SymlinkReadRef {
+    LookupSymlink,
+}
+
 predicate ext2_driver_registered<T>(driver: T) -> bool;
 predicate ext2_driver_read_only<T>(driver: T) -> bool;
 predicate ext2_driver_mount_callback_bound<T>(driver: T) -> bool;
@@ -66,6 +70,7 @@ predicate ext2_filesystem_vfs_lookup_entry_bound<T>(fs: T) -> bool;
 predicate ext2_filesystem_vfs_read_entry_bound<T>(fs: T) -> bool;
 predicate ext2_filesystem_page_cache_deferred<T>(fs: T) -> bool;
 predicate ext2_filesystem_write_paths_deferred<T>(fs: T) -> bool;
+predicate ext2_filesystem_slow_symlink_deferred<T>(fs: T) -> bool;
 
 predicate ext2_inode_record_ready<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_number_bound<T, I>(fs: T, inode: I) -> bool;
@@ -75,6 +80,8 @@ predicate ext2_inode_direct_blocks_bound<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_single_indirect_block_bound<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_is_root_dir<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_is_regular_file<T, I>(fs: T, inode: I) -> bool;
+predicate ext2_inode_is_symlink<T, I>(fs: T, inode: I) -> bool;
+predicate ext2_inode_is_fast_symlink<T, I>(fs: T, inode: I) -> bool;
 predicate ext2_inode_indirect_blocks_deferred<T, I>(fs: T, inode: I) -> bool;
 
 predicate ext2_root_lookup_name_bound<T, D>(fs: T, dirent: D) -> bool;
@@ -106,6 +113,11 @@ predicate ext2_file_read_block_request_checkpoint<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_complete_checkpoint<T, R>(fs: T, read: R) -> bool;
 predicate ext2_file_read_failed_checkpoint_defined<T>(fs: T) -> bool;
 predicate ext2_read_error_classification_contract_ready<T>(fs: T) -> bool;
+
+predicate ext2_symlink_read_uses_inline_i_block<T, R, I>(fs: T, read: R, inode: I) -> bool;
+predicate ext2_symlink_target_copied_to_caller<T, R>(fs: T, read: R) -> bool;
+predicate ext2_symlink_target_len_matches_inode_size<T, R, I>(fs: T, read: R, inode: I) -> bool;
+predicate ext2_slow_symlink_read_deferred<T, R>(fs: T, read: R) -> bool;
 
 object Ext2Driver: ResourceObject {
     initial_state: State::Base;
@@ -238,6 +250,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_filesystem_ready(self);
                     ext2_filesystem_page_cache_deferred(self);
                     ext2_filesystem_write_paths_deferred(self);
+                    ext2_filesystem_slow_symlink_deferred(self);
                     ext2_lookup_failed_checkpoint_defined(self);
                     ext2_file_read_failed_checkpoint_defined(self);
                     ext2_read_error_classification_contract_ready(self);
@@ -261,6 +274,7 @@ object Ext2FileSystem: ResourceObject {
             ext2_filesystem_ready(self);
             ext2_filesystem_page_cache_deferred(self);
             ext2_filesystem_write_paths_deferred(self);
+            ext2_filesystem_slow_symlink_deferred(self);
             ext2_lookup_failed_checkpoint_defined(self);
             ext2_file_read_failed_checkpoint_defined(self);
             ext2_read_error_classification_contract_ready(self);
@@ -283,6 +297,7 @@ object Ext2FileSystem: ResourceObject {
                     ext2_filesystem_vfs_read_entry_bound(self);
                     ext2_filesystem_page_cache_deferred(self);
                     ext2_filesystem_write_paths_deferred(self);
+                    ext2_filesystem_slow_symlink_deferred(self);
                 }
             }
         }
@@ -298,6 +313,7 @@ object Ext2FileSystem: ResourceObject {
             ext2_filesystem_vfs_read_entry_bound(self);
             ext2_filesystem_page_cache_deferred(self);
             ext2_filesystem_write_paths_deferred(self);
+            ext2_filesystem_slow_symlink_deferred(self);
         }
 
         actions {
@@ -326,7 +342,6 @@ object Ext2FileSystem: ResourceObject {
                     ext2_inode_size_bound(self, Ext2InodeRef::LookupFile);
                     ext2_inode_direct_blocks_bound(self, Ext2InodeRef::LookupFile);
                     ext2_inode_single_indirect_block_bound(self, Ext2InodeRef::LookupFile);
-                    ext2_inode_is_regular_file(self, Ext2InodeRef::LookupFile);
                     ext2_inode_indirect_blocks_deferred(self, Ext2InodeRef::LookupFile);
                     ext2_root_lookup_returns_inode(self, Ext2DirEntryRef::RootLookup, Ext2InodeRef::LookupFile);
                     ext2_lookup_found_checkpoint(self, Ext2DirEntryRef::RootLookup);
@@ -355,6 +370,21 @@ object Ext2FileSystem: ResourceObject {
                     ext2_file_read_len_matches_inode_size(self, Ext2FileReadRef::LookupFile, Ext2InodeRef::LookupFile);
                     ext2_file_read_indirect_blocks_deferred(self, Ext2FileReadRef::LookupFile);
                     ext2_file_read_complete_checkpoint(self, Ext2FileReadRef::LookupFile);
+                }
+            }
+
+            Action::ReadFastSymlink {
+                state_effect: StateEffect::None;
+                depends_on {
+                    Ext2FileSystem.state == State::Online;
+                    ext2_inode_is_symlink(self, Ext2InodeRef::LookupFile);
+                    ext2_inode_is_fast_symlink(self, Ext2InodeRef::LookupFile);
+                }
+                ensures {
+                    ext2_symlink_read_uses_inline_i_block(self, Ext2SymlinkReadRef::LookupSymlink, Ext2InodeRef::LookupFile);
+                    ext2_symlink_target_copied_to_caller(self, Ext2SymlinkReadRef::LookupSymlink);
+                    ext2_symlink_target_len_matches_inode_size(self, Ext2SymlinkReadRef::LookupSymlink, Ext2InodeRef::LookupFile);
+                    ext2_slow_symlink_read_deferred(self, Ext2SymlinkReadRef::LookupSymlink);
                 }
             }
 

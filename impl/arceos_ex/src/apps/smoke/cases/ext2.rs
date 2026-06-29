@@ -6,8 +6,10 @@ use crate::{
     context::context,
     objects::{
         ext2::{
-            Ext2FileType, EXT2_ALPINE_INSTALLED_DB_FILE_NAME, EXT2_ALPINE_INSTALLED_DB_MAX_SIZE,
+            Ext2FileType, EXT2_ALPINE_BIN_LS_PATH, EXT2_ALPINE_BUSYBOX_FILE_NAME,
+            EXT2_ALPINE_INSTALLED_DB_FILE_NAME, EXT2_ALPINE_INSTALLED_DB_MAX_SIZE,
             EXT2_ALPINE_INSTALLED_DB_PATH, EXT2_MAX_BLOCK_SIZE, EXT2_ROOT_INO,
+            EXT2_SINGLE_INDIRECT_READ_MAX,
         },
         rootfs::ROOTFS_REAL_MOUNT_POINT_NAME,
         state::State,
@@ -16,8 +18,8 @@ use crate::{
     },
 };
 
-static mut LARGE_READ_BUFFER: [u8; EXT2_ALPINE_INSTALLED_DB_MAX_SIZE] =
-    [0; EXT2_ALPINE_INSTALLED_DB_MAX_SIZE];
+static mut LARGE_READ_BUFFER: [u8; EXT2_SINGLE_INDIRECT_READ_MAX] =
+    [0; EXT2_SINGLE_INDIRECT_READ_MAX];
 
 pub fn run() -> SmokeResult {
     let mut suite = SmokeSuite::new();
@@ -373,6 +375,8 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
             "vfs read backend data",
             ctx.vfs_core.file_read_returns_backend_data(),
         );
+
+        assert_bin_ls_symlink(assertions, &mut provider, buffer);
     }
 
     fn teardown(&mut self, _assertions: &mut SmokeAssertions) {}
@@ -380,6 +384,62 @@ impl SmokeScenario for Ext2ReadOnlyScenario {
 
 fn file_inode_size_within_direct_blocks(inode: &crate::objects::ext2::Ext2InodeRecord) -> bool {
     inode.size() as usize <= EXT2_MAX_BLOCK_SIZE * crate::objects::ext2::EXT2_NDIR_BLOCKS
+}
+
+fn assert_bin_ls_symlink(
+    assertions: &mut SmokeAssertions,
+    provider: &mut impl crate::objects::block_device::BlockDeviceProvider,
+    buffer: &mut [u8],
+) {
+    let ctx = context();
+    buffer.fill(0);
+    let ls_len = match ctx.vfs_core.read_path(
+        &ctx.fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        provider,
+        EXT2_ALPINE_BIN_LS_PATH,
+        buffer,
+    ) {
+        Ok(len) => len,
+        Err(_) => {
+            assertions.assert("vfs symlink read /bin/ls", false);
+            return;
+        }
+    };
+    let ls_dentry_ref = match ctx.vfs_core.walk_path(
+        &ctx.fs_struct,
+        &mut ctx.ext2_filesystem,
+        &mut ctx.block_device_registry,
+        provider,
+        EXT2_ALPINE_BIN_LS_PATH,
+    ) {
+        Ok(dentry_ref) => dentry_ref,
+        Err(_) => {
+            assertions.assert("vfs symlink walk /bin/ls", false);
+            return;
+        }
+    };
+    let Some(ls_dentry) = ctx.vfs_core.dentry(ls_dentry_ref) else {
+        assertions.assert("vfs symlink target dentry", false);
+        return;
+    };
+    let Some(ls_inode) = ctx.vfs_core.inode(ls_dentry.inode_ref()) else {
+        assertions.assert("vfs symlink target inode", false);
+        return;
+    };
+    assertions.assert(
+        "vfs symlink target name",
+        ls_dentry.name() == EXT2_ALPINE_BUSYBOX_FILE_NAME,
+    );
+    assertions.assert(
+        "vfs symlink target regular",
+        ls_inode.kind() == VfsInodeKind::RegularFile,
+    );
+    assertions.assert(
+        "vfs symlink target elf",
+        ls_len >= 4 && &buffer[..4] == b"\x7fELF",
+    );
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {

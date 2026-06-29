@@ -14,12 +14,15 @@ pub const EXT2_SUPERBLOCK_OFFSET: usize = 1024;
 const EXT2_SUPERBLOCK_PROBE_BLOCK: u64 = (EXT2_SUPERBLOCK_OFFSET / EXT2_MIN_BLOCK_SIZE) as u64;
 pub const EXT2_N_BLOCKS: usize = 15;
 pub const EXT2_NDIR_BLOCKS: usize = 12;
+pub const EXT2_FAST_SYMLINK_MAX: usize = EXT2_N_BLOCKS * core::mem::size_of::<u32>();
 pub const EXT2_SINGLE_INDIRECT_INDEX: usize = EXT2_NDIR_BLOCKS;
 pub const EXT2_ALPINE_RELEASE_PATH: &[u8] = b"/etc/alpine-release";
 pub const EXT2_ALPINE_RELEASE_FILE_NAME: &[u8] = b"alpine-release";
 pub const EXT2_ALPINE_RELEASE_FILE_CONTENT: &[u8] = b"3.24.1\n";
 pub const EXT2_ALPINE_INSTALLED_DB_PATH: &[u8] = b"/lib/apk/db/installed";
 pub const EXT2_ALPINE_INSTALLED_DB_FILE_NAME: &[u8] = b"installed";
+pub const EXT2_ALPINE_BIN_LS_PATH: &[u8] = b"/bin/ls";
+pub const EXT2_ALPINE_BUSYBOX_FILE_NAME: &[u8] = b"busybox";
 pub const EXT2_SINGLE_INDIRECT_READ_MAX: usize =
     EXT2_MAX_BLOCK_SIZE * (EXT2_NDIR_BLOCKS + EXT2_MAX_BLOCK_SIZE / core::mem::size_of::<u32>());
 pub const EXT2_ALPINE_INSTALLED_DB_MAX_SIZE: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
@@ -29,6 +32,7 @@ const EXT2_GOOD_OLD_INODE_SIZE: u16 = 128;
 const EXT2_S_IFMT: u16 = 0xf000;
 const EXT2_S_IFDIR: u16 = 0x4000;
 const EXT2_S_IFREG: u16 = 0x8000;
+const EXT2_S_IFLNK: u16 = 0xa000;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Ext2Error {
@@ -46,6 +50,8 @@ pub enum Ext2Error {
     NotFound,
     NotDirectory,
     NotRegularFile,
+    NotSymlink,
+    UnsupportedSymlink,
     IndirectBlocksUnsupported,
     ShortBuffer,
 }
@@ -266,6 +272,7 @@ pub enum Ext2FileType {
     Unknown,
     RegularFile,
     Directory,
+    Symlink,
     Other,
 }
 
@@ -274,6 +281,9 @@ pub struct Ext2InodeRecord {
     ino: u32,
     mode: u16,
     size: u32,
+    blocks_count: u32,
+    file_acl: u32,
+    inline_data: [u8; EXT2_FAST_SYMLINK_MAX],
     direct_blocks: [u32; EXT2_NDIR_BLOCKS],
     single_indirect_block: u32,
     indirect_blocks_deferred: bool,
@@ -286,6 +296,9 @@ impl Ext2InodeRecord {
             ino: 0,
             mode: 0,
             size: 0,
+            blocks_count: 0,
+            file_acl: 0,
+            inline_data: [0; EXT2_FAST_SYMLINK_MAX],
             direct_blocks: [0; EXT2_NDIR_BLOCKS],
             single_indirect_block: 0,
             indirect_blocks_deferred: false,
@@ -302,6 +315,18 @@ impl Ext2InodeRecord {
 
     pub const fn size(&self) -> u32 {
         self.size
+    }
+
+    pub const fn blocks_count(&self) -> u32 {
+        self.blocks_count
+    }
+
+    pub const fn file_acl(&self) -> u32 {
+        self.file_acl
+    }
+
+    pub const fn inline_data(&self) -> &[u8; EXT2_FAST_SYMLINK_MAX] {
+        &self.inline_data
     }
 
     pub const fn direct_blocks(&self) -> &[u32; EXT2_NDIR_BLOCKS] {
@@ -322,6 +347,22 @@ impl Ext2InodeRecord {
 
     pub const fn is_regular_file(&self) -> bool {
         self.mode & EXT2_S_IFMT == EXT2_S_IFREG
+    }
+
+    pub const fn is_symlink(&self) -> bool {
+        self.mode & EXT2_S_IFMT == EXT2_S_IFLNK
+    }
+
+    pub const fn is_fast_symlink(&self, block_size: usize) -> bool {
+        if !self.is_symlink() {
+            return false;
+        }
+        let ea_blocks = if self.file_acl != 0 {
+            (block_size >> 9) as u32
+        } else {
+            0
+        };
+        self.blocks_count >= ea_blocks && self.blocks_count - ea_blocks == 0
     }
 
     pub const fn indirect_blocks_deferred(&self) -> bool {
@@ -912,7 +953,10 @@ impl Ext2FileSystem {
                 self.lookup_dirent = dirent;
                 self.lookup_file_inode = self.read_inode(registry, provider, dirent.inode())?;
                 self.lookup_returns_inode = true;
-                if !self.lookup_file_inode.is_regular_file() && !self.lookup_file_inode.is_dir() {
+                if !self.lookup_file_inode.is_regular_file()
+                    && !self.lookup_file_inode.is_dir()
+                    && !self.lookup_file_inode.is_symlink()
+                {
                     return Err(Ext2Error::InvalidInode);
                 }
                 return Ok(dirent);
@@ -930,6 +974,29 @@ impl Ext2FileSystem {
     ) -> Result<usize, Ext2Error> {
         let inode = self.lookup_file_inode;
         self.read_file_inode(registry, provider, &inode, buffer)
+    }
+
+    pub fn read_fast_symlink_inode(
+        &self,
+        inode: &Ext2InodeRecord,
+        buffer: &mut [u8],
+    ) -> Result<usize, Ext2Error> {
+        if !inode.is_symlink() {
+            return Err(Ext2Error::NotSymlink);
+        }
+        if !inode.is_fast_symlink(self.block_size) {
+            return Err(Ext2Error::UnsupportedSymlink);
+        }
+        let target_len = usize::try_from(inode.size()).map_err(|_| Ext2Error::InvalidInode)?;
+        if target_len > EXT2_FAST_SYMLINK_MAX {
+            return Err(Ext2Error::InvalidInode);
+        }
+        if buffer.len() < target_len {
+            return Err(Ext2Error::ShortBuffer);
+        }
+
+        buffer[..target_len].copy_from_slice(&inode.inline_data()[..target_len]);
+        Ok(target_len)
     }
 
     pub fn read_file_inode<P: BlockDeviceProvider>(
@@ -1027,6 +1094,20 @@ impl Ext2FileSystem {
         self.file_read_entered_from_vfs = true;
         let inode = self.read_inode(registry, provider, ino)?;
         self.read_file_inode(registry, provider, &inode, buffer)
+    }
+
+    pub fn read_vfs_symlink<P: BlockDeviceProvider>(
+        &mut self,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        ino: u32,
+        buffer: &mut [u8],
+    ) -> Result<usize, Ext2Error> {
+        if !self.vfs_read_entry_bound {
+            return Err(Ext2Error::FileSystemNotReady);
+        }
+        let inode = self.read_inode(registry, provider, ino)?;
+        self.read_fast_symlink_inode(&inode, buffer)
     }
 
     pub fn read_vfs_directory<P: BlockDeviceProvider>(
@@ -1263,13 +1344,21 @@ fn parse_group_desc(data: &[u8]) -> Result<Ext2GroupDescRecord, Ext2Error> {
 fn parse_inode(ino: u32, data: &[u8], offset: usize) -> Result<Ext2InodeRecord, Ext2Error> {
     let mode = le_u16(data, offset)?;
     let size = le_u32(data, offset + 0x04)?;
+    let blocks_count = le_u32(data, offset + 0x1c)?;
+    let file_acl = le_u32(data, offset + 0x68)?;
+    let raw_i_block = data
+        .get(offset + 0x28..offset + 0x28 + EXT2_FAST_SYMLINK_MAX)
+        .ok_or(Ext2Error::InvalidInode)?;
+    let mut inline_data = [0u8; EXT2_FAST_SYMLINK_MAX];
+    inline_data.copy_from_slice(raw_i_block);
     let mut blocks = [0u32; EXT2_N_BLOCKS];
     for (index, block) in blocks.iter_mut().enumerate() {
         *block = le_u32(data, offset + 0x28 + index * 4)?;
     }
-    if blocks[EXT2_SINGLE_INDIRECT_INDEX + 1..]
-        .iter()
-        .any(|block| *block != 0)
+    if mode & EXT2_S_IFMT != EXT2_S_IFLNK
+        && blocks[EXT2_SINGLE_INDIRECT_INDEX + 1..]
+            .iter()
+            .any(|block| *block != 0)
     {
         return Err(Ext2Error::IndirectBlocksUnsupported);
     }
@@ -1279,6 +1368,9 @@ fn parse_inode(ino: u32, data: &[u8], offset: usize) -> Result<Ext2InodeRecord, 
         ino,
         mode,
         size,
+        blocks_count,
+        file_acl,
+        inline_data,
         direct_blocks,
         single_indirect_block: blocks[EXT2_SINGLE_INDIRECT_INDEX],
         indirect_blocks_deferred: true,
@@ -1368,6 +1460,7 @@ const fn ext2_file_type(file_type: u8) -> Ext2FileType {
     match file_type {
         1 => Ext2FileType::RegularFile,
         2 => Ext2FileType::Directory,
+        7 => Ext2FileType::Symlink,
         0 => Ext2FileType::Unknown,
         _ => Ext2FileType::Other,
     }

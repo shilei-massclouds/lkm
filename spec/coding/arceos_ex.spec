@@ -2442,8 +2442,18 @@ type ArceosExBlockIoCodingMust {
          *
          * VfsCore must support absolute path walk from current root, direct
          * component lookup, mount crossing, open-by-path and read-by-path for
-         * the currently modeled ramfs/devfs/ext2 subset. Relative paths, cwd,
-         * symlinks, permissions, fd tables and page cache remain deferred.
+         * the currently modeled ramfs/devfs/ext2 subset. Symlink follow must
+         * keep the Linux 6.12 namei skeleton: detect S_IFLNK, obtain the link
+         * target, restart absolute targets at FsStruct.root, restart relative
+         * targets at the symlink parent, preserve remaining path components,
+         * and cap follow count at MAXSYMLINKS == 40 with an ELOOP-like error.
+         * The current implementation slice may limit the backend to read-only
+         * ext2 fast symlinks whose target lives in raw i_block bytes and is
+         * truncated by inode size; slow symlink page/block reads, readlinkat,
+         * nofollow flags, magic links, RCU walk, permissions, mount namespace,
+         * full dotdot and complete errno semantics remain trimmed/deferred.
+         * Relative dirfd/cwd paths, permissions, fd tables and page cache
+         * remain deferred.
          */
         arceos_ex_must_vfs_support_minimal_absolute_path_walk_and_read();
 
@@ -2519,9 +2529,12 @@ type ArceosExBlockIoCodingMust {
         /*
          * Deferred ext2 scope:
          *
-         * Page cache/folios, indirect blocks, symlinks, permissions, xattrs,
-         * quotas, allocation, writes and remount/error recovery remain
-         * explicit deferred scope in this slice.
+         * Page cache/folios, indirect blocks, slow symlinks, permissions,
+         * xattrs, quotas, allocation, writes and remount/error recovery
+         * remain explicit deferred scope in this slice. Fast symlink target
+         * extraction from inline i_block bytes is part of the current VFS
+         * path-walk slice and must not be implemented by treating the symlink
+         * inode as a regular file.
          */
         arceos_ex_must_ext2_defer_page_cache_indirect_and_writes();
     }

@@ -93,6 +93,7 @@ const EOVERFLOW: usize = 75;
 const EREMOTEIO: usize = 121;
 const ESPIPE: usize = 29;
 const ENOTTY: usize = 25;
+const ELOOP: usize = 40;
 
 static SYSCALL_TABLE_READY: AtomicU8 = AtomicU8::new(0);
 
@@ -1115,6 +1116,7 @@ fn file_error_to_errno(error: FileError) -> usize {
         FileError::IllegalSeek => ESPIPE,
         FileError::NotTty => ENOTTY,
         FileError::PermissionDenied => EACCES,
+        FileError::TooManySymlinks => ELOOP,
         FileError::NotReady
         | FileError::NotReadable
         | FileError::NotWritable

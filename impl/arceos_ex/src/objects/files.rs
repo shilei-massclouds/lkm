@@ -21,6 +21,7 @@ const FILE_FD_COUNT: usize = 4;
 const DT_UNKNOWN: u8 = 0;
 const DT_DIR: u8 = 4;
 const DT_REG: u8 = 8;
+const DT_LNK: u8 = 10;
 const FILE_O_RDONLY: u32 = 0;
 const FILE_O_WRONLY: u32 = 1;
 const FILE_O_RDWR: u32 = 2;
@@ -88,6 +89,7 @@ pub enum FileError {
     IllegalSeek,
     NotTty,
     PermissionDenied,
+    TooManySymlinks,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -104,6 +106,7 @@ fn vfs_error_to_file_error(error: VfsError) -> FileError {
         VfsError::NotFound => FileError::PathUnavailable,
         VfsError::ShortBuffer => FileError::BufferTooSmall,
         VfsError::Backend => FileError::VfsBackendUnavailable,
+        VfsError::SymlinkLoop => FileError::TooManySymlinks,
         _ => FileError::BackendUnavailable,
     }
 }
@@ -165,6 +168,10 @@ impl FileStat {
             VfsInodeKind::DeviceNode => Self {
                 size,
                 mode: 0o020444,
+            },
+            VfsInodeKind::Symlink => Self {
+                size,
+                mode: 0o120777,
             },
         }
     }
@@ -1461,6 +1468,7 @@ const fn linux_dtype(file_type: Ext2FileType) -> u8 {
     match file_type {
         Ext2FileType::RegularFile => DT_REG,
         Ext2FileType::Directory => DT_DIR,
+        Ext2FileType::Symlink => DT_LNK,
         Ext2FileType::Unknown | Ext2FileType::Other => DT_UNKNOWN,
     }
 }

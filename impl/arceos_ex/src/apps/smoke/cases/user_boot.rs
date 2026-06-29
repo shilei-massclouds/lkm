@@ -849,5 +849,6 @@ fn read_interpreter_error_label(error: VfsError) -> &'static str {
         VfsError::ShortBuffer => "read interpreter short buffer",
         VfsError::Backend => "read interpreter backend",
         VfsError::UnsupportedPath => "read interpreter unsupported path",
+        VfsError::SymlinkLoop => "read interpreter symlink loop",
     }
 }
