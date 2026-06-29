@@ -2,11 +2,11 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{
     block_device::BlockDeviceRegistry,
-    ext2::Ext2FileSystem,
+    ext2::{Ext2FileSystem, Ext2FileType},
     kernel_image::KernelImage,
     rest_init::KernelInitTask,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
-    vfs::{FsStruct, VfsCore, VfsError},
+    vfs::{FileRef, FsStruct, VfsCore, VfsError},
     virtio_blk,
 };
 
@@ -16,7 +16,11 @@ pub const STDERR_FD: usize = 2;
 pub const REGULAR0_FD: usize = 3;
 pub const FILE_PATH_MAX: usize = 128;
 pub const REGULAR_FILE_BUFFER_SIZE: usize = 4096;
+pub const LINUX_DIRENT64_HEADER_SIZE: usize = 19;
 const FILE_FD_COUNT: usize = 4;
+const DT_UNKNOWN: u8 = 0;
+const DT_DIR: u8 = 4;
+const DT_REG: u8 = 8;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -67,6 +71,13 @@ pub enum FileError {
     VfsBackendUnavailable,
     BackendUnavailable,
     Unsupported,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FilesystemFdKind {
+    None,
+    RegularFile,
+    Directory,
 }
 
 pub type FileResult<T> = Result<T, FileError>;
@@ -675,6 +686,10 @@ pub struct FilesStruct {
     regular0_offset: usize,
     regular0_path: [u8; FILE_PATH_MAX],
     regular0_path_len: usize,
+    filesystem0_kind: FilesystemFdKind,
+    directory0_file_ref: Option<FileRef>,
+    directory0_offset: usize,
+    directory0_last_getdents_len: usize,
     allocated: bool,
     owned_by_kernel_init_task: bool,
     fd_table_bound: bool,
@@ -692,6 +707,8 @@ pub struct FilesStruct {
     regular_file_read_observed: AtomicUsize,
     regular_file_closed: AtomicUsize,
     regular_file_stat_observed: AtomicUsize,
+    directory_fd_installed: AtomicUsize,
+    directory_getdents_observed: AtomicUsize,
 }
 
 #[allow(dead_code)]
@@ -713,6 +730,10 @@ impl FilesStruct {
             regular0_offset: 0,
             regular0_path: [0; FILE_PATH_MAX],
             regular0_path_len: 0,
+            filesystem0_kind: FilesystemFdKind::None,
+            directory0_file_ref: None,
+            directory0_offset: 0,
+            directory0_last_getdents_len: 0,
             allocated: false,
             owned_by_kernel_init_task: false,
             fd_table_bound: false,
@@ -730,6 +751,8 @@ impl FilesStruct {
             regular_file_read_observed: AtomicUsize::new(0),
             regular_file_closed: AtomicUsize::new(0),
             regular_file_stat_observed: AtomicUsize::new(0),
+            directory_fd_installed: AtomicUsize::new(0),
+            directory_getdents_observed: AtomicUsize::new(0),
         }
     }
 
@@ -805,12 +828,28 @@ impl FilesStruct {
         self.regular_file_stat_observed.load(Ordering::Acquire) != 0
     }
 
+    pub fn directory_fd_installed(&self) -> bool {
+        self.directory_fd_installed.load(Ordering::Acquire) != 0
+    }
+
+    pub fn directory_getdents_observed(&self) -> bool {
+        self.directory_getdents_observed.load(Ordering::Acquire) != 0
+    }
+
     pub const fn regular0_len(&self) -> usize {
         self.regular0_len
     }
 
     pub const fn regular0_offset(&self) -> usize {
         self.regular0_offset
+    }
+
+    pub const fn directory0_offset(&self) -> usize {
+        self.directory0_offset
+    }
+
+    pub const fn directory0_last_getdents_len(&self) -> usize {
+        self.directory0_last_getdents_len
     }
 
     pub const fn fd_table(&self) -> &FileDescriptorTable {
@@ -938,11 +977,74 @@ impl FilesStruct {
         let fd = self.fd_table.install_regular(&self.regular0)?;
         self.regular0_len = len;
         self.regular0_offset = 0;
+        self.filesystem0_kind = FilesystemFdKind::RegularFile;
+        self.directory0_file_ref = None;
+        self.directory0_offset = 0;
+        self.directory0_last_getdents_len = 0;
         self.regular0_path.fill(0);
         self.regular0_path[..path.len()].copy_from_slice(path);
         self.regular0_path_len = path.len();
         self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
         self.regular_fd_installed.fetch_add(1, Ordering::AcqRel);
+        Ok(fd)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_directory_path(
+        &mut self,
+        fs_struct: &FsStruct,
+        vfs_core: &mut VfsCore,
+        ext2_filesystem: &mut Ext2FileSystem,
+        block_device_registry: &mut BlockDeviceRegistry,
+        kernel_image: &KernelImage,
+        path: &[u8],
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready
+            || !self.fd_table_bound
+            || !self.regular_file_slot_ready
+            || path.is_empty()
+            || path.len() > FILE_PATH_MAX
+        {
+            return Err(FileError::NotReady);
+        }
+        if self.fd_table.fd_bound(FdRef::Regular0) {
+            return Err(FileError::AlreadyOpen);
+        }
+
+        let mut provider = virtio_blk::live_provider(kernel_image);
+        let file_ref = vfs_core
+            .open_directory_path(
+                fs_struct,
+                ext2_filesystem,
+                block_device_registry,
+                &mut provider,
+                path,
+            )
+            .map_err(vfs_error_to_file_error)?;
+
+        if self.regular0_backend.state() == State::Base {
+            self.regular0_backend
+                .bind_regular_file()
+                .map_err(|_| FileError::BackendUnavailable)?;
+        }
+        if self.regular0.state() == State::Base {
+            self.regular0
+                .setup_regular(&self.regular0_backend)
+                .map_err(|_| FileError::BackendUnavailable)?;
+        }
+
+        let fd = self.fd_table.install_regular(&self.regular0)?;
+        self.regular0_len = 0;
+        self.regular0_offset = 0;
+        self.filesystem0_kind = FilesystemFdKind::Directory;
+        self.directory0_file_ref = Some(file_ref);
+        self.directory0_offset = 0;
+        self.directory0_last_getdents_len = 0;
+        self.regular0_path.fill(0);
+        self.regular0_path[..path.len()].copy_from_slice(path);
+        self.regular0_path_len = path.len();
+        self.open_path_routes_to_vfs.fetch_add(1, Ordering::AcqRel);
+        self.directory_fd_installed.fetch_add(1, Ordering::AcqRel);
         Ok(fd)
     }
 
@@ -959,6 +1061,9 @@ impl FilesStruct {
 
         match entry.ofd {
             OpenFileDescriptionRef::Regular0 => {
+                if self.filesystem0_kind != FilesystemFdKind::RegularFile {
+                    return Err(FileError::NotReadable);
+                }
                 let available = self.regular0_len.saturating_sub(self.regular0_offset);
                 let len = core::cmp::min(buffer.len(), available);
                 let end = self.regular0_offset + len;
@@ -975,6 +1080,50 @@ impl FilesStruct {
         }
     }
 
+    pub fn getdents64_fd(
+        &mut self,
+        fd: usize,
+        buffer: &mut [u8],
+        ext2_filesystem: &mut Ext2FileSystem,
+        vfs_core: &mut VfsCore,
+        block_device_registry: &mut BlockDeviceRegistry,
+        kernel_image: &KernelImage,
+    ) -> FileResult<usize> {
+        if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
+            return Err(FileError::NotReady);
+        }
+
+        let entry = self.fd_table.lookup(fd)?;
+        self.read_fd_routes_to_table.fetch_add(1, Ordering::AcqRel);
+        if !entry.readable || entry.ofd != OpenFileDescriptionRef::Regular0 {
+            return Err(FileError::NotReadable);
+        }
+        if self.filesystem0_kind != FilesystemFdKind::Directory {
+            return Err(FileError::NotReadable);
+        }
+        let file_ref = self.directory0_file_ref.ok_or(FileError::BadFd)?;
+        let mut provider = virtio_blk::live_provider(kernel_image);
+        let entries = vfs_core
+            .read_ext2_dir(
+                ext2_filesystem,
+                block_device_registry,
+                &mut provider,
+                file_ref,
+                self.directory0_offset,
+            )
+            .map_err(vfs_error_to_file_error)?;
+        let (written, next_offset) =
+            serialize_linux_dirents64(entries.iter(), self.directory0_offset, buffer)?;
+        if written == 0 {
+            return Ok(0);
+        }
+        self.directory0_offset = next_offset;
+        self.directory0_last_getdents_len = written;
+        self.directory_getdents_observed
+            .fetch_add(1, Ordering::AcqRel);
+        Ok(written)
+    }
+
     pub fn close_fd(&mut self, fd: usize) -> FileResult<()> {
         if self.lifecycle.state() != State::Ready || !self.fd_table_bound {
             return Err(FileError::NotReady);
@@ -982,6 +1131,9 @@ impl FilesStruct {
 
         self.fd_table.close(fd)?;
         self.regular0_offset = 0;
+        self.directory0_offset = 0;
+        self.directory0_file_ref = None;
+        self.filesystem0_kind = FilesystemFdKind::None;
         self.close_fd_routes_to_table.fetch_add(1, Ordering::AcqRel);
         self.regular_file_closed.fetch_add(1, Ordering::AcqRel);
         Ok(())
@@ -1051,4 +1203,66 @@ impl FilesStruct {
             OpenFileDescriptionRef::Regular0 => Err(FileError::NotWritable),
         }
     }
+}
+
+fn serialize_linux_dirents64<'a>(
+    entries: impl Iterator<Item = &'a super::ext2::Ext2DirectoryEntry>,
+    current_offset: usize,
+    buffer: &mut [u8],
+) -> FileResult<(usize, usize)> {
+    let mut written = 0usize;
+    let mut next_offset = current_offset;
+    for entry in entries {
+        let record = entry.record();
+        let name = record.name();
+        let reclen = linux_dirent64_reclen(name.len());
+        if reclen > buffer.len().saturating_sub(written) {
+            break;
+        }
+        let dst = &mut buffer[written..written + reclen];
+        dst.fill(0);
+        write_u64(dst, 0, u64::from(record.inode()))?;
+        write_u64(dst, 8, entry.next_offset() as u64)?;
+        write_u16(dst, 16, reclen as u16)?;
+        dst[18] = linux_dtype(record.file_type());
+        dst[LINUX_DIRENT64_HEADER_SIZE..LINUX_DIRENT64_HEADER_SIZE + name.len()]
+            .copy_from_slice(name);
+        written += reclen;
+        next_offset = entry.next_offset();
+    }
+    Ok((written, next_offset))
+}
+
+const fn linux_dirent64_reclen(name_len: usize) -> usize {
+    align_up(LINUX_DIRENT64_HEADER_SIZE + name_len + 1, core::mem::size_of::<u64>())
+}
+
+const fn align_up(value: usize, align: usize) -> usize {
+    (value + align - 1) & !(align - 1)
+}
+
+const fn linux_dtype(file_type: Ext2FileType) -> u8 {
+    match file_type {
+        Ext2FileType::RegularFile => DT_REG,
+        Ext2FileType::Directory => DT_DIR,
+        Ext2FileType::Unknown | Ext2FileType::Other => DT_UNKNOWN,
+    }
+}
+
+fn write_u16(buffer: &mut [u8], offset: usize, value: u16) -> FileResult<()> {
+    let bytes = value.to_le_bytes();
+    let Some(dst) = buffer.get_mut(offset..offset + bytes.len()) else {
+        return Err(FileError::BufferTooSmall);
+    };
+    dst.copy_from_slice(&bytes);
+    Ok(())
+}
+
+fn write_u64(buffer: &mut [u8], offset: usize, value: u64) -> FileResult<()> {
+    let bytes = value.to_le_bytes();
+    let Some(dst) = buffer.get_mut(offset..offset + bytes.len()) else {
+        return Err(FileError::BufferTooSmall);
+    };
+    dst.copy_from_slice(&bytes);
+    Ok(())
 }

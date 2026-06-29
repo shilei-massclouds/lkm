@@ -51,6 +51,7 @@ const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
 const SYSCALL_OPENAT: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
+const SYSCALL_GETDENTS64: usize = 61;
 const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_WRITEV: usize = 66;
@@ -68,6 +69,7 @@ const USER_PATH_MAX: usize = crate::objects::files::FILE_PATH_MAX;
 const AT_FDCWD: usize = usize::MAX - 99;
 const O_ACCMODE: usize = 0o3;
 const O_LARGEFILE: usize = 0o100000;
+const O_DIRECTORY: usize = 0o200000;
 const STAT_SIZE: usize = 128;
 const EFAULT: usize = 14;
 const EINVAL: usize = 22;
@@ -86,6 +88,7 @@ pub struct SyscallTable {
     write_supported: bool,
     writev_supported: bool,
     openat_supported: bool,
+    getdents64_supported: bool,
     read_supported: bool,
     close_supported: bool,
     newfstatat_supported: bool,
@@ -99,11 +102,13 @@ pub struct SyscallTable {
     write_usercopy_ready: bool,
     writev_usercopy_ready: bool,
     read_usercopy_ready: bool,
+    getdents64_usercopy_ready: bool,
     path_usercopy_ready: bool,
     stat_usercopy_ready: bool,
     write_routes_to_console: bool,
     writev_routes_to_files_struct: bool,
     openat_routes_to_files_struct: bool,
+    getdents64_routes_to_files_struct: bool,
     read_routes_to_files_struct: bool,
     close_routes_to_files_struct: bool,
     newfstatat_routes_to_files_struct: bool,
@@ -111,6 +116,7 @@ pub struct SyscallTable {
     write_observed: AtomicU8,
     writev_observed: AtomicU8,
     openat_observed: AtomicU8,
+    getdents64_observed: AtomicU8,
     read_observed: AtomicU8,
     close_observed: AtomicU8,
     newfstatat_observed: AtomicU8,
@@ -126,6 +132,7 @@ impl SyscallTable {
             write_supported: false,
             writev_supported: false,
             openat_supported: false,
+            getdents64_supported: false,
             read_supported: false,
             close_supported: false,
             newfstatat_supported: false,
@@ -139,11 +146,13 @@ impl SyscallTable {
             write_usercopy_ready: false,
             writev_usercopy_ready: false,
             read_usercopy_ready: false,
+            getdents64_usercopy_ready: false,
             path_usercopy_ready: false,
             stat_usercopy_ready: false,
             write_routes_to_console: false,
             writev_routes_to_files_struct: false,
             openat_routes_to_files_struct: false,
+            getdents64_routes_to_files_struct: false,
             read_routes_to_files_struct: false,
             close_routes_to_files_struct: false,
             newfstatat_routes_to_files_struct: false,
@@ -151,6 +160,7 @@ impl SyscallTable {
             write_observed: AtomicU8::new(0),
             writev_observed: AtomicU8::new(0),
             openat_observed: AtomicU8::new(0),
+            getdents64_observed: AtomicU8::new(0),
             read_observed: AtomicU8::new(0),
             close_observed: AtomicU8::new(0),
             newfstatat_observed: AtomicU8::new(0),
@@ -182,6 +192,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn openat_supported(&self) -> bool {
         self.openat_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn getdents64_supported(&self) -> bool {
+        self.getdents64_supported
     }
 
     #[allow(dead_code)]
@@ -250,6 +265,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn getdents64_usercopy_ready(&self) -> bool {
+        self.getdents64_usercopy_ready
+    }
+
+    #[allow(dead_code)]
     pub const fn path_usercopy_ready(&self) -> bool {
         self.path_usercopy_ready
     }
@@ -272,6 +292,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn openat_routes_to_files_struct(&self) -> bool {
         self.openat_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn getdents64_routes_to_files_struct(&self) -> bool {
+        self.getdents64_routes_to_files_struct
     }
 
     #[allow(dead_code)]
@@ -307,6 +332,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub fn openat_observed(&self) -> bool {
         self.openat_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn getdents64_observed(&self) -> bool {
+        self.getdents64_observed.load(Ordering::Acquire) != 0
     }
 
     #[allow(dead_code)]
@@ -349,6 +379,7 @@ impl SyscallTable {
         self.write_supported = true;
         self.writev_supported = true;
         self.openat_supported = true;
+        self.getdents64_supported = true;
         self.read_supported = true;
         self.close_supported = true;
         self.newfstatat_supported = true;
@@ -362,11 +393,13 @@ impl SyscallTable {
         self.write_usercopy_ready = true;
         self.writev_usercopy_ready = true;
         self.read_usercopy_ready = true;
+        self.getdents64_usercopy_ready = true;
         self.path_usercopy_ready = true;
         self.stat_usercopy_ready = true;
         self.write_routes_to_console = true;
         self.writev_routes_to_files_struct = true;
         self.openat_routes_to_files_struct = true;
+        self.getdents64_routes_to_files_struct = true;
         self.read_routes_to_files_struct = true;
         self.close_routes_to_files_struct = true;
         self.newfstatat_routes_to_files_struct = true;
@@ -412,6 +445,18 @@ impl SyscallTable {
         }
 
         syscall_table_close(self, frame);
+    }
+
+    pub fn getdents64(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getdents64_supported
+            || !self.getdents64_usercopy_ready
+            || !self.getdents64_routes_to_files_struct
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+        syscall_table_getdents64(self, frame);
     }
 
     pub fn brk(&self, frame: &mut TrapFrame) {
@@ -823,6 +868,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
     match frame.reg(17) {
         SYSCALL_OPENAT => table.openat(frame),
         SYSCALL_CLOSE => table.close(frame),
+        SYSCALL_GETDENTS64 => table.getdents64(frame),
         SYSCALL_READ => table.read(frame),
         SYSCALL_WRITE => table.write(frame),
         SYSCALL_WRITEV => table.writev(frame),
@@ -871,7 +917,8 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     let dirfd = frame.reg(10);
     let path_ptr = frame.reg(11);
     let flags = frame.reg(12);
-    if dirfd != AT_FDCWD || flags & !O_LARGEFILE != 0 || flags & O_ACCMODE != 0 {
+    let supported_flags = O_LARGEFILE | O_DIRECTORY;
+    if dirfd != AT_FDCWD || flags & !supported_flags != 0 || flags & O_ACCMODE != 0 {
         complete_error_syscall(frame, EINVAL);
         return;
     }
@@ -883,14 +930,26 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
     };
 
     let ctx = crate::context::context();
-    let fd = match ctx.files_struct.open_regular_path(
-        &ctx.fs_struct,
-        &mut ctx.vfs_core,
-        &mut ctx.ext2_filesystem,
-        &mut ctx.block_device_registry,
-        &ctx.kernel_image,
-        &path[..path_len],
-    ) {
+    let fd_result = if flags & O_DIRECTORY != 0 {
+        ctx.files_struct.open_directory_path(
+            &ctx.fs_struct,
+            &mut ctx.vfs_core,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            &path[..path_len],
+        )
+    } else {
+        ctx.files_struct.open_regular_path(
+            &ctx.fs_struct,
+            &mut ctx.vfs_core,
+            &mut ctx.ext2_filesystem,
+            &mut ctx.block_device_registry,
+            &ctx.kernel_image,
+            &path[..path_len],
+        )
+    };
+    let fd = match fd_result {
         Ok(fd) => fd,
         Err(error) => {
             complete_error_syscall(frame, file_error_to_errno(error));
@@ -904,6 +963,41 @@ fn syscall_table_openat(table: &SyscallTable, frame: &mut TrapFrame) {
         crate::context::context_ref(),
     );
     complete_successful_syscall(frame, fd);
+}
+
+fn syscall_table_getdents64(table: &SyscallTable, frame: &mut TrapFrame) {
+    let fd = frame.reg(10);
+    let user_ptr = frame.reg(11);
+    let requested = frame.reg(12);
+    let len = core::cmp::min(requested, USER_COPY_MAX);
+    if len == 0 {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let mut buffer = [0u8; USER_COPY_MAX];
+    let ctx = crate::context::context();
+    let read = match ctx.files_struct.getdents64_fd(
+        fd,
+        &mut buffer[..len],
+        &mut ctx.ext2_filesystem,
+        &mut ctx.vfs_core,
+        &mut ctx.block_device_registry,
+        &ctx.kernel_image,
+    ) {
+        Ok(read) => read,
+        Err(error) => {
+            complete_error_syscall(frame, file_error_to_errno(error));
+            return;
+        }
+    };
+    if !copy_to_user(user_ptr, &buffer[..read]) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.getdents64_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, read);
 }
 
 fn syscall_table_read(table: &SyscallTable, frame: &mut TrapFrame) {

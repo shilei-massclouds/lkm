@@ -119,11 +119,13 @@ predicate arceos_ex_must_not_generate_syscall_dispatcher_object() -> bool;
 predicate arceos_ex_must_syscall_table_hold_concrete_syscall_actions() -> bool;
 predicate arceos_ex_must_user_syscall_write_copy_from_user_address_space() -> bool;
 predicate arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions() -> bool;
+predicate arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice() -> bool;
 predicate arceos_ex_must_user_syscall_exit_stop_first_user_process() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
 predicate arceos_ex_must_user_boot_not_require_partition_objects_for_whole_disk_ext2() -> bool;
 predicate arceos_ex_must_user_boot_harness_require_zero_user_exit_status() -> bool;
+predicate arceos_ex_must_user_boot_harness_isolate_overlay_disk_images() -> bool;
 predicate arceos_ex_must_action_lowering_use_context_ref_and_typed_packet() -> bool;
 predicate arceos_ex_must_phase_boundary_guard_lower_to_context_contribution_only() -> bool;
 predicate arceos_ex_must_preemption_guard_lower_to_counted_enter_exit() -> bool;
@@ -1430,12 +1432,25 @@ type ArceosExStartupPhaseCodingMust {
          * are SyscallTable actions. The current table handles the first user
          * program's console/file syscalls, vector console writes through
          * writev, the dynamic loader memory actions brk, mmap, mprotect and
-         * munmap by routing them to UserAddressSpace, and set_tid_address by
-         * recording the current PID1 UserInitProcess clear_child_tid pointer.
+         * munmap by routing them to UserAddressSpace, directory-capable
+         * openat plus getdents64 by routing through FilesStruct fd position
+         * and Ext2/VFS directory records, and set_tid_address by recording
+         * the current PID1 UserInitProcess clear_child_tid pointer.
          * This is a formal runtime boundary, not a test-only API. It does not
          * implement a full VMA tree, fd table, devfs console file, TTY line
          * discipline, futex/clone/thread-group semantics, fork/wait or signal
          * semantics.
+         *
+         * The first directory slice must reference local Linux 6.12
+         * fs/open.c::do_sys_openat2()/sys_openat(),
+         * fs/readdir.c::sys_getdents64()/iterate_dir()/filldir64(), and
+         * fs/file.c::fdget_pos(). It may trim Linux permission, LSM,
+         * fsnotify/file_accessed, inode i_rwsem, RCU/f_pos_lock contention,
+         * mount namespace and complete errno behavior, but it must preserve
+         * the production path shape: openat(O_DIRECTORY) installs a readable
+         * directory fd, getdents64 serializes linux_dirent64 records from the
+         * ext2 directory data, returns copied bytes, and advances the fd
+         * offset only at complete record boundaries.
          *
          * APP=user-boot validation in make test must not treat QEMU/SBI
          * shutdown success as sufficient. The host harness must parse the
@@ -1443,7 +1458,10 @@ type ArceosExStartupPhaseCodingMust {
          * for native and every configured provider. A nonzero status, missing
          * status line, or failed QEMU command is a visible test failure. The
          * guest exit syscall path still owns status printing and shutdown; the
-         * harness only interprets the output.
+         * harness only interprets the output. The harness must use case-local
+         * disk images for distinct rootfs overlay maps, so default sh_probe
+         * and explicit init_fileio regression cases cannot pass by reusing a
+         * stale build/virtio-blk.raw from a different overlay.
          */
         arceos_ex_must_user_boot_payload_bind_kernel_init_task();
         arceos_ex_must_first_user_address_space_bind_kernel_init_task();
@@ -1465,10 +1483,12 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_syscall_table_hold_concrete_syscall_actions();
         arceos_ex_must_user_syscall_write_copy_from_user_address_space();
         arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions();
+        arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice();
         arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
         arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();
         arceos_ex_must_user_boot_harness_require_zero_user_exit_status();
+        arceos_ex_must_user_boot_harness_isolate_overlay_disk_images();
 
         /*
          * Whole-disk ext2 input:

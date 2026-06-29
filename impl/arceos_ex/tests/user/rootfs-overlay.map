@@ -1,2 +1,2 @@
 # target      test        toolchain  link
-/sbin/init    init_fileio musl       dynamic
+/sbin/init    sh_probe    musl       dynamic

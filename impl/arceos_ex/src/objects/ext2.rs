@@ -24,7 +24,7 @@ pub const EXT2_SINGLE_INDIRECT_READ_MAX: usize =
     EXT2_MAX_BLOCK_SIZE * (EXT2_NDIR_BLOCKS + EXT2_MAX_BLOCK_SIZE / core::mem::size_of::<u32>());
 pub const EXT2_ALPINE_INSTALLED_DB_MAX_SIZE: usize = EXT2_MAX_BLOCK_SIZE * EXT2_NDIR_BLOCKS;
 
-const EXT2_NAME_MAX: usize = 32;
+pub const EXT2_NAME_MAX: usize = 32;
 const EXT2_GOOD_OLD_INODE_SIZE: u16 = 128;
 const EXT2_S_IFMT: u16 = 0xf000;
 const EXT2_S_IFDIR: u16 = 0x4000;
@@ -371,6 +371,82 @@ impl Ext2DirEntryRecord {
     }
 }
 
+pub const EXT2_DIRENT_RECORDS_MAX: usize = 32;
+
+#[derive(Clone, Copy)]
+pub struct Ext2DirectoryEntry {
+    record: Ext2DirEntryRecord,
+    offset: usize,
+    next_offset: usize,
+}
+
+#[allow(dead_code)]
+impl Ext2DirectoryEntry {
+    const fn empty() -> Self {
+        Self {
+            record: Ext2DirEntryRecord::empty(),
+            offset: 0,
+            next_offset: 0,
+        }
+    }
+
+    pub const fn record(&self) -> &Ext2DirEntryRecord {
+        &self.record
+    }
+
+    pub const fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub const fn next_offset(&self) -> usize {
+        self.next_offset
+    }
+}
+
+pub struct Ext2DirectoryEntries {
+    entries: [Ext2DirectoryEntry; EXT2_DIRENT_RECORDS_MAX],
+    count: usize,
+    final_offset: usize,
+}
+
+#[allow(dead_code)]
+impl Ext2DirectoryEntries {
+    const fn new() -> Self {
+        Self {
+            entries: [Ext2DirectoryEntry::empty(); EXT2_DIRENT_RECORDS_MAX],
+            count: 0,
+            final_offset: 0,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.count = 0;
+        self.final_offset = 0;
+    }
+
+    fn push(&mut self, entry: Ext2DirectoryEntry) -> Result<(), Ext2Error> {
+        if self.count >= EXT2_DIRENT_RECORDS_MAX {
+            return Err(Ext2Error::ShortBuffer);
+        }
+        self.entries[self.count] = entry;
+        self.count += 1;
+        self.final_offset = entry.next_offset;
+        Ok(())
+    }
+
+    pub const fn count(&self) -> usize {
+        self.count
+    }
+
+    pub const fn final_offset(&self) -> usize {
+        self.final_offset
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Ext2DirectoryEntry> {
+        self.entries[..self.count].iter()
+    }
+}
+
 pub struct Ext2FileSystem {
     lifecycle: Lifecycle,
     devt: Option<DevT>,
@@ -417,6 +493,11 @@ pub struct Ext2FileSystem {
     file_read_short_buffer_rejected: bool,
     file_read_indirect_blocks_deferred: bool,
     file_read_entered_from_vfs: bool,
+    directory_read_uses_direct_block: bool,
+    directory_read_direct_blocks_scanned: usize,
+    directory_read_records: Ext2DirectoryEntries,
+    directory_read_offset_advanced: bool,
+    directory_read_indirect_blocks_deferred: bool,
 }
 
 #[allow(dead_code)]
@@ -468,6 +549,11 @@ impl Ext2FileSystem {
             file_read_short_buffer_rejected: false,
             file_read_indirect_blocks_deferred: true,
             file_read_entered_from_vfs: false,
+            directory_read_uses_direct_block: false,
+            directory_read_direct_blocks_scanned: 0,
+            directory_read_records: Ext2DirectoryEntries::new(),
+            directory_read_offset_advanced: false,
+            directory_read_indirect_blocks_deferred: true,
         }
     }
 
@@ -649,6 +735,26 @@ impl Ext2FileSystem {
 
     pub const fn file_read_entered_from_vfs(&self) -> bool {
         self.file_read_entered_from_vfs
+    }
+
+    pub const fn directory_read_uses_direct_block(&self) -> bool {
+        self.directory_read_uses_direct_block
+    }
+
+    pub const fn directory_read_direct_blocks_scanned(&self) -> usize {
+        self.directory_read_direct_blocks_scanned
+    }
+
+    pub const fn directory_read_records(&self) -> &Ext2DirectoryEntries {
+        &self.directory_read_records
+    }
+
+    pub const fn directory_read_offset_advanced(&self) -> bool {
+        self.directory_read_offset_advanced
+    }
+
+    pub const fn directory_read_indirect_blocks_deferred(&self) -> bool {
+        self.directory_read_indirect_blocks_deferred
     }
 
     pub fn preset(&mut self, driver: &Ext2Driver, volume: &Ext2Volume) -> Result<(), Ext2Error> {
@@ -923,6 +1029,21 @@ impl Ext2FileSystem {
         self.read_file_inode(registry, provider, &inode, buffer)
     }
 
+    pub fn read_vfs_directory<P: BlockDeviceProvider>(
+        &mut self,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        ino: u32,
+        start_offset: usize,
+    ) -> Result<&Ext2DirectoryEntries, Ext2Error> {
+        if !self.vfs_read_entry_bound {
+            return Err(Ext2Error::FileSystemNotReady);
+        }
+        let inode = self.read_inode(registry, provider, ino)?;
+        self.read_directory_inode(registry, provider, &inode, start_offset)?;
+        Ok(&self.directory_read_records)
+    }
+
     pub fn read_inode_record<P: BlockDeviceProvider>(
         &self,
         registry: &mut BlockDeviceRegistry,
@@ -962,6 +1083,59 @@ impl Ext2FileSystem {
         let bh = read_fs_block(registry, provider, devt, inode_block, self.block_size)?;
         let offset = usize::try_from(offset_in_block).map_err(|_| Ext2Error::InvalidInode)?;
         parse_inode(ino, bh.data(), offset)
+    }
+
+    fn read_directory_inode<P: BlockDeviceProvider>(
+        &mut self,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        inode: &Ext2InodeRecord,
+        start_offset: usize,
+    ) -> Result<(), Ext2Error> {
+        if self.lifecycle.state() != State::Online || !self.ready || !self.mount_boundary_recorded {
+            return Err(Ext2Error::FileSystemNotReady);
+        }
+        if !inode.is_dir() {
+            return Err(Ext2Error::NotDirectory);
+        }
+        let dir_size = usize::try_from(inode.size()).map_err(|_| Ext2Error::InvalidInode)?;
+        let Some(devt) = self.devt else {
+            return Err(Ext2Error::DeviceMissing);
+        };
+
+        self.directory_read_uses_direct_block = false;
+        self.directory_read_direct_blocks_scanned = 0;
+        self.directory_read_records.clear();
+        self.directory_read_offset_advanced = false;
+        self.directory_read_indirect_blocks_deferred = inode.indirect_blocks_deferred();
+
+        let mut base_offset = 0usize;
+        for block in inode.direct_blocks {
+            if base_offset >= dir_size {
+                break;
+            }
+            let block_len = min(self.block_size, dir_size - base_offset);
+            if block == 0 {
+                base_offset += block_len;
+                continue;
+            }
+            let bh = read_fs_block(registry, provider, devt, block, self.block_size)?;
+            self.directory_read_direct_blocks_scanned += 1;
+            self.directory_read_uses_direct_block = true;
+            collect_dirents(
+                &bh.data()[..block_len],
+                base_offset,
+                start_offset,
+                &mut self.directory_read_records,
+            )?;
+            base_offset += block_len;
+        }
+        if base_offset < dir_size && inode.single_indirect_block() != 0 {
+            return Err(Ext2Error::IndirectBlocksUnsupported);
+        }
+        self.directory_read_offset_advanced =
+            self.directory_read_records.final_offset() > start_offset;
+        Ok(())
     }
 }
 
@@ -1142,6 +1316,52 @@ fn find_dirent(data: &[u8], needle: &[u8]) -> Result<Option<Ext2DirEntryRecord>,
         offset += rec_len_usize;
     }
     Ok(None)
+}
+
+fn collect_dirents(
+    data: &[u8],
+    base_offset: usize,
+    start_offset: usize,
+    entries: &mut Ext2DirectoryEntries,
+) -> Result<(), Ext2Error> {
+    let limit = data.len();
+    let mut offset = 0usize;
+    while offset + 8 <= limit {
+        let inode = le_u32(data, offset)?;
+        let rec_len = le_u16(data, offset + 0x04)?;
+        let name_len = *data.get(offset + 0x06).ok_or(Ext2Error::InvalidDirEntry)?;
+        let file_type = ext2_file_type(*data.get(offset + 0x07).ok_or(Ext2Error::InvalidDirEntry)?);
+        let rec_len_usize = usize::from(rec_len);
+        let name_len_usize = usize::from(name_len);
+        if rec_len_usize < 8
+            || rec_len_usize % 4 != 0
+            || name_len_usize > rec_len_usize.saturating_sub(8)
+            || name_len_usize > EXT2_NAME_MAX
+            || offset + rec_len_usize > limit
+        {
+            return Err(Ext2Error::InvalidDirEntry);
+        }
+
+        let absolute_offset = base_offset + offset;
+        let next_offset = absolute_offset + rec_len_usize;
+        if inode != 0 && next_offset > start_offset {
+            let mut name = [0u8; EXT2_NAME_MAX];
+            name[..name_len_usize].copy_from_slice(&data[offset + 8..offset + 8 + name_len_usize]);
+            entries.push(Ext2DirectoryEntry {
+                record: Ext2DirEntryRecord {
+                    inode,
+                    rec_len,
+                    name_len,
+                    file_type,
+                    name,
+                },
+                offset: absolute_offset,
+                next_offset,
+            })?;
+        }
+        offset += rec_len_usize;
+    }
+    Ok(())
 }
 
 const fn ext2_file_type(file_type: u8) -> Ext2FileType {

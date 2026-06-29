@@ -1,6 +1,6 @@
 use super::{
     block_device::{BlockDeviceProvider, BlockDeviceRegistry},
-    ext2::{Ext2DirEntryRecord, Ext2Error, Ext2FileSystem, Ext2InodeRecord},
+    ext2::{Ext2DirEntryRecord, Ext2DirectoryEntries, Ext2Error, Ext2FileSystem, Ext2InodeRecord},
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
 use alloc::vec::Vec;
@@ -1343,6 +1343,22 @@ impl VfsCore {
         Ok(file_ref)
     }
 
+    pub fn open_directory(&mut self, dentry_ref: DentryRef) -> Result<FileRef, VfsError> {
+        let dentry_ref = self.follow_mount(dentry_ref)?;
+        let inode_ref = self.positive_dentry(dentry_ref)?.inode_ref();
+        if !self
+            .inode(inode_ref)
+            .ok_or(VfsError::InvalidRef)?
+            .is_directory()
+        {
+            return Err(VfsError::NotDirectory);
+        }
+
+        let file_ref = FileRef::new(self.files.len());
+        self.files.push(File::new(file_ref, dentry_ref, inode_ref));
+        Ok(file_ref)
+    }
+
     pub fn walk_path<P: BlockDeviceProvider>(
         &mut self,
         fs_struct: &FsStruct,
@@ -1390,6 +1406,20 @@ impl VfsCore {
     ) -> Result<FileRef, VfsError> {
         let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
         let file_ref = self.open_file(dentry_ref)?;
+        self.open_path_allocated_file = true;
+        Ok(file_ref)
+    }
+
+    pub fn open_directory_path<P: BlockDeviceProvider>(
+        &mut self,
+        fs_struct: &FsStruct,
+        fs: &mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        path: &[u8],
+    ) -> Result<FileRef, VfsError> {
+        let dentry_ref = self.walk_path(fs_struct, fs, registry, provider, path)?;
+        let file_ref = self.open_directory(dentry_ref)?;
         self.open_path_allocated_file = true;
         Ok(file_ref)
     }
@@ -1514,6 +1544,30 @@ impl VfsCore {
         self.ext2_read_dispatched = true;
         self.file_read_returns_backend_data = true;
         Ok(len)
+    }
+
+    pub fn read_ext2_dir<'a, P: BlockDeviceProvider>(
+        &mut self,
+        fs: &'a mut Ext2FileSystem,
+        registry: &mut BlockDeviceRegistry,
+        provider: &mut P,
+        file_ref: FileRef,
+        offset: usize,
+    ) -> Result<&'a Ext2DirectoryEntries, VfsError> {
+        let inode_ref = self.file(file_ref).ok_or(VfsError::InvalidRef)?.inode_ref();
+        let inode = self.inode(inode_ref).ok_or(VfsError::InvalidRef)?;
+        if !inode.is_directory() || inode.removed() {
+            return Err(VfsError::NotDirectory);
+        }
+        if !inode.read_only_backed() || inode.ext2_binding().is_none() {
+            return Err(VfsError::FsTypeMissing);
+        }
+
+        let ino = inode.ext2_binding().ok_or(VfsError::FsTypeMissing)?.ino();
+        let entries = fs.read_vfs_directory(registry, provider, ino, offset)?;
+        self.read_count = self.read_count.saturating_add(1);
+        self.ext2_read_dispatched = true;
+        Ok(entries)
     }
 
     pub fn read_dir(&mut self, dir_ref: DentryRef) -> Result<Vec<DirEntry>, VfsError> {

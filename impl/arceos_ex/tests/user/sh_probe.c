@@ -56,7 +56,7 @@ static int probe_directory_enumeration(void)
 		struct linux_dirent64_probe *entry =
 			(struct linux_dirent64_probe *)(void *)(dir_buf + offset);
 
-		if (entry->d_reclen < sizeof(*entry) + 1 ||
+		if (entry->d_reclen < offsetof(struct linux_dirent64_probe, d_name) + 1 ||
 		    offset + entry->d_reclen > bytes) {
 			return 44;
 		}

@@ -8,6 +8,8 @@ kunit_app=$4
 kunit_handlers=$5
 smoke_app=$6
 test_plic_providers=${7:-}
+default_overlay_map="tests/user/rootfs-overlay.map"
+init_fileio_overlay_map="tests/user/rootfs-overlay-init-fileio.map"
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
@@ -90,6 +92,17 @@ run_user_boot_case() {
     add_summary "$total" "$pass" "$fail"
 }
 
+run_user_boot_overlay_case() {
+    local name=$1
+    local provider=$2
+    local overlay_map=$3
+    local log=$4
+    local image=$5
+
+    run_user_boot_case "$name" "$log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider" \
+        ROOTFS_OVERLAY_MAP="$overlay_map" VIRTIO_BLK_IMAGE="$image" FORCE=1
+}
+
 run_kunit_case() {
     local name=$1
     local provider=$2
@@ -126,8 +139,10 @@ run_smoke_case() {
     local name=$1
     local provider=$2
     local log=$3
+    local image=$4
 
-    run_with_log "$log" "$make_cmd" run APP="$smoke_app" PLIC_PROVIDER="$provider"
+    run_with_log "$log" "$make_cmd" run APP="$smoke_app" PLIC_PROVIDER="$provider" \
+        VIRTIO_BLK_IMAGE="$image" FORCE=1
     local rc=$?
     local counts
     local pass
@@ -173,15 +188,21 @@ summary_fail=0
 record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
 add_summary "$verify_total" "$verify_pass" "$verify_fail"
 run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run
-run_user_boot_case "run user native" "$tmpdir/run-user-native.log" "$make_cmd" run APP=user-boot
+run_user_boot_overlay_case "run user native" native "$default_overlay_map" \
+    "$tmpdir/run-user-native.log" "$tmpdir/user-native-default.raw"
+run_user_boot_overlay_case "run user init_fileio native" native "$init_fileio_overlay_map" \
+    "$tmpdir/run-user-init-fileio-native.log" "$tmpdir/user-native-init-fileio.raw"
 run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
-run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log"
+run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log" "$tmpdir/smoke-native.raw"
 
 for provider in $test_plic_providers; do
     run_command_case "run hello $provider" "$tmpdir/run-hello-$provider.log" "$make_cmd" run PLIC_PROVIDER="$provider"
-    run_user_boot_case "run user $provider" "$tmpdir/run-user-$provider.log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider"
+    run_user_boot_overlay_case "run user $provider" "$provider" "$default_overlay_map" \
+        "$tmpdir/run-user-$provider.log" "$tmpdir/user-$provider-default.raw"
+    run_user_boot_overlay_case "run user init_fileio $provider" "$provider" "$init_fileio_overlay_map" \
+        "$tmpdir/run-user-init-fileio-$provider.log" "$tmpdir/user-$provider-init-fileio.raw"
     run_kunit_case "KUnit $provider" "$provider" "$tmpdir/kunit-$provider.log"
-    run_smoke_case "app smoke $provider" "$provider" "$tmpdir/smoke-$provider.log"
+    run_smoke_case "app smoke $provider" "$provider" "$tmpdir/smoke-$provider.log" "$tmpdir/smoke-$provider.raw"
 done
 printf '\nTest summary:\n'
 printf '%s' "$summary_rows"
