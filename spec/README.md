@@ -29,4 +29,4 @@
 
 各个规格层之间自上向下排列，上级约束下级，下级是对上级的明确、细化或后续：
 
-![规格层次约束](pic/spec-level.svg)
+![规格层次约束](charter/pic/spec-level.svg)
