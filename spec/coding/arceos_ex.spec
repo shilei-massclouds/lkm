@@ -123,6 +123,7 @@ predicate arceos_ex_must_user_syscall_exit_stop_first_user_process() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
 predicate arceos_ex_must_user_boot_not_require_partition_objects_for_whole_disk_ext2() -> bool;
+predicate arceos_ex_must_user_boot_harness_require_zero_user_exit_status() -> bool;
 predicate arceos_ex_must_action_lowering_use_context_ref_and_typed_packet() -> bool;
 predicate arceos_ex_must_phase_boundary_guard_lower_to_context_contribution_only() -> bool;
 predicate arceos_ex_must_preemption_guard_lower_to_counted_enter_exit() -> bool;
@@ -1435,6 +1436,14 @@ type ArceosExStartupPhaseCodingMust {
          * implement a full VMA tree, fd table, devfs console file, TTY line
          * discipline, futex/clone/thread-group semantics, fork/wait or signal
          * semantics.
+         *
+         * APP=user-boot validation in make test must not treat QEMU/SBI
+         * shutdown success as sufficient. The host harness must parse the
+         * ordinary guest output line "user exit status=N" and require N == 0
+         * for native and every configured provider. A nonzero status, missing
+         * status line, or failed QEMU command is a visible test failure. The
+         * guest exit syscall path still owns status printing and shutdown; the
+         * harness only interprets the output.
          */
         arceos_ex_must_user_boot_payload_bind_kernel_init_task();
         arceos_ex_must_first_user_address_space_bind_kernel_init_task();
@@ -1459,6 +1468,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
         arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();
+        arceos_ex_must_user_boot_harness_require_zero_user_exit_status();
 
         /*
          * Whole-disk ext2 input:

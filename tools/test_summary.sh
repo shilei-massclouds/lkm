@@ -63,6 +63,33 @@ run_command_case() {
     add_summary "$total" "$pass" "$fail"
 }
 
+run_user_boot_case() {
+    local name=$1
+    local log=$2
+    shift 2
+
+    run_with_log "$log" "$@"
+    local rc=$?
+    local exit_status
+    local total=1
+    local pass=0
+    local fail=1
+    exit_status=$(sed -n 's/.*user exit status=\([0-9][0-9]*\).*/\1/p' "$log" | tail -n 1)
+    if [ "$rc" -eq 0 ] && [ "$exit_status" = "0" ]; then
+        pass=1
+        fail=0
+    else
+        status=1
+        if [ -z "$exit_status" ]; then
+            printf 'user-boot exit status missing in %s\n' "$name"
+        else
+            printf 'user-boot exit status for %s: %s\n' "$name" "$exit_status"
+        fi
+    fi
+    record_row "$name" "$total" "$pass" "$fail"
+    add_summary "$total" "$pass" "$fail"
+}
+
 run_kunit_case() {
     local name=$1
     local provider=$2
@@ -146,13 +173,13 @@ summary_fail=0
 record_row "spec verify" "$verify_total" "$verify_pass" "$verify_fail"
 add_summary "$verify_total" "$verify_pass" "$verify_fail"
 run_command_case "run hello native" "$tmpdir/run-hello-native.log" "$make_cmd" run
-run_command_case "run user native" "$tmpdir/run-user-native.log" "$make_cmd" run APP=user-boot
+run_user_boot_case "run user native" "$tmpdir/run-user-native.log" "$make_cmd" run APP=user-boot
 run_kunit_case "KUnit native" native "$tmpdir/kunit-native.log"
 run_smoke_case "app smoke native" native "$tmpdir/smoke-native.log"
 
 for provider in $test_plic_providers; do
     run_command_case "run hello $provider" "$tmpdir/run-hello-$provider.log" "$make_cmd" run PLIC_PROVIDER="$provider"
-    run_command_case "run user $provider" "$tmpdir/run-user-$provider.log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider"
+    run_user_boot_case "run user $provider" "$tmpdir/run-user-$provider.log" "$make_cmd" run APP=user-boot PLIC_PROVIDER="$provider"
     run_kunit_case "KUnit $provider" "$provider" "$tmpdir/kunit-$provider.log"
     run_smoke_case "app smoke $provider" "$provider" "$tmpdir/smoke-$provider.log"
 done
