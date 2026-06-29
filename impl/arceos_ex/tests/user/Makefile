@@ -4,13 +4,6 @@ ARCH ?= riscv64
 # - *_nolibc.c is freestanding/no-libc C.
 # - unsuffixed .c names are reserved for libc-linked tests.
 USER_TEST ?= init_hello
-ifeq ($(USER_TEST),user_smoke)
-USER_TEST_SRC ?= smoke/smoke.c smoke/init_fileio.c smoke/sh_probe.c
-USER_TEST_DEPS ?= smoke/smoke.h
-else
-USER_TEST_SRC ?= $(firstword $(wildcard $(USER_TEST).c) $(wildcard $(USER_TEST).S) $(USER_TEST).S)
-USER_TEST_DEPS ?=
-endif
 USER_TEST_TOOLCHAIN ?= gnu
 USER_TEST_LINK ?= static
 USER_TEST_OUT ?= ../../build/rootfs-user-tests/$(USER_TEST)-$(USER_TEST_TOOLCHAIN)-$(USER_TEST_LINK)
@@ -65,6 +58,11 @@ LIBC_CFLAGS ?= \
 	-Wl,--build-id=none \
 	$(USER_TEST_LINK_FLAGS)
 
+ifeq ($(USER_TEST),user_smoke)
+USER_TEST_CFLAGS ?= $(LIBC_CFLAGS)
+else
+USER_TEST_SRC ?= $(firstword $(wildcard $(USER_TEST).c) $(wildcard $(USER_TEST).S) $(USER_TEST).S)
+USER_TEST_DEPS ?=
 USER_TEST_NOLIBC := $(filter %.S %_nolibc.c,$(USER_TEST_SRC))
 
 ifeq ($(USER_TEST_NOLIBC),)
@@ -75,14 +73,23 @@ ifeq ($(suffix $(USER_TEST_SRC)),.c)
 USER_TEST_CFLAGS += -ffreestanding -fno-stack-protector -no-pie
 endif
 endif
+endif
 
 .PHONY: build clean
 
+ifeq ($(USER_TEST),user_smoke)
+build:
+	$(MAKE) -C smoke build \
+		USER_TEST_OUT="$(abspath $(USER_TEST_OUT))" \
+		USER_TEST_CC="$(USER_TEST_CC)" \
+		USER_TEST_CFLAGS="$(USER_TEST_CFLAGS)"
+else
 build: $(USER_TEST_OUT)
 
 $(USER_TEST_OUT): $(USER_TEST_SRC) $(USER_TEST_DEPS) Makefile
 	mkdir -p $(dir $@)
 	$(USER_TEST_CC) $(USER_TEST_CFLAGS) -o $@ $(USER_TEST_SRC)
+endif
 
 clean:
 	rm -rf ../../build/rootfs-user-tests
