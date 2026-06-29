@@ -29,3 +29,5 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+
+*Zone.Identifier
