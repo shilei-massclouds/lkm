@@ -1,6 +1,8 @@
 #include <stddef.h>
 #include <signal.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "smoke.h"
@@ -90,6 +92,46 @@ static int smoke_rt_sigprocmask(void)
 	return 0;
 }
 
+static int smoke_time_syscalls(void)
+{
+	struct timespec ts;
+	struct timeval tv;
+	struct timezone tz;
+	long rc;
+
+	ts.tv_nsec = -1;
+	rc = syscall(SYS_clock_gettime, CLOCK_MONOTONIC, &ts);
+	if (rc != 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000L) {
+		return 56;
+	}
+	if (SAY_LITERAL("syscall clock_gettime monotonic ok\n") < 0) {
+		return 57;
+	}
+
+	ts.tv_nsec = -1;
+	rc = syscall(SYS_clock_gettime, CLOCK_REALTIME, &ts);
+	if (rc != 0 || ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000L) {
+		return 58;
+	}
+	if (SAY_LITERAL("syscall clock_gettime realtime ok\n") < 0) {
+		return 59;
+	}
+
+	tv.tv_usec = -1;
+	tz.tz_minuteswest = -1;
+	tz.tz_dsttime = -1;
+	rc = syscall(SYS_gettimeofday, &tv, &tz);
+	if (rc != 0 || tv.tv_usec < 0 || tv.tv_usec >= 1000000L ||
+	    tz.tz_minuteswest != 0 || tz.tz_dsttime != 0) {
+		return 60;
+	}
+	if (SAY_LITERAL("syscall gettimeofday ok\n") < 0) {
+		return 61;
+	}
+
+	return 0;
+}
+
 static int smoke_getrandom(void)
 {
 	unsigned char random_bytes[16];
@@ -107,6 +149,8 @@ static int smoke_getrandom(void)
 
 int smoke_sh_probe(void)
 {
+	int status;
+
 	if (SAY_LITERAL("sh_probe entry ok\n") < 0) {
 		return 41;
 	}
@@ -115,6 +159,10 @@ int smoke_sh_probe(void)
 	}
 	if (smoke_rt_sigprocmask() != 0) {
 		return 52;
+	}
+	status = smoke_time_syscalls();
+	if (status != 0) {
+		return status;
 	}
 	if (smoke_getrandom() != 0) {
 		return 42;

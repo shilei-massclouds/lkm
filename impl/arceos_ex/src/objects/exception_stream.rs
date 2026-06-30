@@ -66,9 +66,11 @@ const SYSCALL_FSTAT: usize = 80;
 const SYSCALL_EXIT: usize = 93;
 const SYSCALL_EXIT_GROUP: usize = 94;
 const SYSCALL_SET_TID_ADDRESS: usize = 96;
+const SYSCALL_CLOCK_GETTIME: usize = 113;
 const SYSCALL_RT_SIGPROCMASK: usize = 135;
 const SYSCALL_SETGID: usize = 144;
 const SYSCALL_SETUID: usize = 146;
+const SYSCALL_GETTIMEOFDAY: usize = 169;
 const SYSCALL_GETUID: usize = 174;
 const SYSCALL_GETGID: usize = 176;
 const SYSCALL_BRK: usize = 214;
@@ -95,6 +97,13 @@ const FD_CLOEXEC: usize = 1;
 const TIOCGWINSZ: usize = 0x5413;
 const WINSIZE_SIZE: usize = 8;
 const STAT_SIZE: usize = 128;
+const TIMESPEC_SIZE: usize = 16;
+const TIMEVAL_SIZE: usize = 16;
+const TIMEZONE_SIZE: usize = 8;
+const CLOCK_REALTIME: usize = 0;
+const CLOCK_MONOTONIC: usize = 1;
+const NSEC_PER_SEC: u64 = 1_000_000_000;
+const USEC_PER_SEC: u64 = 1_000_000;
 const RT_SIGSET_SIZE: usize = core::mem::size_of::<usize>();
 const SIG_BLOCK: usize = 0;
 const SIG_UNBLOCK: usize = 1;
@@ -137,6 +146,8 @@ pub struct SyscallTable {
     setuid_supported: bool,
     setgid_supported: bool,
     rt_sigprocmask_supported: bool,
+    clock_gettime_supported: bool,
+    gettimeofday_supported: bool,
     fstat_supported: bool,
     fcntl_supported: bool,
     ioctl_supported: bool,
@@ -157,6 +168,7 @@ pub struct SyscallTable {
     stat_usercopy_ready: bool,
     getrandom_usercopy_ready: bool,
     signal_mask_usercopy_ready: bool,
+    time_usercopy_ready: bool,
     ioctl_usercopy_ready: bool,
     write_routes_to_console: bool,
     writev_routes_to_files_struct: bool,
@@ -179,6 +191,11 @@ pub struct SyscallTable {
     rt_sigprocmask_sigsetsize_bound: bool,
     rt_sigprocmask_unblockable_signals_cleared: bool,
     signal_delivery_deferred: bool,
+    clock_gettime_routes_to_timer_provider: bool,
+    gettimeofday_routes_to_timer_provider: bool,
+    clock_gettime_clockid_first_slice_bound: bool,
+    time_struct_layout_bound: bool,
+    time_full_linux_model_deferred: bool,
     fstat_routes_to_files_struct: bool,
     fcntl_routes_to_files_struct: bool,
     ioctl_routes_to_files_struct: bool,
@@ -199,6 +216,8 @@ pub struct SyscallTable {
     setuid_observed: AtomicU8,
     setgid_observed: AtomicU8,
     rt_sigprocmask_observed: AtomicU8,
+    clock_gettime_observed: AtomicU8,
+    gettimeofday_observed: AtomicU8,
     fstat_observed: AtomicU8,
     fcntl_observed: AtomicU8,
     ioctl_observed: AtomicU8,
@@ -227,6 +246,8 @@ impl SyscallTable {
             setuid_supported: false,
             setgid_supported: false,
             rt_sigprocmask_supported: false,
+            clock_gettime_supported: false,
+            gettimeofday_supported: false,
             fstat_supported: false,
             fcntl_supported: false,
             ioctl_supported: false,
@@ -247,6 +268,7 @@ impl SyscallTable {
             stat_usercopy_ready: false,
             getrandom_usercopy_ready: false,
             signal_mask_usercopy_ready: false,
+            time_usercopy_ready: false,
             ioctl_usercopy_ready: false,
             write_routes_to_console: false,
             writev_routes_to_files_struct: false,
@@ -269,6 +291,11 @@ impl SyscallTable {
             rt_sigprocmask_sigsetsize_bound: false,
             rt_sigprocmask_unblockable_signals_cleared: false,
             signal_delivery_deferred: false,
+            clock_gettime_routes_to_timer_provider: false,
+            gettimeofday_routes_to_timer_provider: false,
+            clock_gettime_clockid_first_slice_bound: false,
+            time_struct_layout_bound: false,
+            time_full_linux_model_deferred: false,
             fstat_routes_to_files_struct: false,
             fcntl_routes_to_files_struct: false,
             ioctl_routes_to_files_struct: false,
@@ -289,6 +316,8 @@ impl SyscallTable {
             setuid_observed: AtomicU8::new(0),
             setgid_observed: AtomicU8::new(0),
             rt_sigprocmask_observed: AtomicU8::new(0),
+            clock_gettime_observed: AtomicU8::new(0),
+            gettimeofday_observed: AtomicU8::new(0),
             fstat_observed: AtomicU8::new(0),
             fcntl_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
@@ -377,6 +406,16 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn rt_sigprocmask_supported(&self) -> bool {
         self.rt_sigprocmask_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn clock_gettime_supported(&self) -> bool {
+        self.clock_gettime_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn gettimeofday_supported(&self) -> bool {
+        self.gettimeofday_supported
     }
 
     #[allow(dead_code)]
@@ -477,6 +516,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn signal_mask_usercopy_ready(&self) -> bool {
         self.signal_mask_usercopy_ready
+    }
+
+    #[allow(dead_code)]
+    pub const fn time_usercopy_ready(&self) -> bool {
+        self.time_usercopy_ready
     }
 
     #[allow(dead_code)]
@@ -590,6 +634,31 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn clock_gettime_routes_to_timer_provider(&self) -> bool {
+        self.clock_gettime_routes_to_timer_provider
+    }
+
+    #[allow(dead_code)]
+    pub const fn gettimeofday_routes_to_timer_provider(&self) -> bool {
+        self.gettimeofday_routes_to_timer_provider
+    }
+
+    #[allow(dead_code)]
+    pub const fn clock_gettime_clockid_first_slice_bound(&self) -> bool {
+        self.clock_gettime_clockid_first_slice_bound
+    }
+
+    #[allow(dead_code)]
+    pub const fn time_struct_layout_bound(&self) -> bool {
+        self.time_struct_layout_bound
+    }
+
+    #[allow(dead_code)]
+    pub const fn time_full_linux_model_deferred(&self) -> bool {
+        self.time_full_linux_model_deferred
+    }
+
+    #[allow(dead_code)]
     pub const fn fstat_routes_to_files_struct(&self) -> bool {
         self.fstat_routes_to_files_struct
     }
@@ -690,6 +759,16 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn clock_gettime_observed(&self) -> bool {
+        self.clock_gettime_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
+    pub fn gettimeofday_observed(&self) -> bool {
+        self.gettimeofday_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn fstat_observed(&self) -> bool {
         self.fstat_observed.load(Ordering::Acquire) != 0
     }
@@ -750,6 +829,8 @@ impl SyscallTable {
         self.setuid_supported = true;
         self.setgid_supported = true;
         self.rt_sigprocmask_supported = true;
+        self.clock_gettime_supported = true;
+        self.gettimeofday_supported = true;
         self.fstat_supported = true;
         self.fcntl_supported = true;
         self.ioctl_supported = true;
@@ -770,6 +851,7 @@ impl SyscallTable {
         self.stat_usercopy_ready = true;
         self.getrandom_usercopy_ready = true;
         self.signal_mask_usercopy_ready = true;
+        self.time_usercopy_ready = true;
         self.ioctl_usercopy_ready = true;
         self.write_routes_to_console = true;
         self.writev_routes_to_files_struct = true;
@@ -792,6 +874,11 @@ impl SyscallTable {
         self.rt_sigprocmask_sigsetsize_bound = true;
         self.rt_sigprocmask_unblockable_signals_cleared = true;
         self.signal_delivery_deferred = true;
+        self.clock_gettime_routes_to_timer_provider = true;
+        self.gettimeofday_routes_to_timer_provider = true;
+        self.clock_gettime_clockid_first_slice_bound = true;
+        self.time_struct_layout_bound = true;
+        self.time_full_linux_model_deferred = true;
         self.fstat_routes_to_files_struct = true;
         self.fcntl_routes_to_files_struct = true;
         self.ioctl_routes_to_files_struct = true;
@@ -992,6 +1079,37 @@ impl SyscallTable {
         }
 
         syscall_table_rt_sigprocmask(self, frame);
+    }
+
+    pub fn clock_gettime(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.clock_gettime_supported
+            || !self.time_usercopy_ready
+            || !self.clock_gettime_routes_to_timer_provider
+            || !self.clock_gettime_clockid_first_slice_bound
+            || !self.time_struct_layout_bound
+            || !self.time_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_clock_gettime(self, frame);
+    }
+
+    pub fn gettimeofday(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.gettimeofday_supported
+            || !self.time_usercopy_ready
+            || !self.gettimeofday_routes_to_timer_provider
+            || !self.time_struct_layout_bound
+            || !self.time_full_linux_model_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_gettimeofday(self, frame);
     }
 
     pub fn fstat(&self, frame: &mut TrapFrame) {
@@ -1432,9 +1550,11 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_NEWFSTATAT => table.newfstatat(frame),
         SYSCALL_FSTAT => table.fstat(frame),
         SYSCALL_SET_TID_ADDRESS => table.set_tid_address(frame),
+        SYSCALL_CLOCK_GETTIME => table.clock_gettime(frame),
         SYSCALL_RT_SIGPROCMASK => table.rt_sigprocmask(frame),
         SYSCALL_SETGID => table.setgid(frame),
         SYSCALL_SETUID => table.setuid(frame),
+        SYSCALL_GETTIMEOFDAY => table.gettimeofday(frame),
         SYSCALL_GETUID => table.getuid(frame),
         SYSCALL_GETGID => table.getgid(frame),
         SYSCALL_BRK => table.brk(frame),
@@ -1858,6 +1978,85 @@ fn syscall_table_rt_sigprocmask(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.rt_sigprocmask_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_clock_gettime(table: &SyscallTable, frame: &mut TrapFrame) {
+    let clockid = frame.reg(10);
+    let timespec_ptr = frame.reg(11);
+    if !time_clockid_supported(clockid) {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+
+    let Some((sec, nsec)) = read_timer_parts(clockid, NSEC_PER_SEC) else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+    let mut buffer = [0u8; TIMESPEC_SIZE];
+    write_u64(&mut buffer, 0, sec);
+    write_u64(&mut buffer, 8, nsec);
+    if !copy_to_user(timespec_ptr, &buffer) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.clock_gettime_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_gettimeofday(table: &SyscallTable, frame: &mut TrapFrame) {
+    let timeval_ptr = frame.reg(10);
+    let timezone_ptr = frame.reg(11);
+    if timeval_ptr != 0 {
+        let Some((sec, usec)) = read_timer_parts(CLOCK_REALTIME, USEC_PER_SEC) else {
+            complete_unsupported_syscall(frame);
+            return;
+        };
+        let mut buffer = [0u8; TIMEVAL_SIZE];
+        write_u64(&mut buffer, 0, sec);
+        write_u64(&mut buffer, 8, usec);
+        if !copy_to_user(timeval_ptr, &buffer) {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+    }
+    if timezone_ptr != 0 {
+        let buffer = [0u8; TIMEZONE_SIZE];
+        if !copy_to_user(timezone_ptr, &buffer) {
+            complete_error_syscall(frame, EFAULT);
+            return;
+        }
+    }
+
+    table.gettimeofday_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn time_clockid_supported(clockid: usize) -> bool {
+    matches!(clockid, CLOCK_REALTIME | CLOCK_MONOTONIC)
+}
+
+fn read_timer_parts(clockid: usize, subsec_scale: u64) -> Option<(u64, u64)> {
+    let ctx = crate::context::context_ref();
+    if ctx.timekeeper.state() != State::Ready {
+        return None;
+    }
+    match clockid {
+        CLOCK_REALTIME if !ctx.timekeeper.wall_time_ready() => return None,
+        CLOCK_MONOTONIC if !ctx.timekeeper.monotonic_time_ready() => return None,
+        CLOCK_REALTIME | CLOCK_MONOTONIC => {}
+        _ => return None,
+    }
+
+    let timebase_hz = ctx.riscv_timer_provider.timebase_hz();
+    if timebase_hz == 0 {
+        return None;
+    }
+    let ticks = ctx.riscv_timer_provider.read_time()?;
+    let sec = ticks / timebase_hz;
+    let subsec =
+        ((ticks % timebase_hz) as u128 * subsec_scale as u128 / timebase_hz as u128) as u64;
+    Some((sec, subsec))
 }
 
 fn syscall_table_fstat(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -2434,9 +2633,11 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_NEWFSTATAT => "newfstatat",
         SYSCALL_FSTAT => "fstat",
         SYSCALL_SET_TID_ADDRESS => "set_tid_address",
+        SYSCALL_CLOCK_GETTIME => "clock_gettime",
         SYSCALL_RT_SIGPROCMASK => "rt_sigprocmask",
         SYSCALL_SETGID => "setgid",
         SYSCALL_SETUID => "setuid",
+        SYSCALL_GETTIMEOFDAY => "gettimeofday",
         SYSCALL_GETUID => "getuid",
         SYSCALL_GETGID => "getgid",
         SYSCALL_BRK => "brk",
