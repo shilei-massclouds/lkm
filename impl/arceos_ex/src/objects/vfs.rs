@@ -1405,13 +1405,19 @@ impl VfsCore {
         if self.lifecycle.state() != State::Ready {
             return Err(VfsError::CoreNotReady);
         }
-        if !path.starts_with(b"/") {
-            return Err(VfsError::UnsupportedPath);
-        }
         if path.len() > VFS_PATH_MAX {
             return Err(VfsError::UnsupportedPath);
         }
-        let root = fs_struct.root_dentry().ok_or(VfsError::MountMissing)?;
+        let absolute = path.starts_with(b"/");
+        if !absolute && path.iter().any(|byte| *byte == b'/') {
+            return Err(VfsError::UnsupportedPath);
+        }
+        let start_dentry = if absolute {
+            fs_struct.root_dentry()
+        } else {
+            fs_struct.pwd_dentry()
+        }
+        .ok_or(VfsError::MountMissing)?;
         let mut path_buf = [0u8; VFS_PATH_MAX];
         path_buf[..path.len()].copy_from_slice(path);
         let mut path_len = path.len();
@@ -1420,7 +1426,7 @@ impl VfsCore {
 
         let mut followed_symlinks = 0usize;
         loop {
-            let mut current = root;
+            let mut current = start_dentry;
             let mut offset = 0usize;
             let mut restarted_from_symlink = false;
             while offset < path_len {
@@ -1891,6 +1897,12 @@ impl VfsCore {
         name: &[u8],
     ) -> Result<DentryRef, VfsError> {
         let parent_ref = self.follow_mount(parent_ref)?;
+        if name == b"." {
+            return Ok(parent_ref);
+        }
+        if name == b".." {
+            return Err(VfsError::UnsupportedPath);
+        }
         let parent = self.positive_dentry(parent_ref)?;
         let parent_inode = self.inode(parent.inode_ref()).ok_or(VfsError::InvalidRef)?;
         if !parent_inode.is_directory() {
@@ -1916,8 +1928,20 @@ impl VfsCore {
         if self.lifecycle.state() != State::Ready {
             return Err(VfsError::CoreNotReady);
         }
-        if !path.starts_with(b"/") || path.len() > VFS_PATH_MAX {
+        if path.len() > VFS_PATH_MAX {
             return Err(VfsError::UnsupportedPath);
+        }
+        if !path.starts_with(b"/") {
+            if path.is_empty() || path.iter().any(|byte| *byte == b'/') {
+                return Err(VfsError::UnsupportedPath);
+            }
+            let (name, name_len) = copy_name(path)?;
+            let parent = fs_struct.pwd_dentry().ok_or(VfsError::MountMissing)?;
+            return Ok(PathFinal {
+                parent,
+                name,
+                name_len,
+            });
         }
 
         let end = path.len();

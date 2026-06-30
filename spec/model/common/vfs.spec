@@ -11,12 +11,15 @@
  * subsystems. The only block-backed filesystem path currently admitted is a
  * read-only ext2 mount whose lookup/read operations dispatch to Ext2FileSystem.
  * FsStruct carries the task-visible root and pwd dentry references. The
- * current path-walk slice supports absolute paths from FsStruct.root, direct
- * child lookup, mount crossing and Linux-like symlink restart semantics for
- * the modeled read-only ext2 subset. Readlink-style lookup is a separate
+ * current path-walk slice supports absolute paths from FsStruct.root, the
+ * first cwd-relative AT_FDCWD subset from FsStruct.pwd for "." and single
+ * relative components, direct child lookup, mount crossing and Linux-like
+ * symlink restart semantics for the modeled read-only ext2 subset.
+ * Readlink-style lookup is a separate
  * operation: it walks all parent components normally, does not follow the
  * final symlink, and copies that symlink body. Page cache, mount namespace,
- * permissions, credentials, full relative dirfd/cwd walking, rename, hardlink,
+ * permissions, credentials, full relative dirfd/cwd walking including "..",
+ * rename, hardlink,
  * open flags and complete file descriptor tables stay deferred.
  */
 
@@ -60,6 +63,9 @@ predicate vfs_ext2_lookup_dispatches_backend<T, F>(core: T, fs: F) -> bool;
 predicate vfs_ext2_read_dispatches_backend<T, F>(core: T, fs: F) -> bool;
 predicate vfs_mount_moved_to_root<T, M, D>(core: T, mount: M, root_dentry: D) -> bool;
 predicate vfs_absolute_path_walk_supported<T>(core: T) -> bool;
+predicate vfs_at_fdcwd_relative_dot_supported<T>(core: T) -> bool;
+predicate vfs_at_fdcwd_relative_single_component_supported<T>(core: T) -> bool;
+predicate vfs_relative_path_walk_full_linux_model_deferred<T>(core: T) -> bool;
 predicate vfs_path_absolute<T>(path: T) -> bool;
 predicate vfs_path_components_bound<T>(path: T) -> bool;
 predicate vfs_path_walk_resolves<T, D>(core: T, dentry: D) -> bool;
@@ -396,10 +402,12 @@ object VfsCore: ResourceObject {
                     VfsCore.state == State::Ready;
                     FsStruct.state == State::Ready;
                     fs_struct_root_dentry_set(fs, Dentry);
+                    fs_struct_pwd_dentry_set(fs, Dentry);
                     dentry_positive(Dentry);
-                    vfs_path_absolute(path);
                     vfs_path_components_bound(path);
                     vfs_absolute_path_walk_supported(VfsCore);
+                    vfs_at_fdcwd_relative_dot_supported(VfsCore);
+                    vfs_at_fdcwd_relative_single_component_supported(VfsCore);
                 }
                 drives {
                     PathWalk.Transition::Setup;
@@ -409,6 +417,7 @@ object VfsCore: ResourceObject {
                 }
                 ensures {
                     vfs_path_walk_resolves(VfsCore, Dentry);
+                    vfs_relative_path_walk_full_linux_model_deferred(VfsCore);
                 }
             }
 

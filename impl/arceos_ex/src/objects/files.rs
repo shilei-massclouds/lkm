@@ -28,6 +28,7 @@ const FILE_O_RDWR: u32 = 2;
 const FILE_O_ACCMODE: u32 = 0o3;
 const FILE_O_LARGEFILE: u32 = 0o100000;
 const FILE_O_DIRECTORY: u32 = 0o200000;
+const FILE_O_CLOEXEC: u32 = 0o2000000;
 const SEEK_SET: usize = 0;
 const SEEK_CUR: usize = 1;
 const SEEK_END: usize = 2;
@@ -1503,7 +1504,7 @@ fn serialize_linux_dirents64<'a>(
 }
 
 const fn persistent_open_flags(flags: u32) -> u32 {
-    flags & (FILE_O_ACCMODE | FILE_O_LARGEFILE | FILE_O_DIRECTORY)
+    flags & (FILE_O_ACCMODE | FILE_O_LARGEFILE | FILE_O_DIRECTORY) & !FILE_O_CLOEXEC
 }
 
 const fn linux_dirent64_reclen(name_len: usize) -> usize {

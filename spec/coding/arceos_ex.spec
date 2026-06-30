@@ -126,6 +126,8 @@ predicate arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core() -> boo
 predicate arceos_ex_must_user_init_process_carry_root_credentials_and_signal_mask() -> bool;
 predicate arceos_ex_must_syscall_table_support_credentials_first_slice() -> bool;
 predicate arceos_ex_must_syscall_table_support_rt_sigprocmask_first_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_time_read_first_slice() -> bool;
+predicate arceos_ex_must_user_syscall_error_probe_be_explicit_and_low_noise() -> bool;
 predicate arceos_ex_must_user_boot_emit_init_attempt_failure_trace() -> bool;
 predicate arceos_ex_must_user_boot_kunit_observe_init_attempt_failure_trace() -> bool;
 predicate arceos_ex_must_user_boot_extend_long_term_checkpoints_for_exec_debug() -> bool;

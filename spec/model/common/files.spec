@@ -80,6 +80,8 @@ predicate fd_table_fd_bound<T, O>(table: T, fd: FdRef, ofd: O) -> bool;
 predicate fd_table_lookup_returns<T, O>(table: T, fd: FdRef, ofd: O) -> bool;
 predicate fd_table_stdio_fds_bound<T>(table: T) -> bool;
 predicate fd_table_fd_installed<T, O>(table: T, fd: FdRef, ofd: O) -> bool;
+predicate fd_table_cloexec_bit_set_on_install<T>(table: T, fd: FdRef) -> bool;
+predicate fd_table_cloexec_not_reported_by_fgetfl<T>(table: T, fd: FdRef) -> bool;
 predicate fd_table_fd_closed<T>(table: T, fd: FdRef) -> bool;
 
 predicate open_file_description_allocated<T>(ofd: T) -> bool;
@@ -331,6 +333,8 @@ object FileDescriptorTable: ResourceObject {
                 ensures {
                     fd_table_fd_installed(self, fd, OpenFileDescription);
                     fd_table_fd_bound(self, fd, OpenFileDescription);
+                    fd_table_cloexec_bit_set_on_install(self, fd);
+                    fd_table_cloexec_not_reported_by_fgetfl(self, fd);
                 }
             }
 

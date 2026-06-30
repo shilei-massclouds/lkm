@@ -228,6 +228,8 @@ predicate syscall_table_getgid_supported<T>(table: T) -> bool;
 predicate syscall_table_setuid_supported<T>(table: T) -> bool;
 predicate syscall_table_setgid_supported<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_supported<T>(table: T) -> bool;
+predicate syscall_table_clock_gettime_supported<T>(table: T) -> bool;
+predicate syscall_table_gettimeofday_supported<T>(table: T) -> bool;
 predicate syscall_table_brk_supported<T>(table: T) -> bool;
 predicate syscall_table_mmap_supported<T>(table: T) -> bool;
 predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
@@ -240,6 +242,7 @@ predicate syscall_writev_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_read_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_getrandom_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_signal_mask_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_time_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_path_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
@@ -262,6 +265,11 @@ predicate syscall_rt_sigprocmask_routes_to_user_init_process<T, P>(table: T, pro
 predicate syscall_rt_sigprocmask_sigsetsize_bound<T>(table: T) -> bool;
 predicate syscall_rt_sigprocmask_unblockable_signals_cleared<T>(table: T) -> bool;
 predicate syscall_signal_delivery_deferred<T>(table: T) -> bool;
+predicate syscall_clock_gettime_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
+predicate syscall_gettimeofday_routes_to_timer_provider<T, P>(table: T, provider: P) -> bool;
+predicate syscall_clock_gettime_clockid_first_slice_bound<T>(table: T) -> bool;
+predicate syscall_time_struct_layout_bound<T>(table: T) -> bool;
+predicate syscall_time_full_linux_model_deferred<T>(table: T) -> bool;
 predicate syscall_brk_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
@@ -289,6 +297,8 @@ predicate syscall_table_getgid_observed<T>(table: T) -> bool;
 predicate syscall_table_setuid_observed<T>(table: T) -> bool;
 predicate syscall_table_setgid_observed<T>(table: T) -> bool;
 predicate syscall_table_rt_sigprocmask_observed<T>(table: T) -> bool;
+predicate syscall_table_clock_gettime_observed<T>(table: T) -> bool;
+predicate syscall_table_gettimeofday_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
@@ -817,6 +827,8 @@ object SyscallTable: ResourceObject {
                     syscall_table_setuid_supported(self);
                     syscall_table_setgid_supported(self);
                     syscall_table_rt_sigprocmask_supported(self);
+                    syscall_table_clock_gettime_supported(self);
+                    syscall_table_gettimeofday_supported(self);
                     syscall_table_brk_supported(self);
                     syscall_table_mmap_supported(self);
                     syscall_table_mprotect_supported(self);
@@ -829,6 +841,7 @@ object SyscallTable: ResourceObject {
                     syscall_read_usercopy_ready(self);
                     syscall_getrandom_usercopy_ready(self);
                     syscall_signal_mask_usercopy_ready(self);
+                    syscall_time_usercopy_ready(self);
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
@@ -855,6 +868,8 @@ object SyscallTable: ResourceObject {
             syscall_table_setuid_supported(self);
             syscall_table_setgid_supported(self);
             syscall_table_rt_sigprocmask_supported(self);
+            syscall_table_clock_gettime_supported(self);
+            syscall_table_gettimeofday_supported(self);
             syscall_table_brk_supported(self);
             syscall_table_mmap_supported(self);
             syscall_table_mprotect_supported(self);
@@ -867,6 +882,7 @@ object SyscallTable: ResourceObject {
             syscall_read_usercopy_ready(self);
             syscall_getrandom_usercopy_ready(self);
             syscall_signal_mask_usercopy_ready(self);
+            syscall_time_usercopy_ready(self);
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
             syscall_write_routes_to_console(self);
@@ -1198,6 +1214,72 @@ object SyscallTable: ResourceObject {
                     syscall_signal_delivery_deferred(self);
                     user_init_process_rt_sigprocmask_observed(UserInitProcess);
                     syscall_table_rt_sigprocmask_observed(self);
+                }
+            }
+
+            on Action::ClockGettime {
+                /*
+                 * Linux 6.12 RISC-V exposes clock_gettime(2) as syscall
+                 * number 113 in include/uapi/asm-generic/unistd.h. The
+                 * syscall body in kernel/time/posix-stubs.c::sys_clock_gettime()
+                 * calls do_clock_gettime(), then copies a
+                 * struct __kernel_timespec to user memory.
+                 *
+                 * The current slice serves BusyBox/musl startup probing:
+                 * CLOCK_REALTIME and CLOCK_MONOTONIC are read from the existing
+                 * Timekeeper/RiscvTimerProvider time-read boundary. Full POSIX
+                 * timer, vDSO, time namespace, seqcount retry and wall-clock
+                 * calibration are deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    Timekeeper.state == State::Ready;
+                    RiscvTimerProvider.state == State::Ready;
+                    syscall_time_usercopy_ready(self);
+                }
+
+                drives {
+                    RiscvTimerProvider.Action::ReadTime;
+                }
+
+                ensures {
+                    syscall_clock_gettime_routes_to_timer_provider(self, RiscvTimerProvider);
+                    syscall_clock_gettime_clockid_first_slice_bound(self);
+                    syscall_time_struct_layout_bound(self);
+                    syscall_time_full_linux_model_deferred(self);
+                    syscall_table_clock_gettime_observed(self);
+                }
+            }
+
+            on Action::Gettimeofday {
+                /*
+                 * Linux 6.12 RISC-V exposes gettimeofday(2) as syscall number
+                 * 169. kernel/time/time.c::sys_gettimeofday() reads
+                 * CLOCK_REALTIME via ktime_get_real_ts64(), copies
+                 * __kernel_old_timeval when tv is non-null, and copies sys_tz
+                 * when tz is non-null.
+                 *
+                 * The current slice writes timeval from the same timer-provider
+                 * read boundary and uses zero timezone fields. Timezone update,
+                 * RTC/NTP wall-clock calibration and compat layouts are
+                 * deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    Timekeeper.state == State::Ready;
+                    RiscvTimerProvider.state == State::Ready;
+                    syscall_time_usercopy_ready(self);
+                }
+
+                drives {
+                    RiscvTimerProvider.Action::ReadTime;
+                }
+
+                ensures {
+                    syscall_gettimeofday_routes_to_timer_provider(self, RiscvTimerProvider);
+                    syscall_time_struct_layout_bound(self);
+                    syscall_time_full_linux_model_deferred(self);
+                    syscall_table_gettimeofday_observed(self);
                 }
             }
 

@@ -59,6 +59,16 @@ static int smoke_directory_fileio(void)
 		return 51;
 	}
 
+	if (fstatat(AT_FDCWD, ".", &st, 0) < 0) {
+		return 64;
+	}
+	if (!S_ISDIR(st.st_mode) || st.st_size <= 0) {
+		return 65;
+	}
+	if (SAY_LITERAL("syscall newfstatat cwd dot ok\n") < 0) {
+		return 66;
+	}
+
 	if (syscall(SYS_fstat, dir_fd, &st) < 0) {
 		return 52;
 	}
@@ -125,6 +135,23 @@ static int smoke_directory_fileio(void)
 	}
 	if (SAY_LITERAL("syscall close directory ok\n") < 0) {
 		return 48;
+	}
+
+	int dot_dir_fd = syscall(SYS_openat, AT_FDCWD, ".",
+				 O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
+	if (dot_dir_fd < 0) {
+		return 67;
+	}
+	int dot_flags = fcntl(dot_dir_fd, F_GETFL, 0);
+	if (dot_flags < 0 || (dot_flags & O_DIRECTORY) == 0 ||
+	    (dot_flags & O_CLOEXEC) != 0) {
+		return 68;
+	}
+	if (close(dot_dir_fd) < 0) {
+		return 69;
+	}
+	if (SAY_LITERAL("syscall openat cwd dot cloexec ok\n") < 0) {
+		return 70;
 	}
 
 	return 0;
