@@ -1170,6 +1170,198 @@ object SyscallTable: ResourceObject {
                 }
             }
 
+            on Action::GetPid {
+                /*
+                 * Linux 6.12 kernel/sys.c::sys_getpid() returns
+                 * task_tgid_vnr(current). The current user init is the
+                 * exec-transformed KernelInitTask, so this first slice returns
+                 * the preserved PID1 task identity.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadProcessId;
+                }
+
+                ensures {
+                    syscall_getpid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_pid_read_observed(UserInitProcess);
+                    syscall_table_getpid_observed(self);
+                }
+            }
+
+            on Action::GetPpid {
+                /*
+                 * Linux 6.12 kernel/sys.c::sys_getppid() reads
+                 * current->real_parent under rcu_read_lock(). PID1 is created
+                 * from the boot idle/init_task parent, so the visible parent
+                 * tgid in init_pid_ns is 0. The current slice records that
+                 * visible-PID0 parent fact without modeling the full task tree.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadParentProcessId;
+                }
+
+                ensures {
+                    syscall_getppid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_ppid_zero_first_slice(UserInitProcess);
+                    user_init_process_ppid_read_observed(UserInitProcess);
+                    syscall_table_getppid_observed(self);
+                }
+            }
+
+            on Action::GetEuid {
+                /*
+                 * Linux 6.12 kernel/sys.c::sys_geteuid() reads current_euid().
+                 * The first slice routes it to the current UserInitProcess
+                 * root credentials substate.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadEffectiveUid;
+                }
+
+                ensures {
+                    syscall_geteuid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_euid_read_observed(UserInitProcess);
+                    syscall_table_geteuid_observed(self);
+                }
+            }
+
+            on Action::GetEgid {
+                /*
+                 * Linux 6.12 kernel/sys.c::sys_getegid() reads current_egid().
+                 * The first slice routes it to the current UserInitProcess
+                 * root credentials substate.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadEffectiveGid;
+                }
+
+                ensures {
+                    syscall_getegid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_egid_read_observed(UserInitProcess);
+                    syscall_table_getegid_observed(self);
+                }
+            }
+
+            on Action::GetResUid {
+                /*
+                 * Linux 6.12 kernel/sys.c::sys_getresuid() snapshots real,
+                 * effective and saved uid from current_cred(), then writes the
+                 * three uid_t values to user memory in order. User pointer
+                 * failure returns EFAULT. The first slice keeps all three root
+                 * ids on UserInitProcess and writes riscv64 uid_t-sized
+                 * values.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    syscall_credentials_usercopy_ready(self);
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadResUid;
+                }
+
+                ensures {
+                    syscall_getresuid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_resuid_read_observed(UserInitProcess);
+                    syscall_table_getresuid_observed(self);
+                }
+            }
+
+            on Action::GetResGid {
+                /*
+                 * Linux 6.12 kernel/sys.c::sys_getresgid() mirrors getresuid
+                 * for real/effective/saved gid. The current slice writes the
+                 * three root gid_t values from UserInitProcess.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    syscall_credentials_usercopy_ready(self);
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadResGid;
+                }
+
+                ensures {
+                    syscall_getresgid_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_resgid_read_observed(UserInitProcess);
+                    syscall_table_getresgid_observed(self);
+                }
+            }
+
+            on Action::Uname {
+                /*
+                 * Linux 6.12 RISC-V maps __NR_uname=160 to sys_newuname().
+                 * kernel/sys.c::sys_newuname() copies struct new_utsname,
+                 * whose uapi layout is six 65-byte fields. The current slice
+                 * exposes the local ../linux-6.12 init_uts_ns generated
+                 * values as a static first UTS namespace and defers writable
+                 * UTS namespaces, sethostname/setdomainname and personality
+                 * release override handling.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    syscall_utsname_usercopy_ready(self);
+                }
+
+                ensures {
+                    syscall_uname_new_utsname_layout_bound(self);
+                    syscall_uname_static_init_uts_namespace_first_slice(self);
+                    syscall_uname_full_uts_namespace_deferred(self);
+                    syscall_table_uname_observed(self);
+                }
+            }
+
+            on Action::GetCwd {
+                /*
+                 * Linux 6.12 fs/d_path.c::sys_getcwd() snapshots
+                 * current->fs root/pwd, builds a NUL-terminated path, returns
+                 * the copied byte count including NUL, and returns ERANGE when
+                 * the user buffer is too small. The current slice only covers
+                 * the boot UserInitProcess whose inherited FsStruct root and
+                 * pwd both point to the ext2 root, so getcwd returns "/\0".
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    UserInitProcess.state == State::Online;
+                    FsStruct.state == State::Ready;
+                    syscall_getcwd_usercopy_ready(self);
+                }
+
+                drives {
+                    UserInitProcess.Action::ReadCurrentWorkingDirectory;
+                }
+
+                ensures {
+                    syscall_getcwd_routes_to_user_init_process(self, UserInitProcess);
+                    user_init_process_root_cwd_first_slice(UserInitProcess, FsStruct);
+                    syscall_getcwd_returns_root_with_nul(self);
+                    syscall_table_getcwd_observed(self);
+                }
+            }
+
             on Action::SetUid {
                 /*
                  * Linux 6.12 kernel/sys.c::__sys_setuid() prepares and commits
@@ -1605,6 +1797,93 @@ object UserInitProcess: ResourceObject {
                 ensures {
                     user_init_process_root_credentials_bound(self);
                     user_init_process_gid_read_observed(self);
+                }
+            }
+
+            on Action::ReadProcessId {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_pid1_preserved(self, KernelInitTask);
+                    user_init_process_pid_read_observed(self);
+                }
+            }
+
+            on Action::ReadParentProcessId {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_pid1_preserved(self, KernelInitTask);
+                    user_init_process_ppid_zero_first_slice(self);
+                    user_init_process_ppid_read_observed(self);
+                }
+            }
+
+            on Action::ReadEffectiveUid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_euid_read_observed(self);
+                }
+            }
+
+            on Action::ReadEffectiveGid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_egid_read_observed(self);
+                }
+            }
+
+            on Action::ReadResUid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_resuid_read_observed(self);
+                }
+            }
+
+            on Action::ReadResGid {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                }
+
+                ensures {
+                    user_init_process_root_credentials_bound(self);
+                    user_init_process_resgid_read_observed(self);
+                }
+            }
+
+            on Action::ReadCurrentWorkingDirectory {
+                depends_on {
+                    UserInitProcess.state == State::Online;
+                    SyscallException.state == State::Online;
+                    FsStruct.state == State::Ready;
+                }
+
+                ensures {
+                    user_init_process_fs_struct_inherited(self, FsStruct);
+                    user_init_process_root_cwd_first_slice(self, FsStruct);
+                    user_init_process_getcwd_observed(self);
                 }
             }
 

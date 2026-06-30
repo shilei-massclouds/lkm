@@ -50,6 +50,7 @@ const UNEXPECTED_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_UNEXPECTED);
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL);
 #[cfg(not(app_user_boot))]
 const SYSCALL_POLICY: ExceptionPolicy = ExceptionPolicy(HANDLER_SYSCALL_DISABLED);
+const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_FCNTL: usize = 25;
 const SYSCALL_IOCTL: usize = 29;
 const SYSCALL_FACCESSAT: usize = 48;
@@ -70,9 +71,16 @@ const SYSCALL_CLOCK_GETTIME: usize = 113;
 const SYSCALL_RT_SIGPROCMASK: usize = 135;
 const SYSCALL_SETGID: usize = 144;
 const SYSCALL_SETUID: usize = 146;
+const SYSCALL_GETRESUID: usize = 148;
+const SYSCALL_GETRESGID: usize = 150;
+const SYSCALL_UNAME: usize = 160;
 const SYSCALL_GETTIMEOFDAY: usize = 169;
+const SYSCALL_GETPID: usize = 172;
+const SYSCALL_GETPPID: usize = 173;
 const SYSCALL_GETUID: usize = 174;
+const SYSCALL_GETEUID: usize = 175;
 const SYSCALL_GETGID: usize = 176;
+const SYSCALL_GETEGID: usize = 177;
 const SYSCALL_BRK: usize = 214;
 const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_MMAP: usize = 222;
@@ -100,6 +108,11 @@ const STAT_SIZE: usize = 128;
 const TIMESPEC_SIZE: usize = 16;
 const TIMEVAL_SIZE: usize = 16;
 const TIMEZONE_SIZE: usize = 8;
+const UID_T_SIZE: usize = 4;
+const GID_T_SIZE: usize = 4;
+const UTS_FIELD_SIZE: usize = 65;
+const NEW_UTSNAME_FIELDS: usize = 6;
+const NEW_UTSNAME_SIZE: usize = UTS_FIELD_SIZE * NEW_UTSNAME_FIELDS;
 const CLOCK_REALTIME: usize = 0;
 const CLOCK_MONOTONIC: usize = 1;
 const NSEC_PER_SEC: u64 = 1_000_000_000;
@@ -120,6 +133,7 @@ const ENOSYS: usize = 38;
 const ENOMEM: usize = 12;
 const EAGAIN: usize = 11;
 const ENOENT: usize = 2;
+const ERANGE: usize = 34;
 const EOVERFLOW: usize = 75;
 const EREMOTEIO: usize = 121;
 const ESPIPE: usize = 29;
@@ -141,8 +155,16 @@ pub struct SyscallTable {
     newfstatat_supported: bool,
     readlinkat_supported: bool,
     getrandom_supported: bool,
+    getcwd_supported: bool,
+    getpid_supported: bool,
+    getppid_supported: bool,
     getuid_supported: bool,
+    geteuid_supported: bool,
     getgid_supported: bool,
+    getegid_supported: bool,
+    getresuid_supported: bool,
+    getresgid_supported: bool,
+    uname_supported: bool,
     setuid_supported: bool,
     setgid_supported: bool,
     rt_sigprocmask_supported: bool,
@@ -169,6 +191,9 @@ pub struct SyscallTable {
     getrandom_usercopy_ready: bool,
     signal_mask_usercopy_ready: bool,
     time_usercopy_ready: bool,
+    credentials_usercopy_ready: bool,
+    utsname_usercopy_ready: bool,
+    getcwd_usercopy_ready: bool,
     ioctl_usercopy_ready: bool,
     write_routes_to_console: bool,
     writev_routes_to_files_struct: bool,
@@ -182,8 +207,19 @@ pub struct SyscallTable {
     getrandom_not_vfs_or_devfs_path: bool,
     getrandom_flags_first_slice_bound: bool,
     getrandom_full_random_core_deferred: bool,
+    getcwd_routes_to_user_init_process: bool,
+    getcwd_root_first_slice_bound: bool,
+    getpid_routes_to_user_init_process: bool,
+    getppid_routes_to_user_init_process: bool,
     getuid_routes_to_user_init_process: bool,
+    geteuid_routes_to_user_init_process: bool,
     getgid_routes_to_user_init_process: bool,
+    getegid_routes_to_user_init_process: bool,
+    getresuid_routes_to_user_init_process: bool,
+    getresgid_routes_to_user_init_process: bool,
+    uname_new_utsname_layout_bound: bool,
+    uname_static_init_uts_namespace_first_slice: bool,
+    uname_full_uts_namespace_deferred: bool,
     setuid_routes_to_user_init_process: bool,
     setgid_routes_to_user_init_process: bool,
     credentials_full_linux_model_deferred: bool,
@@ -211,8 +247,16 @@ pub struct SyscallTable {
     newfstatat_observed: AtomicU8,
     readlinkat_observed: AtomicU8,
     getrandom_observed: AtomicU8,
+    getcwd_observed: AtomicU8,
+    getpid_observed: AtomicU8,
+    getppid_observed: AtomicU8,
     getuid_observed: AtomicU8,
+    geteuid_observed: AtomicU8,
     getgid_observed: AtomicU8,
+    getegid_observed: AtomicU8,
+    getresuid_observed: AtomicU8,
+    getresgid_observed: AtomicU8,
+    uname_observed: AtomicU8,
     setuid_observed: AtomicU8,
     setgid_observed: AtomicU8,
     rt_sigprocmask_observed: AtomicU8,
@@ -241,8 +285,16 @@ impl SyscallTable {
             newfstatat_supported: false,
             readlinkat_supported: false,
             getrandom_supported: false,
+            getcwd_supported: false,
+            getpid_supported: false,
+            getppid_supported: false,
             getuid_supported: false,
+            geteuid_supported: false,
             getgid_supported: false,
+            getegid_supported: false,
+            getresuid_supported: false,
+            getresgid_supported: false,
+            uname_supported: false,
             setuid_supported: false,
             setgid_supported: false,
             rt_sigprocmask_supported: false,
@@ -269,6 +321,9 @@ impl SyscallTable {
             getrandom_usercopy_ready: false,
             signal_mask_usercopy_ready: false,
             time_usercopy_ready: false,
+            credentials_usercopy_ready: false,
+            utsname_usercopy_ready: false,
+            getcwd_usercopy_ready: false,
             ioctl_usercopy_ready: false,
             write_routes_to_console: false,
             writev_routes_to_files_struct: false,
@@ -282,8 +337,19 @@ impl SyscallTable {
             getrandom_not_vfs_or_devfs_path: false,
             getrandom_flags_first_slice_bound: false,
             getrandom_full_random_core_deferred: false,
+            getcwd_routes_to_user_init_process: false,
+            getcwd_root_first_slice_bound: false,
+            getpid_routes_to_user_init_process: false,
+            getppid_routes_to_user_init_process: false,
             getuid_routes_to_user_init_process: false,
+            geteuid_routes_to_user_init_process: false,
             getgid_routes_to_user_init_process: false,
+            getegid_routes_to_user_init_process: false,
+            getresuid_routes_to_user_init_process: false,
+            getresgid_routes_to_user_init_process: false,
+            uname_new_utsname_layout_bound: false,
+            uname_static_init_uts_namespace_first_slice: false,
+            uname_full_uts_namespace_deferred: false,
             setuid_routes_to_user_init_process: false,
             setgid_routes_to_user_init_process: false,
             credentials_full_linux_model_deferred: false,
@@ -311,8 +377,16 @@ impl SyscallTable {
             newfstatat_observed: AtomicU8::new(0),
             readlinkat_observed: AtomicU8::new(0),
             getrandom_observed: AtomicU8::new(0),
+            getcwd_observed: AtomicU8::new(0),
+            getpid_observed: AtomicU8::new(0),
+            getppid_observed: AtomicU8::new(0),
             getuid_observed: AtomicU8::new(0),
+            geteuid_observed: AtomicU8::new(0),
             getgid_observed: AtomicU8::new(0),
+            getegid_observed: AtomicU8::new(0),
+            getresuid_observed: AtomicU8::new(0),
+            getresgid_observed: AtomicU8::new(0),
+            uname_observed: AtomicU8::new(0),
             setuid_observed: AtomicU8::new(0),
             setgid_observed: AtomicU8::new(0),
             rt_sigprocmask_observed: AtomicU8::new(0),
@@ -824,8 +898,16 @@ impl SyscallTable {
         self.newfstatat_supported = true;
         self.readlinkat_supported = true;
         self.getrandom_supported = true;
+        self.getcwd_supported = true;
+        self.getpid_supported = true;
+        self.getppid_supported = true;
         self.getuid_supported = true;
+        self.geteuid_supported = true;
         self.getgid_supported = true;
+        self.getegid_supported = true;
+        self.getresuid_supported = true;
+        self.getresgid_supported = true;
+        self.uname_supported = true;
         self.setuid_supported = true;
         self.setgid_supported = true;
         self.rt_sigprocmask_supported = true;
@@ -852,6 +934,9 @@ impl SyscallTable {
         self.getrandom_usercopy_ready = true;
         self.signal_mask_usercopy_ready = true;
         self.time_usercopy_ready = true;
+        self.credentials_usercopy_ready = true;
+        self.utsname_usercopy_ready = true;
+        self.getcwd_usercopy_ready = true;
         self.ioctl_usercopy_ready = true;
         self.write_routes_to_console = true;
         self.writev_routes_to_files_struct = true;
@@ -865,8 +950,19 @@ impl SyscallTable {
         self.getrandom_not_vfs_or_devfs_path = true;
         self.getrandom_flags_first_slice_bound = true;
         self.getrandom_full_random_core_deferred = true;
+        self.getcwd_routes_to_user_init_process = true;
+        self.getcwd_root_first_slice_bound = true;
+        self.getpid_routes_to_user_init_process = true;
+        self.getppid_routes_to_user_init_process = true;
         self.getuid_routes_to_user_init_process = true;
+        self.geteuid_routes_to_user_init_process = true;
         self.getgid_routes_to_user_init_process = true;
+        self.getegid_routes_to_user_init_process = true;
+        self.getresuid_routes_to_user_init_process = true;
+        self.getresgid_routes_to_user_init_process = true;
+        self.uname_new_utsname_layout_bound = true;
+        self.uname_static_init_uts_namespace_first_slice = true;
+        self.uname_full_uts_namespace_deferred = true;
         self.setuid_routes_to_user_init_process = true;
         self.setgid_routes_to_user_init_process = true;
         self.credentials_full_linux_model_deferred = true;
@@ -1015,6 +1111,44 @@ impl SyscallTable {
         syscall_table_getrandom(self, frame);
     }
 
+    pub fn getcwd(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getcwd_supported
+            || !self.getcwd_usercopy_ready
+            || !self.getcwd_routes_to_user_init_process
+            || !self.getcwd_root_first_slice_bound
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getcwd(self, frame);
+    }
+
+    pub fn getpid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getpid_supported
+            || !self.getpid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getpid(self, frame);
+    }
+
+    pub fn getppid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getppid_supported
+            || !self.getppid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getppid(self, frame);
+    }
+
     pub fn getuid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getuid_supported
@@ -1027,6 +1161,18 @@ impl SyscallTable {
         syscall_table_getuid(self, frame);
     }
 
+    pub fn geteuid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.geteuid_supported
+            || !self.geteuid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_geteuid(self, frame);
+    }
+
     pub fn getgid(&self, frame: &mut TrapFrame) {
         if self.lifecycle.state() != State::Ready
             || !self.getgid_supported
@@ -1037,6 +1183,59 @@ impl SyscallTable {
         }
 
         syscall_table_getgid(self, frame);
+    }
+
+    pub fn getegid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getegid_supported
+            || !self.getegid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getegid(self, frame);
+    }
+
+    pub fn getresuid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getresuid_supported
+            || !self.credentials_usercopy_ready
+            || !self.getresuid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getresuid(self, frame);
+    }
+
+    pub fn getresgid(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getresgid_supported
+            || !self.credentials_usercopy_ready
+            || !self.getresgid_routes_to_user_init_process
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getresgid(self, frame);
+    }
+
+    pub fn uname(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.uname_supported
+            || !self.utsname_usercopy_ready
+            || !self.uname_new_utsname_layout_bound
+            || !self.uname_static_init_uts_namespace_first_slice
+            || !self.uname_full_uts_namespace_deferred
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_uname(self, frame);
     }
 
     pub fn setuid(&self, frame: &mut TrapFrame) {
@@ -1536,6 +1735,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
     };
 
     match frame.reg(17) {
+        SYSCALL_GETCWD => table.getcwd(frame),
         SYSCALL_FCNTL => table.fcntl(frame),
         SYSCALL_IOCTL => table.ioctl(frame),
         SYSCALL_FACCESSAT => table.faccessat(frame),
@@ -1554,9 +1754,16 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_RT_SIGPROCMASK => table.rt_sigprocmask(frame),
         SYSCALL_SETGID => table.setgid(frame),
         SYSCALL_SETUID => table.setuid(frame),
+        SYSCALL_GETRESUID => table.getresuid(frame),
+        SYSCALL_GETRESGID => table.getresgid(frame),
+        SYSCALL_UNAME => table.uname(frame),
         SYSCALL_GETTIMEOFDAY => table.gettimeofday(frame),
+        SYSCALL_GETPID => table.getpid(frame),
+        SYSCALL_GETPPID => table.getppid(frame),
         SYSCALL_GETUID => table.getuid(frame),
+        SYSCALL_GETEUID => table.geteuid(frame),
         SYSCALL_GETGID => table.getgid(frame),
+        SYSCALL_GETEGID => table.getegid(frame),
         SYSCALL_BRK => table.brk(frame),
         SYSCALL_MMAP => table.mmap(frame),
         SYSCALL_MPROTECT => table.mprotect(frame),
@@ -1875,6 +2082,63 @@ fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, read);
 }
 
+fn syscall_table_getcwd(table: &SyscallTable, frame: &mut TrapFrame) {
+    let user_ptr = frame.reg(10);
+    let size = frame.reg(11);
+    const ROOT_CWD: &[u8; 2] = b"/\0";
+
+    if size < ROOT_CWD.len() {
+        complete_error_syscall(frame, ERANGE);
+        return;
+    }
+
+    {
+        let context = crate::context::context_ref();
+        if context.fs_struct.state() != State::Ready
+            || !context.fs_struct.root_pwd_same()
+            || !context.fs_struct.chroot_dot_done()
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+    }
+
+    if !copy_to_user(user_ptr, ROOT_CWD) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+    if !crate::context::context()
+        .user_init_process
+        .observe_getcwd_root_slice()
+    {
+        complete_unsupported_syscall(frame);
+        return;
+    }
+
+    table.getcwd_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, ROOT_CWD.len());
+}
+
+fn syscall_table_getpid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let Some(pid) = crate::context::context().user_init_process.read_pid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    table.getpid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, pid);
+}
+
+fn syscall_table_getppid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let Some(ppid) = crate::context::context().user_init_process.read_ppid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    table.getppid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, ppid);
+}
+
 fn syscall_table_getuid(table: &SyscallTable, frame: &mut TrapFrame) {
     let Some(uid) = crate::context::context().user_init_process.read_uid() else {
         complete_unsupported_syscall(frame);
@@ -1885,6 +2149,16 @@ fn syscall_table_getuid(table: &SyscallTable, frame: &mut TrapFrame) {
     complete_successful_syscall(frame, uid);
 }
 
+fn syscall_table_geteuid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let Some(euid) = crate::context::context().user_init_process.read_euid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    table.geteuid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, euid);
+}
+
 fn syscall_table_getgid(table: &SyscallTable, frame: &mut TrapFrame) {
     let Some(gid) = crate::context::context().user_init_process.read_gid() else {
         complete_unsupported_syscall(frame);
@@ -1893,6 +2167,82 @@ fn syscall_table_getgid(table: &SyscallTable, frame: &mut TrapFrame) {
 
     table.getgid_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, gid);
+}
+
+fn syscall_table_getegid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let Some(egid) = crate::context::context().user_init_process.read_egid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    table.getegid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, egid);
+}
+
+fn syscall_table_getresuid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let ruid_ptr = frame.reg(10);
+    let euid_ptr = frame.reg(11);
+    let suid_ptr = frame.reg(12);
+    let Some((ruid, euid, suid)) = crate::context::context().user_init_process.read_resuid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    if !write_user_u32(ruid_ptr, ruid as u32)
+        || !write_user_u32(euid_ptr, euid as u32)
+        || !write_user_u32(suid_ptr, suid as u32)
+    {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.getresuid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_getresgid(table: &SyscallTable, frame: &mut TrapFrame) {
+    let rgid_ptr = frame.reg(10);
+    let egid_ptr = frame.reg(11);
+    let sgid_ptr = frame.reg(12);
+    let Some((rgid, egid, sgid)) = crate::context::context().user_init_process.read_resgid() else {
+        complete_unsupported_syscall(frame);
+        return;
+    };
+
+    if !write_user_u32(rgid_ptr, rgid as u32)
+        || !write_user_u32(egid_ptr, egid as u32)
+        || !write_user_u32(sgid_ptr, sgid as u32)
+    {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.getresgid_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
+}
+
+fn syscall_table_uname(table: &SyscallTable, frame: &mut TrapFrame) {
+    let user_ptr = frame.reg(10);
+    let mut buffer = [0u8; NEW_UTSNAME_SIZE];
+
+    write_uts_field(&mut buffer, 0, b"Linux");
+    write_uts_field(&mut buffer, 1, b"(none)");
+    write_uts_field(&mut buffer, 2, b"6.12.0+");
+    write_uts_field(
+        &mut buffer,
+        3,
+        b"#1 SMP PREEMPT Sun Jun 28 12:25:04 CST 2026",
+    );
+    write_uts_field(&mut buffer, 4, b"riscv64");
+    write_uts_field(&mut buffer, 5, b"(none)");
+
+    if !copy_to_user(user_ptr, &buffer) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.uname_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, 0);
 }
 
 fn syscall_table_setuid(table: &SyscallTable, frame: &mut TrapFrame) {
@@ -2441,6 +2791,19 @@ fn write_user_usize(user_ptr: usize, value: usize) -> bool {
     copy_to_user(user_ptr, &value.to_le_bytes())
 }
 
+fn write_user_u32(user_ptr: usize, value: u32) -> bool {
+    debug_assert_eq!(UID_T_SIZE, core::mem::size_of::<u32>());
+    debug_assert_eq!(GID_T_SIZE, core::mem::size_of::<u32>());
+    copy_to_user(user_ptr, &value.to_le_bytes())
+}
+
+fn write_uts_field(buffer: &mut [u8; NEW_UTSNAME_SIZE], field: usize, value: &[u8]) {
+    let start = field * UTS_FIELD_SIZE;
+    let max_len = UTS_FIELD_SIZE - 1;
+    let copy_len = core::cmp::min(value.len(), max_len);
+    buffer[start..start + copy_len].copy_from_slice(&value[..copy_len]);
+}
+
 fn copy_cstr_from_user(user_ptr: usize, dst: &mut [u8]) -> Option<usize> {
     if dst.is_empty() || user_ptr == 0 {
         return None;
@@ -2619,6 +2982,7 @@ fn print_syscall_error_diagnostic(_frame: &TrapFrame, _errno: usize) {}
 #[cfg(checkpoint_handler_user_syscall_error)]
 fn print_syscall_name(nr: usize) {
     let name = match nr {
+        SYSCALL_GETCWD => "getcwd",
         SYSCALL_FCNTL => "fcntl",
         SYSCALL_IOCTL => "ioctl",
         SYSCALL_FACCESSAT => "faccessat",
@@ -2637,9 +3001,16 @@ fn print_syscall_name(nr: usize) {
         SYSCALL_RT_SIGPROCMASK => "rt_sigprocmask",
         SYSCALL_SETGID => "setgid",
         SYSCALL_SETUID => "setuid",
+        SYSCALL_GETRESUID => "getresuid",
+        SYSCALL_GETRESGID => "getresgid",
+        SYSCALL_UNAME => "uname",
         SYSCALL_GETTIMEOFDAY => "gettimeofday",
+        SYSCALL_GETPID => "getpid",
+        SYSCALL_GETPPID => "getppid",
         SYSCALL_GETUID => "getuid",
+        SYSCALL_GETEUID => "geteuid",
         SYSCALL_GETGID => "getgid",
+        SYSCALL_GETEGID => "getegid",
         SYSCALL_BRK => "brk",
         SYSCALL_MUNMAP => "munmap",
         SYSCALL_MMAP => "mmap",

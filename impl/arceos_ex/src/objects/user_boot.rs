@@ -2762,8 +2762,15 @@ pub struct UserInitProcess {
     sgid: usize,
     fsuid: usize,
     fsgid: usize,
+    pid_read_observed: bool,
+    ppid_zero_first_slice: bool,
+    ppid_read_observed: bool,
     uid_read_observed: bool,
+    euid_read_observed: bool,
     gid_read_observed: bool,
+    egid_read_observed: bool,
+    resuid_read_observed: bool,
+    resgid_read_observed: bool,
     uid_set_observed: bool,
     gid_set_observed: bool,
     signal_state_inherited: bool,
@@ -2773,6 +2780,8 @@ pub struct UserInitProcess {
     rt_sigprocmask_observed: bool,
     clear_child_tid_bound: bool,
     clear_child_tid: usize,
+    root_cwd_first_slice: bool,
+    getcwd_observed: bool,
 }
 
 #[allow(dead_code)]
@@ -2815,8 +2824,15 @@ impl UserInitProcess {
             sgid: 0,
             fsuid: 0,
             fsgid: 0,
+            pid_read_observed: false,
+            ppid_zero_first_slice: false,
+            ppid_read_observed: false,
             uid_read_observed: false,
+            euid_read_observed: false,
             gid_read_observed: false,
+            egid_read_observed: false,
+            resuid_read_observed: false,
+            resgid_read_observed: false,
             uid_set_observed: false,
             gid_set_observed: false,
             signal_state_inherited: false,
@@ -2826,6 +2842,8 @@ impl UserInitProcess {
             rt_sigprocmask_observed: false,
             clear_child_tid_bound: false,
             clear_child_tid: 0,
+            root_cwd_first_slice: false,
+            getcwd_observed: false,
         }
     }
 
@@ -2973,12 +2991,40 @@ impl UserInitProcess {
         self.fsgid
     }
 
+    pub const fn pid_read_observed(&self) -> bool {
+        self.pid_read_observed
+    }
+
+    pub const fn ppid_zero_first_slice(&self) -> bool {
+        self.ppid_zero_first_slice
+    }
+
+    pub const fn ppid_read_observed(&self) -> bool {
+        self.ppid_read_observed
+    }
+
     pub const fn uid_read_observed(&self) -> bool {
         self.uid_read_observed
     }
 
+    pub const fn euid_read_observed(&self) -> bool {
+        self.euid_read_observed
+    }
+
     pub const fn gid_read_observed(&self) -> bool {
         self.gid_read_observed
+    }
+
+    pub const fn egid_read_observed(&self) -> bool {
+        self.egid_read_observed
+    }
+
+    pub const fn resuid_read_observed(&self) -> bool {
+        self.resuid_read_observed
+    }
+
+    pub const fn resgid_read_observed(&self) -> bool {
+        self.resgid_read_observed
     }
 
     pub const fn uid_set_observed(&self) -> bool {
@@ -3027,6 +3073,14 @@ impl UserInitProcess {
 
     pub const fn clear_child_tid(&self) -> usize {
         self.clear_child_tid
+    }
+
+    pub const fn root_cwd_first_slice(&self) -> bool {
+        self.root_cwd_first_slice
+    }
+
+    pub const fn getcwd_observed(&self) -> bool {
+        self.getcwd_observed
     }
 
     pub fn setup(
@@ -3163,12 +3217,61 @@ impl UserInitProcess {
         Some(self.uid)
     }
 
+    pub fn read_pid(&mut self) -> Option<usize> {
+        if self.lifecycle.state() != State::Online || !self.pid1_preserved {
+            return None;
+        }
+        self.pid_read_observed = true;
+        Some(super::rest_init::KERNEL_INIT_PID)
+    }
+
+    pub fn read_ppid(&mut self) -> Option<usize> {
+        if self.lifecycle.state() != State::Online || !self.pid1_preserved {
+            return None;
+        }
+        self.ppid_zero_first_slice = true;
+        self.ppid_read_observed = true;
+        Some(0)
+    }
+
+    pub fn read_euid(&mut self) -> Option<usize> {
+        if !self.credentials_syscall_ready() {
+            return None;
+        }
+        self.euid_read_observed = true;
+        Some(self.euid)
+    }
+
     pub fn read_gid(&mut self) -> Option<usize> {
         if !self.credentials_syscall_ready() {
             return None;
         }
         self.gid_read_observed = true;
         Some(self.gid)
+    }
+
+    pub fn read_egid(&mut self) -> Option<usize> {
+        if !self.credentials_syscall_ready() {
+            return None;
+        }
+        self.egid_read_observed = true;
+        Some(self.egid)
+    }
+
+    pub fn read_resuid(&mut self) -> Option<(usize, usize, usize)> {
+        if !self.credentials_syscall_ready() {
+            return None;
+        }
+        self.resuid_read_observed = true;
+        Some((self.uid, self.euid, self.suid))
+    }
+
+    pub fn read_resgid(&mut self) -> Option<(usize, usize, usize)> {
+        if !self.credentials_syscall_ready() {
+            return None;
+        }
+        self.resgid_read_observed = true;
+        Some((self.gid, self.egid, self.sgid))
     }
 
     pub fn set_uid_root_slice(&mut self, uid: usize) -> bool {
@@ -3208,6 +3311,15 @@ impl UserInitProcess {
             return false;
         }
         self.rt_sigprocmask_observed = true;
+        true
+    }
+
+    pub fn observe_getcwd_root_slice(&mut self) -> bool {
+        if self.lifecycle.state() != State::Online || !self.fs_struct_inherited {
+            return false;
+        }
+        self.root_cwd_first_slice = true;
+        self.getcwd_observed = true;
         true
     }
 }

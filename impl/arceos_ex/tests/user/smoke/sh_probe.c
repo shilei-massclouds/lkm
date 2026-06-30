@@ -2,6 +2,7 @@
 #include <signal.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
+#include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -15,6 +16,18 @@ static int say(const char *message, size_t len)
 #define SAY_LITERAL(message) say(message, sizeof(message) - 1)
 
 #define FIRST_SIG_WORD(sig) (1UL << ((sig) - 1))
+
+static int str_eq(const char *left, const char *right)
+{
+	while (*left != '\0' && *right != '\0') {
+		if (*left != *right) {
+			return 0;
+		}
+		left++;
+		right++;
+	}
+	return *left == '\0' && *right == '\0';
+}
 
 static int smoke_user_fpu(void)
 {
@@ -41,6 +54,12 @@ static int smoke_user_fpu(void)
 
 static int smoke_credentials(void)
 {
+	uid_t ruid;
+	uid_t euid;
+	uid_t suid;
+	gid_t rgid;
+	gid_t egid;
+	gid_t sgid;
 	long rc;
 
 	rc = syscall(SYS_getuid);
@@ -51,12 +70,50 @@ static int smoke_credentials(void)
 		return 45;
 	}
 
+	rc = syscall(SYS_geteuid);
+	if (rc != 0) {
+		return 65;
+	}
+	if (SAY_LITERAL("syscall geteuid ok\n") < 0) {
+		return 66;
+	}
+
 	rc = syscall(SYS_getgid);
 	if (rc != 0) {
 		return 46;
 	}
 	if (SAY_LITERAL("syscall getgid ok\n") < 0) {
 		return 47;
+	}
+
+	rc = syscall(SYS_getegid);
+	if (rc != 0) {
+		return 67;
+	}
+	if (SAY_LITERAL("syscall getegid ok\n") < 0) {
+		return 68;
+	}
+
+	ruid = 1;
+	euid = 1;
+	suid = 1;
+	rc = syscall(SYS_getresuid, &ruid, &euid, &suid);
+	if (rc != 0 || ruid != 0 || euid != 0 || suid != 0) {
+		return 69;
+	}
+	if (SAY_LITERAL("syscall getresuid ok\n") < 0) {
+		return 70;
+	}
+
+	rgid = 1;
+	egid = 1;
+	sgid = 1;
+	rc = syscall(SYS_getresgid, &rgid, &egid, &sgid);
+	if (rc != 0 || rgid != 0 || egid != 0 || sgid != 0) {
+		return 71;
+	}
+	if (SAY_LITERAL("syscall getresgid ok\n") < 0) {
+		return 72;
 	}
 
 	rc = syscall(SYS_setgid, 0);
@@ -73,6 +130,57 @@ static int smoke_credentials(void)
 	}
 	if (SAY_LITERAL("syscall setuid ok\n") < 0) {
 		return 51;
+	}
+
+	return 0;
+}
+
+static int smoke_process_identity(void)
+{
+	long rc;
+
+	rc = syscall(SYS_getpid);
+	if (rc != 1) {
+		return 73;
+	}
+	if (SAY_LITERAL("syscall getpid ok\n") < 0) {
+		return 74;
+	}
+
+	rc = syscall(SYS_getppid);
+	if (rc != 0) {
+		return 75;
+	}
+	if (SAY_LITERAL("syscall getppid ok\n") < 0) {
+		return 76;
+	}
+
+	return 0;
+}
+
+static int smoke_uts_and_cwd(void)
+{
+	struct utsname uts;
+	char cwd[8];
+	long rc;
+
+	rc = syscall(SYS_uname, &uts);
+	if (rc != 0 || !str_eq(uts.sysname, "Linux") ||
+	    !str_eq(uts.machine, "riscv64")) {
+		return 77;
+	}
+	if (SAY_LITERAL("syscall uname ok\n") < 0) {
+		return 78;
+	}
+
+	cwd[0] = 0;
+	cwd[1] = 0;
+	rc = syscall(SYS_getcwd, cwd, sizeof(cwd));
+	if (rc != 2 || cwd[0] != '/' || cwd[1] != '\0') {
+		return 79;
+	}
+	if (SAY_LITERAL("syscall getcwd ok\n") < 0) {
+		return 80;
 	}
 
 	return 0;
@@ -181,18 +289,29 @@ int smoke_sh_probe(void)
 	if (status != 0) {
 		return status;
 	}
-	if (smoke_credentials() != 0) {
-		return 44;
+	status = smoke_credentials();
+	if (status != 0) {
+		return status;
 	}
-	if (smoke_rt_sigprocmask() != 0) {
-		return 52;
+	status = smoke_process_identity();
+	if (status != 0) {
+		return status;
+	}
+	status = smoke_uts_and_cwd();
+	if (status != 0) {
+		return status;
+	}
+	status = smoke_rt_sigprocmask();
+	if (status != 0) {
+		return status;
 	}
 	status = smoke_time_syscalls();
 	if (status != 0) {
 		return status;
 	}
-	if (smoke_getrandom() != 0) {
-		return 42;
+	status = smoke_getrandom();
+	if (status != 0) {
+		return status;
 	}
 	return 0;
 }
