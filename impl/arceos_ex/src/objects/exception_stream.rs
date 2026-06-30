@@ -5,6 +5,7 @@ use crate::trace::{self, Checkpoint};
 use super::{
     event_stream::{EventStream, TrapFrame},
     files::FileError,
+    hwrng::HwRngError,
     init_stack::InitStack,
     state::{failed_condition, EventResult, Lifecycle, LifecycleEvent, State},
 };
@@ -69,6 +70,7 @@ const SYSCALL_BRK: usize = 214;
 const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_MMAP: usize = 222;
 const SYSCALL_MPROTECT: usize = 226;
+const SYSCALL_GETRANDOM: usize = 278;
 const USER_COPY_MAX: usize = 256;
 const USER_IOV_MAX: usize = 4;
 const USER_PATH_MAX: usize = crate::objects::files::FILE_PATH_MAX;
@@ -89,6 +91,7 @@ const EINVAL: usize = 22;
 const EIO: usize = 5;
 const ENOSYS: usize = 38;
 const ENOMEM: usize = 12;
+const EAGAIN: usize = 11;
 const ENOENT: usize = 2;
 const EOVERFLOW: usize = 75;
 const EREMOTEIO: usize = 121;
@@ -110,6 +113,7 @@ pub struct SyscallTable {
     close_supported: bool,
     newfstatat_supported: bool,
     readlinkat_supported: bool,
+    getrandom_supported: bool,
     fstat_supported: bool,
     fcntl_supported: bool,
     ioctl_supported: bool,
@@ -128,6 +132,7 @@ pub struct SyscallTable {
     getdents64_usercopy_ready: bool,
     path_usercopy_ready: bool,
     stat_usercopy_ready: bool,
+    getrandom_usercopy_ready: bool,
     ioctl_usercopy_ready: bool,
     write_routes_to_console: bool,
     writev_routes_to_files_struct: bool,
@@ -137,6 +142,10 @@ pub struct SyscallTable {
     close_routes_to_files_struct: bool,
     newfstatat_routes_to_files_struct: bool,
     readlinkat_routes_to_files_struct: bool,
+    getrandom_routes_to_hwrng_core: bool,
+    getrandom_not_vfs_or_devfs_path: bool,
+    getrandom_flags_first_slice_bound: bool,
+    getrandom_full_random_core_deferred: bool,
     fstat_routes_to_files_struct: bool,
     fcntl_routes_to_files_struct: bool,
     ioctl_routes_to_files_struct: bool,
@@ -151,6 +160,7 @@ pub struct SyscallTable {
     close_observed: AtomicU8,
     newfstatat_observed: AtomicU8,
     readlinkat_observed: AtomicU8,
+    getrandom_observed: AtomicU8,
     fstat_observed: AtomicU8,
     fcntl_observed: AtomicU8,
     ioctl_observed: AtomicU8,
@@ -173,6 +183,7 @@ impl SyscallTable {
             close_supported: false,
             newfstatat_supported: false,
             readlinkat_supported: false,
+            getrandom_supported: false,
             fstat_supported: false,
             fcntl_supported: false,
             ioctl_supported: false,
@@ -191,6 +202,7 @@ impl SyscallTable {
             getdents64_usercopy_ready: false,
             path_usercopy_ready: false,
             stat_usercopy_ready: false,
+            getrandom_usercopy_ready: false,
             ioctl_usercopy_ready: false,
             write_routes_to_console: false,
             writev_routes_to_files_struct: false,
@@ -200,6 +212,10 @@ impl SyscallTable {
             close_routes_to_files_struct: false,
             newfstatat_routes_to_files_struct: false,
             readlinkat_routes_to_files_struct: false,
+            getrandom_routes_to_hwrng_core: false,
+            getrandom_not_vfs_or_devfs_path: false,
+            getrandom_flags_first_slice_bound: false,
+            getrandom_full_random_core_deferred: false,
             fstat_routes_to_files_struct: false,
             fcntl_routes_to_files_struct: false,
             ioctl_routes_to_files_struct: false,
@@ -214,6 +230,7 @@ impl SyscallTable {
             close_observed: AtomicU8::new(0),
             newfstatat_observed: AtomicU8::new(0),
             readlinkat_observed: AtomicU8::new(0),
+            getrandom_observed: AtomicU8::new(0),
             fstat_observed: AtomicU8::new(0),
             fcntl_observed: AtomicU8::new(0),
             ioctl_observed: AtomicU8::new(0),
@@ -272,6 +289,11 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn readlinkat_supported(&self) -> bool {
         self.readlinkat_supported
+    }
+
+    #[allow(dead_code)]
+    pub const fn getrandom_supported(&self) -> bool {
+        self.getrandom_supported
     }
 
     #[allow(dead_code)]
@@ -365,6 +387,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub const fn getrandom_usercopy_ready(&self) -> bool {
+        self.getrandom_usercopy_ready
+    }
+
+    #[allow(dead_code)]
     pub const fn ioctl_usercopy_ready(&self) -> bool {
         self.ioctl_usercopy_ready
     }
@@ -407,6 +434,26 @@ impl SyscallTable {
     #[allow(dead_code)]
     pub const fn readlinkat_routes_to_files_struct(&self) -> bool {
         self.readlinkat_routes_to_files_struct
+    }
+
+    #[allow(dead_code)]
+    pub const fn getrandom_routes_to_hwrng_core(&self) -> bool {
+        self.getrandom_routes_to_hwrng_core
+    }
+
+    #[allow(dead_code)]
+    pub const fn getrandom_not_vfs_or_devfs_path(&self) -> bool {
+        self.getrandom_not_vfs_or_devfs_path
+    }
+
+    #[allow(dead_code)]
+    pub const fn getrandom_flags_first_slice_bound(&self) -> bool {
+        self.getrandom_flags_first_slice_bound
+    }
+
+    #[allow(dead_code)]
+    pub const fn getrandom_full_random_core_deferred(&self) -> bool {
+        self.getrandom_full_random_core_deferred
     }
 
     #[allow(dead_code)]
@@ -480,6 +527,11 @@ impl SyscallTable {
     }
 
     #[allow(dead_code)]
+    pub fn getrandom_observed(&self) -> bool {
+        self.getrandom_observed.load(Ordering::Acquire) != 0
+    }
+
+    #[allow(dead_code)]
     pub fn fstat_observed(&self) -> bool {
         self.fstat_observed.load(Ordering::Acquire) != 0
     }
@@ -534,6 +586,7 @@ impl SyscallTable {
         self.close_supported = true;
         self.newfstatat_supported = true;
         self.readlinkat_supported = true;
+        self.getrandom_supported = true;
         self.fstat_supported = true;
         self.fcntl_supported = true;
         self.ioctl_supported = true;
@@ -552,6 +605,7 @@ impl SyscallTable {
         self.getdents64_usercopy_ready = true;
         self.path_usercopy_ready = true;
         self.stat_usercopy_ready = true;
+        self.getrandom_usercopy_ready = true;
         self.ioctl_usercopy_ready = true;
         self.write_routes_to_console = true;
         self.writev_routes_to_files_struct = true;
@@ -561,6 +615,10 @@ impl SyscallTable {
         self.close_routes_to_files_struct = true;
         self.newfstatat_routes_to_files_struct = true;
         self.readlinkat_routes_to_files_struct = true;
+        self.getrandom_routes_to_hwrng_core = true;
+        self.getrandom_not_vfs_or_devfs_path = true;
+        self.getrandom_flags_first_slice_bound = true;
+        self.getrandom_full_random_core_deferred = true;
         self.fstat_routes_to_files_struct = true;
         self.fcntl_routes_to_files_struct = true;
         self.ioctl_routes_to_files_struct = true;
@@ -680,6 +738,21 @@ impl SyscallTable {
         }
 
         syscall_table_readlinkat(self, frame);
+    }
+
+    pub fn getrandom(&self, frame: &mut TrapFrame) {
+        if self.lifecycle.state() != State::Ready
+            || !self.getrandom_supported
+            || !self.getrandom_usercopy_ready
+            || !self.getrandom_routes_to_hwrng_core
+            || !self.getrandom_not_vfs_or_devfs_path
+            || !self.getrandom_flags_first_slice_bound
+        {
+            complete_unsupported_syscall(frame);
+            return;
+        }
+
+        syscall_table_getrandom(self, frame);
     }
 
     pub fn fstat(&self, frame: &mut TrapFrame) {
@@ -1124,6 +1197,7 @@ fn syscall_exception_handler(frame: &mut TrapFrame) {
         SYSCALL_MMAP => table.mmap(frame),
         SYSCALL_MPROTECT => table.mprotect(frame),
         SYSCALL_MUNMAP => table.munmap(frame),
+        SYSCALL_GETRANDOM => table.getrandom(frame),
         SYSCALL_EXIT => table.exit(frame),
         SYSCALL_EXIT_GROUP => table.exit_group(frame),
         _ => complete_unsupported_syscall(frame),
@@ -1161,6 +1235,17 @@ fn file_error_to_errno(error: FileError) -> usize {
         | FileError::NotWritable
         | FileError::BackendUnavailable
         | FileError::Unsupported => EIO,
+    }
+}
+
+fn hwrng_error_to_getrandom_errno(error: HwRngError) -> usize {
+    match error {
+        HwRngError::CoreNotReady
+        | HwRngError::DeviceNotReady
+        | HwRngError::NoCurrentDevice
+        | HwRngError::ProviderUnavailable
+        | HwRngError::EmptyRead => EAGAIN,
+        HwRngError::DuplicateName => EIO,
     }
 }
 
@@ -1383,6 +1468,41 @@ fn syscall_table_readlinkat(table: &SyscallTable, frame: &mut TrapFrame) {
     }
 
     table.readlinkat_observed.store(1, Ordering::Release);
+    complete_successful_syscall(frame, read);
+}
+
+fn syscall_table_getrandom(table: &SyscallTable, frame: &mut TrapFrame) {
+    let user_ptr = frame.reg(10);
+    let requested = frame.reg(11);
+    let flags = frame.reg(12);
+    if flags != 0 || requested > USER_COPY_MAX {
+        complete_error_syscall(frame, EINVAL);
+        return;
+    }
+    if requested == 0 {
+        complete_successful_syscall(frame, 0);
+        return;
+    }
+
+    let mut buffer = [0u8; USER_COPY_MAX];
+    let ctx = crate::context::context();
+    let read = match ctx.virtio_rng_runtime.read_current_hwrng(
+        &mut ctx.hwrng_core,
+        &mut buffer[..requested],
+        true,
+    ) {
+        Ok(read) => read,
+        Err(error) => {
+            complete_error_syscall(frame, hwrng_error_to_getrandom_errno(error));
+            return;
+        }
+    };
+    if !copy_to_user(user_ptr, &buffer[..read]) {
+        complete_error_syscall(frame, EFAULT);
+        return;
+    }
+
+    table.getrandom_observed.store(1, Ordering::Release);
     complete_successful_syscall(frame, read);
 }
 

@@ -148,6 +148,7 @@ $(ROOTFS_TARBALL):
 	mv $@.tmp $@
 
 rootfs-overlay:
+	set -e; \
 	case "$(ROOTFS_OVERLAY)" in none) exit 0;; esac; \
 	test -f "$(ROOTFS_OVERLAY_MAP)"; \
 	while read -r target test toolchain link extra; do \

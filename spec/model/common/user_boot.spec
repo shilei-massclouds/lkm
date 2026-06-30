@@ -196,6 +196,7 @@ predicate syscall_table_read_supported<T>(table: T) -> bool;
 predicate syscall_table_close_supported<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_supported<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_supported<T>(table: T) -> bool;
+predicate syscall_table_getrandom_supported<T>(table: T) -> bool;
 predicate syscall_table_brk_supported<T>(table: T) -> bool;
 predicate syscall_table_mmap_supported<T>(table: T) -> bool;
 predicate syscall_table_mprotect_supported<T>(table: T) -> bool;
@@ -206,6 +207,7 @@ predicate syscall_table_exit_group_supported<T>(table: T) -> bool;
 predicate syscall_write_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_writev_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_read_usercopy_ready<T>(table: T) -> bool;
+predicate syscall_getrandom_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_path_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_stat_usercopy_ready<T>(table: T) -> bool;
 predicate syscall_write_routes_to_console<T>(table: T) -> bool;
@@ -215,6 +217,10 @@ predicate syscall_read_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_close_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_newfstatat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
 predicate syscall_readlinkat_routes_to_files_struct<T, F>(table: T, files: F) -> bool;
+predicate syscall_getrandom_routes_to_hwrng_core<T, H>(table: T, hwrng: H) -> bool;
+predicate syscall_getrandom_not_vfs_or_devfs_path<T>(table: T) -> bool;
+predicate syscall_getrandom_flags_first_slice_bound<T>(table: T) -> bool;
+predicate syscall_getrandom_full_random_core_deferred<T>(table: T) -> bool;
 predicate syscall_brk_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mmap_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
 predicate syscall_mprotect_routes_to_user_address_space<T, A>(table: T, space: A) -> bool;
@@ -236,6 +242,7 @@ predicate syscall_table_read_observed<T>(table: T) -> bool;
 predicate syscall_table_close_observed<T>(table: T) -> bool;
 predicate syscall_table_newfstatat_observed<T>(table: T) -> bool;
 predicate syscall_table_readlinkat_observed<T>(table: T) -> bool;
+predicate syscall_table_getrandom_observed<T>(table: T) -> bool;
 predicate syscall_table_set_tid_address_observed<T>(table: T) -> bool;
 predicate syscall_table_exit_observed<T>(table: T) -> bool;
 predicate user_init_process_enter_user_mode_observed<T, R>(process: T, frame: R) -> bool;
@@ -733,6 +740,7 @@ object SyscallTable: ResourceObject {
                     syscall_table_close_supported(self);
                     syscall_table_newfstatat_supported(self);
                     syscall_table_readlinkat_supported(self);
+                    syscall_table_getrandom_supported(self);
                     syscall_table_brk_supported(self);
                     syscall_table_mmap_supported(self);
                     syscall_table_mprotect_supported(self);
@@ -743,6 +751,7 @@ object SyscallTable: ResourceObject {
                     syscall_write_usercopy_ready(self);
                     syscall_writev_usercopy_ready(self);
                     syscall_read_usercopy_ready(self);
+                    syscall_getrandom_usercopy_ready(self);
                     syscall_path_usercopy_ready(self);
                     syscall_stat_usercopy_ready(self);
                     syscall_write_routes_to_console(self);
@@ -763,6 +772,7 @@ object SyscallTable: ResourceObject {
             syscall_table_close_supported(self);
             syscall_table_newfstatat_supported(self);
             syscall_table_readlinkat_supported(self);
+            syscall_table_getrandom_supported(self);
             syscall_table_brk_supported(self);
             syscall_table_mmap_supported(self);
             syscall_table_mprotect_supported(self);
@@ -773,6 +783,7 @@ object SyscallTable: ResourceObject {
             syscall_write_usercopy_ready(self);
             syscall_writev_usercopy_ready(self);
             syscall_read_usercopy_ready(self);
+            syscall_getrandom_usercopy_ready(self);
             syscall_path_usercopy_ready(self);
             syscall_stat_usercopy_ready(self);
             syscall_write_routes_to_console(self);
@@ -936,6 +947,43 @@ object SyscallTable: ResourceObject {
                     syscall_readlinkat_routes_to_files_struct(self, FilesStruct);
                     files_struct_readlink_path_routes_to_vfs(FilesStruct, VfsCore);
                     syscall_table_readlinkat_observed(self);
+                }
+            }
+
+            on Action::GetRandom {
+                /*
+                 * Linux 6.12 exposes getrandom(2) as syscall number 278 in
+                 * include/uapi/asm-generic/unistd.h. The syscall body in
+                 * drivers/char/random.c::sys_getrandom validates flags, waits
+                 * for crng readiness when required, imports the user buffer
+                 * and fills it through get_random_bytes_user(). This is not a
+                 * /dev/random or /dev/urandom pathname operation.
+                 *
+                 * The current slice serves sh_probe/BusyBox startup probing:
+                 * small user buffers and flags == 0 are routed through the
+                 * existing Linux-like HwRngCore current-device read path,
+                 * backed by virtio-rng when present. Full CRNG pool state,
+                 * blocking wait queues, GRND_RANDOM, GRND_INSECURE,
+                 * GRND_NONBLOCK/EAGAIN and large iov iteration are deferred.
+                 */
+                depends_on {
+                    SyscallException.state == State::Online;
+                    HwRngCore.state == State::Ready;
+                    syscall_getrandom_usercopy_ready(self);
+                }
+
+                drives {
+                    HwRngCore.Action::ReadCurrent;
+                }
+
+                ensures {
+                    syscall_getrandom_routes_to_hwrng_core(self, HwRngCore);
+                    syscall_getrandom_not_vfs_or_devfs_path(self);
+                    syscall_getrandom_flags_first_slice_bound(self);
+                    syscall_getrandom_full_random_core_deferred(self);
+                    hwrng_core_current_rng_read_invoked(HwRngCore, HwRngDevice);
+                    hwrng_core_read_copies_from_current(HwRngCore, HwRngDevice);
+                    syscall_table_getrandom_observed(self);
                 }
             }
 

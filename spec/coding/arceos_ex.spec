@@ -120,6 +120,7 @@ predicate arceos_ex_must_syscall_table_hold_concrete_syscall_actions() -> bool;
 predicate arceos_ex_must_user_syscall_write_copy_from_user_address_space() -> bool;
 predicate arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions() -> bool;
 predicate arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice() -> bool;
+predicate arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core() -> bool;
 predicate arceos_ex_must_user_syscall_exit_stop_first_user_process() -> bool;
 predicate arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm() -> bool;
 predicate arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance() -> bool;
@@ -1435,8 +1436,9 @@ type ArceosExStartupPhaseCodingMust {
          * munmap by routing them to UserAddressSpace, directory-capable
          * openat plus getdents64 by routing through FilesStruct fd position
          * and Ext2/VFS directory records, readlinkat through the VFS no-follow
-         * final symlink path, and set_tid_address by recording the current PID1
-         * UserInitProcess clear_child_tid pointer.
+         * final symlink path, getrandom(278) through HwRngCore current-device
+         * reads rather than /dev or VFS, and set_tid_address by recording the
+         * current PID1 UserInitProcess clear_child_tid pointer.
          * This is a formal runtime boundary, not a test-only API. It does not
          * implement a full VMA tree, fd table, devfs console file, TTY line
          * discipline, futex/clone/thread-group semantics, fork/wait or signal
@@ -1465,6 +1467,18 @@ type ArceosExStartupPhaseCodingMust {
          * absolute paths on read-only ext2 fast symlinks; relative dirfd,
          * AT_EMPTY_PATH, slow symlink page/block bodies, security hooks,
          * atime, RCU/retry_estale and complete errno details remain trimmed.
+         *
+         * The first getrandom slice must reference local Linux 6.12
+         * drivers/char/random.c::sys_getrandom(),
+         * include/uapi/linux/random.h and
+         * include/uapi/asm-generic/unistd.h::__NR_getrandom=278. It must keep
+         * the syscall as a kernel random-core interface, not a /dev pathname
+         * operation. The current implementation may support only flags == 0
+         * and small USER_COPY_MAX-bounded buffers, routing successful reads
+         * through the existing HwRngCore current provider backed by
+         * virtio-rng; full CRNG pool readiness, blocking wait queues,
+         * GRND_NONBLOCK, GRND_RANDOM, GRND_INSECURE, signal interruption,
+         * large-buffer iteration and random-quality policy remain trimmed.
          *
          * APP=user-boot validation in make test must not treat QEMU/SBI
          * shutdown success as sufficient. The host harness must parse the
@@ -1498,6 +1512,7 @@ type ArceosExStartupPhaseCodingMust {
         arceos_ex_must_user_syscall_write_copy_from_user_address_space();
         arceos_ex_must_syscall_table_support_dynamic_linker_memory_actions();
         arceos_ex_must_syscall_table_support_directory_openat_getdents64_slice();
+        arceos_ex_must_syscall_table_support_getrandom_via_hwrng_core();
         arceos_ex_must_user_syscall_exit_stop_first_user_process();
         arceos_ex_must_user_address_space_share_kernel_half_with_swapper_vm();
         arceos_ex_must_keep_swapper_vm_single_kernel_shared_instance();
@@ -2375,12 +2390,15 @@ type ArceosExBlockIoCodingMust {
          * static vs dynamic linking. Staged syscall probe subtests such as
          * sh_probe must print an explicit success marker after each syscall
          * path they validate, so guest output distinguishes a loaded fixture
-         * from per-syscall support. The user_smoke framework output MUST use
-         * the "user-smoke:" prefix, print begin/end markers for the whole
-         * run and each case, include "status=N" on every end marker, and use
-         * blank lines to separate the run and case boundaries. The host
-         * harness still determines pass/fail from "user exit status=N", not
-         * from these human-readable markers. The directory-enumeration
+         * from per-syscall support. Any user-test build failure MUST abort
+         * overlay processing and disk construction immediately; the Makefile
+         * must not continue with a stale fixture output. The user_smoke
+         * framework output MUST use the "user-smoke:" prefix, print begin/end
+         * markers for the whole run and each case, include "status=N" on every
+         * end marker, and use blank lines to separate the run and case
+         * boundaries. The host harness still determines pass/fail from "user
+         * exit status=N", not from these human-readable markers. The
+         * directory-enumeration
          * sh_probe slice must use the Linux 6.12/RISC-V syscall ABI directly for
          * openat(AT_FDCWD, "/", O_RDONLY|O_DIRECTORY) and getdents64(61),
          * validate linux_dirent64 records, and then close the directory fd. A

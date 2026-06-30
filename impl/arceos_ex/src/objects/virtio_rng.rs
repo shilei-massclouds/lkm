@@ -812,6 +812,18 @@ impl VirtioRngRuntime {
     pub const fn real_completion_len(&self) -> u32 {
         self.real_completion_len
     }
+
+    pub fn read_current_hwrng(
+        &mut self,
+        hwrng_core: &mut HwRngCore,
+        buffer: &mut [u8],
+        wait: bool,
+    ) -> Result<usize, HwRngError> {
+        let Some(device) = self.device.as_mut() else {
+            return Err(HwRngError::ProviderUnavailable);
+        };
+        hwrng_core.read_current(device, buffer, wait)
+    }
 }
 
 pub fn setup_live_driver(
